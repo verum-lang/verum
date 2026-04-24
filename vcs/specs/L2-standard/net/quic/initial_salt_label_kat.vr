@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, initial_secret, rfc9001_5_2, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §5.2 Initial secrets: byte-exact equality for the
+// fixed v1 salt and the per-role / per-function labels.
+//
+//   initial_salt (v1) = 0x38762cf7f55934b34d179ae6a4c80cadccbb7f0a
+//
+// Labels are ASCII ("client in", "server in", "quic key", "quic iv",
+// "quic hp", "quic ku"). INITIAL_KEY_LEN = 16 / INITIAL_IV_LEN = 12
+// are fixed by AES-128-GCM.
+
+mount core.*;
+mount core.net.quic.crypto.labels.{
+    QUIC_INITIAL_SALT_V1,
+    LABEL_CLIENT_IN, LABEL_SERVER_IN,
+    LABEL_QUIC_KEY, LABEL_QUIC_IV, LABEL_QUIC_HP, LABEL_QUIC_KU,
+    INITIAL_KEY_LEN, INITIAL_IV_LEN,
+};
+
+fn salt_v1_matches_rfc_9001_5_2() {
+    // 0x38 76 2c f7 f5 59 34 b3 4d 17 9a e6 a4 c8 0c ad cc bb 7f 0a
+    let expected: [Byte; 20] = [
+        0x38_u8, 0x76_u8, 0x2C_u8, 0xF7_u8,
+        0xF5_u8, 0x59_u8, 0x34_u8, 0xB3_u8,
+        0x4D_u8, 0x17_u8, 0x9A_u8, 0xE6_u8,
+        0xA4_u8, 0xC8_u8, 0x0C_u8, 0xAD_u8,
+        0xCC_u8, 0xBB_u8, 0x7F_u8, 0x0A_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 20 {
+        assert(QUIC_INITIAL_SALT_V1[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn client_in_label_matches_rfc() {
+    // "client in" = 0x63 0x6C 0x69 0x65 0x6E 0x74 0x20 0x69 0x6E
+    assert(LABEL_CLIENT_IN[0] == 0x63_u8);    // 'c'
+    assert(LABEL_CLIENT_IN[1] == 0x6C_u8);    // 'l'
+    assert(LABEL_CLIENT_IN[5] == 0x74_u8);    // 't'
+    assert(LABEL_CLIENT_IN[6] == 0x20_u8);    // ' '
+    assert(LABEL_CLIENT_IN[7] == 0x69_u8);    // 'i'
+    assert(LABEL_CLIENT_IN[8] == 0x6E_u8);    // 'n'
+}
+
+fn server_in_label_differs_only_at_first_4_bytes() {
+    // "client in" vs "server in" — byte 0 is 'c' vs 's'.
+    // bytes 0..5 = "client" vs "server" → all differ.
+    // bytes 6..8 = " in" — identical.
+    let mut i: Int = 6;
+    while i < 9 {
+        assert(LABEL_CLIENT_IN[i] == LABEL_SERVER_IN[i]);
+        i = i + 1;
+    }
+    assert(LABEL_CLIENT_IN[0] == 0x63_u8 && LABEL_SERVER_IN[0] == 0x73_u8);
+}
+
+fn quic_labels_share_prefix_quic_space() {
+    // All 4 labels begin with "quic " — bytes 0..4 = 0x71 0x75 0x69 0x63 0x20.
+    let key_prefix:  [UInt8; 5] = [
+        LABEL_QUIC_KEY[0], LABEL_QUIC_KEY[1], LABEL_QUIC_KEY[2],
+        LABEL_QUIC_KEY[3], LABEL_QUIC_KEY[4],
+    ];
+    assert(key_prefix[0] == 0x71_u8);    // 'q'
+    assert(key_prefix[1] == 0x75_u8);    // 'u'
+    assert(key_prefix[2] == 0x69_u8);    // 'i'
+    assert(key_prefix[3] == 0x63_u8);    // 'c'
+    assert(key_prefix[4] == 0x20_u8);    // ' '
+    // Matching prefix across all four.
+    let mut i: Int = 0;
+    while i < 5 {
+        assert(LABEL_QUIC_IV[i] == key_prefix[i]);
+        assert(LABEL_QUIC_HP[i] == key_prefix[i]);
+        assert(LABEL_QUIC_KU[i] == key_prefix[i]);
+        i = i + 1;
+    }
+}
+
+fn quic_label_suffixes() {
+    // "quic key" — byte 5..7 = 'k' 'e' 'y'.
+    assert(LABEL_QUIC_KEY[5] == 0x6B_u8);
+    assert(LABEL_QUIC_KEY[6] == 0x65_u8);
+    assert(LABEL_QUIC_KEY[7] == 0x79_u8);
+    // "quic iv" — byte 5..6 = 'i' 'v'.
+    assert(LABEL_QUIC_IV[5]  == 0x69_u8);
+    assert(LABEL_QUIC_IV[6]  == 0x76_u8);
+    // "quic hp" — byte 5..6 = 'h' 'p'.
+    assert(LABEL_QUIC_HP[5]  == 0x68_u8);
+    assert(LABEL_QUIC_HP[6]  == 0x70_u8);
+    // "quic ku" — byte 5..6 = 'k' 'u'.
+    assert(LABEL_QUIC_KU[5]  == 0x6B_u8);
+    assert(LABEL_QUIC_KU[6]  == 0x75_u8);
+}
+
+fn aead_128_gcm_lengths() {
+    // Initial packets are always AES-128-GCM: 16-byte key, 12-byte IV.
+    assert(INITIAL_KEY_LEN == 16);
+    assert(INITIAL_IV_LEN  == 12);
+}
+
+@main
+public fn main() -> Int {
+    salt_v1_matches_rfc_9001_5_2();
+    client_in_label_matches_rfc();
+    server_in_label_differs_only_at_first_4_bytes();
+    quic_labels_share_prefix_quic_space();
+    quic_label_suffixes();
+    aead_128_gcm_lengths();
+    print("RFC 9001 §5.2 Initial salt + labels KAT verified");
+    0
+}

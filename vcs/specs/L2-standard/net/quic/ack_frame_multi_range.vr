@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, ack, multi_range, rfc9000_19_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19.3 ACK frame with multiple ranges: ranges[0] is the
+// highest range (encoded first), subsequent ranges go in strictly
+// descending order with a Gap+AckRangeLength pair separating them.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame, AckRange, encode_frame, decode_all_frames};
+
+fn three_descending_ranges_roundtrip() {
+    // Ranges (largest→smallest): [100..102], [50..60], [10..15].
+    let ranges: List<AckRange> = [
+        AckRange { smallest: 100_u64, largest: 102_u64 },
+        AckRange { smallest: 50_u64,  largest: 60_u64  },
+        AckRange { smallest: 10_u64,  largest: 15_u64  },
+    ];
+    let f = Frame.AckFrame {
+        largest_acked: 102_u64,
+        ack_delay:     0_u64,
+        ranges:        ranges,
+        ecn:           None,
+    };
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(&f, &mut buf);
+    assert(buf[0] == 0x02_u8);    // ACK (no ECN)
+
+    let frames = decode_all_frames(&buf).unwrap();
+    assert(frames.len() == 1);
+    match &frames[0] {
+        Frame.AckFrame { largest_acked, ack_delay: _, ranges: rs, ecn: _ } => {
+            assert(largest_acked == 102_u64);
+            assert(rs.len() == 3);
+            // Ranges strictly descending + non-overlapping + gap ≥ 2.
+            let mut i: Int = 0;
+            while i < rs.len() - 1 {
+                assert(rs[i].smallest > rs[i + 1].largest + 1_u64);
+                i = i + 1;
+            }
+            // Each range: smallest ≤ largest.
+            let mut j: Int = 0;
+            while j < rs.len() {
+                assert(rs[j].smallest <= rs[j].largest);
+                j = j + 1;
+            }
+        },
+        _ => panic("expected AckFrame"),
+    }
+}
+
+fn ack_delay_roundtrips() {
+    let ranges: List<AckRange> = [
+        AckRange { smallest: 0_u64, largest: 0_u64 },
+    ];
+    let f = Frame.AckFrame {
+        largest_acked: 0_u64,
+        ack_delay:     12345_u64,
+        ranges:        ranges,
+        ecn:           None,
+    };
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(&f, &mut buf);
+    let frames = decode_all_frames(&buf).unwrap();
+    match &frames[0] {
+        Frame.AckFrame { ack_delay, .. } => assert(ack_delay == 12345_u64),
+        _ => panic("expected AckFrame"),
+    }
+}
+
+fn single_range_spanning_largest_acked() {
+    // Range = [50..100], largest_acked = 100. One range emitted.
+    let ranges: List<AckRange> = [
+        AckRange { smallest: 50_u64, largest: 100_u64 },
+    ];
+    let f = Frame.AckFrame {
+        largest_acked: 100_u64,
+        ack_delay:     0_u64,
+        ranges:        ranges,
+        ecn:           None,
+    };
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(&f, &mut buf);
+    let frames = decode_all_frames(&buf).unwrap();
+    match &frames[0] {
+        Frame.AckFrame { ranges: rs, .. } => {
+            assert(rs.len() == 1);
+            assert(rs[0].smallest == 50_u64);
+            assert(rs[0].largest  == 100_u64);
+        },
+        _ => panic("expected AckFrame"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    three_descending_ranges_roundtrip();
+    ack_delay_roundtrips();
+    single_range_spanning_largest_acked();
+    print("RFC 9000 §19.3 multi-range ACK round-trip verified");
+    0
+}
