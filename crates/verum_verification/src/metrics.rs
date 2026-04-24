@@ -521,11 +521,12 @@ impl GitHistory {
         let thirty_days_ago = now - (30 * 24 * 60 * 60);
         let ninety_days_ago = now - (90 * 24 * 60 * 60);
 
-        let commits = self.file_commits.get(file);
-        if commits.is_none() {
+        // Replace `if is_none() + unwrap()` (panic-on-mistake refactor
+        // hazard) with a `let-else` pattern — structurally impossible
+        // to reach the body with None.
+        let Some(commits) = self.file_commits.get(file) else {
             return 0.0;
-        }
-        let commits = commits.unwrap();
+        };
 
         // Count recent commits with decay
         let recent_30 = commits.iter().filter(|&&t| t > thirty_days_ago).count() as f64;

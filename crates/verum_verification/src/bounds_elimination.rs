@@ -820,7 +820,13 @@ impl BoundsCheckEliminator {
         let lower = if lower_constraints.is_empty() {
             Expression::int(0) // Default lower bound
         } else if lower_constraints.len() == 1 {
-            lower_constraints.pop().unwrap()
+            // Safe: guarded by `len() == 1` one line above. `.expect`
+            // documents the invariant so a future refactor that drops
+            // the guard surfaces the assumption instead of a mystery
+            // panic.
+            lower_constraints
+                .pop()
+                .expect("len()==1 guard ensures pop() returns Some")
         } else {
             // Multiple lower bounds - take the maximum
             self.compute_max_bound(&lower_constraints)
@@ -832,7 +838,9 @@ impl BoundsCheckEliminator {
                 expr: format!("no upper bound found in: {}", expr).into(),
             });
         } else if upper_constraints.len() == 1 {
-            upper_constraints.pop().unwrap()
+            upper_constraints
+                .pop()
+                .expect("len()==1 guard ensures pop() returns Some")
         } else {
             // Multiple upper bounds - take the minimum
             self.compute_min_bound(&upper_constraints)
@@ -1825,8 +1833,16 @@ impl DataflowAnalyzer {
             ) => {
                 // Both ranges have constant bounds - compute precisely
                 let products = [l1 * l2, l1 * u2, u1 * l2, u1 * u2];
-                let min_prod = *products.iter().min().unwrap();
-                let max_prod = *products.iter().max().unwrap();
+                // Safe: `products` is a 4-element array literal — it is
+                // never empty, so `min()` / `max()` always yield Some.
+                let min_prod = *products
+                    .iter()
+                    .min()
+                    .expect("4-element array literal always has a minimum");
+                let max_prod = *products
+                    .iter()
+                    .max()
+                    .expect("4-element array literal always has a maximum");
 
                 ValueRange::new(Expression::int(min_prod), Expression::int(max_prod))
                     .with_proven(left.proven && right.proven)

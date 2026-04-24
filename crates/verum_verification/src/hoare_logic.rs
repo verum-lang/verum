@@ -649,7 +649,13 @@ impl WPCalculator {
                 } else {
                     // Build sequential composition from the list
                     let mut cmd_iter = cmds.iter().rev();
-                    let last = cmd_iter.next().unwrap();
+                    // Safe: `cmds.is_empty()` was handled by the
+                    // branch above, so `cmds.iter().rev().next()`
+                    // yields Some on the first call. `.expect`
+                    // documents the invariant.
+                    let last = cmd_iter
+                        .next()
+                        .expect("cmds.is_empty() guard ensures at least one element");
                     let mut result = self.wp(last, postcondition)?;
 
                     for cmd in cmd_iter {
