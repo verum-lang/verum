@@ -1,0 +1,176 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, record, aead, rfc8446_5_2, seal, open, v8
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §5.2 AeadState record seal/open:
+//
+//   * seal(plain, type, pad) → wire-record (5-byte outer header ||
+//     AEAD-sealed inner-plaintext).
+//   * open(wire) → (inner_type, inner_content).
+//   * seq monotonic-increment-by-one per call (V8 theorem).
+//   * Outer AAD covers the 5-byte outer header — tampering or AEAD
+//     failure → RecordError.AeadFailure.
+//   * Non-ApplicationData outer type → BadContentType.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{AeadKind};
+mount core.net.tls13.record.content_type.{ContentType};
+mount core.net.tls13.record.aead.{AeadState, RecordError};
+mount core.net.tls13.keyschedule.schedule.{SecretBytes};
+
+fn make_key_16() -> SecretBytes {
+    let mut v: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 16 { v.push((i + 1) as Byte); i = i + 1; }
+    SecretBytes.from(v)
+}
+
+fn make_key_32() -> SecretBytes {
+    let mut v: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 { v.push((i * 2) as Byte); i = i + 1; }
+    SecretBytes.from(v)
+}
+
+fn make_iv() -> [Byte; 12] {
+    let mut iv: [Byte; 12] = [0_u8; 12];
+    let mut i: Int = 0;
+    while i < 12 { iv[i] = (0xC0_u8 | (i as Byte)); i = i + 1; }
+    iv
+}
+
+fn aes128_gcm_seal_open_roundtrip() {
+    let mut tx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let mut rx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let payload: List<Byte> = [0x48_u8, 0x49_u8, 0x50_u8];    // "HIP"
+    let wire = tx.seal(payload.as_slice(), ContentType.ApplicationData, 0).unwrap();
+    // Outer type MUST be ApplicationData regardless of inner.
+    assert(wire[0] == ContentType.ApplicationData.to_u8());
+    // Legacy version bytes are 0x0303.
+    assert(wire[1] == 0x03_u8);
+    assert(wire[2] == 0x03_u8);
+    let (t, body) = rx.open(wire.as_slice()).unwrap();
+    match t {
+        ContentType.ApplicationData => {},
+        _ => panic("expected ApplicationData"),
+    }
+    assert(body.len() == 3);
+    assert(body[0] == 0x48_u8);
+    assert(body[2] == 0x50_u8);
+}
+
+fn chacha20_poly1305_roundtrip() {
+    let mut tx = AeadState.new(AeadKind.ChaCha20Poly1305, make_key_32(), make_iv());
+    let mut rx = AeadState.new(AeadKind.ChaCha20Poly1305, make_key_32(), make_iv());
+    let payload: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let wire = tx.seal(payload.as_slice(), ContentType.Handshake, 0).unwrap();
+    let (t, body) = rx.open(wire.as_slice()).unwrap();
+    match t {
+        ContentType.Handshake => {},
+        _ => panic("expected Handshake inner type"),
+    }
+    assert(body.len() == 4);
+}
+
+fn seq_increments_monotonic_v8() {
+    let mut tx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let payload: List<Byte> = [0x00_u8];
+    assert(tx.seq() == 0_u64);
+    let _ = tx.seal(payload.as_slice(), ContentType.ApplicationData, 0).unwrap();
+    assert(tx.seq() == 1_u64);
+    let _ = tx.seal(payload.as_slice(), ContentType.ApplicationData, 0).unwrap();
+    assert(tx.seq() == 2_u64);
+    let _ = tx.seal(payload.as_slice(), ContentType.ApplicationData, 0).unwrap();
+    assert(tx.seq() == 3_u64);
+}
+
+fn padded_inner_plaintext_roundtrips() {
+    // Non-zero padding exercises the inner-plaintext build/parse path
+    // under AEAD — round-trip must still yield the exact payload.
+    let mut tx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let mut rx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let payload: List<Byte> = [0x11_u8, 0x22_u8];
+    let wire = tx.seal(payload.as_slice(), ContentType.Alert, 16).unwrap();
+    let (t, body) = rx.open(wire.as_slice()).unwrap();
+    match t {
+        ContentType.Alert => {},
+        _ => panic("expected Alert"),
+    }
+    assert(body.len() == 2);
+    assert(body[0] == 0x11_u8 && body[1] == 0x22_u8);
+}
+
+fn tampered_tag_fails_open() {
+    let mut tx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let mut rx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let payload: List<Byte> = [0x01_u8];
+    let mut wire = tx.seal(payload.as_slice(), ContentType.ApplicationData, 0).unwrap();
+    // Flip the last byte — that's in the AEAD tag. open must fail.
+    let last = wire.len() - 1;
+    wire[last] = wire[last] ^ 0x01_u8;
+    match rx.open(wire.as_slice()) {
+        Err(RecordError.AeadFailure) => {},
+        _ => panic("tampered tag must reject"),
+    }
+}
+
+fn wrong_key_fails_open() {
+    let mut tx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    // Different key on rx side.
+    let mut other: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 16 { other.push(0xAA_u8); i = i + 1; }
+    let mut rx = AeadState.new(AeadKind.Aes128Gcm, SecretBytes.from(other), make_iv());
+    let payload: List<Byte> = [0x42_u8];
+    let wire = tx.seal(payload.as_slice(), ContentType.ApplicationData, 0).unwrap();
+    match rx.open(wire.as_slice()) {
+        Err(RecordError.AeadFailure) => {},
+        _ => panic("wrong key must reject"),
+    }
+}
+
+fn non_application_data_outer_rejected() {
+    let mut rx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    // Craft a wire with outer type 22 (Handshake) — post-key records
+    // MUST be application_data at the outer layer.
+    let mut wire: List<Byte> = [];
+    wire.push(ContentType.Handshake.to_u8());   // bad outer type
+    wire.push(0x03_u8);
+    wire.push(0x03_u8);
+    wire.push(0x00_u8);
+    wire.push(0x11_u8);                          // length = 17 (bogus)
+    let mut pad: Int = 0;
+    while pad < 17 { wire.push(0_u8); pad = pad + 1; }
+    match rx.open(wire.as_slice()) {
+        Err(RecordError.BadContentType) => {},
+        _ => panic("Handshake outer must be BadContentType"),
+    }
+}
+
+fn short_ciphertext_is_rejected() {
+    let mut rx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    // 4-byte payload is below the 5-byte header floor.
+    let buf: List<Byte> = [0_u8, 0_u8, 0_u8, 0_u8];
+    match rx.open(buf.as_slice()) {
+        Err(RecordError.CiphertextTooShort) => {},
+        _ => panic("short buffer must reject"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    aes128_gcm_seal_open_roundtrip();
+    chacha20_poly1305_roundtrip();
+    seq_increments_monotonic_v8();
+    padded_inner_plaintext_roundtrips();
+    tampered_tag_fails_open();
+    wrong_key_fails_open();
+    non_application_data_outer_rejected();
+    short_ciphertext_is_rejected();
+    print("RFC 8446 §5.2 AeadState seal/open + V8 seq monotonicity verified");
+    0
+}
