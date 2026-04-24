@@ -7156,28 +7156,42 @@ if let Some(ret_val) = call_site.try_as_basic_value().basic() {
     // Name-based fallback: VBC may assign non-semantic TypeIds to
     // compiled stdlib types, so mark_register_from_return_type misses
     // them. Detect from function name prefix as fallback.
+    //
+    // Only apply when the return type is actually the container itself.
+    // Methods like `Set.iter -> SetIter<T>` or `List.to_set -> Set<T>` have
+    // a DIFFERENT nominal return type already tracked by
+    // mark_register_from_return_type; overwriting breaks downstream dispatch.
+    let ret_type_name = ctx.get_obj_register_type(dst.0).map(|s| s.to_string());
+    let fallback_ok = |container: &str| -> bool {
+        match ret_type_name.as_deref() {
+            None => true,
+            Some(n) => n == container,
+        }
+    };
     for wkt in [WKT::Deque, WKT::Map, WKT::Set] {
         let prefix = wkt.as_str();
-        if func_name.starts_with(&format!("{}.", prefix)) || func_name.starts_with(&format!("{}<", prefix)) {
+        if (func_name.starts_with(&format!("{}.", prefix)) || func_name.starts_with(&format!("{}<", prefix)))
+            && fallback_ok(prefix)
+        {
             wkt.mark_register(ctx, dst.0);
             ctx.set_obj_register_type(dst.0, prefix.to_string());
             break;
         }
     }
     if func_name.starts_with("BTreeMap.") || func_name.starts_with("BTreeMap<") {
-        if !ctx.is_btreemap_register(dst.0) {
+        if fallback_ok("BTreeMap") && !ctx.is_btreemap_register(dst.0) {
             ctx.mark_btreemap_register(dst.0);
             ctx.set_obj_register_type(dst.0, "BTreeMap".to_string());
         }
     }
     if func_name.starts_with("BTreeSet.") || func_name.starts_with("BTreeSet<") {
-        if !ctx.is_btreeset_register(dst.0) {
+        if fallback_ok("BTreeSet") && !ctx.is_btreeset_register(dst.0) {
             ctx.mark_btreeset_register(dst.0);
             ctx.set_obj_register_type(dst.0, "BTreeSet".to_string());
         }
     }
     if func_name.starts_with("BinaryHeap.") || func_name.starts_with("BinaryHeap<") {
-        if !ctx.is_binaryheap_register(dst.0) {
+        if fallback_ok("BinaryHeap") && !ctx.is_binaryheap_register(dst.0) {
             ctx.mark_binaryheap_register(dst.0);
             ctx.set_obj_register_type(dst.0, "BinaryHeap".to_string());
         }
@@ -10712,8 +10726,23 @@ if let Some(ret_val) = call_site.try_as_basic_value().basic() {
         // Name-based fallback for compiled .vr stdlib functions.
         // VBC may assign non-semantic TypeIds to compiled stdlib
         // types, so mark_register_from_return_type misses them.
+        //
+        // IMPORTANT: only apply this fallback when the return type is
+        // actually the container itself (e.g. `Set.clone -> Set<T>`).
+        // Methods like `Set.iter -> SetIter<T>` or `Set.to_list -> List<T>`
+        // return a DIFFERENT nominal type, and mark_register_from_return_type
+        // has already populated obj_register_type with the correct name
+        // ("SetIter", "List", ...). Overwriting that with the container name
+        // breaks downstream dispatch (e.g. IterNew looking up `SetIter.next`).
+        let return_type_name = ctx.get_obj_register_type(dst.0).map(|s| s.to_string());
+        let fallback_allowed = |container: &str| -> bool {
+            match return_type_name.as_deref() {
+                None => true,               // no info → safe to apply fallback
+                Some(n) => n == container,  // matches → fallback is redundant but consistent
+            }
+        };
         if func_name.starts_with("Deque.") || func_name.starts_with("Deque<") {
-            if !ctx.is_deque_register(dst.0) {
+            if fallback_allowed(WKT::Deque.as_str()) && !ctx.is_deque_register(dst.0) {
                 ctx.mark_deque_register(dst.0);
                 ctx.set_obj_register_type(dst.0, WKT::Deque.as_str().to_string());
             }
@@ -10738,31 +10767,31 @@ if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                     }
                 }
                 // Don't mark as map_register — the result is V, not Map
-            } else if !ctx.is_map_register(dst.0) {
+            } else if fallback_allowed(WKT::Map.as_str()) && !ctx.is_map_register(dst.0) {
                 ctx.mark_map_register(dst.0);
                 ctx.set_obj_register_type(dst.0, WKT::Map.as_str().to_string());
             }
         }
         if func_name.starts_with("Set.") || func_name.starts_with("Set<") {
-            if !ctx.is_set_register(dst.0) {
+            if fallback_allowed(WKT::Set.as_str()) && !ctx.is_set_register(dst.0) {
                 ctx.mark_set_register(dst.0);
                 ctx.set_obj_register_type(dst.0, WKT::Set.as_str().to_string());
             }
         }
         if func_name.starts_with("BTreeMap.") || func_name.starts_with("BTreeMap<") {
-            if !ctx.is_btreemap_register(dst.0) {
+            if fallback_allowed("BTreeMap") && !ctx.is_btreemap_register(dst.0) {
                 ctx.mark_btreemap_register(dst.0);
                 ctx.set_obj_register_type(dst.0, "BTreeMap".to_string());
             }
         }
         if func_name.starts_with("BTreeSet.") || func_name.starts_with("BTreeSet<") {
-            if !ctx.is_btreeset_register(dst.0) {
+            if fallback_allowed("BTreeSet") && !ctx.is_btreeset_register(dst.0) {
                 ctx.mark_btreeset_register(dst.0);
                 ctx.set_obj_register_type(dst.0, "BTreeSet".to_string());
             }
         }
         if func_name.starts_with("BinaryHeap.") || func_name.starts_with("BinaryHeap<") {
-            if !ctx.is_binaryheap_register(dst.0) {
+            if fallback_allowed("BinaryHeap") && !ctx.is_binaryheap_register(dst.0) {
                 ctx.mark_binaryheap_register(dst.0);
                 ctx.set_obj_register_type(dst.0, "BinaryHeap".to_string());
             }
