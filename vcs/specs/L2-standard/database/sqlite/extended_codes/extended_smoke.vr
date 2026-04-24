@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, extended_codes, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.extended_codes.state.{
+    ExtendedCodeState,
+    new_state, set_enabled, is_enabled,
+};
+mount core.database.sqlite.native.extended_codes.engine.{
+    sqlite3_extended_result_codes, project_code,
+};
+mount base.{Bool};
+
+fn test_new_state_disabled() {
+    let s = new_state();
+    assert(!is_enabled(&s));
+    assert_eq(s.toggles, 0 as Int64);
+}
+
+fn test_set_enabled_bumps_toggles_on_change() {
+    let mut s = new_state();
+    set_enabled(&mut s, true);
+    assert_eq(s.toggles, 1 as Int64);
+    set_enabled(&mut s, true);
+    assert_eq(s.toggles, 1 as Int64);  // idempotent
+    set_enabled(&mut s, false);
+    assert_eq(s.toggles, 2 as Int64);
+}
+
+fn test_sqlite3_extended_result_codes_returns_ok() {
+    let mut s = new_state();
+    assert_eq(sqlite3_extended_result_codes(&mut s, 1), 0);
+    assert(is_enabled(&s));
+    assert_eq(sqlite3_extended_result_codes(&mut s, 0), 0);
+    assert(!is_enabled(&s));
+}
+
+fn test_project_code_disabled_masks_to_primary() {
+    let s = new_state();
+    let extended = 1 + (256 * 3);  // IOERR extension
+    assert_eq(project_code(&s, extended), 1);
+}
+
+fn test_project_code_enabled_passes_through() {
+    let mut s = new_state();
+    set_enabled(&mut s, true);
+    let extended = 1 + (256 * 3);
+    assert_eq(project_code(&s, extended), extended);
+}
+
+fn main() {
+    test_new_state_disabled();
+    test_set_enabled_bumps_toggles_on_change();
+    test_sqlite3_extended_result_codes_returns_ok();
+    test_project_code_disabled_masks_to_primary();
+    test_project_code_enabled_passes_through();
+}

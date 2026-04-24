@@ -1,0 +1,28 @@
+// =============================================================================
+// core/database/sqlite/native/autovacuum_pages_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_autovacuum_pages)
+// Spec: SQLite C API (3.35+)
+//
+//   int sqlite3_autovacuum_pages(
+//     sqlite3 *db,
+//     unsigned int (*xCallback)(void*, const char*, u32, u32, u32),
+//     void *pArg,
+//     void (*xDestructor)(void*)
+//   );
+//
+// The callback is invoked before each auto-vacuum to decide how many
+// pages to reclaim in this round.  xCallback returns the number of
+// pages to move; returning 0 skips this round entirely.
+//
+// Submodules:
+//   * `request`   — AutoVacuumRequest (schema + current + free page counts)
+//   * `decision`  — DecisionOutcome (Skip / ReclaimPages(n))
+//   * `engine`    — install + invoke
+// =============================================================================
+
+module core.database.sqlite.native.autovacuum_pages_api;
+
+public module request;
+public module decision;
+public module engine;

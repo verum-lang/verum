@@ -1,0 +1,82 @@
+// =============================================================================
+// core/database/sqlite/native/lock_modes/mod.vr
+// =============================================================================
+// Layer: 0 (façade — SQLITE_LOCK_* taxonomy)
+// Spec: SQLite file format §7.4 (locking)
+//
+//   SQLITE_LOCK_NONE      = 0
+//   SQLITE_LOCK_SHARED    = 1
+//   SQLITE_LOCK_RESERVED  = 2
+//   SQLITE_LOCK_PENDING   = 3
+//   SQLITE_LOCK_EXCLUSIVE = 4
+//
+// The monotone-rank transitions are:
+//   NONE → SHARED → RESERVED → EXCLUSIVE
+//   NONE → SHARED → PENDING → EXCLUSIVE
+// =============================================================================
+
+module core.database.sqlite.native.lock_modes;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_LOCK_NONE: Int      = 0;
+public const SQLITE_LOCK_SHARED: Int    = 1;
+public const SQLITE_LOCK_RESERVED: Int  = 2;
+public const SQLITE_LOCK_PENDING: Int   = 3;
+public const SQLITE_LOCK_EXCLUSIVE: Int = 4;
+
+public type LockMode is
+      LmNone
+    | LmShared
+    | LmReserved
+    | LmPending
+    | LmExclusive;
+
+public fn mode_numeric(m: &LockMode) -> Int {
+    match m {
+        LmNone       => SQLITE_LOCK_NONE,
+        LmShared     => SQLITE_LOCK_SHARED,
+        LmReserved   => SQLITE_LOCK_RESERVED,
+        LmPending    => SQLITE_LOCK_PENDING,
+        LmExclusive  => SQLITE_LOCK_EXCLUSIVE,
+    }
+}
+
+public fn mode_name(m: &LockMode) -> Text {
+    match m {
+        LmNone       => "NONE".clone(),
+        LmShared     => "SHARED".clone(),
+        LmReserved   => "RESERVED".clone(),
+        LmPending    => "PENDING".clone(),
+        LmExclusive  => "EXCLUSIVE".clone(),
+    }
+}
+
+public fn from_numeric(n: Int) -> LockMode {
+    if n == SQLITE_LOCK_EXCLUSIVE { return LmExclusive; }
+    if n == SQLITE_LOCK_PENDING   { return LmPending; }
+    if n == SQLITE_LOCK_RESERVED  { return LmReserved; }
+    if n == SQLITE_LOCK_SHARED    { return LmShared; }
+    LmNone
+}
+
+/// True iff `from` → `to` is a legal one-step transition per §7.4.
+public fn is_valid_transition(from: &LockMode, to: &LockMode) -> Bool {
+    let f = mode_numeric(from);
+    let t = mode_numeric(to);
+    // Any mode may drop directly to NONE (release).
+    if t == SQLITE_LOCK_NONE { return true; }
+    // Upgrades must be one step at a time along one of the two paths.
+    if t == f + 1 { return true; }
+    // PENDING can only be held after SHARED — other direct jumps are
+    // illegal; downgrades (except to NONE) are also illegal.
+    false
+}
+
+public fn is_write_lock(m: &LockMode) -> Bool {
+    match m {
+        LmReserved | LmPending | LmExclusive => true,
+        _ => false,
+    }
+}

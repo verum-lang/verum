@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, autovacuum_pages_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.autovacuum_pages_api.request.{
+    AutoVacuumRequest,
+    new_request, free_fraction_tenths,
+};
+mount core.database.sqlite.native.autovacuum_pages_api.decision.{
+    DecisionOutcome, DoSkip, DoReclaimPages,
+    outcome_pages, default_policy, threshold_policy,
+};
+mount core.database.sqlite.native.autovacuum_pages_api.engine.{
+    AutoVacuumSlot, AutoVacuumEngine,
+    empty_slot, is_installed, new_engine,
+};
+mount base.{Bool};
+
+fn test_free_fraction_tenths_zero_total() {
+    let r = new_request("main".clone(), 0 as Int64, 0 as Int64, 4096);
+    assert_eq(free_fraction_tenths(&r), 0);
+}
+
+fn test_free_fraction_tenths_half() {
+    let r = new_request("main".clone(), 200 as Int64, 100 as Int64, 4096);
+    assert_eq(free_fraction_tenths(&r), 500);
+}
+
+fn test_default_policy_skips_when_empty() {
+    let r = new_request("main".clone(), 100 as Int64, 0 as Int64, 4096);
+    match default_policy(&r) { DoSkip => {}, _ => assert(false) }
+}
+
+fn test_default_policy_reclaims_one_sixteenth() {
+    let r = new_request("main".clone(), 1024 as Int64, 1024 as Int64, 4096);
+    let d = default_policy(&r);
+    assert_eq(outcome_pages(&d), 64 as Int64);
+}
+
+fn test_threshold_policy_skips_below_min() {
+    let r = new_request("main".clone(), 1000 as Int64, 50 as Int64, 4096);
+    match threshold_policy(&r, 100) { DoSkip => {}, _ => assert(false) }
+}
+
+fn test_threshold_policy_reclaims_above_min() {
+    let r = new_request("main".clone(), 1000 as Int64, 200 as Int64, 4096);
+    match threshold_policy(&r, 100) {
+        DoReclaimPages(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_empty_slot_not_installed() {
+    let s = empty_slot();
+    assert(!is_installed(&s));
+}
+
+fn test_engine_install_then_invoke() {
+    let mut e = new_engine();
+    let slot = AutoVacuumSlot {
+        tag: "audit".clone(),
+        user_data: 42 as Int64,
+        has_destructor: false,
+    };
+    e.sqlite3_autovacuum_pages(slot);
+    assert(is_installed(&e.slot));
+    let r = new_request("main".clone(), 1024 as Int64, 1024 as Int64, 4096);
+    let n = e.invoke(&r, default_policy);
+    assert_eq(n, 64 as Int64);
+    assert_eq(e.invocations, 1 as Int64);
+    assert_eq(e.total_pages_reclaimed, 64 as Int64);
+}
+
+fn test_engine_clear_uninstalls() {
+    let mut e = new_engine();
+    let slot = AutoVacuumSlot {
+        tag: "t".clone(),
+        user_data: 7 as Int64,
+        has_destructor: false,
+    };
+    e.sqlite3_autovacuum_pages(slot);
+    e.clear();
+    assert(!is_installed(&e.slot));
+}
+
+fn main() {
+    test_free_fraction_tenths_zero_total();
+    test_free_fraction_tenths_half();
+    test_default_policy_skips_when_empty();
+    test_default_policy_reclaims_one_sixteenth();
+    test_threshold_policy_skips_below_min();
+    test_threshold_policy_reclaims_above_min();
+    test_empty_slot_not_installed();
+    test_engine_install_then_invoke();
+    test_engine_clear_uninstalls();
+}

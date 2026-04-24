@@ -364,3 +364,19 @@ public module utf16_codec;
 public module text_encoding;
 // - db_release_memory_api: sqlite3_db_release_memory — per-conn lookaside + page-cache drain
 public module db_release_memory_api;
+// - extended_codes: sqlite3_extended_result_codes — per-conn extended-error projection
+public module extended_codes;
+// - sync_flags: SQLITE_SYNC_NORMAL / _FULL / _DATAONLY — VFS xSync flags
+public module sync_flags;
+// - lock_modes: SQLITE_LOCK_NONE/SHARED/RESERVED/PENDING/EXCLUSIVE + transition matrix
+public module lock_modes;
+// - iocap_flags: SQLITE_IOCAP_* device characteristics bitmap w/ atomic-size probes
+public module iocap_flags;
+// - shm_flags: SQLITE_SHM_LOCK/UNLOCK/SHARED/EXCLUSIVE — shm slot ops + 32KB map chunking
+public module shm_flags;
+// - access_flags: SQLITE_ACCESS_EXISTS/READWRITE/READ — VFS xAccess query shape
+public module access_flags;
+// - autovacuum_pages_api: sqlite3_autovacuum_pages (3.35+) — per-round reclaim policy
+public module autovacuum_pages_api;
+// - pragma_op_list: ~70 recognised PRAGMA names w/ config/query/schema/diagnostic/legacy category
+public module pragma_op_list;

@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, iocap_flags, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.iocap_flags.{
+    IocapFlags,
+    SQLITE_IOCAP_ATOMIC, SQLITE_IOCAP_ATOMIC4K, SQLITE_IOCAP_SAFE_APPEND,
+    SQLITE_IOCAP_IMMUTABLE, SQLITE_IOCAP_POWERSAFE_OVERWRITE,
+    new_flags, empty_flags, has,
+    supports_atomic_writes, atomic_at_size,
+    permits_safe_append, file_is_immutable,
+};
+mount base.{Bool};
+
+fn test_constants_match_c_header() {
+    assert_eq(SQLITE_IOCAP_ATOMIC, 0x00000001);
+    assert_eq(SQLITE_IOCAP_ATOMIC4K, 0x00000010);
+    assert_eq(SQLITE_IOCAP_SAFE_APPEND, 0x00000200);
+    assert_eq(SQLITE_IOCAP_IMMUTABLE, 0x00002000);
+    assert_eq(SQLITE_IOCAP_POWERSAFE_OVERWRITE, 0x00001000);
+}
+
+fn test_empty_flags_none_set() {
+    let f = empty_flags();
+    assert(!supports_atomic_writes(&f));
+    assert(!permits_safe_append(&f));
+    assert(!file_is_immutable(&f));
+}
+
+fn test_atomic_4k_triggers_supports_atomic() {
+    let f = new_flags(SQLITE_IOCAP_ATOMIC4K);
+    assert(supports_atomic_writes(&f));
+    assert(atomic_at_size(&f, 4096));
+    assert(!atomic_at_size(&f, 1024));
+}
+
+fn test_atomic_generic_triggers_supports() {
+    let f = new_flags(SQLITE_IOCAP_ATOMIC);
+    assert(supports_atomic_writes(&f));
+}
+
+fn test_safe_append_independent() {
+    let f = new_flags(SQLITE_IOCAP_SAFE_APPEND);
+    assert(permits_safe_append(&f));
+    assert(!supports_atomic_writes(&f));
+}
+
+fn test_immutable_flag() {
+    let f = new_flags(SQLITE_IOCAP_IMMUTABLE);
+    assert(file_is_immutable(&f));
+}
+
+fn test_atomic_at_size_unknown_returns_false() {
+    let f = new_flags(SQLITE_IOCAP_ATOMIC);
+    assert(!atomic_at_size(&f, 333));
+}
+
+fn test_has_raw_bit() {
+    let f = new_flags(SQLITE_IOCAP_POWERSAFE_OVERWRITE);
+    assert(has(&f, SQLITE_IOCAP_POWERSAFE_OVERWRITE));
+    assert(!has(&f, SQLITE_IOCAP_IMMUTABLE));
+}
+
+fn main() {
+    test_constants_match_c_header();
+    test_empty_flags_none_set();
+    test_atomic_4k_triggers_supports_atomic();
+    test_atomic_generic_triggers_supports();
+    test_safe_append_independent();
+    test_immutable_flag();
+    test_atomic_at_size_unknown_returns_false();
+    test_has_raw_bit();
+}

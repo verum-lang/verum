@@ -1,0 +1,92 @@
+// =============================================================================
+// core/database/sqlite/native/iocap_flags/mod.vr
+// =============================================================================
+// Layer: 0 (façade — SQLITE_IOCAP_* device characteristics)
+// Spec: SQLite C API — xDeviceCharacteristics
+//
+//   SQLITE_IOCAP_ATOMIC             = 0x00000001
+//   SQLITE_IOCAP_ATOMIC512          = 0x00000002
+//   SQLITE_IOCAP_ATOMIC1K           = 0x00000004
+//   SQLITE_IOCAP_ATOMIC2K           = 0x00000008
+//   SQLITE_IOCAP_ATOMIC4K           = 0x00000010
+//   SQLITE_IOCAP_ATOMIC8K           = 0x00000020
+//   SQLITE_IOCAP_ATOMIC16K          = 0x00000040
+//   SQLITE_IOCAP_ATOMIC32K          = 0x00000080
+//   SQLITE_IOCAP_ATOMIC64K          = 0x00000100
+//   SQLITE_IOCAP_SAFE_APPEND        = 0x00000200
+//   SQLITE_IOCAP_SEQUENTIAL         = 0x00000400
+//   SQLITE_IOCAP_UNDELETABLE_WHEN_OPEN = 0x00000800
+//   SQLITE_IOCAP_POWERSAFE_OVERWRITE = 0x00001000
+//   SQLITE_IOCAP_IMMUTABLE          = 0x00002000
+//   SQLITE_IOCAP_BATCH_ATOMIC       = 0x00004000
+// =============================================================================
+
+module core.database.sqlite.native.iocap_flags;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_IOCAP_ATOMIC: Int                = 0x00000001;
+public const SQLITE_IOCAP_ATOMIC512: Int             = 0x00000002;
+public const SQLITE_IOCAP_ATOMIC1K: Int              = 0x00000004;
+public const SQLITE_IOCAP_ATOMIC2K: Int              = 0x00000008;
+public const SQLITE_IOCAP_ATOMIC4K: Int              = 0x00000010;
+public const SQLITE_IOCAP_ATOMIC8K: Int              = 0x00000020;
+public const SQLITE_IOCAP_ATOMIC16K: Int             = 0x00000040;
+public const SQLITE_IOCAP_ATOMIC32K: Int             = 0x00000080;
+public const SQLITE_IOCAP_ATOMIC64K: Int             = 0x00000100;
+public const SQLITE_IOCAP_SAFE_APPEND: Int           = 0x00000200;
+public const SQLITE_IOCAP_SEQUENTIAL: Int            = 0x00000400;
+public const SQLITE_IOCAP_UNDELETABLE_WHEN_OPEN: Int = 0x00000800;
+public const SQLITE_IOCAP_POWERSAFE_OVERWRITE: Int   = 0x00001000;
+public const SQLITE_IOCAP_IMMUTABLE: Int             = 0x00002000;
+public const SQLITE_IOCAP_BATCH_ATOMIC: Int          = 0x00004000;
+
+public type IocapFlags is {
+    bits: Int,
+}
+
+public fn new_flags(bits: Int) -> IocapFlags {
+    IocapFlags { bits: bits }
+}
+
+public fn empty_flags() -> IocapFlags { IocapFlags { bits: 0 } }
+
+public fn has(f: &IocapFlags, bit: Int) -> Bool {
+    (f.bits & bit) != 0
+}
+
+/// True iff writes of *any* size are atomic (covers the general
+/// ATOMIC flag or any specific size-class).
+public fn supports_atomic_writes(f: &IocapFlags) -> Bool {
+    has(f, SQLITE_IOCAP_ATOMIC)
+        || has(f, SQLITE_IOCAP_ATOMIC512)
+        || has(f, SQLITE_IOCAP_ATOMIC1K)
+        || has(f, SQLITE_IOCAP_ATOMIC2K)
+        || has(f, SQLITE_IOCAP_ATOMIC4K)
+        || has(f, SQLITE_IOCAP_ATOMIC8K)
+        || has(f, SQLITE_IOCAP_ATOMIC16K)
+        || has(f, SQLITE_IOCAP_ATOMIC32K)
+        || has(f, SQLITE_IOCAP_ATOMIC64K)
+}
+
+/// True iff writes of EXACTLY `bytes` are atomic (a single size class).
+public fn atomic_at_size(f: &IocapFlags, bytes: Int) -> Bool {
+    if bytes == 512   { return has(f, SQLITE_IOCAP_ATOMIC512); }
+    if bytes == 1024  { return has(f, SQLITE_IOCAP_ATOMIC1K); }
+    if bytes == 2048  { return has(f, SQLITE_IOCAP_ATOMIC2K); }
+    if bytes == 4096  { return has(f, SQLITE_IOCAP_ATOMIC4K); }
+    if bytes == 8192  { return has(f, SQLITE_IOCAP_ATOMIC8K); }
+    if bytes == 16384 { return has(f, SQLITE_IOCAP_ATOMIC16K); }
+    if bytes == 32768 { return has(f, SQLITE_IOCAP_ATOMIC32K); }
+    if bytes == 65536 { return has(f, SQLITE_IOCAP_ATOMIC64K); }
+    false
+}
+
+public fn permits_safe_append(f: &IocapFlags) -> Bool {
+    has(f, SQLITE_IOCAP_SAFE_APPEND)
+}
+
+public fn file_is_immutable(f: &IocapFlags) -> Bool {
+    has(f, SQLITE_IOCAP_IMMUTABLE)
+}

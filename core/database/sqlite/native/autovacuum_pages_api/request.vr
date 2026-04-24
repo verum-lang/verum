@@ -1,0 +1,39 @@
+// =============================================================================
+// autovacuum_pages_api/request.vr — AutoVacuumRequest
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.autovacuum_pages_api.request;
+
+mount core.*;
+mount base.{Text};
+
+public type AutoVacuumRequest is {
+    schema: Text,
+    total_pages: Int64,
+    free_pages: Int64,
+    bytes_per_page: Int,
+}
+
+public fn new_request(
+    schema: Text,
+    total_pages: Int64,
+    free_pages: Int64,
+    bytes_per_page: Int,
+) -> AutoVacuumRequest {
+    AutoVacuumRequest {
+        schema: schema,
+        total_pages: total_pages,
+        free_pages: free_pages,
+        bytes_per_page: bytes_per_page,
+    }
+}
+
+/// Fraction of the file that's currently free space, in tenths of
+/// a percent (0..1000).
+public fn free_fraction_tenths(r: &AutoVacuumRequest) -> Int {
+    if r.total_pages <= (0 as Int64) { return 0; }
+    let numer = r.free_pages * (1000 as Int64);
+    (numer / r.total_pages) as Int
+}

@@ -1,0 +1,147 @@
+// =============================================================================
+// pragma_op_list/names.vr — canonical PRAGMA name table
+// =============================================================================
+// Spec: SQLite C API + PRAGMA docs.
+// =============================================================================
+
+module core.database.sqlite.native.pragma_op_list.names;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.pragma_op_list.category.{
+    PragmaCategory,
+    PcConfig, PcQuery, PcSchema, PcDiagnostic, PcLegacy,
+};
+
+public type PragmaEntry is {
+    name: Text,
+    category: PragmaCategory,
+}
+
+public fn entry(name: Text, category: PragmaCategory) -> PragmaEntry {
+    PragmaEntry { name: name, category: category }
+}
+
+/// Canonical list of every standard PRAGMA name.
+public fn all_pragmas() -> List<PragmaEntry> {
+    let mut out: List<PragmaEntry> = List.new();
+
+    // Config pragmas.
+    out.push(entry("application_id".clone(), PcConfig));
+    out.push(entry("auto_vacuum".clone(), PcConfig));
+    out.push(entry("automatic_index".clone(), PcConfig));
+    out.push(entry("busy_timeout".clone(), PcConfig));
+    out.push(entry("cache_size".clone(), PcConfig));
+    out.push(entry("cache_spill".clone(), PcConfig));
+    out.push(entry("case_sensitive_like".clone(), PcLegacy));
+    out.push(entry("cell_size_check".clone(), PcConfig));
+    out.push(entry("checkpoint_fullfsync".clone(), PcConfig));
+    out.push(entry("data_version".clone(), PcQuery));
+    out.push(entry("defer_foreign_keys".clone(), PcConfig));
+    out.push(entry("encoding".clone(), PcConfig));
+    out.push(entry("foreign_keys".clone(), PcConfig));
+    out.push(entry("fullfsync".clone(), PcConfig));
+    out.push(entry("hard_heap_limit".clone(), PcConfig));
+    out.push(entry("ignore_check_constraints".clone(), PcConfig));
+    out.push(entry("journal_mode".clone(), PcConfig));
+    out.push(entry("journal_size_limit".clone(), PcConfig));
+    out.push(entry("legacy_alter_table".clone(), PcConfig));
+    out.push(entry("legacy_file_format".clone(), PcLegacy));
+    out.push(entry("locking_mode".clone(), PcConfig));
+    out.push(entry("max_page_count".clone(), PcConfig));
+    out.push(entry("mmap_size".clone(), PcConfig));
+    out.push(entry("page_size".clone(), PcConfig));
+    out.push(entry("parser_trace".clone(), PcDiagnostic));
+    out.push(entry("query_only".clone(), PcConfig));
+    out.push(entry("read_uncommitted".clone(), PcConfig));
+    out.push(entry("recursive_triggers".clone(), PcConfig));
+    out.push(entry("reverse_unordered_selects".clone(), PcConfig));
+    out.push(entry("secure_delete".clone(), PcConfig));
+    out.push(entry("soft_heap_limit".clone(), PcConfig));
+    out.push(entry("synchronous".clone(), PcConfig));
+    out.push(entry("temp_store".clone(), PcConfig));
+    out.push(entry("threads".clone(), PcConfig));
+    out.push(entry("trusted_schema".clone(), PcConfig));
+    out.push(entry("user_version".clone(), PcSchema));
+    out.push(entry("wal_autocheckpoint".clone(), PcConfig));
+    out.push(entry("writable_schema".clone(), PcConfig));
+
+    // Query / introspection pragmas.
+    out.push(entry("collation_list".clone(), PcQuery));
+    out.push(entry("compile_options".clone(), PcQuery));
+    out.push(entry("database_list".clone(), PcQuery));
+    out.push(entry("foreign_key_list".clone(), PcQuery));
+    out.push(entry("function_list".clone(), PcQuery));
+    out.push(entry("index_info".clone(), PcQuery));
+    out.push(entry("index_list".clone(), PcQuery));
+    out.push(entry("index_xinfo".clone(), PcQuery));
+    out.push(entry("module_list".clone(), PcQuery));
+    out.push(entry("pragma_list".clone(), PcQuery));
+    out.push(entry("schema_version".clone(), PcSchema));
+    out.push(entry("table_info".clone(), PcQuery));
+    out.push(entry("table_list".clone(), PcQuery));
+    out.push(entry("table_xinfo".clone(), PcQuery));
+
+    // Diagnostic / maintenance pragmas.
+    out.push(entry("analysis_limit".clone(), PcDiagnostic));
+    out.push(entry("foreign_key_check".clone(), PcDiagnostic));
+    out.push(entry("freelist_count".clone(), PcQuery));
+    out.push(entry("incremental_vacuum".clone(), PcDiagnostic));
+    out.push(entry("integrity_check".clone(), PcDiagnostic));
+    out.push(entry("optimize".clone(), PcDiagnostic));
+    out.push(entry("page_count".clone(), PcQuery));
+    out.push(entry("quick_check".clone(), PcDiagnostic));
+    out.push(entry("shrink_memory".clone(), PcDiagnostic));
+    out.push(entry("stats".clone(), PcDiagnostic));
+    out.push(entry("vdbe_addoptrace".clone(), PcDiagnostic));
+    out.push(entry("vdbe_debug".clone(), PcDiagnostic));
+    out.push(entry("vdbe_listing".clone(), PcDiagnostic));
+    out.push(entry("vdbe_trace".clone(), PcDiagnostic));
+    out.push(entry("wal_checkpoint".clone(), PcDiagnostic));
+
+    out
+}
+
+public fn pragma_count() -> Int {
+    all_pragmas().len()
+}
+
+public fn find(name: &Text) -> Maybe<PragmaCategory> {
+    let pragmas = all_pragmas();
+    let mut i: Int = 0;
+    while i < pragmas.len() {
+        let e = pragmas.get(i);
+        if ci_eq(&e.name, name) {
+            return Maybe.Some(clone_category(&e.category));
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+fn ci_eq(a: &Text, b: &Text) -> Bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        let mut x = ab[i];
+        let mut y = bb[i];
+        if x >= (0x41 as u8) && x <= (0x5A as u8) { x = x + (0x20 as u8); }
+        if y >= (0x41 as u8) && y <= (0x5A as u8) { y = y + (0x20 as u8); }
+        if x != y { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn clone_category(c: &PragmaCategory) -> PragmaCategory {
+    match c {
+        PcConfig      => PcConfig,
+        PcQuery       => PcQuery,
+        PcSchema      => PcSchema,
+        PcDiagnostic  => PcDiagnostic,
+        PcLegacy      => PcLegacy,
+    }
+}

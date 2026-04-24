@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma_op_list, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pragma_op_list.category.{
+    PragmaCategory, PcConfig, PcQuery, PcSchema, PcDiagnostic, PcLegacy,
+    category_name, is_mutating,
+};
+mount core.database.sqlite.native.pragma_op_list.names.{
+    PragmaEntry,
+    entry, all_pragmas, pragma_count, find,
+};
+mount base.{Bool, Maybe};
+
+fn test_category_names() {
+    assert(category_name(&PcConfig) == "config".clone());
+    assert(category_name(&PcQuery) == "query".clone());
+    assert(category_name(&PcSchema) == "schema".clone());
+    assert(category_name(&PcDiagnostic) == "diagnostic".clone());
+    assert(category_name(&PcLegacy) == "legacy".clone());
+}
+
+fn test_is_mutating_config_and_schema() {
+    assert(is_mutating(&PcConfig));
+    assert(is_mutating(&PcSchema));
+    assert(!is_mutating(&PcQuery));
+    assert(!is_mutating(&PcDiagnostic));
+    assert(!is_mutating(&PcLegacy));
+}
+
+fn test_all_pragmas_has_reasonable_size() {
+    let n = pragma_count();
+    assert(n >= 60);
+}
+
+fn test_find_config_pragma() {
+    match find(&"journal_mode".clone()) {
+        Maybe.Some(c) => match &c { PcConfig => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_query_pragma() {
+    match find(&"table_info".clone()) {
+        Maybe.Some(c) => match &c { PcQuery => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_diagnostic_pragma() {
+    match find(&"integrity_check".clone()) {
+        Maybe.Some(c) => match &c { PcDiagnostic => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_schema_pragma() {
+    match find(&"schema_version".clone()) {
+        Maybe.Some(c) => match &c { PcSchema => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_legacy_pragma() {
+    match find(&"legacy_file_format".clone()) {
+        Maybe.Some(c) => match &c { PcLegacy => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_case_insensitive() {
+    match find(&"JOURNAL_MODE".clone()) {
+        Maybe.Some(_) => {},
+        Maybe.None => assert(false),
+    }
+    match find(&"Journal_Mode".clone()) {
+        Maybe.Some(_) => {},
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_unknown_none() {
+    match find(&"bogus_pragma".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn main() {
+    test_category_names();
+    test_is_mutating_config_and_schema();
+    test_all_pragmas_has_reasonable_size();
+    test_find_config_pragma();
+    test_find_query_pragma();
+    test_find_diagnostic_pragma();
+    test_find_schema_pragma();
+    test_find_legacy_pragma();
+    test_find_case_insensitive();
+    test_find_unknown_none();
+}

@@ -1,0 +1,34 @@
+// =============================================================================
+// pragma_op_list/category.vr — PragmaCategory sum
+// =============================================================================
+// Spec: SQLite C API + PRAGMA docs.
+// =============================================================================
+
+module core.database.sqlite.native.pragma_op_list.category;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type PragmaCategory is
+      PcConfig            // per-connection setting (journal_mode, synchronous, …)
+    | PcQuery             // introspective query (table_info, index_list, …)
+    | PcSchema            // schema-sensitive DDL-adjacent (schema_version, user_version)
+    | PcDiagnostic        // diagnostics (integrity_check, foreign_key_check, …)
+    | PcLegacy;           // deprecated but still accepted
+
+public fn category_name(c: &PragmaCategory) -> Text {
+    match c {
+        PcConfig      => "config".clone(),
+        PcQuery       => "query".clone(),
+        PcSchema      => "schema".clone(),
+        PcDiagnostic  => "diagnostic".clone(),
+        PcLegacy      => "legacy".clone(),
+    }
+}
+
+public fn is_mutating(c: &PragmaCategory) -> Bool {
+    match c {
+        PcConfig | PcSchema => true,
+        _ => false,
+    }
+}

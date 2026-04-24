@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, sync_flags, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.sync_flags.{
+    SyncMode, SmNormal, SmFull,
+    SyncFlags,
+    SQLITE_SYNC_NORMAL, SQLITE_SYNC_FULL, SQLITE_SYNC_DATAONLY,
+    mode_numeric, mode_name, is_full, new_flags, flags_numeric, from_numeric,
+};
+mount base.{Bool};
+
+fn test_constants_match_c_header() {
+    assert_eq(SQLITE_SYNC_NORMAL, 0x00002);
+    assert_eq(SQLITE_SYNC_FULL, 0x00003);
+    assert_eq(SQLITE_SYNC_DATAONLY, 0x00010);
+}
+
+fn test_mode_numeric_and_name() {
+    assert_eq(mode_numeric(&SmNormal), SQLITE_SYNC_NORMAL);
+    assert_eq(mode_numeric(&SmFull), SQLITE_SYNC_FULL);
+    assert(mode_name(&SmNormal) == "NORMAL".clone());
+    assert(mode_name(&SmFull) == "FULL".clone());
+}
+
+fn test_is_full() {
+    assert(!is_full(&SmNormal));
+    assert(is_full(&SmFull));
+}
+
+fn test_flags_pack_and_unpack() {
+    let f = new_flags(SmFull, true);
+    let n = flags_numeric(&f);
+    assert_eq(n, SQLITE_SYNC_FULL | SQLITE_SYNC_DATAONLY);
+    let back = from_numeric(n);
+    match &back.mode { SmFull => {}, _ => assert(false) }
+    assert(back.data_only);
+}
+
+fn test_flags_normal_without_dataonly() {
+    let f = new_flags(SmNormal, false);
+    assert_eq(flags_numeric(&f), SQLITE_SYNC_NORMAL);
+}
+
+fn test_from_numeric_defaults_to_normal() {
+    let f = from_numeric(0);
+    match &f.mode { SmNormal => {}, _ => assert(false) }
+    assert(!f.data_only);
+}
+
+fn main() {
+    test_constants_match_c_header();
+    test_mode_numeric_and_name();
+    test_is_full();
+    test_flags_pack_and_unpack();
+    test_flags_normal_without_dataonly();
+    test_from_numeric_defaults_to_normal();
+}

@@ -1,0 +1,62 @@
+// =============================================================================
+// core/database/sqlite/native/access_flags/mod.vr
+// =============================================================================
+// Layer: 0 (façade — SQLITE_ACCESS_* for xAccess)
+// Spec: SQLite C API
+//
+//   SQLITE_ACCESS_EXISTS    = 0
+//   SQLITE_ACCESS_READWRITE = 1   /* used by journal test */
+//   SQLITE_ACCESS_READ      = 2   /* unused */
+//
+// xAccess returns SQLITE_OK with a boolean output parameter telling
+// the caller whether the access mode is available for the named file.
+// =============================================================================
+
+module core.database.sqlite.native.access_flags;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_ACCESS_EXISTS: Int    = 0;
+public const SQLITE_ACCESS_READWRITE: Int = 1;
+public const SQLITE_ACCESS_READ: Int      = 2;
+
+public type AccessMode is
+      AmExists
+    | AmReadWrite
+    | AmRead;
+
+public fn mode_numeric(m: &AccessMode) -> Int {
+    match m {
+        AmExists    => SQLITE_ACCESS_EXISTS,
+        AmReadWrite => SQLITE_ACCESS_READWRITE,
+        AmRead      => SQLITE_ACCESS_READ,
+    }
+}
+
+public fn mode_name(m: &AccessMode) -> Text {
+    match m {
+        AmExists    => "EXISTS".clone(),
+        AmReadWrite => "READWRITE".clone(),
+        AmRead      => "READ".clone(),
+    }
+}
+
+public fn from_numeric(n: Int) -> AccessMode {
+    if n == SQLITE_ACCESS_READWRITE { return AmReadWrite; }
+    if n == SQLITE_ACCESS_READ      { return AmRead; }
+    AmExists
+}
+
+public type AccessResult is {
+    mode: AccessMode,
+    allowed: Bool,
+}
+
+public fn new_result(mode: AccessMode, allowed: Bool) -> AccessResult {
+    AccessResult { mode: mode, allowed: allowed }
+}
+
+public fn result_to_int(r: &AccessResult) -> Int {
+    if r.allowed { 1 } else { 0 }
+}

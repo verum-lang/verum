@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/extended_codes/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_extended_result_codes)
+// Spec: SQLite C API
+//
+//   int sqlite3_extended_result_codes(sqlite3 *db, int onoff)
+//
+// Toggles whether sqlite3_errcode returns the classical primary code
+// or the extended form (primary OR (extension << 8)).  Default is OFF.
+//
+// Submodules:
+//   * `state`   — per-connection enable flag
+//   * `engine`  — classical → extended projection w/ toggle
+// =============================================================================
+
+module core.database.sqlite.native.extended_codes;
+
+public module state;
+public module engine;

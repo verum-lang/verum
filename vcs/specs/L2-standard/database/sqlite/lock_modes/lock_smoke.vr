@@ -1,0 +1,77 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, lock_modes, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.lock_modes.{
+    LockMode, LmNone, LmShared, LmReserved, LmPending, LmExclusive,
+    SQLITE_LOCK_NONE, SQLITE_LOCK_SHARED, SQLITE_LOCK_RESERVED,
+    SQLITE_LOCK_PENDING, SQLITE_LOCK_EXCLUSIVE,
+    mode_numeric, mode_name, from_numeric, is_valid_transition, is_write_lock,
+};
+mount base.{Bool};
+
+fn test_mode_numeric_matches_c_header() {
+    assert_eq(SQLITE_LOCK_NONE, 0);
+    assert_eq(SQLITE_LOCK_SHARED, 1);
+    assert_eq(SQLITE_LOCK_RESERVED, 2);
+    assert_eq(SQLITE_LOCK_PENDING, 3);
+    assert_eq(SQLITE_LOCK_EXCLUSIVE, 4);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&LmNone) == "NONE".clone());
+    assert(mode_name(&LmExclusive) == "EXCLUSIVE".clone());
+}
+
+fn test_from_numeric_round_trip() {
+    match from_numeric(0) { LmNone => {}, _ => assert(false) }
+    match from_numeric(1) { LmShared => {}, _ => assert(false) }
+    match from_numeric(4) { LmExclusive => {}, _ => assert(false) }
+    match from_numeric(99) { LmNone => {}, _ => assert(false) }
+}
+
+fn test_valid_single_step_upgrades() {
+    assert(is_valid_transition(&LmNone, &LmShared));
+    assert(is_valid_transition(&LmShared, &LmReserved));
+    assert(is_valid_transition(&LmReserved, &LmPending));
+    assert(is_valid_transition(&LmPending, &LmExclusive));
+}
+
+fn test_direct_release_to_none_always_valid() {
+    assert(is_valid_transition(&LmExclusive, &LmNone));
+    assert(is_valid_transition(&LmPending, &LmNone));
+    assert(is_valid_transition(&LmReserved, &LmNone));
+}
+
+fn test_two_step_upgrade_invalid() {
+    assert(!is_valid_transition(&LmShared, &LmPending));
+    assert(!is_valid_transition(&LmNone, &LmReserved));
+    assert(!is_valid_transition(&LmNone, &LmExclusive));
+}
+
+fn test_partial_downgrades_invalid() {
+    assert(!is_valid_transition(&LmExclusive, &LmReserved));
+    assert(!is_valid_transition(&LmReserved, &LmShared));
+}
+
+fn test_is_write_lock() {
+    assert(!is_write_lock(&LmNone));
+    assert(!is_write_lock(&LmShared));
+    assert(is_write_lock(&LmReserved));
+    assert(is_write_lock(&LmPending));
+    assert(is_write_lock(&LmExclusive));
+}
+
+fn main() {
+    test_mode_numeric_matches_c_header();
+    test_mode_names();
+    test_from_numeric_round_trip();
+    test_valid_single_step_upgrades();
+    test_direct_release_to_none_always_valid();
+    test_two_step_upgrade_invalid();
+    test_partial_downgrades_invalid();
+    test_is_write_lock();
+}

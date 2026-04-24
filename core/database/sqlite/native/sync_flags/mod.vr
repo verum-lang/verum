@@ -1,0 +1,74 @@
+// =============================================================================
+// core/database/sqlite/native/sync_flags/mod.vr
+// =============================================================================
+// Layer: 0 (façade — SQLITE_SYNC_* constants)
+// Spec: SQLite C API — xSync flags
+//
+//   SQLITE_SYNC_NORMAL   = 0x00002
+//   SQLITE_SYNC_FULL     = 0x00003
+//   SQLITE_SYNC_DATAONLY = 0x00010
+//
+// Flags are OR-ed together; NORMAL and FULL are mutually exclusive
+// (FULL is stricter); DATAONLY is orthogonal (skip metadata flush).
+// =============================================================================
+
+module core.database.sqlite.native.sync_flags;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_SYNC_NORMAL: Int   = 0x00002;
+public const SQLITE_SYNC_FULL: Int     = 0x00003;
+public const SQLITE_SYNC_DATAONLY: Int = 0x00010;
+
+public type SyncMode is
+      SmNormal
+    | SmFull;
+
+public fn mode_numeric(m: &SyncMode) -> Int {
+    match m {
+        SmNormal => SQLITE_SYNC_NORMAL,
+        SmFull   => SQLITE_SYNC_FULL,
+    }
+}
+
+public fn mode_name(m: &SyncMode) -> Text {
+    match m {
+        SmNormal => "NORMAL".clone(),
+        SmFull   => "FULL".clone(),
+    }
+}
+
+public fn is_full(m: &SyncMode) -> Bool {
+    match m {
+        SmFull => true,
+        _ => false,
+    }
+}
+
+public type SyncFlags is {
+    mode: SyncMode,
+    data_only: Bool,
+}
+
+public fn new_flags(mode: SyncMode, data_only: Bool) -> SyncFlags {
+    SyncFlags { mode: mode, data_only: data_only }
+}
+
+public fn flags_numeric(f: &SyncFlags) -> Int {
+    let mut v = mode_numeric(&f.mode);
+    if f.data_only { v = v | SQLITE_SYNC_DATAONLY; }
+    v
+}
+
+public fn from_numeric(n: Int) -> SyncFlags {
+    let mode = if (n & SQLITE_SYNC_FULL) == SQLITE_SYNC_FULL {
+        SmFull
+    } else {
+        SmNormal
+    };
+    SyncFlags {
+        mode: mode,
+        data_only: (n & SQLITE_SYNC_DATAONLY) != 0,
+    }
+}

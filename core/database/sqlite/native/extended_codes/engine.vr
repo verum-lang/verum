@@ -1,0 +1,27 @@
+// =============================================================================
+// extended_codes/engine.vr — projection + toggle
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.extended_codes.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.extended_codes.state.{
+    ExtendedCodeState, set_enabled, is_enabled,
+};
+
+public fn sqlite3_extended_result_codes(s: &mut ExtendedCodeState, onoff: Int) -> Int {
+    set_enabled(s, onoff != 0);
+    0   // SQLITE_OK
+}
+
+/// Given the wire (extended) 32-bit error code, project to the form
+/// the caller expects per `state`.  Enabled ⇒ extended, disabled ⇒
+/// primary (low 8 bits).
+public fn project_code(s: &ExtendedCodeState, extended: Int) -> Int {
+    if is_enabled(s) { return extended; }
+    let primary: Int = extended - ((extended / 256) * 256);
+    primary
+}

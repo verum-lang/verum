@@ -1,0 +1,28 @@
+// =============================================================================
+// extended_codes/state.vr — per-connection toggle
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.extended_codes.state;
+
+mount core.*;
+mount base.{Bool};
+
+public type ExtendedCodeState is {
+    enabled: Bool,
+    toggles: Int64,
+}
+
+public fn new_state() -> ExtendedCodeState {
+    ExtendedCodeState { enabled: false, toggles: 0 as Int64 }
+}
+
+public fn set_enabled(s: &mut ExtendedCodeState, on: Bool) {
+    if s.enabled != on {
+        s.enabled = on;
+        s.toggles = s.toggles + (1 as Int64);
+    }
+}
+
+public fn is_enabled(s: &ExtendedCodeState) -> Bool { s.enabled }

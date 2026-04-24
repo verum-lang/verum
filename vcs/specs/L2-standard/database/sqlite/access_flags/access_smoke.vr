@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, access_flags, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.access_flags.{
+    AccessMode, AmExists, AmReadWrite, AmRead,
+    SQLITE_ACCESS_EXISTS, SQLITE_ACCESS_READWRITE, SQLITE_ACCESS_READ,
+    mode_numeric, mode_name, from_numeric,
+    AccessResult, new_result, result_to_int,
+};
+mount base.{Bool};
+
+fn test_constants() {
+    assert_eq(SQLITE_ACCESS_EXISTS, 0);
+    assert_eq(SQLITE_ACCESS_READWRITE, 1);
+    assert_eq(SQLITE_ACCESS_READ, 2);
+}
+
+fn test_mode_numeric() {
+    assert_eq(mode_numeric(&AmExists), SQLITE_ACCESS_EXISTS);
+    assert_eq(mode_numeric(&AmReadWrite), SQLITE_ACCESS_READWRITE);
+    assert_eq(mode_numeric(&AmRead), SQLITE_ACCESS_READ);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&AmExists) == "EXISTS".clone());
+    assert(mode_name(&AmReadWrite) == "READWRITE".clone());
+    assert(mode_name(&AmRead) == "READ".clone());
+}
+
+fn test_from_numeric_round_trip() {
+    match from_numeric(0) { AmExists => {}, _ => assert(false) }
+    match from_numeric(1) { AmReadWrite => {}, _ => assert(false) }
+    match from_numeric(2) { AmRead => {}, _ => assert(false) }
+    match from_numeric(99) { AmExists => {}, _ => assert(false) }
+}
+
+fn test_result_to_int() {
+    let r_true = new_result(AmExists, true);
+    let r_false = new_result(AmExists, false);
+    assert_eq(result_to_int(&r_true), 1);
+    assert_eq(result_to_int(&r_false), 0);
+}
+
+fn main() {
+    test_constants();
+    test_mode_numeric();
+    test_mode_names();
+    test_from_numeric_round_trip();
+    test_result_to_int();
+}

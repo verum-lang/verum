@@ -1,0 +1,39 @@
+// =============================================================================
+// autovacuum_pages_api/decision.vr — DecisionOutcome
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.autovacuum_pages_api.decision;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.autovacuum_pages_api.request.{
+    AutoVacuumRequest, free_fraction_tenths,
+};
+
+public type DecisionOutcome is
+      DoSkip                    // xCallback returned 0
+    | DoReclaimPages(Int64);
+
+public fn outcome_pages(o: &DecisionOutcome) -> Int64 {
+    match o {
+        DoSkip              => 0 as Int64,
+        DoReclaimPages(n)   => *n,
+    }
+}
+
+/// Default policy: reclaim 1/16 of the free pages, floored at 0.
+public fn default_policy(r: &AutoVacuumRequest) -> DecisionOutcome {
+    if r.free_pages <= (0 as Int64) { return DoSkip; }
+    let take = r.free_pages / (16 as Int64);
+    if take == (0 as Int64) { return DoSkip; }
+    DoReclaimPages(take)
+}
+
+/// Threshold policy: skip unless free_fraction ≥ `min_tenths` (e.g.
+/// 100 = 10%).
+public fn threshold_policy(r: &AutoVacuumRequest, min_tenths: Int) -> DecisionOutcome {
+    if free_fraction_tenths(r) < min_tenths { return DoSkip; }
+    default_policy(r)
+}

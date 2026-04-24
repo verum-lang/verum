@@ -1,0 +1,65 @@
+// =============================================================================
+// autovacuum_pages_api/engine.vr — install + invoke
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.autovacuum_pages_api.engine;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.autovacuum_pages_api.request.{
+    AutoVacuumRequest,
+};
+mount core.database.sqlite.native.autovacuum_pages_api.decision.{
+    DecisionOutcome, DoSkip, DoReclaimPages, outcome_pages,
+};
+
+public type AutoVacuumSlot is {
+    tag: Text,
+    user_data: Int64,
+    /// True iff xDestructor was supplied.
+    has_destructor: Bool,
+}
+
+public fn empty_slot() -> AutoVacuumSlot {
+    AutoVacuumSlot { tag: "".clone(), user_data: 0 as Int64, has_destructor: false }
+}
+
+public fn is_installed(s: &AutoVacuumSlot) -> Bool {
+    s.user_data != (0 as Int64) || s.tag.len() > 0
+}
+
+public type AutoVacuumEngine is {
+    slot: AutoVacuumSlot,
+    invocations: Int64,
+    total_pages_reclaimed: Int64,
+}
+
+public fn new_engine() -> AutoVacuumEngine {
+    AutoVacuumEngine {
+        slot: empty_slot(),
+        invocations: 0 as Int64,
+        total_pages_reclaimed: 0 as Int64,
+    }
+}
+
+implement AutoVacuumEngine {
+    pub fn sqlite3_autovacuum_pages(&mut self, slot: AutoVacuumSlot) {
+        self.slot = slot;
+    }
+
+    pub fn clear(&mut self) {
+        self.slot = empty_slot();
+    }
+
+    /// Invoke the callback via the caller's closure; returns the
+    /// number of pages the callback asked to reclaim.
+    pub fn invoke(&mut self, req: &AutoVacuumRequest, policy: fn(&AutoVacuumRequest) -> DecisionOutcome) -> Int64 {
+        self.invocations = self.invocations + (1 as Int64);
+        let outcome = (policy)(req);
+        let n = outcome_pages(&outcome);
+        self.total_pages_reclaimed = self.total_pages_reclaimed + n;
+        n
+    }
+}

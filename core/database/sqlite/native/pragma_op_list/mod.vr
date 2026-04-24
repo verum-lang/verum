@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/pragma_op_list/mod.vr
+// =============================================================================
+// Layer: 5 (façade — full PRAGMA taxonomy)
+// Spec: SQLite C API + PRAGMA docs.
+//
+// Catalogues the complete list of recognised PRAGMA names + their
+// category (config / query / schema / diagnostic / legacy).  Used
+// by the parser + the auth-protected PRAGMA dispatcher in pragmas/.
+//
+// Submodules:
+//   * `category`  — PragmaCategory sum
+//   * `names`     — canonical name list + category lookup
+// =============================================================================
+
+module core.database.sqlite.native.pragma_op_list;
+
+public module category;
+public module names;

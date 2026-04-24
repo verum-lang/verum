@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, shm_flags, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.shm_flags.{
+    ShmOp, ShmLockShared, ShmLockExclusive,
+    ShmUnlockShared, ShmUnlockExclusive,
+    SQLITE_SHM_UNLOCK, SQLITE_SHM_LOCK,
+    SQLITE_SHM_SHARED, SQLITE_SHM_EXCLUSIVE, SQLITE_SHM_NLOCK,
+    op_numeric, op_name, is_lock, is_shared,
+    valid_range, shm_map_bytes,
+};
+mount base.{Bool};
+
+fn test_constants_match_c_header() {
+    assert_eq(SQLITE_SHM_UNLOCK, 1);
+    assert_eq(SQLITE_SHM_LOCK, 2);
+    assert_eq(SQLITE_SHM_SHARED, 4);
+    assert_eq(SQLITE_SHM_EXCLUSIVE, 8);
+    assert_eq(SQLITE_SHM_NLOCK, 8);
+}
+
+fn test_op_numeric() {
+    assert_eq(op_numeric(&ShmLockShared), SQLITE_SHM_LOCK | SQLITE_SHM_SHARED);
+    assert_eq(op_numeric(&ShmLockExclusive), SQLITE_SHM_LOCK | SQLITE_SHM_EXCLUSIVE);
+    assert_eq(op_numeric(&ShmUnlockShared), SQLITE_SHM_UNLOCK | SQLITE_SHM_SHARED);
+    assert_eq(op_numeric(&ShmUnlockExclusive), SQLITE_SHM_UNLOCK | SQLITE_SHM_EXCLUSIVE);
+}
+
+fn test_op_names() {
+    assert(op_name(&ShmLockShared) == "LOCK_SHARED".clone());
+    assert(op_name(&ShmUnlockExclusive) == "UNLOCK_EXCLUSIVE".clone());
+}
+
+fn test_is_lock() {
+    assert(is_lock(&ShmLockShared));
+    assert(is_lock(&ShmLockExclusive));
+    assert(!is_lock(&ShmUnlockShared));
+    assert(!is_lock(&ShmUnlockExclusive));
+}
+
+fn test_is_shared() {
+    assert(is_shared(&ShmLockShared));
+    assert(is_shared(&ShmUnlockShared));
+    assert(!is_shared(&ShmLockExclusive));
+    assert(!is_shared(&ShmUnlockExclusive));
+}
+
+fn test_valid_range_within_nlock() {
+    assert(valid_range(0, 8));
+    assert(valid_range(0, 1));
+    assert(valid_range(7, 1));
+}
+
+fn test_invalid_range_rejected() {
+    assert(!valid_range(-1, 1));
+    assert(!valid_range(0, 0));
+    assert(!valid_range(7, 2));
+    assert(!valid_range(0, 9));
+}
+
+fn test_shm_map_bytes_rounds_to_32k() {
+    assert_eq(shm_map_bytes(0), 0);
+    assert_eq(shm_map_bytes(1), 32 * 1024);
+    assert_eq(shm_map_bytes(32 * 1024), 32 * 1024);
+    assert_eq(shm_map_bytes(32 * 1024 + 1), 64 * 1024);
+    assert_eq(shm_map_bytes(-1), 0);
+}
+
+fn main() {
+    test_constants_match_c_header();
+    test_op_numeric();
+    test_op_names();
+    test_is_lock();
+    test_is_shared();
+    test_valid_range_within_nlock();
+    test_invalid_range_rejected();
+    test_shm_map_bytes_rounds_to_32k();
+}

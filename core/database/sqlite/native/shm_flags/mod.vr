@@ -1,0 +1,80 @@
+// =============================================================================
+// core/database/sqlite/native/shm_flags/mod.vr
+// =============================================================================
+// Layer: 0 (façade — SQLITE_SHM_* flags)
+// Spec: SQLite C API — xShmLock / xShmMap.
+//
+//   SQLITE_SHM_UNLOCK    = 1
+//   SQLITE_SHM_LOCK      = 2
+//   SQLITE_SHM_SHARED    = 4
+//   SQLITE_SHM_EXCLUSIVE = 8
+//
+// The shm region (wal-index) has 8 lock slots.  Valid operations OR
+// one of UNLOCK/LOCK with one of SHARED/EXCLUSIVE.
+// =============================================================================
+
+module core.database.sqlite.native.shm_flags;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_SHM_UNLOCK: Int    = 1;
+public const SQLITE_SHM_LOCK: Int      = 2;
+public const SQLITE_SHM_SHARED: Int    = 4;
+public const SQLITE_SHM_EXCLUSIVE: Int = 8;
+
+/// SQLite reserves 8 lock slots in the shm region.
+public const SQLITE_SHM_NLOCK: Int = 8;
+
+public type ShmOp is
+      ShmLockShared
+    | ShmLockExclusive
+    | ShmUnlockShared
+    | ShmUnlockExclusive;
+
+public fn op_numeric(o: &ShmOp) -> Int {
+    match o {
+        ShmLockShared      => SQLITE_SHM_LOCK | SQLITE_SHM_SHARED,
+        ShmLockExclusive   => SQLITE_SHM_LOCK | SQLITE_SHM_EXCLUSIVE,
+        ShmUnlockShared    => SQLITE_SHM_UNLOCK | SQLITE_SHM_SHARED,
+        ShmUnlockExclusive => SQLITE_SHM_UNLOCK | SQLITE_SHM_EXCLUSIVE,
+    }
+}
+
+public fn op_name(o: &ShmOp) -> Text {
+    match o {
+        ShmLockShared      => "LOCK_SHARED".clone(),
+        ShmLockExclusive   => "LOCK_EXCLUSIVE".clone(),
+        ShmUnlockShared    => "UNLOCK_SHARED".clone(),
+        ShmUnlockExclusive => "UNLOCK_EXCLUSIVE".clone(),
+    }
+}
+
+public fn is_lock(o: &ShmOp) -> Bool {
+    match o {
+        ShmLockShared | ShmLockExclusive => true,
+        _ => false,
+    }
+}
+
+public fn is_shared(o: &ShmOp) -> Bool {
+    match o {
+        ShmLockShared | ShmUnlockShared => true,
+        _ => false,
+    }
+}
+
+/// Check `(offset, n)` is a valid window over the 8 slots.
+public fn valid_range(offset: Int, n: Int) -> Bool {
+    offset >= 0 && n > 0 && offset + n <= SQLITE_SHM_NLOCK
+}
+
+/// Return the number of bytes the shm region occupies given a
+/// requested `region_size` — SQLite always rounds up to the next
+/// multiple of 32KB.
+public fn shm_map_bytes(region_size: Int) -> Int {
+    if region_size <= 0 { return 0; }
+    let chunk = 32 * 1024;
+    let rem = region_size - ((region_size / chunk) * chunk);
+    if rem == 0 { region_size } else { region_size + (chunk - rem) }
+}
