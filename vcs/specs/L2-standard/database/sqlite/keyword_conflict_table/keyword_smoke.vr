@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, keyword_conflict_table, lexer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.keyword_conflict_table.class_.{
+    KeywordClass, KcFullReserved, KcContextReserved, KcFallback,
+    class_name, usable_as_identifier, requires_quoting_everywhere,
+    context_reserved_usable_at,
+};
+mount core.database.sqlite.native.keyword_conflict_table.entry.{
+    KeywordEntry, entry, registry, find, total_entries,
+};
+mount base.{Bool, Maybe};
+
+fn test_class_names() {
+    assert(class_name(&KcFullReserved)    == "full_reserved".clone());
+    assert(class_name(&KcContextReserved) == "context_reserved".clone());
+    assert(class_name(&KcFallback)        == "fallback".clone());
+}
+
+fn test_usable_as_identifier() {
+    assert(!usable_as_identifier(&KcFullReserved));
+    assert(usable_as_identifier(&KcContextReserved));
+    assert(usable_as_identifier(&KcFallback));
+}
+
+fn test_requires_quoting_everywhere() {
+    assert(requires_quoting_everywhere(&KcFullReserved));
+    assert(!requires_quoting_everywhere(&KcContextReserved));
+    assert(!requires_quoting_everywhere(&KcFallback));
+}
+
+fn test_context_reserved_position() {
+    assert(context_reserved_usable_at(1));    // column name
+    assert(context_reserved_usable_at(4));    // generic expression
+    assert(!context_reserved_usable_at(3));   // PRAGMA arg
+    assert(!context_reserved_usable_at(2));   // table name
+}
+
+fn test_registry_size() {
+    assert_eq(total_entries(), 13);
+    let r = registry();
+    assert_eq(r.len(), 13);
+}
+
+fn test_find_is_case_insensitive() {
+    match find(&"select".clone()) {
+        Maybe.Some(e) => match &e.class_ { KcFullReserved => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match find(&"SELECT".clone()) {
+        Maybe.Some(e) => match &e.class_ { KcFullReserved => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match find(&"Select".clone()) {
+        Maybe.Some(e) => match &e.class_ { KcFullReserved => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_identifies_classes() {
+    match find(&"FROM".clone()) {
+        Maybe.Some(e) => match &e.class_ { KcFullReserved => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match find(&"KEY".clone()) {
+        Maybe.Some(e) => match &e.class_ { KcContextReserved => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match find(&"BY".clone()) {
+        Maybe.Some(e) => match &e.class_ { KcFallback => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_unknown_returns_none() {
+    match find(&"UNKNOWNKEYWORD".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn main() {
+    test_class_names();
+    test_usable_as_identifier();
+    test_requires_quoting_everywhere();
+    test_context_reserved_position();
+    test_registry_size();
+    test_find_is_case_insensitive();
+    test_find_identifies_classes();
+    test_find_unknown_returns_none();
+}

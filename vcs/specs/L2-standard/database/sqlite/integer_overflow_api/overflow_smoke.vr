@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, integer_overflow_api, arithmetic
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.integer_overflow_api.policy.{
+    int64_max, int64_min,
+    OverflowPolicy, OpError, OpPromoteReal, OpWrap,
+    policy_name,
+    default_for_arith, default_for_bitwise, default_for_cast,
+    can_silently_promote, is_deterministic_on_overflow,
+};
+mount core.database.sqlite.native.integer_overflow_api.arithmetic.{
+    add_overflows, sub_overflows, mul_overflows,
+    div_overflows, neg_overflows, within_range,
+};
+mount base.{Bool, Int64};
+
+fn test_int64_range_constants() {
+    assert_eq(int64_max(), 0x7FFFFFFFFFFFFFFF as Int64);
+    // int64_min is -2^63.
+    assert(int64_min() < (0 as Int64));
+}
+
+fn test_policy_names() {
+    assert(policy_name(&OpError)       == "error".clone());
+    assert(policy_name(&OpPromoteReal) == "promote_real".clone());
+    assert(policy_name(&OpWrap)        == "wrap".clone());
+}
+
+fn test_default_policies() {
+    match default_for_arith()   { OpPromoteReal => {}, _ => assert(false) }
+    match default_for_bitwise() { OpWrap        => {}, _ => assert(false) }
+    match default_for_cast()    { OpError       => {}, _ => assert(false) }
+}
+
+fn test_can_silently_promote() {
+    assert(can_silently_promote(&OpPromoteReal));
+    assert(!can_silently_promote(&OpError));
+    assert(!can_silently_promote(&OpWrap));
+}
+
+fn test_is_deterministic_on_overflow() {
+    // All three policies are deterministic (no UB).
+    assert(is_deterministic_on_overflow(&OpError));
+    assert(is_deterministic_on_overflow(&OpPromoteReal));
+    assert(is_deterministic_on_overflow(&OpWrap));
+}
+
+fn test_add_overflow_detection() {
+    assert(!add_overflows(1 as Int64, 1 as Int64));
+    assert(!add_overflows(int64_max() - (1 as Int64), 1 as Int64));
+    assert(add_overflows(int64_max(), 1 as Int64));
+    assert(add_overflows(int64_min(), -1 as Int64));
+    assert(!add_overflows(0 as Int64, 0 as Int64));
+}
+
+fn test_sub_overflow_detection() {
+    assert(!sub_overflows(5 as Int64, 3 as Int64));
+    assert(sub_overflows(int64_min(), 1 as Int64));
+    assert(sub_overflows(int64_max(), -1 as Int64));
+    assert(!sub_overflows(int64_max(), 1 as Int64));
+    assert(!sub_overflows(0 as Int64, 0 as Int64));
+}
+
+fn test_mul_overflow_detection() {
+    assert(!mul_overflows(0 as Int64, 12345 as Int64));
+    assert(!mul_overflows(2 as Int64, 3 as Int64));
+    assert(!mul_overflows(int64_max(), 1 as Int64));
+    assert(mul_overflows(int64_max(), 2 as Int64));
+    assert(mul_overflows(int64_min(), -1 as Int64));
+    assert(mul_overflows(-1 as Int64, int64_min()));
+}
+
+fn test_div_overflow_only_int64_min_by_neg_one() {
+    assert(div_overflows(int64_min(), -1 as Int64));
+    assert(!div_overflows(int64_max(), -1 as Int64));
+    assert(!div_overflows(10 as Int64, 2 as Int64));
+}
+
+fn test_neg_overflow_only_int64_min() {
+    assert(neg_overflows(int64_min()));
+    assert(!neg_overflows(int64_max()));
+    assert(!neg_overflows(0 as Int64));
+    assert(!neg_overflows(-1 as Int64));
+}
+
+fn test_within_range() {
+    assert(within_range(0 as Int64));
+    assert(within_range(int64_max()));
+    assert(within_range(int64_min()));
+    assert(within_range(-1 as Int64));
+}
+
+fn main() {
+    test_int64_range_constants();
+    test_policy_names();
+    test_default_policies();
+    test_can_silently_promote();
+    test_is_deterministic_on_overflow();
+    test_add_overflow_detection();
+    test_sub_overflow_detection();
+    test_mul_overflow_detection();
+    test_div_overflow_only_int64_min_by_neg_one();
+    test_neg_overflow_only_int64_min();
+    test_within_range();
+}

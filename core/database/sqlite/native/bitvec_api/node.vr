@@ -1,0 +1,41 @@
+// Bitvec node kinds — leaf (bit-array) vs sub-bitvec (recursive) vs hash.
+
+module core.database.sqlite.native.bitvec_api.node;
+
+mount base.{Bool, Int64, Text};
+
+// BITVEC_SZ: SQLite uses 512-byte nodes, giving 4096 bits per leaf.
+public fn node_size_bytes() -> Int { 512 }
+public fn bits_per_leaf() -> Int { 4096 }
+
+// For sub-bitvec internal nodes: each node carries ~126 sub-bitvec pointers.
+public fn max_children_per_internal() -> Int { 126 }
+
+// Hash-table mode — used when very sparse and we'd waste space on bit-arrays.
+public fn hash_linear_capacity() -> Int { 125 }
+
+public type NodeKind is
+    | NkLeaf           // raw bit array
+    | NkInternal       // pointer to ~126 sub-bitvecs
+    | NkHash           // linear-probed hash set
+    ;
+
+public fn kind_name(k: &NodeKind) -> Text {
+    match k {
+        NkLeaf     => "leaf".clone(),
+        NkInternal => "internal".clone(),
+        NkHash     => "hash".clone(),
+    }
+}
+
+// Pick the node kind based on element count and capacity.
+public fn choose_kind(total_size: Int64, inserted: Int64) -> NodeKind {
+    if total_size <= (bits_per_leaf() as Int64) { return NkLeaf; }
+    if inserted <= (hash_linear_capacity() as Int64) { return NkHash; }
+    NkInternal
+}
+
+// Transition thresholds.
+public fn should_promote_to_internal(total_size: Int64, inserted: Int64) -> Bool {
+    total_size > (bits_per_leaf() as Int64) && inserted > (hash_linear_capacity() as Int64)
+}

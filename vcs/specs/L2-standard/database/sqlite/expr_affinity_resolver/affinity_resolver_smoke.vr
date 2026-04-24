@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, expr_affinity_resolver, types
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.affinity_matrix_api.affinity.{
+    Affinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
+};
+mount core.database.sqlite.native.expr_affinity_resolver.node.{
+    ExprNode,
+    EnColumn, EnCast, EnLiteralInt, EnLiteralReal, EnLiteralText, EnLiteralBlob, EnLiteralNull,
+    EnArith, EnConcat, EnLogical, EnComparison, EnFunction,
+    resolve, comparison_result_affinity, affinity_of_column_expr,
+};
+mount base.{Bool};
+
+fn test_column_passes_through_affinity() {
+    let a = resolve(&EnColumn(AfInteger));
+    match a { AfInteger => {}, _ => assert(false) }
+    let b = resolve(&EnColumn(AfText));
+    match b { AfText => {}, _ => assert(false) }
+}
+
+fn test_cast_resolves_via_classifier() {
+    let a = resolve(&EnCast("INTEGER".clone()));
+    match a { AfInteger => {}, _ => assert(false) }
+    let b = resolve(&EnCast("TEXT".clone()));
+    match b { AfText => {}, _ => assert(false) }
+    let c = resolve(&EnCast("REAL".clone()));
+    match c { AfReal => {}, _ => assert(false) }
+    let d = resolve(&EnCast("BLOB".clone()));
+    match d { AfBlob => {}, _ => assert(false) }
+    let e = resolve(&EnCast("NUMERIC".clone()));
+    match e { AfNumeric => {}, _ => assert(false) }
+}
+
+fn test_literals_have_no_affinity() {
+    match resolve(&EnLiteralInt)   { AfBlob => {}, _ => assert(false) }
+    match resolve(&EnLiteralReal)  { AfBlob => {}, _ => assert(false) }
+    match resolve(&EnLiteralText)  { AfBlob => {}, _ => assert(false) }
+    match resolve(&EnLiteralBlob)  { AfBlob => {}, _ => assert(false) }
+    match resolve(&EnLiteralNull)  { AfBlob => {}, _ => assert(false) }
+}
+
+fn test_complex_exprs_have_no_affinity() {
+    match resolve(&EnArith)      { AfBlob => {}, _ => assert(false) }
+    match resolve(&EnConcat)     { AfBlob => {}, _ => assert(false) }
+    match resolve(&EnLogical)    { AfBlob => {}, _ => assert(false) }
+    match resolve(&EnComparison) { AfBlob => {}, _ => assert(false) }
+    match resolve(&EnFunction)   { AfBlob => {}, _ => assert(false) }
+}
+
+fn test_comparison_numeric_wins_over_non_numeric() {
+    // INTEGER vs TEXT → INTEGER wins
+    match comparison_result_affinity(&AfInteger, &AfText) {
+        AfInteger => {}, _ => assert(false),
+    }
+    match comparison_result_affinity(&AfText, &AfInteger) {
+        AfInteger => {}, _ => assert(false),
+    }
+    // REAL vs BLOB → REAL wins
+    match comparison_result_affinity(&AfReal, &AfBlob) {
+        AfReal => {}, _ => assert(false),
+    }
+    // NUMERIC vs TEXT → NUMERIC wins
+    match comparison_result_affinity(&AfNumeric, &AfText) {
+        AfNumeric => {}, _ => assert(false),
+    }
+}
+
+fn test_comparison_both_numeric_left_wins() {
+    match comparison_result_affinity(&AfInteger, &AfReal) {
+        AfInteger => {}, _ => assert(false),
+    }
+    match comparison_result_affinity(&AfReal, &AfInteger) {
+        AfReal => {}, _ => assert(false),
+    }
+}
+
+fn test_comparison_both_non_numeric_left_wins() {
+    match comparison_result_affinity(&AfText, &AfBlob) {
+        AfText => {}, _ => assert(false),
+    }
+    match comparison_result_affinity(&AfBlob, &AfText) {
+        AfBlob => {}, _ => assert(false),
+    }
+}
+
+fn test_column_affinity_identity() {
+    match affinity_of_column_expr(AfInteger) {
+        AfInteger => {}, _ => assert(false),
+    }
+}
+
+fn main() {
+    test_column_passes_through_affinity();
+    test_cast_resolves_via_classifier();
+    test_literals_have_no_affinity();
+    test_complex_exprs_have_no_affinity();
+    test_comparison_numeric_wins_over_non_numeric();
+    test_comparison_both_numeric_left_wins();
+    test_comparison_both_non_numeric_left_wins();
+    test_column_affinity_identity();
+}

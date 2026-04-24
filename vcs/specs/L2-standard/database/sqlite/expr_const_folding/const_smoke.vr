@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, expr_const_folding, optimizer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.expr_const_folding.level.{
+    ConstLevel, ClVariable, ClStatementConst, ClConnectionConst, ClCompileConst,
+    level_name, rank, is_constant_for_query, is_compile_time_foldable, meet,
+};
+mount core.database.sqlite.native.expr_const_folding.classify.{
+    literal, column_ref, bind_variable, random_fn, last_insert_rowid_fn,
+    deterministic_fn_call, binary_op, cast_of,
+    can_hoist_out_of_row_loop,
+};
+mount base.{Bool};
+
+fn test_level_names() {
+    assert(level_name(&ClVariable)        == "variable".clone());
+    assert(level_name(&ClStatementConst)  == "stmt_const".clone());
+    assert(level_name(&ClConnectionConst) == "conn_const".clone());
+    assert(level_name(&ClCompileConst)    == "compile_const".clone());
+}
+
+fn test_rank_ordering() {
+    assert(rank(&ClVariable)       < rank(&ClStatementConst));
+    assert(rank(&ClStatementConst) < rank(&ClConnectionConst));
+    assert(rank(&ClConnectionConst) < rank(&ClCompileConst));
+}
+
+fn test_constant_for_query_set() {
+    assert(!is_constant_for_query(&ClVariable));
+    assert(is_constant_for_query(&ClStatementConst));
+    assert(is_constant_for_query(&ClConnectionConst));
+    assert(is_constant_for_query(&ClCompileConst));
+}
+
+fn test_compile_time_foldable_only_compile_const() {
+    assert(!is_compile_time_foldable(&ClVariable));
+    assert(!is_compile_time_foldable(&ClStatementConst));
+    assert(!is_compile_time_foldable(&ClConnectionConst));
+    assert(is_compile_time_foldable(&ClCompileConst));
+}
+
+fn test_meet_gives_lower_bound() {
+    // meet(Variable, CompileConst) → Variable
+    match meet(&ClVariable, &ClCompileConst) { ClVariable => {}, _ => assert(false) }
+    match meet(&ClStatementConst, &ClCompileConst) { ClStatementConst => {}, _ => assert(false) }
+    match meet(&ClConnectionConst, &ClCompileConst) { ClConnectionConst => {}, _ => assert(false) }
+    match meet(&ClCompileConst, &ClCompileConst) { ClCompileConst => {}, _ => assert(false) }
+}
+
+fn test_literal_is_compile_const() {
+    match literal() { ClCompileConst => {}, _ => assert(false) }
+}
+
+fn test_column_ref_is_variable() {
+    match column_ref() { ClVariable => {}, _ => assert(false) }
+}
+
+fn test_bind_variable_is_stmt_const() {
+    match bind_variable() { ClStatementConst => {}, _ => assert(false) }
+}
+
+fn test_random_fn_is_variable() {
+    match random_fn() { ClVariable => {}, _ => assert(false) }
+    match last_insert_rowid_fn() { ClStatementConst => {}, _ => assert(false) }
+}
+
+fn test_deterministic_fn_caps_at_connection_const() {
+    // even with all-compile-const args, a det fn is at most conn-const
+    let r = deterministic_fn_call(ClCompileConst, ClCompileConst);
+    match r { ClConnectionConst => {}, _ => assert(false) }
+    // args weaker than ClCompileConst pass through unchanged
+    let r2 = deterministic_fn_call(ClStatementConst, ClCompileConst);
+    match r2 { ClStatementConst => {}, _ => assert(false) }
+}
+
+fn test_binary_op_is_meet() {
+    let r = binary_op(ClCompileConst, ClStatementConst);
+    match r { ClStatementConst => {}, _ => assert(false) }
+    let r2 = binary_op(ClVariable, ClCompileConst);
+    match r2 { ClVariable => {}, _ => assert(false) }
+}
+
+fn test_cast_of_preserves_inner() {
+    match cast_of(ClCompileConst) { ClCompileConst => {}, _ => assert(false) }
+    match cast_of(ClVariable) { ClVariable => {}, _ => assert(false) }
+}
+
+fn test_can_hoist_out_of_row_loop() {
+    assert(!can_hoist_out_of_row_loop(&ClVariable));
+    assert(can_hoist_out_of_row_loop(&ClStatementConst));
+    assert(can_hoist_out_of_row_loop(&ClConnectionConst));
+    assert(can_hoist_out_of_row_loop(&ClCompileConst));
+}
+
+fn main() {
+    test_level_names();
+    test_rank_ordering();
+    test_constant_for_query_set();
+    test_compile_time_foldable_only_compile_const();
+    test_meet_gives_lower_bound();
+    test_literal_is_compile_const();
+    test_column_ref_is_variable();
+    test_bind_variable_is_stmt_const();
+    test_random_fn_is_variable();
+    test_deterministic_fn_caps_at_connection_const();
+    test_binary_op_is_meet();
+    test_cast_of_preserves_inner();
+    test_can_hoist_out_of_row_loop();
+}

@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/keyword_conflict_table/mod.vr
+// =============================================================================
+// Keyword classification — SQLite accepts many SQL keywords as identifiers
+// outside of their reserved positions. This catalogue tags each keyword as
+// full-reserved / context / fallback.
+// Spec §14 — SQLite keywords.
+// =============================================================================
+
+module core.database.sqlite.native.keyword_conflict_table;
+
+public module class_;
+public module entry;

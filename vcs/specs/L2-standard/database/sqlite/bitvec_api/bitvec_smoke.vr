@@ -1,0 +1,119 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bitvec_api, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bitvec_api.node.{
+    NodeKind, NkLeaf, NkInternal, NkHash,
+    kind_name,
+    node_size_bytes, bits_per_leaf, max_children_per_internal, hash_linear_capacity,
+    choose_kind, should_promote_to_internal,
+};
+mount core.database.sqlite.native.bitvec_api.bitvec.{
+    Bitvec,
+    new, size, is_empty, is_full,
+    record_insert, record_hash_collision,
+    density, should_be_internal,
+};
+mount base.{Bool, Int64};
+
+fn test_node_constants() {
+    assert_eq(node_size_bytes(), 512);
+    assert_eq(bits_per_leaf(), 4096);
+    assert_eq(max_children_per_internal(), 126);
+    assert_eq(hash_linear_capacity(), 125);
+}
+
+fn test_kind_name() {
+    assert(kind_name(&NkLeaf)     == "leaf".clone());
+    assert(kind_name(&NkInternal) == "internal".clone());
+    assert(kind_name(&NkHash)     == "hash".clone());
+}
+
+fn test_choose_kind_leaf_for_small_universe() {
+    let k = choose_kind(1000 as Int64, 50 as Int64);
+    match k { NkLeaf => {}, _ => assert(false) }
+}
+
+fn test_choose_kind_hash_for_sparse_big_universe() {
+    let k = choose_kind(1000000 as Int64, 10 as Int64);
+    match k { NkHash => {}, _ => assert(false) }
+}
+
+fn test_choose_kind_internal_for_dense_big_universe() {
+    let k = choose_kind(1000000 as Int64, 500 as Int64);
+    match k { NkInternal => {}, _ => assert(false) }
+}
+
+fn test_promotion_threshold() {
+    assert(!should_promote_to_internal(5000 as Int64, 50 as Int64));   // sparse → stays hash
+    assert(!should_promote_to_internal(1000 as Int64, 500 as Int64));  // universe fits a leaf
+    assert(should_promote_to_internal(5000 as Int64, 500 as Int64));
+}
+
+fn test_new_bitvec_is_empty() {
+    let b = new(1000 as Int64);
+    assert(is_empty(&b));
+    assert_eq(size(&b), 0 as Int64);
+    assert(!is_full(&b));
+}
+
+fn test_record_insert_increments_and_reclassifies() {
+    let b0 = new(10 as Int64);
+    let b1 = record_insert(b0);
+    let b2 = record_insert(b1);
+    assert_eq(size(&b2), 2 as Int64);
+}
+
+fn test_insert_capped_at_universe() {
+    let mut b = new(2 as Int64);
+    b = record_insert(b);
+    b = record_insert(b);
+    assert(is_full(&b));
+    // Further inserts do not push past universe_size.
+    b = record_insert(b);
+    assert_eq(size(&b), 2 as Int64);
+}
+
+fn test_density() {
+    let mut b = new(4 as Int64);
+    b = record_insert(record_insert(b));
+    let d = density(&b);
+    assert(d > 0.49 as Float);
+    assert(d < 0.51 as Float);
+}
+
+fn test_should_be_internal_only_when_both_thresholds_crossed() {
+    let mut b = new(10000 as Int64);
+    assert(!should_be_internal(&b));
+    // Need to insert > 125 elements to flip.
+    let mut i: Int = 0;
+    while i < 200 {
+        b = record_insert(b);
+        i = i + 1;
+    }
+    assert(should_be_internal(&b));
+}
+
+fn test_record_hash_collision_counter() {
+    let mut b = new(10 as Int64);
+    b = record_hash_collision(record_hash_collision(b));
+    assert_eq(b.hash_collisions, 2 as Int64);
+}
+
+fn main() {
+    test_node_constants();
+    test_kind_name();
+    test_choose_kind_leaf_for_small_universe();
+    test_choose_kind_hash_for_sparse_big_universe();
+    test_choose_kind_internal_for_dense_big_universe();
+    test_promotion_threshold();
+    test_new_bitvec_is_empty();
+    test_record_insert_increments_and_reclassifies();
+    test_insert_capped_at_universe();
+    test_density();
+    test_should_be_internal_only_when_both_thresholds_crossed();
+    test_record_hash_collision_counter();
+}

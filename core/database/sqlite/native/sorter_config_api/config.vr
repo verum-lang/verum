@@ -1,0 +1,56 @@
+// SorterConfig — per-sort knobs the VDBE uses.
+
+module core.database.sqlite.native.sorter_config_api.config;
+
+mount base.{Bool, Int64};
+
+public type SorterConfig is {
+    pma_size_bytes: Int64,       // in-memory PMA budget (default SQLITE_DEFAULT_PAGE_SIZE * cache pages)
+    merge_fanin: Int,            // K in K-way merge; SQLite default 4
+    mmap_enabled: Bool,
+    min_spill_bytes: Int64,      // do not spill shorter than this — stay in memory
+};
+
+public fn default_config() -> SorterConfig {
+    SorterConfig {
+        pma_size_bytes: 524288 as Int64,   // 512KB default
+        merge_fanin: 4,
+        mmap_enabled: false,
+        min_spill_bytes: 1048576 as Int64,  // 1MB
+    }
+}
+
+public fn minimum_viable() -> SorterConfig {
+    SorterConfig {
+        pma_size_bytes: 4096 as Int64,
+        merge_fanin: 2,
+        mmap_enabled: false,
+        min_spill_bytes: 0 as Int64,
+    }
+}
+
+public fn is_well_formed(c: &SorterConfig) -> Bool {
+    if c.pma_size_bytes <= (0 as Int64) { return false; }
+    if c.merge_fanin < 2 { return false; }
+    if c.min_spill_bytes < (0 as Int64) { return false; }
+    true
+}
+
+// How many merge passes needed to reduce `n_runs` to a single run at `fanin`.
+// log_fanin(n_runs), rounded up; returns 0 for n_runs <= 1.
+public fn merge_passes_needed(n_runs: Int64, fanin: Int) -> Int {
+    if n_runs <= (1 as Int64) { return 0; }
+    let mut passes: Int = 0;
+    let mut remaining: Int64 = n_runs;
+    while remaining > (1 as Int64) {
+        let f = fanin as Int64;
+        remaining = (remaining + f - (1 as Int64)) / f;
+        passes = passes + 1;
+    }
+    passes
+}
+
+// Decide whether a run of `bytes` should spill to disk or stay in memory.
+public fn should_spill(c: &SorterConfig, bytes: Int64) -> Bool {
+    bytes >= c.min_spill_bytes && bytes > c.pma_size_bytes
+}

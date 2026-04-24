@@ -1,0 +1,41 @@
+// Classifier helpers for common expression shapes.
+
+module core.database.sqlite.native.expr_const_folding.classify;
+
+mount core.database.sqlite.native.expr_const_folding.level.{
+    ConstLevel, ClVariable, ClStatementConst, ClConnectionConst, ClCompileConst,
+    rank, meet,
+};
+mount base.{Bool, Text};
+
+public fn literal() -> ConstLevel { ClCompileConst }
+public fn column_ref() -> ConstLevel { ClVariable }
+public fn bind_variable() -> ConstLevel { ClStatementConst }
+public fn random_fn() -> ConstLevel { ClVariable }
+public fn last_insert_rowid_fn() -> ConstLevel { ClStatementConst }
+
+// A function marked SQLITE_DETERMINISTIC with all-constant args inherits the
+// meet of arg levels at ClConnectionConst at minimum.
+public fn deterministic_fn_call(arg_levels: ConstLevel, arg_levels_b: ConstLevel) -> ConstLevel {
+    let arg_meet = meet(&arg_levels, &arg_levels_b);
+    // never stronger than ClConnectionConst even if all args are compile-const.
+    match arg_meet {
+        ClCompileConst => ClConnectionConst,
+        _ => arg_meet,
+    }
+}
+
+// Arithmetic / concat / compare: meet of operands.
+public fn binary_op(left: ConstLevel, right: ConstLevel) -> ConstLevel {
+    meet(&left, &right)
+}
+
+// CAST(expr AS type): inherits the expr's level.
+public fn cast_of(inner: ConstLevel) -> ConstLevel {
+    inner
+}
+
+// Whether this node can be hoisted out of a per-row loop.
+public fn can_hoist_out_of_row_loop(l: &ConstLevel) -> Bool {
+    rank(l) >= rank(&ClStatementConst)
+}

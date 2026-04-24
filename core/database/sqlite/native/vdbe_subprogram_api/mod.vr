@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/vdbe_subprogram_api/mod.vr
+// =============================================================================
+// VDBE sub-program frame — invocation context for a trigger / INSTEAD OF view
+// body / recursive CTE body. Each call pushes a Frame whose return address
+// resumes the caller's VDBE program.
+// Spec §11.4 — VDBE subprograms.
+// =============================================================================
+
+module core.database.sqlite.native.vdbe_subprogram_api;
+
+public module frame;

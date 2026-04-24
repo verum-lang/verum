@@ -556,3 +556,19 @@ public module stmt_param_mapping;
 public module hot_journal_detector;
 // - eqp_node_emitter: EXPLAIN QUERY PLAN node tree + depth-indent renderer
 public module eqp_node_emitter;
+// - bitvec_api: sparse rowid bitmap — 512B nodes / 4096 bits-per-leaf + 3 node kinds
+public module bitvec_api;
+// - sorter_config_api: PMA budget + K-way merge fanin + spill threshold
+public module sorter_config_api;
+// - vdbe_subprogram_api: 4-kind FrameKind (trigger/view/cte/subquery) + CallStack
+public module vdbe_subprogram_api;
+// - expr_affinity_resolver: expression-tree affinity resolver (§14.3 rules)
+public module expr_affinity_resolver;
+// - expr_const_folding: 4-level ConstLevel lattice + classifier helpers
+public module expr_const_folding;
+// - keyword_conflict_table: 3-class keyword classification + registry
+public module keyword_conflict_table;
+// - prefix_like_opt: LIKE 'abc%' / GLOB 'abc*' → half-open prefix range
+public module prefix_like_opt;
+// - integer_overflow_api: checked add/sub/mul/div/neg + 3-policy taxonomy
+public module integer_overflow_api;

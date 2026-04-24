@@ -1,0 +1,43 @@
+// Keyword classification.
+
+module core.database.sqlite.native.keyword_conflict_table.class_;
+
+mount base.{Bool, Text};
+
+public type KeywordClass is
+    | KcFullReserved      // can never be used as identifier
+    | KcContextReserved   // reserved only in certain positions
+    | KcFallback          // accepted as identifier anywhere
+    ;
+
+public fn class_name(c: &KeywordClass) -> Text {
+    match c {
+        KcFullReserved    => "full_reserved".clone(),
+        KcContextReserved => "context_reserved".clone(),
+        KcFallback        => "fallback".clone(),
+    }
+}
+
+public fn usable_as_identifier(c: &KeywordClass) -> Bool {
+    match c {
+        KcFallback        => true,
+        KcContextReserved => true,   // sometimes; needs position check
+        _                 => false,
+    }
+}
+
+public fn requires_quoting_everywhere(c: &KeywordClass) -> Bool {
+    match c { KcFullReserved => true, _ => false }
+}
+
+// Whether a context-reserved keyword is usable as identifier at the given grammar position.
+// Positions:
+//   1 = column name / alias
+//   2 = table name
+//   3 = PRAGMA argument
+//   4 = generic expression identifier
+public fn context_reserved_usable_at(position: Int) -> Bool {
+    // per SQLite: MOST context-reserved are usable at column/alias positions
+    // (pos 1 and 4) but not at PRAGMA args.
+    position == 1 || position == 4
+}

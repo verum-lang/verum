@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe_subprogram_api, vdbe
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vdbe_subprogram_api.frame.{
+    FrameKind, FkTrigger, FkInsteadOfView, FkRecursiveCte, FkInlineSubquery,
+    frame_kind_name,
+    Frame, new,
+    CallStack,
+    empty_stack, depth, is_empty,
+    push, pop,
+    default_max_trigger_depth, would_exceed_max_depth, top_is_kind,
+};
+mount base.{Bool};
+
+fn test_frame_kind_names() {
+    assert(frame_kind_name(&FkTrigger)        == "trigger".clone());
+    assert(frame_kind_name(&FkInsteadOfView)  == "instead_of_view".clone());
+    assert(frame_kind_name(&FkRecursiveCte)   == "recursive_cte".clone());
+    assert(frame_kind_name(&FkInlineSubquery) == "inline_subquery".clone());
+}
+
+fn test_empty_stack() {
+    let cs = empty_stack();
+    assert(is_empty(&cs));
+    assert_eq(depth(&cs), 0);
+    assert_eq(cs.max_depth_seen, 0);
+}
+
+fn test_push_pop_depth() {
+    let f = new(FkTrigger, 1, 100, 0, 16, 1);
+    let cs = push(empty_stack(), f);
+    assert(!is_empty(&cs));
+    assert_eq(depth(&cs), 1);
+    let cs2 = pop(cs);
+    assert(is_empty(&cs2));
+}
+
+fn test_max_depth_tracking() {
+    let mut cs = empty_stack();
+    cs = push(cs, new(FkTrigger, 1, 10, 0, 8, 1));
+    cs = push(cs, new(FkTrigger, 2, 20, 8, 8, 2));
+    cs = push(cs, new(FkTrigger, 3, 30, 16, 8, 3));
+    assert_eq(cs.max_depth_seen, 3);
+    cs = pop(cs);
+    assert_eq(cs.max_depth_seen, 3);   // peak preserved
+}
+
+fn test_default_trigger_depth() {
+    assert_eq(default_max_trigger_depth(), 1000);
+}
+
+fn test_would_exceed_max_depth() {
+    let mut cs = empty_stack();
+    let mut i: Int = 0;
+    while i < 5 {
+        cs = push(cs, new(FkTrigger, i, 0, 0, 1, i + 1));
+        i = i + 1;
+    }
+    assert(!would_exceed_max_depth(&cs, 10));
+    assert(would_exceed_max_depth(&cs, 5));
+    assert(would_exceed_max_depth(&cs, 3));
+}
+
+fn test_top_is_kind() {
+    let cs = empty_stack();
+    assert(!top_is_kind(&cs, &FkTrigger));
+    let cs2 = push(empty_stack(), new(FkInsteadOfView, 1, 0, 0, 4, 1));
+    assert(top_is_kind(&cs2, &FkInsteadOfView));
+    assert(!top_is_kind(&cs2, &FkTrigger));
+}
+
+fn test_pop_on_empty_is_noop() {
+    let cs = pop(empty_stack());
+    assert(is_empty(&cs));
+}
+
+fn main() {
+    test_frame_kind_names();
+    test_empty_stack();
+    test_push_pop_depth();
+    test_max_depth_tracking();
+    test_default_trigger_depth();
+    test_would_exceed_max_depth();
+    test_top_is_kind();
+    test_pop_on_empty_is_noop();
+}

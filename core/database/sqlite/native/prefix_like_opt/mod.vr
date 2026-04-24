@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/prefix_like_opt/mod.vr
+// =============================================================================
+// LIKE / GLOB prefix-to-range optimization:
+//   WHERE col LIKE 'abc%'        →   col >= 'abc' AND col < 'abd'
+//   WHERE col GLOB 'abc*'        →   same shape
+//
+// Only applicable when:
+//   (a) the RHS pattern is a literal
+//   (b) the literal has a non-empty fixed prefix before the first wildcard
+//   (c) the column's collation is compatible with the comparison direction
+// Spec §13.4 — planner WHERE-term optimization.
+// =============================================================================
+
+module core.database.sqlite.native.prefix_like_opt;
+
+public module pattern;
+public module range;

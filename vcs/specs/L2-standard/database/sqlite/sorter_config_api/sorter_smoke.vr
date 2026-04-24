@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, sorter_config_api, vdbe
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.sorter_config_api.config.{
+    SorterConfig,
+    default_config, minimum_viable,
+    is_well_formed, merge_passes_needed, should_spill,
+};
+mount base.{Bool, Int64};
+
+fn test_default_config_shape() {
+    let c = default_config();
+    assert_eq(c.pma_size_bytes, 524288 as Int64);
+    assert_eq(c.merge_fanin, 4);
+    assert(!c.mmap_enabled);
+    assert_eq(c.min_spill_bytes, 1048576 as Int64);
+    assert(is_well_formed(&c));
+}
+
+fn test_minimum_viable_shape() {
+    let c = minimum_viable();
+    assert(is_well_formed(&c));
+    assert_eq(c.merge_fanin, 2);
+}
+
+fn test_ill_formed_rejected() {
+    let bad1 = SorterConfig { pma_size_bytes: 0 as Int64, merge_fanin: 4, mmap_enabled: false, min_spill_bytes: 0 as Int64 };
+    assert(!is_well_formed(&bad1));
+    let bad2 = SorterConfig { pma_size_bytes: 1024 as Int64, merge_fanin: 1, mmap_enabled: false, min_spill_bytes: 0 as Int64 };
+    assert(!is_well_formed(&bad2));
+    let bad3 = SorterConfig { pma_size_bytes: 1024 as Int64, merge_fanin: 2, mmap_enabled: false, min_spill_bytes: -5 as Int64 };
+    assert(!is_well_formed(&bad3));
+}
+
+fn test_merge_passes_needed() {
+    assert_eq(merge_passes_needed(0 as Int64, 4), 0);
+    assert_eq(merge_passes_needed(1 as Int64, 4), 0);
+    assert_eq(merge_passes_needed(4 as Int64, 4), 1);
+    assert_eq(merge_passes_needed(16 as Int64, 4), 2);
+    assert_eq(merge_passes_needed(64 as Int64, 4), 3);
+    // non-power-of-fanin — rounds up
+    assert_eq(merge_passes_needed(17 as Int64, 4), 3);
+}
+
+fn test_should_spill() {
+    let c = default_config();
+    // 512KB PMA, 1MB min_spill → only spill beyond both thresholds.
+    assert(!should_spill(&c, 100000 as Int64));    // below both
+    assert(!should_spill(&c, 1000000 as Int64));   // below min_spill
+    assert(should_spill(&c, 2000000 as Int64));    // above both
+}
+
+fn test_should_spill_minimum_viable() {
+    let c = minimum_viable();
+    // min_spill=0, pma=4096 → spill any run > 4096 bytes.
+    assert(!should_spill(&c, 4096 as Int64));
+    assert(should_spill(&c, 8192 as Int64));
+}
+
+fn main() {
+    test_default_config_shape();
+    test_minimum_viable_shape();
+    test_ill_formed_rejected();
+    test_merge_passes_needed();
+    test_should_spill();
+    test_should_spill_minimum_viable();
+}

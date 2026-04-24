@@ -1,0 +1,61 @@
+// Pattern inspection — extract the literal prefix before first wildcard.
+
+module core.database.sqlite.native.prefix_like_opt.pattern;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type PatternOp is
+    | PoLike       // LIKE: wildcards are % and _
+    | PoGlob       // GLOB: wildcards are * and ? and [...]
+    ;
+
+public fn is_wildcard_char(op: &PatternOp, b: u8) -> Bool {
+    match op {
+        PoLike => b == (0x25 as u8) || b == (0x5F as u8),      // % or _
+        PoGlob => b == (0x2A as u8) || b == (0x3F as u8) || b == (0x5B as u8),  // * ? [
+    }
+}
+
+public fn is_escape_char(b: u8) -> Bool {
+    // Default SQLite LIKE has no escape; ESCAPE clause introduces one.
+    b == (0x5C as u8)    // '\'
+}
+
+// Return longest literal prefix of `pattern` that contains no wildcards.
+public fn extract_prefix(op: &PatternOp, pattern: &Text) -> Text {
+    let bs = pattern.as_bytes();
+    let mut out_bytes: List<u8> = [].clone() as List<u8>;
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if is_wildcard_char(op, b) { i = bs.len(); } else {
+            out_bytes.push(b);
+            i = i + 1;
+        }
+    }
+    // Rebuild a Text from bytes via Text::from_bytes.
+    let mut out = "".clone();
+    let mut j: Int = 0;
+    while j < out_bytes.len() {
+        out.push_byte(out_bytes[j]);
+        j = j + 1;
+    }
+    out
+}
+
+public fn has_non_empty_prefix(op: &PatternOp, pattern: &Text) -> Bool {
+    let bs = pattern.as_bytes();
+    if bs.len() == 0 { return false; }
+    !is_wildcard_char(op, bs[0])
+}
+
+public fn is_pure_literal(op: &PatternOp, pattern: &Text) -> Bool {
+    let bs = pattern.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        if is_wildcard_char(op, bs[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}

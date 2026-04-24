@@ -1,0 +1,75 @@
+// Keyword entry registry — selected representative keywords per class.
+
+module core.database.sqlite.native.keyword_conflict_table.entry;
+
+mount core.database.sqlite.native.keyword_conflict_table.class_.{
+    KeywordClass, KcFullReserved, KcContextReserved, KcFallback,
+};
+mount base.{Bool, Text, Maybe};
+mount core.collections.list.{List};
+
+public type KeywordEntry is {
+    word: Text,
+    class_: KeywordClass,
+};
+
+public fn entry(word: Text, class_: KeywordClass) -> KeywordEntry {
+    KeywordEntry { word: word, class_: class_ }
+}
+
+// Representative subset used by tests — not exhaustive, but covers the three
+// classes used by the parser's keyword-conflict resolver.
+public fn registry() -> List<KeywordEntry> {
+    let mut out: List<KeywordEntry> = [].clone() as List<KeywordEntry>;
+    // Full-reserved: cannot be identifiers anywhere.
+    out.push(entry("SELECT".clone(),    KcFullReserved));
+    out.push(entry("FROM".clone(),      KcFullReserved));
+    out.push(entry("WHERE".clone(),     KcFullReserved));
+    out.push(entry("TABLE".clone(),     KcFullReserved));
+    // Context-reserved: reserved only in certain grammar positions.
+    out.push(entry("KEY".clone(),       KcContextReserved));
+    out.push(entry("ROW".clone(),       KcContextReserved));
+    out.push(entry("VALUE".clone(),     KcContextReserved));
+    // Fallback: accepted as identifier anywhere.
+    out.push(entry("BY".clone(),        KcFallback));
+    out.push(entry("IF".clone(),        KcFallback));
+    out.push(entry("OF".clone(),        KcFallback));
+    out.push(entry("ABORT".clone(),     KcFallback));
+    out.push(entry("ACTION".clone(),    KcFallback));
+    out.push(entry("AFTER".clone(),     KcFallback));
+    out
+}
+
+// ASCII upper-case fold.
+fn to_upper(b: u8) -> u8 {
+    if b >= 0x61 as u8 && b <= 0x7A as u8 {
+        return (b - 0x20 as u8) as u8;
+    }
+    b
+}
+
+fn eq_upper(a: &Text, b: &Text) -> Bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        if to_upper(ab[i]) != to_upper(bb[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn find(word: &Text) -> Maybe<KeywordEntry> {
+    let r = registry();
+    let mut i: Int = 0;
+    while i < r.len() {
+        if eq_upper(&r[i].word, word) {
+            return Maybe.Some(r[i].clone());
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+public fn total_entries() -> Int { 13 }

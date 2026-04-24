@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/expr_affinity_resolver/mod.vr
+// =============================================================================
+// Expression-affinity resolver — per §14.3 SQLite assigns an affinity to each
+// expression based on its tree shape.
+//
+//   column ref   → column's affinity
+//   CAST(x AS T) → affinity of T
+//   literal      → BLOB
+//   other expr   → BLOB (a.k.a. NONE)
+//
+// Used at comparison time to decide type coercions.
+// =============================================================================
+
+module core.database.sqlite.native.expr_affinity_resolver;
+
+public module node;

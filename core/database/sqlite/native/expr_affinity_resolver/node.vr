@@ -1,0 +1,62 @@
+// Expression-node taxonomy + affinity resolver.
+
+module core.database.sqlite.native.expr_affinity_resolver.node;
+
+mount core.database.sqlite.native.affinity_matrix_api.affinity.{
+    Affinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
+};
+mount core.database.sqlite.native.affinity_matrix_api.classify.{classify as classify_type};
+mount base.{Bool, Text};
+
+public type ExprNode is
+    | EnColumn(Affinity)        // known column affinity
+    | EnCast(Text)              // CAST expr AS <type> — resolve via classify_type
+    | EnLiteralInt              // 42
+    | EnLiteralReal             // 3.14
+    | EnLiteralText             // 'foo'
+    | EnLiteralBlob             // X'DEADBEEF'
+    | EnLiteralNull             // NULL
+    | EnArith                   // +, -, *, /, %
+    | EnConcat                  // ||
+    | EnLogical                 // AND, OR, NOT
+    | EnComparison              // =, <, etc.
+    | EnFunction                // generic function call
+    ;
+
+public fn resolve(e: &ExprNode) -> Affinity {
+    match e {
+        EnColumn(a)      => a.clone(),
+        EnCast(ty)       => classify_type(ty),
+        EnLiteralInt     => AfBlob,      // literals have no affinity per §14.3
+        EnLiteralReal    => AfBlob,
+        EnLiteralText    => AfBlob,
+        EnLiteralBlob    => AfBlob,
+        EnLiteralNull    => AfBlob,
+        EnArith          => AfBlob,      // arithmetic expression — no affinity
+        EnConcat         => AfBlob,
+        EnLogical        => AfBlob,
+        EnComparison     => AfBlob,
+        EnFunction       => AfBlob,      // conservative — known pure fns can override
+    }
+}
+
+// §4.2 — when comparing two operands, if either has numeric affinity and the
+// other has TEXT or BLOB, coerce the non-numeric to numeric.
+public fn comparison_result_affinity(a: &Affinity, b: &Affinity) -> Affinity {
+    let a_num = match a {
+        AfInteger => true, AfReal => true, AfNumeric => true,
+        _ => false,
+    };
+    let b_num = match b {
+        AfInteger => true, AfReal => true, AfNumeric => true,
+        _ => false,
+    };
+    if a_num && !b_num { return a.clone(); }
+    if b_num && !a_num { return b.clone(); }
+    // Both numeric or both textual/blob — left wins.
+    a.clone()
+}
+
+public fn affinity_of_column_expr(affinity: Affinity) -> Affinity {
+    affinity
+}

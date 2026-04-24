@@ -1,0 +1,46 @@
+// Overflow handling policy.
+
+module core.database.sqlite.native.integer_overflow_api.policy;
+
+mount base.{Bool, Text, Int64};
+
+// SQLite Int64 range.
+public fn int64_max() -> Int64 { 0x7FFFFFFFFFFFFFFF as Int64 }
+public fn int64_min() -> Int64 {
+    let hi: Int64 = 0x8000000000000000 as Int64;   // -2^63
+    hi
+}
+
+public type OverflowPolicy is
+    | OpError          // raise SQLITE_ERROR on overflow
+    | OpPromoteReal    // silently promote to REAL
+    | OpWrap           // wrap mod 2^64 (rare — primarily for bitwise ops)
+    ;
+
+public fn policy_name(p: &OverflowPolicy) -> Text {
+    match p {
+        OpError        => "error".clone(),
+        OpPromoteReal  => "promote_real".clone(),
+        OpWrap         => "wrap".clone(),
+    }
+}
+
+// Arithmetic +/-/* on INTEGER operands → OpPromoteReal (per §14.3).
+// Bitwise ops (& | << >>) → OpWrap.
+public fn default_for_arith() -> OverflowPolicy { OpPromoteReal }
+public fn default_for_bitwise() -> OverflowPolicy { OpWrap }
+
+// Pure casts / CAST(expr AS INTEGER) → OpError.
+public fn default_for_cast() -> OverflowPolicy { OpError }
+
+public fn can_silently_promote(p: &OverflowPolicy) -> Bool {
+    match p { OpPromoteReal => true, _ => false }
+}
+
+public fn is_deterministic_on_overflow(p: &OverflowPolicy) -> Bool {
+    match p {
+        OpError       => true,
+        OpPromoteReal => true,
+        OpWrap        => true,     // wrap is deterministic too
+    }
+}

@@ -1,0 +1,91 @@
+// Frame record + push/pop stack.
+
+module core.database.sqlite.native.vdbe_subprogram_api.frame;
+
+mount base.{Bool, Text, Int64};
+mount core.collections.list.{List};
+
+public type FrameKind is
+    | FkTrigger
+    | FkInsteadOfView
+    | FkRecursiveCte
+    | FkInlineSubquery
+    ;
+
+public fn frame_kind_name(k: &FrameKind) -> Text {
+    match k {
+        FkTrigger         => "trigger".clone(),
+        FkInsteadOfView   => "instead_of_view".clone(),
+        FkRecursiveCte    => "recursive_cte".clone(),
+        FkInlineSubquery  => "inline_subquery".clone(),
+    }
+}
+
+public type Frame is {
+    kind: FrameKind,
+    program_id: Int,          // compiled sub-program identifier
+    return_pc: Int,           // caller's next instruction
+    register_base: Int,       // register-file offset this frame owns
+    register_count: Int,      // number of regs reserved
+    depth: Int,               // call depth (0 = top-level invoker)
+};
+
+public fn new(
+    kind: FrameKind, program_id: Int, return_pc: Int,
+    register_base: Int, register_count: Int, depth: Int,
+) -> Frame {
+    Frame {
+        kind: kind,
+        program_id: program_id,
+        return_pc: return_pc,
+        register_base: register_base,
+        register_count: register_count,
+        depth: depth,
+    }
+}
+
+public type CallStack is {
+    frames: List<Frame>,
+    max_depth_seen: Int,
+};
+
+public fn empty_stack() -> CallStack {
+    CallStack { frames: [].clone() as List<Frame>, max_depth_seen: 0 }
+}
+
+public fn depth(cs: &CallStack) -> Int { cs.frames.len() }
+
+public fn is_empty(cs: &CallStack) -> Bool { cs.frames.len() == 0 }
+
+public fn push(mut cs: CallStack, f: Frame) -> CallStack {
+    let new_depth = f.depth;
+    cs.frames.push(f);
+    if new_depth > cs.max_depth_seen { cs.max_depth_seen = new_depth; }
+    cs
+}
+
+public fn pop(mut cs: CallStack) -> CallStack {
+    if cs.frames.len() > 0 {
+        let _ = cs.frames.pop();
+    }
+    cs
+}
+
+// SQLITE_MAX_TRIGGER_DEPTH default 1000 — we record its default here for planner use.
+public fn default_max_trigger_depth() -> Int { 1000 }
+
+public fn would_exceed_max_depth(cs: &CallStack, limit: Int) -> Bool {
+    cs.frames.len() >= limit
+}
+
+// Top-of-stack frame accessor; returns nothing if empty, via a per-frame probe.
+public fn top_is_kind(cs: &CallStack, k: &FrameKind) -> Bool {
+    if cs.frames.len() == 0 { return false; }
+    let top = &cs.frames[cs.frames.len() - 1];
+    match top.kind {
+        FkTrigger        => match k { FkTrigger        => true, _ => false },
+        FkInsteadOfView  => match k { FkInsteadOfView  => true, _ => false },
+        FkRecursiveCte   => match k { FkRecursiveCte   => true, _ => false },
+        FkInlineSubquery => match k { FkInlineSubquery => true, _ => false },
+    }
+}

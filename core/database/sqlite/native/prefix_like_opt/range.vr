@@ -1,0 +1,67 @@
+// Compute the half-open range [lo, hi) that covers all values matching the
+// given literal prefix.
+
+module core.database.sqlite.native.prefix_like_opt.range;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type PrefixRange is {
+    lo: Text,
+    hi: Text,        // empty means open-ended "no upper bound"
+    has_upper_bound: Bool,
+};
+
+public fn single_prefix(prefix: &Text) -> PrefixRange {
+    let lo = prefix.clone();
+    // Increment the last byte of the prefix; if it overflows (0xFF), drop the
+    // last byte and try again; if the prefix is all 0xFF bytes or empty, no
+    // upper bound exists.
+    let bs = prefix.as_bytes();
+    let mut n = bs.len();
+    let mut hi_bytes: List<u8> = [].clone() as List<u8>;
+    let mut i: Int = 0;
+    while i < n {
+        hi_bytes.push(bs[i]);
+        i = i + 1;
+    }
+    let mut found_upper = false;
+    while n > 0 {
+        let b = hi_bytes[n - 1];
+        if b < (0xFF as u8) {
+            hi_bytes[n - 1] = (b + (1 as u8)) as u8;
+            // truncate to n bytes
+            while hi_bytes.len() > n { let _ = hi_bytes.pop(); }
+            found_upper = true;
+            n = 0;
+        } else {
+            n = n - 1;
+        }
+    }
+    let mut hi = "".clone();
+    if found_upper {
+        let mut j: Int = 0;
+        while j < hi_bytes.len() {
+            hi.push_byte(hi_bytes[j]);
+            j = j + 1;
+        }
+    }
+    PrefixRange {
+        lo: lo,
+        hi: hi,
+        has_upper_bound: found_upper,
+    }
+}
+
+public fn is_open_ended(r: &PrefixRange) -> Bool {
+    !r.has_upper_bound
+}
+
+public fn lower_bound_empty(r: &PrefixRange) -> Bool {
+    r.lo.len() == 0
+}
+
+public fn useful_for_planner(r: &PrefixRange) -> Bool {
+    // No useful range if no lower prefix AND no upper bound.
+    !lower_bound_empty(r) || r.has_upper_bound
+}

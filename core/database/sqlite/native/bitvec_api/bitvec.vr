@@ -1,0 +1,64 @@
+// High-level bitvec handle — rowid range + current node kind + counters.
+
+module core.database.sqlite.native.bitvec_api.bitvec;
+
+mount core.database.sqlite.native.bitvec_api.node.{
+    NodeKind, NkLeaf, NkInternal, NkHash,
+    bits_per_leaf, hash_linear_capacity, choose_kind,
+};
+mount base.{Bool, Int64};
+
+public type Bitvec is {
+    universe_size: Int64,    // largest rowid + 1
+    inserted: Int64,
+    kind: NodeKind,
+    hash_collisions: Int64,
+};
+
+public fn new(universe: Int64) -> Bitvec {
+    Bitvec {
+        universe_size: universe,
+        inserted: 0 as Int64,
+        kind: choose_kind(universe, 0 as Int64),
+        hash_collisions: 0 as Int64,
+    }
+}
+
+public fn size(b: &Bitvec) -> Int64 { b.inserted }
+
+public fn is_empty(b: &Bitvec) -> Bool {
+    b.inserted == (0 as Int64)
+}
+
+public fn is_full(b: &Bitvec) -> Bool {
+    b.inserted >= b.universe_size
+}
+
+// Record an insertion — bump counter + re-evaluate kind.
+public fn record_insert(mut b: Bitvec) -> Bitvec {
+    if b.inserted < b.universe_size {
+        b.inserted = b.inserted + (1 as Int64);
+    }
+    b.kind = choose_kind(b.universe_size, b.inserted);
+    b
+}
+
+public fn record_hash_collision(mut b: Bitvec) -> Bitvec {
+    b.hash_collisions = b.hash_collisions + (1 as Int64);
+    b
+}
+
+// Density expressed as fraction of universe used.
+public fn density(b: &Bitvec) -> Float {
+    if b.universe_size <= (0 as Int64) { return 0.0 as Float; }
+    let ins = b.inserted as Float;
+    let un  = b.universe_size as Float;
+    ins / un
+}
+
+// The SQLite rule: transition to Internal only when inserted exceeds the
+// hash linear-probe capacity AND the universe is too large for a single leaf.
+public fn should_be_internal(b: &Bitvec) -> Bool {
+    b.universe_size > (bits_per_leaf() as Int64)
+        && b.inserted > (hash_linear_capacity() as Int64)
+}

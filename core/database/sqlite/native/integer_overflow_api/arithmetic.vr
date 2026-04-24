@@ -1,0 +1,54 @@
+// Checked arithmetic probes.
+
+module core.database.sqlite.native.integer_overflow_api.arithmetic;
+
+mount core.database.sqlite.native.integer_overflow_api.policy.{
+    int64_max, int64_min,
+};
+mount base.{Bool, Int64};
+
+// Return true iff a + b would overflow Int64.
+public fn add_overflows(a: Int64, b: Int64) -> Bool {
+    if b > (0 as Int64) {
+        a > int64_max() - b
+    } else {
+        a < int64_min() - b
+    }
+}
+
+public fn sub_overflows(a: Int64, b: Int64) -> Bool {
+    if b > (0 as Int64) {
+        a < int64_min() + b
+    } else if b < (0 as Int64) {
+        a > int64_max() + b
+    } else {
+        false
+    }
+}
+
+// Multiplication overflow — classic divide-by-zero-avoiding check.
+public fn mul_overflows(a: Int64, b: Int64) -> Bool {
+    if a == (0 as Int64) { return false; }
+    if b == (0 as Int64) { return false; }
+    // Special case: INT64_MIN * -1 overflows.
+    if a == int64_min() && b == (-1 as Int64) { return true; }
+    if b == int64_min() && a == (-1 as Int64) { return true; }
+    // General: |a * b| > INT64_MAX iff |a| > INT64_MAX / |b|.
+    let abs_a = if a < (0 as Int64) { -a } else { a };
+    let abs_b = if b < (0 as Int64) { -b } else { b };
+    abs_a > int64_max() / abs_b
+}
+
+// Checked division: INT64_MIN / -1 is the only overflow case.
+public fn div_overflows(a: Int64, b: Int64) -> Bool {
+    a == int64_min() && b == (-1 as Int64)
+}
+
+// Checked unary negation: only INT64_MIN overflows (no positive counterpart).
+public fn neg_overflows(a: Int64) -> Bool {
+    a == int64_min()
+}
+
+public fn within_range(v: Int64) -> Bool {
+    v >= int64_min() && v <= int64_max()
+}

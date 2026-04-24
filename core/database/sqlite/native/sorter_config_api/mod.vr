@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/sorter_config_api/mod.vr
+// =============================================================================
+// External merge-sort configuration — PMA (packed memory array) buffer size,
+// merge fan-in, spill threshold.
+// Spec §11.5 — VDBE sorter.
+// =============================================================================
+
+module core.database.sqlite.native.sorter_config_api;
+
+public module config;

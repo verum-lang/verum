@@ -1,0 +1,60 @@
+// Constant-level classification.
+
+module core.database.sqlite.native.expr_const_folding.level;
+
+mount base.{Bool, Text};
+
+public type ConstLevel is
+    | ClVariable              // column refs, random(), last_insert_rowid(), etc.
+    | ClStatementConst        // bind variables (fixed during one step)
+    | ClConnectionConst       // fn marked SQLITE_DETERMINISTIC
+    | ClCompileConst          // literals, CAST of literals, deterministic pure ops
+    ;
+
+public fn level_name(l: &ConstLevel) -> Text {
+    match l {
+        ClVariable          => "variable".clone(),
+        ClStatementConst    => "stmt_const".clone(),
+        ClConnectionConst   => "conn_const".clone(),
+        ClCompileConst      => "compile_const".clone(),
+    }
+}
+
+// Strictness: higher rank = more foldable.
+public fn rank(l: &ConstLevel) -> Int {
+    match l {
+        ClVariable          => 0,
+        ClStatementConst    => 1,
+        ClConnectionConst   => 2,
+        ClCompileConst      => 3,
+    }
+}
+
+public fn is_constant_for_query(l: &ConstLevel) -> Bool {
+    match l { ClVariable => false, _ => true }
+}
+
+// Only ClCompileConst can be folded at CREATE-TABLE / CREATE-INDEX time.
+public fn is_compile_time_foldable(l: &ConstLevel) -> Bool {
+    match l { ClCompileConst => true, _ => false }
+}
+
+public fn meet(a: &ConstLevel, b: &ConstLevel) -> ConstLevel {
+    let ra = rank(a);
+    let rb = rank(b);
+    if ra <= rb {
+        match a {
+            ClVariable          => ClVariable,
+            ClStatementConst    => ClStatementConst,
+            ClConnectionConst   => ClConnectionConst,
+            ClCompileConst      => ClCompileConst,
+        }
+    } else {
+        match b {
+            ClVariable          => ClVariable,
+            ClStatementConst    => ClStatementConst,
+            ClConnectionConst   => ClConnectionConst,
+            ClCompileConst      => ClCompileConst,
+        }
+    }
+}

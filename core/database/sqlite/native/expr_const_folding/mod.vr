@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/expr_const_folding/mod.vr
+// =============================================================================
+// Pre-emission constant-folding rules — the SQLite optimizer's
+// sqlite3ExprIsConstant family.
+// Spec §13.5 — optimizer.
+//
+// SQLite splits "constant" into several levels because some functions are
+// deterministic per statement while others are constant per connection / db:
+//   Level 1 — always constant (literals, CAST of literals, + - of constants)
+//   Level 2 — deterministic functions marked SQLITE_DETERMINISTIC
+//   Level 3 — context-sensitive (bind vars count as constant inside one step)
+//   Level 4 — aggregate-arg constant (distinct from row-level)
+// =============================================================================
+
+module core.database.sqlite.native.expr_const_folding;
+
+public module level;
+public module classify;

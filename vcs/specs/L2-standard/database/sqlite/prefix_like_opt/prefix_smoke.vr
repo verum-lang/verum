@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, prefix_like_opt, optimizer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.prefix_like_opt.pattern.{
+    PatternOp, PoLike, PoGlob,
+    is_wildcard_char, is_escape_char,
+    extract_prefix, has_non_empty_prefix, is_pure_literal,
+};
+mount core.database.sqlite.native.prefix_like_opt.range.{
+    PrefixRange,
+    single_prefix, is_open_ended, lower_bound_empty, useful_for_planner,
+};
+mount base.{Bool};
+
+fn test_like_wildcard_chars() {
+    assert(is_wildcard_char(&PoLike, 0x25 as u8));    // %
+    assert(is_wildcard_char(&PoLike, 0x5F as u8));    // _
+    assert(!is_wildcard_char(&PoLike, 0x2A as u8));   // * (glob)
+    assert(!is_wildcard_char(&PoLike, 0x61 as u8));   // 'a'
+}
+
+fn test_glob_wildcard_chars() {
+    assert(is_wildcard_char(&PoGlob, 0x2A as u8));    // *
+    assert(is_wildcard_char(&PoGlob, 0x3F as u8));    // ?
+    assert(is_wildcard_char(&PoGlob, 0x5B as u8));    // [
+    assert(!is_wildcard_char(&PoGlob, 0x25 as u8));   // % (like)
+}
+
+fn test_is_escape_char() {
+    assert(is_escape_char(0x5C as u8));
+    assert(!is_escape_char(0x41 as u8));
+}
+
+fn test_extract_prefix_like() {
+    let p = extract_prefix(&PoLike, &"abc%".clone());
+    assert(p == "abc".clone());
+    let p2 = extract_prefix(&PoLike, &"abc_def".clone());
+    assert(p2 == "abc".clone());
+    let empty = extract_prefix(&PoLike, &"%xyz".clone());
+    assert(empty == "".clone());
+}
+
+fn test_extract_prefix_glob() {
+    let p = extract_prefix(&PoGlob, &"abc*".clone());
+    assert(p == "abc".clone());
+    let p2 = extract_prefix(&PoGlob, &"abc?".clone());
+    assert(p2 == "abc".clone());
+    let p3 = extract_prefix(&PoGlob, &"abc[xy]".clone());
+    assert(p3 == "abc".clone());
+}
+
+fn test_has_non_empty_prefix() {
+    assert(has_non_empty_prefix(&PoLike, &"abc%".clone()));
+    assert(!has_non_empty_prefix(&PoLike, &"%abc".clone()));
+    assert(!has_non_empty_prefix(&PoLike, &"".clone()));
+}
+
+fn test_is_pure_literal() {
+    assert(is_pure_literal(&PoLike, &"abc".clone()));
+    assert(!is_pure_literal(&PoLike, &"a%c".clone()));
+    assert(is_pure_literal(&PoGlob, &"abc".clone()));
+    assert(!is_pure_literal(&PoGlob, &"a*c".clone()));
+}
+
+fn test_single_prefix_basic() {
+    let r = single_prefix(&"abc".clone());
+    assert(!is_open_ended(&r));
+    assert(r.lo == "abc".clone());
+    // hi should be "abd"
+    assert(r.hi == "abd".clone());
+    assert(useful_for_planner(&r));
+}
+
+fn test_single_prefix_empty_is_open_ended() {
+    let r = single_prefix(&"".clone());
+    assert(is_open_ended(&r));
+    assert(lower_bound_empty(&r));
+    assert(!useful_for_planner(&r));
+}
+
+fn test_single_prefix_overflow_trailing_ff() {
+    // prefix ends in 0xFF → decrement path finds non-0xFF byte earlier.
+    let mut pat = "".clone();
+    pat.push_byte(0x61 as u8);    // 'a'
+    pat.push_byte(0xFF as u8);
+    let r = single_prefix(&pat);
+    assert(!is_open_ended(&r));
+    // expected hi: "b" (single byte) since last byte was FF, backtrack.
+    let hi_bs = r.hi.as_bytes();
+    assert_eq(hi_bs.len(), 1);
+    assert_eq(hi_bs[0], 0x62 as u8);
+}
+
+fn main() {
+    test_like_wildcard_chars();
+    test_glob_wildcard_chars();
+    test_is_escape_char();
+    test_extract_prefix_like();
+    test_extract_prefix_glob();
+    test_has_non_empty_prefix();
+    test_is_pure_literal();
+    test_single_prefix_basic();
+    test_single_prefix_empty_is_open_ended();
+    test_single_prefix_overflow_trailing_ff();
+}

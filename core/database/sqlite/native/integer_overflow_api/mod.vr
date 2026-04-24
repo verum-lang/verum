@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/integer_overflow_api/mod.vr
+// =============================================================================
+// Integer arithmetic overflow policy — SQLite's sqlite3AddInt64 family raises
+// SQLITE_ERROR on overflow by default, but affinity rules promote to REAL in
+// some contexts.
+// Spec §14.3 — arithmetic semantics.
+// =============================================================================
+
+module core.database.sqlite.native.integer_overflow_api;
+
+public module policy;
+public module arithmetic;
