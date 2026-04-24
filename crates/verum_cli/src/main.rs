@@ -682,7 +682,22 @@ enum Commands {
     /// Full proof-term export through verum_kernel is a follow-up
     /// — it requires SMT proof-replay, which lands per-backend.
     Export {
-        /// Target format: `dedukti`, `coq`, or `lean`.
+        /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
+        #[clap(long, value_name = "FORMAT")]
+        to: String,
+        /// Output file path (defaults to
+        /// `certificates/<format>/export.<ext>`).
+        #[clap(long, short, value_name = "PATH")]
+        output: Option<std::path::PathBuf>,
+    },
+
+    /// Alias for `export --to <format>` — matches the wording in
+    /// `docs/verification/proof-export.md` and the CLI reference at
+    /// `docs/verification/cli-workflow.md §12`. Behaviour is
+    /// identical to `verum export --to FORMAT`; the alias keeps
+    /// docs-cli parity without duplicating semantics.
+    ExportProofs {
+        /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
         #[clap(long, value_name = "FORMAT")]
         to: String,
         /// Output file path (defaults to
@@ -1618,7 +1633,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit(options)
             }
         }
-        Commands::Export { to, output } => {
+        Commands::Export { to, output } | Commands::ExportProofs { to, output } => {
             let format = commands::export::ExportFormat::parse(&to)?;
             let options = commands::export::ExportOptions {
                 format,

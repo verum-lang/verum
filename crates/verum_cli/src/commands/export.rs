@@ -41,6 +41,11 @@ pub enum ExportFormat {
     Dedukti,
     Coq,
     Lean,
+    /// Metamath — statement-only axiom scaffold in `.mm` format.
+    /// Proof bodies are left as proof-step placeholders
+    /// (`$= ? $.`), mirroring the admitted-proof semantics of the
+    /// Coq / Lean / Dedukti targets.
+    Metamath,
 }
 
 impl ExportFormat {
@@ -50,9 +55,11 @@ impl ExportFormat {
             "dedukti" | "dk" => Ok(Self::Dedukti),
             "coq" | "v" => Ok(Self::Coq),
             "lean" | "lean4" => Ok(Self::Lean),
+            "metamath" | "mm" => Ok(Self::Metamath),
             other => Err(CliError::InvalidArgument(
                 format!(
-                    "unknown export format: `{}` (expected `dedukti`, `coq`, or `lean`)",
+                    "unknown export format: `{}` (expected `dedukti`, \
+                     `coq`, `lean`, or `metamath`)",
                     other
                 )
                 .into(),
@@ -66,6 +73,7 @@ impl ExportFormat {
             Self::Dedukti => "dedukti",
             Self::Coq => "coq",
             Self::Lean => "lean",
+            Self::Metamath => "metamath",
         }
     }
 
@@ -75,6 +83,7 @@ impl ExportFormat {
             Self::Dedukti => "dk",
             Self::Coq => "v",
             Self::Lean => "lean",
+            Self::Metamath => "mm",
         }
     }
 }
@@ -141,6 +150,7 @@ pub fn run(options: ExportOptions) -> Result<()> {
         ExportFormat::Dedukti => emit_dedukti(&declarations),
         ExportFormat::Coq => emit_coq(&declarations),
         ExportFormat::Lean => emit_lean(&declarations),
+        ExportFormat::Metamath => emit_metamath(&declarations),
     };
 
     let output_path = match options.output {
@@ -353,6 +363,80 @@ fn emit_coq(decls: &[Declaration]) -> String {
 // Lean emitter
 // -----------------------------------------------------------------------------
 
+/// Emit a Metamath (.mm) certificate.
+///
+/// Metamath is "axiom system + proof step language". Statements are
+/// declared with `$a` (axiom) / `$p ... $.` (provable), and every
+/// statement must name its free variables in a `$v` line and provide
+/// a constant-typing header. For a Verum export that carries only
+/// statements (proofs admitted), we emit:
+///
+///   $c wff |- $.               — constant declarations
+///   $v x y z $.                — placeholder variables
+///   ax-<name> $a wff <stmt> $. — for axioms
+///   th-<name> $p wff <stmt> $= ? $.   — for theorems (proof placeholder `?`)
+///
+/// Framework citations ride along as `$( comment $)` blocks so the
+/// trusted boundary is visible. The `?` proof-step token is
+/// Metamath's own placeholder for "proof not yet supplied" — tools
+/// like `mmverify.py` accept it as an unchecked scaffold. This
+/// mirrors the admitted-proof semantics of the Coq / Lean / Dedukti
+/// emitters: the statement is authoritative, the proof step is a
+/// follow-up that per-backend SMT replay will fill in.
+fn emit_metamath(decls: &[Declaration]) -> String {
+    let mut out = String::new();
+    out.push_str("$( Exported by `verum export --to metamath`. $)\n");
+    out.push_str(
+        "$( Statements only — proofs are `?` placeholders. Full proof-term\n\
+         replay through verum_kernel lands with per-backend SMT\n\
+         reconstruction. $)\n\n",
+    );
+
+    // Constant + variable declarations. Kept minimal — Verum's
+    // richer dependent statements lower to `wff` here; a faithful
+    // type-preserving encoding is a follow-up that needs a Metamath
+    // metatheory shared across the whole project.
+    out.push_str("$c wff |- $.\n");
+    out.push_str("$v x y z $.\n\n");
+
+    let by_framework = group_by_framework(decls);
+    for (framework_key, group) in &by_framework {
+        if let Some(fw) = framework_key {
+            out.push_str(&format!("$( ==== framework: {} ==== $)\n", fw.as_str()));
+        } else {
+            out.push_str("$( ==== no framework attribution ==== $)\n");
+        }
+        for d in group {
+            if let Maybe::Some(fw) = &d.framework {
+                out.push_str(&format!(
+                    "$( {} — {} — {} :: {} $)\n",
+                    d.kind,
+                    fw.name.as_str(),
+                    fw.citation.as_str(),
+                    d.source.display(),
+                ));
+            }
+            match d.kind {
+                "axiom" => {
+                    out.push_str(&format!(
+                        "ax-{} $a wff {} $.\n\n",
+                        mangle(&d.name),
+                        mangle(&d.name)
+                    ));
+                }
+                _ => {
+                    out.push_str(&format!(
+                        "th-{} $p wff {} $= ? $.\n\n",
+                        mangle(&d.name),
+                        mangle(&d.name)
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
 fn emit_lean(decls: &[Declaration]) -> String {
     let mut out = String::new();
     out.push_str("-- Exported by `verum export --to lean`.\n");
@@ -475,4 +559,56 @@ fn print_summary(
         "      backend SMT reconstruction. This certificate carries"
     );
     println!("      statements + framework citations — proofs are admitted.");
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+
+    #[test]
+    fn metamath_parses_from_mm_and_metamath() {
+        assert_eq!(
+            ExportFormat::parse("metamath").unwrap(),
+            ExportFormat::Metamath
+        );
+        assert_eq!(ExportFormat::parse("mm").unwrap(), ExportFormat::Metamath);
+    }
+
+    #[test]
+    fn metamath_extension_is_mm() {
+        assert_eq!(ExportFormat::Metamath.extension(), "mm");
+        assert_eq!(ExportFormat::Metamath.as_str(), "metamath");
+    }
+
+    #[test]
+    fn all_four_formats_parse_from_canonical_names() {
+        assert_eq!(ExportFormat::parse("dedukti").unwrap(), ExportFormat::Dedukti);
+        assert_eq!(ExportFormat::parse("coq").unwrap(), ExportFormat::Coq);
+        assert_eq!(ExportFormat::parse("lean").unwrap(), ExportFormat::Lean);
+        assert_eq!(
+            ExportFormat::parse("metamath").unwrap(),
+            ExportFormat::Metamath
+        );
+    }
+
+    #[test]
+    fn unknown_format_error_message_lists_all_four() {
+        let err = ExportFormat::parse("isabelle").unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("dedukti"));
+        assert!(msg.contains("coq"));
+        assert!(msg.contains("lean"));
+        assert!(msg.contains("metamath"));
+    }
+
+    #[test]
+    fn metamath_emitter_produces_valid_preamble() {
+        let decls: Vec<Declaration> = Vec::new();
+        let out = emit_metamath(&decls);
+        // Metamath verifiers require the constant/variable
+        // declarations; the preamble must always be emitted.
+        assert!(out.contains("$c wff |- $."));
+        assert!(out.contains("$v x y z $."));
+        assert!(out.contains("`verum export --to metamath`"));
+    }
 }
