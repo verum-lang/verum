@@ -208,8 +208,9 @@ pub enum DependentTypeConstraint {
     },
 }
 
-/// Statistics for dependent type verification (public data-only copy; the
-/// SMT backend exports its own richer version).
+/// Statistics for dependent type verification (canonical shape reused by
+/// every `DependentTypeChecker` implementation, including
+/// `verum_smt::dependent_backend::SmtDependentTypeChecker`).
 #[derive(Debug, Clone, Default)]
 pub struct DependentVerificationStats {
     pub total_checks: usize,

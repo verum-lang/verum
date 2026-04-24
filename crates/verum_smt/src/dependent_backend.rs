@@ -27,7 +27,7 @@ use verum_ast::expr::Expr;
 use verum_ast::span::Span;
 use verum_common::{Maybe, Text};
 
-use verum_types::dependent_integration::DependentTypeChecker;
+use verum_types::dependent_integration::{DependentTypeChecker, DependentVerificationStats};
 use verum_types::refinement::{RefinementError, VerificationResult};
 
 // Import from this crate (verum_smt).
@@ -240,57 +240,5 @@ impl DependentTypeChecker for SmtDependentTypeChecker {
     }
 }
 
-/// Statistics for dependent type verification
-#[derive(Debug, Clone, Default)]
-pub struct DependentVerificationStats {
-    /// Total verification checks
-    pub total_checks: usize,
-    /// Valid verifications
-    pub valid_count: usize,
-    /// Invalid verifications
-    pub invalid_count: usize,
-    /// Unknown results
-    pub unknown_count: usize,
-    /// Total time in milliseconds
-    pub total_time_ms: u64,
-}
-
-impl DependentVerificationStats {
-    /// Get average verification time
-    pub fn average_time_ms(&self) -> f64 {
-        if self.total_checks == 0 {
-            0.0
-        } else {
-            self.total_time_ms as f64 / self.total_checks as f64
-        }
-    }
-
-    /// Get success rate (valid + invalid vs unknown)
-    pub fn success_rate(&self) -> f64 {
-        if self.total_checks == 0 {
-            0.0
-        } else {
-            (self.valid_count + self.invalid_count) as f64 / self.total_checks as f64
-        }
-    }
-
-    /// Generate a report
-    pub fn report(&self) -> Text {
-        format!(
-            "Dependent Type Verification Statistics:\n\
-             - Total checks: {}\n\
-             - Valid: {}, Invalid: {}, Unknown: {}\n\
-             - Success rate: {:.1}%\n\
-             - Average time: {:.2}ms\n\
-             - Total time: {}ms",
-            self.total_checks,
-            self.valid_count,
-            self.invalid_count,
-            self.unknown_count,
-            self.success_rate() * 100.0,
-            self.average_time_ms(),
-            self.total_time_ms
-        )
-        .into()
-    }
-}
+// `DependentVerificationStats` is defined once in
+// `verum_types::dependent_integration` and imported above.
