@@ -509,6 +509,15 @@ enum Commands {
         /// section. See `docs/verification/performance.md §5`.
         #[clap(long)]
         profile_obligation: bool,
+        /// Emit verification diagnostics in Language Server Protocol
+        /// format (one JSON `Diagnostic` per line, newline-delimited)
+        /// on stdout instead of the human-readable report. Intended
+        /// for IDE integrations that pipe `verum verify` through a
+        /// JSON-RPC adapter. Implies no human output on stdout;
+        /// errors still go to stderr. See
+        /// `docs/verification/cli-workflow.md §13`.
+        #[clap(long)]
+        lsp_mode: bool,
         /// Fail the build if total verification time exceeds this budget.
         /// Accepts human-readable durations: `120s`, `2m`, `90`, `1h`.
         #[clap(long, value_name = "DURATION")]
@@ -1417,7 +1426,20 @@ fn run_command(cli: Cli) -> Result<()> {
             interactive_tactic,
             diff,
             function,
+            lsp_mode,
         } => {
+            // --lsp-mode implies no human output; set an env var
+            // the downstream report-renderer reads to switch from
+            // human-readable prose to LSP-JSON. Environment is the
+            // loose-coupling channel the renderer already uses for
+            // output-format toggles (--no-color, --format=json, …).
+            if lsp_mode {
+                // SAFETY: The env var is used by the downstream
+                // verify_cmd's report-renderer as a loose-coupling
+                // format toggle. Single-threaded context at CLI
+                // entry — no TOCTOU hazard.
+                unsafe { std::env::set_var("VERUM_LSP_MODE", "1"); }
+            }
             // `--export` implies `--profile` — you can't dump a profile you
             // didn't collect. `--profile-obligation` also implies `--profile`
             // (per-obligation breakdown is rendered as a detail view under

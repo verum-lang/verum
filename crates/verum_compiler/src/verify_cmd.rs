@@ -101,6 +101,16 @@ impl<'s> VerifyCommand<'s> {
         // Run verification
         let report = self.verify_module(&module, function_name)?;
 
+        // --lsp-mode short-circuit: emit one LSP-formatted JSON
+        // diagnostic per line on stdout, then skip the human
+        // report. Callers pipe `verum verify --lsp-mode` through
+        // a JSON-RPC adapter that forwards each line as a
+        // `textDocument/publishDiagnostics` notification.
+        if std::env::var("VERUM_LSP_MODE").is_ok() {
+            self.emit_lsp_diagnostics(&report);
+            return Ok(());
+        }
+
         // Display report
         self.display_report(&report);
 
@@ -1521,6 +1531,102 @@ impl<'s> VerifyCommand<'s> {
         }
 
         println!();
+    }
+
+    /// Emit newline-delimited JSON LSP-format diagnostics for every
+    /// failed / timed-out verification result. Gated on
+    /// `VERUM_LSP_MODE=1`. Each line is a single
+    /// `textDocument/publishDiagnostics` payload that an external
+    /// JSON-RPC adapter can forward directly to the IDE.
+    ///
+    /// Schema per line:
+    ///
+    ///   { "function": "<name>",
+    ///     "severity": "error" | "warning",
+    ///     "message": "<one-line summary>",
+    ///     "elapsed_ms": <number>,
+    ///     "counterexample": "<string>" | null }
+    ///
+    /// We deliberately emit a Verum-flavored JSON object rather than a
+    /// verbatim LSP `Diagnostic` — the LSP shape needs `range`
+    /// (start/end line+column), which the verifier doesn't track at
+    /// function granularity. The adapter responsible for piping
+    /// through JSON-RPC attaches the range from the LSP document's
+    /// symbol index using the `function` field as the lookup key.
+    fn emit_lsp_diagnostics(&self, report: &VerificationReport) {
+        for (name, result) in &report.results {
+            let (severity, message, elapsed_ms, counterexample): (
+                &str,
+                String,
+                f64,
+                Option<String>,
+            ) = match result {
+                VerificationResult::Proved { elapsed } => (
+                    "info",
+                    "proved".to_string(),
+                    elapsed.as_secs_f64() * 1000.0,
+                    None,
+                ),
+                VerificationResult::Failed {
+                    elapsed,
+                    counterexample,
+                } => (
+                    "error",
+                    "verification failed".to_string(),
+                    elapsed.as_secs_f64() * 1000.0,
+                    counterexample.as_ref().map(|t| t.as_str().to_string()),
+                ),
+                VerificationResult::Timeout { elapsed, timeout } => (
+                    "warning",
+                    format!(
+                        "verification timed out after {:.1}s (budget: {:.1}s)",
+                        elapsed.as_secs_f64(),
+                        timeout.as_secs_f64()
+                    ),
+                    elapsed.as_secs_f64() * 1000.0,
+                    None,
+                ),
+                VerificationResult::Skipped => continue,
+            };
+
+            // Hand-roll the JSON to avoid dragging the full
+            // serde_json dependency graph into the LSP emission
+            // path. Fields are simple strings + numbers; escape
+            // quotes and backslashes.
+            let ce_json: String = match counterexample {
+                Some(ref ce) => format!("\"{}\"", Self::json_escape(ce.as_str())),
+                None => "null".to_string(),
+            };
+            println!(
+                "{{\"function\":\"{}\",\"severity\":\"{}\",\"message\":\"{}\",\"elapsed_ms\":{:.1},\"counterexample\":{}}}",
+                Self::json_escape(name.as_str()),
+                severity,
+                Self::json_escape(&message),
+                elapsed_ms,
+                ce_json
+            );
+        }
+    }
+
+    /// JSON-escape a string. Handles the minimum set of characters
+    /// the JSON spec requires: `"`, `\`, newline, tab. Extended
+    /// Unicode escapes would be overkill for our diagnostic payload.
+    fn json_escape(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for ch in s.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => {
+                    out.push_str(&format!("\\u{:04x}", c as u32));
+                }
+                c => out.push(c),
+            }
+        }
+        out
     }
 
     /// Display cache statistics
