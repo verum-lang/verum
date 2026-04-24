@@ -1,0 +1,150 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, coalesce, short_header, rfc9000_12_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §12.2 — packet coalescing constraint on Short-header order:
+// a Short-header (1-RTT) packet has NO Length field, so everything
+// after it is indistinguishable from its own payload. Therefore the
+// Short-header, when present in a coalesced datagram, MUST be the
+// LAST packet. A plan with `OneRttPkt` somewhere before another
+// packet fails with ShortHeaderNotLast.
+//
+// Valid orderings:
+//   [InitialPkt]
+//   [InitialPkt, HandshakePkt]
+//   [InitialPkt, HandshakePkt, OneRttPkt]
+//   [HandshakePkt, OneRttPkt]
+//
+// Invalid:
+//   [OneRttPkt, InitialPkt]  → ShortHeaderNotLast
+//   [InitialPkt, OneRttPkt, HandshakePkt] → ShortHeaderNotLast
+//   [OneRttPkt, OneRttPkt]   → MultipleShortHeaders (already covered)
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.connection_sm.coalesce.{
+    CoalescedPacket, CoalescePlan, CoalesceError, assemble,
+};
+mount core.net.quic.connection_sm.mod.{QuicSpaceKeys};
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.crypto.header_protection.{HpKey};
+
+fn stub_keys() -> QuicSpaceKeys {
+    QuicSpaceKeys {
+        aead_key: [],
+        aead_iv:  [0_u8; 12],
+        hp_key:   HpKey.AesEcb128([0_u8; 16]),
+    }
+}
+
+fn mk_initial() -> CoalescedPacket {
+    CoalescedPacket.InitialPkt {
+        frames: [], pn: 0_u64, pn_len: 1_u8, largest_acked: None,
+        token: [], keys: stub_keys(),
+    }
+}
+
+fn mk_handshake() -> CoalescedPacket {
+    CoalescedPacket.HandshakePkt {
+        frames: [], pn: 0_u64, pn_len: 1_u8, largest_acked: None,
+        keys: stub_keys(),
+    }
+}
+
+fn mk_onertt(pn: UInt64) -> CoalescedPacket {
+    CoalescedPacket.OneRttPkt {
+        frames: [], pn: pn, pn_len: 1_u8, largest_acked: None,
+        keys: stub_keys(), spin_bit: false, key_phase: false,
+    }
+}
+
+fn assemble_verdict(plan: &CoalescePlan) -> Text {
+    match assemble(plan) {
+        Err(CoalesceError.ShortHeaderNotLast)   => f"ShortHeaderNotLast",
+        Err(CoalesceError.MultipleShortHeaders) => f"MultipleShortHeaders",
+        Err(_)                                  => f"OtherErr",
+        Ok(_)                                   => f"Ok",
+    }
+}
+
+fn short_before_long_is_rejected() {
+    // [OneRtt, Handshake] — OneRtt is first, not last → ShortHeaderNotLast.
+    let plan = CoalescePlan {
+        version: 0x00000001_u32,
+        dcid:    ConnectionId.empty(),
+        scid:    ConnectionId.empty(),
+        packets: [mk_onertt(0_u64), mk_handshake()],
+        pad_to:  0,
+    };
+    assert(assemble_verdict(&plan) == f"ShortHeaderNotLast");
+}
+
+fn short_in_middle_of_three_is_rejected() {
+    // [Initial, OneRtt, Handshake] — OneRtt in middle → ShortHeaderNotLast.
+    let plan = CoalescePlan {
+        version: 0x00000001_u32,
+        dcid:    ConnectionId.empty(),
+        scid:    ConnectionId.empty(),
+        packets: [mk_initial(), mk_onertt(0_u64), mk_handshake()],
+        pad_to:  0,
+    };
+    assert(assemble_verdict(&plan) == f"ShortHeaderNotLast");
+}
+
+fn short_at_end_after_longs_does_not_trip_short_last() {
+    // [Initial, Handshake, OneRtt] — canonical first flight on retry
+    // path; OneRtt at the tail satisfies §12.2.
+    let plan = CoalescePlan {
+        version: 0x00000001_u32,
+        dcid:    ConnectionId.empty(),
+        scid:    ConnectionId.empty(),
+        packets: [mk_initial(), mk_handshake(), mk_onertt(0_u64)],
+        pad_to:  0,
+    };
+    let v = assemble_verdict(&plan);
+    // assemble may still fail on the stub_keys empty-key path, but NOT
+    // with ShortHeaderNotLast.
+    assert(v != f"ShortHeaderNotLast");
+    assert(v != f"MultipleShortHeaders");
+}
+
+fn only_longs_pass_short_header_check() {
+    // [Initial, Handshake] — no short header at all.
+    let plan = CoalescePlan {
+        version: 0x00000001_u32,
+        dcid:    ConnectionId.empty(),
+        scid:    ConnectionId.empty(),
+        packets: [mk_initial(), mk_handshake()],
+        pad_to:  0,
+    };
+    let v = assemble_verdict(&plan);
+    assert(v != f"ShortHeaderNotLast");
+    assert(v != f"MultipleShortHeaders");
+}
+
+fn two_shorts_remains_multiple_short_headers() {
+    // Sanity regression for the existing MultipleShortHeaders case —
+    // ensure the ShortHeaderNotLast path doesn't silently swallow it.
+    let plan = CoalescePlan {
+        version: 0x00000001_u32,
+        dcid:    ConnectionId.empty(),
+        scid:    ConnectionId.empty(),
+        packets: [mk_onertt(0_u64), mk_onertt(1_u64)],
+        pad_to:  0,
+    };
+    assert(assemble_verdict(&plan) == f"MultipleShortHeaders");
+}
+
+@main
+public fn main() -> Int {
+    short_before_long_is_rejected();
+    short_in_middle_of_three_is_rejected();
+    short_at_end_after_longs_does_not_trip_short_last();
+    only_longs_pass_short_header_check();
+    two_shorts_remains_multiple_short_headers();
+    print("RFC 9000 §12.2 Short-header-last ordering verified");
+    0
+}
