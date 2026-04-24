@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/differential/mod.vr
+// =============================================================================
+// Layer: 7+ (test infrastructure)
+// Spec: sqlite-native.md §22.4 (differential — V vs C)
+//
+// Differential test harness scaffolding. The actual host wires
+// against the bundled C-SQLite reference binary; this module
+// supplies the abstract case + result + comparator surface so
+// runners can be written in Verum.
+//
+// Submodules:
+//   * `case`      — DifferentialCase (input SQL + setup + expected mode)
+//   * `result`    — RunResult (rows / error / side-effect summary)
+//   * `compare`   — Comparator + DiffOutcome (Match / RowMismatch / ErrorMismatch / Etc)
+//   * `oracle`    — DifferentialOracle drives a paired runner
+// =============================================================================
+
+module core.database.sqlite.native.differential;
+
+public module case;
+public module result;
+public module compare;
+public module oracle;

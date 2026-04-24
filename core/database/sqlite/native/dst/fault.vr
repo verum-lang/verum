@@ -1,0 +1,151 @@
+// =============================================================================
+// dst/fault.vr — fault-injection taxonomy
+// =============================================================================
+// Spec: sqlite-native.md §22.5 (DST)
+//
+// `Fault` enumerates every byzantine event the harness can inject
+// against the simulated VFS / scheduler / clock. The `FaultSchedule`
+// pairs each fault with the op-index at which it should fire — same
+// seed → same schedule → same crash trace.
+// =============================================================================
+
+module core.database.sqlite.native.dst.fault;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.dst.seed.{DstSeed};
+
+// -----------------------------------------------------------------------------
+// Fault taxonomy
+// -----------------------------------------------------------------------------
+
+public type Fault is
+      FaultPowerLoss
+    | FaultDiskFull
+    | FaultIoError(Text)              // detail
+    | FaultSlowFsync(Int64)           // delay_ns
+    | FaultPartialWrite(Int)          // bytes_written before drop
+    | FaultClockSkew(Int64);          // ns
+
+public fn fault_kind_name(f: &Fault) -> Text {
+    match f {
+        FaultPowerLoss        => "power_loss".clone(),
+        FaultDiskFull         => "disk_full".clone(),
+        FaultIoError(_)       => "io_error".clone(),
+        FaultSlowFsync(_)     => "slow_fsync".clone(),
+        FaultPartialWrite(_)  => "partial_write".clone(),
+        FaultClockSkew(_)     => "clock_skew".clone(),
+    }
+}
+
+public fn is_terminal(f: &Fault) -> Bool {
+    match f {
+        FaultPowerLoss => true,
+        _              => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Scheduled fault
+// -----------------------------------------------------------------------------
+
+public type ScheduledFault is {
+    /// Op index at which the fault fires.
+    at_op: Int,
+    fault: Fault,
+}
+
+public fn scheduled(at_op: Int, fault: Fault) -> ScheduledFault {
+    ScheduledFault { at_op: at_op, fault: fault }
+}
+
+// -----------------------------------------------------------------------------
+// FaultSchedule — fault sequence ready for the harness
+// -----------------------------------------------------------------------------
+
+public type FaultSchedule is { entries: List<ScheduledFault> }
+
+public fn schedule_empty() -> FaultSchedule { FaultSchedule { entries: List.new() } }
+
+implement FaultSchedule {
+    public fn len(&self) -> Int { self.entries.len() }
+
+    pub fn push(&mut self, e: ScheduledFault) { self.entries.push(e); }
+
+    /// First fault at-or-after `op_idx`.
+    pub fn next_after(&self, op_idx: Int) -> base.Maybe<ScheduledFault> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].at_op >= op_idx {
+                return base.Some(scheduled(self.entries[i].at_op, clone_fault(&self.entries[i].fault)));
+            }
+            i = i + 1;
+        }
+        base.None
+    }
+
+    /// Op index at which the first terminal fault (PowerLoss) fires.
+    /// `len()+1` if none scheduled.
+    pub fn terminal_at(&self) -> Int {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if is_terminal(&self.entries[i].fault) {
+                return self.entries[i].at_op;
+            }
+            i = i + 1;
+        }
+        self.entries.len() + 1
+    }
+}
+
+fn clone_fault(f: &Fault) -> Fault {
+    match f {
+        FaultPowerLoss        => FaultPowerLoss,
+        FaultDiskFull         => FaultDiskFull,
+        FaultIoError(d)       => FaultIoError(d.clone()),
+        FaultSlowFsync(n)     => FaultSlowFsync(*n),
+        FaultPartialWrite(b)  => FaultPartialWrite(*b),
+        FaultClockSkew(s)     => FaultClockSkew(*s),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Schedule generator — derive a FaultSchedule from a seed + density
+// -----------------------------------------------------------------------------
+
+public type FaultDensity is {
+    /// Probability (out of 1000) any given op is a fault site.
+    site_per_mille: Int,
+    /// Whether to include a terminal PowerLoss somewhere.
+    include_terminal: Bool,
+}
+
+public fn default_density() -> FaultDensity {
+    FaultDensity { site_per_mille: 50, include_terminal: true }
+}
+
+public fn generate_schedule(seed: &mut DstSeed, total_ops: Int, density: &FaultDensity) -> FaultSchedule {
+    let mut sched = schedule_empty();
+    let mut i: Int = 0;
+    while i < total_ops {
+        if seed.bernoulli(density.site_per_mille, 1000) {
+            sched.push(scheduled(i, draw_fault(seed)));
+        }
+        i = i + 1;
+    }
+    if density.include_terminal && total_ops > 0 {
+        let at = seed.next_below(total_ops);
+        sched.push(scheduled(at, FaultPowerLoss));
+    }
+    sched
+}
+
+fn draw_fault(seed: &mut DstSeed) -> Fault {
+    let pick = seed.next_below(5);
+    if pick == 0 { FaultDiskFull }
+    else if pick == 1 { FaultIoError("EIO".clone()) }
+    else if pick == 2 { FaultSlowFsync(seed.next_u64() & (1000000 as Int64)) }
+    else if pick == 3 { FaultPartialWrite(seed.next_below(4096)) }
+    else { FaultClockSkew(seed.next_u64() & (10000000 as Int64)) }
+}

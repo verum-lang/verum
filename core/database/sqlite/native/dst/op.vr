@@ -1,0 +1,116 @@
+// =============================================================================
+// dst/op.vr — DbOp taxonomy for simulation
+// =============================================================================
+// Spec: sqlite-native.md §22.5 (DST)
+//
+// Each `DbOp` is one user-visible action the harness will replay
+// against the live Database. The set is deliberately small —
+// enough to drive the L7 façade, not enough to model every SQL
+// feature. (Larger surfaces use the SQLancer-style fuzzer in
+// `core.database.sqlite.native.fuzz`.)
+// =============================================================================
+
+module core.database.sqlite.native.dst.op;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+public type DbOp is
+      OpInsert(Int, Text)               // (id, name)
+    | OpUpdate(Int, Text)               // (id, new_name)
+    | OpDelete(Int)
+    | OpSelectById(Int)
+    | OpBegin
+    | OpCommit
+    | OpRollback
+    | OpCheckpoint
+    | OpVacuum;
+
+public fn op_kind_name(o: &DbOp) -> Text {
+    match o {
+        OpInsert(_, _)   => "insert".clone(),
+        OpUpdate(_, _)   => "update".clone(),
+        OpDelete(_)      => "delete".clone(),
+        OpSelectById(_)  => "select".clone(),
+        OpBegin          => "begin".clone(),
+        OpCommit         => "commit".clone(),
+        OpRollback       => "rollback".clone(),
+        OpCheckpoint     => "checkpoint".clone(),
+        OpVacuum         => "vacuum".clone(),
+    }
+}
+
+public fn is_mutation(o: &DbOp) -> Bool {
+    match o {
+        OpInsert(_, _) => true,
+        OpUpdate(_, _) => true,
+        OpDelete(_)    => true,
+        _              => false,
+    }
+}
+
+public fn is_tx_boundary(o: &DbOp) -> Bool {
+    match o {
+        OpBegin    => true,
+        OpCommit   => true,
+        OpRollback => true,
+        _          => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// OpStream — a recorded op sequence
+// -----------------------------------------------------------------------------
+
+public type OpStream is { ops: List<DbOp> }
+
+public fn op_stream_empty() -> OpStream { OpStream { ops: List.new() } }
+
+implement OpStream {
+    public fn len(&self) -> Int { self.ops.len() }
+
+    pub fn push(&mut self, o: DbOp) { self.ops.push(o); }
+
+    /// Take the prefix `[0, n)` — used by the harness to compute "what
+    /// was committed before the simulated power loss".
+    pub fn prefix(&self, n: Int) -> List<DbOp> {
+        let mut out: List<DbOp> = List.new();
+        let cap = if n < self.ops.len() { n } else { self.ops.len() };
+        let mut i: Int = 0;
+        while i < cap { out.push(clone_op(&self.ops[i])); i = i + 1; }
+        out
+    }
+
+    /// Compute the highest-index op that the database would have
+    /// durably persisted given the supplied `committed_until`.
+    /// "Durable" means the op precedes the most recent OpCommit
+    /// at-or-before `committed_until`.
+    pub fn last_durable_index(&self, committed_until: Int) -> Int {
+        let cap = if committed_until < self.ops.len() { committed_until } else { self.ops.len() };
+        let mut last_commit: Int = -1;
+        let mut i: Int = 0;
+        while i < cap {
+            match &self.ops[i] {
+                OpCommit => { last_commit = i; }
+                _        => {}
+            }
+            i = i + 1;
+        }
+        last_commit
+    }
+}
+
+fn clone_op(o: &DbOp) -> DbOp {
+    match o {
+        OpInsert(id, name)  => OpInsert(*id, name.clone()),
+        OpUpdate(id, name)  => OpUpdate(*id, name.clone()),
+        OpDelete(id)        => OpDelete(*id),
+        OpSelectById(id)    => OpSelectById(*id),
+        OpBegin             => OpBegin,
+        OpCommit            => OpCommit,
+        OpRollback          => OpRollback,
+        OpCheckpoint        => OpCheckpoint,
+        OpVacuum            => OpVacuum,
+    }
+}

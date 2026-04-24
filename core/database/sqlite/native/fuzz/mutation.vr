@@ -1,0 +1,103 @@
+// =============================================================================
+// fuzz/mutation.vr — Mutation taxonomy + Mutator protocol
+// =============================================================================
+// Spec: sqlite-native.md §22.6 (fuzz harness)
+//
+// Every mutator emits (or transforms) a `MutationKind`. The kind
+// is recorded alongside the candidate input so corpus stats can
+// answer "which mutation classes are finding bugs".
+// =============================================================================
+
+module core.database.sqlite.native.fuzz.mutation;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// MutationKind taxonomy — covers all three fuzzer surfaces
+// -----------------------------------------------------------------------------
+
+public type MutationKind is
+      // grammar
+      MkGrammarInsert
+    | MkGrammarSelect
+    | MkGrammarUpdate
+    | MkGrammarDelete
+    | MkGrammarPragma
+    | MkGrammarTrigger
+    | MkGrammarUnion
+    // format
+    | MkFlipBit
+    | MkFlipByte
+    | MkInsertByte
+    | MkDeleteByte
+    | MkSwapPages
+    | MkCorruptHeader
+    | MkCorruptCellOffset
+    | MkTruncateFile
+    // wal
+    | MkWalReorder
+    | MkWalDuplicateFrame
+    | MkWalCorruptChecksum
+    | MkWalDropCommitFrame
+    | MkWalEpochSkew;
+
+public fn mutation_kind_name(k: &MutationKind) -> Text {
+    match k {
+        MkGrammarInsert       => "grammar.insert".clone(),
+        MkGrammarSelect       => "grammar.select".clone(),
+        MkGrammarUpdate       => "grammar.update".clone(),
+        MkGrammarDelete       => "grammar.delete".clone(),
+        MkGrammarPragma       => "grammar.pragma".clone(),
+        MkGrammarTrigger      => "grammar.trigger".clone(),
+        MkGrammarUnion        => "grammar.union".clone(),
+        MkFlipBit             => "format.flip_bit".clone(),
+        MkFlipByte            => "format.flip_byte".clone(),
+        MkInsertByte          => "format.insert_byte".clone(),
+        MkDeleteByte          => "format.delete_byte".clone(),
+        MkSwapPages           => "format.swap_pages".clone(),
+        MkCorruptHeader       => "format.corrupt_header".clone(),
+        MkCorruptCellOffset   => "format.corrupt_cell_offset".clone(),
+        MkTruncateFile        => "format.truncate_file".clone(),
+        MkWalReorder          => "wal.reorder".clone(),
+        MkWalDuplicateFrame   => "wal.duplicate_frame".clone(),
+        MkWalCorruptChecksum  => "wal.corrupt_checksum".clone(),
+        MkWalDropCommitFrame  => "wal.drop_commit".clone(),
+        MkWalEpochSkew        => "wal.epoch_skew".clone(),
+    }
+}
+
+public fn surface_name(k: &MutationKind) -> Text {
+    match k {
+        MkGrammarInsert | MkGrammarSelect | MkGrammarUpdate | MkGrammarDelete
+        | MkGrammarPragma | MkGrammarTrigger | MkGrammarUnion
+            => "grammar".clone(),
+        MkFlipBit | MkFlipByte | MkInsertByte | MkDeleteByte | MkSwapPages
+        | MkCorruptHeader | MkCorruptCellOffset | MkTruncateFile
+            => "format".clone(),
+        MkWalReorder | MkWalDuplicateFrame | MkWalCorruptChecksum
+        | MkWalDropCommitFrame | MkWalEpochSkew
+            => "wal".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Mutator protocol — every fuzzer surface implements this
+// -----------------------------------------------------------------------------
+
+public type Mutator is protocol {
+    fn surface(&self) -> Text;
+    fn mutate(&self, seed: Int64, input: &List<Byte>) -> MutationOutput;
+};
+
+public type MutationOutput is {
+    bytes: List<Byte>,
+    kind: MutationKind,
+    /// Brief human-readable description (used in crash bucket).
+    description: Text,
+}
+
+public fn mutation_output(bytes: List<Byte>, kind: MutationKind, description: Text) -> MutationOutput {
+    MutationOutput { bytes: bytes, kind: kind, description: description }
+}

@@ -1,0 +1,98 @@
+// =============================================================================
+// differential/case.vr — DifferentialCase
+// =============================================================================
+// Spec: sqlite-native.md §22.4
+// =============================================================================
+
+module core.database.sqlite.native.differential.case;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SetupAction — schema/data the harness must create before the tested SQL runs
+// -----------------------------------------------------------------------------
+
+public type SetupAction is
+      SaSql(Text)               // arbitrary DDL/DML
+    | SaPragma(Text)            // PRAGMA … (config)
+    | SaAttach(Text);           // ATTACH DATABASE filename AS name
+
+public fn setup_kind_name(a: &SetupAction) -> Text {
+    match a {
+        SaSql(_)    => "sql".clone(),
+        SaPragma(_) => "pragma".clone(),
+        SaAttach(_) => "attach".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CaseMode — what kind of comparison the case demands
+// -----------------------------------------------------------------------------
+
+public type CaseMode is
+      CmExactRows                // identical row sets in identical order
+    | CmRowsetEquivalent         // same multiset of rows; order may differ
+    | CmErrorClass(Text)         // both ends should error with the same class (e.g. "constraint")
+    | CmSideEffect;              // rows may differ; side effects (PRAGMA value / row count) must match
+
+public fn case_mode_name(m: &CaseMode) -> Text {
+    match m {
+        CmExactRows         => "exact_rows".clone(),
+        CmRowsetEquivalent  => "rowset_equivalent".clone(),
+        CmErrorClass(_)     => "error_class".clone(),
+        CmSideEffect        => "side_effect".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DifferentialCase
+// -----------------------------------------------------------------------------
+
+public type DifferentialCase is {
+    /// Stable identifier — survives across runs.
+    name: Text,
+    /// Setup applied to BOTH ends before `sql` runs.
+    setup: List<SetupAction>,
+    /// The statement under test.
+    sql: Text,
+    mode: CaseMode,
+    /// Tags for filtering — e.g. "join", "fts5", "trigger".
+    tags: List<Text>,
+}
+
+public fn differential_case(
+    name: Text,
+    sql: Text,
+    mode: CaseMode,
+) -> DifferentialCase {
+    DifferentialCase {
+        name: name,
+        setup: List.new(),
+        sql: sql,
+        mode: mode,
+        tags: List.new(),
+    }
+}
+
+implement DifferentialCase {
+    pub fn with_setup(mut self, action: SetupAction) -> DifferentialCase {
+        self.setup.push(action);
+        self
+    }
+
+    pub fn with_tag(mut self, tag: Text) -> DifferentialCase {
+        self.tags.push(tag);
+        self
+    }
+
+    pub fn has_tag(&self, want: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.tags.len() {
+            if self.tags[i] == *want { return true; }
+            i = i + 1;
+        }
+        false
+    }
+}

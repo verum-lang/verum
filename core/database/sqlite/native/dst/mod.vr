@@ -1,0 +1,28 @@
+// =============================================================================
+// core/database/sqlite/native/dst/mod.vr
+// =============================================================================
+// Layer: 7+ (test infrastructure)
+// Spec: sqlite-native.md §22.5 (DST — deterministic simulation testing)
+//
+// DST harness scaffolding. The actual scheduler integration lives
+// in `core.async.runtime.test_clock` and `core.runtime.dst`; this
+// module is the SQLite-specific surface — what to inject + what
+// invariants to assert under simulation.
+//
+// Submodules:
+//   * `seed`      — DstSeed (xoshiro256** state) + reproducible draws
+//   * `op`        — DbOp taxonomy (Insert / Update / Delete / Begin / Commit / ...)
+//   * `generator` — random op-sequence generator
+//   * `fault`     — fault-injection taxonomy (PowerLoss / DiskFull / SlowFsync)
+//   * `oracle`    — durability + atomicity invariant checks
+//   * `harness`   — DstHarness state machine driving generator + faults + oracles
+// =============================================================================
+
+module core.database.sqlite.native.dst;
+
+public module seed;
+public module op;
+public module generator;
+public module fault;
+public module oracle;
+public module harness;

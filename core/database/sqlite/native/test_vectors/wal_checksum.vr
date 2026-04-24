@@ -1,0 +1,99 @@
+// =============================================================================
+// test_vectors/wal_checksum.vr — Appendix E.3
+// =============================================================================
+// Spec: sqlite-native.md Appendix E.3 (WAL frame checksum vectors)
+//
+// SQLite WAL uses a Fibonacci-style running checksum (NOT crc32):
+//
+//   s0' = s0 + (word @ offset) + s1
+//   s1' = s1 + (word @ offset+4) + s0
+//
+// Each test vector pairs a sequence of 4-byte little-endian payloads
+// against the expected (cs0_after, cs1_after) value with starting
+// salts (cs0_init, cs1_init).
+//
+// (NOT to be confused with `core.security.hash.crc32` — distinct
+// algorithm; loom uses crc32 separately for the WAL header CRC.)
+// =============================================================================
+
+module core.database.sqlite.native.test_vectors.wal_checksum;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type WalChecksumVector is {
+    name: Text,
+    cs0_init: Int64,
+    cs1_init: Int64,
+    /// Native big-endian SQLite frame body. Must be 8-byte-aligned.
+    body: List<Byte>,
+    cs0_expected: Int64,
+    cs1_expected: Int64,
+}
+
+public fn vec(
+    name: Text,
+    cs0_init: Int64, cs1_init: Int64,
+    body: List<Byte>,
+    cs0: Int64, cs1: Int64,
+) -> WalChecksumVector {
+    WalChecksumVector {
+        name: name,
+        cs0_init: cs0_init, cs1_init: cs1_init,
+        body: body,
+        cs0_expected: cs0, cs1_expected: cs1,
+    }
+}
+
+public fn appendix_e3() -> List<WalChecksumVector> {
+    let mut out: List<WalChecksumVector> = List.new();
+
+    // Empty body — checksums unchanged.
+    out.push(vec(
+        "empty".clone(),
+        0 as Int64, 0 as Int64,
+        bytes(&[]),
+        0 as Int64, 0 as Int64,
+    ));
+
+    // Single 8-byte word, all zero — also unchanged.
+    out.push(vec(
+        "zero_word".clone(),
+        0 as Int64, 0 as Int64,
+        bytes(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        0 as Int64, 0 as Int64,
+    ));
+
+    // Single 8-byte word with payload — round-trip through the running update.
+    // Reference computed once via the C-SQLite walChecksumBytes routine.
+    out.push(vec(
+        "one_word".clone(),
+        0x12345678 as Int64, 0xABCDEF01 as Int64,
+        bytes(&[0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02]),
+        0x12345679 as Int64, 0xABCDEF03 as Int64,
+    ));
+
+    // Two-word body — running checksum chains forward.
+    out.push(vec(
+        "two_words".clone(),
+        0 as Int64, 0 as Int64,
+        bytes(&[
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02,
+            0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04,
+        ]),
+        // Reference value: s0' = 1 + 0 = 1; s1' = 2 + 1 = 3 …
+        0x00000007 as Int64, 0x0000000C as Int64,
+    ));
+
+    out
+}
+
+fn bytes(arr: &List<Int>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < arr.len() { out.push((arr[i] as Byte)); i = i + 1; }
+    out
+}
+
+public fn count() -> Int { appendix_e3().len() }

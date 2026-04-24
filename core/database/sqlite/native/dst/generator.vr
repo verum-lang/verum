@@ -1,0 +1,173 @@
+// =============================================================================
+// dst/generator.vr — random op-sequence generator
+// =============================================================================
+// Spec: sqlite-native.md §22.5 (DST)
+//
+// Generates an `OpStream` from a `DstSeed` according to a configurable
+// op mix. The generator maintains a small "live keys" set so update /
+// delete / select draws don't always miss.
+// =============================================================================
+
+module core.database.sqlite.native.dst.generator;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.dst.seed.{DstSeed};
+mount core.database.sqlite.native.dst.op.{
+    DbOp, OpInsert, OpUpdate, OpDelete, OpSelectById,
+    OpBegin, OpCommit, OpRollback, OpCheckpoint,
+    OpStream, op_stream_empty,
+};
+
+// -----------------------------------------------------------------------------
+// OpMix — relative weights for each op kind.
+// -----------------------------------------------------------------------------
+
+public type OpMix is {
+    insert_weight: Int,
+    update_weight: Int,
+    delete_weight: Int,
+    select_weight: Int,
+    /// Probability (out of 100) that the next emitted op opens / closes
+    /// a transaction.
+    tx_pct: Int,
+    /// Probability (out of 100) of a checkpoint between txs.
+    checkpoint_pct: Int,
+}
+
+public fn default_mix() -> OpMix {
+    OpMix {
+        insert_weight: 5,
+        update_weight: 3,
+        delete_weight: 1,
+        select_weight: 4,
+        tx_pct: 20,
+        checkpoint_pct: 5,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Generator state
+// -----------------------------------------------------------------------------
+
+public type Generator is {
+    seed: DstSeed,
+    mix: OpMix,
+    /// Live primary-key universe — populated as the generator emits Insert.
+    live_keys: List<Int>,
+    /// Whether a transaction is currently open.
+    in_tx: Bool,
+    /// Monotonic id counter for OpInsert.
+    next_id: Int,
+}
+
+public fn generator_new(seed: DstSeed, mix: OpMix) -> Generator {
+    Generator {
+        seed: seed,
+        mix: mix,
+        live_keys: List.new(),
+        in_tx: false,
+        next_id: 1,
+    }
+}
+
+implement Generator {
+    pub fn live_count(&self) -> Int { self.live_keys.len() }
+
+    /// Emit `n` ops into a fresh OpStream.
+    pub fn emit(&mut self, n: Int) -> OpStream {
+        let mut s = op_stream_empty();
+        let mut i: Int = 0;
+        while i < n {
+            s.push(self.next_op());
+            i = i + 1;
+        }
+        s
+    }
+
+    fn next_op(&mut self) -> DbOp {
+        // Transaction boundary draw first — the boundary op slot is
+        // mutually exclusive with a data op for this position.
+        if self.seed.bernoulli(self.mix.tx_pct, 100) {
+            if self.in_tx {
+                self.in_tx = false;
+                return if self.seed.next_bool() { OpCommit } else { OpRollback };
+            } else {
+                self.in_tx = true;
+                return OpBegin;
+            }
+        }
+        if !self.in_tx && self.seed.bernoulli(self.mix.checkpoint_pct, 100) {
+            return OpCheckpoint;
+        }
+
+        let total =
+            self.mix.insert_weight + self.mix.update_weight +
+            self.mix.delete_weight + self.mix.select_weight;
+        let pick = self.seed.next_below(total);
+
+        if pick < self.mix.insert_weight {
+            let id = self.next_id;
+            self.next_id = self.next_id + 1;
+            self.live_keys.push(id);
+            return OpInsert(id, gen_name(&mut self.seed));
+        }
+        let mut acc = self.mix.insert_weight;
+        if pick < acc + self.mix.update_weight {
+            return match self.pick_live_key() {
+                base.Some(k) => OpUpdate(k, gen_name(&mut self.seed)),
+                base.None    => OpInsert(self.next_id_taken(), gen_name(&mut self.seed)),
+            };
+        }
+        acc = acc + self.mix.update_weight;
+        if pick < acc + self.mix.delete_weight {
+            return match self.pick_live_key() {
+                base.Some(k) => {
+                    self.evict_key(k);
+                    OpDelete(k)
+                }
+                base.None    => OpSelectById(0),
+            };
+        }
+        match self.pick_live_key() {
+            base.Some(k) => OpSelectById(k),
+            base.None    => OpSelectById(0),
+        }
+    }
+
+    fn pick_live_key(&mut self) -> base.Maybe<Int> {
+        if self.live_keys.len() == 0 { return base.None; }
+        let idx = self.seed.next_below(self.live_keys.len());
+        base.Some(self.live_keys[idx])
+    }
+
+    fn evict_key(&mut self, k: Int) {
+        let mut new_keys: List<Int> = List.new();
+        let mut i: Int = 0;
+        while i < self.live_keys.len() {
+            if self.live_keys[i] != k { new_keys.push(self.live_keys[i]); }
+            i = i + 1;
+        }
+        self.live_keys = new_keys;
+    }
+
+    fn next_id_taken(&mut self) -> Int {
+        let id = self.next_id;
+        self.next_id = self.next_id + 1;
+        self.live_keys.push(id);
+        id
+    }
+}
+
+fn gen_name(s: &mut DstSeed) -> base.Text {
+    // 8-byte ASCII letter blob — deterministic per draw.
+    let mut t = base.Text.new();
+    let mut i: Int = 0;
+    while i < 8 {
+        let c: Byte = ((s.next_below(26) as Byte) + (97 as Byte));
+        t.push_byte(c);
+        i = i + 1;
+    }
+    t
+}

@@ -1,0 +1,162 @@
+// =============================================================================
+// fuzz/wal.vr — WAL frame sequence mutator
+// =============================================================================
+// Spec: sqlite-native.md §22.6 (fuzz harness — WAL surface)
+//
+// Operates on a list of frames represented opaquely as `List<Byte>`
+// payloads — the recovery code in L1 must shrug off every variant
+// (re-order, duplicate, dropped commit, mismatched checksum).
+// =============================================================================
+
+module core.database.sqlite.native.fuzz.wal;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.dst.seed.{DstSeed, seed_from_u64};
+mount core.database.sqlite.native.fuzz.mutation.{
+    MutationKind,
+    MkWalReorder, MkWalDuplicateFrame, MkWalCorruptChecksum,
+    MkWalDropCommitFrame, MkWalEpochSkew,
+};
+
+// -----------------------------------------------------------------------------
+// WalFrameBlob — opaque payload for one WAL frame
+// -----------------------------------------------------------------------------
+
+public type WalFrameBlob is {
+    bytes: List<Byte>,
+    /// True iff this frame is a commit boundary (db_size_after > 0).
+    is_commit: Bool,
+}
+
+public fn wal_frame_blob(bytes: List<Byte>, is_commit: Bool) -> WalFrameBlob {
+    WalFrameBlob { bytes: bytes, is_commit: is_commit }
+}
+
+// -----------------------------------------------------------------------------
+// WalMutationResult
+// -----------------------------------------------------------------------------
+
+public type WalMutationResult is {
+    frames: List<WalFrameBlob>,
+    kind: MutationKind,
+    description: Text,
+}
+
+public fn wal_result(frames: List<WalFrameBlob>, kind: MutationKind, description: Text) -> WalMutationResult {
+    WalMutationResult { frames: frames, kind: kind, description: description }
+}
+
+// -----------------------------------------------------------------------------
+// WalMutator
+// -----------------------------------------------------------------------------
+
+public type WalMutator is { unit: Bool }
+
+public fn wal_mutator() -> WalMutator { WalMutator { unit: true } }
+
+public fn mutate_wal(_m: &WalMutator, seed: Int64, input: &List<WalFrameBlob>) -> WalMutationResult {
+    let mut s = seed_from_u64(seed);
+    let pick = s.next_below(5);
+    if pick == 0 { return reorder(input, &mut s); }
+    if pick == 1 { return duplicate_frame(input, &mut s); }
+    if pick == 2 { return corrupt_checksum(input, &mut s); }
+    if pick == 3 { return drop_commit(input); }
+    epoch_skew(input, &mut s)
+}
+
+// -----------------------------------------------------------------------------
+// Mutations
+// -----------------------------------------------------------------------------
+
+fn reorder(input: &List<WalFrameBlob>, s: &mut DstSeed) -> WalMutationResult {
+    let mut frames: List<WalFrameBlob> = List.new();
+    let mut i: Int = 0;
+    while i < input.len() { frames.push(clone_blob(&input[i])); i = i + 1; }
+    if frames.len() < 2 {
+        return wal_result(frames, MkWalReorder, "reorder:tiny".clone());
+    }
+    let a = s.next_below(frames.len());
+    let b = s.next_below(frames.len());
+    if a != b {
+        let tmp = clone_blob(&frames[a]);
+        frames[a] = clone_blob(&frames[b]);
+        frames[b] = tmp;
+    }
+    wal_result(frames, MkWalReorder, "reorder".clone())
+}
+
+fn duplicate_frame(input: &List<WalFrameBlob>, s: &mut DstSeed) -> WalMutationResult {
+    let mut frames: List<WalFrameBlob> = List.new();
+    if input.len() == 0 {
+        return wal_result(frames, MkWalDuplicateFrame, "dup:empty".clone());
+    }
+    let pick = s.next_below(input.len());
+    let mut i: Int = 0;
+    while i < input.len() {
+        frames.push(clone_blob(&input[i]));
+        if i == pick { frames.push(clone_blob(&input[i])); }
+        i = i + 1;
+    }
+    wal_result(frames, MkWalDuplicateFrame, "duplicate_frame".clone())
+}
+
+fn corrupt_checksum(input: &List<WalFrameBlob>, s: &mut DstSeed) -> WalMutationResult {
+    let mut frames: List<WalFrameBlob> = List.new();
+    let mut i: Int = 0;
+    while i < input.len() { frames.push(clone_blob(&input[i])); i = i + 1; }
+    if frames.len() == 0 {
+        return wal_result(frames, MkWalCorruptChecksum, "checksum:empty".clone());
+    }
+    let pick = s.next_below(frames.len());
+    let bytes = &mut frames[pick].bytes;
+    if bytes.len() >= 4 {
+        // SQLite WAL frame header has the checksum at offset 16 (8 bytes).
+        // For our opaque test we just flip the last 4 bytes.
+        let n = bytes.len();
+        bytes[n - 1] = bytes[n - 1] ^ (0xFF as Byte);
+    }
+    wal_result(frames, MkWalCorruptChecksum, "corrupt_checksum".clone())
+}
+
+fn drop_commit(input: &List<WalFrameBlob>) -> WalMutationResult {
+    let mut frames: List<WalFrameBlob> = List.new();
+    let mut dropped = false;
+    let mut i: Int = 0;
+    while i < input.len() {
+        if !dropped && input[i].is_commit {
+            dropped = true;
+        } else {
+            frames.push(clone_blob(&input[i]));
+        }
+        i = i + 1;
+    }
+    let descr = if dropped { "drop_commit".clone() } else { "drop_commit:none".clone() };
+    wal_result(frames, MkWalDropCommitFrame, descr)
+}
+
+fn epoch_skew(input: &List<WalFrameBlob>, s: &mut DstSeed) -> WalMutationResult {
+    // Without a parsed frame view we can't change the epoch byte
+    // precisely; emit an approximation by flipping a byte at offset
+    // 4 of one frame which corresponds to the salt/header word.
+    let mut frames: List<WalFrameBlob> = List.new();
+    let mut i: Int = 0;
+    while i < input.len() { frames.push(clone_blob(&input[i])); i = i + 1; }
+    if frames.len() == 0 {
+        return wal_result(frames, MkWalEpochSkew, "epoch_skew:empty".clone());
+    }
+    let pick = s.next_below(frames.len());
+    let bytes = &mut frames[pick].bytes;
+    if bytes.len() >= 8 {
+        bytes[4] = bytes[4] ^ (0xFF as Byte);
+    }
+    wal_result(frames, MkWalEpochSkew, "epoch_skew".clone())
+}
+
+fn clone_blob(b: &WalFrameBlob) -> WalFrameBlob {
+    let mut bytes: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < b.bytes.len() { bytes.push(b.bytes[i]); i = i + 1; }
+    WalFrameBlob { bytes: bytes, is_commit: b.is_commit }
+}

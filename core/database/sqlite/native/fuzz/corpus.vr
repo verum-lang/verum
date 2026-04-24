@@ -1,0 +1,180 @@
+// =============================================================================
+// fuzz/corpus.vr — accumulated input corpus
+// =============================================================================
+// Spec: sqlite-native.md §22.6 (fuzz harness)
+//
+// Each `CorpusEntry` records ONE input the fuzzer found interesting:
+// it survived a mutation cycle, and it either crashed (rare!) or
+// covered new code paths (common).
+//
+// Aging policy: entries that haven't increased coverage in N cycles
+// get dropped to keep the corpus from drifting into the entropy
+// equilibrium where every mutator just emits noise.
+// =============================================================================
+
+module core.database.sqlite.native.fuzz.corpus;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.fuzz.mutation.{MutationKind};
+
+// -----------------------------------------------------------------------------
+// CorpusEntry
+// -----------------------------------------------------------------------------
+
+public type CorpusEntry is {
+    /// Stable id assigned by the corpus on insertion.
+    id: Int,
+    bytes: List<Byte>,
+    /// What mutation produced this entry (None for genesis / loaded seeds).
+    origin: base.Maybe<MutationKind>,
+    /// New basic-blocks the entry exercised when first added.
+    new_coverage_count: Int,
+    /// Cycles since this entry's last contribution to coverage.
+    age_cycles: Int,
+    /// True if the entry has triggered at least one crash.
+    crashed_at_least_once: Bool,
+}
+
+public fn corpus_entry(
+    id: Int,
+    bytes: List<Byte>,
+    origin: base.Maybe<MutationKind>,
+    new_coverage_count: Int,
+) -> CorpusEntry {
+    CorpusEntry {
+        id: id,
+        bytes: bytes,
+        origin: origin,
+        new_coverage_count: new_coverage_count,
+        age_cycles: 0,
+        crashed_at_least_once: false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Corpus
+// -----------------------------------------------------------------------------
+
+public type Corpus is {
+    entries: List<CorpusEntry>,
+    next_id: Int,
+    /// Drop entries with `age_cycles > max_age` whose coverage
+    /// contribution is zero.
+    max_age: Int,
+}
+
+public fn corpus_new() -> Corpus {
+    Corpus { entries: List.new(), next_id: 1, max_age: 1024 }
+}
+
+implement Corpus {
+    public fn len(&self) -> Int { self.entries.len() }
+
+    pub fn add(
+        &mut self,
+        bytes: List<Byte>,
+        origin: base.Maybe<MutationKind>,
+        new_coverage: Int,
+    ) -> Int {
+        let id = self.next_id;
+        self.next_id = id + 1;
+        self.entries.push(corpus_entry(id, bytes, origin, new_coverage));
+        id
+    }
+
+    pub fn mark_crashed(&mut self, id: Int) -> Bool {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].id == id {
+                self.entries[i].crashed_at_least_once = true;
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Bump every entry's age + drop the stale ones (no coverage hits
+    /// AND not crash-bearing AND age past max_age).
+    pub fn age_step(&mut self) -> Int {
+        let mut survivors: List<CorpusEntry> = List.new();
+        let mut dropped: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            let e = &self.entries[i];
+            let new_age = e.age_cycles + 1;
+            let should_keep = e.crashed_at_least_once
+                || e.new_coverage_count > 0
+                || new_age <= self.max_age;
+            if should_keep {
+                survivors.push(CorpusEntry {
+                    id: e.id,
+                    bytes: clone_bytes(&e.bytes),
+                    origin: clone_origin(&e.origin),
+                    new_coverage_count: e.new_coverage_count,
+                    age_cycles: new_age,
+                    crashed_at_least_once: e.crashed_at_least_once,
+                });
+            } else {
+                dropped = dropped + 1;
+            }
+            i = i + 1;
+        }
+        self.entries = survivors;
+        dropped
+    }
+
+    pub fn pick(&self, idx: Int) -> base.Maybe<CorpusEntry> {
+        if idx < 0 || idx >= self.entries.len() { return base.None; }
+        let e = &self.entries[idx];
+        base.Some(CorpusEntry {
+            id: e.id,
+            bytes: clone_bytes(&e.bytes),
+            origin: clone_origin(&e.origin),
+            new_coverage_count: e.new_coverage_count,
+            age_cycles: e.age_cycles,
+            crashed_at_least_once: e.crashed_at_least_once,
+        })
+    }
+}
+
+fn clone_bytes(b: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < b.len() { out.push(b[i]); i = i + 1; }
+    out
+}
+
+fn clone_origin(o: &base.Maybe<MutationKind>) -> base.Maybe<MutationKind> {
+    match o {
+        base.Some(k) => base.Some(clone_kind(k)),
+        base.None    => base.None,
+    }
+}
+
+fn clone_kind(k: &MutationKind) -> MutationKind {
+    match k {
+        core.database.sqlite.native.fuzz.mutation.MkGrammarInsert       => core.database.sqlite.native.fuzz.mutation.MkGrammarInsert,
+        core.database.sqlite.native.fuzz.mutation.MkGrammarSelect       => core.database.sqlite.native.fuzz.mutation.MkGrammarSelect,
+        core.database.sqlite.native.fuzz.mutation.MkGrammarUpdate       => core.database.sqlite.native.fuzz.mutation.MkGrammarUpdate,
+        core.database.sqlite.native.fuzz.mutation.MkGrammarDelete       => core.database.sqlite.native.fuzz.mutation.MkGrammarDelete,
+        core.database.sqlite.native.fuzz.mutation.MkGrammarPragma       => core.database.sqlite.native.fuzz.mutation.MkGrammarPragma,
+        core.database.sqlite.native.fuzz.mutation.MkGrammarTrigger      => core.database.sqlite.native.fuzz.mutation.MkGrammarTrigger,
+        core.database.sqlite.native.fuzz.mutation.MkGrammarUnion        => core.database.sqlite.native.fuzz.mutation.MkGrammarUnion,
+        core.database.sqlite.native.fuzz.mutation.MkFlipBit             => core.database.sqlite.native.fuzz.mutation.MkFlipBit,
+        core.database.sqlite.native.fuzz.mutation.MkFlipByte            => core.database.sqlite.native.fuzz.mutation.MkFlipByte,
+        core.database.sqlite.native.fuzz.mutation.MkInsertByte          => core.database.sqlite.native.fuzz.mutation.MkInsertByte,
+        core.database.sqlite.native.fuzz.mutation.MkDeleteByte          => core.database.sqlite.native.fuzz.mutation.MkDeleteByte,
+        core.database.sqlite.native.fuzz.mutation.MkSwapPages           => core.database.sqlite.native.fuzz.mutation.MkSwapPages,
+        core.database.sqlite.native.fuzz.mutation.MkCorruptHeader       => core.database.sqlite.native.fuzz.mutation.MkCorruptHeader,
+        core.database.sqlite.native.fuzz.mutation.MkCorruptCellOffset   => core.database.sqlite.native.fuzz.mutation.MkCorruptCellOffset,
+        core.database.sqlite.native.fuzz.mutation.MkTruncateFile        => core.database.sqlite.native.fuzz.mutation.MkTruncateFile,
+        core.database.sqlite.native.fuzz.mutation.MkWalReorder          => core.database.sqlite.native.fuzz.mutation.MkWalReorder,
+        core.database.sqlite.native.fuzz.mutation.MkWalDuplicateFrame   => core.database.sqlite.native.fuzz.mutation.MkWalDuplicateFrame,
+        core.database.sqlite.native.fuzz.mutation.MkWalCorruptChecksum  => core.database.sqlite.native.fuzz.mutation.MkWalCorruptChecksum,
+        core.database.sqlite.native.fuzz.mutation.MkWalDropCommitFrame  => core.database.sqlite.native.fuzz.mutation.MkWalDropCommitFrame,
+        core.database.sqlite.native.fuzz.mutation.MkWalEpochSkew        => core.database.sqlite.native.fuzz.mutation.MkWalEpochSkew,
+    }
+}

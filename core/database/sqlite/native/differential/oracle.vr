@@ -1,0 +1,152 @@
+// =============================================================================
+// differential/oracle.vr — DifferentialOracle drives a paired runner
+// =============================================================================
+// Spec: sqlite-native.md §22.4
+//
+// `DifferentialOracle` accumulates per-case outcomes + provides a
+// summary report. Callers feed it (case, loom_result, c_result)
+// triples and the oracle classifies each via the comparator.
+// =============================================================================
+
+module core.database.sqlite.native.differential.oracle;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.differential.case.{
+    DifferentialCase, CaseMode,
+};
+mount core.database.sqlite.native.differential.result.{RunResult};
+mount core.database.sqlite.native.differential.compare.{
+    DiffOutcome, DoMatch, DoStatusMismatch, DoRowCountMismatch, DoRowMismatch,
+    DoErrorClassMismatch, DoSideEffectMismatch,
+    compare, is_match, outcome_kind_name,
+};
+
+// -----------------------------------------------------------------------------
+// CaseReport — per-case record
+// -----------------------------------------------------------------------------
+
+public type CaseReport is {
+    case_name: Text,
+    outcome: DiffOutcome,
+    loom_elapsed_ns: Int64,
+    c_elapsed_ns: Int64,
+}
+
+public fn case_report(case_name: Text, outcome: DiffOutcome, l_ns: Int64, c_ns: Int64) -> CaseReport {
+    CaseReport {
+        case_name: case_name,
+        outcome: outcome,
+        loom_elapsed_ns: l_ns,
+        c_elapsed_ns: c_ns,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DifferentialOracle
+// -----------------------------------------------------------------------------
+
+public type DifferentialOracle is {
+    reports: List<CaseReport>,
+    matched: Int,
+    mismatched: Int,
+}
+
+public fn oracle_new() -> DifferentialOracle {
+    DifferentialOracle {
+        reports: List.new(),
+        matched: 0,
+        mismatched: 0,
+    }
+}
+
+implement DifferentialOracle {
+    public fn case_count(&self) -> Int { self.reports.len() }
+    public fn match_count(&self) -> Int { self.matched }
+    public fn mismatch_count(&self) -> Int { self.mismatched }
+
+    /// True iff every recorded case matched.
+    public fn all_match(&self) -> Bool {
+        self.mismatched == 0
+    }
+
+    /// Run the comparator + record a `CaseReport`.
+    pub fn observe(&mut self, c: &DifferentialCase, loom: &RunResult, csqlite: &RunResult) -> DiffOutcome {
+        let outcome = compare(loom, csqlite, &c.mode);
+        let matched = is_match(&outcome);
+        if matched { self.matched = self.matched + 1; }
+        else        { self.mismatched = self.mismatched + 1; }
+        let report = case_report(
+            c.name.clone(),
+            clone_outcome(&outcome),
+            loom.elapsed_ns,
+            csqlite.elapsed_ns,
+        );
+        self.reports.push(report);
+        outcome
+    }
+
+    /// First report that did NOT match — useful for failing-fast in CI.
+    pub fn first_mismatch(&self) -> base.Maybe<CaseReport> {
+        let mut i: Int = 0;
+        while i < self.reports.len() {
+            if !is_match(&self.reports[i].outcome) {
+                let r = &self.reports[i];
+                return base.Some(case_report(
+                    r.case_name.clone(),
+                    clone_outcome(&r.outcome),
+                    r.loom_elapsed_ns,
+                    r.c_elapsed_ns,
+                ));
+            }
+            i = i + 1;
+        }
+        base.None
+    }
+
+    /// One-line summary suitable for CI output.
+    pub fn summary(&self) -> Text {
+        let mut s = "differential: ".clone();
+        push_int(&mut s, self.matched);
+        push(&mut s, &"/".clone());
+        push_int(&mut s, self.case_count());
+        push(&mut s, &" match".clone());
+        if self.mismatched > 0 {
+            push(&mut s, &" (".clone());
+            push_int(&mut s, self.mismatched);
+            push(&mut s, &" diverged)".clone());
+        }
+        s
+    }
+}
+
+fn clone_outcome(o: &DiffOutcome) -> DiffOutcome {
+    match o {
+        DoMatch                              => DoMatch,
+        DoStatusMismatch(a, b)               => DoStatusMismatch(a.clone(), b.clone()),
+        DoRowCountMismatch(a, b)             => DoRowCountMismatch(*a, *b),
+        DoRowMismatch(i, a, b)               => DoRowMismatch(*i, a.clone(), b.clone()),
+        DoErrorClassMismatch(a, b)           => DoErrorClassMismatch(a.clone(), b.clone()),
+        DoSideEffectMismatch(d)              => DoSideEffectMismatch(d.clone()),
+    }
+}
+
+fn push(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn push_int(dst: &mut Text, n: Int) {
+    if n == 0 { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    while x > 0 {
+        digits.push(((x % 10) as Byte) + (48 as Byte));
+        x = x / 10;
+    }
+    if n < 0 { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}

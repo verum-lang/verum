@@ -1,0 +1,155 @@
+// =============================================================================
+// fuzz/format.vr — file-format byte mutator
+// =============================================================================
+// Spec: sqlite-native.md §22.6 (fuzz harness — format surface)
+//
+// Applies one byte-level perturbation per cycle. The DB will read
+// the mutated file expecting it to be valid; we want to drive the
+// recovery / integrity-check / corruption-handling paths.
+// =============================================================================
+
+module core.database.sqlite.native.fuzz.format;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.dst.seed.{DstSeed, seed_from_u64};
+mount core.database.sqlite.native.fuzz.mutation.{
+    Mutator, MutationOutput, mutation_output, MutationKind,
+    MkFlipBit, MkFlipByte, MkInsertByte, MkDeleteByte, MkSwapPages,
+    MkCorruptHeader, MkCorruptCellOffset, MkTruncateFile,
+};
+
+public type FormatMutator is { page_size: Int }
+
+public fn format_mutator(page_size: Int) -> FormatMutator {
+    FormatMutator { page_size: page_size }
+}
+
+implement Mutator for FormatMutator {
+    fn surface(&self) -> Text { "format".clone() }
+
+    fn mutate(&self, seed: Int64, input: &List<Byte>) -> MutationOutput {
+        let mut s = seed_from_u64(seed);
+        let pick = s.next_below(8);
+        if pick == 0 { return flip_bit(input, &mut s); }
+        if pick == 1 { return flip_byte(input, &mut s); }
+        if pick == 2 { return insert_byte(input, &mut s); }
+        if pick == 3 { return delete_byte(input, &mut s); }
+        if pick == 4 { return swap_pages(input, self.page_size, &mut s); }
+        if pick == 5 { return corrupt_header(input, &mut s); }
+        if pick == 6 { return corrupt_cell_offset(input, self.page_size, &mut s); }
+        truncate_file(input, &mut s)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Mutation primitives
+// -----------------------------------------------------------------------------
+
+fn flip_bit(input: &List<Byte>, s: &mut DstSeed) -> MutationOutput {
+    let mut out = clone_bytes(input);
+    if out.len() == 0 { return mutation_output(out, MkFlipBit, "flip_bit:empty".clone()); }
+    let idx = s.next_below(out.len());
+    let bit = (s.next_below(8) as Byte);
+    out[idx] = out[idx] ^ ((1 as Byte) << bit);
+    mutation_output(out, MkFlipBit, "flip_bit".clone())
+}
+
+fn flip_byte(input: &List<Byte>, s: &mut DstSeed) -> MutationOutput {
+    let mut out = clone_bytes(input);
+    if out.len() == 0 { return mutation_output(out, MkFlipByte, "flip_byte:empty".clone()); }
+    let idx = s.next_below(out.len());
+    out[idx] = (s.next_below(256) as Byte);
+    mutation_output(out, MkFlipByte, "flip_byte".clone())
+}
+
+fn insert_byte(input: &List<Byte>, s: &mut DstSeed) -> MutationOutput {
+    let mut out: List<Byte> = List.new();
+    let idx = if input.len() == 0 { 0 } else { s.next_below(input.len() + 1) };
+    let mut i: Int = 0;
+    while i < input.len() {
+        if i == idx { out.push((s.next_below(256) as Byte)); }
+        out.push(input[i]);
+        i = i + 1;
+    }
+    if idx == input.len() { out.push((s.next_below(256) as Byte)); }
+    mutation_output(out, MkInsertByte, "insert_byte".clone())
+}
+
+fn delete_byte(input: &List<Byte>, s: &mut DstSeed) -> MutationOutput {
+    if input.len() == 0 {
+        return mutation_output(clone_bytes(input), MkDeleteByte, "delete_byte:empty".clone());
+    }
+    let idx = s.next_below(input.len());
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < input.len() {
+        if i != idx { out.push(input[i]); }
+        i = i + 1;
+    }
+    mutation_output(out, MkDeleteByte, "delete_byte".clone())
+}
+
+fn swap_pages(input: &List<Byte>, page_size: Int, s: &mut DstSeed) -> MutationOutput {
+    let mut out = clone_bytes(input);
+    if page_size <= 0 || out.len() < page_size * 2 {
+        return mutation_output(out, MkSwapPages, "swap_pages:tiny".clone());
+    }
+    let pages = out.len() / page_size;
+    let p1 = s.next_below(pages);
+    let p2 = s.next_below(pages);
+    let off1 = p1 * page_size;
+    let off2 = p2 * page_size;
+    let mut k: Int = 0;
+    while k < page_size {
+        let tmp = out[off1 + k];
+        out[off1 + k] = out[off2 + k];
+        out[off2 + k] = tmp;
+        k = k + 1;
+    }
+    mutation_output(out, MkSwapPages, "swap_pages".clone())
+}
+
+fn corrupt_header(input: &List<Byte>, s: &mut DstSeed) -> MutationOutput {
+    let mut out = clone_bytes(input);
+    if out.len() < 100 {
+        return mutation_output(out, MkCorruptHeader, "corrupt_header:short".clone());
+    }
+    // Database header is the first 100 bytes; flip a byte inside.
+    let idx = s.next_below(100);
+    out[idx] = (s.next_below(256) as Byte);
+    mutation_output(out, MkCorruptHeader, "corrupt_header".clone())
+}
+
+fn corrupt_cell_offset(input: &List<Byte>, page_size: Int, s: &mut DstSeed) -> MutationOutput {
+    let mut out = clone_bytes(input);
+    if page_size <= 0 || out.len() < page_size {
+        return mutation_output(out, MkCorruptCellOffset, "corrupt_cell_offset:tiny".clone());
+    }
+    // Cell pointer array sits at page-header + 8 bytes; flip a byte.
+    let off = 12;  // approximate: skip btree page header for interior pages
+    if off >= out.len() {
+        return mutation_output(out, MkCorruptCellOffset, "corrupt_cell_offset:short".clone());
+    }
+    out[off] = (s.next_below(256) as Byte);
+    mutation_output(out, MkCorruptCellOffset, "corrupt_cell_offset".clone())
+}
+
+fn truncate_file(input: &List<Byte>, s: &mut DstSeed) -> MutationOutput {
+    if input.len() == 0 {
+        return mutation_output(clone_bytes(input), MkTruncateFile, "truncate:empty".clone());
+    }
+    let cut = s.next_below(input.len());
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < cut { out.push(input[i]); i = i + 1; }
+    mutation_output(out, MkTruncateFile, "truncate".clone())
+}
+
+fn clone_bytes(b: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < b.len() { out.push(b[i]); i = i + 1; }
+    out
+}

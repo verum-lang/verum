@@ -1,0 +1,83 @@
+// =============================================================================
+// test_vectors/varint.vr — Appendix E.1
+// =============================================================================
+// Spec: sqlite-native.md Appendix E.1 (varint test vectors)
+//
+// SQLite varint encoding (huffman-like, max 9 bytes). Each row is
+// one canonical (encoded_bytes, decoded_value) pair; the runner asserts:
+//
+//   varint_decode(encoded) == decoded
+//   varint_encode(decoded) == encoded
+//
+// The set covers every byte-length boundary (1, 2, 3, 4, 5, 6, 7, 8, 9).
+// =============================================================================
+
+module core.database.sqlite.native.test_vectors.varint;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type VarintVector is {
+    encoded: List<Byte>,
+    decoded: Int64,
+}
+
+public fn vec(encoded: List<Byte>, decoded: Int64) -> VarintVector {
+    VarintVector { encoded: encoded, decoded: decoded }
+}
+
+public fn appendix_e1() -> List<VarintVector> {
+    let mut out: List<VarintVector> = List.new();
+
+    // 1-byte (0..127)
+    out.push(vec(bytes(&[0x00]), 0 as Int64));
+    out.push(vec(bytes(&[0x01]), 1 as Int64));
+    out.push(vec(bytes(&[0x7F]), 127 as Int64));
+
+    // 2-byte (128..16383)
+    out.push(vec(bytes(&[0x81, 0x00]), 128 as Int64));
+    out.push(vec(bytes(&[0x82, 0x00]), 256 as Int64));
+    out.push(vec(bytes(&[0xFF, 0x7F]), 16383 as Int64));
+
+    // 3-byte (16384..2097151)
+    out.push(vec(bytes(&[0x81, 0x80, 0x00]), 16384 as Int64));
+    out.push(vec(bytes(&[0xC0, 0x80, 0x00]), 1048576 as Int64));
+    out.push(vec(bytes(&[0xFF, 0xFF, 0x7F]), 2097151 as Int64));
+
+    // 4-byte (2097152..268435455)
+    out.push(vec(bytes(&[0x81, 0x80, 0x80, 0x00]), 2097152 as Int64));
+    out.push(vec(bytes(&[0xFF, 0xFF, 0xFF, 0x7F]), 268435455 as Int64));
+
+    // 5-byte
+    out.push(vec(bytes(&[0x81, 0x80, 0x80, 0x80, 0x00]), 268435456 as Int64));
+    out.push(vec(bytes(&[0xFF, 0xFF, 0xFF, 0xFF, 0x7F]), 34359738367 as Int64));
+
+    // 6-byte
+    out.push(vec(bytes(&[0x81, 0x80, 0x80, 0x80, 0x80, 0x00]), 34359738368 as Int64));
+    out.push(vec(bytes(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]), 4398046511103 as Int64));
+
+    // 7-byte
+    out.push(vec(bytes(&[0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00]), 4398046511104 as Int64));
+    out.push(vec(bytes(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]), 562949953421311 as Int64));
+
+    // 8-byte
+    out.push(vec(bytes(&[0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00]), 562949953421312 as Int64));
+    out.push(vec(bytes(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]), 72057594037927935 as Int64));
+
+    // 9-byte (special form — 8th byte's high bit ignored, 9th byte takes 8 bits)
+    out.push(vec(bytes(&[0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00]), 72057594037927936 as Int64));
+    out.push(vec(bytes(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]), -1 as Int64));
+
+    out
+}
+
+fn bytes(arr: &List<Int>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < arr.len() { out.push((arr[i] as Byte)); i = i + 1; }
+    out
+}
+
+/// Convenience: total vector count (lets the harness print "21/21 PASS").
+public fn count() -> Int { appendix_e1().len() }

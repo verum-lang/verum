@@ -1,0 +1,151 @@
+// =============================================================================
+// test_vectors/record_encoding.vr — Appendix E.2
+// =============================================================================
+// Spec: sqlite-native.md Appendix E.2 (record encoding test vectors)
+//
+// SQLite record format (§9.1 serial types):
+//
+//   record := varint(header_size) || serial_types[] || values[]
+//
+// Each vector pairs a `RecordVector { header, values }` with the
+// canonical encoded byte sequence. The runner asserts encode +
+// decode round-trip exactly.
+// =============================================================================
+
+module core.database.sqlite.native.test_vectors.record_encoding;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SerialType — abstracted form of one column's serial-type code
+// -----------------------------------------------------------------------------
+
+public type SerialType is
+      StNull
+    | StInt8
+    | StInt16
+    | StInt24
+    | StInt32
+    | StInt48
+    | StInt64
+    | StReal
+    | StZero
+    | StOne
+    | StBlob(Int)            // length
+    | StText(Int);           // length
+
+public fn serial_type_code(t: &SerialType) -> Int {
+    match t {
+        StNull       => 0,
+        StInt8       => 1,
+        StInt16      => 2,
+        StInt24      => 3,
+        StInt32      => 4,
+        StInt48      => 5,
+        StInt64      => 6,
+        StReal       => 7,
+        StZero       => 8,
+        StOne        => 9,
+        StBlob(n)    => 12 + (2 * (*n)),
+        StText(n)    => 13 + (2 * (*n)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RecordVector
+// -----------------------------------------------------------------------------
+
+public type RecordVector is {
+    name: Text,
+    serial_types: List<SerialType>,
+    /// Canonical encoded bytes — header_varint || serial_type varints || data.
+    encoded: List<Byte>,
+}
+
+public fn record_vec(name: Text, types: List<SerialType>, encoded: List<Byte>) -> RecordVector {
+    RecordVector { name: name, serial_types: types, encoded: encoded }
+}
+
+// -----------------------------------------------------------------------------
+// Vector tables
+// -----------------------------------------------------------------------------
+
+public fn appendix_e2() -> List<RecordVector> {
+    let mut out: List<RecordVector> = List.new();
+
+    // (Null) — header 02 0x00, no payload.
+    out.push(record_vec("null".clone(),
+        types(&[StNull]),
+        bytes(&[0x02, 0x00])));
+
+    // (1 as Int8)
+    out.push(record_vec("int8_one".clone(),
+        types(&[StInt8]),
+        bytes(&[0x02, 0x01, 0x01])));
+
+    // (256 as Int16) — 0x0100
+    out.push(record_vec("int16_256".clone(),
+        types(&[StInt16]),
+        bytes(&[0x02, 0x02, 0x01, 0x00])));
+
+    // (1 as Int8, 'AB') — text length 2
+    out.push(record_vec("int_text".clone(),
+        types(&[StInt8, StText(2)]),
+        bytes(&[0x03, 0x01, 0x11, 0x01, 0x41, 0x42])));
+
+    // (1, 0) — sentinel zero/one — encoded as serial-type 9 / 8.
+    out.push(record_vec("one_zero".clone(),
+        types(&[StOne, StZero]),
+        bytes(&[0x03, 0x09, 0x08])));
+
+    // (Null, 'X') — text length 1
+    out.push(record_vec("null_text".clone(),
+        types(&[StNull, StText(1)]),
+        bytes(&[0x03, 0x00, 0x0F, 0x58])));
+
+    // (BLOB[4]) — header 02 0x14, payload 4 bytes
+    out.push(record_vec("blob4".clone(),
+        types(&[StBlob(4)]),
+        bytes(&[0x02, 0x14, 0xDE, 0xAD, 0xBE, 0xEF])));
+
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn types(arr: &List<SerialType>) -> List<SerialType> {
+    let mut out: List<SerialType> = List.new();
+    let mut i: Int = 0;
+    while i < arr.len() { out.push(clone_st(&arr[i])); i = i + 1; }
+    out
+}
+
+fn clone_st(t: &SerialType) -> SerialType {
+    match t {
+        StNull       => StNull,
+        StInt8       => StInt8,
+        StInt16      => StInt16,
+        StInt24      => StInt24,
+        StInt32      => StInt32,
+        StInt48      => StInt48,
+        StInt64      => StInt64,
+        StReal       => StReal,
+        StZero       => StZero,
+        StOne        => StOne,
+        StBlob(n)    => StBlob(*n),
+        StText(n)    => StText(*n),
+    }
+}
+
+fn bytes(arr: &List<Int>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < arr.len() { out.push((arr[i] as Byte)); i = i + 1; }
+    out
+}
+
+public fn count() -> Int { appendix_e2().len() }

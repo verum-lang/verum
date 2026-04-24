@@ -1,0 +1,236 @@
+// =============================================================================
+// fuzz/grammar.vr — SQL grammar-guided mutator
+// =============================================================================
+// Spec: sqlite-native.md §22.6 (fuzz harness — grammar surface)
+//
+// SQLancer-style. Emits one syntactically-valid SQL statement per
+// mutation cycle. The mutator does NOT understand semantics — its
+// goal is to drive the parser/planner/codegen path through every
+// production, not to produce SQL the engine accepts.
+// =============================================================================
+
+module core.database.sqlite.native.fuzz.grammar;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.dst.seed.{DstSeed, seed_from_u64};
+mount core.database.sqlite.native.fuzz.mutation.{
+    Mutator, MutationOutput, mutation_output, MutationKind,
+    MkGrammarInsert, MkGrammarSelect, MkGrammarUpdate, MkGrammarDelete,
+    MkGrammarPragma, MkGrammarTrigger, MkGrammarUnion,
+};
+
+// -----------------------------------------------------------------------------
+// GrammarMutator
+// -----------------------------------------------------------------------------
+
+public type GrammarMutator is { unit: Bool }
+
+public fn grammar_mutator() -> GrammarMutator { GrammarMutator { unit: true } }
+
+implement Mutator for GrammarMutator {
+    fn surface(&self) -> Text { "grammar".clone() }
+
+    fn mutate(&self, seed: Int64, _input: &List<Byte>) -> MutationOutput {
+        let mut s = seed_from_u64(seed);
+        let pick = s.next_below(7);
+        if pick == 0 {
+            let sql = emit_insert(&mut s);
+            return mutation_output(sql_to_bytes(&sql), MkGrammarInsert, "INSERT".clone());
+        }
+        if pick == 1 {
+            let sql = emit_select(&mut s);
+            return mutation_output(sql_to_bytes(&sql), MkGrammarSelect, "SELECT".clone());
+        }
+        if pick == 2 {
+            let sql = emit_update(&mut s);
+            return mutation_output(sql_to_bytes(&sql), MkGrammarUpdate, "UPDATE".clone());
+        }
+        if pick == 3 {
+            let sql = emit_delete(&mut s);
+            return mutation_output(sql_to_bytes(&sql), MkGrammarDelete, "DELETE".clone());
+        }
+        if pick == 4 {
+            let sql = emit_pragma(&mut s);
+            return mutation_output(sql_to_bytes(&sql), MkGrammarPragma, "PRAGMA".clone());
+        }
+        if pick == 5 {
+            let sql = emit_trigger(&mut s);
+            return mutation_output(sql_to_bytes(&sql), MkGrammarTrigger, "TRIGGER".clone());
+        }
+        let sql = emit_union(&mut s);
+        mutation_output(sql_to_bytes(&sql), MkGrammarUnion, "UNION".clone())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Statement emitters — minimal but realistic
+// -----------------------------------------------------------------------------
+
+fn emit_insert(s: &mut DstSeed) -> Text {
+    let mut sql = "INSERT INTO t".clone();
+    push(&mut sql, &draw_table_suffix(s));
+    push(&mut sql, &" VALUES (".clone());
+    push(&mut sql, &draw_int_lit(s));
+    push(&mut sql, &", ".clone());
+    push(&mut sql, &draw_string_lit(s));
+    push(&mut sql, &");".clone());
+    sql
+}
+
+fn emit_select(s: &mut DstSeed) -> Text {
+    let mut sql = "SELECT ".clone();
+    if s.next_bool() { push(&mut sql, &"DISTINCT ".clone()); }
+    push(&mut sql, &draw_columns(s));
+    push(&mut sql, &" FROM t".clone());
+    push(&mut sql, &draw_table_suffix(s));
+    if s.next_bool() {
+        push(&mut sql, &" WHERE ".clone());
+        push(&mut sql, &draw_predicate(s));
+    }
+    if s.next_bool() {
+        push(&mut sql, &" ORDER BY id".clone());
+        if s.next_bool() { push(&mut sql, &" DESC".clone()); }
+    }
+    if s.next_bool() {
+        push(&mut sql, &" LIMIT ".clone());
+        push(&mut sql, &draw_int_lit(s));
+    }
+    push(&mut sql, &";".clone());
+    sql
+}
+
+fn emit_update(s: &mut DstSeed) -> Text {
+    let mut sql = "UPDATE t".clone();
+    push(&mut sql, &draw_table_suffix(s));
+    push(&mut sql, &" SET name = ".clone());
+    push(&mut sql, &draw_string_lit(s));
+    push(&mut sql, &" WHERE id = ".clone());
+    push(&mut sql, &draw_int_lit(s));
+    push(&mut sql, &";".clone());
+    sql
+}
+
+fn emit_delete(s: &mut DstSeed) -> Text {
+    let mut sql = "DELETE FROM t".clone();
+    push(&mut sql, &draw_table_suffix(s));
+    push(&mut sql, &" WHERE id = ".clone());
+    push(&mut sql, &draw_int_lit(s));
+    push(&mut sql, &";".clone());
+    sql
+}
+
+fn emit_pragma(s: &mut DstSeed) -> Text {
+    let pragmas: List<Text> = pragma_list();
+    let idx = s.next_below(pragmas.len());
+    let mut sql = "PRAGMA ".clone();
+    push(&mut sql, &pragmas[idx]);
+    push(&mut sql, &";".clone());
+    sql
+}
+
+fn emit_trigger(s: &mut DstSeed) -> Text {
+    let mut sql = "CREATE TRIGGER tr".clone();
+    push(&mut sql, &draw_table_suffix(s));
+    push(&mut sql, &" AFTER INSERT ON t BEGIN UPDATE t SET name=".clone());
+    push(&mut sql, &draw_string_lit(s));
+    push(&mut sql, &" WHERE id=NEW.id; END;".clone());
+    sql
+}
+
+fn emit_union(s: &mut DstSeed) -> Text {
+    let mut sql = emit_select(s);
+    pop_terminator(&mut sql);
+    push(&mut sql, &" UNION ALL ".clone());
+    let inner = emit_select(s);
+    push(&mut sql, &inner);
+    sql
+}
+
+// -----------------------------------------------------------------------------
+// Token helpers
+// -----------------------------------------------------------------------------
+
+fn pragma_list() -> List<Text> {
+    let mut out: List<Text> = List.new();
+    out.push("journal_mode".clone());
+    out.push("synchronous".clone());
+    out.push("page_size".clone());
+    out.push("cache_size".clone());
+    out.push("foreign_keys".clone());
+    out.push("auto_vacuum".clone());
+    out.push("temp_store".clone());
+    out.push("locking_mode".clone());
+    out
+}
+
+fn draw_table_suffix(s: &mut DstSeed) -> Text {
+    let n = s.next_below(8);
+    let mut t = Text.new();
+    t.push_byte(((n as Byte) + (48 as Byte)));
+    t
+}
+
+fn draw_int_lit(s: &mut DstSeed) -> Text {
+    let v = s.next_below(10000);
+    let mut t = Text.new();
+    if v == 0 { t.push_byte(48 as Byte); return t; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = v;
+    while x > 0 { digits.push(((x % 10) as Byte) + (48 as Byte)); x = x / 10; }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { t.push_byte(digits[i]); i = i - 1; }
+    t
+}
+
+fn draw_string_lit(s: &mut DstSeed) -> Text {
+    let mut t = "'".clone();
+    let n = s.next_below(8) + 1;
+    let mut k: Int = 0;
+    while k < n {
+        let c: Byte = ((s.next_below(26) as Byte) + (97 as Byte));
+        t.push_byte(c);
+        k = k + 1;
+    }
+    t.push_byte(39 as Byte);
+    t
+}
+
+fn draw_columns(s: &mut DstSeed) -> Text {
+    if s.next_bool() { "*".clone() } else { "id, name".clone() }
+}
+
+fn draw_predicate(s: &mut DstSeed) -> Text {
+    let mut t = "id ".clone();
+    push(&mut t, &if s.next_bool() { "=".clone() } else { ">".clone() });
+    push(&mut t, &" ".clone());
+    push(&mut t, &draw_int_lit(s));
+    t
+}
+
+fn push(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn pop_terminator(t: &mut Text) {
+    let bs = t.as_bytes();
+    if bs.len() == 0 { return; }
+    if bs[bs.len() - 1] == (59 as Byte) {
+        // Re-emit without trailing semicolon.
+        let mut new_t = Text.new();
+        let mut i: Int = 0;
+        while i < bs.len() - 1 { new_t.push_byte(bs[i]); i = i + 1; }
+        *t = new_t;
+    }
+}
+
+fn sql_to_bytes(t: &Text) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let bs = t.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push(bs[i]); i = i + 1; }
+    out
+}

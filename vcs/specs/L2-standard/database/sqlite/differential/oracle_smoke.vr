@@ -1,0 +1,215 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, differential, comparator, oracle
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Differential surface:
+//   * DifferentialCase builder + tag predicates
+//   * RunResult builder + with_rows / with_effects / with_elapsed
+//   * compare under each CaseMode (exact / rowset / error_class / side_effect)
+//   * DifferentialOracle accumulator + first_mismatch + summary
+
+mount core.database.sqlite.native.differential.case.{
+    DifferentialCase, differential_case,
+    SetupAction, SaSql, SaPragma,
+    CaseMode, CmExactRows, CmRowsetEquivalent, CmErrorClass, CmSideEffect,
+    case_mode_name, setup_kind_name,
+};
+mount core.database.sqlite.native.differential.result.{
+    RunStatus, RsOk, RsError, RsTimeout,
+    ResultRow, result_row,
+    RunResult, run_result,
+    SideEffect, side_effect_zero,
+    status_name,
+};
+mount core.database.sqlite.native.differential.compare.{
+    DiffOutcome, DoMatch, DoStatusMismatch, DoRowCountMismatch,
+    DoRowMismatch, DoErrorClassMismatch,
+    compare, is_match, outcome_kind_name,
+};
+mount core.database.sqlite.native.differential.oracle.{
+    DifferentialOracle, oracle_new,
+};
+mount core.database.sqlite.native.export.value.{
+    SqlValue, SvNull, SvInteger, SvText,
+};
+mount base.{Some, None, Maybe, Bool, Text};
+
+// -----------------------------------------------------------------------------
+// Case
+// -----------------------------------------------------------------------------
+
+fn test_case_builder() {
+    let c = differential_case("case-1".clone(), "SELECT 1".clone(), CmExactRows)
+        .with_setup(SaSql("CREATE TABLE t(x)".clone()))
+        .with_setup(SaPragma("foreign_keys=ON".clone()))
+        .with_tag("smoke".clone());
+    assert_eq(c.setup.len(), 2);
+    assert(c.has_tag(&"smoke".clone()));
+    assert(!c.has_tag(&"none".clone()));
+}
+
+fn test_case_mode_names() {
+    assert(case_mode_name(&CmExactRows) == "exact_rows".clone());
+    assert(case_mode_name(&CmRowsetEquivalent) == "rowset_equivalent".clone());
+    assert(case_mode_name(&CmErrorClass("syntax".clone())) == "error_class".clone());
+    assert(case_mode_name(&CmSideEffect) == "side_effect".clone());
+}
+
+fn test_setup_kind_names() {
+    assert(setup_kind_name(&SaSql("X".clone())) == "sql".clone());
+    assert(setup_kind_name(&SaPragma("Y".clone())) == "pragma".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Result
+// -----------------------------------------------------------------------------
+
+fn make_row(id: Int, name: Text) -> ResultRow {
+    let mut vals: List<SqlValue> = List.new();
+    vals.push(SvInteger(id as Int64));
+    vals.push(SvText(name));
+    result_row(vals)
+}
+
+fn make_result(label: Text, rows: List<ResultRow>) -> RunResult {
+    run_result(label, RsOk).with_rows(rows).with_elapsed(100 as Int64)
+}
+
+fn test_status_names() {
+    assert(status_name(&RsOk) == "ok".clone());
+    assert(status_name(&RsTimeout) == "timeout".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Comparator
+// -----------------------------------------------------------------------------
+
+fn test_compare_exact_match() {
+    let mut a: List<ResultRow> = List.new();
+    a.push(make_row(1, "Ada".clone()));
+    a.push(make_row(2, "Bob".clone()));
+    let mut b: List<ResultRow> = List.new();
+    b.push(make_row(1, "Ada".clone()));
+    b.push(make_row(2, "Bob".clone()));
+    let l = make_result("loom".clone(), a);
+    let c = make_result("c".clone(), b);
+    let out = compare(&l, &c, &CmExactRows);
+    assert(is_match(&out));
+}
+
+fn test_compare_exact_row_count_mismatch() {
+    let mut a: List<ResultRow> = List.new();
+    a.push(make_row(1, "Ada".clone()));
+    let b: List<ResultRow> = List.new();
+    let l = make_result("loom".clone(), a);
+    let c = make_result("c".clone(), b);
+    let out = compare(&l, &c, &CmExactRows);
+    match out {
+        DoRowCountMismatch(_, _) => {},
+        _                        => panic("row count diff"),
+    }
+}
+
+fn test_compare_rowset_orders_independent() {
+    let mut a: List<ResultRow> = List.new();
+    a.push(make_row(1, "Ada".clone()));
+    a.push(make_row(2, "Bob".clone()));
+    let mut b: List<ResultRow> = List.new();
+    b.push(make_row(2, "Bob".clone()));
+    b.push(make_row(1, "Ada".clone()));
+    let l = make_result("loom".clone(), a);
+    let c = make_result("c".clone(), b);
+    assert(is_match(&compare(&l, &c, &CmRowsetEquivalent)));
+}
+
+fn test_compare_status_mismatch() {
+    let l = run_result("loom".clone(), RsOk);
+    let c = run_result("c".clone(), RsTimeout);
+    match compare(&l, &c, &CmExactRows) {
+        DoStatusMismatch(_, _) => {},
+        _                      => panic("status diff"),
+    }
+}
+
+fn test_compare_error_class_match() {
+    let l = run_result("loom".clone(), RsError("constraint".clone()));
+    let c = run_result("c".clone(), RsError("constraint".clone()));
+    let out = compare(&l, &c, &CmErrorClass("constraint".clone()));
+    assert(is_match(&out));
+}
+
+fn test_compare_error_class_mismatch() {
+    let l = run_result("loom".clone(), RsError("syntax".clone()));
+    let c = run_result("c".clone(), RsError("constraint".clone()));
+    match compare(&l, &c, &CmErrorClass("constraint".clone())) {
+        DoErrorClassMismatch(_, _) => {},
+        _                          => panic("error class diff"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Oracle accumulator
+// -----------------------------------------------------------------------------
+
+fn test_oracle_accumulates_match_and_mismatch() {
+    let mut o = oracle_new();
+    let case_a = differential_case("a".clone(), "SELECT 1".clone(), CmExactRows);
+    let case_b = differential_case("b".clone(), "SELECT 2".clone(), CmExactRows);
+    let r_a_l: List<ResultRow> = List.new();
+    let r_a_c: List<ResultRow> = List.new();
+    let _ = o.observe(&case_a,
+        &make_result("loom".clone(), r_a_l),
+        &make_result("c".clone(), r_a_c));
+    // Mismatch: different row counts.
+    let mut nonempty: List<ResultRow> = List.new();
+    nonempty.push(make_row(1, "X".clone()));
+    let r_b_c: List<ResultRow> = List.new();
+    let _ = o.observe(&case_b,
+        &make_result("loom".clone(), nonempty),
+        &make_result("c".clone(), r_b_c));
+    assert_eq(o.case_count(), 2);
+    assert_eq(o.match_count(), 1);
+    assert_eq(o.mismatch_count(), 1);
+    assert(!o.all_match());
+}
+
+fn test_oracle_first_mismatch() {
+    let mut o = oracle_new();
+    let case = differential_case("only".clone(), "SELECT".clone(), CmExactRows);
+    let l = run_result("loom".clone(), RsOk);
+    let c = run_result("c".clone(), RsTimeout);
+    let _ = o.observe(&case, &l, &c);
+    match o.first_mismatch() {
+        Some(_) => {},
+        None    => panic("mismatch present"),
+    }
+}
+
+fn test_oracle_summary() {
+    let mut o = oracle_new();
+    let case = differential_case("ok".clone(), "SELECT".clone(), CmExactRows);
+    let l: List<ResultRow> = List.new();
+    let c: List<ResultRow> = List.new();
+    let _ = o.observe(&case, &make_result("loom".clone(), l), &make_result("c".clone(), c));
+    let s = o.summary();
+    assert(s.len() > 0);
+}
+
+fn main() {
+    test_case_builder();
+    test_case_mode_names();
+    test_setup_kind_names();
+    test_status_names();
+    test_compare_exact_match();
+    test_compare_exact_row_count_mismatch();
+    test_compare_rowset_orders_independent();
+    test_compare_status_mismatch();
+    test_compare_error_class_match();
+    test_compare_error_class_mismatch();
+    test_oracle_accumulates_match_and_mismatch();
+    test_oracle_first_mismatch();
+    test_oracle_summary();
+}

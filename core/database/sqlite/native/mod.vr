@@ -132,3 +132,11 @@ public module limits;
 public module profiler;
 // - export: schema_dump / data_dump / restore harness (§22)
 public module export;
+// - dst: deterministic simulation harness — seed/op/generator/fault/oracle/harness (§22.5)
+public module dst;
+// - fuzz: grammar / format / WAL mutators + corpus + crash bucket (§22.6)
+public module fuzz;
+// - differential: V vs C-SQLite case + result + comparator + oracle (§22.4)
+public module differential;
+// - test_vectors: codified Appendix E vectors (varint / record / WAL csum / btree)
+public module test_vectors;

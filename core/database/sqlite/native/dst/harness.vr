@@ -1,0 +1,173 @@
+// =============================================================================
+// dst/harness.vr — top-level DST state machine
+// =============================================================================
+// Spec: sqlite-native.md §22.5 (DST)
+//
+// `DstHarness` ties seed → generator → fault-schedule → oracle. The
+// caller drives one `step()` per logical op; the harness reports
+// every fault site + the final state to compare against the live DB
+// after recovery.
+//
+// Lifecycle:
+//
+//   let mut h = harness_from_seed(0x1234, 100);
+//   while !h.is_terminated() {
+//       let plan = h.next_step();
+//       // execute plan.op against the DB; if plan.fault is Some,
+//       // inject it through the simulated VFS.
+//       h.advance();
+//   }
+//   let expected = h.expected_state();
+//   // assert!(expected.matches(&observed_after_recovery));
+// =============================================================================
+
+module core.database.sqlite.native.dst.harness;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.dst.seed.{DstSeed, seed_from_u64};
+mount core.database.sqlite.native.dst.op.{
+    DbOp, OpStream, OpCommit,
+};
+mount core.database.sqlite.native.dst.generator.{
+    Generator, generator_new, default_mix,
+};
+mount core.database.sqlite.native.dst.fault.{
+    Fault, FaultPowerLoss, ScheduledFault, FaultSchedule,
+    generate_schedule, default_density, is_terminal,
+};
+mount core.database.sqlite.native.dst.oracle.{
+    Oracle, oracle_replay,
+};
+
+// -----------------------------------------------------------------------------
+// StepPlan — what the caller does at this op index
+// -----------------------------------------------------------------------------
+
+public type StepPlan is {
+    op_idx: Int,
+    op: DbOp,
+    fault: Maybe<Fault>,
+    /// True if this fault terminates the run.
+    terminate: Bool,
+}
+
+// -----------------------------------------------------------------------------
+// DstHarness
+// -----------------------------------------------------------------------------
+
+public type DstHarness is {
+    stream: OpStream,
+    schedule: FaultSchedule,
+    op_idx: Int,
+    terminated: Bool,
+}
+
+public fn harness_from_seed(seed: Int64, total_ops: Int) -> DstHarness {
+    let mut s = seed_from_u64(seed);
+    let mix = default_mix();
+    let mut g = generator_new(s, mix);
+    let stream = g.emit(total_ops);
+    // Re-derive a fresh seed for the schedule so the fault choices
+    // are statistically independent of the op draws.
+    let mut sched_seed = seed_from_u64(seed + (1 as Int64));
+    let schedule = generate_schedule(&mut sched_seed, total_ops, &default_density());
+    DstHarness {
+        stream: stream,
+        schedule: schedule,
+        op_idx: 0,
+        terminated: false,
+    }
+}
+
+implement DstHarness {
+    public fn total_ops(&self) -> Int { self.stream.len() }
+    public fn current_op(&self) -> Int { self.op_idx }
+    public fn is_terminated(&self) -> Bool { self.terminated }
+
+    pub fn next_step(&self) -> Maybe<StepPlan> {
+        if self.terminated || self.op_idx >= self.stream.len() { return None; }
+        let op = clone_op(&self.stream.ops[self.op_idx]);
+        let mut fault: Maybe<Fault> = None;
+        let mut terminate = false;
+        match self.schedule.next_after(self.op_idx) {
+            Some(sched) => {
+                if sched.at_op == self.op_idx {
+                    let f = clone_fault(&sched.fault);
+                    if is_terminal(&f) { terminate = true; }
+                    fault = Some(f);
+                }
+            }
+            None => {}
+        }
+        Some(StepPlan {
+            op_idx: self.op_idx,
+            op: op,
+            fault: fault,
+            terminate: terminate,
+        })
+    }
+
+    pub fn advance(&mut self) {
+        match self.next_step() {
+            Some(plan) => {
+                if plan.terminate { self.terminated = true; }
+                self.op_idx = self.op_idx + 1;
+            }
+            None => { self.terminated = true; }
+        }
+    }
+
+    /// Compute the oracle state at the durability cut.
+    pub fn expected_state(&self) -> Oracle {
+        let cut = self.durability_cut();
+        oracle_replay(&self.stream, cut)
+    }
+
+    /// Op index of the last successful Commit before the terminal fault.
+    /// Equivalent to "highest committed prefix at recovery time".
+    pub fn durability_cut(&self) -> Int {
+        let limit = self.schedule.terminal_at();
+        let cap = if limit < self.stream.len() { limit } else { self.stream.len() };
+        let mut last_commit: Int = -1;
+        let mut i: Int = 0;
+        while i < cap {
+            match &self.stream.ops[i] {
+                OpCommit => { last_commit = i; }
+                _        => {}
+            }
+            i = i + 1;
+        }
+        last_commit + 1
+    }
+}
+
+fn clone_op(o: &DbOp) -> DbOp {
+    match o {
+        core.database.sqlite.native.dst.op.OpInsert(id, name) =>
+            core.database.sqlite.native.dst.op.OpInsert(*id, name.clone()),
+        core.database.sqlite.native.dst.op.OpUpdate(id, name) =>
+            core.database.sqlite.native.dst.op.OpUpdate(*id, name.clone()),
+        core.database.sqlite.native.dst.op.OpDelete(id) =>
+            core.database.sqlite.native.dst.op.OpDelete(*id),
+        core.database.sqlite.native.dst.op.OpSelectById(id) =>
+            core.database.sqlite.native.dst.op.OpSelectById(*id),
+        core.database.sqlite.native.dst.op.OpBegin       => core.database.sqlite.native.dst.op.OpBegin,
+        OpCommit                                          => OpCommit,
+        core.database.sqlite.native.dst.op.OpRollback    => core.database.sqlite.native.dst.op.OpRollback,
+        core.database.sqlite.native.dst.op.OpCheckpoint  => core.database.sqlite.native.dst.op.OpCheckpoint,
+        core.database.sqlite.native.dst.op.OpVacuum      => core.database.sqlite.native.dst.op.OpVacuum,
+    }
+}
+
+fn clone_fault(f: &Fault) -> Fault {
+    match f {
+        FaultPowerLoss => FaultPowerLoss,
+        core.database.sqlite.native.dst.fault.FaultDiskFull => core.database.sqlite.native.dst.fault.FaultDiskFull,
+        core.database.sqlite.native.dst.fault.FaultIoError(d) => core.database.sqlite.native.dst.fault.FaultIoError(d.clone()),
+        core.database.sqlite.native.dst.fault.FaultSlowFsync(n) => core.database.sqlite.native.dst.fault.FaultSlowFsync(*n),
+        core.database.sqlite.native.dst.fault.FaultPartialWrite(b) => core.database.sqlite.native.dst.fault.FaultPartialWrite(*b),
+        core.database.sqlite.native.dst.fault.FaultClockSkew(s) => core.database.sqlite.native.dst.fault.FaultClockSkew(*s),
+    }
+}

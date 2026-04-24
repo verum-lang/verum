@@ -1,0 +1,231 @@
+// =============================================================================
+// differential/compare.vr — DiffOutcome + comparator
+// =============================================================================
+// Spec: sqlite-native.md §22.4
+//
+// Pairs (`loom_result`, `c_result`) under a `CaseMode` and emits one
+// of a small finite set of `DiffOutcome`s. The mode chooses the
+// strictness; the comparator is the same.
+// =============================================================================
+
+module core.database.sqlite.native.differential.compare;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.export.value.{
+    SqlValue, SvNull, SvInteger, SvReal, SvText, SvBlob, render_sql_literal,
+};
+mount core.database.sqlite.native.differential.case.{
+    CaseMode, CmExactRows, CmRowsetEquivalent, CmErrorClass, CmSideEffect,
+};
+mount core.database.sqlite.native.differential.result.{
+    RunResult, RunStatus, RsOk, RsError, RsTimeout, RsCrash,
+    ResultRow, status_name,
+};
+
+// -----------------------------------------------------------------------------
+// DiffOutcome
+// -----------------------------------------------------------------------------
+
+public type DiffOutcome is
+      DoMatch
+    | DoStatusMismatch(Text, Text)        // (loom_status, c_status)
+    | DoRowCountMismatch(Int, Int)        // (loom_count, c_count)
+    | DoRowMismatch(Int, Text, Text)      // (row_index, loom_repr, c_repr)
+    | DoErrorClassMismatch(Text, Text)
+    | DoSideEffectMismatch(Text);
+
+public fn outcome_kind_name(o: &DiffOutcome) -> Text {
+    match o {
+        DoMatch                       => "match".clone(),
+        DoStatusMismatch(_, _)        => "status_mismatch".clone(),
+        DoRowCountMismatch(_, _)      => "row_count_mismatch".clone(),
+        DoRowMismatch(_, _, _)        => "row_mismatch".clone(),
+        DoErrorClassMismatch(_, _)    => "error_class_mismatch".clone(),
+        DoSideEffectMismatch(_)       => "side_effect_mismatch".clone(),
+    }
+}
+
+public fn is_match(o: &DiffOutcome) -> Bool {
+    match o {
+        DoMatch => true,
+        _       => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Comparator entry-point
+// -----------------------------------------------------------------------------
+
+public fn compare(loom: &RunResult, c: &RunResult, mode: &CaseMode) -> DiffOutcome {
+    // First decide on status.
+    let l_status = status_name(&loom.status);
+    let c_status = status_name(&c.status);
+    if l_status != c_status {
+        return DoStatusMismatch(l_status, c_status);
+    }
+
+    match mode {
+        CmExactRows         => compare_exact(loom, c),
+        CmRowsetEquivalent  => compare_rowset(loom, c),
+        CmErrorClass(class) => compare_error_class(loom, c, class),
+        CmSideEffect        => compare_side_effects(loom, c),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CmExactRows — order + values must match
+// -----------------------------------------------------------------------------
+
+fn compare_exact(loom: &RunResult, c: &RunResult) -> DiffOutcome {
+    if loom.rows.len() != c.rows.len() {
+        return DoRowCountMismatch(loom.rows.len(), c.rows.len());
+    }
+    let mut i: Int = 0;
+    while i < loom.rows.len() {
+        if !rows_equal(&loom.rows[i], &c.rows[i]) {
+            return DoRowMismatch(i, render_row(&loom.rows[i]), render_row(&c.rows[i]));
+        }
+        i = i + 1;
+    }
+    DoMatch
+}
+
+// -----------------------------------------------------------------------------
+// CmRowsetEquivalent — same multiset, any order
+// -----------------------------------------------------------------------------
+
+fn compare_rowset(loom: &RunResult, c: &RunResult) -> DiffOutcome {
+    if loom.rows.len() != c.rows.len() {
+        return DoRowCountMismatch(loom.rows.len(), c.rows.len());
+    }
+    // Mark each c-row as consumed once it has been matched. Quadratic
+    // but correct + deterministic — fuzz cases are small.
+    let mut consumed: List<Bool> = List.new();
+    let mut z: Int = 0;
+    while z < c.rows.len() { consumed.push(false); z = z + 1; }
+
+    let mut i: Int = 0;
+    while i < loom.rows.len() {
+        let mut found = false;
+        let mut j: Int = 0;
+        while j < c.rows.len() {
+            if !consumed[j] && rows_equal(&loom.rows[i], &c.rows[j]) {
+                consumed[j] = true;
+                found = true;
+                break;
+            }
+            j = j + 1;
+        }
+        if !found {
+            return DoRowMismatch(i, render_row(&loom.rows[i]), "<no-match>".clone());
+        }
+        i = i + 1;
+    }
+    DoMatch
+}
+
+// -----------------------------------------------------------------------------
+// CmErrorClass — both ends should error AND share the class
+// -----------------------------------------------------------------------------
+
+fn compare_error_class(loom: &RunResult, c: &RunResult, class: &Text) -> DiffOutcome {
+    let l_class = error_class(&loom.status);
+    let c_class = error_class(&c.status);
+    if l_class != *class || c_class != *class {
+        return DoErrorClassMismatch(l_class, c_class);
+    }
+    DoMatch
+}
+
+fn error_class(status: &RunStatus) -> Text {
+    match status {
+        RsError(cls) => cls.clone(),
+        _            => "".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CmSideEffect — changes() / last_insert_rowid() / pragma snapshot
+// -----------------------------------------------------------------------------
+
+fn compare_side_effects(loom: &RunResult, c: &RunResult) -> DiffOutcome {
+    if loom.effects.changes != c.effects.changes {
+        return DoSideEffectMismatch("changes".clone());
+    }
+    if loom.effects.last_insert_rowid != c.effects.last_insert_rowid {
+        return DoSideEffectMismatch("last_insert_rowid".clone());
+    }
+    if loom.effects.pragmas_after.len() != c.effects.pragmas_after.len() {
+        return DoSideEffectMismatch("pragma_count".clone());
+    }
+    DoMatch
+}
+
+// -----------------------------------------------------------------------------
+// Row equality + rendering
+// -----------------------------------------------------------------------------
+
+fn rows_equal(a: &ResultRow, b: &ResultRow) -> Bool {
+    if a.values.len() != b.values.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.values.len() {
+        if !value_equal(&a.values[i], &b.values[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn value_equal(a: &SqlValue, b: &SqlValue) -> Bool {
+    match a {
+        SvNull => match b {
+            SvNull => true,
+            _      => false,
+        },
+        SvInteger(x) => match b {
+            SvInteger(y) => *x == *y,
+            _            => false,
+        },
+        SvReal(x) => match b {
+            SvReal(y) => *x == *y,
+            _         => false,
+        },
+        SvText(x) => match b {
+            SvText(y) => x == y,
+            _         => false,
+        },
+        SvBlob(x) => match b {
+            SvBlob(y) => bytes_equal(x, y),
+            _         => false,
+        },
+    }
+}
+
+fn bytes_equal(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn render_row(r: &ResultRow) -> Text {
+    let mut out = "[".clone();
+    let mut i: Int = 0;
+    while i < r.values.len() {
+        if i > 0 {
+            out.push_byte(44 as Byte);
+            out.push_byte(32 as Byte);
+        }
+        let lit = render_sql_literal(&r.values[i]);
+        let bs = lit.as_bytes();
+        let mut k: Int = 0;
+        while k < bs.len() { out.push_byte(bs[k]); k = k + 1; }
+        i = i + 1;
+    }
+    out.push_byte(93 as Byte);
+    out
+}

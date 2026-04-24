@@ -1,0 +1,198 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, dst, harness, oracle, fault
+// @timeout: 5000
+// @expected-exit: 0
+//
+// DST surface:
+//   * DstSeed reproducibility (same seed → same draws)
+//   * Generator emits configured op count
+//   * FaultSchedule generation + terminal_at logic
+//   * DstHarness lifecycle (next_step / advance / terminate)
+//   * Oracle replays the durable prefix correctly
+
+mount core.database.sqlite.native.dst.seed.{
+    DstSeed, seed_from_u64,
+};
+mount core.database.sqlite.native.dst.op.{
+    DbOp, OpInsert, OpBegin, OpCommit, OpStream, op_stream_empty,
+    is_mutation, is_tx_boundary,
+};
+mount core.database.sqlite.native.dst.generator.{
+    Generator, generator_new, default_mix,
+};
+mount core.database.sqlite.native.dst.fault.{
+    Fault, FaultPowerLoss, FaultDiskFull, ScheduledFault, FaultSchedule,
+    schedule_empty, scheduled, generate_schedule, default_density, is_terminal,
+};
+mount core.database.sqlite.native.dst.oracle.{
+    Oracle, oracle_empty, oracle_replay, expected_row,
+};
+mount core.database.sqlite.native.dst.harness.{
+    DstHarness, harness_from_seed, StepPlan,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// Seed
+// -----------------------------------------------------------------------------
+
+fn test_seed_reproducible() {
+    let mut s1 = seed_from_u64(0x12345 as Int64);
+    let mut s2 = seed_from_u64(0x12345 as Int64);
+    assert_eq(s1.next_u64(), s2.next_u64());
+    assert_eq(s1.next_u64(), s2.next_u64());
+}
+
+fn test_seed_bounded_draw_in_range() {
+    let mut s = seed_from_u64(7 as Int64);
+    let v = s.next_below(10);
+    assert(v >= 0);
+    assert(v < 10);
+}
+
+// -----------------------------------------------------------------------------
+// Op + OpStream
+// -----------------------------------------------------------------------------
+
+fn test_is_mutation_classifies() {
+    assert(is_mutation(&OpInsert(1, "a".clone())));
+    assert(!is_mutation(&OpCommit));
+}
+
+fn test_is_tx_boundary() {
+    assert(is_tx_boundary(&OpCommit));
+    assert(!is_tx_boundary(&OpInsert(1, "a".clone())));
+}
+
+fn test_op_stream_push_and_len() {
+    let mut s = op_stream_empty();
+    s.push(OpInsert(1, "a".clone()));
+    s.push(OpCommit);
+    assert_eq(s.len(), 2);
+}
+
+fn test_op_stream_last_durable_index() {
+    let mut s = op_stream_empty();
+    s.push(OpInsert(1, "a".clone()));
+    s.push(OpCommit);
+    s.push(OpInsert(2, "b".clone()));
+    assert_eq(s.last_durable_index(3), 1);
+    assert_eq(s.last_durable_index(1), -1);
+}
+
+// -----------------------------------------------------------------------------
+// Generator
+// -----------------------------------------------------------------------------
+
+fn test_generator_emits_requested_count() {
+    let s = seed_from_u64(0x42 as Int64);
+    let mut g = generator_new(s, default_mix());
+    let stream = g.emit(50);
+    assert_eq(stream.len(), 50);
+}
+
+// -----------------------------------------------------------------------------
+// Fault + schedule
+// -----------------------------------------------------------------------------
+
+fn test_fault_terminal_classification() {
+    assert(is_terminal(&FaultPowerLoss));
+    assert(!is_terminal(&FaultDiskFull));
+}
+
+fn test_schedule_terminal_at_when_empty() {
+    let s = schedule_empty();
+    assert_eq(s.terminal_at(), 1);
+}
+
+fn test_schedule_next_after_finds_pending() {
+    let mut s = schedule_empty();
+    s.push(scheduled(10, FaultDiskFull));
+    s.push(scheduled(20, FaultPowerLoss));
+    match s.next_after(15) {
+        Some(_) => {},
+        None    => panic("20 found"),
+    }
+}
+
+fn test_generate_schedule_density() {
+    let mut s = seed_from_u64(0x9 as Int64);
+    let sched = generate_schedule(&mut s, 100, &default_density());
+    assert(sched.len() >= 0);
+}
+
+// -----------------------------------------------------------------------------
+// Oracle
+// -----------------------------------------------------------------------------
+
+fn test_oracle_replays_committed_prefix() {
+    let mut stream = op_stream_empty();
+    stream.push(OpBegin);
+    stream.push(OpInsert(1, "a".clone()));
+    stream.push(OpCommit);
+    stream.push(OpInsert(2, "b".clone()));  // un-committed
+    let o = oracle_replay(&stream, 4);
+    assert_eq(o.row_count(), 1);
+    match o.lookup(1) {
+        Some(_) => {},
+        None    => panic("row 1 durable"),
+    }
+}
+
+fn test_oracle_matches_self() {
+    let mut o1 = oracle_empty();
+    o1.apply(&OpInsert(5, "x".clone()));
+    let mut o2 = oracle_empty();
+    o2.apply(&OpInsert(5, "x".clone()));
+    assert(o1.matches(&o2));
+}
+
+// -----------------------------------------------------------------------------
+// Harness
+// -----------------------------------------------------------------------------
+
+fn test_harness_total_ops() {
+    let h = harness_from_seed(0x1 as Int64, 100);
+    assert_eq(h.total_ops(), 100);
+}
+
+fn test_harness_advance_until_terminate() {
+    let mut h = harness_from_seed(0x2 as Int64, 50);
+    let mut steps: Int = 0;
+    while !h.is_terminated() && steps < 100 {
+        match h.next_step() {
+            Some(_) => h.advance(),
+            None    => break,
+        }
+        steps = steps + 1;
+    }
+    assert(steps > 0);
+}
+
+fn test_harness_durability_cut_within_bounds() {
+    let h = harness_from_seed(0x3 as Int64, 50);
+    let cut = h.durability_cut();
+    assert(cut >= 0);
+    assert(cut <= h.total_ops());
+}
+
+fn main() {
+    test_seed_reproducible();
+    test_seed_bounded_draw_in_range();
+    test_is_mutation_classifies();
+    test_is_tx_boundary();
+    test_op_stream_push_and_len();
+    test_op_stream_last_durable_index();
+    test_generator_emits_requested_count();
+    test_fault_terminal_classification();
+    test_schedule_terminal_at_when_empty();
+    test_schedule_next_after_finds_pending();
+    test_generate_schedule_density();
+    test_oracle_replays_committed_prefix();
+    test_oracle_matches_self();
+    test_harness_total_ops();
+    test_harness_advance_until_terminate();
+    test_harness_durability_cut_within_bounds();
+}

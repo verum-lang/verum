@@ -1,0 +1,121 @@
+// =============================================================================
+// differential/result.vr — RunResult
+// =============================================================================
+// Spec: sqlite-native.md §22.4
+//
+// One result captures everything observable from running a single
+// case against ONE end (loom or C-SQLite). The comparator pairs
+// two results and decides whether they "agree".
+// =============================================================================
+
+module core.database.sqlite.native.differential.result;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.export.value.{
+    SqlValue, SvNull, SvInteger, SvReal, SvText, SvBlob,
+};
+
+// -----------------------------------------------------------------------------
+// RunStatus — coarse "what happened"
+// -----------------------------------------------------------------------------
+
+public type RunStatus is
+      RsOk
+    | RsError(Text)         // error class (e.g. "constraint" / "syntax" / "io")
+    | RsTimeout
+    | RsCrash(Text);        // panic / segfault detail
+
+public fn status_name(s: &RunStatus) -> Text {
+    match s {
+        RsOk        => "ok".clone(),
+        RsError(_)  => "error".clone(),
+        RsTimeout   => "timeout".clone(),
+        RsCrash(_)  => "crash".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ResultRow — one row of a result set
+// -----------------------------------------------------------------------------
+
+public type ResultRow is { values: List<SqlValue> }
+
+public fn result_row(values: List<SqlValue>) -> ResultRow {
+    ResultRow { values: values }
+}
+
+implement ResultRow {
+    public fn arity(&self) -> Int { self.values.len() }
+}
+
+// -----------------------------------------------------------------------------
+// SideEffect — observable consequences other than rows
+// -----------------------------------------------------------------------------
+
+public type SideEffect is {
+    /// PRAGMA values queried after the SQL ran (key → text repr).
+    pragmas_after: List<PragmaState>,
+    /// Last `changes()` value (rows affected by latest write).
+    changes: Int64,
+    /// Last_insert_rowid().
+    last_insert_rowid: Int64,
+}
+
+public type PragmaState is { name: Text, value: Text }
+
+public fn pragma_state(name: Text, value: Text) -> PragmaState {
+    PragmaState { name: name, value: value }
+}
+
+public fn side_effect_zero() -> SideEffect {
+    SideEffect {
+        pragmas_after: List.new(),
+        changes: 0 as Int64,
+        last_insert_rowid: 0 as Int64,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RunResult
+// -----------------------------------------------------------------------------
+
+public type RunResult is {
+    /// "loom" or "c-sqlite" — used purely for reporting.
+    end_label: Text,
+    status: RunStatus,
+    rows: List<ResultRow>,
+    effects: SideEffect,
+    /// Wall-clock the case took.
+    elapsed_ns: Int64,
+}
+
+public fn run_result(end_label: Text, status: RunStatus) -> RunResult {
+    RunResult {
+        end_label: end_label,
+        status: status,
+        rows: List.new(),
+        effects: side_effect_zero(),
+        elapsed_ns: 0 as Int64,
+    }
+}
+
+implement RunResult {
+    pub fn with_rows(mut self, rows: List<ResultRow>) -> RunResult {
+        self.rows = rows;
+        self
+    }
+
+    pub fn with_effects(mut self, effects: SideEffect) -> RunResult {
+        self.effects = effects;
+        self
+    }
+
+    pub fn with_elapsed(mut self, ns: Int64) -> RunResult {
+        self.elapsed_ns = ns;
+        self
+    }
+
+    public fn row_count(&self) -> Int { self.rows.len() }
+}

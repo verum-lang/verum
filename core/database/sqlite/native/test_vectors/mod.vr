@@ -1,0 +1,28 @@
+// =============================================================================
+// core/database/sqlite/native/test_vectors/mod.vr
+// =============================================================================
+// Layer: 7+ (test infrastructure)
+// Spec: sqlite-native.md Appendix E
+//
+// Codified file-format test vectors. Each table is a `List<…>` of
+// (input, expected) pairs the test runners feed into the relevant
+// L0 / L2 component:
+//
+//   * `varint`         — Appendix E.1 — 38 representative pairs
+//                         spanning every length class 1-9 bytes
+//   * `record_encoding`— Appendix E.2 — record-header parses
+//   * `wal_checksum`   — Appendix E.3 — fnv-1a-shaped frame checksums
+//   * `btree_cell`     — Appendix E.4 — interior + leaf + index cells
+//
+// The full Appendix E vector set (128 + 50 + 20 + 50) lives in
+// `vcs/conformance/sqlite/vectors/`. The tables here are the
+// load-bearing subset that exercises every code path; CI loads the
+// full set via the runner.
+// =============================================================================
+
+module core.database.sqlite.native.test_vectors;
+
+public module varint;
+public module record_encoding;
+public module wal_checksum;
+public module btree_cell;

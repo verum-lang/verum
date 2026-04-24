@@ -1,0 +1,120 @@
+// =============================================================================
+// fuzz/crash.vr — crash bucketing
+// =============================================================================
+// Spec: sqlite-native.md §22.6 (fuzz harness)
+//
+// `CrashBucket` deduplicates by signature so 1000 hits of the same
+// bug don't drown out the second bug. Signature is the panic message
+// truncated + first stack frame; close enough that "two crashes that
+// look the same" group together, far enough that "two genuinely
+// different paths" don't.
+// =============================================================================
+
+module core.database.sqlite.native.fuzz.crash;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+public type Crash is {
+    /// Signature — used for dedup.
+    signature: Text,
+    /// Mutation that produced the crashing input (free-form name).
+    mutation: Text,
+    /// Bytes that triggered the crash. Caller may persist these.
+    input: List<Byte>,
+    /// First-seen timestamp (ns).
+    first_seen_ns: Int64,
+    /// Hits since first_seen.
+    hit_count: Int,
+}
+
+public fn crash(signature: Text, mutation: Text, input: List<Byte>, when_ns: Int64) -> Crash {
+    Crash {
+        signature: signature,
+        mutation: mutation,
+        input: input,
+        first_seen_ns: when_ns,
+        hit_count: 1,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CrashBucket
+// -----------------------------------------------------------------------------
+
+public type CrashBucket is { entries: List<Crash> }
+
+public fn bucket_new() -> CrashBucket { CrashBucket { entries: List.new() } }
+
+implement CrashBucket {
+    public fn unique_count(&self) -> Int { self.entries.len() }
+
+    pub fn total_hits(&self) -> Int {
+        let mut sum: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() { sum = sum + self.entries[i].hit_count; i = i + 1; }
+        sum
+    }
+
+    /// Record a crash. Returns true iff this is a previously-unseen
+    /// signature (caller may want to persist these to disk).
+    pub fn record(&mut self, c: Crash) -> Bool {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].signature == c.signature {
+                self.entries[i].hit_count = self.entries[i].hit_count + 1;
+                return false;
+            }
+            i = i + 1;
+        }
+        self.entries.push(c);
+        true
+    }
+
+    pub fn lookup(&self, signature: &Text) -> base.Maybe<Int> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].signature == *signature {
+                return base.Some(self.entries[i].hit_count);
+            }
+            i = i + 1;
+        }
+        base.None
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Signature derivation — collapse a panic message into a stable key
+// -----------------------------------------------------------------------------
+
+/// Take the first non-whitespace 64 bytes of `msg` and uppercase them.
+/// This is intentionally lossy: pointer addresses + line numbers
+/// would otherwise make every hit unique.
+public fn signature_from_panic(msg: &Text) -> Text {
+    let bs = msg.as_bytes();
+    let mut out = Text.new();
+    let mut emitted: Int = 0;
+    let mut i: Int = 0;
+    while i < bs.len() && emitted < 64 {
+        let b = bs[i];
+        if !is_ws(b) && !is_digit(b) {
+            out.push_byte(uppercase(b));
+            emitted = emitted + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) || b == (13 as Byte)
+}
+
+fn is_digit(b: Byte) -> Bool {
+    b >= (48 as Byte) && b <= (57 as Byte)
+}
+
+fn uppercase(b: Byte) -> Byte {
+    if b >= (97 as Byte) && b <= (122 as Byte) { b - (32 as Byte) } else { b }
+}

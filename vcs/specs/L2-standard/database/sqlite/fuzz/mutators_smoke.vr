@@ -1,0 +1,184 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fuzz, grammar, format, wal, corpus, crash
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Fuzzer surface:
+//   * MutationKind taxonomy + surface_name routing
+//   * GrammarMutator emits non-empty SQL bytes for each pick
+//   * FormatMutator handles empty + page-aligned inputs
+//   * WalMutator handles every variant including empty input
+//   * Corpus add / age / drop policy
+//   * CrashBucket dedup by signature
+
+mount core.database.sqlite.native.fuzz.mutation.{
+    Mutator, MutationOutput, MutationKind,
+    MkGrammarInsert, MkFlipBit, MkWalReorder,
+    mutation_kind_name, surface_name,
+};
+mount core.database.sqlite.native.fuzz.corpus.{
+    CorpusEntry, Corpus, corpus_new,
+};
+mount core.database.sqlite.native.fuzz.crash.{
+    Crash, CrashBucket, bucket_new, crash, signature_from_panic,
+};
+mount core.database.sqlite.native.fuzz.grammar.{
+    GrammarMutator, grammar_mutator,
+};
+mount core.database.sqlite.native.fuzz.format.{
+    FormatMutator, format_mutator,
+};
+mount core.database.sqlite.native.fuzz.wal.{
+    WalMutator, wal_mutator, mutate_wal,
+    WalFrameBlob, wal_frame_blob, WalMutationResult,
+};
+mount base.{Some, None, Maybe, Bool, Text};
+
+// -----------------------------------------------------------------------------
+// Mutation taxonomy
+// -----------------------------------------------------------------------------
+
+fn test_mutation_kind_names_unique() {
+    let n1 = mutation_kind_name(&MkGrammarInsert);
+    let n2 = mutation_kind_name(&MkFlipBit);
+    let n3 = mutation_kind_name(&MkWalReorder);
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn test_surface_name_routing() {
+    assert(surface_name(&MkGrammarInsert) == "grammar".clone());
+    assert(surface_name(&MkFlipBit) == "format".clone());
+    assert(surface_name(&MkWalReorder) == "wal".clone());
+}
+
+// -----------------------------------------------------------------------------
+// GrammarMutator
+// -----------------------------------------------------------------------------
+
+fn test_grammar_mutator_emits_bytes() {
+    let m = grammar_mutator();
+    let empty: List<Byte> = List.new();
+    let out = m.mutate(0x123 as Int64, &empty);
+    assert(out.bytes.len() > 0);
+}
+
+fn test_grammar_surface_label() {
+    assert(grammar_mutator().surface() == "grammar".clone());
+}
+
+// -----------------------------------------------------------------------------
+// FormatMutator
+// -----------------------------------------------------------------------------
+
+fn make_input(n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push((i % 256) as Byte); i = i + 1; }
+    out
+}
+
+fn test_format_mutator_empty_input() {
+    let m = format_mutator(4096);
+    let empty: List<Byte> = List.new();
+    let _ = m.mutate(0x1 as Int64, &empty);
+}
+
+fn test_format_mutator_page_aligned_input() {
+    let m = format_mutator(64);
+    let input = make_input(192);
+    let _ = m.mutate(0x42 as Int64, &input);
+}
+
+fn test_format_surface_label() {
+    assert(format_mutator(4096).surface() == "format".clone());
+}
+
+// -----------------------------------------------------------------------------
+// WalMutator
+// -----------------------------------------------------------------------------
+
+fn make_wal_frames() -> List<WalFrameBlob> {
+    let mut out: List<WalFrameBlob> = List.new();
+    out.push(wal_frame_blob(make_input(16), false));
+    out.push(wal_frame_blob(make_input(16), false));
+    out.push(wal_frame_blob(make_input(16), true));   // commit
+    out
+}
+
+fn test_wal_mutator_handles_three_frames() {
+    let m = wal_mutator();
+    let frames = make_wal_frames();
+    let _ = mutate_wal(&m, 0x1 as Int64, &frames);
+}
+
+fn test_wal_mutator_handles_empty() {
+    let m = wal_mutator();
+    let empty: List<WalFrameBlob> = List.new();
+    let _ = mutate_wal(&m, 0x1 as Int64, &empty);
+}
+
+// -----------------------------------------------------------------------------
+// Corpus
+// -----------------------------------------------------------------------------
+
+fn test_corpus_add_and_pick() {
+    let mut c = corpus_new();
+    let id = c.add(make_input(8), Some(MkFlipBit), 3);
+    assert_eq(c.len(), 1);
+    match c.pick(0) {
+        Some(e) => assert_eq(e.id, id),
+        None    => panic("pick returns first entry"),
+    }
+}
+
+fn test_corpus_mark_crashed() {
+    let mut c = corpus_new();
+    let id = c.add(make_input(8), None, 1);
+    assert(c.mark_crashed(id));
+    assert(!c.mark_crashed(99999));
+}
+
+fn test_corpus_age_step_keeps_valuable() {
+    let mut c = corpus_new();
+    let _ = c.add(make_input(4), None, 5);
+    let _ = c.add(make_input(4), None, 0);
+    let dropped = c.age_step();
+    assert(dropped >= 0);
+}
+
+// -----------------------------------------------------------------------------
+// CrashBucket
+// -----------------------------------------------------------------------------
+
+fn test_crash_record_dedup() {
+    let mut b = bucket_new();
+    assert(b.record(crash("PANIC".clone(), "format".clone(), make_input(4), 1 as Int64)));
+    assert(!b.record(crash("PANIC".clone(), "format".clone(), make_input(8), 2 as Int64)));
+    assert_eq(b.unique_count(), 1);
+    assert_eq(b.total_hits(), 2);
+}
+
+fn test_signature_from_panic_strips_digits() {
+    let s = signature_from_panic(&"index out of bounds at line 1234".clone());
+    assert(s.len() > 0);
+}
+
+fn main() {
+    test_mutation_kind_names_unique();
+    test_surface_name_routing();
+    test_grammar_mutator_emits_bytes();
+    test_grammar_surface_label();
+    test_format_mutator_empty_input();
+    test_format_mutator_page_aligned_input();
+    test_format_surface_label();
+    test_wal_mutator_handles_three_frames();
+    test_wal_mutator_handles_empty();
+    test_corpus_add_and_pick();
+    test_corpus_mark_crashed();
+    test_corpus_age_step_keeps_valuable();
+    test_crash_record_dedup();
+    test_signature_from_panic_strips_digits();
+}

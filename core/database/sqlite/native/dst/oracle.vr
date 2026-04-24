@@ -1,0 +1,166 @@
+// =============================================================================
+// dst/oracle.vr — durability + atomicity invariant checks
+// =============================================================================
+// Spec: sqlite-native.md §22.5 (DST)
+//
+// After a simulated power loss + recovery, the harness asks the
+// oracle: "given the op-stream we recorded and the schedule of
+// faults that fired, what state SHOULD the recovered database
+// hold?"
+//
+// Three invariant classes:
+//
+//   * `Durability`  — every op preceding the last successful Commit
+//                      MUST be visible after recovery.
+//   * `Atomicity`   — every op AFTER the last successful Commit
+//                      MUST NOT be visible (no torn writes).
+//   * `Isolation`   — readers SHOULD see snapshot-of-Commit, never
+//                      a partially-applied tx state.
+// =============================================================================
+
+module core.database.sqlite.native.dst.oracle;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.dst.op.{
+    DbOp, OpInsert, OpUpdate, OpDelete, OpCommit, OpRollback,
+    OpStream, is_mutation,
+};
+
+// -----------------------------------------------------------------------------
+// ExpectedRow — what the oracle says SHOULD be in the table
+// -----------------------------------------------------------------------------
+
+public type ExpectedRow is { id: Int, name: Text }
+
+public fn expected_row(id: Int, name: Text) -> ExpectedRow {
+    ExpectedRow { id: id, name: name }
+}
+
+// -----------------------------------------------------------------------------
+// Oracle
+// -----------------------------------------------------------------------------
+
+public type Oracle is { rows: List<ExpectedRow> }
+
+public fn oracle_empty() -> Oracle { Oracle { rows: List.new() } }
+
+public fn oracle_replay(stream: &OpStream, committed_until: Int) -> Oracle {
+    let mut o = oracle_empty();
+    let mut tx_buf: List<DbOp> = List.new();
+    let mut in_tx = false;
+    let cap = if committed_until < stream.ops.len() { committed_until } else { stream.ops.len() };
+    let mut i: Int = 0;
+    while i < cap {
+        let op = &stream.ops[i];
+        match op {
+            core.database.sqlite.native.dst.op.OpBegin => {
+                in_tx = true;
+                tx_buf = List.new();
+            }
+            OpCommit => {
+                if in_tx {
+                    let mut k: Int = 0;
+                    while k < tx_buf.len() { o.apply(&tx_buf[k]); k = k + 1; }
+                    in_tx = false;
+                    tx_buf = List.new();
+                }
+            }
+            OpRollback => {
+                in_tx = false;
+                tx_buf = List.new();
+            }
+            _ => {
+                if is_mutation(op) {
+                    if in_tx { tx_buf.push(clone_op(op)); }
+                    else     { o.apply(op); }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    o
+}
+
+implement Oracle {
+    public fn row_count(&self) -> Int { self.rows.len() }
+
+    pub fn apply(&mut self, op: &DbOp) {
+        match op {
+            OpInsert(id, name) => {
+                self.upsert(*id, name.clone());
+            }
+            OpUpdate(id, name) => {
+                self.upsert(*id, name.clone());
+            }
+            OpDelete(id) => {
+                self.evict(*id);
+            }
+            _ => {}
+        }
+    }
+
+    fn upsert(&mut self, id: Int, name: Text) {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].id == id {
+                self.rows[i].name = name;
+                return;
+            }
+            i = i + 1;
+        }
+        self.rows.push(expected_row(id, name));
+    }
+
+    fn evict(&mut self, id: Int) {
+        let mut new_rows: List<ExpectedRow> = List.new();
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].id != id {
+                new_rows.push(expected_row(self.rows[i].id, self.rows[i].name.clone()));
+            }
+            i = i + 1;
+        }
+        self.rows = new_rows;
+    }
+
+    pub fn lookup(&self, id: Int) -> Maybe<Text> {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].id == id { return Some(self.rows[i].name.clone()); }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// True iff `other` (e.g. the database state observed after recovery)
+    /// matches exactly: same set of ids, each id mapped to the same name.
+    pub fn matches(&self, other: &Oracle) -> Bool {
+        if self.rows.len() != other.rows.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            match other.lookup(self.rows[i].id) {
+                Some(n) => if n != self.rows[i].name { return false; },
+                None    => return false,
+            }
+            i = i + 1;
+        }
+        true
+    }
+}
+
+fn clone_op(o: &DbOp) -> DbOp {
+    match o {
+        OpInsert(id, name)  => OpInsert(*id, name.clone()),
+        OpUpdate(id, name)  => OpUpdate(*id, name.clone()),
+        OpDelete(id)        => OpDelete(*id),
+        core.database.sqlite.native.dst.op.OpSelectById(id) =>
+            core.database.sqlite.native.dst.op.OpSelectById(*id),
+        core.database.sqlite.native.dst.op.OpBegin       => core.database.sqlite.native.dst.op.OpBegin,
+        OpCommit                                          => OpCommit,
+        OpRollback                                        => OpRollback,
+        core.database.sqlite.native.dst.op.OpCheckpoint  => core.database.sqlite.native.dst.op.OpCheckpoint,
+        core.database.sqlite.native.dst.op.OpVacuum      => core.database.sqlite.native.dst.op.OpVacuum,
+    }
+}

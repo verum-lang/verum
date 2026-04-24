@@ -1,0 +1,115 @@
+// =============================================================================
+// test_vectors/btree_cell.vr — Appendix E.4
+// =============================================================================
+// Spec: sqlite-native.md Appendix E.4 (btree cell parsing test vectors)
+//
+// Cells appear in four flavours per page kind:
+//
+//   * TableLeafCell       — varint(payload_size) || varint(rowid) || payload
+//   * TableInteriorCell   — uint32(left_child) || varint(rowid)
+//   * IndexLeafCell       — varint(payload_size) || payload
+//   * IndexInteriorCell   — uint32(left_child) || varint(payload_size) || payload
+//
+// Each vector pairs one canonical encoding with the parsed
+// `BtreeCellShape` the L3 cursor must produce.
+// =============================================================================
+
+module core.database.sqlite.native.test_vectors.btree_cell;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// BtreeCellShape — abstract decode result
+// -----------------------------------------------------------------------------
+
+public type BtreeCellShape is
+      BcsTableLeaf(Int, Int64)              // (payload_size, rowid)
+    | BcsTableInterior(Int, Int64)          // (left_child_page, rowid)
+    | BcsIndexLeaf(Int)                     // (payload_size)
+    | BcsIndexInterior(Int, Int);           // (left_child_page, payload_size)
+
+public fn cell_kind_name(c: &BtreeCellShape) -> Text {
+    match c {
+        BcsTableLeaf(_, _)      => "table_leaf".clone(),
+        BcsTableInterior(_, _)  => "table_interior".clone(),
+        BcsIndexLeaf(_)         => "index_leaf".clone(),
+        BcsIndexInterior(_, _)  => "index_interior".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// BtreeCellVector
+// -----------------------------------------------------------------------------
+
+public type BtreeCellVector is {
+    name: Text,
+    encoded: List<Byte>,
+    shape: BtreeCellShape,
+}
+
+public fn cell_vec(name: Text, encoded: List<Byte>, shape: BtreeCellShape) -> BtreeCellVector {
+    BtreeCellVector { name: name, encoded: encoded, shape: shape }
+}
+
+// -----------------------------------------------------------------------------
+// Vector tables
+// -----------------------------------------------------------------------------
+
+public fn appendix_e4() -> List<BtreeCellVector> {
+    let mut out: List<BtreeCellVector> = List.new();
+
+    // Table leaf — payload_size = 5, rowid = 1, payload "HELLO"
+    out.push(cell_vec(
+        "table_leaf_hello".clone(),
+        bytes(&[0x05, 0x01, 0x48, 0x45, 0x4C, 0x4C, 0x4F]),
+        BcsTableLeaf(5, 1 as Int64),
+    ));
+
+    // Table leaf — payload_size = 1, rowid = 0
+    out.push(cell_vec(
+        "table_leaf_one".clone(),
+        bytes(&[0x01, 0x00, 0x55]),
+        BcsTableLeaf(1, 0 as Int64),
+    ));
+
+    // Table interior — left_child = 5, rowid = 100
+    out.push(cell_vec(
+        "table_interior".clone(),
+        bytes(&[0x00, 0x00, 0x00, 0x05, 0x64]),
+        BcsTableInterior(5, 100 as Int64),
+    ));
+
+    // Table interior — left_child = 0xDEADBEEF, rowid = 1
+    out.push(cell_vec(
+        "table_interior_big".clone(),
+        bytes(&[0xDE, 0xAD, 0xBE, 0xEF, 0x01]),
+        BcsTableInterior(0xDEADBEEF, 1 as Int64),
+    ));
+
+    // Index leaf — payload_size = 4
+    out.push(cell_vec(
+        "index_leaf_4".clone(),
+        bytes(&[0x04, 0x01, 0x02, 0x03, 0x04]),
+        BcsIndexLeaf(4),
+    ));
+
+    // Index interior — left_child = 7, payload_size = 8
+    out.push(cell_vec(
+        "index_interior".clone(),
+        bytes(&[0x00, 0x00, 0x00, 0x07, 0x08, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22]),
+        BcsIndexInterior(7, 8),
+    ));
+
+    out
+}
+
+fn bytes(arr: &List<Int>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < arr.len() { out.push((arr[i] as Byte)); i = i + 1; }
+    out
+}
+
+public fn count() -> Int { appendix_e4().len() }

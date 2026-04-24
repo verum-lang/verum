@@ -1,0 +1,77 @@
+// =============================================================================
+// dst/seed.vr — reproducible PRNG for DST runs
+// =============================================================================
+// Spec: sqlite-native.md §22.5 (DST)
+//
+// `DstSeed` wraps a 4-word xoshiro256** state. Every DST harness
+// is constructed from a single `Int64` seed; the same seed always
+// produces the same op sequence + fault sequence.
+// =============================================================================
+
+module core.database.sqlite.native.dst.seed;
+
+mount core.*;
+mount base.{Bool};
+
+public type DstSeed is {
+    s0: Int64,
+    s1: Int64,
+    s2: Int64,
+    s3: Int64,
+}
+
+public fn seed_from_u64(seed: Int64) -> DstSeed {
+    // SplitMix64 expansion — turns one Int64 into the four words
+    // xoshiro needs without zero-state.
+    let mut z = seed;
+    let s0 = splitmix(&mut z);
+    let s1 = splitmix(&mut z);
+    let s2 = splitmix(&mut z);
+    let s3 = splitmix(&mut z);
+    DstSeed { s0: s0, s1: s1, s2: s2, s3: s3 }
+}
+
+fn splitmix(z: &mut Int64) -> Int64 {
+    *z = *z + (0x9E3779B97F4A7C15 as Int64);
+    let mut x: Int64 = *z;
+    x = (x ^ (x >> (30 as Int64))) * (0xBF58476D1CE4E5B9 as Int64);
+    x = (x ^ (x >> (27 as Int64))) * (0x94D049BB133111EB as Int64);
+    x ^ (x >> (31 as Int64))
+}
+
+implement DstSeed {
+    /// Pull the next u64-shaped Int64 + advance state in place.
+    pub fn next_u64(&mut self) -> Int64 {
+        let result = rotl(self.s1 * (5 as Int64), 7) * (9 as Int64);
+        let t = self.s1 << (17 as Int64);
+        self.s2 = self.s2 ^ self.s0;
+        self.s3 = self.s3 ^ self.s1;
+        self.s1 = self.s1 ^ self.s2;
+        self.s0 = self.s0 ^ self.s3;
+        self.s2 = self.s2 ^ t;
+        self.s3 = rotl(self.s3, 45);
+        result
+    }
+
+    /// Bounded draw in `[0, n)`. Caller passes `n > 0`.
+    pub fn next_below(&mut self, n: Int) -> Int {
+        if n <= 0 { return 0; }
+        let v = self.next_u64();
+        let abs_v = if v < (0 as Int64) { -v } else { v };
+        ((abs_v as Int) % n)
+    }
+
+    pub fn next_bool(&mut self) -> Bool {
+        (self.next_u64() & (1 as Int64)) != (0 as Int64)
+    }
+
+    /// Bernoulli draw — true with `numerator/denominator` probability.
+    pub fn bernoulli(&mut self, numerator: Int, denominator: Int) -> Bool {
+        if denominator <= 0 { return false; }
+        self.next_below(denominator) < numerator
+    }
+}
+
+fn rotl(x: Int64, k: Int) -> Int64 {
+    (x << (k as Int64)) | (x >> ((64 - k) as Int64))
+}

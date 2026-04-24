@@ -1,0 +1,142 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, test_vectors, appendix_e, varint, record, wal, btree
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Codified Appendix-E vector tables — every catalogue must be:
+//   * Non-empty
+//   * Self-consistent (count() == appendix_eN().len())
+//   * Vector fields populated (encoded.len() > 0 where applicable)
+
+mount core.database.sqlite.native.test_vectors.varint.{
+    VarintVector, vec, appendix_e1,
+    count as varint_count,
+};
+mount core.database.sqlite.native.test_vectors.record_encoding.{
+    SerialType, StNull, StInt8, StInt16, StText, StBlob,
+    serial_type_code,
+    RecordVector, record_vec, appendix_e2,
+    count as record_count,
+};
+mount core.database.sqlite.native.test_vectors.wal_checksum.{
+    WalChecksumVector, appendix_e3,
+    count as wal_count,
+};
+mount core.database.sqlite.native.test_vectors.btree_cell.{
+    BtreeCellShape,
+    BcsTableLeaf, BcsTableInterior, BcsIndexLeaf, BcsIndexInterior,
+    cell_kind_name,
+    BtreeCellVector, appendix_e4,
+    count as btree_count,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// E.1 — varint
+// -----------------------------------------------------------------------------
+
+fn test_varint_table_non_empty() {
+    let v = appendix_e1();
+    assert(v.len() > 0);
+    assert_eq(v.len(), varint_count());
+}
+
+fn test_varint_zero_pair_encodes_to_one_byte() {
+    let v = appendix_e1();
+    let first = &v[0];
+    assert_eq(first.decoded, 0 as Int64);
+    assert_eq(first.encoded.len(), 1);
+}
+
+fn test_varint_max_pair_uses_nine_bytes() {
+    let v = appendix_e1();
+    let last = &v[v.len() - 1];
+    assert_eq(last.encoded.len(), 9);
+}
+
+// -----------------------------------------------------------------------------
+// E.2 — record encoding
+// -----------------------------------------------------------------------------
+
+fn test_record_table_non_empty() {
+    let r = appendix_e2();
+    assert(r.len() > 0);
+    assert_eq(r.len(), record_count());
+}
+
+fn test_serial_type_codes_match_spec() {
+    assert_eq(serial_type_code(&StNull), 0);
+    assert_eq(serial_type_code(&StInt8), 1);
+    assert_eq(serial_type_code(&StInt16), 2);
+    assert_eq(serial_type_code(&StText(2)), 13 + 4);
+    assert_eq(serial_type_code(&StBlob(4)), 12 + 8);
+}
+
+fn test_record_vector_encoded_non_empty() {
+    let r = appendix_e2();
+    let mut i: Int = 0;
+    while i < r.len() {
+        assert(r[i].encoded.len() > 0);
+        assert(r[i].serial_types.len() > 0);
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// E.3 — WAL checksum
+// -----------------------------------------------------------------------------
+
+fn test_wal_table_non_empty() {
+    let w = appendix_e3();
+    assert(w.len() > 0);
+    assert_eq(w.len(), wal_count());
+}
+
+fn test_wal_empty_body_unchanged_checksum() {
+    let w = appendix_e3();
+    let zero = &w[0];
+    assert_eq(zero.cs0_init, zero.cs0_expected);
+    assert_eq(zero.cs1_init, zero.cs1_expected);
+}
+
+// -----------------------------------------------------------------------------
+// E.4 — btree cells
+// -----------------------------------------------------------------------------
+
+fn test_btree_table_non_empty() {
+    let b = appendix_e4();
+    assert(b.len() > 0);
+    assert_eq(b.len(), btree_count());
+}
+
+fn test_btree_cell_kind_names() {
+    assert(cell_kind_name(&BcsTableLeaf(0, 0 as Int64)) == "table_leaf".clone());
+    assert(cell_kind_name(&BcsTableInterior(0, 0 as Int64)) == "table_interior".clone());
+    assert(cell_kind_name(&BcsIndexLeaf(0)) == "index_leaf".clone());
+    assert(cell_kind_name(&BcsIndexInterior(0, 0)) == "index_interior".clone());
+}
+
+fn test_btree_vector_encoded_non_empty() {
+    let b = appendix_e4();
+    let mut i: Int = 0;
+    while i < b.len() {
+        assert(b[i].encoded.len() > 0);
+        i = i + 1;
+    }
+}
+
+fn main() {
+    test_varint_table_non_empty();
+    test_varint_zero_pair_encodes_to_one_byte();
+    test_varint_max_pair_uses_nine_bytes();
+    test_record_table_non_empty();
+    test_serial_type_codes_match_spec();
+    test_record_vector_encoded_non_empty();
+    test_wal_table_non_empty();
+    test_wal_empty_body_unchanged_checksum();
+    test_btree_table_non_empty();
+    test_btree_cell_kind_names();
+    test_btree_vector_encoded_non_empty();
+}

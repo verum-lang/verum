@@ -1,0 +1,32 @@
+// =============================================================================
+// core/database/sqlite/native/fuzz/mod.vr
+// =============================================================================
+// Layer: 7+ (test infrastructure)
+// Spec: sqlite-native.md §22.6 (fuzz harness)
+//
+// Three fuzzer surfaces:
+//
+//   * `grammar` — SQL grammar-guided mutator (SQLancer-style; emits
+//                 syntactically-valid SQL bursts)
+//   * `format`  — file-format byte mutator (corrupted page bytes /
+//                 cell offsets / freelist pointers)
+//   * `wal`     — WAL frame sequence mutator (out-of-order frames,
+//                 mismatched checksums, truncated batches)
+//
+// Submodules:
+//   * `mutation`  — Mutation taxonomy + Mutator protocol
+//   * `corpus`    — Corpus + CorpusEntry + ageing policy
+//   * `crash`     — CrashBucket — dedupes crashes by signature
+//   * `grammar`   — SQL-grammar mutator
+//   * `format`    — file-format mutator
+//   * `wal`       — WAL-frame mutator
+// =============================================================================
+
+module core.database.sqlite.native.fuzz;
+
+public module mutation;
+public module corpus;
+public module crash;
+public module grammar;
+public module format;
+public module wal;
