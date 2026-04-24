@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, varint, rfc9000_16, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §16 QUIC varint encoding — 1/2/4/8-byte length is signaled
+// by the first 2 bits of the first byte:
+//   00 = 1 byte  (6-bit value, 0..63)
+//   01 = 2 bytes (14-bit value, 0..16383)
+//   10 = 4 bytes (30-bit value, 0..1073741823)
+//   11 = 8 bytes (62-bit value, 0..(2^62 - 1))
+//
+// RFC 9000 §A.1 worked example: 0x3fff7151 encoded as 4 bytes
+// 0xbf 0xff 0x71 0x51.
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.varint.{
+    quic_encoded_len, quic_encode, quic_decode,
+};
+
+fn encoded_length_picks_shortest_form() {
+    assert(quic_encoded_len(0_u64)               == 1);
+    assert(quic_encoded_len(63_u64)              == 1);        // 0x3F — fits in 6 bits
+    assert(quic_encoded_len(64_u64)              == 2);        // needs 14 bits
+    assert(quic_encoded_len(16_383_u64)          == 2);        // 0x3FFF
+    assert(quic_encoded_len(16_384_u64)          == 4);
+    assert(quic_encoded_len(1_073_741_823_u64)   == 4);        // 0x3FFFFFFF
+    assert(quic_encoded_len(1_073_741_824_u64)   == 8);
+    // Max representable 62-bit value.
+    assert(quic_encoded_len(4_611_686_018_427_387_903_u64) == 8);
+}
+
+fn one_byte_encode_has_00_prefix() {
+    let bytes = quic_encode(0_u64);
+    assert(bytes.len() == 1);
+    // Top 2 bits = 00.
+    assert((bytes[0] & 0xC0_u8) == 0x00_u8);
+
+    let bytes63 = quic_encode(63_u64);
+    assert(bytes63.len() == 1);
+    assert(bytes63[0] == 0x3F_u8);       // exactly 6 bits set
+}
+
+fn two_byte_encode_has_01_prefix() {
+    let bytes = quic_encode(64_u64);
+    assert(bytes.len() == 2);
+    // Top 2 bits = 01.
+    assert((bytes[0] & 0xC0_u8) == 0x40_u8);
+    // Value 64 → 0x4040 on the wire.
+    assert(bytes[0] == 0x40_u8);
+    assert(bytes[1] == 0x40_u8);
+}
+
+fn four_byte_encode_has_10_prefix() {
+    let bytes = quic_encode(16_384_u64);
+    assert(bytes.len() == 4);
+    assert((bytes[0] & 0xC0_u8) == 0x80_u8);
+}
+
+fn eight_byte_encode_has_11_prefix() {
+    let bytes = quic_encode(1_073_741_824_u64);
+    assert(bytes.len() == 8);
+    assert((bytes[0] & 0xC0_u8) == 0xC0_u8);
+}
+
+fn roundtrip_sample_values() {
+    let samples: [UInt64; 6] = [
+        0_u64, 1_u64, 63_u64,
+        16_383_u64, 16_384_u64, 1_073_741_823_u64,
+    ];
+    let mut i: Int = 0;
+    while i < 6 {
+        let enc = quic_encode(samples[i]);
+        let (decoded, next) = quic_decode(enc.as_slice(), 0).unwrap();
+        assert(decoded == samples[i]);
+        assert(next == enc.len());
+        i = i + 1;
+    }
+}
+
+fn rfc9000_appendix_a1_example() {
+    // RFC 9000 §A.1: decoding 0xbf 0xff 0x71 0x51 yields 494_878_333.
+    let wire: List<Byte> = [0xBF_u8, 0xFF_u8, 0x71_u8, 0x51_u8];
+    let (v, next) = quic_decode(wire.as_slice(), 0).unwrap();
+    assert(v == 494_878_333_u64);
+    assert(next == 4);
+}
+
+@main
+public fn main() -> Int {
+    encoded_length_picks_shortest_form();
+    one_byte_encode_has_00_prefix();
+    two_byte_encode_has_01_prefix();
+    four_byte_encode_has_10_prefix();
+    eight_byte_encode_has_11_prefix();
+    roundtrip_sample_values();
+    rfc9000_appendix_a1_example();
+    print("RFC 9000 §16 QUIC varint KAT verified");
+    0
+}
