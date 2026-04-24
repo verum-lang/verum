@@ -1,0 +1,140 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, error, rfc9114, rfc9204, iana
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9114 §8.1 HTTP/3 error codes + RFC 9204 §6 QPACK error codes
+// plus the H3Error sum decomposing connection- vs stream-level failures.
+// This test pins IANA codepoints and variant constructibility.
+
+mount core.*;
+mount core.net.h3.error.{H3ErrorCode, H3Error};
+
+fn h3_error_code_iana_points() {
+    // RFC 9114 §8.1 registered codes.
+    assert(H3ErrorCode.H3_NO_ERROR                == 0x0100_u64);
+    assert(H3ErrorCode.H3_GENERAL_PROTOCOL_ERROR  == 0x0101_u64);
+    assert(H3ErrorCode.H3_INTERNAL_ERROR          == 0x0102_u64);
+    assert(H3ErrorCode.H3_STREAM_CREATION_ERROR   == 0x0103_u64);
+    assert(H3ErrorCode.H3_CLOSED_CRITICAL_STREAM  == 0x0104_u64);
+    assert(H3ErrorCode.H3_FRAME_UNEXPECTED        == 0x0105_u64);
+    assert(H3ErrorCode.H3_FRAME_ERROR             == 0x0106_u64);
+    assert(H3ErrorCode.H3_EXCESSIVE_LOAD          == 0x0107_u64);
+    assert(H3ErrorCode.H3_ID_ERROR                == 0x0108_u64);
+    assert(H3ErrorCode.H3_SETTINGS_ERROR          == 0x0109_u64);
+    assert(H3ErrorCode.H3_MISSING_SETTINGS        == 0x010A_u64);
+    assert(H3ErrorCode.H3_REQUEST_REJECTED        == 0x010B_u64);
+    assert(H3ErrorCode.H3_REQUEST_CANCELLED       == 0x010C_u64);
+    assert(H3ErrorCode.H3_REQUEST_INCOMPLETE      == 0x010D_u64);
+    assert(H3ErrorCode.H3_MESSAGE_ERROR           == 0x010E_u64);
+    assert(H3ErrorCode.H3_CONNECT_ERROR           == 0x010F_u64);
+    assert(H3ErrorCode.H3_VERSION_FALLBACK        == 0x0110_u64);
+}
+
+fn qpack_iana_points() {
+    // RFC 9204 §6 registered codes.
+    assert(H3ErrorCode.QPACK_DECOMPRESSION_FAILED == 0x0200_u64);
+    assert(H3ErrorCode.QPACK_ENCODER_STREAM_ERROR == 0x0201_u64);
+    assert(H3ErrorCode.QPACK_DECODER_STREAM_ERROR == 0x0202_u64);
+}
+
+fn h3_error_code_wrap_unwrap() {
+    let c = H3ErrorCode.new(H3ErrorCode.H3_FRAME_ERROR);
+    assert(c.value() == 0x0106_u64);
+    let q = H3ErrorCode.new(H3ErrorCode.QPACK_DECOMPRESSION_FAILED);
+    assert(q.value() == 0x0200_u64);
+}
+
+fn h3_error_connection_stream_carries_payload() {
+    let conn = H3Error.ConnectionError {
+        code:   H3ErrorCode.new(H3ErrorCode.H3_SETTINGS_ERROR),
+        reason: f"duplicate SETTINGS frame",
+    };
+    match conn {
+        H3Error.ConnectionError { code, reason: _ } => {
+            assert(code.value() == 0x0109_u64);
+        },
+        _ => panic("expected ConnectionError payload"),
+    }
+
+    let strm = H3Error.StreamError {
+        stream_id: 12_u64,
+        code:      H3ErrorCode.new(H3ErrorCode.H3_REQUEST_CANCELLED),
+    };
+    match strm {
+        H3Error.StreamError { stream_id, code } => {
+            assert(stream_id == 12_u64);
+            assert(code.value() == 0x010C_u64);
+        },
+        _ => panic("expected StreamError payload"),
+    }
+}
+
+fn h3_error_structural_variants_constructible() {
+    let _a: H3Error = H3Error.FrameDecode(f"malformed varint");
+    let _b: H3Error = H3Error.StreamTypeDecode;
+    let _c: H3Error = H3Error.UnexpectedFrame {
+        on_stream_kind: f"control",
+        frame_type:     0xFF_u64,
+    };
+    let _d: H3Error = H3Error.MissingSettings;
+    let _e: H3Error = H3Error.SettingsRepeat;
+    let _f: H3Error = H3Error.ConnectionClosed;
+}
+
+fn h3_error_tagged_distinctly() {
+    let errs: [H3Error; 8] = [
+        H3Error.ConnectionError {
+            code:   H3ErrorCode.new(H3ErrorCode.H3_INTERNAL_ERROR),
+            reason: f"x",
+        },
+        H3Error.StreamError {
+            stream_id: 0_u64,
+            code:      H3ErrorCode.new(H3ErrorCode.H3_NO_ERROR),
+        },
+        H3Error.FrameDecode(f"y"),
+        H3Error.StreamTypeDecode,
+        H3Error.UnexpectedFrame { on_stream_kind: f"push", frame_type: 1_u64 },
+        H3Error.MissingSettings,
+        H3Error.SettingsRepeat,
+        H3Error.ConnectionClosed,
+    ];
+    let mut tags: [Int; 8] = [0; 8];
+    let mut i: Int = 0;
+    while i < 8 {
+        tags[i] = match errs[i] {
+            H3Error.ConnectionError { .. }  => 1,
+            H3Error.StreamError { .. }      => 2,
+            H3Error.FrameDecode(_)          => 3,
+            H3Error.StreamTypeDecode        => 4,
+            H3Error.UnexpectedFrame { .. }  => 5,
+            H3Error.MissingSettings         => 6,
+            H3Error.SettingsRepeat          => 7,
+            H3Error.ConnectionClosed        => 8,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 8 {
+        let mut k: Int = j + 1;
+        while k < 8 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    h3_error_code_iana_points();
+    qpack_iana_points();
+    h3_error_code_wrap_unwrap();
+    h3_error_connection_stream_carries_payload();
+    h3_error_structural_variants_constructible();
+    h3_error_tagged_distinctly();
+    print("RFC 9114 §8.1 + RFC 9204 §6 H3Error variants + IANA codepoints verified");
+    0
+}

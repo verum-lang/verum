@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, error, alert, rfc8446_6
+// @timeout: 15000
+// @expected-exit: 0
+
+// TlsError ↔ AlertDescription mapping per RFC 8446 §6: every named
+// error that we raise locally translates to an outgoing alert the
+// peer will receive. Receiving a peer's alert or an I/O error does
+// not yield an outgoing alert.
+
+mount core.*;
+mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.alert.{AlertDescription};
+
+fn protocol_version_maps_to_protocol_version_alert() {
+    match TlsError.ProtocolVersion.to_alert() {
+        Some(a) => assert(a.to_u8() == AlertDescription.ProtocolVersion.to_u8()),
+        None => panic("ProtocolVersion must map"),
+    }
+}
+
+fn handshake_failure_maps_to_handshake_failure() {
+    match TlsError.HandshakeFailure.to_alert() {
+        Some(a) => assert(a.to_u8() == AlertDescription.HandshakeFailure.to_u8()),
+        None => panic("HandshakeFailure must map"),
+    }
+}
+
+fn certificate_failures_map_to_certificate_alerts() {
+    let pairs: [TlsError; 6] = [
+        TlsError.BadCertificate,
+        TlsError.UnsupportedCertificate,
+        TlsError.CertificateRevoked,
+        TlsError.CertificateExpired,
+        TlsError.CertificateUnknown,
+        TlsError.UnknownCa,
+    ];
+    let expected: [AlertDescription; 6] = [
+        AlertDescription.BadCertificate,
+        AlertDescription.UnsupportedCertificate,
+        AlertDescription.CertificateRevoked,
+        AlertDescription.CertificateExpired,
+        AlertDescription.CertificateUnknown,
+        AlertDescription.UnknownCa,
+    ];
+    let mut i: Int = 0;
+    while i < 6 {
+        match pairs[i].to_alert() {
+            Some(a) => assert(a.to_u8() == expected[i].to_u8()),
+            None => panic("certificate error must map"),
+        }
+        i = i + 1;
+    }
+}
+
+fn internal_error_maps_to_internal_error_alert() {
+    let e = TlsError.InternalError(f"database down");
+    match e.to_alert() {
+        Some(a) => assert(a.to_u8() == 80_u8),
+        None => panic("InternalError must map"),
+    }
+}
+
+fn remote_alert_does_not_emit_outgoing() {
+    let e = TlsError.RemoteAlert(AlertDescription.CloseNotify);
+    match e.to_alert() {
+        None => {},
+        _ => panic("RemoteAlert is inbound — no outgoing"),
+    }
+}
+
+fn io_error_does_not_emit_outgoing() {
+    let e = TlsError.IoError(f"write timeout");
+    match e.to_alert() {
+        None => {},
+        _ => panic("IoError → no alert"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    protocol_version_maps_to_protocol_version_alert();
+    handshake_failure_maps_to_handshake_failure();
+    certificate_failures_map_to_certificate_alerts();
+    internal_error_maps_to_internal_error_alert();
+    remote_alert_does_not_emit_outgoing();
+    io_error_does_not_emit_outgoing();
+    print("TlsError → AlertDescription mapping verified");
+    0
+}

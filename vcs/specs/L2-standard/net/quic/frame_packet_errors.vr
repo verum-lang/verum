@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, error, frame, packet
+// @timeout: 15000
+// @expected-exit: 0
+
+// QUIC FrameError + PacketError variants — every decoder path in the
+// stack classifies failures through these enums. This test pins that
+// every variant is constructible and distinct under a match arm.
+
+mount core.*;
+mount core.net.quic.frame.{FrameError};
+mount core.net.quic.packet.{PacketError};
+
+fn frame_error_variants_constructible() {
+    let _a: FrameError = FrameError.Truncated;
+    let _b: FrameError = FrameError.InvalidType(42_u64);
+    let _c: FrameError = FrameError.InvalidValue(f"bad length");
+    let _d: FrameError = FrameError.VarintFailure;
+}
+
+fn frame_error_tagged_distinctly() {
+    let errs: [FrameError; 4] = [
+        FrameError.Truncated,
+        FrameError.InvalidType(1_u64),
+        FrameError.InvalidValue(f"x"),
+        FrameError.VarintFailure,
+    ];
+    let mut tags: [Int; 4] = [0; 4];
+    let mut i: Int = 0;
+    while i < 4 {
+        tags[i] = match errs[i] {
+            FrameError.Truncated         => 1,
+            FrameError.InvalidType(_)    => 2,
+            FrameError.InvalidValue(_)   => 3,
+            FrameError.VarintFailure     => 4,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 4 {
+        let mut k: Int = j + 1;
+        while k < 4 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn packet_error_variants_constructible() {
+    let _a: PacketError = PacketError.Truncated;
+    let _b: PacketError = PacketError.InvalidHeaderForm;
+    let _c: PacketError = PacketError.UnsupportedVersion(0xDADADADA_u32);
+    let _d: PacketError = PacketError.VarintFailure;
+    let _e: PacketError = PacketError.CidTooLong(21);
+    let _f: PacketError = PacketError.InvalidPacketNumberLength(5);
+    let _g: PacketError = PacketError.TokenTooLong(4096);
+}
+
+fn packet_error_carries_diagnostic_payload() {
+    let e = PacketError.UnsupportedVersion(0xABCDEF12_u32);
+    match e {
+        PacketError.UnsupportedVersion(v) => assert(v == 0xABCDEF12_u32),
+        _ => panic("expected UnsupportedVersion payload"),
+    }
+    let c = PacketError.CidTooLong(25);
+    match c {
+        PacketError.CidTooLong(len) => assert(len == 25),
+        _ => panic("expected CidTooLong payload"),
+    }
+    let p = PacketError.InvalidPacketNumberLength(7);
+    match p {
+        PacketError.InvalidPacketNumberLength(n) => assert(n == 7),
+        _ => panic("expected InvalidPacketNumberLength payload"),
+    }
+    let t = PacketError.TokenTooLong(8192);
+    match t {
+        PacketError.TokenTooLong(len) => assert(len == 8192),
+        _ => panic("expected TokenTooLong payload"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    frame_error_variants_constructible();
+    frame_error_tagged_distinctly();
+    packet_error_variants_constructible();
+    packet_error_carries_diagnostic_payload();
+    print("QUIC FrameError + PacketError variants verified");
+    0
+}
