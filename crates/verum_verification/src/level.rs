@@ -16,6 +16,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::Duration;
+use verum_common::Text;
 
 /// Verification level for gradual verification
 ///
@@ -136,6 +137,147 @@ impl VerificationLevel {
             VerificationLevel::Static => "static",
             VerificationLevel::Proof => "proof",
         }
+    }
+
+    /// Evaluate the outcome of a proof-attempt at this level.
+    ///
+    /// This encodes the single policy decision that distinguishes the
+    /// three levels at the compile-time / runtime boundary:
+    ///
+    /// | Level    | Proof succeeds | Proof fails         |
+    /// |----------|----------------|---------------------|
+    /// | Runtime  | no SMT call    | no SMT call         |
+    /// | Static   | check elided   | fall back → runtime |
+    /// | Proof    | check elided   | **hard compile fail** |
+    ///
+    /// ### Runtime level
+    ///
+    /// Runtime never attempts a proof — we pre-short-circuit here and
+    /// always return `EmitRuntimeCheck`. The compiler consumer should
+    /// honor this without ever invoking the SMT backend.
+    ///
+    /// ### Static level
+    ///
+    /// Static is the "best-effort optimisation" level. If the backend
+    /// proves the obligation, the check is elided. If the backend
+    /// times out or returns *Unknown* / *Sat*, the compiler emits the
+    /// runtime check plus a `W501` warning (`soft-fail fallback:
+    /// `static` became `runtime` for <name>`) — the build still
+    /// succeeds. This matches the docs at
+    /// `docs/verification/levels.md §2`.
+    ///
+    /// ### Proof level
+    ///
+    /// Proof is the "no fallback" contract. A failed proof is a hard
+    /// compile error (`E502`), never silently demoted to runtime.
+    ///
+    /// The `ProofAttempt::Unattempted` variant is for call sites that
+    /// want to short-circuit (e.g. when SMT is globally disabled via
+    /// `--no-smt`): Runtime / Static fall back, Proof hard-fails.
+    pub fn evaluate_attempt(&self, attempt: ProofAttempt) -> VerificationOutcome {
+        match (self, attempt) {
+            // Runtime never runs the proof — the caller shouldn't even
+            // reach here with Proven / Failed. If they did, we still
+            // short-circuit to runtime check emission so the policy
+            // is crash-proof.
+            (VerificationLevel::Runtime, _) => VerificationOutcome::EmitRuntimeCheck,
+
+            // Static: proven → elide; failed or unattempted → runtime
+            // fallback with warning.
+            (VerificationLevel::Static, ProofAttempt::Proven) => {
+                VerificationOutcome::ElideCheck
+            }
+            (VerificationLevel::Static, ProofAttempt::Failed(reason)) => {
+                VerificationOutcome::FallbackWithWarning(reason)
+            }
+            (VerificationLevel::Static, ProofAttempt::Unattempted) => {
+                VerificationOutcome::FallbackWithWarning(
+                    Text::from("SMT not attempted (e.g. --no-smt)"),
+                )
+            }
+
+            // Proof: proven → elide; failed → hard error; unattempted
+            // → hard error (Proof's whole contract is "must prove").
+            (VerificationLevel::Proof, ProofAttempt::Proven) => {
+                VerificationOutcome::ElideCheck
+            }
+            (VerificationLevel::Proof, ProofAttempt::Failed(reason)) => {
+                VerificationOutcome::HardFail(reason)
+            }
+            (VerificationLevel::Proof, ProofAttempt::Unattempted) => {
+                VerificationOutcome::HardFail(Text::from(
+                    "Proof-level obligation requires SMT; none was \
+                     attempted (is the solver disabled?)",
+                ))
+            }
+        }
+    }
+}
+
+/// Input to [`VerificationLevel::evaluate_attempt`] — the result of
+/// actually invoking the SMT backend (or the signal that no backend
+/// was invoked at all).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProofAttempt {
+    /// The backend returned *Unsat* on the negated obligation — the
+    /// obligation is valid.
+    Proven,
+
+    /// The backend returned *Sat*, *Unknown*, or timed out. Carries a
+    /// short human-readable reason (counterexample summary, timeout,
+    /// solver-unknown rationale) for the diagnostic.
+    Failed(Text),
+
+    /// No backend was invoked — most commonly because SMT is
+    /// globally disabled (e.g. `--no-smt`, dev builds). Static
+    /// gracefully falls back; Proof hard-fails.
+    Unattempted,
+}
+
+/// Output of [`VerificationLevel::evaluate_attempt`] — the
+/// instruction the compiler consumer should follow. This is
+/// deliberately kept side-effect-free: the consumer translates each
+/// variant into the actual VBC emission / diagnostic surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerificationOutcome {
+    /// The obligation is proven — do not emit a runtime check.
+    ElideCheck,
+
+    /// Emit the runtime check. No diagnostic (this is the Runtime
+    /// level's normal behaviour or Static's explicit "not proven but
+    /// OK to run" signal when the caller pre-decided no proof).
+    EmitRuntimeCheck,
+
+    /// Emit the runtime check **and** a `W501` warning saying why
+    /// the static proof did not succeed. The compiler consumer is
+    /// responsible for translating this into the diagnostic surface
+    /// (CLI / LSP).
+    FallbackWithWarning(Text),
+
+    /// Fail the build with an `E502` error citing the proof failure.
+    /// Proof level only; Static must never return this variant.
+    HardFail(Text),
+}
+
+impl VerificationOutcome {
+    /// Whether this outcome requires the compiler to emit a runtime
+    /// check into the generated VBC.
+    pub fn requires_runtime_check(&self) -> bool {
+        matches!(
+            self,
+            VerificationOutcome::EmitRuntimeCheck
+                | VerificationOutcome::FallbackWithWarning(_)
+        )
+    }
+
+    /// Whether this outcome should halt compilation.
+    pub fn is_hard_failure(&self) -> bool {
+        matches!(self, VerificationOutcome::HardFail(_))
+    }
+
+    /// Whether this outcome should emit a warning diagnostic.
+    pub fn is_warning(&self) -> bool {
+        matches!(self, VerificationOutcome::FallbackWithWarning(_))
     }
 }
 
@@ -378,3 +520,122 @@ pub trait ProofLevel {
 impl RuntimeLevel for VerificationLevel {}
 impl StaticLevel for VerificationLevel {}
 impl ProofLevel for VerificationLevel {}
+
+#[cfg(test)]
+mod attempt_tests {
+    use super::*;
+
+    // ---- Runtime level: SMT never consulted ----
+
+    #[test]
+    fn runtime_always_emits_runtime_check() {
+        assert_eq!(
+            VerificationLevel::Runtime.evaluate_attempt(ProofAttempt::Unattempted),
+            VerificationOutcome::EmitRuntimeCheck
+        );
+        assert_eq!(
+            VerificationLevel::Runtime.evaluate_attempt(ProofAttempt::Proven),
+            VerificationOutcome::EmitRuntimeCheck
+        );
+        assert_eq!(
+            VerificationLevel::Runtime
+                .evaluate_attempt(ProofAttempt::Failed(Text::from("x"))),
+            VerificationOutcome::EmitRuntimeCheck
+        );
+    }
+
+    // ---- Static level: proof-attempt then soft-fail ----
+
+    #[test]
+    fn static_elides_check_when_proven() {
+        assert_eq!(
+            VerificationLevel::Static.evaluate_attempt(ProofAttempt::Proven),
+            VerificationOutcome::ElideCheck
+        );
+    }
+
+    #[test]
+    fn static_falls_back_with_warning_on_proof_failure() {
+        let outcome = VerificationLevel::Static
+            .evaluate_attempt(ProofAttempt::Failed(Text::from("timeout")));
+        match outcome {
+            VerificationOutcome::FallbackWithWarning(reason) => {
+                assert_eq!(reason.as_str(), "timeout");
+            }
+            other => panic!("expected FallbackWithWarning, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn static_falls_back_with_warning_on_unattempted() {
+        let outcome =
+            VerificationLevel::Static.evaluate_attempt(ProofAttempt::Unattempted);
+        assert!(outcome.is_warning());
+        assert!(outcome.requires_runtime_check());
+        assert!(!outcome.is_hard_failure());
+    }
+
+    // ---- Proof level: hard-fail on anything but Proven ----
+
+    #[test]
+    fn proof_elides_check_when_proven() {
+        assert_eq!(
+            VerificationLevel::Proof.evaluate_attempt(ProofAttempt::Proven),
+            VerificationOutcome::ElideCheck
+        );
+    }
+
+    #[test]
+    fn proof_hard_fails_on_proof_failure() {
+        let outcome = VerificationLevel::Proof
+            .evaluate_attempt(ProofAttempt::Failed(Text::from("sat model found")));
+        match outcome {
+            VerificationOutcome::HardFail(reason) => {
+                assert_eq!(reason.as_str(), "sat model found");
+            }
+            other => panic!("expected HardFail, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn proof_hard_fails_on_unattempted() {
+        let outcome =
+            VerificationLevel::Proof.evaluate_attempt(ProofAttempt::Unattempted);
+        assert!(outcome.is_hard_failure());
+        assert!(!outcome.requires_runtime_check());
+    }
+
+    // ---- VerificationOutcome predicate consistency ----
+
+    #[test]
+    fn outcome_predicates_are_mutually_consistent() {
+        let elide = VerificationOutcome::ElideCheck;
+        assert!(!elide.requires_runtime_check());
+        assert!(!elide.is_hard_failure());
+        assert!(!elide.is_warning());
+
+        let emit = VerificationOutcome::EmitRuntimeCheck;
+        assert!(emit.requires_runtime_check());
+        assert!(!emit.is_hard_failure());
+        assert!(!emit.is_warning());
+
+        let fb = VerificationOutcome::FallbackWithWarning(Text::from("r"));
+        assert!(fb.requires_runtime_check());
+        assert!(!fb.is_hard_failure());
+        assert!(fb.is_warning());
+
+        let hf = VerificationOutcome::HardFail(Text::from("r"));
+        assert!(!hf.requires_runtime_check());
+        assert!(hf.is_hard_failure());
+        assert!(!hf.is_warning());
+    }
+
+    #[test]
+    fn static_level_config_matches_policy() {
+        // The config-side flag must agree with the evaluate_attempt
+        // policy: Static allows fallback; Proof doesn't.
+        assert!(VerificationLevel::Static.allows_runtime_fallback());
+        assert!(!VerificationLevel::Proof.allows_runtime_fallback());
+        assert!(VerificationLevel::Runtime.allows_runtime_fallback());
+    }
+}
