@@ -1,0 +1,129 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, sni, server_name, rfc6066, encode, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 6066 §3 server_name extension byte-exact encode:
+//
+//   Extension {
+//       ExtensionType ext_type = server_name (0);
+//       opaque<0..2^16-1> extension_data = u16_len_prefixed(
+//           ServerNameList server_name_list<1..2^16-1>;
+//       );
+//   }
+//   struct { NameType name_type (u8); opaque HostName<1..2^16-1>; } ServerName;
+//   NameType host_name = 0;
+//
+// "example.com" (11 bytes) single entry wire:
+//   00 00                               ext_type = 0
+//   00 10                               outer len = 16
+//   00 0E                               server_name_list len = 14
+//   00                                  name_type = host_name
+//   00 0B                               hostname len = 11
+//   65 78 61 6D 70 6C 65 2E 63 6F 6D    "example.com"
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.extension.{
+    Extension, ServerName, encode_extension, EXT_SERVER_NAME,
+};
+
+fn ext_server_name_constant_is_zero() {
+    assert(EXT_SERVER_NAME == 0_u16);
+}
+
+fn sni_example_com_byte_exact() {
+    let host_name = f"example.com";
+    let ext = Extension.ServerNameExt {
+        names: [ServerName { host_name: host_name }],
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+
+    // Total: 2 + 2 + 2 + 1 + 2 + 11 = 20.
+    assert(out.len() == 20);
+    assert(out[0]  == 0x00_u8 && out[1]  == 0x00_u8);   // ext_type = 0
+    assert(out[2]  == 0x00_u8 && out[3]  == 0x10_u8);   // outer len = 16
+    assert(out[4]  == 0x00_u8 && out[5]  == 0x0E_u8);   // list len = 14
+    assert(out[6]  == 0x00_u8);                          // name_type = 0 (host_name)
+    assert(out[7]  == 0x00_u8 && out[8]  == 0x0B_u8);   // hostname len = 11
+    // "example.com"
+    assert(out[9]  == 0x65_u8);    // 'e'
+    assert(out[10] == 0x78_u8);    // 'x'
+    assert(out[11] == 0x61_u8);    // 'a'
+    assert(out[12] == 0x6D_u8);    // 'm'
+    assert(out[13] == 0x70_u8);    // 'p'
+    assert(out[14] == 0x6C_u8);    // 'l'
+    assert(out[15] == 0x65_u8);    // 'e'
+    assert(out[16] == 0x2E_u8);    // '.'
+    assert(out[17] == 0x63_u8);    // 'c'
+    assert(out[18] == 0x6F_u8);    // 'o'
+    assert(out[19] == 0x6D_u8);    // 'm'
+}
+
+fn sni_single_char_hostname() {
+    // "a" — shortest legal HostName.
+    let ext = Extension.ServerNameExt {
+        names: [ServerName { host_name: f"a" }],
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // 2 + 2 + 2 + 1 + 2 + 1 = 10.
+    assert(out.len() == 10);
+    assert(out[0] == 0x00_u8 && out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x06_u8);    // outer 6
+    assert(out[4] == 0x00_u8 && out[5] == 0x04_u8);    // list 4
+    assert(out[6] == 0x00_u8);                          // name_type 0
+    assert(out[7] == 0x00_u8 && out[8] == 0x01_u8);    // host_name len 1
+    assert(out[9] == 0x61_u8);                          // 'a'
+}
+
+fn sni_two_hostnames_in_one_extension() {
+    // Two ServerName entries — each with name_type=0 + u16-len-prefixed hostname.
+    let ext = Extension.ServerNameExt {
+        names: [
+            ServerName { host_name: f"a.test" },
+            ServerName { host_name: f"b.test" },
+        ],
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // 2 (ext_type) + 2 (outer) + 2 (list) + 2× (1+2+6) = 24.
+    assert(out.len() == 24);
+    // First entry starts at byte 6.
+    assert(out[6]  == 0x00_u8);                         // name_type
+    assert(out[7]  == 0x00_u8 && out[8]  == 0x06_u8);   // len 6
+    assert(out[9]  == 0x61_u8);                         // 'a'
+    // Second entry starts at byte 15.
+    assert(out[15] == 0x00_u8);
+    assert(out[16] == 0x00_u8 && out[17] == 0x06_u8);
+    assert(out[18] == 0x62_u8);                         // 'b'
+}
+
+fn sni_extension_appears_in_client_hello_context() {
+    // Real ClientHello encoding wraps multiple extensions in a u16-length
+    // block. This test just verifies our single-extension encoder
+    // produces bytes that fit that composition — the outer block just
+    // concatenates len-prefixed ext frames and wraps the whole thing.
+    let ext = Extension.ServerNameExt {
+        names: [ServerName { host_name: f"host.test" }],
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // 2 + 2 + 2 + 1 + 2 + 9 = 18.
+    assert(out.len() == 18);
+    assert(out[6] == 0x00_u8);                         // host_name name_type
+}
+
+@main
+public fn main() -> Int {
+    ext_server_name_constant_is_zero();
+    sni_example_com_byte_exact();
+    sni_single_char_hostname();
+    sni_two_hostnames_in_one_extension();
+    sni_extension_appears_in_client_hello_context();
+    print("RFC 6066 §3 SNI server_name extension encode byte-exact verified");
+    0
+}
