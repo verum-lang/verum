@@ -512,7 +512,15 @@ fn run_bench_interpret(
     // Single interpreter instance reused across samples so we're not
     // re-paying state-construction overhead each iteration. Each call
     // to `execute_function` runs the bench body once and returns.
+    // Disable the interpreter's safety caps — benches intentionally run
+    // hot loops with billions of VBC ops, and the counters are cumulative
+    // across the Interpreter's lifetime (not per-call), so even one
+    // @bench with ITERATIONS=10^6 trips the default 100M cap. Setting
+    // max_instructions=0 and timeout_ms=0 disables both gates (the
+    // dispatch check is `count > max && max > 0`).
     let mut interp = Interpreter::new(Arc::clone(module));
+    interp.state.config.max_instructions = 0;
+    interp.state.config.timeout_ms = 0;
 
     // Warm-up: run while warm_up_time hasn't elapsed. Discard timings.
     let warm_end = Instant::now() + opts.warm_up_time;
