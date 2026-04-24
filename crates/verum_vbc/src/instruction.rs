@@ -8996,6 +8996,23 @@ pub enum Instruction {
         /// Destination register for new set.
         dst: Reg,
     },
+
+    // ========================================================================
+    // Deque Operations
+    // ========================================================================
+    /// Create new empty deque with default capacity.
+    /// Layout: [data, head, len, cap] — matches
+    /// `type Deque<T> is { data, head, len, cap }` in
+    /// `core/collections/deque.vr`. Interpreter handler
+    /// (`handle_new_deque` @ opcode 0xCD) allocates with
+    /// `TypeId::DEQUE` so every subsequent `push_back`/`pop_back`/…
+    /// dispatches through the builtin Deque handlers instead of
+    /// the stdlib's raw-pointer `self.data.offset(…)` path (which
+    /// can't work against the builtin layout).
+    NewDeque {
+        /// Destination register for new deque.
+        dst: Reg,
+    },
     /// Insert element into set.
     SetInsert {
         /// Set register.

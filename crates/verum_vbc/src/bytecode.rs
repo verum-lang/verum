@@ -1936,6 +1936,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(0, output);
         }
 
+        Instruction::NewDeque { dst } => {
+            output.push(Opcode::NewDeque.to_byte());
+            encode_reg(*dst, output);
+            // capacity_hint=0 → handler uses DEFAULT_CAP (16).
+            encode_varint(0, output);
+        }
+
         Instruction::SetInsert { set, elem } => {
             output.push(Opcode::SetInsert.to_byte());
             encode_reg(*set, output);

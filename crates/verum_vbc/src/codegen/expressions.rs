@@ -4661,6 +4661,11 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::NewSet { dst: dest });
                 return Ok(Some(dest));
             }
+            if tn == type_names::DEQUE {
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::NewDeque { dst: dest });
+                return Ok(Some(dest));
+            }
         }
 
         // `List.with_capacity(n)` / `Map.with_capacity(n)` /
@@ -4681,6 +4686,8 @@ impl VbcCodegen {
                 Some(Instruction::NewMap { dst: Reg(0) })
             } else if tn == type_names::SET {
                 Some(Instruction::NewSet { dst: Reg(0) })
+            } else if tn == type_names::DEQUE {
+                Some(Instruction::NewDeque { dst: Reg(0) })
             } else {
                 None
             };
@@ -4693,9 +4700,10 @@ impl VbcCodegen {
                 }
                 let dest = self.ctx.alloc_temp();
                 let instr = match template {
-                    Instruction::NewList { .. } => Instruction::NewList { dst: dest },
-                    Instruction::NewMap  { .. } => Instruction::NewMap  { dst: dest },
-                    Instruction::NewSet  { .. } => Instruction::NewSet  { dst: dest },
+                    Instruction::NewList  { .. } => Instruction::NewList  { dst: dest },
+                    Instruction::NewMap   { .. } => Instruction::NewMap   { dst: dest },
+                    Instruction::NewSet   { .. } => Instruction::NewSet   { dst: dest },
+                    Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest },
                     other => other,
                 };
                 self.ctx.emit(instr);

@@ -1,0 +1,50 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: deque, constructor, builtin, layout
+// @timeout: 5000
+// @expect: pass
+//
+// Regression: `Deque.new()` went through stdlib `core.collections.deque`
+// (user-defined record `{ data: &unsafe T, head, len, cap }`) instead
+// of the interpreter's builtin constructor. The NewDeque opcode (0xCD)
+// existed as an Opcode + interpreter handler but had no
+//   (a) Instruction variant, so it couldn't be emitted
+//   (b) codegen intercept at `Deque.new()` / `Deque.with_capacity(n)`
+//
+// Every `d.push_back(1)` then panicked
+//   "method 'T.offset' not found on value"
+// because the stdlib body called `self.data.offset(tail)` on the
+// builtin Deque's raw Value layout.
+//
+// Fixed by adding a NewDeque variant, wiring its encoding, and
+// pairing it with the existing List/Map/Set intercepts in
+// `compile_method_call` so `Deque.new()` emits NewDeque directly.
+
+mount core.collections.deque.Deque;
+
+fn main() {
+    let mut d: Deque<Int> = Deque.new();
+    assert(d.is_empty());
+    assert(d.len() == 0);
+
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_front(0);
+    assert(d.len() == 4);
+
+    let back = d.pop_back();
+    match back {
+        Some(v) => assert(v == 3),
+        None => panic("Expected Some(3)"),
+    }
+
+    let front = d.pop_front();
+    match front {
+        Some(v) => assert(v == 0),
+        None => panic("Expected Some(0)"),
+    }
+
+    assert(d.len() == 2);
+}
