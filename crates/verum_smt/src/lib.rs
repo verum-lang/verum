@@ -159,6 +159,7 @@ pub mod parallel;
 pub mod quantifier_elim;
 pub mod tactics;
 pub mod user_tactic; // Phase D.4: surface tactic DSL → Z3 combinator bridge
+pub mod tactic_registry; // Task #87: cog-level registry for user-authored tactic packages
 pub mod cubical_tactic; // Phase D.4 extension: cubical/category/descent tactic runtime bridge
 pub mod proof_extraction_bridge; // Phase D.5: proof term extraction + certificate export
 pub mod unsat_core;
