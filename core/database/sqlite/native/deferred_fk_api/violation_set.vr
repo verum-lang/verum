@@ -1,0 +1,50 @@
+// Per-transaction FK-violation accumulator.
+
+module core.database.sqlite.native.deferred_fk_api.violation_set;
+
+mount base.{Bool, Int64};
+
+public type ViolationSet is {
+    pending_count: Int64,
+    peak_count: Int64,
+    violations_resolved: Int64,
+};
+
+public fn empty() -> ViolationSet {
+    ViolationSet {
+        pending_count: 0 as Int64,
+        peak_count: 0 as Int64,
+        violations_resolved: 0 as Int64,
+    }
+}
+
+public fn is_empty(v: &ViolationSet) -> Bool {
+    v.pending_count == (0 as Int64)
+}
+
+public fn record_violation(mut v: ViolationSet) -> ViolationSet {
+    v.pending_count = v.pending_count + (1 as Int64);
+    if v.pending_count > v.peak_count {
+        v.peak_count = v.pending_count;
+    }
+    v
+}
+
+public fn resolve_violation(mut v: ViolationSet) -> ViolationSet {
+    if v.pending_count > (0 as Int64) {
+        v.pending_count = v.pending_count - (1 as Int64);
+        v.violations_resolved = v.violations_resolved + (1 as Int64);
+    }
+    v
+}
+
+// Is a COMMIT safe to proceed?
+public fn commit_is_safe(v: &ViolationSet) -> Bool {
+    is_empty(v)
+}
+
+// Resetting on ROLLBACK clears pending + preserves peak (for profiling).
+public fn reset_on_rollback(mut v: ViolationSet) -> ViolationSet {
+    v.pending_count = 0 as Int64;
+    v
+}

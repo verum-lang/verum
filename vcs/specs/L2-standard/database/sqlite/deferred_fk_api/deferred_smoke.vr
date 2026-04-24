@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, deferred_fk_api, constraint
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.deferred_fk_api.constraint_mode.{
+    FkMode, FmImmediate, FmDeferredInitImm, FmDeferredInitDef,
+    mode_name, checks_at_statement, defers_until_commit, can_be_toggled,
+};
+mount core.database.sqlite.native.deferred_fk_api.violation_set.{
+    ViolationSet,
+    empty, is_empty, record_violation, resolve_violation,
+    commit_is_safe, reset_on_rollback,
+};
+mount base.{Bool, Int64};
+
+fn test_mode_names() {
+    assert(mode_name(&FmImmediate)       == "IMMEDIATE".clone());
+    assert(mode_name(&FmDeferredInitImm) == "DEFERRABLE INITIALLY IMMEDIATE".clone());
+    assert(mode_name(&FmDeferredInitDef) == "DEFERRABLE INITIALLY DEFERRED".clone());
+}
+
+fn test_checks_at_statement_set() {
+    assert(checks_at_statement(&FmImmediate));
+    assert(checks_at_statement(&FmDeferredInitImm));
+    assert(!checks_at_statement(&FmDeferredInitDef));
+}
+
+fn test_defers_until_commit_set() {
+    assert(defers_until_commit(&FmDeferredInitDef));
+    assert(!defers_until_commit(&FmImmediate));
+    assert(!defers_until_commit(&FmDeferredInitImm));
+}
+
+fn test_toggle_permission() {
+    assert(!can_be_toggled(&FmImmediate));
+    assert(can_be_toggled(&FmDeferredInitImm));
+    assert(can_be_toggled(&FmDeferredInitDef));
+}
+
+fn test_empty_violation_set() {
+    let v = empty();
+    assert(is_empty(&v));
+    assert(commit_is_safe(&v));
+}
+
+fn test_record_and_resolve() {
+    let v0 = empty();
+    let v1 = record_violation(v0);
+    assert(!is_empty(&v1));
+    assert(!commit_is_safe(&v1));
+    assert_eq(v1.pending_count, 1 as Int64);
+    let v2 = record_violation(v1);
+    assert_eq(v2.pending_count, 2 as Int64);
+    assert_eq(v2.peak_count, 2 as Int64);
+    let v3 = resolve_violation(v2);
+    assert_eq(v3.pending_count, 1 as Int64);
+    assert_eq(v3.violations_resolved, 1 as Int64);
+    assert_eq(v3.peak_count, 2 as Int64);
+}
+
+fn test_peak_preserved_on_full_resolve() {
+    let mut v = empty();
+    v = record_violation(v);
+    v = record_violation(v);
+    v = record_violation(v);
+    v = resolve_violation(resolve_violation(resolve_violation(v)));
+    assert(is_empty(&v));
+    assert(commit_is_safe(&v));
+    assert_eq(v.peak_count, 3 as Int64);
+}
+
+fn test_rollback_resets_pending_preserves_peak() {
+    let mut v = empty();
+    v = record_violation(record_violation(v));
+    let r = reset_on_rollback(v);
+    assert(is_empty(&r));
+    assert_eq(r.peak_count, 2 as Int64);
+}
+
+fn test_resolve_on_empty_is_safe() {
+    let v = resolve_violation(empty());
+    assert(is_empty(&v));
+    assert_eq(v.violations_resolved, 0 as Int64);
+}
+
+fn main() {
+    test_mode_names();
+    test_checks_at_statement_set();
+    test_defers_until_commit_set();
+    test_toggle_permission();
+    test_empty_violation_set();
+    test_record_and_resolve();
+    test_peak_preserved_on_full_resolve();
+    test_rollback_resets_pending_preserves_peak();
+    test_resolve_on_empty_is_safe();
+}

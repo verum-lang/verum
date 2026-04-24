@@ -1,0 +1,41 @@
+// R-tree node layout + fanout parameters.
+
+module core.database.sqlite.native.rtree_index_info.node;
+
+mount base.{Bool};
+
+// Per sqlite's rtree.c: a node is a single B-tree page; RTREE_MAX_CELLS is
+// (pagesize - 4) / (8 + 8*dims) but SQLite caps it at RTREE_MAXCELLS = 51.
+public fn max_cells_cap() -> Int { 51 }
+
+public fn min_cells_default() -> Int { 6 }
+
+// Bytes per cell: 8-byte rowid + 2 * dims * 4-byte floats.
+public fn cell_size_bytes(dims: Int) -> Int {
+    8 + 2 * dims * 4
+}
+
+// Per-node header size (4 bytes for cell count + 4 for reserved).
+public fn node_header_size() -> Int { 4 }
+
+// Maximum cells that fit on a page of the given size.
+public fn max_cells_for_page(page_size: Int, dims: Int) -> Int {
+    let usable = page_size - node_header_size();
+    let per_cell = cell_size_bytes(dims);
+    let raw = usable / per_cell;
+    if raw > max_cells_cap() { max_cells_cap() } else { raw }
+}
+
+// Whether a node at the given fill is underfull — triggers merge / borrow.
+public fn is_underfull(cells: Int, min_cells: Int) -> Bool {
+    cells < min_cells
+}
+
+public fn is_overfull(cells: Int, max_cells: Int) -> Bool {
+    cells > max_cells
+}
+
+public fn is_root(node_id: Int) -> Bool {
+    // R*-tree root is always node 1.
+    node_id == 1
+}

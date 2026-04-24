@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/fts5_ranking_api/mod.vr
+// =============================================================================
+// FTS5 BM25 ranking — xPhraseSize / xColumnSize-driven score.
+// Spec §16.2.6 — FTS5 built-in bm25() ranker.
+//
+// Classic BM25 formula:
+//   score = sum_over_terms(
+//     idf(term) * (f * (k1+1)) / (f + k1 * (1 - b + b * (|d| / avgdl)))
+//   )
+// =============================================================================
+
+module core.database.sqlite.native.fts5_ranking_api;
+
+public module params;
+public module score;

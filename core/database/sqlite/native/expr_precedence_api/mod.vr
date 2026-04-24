@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/expr_precedence_api/mod.vr
+// =============================================================================
+// SQLite expression-operator precedence table.
+// Spec §14.2 — operators.
+//
+// Highest to lowest precedence (SQLite 3.45):
+//   1  ~   unary bitwise-not / unary minus / unary plus
+//   2  ||  -> ->>       concat / JSON extract
+//   3  *   /  %
+//   4  +   -
+//   5  &   |  <<  >>
+//   6  ESCAPE
+//   7  <   <=  >  >=
+//   8  =   ==  !=  <>   IS  IS NOT  IN  LIKE  GLOB  MATCH  REGEXP
+//   9  NOT
+//   10 AND
+//   11 OR
+//
+// =============================================================================
+
+module core.database.sqlite.native.expr_precedence_api;
+
+public module op;
+public module level;

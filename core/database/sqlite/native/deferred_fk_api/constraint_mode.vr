@@ -1,0 +1,39 @@
+// FK constraint timing mode.
+
+module core.database.sqlite.native.deferred_fk_api.constraint_mode;
+
+mount base.{Bool, Text};
+
+public type FkMode is
+    | FmImmediate          // NOT DEFERRABLE — check after each statement
+    | FmDeferredInitImm    // DEFERRABLE INITIALLY IMMEDIATE — default deferred
+    | FmDeferredInitDef    // DEFERRABLE INITIALLY DEFERRED
+    ;
+
+public fn mode_name(m: &FkMode) -> Text {
+    match m {
+        FmImmediate       => "IMMEDIATE".clone(),
+        FmDeferredInitImm => "DEFERRABLE INITIALLY IMMEDIATE".clone(),
+        FmDeferredInitDef => "DEFERRABLE INITIALLY DEFERRED".clone(),
+    }
+}
+
+// Does this mode check at statement boundary?
+public fn checks_at_statement(m: &FkMode) -> Bool {
+    match m {
+        FmImmediate       => true,
+        FmDeferredInitImm => true,    // default immediate; SET CONSTRAINTS can toggle
+        _                 => false,
+    }
+}
+
+// Does this mode defer checks until COMMIT?
+public fn defers_until_commit(m: &FkMode) -> Bool {
+    match m { FmDeferredInitDef => true, _ => false }
+}
+
+// Only DEFERRABLE modes can be toggled with SET CONSTRAINTS (SQL-92 — SQLite
+// has PRAGMA defer_foreign_keys as the connection-wide equivalent).
+public fn can_be_toggled(m: &FkMode) -> Bool {
+    match m { FmImmediate => false, _ => true }
+}

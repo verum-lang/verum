@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, token_kind_api, lexer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.token_kind_api.kind.{
+    TokenClass,
+    TcKeyword, TcIdentifier, TcIntegerLit, TcRealLit, TcStringLit, TcBlobLit,
+    TcParamBind, TcPunctuation, TcOperator, TcWhitespace,
+    TcLineComment, TcBlockComment, TcInvalid,
+    class_name, is_meaningful, is_literal, is_comment,
+};
+mount core.database.sqlite.native.token_kind_api.properties.{
+    TokenSpan,
+    span, byte_length, is_zero_width, skip_in_parse, is_content_bearing,
+};
+mount base.{Bool};
+
+fn test_class_names() {
+    assert(class_name(&TcKeyword) == "keyword".clone());
+    assert(class_name(&TcLineComment) == "line_comment".clone());
+    assert(class_name(&TcInvalid) == "invalid".clone());
+}
+
+fn test_is_meaningful() {
+    assert(is_meaningful(&TcKeyword));
+    assert(is_meaningful(&TcIdentifier));
+    assert(!is_meaningful(&TcWhitespace));
+    assert(!is_meaningful(&TcLineComment));
+    assert(!is_meaningful(&TcBlockComment));
+    assert(!is_meaningful(&TcInvalid));
+}
+
+fn test_is_literal() {
+    assert(is_literal(&TcIntegerLit));
+    assert(is_literal(&TcRealLit));
+    assert(is_literal(&TcStringLit));
+    assert(is_literal(&TcBlobLit));
+    assert(!is_literal(&TcKeyword));
+    assert(!is_literal(&TcParamBind));
+}
+
+fn test_is_comment() {
+    assert(is_comment(&TcLineComment));
+    assert(is_comment(&TcBlockComment));
+    assert(!is_comment(&TcWhitespace));
+}
+
+fn test_span_basics() {
+    let t = span(TcKeyword, 10, 16, 1, 11);
+    assert_eq(byte_length(&t), 6);
+    assert(!is_zero_width(&t));
+    assert(!skip_in_parse(&t));
+    assert(is_content_bearing(&t));
+}
+
+fn test_span_zero_width_whitespace() {
+    let t = span(TcWhitespace, 5, 5, 1, 5);
+    assert(is_zero_width(&t));
+    assert(skip_in_parse(&t));
+    assert(!is_content_bearing(&t));
+}
+
+fn test_comment_is_content_bearing_false() {
+    let t = span(TcLineComment, 0, 20, 1, 0);
+    assert(!is_content_bearing(&t));
+}
+
+fn test_literal_is_content_bearing_even_when_short() {
+    let t = span(TcStringLit, 0, 2, 1, 0);
+    assert(is_content_bearing(&t));
+}
+
+fn main() {
+    test_class_names();
+    test_is_meaningful();
+    test_is_literal();
+    test_is_comment();
+    test_span_basics();
+    test_span_zero_width_whitespace();
+    test_comment_is_content_bearing_false();
+    test_literal_is_content_bearing_even_when_short();
+}

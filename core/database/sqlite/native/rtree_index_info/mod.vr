@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/rtree_index_info/mod.vr
+// =============================================================================
+// R*-tree bounding-box geometry + node layout helpers.
+// Spec §16.3 — R-tree virtual table.
+// =============================================================================
+
+module core.database.sqlite.native.rtree_index_info;
+
+public module bbox;
+public module node;

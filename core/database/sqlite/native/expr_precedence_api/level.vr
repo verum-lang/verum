@@ -1,0 +1,92 @@
+// Per-operator precedence level + associativity.
+
+module core.database.sqlite.native.expr_precedence_api.level;
+
+mount core.database.sqlite.native.expr_precedence_api.op.{
+    ExprOp,
+    EoUnaryBitNot, EoUnaryMinus, EoUnaryPlus,
+    EoConcat, EoJsonExtract, EoJsonExtractText,
+    EoMul, EoDiv, EoMod,
+    EoAdd, EoSub,
+    EoBitAnd, EoBitOr, EoShl, EoShr,
+    EoEscape,
+    EoLt, EoLe, EoGt, EoGe,
+    EoEq, EoNe, EoIs, EoIsNot,
+    EoIn, EoLike, EoGlob, EoMatch, EoRegexp,
+    EoNot, EoAnd, EoOr,
+};
+mount base.{Bool, Text};
+
+// Return precedence — lower number = higher priority.
+public fn precedence(o: &ExprOp) -> Int {
+    match o {
+        EoUnaryBitNot     => 1,
+        EoUnaryMinus      => 1,
+        EoUnaryPlus       => 1,
+        EoConcat          => 2,
+        EoJsonExtract     => 2,
+        EoJsonExtractText => 2,
+        EoMul             => 3,
+        EoDiv             => 3,
+        EoMod             => 3,
+        EoAdd             => 4,
+        EoSub             => 4,
+        EoBitAnd          => 5,
+        EoBitOr           => 5,
+        EoShl             => 5,
+        EoShr             => 5,
+        EoEscape          => 6,
+        EoLt              => 7,
+        EoLe              => 7,
+        EoGt              => 7,
+        EoGe              => 7,
+        EoEq              => 8,
+        EoNe              => 8,
+        EoIs              => 8,
+        EoIsNot           => 8,
+        EoIn              => 8,
+        EoLike            => 8,
+        EoGlob            => 8,
+        EoMatch           => 8,
+        EoRegexp          => 8,
+        EoNot             => 9,
+        EoAnd             => 10,
+        EoOr              => 11,
+    }
+}
+
+public type Associativity is
+    | AsLeft
+    | AsRight
+    | AsNon           // non-associative (e.g., comparison)
+    ;
+
+public fn assoc_name(a: &Associativity) -> Text {
+    match a {
+        AsLeft  => "left".clone(),
+        AsRight => "right".clone(),
+        AsNon   => "non".clone(),
+    }
+}
+
+public fn associativity(o: &ExprOp) -> Associativity {
+    match o {
+        EoUnaryBitNot     => AsRight,
+        EoUnaryMinus      => AsRight,
+        EoUnaryPlus       => AsRight,
+        EoNot             => AsRight,
+        EoLt => AsNon, EoLe => AsNon, EoGt => AsNon, EoGe => AsNon,
+        EoEq => AsNon, EoNe => AsNon,
+        EoIs => AsNon, EoIsNot => AsNon,
+        EoIn => AsNon,
+        _    => AsLeft,
+    }
+}
+
+public fn binds_tighter_than(a: &ExprOp, b: &ExprOp) -> Bool {
+    precedence(a) < precedence(b)
+}
+
+public fn same_precedence(a: &ExprOp, b: &ExprOp) -> Bool {
+    precedence(a) == precedence(b)
+}

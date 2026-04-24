@@ -508,3 +508,19 @@ public module freelist_api;
 public module overflow_page_api;
 // - journal_header_api: rollback-journal 28-byte header + magic 0xD9D505F920A163D7
 public module journal_header_api;
+// - token_kind_api: 13-class lexer token taxonomy + meaningful/literal/comment classifiers
+public module token_kind_api;
+// - identifier_quote_api: 4-style quoting ("x", [x], `x`, bare) + doubling-escape rules
+public module identifier_quote_api;
+// - expr_precedence_api: SQLite operator precedence table (11 levels) + associativity
+public module expr_precedence_api;
+// - stmt_aggregate_api: aggregate UDF callback slots (xStep/Final/Value/Inverse) + lifecycle
+public module stmt_aggregate_api;
+// - rtree_index_info: axis-aligned bounding-box + 1..5-dim R-tree node layout + fanout
+public module rtree_index_info;
+// - fts5_ranking_api: BM25 tuning params + monotone idf_rank + term_score accumulator
+public module fts5_ranking_api;
+// - deferred_fk_api: FK timing mode (IMMEDIATE/DEFERRED INIT IMM/DEF) + violation set
+public module deferred_fk_api;
+// - snapshot_isolation_api: 3-level IsolationLevel + SnapshotHandle compare/free
+public module snapshot_isolation_api;

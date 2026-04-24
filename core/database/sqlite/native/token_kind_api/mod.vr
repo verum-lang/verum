@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/token_kind_api/mod.vr
+// =============================================================================
+// SQLite lexer token taxonomy — keyword / identifier / literal / operator /
+// whitespace / comment / punctuation classes.
+// Spec §14 — SQL grammar (lexer).
+// =============================================================================
+
+module core.database.sqlite.native.token_kind_api;
+
+public module kind;
+public module properties;

@@ -1,0 +1,128 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, expr_precedence_api, parser
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.expr_precedence_api.op.{
+    ExprOp,
+    EoUnaryBitNot, EoUnaryMinus, EoUnaryPlus,
+    EoConcat, EoJsonExtract, EoJsonExtractText,
+    EoMul, EoDiv, EoMod, EoAdd, EoSub,
+    EoBitAnd, EoBitOr, EoShl, EoShr, EoEscape,
+    EoLt, EoLe, EoGt, EoGe,
+    EoEq, EoNe, EoIs, EoIsNot, EoIn, EoLike, EoGlob, EoMatch, EoRegexp,
+    EoNot, EoAnd, EoOr,
+    is_unary, is_comparison, is_logical, is_bitwise, is_arithmetic,
+};
+mount core.database.sqlite.native.expr_precedence_api.level.{
+    precedence,
+    Associativity, AsLeft, AsRight, AsNon,
+    assoc_name, associativity,
+    binds_tighter_than, same_precedence,
+};
+mount base.{Bool};
+
+fn test_precedence_levels() {
+    assert_eq(precedence(&EoUnaryMinus), 1);
+    assert_eq(precedence(&EoConcat),     2);
+    assert_eq(precedence(&EoMul),        3);
+    assert_eq(precedence(&EoAdd),        4);
+    assert_eq(precedence(&EoBitAnd),     5);
+    assert_eq(precedence(&EoEscape),     6);
+    assert_eq(precedence(&EoLt),         7);
+    assert_eq(precedence(&EoEq),         8);
+    assert_eq(precedence(&EoNot),        9);
+    assert_eq(precedence(&EoAnd),       10);
+    assert_eq(precedence(&EoOr),        11);
+}
+
+fn test_binds_tighter_than() {
+    assert(binds_tighter_than(&EoMul, &EoAdd));
+    assert(binds_tighter_than(&EoAdd, &EoEq));
+    assert(binds_tighter_than(&EoEq, &EoAnd));
+    assert(binds_tighter_than(&EoAnd, &EoOr));
+    assert(!binds_tighter_than(&EoOr, &EoAnd));
+}
+
+fn test_same_precedence_band() {
+    assert(same_precedence(&EoMul, &EoDiv));
+    assert(same_precedence(&EoMul, &EoMod));
+    assert(same_precedence(&EoAdd, &EoSub));
+    assert(same_precedence(&EoLt, &EoGe));
+    assert(same_precedence(&EoEq, &EoIn));
+    assert(!same_precedence(&EoMul, &EoAdd));
+}
+
+fn test_is_unary_set() {
+    assert(is_unary(&EoUnaryBitNot));
+    assert(is_unary(&EoUnaryMinus));
+    assert(is_unary(&EoNot));
+    assert(!is_unary(&EoAdd));
+    assert(!is_unary(&EoAnd));
+}
+
+fn test_is_comparison_set() {
+    assert(is_comparison(&EoLt));
+    assert(is_comparison(&EoEq));
+    assert(is_comparison(&EoIs));
+    assert(is_comparison(&EoLike));
+    assert(is_comparison(&EoIn));
+    assert(!is_comparison(&EoAdd));
+    assert(!is_comparison(&EoAnd));
+}
+
+fn test_is_logical_set() {
+    assert(is_logical(&EoAnd));
+    assert(is_logical(&EoOr));
+    assert(is_logical(&EoNot));
+    assert(!is_logical(&EoEq));
+}
+
+fn test_is_bitwise_set() {
+    assert(is_bitwise(&EoBitAnd));
+    assert(is_bitwise(&EoBitOr));
+    assert(is_bitwise(&EoShl));
+    assert(is_bitwise(&EoShr));
+    assert(is_bitwise(&EoUnaryBitNot));
+    assert(!is_bitwise(&EoMul));
+}
+
+fn test_is_arithmetic_set() {
+    assert(is_arithmetic(&EoAdd));
+    assert(is_arithmetic(&EoMul));
+    assert(is_arithmetic(&EoUnaryMinus));
+    assert(!is_arithmetic(&EoBitAnd));
+    assert(!is_arithmetic(&EoEq));
+}
+
+fn test_associativity_rules() {
+    match associativity(&EoUnaryMinus) { AsRight => {}, _ => assert(false) }
+    match associativity(&EoNot)        { AsRight => {}, _ => assert(false) }
+    match associativity(&EoAdd)        { AsLeft  => {}, _ => assert(false) }
+    match associativity(&EoConcat)     { AsLeft  => {}, _ => assert(false) }
+    match associativity(&EoEq)         { AsNon   => {}, _ => assert(false) }
+    match associativity(&EoLt)         { AsNon   => {}, _ => assert(false) }
+    assert(assoc_name(&AsLeft)  == "left".clone());
+    assert(assoc_name(&AsRight) == "right".clone());
+    assert(assoc_name(&AsNon)   == "non".clone());
+}
+
+fn test_json_extract_share_concat_band() {
+    assert(same_precedence(&EoConcat, &EoJsonExtract));
+    assert(same_precedence(&EoConcat, &EoJsonExtractText));
+}
+
+fn main() {
+    test_precedence_levels();
+    test_binds_tighter_than();
+    test_same_precedence_band();
+    test_is_unary_set();
+    test_is_comparison_set();
+    test_is_logical_set();
+    test_is_bitwise_set();
+    test_is_arithmetic_set();
+    test_associativity_rules();
+    test_json_extract_share_concat_band();
+}

@@ -1,0 +1,87 @@
+// Operator taxonomy.
+
+module core.database.sqlite.native.expr_precedence_api.op;
+
+mount base.{Bool, Text};
+
+public type ExprOp is
+    | EoUnaryBitNot     // ~
+    | EoUnaryMinus      // -
+    | EoUnaryPlus       // +
+    | EoConcat          // ||
+    | EoJsonExtract     // ->
+    | EoJsonExtractText // ->>
+    | EoMul
+    | EoDiv
+    | EoMod
+    | EoAdd
+    | EoSub
+    | EoBitAnd
+    | EoBitOr
+    | EoShl
+    | EoShr
+    | EoEscape
+    | EoLt
+    | EoLe
+    | EoGt
+    | EoGe
+    | EoEq
+    | EoNe
+    | EoIs
+    | EoIsNot
+    | EoIn
+    | EoLike
+    | EoGlob
+    | EoMatch
+    | EoRegexp
+    | EoNot
+    | EoAnd
+    | EoOr
+    ;
+
+public fn is_unary(o: &ExprOp) -> Bool {
+    match o {
+        EoUnaryBitNot => true,
+        EoUnaryMinus  => true,
+        EoUnaryPlus   => true,
+        EoNot         => true,
+        _             => false,
+    }
+}
+
+public fn is_comparison(o: &ExprOp) -> Bool {
+    match o {
+        EoLt => true, EoLe => true, EoGt => true, EoGe => true,
+        EoEq => true, EoNe => true,
+        EoIs => true, EoIsNot => true,
+        EoIn => true, EoLike => true, EoGlob => true, EoMatch => true, EoRegexp => true,
+        _    => false,
+    }
+}
+
+public fn is_logical(o: &ExprOp) -> Bool {
+    match o {
+        EoAnd => true,
+        EoOr  => true,
+        EoNot => true,
+        _     => false,
+    }
+}
+
+public fn is_bitwise(o: &ExprOp) -> Bool {
+    match o {
+        EoUnaryBitNot => true,
+        EoBitAnd => true, EoBitOr => true,
+        EoShl    => true, EoShr   => true,
+        _        => false,
+    }
+}
+
+public fn is_arithmetic(o: &ExprOp) -> Bool {
+    match o {
+        EoUnaryMinus => true, EoUnaryPlus => true,
+        EoAdd => true, EoSub => true,
+        EoMul => true, EoDiv => true, EoMod => true,
+        _     => false,
+    }
+}

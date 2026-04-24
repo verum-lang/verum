@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_aggregate_api/mod.vr
+// =============================================================================
+// Aggregate + window-function user-defined-function state machine.
+// Spec §15.3 — aggregate functions.
+//
+// A plain aggregate has (xStep, xFinal). A window aggregate adds (xValue,
+// xInverse) for frame-slide semantics (3.25+).
+// =============================================================================
+
+module core.database.sqlite.native.stmt_aggregate_api;
+
+public module callback;
+public module lifecycle;

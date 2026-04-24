@@ -1,0 +1,44 @@
+// Aggregate callback slot taxonomy.
+
+module core.database.sqlite.native.stmt_aggregate_api.callback;
+
+mount base.{Bool, Text};
+
+public type CallbackSlot is
+    | CsStep         // required — one call per row
+    | CsFinal        // required for plain aggregates — called once at end
+    | CsValue        // window only — peek current value without dropping state
+    | CsInverse      // window only — opposite of step (drop a row)
+    ;
+
+public fn slot_name(s: &CallbackSlot) -> Text {
+    match s {
+        CsStep    => "xStep".clone(),
+        CsFinal   => "xFinal".clone(),
+        CsValue   => "xValue".clone(),
+        CsInverse => "xInverse".clone(),
+    }
+}
+
+public fn is_required_for_plain(s: &CallbackSlot) -> Bool {
+    match s {
+        CsStep  => true,
+        CsFinal => true,
+        _       => false,
+    }
+}
+
+public fn is_window_specific(s: &CallbackSlot) -> Bool {
+    match s {
+        CsValue   => true,
+        CsInverse => true,
+        _         => false,
+    }
+}
+
+// A window-capable aggregate must supply all four slots.
+public fn window_requires_all_four(
+    has_step: Bool, has_final: Bool, has_value: Bool, has_inverse: Bool,
+) -> Bool {
+    has_step && has_final && has_value && has_inverse
+}

@@ -1,0 +1,67 @@
+// Top-level lexer token kind.
+
+module core.database.sqlite.native.token_kind_api.kind;
+
+mount base.{Bool, Text};
+
+public type TokenClass is
+    | TcKeyword              // reserved or context-keyword
+    | TcIdentifier           // bare or quoted name
+    | TcIntegerLit           // 42, 0x2A, 0b101010
+    | TcRealLit              // 3.14, 1e10
+    | TcStringLit            // 'hello'
+    | TcBlobLit              // X'DEADBEEF'
+    | TcParamBind            // ?, ?NNN, :name, $name, @name
+    | TcPunctuation          // , ( ) ; .
+    | TcOperator             // + - * / % || < > <= >= = == != <>
+    | TcWhitespace
+    | TcLineComment          // -- ...
+    | TcBlockComment         // /* ... */
+    | TcInvalid              // scanner error
+    ;
+
+public fn class_name(c: &TokenClass) -> Text {
+    match c {
+        TcKeyword       => "keyword".clone(),
+        TcIdentifier    => "identifier".clone(),
+        TcIntegerLit    => "integer".clone(),
+        TcRealLit       => "real".clone(),
+        TcStringLit     => "string".clone(),
+        TcBlobLit       => "blob".clone(),
+        TcParamBind     => "param".clone(),
+        TcPunctuation   => "punctuation".clone(),
+        TcOperator      => "operator".clone(),
+        TcWhitespace    => "whitespace".clone(),
+        TcLineComment   => "line_comment".clone(),
+        TcBlockComment  => "block_comment".clone(),
+        TcInvalid       => "invalid".clone(),
+    }
+}
+
+public fn is_meaningful(c: &TokenClass) -> Bool {
+    match c {
+        TcWhitespace   => false,
+        TcLineComment  => false,
+        TcBlockComment => false,
+        TcInvalid      => false,
+        _              => true,
+    }
+}
+
+public fn is_literal(c: &TokenClass) -> Bool {
+    match c {
+        TcIntegerLit => true,
+        TcRealLit    => true,
+        TcStringLit  => true,
+        TcBlobLit    => true,
+        _            => false,
+    }
+}
+
+public fn is_comment(c: &TokenClass) -> Bool {
+    match c {
+        TcLineComment  => true,
+        TcBlockComment => true,
+        _              => false,
+    }
+}

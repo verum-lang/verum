@@ -1,0 +1,129 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, rtree_index_info, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.rtree_index_info.bbox.{
+    BBox,
+    new, dimension, arity_consistent, is_well_formed,
+    intersects, contains_point, extent,
+};
+mount core.database.sqlite.native.rtree_index_info.node.{
+    max_cells_cap, min_cells_default,
+    cell_size_bytes, node_header_size, max_cells_for_page,
+    is_underfull, is_overfull, is_root,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_bbox_dim_and_arity() {
+    let mins: List<Float> = [0.0 as Float, 0.0 as Float].clone() as List<Float>;
+    let maxs: List<Float> = [1.0 as Float, 2.0 as Float].clone() as List<Float>;
+    let b = new(mins, maxs);
+    assert_eq(dimension(&b), 2);
+    assert(arity_consistent(&b));
+    assert(is_well_formed(&b));
+}
+
+fn test_bbox_rejects_inverted() {
+    let mins: List<Float> = [5.0 as Float].clone() as List<Float>;
+    let maxs: List<Float> = [1.0 as Float].clone() as List<Float>;
+    let b = new(mins, maxs);
+    assert(!is_well_formed(&b));
+}
+
+fn test_bbox_rejects_zero_dim_and_too_many_dims() {
+    let empty_min: List<Float> = [].clone() as List<Float>;
+    let empty_max: List<Float> = [].clone() as List<Float>;
+    assert(!is_well_formed(&new(empty_min, empty_max)));
+    let six_min: List<Float> = [0.0 as Float, 0.0 as Float, 0.0 as Float, 0.0 as Float, 0.0 as Float, 0.0 as Float].clone() as List<Float>;
+    let six_max: List<Float> = [1.0 as Float, 1.0 as Float, 1.0 as Float, 1.0 as Float, 1.0 as Float, 1.0 as Float].clone() as List<Float>;
+    assert(!is_well_formed(&new(six_min, six_max)));
+}
+
+fn test_bbox_intersects() {
+    let a_min: List<Float> = [0.0 as Float, 0.0 as Float].clone() as List<Float>;
+    let a_max: List<Float> = [2.0 as Float, 2.0 as Float].clone() as List<Float>;
+    let a = new(a_min, a_max);
+    let b_min: List<Float> = [1.0 as Float, 1.0 as Float].clone() as List<Float>;
+    let b_max: List<Float> = [3.0 as Float, 3.0 as Float].clone() as List<Float>;
+    let b = new(b_min, b_max);
+    let c_min: List<Float> = [5.0 as Float, 5.0 as Float].clone() as List<Float>;
+    let c_max: List<Float> = [6.0 as Float, 6.0 as Float].clone() as List<Float>;
+    let c = new(c_min, c_max);
+    assert(intersects(&a, &b));
+    assert(!intersects(&a, &c));
+}
+
+fn test_bbox_contains_point() {
+    let mins: List<Float> = [0.0 as Float, 0.0 as Float].clone() as List<Float>;
+    let maxs: List<Float> = [10.0 as Float, 10.0 as Float].clone() as List<Float>;
+    let b = new(mins, maxs);
+    let p_inside: List<Float> = [5.0 as Float, 5.0 as Float].clone() as List<Float>;
+    let p_edge:   List<Float> = [10.0 as Float, 0.0 as Float].clone() as List<Float>;
+    let p_out:    List<Float> = [11.0 as Float, 5.0 as Float].clone() as List<Float>;
+    assert(contains_point(&b, &p_inside));
+    assert(contains_point(&b, &p_edge));
+    assert(!contains_point(&b, &p_out));
+}
+
+fn test_extent() {
+    let mins: List<Float> = [0.0 as Float, 5.0 as Float].clone() as List<Float>;
+    let maxs: List<Float> = [10.0 as Float, 8.0 as Float].clone() as List<Float>;
+    let b = new(mins, maxs);
+    let ex = extent(&b, 0);
+    assert(ex > 9.9 as Float);
+    assert(ex < 10.1 as Float);
+    let ex1 = extent(&b, 1);
+    assert(ex1 > 2.9 as Float);
+    assert(ex1 < 3.1 as Float);
+}
+
+fn test_node_constants() {
+    assert_eq(max_cells_cap(), 51);
+    assert_eq(min_cells_default(), 6);
+    assert_eq(node_header_size(), 4);
+}
+
+fn test_cell_size_bytes() {
+    // 2-d: 8 + 2*2*4 = 24 bytes
+    assert_eq(cell_size_bytes(2), 24);
+    // 3-d: 8 + 2*3*4 = 32 bytes
+    assert_eq(cell_size_bytes(3), 32);
+}
+
+fn test_max_cells_capped_at_51() {
+    // 4K page with 2-d cells → raw = (4092)/24 = 170 → capped at 51
+    assert_eq(max_cells_for_page(4096, 2), 51);
+    // 256-byte page with 5-d cells (48 bytes) → raw = 252/48 = 5
+    assert_eq(max_cells_for_page(256, 5), 5);
+}
+
+fn test_fill_predicates() {
+    assert(is_underfull(3, 6));
+    assert(!is_underfull(7, 6));
+    assert(is_overfull(52, 51));
+    assert(!is_overfull(51, 51));
+}
+
+fn test_is_root_node_1() {
+    assert(is_root(1));
+    assert(!is_root(0));
+    assert(!is_root(2));
+}
+
+fn main() {
+    test_bbox_dim_and_arity();
+    test_bbox_rejects_inverted();
+    test_bbox_rejects_zero_dim_and_too_many_dims();
+    test_bbox_intersects();
+    test_bbox_contains_point();
+    test_extent();
+    test_node_constants();
+    test_cell_size_bytes();
+    test_max_cells_capped_at_51();
+    test_fill_predicates();
+    test_is_root_node_1();
+}

@@ -1,0 +1,36 @@
+// BM25 tuning parameters.
+
+module core.database.sqlite.native.fts5_ranking_api.params;
+
+mount base.{Bool};
+
+public type Bm25Params is {
+    k1: Float,      // term-frequency saturation (SQLite default 1.2)
+    b: Float,       // length-normalization weight (SQLite default 0.75)
+};
+
+public fn sqlite_default() -> Bm25Params {
+    Bm25Params { k1: 1.2 as Float, b: 0.75 as Float }
+}
+
+public fn permissive_default() -> Bm25Params {
+    Bm25Params { k1: 2.0 as Float, b: 0.5 as Float }
+}
+
+// Validate ranges: k1 >= 0, 0 <= b <= 1.
+public fn is_valid(p: &Bm25Params) -> Bool {
+    if p.k1 < (0.0 as Float) { return false; }
+    if p.b  < (0.0 as Float) { return false; }
+    if p.b  > (1.0 as Float) { return false; }
+    true
+}
+
+// When b == 0, ranker ignores document length.
+public fn length_normalization_disabled(p: &Bm25Params) -> Bool {
+    p.b == (0.0 as Float)
+}
+
+// When k1 == 0, the saturation term collapses — matches count 0 or 1.
+public fn saturates_immediately(p: &Bm25Params) -> Bool {
+    p.k1 == (0.0 as Float)
+}

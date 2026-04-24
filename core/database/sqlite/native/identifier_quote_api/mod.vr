@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/identifier_quote_api/mod.vr
+// =============================================================================
+// Identifier quoting — SQLite accepts four styles:
+//
+//   bare         my_col
+//   "dquote"     "MyColumn"          — SQL-92 standard
+//   [bracket]    [MyColumn]          — MSSQL compatibility
+//   `backtick`   `MyColumn`          — MySQL compatibility
+//
+// Single quotes are NOT identifier quotes (they always denote string literals).
+// =============================================================================
+
+module core.database.sqlite.native.identifier_quote_api;
+
+public module style;
+public module classify;

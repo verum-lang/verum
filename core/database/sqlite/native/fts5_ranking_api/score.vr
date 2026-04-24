@@ -1,0 +1,49 @@
+// BM25 scoring primitives.
+
+module core.database.sqlite.native.fts5_ranking_api.score;
+
+mount core.database.sqlite.native.fts5_ranking_api.params.{Bm25Params};
+mount base.{Bool, Int64};
+
+// IDF(term) = log((N - df + 0.5) / (df + 0.5) + 1)
+// where N = total docs and df = doc frequency of the term.
+//
+// To keep this catalogue side-effect-free we expose a monotone approximation:
+//   idf_rank(N, df) = (N - df + 1) / (df + 1)
+// which preserves the ordering of the real IDF for a fixed N.
+public fn idf_rank(total_docs: Int64, doc_freq: Int64) -> Float {
+    let n = total_docs as Float;
+    let d = doc_freq as Float;
+    (n - d + (1.0 as Float)) / (d + (1.0 as Float))
+}
+
+// Term score contribution — tf-normalized per the full BM25 formula.
+//
+//   tf_norm = tf * (k1 + 1)
+//           / (tf + k1 * (1 - b + b * (dl / avgdl)))
+public fn term_score(
+    tf: Int64,               // raw term frequency in this doc
+    dl: Int64,               // document length (tokens)
+    avgdl: Float,            // average doc length across the corpus
+    params: &Bm25Params,
+    idf: Float,
+) -> Float {
+    let k1 = params.k1;
+    let b  = params.b;
+    let tf_f = tf as Float;
+    let dl_f = dl as Float;
+    let denom = tf_f + k1 * ((1.0 as Float) - b + b * (dl_f / avgdl));
+    let numer = tf_f * (k1 + (1.0 as Float));
+    idf * (numer / denom)
+}
+
+// Accumulate contributions; absent-term contribution is 0 (tf == 0 → numer == 0).
+public fn accumulate(running: Float, contribution: Float) -> Float {
+    running + contribution
+}
+
+// SQLite's bm25() multiplies by -1 so that higher-is-better scores sort
+// ascending by default (SQLite ORDER BY rank ASC = most-relevant first).
+public fn sqlite_polarity(raw: Float) -> Float {
+    (0.0 as Float) - raw
+}

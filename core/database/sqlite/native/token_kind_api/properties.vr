@@ -1,0 +1,42 @@
+// Per-token metadata — start / end byte offset + line/column for diagnostics.
+
+module core.database.sqlite.native.token_kind_api.properties;
+
+mount core.database.sqlite.native.token_kind_api.kind.{
+    TokenClass, is_meaningful, is_literal, is_comment,
+};
+mount base.{Bool, Text};
+
+public type TokenSpan is {
+    class_: TokenClass,
+    start_byte: Int,
+    end_byte: Int,
+    line: Int,
+    column: Int,
+};
+
+public fn span(c: TokenClass, start: Int, end: Int, line: Int, col: Int) -> TokenSpan {
+    TokenSpan {
+        class_: c,
+        start_byte: start,
+        end_byte: end,
+        line: line,
+        column: col,
+    }
+}
+
+public fn byte_length(t: &TokenSpan) -> Int {
+    t.end_byte - t.start_byte
+}
+
+public fn is_zero_width(t: &TokenSpan) -> Bool {
+    t.start_byte == t.end_byte
+}
+
+public fn skip_in_parse(t: &TokenSpan) -> Bool {
+    !is_meaningful(&t.class_)
+}
+
+public fn is_content_bearing(t: &TokenSpan) -> Bool {
+    is_literal(&t.class_) || (!is_comment(&t.class_) && byte_length(t) > 0)
+}

@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fts5_ranking_api, fts5
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.fts5_ranking_api.params.{
+    Bm25Params,
+    sqlite_default, permissive_default,
+    is_valid, length_normalization_disabled, saturates_immediately,
+};
+mount core.database.sqlite.native.fts5_ranking_api.score.{
+    idf_rank, term_score, accumulate, sqlite_polarity,
+};
+mount base.{Bool, Int64};
+
+fn test_sqlite_default_params() {
+    let p = sqlite_default();
+    assert(is_valid(&p));
+    assert(p.k1 > 1.1 as Float);
+    assert(p.k1 < 1.3 as Float);
+    assert(p.b  > 0.7 as Float);
+    assert(p.b  < 0.8 as Float);
+}
+
+fn test_permissive_defaults() {
+    let p = permissive_default();
+    assert(is_valid(&p));
+    assert(p.k1 > 1.9 as Float);
+    assert(p.b  < 0.6 as Float);
+}
+
+fn test_is_valid_range_checks() {
+    let bad_k1 = Bm25Params { k1: -1.0 as Float, b: 0.5 as Float };
+    assert(!is_valid(&bad_k1));
+    let bad_b_low = Bm25Params { k1: 1.2 as Float, b: -0.1 as Float };
+    assert(!is_valid(&bad_b_low));
+    let bad_b_high = Bm25Params { k1: 1.2 as Float, b: 1.1 as Float };
+    assert(!is_valid(&bad_b_high));
+}
+
+fn test_classifiers() {
+    let p_no_norm = Bm25Params { k1: 1.2 as Float, b: 0.0 as Float };
+    assert(length_normalization_disabled(&p_no_norm));
+    let p_default = sqlite_default();
+    assert(!length_normalization_disabled(&p_default));
+    let p_saturates = Bm25Params { k1: 0.0 as Float, b: 0.5 as Float };
+    assert(saturates_immediately(&p_saturates));
+    assert(!saturates_immediately(&p_default));
+}
+
+fn test_idf_rank_monotonic_in_df() {
+    // As df grows, idf_rank decreases.
+    let big = idf_rank(1000 as Int64, 10 as Int64);
+    let mid = idf_rank(1000 as Int64, 100 as Int64);
+    let tiny = idf_rank(1000 as Int64, 500 as Int64);
+    assert(big > mid);
+    assert(mid > tiny);
+}
+
+fn test_term_score_increases_with_tf() {
+    let p = sqlite_default();
+    let low = term_score(1 as Int64, 100 as Int64, 100.0 as Float, &p, 1.0 as Float);
+    let high = term_score(5 as Int64, 100 as Int64, 100.0 as Float, &p, 1.0 as Float);
+    assert(high > low);
+}
+
+fn test_term_score_idf_linear() {
+    let p = sqlite_default();
+    let s1 = term_score(2 as Int64, 80 as Int64, 100.0 as Float, &p, 1.0 as Float);
+    let s2 = term_score(2 as Int64, 80 as Int64, 100.0 as Float, &p, 3.0 as Float);
+    // Doubling IDF ~3x should triple the contribution.
+    assert(s2 > s1);
+    assert(s2 > s1 * 2.0 as Float);
+}
+
+fn test_accumulate() {
+    let r = accumulate(1.5 as Float, 0.25 as Float);
+    assert(r > 1.7 as Float);
+    assert(r < 1.8 as Float);
+}
+
+fn test_sqlite_polarity_inverts() {
+    let raw = 2.5 as Float;
+    let pol = sqlite_polarity(raw);
+    assert(pol < 0.0 as Float);
+    assert(pol > -3.0 as Float);
+}
+
+fn main() {
+    test_sqlite_default_params();
+    test_permissive_defaults();
+    test_is_valid_range_checks();
+    test_classifiers();
+    test_idf_rank_monotonic_in_df();
+    test_term_score_increases_with_tf();
+    test_term_score_idf_linear();
+    test_accumulate();
+    test_sqlite_polarity_inverts();
+}

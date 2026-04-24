@@ -1,0 +1,64 @@
+// Axis-aligned bounding box in 1..5 dimensions.
+
+module core.database.sqlite.native.rtree_index_info.bbox;
+
+mount base.{Bool};
+mount core.collections.list.{List};
+
+public type BBox is {
+    min_coords: List<Float>,
+    max_coords: List<Float>,
+};
+
+public fn new(min_coords: List<Float>, max_coords: List<Float>) -> BBox {
+    BBox { min_coords: min_coords, max_coords: max_coords }
+}
+
+public fn dimension(b: &BBox) -> Int {
+    b.min_coords.len()
+}
+
+public fn arity_consistent(b: &BBox) -> Bool {
+    b.min_coords.len() == b.max_coords.len()
+}
+
+public fn is_well_formed(b: &BBox) -> Bool {
+    if !arity_consistent(b) { return false; }
+    let n = b.min_coords.len();
+    if n == 0 { return false; }
+    if n > 5  { return false; }
+    let mut i: Int = 0;
+    while i < n {
+        if b.min_coords[i] > b.max_coords[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn intersects(a: &BBox, b: &BBox) -> Bool {
+    if a.min_coords.len() != b.min_coords.len() { return false; }
+    let n = a.min_coords.len();
+    let mut i: Int = 0;
+    while i < n {
+        if a.max_coords[i] < b.min_coords[i] { return false; }
+        if b.max_coords[i] < a.min_coords[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn contains_point(b: &BBox, coords: &List<Float>) -> Bool {
+    if b.min_coords.len() != coords.len() { return false; }
+    let n = b.min_coords.len();
+    let mut i: Int = 0;
+    while i < n {
+        if coords[i] < b.min_coords[i] { return false; }
+        if coords[i] > b.max_coords[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn extent(b: &BBox, axis: Int) -> Float {
+    b.max_coords[axis] - b.min_coords[axis]
+}

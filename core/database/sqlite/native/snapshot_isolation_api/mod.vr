@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/snapshot_isolation_api/mod.vr
+// =============================================================================
+// Snapshot isolation levels — SQLite offers two deliberate points on the
+// spectrum: "read committed" (default in WAL mode, each SELECT sees a fresh
+// snapshot) and "repeatable read / serializable" (sqlite3_snapshot_open binds
+// a specific snapshot for the whole txn).
+// Spec §10.3 — isolation.
+// =============================================================================
+
+module core.database.sqlite.native.snapshot_isolation_api;
+
+public module level;
+public module handle;

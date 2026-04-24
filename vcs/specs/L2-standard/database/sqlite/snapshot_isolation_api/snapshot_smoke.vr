@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, snapshot_isolation_api, concurrency
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.snapshot_isolation_api.level.{
+    IsolationLevel, IlReadCommitted, IlRepeatableRead, IlSerializable,
+    level_name,
+    allows_nonrepeatable_read, allows_phantom_read,
+    default_in_wal_mode, strictness_rank, is_stronger_than,
+};
+mount core.database.sqlite.native.snapshot_isolation_api.handle.{
+    SnapshotHandle,
+    new, free, is_live, compare, same_snapshot,
+};
+mount base.{Bool, Int64};
+
+fn test_level_names() {
+    assert(level_name(&IlReadCommitted)  == "READ COMMITTED".clone());
+    assert(level_name(&IlRepeatableRead) == "REPEATABLE READ".clone());
+    assert(level_name(&IlSerializable)   == "SERIALIZABLE".clone());
+}
+
+fn test_anomaly_rules() {
+    assert(allows_nonrepeatable_read(&IlReadCommitted));
+    assert(!allows_nonrepeatable_read(&IlRepeatableRead));
+    assert(!allows_nonrepeatable_read(&IlSerializable));
+    assert(allows_phantom_read(&IlReadCommitted));
+    assert(allows_phantom_read(&IlRepeatableRead));
+    assert(!allows_phantom_read(&IlSerializable));
+}
+
+fn test_default_in_wal_is_read_committed() {
+    match default_in_wal_mode() { IlReadCommitted => {}, _ => assert(false) }
+}
+
+fn test_strictness_rank_monotonic() {
+    assert(strictness_rank(&IlReadCommitted) < strictness_rank(&IlRepeatableRead));
+    assert(strictness_rank(&IlRepeatableRead) < strictness_rank(&IlSerializable));
+}
+
+fn test_is_stronger_than() {
+    assert(is_stronger_than(&IlSerializable, &IlRepeatableRead));
+    assert(is_stronger_than(&IlRepeatableRead, &IlReadCommitted));
+    assert(!is_stronger_than(&IlReadCommitted, &IlSerializable));
+}
+
+fn test_snapshot_handle_life_cycle() {
+    let h = new(1 as Int64, 42 as Int64, 7 as Int64);
+    assert(is_live(&h));
+    let freed = free(h);
+    assert(!is_live(&freed));
+}
+
+fn test_snapshot_compare_by_generation() {
+    let older = new(1 as Int64, 10 as Int64, 0 as Int64);
+    let newer = new(2 as Int64, 20 as Int64, 0 as Int64);
+    assert(compare(&older, &newer) < 0);
+    assert(compare(&newer, &older) > 0);
+    assert(!same_snapshot(&older, &newer));
+}
+
+fn test_snapshot_compare_by_cookie_when_same_gen() {
+    let a = new(1 as Int64, 10 as Int64, 3 as Int64);
+    let b = new(2 as Int64, 10 as Int64, 7 as Int64);
+    assert(compare(&a, &b) < 0);
+    let c = new(3 as Int64, 10 as Int64, 3 as Int64);
+    assert(same_snapshot(&a, &c));
+}
+
+fn main() {
+    test_level_names();
+    test_anomaly_rules();
+    test_default_in_wal_is_read_committed();
+    test_strictness_rank_monotonic();
+    test_is_stronger_than();
+    test_snapshot_handle_life_cycle();
+    test_snapshot_compare_by_generation();
+    test_snapshot_compare_by_cookie_when_same_gen();
+}

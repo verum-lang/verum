@@ -1,0 +1,47 @@
+// Classify a raw identifier token (including its quotes, if present).
+
+module core.database.sqlite.native.identifier_quote_api.classify;
+
+mount core.database.sqlite.native.identifier_quote_api.style.{
+    QuoteStyle, QsBare, QsDoubleQuote, QsBracket, QsBacktick,
+};
+mount base.{Bool, Text};
+
+public fn classify(raw: &Text) -> QuoteStyle {
+    let bs = raw.as_bytes();
+    let n = bs.len();
+    if n < 2 { return QsBare; }
+    let first = bs[0];
+    let last = bs[n - 1];
+    if first == (0x22 as u8) && last == (0x22 as u8) { return QsDoubleQuote; }
+    if first == (0x5B as u8) && last == (0x5D as u8) { return QsBracket; }
+    if first == (0x60 as u8) && last == (0x60 as u8) { return QsBacktick; }
+    QsBare
+}
+
+fn is_identifier_start(b: u8) -> Bool {
+    if b >= 0x41 as u8 && b <= 0x5A as u8 { return true; }   // A-Z
+    if b >= 0x61 as u8 && b <= 0x7A as u8 { return true; }   // a-z
+    if b == 0x5F as u8 { return true; }                      // _
+    false
+}
+
+fn is_identifier_cont(b: u8) -> Bool {
+    if is_identifier_start(b) { return true; }
+    if b >= 0x30 as u8 && b <= 0x39 as u8 { return true; }   // 0-9
+    if b == 0x24 as u8 { return true; }                      // $ (SQLite allows)
+    false
+}
+
+// Whether a bare identifier body conforms to the unquoted grammar.
+public fn bare_is_valid(name: &Text) -> Bool {
+    let bs = name.as_bytes();
+    if bs.len() == 0 { return false; }
+    if !is_identifier_start(bs[0]) { return false; }
+    let mut i: Int = 1;
+    while i < bs.len() {
+        if !is_identifier_cont(bs[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}

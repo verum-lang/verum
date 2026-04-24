@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, identifier_quote_api, lexer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.identifier_quote_api.style.{
+    QuoteStyle, QsBare, QsDoubleQuote, QsBracket, QsBacktick,
+    style_name, is_quoted, is_standard,
+    open_char, close_char, supports_doubling_escape,
+};
+mount core.database.sqlite.native.identifier_quote_api.classify.{classify, bare_is_valid};
+mount base.{Bool};
+
+fn test_style_names() {
+    assert(style_name(&QsBare) == "bare".clone());
+    assert(style_name(&QsDoubleQuote) == "double_quote".clone());
+    assert(style_name(&QsBracket) == "bracket".clone());
+    assert(style_name(&QsBacktick) == "backtick".clone());
+}
+
+fn test_is_quoted_vs_bare() {
+    assert(!is_quoted(&QsBare));
+    assert(is_quoted(&QsDoubleQuote));
+    assert(is_quoted(&QsBracket));
+    assert(is_quoted(&QsBacktick));
+}
+
+fn test_is_standard() {
+    assert(is_standard(&QsDoubleQuote));
+    assert(!is_standard(&QsBare));
+    assert(!is_standard(&QsBracket));
+    assert(!is_standard(&QsBacktick));
+}
+
+fn test_open_close_chars() {
+    assert_eq(open_char(&QsDoubleQuote), 0x22 as u8);
+    assert_eq(close_char(&QsDoubleQuote), 0x22 as u8);
+    assert_eq(open_char(&QsBracket), 0x5B as u8);
+    assert_eq(close_char(&QsBracket), 0x5D as u8);
+    assert_eq(open_char(&QsBacktick), 0x60 as u8);
+    assert_eq(close_char(&QsBacktick), 0x60 as u8);
+}
+
+fn test_doubling_escape_support() {
+    assert(supports_doubling_escape(&QsDoubleQuote));
+    assert(supports_doubling_escape(&QsBacktick));
+    assert(!supports_doubling_escape(&QsBracket));
+    assert(!supports_doubling_escape(&QsBare));
+}
+
+fn test_classify_bare() {
+    match classify(&"id".clone())     { QsBare => {}, _ => assert(false) }
+    match classify(&"x".clone())      { QsBare => {}, _ => assert(false) }
+    match classify(&"".clone())       { QsBare => {}, _ => assert(false) }
+}
+
+fn test_classify_quoted_variants() {
+    match classify(&"\"x\"".clone()) { QsDoubleQuote => {}, _ => assert(false) }
+    match classify(&"[x]".clone())   { QsBracket    => {}, _ => assert(false) }
+    match classify(&"`x`".clone())   { QsBacktick   => {}, _ => assert(false) }
+}
+
+fn test_bare_identifier_validation() {
+    assert(bare_is_valid(&"my_col".clone()));
+    assert(bare_is_valid(&"_underscore".clone()));
+    assert(bare_is_valid(&"Name123".clone()));
+    assert(bare_is_valid(&"a$b".clone()));          // $ allowed in continuation
+    assert(!bare_is_valid(&"".clone()));
+    assert(!bare_is_valid(&"1foo".clone()));         // can't start with digit
+    assert(!bare_is_valid(&"has space".clone()));
+    assert(!bare_is_valid(&"$foo".clone()));         // $ not allowed at start
+}
+
+fn main() {
+    test_style_names();
+    test_is_quoted_vs_bare();
+    test_is_standard();
+    test_open_close_chars();
+    test_doubling_escape_support();
+    test_classify_bare();
+    test_classify_quoted_variants();
+    test_bare_identifier_validation();
+}

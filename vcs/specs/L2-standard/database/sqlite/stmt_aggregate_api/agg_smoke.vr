@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stmt_aggregate_api, udf
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stmt_aggregate_api.callback.{
+    CallbackSlot, CsStep, CsFinal, CsValue, CsInverse,
+    slot_name, is_required_for_plain, is_window_specific,
+    window_requires_all_four,
+};
+mount core.database.sqlite.native.stmt_aggregate_api.lifecycle.{
+    Phase, PaIdle, PaAccumulating, PaFinalizing, PaDone,
+    phase_name,
+    AggState,
+    fresh, begin, step, inverse, emit_value, finalize, complete,
+    live_row_count, is_window_use, is_plain_aggregate_use,
+};
+mount base.{Bool, Int64};
+
+fn test_slot_names() {
+    assert(slot_name(&CsStep)    == "xStep".clone());
+    assert(slot_name(&CsFinal)   == "xFinal".clone());
+    assert(slot_name(&CsValue)   == "xValue".clone());
+    assert(slot_name(&CsInverse) == "xInverse".clone());
+}
+
+fn test_required_for_plain() {
+    assert(is_required_for_plain(&CsStep));
+    assert(is_required_for_plain(&CsFinal));
+    assert(!is_required_for_plain(&CsValue));
+    assert(!is_required_for_plain(&CsInverse));
+}
+
+fn test_window_specific() {
+    assert(is_window_specific(&CsValue));
+    assert(is_window_specific(&CsInverse));
+    assert(!is_window_specific(&CsStep));
+    assert(!is_window_specific(&CsFinal));
+}
+
+fn test_window_requires_all_four() {
+    assert(window_requires_all_four(true, true, true, true));
+    assert(!window_requires_all_four(true, true, false, true));
+    assert(!window_requires_all_four(true, true, true, false));
+}
+
+fn test_phase_names() {
+    assert(phase_name(&PaIdle)         == "idle".clone());
+    assert(phase_name(&PaAccumulating) == "accumulating".clone());
+    assert(phase_name(&PaFinalizing)   == "finalizing".clone());
+    assert(phase_name(&PaDone)         == "done".clone());
+}
+
+fn test_fresh_state() {
+    let s = fresh();
+    match s.phase { PaIdle => {}, _ => assert(false) }
+    assert_eq(s.rows_stepped, 0 as Int64);
+    assert_eq(live_row_count(&s), 0 as Int64);
+}
+
+fn test_plain_aggregate_use() {
+    let mut s = begin(fresh());
+    s = step(step(step(s)));
+    assert_eq(s.rows_stepped, 3 as Int64);
+    assert_eq(live_row_count(&s), 3 as Int64);
+    assert(is_plain_aggregate_use(&s));
+    assert(!is_window_use(&s));
+    let f = finalize(s);
+    match f.phase { PaFinalizing => {}, _ => assert(false) }
+    let d = complete(f);
+    match d.phase { PaDone => {}, _ => assert(false) }
+}
+
+fn test_window_use_flag_when_inverse_called() {
+    let mut s = begin(fresh());
+    s = step(step(step(s)));
+    s = emit_value(s);
+    s = inverse(s);
+    assert_eq(live_row_count(&s), 2 as Int64);
+    assert(is_window_use(&s));
+    assert(!is_plain_aggregate_use(&s));
+}
+
+fn test_emit_value_is_window_marker() {
+    let mut s = begin(fresh());
+    s = step(s);
+    s = emit_value(s);
+    assert(is_window_use(&s));
+}
+
+fn main() {
+    test_slot_names();
+    test_required_for_plain();
+    test_window_specific();
+    test_window_requires_all_four();
+    test_phase_names();
+    test_fresh_state();
+    test_plain_aggregate_use();
+    test_window_use_flag_when_inverse_called();
+    test_emit_value_is_window_marker();
+}

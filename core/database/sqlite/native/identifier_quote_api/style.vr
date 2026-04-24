@@ -1,0 +1,58 @@
+// Identifier-quoting style.
+
+module core.database.sqlite.native.identifier_quote_api.style;
+
+mount base.{Bool, Text};
+
+public type QuoteStyle is
+    | QsBare              // no quoting
+    | QsDoubleQuote       // "name" — SQL-92
+    | QsBracket           // [name] — MSSQL
+    | QsBacktick          // `name` — MySQL
+    ;
+
+public fn style_name(s: &QuoteStyle) -> Text {
+    match s {
+        QsBare        => "bare".clone(),
+        QsDoubleQuote => "double_quote".clone(),
+        QsBracket     => "bracket".clone(),
+        QsBacktick    => "backtick".clone(),
+    }
+}
+
+public fn is_quoted(s: &QuoteStyle) -> Bool {
+    match s { QsBare => false, _ => true }
+}
+
+// SQL-92 portable quoting.
+public fn is_standard(s: &QuoteStyle) -> Bool {
+    match s { QsDoubleQuote => true, _ => false }
+}
+
+public fn open_char(s: &QuoteStyle) -> u8 {
+    match s {
+        QsBare        => 0 as u8,
+        QsDoubleQuote => 0x22 as u8,   // "
+        QsBracket     => 0x5B as u8,   // [
+        QsBacktick    => 0x60 as u8,   // `
+    }
+}
+
+public fn close_char(s: &QuoteStyle) -> u8 {
+    match s {
+        QsBare        => 0 as u8,
+        QsDoubleQuote => 0x22 as u8,   // "
+        QsBracket     => 0x5D as u8,   // ]
+        QsBacktick    => 0x60 as u8,   // `
+    }
+}
+
+// Double-quote + backtick: doubling the quote char escapes it.
+// Bracket: no escape — brackets cannot contain ']'.
+public fn supports_doubling_escape(s: &QuoteStyle) -> Bool {
+    match s {
+        QsDoubleQuote => true,
+        QsBacktick    => true,
+        _             => false,
+    }
+}
