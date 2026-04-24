@@ -1,0 +1,173 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, der, time, string, rfc5280_4_1_2_5, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// X.690 §8.23 PrintableString, §8.24 UTF8String, §8.25 IA5String
+// parse; RFC 5280 §4.1.2.5 UTCTime (13-byte YYMMDDHHMMSSZ) +
+// GeneralizedTime (15-byte YYYYMMDDHHMMSSZ) parse.
+//
+// RFC 5280 §4.1.2.5.1 UTCTime two-digit-year interpretation:
+//   YY in 00..=49 → 2000-2049
+//   YY in 50..=99 → 1950-1999
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader};
+
+fn printable_string_ascii_parse() {
+    // PrintableString "Hello" — tag 0x13, length 5, body "Hello".
+    let der: List<Byte> = [
+        0x13_u8, 0x05_u8,
+        0x48_u8, 0x65_u8, 0x6C_u8, 0x6C_u8, 0x6F_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let s = r.read_printable_string().unwrap();
+    assert(s.eq(&f"Hello"));
+}
+
+fn utf8_string_ascii_parse() {
+    // UTF8String "Warp" — tag 0x0C.
+    let der: List<Byte> = [
+        0x0C_u8, 0x04_u8,
+        0x57_u8, 0x61_u8, 0x72_u8, 0x70_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let s = r.read_utf8_string().unwrap();
+    assert(s.eq(&f"Warp"));
+}
+
+fn ia5_string_dns_label_parse() {
+    // IA5String "example.com" — tag 0x16.
+    let der: List<Byte> = [
+        0x16_u8, 0x0B_u8,
+        0x65_u8, 0x78_u8, 0x61_u8, 0x6D_u8, 0x70_u8, 0x6C_u8, 0x65_u8,
+        0x2E_u8, 0x63_u8, 0x6F_u8, 0x6D_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let s = r.read_ia5_string().unwrap();
+    assert(s.eq(&f"example.com"));
+}
+
+fn utc_time_2026_04_24_parse() {
+    // UTCTime "260424120000Z" = 2026-04-24 12:00:00 UTC.
+    //   tag 0x17, length 13, ASCII body + 'Z'.
+    let der: List<Byte> = [
+        0x17_u8, 0x0D_u8,
+        0x32_u8, 0x36_u8,             // "26"
+        0x30_u8, 0x34_u8,             // "04"
+        0x32_u8, 0x34_u8,             // "24"
+        0x31_u8, 0x32_u8,             // "12"
+        0x30_u8, 0x30_u8,             // "00"
+        0x30_u8, 0x30_u8,             // "00"
+        0x5A_u8,                       // 'Z'
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let t = r.read_utc_time().unwrap();
+    assert(t.year == 2026_u32);       // 26 < 50 → 2000+26
+    assert(t.month == 4_u8);
+    assert(t.day == 24_u8);
+    assert(t.hour == 12_u8);
+    assert(t.minute == 0_u8);
+    assert(t.second == 0_u8);
+}
+
+fn utc_time_1999_boundary_uses_1900() {
+    // UTCTime "991231235959Z" = 1999-12-31 23:59:59 UTC (99 >= 50).
+    let der: List<Byte> = [
+        0x17_u8, 0x0D_u8,
+        0x39_u8, 0x39_u8,             // "99"
+        0x31_u8, 0x32_u8,             // "12"
+        0x33_u8, 0x31_u8,             // "31"
+        0x32_u8, 0x33_u8,             // "23"
+        0x35_u8, 0x39_u8,             // "59"
+        0x35_u8, 0x39_u8,             // "59"
+        0x5A_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let t = r.read_utc_time().unwrap();
+    assert(t.year == 1999_u32);       // 99 >= 50 → 1900+99
+    assert(t.month == 12_u8);
+    assert(t.day == 31_u8);
+}
+
+fn utc_time_requires_trailing_Z() {
+    // Same bytes but trailing 'G' instead of 'Z' → reject.
+    let der: List<Byte> = [
+        0x17_u8, 0x0D_u8,
+        0x32_u8, 0x36_u8, 0x30_u8, 0x34_u8, 0x32_u8, 0x34_u8,
+        0x31_u8, 0x32_u8, 0x30_u8, 0x30_u8, 0x30_u8, 0x30_u8,
+        0x47_u8,                        // 'G' (wrong)
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    match r.read_utc_time() {
+        Err(_) => {},
+        Ok(_)  => panic("non-Z UTCTime must reject"),
+    }
+}
+
+fn utc_time_wrong_length_rejects() {
+    // 12 bytes (missing 'Z') — length must be 13.
+    let der: List<Byte> = [
+        0x17_u8, 0x0C_u8,
+        0x32_u8, 0x36_u8, 0x30_u8, 0x34_u8, 0x32_u8, 0x34_u8,
+        0x31_u8, 0x32_u8, 0x30_u8, 0x30_u8, 0x30_u8, 0x30_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    match r.read_utc_time() {
+        Err(_) => {},
+        Ok(_)  => panic("12-byte UTCTime must reject"),
+    }
+}
+
+fn generalized_time_2100_parse() {
+    // GeneralizedTime "21000101000000Z" = 2100-01-01 00:00:00 UTC.
+    // Tag 0x18, length 15.
+    let der: List<Byte> = [
+        0x18_u8, 0x0F_u8,
+        0x32_u8, 0x31_u8, 0x30_u8, 0x30_u8,   // "2100"
+        0x30_u8, 0x31_u8,                      // "01"
+        0x30_u8, 0x31_u8,                      // "01"
+        0x30_u8, 0x30_u8,                      // "00"
+        0x30_u8, 0x30_u8,                      // "00"
+        0x30_u8, 0x30_u8,                      // "00"
+        0x5A_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let t = r.read_generalized_time().unwrap();
+    assert(t.year == 2100_u32);
+    assert(t.month == 1_u8);
+    assert(t.day == 1_u8);
+    assert(t.hour == 0_u8);
+}
+
+fn utf8_string_invalid_sequence_rejected() {
+    // UTF8String with invalid continuation byte sequence — Text.from_utf8
+    // rejects 0x80 as a lead byte.
+    let der: List<Byte> = [
+        0x0C_u8, 0x02_u8,
+        0x80_u8, 0x00_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    match r.read_utf8_string() {
+        Err(_) => {},
+        Ok(_)  => panic("invalid UTF-8 must reject"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    printable_string_ascii_parse();
+    utf8_string_ascii_parse();
+    ia5_string_dns_label_parse();
+    utc_time_2026_04_24_parse();
+    utc_time_1999_boundary_uses_1900();
+    utc_time_requires_trailing_Z();
+    utc_time_wrong_length_rejects();
+    generalized_time_2100_parse();
+    utf8_string_invalid_sequence_rejected();
+    print("X.690 §8.23-25 + RFC 5280 §4.1.2.5 DER string/time parse KAT verified");
+    0
+}
