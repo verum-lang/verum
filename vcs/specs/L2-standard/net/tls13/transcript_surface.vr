@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, transcript, hash, rfc8446_4_4_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.4.1 Transcript-Hash — the running hash over all
+// serialised handshake messages from the first ClientHello onward.
+//
+//   * snapshot() returns a 32-byte (Sha256) or 48-byte (Sha384) hash.
+//   * Fragmented append(a) + append(b) must yield the same hash as
+//     append(ab).
+//   * reseed_for_hrr replaces the cumulative hash with
+//     `message_hash(hash(CH1))` per the HRR transcript folding rule.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{HashKind};
+mount core.net.tls13.handshake.transcript.{Transcript};
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn empty_transcript_sha256_has_32_byte_snapshot() {
+    let tr = Transcript.new(HashKind.Sha256);
+    let snap = tr.snapshot();
+    assert(snap.len() == 32);
+}
+
+fn empty_transcript_sha384_has_48_byte_snapshot() {
+    let tr = Transcript.new(HashKind.Sha384);
+    let snap = tr.snapshot();
+    assert(snap.len() == 48);
+}
+
+fn hash_kind_survives_append() {
+    let mut tr = Transcript.new(HashKind.Sha384);
+    let data: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    tr.append(data.as_slice());
+    match tr.hash_kind() {
+        HashKind.Sha384 => {},
+        _ => panic("hash kind must survive append"),
+    }
+    // Snapshot still 48 bytes.
+    assert(tr.snapshot().len() == 48);
+}
+
+fn fragmented_append_equals_single_append() {
+    // append(a) then append(b) → same hash as append(a || b).
+    let mut tr1 = Transcript.new(HashKind.Sha256);
+    let mut tr2 = Transcript.new(HashKind.Sha256);
+
+    let a: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let b: List<Byte> = [0x04_u8, 0x05_u8];
+    tr1.append(a.as_slice());
+    tr1.append(b.as_slice());
+
+    let mut ab: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < a.len() { ab.push(a[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < b.len() { ab.push(b[j]); j = j + 1; }
+    tr2.append(ab.as_slice());
+
+    let h1 = tr1.snapshot();
+    let h2 = tr2.snapshot();
+    assert(bytes_eq(h1.as_slice(), h2.as_slice()));
+}
+
+fn snapshot_is_idempotent() {
+    let mut tr = Transcript.new(HashKind.Sha256);
+    let data: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    tr.append(data.as_slice());
+    let a = tr.snapshot();
+    let b = tr.snapshot();
+    assert(bytes_eq(a.as_slice(), b.as_slice()));
+}
+
+fn reseed_for_hrr_changes_hash() {
+    let mut tr = Transcript.new(HashKind.Sha256);
+    let ch1: List<Byte> = [
+        0x01_u8, 0x00_u8, 0x00_u8, 0x04_u8,
+        0x03_u8, 0x03_u8, 0xAA_u8, 0xBB_u8,
+    ];
+    tr.append(ch1.as_slice());
+    let pre = tr.snapshot();
+    tr.reseed_for_hrr();
+    let post = tr.snapshot();
+    // Reseed MUST produce a different cumulative hash (message_hash
+    // prefix injection).
+    let mut differ = false;
+    let mut i: Int = 0;
+    while i < pre.len() {
+        if pre[i] != post[i] { differ = true; }
+        i = i + 1;
+    }
+    assert(differ);
+    // Length unchanged — still SHA-256 = 32 bytes.
+    assert(post.len() == 32);
+}
+
+@main
+public fn main() -> Int {
+    empty_transcript_sha256_has_32_byte_snapshot();
+    empty_transcript_sha384_has_48_byte_snapshot();
+    hash_kind_survives_append();
+    fragmented_append_equals_single_append();
+    snapshot_is_idempotent();
+    reseed_for_hrr_changes_hash();
+    print("RFC 8446 §4.4.1 Transcript append/snapshot/reseed verified");
+    0
+}

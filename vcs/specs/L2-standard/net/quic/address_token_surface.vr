@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, address_token, retry, new_token, rfc9000_8_1_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §8.1.3 address-validation tokens: server issues Retry
+// (short-lived) or NewToken (longer-lived) tokens bound to client
+// IP + optional original-DCID. Wire layout = key_id(8) || version(1)
+// || kind(1) || nonce(12) || AEAD-sealed plaintext.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.address_token.{
+    AddressTokenKey, TokenKind, TokenError, VerifyOptions,
+    WIRE_VERSION,
+};
+
+fn wire_version_is_one() {
+    // Token format v1.
+    assert(WIRE_VERSION == 1_u8);
+}
+
+fn token_kinds_are_distinct() {
+    let retry:     TokenKind = TokenKind.Retry;
+    let new_token: TokenKind = TokenKind.NewToken;
+    // Match-based distinctness check.
+    let r = match retry {
+        TokenKind.Retry    => 1,
+        TokenKind.NewToken => 2,
+    };
+    let n = match new_token {
+        TokenKind.Retry    => 1,
+        TokenKind.NewToken => 2,
+    };
+    assert(r != n);
+}
+
+fn key_generate_produces_distinct_random_values() {
+    let k1 = AddressTokenKey::generate();
+    let k2 = AddressTokenKey::generate();
+    let id1 = k1.key_id();
+    let id2 = k2.key_id();
+    // CSPRNG collision probability on 64-bit key_id is negligible.
+    let mut any_diff = false;
+    let mut i: Int = 0;
+    while i < 8 {
+        if id1[i] != id2[i] { any_diff = true; }
+        i = i + 1;
+    }
+    assert(any_diff);
+}
+
+fn verify_options_defaults_match_spec() {
+    let o = VerifyOptions.defaults();
+    // Default 24-hour lifetime (86 400 seconds).
+    assert(o.max_age_sec == 86_400_u64);
+    // IP check not enforced by default.
+    match o.expected_client_ip {
+        None => {},
+        _ => panic("defaults must not pin client IP"),
+    }
+    // Either kind accepted by default.
+    match o.required_kind {
+        None => {},
+        _ => panic("defaults must not require a specific kind"),
+    }
+}
+
+fn token_error_variants_constructible() {
+    let errs: [TokenError; 7] = [
+        TokenError.SealFailure,
+        TokenError.OpenFailure,
+        TokenError.WrongKeyId,
+        TokenError.Malformed,
+        TokenError.Expired,
+        TokenError.WrongKind,
+        TokenError.ClientIpMismatch,
+    ];
+    let mut i: Int = 0;
+    while i < 7 {
+        let _ = errs[i];
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    wire_version_is_one();
+    token_kinds_are_distinct();
+    key_generate_produces_distinct_random_values();
+    verify_options_defaults_match_spec();
+    token_error_variants_constructible();
+    print("RFC 9000 §8.1.3 address-token surface verified");
+    0
+}

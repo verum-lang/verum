@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, stats, observability, merge
+// @timeout: 15000
+// @expected-exit: 0
+
+// QuicStats surface: zero-on-new counters + additive merge semantics
+// used by the endpoint aggregator to fold per-connection snapshots.
+
+mount core.*;
+mount core.net.quic.stats.{QuicStats, EndpointStats};
+
+fn new_stats_are_all_zero() {
+    let s = QuicStats::new();
+    assert(s.datagrams_sent   == 0_u64);
+    assert(s.datagrams_recv   == 0_u64);
+    assert(s.bytes_sent       == 0_u64);
+    assert(s.bytes_recv       == 0_u64);
+    assert(s.packets_lost     == 0_u64);
+    assert(s.streams_opened_bidi == 0_u64);
+    assert(s.zero_rtt_offered == 0_u64);
+    assert(s.paths_validated  == 0_u64);
+    assert(s.cids_issued      == 0_u64);
+}
+
+fn merge_is_additive_per_field() {
+    let mut a = QuicStats::new();
+    a.datagrams_sent = 10_u64;
+    a.bytes_sent     = 1500_u64;
+    a.packets_lost   = 2_u64;
+    a.paths_validated = 1_u64;
+
+    let mut b = QuicStats::new();
+    b.datagrams_sent = 5_u64;
+    b.bytes_sent     = 800_u64;
+    b.packets_lost   = 3_u64;
+    b.paths_validated = 2_u64;
+
+    a.merge(&b);
+    assert(a.datagrams_sent == 15_u64);
+    assert(a.bytes_sent     == 2300_u64);
+    assert(a.packets_lost   == 5_u64);
+    assert(a.paths_validated == 3_u64);
+    // b unchanged.
+    assert(b.datagrams_sent == 5_u64);
+}
+
+fn merge_zero_does_not_perturb() {
+    let mut a = QuicStats::new();
+    a.datagrams_sent = 42_u64;
+    a.rtt_smoothed_us = 20_000_u64;
+    let z = QuicStats::new();
+    a.merge(&z);
+    assert(a.datagrams_sent   == 42_u64);
+    assert(a.rtt_smoothed_us  == 20_000_u64);
+}
+
+fn endpoint_stats_constructible() {
+    let e = EndpointStats::new();
+    // Endpoint aggregates exist separately from per-connection stats;
+    // the exact fields are implementation-internal, but new() must
+    // return a fully-initialised zero aggregate.
+    let _ = e;
+}
+
+@main
+public fn main() -> Int {
+    new_stats_are_all_zero();
+    merge_is_additive_per_field();
+    merge_zero_does_not_perturb();
+    endpoint_stats_constructible();
+    print("QuicStats zero + merge + EndpointStats surface verified");
+    0
+}
