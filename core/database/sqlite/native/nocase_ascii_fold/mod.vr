@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/nocase_ascii_fold/mod.vr
+// =============================================================================
+// SQLite NOCASE collation — ASCII-only upper/lower fold. This catalogue
+// documents the folding table that the BINARY vs NOCASE diff relies on,
+// and exposes exact fold helpers.
+// Spec §15.4.2 — NOCASE.
+// =============================================================================
+
+module core.database.sqlite.native.nocase_ascii_fold;
+
+public module fold;

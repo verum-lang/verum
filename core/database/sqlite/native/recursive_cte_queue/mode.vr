@@ -1,0 +1,27 @@
+// Traversal mode.
+
+module core.database.sqlite.native.recursive_cte_queue.mode;
+
+mount base.{Bool, Text};
+
+public type TraversalMode is
+    | TmBreadthFirst      // default for UNION ALL recursion
+    | TmDepthFirst        // triggered by ORDER BY on the recursive output
+    ;
+
+public fn mode_name(m: &TraversalMode) -> Text {
+    match m {
+        TmBreadthFirst => "bfs".clone(),
+        TmDepthFirst   => "dfs".clone(),
+    }
+}
+
+public fn default_mode() -> TraversalMode { TmBreadthFirst }
+
+public fn is_cycle_safe_on_trees(m: &TraversalMode) -> Bool {
+    match m { TmDepthFirst => true, _ => false }
+}
+
+public fn emits_level_order(m: &TraversalMode) -> Bool {
+    match m { TmBreadthFirst => true, _ => false }
+}

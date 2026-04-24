@@ -1,0 +1,49 @@
+// Long-path prefix application.
+
+module core.database.sqlite.native.win32_vfs_paths.prefix;
+
+mount core.database.sqlite.native.win32_vfs_paths.kind.{
+    PathKind, PkDriveAbsolute, PkDriveRelative, PkUnc, PkRelative, PkDevice, PkEmpty,
+    is_absolute, needs_long_path_prefix,
+};
+mount base.{Bool, Text};
+
+// The long-path prefix that lifts MAX_PATH (260) up to ~32k.
+public fn long_path_prefix() -> Text { "\\\\?\\".clone() }
+
+// The UNC variant of the long-path prefix.
+public fn unc_long_prefix() -> Text { "\\\\?\\UNC\\".clone() }
+
+public type Decision is
+    | DcKeep                    // no change
+    | DcAddLongPath             // \\?\C:\...
+    | DcAddUncLongPath          // \\?\UNC\server\share\...
+    | DcReject                  // invalid for Win32 VFS (empty)
+    ;
+
+public fn decision_name(d: &Decision) -> Text {
+    match d {
+        DcKeep            => "keep".clone(),
+        DcAddLongPath     => "add_long".clone(),
+        DcAddUncLongPath  => "add_unc_long".clone(),
+        DcReject          => "reject".clone(),
+    }
+}
+
+public fn decide(k: &PathKind, length: Int) -> Decision {
+    match k {
+        PkEmpty          => DcReject,
+        PkDevice         => DcKeep,
+        PkDriveAbsolute  => if length > 260 { DcAddLongPath } else { DcKeep },
+        PkUnc            => if length > 260 { DcAddUncLongPath } else { DcKeep },
+        _                => DcKeep,
+    }
+}
+
+public fn results_in_longer_path(d: &Decision) -> Bool {
+    match d {
+        DcAddLongPath     => true,
+        DcAddUncLongPath  => true,
+        _                 => false,
+    }
+}

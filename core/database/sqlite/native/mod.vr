@@ -604,3 +604,19 @@ public module journal_mode_transition;
 public module busy_retry_policy;
 // - fts5_auxiliary_api: 13-method FTS5 auxiliary fn taxonomy + name lookup
 public module fts5_auxiliary_api;
+// - jsonb_binary_format: 13-entry element-type nibble + variable-length header decoder
+public module jsonb_binary_format;
+// - unix_vfs_lock_style: POSIX/FLOCK/DOTFILE/NONE/PROXY + capability-based resolver
+public module unix_vfs_lock_style;
+// - win32_vfs_paths: 6-kind Win32 path + long-path-prefix decision
+public module win32_vfs_paths;
+// - bloom_filter_api: BM25-like sizing + approximate FPR + worthwhile-threshold
+public module bloom_filter_api;
+// - cross_db_ref_api: schema-walk main → temp → attached resolver
+public module cross_db_ref_api;
+// - recursive_cte_queue: BFS/DFS WorkQueue with front/back insertion policy
+public module recursive_cte_queue;
+// - nocase_ascii_fold: ASCII-only to_lower/to_upper + eq_nocase + round-trip identity
+public module nocase_ascii_fold;
+// - integrity_walker_api: 8-kind FindingKind + severity rank + pragma_output_line_count
+public module integrity_walker_api;

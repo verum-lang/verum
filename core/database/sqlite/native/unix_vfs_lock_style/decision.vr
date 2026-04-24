@@ -1,0 +1,45 @@
+// Lock-style decision inputs + resolver.
+
+module core.database.sqlite.native.unix_vfs_lock_style.decision;
+
+mount core.database.sqlite.native.unix_vfs_lock_style.style.{
+    LockStyle, LsPosix, LsFlock, LsDotfile, LsNone, LsProxy,
+};
+mount base.{Bool, Text};
+
+public type FsCapabilities is {
+    supports_posix_locks: Bool,
+    supports_flock: Bool,
+    is_readonly: Bool,
+    is_apple_platform: Bool,
+    proxy_requested: Bool,
+};
+
+public fn default_caps() -> FsCapabilities {
+    FsCapabilities {
+        supports_posix_locks: true,
+        supports_flock: true,
+        is_readonly: false,
+        is_apple_platform: false,
+        proxy_requested: false,
+    }
+}
+
+// Pick a lock style using SQLite's preference order.
+public fn resolve(caps: &FsCapabilities) -> LockStyle {
+    if caps.is_apple_platform && caps.proxy_requested { return LsProxy; }
+    if caps.is_readonly { return LsDotfile; }
+    if caps.supports_posix_locks { return LsPosix; }
+    if caps.supports_flock { return LsFlock; }
+    LsNone
+}
+
+// URI param "vfs=unix-none" forces LsNone regardless of capabilities.
+public fn resolve_with_force(caps: &FsCapabilities, forced: Bool) -> LockStyle {
+    if forced { return LsNone; }
+    resolve(caps)
+}
+
+public fn requires_fallback_from_posix(caps: &FsCapabilities) -> Bool {
+    !caps.supports_posix_locks && !caps.is_readonly && !caps.is_apple_platform
+}

@@ -1,0 +1,63 @@
+// Generic row-id queue abstraction — push_back for BFS, push_front for DFS.
+
+module core.database.sqlite.native.recursive_cte_queue.queue;
+
+mount core.database.sqlite.native.recursive_cte_queue.mode.{
+    TraversalMode, TmBreadthFirst, TmDepthFirst,
+};
+mount base.{Bool, Int64};
+mount core.collections.list.{List};
+
+public type WorkQueue is {
+    mode: TraversalMode,
+    items: List<Int64>,
+    total_enqueued: Int64,
+    total_dequeued: Int64,
+};
+
+public fn new(mode: TraversalMode) -> WorkQueue {
+    WorkQueue {
+        mode: mode,
+        items: [].clone() as List<Int64>,
+        total_enqueued: 0 as Int64,
+        total_dequeued: 0 as Int64,
+    }
+}
+
+public fn size(q: &WorkQueue) -> Int { q.items.len() }
+
+public fn is_empty(q: &WorkQueue) -> Bool { q.items.len() == 0 }
+
+// BFS: append at end → dequeue from front.
+// DFS: insert at front → dequeue from front.
+public fn enqueue(mut q: WorkQueue, row_id: Int64) -> WorkQueue {
+    match q.mode {
+        TmBreadthFirst => q.items.push(row_id),
+        TmDepthFirst   => q.items.insert(0, row_id),
+    }
+    q.total_enqueued = q.total_enqueued + (1 as Int64);
+    q
+}
+
+// Dequeue from the front (index 0).
+public fn dequeue_front(mut q: WorkQueue) -> (WorkQueue, Int64) {
+    if q.items.len() == 0 { return (q, -1 as Int64); }
+    let front = q.items[0];
+    let _ = q.items.remove(0);
+    q.total_dequeued = q.total_dequeued + (1 as Int64);
+    (q, front)
+}
+
+public fn peek_front(q: &WorkQueue) -> Int64 {
+    if q.items.len() == 0 { return -1 as Int64; }
+    q.items[0]
+}
+
+// Net pending items — enqueued minus dequeued.
+public fn pending(q: &WorkQueue) -> Int64 {
+    q.total_enqueued - q.total_dequeued
+}
+
+public fn max_seen_size(q: &WorkQueue) -> Int64 {
+    q.total_enqueued
+}

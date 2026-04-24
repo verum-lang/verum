@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/jsonb_binary_format/mod.vr
+// =============================================================================
+// JSONB binary format — SQLite 3.45+ element encoding.
+//
+// Each element starts with a 1-byte header:
+//   bits 3..0 — element type (nibble 0..12)
+//   bits 7..4 — payload-length class:
+//     0..11 — payload length is the nibble value (0..11 bytes inline)
+//     12    — next 1 byte holds the payload length
+//     13    — next 2 bytes (big-endian u16)
+//     14    — next 4 bytes (big-endian u32)
+//     15    — next 8 bytes (big-endian u64)
+// =============================================================================
+
+module core.database.sqlite.native.jsonb_binary_format;
+
+public module element;
+public module header;

@@ -1,0 +1,50 @@
+// Unix lock-style taxonomy.
+
+module core.database.sqlite.native.unix_vfs_lock_style.style;
+
+mount base.{Bool, Text};
+
+public type LockStyle is
+    | LsPosix
+    | LsFlock
+    | LsDotfile
+    | LsNone
+    | LsProxy
+    ;
+
+public fn style_name(s: &LockStyle) -> Text {
+    match s {
+        LsPosix   => "POSIX".clone(),
+        LsFlock   => "FLOCK".clone(),
+        LsDotfile => "DOTFILE".clone(),
+        LsNone    => "NONE".clone(),
+        LsProxy   => "PROXY".clone(),
+    }
+}
+
+public fn is_advisory(s: &LockStyle) -> Bool {
+    match s {
+        LsPosix  => true,
+        LsFlock  => true,
+        LsDotfile => true,
+        _        => false,
+    }
+}
+
+public fn supports_byte_range(s: &LockStyle) -> Bool {
+    match s { LsPosix => true, _ => false }
+}
+
+public fn default_style() -> LockStyle { LsPosix }
+
+public fn is_readonly_filesystem_friendly(s: &LockStyle) -> Bool {
+    match s {
+        LsDotfile => true,
+        LsNone    => true,
+        _         => false,
+    }
+}
+
+public fn apple_only(s: &LockStyle) -> Bool {
+    match s { LsProxy => true, _ => false }
+}

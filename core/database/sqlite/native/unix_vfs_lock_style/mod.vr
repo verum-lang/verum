@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/unix_vfs_lock_style/mod.vr
+// =============================================================================
+// Unix VFS lock-style selection — mirrors unixSetupFsidKey + unixFileControl.
+// Spec §7.4 — platform-specific locking.
+//
+// Strategies (in preference order):
+//   POSIX   — fcntl(F_SETLK) advisory byte-range locks (default)
+//   FLOCK   — flock(2) whole-file advisory
+//   DOTFILE — <db>.lock marker file (read-only FS)
+//   UNIX_NONE — no locking (single process)
+//   PROXY   — proxy-file locking (Apple-only)
+// =============================================================================
+
+module core.database.sqlite.native.unix_vfs_lock_style;
+
+public module style;
+public module decision;

@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, recursive_cte_queue, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.recursive_cte_queue.mode.{
+    TraversalMode, TmBreadthFirst, TmDepthFirst,
+    mode_name, default_mode, is_cycle_safe_on_trees, emits_level_order,
+};
+mount core.database.sqlite.native.recursive_cte_queue.queue.{
+    WorkQueue,
+    new, size, is_empty, enqueue, dequeue_front, peek_front,
+    pending, max_seen_size,
+};
+mount base.{Bool, Int64};
+
+fn test_mode_names() {
+    assert(mode_name(&TmBreadthFirst) == "bfs".clone());
+    assert(mode_name(&TmDepthFirst)   == "dfs".clone());
+}
+
+fn test_default_mode_is_bfs() {
+    match default_mode() { TmBreadthFirst => {}, _ => assert(false) }
+}
+
+fn test_cycle_safety_and_level_order() {
+    assert(is_cycle_safe_on_trees(&TmDepthFirst));
+    assert(!is_cycle_safe_on_trees(&TmBreadthFirst));
+    assert(emits_level_order(&TmBreadthFirst));
+    assert(!emits_level_order(&TmDepthFirst));
+}
+
+fn test_empty_queue() {
+    let q = new(TmBreadthFirst);
+    assert(is_empty(&q));
+    assert_eq(size(&q), 0);
+    assert_eq(pending(&q), 0 as Int64);
+}
+
+fn test_bfs_order_is_fifo() {
+    let mut q = new(TmBreadthFirst);
+    q = enqueue(q, 1 as Int64);
+    q = enqueue(q, 2 as Int64);
+    q = enqueue(q, 3 as Int64);
+    assert_eq(peek_front(&q), 1 as Int64);
+    let (q1, v1) = dequeue_front(q);
+    assert_eq(v1, 1 as Int64);
+    let (q2, v2) = dequeue_front(q1);
+    assert_eq(v2, 2 as Int64);
+    let (q3, v3) = dequeue_front(q2);
+    assert_eq(v3, 3 as Int64);
+    assert(is_empty(&q3));
+}
+
+fn test_dfs_order_is_lifo() {
+    let mut q = new(TmDepthFirst);
+    q = enqueue(q, 1 as Int64);
+    q = enqueue(q, 2 as Int64);
+    q = enqueue(q, 3 as Int64);
+    // DFS inserts at front → last-in first-out
+    assert_eq(peek_front(&q), 3 as Int64);
+    let (q1, v1) = dequeue_front(q);
+    assert_eq(v1, 3 as Int64);
+    let (q2, v2) = dequeue_front(q1);
+    assert_eq(v2, 2 as Int64);
+    let (q3, v3) = dequeue_front(q2);
+    assert_eq(v3, 1 as Int64);
+}
+
+fn test_dequeue_empty_returns_sentinel() {
+    let q = new(TmBreadthFirst);
+    let (_, v) = dequeue_front(q);
+    assert_eq(v, -1 as Int64);
+}
+
+fn test_counters_persist() {
+    let mut q = new(TmBreadthFirst);
+    q = enqueue(enqueue(enqueue(q, 10 as Int64), 20 as Int64), 30 as Int64);
+    let (q1, _) = dequeue_front(q);
+    assert_eq(pending(&q1), 2 as Int64);
+    assert_eq(max_seen_size(&q1), 3 as Int64);
+}
+
+fn main() {
+    test_mode_names();
+    test_default_mode_is_bfs();
+    test_cycle_safety_and_level_order();
+    test_empty_queue();
+    test_bfs_order_is_fifo();
+    test_dfs_order_is_lifo();
+    test_dequeue_empty_returns_sentinel();
+    test_counters_persist();
+}

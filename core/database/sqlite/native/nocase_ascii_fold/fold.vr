@@ -1,0 +1,48 @@
+// Per-byte ASCII folding.
+
+module core.database.sqlite.native.nocase_ascii_fold.fold;
+
+mount base.{Bool};
+
+// A..Z is 0x41..0x5A; a..z is 0x61..0x7A.
+public fn to_lower(b: u8) -> u8 {
+    if b >= 0x41 as u8 && b <= 0x5A as u8 {
+        return (b + 0x20 as u8) as u8;
+    }
+    b
+}
+
+public fn to_upper(b: u8) -> u8 {
+    if b >= 0x61 as u8 && b <= 0x7A as u8 {
+        return (b - 0x20 as u8) as u8;
+    }
+    b
+}
+
+// Fold-insensitive equality — used by NOCASE comparator.
+public fn eq_nocase(a: u8, b: u8) -> Bool {
+    to_lower(a) == to_lower(b)
+}
+
+// Byte is alpha (A-Z or a-z).
+public fn is_ascii_alpha(b: u8) -> Bool {
+    (b >= 0x41 as u8 && b <= 0x5A as u8) || (b >= 0x61 as u8 && b <= 0x7A as u8)
+}
+
+public fn is_ascii_digit(b: u8) -> Bool {
+    b >= 0x30 as u8 && b <= 0x39 as u8
+}
+
+public fn is_ascii_alnum(b: u8) -> Bool {
+    is_ascii_alpha(b) || is_ascii_digit(b)
+}
+
+// Bytes that NOCASE treats specially — only the ASCII alpha range.
+public fn is_case_folded(b: u8) -> Bool {
+    is_ascii_alpha(b)
+}
+
+// Upper-case A maps to lower-case a and vice versa; verify via round-trip.
+public fn round_trip_identity(b: u8) -> Bool {
+    to_upper(to_lower(b)) == to_upper(b)
+}

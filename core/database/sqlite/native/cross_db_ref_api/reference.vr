@@ -1,0 +1,34 @@
+// Reference record — may or may not carry an explicit schema name.
+
+module core.database.sqlite.native.cross_db_ref_api.reference;
+
+mount base.{Bool, Text};
+
+public type TableRef is {
+    schema: Text,      // empty means unqualified
+    table: Text,
+};
+
+public fn unqualified(table: Text) -> TableRef {
+    TableRef { schema: "".clone(), table: table }
+}
+
+public fn qualified(schema: Text, table: Text) -> TableRef {
+    TableRef { schema: schema, table: table }
+}
+
+public fn is_qualified(r: &TableRef) -> Bool {
+    r.schema.len() > 0
+}
+
+public fn names_temp(r: &TableRef) -> Bool {
+    r.schema == "temp".clone()
+}
+
+public fn names_main(r: &TableRef) -> Bool {
+    r.schema == "main".clone()
+}
+
+public fn is_reserved_schema(r: &TableRef) -> Bool {
+    names_main(r) || names_temp(r)
+}

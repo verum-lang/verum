@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/bloom_filter_api/mod.vr
+// =============================================================================
+// Bloom filter for join pushdown — SQLite 3.38+ optimizer inserts a Bloom
+// filter over the outer loop's keys to skip inner-loop probes that will
+// certainly miss.
+// Spec §13.5.7 — Bloom filter join filtering.
+//
+// SQLite uses a fixed 1-hash-function Bloom filter sized to ~(N rows / 2)
+// bytes; larger tables auto-select larger filters.
+// =============================================================================
+
+module core.database.sqlite.native.bloom_filter_api;
+
+public module spec;

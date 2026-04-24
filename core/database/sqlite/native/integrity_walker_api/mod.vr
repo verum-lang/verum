@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/integrity_walker_api/mod.vr
+// =============================================================================
+// PRAGMA integrity_check — tree walk that inspects every page and emits a
+// list of findings. The walker tracks per-check categories so callers can
+// classify output severity.
+// Spec §10.7 — integrity_check.
+// =============================================================================
+
+module core.database.sqlite.native.integrity_walker_api;
+
+public module finding;
+public module walker;

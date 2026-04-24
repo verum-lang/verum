@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/win32_vfs_paths/mod.vr
+// =============================================================================
+// Windows VFS path-normalization quirks — UNC paths, long-path prefix, drive
+// letters, and the SQLITE_ENABLE_WIN32_NO_ANSI flag.
+// Spec §7.4 — Windows VFS.
+// =============================================================================
+
+module core.database.sqlite.native.win32_vfs_paths;
+
+public module kind;
+public module prefix;

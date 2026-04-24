@@ -1,0 +1,74 @@
+// Walker state — accumulates findings + tallies per category.
+
+module core.database.sqlite.native.integrity_walker_api.walker;
+
+mount core.database.sqlite.native.integrity_walker_api.finding.{
+    Finding, FindingKind,
+    FkOk, FkPageAllocation, FkTreeStructure, FkOverflowChain,
+    FkConstraintViolated, FkMissingIndex, FkRowFormat, FkEncoding,
+    is_ok, severity_rank,
+    ok_sentinel,
+};
+mount base.{Bool, Int64};
+mount core.collections.list.{List};
+
+public type IntegrityReport is {
+    findings: List<Finding>,
+    pages_scanned: Int64,
+    highest_severity: Int,
+};
+
+public fn fresh() -> IntegrityReport {
+    IntegrityReport {
+        findings: [].clone() as List<Finding>,
+        pages_scanned: 0 as Int64,
+        highest_severity: 0,
+    }
+}
+
+public fn record(mut r: IntegrityReport, f: Finding) -> IntegrityReport {
+    let sev = severity_rank(&f.kind);
+    if sev > r.highest_severity { r.highest_severity = sev; }
+    r.findings.push(f);
+    r
+}
+
+public fn count_page(mut r: IntegrityReport) -> IntegrityReport {
+    r.pages_scanned = r.pages_scanned + (1 as Int64);
+    r
+}
+
+public fn finding_count(r: &IntegrityReport) -> Int { r.findings.len() }
+
+public fn has_issues(r: &IntegrityReport) -> Bool {
+    // Any finding that isn't an OK sentinel.
+    let mut i: Int = 0;
+    while i < r.findings.len() {
+        if !is_ok(&r.findings[i].kind) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// PRAGMA integrity_check returns "ok" when the report is issue-free.
+public fn pragma_output_line_count(r: &IntegrityReport) -> Int {
+    if !has_issues(r) { return 1; }    // just "ok"
+    // Otherwise one line per finding (SQLite caps at integrity_check(N)).
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < r.findings.len() {
+        if !is_ok(&r.findings[i].kind) { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}
+
+public fn first_finding_or_ok(r: &IntegrityReport) -> Finding {
+    if r.findings.len() == 0 { return ok_sentinel(); }
+    let mut i: Int = 0;
+    while i < r.findings.len() {
+        if !is_ok(&r.findings[i].kind) { return r.findings[i].clone(); }
+        i = i + 1;
+    }
+    ok_sentinel()
+}

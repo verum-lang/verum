@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, nocase_ascii_fold, collation
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.nocase_ascii_fold.fold.{
+    to_lower, to_upper, eq_nocase,
+    is_ascii_alpha, is_ascii_digit, is_ascii_alnum,
+    is_case_folded, round_trip_identity,
+};
+mount base.{Bool};
+
+fn test_to_lower_on_ascii_upper() {
+    assert_eq(to_lower(0x41 as u8), 0x61 as u8);   // A → a
+    assert_eq(to_lower(0x5A as u8), 0x7A as u8);   // Z → z
+}
+
+fn test_to_lower_passes_through_lower_and_non_alpha() {
+    assert_eq(to_lower(0x61 as u8), 0x61 as u8);   // a → a
+    assert_eq(to_lower(0x30 as u8), 0x30 as u8);   // 0
+    assert_eq(to_lower(0x2E as u8), 0x2E as u8);   // .
+    assert_eq(to_lower(0x7B as u8), 0x7B as u8);   // {
+}
+
+fn test_to_upper_on_ascii_lower() {
+    assert_eq(to_upper(0x61 as u8), 0x41 as u8);
+    assert_eq(to_upper(0x7A as u8), 0x5A as u8);
+}
+
+fn test_eq_nocase() {
+    assert(eq_nocase(0x41 as u8, 0x61 as u8));      // A == a
+    assert(eq_nocase(0x5A as u8, 0x7A as u8));      // Z == z
+    assert(eq_nocase(0x61 as u8, 0x61 as u8));      // a == a
+    assert(!eq_nocase(0x41 as u8, 0x42 as u8));     // A != B
+    assert(!eq_nocase(0x41 as u8, 0x31 as u8));     // A != 1
+}
+
+fn test_ascii_classifiers() {
+    assert(is_ascii_alpha(0x41 as u8));
+    assert(is_ascii_alpha(0x7A as u8));
+    assert(!is_ascii_alpha(0x30 as u8));
+    assert(is_ascii_digit(0x35 as u8));
+    assert(!is_ascii_digit(0x41 as u8));
+    assert(is_ascii_alnum(0x41 as u8));
+    assert(is_ascii_alnum(0x30 as u8));
+    assert(!is_ascii_alnum(0x2E as u8));
+}
+
+fn test_is_case_folded_only_alpha() {
+    assert(is_case_folded(0x41 as u8));
+    assert(is_case_folded(0x61 as u8));
+    assert(!is_case_folded(0x30 as u8));
+    assert(!is_case_folded(0x2E as u8));
+}
+
+fn test_round_trip_identity() {
+    let mut b: u8 = 0x41 as u8;
+    while b <= 0x5A as u8 {
+        assert(round_trip_identity(b));
+        b = (b + 1 as u8) as u8;
+    }
+    assert(round_trip_identity(0x30 as u8));
+    assert(round_trip_identity(0x7B as u8));
+}
+
+fn main() {
+    test_to_lower_on_ascii_upper();
+    test_to_lower_passes_through_lower_and_non_alpha();
+    test_to_upper_on_ascii_lower();
+    test_eq_nocase();
+    test_ascii_classifiers();
+    test_is_case_folded_only_alpha();
+    test_round_trip_identity();
+}

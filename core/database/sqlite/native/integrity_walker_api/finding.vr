@@ -1,0 +1,77 @@
+// Per-finding record emitted by integrity_check.
+
+module core.database.sqlite.native.integrity_walker_api.finding;
+
+mount base.{Bool, Text};
+
+public type FindingKind is
+    | FkOk                 // "ok" sentinel
+    | FkPageAllocation     // freelist or root-page error
+    | FkTreeStructure      // B-tree cell order / orphan pages
+    | FkOverflowChain      // broken overflow pointer
+    | FkConstraintViolated // CHECK / NOT NULL / FK violation
+    | FkMissingIndex       // index references missing row
+    | FkRowFormat          // malformed row payload
+    | FkEncoding           // UTF encoding mismatch
+    ;
+
+public fn kind_name(k: &FindingKind) -> Text {
+    match k {
+        FkOk                 => "ok".clone(),
+        FkPageAllocation     => "page_allocation".clone(),
+        FkTreeStructure      => "tree_structure".clone(),
+        FkOverflowChain      => "overflow_chain".clone(),
+        FkConstraintViolated => "constraint".clone(),
+        FkMissingIndex       => "missing_index".clone(),
+        FkRowFormat          => "row_format".clone(),
+        FkEncoding           => "encoding".clone(),
+    }
+}
+
+public fn is_ok(k: &FindingKind) -> Bool {
+    match k { FkOk => true, _ => false }
+}
+
+public fn is_structural(k: &FindingKind) -> Bool {
+    match k {
+        FkPageAllocation => true,
+        FkTreeStructure  => true,
+        FkOverflowChain  => true,
+        _                => false,
+    }
+}
+
+public fn is_logical(k: &FindingKind) -> Bool {
+    match k {
+        FkConstraintViolated => true,
+        FkMissingIndex       => true,
+        FkRowFormat          => true,
+        _                    => false,
+    }
+}
+
+public fn severity_rank(k: &FindingKind) -> Int {
+    match k {
+        FkOk                 => 0,
+        FkEncoding           => 1,
+        FkConstraintViolated => 2,
+        FkMissingIndex       => 2,
+        FkRowFormat          => 3,
+        FkOverflowChain      => 4,
+        FkTreeStructure      => 5,
+        FkPageAllocation     => 5,
+    }
+}
+
+public type Finding is {
+    kind: FindingKind,
+    detail: Text,
+};
+
+public fn ok_sentinel() -> Finding {
+    Finding { kind: FkOk, detail: "ok".clone() }
+}
+
+public fn finding(kind: FindingKind, detail: Text) -> Finding {
+    Finding { kind: kind, detail: detail }
+}

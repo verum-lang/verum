@@ -1,0 +1,66 @@
+// 1-byte JSONB element-header + variable-length payload-size encoding.
+
+module core.database.sqlite.native.jsonb_binary_format.header;
+
+mount core.database.sqlite.native.jsonb_binary_format.element.{
+    ElementType, from_nibble, tag_nibble, is_empty_payload,
+};
+mount base.{Bool, Int64, Maybe};
+
+public type Header is {
+    element: ElementType,
+    inline_payload_len: Int,    // nibble value when 0..11 (fast path)
+    ext_bytes: Int,             // 0 if inline; 1/2/4/8 if extended
+};
+
+// Decode a 1-byte header + (optional) extended-length bytes summary.
+// Returns Maybe.None if the nibble is not a known ElementType.
+public fn decode(byte0: u8) -> Maybe<Header> {
+    let nibble = (byte0 & (0x0F as u8)) as Int;
+    let cls    = ((byte0 >> (4 as u8)) & (0x0F as u8)) as Int;
+    match from_nibble(nibble) {
+        Maybe.None => Maybe.None,
+        Maybe.Some(e) => {
+            let (inline, ext) = if cls <= 11 { (cls, 0) }
+                                else if cls == 12 { (0, 1) }
+                                else if cls == 13 { (0, 2) }
+                                else if cls == 14 { (0, 4) }
+                                else { (0, 8) };
+            Maybe.Some(Header {
+                element: e,
+                inline_payload_len: inline,
+                ext_bytes: ext,
+            })
+        },
+    }
+}
+
+// Reverse: build a single byte from element-type + payload-class nibble.
+public fn encode_byte(e: &ElementType, len_class: Int) -> u8 {
+    let tag = tag_nibble(e) as u8;
+    let cls = (len_class as u8) & (0x0F as u8);
+    (tag | (cls << (4 as u8))) as u8
+}
+
+// Choose a length-class for a given payload length.
+public fn len_class_for(n: Int64) -> Int {
+    if n <= (11 as Int64)        { return n as Int; }
+    if n <= (0xFF as Int64)      { return 12; }
+    if n <= (0xFFFF as Int64)    { return 13; }
+    if n <= (0xFFFFFFFF as Int64) { return 14; }
+    15
+}
+
+// Total on-disk header bytes = 1 + ext_bytes.
+public fn header_bytes(h: &Header) -> Int {
+    1 + h.ext_bytes
+}
+
+// Is the encoding consistent with the element?
+public fn is_consistent(h: &Header) -> Bool {
+    if is_empty_payload(&h.element) {
+        return h.inline_payload_len == 0 && h.ext_bytes == 0;
+    }
+    // otherwise no constraint — any length is valid.
+    true
+}

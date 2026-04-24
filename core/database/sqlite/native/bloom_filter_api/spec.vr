@@ -1,0 +1,67 @@
+// Bloom filter spec + sizing heuristic.
+
+module core.database.sqlite.native.bloom_filter_api.spec;
+
+mount base.{Bool, Int64};
+
+public type FilterSpec is {
+    bit_count: Int64,       // total bits allocated
+    hash_count: Int,        // number of independent hash functions (SQLite uses 1)
+    expected_entries: Int64,
+    entries_inserted: Int64,
+};
+
+// SQLite default: 1 hash, 8 bits per expected entry.
+public fn default_bits_per_entry() -> Int { 8 }
+
+public fn new(expected_entries: Int64) -> FilterSpec {
+    let bits = expected_entries * (default_bits_per_entry() as Int64);
+    FilterSpec {
+        bit_count: bits,
+        hash_count: 1,
+        expected_entries: expected_entries,
+        entries_inserted: 0 as Int64,
+    }
+}
+
+public fn with_hash_count(mut s: FilterSpec, n: Int) -> FilterSpec {
+    s.hash_count = if n < 1 { 1 } else { n };
+    s
+}
+
+public fn record_insert(mut s: FilterSpec) -> FilterSpec {
+    s.entries_inserted = s.entries_inserted + (1 as Int64);
+    s
+}
+
+// Approximate FPR (false-positive rate) for a single-hash Bloom:
+//   fpr ~= (1 - e^(-n / m))^k  ≈  (n / m)   for k = 1 and small n
+// We use the linear approximation; returns 0..1 Float.
+public fn approximate_fpr(s: &FilterSpec) -> Float {
+    if s.bit_count <= (0 as Int64) { return 1.0 as Float; }
+    let n = s.entries_inserted as Float;
+    let m = s.bit_count as Float;
+    let single = n / m;
+    // For k=1 Bloom, this IS the FPR linear approximation.
+    // For k>1, raise to the k-th power (iteratively).
+    let mut fpr = single;
+    let mut i: Int = 1;
+    while i < s.hash_count {
+        fpr = fpr * single;
+        i = i + 1;
+    }
+    if fpr > (1.0 as Float) { 1.0 as Float } else { fpr }
+}
+
+// Decide whether the filter is worth building — skip if too small.
+public fn is_worthwhile(expected_entries: Int64) -> Bool {
+    expected_entries >= (25 as Int64)
+}
+
+// Bits per entry at current fill.
+public fn bits_per_entry(s: &FilterSpec) -> Float {
+    if s.expected_entries <= (0 as Int64) { return 0.0 as Float; }
+    let m = s.bit_count as Float;
+    let n = s.expected_entries as Float;
+    m / n
+}

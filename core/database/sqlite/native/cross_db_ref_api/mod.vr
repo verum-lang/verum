@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/cross_db_ref_api/mod.vr
+// =============================================================================
+// Cross-database reference resolution — "aux.table" or bare "table".
+// Spec §17.1.2 — schema name resolution.
+//
+// The resolver walks schemas in this order:
+//   1. if an explicit "aux." qualifier is present, use exactly that schema
+//   2. otherwise: main → temp → attached (in ATTACH order)
+// =============================================================================
+
+module core.database.sqlite.native.cross_db_ref_api;
+
+public module reference;
+public module resolver;

@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, cross_db_ref_api, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.cross_db_ref_api.reference.{
+    TableRef, unqualified, qualified,
+    is_qualified, names_temp, names_main, is_reserved_schema,
+};
+mount core.database.sqlite.native.cross_db_ref_api.resolver.{
+    AttachedDb, db,
+    SchemaRegistry,
+    new, attach, resolve, table_exists,
+};
+mount base.{Bool, Maybe};
+mount core.collections.list.{List};
+
+fn test_reference_constructors() {
+    let u = unqualified("users".clone());
+    assert(!is_qualified(&u));
+    let q = qualified("aux".clone(), "t".clone());
+    assert(is_qualified(&q));
+}
+
+fn test_names_main_temp() {
+    let m = qualified("main".clone(), "t".clone());
+    assert(names_main(&m));
+    assert(!names_temp(&m));
+    let t = qualified("temp".clone(), "t".clone());
+    assert(names_temp(&t));
+    assert(!names_main(&t));
+    let a = qualified("aux".clone(), "t".clone());
+    assert(!names_main(&a));
+    assert(!names_temp(&a));
+}
+
+fn test_is_reserved_schema() {
+    assert(is_reserved_schema(&qualified("main".clone(), "t".clone())));
+    assert(is_reserved_schema(&qualified("temp".clone(), "t".clone())));
+    assert(!is_reserved_schema(&qualified("aux".clone(), "t".clone())));
+}
+
+fn test_resolve_unqualified_main_wins() {
+    let main_tables: List<Text> = ["users".clone()].clone() as List<Text>;
+    let temp_tables: List<Text> = [].clone() as List<Text>;
+    let r = new(main_tables, temp_tables);
+    match resolve(&r, &unqualified("users".clone())) {
+        Maybe.Some(s) => assert(s == "main".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_resolve_unqualified_falls_through_to_temp() {
+    let main_tables: List<Text> = [].clone() as List<Text>;
+    let temp_tables: List<Text> = ["scratch".clone()].clone() as List<Text>;
+    let r = new(main_tables, temp_tables);
+    match resolve(&r, &unqualified("scratch".clone())) {
+        Maybe.Some(s) => assert(s == "temp".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_resolve_unqualified_falls_through_to_attached() {
+    let main_tables: List<Text> = [].clone() as List<Text>;
+    let temp_tables: List<Text> = [].clone() as List<Text>;
+    let aux_tables: List<Text> = ["orders".clone()].clone() as List<Text>;
+    let r0 = new(main_tables, temp_tables);
+    let r = attach(r0, db("aux1".clone(), aux_tables));
+    match resolve(&r, &unqualified("orders".clone())) {
+        Maybe.Some(s) => assert(s == "aux1".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_resolve_qualified_binds_to_named_schema_only() {
+    let main_tables: List<Text> = ["t".clone()].clone() as List<Text>;
+    let temp_tables: List<Text> = [].clone() as List<Text>;
+    let aux_tables: List<Text> = ["t".clone()].clone() as List<Text>;
+    let r0 = new(main_tables, temp_tables);
+    let r = attach(r0, db("aux1".clone(), aux_tables));
+    match resolve(&r, &qualified("aux1".clone(), "t".clone())) {
+        Maybe.Some(s) => assert(s == "aux1".clone()),
+        Maybe.None => assert(false),
+    }
+    // "aux1" schema doesn't have "missing"
+    match resolve(&r, &qualified("aux1".clone(), "missing".clone())) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_exists_convenience() {
+    let main_tables: List<Text> = ["users".clone()].clone() as List<Text>;
+    let temp_tables: List<Text> = [].clone() as List<Text>;
+    let r = new(main_tables, temp_tables);
+    let have  = unqualified("users".clone());
+    let ghost = unqualified("ghosts".clone());
+    assert(table_exists(&r, &have));
+    assert(!table_exists(&r, &ghost));
+}
+
+fn test_unknown_unqualified_returns_none() {
+    let main_tables: List<Text> = [].clone() as List<Text>;
+    let temp_tables: List<Text> = [].clone() as List<Text>;
+    let r = new(main_tables, temp_tables);
+    match resolve(&r, &unqualified("whatever".clone())) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn main() {
+    test_reference_constructors();
+    test_names_main_temp();
+    test_is_reserved_schema();
+    test_resolve_unqualified_main_wins();
+    test_resolve_unqualified_falls_through_to_temp();
+    test_resolve_unqualified_falls_through_to_attached();
+    test_resolve_qualified_binds_to_named_schema_only();
+    test_exists_convenience();
+    test_unknown_unqualified_returns_none();
+}

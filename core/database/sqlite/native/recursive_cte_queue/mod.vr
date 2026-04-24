@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/recursive_cte_queue/mod.vr
+// =============================================================================
+// Work queue for recursive CTE evaluation — BFS (default / union-all) vs DFS
+// (cycle-safe for tree traversals).
+// Spec §13.5.5 — recursive CTE execution.
+// =============================================================================
+
+module core.database.sqlite.native.recursive_cte_queue;
+
+public module mode;
+public module queue;

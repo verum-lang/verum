@@ -1,0 +1,52 @@
+// Path kind classification.
+
+module core.database.sqlite.native.win32_vfs_paths.kind;
+
+mount base.{Bool, Text};
+
+public type PathKind is
+    | PkDriveAbsolute    // C:\foo\bar
+    | PkDriveRelative    // C:foo
+    | PkUnc              // \\server\share\file
+    | PkRelative         // foo\bar
+    | PkDevice           // \\.\COM1, \\?\C:\...
+    | PkEmpty
+    ;
+
+public fn kind_name(k: &PathKind) -> Text {
+    match k {
+        PkDriveAbsolute => "drive_absolute".clone(),
+        PkDriveRelative => "drive_relative".clone(),
+        PkUnc           => "unc".clone(),
+        PkRelative      => "relative".clone(),
+        PkDevice        => "device".clone(),
+        PkEmpty         => "empty".clone(),
+    }
+}
+
+public fn is_absolute(k: &PathKind) -> Bool {
+    match k {
+        PkDriveAbsolute => true,
+        PkUnc           => true,
+        PkDevice        => true,
+        _               => false,
+    }
+}
+
+public fn needs_long_path_prefix(k: &PathKind, length: Int) -> Bool {
+    // Paths > 260 chars need the \\?\ prefix unless already a device path.
+    match k {
+        PkDevice => false,    // already prefixed
+        PkUnc    => length > 260,
+        PkDriveAbsolute => length > 260,
+        _        => false,
+    }
+}
+
+public fn supports_unicode_api(k: &PathKind) -> Bool {
+    match k {
+        PkDevice => true,
+        PkUnc    => true,
+        _        => true,
+    }
+}

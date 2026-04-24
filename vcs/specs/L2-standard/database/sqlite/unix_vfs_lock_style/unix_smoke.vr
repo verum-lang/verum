@@ -1,0 +1,117 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, unix_vfs_lock_style, vfs
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.unix_vfs_lock_style.style.{
+    LockStyle, LsPosix, LsFlock, LsDotfile, LsNone, LsProxy,
+    style_name, is_advisory, supports_byte_range,
+    default_style, is_readonly_filesystem_friendly, apple_only,
+};
+mount core.database.sqlite.native.unix_vfs_lock_style.decision.{
+    FsCapabilities, default_caps, resolve, resolve_with_force,
+    requires_fallback_from_posix,
+};
+mount base.{Bool};
+
+fn test_style_names() {
+    assert(style_name(&LsPosix)   == "POSIX".clone());
+    assert(style_name(&LsFlock)   == "FLOCK".clone());
+    assert(style_name(&LsDotfile) == "DOTFILE".clone());
+    assert(style_name(&LsNone)    == "NONE".clone());
+    assert(style_name(&LsProxy)   == "PROXY".clone());
+}
+
+fn test_is_advisory_set() {
+    assert(is_advisory(&LsPosix));
+    assert(is_advisory(&LsFlock));
+    assert(is_advisory(&LsDotfile));
+    assert(!is_advisory(&LsNone));
+    assert(!is_advisory(&LsProxy));
+}
+
+fn test_byte_range_only_posix() {
+    assert(supports_byte_range(&LsPosix));
+    assert(!supports_byte_range(&LsFlock));
+    assert(!supports_byte_range(&LsDotfile));
+}
+
+fn test_default_style_is_posix() {
+    match default_style() { LsPosix => {}, _ => assert(false) }
+}
+
+fn test_readonly_friendly_set() {
+    assert(is_readonly_filesystem_friendly(&LsDotfile));
+    assert(is_readonly_filesystem_friendly(&LsNone));
+    assert(!is_readonly_filesystem_friendly(&LsPosix));
+}
+
+fn test_apple_only_proxy() {
+    assert(apple_only(&LsProxy));
+    assert(!apple_only(&LsPosix));
+}
+
+fn test_resolve_default_caps() {
+    let c = default_caps();
+    match resolve(&c) { LsPosix => {}, _ => assert(false) }
+}
+
+fn test_resolve_proxy_requested_on_apple() {
+    let mut c = default_caps();
+    c.is_apple_platform = true;
+    c.proxy_requested = true;
+    match resolve(&c) { LsProxy => {}, _ => assert(false) }
+}
+
+fn test_resolve_readonly_fs_picks_dotfile() {
+    let mut c = default_caps();
+    c.is_readonly = true;
+    match resolve(&c) { LsDotfile => {}, _ => assert(false) }
+}
+
+fn test_resolve_no_posix_falls_back_to_flock() {
+    let mut c = default_caps();
+    c.supports_posix_locks = false;
+    match resolve(&c) { LsFlock => {}, _ => assert(false) }
+}
+
+fn test_resolve_no_posix_no_flock_falls_to_none() {
+    let mut c = default_caps();
+    c.supports_posix_locks = false;
+    c.supports_flock = false;
+    match resolve(&c) { LsNone => {}, _ => assert(false) }
+}
+
+fn test_resolve_with_force_overrides() {
+    let c = default_caps();
+    match resolve_with_force(&c, true) { LsNone => {}, _ => assert(false) }
+    match resolve_with_force(&c, false) { LsPosix => {}, _ => assert(false) }
+}
+
+fn test_requires_fallback_from_posix_flag() {
+    let c = default_caps();
+    assert(!requires_fallback_from_posix(&c));
+    let mut c2 = default_caps();
+    c2.supports_posix_locks = false;
+    assert(requires_fallback_from_posix(&c2));
+    c2.is_readonly = true;
+    assert(!requires_fallback_from_posix(&c2));
+}
+
+fn main() {
+    test_style_names();
+    test_is_advisory_set();
+    test_byte_range_only_posix();
+    test_default_style_is_posix();
+    test_readonly_friendly_set();
+    test_apple_only_proxy();
+    test_resolve_default_caps();
+    test_resolve_proxy_requested_on_apple();
+    test_resolve_readonly_fs_picks_dotfile();
+    test_resolve_no_posix_falls_back_to_flock();
+    test_resolve_no_posix_no_flock_falls_to_none();
+    test_resolve_with_force_overrides();
+    test_requires_fallback_from_posix_flag();
+}

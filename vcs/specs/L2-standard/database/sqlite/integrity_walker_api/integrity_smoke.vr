@@ -1,0 +1,134 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, integrity_walker_api, diagnostics
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.integrity_walker_api.finding.{
+    FindingKind,
+    FkOk, FkPageAllocation, FkTreeStructure, FkOverflowChain,
+    FkConstraintViolated, FkMissingIndex, FkRowFormat, FkEncoding,
+    kind_name, is_ok, is_structural, is_logical, severity_rank,
+    Finding, ok_sentinel, finding,
+};
+mount core.database.sqlite.native.integrity_walker_api.walker.{
+    IntegrityReport,
+    fresh, record, count_page,
+    finding_count, has_issues,
+    pragma_output_line_count, first_finding_or_ok,
+};
+mount base.{Bool, Int64};
+
+fn test_kind_names() {
+    assert(kind_name(&FkOk)                 == "ok".clone());
+    assert(kind_name(&FkPageAllocation)     == "page_allocation".clone());
+    assert(kind_name(&FkMissingIndex)       == "missing_index".clone());
+}
+
+fn test_is_ok_only_ok() {
+    assert(is_ok(&FkOk));
+    assert(!is_ok(&FkPageAllocation));
+}
+
+fn test_structural_vs_logical() {
+    assert(is_structural(&FkPageAllocation));
+    assert(is_structural(&FkTreeStructure));
+    assert(is_structural(&FkOverflowChain));
+    assert(!is_structural(&FkConstraintViolated));
+    assert(is_logical(&FkConstraintViolated));
+    assert(is_logical(&FkMissingIndex));
+    assert(is_logical(&FkRowFormat));
+    assert(!is_logical(&FkEncoding));
+}
+
+fn test_severity_ranks_increasing() {
+    assert(severity_rank(&FkOk) < severity_rank(&FkEncoding));
+    assert(severity_rank(&FkEncoding) < severity_rank(&FkConstraintViolated));
+    assert(severity_rank(&FkConstraintViolated) < severity_rank(&FkRowFormat));
+    assert(severity_rank(&FkRowFormat) < severity_rank(&FkOverflowChain));
+    assert(severity_rank(&FkOverflowChain) < severity_rank(&FkTreeStructure));
+    // TreeStructure and PageAllocation tied at the top
+    assert_eq(severity_rank(&FkTreeStructure), severity_rank(&FkPageAllocation));
+}
+
+fn test_finding_constructor() {
+    let ok = ok_sentinel();
+    assert(is_ok(&ok.kind));
+    let bad = finding(FkRowFormat, "row 5 has malformed varint".clone());
+    assert(!is_ok(&bad.kind));
+}
+
+fn test_fresh_report_is_empty() {
+    let r = fresh();
+    assert_eq(finding_count(&r), 0);
+    assert(!has_issues(&r));
+    assert_eq(r.highest_severity, 0);
+    assert_eq(r.pages_scanned, 0 as Int64);
+}
+
+fn test_count_page_increments() {
+    let mut r = fresh();
+    r = count_page(count_page(count_page(r)));
+    assert_eq(r.pages_scanned, 3 as Int64);
+}
+
+fn test_record_tracks_highest_severity() {
+    let mut r = fresh();
+    r = record(r, finding(FkEncoding, "utf16 bom mismatch".clone()));
+    assert_eq(r.highest_severity, severity_rank(&FkEncoding));
+    r = record(r, finding(FkOverflowChain, "orphan at page 42".clone()));
+    assert_eq(r.highest_severity, severity_rank(&FkOverflowChain));
+    // Lower severity doesn't decrease the high-water mark.
+    r = record(r, finding(FkConstraintViolated, "fk t(id)".clone()));
+    assert_eq(r.highest_severity, severity_rank(&FkOverflowChain));
+}
+
+fn test_has_issues_detects_nonok_findings() {
+    let mut r = fresh();
+    r = record(r, ok_sentinel());
+    assert(!has_issues(&r));
+    r = record(r, finding(FkMissingIndex, "idx_x".clone()));
+    assert(has_issues(&r));
+}
+
+fn test_pragma_output_line_count_ok_path() {
+    let r = fresh();
+    // No findings at all → PRAGMA integrity_check returns 1 line ("ok").
+    assert_eq(pragma_output_line_count(&r), 1);
+}
+
+fn test_pragma_output_line_count_issues_path() {
+    let mut r = fresh();
+    r = record(r, finding(FkOverflowChain, "a".clone()));
+    r = record(r, finding(FkConstraintViolated, "b".clone()));
+    r = record(r, ok_sentinel());        // shouldn't count
+    assert_eq(pragma_output_line_count(&r), 2);
+}
+
+fn test_first_finding_or_ok_finds_first_issue() {
+    let mut r = fresh();
+    r = record(r, ok_sentinel());
+    r = record(r, finding(FkMissingIndex, "idx_x".clone()));
+    let f = first_finding_or_ok(&r);
+    match f.kind { FkMissingIndex => {}, _ => assert(false) }
+    // Empty report → ok sentinel.
+    let empty = fresh();
+    let ok = first_finding_or_ok(&empty);
+    assert(is_ok(&ok.kind));
+}
+
+fn main() {
+    test_kind_names();
+    test_is_ok_only_ok();
+    test_structural_vs_logical();
+    test_severity_ranks_increasing();
+    test_finding_constructor();
+    test_fresh_report_is_empty();
+    test_count_page_increments();
+    test_record_tracks_highest_severity();
+    test_has_issues_detects_nonok_findings();
+    test_pragma_output_line_count_ok_path();
+    test_pragma_output_line_count_issues_path();
+    test_first_finding_or_ok_finds_first_issue();
+}

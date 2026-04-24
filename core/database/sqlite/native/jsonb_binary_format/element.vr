@@ -1,0 +1,92 @@
+// JSONB element-type nibble taxonomy.
+
+module core.database.sqlite.native.jsonb_binary_format.element;
+
+mount base.{Bool, Text, Maybe};
+
+public type ElementType is
+    | EtNull        //  0
+    | EtTrue        //  1
+    | EtFalse       //  2
+    | EtInt         //  3   ASCII-encoded int
+    | EtInt5        //  4   5-byte integer encoded in payload
+    | EtFloat       //  5   ASCII-encoded float
+    | EtFloat5      //  6   8-byte IEEE double (payload length == 8)
+    | EtText        //  7   UTF-8 text, no escapes
+    | EtTextJ       //  8   UTF-8 text with JSON escapes
+    | EtText5       //  9   UTF-8 text with 5-char escapes \xNN
+    | EtTextRaw     // 10   raw UTF-8, SQL-style quoting
+    | EtArray       // 11
+    | EtObject      // 12
+    ;
+
+public fn tag_nibble(e: &ElementType) -> Int {
+    match e {
+        EtNull      => 0,
+        EtTrue      => 1,
+        EtFalse     => 2,
+        EtInt       => 3,
+        EtInt5      => 4,
+        EtFloat     => 5,
+        EtFloat5    => 6,
+        EtText      => 7,
+        EtTextJ     => 8,
+        EtText5     => 9,
+        EtTextRaw   => 10,
+        EtArray     => 11,
+        EtObject    => 12,
+    }
+}
+
+public fn from_nibble(n: Int) -> Maybe<ElementType> {
+    if n == 0  { return Maybe.Some(EtNull); }
+    if n == 1  { return Maybe.Some(EtTrue); }
+    if n == 2  { return Maybe.Some(EtFalse); }
+    if n == 3  { return Maybe.Some(EtInt); }
+    if n == 4  { return Maybe.Some(EtInt5); }
+    if n == 5  { return Maybe.Some(EtFloat); }
+    if n == 6  { return Maybe.Some(EtFloat5); }
+    if n == 7  { return Maybe.Some(EtText); }
+    if n == 8  { return Maybe.Some(EtTextJ); }
+    if n == 9  { return Maybe.Some(EtText5); }
+    if n == 10 { return Maybe.Some(EtTextRaw); }
+    if n == 11 { return Maybe.Some(EtArray); }
+    if n == 12 { return Maybe.Some(EtObject); }
+    Maybe.None
+}
+
+public fn element_name(e: &ElementType) -> Text {
+    match e {
+        EtNull     => "null".clone(),
+        EtTrue     => "true".clone(),
+        EtFalse    => "false".clone(),
+        EtInt      => "int".clone(),
+        EtInt5     => "int5".clone(),
+        EtFloat    => "float".clone(),
+        EtFloat5   => "float5".clone(),
+        EtText     => "text".clone(),
+        EtTextJ    => "textj".clone(),
+        EtText5    => "text5".clone(),
+        EtTextRaw  => "textraw".clone(),
+        EtArray    => "array".clone(),
+        EtObject   => "object".clone(),
+    }
+}
+
+public fn is_container(e: &ElementType) -> Bool {
+    match e { EtArray => true, EtObject => true, _ => false }
+}
+
+public fn is_scalar(e: &ElementType) -> Bool { !is_container(e) }
+
+public fn is_empty_payload(e: &ElementType) -> Bool {
+    // NULL / TRUE / FALSE have zero-length payload.
+    match e {
+        EtNull  => true,
+        EtTrue  => true,
+        EtFalse => true,
+        _       => false,
+    }
+}
+
+public fn well_known_count() -> Int { 13 }

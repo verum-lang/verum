@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, win32_vfs_paths, vfs
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.win32_vfs_paths.kind.{
+    PathKind, PkDriveAbsolute, PkDriveRelative, PkUnc, PkRelative, PkDevice, PkEmpty,
+    kind_name, is_absolute, needs_long_path_prefix, supports_unicode_api,
+};
+mount core.database.sqlite.native.win32_vfs_paths.prefix.{
+    long_path_prefix, unc_long_prefix,
+    Decision, DcKeep, DcAddLongPath, DcAddUncLongPath, DcReject,
+    decision_name, decide, results_in_longer_path,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&PkDriveAbsolute) == "drive_absolute".clone());
+    assert(kind_name(&PkUnc)           == "unc".clone());
+    assert(kind_name(&PkDevice)        == "device".clone());
+}
+
+fn test_is_absolute_set() {
+    assert(is_absolute(&PkDriveAbsolute));
+    assert(is_absolute(&PkUnc));
+    assert(is_absolute(&PkDevice));
+    assert(!is_absolute(&PkDriveRelative));
+    assert(!is_absolute(&PkRelative));
+}
+
+fn test_needs_long_path_prefix() {
+    assert(needs_long_path_prefix(&PkDriveAbsolute, 300));
+    assert(!needs_long_path_prefix(&PkDriveAbsolute, 100));
+    assert(!needs_long_path_prefix(&PkDevice, 500));
+    assert(needs_long_path_prefix(&PkUnc, 300));
+    assert(!needs_long_path_prefix(&PkRelative, 500));
+}
+
+fn test_supports_unicode_api() {
+    assert(supports_unicode_api(&PkDevice));
+    assert(supports_unicode_api(&PkUnc));
+    assert(supports_unicode_api(&PkDriveAbsolute));
+}
+
+fn test_prefix_constants() {
+    assert(long_path_prefix() == "\\\\?\\".clone());
+    assert(unc_long_prefix() == "\\\\?\\UNC\\".clone());
+}
+
+fn test_decision_names() {
+    assert(decision_name(&DcKeep)           == "keep".clone());
+    assert(decision_name(&DcAddLongPath)    == "add_long".clone());
+    assert(decision_name(&DcAddUncLongPath) == "add_unc_long".clone());
+    assert(decision_name(&DcReject)         == "reject".clone());
+}
+
+fn test_decide_empty_rejected() {
+    match decide(&PkEmpty, 0) { DcReject => {}, _ => assert(false) }
+}
+
+fn test_decide_device_keep() {
+    match decide(&PkDevice, 500) { DcKeep => {}, _ => assert(false) }
+}
+
+fn test_decide_short_drive_keep() {
+    match decide(&PkDriveAbsolute, 100) { DcKeep => {}, _ => assert(false) }
+}
+
+fn test_decide_long_drive_add_prefix() {
+    match decide(&PkDriveAbsolute, 300) { DcAddLongPath => {}, _ => assert(false) }
+}
+
+fn test_decide_long_unc_add_unc_prefix() {
+    match decide(&PkUnc, 300) { DcAddUncLongPath => {}, _ => assert(false) }
+}
+
+fn test_results_in_longer_path() {
+    assert(results_in_longer_path(&DcAddLongPath));
+    assert(results_in_longer_path(&DcAddUncLongPath));
+    assert(!results_in_longer_path(&DcKeep));
+    assert(!results_in_longer_path(&DcReject));
+}
+
+fn main() {
+    test_kind_names();
+    test_is_absolute_set();
+    test_needs_long_path_prefix();
+    test_supports_unicode_api();
+    test_prefix_constants();
+    test_decision_names();
+    test_decide_empty_rejected();
+    test_decide_device_keep();
+    test_decide_short_drive_keep();
+    test_decide_long_drive_add_prefix();
+    test_decide_long_unc_add_unc_prefix();
+    test_results_in_longer_path();
+}

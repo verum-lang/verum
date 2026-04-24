@@ -1,0 +1,93 @@
+// Schema-resolver walking main → temp → attached in order.
+
+module core.database.sqlite.native.cross_db_ref_api.resolver;
+
+mount core.database.sqlite.native.cross_db_ref_api.reference.{
+    TableRef, is_qualified, names_main, names_temp, is_reserved_schema,
+};
+mount base.{Bool, Text, Maybe};
+mount core.collections.list.{List};
+
+public type AttachedDb is {
+    name: Text,
+    has_table: List<Text>,     // simple in-memory table index
+};
+
+public fn db(name: Text, tables: List<Text>) -> AttachedDb {
+    AttachedDb { name: name, has_table: tables }
+}
+
+fn list_contains(l: &List<Text>, s: &Text) -> Bool {
+    let mut i: Int = 0;
+    while i < l.len() {
+        if l[i] == *s { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// Schema registry: main + temp + attached.
+public type SchemaRegistry is {
+    main: AttachedDb,
+    temp: AttachedDb,
+    attached: List<AttachedDb>,
+};
+
+public fn new(main_tables: List<Text>, temp_tables: List<Text>) -> SchemaRegistry {
+    SchemaRegistry {
+        main: db("main".clone(), main_tables),
+        temp: db("temp".clone(), temp_tables),
+        attached: [].clone() as List<AttachedDb>,
+    }
+}
+
+public fn attach(mut r: SchemaRegistry, d: AttachedDb) -> SchemaRegistry {
+    r.attached.push(d);
+    r
+}
+
+// Resolve a TableRef to a schema name; Maybe.None if not found.
+public fn resolve(r: &SchemaRegistry, tref: &TableRef) -> Maybe<Text> {
+    if is_qualified(tref) {
+        if names_main(tref) && list_contains(&r.main.has_table, &tref.table) {
+            return Maybe.Some("main".clone());
+        }
+        if names_temp(tref) && list_contains(&r.temp.has_table, &tref.table) {
+            return Maybe.Some("temp".clone());
+        }
+        // Search attached dbs for the exact name.
+        let mut i: Int = 0;
+        while i < r.attached.len() {
+            let d = &r.attached[i];
+            if d.name == tref.schema && list_contains(&d.has_table, &tref.table) {
+                return Maybe.Some(d.name.clone());
+            }
+            i = i + 1;
+        }
+        return Maybe.None;
+    }
+    // Unqualified: main → temp → attached, first hit wins.
+    if list_contains(&r.main.has_table, &tref.table) {
+        return Maybe.Some("main".clone());
+    }
+    if list_contains(&r.temp.has_table, &tref.table) {
+        return Maybe.Some("temp".clone());
+    }
+    let mut i: Int = 0;
+    while i < r.attached.len() {
+        let d = &r.attached[i];
+        if list_contains(&d.has_table, &tref.table) {
+            return Maybe.Some(d.name.clone());
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+// Convenience: whether a table exists anywhere.
+public fn table_exists(r: &SchemaRegistry, tref: &TableRef) -> Bool {
+    match resolve(r, tref) {
+        Maybe.Some(_) => true,
+        Maybe.None    => false,
+    }
+}
