@@ -225,10 +225,28 @@ public type ReplayCache is {
 };
 
 implement ReplayCache {
-    /// Construct a replay cache from `cfg`, seeded at `now`.
+    /// Construct a replay cache from `cfg`, seeding the first bucket
+    /// at `Instant.now()` (monotonic clock on all supported platforms:
+    /// `clock_gettime(CLOCK_MONOTONIC)` / `mach_absolute_time()` /
+    /// `QueryPerformanceCounter`).
+    ///
+    /// Callers that need a deterministic clock source (tests, replay
+    /// of captured traces, simulated networks) SHOULD instead use
+    /// `ReplayCache.new_at(cfg, origin)` and drive `try_admit` with
+    /// their own monotonic clock — the two entry points together
+    /// close the wall-clock-dependence gap flagged in
+    /// `internal/specs/tls-quic-security-audit.md §5`.
     public fn new(cfg: ReplayConfig) -> ReplayCache {
-        let now = Instant.now();
-        let active = new_bucket(&cfg, now.clone());
+        ReplayCache.new_at(cfg, Instant.now())
+    }
+
+    /// Construct a replay cache seeded at `origin`. `origin` must come
+    /// from a monotonic clock — the rotation logic assumes subsequent
+    /// `now` values passed to `try_admit` are ≥ `origin`. In
+    /// production, pass `Instant.now()`; in tests, pass a synthetic
+    /// starting instant and feed later `now` values deterministically.
+    public fn new_at(cfg: ReplayConfig, origin: Instant) -> ReplayCache {
+        let active = new_bucket(&cfg, origin);
         ReplayCache { cfg: cfg, active: active, retired: None }
     }
 

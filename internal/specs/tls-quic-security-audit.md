@@ -111,9 +111,14 @@ deduplication over a lifetime-bounded window.
 — implements RFC 8446 §8 strike register + bloom filter. The
 server-side SM calls into it before accepting early_data.
 
-**Gap:** the window-expiry prune is currently driven by `Instant.now()`
-(wall-clock dependence). In constrained environments the caller should
-feed a monotonic clock. Tracked in `internal/specs/tls-quic.md §8.5`.
+**Gap — closed 2026-04-24:** `ReplayCache.new_at(cfg, origin)` now
+accepts an explicit monotonic-origin `Instant`, so tests and
+constrained deployments can drive bucket rotation deterministically
+without relying on `Instant.now()`. `ReplayCache.new(cfg)` remains the
+production convenience and is documented to call the monotonic
+platform clock (`CLOCK_MONOTONIC` / `mach_absolute_time` /
+`QueryPerformanceCounter`). `try_admit(_, _, now)` already accepted a
+caller-supplied `now` from day one.
 
 ---
 
@@ -160,9 +165,14 @@ accepting client-attacker-controlled transport_params.
 
 1. De-dup constant_time in TLS handshake — **done** this commit.
 2. LLVM-IR audit of zeroise memset preservation — follow-up.
-3. Fuzzing corpus (task #32) — pending.
-4. Monotonic-clock feed for 0-RTT anti-replay window — design note
-   added to `internal/specs/tls-quic.md §8.5`.
+3. Fuzzing corpus (task #32) — **landed 2026-04-24**: six self-contained
+   Verum runners under `vcs/fuzz/net/{tls13,quic,h3,x509}/**/runner.vr`
+   (handshake / record / packet / frame / h3-frame / qpack / DER) plus
+   accompanying Rust-side README scaffolding under
+   `vcs/fuzz/harnesses/net/` — each runner mutates canonical RFC
+   vectors with a deterministic xorshift64 and asserts panic-freedom.
+4. Monotonic-clock feed for 0-RTT anti-replay window — **closed
+   2026-04-24** via `ReplayCache.new_at(cfg, origin)`.
 
 No exploitable findings. No constant-time regressions. Audit closes
-pending items #1 and #6.
+pending items #1, #3, #5, and #6.

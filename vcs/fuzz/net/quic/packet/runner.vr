@@ -1,0 +1,114 @@
+// @test: wip
+// @tier: 0
+// @level: L2
+// @tags: quic, packet, fuzz, rfc9000_17
+// @timeout: 1800000
+// @expected-exit: 0
+// @description: QUIC packet header fuzzer — feed random/mutated bytes
+//               into parse_long / parse_short; assert Ok(_) | Err(_),
+//               never panic.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.packet.{parse_long, parse_short};
+
+type FuzzRng is { state: UInt64 }
+implement FuzzRng {
+    fn new(seed: Int) -> FuzzRng {
+        let s = if seed == 0 { 1_u64 } else { seed as UInt64 };
+        FuzzRng { state: s }
+    }
+    fn next_u64(&mut self) -> UInt64 {
+        let mut x = self.state;
+        x = x ^ (x << 13_u32);
+        x = x ^ (x >> 7_u32);
+        x = x ^ (x << 17_u32);
+        self.state = x;
+        x
+    }
+    fn next_byte(&mut self) -> UInt8 { (self.next_u64() & 0xFF_u64) as UInt8 }
+    fn next_in_range(&mut self, lo: Int, hi: Int) -> Int {
+        if hi <= lo { return lo; }
+        let span = (hi - lo) as UInt64;
+        (lo as UInt64 + (self.next_u64() % span)) as Int
+    }
+    fn mutate(&mut self, input: &[Byte]) -> List<Byte> {
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < input.len() { out.push(input[i]); i = i + 1; }
+        if out.len() == 0 {
+            let extra = self.next_in_range(1, 64);
+            let mut k: Int = 0;
+            while k < extra { out.push(self.next_byte() as Byte); k = k + 1; }
+            return out;
+        }
+        let op = self.next_in_range(0, 4);
+        match op {
+            0 => { let idx = self.next_in_range(0, out.len()); out[idx] = (out[idx] ^ (1_u8 << ((self.next_in_range(0, 8)) as UInt32))) as Byte; },
+            1 => { let idx = self.next_in_range(0, out.len()); out[idx] = self.next_byte() as Byte; },
+            2 => { let keep = self.next_in_range(0, out.len()); let mut j = out.len(); while j > keep { out.pop(); j = j - 1; } },
+            _ => { out.push(self.next_byte() as Byte); },
+        }
+        out
+    }
+}
+
+fn seed_long_header_initial() -> List<Byte> {
+    let mut v: List<Byte> = [];
+    v.push(0xC0_u8);
+    v.push(0x00_u8); v.push(0x00_u8); v.push(0x00_u8); v.push(0x01_u8);
+    v.push(0x08_u8);
+    v.push(0x83_u8); v.push(0x94_u8); v.push(0xC8_u8); v.push(0xF0_u8);
+    v.push(0x3E_u8); v.push(0x51_u8); v.push(0x57_u8); v.push(0x08_u8);
+    v.push(0x00_u8);
+    v.push(0x00_u8);
+    v.push(0x40_u8); v.push(0x20_u8);
+    v.push(0x00_u8);
+    let mut i: Int = 0;
+    while i < 32 { v.push(0x00_u8); i = i + 1; }
+    v
+}
+
+fn seed_short_header() -> List<Byte> {
+    let mut v: List<Byte> = [];
+    v.push(0x40_u8);
+    let mut i: Int = 0;
+    while i < 8 { v.push(i as Byte); i = i + 1; }
+    v.push(0x00_u8);
+    let mut j: Int = 0;
+    while j < 16 { v.push(0x00_u8); j = j + 1; }
+    v
+}
+
+fn feed_long(bytes: &[Byte]) -> Int {
+    match parse_long(bytes) {
+        Ok(_)  => 1,
+        Err(_) => 0,
+    }
+}
+
+fn feed_short(bytes: &[Byte], dcid_len: Int) -> Int {
+    match parse_short(bytes, dcid_len) {
+        Ok(_)  => 1,
+        Err(_) => 0,
+    }
+}
+
+@main
+public fn main() -> Int {
+    let mut rng = FuzzRng::new(2);
+    let long_seed = seed_long_header_initial();
+    let short_seed = seed_short_header();
+    let mut iters: Int = 0;
+    let mut accepted_long: Int = 0;
+    let mut accepted_short: Int = 0;
+    while iters < 256 {
+        let mutated_long = rng.mutate(&long_seed);
+        accepted_long = accepted_long + feed_long(&mutated_long);
+        let mutated_short = rng.mutate(&short_seed);
+        accepted_short = accepted_short + feed_short(&mutated_short, 8);
+        iters = iters + 1;
+    }
+    print(f"quic.packet fuzz iters={iters} long={accepted_long} short={accepted_short}");
+    0
+}

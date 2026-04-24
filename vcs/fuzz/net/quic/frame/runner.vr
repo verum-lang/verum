@@ -1,0 +1,92 @@
+// @test: wip
+// @tier: 0
+// @level: L2
+// @tags: quic, frame, fuzz, rfc9000_19
+// @timeout: 1800000
+// @expected-exit: 0
+// @description: QUIC frame codec fuzzer — feed random/mutated bytes
+//               into decode_all_frames; assert Ok(_) | Err(_),
+//               never panic.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{decode_all_frames};
+
+type FuzzRng is { state: UInt64 }
+implement FuzzRng {
+    fn new(seed: Int) -> FuzzRng {
+        let s = if seed == 0 { 1_u64 } else { seed as UInt64 };
+        FuzzRng { state: s }
+    }
+    fn next_u64(&mut self) -> UInt64 {
+        let mut x = self.state;
+        x = x ^ (x << 13_u32);
+        x = x ^ (x >> 7_u32);
+        x = x ^ (x << 17_u32);
+        self.state = x;
+        x
+    }
+    fn next_byte(&mut self) -> UInt8 { (self.next_u64() & 0xFF_u64) as UInt8 }
+    fn next_in_range(&mut self, lo: Int, hi: Int) -> Int {
+        if hi <= lo { return lo; }
+        let span = (hi - lo) as UInt64;
+        (lo as UInt64 + (self.next_u64() % span)) as Int
+    }
+    fn mutate(&mut self, input: &[Byte]) -> List<Byte> {
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < input.len() { out.push(input[i]); i = i + 1; }
+        if out.len() == 0 {
+            let extra = self.next_in_range(1, 64);
+            let mut k: Int = 0;
+            while k < extra { out.push(self.next_byte() as Byte); k = k + 1; }
+            return out;
+        }
+        let op = self.next_in_range(0, 4);
+        match op {
+            0 => { let idx = self.next_in_range(0, out.len()); out[idx] = (out[idx] ^ (1_u8 << ((self.next_in_range(0, 8)) as UInt32))) as Byte; },
+            1 => { let idx = self.next_in_range(0, out.len()); out[idx] = self.next_byte() as Byte; },
+            2 => { let keep = self.next_in_range(0, out.len()); let mut j = out.len(); while j > keep { out.pop(); j = j - 1; } },
+            _ => { out.push(self.next_byte() as Byte); },
+        }
+        out
+    }
+}
+
+fn seed_frames() -> List<Byte> {
+    let mut v: List<Byte> = [];
+    v.push(0x00_u8);
+    v.push(0x01_u8);
+    v.push(0x02_u8);
+    v.push(0x00_u8);
+    v.push(0x00_u8);
+    v.push(0x00_u8);
+    v.push(0x00_u8);
+    v.push(0x06_u8);
+    v.push(0x00_u8);
+    v.push(0x04_u8);
+    v.push(0xDE_u8); v.push(0xAD_u8); v.push(0xBE_u8); v.push(0xEF_u8);
+    v
+}
+
+fn feed(bytes: &[Byte]) -> Int {
+    match decode_all_frames(bytes) {
+        Ok(_)  => 1,
+        Err(_) => 0,
+    }
+}
+
+@main
+public fn main() -> Int {
+    let mut rng = FuzzRng::new(3);
+    let seed = seed_frames();
+    let mut iters: Int = 0;
+    let mut accepted: Int = 0;
+    while iters < 256 {
+        let mutated = rng.mutate(&seed);
+        accepted = accepted + feed(&mutated);
+        iters = iters + 1;
+    }
+    print(f"quic.frame fuzz iters={iters} accepted={accepted}");
+    0
+}

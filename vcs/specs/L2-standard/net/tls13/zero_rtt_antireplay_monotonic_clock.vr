@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, zero_rtt, antireplay, monotonic_clock, audit_5, rfc8446_8
+// @timeout: 15000
+// @expected-exit: 0
+
+// Regression for audit §5 — ReplayCache accepts an injectable monotonic
+// origin so tests and constrained deployments can drive bucket
+// rotation deterministically.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.tls13.handshake.zero_rtt_antireplay.{ReplayCache, ReplayConfig};
+
+fn exercise_injectable_clock() {
+    let cfg = ReplayConfig.default();
+
+    // Production entry point — internally seeds from Instant.now().
+    let _c1 = ReplayCache.new(cfg.clone());
+
+    // Deterministic entry point — caller supplies monotonic origin.
+    let origin = Instant.now();
+    let mut cache = ReplayCache.new_at(cfg, origin.clone());
+
+    // Feed a synthetic "now" that matches the origin so bucket rotation
+    // is suppressed — first admit is accepted, replay is rejected.
+    let psk_id: List<Byte>  = [0x01_u8, 0x02_u8, 0x03_u8];
+    let ch_hash: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+
+    let admitted_1 = cache.try_admit(&psk_id, &ch_hash, origin.clone());
+    let admitted_2 = cache.try_admit(&psk_id, &ch_hash, origin.clone());
+    assert(admitted_1 == true);
+    assert(admitted_2 == false);
+}
+
+@main
+public fn main() -> Int {
+    exercise_injectable_clock();
+    print("zero_rtt_antireplay_monotonic_clock typecheck ok");
+    0
+}
