@@ -302,7 +302,7 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
             state.set_reg(has_next_dst, Value::from_bool(true));
         }
         ITER_TYPE_MAP => {
-            // Read map header: [count, capacity, entries_ptr]
+            // Read map/set header: [count, capacity, entries_ptr]
             let map_header = unsafe {
                 source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
             };
@@ -313,35 +313,46 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
                 entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
             };
 
-            // Find next non-empty entry starting from current_idx. Yield a
-            // `(key, value)` 2-tuple so that `for (k, v) in map` / the
-            // JSON stringify path (`for (k, v) in o.iter()`) can
-            // destructure. The tuple object is allocated as a 2-Value
-            // Pack (same layout the rest of the VM uses for tuples).
+            // Inspect the source's type_id to decide element shape:
+            //   SET → yield key only (matches `implement<T> Iterator for
+            //         SetIter<T> { type Item = T; … }` in
+            //         core/collections/set.vr)
+            //   MAP → yield `(key, value)` 2-tuple for destructuring
+            //         `for (k, v) in map { … }`
+            // Everything else (historical builtins piping through
+            // TypeId::UNIT) defaults to the MAP pair shape.
+            let source_is_set = {
+                let header = unsafe { &*(source_ptr as *const heap::ObjectHeader) };
+                header.type_id == TypeId::SET
+            };
+
+            // Find next non-empty entry starting from current_idx.
             let mut idx = current_idx;
             while idx < capacity {
                 let entry_key = unsafe { *entries_data.add(idx * 2) };
                 if !entry_key.is_unit() {
-                    let entry_val = unsafe { *entries_data.add(idx * 2 + 1) };
-
                     // Advance iterator to next slot.
                     unsafe { *iter_data.add(1) = Value::from_i64((idx + 1) as i64); }
 
-                    // Build (key, value) tuple.
-                    let tuple_obj = state.heap.alloc(
-                        TypeId::TUPLE,
-                        2 * std::mem::size_of::<Value>(),
-                    )?;
-                    let tuple_data = unsafe {
-                        (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                    let element = if source_is_set {
+                        entry_key
+                    } else {
+                        let entry_val = unsafe { *entries_data.add(idx * 2 + 1) };
+                        let tuple_obj = state.heap.alloc(
+                            TypeId::TUPLE,
+                            2 * std::mem::size_of::<Value>(),
+                        )?;
+                        let tuple_data = unsafe {
+                            (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                        };
+                        unsafe {
+                            *tuple_data = entry_key;
+                            *tuple_data.add(1) = entry_val;
+                        }
+                        Value::from_ptr(tuple_obj.as_ptr() as *mut u8)
                     };
-                    unsafe {
-                        *tuple_data = entry_key;
-                        *tuple_data.add(1) = entry_val;
-                    }
-                    let tuple_val = Value::from_ptr(tuple_obj.as_ptr() as *mut u8);
 
-                    state.set_reg(dst, tuple_val);
+                    state.set_reg(dst, element);
                     state.set_reg(has_next_dst, Value::from_bool(true));
                     return Ok(DispatchResult::Continue);
                 }

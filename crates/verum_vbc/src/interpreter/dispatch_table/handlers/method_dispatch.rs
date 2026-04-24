@@ -897,7 +897,13 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // Skip user-defined method lookup for builtin collections (Map, Set, List).
     // The interpreter has optimized builtin handlers for these types with correct
     // memory layout. Using compiled stdlib functions would fail because they expect
-    // different internal representations (e.g., T.offset pointer arithmetic).
+    // different internal representations (e.g., `self.inner.insert(…)` on a
+    // stdlib `Set<T>` assumes a struct `{ inner: Map<T,()> }` layout, but
+    // `Set.new()` returns the builtin `[count, capacity, entries_ptr]`
+    // layout — dereferencing a non-existent field panics with
+    // "field access out of bounds"). New collection methods belong as
+    // builtin handlers alongside the existing `insert` / `contains` / …
+    // dispatchers above (see the `"filter" if is_set` arm below).
     if found_func_id.is_none() && !is_builtin_collection {
         // First try the old approach: treat method_id as function_id for backwards compatibility
         let func_id = FunctionId(method_id);
@@ -2305,11 +2311,17 @@ pub(super) fn dispatch_primitive_method(
                             return Ok(Some(make_none_value(state)?));
                         }
 
-                        // MAP iteration yields `(key, value)` tuples by scanning
-                        // the entries array for non-empty slots. Returns directly
-                        // as `Some(tuple)` — the builder pattern used by other
-                        // iter_types (ThinRef + make_some_value) doesn't apply.
+                        // ITER_TYPE_MAP covers both Map (yields `(key, value)`
+                        // tuples) and Set (yields keys only). Branch on the
+                        // source object's type_id: SET → key only, MAP/other
+                        // → 2-tuple. Matches the stdlib's
+                        // `implement<T> Iterator for SetIter<T> { type Item = T; … }`
+                        // and `implement<K, V> Iterator for MapIter<K, V> { type Item = (K, V); … }`.
                         if iter_type == ITER_TYPE_MAP {
+                            let source_is_set = {
+                                let header = unsafe { &*(source_ptr as *const heap::ObjectHeader) };
+                                header.type_id == TypeId::SET
+                            };
                             let map_header = unsafe {
                                 source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
                             };
@@ -2323,21 +2335,25 @@ pub(super) fn dispatch_primitive_method(
                             while idx < scan_end {
                                 let entry_key = unsafe { *entries_data.add(idx * 2) };
                                 if !entry_key.is_unit() {
-                                    let entry_val = unsafe { *entries_data.add(idx * 2 + 1) };
                                     unsafe { *iter_data.add(1) = Value::from_i64((idx + 1) as i64); }
-                                    let tuple_obj = state.heap.alloc(
-                                        TypeId::TUPLE,
-                                        2 * std::mem::size_of::<Value>(),
-                                    )?;
-                                    let tuple_data = unsafe {
-                                        (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                                    let element = if source_is_set {
+                                        entry_key
+                                    } else {
+                                        let entry_val = unsafe { *entries_data.add(idx * 2 + 1) };
+                                        let tuple_obj = state.heap.alloc(
+                                            TypeId::TUPLE,
+                                            2 * std::mem::size_of::<Value>(),
+                                        )?;
+                                        let tuple_data = unsafe {
+                                            (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                                        };
+                                        unsafe {
+                                            *tuple_data = entry_key;
+                                            *tuple_data.add(1) = entry_val;
+                                        }
+                                        Value::from_ptr(tuple_obj.as_ptr() as *mut u8)
                                     };
-                                    unsafe {
-                                        *tuple_data = entry_key;
-                                        *tuple_data.add(1) = entry_val;
-                                    }
-                                    let tuple_val = Value::from_ptr(tuple_obj.as_ptr() as *mut u8);
-                                    return Ok(Some(make_some_value(state, tuple_val)?));
+                                    return Ok(Some(make_some_value(state, element)?));
                                 }
                                 idx += 1;
                             }
@@ -2819,7 +2835,11 @@ pub(super) fn dispatch_primitive_method(
                                     if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
                                         unsafe {
                                             *new_entries_data.add(ni * 2) = old_key;
-                                            *new_entries_data.add(ni * 2 + 1) = Value::from_bool(true);
+                                            // Set's value-slot must be unit to match the
+                                            // stdlib contract (`Map<T, ()>`); ITER_TYPE_MAP
+                                            // inspects the source type_id to decide whether
+                                            // to yield keys (Set) or pairs (Map).
+                                            *new_entries_data.add(ni * 2 + 1) = Value::unit();
                                         }
                                         break;
                                     }
@@ -2842,7 +2862,8 @@ pub(super) fn dispatch_primitive_method(
                         if entry_key.is_unit() {
                             unsafe {
                                 *entries_data.add(idx * 2) = val;
-                                *entries_data.add(idx * 2 + 1) = Value::from_bool(true);
+                                // Set's value-slot is unit (`Map<T, ()>`).
+                                *entries_data.add(idx * 2 + 1) = Value::unit();
                             }
                             count += 1;
                             unsafe { *header_ptr = Value::from_i64(count as i64); }
@@ -3483,7 +3504,10 @@ pub(super) fn dispatch_primitive_method(
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = *elem;
-                                    *new_data.add(ni * 2 + 1) = Value::from_bool(true);
+                                    // Set's value-slot is unit (`Map<T, ()>`
+                                    // contract; iteration branches on
+                                    // source type_id).
+                                    *new_data.add(ni * 2 + 1) = Value::unit();
                                 }
                                 break;
                             }
@@ -3570,7 +3594,10 @@ pub(super) fn dispatch_primitive_method(
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = *elem;
-                                    *new_data.add(ni * 2 + 1) = Value::from_bool(true);
+                                    // Set's value-slot is unit (`Map<T, ()>`
+                                    // contract; iteration branches on
+                                    // source type_id).
+                                    *new_data.add(ni * 2 + 1) = Value::unit();
                                 }
                                 break;
                             }
@@ -3656,7 +3683,10 @@ pub(super) fn dispatch_primitive_method(
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = *elem;
-                                    *new_data.add(ni * 2 + 1) = Value::from_bool(true);
+                                    // Set's value-slot is unit (`Map<T, ()>`
+                                    // contract; iteration branches on
+                                    // source type_id).
+                                    *new_data.add(ni * 2 + 1) = Value::unit();
                                 }
                                 break;
                             }
@@ -3849,7 +3879,10 @@ pub(super) fn dispatch_primitive_method(
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = *elem;
-                                    *new_data.add(ni * 2 + 1) = Value::from_bool(true);
+                                    // Set's value-slot is unit (`Map<T, ()>`
+                                    // contract; iteration branches on
+                                    // source type_id).
+                                    *new_data.add(ni * 2 + 1) = Value::unit();
                                 }
                                 break;
                             }
@@ -3946,6 +3979,120 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
                     return Ok(Some(Value::unit()));
+                }
+                "filter" if is_set => {
+                    // Set.filter(closure) -> Set (new set with elements where closure(element) is true)
+                    let caller_base = state.reg_base();
+                    let closure_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let self_header = unsafe {
+                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
+                    let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
+                    let self_entries = unsafe {
+                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let mut kept = Vec::new();
+                    for i in 0..self_cap {
+                        let k = unsafe { *self_entries.add(i * 2) };
+                        if !k.is_unit() {
+                            let result = call_closure_sync(state, closure_val, &[k])?;
+                            if result.as_bool() {
+                                kept.push(k);
+                            }
+                        }
+                    }
+                    return Ok(Some(build_set_from_values(state, kept)?));
+                }
+                "map" if is_set => {
+                    // Set.map(closure) -> Set (new set of closure(element) values)
+                    let caller_base = state.reg_base();
+                    let closure_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let self_header = unsafe {
+                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
+                    let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
+                    let self_entries = unsafe {
+                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let mut mapped = Vec::new();
+                    for i in 0..self_cap {
+                        let k = unsafe { *self_entries.add(i * 2) };
+                        if !k.is_unit() {
+                            let out = call_closure_sync(state, closure_val, &[k])?;
+                            mapped.push(out);
+                        }
+                    }
+                    return Ok(Some(build_set_from_values(state, mapped)?));
+                }
+                "fold" if is_set => {
+                    // Set.fold(init, closure) -> U (fold over elements)
+                    let caller_base = state.reg_base();
+                    let mut acc = state.registers.get(caller_base, Reg(args.start.0));
+                    let closure_val = state.registers.get(caller_base, Reg(args.start.0 + 1));
+                    let self_header = unsafe {
+                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
+                    let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
+                    let self_entries = unsafe {
+                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    for i in 0..self_cap {
+                        let k = unsafe { *self_entries.add(i * 2) };
+                        if !k.is_unit() {
+                            acc = call_closure_sync(state, closure_val, &[acc, k])?;
+                        }
+                    }
+                    return Ok(Some(acc));
+                }
+                "count_where" if is_set => {
+                    // Set.count_where(closure) -> Int
+                    let caller_base = state.reg_base();
+                    let closure_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let self_header = unsafe {
+                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
+                    let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
+                    let self_entries = unsafe {
+                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let mut count: i64 = 0;
+                    for i in 0..self_cap {
+                        let k = unsafe { *self_entries.add(i * 2) };
+                        if !k.is_unit() {
+                            let r = call_closure_sync(state, closure_val, &[k])?;
+                            if r.as_bool() { count += 1; }
+                        }
+                    }
+                    return Ok(Some(Value::from_i64(count)));
+                }
+                "filter_map" if is_set => {
+                    // Set.filter_map(closure: fn(&T) -> Maybe<U>) -> Set<U>
+                    let caller_base = state.reg_base();
+                    let closure_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let self_header = unsafe {
+                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
+                    let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
+                    let self_entries = unsafe {
+                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let mut kept = Vec::new();
+                    for i in 0..self_cap {
+                        let k = unsafe { *self_entries.add(i * 2) };
+                        if !k.is_unit() {
+                            let maybe = call_closure_sync(state, closure_val, &[k])?;
+                            // Extract Some payload from Maybe variant. None → skip.
+                            if let Some(inner) = unwrap_maybe_some(maybe) {
+                                kept.push(inner);
+                            }
+                        }
+                    }
+                    return Ok(Some(build_set_from_values(state, kept)?));
                 }
                 "for_each" if is_map => {
                     // Map.for_each(closure) - call closure(key, value) for each entry
@@ -5304,6 +5451,81 @@ pub(crate) fn alloc_list_from_values(state: &mut InterpreterState, values: Vec<V
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
+/// Build a new Set from a Vec of unique (or to-be-deduplicated) values.
+/// Layout is the builtin Set shape `[count, capacity, entries_ptr]` with
+/// `[key, unit]` slot pairs — identical to what `Set.new()` +
+/// `insert` produces, so subsequent builtin Set methods work over it.
+pub(super) fn build_set_from_values(
+    state: &mut InterpreterState,
+    elements: Vec<Value>,
+) -> InterpreterResult<Value> {
+    let initial_cap = (elements.len() * 2).max(16);
+    let obj = state.heap.alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
+    state.record_allocation();
+    let backing = state.heap.alloc_array(TypeId::UNIT, initial_cap * 2)?;
+    state.record_allocation();
+    let backing_ptr = backing.as_ptr() as *mut u8;
+    let data = unsafe {
+        backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
+    };
+    // Initialise every slot to unit (empty-slot marker).
+    for i in 0..(initial_cap * 2) {
+        unsafe { *data.add(i) = Value::unit(); }
+    }
+    // Probe-insert each element, skipping duplicates.
+    let mut live: usize = 0;
+    for elem in elements.into_iter() {
+        let hash = value_hash(elem);
+        let mut idx = hash % initial_cap;
+        let start = idx;
+        loop {
+            let slot_key = unsafe { *data.add(idx * 2) };
+            if slot_key.is_unit() {
+                unsafe {
+                    *data.add(idx * 2) = elem;
+                    *data.add(idx * 2 + 1) = Value::unit();
+                }
+                live += 1;
+                break;
+            }
+            if value_eq(slot_key, elem) {
+                break; // dedup
+            }
+            idx = (idx + 1) % initial_cap;
+            if idx == start { break; }
+        }
+    }
+    let header = unsafe {
+        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+    };
+    unsafe {
+        *header = Value::from_i64(live as i64);
+        *header.add(1) = Value::from_i64(initial_cap as i64);
+        *header.add(2) = Value::from_ptr(backing_ptr);
+    }
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+}
+
+/// Extract the payload of a `Maybe::Some(x)` variant; return `None` when
+/// the value is `Maybe::None`. Variant layout (as produced by
+/// `make_some_value` / `make_none_value`): `[ObjectHeader][tag:u32]
+/// [field_count:u32][payload_0:Value…]` — tag 0 = None, tag 1 = Some.
+pub(super) fn unwrap_maybe_some(value: Value) -> Option<Value> {
+    if !value.is_ptr() || value.is_nil() {
+        return None;
+    }
+    let ptr = value.as_ptr::<u8>();
+    if ptr.is_null() { return None; }
+    let tag = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const u32) };
+    if tag == 0 {
+        return None;
+    }
+    let payload = unsafe {
+        *(ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value)
+    };
+    Some(payload)
+}
+
 /// Push a value onto a List.
 /// List layout: [len: Value(i64), cap: Value(i64), backing: Value(ptr)]
 pub(super) fn list_push(state: &mut InterpreterState, list_val: Value, new_val: Value) -> InterpreterResult<()> {
@@ -5527,8 +5749,19 @@ pub(super) fn dispatch_array_method(
         return Ok(None);
     }
 
-    // Skip Deque and Channel - they have their own dispatch in dispatch_primitive_method
-    if header.type_id == TypeId::DEQUE || header.type_id == TypeId::CHANNEL {
+    // Skip associative/channel builtins — they have their own dispatch in
+    // dispatch_primitive_method (Map has explicit filter/map/fold arms;
+    // Set/Deque/Channel are handled elsewhere or must fall through to the
+    // user-defined stdlib impl). Treating their
+    // `[count, capacity, entries_ptr]` header as a raw Value-array would
+    // iterate the metadata fields as if they were elements, producing
+    // nonsense like `filter` yielding `(count, capacity, entries_ptr)`
+    // triplets.
+    if header.type_id == TypeId::DEQUE
+        || header.type_id == TypeId::CHANNEL
+        || header.type_id == TypeId::MAP
+        || header.type_id == TypeId::SET
+    {
         return Ok(None);
     }
 

@@ -1,0 +1,58 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: set, higher_order, iterator, closure
+// @timeout: 5000
+// @expect: pass
+//
+// Regression: Set's higher-order methods (filter/map/fold/count_where/
+// for_each) previously dispatched through the generic array path and
+// treated the Set's `[count, capacity, entries_ptr]` header as if it
+// were a Value-array — producing nonsense results (e.g. `filter` of
+// `{1,2,3,4}` yielding 3 elements: the count, capacity, and
+// entries-pointer fields).
+//
+// Fixed by adding Set-specific builtin handlers and making Set iteration
+// yield keys only (not `(key, value)` tuples like Map).
+
+mount core.collections.set.Set;
+
+fn main() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+
+    // filter
+    let evens = s.filter(|x| *x % 2 == 0);
+    assert(evens.len() == 2);
+    assert(evens.contains(2));
+    assert(evens.contains(4));
+
+    // map
+    let doubled = s.map(|x| *x * 10);
+    assert(doubled.len() == 4);
+    assert(doubled.contains(10));
+    assert(doubled.contains(40));
+
+    // fold
+    let sum = s.fold(0, |acc, x| acc + *x);
+    assert(sum == 10);
+
+    // count_where
+    let odd_count = s.count_where(|x| *x % 2 == 1);
+    assert(odd_count == 2);
+
+    // for_each
+    let mut total = 0;
+    s.for_each(|x| { total = total + *x; });
+    assert(total == 10);
+
+    // iteration yields keys only, not (key, flag) tuples
+    let mut iter_sum = 0;
+    for v in s.iter() {
+        iter_sum = iter_sum + *v;
+    }
+    assert(iter_sum == 10);
+}
