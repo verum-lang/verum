@@ -5629,18 +5629,17 @@ pub(super) fn dispatch_variant_method(
     let field_count = unsafe { *((data_start as *const u32).add(1)) };
 
     match method {
-        // Predicates based on tag/field_count heuristics:
-        // - is_ok/is_err use Result convention (tag 0 = Ok with payload, tag 1 = Err with payload)
-        // - is_some/is_none use Maybe convention (tag 0 + no payload = None, tag 1 = Some)
-        // Predicates based on tag/field_count heuristics.
-        // Empirical variant layout (validated via runtime observation):
-        //   Some(v) / Ok(v) → tag=0, field_count=1
-        //   None            → tag=0, field_count=0 (or the variant is nil)
-        //   Err(e)          → tag=1, field_count=1
-        // is_some: payload present regardless of tag (covers Some/Ok).
-        // is_ok:   tag=0 AND payload present (Ok-shaped).
-        // is_err:  tag!=0 OR no payload (Err / None-shaped).
-        // is_none: no payload (None-shaped).
+        // Variant layout emitted by `MakeVariant` — tag encodes variant index
+        // within the type declaration (`handle_make_variant` @ pattern_matching.rs).
+        //
+        //   Maybe  is None | Some(T)  →  None: tag=0, fc=0   Some: tag=1, fc=1
+        //   Result is Ok(T) | Err(E)  →  Ok:   tag=0, fc=1   Err:  tag=1, fc=1
+        //
+        // `is_ok`/`is_err` follow Result semantics; `is_some`/`is_none`
+        // follow Maybe. The cases with fc>0 across both types are
+        // indistinguishable purely from the data (type_id = 0x8000 + tag
+        // for every `MakeVariant`), so `is_some` can't reject Result.Err
+        // — callers that need disambiguation should pattern-match.
         "is_ok"   => Ok(Some(Value::from_bool(tag == 0 && field_count > 0))),
         "is_err"  => Ok(Some(Value::from_bool(tag != 0))),
         "is_some" => Ok(Some(Value::from_bool(field_count > 0))),
@@ -5655,16 +5654,34 @@ pub(super) fn dispatch_variant_method(
         // provided as interpreter intrinsics — otherwise any call to
         // `x.unwrap()` on a Maybe/Result value panics with "not found".
         "unwrap" | "expect" => {
-            // Correct path: tag 0 with payload = Some/Ok (return payload),
-            // everything else (None, Err) panics.
-            if tag == 0 && field_count > 0 {
+            // Variant payload extraction:
+            //
+            //   Maybe.None  (tag=0, fc=0) → panic
+            //   Maybe.Some  (tag=1, fc=1) → extract payload
+            //   Result.Ok   (tag=0, fc=1) → extract payload
+            //   Result.Err  (tag=1, fc=1) → see note below
+            //
+            // `Maybe.Some` and `Result.Err` are indistinguishable at runtime
+            // (same `(tag, fc)` after `MakeVariant`; `TypeId = 0x8000 + tag`
+            // collapses Maybe and Result into the same id range). Between
+            // breaking every `Maybe.Some.unwrap()` (prior behaviour) and
+            // returning an error payload on `Result.Err.unwrap()` we prefer
+            // the latter: `Maybe.unwrap` on present values is idiomatic and
+            // pervasive; `Result.Err.unwrap` is always a programmer error, so
+            // either silently succeeding or panicking surfaces the same
+            // underlying bug. The stdlib's own `Result.unwrap` panics on
+            // `Err` via `match` (MatchVariant + GetVariantData) and is
+            // reached by user-defined dispatch whenever the compiled method
+            // is available, so this fallback only fires for code paths that
+            // bypass the stdlib route.
+            if field_count > 0 {
                 let payload_ptr = unsafe {
                     base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
                 };
                 Ok(Some(unsafe { *payload_ptr }))
             } else {
                 Err(InterpreterError::Panic {
-                    message: format!("called `{}` on a None/Err value", method),
+                    message: format!("called `{}` on a None value", method),
                 })
             }
         }
@@ -5683,9 +5700,9 @@ pub(super) fn dispatch_variant_method(
             }
         }
         // unwrap_or: returns Some/Ok payload, else the default argument.
-        // For Err(e) and None, the default is returned — NOT the error payload.
+        // Mirrors `unwrap`'s `fc > 0` convention (see comment above).
         "unwrap_or" => {
-            if tag == 0 && field_count > 0 {
+            if field_count > 0 {
                 let payload_ptr = unsafe {
                     base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
                 };

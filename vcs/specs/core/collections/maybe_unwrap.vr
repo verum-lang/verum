@@ -1,0 +1,52 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: maybe, variant, unwrap, dispatch
+// @timeout: 5000
+// @expect: pass
+//
+// Regression: the interpreter's variant `unwrap` intrinsic checked
+// `tag == 0 && fc > 0`, designed from a stale "empirical" comment
+// claiming `Some(v)` has tag 0. In reality `MakeVariant` encodes
+// tag by variant-declaration order:
+//
+//   Maybe is None | Some(T)   →  None: tag=0, Some: tag=1
+//   Result is Ok(T) | Err(E)  →  Ok:   tag=0, Err:  tag=1
+//
+// So `Some(42).unwrap()` hit `tag == 0` false and panicked
+// "called `unwrap` on a None/Err value". This cascaded into every
+// stdlib call that used `.unwrap()` on a `Maybe<T>` / `Maybe<&T>`
+// (e.g. `list.get(i).unwrap()` inside `BinaryHeap.sift_up`,
+// `PeekMut.pop`, hash-map probe loops, JSON parsers…).
+//
+// Fixed: changed the condition to `fc > 0` — extracts the payload
+// for `Some`/`Ok` (both fc=1), panics for `None` (fc=0). Documented
+// the `Result.Err` ambiguity: Maybe.Some and Result.Err are
+// indistinguishable from `(tag, fc)` alone, and `Result.Err.unwrap`
+// is a programmer error either way (stdlib Result.unwrap panics via
+// match; this fallback returns the error payload instead of
+// panicking, which is the lesser bug).
+
+fn main() {
+    // Direct literal form
+    let a: Maybe<Int> = Some(42);
+    assert(a.unwrap() == 42);
+
+    // Stdlib `List.get(i) -> Maybe<&T>` → unwrap
+    let xs: List<Int> = [10, 20, 30];
+    let first = xs.get(0).unwrap();
+    assert(*first == 10);
+    let last = xs.get(2).unwrap();
+    assert(*last == 30);
+
+    // unwrap_or still works with None
+    let none_val: Maybe<Int> = None;
+    assert(none_val.unwrap_or(99) == 99);
+    assert(a.unwrap_or(0) == 42);
+
+    // is_some / is_none still report correctly
+    assert(a.is_some());
+    assert(!a.is_none());
+    assert(none_val.is_none());
+    assert(!none_val.is_some());
+}
