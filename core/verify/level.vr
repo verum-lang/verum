@@ -1,0 +1,68 @@
+// core.verify.level — user-facing mirror of
+// `verum_verification::level::VerificationLevel`.
+//
+// Lets user code query / branch on the current verification
+// level. The three levels and their semantics are documented in
+// `docs/verification/gradual-verification.md`:
+//
+//   Runtime — dynamic checks, ~5-15ns per assertion.
+//   Static  — compile-time SMT proof; fallback to runtime on
+//             unprovable goals, with a diagnostic.
+//   Proof   — compile-time SMT proof; hard compile error on
+//             unprovable goals.
+
+// The verification level a function is compiled at.
+type VerificationLevel is
+    | Runtime
+    | Static
+    | Proof;
+
+// Parse a level annotation from its canonical string form.
+//
+// Accepts `"runtime"` | `"static"` | `"proof"` (+ the aliases
+// `"formal"` for Proof). Returns `None` for unknown names so
+// callers can emit a useful diagnostic on invalid annotations.
+fn parse_level(annotation: Text) -> Maybe<VerificationLevel> {
+    if annotation == "runtime" {
+        Maybe.Some(VerificationLevel.Runtime)
+    } else if annotation == "static" {
+        Maybe.Some(VerificationLevel.Static)
+    } else if annotation == "proof" || annotation == "formal" {
+        Maybe.Some(VerificationLevel.Proof)
+    } else {
+        Maybe.None
+    }
+}
+
+// Canonical string form.
+fn to_annotation(level: VerificationLevel) -> Text {
+    match level {
+        VerificationLevel.Runtime => "runtime",
+        VerificationLevel.Static => "static",
+        VerificationLevel.Proof => "proof",
+    }
+}
+
+// True iff this level requires the SMT backend.
+fn requires_smt(level: VerificationLevel) -> Bool {
+    match level {
+        VerificationLevel.Runtime => false,
+        VerificationLevel.Static => true,
+        VerificationLevel.Proof => true,
+    }
+}
+
+// True iff this level permits silent fallback to runtime checks
+// on proof failure.
+//
+// See `verum_verification::level::VerificationLevel::
+// evaluate_attempt` for the fundamental-level enforcement
+// table — `allows_runtime_fallback` is the user-facing mirror
+// of `Static == fallback | Proof == no-fallback`.
+fn allows_runtime_fallback(level: VerificationLevel) -> Bool {
+    match level {
+        VerificationLevel::Runtime => true,
+        VerificationLevel::Static => true,
+        VerificationLevel::Proof => false,
+    }
+}

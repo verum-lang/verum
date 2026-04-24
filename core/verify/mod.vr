@@ -1,0 +1,39 @@
+// core.verify — first-class verification API for user code.
+//
+// Closes task #77. This module is the user-facing entry point
+// for embedding verification into Verum programs — the stdlib
+// complement to the compiler's internal verification pipeline.
+//
+// Design philosophy
+//
+// The compiler owns the verification pipeline (SMT dispatch,
+// proof extraction, kernel replay, certificate export). This
+// module exposes a narrow, ergonomic API on top of it so that
+// Verum programs can:
+//
+//   1. Invoke verification at value level — `assert_verified!(x
+//      > 0)` checks at compile-time under `@verify(proof)`
+//      semantics.
+//   2. Carry verification-status witnesses in types —
+//      `Verified<T>` / `Proven<P>` annotations encode "this
+//      value has been proved to satisfy P".
+//   3. Query the current verification level / strategy — library
+//      code that should behave differently at proof-level vs
+//      runtime-level can branch on it.
+//   4. Attach verification directives at value-position —
+//      `@verify(strategy)` / `@trigger(pattern)` / `@logic`
+//      attributes composable from user code.
+//
+// Dependencies
+//
+//   mount core.proof.tactics.*;    — tactic library (task #85)
+//   mount core.verify.level.*;     — VerificationLevel mirror
+//   mount core.verify.attempt.*;   — ProofAttempt / Outcome
+//   mount core.verify.certificate.*; — SmtCertificate stdlib view
+//
+// See `docs/verification/gradual-verification.md` for the full
+// spec.
+
+mount core.verify.level.*;
+mount core.verify.attempt.*;
+mount core.verify.certificate.*;

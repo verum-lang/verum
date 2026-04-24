@@ -1,0 +1,101 @@
+// core.verify.attempt — proof-attempt outcome types.
+//
+// Mirror of `verum_verification::level::ProofAttempt` +
+// `VerificationOutcome`. Lets user code structure its own
+// dispatch on "prove / fall-back / hard-fail" in the same
+// semantic table the compiler enforces.
+
+// The result of an SMT proof attempt.
+type ProofAttempt is
+    // The backend returned Unsat on the negated goal — valid.
+    | Proven
+    // The backend returned Sat / Unknown / Timeout — carries a
+    // one-line rationale for the diagnostic.
+    | Failed(Text)
+    // No backend invoked (e.g. --no-smt or global disable).
+    | Unattempted;
+
+// The compiler's instruction to the VBC emitter.
+//
+// Every `(VerificationLevel, ProofAttempt)` pair maps to
+// exactly one `VerificationOutcome` via the table in
+// `verum_verification::level::evaluate_attempt`:
+//
+//   Runtime, _              → EmitRuntimeCheck
+//   Static,  Proven         → ElideCheck
+//   Static,  Failed(r)      → FallbackWithWarning(r)
+//   Static,  Unattempted    → FallbackWithWarning("no SMT")
+//   Proof,   Proven         → ElideCheck
+//   Proof,   Failed(r)      → HardFail(r)
+//   Proof,   Unattempted    → HardFail("no SMT")
+type VerificationOutcome is
+    | ElideCheck
+    | EmitRuntimeCheck
+    | FallbackWithWarning(Text)
+    | HardFail(Text);
+
+// Evaluate the outcome of a proof attempt at the given level.
+//
+// This is the user-space mirror of
+// `verum_verification::level::VerificationLevel::
+// evaluate_attempt` — the fundamental-level policy dispatch
+// from task #70.
+//
+// User libraries that want to implement "verify if possible,
+// fall back gracefully" semantics should call this exactly —
+// don't roll your own; the compiler's enforcement table
+// doesn't accept non-standard policies.
+fn evaluate_attempt(
+    level: VerificationLevel,
+    attempt: ProofAttempt,
+) -> VerificationOutcome {
+    match level {
+        VerificationLevel.Runtime =>
+            VerificationOutcome.EmitRuntimeCheck,
+        VerificationLevel.Static => match attempt {
+            ProofAttempt.Proven =>
+                VerificationOutcome.ElideCheck,
+            ProofAttempt.Failed(reason) =>
+                VerificationOutcome.FallbackWithWarning(reason),
+            ProofAttempt.Unattempted =>
+                VerificationOutcome.FallbackWithWarning(
+                    "SMT not attempted (e.g. --no-smt)"
+                ),
+        },
+        VerificationLevel.Proof => match attempt {
+            ProofAttempt.Proven =>
+                VerificationOutcome.ElideCheck,
+            ProofAttempt.Failed(reason) =>
+                VerificationOutcome.HardFail(reason),
+            ProofAttempt.Unattempted =>
+                VerificationOutcome.HardFail(
+                    "Proof-level obligation requires SMT"
+                ),
+        },
+    }
+}
+
+// Predicates for quick shape inspection.
+
+fn requires_runtime_check(outcome: VerificationOutcome) -> Bool {
+    match outcome {
+        VerificationOutcome.EmitRuntimeCheck => true,
+        VerificationOutcome.FallbackWithWarning(_) => true,
+        VerificationOutcome.ElideCheck => false,
+        VerificationOutcome.HardFail(_) => false,
+    }
+}
+
+fn is_hard_failure(outcome: VerificationOutcome) -> Bool {
+    match outcome {
+        VerificationOutcome.HardFail(_) => true,
+        _ => false,
+    }
+}
+
+fn is_warning(outcome: VerificationOutcome) -> Bool {
+    match outcome {
+        VerificationOutcome.FallbackWithWarning(_) => true,
+        _ => false,
+    }
+}
