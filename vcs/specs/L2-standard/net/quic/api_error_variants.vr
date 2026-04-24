@@ -1,0 +1,150 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, api, errors, client, server, stream
+// @timeout: 15000
+// @expected-exit: 0
+
+// QUIC high-level API error surface — the three sums the application
+// layer pattern-matches on when connect / accept / IO hits a failure.
+//
+//   * QuicClientError — 6 variants (Resolve / UdpBind / Handshake /
+//     Timeout / StreamOpen(inner) / Closed).
+//   * QuicServerError — 4 variants (Bind / Handshake / Closed /
+//     StreamError(inner)).
+//   * QuicStreamError — 5 variants (Closed / Reset(code) / FlowControl
+//     / Timeout / Transport(text)).
+//
+// Pairwise-distinct under total match + wrapper-variant payloads
+// exposed through nested pattern.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.api.{
+    QuicClientError, QuicServerError, QuicStreamError,
+};
+
+fn quic_stream_error_five_variants_distinct() {
+    let errs: [QuicStreamError; 5] = [
+        QuicStreamError.Closed,
+        QuicStreamError.Reset(0x010C_u64),           // H3_REQUEST_CANCELLED
+        QuicStreamError.FlowControl,
+        QuicStreamError.Timeout,
+        QuicStreamError.Transport(f"broken pipe"),
+    ];
+    let mut tags: [Int; 5] = [0; 5];
+    let mut i: Int = 0;
+    while i < 5 {
+        tags[i] = match errs[i] {
+            QuicStreamError.Closed        => 1,
+            QuicStreamError.Reset(_)      => 2,
+            QuicStreamError.FlowControl   => 3,
+            QuicStreamError.Timeout       => 4,
+            QuicStreamError.Transport(_)  => 5,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 5 {
+        let mut k: Int = j + 1;
+        while k < 5 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn quic_stream_error_reset_carries_code() {
+    let e = QuicStreamError.Reset(0x42_u64);
+    match e {
+        QuicStreamError.Reset(code) => assert(code == 0x42_u64),
+        _ => panic("expected Reset(0x42)"),
+    }
+}
+
+fn quic_client_error_six_variants_distinct() {
+    let errs: [QuicClientError; 6] = [
+        QuicClientError.Resolve(f"dns timeout"),
+        QuicClientError.UdpBind(f"permission denied"),
+        QuicClientError.Handshake(f"bad certificate"),
+        QuicClientError.Timeout,
+        QuicClientError.StreamOpen(QuicStreamError.FlowControl),
+        QuicClientError.Closed,
+    ];
+    let mut tags: [Int; 6] = [0; 6];
+    let mut i: Int = 0;
+    while i < 6 {
+        tags[i] = match errs[i] {
+            QuicClientError.Resolve(_)     => 1,
+            QuicClientError.UdpBind(_)     => 2,
+            QuicClientError.Handshake(_)   => 3,
+            QuicClientError.Timeout        => 4,
+            QuicClientError.StreamOpen(_)  => 5,
+            QuicClientError.Closed         => 6,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 6 {
+        let mut k: Int = j + 1;
+        while k < 6 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn quic_client_error_stream_open_wraps_stream_error() {
+    let e = QuicClientError.StreamOpen(QuicStreamError.Reset(7_u64));
+    match e {
+        QuicClientError.StreamOpen(inner) => {
+            match inner {
+                QuicStreamError.Reset(code) => assert(code == 7_u64),
+                _ => panic("inner must be Reset(7)"),
+            }
+        },
+        _ => panic("outer must be StreamOpen"),
+    }
+}
+
+fn quic_server_error_four_variants_distinct() {
+    let errs: [QuicServerError; 4] = [
+        QuicServerError.Bind(f"address in use"),
+        QuicServerError.Handshake(f"unknown_ca"),
+        QuicServerError.Closed,
+        QuicServerError.StreamError(QuicStreamError.Timeout),
+    ];
+    let mut tags: [Int; 4] = [0; 4];
+    let mut i: Int = 0;
+    while i < 4 {
+        tags[i] = match errs[i] {
+            QuicServerError.Bind(_)         => 1,
+            QuicServerError.Handshake(_)    => 2,
+            QuicServerError.Closed          => 3,
+            QuicServerError.StreamError(_)  => 4,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 4 {
+        let mut k: Int = j + 1;
+        while k < 4 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    quic_stream_error_five_variants_distinct();
+    quic_stream_error_reset_carries_code();
+    quic_client_error_six_variants_distinct();
+    quic_client_error_stream_open_wraps_stream_error();
+    quic_server_error_four_variants_distinct();
+    print("QUIC API error variants verified");
+    0
+}
