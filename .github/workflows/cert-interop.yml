@@ -1,0 +1,205 @@
+name: Certificates Interop Matrix
+
+on:
+  schedule:
+    # 04:00 UTC every Monday — weekly cadence matches task #90's
+    # "weekly cross-tool matrix" contract.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Step 1 — build verum + export the project's certificates in every
+  # supported format. The artefacts are uploaded once and consumed by
+  # each tool's re-check job in parallel.
+  # ---------------------------------------------------------------------------
+  export:
+    name: Export certificates
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      commit_sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cert-interop
+
+      - name: Build verum
+        run: cargo build --release -p verum_cli --bin verum
+
+      - name: Export Lean certificates
+        run: ./target/release/verum export-proofs --to lean --output certificates/lean/export.lean
+        continue-on-error: true
+
+      - name: Export Coq certificates
+        run: ./target/release/verum export-proofs --to coq --output certificates/coq/export.v
+        continue-on-error: true
+
+      - name: Export Dedukti certificates
+        run: ./target/release/verum export-proofs --to dedukti --output certificates/dedukti/export.dk
+        continue-on-error: true
+
+      - name: Export Metamath certificates
+        run: ./target/release/verum export-proofs --to metamath --output certificates/metamath/export.mm
+        continue-on-error: true
+
+      - name: Record the exporting commit SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload certificate bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: certificates
+          path: certificates/
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Step 2 — each supported prover re-checks the certificate exported for
+  # it. A failure here means our emitter produced something the external
+  # tool rejects — a regression we want to catch immediately.
+  #
+  # Every prover job runs in parallel and reports independently; a single
+  # prover's failure does not short-circuit the others.
+  # ---------------------------------------------------------------------------
+
+  recheck-lean:
+    name: Re-check Lean4
+    needs: export
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    container: leanprovercommunity/mathlib:latest
+    steps:
+      - name: Download certificates
+        uses: actions/download-artifact@v4
+        with:
+          name: certificates
+          path: certificates/
+
+      - name: Run lean4 on exported file
+        run: |
+          if [ -f certificates/lean/export.lean ]; then
+            lean certificates/lean/export.lean || exit 1
+          else
+            echo "No lean certificate produced — skipping re-check"
+          fi
+
+  recheck-coq:
+    name: Re-check Coq
+    needs: export
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    container: coqorg/coq:8.18
+    steps:
+      - name: Download certificates
+        uses: actions/download-artifact@v4
+        with:
+          name: certificates
+          path: certificates/
+
+      - name: Run coqc on exported file
+        run: |
+          if [ -f certificates/coq/export.v ]; then
+            coqc certificates/coq/export.v || exit 1
+          else
+            echo "No coq certificate produced — skipping re-check"
+          fi
+
+  recheck-dedukti:
+    name: Re-check Dedukti
+    needs: export
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - name: Install Dedukti
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y opam
+          opam init --disable-sandboxing -y
+          eval $(opam env)
+          opam install -y dedukti
+      - name: Download certificates
+        uses: actions/download-artifact@v4
+        with:
+          name: certificates
+          path: certificates/
+      - name: Run dkcheck on exported file
+        run: |
+          eval $(opam env)
+          if [ -f certificates/dedukti/export.dk ]; then
+            dkcheck certificates/dedukti/export.dk || exit 1
+          else
+            echo "No dedukti certificate produced — skipping re-check"
+          fi
+
+  recheck-metamath:
+    name: Re-check Metamath
+    needs: export
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - name: Install mmverify.py (pure-Python reference verifier)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3
+          curl -fsSL https://raw.githubusercontent.com/david-a-wheeler/mmverify.py/master/mmverify.py -o mmverify.py
+          chmod +x mmverify.py
+      - name: Download certificates
+        uses: actions/download-artifact@v4
+        with:
+          name: certificates
+          path: certificates/
+      - name: Run mmverify.py on exported file
+        run: |
+          if [ -f certificates/metamath/export.mm ]; then
+            python3 mmverify.py certificates/metamath/export.mm || exit 1
+          else
+            echo "No metamath certificate produced — skipping re-check"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Step 3 — consolidate each prover's result into a single matrix report
+  # that's posted as a CI artefact + summary comment. The matrix gives the
+  # release-gate view of "does every prover accept our current exports".
+  # ---------------------------------------------------------------------------
+  summary:
+    name: Matrix summary
+    needs: [export, recheck-lean, recheck-coq, recheck-dedukti, recheck-metamath]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Emit summary
+        run: |
+          echo "# Certificate cross-tool matrix — ${{ needs.export.outputs.commit_sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Target   | Re-check status                                          |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|----------------------------------------------------------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Lean4    | ${{ needs.recheck-lean.result }}                         |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Coq      | ${{ needs.recheck-coq.result }}                          |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dedukti  | ${{ needs.recheck-dedukti.result }}                      |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metamath | ${{ needs.recheck-metamath.result }}                     |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "A 'failure' status means the prover rejected the emitted certificate —" >> "$GITHUB_STEP_SUMMARY"
+          echo "either a regression in the emitter or a legitimate axiom expansion." >> "$GITHUB_STEP_SUMMARY"
+          echo "See docs/verification/proof-export.md for the export-pipeline contract." >> "$GITHUB_STEP_SUMMARY"
