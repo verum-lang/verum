@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, post_handshake, client_sm, rfc8446_4_6
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.6 post-handshake messages — after the main handshake
+// completes, the server may deliver any of three payloads on the
+// application-data stream (encrypted under the 1-RTT traffic key):
+//
+//   §4.6.1 NewSessionTicket         → NewSession(ClientSession)
+//   §4.6.2 CertificateRequest       → CertificateRequestReceived(CR)
+//   §4.6.3 KeyUpdate                → handled internally (no outcome)
+//
+// ClientSm.on_post_handshake returns a PostHandshakeOutcome
+// discriminator so callers dispatch correctly.
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.handshake.resumption.{ClientSession};
+mount core.net.tls13.handshake.messages.{CertificateRequest};
+mount core.net.tls13.handshake.client_sm.{PostHandshakeOutcome};
+
+fn ignored_is_unit_variant() {
+    let o = PostHandshakeOutcome.Ignored;
+    match o {
+        PostHandshakeOutcome.Ignored => {},
+        _ => panic("Ignored must match as unit"),
+    }
+}
+
+fn new_session_carries_client_session() {
+    let sess = ClientSession {
+        ticket:              [0xAA_u8; 16].to_list(),
+        ticket_age_add:      42_u32,
+        ticket_lifetime_sec: 3600_u32,
+        cipher_suite:        CipherSuite.TlsAes128GcmSha256,
+        resumption_secret:   [0xBB_u8; 32].to_list(),
+        max_early_data_size: 16384_u32,
+        created_at:          Instant.now(),
+        ticket_nonce:        [0xCC_u8; 8].to_list(),
+    };
+    let o = PostHandshakeOutcome.NewSession(sess);
+    match o {
+        PostHandshakeOutcome.NewSession(s) => {
+            assert(s.ticket_age_add == 42_u32);
+            assert(s.max_early_data_size == 16384_u32);
+            match s.cipher_suite {
+                CipherSuite.TlsAes128GcmSha256 => {},
+                _ => panic("suite round-trip"),
+            }
+        },
+        _ => panic("expected NewSession"),
+    }
+}
+
+fn certificate_request_received_carries_cr() {
+    let cr = CertificateRequest {
+        certificate_request_context: [0xDE_u8, 0xAD_u8],
+        extensions:                  [],
+    };
+    let o = PostHandshakeOutcome.CertificateRequestReceived(cr);
+    match o {
+        PostHandshakeOutcome.CertificateRequestReceived(c) => {
+            assert(c.certificate_request_context.len() == 2);
+            assert(c.certificate_request_context[0] == 0xDE_u8);
+            assert(c.certificate_request_context[1] == 0xAD_u8);
+        },
+        _ => panic("expected CertificateRequestReceived"),
+    }
+}
+
+fn three_variants_distinct_under_match() {
+    // Distinctness test — build each variant and score it.
+    let sess = ClientSession {
+        ticket:              [],
+        ticket_age_add:      0_u32,
+        ticket_lifetime_sec: 0_u32,
+        cipher_suite:        CipherSuite.TlsAes128GcmSha256,
+        resumption_secret:   [],
+        max_early_data_size: 0_u32,
+        created_at:          Instant.now(),
+        ticket_nonce:        [],
+    };
+    let cr = CertificateRequest {
+        certificate_request_context: [],
+        extensions:                  [],
+    };
+    let outcomes: [PostHandshakeOutcome; 3] = [
+        PostHandshakeOutcome.NewSession(sess),
+        PostHandshakeOutcome.CertificateRequestReceived(cr),
+        PostHandshakeOutcome.Ignored,
+    ];
+    let mut tags: [Int; 3] = [0; 3];
+    let mut i: Int = 0;
+    while i < 3 {
+        tags[i] = match &outcomes[i] {
+            PostHandshakeOutcome.NewSession(_)                 => 1,
+            PostHandshakeOutcome.CertificateRequestReceived(_) => 2,
+            PostHandshakeOutcome.Ignored                       => 3,
+        };
+        i = i + 1;
+    }
+    assert(tags[0] != tags[1]);
+    assert(tags[1] != tags[2]);
+    assert(tags[0] != tags[2]);
+}
+
+@main
+public fn main() -> Int {
+    ignored_is_unit_variant();
+    new_session_carries_client_session();
+    certificate_request_received_carries_cr();
+    three_variants_distinct_under_match();
+    print("RFC 8446 §4.6 PostHandshakeOutcome variants verified");
+    0
+}
