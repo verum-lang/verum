@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stmt_introspect, flags, sql_view, counters, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stmt_introspect.flags.{
+    ExplainKind,
+    ExkNotExplain, ExkExplain, ExkExplainQueryPlan,
+    StmtFlags, new_flags,
+    explain_numeric, explain_is_any,
+    sqlite3_stmt_busy_flag, sqlite3_stmt_readonly_flag,
+    sqlite3_stmt_explain_value, sqlite3_stmt_isexplain_value,
+};
+mount core.database.sqlite.native.stmt_introspect.sql_view.{
+    SqlView, new_view,
+};
+mount core.database.sqlite.native.stmt_introspect.counter.{
+    StmtCounterOp,
+    ScFullscanStep, ScSort, ScVmStep, ScRun,
+    op_numeric,
+    StmtCounters, new_counters,
+    ScanStatusEntry, new_scan_entry,
+};
+mount base.{Bool, Maybe};
+
+fn test_explain_numeric_matches_c_header() {
+    assert_eq(explain_numeric(&ExkNotExplain), 0);
+    assert_eq(explain_numeric(&ExkExplain), 1);
+    assert_eq(explain_numeric(&ExkExplainQueryPlan), 2);
+}
+
+fn test_explain_any_flag() {
+    assert(!explain_is_any(&ExkNotExplain));
+    assert(explain_is_any(&ExkExplain));
+    assert(explain_is_any(&ExkExplainQueryPlan));
+}
+
+fn test_flags_accessors_round_trip() {
+    let f = new_flags(ExkExplainQueryPlan, true);
+    assert_eq(sqlite3_stmt_busy_flag(&f), 0);
+    assert_eq(sqlite3_stmt_readonly_flag(&f), 1);
+    assert_eq(sqlite3_stmt_explain_value(&f), 2);
+    assert_eq(sqlite3_stmt_isexplain_value(&f), 1);
+}
+
+fn test_sql_view_returns_original_until_recorded() {
+    let mut v = new_view("SELECT ?".clone());
+    assert(v.sqlite3_sql() == "SELECT ?".clone());
+    assert(!v.has_expansion());
+    v.record_expansion("SELECT 42".clone());
+    assert(v.has_expansion());
+    match v.sqlite3_expanded_sql() {
+        Maybe.Some(t) => assert(t.len() > 0),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_counter_op_numeric_match_stmtstatus() {
+    assert_eq(op_numeric(&ScFullscanStep), 1);
+    assert_eq(op_numeric(&ScSort), 2);
+    assert_eq(op_numeric(&ScVmStep), 4);
+    assert_eq(op_numeric(&ScRun), 6);
+}
+
+fn test_counters_read_with_reset() {
+    let mut c = new_counters();
+    c.vm_step = 42 as Int64;
+    let v = c.read(&ScVmStep, true);
+    assert_eq(v, 42 as Int64);
+    let v2 = c.read(&ScVmStep, false);
+    assert_eq(v2, 0 as Int64);
+}
+
+fn test_scan_status_entry_initialised() {
+    let e = new_scan_entry(0, "scan t".clone(), "SEARCH t".clone());
+    assert_eq(e.loop_index, 0);
+    assert_eq(e.parent, -1);
+    assert_eq(e.n_loop, 0 as Int64);
+}
+
+fn main() {
+    test_explain_numeric_matches_c_header();
+    test_explain_any_flag();
+    test_flags_accessors_round_trip();
+    test_sql_view_returns_original_until_recorded();
+    test_counter_op_numeric_match_stmtstatus();
+    test_counters_read_with_reset();
+    test_scan_status_entry_initialised();
+}

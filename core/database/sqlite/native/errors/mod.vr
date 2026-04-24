@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/errors/mod.vr
+// =============================================================================
+// Layer: 7 (façade — public error-surface)
+// Spec: SQLite C API — sqlite3_errcode / sqlite3_extended_errcode /
+//       sqlite3_errmsg / sqlite3_errstr / sqlite3_error_offset /
+//       sqlite3_system_errno.  Appendix D mirrors these numeric codes.
+//
+// This catalogue models the *public* error surface seen by embedders,
+// distinct from the rich internal `DbError` sums used inside l0–l5
+// crates.  The two are bridged at the l7_api boundary.
+//
+// Submodules:
+//   * `code`     — primary + extended code catalogues
+//   * `message`  — rendered diagnostic message (+ optional offset)
+//   * `engine`   — C-API-aligned accessors
+// =============================================================================
+
+module core.database.sqlite.native.errors;
+
+public module code;
+public module message;
+public module engine;

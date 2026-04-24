@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/exec/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_exec convenience)
+// Spec: SQLite C API — sqlite3_exec(db, sql, cb, pArg, pErrmsg).
+//
+// The convenience loop:
+//   1. Parse SQL into statement segments using the `complete` scanner.
+//   2. For each segment: prepare → step until DONE/ROW → invoke cb per row.
+//   3. Stop on first error or when cb returns non-zero.
+//
+// Submodules:
+//   * `row`       — column-value list handed to the user callback
+//   * `callback`  — CallbackDecision sum
+//   * `engine`    — pure driver (caller supplies prepare / step hooks)
+// =============================================================================
+
+module core.database.sqlite.native.exec;
+
+public module row;
+public module callback;
+public module engine;

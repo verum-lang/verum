@@ -1,0 +1,43 @@
+// =============================================================================
+// log/record.vr — one emitted log record
+// =============================================================================
+// Spec: SQLite C API — sqlite3_log(errcode, fmt, …).
+//
+// We pre-render `fmt` into `message` before the record hits the sink
+// so sinks don't have to understand printf formatting.
+// =============================================================================
+
+module core.database.sqlite.native.log.record;
+
+mount core.*;
+mount base.{Text};
+mount core.database.sqlite.native.log.level.{
+    LogLevel, level_from_primary,
+};
+
+public type LogRecord is {
+    /// Extended error code as passed to sqlite3_log.
+    errcode: Int,
+    level: LogLevel,
+    message: Text,
+    /// Monotone wall-clock (ns) for deterministic ordering.
+    timestamp_ns: Int64,
+    /// Sequence number within the current engine (for tie-break).
+    seq: Int64,
+}
+
+public fn new_record(
+    errcode: Int,
+    message: Text,
+    timestamp_ns: Int64,
+    seq: Int64,
+) -> LogRecord {
+    let primary: Int = errcode - ((errcode / 256) * 256);
+    LogRecord {
+        errcode: errcode,
+        level: level_from_primary(primary),
+        message: message,
+        timestamp_ns: timestamp_ns,
+        seq: seq,
+    }
+}

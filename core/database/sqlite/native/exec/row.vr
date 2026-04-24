@@ -1,0 +1,45 @@
+// =============================================================================
+// exec/row.vr — column-values passed to the sqlite3_exec callback
+// =============================================================================
+// Spec: SQLite C API
+//
+// The classical callback signature is:
+//
+//   int xCallback(void* pArg, int ncols, char** values, char** names);
+//
+// Here we represent the pair of parallel arrays as a single typed
+// record to keep the API honest + avoid unchecked parallel indexing.
+// =============================================================================
+
+module core.database.sqlite.native.exec.row;
+
+mount core.*;
+mount base.{Text};
+mount collections.List;
+
+public type ExecColumn is {
+    name: Text,
+    /// The canonical sqlite3_exec surface hands NULLs back as an
+    /// empty Text — we keep that exactly.  Embedders that need
+    /// typed values use the iterator/collect catalogue instead.
+    text: Text,
+}
+
+public fn exec_column(name: Text, text: Text) -> ExecColumn {
+    ExecColumn { name: name, text: text }
+}
+
+public type ExecRow is {
+    columns: List<ExecColumn>,
+}
+
+public fn new_row() -> ExecRow {
+    ExecRow { columns: List.new() }
+}
+
+implement ExecRow {
+    pub fn push(&mut self, name: Text, text: Text) {
+        self.columns.push(exec_column(name, text));
+    }
+    pub fn len(&self) -> Int { self.columns.len() }
+}

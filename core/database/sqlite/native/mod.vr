@@ -188,3 +188,19 @@ public module incrblob;
 public module walblock;
 // - shutdown: sqlite3_shutdown sequence — subsystem + phase + engine
 public module shutdown;
+// - changes: sqlite3_changes / _total_changes / _last_insert_rowid (row-accounting)
+public module changes;
+// - errors: sqlite3_errcode / _extended_errcode / _errmsg / _errstr / _error_offset
+public module errors;
+// - interrupt: sqlite3_interrupt / _is_interrupted — cancellation token (§20.5)
+public module interrupt;
+// - complete: sqlite3_complete / _complete16 — SQL statement-boundary scanner
+public module complete;
+// - progress: sqlite3_progress_handler — per-op-tick consultation
+public module progress;
+// - exec: sqlite3_exec convenience — prepare/step/reset loop with row callback
+public module exec;
+// - log: sqlite3_log — global diagnostic-log surface + ring-buffer sink
+public module log;
+// - stmt_introspect: sqlite3_stmt_busy / _readonly / _explain / _sql / _status
+public module stmt_introspect;

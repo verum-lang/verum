@@ -1,0 +1,128 @@
+// =============================================================================
+// stmt_introspect/counter.vr — per-statement statistics
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_stmt_status(stmt, op, resetFlag)    → value for op
+//   sqlite3_stmt_scanstatus_v2(stmt, idx, …)   → one scan-status row
+//
+// The op ids match the SQLITE_STMTSTATUS_* constants.  `reset_flag`
+// zeroes the counter after reading.
+// =============================================================================
+
+module core.database.sqlite.native.stmt_introspect.counter;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type StmtCounterOp is
+      ScFullscanStep
+    | ScSort
+    | ScAutoindex
+    | ScVmStep
+    | ScReprepare
+    | ScRun
+    | ScFilterMiss
+    | ScFilterHit
+    | ScMemUsed;
+
+public fn op_numeric(op: &StmtCounterOp) -> Int {
+    // Matches SQLITE_STMTSTATUS_* in sqlite3.h.
+    match op {
+        ScFullscanStep => 1,
+        ScSort         => 2,
+        ScAutoindex    => 3,
+        ScVmStep       => 4,
+        ScReprepare    => 5,
+        ScRun          => 6,
+        ScFilterMiss   => 7,
+        ScFilterHit    => 8,
+        ScMemUsed      => 99,
+    }
+}
+
+public type StmtCounters is {
+    fullscan_step: Int64,
+    sort: Int64,
+    autoindex: Int64,
+    vm_step: Int64,
+    reprepare: Int64,
+    run: Int64,
+    filter_miss: Int64,
+    filter_hit: Int64,
+    mem_used: Int64,
+}
+
+public fn new_counters() -> StmtCounters {
+    StmtCounters {
+        fullscan_step: 0 as Int64,
+        sort: 0 as Int64,
+        autoindex: 0 as Int64,
+        vm_step: 0 as Int64,
+        reprepare: 0 as Int64,
+        run: 0 as Int64,
+        filter_miss: 0 as Int64,
+        filter_hit: 0 as Int64,
+        mem_used: 0 as Int64,
+    }
+}
+
+implement StmtCounters {
+    pub fn read(&mut self, op: &StmtCounterOp, reset: Bool) -> Int64 {
+        let v = match op {
+            ScFullscanStep => self.fullscan_step,
+            ScSort         => self.sort,
+            ScAutoindex    => self.autoindex,
+            ScVmStep       => self.vm_step,
+            ScReprepare    => self.reprepare,
+            ScRun          => self.run,
+            ScFilterMiss   => self.filter_miss,
+            ScFilterHit    => self.filter_hit,
+            ScMemUsed      => self.mem_used,
+        };
+        if reset { self.zero(op); }
+        v
+    }
+
+    fn zero(&mut self, op: &StmtCounterOp) {
+        match op {
+            ScFullscanStep => self.fullscan_step = 0 as Int64,
+            ScSort         => self.sort = 0 as Int64,
+            ScAutoindex    => self.autoindex = 0 as Int64,
+            ScVmStep       => self.vm_step = 0 as Int64,
+            ScReprepare    => self.reprepare = 0 as Int64,
+            ScRun          => self.run = 0 as Int64,
+            ScFilterMiss   => self.filter_miss = 0 as Int64,
+            ScFilterHit    => self.filter_hit = 0 as Int64,
+            ScMemUsed      => self.mem_used = 0 as Int64,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Scan-status entries (sqlite3_stmt_scanstatus_v2)
+// -----------------------------------------------------------------------------
+
+public type ScanStatusEntry is {
+    loop_index: Int,
+    n_loop: Int64,
+    n_visit: Int64,
+    est_rows: Int64,
+    name: Text,
+    explain_text: Text,
+    parent: Int,
+    select_id: Int,
+}
+
+public fn new_scan_entry(loop_index: Int, name: Text, explain_text: Text) -> ScanStatusEntry {
+    ScanStatusEntry {
+        loop_index: loop_index,
+        n_loop: 0 as Int64,
+        n_visit: 0 as Int64,
+        est_rows: 0 as Int64,
+        name: name,
+        explain_text: explain_text,
+        parent: -1,
+        select_id: 0,
+    }
+}

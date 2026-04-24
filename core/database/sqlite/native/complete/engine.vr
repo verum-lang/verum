@@ -1,0 +1,31 @@
+// =============================================================================
+// complete/engine.vr — C-API aligned accessor
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_complete(sql) → int (1 if complete, 0 otherwise)
+//
+// The UTF-16 variant sqlite3_complete16 is expected to decode into the
+// same byte-oriented scanner; this façade only exposes the UTF-8 form.
+// =============================================================================
+
+module core.database.sqlite.native.complete.engine;
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.complete.state.{
+    ScanState, new_state,
+};
+mount core.database.sqlite.native.complete.scanner.{
+    scan_text,
+};
+
+public fn sqlite3_complete_bytes(bytes: &List<u8>) -> Int {
+    let mut s = new_state();
+    scan_text(&mut s, bytes);
+    if s.has_content && s.last_was_semicolon && s.trigger_depth == 0 {
+        1
+    } else {
+        0
+    }
+}

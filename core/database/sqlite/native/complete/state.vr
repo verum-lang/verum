@@ -1,0 +1,85 @@
+// =============================================================================
+// complete/state.vr — scanner state machine
+// =============================================================================
+// Spec: SQLite C API — sqlite3_complete.
+//
+// The classic algorithm is a small state machine that tracks:
+//
+//   * current lexical mode (plain / single-quote / double-quote /
+//     bracket-identifier / line-comment / block-comment),
+//   * CREATE TRIGGER depth — once a CREATE TRIGGER begins, a stand-
+//     alone `;` does *not* end the outer statement until the trailing
+//     `END` is seen,
+//   * whether we have seen *any* non-whitespace character since the
+//     last terminator (empty strings are not complete).
+// =============================================================================
+
+module core.database.sqlite.native.complete.state;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ScanMode is
+      SmNormal
+    | SmSingleQuote
+    | SmDoubleQuote
+    | SmBracketIdent
+    | SmBacktickIdent
+    | SmLineComment
+    | SmBlockComment;
+
+public fn mode_name(m: &ScanMode) -> Text {
+    match m {
+        SmNormal        => "normal".clone(),
+        SmSingleQuote   => "single-quote".clone(),
+        SmDoubleQuote   => "double-quote".clone(),
+        SmBracketIdent  => "bracket".clone(),
+        SmBacktickIdent => "backtick".clone(),
+        SmLineComment   => "line-comment".clone(),
+        SmBlockComment  => "block-comment".clone(),
+    }
+}
+
+public type ScanState is {
+    mode: ScanMode,
+    /// Depth of unterminated `CREATE TRIGGER … BEGIN …` regions.
+    trigger_depth: Int,
+    /// Token history long enough to catch CREATE TRIGGER boundaries
+    /// and the trailing END / ;-after-END.
+    saw_create: Bool,
+    saw_trigger: Bool,
+    saw_begin: Bool,
+    saw_end: Bool,
+    /// True once any non-whitespace-non-comment byte has been seen.
+    has_content: Bool,
+    /// True iff the last non-comment byte was `;` *outside* any
+    /// quoted region and at trigger_depth 0 — the completeness flag.
+    last_was_semicolon: Bool,
+}
+
+public fn new_state() -> ScanState {
+    ScanState {
+        mode: SmNormal,
+        trigger_depth: 0,
+        saw_create: false,
+        saw_trigger: false,
+        saw_begin: false,
+        saw_end: false,
+        has_content: false,
+        last_was_semicolon: false,
+    }
+}
+
+public fn reset_token_flags(s: &mut ScanState) {
+    s.saw_create = false;
+    s.saw_trigger = false;
+    s.saw_begin = false;
+    s.saw_end = false;
+}
+
+public fn in_quote_or_comment(m: &ScanMode) -> Bool {
+    match m {
+        SmNormal => false,
+        _ => true,
+    }
+}

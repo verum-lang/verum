@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, changes, counter, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.changes.counter.{
+    ChangeCounter, new_counter, is_noop,
+};
+mount core.database.sqlite.native.changes.snapshot.{
+    ChangeSnapshot, snapshot_of, advanced, total_delta,
+};
+mount core.database.sqlite.native.changes.engine.{
+    sqlite3_changes, sqlite3_changes64,
+    sqlite3_total_changes, sqlite3_total_changes64,
+    sqlite3_last_insert_rowid, sqlite3_set_last_insert_rowid,
+};
+mount base.{Bool};
+
+fn test_new_counter_is_zero() {
+    let c = new_counter();
+    assert_eq(sqlite3_changes(&c), 0);
+    assert_eq(sqlite3_total_changes(&c), 0);
+    assert_eq(sqlite3_last_insert_rowid(&c), 0 as Int64);
+    assert(is_noop(&c));
+}
+
+fn test_record_statement_accumulates() {
+    let mut c = new_counter();
+    c.record_statement(5 as Int64);
+    c.record_statement(3 as Int64);
+    assert_eq(sqlite3_changes(&c), 3);
+    assert_eq(sqlite3_total_changes64(&c), 8 as Int64);
+}
+
+fn test_last_insert_rowid_overrides() {
+    let mut c = new_counter();
+    c.record_insert(42 as Int64);
+    assert_eq(sqlite3_last_insert_rowid(&c), 42 as Int64);
+    sqlite3_set_last_insert_rowid(&mut c, 99 as Int64);
+    assert_eq(sqlite3_last_insert_rowid(&c), 99 as Int64);
+}
+
+fn test_snapshot_diff_reports_delta() {
+    let mut c = new_counter();
+    let before = snapshot_of(&c);
+    c.record_statement(10 as Int64);
+    let after = snapshot_of(&c);
+    assert(advanced(&before, &after));
+    assert_eq(total_delta(&before, &after), 10 as Int64);
+}
+
+fn test_changes64_matches_statement_field() {
+    let mut c = new_counter();
+    c.record_statement(7 as Int64);
+    assert_eq(sqlite3_changes64(&c), 7 as Int64);
+}
+
+fn test_start_statement_zeroes_local() {
+    let mut c = new_counter();
+    c.record_statement(4 as Int64);
+    c.start_statement();
+    assert(is_noop(&c));
+    assert_eq(sqlite3_total_changes(&c), 4);
+}
+
+fn main() {
+    test_new_counter_is_zero();
+    test_record_statement_accumulates();
+    test_last_insert_rowid_overrides();
+    test_snapshot_diff_reports_delta();
+    test_changes64_matches_statement_field();
+    test_start_statement_zeroes_local();
+}

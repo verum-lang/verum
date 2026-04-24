@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/complete/mod.vr
+// =============================================================================
+// Layer: 7 (façade — SQL statement-boundary detection)
+// Spec: SQLite C API — sqlite3_complete / sqlite3_complete16.
+//
+// The classic "is this a complete statement" scanner — used by shells
+// and REPLs to decide whether the user has typed enough SQL to submit.
+//
+// Submodules:
+//   * `state`    — scanner state (tokens, quotes, CREATE TRIGGER depth)
+//   * `scanner`  — step-byte update of state
+//   * `engine`   — C-API-aligned accessor (sqlite3_complete)
+// =============================================================================
+
+module core.database.sqlite.native.complete;
+
+public module state;
+public module scanner;
+public module engine;

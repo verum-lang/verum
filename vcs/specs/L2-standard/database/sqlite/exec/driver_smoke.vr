@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, exec, convenience, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.exec.row.{
+    ExecColumn, ExecRow, exec_column, new_row,
+};
+mount core.database.sqlite.native.exec.callback.{
+    CallbackDecision, CdContinue, CdAbort,
+    decision_numeric, decision_aborts, from_numeric,
+};
+mount core.database.sqlite.native.exec.engine.{
+    ExecOutcome, EoOk, EoAborted, EoError,
+    outcome_name, exec_statement, exec_many,
+};
+mount core.database.sqlite.native.iter.outcome.{
+    StepOutcome, SoRow, SoDone, SoError,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_exec_row_push_and_len() {
+    let mut r = new_row();
+    r.push("id".clone(), "1".clone());
+    r.push("name".clone(), "alice".clone());
+    assert_eq(r.len(), 2);
+}
+
+fn test_callback_decision_round_trip() {
+    assert_eq(decision_numeric(&CdContinue), 0);
+    assert_eq(decision_numeric(&CdAbort), 1);
+    assert(decision_aborts(&CdAbort));
+    assert(!decision_aborts(&CdContinue));
+    assert(!decision_aborts(&from_numeric(0)));
+    assert(decision_aborts(&from_numeric(42)));
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&EoOk) == "ok".clone());
+    assert(outcome_name(&EoAborted) == "aborted".clone());
+    assert(outcome_name(&EoError("x".clone())) == "error".clone());
+}
+
+fn fake_prepare_ok(_sql: &Text) -> Int64 { 1 as Int64 }
+fn fake_prepare_fail(_sql: &Text) -> Int64 { -1 as Int64 }
+fn fake_step_done(_id: Int64) -> StepOutcome { SoDone }
+fn fake_step_err(_id: Int64) -> StepOutcome { SoError("boom".clone()) }
+fn fake_read_row(_id: Int64) -> ExecRow { new_row() }
+fn noop_finalize(_id: Int64) {}
+fn cont_cb(_r: &ExecRow) -> CallbackDecision { CdContinue }
+
+fn test_exec_statement_ok_path() {
+    let outcome = exec_statement(
+        "SELECT 1".clone(),
+        fake_prepare_ok, fake_step_done, fake_read_row, noop_finalize, cont_cb,
+    );
+    match &outcome {
+        EoOk => {},
+        _ => assert(false),
+    }
+}
+
+fn test_exec_statement_prepare_failure_is_error() {
+    let outcome = exec_statement(
+        "SELECT 1".clone(),
+        fake_prepare_fail, fake_step_done, fake_read_row, noop_finalize, cont_cb,
+    );
+    match &outcome {
+        EoError(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_exec_statement_step_error_surfaces() {
+    let outcome = exec_statement(
+        "SELECT 1".clone(),
+        fake_prepare_ok, fake_step_err, fake_read_row, noop_finalize, cont_cb,
+    );
+    match &outcome {
+        EoError(msg) => assert(msg.len() > 0),
+        _ => assert(false),
+    }
+}
+
+fn test_exec_many_stops_on_first_error() {
+    let mut stmts: List<Text> = List.new();
+    stmts.push("S1".clone());
+    stmts.push("S2".clone());
+    let outcome = exec_many(
+        &stmts,
+        fake_prepare_ok, fake_step_err, fake_read_row, noop_finalize, cont_cb,
+    );
+    match &outcome {
+        EoError(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn main() {
+    test_exec_row_push_and_len();
+    test_callback_decision_round_trip();
+    test_outcome_names();
+    test_exec_statement_ok_path();
+    test_exec_statement_prepare_failure_is_error();
+    test_exec_statement_step_error_surfaces();
+    test_exec_many_stops_on_first_error();
+}

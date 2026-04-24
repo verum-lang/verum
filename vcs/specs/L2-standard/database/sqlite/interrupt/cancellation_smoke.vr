@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, interrupt, cancellation, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.interrupt.token.{
+    InterruptToken, InterruptState, InterruptReason,
+    ItArmed, ItFiring, ItServed,
+    IrUser, IrTimeout, IrAuthorizer, IrProgressHandler, IrExtension,
+    new_token, reason_name,
+};
+mount core.database.sqlite.native.interrupt.engine.{
+    sqlite3_interrupt, sqlite3_interrupt_with, sqlite3_is_interrupted,
+    check_vdbe_tick,
+};
+mount base.{Bool};
+
+fn test_new_token_not_pending() {
+    let t = new_token();
+    assert(!t.is_pending());
+    assert_eq(sqlite3_is_interrupted(&t), 0);
+}
+
+fn test_fire_marks_pending() {
+    let mut t = new_token();
+    sqlite3_interrupt(&mut t);
+    assert(t.is_pending());
+    assert_eq(sqlite3_is_interrupted(&t), 1);
+}
+
+fn test_fire_with_specific_reason() {
+    let mut t = new_token();
+    sqlite3_interrupt_with(&mut t, IrTimeout);
+    assert(t.is_pending());
+}
+
+fn test_acknowledge_then_rearm() {
+    let mut t = new_token();
+    sqlite3_interrupt(&mut t);
+    t.acknowledge(3);
+    assert(!t.is_pending());
+    t.rearm();
+    assert(!t.is_pending());
+}
+
+fn test_reason_names() {
+    assert(reason_name(&IrUser) == "user".clone());
+    assert(reason_name(&IrTimeout) == "timeout".clone());
+    assert(reason_name(&IrAuthorizer) == "authorizer".clone());
+    assert(reason_name(&IrProgressHandler) == "progress".clone());
+    assert(reason_name(&IrExtension("cap".clone())) == "cap".clone());
+}
+
+fn test_vdbe_tick_only_on_interval() {
+    let mut t = new_token();
+    sqlite3_interrupt(&mut t);
+    // Not on an interval boundary:
+    assert(!check_vdbe_tick(&t, 16, 1));
+    assert(!check_vdbe_tick(&t, 16, 15));
+    // Exactly on the boundary:
+    assert(check_vdbe_tick(&t, 16, 16));
+    assert(check_vdbe_tick(&t, 16, 32));
+}
+
+fn test_vdbe_tick_never_when_not_pending() {
+    let t = new_token();
+    assert(!check_vdbe_tick(&t, 4, 4));
+}
+
+fn test_fire_version_monotone() {
+    let mut t = new_token();
+    let v0 = t.fire_version;
+    sqlite3_interrupt(&mut t);
+    let v1 = t.fire_version;
+    assert(v1 > v0);
+}
+
+fn main() {
+    test_new_token_not_pending();
+    test_fire_marks_pending();
+    test_fire_with_specific_reason();
+    test_acknowledge_then_rearm();
+    test_reason_names();
+    test_vdbe_tick_only_on_interval();
+    test_vdbe_tick_never_when_not_pending();
+    test_fire_version_monotone();
+}

@@ -1,0 +1,106 @@
+// =============================================================================
+// exec/engine.vr — sqlite3_exec driver (pure, callback-based)
+// =============================================================================
+// Spec: SQLite C API
+//
+// The catalogue-layer driver takes closures from the caller for:
+//   * prepare_fn : &Text -> Int64        // statement id, or -1 on error
+//   * step_fn    : Int64 -> StepOutcome
+//   * read_row_fn: Int64 -> ExecRow
+//   * finalize_fn: Int64 -> ()
+//
+// and loops through each non-empty statement.  Aggregated outcome
+// reflects the first terminal event (abort / error / success).
+// =============================================================================
+
+module core.database.sqlite.native.exec.engine;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+mount core.database.sqlite.native.iter.outcome.{
+    StepOutcome, has_row, is_terminal, SoError,
+};
+mount core.database.sqlite.native.exec.row.{
+    ExecRow,
+};
+mount core.database.sqlite.native.exec.callback.{
+    CallbackDecision, CdContinue, CdAbort, decision_aborts,
+};
+
+public type ExecOutcome is
+      EoOk
+    | EoAborted
+    | EoError(Text);
+
+public fn outcome_name(o: &ExecOutcome) -> Text {
+    match o {
+        EoOk          => "ok".clone(),
+        EoAborted     => "aborted".clone(),
+        EoError(_)    => "error".clone(),
+    }
+}
+
+public fn exec_statement(
+    sql: Text,
+    prepare_fn: fn(&Text) -> Int64,
+    step_fn: fn(Int64) -> StepOutcome,
+    read_row_fn: fn(Int64) -> ExecRow,
+    finalize_fn: fn(Int64),
+    callback: fn(&ExecRow) -> CallbackDecision,
+) -> ExecOutcome {
+    let stmt_id = (prepare_fn)(&sql);
+    if stmt_id < (0 as Int64) {
+        return EoError("prepare failed".clone());
+    }
+    let mut outcome: ExecOutcome = EoOk;
+    loop {
+        let o = (step_fn)(stmt_id);
+        if has_row(&o) {
+            let row = (read_row_fn)(stmt_id);
+            let decision = (callback)(&row);
+            if decision_aborts(&decision) {
+                outcome = EoAborted;
+                break;
+            }
+            continue;
+        }
+        match &o {
+            SoError(msg) => {
+                outcome = EoError(msg.clone());
+                break;
+            }
+            _ => {
+                if is_terminal(&o) { break; }
+            }
+        }
+    }
+    (finalize_fn)(stmt_id);
+    outcome
+}
+
+/// Drive a list of pre-split statements.  Stops at the first non-OK
+/// outcome; never calls prepare on later statements.
+public fn exec_many(
+    statements: &List<Text>,
+    prepare_fn: fn(&Text) -> Int64,
+    step_fn: fn(Int64) -> StepOutcome,
+    read_row_fn: fn(Int64) -> ExecRow,
+    finalize_fn: fn(Int64),
+    callback: fn(&ExecRow) -> CallbackDecision,
+) -> ExecOutcome {
+    let mut i: Int = 0;
+    let n = statements.len();
+    while i < n {
+        let sql = statements.get(i).clone();
+        let outcome = exec_statement(
+            sql, prepare_fn, step_fn, read_row_fn, finalize_fn, callback,
+        );
+        match &outcome {
+            EoOk => {},
+            _ => return outcome,
+        }
+        i = i + 1;
+    }
+    EoOk
+}

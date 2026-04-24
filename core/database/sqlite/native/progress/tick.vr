@@ -1,0 +1,45 @@
+// =============================================================================
+// progress/tick.vr — op-counter accounting
+// =============================================================================
+// Spec: SQLite C API
+//
+// `TickAccumulator` is the per-VDBE opcode counter.  The engine calls
+// `observe_op` on every op; `should_consult` answers "is this the tick
+// on which we should run the progress callback?"
+// =============================================================================
+
+module core.database.sqlite.native.progress.tick;
+
+mount core.*;
+mount base.{Bool};
+
+public type TickAccumulator is {
+    op_count: Int64,
+    /// Total number of consultations delivered so far.
+    consultations: Int64,
+}
+
+public fn new_accumulator() -> TickAccumulator {
+    TickAccumulator {
+        op_count: 0 as Int64,
+        consultations: 0 as Int64,
+    }
+}
+
+implement TickAccumulator {
+    pub fn observe_op(&mut self) {
+        self.op_count = self.op_count + (1 as Int64);
+    }
+
+    pub fn should_consult(&self, interval_ops: Int) -> Bool {
+        if interval_ops <= 0 { return false; }
+        let i = interval_ops as Int64;
+        if i == (0 as Int64) { return false; }
+        let residue: Int64 = self.op_count - ((self.op_count / i) * i);
+        residue == (0 as Int64) && self.op_count > (0 as Int64)
+    }
+
+    pub fn note_consultation(&mut self) {
+        self.consultations = self.consultations + (1 as Int64);
+    }
+}

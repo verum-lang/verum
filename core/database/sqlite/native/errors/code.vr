@@ -1,0 +1,188 @@
+// =============================================================================
+// errors/code.vr — primary + extended error codes
+// =============================================================================
+// Spec: SQLite C API, Appendix D
+//
+// Primary codes occupy the low 8 bits of an extended code.  A typed
+// `PrimaryCode` variant prevents mis-spelling; `extended_of(primary,
+// extension)` builds the 32-bit composite.
+// =============================================================================
+
+module core.database.sqlite.native.errors.code;
+
+mount core.*;
+mount base.{Bool, Text};
+
+// -----------------------------------------------------------------------------
+// Primary codes (Appendix D)
+// -----------------------------------------------------------------------------
+
+public type PrimaryCode is
+      PcOk
+    | PcError
+    | PcInternal
+    | PcPerm
+    | PcAbort
+    | PcBusy
+    | PcLocked
+    | PcNoMem
+    | PcReadonly
+    | PcInterrupt
+    | PcIoErr
+    | PcCorrupt
+    | PcNotFound
+    | PcFull
+    | PcCantOpen
+    | PcProtocol
+    | PcEmpty
+    | PcSchema
+    | PcTooBig
+    | PcConstraint
+    | PcMismatch
+    | PcMisuse
+    | PcNoLfs
+    | PcAuth
+    | PcFormat
+    | PcRange
+    | PcNotAdb
+    | PcNotice
+    | PcWarning
+    | PcRow
+    | PcDone;
+
+public fn primary_numeric(p: &PrimaryCode) -> Int {
+    match p {
+        PcOk           => 0,
+        PcError        => 1,
+        PcInternal     => 2,
+        PcPerm         => 3,
+        PcAbort        => 4,
+        PcBusy         => 5,
+        PcLocked       => 6,
+        PcNoMem        => 7,
+        PcReadonly     => 8,
+        PcInterrupt    => 9,
+        PcIoErr        => 10,
+        PcCorrupt      => 11,
+        PcNotFound     => 12,
+        PcFull         => 13,
+        PcCantOpen     => 14,
+        PcProtocol     => 15,
+        PcEmpty        => 16,
+        PcSchema       => 17,
+        PcTooBig       => 18,
+        PcConstraint   => 19,
+        PcMismatch     => 20,
+        PcMisuse       => 21,
+        PcNoLfs        => 22,
+        PcAuth         => 23,
+        PcFormat       => 24,
+        PcRange        => 25,
+        PcNotAdb       => 26,
+        PcNotice       => 27,
+        PcWarning      => 28,
+        PcRow          => 100,
+        PcDone         => 101,
+    }
+}
+
+public fn primary_mnemonic(p: &PrimaryCode) -> Text {
+    match p {
+        PcOk         => "SQLITE_OK".clone(),
+        PcError      => "SQLITE_ERROR".clone(),
+        PcInternal   => "SQLITE_INTERNAL".clone(),
+        PcPerm       => "SQLITE_PERM".clone(),
+        PcAbort      => "SQLITE_ABORT".clone(),
+        PcBusy       => "SQLITE_BUSY".clone(),
+        PcLocked     => "SQLITE_LOCKED".clone(),
+        PcNoMem      => "SQLITE_NOMEM".clone(),
+        PcReadonly   => "SQLITE_READONLY".clone(),
+        PcInterrupt  => "SQLITE_INTERRUPT".clone(),
+        PcIoErr      => "SQLITE_IOERR".clone(),
+        PcCorrupt    => "SQLITE_CORRUPT".clone(),
+        PcNotFound   => "SQLITE_NOTFOUND".clone(),
+        PcFull       => "SQLITE_FULL".clone(),
+        PcCantOpen   => "SQLITE_CANTOPEN".clone(),
+        PcProtocol   => "SQLITE_PROTOCOL".clone(),
+        PcEmpty      => "SQLITE_EMPTY".clone(),
+        PcSchema     => "SQLITE_SCHEMA".clone(),
+        PcTooBig     => "SQLITE_TOOBIG".clone(),
+        PcConstraint => "SQLITE_CONSTRAINT".clone(),
+        PcMismatch   => "SQLITE_MISMATCH".clone(),
+        PcMisuse     => "SQLITE_MISUSE".clone(),
+        PcNoLfs      => "SQLITE_NOLFS".clone(),
+        PcAuth       => "SQLITE_AUTH".clone(),
+        PcFormat     => "SQLITE_FORMAT".clone(),
+        PcRange      => "SQLITE_RANGE".clone(),
+        PcNotAdb     => "SQLITE_NOTADB".clone(),
+        PcNotice     => "SQLITE_NOTICE".clone(),
+        PcWarning    => "SQLITE_WARNING".clone(),
+        PcRow        => "SQLITE_ROW".clone(),
+        PcDone       => "SQLITE_DONE".clone(),
+    }
+}
+
+public fn primary_is_success(p: &PrimaryCode) -> Bool {
+    match p {
+        PcOk | PcRow | PcDone => true,
+        _ => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Extended codes (low 8 bits = primary; high 24 = extension)
+// -----------------------------------------------------------------------------
+
+public type ExtendedCode is {
+    primary: PrimaryCode,
+    /// Extension bits >> 8 (0 for plain primary).
+    extension: Int,
+}
+
+public fn extended_of(primary: PrimaryCode, extension: Int) -> ExtendedCode {
+    ExtendedCode { primary: primary, extension: extension }
+}
+
+public fn extended_numeric(e: &ExtendedCode) -> Int {
+    let p = primary_numeric(&e.primary);
+    p | (e.extension * 256)
+}
+
+public fn extended_is_success(e: &ExtendedCode) -> Bool {
+    primary_is_success(&e.primary)
+}
+
+/// Well-known IOERR extensions (subset — full list in §20.5 of the spec).
+public const IOERR_READ: Int            = 1;
+public const IOERR_SHORT_READ: Int      = 2;
+public const IOERR_WRITE: Int           = 3;
+public const IOERR_FSYNC: Int           = 4;
+public const IOERR_DIR_FSYNC: Int       = 5;
+public const IOERR_TRUNCATE: Int        = 6;
+public const IOERR_FSTAT: Int           = 7;
+public const IOERR_UNLOCK: Int          = 8;
+public const IOERR_RDLOCK: Int          = 9;
+public const IOERR_DELETE: Int          = 10;
+public const IOERR_BLOCKED: Int         = 11;
+public const IOERR_NOMEM: Int           = 12;
+public const IOERR_ACCESS: Int          = 13;
+public const IOERR_CHECKRESERVEDLOCK: Int = 14;
+public const IOERR_LOCK: Int            = 15;
+public const IOERR_CLOSE: Int           = 16;
+public const IOERR_DIR_CLOSE: Int       = 17;
+public const IOERR_SHMOPEN: Int         = 18;
+public const IOERR_SHMSIZE: Int         = 19;
+public const IOERR_SHMLOCK: Int         = 20;
+public const IOERR_SHMMAP: Int          = 21;
+public const IOERR_SEEK: Int            = 22;
+public const IOERR_DELETE_NOENT: Int    = 23;
+public const IOERR_MMAP: Int            = 24;
+public const IOERR_GETTEMPPATH: Int     = 25;
+public const IOERR_CONVPATH: Int        = 26;
+public const IOERR_VNODE: Int           = 27;
+public const IOERR_AUTH: Int            = 28;
+public const IOERR_BEGIN_ATOMIC: Int    = 29;
+public const IOERR_COMMIT_ATOMIC: Int   = 30;
+public const IOERR_ROLLBACK_ATOMIC: Int = 31;
+public const IOERR_DATA: Int            = 32;
+public const IOERR_CORRUPTFS: Int       = 33;

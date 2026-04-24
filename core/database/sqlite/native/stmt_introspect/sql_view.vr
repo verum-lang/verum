@@ -1,0 +1,63 @@
+// =============================================================================
+// stmt_introspect/sql_view.vr — SQL text views for a prepared statement
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_sql(stmt)           → original SQL text (possibly with
+//                                   ? placeholders)
+//   sqlite3_expanded_sql(stmt)  → SQL text with parameter values
+//                                   substituted (caller must sqlite3_free)
+//   sqlite3_normalized_sql(stmt)→ SQL text with literals replaced by
+//                                   ? and whitespace / case canonicalised
+// =============================================================================
+
+module core.database.sqlite.native.stmt_introspect.sql_view;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+
+public type SqlView is {
+    original: Text,
+    /// None until sqlite3_expanded_sql is called.
+    expanded: Maybe<Text>,
+    /// None until sqlite3_normalized_sql is called.
+    normalized: Maybe<Text>,
+}
+
+public fn new_view(original: Text) -> SqlView {
+    SqlView {
+        original: original,
+        expanded: Maybe.None,
+        normalized: Maybe.None,
+    }
+}
+
+implement SqlView {
+    pub fn sqlite3_sql(&self) -> Text { self.original.clone() }
+
+    pub fn sqlite3_expanded_sql(&self) -> Maybe<Text> {
+        match &self.expanded {
+            Maybe.Some(t) => Maybe.Some(t.clone()),
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    pub fn sqlite3_normalized_sql(&self) -> Maybe<Text> {
+        match &self.normalized {
+            Maybe.Some(t) => Maybe.Some(t.clone()),
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    pub fn record_expansion(&mut self, expanded: Text) {
+        self.expanded = Maybe.Some(expanded);
+    }
+
+    pub fn record_normalization(&mut self, normalized: Text) {
+        self.normalized = Maybe.Some(normalized);
+    }
+
+    pub fn has_expansion(&self) -> Bool {
+        match &self.expanded { Maybe.Some(_) => true, Maybe.None => false }
+    }
+}

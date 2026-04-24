@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/log/mod.vr
+// =============================================================================
+// Layer: 7 (façade — global error-log surface)
+// Spec: SQLite C API — sqlite3_log(errcode, fmt, …).
+//
+// Used by SQLite internals for soft diagnostics (e.g. "malformed row
+// in the wal-index header, recovering").  Embedders register a sink
+// once via sqlite3_config(SQLITE_CONFIG_LOG, …); every internal
+// `sqlite3_log` call routes to that sink.
+//
+// Submodules:
+//   * `level`   — severity mapping onto extended error codes
+//   * `record`  — one emitted log record
+//   * `sink`    — registered handler descriptor
+//   * `engine`  — routing façade
+// =============================================================================
+
+module core.database.sqlite.native.log;
+
+public module level;
+public module record;
+public module sink;
+public module engine;

@@ -1,0 +1,38 @@
+// =============================================================================
+// interrupt/engine.vr — C-API facade over InterruptToken
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_interrupt(db)       → void
+//   sqlite3_is_interrupted(db)  → int (0 / 1)
+// =============================================================================
+
+module core.database.sqlite.native.interrupt.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.interrupt.token.{
+    InterruptToken, InterruptReason, IrUser,
+};
+
+public fn sqlite3_interrupt(t: &mut InterruptToken) {
+    t.fire(IrUser);
+}
+
+/// Extension authors (e.g. busy-timeout) may fire with a specific reason.
+public fn sqlite3_interrupt_with(t: &mut InterruptToken, reason: InterruptReason) {
+    t.fire(reason);
+}
+
+public fn sqlite3_is_interrupted(t: &InterruptToken) -> Int {
+    if t.is_pending() { 1 } else { 0 }
+}
+
+/// Convenience: VDBE check on every N opcodes.
+public fn check_vdbe_tick(t: &InterruptToken, every_n: Int, op_count: Int) -> Bool {
+    if every_n <= 0 { return false; }
+    if op_count <= 0 { return false; }
+    let residue: Int = op_count - ((op_count / every_n) * every_n);
+    if residue != 0 { return false; }
+    t.is_pending()
+}

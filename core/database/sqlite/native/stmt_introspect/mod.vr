@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_introspect/mod.vr
+// =============================================================================
+// Layer: 7 (façade — prepared-statement introspection surface)
+// Spec: SQLite C API:
+//
+//   sqlite3_stmt_busy / _readonly / _explain / _isexplain
+//   sqlite3_sql / sqlite3_expanded_sql / sqlite3_normalized_sql
+//   sqlite3_stmt_status / sqlite3_stmt_scanstatus_v2
+//
+// Submodules:
+//   * `flags`    — typed boolean flag record (busy/readonly/explain…)
+//   * `sql_view` — original / expanded / normalized strings
+//   * `counter`  — per-statement stat counters + scan-status entries
+// =============================================================================
+
+module core.database.sqlite.native.stmt_introspect;
+
+public module flags;
+public module sql_view;
+public module counter;

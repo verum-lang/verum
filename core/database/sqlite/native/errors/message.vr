@@ -1,0 +1,94 @@
+// =============================================================================
+// errors/message.vr — rendered public error diagnostics
+// =============================================================================
+// Spec: SQLite C API — sqlite3_errmsg / sqlite3_errstr / sqlite3_error_offset
+//
+// `ErrorMessage` is the value returned by sqlite3_errmsg.  It carries:
+//   * the extended code (for sqlite3_extended_errcode),
+//   * the diagnostic text,
+//   * an optional byte-offset into the *current* SQL for parse errors
+//     (sqlite3_error_offset; -1 if not applicable),
+//   * an optional platform errno (sqlite3_system_errno).
+// =============================================================================
+
+module core.database.sqlite.native.errors.message;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, PrimaryCode, PcOk,
+    primary_mnemonic, primary_is_success,
+    extended_is_success,
+};
+
+public type ErrorMessage is {
+    code: ExtendedCode,
+    text: Text,
+    /// -1 → no offset available (not a parse-time error).
+    offset: Int,
+    /// 0 → no system errno recorded.
+    system_errno: Int,
+}
+
+public fn ok_message() -> ErrorMessage {
+    ErrorMessage {
+        code: ExtendedCode { primary: PcOk, extension: 0 },
+        text: "".clone(),
+        offset: -1,
+        system_errno: 0,
+    }
+}
+
+public fn new_message(code: ExtendedCode, text: Text) -> ErrorMessage {
+    ErrorMessage { code: code, text: text, offset: -1, system_errno: 0 }
+}
+
+implement ErrorMessage {
+    pub fn with_offset(&mut self, offset: Int) {
+        self.offset = offset;
+    }
+    pub fn with_system_errno(&mut self, errno: Int) {
+        self.system_errno = errno;
+    }
+    pub fn is_success(&self) -> Bool {
+        extended_is_success(&self.code)
+    }
+}
+
+/// Fallback human-readable string for a primary code — mirrors
+/// sqlite3_errstr() for values without a bespoke message.
+public fn errstr(p: &PrimaryCode) -> Text {
+    match p {
+        PcOk         => "not an error".clone(),
+        PcError      => "SQL logic error".clone(),
+        PcInternal   => "internal logic error".clone(),
+        PcPerm       => "access permission denied".clone(),
+        PcAbort      => "query aborted".clone(),
+        PcBusy       => "database is locked".clone(),
+        PcLocked     => "database table is locked".clone(),
+        PcNoMem      => "out of memory".clone(),
+        PcReadonly   => "attempt to write a readonly database".clone(),
+        PcInterrupt  => "interrupted".clone(),
+        PcIoErr      => "disk I/O error".clone(),
+        PcCorrupt    => "database disk image is malformed".clone(),
+        PcNotFound   => "unknown operation".clone(),
+        PcFull       => "database or disk is full".clone(),
+        PcCantOpen   => "unable to open database file".clone(),
+        PcProtocol   => "locking protocol".clone(),
+        PcEmpty      => "table contains no data".clone(),
+        PcSchema     => "database schema has changed".clone(),
+        PcTooBig     => "string or blob too big".clone(),
+        PcConstraint => "constraint failed".clone(),
+        PcMismatch   => "datatype mismatch".clone(),
+        PcMisuse     => "bad parameter or other API misuse".clone(),
+        PcNoLfs      => "large file support is disabled".clone(),
+        PcAuth       => "authorization denied".clone(),
+        PcFormat     => "auxiliary database format error".clone(),
+        PcRange      => "column index out of range".clone(),
+        PcNotAdb     => "file is not a database".clone(),
+        PcNotice     => "notification message".clone(),
+        PcWarning    => "warning message".clone(),
+        PcRow        => "another row available".clone(),
+        PcDone       => "no more rows available".clone(),
+    }
+}

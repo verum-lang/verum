@@ -1,0 +1,72 @@
+// =============================================================================
+// stmt_introspect/flags.vr — typed introspection flags
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_stmt_busy(stmt)      → 1 if the stmt has been stepped past
+//                                     its last DONE without a reset
+//   sqlite3_stmt_readonly(stmt)  → 1 if the stmt only reads
+//   sqlite3_stmt_explain(stmt)   → 0 / 1 / 2
+//                                    0 = not EXPLAIN
+//                                    1 = EXPLAIN
+//                                    2 = EXPLAIN QUERY PLAN
+//   sqlite3_stmt_isexplain(stmt) → 1 if stmt is EXPLAIN (any variant)
+// =============================================================================
+
+module core.database.sqlite.native.stmt_introspect.flags;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ExplainKind is
+      ExkNotExplain
+    | ExkExplain
+    | ExkExplainQueryPlan;
+
+public fn explain_numeric(e: &ExplainKind) -> Int {
+    match e {
+        ExkNotExplain        => 0,
+        ExkExplain           => 1,
+        ExkExplainQueryPlan  => 2,
+    }
+}
+
+public fn explain_is_any(e: &ExplainKind) -> Bool {
+    match e {
+        ExkNotExplain => false,
+        _ => true,
+    }
+}
+
+public type StmtFlags is {
+    busy: Bool,
+    readonly: Bool,
+    explain: ExplainKind,
+    /// True iff the statement has no bound parameters.
+    parameter_count_zero: Bool,
+}
+
+public fn new_flags(explain: ExplainKind, readonly: Bool) -> StmtFlags {
+    StmtFlags {
+        busy: false,
+        readonly: readonly,
+        explain: explain,
+        parameter_count_zero: true,
+    }
+}
+
+public fn sqlite3_stmt_busy_flag(f: &StmtFlags) -> Int {
+    if f.busy { 1 } else { 0 }
+}
+
+public fn sqlite3_stmt_readonly_flag(f: &StmtFlags) -> Int {
+    if f.readonly { 1 } else { 0 }
+}
+
+public fn sqlite3_stmt_explain_value(f: &StmtFlags) -> Int {
+    explain_numeric(&f.explain)
+}
+
+public fn sqlite3_stmt_isexplain_value(f: &StmtFlags) -> Int {
+    if explain_is_any(&f.explain) { 1 } else { 0 }
+}

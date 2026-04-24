@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/interrupt/mod.vr
+// =============================================================================
+// Layer: 7 (façade — public cancellation surface)
+// Spec: SQLite C API — sqlite3_interrupt / sqlite3_is_interrupted.
+//
+// The VDBE consults the interrupt token on a periodic cadence and
+// aborts the current statement with SQLITE_INTERRUPT when it fires.
+//
+// Submodules:
+//   * `token`  — mutable flag + reason tag
+//   * `engine` — C-API accessors and state transitions
+// =============================================================================
+
+module core.database.sqlite.native.interrupt;
+
+public module token;
+public module engine;

@@ -1,0 +1,47 @@
+// =============================================================================
+// errors/engine.vr — C-API name-aligned error accessors
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_errcode(db)           → int (primary)
+//   sqlite3_extended_errcode(db)  → int (extended)
+//   sqlite3_errmsg(db)            → Text
+//   sqlite3_error_offset(db)      → int  (-1 if N/A)
+//   sqlite3_system_errno(db)      → int
+//   sqlite3_errstr(code)          → Text (fallback)
+// =============================================================================
+
+module core.database.sqlite.native.errors.engine;
+
+mount core.*;
+mount base.{Text};
+mount core.database.sqlite.native.errors.code.{
+    PrimaryCode, primary_numeric, extended_numeric,
+};
+mount core.database.sqlite.native.errors.message.{
+    ErrorMessage, errstr,
+};
+
+public fn sqlite3_errcode(m: &ErrorMessage) -> Int {
+    primary_numeric(&m.code.primary)
+}
+
+public fn sqlite3_extended_errcode(m: &ErrorMessage) -> Int {
+    extended_numeric(&m.code)
+}
+
+public fn sqlite3_errmsg(m: &ErrorMessage) -> Text {
+    m.text.clone()
+}
+
+public fn sqlite3_error_offset(m: &ErrorMessage) -> Int {
+    m.offset
+}
+
+public fn sqlite3_system_errno(m: &ErrorMessage) -> Int {
+    m.system_errno
+}
+
+public fn sqlite3_errstr(p: &PrimaryCode) -> Text {
+    errstr(p)
+}

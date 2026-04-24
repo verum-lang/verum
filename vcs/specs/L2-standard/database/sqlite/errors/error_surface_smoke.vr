@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, errors, error-code, extended, errstr, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.errors.code.{
+    PrimaryCode,
+    PcOk, PcError, PcBusy, PcIoErr, PcRow, PcDone, PcConstraint, PcRange,
+    primary_numeric, primary_mnemonic, primary_is_success,
+    ExtendedCode, extended_of, extended_numeric, extended_is_success,
+    IOERR_READ, IOERR_WRITE, IOERR_FSYNC,
+};
+mount core.database.sqlite.native.errors.message.{
+    ErrorMessage, new_message, ok_message, errstr,
+};
+mount core.database.sqlite.native.errors.engine.{
+    sqlite3_errcode, sqlite3_extended_errcode,
+    sqlite3_errmsg, sqlite3_error_offset, sqlite3_system_errno,
+    sqlite3_errstr,
+};
+mount base.{Text};
+
+fn test_primary_numeric_match_appendix_d() {
+    assert_eq(primary_numeric(&PcOk), 0);
+    assert_eq(primary_numeric(&PcError), 1);
+    assert_eq(primary_numeric(&PcBusy), 5);
+    assert_eq(primary_numeric(&PcIoErr), 10);
+    assert_eq(primary_numeric(&PcRow), 100);
+    assert_eq(primary_numeric(&PcDone), 101);
+}
+
+fn test_primary_success_flags() {
+    assert(primary_is_success(&PcOk));
+    assert(primary_is_success(&PcRow));
+    assert(primary_is_success(&PcDone));
+    assert(!primary_is_success(&PcError));
+    assert(!primary_is_success(&PcBusy));
+}
+
+fn test_extended_packs_low_high_bits() {
+    let e = extended_of(PcIoErr, IOERR_WRITE);
+    assert_eq(extended_numeric(&e), 10 + (256 * IOERR_WRITE));
+    assert(!extended_is_success(&e));
+}
+
+fn test_extended_success_for_ok() {
+    let e = extended_of(PcOk, 0);
+    assert(extended_is_success(&e));
+}
+
+fn test_mnemonic_aligns_with_c() {
+    assert(primary_mnemonic(&PcConstraint) == "SQLITE_CONSTRAINT".clone());
+    assert(primary_mnemonic(&PcRange) == "SQLITE_RANGE".clone());
+}
+
+fn test_errstr_returns_non_empty() {
+    let s = errstr(&PcBusy);
+    assert(s.len() > 0);
+}
+
+fn test_error_message_ok_is_success() {
+    let m = ok_message();
+    assert(m.is_success());
+    assert_eq(sqlite3_errcode(&m), 0);
+    assert_eq(sqlite3_extended_errcode(&m), 0);
+    assert_eq(sqlite3_error_offset(&m), -1);
+    assert_eq(sqlite3_system_errno(&m), 0);
+}
+
+fn test_error_message_carries_offset_and_errno() {
+    let code = extended_of(PcIoErr, IOERR_READ);
+    let mut m = new_message(code, "short read at offset 42".clone());
+    m.with_offset(42);
+    m.with_system_errno(5);
+    assert_eq(sqlite3_error_offset(&m), 42);
+    assert_eq(sqlite3_system_errno(&m), 5);
+    assert_eq(sqlite3_errcode(&m), primary_numeric(&PcIoErr));
+    assert(sqlite3_errmsg(&m).len() > 0);
+    let fallback = sqlite3_errstr(&PcIoErr);
+    assert(fallback.len() > 0);
+}
+
+fn main() {
+    test_primary_numeric_match_appendix_d();
+    test_primary_success_flags();
+    test_extended_packs_low_high_bits();
+    test_extended_success_for_ok();
+    test_mnemonic_aligns_with_c();
+    test_errstr_returns_non_empty();
+    test_error_message_ok_is_success();
+    test_error_message_carries_offset_and_errno();
+}

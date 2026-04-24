@@ -1,0 +1,70 @@
+// =============================================================================
+// changes/counter.vr — per-connection row-change counters
+// =============================================================================
+// Spec: SQLite C API — sqlite3_changes / sqlite3_total_changes /
+//                    sqlite3_last_insert_rowid and their 64-bit variants.
+//
+// Counters are always stored as Int64 internally; the 32-bit accessors
+// in `engine` truncate.
+//
+//   * `statement_changes` — changes from the most recent INSERT/UPDATE/
+//                           DELETE statement completed on this connection
+//   * `total_changes`     — cumulative since the connection was opened
+//   * `last_insert_rowid` — rowid of the most recent successful INSERT
+//                           into a rowid table
+// =============================================================================
+
+module core.database.sqlite.native.changes.counter;
+
+mount core.*;
+mount base.{Bool};
+
+public type ChangeCounter is {
+    statement_changes: Int64,
+    total_changes: Int64,
+    last_insert_rowid: Int64,
+    /// Monotone version — incremented on every mutation. Useful for
+    /// hooks that want to detect "anything happened between snapshots".
+    version: Int64,
+}
+
+public fn new_counter() -> ChangeCounter {
+    ChangeCounter {
+        statement_changes: 0 as Int64,
+        total_changes: 0 as Int64,
+        last_insert_rowid: 0 as Int64,
+        version: 0 as Int64,
+    }
+}
+
+implement ChangeCounter {
+    /// Called by the VDBE at the end of a DML statement. Overwrites
+    /// statement_changes, folds into total_changes, bumps version.
+    pub fn record_statement(&mut self, changes: Int64) {
+        self.statement_changes = changes;
+        self.total_changes = self.total_changes + changes;
+        self.version = self.version + (1 as Int64);
+    }
+
+    /// Called by the VDBE when an INSERT into a rowid table commits.
+    pub fn record_insert(&mut self, rowid: Int64) {
+        self.last_insert_rowid = rowid;
+        self.version = self.version + (1 as Int64);
+    }
+
+    /// Explicit override — matches sqlite3_set_last_insert_rowid.
+    pub fn override_last_insert_rowid(&mut self, rowid: Int64) {
+        self.last_insert_rowid = rowid;
+        self.version = self.version + (1 as Int64);
+    }
+
+    /// Reset statement-local counter at the start of a new statement.
+    pub fn start_statement(&mut self) {
+        self.statement_changes = 0 as Int64;
+    }
+}
+
+/// True iff the last statement made no visible modifications.
+public fn is_noop(c: &ChangeCounter) -> Bool {
+    c.statement_changes == (0 as Int64)
+}

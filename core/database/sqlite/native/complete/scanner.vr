@@ -1,0 +1,153 @@
+// =============================================================================
+// complete/scanner.vr — byte-at-a-time scanner
+// =============================================================================
+// Spec: SQLite C API — sqlite3_complete.
+//
+// The scanner drives the state machine one byte at a time.  Callers
+// feed the whole SQL text through `scan_text`; inspect
+// `state.last_was_semicolon` after the call.
+// =============================================================================
+
+module core.database.sqlite.native.complete.scanner;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.complete.state.{
+    ScanState, ScanMode,
+    SmNormal, SmSingleQuote, SmDoubleQuote, SmBracketIdent,
+    SmBacktickIdent, SmLineComment, SmBlockComment,
+    in_quote_or_comment,
+};
+
+fn is_space(b: u8) -> Bool {
+    b == (0x20 as u8) || b == (0x09 as u8) || b == (0x0A as u8)
+        || b == (0x0B as u8) || b == (0x0C as u8) || b == (0x0D as u8)
+}
+
+/// Case-insensitive keyword match for 6-byte window ending at `end`.
+fn window_matches(bytes: &List<u8>, end: Int, kw: &List<u8>) -> Bool {
+    let klen = kw.len();
+    if end + 1 < klen { return false; }
+    let start = end + 1 - klen;
+    let mut i: Int = 0;
+    while i < klen {
+        let mut a = *bytes.get(start + i);
+        let b = *kw.get(i);
+        if a >= (0x41 as u8) && a <= (0x5A as u8) {
+            a = a + (0x20 as u8);
+        }
+        if a != b { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn kw_create() -> List<u8> {
+    let mut v: List<u8> = List.new();
+    v.push(0x63 as u8); v.push(0x72 as u8); v.push(0x65 as u8);
+    v.push(0x61 as u8); v.push(0x74 as u8); v.push(0x65 as u8);
+    v
+}
+fn kw_trigger() -> List<u8> {
+    let mut v: List<u8> = List.new();
+    v.push(0x74 as u8); v.push(0x72 as u8); v.push(0x69 as u8);
+    v.push(0x67 as u8); v.push(0x67 as u8); v.push(0x65 as u8);
+    v.push(0x72 as u8);
+    v
+}
+fn kw_begin() -> List<u8> {
+    let mut v: List<u8> = List.new();
+    v.push(0x62 as u8); v.push(0x65 as u8); v.push(0x67 as u8);
+    v.push(0x69 as u8); v.push(0x6E as u8);
+    v
+}
+fn kw_end() -> List<u8> {
+    let mut v: List<u8> = List.new();
+    v.push(0x65 as u8); v.push(0x6E as u8); v.push(0x64 as u8);
+    v
+}
+
+/// Drive the state machine once byte window ends at `i`.
+public fn scan_byte(s: &mut ScanState, bytes: &List<u8>, i: Int) {
+    let b = *bytes.get(i);
+    match s.mode {
+        SmLineComment => {
+            if b == (0x0A as u8) { s.mode = SmNormal; }
+            return;
+        }
+        SmBlockComment => {
+            if b == (0x2F as u8) && i > 0 {
+                let prev = *bytes.get(i - 1);
+                if prev == (0x2A as u8) { s.mode = SmNormal; }
+            }
+            return;
+        }
+        SmSingleQuote => {
+            if b == (0x27 as u8) { s.mode = SmNormal; }
+            return;
+        }
+        SmDoubleQuote => {
+            if b == (0x22 as u8) { s.mode = SmNormal; }
+            return;
+        }
+        SmBracketIdent => {
+            if b == (0x5D as u8) { s.mode = SmNormal; }
+            return;
+        }
+        SmBacktickIdent => {
+            if b == (0x60 as u8) { s.mode = SmNormal; }
+            return;
+        }
+        SmNormal => {}
+    }
+    // Normal mode
+    if b == (0x27 as u8) { s.mode = SmSingleQuote; s.has_content = true; s.last_was_semicolon = false; return; }
+    if b == (0x22 as u8) { s.mode = SmDoubleQuote; s.has_content = true; s.last_was_semicolon = false; return; }
+    if b == (0x5B as u8) { s.mode = SmBracketIdent; s.has_content = true; s.last_was_semicolon = false; return; }
+    if b == (0x60 as u8) { s.mode = SmBacktickIdent; s.has_content = true; s.last_was_semicolon = false; return; }
+    if b == (0x2D as u8) && i + 1 < bytes.len() {
+        let nxt = *bytes.get(i + 1);
+        if nxt == (0x2D as u8) { s.mode = SmLineComment; return; }
+    }
+    if b == (0x2F as u8) && i + 1 < bytes.len() {
+        let nxt = *bytes.get(i + 1);
+        if nxt == (0x2A as u8) { s.mode = SmBlockComment; return; }
+    }
+    if is_space(b) {
+        // whitespace — leave has_content / last_was_semicolon alone
+        return;
+    }
+    // Keyword recognition at the *end* of a word — inexpensive overall
+    // and precise enough for completeness.
+    if window_matches(bytes, i, &kw_create())  { s.saw_create  = true; }
+    if window_matches(bytes, i, &kw_trigger()) { s.saw_trigger = true; }
+    if window_matches(bytes, i, &kw_begin())   {
+        s.saw_begin = true;
+        if s.saw_create && s.saw_trigger {
+            s.trigger_depth = s.trigger_depth + 1;
+        }
+    }
+    if window_matches(bytes, i, &kw_end()) {
+        s.saw_end = true;
+        if s.trigger_depth > 0 {
+            s.trigger_depth = s.trigger_depth - 1;
+        }
+    }
+    if b == (0x3B as u8) {
+        s.has_content = true;
+        s.last_was_semicolon = s.trigger_depth == 0;
+        return;
+    }
+    s.has_content = true;
+    s.last_was_semicolon = false;
+}
+
+public fn scan_text(s: &mut ScanState, bytes: &List<u8>) {
+    let mut i: Int = 0;
+    let n = bytes.len();
+    while i < n {
+        scan_byte(s, bytes, i);
+        i = i + 1;
+    }
+}

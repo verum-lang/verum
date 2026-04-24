@@ -1,0 +1,48 @@
+// =============================================================================
+// log/sink.vr — registered log sink descriptor
+// =============================================================================
+// Spec: SQLite C API — sqlite3_config(SQLITE_CONFIG_LOG, xLog, pArg).
+//
+// A sink is (name, min_level, ring_capacity).  The engine buffers
+// recent records up to `ring_capacity` for later inspection; the
+// host-level callback is threaded through `engine` separately.
+// =============================================================================
+
+module core.database.sqlite.native.log.sink;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.log.level.{
+    LogLevel, LlNotice, LlWarning, LlError,
+};
+
+public type LogSink is {
+    name: Text,
+    min_level: LogLevel,
+    ring_capacity: Int,
+}
+
+public fn new_sink(name: Text, min_level: LogLevel, ring_capacity: Int) -> LogSink {
+    LogSink { name: name, min_level: min_level, ring_capacity: ring_capacity }
+}
+
+/// Level ordering: notice < warning < error.
+fn level_rank(l: &LogLevel) -> Int {
+    match l {
+        LlNotice  => 0,
+        LlWarning => 1,
+        LlError   => 2,
+    }
+}
+
+public fn sink_accepts(s: &LogSink, level: &LogLevel) -> Bool {
+    level_rank(level) >= level_rank(&s.min_level)
+}
+
+public fn stdout_sink() -> LogSink {
+    new_sink("stdout".clone(), LlNotice, 256)
+}
+
+public fn error_only_sink() -> LogSink {
+    new_sink("error-only".clone(), LlError, 64)
+}

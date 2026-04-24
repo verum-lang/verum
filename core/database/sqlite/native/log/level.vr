@@ -1,0 +1,40 @@
+// =============================================================================
+// log/level.vr — severity levels for sqlite3_log
+// =============================================================================
+// Spec: SQLite C API.  SQLite's log severities are derived from the
+// primary error code: SQLITE_NOTICE / SQLITE_WARNING are the two
+// soft-info channels; everything else maps to "error".
+// =============================================================================
+
+module core.database.sqlite.native.log.level;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type LogLevel is
+      LlNotice
+    | LlWarning
+    | LlError;
+
+public fn level_name(l: &LogLevel) -> Text {
+    match l {
+        LlNotice  => "notice".clone(),
+        LlWarning => "warning".clone(),
+        LlError   => "error".clone(),
+    }
+}
+
+public fn is_actionable(l: &LogLevel) -> Bool {
+    match l {
+        LlError => true,
+        _ => false,
+    }
+}
+
+/// Derive a LogLevel from the primary error-code integer.
+public fn level_from_primary(primary: Int) -> LogLevel {
+    if primary == 27 { return LlNotice; }   // SQLITE_NOTICE
+    if primary == 28 { return LlWarning; }  // SQLITE_WARNING
+    if primary == 0  { return LlNotice; }   // SQLITE_OK → informational
+    LlError
+}

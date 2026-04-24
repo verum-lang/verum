@@ -1,0 +1,61 @@
+// =============================================================================
+// progress/engine.vr — C-API facade over ProgressHandler
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_progress_handler(db, N, xProgress, pArg)
+//
+// `install(None)` clears the handler (N=0 or xProgress=NULL in C).
+// `consult(...)` asks the registered callback once the tick accumulator
+// says we are due.
+// =============================================================================
+
+module core.database.sqlite.native.progress.engine;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount core.database.sqlite.native.progress.handler.{
+    ProgressHandler, ProgressDecision, PdContinue, PdInterrupt,
+    handler_is_enabled,
+};
+mount core.database.sqlite.native.progress.tick.{
+    TickAccumulator,
+};
+
+public type ProgressEngine is {
+    handler: Maybe<ProgressHandler>,
+    acc: TickAccumulator,
+}
+
+public fn new_engine() -> ProgressEngine {
+    ProgressEngine {
+        handler: Maybe.None,
+        acc: core.database.sqlite.native.progress.tick.new_accumulator(),
+    }
+}
+
+implement ProgressEngine {
+    pub fn install(&mut self, h: Maybe<ProgressHandler>) {
+        self.handler = h;
+    }
+
+    pub fn tick(&mut self) {
+        self.acc.observe_op();
+    }
+
+    /// Returns the decision from the callback.  If no handler is
+    /// installed or this is not a consultation tick, returns Continue.
+    pub fn consult(&mut self, cb: fn() -> ProgressDecision) -> ProgressDecision {
+        match &self.handler {
+            Maybe.Some(h) => {
+                if !handler_is_enabled(h) { return PdContinue; }
+                if !self.acc.should_consult(h.interval_ops) { return PdContinue; }
+                self.acc.note_consultation();
+                (cb)()
+            }
+            Maybe.None => PdContinue,
+        }
+    }
+
+    pub fn consultations(&self) -> Int64 { self.acc.consultations }
+}

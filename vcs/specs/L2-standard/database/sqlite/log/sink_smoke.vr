@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, log, sink, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.log.level.{
+    LogLevel, LlNotice, LlWarning, LlError,
+    level_name, is_actionable, level_from_primary,
+};
+mount core.database.sqlite.native.log.record.{
+    LogRecord, new_record,
+};
+mount core.database.sqlite.native.log.sink.{
+    LogSink, new_sink, sink_accepts, stdout_sink, error_only_sink,
+};
+mount core.database.sqlite.native.log.engine.{
+    LogEngine, new_engine,
+};
+mount base.{Bool, Maybe};
+
+fn test_level_names_and_actionable() {
+    assert(level_name(&LlNotice) == "notice".clone());
+    assert(level_name(&LlWarning) == "warning".clone());
+    assert(level_name(&LlError) == "error".clone());
+    assert(is_actionable(&LlError));
+    assert(!is_actionable(&LlNotice));
+}
+
+fn test_level_from_primary_notice_vs_warning_vs_error() {
+    match level_from_primary(27) {
+        LlNotice => {},
+        _ => assert(false),
+    }
+    match level_from_primary(28) {
+        LlWarning => {},
+        _ => assert(false),
+    }
+    match level_from_primary(1) {
+        LlError => {},
+        _ => assert(false),
+    }
+}
+
+fn test_record_builder_picks_level_from_extended_code() {
+    let extended = 1 + (256 * 3);  // IOERR variant
+    let r = new_record(extended, "bad".clone(), 1 as Int64, 1 as Int64);
+    assert_eq(r.errcode, extended);
+    assert(is_actionable(&r.level));
+}
+
+fn test_sink_accepts_by_level() {
+    let s = error_only_sink();
+    assert(sink_accepts(&s, &LlError));
+    assert(!sink_accepts(&s, &LlNotice));
+}
+
+fn test_stdout_sink_accepts_everything() {
+    let s = stdout_sink();
+    assert(sink_accepts(&s, &LlNotice));
+    assert(sink_accepts(&s, &LlWarning));
+    assert(sink_accepts(&s, &LlError));
+}
+
+fn test_engine_without_sink_drops() {
+    let mut e = new_engine();
+    let accepted = e.log(1, "noop".clone(), 1 as Int64);
+    assert(!accepted);
+    assert_eq(e.dropped_count(), 1 as Int64);
+    assert_eq(e.ring_len(), 0);
+}
+
+fn test_engine_with_stdout_sink_records() {
+    let mut e = new_engine();
+    e.install_sink(Maybe.Some(stdout_sink()));
+    let accepted = e.log(1, "first".clone(), 10 as Int64);
+    assert(accepted);
+    assert_eq(e.ring_len(), 1);
+}
+
+fn test_engine_ring_bounded_by_capacity() {
+    let mut e = new_engine();
+    e.install_sink(Maybe.Some(new_sink("tiny".clone(), LlNotice, 2)));
+    let _ = e.log(1, "a".clone(), 1 as Int64);
+    let _ = e.log(1, "b".clone(), 2 as Int64);
+    let _ = e.log(1, "c".clone(), 3 as Int64);
+    assert_eq(e.ring_len(), 2);
+}
+
+fn main() {
+    test_level_names_and_actionable();
+    test_level_from_primary_notice_vs_warning_vs_error();
+    test_record_builder_picks_level_from_extended_code();
+    test_sink_accepts_by_level();
+    test_stdout_sink_accepts_everything();
+    test_engine_without_sink_drops();
+    test_engine_with_stdout_sink_records();
+    test_engine_ring_bounded_by_capacity();
+}

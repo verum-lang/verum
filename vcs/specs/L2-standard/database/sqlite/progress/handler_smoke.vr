@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, progress, handler, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.progress.handler.{
+    ProgressHandler, ProgressDecision,
+    PdContinue, PdInterrupt,
+    new_handler, handler_is_enabled, decision_should_abort, decision_name,
+};
+mount core.database.sqlite.native.progress.tick.{
+    TickAccumulator, new_accumulator,
+};
+mount core.database.sqlite.native.progress.engine.{
+    ProgressEngine, new_engine,
+};
+mount base.{Bool, Maybe};
+
+fn always_continue() -> ProgressDecision { PdContinue }
+fn always_abort() -> ProgressDecision { PdInterrupt }
+
+fn test_handler_disabled_when_interval_zero() {
+    let h = new_handler("x".clone(), 0);
+    assert(!handler_is_enabled(&h));
+}
+
+fn test_handler_enabled_when_interval_positive() {
+    let h = new_handler("x".clone(), 16);
+    assert(handler_is_enabled(&h));
+}
+
+fn test_decision_flags() {
+    assert(!decision_should_abort(&PdContinue));
+    assert(decision_should_abort(&PdInterrupt));
+    assert(decision_name(&PdContinue) == "continue".clone());
+}
+
+fn test_tick_not_consulted_before_interval() {
+    let mut a = new_accumulator();
+    a.observe_op();
+    assert(!a.should_consult(16));
+}
+
+fn test_tick_consulted_on_interval_boundary() {
+    let mut a = new_accumulator();
+    let mut i: Int = 0;
+    while i < 16 {
+        a.observe_op();
+        i = i + 1;
+    }
+    assert(a.should_consult(16));
+}
+
+fn test_engine_without_handler_returns_continue() {
+    let mut e = new_engine();
+    e.tick();
+    let d = e.consult(always_abort);
+    assert(!decision_should_abort(&d));
+}
+
+fn test_engine_with_handler_fires_on_tick() {
+    let mut e = new_engine();
+    e.install(Maybe.Some(new_handler("h".clone(), 2)));
+    e.tick();
+    e.tick();  // second tick is an interval boundary
+    let d = e.consult(always_abort);
+    assert(decision_should_abort(&d));
+    assert_eq(e.consultations(), 1 as Int64);
+}
+
+fn main() {
+    test_handler_disabled_when_interval_zero();
+    test_handler_enabled_when_interval_positive();
+    test_decision_flags();
+    test_tick_not_consulted_before_interval();
+    test_tick_consulted_on_interval_boundary();
+    test_engine_without_handler_returns_continue();
+    test_engine_with_handler_fires_on_tick();
+}

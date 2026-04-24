@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, complete, scanner, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.complete.state.{
+    ScanState, ScanMode,
+    SmNormal, SmSingleQuote,
+    new_state, reset_token_flags, in_quote_or_comment, mode_name,
+};
+mount core.database.sqlite.native.complete.scanner.{
+    scan_byte, scan_text,
+};
+mount core.database.sqlite.native.complete.engine.{
+    sqlite3_complete_bytes,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn text_bytes(s: Text) -> List<u8> {
+    let mut out: List<u8> = List.new();
+    for b in s.bytes() {
+        out.push(b);
+    }
+    out
+}
+
+fn test_empty_not_complete() {
+    let bytes = text_bytes("".clone());
+    assert_eq(sqlite3_complete_bytes(&bytes), 0);
+}
+
+fn test_whitespace_only_not_complete() {
+    let bytes = text_bytes("   \n\t".clone());
+    assert_eq(sqlite3_complete_bytes(&bytes), 0);
+}
+
+fn test_simple_select_complete() {
+    let bytes = text_bytes("SELECT 1;".clone());
+    assert_eq(sqlite3_complete_bytes(&bytes), 1);
+}
+
+fn test_missing_semicolon_incomplete() {
+    let bytes = text_bytes("SELECT 1".clone());
+    assert_eq(sqlite3_complete_bytes(&bytes), 0);
+}
+
+fn test_in_quote_not_complete() {
+    let bytes = text_bytes("SELECT 'abc;".clone());
+    assert_eq(sqlite3_complete_bytes(&bytes), 0);
+}
+
+fn test_line_comment_does_not_confuse() {
+    let bytes = text_bytes("SELECT 1; -- trailing comment\n".clone());
+    assert_eq(sqlite3_complete_bytes(&bytes), 1);
+}
+
+fn test_new_state_initial_normal_mode() {
+    let s = new_state();
+    assert(!in_quote_or_comment(&s.mode));
+    assert(mode_name(&s.mode) == "normal".clone());
+    assert_eq(s.trigger_depth, 0);
+}
+
+fn test_reset_token_flags_zeroes() {
+    let mut s = new_state();
+    s.saw_create = true;
+    s.saw_trigger = true;
+    reset_token_flags(&mut s);
+    assert(!s.saw_create);
+    assert(!s.saw_trigger);
+}
+
+fn main() {
+    test_empty_not_complete();
+    test_whitespace_only_not_complete();
+    test_simple_select_complete();
+    test_missing_semicolon_incomplete();
+    test_in_quote_not_complete();
+    test_line_comment_does_not_confuse();
+    test_new_state_initial_normal_mode();
+    test_reset_token_flags_zeroes();
+}

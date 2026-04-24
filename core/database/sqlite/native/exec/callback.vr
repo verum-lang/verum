@@ -1,0 +1,38 @@
+// =============================================================================
+// exec/callback.vr — callback decision sum
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_exec documents the callback's return as:
+//   * 0 → continue
+//   * non-zero → abort (SQLITE_ABORT)
+//
+// We model that as a typed decision to remove the magic-zero idiom.
+// =============================================================================
+
+module core.database.sqlite.native.exec.callback;
+
+mount core.*;
+mount base.{Bool};
+
+public type CallbackDecision is
+      CdContinue
+    | CdAbort;
+
+public fn decision_numeric(d: &CallbackDecision) -> Int {
+    match d {
+        CdContinue => 0,
+        CdAbort    => 1,
+    }
+}
+
+public fn decision_aborts(d: &CallbackDecision) -> Bool {
+    match d {
+        CdAbort => true,
+        _ => false,
+    }
+}
+
+public fn from_numeric(n: Int) -> CallbackDecision {
+    if n == 0 { CdContinue } else { CdAbort }
+}

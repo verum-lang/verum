@@ -1,0 +1,72 @@
+// =============================================================================
+// log/engine.vr — sqlite3_log routing façade
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_log(errcode, message)           → void
+//
+// Engine state: installed sink + monotone-sequence counter + ring
+// buffer of recent records.  Sinks are replaced atomically.
+// =============================================================================
+
+module core.database.sqlite.native.log.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.log.level.{LogLevel};
+mount core.database.sqlite.native.log.record.{LogRecord, new_record};
+mount core.database.sqlite.native.log.sink.{LogSink, sink_accepts};
+
+public type LogEngine is {
+    sink: Maybe<LogSink>,
+    recent: List<LogRecord>,
+    seq: Int64,
+    dropped: Int64,
+}
+
+public fn new_engine() -> LogEngine {
+    LogEngine {
+        sink: Maybe.None,
+        recent: List.new(),
+        seq: 0 as Int64,
+        dropped: 0 as Int64,
+    }
+}
+
+implement LogEngine {
+    pub fn install_sink(&mut self, sink: Maybe<LogSink>) {
+        self.sink = sink;
+    }
+
+    /// Route a record per sink policy.  Returns true if the sink
+    /// accepted (and the record was pushed to the ring); false if the
+    /// sink dropped or no sink is installed.
+    pub fn log(&mut self, errcode: Int, message: Text, timestamp_ns: Int64) -> Bool {
+        self.seq = self.seq + (1 as Int64);
+        let rec = new_record(errcode, message, timestamp_ns, self.seq);
+        match &self.sink {
+            Maybe.Some(s) => {
+                if !sink_accepts(s, &rec.level) {
+                    self.dropped = self.dropped + (1 as Int64);
+                    return false;
+                }
+                let cap = s.ring_capacity;
+                if cap > 0 {
+                    while self.recent.len() >= cap {
+                        let _ = self.recent.remove(0);
+                    }
+                    self.recent.push(rec);
+                }
+                true
+            }
+            Maybe.None => {
+                self.dropped = self.dropped + (1 as Int64);
+                false
+            }
+        }
+    }
+
+    pub fn ring_len(&self) -> Int { self.recent.len() }
+    pub fn dropped_count(&self) -> Int64 { self.dropped }
+}

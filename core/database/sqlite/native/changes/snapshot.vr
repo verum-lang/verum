@@ -1,0 +1,43 @@
+// =============================================================================
+// changes/snapshot.vr — immutable view of ChangeCounter
+// =============================================================================
+// Spec: SQLite C API — convenience value type for callers who want to
+// compare the change-counter state at two distinct points in time
+// (e.g. an update hook decorator).
+// =============================================================================
+
+module core.database.sqlite.native.changes.snapshot;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.changes.counter.{ChangeCounter};
+
+public type ChangeSnapshot is {
+    statement_changes: Int64,
+    total_changes: Int64,
+    last_insert_rowid: Int64,
+    version: Int64,
+}
+
+public fn snapshot_of(c: &ChangeCounter) -> ChangeSnapshot {
+    ChangeSnapshot {
+        statement_changes: c.statement_changes,
+        total_changes: c.total_changes,
+        last_insert_rowid: c.last_insert_rowid,
+        version: c.version,
+    }
+}
+
+/// True iff `after` records more mutations than `before`.
+public fn advanced(before: &ChangeSnapshot, after: &ChangeSnapshot) -> Bool {
+    after.version > before.version
+}
+
+/// Delta in total_changes between two snapshots; clamped at zero.
+public fn total_delta(before: &ChangeSnapshot, after: &ChangeSnapshot) -> Int64 {
+    if after.total_changes >= before.total_changes {
+        after.total_changes - before.total_changes
+    } else {
+        0 as Int64
+    }
+}

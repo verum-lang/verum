@@ -1,0 +1,77 @@
+// =============================================================================
+// interrupt/token.vr — cancellation token state
+// =============================================================================
+// Spec: SQLite C API
+//
+// The token has three observable states:
+//
+//   * `ItArmed`         — no cancellation requested
+//   * `ItFiring(reason)`— cancellation requested, VDBE will abort asap
+//   * `ItServed(count)` — the VDBE observed the firing and bumped the
+//                         served counter; state transitions back to
+//                         Armed on the next statement begin.
+// =============================================================================
+
+module core.database.sqlite.native.interrupt.token;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type InterruptReason is
+      IrUser              // explicit sqlite3_interrupt call
+    | IrTimeout           // busy-timeout elapsed
+    | IrAuthorizer        // authorizer said DENY
+    | IrProgressHandler   // progress callback returned non-zero
+    | IrExtension(Text);  // extension-defined cause
+
+public type InterruptState is
+      ItArmed
+    | ItFiring(InterruptReason)
+    | ItServed(Int);
+
+public type InterruptToken is {
+    state: InterruptState,
+    /// Monotonically increases each time the token fires — never
+    /// reset; distinct from ItServed count (which tracks *consumption*).
+    fire_version: Int64,
+}
+
+public fn new_token() -> InterruptToken {
+    InterruptToken { state: ItArmed, fire_version: 0 as Int64 }
+}
+
+implement InterruptToken {
+    /// True iff the VDBE should abort the current statement.
+    pub fn is_pending(&self) -> Bool {
+        match &self.state {
+            ItFiring(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn fire(&mut self, reason: InterruptReason) {
+        self.state = ItFiring(reason);
+        self.fire_version = self.fire_version + (1 as Int64);
+    }
+
+    /// VDBE calls this once it has observed the firing and transitioned
+    /// to the aborted state. Subsequent statements may re-arm.
+    pub fn acknowledge(&mut self, count_so_far: Int) {
+        self.state = ItServed(count_so_far);
+    }
+
+    /// Re-arm before running a new statement (normal lifecycle).
+    pub fn rearm(&mut self) {
+        self.state = ItArmed;
+    }
+}
+
+public fn reason_name(r: &InterruptReason) -> Text {
+    match r {
+        IrUser             => "user".clone(),
+        IrTimeout          => "timeout".clone(),
+        IrAuthorizer       => "authorizer".clone(),
+        IrProgressHandler  => "progress".clone(),
+        IrExtension(n)     => n.clone(),
+    }
+}

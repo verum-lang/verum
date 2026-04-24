@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/progress/mod.vr
+// =============================================================================
+// Layer: 7 (façade — progress-handler surface)
+// Spec: SQLite C API — sqlite3_progress_handler(db, N, xProgress, pArg)
+//
+// The VDBE consults the progress handler every `interval_ops`
+// virtual-machine opcodes.  A non-zero return asks the engine to
+// interrupt the current statement with SQLITE_INTERRUPT.
+//
+// Submodules:
+//   * `handler`  — registered-callback descriptor (name, interval, decision sum)
+//   * `tick`     — accounting: op_count modulo interval
+//   * `engine`   — C-API-aligned registration/consultation
+// =============================================================================
+
+module core.database.sqlite.native.progress;
+
+public module handler;
+public module tick;
+public module engine;

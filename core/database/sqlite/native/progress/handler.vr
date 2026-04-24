@@ -1,0 +1,48 @@
+// =============================================================================
+// progress/handler.vr — registered progress handler descriptor
+// =============================================================================
+// Spec: SQLite C API
+//
+// A progress handler is triple (name, interval_ops, decision) where
+// the decision is a pure function over the current op-count.  The
+// catalogue keeps it callback-free — the runtime instantiates it with
+// a closure stored elsewhere.
+// =============================================================================
+
+module core.database.sqlite.native.progress.handler;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ProgressDecision is
+      PdContinue
+    | PdInterrupt;
+
+public fn decision_should_abort(d: &ProgressDecision) -> Bool {
+    match d {
+        PdInterrupt => true,
+        _ => false,
+    }
+}
+
+public fn decision_name(d: &ProgressDecision) -> Text {
+    match d {
+        PdContinue  => "continue".clone(),
+        PdInterrupt => "interrupt".clone(),
+    }
+}
+
+public type ProgressHandler is {
+    name: Text,
+    /// VDBE consults the handler once every `interval_ops` opcodes.
+    /// Non-positive disables the handler entirely.
+    interval_ops: Int,
+}
+
+public fn new_handler(name: Text, interval_ops: Int) -> ProgressHandler {
+    ProgressHandler { name: name, interval_ops: interval_ops }
+}
+
+public fn handler_is_enabled(h: &ProgressHandler) -> Bool {
+    h.interval_ops > 0
+}
