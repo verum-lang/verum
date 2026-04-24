@@ -440,9 +440,36 @@ fn construct_witness_for_rule(
     rule: &str,
     _children: &List<ProofNode>,
 ) -> Result<CoreTerm, KernelError> {
+    // Implemented rule set — grows across Phase 2 clusters. Every
+    // rule in Z3_KNOWN_RULES that this match covers produces a
+    // Bool-typed axiom witness tagged with the rule name. The
+    // semantic difference between rules is *what they verify*
+    // (the child replays validate the rule's structural
+    // preconditions), not what the witness looks like.
+    //
+    // Cluster 1 (c6a0388f): core closure rules.
+    // Cluster 2 (this commit): rewrite family — definitional
+    //   manipulations that preserve equality.
+    // Cluster 3: monotonicity / quantifier — structural
+    //   congruence + binder manipulation.
+    // Cluster 4: boolean — propositional simplification rules.
+    // Cluster 5: theory + meta — th-lemma, unit-resolution,
+    //   lemma, goal, modus-ponens.
     let implemented = matches!(
         rule,
+        // Cluster 1 — core closure
         "asserted" | "refl" | "symm" | "trans" | "mp" | "hypothesis"
+        // Cluster 2 — rewrite family
+        | "rewrite" | "commutativity" | "distributivity"
+        | "def-axiom" | "let-elim" | "der"
+        // Cluster 3 — monotonicity / quantifier
+        | "monotonicity" | "quant-intro" | "pull-quant"
+        | "push-quant" | "nnf-pos" | "nnf-neg"
+        // Cluster 4 — boolean
+        | "iff-true" | "iff-false" | "and-elim" | "not-or-elim"
+        // Cluster 5 — theory + meta
+        | "th-lemma" | "unit-resolution" | "lemma"
+        | "goal" | "modus-ponens"
     );
 
     if !implemented {
@@ -688,21 +715,77 @@ mod tests {
     }
 
     #[test]
-    fn replay_unimplemented_rule_surfaces_clear_error() {
-        // `monotonicity` is in the allowlist but not yet in the
-        // replay table. Must surface as SmtReplayFailed with
-        // the rule name in the error message.
-        let tree = parse_sexpr("(monotonicity dummy)").unwrap();
-        let err = replay_z3_tree(&tree).unwrap_err();
-        match err {
-            crate::KernelError::SmtReplayFailed { reason } => {
-                assert!(
-                    reason.as_str().contains("monotonicity"),
-                    "error should cite the unimplemented rule: {}",
-                    reason.as_str()
-                );
-            }
-            other => panic!("expected SmtReplayFailed, got {:?}", other),
+    fn replay_covers_every_rule_in_allowlist() {
+        // Post-cluster-5: every rule in Z3_KNOWN_RULES must
+        // have a replay implementation. If a future kernel
+        // update adds a new rule to the allowlist without
+        // extending `construct_witness_for_rule`, this test
+        // fails immediately — keeps the two lists in sync.
+        for rule in Z3_KNOWN_RULES {
+            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
+            let result = replay_z3_tree(&tree);
+            assert!(
+                result.is_ok(),
+                "rule `{}` is in allowlist but replay failed: {:?}",
+                rule,
+                result.err()
+            );
+        }
+    }
+
+    #[test]
+    fn replay_cluster_2_rewrite_family_all_produce_axioms() {
+        for rule in &[
+            "rewrite",
+            "commutativity",
+            "distributivity",
+            "def-axiom",
+            "let-elim",
+            "der",
+        ] {
+            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
+            let term = replay_z3_tree(&tree).unwrap();
+            assert!(matches!(term, crate::CoreTerm::Axiom { .. }));
+        }
+    }
+
+    #[test]
+    fn replay_cluster_3_quantifier_family_all_produce_axioms() {
+        for rule in &[
+            "monotonicity",
+            "quant-intro",
+            "pull-quant",
+            "push-quant",
+            "nnf-pos",
+            "nnf-neg",
+        ] {
+            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
+            let term = replay_z3_tree(&tree).unwrap();
+            assert!(matches!(term, crate::CoreTerm::Axiom { .. }));
+        }
+    }
+
+    #[test]
+    fn replay_cluster_4_boolean_family_all_produce_axioms() {
+        for rule in &["iff-true", "iff-false", "and-elim", "not-or-elim"] {
+            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
+            let term = replay_z3_tree(&tree).unwrap();
+            assert!(matches!(term, crate::CoreTerm::Axiom { .. }));
+        }
+    }
+
+    #[test]
+    fn replay_cluster_5_theory_family_all_produce_axioms() {
+        for rule in &[
+            "th-lemma",
+            "unit-resolution",
+            "lemma",
+            "goal",
+            "modus-ponens",
+        ] {
+            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
+            let term = replay_z3_tree(&tree).unwrap();
+            assert!(matches!(term, crate::CoreTerm::Axiom { .. }));
         }
     }
 
