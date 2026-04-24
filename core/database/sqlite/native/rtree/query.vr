@@ -1,0 +1,144 @@
+// =============================================================================
+// rtree/query.vr — RangeQuery + WHERE-clause translation
+// =============================================================================
+// Spec: sqlite-native.md §16.3
+//
+// SQLite's R-tree virtual table is queried via:
+//
+//   SELECT id FROM points WHERE x_min >= ? AND x_max <= ?
+//                           AND y_min >= ? AND y_max <= ?
+//
+// The vtab implementation translates this into a `RangeQuery`. The
+// query reduces to "find all rowids whose MBB is fully inside the
+// query box" (covers semantics) or "intersects the query box"
+// (intersect semantics).
+// =============================================================================
+
+module core.database.sqlite.native.rtree.query;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.rtree.bbox.{
+    BoundingBox, bbox,
+};
+mount core.database.sqlite.native.rtree.tree.{RTree};
+
+// -----------------------------------------------------------------------------
+// QueryMode
+// -----------------------------------------------------------------------------
+
+public type QueryMode is QmIntersect | QmCovers | QmContainedIn;
+
+public fn mode_name(m: &QueryMode) -> Text {
+    match m {
+        QmIntersect    => "intersect".clone(),
+        QmCovers       => "covers".clone(),
+        QmContainedIn  => "contained_in".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RangeQuery
+// -----------------------------------------------------------------------------
+
+public type RangeQuery is {
+    box_q: BoundingBox,
+    mode: QueryMode,
+}
+
+public fn range_query(box_q: BoundingBox, mode: QueryMode) -> RangeQuery {
+    RangeQuery { box_q: box_q, mode: mode }
+}
+
+// -----------------------------------------------------------------------------
+// Predicate translation — convert SQL WHERE clause shape to RangeQuery
+// -----------------------------------------------------------------------------
+
+public type DimBound is {
+    min_value: Float64,
+    max_value: Float64,
+}
+
+public fn dim_bound(min_v: Float64, max_v: Float64) -> DimBound {
+    DimBound { min_value: min_v, max_value: max_v }
+}
+
+/// Build a RangeQuery from per-dimension bounds.
+public fn build_range_query(dims: &List<DimBound>, mode: QueryMode) -> RangeQuery {
+    let mut min: List<Float64> = List.new();
+    let mut max: List<Float64> = List.new();
+    let mut i: Int = 0;
+    while i < dims.len() {
+        min.push(dims[i].min_value);
+        max.push(dims[i].max_value);
+        i = i + 1;
+    }
+    range_query(bbox(min, max), mode)
+}
+
+// -----------------------------------------------------------------------------
+// Run a query against the tree
+// -----------------------------------------------------------------------------
+
+public fn run_range_query(tree: &RTree, q: &RangeQuery) -> List<Int64> {
+    // The tree.search returns intersect semantics; refine here for covers
+    // / contained_in.
+    let candidates = tree.search(&q.box_q);
+    match q.mode {
+        QmIntersect => candidates,
+        QmCovers => filter_by_predicate(tree, &candidates, q),
+        QmContainedIn => filter_by_predicate(tree, &candidates, q),
+    }
+}
+
+fn filter_by_predicate(tree: &RTree, candidates: &List<Int64>, q: &RangeQuery) -> List<Int64> {
+    let mut out: List<Int64> = List.new();
+    let mut i: Int = 0;
+    while i < candidates.len() {
+        // Need the candidate's MBB; walk every leaf to find it.
+        let m = lookup_mbb(tree, candidates[i]);
+        match m {
+            base.Some(b) => {
+                let pass = match q.mode {
+                    QmCovers       => q.box_q.covers(&b),
+                    QmContainedIn  => b.covers(&q.box_q),
+                    QmIntersect    => true,
+                };
+                if pass { out.push(candidates[i]); }
+            }
+            base.None => {}
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn lookup_mbb(tree: &RTree, rowid: Int64) -> base.Maybe<BoundingBox> {
+    let mut i: Int = 0;
+    while i < tree.nodes.len() {
+        match &tree.nodes[i] {
+            core.database.sqlite.native.rtree.node.RnLeaf(_id, entries) => {
+                let mut k: Int = 0;
+                while k < entries.len() {
+                    if entries[k].rowid == rowid {
+                        let b = &entries[k].mbb;
+                        let mut min: List<Float64> = List.new();
+                        let mut max: List<Float64> = List.new();
+                        let mut z: Int = 0;
+                        while z < b.min.len() {
+                            min.push(b.min[z]);
+                            max.push(b.max[z]);
+                            z = z + 1;
+                        }
+                        return base.Some(bbox(min, max));
+                    }
+                    k = k + 1;
+                }
+            }
+            _ => {}
+        }
+        i = i + 1;
+    }
+    base.None
+}

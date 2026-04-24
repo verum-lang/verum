@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/integrity/mod.vr
+// =============================================================================
+// Layer: 7 (façade utility)
+// Spec: sqlite-native.md §10.7 (B-tree integrity check)
+//
+// Four integrity surfaces matching the SQLite PRAGMAs:
+//
+//   * `integrity_check` — full structural + content scan
+//   * `quick_check`     — page-level only, no payload sweep
+//   * `foreign_key_check` — orphan FK rows
+//   * `cell_size_check` — page-cell size constraints (since SQLite 3.30)
+//
+// Submodules:
+//   * `error`  — IntegrityError taxonomy
+//   * `report` — IntegrityReport accumulator
+//   * `mode`   — CheckMode + per-mode predicate
+//   * `engine` — IntegrityEngine state machine
+// =============================================================================
+
+module core.database.sqlite.native.integrity;
+
+public module error;
+public module report;
+public module mode;
+public module engine;

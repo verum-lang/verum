@@ -1,0 +1,43 @@
+// =============================================================================
+// fts5/tokenizer/trigram.vr — sliding 3-character window
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (FTS5 trigram tokenizer)
+//
+// Emits every 3-byte window from the input as a token. Used for fuzzy
+// match (`x LIKE '%abc%'` becomes "do all of {abc} appear as trigrams?").
+// =============================================================================
+
+module core.database.sqlite.native.fts5.tokenizer.trigram;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.fts5.tokenizer.core.{
+    Token, Tokenizer, token, lowercase_byte,
+};
+
+public type TrigramTokenizer is { unit: Bool }
+
+public fn trigram_tokenizer() -> TrigramTokenizer { TrigramTokenizer { unit: true } }
+
+implement Tokenizer for TrigramTokenizer {
+    fn name(&self) -> Text { "trigram".clone() }
+
+    fn tokenize(&self, text: &Text) -> List<Token> {
+        let bs = text.as_bytes();
+        let mut out: List<Token> = List.new();
+        if bs.len() < 3 { return out; }
+        let mut i: Int = 0;
+        let mut pos: Int = 0;
+        while i + 3 <= bs.len() {
+            let mut tok = Text.new();
+            tok.push_byte(lowercase_byte(bs[i]));
+            tok.push_byte(lowercase_byte(bs[i + 1]));
+            tok.push_byte(lowercase_byte(bs[i + 2]));
+            out.push(token(tok, i, i + 3, pos));
+            pos = pos + 1;
+            i = i + 1;
+        }
+        out
+    }
+}

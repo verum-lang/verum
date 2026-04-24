@@ -1,0 +1,27 @@
+// =============================================================================
+// fts5/query/mod.vr — MATCH-query parser + executor + ranker
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (FTS5 MATCH grammar)
+//
+// MATCH grammar (subset):
+//
+//   query    := disjunction
+//   disjunction := conjunction (OR conjunction)*
+//   conjunction := factor (AND factor)*  // implicit AND if absent
+//   factor   := NOT factor | atom
+//   atom     := PHRASE | NEAR(token, token, n) | term
+//   PHRASE   := '"' term+ '"'
+//
+// Submodules:
+//   * `ast`      — MatchAst sum + builder
+//   * `parser`   — text → MatchAst
+//   * `executor` — MatchAst + InvertedIndex → matched rowid set
+//   * `ranker`   — BM25 ranker
+// =============================================================================
+
+module core.database.sqlite.native.fts5.query;
+
+public module ast;
+public module parser;
+public module executor;
+public module ranker;

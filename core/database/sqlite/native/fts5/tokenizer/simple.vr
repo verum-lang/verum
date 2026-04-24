@@ -1,0 +1,43 @@
+// =============================================================================
+// fts5/tokenizer/simple.vr — ASCII word-split + lowercase
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (FTS5 default tokenizer)
+// =============================================================================
+
+module core.database.sqlite.native.fts5.tokenizer.simple;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.fts5.tokenizer.core.{
+    Token, Tokenizer, token, is_word_byte, lowercase_byte,
+};
+
+public type SimpleTokenizer is { unit: Bool }
+
+public fn simple_tokenizer() -> SimpleTokenizer { SimpleTokenizer { unit: true } }
+
+implement Tokenizer for SimpleTokenizer {
+    fn name(&self) -> Text { "simple".clone() }
+
+    fn tokenize(&self, text: &Text) -> List<Token> {
+        let bs = text.as_bytes();
+        let mut out: List<Token> = List.new();
+        let mut i: Int = 0;
+        let mut pos: Int = 0;
+        while i < bs.len() {
+            // Skip non-word bytes
+            while i < bs.len() && !is_word_byte(bs[i]) { i = i + 1; }
+            if i >= bs.len() { break; }
+            let start = i;
+            let mut tok = Text.new();
+            while i < bs.len() && is_word_byte(bs[i]) {
+                tok.push_byte(lowercase_byte(bs[i]));
+                i = i + 1;
+            }
+            out.push(token(tok, start, i, pos));
+            pos = pos + 1;
+        }
+        out
+    }
+}

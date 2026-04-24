@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/statistics/mod.vr
+// =============================================================================
+// Layer: 5 (planner support)
+// Spec: sqlite-native.md §13.2 (cost model)
+//
+// SQLite stores planner statistics in four sqlite_stat tables:
+//
+//   * `sqlite_stat1` — per-(table, index) row count + bucket sizes
+//   * `sqlite_stat2` — per-index sample of typical key prefixes
+//   * `sqlite_stat3` — same intent as stat2, more detail
+//   * `sqlite_stat4` — full per-key-prefix histogram
+//
+// Submodules:
+//   * `stat1`        — Stat1Row + per-index aggregate
+//   * `histogram`    — Stat4Histogram + bucket structure
+//   * `selectivity`  — selectivity_for(predicate, index, stats)
+//   * `analyze`      — ANALYZE driver state machine
+// =============================================================================
+
+module core.database.sqlite.native.statistics;
+
+public module stat1;
+public module histogram;
+public module selectivity;
+public module analyze;

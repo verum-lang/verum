@@ -1,0 +1,148 @@
+// =============================================================================
+// integrity/engine.vr — IntegrityEngine state machine
+// =============================================================================
+// Spec: sqlite-native.md §10.7
+//
+// Drives an integrity check via a small state machine:
+//
+//   IpInit → IpScanningPages → IpVerifyingBtree → IpScanningRecords
+//          → IpCheckingForeignKeys → IpCheckingIndexes → IpDone
+//
+// On any per-phase fault → `IpFailed(reason)`. The caller pumps
+// the engine + records observations (errors / pages / rows) into
+// the supplied `IntegrityReport`.
+// =============================================================================
+
+module core.database.sqlite.native.integrity.engine;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.integrity.error.{IntegrityError};
+mount core.database.sqlite.native.integrity.mode.{
+    CheckMode, CmIntegrity, CmQuick, CmForeignKey, CmCellSize,
+    applies,
+};
+mount core.database.sqlite.native.integrity.report.{
+    IntegrityReport, report_new,
+};
+
+// -----------------------------------------------------------------------------
+// EnginePhase
+// -----------------------------------------------------------------------------
+
+public type EnginePhase is
+      IpInit
+    | IpScanningPages
+    | IpVerifyingBtree
+    | IpScanningRecords
+    | IpCheckingForeignKeys
+    | IpCheckingIndexes
+    | IpDone
+    | IpFailed(Text);
+
+public fn engine_phase_name(p: &EnginePhase) -> Text {
+    match p {
+        IpInit                  => "init".clone(),
+        IpScanningPages         => "scanning_pages".clone(),
+        IpVerifyingBtree        => "verifying_btree".clone(),
+        IpScanningRecords       => "scanning_records".clone(),
+        IpCheckingForeignKeys   => "checking_fk".clone(),
+        IpCheckingIndexes       => "checking_indexes".clone(),
+        IpDone                  => "done".clone(),
+        IpFailed(_)             => "failed".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// IntegrityEngine
+// -----------------------------------------------------------------------------
+
+public type IntegrityEngine is {
+    mode: CheckMode,
+    phase: EnginePhase,
+    report: IntegrityReport,
+}
+
+public fn engine_new(mode: CheckMode) -> IntegrityEngine {
+    IntegrityEngine {
+        mode: clone_mode(&mode),
+        phase: IpInit,
+        report: report_new(mode),
+    }
+}
+
+implement IntegrityEngine {
+    public fn current_phase(&self) -> EnginePhase { clone_phase(&self.phase) }
+
+    public fn is_terminal(&self) -> Bool {
+        match &self.phase {
+            IpDone | IpFailed(_) => true,
+            _                    => false,
+        }
+    }
+
+    pub fn fail(&mut self, reason: Text) {
+        self.phase = IpFailed(reason);
+    }
+
+    /// Step the engine one phase. The order is fixed; callers do their
+    /// scan + record() between calls.
+    pub fn advance(&mut self) {
+        let next = next_phase_for(&self.mode, &self.phase);
+        self.phase = next;
+    }
+
+    /// Record an error if it is in scope for the current mode; mode's
+    /// `applies` predicate gates inclusion.
+    pub fn record(&mut self, err: IntegrityError) -> Bool {
+        if applies(&self.mode, &err) {
+            self.report.record(err);
+            true
+        } else { false }
+    }
+
+    pub fn report_view(&self) -> &IntegrityReport { &self.report }
+}
+
+fn next_phase_for(mode: &CheckMode, current: &EnginePhase) -> EnginePhase {
+    // quick_check + cell_size_check skip record / FK / index phases.
+    let full = match mode {
+        CmIntegrity => true,
+        _           => false,
+    };
+    match current {
+        IpInit                  => IpScanningPages,
+        IpScanningPages         => IpVerifyingBtree,
+        IpVerifyingBtree        => {
+            if full { IpScanningRecords } else { IpDone }
+        }
+        IpScanningRecords       => IpCheckingForeignKeys,
+        IpCheckingForeignKeys   => IpCheckingIndexes,
+        IpCheckingIndexes       => IpDone,
+        IpDone                  => IpDone,
+        IpFailed(r)             => IpFailed(r.clone()),
+    }
+}
+
+fn clone_mode(m: &CheckMode) -> CheckMode {
+    match m {
+        CmIntegrity   => CmIntegrity,
+        CmQuick       => CmQuick,
+        CmForeignKey  => CmForeignKey,
+        CmCellSize    => CmCellSize,
+    }
+}
+
+fn clone_phase(p: &EnginePhase) -> EnginePhase {
+    match p {
+        IpInit                  => IpInit,
+        IpScanningPages         => IpScanningPages,
+        IpVerifyingBtree        => IpVerifyingBtree,
+        IpScanningRecords       => IpScanningRecords,
+        IpCheckingForeignKeys   => IpCheckingForeignKeys,
+        IpCheckingIndexes       => IpCheckingIndexes,
+        IpDone                  => IpDone,
+        IpFailed(r)             => IpFailed(r.clone()),
+    }
+}

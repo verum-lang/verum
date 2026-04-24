@@ -1,0 +1,131 @@
+// =============================================================================
+// integrity/report.vr — IntegrityReport accumulator
+// =============================================================================
+// Spec: sqlite-native.md §10.7
+//
+// Aggregates errors observed during a check run. Three derived
+// metrics:
+//
+//   * `error_count`            — total errors recorded
+//   * `error_count_by_class`   — per-ErrorClass tally
+//   * `is_clean`               — no errors at all
+//
+// `summary()` renders one line suitable for log output, mimicking
+// the C-SQLite CLI's `ok` / `*** in database … ***` style.
+// =============================================================================
+
+module core.database.sqlite.native.integrity.report;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.integrity.error.{
+    IntegrityError, ErrorClass, error_kind_name, classify, class_name,
+    EcStructural, EcBtree, EcRecord, EcForeignKey, EcIndex,
+};
+mount core.database.sqlite.native.integrity.mode.{CheckMode, check_mode_name};
+
+public type IntegrityReport is {
+    mode: CheckMode,
+    errors: List<IntegrityError>,
+    pages_checked: Int64,
+    rows_checked: Int64,
+    started_at_ns: Int64,
+    finished_at_ns: Int64,
+}
+
+public fn report_new(mode: CheckMode) -> IntegrityReport {
+    IntegrityReport {
+        mode: mode,
+        errors: List.new(),
+        pages_checked: 0 as Int64,
+        rows_checked: 0 as Int64,
+        started_at_ns: 0 as Int64,
+        finished_at_ns: 0 as Int64,
+    }
+}
+
+implement IntegrityReport {
+    public fn error_count(&self) -> Int { self.errors.len() }
+    public fn is_clean(&self) -> Bool { self.errors.len() == 0 }
+
+    pub fn record(&mut self, e: IntegrityError) {
+        self.errors.push(e);
+    }
+
+    pub fn note_page_visited(&mut self) {
+        self.pages_checked = self.pages_checked + (1 as Int64);
+    }
+
+    pub fn note_row_visited(&mut self) {
+        self.rows_checked = self.rows_checked + (1 as Int64);
+    }
+
+    pub fn start(&mut self, when_ns: Int64) {
+        self.started_at_ns = when_ns;
+        self.finished_at_ns = when_ns;
+    }
+
+    pub fn finish(&mut self, when_ns: Int64) {
+        self.finished_at_ns = when_ns;
+    }
+
+    pub fn elapsed_ns(&self) -> Int64 { self.finished_at_ns - self.started_at_ns }
+
+    pub fn count_by_class(&self, want: &ErrorClass) -> Int {
+        let want_name = class_name(want);
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.errors.len() {
+            if class_name(&classify(&self.errors[i])) == want_name { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+
+    pub fn summary(&self) -> Text {
+        let mut s = check_mode_name(&self.mode);
+        push_text(&mut s, &": ".clone());
+        if self.is_clean() {
+            push_text(&mut s, &"ok ".clone());
+            push_int64(&mut s, self.pages_checked);
+            push_text(&mut s, &" pages".clone());
+        } else {
+            push_int(&mut s, self.error_count());
+            push_text(&mut s, &" error(s)".clone());
+        }
+        s
+    }
+}
+
+fn push_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn push_int(dst: &mut Text, n: Int) {
+    if n == 0 { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    while x > 0 {
+        digits.push(((x % 10) as Byte) + (48 as Byte));
+        x = x / 10;
+    }
+    if n < 0 { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+fn push_int64(dst: &mut Text, n: Int64) {
+    if n == (0 as Int64) { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int64 = if n < (0 as Int64) { -n } else { n };
+    while x > (0 as Int64) {
+        digits.push((((x as Int) % 10) as Byte) + (48 as Byte));
+        x = x / (10 as Int64);
+    }
+    if n < (0 as Int64) { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}

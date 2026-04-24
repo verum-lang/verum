@@ -1,0 +1,70 @@
+// =============================================================================
+// fts5/posting.vr — posting + posting list
+// =============================================================================
+// Spec: sqlite-native.md §16.2
+//
+// One `Posting` records that a term occurred in (rowid, column, position).
+// `PostingList` aggregates them in rowid-ascending order — the canonical
+// shape inside an inverted-index segment.
+// =============================================================================
+
+module core.database.sqlite.native.fts5.posting;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type Posting is {
+    rowid: Int64,
+    column: Int,
+    /// Token offset within the column's tokenized stream (0-based).
+    position: Int,
+}
+
+public fn posting(rowid: Int64, column: Int, position: Int) -> Posting {
+    Posting { rowid: rowid, column: column, position: position }
+}
+
+implement Posting {
+    public fn precedes(&self, other: &Posting) -> Bool {
+        if self.rowid != other.rowid { return self.rowid < other.rowid; }
+        if self.column != other.column { return self.column < other.column; }
+        self.position < other.position
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PostingList — rowid-ascending sequence
+// -----------------------------------------------------------------------------
+
+public type PostingList is { entries: List<Posting> }
+
+public fn posting_list_empty() -> PostingList { PostingList { entries: List.new() } }
+
+implement PostingList {
+    public fn len(&self) -> Int { self.entries.len() }
+
+    /// Append. Caller is responsible for keeping the list sorted; this
+    /// is the construction-time path. For arbitrary insertion use
+    /// `merge_in`.
+    pub fn push(&mut self, p: Posting) {
+        self.entries.push(p);
+    }
+
+    pub fn unique_rowids(&self) -> Int {
+        let mut seen: Int64 = -1 as Int64;
+        let mut count: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].rowid != seen {
+                count = count + 1;
+                seen = self.entries[i].rowid;
+            }
+            i = i + 1;
+        }
+        count
+    }
+
+    /// Total token-occurrences (= entries.len()).
+    pub fn term_frequency(&self) -> Int { self.entries.len() }
+}

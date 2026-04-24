@@ -1,0 +1,232 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, integrity, quick_check, fk_check, error_class
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Integrity surface:
+//   * IntegrityError taxonomy + classify routing
+//   * CheckMode.applies() gates errors per mode
+//   * IntegrityReport accumulator + summary
+//   * IntegrityEngine phase progression (full vs quick)
+
+mount core.database.sqlite.native.integrity.error.{
+    IntegrityError,
+    IePageNotFound, IeUnorderedKeys, IeNonNullColumnIsNull,
+    IeOrphanFkRow, IeIndexExtraRow, IeCellSizeViolation,
+    ErrorClass, EcStructural, EcBtree, EcRecord, EcForeignKey, EcIndex,
+    error_kind_name, classify, class_name,
+};
+mount core.database.sqlite.native.integrity.mode.{
+    CheckMode, CmIntegrity, CmQuick, CmForeignKey, CmCellSize,
+    check_mode_name, applies,
+};
+mount core.database.sqlite.native.integrity.report.{
+    IntegrityReport, report_new,
+};
+mount core.database.sqlite.native.integrity.engine.{
+    IntegrityEngine, engine_new,
+    EnginePhase, IpInit, IpScanningPages, IpVerifyingBtree, IpDone, IpFailed,
+    engine_phase_name,
+};
+mount base.{Bool, Text};
+
+// -----------------------------------------------------------------------------
+// Error classification
+// -----------------------------------------------------------------------------
+
+fn test_classify_page_error_is_structural() {
+    match classify(&IePageNotFound(7)) {
+        EcStructural => {},
+        _            => panic("structural"),
+    }
+}
+
+fn test_classify_btree_error() {
+    match classify(&IeUnorderedKeys(3, 1)) {
+        EcBtree => {},
+        _       => panic("btree"),
+    }
+}
+
+fn test_classify_fk_error() {
+    match classify(&IeOrphanFkRow("t".clone(), 1 as Int64, "p".clone())) {
+        EcForeignKey => {},
+        _            => panic("fk"),
+    }
+}
+
+fn test_classify_index_error() {
+    match classify(&IeIndexExtraRow("idx".clone(), 1 as Int64)) {
+        EcIndex => {},
+        _       => panic("index"),
+    }
+}
+
+fn test_error_kind_names_unique() {
+    let n1 = error_kind_name(&IePageNotFound(0));
+    let n2 = error_kind_name(&IeUnorderedKeys(0, 0));
+    let n3 = error_kind_name(&IeOrphanFkRow("t".clone(), 0 as Int64, "p".clone()));
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn test_class_names() {
+    assert(class_name(&EcStructural) == "structural".clone());
+    assert(class_name(&EcRecord)     == "record".clone());
+    assert(class_name(&EcForeignKey) == "foreign_key".clone());
+}
+
+// -----------------------------------------------------------------------------
+// CheckMode.applies
+// -----------------------------------------------------------------------------
+
+fn test_quick_check_skips_record_errors() {
+    let err = IeNonNullColumnIsNull("t".clone(), "c".clone(), 1 as Int64);
+    assert(!applies(&CmQuick, &err));
+}
+
+fn test_integrity_check_includes_everything() {
+    let err1 = IePageNotFound(1);
+    let err2 = IeNonNullColumnIsNull("t".clone(), "c".clone(), 1 as Int64);
+    let err3 = IeOrphanFkRow("t".clone(), 1 as Int64, "p".clone());
+    assert(applies(&CmIntegrity, &err1));
+    assert(applies(&CmIntegrity, &err2));
+    assert(applies(&CmIntegrity, &err3));
+}
+
+fn test_fk_check_only_includes_fk() {
+    assert(applies(&CmForeignKey, &IeOrphanFkRow("t".clone(), 1 as Int64, "p".clone())));
+    assert(!applies(&CmForeignKey, &IePageNotFound(1)));
+}
+
+fn test_cell_size_check_only_for_cell_size_violations() {
+    assert(applies(&CmCellSize, &IeCellSizeViolation(1, 0, 999)));
+    assert(!applies(&CmCellSize, &IePageNotFound(1)));
+}
+
+fn test_check_mode_names() {
+    assert(check_mode_name(&CmIntegrity) == "integrity_check".clone());
+    assert(check_mode_name(&CmQuick) == "quick_check".clone());
+    assert(check_mode_name(&CmForeignKey) == "foreign_key_check".clone());
+    assert(check_mode_name(&CmCellSize) == "cell_size_check".clone());
+}
+
+// -----------------------------------------------------------------------------
+// IntegrityReport
+// -----------------------------------------------------------------------------
+
+fn test_report_starts_clean() {
+    let r = report_new(CmIntegrity);
+    assert(r.is_clean());
+    assert_eq(r.error_count(), 0);
+}
+
+fn test_report_records_errors() {
+    let mut r = report_new(CmIntegrity);
+    r.record(IePageNotFound(7));
+    r.record(IeOrphanFkRow("t".clone(), 1 as Int64, "p".clone()));
+    assert_eq(r.error_count(), 2);
+    assert(!r.is_clean());
+}
+
+fn test_report_count_by_class() {
+    let mut r = report_new(CmIntegrity);
+    r.record(IePageNotFound(7));
+    r.record(IePageNotFound(8));
+    r.record(IeOrphanFkRow("t".clone(), 1 as Int64, "p".clone()));
+    assert_eq(r.count_by_class(&EcStructural), 2);
+    assert_eq(r.count_by_class(&EcForeignKey), 1);
+}
+
+fn test_report_summary_non_empty() {
+    let mut r = report_new(CmIntegrity);
+    r.note_page_visited();
+    let s = r.summary();
+    assert(s.len() > 0);
+}
+
+fn test_report_elapsed_ns() {
+    let mut r = report_new(CmIntegrity);
+    r.start(100 as Int64);
+    r.finish(500 as Int64);
+    assert_eq(r.elapsed_ns(), 400 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// IntegrityEngine
+// -----------------------------------------------------------------------------
+
+fn test_engine_starts_in_init() {
+    let e = engine_new(CmIntegrity);
+    match e.current_phase() {
+        IpInit => {},
+        _      => panic("init"),
+    }
+}
+
+fn test_engine_quick_check_skips_to_done_after_btree() {
+    let mut e = engine_new(CmQuick);
+    e.advance(); // init → scan pages
+    e.advance(); // scan → verify btree
+    e.advance(); // verify btree → done (quick mode)
+    assert(e.is_terminal());
+}
+
+fn test_engine_integrity_walks_all_phases() {
+    let mut e = engine_new(CmIntegrity);
+    let mut steps: Int = 0;
+    while !e.is_terminal() && steps < 20 {
+        e.advance();
+        steps = steps + 1;
+    }
+    assert(e.is_terminal());
+}
+
+fn test_engine_record_filters_by_mode() {
+    let mut e = engine_new(CmQuick);
+    let added = e.record(IeNonNullColumnIsNull("t".clone(), "c".clone(), 1 as Int64));
+    assert(!added);    // record-class error filtered out by quick
+}
+
+fn test_engine_fail_terminates() {
+    let mut e = engine_new(CmIntegrity);
+    e.fail("io error".clone());
+    match e.current_phase() {
+        IpFailed(_) => {},
+        _           => panic("failed"),
+    }
+    assert(e.is_terminal());
+}
+
+fn test_engine_phase_names() {
+    assert(engine_phase_name(&IpInit) == "init".clone());
+    assert(engine_phase_name(&IpScanningPages) == "scanning_pages".clone());
+    assert(engine_phase_name(&IpDone) == "done".clone());
+}
+
+fn main() {
+    test_classify_page_error_is_structural();
+    test_classify_btree_error();
+    test_classify_fk_error();
+    test_classify_index_error();
+    test_error_kind_names_unique();
+    test_class_names();
+    test_quick_check_skips_record_errors();
+    test_integrity_check_includes_everything();
+    test_fk_check_only_includes_fk();
+    test_cell_size_check_only_for_cell_size_violations();
+    test_check_mode_names();
+    test_report_starts_clean();
+    test_report_records_errors();
+    test_report_count_by_class();
+    test_report_summary_non_empty();
+    test_report_elapsed_ns();
+    test_engine_starts_in_init();
+    test_engine_quick_check_skips_to_done_after_btree();
+    test_engine_integrity_walks_all_phases();
+    test_engine_record_filters_by_mode();
+    test_engine_fail_terminates();
+    test_engine_phase_names();
+}

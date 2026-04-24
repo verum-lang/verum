@@ -1,0 +1,186 @@
+// =============================================================================
+// rtree/split.vr — quadratic split heuristic (Guttman 1984)
+// =============================================================================
+// Spec: sqlite-native.md §16.3
+//
+// On overflow we split a node's M+1 entries into two groups so that
+// the sum of their MBB areas is minimised. Two phases:
+//
+//   1. PickSeeds: pick the pair of entries that, if kept in the same
+//      group, would waste the most area. They become group seeds.
+//   2. PickNext: of the remaining entries, repeatedly pick the one
+//      whose enlargement preference is largest, and assign to its
+//      preferred group.
+//
+// Pure data — no I/O. The caller turns the two groups into two
+// fresh nodes.
+// =============================================================================
+
+module core.database.sqlite.native.rtree.split;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.rtree.bbox.{BoundingBox};
+
+// -----------------------------------------------------------------------------
+// SplitGroups — output of the heuristic
+// -----------------------------------------------------------------------------
+
+public type SplitGroups is {
+    /// Indices into the input list assigned to group A.
+    group_a: List<Int>,
+    /// Same for group B.
+    group_b: List<Int>,
+}
+
+public fn empty_groups() -> SplitGroups {
+    SplitGroups { group_a: List.new(), group_b: List.new() }
+}
+
+// -----------------------------------------------------------------------------
+// quadratic_split — driver
+// -----------------------------------------------------------------------------
+
+public fn quadratic_split(boxes: &List<BoundingBox>, min_per_group: Int) -> SplitGroups {
+    let n = boxes.len();
+    if n < 2 { return empty_groups(); }
+
+    let (seed_a, seed_b) = pick_seeds(boxes);
+    let mut groups = empty_groups();
+    groups.group_a.push(seed_a);
+    groups.group_b.push(seed_b);
+
+    let mut assigned: List<Bool> = List.new();
+    let mut z: Int = 0;
+    while z < n { assigned.push(false); z = z + 1; }
+    assigned[seed_a] = true;
+    assigned[seed_b] = true;
+
+    let mut mbb_a = clone_bbox(&boxes[seed_a]);
+    let mut mbb_b = clone_bbox(&boxes[seed_b]);
+
+    loop {
+        // If one group is so small that the rest must go to it to
+        // satisfy `min_per_group`, do so.
+        let remaining = unassigned_count(&assigned);
+        if remaining == 0 { break; }
+        if groups.group_a.len() + remaining <= min_per_group {
+            absorb_remaining(&mut groups.group_a, &mut assigned, &mut mbb_a, boxes);
+            break;
+        }
+        if groups.group_b.len() + remaining <= min_per_group {
+            absorb_remaining(&mut groups.group_b, &mut assigned, &mut mbb_b, boxes);
+            break;
+        }
+
+        let next = pick_next(boxes, &assigned, &mbb_a, &mbb_b);
+        let prefer_a = preference_for_a(boxes, next, &mbb_a, &mbb_b);
+        if prefer_a {
+            mbb_a = mbb_a.enlarged_to(&boxes[next]);
+            groups.group_a.push(next);
+        } else {
+            mbb_b = mbb_b.enlarged_to(&boxes[next]);
+            groups.group_b.push(next);
+        }
+        assigned[next] = true;
+    }
+    groups
+}
+
+// -----------------------------------------------------------------------------
+// PickSeeds — pair that wastes the most area
+// -----------------------------------------------------------------------------
+
+fn pick_seeds(boxes: &List<BoundingBox>) -> (Int, Int) {
+    let mut worst: Float64 = -1.0 as Float64;
+    let mut a: Int = 0;
+    let mut b: Int = 1;
+    let mut i: Int = 0;
+    while i < boxes.len() {
+        let mut j: Int = i + 1;
+        while j < boxes.len() {
+            let combined = boxes[i].enlarged_to(&boxes[j]);
+            let waste = combined.area() - boxes[i].area() - boxes[j].area();
+            if waste > worst {
+                worst = waste;
+                a = i;
+                b = j;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    (a, b)
+}
+
+// -----------------------------------------------------------------------------
+// PickNext — entry whose preference between A and B is strongest
+// -----------------------------------------------------------------------------
+
+fn pick_next(boxes: &List<BoundingBox>, assigned: &List<Bool>, a: &BoundingBox, b: &BoundingBox) -> Int {
+    let mut best_diff: Float64 = -1.0 as Float64;
+    let mut best_idx: Int = -1;
+    let mut i: Int = 0;
+    while i < boxes.len() {
+        if !assigned[i] {
+            let cost_a = a.enlargement(&boxes[i]);
+            let cost_b = b.enlargement(&boxes[i]);
+            let diff = if cost_a > cost_b { cost_a - cost_b } else { cost_b - cost_a };
+            if diff > best_diff {
+                best_diff = diff;
+                best_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    if best_idx < 0 { 0 } else { best_idx }
+}
+
+fn preference_for_a(boxes: &List<BoundingBox>, idx: Int, a: &BoundingBox, b: &BoundingBox) -> Bool {
+    let cost_a = a.enlargement(&boxes[idx]);
+    let cost_b = b.enlargement(&boxes[idx]);
+    if cost_a < cost_b { return true; }
+    if cost_b < cost_a { return false; }
+    // Tie-break by area, then by entry count.
+    a.area() < b.area()
+}
+
+fn unassigned_count(assigned: &List<Bool>) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < assigned.len() {
+        if !assigned[i] { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}
+
+fn absorb_remaining(
+    group: &mut List<Int>,
+    assigned: &mut List<Bool>,
+    mbb: &mut BoundingBox,
+    boxes: &List<BoundingBox>,
+) {
+    let mut i: Int = 0;
+    while i < assigned.len() {
+        if !assigned[i] {
+            *mbb = mbb.enlarged_to(&boxes[i]);
+            group.push(i);
+            assigned[i] = true;
+        }
+        i = i + 1;
+    }
+}
+
+fn clone_bbox(b: &BoundingBox) -> BoundingBox {
+    let mut min: List<Float64> = List.new();
+    let mut max: List<Float64> = List.new();
+    let mut i: Int = 0;
+    while i < b.min.len() {
+        min.push(b.min[i]);
+        max.push(b.max[i]);
+        i = i + 1;
+    }
+    BoundingBox { min: min, max: max }
+}

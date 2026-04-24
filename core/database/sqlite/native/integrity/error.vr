@@ -1,0 +1,90 @@
+// =============================================================================
+// integrity/error.vr — IntegrityError taxonomy
+// =============================================================================
+// Spec: sqlite-native.md §10.7
+//
+// Each variant matches a SQLite-CLI integrity_check output category;
+// the strings the CLI prints are the variant's `name()` rendering.
+// =============================================================================
+
+module core.database.sqlite.native.integrity.error;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type IntegrityError is
+      // Structural
+      IePageNotFound(Int)
+    | IeWrongPageSize(Int, Int)             // (page, found_size)
+    | IeOrphanedPage(Int)
+    | IeFreelistMismatch(Int, Int)          // (expected, found)
+    | IeRootPageMismatch(Text, Int, Int)    // (table, expected, found)
+
+      // Btree invariant
+    | IeUnorderedKeys(Int, Int)             // (page, cell_index)
+    | IeCellSizeViolation(Int, Int, Int)    // (page, cell, size)
+    | IeOverflowChainBroken(Int)
+    | IeUnusedSpaceMismatch(Int, Int)
+
+      // Record / payload
+    | IeRecordHeaderTooLong(Int64)          // (rowid)
+    | IePayloadCrcMismatch(Int64)
+    | IeNonNullColumnIsNull(Text, Text, Int64)   // (table, column, rowid)
+
+      // Foreign keys
+    | IeOrphanFkRow(Text, Int64, Text)      // (child_table, rowid, parent_table)
+
+      // Index
+    | IeIndexExtraRow(Text, Int64)
+    | IeIndexMissingRow(Text, Int64);
+
+public fn error_kind_name(e: &IntegrityError) -> Text {
+    match e {
+        IePageNotFound(_)               => "page_not_found".clone(),
+        IeWrongPageSize(_, _)           => "wrong_page_size".clone(),
+        IeOrphanedPage(_)               => "orphaned_page".clone(),
+        IeFreelistMismatch(_, _)        => "freelist_mismatch".clone(),
+        IeRootPageMismatch(_, _, _)     => "root_page_mismatch".clone(),
+        IeUnorderedKeys(_, _)           => "unordered_keys".clone(),
+        IeCellSizeViolation(_, _, _)    => "cell_size_violation".clone(),
+        IeOverflowChainBroken(_)        => "overflow_chain_broken".clone(),
+        IeUnusedSpaceMismatch(_, _)     => "unused_space_mismatch".clone(),
+        IeRecordHeaderTooLong(_)        => "record_header_too_long".clone(),
+        IePayloadCrcMismatch(_)         => "payload_crc_mismatch".clone(),
+        IeNonNullColumnIsNull(_, _, _)  => "non_null_column_is_null".clone(),
+        IeOrphanFkRow(_, _, _)          => "orphan_fk_row".clone(),
+        IeIndexExtraRow(_, _)           => "index_extra_row".clone(),
+        IeIndexMissingRow(_, _)         => "index_missing_row".clone(),
+    }
+}
+
+/// Coarse classification — used to gate quick_check vs integrity_check.
+public type ErrorClass is EcStructural | EcBtree | EcRecord | EcForeignKey | EcIndex;
+
+public fn classify(e: &IntegrityError) -> ErrorClass {
+    match e {
+        IePageNotFound(_) | IeWrongPageSize(_, _) | IeOrphanedPage(_)
+        | IeFreelistMismatch(_, _) | IeRootPageMismatch(_, _, _)
+            => EcStructural,
+        IeUnorderedKeys(_, _) | IeCellSizeViolation(_, _, _)
+        | IeOverflowChainBroken(_) | IeUnusedSpaceMismatch(_, _)
+            => EcBtree,
+        IeRecordHeaderTooLong(_) | IePayloadCrcMismatch(_)
+        | IeNonNullColumnIsNull(_, _, _)
+            => EcRecord,
+        IeOrphanFkRow(_, _, _)
+            => EcForeignKey,
+        IeIndexExtraRow(_, _) | IeIndexMissingRow(_, _)
+            => EcIndex,
+    }
+}
+
+public fn class_name(c: &ErrorClass) -> Text {
+    match c {
+        EcStructural  => "structural".clone(),
+        EcBtree       => "btree".clone(),
+        EcRecord      => "record".clone(),
+        EcForeignKey  => "foreign_key".clone(),
+        EcIndex       => "index".clone(),
+    }
+}

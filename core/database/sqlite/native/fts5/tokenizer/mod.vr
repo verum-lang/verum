@@ -1,0 +1,28 @@
+// =============================================================================
+// fts5/tokenizer/mod.vr — Tokenizer protocol + 4 implementations
+// =============================================================================
+// Spec: sqlite-native.md §16.2
+//
+// Tokenizers transform an input text into a stream of (token, position).
+// Four stock tokenizers ship out of the box:
+//
+//   * `simple`     — ASCII word-split + lowercase (default)
+//   * `porter`     — Porter stemmer (English)
+//   * `unicode61`  — Unicode-aware word break, optional diacritic strip
+//   * `trigram`    — 3-character sliding window for fuzzy match
+//
+// Submodules:
+//   * `core`      — Tokenizer protocol + Token + tokenize entry-point
+//   * `simple`    — SimpleTokenizer
+//   * `porter`    — PorterTokenizer (English stems)
+//   * `unicode61` — Unicode61Tokenizer (NFC-normalised word break)
+//   * `trigram`   — TrigramTokenizer
+// =============================================================================
+
+module core.database.sqlite.native.fts5.tokenizer;
+
+public module core;
+public module simple;
+public module porter;
+public module unicode61;
+public module trigram;

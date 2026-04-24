@@ -1,0 +1,167 @@
+// =============================================================================
+// fts5/index.vr — segment-based inverted index
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (FTS5)
+//
+// `InvertedIndex` is the in-memory write-buffer + sorted segment list.
+// On each insert/delete the new entry lands in the in-memory buffer;
+// when the buffer crosses `flush_threshold` it is materialised as an
+// L0 segment.
+//
+// Lookups traverse: buffer → L0 → L1 → … → L3 and union the posting
+// lists. The merger compacts adjacent same-level segments into the
+// next level when the count crosses `merge_threshold`.
+// =============================================================================
+
+module core.database.sqlite.native.fts5.index;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.fts5.posting.{
+    Posting, PostingList, posting_list_empty,
+};
+mount core.database.sqlite.native.fts5.segment.{
+    Segment, SegmentEntry, SegmentLevel, L0, segment_new, segment_entry,
+    level_index,
+};
+
+// -----------------------------------------------------------------------------
+// InvertedIndex
+// -----------------------------------------------------------------------------
+
+public type InvertedIndex is {
+    /// In-memory write buffer (will become an L0 segment on flush).
+    buffer: List<SegmentEntry>,
+    segments: List<Segment>,
+    next_segment_id: Int64,
+    flush_threshold: Int,
+    merge_threshold: Int,
+}
+
+public fn index_new() -> InvertedIndex {
+    InvertedIndex {
+        buffer: List.new(),
+        segments: List.new(),
+        next_segment_id: 1 as Int64,
+        flush_threshold: 4096,
+        merge_threshold: 4,
+    }
+}
+
+implement InvertedIndex {
+    public fn segment_count(&self) -> Int { self.segments.len() }
+    public fn buffer_size(&self) -> Int { self.buffer.len() }
+
+    /// Index one (term, posting) into the buffer. The buffer is kept
+    /// sorted by term so flush can be O(N).
+    pub fn add_posting(&mut self, term: Text, p: Posting) {
+        let mut i: Int = 0;
+        while i < self.buffer.len() {
+            if self.buffer[i].term == term {
+                self.buffer[i].postings.push(p);
+                return;
+            }
+            if term < self.buffer[i].term { break; }
+            i = i + 1;
+        }
+        let mut postings = posting_list_empty();
+        postings.push(p);
+        self.insert_at(i, segment_entry(term, postings));
+    }
+
+    fn insert_at(&mut self, idx: Int, e: SegmentEntry) {
+        let mut new_buf: List<SegmentEntry> = List.new();
+        let mut k: Int = 0;
+        while k < self.buffer.len() {
+            if k == idx { new_buf.push(clone_entry(&e)); }
+            new_buf.push(clone_entry(&self.buffer[k]));
+            k = k + 1;
+        }
+        if idx >= self.buffer.len() { new_buf.push(clone_entry(&e)); }
+        self.buffer = new_buf;
+    }
+
+    /// Materialise the buffer as a fresh L0 segment.
+    pub fn flush(&mut self) -> Int64 {
+        let id = self.next_segment_id;
+        self.next_segment_id = id + (1 as Int64);
+        let mut seg = segment_new(id, L0);
+        let mut i: Int = 0;
+        while i < self.buffer.len() {
+            seg.append(clone_entry(&self.buffer[i]));
+            i = i + 1;
+        }
+        seg.mark_persisted();
+        self.segments.push(seg);
+        self.buffer = List.new();
+        id
+    }
+
+    /// Lookup `term`. Returns the union of postings across the buffer
+    /// and every segment.
+    pub fn lookup(&self, term: &Text) -> PostingList {
+        let mut out = posting_list_empty();
+        // Buffer first
+        let mut i: Int = 0;
+        while i < self.buffer.len() {
+            if self.buffer[i].term == *term {
+                copy_postings(&self.buffer[i].postings, &mut out);
+                break;
+            }
+            i = i + 1;
+        }
+        // Segments
+        let mut s: Int = 0;
+        while s < self.segments.len() {
+            match self.segments[s].lookup(term) {
+                Some(idx) => {
+                    copy_postings(&self.segments[s].entries[idx].postings, &mut out);
+                }
+                None => {}
+            }
+            s = s + 1;
+        }
+        out
+    }
+
+    /// Count of segments at the given level.
+    pub fn segments_at(&self, level: &SegmentLevel) -> Int {
+        let want = level_index(level);
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.segments.len() {
+            if level_index(&self.segments[i].level) == want { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+}
+
+fn clone_entry(e: &SegmentEntry) -> SegmentEntry {
+    let mut postings = posting_list_empty();
+    let mut i: Int = 0;
+    while i < e.postings.entries.len() {
+        let p = &e.postings.entries[i];
+        postings.push(Posting {
+            rowid: p.rowid,
+            column: p.column,
+            position: p.position,
+        });
+        i = i + 1;
+    }
+    SegmentEntry { term: e.term.clone(), postings: postings }
+}
+
+fn copy_postings(src: &PostingList, dst: &mut PostingList) {
+    let mut i: Int = 0;
+    while i < src.entries.len() {
+        let p = &src.entries[i];
+        dst.push(Posting {
+            rowid: p.rowid,
+            column: p.column,
+            position: p.position,
+        });
+        i = i + 1;
+    }
+}

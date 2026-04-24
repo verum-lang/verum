@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/rtree/mod.vr
+// =============================================================================
+// Layer: 5 (built-in vtab)
+// Spec: sqlite-native.md §16.3 (R-Tree spatial index)
+//
+// N-dimensional R-tree, 1..5 dimensions. Internal nodes carry a
+// bounding box that covers every leaf descendant. Leaf nodes carry
+// the actual `(rowid, BoundingBox)` records.
+//
+// Submodules:
+//   * `bbox`    — BoundingBox + dimension predicates
+//   * `node`    — RNode (interior + leaf) + insert
+//   * `tree`    — RTree top-level + search/insert/delete
+//   * `query`   — RangeQuery + intersect predicate translation
+//   * `split`   — quadratic split heuristic (Guttman 1984)
+// =============================================================================
+
+module core.database.sqlite.native.rtree;
+
+public module bbox;
+public module node;
+public module tree;
+public module query;
+public module split;

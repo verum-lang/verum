@@ -1,0 +1,61 @@
+// =============================================================================
+// integrity/mode.vr — CheckMode + per-mode predicates
+// =============================================================================
+// Spec: sqlite-native.md §10.7
+// =============================================================================
+
+module core.database.sqlite.native.integrity.mode;
+
+mount core.*;
+mount base.{Text, Bool};
+mount core.database.sqlite.native.integrity.error.{
+    IntegrityError, ErrorClass, EcStructural, EcBtree, EcRecord, EcForeignKey, EcIndex,
+    classify,
+};
+
+public type CheckMode is
+      CmIntegrity                    // PRAGMA integrity_check
+    | CmQuick                        // PRAGMA quick_check (page-level only)
+    | CmForeignKey                   // PRAGMA foreign_key_check
+    | CmCellSize;                    // PRAGMA cell_size_check
+
+public fn check_mode_name(m: &CheckMode) -> Text {
+    match m {
+        CmIntegrity   => "integrity_check".clone(),
+        CmQuick       => "quick_check".clone(),
+        CmForeignKey  => "foreign_key_check".clone(),
+        CmCellSize    => "cell_size_check".clone(),
+    }
+}
+
+/// True iff the supplied error is in scope for this CheckMode.
+public fn applies(mode: &CheckMode, err: &IntegrityError) -> Bool {
+    let class = classify(err);
+    match mode {
+        CmIntegrity   => true,
+        CmQuick       => is_structural_or_btree(&class),
+        CmForeignKey  => is_fk(&class),
+        CmCellSize    => is_cell_size(err),
+    }
+}
+
+fn is_structural_or_btree(c: &ErrorClass) -> Bool {
+    match c {
+        EcStructural | EcBtree => true,
+        _                      => false,
+    }
+}
+
+fn is_fk(c: &ErrorClass) -> Bool {
+    match c {
+        EcForeignKey => true,
+        _            => false,
+    }
+}
+
+fn is_cell_size(e: &IntegrityError) -> Bool {
+    match e {
+        core.database.sqlite.native.integrity.error.IeCellSizeViolation(_, _, _) => true,
+        _                                                                          => false,
+    }
+}

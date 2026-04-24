@@ -140,3 +140,11 @@ public module fuzz;
 public module differential;
 // - test_vectors: codified Appendix E vectors (varint / record / WAL csum / btree)
 public module test_vectors;
+// - fts5: full-text search vtab — tokenizer/index/segment/merger/query/ranker (§16.2)
+public module fts5;
+// - rtree: N-dimensional R-tree spatial index (§16.3)
+public module rtree;
+// - statistics: sqlite_stat1/4 + selectivity estimator + ANALYZE driver (§13.2)
+public module statistics;
+// - integrity: integrity_check / quick_check / FK_check / cell_size_check (§10.7)
+public module integrity;

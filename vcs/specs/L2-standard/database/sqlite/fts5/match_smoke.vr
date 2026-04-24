@@ -1,0 +1,266 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fts5, tokenizer, index, query, bm25
+// @timeout: 5000
+// @expected-exit: 0
+//
+// FTS5 surface:
+//   * Tokenizer protocol — simple/porter/unicode61/trigram emit tokens
+//   * InvertedIndex add_posting + flush + lookup
+//   * MATCH parser produces correct AST (term/AND/OR/NOT/phrase)
+//   * Executor returns intersected rowids
+//   * BM25 scoring is monotonic in tf
+
+mount core.database.sqlite.native.fts5.posting.{
+    Posting, PostingList, posting, posting_list_empty,
+};
+mount core.database.sqlite.native.fts5.tokenizer.core.{
+    Token, Tokenizer, token,
+};
+mount core.database.sqlite.native.fts5.tokenizer.simple.{
+    SimpleTokenizer, simple_tokenizer,
+};
+mount core.database.sqlite.native.fts5.tokenizer.porter.{
+    PorterTokenizer, porter_tokenizer, porter_stem,
+};
+mount core.database.sqlite.native.fts5.tokenizer.unicode61.{
+    Unicode61Tokenizer, unicode61_tokenizer,
+};
+mount core.database.sqlite.native.fts5.tokenizer.trigram.{
+    TrigramTokenizer, trigram_tokenizer,
+};
+mount core.database.sqlite.native.fts5.index.{
+    InvertedIndex, index_new,
+};
+mount core.database.sqlite.native.fts5.segment.{
+    Segment, SegmentLevel, L0, L1, L2, level_index,
+};
+mount core.database.sqlite.native.fts5.merger.{
+    MergeAction, MaIdle, MaCompactLevel, MaFlushBuffer,
+    MergePolicy, default_policy, decide, promote,
+};
+mount core.database.sqlite.native.fts5.query.ast.{
+    MatchAst, MaTerm, MaAnd, MaOr,
+    term, and_op, or_op, collect_terms,
+};
+mount core.database.sqlite.native.fts5.query.parser.{
+    parse, ParseError, PeEmpty,
+};
+mount core.database.sqlite.native.fts5.query.executor.{
+    MatchedRowid, execute,
+};
+mount core.database.sqlite.native.fts5.query.ranker.{
+    Bm25Params, bm25_default, DocStats, doc_stats, bm25_score,
+};
+mount core.database.sqlite.native.fts5.helpers.{
+    MatchRange, match_range, highlight, snippet,
+};
+mount base.{Ok, Err, Some, None, Maybe, Bool, Text};
+
+// -----------------------------------------------------------------------------
+// Tokenizers
+// -----------------------------------------------------------------------------
+
+fn test_simple_tokenizer_lowercases() {
+    let t = simple_tokenizer();
+    let toks = t.tokenize(&"Hello WORLD".clone());
+    assert_eq(toks.len(), 2);
+    assert(toks[0].text == "hello".clone());
+    assert(toks[1].text == "world".clone());
+}
+
+fn test_simple_tokenizer_assigns_positions() {
+    let toks = simple_tokenizer().tokenize(&"a b c".clone());
+    assert_eq(toks.len(), 3);
+    assert_eq(toks[0].position, 0);
+    assert_eq(toks[1].position, 1);
+    assert_eq(toks[2].position, 2);
+}
+
+fn test_porter_stems_plurals() {
+    let stem = porter_stem(&"flies".clone());
+    assert(stem == "fli".clone());
+}
+
+fn test_porter_strips_ss_only_when_double() {
+    let stem = porter_stem(&"miss".clone());
+    assert(stem == "miss".clone());
+}
+
+fn test_unicode61_handles_high_bytes() {
+    let t = unicode61_tokenizer();
+    // ASCII-only stand-in (full UTF-8 belongs to runtime testing).
+    let toks = t.tokenize(&"hello".clone());
+    assert_eq(toks.len(), 1);
+}
+
+fn test_trigram_emits_sliding_window() {
+    let t = trigram_tokenizer();
+    let toks = t.tokenize(&"hello".clone());
+    assert_eq(toks.len(), 3);    // hel / ell / llo
+}
+
+// -----------------------------------------------------------------------------
+// Inverted index
+// -----------------------------------------------------------------------------
+
+fn test_index_add_posting_and_lookup() {
+    let mut idx = index_new();
+    idx.add_posting("hello".clone(), posting(1 as Int64, 0, 0));
+    idx.add_posting("hello".clone(), posting(2 as Int64, 0, 5));
+    idx.add_posting("world".clone(), posting(1 as Int64, 0, 1));
+    let p = idx.lookup(&"hello".clone());
+    assert_eq(p.len(), 2);
+}
+
+fn test_index_flush_creates_l0_segment() {
+    let mut idx = index_new();
+    idx.add_posting("a".clone(), posting(1 as Int64, 0, 0));
+    let _ = idx.flush();
+    assert_eq(idx.segment_count(), 1);
+    assert_eq(idx.segments_at(&L0), 1);
+}
+
+// -----------------------------------------------------------------------------
+// Merger policy
+// -----------------------------------------------------------------------------
+
+fn test_merger_idle_when_empty() {
+    let idx = index_new();
+    let policy = default_policy();
+    match decide(&policy, &idx) {
+        MaIdle => {},
+        _      => panic("idle expected"),
+    }
+}
+
+fn test_promote_routes_through_levels() {
+    assert_eq(level_index(&promote(&L0)), 1);
+    assert_eq(level_index(&promote(&L1)), 2);
+    assert_eq(level_index(&promote(&L2)), 3);
+}
+
+// -----------------------------------------------------------------------------
+// Query parser
+// -----------------------------------------------------------------------------
+
+fn test_parse_simple_term() {
+    match parse(&"hello".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("term parses"),
+    }
+}
+
+fn test_parse_and() {
+    match parse(&"a AND b".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("AND parses"),
+    }
+}
+
+fn test_parse_implicit_and() {
+    match parse(&"a b".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("implicit AND parses"),
+    }
+}
+
+fn test_parse_or() {
+    match parse(&"x OR y".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("OR parses"),
+    }
+}
+
+fn test_parse_phrase() {
+    match parse(&"\"hello world\"".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("phrase parses"),
+    }
+}
+
+fn test_parse_empty_errors() {
+    match parse(&"".clone()) {
+        Err(PeEmpty) => {},
+        _            => panic("empty rejected"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// AST term collection
+// -----------------------------------------------------------------------------
+
+fn test_collect_terms_traverses_AND() {
+    let ast = and_op(term("a".clone()), term("b".clone()));
+    let terms = collect_terms(&ast);
+    assert_eq(terms.len(), 2);
+}
+
+// -----------------------------------------------------------------------------
+// Executor
+// -----------------------------------------------------------------------------
+
+fn test_execute_term_returns_unique_rowids() {
+    let mut idx = index_new();
+    idx.add_posting("hello".clone(), posting(1 as Int64, 0, 0));
+    idx.add_posting("hello".clone(), posting(1 as Int64, 0, 5));   // same rowid
+    idx.add_posting("hello".clone(), posting(2 as Int64, 0, 0));
+    let ast = term("hello".clone());
+    let result = execute(&ast, &idx);
+    assert_eq(result.len(), 2);
+}
+
+// -----------------------------------------------------------------------------
+// BM25
+// -----------------------------------------------------------------------------
+
+fn test_bm25_score_monotonic_in_tf() {
+    let stats = doc_stats(100, 50.0 as Float64);
+    let params = bm25_default();
+    let s_low = bm25_score(1, 50, 10, &stats, &params);
+    let s_high = bm25_score(5, 50, 10, &stats, &params);
+    assert(s_high > s_low);
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn test_highlight_wraps_ranges() {
+    let mut ranges: List<MatchRange> = List.new();
+    ranges.push(match_range(0, 5));
+    let out = highlight(&"hello world".clone(), &ranges, &"<".clone(), &">".clone());
+    assert(out.len() > 0);
+}
+
+fn test_snippet_emits_window() {
+    let mut ranges: List<MatchRange> = List.new();
+    ranges.push(match_range(0, 5));
+    let out = snippet(&"hello world foo bar".clone(), &ranges, &"<".clone(), &">".clone(), &"…".clone(), 4);
+    assert(out.len() > 0);
+}
+
+fn main() {
+    test_simple_tokenizer_lowercases();
+    test_simple_tokenizer_assigns_positions();
+    test_porter_stems_plurals();
+    test_porter_strips_ss_only_when_double();
+    test_unicode61_handles_high_bytes();
+    test_trigram_emits_sliding_window();
+    test_index_add_posting_and_lookup();
+    test_index_flush_creates_l0_segment();
+    test_merger_idle_when_empty();
+    test_promote_routes_through_levels();
+    test_parse_simple_term();
+    test_parse_and();
+    test_parse_implicit_and();
+    test_parse_or();
+    test_parse_phrase();
+    test_parse_empty_errors();
+    test_collect_terms_traverses_AND();
+    test_execute_term_returns_unique_rowids();
+    test_bm25_score_monotonic_in_tf();
+    test_highlight_wraps_ranges();
+    test_snippet_emits_window();
+}

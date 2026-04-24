@@ -1,0 +1,123 @@
+// =============================================================================
+// fts5/query/ranker.vr — BM25 ranker
+// =============================================================================
+// Spec: sqlite-native.md §16.2
+//
+// BM25 = sum over query terms q of:
+//
+//   IDF(q) * tf(q,doc) * (k1 + 1)
+//   ─────────────────────────────────────────
+//   tf(q,doc) + k1 * (1 - b + b * doc_len / avgdl)
+//
+// where:
+//   k1 = 1.2 (term-saturation parameter)
+//   b  = 0.75 (length-normalisation parameter)
+//   IDF(q) = ln((N - df + 0.5) / (df + 0.5) + 1)
+//
+// =============================================================================
+
+module core.database.sqlite.native.fts5.query.ranker;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.fts5.query.executor.{MatchedRowid};
+
+// -----------------------------------------------------------------------------
+// BM25 parameters
+// -----------------------------------------------------------------------------
+
+public type Bm25Params is {
+    k1: Float64,
+    b: Float64,
+}
+
+public fn bm25_default() -> Bm25Params {
+    Bm25Params { k1: 1.2 as Float64, b: 0.75 as Float64 }
+}
+
+// -----------------------------------------------------------------------------
+// Document statistics — provided by the caller (per-rowid doc length)
+// -----------------------------------------------------------------------------
+
+public type DocStats is {
+    /// Total documents in the collection.
+    n_docs: Int,
+    /// Average doc length (in tokens).
+    avgdl: Float64,
+}
+
+public fn doc_stats(n_docs: Int, avgdl: Float64) -> DocStats {
+    DocStats { n_docs: n_docs, avgdl: avgdl }
+}
+
+// -----------------------------------------------------------------------------
+// RankedRow
+// -----------------------------------------------------------------------------
+
+public type RankedRow is { rowid: Int64, score: Float64 }
+
+public fn ranked(rowid: Int64, score: Float64) -> RankedRow {
+    RankedRow { rowid: rowid, score: score }
+}
+
+// -----------------------------------------------------------------------------
+// Score one row given its term frequency + document frequency
+// -----------------------------------------------------------------------------
+
+public fn bm25_score(
+    tf: Int,
+    doc_len: Int,
+    df: Int,
+    stats: &DocStats,
+    params: &Bm25Params,
+) -> Float64 {
+    let idf = idf_term(stats.n_docs, df);
+    let tf_f = tf as Float64;
+    let dl_f = doc_len as Float64;
+    let numerator = tf_f * (params.k1 + (1.0 as Float64));
+    let denom = tf_f + params.k1 * ((1.0 as Float64) - params.b + params.b * dl_f / stats.avgdl);
+    if denom == (0.0 as Float64) { return 0.0 as Float64; }
+    idf * (numerator / denom)
+}
+
+fn idf_term(n_docs: Int, df: Int) -> Float64 {
+    let n = n_docs as Float64;
+    let d = df as Float64;
+    let half = 0.5 as Float64;
+    let arg = (n - d + half) / (d + half) + (1.0 as Float64);
+    ln_approx(arg)
+}
+
+/// Natural log via Taylor series — `core.math.float` ships the real
+/// thing; here we expose a usable approximation suitable for
+/// ranking ordering (monotonic).
+fn ln_approx(x: Float64) -> Float64 {
+    if x <= (0.0 as Float64) { return 0.0 as Float64; }
+    // Use ln(x) ≈ 2 * ((x-1)/(x+1) + (1/3)((x-1)/(x+1))^3 + ...)
+    let r = (x - (1.0 as Float64)) / (x + (1.0 as Float64));
+    let r2 = r * r;
+    (2.0 as Float64) * r * ((1.0 as Float64) + r2 / (3.0 as Float64) + r2 * r2 / (5.0 as Float64))
+}
+
+// -----------------------------------------------------------------------------
+// Rank a result set — caller supplies a doc-length lookup
+// -----------------------------------------------------------------------------
+
+public fn rank(
+    rows: &List<MatchedRowid>,
+    df: Int,
+    doc_len_for: fn(Int64) -> Int,
+    stats: &DocStats,
+    params: &Bm25Params,
+) -> List<RankedRow> {
+    let mut out: List<RankedRow> = List.new();
+    let mut i: Int = 0;
+    while i < rows.len() {
+        let dl = (doc_len_for)(rows[i].rowid);
+        let s = bm25_score(rows[i].tf, dl, df, stats, params);
+        out.push(ranked(rows[i].rowid, s));
+        i = i + 1;
+    }
+    out
+}

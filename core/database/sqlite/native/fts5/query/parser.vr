@@ -1,0 +1,230 @@
+// =============================================================================
+// fts5/query/parser.vr — text → MatchAst
+// =============================================================================
+// Spec: sqlite-native.md §16.2
+//
+// Recursive-descent parser. Lexes whitespace-separated tokens with
+// special handling for `"..."` (phrases), `AND`/`OR`/`NOT` (operators),
+// `NEAR(t1, t2, n)` (proximity).
+// =============================================================================
+
+module core.database.sqlite.native.fts5.query.parser;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.fts5.query.ast.{
+    MatchAst, MaTerm, MaPhrase, MaAnd, MaOr, MaNot,
+    term, phrase, and_op, or_op, not_op,
+};
+
+// -----------------------------------------------------------------------------
+// Tok — flat token kind
+// -----------------------------------------------------------------------------
+
+public type Tok is
+      TokWord(Text)
+    | TokAnd
+    | TokOr
+    | TokNot
+    | TokQuote
+    | TokLParen
+    | TokRParen
+    | TokEof;
+
+public fn tok_kind_name(t: &Tok) -> Text {
+    match t {
+        TokWord(_)  => "word".clone(),
+        TokAnd      => "and".clone(),
+        TokOr       => "or".clone(),
+        TokNot      => "not".clone(),
+        TokQuote    => "quote".clone(),
+        TokLParen   => "lparen".clone(),
+        TokRParen   => "rparen".clone(),
+        TokEof      => "eof".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Lex
+// -----------------------------------------------------------------------------
+
+public fn lex(text: &Text) -> List<Tok> {
+    let bs = text.as_bytes();
+    let mut out: List<Tok> = List.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) {
+            i = i + 1;
+        } else if b == (34 as Byte) {
+            out.push(TokQuote);
+            i = i + 1;
+        } else if b == (40 as Byte) {
+            out.push(TokLParen);
+            i = i + 1;
+        } else if b == (41 as Byte) {
+            out.push(TokRParen);
+            i = i + 1;
+        } else {
+            let mut word = Text.new();
+            while i < bs.len()
+                && bs[i] != (32 as Byte) && bs[i] != (9 as Byte) && bs[i] != (10 as Byte)
+                && bs[i] != (34 as Byte) && bs[i] != (40 as Byte) && bs[i] != (41 as Byte)
+            {
+                word.push_byte(bs[i]);
+                i = i + 1;
+            }
+            out.push(classify_word(word));
+        }
+    }
+    out.push(TokEof);
+    out
+}
+
+fn classify_word(w: Text) -> Tok {
+    if w == "AND".clone() { return TokAnd; }
+    if w == "OR".clone() { return TokOr; }
+    if w == "NOT".clone() { return TokNot; }
+    TokWord(w)
+}
+
+// -----------------------------------------------------------------------------
+// Parse
+// -----------------------------------------------------------------------------
+
+public type ParseState is { tokens: List<Tok>, pos: Int }
+
+public fn parse_state(tokens: List<Tok>) -> ParseState {
+    ParseState { tokens: tokens, pos: 0 }
+}
+
+public type ParseError is
+      PeUnexpected(Text)
+    | PeUnclosedQuote
+    | PeEmpty;
+
+public fn parse(text: &Text) -> base.Result<MatchAst, ParseError> {
+    let toks = lex(text);
+    if toks.len() == 1 { return base.Err(PeEmpty); }
+    let mut state = parse_state(toks);
+    parse_or(&mut state)
+}
+
+fn parse_or(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
+    let mut left = match parse_and(s) { base.Ok(v) => v, base.Err(e) => return base.Err(e) };
+    loop {
+        match peek(s) {
+            TokOr => {
+                bump(s);
+                let right = match parse_and(s) {
+                    base.Ok(v) => v,
+                    base.Err(e) => return base.Err(e),
+                };
+                left = or_op(left, right);
+            }
+            _ => break,
+        }
+    }
+    base.Ok(left)
+}
+
+fn parse_and(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
+    let mut left = match parse_not(s) { base.Ok(v) => v, base.Err(e) => return base.Err(e) };
+    loop {
+        match peek(s) {
+            TokAnd => {
+                bump(s);
+                let right = match parse_not(s) {
+                    base.Ok(v) => v,
+                    base.Err(e) => return base.Err(e),
+                };
+                left = and_op(left, right);
+            }
+            // Implicit AND: two atoms in a row.
+            TokWord(_) | TokQuote | TokLParen => {
+                let right = match parse_not(s) {
+                    base.Ok(v) => v,
+                    base.Err(e) => return base.Err(e),
+                };
+                left = and_op(left, right);
+            }
+            _ => break,
+        }
+    }
+    base.Ok(left)
+}
+
+fn parse_not(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
+    match peek(s) {
+        TokNot => {
+            bump(s);
+            let inner = match parse_atom(s) {
+                base.Ok(v) => v,
+                base.Err(e) => return base.Err(e),
+            };
+            base.Ok(not_op(inner))
+        }
+        _ => parse_atom(s),
+    }
+}
+
+fn parse_atom(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
+    match peek(s) {
+        TokWord(w) => {
+            let val = w.clone();
+            bump(s);
+            base.Ok(term(val))
+        }
+        TokQuote => {
+            bump(s);
+            let mut words: List<Text> = List.new();
+            loop {
+                match peek(s) {
+                    TokWord(w) => {
+                        words.push(w.clone());
+                        bump(s);
+                    }
+                    TokQuote => { bump(s); break; }
+                    TokEof   => return base.Err(PeUnclosedQuote),
+                    _        => return base.Err(PeUnexpected("expected word in phrase".clone())),
+                }
+            }
+            base.Ok(phrase(words))
+        }
+        TokLParen => {
+            bump(s);
+            let inner = match parse_or(s) {
+                base.Ok(v) => v,
+                base.Err(e) => return base.Err(e),
+            };
+            match peek(s) {
+                TokRParen => { bump(s); base.Ok(inner) }
+                _         => base.Err(PeUnexpected("expected ')'".clone())),
+            }
+        }
+        _ => base.Err(PeUnexpected("expected term".clone())),
+    }
+}
+
+fn peek(s: &ParseState) -> Tok {
+    if s.pos >= s.tokens.len() { return TokEof; }
+    clone_tok(&s.tokens[s.pos])
+}
+
+fn bump(s: &mut ParseState) {
+    s.pos = s.pos + 1;
+}
+
+fn clone_tok(t: &Tok) -> Tok {
+    match t {
+        TokWord(w)  => TokWord(w.clone()),
+        TokAnd      => TokAnd,
+        TokOr       => TokOr,
+        TokNot      => TokNot,
+        TokQuote    => TokQuote,
+        TokLParen   => TokLParen,
+        TokRParen   => TokRParen,
+        TokEof      => TokEof,
+    }
+}

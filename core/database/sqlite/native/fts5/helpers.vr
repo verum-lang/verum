@@ -1,0 +1,147 @@
+// =============================================================================
+// fts5/helpers.vr — highlight + snippet text helpers
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (fts5 builtin functions)
+//
+// Two pure-text helpers:
+//
+//   * `highlight(text, ranges, open, close)` — wrap each (start, end)
+//                                              byte range in the marker
+//                                              pair
+//   * `snippet(text, ranges, open, close, ellipsis, n_words)` —
+//                                              extract a `n_words`-wide
+//                                              window centred on the
+//                                              first matching range
+//
+// =============================================================================
+
+module core.database.sqlite.native.fts5.helpers;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// MatchRange — byte half-open [start, end)
+// -----------------------------------------------------------------------------
+
+public type MatchRange is { start_byte: Int, end_byte: Int }
+
+public fn match_range(start: Int, end: Int) -> MatchRange {
+    MatchRange { start_byte: start, end_byte: end }
+}
+
+// -----------------------------------------------------------------------------
+// highlight
+// -----------------------------------------------------------------------------
+
+public fn highlight(text: &Text, ranges: &List<MatchRange>, open: &Text, close: &Text) -> Text {
+    let bs = text.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    let mut r: Int = 0;
+    while i < bs.len() {
+        if r < ranges.len() && i == ranges[r].start_byte {
+            push_text(&mut out, open);
+            while i < ranges[r].end_byte && i < bs.len() {
+                out.push_byte(bs[i]);
+                i = i + 1;
+            }
+            push_text(&mut out, close);
+            r = r + 1;
+        } else {
+            out.push_byte(bs[i]);
+            i = i + 1;
+        }
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// snippet
+// -----------------------------------------------------------------------------
+
+public fn snippet(
+    text: &Text,
+    ranges: &List<MatchRange>,
+    open: &Text,
+    close: &Text,
+    ellipsis: &Text,
+    n_words: Int,
+) -> Text {
+    if ranges.len() == 0 || n_words <= 0 { return text.clone(); }
+    let pivot = ranges[0].start_byte;
+    let bs = text.as_bytes();
+
+    // Walk back n_words/2 word boundaries from pivot.
+    let half = n_words / 2;
+    let win_start = walk_words_back(bs, pivot, half);
+    let win_end = walk_words_forward(bs, pivot, n_words - half);
+
+    let mut out = Text.new();
+    if win_start > 0 { push_text(&mut out, ellipsis); }
+    let mut i: Int = win_start;
+    let mut r: Int = 0;
+    while r < ranges.len() && ranges[r].end_byte <= win_start { r = r + 1; }
+    while i < win_end && i < bs.len() {
+        if r < ranges.len() && i == ranges[r].start_byte {
+            push_text(&mut out, open);
+            while i < ranges[r].end_byte && i < win_end && i < bs.len() {
+                out.push_byte(bs[i]);
+                i = i + 1;
+            }
+            push_text(&mut out, close);
+            r = r + 1;
+        } else {
+            out.push_byte(bs[i]);
+            i = i + 1;
+        }
+    }
+    if win_end < bs.len() { push_text(&mut out, ellipsis); }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Word-boundary walkers
+// -----------------------------------------------------------------------------
+
+fn walk_words_back(bs: List<Byte>, from: Int, n_words: Int) -> Int {
+    let mut i: Int = if from > 0 { from - 1 } else { 0 };
+    let mut counted: Int = 0;
+    let mut in_word = false;
+    while i > 0 && counted < n_words {
+        let b = bs[i];
+        let is_w = is_word_byte(b);
+        if !is_w && in_word { counted = counted + 1; }
+        in_word = is_w;
+        i = i - 1;
+    }
+    i
+}
+
+fn walk_words_forward(bs: List<Byte>, from: Int, n_words: Int) -> Int {
+    let mut i: Int = from;
+    let mut counted: Int = 0;
+    let mut in_word = false;
+    while i < bs.len() && counted < n_words {
+        let b = bs[i];
+        let is_w = is_word_byte(b);
+        if !is_w && in_word { counted = counted + 1; }
+        in_word = is_w;
+        i = i + 1;
+    }
+    i
+}
+
+fn is_word_byte(b: Byte) -> Bool {
+    (b >= (97 as Byte) && b <= (122 as Byte))
+        || (b >= (65 as Byte) && b <= (90 as Byte))
+        || (b >= (48 as Byte) && b <= (57 as Byte))
+        || b == (95 as Byte)
+}
+
+fn push_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}

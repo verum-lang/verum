@@ -1,0 +1,97 @@
+// =============================================================================
+// fts5/segment.vr — immutable segment file shape
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (FTS5 segments)
+//
+// One `Segment` is a sorted (term, posting_list) collection that has
+// been frozen onto disk. Segments are written by the index tree's
+// flush path; the merger periodically combines older segments into
+// fewer/larger ones (LSM-tree style).
+// =============================================================================
+
+module core.database.sqlite.native.fts5.segment;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.fts5.posting.{
+    Posting, PostingList, posting_list_empty,
+};
+
+// -----------------------------------------------------------------------------
+// SegmentEntry — one (term, postings) row in a segment
+// -----------------------------------------------------------------------------
+
+public type SegmentEntry is {
+    term: Text,
+    postings: PostingList,
+}
+
+public fn segment_entry(term: Text, postings: PostingList) -> SegmentEntry {
+    SegmentEntry { term: term, postings: postings }
+}
+
+// -----------------------------------------------------------------------------
+// SegmentLevel — LSM-tree style level (segments at the same level)
+// -----------------------------------------------------------------------------
+
+public type SegmentLevel is L0 | L1 | L2 | L3;
+
+public fn level_index(l: &SegmentLevel) -> Int {
+    match l {
+        L0 => 0,
+        L1 => 1,
+        L2 => 2,
+        L3 => 3,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Segment
+// -----------------------------------------------------------------------------
+
+public type Segment is {
+    /// Unique segment id (assigned by the writer).
+    id: Int64,
+    level: SegmentLevel,
+    /// Sorted by term (ascending).
+    entries: List<SegmentEntry>,
+    /// Sum of all posting-list lengths — used by merger heuristic.
+    total_postings: Int,
+    /// True iff this segment has been written to disk.
+    persisted: Bool,
+}
+
+public fn segment_new(id: Int64, level: SegmentLevel) -> Segment {
+    Segment {
+        id: id,
+        level: level,
+        entries: List.new(),
+        total_postings: 0,
+        persisted: false,
+    }
+}
+
+implement Segment {
+    public fn term_count(&self) -> Int { self.entries.len() }
+
+    pub fn append(&mut self, e: SegmentEntry) {
+        self.total_postings = self.total_postings + e.postings.len();
+        self.entries.push(e);
+    }
+
+    pub fn lookup(&self, term: &Text) -> Maybe<Int> {
+        // Binary search assumes sorted entries.
+        let mut lo: Int = 0;
+        let mut hi: Int = self.entries.len();
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.entries[mid].term == *term { return Some(mid); }
+            if self.entries[mid].term < *term { lo = mid + 1; }
+            else                              { hi = mid; }
+        }
+        None
+    }
+
+    pub fn mark_persisted(&mut self) { self.persisted = true; }
+}

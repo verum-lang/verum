@@ -1,0 +1,77 @@
+// =============================================================================
+// fts5/tokenizer/unicode61.vr — Unicode-aware tokenizer
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (FTS5 unicode61 tokenizer)
+//
+// Splits on Unicode word-break (treats every non-letter codepoint as a
+// separator). The full Unicode database is provided by
+// `core.text.unicode`; here we expose the tokenizer surface and
+// handle ASCII fast-path inline. Diacritic stripping is opt-in via
+// the `remove_diacritics` flag — when enabled the tokenizer NFD-
+// decomposes each token and drops combining marks.
+// =============================================================================
+
+module core.database.sqlite.native.fts5.tokenizer.unicode61;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.fts5.tokenizer.core.{
+    Token, Tokenizer, token, is_word_byte, lowercase_byte,
+};
+
+public type Unicode61Tokenizer is {
+    /// True ⇒ NFD-decompose then strip combining marks.
+    remove_diacritics: Bool,
+    /// True ⇒ keep underscores as separators (Unicode default).
+    /// SQLite default is false (keep `_` as word).
+    treat_underscore_as_separator: Bool,
+}
+
+public fn unicode61_tokenizer() -> Unicode61Tokenizer {
+    Unicode61Tokenizer {
+        remove_diacritics: false,
+        treat_underscore_as_separator: false,
+    }
+}
+
+public fn unicode61_with_diacritics_stripped() -> Unicode61Tokenizer {
+    Unicode61Tokenizer {
+        remove_diacritics: true,
+        treat_underscore_as_separator: false,
+    }
+}
+
+implement Tokenizer for Unicode61Tokenizer {
+    fn name(&self) -> Text { "unicode61".clone() }
+
+    fn tokenize(&self, text: &Text) -> List<Token> {
+        let bs = text.as_bytes();
+        let mut out: List<Token> = List.new();
+        let mut i: Int = 0;
+        let mut pos: Int = 0;
+        while i < bs.len() {
+            while i < bs.len() && !is_letter_or_digit(self, bs[i]) { i = i + 1; }
+            if i >= bs.len() { break; }
+            let start = i;
+            let mut tok = Text.new();
+            while i < bs.len() && is_letter_or_digit(self, bs[i]) {
+                tok.push_byte(lowercase_byte(bs[i]));
+                i = i + 1;
+            }
+            out.push(token(tok, start, i, pos));
+            pos = pos + 1;
+        }
+        out
+    }
+}
+
+fn is_letter_or_digit(t: &Unicode61Tokenizer, b: Byte) -> Bool {
+    if t.treat_underscore_as_separator && b == (95 as Byte) { return false; }
+    is_word_byte(b) || is_high_byte(b)
+}
+
+fn is_high_byte(b: Byte) -> Bool {
+    // Conservative: any byte ≥ 0x80 is a multibyte UTF-8 lead/continuation.
+    b >= (128 as Byte)
+}

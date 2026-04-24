@@ -1,0 +1,108 @@
+// =============================================================================
+// statistics/histogram.vr — sqlite_stat4 histogram
+// =============================================================================
+// Spec: sqlite-native.md §13.2
+//
+// stat4 stores per-key-prefix sample histograms. Each `Bucket` is
+// one sampled key together with the cumulative count of rows
+// preceding it. Selectivity for `key < ?` reduces to "binary-search
+// for the bucket whose key is closest" + "interpolate linearly".
+// =============================================================================
+
+module core.database.sqlite.native.statistics.histogram;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SampleKey — opaque key bytes (the index's leading column values)
+// -----------------------------------------------------------------------------
+
+public type SampleKey is { bytes: List<Byte> }
+
+public fn sample_key(bytes: List<Byte>) -> SampleKey { SampleKey { bytes: bytes } }
+
+public fn key_compare(a: &SampleKey, b: &SampleKey) -> Int {
+    let len = if a.bytes.len() < b.bytes.len() { a.bytes.len() } else { b.bytes.len() };
+    let mut i: Int = 0;
+    while i < len {
+        if a.bytes[i] < b.bytes[i] { return -1; }
+        if a.bytes[i] > b.bytes[i] { return 1; }
+        i = i + 1;
+    }
+    if a.bytes.len() < b.bytes.len() { -1 }
+    else if a.bytes.len() > b.bytes.len() { 1 }
+    else { 0 }
+}
+
+// -----------------------------------------------------------------------------
+// Bucket — one sampled point in the cumulative distribution
+// -----------------------------------------------------------------------------
+
+public type Bucket is {
+    key: SampleKey,
+    /// Number of rows whose key < this bucket's key.
+    cumulative_lt: Int64,
+    /// Number of rows whose key == this bucket's key.
+    eq_count: Int64,
+}
+
+public fn bucket(key: SampleKey, cumulative_lt: Int64, eq_count: Int64) -> Bucket {
+    Bucket { key: key, cumulative_lt: cumulative_lt, eq_count: eq_count }
+}
+
+// -----------------------------------------------------------------------------
+// Stat4Histogram
+// -----------------------------------------------------------------------------
+
+public type Stat4Histogram is {
+    /// Bucket samples sorted by key ascending.
+    buckets: List<Bucket>,
+    /// Total rows = last bucket's cumulative_lt + eq_count + tail.
+    total_rows: Int64,
+}
+
+public fn stat4_histogram(buckets: List<Bucket>, total_rows: Int64) -> Stat4Histogram {
+    Stat4Histogram { buckets: buckets, total_rows: total_rows }
+}
+
+implement Stat4Histogram {
+    public fn bucket_count(&self) -> Int { self.buckets.len() }
+
+    /// Estimate the count of rows with `key == probe`.
+    pub fn estimate_eq(&self, probe: &SampleKey) -> Int64 {
+        let mut i: Int = 0;
+        while i < self.buckets.len() {
+            if key_compare(&self.buckets[i].key, probe) == 0 {
+                return self.buckets[i].eq_count;
+            }
+            i = i + 1;
+        }
+        // Probe between samples — fall back to average density.
+        if self.buckets.len() == 0 { return 1 as Int64; }
+        let avg = self.total_rows / (self.buckets.len() as Int64);
+        if avg < (1 as Int64) { 1 as Int64 } else { avg }
+    }
+
+    /// Estimate the count of rows with `key < probe`.
+    pub fn estimate_lt(&self, probe: &SampleKey) -> Int64 {
+        let mut last: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < self.buckets.len() {
+            if key_compare(&self.buckets[i].key, probe) >= 0 {
+                return last;
+            }
+            last = self.buckets[i].cumulative_lt + self.buckets[i].eq_count;
+            i = i + 1;
+        }
+        self.total_rows
+    }
+
+    /// Estimate count with `lo ≤ key < hi`.
+    pub fn estimate_range(&self, lo: &SampleKey, hi: &SampleKey) -> Int64 {
+        let upper = self.estimate_lt(hi);
+        let lower = self.estimate_lt(lo);
+        if upper > lower { upper - lower } else { 0 as Int64 }
+    }
+}

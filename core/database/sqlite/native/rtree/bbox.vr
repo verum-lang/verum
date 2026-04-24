@@ -1,0 +1,111 @@
+// =============================================================================
+// rtree/bbox.vr — N-dimensional bounding box
+// =============================================================================
+// Spec: sqlite-native.md §16.3 (R-Tree)
+//
+// `BoundingBox` carries `min[]` + `max[]` per dimension. SQLite's
+// R-Tree supports up to 5 dimensions; we don't enforce that limit
+// at the type level — the caller decides how many dimensions to
+// allocate.
+// =============================================================================
+
+module core.database.sqlite.native.rtree.bbox;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type BoundingBox is {
+    /// Lower bounds per dimension.
+    min: List<Float64>,
+    /// Upper bounds per dimension. Same length as `min`.
+    max: List<Float64>,
+}
+
+public fn bbox_new(dim: Int) -> BoundingBox {
+    let mut min: List<Float64> = List.new();
+    let mut max: List<Float64> = List.new();
+    let mut i: Int = 0;
+    while i < dim {
+        min.push(0.0 as Float64);
+        max.push(0.0 as Float64);
+        i = i + 1;
+    }
+    BoundingBox { min: min, max: max }
+}
+
+public fn bbox(min: List<Float64>, max: List<Float64>) -> BoundingBox {
+    BoundingBox { min: min, max: max }
+}
+
+implement BoundingBox {
+    public fn dimension(&self) -> Int { self.min.len() }
+
+    /// Volume = product over dimensions of (max - min). Used by the
+    /// split heuristic to pick the box whose enlargement is smallest.
+    pub fn area(&self) -> Float64 {
+        if self.min.len() == 0 { return 0.0 as Float64; }
+        let mut acc: Float64 = 1.0 as Float64;
+        let mut i: Int = 0;
+        while i < self.min.len() {
+            let span = self.max[i] - self.min[i];
+            acc = acc * if span < (0.0 as Float64) { 0.0 as Float64 } else { span };
+            i = i + 1;
+        }
+        acc
+    }
+
+    /// True iff `point` lies inside this box (closed on min, closed on max).
+    pub fn contains_point(&self, point: &List<Float64>) -> Bool {
+        if point.len() != self.min.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.min.len() {
+            if point[i] < self.min[i] || point[i] > self.max[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// True iff `other` overlaps `self`.
+    pub fn intersects(&self, other: &BoundingBox) -> Bool {
+        if self.min.len() != other.min.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.min.len() {
+            if self.max[i] < other.min[i] { return false; }
+            if other.max[i] < self.min[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// True iff `other` is fully inside `self`.
+    pub fn covers(&self, other: &BoundingBox) -> Bool {
+        if self.min.len() != other.min.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.min.len() {
+            if other.min[i] < self.min[i] { return false; }
+            if other.max[i] > self.max[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Smallest box that contains both `self` and `other`.
+    pub fn enlarged_to(&self, other: &BoundingBox) -> BoundingBox {
+        let mut new_min: List<Float64> = List.new();
+        let mut new_max: List<Float64> = List.new();
+        let mut i: Int = 0;
+        while i < self.min.len() {
+            new_min.push(if self.min[i] < other.min[i] { self.min[i] } else { other.min[i] });
+            new_max.push(if self.max[i] > other.max[i] { self.max[i] } else { other.max[i] });
+            i = i + 1;
+        }
+        BoundingBox { min: new_min, max: new_max }
+    }
+
+    /// Cost of growing `self` to contain `other` — drives node-pick
+    /// during insertion.
+    pub fn enlargement(&self, other: &BoundingBox) -> Float64 {
+        self.enlarged_to(other).area() - self.area()
+    }
+}

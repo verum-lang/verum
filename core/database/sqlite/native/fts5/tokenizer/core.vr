@@ -1,0 +1,55 @@
+// =============================================================================
+// fts5/tokenizer/core.vr — Tokenizer protocol + Token type
+// =============================================================================
+// Spec: sqlite-native.md §16.2
+// =============================================================================
+
+module core.database.sqlite.native.fts5.tokenizer.core;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Token
+// -----------------------------------------------------------------------------
+
+public type Token is {
+    /// The normalised token text. May differ from the surface form
+    /// (e.g. lowercased, stemmed).
+    text: Text,
+    /// Byte offset in the source text where the token starts.
+    start_byte: Int,
+    /// Byte offset where the token ends (exclusive).
+    end_byte: Int,
+    /// 0-based token-position within the source (used for PHRASE / NEAR).
+    position: Int,
+}
+
+public fn token(text: Text, start_byte: Int, end_byte: Int, position: Int) -> Token {
+    Token { text: text, start_byte: start_byte, end_byte: end_byte, position: position }
+}
+
+// -----------------------------------------------------------------------------
+// Tokenizer protocol — every implementation provides `tokenize`
+// -----------------------------------------------------------------------------
+
+public type Tokenizer is protocol {
+    fn name(&self) -> Text;
+    fn tokenize(&self, text: &Text) -> List<Token>;
+};
+
+// -----------------------------------------------------------------------------
+// Helpers shared by ASCII tokenizers
+// -----------------------------------------------------------------------------
+
+public fn is_word_byte(b: Byte) -> Bool {
+    (b >= (97 as Byte) && b <= (122 as Byte))    // a-z
+        || (b >= (65 as Byte) && b <= (90 as Byte))    // A-Z
+        || (b >= (48 as Byte) && b <= (57 as Byte))    // 0-9
+        || b == (95 as Byte)                            // _
+}
+
+public fn lowercase_byte(b: Byte) -> Byte {
+    if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b }
+}

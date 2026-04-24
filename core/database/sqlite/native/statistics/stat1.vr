@@ -1,0 +1,107 @@
+// =============================================================================
+// statistics/stat1.vr — sqlite_stat1 row
+// =============================================================================
+// Spec: sqlite-native.md §13.2
+//
+// One sqlite_stat1 row records:
+//
+//   * `tbl`     — table name
+//   * `idx`     — index name (NULL means "the table's rowid")
+//   * `stat`    — text-encoded stats: total_rows + per-prefix-length avg dups
+//
+// Example: `1000 5 1` means "table has 1000 rows; the index's first
+// column has on average 5 duplicates per key, the first two columns
+// have 1 (i.e. unique)".
+// =============================================================================
+
+module core.database.sqlite.native.statistics.stat1;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+public type Stat1Row is {
+    table_name: Text,
+    /// `None` ⇒ statistics for the table's implicit rowid.
+    index_name: Maybe<Text>,
+    /// Total rows in the table.
+    total_rows: Int64,
+    /// Average duplicates per key prefix. `dup_per_prefix[k]` is the
+    /// average number of rows that share the first k+1 columns of the
+    /// index. Length matches the number of indexed columns.
+    dup_per_prefix: List<Int64>,
+}
+
+public fn stat1_row(
+    table: Text,
+    index: Maybe<Text>,
+    total_rows: Int64,
+    dup_per_prefix: List<Int64>,
+) -> Stat1Row {
+    Stat1Row {
+        table_name: table,
+        index_name: index,
+        total_rows: total_rows,
+        dup_per_prefix: dup_per_prefix,
+    }
+}
+
+implement Stat1Row {
+    /// Distinct keys for the first `n_cols` of the index.
+    /// Distinct = total_rows / avg_dup
+    pub fn distinct_keys(&self, n_cols: Int) -> Int64 {
+        if n_cols <= 0 || n_cols > self.dup_per_prefix.len() {
+            return self.total_rows;
+        }
+        let dup = self.dup_per_prefix[n_cols - 1];
+        if dup <= (0 as Int64) { return self.total_rows; }
+        self.total_rows / dup
+    }
+
+    /// True iff the first `n_cols` of the index are unique
+    /// (avg_dup == 1).
+    pub fn is_unique_prefix(&self, n_cols: Int) -> Bool {
+        if n_cols <= 0 || n_cols > self.dup_per_prefix.len() { return false; }
+        self.dup_per_prefix[n_cols - 1] == (1 as Int64)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Stat1Table — collection of rows for one schema
+// -----------------------------------------------------------------------------
+
+public type Stat1Table is { rows: List<Stat1Row> }
+
+public fn stat1_table_new() -> Stat1Table { Stat1Table { rows: List.new() } }
+
+implement Stat1Table {
+    public fn len(&self) -> Int { self.rows.len() }
+
+    pub fn add(&mut self, r: Stat1Row) { self.rows.push(r); }
+
+    pub fn lookup_table(&self, table: &Text) -> Maybe<Int64> {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].table_name == *table {
+                match &self.rows[i].index_name {
+                    None    => return Some(self.rows[i].total_rows),
+                    Some(_) => {}
+                }
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn lookup_index(&self, index: &Text) -> Maybe<Int64> {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            match &self.rows[i].index_name {
+                Some(n) => if n == index { return Some(self.rows[i].total_rows); },
+                None    => {}
+            }
+            i = i + 1;
+        }
+        None
+    }
+}

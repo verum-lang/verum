@@ -1,0 +1,110 @@
+// =============================================================================
+// rtree/node.vr — RNode (interior + leaf)
+// =============================================================================
+// Spec: sqlite-native.md §16.3
+//
+// `RNode` is a single tree node. Two flavours:
+//
+//   * `RnInterior` — children are `(box, child_node_id)` pairs
+//   * `RnLeaf`     — children are `(box, rowid)` records
+//
+// Each node is bounded by `M` (max children) and `m` (min children;
+// `m ≤ M/2`). When a node overflows the inserter splits it; when
+// underflows on delete, the inserter rebalances (see `tree.vr`).
+// =============================================================================
+
+module core.database.sqlite.native.rtree.node;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.rtree.bbox.{
+    BoundingBox, bbox_new,
+};
+
+// -----------------------------------------------------------------------------
+// LeafEntry — (rowid, box) pair stored in a leaf
+// -----------------------------------------------------------------------------
+
+public type LeafEntry is { rowid: Int64, mbb: BoundingBox }
+
+public fn leaf_entry(rowid: Int64, mbb: BoundingBox) -> LeafEntry {
+    LeafEntry { rowid: rowid, mbb: mbb }
+}
+
+// -----------------------------------------------------------------------------
+// InteriorEntry — (child_node_id, box) pair stored in an interior
+// -----------------------------------------------------------------------------
+
+public type InteriorEntry is { child_id: Int64, mbb: BoundingBox }
+
+public fn interior_entry(child_id: Int64, mbb: BoundingBox) -> InteriorEntry {
+    InteriorEntry { child_id: child_id, mbb: mbb }
+}
+
+// -----------------------------------------------------------------------------
+// RNode
+// -----------------------------------------------------------------------------
+
+public type RNode is
+      RnInterior(Int64, List<InteriorEntry>)        // (node_id, entries)
+    | RnLeaf(Int64, List<LeafEntry>);               // (node_id, entries)
+
+public fn node_id(n: &RNode) -> Int64 {
+    match n {
+        RnInterior(id, _) => *id,
+        RnLeaf(id, _)     => *id,
+    }
+}
+
+public fn entry_count(n: &RNode) -> Int {
+    match n {
+        RnInterior(_, es) => es.len(),
+        RnLeaf(_, es)     => es.len(),
+    }
+}
+
+public fn is_leaf(n: &RNode) -> Bool {
+    match n {
+        RnLeaf(_, _) => true,
+        _            => false,
+    }
+}
+
+/// Compute the MBB that covers every entry in this node.
+pub fn cover_mbb(n: &RNode) -> BoundingBox {
+    match n {
+        RnInterior(_, es) => {
+            if es.len() == 0 { return bbox_new(0); }
+            let mut acc = clone_bbox(&es[0].mbb);
+            let mut i: Int = 1;
+            while i < es.len() {
+                acc = acc.enlarged_to(&es[i].mbb);
+                i = i + 1;
+            }
+            acc
+        }
+        RnLeaf(_, es) => {
+            if es.len() == 0 { return bbox_new(0); }
+            let mut acc = clone_bbox(&es[0].mbb);
+            let mut i: Int = 1;
+            while i < es.len() {
+                acc = acc.enlarged_to(&es[i].mbb);
+                i = i + 1;
+            }
+            acc
+        }
+    }
+}
+
+fn clone_bbox(b: &BoundingBox) -> BoundingBox {
+    let mut min: List<Float64> = List.new();
+    let mut max: List<Float64> = List.new();
+    let mut i: Int = 0;
+    while i < b.min.len() {
+        min.push(b.min[i]);
+        max.push(b.max[i]);
+        i = i + 1;
+    }
+    BoundingBox { min: min, max: max }
+}

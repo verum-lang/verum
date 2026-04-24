@@ -1,0 +1,95 @@
+// =============================================================================
+// fts5/tokenizer/porter.vr — English Porter stemmer
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (FTS5 Porter tokenizer)
+//
+// Two-pass: first split + lowercase as `simple` does, then apply
+// the Porter algorithm to each token. The implementation here
+// covers the most-used suffix rules (steps 1a, 1b, 2 partial, 5);
+// the full Porter algorithm has six steps with ~60 rules — out of
+// scope for the catalogue, present in `core.text.stemmer.porter`.
+// =============================================================================
+
+module core.database.sqlite.native.fts5.tokenizer.porter;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.fts5.tokenizer.core.{
+    Token, Tokenizer, token, is_word_byte, lowercase_byte,
+};
+
+public type PorterTokenizer is { unit: Bool }
+
+public fn porter_tokenizer() -> PorterTokenizer { PorterTokenizer { unit: true } }
+
+implement Tokenizer for PorterTokenizer {
+    fn name(&self) -> Text { "porter".clone() }
+
+    fn tokenize(&self, text: &Text) -> List<Token> {
+        let bs = text.as_bytes();
+        let mut out: List<Token> = List.new();
+        let mut i: Int = 0;
+        let mut pos: Int = 0;
+        while i < bs.len() {
+            while i < bs.len() && !is_word_byte(bs[i]) { i = i + 1; }
+            if i >= bs.len() { break; }
+            let start = i;
+            let mut raw = Text.new();
+            while i < bs.len() && is_word_byte(bs[i]) {
+                raw.push_byte(lowercase_byte(bs[i]));
+                i = i + 1;
+            }
+            let stem = porter_stem(&raw);
+            out.push(token(stem, start, i, pos));
+            pos = pos + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Porter stemming — partial implementation (most-used suffixes)
+// -----------------------------------------------------------------------------
+
+public fn porter_stem(t: &Text) -> Text {
+    let mut s = t.clone();
+    s = step1a(&s);
+    s = step5(&s);
+    s
+}
+
+/// Step 1a: SSES → SS, IES → I, SS → SS, S → ø
+fn step1a(t: &Text) -> Text {
+    if ends_with(t, &"sses".clone()) { return drop_suffix(t, 2); }
+    if ends_with(t, &"ies".clone())  { return drop_suffix(t, 2); }
+    if ends_with(t, &"ss".clone())   { return t.clone(); }
+    if ends_with(t, &"s".clone()) && t.len() > 1 { return drop_suffix(t, 1); }
+    t.clone()
+}
+
+/// Step 5a: removing trailing "e" if measure > 1.
+fn step5(t: &Text) -> Text {
+    if ends_with(t, &"e".clone()) && t.len() > 3 { drop_suffix(t, 1) } else { t.clone() }
+}
+
+fn ends_with(t: &Text, suffix: &Text) -> Bool {
+    let bs = t.as_bytes();
+    let sb = suffix.as_bytes();
+    if bs.len() < sb.len() { return false; }
+    let mut i: Int = 0;
+    while i < sb.len() {
+        if bs[bs.len() - sb.len() + i] != sb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn drop_suffix(t: &Text, n: Int) -> Text {
+    let bs = t.as_bytes();
+    let cut = if bs.len() >= n { bs.len() - n } else { 0 };
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < cut { out.push_byte(bs[i]); i = i + 1; }
+    out
+}

@@ -1,0 +1,197 @@
+// =============================================================================
+// fts5/query/executor.vr — MatchAst → matched rowid set
+// =============================================================================
+// Spec: sqlite-native.md §16.2
+//
+// The executor walks the AST and intersects/unions per-term posting
+// lists pulled from the inverted index. Phrase + NEAR are handled by
+// position-comparison after rowid intersection.
+// =============================================================================
+
+module core.database.sqlite.native.fts5.query.executor;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.fts5.posting.{
+    Posting, PostingList, posting_list_empty,
+};
+mount core.database.sqlite.native.fts5.index.{InvertedIndex};
+mount core.database.sqlite.native.fts5.query.ast.{
+    MatchAst, MaTerm, MaPhrase, MaNear, MaAnd, MaOr, MaNot,
+};
+
+// -----------------------------------------------------------------------------
+// MatchedRowid — rowid + term-frequency for ranking
+// -----------------------------------------------------------------------------
+
+public type MatchedRowid is { rowid: Int64, tf: Int }
+
+public fn matched(rowid: Int64, tf: Int) -> MatchedRowid {
+    MatchedRowid { rowid: rowid, tf: tf }
+}
+
+// -----------------------------------------------------------------------------
+// Execute
+// -----------------------------------------------------------------------------
+
+public fn execute(ast: &MatchAst, idx: &InvertedIndex) -> List<MatchedRowid> {
+    match ast {
+        MaTerm(t) => {
+            let p = idx.lookup(t);
+            collapse(&p)
+        }
+        MaPhrase(words) => {
+            // Phrase = AND across each term, then position adjacency check.
+            if words.len() == 0 { return List.new(); }
+            let mut acc = idx.lookup(&words[0]);
+            let mut i: Int = 1;
+            while i < words.len() {
+                let next = idx.lookup(&words[i]);
+                acc = phrase_advance(&acc, &next);
+                i = i + 1;
+            }
+            collapse(&acc)
+        }
+        MaNear(t1, t2, max_dist) => {
+            let p1 = idx.lookup(t1);
+            let p2 = idx.lookup(t2);
+            collapse(&near_filter(&p1, &p2, *max_dist))
+        }
+        MaAnd(l, r) => {
+            let lr = execute(l, idx);
+            let rr = execute(r, idx);
+            intersect(&lr, &rr)
+        }
+        MaOr(l, r) => {
+            let lr = execute(l, idx);
+            let rr = execute(r, idx);
+            union_rows(&lr, &rr)
+        }
+        MaNot(_inner) => {
+            // NOT is meaningful only as a binary "left AND NOT right";
+            // standalone NOT returns empty.
+            List.new()
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Posting → MatchedRowid (collapse rowid duplicates, sum tf)
+// -----------------------------------------------------------------------------
+
+fn collapse(p: &PostingList) -> List<MatchedRowid> {
+    let mut out: List<MatchedRowid> = List.new();
+    let mut last: Int64 = -1 as Int64;
+    let mut i: Int = 0;
+    while i < p.entries.len() {
+        if p.entries[i].rowid != last {
+            out.push(matched(p.entries[i].rowid, 1));
+            last = p.entries[i].rowid;
+        } else {
+            let n = out.len() - 1;
+            out[n].tf = out[n].tf + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Set ops
+// -----------------------------------------------------------------------------
+
+fn intersect(a: &List<MatchedRowid>, b: &List<MatchedRowid>) -> List<MatchedRowid> {
+    let mut out: List<MatchedRowid> = List.new();
+    let mut i: Int = 0;
+    while i < a.len() {
+        let mut j: Int = 0;
+        while j < b.len() {
+            if a[i].rowid == b[j].rowid {
+                out.push(matched(a[i].rowid, a[i].tf + b[j].tf));
+                break;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn union_rows(a: &List<MatchedRowid>, b: &List<MatchedRowid>) -> List<MatchedRowid> {
+    let mut out: List<MatchedRowid> = List.new();
+    let mut i: Int = 0;
+    while i < a.len() { out.push(matched(a[i].rowid, a[i].tf)); i = i + 1; }
+    let mut k: Int = 0;
+    while k < b.len() {
+        let mut found = false;
+        let mut j: Int = 0;
+        while j < out.len() {
+            if out[j].rowid == b[k].rowid {
+                out[j].tf = out[j].tf + b[k].tf;
+                found = true;
+                break;
+            }
+            j = j + 1;
+        }
+        if !found { out.push(matched(b[k].rowid, b[k].tf)); }
+        k = k + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Phrase / NEAR helpers
+// -----------------------------------------------------------------------------
+
+/// Keep `p1` postings whose position+1 == some `p2` posting at the
+/// same rowid + column.
+fn phrase_advance(p1: &PostingList, p2: &PostingList) -> PostingList {
+    let mut out = posting_list_empty();
+    let mut i: Int = 0;
+    while i < p1.entries.len() {
+        let a = &p1.entries[i];
+        let mut j: Int = 0;
+        while j < p2.entries.len() {
+            let b = &p2.entries[j];
+            if a.rowid == b.rowid && a.column == b.column && (a.position + 1) == b.position {
+                out.push(Posting {
+                    rowid: b.rowid,
+                    column: b.column,
+                    position: b.position,
+                });
+                break;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn near_filter(p1: &PostingList, p2: &PostingList, max_dist: Int) -> PostingList {
+    let mut out = posting_list_empty();
+    let mut i: Int = 0;
+    while i < p1.entries.len() {
+        let a = &p1.entries[i];
+        let mut j: Int = 0;
+        while j < p2.entries.len() {
+            let b = &p2.entries[j];
+            if a.rowid == b.rowid && a.column == b.column {
+                let diff = if a.position > b.position { a.position - b.position }
+                           else                       { b.position - a.position };
+                if diff <= max_dist {
+                    out.push(Posting {
+                        rowid: a.rowid,
+                        column: a.column,
+                        position: a.position,
+                    });
+                    break;
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}

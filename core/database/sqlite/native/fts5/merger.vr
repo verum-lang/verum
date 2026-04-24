@@ -1,0 +1,87 @@
+// =============================================================================
+// fts5/merger.vr — background segment merger policy
+// =============================================================================
+// Spec: sqlite-native.md §16.2 (FTS5 segment merging)
+//
+// LSM-tree style. The policy decides: at this moment, given the
+// segment counts at each level, what compaction action should the
+// background merger take? Three actions:
+//
+//   * `MaIdle`           — no-op
+//   * `MaCompactLevel(level)` — merge all segments at `level` into ONE
+//                                segment at the next level up
+//   * `MaFlushBuffer`    — buffer crossed the flush threshold
+//
+// The merger itself (which actually rewrites segment files) is the
+// host's job; this module only emits the policy decisions.
+// =============================================================================
+
+module core.database.sqlite.native.fts5.merger;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.fts5.segment.{
+    SegmentLevel, L0, L1, L2, L3, level_index,
+};
+mount core.database.sqlite.native.fts5.index.{InvertedIndex};
+
+// -----------------------------------------------------------------------------
+// MergeAction
+// -----------------------------------------------------------------------------
+
+public type MergeAction is
+      MaIdle
+    | MaCompactLevel(SegmentLevel)
+    | MaFlushBuffer;
+
+public fn action_kind_name(a: &MergeAction) -> Text {
+    match a {
+        MaIdle                 => "idle".clone(),
+        MaCompactLevel(_)      => "compact".clone(),
+        MaFlushBuffer          => "flush_buffer".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Policy
+// -----------------------------------------------------------------------------
+
+public type MergePolicy is {
+    /// Buffer-size threshold past which the merger schedules a flush.
+    flush_threshold: Int,
+    /// Per-level segment count past which the merger compacts.
+    merge_threshold: Int,
+}
+
+public fn default_policy() -> MergePolicy {
+    MergePolicy { flush_threshold: 4096, merge_threshold: 4 }
+}
+
+/// Return the next compaction action based on current index state.
+public fn decide(policy: &MergePolicy, idx: &InvertedIndex) -> MergeAction {
+    if idx.buffer_size() >= policy.flush_threshold {
+        return MaFlushBuffer;
+    }
+    if idx.segments_at(&L0) >= policy.merge_threshold {
+        return MaCompactLevel(L0);
+    }
+    if idx.segments_at(&L1) >= policy.merge_threshold {
+        return MaCompactLevel(L1);
+    }
+    if idx.segments_at(&L2) >= policy.merge_threshold {
+        return MaCompactLevel(L2);
+    }
+    MaIdle
+}
+
+/// Promote one level up. L3 → L3 (no further promotion — caller drops
+/// the merged segments at L3 if it doesn't want them to grow).
+public fn promote(level: &SegmentLevel) -> SegmentLevel {
+    match level {
+        L0 => L1,
+        L1 => L2,
+        L2 => L3,
+        L3 => L3,
+    }
+}

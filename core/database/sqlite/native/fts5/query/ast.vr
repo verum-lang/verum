@@ -1,0 +1,73 @@
+// =============================================================================
+// fts5/query/ast.vr — MATCH expression AST
+// =============================================================================
+// Spec: sqlite-native.md §16.2
+// =============================================================================
+
+module core.database.sqlite.native.fts5.query.ast;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+public type MatchAst is
+      MaTerm(Text)
+    | MaPhrase(List<Text>)
+    | MaNear(Text, Text, Int)        // (term1, term2, max_word_distance)
+    | MaAnd(Heap<MatchAst>, Heap<MatchAst>)
+    | MaOr(Heap<MatchAst>, Heap<MatchAst>)
+    | MaNot(Heap<MatchAst>);
+
+public fn ast_kind_name(a: &MatchAst) -> Text {
+    match a {
+        MaTerm(_)        => "term".clone(),
+        MaPhrase(_)      => "phrase".clone(),
+        MaNear(_, _, _)  => "near".clone(),
+        MaAnd(_, _)      => "and".clone(),
+        MaOr(_, _)       => "or".clone(),
+        MaNot(_)         => "not".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Builders
+// -----------------------------------------------------------------------------
+
+public fn term(t: Text) -> MatchAst { MaTerm(t) }
+
+public fn phrase(words: List<Text>) -> MatchAst { MaPhrase(words) }
+
+public fn near(t1: Text, t2: Text, n: Int) -> MatchAst { MaNear(t1, t2, n) }
+
+public fn and_op(l: MatchAst, r: MatchAst) -> MatchAst { MaAnd(Heap(l), Heap(r)) }
+
+public fn or_op(l: MatchAst, r: MatchAst) -> MatchAst { MaOr(Heap(l), Heap(r)) }
+
+public fn not_op(inner: MatchAst) -> MatchAst { MaNot(Heap(inner)) }
+
+// -----------------------------------------------------------------------------
+// Term collector — used by the executor to know which terms to look up
+// -----------------------------------------------------------------------------
+
+public fn collect_terms(a: &MatchAst) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    visit(a, &mut out);
+    out
+}
+
+fn visit(a: &MatchAst, out: &mut List<Text>) {
+    match a {
+        MaTerm(t)         => out.push(t.clone()),
+        MaPhrase(words)   => {
+            let mut i: Int = 0;
+            while i < words.len() { out.push(words[i].clone()); i = i + 1; }
+        }
+        MaNear(t1, t2, _) => {
+            out.push(t1.clone());
+            out.push(t2.clone());
+        }
+        MaAnd(l, r)       => { visit(l, out); visit(r, out); }
+        MaOr(l, r)        => { visit(l, out); visit(r, out); }
+        MaNot(inner)      => visit(inner, out),
+    }
+}

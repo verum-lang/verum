@@ -1,0 +1,208 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, statistics, stat1, stat4, selectivity, analyze, bm25
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Statistics surface:
+//   * Stat1Row distinct_keys + is_unique_prefix
+//   * Stat1Table lookup by table / index name
+//   * Stat4Histogram estimate_eq / estimate_lt / estimate_range
+//   * Selectivity bounded to [0, 1]
+//   * Combine_and / combine_or arithmetic
+//   * AnalyzeEngine phase progression
+
+mount core.database.sqlite.native.statistics.stat1.{
+    Stat1Row, stat1_row, Stat1Table, stat1_table_new,
+};
+mount core.database.sqlite.native.statistics.histogram.{
+    SampleKey, sample_key, key_compare,
+    Bucket, bucket,
+    Stat4Histogram, stat4_histogram,
+};
+mount core.database.sqlite.native.statistics.selectivity.{
+    PredicateShape, PsEquality, PsRange, PsLessThan, PsIsNotNull, PsLike,
+    Selectivity, selectivity,
+    estimate_with_stat1, estimate_with_stat4,
+    combine_and, combine_or,
+};
+mount core.database.sqlite.native.statistics.analyze.{
+    AnalyzePhase, AeInit, AeScanningTable, AeFlushingStat1, AeDone,
+    AnalyzePlan, plan_for,
+    AnalyzeEngine, engine_new,
+    phase_name,
+};
+mount base.{Some, None, Maybe, Bool, Text};
+
+// -----------------------------------------------------------------------------
+// stat1
+// -----------------------------------------------------------------------------
+
+fn make_stat1() -> Stat1Row {
+    let mut dups: List<Int64> = List.new();
+    dups.push(5 as Int64);    // 1 col → avg 5 dups
+    dups.push(1 as Int64);    // 2 cols → unique
+    stat1_row("users".clone(), Some("idx_users_name".clone()), 1000 as Int64, dups)
+}
+
+fn test_stat1_distinct_keys_one_col() {
+    let s = make_stat1();
+    assert_eq(s.distinct_keys(1), 200 as Int64);
+}
+
+fn test_stat1_distinct_keys_unique_prefix() {
+    let s = make_stat1();
+    assert_eq(s.distinct_keys(2), 1000 as Int64);
+}
+
+fn test_stat1_is_unique_prefix() {
+    let s = make_stat1();
+    assert(!s.is_unique_prefix(1));
+    assert(s.is_unique_prefix(2));
+}
+
+fn test_stat1_table_lookup_index() {
+    let mut t = stat1_table_new();
+    t.add(make_stat1());
+    match t.lookup_index(&"idx_users_name".clone()) {
+        Some(n) => assert_eq(n, 1000 as Int64),
+        None    => panic("index lookup hits"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// histogram
+// -----------------------------------------------------------------------------
+
+fn make_key(n: Int) -> SampleKey {
+    let mut bs: List<Byte> = List.new();
+    bs.push((n as Byte));
+    sample_key(bs)
+}
+
+fn make_histogram() -> Stat4Histogram {
+    let mut bs: List<Bucket> = List.new();
+    bs.push(bucket(make_key(1), 0 as Int64, 100 as Int64));
+    bs.push(bucket(make_key(5), 100 as Int64, 200 as Int64));
+    bs.push(bucket(make_key(9), 300 as Int64, 100 as Int64));
+    stat4_histogram(bs, 400 as Int64)
+}
+
+fn test_histogram_estimate_eq_known_bucket() {
+    let h = make_histogram();
+    assert_eq(h.estimate_eq(&make_key(5)), 200 as Int64);
+}
+
+fn test_histogram_estimate_lt_threshold() {
+    let h = make_histogram();
+    let count = h.estimate_lt(&make_key(5));
+    assert_eq(count, 100 as Int64);
+}
+
+fn test_histogram_estimate_range() {
+    let h = make_histogram();
+    let r = h.estimate_range(&make_key(1), &make_key(9));
+    assert(r >= (0 as Int64));
+}
+
+fn test_key_compare_orders_correctly() {
+    assert_eq(key_compare(&make_key(1), &make_key(2)), -1);
+    assert_eq(key_compare(&make_key(5), &make_key(5)), 0);
+    assert_eq(key_compare(&make_key(9), &make_key(2)), 1);
+}
+
+// -----------------------------------------------------------------------------
+// Selectivity
+// -----------------------------------------------------------------------------
+
+fn test_selectivity_clamps_to_unit() {
+    let s = selectivity(2.0 as Float64);
+    assert_eq(s.ratio, 1.0 as Float64);
+    let z = selectivity(-1.0 as Float64);
+    assert_eq(z.ratio, 0.0 as Float64);
+}
+
+fn test_estimate_with_stat1_equality() {
+    let s = make_stat1();
+    let pred = PsEquality(make_key(1));
+    let sel = estimate_with_stat1(&pred, &s, 1);
+    assert(sel.ratio > (0.0 as Float64));
+    assert(sel.ratio < (1.0 as Float64));
+}
+
+fn test_combine_and_multiplies() {
+    let a = selectivity(0.5 as Float64);
+    let b = selectivity(0.5 as Float64);
+    let r = combine_and(a, b);
+    assert_eq(r.ratio, 0.25 as Float64);
+}
+
+fn test_combine_or_complement() {
+    let a = selectivity(0.5 as Float64);
+    let b = selectivity(0.5 as Float64);
+    let r = combine_or(a, b);
+    assert_eq(r.ratio, 0.75 as Float64);
+}
+
+fn test_selectivity_estimate_rows() {
+    let s = selectivity(0.1 as Float64);
+    assert_eq(s.estimate_rows(1000 as Int64), 100 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// AnalyzeEngine
+// -----------------------------------------------------------------------------
+
+fn test_engine_starts_in_init() {
+    let mut tables: List<Text> = List.new();
+    tables.push("t1".clone());
+    let e = engine_new(plan_for(tables));
+    match e.current_phase() {
+        AeInit => {},
+        _      => panic("init"),
+    }
+}
+
+fn test_engine_advances_to_scanning() {
+    let mut tables: List<Text> = List.new();
+    tables.push("t1".clone());
+    let mut e = engine_new(plan_for(tables));
+    e.advance();
+    match e.current_phase() {
+        AeScanningTable(_) => {},
+        _                  => panic("scanning"),
+    }
+}
+
+fn test_engine_terminates_after_walking_tables() {
+    let tables: List<Text> = List.new();
+    let mut e = engine_new(plan_for(tables));
+    e.advance();
+    assert(e.is_terminal());
+}
+
+fn test_phase_names() {
+    assert(phase_name(&AeInit) == "init".clone());
+    assert(phase_name(&AeFlushingStat1("t".clone())) == "flushing_stat1".clone());
+}
+
+fn main() {
+    test_stat1_distinct_keys_one_col();
+    test_stat1_distinct_keys_unique_prefix();
+    test_stat1_is_unique_prefix();
+    test_stat1_table_lookup_index();
+    test_histogram_estimate_eq_known_bucket();
+    test_histogram_estimate_lt_threshold();
+    test_histogram_estimate_range();
+    test_key_compare_orders_correctly();
+    test_selectivity_clamps_to_unit();
+    test_estimate_with_stat1_equality();
+    test_combine_and_multiplies();
+    test_combine_or_complement();
+    test_selectivity_estimate_rows();
+    test_engine_starts_in_init();
+    test_engine_advances_to_scanning();
+    test_engine_terminates_after_walking_tables();
+    test_phase_names();
+}

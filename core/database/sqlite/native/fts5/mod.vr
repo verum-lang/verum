@@ -1,0 +1,34 @@
+// =============================================================================
+// core/database/sqlite/native/fts5/mod.vr
+// =============================================================================
+// Layer: 5 (built-in vtab)
+// Spec: sqlite-native.md §16.2 (FTS5 full-text search)
+//
+// FTS5 surface, organised by responsibility:
+//
+//   * `tokenizer/` — Tokenizer protocol + 4 stock implementations
+//   * `index`      — segment-based inverted index (term → posting list)
+//   * `segment`    — immutable segment file shape
+//   * `merger`     — background segment merger policy
+//   * `query/`     — MATCH-query parser + executor + ranker
+//   * `dml`        — INSERT/UPDATE/DELETE wired to content-table linkage
+//
+// Submodules:
+//   * `posting`    — Posting + PostingList primitives
+//   * `tokenizer`  — Tokenizer protocol + 4 implementations
+//   * `index`      — InvertedIndex
+//   * `segment`    — Segment / SegmentLevel
+//   * `merger`     — Merger policy
+//   * `query`      — MATCH AST + executor + BM25 ranker
+//   * `helpers`    — highlight + snippet text helpers
+// =============================================================================
+
+module core.database.sqlite.native.fts5;
+
+public module posting;
+public module tokenizer;
+public module index;
+public module segment;
+public module merger;
+public module query;
+public module helpers;

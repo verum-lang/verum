@@ -1,0 +1,141 @@
+// =============================================================================
+// statistics/analyze.vr — ANALYZE driver state machine
+// =============================================================================
+// Spec: sqlite-native.md §13.2
+//
+// `AnalyzeEngine` walks the schema and emits sqlite_stat1 + sqlite_stat4
+// rows. Phase sequence:
+//
+//   AeInit → AeScanningTable(table) → AeFlushingStat1(table)
+//          → AeSamplingStat4(table) → AeFlushingStat4(table)
+//          → ... (next table)
+//          → AeDone
+//
+// On any per-table failure → `AeFailed(reason)`.
+// =============================================================================
+
+module core.database.sqlite.native.statistics.analyze;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.statistics.stat1.{
+    Stat1Row, Stat1Table, stat1_table_new,
+};
+
+// -----------------------------------------------------------------------------
+// AnalyzePhase
+// -----------------------------------------------------------------------------
+
+public type AnalyzePhase is
+      AeInit
+    | AeScanningTable(Text)
+    | AeFlushingStat1(Text)
+    | AeSamplingStat4(Text)
+    | AeFlushingStat4(Text)
+    | AeDone
+    | AeFailed(Text);
+
+public fn phase_name(p: &AnalyzePhase) -> Text {
+    match p {
+        AeInit                => "init".clone(),
+        AeScanningTable(_)    => "scanning".clone(),
+        AeFlushingStat1(_)    => "flushing_stat1".clone(),
+        AeSamplingStat4(_)    => "sampling_stat4".clone(),
+        AeFlushingStat4(_)    => "flushing_stat4".clone(),
+        AeDone                => "done".clone(),
+        AeFailed(_)           => "failed".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// AnalyzePlan — per-table list to walk
+// -----------------------------------------------------------------------------
+
+public type AnalyzePlan is { tables: List<Text> }
+
+public fn plan_for(tables: List<Text>) -> AnalyzePlan {
+    AnalyzePlan { tables: tables }
+}
+
+// -----------------------------------------------------------------------------
+// AnalyzeEngine
+// -----------------------------------------------------------------------------
+
+public type AnalyzeEngine is {
+    plan: AnalyzePlan,
+    phase: AnalyzePhase,
+    table_idx: Int,
+    /// Accumulated stat1 results.
+    stat1: Stat1Table,
+}
+
+public fn engine_new(plan: AnalyzePlan) -> AnalyzeEngine {
+    AnalyzeEngine {
+        plan: plan,
+        phase: AeInit,
+        table_idx: 0,
+        stat1: stat1_table_new(),
+    }
+}
+
+implement AnalyzeEngine {
+    public fn current_phase(&self) -> AnalyzePhase { clone_phase(&self.phase) }
+
+    public fn is_terminal(&self) -> Bool {
+        match &self.phase {
+            AeDone | AeFailed(_) => true,
+            _                    => false,
+        }
+    }
+
+    public fn current_table(&self) -> Maybe<Text> {
+        if self.table_idx >= self.plan.tables.len() { return None; }
+        Some(self.plan.tables[self.table_idx].clone())
+    }
+
+    /// Step the state machine. Caller drives execution by feeding back
+    /// the per-phase scan result via `record_stat1` / `record_stat4`.
+    pub fn advance(&mut self) {
+        match &self.phase {
+            AeInit => {
+                if self.plan.tables.len() == 0 { self.phase = AeDone; }
+                else { self.phase = AeScanningTable(self.plan.tables[0].clone()); }
+            }
+            AeScanningTable(t)  => self.phase = AeFlushingStat1(t.clone()),
+            AeFlushingStat1(t)  => self.phase = AeSamplingStat4(t.clone()),
+            AeSamplingStat4(t)  => self.phase = AeFlushingStat4(t.clone()),
+            AeFlushingStat4(_t) => {
+                self.table_idx = self.table_idx + 1;
+                if self.table_idx >= self.plan.tables.len() {
+                    self.phase = AeDone;
+                } else {
+                    self.phase = AeScanningTable(self.plan.tables[self.table_idx].clone());
+                }
+            }
+            AeDone | AeFailed(_) => {}
+        }
+    }
+
+    pub fn fail(&mut self, reason: Text) {
+        self.phase = AeFailed(reason);
+    }
+
+    pub fn record_stat1(&mut self, row: Stat1Row) {
+        self.stat1.add(row);
+    }
+
+    pub fn finished_stat1_count(&self) -> Int { self.stat1.len() }
+}
+
+fn clone_phase(p: &AnalyzePhase) -> AnalyzePhase {
+    match p {
+        AeInit                => AeInit,
+        AeScanningTable(t)    => AeScanningTable(t.clone()),
+        AeFlushingStat1(t)    => AeFlushingStat1(t.clone()),
+        AeSamplingStat4(t)    => AeSamplingStat4(t.clone()),
+        AeFlushingStat4(t)    => AeFlushingStat4(t.clone()),
+        AeDone                => AeDone,
+        AeFailed(r)           => AeFailed(r.clone()),
+    }
+}

@@ -1,0 +1,202 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, rtree, bbox, spatial, split
+// @timeout: 5000
+// @expected-exit: 0
+//
+// R-tree surface:
+//   * BoundingBox area / contains / intersects / covers / enlarged_to
+//   * RNode classification (leaf vs interior)
+//   * RTree insert + search + delete
+//   * Quadratic split heuristic produces non-empty groups
+//   * RangeQuery translation (covers / contained_in / intersects)
+
+mount core.database.sqlite.native.rtree.bbox.{
+    BoundingBox, bbox, bbox_new,
+};
+mount core.database.sqlite.native.rtree.node.{
+    RNode, RnInterior, RnLeaf,
+    LeafEntry, leaf_entry,
+    InteriorEntry, interior_entry,
+    node_id, entry_count, is_leaf, cover_mbb,
+};
+mount core.database.sqlite.native.rtree.tree.{
+    RTree, rtree_new,
+};
+mount core.database.sqlite.native.rtree.split.{
+    SplitGroups, quadratic_split, empty_groups,
+};
+mount core.database.sqlite.native.rtree.query.{
+    QueryMode, QmIntersect, QmCovers, QmContainedIn,
+    RangeQuery, range_query,
+    DimBound, dim_bound, build_range_query, run_range_query,
+    mode_name,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// BoundingBox
+// -----------------------------------------------------------------------------
+
+fn make_bbox(x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> BoundingBox {
+    let mut min: List<Float64> = List.new();
+    min.push(x0); min.push(y0);
+    let mut max: List<Float64> = List.new();
+    max.push(x1); max.push(y1);
+    bbox(min, max)
+}
+
+fn test_bbox_area_unit_square() {
+    let b = make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64);
+    assert_eq(b.area(), 1.0 as Float64);
+}
+
+fn test_bbox_intersects_overlap() {
+    let a = make_bbox(0.0 as Float64, 0.0 as Float64, 2.0 as Float64, 2.0 as Float64);
+    let b = make_bbox(1.0 as Float64, 1.0 as Float64, 3.0 as Float64, 3.0 as Float64);
+    assert(a.intersects(&b));
+}
+
+fn test_bbox_no_intersect_when_disjoint() {
+    let a = make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64);
+    let b = make_bbox(5.0 as Float64, 5.0 as Float64, 6.0 as Float64, 6.0 as Float64);
+    assert(!a.intersects(&b));
+}
+
+fn test_bbox_covers_when_inside() {
+    let outer = make_bbox(0.0 as Float64, 0.0 as Float64, 10.0 as Float64, 10.0 as Float64);
+    let inner = make_bbox(2.0 as Float64, 2.0 as Float64, 4.0 as Float64, 4.0 as Float64);
+    assert(outer.covers(&inner));
+    assert(!inner.covers(&outer));
+}
+
+fn test_bbox_contains_point() {
+    let b = make_bbox(0.0 as Float64, 0.0 as Float64, 10.0 as Float64, 10.0 as Float64);
+    let mut p: List<Float64> = List.new();
+    p.push(5.0 as Float64); p.push(5.0 as Float64);
+    assert(b.contains_point(&p));
+}
+
+fn test_bbox_enlargement_zero_for_covering_box() {
+    let outer = make_bbox(0.0 as Float64, 0.0 as Float64, 10.0 as Float64, 10.0 as Float64);
+    let inner = make_bbox(2.0 as Float64, 2.0 as Float64, 4.0 as Float64, 4.0 as Float64);
+    assert_eq(outer.enlargement(&inner), 0.0 as Float64);
+}
+
+// -----------------------------------------------------------------------------
+// RNode
+// -----------------------------------------------------------------------------
+
+fn test_node_id_round_trip() {
+    let n = RnLeaf(7 as Int64, List.new());
+    assert_eq(node_id(&n), 7 as Int64);
+    assert(is_leaf(&n));
+}
+
+fn test_node_entry_count_zero() {
+    let n = RnLeaf(1 as Int64, List.new());
+    assert_eq(entry_count(&n), 0);
+}
+
+// -----------------------------------------------------------------------------
+// RTree
+// -----------------------------------------------------------------------------
+
+fn test_rtree_inserts_into_root_leaf() {
+    let mut t = rtree_new(2, 4);
+    t.insert(1 as Int64, make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64));
+    t.insert(2 as Int64, make_bbox(2.0 as Float64, 2.0 as Float64, 3.0 as Float64, 3.0 as Float64));
+    let q = make_bbox(0.0 as Float64, 0.0 as Float64, 5.0 as Float64, 5.0 as Float64);
+    let hits = t.search(&q);
+    assert_eq(hits.len(), 2);
+}
+
+fn test_rtree_search_filters_misses() {
+    let mut t = rtree_new(2, 4);
+    t.insert(1 as Int64, make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64));
+    t.insert(2 as Int64, make_bbox(20.0 as Float64, 20.0 as Float64, 21.0 as Float64, 21.0 as Float64));
+    let q = make_bbox(0.0 as Float64, 0.0 as Float64, 5.0 as Float64, 5.0 as Float64);
+    let hits = t.search(&q);
+    assert_eq(hits.len(), 1);
+}
+
+fn test_rtree_delete_removes_entry() {
+    let mut t = rtree_new(2, 4);
+    t.insert(1 as Int64, make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64));
+    assert(t.delete(1 as Int64));
+    let q = make_bbox(0.0 as Float64, 0.0 as Float64, 5.0 as Float64, 5.0 as Float64);
+    assert_eq(t.search(&q).len(), 0);
+}
+
+fn test_rtree_delete_missing_returns_false() {
+    let mut t = rtree_new(2, 4);
+    assert(!t.delete(99 as Int64));
+}
+
+// -----------------------------------------------------------------------------
+// Split heuristic
+// -----------------------------------------------------------------------------
+
+fn test_quadratic_split_distributes_entries() {
+    let mut boxes: List<BoundingBox> = List.new();
+    boxes.push(make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64));
+    boxes.push(make_bbox(1.0 as Float64, 1.0 as Float64, 2.0 as Float64, 2.0 as Float64));
+    boxes.push(make_bbox(10.0 as Float64, 10.0 as Float64, 11.0 as Float64, 11.0 as Float64));
+    boxes.push(make_bbox(11.0 as Float64, 11.0 as Float64, 12.0 as Float64, 12.0 as Float64));
+    let groups = quadratic_split(&boxes, 1);
+    assert_eq(groups.group_a.len() + groups.group_b.len(), 4);
+}
+
+fn test_quadratic_split_rejects_singleton() {
+    let mut boxes: List<BoundingBox> = List.new();
+    boxes.push(make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64));
+    let groups = quadratic_split(&boxes, 1);
+    assert_eq(groups.group_a.len(), 0);
+    assert_eq(groups.group_b.len(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// Range query translation
+// -----------------------------------------------------------------------------
+
+fn test_mode_name_matches() {
+    assert(mode_name(&QmIntersect) == "intersect".clone());
+    assert(mode_name(&QmCovers) == "covers".clone());
+    assert(mode_name(&QmContainedIn) == "contained_in".clone());
+}
+
+fn test_build_range_query_from_dim_bounds() {
+    let mut dims: List<DimBound> = List.new();
+    dims.push(dim_bound(0.0 as Float64, 10.0 as Float64));
+    dims.push(dim_bound(0.0 as Float64, 10.0 as Float64));
+    let q = build_range_query(&dims, QmIntersect);
+    assert_eq(q.box_q.dimension(), 2);
+}
+
+fn test_run_range_query_intersect() {
+    let mut t = rtree_new(2, 4);
+    t.insert(1 as Int64, make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64));
+    let q = range_query(make_bbox(0.0 as Float64, 0.0 as Float64, 5.0 as Float64, 5.0 as Float64), QmIntersect);
+    assert_eq(run_range_query(&t, &q).len(), 1);
+}
+
+fn main() {
+    test_bbox_area_unit_square();
+    test_bbox_intersects_overlap();
+    test_bbox_no_intersect_when_disjoint();
+    test_bbox_covers_when_inside();
+    test_bbox_contains_point();
+    test_bbox_enlargement_zero_for_covering_box();
+    test_node_id_round_trip();
+    test_node_entry_count_zero();
+    test_rtree_inserts_into_root_leaf();
+    test_rtree_search_filters_misses();
+    test_rtree_delete_removes_entry();
+    test_rtree_delete_missing_returns_false();
+    test_quadratic_split_distributes_entries();
+    test_quadratic_split_rejects_singleton();
+    test_mode_name_matches();
+    test_build_range_query_from_dim_bounds();
+    test_run_range_query_intersect();
+}
