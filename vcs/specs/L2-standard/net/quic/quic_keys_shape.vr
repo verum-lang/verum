@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, keys, rfc9001_5_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §5.1 QuicKeys aggregate state — QuicKeys.empty() starts
+// all three per-phase slots at None; each slot holds a (tx, rx) pair
+// of QuicSpaceKeys so the connection can encrypt out-bound and
+// decrypt in-bound records separately.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.connection_sm.{QuicSpaceKeys, QuicKeys};
+mount core.net.quic.crypto.header_protection.{HpKey};
+
+fn empty_keys_all_none() {
+    let k = QuicKeys.empty();
+    match k.initial   { None => {}, _ => panic("initial must start None")   }
+    match k.handshake { None => {}, _ => panic("handshake must start None") }
+    match k.app       { None => {}, _ => panic("app must start None")       }
+}
+
+fn space_keys_shape_aes128() {
+    // 16-byte AEAD key + 12-byte IV + AES-ECB-128 HP key.
+    let sk = QuicSpaceKeys {
+        aead_key: [0xAA_u8; 16].to_list(),
+        aead_iv:  [0xBB_u8; 12],
+        hp_key:   HpKey.AesEcb128([0xCC_u8; 16]),
+    };
+    assert(sk.aead_key.len() == 16);
+    // iv is a fixed array; slice access pins the length.
+    assert(sk.aead_iv[0]  == 0xBB_u8);
+    assert(sk.aead_iv[11] == 0xBB_u8);
+    match sk.hp_key {
+        HpKey.AesEcb128(_) => {},
+        _ => panic("hp_key must be AesEcb128"),
+    }
+}
+
+fn space_keys_shape_chacha() {
+    let sk = QuicSpaceKeys {
+        aead_key: [0x11_u8; 32].to_list(),
+        aead_iv:  [0x22_u8; 12],
+        hp_key:   HpKey.ChaCha20Block([0x33_u8; 32]),
+    };
+    assert(sk.aead_key.len() == 32);
+    match sk.hp_key {
+        HpKey.ChaCha20Block(_) => {},
+        _ => panic("hp_key must be ChaCha20Block"),
+    }
+}
+
+fn keys_populated_with_distinct_tx_and_rx() {
+    let tx = QuicSpaceKeys {
+        aead_key: [0x01_u8; 16].to_list(),
+        aead_iv:  [0x02_u8; 12],
+        hp_key:   HpKey.AesEcb128([0x03_u8; 16]),
+    };
+    let rx = QuicSpaceKeys {
+        aead_key: [0x10_u8; 16].to_list(),
+        aead_iv:  [0x20_u8; 12],
+        hp_key:   HpKey.AesEcb128([0x30_u8; 16]),
+    };
+    let k = QuicKeys {
+        initial:   Some((tx, rx)),
+        handshake: None,
+        app:       None,
+    };
+    match k.initial {
+        Some((t, r)) => {
+            // tx and rx differ in the first byte of every field.
+            assert(t.aead_key[0] != r.aead_key[0]);
+            assert(t.aead_iv[0]  != r.aead_iv[0]);
+        },
+        None => panic("initial must be populated"),
+    }
+    match k.handshake { None => {}, _ => panic("handshake still None") }
+    match k.app       { None => {}, _ => panic("app still None")       }
+}
+
+fn keys_multi_phase_population() {
+    // Populate all three phases with stub keys to exercise the slot shape.
+    let stub = QuicSpaceKeys {
+        aead_key: [0x00_u8; 16].to_list(),
+        aead_iv:  [0_u8; 12],
+        hp_key:   HpKey.AesEcb128([0_u8; 16]),
+    };
+    let k = QuicKeys {
+        initial:   Some((stub.clone(), stub.clone())),
+        handshake: Some((stub.clone(), stub.clone())),
+        app:       Some((stub.clone(), stub)),
+    };
+    match k.initial   { Some(_) => {}, None => panic("initial")   }
+    match k.handshake { Some(_) => {}, None => panic("handshake") }
+    match k.app       { Some(_) => {}, None => panic("app")       }
+}
+
+@main
+public fn main() -> Int {
+    empty_keys_all_none();
+    space_keys_shape_aes128();
+    space_keys_shape_chacha();
+    keys_populated_with_distinct_tx_and_rx();
+    keys_multi_phase_population();
+    print("RFC 9001 §5.1 QuicKeys/QuicSpaceKeys shape verified");
+    0
+}
