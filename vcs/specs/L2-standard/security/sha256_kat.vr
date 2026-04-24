@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, sha256, fips_180_4, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// FIPS 180-4 SHA-256 test vectors:
+//   SHA-256("")    = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+//   SHA-256("abc") = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+
+mount core.*;
+mount core.collections.List;
+mount core.security.hash.sha256.{Sha256};
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn sha256_empty_digest() {
+    let empty: List<Byte> = [];
+    let d = Sha256.digest(empty.as_slice());
+    let expected: [Byte; 32] = [
+        0xE3_u8, 0xB0_u8, 0xC4_u8, 0x42_u8,
+        0x98_u8, 0xFC_u8, 0x1C_u8, 0x14_u8,
+        0x9A_u8, 0xFB_u8, 0xF4_u8, 0xC8_u8,
+        0x99_u8, 0x6F_u8, 0xB9_u8, 0x24_u8,
+        0x27_u8, 0xAE_u8, 0x41_u8, 0xE4_u8,
+        0x64_u8, 0x9B_u8, 0x93_u8, 0x4C_u8,
+        0xA4_u8, 0x95_u8, 0x99_u8, 0x1B_u8,
+        0x78_u8, 0x52_u8, 0xB8_u8, 0x55_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(d[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn sha256_abc_digest() {
+    let abc: List<Byte> = [0x61_u8, 0x62_u8, 0x63_u8];
+    let d = Sha256.digest(abc.as_slice());
+    let expected: [Byte; 32] = [
+        0xBA_u8, 0x78_u8, 0x16_u8, 0xBF_u8,
+        0x8F_u8, 0x01_u8, 0xCF_u8, 0xEA_u8,
+        0x41_u8, 0x41_u8, 0x40_u8, 0xDE_u8,
+        0x5D_u8, 0xAE_u8, 0x22_u8, 0x23_u8,
+        0xB0_u8, 0x03_u8, 0x61_u8, 0xA3_u8,
+        0x96_u8, 0x17_u8, 0x7A_u8, 0x9C_u8,
+        0xB4_u8, 0x10_u8, 0xFF_u8, 0x61_u8,
+        0xF2_u8, 0x00_u8, 0x15_u8, 0xAD_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(d[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn sha256_digest_deterministic() {
+    // Same input yields identical digest across calls.
+    let data: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let d1 = Sha256.digest(data.as_slice());
+    let d2 = Sha256.digest(data.as_slice());
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(d1[i] == d2[i]);
+        i = i + 1;
+    }
+}
+
+fn sha256_sensitive_to_single_bit_flip() {
+    let a: List<Byte> = [0x61_u8, 0x62_u8, 0x63_u8];       // "abc"
+    let b: List<Byte> = [0x61_u8, 0x62_u8, 0x64_u8];       // "abd"
+    let da = Sha256.digest(a.as_slice());
+    let db = Sha256.digest(b.as_slice());
+    let mut differ = false;
+    let mut i: Int = 0;
+    while i < 32 {
+        if da[i] != db[i] { differ = true; }
+        i = i + 1;
+    }
+    assert(differ);
+}
+
+@main
+public fn main() -> Int {
+    sha256_empty_digest();
+    sha256_abc_digest();
+    sha256_digest_deterministic();
+    sha256_sensitive_to_single_bit_flip();
+    print("FIPS 180-4 SHA-256 KAT verified");
+    0
+}

@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, der, bit_string, rfc5280
+// @timeout: 15000
+// @expected-exit: 0
+
+// ITU-T X.690 §8.6 BIT STRING: first octet of the value is the
+// count of unused bits (0..=7) in the final content byte; the
+// remaining bytes carry the content MSB-first.
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader, DerError, BitString};
+
+fn bit_string_zero_bits_roundtrip() {
+    // 0x03 0x02 0x00 0xAB — BIT STRING tag, 2-byte value, 0 unused, 0xAB content.
+    let der: List<Byte> = [0x03_u8, 0x02_u8, 0x00_u8, 0xAB_u8];
+    let mut r = DerReader.new(der.as_slice());
+    let bs = r.read_bit_string().unwrap();
+    assert(bs.unused_bits == 0_u8);
+    assert(bs.bytes.len() == 1);
+    assert(bs.bytes[0] == 0xAB_u8);
+}
+
+fn bit_string_unused_bits_preserved() {
+    // 0x03 0x03 0x04 0xAB 0xF0 — 4 unused bits, content = 0xAB 0xF0.
+    let der: List<Byte> = [0x03_u8, 0x03_u8, 0x04_u8, 0xAB_u8, 0xF0_u8];
+    let mut r = DerReader.new(der.as_slice());
+    let bs = r.read_bit_string().unwrap();
+    assert(bs.unused_bits == 4_u8);
+    assert(bs.bytes.len() == 2);
+    assert(bs.bytes[0] == 0xAB_u8);
+    assert(bs.bytes[1] == 0xF0_u8);
+}
+
+fn bit_string_empty_is_zero_length_value() {
+    // 0x03 0x01 0x00 — BIT STRING with 0 unused bits and no content bytes.
+    let der: List<Byte> = [0x03_u8, 0x01_u8, 0x00_u8];
+    let mut r = DerReader.new(der.as_slice());
+    let bs = r.read_bit_string().unwrap();
+    assert(bs.unused_bits == 0_u8);
+    assert(bs.bytes.len() == 0);
+}
+
+fn bit_string_invalid_unused_bits_rejected() {
+    // 0x03 0x02 0x08 0xFF — unused_bits = 8 violates X.690 §8.6.2.
+    let der: List<Byte> = [0x03_u8, 0x02_u8, 0x08_u8, 0xFF_u8];
+    let mut r = DerReader.new(der.as_slice());
+    match r.read_bit_string() {
+        Err(_) => {},
+        _ => panic("unused_bits=8 must be rejected"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    bit_string_zero_bits_roundtrip();
+    bit_string_unused_bits_preserved();
+    bit_string_empty_is_zero_length_value();
+    bit_string_invalid_unused_bits_rejected();
+    print("ITU-T X.690 §8.6 BIT STRING reader verified");
+    0
+}

@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, oid, pkix
+// @timeout: 15000
+// @expected-exit: 0
+
+// PKIX Oid — arc-list-based equality. Constructed via Oid.from(&[u32])
+// with well-known constants living under core.security.x509.oid.*
+// as nullary functions.
+
+mount core.*;
+mount core.security.x509.oid.{
+    Oid,
+    sha256_with_rsa, sha384_with_rsa, sha512_with_rsa,
+    ecdsa_with_sha256, ecdsa_with_sha384,
+    ed25519, rsa_encryption, ec_public_key,
+    ext_subject_alt_name, ext_basic_constraints, ext_key_usage,
+    ext_ext_key_usage,
+    eku_server_auth, eku_client_auth,
+};
+
+fn from_arcs_equal_itself() {
+    let a = Oid.from(&[1_u32, 2_u32, 840_u32, 113549_u32]);
+    let b = Oid.from(&[1_u32, 2_u32, 840_u32, 113549_u32]);
+    assert(a.eq(&b));
+    assert(a.len() == 4);
+}
+
+fn different_arcs_are_unequal() {
+    let a = Oid.from(&[1_u32, 2_u32, 840_u32]);
+    let b = Oid.from(&[1_u32, 3_u32, 840_u32]);
+    assert(false == a.eq(&b));
+}
+
+fn different_length_oids_are_unequal() {
+    let a = Oid.from(&[1_u32, 2_u32, 840_u32]);
+    let b = Oid.from(&[1_u32, 2_u32, 840_u32, 113549_u32]);
+    assert(false == a.eq(&b));
+}
+
+fn well_known_signature_algorithm_oids() {
+    // RSA PKCS#1 signature OIDs (1.2.840.113549.1.1.n)
+    let sha256_rsa = sha256_with_rsa();
+    let expected_sha256_rsa = Oid.from(&[
+        1_u32, 2_u32, 840_u32, 113549_u32, 1_u32, 1_u32, 11_u32,
+    ]);
+    assert(sha256_rsa.eq(&expected_sha256_rsa));
+
+    // ECDSA signature OIDs (1.2.840.10045.4.3.n)
+    let ecdsa_256 = ecdsa_with_sha256();
+    let expected_ecdsa = Oid.from(&[
+        1_u32, 2_u32, 840_u32, 10045_u32, 4_u32, 3_u32, 2_u32,
+    ]);
+    assert(ecdsa_256.eq(&expected_ecdsa));
+
+    // Ed25519 (1.3.101.112)
+    let ed = ed25519();
+    let expected_ed = Oid.from(&[1_u32, 3_u32, 101_u32, 112_u32]);
+    assert(ed.eq(&expected_ed));
+}
+
+fn well_known_public_key_oids() {
+    let rsa = rsa_encryption();
+    let expected_rsa = Oid.from(&[
+        1_u32, 2_u32, 840_u32, 113549_u32, 1_u32, 1_u32, 1_u32,
+    ]);
+    assert(rsa.eq(&expected_rsa));
+
+    let ec = ec_public_key();
+    let expected_ec = Oid.from(&[
+        1_u32, 2_u32, 840_u32, 10045_u32, 2_u32, 1_u32,
+    ]);
+    assert(ec.eq(&expected_ec));
+}
+
+fn id_ce_extension_oids() {
+    // id-ce (2.5.29.*)
+    assert(ext_subject_alt_name().eq(&Oid.from(&[2_u32, 5_u32, 29_u32, 17_u32])));
+    assert(ext_basic_constraints().eq(&Oid.from(&[2_u32, 5_u32, 29_u32, 19_u32])));
+    assert(ext_key_usage().eq(&Oid.from(&[2_u32, 5_u32, 29_u32, 15_u32])));
+    assert(ext_ext_key_usage().eq(&Oid.from(&[2_u32, 5_u32, 29_u32, 37_u32])));
+}
+
+fn eku_oids() {
+    // id-kp (1.3.6.1.5.5.7.3.*)
+    assert(eku_server_auth().eq(&Oid.from(&[
+        1_u32, 3_u32, 6_u32, 1_u32, 5_u32, 5_u32, 7_u32, 3_u32, 1_u32,
+    ])));
+    assert(eku_client_auth().eq(&Oid.from(&[
+        1_u32, 3_u32, 6_u32, 1_u32, 5_u32, 5_u32, 7_u32, 3_u32, 2_u32,
+    ])));
+}
+
+@main
+public fn main() -> Int {
+    from_arcs_equal_itself();
+    different_arcs_are_unequal();
+    different_length_oids_are_unequal();
+    well_known_signature_algorithm_oids();
+    well_known_public_key_oids();
+    id_ce_extension_oids();
+    eku_oids();
+    print("PKIX OID equality + constants verified");
+    0
+}
