@@ -1,0 +1,146 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, extension, encode, rfc8446_4_2, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2 TLS extension wire-encoding byte-exact KAT.
+//
+// Every extension has the same outer frame: u16 ext_type + u16 length
+// + `length` bytes of body. The body shape varies by extension but is
+// fully determined by the Extension ADT variant.
+//
+// This test pins the byte-exact output of `encode_extension` for the
+// context-sensitive and fixed-shape variants — these are the ones
+// where the decode side picks the right variant based on
+// ExtensionContext, so the encode side MUST match a specific wire
+// layout.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.version.{ProtocolVersion, TLS_1_3};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.handshake.extension.{
+    Extension, encode_extension,
+    EXT_SUPPORTED_VERSIONS, EXT_KEY_SHARE,
+    EXT_POST_HANDSHAKE_AUTH, EXT_RECORD_SIZE_LIMIT,
+    EXT_QUIC_TRANSPORT_PARAMETERS, EXT_COOKIE,
+};
+
+fn supported_versions_client_list_of_one_tls_1_3() {
+    // Wire: ext_type(0x002B) | u16_len=3 | u8_len=2 | u16 0x0304
+    let ext = Extension.SupportedVersionsClient {
+        versions: [TLS_1_3],
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // 2 (ext_type) + 2 (outer len) + 1 (u8 inner len) + 2 (one version) = 7.
+    assert(out.len() == 7);
+    assert(out[0] == 0x00_u8 && out[1] == 0x2B_u8);    // ext_type = 43
+    assert(out[2] == 0x00_u8 && out[3] == 0x03_u8);    // outer len = 3
+    assert(out[4] == 0x02_u8);                          // u8 list len = 2
+    assert(out[5] == 0x03_u8 && out[6] == 0x04_u8);    // TLS 1.3 = 0x0304
+}
+
+fn supported_versions_server_selected_tls_1_3() {
+    // Wire: ext_type(0x002B) | u16_len=2 | u16 0x0304
+    let ext = Extension.SupportedVersionsServer { selected: TLS_1_3 };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // 2 (ext_type) + 2 (outer len) + 2 (selected) = 6.
+    assert(out.len() == 6);
+    assert(out[0] == 0x00_u8 && out[1] == 0x2B_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x02_u8);    // outer len = 2
+    assert(out[4] == 0x03_u8 && out[5] == 0x04_u8);
+}
+
+fn key_share_hello_retry_request_only_carries_group() {
+    // HRR uses key_share to tell the client "send me this group instead".
+    // Wire: ext_type(0x0033) | u16_len=2 | u16 group
+    let ext = Extension.KeyShareHelloRetryRequest {
+        selected_group: NamedGroup.X25519,
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    assert(out.len() == 6);
+    assert(out[0] == 0x00_u8 && out[1] == 0x33_u8);    // ext_type = 51
+    assert(out[2] == 0x00_u8 && out[3] == 0x02_u8);    // outer len = 2
+    assert(out[4] == 0x00_u8 && out[5] == 0x1D_u8);    // X25519 = 0x001D
+}
+
+fn post_handshake_auth_has_zero_length_body() {
+    // RFC 8446 §4.6.2 — Client-only presence marker; no payload.
+    let ext = Extension.PostHandshakeAuthExt;
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    assert(out.len() == 4);
+    assert(out[0] == 0x00_u8 && out[1] == 0x31_u8);    // ext_type = 49
+    assert(out[2] == 0x00_u8 && out[3] == 0x00_u8);    // body len = 0
+}
+
+fn record_size_limit_carries_single_u16() {
+    // RFC 8449 — body is a single u16 record-size-limit.
+    let ext = Extension.RecordSizeLimitExt { limit: 0x4000_u16 };  // 16384
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    assert(out.len() == 6);
+    assert(out[0] == 0x00_u8 && out[1] == 0x1C_u8);    // ext_type = 28
+    assert(out[2] == 0x00_u8 && out[3] == 0x02_u8);    // body len = 2
+    assert(out[4] == 0x40_u8 && out[5] == 0x00_u8);    // 0x4000 = 16384
+}
+
+fn quic_transport_parameters_passes_through_raw_bytes() {
+    // RFC 9001 §8.2 — body is the varint-encoded transport parameters
+    // blob, passed through verbatim.
+    let params: List<Byte> = [0x00_u8, 0x01_u8, 0x02_u8, 0x03_u8];
+    let ext = Extension.QuicTransportParametersExt { params: params };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // 2 (ext_type) + 2 (outer len) + 4 (passthrough) = 8.
+    assert(out.len() == 8);
+    assert(out[0] == 0x00_u8 && out[1] == 0x39_u8);    // ext_type = 57
+    assert(out[2] == 0x00_u8 && out[3] == 0x04_u8);
+    assert(out[4] == 0x00_u8 && out[5] == 0x01_u8);
+    assert(out[6] == 0x02_u8 && out[7] == 0x03_u8);
+}
+
+fn cookie_double_u16_length_wrap() {
+    // RFC 8446 §4.2.2 — Cookie<1..2^16-1> inside a u16-length frame.
+    // ext_type(0x002C) | u16_outer | u16_inner | cookie bytes
+    let cookie: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let ext = Extension.CookieExt { cookie: cookie };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // 2 (ext_type) + 2 (outer) + 2 (inner) + 4 (body) = 10.
+    assert(out.len() == 10);
+    assert(out[0] == 0x00_u8 && out[1] == 0x2C_u8);    // ext_type = 44
+    assert(out[2] == 0x00_u8 && out[3] == 0x06_u8);    // outer len = 6
+    assert(out[4] == 0x00_u8 && out[5] == 0x04_u8);    // inner len = 4
+    assert(out[6] == 0xDE_u8 && out[7] == 0xAD_u8);
+    assert(out[8] == 0xBE_u8 && out[9] == 0xEF_u8);
+}
+
+fn ext_ids_referenced_above_match_iana() {
+    // Sanity-cross with the constants we used in the KATs above.
+    assert(EXT_SUPPORTED_VERSIONS         == 43_u16);
+    assert(EXT_KEY_SHARE                  == 51_u16);
+    assert(EXT_POST_HANDSHAKE_AUTH        == 49_u16);
+    assert(EXT_RECORD_SIZE_LIMIT          == 28_u16);
+    assert(EXT_QUIC_TRANSPORT_PARAMETERS  == 57_u16);
+    assert(EXT_COOKIE                     == 44_u16);
+}
+
+@main
+public fn main() -> Int {
+    supported_versions_client_list_of_one_tls_1_3();
+    supported_versions_server_selected_tls_1_3();
+    key_share_hello_retry_request_only_carries_group();
+    post_handshake_auth_has_zero_length_body();
+    record_size_limit_carries_single_u16();
+    quic_transport_parameters_passes_through_raw_bytes();
+    cookie_double_u16_length_wrap();
+    ext_ids_referenced_above_match_iana();
+    print("RFC 8446 §4.2 TLS extension encoder byte-exact KAT verified");
+    0
+}
