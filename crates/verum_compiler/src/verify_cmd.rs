@@ -46,6 +46,14 @@ pub struct VerifyCommand<'s> {
     cache: VerificationCache,
     budget_tracker: BudgetTracker,
     profiler: Option<VerificationProfiler>,
+    /// Scratch-pad for per-obligation timings accumulated during a
+    /// single `verify_function` call. Drained by `verify_module`
+    /// after each call into `VerificationReport::
+    /// add_obligation_timings`. Interior mutability so
+    /// `verify_preconditions` / `verify_postconditions` (which take
+    /// `&self`) can push into it without threading an extra `&mut`
+    /// argument through every helper.
+    obligation_scratch: std::cell::RefCell<Vec<(Text, Duration)>>,
 }
 
 impl<'s> VerifyCommand<'s> {
@@ -70,7 +78,23 @@ impl<'s> VerifyCommand<'s> {
             cache: VerificationCache::new(),
             budget_tracker: BudgetTracker::new(budget, slow_threshold),
             profiler,
+            obligation_scratch: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// Record a discharged obligation's elapsed time. Called by the
+    /// per-obligation verifiers; drained by `verify_module` into
+    /// the report after each function's verification completes.
+    fn record_obligation(&self, label: &str, elapsed: Duration) {
+        self.obligation_scratch
+            .borrow_mut()
+            .push((Text::from(label.to_string()), elapsed));
+    }
+
+    /// Drain the scratch-pad and return the collected timings for
+    /// the just-completed `verify_function` call.
+    fn drain_obligation_timings(&self) -> Vec<(Text, Duration)> {
+        std::mem::take(&mut *self.obligation_scratch.borrow_mut())
     }
 
     /// Run verification with cost reporting
@@ -291,6 +315,24 @@ impl<'s> VerifyCommand<'s> {
                     &callee_signatures_for_module,
                 );
                 let elapsed = start_time.elapsed();
+
+                // Drain per-obligation timings accumulated during
+                // verify_function and associate them with this
+                // function's entry in the report. Empty drain
+                // (function had no requires/ensures instrumented)
+                // is a no-op — the report's fallback view keeps
+                // working.
+                let obligation_timings = self.drain_obligation_timings();
+                if !obligation_timings.is_empty() {
+                    let mut timings_list: List<(Text, Duration)> = List::new();
+                    for t in obligation_timings {
+                        timings_list.push(t);
+                    }
+                    report.add_obligation_timings(
+                        func.name.as_str().to_text(),
+                        timings_list,
+                    );
+                }
 
                 // Profile if enabled (extract location before mutable borrow)
                 let location = if self.profiler.is_some() {
@@ -672,9 +714,11 @@ impl<'s> VerifyCommand<'s> {
 
         // Step 1: Verify preconditions are satisfiable (not contradictory)
         if has_requires || has_implicit_requires {
-            if let Err(e) =
-                self.verify_preconditions(&ctx, &mut translator, &effective_requires, timeout)
-            {
+            let pre_start = Instant::now();
+            let pre_result =
+                self.verify_preconditions(&ctx, &mut translator, &effective_requires, timeout);
+            self.record_obligation("precondition", pre_start.elapsed());
+            if let Err(e) = pre_result {
                 debug!(
                     "Precondition verification failed for {}: {}",
                     func.name,
@@ -700,7 +744,8 @@ impl<'s> VerifyCommand<'s> {
         // `result == body` so the SMT can check ensures against the actual
         // return value rather than an unconstrained fresh variable.
         if has_ensures {
-            match self.verify_postconditions(
+            let post_start = Instant::now();
+            let post_result = self.verify_postconditions(
                 &ctx,
                 &mut translator,
                 &effective_requires,
@@ -708,7 +753,9 @@ impl<'s> VerifyCommand<'s> {
                 func.body.as_ref(),
                 timeout,
                 reflection_registry,
-            ) {
+            );
+            self.record_obligation("postcondition", post_start.elapsed());
+            match post_result {
                 Ok(()) => debug!("Postconditions verified for {}", func.name),
                 Err(VerifyError::Timeout) => {
                     return Err(VerificationError::Timeout {
