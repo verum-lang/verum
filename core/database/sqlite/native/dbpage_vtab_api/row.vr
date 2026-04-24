@@ -1,0 +1,29 @@
+// =============================================================================
+// dbpage_vtab_api/row.vr — DbPageRow
+// =============================================================================
+// Spec: SQLite 3.31+ sqlite_dbpage.
+// =============================================================================
+
+module core.database.sqlite.native.dbpage_vtab_api.row;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type DbPageRow is {
+    pgno: Int64,
+    /// Page bytes; empty list means NULL.
+    data: List<u8>,
+    /// "main" / "temp" / ATTACH-ed schema.
+    schema: Text,
+}
+
+public fn new_row(pgno: Int64, data: List<u8>, schema: Text) -> DbPageRow {
+    DbPageRow { pgno: pgno, data: data, schema: schema }
+}
+
+public fn row_byte_count(r: &DbPageRow) -> Int { r.data.len() }
+
+public fn is_first_page(r: &DbPageRow) -> Bool { r.pgno == (1 as Int64) }
+
+public fn is_null_page(r: &DbPageRow) -> Bool { r.data.len() == 0 }

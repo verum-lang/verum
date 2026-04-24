@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/returning_clause_api/mod.vr
+// =============================================================================
+// Layer: 5 (façade — RETURNING clause support)
+// Spec: SQLite RETURNING (3.35+)
+//
+//   INSERT ... RETURNING expr[, expr...];
+//   UPDATE ... RETURNING *;
+//   DELETE ... RETURNING rowid;
+//
+// Each DML statement may specify a RETURNING list.  The engine yields
+// a result row per touched row, evaluating the expressions in the
+// post-mutation context.
+//
+// Submodules:
+//   * `spec`     — ReturningSpec (list of expression slots + star)
+//   * `row`      — per-row evaluation result
+//   * `engine`   — rows-returned counter + state
+// =============================================================================
+
+module core.database.sqlite.native.returning_clause_api;
+
+public module spec;
+public module row;
+public module engine;

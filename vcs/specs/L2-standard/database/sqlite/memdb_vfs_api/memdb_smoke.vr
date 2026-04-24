@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, memdb_vfs_api, memdb, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.memdb_vfs_api.uri.{
+    CacheMode, CmPrivate, CmShared,
+    MemdbOpenSpec,
+    cache_mode_name, classic_memory, named_shared, is_shared, is_memdb_uri,
+};
+mount core.database.sqlite.native.memdb_vfs_api.policy.{
+    MemdbPolicy,
+    DEFAULT_MAX_BYTES,
+    default_policy, set_max_bytes, mark_immutable, fits,
+};
+mount base.{Bool};
+
+fn test_classic_memory_private() {
+    let s = classic_memory();
+    assert_eq(s.name.len(), 0);
+    assert(!is_shared(&s));
+    assert(cache_mode_name(&s.cache) == "private".clone());
+}
+
+fn test_named_shared() {
+    let s = named_shared("project".clone());
+    assert(is_shared(&s));
+    assert(cache_mode_name(&s.cache) == "shared".clone());
+}
+
+fn test_is_memdb_uri_classic() {
+    assert(is_memdb_uri(&":memory:".clone()));
+}
+
+fn test_is_memdb_uri_file_form() {
+    assert(is_memdb_uri(&"file:/memdb?cache=shared".clone()));
+    assert(is_memdb_uri(&"FILE:/MEMDB".clone()));
+}
+
+fn test_not_memdb_uri_rejects_regular_paths() {
+    assert(!is_memdb_uri(&"/tmp/x.db".clone()));
+    assert(!is_memdb_uri(&"file:/tmp/x.db".clone()));
+}
+
+fn test_default_policy_unlimited() {
+    let p = default_policy();
+    assert_eq(p.max_bytes, DEFAULT_MAX_BYTES);
+    assert(!p.immutable);
+    assert_eq(p.peak_bytes, 0 as Int64);
+}
+
+fn test_set_max_bytes_rejects_negative() {
+    let mut p = default_policy();
+    assert(!set_max_bytes(&mut p, -1 as Int64));
+    assert(set_max_bytes(&mut p, 1024 as Int64));
+    assert_eq(p.max_bytes, 1024 as Int64);
+}
+
+fn test_mark_immutable() {
+    let mut p = default_policy();
+    mark_immutable(&mut p);
+    assert(p.immutable);
+}
+
+fn test_fits_tracks_peak() {
+    let mut p = default_policy();
+    let _ = set_max_bytes(&mut p, 1000 as Int64);
+    assert(fits(&mut p, 500 as Int64));
+    assert(fits(&mut p, 800 as Int64));
+    assert(!fits(&mut p, 1200 as Int64));
+    assert_eq(p.peak_bytes, 800 as Int64);
+}
+
+fn test_fits_rejects_negative() {
+    let mut p = default_policy();
+    assert(!fits(&mut p, -1 as Int64));
+}
+
+fn main() {
+    test_classic_memory_private();
+    test_named_shared();
+    test_is_memdb_uri_classic();
+    test_is_memdb_uri_file_form();
+    test_not_memdb_uri_rejects_regular_paths();
+    test_default_policy_unlimited();
+    test_set_max_bytes_rejects_negative();
+    test_mark_immutable();
+    test_fits_tracks_peak();
+    test_fits_rejects_negative();
+}

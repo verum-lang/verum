@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bitvec_test_api, testctrl, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bitvec_test_api.bitvec.{
+    BitVec,
+    new_bitvec, get, set, clear, reset,
+};
+mount core.database.sqlite.native.bitvec_test_api.harness.{
+    TestOp, ToSet, ToClear,
+    TestResult,
+    new_result, apply_op, finalize,
+};
+mount base.{Bool};
+
+fn test_new_bitvec_rounds_capacity_to_byte() {
+    let v = new_bitvec(17);
+    assert_eq(v.capacity_bits, 24);
+    assert_eq(v.population, 0);
+}
+
+fn test_set_and_get_round_trip() {
+    let mut v = new_bitvec(64);
+    assert(set(&mut v, 5));
+    assert(get(&v, 5));
+    assert(!get(&v, 4));
+    assert_eq(v.population, 1);
+}
+
+fn test_set_returns_false_on_duplicate() {
+    let mut v = new_bitvec(32);
+    let _ = set(&mut v, 0);
+    assert(!set(&mut v, 0));
+    assert_eq(v.population, 1);
+}
+
+fn test_clear_returns_false_on_miss() {
+    let mut v = new_bitvec(32);
+    assert(!clear(&mut v, 0));
+}
+
+fn test_clear_drops_population() {
+    let mut v = new_bitvec(32);
+    let _ = set(&mut v, 1);
+    let _ = set(&mut v, 2);
+    assert(clear(&mut v, 1));
+    assert_eq(v.population, 1);
+    assert(!get(&v, 1));
+    assert(get(&v, 2));
+}
+
+fn test_reset_clears_everything() {
+    let mut v = new_bitvec(32);
+    let _ = set(&mut v, 1);
+    let _ = set(&mut v, 5);
+    let _ = set(&mut v, 10);
+    reset(&mut v);
+    assert_eq(v.population, 0);
+    assert(!get(&v, 5));
+}
+
+fn test_out_of_range_returns_false() {
+    let mut v = new_bitvec(8);
+    assert(!get(&v, 99));
+    assert(!set(&mut v, 99));
+    assert(!clear(&mut v, 99));
+}
+
+fn test_harness_counts_duplicates_and_misses() {
+    let mut v = new_bitvec(32);
+    let mut r = new_result();
+    apply_op(&mut v, &ToSet(1), &mut r);
+    apply_op(&mut v, &ToSet(1), &mut r);    // duplicate
+    apply_op(&mut v, &ToClear(2), &mut r);  // miss
+    finalize(&v, &mut r);
+    assert_eq(r.ops_applied, 3 as Int64);
+    assert_eq(r.set_duplicates, 1 as Int64);
+    assert_eq(r.clear_misses, 1 as Int64);
+    assert_eq(r.final_population, 1);
+}
+
+fn main() {
+    test_new_bitvec_rounds_capacity_to_byte();
+    test_set_and_get_round_trip();
+    test_set_returns_false_on_duplicate();
+    test_clear_returns_false_on_miss();
+    test_clear_drops_population();
+    test_reset_clears_everything();
+    test_out_of_range_returns_false();
+    test_harness_counts_duplicates_and_misses();
+}

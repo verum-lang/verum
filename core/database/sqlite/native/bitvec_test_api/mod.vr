@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/bitvec_test_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — SQLITE_TESTCTRL_BITVEC_TEST harness)
+// Spec: SQLite test-control BitVec harness.
+//
+// The BitVec is a sparse bitmap used by the pager to track dirty
+// pages.  The test harness exercises get/set/clear over a pseudo-
+// random schedule and compares against a reference implementation.
+//
+// Submodules:
+//   * `bitvec`   — simple bitmap data type (byte-slice backed)
+//   * `harness`  — test-schedule driver w/ assertion count
+// =============================================================================
+
+module core.database.sqlite.native.bitvec_test_api;
+
+public module bitvec;
+public module harness;

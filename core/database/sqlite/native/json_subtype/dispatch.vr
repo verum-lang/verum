@@ -1,0 +1,57 @@
+// =============================================================================
+// json_subtype/dispatch.vr — subtype propagation rules
+// =============================================================================
+// Spec: SQLite JSON1 extension.
+//
+// A user function declared with SQLITE_RESULT_SUBTYPE flag may emit a
+// subtype on its return value; without the flag, SQLite strips the
+// tag.  SQLITE_SUBTYPE on the *function* (eTextRep flag) marks that
+// the function READS its arguments' subtypes — JSON1 aggregation
+// functions like json_group_array set both flags.
+// =============================================================================
+
+module core.database.sqlite.native.json_subtype.dispatch;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.json_subtype.tag.{
+    JSON_SUBTYPE,
+};
+
+public type FunctionFlags is {
+    /// SQLITE_SUBTYPE — function inspects argument subtypes.
+    subtype_reader: Bool,
+    /// SQLITE_RESULT_SUBTYPE — function sets a subtype on the result.
+    subtype_producer: Bool,
+}
+
+public fn new_flags(subtype_reader: Bool, subtype_producer: Bool) -> FunctionFlags {
+    FunctionFlags {
+        subtype_reader: subtype_reader,
+        subtype_producer: subtype_producer,
+    }
+}
+
+/// Default flags for any JSON1 function that both reads and propagates
+/// the 'J' subtype.
+public fn json_function_flags() -> FunctionFlags {
+    new_flags(true, true)
+}
+
+/// True iff the engine should preserve the caller-set subtype on this
+/// function's output.
+public fn propagates_subtype(f: &FunctionFlags) -> Bool {
+    f.subtype_producer
+}
+
+/// Returns the subtype byte the engine will attach to the result; 0
+/// means "strip" (no subtype).  If `f` is a subtype producer, always
+/// return the raw requested subtype; otherwise force-strip.
+public fn effective_subtype(f: &FunctionFlags, requested: Int) -> Int {
+    if propagates_subtype(f) { requested } else { 0 }
+}
+
+/// True iff `subtype` is the JSON ('J') tag — 74 == 0x4A.
+public fn is_json_tag(subtype: Int) -> Bool {
+    subtype == JSON_SUBTYPE
+}

@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/csv_vtab_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — CSV virtual table module)
+// Spec: SQLite ext/misc/csv.c
+//
+//   CREATE VIRTUAL TABLE t USING csv(
+//       filename = '...',
+//       header   = true,
+//       schema   = 'CREATE TABLE t(a INT, b TEXT)',
+//       columns  = 3,
+//       data     = '...' -- inline alternative to filename
+//   );
+//
+// Submodules:
+//   * `options`   — CsvOptions (delimiter/quote/header/columns)
+//   * `schema`    — derived-column inference when schema not supplied
+// =============================================================================
+
+module core.database.sqlite.native.csv_vtab_api;
+
+public module options;
+public module schema;

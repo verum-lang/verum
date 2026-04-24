@@ -1,0 +1,49 @@
+// =============================================================================
+// memdb_vfs_api/policy.vr — max-size + immutable policy
+// =============================================================================
+// Spec: SQLite memdb VFS
+//
+// SQLITE_CONFIG_MEMDB_MAXSIZE caps the maximum bytes the memdb VFS
+// may hold.  Default is 0x7FFFFFFFFFFFFFFF (effectively unlimited).
+// =============================================================================
+
+module core.database.sqlite.native.memdb_vfs_api.policy;
+
+mount core.*;
+mount base.{Bool};
+
+public const DEFAULT_MAX_BYTES: Int64 = 9223372036854775807 as Int64;
+
+public type MemdbPolicy is {
+    max_bytes: Int64,
+    /// True if the image is mapped read-only (FreeOnClose/READONLY flag
+    /// from sqlite3_deserialize).
+    immutable: Bool,
+    /// Track peak allocation for audit.
+    peak_bytes: Int64,
+}
+
+public fn default_policy() -> MemdbPolicy {
+    MemdbPolicy {
+        max_bytes: DEFAULT_MAX_BYTES,
+        immutable: false,
+        peak_bytes: 0 as Int64,
+    }
+}
+
+public fn set_max_bytes(p: &mut MemdbPolicy, n: Int64) -> Bool {
+    if n < (0 as Int64) { return false; }
+    p.max_bytes = n;
+    true
+}
+
+public fn mark_immutable(p: &mut MemdbPolicy) {
+    p.immutable = true;
+}
+
+public fn fits(p: &mut MemdbPolicy, requested_bytes: Int64) -> Bool {
+    if requested_bytes < (0 as Int64) { return false; }
+    if requested_bytes > p.max_bytes { return false; }
+    if requested_bytes > p.peak_bytes { p.peak_bytes = requested_bytes; }
+    true
+}

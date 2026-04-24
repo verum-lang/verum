@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, csv_vtab_api, vtab, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.csv_vtab_api.options.{
+    DataSource, DsFilename, DsInline,
+    CsvOptions,
+    default_options, with_header, with_tab_delim, without_quoting, is_quoted,
+};
+mount core.database.sqlite.native.csv_vtab_api.schema.{
+    infer_schema, effective_column_count,
+};
+mount base.{Bool, Maybe};
+
+fn test_default_options() {
+    let o = default_options(DsFilename("/tmp/x.csv".clone()));
+    assert_eq(o.delim, 0x2C as u8);
+    assert_eq(o.quote_byte, 0x22 as u8);
+    assert(!o.header);
+    assert(is_quoted(&o));
+}
+
+fn test_with_header() {
+    let mut o = default_options(DsInline("a,b\n1,2".clone()));
+    with_header(&mut o);
+    assert(o.header);
+}
+
+fn test_with_tab_delim() {
+    let mut o = default_options(DsInline("a\tb".clone()));
+    with_tab_delim(&mut o);
+    assert_eq(o.delim, 0x09 as u8);
+}
+
+fn test_without_quoting_disables() {
+    let mut o = default_options(DsInline("raw".clone()));
+    without_quoting(&mut o);
+    assert(!is_quoted(&o));
+}
+
+fn test_infer_schema_defaults_to_text_columns() {
+    let o = default_options(DsInline("a,b,c".clone()));
+    let sql = infer_schema(&o, 3);
+    assert(sql == "CREATE TABLE x(c0 TEXT, c1 TEXT, c2 TEXT)".clone());
+}
+
+fn test_infer_schema_uses_explicit() {
+    let mut o = default_options(DsInline("".clone()));
+    o.schema = Maybe.Some("CREATE TABLE t(id INT)".clone());
+    let sql = infer_schema(&o, 0);
+    assert(sql == "CREATE TABLE t(id INT)".clone());
+}
+
+fn test_effective_column_count() {
+    let mut o = default_options(DsInline("".clone()));
+    assert_eq(effective_column_count(&o, 5), 5);
+    o.columns = Maybe.Some(7);
+    assert_eq(effective_column_count(&o, 5), 7);
+}
+
+fn main() {
+    test_default_options();
+    test_with_header();
+    test_with_tab_delim();
+    test_without_quoting_disables();
+    test_infer_schema_defaults_to_text_columns();
+    test_infer_schema_uses_explicit();
+    test_effective_column_count();
+}

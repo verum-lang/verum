@@ -1,0 +1,78 @@
+// =============================================================================
+// bitvec_test_api/bitvec.vr — sparse bitmap
+// =============================================================================
+// Spec: SQLite test-control BitVec harness.
+// =============================================================================
+
+module core.database.sqlite.native.bitvec_test_api.bitvec;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type BitVec is {
+    bits: List<u8>,
+    /// Total bit capacity (always a multiple of 8).
+    capacity_bits: Int,
+    population: Int,
+}
+
+public fn new_bitvec(capacity_bits: Int) -> BitVec {
+    let byte_count = (capacity_bits + 7) / 8;
+    let mut bytes: List<u8> = List.new();
+    let mut i: Int = 0;
+    while i < byte_count {
+        bytes.push(0 as u8);
+        i = i + 1;
+    }
+    BitVec {
+        bits: bytes,
+        capacity_bits: byte_count * 8,
+        population: 0,
+    }
+}
+
+public fn get(v: &BitVec, index: Int) -> Bool {
+    if index < 0 || index >= v.capacity_bits { return false; }
+    let byte_index = index / 8;
+    let bit_index = index - (byte_index * 8);
+    let b = v.bits[byte_index];
+    let mask: u8 = (1 << bit_index) as u8;
+    (b & mask) != (0 as u8)
+}
+
+public fn set(v: &mut BitVec, index: Int) -> Bool {
+    if index < 0 || index >= v.capacity_bits { return false; }
+    if get(v, index) { return false; }
+    let byte_index = index / 8;
+    let bit_index = index - (byte_index * 8);
+    let mask: u8 = (1 << bit_index) as u8;
+    let current = v.bits[byte_index];
+    let slot = v.bits.get_mut(byte_index);
+    *slot = current | mask;
+    v.population = v.population + 1;
+    true
+}
+
+public fn clear(v: &mut BitVec, index: Int) -> Bool {
+    if index < 0 || index >= v.capacity_bits { return false; }
+    if !get(v, index) { return false; }
+    let byte_index = index / 8;
+    let bit_index = index - (byte_index * 8);
+    let mask: u8 = (1 << bit_index) as u8;
+    let current = v.bits[byte_index];
+    let slot = v.bits.get_mut(byte_index);
+    *slot = current & (!mask);
+    v.population = v.population - 1;
+    true
+}
+
+public fn reset(v: &mut BitVec) {
+    let mut i: Int = 0;
+    while i < v.bits.len() {
+        let slot = v.bits.get_mut(i);
+        *slot = 0 as u8;
+        i = i + 1;
+    }
+    v.population = 0;
+}

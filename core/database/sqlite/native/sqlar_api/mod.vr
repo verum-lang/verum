@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/sqlar_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — SQLAR archive API)
+// Spec: SQLite ext/misc/sqlar.c + PRAGMA application_id = 0x53514C41 ("SQLA")
+//
+//   CREATE TABLE sqlar(
+//     name   TEXT PRIMARY KEY,  -- archive path
+//     mode   INT,               -- POSIX permissions
+//     mtime  INT,               -- Unix modification time
+//     sz     INT,               -- uncompressed size, -1 for dirs
+//     data   BLOB               -- zlib-compressed (or raw if sz matches)
+//   );
+//
+//   sqlar_compress(data)    — compress if ratio beneficial
+//   sqlar_uncompress(data, n) — inflate to expected size n
+//
+// Submodules:
+//   * `entry`    — SqlarEntry record (path/mode/mtime/sz/data_len)
+//   * `compress` — CompressionDecision: Compress / Store / TooSmall
+// =============================================================================
+
+module core.database.sqlite.native.sqlar_api;
+
+public module entry;
+public module compress;

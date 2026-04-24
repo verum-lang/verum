@@ -1,0 +1,62 @@
+// =============================================================================
+// returning_clause_api/spec.vr — ReturningSpec
+// =============================================================================
+// Spec: SQLite RETURNING (3.35+).
+// =============================================================================
+
+module core.database.sqlite.native.returning_clause_api.spec;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type ReturningExprKind is
+      RekStar                       // RETURNING *
+    | RekColumn(Text)               // RETURNING col
+    | RekRowid                      // RETURNING rowid
+    | RekExpression(Text);          // RETURNING a+b AS c (raw SQL snippet)
+
+public type ReturningSpec is {
+    exprs: List<ReturningExprKind>,
+    /// True iff any element is RekStar — causes column-count to depend
+    /// on the target table width.
+    has_star: Bool,
+}
+
+public fn empty_spec() -> ReturningSpec {
+    ReturningSpec { exprs: List.new(), has_star: false }
+}
+
+public fn push_star(s: &mut ReturningSpec) {
+    s.exprs.push(RekStar);
+    s.has_star = true;
+}
+
+public fn push_column(s: &mut ReturningSpec, name: Text) {
+    s.exprs.push(RekColumn(name));
+}
+
+public fn push_rowid(s: &mut ReturningSpec) {
+    s.exprs.push(RekRowid);
+}
+
+public fn push_expression(s: &mut ReturningSpec, sql: Text) {
+    s.exprs.push(RekExpression(sql));
+}
+
+/// Column count the engine will emit PER ROW, given the target
+/// table has `table_columns` columns.  RekStar expands to that many;
+/// other kinds contribute 1 each.
+public fn projected_columns(s: &ReturningSpec, table_columns: Int) -> Int {
+    let mut total: Int = 0;
+    let mut i: Int = 0;
+    while i < s.exprs.len() {
+        let e = s.exprs.get(i);
+        match e {
+            RekStar => total = total + table_columns,
+            _       => total = total + 1,
+        }
+        i = i + 1;
+    }
+    total
+}

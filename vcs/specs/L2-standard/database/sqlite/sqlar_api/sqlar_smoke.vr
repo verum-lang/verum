@@ -1,0 +1,77 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, sqlar_api, archive, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.sqlar_api.entry.{
+    SqlarEntry,
+    new_file, new_directory,
+    is_directory, is_compressed, compression_ratio_tenths,
+};
+mount core.database.sqlite.native.sqlar_api.compress.{
+    CompressionDecision, CdCompress, CdStore, CdTooSmall,
+    MIN_COMPRESS_BYTES,
+    decision_name, should_compress, decide,
+};
+mount base.{Bool};
+
+fn test_new_file_has_size() {
+    let e = new_file("README.md".clone(), 0o644, 1700000000 as Int64,
+                     1024 as Int64, 400 as Int64);
+    assert(!is_directory(&e));
+    assert(is_compressed(&e));
+    assert_eq(compression_ratio_tenths(&e), 390);
+}
+
+fn test_new_directory_marker() {
+    let d = new_directory("src/".clone(), 0o755, 0 as Int64);
+    assert(is_directory(&d));
+    assert(!is_compressed(&d));
+    assert_eq(compression_ratio_tenths(&d), 0);
+}
+
+fn test_raw_storage_not_compressed() {
+    let e = new_file("tiny.txt".clone(), 0o644, 1 as Int64,
+                     100 as Int64, 100 as Int64);
+    assert(!is_compressed(&e));
+}
+
+fn test_decide_too_small() {
+    let d = decide(64 as Int64, 40 as Int64);
+    match d { CdTooSmall => {}, _ => assert(false) }
+    assert(!should_compress(&d));
+}
+
+fn test_decide_store_when_no_win() {
+    let d = decide(1024 as Int64, 1024 as Int64);
+    match d { CdStore => {}, _ => assert(false) }
+}
+
+fn test_decide_compress_when_shrinks() {
+    let d = decide(2048 as Int64, 400 as Int64);
+    match d { CdCompress(n) => assert_eq(n, 400 as Int64), _ => assert(false) }
+    assert(should_compress(&d));
+}
+
+fn test_decision_names() {
+    assert(decision_name(&CdCompress(100 as Int64)) == "compress".clone());
+    assert(decision_name(&CdStore) == "store".clone());
+    assert(decision_name(&CdTooSmall) == "too-small".clone());
+}
+
+fn test_min_compress_bytes_constant() {
+    assert_eq(MIN_COMPRESS_BYTES, 128 as Int64);
+}
+
+fn main() {
+    test_new_file_has_size();
+    test_new_directory_marker();
+    test_raw_storage_not_compressed();
+    test_decide_too_small();
+    test_decide_store_when_no_win();
+    test_decide_compress_when_shrinks();
+    test_decision_names();
+    test_min_compress_bytes_constant();
+}

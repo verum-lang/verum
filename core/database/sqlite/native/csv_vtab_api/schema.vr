@@ -1,0 +1,68 @@
+// =============================================================================
+// csv_vtab_api/schema.vr — CSV schema inference
+// =============================================================================
+// Spec: SQLite ext/misc/csv.c
+//
+// When the caller doesn't supply `schema=...`, the vtab infers
+// "CREATE TABLE x(c0 TEXT, c1 TEXT, …)" from the first row's column
+// count (or from the explicit `columns=N` option).
+// =============================================================================
+
+module core.database.sqlite.native.csv_vtab_api.schema;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.csv_vtab_api.options.{
+    CsvOptions,
+};
+
+fn push_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn push_int(dst: &mut Text, mut n: Int) {
+    if n < 0 { dst.push_byte(0x2D as u8); n = 0 - n; }
+    if n == 0 { dst.push_byte(0x30 as u8); return; }
+    let mut digits: Int = 0;
+    let mut x: Int = n;
+    while x > 0 { digits = digits + 1; x = x / 10; }
+    let mut buf: Int = 1;
+    let mut d: Int = 1;
+    while d < digits { buf = buf * 10; d = d + 1; }
+    while buf > 0 {
+        let c = (n / buf) - ((n / (buf * 10)) * 10);
+        dst.push_byte((0x30 + c) as u8);
+        buf = buf / 10;
+    }
+}
+
+public fn infer_schema(opts: &CsvOptions, first_row_columns: Int) -> Text {
+    match &opts.schema {
+        Maybe.Some(s) => return s.clone(),
+        Maybe.None => {}
+    }
+    let n_cols = match &opts.columns {
+        Maybe.Some(n) => *n,
+        Maybe.None => first_row_columns,
+    };
+    let mut out = "CREATE TABLE x(".clone();
+    let mut i: Int = 0;
+    while i < n_cols {
+        if i > 0 { push_text(&mut out, &", ".clone()); }
+        push_text(&mut out, &"c".clone());
+        push_int(&mut out, i);
+        push_text(&mut out, &" TEXT".clone());
+        i = i + 1;
+    }
+    push_text(&mut out, &")".clone());
+    out
+}
+
+public fn effective_column_count(opts: &CsvOptions, first_row_columns: Int) -> Int {
+    match &opts.columns {
+        Maybe.Some(n) => *n,
+        Maybe.None => first_row_columns,
+    }
+}

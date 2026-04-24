@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, dbpage_vtab_api, vtab, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.dbpage_vtab_api.row.{
+    DbPageRow,
+    new_row, row_byte_count, is_first_page, is_null_page,
+};
+mount core.database.sqlite.native.dbpage_vtab_api.write_guard.{
+    WriteGuard, WriteVerdict,
+    WvAllow, WvBlockReadOnly, WvBlockPageOneProtected, WvBlockActiveTxn,
+    default_guard, verdict_name, verdict_allows, evaluate,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_row_byte_count() {
+    let mut data: List<u8> = List.new();
+    data.push(0x01 as u8);
+    data.push(0x02 as u8);
+    let r = new_row(7 as Int64, data, "main".clone());
+    assert_eq(row_byte_count(&r), 2);
+    assert(!is_null_page(&r));
+}
+
+fn test_is_first_page() {
+    let d1: List<u8> = List.new();
+    let r1 = new_row(1 as Int64, d1, "main".clone());
+    assert(is_first_page(&r1));
+    let d2: List<u8> = List.new();
+    let r2 = new_row(42 as Int64, d2, "main".clone());
+    assert(!is_first_page(&r2));
+}
+
+fn test_is_null_page() {
+    let empty: List<u8> = List.new();
+    let r = new_row(5 as Int64, empty, "main".clone());
+    assert(is_null_page(&r));
+}
+
+fn test_default_guard_blocks_readonly() {
+    let g = default_guard();
+    match evaluate(&g, 5 as Int64) { WvBlockReadOnly => {}, _ => assert(false) }
+}
+
+fn test_writable_schema_allows_non_page_one() {
+    let mut g = default_guard();
+    g.schema_writable = true;
+    match evaluate(&g, 5 as Int64) { WvAllow => {}, _ => assert(false) }
+}
+
+fn test_page_one_requires_writable_schema_pragma() {
+    let mut g = default_guard();
+    g.schema_writable = true;
+    match evaluate(&g, 1 as Int64) {
+        WvBlockPageOneProtected => {},
+        _ => assert(false),
+    }
+}
+
+fn test_page_one_with_pragma_allowed() {
+    let mut g = default_guard();
+    g.schema_writable = true;
+    g.writable_schema_pragma = true;
+    match evaluate(&g, 1 as Int64) { WvAllow => {}, _ => assert(false) }
+}
+
+fn test_active_txn_blocks() {
+    let mut g = default_guard();
+    g.schema_writable = true;
+    g.no_active_read_txn = false;
+    match evaluate(&g, 5 as Int64) {
+        WvBlockActiveTxn => {},
+        _ => assert(false),
+    }
+}
+
+fn test_verdict_names_and_allow() {
+    assert(verdict_name(&WvAllow) == "allow".clone());
+    assert(verdict_name(&WvBlockReadOnly) == "readonly-schema".clone());
+    assert(verdict_allows(&WvAllow));
+    assert(!verdict_allows(&WvBlockActiveTxn));
+}
+
+fn main() {
+    test_row_byte_count();
+    test_is_first_page();
+    test_is_null_page();
+    test_default_guard_blocks_readonly();
+    test_writable_schema_allows_non_page_one();
+    test_page_one_requires_writable_schema_pragma();
+    test_page_one_with_pragma_allowed();
+    test_active_txn_blocks();
+    test_verdict_names_and_allow();
+}

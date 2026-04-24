@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, malloc_fault_injection, testctrl, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.malloc_fault_injection.schedule.{
+    FaultSchedule,
+    FsDisabled, FsAfterNth, FsEveryNth, FsAlways,
+    schedule_name, is_active,
+};
+mount core.database.sqlite.native.malloc_fault_injection.engine.{
+    FaultEngine,
+    new_engine,
+};
+mount base.{Bool};
+
+fn test_schedule_names() {
+    assert(schedule_name(&FsDisabled) == "disabled".clone());
+    assert(schedule_name(&FsAlways) == "always".clone());
+    assert(schedule_name(&FsAfterNth(5 as Int64)) == "after-nth".clone());
+    assert(schedule_name(&FsEveryNth(3 as Int64)) == "every-nth".clone());
+}
+
+fn test_is_active() {
+    assert(!is_active(&FsDisabled));
+    assert(is_active(&FsAfterNth(0 as Int64)));
+    assert(is_active(&FsAlways));
+}
+
+fn test_disabled_engine_never_fails() {
+    let mut e = new_engine();
+    let mut i: Int = 0;
+    while i < 5 {
+        assert(!e.tick());
+        i = i + 1;
+    }
+    assert_eq(e.faults_issued, 0 as Int64);
+    assert_eq(e.mallocs_observed, 5 as Int64);
+}
+
+fn test_always_fails() {
+    let mut e = new_engine();
+    e.install(FsAlways);
+    assert(e.tick());
+    assert(e.tick());
+    assert_eq(e.faults_issued, 2 as Int64);
+}
+
+fn test_after_nth_succeeds_then_fails() {
+    let mut e = new_engine();
+    e.install(FsAfterNth(3 as Int64));
+    assert(!e.tick());
+    assert(!e.tick());
+    assert(!e.tick());
+    assert(e.tick());    // 4th → fail
+    assert(e.tick());    // 5th → fail
+    assert_eq(e.faults_issued, 2 as Int64);
+}
+
+fn test_every_nth_fires_on_multiples() {
+    let mut e = new_engine();
+    e.install(FsEveryNth(3 as Int64));
+    assert(!e.tick());    // 1
+    assert(!e.tick());    // 2
+    assert(e.tick());     // 3 → fail
+    assert(!e.tick());    // 4
+    assert(!e.tick());    // 5
+    assert(e.tick());     // 6 → fail
+    assert_eq(e.faults_issued, 2 as Int64);
+}
+
+fn test_clear_disables_schedule() {
+    let mut e = new_engine();
+    e.install(FsAlways);
+    let _ = e.tick();
+    e.clear();
+    assert(!e.tick());
+}
+
+fn main() {
+    test_schedule_names();
+    test_is_active();
+    test_disabled_engine_never_fails();
+    test_always_fails();
+    test_after_nth_succeeds_then_fails();
+    test_every_nth_fires_on_multiples();
+    test_clear_disables_schedule();
+}

@@ -1,0 +1,61 @@
+// =============================================================================
+// sqlar_api/entry.vr — SqlarEntry record
+// =============================================================================
+// Spec: SQLite ext/misc/sqlar.c
+// =============================================================================
+
+module core.database.sqlite.native.sqlar_api.entry;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type SqlarEntry is {
+    name: Text,
+    mode: Int,
+    mtime: Int64,
+    /// Uncompressed size in bytes; -1 marks a directory.
+    sz: Int64,
+    /// Byte-length of stored `data` blob.
+    data_len: Int64,
+}
+
+public fn new_file(
+    name: Text,
+    mode: Int,
+    mtime: Int64,
+    uncompressed_size: Int64,
+    data_len: Int64,
+) -> SqlarEntry {
+    SqlarEntry {
+        name: name,
+        mode: mode,
+        mtime: mtime,
+        sz: uncompressed_size,
+        data_len: data_len,
+    }
+}
+
+public fn new_directory(name: Text, mode: Int, mtime: Int64) -> SqlarEntry {
+    SqlarEntry {
+        name: name,
+        mode: mode,
+        mtime: mtime,
+        sz: -1 as Int64,
+        data_len: 0 as Int64,
+    }
+}
+
+public fn is_directory(e: &SqlarEntry) -> Bool {
+    e.sz == (-1 as Int64)
+}
+
+/// True iff the entry's data is stored compressed — happens when
+/// `data_len < sz` (SQLAR convention: equal sizes imply raw storage).
+public fn is_compressed(e: &SqlarEntry) -> Bool {
+    !is_directory(e) && e.data_len < e.sz
+}
+
+public fn compression_ratio_tenths(e: &SqlarEntry) -> Int {
+    if is_directory(e) || e.sz <= (0 as Int64) { return 0; }
+    ((e.data_len * (1000 as Int64)) / e.sz) as Int
+}

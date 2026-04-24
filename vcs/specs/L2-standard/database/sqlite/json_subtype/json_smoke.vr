@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, json_subtype, json1, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.json_subtype.tag.{
+    JSON_SUBTYPE,
+    JsonbKind,
+    JkNull, JkTrue, JkFalse, JkInt, JkInt5,
+    JkFloat, JkFloat5, JkText, JkTextJ, JkText5, JkTextRaw,
+    JkArray, JkObject, JkReserved,
+    kind_numeric, kind_name, is_reserved, from_nibble,
+};
+mount core.database.sqlite.native.json_subtype.dispatch.{
+    FunctionFlags,
+    new_flags, json_function_flags,
+    propagates_subtype, effective_subtype, is_json_tag,
+};
+mount base.{Bool};
+
+fn test_json_subtype_is_74() {
+    assert_eq(JSON_SUBTYPE, 0x4A);
+    assert_eq(JSON_SUBTYPE, 74);
+}
+
+fn test_jsonb_kind_numeric() {
+    assert_eq(kind_numeric(&JkNull), 0x0);
+    assert_eq(kind_numeric(&JkArray), 0xB);
+    assert_eq(kind_numeric(&JkObject), 0xC);
+    assert_eq(kind_numeric(&JkReserved(0xE)), 0xE);
+}
+
+fn test_jsonb_kind_names() {
+    assert(kind_name(&JkTextJ) == "textJ".clone());
+    assert(kind_name(&JkTextRaw) == "textRaw".clone());
+    assert(kind_name(&JkReserved(0xF)) == "reserved".clone());
+}
+
+fn test_is_reserved() {
+    assert(!is_reserved(&JkObject));
+    assert(is_reserved(&JkReserved(0xD)));
+}
+
+fn test_from_nibble_round_trip() {
+    match from_nibble(0x0) { JkNull    => {}, _ => assert(false) }
+    match from_nibble(0x7) { JkText    => {}, _ => assert(false) }
+    match from_nibble(0xB) { JkArray   => {}, _ => assert(false) }
+    match from_nibble(0xC) { JkObject  => {}, _ => assert(false) }
+    match from_nibble(0xD) { JkReserved(_) => {}, _ => assert(false) }
+}
+
+fn test_json_function_flags() {
+    let f = json_function_flags();
+    assert(f.subtype_reader);
+    assert(f.subtype_producer);
+}
+
+fn test_propagates_subtype() {
+    assert(propagates_subtype(&new_flags(false, true)));
+    assert(!propagates_subtype(&new_flags(true, false)));
+}
+
+fn test_effective_subtype_strips_when_not_producer() {
+    let f = new_flags(true, false);
+    assert_eq(effective_subtype(&f, JSON_SUBTYPE), 0);
+}
+
+fn test_effective_subtype_preserves_when_producer() {
+    let f = new_flags(true, true);
+    assert_eq(effective_subtype(&f, JSON_SUBTYPE), JSON_SUBTYPE);
+}
+
+fn test_is_json_tag() {
+    assert(is_json_tag(JSON_SUBTYPE));
+    assert(!is_json_tag(0));
+    assert(!is_json_tag(0x42));
+}
+
+fn main() {
+    test_json_subtype_is_74();
+    test_jsonb_kind_numeric();
+    test_jsonb_kind_names();
+    test_is_reserved();
+    test_from_nibble_round_trip();
+    test_json_function_flags();
+    test_propagates_subtype();
+    test_effective_subtype_strips_when_not_producer();
+    test_effective_subtype_preserves_when_producer();
+    test_is_json_tag();
+}

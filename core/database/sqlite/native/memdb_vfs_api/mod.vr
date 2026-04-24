@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/memdb_vfs_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — memdb VFS public surface)
+// Spec: SQLite memdb VFS
+//
+// The memdb VFS backs in-memory databases.  It supports:
+//
+//   * file:/memdb?cache=shared    — shared across connections
+//   * :memory:                     — private per-connection
+//   * sqlite3_serialize/_deserialize — memdb is the backing store for
+//                                      deserialized images
+//
+// SQLITE_CONFIG_MEMDB_MAXSIZE bounds the total bytes held by the VFS.
+//
+// Submodules:
+//   * `uri`       — memdb URI parsing (shared vs private)
+//   * `policy`    — max-size + immutable flags
+// =============================================================================
+
+module core.database.sqlite.native.memdb_vfs_api;
+
+public module uri;
+public module policy;

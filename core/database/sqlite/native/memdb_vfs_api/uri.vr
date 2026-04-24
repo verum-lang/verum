@@ -1,0 +1,66 @@
+// =============================================================================
+// memdb_vfs_api/uri.vr — memdb URI parsing
+// =============================================================================
+// Spec: SQLite memdb VFS
+// =============================================================================
+
+module core.database.sqlite.native.memdb_vfs_api.uri;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+
+public type CacheMode is
+      CmPrivate         // default — each open creates a fresh memdb
+    | CmShared;         // cache=shared — multiple opens see the same memdb
+
+public fn cache_mode_name(m: &CacheMode) -> Text {
+    match m {
+        CmPrivate => "private".clone(),
+        CmShared  => "shared".clone(),
+    }
+}
+
+public type MemdbOpenSpec is {
+    /// Name component after `/memdb?` or the literal ":memory:".
+    /// Empty for the classic :memory: form.
+    name: Text,
+    cache: CacheMode,
+}
+
+public fn classic_memory() -> MemdbOpenSpec {
+    MemdbOpenSpec { name: "".clone(), cache: CmPrivate }
+}
+
+public fn named_shared(name: Text) -> MemdbOpenSpec {
+    MemdbOpenSpec { name: name, cache: CmShared }
+}
+
+public fn is_shared(s: &MemdbOpenSpec) -> Bool {
+    match &s.cache {
+        CmShared => true,
+        _ => false,
+    }
+}
+
+/// A memdb URI matches `file:/memdb?cache=shared&…` or ":memory:".
+fn starts_with_ci(s: &Text, prefix: &Text) -> Bool {
+    let sb = s.as_bytes();
+    let pb = prefix.as_bytes();
+    if sb.len() < pb.len() { return false; }
+    let mut i: Int = 0;
+    while i < pb.len() {
+        let mut a = sb[i];
+        let mut b = pb[i];
+        if a >= (0x41 as u8) && a <= (0x5A as u8) { a = a + (0x20 as u8); }
+        if b >= (0x41 as u8) && b <= (0x5A as u8) { b = b + (0x20 as u8); }
+        if a != b { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn is_memdb_uri(s: &Text) -> Bool {
+    if s == &":memory:".clone() { return true; }
+    starts_with_ci(s, &"file:/memdb".clone())
+}

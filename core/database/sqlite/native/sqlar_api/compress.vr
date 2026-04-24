@@ -1,0 +1,44 @@
+// =============================================================================
+// sqlar_api/compress.vr — CompressionDecision
+// =============================================================================
+// Spec: SQLite ext/misc/sqlar.c
+//
+// sqlar_compress only compresses when the result is shorter than the
+// input; otherwise the entry is stored raw.  Entries below
+// MIN_COMPRESS_BYTES are stored raw regardless.
+// =============================================================================
+
+module core.database.sqlite.native.sqlar_api.compress;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const MIN_COMPRESS_BYTES: Int64 = 128 as Int64;
+
+public type CompressionDecision is
+      CdCompress(Int64)      // compressed byte count
+    | CdStore                // keep raw (compression didn't help OR too small)
+    | CdTooSmall;            // below MIN_COMPRESS_BYTES threshold
+
+public fn decision_name(d: &CompressionDecision) -> Text {
+    match d {
+        CdCompress(_) => "compress".clone(),
+        CdStore       => "store".clone(),
+        CdTooSmall    => "too-small".clone(),
+    }
+}
+
+public fn should_compress(d: &CompressionDecision) -> Bool {
+    match d {
+        CdCompress(_) => true,
+        _ => false,
+    }
+}
+
+/// Decide whether the compressed size `compressed_bytes` is worth
+/// keeping over the uncompressed `raw_bytes`.
+public fn decide(raw_bytes: Int64, compressed_bytes: Int64) -> CompressionDecision {
+    if raw_bytes < MIN_COMPRESS_BYTES { return CdTooSmall; }
+    if compressed_bytes >= raw_bytes { return CdStore; }
+    CdCompress(compressed_bytes)
+}

@@ -1,0 +1,64 @@
+// =============================================================================
+// dbpage_vtab_api/write_guard.vr — write permission guard
+// =============================================================================
+// Spec: SQLite 3.31+ sqlite_dbpage.
+//
+// Writes through sqlite_dbpage require:
+//   * the target schema is attached READWRITE,
+//   * PRAGMA writable_schema = ON (for page 1),
+//   * no active read txn on the target schema.
+// =============================================================================
+
+module core.database.sqlite.native.dbpage_vtab_api.write_guard;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type WriteGuard is {
+    /// Target schema is writable at the VFS level.
+    schema_writable: Bool,
+    /// PRAGMA writable_schema is ON (needed for page 1 writes).
+    writable_schema_pragma: Bool,
+    /// No active read txn that would see an inconsistent page mix.
+    no_active_read_txn: Bool,
+}
+
+public fn default_guard() -> WriteGuard {
+    WriteGuard {
+        schema_writable: false,
+        writable_schema_pragma: false,
+        no_active_read_txn: true,
+    }
+}
+
+public type WriteVerdict is
+      WvAllow
+    | WvBlockReadOnly
+    | WvBlockPageOneProtected
+    | WvBlockActiveTxn;
+
+public fn verdict_name(v: &WriteVerdict) -> Text {
+    match v {
+        WvAllow                  => "allow".clone(),
+        WvBlockReadOnly          => "readonly-schema".clone(),
+        WvBlockPageOneProtected  => "page1-protected".clone(),
+        WvBlockActiveTxn         => "active-txn".clone(),
+    }
+}
+
+public fn verdict_allows(v: &WriteVerdict) -> Bool {
+    match v {
+        WvAllow => true,
+        _ => false,
+    }
+}
+
+/// Decide whether a write to page `pgno` is allowed.
+public fn evaluate(g: &WriteGuard, pgno: Int64) -> WriteVerdict {
+    if !g.schema_writable { return WvBlockReadOnly; }
+    if pgno == (1 as Int64) && !g.writable_schema_pragma {
+        return WvBlockPageOneProtected;
+    }
+    if !g.no_active_read_txn { return WvBlockActiveTxn; }
+    WvAllow
+}

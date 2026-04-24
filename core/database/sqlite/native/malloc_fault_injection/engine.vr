@@ -1,0 +1,59 @@
+// =============================================================================
+// malloc_fault_injection/engine.vr — per-malloc verdict
+// =============================================================================
+// Spec: SQLite test-control fault hook.
+// =============================================================================
+
+module core.database.sqlite.native.malloc_fault_injection.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.malloc_fault_injection.schedule.{
+    FaultSchedule, FsDisabled, FsAfterNth, FsEveryNth, FsAlways,
+};
+
+public type FaultEngine is {
+    schedule: FaultSchedule,
+    /// Monotone malloc call count.
+    mallocs_observed: Int64,
+    faults_issued: Int64,
+}
+
+public fn new_engine() -> FaultEngine {
+    FaultEngine {
+        schedule: FsDisabled,
+        mallocs_observed: 0 as Int64,
+        faults_issued: 0 as Int64,
+    }
+}
+
+implement FaultEngine {
+    pub fn install(&mut self, s: FaultSchedule) {
+        self.schedule = s;
+        self.mallocs_observed = 0 as Int64;
+        self.faults_issued = 0 as Int64;
+    }
+
+    pub fn clear(&mut self) {
+        self.schedule = FsDisabled;
+    }
+
+    /// Returns true iff the next malloc should FAIL (simulating ENOMEM).
+    pub fn tick(&mut self) -> Bool {
+        self.mallocs_observed = self.mallocs_observed + (1 as Int64);
+        let fail = match &self.schedule {
+            FsDisabled    => false,
+            FsAlways      => true,
+            FsAfterNth(n) => self.mallocs_observed > *n,
+            FsEveryNth(n) => {
+                if *n <= (0 as Int64) { false }
+                else {
+                    let rem = self.mallocs_observed - ((self.mallocs_observed / *n) * *n);
+                    rem == (0 as Int64)
+                }
+            }
+        };
+        if fail { self.faults_issued = self.faults_issued + (1 as Int64); }
+        fail
+    }
+}

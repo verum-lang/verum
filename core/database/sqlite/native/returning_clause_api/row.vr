@@ -1,0 +1,41 @@
+// =============================================================================
+// returning_clause_api/row.vr — per-row evaluation result
+// =============================================================================
+// Spec: SQLite RETURNING (3.35+).
+// =============================================================================
+
+module core.database.sqlite.native.returning_clause_api.row;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type ReturningCell is {
+    column_name: Text,
+    /// Opaque cell id the engine attaches in the sqlite3_value
+    /// registry; 0 for NULL.
+    value_handle: Int64,
+}
+
+public fn new_cell(name: Text, handle: Int64) -> ReturningCell {
+    ReturningCell { column_name: name, value_handle: handle }
+}
+
+public type ReturningRow is {
+    cells: List<ReturningCell>,
+}
+
+public fn new_row() -> ReturningRow {
+    ReturningRow { cells: List.new() }
+}
+
+public fn push_cell(r: &mut ReturningRow, cell: ReturningCell) {
+    r.cells.push(cell);
+}
+
+public fn row_byte_count(r: &ReturningRow) -> Int { r.cells.len() }
+
+public fn column_name(r: &ReturningRow, index: Int) -> Text {
+    if index < 0 || index >= r.cells.len() { return "".clone(); }
+    r.cells.get(index).column_name.clone()
+}

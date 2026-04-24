@@ -1,0 +1,45 @@
+// =============================================================================
+// returning_clause_api/engine.vr — rows-returned counter + state
+// =============================================================================
+// Spec: SQLite RETURNING (3.35+).
+// =============================================================================
+
+module core.database.sqlite.native.returning_clause_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.returning_clause_api.spec.{
+    ReturningSpec, projected_columns,
+};
+mount core.database.sqlite.native.returning_clause_api.row.{
+    ReturningRow,
+};
+
+public type ReturningEngine is {
+    spec: ReturningSpec,
+    table_columns: Int,
+    rows_yielded: Int64,
+    column_count: Int,
+}
+
+public fn new_engine(spec: ReturningSpec, table_columns: Int) -> ReturningEngine {
+    let cc = projected_columns(&spec, table_columns);
+    ReturningEngine {
+        spec: spec,
+        table_columns: table_columns,
+        rows_yielded: 0 as Int64,
+        column_count: cc,
+    }
+}
+
+implement ReturningEngine {
+    /// Record one emitted row.  Returns false if the supplied row's
+    /// column count doesn't match the expected projection.
+    pub fn emit(&mut self, row: &ReturningRow) -> Bool {
+        if row.cells.len() != self.column_count { return false; }
+        self.rows_yielded = self.rows_yielded + (1 as Int64);
+        true
+    }
+
+    pub fn is_star_expansion(&self) -> Bool { self.spec.has_star }
+}

@@ -396,3 +396,19 @@ public module os_init_api;
 public module release_memory_global;
 // - bind_clear_api: sqlite3_clear_bindings — NULL all bound params (complements finalize/)
 public module bind_clear_api;
+// - sqlar_api: SQLAR archive (ext/misc/sqlar.c) — entry + compression decision
+public module sqlar_api;
+// - csv_vtab_api: CSV virtual table (ext/misc/csv.c) — options + schema inference
+public module csv_vtab_api;
+// - json_subtype: JSON1 'J' (0x4A) subtype + JSONB first-nibble kind tag
+public module json_subtype;
+// - memdb_vfs_api: memdb VFS public surface — URI parse + max-size policy
+public module memdb_vfs_api;
+// - malloc_fault_injection: SQLITE_TESTCTRL_FAULT_INSTALL — 4 schedule flavors
+public module malloc_fault_injection;
+// - bitvec_test_api: SQLITE_TESTCTRL_BITVEC_TEST — sparse bitmap get/set/clear harness
+public module bitvec_test_api;
+// - returning_clause_api: RETURNING spec + row + engine (3.35+)
+public module returning_clause_api;
+// - dbpage_vtab_api: sqlite_dbpage vtab (3.31+) — DbPageRow + WriteGuard
+public module dbpage_vtab_api;

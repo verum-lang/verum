@@ -1,0 +1,32 @@
+// =============================================================================
+// malloc_fault_injection/schedule.vr — FaultSchedule sum
+// =============================================================================
+// Spec: SQLite test-control fault hook.
+// =============================================================================
+
+module core.database.sqlite.native.malloc_fault_injection.schedule;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type FaultSchedule is
+      FsDisabled
+    | FsAfterNth(Int64)     // succeed for the first N mallocs, then permanently fail
+    | FsEveryNth(Int64)     // fail on every Nth malloc (1..N-1 pass, N fails, cycle)
+    | FsAlways;
+
+public fn schedule_name(s: &FaultSchedule) -> Text {
+    match s {
+        FsDisabled    => "disabled".clone(),
+        FsAfterNth(_) => "after-nth".clone(),
+        FsEveryNth(_) => "every-nth".clone(),
+        FsAlways      => "always".clone(),
+    }
+}
+
+public fn is_active(s: &FaultSchedule) -> Bool {
+    match s {
+        FsDisabled => false,
+        _ => true,
+    }
+}

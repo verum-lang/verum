@@ -1,0 +1,47 @@
+// =============================================================================
+// csv_vtab_api/options.vr — CsvOptions
+// =============================================================================
+// Spec: SQLite ext/misc/csv.c
+// =============================================================================
+
+module core.database.sqlite.native.csv_vtab_api.options;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+
+public type DataSource is
+      DsFilename(Text)
+    | DsInline(Text);
+
+public type CsvOptions is {
+    source: DataSource,
+    /// Column delimiter byte (default 0x2C = ',').
+    delim: u8,
+    /// Quote byte (default 0x22 = '"'); 0 disables quoting.
+    quote_byte: u8,
+    /// True iff the first row is a header.
+    header: Bool,
+    /// Explicit column count; None means "infer from first row".
+    columns: Maybe<Int>,
+    /// Explicit schema SQL; None means "auto-generate with text columns".
+    schema: Maybe<Text>,
+}
+
+public fn default_options(source: DataSource) -> CsvOptions {
+    CsvOptions {
+        source: source,
+        delim: 0x2C as u8,
+        quote_byte: 0x22 as u8,
+        header: false,
+        columns: Maybe.None,
+        schema: Maybe.None,
+    }
+}
+
+public fn with_header(o: &mut CsvOptions) { o.header = true; }
+
+public fn with_tab_delim(o: &mut CsvOptions) { o.delim = 0x09 as u8; }
+
+public fn without_quoting(o: &mut CsvOptions) { o.quote_byte = 0 as u8; }
+
+public fn is_quoted(o: &CsvOptions) -> Bool { o.quote_byte != (0 as u8) }

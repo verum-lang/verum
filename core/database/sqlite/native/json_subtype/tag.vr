@@ -1,0 +1,96 @@
+// =============================================================================
+// json_subtype/tag.vr — subtype constants
+// =============================================================================
+// Spec: SQLite JSON1 extension
+// =============================================================================
+
+module core.database.sqlite.native.json_subtype.tag;
+
+mount core.*;
+mount base.{Bool, Text};
+
+/// 'J' — the subtype byte JSON1 functions set on TEXT results.
+public const JSON_SUBTYPE: Int = 0x4A;
+
+/// First-nibble discriminants for JSONB blob format (per SQLite JSONB
+/// spec): 0x0 null, 0x1 true, 0x2 false, 0x3 int, 0x4 int5, 0x5 float,
+/// 0x6 float5, 0x7 text, 0x8 textJ, 0x9 text5, 0xA textRaw, 0xB array,
+/// 0xC object, 0xD-0xF reserved.
+public type JsonbKind is
+      JkNull
+    | JkTrue
+    | JkFalse
+    | JkInt
+    | JkInt5
+    | JkFloat
+    | JkFloat5
+    | JkText
+    | JkTextJ
+    | JkText5
+    | JkTextRaw
+    | JkArray
+    | JkObject
+    | JkReserved(Int);
+
+public fn kind_numeric(k: &JsonbKind) -> Int {
+    match k {
+        JkNull      => 0x0,
+        JkTrue      => 0x1,
+        JkFalse     => 0x2,
+        JkInt       => 0x3,
+        JkInt5      => 0x4,
+        JkFloat     => 0x5,
+        JkFloat5    => 0x6,
+        JkText      => 0x7,
+        JkTextJ     => 0x8,
+        JkText5     => 0x9,
+        JkTextRaw   => 0xA,
+        JkArray     => 0xB,
+        JkObject    => 0xC,
+        JkReserved(n) => *n,
+    }
+}
+
+public fn kind_name(k: &JsonbKind) -> Text {
+    match k {
+        JkNull      => "null".clone(),
+        JkTrue      => "true".clone(),
+        JkFalse     => "false".clone(),
+        JkInt       => "int".clone(),
+        JkInt5      => "int5".clone(),
+        JkFloat     => "float".clone(),
+        JkFloat5    => "float5".clone(),
+        JkText      => "text".clone(),
+        JkTextJ     => "textJ".clone(),
+        JkText5     => "text5".clone(),
+        JkTextRaw   => "textRaw".clone(),
+        JkArray     => "array".clone(),
+        JkObject    => "object".clone(),
+        JkReserved(_) => "reserved".clone(),
+    }
+}
+
+public fn is_reserved(k: &JsonbKind) -> Bool {
+    match k {
+        JkReserved(_) => true,
+        _ => false,
+    }
+}
+
+public fn from_nibble(n: Int) -> JsonbKind {
+    let low = n & 0xF;
+    if low == 0x0 { return JkNull; }
+    if low == 0x1 { return JkTrue; }
+    if low == 0x2 { return JkFalse; }
+    if low == 0x3 { return JkInt; }
+    if low == 0x4 { return JkInt5; }
+    if low == 0x5 { return JkFloat; }
+    if low == 0x6 { return JkFloat5; }
+    if low == 0x7 { return JkText; }
+    if low == 0x8 { return JkTextJ; }
+    if low == 0x9 { return JkText5; }
+    if low == 0xA { return JkTextRaw; }
+    if low == 0xB { return JkArray; }
+    if low == 0xC { return JkObject; }
+    JkReserved(low)
+}

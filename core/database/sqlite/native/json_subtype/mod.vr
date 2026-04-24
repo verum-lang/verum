@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/json_subtype/mod.vr
+// =============================================================================
+// Layer: 7 (façade — JSON1 / JSONB subtype handling)
+// Spec: SQLite JSON1 extension + SQLITE_RESULT_SUBTYPE flag
+//
+// JSON functions tag their result with `sqlite3_result_subtype('J')`
+// (= 0x4A = 74) so downstream functions know to treat the value as
+// structured JSON rather than a plain string.  JSONB additionally
+// stores a dedicated BLOB format tag byte at offset 0.
+//
+// Submodules:
+//   * `tag`       — subtype constant + JsonbHeader first-byte tag
+//   * `dispatch`  — whether a function should propagate the J tag
+// =============================================================================
+
+module core.database.sqlite.native.json_subtype;
+
+public module tag;
+public module dispatch;

@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/dbpage_vtab_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite_dbpage vtab)
+// Spec: SQLite 3.31+ — sqlite_dbpage table
+//
+//   CREATE VIRTUAL TABLE temp.dbpage USING dbpage;
+//
+// Columns: pgno INT PRIMARY KEY, data BLOB HIDDEN, schema TEXT HIDDEN.
+//
+// Reading a row returns the raw page; writing replaces it.  Requires
+// SQLITE_ENABLE_DBPAGE_VTAB compile option AND the caller must call
+// SQLITE_FCNTL_RESERVE_BYTES (or equivalent) for dirty-page tracking.
+//
+// Submodules:
+//   * `row`        — DbPageRow (pgno + data byte-slice + schema tag)
+//   * `write_guard` — whether the connection permits writes
+// =============================================================================
+
+module core.database.sqlite.native.dbpage_vtab_api;
+
+public module row;
+public module write_guard;
