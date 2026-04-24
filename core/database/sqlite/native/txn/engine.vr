@@ -1,0 +1,105 @@
+// =============================================================================
+// txn/engine.vr — per-schema transaction tracker
+// =============================================================================
+// Spec: SQLite C API
+//
+// The engine keeps a list of (schema_name, TxnState) pairs plus the
+// top-level autocommit flag.  BEGIN clears autocommit + inserts a
+// TxRead / TxWrite state; COMMIT / ROLLBACK restore autocommit.
+// =============================================================================
+
+module core.database.sqlite.native.txn.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.txn.state.{
+    TxnState, TxNone, TxRead, TxWrite, state_numeric, from_numeric,
+};
+mount core.database.sqlite.native.txn.autocommit.{
+    AutocommitFlag, on, off, is_on, as_int,
+};
+
+public type SchemaTxn is {
+    name: Text,
+    state: TxnState,
+}
+
+public type TxnEngine is {
+    autocommit: AutocommitFlag,
+    schemas: List<SchemaTxn>,
+}
+
+public fn new_engine() -> TxnEngine {
+    let mut out: List<SchemaTxn> = List.new();
+    out.push(SchemaTxn { name: "main".clone(), state: TxNone });
+    out.push(SchemaTxn { name: "temp".clone(), state: TxNone });
+    TxnEngine { autocommit: on(), schemas: out }
+}
+
+implement TxnEngine {
+    pub fn attach(&mut self, name: Text) {
+        self.schemas.push(SchemaTxn { name: name, state: TxNone });
+    }
+
+    fn find_index(&self, name: &Text) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < self.schemas.len() {
+            if self.schemas.get(i).name == *name {
+                return Maybe.Some(i);
+            }
+            i = i + 1;
+        }
+        Maybe.None
+    }
+
+    /// -1 iff the named schema is unknown.
+    pub fn sqlite3_txn_state(&self, name: &Text) -> Int {
+        match self.find_index(name) {
+            Maybe.Some(i) => state_numeric(&self.schemas.get(i).state),
+            Maybe.None => -1,
+        }
+    }
+
+    pub fn sqlite3_get_autocommit(&self) -> Int { as_int(&self.autocommit) }
+
+    pub fn begin_read(&mut self, name: Text) -> Bool {
+        self.set_state_inner(&name, TxRead)
+    }
+
+    pub fn promote_to_write(&mut self, name: Text) -> Bool {
+        self.set_state_inner(&name, TxWrite)
+    }
+
+    pub fn commit(&mut self, name: Text) -> Bool {
+        self.set_state_inner(&name, TxNone)
+    }
+
+    pub fn rollback(&mut self, name: Text) -> Bool {
+        self.set_state_inner(&name, TxNone)
+    }
+
+    fn set_state_inner(&mut self, name: &Text, next: TxnState) -> Bool {
+        match self.find_index(name) {
+            Maybe.Some(i) => {
+                self.schemas.get_mut(i).state = next;
+                let autocommit_should_hold = self.all_none();
+                self.autocommit = if autocommit_should_hold { on() } else { off() };
+                true
+            }
+            Maybe.None => false,
+        }
+    }
+
+    fn all_none(&self) -> Bool {
+        let mut i: Int = 0;
+        while i < self.schemas.len() {
+            match &self.schemas.get(i).state {
+                TxNone => {}
+                _ => return false,
+            }
+            i = i + 1;
+        }
+        true
+    }
+}

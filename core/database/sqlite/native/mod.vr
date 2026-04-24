@@ -220,3 +220,19 @@ public module file_control;
 public module memory_stats;
 // - threadsafe: sqlite3_threadsafe — compile-time floor + runtime effective mode
 public module threadsafe;
+// - db_handle: sqlite3_db_handle / _db_filename / _db_readonly / _db_name / _db_mutex
+public module db_handle;
+// - txn: sqlite3_txn_state + sqlite3_get_autocommit — per-schema transaction tracker
+public module txn;
+// - busy_timeout: sqlite3_busy_handler / _busy_timeout — handler + back-off table
+public module busy_timeout;
+// - snapshot_api: sqlite3_snapshot_* — handle/op/result layer over concurrency/snapshot
+public module snapshot_api;
+// - load_extension: sqlite3_enable_load_extension / _load_extension / _auto_extension
+public module load_extension;
+// - create_function: sqlite3_create_function_v2 / _create_window_function — spec+kind+outcome
+public module create_function;
+// - create_collation: sqlite3_create_collation_v2 / _collation_needed — spec+needed+outcome
+public module create_collation;
+// - vtab_helpers: sqlite3_overload_function + _vtab_distinct / _nochange / _on_conflict / _in_iter
+public module vtab_helpers;

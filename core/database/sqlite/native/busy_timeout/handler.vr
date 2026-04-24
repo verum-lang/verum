@@ -1,0 +1,44 @@
+// =============================================================================
+// busy_timeout/handler.vr — BusyHandler descriptor
+// =============================================================================
+// Spec: SQLite C API
+//
+// A BusyHandler is triple (name, attempt, decision).  The catalogue
+// keeps it callback-free; the runtime maps it onto a closure.
+// =============================================================================
+
+module core.database.sqlite.native.busy_timeout.handler;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type BusyDecision is
+      BdRetry(Int64)     // sleep ns before next attempt
+    | BdGiveUp;
+
+public fn decision_should_retry(d: &BusyDecision) -> Bool {
+    match d {
+        BdRetry(_) => true,
+        _ => false,
+    }
+}
+
+public fn decision_sleep_ns(d: &BusyDecision) -> Int64 {
+    match d {
+        BdRetry(ns) => *ns,
+        _ => 0 as Int64,
+    }
+}
+
+public type BusyHandlerKind is
+      BhNone                // handler cleared / never installed
+    | BhCustom(Text)        // user supplied handler (name)
+    | BhTimeout(Int);       // built-in sqlite3_busy_timeout(ms)
+
+public fn kind_name(k: &BusyHandlerKind) -> Text {
+    match k {
+        BhNone       => "none".clone(),
+        BhCustom(n)  => n.clone(),
+        BhTimeout(_) => "builtin-timeout".clone(),
+    }
+}

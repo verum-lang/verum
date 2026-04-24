@@ -1,0 +1,136 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, busy_timeout, busy_handler, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.busy_timeout.handler.{
+    BusyDecision, BdRetry, BdGiveUp,
+    BusyHandlerKind, BhNone, BhCustom, BhTimeout,
+    decision_should_retry, decision_sleep_ns, kind_name,
+};
+mount core.database.sqlite.native.busy_timeout.timeout.{
+    TimeoutRequest, new_request, derive_handler, sleep_ns_for_attempt,
+};
+mount core.database.sqlite.native.busy_timeout.engine.{
+    BusyEngine, new_engine,
+};
+mount base.{Bool};
+
+fn always_give_up(_attempt: Int) -> BusyDecision { BdGiveUp }
+
+fn test_decision_should_retry() {
+    assert(decision_should_retry(&BdRetry(1000 as Int64)));
+    assert(!decision_should_retry(&BdGiveUp));
+    assert_eq(decision_sleep_ns(&BdRetry(1000 as Int64)), 1000 as Int64);
+}
+
+fn test_kind_name_for_builtin_timeout() {
+    assert(kind_name(&BhTimeout(100)) == "builtin-timeout".clone());
+    assert(kind_name(&BhNone) == "none".clone());
+}
+
+fn test_derive_handler_zero_ms_is_none() {
+    let r = new_request(0);
+    match derive_handler(&r) {
+        BhNone => {},
+        _ => assert(false),
+    }
+}
+
+fn test_derive_handler_positive_ms_is_timeout() {
+    let r = new_request(500);
+    match derive_handler(&r) {
+        BhTimeout(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_sleep_ns_grows_with_attempt() {
+    let r = new_request(1000);
+    let a0 = sleep_ns_for_attempt(&r, 0);
+    let a6 = sleep_ns_for_attempt(&r, 6);
+    let a20 = sleep_ns_for_attempt(&r, 20);
+    assert(a0 < a6);
+    assert(a6 < a20 || a6 == a20);
+}
+
+fn test_sleep_ns_zero_ms_is_zero() {
+    let r = new_request(0);
+    assert_eq(sleep_ns_for_attempt(&r, 5), 0 as Int64);
+}
+
+fn test_engine_default_is_none() {
+    let e = new_engine();
+    match &e.kind {
+        BhNone => {},
+        _ => assert(false),
+    }
+    assert_eq(e.attempts, 0);
+}
+
+fn test_engine_install_timeout() {
+    let mut e = new_engine();
+    e.sqlite3_busy_timeout(200);
+    match &e.kind {
+        BhTimeout(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_engine_decide_under_timeout_retries() {
+    let mut e = new_engine();
+    e.sqlite3_busy_timeout(500);
+    let d = e.decide(always_give_up);
+    assert(decision_should_retry(&d));
+    assert_eq(e.attempts, 1);
+}
+
+fn test_engine_decide_with_no_handler_gives_up() {
+    let mut e = new_engine();
+    let d = e.decide(always_give_up);
+    assert(!decision_should_retry(&d));
+}
+
+fn test_engine_custom_defers_to_callback() {
+    let mut e = new_engine();
+    e.install_custom("user".clone());
+    let d = e.decide(always_give_up);
+    assert(!decision_should_retry(&d));
+    assert_eq(e.attempts, 1);
+}
+
+fn test_reset_counter_zeroes_attempts() {
+    let mut e = new_engine();
+    e.sqlite3_busy_timeout(100);
+    let _ = e.decide(always_give_up);
+    e.reset_counter();
+    assert_eq(e.attempts, 0);
+}
+
+fn test_clear_erases_handler() {
+    let mut e = new_engine();
+    e.sqlite3_busy_timeout(100);
+    e.clear();
+    match &e.kind {
+        BhNone => {},
+        _ => assert(false),
+    }
+}
+
+fn main() {
+    test_decision_should_retry();
+    test_kind_name_for_builtin_timeout();
+    test_derive_handler_zero_ms_is_none();
+    test_derive_handler_positive_ms_is_timeout();
+    test_sleep_ns_grows_with_attempt();
+    test_sleep_ns_zero_ms_is_zero();
+    test_engine_default_is_none();
+    test_engine_install_timeout();
+    test_engine_decide_under_timeout_retries();
+    test_engine_decide_with_no_handler_gives_up();
+    test_engine_custom_defers_to_callback();
+    test_reset_counter_zeroes_attempts();
+    test_clear_erases_handler();
+}

@@ -1,0 +1,52 @@
+// =============================================================================
+// load_extension/request.vr — LoadRequest + LoadOutcome
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.load_extension.request;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.load_extension.entry_point.{
+    EntryPoint,
+};
+
+public type LoadRequest is {
+    entry: EntryPoint,
+}
+
+public fn new_request(entry: EntryPoint) -> LoadRequest {
+    LoadRequest { entry: entry }
+}
+
+public type LoadOutcome is
+      LoOk
+    | LoDenied(Text)       // policy forbids extensions
+    | LoMissingFile(Text)  // file does not exist
+    | LoBadEntry(Text)     // entry point symbol missing
+    | LoInitFailed(Text);  // xEntry returned non-zero
+
+public fn outcome_name(o: &LoadOutcome) -> Text {
+    match o {
+        LoOk                => "ok".clone(),
+        LoDenied(_)         => "denied".clone(),
+        LoMissingFile(_)    => "missing-file".clone(),
+        LoBadEntry(_)       => "bad-entry".clone(),
+        LoInitFailed(_)     => "init-failed".clone(),
+    }
+}
+
+public fn outcome_is_ok(o: &LoadOutcome) -> Bool {
+    match o {
+        LoOk => true,
+        _ => false,
+    }
+}
+
+public fn outcome_reason(o: &LoadOutcome) -> Text {
+    match o {
+        LoOk => "".clone(),
+        LoDenied(m) | LoMissingFile(m) | LoBadEntry(m) | LoInitFailed(m) => m.clone(),
+    }
+}

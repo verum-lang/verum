@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/db_handle/mod.vr
+// =============================================================================
+// Layer: 7 (façade — per-connection introspection)
+// Spec: SQLite C API
+//
+//   sqlite3_db_handle(stmt)         → owning connection
+//   sqlite3_db_filename(db, name)   → path for the named database
+//   sqlite3_db_name(db, N)          → schema name at slot N
+//   sqlite3_db_readonly(db, name)   → 0 / 1 / -1 (name not recognised)
+//   sqlite3_db_mutex(db)            → connection's mutex
+//   sqlite3_db_cacheflush(db)       → flush dirty pages
+//
+// Submodules:
+//   * `handle`  — record describing the handle (id, filename, name, mode)
+//   * `engine`  — pure accessors matching the C-API names
+// =============================================================================
+
+module core.database.sqlite.native.db_handle;
+
+public module handle;
+public module engine;

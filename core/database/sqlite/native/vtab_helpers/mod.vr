@@ -1,0 +1,28 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_helpers/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_vtab_* helper surface)
+// Spec: SQLite C API — §16 virtual tables.
+//
+//   sqlite3_overload_function(db, name, n)  — shadow a built-in
+//   sqlite3_vtab_distinct(index_info)       — hint: DISTINCT?
+//   sqlite3_vtab_nochange(ctx)              — hint: UPDATE no-change?
+//   sqlite3_vtab_on_conflict(db)            — current ON CONFLICT action
+//   sqlite3_vtab_in_first / _in_next        — multi-value IN dispatch
+//   sqlite3_vtab_rhs_value(ctx, j, &rhs)    — constraint RHS fetch
+//
+// Submodules:
+//   * `overload`     — overload_function registration
+//   * `distinct`     — DistinctHint enum
+//   * `nochange`     — no-change signal
+//   * `on_conflict`  — ON CONFLICT action enum
+//   * `in_iter`      — IN-dispatch iterator surface
+// =============================================================================
+
+module core.database.sqlite.native.vtab_helpers;
+
+public module overload;
+public module distinct;
+public module nochange;
+public module on_conflict;
+public module in_iter;

@@ -1,0 +1,61 @@
+// =============================================================================
+// snapshot_api/result.vr — normalised outcome of sqlite3_snapshot_*
+// =============================================================================
+// Spec: SQLite C API
+//
+// All six surfaces return SQLITE_OK or a primary/extended code.  We
+// model the common shape here.  snapshot_cmp additionally returns a
+// three-way ordering via a dedicated Order value.
+// =============================================================================
+
+module core.database.sqlite.native.snapshot_api.result;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type SnapshotOrder is
+      OrBefore
+    | OrEqual
+    | OrAfter;
+
+public fn order_numeric(o: &SnapshotOrder) -> Int {
+    match o {
+        OrBefore => -1,
+        OrEqual  => 0,
+        OrAfter  => 1,
+    }
+}
+
+public fn order_from_int(n: Int) -> SnapshotOrder {
+    if n < 0 { return OrBefore; }
+    if n > 0 { return OrAfter; }
+    OrEqual
+}
+
+public type SnapshotResult is
+      SrOk
+    | SrFailed { code: ExtendedCode, reason: Text };
+
+public fn is_ok(r: &SnapshotResult) -> Bool {
+    match r {
+        SrOk => true,
+        _ => false,
+    }
+}
+
+public fn result_code(r: &SnapshotResult) -> Int {
+    match r {
+        SrOk => 0,
+        SrFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn result_reason(r: &SnapshotResult) -> Text {
+    match r {
+        SrOk => "".clone(),
+        SrFailed { reason, .. } => reason.clone(),
+    }
+}

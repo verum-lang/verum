@@ -1,0 +1,54 @@
+// =============================================================================
+// db_handle/engine.vr — C-API aligned accessors
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_db_handle(stmt)      → connection id (caller threads stmt→conn)
+//   sqlite3_db_filename(db, n)   → path (empty if n not found)
+//   sqlite3_db_name(db, N)       → name at slot N (empty if out of range)
+//   sqlite3_db_readonly(db, n)   → 0 / 1 / -1
+//   sqlite3_db_mutex(db)         → mutex id (0 if none)
+//   sqlite3_db_cacheflush(db)    → SQLITE_OK (count maintained)
+// =============================================================================
+
+module core.database.sqlite.native.db_handle.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.db_handle.handle.{
+    DbHandle, DbSchema,
+};
+
+public fn sqlite3_db_filename(h: &DbHandle, name: Text) -> Text {
+    match h.find_by_name(&name) {
+        Maybe.Some(i) => h.schemas.get(i).filename.clone(),
+        Maybe.None => "".clone(),
+    }
+}
+
+public fn sqlite3_db_name(h: &DbHandle, slot: Int) -> Text {
+    if slot < 0 || slot >= h.schemas.len() { return "".clone(); }
+    h.schemas.get(slot).name.clone()
+}
+
+/// -1 => name not recognised, 0 => read-write, 1 => readonly.
+public fn sqlite3_db_readonly(h: &DbHandle, name: Text) -> Int {
+    match h.find_by_name(&name) {
+        Maybe.Some(i) => {
+            if h.schemas.get(i).readonly { 1 } else { 0 }
+        }
+        Maybe.None => -1,
+    }
+}
+
+public fn sqlite3_db_mutex(h: &DbHandle) -> Int64 {
+    h.mutex_id
+}
+
+public fn sqlite3_db_cacheflush(h: &mut DbHandle) {
+    h.record_cacheflush();
+}
+
+public fn sqlite3_db_handle_id(h: &DbHandle) -> Int64 {
+    h.id
+}

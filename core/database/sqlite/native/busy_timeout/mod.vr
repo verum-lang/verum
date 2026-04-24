@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/busy_timeout/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_busy_handler / sqlite3_busy_timeout)
+// Spec: SQLite C API
+//
+// The public API is a thin layer on top of `concurrency/busy`
+// `BusyPolicy`.  Either of the two C calls replaces the previous
+// handler — sqlite3_busy_timeout is a specialised form that installs
+// a built-in "sleep ≤ timeout_ms then give up" policy.
+//
+// Submodules:
+//   * `handler`  — BusyHandler descriptor (name + max_attempts)
+//   * `timeout`  — sqlite3_busy_timeout request + resulting handler
+//   * `engine`   — current handler + attempt counter
+// =============================================================================
+
+module core.database.sqlite.native.busy_timeout;
+
+public module handler;
+public module timeout;
+public module engine;

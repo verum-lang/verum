@@ -1,0 +1,48 @@
+// =============================================================================
+// create_collation/outcome.vr — registration outcome
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.create_collation.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type CreateCollationOutcome is
+      CcOk
+    | CcMisuse(Text)
+    | CcFailed { code: ExtendedCode, reason: Text };
+
+public fn is_ok(o: &CreateCollationOutcome) -> Bool {
+    match o {
+        CcOk => true,
+        _ => false,
+    }
+}
+
+public fn outcome_numeric(o: &CreateCollationOutcome) -> Int {
+    match o {
+        CcOk => 0,
+        CcMisuse(_) => 21,  // SQLITE_MISUSE
+        CcFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+fn is_supported_encoding(enc: Int) -> Bool {
+    enc == 1 || enc == 2 || enc == 3 || enc == 4
+}
+
+/// Validate per-spec constraints: name must be non-empty + supported encoding.
+public fn validate(name: &Text, encoding: Int) -> CreateCollationOutcome {
+    if name.len() == 0 {
+        return CcMisuse("collation name must not be empty".clone());
+    }
+    if !is_supported_encoding(encoding) {
+        return CcMisuse("unsupported encoding".clone());
+    }
+    CcOk
+}

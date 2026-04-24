@@ -1,0 +1,56 @@
+// =============================================================================
+// vtab_helpers/distinct.vr — sqlite3_vtab_distinct
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_vtab_distinct(pIdx) returns one of four codes telling the
+// vtab how much work the core is doing on distinctness.
+//
+//   0  — caller wants no distinctness help from the vtab
+//   1  — "distinct rows" — grouping is not needed
+//   2  — "distinct grouping" — rows may arrive in any order
+//   3  — "distinct rows in order" — rows already sorted
+// =============================================================================
+
+module core.database.sqlite.native.vtab_helpers.distinct;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type DistinctHint is
+      DhNone          // 0
+    | DhRows          // 1
+    | DhGrouping      // 2
+    | DhOrdered;      // 3
+
+public fn hint_numeric(h: &DistinctHint) -> Int {
+    match h {
+        DhNone     => 0,
+        DhRows     => 1,
+        DhGrouping => 2,
+        DhOrdered  => 3,
+    }
+}
+
+public fn hint_name(h: &DistinctHint) -> Text {
+    match h {
+        DhNone     => "none".clone(),
+        DhRows     => "rows".clone(),
+        DhGrouping => "grouping".clone(),
+        DhOrdered  => "ordered".clone(),
+    }
+}
+
+public fn hint_permits_skip(h: &DistinctHint) -> Bool {
+    match h {
+        DhOrdered | DhGrouping => true,
+        _ => false,
+    }
+}
+
+public fn from_numeric(n: Int) -> DistinctHint {
+    if n == 3 { return DhOrdered; }
+    if n == 2 { return DhGrouping; }
+    if n == 1 { return DhRows; }
+    DhNone
+}

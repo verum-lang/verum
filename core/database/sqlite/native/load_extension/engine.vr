@@ -1,0 +1,84 @@
+// =============================================================================
+// load_extension/engine.vr — auto-extension registry + load driver
+// =============================================================================
+// Spec: SQLite C API
+//
+// Two cooperating pieces:
+//   1. A process-global list of auto-extensions invoked on every
+//      newly-opened connection (sqlite3_auto_extension).
+//   2. A per-connection policy gate + outcome tracker.
+// =============================================================================
+
+module core.database.sqlite.native.load_extension.engine;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+mount core.database.sqlite.native.load_extension.entry_point.{
+    EntryPoint,
+};
+mount core.database.sqlite.native.load_extension.request.{
+    LoadRequest, LoadOutcome, LoOk, LoDenied,
+};
+mount core.database.sqlite.native.load_extension.policy.{
+    LoadExtPolicy, allows_c_level,
+};
+
+public type AutoExtensionRegistry is {
+    entries: List<EntryPoint>,
+}
+
+public fn new_registry() -> AutoExtensionRegistry {
+    AutoExtensionRegistry { entries: List.new() }
+}
+
+implement AutoExtensionRegistry {
+    pub fn auto_extension(&mut self, entry: EntryPoint) {
+        self.entries.push(entry);
+    }
+
+    pub fn cancel_auto_extension(&mut self, file: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries.get(i).file == *file {
+                let _ = self.entries.remove(i);
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    pub fn reset_auto_extension(&mut self) {
+        self.entries = List.new();
+    }
+
+    pub fn len(&self) -> Int { self.entries.len() }
+}
+
+public type LoadEngine is {
+    policy: LoadExtPolicy,
+    loads_completed: Int64,
+    loads_denied: Int64,
+}
+
+public fn new_engine(policy: LoadExtPolicy) -> LoadEngine {
+    LoadEngine {
+        policy: policy,
+        loads_completed: 0 as Int64,
+        loads_denied: 0 as Int64,
+    }
+}
+
+implement LoadEngine {
+    /// Gate the request through the per-db policy; returns LoDenied if
+    /// the policy forbids it and bumps the counter.
+    pub fn gate(&mut self, _req: &LoadRequest) -> LoadOutcome {
+        if !allows_c_level(&self.policy) {
+            self.loads_denied = self.loads_denied + (1 as Int64);
+            return LoDenied("sqlite3_enable_load_extension is off".clone());
+        }
+        self.loads_completed = self.loads_completed + (1 as Int64);
+        LoOk
+    }
+}

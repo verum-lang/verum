@@ -1,0 +1,75 @@
+// =============================================================================
+// db_handle/handle.vr — DbHandle descriptor
+// =============================================================================
+// Spec: SQLite C API
+//
+// The catalogue-layer handle carries enough metadata to answer every
+// sqlite3_db_* accessor without touching real I/O.  The main / temp /
+// ATTACH-ed databases are a small list of (name, filename, readonly).
+// =============================================================================
+
+module core.database.sqlite.native.db_handle.handle;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+
+public type DbSchema is {
+    name: Text,           // "main", "temp", "aux1", …
+    filename: Text,       // "/tmp/x.db", ":memory:", ""
+    readonly: Bool,
+}
+
+public fn main_schema(filename: Text, readonly: Bool) -> DbSchema {
+    DbSchema { name: "main".clone(), filename: filename, readonly: readonly }
+}
+
+public fn temp_schema() -> DbSchema {
+    DbSchema { name: "temp".clone(), filename: "".clone(), readonly: false }
+}
+
+public type DbHandle is {
+    id: Int64,
+    schemas: List<DbSchema>,
+    /// Opaque mutex id (per sqlite3_db_mutex).  0 ⇒ no mutex (single-thread).
+    mutex_id: Int64,
+    /// Total cache-flush requests observed so far.
+    cacheflush_count: Int64,
+}
+
+public fn new_handle(id: Int64, main: DbSchema) -> DbHandle {
+    let mut schemas: List<DbSchema> = List.new();
+    schemas.push(main);
+    schemas.push(temp_schema());
+    DbHandle {
+        id: id,
+        schemas: schemas,
+        mutex_id: 0 as Int64,
+        cacheflush_count: 0 as Int64,
+    }
+}
+
+implement DbHandle {
+    pub fn attach(&mut self, schema: DbSchema) {
+        self.schemas.push(schema);
+    }
+
+    pub fn find_by_name(&self, name: &Text) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < self.schemas.len() {
+            if self.schemas.get(i).name == *name {
+                return Maybe.Some(i);
+            }
+            i = i + 1;
+        }
+        Maybe.None
+    }
+
+    pub fn record_cacheflush(&mut self) {
+        self.cacheflush_count = self.cacheflush_count + (1 as Int64);
+    }
+
+    pub fn set_mutex_id(&mut self, id: Int64) {
+        self.mutex_id = id;
+    }
+}

@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, create_function, user_fn, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.create_function.spec.{
+    FunctionSpec,
+    SQLITE_UTF8, SQLITE_UTF16LE, SQLITE_UTF16BE, SQLITE_UTF16, SQLITE_ANY,
+    new_spec, pure_spec,
+};
+mount core.database.sqlite.native.create_function.kind.{
+    FunctionKind,
+    FkScalar, FkAggregate, FkWindow,
+    kind_name, requires_step_and_final, requires_value_and_inverse, callback_count,
+};
+mount core.database.sqlite.native.create_function.outcome.{
+    CreateFnOutcome, CfOk, CfMisuse, CfFailed,
+    is_ok, outcome_numeric, validate_n_arg,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcNoMem,
+};
+mount base.{Bool};
+
+fn test_new_spec_defaults_utf8() {
+    let s = new_spec("upper".clone(), 1);
+    assert_eq(s.encoding, SQLITE_UTF8);
+    assert(!s.is_variadic());
+}
+
+fn test_pure_spec_is_pure() {
+    let s = pure_spec("length".clone(), 1);
+    assert(s.is_pure());
+}
+
+fn test_spec_variadic_detection() {
+    let s = new_spec("printf".clone(), -1);
+    assert(s.is_variadic());
+}
+
+fn test_kind_name_and_callbacks() {
+    assert(kind_name(&FkScalar) == "scalar".clone());
+    assert(kind_name(&FkAggregate) == "aggregate".clone());
+    assert(kind_name(&FkWindow) == "window".clone());
+    assert_eq(callback_count(&FkScalar), 1);
+    assert_eq(callback_count(&FkAggregate), 2);
+    assert_eq(callback_count(&FkWindow), 4);
+}
+
+fn test_requires_step_and_final_only_agg_and_window() {
+    assert(!requires_step_and_final(&FkScalar));
+    assert(requires_step_and_final(&FkAggregate));
+    assert(requires_step_and_final(&FkWindow));
+}
+
+fn test_requires_value_and_inverse_only_window() {
+    assert(!requires_value_and_inverse(&FkScalar));
+    assert(!requires_value_and_inverse(&FkAggregate));
+    assert(requires_value_and_inverse(&FkWindow));
+}
+
+fn test_outcome_is_ok() {
+    assert(is_ok(&CfOk));
+    assert(!is_ok(&CfMisuse("x".clone())));
+}
+
+fn test_outcome_numeric() {
+    assert_eq(outcome_numeric(&CfOk), 0);
+    assert_eq(outcome_numeric(&CfMisuse("x".clone())), 21);
+    let failed: CreateFnOutcome = CfFailed {
+        code: extended_of(PcNoMem, 0),
+        reason: "oom".clone(),
+    };
+    assert(outcome_numeric(&failed) != 0);
+}
+
+fn test_validate_n_arg_accepts_variadic_and_zero_to_127() {
+    match validate_n_arg(-1) { CfOk => {}, _ => assert(false) }
+    match validate_n_arg(0)  { CfOk => {}, _ => assert(false) }
+    match validate_n_arg(127) { CfOk => {}, _ => assert(false) }
+}
+
+fn test_validate_n_arg_rejects_below_neg1_and_above_127() {
+    match validate_n_arg(-2) { CfMisuse(_) => {}, _ => assert(false) }
+    match validate_n_arg(128) { CfMisuse(_) => {}, _ => assert(false) }
+}
+
+fn test_encoding_constants() {
+    assert_eq(SQLITE_UTF8, 1);
+    assert_eq(SQLITE_UTF16LE, 2);
+    assert_eq(SQLITE_UTF16BE, 3);
+    assert_eq(SQLITE_UTF16, 4);
+    assert_eq(SQLITE_ANY, 5);
+}
+
+fn main() {
+    test_new_spec_defaults_utf8();
+    test_pure_spec_is_pure();
+    test_spec_variadic_detection();
+    test_kind_name_and_callbacks();
+    test_requires_step_and_final_only_agg_and_window();
+    test_requires_value_and_inverse_only_window();
+    test_outcome_is_ok();
+    test_outcome_numeric();
+    test_validate_n_arg_accepts_variadic_and_zero_to_127();
+    test_validate_n_arg_rejects_below_neg1_and_above_127();
+    test_encoding_constants();
+}

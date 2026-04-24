@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, txn, autocommit, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.txn.state.{
+    TxnState, TxNone, TxRead, TxWrite,
+    SQLITE_TXN_NONE, SQLITE_TXN_READ, SQLITE_TXN_WRITE,
+    state_numeric, state_name, has_pending_writes, from_numeric,
+};
+mount core.database.sqlite.native.txn.autocommit.{
+    AutocommitFlag, on, off, is_on, as_int,
+};
+mount core.database.sqlite.native.txn.engine.{
+    TxnEngine, new_engine,
+};
+mount base.{Bool};
+
+fn test_state_numeric_matches_c_header() {
+    assert_eq(state_numeric(&TxNone),  SQLITE_TXN_NONE);
+    assert_eq(state_numeric(&TxRead),  SQLITE_TXN_READ);
+    assert_eq(state_numeric(&TxWrite), SQLITE_TXN_WRITE);
+}
+
+fn test_state_names() {
+    assert(state_name(&TxNone) == "none".clone());
+    assert(state_name(&TxRead) == "read".clone());
+    assert(state_name(&TxWrite) == "write".clone());
+}
+
+fn test_has_pending_writes_only_write() {
+    assert(!has_pending_writes(&TxNone));
+    assert(!has_pending_writes(&TxRead));
+    assert(has_pending_writes(&TxWrite));
+}
+
+fn test_from_numeric_round_trip() {
+    match from_numeric(0) { TxNone  => {}, _ => assert(false) }
+    match from_numeric(1) { TxRead  => {}, _ => assert(false) }
+    match from_numeric(2) { TxWrite => {}, _ => assert(false) }
+    match from_numeric(99) { TxNone => {}, _ => assert(false) }
+}
+
+fn test_autocommit_helpers() {
+    let a_on = on();
+    let a_off = off();
+    assert(is_on(&a_on));
+    assert(!is_on(&a_off));
+    assert_eq(as_int(&a_on), 1);
+    assert_eq(as_int(&a_off), 0);
+}
+
+fn test_engine_initial_state() {
+    let e = new_engine();
+    assert_eq(e.sqlite3_get_autocommit(), 1);
+    assert_eq(e.sqlite3_txn_state(&"main".clone()), SQLITE_TXN_NONE);
+    assert_eq(e.sqlite3_txn_state(&"temp".clone()), SQLITE_TXN_NONE);
+}
+
+fn test_engine_begin_read_clears_autocommit() {
+    let mut e = new_engine();
+    assert(e.begin_read("main".clone()));
+    assert_eq(e.sqlite3_get_autocommit(), 0);
+    assert_eq(e.sqlite3_txn_state(&"main".clone()), SQLITE_TXN_READ);
+}
+
+fn test_engine_promote_to_write() {
+    let mut e = new_engine();
+    let _ = e.begin_read("main".clone());
+    assert(e.promote_to_write("main".clone()));
+    assert_eq(e.sqlite3_txn_state(&"main".clone()), SQLITE_TXN_WRITE);
+}
+
+fn test_engine_commit_restores_autocommit() {
+    let mut e = new_engine();
+    let _ = e.begin_read("main".clone());
+    assert(e.commit("main".clone()));
+    assert_eq(e.sqlite3_get_autocommit(), 1);
+}
+
+fn test_engine_unknown_schema_returns_minus_one() {
+    let e = new_engine();
+    assert_eq(e.sqlite3_txn_state(&"missing".clone()), -1);
+}
+
+fn test_attach_extends_tracker() {
+    let mut e = new_engine();
+    e.attach("aux1".clone());
+    assert_eq(e.sqlite3_txn_state(&"aux1".clone()), SQLITE_TXN_NONE);
+}
+
+fn main() {
+    test_state_numeric_matches_c_header();
+    test_state_names();
+    test_has_pending_writes_only_write();
+    test_from_numeric_round_trip();
+    test_autocommit_helpers();
+    test_engine_initial_state();
+    test_engine_begin_read_clears_autocommit();
+    test_engine_promote_to_write();
+    test_engine_commit_restores_autocommit();
+    test_engine_unknown_schema_returns_minus_one();
+    test_attach_extends_tracker();
+}

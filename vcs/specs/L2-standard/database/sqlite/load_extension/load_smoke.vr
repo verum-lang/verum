@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, load_extension, loadable, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.load_extension.entry_point.{
+    EntryPoint, new_entry_point, with_symbol, default_symbol,
+};
+mount core.database.sqlite.native.load_extension.request.{
+    LoadRequest, LoadOutcome,
+    LoOk, LoDenied, LoMissingFile, LoBadEntry, LoInitFailed,
+    new_request, outcome_name, outcome_is_ok, outcome_reason,
+};
+mount core.database.sqlite.native.load_extension.policy.{
+    LoadExtPolicy, default_policy,
+    c_level_enable, sql_level_enable,
+    allows_c_level, allows_sql_level,
+};
+mount core.database.sqlite.native.load_extension.engine.{
+    AutoExtensionRegistry, LoadEngine,
+    new_registry, new_engine,
+};
+mount base.{Bool, Maybe};
+
+fn test_default_symbol_strips_lib_and_ext() {
+    let sym = default_symbol(&"/usr/lib/libfoo.so".clone());
+    assert(sym == "sqlite3_foo_init".clone());
+}
+
+fn test_default_symbol_without_lib_prefix() {
+    let sym = default_symbol(&"/path/bar.dylib".clone());
+    assert(sym == "sqlite3_bar_init".clone());
+}
+
+fn test_with_symbol_overrides() {
+    let mut ep = new_entry_point("libfoo.so".clone());
+    with_symbol(&mut ep, "custom_init".clone());
+    match &ep.symbol {
+        Maybe.Some(s) => assert(*s == "custom_init".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_outcome_is_ok_only_lo_ok() {
+    assert(outcome_is_ok(&LoOk));
+    assert(!outcome_is_ok(&LoDenied("x".clone())));
+    assert(!outcome_is_ok(&LoMissingFile("x".clone())));
+    assert(!outcome_is_ok(&LoBadEntry("x".clone())));
+    assert(!outcome_is_ok(&LoInitFailed("x".clone())));
+}
+
+fn test_outcome_names_distinct() {
+    assert(outcome_name(&LoOk) == "ok".clone());
+    assert(outcome_name(&LoDenied("x".clone())) == "denied".clone());
+    assert(outcome_name(&LoMissingFile("x".clone())) == "missing-file".clone());
+    assert(outcome_name(&LoBadEntry("x".clone())) == "bad-entry".clone());
+    assert(outcome_name(&LoInitFailed("x".clone())) == "init-failed".clone());
+}
+
+fn test_policy_default_all_off() {
+    let p = default_policy();
+    assert(!allows_c_level(&p));
+    assert(!allows_sql_level(&p));
+}
+
+fn test_policy_c_level_and_sql_level_independent() {
+    let mut p = default_policy();
+    c_level_enable(&mut p, true);
+    assert(allows_c_level(&p));
+    assert(!allows_sql_level(&p));
+    sql_level_enable(&mut p, true);
+    assert(allows_sql_level(&p));
+}
+
+fn test_auto_registry_add_cancel_reset() {
+    let mut r = new_registry();
+    r.auto_extension(new_entry_point("libfoo.so".clone()));
+    r.auto_extension(new_entry_point("libbar.so".clone()));
+    assert_eq(r.len(), 2);
+    assert(r.cancel_auto_extension(&"libfoo.so".clone()));
+    assert_eq(r.len(), 1);
+    r.reset_auto_extension();
+    assert_eq(r.len(), 0);
+}
+
+fn test_engine_blocks_when_c_level_off() {
+    let p = default_policy();
+    let mut e = new_engine(p);
+    let req = new_request(new_entry_point("libx.so".clone()));
+    let o = e.gate(&req);
+    match &o {
+        LoDenied(_) => {},
+        _ => assert(false),
+    }
+    assert_eq(e.loads_denied, 1 as Int64);
+    assert_eq(e.loads_completed, 0 as Int64);
+}
+
+fn test_engine_allows_when_c_level_on() {
+    let mut p = default_policy();
+    c_level_enable(&mut p, true);
+    let mut e = new_engine(p);
+    let req = new_request(new_entry_point("libx.so".clone()));
+    let o = e.gate(&req);
+    assert(outcome_is_ok(&o));
+    assert_eq(e.loads_completed, 1 as Int64);
+}
+
+fn main() {
+    test_default_symbol_strips_lib_and_ext();
+    test_default_symbol_without_lib_prefix();
+    test_with_symbol_overrides();
+    test_outcome_is_ok_only_lo_ok();
+    test_outcome_names_distinct();
+    test_policy_default_all_off();
+    test_policy_c_level_and_sql_level_independent();
+    test_auto_registry_add_cancel_reset();
+    test_engine_blocks_when_c_level_off();
+    test_engine_allows_when_c_level_on();
+}

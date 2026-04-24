@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, create_collation, collation_needed, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.create_collation.spec.{
+    CollationSpec,
+    SQLITE_UTF8, SQLITE_UTF16LE, SQLITE_UTF16BE, SQLITE_UTF16,
+    new_spec, with_encoding, mark_lazy, is_utf8,
+};
+mount core.database.sqlite.native.create_collation.needed.{
+    NeededHook, NeededRequest, NeededOutcome,
+    NoFulfilled, NoUnknown,
+    new_hook, new_request, was_fulfilled,
+};
+mount core.database.sqlite.native.create_collation.outcome.{
+    CreateCollationOutcome, CcOk, CcMisuse, CcFailed,
+    is_ok, outcome_numeric, validate,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcNoMem,
+};
+mount base.{Bool};
+
+fn test_new_spec_defaults_utf8() {
+    let s = new_spec("NOCASE_LOCALE".clone());
+    assert_eq(s.encoding, SQLITE_UTF8);
+    assert(is_utf8(&s));
+    assert(!s.lazy);
+}
+
+fn test_with_encoding_updates() {
+    let mut s = new_spec("NOCASE".clone());
+    with_encoding(&mut s, SQLITE_UTF16);
+    assert_eq(s.encoding, SQLITE_UTF16);
+    assert(!is_utf8(&s));
+}
+
+fn test_mark_lazy_sets_flag() {
+    let mut s = new_spec("LAZY".clone());
+    mark_lazy(&mut s);
+    assert(s.lazy);
+}
+
+fn test_needed_helpers() {
+    let h = new_hook("autoload".clone());
+    assert(h.tag == "autoload".clone());
+    let r = new_request("RU_COLLATE".clone(), SQLITE_UTF8);
+    assert_eq(r.encoding, SQLITE_UTF8);
+}
+
+fn test_was_fulfilled() {
+    assert(was_fulfilled(&NoFulfilled));
+    assert(!was_fulfilled(&NoUnknown));
+}
+
+fn test_is_ok_of_outcome() {
+    assert(is_ok(&CcOk));
+    assert(!is_ok(&CcMisuse("x".clone())));
+}
+
+fn test_outcome_numeric() {
+    assert_eq(outcome_numeric(&CcOk), 0);
+    assert_eq(outcome_numeric(&CcMisuse("x".clone())), 21);
+    let failed: CreateCollationOutcome = CcFailed {
+        code: extended_of(PcNoMem, 0),
+        reason: "oom".clone(),
+    };
+    assert(outcome_numeric(&failed) != 0);
+}
+
+fn test_validate_accepts_utf8_and_utf16_variants() {
+    match validate(&"NOCASE".clone(), SQLITE_UTF8) { CcOk => {}, _ => assert(false) }
+    match validate(&"NOCASE".clone(), SQLITE_UTF16LE) { CcOk => {}, _ => assert(false) }
+    match validate(&"NOCASE".clone(), SQLITE_UTF16BE) { CcOk => {}, _ => assert(false) }
+    match validate(&"NOCASE".clone(), SQLITE_UTF16) { CcOk => {}, _ => assert(false) }
+}
+
+fn test_validate_rejects_empty_name() {
+    match validate(&"".clone(), SQLITE_UTF8) { CcMisuse(_) => {}, _ => assert(false) }
+}
+
+fn test_validate_rejects_unknown_encoding() {
+    match validate(&"X".clone(), 99) { CcMisuse(_) => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_new_spec_defaults_utf8();
+    test_with_encoding_updates();
+    test_mark_lazy_sets_flag();
+    test_needed_helpers();
+    test_was_fulfilled();
+    test_is_ok_of_outcome();
+    test_outcome_numeric();
+    test_validate_accepts_utf8_and_utf16_variants();
+    test_validate_rejects_empty_name();
+    test_validate_rejects_unknown_encoding();
+}

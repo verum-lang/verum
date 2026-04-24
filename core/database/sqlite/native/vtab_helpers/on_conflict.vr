@@ -1,0 +1,48 @@
+// =============================================================================
+// vtab_helpers/on_conflict.vr — sqlite3_vtab_on_conflict
+// =============================================================================
+// Spec: SQLite C API
+//
+// Codes match the SQLITE_ROLLBACK / _IGNORE / _FAIL / _ABORT / _REPLACE
+// constants in sqlite3.h.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_helpers.on_conflict;
+
+mount core.*;
+mount base.{Text};
+
+public type ConflictAction is
+      CaRollback    // 1
+    | CaIgnore      // 2
+    | CaFail        // 3
+    | CaAbort       // 4
+    | CaReplace;    // 5
+
+public fn action_numeric(a: &ConflictAction) -> Int {
+    match a {
+        CaRollback => 1,
+        CaIgnore   => 2,
+        CaFail     => 3,
+        CaAbort    => 4,
+        CaReplace  => 5,
+    }
+}
+
+public fn action_name(a: &ConflictAction) -> Text {
+    match a {
+        CaRollback => "ROLLBACK".clone(),
+        CaIgnore   => "IGNORE".clone(),
+        CaFail     => "FAIL".clone(),
+        CaAbort    => "ABORT".clone(),
+        CaReplace  => "REPLACE".clone(),
+    }
+}
+
+public fn from_numeric(n: Int) -> ConflictAction {
+    if n == 2 { return CaIgnore; }
+    if n == 3 { return CaFail; }
+    if n == 5 { return CaReplace; }
+    if n == 1 { return CaRollback; }
+    CaAbort
+}

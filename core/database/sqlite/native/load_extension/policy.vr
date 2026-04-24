@@ -1,0 +1,38 @@
+// =============================================================================
+// load_extension/policy.vr — per-db enable flag + C-level toggle
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_enable_load_extension(db, 1)    → C-level  ON
+//   sqlite3_enable_load_extension(db, 0)    → C-level  OFF
+//   SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION   → separate SQL-level toggle
+//
+// The C-level and SQL-level toggles are independent; SQLite allows
+// C-level loading while keeping the SQL `load_extension()` function
+// disabled.  The catalogue models both independently.
+// =============================================================================
+
+module core.database.sqlite.native.load_extension.policy;
+
+mount core.*;
+mount base.{Bool};
+
+public type LoadExtPolicy is {
+    c_level_allowed: Bool,
+    sql_level_allowed: Bool,
+}
+
+public fn default_policy() -> LoadExtPolicy {
+    LoadExtPolicy { c_level_allowed: false, sql_level_allowed: false }
+}
+
+public fn c_level_enable(p: &mut LoadExtPolicy, on: Bool) {
+    p.c_level_allowed = on;
+}
+
+public fn sql_level_enable(p: &mut LoadExtPolicy, on: Bool) {
+    p.sql_level_allowed = on;
+}
+
+public fn allows_c_level(p: &LoadExtPolicy) -> Bool { p.c_level_allowed }
+public fn allows_sql_level(p: &LoadExtPolicy) -> Bool { p.sql_level_allowed }

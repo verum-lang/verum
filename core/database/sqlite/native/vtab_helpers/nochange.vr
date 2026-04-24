@@ -1,0 +1,37 @@
+// =============================================================================
+// vtab_helpers/nochange.vr — sqlite3_vtab_nochange
+// =============================================================================
+// Spec: SQLite C API
+//
+// During an xUpdate with UPDATE semantics, the host may skip re-
+// computing a column's value if it is unchanged.  sqlite3_vtab_nochange
+// returns non-zero iff the current column is one of those.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_helpers.nochange;
+
+mount core.*;
+mount base.{Bool};
+
+public type NoChangeSignal is {
+    /// Global disable — e.g. vtab authored before this hint existed.
+    enabled: Bool,
+    /// Which column index (0-based) the signal refers to.
+    column_index: Int,
+}
+
+public fn signal_on(column_index: Int) -> NoChangeSignal {
+    NoChangeSignal { enabled: true, column_index: column_index }
+}
+
+public fn signal_off() -> NoChangeSignal {
+    NoChangeSignal { enabled: false, column_index: -1 }
+}
+
+public fn is_active(s: &NoChangeSignal, current_col: Int) -> Bool {
+    s.enabled && s.column_index == current_col
+}
+
+public fn as_int(s: &NoChangeSignal, current_col: Int) -> Int {
+    if is_active(s, current_col) { 1 } else { 0 }
+}

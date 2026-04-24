@@ -1,0 +1,45 @@
+// =============================================================================
+// create_collation/needed.vr — sqlite3_collation_needed hook
+// =============================================================================
+// Spec: SQLite C API
+//
+// When a schema references an unknown collation, the engine fires the
+// registered hook before raising an error.  The hook may register the
+// collation on-the-fly; if it doesn't, the schema open fails.
+// =============================================================================
+
+module core.database.sqlite.native.create_collation.needed;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+
+public type NeededHook is {
+    /// Non-empty tag for diagnostics; the real closure lives elsewhere.
+    tag: Text,
+}
+
+public fn new_hook(tag: Text) -> NeededHook {
+    NeededHook { tag: tag }
+}
+
+public type NeededRequest is {
+    /// Name of the collation the schema references but can't find.
+    name: Text,
+    /// Encoding the engine is willing to accept back.
+    encoding: Int,
+}
+
+public fn new_request(name: Text, encoding: Int) -> NeededRequest {
+    NeededRequest { name: name, encoding: encoding }
+}
+
+public type NeededOutcome is
+      NoFulfilled
+    | NoUnknown;
+
+public fn was_fulfilled(o: &NeededOutcome) -> Bool {
+    match o {
+        NoFulfilled => true,
+        _ => false,
+    }
+}

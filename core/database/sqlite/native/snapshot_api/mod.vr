@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/snapshot_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_snapshot_* surface)
+// Spec: SQLite C API — §20.6 snapshot isolation.
+//
+//   sqlite3_snapshot_get(db, schema, &snap)    — take a snapshot
+//   sqlite3_snapshot_open(db, schema, snap)    — begin txn bound to snap
+//   sqlite3_snapshot_recover(db, schema)       — recover snap from WAL
+//   sqlite3_snapshot_free(snap)                — release
+//   sqlite3_snapshot_cmp(a, b)                 — -1/0/1
+//
+// Submodules:
+//   * `handle`  — SnapshotHandle (id + schema + watermark)
+//   * `op`      — SnapshotOp sum (which C call)
+//   * `result`  — normalised outcome
+// =============================================================================
+
+module core.database.sqlite.native.snapshot_api;
+
+public module handle;
+public module op;
+public module result;

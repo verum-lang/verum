@@ -1,0 +1,27 @@
+// =============================================================================
+// txn/autocommit.vr — autocommit flag
+// =============================================================================
+// Spec: SQLite C API — sqlite3_get_autocommit.
+//
+// Autocommit is ON by default; it is cleared when a BEGIN statement
+// enters transactional mode and re-set on COMMIT / ROLLBACK.
+// =============================================================================
+
+module core.database.sqlite.native.txn.autocommit;
+
+mount core.*;
+mount base.{Bool};
+
+public type AutocommitFlag is {
+    enabled: Bool,
+}
+
+public fn on() -> AutocommitFlag { AutocommitFlag { enabled: true } }
+public fn off() -> AutocommitFlag { AutocommitFlag { enabled: false } }
+
+public fn is_on(a: &AutocommitFlag) -> Bool { a.enabled }
+
+/// sqlite3_get_autocommit returns a non-zero int when autocommit is on.
+public fn as_int(a: &AutocommitFlag) -> Int {
+    if a.enabled { 1 } else { 0 }
+}

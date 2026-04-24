@@ -1,0 +1,72 @@
+// =============================================================================
+// load_extension/entry_point.vr — extension symbol descriptor
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3_load_extension(db, file, ep, msg)
+//
+// If `ep` is NULL the default entry point name is derived from the
+// file's stem (e.g. "libfoo.so" → "sqlite3_foo_init").
+// =============================================================================
+
+module core.database.sqlite.native.load_extension.entry_point;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+
+public type EntryPoint is {
+    file: Text,
+    /// None => derive from file-stem
+    symbol: Maybe<Text>,
+}
+
+public fn new_entry_point(file: Text) -> EntryPoint {
+    EntryPoint { file: file, symbol: Maybe.None }
+}
+
+public fn with_symbol(ep: &mut EntryPoint, symbol: Text) {
+    ep.symbol = Maybe.Some(symbol);
+}
+
+fn push_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+/// Derive "sqlite3_<stem>_init" from the filename.  Strips the leading
+/// directory + any trailing extension + a leading "lib" prefix.
+public fn default_symbol(file: &Text) -> Text {
+    let bytes = file.as_bytes();
+    // Find last '/' (0x2F).
+    let mut start: Int = 0;
+    let mut i: Int = bytes.len() - 1;
+    while i >= 0 {
+        if bytes[i] == (0x2F as u8) { start = i + 1; break; }
+        i = i - 1;
+    }
+    // Strip trailing extension (last '.').
+    let mut end: Int = bytes.len();
+    let mut j: Int = bytes.len() - 1;
+    while j > start {
+        if bytes[j] == (0x2E as u8) { end = j; break; }
+        j = j - 1;
+    }
+    // Skip leading "lib".
+    let mut s: Int = start;
+    if end - start > 3
+       && bytes[start]     == (0x6C as u8)    // 'l'
+       && bytes[start + 1] == (0x69 as u8)    // 'i'
+       && bytes[start + 2] == (0x62 as u8) {  // 'b'
+        s = start + 3;
+    }
+    let mut out: Text = "sqlite3_".clone();
+    let mut k: Int = s;
+    while k < end {
+        out.push_byte(bytes[k]);
+        k = k + 1;
+    }
+    let suffix = "_init".clone();
+    push_text(&mut out, &suffix);
+    out
+}

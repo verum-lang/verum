@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/create_function/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_create_function_*)
+// Spec: SQLite C API
+//
+//   sqlite3_create_function       (db, name, nArg, eTextRep, pApp, xFunc,
+//                                     xStep, xFinal)
+//   sqlite3_create_function_v2    (+ xDestroy)
+//   sqlite3_create_window_function(+ xValue, xInverse)
+//
+// The catalogue-layer registration is callback-free; it records the
+// shape + flags only.  The runtime plugs in real closures via ext/.
+//
+// Submodules:
+//   * `spec`    — name + nArg + encoding + fn_flags
+//   * `kind`    — which kind of function is being registered
+//   * `outcome` — registration outcome
+// =============================================================================
+
+module core.database.sqlite.native.create_function;
+
+public module spec;
+public module kind;
+public module outcome;

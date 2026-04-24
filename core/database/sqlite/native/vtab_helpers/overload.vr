@@ -1,0 +1,53 @@
+// =============================================================================
+// vtab_helpers/overload.vr — sqlite3_overload_function
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_overload_function(db, name, n) makes the virtual table's
+// xFindFunction callback a candidate for the named scalar.  The
+// catalogue records the declaration; routing is the vtab module's job.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_helpers.overload;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type OverloadDecl is {
+    name: Text,
+    /// Intended n_arg; negative means variadic.
+    n_arg: Int,
+}
+
+public fn new_decl(name: Text, n_arg: Int) -> OverloadDecl {
+    OverloadDecl { name: name, n_arg: n_arg }
+}
+
+public type OverloadRegistry is {
+    decls: List<OverloadDecl>,
+}
+
+public fn new_registry() -> OverloadRegistry {
+    OverloadRegistry { decls: List.new() }
+}
+
+implement OverloadRegistry {
+    pub fn overload(&mut self, name: Text, n_arg: Int) {
+        self.decls.push(new_decl(name, n_arg));
+    }
+
+    pub fn contains(&self, name: &Text, n_arg: Int) -> Bool {
+        let mut i: Int = 0;
+        while i < self.decls.len() {
+            let d = self.decls.get(i);
+            if d.name == *name && (d.n_arg == n_arg || d.n_arg == -1) {
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    pub fn len(&self) -> Int { self.decls.len() }
+}

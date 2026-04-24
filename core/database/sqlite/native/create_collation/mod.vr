@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/create_collation/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_create_collation_*)
+// Spec: SQLite C API
+//
+//   sqlite3_create_collation        (db, name, enc, pArg, xCmp)
+//   sqlite3_create_collation_v2     (+ xDestroy)
+//   sqlite3_create_collation16      (name as UTF16)
+//   sqlite3_collation_needed        (db, pArg, xNeeded)
+//
+// Internal defaults BINARY / NOCASE / RTRIM live in l2_record/collation.
+//
+// Submodules:
+//   * `spec`     — CollationSpec record
+//   * `needed`   — NeededHook descriptor
+//   * `outcome`  — registration outcome
+// =============================================================================
+
+module core.database.sqlite.native.create_collation;
+
+public module spec;
+public module needed;
+public module outcome;

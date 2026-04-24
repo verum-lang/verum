@@ -1,0 +1,54 @@
+// =============================================================================
+// txn/state.vr — TxnState sum
+// =============================================================================
+// Spec: SQLite C API — sqlite3_txn_state.
+//
+//   SQLITE_TXN_NONE   = 0  — no transaction active on the named schema
+//   SQLITE_TXN_READ   = 1  — read transaction active
+//   SQLITE_TXN_WRITE  = 2  — write transaction active (has pending changes)
+//
+// sqlite3_txn_state returns -1 if the supplied schema name is unknown.
+// =============================================================================
+
+module core.database.sqlite.native.txn.state;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type TxnState is
+      TxNone
+    | TxRead
+    | TxWrite;
+
+public const SQLITE_TXN_NONE: Int  = 0;
+public const SQLITE_TXN_READ: Int  = 1;
+public const SQLITE_TXN_WRITE: Int = 2;
+
+public fn state_numeric(s: &TxnState) -> Int {
+    match s {
+        TxNone  => SQLITE_TXN_NONE,
+        TxRead  => SQLITE_TXN_READ,
+        TxWrite => SQLITE_TXN_WRITE,
+    }
+}
+
+public fn state_name(s: &TxnState) -> Text {
+    match s {
+        TxNone  => "none".clone(),
+        TxRead  => "read".clone(),
+        TxWrite => "write".clone(),
+    }
+}
+
+public fn has_pending_writes(s: &TxnState) -> Bool {
+    match s {
+        TxWrite => true,
+        _ => false,
+    }
+}
+
+public fn from_numeric(n: Int) -> TxnState {
+    if n == SQLITE_TXN_WRITE { return TxWrite; }
+    if n == SQLITE_TXN_READ  { return TxRead; }
+    TxNone
+}

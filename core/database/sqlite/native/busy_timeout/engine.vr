@@ -1,0 +1,67 @@
+// =============================================================================
+// busy_timeout/engine.vr — installed handler + retry accounting
+// =============================================================================
+// Spec: SQLite C API
+//
+// `sqlite3_busy_handler` and `sqlite3_busy_timeout` compete for the
+// same slot — installing one clears the other.  `BusyEngine` records
+// the currently-installed handler + a monotone attempt counter used
+// by the retry-decision function.
+// =============================================================================
+
+module core.database.sqlite.native.busy_timeout.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.busy_timeout.handler.{
+    BusyHandlerKind, BhNone, BhCustom, BhTimeout, BusyDecision, BdRetry, BdGiveUp,
+};
+mount core.database.sqlite.native.busy_timeout.timeout.{
+    TimeoutRequest, new_request, sleep_ns_for_attempt,
+};
+
+public type BusyEngine is {
+    kind: BusyHandlerKind,
+    attempts: Int,
+}
+
+public fn new_engine() -> BusyEngine {
+    BusyEngine { kind: BhNone, attempts: 0 }
+}
+
+implement BusyEngine {
+    pub fn install_custom(&mut self, name: base.Text) {
+        self.kind = BhCustom(name);
+        self.attempts = 0;
+    }
+
+    pub fn sqlite3_busy_timeout(&mut self, ms: Int) {
+        let req = new_request(ms);
+        self.kind = if ms <= 0 { BhNone } else { BhTimeout(ms) };
+        self.attempts = 0;
+        let _ = req; // ms threaded through above
+    }
+
+    pub fn clear(&mut self) {
+        self.kind = BhNone;
+        self.attempts = 0;
+    }
+
+    pub fn decide(&mut self, on_custom: fn(Int) -> BusyDecision) -> BusyDecision {
+        let decision = match &self.kind {
+            BhNone => BdGiveUp,
+            BhTimeout(ms) => {
+                let req = new_request(*ms);
+                let ns = sleep_ns_for_attempt(&req, self.attempts);
+                BdRetry(ns)
+            }
+            BhCustom(_) => (on_custom)(self.attempts),
+        };
+        self.attempts = self.attempts + 1;
+        decision
+    }
+
+    pub fn reset_counter(&mut self) {
+        self.attempts = 0;
+    }
+}

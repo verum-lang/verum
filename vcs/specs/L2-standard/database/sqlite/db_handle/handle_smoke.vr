@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, db_handle, introspection, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.db_handle.handle.{
+    DbHandle, DbSchema,
+    main_schema, temp_schema, new_handle,
+};
+mount core.database.sqlite.native.db_handle.engine.{
+    sqlite3_db_filename, sqlite3_db_name,
+    sqlite3_db_readonly, sqlite3_db_mutex,
+    sqlite3_db_cacheflush, sqlite3_db_handle_id,
+};
+mount base.{Bool};
+
+fn test_new_handle_has_main_and_temp() {
+    let h = new_handle(7 as Int64, main_schema("/tmp/x.db".clone(), false));
+    assert_eq(sqlite3_db_handle_id(&h), 7 as Int64);
+    assert_eq(sqlite3_db_name(&h, 0), "main".clone());
+    assert_eq(sqlite3_db_name(&h, 1), "temp".clone());
+}
+
+fn test_db_filename_for_main() {
+    let h = new_handle(1 as Int64, main_schema("/tmp/x.db".clone(), false));
+    assert_eq(sqlite3_db_filename(&h, "main".clone()), "/tmp/x.db".clone());
+}
+
+fn test_db_filename_unknown_name_empty() {
+    let h = new_handle(1 as Int64, main_schema("/tmp/x.db".clone(), false));
+    assert_eq(sqlite3_db_filename(&h, "nope".clone()).len(), 0);
+}
+
+fn test_db_readonly_main_zero() {
+    let h = new_handle(1 as Int64, main_schema("/tmp/x.db".clone(), false));
+    assert_eq(sqlite3_db_readonly(&h, "main".clone()), 0);
+}
+
+fn test_db_readonly_main_one_when_ro() {
+    let h = new_handle(1 as Int64, main_schema("/tmp/x.db".clone(), true));
+    assert_eq(sqlite3_db_readonly(&h, "main".clone()), 1);
+}
+
+fn test_db_readonly_unknown_minus_one() {
+    let h = new_handle(1 as Int64, main_schema("/tmp/x.db".clone(), false));
+    assert_eq(sqlite3_db_readonly(&h, "unknown".clone()), -1);
+}
+
+fn test_attach_adds_schema() {
+    let mut h = new_handle(1 as Int64, main_schema("/tmp/x.db".clone(), false));
+    h.attach(DbSchema { name: "aux1".clone(), filename: "/tmp/a.db".clone(), readonly: true });
+    assert_eq(sqlite3_db_name(&h, 2), "aux1".clone());
+    assert_eq(sqlite3_db_readonly(&h, "aux1".clone()), 1);
+}
+
+fn test_mutex_id_default_zero() {
+    let h = new_handle(1 as Int64, main_schema("/tmp/x.db".clone(), false));
+    assert_eq(sqlite3_db_mutex(&h), 0 as Int64);
+}
+
+fn test_db_cacheflush_increments_count() {
+    let mut h = new_handle(1 as Int64, main_schema("/tmp/x.db".clone(), false));
+    sqlite3_db_cacheflush(&mut h);
+    assert_eq(h.cacheflush_count, 1 as Int64);
+}
+
+fn main() {
+    test_new_handle_has_main_and_temp();
+    test_db_filename_for_main();
+    test_db_filename_unknown_name_empty();
+    test_db_readonly_main_zero();
+    test_db_readonly_main_one_when_ro();
+    test_db_readonly_unknown_minus_one();
+    test_attach_adds_schema();
+    test_mutex_id_default_zero();
+    test_db_cacheflush_increments_count();
+}

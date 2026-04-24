@@ -1,0 +1,125 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_helpers, overload, distinct, nochange, in_iter, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_helpers.overload.{
+    OverloadDecl, OverloadRegistry,
+    new_decl, new_registry,
+};
+mount core.database.sqlite.native.vtab_helpers.distinct.{
+    DistinctHint,
+    DhNone, DhRows, DhGrouping, DhOrdered,
+    hint_numeric, hint_name, hint_permits_skip, from_numeric,
+};
+mount core.database.sqlite.native.vtab_helpers.nochange.{
+    NoChangeSignal, signal_on, signal_off, is_active, as_int,
+};
+mount core.database.sqlite.native.vtab_helpers.on_conflict.{
+    ConflictAction,
+    CaRollback, CaIgnore, CaFail, CaAbort, CaReplace,
+    action_numeric, action_name, from_numeric as conflict_from_numeric,
+};
+mount core.database.sqlite.native.vtab_helpers.in_iter.{
+    InIterator, new_iterator,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_overload_registry() {
+    let mut r = new_registry();
+    r.overload("json_extract".clone(), 2);
+    r.overload("fts_rank".clone(), -1);
+    assert_eq(r.len(), 2);
+    assert(r.contains(&"json_extract".clone(), 2));
+    assert(r.contains(&"fts_rank".clone(), 5));   // variadic accepts any
+    assert(!r.contains(&"missing".clone(), 0));
+}
+
+fn test_distinct_numeric_matches_spec() {
+    assert_eq(hint_numeric(&DhNone), 0);
+    assert_eq(hint_numeric(&DhRows), 1);
+    assert_eq(hint_numeric(&DhGrouping), 2);
+    assert_eq(hint_numeric(&DhOrdered), 3);
+}
+
+fn test_distinct_permits_skip() {
+    assert(!hint_permits_skip(&DhNone));
+    assert(!hint_permits_skip(&DhRows));
+    assert(hint_permits_skip(&DhGrouping));
+    assert(hint_permits_skip(&DhOrdered));
+}
+
+fn test_distinct_from_numeric() {
+    match from_numeric(0) { DhNone     => {}, _ => assert(false) }
+    match from_numeric(3) { DhOrdered  => {}, _ => assert(false) }
+    match from_numeric(99) { DhNone    => {}, _ => assert(false) }
+}
+
+fn test_nochange_signal_matching_column() {
+    let s = signal_on(3);
+    assert(is_active(&s, 3));
+    assert(!is_active(&s, 4));
+    assert_eq(as_int(&s, 3), 1);
+    assert_eq(as_int(&s, 4), 0);
+}
+
+fn test_nochange_signal_off() {
+    let s = signal_off();
+    assert(!is_active(&s, 0));
+    assert_eq(as_int(&s, 0), 0);
+}
+
+fn test_conflict_numeric_matches_c_header() {
+    assert_eq(action_numeric(&CaRollback), 1);
+    assert_eq(action_numeric(&CaIgnore), 2);
+    assert_eq(action_numeric(&CaFail), 3);
+    assert_eq(action_numeric(&CaAbort), 4);
+    assert_eq(action_numeric(&CaReplace), 5);
+}
+
+fn test_conflict_names_uppercase() {
+    assert(action_name(&CaRollback) == "ROLLBACK".clone());
+    assert(action_name(&CaReplace) == "REPLACE".clone());
+}
+
+fn test_conflict_from_numeric_fallback_to_abort() {
+    match conflict_from_numeric(5) { CaReplace => {}, _ => assert(false) }
+    match conflict_from_numeric(99) { CaAbort  => {}, _ => assert(false) }
+}
+
+fn test_in_iterator_empty_is_done() {
+    let values: List<Int64> = List.new();
+    let mut it = new_iterator(values);
+    assert(it.is_done());
+    assert_eq(it.sqlite3_vtab_in_first(), 101);  // DONE
+}
+
+fn test_in_iterator_iterates_then_stops() {
+    let mut values: List<Int64> = List.new();
+    values.push(10 as Int64);
+    values.push(20 as Int64);
+    values.push(30 as Int64);
+    let mut it = new_iterator(values);
+    assert_eq(it.sqlite3_vtab_in_first(), 100);   // ROW (1st)
+    assert_eq(it.sqlite3_vtab_in_next(),  100);   // ROW (2nd)
+    assert_eq(it.sqlite3_vtab_in_next(),  100);   // ROW (3rd)
+    assert_eq(it.sqlite3_vtab_in_next(),  101);   // DONE
+    assert(it.is_done());
+}
+
+fn main() {
+    test_overload_registry();
+    test_distinct_numeric_matches_spec();
+    test_distinct_permits_skip();
+    test_distinct_from_numeric();
+    test_nochange_signal_matching_column();
+    test_nochange_signal_off();
+    test_conflict_numeric_matches_c_header();
+    test_conflict_names_uppercase();
+    test_conflict_from_numeric_fallback_to_abort();
+    test_in_iterator_empty_is_done();
+    test_in_iterator_iterates_then_stops();
+}

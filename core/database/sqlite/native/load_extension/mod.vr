@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/load_extension/mod.vr
+// =============================================================================
+// Layer: 7 (façade — loadable-extension API)
+// Spec: SQLite C API
+//
+//   sqlite3_enable_load_extension(db, on)      → int
+//   sqlite3_load_extension(db, file, ep, msg)  → int
+//   sqlite3_auto_extension(fn)                 → int
+//   sqlite3_cancel_auto_extension(fn)          → int
+//   sqlite3_reset_auto_extension()             → void
+//
+// Complements `ext/loadable` by modelling the public-API policy gate
+// and per-request outcome.  The catalogue does NOT perform dlopen;
+// that's the runtime's job.
+//
+// Submodules:
+//   * `entry_point` — symbol descriptor (path, entry name)
+//   * `request`     — single load request
+//   * `policy`      — per-connection enable flag
+//   * `engine`      — auto-extension registry + per-db policy
+// =============================================================================
+
+module core.database.sqlite.native.load_extension;
+
+public module entry_point;
+public module request;
+public module policy;
+public module engine;

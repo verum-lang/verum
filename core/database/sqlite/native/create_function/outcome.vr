@@ -1,0 +1,45 @@
+// =============================================================================
+// create_function/outcome.vr — registration outcome
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_create_function_v2 returns SQLITE_OK on success, SQLITE_MISUSE
+// if nArg is outside -1..127, or another primary code for OOM / EE
+// failures.
+// =============================================================================
+
+module core.database.sqlite.native.create_function.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type CreateFnOutcome is
+      CfOk
+    | CfMisuse(Text)
+    | CfFailed { code: ExtendedCode, reason: Text };
+
+public fn is_ok(o: &CreateFnOutcome) -> Bool {
+    match o {
+        CfOk => true,
+        _ => false,
+    }
+}
+
+public fn outcome_numeric(o: &CreateFnOutcome) -> Int {
+    match o {
+        CfOk => 0,
+        CfMisuse(_) => 21,  // SQLITE_MISUSE
+        CfFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+/// Validate that n_arg ∈ {-1} ∪ [0,127]; returns CfOk if valid,
+/// CfMisuse otherwise.
+public fn validate_n_arg(n_arg: Int) -> CreateFnOutcome {
+    if n_arg < -1 { return CfMisuse("n_arg must be >= -1".clone()); }
+    if n_arg > 127 { return CfMisuse("n_arg must be <= 127".clone()); }
+    CfOk
+}

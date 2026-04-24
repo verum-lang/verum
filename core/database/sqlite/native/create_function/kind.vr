@@ -1,0 +1,52 @@
+// =============================================================================
+// create_function/kind.vr — which kind of user function is registered
+// =============================================================================
+// Spec: SQLite C API
+//
+//   Scalar    — xFunc only
+//   Aggregate — xStep + xFinal
+//   Window    — xStep + xFinal + xValue + xInverse (new in 3.25)
+//
+// The catalogue records which callbacks the runtime is expected to
+// supply; actual closures live elsewhere.
+// =============================================================================
+
+module core.database.sqlite.native.create_function.kind;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type FunctionKind is
+      FkScalar
+    | FkAggregate
+    | FkWindow;
+
+public fn kind_name(k: &FunctionKind) -> Text {
+    match k {
+        FkScalar    => "scalar".clone(),
+        FkAggregate => "aggregate".clone(),
+        FkWindow    => "window".clone(),
+    }
+}
+
+public fn requires_step_and_final(k: &FunctionKind) -> Bool {
+    match k {
+        FkAggregate | FkWindow => true,
+        _ => false,
+    }
+}
+
+public fn requires_value_and_inverse(k: &FunctionKind) -> Bool {
+    match k {
+        FkWindow => true,
+        _ => false,
+    }
+}
+
+public fn callback_count(k: &FunctionKind) -> Int {
+    match k {
+        FkScalar    => 1,   // xFunc
+        FkAggregate => 2,   // xStep + xFinal
+        FkWindow    => 4,   // xStep + xFinal + xValue + xInverse
+    }
+}

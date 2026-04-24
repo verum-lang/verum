@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, snapshot_api, wal, isolation, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.snapshot_api.handle.{
+    SnapshotHandle, new_handle, cmp,
+};
+mount core.database.sqlite.native.snapshot_api.op.{
+    SnapshotOp,
+    SoGet, SoOpen, SoRecover, SoFree, SoCmp, SoUnlock,
+    op_name, op_is_mutating,
+};
+mount core.database.sqlite.native.snapshot_api.result.{
+    SnapshotResult, SrOk, SrFailed,
+    SnapshotOrder, OrBefore, OrEqual, OrAfter,
+    order_numeric, order_from_int,
+    is_ok, result_code, result_reason,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcBusy,
+};
+mount base.{Bool};
+
+fn test_handle_liveness() {
+    let mut h = new_handle(1 as Int64, "main".clone(), 42 as Int64);
+    assert(h.is_live());
+    h.free();
+    assert(!h.is_live());
+}
+
+fn test_cmp_order() {
+    let a = new_handle(1 as Int64, "main".clone(), 10 as Int64);
+    let b = new_handle(2 as Int64, "main".clone(), 20 as Int64);
+    let c = new_handle(3 as Int64, "main".clone(), 20 as Int64);
+    assert_eq(cmp(&a, &b), -1);
+    assert_eq(cmp(&b, &a), 1);
+    assert_eq(cmp(&b, &c), 0);
+}
+
+fn test_op_names() {
+    assert(op_name(&SoGet) == "snapshot_get".clone());
+    assert(op_name(&SoOpen) == "snapshot_open".clone());
+    assert(op_name(&SoFree) == "snapshot_free".clone());
+}
+
+fn test_op_mutating_only_free_and_unlock() {
+    assert(op_is_mutating(&SoFree));
+    assert(op_is_mutating(&SoUnlock));
+    assert(!op_is_mutating(&SoGet));
+    assert(!op_is_mutating(&SoRecover));
+    assert(!op_is_mutating(&SoCmp));
+}
+
+fn test_order_numeric() {
+    assert_eq(order_numeric(&OrBefore), -1);
+    assert_eq(order_numeric(&OrEqual), 0);
+    assert_eq(order_numeric(&OrAfter), 1);
+}
+
+fn test_order_from_int() {
+    match order_from_int(-5) { OrBefore => {}, _ => assert(false) }
+    match order_from_int(0)  { OrEqual  => {}, _ => assert(false) }
+    match order_from_int(5)  { OrAfter  => {}, _ => assert(false) }
+}
+
+fn test_result_ok_and_failed_codes() {
+    let ok: SnapshotResult = SrOk;
+    assert(is_ok(&ok));
+    assert_eq(result_code(&ok), 0);
+
+    let failed: SnapshotResult = SrFailed {
+        code: extended_of(PcBusy, 0),
+        reason: "wal busy".clone(),
+    };
+    assert(!is_ok(&failed));
+    assert(result_code(&failed) != 0);
+    assert(result_reason(&failed).len() > 0);
+}
+
+fn main() {
+    test_handle_liveness();
+    test_cmp_order();
+    test_op_names();
+    test_op_mutating_only_free_and_unlock();
+    test_order_numeric();
+    test_order_from_int();
+    test_result_ok_and_failed_codes();
+}

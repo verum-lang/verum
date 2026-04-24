@@ -1,0 +1,68 @@
+// =============================================================================
+// vtab_helpers/in_iter.vr — sqlite3_vtab_in_first / _in_next
+// =============================================================================
+// Spec: SQLite C API
+//
+// For vtabs that opt into SQLITE_VTAB_USES_ALL_SCHEMAS, a constraint
+// `col IN (v1, v2, v3)` can be served value-at-a-time.  The iterator
+// exposes Start / More / Done states over a list of value rowids.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_helpers.in_iter;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type InIterState is
+      IisStart
+    | IisMore(Int)      // 0-based index of the NEXT value to return
+    | IisDone;
+
+public type InIterator is {
+    values: List<Int64>,
+    state: InIterState,
+}
+
+public fn new_iterator(values: List<Int64>) -> InIterator {
+    let st = if values.len() == 0 { IisDone } else { IisStart };
+    InIterator { values: values, state: st }
+}
+
+implement InIterator {
+    pub fn sqlite3_vtab_in_first(&mut self) -> Int {
+        match &self.state {
+            IisStart => {
+                if self.values.len() == 0 {
+                    self.state = IisDone;
+                    return 101;  // SQLITE_DONE
+                }
+                self.state = IisMore(1);
+                100  // SQLITE_ROW
+            }
+            _ => 0,   // SQLITE_OK (already advanced)
+        }
+    }
+
+    pub fn sqlite3_vtab_in_next(&mut self) -> Int {
+        match &self.state {
+            IisMore(i) => {
+                let next = *i;
+                if next >= self.values.len() {
+                    self.state = IisDone;
+                    return 101;  // DONE
+                }
+                self.state = IisMore(next + 1);
+                100  // ROW
+            }
+            _ => 101,
+        }
+    }
+
+    pub fn is_done(&self) -> Bool {
+        match &self.state {
+            IisDone => true,
+            _ => false,
+        }
+    }
+}

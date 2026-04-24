@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/txn/mod.vr
+// =============================================================================
+// Layer: 7 (façade — transaction-state introspection)
+// Spec: SQLite C API
+//
+//   sqlite3_txn_state(db, name)      → -1 / 0 / 1 / 2
+//   sqlite3_get_autocommit(db)       → non-zero iff autocommit is on
+//
+// Submodules:
+//   * `state`       — TxnState sum + numeric mapping
+//   * `autocommit`  — AutocommitFlag
+//   * `engine`      — per-schema state table
+// =============================================================================
+
+module core.database.sqlite.native.txn;
+
+public module state;
+public module autocommit;
+public module engine;

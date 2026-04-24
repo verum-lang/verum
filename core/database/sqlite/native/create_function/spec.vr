@@ -1,0 +1,56 @@
+// =============================================================================
+// create_function/spec.vr — FunctionSpec record
+// =============================================================================
+// Spec: SQLite C API
+//
+//   name       — zero-terminated UTF-8 identifier
+//   n_arg      — 0..127 or -1 (variadic)
+//   encoding   — SQLITE_UTF8 / UTF16LE / UTF16BE / UTF16 / ANY (= UTF8|UTF16)
+//   flags      — FnFlags bundle (deterministic, direct_only, …)
+// =============================================================================
+
+module core.database.sqlite.native.create_function.spec;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.ext.fn_flags.{
+    FnFlags, flags_default, flags_pure,
+};
+
+public const SQLITE_UTF8: Int     = 1;
+public const SQLITE_UTF16LE: Int  = 2;
+public const SQLITE_UTF16BE: Int  = 3;
+public const SQLITE_UTF16: Int    = 4;
+public const SQLITE_ANY: Int      = 5;      // deprecated — UTF8 or UTF16 as needed
+public const SQLITE_UTF16_ALIGNED: Int = 8;
+
+public type FunctionSpec is {
+    name: Text,
+    n_arg: Int,
+    encoding: Int,
+    flags: FnFlags,
+}
+
+public fn new_spec(name: Text, n_arg: Int) -> FunctionSpec {
+    FunctionSpec {
+        name: name,
+        n_arg: n_arg,
+        encoding: SQLITE_UTF8,
+        flags: flags_default(),
+    }
+}
+
+implement FunctionSpec {
+    pub fn with_encoding(&mut self, enc: Int) { self.encoding = enc; }
+    pub fn with_flags(&mut self, f: FnFlags) { self.flags = f; }
+    pub fn is_variadic(&self) -> Bool { self.n_arg < 0 }
+    pub fn is_pure(&self) -> Bool {
+        self.flags.deterministic && self.flags.innocuous
+    }
+}
+
+public fn pure_spec(name: Text, n_arg: Int) -> FunctionSpec {
+    let mut s = new_spec(name, n_arg);
+    s.with_flags(flags_pure());
+    s
+}

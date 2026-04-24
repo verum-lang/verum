@@ -1,0 +1,37 @@
+// =============================================================================
+// create_collation/spec.vr — CollationSpec record
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.create_collation.spec;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_UTF8: Int     = 1;
+public const SQLITE_UTF16LE: Int  = 2;
+public const SQLITE_UTF16BE: Int  = 3;
+public const SQLITE_UTF16: Int    = 4;
+
+public type CollationSpec is {
+    name: Text,
+    encoding: Int,
+    /// True if the collation was registered via sqlite3_collation_needed
+    /// + the hook fulfilled it, as opposed to an explicit create call.
+    lazy: Bool,
+}
+
+public fn new_spec(name: Text) -> CollationSpec {
+    CollationSpec { name: name, encoding: SQLITE_UTF8, lazy: false }
+}
+
+public fn with_encoding(s: &mut CollationSpec, enc: Int) {
+    s.encoding = enc;
+}
+
+public fn mark_lazy(s: &mut CollationSpec) {
+    s.lazy = true;
+}
+
+public fn is_utf8(s: &CollationSpec) -> Bool { s.encoding == SQLITE_UTF8 }

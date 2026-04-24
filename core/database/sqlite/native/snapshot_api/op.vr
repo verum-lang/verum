@@ -1,0 +1,36 @@
+// =============================================================================
+// snapshot_api/op.vr — which sqlite3_snapshot_* is being invoked
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.snapshot_api.op;
+
+mount core.*;
+mount base.{Text};
+
+public type SnapshotOp is
+      SoGet
+    | SoOpen
+    | SoRecover
+    | SoFree
+    | SoCmp
+    | SoUnlock;
+
+public fn op_name(o: &SnapshotOp) -> Text {
+    match o {
+        SoGet     => "snapshot_get".clone(),
+        SoOpen    => "snapshot_open".clone(),
+        SoRecover => "snapshot_recover".clone(),
+        SoFree    => "snapshot_free".clone(),
+        SoCmp     => "snapshot_cmp".clone(),
+        SoUnlock  => "snapshot_unlock".clone(),
+    }
+}
+
+public fn op_is_mutating(o: &SnapshotOp) -> base.Bool {
+    match o {
+        SoFree | SoUnlock => true,
+        _ => false,
+    }
+}

@@ -1,0 +1,38 @@
+// =============================================================================
+// snapshot_api/handle.vr — SnapshotHandle descriptor
+// =============================================================================
+// Spec: SQLite C API
+//
+// A handle carries a connection-local id, schema name, and the WAL
+// watermark (frame count) captured at sqlite3_snapshot_get time.
+// =============================================================================
+
+module core.database.sqlite.native.snapshot_api.handle;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type SnapshotHandle is {
+    id: Int64,
+    schema: Text,
+    /// WAL frame count at snapshot time.
+    watermark: Int64,
+    /// True once sqlite3_snapshot_free has been invoked.
+    freed: Bool,
+}
+
+public fn new_handle(id: Int64, schema: Text, watermark: Int64) -> SnapshotHandle {
+    SnapshotHandle { id: id, schema: schema, watermark: watermark, freed: false }
+}
+
+implement SnapshotHandle {
+    pub fn free(&mut self) { self.freed = true; }
+    pub fn is_live(&self) -> Bool { !self.freed }
+}
+
+/// -1 / 0 / +1 ordering by watermark — matches sqlite3_snapshot_cmp.
+public fn cmp(a: &SnapshotHandle, b: &SnapshotHandle) -> Int {
+    if a.watermark < b.watermark { return -1; }
+    if a.watermark > b.watermark { return 1; }
+    0
+}
