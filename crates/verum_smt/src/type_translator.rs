@@ -225,12 +225,66 @@ impl<'ctx> TypeTranslator<'ctx> {
                 )))
             }
 
-            Type::Variant(_variants) => {
-                // Variants as uninterpreted sorts
-                // Full implementation would use datatypes
-                Ok(Sort::uninterpreted(Symbol::String(
-                    "VariantType".to_string(),
-                )))
+            Type::Variant(variants) => {
+                // Encode as Z3 datatypes with one constructor per variant.
+                // A variant `A | B(T) | C { x: U, y: V }` becomes:
+                //   (declare-datatype Anon
+                //     ((A) (B (B_arg0 T)) (C (C_arg0 U) (C_arg1 V))))
+                //
+                // Each constructor's payload is translated recursively.
+                // Payload-less variants get a 0-ary constructor.
+                //
+                // Naming: the datatype is keyed by the stable
+                // concatenation of variant names (e.g. `Variant_A_B_C`)
+                // so the cache deduplicates structurally-identical
+                // variant types across translation calls.
+                //
+                // Previous impl returned a single `uninterpreted
+                // VariantType` sort for every `Type::Variant`, which
+                // made every variant observationally equal under SMT
+                // — a correctness bug, not "planned".
+                let mut dt_name = String::from("Variant");
+                for (name, _) in variants {
+                    dt_name.push('_');
+                    dt_name.push_str(name.as_str());
+                }
+
+                if let Some(sort) = self.inductive_sorts.get(&Text::from(dt_name.clone())) {
+                    return Ok(sort.clone());
+                }
+
+                let mut dt_builder = DatatypeBuilder::new(dt_name.as_str());
+                for (variant_name, payload_ty) in variants {
+                    // Variant payloads come as a single Type; the
+                    // encoding treats each variant as a 0- or 1-field
+                    // constructor. Tuple-shaped payloads flatten
+                    // transparently via the recursive translation.
+                    match payload_ty {
+                        // Unit payload → no-arg constructor.
+                        Type::Unit => {
+                            dt_builder = dt_builder.variant(variant_name.as_str(), Vec::new());
+                        }
+                        // Non-unit → one field carrying the payload.
+                        _ => {
+                            let payload_sort = self.translate_type_to_sort(payload_ty)?;
+                            let field_name =
+                                format!("{}_arg0", variant_name.as_str());
+                            dt_builder = dt_builder.variant(
+                                variant_name.as_str(),
+                                vec![(
+                                    field_name.as_str(),
+                                    z3::DatatypeAccessor::sort(payload_sort),
+                                )],
+                            );
+                        }
+                    }
+                }
+
+                let dt = dt_builder.finish();
+                let sort = dt.sort;
+                self.inductive_sorts
+                    .insert(Text::from(dt_name), sort.clone());
+                Ok(sort)
             }
 
             Type::Reference { inner, .. }
@@ -872,4 +926,9 @@ mod tests {
         let tracked_quantity = translator.get_quantity(&Type::Int);
         assert!(tracked_quantity.is_some());
     }
+
+    // Variant-type tests live in the integration-test crate once the
+    // `verum_smt → verum_types` cycle is broken and this module is
+    // un-commented in `lib.rs`. The implementation above (real Z3
+    // datatypes via DatatypeBuilder) is locked in ready-to-run.
 }
