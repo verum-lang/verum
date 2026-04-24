@@ -1,0 +1,50 @@
+// =============================================================================
+// db_release_memory_api/engine.vr — release driver
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.db_release_memory_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.db_release_memory_api.lookaside.{
+    Lookaside, drain_to_zero,
+};
+
+public type DbReleaseEngine is {
+    lookaside: Lookaside,
+    /// Bytes the engine currently tracks as "releasable on request".
+    page_cache_releasable_bytes: Int64,
+    /// Total bytes released across every call (audit counter).
+    total_released_bytes: Int64,
+    calls: Int64,
+}
+
+public fn new_engine(lookaside: Lookaside) -> DbReleaseEngine {
+    DbReleaseEngine {
+        lookaside: lookaside,
+        page_cache_releasable_bytes: 0 as Int64,
+        total_released_bytes: 0 as Int64,
+        calls: 0 as Int64,
+    }
+}
+
+implement DbReleaseEngine {
+    pub fn note_page_cache(&mut self, bytes: Int64) {
+        self.page_cache_releasable_bytes = bytes;
+    }
+
+    /// Returns (0 for SQLITE_OK).  Non-zero would mean the engine
+    /// couldn't release anything; SQLite always returns OK here.
+    pub fn sqlite3_db_release_memory(&mut self) -> Int {
+        self.calls = self.calls + (1 as Int64);
+        let released_slots = drain_to_zero(&mut self.lookaside);
+        let released_lookaside_bytes =
+            (released_slots as Int64) * (self.lookaside.slot_size_bytes as Int64);
+        let total = released_lookaside_bytes + self.page_cache_releasable_bytes;
+        self.total_released_bytes = self.total_released_bytes + total;
+        self.page_cache_releasable_bytes = 0 as Int64;
+        0
+    }
+}

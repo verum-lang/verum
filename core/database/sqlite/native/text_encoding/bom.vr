@@ -1,0 +1,44 @@
+// =============================================================================
+// text_encoding/bom.vr — UTF-16 byte-order-mark sniffer
+// =============================================================================
+// Spec: Unicode — BOMs:
+//   FE FF  — UTF-16 BE
+//   FF FE  — UTF-16 LE
+//   EF BB BF — UTF-8 (rarely emitted; detected but stripped)
+// =============================================================================
+
+module core.database.sqlite.native.text_encoding.bom;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type BomKind is
+      BkNone
+    | BkUtf8
+    | BkUtf16Le
+    | BkUtf16Be;
+
+public fn bom_bytes(kind: &BomKind) -> Int {
+    match kind {
+        BkNone     => 0,
+        BkUtf8     => 3,
+        BkUtf16Le  => 2,
+        BkUtf16Be  => 2,
+    }
+}
+
+public fn detect_bom(bytes: &List<u8>) -> BomKind {
+    let n = bytes.len();
+    if n >= 3
+       && bytes[0] == (0xEF as u8)
+       && bytes[1] == (0xBB as u8)
+       && bytes[2] == (0xBF as u8) {
+        return BkUtf8;
+    }
+    if n >= 2 {
+        if bytes[0] == (0xFE as u8) && bytes[1] == (0xFF as u8) { return BkUtf16Be; }
+        if bytes[0] == (0xFF as u8) && bytes[1] == (0xFE as u8) { return BkUtf16Le; }
+    }
+    BkNone
+}

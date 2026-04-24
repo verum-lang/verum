@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/bind_blob_v2/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_bind_blob / _blob64)
+// Spec: SQLite C API
+//
+//   sqlite3_bind_blob   (stmt, idx, data, n, xDel)
+//   sqlite3_bind_blob64 (stmt, idx, data, n64, xDel)
+//
+// `n < 0` is SQLITE_MISUSE — blob sizes must be specified (unlike
+// text where -1 means NUL-terminated).
+//
+// Submodules:
+//   * `spec`     — BindBlobSpec (byte-length + destructor + API variant)
+//   * `engine`   — per-stmt slot w/ validation
+// =============================================================================
+
+module core.database.sqlite.native.bind_blob_v2;
+
+public module spec;
+public module engine;

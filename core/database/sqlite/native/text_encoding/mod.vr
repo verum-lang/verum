@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/text_encoding/mod.vr
+// =============================================================================
+// Layer: 5 (façade — text encoding taxonomy)
+// Spec: SQLite C API + §6 file format
+//
+// SQLite supports four text encodings:
+//
+//   SQLITE_UTF8          = 1
+//   SQLITE_UTF16LE       = 2
+//   SQLITE_UTF16BE       = 3
+//   SQLITE_UTF16         = 4   (native byte order)
+//   SQLITE_UTF16_ALIGNED = 8   (for sqlite3_create_collation; native BO, aligned)
+//   SQLITE_ANY           = 5   (collation/function accepts any)
+//
+// Submodules:
+//   * `kind`     — TextEncoding sum + numeric
+//   * `bom`      — UTF-16 byte-order-mark sniffer
+//   * `detect`   — best-guess encoding detection
+// =============================================================================
+
+module core.database.sqlite.native.text_encoding;
+
+public module kind;
+public module bom;
+public module detect;

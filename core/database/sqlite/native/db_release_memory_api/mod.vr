@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/db_release_memory_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — per-db memory release)
+// Spec: SQLite C API
+//
+//   int sqlite3_db_release_memory(sqlite3 *db)
+//
+// Releases as much memory as possible associated with the named
+// connection (page cache, lookaside, etc.).  Returns SQLITE_OK.
+// Complements memory_stats/ (process-global totals) with a per-conn
+// driver + lookaside slot model.
+//
+// Submodules:
+//   * `lookaside`  — LookasideSlot count + hit-rate
+//   * `engine`     — release driver + quota
+// =============================================================================
+
+module core.database.sqlite.native.db_release_memory_api;
+
+public module lookaside;
+public module engine;

@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/column_text16/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_column_text16 / _bytes16)
+// Spec: SQLite C API
+//
+//   const void *sqlite3_column_text16(stmt, col) → UTF-16 bytes
+//   int         sqlite3_column_bytes16(stmt, col) → byte count (not code units)
+//
+// Complements column/ (UTF-8 side) with the UTF-16 accessor shape.
+// The engine auto-converts from the stored representation when needed.
+//
+// Submodules:
+//   * `view`     — per-column U16 view w/ byte-order
+//   * `engine`   — _column_text16 / _column_bytes16
+// =============================================================================
+
+module core.database.sqlite.native.column_text16;
+
+public module view;
+public module engine;

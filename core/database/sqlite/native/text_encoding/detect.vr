@@ -1,0 +1,62 @@
+// =============================================================================
+// text_encoding/detect.vr — best-guess encoding detection
+// =============================================================================
+// Spec: heuristic used when sqlite3_prepare receives a raw blob and
+// must decide whether it's UTF-8 or UTF-16.  The rule is:
+//   1. If a BOM is present, trust it.
+//   2. Otherwise every even byte being 0 implies UTF-16LE; every odd
+//      byte being 0 implies UTF-16BE.
+//   3. Otherwise default to UTF-8.
+// =============================================================================
+
+module core.database.sqlite.native.text_encoding.detect;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.text_encoding.kind.{
+    TextEncoding, TeUtf8, TeUtf16Le, TeUtf16Be,
+};
+mount core.database.sqlite.native.text_encoding.bom.{
+    BomKind, BkNone, BkUtf8, BkUtf16Le, BkUtf16Be, detect_bom,
+};
+
+fn looks_like_utf16_le(bytes: &List<u8>) -> Bool {
+    let n = bytes.len();
+    if n < 2 { return false; }
+    let mut i: Int = 1;
+    let mut zeros: Int = 0;
+    let mut checked: Int = 0;
+    while i < n {
+        if bytes[i] == (0 as u8) { zeros = zeros + 1; }
+        checked = checked + 1;
+        i = i + 2;
+    }
+    checked > 0 && zeros * 4 > checked * 3
+}
+
+fn looks_like_utf16_be(bytes: &List<u8>) -> Bool {
+    let n = bytes.len();
+    if n < 2 { return false; }
+    let mut i: Int = 0;
+    let mut zeros: Int = 0;
+    let mut checked: Int = 0;
+    while i < n {
+        if bytes[i] == (0 as u8) { zeros = zeros + 1; }
+        checked = checked + 1;
+        i = i + 2;
+    }
+    checked > 0 && zeros * 4 > checked * 3
+}
+
+public fn detect(bytes: &List<u8>) -> TextEncoding {
+    match detect_bom(bytes) {
+        BkUtf16Le => return TeUtf16Le,
+        BkUtf16Be => return TeUtf16Be,
+        BkUtf8    => return TeUtf8,
+        BkNone    => {}
+    }
+    if looks_like_utf16_le(bytes) { return TeUtf16Le; }
+    if looks_like_utf16_be(bytes) { return TeUtf16Be; }
+    TeUtf8
+}

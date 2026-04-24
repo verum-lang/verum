@@ -1,0 +1,53 @@
+// =============================================================================
+// result_api/payload.vr — typed result payload
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.result_api.payload;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type ResultPayload is
+      RpNull
+    | RpInt(Int64)
+    | RpDouble(Float)
+    | RpText(Text)
+    | RpText16(List<u8>)
+    | RpBlob(List<u8>)
+    | RpZeroBlob(Int64)
+    | RpPointer { handle: Int64, type_tag: Text }
+    | RpValue(Int64);           // opaque sqlite3_value handle id
+
+public fn kind_name(p: &ResultPayload) -> Text {
+    match p {
+        RpNull          => "null".clone(),
+        RpInt(_)        => "int".clone(),
+        RpDouble(_)     => "double".clone(),
+        RpText(_)       => "text".clone(),
+        RpText16(_)     => "text16".clone(),
+        RpBlob(_)       => "blob".clone(),
+        RpZeroBlob(_)   => "zeroblob".clone(),
+        RpPointer { .. } => "pointer".clone(),
+        RpValue(_)      => "value".clone(),
+    }
+}
+
+public fn is_null(p: &ResultPayload) -> Bool {
+    match p {
+        RpNull => true,
+        _ => false,
+    }
+}
+
+public fn byte_len(p: &ResultPayload) -> Int64 {
+    match p {
+        RpText(t)     => t.len() as Int64,
+        RpText16(b)   => b.len() as Int64,
+        RpBlob(b)     => b.len() as Int64,
+        RpZeroBlob(n) => *n,
+        _ => 0 as Int64,
+    }
+}

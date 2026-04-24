@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, destructor_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.destructor_api.kind.{
+    Destructor, DStatic, DTransient, DCustom,
+    SQLITE_STATIC, SQLITE_TRANSIENT,
+    destructor_ptr, destructor_name,
+    will_copy, will_invoke_callback, from_ptr,
+};
+mount core.database.sqlite.native.destructor_api.engine.{
+    DestructorEngine, new_engine,
+};
+mount base.{Bool};
+
+fn test_constants() {
+    assert_eq(SQLITE_STATIC, 0 as Int64);
+    assert_eq(SQLITE_TRANSIENT, -1 as Int64);
+}
+
+fn test_destructor_ptr() {
+    assert_eq(destructor_ptr(&DStatic), SQLITE_STATIC);
+    assert_eq(destructor_ptr(&DTransient), SQLITE_TRANSIENT);
+    assert_eq(destructor_ptr(&DCustom(42 as Int64)), 42 as Int64);
+}
+
+fn test_destructor_names() {
+    assert(destructor_name(&DStatic) == "SQLITE_STATIC".clone());
+    assert(destructor_name(&DTransient) == "SQLITE_TRANSIENT".clone());
+    assert(destructor_name(&DCustom(1 as Int64)) == "custom".clone());
+}
+
+fn test_will_copy_only_transient() {
+    assert(!will_copy(&DStatic));
+    assert(will_copy(&DTransient));
+    assert(!will_copy(&DCustom(42 as Int64)));
+}
+
+fn test_will_invoke_callback_only_custom() {
+    assert(!will_invoke_callback(&DStatic));
+    assert(!will_invoke_callback(&DTransient));
+    assert(will_invoke_callback(&DCustom(1 as Int64)));
+}
+
+fn test_from_ptr_round_trip() {
+    match from_ptr(SQLITE_STATIC)    { DStatic     => {}, _ => assert(false) }
+    match from_ptr(SQLITE_TRANSIENT) { DTransient  => {}, _ => assert(false) }
+    match from_ptr(999 as Int64)     { DCustom(_)  => {}, _ => assert(false) }
+}
+
+fn test_engine_observes() {
+    let mut e = new_engine();
+    e.observe(&DStatic);
+    e.observe(&DTransient);
+    e.observe(&DTransient);
+    e.observe(&DCustom(42 as Int64));
+    assert_eq(e.static_refs, 1 as Int64);
+    assert_eq(e.transient_copies, 2 as Int64);
+    assert_eq(e.custom_callbacks, 1 as Int64);
+    assert_eq(e.total(), 4 as Int64);
+}
+
+fn main() {
+    test_constants();
+    test_destructor_ptr();
+    test_destructor_names();
+    test_will_copy_only_transient();
+    test_will_invoke_callback_only_custom();
+    test_from_ptr_round_trip();
+    test_engine_observes();
+}

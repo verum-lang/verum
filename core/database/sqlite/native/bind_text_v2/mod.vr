@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/bind_text_v2/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_bind_text / _text16 / _text64)
+// Spec: SQLite C API
+//
+//   sqlite3_bind_text   (stmt, idx, z, n, xDel)
+//   sqlite3_bind_text16 (stmt, idx, z, n, xDel)
+//   sqlite3_bind_text64 (stmt, idx, z, n, xDel, encoding)
+//
+// `n < 0` for text16 means "read until the first zero-code-unit";
+// for text/text64 it means "read until NUL byte".
+//
+// Submodules:
+//   * `spec`      — BindTextSpec (encoding + byte-length + destructor)
+//   * `engine`    — per-stmt slot w/ validation
+// =============================================================================
+
+module core.database.sqlite.native.bind_text_v2;
+
+public module spec;
+public module engine;

@@ -1,0 +1,40 @@
+// =============================================================================
+// result_api/error.vr — ResultError sum
+// =============================================================================
+// Spec: SQLite C API — sqlite3_result_error / _error_code /
+//                    _error_nomem / _error_toobig.
+// =============================================================================
+
+module core.database.sqlite.native.result_api.error;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ResultError is
+      ReCustom { code: Int, message: Text }   // sqlite3_result_error_code + _error
+    | ReNoMem                                  // sqlite3_result_error_nomem
+    | ReTooBig;                                // sqlite3_result_error_toobig
+
+public fn error_code(e: &ResultError) -> Int {
+    match e {
+        ReCustom { code, .. } => *code,
+        ReNoMem => 7,      // SQLITE_NOMEM
+        ReTooBig => 18,    // SQLITE_TOOBIG
+    }
+}
+
+public fn error_name(e: &ResultError) -> Text {
+    match e {
+        ReCustom { .. } => "custom".clone(),
+        ReNoMem         => "SQLITE_NOMEM".clone(),
+        ReTooBig        => "SQLITE_TOOBIG".clone(),
+    }
+}
+
+public fn error_message(e: &ResultError) -> Text {
+    match e {
+        ReCustom { message, .. } => message.clone(),
+        ReNoMem  => "out of memory".clone(),
+        ReTooBig => "string or blob too big".clone(),
+    }
+}

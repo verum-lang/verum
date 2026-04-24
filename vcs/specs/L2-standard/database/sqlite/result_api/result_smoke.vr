@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, result_api, user_fn, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.result_api.payload.{
+    ResultPayload,
+    RpNull, RpInt, RpDouble, RpText, RpText16, RpBlob, RpZeroBlob,
+    RpPointer, RpValue,
+    kind_name, is_null, byte_len,
+};
+mount core.database.sqlite.native.result_api.error.{
+    ResultError,
+    ReCustom, ReNoMem, ReTooBig,
+    error_code, error_name, error_message,
+};
+mount core.database.sqlite.native.result_api.engine.{
+    ResultEngine,
+    new_engine,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_payload_kind_names() {
+    assert(kind_name(&RpNull) == "null".clone());
+    assert(kind_name(&RpInt(1 as Int64)) == "int".clone());
+    assert(kind_name(&RpDouble(3.14)) == "double".clone());
+    assert(kind_name(&RpText("x".clone())) == "text".clone());
+    let b: List<u8> = List.new();
+    assert(kind_name(&RpText16(b)) == "text16".clone());
+}
+
+fn test_is_null_only_rp_null() {
+    assert(is_null(&RpNull));
+    assert(!is_null(&RpInt(0 as Int64)));
+}
+
+fn test_byte_len_for_text_and_blob() {
+    assert_eq(byte_len(&RpText("abc".clone())), 3 as Int64);
+    let mut b: List<u8> = List.new();
+    b.push(0x01 as u8);
+    b.push(0x02 as u8);
+    assert_eq(byte_len(&RpBlob(b)), 2 as Int64);
+    assert_eq(byte_len(&RpZeroBlob(128 as Int64)), 128 as Int64);
+    assert_eq(byte_len(&RpNull), 0 as Int64);
+}
+
+fn test_error_code_and_name() {
+    assert_eq(error_code(&ReNoMem), 7);
+    assert_eq(error_code(&ReTooBig), 18);
+    let e: ResultError = ReCustom { code: 19, message: "constraint".clone() };
+    assert_eq(error_code(&e), 19);
+    assert(error_name(&ReNoMem) == "SQLITE_NOMEM".clone());
+    assert(error_message(&e) == "constraint".clone());
+}
+
+fn test_engine_set_payload_clears_error() {
+    let mut e = new_engine();
+    e.set_error(ReNoMem);
+    assert(e.has_error());
+    e.set_payload(RpInt(42 as Int64));
+    assert(!e.has_error());
+    assert_eq(e.sets, 2 as Int64);
+}
+
+fn test_engine_set_error_tracks_sets() {
+    let mut e = new_engine();
+    e.set_error(ReTooBig);
+    assert(e.has_error());
+    assert_eq(e.sets, 1 as Int64);
+}
+
+fn test_engine_subtype() {
+    let mut e = new_engine();
+    e.sqlite3_result_subtype(74);
+    assert_eq(e.subtype, 74);
+}
+
+fn test_payload_pointer_kind() {
+    let p: ResultPayload = RpPointer { handle: 99 as Int64, type_tag: "carray".clone() };
+    assert(kind_name(&p) == "pointer".clone());
+}
+
+fn main() {
+    test_payload_kind_names();
+    test_is_null_only_rp_null();
+    test_byte_len_for_text_and_blob();
+    test_error_code_and_name();
+    test_engine_set_payload_clears_error();
+    test_engine_set_error_tracks_sets();
+    test_engine_subtype();
+    test_payload_pointer_kind();
+}

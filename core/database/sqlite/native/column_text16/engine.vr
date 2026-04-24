@@ -1,0 +1,39 @@
+// =============================================================================
+// column_text16/engine.vr — _column_text16 / _column_bytes16
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.column_text16.engine;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.column_text16.view.{
+    U16ColumnView, view_byte_len, view_is_empty,
+};
+
+public type Text16Row is {
+    columns: List<U16ColumnView>,
+}
+
+public fn new_row() -> Text16Row {
+    Text16Row { columns: List.new() }
+}
+
+public fn push_column(r: &mut Text16Row, v: U16ColumnView) {
+    r.columns.push(v);
+}
+
+/// Returns a clone of the column bytes (caller-owned).  None if the
+/// column is out of range.
+public fn sqlite3_column_text16(r: &Text16Row, col: Int) -> Maybe<List<u8>> {
+    if col < 0 || col >= r.columns.len() { return Maybe.None; }
+    Maybe.Some(r.columns.get(col).bytes.clone())
+}
+
+/// Byte count (not code units); -1 if out of range, 0 if empty.
+public fn sqlite3_column_bytes16(r: &Text16Row, col: Int) -> Int {
+    if col < 0 || col >= r.columns.len() { return -1; }
+    view_byte_len(r.columns.get(col))
+}

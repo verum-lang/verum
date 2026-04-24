@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, column_text16, utf16, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.column_text16.view.{
+    U16ColumnView,
+    new_view_le, new_view_be,
+    view_byte_len, view_code_units, view_is_empty,
+};
+mount core.database.sqlite.native.column_text16.engine.{
+    Text16Row,
+    new_row, push_column,
+    sqlite3_column_text16, sqlite3_column_bytes16,
+};
+mount collections.List;
+mount base.{Bool, Maybe};
+
+fn test_view_byte_and_code_unit_counts() {
+    let mut b: List<u8> = List.new();
+    b.push(0x48 as u8);
+    b.push(0x00 as u8);
+    b.push(0x69 as u8);
+    b.push(0x00 as u8);
+    let v = new_view_le(b);
+    assert_eq(view_byte_len(&v), 4);
+    assert_eq(view_code_units(&v), 2);
+    assert(!view_is_empty(&v));
+}
+
+fn test_view_empty() {
+    let b: List<u8> = List.new();
+    let v = new_view_le(b);
+    assert(view_is_empty(&v));
+    assert_eq(view_code_units(&v), 0);
+}
+
+fn test_be_view_flag() {
+    let mut b: List<u8> = List.new();
+    b.push(0x00 as u8);
+    b.push(0x48 as u8);
+    let _ = new_view_be(b);
+}
+
+fn test_row_push_and_fetch_text16() {
+    let mut r = new_row();
+    let mut b: List<u8> = List.new();
+    b.push(0x48 as u8);
+    b.push(0x00 as u8);
+    push_column(&mut r, new_view_le(b));
+    match sqlite3_column_text16(&r, 0) {
+        Maybe.Some(bytes) => assert_eq(bytes.len(), 2),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_row_bytes16() {
+    let mut r = new_row();
+    let mut b: List<u8> = List.new();
+    b.push(0x00 as u8);
+    b.push(0x48 as u8);
+    b.push(0x00 as u8);
+    b.push(0x69 as u8);
+    push_column(&mut r, new_view_be(b));
+    assert_eq(sqlite3_column_bytes16(&r, 0), 4);
+}
+
+fn test_row_out_of_range_returns_none_or_neg1() {
+    let r = new_row();
+    match sqlite3_column_text16(&r, 0) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+    assert_eq(sqlite3_column_bytes16(&r, 0), -1);
+}
+
+fn main() {
+    test_view_byte_and_code_unit_counts();
+    test_view_empty();
+    test_be_view_flag();
+    test_row_push_and_fetch_text16();
+    test_row_bytes16();
+    test_row_out_of_range_returns_none_or_neg1();
+}

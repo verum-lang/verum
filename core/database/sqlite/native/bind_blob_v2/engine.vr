@@ -1,0 +1,63 @@
+// =============================================================================
+// bind_blob_v2/engine.vr — per-stmt bind slot
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.bind_blob_v2.engine;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.bind_blob_v2.spec.{
+    BindBlobSpec, is_valid,
+};
+
+public type BindBlobSlot is {
+    index: Int,
+    spec: Maybe<BindBlobSpec>,
+}
+
+public fn empty_slot(index: Int) -> BindBlobSlot {
+    BindBlobSlot { index: index, spec: Maybe.None }
+}
+
+public type BindBlobEngine is {
+    slots: List<BindBlobSlot>,
+    rejections: Int64,
+}
+
+public fn new_engine(n_params: Int) -> BindBlobEngine {
+    let mut slots: List<BindBlobSlot> = List.new();
+    let mut i: Int = 0;
+    while i <= n_params { slots.push(empty_slot(i)); i = i + 1; }
+    BindBlobEngine { slots: slots, rejections: 0 as Int64 }
+}
+
+implement BindBlobEngine {
+    /// SQLite codes: 0 (OK), 25 (SQLITE_RANGE) on bad index,
+    /// 21 (SQLITE_MISUSE) on negative size, 18 (SQLITE_TOOBIG) on
+    /// v1 size > INT32_MAX.
+    pub fn sqlite3_bind_blob(&mut self, index: Int, spec: BindBlobSpec) -> Int {
+        if index <= 0 || index >= self.slots.len() {
+            self.rejections = self.rejections + (1 as Int64);
+            return 25;
+        }
+        if spec.byte_len < (0 as Int64) {
+            self.rejections = self.rejections + (1 as Int64);
+            return 21;
+        }
+        if !is_valid(&spec) {
+            self.rejections = self.rejections + (1 as Int64);
+            return 18;
+        }
+        self.slots.get_mut(index).spec = Maybe.Some(spec);
+        0
+    }
+
+    pub fn clear(&mut self, index: Int) -> Bool {
+        if index <= 0 || index >= self.slots.len() { return false; }
+        self.slots.get_mut(index).spec = Maybe.None;
+        true
+    }
+}

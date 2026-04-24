@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, db_release_memory_api, lookaside, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.db_release_memory_api.lookaside.{
+    Lookaside,
+    new_lookaside, try_allocate, release_one, drain_to_zero,
+};
+mount core.database.sqlite.native.db_release_memory_api.engine.{
+    DbReleaseEngine,
+    new_engine,
+};
+mount base.{Bool};
+
+fn test_lookaside_allocate_and_release() {
+    let mut l = new_lookaside(64, 4);
+    assert(try_allocate(&mut l, 32));
+    assert(try_allocate(&mut l, 64));
+    assert_eq(l.slots_in_use, 2);
+    assert_eq(l.hits, 2 as Int64);
+    assert(release_one(&mut l));
+    assert_eq(l.slots_in_use, 1);
+}
+
+fn test_lookaside_rejects_oversize() {
+    let mut l = new_lookaside(64, 4);
+    assert(!try_allocate(&mut l, 128));
+    assert_eq(l.misses, 1 as Int64);
+}
+
+fn test_lookaside_rejects_when_full() {
+    let mut l = new_lookaside(64, 2);
+    assert(try_allocate(&mut l, 32));
+    assert(try_allocate(&mut l, 32));
+    assert(!try_allocate(&mut l, 32));
+    assert_eq(l.misses, 1 as Int64);
+}
+
+fn test_lookaside_drain_to_zero() {
+    let mut l = new_lookaside(64, 4);
+    let _ = try_allocate(&mut l, 32);
+    let _ = try_allocate(&mut l, 32);
+    let _ = try_allocate(&mut l, 32);
+    let released = drain_to_zero(&mut l);
+    assert_eq(released, 3);
+    assert_eq(l.slots_in_use, 0);
+}
+
+fn test_engine_release_drains_lookaside_and_reports_ok() {
+    let mut l = new_lookaside(64, 4);
+    let _ = try_allocate(&mut l, 16);
+    let _ = try_allocate(&mut l, 16);
+    let mut e = new_engine(l);
+    e.note_page_cache(1024 as Int64);
+    let rc = e.sqlite3_db_release_memory();
+    assert_eq(rc, 0);
+    assert_eq(e.calls, 1 as Int64);
+    // 2 slots × 64 bytes + 1024 page cache = 1152 bytes released.
+    assert_eq(e.total_released_bytes, 1152 as Int64);
+    assert_eq(e.page_cache_releasable_bytes, 0 as Int64);
+}
+
+fn test_engine_repeated_release_counts_calls() {
+    let mut l = new_lookaside(32, 2);
+    let _ = try_allocate(&mut l, 16);
+    let mut e = new_engine(l);
+    let _ = e.sqlite3_db_release_memory();
+    let _ = e.sqlite3_db_release_memory();
+    assert_eq(e.calls, 2 as Int64);
+}
+
+fn main() {
+    test_lookaside_allocate_and_release();
+    test_lookaside_rejects_oversize();
+    test_lookaside_rejects_when_full();
+    test_lookaside_drain_to_zero();
+    test_engine_release_drains_lookaside_and_reports_ok();
+    test_engine_repeated_release_counts_calls();
+}

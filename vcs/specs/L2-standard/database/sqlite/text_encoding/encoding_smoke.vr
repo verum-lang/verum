@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, text_encoding, utf16, bom, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.text_encoding.kind.{
+    TextEncoding, TeUtf8, TeUtf16Le, TeUtf16Be, TeUtf16Native, TeAny, TeUtf16Aligned,
+    SQLITE_UTF8, SQLITE_UTF16LE, SQLITE_UTF16BE, SQLITE_UTF16_NATIVE,
+    SQLITE_ANY, SQLITE_UTF16_ALIGNED,
+    encoding_numeric, encoding_name, is_utf16, code_unit_bytes, from_numeric,
+};
+mount core.database.sqlite.native.text_encoding.bom.{
+    BomKind, BkNone, BkUtf8, BkUtf16Le, BkUtf16Be,
+    bom_bytes, detect_bom,
+};
+mount core.database.sqlite.native.text_encoding.detect.{
+    detect,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_encoding_constants() {
+    assert_eq(SQLITE_UTF8, 1);
+    assert_eq(SQLITE_UTF16LE, 2);
+    assert_eq(SQLITE_UTF16BE, 3);
+    assert_eq(SQLITE_UTF16_NATIVE, 4);
+    assert_eq(SQLITE_ANY, 5);
+    assert_eq(SQLITE_UTF16_ALIGNED, 8);
+}
+
+fn test_encoding_numeric_round_trip() {
+    assert_eq(encoding_numeric(&TeUtf8), SQLITE_UTF8);
+    assert_eq(encoding_numeric(&TeUtf16Aligned), SQLITE_UTF16_ALIGNED);
+    match from_numeric(2) { TeUtf16Le => {}, _ => assert(false) }
+    match from_numeric(99) { TeUtf8   => {}, _ => assert(false) }
+}
+
+fn test_is_utf16() {
+    assert(!is_utf16(&TeUtf8));
+    assert(is_utf16(&TeUtf16Le));
+    assert(is_utf16(&TeUtf16Be));
+    assert(is_utf16(&TeUtf16Native));
+    assert(is_utf16(&TeUtf16Aligned));
+}
+
+fn test_code_unit_bytes() {
+    assert_eq(code_unit_bytes(&TeUtf8), 1);
+    assert_eq(code_unit_bytes(&TeUtf16Le), 2);
+}
+
+fn test_encoding_name() {
+    assert(encoding_name(&TeUtf8) == "UTF8".clone());
+    assert(encoding_name(&TeUtf16Le) == "UTF16LE".clone());
+}
+
+fn test_bom_bytes() {
+    assert_eq(bom_bytes(&BkNone), 0);
+    assert_eq(bom_bytes(&BkUtf8), 3);
+    assert_eq(bom_bytes(&BkUtf16Le), 2);
+    assert_eq(bom_bytes(&BkUtf16Be), 2);
+}
+
+fn test_detect_bom_utf8() {
+    let mut b: List<u8> = List.new();
+    b.push(0xEF as u8);
+    b.push(0xBB as u8);
+    b.push(0xBF as u8);
+    b.push(0x61 as u8);
+    match detect_bom(&b) { BkUtf8 => {}, _ => assert(false) }
+}
+
+fn test_detect_bom_utf16_le_be() {
+    let mut le: List<u8> = List.new();
+    le.push(0xFF as u8);
+    le.push(0xFE as u8);
+    match detect_bom(&le) { BkUtf16Le => {}, _ => assert(false) }
+
+    let mut be: List<u8> = List.new();
+    be.push(0xFE as u8);
+    be.push(0xFF as u8);
+    match detect_bom(&be) { BkUtf16Be => {}, _ => assert(false) }
+}
+
+fn test_detect_bom_none() {
+    let mut b: List<u8> = List.new();
+    b.push(0x61 as u8);
+    b.push(0x62 as u8);
+    match detect_bom(&b) { BkNone => {}, _ => assert(false) }
+}
+
+fn test_detect_picks_utf16_le_for_bom() {
+    let mut b: List<u8> = List.new();
+    b.push(0xFF as u8);
+    b.push(0xFE as u8);
+    b.push(0x61 as u8);
+    b.push(0x00 as u8);
+    match detect(&b) { TeUtf16Le => {}, _ => assert(false) }
+}
+
+fn test_detect_picks_utf8_for_plain_ascii() {
+    let mut b: List<u8> = List.new();
+    b.push(0x48 as u8);
+    b.push(0x69 as u8);
+    b.push(0x21 as u8);
+    match detect(&b) { TeUtf8 => {}, _ => assert(false) }
+}
+
+fn test_detect_picks_utf16_be_for_alternating_zeros() {
+    // "H" "i" in UTF-16 BE bytes.
+    let mut b: List<u8> = List.new();
+    b.push(0x00 as u8);
+    b.push(0x48 as u8);
+    b.push(0x00 as u8);
+    b.push(0x69 as u8);
+    b.push(0x00 as u8);
+    b.push(0x21 as u8);
+    match detect(&b) { TeUtf16Be => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_encoding_constants();
+    test_encoding_numeric_round_trip();
+    test_is_utf16();
+    test_code_unit_bytes();
+    test_encoding_name();
+    test_bom_bytes();
+    test_detect_bom_utf8();
+    test_detect_bom_utf16_le_be();
+    test_detect_bom_none();
+    test_detect_picks_utf16_le_for_bom();
+    test_detect_picks_utf8_for_plain_ascii();
+    test_detect_picks_utf16_be_for_alternating_zeros();
+}

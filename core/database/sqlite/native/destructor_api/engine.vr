@@ -1,0 +1,44 @@
+// =============================================================================
+// destructor_api/engine.vr — invocation bookkeeping
+// =============================================================================
+// Spec: SQLite C API
+//
+// Tracks static-refs / transient-copies / custom-callbacks fired so
+// tooling can audit allocator balance between bind/result pairs.
+// =============================================================================
+
+module core.database.sqlite.native.destructor_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.destructor_api.kind.{
+    Destructor, DStatic, DTransient, DCustom, will_copy, will_invoke_callback,
+};
+
+public type DestructorEngine is {
+    static_refs: Int64,
+    transient_copies: Int64,
+    custom_callbacks: Int64,
+}
+
+public fn new_engine() -> DestructorEngine {
+    DestructorEngine {
+        static_refs: 0 as Int64,
+        transient_copies: 0 as Int64,
+        custom_callbacks: 0 as Int64,
+    }
+}
+
+implement DestructorEngine {
+    pub fn observe(&mut self, d: &Destructor) {
+        match d {
+            DStatic     => self.static_refs = self.static_refs + (1 as Int64),
+            DTransient  => self.transient_copies = self.transient_copies + (1 as Int64),
+            DCustom(_)  => self.custom_callbacks = self.custom_callbacks + (1 as Int64),
+        }
+    }
+
+    pub fn total(&self) -> Int64 {
+        self.static_refs + self.transient_copies + self.custom_callbacks
+    }
+}

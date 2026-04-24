@@ -1,0 +1,48 @@
+// =============================================================================
+// bind_text_v2/spec.vr — BindTextSpec
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.bind_text_v2.spec;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.text_encoding.kind.{
+    TextEncoding, TeUtf8, TeUtf16Le, TeUtf16Be, is_utf16,
+};
+mount core.database.sqlite.native.destructor_api.kind.{
+    Destructor, DStatic, DTransient, DCustom,
+};
+
+public type BindTextSpec is {
+    encoding: TextEncoding,
+    /// -1 ⇒ "read to NUL" (UTF-8) or "read to zero-code-unit" (UTF-16).
+    /// Otherwise byte length (always bytes, even for UTF-16).
+    byte_len: Int64,
+    destructor: Destructor,
+}
+
+public fn utf8_spec(byte_len: Int64, destructor: Destructor) -> BindTextSpec {
+    BindTextSpec {
+        encoding: TeUtf8,
+        byte_len: byte_len,
+        destructor: destructor,
+    }
+}
+
+public fn utf16le_spec(byte_len: Int64, destructor: Destructor) -> BindTextSpec {
+    BindTextSpec {
+        encoding: TeUtf16Le,
+        byte_len: byte_len,
+        destructor: destructor,
+    }
+}
+
+/// UTF-16 byte lengths (non-negative) must be even.
+public fn is_valid(s: &BindTextSpec) -> Bool {
+    if is_utf16(&s.encoding) && s.byte_len > (0 as Int64) && (s.byte_len & (1 as Int64)) != (0 as Int64) {
+        return false;
+    }
+    true
+}

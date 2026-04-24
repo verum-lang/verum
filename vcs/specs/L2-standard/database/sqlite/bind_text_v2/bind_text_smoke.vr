@@ -1,0 +1,77 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind_text_v2, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bind_text_v2.spec.{
+    BindTextSpec,
+    utf8_spec, utf16le_spec, is_valid,
+};
+mount core.database.sqlite.native.bind_text_v2.engine.{
+    BindTextEngine, new_engine,
+};
+mount core.database.sqlite.native.destructor_api.kind.{
+    Destructor, DStatic, DTransient, DCustom,
+};
+mount base.{Bool};
+
+fn test_utf8_spec_valid() {
+    let s = utf8_spec(128 as Int64, DTransient);
+    assert(is_valid(&s));
+}
+
+fn test_utf16_even_byte_len_valid() {
+    let s = utf16le_spec(64 as Int64, DStatic);
+    assert(is_valid(&s));
+}
+
+fn test_utf16_odd_byte_len_invalid() {
+    let s = utf16le_spec(65 as Int64, DTransient);
+    assert(!is_valid(&s));
+}
+
+fn test_utf16_nul_terminated_len_neg_one_valid() {
+    // byte_len < 0 (read-to-NUL) bypasses the even-length rule.
+    let s = utf16le_spec(-1 as Int64, DTransient);
+    assert(is_valid(&s));
+}
+
+fn test_engine_bind_ok() {
+    let mut e = new_engine(4);
+    let r = e.sqlite3_bind_text(2, utf8_spec(100 as Int64, DTransient));
+    assert_eq(r, 0);
+    assert_eq(e.byte_len(2), 100 as Int64);
+}
+
+fn test_engine_bind_bad_index_is_sqlite_range() {
+    let mut e = new_engine(2);
+    assert_eq(e.sqlite3_bind_text(0, utf8_spec(1 as Int64, DStatic)), 25);
+    assert_eq(e.sqlite3_bind_text(99, utf8_spec(1 as Int64, DStatic)), 25);
+}
+
+fn test_engine_bind_invalid_shape_is_sqlite_error() {
+    let mut e = new_engine(4);
+    let r = e.sqlite3_bind_text(1, utf16le_spec(5 as Int64, DStatic));
+    assert_eq(r, 1);
+    assert_eq(e.rejections, 1 as Int64);
+}
+
+fn test_engine_clear() {
+    let mut e = new_engine(4);
+    let _ = e.sqlite3_bind_text(2, utf8_spec(1 as Int64, DStatic));
+    assert(e.clear(2));
+    assert_eq(e.byte_len(2), 0 as Int64);
+}
+
+fn main() {
+    test_utf8_spec_valid();
+    test_utf16_even_byte_len_valid();
+    test_utf16_odd_byte_len_invalid();
+    test_utf16_nul_terminated_len_neg_one_valid();
+    test_engine_bind_ok();
+    test_engine_bind_bad_index_is_sqlite_range();
+    test_engine_bind_invalid_shape_is_sqlite_error();
+    test_engine_clear();
+}

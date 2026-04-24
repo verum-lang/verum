@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/result_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_result_* user-fn result setters)
+// Spec: SQLite C API
+//
+//   sqlite3_result_int / _int64 / _double / _text / _text16 / _blob /
+//   sqlite3_result_null / _zeroblob / _zeroblob64 / _value / _pointer /
+//   sqlite3_result_subtype / sqlite3_result_error / _error_code /
+//   sqlite3_result_error_nomem / _error_toobig / _error_code
+//
+// Complements `context_api/result` (the typed sum the engine reads);
+// this catalogue models the typed *setters*.
+//
+// Submodules:
+//   * `payload`    — ResultPayload variant
+//   * `error`      — ResultError sum (nomem / toobig / message)
+//   * `engine`     — single-slot sink + latest-set tracker
+// =============================================================================
+
+module core.database.sqlite.native.result_api;
+
+public module payload;
+public module error;
+public module engine;

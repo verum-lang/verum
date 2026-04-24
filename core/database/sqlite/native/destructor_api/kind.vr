@@ -1,0 +1,55 @@
+// =============================================================================
+// destructor_api/kind.vr — Destructor sum
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.destructor_api.kind;
+
+mount core.*;
+mount base.{Bool, Text};
+
+/// SQLite's two magic pointer values.
+public const SQLITE_STATIC: Int64     = 0 as Int64;
+public const SQLITE_TRANSIENT: Int64  = -1 as Int64;
+
+public type Destructor is
+      DStatic
+    | DTransient
+    | DCustom(Int64);       // opaque destructor-function handle (non-NULL)
+
+public fn destructor_ptr(d: &Destructor) -> Int64 {
+    match d {
+        DStatic       => SQLITE_STATIC,
+        DTransient    => SQLITE_TRANSIENT,
+        DCustom(h)    => *h,
+    }
+}
+
+public fn destructor_name(d: &Destructor) -> Text {
+    match d {
+        DStatic     => "SQLITE_STATIC".clone(),
+        DTransient  => "SQLITE_TRANSIENT".clone(),
+        DCustom(_)  => "custom".clone(),
+    }
+}
+
+public fn will_copy(d: &Destructor) -> Bool {
+    match d {
+        DTransient => true,
+        _ => false,
+    }
+}
+
+public fn will_invoke_callback(d: &Destructor) -> Bool {
+    match d {
+        DCustom(_) => true,
+        _ => false,
+    }
+}
+
+public fn from_ptr(ptr: Int64) -> Destructor {
+    if ptr == SQLITE_STATIC    { return DStatic; }
+    if ptr == SQLITE_TRANSIENT { return DTransient; }
+    DCustom(ptr)
+}

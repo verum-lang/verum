@@ -1,0 +1,52 @@
+// =============================================================================
+// bind_blob_v2/spec.vr — BindBlobSpec
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.bind_blob_v2.spec;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.destructor_api.kind.{
+    Destructor,
+};
+
+public type BindApi is
+      BaV1         // sqlite3_bind_blob (32-bit size)
+    | BaV2;        // sqlite3_bind_blob64
+
+public type BindBlobSpec is {
+    byte_len: Int64,
+    destructor: Destructor,
+    api: BindApi,
+}
+
+public fn v1_spec(byte_len: Int, destructor: Destructor) -> BindBlobSpec {
+    BindBlobSpec {
+        byte_len: byte_len as Int64,
+        destructor: destructor,
+        api: BaV1,
+    }
+}
+
+public fn v2_spec(byte_len: Int64, destructor: Destructor) -> BindBlobSpec {
+    BindBlobSpec {
+        byte_len: byte_len,
+        destructor: destructor,
+        api: BaV2,
+    }
+}
+
+/// Negative blob size is always SQLITE_MISUSE.  The 32-bit variant
+/// additionally rejects sizes > INT32_MAX.
+public fn is_valid(s: &BindBlobSpec) -> Bool {
+    if s.byte_len < (0 as Int64) { return false; }
+    match &s.api {
+        BaV1 => {
+            let max32: Int64 = 2147483647 as Int64;
+            s.byte_len <= max32
+        }
+        BaV2 => true,
+    }
+}

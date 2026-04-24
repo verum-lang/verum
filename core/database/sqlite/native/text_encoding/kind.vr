@@ -1,0 +1,67 @@
+// =============================================================================
+// text_encoding/kind.vr — TextEncoding sum
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.text_encoding.kind;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_UTF8: Int           = 1;
+public const SQLITE_UTF16LE: Int        = 2;
+public const SQLITE_UTF16BE: Int        = 3;
+public const SQLITE_UTF16_NATIVE: Int   = 4;   // "SQLITE_UTF16" in sqlite3.h
+public const SQLITE_ANY: Int            = 5;
+public const SQLITE_UTF16_ALIGNED: Int  = 8;
+
+public type TextEncoding is
+      TeUtf8
+    | TeUtf16Le
+    | TeUtf16Be
+    | TeUtf16Native
+    | TeAny
+    | TeUtf16Aligned;
+
+public fn encoding_numeric(e: &TextEncoding) -> Int {
+    match e {
+        TeUtf8          => SQLITE_UTF8,
+        TeUtf16Le       => SQLITE_UTF16LE,
+        TeUtf16Be       => SQLITE_UTF16BE,
+        TeUtf16Native   => SQLITE_UTF16_NATIVE,
+        TeAny           => SQLITE_ANY,
+        TeUtf16Aligned  => SQLITE_UTF16_ALIGNED,
+    }
+}
+
+public fn encoding_name(e: &TextEncoding) -> Text {
+    match e {
+        TeUtf8          => "UTF8".clone(),
+        TeUtf16Le       => "UTF16LE".clone(),
+        TeUtf16Be       => "UTF16BE".clone(),
+        TeUtf16Native   => "UTF16".clone(),
+        TeAny           => "ANY".clone(),
+        TeUtf16Aligned  => "UTF16_ALIGNED".clone(),
+    }
+}
+
+public fn is_utf16(e: &TextEncoding) -> Bool {
+    match e {
+        TeUtf16Le | TeUtf16Be | TeUtf16Native | TeUtf16Aligned => true,
+        _ => false,
+    }
+}
+
+public fn code_unit_bytes(e: &TextEncoding) -> Int {
+    if is_utf16(e) { 2 } else { 1 }
+}
+
+public fn from_numeric(n: Int) -> TextEncoding {
+    if n == SQLITE_UTF16LE        { return TeUtf16Le; }
+    if n == SQLITE_UTF16BE        { return TeUtf16Be; }
+    if n == SQLITE_UTF16_NATIVE   { return TeUtf16Native; }
+    if n == SQLITE_ANY            { return TeAny; }
+    if n == SQLITE_UTF16_ALIGNED  { return TeUtf16Aligned; }
+    TeUtf8
+}

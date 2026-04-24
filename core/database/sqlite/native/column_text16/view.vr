@@ -1,0 +1,38 @@
+// =============================================================================
+// column_text16/view.vr — per-column UTF-16 view
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.column_text16.view;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.utf16_codec.byte_order.{
+    ByteOrder, BoLittle, BoBig, is_little,
+};
+
+public type U16ColumnView is {
+    bytes: List<u8>,
+    order: ByteOrder,
+}
+
+public fn new_view_le(bytes: List<u8>) -> U16ColumnView {
+    U16ColumnView { bytes: bytes, order: BoLittle }
+}
+
+public fn new_view_be(bytes: List<u8>) -> U16ColumnView {
+    U16ColumnView { bytes: bytes, order: BoBig }
+}
+
+public fn view_byte_len(v: &U16ColumnView) -> Int { v.bytes.len() }
+
+public fn view_code_units(v: &U16ColumnView) -> Int {
+    let n = v.bytes.len();
+    n / 2
+}
+
+public fn view_is_empty(v: &U16ColumnView) -> Bool {
+    v.bytes.len() == 0
+}

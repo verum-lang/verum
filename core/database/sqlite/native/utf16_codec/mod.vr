@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/utf16_codec/mod.vr
+// =============================================================================
+// Layer: 5 (façade — UTF-16 LE/BE byte-level marshalling)
+// Spec: Unicode + SQLite C API
+//
+// SQLite's UTF-16 handling is byte-granular — public calls like
+// sqlite3_bind_text16 / _column_text16 accept a raw byte buffer and a
+// length.  This catalogue encapsulates:
+//
+//   * byte-count helpers (code units → bytes),
+//   * LE/BE code-unit extraction,
+//   * byte-order conversion (swap pairs).
+//
+// Submodules:
+//   * `byte_order` — ByteOrder sum + swap helper
+//   * `codec`      — encode_u16 / decode_u16 per byte order
+// =============================================================================
+
+module core.database.sqlite.native.utf16_codec;
+
+public module byte_order;
+public module codec;

@@ -1,0 +1,57 @@
+// =============================================================================
+// utf16_codec/codec.vr — encode / decode one u16 code unit
+// =============================================================================
+// Spec: Unicode
+// =============================================================================
+
+module core.database.sqlite.native.utf16_codec.codec;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.utf16_codec.byte_order.{
+    ByteOrder, BoLittle, BoBig,
+};
+
+/// Extract the 16-bit value stored at byte-offset `offset` in the
+/// given byte order.  Returns -1 if the offset is out of range.
+public fn decode_u16(bytes: &List<u8>, offset: Int, order: &ByteOrder) -> Int {
+    if offset < 0 || offset + 1 >= bytes.len() { return -1; }
+    let lo_first = match order {
+        BoLittle => true,
+        BoBig    => false,
+    };
+    let b0: Int = bytes[offset] as Int;
+    let b1: Int = bytes[offset + 1] as Int;
+    if lo_first {
+        b0 | (b1 * 256)
+    } else {
+        (b0 * 256) | b1
+    }
+}
+
+public fn encode_u16(dst: &mut List<u8>, value: Int, order: &ByteOrder) {
+    let lo: Int = value & 0xFF;
+    let hi: Int = (value / 256) & 0xFF;
+    match order {
+        BoLittle => {
+            dst.push(lo as u8);
+            dst.push(hi as u8);
+        }
+        BoBig => {
+            dst.push(hi as u8);
+            dst.push(lo as u8);
+        }
+    }
+}
+
+/// UTF-16 byte length (bytes, not code units).  Always even; rounds
+/// odd input down.
+public fn round_to_code_units(byte_len: Int) -> Int {
+    byte_len - (byte_len & 1)
+}
+
+/// Number of UTF-16 code units in `byte_len` bytes.
+public fn code_units_in(byte_len: Int) -> Int {
+    round_to_code_units(byte_len) / 2
+}

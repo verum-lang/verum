@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/destructor_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — SQLITE_STATIC / SQLITE_TRANSIENT destructor constants)
+// Spec: SQLite C API
+//
+// Every sqlite3_bind_text / _bind_blob / sqlite3_result_text /
+// _result_blob call takes a trailing destructor argument:
+//
+//   SQLITE_STATIC    = 0   — value is permanent; engine keeps pointer
+//   SQLITE_TRANSIENT = -1  — engine copies immediately
+//   any other ptr    — engine calls it when releasing the value
+//
+// Submodules:
+//   * `kind`    — Destructor sum (Static / Transient / Custom(handle))
+//   * `engine`  — invocation bookkeeping
+// =============================================================================
+
+module core.database.sqlite.native.destructor_api;
+
+public module kind;
+public module engine;

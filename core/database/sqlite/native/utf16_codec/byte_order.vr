@@ -1,0 +1,45 @@
+// =============================================================================
+// utf16_codec/byte_order.vr — ByteOrder sum + swap
+// =============================================================================
+// Spec: Unicode
+// =============================================================================
+
+module core.database.sqlite.native.utf16_codec.byte_order;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type ByteOrder is
+      BoLittle
+    | BoBig;
+
+public fn order_name(o: &ByteOrder) -> Text {
+    match o {
+        BoLittle => "LE".clone(),
+        BoBig    => "BE".clone(),
+    }
+}
+
+public fn is_little(o: &ByteOrder) -> Bool {
+    match o {
+        BoLittle => true,
+        BoBig    => false,
+    }
+}
+
+/// Swap every adjacent byte pair — converts between LE and BE.
+/// Input length must be even; odd trailing byte is preserved.
+public fn swap_pairs(bytes: &List<u8>) -> List<u8> {
+    let mut out: List<u8> = List.new();
+    let n = bytes.len();
+    let limit = n - (n & 1);
+    let mut i: Int = 0;
+    while i < limit {
+        out.push(bytes[i + 1]);
+        out.push(bytes[i]);
+        i = i + 2;
+    }
+    if (n & 1) != 0 { out.push(bytes[n - 1]); }
+    out
+}

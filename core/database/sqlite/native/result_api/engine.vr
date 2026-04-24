@@ -1,0 +1,62 @@
+// =============================================================================
+// result_api/engine.vr — single-slot result sink
+// =============================================================================
+// Spec: SQLite C API
+//
+// A user-fn's context has exactly one result slot; sqlite3_result_*
+// calls overwrite it.  The engine also records the subtype byte set
+// via sqlite3_result_subtype.
+// =============================================================================
+
+module core.database.sqlite.native.result_api.engine;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount core.database.sqlite.native.result_api.payload.{
+    ResultPayload, RpNull, kind_name,
+};
+mount core.database.sqlite.native.result_api.error.{
+    ResultError,
+};
+
+public type ResultEngine is {
+    payload: ResultPayload,
+    error: Maybe<ResultError>,
+    /// sqlite3_result_subtype byte 0..255 (0 = default).
+    subtype: Int,
+    /// Number of sqlite3_result_* calls observed on this context.
+    sets: Int64,
+}
+
+public fn new_engine() -> ResultEngine {
+    ResultEngine {
+        payload: RpNull,
+        error: Maybe.None,
+        subtype: 0,
+        sets: 0 as Int64,
+    }
+}
+
+implement ResultEngine {
+    pub fn set_payload(&mut self, p: ResultPayload) {
+        self.payload = p;
+        self.error = Maybe.None;
+        self.sets = self.sets + (1 as Int64);
+    }
+
+    pub fn set_error(&mut self, e: ResultError) {
+        self.error = Maybe.Some(e);
+        self.sets = self.sets + (1 as Int64);
+    }
+
+    pub fn sqlite3_result_subtype(&mut self, st: Int) {
+        self.subtype = st;
+    }
+
+    pub fn has_error(&self) -> Bool {
+        match &self.error {
+            Maybe.Some(_) => true,
+            Maybe.None => false,
+        }
+    }
+}

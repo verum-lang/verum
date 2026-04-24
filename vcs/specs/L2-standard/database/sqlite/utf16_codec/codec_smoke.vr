@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, utf16_codec, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.utf16_codec.byte_order.{
+    ByteOrder, BoLittle, BoBig,
+    order_name, is_little, swap_pairs,
+};
+mount core.database.sqlite.native.utf16_codec.codec.{
+    encode_u16, decode_u16, round_to_code_units, code_units_in,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_order_names() {
+    assert(order_name(&BoLittle) == "LE".clone());
+    assert(order_name(&BoBig) == "BE".clone());
+}
+
+fn test_is_little() {
+    assert(is_little(&BoLittle));
+    assert(!is_little(&BoBig));
+}
+
+fn test_swap_pairs_even_len() {
+    let mut b: List<u8> = List.new();
+    b.push(0x01 as u8);
+    b.push(0x02 as u8);
+    b.push(0x03 as u8);
+    b.push(0x04 as u8);
+    let s = swap_pairs(&b);
+    assert_eq(s.get(0), &(0x02 as u8));
+    assert_eq(s.get(1), &(0x01 as u8));
+    assert_eq(s.get(2), &(0x04 as u8));
+    assert_eq(s.get(3), &(0x03 as u8));
+}
+
+fn test_swap_pairs_odd_preserves_tail() {
+    let mut b: List<u8> = List.new();
+    b.push(0x01 as u8);
+    b.push(0x02 as u8);
+    b.push(0x05 as u8);
+    let s = swap_pairs(&b);
+    assert_eq(s.len(), 3);
+    assert_eq(s.get(2), &(0x05 as u8));
+}
+
+fn test_decode_u16_le() {
+    let mut b: List<u8> = List.new();
+    b.push(0x34 as u8);
+    b.push(0x12 as u8);
+    assert_eq(decode_u16(&b, 0, &BoLittle), 0x1234);
+}
+
+fn test_decode_u16_be() {
+    let mut b: List<u8> = List.new();
+    b.push(0x12 as u8);
+    b.push(0x34 as u8);
+    assert_eq(decode_u16(&b, 0, &BoBig), 0x1234);
+}
+
+fn test_decode_u16_out_of_range() {
+    let b: List<u8> = List.new();
+    assert_eq(decode_u16(&b, 0, &BoLittle), -1);
+}
+
+fn test_encode_u16_le_then_decode() {
+    let mut dst: List<u8> = List.new();
+    encode_u16(&mut dst, 0xBEEF, &BoLittle);
+    assert_eq(dst.len(), 2);
+    assert_eq(decode_u16(&dst, 0, &BoLittle), 0xBEEF);
+}
+
+fn test_encode_u16_be_then_decode() {
+    let mut dst: List<u8> = List.new();
+    encode_u16(&mut dst, 0xABCD, &BoBig);
+    assert_eq(decode_u16(&dst, 0, &BoBig), 0xABCD);
+}
+
+fn test_round_to_code_units_and_count() {
+    assert_eq(round_to_code_units(10), 10);
+    assert_eq(round_to_code_units(11), 10);
+    assert_eq(code_units_in(10), 5);
+    assert_eq(code_units_in(11), 5);
+}
+
+fn main() {
+    test_order_names();
+    test_is_little();
+    test_swap_pairs_even_len();
+    test_swap_pairs_odd_preserves_tail();
+    test_decode_u16_le();
+    test_decode_u16_be();
+    test_decode_u16_out_of_range();
+    test_encode_u16_le_then_decode();
+    test_encode_u16_be_then_decode();
+    test_round_to_code_units_and_count();
+}

@@ -348,3 +348,19 @@ public module hash_api;
 public module sorter_api;
 // - pcache_api: sqlite3_pcache_* runtime — LRU page cache w/ pin/unpin/dirty tracking
 public module pcache_api;
+// - destructor_api: SQLITE_STATIC / SQLITE_TRANSIENT destructor constants + custom handles
+public module destructor_api;
+// - result_api: sqlite3_result_* user-fn result setters — payload + error + subtype
+public module result_api;
+// - bind_text_v2: sqlite3_bind_text / _text16 / _text64 — encoding + destructor + byte-len
+public module bind_text_v2;
+// - bind_blob_v2: sqlite3_bind_blob / _blob64 — destructor + byte-len validation
+public module bind_blob_v2;
+// - column_text16: sqlite3_column_text16 / _bytes16 — UTF-16 column accessors
+public module column_text16;
+// - utf16_codec: UTF-16 LE/BE byte-level marshalling — encode/decode/swap
+public module utf16_codec;
+// - text_encoding: TextEncoding taxonomy + BOM detection + best-guess encoding detect
+public module text_encoding;
+// - db_release_memory_api: sqlite3_db_release_memory — per-conn lookaside + page-cache drain
+public module db_release_memory_api;

@@ -1,0 +1,59 @@
+// =============================================================================
+// db_release_memory_api/lookaside.vr — LookasideSlot bookkeeping
+// =============================================================================
+// Spec: SQLite C API — SQLITE_DBCONFIG_LOOKASIDE.
+//
+// Per-connection lookaside is a fixed-size slab of equal-length slots
+// used to satisfy small allocations without touching the heap.
+// =============================================================================
+
+module core.database.sqlite.native.db_release_memory_api.lookaside;
+
+mount core.*;
+mount base.{Bool};
+
+public type Lookaside is {
+    slot_size_bytes: Int,
+    slot_count: Int,
+    slots_in_use: Int,
+    hits: Int64,
+    misses: Int64,
+}
+
+public fn new_lookaside(slot_size_bytes: Int, slot_count: Int) -> Lookaside {
+    Lookaside {
+        slot_size_bytes: slot_size_bytes,
+        slot_count: slot_count,
+        slots_in_use: 0,
+        hits: 0 as Int64,
+        misses: 0 as Int64,
+    }
+}
+
+public fn try_allocate(l: &mut Lookaside, requested_bytes: Int) -> Bool {
+    if requested_bytes > l.slot_size_bytes {
+        l.misses = l.misses + (1 as Int64);
+        return false;
+    }
+    if l.slots_in_use >= l.slot_count {
+        l.misses = l.misses + (1 as Int64);
+        return false;
+    }
+    l.slots_in_use = l.slots_in_use + 1;
+    l.hits = l.hits + (1 as Int64);
+    true
+}
+
+public fn release_one(l: &mut Lookaside) -> Bool {
+    if l.slots_in_use == 0 { return false; }
+    l.slots_in_use = l.slots_in_use - 1;
+    true
+}
+
+/// Reset to fully-free state; used by sqlite3_db_release_memory when
+/// the connection is idle.
+public fn drain_to_zero(l: &mut Lookaside) -> Int {
+    let released = l.slots_in_use;
+    l.slots_in_use = 0;
+    released
+}
