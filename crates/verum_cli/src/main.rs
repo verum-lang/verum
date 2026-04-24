@@ -500,6 +500,15 @@ enum Commands {
         /// printed to stdout unless `--export` is given.
         #[clap(long)]
         profile: bool,
+        /// Enable per-obligation profiling: breaks down each function's
+        /// verification time into its individual proof obligations
+        /// (preconditions, postconditions, refinement checks, loop
+        /// invariants, …) and surfaces the slowest obligations
+        /// across the whole run. Implies `--profile`. Output joins the
+        /// standard profile report under a "Per-obligation breakdown"
+        /// section. See `docs/verification/performance.md §5`.
+        #[clap(long)]
+        profile_obligation: bool,
         /// Fail the build if total verification time exceeds this budget.
         /// Accepts human-readable durations: `120s`, `2m`, `90`, `1h`.
         #[clap(long, value_name = "DURATION")]
@@ -1361,6 +1370,7 @@ fn run_command(cli: Cli) -> Result<()> {
             file,
             mode,
             profile,
+            profile_obligation,
             budget,
             export,
             distributed_cache,
@@ -1375,8 +1385,11 @@ fn run_command(cli: Cli) -> Result<()> {
             function,
         } => {
             // `--export` implies `--profile` — you can't dump a profile you
-            // didn't collect. Normalise here so downstream sees a single flag.
-            let profile = profile || export.is_some();
+            // didn't collect. `--profile-obligation` also implies `--profile`
+            // (per-obligation breakdown is rendered as a detail view under
+            // the main profile report). Normalise so downstream sees a
+            // single `profile` flag plus a granularity hint.
+            let profile = profile || export.is_some() || profile_obligation;
 
             // Validate --smt-proof-preference (cvc5 | z3). Down-stream
             // passes the value to the Certified strategy's export path;
@@ -1445,6 +1458,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     export_path: export,
                     distributed_cache: distributed_cache.map(|t| t.to_string()),
                     profile_name: verify_profile.map(|t| t.to_string()),
+                    profile_obligation,
                 };
                 // Verify project
                 commands::verify::execute(

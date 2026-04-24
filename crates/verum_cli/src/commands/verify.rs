@@ -136,6 +136,15 @@ pub struct ProfileConfig {
     /// `[verify]` > default. Unknown profile name surfaces an error
     /// at merge time.
     pub profile_name: Option<String>,
+    /// Per-obligation profiling granularity — when true, the
+    /// profile report includes a breakdown of individual proof
+    /// obligations within each function (preconditions,
+    /// postconditions, refinement checks, loop invariants, …). At
+    /// current instrumentation this surfaces the slowest-obligation
+    /// table in the human-readable report; the JSON export carries
+    /// the full per-obligation list. Implies `enabled = true`.
+    /// Docs: `docs/verification/performance.md §5`.
+    pub profile_obligation: bool,
 }
 
 /// Merge CLI-provided profile knobs with whatever the project's
@@ -400,6 +409,7 @@ fn verify_file_proof(
         // Profiler / budget / export wiring — `--profile`, `--budget`, `--export`
         // arrive here from the CLI and are consumed by VerifyCommand internally.
         profile_verification: profile.enabled,
+        profile_obligation: profile.profile_obligation,
         verification_budget_secs: profile.budget.map(|d| d.as_secs().max(1)),
         export_verification_json: profile.export_path.is_some(),
         verification_json_path: profile.export_path.clone(),

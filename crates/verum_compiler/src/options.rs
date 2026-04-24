@@ -123,6 +123,24 @@ pub struct CompilerOptions {
     /// Enable verification profiling (detailed bottleneck analysis)
     pub profile_verification: bool,
 
+    /// Enable per-obligation profiling granularity.
+    ///
+    /// When `true`, the verification profiler surfaces a per-
+    /// obligation breakdown within each verified function instead
+    /// of only the function-level aggregate. Obligations include
+    /// preconditions, postconditions, refinement checks, loop
+    /// invariants, termination measures, and structural-recursion
+    /// conditions. Implies `profile_verification = true`.
+    ///
+    /// The human-readable report adds a "Slowest obligations"
+    /// section sorted by wall-clock time; the JSON export carries
+    /// the full per-obligation list under
+    /// `per_obligation_timings`.
+    ///
+    /// Plumbed from the CLI flag `--profile-obligation`. See
+    /// `docs/verification/performance.md §5`.
+    pub profile_obligation: bool,
+
     /// URL of a distributed verification cache (e.g. `s3://bucket/path`,
     /// `redis://host:6379`, `file:///nfs/verify-cache`).
     ///
@@ -288,6 +306,7 @@ impl Default for CompilerOptions {
             export_verification_json: false,
             verification_json_path: None,
             profile_verification: false,
+            profile_obligation: false,
             distributed_cache_url: None,
             profile_memory: false,
             hot_path_threshold: 5.0,

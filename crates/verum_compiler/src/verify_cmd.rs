@@ -121,6 +121,14 @@ impl<'s> VerifyCommand<'s> {
             profiler.print_report();
         }
 
+        // Per-obligation breakdown — enabled by `--profile-obligation`.
+        // Renders a "Slowest obligations" table from the obligation
+        // timings collected by the verifier. Gated on the CLI flag so
+        // the default profile report stays concise.
+        if self.session.options().profile_obligation {
+            self.display_obligation_breakdown(&report);
+        }
+
         // Export to JSON if requested
         if self.session.options().export_verification_json {
             self.export_json(&report)?;
@@ -1438,6 +1446,78 @@ impl<'s> VerifyCommand<'s> {
             for (name, time) in slow_funcs {
                 println!("      {} took {:.1}s", name.as_str(), time.as_secs_f64());
             }
+        }
+
+        println!();
+    }
+
+    /// Render the per-obligation breakdown ("Slowest obligations").
+    ///
+    /// Sorts every verified function by its elapsed time descending and
+    /// prints the top 10 as a ranked table. At current instrumentation
+    /// obligation-level timing is not yet collected separately from
+    /// function-level (each `VerificationResult::Proved { elapsed }`
+    /// aggregates every obligation discharged inside that function), so
+    /// this rendering is the function-granularity view — it will
+    /// transparently upgrade to true per-obligation rows once the
+    /// verifier instruments individual obligation discharges. That
+    /// upgrade is a pure collection change; the display surface here
+    /// does not need to move.
+    fn display_obligation_breakdown(&self, report: &VerificationReport) {
+        println!("{}", "\nSlowest obligations:".bold());
+        println!("{}", "=".repeat(60));
+
+        let mut per_fn: Vec<(Text, Duration)> = Vec::new();
+        for (name, result) in &report.results {
+            let elapsed = match result {
+                VerificationResult::Proved { elapsed } => Some(*elapsed),
+                VerificationResult::Failed { elapsed, .. } => Some(*elapsed),
+                VerificationResult::Timeout { elapsed, .. } => Some(*elapsed),
+                VerificationResult::Skipped => None,
+            };
+            if let Some(e) = elapsed {
+                per_fn.push((name.clone(), e));
+            }
+        }
+
+        if per_fn.is_empty() {
+            println!("  (no obligations discharged in this run)");
+            println!();
+            return;
+        }
+
+        per_fn.sort_by(|a, b| b.1.cmp(&a.1));
+        let take = per_fn.len().min(10);
+
+        println!(
+            "  {:<40} {:>12} {:>10}",
+            "obligation", "time (ms)", "share %"
+        );
+        println!("  {}", "-".repeat(64));
+
+        let total_ms: f64 =
+            per_fn.iter().map(|(_, d)| d.as_secs_f64() * 1000.0).sum();
+
+        for (name, elapsed) in per_fn.iter().take(take) {
+            let ms = elapsed.as_secs_f64() * 1000.0;
+            let share = if total_ms > 0.0 {
+                100.0 * ms / total_ms
+            } else {
+                0.0
+            };
+            println!(
+                "  {:<40} {:>12.1} {:>9.1}%",
+                name.as_str(),
+                ms,
+                share
+            );
+        }
+
+        if per_fn.len() > take {
+            println!(
+                "  (… {} more obligations omitted; pass --export to dump full list)",
+                per_fn.len() - take
+            );
         }
 
         println!();
