@@ -1,0 +1,130 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, header_protection, aes_ecb, rfc9001_5_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §5.4 header-protection with AES-128 / AES-256 ECB keystream:
+//
+//   * compute_hp_mask(hp, sample) is deterministic over (hp, sample) —
+//     the same pair always yields the same 5-byte mask.
+//   * apply_hp_mask is XOR, i.e. its own inverse.
+//   * First-byte mask clamp: long headers mask the low 4 bits (0x0F),
+//     short headers mask the low 5 bits (0x1F).
+//   * Packet-number bytes in [pn_offset, pn_offset+pn_len) XOR with
+//     mask[1..pn_len+1].
+
+mount core.*;
+mount core.net.quic.crypto.header_protection.{
+    HpKey, HpMask, compute_hp_mask, apply_hp_mask,
+};
+
+fn aes128_mask_is_deterministic() {
+    let key: [Byte; 16] = [
+        0x00_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8, 0x07_u8,
+        0x08_u8, 0x09_u8, 0x0A_u8, 0x0B_u8, 0x0C_u8, 0x0D_u8, 0x0E_u8, 0x0F_u8,
+    ];
+    let hp = HpKey.AesEcb128(key);
+    let sample: [Byte; 16] = [
+        0x10_u8, 0x20_u8, 0x30_u8, 0x40_u8, 0x50_u8, 0x60_u8, 0x70_u8, 0x80_u8,
+        0x90_u8, 0xA0_u8, 0xB0_u8, 0xC0_u8, 0xD0_u8, 0xE0_u8, 0xF0_u8, 0x00_u8,
+    ];
+    let m1 = compute_hp_mask(&hp, &sample);
+    let m2 = compute_hp_mask(&hp, &sample);
+    let mut i: Int = 0;
+    while i < 5 {
+        assert(m1[i] == m2[i]);
+        i = i + 1;
+    }
+}
+
+fn aes256_mask_deterministic_and_differs_from_aes128() {
+    let key128: [Byte; 16] = [0x11_u8; 16];
+    let mut key256: [Byte; 32] = [0_u8; 32];
+    let mut k: Int = 0;
+    while k < 32 { key256[k] = 0x11_u8; k = k + 1; }
+    let hp128 = HpKey.AesEcb128(key128);
+    let hp256 = HpKey.AesEcb256(key256);
+    let sample: [Byte; 16] = [0x22_u8; 16];
+    let m128 = compute_hp_mask(&hp128, &sample);
+    let m256 = compute_hp_mask(&hp256, &sample);
+    // AES-128 vs AES-256 disagree on all-0x11 key stretched to 16/32
+    // bytes; at least one byte MUST differ.
+    let mut differs = false;
+    let mut i: Int = 0;
+    while i < 5 {
+        if m128[i] != m256[i] { differs = true; }
+        i = i + 1;
+    }
+    assert(differs);
+}
+
+fn apply_hp_mask_is_xor_inverse_short_header() {
+    let key: [Byte; 16] = [0x33_u8; 16];
+    let hp = HpKey.AesEcb128(key);
+    let sample: [Byte; 16] = [0x44_u8; 16];
+    let mask = compute_hp_mask(&hp, &sample);
+
+    let original: [Byte; 5] = [0x4A_u8, 0xCA_u8, 0xFE_u8, 0xBA_u8, 0xBE_u8];
+    let mut header: [Byte; 5] = original;
+    apply_hp_mask(&mut header[..], false, 1, 4, &mask);
+    apply_hp_mask(&mut header[..], false, 1, 4, &mask);
+    let mut i: Int = 0;
+    while i < 5 {
+        assert(header[i] == original[i]);
+        i = i + 1;
+    }
+}
+
+fn apply_hp_mask_long_header_clamps_first_byte_to_0x0f() {
+    // Craft a mask whose byte 0 is 0xFF; long-header must clamp to
+    // 0x0F (bits 0..3 of the byte are the unmasked portion, the rest
+    // stays untouched).
+    let mask: HpMask = [0xFF_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8];
+    let original: [Byte; 1] = [0xC3_u8];   // long-header shape: 11000011
+    let mut header: [Byte; 1] = original;
+    apply_hp_mask(&mut header[..], true, 1, 0, &mask);
+    // Only the low 4 bits flipped: 0xC3 XOR 0x0F = 0xCC.
+    assert(header[0] == 0xCC_u8);
+    // Original's high 4 bits stay intact.
+    assert((header[0] & 0xF0_u8) == (original[0] & 0xF0_u8));
+}
+
+fn apply_hp_mask_short_header_clamps_first_byte_to_0x1f() {
+    let mask: HpMask = [0xFF_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8];
+    let original: [Byte; 1] = [0x40_u8];   // short-header with just the fixed bit
+    let mut header: [Byte; 1] = original;
+    apply_hp_mask(&mut header[..], false, 1, 0, &mask);
+    // Low 5 bits flipped: 0x40 XOR 0x1F = 0x5F.
+    assert(header[0] == 0x5F_u8);
+    assert((header[0] & 0xE0_u8) == (original[0] & 0xE0_u8));
+}
+
+fn pn_bytes_xor_with_mask_tail() {
+    // With mask = 01 02 03 04 05 and header byte 1..5 = 0x10..0x40,
+    // applying mask with pn_offset=1, pn_len=4 flips bytes 1..5 by 2,3,4,5
+    // respectively (mask[1..=4]).
+    let mask: HpMask = [0x00_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8];
+    let original: [Byte; 5] = [0xA0_u8, 0x10_u8, 0x20_u8, 0x30_u8, 0x40_u8];
+    let mut header: [Byte; 5] = original;
+    apply_hp_mask(&mut header[..], false, 1, 4, &mask);
+    // First byte clamp = 0x00 & 0x1F = 0 → unchanged.
+    assert(header[0] == 0xA0_u8);
+    assert(header[1] == (0x10_u8 ^ 0x02_u8));
+    assert(header[2] == (0x20_u8 ^ 0x03_u8));
+    assert(header[3] == (0x30_u8 ^ 0x04_u8));
+    assert(header[4] == (0x40_u8 ^ 0x05_u8));
+}
+
+@main
+public fn main() -> Int {
+    aes128_mask_is_deterministic();
+    aes256_mask_deterministic_and_differs_from_aes128();
+    apply_hp_mask_is_xor_inverse_short_header();
+    apply_hp_mask_long_header_clamps_first_byte_to_0x0f();
+    apply_hp_mask_short_header_clamps_first_byte_to_0x1f();
+    pn_bytes_xor_with_mask_tail();
+    print("RFC 9001 §5.4 AES HP mask + clamp verified");
+    0
+}
