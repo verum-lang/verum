@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, idle_timeout, rfc9000_10_1_1, send_suppression
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §10.1.1 — sender-side timer reset is suppressed while the
+// connection is already actively sending:
+//
+//   * on_packet_sent(ack_eliciting=true) resets last_activity ONLY
+//     while !since_last_send; subsequent sends in the same burst do
+//     NOT re-arm (keep-alive spam suppression).
+//   * Any ack-eliciting RX clears since_last_send so the next send
+//     can re-arm.
+//   * Non-ack-eliciting sends never reset the timer.
+//   * tick(now) returns Expired once elapsed ≥ effective + pto_buffer.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.idle_timeout.{IdleTimeoutTracker, TickResult};
+
+fn non_ack_eliciting_send_does_not_reset() {
+    let start = Instant.now();
+    let mut t = IdleTimeoutTracker.new(1000_u64, 1000_u64, start.clone());
+    let at_500 = start.checked_add(Duration.from_millis(500)).unwrap();
+    // Non-ack-eliciting send at 500ms — must NOT touch last_activity.
+    t.on_packet_sent(at_500, false);
+    // Deadline still computed from start — at 999ms we're Active with
+    // <= 1ms remaining, at 1001ms we're Expired.
+    let at_1001 = start.checked_add(Duration.from_millis(1001)).unwrap();
+    match t.tick(at_1001) {
+        TickResult.Expired => {},
+        _ => panic("expired past deadline since non-eliciting did not reset"),
+    }
+}
+
+fn first_ack_eliciting_send_arms_then_second_is_suppressed() {
+    let start = Instant.now();
+    let mut t = IdleTimeoutTracker.new(10_000_u64, 10_000_u64, start.clone());
+    // First ack-eliciting send at 1000ms — arms the timer from 1000.
+    let at_1000 = start.checked_add(Duration.from_millis(1000)).unwrap();
+    t.on_packet_sent(at_1000, true);
+    // Second ack-eliciting send at 2000ms — MUST be suppressed, so the
+    // tracker still considers last_activity=1000ms.
+    let at_2000 = start.checked_add(Duration.from_millis(2000)).unwrap();
+    t.on_packet_sent(at_2000, true);
+    // At 11001ms we should be Expired (10s past activity at 1000ms).
+    let at_11001 = start.checked_add(Duration.from_millis(11_001)).unwrap();
+    match t.tick(at_11001) {
+        TickResult.Expired => {},
+        _ => panic("second send must NOT have re-armed timer"),
+    }
+}
+
+fn receive_clears_flag_then_next_send_rearms() {
+    let start = Instant.now();
+    let mut t = IdleTimeoutTracker.new(5_000_u64, 5_000_u64, start.clone());
+    // First send at t=500 arms the timer.
+    let at_500 = start.checked_add(Duration.from_millis(500)).unwrap();
+    t.on_packet_sent(at_500, true);
+    // Peer reply arrives at t=600 (ack-eliciting) — clears
+    // since_last_send AND advances last_activity.
+    let at_600 = start.checked_add(Duration.from_millis(600)).unwrap();
+    t.on_packet_received(at_600, true);
+    // Next send at t=3000 is the first since the RX flag clear — must re-arm.
+    let at_3000 = start.checked_add(Duration.from_millis(3000)).unwrap();
+    t.on_packet_sent(at_3000, true);
+    // Deadline now at 3000 + 5000 = 8000ms. At 7999 Active, at 8001 Expired.
+    let at_7999 = start.checked_add(Duration.from_millis(7999)).unwrap();
+    match t.tick(at_7999) {
+        TickResult.Active(_) => {},
+        _ => panic("still Active just before deadline"),
+    }
+    let at_8001 = start.checked_add(Duration.from_millis(8001)).unwrap();
+    match t.tick(at_8001) {
+        TickResult.Expired => {},
+        _ => panic("expired past 8000ms deadline"),
+    }
+}
+
+fn non_ack_eliciting_receive_is_no_op() {
+    let start = Instant.now();
+    let mut t = IdleTimeoutTracker.new(1000_u64, 1000_u64, start.clone());
+    // Non-ack-eliciting RX at 500ms — NOT supposed to reset timer.
+    let at_500 = start.checked_add(Duration.from_millis(500)).unwrap();
+    t.on_packet_received(at_500, false);
+    // Still expire at 1001ms — reset would have given us until 1501ms.
+    let at_1001 = start.checked_add(Duration.from_millis(1001)).unwrap();
+    match t.tick(at_1001) {
+        TickResult.Expired => {},
+        _ => panic("non-eliciting RX must NOT reset the timer"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    non_ack_eliciting_send_does_not_reset();
+    first_ack_eliciting_send_arms_then_second_is_suppressed();
+    receive_clears_flag_then_next_send_rearms();
+    non_ack_eliciting_receive_is_no_op();
+    print("RFC 9000 §10.1.1 idle-timeout send-suppression verified");
+    0
+}
