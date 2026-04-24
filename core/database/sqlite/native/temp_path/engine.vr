@@ -1,0 +1,50 @@
+// =============================================================================
+// temp_path/engine.vr — dual-slot facade
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.temp_path.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.temp_path.slot.{
+    PathSlot, SetOutcome, SoOk, SoFrozen,
+    empty_slot, freeze, set_path, get_path,
+};
+
+public type TempPathEngine is {
+    temp: PathSlot,
+    data: PathSlot,
+}
+
+public fn new_engine() -> TempPathEngine {
+    TempPathEngine { temp: empty_slot(), data: empty_slot() }
+}
+
+implement TempPathEngine {
+    /// Mirrors the initialization gate on Windows.
+    pub fn after_initialize(&mut self) {
+        freeze(&mut self.temp);
+        freeze(&mut self.data);
+    }
+
+    pub fn sqlite3_temp_directory(&self) -> Maybe<Text> {
+        get_path(&self.temp)
+    }
+
+    pub fn sqlite3_data_directory(&self) -> Maybe<Text> {
+        get_path(&self.data)
+    }
+
+    pub fn set_temp_directory(&mut self, path: Maybe<Text>) -> SetOutcome {
+        set_path(&mut self.temp, path)
+    }
+
+    pub fn set_data_directory(&mut self, path: Maybe<Text>) -> SetOutcome {
+        set_path(&mut self.data, path)
+    }
+
+    pub fn temp_frozen(&self) -> Bool { self.temp.frozen }
+    pub fn data_frozen(&self) -> Bool { self.data.frozen }
+}

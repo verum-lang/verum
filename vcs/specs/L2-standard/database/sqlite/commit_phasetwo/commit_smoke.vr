@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, commit_phasetwo, fcntl, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.commit_phasetwo.phase.{
+    CommitPhase,
+    CpIdle, CpPhaseOne, CpPhaseTwo, CpDone, CpRollback,
+    phase_name, is_terminal, is_committing,
+};
+mount core.database.sqlite.native.commit_phasetwo.engine.{
+    CommitEngine,
+    SQLITE_FCNTL_COMMIT_PHASETWO,
+    new_engine,
+};
+mount base.{Bool};
+
+fn test_phase_names() {
+    assert(phase_name(&CpIdle) == "idle".clone());
+    assert(phase_name(&CpPhaseOne) == "phase-one".clone());
+    assert(phase_name(&CpPhaseTwo) == "phase-two".clone());
+    assert(phase_name(&CpDone) == "done".clone());
+    assert(phase_name(&CpRollback("x".clone())) == "rollback".clone());
+}
+
+fn test_is_terminal() {
+    assert(is_terminal(&CpDone));
+    assert(is_terminal(&CpRollback("x".clone())));
+    assert(!is_terminal(&CpIdle));
+    assert(!is_terminal(&CpPhaseOne));
+}
+
+fn test_is_committing() {
+    assert(is_committing(&CpPhaseOne));
+    assert(is_committing(&CpPhaseTwo));
+    assert(!is_committing(&CpIdle));
+    assert(!is_committing(&CpDone));
+}
+
+fn test_engine_fcntl_const_matches_file_control() {
+    assert_eq(SQLITE_FCNTL_COMMIT_PHASETWO, 22);
+}
+
+fn test_engine_idle_start_transitions_to_phase_one() {
+    let mut e = new_engine();
+    assert(e.start_phase_one());
+    assert(e.is_in_flight());
+}
+
+fn test_engine_phase_two_returns_fcntl() {
+    let mut e = new_engine();
+    let _ = e.start_phase_one();
+    assert_eq(e.enter_phase_two(), SQLITE_FCNTL_COMMIT_PHASETWO);
+    assert_eq(e.fcntl_notifications, 1 as Int64);
+}
+
+fn test_engine_finish_records_commit() {
+    let mut e = new_engine();
+    let _ = e.start_phase_one();
+    let _ = e.enter_phase_two();
+    assert(e.finish());
+    assert_eq(e.commits_completed, 1 as Int64);
+    assert(!e.is_in_flight());
+}
+
+fn test_engine_start_when_not_idle_rejected() {
+    let mut e = new_engine();
+    let _ = e.start_phase_one();
+    assert(!e.start_phase_one());
+}
+
+fn test_engine_phase_two_from_idle_returns_minus_one() {
+    let mut e = new_engine();
+    assert_eq(e.enter_phase_two(), -1);
+}
+
+fn test_engine_rollback_from_any_state() {
+    let mut e = new_engine();
+    let _ = e.start_phase_one();
+    e.rollback("io error".clone());
+    assert_eq(e.rollbacks_observed, 1 as Int64);
+    match &e.phase {
+        CpRollback(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_engine_reset_from_terminal_back_to_idle() {
+    let mut e = new_engine();
+    e.rollback("x".clone());
+    e.reset();
+    match &e.phase {
+        CpIdle => {},
+        _ => assert(false),
+    }
+}
+
+fn main() {
+    test_phase_names();
+    test_is_terminal();
+    test_is_committing();
+    test_engine_fcntl_const_matches_file_control();
+    test_engine_idle_start_transitions_to_phase_one();
+    test_engine_phase_two_returns_fcntl();
+    test_engine_finish_records_commit();
+    test_engine_start_when_not_idle_rejected();
+    test_engine_phase_two_from_idle_returns_minus_one();
+    test_engine_rollback_from_any_state();
+    test_engine_reset_from_terminal_back_to_idle();
+}

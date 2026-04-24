@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/trace_v2_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_trace_v2)
+// Spec: SQLite C API
+//
+//   sqlite3_trace_v2(db, uMask, xCallback, pCtx)
+//
+// Replaces the legacy sqlite3_trace + _profile with a single API
+// gated by a bitmask of SQLITE_TRACE_STMT | _PROFILE | _ROW | _CLOSE.
+// Passing uMask==0 or xCallback==NULL disables tracing.
+//
+// Submodules:
+//   * `mask`     — TraceEventMask constants + bit ops
+//   * `callback` — CallbackSpec descriptor (opaque context id)
+//   * `engine`   — installed mask + callback handle
+// =============================================================================
+
+module core.database.sqlite.native.trace_v2_api;
+
+public module mask;
+public module callback;
+public module engine;

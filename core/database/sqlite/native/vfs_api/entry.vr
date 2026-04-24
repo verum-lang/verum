@@ -1,0 +1,31 @@
+// =============================================================================
+// vfs_api/entry.vr — VfsEntry
+// =============================================================================
+// Spec: SQLite C API
+//
+// A VFS entry is (name, handle, made_default).  The handle is opaque —
+// the runtime binds real implementations elsewhere.
+// =============================================================================
+
+module core.database.sqlite.native.vfs_api.entry;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type VfsEntry is {
+    name: Text,
+    handle: Int64,
+    made_default: Bool,
+}
+
+public fn new_entry(name: Text, handle: Int64) -> VfsEntry {
+    VfsEntry { name: name, handle: handle, made_default: false }
+}
+
+public fn promote_to_default(e: &mut VfsEntry) {
+    e.made_default = true;
+}
+
+public fn entry_matches(e: &VfsEntry, name: &Text) -> Bool {
+    e.name == *name
+}

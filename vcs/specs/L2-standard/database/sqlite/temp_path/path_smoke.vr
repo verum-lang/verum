@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, temp_path, global_paths, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.temp_path.slot.{
+    PathSlot, SetOutcome, SoOk, SoFrozen,
+    empty_slot, freeze, set_path, get_path,
+};
+mount core.database.sqlite.native.temp_path.engine.{
+    TempPathEngine, new_engine,
+};
+mount base.{Bool, Maybe};
+
+fn test_empty_slot_none() {
+    let s = empty_slot();
+    match get_path(&s) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+    assert(!s.frozen);
+}
+
+fn test_set_path_works_before_freeze() {
+    let mut s = empty_slot();
+    match set_path(&mut s, Maybe.Some("/tmp".clone())) {
+        SoOk => {},
+        _ => assert(false),
+    }
+    match get_path(&s) {
+        Maybe.Some(p) => assert(p == "/tmp".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_set_path_rejected_after_freeze() {
+    let mut s = empty_slot();
+    freeze(&mut s);
+    match set_path(&mut s, Maybe.Some("/tmp".clone())) {
+        SoFrozen => {},
+        _ => assert(false),
+    }
+}
+
+fn test_engine_initial_both_empty() {
+    let e = new_engine();
+    match e.sqlite3_temp_directory() { Maybe.None => {}, _ => assert(false) }
+    match e.sqlite3_data_directory() { Maybe.None => {}, _ => assert(false) }
+}
+
+fn test_engine_set_temp_directory() {
+    let mut e = new_engine();
+    match e.set_temp_directory(Maybe.Some("/tmp".clone())) {
+        SoOk => {},
+        _ => assert(false),
+    }
+    match e.sqlite3_temp_directory() {
+        Maybe.Some(p) => assert(p == "/tmp".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_engine_data_directory_independent() {
+    let mut e = new_engine();
+    let _ = e.set_temp_directory(Maybe.Some("/tmp".clone()));
+    let _ = e.set_data_directory(Maybe.Some("/var/data".clone()));
+    match e.sqlite3_data_directory() {
+        Maybe.Some(p) => assert(p == "/var/data".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_after_initialize_freezes_both() {
+    let mut e = new_engine();
+    e.after_initialize();
+    assert(e.temp_frozen());
+    assert(e.data_frozen());
+    match e.set_temp_directory(Maybe.Some("/x".clone())) {
+        SoFrozen => {},
+        _ => assert(false),
+    }
+}
+
+fn test_unset_via_none() {
+    let mut e = new_engine();
+    let _ = e.set_temp_directory(Maybe.Some("/tmp".clone()));
+    let _ = e.set_temp_directory(Maybe.None);
+    match e.sqlite3_temp_directory() {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn main() {
+    test_empty_slot_none();
+    test_set_path_works_before_freeze();
+    test_set_path_rejected_after_freeze();
+    test_engine_initial_both_empty();
+    test_engine_set_temp_directory();
+    test_engine_data_directory_independent();
+    test_after_initialize_freezes_both();
+    test_unset_via_none();
+}

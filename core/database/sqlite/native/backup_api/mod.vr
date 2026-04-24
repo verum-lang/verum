@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/backup_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_backup_*)
+// Spec: SQLite C API
+//
+//   sqlite3_backup_init(pDest, zDestName, pSrc, zSrcName) → handle
+//   sqlite3_backup_step(p, nPage)                         → ok/busy/locked/done
+//   sqlite3_backup_remaining(p)                           → remaining pages
+//   sqlite3_backup_pagecount(p)                           → total source pages
+//   sqlite3_backup_finish(p)                              → final status
+//
+// Complements `backup/` (state machine + policy) with the public API
+// surface: handle record, step-count request, typed outcomes.
+//
+// Submodules:
+//   * `handle`   — BackupHandle descriptor
+//   * `request`  — BackupStepRequest (pages_per_step)
+//   * `outcome`  — BackupOutcome sum (Ok/Done/Busy/Locked/Failed)
+// =============================================================================
+
+module core.database.sqlite.native.backup_api;
+
+public module handle;
+public module request;
+public module outcome;

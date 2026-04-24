@@ -1,0 +1,64 @@
+// =============================================================================
+// trace_v2_api/engine.vr — installed mask + callback swap
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.trace_v2_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.trace_v2_api.mask.{
+    TraceEventMask, empty_mask, is_empty,
+};
+mount core.database.sqlite.native.trace_v2_api.callback.{
+    CallbackSpec, null_spec, is_null,
+};
+
+public type TraceEngine is {
+    mask: TraceEventMask,
+    callback: CallbackSpec,
+    events_delivered: Int64,
+    events_dropped: Int64,
+}
+
+public fn new_engine() -> TraceEngine {
+    TraceEngine {
+        mask: empty_mask(),
+        callback: null_spec(),
+        events_delivered: 0 as Int64,
+        events_dropped: 0 as Int64,
+    }
+}
+
+implement TraceEngine {
+    /// Matches sqlite3_trace_v2: mask == 0 or spec.is_null ⇒ disable.
+    pub fn sqlite3_trace_v2(&mut self, mask: TraceEventMask, spec: CallbackSpec) {
+        if is_empty(&mask) || is_null(&spec) {
+            self.mask = empty_mask();
+            self.callback = null_spec();
+            return;
+        }
+        self.mask = mask;
+        self.callback = spec;
+    }
+
+    pub fn is_enabled(&self) -> Bool {
+        !is_empty(&self.mask) && !is_null(&self.callback)
+    }
+
+    /// Record an event delivery / drop.  `bit` is a single SQLITE_TRACE_*
+    /// constant.
+    pub fn note_event(&mut self, bit: Int) -> Bool {
+        if !self.is_enabled() {
+            self.events_dropped = self.events_dropped + (1 as Int64);
+            return false;
+        }
+        if (self.mask.bits & bit) == 0 {
+            self.events_dropped = self.events_dropped + (1 as Int64);
+            return false;
+        }
+        self.events_delivered = self.events_delivered + (1 as Int64);
+        true
+    }
+}

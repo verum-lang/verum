@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/unlock_notify/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_unlock_notify)
+// Spec: SQLite C API
+//
+//   sqlite3_unlock_notify(pBlocked, xNotify, pNotifyArg)
+//       → SQLITE_OK      registered — callback will fire when unlocked
+//       → SQLITE_LOCKED  deadlock detected; caller must back off
+//
+// Submodules:
+//   * `request`  — RegistrationRequest (blocker + blocked + opaque arg)
+//   * `engine`   — pending-notifications queue + deadlock detection
+// =============================================================================
+
+module core.database.sqlite.native.unlock_notify;
+
+public module request;
+public module engine;

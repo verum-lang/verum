@@ -1,0 +1,41 @@
+// =============================================================================
+// backup_api/request.vr — BackupStepRequest
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_backup_step(p, nPage):
+//   * nPage > 0  → copy exactly N pages (or fewer if source exhausts)
+//   * nPage < 0  → copy the entire remaining source in one step
+//   * nPage == 0 → documented as a no-op; catalogue preserves that shape
+// =============================================================================
+
+module core.database.sqlite.native.backup_api.request;
+
+mount core.*;
+mount base.{Bool};
+
+public type BackupStepRequest is
+      BsrNoop
+    | BsrStep(Int)         // n_pages, strictly positive
+    | BsrAll;              // nPage < 0
+
+public fn from_n_pages(n: Int) -> BackupStepRequest {
+    if n == 0 { return BsrNoop; }
+    if n < 0  { return BsrAll; }
+    BsrStep(n)
+}
+
+public fn is_noop(r: &BackupStepRequest) -> Bool {
+    match r {
+        BsrNoop => true,
+        _ => false,
+    }
+}
+
+public fn requested_pages(r: &BackupStepRequest, remaining: Int) -> Int {
+    match r {
+        BsrNoop    => 0,
+        BsrStep(n) => if *n < remaining { *n } else { remaining },
+        BsrAll     => remaining,
+    }
+}

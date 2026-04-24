@@ -1,0 +1,117 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, preupdate_api, session, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.preupdate_api.context.{
+    PreupdateContext, new_context,
+    sqlite3_preupdate_count, sqlite3_preupdate_depth, sqlite3_preupdate_blobwrite,
+};
+mount core.database.sqlite.native.preupdate_api.value_view.{
+    PreupdateValueError, PveOutOfRange, PveWrongOp,
+    ValidateResult, VrOk, VrErr,
+    error_name, validate_old, validate_new, is_ok,
+};
+mount core.database.sqlite.native.hooks_api.op.{
+    UpdateOp, UoInsert, UoUpdate, UoDelete,
+};
+mount base.{Bool};
+
+fn test_new_context_defaults() {
+    let c = new_context(UoUpdate, 4);
+    assert_eq(sqlite3_preupdate_count(&c), 4);
+    assert_eq(sqlite3_preupdate_depth(&c), 0);
+    assert_eq(sqlite3_preupdate_blobwrite(&c), -1);
+}
+
+fn test_enter_leave_nested_tracks_depth() {
+    let mut c = new_context(UoUpdate, 1);
+    c.enter_nested();
+    c.enter_nested();
+    assert_eq(sqlite3_preupdate_depth(&c), 2);
+    c.leave_nested();
+    assert_eq(sqlite3_preupdate_depth(&c), 1);
+}
+
+fn test_leave_nested_at_zero_is_noop() {
+    let mut c = new_context(UoInsert, 1);
+    c.leave_nested();
+    assert_eq(sqlite3_preupdate_depth(&c), 0);
+}
+
+fn test_blobwrite_set_and_clear() {
+    let mut c = new_context(UoUpdate, 4);
+    c.set_blobwrite(2);
+    assert_eq(sqlite3_preupdate_blobwrite(&c), 2);
+    c.clear_blobwrite();
+    assert_eq(sqlite3_preupdate_blobwrite(&c), -1);
+}
+
+fn test_old_values_gated_by_op() {
+    let insert = new_context(UoInsert, 2);
+    assert(!insert.has_old_values());
+    let update = new_context(UoUpdate, 2);
+    assert(update.has_old_values());
+    let delete = new_context(UoDelete, 2);
+    assert(delete.has_old_values());
+}
+
+fn test_new_values_gated_by_op() {
+    let insert = new_context(UoInsert, 2);
+    assert(insert.has_new_values());
+    let update = new_context(UoUpdate, 2);
+    assert(update.has_new_values());
+    let delete = new_context(UoDelete, 2);
+    assert(!delete.has_new_values());
+}
+
+fn test_validate_old_rejects_insert() {
+    let c = new_context(UoInsert, 2);
+    match validate_old(&c, 0) {
+        VrErr(PveWrongOp(_)) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_validate_old_rejects_out_of_range() {
+    let c = new_context(UoUpdate, 2);
+    match validate_old(&c, 99) {
+        VrErr(PveOutOfRange) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_validate_old_ok() {
+    let c = new_context(UoUpdate, 2);
+    let r = validate_old(&c, 0);
+    assert(is_ok(&r));
+}
+
+fn test_validate_new_rejects_delete() {
+    let c = new_context(UoDelete, 2);
+    match validate_new(&c, 0) {
+        VrErr(PveWrongOp(_)) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_error_name_distinct() {
+    assert(error_name(&PveOutOfRange) == "out-of-range".clone());
+    assert(error_name(&PveWrongOp("x".clone())) == "wrong-op".clone());
+}
+
+fn main() {
+    test_new_context_defaults();
+    test_enter_leave_nested_tracks_depth();
+    test_leave_nested_at_zero_is_noop();
+    test_blobwrite_set_and_clear();
+    test_old_values_gated_by_op();
+    test_new_values_gated_by_op();
+    test_validate_old_rejects_insert();
+    test_validate_old_rejects_out_of_range();
+    test_validate_old_ok();
+    test_validate_new_rejects_delete();
+    test_error_name_distinct();
+}

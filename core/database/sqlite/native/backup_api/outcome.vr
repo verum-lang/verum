@@ -1,0 +1,68 @@
+// =============================================================================
+// backup_api/outcome.vr — BackupOutcome sum
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_backup_step returns one of:
+//   SQLITE_OK       → more pages to copy
+//   SQLITE_DONE     → source fully copied
+//   SQLITE_BUSY     → destination locked; caller may retry
+//   SQLITE_LOCKED   → source locked; caller may retry
+//   any error code  → copy aborted
+// =============================================================================
+
+module core.database.sqlite.native.backup_api.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type BackupOutcome is
+      BoOk
+    | BoDone
+    | BoBusy
+    | BoLocked
+    | BoFailed { code: ExtendedCode, reason: Text };
+
+public fn outcome_numeric(o: &BackupOutcome) -> Int {
+    match o {
+        BoOk      => 0,
+        BoDone    => 101,
+        BoBusy    => 5,
+        BoLocked  => 6,
+        BoFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn outcome_name(o: &BackupOutcome) -> Text {
+    match o {
+        BoOk      => "ok".clone(),
+        BoDone    => "done".clone(),
+        BoBusy    => "busy".clone(),
+        BoLocked  => "locked".clone(),
+        BoFailed { .. } => "failed".clone(),
+    }
+}
+
+public fn is_retriable(o: &BackupOutcome) -> Bool {
+    match o {
+        BoBusy | BoLocked => true,
+        _ => false,
+    }
+}
+
+public fn is_progress(o: &BackupOutcome) -> Bool {
+    match o {
+        BoOk | BoDone => true,
+        _ => false,
+    }
+}
+
+public fn is_terminal(o: &BackupOutcome) -> Bool {
+    match o {
+        BoDone | BoFailed { .. } => true,
+        _ => false,
+    }
+}

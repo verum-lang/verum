@@ -1,0 +1,111 @@
+// =============================================================================
+// filename_api/uri.vr — URI parameter parsing + typed accessors
+// =============================================================================
+// Spec: SQLite C API
+//
+// "file:/tmp/x.db?cache=shared&mode=rwc" → three keyed parameters.
+// sqlite3_uri_boolean treats "1" / "yes" / "true" / "on" as true and
+// "0" / "no" / "false" / "off" as false; anything else falls through
+// to the default.
+// =============================================================================
+
+module core.database.sqlite.native.filename_api.uri;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+
+public type UriParam is {
+    name: Text,
+    value: Text,
+}
+
+public fn param(name: Text, value: Text) -> UriParam {
+    UriParam { name: name, value: value }
+}
+
+public type UriParameters is {
+    params: List<UriParam>,
+}
+
+public fn new_params() -> UriParameters {
+    UriParameters { params: List.new() }
+}
+
+public fn from_list(params: List<UriParam>) -> UriParameters {
+    UriParameters { params: params }
+}
+
+fn ci_eq(a: &Text, b: &Text) -> Bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        let mut x = ab[i];
+        let mut y = bb[i];
+        if x >= (0x61 as u8) && x <= (0x7A as u8) { x = x - (0x20 as u8); }
+        if y >= (0x61 as u8) && y <= (0x7A as u8) { y = y - (0x20 as u8); }
+        if x != y { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+implement UriParameters {
+    pub fn add(&mut self, name: Text, value: Text) {
+        self.params.push(param(name, value));
+    }
+
+    pub fn parameter(&self, name: &Text) -> Maybe<Text> {
+        let mut i: Int = 0;
+        while i < self.params.len() {
+            if self.params.get(i).name == *name {
+                return Maybe.Some(self.params.get(i).value.clone());
+            }
+            i = i + 1;
+        }
+        Maybe.None
+    }
+
+    pub fn key(&self, index: Int) -> Maybe<Text> {
+        if index < 0 || index >= self.params.len() { return Maybe.None; }
+        Maybe.Some(self.params.get(index).name.clone())
+    }
+
+    pub fn len(&self) -> Int { self.params.len() }
+}
+
+/// Interpret a value as a boolean per the SQLite URI rules.
+public fn interpret_boolean(v: &Text, default: Bool) -> Bool {
+    let y1 = "1".clone();
+    let y2 = "yes".clone();
+    let y3 = "true".clone();
+    let y4 = "on".clone();
+    let n1 = "0".clone();
+    let n2 = "no".clone();
+    let n3 = "false".clone();
+    let n4 = "off".clone();
+    if ci_eq(v, &y1) || ci_eq(v, &y2) || ci_eq(v, &y3) || ci_eq(v, &y4) { return true; }
+    if ci_eq(v, &n1) || ci_eq(v, &n2) || ci_eq(v, &n3) || ci_eq(v, &n4) { return false; }
+    default
+}
+
+/// Parse as Int64, returning the default if unparseable.
+public fn interpret_int64(v: &Text, default: Int64) -> Int64 {
+    let bs = v.as_bytes();
+    if bs.len() == 0 { return default; }
+    let mut sign: Int64 = 1 as Int64;
+    let mut i: Int = 0;
+    if bs[0] == (0x2D as u8) { sign = -1 as Int64; i = 1; }
+    else if bs[0] == (0x2B as u8) { i = 1; }
+    if i >= bs.len() { return default; }
+    let mut out: Int64 = 0 as Int64;
+    while i < bs.len() {
+        let b = bs[i];
+        if b < (0x30 as u8) || b > (0x39 as u8) { return default; }
+        out = (out * (10 as Int64)) + ((b - (0x30 as u8)) as Int64);
+        i = i + 1;
+    }
+    out * sign
+}

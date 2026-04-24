@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/preupdate_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_preupdate_*)
+// Spec: SQLite C API
+//
+//   sqlite3_preupdate_hook(db, xCb, pArg)       — registered via hooks_api
+//   sqlite3_preupdate_count(db)                 → n_columns
+//   sqlite3_preupdate_depth(db)                 → nested-trigger depth
+//   sqlite3_preupdate_old(db, i, &pVal)         → pre-image column value
+//   sqlite3_preupdate_new(db, i, &pVal)         → post-image column value
+//   sqlite3_preupdate_blobwrite(db)             → index of the column
+//                                                  targeted by an
+//                                                  incremental blob write,
+//                                                  or -1
+//
+// Submodules:
+//   * `context`    — PreupdateContext w/ op, count, depth, blobwrite_col
+//   * `value_view` — typed read-only value access helpers
+// =============================================================================
+
+module core.database.sqlite.native.preupdate_api;
+
+public module context;
+public module value_view;

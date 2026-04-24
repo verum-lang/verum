@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/filename_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_filename_* + URI introspection)
+// Spec: SQLite C API
+//
+//   sqlite3_filename_database(zName)  → main database path
+//   sqlite3_filename_journal(zName)   → journal file path
+//   sqlite3_filename_wal(zName)       → WAL file path
+//   sqlite3_create_filename(…)        → opaque filename object
+//   sqlite3_free_filename(p)
+//   sqlite3_uri_parameter(z, param)   → Text
+//   sqlite3_uri_boolean(z, param, def)→ Bool
+//   sqlite3_uri_int64(z, param, def)  → Int64
+//   sqlite3_uri_key(z, n)             → n-th parameter name
+//
+// Submodules:
+//   * `filename`     — FilenameHandle with main / journal / wal sidecars
+//   * `uri`          — UriParameters keyed list + typed accessors
+//   * `engine`       — C-API-aligned functions
+// =============================================================================
+
+module core.database.sqlite.native.filename_api;
+
+public module filename;
+public module uri;
+public module engine;

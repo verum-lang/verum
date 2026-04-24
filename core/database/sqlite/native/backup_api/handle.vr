@@ -1,0 +1,58 @@
+// =============================================================================
+// backup_api/handle.vr — BackupHandle descriptor
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.backup_api.handle;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type BackupHandle is {
+    id: Int64,
+    src_db: Int64,
+    src_schema: Text,
+    dst_db: Int64,
+    dst_schema: Text,
+    total_pages: Int,
+    remaining_pages: Int,
+    finished: Bool,
+}
+
+public fn new_handle(
+    id: Int64,
+    src_db: Int64, src_schema: Text,
+    dst_db: Int64, dst_schema: Text,
+    total_pages: Int,
+) -> BackupHandle {
+    BackupHandle {
+        id: id,
+        src_db: src_db,
+        src_schema: src_schema,
+        dst_db: dst_db,
+        dst_schema: dst_schema,
+        total_pages: total_pages,
+        remaining_pages: total_pages,
+        finished: false,
+    }
+}
+
+implement BackupHandle {
+    pub fn is_live(&self) -> Bool { !self.finished }
+    pub fn record_progress(&mut self, pages: Int) {
+        if pages <= 0 { return; }
+        if self.remaining_pages >= pages {
+            self.remaining_pages = self.remaining_pages - pages;
+        } else {
+            self.remaining_pages = 0;
+        }
+    }
+    pub fn finish(&mut self) { self.finished = true; }
+}
+
+public fn progress_fraction_pct(h: &BackupHandle) -> Int {
+    if h.total_pages <= 0 { return 0; }
+    let done = h.total_pages - h.remaining_pages;
+    (done * 100) / h.total_pages
+}

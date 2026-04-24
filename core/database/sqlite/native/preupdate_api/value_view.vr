@@ -1,0 +1,61 @@
+// =============================================================================
+// preupdate_api/value_view.vr — old / new value access
+// =============================================================================
+// Spec: SQLite C API
+//
+// The catalogue handles index-bounds + op-gating logic.  Actual value
+// storage is opaque here — the runtime feeds SqliteValue references.
+// =============================================================================
+
+module core.database.sqlite.native.preupdate_api.value_view;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.preupdate_api.context.{
+    PreupdateContext,
+};
+
+public type PreupdateValueError is
+      PveOutOfRange
+    | PveWrongOp(Text);
+
+public fn error_name(e: &PreupdateValueError) -> Text {
+    match e {
+        PveOutOfRange   => "out-of-range".clone(),
+        PveWrongOp(_)   => "wrong-op".clone(),
+    }
+}
+
+/// Validate an `sqlite3_preupdate_old(i, &pVal)` request.  Returns
+/// PveWrongOp if `op` has no old values (INSERT), PveOutOfRange if the
+/// column index is out of range, else Ok(()).
+public type ValidateResult is
+      VrOk
+    | VrErr(PreupdateValueError);
+
+public fn validate_old(c: &PreupdateContext, col: Int) -> ValidateResult {
+    if !c.has_old_values() {
+        return VrErr(PveWrongOp("old requested on INSERT".clone()));
+    }
+    if col < 0 || col >= c.n_columns {
+        return VrErr(PveOutOfRange);
+    }
+    VrOk
+}
+
+public fn validate_new(c: &PreupdateContext, col: Int) -> ValidateResult {
+    if !c.has_new_values() {
+        return VrErr(PveWrongOp("new requested on DELETE".clone()));
+    }
+    if col < 0 || col >= c.n_columns {
+        return VrErr(PveOutOfRange);
+    }
+    VrOk
+}
+
+public fn is_ok(r: &ValidateResult) -> Bool {
+    match r {
+        VrOk => true,
+        VrErr(_) => false,
+    }
+}

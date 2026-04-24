@@ -1,0 +1,32 @@
+// =============================================================================
+// trace_v2_api/callback.vr — CallbackSpec
+// =============================================================================
+// Spec: SQLite C API
+//
+// The real closure lives elsewhere; the catalogue tracks a handle id
+// + a disabled flag (set when the caller passes NULL or uMask == 0).
+// =============================================================================
+
+module core.database.sqlite.native.trace_v2_api.callback;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type CallbackSpec is {
+    handle: Int64,
+    context: Int64,
+    /// A human-readable tag for diagnostics (e.g. "prof-sink").
+    tag: Text,
+}
+
+public fn new_spec(handle: Int64, context: Int64, tag: Text) -> CallbackSpec {
+    CallbackSpec { handle: handle, context: context, tag: tag }
+}
+
+public fn null_spec() -> CallbackSpec {
+    CallbackSpec { handle: 0 as Int64, context: 0 as Int64, tag: "".clone() }
+}
+
+public fn is_null(s: &CallbackSpec) -> Bool {
+    s.handle == (0 as Int64)
+}

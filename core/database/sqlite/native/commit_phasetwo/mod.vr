@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/commit_phasetwo/mod.vr
+// =============================================================================
+// Layer: 7 (façade — two-phase commit state)
+// Spec: SQLite C API
+//
+// SQLite's transactional write-path is a two-phase commit at the VFS
+// boundary.  Phase one flushes the journal; phase two flushes the
+// main database and removes the journal.  The VFS is notified via
+// SQLITE_FCNTL_COMMIT_PHASETWO = 22 before phase two starts.
+//
+// Submodules:
+//   * `phase`    — CommitPhase state machine
+//   * `engine`   — transition driver + SQLITE_FCNTL_COMMIT_PHASETWO integration
+// =============================================================================
+
+module core.database.sqlite.native.commit_phasetwo;
+
+public module phase;
+public module engine;

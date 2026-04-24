@@ -1,0 +1,88 @@
+// =============================================================================
+// vfs_api/registry.vr — global-chain + default pointer
+// =============================================================================
+// Spec: SQLite C API
+//
+// SQLite stores VFS registrations as a singly-linked list; the head
+// is returned when sqlite3_vfs_find(NULL) is called.
+// =============================================================================
+
+module core.database.sqlite.native.vfs_api.registry;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.vfs_api.entry.{
+    VfsEntry, new_entry, entry_matches, promote_to_default,
+};
+
+public type VfsRegistry is {
+    entries: List<VfsEntry>,
+    /// 0 ⇒ no default installed.  Otherwise it's the handle of the
+    /// entry at the head of the chain.
+    default_handle: Int64,
+}
+
+public fn new_registry() -> VfsRegistry {
+    VfsRegistry { entries: List.new(), default_handle: 0 as Int64 }
+}
+
+implement VfsRegistry {
+    /// sqlite3_vfs_register: returns 0 on success, 1 on misuse
+    /// (duplicate name).
+    pub fn sqlite3_vfs_register(&mut self, name: Text, handle: Int64, make_default: Bool) -> Int {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if entry_matches(self.entries.get(i), &name) {
+                return 1;
+            }
+            i = i + 1;
+        }
+        let mut entry = new_entry(name, handle);
+        if make_default {
+            promote_to_default(&mut entry);
+            self.default_handle = handle;
+        }
+        self.entries.push(entry);
+        0
+    }
+
+    /// sqlite3_vfs_unregister: returns 0 if removed, 1 if not found.
+    pub fn sqlite3_vfs_unregister(&mut self, handle: Int64) -> Int {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries.get(i).handle == handle {
+                let _ = self.entries.remove(i);
+                if self.default_handle == handle {
+                    self.default_handle = if self.entries.len() > 0 {
+                        self.entries.get(0).handle
+                    } else {
+                        0 as Int64
+                    };
+                }
+                return 0;
+            }
+            i = i + 1;
+        }
+        1
+    }
+
+    /// Passing `None` requests the default VFS.
+    pub fn sqlite3_vfs_find(&self, name: &Maybe<Text>) -> Int64 {
+        match name {
+            Maybe.None => self.default_handle,
+            Maybe.Some(n) => {
+                let mut i: Int = 0;
+                while i < self.entries.len() {
+                    if entry_matches(self.entries.get(i), n) {
+                        return self.entries.get(i).handle;
+                    }
+                    i = i + 1;
+                }
+                0 as Int64
+            }
+        }
+    }
+
+    pub fn len(&self) -> Int { self.entries.len() }
+}

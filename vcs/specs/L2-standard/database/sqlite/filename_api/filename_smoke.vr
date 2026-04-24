@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, filename_api, uri, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.filename_api.filename.{
+    FilenameHandle, new_handle,
+};
+mount core.database.sqlite.native.filename_api.uri.{
+    UriParameters, UriParam,
+    param, new_params, from_list,
+    interpret_boolean, interpret_int64,
+};
+mount core.database.sqlite.native.filename_api.engine.{
+    sqlite3_filename_database, sqlite3_filename_journal,
+    sqlite3_filename_wal, sqlite3_filename_super_journal,
+    sqlite3_uri_parameter, sqlite3_uri_boolean,
+    sqlite3_uri_int64, sqlite3_uri_key,
+};
+mount collections.List;
+mount base.{Bool, Maybe};
+
+fn test_filename_sidecars() {
+    let h = new_handle("/tmp/x.db".clone());
+    assert(sqlite3_filename_database(&h) == "/tmp/x.db".clone());
+    assert(sqlite3_filename_journal(&h) == "/tmp/x.db-journal".clone());
+    assert(sqlite3_filename_wal(&h) == "/tmp/x.db-wal".clone());
+    assert(sqlite3_filename_super_journal(&h) == "/tmp/x.db-mj".clone());
+}
+
+fn test_uri_parameter_hit() {
+    let mut p = new_params();
+    p.add("cache".clone(), "shared".clone());
+    match sqlite3_uri_parameter(&p, &"cache".clone()) {
+        Maybe.Some(v) => assert(v == "shared".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_uri_parameter_miss() {
+    let p = new_params();
+    match sqlite3_uri_parameter(&p, &"missing".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_uri_boolean_on_values() {
+    assert(interpret_boolean(&"1".clone(), false));
+    assert(interpret_boolean(&"yes".clone(), false));
+    assert(interpret_boolean(&"true".clone(), false));
+    assert(interpret_boolean(&"on".clone(), false));
+    assert(interpret_boolean(&"YES".clone(), false));
+    assert(interpret_boolean(&"True".clone(), false));
+}
+
+fn test_uri_boolean_off_values() {
+    assert(!interpret_boolean(&"0".clone(), true));
+    assert(!interpret_boolean(&"no".clone(), true));
+    assert(!interpret_boolean(&"false".clone(), true));
+    assert(!interpret_boolean(&"off".clone(), true));
+}
+
+fn test_uri_boolean_falls_back_to_default() {
+    assert(interpret_boolean(&"maybe".clone(), true));
+    assert(!interpret_boolean(&"maybe".clone(), false));
+}
+
+fn test_uri_int64_parses_decimal() {
+    assert_eq(interpret_int64(&"4096".clone(), 0 as Int64), 4096 as Int64);
+    assert_eq(interpret_int64(&"-7".clone(), 0 as Int64), -7 as Int64);
+    assert_eq(interpret_int64(&"+42".clone(), 0 as Int64), 42 as Int64);
+}
+
+fn test_uri_int64_fallback_on_garbage() {
+    assert_eq(interpret_int64(&"abc".clone(), 99 as Int64), 99 as Int64);
+    assert_eq(interpret_int64(&"".clone(), 99 as Int64), 99 as Int64);
+    assert_eq(interpret_int64(&"12x".clone(), 99 as Int64), 99 as Int64);
+}
+
+fn test_uri_boolean_via_engine() {
+    let mut p = new_params();
+    p.add("wal".clone(), "true".clone());
+    assert(sqlite3_uri_boolean(&p, &"wal".clone(), false));
+    assert(sqlite3_uri_boolean(&p, &"missing".clone(), true));
+}
+
+fn test_uri_int64_via_engine() {
+    let mut p = new_params();
+    p.add("page_size".clone(), "4096".clone());
+    assert_eq(sqlite3_uri_int64(&p, &"page_size".clone(), 0 as Int64), 4096 as Int64);
+    assert_eq(sqlite3_uri_int64(&p, &"missing".clone(), 99 as Int64), 99 as Int64);
+}
+
+fn test_uri_key_by_index() {
+    let mut p = new_params();
+    p.add("alpha".clone(), "1".clone());
+    p.add("beta".clone(), "2".clone());
+    match sqlite3_uri_key(&p, 0) {
+        Maybe.Some(t) => assert(t == "alpha".clone()),
+        Maybe.None => assert(false),
+    }
+    match sqlite3_uri_key(&p, 1) {
+        Maybe.Some(t) => assert(t == "beta".clone()),
+        Maybe.None => assert(false),
+    }
+    match sqlite3_uri_key(&p, 99) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_from_list_roundtrip() {
+    let mut lst: List<UriParam> = List.new();
+    lst.push(param("k".clone(), "v".clone()));
+    let p = from_list(lst);
+    assert_eq(p.len(), 1);
+}
+
+fn main() {
+    test_filename_sidecars();
+    test_uri_parameter_hit();
+    test_uri_parameter_miss();
+    test_uri_boolean_on_values();
+    test_uri_boolean_off_values();
+    test_uri_boolean_falls_back_to_default();
+    test_uri_int64_parses_decimal();
+    test_uri_int64_fallback_on_garbage();
+    test_uri_boolean_via_engine();
+    test_uri_int64_via_engine();
+    test_uri_key_by_index();
+    test_from_list_roundtrip();
+}

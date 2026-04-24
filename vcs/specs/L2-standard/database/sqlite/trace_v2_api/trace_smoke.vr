@@ -1,0 +1,108 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, trace_v2_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.trace_v2_api.mask.{
+    TraceEventMask,
+    SQLITE_TRACE_STMT, SQLITE_TRACE_PROFILE, SQLITE_TRACE_ROW, SQLITE_TRACE_CLOSE,
+    empty_mask, mask_of, full_mask, has, is_empty,
+    wants_stmt, wants_profile, wants_row, wants_close,
+};
+mount core.database.sqlite.native.trace_v2_api.callback.{
+    CallbackSpec, new_spec, null_spec, is_null,
+};
+mount core.database.sqlite.native.trace_v2_api.engine.{
+    TraceEngine, new_engine,
+};
+mount base.{Bool};
+
+fn test_mask_constants_match_header() {
+    assert_eq(SQLITE_TRACE_STMT, 1);
+    assert_eq(SQLITE_TRACE_PROFILE, 2);
+    assert_eq(SQLITE_TRACE_ROW, 4);
+    assert_eq(SQLITE_TRACE_CLOSE, 8);
+}
+
+fn test_empty_mask_flags_all_false() {
+    let m = empty_mask();
+    assert(is_empty(&m));
+    assert(!wants_stmt(&m));
+    assert(!wants_profile(&m));
+    assert(!wants_row(&m));
+    assert(!wants_close(&m));
+}
+
+fn test_full_mask_flags_all_true() {
+    let m = full_mask();
+    assert(!is_empty(&m));
+    assert(wants_stmt(&m));
+    assert(wants_profile(&m));
+    assert(wants_row(&m));
+    assert(wants_close(&m));
+}
+
+fn test_mask_of_specific_bits() {
+    let m = mask_of(SQLITE_TRACE_STMT | SQLITE_TRACE_CLOSE);
+    assert(wants_stmt(&m));
+    assert(!wants_profile(&m));
+    assert(wants_close(&m));
+}
+
+fn test_callback_null_detection() {
+    let n = null_spec();
+    assert(is_null(&n));
+    let s = new_spec(1 as Int64, 0 as Int64, "sink".clone());
+    assert(!is_null(&s));
+}
+
+fn test_engine_disabled_initially() {
+    let e = new_engine();
+    assert(!e.is_enabled());
+}
+
+fn test_engine_trace_v2_install_then_note() {
+    let mut e = new_engine();
+    e.sqlite3_trace_v2(
+        mask_of(SQLITE_TRACE_STMT | SQLITE_TRACE_PROFILE),
+        new_spec(1 as Int64, 0 as Int64, "s".clone()),
+    );
+    assert(e.is_enabled());
+    assert(e.note_event(SQLITE_TRACE_STMT));
+    assert_eq(e.events_delivered, 1 as Int64);
+    assert(!e.note_event(SQLITE_TRACE_ROW));   // not in mask
+    assert_eq(e.events_dropped, 1 as Int64);
+}
+
+fn test_engine_null_callback_disables() {
+    let mut e = new_engine();
+    e.sqlite3_trace_v2(full_mask(), null_spec());
+    assert(!e.is_enabled());
+}
+
+fn test_engine_empty_mask_disables() {
+    let mut e = new_engine();
+    e.sqlite3_trace_v2(empty_mask(), new_spec(1 as Int64, 0 as Int64, "s".clone()));
+    assert(!e.is_enabled());
+}
+
+fn test_engine_drops_when_disabled() {
+    let mut e = new_engine();
+    assert(!e.note_event(SQLITE_TRACE_STMT));
+    assert_eq(e.events_dropped, 1 as Int64);
+}
+
+fn main() {
+    test_mask_constants_match_header();
+    test_empty_mask_flags_all_false();
+    test_full_mask_flags_all_true();
+    test_mask_of_specific_bits();
+    test_callback_null_detection();
+    test_engine_disabled_initially();
+    test_engine_trace_v2_install_then_note();
+    test_engine_null_callback_disables();
+    test_engine_empty_mask_disables();
+    test_engine_drops_when_disabled();
+}

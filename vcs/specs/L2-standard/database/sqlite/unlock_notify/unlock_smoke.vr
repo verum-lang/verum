@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, unlock_notify, deadlock, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.unlock_notify.request.{
+    RegistrationRequest,
+    new_request, cancel_request, is_cancellation,
+};
+mount core.database.sqlite.native.unlock_notify.engine.{
+    UnlockNotifyEngine, Registration, new_engine,
+};
+mount base.{Bool};
+
+fn test_new_request_not_cancellation() {
+    let r = new_request(1 as Int64, 2 as Int64, 42 as Int64);
+    assert(!is_cancellation(&r));
+    assert_eq(r.blocked, 1 as Int64);
+    assert_eq(r.blocker, 2 as Int64);
+    assert_eq(r.arg, 42 as Int64);
+}
+
+fn test_cancel_request_is_cancellation() {
+    let r = cancel_request(1 as Int64);
+    assert(is_cancellation(&r));
+    assert_eq(r.blocker, 0 as Int64);
+}
+
+fn test_engine_first_registration_succeeds() {
+    let mut e = new_engine();
+    let r = new_request(1 as Int64, 2 as Int64, 100 as Int64);
+    assert_eq(e.sqlite3_unlock_notify(&r), 0);
+    assert_eq(e.pending_count(), 1);
+}
+
+fn test_engine_cancellation_removes() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_unlock_notify(&new_request(1 as Int64, 2 as Int64, 100 as Int64));
+    let _ = e.sqlite3_unlock_notify(&cancel_request(1 as Int64));
+    assert_eq(e.pending_count(), 0);
+}
+
+fn test_engine_self_blocking_is_deadlock() {
+    let mut e = new_engine();
+    let r = new_request(1 as Int64, 1 as Int64, 0 as Int64);
+    assert_eq(e.sqlite3_unlock_notify(&r), 6);   // SQLITE_LOCKED
+    assert_eq(e.deadlock_rejects, 1 as Int64);
+}
+
+fn test_engine_two_conn_cycle_is_deadlock() {
+    let mut e = new_engine();
+    // conn 1 waits for 2.
+    assert_eq(e.sqlite3_unlock_notify(&new_request(1 as Int64, 2 as Int64, 0 as Int64)), 0);
+    // conn 2 waiting for 1 → deadlock.
+    assert_eq(e.sqlite3_unlock_notify(&new_request(2 as Int64, 1 as Int64, 0 as Int64)), 6);
+}
+
+fn test_engine_non_cyclic_chain_accepted() {
+    let mut e = new_engine();
+    // 1 → 2, 2 → 3, 3 → 4; no cycle.
+    assert_eq(e.sqlite3_unlock_notify(&new_request(1 as Int64, 2 as Int64, 0 as Int64)), 0);
+    assert_eq(e.sqlite3_unlock_notify(&new_request(2 as Int64, 3 as Int64, 0 as Int64)), 0);
+    assert_eq(e.sqlite3_unlock_notify(&new_request(3 as Int64, 4 as Int64, 0 as Int64)), 0);
+    assert_eq(e.pending_count(), 3);
+}
+
+fn test_engine_blocker_released_fires_matching() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_unlock_notify(&new_request(1 as Int64, 99 as Int64, 11 as Int64));
+    let _ = e.sqlite3_unlock_notify(&new_request(2 as Int64, 99 as Int64, 22 as Int64));
+    let fired = e.blocker_released(99 as Int64);
+    assert_eq(fired, 2);
+    assert_eq(e.pending_count(), 0);
+    assert_eq(e.notifications_fired, 2 as Int64);
+}
+
+fn test_engine_blocker_released_no_match_is_zero() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_unlock_notify(&new_request(1 as Int64, 99 as Int64, 11 as Int64));
+    let fired = e.blocker_released(42 as Int64);
+    assert_eq(fired, 0);
+}
+
+fn main() {
+    test_new_request_not_cancellation();
+    test_cancel_request_is_cancellation();
+    test_engine_first_registration_succeeds();
+    test_engine_cancellation_removes();
+    test_engine_self_blocking_is_deadlock();
+    test_engine_two_conn_cycle_is_deadlock();
+    test_engine_non_cyclic_chain_accepted();
+    test_engine_blocker_released_fires_matching();
+    test_engine_blocker_released_no_match_is_zero();
+}

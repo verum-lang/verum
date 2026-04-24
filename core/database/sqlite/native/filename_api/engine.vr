@@ -1,0 +1,54 @@
+// =============================================================================
+// filename_api/engine.vr — C-API-aligned accessors
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.filename_api.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.filename_api.filename.{
+    FilenameHandle,
+};
+mount core.database.sqlite.native.filename_api.uri.{
+    UriParameters, interpret_boolean, interpret_int64,
+};
+
+public fn sqlite3_filename_database(h: &FilenameHandle) -> Text {
+    h.database.clone()
+}
+
+public fn sqlite3_filename_journal(h: &FilenameHandle) -> Text {
+    h.journal.clone()
+}
+
+public fn sqlite3_filename_wal(h: &FilenameHandle) -> Text {
+    h.wal.clone()
+}
+
+public fn sqlite3_filename_super_journal(h: &FilenameHandle) -> Text {
+    h.super_journal.clone()
+}
+
+public fn sqlite3_uri_parameter(p: &UriParameters, name: &Text) -> Maybe<Text> {
+    p.parameter(name)
+}
+
+public fn sqlite3_uri_boolean(p: &UriParameters, name: &Text, default: Bool) -> Bool {
+    match p.parameter(name) {
+        Maybe.Some(v) => interpret_boolean(&v, default),
+        Maybe.None => default,
+    }
+}
+
+public fn sqlite3_uri_int64(p: &UriParameters, name: &Text, default: Int64) -> Int64 {
+    match p.parameter(name) {
+        Maybe.Some(v) => interpret_int64(&v, default),
+        Maybe.None => default,
+    }
+}
+
+public fn sqlite3_uri_key(p: &UriParameters, index: Int) -> Maybe<Text> {
+    p.key(index)
+}

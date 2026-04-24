@@ -1,0 +1,40 @@
+// =============================================================================
+// temp_path/slot.vr — PathSlot
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.temp_path.slot;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+
+public type SetOutcome is
+      SoOk
+    | SoFrozen;         // sqlite3_initialize was already called
+
+public type PathSlot is {
+    path: Maybe<Text>,
+    /// True once sqlite3_initialize has been called; on Windows
+    /// `sqlite3_temp_directory` is locked after that.
+    frozen: Bool,
+}
+
+public fn empty_slot() -> PathSlot {
+    PathSlot { path: Maybe.None, frozen: false }
+}
+
+public fn freeze(s: &mut PathSlot) { s.frozen = true; }
+
+public fn set_path(s: &mut PathSlot, path: Maybe<Text>) -> SetOutcome {
+    if s.frozen { return SoFrozen; }
+    s.path = path;
+    SoOk
+}
+
+public fn get_path(s: &PathSlot) -> Maybe<Text> {
+    match &s.path {
+        Maybe.Some(t) => Maybe.Some(t.clone()),
+        Maybe.None => Maybe.None,
+    }
+}

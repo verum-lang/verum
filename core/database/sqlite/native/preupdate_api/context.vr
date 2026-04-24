@@ -1,0 +1,77 @@
+// =============================================================================
+// preupdate_api/context.vr — PreupdateContext
+// =============================================================================
+// Spec: SQLite C API — session/preupdate.
+// =============================================================================
+
+module core.database.sqlite.native.preupdate_api.context;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.hooks_api.op.{
+    UpdateOp, UoInsert, UoUpdate, UoDelete,
+};
+
+public type PreupdateContext is {
+    op: UpdateOp,
+    /// Column count of the affected table.
+    n_columns: Int,
+    /// Nested trigger / foreign-key cascade depth (0 for top-level).
+    depth: Int,
+    /// Column index currently targeted by sqlite3_blob_write during
+    /// the preupdate callback.  -1 if this isn't a blob-write.
+    blobwrite_column: Int,
+}
+
+public fn new_context(op: UpdateOp, n_columns: Int) -> PreupdateContext {
+    PreupdateContext {
+        op: op,
+        n_columns: n_columns,
+        depth: 0,
+        blobwrite_column: -1,
+    }
+}
+
+implement PreupdateContext {
+    pub fn enter_nested(&mut self) {
+        self.depth = self.depth + 1;
+    }
+
+    pub fn leave_nested(&mut self) {
+        if self.depth > 0 { self.depth = self.depth - 1; }
+    }
+
+    pub fn set_blobwrite(&mut self, column_index: Int) {
+        self.blobwrite_column = column_index;
+    }
+
+    pub fn clear_blobwrite(&mut self) {
+        self.blobwrite_column = -1;
+    }
+
+    pub fn has_old_values(&self) -> Bool {
+        match &self.op {
+            UoUpdate | UoDelete => true,
+            UoInsert => false,
+        }
+    }
+
+    pub fn has_new_values(&self) -> Bool {
+        match &self.op {
+            UoInsert | UoUpdate => true,
+            UoDelete => false,
+        }
+    }
+}
+
+public fn sqlite3_preupdate_count(c: &PreupdateContext) -> Int {
+    c.n_columns
+}
+
+public fn sqlite3_preupdate_depth(c: &PreupdateContext) -> Int {
+    c.depth
+}
+
+public fn sqlite3_preupdate_blobwrite(c: &PreupdateContext) -> Int {
+    c.blobwrite_column
+}

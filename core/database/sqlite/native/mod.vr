@@ -284,3 +284,19 @@ public module sleep_api;
 public module free_api;
 // - version_api: sqlite3_libversion / _sourceid / _compileoption_get / _used — version + build flags
 public module version_api;
+// - backup_api: sqlite3_backup_init / _step / _finish / _remaining / _pagecount — public API over backup/
+public module backup_api;
+// - unlock_notify: sqlite3_unlock_notify — async coordination + cycle-detect deadlock check
+public module unlock_notify;
+// - filename_api: sqlite3_filename_* + sqlite3_uri_{parameter,boolean,int64,key}
+public module filename_api;
+// - preupdate_api: sqlite3_preupdate_count / _depth / _old / _new / _blobwrite data accessors
+public module preupdate_api;
+// - vfs_api: sqlite3_vfs_register / _unregister / _find — public registry facade
+public module vfs_api;
+// - temp_path: sqlite3_temp_directory / sqlite3_data_directory — global path slots w/ freeze gate
+public module temp_path;
+// - trace_v2_api: sqlite3_trace_v2 — SQLITE_TRACE_* mask + callback + delivery counters
+public module trace_v2_api;
+// - commit_phasetwo: two-phase commit state machine + SQLITE_FCNTL_COMMIT_PHASETWO integration
+public module commit_phasetwo;

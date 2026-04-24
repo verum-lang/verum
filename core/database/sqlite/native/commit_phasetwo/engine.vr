@@ -1,0 +1,88 @@
+// =============================================================================
+// commit_phasetwo/engine.vr — commit-phase driver
+// =============================================================================
+// Spec: SQLite C API
+//
+// The engine records the current phase + a counter of successful
+// commits.  Transitions:
+//
+//   Idle → PhaseOne                      (start commit)
+//   PhaseOne → PhaseTwo                  (journal flushed)
+//   PhaseTwo → Done                      (main DB flushed; commit complete)
+//   any → Rollback(reason)               (abort)
+//
+// Each PhaseTwo entry fires SQLITE_FCNTL_COMMIT_PHASETWO = 22 on the
+// owning VFS via file_control.
+// =============================================================================
+
+module core.database.sqlite.native.commit_phasetwo.engine;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.commit_phasetwo.phase.{
+    CommitPhase, CpIdle, CpPhaseOne, CpPhaseTwo, CpDone, CpRollback,
+    is_terminal, is_committing,
+};
+
+public const SQLITE_FCNTL_COMMIT_PHASETWO: Int = 22;
+
+public type CommitEngine is {
+    phase: CommitPhase,
+    commits_completed: Int64,
+    rollbacks_observed: Int64,
+    fcntl_notifications: Int64,
+}
+
+public fn new_engine() -> CommitEngine {
+    CommitEngine {
+        phase: CpIdle,
+        commits_completed: 0 as Int64,
+        rollbacks_observed: 0 as Int64,
+        fcntl_notifications: 0 as Int64,
+    }
+}
+
+implement CommitEngine {
+    pub fn start_phase_one(&mut self) -> Bool {
+        match &self.phase {
+            CpIdle => { self.phase = CpPhaseOne; true }
+            _ => false,
+        }
+    }
+
+    /// Returns the FCNTL opcode the caller must send to the VFS
+    /// (SQLITE_FCNTL_COMMIT_PHASETWO).  Caller integrates with
+    /// file_control to actually invoke it.
+    pub fn enter_phase_two(&mut self) -> Int {
+        match &self.phase {
+            CpPhaseOne => {
+                self.phase = CpPhaseTwo;
+                self.fcntl_notifications = self.fcntl_notifications + (1 as Int64);
+                SQLITE_FCNTL_COMMIT_PHASETWO
+            }
+            _ => -1,
+        }
+    }
+
+    pub fn finish(&mut self) -> Bool {
+        match &self.phase {
+            CpPhaseTwo => {
+                self.phase = CpDone;
+                self.commits_completed = self.commits_completed + (1 as Int64);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn rollback(&mut self, reason: Text) {
+        self.phase = CpRollback(reason);
+        self.rollbacks_observed = self.rollbacks_observed + (1 as Int64);
+    }
+
+    pub fn reset(&mut self) {
+        if is_terminal(&self.phase) { self.phase = CpIdle; }
+    }
+
+    pub fn is_in_flight(&self) -> Bool { is_committing(&self.phase) }
+}

@@ -1,0 +1,118 @@
+// =============================================================================
+// unlock_notify/engine.vr — pending-notifications queue + deadlock detect
+// =============================================================================
+// Spec: SQLite C API
+//
+// Deadlock detection: if registering (blocked → blocker) would create
+// a cycle in the "waits-for" graph, sqlite3_unlock_notify returns
+// SQLITE_LOCKED.
+// =============================================================================
+
+module core.database.sqlite.native.unlock_notify.engine;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.unlock_notify.request.{
+    RegistrationRequest, is_cancellation,
+};
+
+public type Registration is {
+    blocked: Int64,
+    blocker: Int64,
+    arg: Int64,
+}
+
+public type UnlockNotifyEngine is {
+    pending: List<Registration>,
+    deadlock_rejects: Int64,
+    notifications_fired: Int64,
+}
+
+public fn new_engine() -> UnlockNotifyEngine {
+    UnlockNotifyEngine {
+        pending: List.new(),
+        deadlock_rejects: 0 as Int64,
+        notifications_fired: 0 as Int64,
+    }
+}
+
+implement UnlockNotifyEngine {
+    fn find_blocker(&self, blocked: Int64) -> Maybe<Int64> {
+        let mut i: Int = 0;
+        while i < self.pending.len() {
+            let r = self.pending.get(i);
+            if r.blocked == blocked {
+                return Maybe.Some(r.blocker);
+            }
+            i = i + 1;
+        }
+        Maybe.None
+    }
+
+    /// Does `blocker` transitively block `blocked`?  If yes, registering
+    /// blocked→blocker would form a cycle.
+    fn would_deadlock(&self, blocked: Int64, blocker: Int64) -> Bool {
+        if blocked == blocker { return true; }
+        let mut current = blocker;
+        let mut depth: Int = 0;
+        while depth < self.pending.len() + 1 {
+            match self.find_blocker(current) {
+                Maybe.Some(next) => {
+                    if next == blocked { return true; }
+                    current = next;
+                }
+                Maybe.None => return false,
+            }
+            depth = depth + 1;
+        }
+        false
+    }
+
+    /// Returns 0 on success, 6 (SQLITE_LOCKED) on deadlock.
+    pub fn sqlite3_unlock_notify(&mut self, req: &RegistrationRequest) -> Int {
+        self.clear_for(req.blocked);
+        if is_cancellation(req) { return 0; }
+        if self.would_deadlock(req.blocked, req.blocker) {
+            self.deadlock_rejects = self.deadlock_rejects + (1 as Int64);
+            return 6;
+        }
+        self.pending.push(Registration {
+            blocked: req.blocked,
+            blocker: req.blocker,
+            arg: req.arg,
+        });
+        0
+    }
+
+    fn clear_for(&mut self, blocked: Int64) {
+        let mut i: Int = 0;
+        while i < self.pending.len() {
+            if self.pending.get(i).blocked == blocked {
+                let _ = self.pending.remove(i);
+                continue;
+            }
+            i = i + 1;
+        }
+    }
+
+    /// Fire + drain every registration that was waiting for `blocker`.
+    /// Returns the number of notifications delivered.
+    pub fn blocker_released(&mut self, blocker: Int64) -> Int {
+        let mut out = List.new();
+        let mut i: Int = 0;
+        while i < self.pending.len() {
+            if self.pending.get(i).blocker == blocker {
+                out.push(self.pending.get(i).arg);
+                let _ = self.pending.remove(i);
+                continue;
+            }
+            i = i + 1;
+        }
+        let fired = out.len();
+        self.notifications_fired = self.notifications_fired + (fired as Int64);
+        fired
+    }
+
+    pub fn pending_count(&self) -> Int { self.pending.len() }
+}

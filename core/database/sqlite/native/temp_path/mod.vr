@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/temp_path/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_temp_directory / sqlite3_data_directory)
+// Spec: SQLite C API
+//
+// Two process-global mutable path slots.  Setting either one must
+// happen BEFORE any connection is opened on Windows; on Unix the
+// override is accepted any time but only takes effect for subsequently
+// opened connections.
+//
+// Submodules:
+//   * `slot`       — TempPath slot w/ override policy
+//   * `engine`     — sqlite3_temp_directory + sqlite3_data_directory getters/setters
+// =============================================================================
+
+module core.database.sqlite.native.temp_path;
+
+public module slot;
+public module engine;

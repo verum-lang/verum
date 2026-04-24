@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/vfs_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_vfs_* registration)
+// Spec: SQLite C API
+//
+//   sqlite3_vfs_find(zName)            → registered VFS (or NULL)
+//   sqlite3_vfs_register(pVfs, makeDflt) → install + optional default-promotion
+//   sqlite3_vfs_unregister(pVfs)       → remove from global chain
+//
+// The on-disk VfsProtocol + default selection live in l0_vfs; this
+// catalogue is the public-API façade the caller sees.
+//
+// Submodules:
+//   * `entry`      — VfsEntry (name + handle + priority flag)
+//   * `registry`   — ordered list + default pointer
+// =============================================================================
+
+module core.database.sqlite.native.vfs_api;
+
+public module entry;
+public module registry;

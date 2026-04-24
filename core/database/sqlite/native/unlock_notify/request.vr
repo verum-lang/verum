@@ -1,0 +1,35 @@
+// =============================================================================
+// unlock_notify/request.vr — RegistrationRequest
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.unlock_notify.request;
+
+mount core.*;
+mount base.{Bool};
+
+public type RegistrationRequest is {
+    /// The connection that is currently blocked (waiting for a lock).
+    blocked: Int64,
+    /// The connection that holds the conflicting lock.  0 ⇒
+    /// cancellation (sqlite3_unlock_notify with xNotify == NULL).
+    blocker: Int64,
+    /// Opaque argument the caller supplies; forwarded verbatim to
+    /// the notification callback.
+    arg: Int64,
+}
+
+public fn new_request(blocked: Int64, blocker: Int64, arg: Int64) -> RegistrationRequest {
+    RegistrationRequest { blocked: blocked, blocker: blocker, arg: arg }
+}
+
+/// `cancel_request(blocked)` clears any previously-registered
+/// notification for `blocked`.
+public fn cancel_request(blocked: Int64) -> RegistrationRequest {
+    RegistrationRequest { blocked: blocked, blocker: 0 as Int64, arg: 0 as Int64 }
+}
+
+public fn is_cancellation(r: &RegistrationRequest) -> Bool {
+    r.blocker == (0 as Int64)
+}

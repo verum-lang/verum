@@ -1,0 +1,41 @@
+// =============================================================================
+// trace_v2_api/mask.vr — SQLITE_TRACE_* event mask
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.trace_v2_api.mask;
+
+mount core.*;
+mount base.{Bool};
+
+public const SQLITE_TRACE_STMT: Int    = 0x01;
+public const SQLITE_TRACE_PROFILE: Int = 0x02;
+public const SQLITE_TRACE_ROW: Int     = 0x04;
+public const SQLITE_TRACE_CLOSE: Int   = 0x08;
+
+public type TraceEventMask is {
+    bits: Int,
+}
+
+public fn empty_mask() -> TraceEventMask { TraceEventMask { bits: 0 } }
+
+public fn mask_of(bits: Int) -> TraceEventMask { TraceEventMask { bits: bits } }
+
+public fn full_mask() -> TraceEventMask {
+    TraceEventMask {
+        bits: SQLITE_TRACE_STMT | SQLITE_TRACE_PROFILE
+            | SQLITE_TRACE_ROW | SQLITE_TRACE_CLOSE,
+    }
+}
+
+public fn has(m: &TraceEventMask, bit: Int) -> Bool {
+    (m.bits & bit) != 0
+}
+
+public fn is_empty(m: &TraceEventMask) -> Bool { m.bits == 0 }
+
+public fn wants_stmt(m: &TraceEventMask) -> Bool    { has(m, SQLITE_TRACE_STMT) }
+public fn wants_profile(m: &TraceEventMask) -> Bool { has(m, SQLITE_TRACE_PROFILE) }
+public fn wants_row(m: &TraceEventMask) -> Bool     { has(m, SQLITE_TRACE_ROW) }
+public fn wants_close(m: &TraceEventMask) -> Bool   { has(m, SQLITE_TRACE_CLOSE) }

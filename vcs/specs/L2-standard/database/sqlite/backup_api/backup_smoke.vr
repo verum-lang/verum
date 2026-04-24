@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, backup_api, online_backup, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.backup_api.handle.{
+    BackupHandle, new_handle, progress_fraction_pct,
+};
+mount core.database.sqlite.native.backup_api.request.{
+    BackupStepRequest, BsrNoop, BsrStep, BsrAll,
+    from_n_pages, is_noop, requested_pages,
+};
+mount core.database.sqlite.native.backup_api.outcome.{
+    BackupOutcome, BoOk, BoDone, BoBusy, BoLocked, BoFailed,
+    outcome_numeric, outcome_name, is_retriable, is_progress, is_terminal,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcError,
+};
+mount base.{Bool};
+
+fn test_new_handle_total_and_remaining() {
+    let h = new_handle(
+        1 as Int64, 1 as Int64, "main".clone(),
+        2 as Int64, "main".clone(), 100,
+    );
+    assert_eq(h.total_pages, 100);
+    assert_eq(h.remaining_pages, 100);
+    assert(h.is_live());
+}
+
+fn test_record_progress_shrinks_remaining() {
+    let mut h = new_handle(
+        1 as Int64, 1 as Int64, "main".clone(),
+        2 as Int64, "main".clone(), 100,
+    );
+    h.record_progress(30);
+    assert_eq(h.remaining_pages, 70);
+    h.record_progress(100);
+    assert_eq(h.remaining_pages, 0);
+}
+
+fn test_progress_fraction_pct() {
+    let mut h = new_handle(
+        1 as Int64, 1 as Int64, "main".clone(),
+        2 as Int64, "main".clone(), 100,
+    );
+    h.record_progress(25);
+    assert_eq(progress_fraction_pct(&h), 25);
+}
+
+fn test_finish_makes_not_live() {
+    let mut h = new_handle(
+        1 as Int64, 1 as Int64, "main".clone(),
+        2 as Int64, "main".clone(), 100,
+    );
+    h.finish();
+    assert(!h.is_live());
+}
+
+fn test_from_n_pages_dispatch() {
+    match from_n_pages(0)  { BsrNoop    => {}, _ => assert(false) }
+    match from_n_pages(5)  { BsrStep(_) => {}, _ => assert(false) }
+    match from_n_pages(-1) { BsrAll     => {}, _ => assert(false) }
+}
+
+fn test_is_noop() {
+    assert(is_noop(&BsrNoop));
+    assert(!is_noop(&BsrStep(5)));
+    assert(!is_noop(&BsrAll));
+}
+
+fn test_requested_pages_clamps_to_remaining() {
+    assert_eq(requested_pages(&BsrStep(10), 5), 5);
+    assert_eq(requested_pages(&BsrStep(3), 10), 3);
+    assert_eq(requested_pages(&BsrAll, 42), 42);
+    assert_eq(requested_pages(&BsrNoop, 100), 0);
+}
+
+fn test_outcome_numeric_matches_c_header() {
+    assert_eq(outcome_numeric(&BoOk), 0);
+    assert_eq(outcome_numeric(&BoDone), 101);
+    assert_eq(outcome_numeric(&BoBusy), 5);
+    assert_eq(outcome_numeric(&BoLocked), 6);
+    let failed: BackupOutcome = BoFailed {
+        code: extended_of(PcError, 0),
+        reason: "boom".clone(),
+    };
+    assert(outcome_numeric(&failed) != 0);
+}
+
+fn test_outcome_name() {
+    assert(outcome_name(&BoOk) == "ok".clone());
+    assert(outcome_name(&BoDone) == "done".clone());
+    assert(outcome_name(&BoBusy) == "busy".clone());
+}
+
+fn test_is_retriable_for_busy_and_locked() {
+    assert(is_retriable(&BoBusy));
+    assert(is_retriable(&BoLocked));
+    assert(!is_retriable(&BoOk));
+    assert(!is_retriable(&BoDone));
+}
+
+fn test_is_progress_for_ok_and_done() {
+    assert(is_progress(&BoOk));
+    assert(is_progress(&BoDone));
+    assert(!is_progress(&BoBusy));
+}
+
+fn test_is_terminal_only_done_and_failed() {
+    assert(is_terminal(&BoDone));
+    assert(!is_terminal(&BoOk));
+    assert(!is_terminal(&BoBusy));
+}
+
+fn main() {
+    test_new_handle_total_and_remaining();
+    test_record_progress_shrinks_remaining();
+    test_progress_fraction_pct();
+    test_finish_makes_not_live();
+    test_from_n_pages_dispatch();
+    test_is_noop();
+    test_requested_pages_clamps_to_remaining();
+    test_outcome_numeric_matches_c_header();
+    test_outcome_name();
+    test_is_retriable_for_busy_and_locked();
+    test_is_progress_for_ok_and_done();
+    test_is_terminal_only_done_and_failed();
+}

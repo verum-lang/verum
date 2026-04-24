@@ -1,0 +1,48 @@
+// =============================================================================
+// commit_phasetwo/phase.vr — CommitPhase state machine
+// =============================================================================
+// Spec: SQLite C API
+//
+// States:
+//   CpIdle          — no write txn is committing
+//   CpPhaseOne      — journal being flushed
+//   CpPhaseTwo      — main DB being flushed
+//   CpDone          — commit succeeded
+//   CpRollback(tag) — commit aborted; caller must rollback
+// =============================================================================
+
+module core.database.sqlite.native.commit_phasetwo.phase;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type CommitPhase is
+      CpIdle
+    | CpPhaseOne
+    | CpPhaseTwo
+    | CpDone
+    | CpRollback(Text);
+
+public fn phase_name(p: &CommitPhase) -> Text {
+    match p {
+        CpIdle         => "idle".clone(),
+        CpPhaseOne     => "phase-one".clone(),
+        CpPhaseTwo     => "phase-two".clone(),
+        CpDone         => "done".clone(),
+        CpRollback(_)  => "rollback".clone(),
+    }
+}
+
+public fn is_terminal(p: &CommitPhase) -> Bool {
+    match p {
+        CpDone | CpRollback(_) => true,
+        _ => false,
+    }
+}
+
+public fn is_committing(p: &CommitPhase) -> Bool {
+    match p {
+        CpPhaseOne | CpPhaseTwo => true,
+        _ => false,
+    }
+}
