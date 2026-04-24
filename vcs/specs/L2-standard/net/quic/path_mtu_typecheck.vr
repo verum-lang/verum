@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, path_mtu, dplpmtud, rfc9000_14, rfc8899
+// @timeout: 15000
+// @expected-exit: 0
+
+// Path MTU Discovery scaffold surface — RFC 9000 §14 + RFC 8899.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.net.quic.path_mtu.{
+    PmtuTracker, PmtuState,
+    BASE_PLPMTU, ETHERNET_PLPMTU, JUMBO_PLPMTU, MAX_PLPMTU,
+    MAX_PROBES, RAISE_TIMER_SECS,
+    next_probe_size,
+};
+
+fn constants_match_rfc() {
+    assert(BASE_PLPMTU == 1200);
+    assert(ETHERNET_PLPMTU == 1452);        // 1500 - IPv6(40) - UDP(8)
+    assert(JUMBO_PLPMTU == 9000);
+    assert(MAX_PLPMTU == 65527);
+    assert(MAX_PROBES == 3);
+    assert(RAISE_TIMER_SECS == 600);
+}
+
+fn tracker_starts_at_base() {
+    let t = PmtuTracker.new(Instant.now());
+    assert(t.plpmtu() == BASE_PLPMTU);
+}
+
+fn disable_clamps_to_base() {
+    let mut t = PmtuTracker.new(Instant.now());
+    t.disable();
+    assert(t.plpmtu() == BASE_PLPMTU);
+    match t.state {
+        PmtuState.Disabled => {},
+        _ => panic("expected Disabled after disable()"),
+    }
+}
+
+fn begin_search_enters_search_state() {
+    let mut t = PmtuTracker.new(Instant.now());
+    t.begin_search(ETHERNET_PLPMTU);
+    match t.state {
+        PmtuState.Search { probed_size, probes_sent } => {
+            assert(probed_size == ETHERNET_PLPMTU);
+            assert(probes_sent == 1);
+        },
+        _ => panic("expected Search after begin_search"),
+    }
+}
+
+fn on_probe_acked_raises_plpmtu() {
+    let mut t = PmtuTracker.new(Instant.now());
+    t.begin_search(ETHERNET_PLPMTU);
+    t.on_probe_acked(ETHERNET_PLPMTU, Instant.now());
+    assert(t.plpmtu() == ETHERNET_PLPMTU);
+    match t.state {
+        PmtuState.SearchComplete {..} => {},
+        _ => panic("expected SearchComplete after ack"),
+    }
+}
+
+fn clamp_send_size_respects_base_and_plpmtu() {
+    let mut t = PmtuTracker.new(Instant.now());
+    // current_plpmtu = BASE_PLPMTU (1200).
+    assert(t.clamp_send_size(800)  == BASE_PLPMTU);   // below floor → BASE
+    assert(t.clamp_send_size(1200) == 1200);
+    assert(t.clamp_send_size(9000) == BASE_PLPMTU);   // above ceiling → clamp
+
+    // After a successful probe raises PLPMTU:
+    t.begin_search(ETHERNET_PLPMTU);
+    t.on_probe_acked(ETHERNET_PLPMTU, Instant.now());
+    assert(t.clamp_send_size(9000) == ETHERNET_PLPMTU);
+    assert(t.clamp_send_size(1300) == 1300);
+}
+
+fn probe_in_flight_reflects_state() {
+    let mut t = PmtuTracker.new(Instant.now());
+    match t.probe_in_flight() {
+        None => {},
+        _ => panic("expected None pre-probe"),
+    }
+    t.begin_search(ETHERNET_PLPMTU);
+    match t.probe_in_flight() {
+        Some(sz) => assert(sz == ETHERNET_PLPMTU),
+        _ => panic("expected Some after begin_search"),
+    }
+    t.on_probe_acked(ETHERNET_PLPMTU, Instant.now());
+    match t.probe_in_flight() {
+        None => {},
+        _ => panic("expected None after ack (SearchComplete)"),
+    }
+}
+
+fn next_probe_size_binary_searches() {
+    assert(next_probe_size(BASE_PLPMTU, ETHERNET_PLPMTU)
+           > BASE_PLPMTU);
+    assert(next_probe_size(BASE_PLPMTU, ETHERNET_PLPMTU)
+           <= ETHERNET_PLPMTU);
+    // Ceiling at or below current: return current unchanged.
+    assert(next_probe_size(ETHERNET_PLPMTU, ETHERNET_PLPMTU)
+           == ETHERNET_PLPMTU);
+    assert(next_probe_size(ETHERNET_PLPMTU, BASE_PLPMTU)
+           == ETHERNET_PLPMTU);
+}
+
+@main
+public fn main() -> Int {
+    constants_match_rfc();
+    tracker_starts_at_base();
+    disable_clamps_to_base();
+    begin_search_enters_search_state();
+    on_probe_acked_raises_plpmtu();
+    clamp_send_size_respects_base_and_plpmtu();
+    probe_in_flight_reflects_state();
+    next_probe_size_binary_searches();
+    print("Path-MTU Discovery scaffold surface verified");
+    0
+}

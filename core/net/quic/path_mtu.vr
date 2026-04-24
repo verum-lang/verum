@@ -1,0 +1,185 @@
+// =============================================================================
+// net/quic/path_mtu.vr — Path MTU Discovery (DPLPMTUD, RFC 8899) for QUIC
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// =============================================================================
+//
+// QUIC RFC 9000 §14 mandates a minimum UDP payload size of 1200 bytes
+// and recommends peers discover the actual path MTU using DPLPMTUD
+// (Datagram Packetization Layer PMTUD, RFC 8899). This lets the
+// sender raise its per-datagram size from 1200 up to the true path
+// MTU (often 1500 on the public Internet, larger on internal links).
+//
+// The algorithm maintains three values:
+//
+//   * BASE_PLPMTU = 1200 bytes (QUIC floor, RFC 9000 §14).
+//   * MIN_PLPMTU  = 1200 bytes (same as BASE in QUIC).
+//   * MAX_PLPMTU  = 65527 bytes (maximum UDP payload).
+//   * probed_size  = current size under probe (strictly > current PLPMTU).
+//   * current_plpmtu = last confirmed size.
+//
+// State machine (RFC 8899 §5):
+//
+//   Disabled → Base → Search_Complete
+//                 │          ↓
+//                 └→ Search  ↑
+//                      │     │
+//                      └→ Error_Down (raise budget back toward BASE)
+//
+// Probe packets are sent padded with PADDING frames (RFC 9000 §19.1)
+// up to the probed_size; if acknowledged, the sender raises
+// current_plpmtu. If lost, the sender backs off.
+//
+// This scaffold type-checks and exposes the state-machine surface; it
+// does NOT yet drive the Pacer or the send path directly — that
+// integration lands in the Phase 7 perf work.
+//
+// =============================================================================
+
+module core.net.quic.path_mtu;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Constants (RFC 9000 §14, RFC 8899 §4)
+// =============================================================================
+
+/// QUIC floor — MUST NOT probe below this.
+public const BASE_PLPMTU:      Int = 1200;
+/// Ethernet II baseline path MTU minus IPv6 + UDP headers (1500 - 40 - 8).
+public const ETHERNET_PLPMTU:  Int = 1452;
+/// Path MTU for jumbo-frame data centers (RFC 8899 considers 9000 typical).
+public const JUMBO_PLPMTU:     Int = 9000;
+/// Upper bound — raw UDP payload size ceiling.
+public const MAX_PLPMTU:       Int = 65527;
+/// Number of probe retries at each probed size before declaring the
+/// path does not support it (RFC 8899 §5.1.4 recommends 3).
+public const MAX_PROBES:       Int = 3;
+/// RFC 8899 §5.1.4 — RAISE_TIMER baseline (600s).
+public const RAISE_TIMER_SECS: Int = 600;
+
+// =============================================================================
+// State machine
+// =============================================================================
+
+public type PmtuState is
+      Disabled                                                 // app opted out
+    | Base                                                     // operating at 1200
+    | Search { probed_size: Int, probes_sent: Int }            // probing > current
+    | SearchComplete { raise_after: Instant }                  // at peak; re-probe later
+    | ErrorDown { next_probe: Int };                           // backing off after loss
+
+// =============================================================================
+// Tracker — one per QuicConnection
+// =============================================================================
+
+public type PmtuTracker is {
+    /// Current confirmed PLPMTU. Send path limits datagrams to this.
+    current_plpmtu: Int,
+    state:          PmtuState,
+    /// Monotonic clock source for RAISE_TIMER expiry. Injected per
+    /// connection (same pattern as ReplayCache.new_at — production
+    /// passes Instant.now(), tests pass a synthetic origin).
+    now_seed:       Instant,
+};
+
+implement PmtuTracker {
+    /// Start at the QUIC floor; caller may immediately `begin_search`.
+    public fn new(now: Instant) -> PmtuTracker {
+        PmtuTracker {
+            current_plpmtu: BASE_PLPMTU,
+            state:          PmtuState.Base,
+            now_seed:       now,
+        }
+    }
+
+    /// Disable PMTU — clamp to BASE and stop probing.
+    public fn disable(&mut self) {
+        self.current_plpmtu = BASE_PLPMTU;
+        self.state = PmtuState.Disabled;
+    }
+
+    /// Initiate a probe at `probed_size`. The caller sends a QUIC
+    /// packet padded (via PADDING frames, RFC 9000 §19.1) up to this
+    /// size; acknowledgement or loss drives
+    /// `on_probe_acked` / `on_probe_lost`.
+    public fn begin_search(&mut self, probed_size: Int) {
+        if probed_size <= self.current_plpmtu { return; }
+        if probed_size > MAX_PLPMTU { return; }
+        self.state = PmtuState.Search {
+            probed_size:  probed_size,
+            probes_sent:  1,
+        };
+    }
+
+    /// Probe acknowledged — raise current_plpmtu.
+    public fn on_probe_acked(&mut self, size_acked: Int, now: Instant) {
+        if size_acked > self.current_plpmtu {
+            self.current_plpmtu = size_acked;
+        }
+        // After a successful probe the tracker can either continue
+        // searching up (if below MAX) or settle at SearchComplete
+        // with RAISE_TIMER to retry later.
+        let raise_at = now.add_duration(Duration.from_secs(RAISE_TIMER_SECS as UInt64));
+        self.state = PmtuState.SearchComplete { raise_after: raise_at };
+    }
+
+    /// Probe lost (timeout or negative ACK). Back off toward BASE if
+    /// MAX_PROBES exceeded; otherwise retry.
+    public fn on_probe_lost(&mut self) {
+        match &self.state {
+            PmtuState.Search { probed_size, probes_sent } => {
+                if *probes_sent + 1 > MAX_PROBES {
+                    self.state = PmtuState.ErrorDown { next_probe: BASE_PLPMTU };
+                } else {
+                    self.state = PmtuState.Search {
+                        probed_size:  *probed_size,
+                        probes_sent:  *probes_sent + 1,
+                    };
+                }
+            },
+            _ => {},
+        }
+    }
+
+    /// Expose current PLPMTU so the send path can clamp to it.
+    public fn plpmtu(&self) -> Int {
+        self.current_plpmtu
+    }
+
+    /// Clamp a proposed-datagram size to the current PLPMTU. Used by
+    /// the connection-pump send path: pass the frame-assembly
+    /// budget, receive the actually-safe wire size.
+    public fn clamp_send_size(&self, requested: Int) -> Int {
+        if requested < BASE_PLPMTU { return BASE_PLPMTU; }
+        if requested > self.current_plpmtu { return self.current_plpmtu; }
+        requested
+    }
+
+    /// True iff the tracker is currently in a Search state and the
+    /// caller SHOULD pad the next datagram to `probed_size` so the
+    /// probe reaches the peer.
+    public fn probe_in_flight(&self) -> Maybe<Int> {
+        match &self.state {
+            PmtuState.Search { probed_size, probes_sent: _ } => Some(*probed_size),
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// Probe-size recommendation (RFC 8899 §5.1.4 — binary-search style)
+// =============================================================================
+
+/// Heuristic: pick the next probed_size by binary-searching between
+/// `current` and `ceiling`. This is stateless — callers may swap in
+/// a different policy without touching the state machine.
+public fn next_probe_size(current: Int, ceiling: Int) -> Int {
+    if ceiling <= current { return current; }
+    let mid = current + ((ceiling - current) / 2);
+    // Round up to an even byte boundary — some TAPs have trouble with
+    // odd sizes and the jump is tiny.
+    if mid % 2 != 0 { mid + 1 } else { mid }
+}

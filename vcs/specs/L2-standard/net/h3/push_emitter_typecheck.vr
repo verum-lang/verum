@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, push, server_push, rfc9114_4_6, rfc9114_7_2_5
+// @timeout: 15000
+// @expected-exit: 0
+
+// Server-side PushEmitter surface — tracks client budget (MAX_PUSH_ID),
+// cancellations (CANCEL_PUSH), and GOAWAY.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.frame.{H3Frame};
+mount core.net.h3.push.{
+    PushEmitter, PushError, PushReservation,
+    PUSH_STREAM_TYPE,
+};
+
+fn reserve_without_grant_fails() {
+    let mut emitter = PushEmitter::new();
+    // With zero budget any reservation fails.
+    let headers: List<Byte> = [0xD1_u8];   // QPACK indexed :method GET
+    let res = emitter.reserve(headers);
+    match res {
+        Err(PushError.BudgetExhausted {..}) => {},
+        _ => panic("expected BudgetExhausted on initial reserve"),
+    }
+}
+
+fn grant_then_reserve_succeeds() {
+    let mut emitter = PushEmitter::new();
+    emitter.grant(3_u64);
+
+    let headers_a: List<Byte> = [0xD1_u8, 0x50_u8, 0x02_u8, 0x2F_u8, 0x01_u8];
+    match emitter.reserve(headers_a) {
+        Ok(r) => {
+            assert(r.push_id == 0_u64);
+            match r.promise {
+                H3Frame.PushPromiseFrame { push_id, encoded_headers: _ } => {
+                    assert(push_id == 0_u64);
+                },
+                _ => panic("expected PushPromiseFrame"),
+            }
+        },
+        Err(_) => panic("first reserve under budget must succeed"),
+    }
+
+    let headers_b: List<Byte> = [0xD1_u8];
+    match emitter.reserve(headers_b) {
+        Ok(r) => assert(r.push_id == 1_u64),
+        Err(_) => panic("second reserve under budget must succeed"),
+    }
+}
+
+fn cancelled_push_flagged() {
+    let mut emitter = PushEmitter::new();
+    assert(false == emitter.is_cancelled(42_u64));
+    emitter.mark_cancelled(42_u64);
+    assert(emitter.is_cancelled(42_u64));
+    // Double-cancel is idempotent — no duplicate stored.
+    emitter.mark_cancelled(42_u64);
+    assert(emitter.is_cancelled(42_u64));
+}
+
+fn goaway_blocks_at_threshold() {
+    let mut emitter = PushEmitter::new();
+    emitter.grant(10_u64);
+    emitter.mark_client_goneaway(2_u64);   // no new push_ids ≥ 2
+
+    let headers: List<Byte> = [0xD1_u8];
+    let _ = emitter.reserve(headers.clone());
+    let _ = emitter.reserve(headers.clone());
+    // Third reservation (push_id = 2) should be refused.
+    match emitter.reserve(headers.clone()) {
+        Err(PushError.ClientGoneAway) => {},
+        _ => panic("expected ClientGoneAway"),
+    }
+}
+
+fn stream_type_constant_matches_rfc() {
+    // RFC 9114 §6.2.2 — push stream has type 0x01.
+    assert(PUSH_STREAM_TYPE == 0x01_u8);
+}
+
+@main
+public fn main() -> Int {
+    reserve_without_grant_fails();
+    grant_then_reserve_succeeds();
+    cancelled_push_flagged();
+    goaway_blocks_at_threshold();
+    stream_type_constant_matches_rfc();
+    print("H3 PushEmitter surface verified");
+    0
+}

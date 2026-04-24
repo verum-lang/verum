@@ -1,0 +1,180 @@
+// =============================================================================
+// net/h3/push.vr — HTTP/3 server push (RFC 9114 §4.6 + §7.2.5)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// =============================================================================
+//
+// RFC 9114 §4.6:
+//
+//   Server push is an HTTP/3 feature that allows a server to send a
+//   response to a client in anticipation of the client requesting it.
+//   A server initiates a push by sending a PUSH_PROMISE frame on a
+//   request stream; the push request is delivered on a push stream
+//   (HTTP unidirectional stream type 0x01).
+//
+// Flow:
+//
+//   1. Client advertises its push-id budget via MAX_PUSH_ID frame
+//      (on the control stream). Initial budget is 0.
+//   2. Server opens a unidirectional stream with type 0x01, writes
+//      the push_id varint, then the HTTP/3 response as DATA + HEADERS
+//      frames.
+//   3. Server emits PUSH_PROMISE on the original request stream
+//      carrying the pushed request's QPACK-encoded headers.
+//   4. Client MAY cancel a push by sending CANCEL_PUSH on the control
+//      stream. Server MAY cancel via CANCEL_PUSH on its control
+//      stream.
+//
+// The `PushEmitter` below tracks the server-side budget locally and
+// rejects emissions past the client-advertised limit. It does NOT
+// wire push streams end-to-end; the integration layer (h3.server)
+// drives the stream write after `emit_promise` returns a promise
+// descriptor.
+//
+// =============================================================================
+
+module core.net.h3.push;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.frame.{H3Frame};
+mount core.net.h3.error.{H3Error};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type PushError is
+    /// Push_id requested exceeds the client-granted MAX_PUSH_ID budget.
+      BudgetExhausted { requested: UInt64, limit: UInt64 }
+    /// Push_id was previously cancelled by the client; re-emission
+    /// would be a protocol error (RFC 9114 §7.2.3).
+    | AlreadyCancelled(UInt64)
+    /// Push attempted after the client sent GOAWAY on the control
+    /// stream — client no longer accepts new push_ids.
+    | ClientGoneAway;
+
+// =============================================================================
+// PushEmitter — server-side allocator + budget tracker
+// =============================================================================
+
+/// Per-connection push-id allocator. Call sites:
+///
+///   * on each `MAX_PUSH_ID` frame from the client → `grant(id)`.
+///   * on each `CANCEL_PUSH` from the client → `mark_cancelled(id)`.
+///   * before initiating a new push → `reserve(headers) -> PushPromiseDescriptor`.
+///   * on client GOAWAY → `mark_client_goneaway()`.
+public type PushEmitter is {
+    /// Highest push_id the client will accept. RFC 9114 §7.2.7:
+    /// MAX_PUSH_ID is cumulative (monotonically non-decreasing).
+    limit_inclusive: UInt64,
+    /// Next push_id the server will use. Incremented on `reserve`.
+    next_push_id:    UInt64,
+    /// Push_ids the client already cancelled. Server MUST NOT
+    /// re-advertise them.
+    cancelled:       List<UInt64>,
+    /// GOAWAY on the server's perspective — client advertised it
+    /// won't accept further push_ids at/above some threshold.
+    client_goneaway_at: Maybe<UInt64>,
+};
+
+implement PushEmitter {
+    /// A fresh emitter starts with zero budget (RFC 9114 §7.2.7 —
+    /// absent MAX_PUSH_ID means no pushes permitted).
+    public fn new() -> PushEmitter {
+        PushEmitter {
+            limit_inclusive:    0_u64,
+            next_push_id:       0_u64,
+            cancelled:          [],
+            client_goneaway_at: None,
+        }
+    }
+
+    /// Raise the client budget to `new_limit`. RFC 9114 §7.2.7 MAX_PUSH_ID
+    /// is cumulative; lowering it via a subsequent frame is a protocol
+    /// error on the client's part, but we defensively clamp to the
+    /// maximum so a misbehaving client does not break us.
+    public fn grant(&mut self, new_limit: UInt64) {
+        if new_limit > self.limit_inclusive {
+            self.limit_inclusive = new_limit;
+        }
+    }
+
+    /// Record a cancellation from the client (CANCEL_PUSH).
+    public fn mark_cancelled(&mut self, push_id: UInt64) {
+        // O(n) insert — n is tiny in practice (pushes in flight).
+        // Dedup in case the client sends CANCEL_PUSH twice.
+        let mut i: Int = 0;
+        while i < self.cancelled.len() {
+            if self.cancelled[i] == push_id { return; }
+            i = i + 1;
+        }
+        self.cancelled.push(push_id);
+    }
+
+    /// Client sent GOAWAY on the control stream. Pushes at or above
+    /// `max_push_id` MUST NOT be initiated (RFC 9114 §5.2).
+    public fn mark_client_goneaway(&mut self, max_push_id: UInt64) {
+        self.client_goneaway_at = Some(max_push_id);
+    }
+
+    /// True iff `push_id` was cancelled by the client.
+    public fn is_cancelled(&self, push_id: UInt64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.cancelled.len() {
+            if self.cancelled[i] == push_id { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Reserve the next push_id + return a PUSH_PROMISE frame ready
+    /// for emission on the originating request stream. Consumes one
+    /// budget unit.
+    public fn reserve(&mut self, encoded_headers: List<Byte>) -> Result<PushReservation, PushError> {
+        // Budget check.
+        if self.next_push_id > self.limit_inclusive {
+            return Err(PushError.BudgetExhausted {
+                requested: self.next_push_id,
+                limit:     self.limit_inclusive,
+            });
+        }
+        // GOAWAY check.
+        match &self.client_goneaway_at {
+            Some(cap) => {
+                if self.next_push_id >= *cap {
+                    return Err(PushError.ClientGoneAway);
+                }
+            },
+            None => {},
+        }
+        let push_id = self.next_push_id;
+        self.next_push_id = push_id + 1_u64;
+        Ok(PushReservation {
+            push_id: push_id,
+            promise: H3Frame.PushPromiseFrame {
+                push_id:         push_id,
+                encoded_headers: encoded_headers,
+            },
+        })
+    }
+}
+
+// =============================================================================
+// PushReservation — emitted by `reserve`
+// =============================================================================
+
+/// What `PushEmitter.reserve` hands back: the chosen push_id (so the
+/// caller can build the push response stream header) and the
+/// PUSH_PROMISE frame to emit on the originating request stream.
+public type PushReservation is {
+    push_id: UInt64,
+    promise: H3Frame,
+};
+
+// =============================================================================
+// Stream-type header for unidirectional push streams
+// =============================================================================
+
+/// RFC 9114 §6.2.2 — push-stream type tag (unidirectional stream type 0x01).
+public const PUSH_STREAM_TYPE: UInt8 = 0x01_u8;
