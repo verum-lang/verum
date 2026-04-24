@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, eku, der, rfc5280_4_2_1_12, parse
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2.1.12 ExtKeyUsage — DER SEQUENCE OF KeyPurposeId (OID).
+//
+// IANA OIDs used below:
+//   id-kp-serverAuth  = 1.3.6.1.5.5.7.3.1 → DER arcs 2B 06 01 05 05 07 03 01
+//   id-kp-clientAuth  = 1.3.6.1.5.5.7.3.2 → DER arcs 2B 06 01 05 05 07 03 02
+//   id-kp-codeSigning = 1.3.6.1.5.5.7.3.3 → DER arcs 2B 06 01 05 05 07 03 03
+//   anyExtendedKeyUsage = 2.5.29.37.0     → DER arcs 55 1D 25 00
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ext.ext_key_usage.{
+    ExtKeyUsage, ExtKeyUsagePurpose, parse,
+};
+
+fn server_auth_only_is_classified_server_auth() {
+    // SEQUENCE { OID id-kp-serverAuth }
+    //   30 0A 06 08 2B 06 01 05 05 07 03 01
+    let der: List<Byte> = [
+        0x30_u8, 0x0A_u8,
+        0x06_u8, 0x08_u8,
+        0x2B_u8, 0x06_u8, 0x01_u8, 0x05_u8, 0x05_u8, 0x07_u8, 0x03_u8, 0x01_u8,
+    ];
+    let eku = parse(der.as_slice()).unwrap();
+    assert(eku.purposes.len() == 1);
+    match &eku.purposes[0] {
+        ExtKeyUsagePurpose.ServerAuth => {},
+        _ => panic("expected ServerAuth"),
+    }
+    assert(eku.allows_server_auth());
+    assert(eku.allows_client_auth() == false);
+}
+
+fn client_and_server_auth_sequence() {
+    // SEQUENCE { OID serverAuth, OID clientAuth }
+    //   30 14
+    //     06 08 2B 06 01 05 05 07 03 01
+    //     06 08 2B 06 01 05 05 07 03 02
+    let der: List<Byte> = [
+        0x30_u8, 0x14_u8,
+        0x06_u8, 0x08_u8, 0x2B_u8, 0x06_u8, 0x01_u8, 0x05_u8, 0x05_u8, 0x07_u8, 0x03_u8, 0x01_u8,
+        0x06_u8, 0x08_u8, 0x2B_u8, 0x06_u8, 0x01_u8, 0x05_u8, 0x05_u8, 0x07_u8, 0x03_u8, 0x02_u8,
+    ];
+    let eku = parse(der.as_slice()).unwrap();
+    assert(eku.purposes.len() == 2);
+    assert(eku.allows_server_auth());
+    assert(eku.allows_client_auth());
+}
+
+fn any_purpose_short_oid() {
+    // OID anyExtendedKeyUsage = 2.5.29.37.0
+    // Arcs: 40*2 + 5 = 85 = 0x55; 29 = 0x1D; 37 = 0x25; 0 = 0x00.
+    // SEQUENCE { OID 2.5.29.37.0 } = 30 06 06 04 55 1D 25 00
+    let der: List<Byte> = [
+        0x30_u8, 0x06_u8,
+        0x06_u8, 0x04_u8, 0x55_u8, 0x1D_u8, 0x25_u8, 0x00_u8,
+    ];
+    let eku = parse(der.as_slice()).unwrap();
+    assert(eku.purposes.len() == 1);
+    match &eku.purposes[0] {
+        ExtKeyUsagePurpose.AnyPurpose => {},
+        _ => panic("expected AnyPurpose"),
+    }
+    // AnyPurpose grants every WebPKI purpose.
+    assert(eku.allows_server_auth());
+    assert(eku.allows_client_auth());
+}
+
+fn code_signing_is_not_classified_as_server_or_client_auth() {
+    // id-kp-codeSigning = 1.3.6.1.5.5.7.3.3 → 06 08 2B 06 01 05 05 07 03 03
+    let der: List<Byte> = [
+        0x30_u8, 0x0A_u8,
+        0x06_u8, 0x08_u8, 0x2B_u8, 0x06_u8, 0x01_u8, 0x05_u8, 0x05_u8, 0x07_u8, 0x03_u8, 0x03_u8,
+    ];
+    let eku = parse(der.as_slice()).unwrap();
+    match &eku.purposes[0] {
+        ExtKeyUsagePurpose.CodeSigning => {},
+        _ => panic("expected CodeSigning"),
+    }
+    assert(eku.allows_server_auth() == false);
+    assert(eku.allows_client_auth() == false);
+}
+
+fn unregistered_oid_falls_through_to_other() {
+    // OID 1.2.3.4 → arcs 0x2A 0x03 0x04. SEQUENCE { OID 1.2.3.4 }:
+    //   30 05 06 03 2A 03 04
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2A_u8, 0x03_u8, 0x04_u8,
+    ];
+    let eku = parse(der.as_slice()).unwrap();
+    assert(eku.purposes.len() == 1);
+    match &eku.purposes[0] {
+        ExtKeyUsagePurpose.Other(_) => {},
+        _ => panic("unregistered OID must land in Other"),
+    }
+    assert(eku.allows_server_auth() == false);
+}
+
+@main
+public fn main() -> Int {
+    server_auth_only_is_classified_server_auth();
+    client_and_server_auth_sequence();
+    any_purpose_short_oid();
+    code_signing_is_not_classified_as_server_or_client_auth();
+    unregistered_oid_falls_through_to_other();
+    print("RFC 5280 §4.2.1.12 ExtKeyUsage DER parse verified");
+    0
+}

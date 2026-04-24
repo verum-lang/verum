@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, basic_constraints, der, rfc5280_4_2_1_9, parse
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2.1.9 BasicConstraints wire decode:
+//
+//   BasicConstraints ::= SEQUENCE {
+//       cA                  BOOLEAN DEFAULT FALSE,
+//       pathLenConstraint   INTEGER (0..MAX) OPTIONAL
+//   }
+//
+// DER:
+//   Leaf/EE               : 30 00            (empty SEQUENCE, cA=FALSE default)
+//   CA, no pathLen        : 30 03 01 01 FF   (SEQUENCE { BOOL TRUE })
+//   CA, pathLen=0         : 30 06 01 01 FF 02 01 00
+//   CA, pathLen=3         : 30 06 01 01 FF 02 01 03
+//   cA=FALSE explicit     : 30 03 01 01 00
+//   CA, pathLen negative  : 30 06 01 01 FF 02 01 FF  → reject
+// BOOLEAN DER: tag=01, length=01, value 0x00 = FALSE, anything else = TRUE (X.690 §11.1).
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ext.basic_constraints.{BasicConstraints, parse};
+
+fn empty_sequence_is_leaf_default() {
+    let der: List<Byte> = [0x30_u8, 0x00_u8];
+    let bc = parse(der.as_slice()).unwrap();
+    assert(bc.is_ca == false);
+    match bc.path_len_constraint {
+        None => {},
+        _ => panic("leaf default must have no path len"),
+    }
+}
+
+fn ca_true_no_path_len() {
+    // SEQUENCE { BOOLEAN TRUE } → 30 03 01 01 FF.
+    let der: List<Byte> = [0x30_u8, 0x03_u8, 0x01_u8, 0x01_u8, 0xFF_u8];
+    let bc = parse(der.as_slice()).unwrap();
+    assert(bc.is_ca);
+    match bc.path_len_constraint {
+        None => {},
+        _ => panic("CA with no pathLen constraint"),
+    }
+}
+
+fn ca_true_path_len_zero() {
+    // 30 06 01 01 FF 02 01 00 — CA with pathLen=0 (leaf-only signer).
+    let der: List<Byte> = [
+        0x30_u8, 0x06_u8,
+        0x01_u8, 0x01_u8, 0xFF_u8,      // BOOLEAN TRUE
+        0x02_u8, 0x01_u8, 0x00_u8,      // INTEGER 0
+    ];
+    let bc = parse(der.as_slice()).unwrap();
+    assert(bc.is_ca);
+    match bc.path_len_constraint {
+        Some(n) => assert(n == 0),
+        _ => panic("pathLen=0"),
+    }
+}
+
+fn ca_true_path_len_three() {
+    let der: List<Byte> = [
+        0x30_u8, 0x06_u8,
+        0x01_u8, 0x01_u8, 0xFF_u8,
+        0x02_u8, 0x01_u8, 0x03_u8,
+    ];
+    let bc = parse(der.as_slice()).unwrap();
+    assert(bc.is_ca);
+    match bc.path_len_constraint {
+        Some(n) => assert(n == 3),
+        _ => panic("pathLen=3"),
+    }
+}
+
+fn explicit_ca_false_is_same_as_default() {
+    // 30 03 01 01 00 — explicitly cA=FALSE.
+    let der: List<Byte> = [0x30_u8, 0x03_u8, 0x01_u8, 0x01_u8, 0x00_u8];
+    let bc = parse(der.as_slice()).unwrap();
+    assert(bc.is_ca == false);
+    match bc.path_len_constraint {
+        None => {},
+        _ => panic("explicit FALSE must still have no pathLen"),
+    }
+}
+
+fn negative_path_len_rejected() {
+    // INTEGER 0xFF encodes -1 in DER two's-complement → reject.
+    let der: List<Byte> = [
+        0x30_u8, 0x06_u8,
+        0x01_u8, 0x01_u8, 0xFF_u8,
+        0x02_u8, 0x01_u8, 0xFF_u8,      // INTEGER -1
+    ];
+    match parse(der.as_slice()) {
+        Err(_) => {},
+        _ => panic("negative pathLen must be rejected"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    empty_sequence_is_leaf_default();
+    ca_true_no_path_len();
+    ca_true_path_len_zero();
+    ca_true_path_len_three();
+    explicit_ca_false_is_same_as_default();
+    negative_path_len_rejected();
+    print("RFC 5280 §4.2.1.9 BasicConstraints DER parse verified");
+    0
+}
