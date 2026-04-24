@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, aead, keys, rfc9001_5_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §5.1 per-space key derivation helpers —
+//
+//   * aead_key_len_for(kind) returns the AEAD key length in bytes:
+//       16 for AES-128-GCM / AES-128-CCM / AES-128-CCM-8,
+//       32 for AES-256-GCM / ChaCha20-Poly1305,
+//       0  for Unknown.
+//   * is_chacha_aead(kind) — true only for ChaCha20-Poly1305; the
+//     derive path branches on this to pick ChaCha20-keystream vs
+//     AES-ECB header-protection.
+//   * QuicKeyError — 2 variants: HkdfFailure (unit) + BadKeyLength(Int).
+
+mount core.*;
+mount core.net.tls13.cipher_suite.{AeadKind};
+mount core.net.quic.connection_sm.keys.{
+    aead_key_len_for, is_chacha_aead, QuicKeyError,
+};
+
+fn aead_key_len_matches_rfc_per_suite() {
+    assert(aead_key_len_for(&AeadKind.Aes128Gcm)        == 16);
+    assert(aead_key_len_for(&AeadKind.Aes256Gcm)        == 32);
+    assert(aead_key_len_for(&AeadKind.ChaCha20Poly1305) == 32);
+    assert(aead_key_len_for(&AeadKind.Aes128Ccm)        == 16);
+    assert(aead_key_len_for(&AeadKind.Aes128Ccm8)       == 16);
+    assert(aead_key_len_for(&AeadKind.Unknown)          == 0);
+}
+
+fn is_chacha_aead_only_true_for_chacha() {
+    assert(is_chacha_aead(&AeadKind.ChaCha20Poly1305));
+    assert(is_chacha_aead(&AeadKind.Aes128Gcm)        == false);
+    assert(is_chacha_aead(&AeadKind.Aes256Gcm)        == false);
+    assert(is_chacha_aead(&AeadKind.Aes128Ccm)        == false);
+    assert(is_chacha_aead(&AeadKind.Aes128Ccm8)       == false);
+    assert(is_chacha_aead(&AeadKind.Unknown)          == false);
+}
+
+fn quic_key_error_two_variants_distinct() {
+    let errs: [QuicKeyError; 2] = [
+        QuicKeyError.HkdfFailure,
+        QuicKeyError.BadKeyLength(7),
+    ];
+    let mut tags: [Int; 2] = [0; 2];
+    let mut i: Int = 0;
+    while i < 2 {
+        tags[i] = match errs[i] {
+            QuicKeyError.HkdfFailure      => 1,
+            QuicKeyError.BadKeyLength(_)  => 2,
+        };
+        i = i + 1;
+    }
+    assert(tags[0] == 1);
+    assert(tags[1] == 2);
+}
+
+fn quic_key_error_bad_key_length_carries_payload() {
+    let e = QuicKeyError.BadKeyLength(24);    // not 16 or 32
+    match e {
+        QuicKeyError.BadKeyLength(n) => assert(n == 24),
+        _ => panic("expected BadKeyLength(24)"),
+    }
+}
+
+fn all_supported_aeads_have_nonzero_key_len() {
+    // Every registered (non-Unknown) AEAD must have a positive key length.
+    assert(aead_key_len_for(&AeadKind.Aes128Gcm)        > 0);
+    assert(aead_key_len_for(&AeadKind.Aes256Gcm)        > 0);
+    assert(aead_key_len_for(&AeadKind.ChaCha20Poly1305) > 0);
+    assert(aead_key_len_for(&AeadKind.Aes128Ccm)        > 0);
+    assert(aead_key_len_for(&AeadKind.Aes128Ccm8)       > 0);
+}
+
+@main
+public fn main() -> Int {
+    aead_key_len_matches_rfc_per_suite();
+    is_chacha_aead_only_true_for_chacha();
+    quic_key_error_two_variants_distinct();
+    quic_key_error_bad_key_length_carries_payload();
+    all_supported_aeads_have_nonzero_key_len();
+    print("RFC 9001 §5.1 AEAD helpers + QuicKeyError verified");
+    0
+}
