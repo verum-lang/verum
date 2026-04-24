@@ -1,0 +1,44 @@
+// mmap-policy — mmap_size + SQLITE_MAX_MMAP_SIZE.
+
+module core.database.sqlite.native.mmap_region_api.policy;
+
+mount base.{Bool, Int64};
+
+// SQLite default is 0 (no mmap); SQLITE_DEFAULT_MMAP_SIZE compile-option can raise it.
+public fn default_mmap_size() -> Int64 { 0 as Int64 }
+
+// SQLITE_MAX_MMAP_SIZE compile-time ceiling — SQLite default 0x7FFF0000.
+public fn compile_time_ceiling() -> Int64 { 0x7FFF0000 as Int64 }
+
+public type MmapPolicy is {
+    requested_bytes: Int64,
+    active_bytes: Int64,
+    effective_ceiling: Int64,
+};
+
+public fn new(requested: Int64, effective_ceiling: Int64) -> MmapPolicy {
+    let capped = if requested > effective_ceiling {
+        effective_ceiling
+    } else if requested < (0 as Int64) {
+        0 as Int64
+    } else {
+        requested
+    };
+    MmapPolicy {
+        requested_bytes: requested,
+        active_bytes: capped,
+        effective_ceiling: effective_ceiling,
+    }
+}
+
+public fn is_enabled(p: &MmapPolicy) -> Bool {
+    p.active_bytes > (0 as Int64)
+}
+
+public fn hit_ceiling(p: &MmapPolicy) -> Bool {
+    p.requested_bytes > p.effective_ceiling
+}
+
+public fn default_policy() -> MmapPolicy {
+    new(default_mmap_size(), compile_time_ceiling())
+}

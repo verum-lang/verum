@@ -1,0 +1,54 @@
+// Lookaside config — slot size + count per SQLITE_DBCONFIG_LOOKASIDE.
+
+module core.database.sqlite.native.lookaside_allocator_api.config;
+
+mount base.{Bool, Int64};
+
+public type LookasideConfig is {
+    slot_size: Int,      // bytes per slot
+    slot_count: Int,     // number of slots
+    small_slot_size: Int,  // for two-size lookaside (3.31+)
+    small_slot_count: Int,
+};
+
+public fn disabled() -> LookasideConfig {
+    LookasideConfig {
+        slot_size: 0,
+        slot_count: 0,
+        small_slot_size: 0,
+        small_slot_count: 0,
+    }
+}
+
+// SQLite defaults: slot_size=1200, slot_count=100 → 120KB total.
+public fn default_config() -> LookasideConfig {
+    LookasideConfig {
+        slot_size: 1200,
+        slot_count: 100,
+        small_slot_size: 0,
+        small_slot_count: 0,
+    }
+}
+
+public fn is_enabled(c: &LookasideConfig) -> Bool {
+    c.slot_size > 0 && c.slot_count > 0
+}
+
+public fn total_bytes(c: &LookasideConfig) -> Int64 {
+    let main = (c.slot_size as Int64) * (c.slot_count as Int64);
+    let small = (c.small_slot_size as Int64) * (c.small_slot_count as Int64);
+    main + small
+}
+
+public fn has_two_size_mode(c: &LookasideConfig) -> Bool {
+    c.small_slot_size > 0 && c.small_slot_count > 0
+}
+
+// Can a request of `n` bytes be served from a main lookaside slot?
+public fn fits_main_slot(c: &LookasideConfig, n: Int) -> Bool {
+    c.slot_size >= n && n > 0
+}
+
+public fn fits_small_slot(c: &LookasideConfig, n: Int) -> Bool {
+    c.small_slot_size >= n && n > 0
+}

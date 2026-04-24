@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/vfs_xshm_methods/mod.vr
+// =============================================================================
+// VFS shared-memory (WAL) methods — xShmMap / xShmLock / xShmBarrier / xShmUnmap.
+// Spec §6.6 — shared memory (wal-index / -shm file).
+// =============================================================================
+
+module core.database.sqlite.native.vfs_xshm_methods;
+
+public module method;
+public module lock_op;

@@ -1,0 +1,38 @@
+// Frame range [first..last] inclusive.
+
+module core.database.sqlite.native.checkpoint_frame_range.range;
+
+mount base.{Bool, Int64};
+
+public type FrameRange is {
+    first_frame: Int64,     // 1-based frame number
+    last_frame: Int64,
+};
+
+public fn new(first: Int64, last: Int64) -> FrameRange {
+    FrameRange { first_frame: first, last_frame: last }
+}
+
+public fn empty_range() -> FrameRange {
+    FrameRange { first_frame: 1 as Int64, last_frame: 0 as Int64 }
+}
+
+public fn is_empty(r: &FrameRange) -> Bool {
+    r.last_frame < r.first_frame
+}
+
+public fn length(r: &FrameRange) -> Int64 {
+    if is_empty(r) { return 0 as Int64; }
+    r.last_frame - r.first_frame + (1 as Int64)
+}
+
+public fn contains(r: &FrameRange, frame: Int64) -> Bool {
+    if is_empty(r) { return false; }
+    frame >= r.first_frame && frame <= r.last_frame
+}
+
+// Advance the first frame past n frames (after a checkpoint pass).
+public fn consume(mut r: FrameRange, n: Int64) -> FrameRange {
+    r.first_frame = r.first_frame + n;
+    r
+}

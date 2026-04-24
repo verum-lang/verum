@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, checkpoint_frame_range, wal
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.checkpoint_frame_range.range.{
+    FrameRange,
+    new, empty_range, is_empty, length, contains, consume,
+};
+mount core.database.sqlite.native.checkpoint_frame_range.session.{
+    CkptState, CsIdle, CsCopying, CsSyncing, CsTruncating, CsDone, CsAborted,
+    state_name, is_terminal,
+    CkptSession,
+    start, record_drain, transition_to_sync, transition_to_truncate,
+    complete, abort, backlog, is_done, progress,
+};
+mount base.{Bool, Int64};
+
+fn test_range_basics() {
+    let r = new(1 as Int64, 100 as Int64);
+    assert_eq(length(&r), 100 as Int64);
+    assert(contains(&r, 1 as Int64));
+    assert(contains(&r, 100 as Int64));
+    assert(!contains(&r, 0 as Int64));
+    assert(!contains(&r, 101 as Int64));
+    assert(!is_empty(&r));
+}
+
+fn test_empty_range() {
+    let e = empty_range();
+    assert(is_empty(&e));
+    assert_eq(length(&e), 0 as Int64);
+    assert(!contains(&e, 1 as Int64));
+}
+
+fn test_consume_advances_first() {
+    let r = new(1 as Int64, 10 as Int64);
+    let r2 = consume(r, 3 as Int64);
+    assert_eq(r2.first_frame, 4 as Int64);
+    assert_eq(length(&r2), 7 as Int64);
+}
+
+fn test_state_names() {
+    assert(state_name(&CsIdle)       == "idle".clone());
+    assert(state_name(&CsCopying)    == "copying".clone());
+    assert(state_name(&CsSyncing)    == "syncing".clone());
+    assert(state_name(&CsTruncating) == "truncating".clone());
+    assert(state_name(&CsDone)       == "done".clone());
+    assert(state_name(&CsAborted)    == "aborted".clone());
+}
+
+fn test_is_terminal() {
+    assert(!is_terminal(&CsIdle));
+    assert(!is_terminal(&CsCopying));
+    assert(!is_terminal(&CsSyncing));
+    assert(is_terminal(&CsDone));
+    assert(is_terminal(&CsAborted));
+}
+
+fn test_start_and_drain() {
+    let target = new(1 as Int64, 10 as Int64);
+    let s0 = start(target);
+    match s0.state { CsCopying => {}, _ => assert(false) }
+    assert_eq(backlog(&s0), 10 as Int64);
+    let s1 = record_drain(s0, 4 as Int64);
+    assert_eq(s1.frames_drained, 4 as Int64);
+    assert_eq(backlog(&s1), 6 as Int64);
+    assert_eq(s1.passes, 1 as Int64);
+}
+
+fn test_transitions() {
+    let target = new(1 as Int64, 5 as Int64);
+    let s0 = start(target);
+    let s1 = transition_to_sync(s0);
+    match s1.state { CsSyncing => {}, _ => assert(false) }
+    let s2 = transition_to_truncate(s1);
+    match s2.state { CsTruncating => {}, _ => assert(false) }
+    let s3 = complete(s2);
+    assert(is_done(&s3));
+}
+
+fn test_abort() {
+    let s = abort(start(new(1 as Int64, 5 as Int64)));
+    assert(is_done(&s));
+    match s.state { CsAborted => {}, _ => assert(false) }
+}
+
+fn test_progress_fraction() {
+    let s0 = start(new(1 as Int64, 4 as Int64));
+    let s1 = record_drain(record_drain(s0, 1 as Int64), 1 as Int64);
+    // 2 drained, 2 remaining → 50 %
+    let p = progress(&s1);
+    assert(p > 0.49 as Float);
+    assert(p < 0.51 as Float);
+}
+
+fn main() {
+    test_range_basics();
+    test_empty_range();
+    test_consume_advances_first();
+    test_state_names();
+    test_is_terminal();
+    test_start_and_drain();
+    test_transitions();
+    test_abort();
+    test_progress_fraction();
+}

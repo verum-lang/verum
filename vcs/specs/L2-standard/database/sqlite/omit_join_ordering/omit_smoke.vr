@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, omit_join_ordering, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.omit_join_ordering.reason.{
+    Reason,
+    ReCrossJoinHint, ReLeftOuterBarrier, ReFullOuterBarrier,
+    ReVtabBestIndex, ReSubqueryMaterialized, RePragmaNoReorder, ReUsedByAggregateOrder,
+    reason_name, is_user_controllable, is_hard_barrier, is_semantic_barrier,
+};
+mount core.database.sqlite.native.omit_join_ordering.lattice.{
+    bit_for, empty, add, has, join, meet,
+    reorderable, has_any_hard_barrier, has_only_preferences,
+};
+mount base.{Bool, Int64};
+
+fn test_reason_names() {
+    assert(reason_name(&ReCrossJoinHint)   == "cross_join_hint".clone());
+    assert(reason_name(&ReLeftOuterBarrier) == "left_outer".clone());
+    assert(reason_name(&ReVtabBestIndex)   == "vtab_best_index".clone());
+}
+
+fn test_user_controllable_set() {
+    assert(is_user_controllable(&ReCrossJoinHint));
+    assert(is_user_controllable(&ReLeftOuterBarrier));
+    assert(is_user_controllable(&ReFullOuterBarrier));
+    assert(is_user_controllable(&RePragmaNoReorder));
+    assert(!is_user_controllable(&ReVtabBestIndex));
+    assert(!is_user_controllable(&ReSubqueryMaterialized));
+    assert(!is_user_controllable(&ReUsedByAggregateOrder));
+}
+
+fn test_hard_barrier_set() {
+    assert(is_hard_barrier(&ReLeftOuterBarrier));
+    assert(is_hard_barrier(&ReFullOuterBarrier));
+    assert(is_hard_barrier(&ReSubqueryMaterialized));
+    assert(!is_hard_barrier(&ReCrossJoinHint));
+    assert(!is_hard_barrier(&RePragmaNoReorder));
+}
+
+fn test_semantic_barrier_set() {
+    assert(is_semantic_barrier(&ReLeftOuterBarrier));
+    assert(is_semantic_barrier(&ReFullOuterBarrier));
+    assert(!is_semantic_barrier(&ReSubqueryMaterialized));
+    assert(!is_semantic_barrier(&ReCrossJoinHint));
+}
+
+fn test_bit_for_distinct() {
+    let b1 = bit_for(&ReCrossJoinHint);
+    let b2 = bit_for(&ReLeftOuterBarrier);
+    let b3 = bit_for(&ReUsedByAggregateOrder);
+    assert(b1 != b2);
+    assert(b2 != b3);
+    assert(b1 != b3);
+}
+
+fn test_lattice_ops() {
+    let m0 = empty();
+    assert(reorderable(m0));
+    let m1 = add(m0, &ReCrossJoinHint);
+    assert(!reorderable(m1));
+    assert(has(m1, &ReCrossJoinHint));
+    assert(!has(m1, &ReLeftOuterBarrier));
+    let m2 = add(m1, &ReLeftOuterBarrier);
+    let m_meet = meet(m1, m2);
+    assert(has(m_meet, &ReCrossJoinHint));
+    assert(!has(m_meet, &ReLeftOuterBarrier));
+    let m_join = join(m1, m2);
+    assert(has(m_join, &ReLeftOuterBarrier));
+    assert(has(m_join, &ReCrossJoinHint));
+}
+
+fn test_has_any_hard_barrier() {
+    let only_pref = add(empty(), &ReCrossJoinHint);
+    assert(!has_any_hard_barrier(only_pref));
+    assert(has_only_preferences(only_pref));
+    let with_hard = add(only_pref, &ReLeftOuterBarrier);
+    assert(has_any_hard_barrier(with_hard));
+    assert(!has_only_preferences(with_hard));
+}
+
+fn test_empty_not_preferences() {
+    let m = empty();
+    assert(!has_only_preferences(m));
+    assert(!has_any_hard_barrier(m));
+}
+
+fn main() {
+    test_reason_names();
+    test_user_controllable_set();
+    test_hard_barrier_set();
+    test_semantic_barrier_set();
+    test_bit_for_distinct();
+    test_lattice_ops();
+    test_has_any_hard_barrier();
+    test_empty_not_preferences();
+}

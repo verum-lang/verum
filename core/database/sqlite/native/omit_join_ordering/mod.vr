@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/omit_join_ordering/mod.vr
+// =============================================================================
+// Planner "do not reorder" flag set — tracks why a particular join order is
+// frozen (CROSS JOIN hint, LEFT/FULL OUTER JOIN barrier, vtab's xBestIndex
+// preferences, etc.).
+// Spec §13.4 — join ordering.
+// =============================================================================
+
+module core.database.sqlite.native.omit_join_ordering;
+
+public module reason;
+public module lattice;

@@ -1,0 +1,59 @@
+// Bitmap of reorder-frozen reasons + lattice-style join / meet helpers.
+
+module core.database.sqlite.native.omit_join_ordering.lattice;
+
+mount core.database.sqlite.native.omit_join_ordering.reason.{
+    Reason, ReCrossJoinHint, ReLeftOuterBarrier, ReFullOuterBarrier,
+    ReVtabBestIndex, ReSubqueryMaterialized, RePragmaNoReorder, ReUsedByAggregateOrder,
+    is_hard_barrier, is_semantic_barrier,
+};
+mount base.{Bool, Int64};
+
+public fn bit_for(r: &Reason) -> Int64 {
+    match r {
+        ReCrossJoinHint        => 0x01 as Int64,
+        ReLeftOuterBarrier     => 0x02 as Int64,
+        ReFullOuterBarrier     => 0x04 as Int64,
+        ReVtabBestIndex        => 0x08 as Int64,
+        ReSubqueryMaterialized => 0x10 as Int64,
+        RePragmaNoReorder      => 0x20 as Int64,
+        ReUsedByAggregateOrder => 0x40 as Int64,
+    }
+}
+
+public fn empty() -> Int64 { 0 as Int64 }
+
+public fn add(mask: Int64, r: &Reason) -> Int64 {
+    mask | bit_for(r)
+}
+
+public fn has(mask: Int64, r: &Reason) -> Bool {
+    (mask & bit_for(r)) != (0 as Int64)
+}
+
+// Join of two reorder-reason sets.
+public fn join(a: Int64, b: Int64) -> Int64 {
+    a | b
+}
+
+// Meet — intersection.
+public fn meet(a: Int64, b: Int64) -> Int64 {
+    a & b
+}
+
+public fn reorderable(mask: Int64) -> Bool {
+    mask == (0 as Int64)
+}
+
+// Any bit that is a hard barrier → reorder impossible.
+public fn has_any_hard_barrier(mask: Int64) -> Bool {
+    if has(mask, &ReLeftOuterBarrier)     { return true; }
+    if has(mask, &ReFullOuterBarrier)     { return true; }
+    if has(mask, &ReSubqueryMaterialized) { return true; }
+    false
+}
+
+public fn has_only_preferences(mask: Int64) -> Bool {
+    if mask == (0 as Int64) { return false; }
+    !has_any_hard_barrier(mask)
+}

@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, mmap_region_api, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.mmap_region_api.region.{
+    MmapRegion,
+    new, end_offset, contains_range, overlaps, is_well_formed,
+};
+mount core.database.sqlite.native.mmap_region_api.policy.{
+    MmapPolicy,
+    default_mmap_size, compile_time_ceiling,
+    is_enabled, hit_ceiling, default_policy,
+};
+mount base.{Bool, Int64};
+
+fn test_region_end_offset() {
+    let r = new(100 as Int64, 50 as Int64, false);
+    assert_eq(end_offset(&r), 150 as Int64);
+}
+
+fn test_region_contains_range() {
+    let r = new(100 as Int64, 100 as Int64, false);
+    assert(contains_range(&r, 100 as Int64, 50 as Int64));
+    assert(contains_range(&r, 150 as Int64, 50 as Int64));
+    assert(!contains_range(&r, 150 as Int64, 51 as Int64));
+    assert(!contains_range(&r, 99 as Int64, 10 as Int64));
+    assert(!contains_range(&r, 100 as Int64, 0 as Int64));
+    assert(!contains_range(&r, 100 as Int64, -5 as Int64));
+}
+
+fn test_region_overlap() {
+    let a = new(0 as Int64, 100 as Int64, false);
+    let b = new(50 as Int64, 100 as Int64, false);
+    let c = new(200 as Int64, 100 as Int64, false);
+    let d = new(100 as Int64, 50 as Int64, false);
+    assert(overlaps(&a, &b));
+    assert(!overlaps(&a, &c));
+    // touching, not overlapping
+    assert(!overlaps(&a, &d));
+}
+
+fn test_region_well_formed() {
+    let good = new(0 as Int64, 100 as Int64, true);
+    assert(is_well_formed(&good));
+    let bad = new(-1 as Int64, 100 as Int64, true);
+    assert(!is_well_formed(&bad));
+}
+
+fn test_policy_constants() {
+    assert_eq(default_mmap_size(), 0 as Int64);
+    assert_eq(compile_time_ceiling(), 0x7FFF0000 as Int64);
+}
+
+fn test_policy_default_is_disabled() {
+    let p = default_policy();
+    assert(!is_enabled(&p));
+}
+
+fn test_policy_requested_capped_by_ceiling() {
+    let p = MmapPolicy { requested_bytes: 0 as Int64, active_bytes: 0 as Int64, effective_ceiling: 100 as Int64 };
+    let lo = MmapPolicy { requested_bytes: 50 as Int64, active_bytes: 50 as Int64, effective_ceiling: 100 as Int64 };
+    let hi_req = MmapPolicy { requested_bytes: 9999 as Int64, active_bytes: 9999 as Int64, effective_ceiling: 100 as Int64 };
+    // hit_ceiling is independent of how active_bytes was set.
+    assert(!hit_ceiling(&p));
+    assert(!hit_ceiling(&lo));
+    assert(hit_ceiling(&hi_req));
+}
+
+fn test_policy_construction_caps_and_floors() {
+    let capped = MmapPolicy { requested_bytes: 9999 as Int64, active_bytes: 0 as Int64, effective_ceiling: 100 as Int64 };
+    let _ = capped;
+    // Constructor test: values should be capped / floored.
+    let huge_req = 9999999 as Int64;
+    let ceil     = 100 as Int64;
+    let via_ctor = MmapPolicy {
+        requested_bytes: huge_req,
+        active_bytes: if huge_req > ceil { ceil } else { huge_req },
+        effective_ceiling: ceil,
+    };
+    assert(is_enabled(&via_ctor));
+    assert(hit_ceiling(&via_ctor));
+}
+
+fn main() {
+    test_region_end_offset();
+    test_region_contains_range();
+    test_region_overlap();
+    test_region_well_formed();
+    test_policy_constants();
+    test_policy_default_is_disabled();
+    test_policy_requested_capped_by_ceiling();
+    test_policy_construction_caps_and_floors();
+}

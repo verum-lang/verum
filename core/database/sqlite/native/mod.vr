@@ -524,3 +524,19 @@ public module fts5_ranking_api;
 public module deferred_fk_api;
 // - snapshot_isolation_api: 3-level IsolationLevel + SnapshotHandle compare/free
 public module snapshot_isolation_api;
+// - vfs_xshm_methods: xShmMap / xShmLock / xShmBarrier / xShmUnmap + lock flag rules
+public module vfs_xshm_methods;
+// - xfilecontrol_opcodes: SQLITE_FCNTL_* opcode taxonomy (40+ well-known codes)
+public module xfilecontrol_opcodes;
+// - where_loop_cost_model: log-est arithmetic + WhereLoop (r_setup / r_run / n_out) dominance
+public module where_loop_cost_model;
+// - scan_direction_api: ASC/DESC scan direction + ORDER BY consumption
+public module scan_direction_api;
+// - mmap_region_api: per-region layout + mmap_size policy
+public module mmap_region_api;
+// - checkpoint_frame_range: WAL frame range + 6-state checkpointer session
+public module checkpoint_frame_range;
+// - lookaside_allocator_api: per-conn lookaside slot config + hit/miss/peak stats
+public module lookaside_allocator_api;
+// - omit_join_ordering: 7-reason reorder-barrier lattice (hard vs preference)
+public module omit_join_ordering;

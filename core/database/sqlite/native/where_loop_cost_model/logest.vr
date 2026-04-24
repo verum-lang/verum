@@ -1,0 +1,55 @@
+// Log-estimate arithmetic used by the SQLite planner.
+
+module core.database.sqlite.native.where_loop_cost_model.logest;
+
+mount base.{Bool, Int64};
+
+// The sentinel "log(0)" value — SQLite uses 0 to mean "unknown" for rRun.
+public fn logest_zero() -> Int { 0 }
+
+// Encode a small integer n >= 0 as its log-estimate. For n == 0 returns 0;
+// for n >= 1 returns ceil(10 * log2(n)).
+// Iterative implementation; avoids floating point.
+public fn from_int(n: Int64) -> Int {
+    if n <= (0 as Int64) { return 0; }
+    if n == (1 as Int64) { return 0; }
+    // Find the highest bit.
+    let mut v = n;
+    let mut hi: Int = 0;
+    while v > (1 as Int64) {
+        v = v >> (1 as Int64);
+        hi = hi + 1;
+    }
+    // Fractional part: compute 10 * log2(n / 2^hi) in fixed-point.
+    // For simplicity use linear interpolation between 2^hi and 2^(hi+1).
+    let base: Int64 = (1 as Int64) << (hi as Int64);
+    let next: Int64 = base << (1 as Int64);
+    let frac_num: Int64 = (n - base) * (10 as Int64);
+    let frac_den: Int64 = next - base;
+    let frac: Int64 = frac_num / frac_den;
+    (hi * 10) + (frac as Int)
+}
+
+// Add two log-estimates — corresponds to multiplying the underlying values.
+public fn mul(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Subtract two log-estimates — corresponds to dividing the underlying values.
+public fn div(a: Int, b: Int) -> Int {
+    a - b
+}
+
+// Add two row-count estimates (approximation of log-space addition).
+// SQLite uses a lookup table; here we return the max + small delta when close.
+public fn add(a: Int, b: Int) -> Int {
+    let hi = if a >= b { a } else { b };
+    let lo = if a >= b { b } else { a };
+    let diff = hi - lo;
+    if diff >= 40 { return hi; }       // 2^4 → lo contributes nothing
+    hi + (10 / (diff + 1))
+}
+
+// Comparison helpers.
+public fn is_cheaper_than(a: Int, b: Int) -> Bool { a < b }
+public fn same_cost(a: Int, b: Int) -> Bool { a == b }

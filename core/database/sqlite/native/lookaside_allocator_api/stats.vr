@@ -1,0 +1,71 @@
+// Lookaside usage counters.
+
+module core.database.sqlite.native.lookaside_allocator_api.stats;
+
+mount base.{Bool, Int64};
+
+public type LookasideStats is {
+    slots_used: Int64,
+    slots_free: Int64,
+    hits: Int64,
+    misses_size: Int64,          // request too big for a slot
+    misses_full: Int64,          // no free slots
+};
+
+public fn zeroed(total_slots: Int) -> LookasideStats {
+    LookasideStats {
+        slots_used: 0 as Int64,
+        slots_free: total_slots as Int64,
+        hits: 0 as Int64,
+        misses_size: 0 as Int64,
+        misses_full: 0 as Int64,
+    }
+}
+
+public fn record_hit(mut s: LookasideStats) -> LookasideStats {
+    s.hits = s.hits + (1 as Int64);
+    s.slots_used = s.slots_used + (1 as Int64);
+    if s.slots_free > (0 as Int64) {
+        s.slots_free = s.slots_free - (1 as Int64);
+    }
+    s
+}
+
+public fn record_free(mut s: LookasideStats) -> LookasideStats {
+    if s.slots_used > (0 as Int64) {
+        s.slots_used = s.slots_used - (1 as Int64);
+        s.slots_free = s.slots_free + (1 as Int64);
+    }
+    s
+}
+
+public fn record_miss_size(mut s: LookasideStats) -> LookasideStats {
+    s.misses_size = s.misses_size + (1 as Int64);
+    s
+}
+
+public fn record_miss_full(mut s: LookasideStats) -> LookasideStats {
+    s.misses_full = s.misses_full + (1 as Int64);
+    s
+}
+
+public fn total_requests(s: &LookasideStats) -> Int64 {
+    s.hits + s.misses_size + s.misses_full
+}
+
+public fn hit_rate(s: &LookasideStats) -> Float {
+    let tot = total_requests(s);
+    if tot <= (0 as Int64) { return 1.0 as Float; }
+    let h = s.hits as Float;
+    let t = tot as Float;
+    h / t
+}
+
+public fn is_exhausted(s: &LookasideStats) -> Bool {
+    s.slots_free == (0 as Int64)
+}
+
+// Peak usage counter for SQLITE_DBSTATUS_LOOKASIDE_USED_HIGH.
+public fn peak_slots_used(s: &LookasideStats) -> Int64 {
+    s.slots_used
+}

@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, lookaside_allocator_api, memory
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.lookaside_allocator_api.config.{
+    LookasideConfig,
+    disabled, default_config, is_enabled, total_bytes,
+    has_two_size_mode, fits_main_slot, fits_small_slot,
+};
+mount core.database.sqlite.native.lookaside_allocator_api.stats.{
+    LookasideStats,
+    zeroed, record_hit, record_free,
+    record_miss_size, record_miss_full,
+    total_requests, hit_rate, is_exhausted, peak_slots_used,
+};
+mount base.{Bool, Int64};
+
+fn test_disabled_and_default_config() {
+    let d = disabled();
+    assert(!is_enabled(&d));
+    assert_eq(total_bytes(&d), 0 as Int64);
+    assert(!has_two_size_mode(&d));
+    let def = default_config();
+    assert(is_enabled(&def));
+    assert_eq(def.slot_size, 1200);
+    assert_eq(def.slot_count, 100);
+    assert_eq(total_bytes(&def), 120000 as Int64);
+}
+
+fn test_two_size_mode() {
+    let c = LookasideConfig {
+        slot_size: 1200, slot_count: 100,
+        small_slot_size: 128, small_slot_count: 512,
+    };
+    assert(has_two_size_mode(&c));
+    assert_eq(total_bytes(&c), 120000 as Int64 + 65536 as Int64);
+}
+
+fn test_fits_slot_checks() {
+    let c = default_config();
+    assert(fits_main_slot(&c, 500));
+    assert(fits_main_slot(&c, 1200));
+    assert(!fits_main_slot(&c, 1201));
+    assert(!fits_main_slot(&c, 0));
+    assert(!fits_main_slot(&c, -5));
+    // no small mode on default
+    assert(!fits_small_slot(&c, 100));
+}
+
+fn test_stats_zero_initialization() {
+    let s = zeroed(64);
+    assert_eq(s.slots_used, 0 as Int64);
+    assert_eq(s.slots_free, 64 as Int64);
+    assert_eq(s.hits, 0 as Int64);
+    assert_eq(total_requests(&s), 0 as Int64);
+    assert_eq(hit_rate(&s), 1.0 as Float);   // empty hit rate normalized to 1.0
+    assert(!is_exhausted(&s));
+}
+
+fn test_record_hit_and_free() {
+    let s0 = zeroed(4);
+    let s1 = record_hit(record_hit(s0));
+    assert_eq(s1.hits, 2 as Int64);
+    assert_eq(s1.slots_used, 2 as Int64);
+    assert_eq(s1.slots_free, 2 as Int64);
+    let s2 = record_free(s1);
+    assert_eq(s2.slots_used, 1 as Int64);
+    assert_eq(s2.slots_free, 3 as Int64);
+}
+
+fn test_free_below_zero_is_floored() {
+    let s = record_free(zeroed(4));
+    assert_eq(s.slots_used, 0 as Int64);
+    assert_eq(s.slots_free, 4 as Int64);
+}
+
+fn test_misses() {
+    let mut s = zeroed(2);
+    s = record_miss_size(s);
+    s = record_miss_full(record_miss_full(s));
+    assert_eq(s.misses_size, 1 as Int64);
+    assert_eq(s.misses_full, 2 as Int64);
+    assert_eq(total_requests(&s), 3 as Int64);
+}
+
+fn test_exhaustion_detection() {
+    let mut s = zeroed(2);
+    s = record_hit(record_hit(s));
+    assert(is_exhausted(&s));
+    let released = record_free(s);
+    assert(!is_exhausted(&released));
+}
+
+fn test_hit_rate_calc() {
+    let mut s = zeroed(10);
+    s = record_hit(record_hit(record_hit(s)));
+    s = record_miss_size(s);
+    // 3 hits out of 4 total requests = 0.75
+    let r = hit_rate(&s);
+    assert(r > 0.74 as Float);
+    assert(r < 0.76 as Float);
+}
+
+fn test_peak_reflects_current_slots_used() {
+    let mut s = zeroed(5);
+    s = record_hit(record_hit(record_hit(s)));
+    assert_eq(peak_slots_used(&s), 3 as Int64);
+}
+
+fn main() {
+    test_disabled_and_default_config();
+    test_two_size_mode();
+    test_fits_slot_checks();
+    test_stats_zero_initialization();
+    test_record_hit_and_free();
+    test_free_below_zero_is_floored();
+    test_misses();
+    test_exhaustion_detection();
+    test_hit_rate_calc();
+    test_peak_reflects_current_slots_used();
+}

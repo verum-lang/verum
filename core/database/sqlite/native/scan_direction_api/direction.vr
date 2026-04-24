@@ -1,0 +1,52 @@
+// Scan direction taxonomy.
+
+module core.database.sqlite.native.scan_direction_api.direction;
+
+mount base.{Bool, Text};
+
+public type ScanDirection is
+    | SdAscending      // sqlite3BtreeFirst → sqlite3BtreeNext
+    | SdDescending     // sqlite3BtreeLast  → sqlite3BtreePrevious
+    ;
+
+public fn direction_name(d: &ScanDirection) -> Text {
+    match d {
+        SdAscending  => "ASC".clone(),
+        SdDescending => "DESC".clone(),
+    }
+}
+
+public fn is_reverse(d: &ScanDirection) -> Bool {
+    match d { SdDescending => true, _ => false }
+}
+
+public fn reverse(d: &ScanDirection) -> ScanDirection {
+    match d {
+        SdAscending  => SdDescending,
+        SdDescending => SdAscending,
+    }
+}
+
+// ORDER BY consumption: given the index's native direction and the query's
+// desired direction, can the scan satisfy ORDER BY without a separate sort?
+public fn satisfies_order_by(index_dir: &ScanDirection, wanted_dir: &ScanDirection) -> Bool {
+    match index_dir {
+        SdAscending  => match wanted_dir {
+            SdAscending  => true,   // same direction
+            SdDescending => true,   // reverse-scan the same index
+        },
+        SdDescending => match wanted_dir {
+            SdAscending  => true,
+            SdDescending => true,
+        },
+    }
+}
+
+// If the scan direction flips to satisfy ORDER BY, the planner emits a
+// SQLITE_STMTSTATUS_REVERSE counter hit.
+public fn requires_reverse_scan(index_dir: &ScanDirection, wanted_dir: &ScanDirection) -> Bool {
+    match index_dir {
+        SdAscending  => match wanted_dir { SdDescending => true, _ => false },
+        SdDescending => match wanted_dir { SdAscending  => true, _ => false },
+    }
+}

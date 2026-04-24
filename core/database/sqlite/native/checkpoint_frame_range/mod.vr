@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/checkpoint_frame_range/mod.vr
+// =============================================================================
+// WAL checkpoint frame range + checkpointer session state.
+// Spec §6.5 — checkpointing.
+//
+// A checkpoint processes frames [first_frame..last_frame] from WAL into the
+// main database file. The session tracks how far we've progressed + backlog.
+// =============================================================================
+
+module core.database.sqlite.native.checkpoint_frame_range;
+
+public module range;
+public module session;

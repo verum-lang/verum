@@ -1,0 +1,55 @@
+// xShmLock flag combinations.
+
+module core.database.sqlite.native.vfs_xshm_methods.lock_op;
+
+mount base.{Bool, Int64};
+
+// SQLite constants mirrored from sqlite3.h SQLITE_SHM_*:
+public fn f_unlock()    -> Int64 { 1 as Int64 }
+public fn f_lock()      -> Int64 { 2 as Int64 }
+public fn f_shared()    -> Int64 { 4 as Int64 }
+public fn f_exclusive() -> Int64 { 8 as Int64 }
+
+// Number of slots (WAL_NREADER + 1 reserved) — SQLite's WAL uses 8 slots total.
+public fn total_slots() -> Int { 8 }
+
+public fn is_unlock(flags: Int64) -> Bool {
+    (flags & f_unlock()) != (0 as Int64)
+}
+
+public fn is_lock(flags: Int64) -> Bool {
+    (flags & f_lock()) != (0 as Int64)
+}
+
+public fn is_shared_mode(flags: Int64) -> Bool {
+    (flags & f_shared()) != (0 as Int64)
+}
+
+public fn is_exclusive_mode(flags: Int64) -> Bool {
+    (flags & f_exclusive()) != (0 as Int64)
+}
+
+// A well-formed xShmLock call has exactly one of {lock,unlock} AND exactly
+// one of {shared,exclusive}.
+public fn is_well_formed(flags: Int64) -> Bool {
+    let l = is_lock(flags);
+    let u = is_unlock(flags);
+    let s = is_shared_mode(flags);
+    let e = is_exclusive_mode(flags);
+    let mut act: Int = 0;
+    if l { act = act + 1; }
+    if u { act = act + 1; }
+    if act != 1 { return false; }
+    let mut kind: Int = 0;
+    if s { kind = kind + 1; }
+    if e { kind = kind + 1; }
+    kind == 1
+}
+
+// (ofst, n) must fall within the slot range.
+public fn range_is_valid(ofst: Int, n: Int) -> Bool {
+    if ofst < 0 { return false; }
+    if n <= 0 { return false; }
+    if ofst + n > total_slots() { return false; }
+    true
+}

@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/lookaside_allocator_api/mod.vr
+// =============================================================================
+// Per-connection lookaside allocator — fixed-slot fast-path for small allocations.
+// Spec §10.4 + §16 — memory management.
+// =============================================================================
+
+module core.database.sqlite.native.lookaside_allocator_api;
+
+public module config;
+public module stats;

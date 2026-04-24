@@ -1,0 +1,91 @@
+// Checkpointer session — frames queued + frames drained + elapsed-passes.
+
+module core.database.sqlite.native.checkpoint_frame_range.session;
+
+mount core.database.sqlite.native.checkpoint_frame_range.range.{
+    FrameRange, new, empty_range, is_empty, length, consume,
+};
+mount base.{Bool, Text, Int64};
+
+public type CkptState is
+    | CsIdle
+    | CsCopying            // moving frames from WAL into the DB
+    | CsSyncing            // fsync the DB file
+    | CsTruncating         // shrink WAL when fully drained
+    | CsDone
+    | CsAborted
+    ;
+
+public fn state_name(s: &CkptState) -> Text {
+    match s {
+        CsIdle       => "idle".clone(),
+        CsCopying    => "copying".clone(),
+        CsSyncing    => "syncing".clone(),
+        CsTruncating => "truncating".clone(),
+        CsDone       => "done".clone(),
+        CsAborted    => "aborted".clone(),
+    }
+}
+
+public fn is_terminal(s: &CkptState) -> Bool {
+    match s { CsDone => true, CsAborted => true, _ => false }
+}
+
+public type CkptSession is {
+    state: CkptState,
+    range: FrameRange,
+    frames_drained: Int64,
+    passes: Int64,
+};
+
+public fn start(target: FrameRange) -> CkptSession {
+    CkptSession {
+        state: CsCopying,
+        range: target,
+        frames_drained: 0 as Int64,
+        passes: 0 as Int64,
+    }
+}
+
+public fn record_drain(mut s: CkptSession, n: Int64) -> CkptSession {
+    s.frames_drained = s.frames_drained + n;
+    s.range = consume(s.range, n);
+    s.passes = s.passes + (1 as Int64);
+    s
+}
+
+public fn transition_to_sync(mut s: CkptSession) -> CkptSession {
+    s.state = CsSyncing;
+    s
+}
+
+public fn transition_to_truncate(mut s: CkptSession) -> CkptSession {
+    s.state = CsTruncating;
+    s
+}
+
+public fn complete(mut s: CkptSession) -> CkptSession {
+    s.state = CsDone;
+    s
+}
+
+public fn abort(mut s: CkptSession) -> CkptSession {
+    s.state = CsAborted;
+    s
+}
+
+public fn backlog(s: &CkptSession) -> Int64 {
+    length(&s.range)
+}
+
+public fn is_done(s: &CkptSession) -> Bool {
+    is_terminal(&s.state)
+}
+
+public fn progress(s: &CkptSession) -> Float {
+    let total = s.frames_drained + length(&s.range);
+    if total <= (0 as Int64) { return 1.0 as Float; }
+    let drained = s.frames_drained as Float;
+    let t = total as Float;
+    drained / t
+}

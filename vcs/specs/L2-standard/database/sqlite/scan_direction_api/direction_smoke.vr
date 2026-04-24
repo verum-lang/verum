@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, scan_direction_api, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.scan_direction_api.direction.{
+    ScanDirection, SdAscending, SdDescending,
+    direction_name, is_reverse, reverse,
+    satisfies_order_by, requires_reverse_scan,
+};
+mount base.{Bool};
+
+fn test_direction_names() {
+    assert(direction_name(&SdAscending)  == "ASC".clone());
+    assert(direction_name(&SdDescending) == "DESC".clone());
+}
+
+fn test_is_reverse() {
+    assert(!is_reverse(&SdAscending));
+    assert(is_reverse(&SdDescending));
+}
+
+fn test_reverse_involution() {
+    match reverse(&SdAscending)  { SdDescending => {}, _ => assert(false) }
+    match reverse(&SdDescending) { SdAscending  => {}, _ => assert(false) }
+}
+
+fn test_satisfies_order_by_always() {
+    assert(satisfies_order_by(&SdAscending, &SdAscending));
+    assert(satisfies_order_by(&SdAscending, &SdDescending));
+    assert(satisfies_order_by(&SdDescending, &SdAscending));
+    assert(satisfies_order_by(&SdDescending, &SdDescending));
+}
+
+fn test_requires_reverse_scan() {
+    assert(!requires_reverse_scan(&SdAscending, &SdAscending));
+    assert(requires_reverse_scan(&SdAscending, &SdDescending));
+    assert(requires_reverse_scan(&SdDescending, &SdAscending));
+    assert(!requires_reverse_scan(&SdDescending, &SdDescending));
+}
+
+fn main() {
+    test_direction_names();
+    test_is_reverse();
+    test_reverse_involution();
+    test_satisfies_order_by_always();
+    test_requires_reverse_scan();
+}

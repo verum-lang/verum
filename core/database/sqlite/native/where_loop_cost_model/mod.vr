@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/where_loop_cost_model/mod.vr
+// =============================================================================
+// Planner per-loop cost model — mirrors WhereLoop in SQLite's where.c.
+// Spec §13.4 — WhereLoop cost evaluation.
+//
+// SQLite's cost model is logarithmic (estimates stored in "log-est" units,
+// essentially ceil(10 * log2(x))). This catalogue provides the log-est
+// encode/decode plus the WhereLoop.rSetup/rRun/nOut triple.
+// =============================================================================
+
+module core.database.sqlite.native.where_loop_cost_model;
+
+public module logest;
+public module loop_;

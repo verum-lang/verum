@@ -1,0 +1,50 @@
+// WhereLoop record — setup cost + per-row run cost + output cardinality.
+
+module core.database.sqlite.native.where_loop_cost_model.loop_;
+
+mount core.database.sqlite.native.where_loop_cost_model.logest.{
+    from_int, mul, add, is_cheaper_than,
+};
+mount base.{Bool, Int64};
+
+public type WhereLoop is {
+    r_setup: Int,    // one-time setup cost (log-est)
+    r_run: Int,      // cost per iteration (log-est)
+    n_out: Int,      // estimated output rows (log-est)
+};
+
+public fn new(r_setup: Int, r_run: Int, n_out: Int) -> WhereLoop {
+    WhereLoop { r_setup: r_setup, r_run: r_run, n_out: n_out }
+}
+
+// Total cost of running this loop once over an outer-loop cardinality of
+// `outer_rows` (log-est). Formula:
+//   total = r_setup + outer_rows * r_run
+public fn total_cost(l: &WhereLoop, outer_rows_logest: Int) -> Int {
+    add(l.r_setup, mul(outer_rows_logest, l.r_run))
+}
+
+// Output cardinality after this loop = outer * n_out.
+public fn output_cardinality(l: &WhereLoop, outer_rows_logest: Int) -> Int {
+    mul(outer_rows_logest, l.n_out)
+}
+
+public fn dominates(a: &WhereLoop, b: &WhereLoop) -> Bool {
+    // a strictly better than b iff all three fields are <= and at least one <.
+    let ge1 = a.r_setup <= b.r_setup;
+    let ge2 = a.r_run   <= b.r_run;
+    let ge3 = a.n_out   <= b.n_out;
+    if !(ge1 && ge2 && ge3) { return false; }
+    a.r_setup < b.r_setup || a.r_run < b.r_run || a.n_out < b.n_out
+}
+
+// A "free scan" — zero setup, zero per-row cost, known row count.
+public fn free_scan_of(rows: Int64) -> WhereLoop {
+    WhereLoop { r_setup: 0, r_run: 0, n_out: from_int(rows) }
+}
+
+public fn pick_cheaper(a: WhereLoop, b: WhereLoop, outer_rows_logest: Int) -> WhereLoop {
+    let ca = total_cost(&a, outer_rows_logest);
+    let cb = total_cost(&b, outer_rows_logest);
+    if is_cheaper_than(ca, cb) { a } else { b }
+}

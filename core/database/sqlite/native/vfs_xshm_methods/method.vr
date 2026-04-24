@@ -1,0 +1,43 @@
+// xShm* method slot taxonomy.
+
+module core.database.sqlite.native.vfs_xshm_methods.method;
+
+mount base.{Bool, Text};
+
+public type ShmMethod is
+    | SmMap          // xShmMap     — request a shm region
+    | SmLock         // xShmLock    — take or release a slot lock
+    | SmBarrier      // xShmBarrier — memory barrier
+    | SmUnmap        // xShmUnmap   — release shm mapping (+ delete?)
+    ;
+
+public fn method_name(m: &ShmMethod) -> Text {
+    match m {
+        SmMap     => "xShmMap".clone(),
+        SmLock    => "xShmLock".clone(),
+        SmBarrier => "xShmBarrier".clone(),
+        SmUnmap   => "xShmUnmap".clone(),
+    }
+}
+
+// Whether the method may perform I/O and so block.
+public fn may_block(m: &ShmMethod) -> Bool {
+    match m {
+        SmMap    => true,    // first map may fault-in
+        SmLock   => true,
+        SmUnmap  => true,
+        SmBarrier => false,
+    }
+}
+
+// xShmBarrier and xShmUnmap must never return an error code; SQLite asserts.
+public fn must_always_succeed(m: &ShmMethod) -> Bool {
+    match m {
+        SmBarrier => true,
+        SmUnmap   => true,
+        _         => false,
+    }
+}
+
+// shm regions are 32KB chunks per §6.6.
+public fn region_size_bytes() -> Int { 32768 }

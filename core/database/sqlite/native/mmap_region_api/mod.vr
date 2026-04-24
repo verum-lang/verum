@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/mmap_region_api/mod.vr
+// =============================================================================
+// mmap-based page-cache region model — used when PRAGMA mmap_size > 0.
+// Spec §10.2 — memory-mapped I/O.
+// =============================================================================
+
+module core.database.sqlite.native.mmap_region_api;
+
+public module region;
+public module policy;

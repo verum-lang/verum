@@ -1,0 +1,57 @@
+// Why the planner won't swap two tables in a join order.
+
+module core.database.sqlite.native.omit_join_ordering.reason;
+
+mount base.{Bool, Text};
+
+public type Reason is
+    | ReCrossJoinHint          // explicit CROSS JOIN keyword
+    | ReLeftOuterBarrier       // LEFT JOIN — RHS can't jump outside
+    | ReFullOuterBarrier       // FULL OUTER — same for both sides
+    | ReVtabBestIndex          // vtab declared SQLITE_INDEX_SCAN_UNIQUE
+    | ReSubqueryMaterialized   // materialized CTE at fixed position
+    | RePragmaNoReorder        // PRAGMA reverse_unordered_selects / no-reorder
+    | ReUsedByAggregateOrder   // ORDER BY / GROUP BY freezes leftmost table
+    ;
+
+public fn reason_name(r: &Reason) -> Text {
+    match r {
+        ReCrossJoinHint        => "cross_join_hint".clone(),
+        ReLeftOuterBarrier     => "left_outer".clone(),
+        ReFullOuterBarrier     => "full_outer".clone(),
+        ReVtabBestIndex        => "vtab_best_index".clone(),
+        ReSubqueryMaterialized => "subquery_materialized".clone(),
+        RePragmaNoReorder      => "pragma_no_reorder".clone(),
+        ReUsedByAggregateOrder => "aggregate_order".clone(),
+    }
+}
+
+// Programmer-visible reasons (explicit SQL constructs) vs. planner-internal.
+public fn is_user_controllable(r: &Reason) -> Bool {
+    match r {
+        ReCrossJoinHint        => true,
+        ReLeftOuterBarrier     => true,
+        ReFullOuterBarrier     => true,
+        RePragmaNoReorder      => true,
+        _                      => false,
+    }
+}
+
+// Hard barriers (reorder impossible) vs. preferences (reorder costly).
+public fn is_hard_barrier(r: &Reason) -> Bool {
+    match r {
+        ReLeftOuterBarrier     => true,
+        ReFullOuterBarrier     => true,
+        ReSubqueryMaterialized => true,
+        _                      => false,
+    }
+}
+
+// Barriers originating from join semantics (vs optimizer hints).
+public fn is_semantic_barrier(r: &Reason) -> Bool {
+    match r {
+        ReLeftOuterBarrier => true,
+        ReFullOuterBarrier => true,
+        _                  => false,
+    }
+}

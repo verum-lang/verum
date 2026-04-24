@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/scan_direction_api/mod.vr
+// =============================================================================
+// B-tree scan direction + ORDER BY consumption classifier.
+// Spec §13.4 — planner ordering.
+// =============================================================================
+
+module core.database.sqlite.native.scan_direction_api;
+
+public module direction;

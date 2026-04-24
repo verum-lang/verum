@@ -1,0 +1,207 @@
+// SQLITE_FCNTL_* codes.
+
+module core.database.sqlite.native.xfilecontrol_opcodes.op;
+
+mount base.{Bool, Text, Maybe};
+
+public type FcntlOp is
+    | FoLockstate               //  1
+    | FoGetLockproxyfile        //  2
+    | FoSetLockproxyfile        //  3
+    | FoLastErrno               //  4
+    | FoSizeHint                //  5
+    | FoChunkSize               //  6
+    | FoFileIoMode              //  7   FILE_POINTER
+    | FoSyncOmitted             //  8
+    | FoWin32AvRetry            //  9
+    | FoPersistWal              // 10
+    | FoOverwrite               // 11
+    | FoVfsname                 // 12
+    | FoPowersafeOverwrite      // 13
+    | FoPragma                  // 14
+    | FoBusyhandler             // 15
+    | FoTempfilename            // 16
+    | FoMmapSize                // 18
+    | FoTraceFcntl              // 19   TRACE
+    | FoHasMoved                // 20
+    | FoSync                    // 21
+    | FoCommitPhasetwo          // 22
+    | FoWin32SetHandle          // 23
+    | FoWalBlock                // 24
+    | FoZipvfs                  // 25
+    | FoRbu                     // 26
+    | FoVfsPointer              // 27
+    | FoJournalPointer          // 28
+    | FoWin32GetHandle          // 29
+    | FoPdb                     // 30
+    | FoBeginAtomicWrite        // 31
+    | FoCommitAtomicWrite       // 32
+    | FoRollbackAtomicWrite     // 33
+    | FoLockTimeout             // 34
+    | FoDataVersion             // 35
+    | FoSizeLimit               // 36
+    | FoCkptDone                // 37
+    | FoReserveBytes            // 38
+    | FoCkptStart               // 39
+    | FoReserveBytesMulti       // 40
+    | FoCkpts                   // 41
+    | FoCksmFile                // 41 alias — see cksm_file catalogue
+    ;
+
+public fn op_code(o: &FcntlOp) -> Int {
+    match o {
+        FoLockstate               =>  1,
+        FoGetLockproxyfile        =>  2,
+        FoSetLockproxyfile        =>  3,
+        FoLastErrno               =>  4,
+        FoSizeHint                =>  5,
+        FoChunkSize               =>  6,
+        FoFileIoMode              =>  7,
+        FoSyncOmitted             =>  8,
+        FoWin32AvRetry            =>  9,
+        FoPersistWal              => 10,
+        FoOverwrite               => 11,
+        FoVfsname                 => 12,
+        FoPowersafeOverwrite      => 13,
+        FoPragma                  => 14,
+        FoBusyhandler             => 15,
+        FoTempfilename            => 16,
+        FoMmapSize                => 18,
+        FoTraceFcntl              => 19,
+        FoHasMoved                => 20,
+        FoSync                    => 21,
+        FoCommitPhasetwo          => 22,
+        FoWin32SetHandle          => 23,
+        FoWalBlock                => 24,
+        FoZipvfs                  => 25,
+        FoRbu                     => 26,
+        FoVfsPointer              => 27,
+        FoJournalPointer          => 28,
+        FoWin32GetHandle          => 29,
+        FoPdb                     => 30,
+        FoBeginAtomicWrite        => 31,
+        FoCommitAtomicWrite       => 32,
+        FoRollbackAtomicWrite     => 33,
+        FoLockTimeout             => 34,
+        FoDataVersion             => 35,
+        FoSizeLimit               => 36,
+        FoCkptDone                => 37,
+        FoReserveBytes            => 38,
+        FoCkptStart               => 39,
+        FoReserveBytesMulti       => 40,
+        FoCkpts                   => 41,
+        FoCksmFile                => 41,
+    }
+}
+
+public fn op_name(o: &FcntlOp) -> Text {
+    match o {
+        FoLockstate           => "LOCKSTATE".clone(),
+        FoGetLockproxyfile    => "GET_LOCKPROXYFILE".clone(),
+        FoSetLockproxyfile    => "SET_LOCKPROXYFILE".clone(),
+        FoLastErrno           => "LAST_ERRNO".clone(),
+        FoSizeHint            => "SIZE_HINT".clone(),
+        FoChunkSize           => "CHUNK_SIZE".clone(),
+        FoFileIoMode          => "FILE_POINTER".clone(),
+        FoSyncOmitted         => "SYNC_OMITTED".clone(),
+        FoWin32AvRetry        => "WIN32_AV_RETRY".clone(),
+        FoPersistWal          => "PERSIST_WAL".clone(),
+        FoOverwrite           => "OVERWRITE".clone(),
+        FoVfsname             => "VFSNAME".clone(),
+        FoPowersafeOverwrite  => "POWERSAFE_OVERWRITE".clone(),
+        FoPragma              => "PRAGMA".clone(),
+        FoBusyhandler         => "BUSYHANDLER".clone(),
+        FoTempfilename        => "TEMPFILENAME".clone(),
+        FoMmapSize            => "MMAP_SIZE".clone(),
+        FoTraceFcntl          => "TRACE".clone(),
+        FoHasMoved            => "HAS_MOVED".clone(),
+        FoSync                => "SYNC".clone(),
+        FoCommitPhasetwo      => "COMMIT_PHASETWO".clone(),
+        FoWin32SetHandle      => "WIN32_SET_HANDLE".clone(),
+        FoWalBlock            => "WAL_BLOCK".clone(),
+        FoZipvfs              => "ZIPVFS".clone(),
+        FoRbu                 => "RBU".clone(),
+        FoVfsPointer          => "VFS_POINTER".clone(),
+        FoJournalPointer      => "JOURNAL_POINTER".clone(),
+        FoWin32GetHandle      => "WIN32_GET_HANDLE".clone(),
+        FoPdb                 => "PDB".clone(),
+        FoBeginAtomicWrite    => "BEGIN_ATOMIC_WRITE".clone(),
+        FoCommitAtomicWrite   => "COMMIT_ATOMIC_WRITE".clone(),
+        FoRollbackAtomicWrite => "ROLLBACK_ATOMIC_WRITE".clone(),
+        FoLockTimeout         => "LOCK_TIMEOUT".clone(),
+        FoDataVersion         => "DATA_VERSION".clone(),
+        FoSizeLimit           => "SIZE_LIMIT".clone(),
+        FoCkptDone            => "CKPT_DONE".clone(),
+        FoReserveBytes        => "RESERVE_BYTES".clone(),
+        FoCkptStart           => "CKPT_START".clone(),
+        FoReserveBytesMulti   => "RESERVE_BYTES_MULTI".clone(),
+        FoCkpts               => "CKPTS".clone(),
+        FoCksmFile            => "CKSM_FILE".clone(),
+    }
+}
+
+// Atomic-write family (3.24+).
+public fn is_atomic_write(o: &FcntlOp) -> Bool {
+    match o {
+        FoBeginAtomicWrite    => true,
+        FoCommitAtomicWrite   => true,
+        FoRollbackAtomicWrite => true,
+        _                     => false,
+    }
+}
+
+// Checkpoint lifecycle family.
+public fn is_checkpoint_ctrl(o: &FcntlOp) -> Bool {
+    match o {
+        FoCkptStart => true,
+        FoCkptDone  => true,
+        FoCkpts     => true,
+        _           => false,
+    }
+}
+
+public fn from_code(code: Int) -> Maybe<FcntlOp> {
+    if code ==  1 { return Maybe.Some(FoLockstate); }
+    if code ==  2 { return Maybe.Some(FoGetLockproxyfile); }
+    if code ==  3 { return Maybe.Some(FoSetLockproxyfile); }
+    if code ==  4 { return Maybe.Some(FoLastErrno); }
+    if code ==  5 { return Maybe.Some(FoSizeHint); }
+    if code ==  6 { return Maybe.Some(FoChunkSize); }
+    if code ==  7 { return Maybe.Some(FoFileIoMode); }
+    if code ==  8 { return Maybe.Some(FoSyncOmitted); }
+    if code ==  9 { return Maybe.Some(FoWin32AvRetry); }
+    if code == 10 { return Maybe.Some(FoPersistWal); }
+    if code == 11 { return Maybe.Some(FoOverwrite); }
+    if code == 12 { return Maybe.Some(FoVfsname); }
+    if code == 13 { return Maybe.Some(FoPowersafeOverwrite); }
+    if code == 14 { return Maybe.Some(FoPragma); }
+    if code == 15 { return Maybe.Some(FoBusyhandler); }
+    if code == 16 { return Maybe.Some(FoTempfilename); }
+    if code == 18 { return Maybe.Some(FoMmapSize); }
+    if code == 19 { return Maybe.Some(FoTraceFcntl); }
+    if code == 20 { return Maybe.Some(FoHasMoved); }
+    if code == 21 { return Maybe.Some(FoSync); }
+    if code == 22 { return Maybe.Some(FoCommitPhasetwo); }
+    if code == 23 { return Maybe.Some(FoWin32SetHandle); }
+    if code == 24 { return Maybe.Some(FoWalBlock); }
+    if code == 25 { return Maybe.Some(FoZipvfs); }
+    if code == 26 { return Maybe.Some(FoRbu); }
+    if code == 27 { return Maybe.Some(FoVfsPointer); }
+    if code == 28 { return Maybe.Some(FoJournalPointer); }
+    if code == 29 { return Maybe.Some(FoWin32GetHandle); }
+    if code == 30 { return Maybe.Some(FoPdb); }
+    if code == 31 { return Maybe.Some(FoBeginAtomicWrite); }
+    if code == 32 { return Maybe.Some(FoCommitAtomicWrite); }
+    if code == 33 { return Maybe.Some(FoRollbackAtomicWrite); }
+    if code == 34 { return Maybe.Some(FoLockTimeout); }
+    if code == 35 { return Maybe.Some(FoDataVersion); }
+    if code == 36 { return Maybe.Some(FoSizeLimit); }
+    if code == 37 { return Maybe.Some(FoCkptDone); }
+    if code == 38 { return Maybe.Some(FoReserveBytes); }
+    if code == 39 { return Maybe.Some(FoCkptStart); }
+    if code == 40 { return Maybe.Some(FoReserveBytesMulti); }
+    if code == 41 { return Maybe.Some(FoCkpts); }
+    Maybe.None
+}
+
+public fn well_known_count() -> Int { 40 }

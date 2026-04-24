@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vfs_xshm_methods, vfs
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vfs_xshm_methods.method.{
+    ShmMethod, SmMap, SmLock, SmBarrier, SmUnmap,
+    method_name, may_block, must_always_succeed, region_size_bytes,
+};
+mount core.database.sqlite.native.vfs_xshm_methods.lock_op.{
+    f_unlock, f_lock, f_shared, f_exclusive,
+    total_slots,
+    is_unlock, is_lock, is_shared_mode, is_exclusive_mode,
+    is_well_formed, range_is_valid,
+};
+mount base.{Bool, Int64};
+
+fn test_method_names() {
+    assert(method_name(&SmMap)     == "xShmMap".clone());
+    assert(method_name(&SmLock)    == "xShmLock".clone());
+    assert(method_name(&SmBarrier) == "xShmBarrier".clone());
+    assert(method_name(&SmUnmap)   == "xShmUnmap".clone());
+}
+
+fn test_may_block() {
+    assert(may_block(&SmMap));
+    assert(may_block(&SmLock));
+    assert(may_block(&SmUnmap));
+    assert(!may_block(&SmBarrier));
+}
+
+fn test_must_always_succeed() {
+    assert(must_always_succeed(&SmBarrier));
+    assert(must_always_succeed(&SmUnmap));
+    assert(!must_always_succeed(&SmMap));
+    assert(!must_always_succeed(&SmLock));
+}
+
+fn test_region_size() {
+    assert_eq(region_size_bytes(), 32768);
+}
+
+fn test_lock_flag_constants() {
+    assert_eq(f_unlock(),    1 as Int64);
+    assert_eq(f_lock(),      2 as Int64);
+    assert_eq(f_shared(),    4 as Int64);
+    assert_eq(f_exclusive(), 8 as Int64);
+    assert_eq(total_slots(), 8);
+}
+
+fn test_lock_flag_classifiers() {
+    let sh_lock = f_lock() | f_shared();
+    assert(is_lock(sh_lock));
+    assert(!is_unlock(sh_lock));
+    assert(is_shared_mode(sh_lock));
+    assert(!is_exclusive_mode(sh_lock));
+    let ex_unlock = f_unlock() | f_exclusive();
+    assert(is_unlock(ex_unlock));
+    assert(is_exclusive_mode(ex_unlock));
+}
+
+fn test_well_formed() {
+    assert(is_well_formed(f_lock() | f_shared()));
+    assert(is_well_formed(f_unlock() | f_exclusive()));
+    // both action bits → bad
+    assert(!is_well_formed(f_lock() | f_unlock() | f_shared()));
+    // both kind bits → bad
+    assert(!is_well_formed(f_lock() | f_shared() | f_exclusive()));
+    // missing kind → bad
+    assert(!is_well_formed(f_lock()));
+    // missing action → bad
+    assert(!is_well_formed(f_shared()));
+}
+
+fn test_range_validation() {
+    assert(range_is_valid(0, 1));
+    assert(range_is_valid(0, 8));
+    assert(range_is_valid(4, 4));
+    assert(!range_is_valid(-1, 1));
+    assert(!range_is_valid(0, 0));
+    assert(!range_is_valid(7, 2));   // 7+2 > 8
+    assert(!range_is_valid(8, 1));
+}
+
+fn main() {
+    test_method_names();
+    test_may_block();
+    test_must_always_succeed();
+    test_region_size();
+    test_lock_flag_constants();
+    test_lock_flag_classifiers();
+    test_well_formed();
+    test_range_validation();
+}

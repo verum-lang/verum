@@ -1,0 +1,40 @@
+// One mmap region — contiguous byte range mapped from the DB file.
+
+module core.database.sqlite.native.mmap_region_api.region;
+
+mount base.{Bool, Int64};
+
+public type MmapRegion is {
+    file_offset: Int64,    // byte offset in DB file
+    length: Int64,         // byte length
+    writable: Bool,
+};
+
+public fn new(file_offset: Int64, length: Int64, writable: Bool) -> MmapRegion {
+    MmapRegion {
+        file_offset: file_offset,
+        length: length,
+        writable: writable,
+    }
+}
+
+public fn end_offset(r: &MmapRegion) -> Int64 {
+    r.file_offset + r.length
+}
+
+// Does `offset..offset+len` fall entirely inside this region?
+public fn contains_range(r: &MmapRegion, offset: Int64, len: Int64) -> Bool {
+    if offset < r.file_offset { return false; }
+    if len <= (0 as Int64) { return false; }
+    offset + len <= end_offset(r)
+}
+
+public fn overlaps(a: &MmapRegion, b: &MmapRegion) -> Bool {
+    if a.length <= (0 as Int64) { return false; }
+    if b.length <= (0 as Int64) { return false; }
+    !(end_offset(a) <= b.file_offset || end_offset(b) <= a.file_offset)
+}
+
+public fn is_well_formed(r: &MmapRegion) -> Bool {
+    r.file_offset >= (0 as Int64) && r.length >= (0 as Int64)
+}
