@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/check_tri_valued_api/mod.vr
+// =============================================================================
+// CHECK-constraint semantics — tri-valued logic. A CHECK evaluates to
+// TRUE, FALSE, or NULL; only FALSE rejects the row.
+// Spec §17.3.7 — CHECK constraints.
+// =============================================================================
+
+module core.database.sqlite.native.check_tri_valued_api;
+
+public module verdict;

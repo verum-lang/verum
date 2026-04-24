@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, create_table_default_cols, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.create_table_default_cols.implicit.{
+    ImplicitCol, IcRowid, IcIntegerPk, IcUnique,
+    col_name,
+    rowid_alias_names, is_rowid_alias, rowid_alias_count,
+    has_implicit_rowid,
+};
+mount core.database.sqlite.native.create_table_default_cols.infer.{
+    InferredSource, IsColumnAlias, IsBareColumn, IsExpression,
+    source_name, disambiguate, has_duplicates,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_col_names() {
+    assert(col_name(&IcRowid)     == "rowid".clone());
+    assert(col_name(&IcIntegerPk) == "integer_pk_alias".clone());
+    assert(col_name(&IcUnique)    == "auto_unique".clone());
+}
+
+fn test_rowid_alias_detection() {
+    assert_eq(rowid_alias_count(), 3);
+    let aliases = rowid_alias_names();
+    assert_eq(aliases.len(), 3);
+    assert(is_rowid_alias(&"rowid".clone()));
+    assert(is_rowid_alias(&"_rowid_".clone()));
+    assert(is_rowid_alias(&"oid".clone()));
+    assert(!is_rowid_alias(&"id".clone()));
+    assert(!is_rowid_alias(&"pk".clone()));
+}
+
+fn test_has_implicit_rowid() {
+    assert(has_implicit_rowid(false));    // normal table
+    assert(!has_implicit_rowid(true));    // WITHOUT ROWID
+}
+
+fn test_source_name_projection() {
+    assert(source_name(&IsColumnAlias("my_col".clone())) == "my_col".clone());
+    assert(source_name(&IsBareColumn("x".clone()))       == "x".clone());
+    // Expression → "column" + digit suffix.
+    assert(source_name(&IsExpression(1)) == "column1".clone());
+    assert(source_name(&IsExpression(42)) == "column42".clone());
+}
+
+fn test_has_duplicates() {
+    let no_dup: List<Text> = ["a".clone(), "b".clone(), "c".clone()].clone() as List<Text>;
+    assert(!has_duplicates(&no_dup));
+    let with_dup: List<Text> = ["a".clone(), "b".clone(), "a".clone()].clone() as List<Text>;
+    assert(has_duplicates(&with_dup));
+}
+
+fn test_disambiguate_removes_collisions() {
+    let input: List<Text> = ["a".clone(), "b".clone(), "a".clone(), "a".clone()].clone() as List<Text>;
+    let out = disambiguate(&input);
+    assert_eq(out.len(), 4);
+    assert(!has_duplicates(&out));
+    assert(out[0] == "a".clone());
+    assert(out[1] == "b".clone());
+    assert(out[2] == "a_1".clone());
+    assert(out[3] == "a_2".clone());
+}
+
+fn test_disambiguate_idempotent_on_unique() {
+    let input: List<Text> = ["x".clone(), "y".clone()].clone() as List<Text>;
+    let out = disambiguate(&input);
+    assert_eq(out.len(), 2);
+    assert(out[0] == "x".clone());
+    assert(out[1] == "y".clone());
+}
+
+fn main() {
+    test_col_names();
+    test_rowid_alias_detection();
+    test_has_implicit_rowid();
+    test_source_name_projection();
+    test_has_duplicates();
+    test_disambiguate_removes_collisions();
+    test_disambiguate_idempotent_on_unique();
+}

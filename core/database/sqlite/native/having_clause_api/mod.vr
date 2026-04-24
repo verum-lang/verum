@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/having_clause_api/mod.vr
+// =============================================================================
+// HAVING clause semantics — post-aggregation filter that may reference
+// aggregate functions or GROUP BY keys, but NOT bare column references.
+// Spec §13.7 — GROUP BY + HAVING.
+// =============================================================================
+
+module core.database.sqlite.native.having_clause_api;
+
+public module reference;
+public module rule;

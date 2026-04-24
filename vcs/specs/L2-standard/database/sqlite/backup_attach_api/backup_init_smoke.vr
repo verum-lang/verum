@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, backup_attach_api, backup
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.backup_attach_api.init_spec.{
+    BackupSpec,
+    new, with_source_schema, with_dest_schema,
+    same_handle, defaults_to_main,
+    InitVerdict,
+    IvOk, IvSameHandle, IvSourceNotOpen, IvDestReadonly, IvAutoVacuumInProgress,
+    verdict_name, is_ok, classify,
+};
+mount base.{Bool, Int64};
+
+fn test_defaults_to_main_helper() {
+    assert(defaults_to_main(&"main".clone()));
+    assert(!defaults_to_main(&"aux".clone()));
+    assert(!defaults_to_main(&"".clone()));
+}
+
+fn test_new_sets_main_schemas() {
+    let s = new(1 as Int64, 2 as Int64);
+    assert(defaults_to_main(&s.source_schema));
+    assert(defaults_to_main(&s.dest_schema));
+    assert(!same_handle(&s));
+}
+
+fn test_same_handle_flag() {
+    let s = new(7 as Int64, 7 as Int64);
+    assert(same_handle(&s));
+}
+
+fn test_with_source_dest_schema() {
+    let s0 = new(1 as Int64, 2 as Int64);
+    let s1 = with_source_schema(s0, "aux_src".clone());
+    let s2 = with_dest_schema(s1, "aux_dst".clone());
+    assert(s2.source_schema == "aux_src".clone());
+    assert(s2.dest_schema == "aux_dst".clone());
+}
+
+fn test_classify_ok_path() {
+    let s = new(1 as Int64, 2 as Int64);
+    let v = classify(&s, true, true, false);
+    match v { IvOk => {}, _ => assert(false) }
+    assert(is_ok(&v));
+}
+
+fn test_classify_same_handle_rejected() {
+    let s = new(1 as Int64, 1 as Int64);
+    match classify(&s, true, true, false) { IvSameHandle => {}, _ => assert(false) }
+}
+
+fn test_classify_source_not_open() {
+    let s = new(1 as Int64, 2 as Int64);
+    match classify(&s, false, true, false) { IvSourceNotOpen => {}, _ => assert(false) }
+}
+
+fn test_classify_dest_readonly() {
+    let s = new(1 as Int64, 2 as Int64);
+    match classify(&s, true, false, false) { IvDestReadonly => {}, _ => assert(false) }
+}
+
+fn test_classify_autovacuum_rejected() {
+    let s = new(1 as Int64, 2 as Int64);
+    match classify(&s, true, true, true) { IvAutoVacuumInProgress => {}, _ => assert(false) }
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&IvOk) == "ok".clone());
+    assert(verdict_name(&IvSameHandle) == "same_handle".clone());
+}
+
+fn main() {
+    test_defaults_to_main_helper();
+    test_new_sets_main_schemas();
+    test_same_handle_flag();
+    test_with_source_dest_schema();
+    test_classify_ok_path();
+    test_classify_same_handle_rejected();
+    test_classify_source_not_open();
+    test_classify_dest_readonly();
+    test_classify_autovacuum_rejected();
+    test_verdict_names();
+}

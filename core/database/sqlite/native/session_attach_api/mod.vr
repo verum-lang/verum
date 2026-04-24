@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/session_attach_api/mod.vr
+// =============================================================================
+// sqlite3session_attach — selects which tables are recorded into a session.
+// Spec §22 — session extension.
+//
+// attach(session, NULL)        → every rowid table is attached
+// attach(session, "tbl")       → only "tbl" is attached
+// attach_filter(session, fn)   → callback decides per-table
+// =============================================================================
+
+module core.database.sqlite.native.session_attach_api;
+
+public module mode;
+public module session;

@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/temp_store_policy/mod.vr
+// =============================================================================
+// PRAGMA temp_store — where to put TEMP tables and temp indexes.
+// Spec §18.4 — temp_store.
+//
+//   0 / DEFAULT  — use compile-time default (SQLITE_TEMP_STORE)
+//   1 / FILE     — disk file in temp_directory
+//   2 / MEMORY   — in-memory
+// =============================================================================
+
+module core.database.sqlite.native.temp_store_policy;
+
+public module store;

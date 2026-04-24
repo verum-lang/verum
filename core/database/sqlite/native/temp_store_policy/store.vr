@@ -1,0 +1,72 @@
+// PRAGMA temp_store mode taxonomy.
+
+module core.database.sqlite.native.temp_store_policy.store;
+
+mount base.{Bool, Text, Maybe};
+
+public type TempStore is
+    | TsDefault       // 0 — follow compile-time SQLITE_TEMP_STORE
+    | TsFile          // 1 — disk
+    | TsMemory        // 2 — RAM
+    ;
+
+public fn code(t: &TempStore) -> Int {
+    match t {
+        TsDefault => 0,
+        TsFile    => 1,
+        TsMemory  => 2,
+    }
+}
+
+public fn from_code(c: Int) -> Maybe<TempStore> {
+    if c == 0 { return Maybe.Some(TsDefault); }
+    if c == 1 { return Maybe.Some(TsFile); }
+    if c == 2 { return Maybe.Some(TsMemory); }
+    Maybe.None
+}
+
+public fn store_name(t: &TempStore) -> Text {
+    match t {
+        TsDefault => "DEFAULT".clone(),
+        TsFile    => "FILE".clone(),
+        TsMemory  => "MEMORY".clone(),
+    }
+}
+
+// Compile-time default values for SQLITE_TEMP_STORE (informational).
+public type CompileTimeDefault is
+    | CtdAlwaysFile       // 0
+    | CtdFilePreferred    // 1
+    | CtdMemoryPreferred  // 2
+    | CtdAlwaysMemory     // 3
+    ;
+
+public fn compile_time_name(d: &CompileTimeDefault) -> Text {
+    match d {
+        CtdAlwaysFile      => "always_file".clone(),
+        CtdFilePreferred   => "file_preferred".clone(),
+        CtdMemoryPreferred => "memory_preferred".clone(),
+        CtdAlwaysMemory    => "always_memory".clone(),
+    }
+}
+
+// Resolve the effective store given compile-time default + pragma value.
+public fn resolve(pragma: &TempStore, compile_default: &CompileTimeDefault) -> TempStore {
+    match pragma {
+        TsFile    => TsFile,
+        TsMemory  => TsMemory,
+        TsDefault => match compile_default {
+            CtdAlwaysFile      => TsFile,
+            CtdFilePreferred   => TsFile,
+            CtdMemoryPreferred => TsMemory,
+            CtdAlwaysMemory    => TsMemory,
+        },
+    }
+}
+
+// Once a temp table exists, the pragma value is read-only for the session.
+public fn can_change_after_temp_created(has_temp_objects: Bool) -> Bool {
+    !has_temp_objects
+}
+
+public fn default_compile_option() -> CompileTimeDefault { CtdFilePreferred }

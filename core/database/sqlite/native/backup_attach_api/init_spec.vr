@@ -1,0 +1,74 @@
+// backup_init spec + validation verdict.
+
+module core.database.sqlite.native.backup_attach_api.init_spec;
+
+mount base.{Bool, Int64, Text};
+
+public type BackupSpec is {
+    source_handle: Int64,        // opaque sqlite3* id
+    source_schema: Text,
+    dest_handle: Int64,
+    dest_schema: Text,
+};
+
+public fn new(source_handle: Int64, dest_handle: Int64) -> BackupSpec {
+    BackupSpec {
+        source_handle: source_handle,
+        source_schema: "main".clone(),
+        dest_handle: dest_handle,
+        dest_schema: "main".clone(),
+    }
+}
+
+public fn with_source_schema(mut s: BackupSpec, schema: Text) -> BackupSpec {
+    s.source_schema = schema;
+    s
+}
+
+public fn with_dest_schema(mut s: BackupSpec, schema: Text) -> BackupSpec {
+    s.dest_schema = schema;
+    s
+}
+
+public fn same_handle(s: &BackupSpec) -> Bool {
+    s.source_handle == s.dest_handle
+}
+
+public fn defaults_to_main(schema: &Text) -> Bool {
+    *schema == "main".clone()
+}
+
+public type InitVerdict is
+    | IvOk
+    | IvSameHandle            // SQLITE_ERROR — source == dest
+    | IvSourceNotOpen
+    | IvDestReadonly
+    | IvAutoVacuumInProgress
+    ;
+
+public fn verdict_name(v: &InitVerdict) -> Text {
+    match v {
+        IvOk                    => "ok".clone(),
+        IvSameHandle            => "same_handle".clone(),
+        IvSourceNotOpen         => "source_not_open".clone(),
+        IvDestReadonly          => "dest_readonly".clone(),
+        IvAutoVacuumInProgress  => "autovacuum_in_progress".clone(),
+    }
+}
+
+public fn is_ok(v: &InitVerdict) -> Bool {
+    match v { IvOk => true, _ => false }
+}
+
+public fn classify(
+    spec: &BackupSpec,
+    source_is_open: Bool,
+    dest_is_writable: Bool,
+    autovacuum_in_progress: Bool,
+) -> InitVerdict {
+    if same_handle(spec)            { return IvSameHandle; }
+    if !source_is_open              { return IvSourceNotOpen; }
+    if !dest_is_writable            { return IvDestReadonly; }
+    if autovacuum_in_progress       { return IvAutoVacuumInProgress; }
+    IvOk
+}

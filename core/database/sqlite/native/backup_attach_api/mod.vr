@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/backup_attach_api/mod.vr
+// =============================================================================
+// sqlite3_backup_init — selects source + destination databases for an online
+// backup. Spec §7.8 — online backup.
+//
+// Validation rules:
+//   * source and dest must be distinct sqlite3* handles
+//   * source_name and dest_name default to "main"
+//   * neither handle may be in auto-vacuum transition
+// =============================================================================
+
+module core.database.sqlite.native.backup_attach_api;
+
+public module init_spec;

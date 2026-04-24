@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/readonly_db_detect/mod.vr
+// =============================================================================
+// Readonly-database detection — SQLITE_READONLY is a family of extended codes
+// tracking *why* writes are refused.
+// Spec §App-D — extended result codes.
+//
+//   SQLITE_READONLY (8)                      base code
+//   SQLITE_READONLY_RECOVERY     (8 | 1<<8)
+//   SQLITE_READONLY_CANTLOCK     (8 | 2<<8)
+//   SQLITE_READONLY_ROLLBACK     (8 | 3<<8)
+//   SQLITE_READONLY_DBMOVED      (8 | 4<<8)
+//   SQLITE_READONLY_CANTINIT     (8 | 5<<8)
+//   SQLITE_READONLY_DIRECTORY    (8 | 6<<8)
+// =============================================================================
+
+module core.database.sqlite.native.readonly_db_detect;
+
+public module reason;

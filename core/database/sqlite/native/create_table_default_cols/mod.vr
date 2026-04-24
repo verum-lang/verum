@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/create_table_default_cols/mod.vr
+// =============================================================================
+// CREATE TABLE implicit column defaults — auto-generated rowid alias, implicit
+// INTEGER PRIMARY KEY handling, and CREATE TABLE AS SELECT column-name inference.
+// Spec §17.1 — CREATE TABLE.
+// =============================================================================
+
+module core.database.sqlite.native.create_table_default_cols;
+
+public module implicit;
+public module infer;

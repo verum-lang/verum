@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, temp_store_policy, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.temp_store_policy.store.{
+    TempStore, TsDefault, TsFile, TsMemory,
+    code, from_code, store_name,
+    CompileTimeDefault,
+    CtdAlwaysFile, CtdFilePreferred, CtdMemoryPreferred, CtdAlwaysMemory,
+    compile_time_name, resolve,
+    can_change_after_temp_created, default_compile_option,
+};
+mount base.{Bool, Maybe};
+
+fn test_codes() {
+    assert_eq(code(&TsDefault), 0);
+    assert_eq(code(&TsFile),    1);
+    assert_eq(code(&TsMemory),  2);
+}
+
+fn test_round_trip() {
+    match from_code(0) {
+        Maybe.Some(t) => match &t { TsDefault => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(2) {
+        Maybe.Some(t) => match &t { TsMemory => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(3) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_store_names() {
+    assert(store_name(&TsDefault) == "DEFAULT".clone());
+    assert(store_name(&TsFile)    == "FILE".clone());
+    assert(store_name(&TsMemory)  == "MEMORY".clone());
+}
+
+fn test_compile_time_names() {
+    assert(compile_time_name(&CtdAlwaysFile)      == "always_file".clone());
+    assert(compile_time_name(&CtdMemoryPreferred) == "memory_preferred".clone());
+    assert(compile_time_name(&CtdAlwaysMemory)    == "always_memory".clone());
+}
+
+fn test_resolve_explicit_wins() {
+    match resolve(&TsFile,   &CtdAlwaysMemory)    { TsFile   => {}, _ => assert(false) }
+    match resolve(&TsMemory, &CtdAlwaysFile)      { TsMemory => {}, _ => assert(false) }
+}
+
+fn test_resolve_default_follows_compile_time() {
+    match resolve(&TsDefault, &CtdAlwaysFile)      { TsFile   => {}, _ => assert(false) }
+    match resolve(&TsDefault, &CtdFilePreferred)   { TsFile   => {}, _ => assert(false) }
+    match resolve(&TsDefault, &CtdMemoryPreferred) { TsMemory => {}, _ => assert(false) }
+    match resolve(&TsDefault, &CtdAlwaysMemory)    { TsMemory => {}, _ => assert(false) }
+}
+
+fn test_can_change_after_temp_created() {
+    assert(can_change_after_temp_created(false));
+    assert(!can_change_after_temp_created(true));
+}
+
+fn test_default_compile_option() {
+    match default_compile_option() { CtdFilePreferred => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_codes();
+    test_round_trip();
+    test_store_names();
+    test_compile_time_names();
+    test_resolve_explicit_wins();
+    test_resolve_default_follows_compile_time();
+    test_can_change_after_temp_created();
+    test_default_compile_option();
+}

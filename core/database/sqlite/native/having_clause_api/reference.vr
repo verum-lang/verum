@@ -1,0 +1,35 @@
+// Expression-reference classifier for HAVING-clause validation.
+
+module core.database.sqlite.native.having_clause_api.reference;
+
+mount base.{Bool, Text};
+
+public type ExprRefKind is
+    | ErkBareColumn          // column not in GROUP BY — ILLEGAL in HAVING
+    | ErkGroupByColumn       // column that appears in GROUP BY — OK
+    | ErkAggregateCall       // COUNT(*), SUM(x), etc. — OK
+    | ErkConstantExpr        // literal / bind param — OK
+    | ErkSubquery            // (SELECT ...) — OK (SQLite allows)
+    ;
+
+public fn kind_name(k: &ExprRefKind) -> Text {
+    match k {
+        ErkBareColumn     => "bare_column".clone(),
+        ErkGroupByColumn  => "group_by_column".clone(),
+        ErkAggregateCall  => "aggregate".clone(),
+        ErkConstantExpr   => "constant".clone(),
+        ErkSubquery       => "subquery".clone(),
+    }
+}
+
+public fn is_legal_in_having(k: &ExprRefKind) -> Bool {
+    match k { ErkBareColumn => false, _ => true }
+}
+
+public fn is_aggregate(k: &ExprRefKind) -> Bool {
+    match k { ErkAggregateCall => true, _ => false }
+}
+
+public fn survives_constant_folding(k: &ExprRefKind) -> Bool {
+    match k { ErkConstantExpr => true, _ => false }
+}

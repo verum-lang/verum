@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/nullif_coalesce_api/mod.vr
+// =============================================================================
+// NULLIF / COALESCE / IFNULL built-in semantics.
+// Spec §15.2 — built-in scalar functions.
+// =============================================================================
+
+module core.database.sqlite.native.nullif_coalesce_api;
+
+public module fn_;

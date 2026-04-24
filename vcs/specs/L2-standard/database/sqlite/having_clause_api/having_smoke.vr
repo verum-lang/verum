@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, having_clause_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.having_clause_api.reference.{
+    ExprRefKind,
+    ErkBareColumn, ErkGroupByColumn, ErkAggregateCall, ErkConstantExpr, ErkSubquery,
+    kind_name, is_legal_in_having, is_aggregate, survives_constant_folding,
+};
+mount core.database.sqlite.native.having_clause_api.rule.{
+    Verdict, VdOk, VdBareColumnReferenced, VdNoGroupByWithoutAggregate,
+    verdict_name, is_accepted, classify,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_kind_names() {
+    assert(kind_name(&ErkBareColumn)    == "bare_column".clone());
+    assert(kind_name(&ErkAggregateCall) == "aggregate".clone());
+}
+
+fn test_is_legal_in_having() {
+    assert(!is_legal_in_having(&ErkBareColumn));
+    assert(is_legal_in_having(&ErkGroupByColumn));
+    assert(is_legal_in_having(&ErkAggregateCall));
+    assert(is_legal_in_having(&ErkConstantExpr));
+    assert(is_legal_in_having(&ErkSubquery));
+}
+
+fn test_is_aggregate() {
+    assert(is_aggregate(&ErkAggregateCall));
+    assert(!is_aggregate(&ErkGroupByColumn));
+}
+
+fn test_survives_constant_folding() {
+    assert(survives_constant_folding(&ErkConstantExpr));
+    assert(!survives_constant_folding(&ErkAggregateCall));
+}
+
+fn test_classify_ok_with_group_by_key() {
+    let refs: List<ExprRefKind> = [ErkGroupByColumn].clone() as List<ExprRefKind>;
+    match classify(&refs, true) { VdOk => {}, _ => assert(false) }
+}
+
+fn test_classify_ok_with_aggregate() {
+    let refs: List<ExprRefKind> = [ErkAggregateCall].clone() as List<ExprRefKind>;
+    match classify(&refs, true) { VdOk => {}, _ => assert(false) }
+    match classify(&refs, false) { VdOk => {}, _ => assert(false) }
+}
+
+fn test_classify_rejects_bare_column() {
+    let refs: List<ExprRefKind> = [ErkBareColumn].clone() as List<ExprRefKind>;
+    match classify(&refs, true) { VdBareColumnReferenced => {}, _ => assert(false) }
+}
+
+fn test_classify_rejects_no_group_by_without_agg() {
+    let refs: List<ExprRefKind> = [ErkConstantExpr].clone() as List<ExprRefKind>;
+    match classify(&refs, false) { VdNoGroupByWithoutAggregate => {}, _ => assert(false) }
+    // With GROUP BY, constants are fine
+    match classify(&refs, true) { VdOk => {}, _ => assert(false) }
+}
+
+fn test_verdict_names_and_accepted() {
+    assert(is_accepted(&VdOk));
+    assert(!is_accepted(&VdBareColumnReferenced));
+    assert(verdict_name(&VdOk) == "ok".clone());
+}
+
+fn main() {
+    test_kind_names();
+    test_is_legal_in_having();
+    test_is_aggregate();
+    test_survives_constant_folding();
+    test_classify_ok_with_group_by_key();
+    test_classify_ok_with_aggregate();
+    test_classify_rejects_bare_column();
+    test_classify_rejects_no_group_by_without_agg();
+    test_verdict_names_and_accepted();
+}

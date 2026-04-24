@@ -1,0 +1,76 @@
+// SQLITE_READONLY_* extended-code taxonomy.
+
+module core.database.sqlite.native.readonly_db_detect.reason;
+
+mount base.{Bool, Text, Maybe};
+
+public fn base_code() -> Int { 8 }
+
+public type ReadonlyReason is
+    | RrBase
+    | RrRecovery      // hot journal replay needed but no write access
+    | RrCantLock
+    | RrRollback      // recovery needed but file moved / swapped
+    | RrDbMoved       // inode changed since open
+    | RrCantInit      // shared-cache first-write init failed
+    | RrDirectory     // path is a directory
+    ;
+
+public fn sub_code(r: &ReadonlyReason) -> Int {
+    match r {
+        RrBase      => 0,
+        RrRecovery  => 1,
+        RrCantLock  => 2,
+        RrRollback  => 3,
+        RrDbMoved   => 4,
+        RrCantInit  => 5,
+        RrDirectory => 6,
+    }
+}
+
+public fn extended_code(r: &ReadonlyReason) -> Int {
+    let sub = sub_code(r);
+    base_code() | (sub * 256)      // sub << 8
+}
+
+public fn from_extended(code: Int) -> Maybe<ReadonlyReason> {
+    if (code & 0xFF) != base_code() { return Maybe.None; }
+    let sub = (code / 256) & 0xFF;
+    if sub == 0 { return Maybe.Some(RrBase); }
+    if sub == 1 { return Maybe.Some(RrRecovery); }
+    if sub == 2 { return Maybe.Some(RrCantLock); }
+    if sub == 3 { return Maybe.Some(RrRollback); }
+    if sub == 4 { return Maybe.Some(RrDbMoved); }
+    if sub == 5 { return Maybe.Some(RrCantInit); }
+    if sub == 6 { return Maybe.Some(RrDirectory); }
+    Maybe.None
+}
+
+public fn reason_name(r: &ReadonlyReason) -> Text {
+    match r {
+        RrBase      => "READONLY".clone(),
+        RrRecovery  => "READONLY_RECOVERY".clone(),
+        RrCantLock  => "READONLY_CANTLOCK".clone(),
+        RrRollback  => "READONLY_ROLLBACK".clone(),
+        RrDbMoved   => "READONLY_DBMOVED".clone(),
+        RrCantInit  => "READONLY_CANTINIT".clone(),
+        RrDirectory => "READONLY_DIRECTORY".clone(),
+    }
+}
+
+public fn is_transient(r: &ReadonlyReason) -> Bool {
+    match r {
+        RrCantLock  => true,     // may clear
+        RrRecovery  => true,     // may clear if perms change
+        _           => false,
+    }
+}
+
+public fn is_corruption_hint(r: &ReadonlyReason) -> Bool {
+    match r {
+        RrRollback => true,
+        _          => false,
+    }
+}
+
+public fn well_known_count() -> Int { 7 }

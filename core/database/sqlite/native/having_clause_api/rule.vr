@@ -1,0 +1,52 @@
+// Validation verdict for HAVING.
+
+module core.database.sqlite.native.having_clause_api.rule;
+
+mount core.database.sqlite.native.having_clause_api.reference.{
+    ExprRefKind, ErkBareColumn, ErkGroupByColumn, ErkAggregateCall,
+    ErkConstantExpr, ErkSubquery,
+    is_legal_in_having, is_aggregate,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type Verdict is
+    | VdOk
+    | VdBareColumnReferenced
+    | VdNoGroupByWithoutAggregate
+    ;
+
+public fn verdict_name(v: &Verdict) -> Text {
+    match v {
+        VdOk                        => "ok".clone(),
+        VdBareColumnReferenced      => "bare_column".clone(),
+        VdNoGroupByWithoutAggregate => "no_group_by_no_agg".clone(),
+    }
+}
+
+public fn is_accepted(v: &Verdict) -> Bool {
+    match v { VdOk => true, _ => false }
+}
+
+// Classify a HAVING expression made up of several references.
+//   refs — per-sub-expression kind (in parse order)
+//   has_group_by — whether the query has a GROUP BY clause
+public fn classify(refs: &List<ExprRefKind>, has_group_by: Bool) -> Verdict {
+    // First blocker: a bare-column reference fails.
+    let mut i: Int = 0;
+    while i < refs.len() {
+        if !is_legal_in_having(&refs[i]) { return VdBareColumnReferenced; }
+        i = i + 1;
+    }
+    // Without GROUP BY, HAVING must reference at least one aggregate.
+    if !has_group_by {
+        let mut j: Int = 0;
+        let mut saw_aggregate: Bool = false;
+        while j < refs.len() {
+            if is_aggregate(&refs[j]) { saw_aggregate = true; j = refs.len(); }
+            else { j = j + 1; }
+        }
+        if !saw_aggregate { return VdNoGroupByWithoutAggregate; }
+    }
+    VdOk
+}

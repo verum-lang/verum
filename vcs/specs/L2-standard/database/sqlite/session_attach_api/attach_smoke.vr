@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, session_attach_api, session
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.session_attach_api.mode.{
+    AttachMode, AmAll, AmSpecific, AmFilter,
+    mode_name, names_all_tables, targets_one_table, uses_callback,
+    target_name, table_eligible_when_all,
+};
+mount core.database.sqlite.native.session_attach_api.session.{
+    Session, new, apply, records_table, attached_count, is_attach_all,
+};
+mount base.{Bool};
+
+fn test_mode_names() {
+    assert(mode_name(&AmAll)                  == "all".clone());
+    assert(mode_name(&AmSpecific("t".clone())) == "specific".clone());
+    assert(mode_name(&AmFilter)               == "filter".clone());
+}
+
+fn test_mode_classifiers() {
+    assert(names_all_tables(&AmAll));
+    assert(!names_all_tables(&AmFilter));
+    assert(targets_one_table(&AmSpecific("t".clone())));
+    assert(!targets_one_table(&AmAll));
+    assert(uses_callback(&AmFilter));
+    assert(!uses_callback(&AmAll));
+}
+
+fn test_target_name_projection() {
+    assert(target_name(&AmSpecific("orders".clone())) == "orders".clone());
+    assert(target_name(&AmAll) == "".clone());
+}
+
+fn test_table_eligible_when_all() {
+    assert(table_eligible_when_all(true, false));     // rowid, not vtab
+    assert(!table_eligible_when_all(false, false));   // without-rowid
+    assert(!table_eligible_when_all(true, true));     // vtab
+}
+
+fn test_apply_amall() {
+    let s = apply(new(), &AmAll);
+    assert(is_attach_all(&s));
+}
+
+fn test_apply_amspecific_pushes_once() {
+    let s0 = new();
+    let s1 = apply(s0, &AmSpecific("users".clone()));
+    let s2 = apply(s1, &AmSpecific("users".clone()));   // dedup
+    assert_eq(attached_count(&s2), 1);
+}
+
+fn test_records_table_with_specific_mode() {
+    let s = apply(new(), &AmSpecific("users".clone()));
+    assert(records_table(&s, &"users".clone(), true, false, false));
+    assert(!records_table(&s, &"other".clone(), true, false, false));
+}
+
+fn test_records_table_with_attach_all() {
+    let s = apply(new(), &AmAll);
+    assert(records_table(&s, &"users".clone(), true, false, false));
+    // WITHOUT ROWID + vtab skipped even in attach-all
+    assert(!records_table(&s, &"w".clone(), false, false, false));
+    assert(!records_table(&s, &"v".clone(), true, true, false));
+}
+
+fn test_records_table_with_filter() {
+    let s = apply(new(), &AmFilter);
+    assert(records_table(&s, &"users".clone(), true, false, true));
+    assert(!records_table(&s, &"users".clone(), true, false, false));
+}
+
+fn main() {
+    test_mode_names();
+    test_mode_classifiers();
+    test_target_name_projection();
+    test_table_eligible_when_all();
+    test_apply_amall();
+    test_apply_amspecific_pushes_once();
+    test_records_table_with_specific_mode();
+    test_records_table_with_attach_all();
+    test_records_table_with_filter();
+}

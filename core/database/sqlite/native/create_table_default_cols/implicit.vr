@@ -1,0 +1,46 @@
+// Implicit-column rules.
+
+module core.database.sqlite.native.create_table_default_cols.implicit;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type ImplicitCol is
+    | IcRowid            // implicit "rowid" / "oid" / "_rowid_" alias
+    | IcIntegerPk        // user declared INTEGER PRIMARY KEY → becomes rowid alias
+    | IcUnique           // SQLite auto-creates unique index when absent
+    ;
+
+public fn col_name(c: &ImplicitCol) -> Text {
+    match c {
+        IcRowid      => "rowid".clone(),
+        IcIntegerPk  => "integer_pk_alias".clone(),
+        IcUnique     => "auto_unique".clone(),
+    }
+}
+
+// Implicit rowid aliases are always accessible: "rowid", "_rowid_", "oid".
+public fn rowid_alias_names() -> List<Text> {
+    let mut out: List<Text> = [].clone() as List<Text>;
+    out.push("rowid".clone());
+    out.push("_rowid_".clone());
+    out.push("oid".clone());
+    out
+}
+
+public fn is_rowid_alias(name: &Text) -> Bool {
+    let aliases = rowid_alias_names();
+    let mut i: Int = 0;
+    while i < aliases.len() {
+        if aliases[i] == *name { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+public fn rowid_alias_count() -> Int { 3 }
+
+// Whether a classic rowid table has an implicit rowid column.
+public fn has_implicit_rowid(is_without_rowid: Bool) -> Bool {
+    !is_without_rowid
+}

@@ -1,0 +1,83 @@
+// CHECK verdict taxonomy.
+
+module core.database.sqlite.native.check_tri_valued_api.verdict;
+
+mount base.{Bool, Text};
+
+public type TriResult is
+    | TrTrue           // row admitted
+    | TrFalse          // row rejected with SQLITE_CONSTRAINT_CHECK
+    | TrNull           // unknown — row admitted (NULL is NOT a violation)
+    ;
+
+public fn result_name(r: &TriResult) -> Text {
+    match r {
+        TrTrue  => "TRUE".clone(),
+        TrFalse => "FALSE".clone(),
+        TrNull  => "NULL".clone(),
+    }
+}
+
+public fn passes(r: &TriResult) -> Bool {
+    match r { TrFalse => false, _ => true }
+}
+
+public fn rejects(r: &TriResult) -> Bool {
+    match r { TrFalse => true, _ => false }
+}
+
+public fn is_definite(r: &TriResult) -> Bool {
+    match r { TrNull => false, _ => true }
+}
+
+// AND over tri-valued truth table.
+public fn and(a: &TriResult, b: &TriResult) -> TriResult {
+    match a {
+        TrFalse => TrFalse,
+        TrTrue  => match b {
+            TrTrue  => TrTrue,
+            TrFalse => TrFalse,
+            TrNull  => TrNull,
+        },
+        TrNull  => match b {
+            TrFalse => TrFalse,
+            _       => TrNull,
+        },
+    }
+}
+
+public fn or(a: &TriResult, b: &TriResult) -> TriResult {
+    match a {
+        TrTrue  => TrTrue,
+        TrFalse => match b {
+            TrTrue  => TrTrue,
+            TrFalse => TrFalse,
+            TrNull  => TrNull,
+        },
+        TrNull  => match b {
+            TrTrue  => TrTrue,
+            _       => TrNull,
+        },
+    }
+}
+
+public fn not(a: &TriResult) -> TriResult {
+    match a {
+        TrTrue  => TrFalse,
+        TrFalse => TrTrue,
+        TrNull  => TrNull,
+    }
+}
+
+// SQLite CHECK rejects only when the final value is strictly FALSE.
+public fn check_accepts(final: &TriResult) -> Bool {
+    passes(final)
+}
+
+public fn sqlite_error_code(r: &TriResult) -> Int {
+    // SQLITE_OK = 0, SQLITE_CONSTRAINT_CHECK = 275 (0x113).
+    match r {
+        TrFalse => 275,
+        _       => 0,
+    }
+}

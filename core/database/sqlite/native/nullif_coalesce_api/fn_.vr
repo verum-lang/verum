@@ -1,0 +1,89 @@
+// Semantics of the three null-handling built-ins.
+
+module core.database.sqlite.native.nullif_coalesce_api.fn_;
+
+mount base.{Bool, Text, Maybe};
+mount core.collections.list.{List};
+
+public type NullHandlerFn is
+    | NhNullif         // NULLIF(x, y) → NULL if x == y else x
+    | NhCoalesce       // COALESCE(a, b, ...) → first non-NULL
+    | NhIfnull         // IFNULL(x, y) → COALESCE(x, y)
+    ;
+
+public fn fn_name(f: &NullHandlerFn) -> Text {
+    match f {
+        NhNullif   => "NULLIF".clone(),
+        NhCoalesce => "COALESCE".clone(),
+        NhIfnull   => "IFNULL".clone(),
+    }
+}
+
+// Arity constraints (SQLite enforces these at parse time).
+public fn min_arity(f: &NullHandlerFn) -> Int {
+    match f {
+        NhNullif   => 2,
+        NhCoalesce => 2,   // SQLite requires >= 2
+        NhIfnull   => 2,
+    }
+}
+
+public fn max_arity(f: &NullHandlerFn) -> Int {
+    match f {
+        NhNullif   => 2,
+        NhIfnull   => 2,
+        NhCoalesce => -1,  // variadic
+    }
+}
+
+public fn is_variadic(f: &NullHandlerFn) -> Bool {
+    max_arity(f) < 0
+}
+
+public fn accepts_arity(f: &NullHandlerFn, n: Int) -> Bool {
+    if n < min_arity(f) { return false; }
+    let m = max_arity(f);
+    if m < 0 { return true; }
+    n <= m
+}
+
+// Nullable: one argument modeled as Maybe<Text>. None = NULL.
+public fn nullif(x: &Maybe<Text>, y: &Maybe<Text>) -> Maybe<Text> {
+    match x {
+        Maybe.None => Maybe.None,
+        Maybe.Some(xv) => match y {
+            Maybe.None => Maybe.Some(xv.clone()),
+            Maybe.Some(yv) => if xv == yv { Maybe.None } else { Maybe.Some(xv.clone()) },
+        },
+    }
+}
+
+public fn coalesce(args: &List<Maybe<Text>>) -> Maybe<Text> {
+    let mut i: Int = 0;
+    while i < args.len() {
+        match &args[i] {
+            Maybe.Some(v) => return Maybe.Some(v.clone()),
+            Maybe.None    => {},
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+public fn ifnull(x: &Maybe<Text>, y: &Maybe<Text>) -> Maybe<Text> {
+    match x {
+        Maybe.Some(v) => Maybe.Some(v.clone()),
+        Maybe.None    => match y {
+            Maybe.Some(w) => Maybe.Some(w.clone()),
+            Maybe.None    => Maybe.None,
+        },
+    }
+}
+
+// Compile-time hint: NULLIF can never return all-non-null (may produce NULL).
+public fn may_return_null(f: &NullHandlerFn) -> Bool {
+    match f {
+        NhCoalesce => true,   // if all args are NULL
+        _          => true,
+    }
+}

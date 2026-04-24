@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, nullif_coalesce_api, builtins
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.nullif_coalesce_api.fn_.{
+    NullHandlerFn, NhNullif, NhCoalesce, NhIfnull,
+    fn_name, min_arity, max_arity, is_variadic, accepts_arity,
+    nullif, coalesce, ifnull, may_return_null,
+};
+mount base.{Bool, Maybe};
+mount core.collections.list.{List};
+
+fn test_fn_names() {
+    assert(fn_name(&NhNullif)   == "NULLIF".clone());
+    assert(fn_name(&NhCoalesce) == "COALESCE".clone());
+    assert(fn_name(&NhIfnull)   == "IFNULL".clone());
+}
+
+fn test_arity_rules() {
+    assert_eq(min_arity(&NhNullif), 2);
+    assert_eq(max_arity(&NhNullif), 2);
+    assert_eq(min_arity(&NhCoalesce), 2);
+    assert(is_variadic(&NhCoalesce));
+    assert(!is_variadic(&NhNullif));
+    assert(!accepts_arity(&NhNullif, 1));
+    assert(accepts_arity(&NhNullif, 2));
+    assert(!accepts_arity(&NhNullif, 3));
+    assert(accepts_arity(&NhCoalesce, 5));
+}
+
+fn test_nullif_semantics() {
+    let x: Maybe<Text> = Maybe.Some("A".clone());
+    let y: Maybe<Text> = Maybe.Some("A".clone());
+    match nullif(&x, &y) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+    let z: Maybe<Text> = Maybe.Some("B".clone());
+    match nullif(&x, &z) {
+        Maybe.Some(v) => assert(v == "A".clone()),
+        Maybe.None => assert(false),
+    }
+    // NULLIF(NULL, x) → NULL
+    let n: Maybe<Text> = Maybe.None;
+    match nullif(&n, &x) { Maybe.None => {}, _ => assert(false) }
+    // NULLIF(x, NULL) → x (since x != NULL under SQL semantics)
+    match nullif(&x, &n) {
+        Maybe.Some(v) => assert(v == "A".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_coalesce_first_non_null() {
+    let args: List<Maybe<Text>> = [
+        Maybe.None,
+        Maybe.None,
+        Maybe.Some("C".clone()),
+        Maybe.Some("D".clone()),
+    ].clone() as List<Maybe<Text>>;
+    match coalesce(&args) {
+        Maybe.Some(v) => assert(v == "C".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_coalesce_all_null_returns_null() {
+    let args: List<Maybe<Text>> = [
+        Maybe.None,
+        Maybe.None,
+    ].clone() as List<Maybe<Text>>;
+    match coalesce(&args) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_ifnull_semantics() {
+    let a: Maybe<Text> = Maybe.Some("A".clone());
+    let b: Maybe<Text> = Maybe.Some("B".clone());
+    let n: Maybe<Text> = Maybe.None;
+    match ifnull(&a, &b) {
+        Maybe.Some(v) => assert(v == "A".clone()),
+        Maybe.None => assert(false),
+    }
+    match ifnull(&n, &b) {
+        Maybe.Some(v) => assert(v == "B".clone()),
+        Maybe.None => assert(false),
+    }
+    match ifnull(&n, &n) { Maybe.None => {}, _ => assert(false) }
+}
+
+fn test_may_return_null_always_true() {
+    assert(may_return_null(&NhNullif));
+    assert(may_return_null(&NhCoalesce));
+    assert(may_return_null(&NhIfnull));
+}
+
+fn main() {
+    test_fn_names();
+    test_arity_rules();
+    test_nullif_semantics();
+    test_coalesce_first_non_null();
+    test_coalesce_all_null_returns_null();
+    test_ifnull_semantics();
+    test_may_return_null_always_true();
+}

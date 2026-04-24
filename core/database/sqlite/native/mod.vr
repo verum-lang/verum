@@ -668,3 +668,19 @@ public module trace_v2_payload_api;
 public module random_bytes_stream_api;
 // - page_write_back_budget_api: token-bucket budget for async write-back
 public module page_write_back_budget_api;
+// - nullif_coalesce_api: NULLIF / COALESCE / IFNULL built-in semantics + arity rules
+public module nullif_coalesce_api;
+// - having_clause_api: HAVING-clause 5-kind ExprRefKind + legality classifier
+public module having_clause_api;
+// - session_attach_api: sqlite3session_attach 3-mode (all / specific / filter) + session record
+public module session_attach_api;
+// - check_tri_valued_api: CHECK TriResult (True/False/Null) + AND/OR/NOT truth tables
+public module check_tri_valued_api;
+// - backup_attach_api: sqlite3_backup_init spec + 5-verdict init classifier
+public module backup_attach_api;
+// - readonly_db_detect: 7-reason SQLITE_READONLY_* extended code taxonomy
+public module readonly_db_detect;
+// - temp_store_policy: PRAGMA temp_store DEFAULT/FILE/MEMORY + compile-time resolution
+public module temp_store_policy;
+// - create_table_default_cols: implicit rowid aliases + CREATE-AS-SELECT column inference
+public module create_table_default_cols;

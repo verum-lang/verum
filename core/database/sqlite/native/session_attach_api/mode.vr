@@ -1,0 +1,43 @@
+// Attach mode taxonomy.
+
+module core.database.sqlite.native.session_attach_api.mode;
+
+mount base.{Bool, Text};
+
+public type AttachMode is
+    | AmAll                  // attach(session, NULL) — every rowid table
+    | AmSpecific(Text)       // attach(session, "tbl")
+    | AmFilter               // attach_filter(session, fn) — per-table callback
+    ;
+
+public fn mode_name(m: &AttachMode) -> Text {
+    match m {
+        AmAll          => "all".clone(),
+        AmSpecific(_)  => "specific".clone(),
+        AmFilter       => "filter".clone(),
+    }
+}
+
+public fn names_all_tables(m: &AttachMode) -> Bool {
+    match m { AmAll => true, _ => false }
+}
+
+public fn targets_one_table(m: &AttachMode) -> Bool {
+    match m { AmSpecific(_) => true, _ => false }
+}
+
+public fn uses_callback(m: &AttachMode) -> Bool {
+    match m { AmFilter => true, _ => false }
+}
+
+public fn target_name(m: &AttachMode) -> Text {
+    match m {
+        AmSpecific(n) => n.clone(),
+        _             => "".clone(),
+    }
+}
+
+// Only rowid tables are eligible — WITHOUT ROWID + virtual tables are skipped.
+public fn table_eligible_when_all(has_rowid: Bool, is_virtual: Bool) -> Bool {
+    has_rowid && !is_virtual
+}

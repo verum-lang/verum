@@ -1,0 +1,64 @@
+// Minimal session state for attach bookkeeping.
+
+module core.database.sqlite.native.session_attach_api.session;
+
+mount core.database.sqlite.native.session_attach_api.mode.{
+    AttachMode, AmAll, AmSpecific, AmFilter,
+    names_all_tables, targets_one_table, target_name,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type Session is {
+    attached_tables: List<Text>,
+    attach_all_mode: Bool,
+    has_filter: Bool,
+};
+
+public fn new() -> Session {
+    Session {
+        attached_tables: [].clone() as List<Text>,
+        attach_all_mode: false,
+        has_filter: false,
+    }
+}
+
+fn list_contains(l: &List<Text>, s: &Text) -> Bool {
+    let mut i: Int = 0;
+    while i < l.len() {
+        if l[i] == *s { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+public fn apply(mut s: Session, m: &AttachMode) -> Session {
+    match m {
+        AmAll => { s.attach_all_mode = true; },
+        AmSpecific(name) => {
+            if !list_contains(&s.attached_tables, name) {
+                s.attached_tables.push(name.clone());
+            }
+        },
+        AmFilter => { s.has_filter = true; },
+    }
+    s
+}
+
+// Which tables actually end up recorded — given the table's metadata.
+public fn records_table(
+    s: &Session,
+    table_name: &Text,
+    has_rowid: Bool,
+    is_virtual: Bool,
+    filter_says_yes: Bool,
+) -> Bool {
+    // Virtual tables are always skipped.
+    if is_virtual { return false; }
+    if s.has_filter { return filter_says_yes; }
+    if s.attach_all_mode { return has_rowid; }
+    list_contains(&s.attached_tables, table_name)
+}
+
+public fn attached_count(s: &Session) -> Int { s.attached_tables.len() }
+public fn is_attach_all(s: &Session) -> Bool { s.attach_all_mode }

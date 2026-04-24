@@ -1,0 +1,94 @@
+// CREATE TABLE ... AS SELECT column-name inference rules.
+
+module core.database.sqlite.native.create_table_default_cols.infer;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type InferredSource is
+    | IsColumnAlias(Text)        // SELECT x AS my_col → column name my_col
+    | IsBareColumn(Text)         // SELECT t.x → column name x
+    | IsExpression(Int)          // SELECT 2*x → column name "2*x" or "column1"
+    ;
+
+public fn source_name(s: &InferredSource) -> Text {
+    match s {
+        IsColumnAlias(n)  => n.clone(),
+        IsBareColumn(n)   => n.clone(),
+        IsExpression(idx) => "column".clone() + int_suffix(idx),
+    }
+}
+
+fn int_suffix(n: Int) -> Text {
+    // Convert small n to text suffix; fall back to "_n".
+    let mut out = "".clone();
+    let mut v: Int = if n < 0 { -n } else { n };
+    if v == 0 { out.push_byte(0x30 as u8); return out; }
+    let mut digits = "".clone();
+    while v > 0 {
+        let d = (v % 10) as u8;
+        digits.push_byte((d + 0x30 as u8) as u8);
+        v = v / 10;
+    }
+    let bs = digits.as_bytes();
+    let mut i: Int = bs.len() - 1;
+    while i >= 0 {
+        out.push_byte(bs[i]);
+        i = i - 1;
+    }
+    out
+}
+
+// Per §17.1: if two inferred names collide, append "_1", "_2", ...
+public fn disambiguate(names: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = [].clone() as List<Text>;
+    let mut i: Int = 0;
+    while i < names.len() {
+        let candidate = names[i].clone();
+        // Check if `candidate` appears earlier.
+        let mut collision = false;
+        let mut j: Int = 0;
+        while j < out.len() {
+            if out[j] == candidate { collision = true; j = out.len(); } else { j = j + 1; }
+        }
+        if collision {
+            // Append "_N" until unique. Start at 1.
+            let mut n: Int = 1;
+            let mut found_name: Text = "".clone();
+            while found_name.len() == 0 {
+                let mut trial = candidate.clone();
+                trial.push_byte(0x5F as u8);
+                let suffix = int_suffix(n);
+                let sbs = suffix.as_bytes();
+                let mut k: Int = 0;
+                while k < sbs.len() { trial.push_byte(sbs[k]); k = k + 1; }
+                // Is `trial` in `out`?
+                let mut dup = false;
+                let mut q: Int = 0;
+                while q < out.len() {
+                    if out[q] == trial { dup = true; q = out.len(); } else { q = q + 1; }
+                }
+                if !dup { found_name = trial; }
+                n = n + 1;
+            }
+            out.push(found_name);
+        } else {
+            out.push(candidate);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+public fn has_duplicates(names: &List<Text>) -> Bool {
+    let mut i: Int = 0;
+    while i < names.len() {
+        let mut j: Int = i + 1;
+        while j < names.len() {
+            if names[i] == names[j] { return true; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    false
+}

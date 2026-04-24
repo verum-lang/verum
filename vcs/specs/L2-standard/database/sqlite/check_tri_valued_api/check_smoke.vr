@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, check_tri_valued_api, constraint
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.check_tri_valued_api.verdict.{
+    TriResult, TrTrue, TrFalse, TrNull,
+    result_name, passes, rejects, is_definite,
+    and, or, not,
+    check_accepts, sqlite_error_code,
+};
+mount base.{Bool};
+
+fn test_result_names() {
+    assert(result_name(&TrTrue)  == "TRUE".clone());
+    assert(result_name(&TrFalse) == "FALSE".clone());
+    assert(result_name(&TrNull)  == "NULL".clone());
+}
+
+fn test_passes_rejects() {
+    assert(passes(&TrTrue));
+    assert(passes(&TrNull));    // NULL is NOT a violation
+    assert(!passes(&TrFalse));
+    assert(rejects(&TrFalse));
+    assert(!rejects(&TrTrue));
+    assert(!rejects(&TrNull));
+}
+
+fn test_is_definite() {
+    assert(is_definite(&TrTrue));
+    assert(is_definite(&TrFalse));
+    assert(!is_definite(&TrNull));
+}
+
+fn test_and_truth_table() {
+    match and(&TrTrue,  &TrTrue)  { TrTrue  => {}, _ => assert(false) }
+    match and(&TrTrue,  &TrFalse) { TrFalse => {}, _ => assert(false) }
+    match and(&TrTrue,  &TrNull)  { TrNull  => {}, _ => assert(false) }
+    match and(&TrFalse, &TrNull)  { TrFalse => {}, _ => assert(false) }
+    match and(&TrNull,  &TrFalse) { TrFalse => {}, _ => assert(false) }
+    match and(&TrNull,  &TrNull)  { TrNull  => {}, _ => assert(false) }
+}
+
+fn test_or_truth_table() {
+    match or(&TrTrue,  &TrFalse) { TrTrue  => {}, _ => assert(false) }
+    match or(&TrFalse, &TrTrue)  { TrTrue  => {}, _ => assert(false) }
+    match or(&TrFalse, &TrFalse) { TrFalse => {}, _ => assert(false) }
+    match or(&TrFalse, &TrNull)  { TrNull  => {}, _ => assert(false) }
+    match or(&TrTrue,  &TrNull)  { TrTrue  => {}, _ => assert(false) }
+    match or(&TrNull,  &TrFalse) { TrNull  => {}, _ => assert(false) }
+    match or(&TrNull,  &TrNull)  { TrNull  => {}, _ => assert(false) }
+}
+
+fn test_not_involution() {
+    match not(&TrTrue)  { TrFalse => {}, _ => assert(false) }
+    match not(&TrFalse) { TrTrue  => {}, _ => assert(false) }
+    match not(&TrNull)  { TrNull  => {}, _ => assert(false) }
+}
+
+fn test_check_accepts() {
+    assert(check_accepts(&TrTrue));
+    assert(check_accepts(&TrNull));
+    assert(!check_accepts(&TrFalse));
+}
+
+fn test_sqlite_error_code_mapping() {
+    assert_eq(sqlite_error_code(&TrTrue),  0);
+    assert_eq(sqlite_error_code(&TrNull),  0);
+    assert_eq(sqlite_error_code(&TrFalse), 275);
+}
+
+fn main() {
+    test_result_names();
+    test_passes_rejects();
+    test_is_definite();
+    test_and_truth_table();
+    test_or_truth_table();
+    test_not_involution();
+    test_check_accepts();
+    test_sqlite_error_code_mapping();
+}
