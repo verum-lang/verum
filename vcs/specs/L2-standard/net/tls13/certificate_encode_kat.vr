@@ -1,0 +1,142 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, handshake, certificate, certificate_verify, encode, rfc8446_4_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.4.2 Certificate handshake message:
+//
+//   struct {
+//       opaque      certificate_request_context<0..2^8-1>;
+//       CertificateEntry certificate_list<0..2^24-1>;
+//   } Certificate;
+//
+//   struct {
+//       opaque cert_data<1..2^24-1>;
+//       Extension extensions<0..2^16-1>;
+//   } CertificateEntry;
+//
+// Handshake wrap: 1-byte type (11) + uint24 length + body.
+//
+// §4.4.3 CertificateVerify:
+//   SignatureScheme algorithm (u16) + opaque signature<0..2^16-1>
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.handshake.messages.{
+    HandshakeMessage, CertificateMessage, CertificateEntry,
+    CertificateVerify, encode_handshake,
+    HST_CERTIFICATE, HST_CERTIFICATE_VERIFY,
+};
+
+fn empty_certificate_message_minimum_bytes() {
+    // Empty request_context + empty cert_list.
+    let cm = CertificateMessage {
+        certificate_request_context: [],
+        certificate_list:            [],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateMsg(cm), &mut out).unwrap();
+    // Wrap header (4) + u8 ctx len (1) + u24 list len (3) = 8 bytes.
+    assert(out.len() == 8);
+    assert(out[0] == HST_CERTIFICATE);         // 11
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8);
+    assert(out[3] == 0x04_u8);                 // body length = 4
+    assert(out[4] == 0x00_u8);                 // request_context len = 0
+    assert(out[5] == 0x00_u8);                 // cert_list u24 len high
+    assert(out[6] == 0x00_u8);
+    assert(out[7] == 0x00_u8);                 // cert_list len = 0
+}
+
+fn single_entry_certificate_has_cert_plus_extensions_block() {
+    let cert_data: List<Byte> = [0x30_u8, 0x01_u8, 0x02_u8];   // 3-byte "cert"
+    let entry = CertificateEntry {
+        cert_data:  cert_data.clone(),
+        extensions: [],
+    };
+    let cm = CertificateMessage {
+        certificate_request_context: [],
+        certificate_list:            [entry],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateMsg(cm), &mut out).unwrap();
+    // Layout:
+    //   [0]  type = 11
+    //   [1..3] body length
+    //   [4]  request_context len = 0
+    //   [5..7] cert_list len = 3 (cert u24) + 3 (cert) + 2 (ext u16) = 8
+    //   [8..10] cert u24 len = 3
+    //   [11..13] cert bytes
+    //   [14..15] ext u16 len = 0
+    assert(out[0]  == HST_CERTIFICATE);
+    assert(out[4]  == 0x00_u8);                           // empty context
+    assert(out[5]  == 0x00_u8 && out[6] == 0x00_u8 && out[7] == 0x08_u8);   // cert_list len 8
+    assert(out[8]  == 0x00_u8 && out[9] == 0x00_u8 && out[10] == 0x03_u8);  // cert len 3
+    assert(out[11] == 0x30_u8);
+    assert(out[12] == 0x01_u8);
+    assert(out[13] == 0x02_u8);
+    assert(out[14] == 0x00_u8 && out[15] == 0x00_u8);   // extensions block empty
+}
+
+fn certificate_with_request_context() {
+    // request_context = [0xAA, 0xBB] — echoed from CertificateRequest
+    // in post-handshake auth.
+    let cm = CertificateMessage {
+        certificate_request_context: [0xAA_u8, 0xBB_u8],
+        certificate_list:            [],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateMsg(cm), &mut out).unwrap();
+    // Header(4) + u8 ctx_len(1) + 2 ctx bytes + u24 list len(3) = 10.
+    assert(out.len() == 10);
+    assert(out[4] == 0x02_u8);
+    assert(out[5] == 0xAA_u8);
+    assert(out[6] == 0xBB_u8);
+    assert(out[7] == 0x00_u8 && out[8] == 0x00_u8 && out[9] == 0x00_u8);
+}
+
+fn certificate_verify_byte_exact() {
+    // Ed25519 + 64-byte signature.
+    let cv = CertificateVerify {
+        algorithm: SignatureScheme.Ed25519Scheme,
+        signature: [0x42_u8; 64].to_list(),
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateVerifyMsg(cv), &mut out).unwrap();
+    // Header(4) + alg u16(2) + sig u16 len(2) + 64 sig = 72.
+    assert(out.len() == 72);
+    assert(out[0] == HST_CERTIFICATE_VERIFY);             // 15
+    assert(out[1] == 0x00_u8 && out[2] == 0x00_u8 && out[3] == 0x44_u8);   // body len 68
+    // Ed25519Scheme = 0x0807.
+    assert(out[4] == 0x08_u8 && out[5] == 0x07_u8);
+    assert(out[6] == 0x00_u8 && out[7] == 0x40_u8);       // sig length 64
+    // First + last signature byte.
+    assert(out[8]  == 0x42_u8);
+    assert(out[71] == 0x42_u8);
+}
+
+fn certificate_verify_ecdsa_p256_sha256() {
+    let cv = CertificateVerify {
+        algorithm: SignatureScheme.EcdsaSecp256r1Sha256,
+        signature: [0xCC_u8; 72].to_list(),
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateVerifyMsg(cv), &mut out).unwrap();
+    // EcdsaSecp256r1Sha256 = 0x0403.
+    assert(out[4] == 0x04_u8 && out[5] == 0x03_u8);
+    assert(out[6] == 0x00_u8 && out[7] == 0x48_u8);       // sig len 72
+}
+
+@main
+public fn main() -> Int {
+    empty_certificate_message_minimum_bytes();
+    single_entry_certificate_has_cert_plus_extensions_block();
+    certificate_with_request_context();
+    certificate_verify_byte_exact();
+    certificate_verify_ecdsa_p256_sha256();
+    print("RFC 8446 §4.4 Certificate + CertificateVerify wire encode verified");
+    0
+}
