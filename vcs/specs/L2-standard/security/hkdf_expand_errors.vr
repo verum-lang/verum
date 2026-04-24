@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, hkdf, rfc5869, errors, expand
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5869 §2.3 HKDF-Expand error surface:
+//
+//   * length == 0 is legal → empty output, no error.
+//   * length > 255 × HashLen → OutputTooLong { requested, limit }.
+//   * prk.len() < HashLen → InvalidPrk { len }.
+//
+// Limits per hash primitive:
+//   SHA-256 → 8160 bytes max (255 × 32)
+//   SHA-384 → 12240 bytes max (255 × 48)
+//   SHA-512 → 16320 bytes max (255 × 64)
+
+mount core.*;
+mount core.collections.List;
+mount core.security.kdf.hkdf.{
+    HkdfError,
+    hkdf_expand_sha256, hkdf_expand_sha384, hkdf_expand_sha512,
+    MAX_EXPAND_OUTPUT_256,
+};
+
+fn zero_length_expand_is_empty_output() {
+    let prk: List<Byte> = [0x11_u8; 32];
+    let info: List<Byte> = [];
+    let mut out: List<Byte> = [];
+    hkdf_expand_sha256(prk.as_slice(), info.as_slice(), 0, &mut out).unwrap();
+    assert(out.len() == 0);
+}
+
+fn one_block_expand_produces_hashlen_bytes() {
+    let prk: List<Byte> = [0x22_u8; 32];
+    let info: List<Byte> = [0xAB_u8, 0xCD_u8];
+    let mut out: List<Byte> = [];
+    hkdf_expand_sha256(prk.as_slice(), info.as_slice(), 32, &mut out).unwrap();
+    assert(out.len() == 32);
+}
+
+fn expand_beyond_limit_returns_output_too_long_sha256() {
+    let prk: List<Byte> = [0x33_u8; 32];
+    let info: List<Byte> = [];
+    let mut out: List<Byte> = [];
+    let over = MAX_EXPAND_OUTPUT_256 + 1;   // 8161
+    match hkdf_expand_sha256(prk.as_slice(), info.as_slice(), over, &mut out) {
+        Err(HkdfError.OutputTooLong { requested, limit }) => {
+            assert(requested == over);
+            assert(limit == MAX_EXPAND_OUTPUT_256);
+        },
+        _ => panic("expand past 255*HashLen must be OutputTooLong"),
+    }
+}
+
+fn expand_sha384_has_larger_limit_than_sha256() {
+    // 255 × 48 = 12240 — requesting more must fail; requesting within
+    // limit must succeed.
+    let prk: List<Byte> = [0x44_u8; 48];
+    let info: List<Byte> = [];
+    let mut out: List<Byte> = [];
+    match hkdf_expand_sha384(prk.as_slice(), info.as_slice(), 12_240, &mut out) {
+        Ok(()) => assert(out.len() == 12_240),
+        Err(_) => panic("12240 bytes fit in SHA-384's 255×HashLen limit"),
+    }
+    // One past the limit — OutputTooLong.
+    let mut out2: List<Byte> = [];
+    match hkdf_expand_sha384(prk.as_slice(), info.as_slice(), 12_241, &mut out2) {
+        Err(HkdfError.OutputTooLong { requested, limit }) => {
+            assert(requested == 12_241);
+            assert(limit == 12_240);
+        },
+        _ => panic("SHA-384 over-length must be OutputTooLong"),
+    }
+}
+
+fn expand_sha512_limit_is_16320() {
+    let prk: List<Byte> = [0x55_u8; 64];
+    let info: List<Byte> = [];
+    let mut out: List<Byte> = [];
+    match hkdf_expand_sha512(prk.as_slice(), info.as_slice(), 16_321, &mut out) {
+        Err(HkdfError.OutputTooLong { requested, limit }) => {
+            assert(requested == 16_321);
+            assert(limit == 16_320);
+        },
+        _ => panic("SHA-512 over-length must be OutputTooLong"),
+    }
+}
+
+fn invalid_prk_shorter_than_hash_len_rejected() {
+    // SHA-256 requires PRK ≥ 32 bytes.
+    let short_prk: List<Byte> = [0x66_u8; 16];
+    let info: List<Byte> = [];
+    let mut out: List<Byte> = [];
+    match hkdf_expand_sha256(short_prk.as_slice(), info.as_slice(), 32, &mut out) {
+        Err(HkdfError.InvalidPrk { len }) => assert(len == 16),
+        _ => panic("16-byte PRK must be InvalidPrk under SHA-256"),
+    }
+}
+
+fn invalid_prk_sha384_boundary() {
+    // 47-byte PRK is below SHA-384's 48-byte minimum.
+    let short_prk: List<Byte> = [0x77_u8; 47];
+    let info: List<Byte> = [];
+    let mut out: List<Byte> = [];
+    match hkdf_expand_sha384(short_prk.as_slice(), info.as_slice(), 48, &mut out) {
+        Err(HkdfError.InvalidPrk { len }) => assert(len == 47),
+        _ => panic("47-byte PRK must be InvalidPrk under SHA-384"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    zero_length_expand_is_empty_output();
+    one_block_expand_produces_hashlen_bytes();
+    expand_beyond_limit_returns_output_too_long_sha256();
+    expand_sha384_has_larger_limit_than_sha256();
+    expand_sha512_limit_is_16320();
+    invalid_prk_shorter_than_hash_len_rejected();
+    invalid_prk_sha384_boundary();
+    print("RFC 5869 §2.3 HKDF expand error paths verified");
+    0
+}
