@@ -1,0 +1,157 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, der, integer, oid, rfc5280, rfc3280, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// ITU-T X.690 §8.3 INTEGER + §8.19 OBJECT IDENTIFIER wire encoding.
+//
+// INTEGER:
+//   Tag 0x02 | length | big-endian two's-complement bytes, minimal form
+//   (no redundant leading 0x00 in front of a byte whose high bit is 0;
+//   no redundant 0xFF in front of a negative value).
+//
+// OID (§8.19):
+//   Tag 0x06 | length | base-128 sub-identifier bytes with continuation
+//   high bit; the first sub-identifier packs arcs 0 and 1 as
+//   `arc0 * 40 + arc1`.
+//
+// This KAT pins the byte layout for well-known PKIX OIDs:
+//   1.2.840.113549.1.1.11  sha256WithRSAEncryption  (9 bytes)
+//   1.2.840.10045.4.3.2    ecdsa-with-SHA256        (8 bytes)
+//   1.3.101.112            id-Ed25519               (3 bytes)
+//   2.5.29.17              id-ce-subjectAltName     (3 bytes)
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader};
+
+fn integer_zero_is_single_byte() {
+    // INTEGER 0 → 0x02 0x01 0x00.
+    let der: List<Byte> = [0x02_u8, 0x01_u8, 0x00_u8];
+    let mut r = DerReader.new(der.as_slice());
+    let v = r.read_int64().unwrap();
+    assert(v == 0_i64);
+}
+
+fn integer_positive_requires_zero_padding_when_high_bit_set() {
+    // 128 = 0x80 — needs leading 0x00 because high bit is set (else
+    // it would be interpreted as -128). Wire: 0x02 0x02 0x00 0x80.
+    let der: List<Byte> = [0x02_u8, 0x02_u8, 0x00_u8, 0x80_u8];
+    let mut r = DerReader.new(der.as_slice());
+    let v = r.read_int64().unwrap();
+    assert(v == 128_i64);
+}
+
+fn integer_negative_two_byte_form() {
+    // -1 → 0x02 0x01 0xFF (single-byte sign-extended).
+    let der: List<Byte> = [0x02_u8, 0x01_u8, 0xFF_u8];
+    let mut r = DerReader.new(der.as_slice());
+    let v = r.read_int64().unwrap();
+    assert(v == -1_i64);
+}
+
+fn integer_non_minimal_leading_zero_rejected() {
+    // 0x02 0x02 0x00 0x01 — value 1 with redundant leading 0x00
+    // (high bit of next byte is 0, so padding is not needed).
+    let der: List<Byte> = [0x02_u8, 0x02_u8, 0x00_u8, 0x01_u8];
+    let mut r = DerReader.new(der.as_slice());
+    match r.read_int64() {
+        Err(_) => {},
+        Ok(_)  => panic("non-minimal leading 0x00 must reject"),
+    }
+}
+
+fn integer_raw_roundtrip_20_byte_serial() {
+    // 20-byte serial number — uses read_integer_raw (fits > Int64).
+    let mut body: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 20 { body.push((0x40_u8 | (i as Byte))); i = i + 1; }
+    let mut der: List<Byte> = [0x02_u8, 0x14_u8];       // tag + len 20
+    let mut j: Int = 0;
+    while j < 20 { der.push(body[j]); j = j + 1; }
+    let mut r = DerReader.new(der.as_slice());
+    let bytes = r.read_integer_raw().unwrap();
+    assert(bytes.len() == 20);
+    assert(bytes[0]  == 0x40_u8);
+    assert(bytes[19] == 0x53_u8);       // 0x40 | 19
+}
+
+fn oid_sha256_with_rsa_encryption_parse() {
+    // 1.2.840.113549.1.1.11 → base-128 bytes:
+    //   42 (first subid = 1*40+2) || 0x86 0x48 (840) || 0x86 0xF7 0x0D (113549)
+    //     || 1 || 1 || 11
+    // Full DER: 0x06 0x09 0x2A 0x86 0x48 0x86 0xF7 0x0D 0x01 0x01 0x0B.
+    let der: List<Byte> = [
+        0x06_u8, 0x09_u8,
+        0x2A_u8, 0x86_u8, 0x48_u8,
+        0x86_u8, 0xF7_u8, 0x0D_u8,
+        0x01_u8, 0x01_u8, 0x0B_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let arcs = r.read_oid().unwrap();
+    assert(arcs.len() == 7);
+    assert(arcs[0] == 1_u32);
+    assert(arcs[1] == 2_u32);
+    assert(arcs[2] == 840_u32);
+    assert(arcs[3] == 113549_u32);
+    assert(arcs[4] == 1_u32);
+    assert(arcs[5] == 1_u32);
+    assert(arcs[6] == 11_u32);
+}
+
+fn oid_ed25519_parse() {
+    // 1.3.101.112 → 0x06 0x03 0x2B 0x65 0x70
+    //   2B = 1 * 40 + 3 = 43
+    //   65 = 101
+    //   70 = 112
+    let der: List<Byte> = [0x06_u8, 0x03_u8, 0x2B_u8, 0x65_u8, 0x70_u8];
+    let mut r = DerReader.new(der.as_slice());
+    let arcs = r.read_oid().unwrap();
+    assert(arcs.len() == 4);
+    assert(arcs[0] == 1_u32);
+    assert(arcs[1] == 3_u32);
+    assert(arcs[2] == 101_u32);
+    assert(arcs[3] == 112_u32);
+}
+
+fn oid_subject_alt_name_parse() {
+    // 2.5.29.17 → 0x06 0x03 0x55 0x1D 0x11
+    //   55 = 2 * 40 + 5 = 85 (first subid packs arc0=2, arc1=5)
+    //   1D = 29
+    //   11 = 17
+    let der: List<Byte> = [0x06_u8, 0x03_u8, 0x55_u8, 0x1D_u8, 0x11_u8];
+    let mut r = DerReader.new(der.as_slice());
+    let arcs = r.read_oid().unwrap();
+    assert(arcs.len() == 4);
+    assert(arcs[0] == 2_u32);
+    assert(arcs[1] == 5_u32);
+    assert(arcs[2] == 29_u32);
+    assert(arcs[3] == 17_u32);
+}
+
+fn oid_empty_body_rejected() {
+    // OID with length 0 is malformed (X.690 §8.19 requires ≥1 byte).
+    let der: List<Byte> = [0x06_u8, 0x00_u8];
+    let mut r = DerReader.new(der.as_slice());
+    match r.read_oid() {
+        Err(_) => {},
+        Ok(_)  => panic("empty OID must reject"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    integer_zero_is_single_byte();
+    integer_positive_requires_zero_padding_when_high_bit_set();
+    integer_negative_two_byte_form();
+    integer_non_minimal_leading_zero_rejected();
+    integer_raw_roundtrip_20_byte_serial();
+    oid_sha256_with_rsa_encryption_parse();
+    oid_ed25519_parse();
+    oid_subject_alt_name_parse();
+    oid_empty_body_rejected();
+    print("X.690 §8.3 INTEGER + §8.19 OID byte-exact parse KAT verified");
+    0
+}
