@@ -621,7 +621,11 @@ fn run_test_property(
     let default_runs = prop.runs_override.unwrap_or(100);
     let pinned = prop.seed_override;
 
-    // Replay pass (one run each, pinned seed).
+    // Replay pass (one run each, pinned seed). If a stored seed now
+    // PASSES, the bug it originally captured has been fixed — drop
+    // it from the DB so the regression set always reflects current
+    // failures. Matches Hypothesis's "database pruning" behaviour.
+    let mut pruned_hex: Vec<String> = Vec::new();
     for s in &replay_seeds {
         let cfg = RunnerConfig {
             runs: 1,
@@ -643,7 +647,14 @@ fn run_test_property(
                     f.message
                 ),
             };
+        } else {
+            pruned_hex.push(s.to_hex());
         }
+    }
+    if !pruned_hex.is_empty() {
+        let name = test.name.as_str().to_string();
+        db.entries.retain(|e| !(e.test == name && pruned_hex.contains(&e.seed)));
+        let _ = save_regression_db(&db);
     }
 
     // Fresh-sample pass. Seed picked from wall time if not pinned by the
