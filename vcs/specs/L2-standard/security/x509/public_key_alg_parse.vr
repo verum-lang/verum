@@ -1,0 +1,192 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, algorithm, public_key, der, rfc5280_4_1_1_2, rfc5480, rfc8410
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.1.1.2 / RFC 5480 / RFC 8410 — parse_public_key_alg byte-
+// exact wire decode for the WebPKI-registered SubjectPublicKeyInfo
+// algorithm identifiers:
+//
+//   * rsaEncryption      1.2.840.113549.1.1.1 + NULL params
+//   * id-ecPublicKey     1.2.840.10045.2.1 + curve OID parameter
+//   * Ed25519            1.3.101.112 (absent params)
+//   * Ed448              1.3.101.113
+//   * X25519             1.3.101.110
+//   * X448               1.3.101.111
+//
+// Curve OIDs for id-ecPublicKey:
+//   P-256 = 1.2.840.10045.3.1.7
+//   P-384 = 1.3.132.0.34
+//   P-521 = 1.3.132.0.35
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader};
+mount core.security.x509.algorithm.{
+    PublicKeyAlg, EcNamedCurve, parse_public_key_alg,
+};
+
+fn rsa_encryption_parses() {
+    // 1.2.840.113549.1.1.1 → 2A 86 48 86 F7 0D 01 01 01 (9 bytes).
+    // With NULL params: 30 0D 06 09 <oid> 05 00
+    let der: List<Byte> = [
+        0x30_u8, 0x0D_u8,
+        0x06_u8, 0x09_u8,
+        0x2A_u8, 0x86_u8, 0x48_u8, 0x86_u8, 0xF7_u8, 0x0D_u8, 0x01_u8, 0x01_u8, 0x01_u8,
+        0x05_u8, 0x00_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.RsaEncryption => {},
+        _ => panic("expected RsaEncryption"),
+    }
+}
+
+fn ec_public_key_p256_parses() {
+    // id-ecPublicKey: 1.2.840.10045.2.1 → 2A 86 48 CE 3D 02 01 (7 bytes).
+    // curve P-256: 1.2.840.10045.3.1.7 → 2A 86 48 CE 3D 03 01 07 (8 bytes).
+    let der: List<Byte> = [
+        0x30_u8, 0x13_u8,
+        0x06_u8, 0x07_u8, 0x2A_u8, 0x86_u8, 0x48_u8, 0xCE_u8, 0x3D_u8, 0x02_u8, 0x01_u8,
+        0x06_u8, 0x08_u8, 0x2A_u8, 0x86_u8, 0x48_u8, 0xCE_u8, 0x3D_u8, 0x03_u8, 0x01_u8, 0x07_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.EcPublicKey(curve) => {
+            match curve {
+                EcNamedCurve.P256 => {},
+                _ => panic("expected P256 curve"),
+            }
+        },
+        _ => panic("expected EcPublicKey(P256)"),
+    }
+}
+
+fn ec_public_key_p384_parses() {
+    // curve P-384: 1.3.132.0.34 → 2B 81 04 00 22 (5 bytes).
+    let der: List<Byte> = [
+        0x30_u8, 0x10_u8,
+        0x06_u8, 0x07_u8, 0x2A_u8, 0x86_u8, 0x48_u8, 0xCE_u8, 0x3D_u8, 0x02_u8, 0x01_u8,
+        0x06_u8, 0x05_u8, 0x2B_u8, 0x81_u8, 0x04_u8, 0x00_u8, 0x22_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.EcPublicKey(curve) => {
+            match curve {
+                EcNamedCurve.P384 => {},
+                _ => panic("expected P384 curve"),
+            }
+        },
+        _ => panic("expected EcPublicKey(P384)"),
+    }
+}
+
+fn ec_public_key_p521_parses() {
+    // curve P-521: 1.3.132.0.35 → 2B 81 04 00 23.
+    let der: List<Byte> = [
+        0x30_u8, 0x10_u8,
+        0x06_u8, 0x07_u8, 0x2A_u8, 0x86_u8, 0x48_u8, 0xCE_u8, 0x3D_u8, 0x02_u8, 0x01_u8,
+        0x06_u8, 0x05_u8, 0x2B_u8, 0x81_u8, 0x04_u8, 0x00_u8, 0x23_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.EcPublicKey(curve) => {
+            match curve {
+                EcNamedCurve.P521 => {},
+                _ => panic("expected P521 curve"),
+            }
+        },
+        _ => panic("expected EcPublicKey(P521)"),
+    }
+}
+
+fn ed25519_key_parses() {
+    // RFC 8410 §3 — Ed25519 key OID = 1.3.101.112, params absent.
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2B_u8, 0x65_u8, 0x70_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.Ed25519Key => {},
+        _ => panic("expected Ed25519Key"),
+    }
+}
+
+fn ed448_key_parses() {
+    // Ed448 OID = 1.3.101.113.
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2B_u8, 0x65_u8, 0x71_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.Ed448Key => {},
+        _ => panic("expected Ed448Key"),
+    }
+}
+
+fn x25519_key_parses() {
+    // X25519 OID = 1.3.101.110.
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2B_u8, 0x65_u8, 0x6E_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.X25519Key => {},
+        _ => panic("expected X25519Key"),
+    }
+}
+
+fn x448_key_parses() {
+    // X448 OID = 1.3.101.111.
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2B_u8, 0x65_u8, 0x6F_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.X448Key => {},
+        _ => panic("expected X448Key"),
+    }
+}
+
+fn unknown_pubkey_oid_falls_through() {
+    // OID 1.2.3.4 as fictional pubkey algorithm.
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2A_u8, 0x03_u8, 0x04_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_public_key_alg(&mut r).unwrap();
+    match alg {
+        PublicKeyAlg.UnknownPubKey(_) => {},
+        _ => panic("unknown pubkey OID must fall through"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    rsa_encryption_parses();
+    ec_public_key_p256_parses();
+    ec_public_key_p384_parses();
+    ec_public_key_p521_parses();
+    ed25519_key_parses();
+    ed448_key_parses();
+    x25519_key_parses();
+    x448_key_parses();
+    unknown_pubkey_oid_falls_through();
+    print("RFC 5280 §4.1.1.2 + RFC 5480 + RFC 8410 parse_public_key_alg verified");
+    0
+}
