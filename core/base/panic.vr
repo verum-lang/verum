@@ -203,6 +203,62 @@ public fn assert_err<T: Debug, E>(result: Result<T, E>, msg: Text = "assertion f
     }
 }
 
+/// Assert that two floats are equal to within `tolerance`.
+/// Use this instead of `assert_eq` for any Float comparison — direct
+/// equality on IEEE 754 is almost never what you want when the values
+/// came from arithmetic.
+public fn assert_approx_eq(left: Float, right: Float, tolerance: Float = 1e-9, msg: Text = "assertion failed: floats not within tolerance") {
+    let diff = if left > right { left - right } else { right - left };
+    if diff > tolerance {
+        panic(msg);
+    }
+}
+
+/// Assert that `v` falls within the inclusive range `[lo, hi]`.
+public fn assert_between<T: Ord>(v: T, lo: T, hi: T, msg: Text = "assertion failed: value out of range") {
+    if v < lo {
+        panic(msg);
+    }
+    if v > hi {
+        panic(msg);
+    }
+}
+
+/// Assert that a list is sorted in ascending order.
+public fn assert_is_sorted<T: Ord>(list: &List<T>, msg: Text = "assertion failed: list is not sorted") {
+    let mut i: Int = 1;
+    while i < list.len() {
+        if list[i - 1] > list[i] {
+            panic(msg);
+        }
+        i = i + 1;
+    }
+}
+
+/// Assert that `list` contains `needle`.
+public fn assert_contains<T: Eq>(list: &List<T>, needle: &T, msg: Text = "assertion failed: list does not contain value") {
+    let mut i: Int = 0;
+    while i < list.len() {
+        if list[i] == *needle {
+            return;
+        }
+        i = i + 1;
+    }
+    panic(msg);
+}
+
+/// Assert that invoking `f` panics. If `f` returns normally, this
+/// itself panics with `msg`. Useful for testing error-handling code.
+///
+/// Implemented via the `catch_unwind` intrinsic — panics that escape
+/// `f` are captured; normal returns fail the assertion.
+public fn assert_panics<T>(f: fn() -> T, msg: Text = "assertion failed: expected panic, function returned normally") {
+    match catch_unwind(f) {
+        Ok(_) => panic(msg),
+        Err(_) => {},
+    }
+}
+
 /// Assert that a condition is true (only in debug builds).
 @cfg(debug)
 public fn debug_assert(condition: Bool, msg: Text = "debug assertion failed") {

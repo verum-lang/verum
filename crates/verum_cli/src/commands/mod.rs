@@ -25,6 +25,7 @@ pub mod run;
 #[cfg(feature = "verification")]
 pub mod smt_info;
 pub mod smt_stats;
+pub mod property;
 pub mod test;
 pub mod verify;
 pub mod version;

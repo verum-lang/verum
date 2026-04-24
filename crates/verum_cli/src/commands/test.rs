@@ -531,9 +531,154 @@ struct TestFailure {
 }
 
 fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
+    if let Some(prop) = &test.property {
+        return run_test_property(test, prop, cfg);
+    }
     match cfg.tier {
         Tier::Aot => run_test_aot(test, target_dir, cfg),
         Tier::Interpret => run_test_interpret(test, cfg),
+    }
+}
+
+/// Property-test path: compile once via VBC, loop the PBT runner.
+/// Routes through the interpreter irrespective of --tier because the
+/// property runner needs per-iteration Value construction that the
+/// native-binary path can't do (each sample would require respawning).
+fn run_test_property(
+    test: &Test,
+    prop: &crate::commands::property::PropertyFunc,
+    _cfg: &TestRunCfg,
+) -> TestResult {
+    use crate::commands::property::{
+        load_regression_db, record_regression, run_property, save_regression_db,
+        seeds_for, RunnerConfig, Seed,
+    };
+    use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+
+    let start = Instant::now();
+
+    // Compile file → VBC (same shape as run_test_interpret).
+    let source = match std::fs::read_to_string(&test.file) {
+        Ok(s) => s,
+        Err(e) => {
+            return TestResult::CompileError {
+                duration: start.elapsed(),
+                error: format!("read: {}", e),
+            };
+        }
+    };
+    let file_id = FileId::new(0);
+    let parser = VerumParser::new();
+    let lexer = Lexer::new(&source, file_id);
+    let ast = match parser.parse_module(lexer, file_id) {
+        Ok(m) => m,
+        Err(errs) => {
+            let joined = errs
+                .iter()
+                .map(|e| format!("{}", e))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return TestResult::CompileError {
+                duration: start.elapsed(),
+                error: format!("parse: {}", joined),
+            };
+        }
+    };
+    let config = CodegenConfig::new("test");
+    let mut codegen = VbcCodegen::with_config(config);
+    let module = match codegen.compile_module(&ast) {
+        Ok(m) => m,
+        Err(e) => {
+            return TestResult::CompileError {
+                duration: start.elapsed(),
+                error: format!("codegen: {:?}", e),
+            };
+        }
+    };
+    let module = std::sync::Arc::new(module);
+
+    // Replay regression DB seeds first, then draw fresh ones.
+    let mut db = load_regression_db();
+    let replay_seeds = seeds_for(&db, test.name.as_str());
+
+    let default_runs = prop.runs_override.unwrap_or(100);
+    let pinned = prop.seed_override;
+
+    // Replay pass (one run each, pinned seed).
+    for s in &replay_seeds {
+        let cfg = RunnerConfig {
+            runs: 1,
+            max_shrinks: 500,
+            seed: *s,
+            pinned_seed: true,
+        };
+        let outcome = run_property(&module, prop, &cfg);
+        if let Some(f) = outcome.failure {
+            return TestResult::Fail {
+                duration: start.elapsed(),
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: None,
+                error: format!(
+                    "regression replay seed {} still fails: shrunk=({}) :: {}",
+                    f.seed.to_hex(),
+                    f.shrunk_inputs.join(", "),
+                    f.message
+                ),
+            };
+        }
+    }
+
+    // Fresh-sample pass. Seed picked from wall time if not pinned by the
+    // @property(seed = 0x...) override.
+    let seed = pinned.unwrap_or_else(|| {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1);
+        Seed(nanos ^ 0x9E37_79B9_7F4A_7C15)
+    });
+    let cfg = RunnerConfig {
+        runs: default_runs,
+        max_shrinks: 500,
+        seed,
+        pinned_seed: pinned.is_some(),
+    };
+    let outcome = run_property(&module, prop, &cfg);
+    if let Some(f) = outcome.failure {
+        let msg = format!(
+            "property failed after {} iterations\n  seed: {}\n  original: ({})\n  shrunk: ({}) [{} shrink steps]\n  error: {}\n  replay: verum test --filter '{}' -Z test.property_seed={}",
+            outcome.iterations,
+            f.seed.to_hex(),
+            f.original_inputs.join(", "),
+            f.shrunk_inputs.join(", "),
+            f.shrink_steps,
+            f.message,
+            test.name,
+            f.seed.to_hex(),
+        );
+        // Persist failing seed so future runs replay it first.
+        record_regression(
+            &mut db,
+            test.name.as_str(),
+            f.seed,
+            &format!("({})", f.shrunk_inputs.join(", ")),
+        );
+        let _ = save_regression_db(&db);
+        return TestResult::Fail {
+            duration: start.elapsed(),
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            error: msg,
+        };
+    }
+
+    TestResult::Pass {
+        duration: start.elapsed(),
+        stdout: format!("{} iterations ok", outcome.iterations),
+        stderr: String::new(),
     }
 }
 
@@ -756,6 +901,9 @@ struct Test {
     name: Text,
     file: PathBuf,
     ignored: bool,
+    /// When Some, this is a property-based test — the runner generates
+    /// random inputs for each parameter and calls the function N times.
+    property: Option<crate::commands::property::PropertyFunc>,
 }
 
 fn discover_tests(file: &Path) -> Result<List<Test>> {
@@ -772,20 +920,36 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
         let has_test_attrs = module.items.iter().any(|item| {
             matches!(&item.kind, ItemKind::Function(f) if f.attributes.iter().any(|a| a.name.as_str() == "test"))
         });
-        if has_test_attrs {
+        // Pass 1: property-based tests (@property).
+        let property_funcs = crate::commands::property::discover_properties_in_module(
+            &module, module_name, file,
+        );
+        let has_property_attrs = !property_funcs.is_empty();
+
+        if has_test_attrs || has_property_attrs {
             for item in &module.items {
                 if let ItemKind::Function(func) = &item.kind {
                     let is_test = func.attributes.iter().any(|a| a.name.as_str() == "test");
-                    if !is_test {
+                    let is_property = func.attributes.iter().any(|a| a.name.as_str() == "property");
+                    if !is_test && !is_property {
                         continue;
                     }
                     let is_ignored = func.attributes.iter().any(|a| {
                         a.name.as_str() == "ignore" || a.name.as_str() == "ignored"
                     });
+                    let property = if is_property {
+                        property_funcs
+                            .iter()
+                            .find(|p| p.name == func.name.as_str())
+                            .cloned()
+                    } else {
+                        None
+                    };
                     tests.push(Test {
                         name: format!("{}::{}", module_name, func.name).into(),
                         file: file.to_path_buf(),
                         ignored: is_ignored,
+                        property,
                     });
                 }
             }
@@ -803,6 +967,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                     name: module_name.into(),
                     file: file.to_path_buf(),
                     ignored: is_ignored,
+                    property: None,
                 });
             }
         }
@@ -827,6 +992,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                         .into(),
                         file: file.to_path_buf(),
                         ignored,
+                        property: None,
                     });
                 }
             }
@@ -843,6 +1009,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                 name: module_name.into(),
                 file: file.to_path_buf(),
                 ignored: false,
+                property: None,
             });
         }
     }
