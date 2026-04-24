@@ -570,33 +570,42 @@ fn test_refined_type_with_lambda() {
 #[test]
 fn test_sigma_type() {
     // Rule 3 (Sigma): x: Int where x > 0
+    //
+    // Per VUVA §5 the sigma surface form collapses onto
+    // `TypeKind::Refined { predicate.binding = Some(name) }`.
     let span = test_span();
     let name = test_ident("x");
     let base = Heap::new(Type::int(span));
 
-    let predicate = Heap::new(Expr::new(
+    let pred_expr = Expr::new(
         ExprKind::Binary {
             op: BinOp::Gt,
             left: Heap::new(Expr::ident(test_ident("x"))),
             right: Heap::new(Expr::literal(Literal::int(0, span))),
         },
         span,
-    ));
+    );
 
     let ty = Type::new(
-        TypeKind::Sigma {
-            name: name.clone(),
+        TypeKind::Refined {
             base,
-            predicate,
+            predicate: Heap::new(RefinementPredicate::with_binding(
+                pred_expr,
+                Maybe::Some(name.clone()),
+                span,
+            )),
         },
         span,
     );
 
     match ty.kind {
-        TypeKind::Sigma { ref name, .. } => {
-            assert_eq!(name.name.as_str(), "x");
+        TypeKind::Refined { ref predicate, .. } => {
+            match &predicate.binding {
+                Maybe::Some(bound) => assert_eq!(bound.name.as_str(), "x"),
+                Maybe::None => panic!("Expected explicit binder on sigma refinement"),
+            }
         }
-        _ => panic!("Expected Sigma type"),
+        _ => panic!("Expected Refined (sigma form)"),
     }
 }
 

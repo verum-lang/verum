@@ -1459,18 +1459,21 @@ fn type_kind_to_string(kind: &verum_ast::TypeKind) -> Text {
             assoc_name.name
         )),
 
-        TypeKind::Refined { base, predicate: _ } => {
-            // Refinement types: T{predicate}
-            Text::from(format!("{{{}: _ | ... }}", type_to_string(base)))
-        }
-
-        TypeKind::Sigma {
-            name,
-            base,
-            predicate: _,
-        } => {
-            // Sigma types: x: T where predicate
-            Text::from(format!("{}: {} where ...", name.name, type_to_string(base)))
+        TypeKind::Refined { base, predicate } => {
+            // Refinement types carry all three surface forms (VUVA §5):
+            // inline `T{pred}`, declarative `T where p`, and sigma
+            // `x: T where p(x)`. Render the sigma form when the
+            // predicate carries an explicit binder.
+            match &predicate.binding {
+                verum_common::Maybe::Some(binder) => Text::from(format!(
+                    "{}: {} where ...",
+                    binder.name,
+                    type_to_string(base)
+                )),
+                verum_common::Maybe::None => {
+                    Text::from(format!("{{{}: _ | ... }}", type_to_string(base)))
+                }
+            }
         }
 
         TypeKind::Inferred => Text::from("_"),

@@ -110,7 +110,6 @@ pub fn type_to_sort(ty: &Type) -> Sort {
             }
         }
         TypeKind::Refined { base, .. } => type_to_sort(base),
-        TypeKind::Sigma { base, .. } => type_to_sort(base),
         TypeKind::Bounded { base, .. } => type_to_sort(base),
         TypeKind::DynProtocol { .. } => {
             Sort::uninterpreted(Symbol::String("DynProtocol".to_string()))

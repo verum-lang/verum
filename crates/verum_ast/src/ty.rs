@@ -375,27 +375,21 @@ pub enum TypeKind {
         assoc_name: Ident,
     },
 
-    /// Refinement type: T{predicate}
-    /// Rule 1 (Inline): Int{> 0}
-    /// This is the core innovation of Verum!
+    /// Refinement type — canonical node for all three surface forms
+    /// (VUVA spec §5 collapses the three forms into a single AST shape):
+    ///
+    /// - Rule 1 (Inline): `T{pred}` with implicit `it` — `predicate.binding = None`.
+    /// - Rule 2 (Lambda where): `T where |x| pred(x)` — `predicate.binding = Some(x)`.
+    /// - Rule 3 (Sigma): `x: T where pred(x)` — `predicate.binding = Some(x)`.
+    /// - Rule 4 (Named predicate): `T where predicate_name` — `predicate.binding = None`,
+    ///   `predicate.expr = Path("predicate_name")`.
+    /// - Rule 5 (Bare where): `T where pred` — `predicate.binding = None`.
+    ///
+    /// The pretty-printer distinguishes the Sigma surface syntax from the inline
+    /// form by inspecting `predicate.binding`.
     Refined {
         base: Heap<Type>,
         predicate: Heap<RefinementPredicate>,
-    },
-
-    /// Sigma-type refinement: x: T where predicate
-    /// Rule 3 (Sigma-type): x: Int where x > 0
-    /// Explicit name binding for dependent refinements
-    /// The Sigma-type form is Rule 3 of Verum's five refinement binding rules:
-    /// Rule 1 (Inline): `T{pred}` with implicit `it`
-    /// Rule 2 (Lambda where): `T where |x| pred(x)`
-    /// Rule 3 (Sigma): `x: T where pred(x)` -- canonical for dependent types
-    /// Rule 4 (Named predicate): `T where predicate_name`
-    /// Rule 5 (Bare where): `T where pred` (deprecated, use Rule 1)
-    Sigma {
-        name: Ident,
-        base: Heap<Type>,
-        predicate: Heap<Expr>,
     },
 
     /// Type variable for inference: _

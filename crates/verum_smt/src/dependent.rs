@@ -142,14 +142,6 @@ impl PiType {
                 false
             }
             TypeKind::Tuple(types) => types.iter().any(|t| self.type_references_name(t, name)),
-            TypeKind::Sigma {
-                base, predicate, ..
-            } => {
-                if self.type_references_name(base, name) {
-                    return true;
-                }
-                self.expr_references_name(predicate, name)
-            }
             TypeKind::Qualified { self_ty, .. } => self.type_references_name(self_ty, name),
             TypeKind::Tensor { element, shape, .. } => {
                 if self.type_references_name(element, name) {
@@ -961,7 +953,6 @@ impl DependentTypeBackend {
                 self.create_fresh_var(name, inner)
             }
             TypeKind::Qualified { .. }
-            | TypeKind::Sigma { .. }
             | TypeKind::DynProtocol { .. }
             | TypeKind::Tensor { .. }
             | TypeKind::Existential { .. }
@@ -1054,7 +1045,6 @@ impl DependentTypeBackend {
             | TypeKind::TypeConstructor { .. }
             | TypeKind::Bounded { .. }
             | TypeKind::DynProtocol { .. }
-            | TypeKind::Sigma { .. }
             | TypeKind::Qualified { .. }
             | TypeKind::Tensor { .. }
             | TypeKind::Existential { .. }
@@ -1129,7 +1119,7 @@ impl DependentTypeBackend {
                     .unwrap_or(0);
                 base_depth.max(args_depth)
             }
-            TypeKind::Sigma { base, .. } | TypeKind::Qualified { self_ty: base, .. } => {
+            TypeKind::Qualified { self_ty: base, .. } => {
                 self.compute_quantifier_depth(base)
             }
             TypeKind::Tensor { element, .. } => self.compute_quantifier_depth(element),
@@ -1407,9 +1397,6 @@ impl DependentTypeBackend {
                     Self::extract_type_names_recursive(t, names);
                 }
             }
-            TypeKind::Sigma { base, .. } => {
-                Self::extract_type_names_recursive(base, names);
-            }
             TypeKind::Qualified { self_ty, .. } => {
                 Self::extract_type_names_recursive(self_ty, names);
             }
@@ -1670,9 +1657,6 @@ impl TypeDependencyGraph {
                 for t in types {
                     self.collect_dependencies_recursive(t, parent);
                 }
-            }
-            TypeKind::Sigma { base, .. } => {
-                self.collect_dependencies_recursive(base, parent);
             }
             TypeKind::Qualified { self_ty, .. } => {
                 self.collect_dependencies_recursive(self_ty, parent);
@@ -3347,7 +3331,7 @@ impl InductiveType {
                 // Transparent wrappers preserve position
                 self.check_positivity_in_type(element, positive)
             }
-            TypeKind::Sigma { base, .. } | TypeKind::Qualified { self_ty: base, .. } => {
+            TypeKind::Qualified { self_ty: base, .. } => {
                 self.check_positivity_in_type(base, positive)
             }
             TypeKind::Tensor { element, .. } => self.check_positivity_in_type(element, positive),

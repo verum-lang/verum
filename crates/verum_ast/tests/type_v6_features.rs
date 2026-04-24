@@ -15,7 +15,9 @@
 //! Tests for v6.0-BALANCED type system features.
 //!
 //! This module tests the advanced type system features introduced in v6.0:
-//! - TypeKind::Sigma with predicates
+//! - TypeKind::Refined with an explicit binder (the canonical sigma form per
+//!   VUVA §5 — `x: T where P(x)` parses to `Refined` with
+//!   `predicate.binding = Some(x)`)
 //! - TypeKind::Ownership (mutable/immutable)
 //! - WherePredicateKind::Meta
 //! - WherePredicateKind::Value
@@ -29,7 +31,7 @@ use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::Literal;
 use verum_ast::ty::*;
 use verum_ast::*;
-use verum_common::{Heap, List};
+use verum_common::{Heap, List, Maybe};
 
 /// Helper function to create a test span
 fn test_span() -> Span {
@@ -42,7 +44,10 @@ fn test_ident(name: &str) -> Ident {
 }
 
 // ============================================================================
-// TypeKind::Sigma Tests
+// Refinement (sigma surface form) Tests — Rule 3: x: T where P(x)
+//
+// Per VUVA §5 the sigma surface form collapses onto `TypeKind::Refined` with
+// `predicate.binding = Some(name)`.
 // ============================================================================
 
 #[test]
@@ -64,25 +69,28 @@ fn test_sigma_type_basic() {
     );
 
     let sigma_type = Type::new(
-        TypeKind::Sigma {
-            name: test_ident("x"),
+        TypeKind::Refined {
             base: Heap::new(Type::int(span)),
-            predicate: Heap::new(predicate),
+            predicate: Heap::new(RefinementPredicate::with_binding(
+                predicate,
+                Maybe::Some(test_ident("x")),
+                span,
+            )),
         },
         span,
     );
 
     match &sigma_type.kind {
-        TypeKind::Sigma {
-            name,
-            base,
-            predicate,
-        } => {
-            assert_eq!(name.name.as_str(), "x");
+        TypeKind::Refined { base, predicate } => {
+            let binder = match &predicate.binding {
+                Maybe::Some(ident) => ident,
+                Maybe::None => panic!("Expected explicit binder on sigma refinement"),
+            };
+            assert_eq!(binder.name.as_str(), "x");
             assert_eq!(base.kind, TypeKind::Int);
-            assert!(matches!(predicate.kind, ExprKind::Binary { .. }));
+            assert!(matches!(predicate.expr.kind, ExprKind::Binary { .. }));
         }
-        _ => panic!("Expected Sigma type"),
+        _ => panic!("Expected Refined (sigma form)"),
     }
 }
 
@@ -125,30 +133,33 @@ fn test_sigma_type_complex_predicate() {
     );
 
     let sigma_type = Type::new(
-        TypeKind::Sigma {
-            name: test_ident("x"),
+        TypeKind::Refined {
             base: Heap::new(Type::float(span)),
-            predicate: Heap::new(predicate),
+            predicate: Heap::new(RefinementPredicate::with_binding(
+                predicate,
+                Maybe::Some(test_ident("x")),
+                span,
+            )),
         },
         span,
     );
 
     match &sigma_type.kind {
-        TypeKind::Sigma {
-            name,
-            base,
-            predicate,
-        } => {
-            assert_eq!(name.name.as_str(), "x");
+        TypeKind::Refined { base, predicate } => {
+            let binder = match &predicate.binding {
+                Maybe::Some(ident) => ident,
+                Maybe::None => panic!("Expected explicit binder on sigma refinement"),
+            };
+            assert_eq!(binder.name.as_str(), "x");
             assert_eq!(base.kind, TypeKind::Float);
-            match &predicate.kind {
+            match &predicate.expr.kind {
                 ExprKind::Binary { op, .. } => {
                     assert_eq!(*op, BinOp::And);
                 }
                 _ => panic!("Expected binary expression"),
             }
         }
-        _ => panic!("Expected Sigma type"),
+        _ => panic!("Expected Refined (sigma form)"),
     }
 }
 
@@ -173,25 +184,28 @@ fn test_sigma_type_with_text_predicate() {
     );
 
     let sigma_type = Type::new(
-        TypeKind::Sigma {
-            name: test_ident("email"),
+        TypeKind::Refined {
             base: Heap::new(Type::text(span)),
-            predicate: Heap::new(predicate),
+            predicate: Heap::new(RefinementPredicate::with_binding(
+                predicate,
+                Maybe::Some(test_ident("email")),
+                span,
+            )),
         },
         span,
     );
 
     match &sigma_type.kind {
-        TypeKind::Sigma {
-            name,
-            base,
-            predicate,
-        } => {
-            assert_eq!(name.name.as_str(), "email");
+        TypeKind::Refined { base, predicate } => {
+            let binder = match &predicate.binding {
+                Maybe::Some(ident) => ident,
+                Maybe::None => panic!("Expected explicit binder on sigma refinement"),
+            };
+            assert_eq!(binder.name.as_str(), "email");
             assert_eq!(base.kind, TypeKind::Text);
-            assert!(matches!(predicate.kind, ExprKind::Call { .. }));
+            assert!(matches!(predicate.expr.kind, ExprKind::Call { .. }));
         }
-        _ => panic!("Expected Sigma type"),
+        _ => panic!("Expected Refined (sigma form)"),
     }
 }
 
@@ -213,10 +227,13 @@ fn test_sigma_type_nested_in_function() {
     );
 
     let param_type = Type::new(
-        TypeKind::Sigma {
-            name: test_ident("x"),
+        TypeKind::Refined {
             base: Heap::new(Type::float(span)),
-            predicate: Heap::new(predicate),
+            predicate: Heap::new(RefinementPredicate::with_binding(
+                predicate,
+                Maybe::Some(test_ident("x")),
+                span,
+            )),
         },
         span,
     );
@@ -224,10 +241,14 @@ fn test_sigma_type_nested_in_function() {
     // Verify the type can be used as a function parameter type
     assert_eq!(param_type.span, span);
     match &param_type.kind {
-        TypeKind::Sigma { name, .. } => {
-            assert_eq!(name.name.as_str(), "x");
+        TypeKind::Refined { predicate, .. } => {
+            let binder = match &predicate.binding {
+                Maybe::Some(ident) => ident,
+                Maybe::None => panic!("Expected explicit binder on sigma refinement"),
+            };
+            assert_eq!(binder.name.as_str(), "x");
         }
-        _ => panic!("Expected Sigma type"),
+        _ => panic!("Expected Refined (sigma form)"),
     }
 }
 

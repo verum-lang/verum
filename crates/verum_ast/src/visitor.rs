@@ -1935,12 +1935,6 @@ pub fn walk_type<V: Visitor>(visitor: &mut V, ty: &Type) {
             visit_child!(visitor, base.as_ref(), Type);
             visit_child!(visitor, &predicate.expr, Expr);
         }
-        TypeKind::Sigma {
-            base, predicate, ..
-        } => {
-            visit_child!(visitor, base.as_ref(), Type);
-            visit_child!(visitor, predicate.as_ref(), Expr);
-        }
         TypeKind::Bounded { base, .. } => visit_child!(visitor, base.as_ref(), Type),
         TypeKind::DynProtocol { bindings, .. } => {
             if let Maybe::Some(bindings) = bindings {

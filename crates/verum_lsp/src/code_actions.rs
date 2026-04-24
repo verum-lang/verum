@@ -858,7 +858,16 @@ fn format_type_simple(ty: &verum_ast::Type) -> String {
         verum_ast::TypeKind::Refined { base, predicate } => {
             let base_str = format_type_simple(base);
             let pred_str = format_refinement_predicate(&predicate.expr);
-            format!("{}{{i | {}}}", base_str, pred_str)
+            // Post VUVA §5, the sigma surface form (`x: T where P(x)`) lives
+            // here too — distinguished by an explicit binder on the predicate.
+            match &predicate.binding {
+                verum_common::Maybe::Some(binder) => {
+                    format!("{}: {} where {}", binder.as_str(), base_str, pred_str)
+                }
+                verum_common::Maybe::None => {
+                    format!("{}{{i | {}}}", base_str, pred_str)
+                }
+            }
         }
         verum_ast::TypeKind::Tuple(types) => {
             let inner: Vec<String> = types.iter().map(format_type_simple).collect();
@@ -916,9 +925,6 @@ fn format_type_simple(ty: &verum_ast::Type) -> String {
                 base_str,
                 bounds_str.join(" + ")
             )
-        }
-        verum_ast::TypeKind::Sigma { name, base, .. } => {
-            format!("{}: {}", name.as_str(), format_type_simple(base))
         }
         verum_ast::TypeKind::Qualified {
             self_ty,

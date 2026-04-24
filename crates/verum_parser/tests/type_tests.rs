@@ -943,12 +943,17 @@ fn test_parse_type_generic_with_refinement() {
 
 #[test]
 fn test_parse_type_sigma() {
+    // Per VUVA §5 the sigma surface form parses to `TypeKind::Refined`
+    // with `predicate.binding = Some(name)`.
     let ty = parse_type("x: Int where x > 0");
     match ty.kind {
-        TypeKind::Sigma { .. } => {
-            // Correct
+        TypeKind::Refined { ref predicate, .. } => {
+            assert!(
+                matches!(predicate.binding, verum_common::Maybe::Some(_)),
+                "Expected sigma refinement with explicit binder"
+            );
         }
-        _ => panic!("Expected sigma type"),
+        _ => panic!("Expected refined type (sigma surface form)"),
     }
 }
 
@@ -956,10 +961,13 @@ fn test_parse_type_sigma() {
 fn test_parse_type_sigma_with_complex_predicate() {
     let ty = parse_type("x: List<Int> where is_sorted(x)");
     match ty.kind {
-        TypeKind::Sigma { .. } => {
-            // Correct
+        TypeKind::Refined { ref predicate, .. } => {
+            assert!(
+                matches!(predicate.binding, verum_common::Maybe::Some(_)),
+                "Expected sigma refinement with explicit binder"
+            );
         }
-        _ => panic!("Expected sigma type"),
+        _ => panic!("Expected refined type (sigma surface form)"),
     }
 }
 

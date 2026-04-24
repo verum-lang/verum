@@ -2085,25 +2085,27 @@ impl ToTokens for Type {
             }
 
             TypeKind::Refined { base, predicate } => {
-                base.to_tokens(stream);
-                stream.push(Token::new(TokenKind::LBrace, self.span));
-                predicate.expr.to_tokens(stream);
-                stream.push(Token::new(TokenKind::RBrace, self.span));
-            }
-
-            TypeKind::Sigma {
-                name,
-                base,
-                predicate,
-            } => {
-                stream.push(Token::new(
-                    TokenKind::Ident(name.as_str().to_string().into()),
-                    self.span,
-                ));
-                stream.push(Token::new(TokenKind::Colon, self.span));
-                base.to_tokens(stream);
-                stream.push(Token::new(TokenKind::Ident("where".into()), self.span));
-                predicate.to_tokens(stream);
+                // Post VUVA §5 the sigma surface form lives on Refined with
+                // `predicate.binding = Some(name)` — emit the sigma form when
+                // the binder is present, the inline `T{pred}` form otherwise.
+                match &predicate.binding {
+                    verum_common::Maybe::Some(binder) => {
+                        stream.push(Token::new(
+                            TokenKind::Ident(binder.as_str().to_string().into()),
+                            self.span,
+                        ));
+                        stream.push(Token::new(TokenKind::Colon, self.span));
+                        base.to_tokens(stream);
+                        stream.push(Token::new(TokenKind::Ident("where".into()), self.span));
+                        predicate.expr.to_tokens(stream);
+                    }
+                    verum_common::Maybe::None => {
+                        base.to_tokens(stream);
+                        stream.push(Token::new(TokenKind::LBrace, self.span));
+                        predicate.expr.to_tokens(stream);
+                        stream.push(Token::new(TokenKind::RBrace, self.span));
+                    }
+                }
             }
 
             TypeKind::Bounded { base, bounds } => {

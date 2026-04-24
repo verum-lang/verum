@@ -522,6 +522,9 @@ impl<'a> RecursiveParser<'a> {
     /// Rule 3 of the Five Binding Rules: sigma-type form is canonical for dependent types.
     /// Three equivalent refinement forms: inline `T{pred}`, declarative `T where pred`,
     /// and sigma `n: T where f(n)`. The sigma form binds a name visible in the predicate.
+    ///
+    /// Per VUVA §5 the three forms share a single AST node: this emits
+    /// `TypeKind::Refined` with the binder carried as `predicate.binding`.
     pub fn parse_sigma_type(&mut self) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
@@ -543,8 +546,15 @@ impl<'a> RecursiveParser<'a> {
         // This happens when the base type is itself a sigma type without wrapping parens.
         // Valid: `inner: (n: Int, data: [Int])` - nested sigma wrapped in parens
         // Invalid: `Item: Display: Clone` - chained colons without parens
-        if matches!(base.kind, TypeKind::Sigma { .. }) {
-            return Err(ParseError::unclosed_constraint_generic(base.span));
+        //
+        // Post-canonicalisation (VUVA §5): the sigma surface form lowers to
+        // `TypeKind::Refined` with `predicate.binding = Some(name)`, so the
+        // chain-of-colons detector looks for a refined node whose binding is
+        // a `Some` — that means the inner was itself a sigma binding.
+        if let TypeKind::Refined { predicate, .. } = &base.kind {
+            if matches!(predicate.binding, Maybe::Some(_)) {
+                return Err(ParseError::unclosed_constraint_generic(base.span));
+            }
         }
 
         // Optional where clause per grammar: sigma_binding = identifier , ':' , type_expr , [ 'where' , expression ] ;
@@ -561,11 +571,15 @@ impl<'a> RecursiveParser<'a> {
         };
 
         let span = self.stream.make_span(start_pos);
+        let pred_span = predicate.span;
         Ok(Type::new(
-            TypeKind::Sigma {
-                name: Ident::new(name, name_span),
+            TypeKind::Refined {
                 base: Box::new(base),
-                predicate: Box::new(predicate),
+                predicate: Box::new(RefinementPredicate::with_binding(
+                    predicate,
+                    Maybe::Some(Ident::new(name, name_span)),
+                    pred_span,
+                )),
             },
             span,
         ))

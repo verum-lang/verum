@@ -73,17 +73,21 @@ fn assert_parses_decl(source: &str) {
 
 #[test]
 fn test_sigma_type_simple_positive_int() {
+    // Per VUVA §5 the sigma surface form parses to `TypeKind::Refined`
+    // with `predicate.binding = Some(name)`.
     let ty = parse_type("x: Int where x > 0").unwrap();
     match ty.kind {
-        TypeKind::Sigma {
-            ref name,
-            ref base,
-            ref predicate,
-        } => {
-            assert_eq!(name.name.as_str(), "x");
+        TypeKind::Refined { ref base, ref predicate } => {
+            let binder = match &predicate.binding {
+                verum_common::Maybe::Some(id) => id,
+                verum_common::Maybe::None => {
+                    panic!("Expected sigma refinement with explicit binder")
+                }
+            };
+            assert_eq!(binder.name.as_str(), "x");
             assert!(matches!(base.kind, TypeKind::Int));
         }
-        _ => panic!("Expected Sigma type, got {:?}", ty.kind),
+        _ => panic!("Expected Refined (sigma form), got {:?}", ty.kind),
     }
 }
 
@@ -91,10 +95,16 @@ fn test_sigma_type_simple_positive_int() {
 fn test_sigma_type_with_named_predicate() {
     let ty = parse_type("value: Int where value >= 0").unwrap();
     match ty.kind {
-        TypeKind::Sigma { ref name, .. } => {
-            assert_eq!(name.name.as_str(), "value");
+        TypeKind::Refined { ref predicate, .. } => {
+            let binder = match &predicate.binding {
+                verum_common::Maybe::Some(id) => id,
+                verum_common::Maybe::None => {
+                    panic!("Expected sigma refinement with explicit binder")
+                }
+            };
+            assert_eq!(binder.name.as_str(), "value");
         }
-        _ => panic!("Expected Sigma type, got {:?}", ty.kind),
+        _ => panic!("Expected Refined (sigma form), got {:?}", ty.kind),
     }
 }
 
@@ -315,21 +325,30 @@ fn test_lambda_refinement_for_reusable_logic() {
 
 #[test]
 fn test_sigma_type_shows_explicit_binding() {
-    // Sigma-type makes the binding explicit
+    // Sigma-type makes the binding explicit — `predicate.binding = Some(x)`.
     let ty = parse_type("x: Int where x > 0").unwrap();
-    assert!(matches!(ty.kind, TypeKind::Sigma { .. }));
+    match ty.kind {
+        TypeKind::Refined { ref predicate, .. } => {
+            assert!(matches!(predicate.binding, verum_common::Maybe::Some(_)));
+        }
+        _ => panic!("Expected Refined (sigma form)"),
+    }
 }
 
 #[test]
-fn test_all_three_styles_parse_differently() {
-    // Verify they produce different AST nodes
+fn test_all_three_styles_parse_to_refined() {
+    // Per VUVA §5 the three refinement forms collapse onto `TypeKind::Refined`.
     let inline = parse_type("Int{> 0}").unwrap();
     let lambda = parse_type("Int where |x| x > 0").unwrap();
     let sigma = parse_type("x: Int where x > 0").unwrap();
 
     assert!(matches!(inline.kind, TypeKind::Refined { .. }));
     assert!(matches!(lambda.kind, TypeKind::Refined { .. }));
-    assert!(matches!(sigma.kind, TypeKind::Sigma { .. }));
+    assert!(matches!(sigma.kind, TypeKind::Refined { .. }));
+
+    if let TypeKind::Refined { ref predicate, .. } = sigma.kind {
+        assert!(matches!(predicate.binding, verum_common::Maybe::Some(_)));
+    }
 }
 
 // ============================================================================

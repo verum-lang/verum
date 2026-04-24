@@ -334,10 +334,6 @@ impl VarianceTracker {
                 // Refined types preserve base type variance
                 self.analyze_type(base, position);
             }
-            TypeKind::Sigma { base, .. } => {
-                // Sigma types preserve base type variance
-                self.analyze_type(base, position);
-            }
             _ => {
                 // Other types: skip or handle conservatively
                 // (Unit, Bool, Int, Float, Char, Text, Bounded, Qualified, etc.)
@@ -487,8 +483,7 @@ impl VarianceTracker {
             | TypeKind::GenRef { inner }
             | TypeKind::Pointer { inner, .. }
             | TypeKind::Ownership { inner, .. }
-            | TypeKind::Refined { base: inner, .. }
-            | TypeKind::Sigma { base: inner, .. } => self.contains_param(inner),
+            | TypeKind::Refined { base: inner, .. } => self.contains_param(inner),
             TypeKind::Array { element, .. } => self.contains_param(element),
             TypeKind::Tuple(elements) => elements.iter().any(|e| self.contains_param(e)),
             TypeKind::Function {
@@ -1039,7 +1034,7 @@ impl GATVerifier {
                     }
                 }
             }
-            TypeKind::Refined { base, .. } | TypeKind::Sigma { base, .. } => {
+            TypeKind::Refined { base, .. } => {
                 Self::extract_gat_references(base, deps);
             }
             _ => {

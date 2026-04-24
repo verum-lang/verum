@@ -2352,14 +2352,6 @@ fn collect_refinements(
             out.push(rewritten);
             collect_refinements(base, param_ident, out, alias_map);
         }
-        TypeKind::Sigma { name, base, predicate } => {
-            let rewritten = substitute_ident(
-                predicate,
-                &[(name.name.clone(), param_ident.clone())],
-            );
-            out.push(rewritten);
-            collect_refinements(base, param_ident, out, alias_map);
-        }
         TypeKind::Bounded { base, .. } => {
             collect_refinements(base, param_ident, out, alias_map)
         }
@@ -2586,14 +2578,6 @@ fn flatten_chain(
             pred_expr = substitute_ident(
                 &pred_expr,
                 &[(Text::from("it"), Ident::new("self", predicate.span))],
-            );
-            out.push(pred_expr);
-            flatten_chain(base, raw_aliases, visited, out);
-        }
-        TypeKind::Sigma { name, base, predicate } => {
-            let pred_expr = substitute_ident(
-                predicate,
-                &[(name.name.clone(), Ident::new("self", predicate.span))],
             );
             out.push(pred_expr);
             flatten_chain(base, raw_aliases, visited, out);

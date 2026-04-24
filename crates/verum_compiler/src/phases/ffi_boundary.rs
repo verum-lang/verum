@@ -990,18 +990,12 @@ impl FfiBoundaryValidator {
                 )
                 .build()),
 
-            // Refinement types need base type validation
+            // Refinement types (VUVA §5 canonical: inline, lambda-where, and
+            // sigma surface forms all live here) need base type validation
             TypeKind::Refined { base, predicate: _ } => {
                 // Refinement is compile-time only, validate base type
                 self.validate_ffi_safe_type(base, direction, context)
             }
-
-            // Sigma types need base validation
-            TypeKind::Sigma {
-                name: _,
-                base,
-                predicate: _,
-            } => self.validate_ffi_safe_type(base, direction, context),
 
             // Other types are not FFI-safe
             _ => Err(DiagnosticBuilder::new(Severity::Error)
@@ -1065,7 +1059,7 @@ impl FfiBoundaryValidator {
                     _ => Ok(()),
                 }
             }
-            TypeKind::Refined { base, .. } | TypeKind::Sigma { base, .. } => self.validate_ffi_safe_type_with_context(base, direction, context, ffi_context),
+            TypeKind::Refined { base, .. } => self.validate_ffi_safe_type_with_context(base, direction, context, ffi_context),
             TypeKind::Slice(_) => Err(DiagnosticBuilder::new(Severity::Error).message(format!("Slice type cannot cross FFI boundary in {}", context)).build()),
             TypeKind::Tuple(_) => Err(DiagnosticBuilder::new(Severity::Error).message(format!("Tuple type cannot cross FFI boundary in {}", context)).build()),
             TypeKind::Generic { .. } => Err(DiagnosticBuilder::new(Severity::Error).message(format!("Generic type cannot cross FFI boundary in {}", context)).build()),
@@ -1324,18 +1318,11 @@ impl Marshaller {
                 idx, param_name.name
             )),
 
-            // Refined types: strip refinement, marshal base type
+            // Refined types (VUVA §5 canonical: all three surface forms):
+            // strip refinement, marshal base type
             TypeKind::Refined { base, predicate: _ } => {
-                // Recursively marshal the base type
                 self.generate_param_conversion(param_name, base, idx)
             }
-
-            // Sigma types: strip predicate, marshal base type
-            TypeKind::Sigma {
-                name: _,
-                base,
-                predicate: _,
-            } => self.generate_param_conversion(param_name, base, idx),
 
             // CBGR references: ERROR - cannot cross FFI
             TypeKind::Reference { .. } | TypeKind::CheckedReference { .. } => {
@@ -1445,13 +1432,9 @@ impl Marshaller {
                 Ok("    // Function pointer: direct return\n    Ok(result)\n".to_string())
             }
 
-            // Refined types: marshal base type, trust postcondition
+            // Refined types (VUVA §5 canonical: all three surface forms):
+            // marshal base type, trust postcondition
             TypeKind::Refined { base, predicate: _ } => {
-                self.generate_return_conversion(base)
-            }
-
-            // Sigma types: marshal base type
-            TypeKind::Sigma { name: _, base, predicate: _ } => {
                 self.generate_return_conversion(base)
             }
 

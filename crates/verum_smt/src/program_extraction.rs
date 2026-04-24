@@ -2180,29 +2180,17 @@ impl CodeGenerator {
                 )
             }
 
-            // Refinement types: T{predicate}
+            // Refinement types (VUVA §5) carry all three surface forms.
+            // Render the sigma form (`x: T where P(x)`) when the predicate
+            // carries an explicit binder; otherwise render the inline form.
             TypeKind::Refined { base, predicate } => {
                 let base_str = self.format_type(base);
                 let pred_str = self.format_expr(&predicate.expr);
                 if let Maybe::Some(ref binding) = predicate.binding {
-                    format!("{}{{|{}| {}}}", base_str, binding.name, pred_str)
+                    format!("{}: {} where {}", binding.name, base_str, pred_str)
                 } else {
                     format!("{}{{{}}}", base_str, pred_str)
                 }
-            }
-
-            // Sigma types: x: T where predicate
-            TypeKind::Sigma {
-                name,
-                base,
-                predicate,
-            } => {
-                format!(
-                    "{}: {} where {}",
-                    name.name,
-                    self.format_type(base),
-                    self.format_expr(predicate)
-                )
             }
 
             // Inferred type

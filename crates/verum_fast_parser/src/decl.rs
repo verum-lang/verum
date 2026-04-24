@@ -3015,11 +3015,18 @@ impl<'a> RecursiveParser<'a> {
         // Parse as type alias (handles complex types like Vec<T>, fn(Int) -> Int, Int{> 0}, &Int)
         let ty = self.parse_type()?;
 
-        // Check if this is a sigma type followed by comma - indicates sigma bindings
-        // Grammar: sigma_bindings = sigma_binding , { ',' , sigma_binding } ;
-        // Example: type SizedVec is n: Int, data: [Int; n];
-        if matches!(ty.kind, TypeKind::Sigma { .. }) && self.stream.check(&TokenKind::Comma) {
-            // We have a sigma type followed by comma - parse additional sigma bindings
+        // Check if this is a sigma-form refinement followed by comma -
+        // indicates sigma-bindings (e.g. `type SizedVec is n: Int, data: [Int; n];`).
+        // Post VUVA §5 canonicalisation, the sigma surface form parses as
+        // `TypeKind::Refined` with `predicate.binding = Some(name)`; we detect
+        // that shape here.
+        let looks_like_sigma_binding = matches!(
+            &ty.kind,
+            TypeKind::Refined { predicate, .. }
+                if matches!(predicate.binding, verum_common::Maybe::Some(_))
+        );
+        if looks_like_sigma_binding && self.stream.check(&TokenKind::Comma) {
+            // We have a sigma-binding followed by comma - parse additional sigma bindings
             let mut bindings = vec![ty];
             while self.stream.consume(&TokenKind::Comma).is_some() {
                 let sigma = self.parse_sigma_type()?;
@@ -7161,10 +7168,9 @@ impl<'a> RecursiveParser<'a> {
                     Ok(Path::from_ident(Ident::new(Text::from("_"), ty.span)))
                 }
             }
-            // Sigma type: `n: Int where ...` - extract the base type as path
-            TypeKind::Sigma { base, .. } => {
-                self.type_to_path(*base.clone())
-            }
+            // Refined types (all three surface forms: `T{p}`, `T where p`,
+            // `n: T where p`) fall through to the `Refined` arm above; the
+            // dedicated Sigma arm is gone after VUVA §5 collapse.
             _ => Err(ParseError::invalid_syntax(
                 "expected path or refined type in type bound",
                 ty.span,

@@ -22064,69 +22064,61 @@ impl TypeChecker {
                 use Option;
 
                 let base_ty = self.ast_to_type(base)?;
+                // Post VUVA §5 collapse, `TypeKind::Refined` carries all three
+                // surface forms. The sigma form reaches us with a
+                // `predicate.binding = Some(name)`; preserve that distinction
+                // by emitting a `RefinementBinding::Sigma` when the binding
+                // came from the sigma surface syntax. We can no longer tell
+                // sigma apart from lambda `T where |x| expr` at this layer
+                // (both share the same AST shape), so both are treated as
+                // Sigma — semantically equivalent in the type system.
                 let binding = match &predicate.binding {
-                    Some(ident) => RefinementBinding::Lambda(ident.name.clone()),
+                    Some(ident) => RefinementBinding::Sigma(ident.name.clone()),
                     None => RefinementBinding::Inline,
                 };
                 let pred = TyRefinementPredicate {
                     predicate: predicate.expr.clone(),
-                    binding,
+                    binding: binding.clone(),
                     span: predicate.span,
                 };
-                Ok(Type::refined(base_ty, pred))
-            }
 
-            TypeKind::Sigma {
-                name,
-                base,
-                predicate,
-            } => {
-                use crate::refinement::{
-                    RefinementBinding, RefinementPredicate as TyRefinementPredicate,
-                };
+                // Verify dependent type constraint using SMT if enabled for
+                // sigma-form refinements (previously the `TypeKind::Sigma`
+                // arm's behaviour). Sigma types (dependent pairs):
+                // `(x: A, B(x))` where second component type depends on first
+                // value — refinement types desugar to Sigma.
+                if let Some(name) = &predicate.binding {
+                    if self.has_dependent_types() {
+                        use crate::dependent_helpers::convert_internal_to_ast;
+                        use crate::dependent_integration::DependentTypeConstraint;
 
-                let base_ty = self.ast_to_type(base)?;
-                let pred = TyRefinementPredicate {
-                    predicate: (**predicate).clone(),
-                    binding: RefinementBinding::Sigma(name.name.clone()),
-                    span: ast_ty.span,
-                };
+                        let constraint = DependentTypeConstraint::SigmaType {
+                            fst_name: name.name.clone(),
+                            fst_type: convert_internal_to_ast(&base_ty),
+                            snd_type: convert_internal_to_ast(&Type::Bool),
+                            span: ast_ty.span,
+                        };
 
-                // Verify dependent type constraint using SMT if enabled
-                // Sigma types (dependent pairs): (x: A, B(x)) where second component type depends on first value, refinement types desugar to Sigma — Sigma Types (Dependent Pairs)
-                if self.has_dependent_types() {
-                    use crate::dependent_helpers::convert_internal_to_ast;
-                    use crate::dependent_integration::DependentTypeConstraint;
-
-                    // For Sigma types, we need to verify that the second component type
-                    // is well-formed for all valid values of the first component.
-                    // The predicate forms the proof obligation for the second component.
-                    let constraint = DependentTypeConstraint::SigmaType {
-                        fst_name: name.name.clone(),
-                        fst_type: convert_internal_to_ast(&base_ty),
-                        snd_type: convert_internal_to_ast(&Type::Bool), // Predicate as proof obligation
-                        span: ast_ty.span,
-                    };
-
-                    match self.verify_dependent_type(&constraint) {
-                        Ok(result) => {
-                            if let crate::refinement::VerificationResult::Invalid {
-                                counterexample,
-                            } = result
-                            {
-                                // Log verification failure but don't fail type checking
-                                // This allows gradual adoption of dependent types
-                                // The constraint will be checked at runtime if not proven
-                                if let Maybe::Some(ref ce) = counterexample {
-                                    // Record that this constraint needs runtime checking
-                                    // (could be tracked in a separate data structure for diagnostics)
-                                    let _ = ce; // Suppress unused warning for now
+                        match self.verify_dependent_type(&constraint) {
+                            Ok(result) => {
+                                if let crate::refinement::VerificationResult::Invalid {
+                                    counterexample,
+                                } = result
+                                {
+                                    // Log verification failure but don't fail type checking
+                                    // This allows gradual adoption of dependent types
+                                    // The constraint will be checked at runtime if not proven
+                                    if let Maybe::Some(ref ce) = counterexample {
+                                        // Record that this constraint needs runtime checking
+                                        // (could be tracked in a separate data structure for diagnostics)
+                                        let _ = ce; // Suppress unused warning for now
+                                    }
                                 }
                             }
-                        }
-                        Err(_) => {
-                            // SMT verification failed - continue with type checking
-                            // The constraint will be checked at runtime
+                            Err(_) => {
+                                // SMT verification failed - continue with type checking
+                                // The constraint will be checked at runtime
+                            }
                         }
                     }
                 }
@@ -46552,7 +46544,6 @@ fn type_kind_description(kind: &verum_ast::ty::TypeKind) -> String {
         TypeKind::Generic { .. } => "generic type".to_string(),
         TypeKind::Qualified { .. } => "qualified type".to_string(),
         TypeKind::Refined { .. } => "refinement type".to_string(),
-        TypeKind::Sigma { .. } => "sigma type".to_string(),
         TypeKind::Inferred => "inferred type".to_string(),
         TypeKind::Bounded { .. } => "bounded type".to_string(),
         TypeKind::DynProtocol { .. } => "dyn protocol type".to_string(),
@@ -47929,7 +47920,9 @@ impl TypeChecker {
             }
             TypeDeclBody::SigmaTuple(types) => {
                 // Dependent pair / sigma type (e.g., `type Interval is lo: Int, hi: Int where hi >= lo;`)
-                // Each element is TypeKind::Sigma { name, base, predicate } with named fields.
+                // Post VUVA §5, each sigma-binding element parses as
+                // `TypeKind::Refined { base, predicate }` with
+                // `predicate.binding = Some(field_name)`.
                 let element_types: List<Type> = types
                     .iter()
                     .map(|t| self.ast_to_type(t))
@@ -47947,12 +47940,14 @@ impl TypeChecker {
                     .define_type(inner_key.clone(), Type::Tuple(element_types));
 
                 // Also register named fields as struct fields for field access (e.g., iv.lo, iv.hi)
-                // Extract field names from Sigma type nodes
+                // Extract field names from the refined nodes' predicate binder.
                 let mut fields = indexmap::IndexMap::new();
                 for sigma_ty in types {
-                    if let verum_ast::ty::TypeKind::Sigma { ref name, ref base, .. } = sigma_ty.kind {
-                        let field_type = self.ast_to_type(base)?;
-                        fields.insert(name.name.clone(), field_type);
+                    if let verum_ast::ty::TypeKind::Refined { ref base, ref predicate } = sigma_ty.kind {
+                        if let verum_common::Maybe::Some(ref name) = predicate.binding {
+                            let field_type = self.ast_to_type(base)?;
+                            fields.insert(name.name.clone(), field_type);
+                        }
                     }
                 }
                 if !fields.is_empty() {
@@ -49302,12 +49297,16 @@ impl TypeChecker {
                 self.ctx
                     .define_type(inner_key, Type::Tuple(element_types));
 
-                // Register named fields as struct fields for field access
+                // Register named fields as struct fields for field access.
+                // Post VUVA §5, sigma-binding elements parse as
+                // `TypeKind::Refined` with `predicate.binding = Some(field)`.
                 let mut fields = indexmap::IndexMap::new();
                 for sigma_ty in types {
-                    if let verum_ast::ty::TypeKind::Sigma { ref name, ref base, .. } = sigma_ty.kind {
-                        let field_type = self.ast_to_type(base)?;
-                        fields.insert(name.name.clone(), field_type);
+                    if let verum_ast::ty::TypeKind::Refined { ref base, ref predicate } = sigma_ty.kind {
+                        if let verum_common::Maybe::Some(ref name) = predicate.binding {
+                            let field_type = self.ast_to_type(base)?;
+                            fields.insert(name.name.clone(), field_type);
+                        }
                     }
                 }
                 if !fields.is_empty() {

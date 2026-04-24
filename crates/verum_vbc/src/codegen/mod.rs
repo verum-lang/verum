@@ -7138,7 +7138,9 @@ impl VbcCodegen {
             let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind else { continue };
             let Some((param_name, _)) = self.extract_param_name_and_mutable(param) else { continue };
 
-            // Extract (predicate_expr, binding_name) from Refined / Sigma.
+            // Extract (predicate_expr, binding_name) from the canonical
+            // `Refined` node (post VUVA §5 — the sigma surface form parses
+            // to `Refined` with `predicate.binding = Some(name)`).
             let (pred_expr, binding_name) = match &ty.kind {
                 verum_ast::ty::TypeKind::Refined { predicate, .. } => {
                     let bname = match &predicate.binding {
@@ -7146,9 +7148,6 @@ impl VbcCodegen {
                         verum_common::Maybe::None    => "it".to_string(),
                     };
                     (predicate.expr.clone(), bname)
-                }
-                verum_ast::ty::TypeKind::Sigma { name, predicate, .. } => {
-                    ((**predicate).clone(), name.name.to_string())
                 }
                 _ => continue,
             };
@@ -7412,9 +7411,6 @@ impl VbcCodegen {
                 };
                 (predicate.expr.clone(), bname)
             }
-            verum_ast::ty::TypeKind::Sigma { name, predicate, .. } => {
-                ((**predicate).clone(), name.name.to_string())
-            }
             _ => return,
         };
 
@@ -7424,16 +7420,10 @@ impl VbcCodegen {
             verum_ast::ty::TypeKind::Refined { base, .. } => {
                 self.type_kind_to_var_type(&base.kind)
             }
-            verum_ast::ty::TypeKind::Sigma { base, .. } => {
-                self.type_kind_to_var_type(&base.kind)
-            }
             _ => context::VarTypeKind::Unknown,
         };
         let base_type_name = match &ret_ty.kind {
             verum_ast::ty::TypeKind::Refined { base, .. } => {
-                Self::extract_type_name_from_ast(base)
-            }
-            verum_ast::ty::TypeKind::Sigma { base, .. } => {
                 Self::extract_type_name_from_ast(base)
             }
             _ => String::new(),

@@ -8192,13 +8192,18 @@ impl<'s> CompilationPipeline<'s> {
                 let self_text = self.type_to_text(self_ty);
                 Text::from(format!("<{} as {}>::{}", self_text, trait_ref, assoc_name.name))
             }
-            TypeKind::Refined { base, .. } => {
+            TypeKind::Refined { base, predicate } => {
                 let base_text = self.type_to_text(base);
-                Text::from(format!("{}{{...}}", base_text))
-            }
-            TypeKind::Sigma { name, base, .. } => {
-                let base_text = self.type_to_text(base);
-                Text::from(format!("{}: {} where ...", name.name, base_text))
+                // Post VUVA §5 the sigma surface form lives here too (binder
+                // carried by the predicate); render it distinctly when bound.
+                match &predicate.binding {
+                    verum_common::Maybe::Some(binder) => {
+                        Text::from(format!("{}: {} where ...", binder.name, base_text))
+                    }
+                    verum_common::Maybe::None => {
+                        Text::from(format!("{}{{...}}", base_text))
+                    }
+                }
             }
             TypeKind::Bounded { base, .. } => self.type_to_text(base),
             _ if ty.kind.primitive_name().is_some() => {

@@ -851,21 +851,22 @@ impl PrettyPrinter {
                 self.write(assoc_name.as_str());
             }
             TypeKind::Refined { base, predicate } => {
-                self.format_type(base);
-                self.write("{");
-                self.format_refinement_predicate(predicate);
-                self.write("}");
-            }
-            TypeKind::Sigma {
-                name,
-                base,
-                predicate,
-            } => {
-                self.write(name.as_str());
-                self.write(": ");
-                self.format_type(base);
-                self.write(" where ");
-                self.format_expr(predicate);
+                // VUVA §5 collapses the three refinement surface forms into
+                // `TypeKind::Refined`. Render the sigma form (`x: T where P(x)`)
+                // when the predicate carries an explicit binder; otherwise fall
+                // back to the inline form `T{pred}`.
+                if let Maybe::Some(binder) = &predicate.binding {
+                    self.write(binder.as_str());
+                    self.write(": ");
+                    self.format_type(base);
+                    self.write(" where ");
+                    self.format_expr(&predicate.expr);
+                } else {
+                    self.format_type(base);
+                    self.write("{");
+                    self.format_refinement_predicate(predicate);
+                    self.write("}");
+                }
             }
             TypeKind::Inferred => self.write("_"),
             TypeKind::Bounded { base, bounds } => {
