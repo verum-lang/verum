@@ -93,6 +93,9 @@ pub enum TestFormat {
     Pretty,
     Terse,
     Json,
+    Junit,
+    Tap,
+    Sarif,
 }
 
 impl TestFormat {
@@ -101,8 +104,11 @@ impl TestFormat {
             "pretty" => Ok(Self::Pretty),
             "terse" => Ok(Self::Terse),
             "json" => Ok(Self::Json),
+            "junit" | "junit-xml" => Ok(Self::Junit),
+            "tap" => Ok(Self::Tap),
+            "sarif" => Ok(Self::Sarif),
             other => Err(CliError::InvalidArgument(format!(
-                "unknown format `{}` (expected: pretty | terse | json)",
+                "unknown format `{}` (expected: pretty | terse | json | junit | tap | sarif)",
                 other
             ))),
         }
@@ -111,8 +117,10 @@ impl TestFormat {
 
 pub fn execute(opts: TestOptions) -> Result<()> {
     let start = Instant::now();
-    let json = opts.format == TestFormat::Json;
-    let quiet = json;
+    let quiet = matches!(
+        opts.format,
+        TestFormat::Json | TestFormat::Junit | TestFormat::Tap | TestFormat::Sarif
+    );
 
     // Manifest + feature overrides (honour -Z test.*, [test].timeout_secs, ...)
     let manifest_dir = Manifest::find_manifest_dir()?;
@@ -276,6 +284,8 @@ pub fn execute(opts: TestOptions) -> Result<()> {
                     t.name,
                     "ignored".yellow()
                 )),
+                // Aggregate formats emit per-test entries at summary time.
+                TestFormat::Junit | TestFormat::Tap | TestFormat::Sarif => {}
             }
         }
     }
@@ -311,6 +321,9 @@ pub fn execute(opts: TestOptions) -> Result<()> {
 
     // Summary
     match opts.format {
+        TestFormat::Junit => emit_junit(&results, &active, ignored_count, total_duration),
+        TestFormat::Tap => emit_tap(&results, &active, ignored_count),
+        TestFormat::Sarif => emit_sarif(&results, &active),
         TestFormat::Json => {
             println!(
                 "{}",
@@ -396,6 +409,10 @@ fn present_result(
         TestFormat::Json => present_json(test, result),
         TestFormat::Terse => present_terse(result),
         TestFormat::Pretty => present_pretty(test, result, opts.nocapture),
+        // Aggregate formats don't emit per-test lines — everything goes
+        // into one buffer emitted at summary time. We still have to
+        // fall through so pass/fail counters and failure collection run.
+        TestFormat::Junit | TestFormat::Tap | TestFormat::Sarif => {}
     }
     match result {
         TestResult::Pass { .. } => *passed += 1,
@@ -842,12 +859,15 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     // Pick the function to run. Priority:
     //   1. Function whose name matches the test name (for per-@test tests)
     //   2. `main`
-    let fn_name_tail = test
-        .name
-        .as_str()
-        .rsplit_once("::")
-        .map(|(_, n)| n)
-        .unwrap_or_else(|| test.name.as_str());
+    let fn_name_tail: &str = if let Some(fn_name) = &test.fn_name {
+        fn_name.as_str()
+    } else {
+        test.name
+            .as_str()
+            .rsplit_once("::")
+            .map(|(_, n)| n)
+            .unwrap_or_else(|| test.name.as_str())
+    };
     let fid_opt = module
         .functions
         .iter()
@@ -865,7 +885,30 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     };
 
     let mut interp = Interpreter::new(module);
-    let outcome = interp.execute_function(fid);
+    // Disable tier-0 safety caps — test runners frequently push past
+    // the 100M instruction / 30s timeout defaults, especially for
+    // @property-style tests that iterate internally.
+    interp.state.config.max_instructions = 0;
+    interp.state.config.timeout_ms = 0;
+
+    let outcome = if let Some(args) = &test.case_args {
+        // @test_case path: convert literal args → VBC Values, call directly.
+        let vbc_args: std::result::Result<Vec<_>, _> = args
+            .iter()
+            .map(|tv| tv.to_vbc_value(&mut interp))
+            .collect();
+        match vbc_args {
+            Ok(vs) => crate::commands::property::call_parametrised(&mut interp, fid, &vs),
+            Err(e) => {
+                return TestResult::CompileError {
+                    duration: start.elapsed(),
+                    error: format!("encode @test_case args: {}", e),
+                };
+            }
+        }
+    } else {
+        interp.execute_function(fid)
+    };
     let duration = start.elapsed();
     let stdout = interp.state.get_stdout().to_string();
     match outcome {
@@ -904,6 +947,14 @@ struct Test {
     /// When Some, this is a property-based test — the runner generates
     /// random inputs for each parameter and calls the function N times.
     property: Option<crate::commands::property::PropertyFunc>,
+    /// When Some, this test was expanded from a @test_case(args...)
+    /// attribute — the runner should call the function with these
+    /// literal args instead of no-args. The original fn name (without
+    /// the `[N]` suffix) is used to resolve the VBC FunctionId.
+    case_args: Option<Vec<crate::commands::property::TreeValue>>,
+    /// Underlying fn name (without `[N]` suffix) — needed for @test_case
+    /// expansions to still find their target in the compiled VBC module.
+    fn_name: Option<String>,
 }
 
 fn discover_tests(file: &Path) -> Result<List<Test>> {
@@ -945,12 +996,29 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                     } else {
                         None
                     };
-                    tests.push(Test {
-                        name: format!("{}::{}", module_name, func.name).into(),
-                        file: file.to_path_buf(),
-                        ignored: is_ignored,
-                        property,
-                    });
+                    // @test_case expansion: one Test per invocation.
+                    let cases = parse_test_cases(&func.attributes);
+                    if !cases.is_empty() {
+                        for (idx, args) in cases.into_iter().enumerate() {
+                            tests.push(Test {
+                                name: format!("{}::{}[{}]", module_name, func.name, idx).into(),
+                                file: file.to_path_buf(),
+                                ignored: is_ignored,
+                                property: property.clone(),
+                                case_args: Some(args),
+                                fn_name: Some(func.name.to_string()),
+                            });
+                        }
+                    } else {
+                        tests.push(Test {
+                            name: format!("{}::{}", module_name, func.name).into(),
+                            file: file.to_path_buf(),
+                            ignored: is_ignored,
+                            property,
+                            case_args: None,
+                            fn_name: Some(func.name.to_string()),
+                        });
+                    }
                 }
             }
         } else {
@@ -968,6 +1036,8 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                     file: file.to_path_buf(),
                     ignored: is_ignored,
                     property: None,
+                    case_args: None,
+                    fn_name: None,
                 });
             }
         }
@@ -993,6 +1063,8 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                         file: file.to_path_buf(),
                         ignored,
                         property: None,
+                        case_args: None,
+                        fn_name: None,
                     });
                 }
             }
@@ -1010,6 +1082,8 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                 file: file.to_path_buf(),
                 ignored: false,
                 property: None,
+                case_args: None,
+                fn_name: None,
             });
         }
     }
@@ -1061,6 +1135,229 @@ fn format_duration(d: Duration) -> String {
     } else {
         format!("{:.1}s", d.as_secs_f64())
     }
+}
+
+
+
+/// Parse `@test_case(arg, arg, ...)` attributes on a function into a
+/// list of argument vectors ready for call_with_args. Returns empty
+/// vec if no @test_case attributes are present.
+///
+/// Supported argument literals: Int, Bool, Text, Float. Anything else
+/// is silently dropped — keeps the attribute surface simple and avoids
+/// inventing type coercions at discover time.
+fn parse_test_cases(
+    attrs: &[verum_ast::Attribute],
+) -> Vec<Vec<crate::commands::property::TreeValue>> {
+    use crate::commands::property::TreeValue;
+    use verum_ast::ExprKind;
+    let mut cases = Vec::new();
+    for a in attrs {
+        if a.name.as_str() != "test_case" {
+            continue;
+        }
+        let args = match &a.args {
+            verum_common::Maybe::Some(a) => a,
+            _ => continue,
+        };
+        let mut case: Vec<TreeValue> = Vec::new();
+        for e in args.iter() {
+            if let Some(tv) = expr_to_tree_value(e) {
+                case.push(tv);
+            }
+        }
+        if !case.is_empty() {
+            cases.push(case);
+        }
+    }
+    cases
+}
+
+fn expr_to_tree_value(e: &verum_ast::Expr) -> Option<crate::commands::property::TreeValue> {
+    use crate::commands::property::TreeValue;
+    use verum_ast::{ExprKind, LiteralKind, UnOp};
+    match &e.kind {
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Int(il) => Some(TreeValue::Int {
+                value: il.value as i64,
+                lo: i64::MIN,
+                hi: i64::MAX,
+            }),
+            LiteralKind::Bool(b) => Some(TreeValue::Bool(*b)),
+            LiteralKind::Float(fl) => Some(TreeValue::Float(fl.value)),
+            LiteralKind::Text(s) => Some(TreeValue::Text {
+                value: s.to_string(),
+                max_len: u32::MAX,
+            }),
+            _ => None,
+        },
+        ExprKind::Unary { op: UnOp::Neg, expr: inner } => {
+            if let ExprKind::Literal(lit) = &inner.kind {
+                match &lit.kind {
+                    LiteralKind::Int(il) => Some(TreeValue::Int {
+                        value: -(il.value as i64),
+                        lo: i64::MIN,
+                        hi: i64::MAX,
+                    }),
+                    LiteralKind::Float(fl) => Some(TreeValue::Float(-fl.value)),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+
+// ----------------------------------------------------------------
+// Aggregate CI-output emitters (JUnit XML / TAP v13 / SARIF 2.1.0)
+// ----------------------------------------------------------------
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn emit_junit(
+    results: &[(Text, TestResult)],
+    active: &[&Test],
+    ignored: usize,
+    total: Duration,
+) {
+    let n = results.len() + ignored;
+    let failures = results
+        .iter()
+        .filter(|(_, r)| !matches!(r, TestResult::Pass { .. }))
+        .count();
+    println!(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+    println!(
+        r#"<testsuites tests="{}" failures="{}" time="{:.3}">"#,
+        n,
+        failures,
+        total.as_secs_f64()
+    );
+    println!(
+        r#"  <testsuite name="verum" tests="{}" failures="{}" skipped="{}" time="{:.3}">"#,
+        n,
+        failures,
+        ignored,
+        total.as_secs_f64()
+    );
+    for (name, r) in results {
+        let (elapsed, ok, err, kind) = match r {
+            TestResult::Pass { duration, .. } => (*duration, true, String::new(), ""),
+            TestResult::Fail { duration, error, .. } => (*duration, false, error.clone(), "failure"),
+            TestResult::CompileError { duration, error } => {
+                (*duration, false, error.clone(), "error")
+            }
+        };
+        let _ = active; // silence unused warning when active goes away
+        println!(
+            r#"    <testcase classname="verum" name="{}" time="{:.3}">"#,
+            xml_escape(name.as_str()),
+            elapsed.as_secs_f64()
+        );
+        if !ok {
+            println!(
+                r#"      <{} message="{}"><![CDATA[{}]]></{}>"#,
+                kind,
+                xml_escape(&err.lines().next().unwrap_or("")),
+                err.replace("]]>", "]]]]><![CDATA[>"),
+                kind,
+            );
+        }
+        println!("    </testcase>");
+    }
+    println!("  </testsuite>");
+    println!("</testsuites>");
+}
+
+fn emit_tap(results: &[(Text, TestResult)], _active: &[&Test], ignored: usize) {
+    let n = results.len() + ignored;
+    println!("TAP version 13");
+    println!("1..{}", n);
+    let mut i: usize = 1;
+    for (name, r) in results {
+        match r {
+            TestResult::Pass { duration, .. } => println!(
+                "ok {} - {} # time={:.3}s",
+                i,
+                name,
+                duration.as_secs_f64()
+            ),
+            TestResult::Fail { duration, error, .. } => {
+                println!("not ok {} - {} # time={:.3}s", i, name, duration.as_secs_f64());
+                println!("  ---");
+                for line in error.lines() {
+                    println!("  message: {}", line);
+                }
+                println!("  ...");
+            }
+            TestResult::CompileError { duration, error } => {
+                println!(
+                    "not ok {} - {} # time={:.3}s (compile-error)",
+                    i,
+                    name,
+                    duration.as_secs_f64()
+                );
+                println!("  ---");
+                for line in error.lines() {
+                    println!("  message: {}", line);
+                }
+                println!("  ...");
+            }
+        }
+        i += 1;
+    }
+}
+
+fn emit_sarif(results: &[(Text, TestResult)], _active: &[&Test]) {
+    let rules = serde_json::json!([{
+        "id": "verum-test",
+        "name": "VerumTestFailure",
+        "shortDescription": {"text": "A Verum test failed"},
+        "fullDescription": {"text": "Emitted by `verum test` for each failing test."},
+        "defaultConfiguration": {"level": "error"},
+    }]);
+    let mut sarif_results = Vec::new();
+    for (name, r) in results {
+        let (ok, msg): (bool, String) = match r {
+            TestResult::Pass { .. } => (true, String::new()),
+            TestResult::Fail { error, .. } => (false, error.clone()),
+            TestResult::CompileError { error, .. } => (false, error.clone()),
+        };
+        if ok {
+            continue;
+        }
+        sarif_results.push(serde_json::json!({
+            "ruleId": "verum-test",
+            "level": "error",
+            "message": {"text": msg},
+            "locations": [{
+                "logicalLocations": [{"name": name.as_str()}],
+            }],
+        }));
+    }
+    let doc = serde_json::json!({
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "verum",
+                    "informationUri": "https://verum-lang.dev",
+                    "rules": rules,
+                }
+            },
+            "results": sarif_results,
+        }],
+    });
+    println!("{}", serde_json::to_string_pretty(&doc).unwrap());
 }
 
 #[cfg(test)]

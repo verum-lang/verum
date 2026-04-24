@@ -695,6 +695,14 @@ fn shrink_failure(
 // frame with `register_count` from the function descriptor, copy the
 // args into registers [0..N), then run `dispatch_loop_table` (which
 // does NOT re-push a frame — that's `execute_table`'s job).
+pub fn call_parametrised(
+    interp: &mut verum_vbc::interpreter::Interpreter,
+    fid: FunctionId,
+    args: &[Value],
+) -> verum_vbc::interpreter::InterpreterResult<Value> {
+    call_with_args(interp, fid, args)
+}
+
 fn call_with_args(
     interp: &mut verum_vbc::interpreter::Interpreter,
     fid: FunctionId,
