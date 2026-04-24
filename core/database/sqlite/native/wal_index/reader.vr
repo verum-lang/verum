@@ -1,0 +1,111 @@
+// =============================================================================
+// wal_index/reader.vr — per-reader mark slots
+// =============================================================================
+// Spec: sqlite-native.md §6.6
+//
+// SQLite supports up to 5 simultaneous read-only snapshots via the
+// READMARK_0..4 slots in the shm file (slot 0 always tracks 0; slot
+// 1..4 are dynamically assigned). Each slot holds the max_frame the
+// reader is allowed to see; the checkpointer must not reclaim WAL
+// frames past `min(reader_marks)` until the reader releases its lock.
+// =============================================================================
+
+module core.database.sqlite.native.wal_index.reader;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+public const READER_SLOT_COUNT: Int = 5;
+
+// -----------------------------------------------------------------------------
+// ReaderSlot
+// -----------------------------------------------------------------------------
+
+public type ReaderSlot is {
+    /// 0 = unused (or slot 0, which always holds 0).
+    /// Otherwise: the largest WAL frame visible to this reader.
+    max_frame: Int,
+}
+
+public fn empty_slot() -> ReaderSlot { ReaderSlot { max_frame: 0 } }
+
+public fn slot_for(max_frame: Int) -> ReaderSlot { ReaderSlot { max_frame: max_frame } }
+
+implement ReaderSlot {
+    public fn is_active(&self) -> Bool { self.max_frame > 0 }
+}
+
+// -----------------------------------------------------------------------------
+// ReaderMarks — fixed-size array of READER_SLOT_COUNT slots
+// -----------------------------------------------------------------------------
+
+public type ReaderMarks is { slots: List<ReaderSlot> }
+
+public fn marks_new() -> ReaderMarks {
+    let mut slots: List<ReaderSlot> = List.new();
+    let mut i: Int = 0;
+    while i < READER_SLOT_COUNT { slots.push(empty_slot()); i = i + 1; }
+    ReaderMarks { slots: slots }
+}
+
+implement ReaderMarks {
+    public fn slot_count(&self) -> Int { self.slots.len() }
+
+    /// Find an inactive slot (or one with the same max_frame) and
+    /// claim it. Returns the slot index, or None if all slots are
+    /// busy with different frames.
+    pub fn claim(&mut self, max_frame: Int) -> Maybe<Int> {
+        // First pass: look for exact match (so multiple readers at
+        // the same WAL position share a slot).
+        let mut i: Int = 1;
+        while i < READER_SLOT_COUNT {
+            if self.slots[i].max_frame == max_frame { return Some(i); }
+            i = i + 1;
+        }
+        // Second pass: take the first inactive slot.
+        let mut k: Int = 1;
+        while k < READER_SLOT_COUNT {
+            if !self.slots[k].is_active() {
+                self.slots[k] = slot_for(max_frame);
+                return Some(k);
+            }
+            k = k + 1;
+        }
+        None
+    }
+
+    /// Release a previously-claimed slot.
+    pub fn release(&mut self, slot_idx: Int) -> Bool {
+        if slot_idx <= 0 || slot_idx >= READER_SLOT_COUNT { return false; }
+        if !self.slots[slot_idx].is_active() { return false; }
+        self.slots[slot_idx] = empty_slot();
+        true
+    }
+
+    /// The smallest max_frame value across active reader slots —
+    /// the checkpointer must not reclaim past this point.
+    pub fn checkpoint_low_water_mark(&self) -> Int {
+        let mut best: Int = -1;
+        let mut i: Int = 1;
+        while i < READER_SLOT_COUNT {
+            if self.slots[i].is_active() {
+                if best < 0 || self.slots[i].max_frame < best {
+                    best = self.slots[i].max_frame;
+                }
+            }
+            i = i + 1;
+        }
+        if best < 0 { 0 } else { best }
+    }
+
+    pub fn active_count(&self) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < READER_SLOT_COUNT {
+            if self.slots[i].is_active() { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+}

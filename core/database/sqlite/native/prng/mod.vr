@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/prng/mod.vr
+// =============================================================================
+// Layer: 5 (built-in scalar fn backing)
+// Spec: sqlite-native.md §15.1 (random / randomblob)
+//
+// SQLite exposes:
+//
+//   * `random()`         — random Int64 in [-2^63, 2^63 - 1]
+//   * `randomblob(N)`    — N bytes of randomness
+//   * `sqlite3_randomness(N, P)` — refill N bytes into P (C API)
+//
+// All three share one process-wide PRNG seeded from the OS entropy
+// pool on first use. We implement an ARC4-style stream cipher PRNG
+// matching SQLite's reference implementation in `sqliteRandomness`.
+//
+// Submodules:
+//   * `arc4`     — RC4 keystream state + step
+//   * `engine`   — PrngEngine: high-level random_int / random_blob
+//   * `seed`     — Seed material + reseed scheduler
+// =============================================================================
+
+module core.database.sqlite.native.prng;
+
+public module arc4;
+public module engine;
+public module seed;

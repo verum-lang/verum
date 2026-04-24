@@ -1,0 +1,68 @@
+// =============================================================================
+// prng/arc4.vr — ARC4 keystream
+// =============================================================================
+// Spec: sqlite-native.md §15.1
+//
+// SQLite uses a textbook RC4 (a.k.a. ARC4) variant for its randomness:
+// 256-byte permutation state + two indices i,j. Each call to `step`
+// updates the state and returns one byte of keystream.
+// =============================================================================
+
+module core.database.sqlite.native.prng.arc4;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type Arc4State is {
+    s: List<Byte>,    // 256-byte permutation
+    i: Int,
+    j: Int,
+}
+
+public fn arc4_init() -> Arc4State {
+    let mut s: List<Byte> = List.new();
+    let mut k: Int = 0;
+    while k < 256 { s.push(k as Byte); k = k + 1; }
+    Arc4State { s: s, i: 0, j: 0 }
+}
+
+implement Arc4State {
+    /// Mix `seed_bytes` into the permutation (KSA — key-scheduling).
+    /// Equivalent to RC4 `KSA(K)` but accepts any-length key by
+    /// repeating it across the 256 slots.
+    pub fn mix(&mut self, seed_bytes: &List<Byte>) {
+        if seed_bytes.len() == 0 { return; }
+        let mut j: Int = 0;
+        let mut i: Int = 0;
+        while i < 256 {
+            let key_byte = seed_bytes[i % seed_bytes.len()] as Int;
+            j = (j + (self.s[i] as Int) + key_byte) % 256;
+            let tmp = self.s[i];
+            self.s[i] = self.s[j];
+            self.s[j] = tmp;
+            i = i + 1;
+        }
+        self.i = 0;
+        self.j = 0;
+    }
+
+    /// Pull one byte from the keystream + advance state.
+    pub fn step(&mut self) -> Byte {
+        self.i = (self.i + 1) % 256;
+        self.j = (self.j + (self.s[self.i] as Int)) % 256;
+        let tmp = self.s[self.i];
+        self.s[self.i] = self.s[self.j];
+        self.s[self.j] = tmp;
+        let idx = (self.s[self.i] as Int + self.s[self.j] as Int) % 256;
+        self.s[idx]
+    }
+
+    /// Pull `n` bytes from the keystream.
+    pub fn step_n(&mut self, n: Int) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let mut k: Int = 0;
+        while k < n { out.push(self.step()); k = k + 1; }
+        out
+    }
+}

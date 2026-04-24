@@ -1,0 +1,86 @@
+// =============================================================================
+// trace/payload.vr — per-event payload records
+// =============================================================================
+// Spec: sqlite-native.md §22 (sqlite3_trace_v2)
+//
+// `TracePayload` is the typed counterpart to SQLite's `(p, x)` arg
+// pair: each event variant carries the data the C API would expose
+// to the callback.
+// =============================================================================
+
+module core.database.sqlite.native.trace.payload;
+
+mount core.*;
+mount base.{Text, Bool};
+
+// -----------------------------------------------------------------------------
+// StmtPayload — fired at first VDBE step
+// -----------------------------------------------------------------------------
+
+public type StmtPayload is {
+    /// Raw SQL text the user passed to prepare().
+    sql: Text,
+    /// SQL with bound parameters substituted (matches sqlite3_expanded_sql).
+    expanded_sql: Text,
+    /// Stable identifier for the statement.
+    stmt_id: Int64,
+}
+
+public fn stmt_payload(sql: Text, expanded_sql: Text, stmt_id: Int64) -> StmtPayload {
+    StmtPayload { sql: sql, expanded_sql: expanded_sql, stmt_id: stmt_id }
+}
+
+// -----------------------------------------------------------------------------
+// ProfilePayload — fired at last VDBE step
+// -----------------------------------------------------------------------------
+
+public type ProfilePayload is {
+    sql: Text,
+    /// Wall-clock nanoseconds spent in this statement.
+    elapsed_ns: Int64,
+    /// Number of result rows the statement produced (0 for DDL/DML).
+    rows_returned: Int64,
+}
+
+public fn profile_payload(sql: Text, elapsed_ns: Int64, rows_returned: Int64) -> ProfilePayload {
+    ProfilePayload { sql: sql, elapsed_ns: elapsed_ns, rows_returned: rows_returned }
+}
+
+// -----------------------------------------------------------------------------
+// RowPayload — fired at each ResultRow opcode
+// -----------------------------------------------------------------------------
+
+public type RowPayload is { stmt_id: Int64, row_index: Int64 }
+
+public fn row_payload(stmt_id: Int64, row_index: Int64) -> RowPayload {
+    RowPayload { stmt_id: stmt_id, row_index: row_index }
+}
+
+// -----------------------------------------------------------------------------
+// ClosePayload — fired on Connection close
+// -----------------------------------------------------------------------------
+
+public type ClosePayload is { connection_id: Int64 }
+
+public fn close_payload(connection_id: Int64) -> ClosePayload {
+    ClosePayload { connection_id: connection_id }
+}
+
+// -----------------------------------------------------------------------------
+// TracePayload — sum
+// -----------------------------------------------------------------------------
+
+public type TracePayload is
+      TpStmt(StmtPayload)
+    | TpProfile(ProfilePayload)
+    | TpRow(RowPayload)
+    | TpClose(ClosePayload);
+
+public fn payload_kind_name(p: &TracePayload) -> Text {
+    match p {
+        TpStmt(_)    => "stmt".clone(),
+        TpProfile(_) => "profile".clone(),
+        TpRow(_)     => "row".clone(),
+        TpClose(_)   => "close".clone(),
+    }
+}

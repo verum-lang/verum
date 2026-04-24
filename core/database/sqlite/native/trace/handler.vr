@@ -1,0 +1,88 @@
+// =============================================================================
+// trace/handler.vr — TraceHandler protocol + chain composition
+// =============================================================================
+// Spec: sqlite-native.md §22 (sqlite3_trace_v2)
+//
+// `TraceHandler` is the user-facing protocol. The L7 façade installs
+// at most one handler per Connection but the catalogue lets the host
+// chain handlers via `compose` so multiple subscribers (audit, EXPLAIN
+// ANALYZE collector, REPL echo) can coexist.
+// =============================================================================
+
+module core.database.sqlite.native.trace.handler;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.trace.event.{
+    TraceEvent, TraceMask, mask_empty, mask_all,
+};
+mount core.database.sqlite.native.trace.payload.{TracePayload};
+
+// -----------------------------------------------------------------------------
+// TraceHandler protocol
+// -----------------------------------------------------------------------------
+
+public type TraceHandler is protocol {
+    fn name(&self) -> Text;
+    fn mask(&self) -> TraceMask;
+    fn on_event(&mut self, payload: &TracePayload);
+};
+
+// -----------------------------------------------------------------------------
+// CountingHandler — increments a counter per event kind (test fixture)
+// -----------------------------------------------------------------------------
+
+public type CountingHandler is {
+    stmt_count: Int,
+    profile_count: Int,
+    row_count: Int,
+    close_count: Int,
+}
+
+public fn counting_handler() -> CountingHandler {
+    CountingHandler { stmt_count: 0, profile_count: 0, row_count: 0, close_count: 0 }
+}
+
+implement TraceHandler for CountingHandler {
+    fn name(&self) -> Text { "counting".clone() }
+
+    fn mask(&self) -> TraceMask { mask_all() }
+
+    fn on_event(&mut self, payload: &TracePayload) {
+        match payload {
+            core.database.sqlite.native.trace.payload.TpStmt(_)    => { self.stmt_count = self.stmt_count + 1; }
+            core.database.sqlite.native.trace.payload.TpProfile(_) => { self.profile_count = self.profile_count + 1; }
+            core.database.sqlite.native.trace.payload.TpRow(_)     => { self.row_count = self.row_count + 1; }
+            core.database.sqlite.native.trace.payload.TpClose(_)   => { self.close_count = self.close_count + 1; }
+        }
+    }
+}
+
+implement CountingHandler {
+    public fn total_events(&self) -> Int {
+        self.stmt_count + self.profile_count + self.row_count + self.close_count
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SilentHandler — discards everything (mask = empty)
+// -----------------------------------------------------------------------------
+
+public type SilentHandler is { unit: Bool }
+
+public fn silent_handler() -> SilentHandler { SilentHandler { unit: true } }
+
+implement TraceHandler for SilentHandler {
+    fn name(&self) -> Text { "silent".clone() }
+    fn mask(&self) -> TraceMask { mask_empty() }
+    fn on_event(&mut self, _payload: &TracePayload) {}
+}
+
+// -----------------------------------------------------------------------------
+// Decision helper — should this handler observe `event`?
+// -----------------------------------------------------------------------------
+
+public fn handler_observes(handler_mask: &TraceMask, event: &TraceEvent) -> Bool {
+    handler_mask.covers(event)
+}

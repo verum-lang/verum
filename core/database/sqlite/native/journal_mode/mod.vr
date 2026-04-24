@@ -1,0 +1,30 @@
+// =============================================================================
+// core/database/sqlite/native/journal_mode/mod.vr
+// =============================================================================
+// Layer: 1 (pager) / 6 (PRAGMA dispatch)
+// Spec: sqlite-native.md §18.4 (PRAGMA journal_mode)
+//
+// Six legal journal modes:
+//
+//   * `DELETE`    — default — rollback journal deleted at COMMIT
+//   * `TRUNCATE`  — rollback journal truncated at COMMIT (faster on
+//                    some filesystems)
+//   * `PERSIST`   — rollback journal kept; first 28 bytes zeroed
+//                    (avoids the file-creation cost on next tx)
+//   * `MEMORY`    — rollback journal lives in RAM (fastest, no crash safety)
+//   * `WAL`       — write-ahead-log (SQLite 3.7+); enables concurrent
+//                    readers + one writer
+//   * `OFF`       — no journal (no rollback, atomic-write filesystem only)
+//
+// Submodules:
+//   * `mode`      — JournalMode enum + name table
+//   * `semantics` — per-mode commit/checkpoint behaviour predicates
+//   * `transition`— validity matrix (which mode → mode transitions are
+//                    allowed without a fresh open)
+// =============================================================================
+
+module core.database.sqlite.native.journal_mode;
+
+public module mode;
+public module semantics;
+public module transition;

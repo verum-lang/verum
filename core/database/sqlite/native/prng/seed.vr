@@ -1,0 +1,91 @@
+// =============================================================================
+// prng/seed.vr — seed material + reseed scheduler
+// =============================================================================
+// Spec: sqlite-native.md §15.1
+//
+// SQLite seeds its PRNG once on first use from `sqlite3OsRandomness`
+// (which wraps `/dev/urandom` on Posix, `BCryptGenRandom` on Win).
+// `SeedSource` lets the host swap in a deterministic source for DST.
+// =============================================================================
+
+module core.database.sqlite.native.prng.seed;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SeedSource protocol — each implementation provides 32 bytes of seed
+// -----------------------------------------------------------------------------
+
+public type SeedSource is protocol {
+    fn name(&self) -> base.Text;
+    fn fetch(&self, n_bytes: Int) -> List<Byte>;
+};
+
+// -----------------------------------------------------------------------------
+// FixedSeedSource — for DST: returns the same bytes every call
+// -----------------------------------------------------------------------------
+
+public type FixedSeedSource is { material: List<Byte> }
+
+public fn fixed_seed(material: List<Byte>) -> FixedSeedSource {
+    FixedSeedSource { material: material }
+}
+
+implement SeedSource for FixedSeedSource {
+    fn name(&self) -> base.Text { "fixed".clone() }
+
+    fn fetch(&self, n_bytes: Int) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < n_bytes && self.material.len() > 0 {
+            out.push(self.material[i % self.material.len()]);
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CounterSeedSource — predictable, monotonically-incrementing bytes
+// -----------------------------------------------------------------------------
+
+public type CounterSeedSource is { unit: Bool }
+
+public fn counter_seed() -> CounterSeedSource { CounterSeedSource { unit: true } }
+
+implement SeedSource for CounterSeedSource {
+    fn name(&self) -> base.Text { "counter".clone() }
+
+    fn fetch(&self, n_bytes: Int) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < n_bytes { out.push((i % 256) as Byte); i = i + 1; }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Reseed policy — when to refresh from the seed source
+// -----------------------------------------------------------------------------
+
+public type ReseedPolicy is {
+    /// Reseed after this many bytes pulled from the keystream.
+    bytes_threshold: Int64,
+    /// Reseed after this many seconds. 0 disables.
+    secs_threshold: Int64,
+}
+
+public fn default_policy() -> ReseedPolicy {
+    ReseedPolicy {
+        bytes_threshold: 1_048_576 as Int64,    // 1 MiB
+        secs_threshold: 600 as Int64,             // 10 min
+    }
+}
+
+public fn should_reseed(policy: &ReseedPolicy, bytes_since_seed: Int64, secs_since_seed: Int64) -> Bool {
+    if policy.bytes_threshold > (0 as Int64) && bytes_since_seed >= policy.bytes_threshold { return true; }
+    if policy.secs_threshold > (0 as Int64) && secs_since_seed >= policy.secs_threshold { return true; }
+    false
+}

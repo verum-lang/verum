@@ -1,0 +1,230 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, wal_index, shm, hash_group, reader_marks
+// @timeout: 5000
+// @expected-exit: 0
+//
+// WAL-index surface:
+//   * WalIndexHeader serialize round-trip + version predicate
+//   * Dual-copy validation
+//   * HashGroup insert + lookup most-recent within group
+//   * Hash function deterministic
+//   * group_for_frame + frame_position_in_group inverses
+//   * ReaderMarks claim/release + checkpoint_low_water_mark
+//   * WalIndexState register_frame + lookup_page
+
+mount core.database.sqlite.native.wal_index.header.{
+    WalIndexHeader, header_default, dual_copies_agree, serialize, HEADER_BYTES,
+};
+mount core.database.sqlite.native.wal_index.hash.{
+    HashGroup, hash_group_new, HashSlot, empty_slot, slot_with,
+    hash_for, group_for_frame, frame_position_in_group,
+    HASHTABLE_SIZE, FRAMES_PER_GROUP,
+};
+mount core.database.sqlite.native.wal_index.reader.{
+    ReaderSlot, ReaderMarks, marks_new, READER_SLOT_COUNT,
+};
+mount core.database.sqlite.native.wal_index.state.{
+    WalIndexState, state_new,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// Header
+// -----------------------------------------------------------------------------
+
+fn test_header_default_supported_version() {
+    let h = header_default(4096);
+    assert(h.is_version_supported());
+    assert(!h.is_init);
+}
+
+fn test_header_serialize_length() {
+    let h = header_default(4096);
+    let bytes = serialize(&h);
+    assert_eq(bytes.len(), HEADER_BYTES);
+}
+
+fn test_header_bump_change_counter() {
+    let mut h = header_default(4096);
+    h.bump_change_counter();
+    h.bump_change_counter();
+    assert_eq(h.change_counter, 2);
+}
+
+fn test_header_note_committed_frame_advances_mx() {
+    let mut h = header_default(4096);
+    h.note_committed_frame(7, 100);
+    assert_eq(h.mx_frame, 7);
+    assert_eq(h.n_page, 100);
+}
+
+fn test_dual_copies_agree_when_equal() {
+    let a = header_default(4096);
+    let b = header_default(4096);
+    assert(dual_copies_agree(&a, &b));
+}
+
+// -----------------------------------------------------------------------------
+// Hash function
+// -----------------------------------------------------------------------------
+
+fn test_hash_for_deterministic() {
+    let h1 = hash_for(42);
+    let h2 = hash_for(42);
+    assert_eq(h1, h2);
+}
+
+fn test_hash_for_in_range() {
+    let h = hash_for(99);
+    assert(h >= 0);
+    assert(h < HASHTABLE_SIZE);
+}
+
+fn test_group_for_frame_round_trip() {
+    let frame = 4097;
+    assert_eq(group_for_frame(frame), 1);
+    assert_eq(frame_position_in_group(frame), 1);
+}
+
+fn test_group_for_frame_first_group() {
+    let frame = 1;
+    assert_eq(group_for_frame(frame), 0);
+    assert_eq(frame_position_in_group(frame), 1);
+}
+
+// -----------------------------------------------------------------------------
+// HashGroup
+// -----------------------------------------------------------------------------
+
+fn test_hash_group_insert_and_lookup() {
+    let mut g = hash_group_new(0);
+    g.insert(1, 7);
+    match g.lookup(7) {
+        Some(frame) => assert_eq(frame, 1),
+        None        => panic("page 7 found"),
+    }
+}
+
+fn test_hash_group_returns_most_recent() {
+    let mut g = hash_group_new(0);
+    g.insert(1, 7);
+    g.insert(5, 7);    // page 7 rewritten in frame 5
+    match g.lookup(7) {
+        Some(frame) => assert_eq(frame, 5),
+        None        => panic("most recent"),
+    }
+}
+
+fn test_hash_group_unknown_page_returns_none() {
+    let g = hash_group_new(0);
+    match g.lookup(99) {
+        None    => {},
+        Some(_) => panic("unknown"),
+    }
+}
+
+fn test_hash_group_frame_count() {
+    let mut g = hash_group_new(0);
+    g.insert(1, 7);
+    g.insert(2, 8);
+    assert_eq(g.frame_count(), 2);
+}
+
+// -----------------------------------------------------------------------------
+// ReaderMarks
+// -----------------------------------------------------------------------------
+
+fn test_reader_marks_initial_inactive() {
+    let m = marks_new();
+    assert_eq(m.active_count(), 0);
+}
+
+fn test_reader_marks_claim_returns_slot() {
+    let mut m = marks_new();
+    match m.claim(100) {
+        Some(_) => {},
+        None    => panic("claim"),
+    }
+    assert_eq(m.active_count(), 1);
+}
+
+fn test_reader_marks_dedup_same_max_frame() {
+    let mut m = marks_new();
+    let a = match m.claim(100) { Some(s) => s, None => 0 };
+    let b = match m.claim(100) { Some(s) => s, None => 0 };
+    assert_eq(a, b);
+}
+
+fn test_reader_marks_release_returns_true() {
+    let mut m = marks_new();
+    let s = match m.claim(50) { Some(s) => s, None => 0 };
+    assert(m.release(s));
+}
+
+fn test_reader_marks_release_inactive_returns_false() {
+    let mut m = marks_new();
+    assert(!m.release(2));
+}
+
+fn test_reader_marks_low_water_mark() {
+    let mut m = marks_new();
+    let _ = m.claim(100);
+    let _ = m.claim(50);
+    let _ = m.claim(200);
+    assert_eq(m.checkpoint_low_water_mark(), 50);
+}
+
+// -----------------------------------------------------------------------------
+// WalIndexState
+// -----------------------------------------------------------------------------
+
+fn test_state_register_then_lookup() {
+    let mut s = state_new(4096);
+    s.register_frame(1, 7, 100);
+    match s.lookup_page(7) {
+        Some(frame) => assert_eq(frame, 1),
+        None        => panic("page 7 indexed"),
+    }
+}
+
+fn test_state_dual_copies_consistent_after_sync() {
+    let mut s = state_new(4096);
+    s.register_frame(1, 7, 100);
+    s.sync_backup();
+    assert(s.dual_copies_consistent());
+}
+
+fn test_state_lookup_unknown_returns_none() {
+    let s = state_new(4096);
+    match s.lookup_page(42) {
+        None    => {},
+        Some(_) => panic("unknown"),
+    }
+}
+
+fn main() {
+    test_header_default_supported_version();
+    test_header_serialize_length();
+    test_header_bump_change_counter();
+    test_header_note_committed_frame_advances_mx();
+    test_dual_copies_agree_when_equal();
+    test_hash_for_deterministic();
+    test_hash_for_in_range();
+    test_group_for_frame_round_trip();
+    test_group_for_frame_first_group();
+    test_hash_group_insert_and_lookup();
+    test_hash_group_returns_most_recent();
+    test_hash_group_unknown_page_returns_none();
+    test_hash_group_frame_count();
+    test_reader_marks_initial_inactive();
+    test_reader_marks_claim_returns_slot();
+    test_reader_marks_dedup_same_max_frame();
+    test_reader_marks_release_returns_true();
+    test_reader_marks_release_inactive_returns_false();
+    test_reader_marks_low_water_mark();
+    test_state_register_then_lookup();
+    test_state_dual_copies_consistent_after_sync();
+    test_state_lookup_unknown_returns_none();
+}

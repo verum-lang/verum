@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/wal_index/mod.vr
+// =============================================================================
+// Layer: 1 (pager support)
+// Spec: sqlite-native.md §6.6 (WAL-index / shm file)
+//
+// The WAL-index is a memory-mapped helper file (`<db>-shm`) that lets
+// multiple readers share the WAL without parsing it. Layout:
+//
+//   * 48-byte header (×2, redundant copies for crash safety)
+//   * Hash table mapping page_no → frame_index (within current WAL)
+//   * Per-reader marks (max_frame each reader is allowed to see)
+//   * Checkpoint progress (last frame the checkpointer wrote back)
+//
+// Submodules:
+//   * `header`    — WalIndexHeader + serialize/parse + dual-copy validation
+//   * `hash`      — page_no → frame_index hash table primitives
+//   * `reader`    — per-reader mark slots (READMARK_0..7)
+//   * `state`     — WalIndexState aggregate
+// =============================================================================
+
+module core.database.sqlite.native.wal_index;
+
+public module header;
+public module hash;
+public module reader;
+public module state;

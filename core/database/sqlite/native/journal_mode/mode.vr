@@ -1,0 +1,56 @@
+// =============================================================================
+// journal_mode/mode.vr — JournalMode taxonomy
+// =============================================================================
+// Spec: sqlite-native.md §18.4
+// =============================================================================
+
+module core.database.sqlite.native.journal_mode.mode;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+
+public type JournalMode is
+      JmDelete
+    | JmTruncate
+    | JmPersist
+    | JmMemory
+    | JmWal
+    | JmOff;
+
+public fn mode_text(m: &JournalMode) -> Text {
+    match m {
+        JmDelete    => "delete".clone(),
+        JmTruncate  => "truncate".clone(),
+        JmPersist   => "persist".clone(),
+        JmMemory    => "memory".clone(),
+        JmWal       => "wal".clone(),
+        JmOff       => "off".clone(),
+    }
+}
+
+/// Parse the SQLite spelling (case-insensitive) → JournalMode.
+public fn parse_mode(text: &Text) -> Maybe<JournalMode> {
+    let lower = lower(text);
+    if lower == "delete".clone()    { return Some(JmDelete); }
+    if lower == "truncate".clone()  { return Some(JmTruncate); }
+    if lower == "persist".clone()   { return Some(JmPersist); }
+    if lower == "memory".clone()    { return Some(JmMemory); }
+    if lower == "wal".clone()       { return Some(JmWal); }
+    if lower == "off".clone()       { return Some(JmOff); }
+    None
+}
+
+fn lower(t: &Text) -> Text {
+    let bs = t.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        let c = if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(c);
+        i = i + 1;
+    }
+    out
+}
+
+public fn default_mode() -> JournalMode { JmDelete }

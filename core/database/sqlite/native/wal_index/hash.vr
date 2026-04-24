@@ -1,0 +1,146 @@
+// =============================================================================
+// wal_index/hash.vr — page_no → frame_index hash table
+// =============================================================================
+// Spec: sqlite-native.md §6.6
+//
+// SQLite organises the WAL-index hash table in 32K-frame "groups";
+// each group has 8192 hash slots + 4096 frame-index slots. We model
+// a single group; multi-group lookup is `group_idx = (frame - 1) / 4096`.
+//
+// Hash function: `(page_no * 383) % HASHTABLE_SIZE`. Linear probe
+// on collision. On every insert we record (frame_index, page_no);
+// on lookup we walk slots until either a match or the sentinel 0.
+// =============================================================================
+
+module core.database.sqlite.native.wal_index.hash;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+// SQLite uses 8192 hash slots per 4096 frame slots.
+public const HASHTABLE_SIZE: Int = 8192;
+public const FRAMES_PER_GROUP: Int = 4096;
+public const HASH_PRIME: Int = 383;
+
+// -----------------------------------------------------------------------------
+// HashSlot — one slot in the page-hash table
+// -----------------------------------------------------------------------------
+
+public type HashSlot is { value: Int }
+
+public fn empty_slot() -> HashSlot { HashSlot { value: 0 } }
+
+public fn slot_with(frame_in_group: Int) -> HashSlot { HashSlot { value: frame_in_group } }
+
+implement HashSlot {
+    public fn is_empty(&self) -> Bool { self.value == 0 }
+    public fn frame_in_group(&self) -> Int { self.value }
+}
+
+// -----------------------------------------------------------------------------
+// FrameRecord — per-frame metadata
+// -----------------------------------------------------------------------------
+
+public type FrameRecord is { page_no: Int }
+
+public fn frame_record(page_no: Int) -> FrameRecord { FrameRecord { page_no: page_no } }
+
+// -----------------------------------------------------------------------------
+// HashGroup — one 4096-frame group
+// -----------------------------------------------------------------------------
+
+public type HashGroup is {
+    /// Index of this group (0-based) — frame 1..4096 → group 0, etc.
+    group_index: Int,
+    slots: List<HashSlot>,                 // length = HASHTABLE_SIZE
+    frames: List<FrameRecord>,             // length = FRAMES_PER_GROUP
+    /// Number of frames currently registered in this group.
+    populated: Int,
+}
+
+public fn hash_group_new(group_index: Int) -> HashGroup {
+    let mut slots: List<HashSlot> = List.new();
+    let mut i: Int = 0;
+    while i < HASHTABLE_SIZE { slots.push(empty_slot()); i = i + 1; }
+    let mut frames: List<FrameRecord> = List.new();
+    let mut k: Int = 0;
+    while k < FRAMES_PER_GROUP { frames.push(frame_record(0)); k = k + 1; }
+    HashGroup {
+        group_index: group_index,
+        slots: slots,
+        frames: frames,
+        populated: 0,
+    }
+}
+
+implement HashGroup {
+    public fn frame_count(&self) -> Int { self.populated }
+
+    /// Insert a (frame_in_group, page_no) record. `frame_in_group`
+    /// is 1-based (matches SQLite's WAL frame numbering within group).
+    pub fn insert(&mut self, frame_in_group: Int, page_no: Int) {
+        if frame_in_group <= 0 || frame_in_group > FRAMES_PER_GROUP { return; }
+        self.frames[frame_in_group - 1] = frame_record(page_no);
+        let mut slot = hash_for(page_no);
+        // Linear probe.
+        let mut i: Int = 0;
+        while i < HASHTABLE_SIZE {
+            if self.slots[slot].is_empty() {
+                self.slots[slot] = slot_with(frame_in_group);
+                self.populated = self.populated + 1;
+                return;
+            }
+            slot = (slot + 1) % HASHTABLE_SIZE;
+            i = i + 1;
+        }
+    }
+
+    /// Look up the most recent frame_in_group that wrote `page_no`.
+    /// SQLite's lookup walks ALL collision-chain entries and keeps
+    /// the maximum, since the same page may have been rewritten in
+    /// successive frames within the same group.
+    pub fn lookup(&self, page_no: Int) -> Maybe<Int> {
+        let mut slot = hash_for(page_no);
+        let mut best: Int = 0;
+        let mut i: Int = 0;
+        while i < HASHTABLE_SIZE {
+            if self.slots[slot].is_empty() {
+                return if best == 0 { None } else { Some(best) };
+            }
+            let frame = self.slots[slot].frame_in_group();
+            if frame >= 1 && frame <= FRAMES_PER_GROUP
+                && self.frames[frame - 1].page_no == page_no
+                && frame > best
+            {
+                best = frame;
+            }
+            slot = (slot + 1) % HASHTABLE_SIZE;
+            i = i + 1;
+        }
+        if best == 0 { None } else { Some(best) }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Hash function
+// -----------------------------------------------------------------------------
+
+public fn hash_for(page_no: Int) -> Int {
+    let h = (page_no * HASH_PRIME) % HASHTABLE_SIZE;
+    if h < 0 { h + HASHTABLE_SIZE } else { h }
+}
+
+// -----------------------------------------------------------------------------
+// Frame → group / position mapping
+// -----------------------------------------------------------------------------
+
+public fn group_for_frame(frame_idx: Int) -> Int {
+    if frame_idx <= 0 { return 0; }
+    (frame_idx - 1) / FRAMES_PER_GROUP
+}
+
+public fn frame_position_in_group(frame_idx: Int) -> Int {
+    if frame_idx <= 0 { return 0; }
+    ((frame_idx - 1) % FRAMES_PER_GROUP) + 1
+}

@@ -1,0 +1,74 @@
+// =============================================================================
+// trace/event.vr — TraceEvent + mask flags
+// =============================================================================
+// Spec: sqlite-native.md §22 (sqlite3_trace_v2)
+//
+// SQLite assigns each event a bit:
+//
+//   SQLITE_TRACE_STMT     = 0x01
+//   SQLITE_TRACE_PROFILE  = 0x02
+//   SQLITE_TRACE_ROW      = 0x04
+//   SQLITE_TRACE_CLOSE    = 0x08
+// =============================================================================
+
+module core.database.sqlite.native.trace.event;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type TraceEvent is TeStmt | TeProfile | TeRow | TeClose;
+
+public fn event_kind_name(e: &TraceEvent) -> Text {
+    match e {
+        TeStmt    => "stmt".clone(),
+        TeProfile => "profile".clone(),
+        TeRow     => "row".clone(),
+        TeClose   => "close".clone(),
+    }
+}
+
+public const TRACE_STMT: Int    = 0x01;
+public const TRACE_PROFILE: Int = 0x02;
+public const TRACE_ROW: Int     = 0x04;
+public const TRACE_CLOSE: Int   = 0x08;
+
+public fn event_bit(e: &TraceEvent) -> Int {
+    match e {
+        TeStmt    => TRACE_STMT,
+        TeProfile => TRACE_PROFILE,
+        TeRow     => TRACE_ROW,
+        TeClose   => TRACE_CLOSE,
+    }
+}
+
+public fn mask_includes(mask: Int, e: &TraceEvent) -> Bool {
+    (mask & event_bit(e)) != 0
+}
+
+// -----------------------------------------------------------------------------
+// MaskBuilder — fluent OR composition
+// -----------------------------------------------------------------------------
+
+public type TraceMask is { bits: Int }
+
+public fn mask_empty() -> TraceMask { TraceMask { bits: 0 } }
+
+public fn mask_all() -> TraceMask {
+    TraceMask { bits: TRACE_STMT | TRACE_PROFILE | TRACE_ROW | TRACE_CLOSE }
+}
+
+implement TraceMask {
+    pub fn include(mut self, e: TraceEvent) -> TraceMask {
+        self.bits = self.bits | event_bit(&e);
+        self
+    }
+
+    pub fn exclude(mut self, e: TraceEvent) -> TraceMask {
+        self.bits = self.bits & !event_bit(&e);
+        self
+    }
+
+    public fn covers(&self, e: &TraceEvent) -> Bool { mask_includes(self.bits, e) }
+
+    public fn raw_bits(&self) -> Int { self.bits }
+}

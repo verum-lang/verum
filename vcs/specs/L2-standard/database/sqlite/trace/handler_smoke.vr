@@ -1,0 +1,157 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, trace, event, mask, handler
+// @timeout: 5000
+// @expected-exit: 0
+//
+// trace_v2 surface:
+//   * TraceEvent kind names
+//   * TraceMask include/exclude/covers
+//   * TracePayload kind names
+//   * CountingHandler observes every event
+//   * SilentHandler discards everything
+
+mount core.database.sqlite.native.trace.event.{
+    TraceEvent, TeStmt, TeProfile, TeRow, TeClose,
+    event_kind_name, event_bit, mask_includes,
+    TraceMask, mask_empty, mask_all,
+    TRACE_STMT, TRACE_PROFILE, TRACE_ROW, TRACE_CLOSE,
+};
+mount core.database.sqlite.native.trace.payload.{
+    StmtPayload, stmt_payload,
+    ProfilePayload, profile_payload,
+    RowPayload, row_payload,
+    ClosePayload, close_payload,
+    TracePayload, TpStmt, TpProfile, TpRow, TpClose,
+    payload_kind_name,
+};
+mount core.database.sqlite.native.trace.handler.{
+    TraceHandler,
+    CountingHandler, counting_handler,
+    SilentHandler, silent_handler,
+    handler_observes,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// Event
+// -----------------------------------------------------------------------------
+
+fn test_event_names_unique() {
+    assert(event_kind_name(&TeStmt) == "stmt".clone());
+    assert(event_kind_name(&TeProfile) == "profile".clone());
+    assert(event_kind_name(&TeRow) == "row".clone());
+    assert(event_kind_name(&TeClose) == "close".clone());
+}
+
+fn test_event_bits() {
+    assert_eq(event_bit(&TeStmt), TRACE_STMT);
+    assert_eq(event_bit(&TeProfile), TRACE_PROFILE);
+    assert_eq(event_bit(&TeRow), TRACE_ROW);
+    assert_eq(event_bit(&TeClose), TRACE_CLOSE);
+}
+
+fn test_mask_includes_individual_bits() {
+    let bits = TRACE_STMT | TRACE_ROW;
+    assert(mask_includes(bits, &TeStmt));
+    assert(!mask_includes(bits, &TeProfile));
+    assert(mask_includes(bits, &TeRow));
+}
+
+// -----------------------------------------------------------------------------
+// TraceMask
+// -----------------------------------------------------------------------------
+
+fn test_mask_empty_covers_nothing() {
+    let m = mask_empty();
+    assert(!m.covers(&TeStmt));
+    assert(!m.covers(&TeProfile));
+}
+
+fn test_mask_all_covers_everything() {
+    let m = mask_all();
+    assert(m.covers(&TeStmt));
+    assert(m.covers(&TeProfile));
+    assert(m.covers(&TeRow));
+    assert(m.covers(&TeClose));
+}
+
+fn test_mask_include_adds_event() {
+    let m = mask_empty().include(TeStmt);
+    assert(m.covers(&TeStmt));
+    assert(!m.covers(&TeProfile));
+}
+
+fn test_mask_exclude_removes_event() {
+    let m = mask_all().exclude(TeRow);
+    assert(!m.covers(&TeRow));
+    assert(m.covers(&TeStmt));
+}
+
+// -----------------------------------------------------------------------------
+// Payload
+// -----------------------------------------------------------------------------
+
+fn test_payload_kind_names() {
+    let p1 = TpStmt(stmt_payload("SQL".clone(), "SQL".clone(), 1 as Int64));
+    let p2 = TpProfile(profile_payload("SQL".clone(), 100 as Int64, 1 as Int64));
+    let p3 = TpRow(row_payload(1 as Int64, 0 as Int64));
+    let p4 = TpClose(close_payload(7 as Int64));
+    assert(payload_kind_name(&p1) == "stmt".clone());
+    assert(payload_kind_name(&p2) == "profile".clone());
+    assert(payload_kind_name(&p3) == "row".clone());
+    assert(payload_kind_name(&p4) == "close".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Handler
+// -----------------------------------------------------------------------------
+
+fn test_counting_handler_increments() {
+    let mut h = counting_handler();
+    h.on_event(&TpStmt(stmt_payload("SQL".clone(), "SQL".clone(), 1 as Int64)));
+    h.on_event(&TpProfile(profile_payload("SQL".clone(), 100 as Int64, 1 as Int64)));
+    h.on_event(&TpRow(row_payload(1 as Int64, 0 as Int64)));
+    h.on_event(&TpClose(close_payload(7 as Int64)));
+    assert_eq(h.total_events(), 4);
+    assert_eq(h.stmt_count, 1);
+    assert_eq(h.profile_count, 1);
+    assert_eq(h.row_count, 1);
+    assert_eq(h.close_count, 1);
+}
+
+fn test_counting_handler_full_mask() {
+    let h = counting_handler();
+    let m = h.mask();
+    assert(m.covers(&TeStmt));
+    assert(m.covers(&TeClose));
+}
+
+fn test_silent_handler_empty_mask() {
+    let h = silent_handler();
+    let m = h.mask();
+    assert(!m.covers(&TeStmt));
+}
+
+fn test_handler_observes_routes_via_mask() {
+    let h = counting_handler();
+    assert(handler_observes(&h.mask(), &TeProfile));
+    let s = silent_handler();
+    assert(!handler_observes(&s.mask(), &TeProfile));
+}
+
+fn main() {
+    test_event_names_unique();
+    test_event_bits();
+    test_mask_includes_individual_bits();
+    test_mask_empty_covers_nothing();
+    test_mask_all_covers_everything();
+    test_mask_include_adds_event();
+    test_mask_exclude_removes_event();
+    test_payload_kind_names();
+    test_counting_handler_increments();
+    test_counting_handler_full_mask();
+    test_silent_handler_empty_mask();
+    test_handler_observes_routes_via_mask();
+}

@@ -1,0 +1,109 @@
+// =============================================================================
+// journal_mode/semantics.vr — per-mode behaviour predicates
+// =============================================================================
+// Spec: sqlite-native.md §18.4
+//
+// Each predicate answers one yes/no question about how the journal
+// behaves under a given JournalMode. The L1 pager + checkpointer
+// consult these to know what to do.
+// =============================================================================
+
+module core.database.sqlite.native.journal_mode.semantics;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.journal_mode.mode.{
+    JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+};
+
+/// True iff this mode keeps a rollback journal at all.
+/// (WAL uses a separate WAL file; OFF + MEMORY use no on-disk journal.)
+public fn has_rollback_journal(m: &JournalMode) -> Bool {
+    match m {
+        JmDelete | JmTruncate | JmPersist => true,
+        _ => false,
+    }
+}
+
+/// True iff this mode requires a `<db>-wal` companion file.
+public fn requires_wal_file(m: &JournalMode) -> Bool {
+    match m {
+        JmWal => true,
+        _     => false,
+    }
+}
+
+/// True iff readers and writers can run concurrently.
+/// (WAL is the only mode supporting reader/writer concurrency.)
+public fn supports_concurrent_readers(m: &JournalMode) -> Bool {
+    match m {
+        JmWal => true,
+        _     => false,
+    }
+}
+
+/// True iff a crash mid-tx can result in database corruption.
+/// (OFF skips all crash safety; everything else recovers cleanly.)
+public fn is_crash_safe(m: &JournalMode) -> Bool {
+    match m {
+        JmOff => false,
+        _     => true,
+    }
+}
+
+/// True iff the journal/WAL file persists on disk between transactions.
+public fn journal_persists_between_tx(m: &JournalMode) -> Bool {
+    match m {
+        JmPersist | JmWal => true,
+        _                  => false,
+    }
+}
+
+/// True iff the journal lives entirely in memory (and so the
+/// database is not durable across process restarts during an
+/// uncommitted transaction).
+public fn is_memory_only(m: &JournalMode) -> Bool {
+    match m {
+        JmMemory => true,
+        _        => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Performance hint — one of {Slow, Medium, Fast}
+// -----------------------------------------------------------------------------
+
+public type CommitSpeed is CsSlow | CsMedium | CsFast;
+
+public fn speed_name(s: &CommitSpeed) -> base.Text {
+    match s {
+        CsSlow   => "slow".clone(),
+        CsMedium => "medium".clone(),
+        CsFast   => "fast".clone(),
+    }
+}
+
+public fn commit_speed(m: &JournalMode) -> CommitSpeed {
+    match m {
+        JmDelete   => CsSlow,         // file create + fsync + delete
+        JmTruncate => CsMedium,       // truncate-to-zero + fsync
+        JmPersist  => CsMedium,       // header zero + fsync
+        JmMemory   => CsFast,
+        JmWal      => CsFast,         // append-only
+        JmOff      => CsFast,         // no journal at all
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Mode selection helper — pick the safest mode that satisfies a goal
+// -----------------------------------------------------------------------------
+
+public type Goal is GMaxConcurrency | GMaxSpeed | GCrashSafety;
+
+public fn recommend_for(goal: &Goal) -> JournalMode {
+    match goal {
+        GMaxConcurrency => JmWal,
+        GMaxSpeed       => JmMemory,
+        GCrashSafety    => JmDelete,
+    }
+}

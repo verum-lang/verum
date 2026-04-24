@@ -1,0 +1,203 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, journal_mode, semantics, transition, wal
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Journal-mode surface:
+//   * JournalMode parse round-trips
+//   * Per-mode semantics predicates
+//   * commit_speed classification
+//   * Goal → recommended mode
+//   * TransitionPlan steps for WAL → DELETE includes checkpoint+remove
+//   * TransitionPlan steps for non-WAL → non-WAL omits exclusive lock
+
+mount core.database.sqlite.native.journal_mode.mode.{
+    JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+    mode_text, parse_mode, default_mode,
+};
+mount core.database.sqlite.native.journal_mode.semantics.{
+    has_rollback_journal, requires_wal_file,
+    supports_concurrent_readers, is_crash_safe,
+    journal_persists_between_tx, is_memory_only,
+    CommitSpeed, CsSlow, CsMedium, CsFast,
+    speed_name, commit_speed,
+    Goal, GMaxConcurrency, GMaxSpeed, GCrashSafety,
+    recommend_for,
+};
+mount core.database.sqlite.native.journal_mode.transition.{
+    TransitionStep,
+    TsCheckpointWal, TsAcquireExclusiveLock, TsRemoveWalFile,
+    TsCreateWalFile, TsRollbackJournalToFresh, TsRollbackJournalToMemory,
+    TsReleaseExclusiveLock,
+    TransitionPlan, plan_for, is_transition_supported,
+    step_kind_name,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// Mode parse + name
+// -----------------------------------------------------------------------------
+
+fn test_mode_text_round_trip() {
+    assert(mode_text(&JmDelete) == "delete".clone());
+    assert(mode_text(&JmTruncate) == "truncate".clone());
+    assert(mode_text(&JmPersist) == "persist".clone());
+    assert(mode_text(&JmMemory) == "memory".clone());
+    assert(mode_text(&JmWal) == "wal".clone());
+    assert(mode_text(&JmOff) == "off".clone());
+}
+
+fn test_parse_mode_recognises_all() {
+    match parse_mode(&"DELETE".clone()) { Some(_) => {}, None => panic("DELETE") }
+    match parse_mode(&"truncate".clone()) { Some(_) => {}, None => panic("truncate") }
+    match parse_mode(&"WAL".clone()) { Some(_) => {}, None => panic("WAL") }
+    match parse_mode(&"OFF".clone()) { Some(_) => {}, None => panic("OFF") }
+}
+
+fn test_parse_mode_unknown_returns_none() {
+    match parse_mode(&"foo".clone()) { None => {}, _ => panic("none") }
+}
+
+fn test_default_mode_is_delete() {
+    match default_mode() {
+        JmDelete => {},
+        _        => panic("default delete"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Semantics
+// -----------------------------------------------------------------------------
+
+fn test_has_rollback_journal_only_for_classic() {
+    assert(has_rollback_journal(&JmDelete));
+    assert(has_rollback_journal(&JmTruncate));
+    assert(has_rollback_journal(&JmPersist));
+    assert(!has_rollback_journal(&JmMemory));
+    assert(!has_rollback_journal(&JmWal));
+    assert(!has_rollback_journal(&JmOff));
+}
+
+fn test_requires_wal_file_only_for_wal() {
+    assert(requires_wal_file(&JmWal));
+    assert(!requires_wal_file(&JmDelete));
+    assert(!requires_wal_file(&JmMemory));
+}
+
+fn test_supports_concurrent_readers_only_wal() {
+    assert(supports_concurrent_readers(&JmWal));
+    assert(!supports_concurrent_readers(&JmDelete));
+}
+
+fn test_is_crash_safe_except_off() {
+    assert(is_crash_safe(&JmDelete));
+    assert(is_crash_safe(&JmWal));
+    assert(!is_crash_safe(&JmOff));
+}
+
+fn test_journal_persists_between_tx() {
+    assert(journal_persists_between_tx(&JmPersist));
+    assert(journal_persists_between_tx(&JmWal));
+    assert(!journal_persists_between_tx(&JmDelete));
+}
+
+fn test_is_memory_only_only_memory() {
+    assert(is_memory_only(&JmMemory));
+    assert(!is_memory_only(&JmDelete));
+}
+
+fn test_commit_speed_categorisation() {
+    match commit_speed(&JmDelete) { CsSlow => {}, _ => panic("DELETE slow") }
+    match commit_speed(&JmTruncate) { CsMedium => {}, _ => panic("TRUNCATE medium") }
+    match commit_speed(&JmWal) { CsFast => {}, _ => panic("WAL fast") }
+    match commit_speed(&JmOff) { CsFast => {}, _ => panic("OFF fast") }
+}
+
+fn test_speed_name_round_trip() {
+    assert(speed_name(&CsSlow) == "slow".clone());
+    assert(speed_name(&CsMedium) == "medium".clone());
+    assert(speed_name(&CsFast) == "fast".clone());
+}
+
+fn test_recommend_for_goals() {
+    match recommend_for(&GMaxConcurrency) {
+        JmWal => {},
+        _     => panic("concurrency wants WAL"),
+    }
+    match recommend_for(&GMaxSpeed) {
+        JmMemory => {},
+        _        => panic("speed wants MEMORY"),
+    }
+    match recommend_for(&GCrashSafety) {
+        JmDelete => {},
+        _        => panic("safety wants DELETE"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Transition plan
+// -----------------------------------------------------------------------------
+
+fn test_transition_wal_to_delete_includes_checkpoint() {
+    let plan = plan_for(JmWal, JmDelete);
+    assert(plan.requires_exclusive);
+    assert(plan.includes_step(&TsCheckpointWal));
+    assert(plan.includes_step(&TsRemoveWalFile));
+    assert(plan.includes_step(&TsAcquireExclusiveLock));
+    assert(plan.includes_step(&TsReleaseExclusiveLock));
+}
+
+fn test_transition_delete_to_wal_creates_wal_file() {
+    let plan = plan_for(JmDelete, JmWal);
+    assert(plan.requires_exclusive);
+    assert(plan.includes_step(&TsCreateWalFile));
+}
+
+fn test_transition_delete_to_truncate_no_excl() {
+    let plan = plan_for(JmDelete, JmTruncate);
+    assert(!plan.requires_exclusive);
+    assert(!plan.includes_step(&TsAcquireExclusiveLock));
+    assert(!plan.includes_step(&TsCheckpointWal));
+}
+
+fn test_transition_to_memory_uses_memory_journal_step() {
+    let plan = plan_for(JmDelete, JmMemory);
+    assert(plan.includes_step(&TsRollbackJournalToMemory));
+}
+
+fn test_transition_step_kind_names_unique() {
+    let n1 = step_kind_name(&TsCheckpointWal);
+    let n2 = step_kind_name(&TsCreateWalFile);
+    let n3 = step_kind_name(&TsRollbackJournalToFresh);
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn test_is_transition_supported_always_true() {
+    assert(is_transition_supported(&JmDelete, &JmWal));
+    assert(is_transition_supported(&JmWal, &JmOff));
+}
+
+fn main() {
+    test_mode_text_round_trip();
+    test_parse_mode_recognises_all();
+    test_parse_mode_unknown_returns_none();
+    test_default_mode_is_delete();
+    test_has_rollback_journal_only_for_classic();
+    test_requires_wal_file_only_for_wal();
+    test_supports_concurrent_readers_only_wal();
+    test_is_crash_safe_except_off();
+    test_journal_persists_between_tx();
+    test_is_memory_only_only_memory();
+    test_commit_speed_categorisation();
+    test_speed_name_round_trip();
+    test_recommend_for_goals();
+    test_transition_wal_to_delete_includes_checkpoint();
+    test_transition_delete_to_wal_creates_wal_file();
+    test_transition_delete_to_truncate_no_excl();
+    test_transition_to_memory_uses_memory_journal_step();
+    test_transition_step_kind_names_unique();
+    test_is_transition_supported_always_true();
+}

@@ -1,0 +1,115 @@
+// =============================================================================
+// journal_mode/transition.vr — mode-transition validity matrix
+// =============================================================================
+// Spec: sqlite-native.md §18.4
+//
+// SQLite's `PRAGMA journal_mode = X;` accepts (almost) any
+// transition; the catch is WAL → non-WAL (or vice versa) requires
+// taking an EXCLUSIVE lock so no other connection holds the
+// database open.
+//
+// `TransitionPlan` enumerates the steps required.
+// =============================================================================
+
+module core.database.sqlite.native.journal_mode.transition;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.journal_mode.mode.{
+    JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+    mode_text,
+};
+mount core.database.sqlite.native.journal_mode.semantics.{
+    requires_wal_file, has_rollback_journal,
+};
+
+// -----------------------------------------------------------------------------
+// TransitionStep
+// -----------------------------------------------------------------------------
+
+public type TransitionStep is
+      TsCheckpointWal              // before leaving WAL: full checkpoint
+    | TsAcquireExclusiveLock
+    | TsRemoveWalFile
+    | TsCreateWalFile
+    | TsRollbackJournalToFresh     // create / truncate journal as needed
+    | TsRollbackJournalToMemory
+    | TsReleaseExclusiveLock;
+
+public fn step_kind_name(s: &TransitionStep) -> Text {
+    match s {
+        TsCheckpointWal             => "checkpoint_wal".clone(),
+        TsAcquireExclusiveLock      => "acquire_excl".clone(),
+        TsRemoveWalFile             => "remove_wal".clone(),
+        TsCreateWalFile             => "create_wal".clone(),
+        TsRollbackJournalToFresh    => "fresh_journal".clone(),
+        TsRollbackJournalToMemory   => "memory_journal".clone(),
+        TsReleaseExclusiveLock      => "release_excl".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// TransitionPlan
+// -----------------------------------------------------------------------------
+
+public type TransitionPlan is {
+    from_mode: JournalMode,
+    to_mode: JournalMode,
+    steps: List<TransitionStep>,
+    /// True iff the transition demands an EXCLUSIVE lock (no other
+    /// connection can be open).
+    requires_exclusive: Bool,
+}
+
+public fn plan_for(from_mode: JournalMode, to_mode: JournalMode) -> TransitionPlan {
+    let leaving_wal = requires_wal_file(&from_mode);
+    let entering_wal = requires_wal_file(&to_mode);
+    let needs_excl = leaving_wal || entering_wal;
+
+    let mut steps: List<TransitionStep> = List.new();
+    if needs_excl { steps.push(TsAcquireExclusiveLock); }
+    if leaving_wal {
+        steps.push(TsCheckpointWal);
+        steps.push(TsRemoveWalFile);
+    }
+    if entering_wal {
+        steps.push(TsCreateWalFile);
+    } else {
+        match &to_mode {
+            JmMemory => steps.push(TsRollbackJournalToMemory),
+            _        => if has_rollback_journal(&to_mode) { steps.push(TsRollbackJournalToFresh); } else {},
+        }
+    }
+    if needs_excl { steps.push(TsReleaseExclusiveLock); }
+
+    TransitionPlan {
+        from_mode: from_mode,
+        to_mode: to_mode,
+        steps: steps,
+        requires_exclusive: needs_excl,
+    }
+}
+
+implement TransitionPlan {
+    public fn step_count(&self) -> Int { self.steps.len() }
+
+    pub fn includes_step(&self, want: &TransitionStep) -> Bool {
+        let want_name = step_kind_name(want);
+        let mut i: Int = 0;
+        while i < self.steps.len() {
+            if step_kind_name(&self.steps[i]) == want_name { return true; }
+            i = i + 1;
+        }
+        false
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Validity check — is this transition representable in the catalogue?
+// SQLite accepts every (from, to) pair; we always return true. The
+// predicate is here for symmetry — bespoke storage backends might
+// reject specific pairs.
+// -----------------------------------------------------------------------------
+
+public fn is_transition_supported(_from: &JournalMode, _to: &JournalMode) -> Bool { true }

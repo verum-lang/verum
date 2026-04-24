@@ -1,0 +1,177 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, prng, arc4, random, randomblob, seed
+// @timeout: 5000
+// @expected-exit: 0
+//
+// PRNG surface:
+//   * Arc4State init + mix is reproducible from same seed
+//   * step / step_n produce expected counts
+//   * SeedSource protocol covers fixed/counter implementations
+//   * ReseedPolicy default + should_reseed predicate
+//   * PrngEngine seed_with → random_blob / random_int
+
+mount core.database.sqlite.native.prng.arc4.{
+    Arc4State, arc4_init,
+};
+mount core.database.sqlite.native.prng.seed.{
+    SeedSource,
+    FixedSeedSource, fixed_seed,
+    CounterSeedSource, counter_seed,
+    ReseedPolicy, default_policy, should_reseed,
+};
+mount core.database.sqlite.native.prng.engine.{
+    PrngEngine, engine_new, engine_with_fixed_seed,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// Arc4State
+// -----------------------------------------------------------------------------
+
+fn make_seed(n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push((i % 256) as Byte); i = i + 1; }
+    out
+}
+
+fn test_arc4_init_state_size() {
+    let s = arc4_init();
+    assert_eq(s.s.len(), 256);
+}
+
+fn test_arc4_step_advances_state() {
+    let mut s = arc4_init();
+    let i_before = s.i;
+    let _ = s.step();
+    assert(s.i != i_before);
+}
+
+fn test_arc4_step_n_returns_n_bytes() {
+    let mut s = arc4_init();
+    let bytes = s.step_n(16);
+    assert_eq(bytes.len(), 16);
+}
+
+fn test_arc4_mix_then_step_reproducible() {
+    let key = make_seed(32);
+    let mut a = arc4_init();
+    let mut b = arc4_init();
+    a.mix(&key);
+    b.mix(&key);
+    assert_eq(a.step(), b.step());
+    assert_eq(a.step(), b.step());
+}
+
+// -----------------------------------------------------------------------------
+// Seed sources
+// -----------------------------------------------------------------------------
+
+fn test_fixed_seed_source_returns_material() {
+    let src = fixed_seed(make_seed(8));
+    let bytes = src.fetch(8);
+    assert_eq(bytes.len(), 8);
+}
+
+fn test_counter_seed_source_monotonic() {
+    let src = counter_seed();
+    let bytes = src.fetch(4);
+    assert_eq(bytes.len(), 4);
+    assert_eq(bytes[0], 0 as Byte);
+    assert_eq(bytes[3], 3 as Byte);
+}
+
+fn test_seed_source_name() {
+    let f = fixed_seed(make_seed(4));
+    assert(f.name() == "fixed".clone());
+    let c = counter_seed();
+    assert(c.name() == "counter".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Reseed policy
+// -----------------------------------------------------------------------------
+
+fn test_default_policy_thresholds_positive() {
+    let p = default_policy();
+    assert(p.bytes_threshold > (0 as Int64));
+    assert(p.secs_threshold > (0 as Int64));
+}
+
+fn test_should_reseed_under_threshold_false() {
+    let p = default_policy();
+    assert(!should_reseed(&p, 100 as Int64, 1 as Int64));
+}
+
+fn test_should_reseed_at_threshold_true() {
+    let p = default_policy();
+    assert(should_reseed(&p, p.bytes_threshold, 0 as Int64));
+}
+
+// -----------------------------------------------------------------------------
+// PrngEngine
+// -----------------------------------------------------------------------------
+
+fn test_engine_starts_unseeded() {
+    let e = engine_new();
+    assert(!e.is_seeded());
+}
+
+fn test_engine_seed_with_marks_seeded() {
+    let mut e = engine_new();
+    e.seed_with(make_seed(32));
+    assert(e.is_seeded());
+}
+
+fn test_engine_random_blob_returns_n_bytes() {
+    let mut e = engine_with_fixed_seed(make_seed(32));
+    let blob = e.random_blob(32);
+    assert_eq(blob.len(), 32);
+    assert(e.bytes_emitted() == (32 as Int64));
+}
+
+fn test_engine_random_int_emits_int64() {
+    let mut e = engine_with_fixed_seed(make_seed(32));
+    let _v = e.random_int();
+    assert(e.bytes_emitted() == (8 as Int64));
+}
+
+fn test_engine_reproducible_from_same_seed() {
+    let mut a = engine_with_fixed_seed(make_seed(32));
+    let mut b = engine_with_fixed_seed(make_seed(32));
+    let blob_a = a.random_blob(16);
+    let blob_b = b.random_blob(16);
+    let mut i: Int = 0;
+    while i < 16 {
+        assert_eq(blob_a[i], blob_b[i]);
+        i = i + 1;
+    }
+}
+
+fn test_engine_needs_reseed_true_after_threshold() {
+    let mut e = engine_with_fixed_seed(make_seed(8));
+    let _ = e.random_blob(8);
+    let policy_bytes = default_policy().bytes_threshold;
+    assert(e.needs_reseed(policy_bytes));
+}
+
+fn main() {
+    test_arc4_init_state_size();
+    test_arc4_step_advances_state();
+    test_arc4_step_n_returns_n_bytes();
+    test_arc4_mix_then_step_reproducible();
+    test_fixed_seed_source_returns_material();
+    test_counter_seed_source_monotonic();
+    test_seed_source_name();
+    test_default_policy_thresholds_positive();
+    test_should_reseed_under_threshold_false();
+    test_should_reseed_at_threshold_true();
+    test_engine_starts_unseeded();
+    test_engine_seed_with_marks_seeded();
+    test_engine_random_blob_returns_n_bytes();
+    test_engine_random_int_emits_int64();
+    test_engine_reproducible_from_same_seed();
+    test_engine_needs_reseed_true_after_threshold();
+}

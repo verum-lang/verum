@@ -1,0 +1,95 @@
+// =============================================================================
+// prng/engine.vr — high-level random_int / random_blob
+// =============================================================================
+// Spec: sqlite-native.md §15.1
+//
+// `PrngEngine` wraps `Arc4State` + a `SeedSource` + a `ReseedPolicy`.
+// Public surface mirrors the SQLite C API:
+//
+//   * `random_int()`   — Int64 in [-2^63, 2^63 - 1]
+//   * `random_blob(n)` — n bytes
+//   * `randomness(n)`  — refill helper (returns n bytes)
+// =============================================================================
+
+module core.database.sqlite.native.prng.engine;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.prng.arc4.{Arc4State, arc4_init};
+mount core.database.sqlite.native.prng.seed.{
+    FixedSeedSource, fixed_seed,
+    ReseedPolicy, default_policy, should_reseed,
+};
+
+public type PrngEngine is {
+    state: Arc4State,
+    /// Bytes produced since last reseed.
+    bytes_since_seed: Int64,
+    /// Whether the engine has been seeded at least once.
+    seeded: Bool,
+    policy: ReseedPolicy,
+}
+
+public fn engine_new() -> PrngEngine {
+    PrngEngine {
+        state: arc4_init(),
+        bytes_since_seed: 0 as Int64,
+        seeded: false,
+        policy: default_policy(),
+    }
+}
+
+implement PrngEngine {
+    pub fn is_seeded(&self) -> Bool { self.seeded }
+    pub fn bytes_emitted(&self) -> Int64 { self.bytes_since_seed }
+
+    /// Mix `material` into the state. Idempotent: calling twice with
+    /// the same material is identical to calling once with a longer
+    /// concatenation (because RC4 KSA is cumulative over the slot
+    /// rotations).
+    pub fn seed_with(&mut self, material: List<Byte>) {
+        self.state.mix(&material);
+        self.seeded = true;
+        self.bytes_since_seed = 0 as Int64;
+    }
+
+    pub fn random_blob(&mut self, n: Int) -> List<Byte> {
+        let bytes = self.state.step_n(n);
+        self.bytes_since_seed = self.bytes_since_seed + (n as Int64);
+        bytes
+    }
+
+    /// Pull a single Int64 from the keystream by composing 8 bytes
+    /// big-endian.
+    pub fn random_int(&mut self) -> Int64 {
+        let bytes = self.random_blob(8);
+        let mut acc: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < 8 {
+            acc = (acc << (8 as Int64)) | ((bytes[i] as Int64) & (0xFF as Int64));
+            i = i + 1;
+        }
+        acc
+    }
+
+    /// Convenience: the SQLite C API's `sqlite3_randomness(N, P)`
+    /// signature. Returns N fresh bytes.
+    pub fn randomness(&mut self, n: Int) -> List<Byte> { self.random_blob(n) }
+
+    /// True iff the policy says we should reseed; caller fetches
+    /// fresh material from a `SeedSource` then calls `seed_with`.
+    pub fn needs_reseed(&self, secs_since_seed: Int64) -> Bool {
+        should_reseed(&self.policy, self.bytes_since_seed, secs_since_seed)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Stateless convenience for tests — seeded engine in one call
+// -----------------------------------------------------------------------------
+
+public fn engine_with_fixed_seed(material: List<Byte>) -> PrngEngine {
+    let mut e = engine_new();
+    e.seed_with(material);
+    e
+}

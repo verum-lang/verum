@@ -1,0 +1,131 @@
+// =============================================================================
+// wal_index/header.vr — WalIndexHeader
+// =============================================================================
+// Spec: sqlite-native.md §6.6
+//
+// 48-byte header (held in two contiguous copies inside the shm file):
+//
+//   offset  size  field
+//   0       4     iVersion       — WAL-index format version (3007000)
+//   4       4     unused
+//   8       4     iChange        — counter incremented on every WAL change
+//   12      1     isInit         — non-zero after first writer
+//   13      1     bigEndCksum    — checksum endianness
+//   14      2     szPage         — database page size
+//   16      4     mxFrame        — index of last valid frame in WAL
+//   20      4     nPage          — db_size_after of last commit frame
+//   24      8     aFrameCksum    — checksum of last frame
+//   32      8     aSalt          — salts copied from WAL header
+//   40      8     aCksum         — checksum of THIS header
+//
+// =============================================================================
+
+module core.database.sqlite.native.wal_index.header;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+public type WalIndexHeader is {
+    /// Format version — 3007000 in current SQLite.
+    version: Int,
+    change_counter: Int,
+    is_init: Bool,
+    big_end_checksum: Bool,
+    page_size: Int,
+    mx_frame: Int,
+    n_page: Int,
+    /// Combined 8-byte checksum of the last frame (s0:Int, s1:Int).
+    last_frame_cksum_s0: Int,
+    last_frame_cksum_s1: Int,
+    /// Salts (4 bytes + 4 bytes) copied from WAL header on init.
+    salt1: Int,
+    salt2: Int,
+    /// Self-checksum of the header (s0, s1).
+    header_cksum_s0: Int,
+    header_cksum_s1: Int,
+}
+
+public fn header_default(page_size: Int) -> WalIndexHeader {
+    WalIndexHeader {
+        version: 3007000,
+        change_counter: 0,
+        is_init: false,
+        big_end_checksum: false,
+        page_size: page_size,
+        mx_frame: 0,
+        n_page: 0,
+        last_frame_cksum_s0: 0,
+        last_frame_cksum_s1: 0,
+        salt1: 0,
+        salt2: 0,
+        header_cksum_s0: 0,
+        header_cksum_s1: 0,
+    }
+}
+
+implement WalIndexHeader {
+    pub fn bump_change_counter(&mut self) {
+        self.change_counter = self.change_counter + 1;
+    }
+
+    pub fn note_committed_frame(&mut self, frame_idx: Int, db_size_after: Int) {
+        if frame_idx > self.mx_frame { self.mx_frame = frame_idx; }
+        if db_size_after > 0 { self.n_page = db_size_after; }
+    }
+
+    /// True iff the header has the layout-version we recognise.
+    pub fn is_version_supported(&self) -> Bool { self.version == 3007000 }
+}
+
+// -----------------------------------------------------------------------------
+// Dual-copy validation — shm holds TWO copies of the header for crash safety
+// -----------------------------------------------------------------------------
+
+public fn dual_copies_agree(a: &WalIndexHeader, b: &WalIndexHeader) -> Bool {
+    a.version == b.version
+        && a.change_counter == b.change_counter
+        && a.mx_frame == b.mx_frame
+        && a.n_page == b.n_page
+        && a.salt1 == b.salt1
+        && a.salt2 == b.salt2
+        && a.header_cksum_s0 == b.header_cksum_s0
+        && a.header_cksum_s1 == b.header_cksum_s1
+}
+
+// -----------------------------------------------------------------------------
+// Serialize — 48 bytes per copy
+// -----------------------------------------------------------------------------
+
+public const HEADER_BYTES: Int = 48;
+
+public fn serialize(h: &WalIndexHeader) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    push_u32_be(&mut out, h.version);
+    push_u32_be(&mut out, 0);                  // unused
+    push_u32_be(&mut out, h.change_counter);
+    out.push(if h.is_init { 1 as Byte } else { 0 as Byte });
+    out.push(if h.big_end_checksum { 1 as Byte } else { 0 as Byte });
+    push_u16_be(&mut out, h.page_size);
+    push_u32_be(&mut out, h.mx_frame);
+    push_u32_be(&mut out, h.n_page);
+    push_u32_be(&mut out, h.last_frame_cksum_s0);
+    push_u32_be(&mut out, h.last_frame_cksum_s1);
+    push_u32_be(&mut out, h.salt1);
+    push_u32_be(&mut out, h.salt2);
+    push_u32_be(&mut out, h.header_cksum_s0);
+    push_u32_be(&mut out, h.header_cksum_s1);
+    out
+}
+
+fn push_u32_be(dst: &mut List<Byte>, v: Int) {
+    dst.push(((v >> 24) & 0xFF) as Byte);
+    dst.push(((v >> 16) & 0xFF) as Byte);
+    dst.push(((v >> 8) & 0xFF) as Byte);
+    dst.push((v & 0xFF) as Byte);
+}
+
+fn push_u16_be(dst: &mut List<Byte>, v: Int) {
+    dst.push(((v >> 8) & 0xFF) as Byte);
+    dst.push((v & 0xFF) as Byte);
+}

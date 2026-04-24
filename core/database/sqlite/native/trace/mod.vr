@@ -1,0 +1,30 @@
+// =============================================================================
+// core/database/sqlite/native/trace/mod.vr
+// =============================================================================
+// Layer: 6 (per-Connection)
+// Spec: sqlite-native.md §22 (operational tooling — sqlite3_trace_v2)
+//
+// SQLite's `sqlite3_trace_v2(db, mask, callback, ctx)` installs ONE
+// callback that fires on a configurable set of events:
+//
+//   * `Stmt`     — at first VDBE step (SQL text + expanded SQL)
+//   * `Profile`  — at last VDBE step (SQL + nanoseconds elapsed)
+//   * `Row`      — at each ResultRow opcode (current row payload not
+//                  exposed by the C API — the callback gets the
+//                  Connection + Stmt only)
+//   * `Close`    — Connection closed
+//
+// We model the surface — the actual hook firing happens inside the
+// L4 interpreter + L7 façade.
+//
+// Submodules:
+//   * `event`     — TraceEvent sum + mask flags
+//   * `payload`   — per-event payload records
+//   * `handler`   — TraceHandler protocol + chain composition
+// =============================================================================
+
+module core.database.sqlite.native.trace;
+
+public module event;
+public module payload;
+public module handler;

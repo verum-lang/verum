@@ -156,3 +156,11 @@ public module dbstat;
 public module datetime;
 // - uri: SQLite file: URI parser + UriParams (§7.6 sqlite3_open_v2)
 public module uri;
+// - wal_index: shm file layout — header + hash groups + reader marks (§6.6)
+public module wal_index;
+// - prng: ARC4 random/randomblob backing (§15.1)
+public module prng;
+// - trace: sqlite3_trace_v2 event taxonomy + handler protocol (§22)
+public module trace;
+// - journal_mode: JournalMode taxonomy + per-mode semantics + transition plans (§18.4)
+public module journal_mode;

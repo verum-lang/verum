@@ -1,0 +1,109 @@
+// =============================================================================
+// wal_index/state.vr — WalIndexState aggregate
+// =============================================================================
+// Spec: sqlite-native.md §6.6
+//
+// Top-level WAL-index state: header (×2 dual copies) + reader marks +
+// hash groups. Mirrors the layout of the shm file at the byte level
+// (apart from byte ordering — we model it abstractly).
+// =============================================================================
+
+module core.database.sqlite.native.wal_index.state;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.wal_index.header.{
+    WalIndexHeader, header_default, dual_copies_agree,
+};
+mount core.database.sqlite.native.wal_index.reader.{
+    ReaderMarks, marks_new,
+};
+mount core.database.sqlite.native.wal_index.hash.{
+    HashGroup, hash_group_new,
+    group_for_frame, frame_position_in_group,
+    FRAMES_PER_GROUP,
+};
+
+public type WalIndexState is {
+    primary_header: WalIndexHeader,
+    backup_header: WalIndexHeader,
+    marks: ReaderMarks,
+    groups: List<HashGroup>,
+}
+
+public fn state_new(page_size: Int) -> WalIndexState {
+    WalIndexState {
+        primary_header: header_default(page_size),
+        backup_header: header_default(page_size),
+        marks: marks_new(),
+        groups: List.new(),
+    }
+}
+
+implement WalIndexState {
+    public fn group_count(&self) -> Int { self.groups.len() }
+
+    /// Ensure a group exists for `frame_idx`; lazy-allocates new groups.
+    fn ensure_group_for(&mut self, frame_idx: Int) -> Int {
+        let target = group_for_frame(frame_idx);
+        while self.groups.len() <= target {
+            self.groups.push(hash_group_new(self.groups.len()));
+        }
+        target
+    }
+
+    /// Register a new WAL frame: bump headers + index it in the
+    /// appropriate hash group.
+    pub fn register_frame(&mut self, frame_idx: Int, page_no: Int, db_size_after: Int) {
+        let group_idx = self.ensure_group_for(frame_idx);
+        let pos_in_group = frame_position_in_group(frame_idx);
+        self.groups[group_idx].insert(pos_in_group, page_no);
+        self.primary_header.note_committed_frame(frame_idx, db_size_after);
+        self.backup_header.note_committed_frame(frame_idx, db_size_after);
+        self.primary_header.bump_change_counter();
+        self.backup_header.bump_change_counter();
+    }
+
+    /// Find the most recent frame that wrote `page_no`. Walks groups
+    /// in REVERSE order (latest group first) to ensure the answer is
+    /// the most-recent occurrence. Returns frame_idx (1-based).
+    pub fn lookup_page(&self, page_no: Int) -> Maybe<Int> {
+        let mut g: Int = self.groups.len() - 1;
+        while g >= 0 {
+            match self.groups[g].lookup(page_no) {
+                Some(pos) => {
+                    let frame_idx = g * FRAMES_PER_GROUP + pos;
+                    return Some(frame_idx);
+                }
+                None => {}
+            }
+            g = g - 1;
+        }
+        None
+    }
+
+    /// Sync the backup header to match the primary (called after an
+    /// atomic update completes).
+    pub fn sync_backup(&mut self) {
+        self.backup_header = WalIndexHeader {
+            version: self.primary_header.version,
+            change_counter: self.primary_header.change_counter,
+            is_init: self.primary_header.is_init,
+            big_end_checksum: self.primary_header.big_end_checksum,
+            page_size: self.primary_header.page_size,
+            mx_frame: self.primary_header.mx_frame,
+            n_page: self.primary_header.n_page,
+            last_frame_cksum_s0: self.primary_header.last_frame_cksum_s0,
+            last_frame_cksum_s1: self.primary_header.last_frame_cksum_s1,
+            salt1: self.primary_header.salt1,
+            salt2: self.primary_header.salt2,
+            header_cksum_s0: self.primary_header.header_cksum_s0,
+            header_cksum_s1: self.primary_header.header_cksum_s1,
+        };
+    }
+
+    pub fn dual_copies_consistent(&self) -> Bool {
+        dual_copies_agree(&self.primary_header, &self.backup_header)
+    }
+}
