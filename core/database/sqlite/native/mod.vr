@@ -380,3 +380,19 @@ public module access_flags;
 public module autovacuum_pages_api;
 // - pragma_op_list: ~70 recognised PRAGMA names w/ config/query/schema/diagnostic/legacy category
 public module pragma_op_list;
+// - io_methods: sqlite3_io_methods vtable — iVersion 1/2/3 w/ WAL + mmap feature gating
+public module io_methods;
+// - page_struct: sqlite3_pcache_page (pBuf + pExtra) + SQLITE_CONFIG_PCACHE_HDRSZ rounding
+public module page_struct;
+// - mutex_assertions: sqlite3_mutex_held / _notheld — Debug vs Release mode
+public module mutex_assertions;
+// - stmt_expired: sqlite3_expired — deprecated 3.8+ schema-staleness flag
+public module stmt_expired;
+// - prepare_tail_api: tail-walker for multi-statement sqlite3_prepare scripts
+public module prepare_tail_api;
+// - os_init_api: sqlite3_os_init / _os_end — platform-OS init partner of initialize/shutdown
+public module os_init_api;
+// - release_memory_global: sqlite3_release_memory — process-global allocator release
+public module release_memory_global;
+// - bind_clear_api: sqlite3_clear_bindings — NULL all bound params (complements finalize/)
+public module bind_clear_api;

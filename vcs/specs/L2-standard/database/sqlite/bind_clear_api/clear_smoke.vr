@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind_clear_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bind_clear_api.engine.{
+    BindSlotState, ClearEngine,
+    fresh_slot, new_engine,
+};
+mount base.{Bool};
+
+fn test_fresh_slot_not_bound() {
+    let s = fresh_slot(1);
+    assert(!s.bound);
+    assert_eq(s.index, 1);
+}
+
+fn test_new_engine_all_unbound() {
+    let e = new_engine(4);
+    assert_eq(e.bound_count(), 0);
+    assert_eq(e.clears, 0 as Int64);
+}
+
+fn test_mark_bound_counts() {
+    let mut e = new_engine(4);
+    assert(e.mark_bound(1, 128 as Int64));
+    assert(e.mark_bound(3, 64 as Int64));
+    assert_eq(e.bound_count(), 2);
+    assert_eq(e.bytes_released_estimate, 192 as Int64);
+}
+
+fn test_mark_bound_bad_index_returns_false() {
+    let mut e = new_engine(2);
+    assert(!e.mark_bound(0, 1 as Int64));
+    assert(!e.mark_bound(99, 1 as Int64));
+}
+
+fn test_sqlite3_clear_bindings_resets_everything() {
+    let mut e = new_engine(4);
+    let _ = e.mark_bound(1, 128 as Int64);
+    let _ = e.mark_bound(3, 64 as Int64);
+    assert_eq(e.sqlite3_clear_bindings(), 0);
+    assert_eq(e.bound_count(), 0);
+    assert_eq(e.bytes_released_estimate, 0 as Int64);
+    assert_eq(e.clears, 1 as Int64);
+}
+
+fn test_repeated_clear_is_idempotent() {
+    let mut e = new_engine(4);
+    let _ = e.sqlite3_clear_bindings();
+    let _ = e.sqlite3_clear_bindings();
+    assert_eq(e.clears, 2 as Int64);
+    assert_eq(e.bound_count(), 0);
+}
+
+fn main() {
+    test_fresh_slot_not_bound();
+    test_new_engine_all_unbound();
+    test_mark_bound_counts();
+    test_mark_bound_bad_index_returns_false();
+    test_sqlite3_clear_bindings_resets_everything();
+    test_repeated_clear_is_idempotent();
+}

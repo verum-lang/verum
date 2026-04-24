@@ -1,0 +1,35 @@
+// =============================================================================
+// stmt_expired/engine.vr — sqlite3_expired accessor
+// =============================================================================
+// Spec: SQLite C API (deprecated in 3.8+)
+// =============================================================================
+
+module core.database.sqlite.native.stmt_expired.engine;
+
+mount core.*;
+mount base.{Bool};
+
+public type ExpiredFlag is {
+    /// True iff a SQLITE_SCHEMA error is pending against this statement.
+    stale: Bool,
+    /// Total number of sqlite3_expired calls against this statement
+    /// (audit counter — lets tooling detect legacy callers).
+    queries: Int64,
+}
+
+public fn fresh_flag() -> ExpiredFlag {
+    ExpiredFlag { stale: false, queries: 0 as Int64 }
+}
+
+public fn mark_schema_changed(f: &mut ExpiredFlag) {
+    f.stale = true;
+}
+
+public fn clear_after_reprepare(f: &mut ExpiredFlag) {
+    f.stale = false;
+}
+
+public fn sqlite3_expired(f: &mut ExpiredFlag) -> Int {
+    f.queries = f.queries + (1 as Int64);
+    if f.stale { 1 } else { 0 }
+}

@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, prepare_tail_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.prepare_tail_api.walker.{
+    TailAdvance,
+    skip_ws_and_comments, tail_is_empty, advance,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn text_to_bytes(s: Text) -> List<u8> {
+    let mut out: List<u8> = List.new();
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push(bs[i]); i = i + 1; }
+    out
+}
+
+fn test_skip_plain_whitespace() {
+    let b = text_to_bytes("   \t\n\r   SELECT".clone());
+    let i = skip_ws_and_comments(&b, 0);
+    assert_eq(i, 9);
+}
+
+fn test_skip_line_comment() {
+    let b = text_to_bytes("-- hello\nSELECT".clone());
+    let i = skip_ws_and_comments(&b, 0);
+    assert_eq(i, 9);
+}
+
+fn test_skip_block_comment() {
+    let b = text_to_bytes("/* hi */SELECT".clone());
+    let i = skip_ws_and_comments(&b, 0);
+    assert_eq(i, 8);
+}
+
+fn test_skip_mix_of_whitespace_and_comments() {
+    let b = text_to_bytes("  -- one\n/* two */\n  SELECT".clone());
+    let i = skip_ws_and_comments(&b, 0);
+    let bs = b;
+    let byte_at_i = bs[i];
+    assert_eq(byte_at_i, 0x53 as u8);   // 'S'
+}
+
+fn test_tail_is_empty_on_blank() {
+    let b = text_to_bytes("   \n  -- trailing\n".clone());
+    assert(tail_is_empty(&b, 0));
+}
+
+fn test_tail_is_empty_false_with_content() {
+    let b = text_to_bytes("   x".clone());
+    assert(!tail_is_empty(&b, 0));
+}
+
+fn test_advance_returns_has_more() {
+    let b = text_to_bytes("   SELECT".clone());
+    let a = advance(&b, 0);
+    assert_eq(a.new_offset, 3);
+    assert(a.has_more);
+}
+
+fn test_advance_past_end_has_no_more() {
+    let b = text_to_bytes("   ".clone());
+    let a = advance(&b, 0);
+    assert(!a.has_more);
+}
+
+fn main() {
+    test_skip_plain_whitespace();
+    test_skip_line_comment();
+    test_skip_block_comment();
+    test_skip_mix_of_whitespace_and_comments();
+    test_tail_is_empty_on_blank();
+    test_tail_is_empty_false_with_content();
+    test_advance_returns_has_more();
+    test_advance_past_end_has_no_more();
+}

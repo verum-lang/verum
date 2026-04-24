@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, io_methods, vtable, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.io_methods.method_set.{
+    MethodSet,
+    minimal_v1_set, wal_capable_v2_set, mmap_capable_v3_set,
+    missing_v1_method, is_viable_v1, supports_wal, supports_mmap,
+};
+mount core.database.sqlite.native.io_methods.version.{
+    IoMethodsVersion,
+    version_one, version_two, version_three,
+    supports_shm, supports_fetch, set_consistent_with_version,
+};
+mount base.{Bool};
+
+fn test_minimal_v1_is_viable() {
+    let m = minimal_v1_set();
+    assert(is_viable_v1(&m));
+    assert_eq(missing_v1_method(&m).len(), 0);
+    assert(!supports_wal(&m));
+    assert(!supports_mmap(&m));
+}
+
+fn test_missing_xread_flags_xread() {
+    let mut m = minimal_v1_set();
+    m.has_read = false;
+    assert(!is_viable_v1(&m));
+    assert(missing_v1_method(&m) == "xRead".clone());
+}
+
+fn test_wal_capable_set() {
+    let m = wal_capable_v2_set();
+    assert(is_viable_v1(&m));
+    assert(supports_wal(&m));
+    assert(!supports_mmap(&m));
+}
+
+fn test_mmap_capable_set() {
+    let m = mmap_capable_v3_set();
+    assert(supports_wal(&m));
+    assert(supports_mmap(&m));
+}
+
+fn test_version_feature_gates() {
+    let v1 = version_one();
+    let v2 = version_two();
+    let v3 = version_three();
+    assert(!supports_shm(&v1));
+    assert(supports_shm(&v2));
+    assert(supports_shm(&v3));
+    assert(!supports_fetch(&v1));
+    assert(!supports_fetch(&v2));
+    assert(supports_fetch(&v3));
+}
+
+fn test_wal_requires_version_two() {
+    let m = wal_capable_v2_set();
+    assert(!set_consistent_with_version(&m, &version_one()));
+    assert(set_consistent_with_version(&m, &version_two()));
+}
+
+fn test_mmap_requires_version_three() {
+    let m = mmap_capable_v3_set();
+    assert(!set_consistent_with_version(&m, &version_two()));
+    assert(set_consistent_with_version(&m, &version_three()));
+}
+
+fn main() {
+    test_minimal_v1_is_viable();
+    test_missing_xread_flags_xread();
+    test_wal_capable_set();
+    test_mmap_capable_set();
+    test_version_feature_gates();
+    test_wal_requires_version_two();
+    test_mmap_requires_version_three();
+}

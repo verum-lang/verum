@@ -1,0 +1,46 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stmt_expired, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stmt_expired.engine.{
+    ExpiredFlag,
+    fresh_flag, mark_schema_changed, clear_after_reprepare, sqlite3_expired,
+};
+mount base.{Bool};
+
+fn test_fresh_flag_not_stale() {
+    let f = fresh_flag();
+    assert(!f.stale);
+    assert_eq(f.queries, 0 as Int64);
+}
+
+fn test_mark_then_query_returns_one() {
+    let mut f = fresh_flag();
+    mark_schema_changed(&mut f);
+    assert_eq(sqlite3_expired(&mut f), 1);
+    assert_eq(f.queries, 1 as Int64);
+}
+
+fn test_clear_after_reprepare_resets() {
+    let mut f = fresh_flag();
+    mark_schema_changed(&mut f);
+    clear_after_reprepare(&mut f);
+    assert_eq(sqlite3_expired(&mut f), 0);
+}
+
+fn test_query_increments_counter_even_if_fresh() {
+    let mut f = fresh_flag();
+    assert_eq(sqlite3_expired(&mut f), 0);
+    assert_eq(sqlite3_expired(&mut f), 0);
+    assert_eq(f.queries, 2 as Int64);
+}
+
+fn main() {
+    test_fresh_flag_not_stale();
+    test_mark_then_query_returns_one();
+    test_clear_after_reprepare_resets();
+    test_query_increments_counter_even_if_fresh();
+}

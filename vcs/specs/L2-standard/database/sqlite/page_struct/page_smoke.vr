@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, page_struct, pcache, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.page_struct.page.{
+    PcachePage,
+    empty_page, new_page, is_allocated, has_extra,
+};
+mount core.database.sqlite.native.page_struct.extra.{
+    ExtraSlot,
+    SQLITE_CONFIG_PCACHE_HDRSZ_DEFAULT,
+    round_up, new_slot, default_slot, slot_wastes_bytes,
+};
+mount base.{Bool};
+
+fn test_empty_page_unallocated() {
+    let p = empty_page();
+    assert(!is_allocated(&p));
+    assert(!has_extra(&p));
+}
+
+fn test_new_page_allocated_with_extra() {
+    let p = new_page(1 as Int64, 4096, 2 as Int64, 24);
+    assert(is_allocated(&p));
+    assert(has_extra(&p));
+    assert_eq(p.buf_byte_len, 4096);
+    assert_eq(p.extra_byte_len, 24);
+}
+
+fn test_page_without_extra() {
+    let p = new_page(1 as Int64, 4096, 0 as Int64, 0);
+    assert(is_allocated(&p));
+    assert(!has_extra(&p));
+}
+
+fn test_round_up_to_8() {
+    assert_eq(round_up(0, 8), 0);
+    assert_eq(round_up(1, 8), 8);
+    assert_eq(round_up(8, 8), 8);
+    assert_eq(round_up(9, 8), 16);
+    assert_eq(round_up(24, 8), 24);
+}
+
+fn test_default_slot_pcache_hdrsz() {
+    let s = default_slot();
+    assert_eq(s.requested_bytes, SQLITE_CONFIG_PCACHE_HDRSZ_DEFAULT);
+    assert_eq(s.aligned_bytes, 24);
+}
+
+fn test_slot_waste_calculation() {
+    let s = new_slot(17);
+    assert_eq(s.aligned_bytes, 24);
+    assert_eq(slot_wastes_bytes(&s), 7);
+}
+
+fn test_pcache_hdrsz_default_is_24() {
+    assert_eq(SQLITE_CONFIG_PCACHE_HDRSZ_DEFAULT, 24);
+}
+
+fn main() {
+    test_empty_page_unallocated();
+    test_new_page_allocated_with_extra();
+    test_page_without_extra();
+    test_round_up_to_8();
+    test_default_slot_pcache_hdrsz();
+    test_slot_waste_calculation();
+    test_pcache_hdrsz_default_is_24();
+}

@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/prepare_tail_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — multi-statement prepare tail walking)
+// Spec: SQLite C API — sqlite3_prepare_v2/v3 tail pointer.
+//
+// Each sqlite3_prepare call compiles the leading SQL statement and
+// hands back a pointer into the remaining bytes.  To walk a whole
+// script the caller repeats prepare(tail) until the tail is empty (or
+// entirely whitespace/comments).
+//
+// Submodules:
+//   * `walker`  — advance past a byte offset, skip whitespace + comments
+// =============================================================================
+
+module core.database.sqlite.native.prepare_tail_api;
+
+public module walker;

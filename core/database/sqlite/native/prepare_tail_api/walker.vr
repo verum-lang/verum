@@ -1,0 +1,64 @@
+// =============================================================================
+// prepare_tail_api/walker.vr — tail-walking helper
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.prepare_tail_api.walker;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+fn is_ws(b: u8) -> Bool {
+    b == (0x20 as u8) || b == (0x09 as u8) || b == (0x0A as u8)
+        || b == (0x0B as u8) || b == (0x0C as u8) || b == (0x0D as u8)
+}
+
+/// Advance `start` past leading whitespace + `--` line comments +
+/// `/* */` block comments.  Returns the new offset (≤ bytes.len()).
+public fn skip_ws_and_comments(bytes: &List<u8>, start: Int) -> Int {
+    let n = bytes.len();
+    let mut i: Int = start;
+    loop {
+        if i >= n { return i; }
+        let b = bytes[i];
+        if is_ws(b) { i = i + 1; continue; }
+        if b == (0x2D as u8) && i + 1 < n && bytes[i + 1] == (0x2D as u8) {
+            i = i + 2;
+            while i < n && bytes[i] != (0x0A as u8) { i = i + 1; }
+            continue;
+        }
+        if b == (0x2F as u8) && i + 1 < n && bytes[i + 1] == (0x2A as u8) {
+            i = i + 2;
+            while i + 1 < n {
+                if bytes[i] == (0x2A as u8) && bytes[i + 1] == (0x2F as u8) {
+                    i = i + 2;
+                    break;
+                }
+                i = i + 1;
+            }
+            continue;
+        }
+        break;
+    }
+    i
+}
+
+/// True iff the tail starting at `offset` consists of nothing but
+/// whitespace + comments (caller can stop prepare-looping).
+public fn tail_is_empty(bytes: &List<u8>, offset: Int) -> Bool {
+    skip_ws_and_comments(bytes, offset) >= bytes.len()
+}
+
+public type TailAdvance is {
+    /// The new offset after skipping leading whitespace/comments.
+    new_offset: Int,
+    /// True iff the remaining tail has at least one non-blank byte.
+    has_more: Bool,
+}
+
+public fn advance(bytes: &List<u8>, offset: Int) -> TailAdvance {
+    let o = skip_ws_and_comments(bytes, offset);
+    TailAdvance { new_offset: o, has_more: o < bytes.len() }
+}

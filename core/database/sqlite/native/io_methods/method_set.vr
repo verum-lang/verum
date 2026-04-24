@@ -1,0 +1,106 @@
+// =============================================================================
+// io_methods/method_set.vr — presence map for every xMethod
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.io_methods.method_set;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type MethodSet is {
+    // iVersion >= 1 (all mandatory).
+    has_close: Bool,
+    has_read: Bool,
+    has_write: Bool,
+    has_truncate: Bool,
+    has_sync: Bool,
+    has_file_size: Bool,
+    has_lock: Bool,
+    has_unlock: Bool,
+    has_check_reserved_lock: Bool,
+    has_file_control: Bool,
+    has_sector_size: Bool,
+    has_device_characteristics: Bool,
+    // iVersion >= 2 (required iff WAL mode is supported).
+    has_shm_map: Bool,
+    has_shm_lock: Bool,
+    has_shm_barrier: Bool,
+    has_shm_unmap: Bool,
+    // iVersion >= 3.
+    has_fetch: Bool,
+    has_unfetch: Bool,
+}
+
+public fn minimal_v1_set() -> MethodSet {
+    MethodSet {
+        has_close: true,
+        has_read: true,
+        has_write: true,
+        has_truncate: true,
+        has_sync: true,
+        has_file_size: true,
+        has_lock: true,
+        has_unlock: true,
+        has_check_reserved_lock: true,
+        has_file_control: true,
+        has_sector_size: true,
+        has_device_characteristics: true,
+        has_shm_map: false,
+        has_shm_lock: false,
+        has_shm_barrier: false,
+        has_shm_unmap: false,
+        has_fetch: false,
+        has_unfetch: false,
+    }
+}
+
+public fn wal_capable_v2_set() -> MethodSet {
+    let mut m = minimal_v1_set();
+    m.has_shm_map = true;
+    m.has_shm_lock = true;
+    m.has_shm_barrier = true;
+    m.has_shm_unmap = true;
+    m
+}
+
+public fn mmap_capable_v3_set() -> MethodSet {
+    let mut m = wal_capable_v2_set();
+    m.has_fetch = true;
+    m.has_unfetch = true;
+    m
+}
+
+/// Every iVersion-1 slot must be filled.  Returns the first missing
+/// method name, or "" when the set is viable.
+public fn missing_v1_method(m: &MethodSet) -> Text {
+    if !m.has_close                  { return "xClose".clone(); }
+    if !m.has_read                   { return "xRead".clone(); }
+    if !m.has_write                  { return "xWrite".clone(); }
+    if !m.has_truncate               { return "xTruncate".clone(); }
+    if !m.has_sync                   { return "xSync".clone(); }
+    if !m.has_file_size              { return "xFileSize".clone(); }
+    if !m.has_lock                   { return "xLock".clone(); }
+    if !m.has_unlock                 { return "xUnlock".clone(); }
+    if !m.has_check_reserved_lock    { return "xCheckReservedLock".clone(); }
+    if !m.has_file_control           { return "xFileControl".clone(); }
+    if !m.has_sector_size            { return "xSectorSize".clone(); }
+    if !m.has_device_characteristics { return "xDeviceCharacteristics".clone(); }
+    "".clone()
+}
+
+public fn is_viable_v1(m: &MethodSet) -> Bool {
+    missing_v1_method(m).len() == 0
+}
+
+/// v2 additionally needs all four xShm* slots to be filled together —
+/// WAL mode otherwise falls back to journal.
+public fn supports_wal(m: &MethodSet) -> Bool {
+    m.has_shm_map && m.has_shm_lock && m.has_shm_barrier && m.has_shm_unmap
+}
+
+/// v3 mmap support requires xFetch + xUnfetch as a pair.
+public fn supports_mmap(m: &MethodSet) -> Bool {
+    m.has_fetch && m.has_unfetch
+}

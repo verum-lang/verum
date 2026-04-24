@@ -1,0 +1,44 @@
+// =============================================================================
+// page_struct/extra.vr — SQLITE_CONFIG_PCACHE_HDRSZ accounting
+// =============================================================================
+// Spec: SQLite C API
+//
+// The pcache reserves `PCACHE_HDRSZ` bytes at the front of every
+// allocation for its own metadata.  SQLite queries this via
+// SQLITE_CONFIG_PCACHE_HDRSZ and rounds up to a pointer-sized multiple.
+// =============================================================================
+
+module core.database.sqlite.native.page_struct.extra;
+
+mount core.*;
+mount base.{Bool};
+
+public const SQLITE_CONFIG_PCACHE_HDRSZ_DEFAULT: Int = 24;
+
+public type ExtraSlot is {
+    requested_bytes: Int,
+    aligned_bytes: Int,
+}
+
+/// Round `n` up to the next multiple of `alignment` (must be power of
+/// two).  Used to match SQLite's "sqlite3_pcache_hdrsz" rounding.
+public fn round_up(n: Int, alignment: Int) -> Int {
+    if n <= 0 || alignment <= 1 { return n; }
+    let mask = alignment - 1;
+    (n + mask) & (0 - alignment)
+}
+
+public fn new_slot(requested_bytes: Int) -> ExtraSlot {
+    ExtraSlot {
+        requested_bytes: requested_bytes,
+        aligned_bytes: round_up(requested_bytes, 8),
+    }
+}
+
+public fn default_slot() -> ExtraSlot {
+    new_slot(SQLITE_CONFIG_PCACHE_HDRSZ_DEFAULT)
+}
+
+public fn slot_wastes_bytes(s: &ExtraSlot) -> Int {
+    s.aligned_bytes - s.requested_bytes
+}

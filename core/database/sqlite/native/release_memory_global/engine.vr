@@ -1,0 +1,53 @@
+// =============================================================================
+// release_memory_global/engine.vr — running totals + release driver
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.release_memory_global.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.release_memory_global.request.{
+    SizeRequest, is_noop,
+};
+
+public type ReleaseEngine is {
+    /// Bytes the engine currently estimates as reclaimable.
+    reclaimable_bytes: Int64,
+    /// Cumulative bytes released across every call (audit).
+    total_released: Int64,
+    /// Number of sqlite3_release_memory invocations.
+    calls: Int64,
+}
+
+public fn new_engine() -> ReleaseEngine {
+    ReleaseEngine {
+        reclaimable_bytes: 0 as Int64,
+        total_released: 0 as Int64,
+        calls: 0 as Int64,
+    }
+}
+
+implement ReleaseEngine {
+    pub fn set_reclaimable(&mut self, bytes: Int64) {
+        self.reclaimable_bytes = bytes;
+    }
+
+    /// Classical sqlite3_release_memory contract: returns the number
+    /// of bytes actually released (≤ request.target_bytes and
+    /// ≤ reclaimable_bytes).
+    pub fn sqlite3_release_memory(&mut self, req: &SizeRequest) -> Int {
+        self.calls = self.calls + (1 as Int64);
+        if is_noop(req) { return 0; }
+        let target = req.target_bytes;
+        let actual = if target <= self.reclaimable_bytes {
+            target
+        } else {
+            self.reclaimable_bytes
+        };
+        self.reclaimable_bytes = self.reclaimable_bytes - actual;
+        self.total_released = self.total_released + actual;
+        actual as Int
+    }
+}

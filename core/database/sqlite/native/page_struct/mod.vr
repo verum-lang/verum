@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/page_struct/mod.vr
+// =============================================================================
+// Layer: 1 (façade — sqlite3_pcache_page struct)
+// Spec: SQLite C API — pcache vtable page shape.
+//
+//   typedef struct sqlite3_pcache_page {
+//     void *pBuf;    /* The page content */
+//     void *pExtra;  /* Extra "sz-N" bytes the cache attached */
+//   } sqlite3_pcache_page;
+//
+// `pBuf` is the page-size byte slab; `pExtra` is a fixed-size cache-
+// owned scratch slab (SQLITE_CONFIG_PCACHE_HDRSZ bytes) the engine
+// uses for per-page metadata.
+//
+// Submodules:
+//   * `page`    — PcachePage record (pBuf byte slice + pExtra metadata slot)
+//   * `extra`   — ExtraSlot size accounting per SQLITE_CONFIG_PCACHE_HDRSZ
+// =============================================================================
+
+module core.database.sqlite.native.page_struct;
+
+public module page;
+public module extra;

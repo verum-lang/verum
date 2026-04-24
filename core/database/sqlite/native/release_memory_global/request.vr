@@ -1,0 +1,28 @@
+// =============================================================================
+// release_memory_global/request.vr — SizeRequest
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_release_memory(N):
+//   * N > 0  → "release at least N bytes" (target)
+//   * N == 0 → no-op; return 0
+//   * N < 0  → undefined-behaviour per docs; we normalise to 0
+// =============================================================================
+
+module core.database.sqlite.native.release_memory_global.request;
+
+mount core.*;
+mount base.{Bool};
+
+public type SizeRequest is {
+    target_bytes: Int64,
+}
+
+public fn from_int(n: Int) -> SizeRequest {
+    let t = if n <= 0 { 0 as Int64 } else { n as Int64 };
+    SizeRequest { target_bytes: t }
+}
+
+public fn is_noop(r: &SizeRequest) -> Bool {
+    r.target_bytes == (0 as Int64)
+}

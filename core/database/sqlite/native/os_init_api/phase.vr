@@ -1,0 +1,30 @@
+// =============================================================================
+// os_init_api/phase.vr — OsPhase
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.os_init_api.phase;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type OsPhase is
+      OsFresh
+    | OsInitialised
+    | OsTornDown;
+
+public fn phase_name(p: &OsPhase) -> Text {
+    match p {
+        OsFresh        => "fresh".clone(),
+        OsInitialised  => "initialised".clone(),
+        OsTornDown     => "torn-down".clone(),
+    }
+}
+
+public fn is_live(p: &OsPhase) -> Bool {
+    match p {
+        OsInitialised => true,
+        _ => false,
+    }
+}

@@ -1,0 +1,51 @@
+// =============================================================================
+// page_struct/page.vr — PcachePage
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.page_struct.page;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type PcachePage is {
+    /// Opaque page-body allocation id; 0 means unallocated.
+    buf_id: Int64,
+    buf_byte_len: Int,
+    /// Opaque extra-slot allocation id.
+    extra_id: Int64,
+    extra_byte_len: Int,
+}
+
+public fn empty_page() -> PcachePage {
+    PcachePage {
+        buf_id: 0 as Int64,
+        buf_byte_len: 0,
+        extra_id: 0 as Int64,
+        extra_byte_len: 0,
+    }
+}
+
+public fn new_page(
+    buf_id: Int64,
+    buf_byte_len: Int,
+    extra_id: Int64,
+    extra_byte_len: Int,
+) -> PcachePage {
+    PcachePage {
+        buf_id: buf_id,
+        buf_byte_len: buf_byte_len,
+        extra_id: extra_id,
+        extra_byte_len: extra_byte_len,
+    }
+}
+
+public fn is_allocated(p: &PcachePage) -> Bool {
+    p.buf_id != (0 as Int64)
+}
+
+public fn has_extra(p: &PcachePage) -> Bool {
+    p.extra_id != (0 as Int64) && p.extra_byte_len > 0
+}

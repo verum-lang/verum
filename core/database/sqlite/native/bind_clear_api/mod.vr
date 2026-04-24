@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/bind_clear_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_clear_bindings)
+// Spec: SQLite C API
+//
+//   int sqlite3_clear_bindings(sqlite3_stmt *pStmt)
+//
+// Resets every bound parameter to NULL without resetting the VM
+// cursor.  Complements `finalize/action` (which catalogues the three
+// tear-down actions — finalize / reset / clear-bindings — as an enum)
+// with the runtime slot-map + typed outcome.
+//
+// Submodules:
+//   * `engine`  — per-stmt parameter-bound bitmap + clear driver
+// =============================================================================
+
+module core.database.sqlite.native.bind_clear_api;
+
+public module engine;

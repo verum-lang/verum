@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, release_memory_global, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.release_memory_global.request.{
+    SizeRequest,
+    from_int, is_noop,
+};
+mount core.database.sqlite.native.release_memory_global.engine.{
+    ReleaseEngine,
+    new_engine,
+};
+mount base.{Bool};
+
+fn test_from_int_zero_and_negative_are_noop() {
+    let r0 = from_int(0);
+    assert(is_noop(&r0));
+    let rn = from_int(-5);
+    assert(is_noop(&rn));
+}
+
+fn test_from_int_positive_records_target() {
+    let r = from_int(1024);
+    assert(!is_noop(&r));
+    assert_eq(r.target_bytes, 1024 as Int64);
+}
+
+fn test_engine_release_under_budget() {
+    let mut e = new_engine();
+    e.set_reclaimable(500 as Int64);
+    let r = from_int(200);
+    let got = e.sqlite3_release_memory(&r);
+    assert_eq(got, 200);
+    assert_eq(e.total_released, 200 as Int64);
+    assert_eq(e.reclaimable_bytes, 300 as Int64);
+}
+
+fn test_engine_release_exceeds_budget_caps() {
+    let mut e = new_engine();
+    e.set_reclaimable(100 as Int64);
+    let r = from_int(1000);
+    let got = e.sqlite3_release_memory(&r);
+    assert_eq(got, 100);
+    assert_eq(e.reclaimable_bytes, 0 as Int64);
+}
+
+fn test_engine_noop_request_no_effect() {
+    let mut e = new_engine();
+    e.set_reclaimable(500 as Int64);
+    let r = from_int(0);
+    let got = e.sqlite3_release_memory(&r);
+    assert_eq(got, 0);
+    assert_eq(e.reclaimable_bytes, 500 as Int64);
+}
+
+fn test_engine_tracks_call_count() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_release_memory(&from_int(10));
+    let _ = e.sqlite3_release_memory(&from_int(0));
+    assert_eq(e.calls, 2 as Int64);
+}
+
+fn main() {
+    test_from_int_zero_and_negative_are_noop();
+    test_from_int_positive_records_target();
+    test_engine_release_under_budget();
+    test_engine_release_exceeds_budget_caps();
+    test_engine_noop_request_no_effect();
+    test_engine_tracks_call_count();
+}

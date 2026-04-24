@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_expired/mod.vr
+// =============================================================================
+// Layer: 7 (façade — deprecated sqlite3_expired)
+// Spec: SQLite C API (deprecated in 3.8+; still exported)
+//
+//   int sqlite3_expired(sqlite3_stmt *)
+//
+// Returns non-zero if the underlying schema has changed since the
+// statement was prepared.  Deprecated because sqlite3_prepare_v2
+// automatically re-prepares on schema change; modern callers should
+// ignore it.  The function is still exported for binary compatibility
+// and returns 0 except when a SQLITE_SCHEMA error is pending.
+//
+// Submodules:
+//   * `engine`  — per-stmt stale-schema flag + accessor
+// =============================================================================
+
+module core.database.sqlite.native.stmt_expired;
+
+public module engine;

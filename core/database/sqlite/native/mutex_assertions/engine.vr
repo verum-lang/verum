@@ -1,0 +1,77 @@
+// =============================================================================
+// mutex_assertions/engine.vr — per-mutex held-tag registry
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.mutex_assertions.engine;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.mutex_assertions.mode.{
+    BuildMode, BmDebug, BmRelease, always_true_in_release,
+};
+
+public type HeldMutex is {
+    id: Int64,
+    /// Opaque owning-thread id (0 ⇒ not currently held).
+    owner: Int64,
+}
+
+public type MutexAssertEngine is {
+    mode: BuildMode,
+    held: List<HeldMutex>,
+}
+
+public fn new_engine(mode: BuildMode) -> MutexAssertEngine {
+    MutexAssertEngine { mode: mode, held: List.new() }
+}
+
+implement MutexAssertEngine {
+    pub fn acquire(&mut self, mutex_id: Int64, owner: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.held.len() {
+            if self.held.get(i).id == mutex_id {
+                if self.held.get(i).owner != (0 as Int64) { return false; }
+                self.held.get_mut(i).owner = owner;
+                return true;
+            }
+            i = i + 1;
+        }
+        self.held.push(HeldMutex { id: mutex_id, owner: owner });
+        true
+    }
+
+    pub fn release(&mut self, mutex_id: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.held.len() {
+            if self.held.get(i).id == mutex_id {
+                self.held.get_mut(i).owner = 0 as Int64;
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// sqlite3_mutex_held: 1 if the mutex is currently held (debug) or
+    /// always 1 (release).  On debug + unknown mutex, returns 1 (safe).
+    pub fn sqlite3_mutex_held(&self, mutex_id: Int64) -> Int {
+        if always_true_in_release(&self.mode) { return 1; }
+        let mut i: Int = 0;
+        while i < self.held.len() {
+            if self.held.get(i).id == mutex_id {
+                return if self.held.get(i).owner != (0 as Int64) { 1 } else { 0 };
+            }
+            i = i + 1;
+        }
+        1
+    }
+
+    pub fn sqlite3_mutex_notheld(&self, mutex_id: Int64) -> Int {
+        if always_true_in_release(&self.mode) { return 1; }
+        let held = self.sqlite3_mutex_held(mutex_id);
+        if held == 1 { 0 } else { 1 }
+    }
+}

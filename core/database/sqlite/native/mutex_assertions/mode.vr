@@ -1,0 +1,29 @@
+// =============================================================================
+// mutex_assertions/mode.vr — BuildMode
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.mutex_assertions.mode;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type BuildMode is
+      BmDebug
+    | BmRelease;
+
+public fn mode_name(m: &BuildMode) -> Text {
+    match m {
+        BmDebug   => "debug".clone(),
+        BmRelease => "release".clone(),
+    }
+}
+
+/// Release-mode versions of held / notheld always return 1.
+public fn always_true_in_release(m: &BuildMode) -> Bool {
+    match m {
+        BmRelease => true,
+        _ => false,
+    }
+}

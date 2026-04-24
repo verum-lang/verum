@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/os_init_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_os_init / _os_end)
+// Spec: SQLite C API
+//
+//   int sqlite3_os_init(void)
+//   int sqlite3_os_end(void)
+//
+// Invoked once each by sqlite3_initialize / _shutdown respectively —
+// platforms override them (win32 / unix / custom VFS) to register
+// their VFS, mutex, and PRNG backends.  The classical sequence is:
+//
+//   sqlite3_initialize → sqlite3_os_init → SQLITE_OK
+//   sqlite3_shutdown   → sqlite3_os_end  → SQLITE_OK
+//
+// Submodules:
+//   * `phase`   — OsPhase (Fresh / Initialised / TornDown)
+//   * `engine`  — _os_init / _os_end call counters + idempotence
+// =============================================================================
+
+module core.database.sqlite.native.os_init_api;
+
+public module phase;
+public module engine;

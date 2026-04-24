@@ -1,0 +1,32 @@
+// =============================================================================
+// io_methods/version.vr — IoMethodsVersion + feature gating
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.io_methods.version;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.io_methods.method_set.{
+    MethodSet, supports_wal, supports_mmap,
+};
+
+public type IoMethodsVersion is {
+    i_version: Int,
+}
+
+public fn version_one() -> IoMethodsVersion   { IoMethodsVersion { i_version: 1 } }
+public fn version_two() -> IoMethodsVersion   { IoMethodsVersion { i_version: 2 } }
+public fn version_three() -> IoMethodsVersion { IoMethodsVersion { i_version: 3 } }
+
+public fn supports_shm(v: &IoMethodsVersion) -> Bool { v.i_version >= 2 }
+public fn supports_fetch(v: &IoMethodsVersion) -> Bool { v.i_version >= 3 }
+
+/// True iff the provided MethodSet is consistent with the declared
+/// iVersion — shm slots require iVersion ≥ 2, fetch slots ≥ 3.
+public fn set_consistent_with_version(set: &MethodSet, v: &IoMethodsVersion) -> Bool {
+    if supports_wal(set) && !supports_shm(v) { return false; }
+    if supports_mmap(set) && !supports_fetch(v) { return false; }
+    true
+}

@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/release_memory_global/mod.vr
+// =============================================================================
+// Layer: 7 (façade — global sqlite3_release_memory)
+// Spec: SQLite C API
+//
+//   int sqlite3_release_memory(int N)
+//
+// Asks the engine to try to release at least N bytes from the shared
+// page cache + any scratch memory.  Returns the number of bytes
+// actually released (may be less than N or 0).  Distinct from
+// `db_release_memory_api/` which is the per-connection flavour.
+//
+// Submodules:
+//   * `request`   — SizeRequest wrapper
+//   * `engine`    — running totals + soft-heap integration hook
+// =============================================================================
+
+module core.database.sqlite.native.release_memory_global;
+
+public module request;
+public module engine;

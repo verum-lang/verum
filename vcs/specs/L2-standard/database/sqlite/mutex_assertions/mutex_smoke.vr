@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, mutex_assertions, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.mutex_assertions.mode.{
+    BuildMode, BmDebug, BmRelease,
+    mode_name, always_true_in_release,
+};
+mount core.database.sqlite.native.mutex_assertions.engine.{
+    MutexAssertEngine, HeldMutex,
+    new_engine,
+};
+mount base.{Bool};
+
+fn test_mode_names() {
+    assert(mode_name(&BmDebug) == "debug".clone());
+    assert(mode_name(&BmRelease) == "release".clone());
+}
+
+fn test_always_true_in_release() {
+    assert(always_true_in_release(&BmRelease));
+    assert(!always_true_in_release(&BmDebug));
+}
+
+fn test_release_always_returns_held_1() {
+    let e = new_engine(BmRelease);
+    assert_eq(e.sqlite3_mutex_held(42 as Int64), 1);
+    assert_eq(e.sqlite3_mutex_notheld(42 as Int64), 1);
+}
+
+fn test_debug_unknown_mutex_held_safe_default_1() {
+    let e = new_engine(BmDebug);
+    assert_eq(e.sqlite3_mutex_held(99 as Int64), 1);
+}
+
+fn test_acquire_then_held_query() {
+    let mut e = new_engine(BmDebug);
+    assert(e.acquire(1 as Int64, 100 as Int64));
+    assert_eq(e.sqlite3_mutex_held(1 as Int64), 1);
+    assert_eq(e.sqlite3_mutex_notheld(1 as Int64), 0);
+}
+
+fn test_release_flips_held_to_zero() {
+    let mut e = new_engine(BmDebug);
+    let _ = e.acquire(1 as Int64, 100 as Int64);
+    assert(e.release(1 as Int64));
+    assert_eq(e.sqlite3_mutex_held(1 as Int64), 0);
+    assert_eq(e.sqlite3_mutex_notheld(1 as Int64), 1);
+}
+
+fn test_double_acquire_rejected() {
+    let mut e = new_engine(BmDebug);
+    assert(e.acquire(1 as Int64, 100 as Int64));
+    assert(!e.acquire(1 as Int64, 200 as Int64));
+}
+
+fn test_release_unknown_mutex_returns_false() {
+    let mut e = new_engine(BmDebug);
+    assert(!e.release(42 as Int64));
+}
+
+fn main() {
+    test_mode_names();
+    test_always_true_in_release();
+    test_release_always_returns_held_1();
+    test_debug_unknown_mutex_held_safe_default_1();
+    test_acquire_then_held_query();
+    test_release_flips_held_to_zero();
+    test_double_acquire_rejected();
+    test_release_unknown_mutex_returns_false();
+}

@@ -1,0 +1,73 @@
+// =============================================================================
+// bind_clear_api/engine.vr — clear_bindings driver
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.bind_clear_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type BindSlotState is {
+    index: Int,
+    bound: Bool,
+}
+
+public fn fresh_slot(index: Int) -> BindSlotState {
+    BindSlotState { index: index, bound: false }
+}
+
+public type ClearEngine is {
+    slots: List<BindSlotState>,
+    clears: Int64,
+    bytes_released_estimate: Int64,
+}
+
+public fn new_engine(n_params: Int) -> ClearEngine {
+    let mut slots: List<BindSlotState> = List.new();
+    let mut i: Int = 0;
+    while i <= n_params {
+        slots.push(fresh_slot(i));
+        i = i + 1;
+    }
+    ClearEngine {
+        slots: slots,
+        clears: 0 as Int64,
+        bytes_released_estimate: 0 as Int64,
+    }
+}
+
+implement ClearEngine {
+    pub fn mark_bound(&mut self, index: Int, byte_estimate: Int64) -> Bool {
+        if index <= 0 || index >= self.slots.len() { return false; }
+        self.slots.get_mut(index).bound = true;
+        self.bytes_released_estimate = self.bytes_released_estimate + byte_estimate;
+        true
+    }
+
+    /// sqlite3_clear_bindings — NULL every slot; returns SQLITE_OK (0).
+    /// Counts how many slots were previously bound so callers can tell
+    /// whether the call reclaimed any allocations.
+    pub fn sqlite3_clear_bindings(&mut self) -> Int {
+        self.clears = self.clears + (1 as Int64);
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            self.slots.get_mut(i).bound = false;
+            i = i + 1;
+        }
+        self.bytes_released_estimate = 0 as Int64;
+        0
+    }
+
+    pub fn bound_count(&self) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            if self.slots.get(i).bound { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+}

@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, os_init_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.os_init_api.phase.{
+    OsPhase, OsFresh, OsInitialised, OsTornDown,
+    phase_name, is_live,
+};
+mount core.database.sqlite.native.os_init_api.engine.{
+    OsInitEngine,
+    new_engine,
+};
+mount base.{Bool};
+
+fn test_phase_names_and_live() {
+    assert(phase_name(&OsFresh) == "fresh".clone());
+    assert(phase_name(&OsInitialised) == "initialised".clone());
+    assert(phase_name(&OsTornDown) == "torn-down".clone());
+    assert(!is_live(&OsFresh));
+    assert(is_live(&OsInitialised));
+    assert(!is_live(&OsTornDown));
+}
+
+fn test_new_engine_defaults_fresh() {
+    let e = new_engine();
+    match &e.phase { OsFresh => {}, _ => assert(false) }
+    assert_eq(e.init_calls, 0 as Int64);
+    assert_eq(e.end_calls, 0 as Int64);
+}
+
+fn test_sqlite3_os_init_transitions_to_initialised() {
+    let mut e = new_engine();
+    assert_eq(e.sqlite3_os_init(), 0);
+    match &e.phase { OsInitialised => {}, _ => assert(false) }
+    assert_eq(e.init_calls, 1 as Int64);
+}
+
+fn test_sqlite3_os_init_idempotent() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_os_init();
+    let _ = e.sqlite3_os_init();
+    assert_eq(e.init_calls, 2 as Int64);
+    match &e.phase { OsInitialised => {}, _ => assert(false) }
+}
+
+fn test_sqlite3_os_end_after_init() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_os_init();
+    assert_eq(e.sqlite3_os_end(), 0);
+    match &e.phase { OsTornDown => {}, _ => assert(false) }
+    assert_eq(e.end_calls, 1 as Int64);
+}
+
+fn test_sqlite3_os_end_from_fresh_is_noop() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_os_end();
+    match &e.phase { OsFresh => {}, _ => assert(false) }
+    assert_eq(e.end_calls, 1 as Int64);
+}
+
+fn test_total_calls() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_os_init();
+    let _ = e.sqlite3_os_end();
+    let _ = e.sqlite3_os_init();
+    assert_eq(e.total_calls(), 3 as Int64);
+}
+
+fn main() {
+    test_phase_names_and_live();
+    test_new_engine_defaults_fresh();
+    test_sqlite3_os_init_transitions_to_initialised();
+    test_sqlite3_os_init_idempotent();
+    test_sqlite3_os_end_after_init();
+    test_sqlite3_os_end_from_fresh_is_noop();
+    test_total_calls();
+}

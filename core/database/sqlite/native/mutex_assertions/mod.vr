@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/mutex_assertions/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_mutex_held / _notheld)
+// Spec: SQLite C API
+//
+//   int sqlite3_mutex_held(sqlite3_mutex *p)
+//   int sqlite3_mutex_notheld(sqlite3_mutex *p)
+//
+// Debug-build assertion helpers — the release build always returns 1
+// (true), the debug build queries the mutex state.  The pair is
+// idempotent: notheld ≡ !held on debug; both return 1 on release.
+//
+// Submodules:
+//   * `mode`    — BuildMode (Debug / Release)
+//   * `engine`  — per-mutex held-tag registry
+// =============================================================================
+
+module core.database.sqlite.native.mutex_assertions;
+
+public module mode;
+public module engine;

@@ -1,0 +1,39 @@
+// =============================================================================
+// core/database/sqlite/native/io_methods/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_io_methods vtable)
+// Spec: SQLite C API
+//
+//   struct sqlite3_io_methods {
+//     int iVersion;                 /* 1, 2, or 3 */
+//     int (*xClose)(...);
+//     int (*xRead)(...);
+//     int (*xWrite)(...);
+//     int (*xTruncate)(...);
+//     int (*xSync)(...);
+//     int (*xFileSize)(...);
+//     int (*xLock)(...);
+//     int (*xUnlock)(...);
+//     int (*xCheckReservedLock)(...);
+//     int (*xFileControl)(...);
+//     int (*xSectorSize)(...);
+//     int (*xDeviceCharacteristics)(...);
+//     /* iVersion >= 2 */
+//     int (*xShmMap)(...);
+//     int (*xShmLock)(...);
+//     void (*xShmBarrier)(...);
+//     int (*xShmUnmap)(...);
+//     /* iVersion >= 3 */
+//     int (*xFetch)(...);
+//     int (*xUnfetch)(...);
+//   };
+//
+// Submodules:
+//   * `method_set`  — boolean presence map for every slot
+//   * `version`     — IoMethodsVersion w/ feature gating
+// =============================================================================
+
+module core.database.sqlite.native.io_methods;
+
+public module method_set;
+public module version;

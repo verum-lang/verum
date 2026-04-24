@@ -1,0 +1,53 @@
+// =============================================================================
+// os_init_api/engine.vr — _os_init / _os_end call counters
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.os_init_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.os_init_api.phase.{
+    OsPhase, OsFresh, OsInitialised, OsTornDown,
+};
+
+public type OsInitEngine is {
+    phase: OsPhase,
+    init_calls: Int64,
+    end_calls: Int64,
+}
+
+public fn new_engine() -> OsInitEngine {
+    OsInitEngine {
+        phase: OsFresh,
+        init_calls: 0 as Int64,
+        end_calls: 0 as Int64,
+    }
+}
+
+implement OsInitEngine {
+    /// sqlite3_os_init — transitions Fresh → Initialised and also
+    /// TornDown → Initialised.  Returns SQLITE_OK (0); idempotent when
+    /// already initialised.
+    pub fn sqlite3_os_init(&mut self) -> Int {
+        self.init_calls = self.init_calls + (1 as Int64);
+        self.phase = OsInitialised;
+        0
+    }
+
+    /// sqlite3_os_end — transitions Initialised → TornDown; ignored
+    /// (but counted) if the phase is already Fresh or TornDown.
+    pub fn sqlite3_os_end(&mut self) -> Int {
+        self.end_calls = self.end_calls + (1 as Int64);
+        match &self.phase {
+            OsInitialised => self.phase = OsTornDown,
+            _ => {}
+        }
+        0
+    }
+
+    pub fn total_calls(&self) -> Int64 {
+        self.init_calls + self.end_calls
+    }
+}
