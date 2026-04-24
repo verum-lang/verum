@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/expr_index_api/mod.vr
+// =============================================================================
+// Expression indexes (SQLite 3.9+):
+//
+//   CREATE INDEX idx_lower ON users(LOWER(name));
+//
+// Queries that reference the same expression syntactically can use the
+// index. All expressions must be deterministic.
+// Spec §13.3 — index variants.
+// =============================================================================
+
+module core.database.sqlite.native.expr_index_api;
+
+public module expr_key;
+public module spec;

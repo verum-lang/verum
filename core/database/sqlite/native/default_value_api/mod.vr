@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/default_value_api/mod.vr
+// =============================================================================
+// Column DEFAULT expressions — literal, NULL, CURRENT_TIMESTAMP, or expression.
+// Spec §17.4 — column constraints.
+//
+// DEFAULT forms:
+//   DEFAULT NULL                                   -- explicit null
+//   DEFAULT 42                                     -- literal
+//   DEFAULT 'text'                                 -- text literal
+//   DEFAULT CURRENT_TIMESTAMP                      -- runtime constant
+//   DEFAULT CURRENT_DATE
+//   DEFAULT CURRENT_TIME
+//   DEFAULT (expr)                                 -- parenthesized expression
+//
+// =============================================================================
+
+module core.database.sqlite.native.default_value_api;
+
+public module form;
+public module current_marker;

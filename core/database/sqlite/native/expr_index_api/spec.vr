@@ -1,0 +1,56 @@
+// Expression-index spec.
+
+module core.database.sqlite.native.expr_index_api.spec;
+
+mount core.database.sqlite.native.expr_index_api.expr_key.{
+    ExprKey, EkColumn, EkExpr, is_plain_column, is_expression,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type ExprIndexSpec is {
+    index_name: Text,
+    table_name: Text,
+    keys: List<ExprKey>,
+    unique: Bool,
+};
+
+public fn new(index_name: Text, table_name: Text, keys: List<ExprKey>) -> ExprIndexSpec {
+    ExprIndexSpec {
+        index_name: index_name,
+        table_name: table_name,
+        keys: keys,
+        unique: false,
+    }
+}
+
+public fn as_unique(mut s: ExprIndexSpec) -> ExprIndexSpec {
+    s.unique = true;
+    s
+}
+
+public fn arity(s: &ExprIndexSpec) -> Int { s.keys.len() }
+
+public fn has_any_expression(s: &ExprIndexSpec) -> Bool {
+    let mut i: Int = 0;
+    while i < s.keys.len() {
+        if is_expression(&s.keys[i]) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+public fn has_any_plain_column(s: &ExprIndexSpec) -> Bool {
+    let mut i: Int = 0;
+    while i < s.keys.len() {
+        if is_plain_column(&s.keys[i]) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// A mixed index (column + expression) is allowed; a pure-column index is
+// indistinguishable from a regular index.
+public fn is_pure_expression(s: &ExprIndexSpec) -> Bool {
+    !has_any_plain_column(s) && has_any_expression(s)
+}

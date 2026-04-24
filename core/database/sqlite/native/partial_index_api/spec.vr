@@ -1,0 +1,28 @@
+// Partial index spec.
+
+module core.database.sqlite.native.partial_index_api.spec;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type PartialIndexSpec is {
+    index_name: Text,
+    table_name: Text,
+    columns: List<Text>,
+    where_sql: Text,       // raw predicate text; parse in l5_sql
+};
+
+public fn new(index_name: Text, table_name: Text, columns: List<Text>, where_sql: Text) -> PartialIndexSpec {
+    PartialIndexSpec {
+        index_name: index_name,
+        table_name: table_name,
+        columns: columns,
+        where_sql: where_sql,
+    }
+}
+
+public fn is_partial(s: &PartialIndexSpec) -> Bool {
+    s.where_sql.len() > 0
+}
+
+public fn arity(s: &PartialIndexSpec) -> Int { s.columns.len() }

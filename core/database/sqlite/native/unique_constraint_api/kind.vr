@@ -1,0 +1,27 @@
+// Uniqueness-constraint kind.
+
+module core.database.sqlite.native.unique_constraint_api.kind;
+
+mount base.{Bool, Text};
+
+public type UniqueKind is
+    | UkPrimaryKey
+    | UkUnique
+    ;
+
+public fn kind_name(k: &UniqueKind) -> Text {
+    match k {
+        UkPrimaryKey => "PRIMARY KEY".clone(),
+        UkUnique     => "UNIQUE".clone(),
+    }
+}
+
+public fn is_primary_key(k: &UniqueKind) -> Bool {
+    match k { UkPrimaryKey => true, _ => false }
+}
+
+// PRIMARY KEY implies NOT NULL (except for the legacy INTEGER PRIMARY KEY =
+// ROWID quirk); UNIQUE does not.
+public fn implies_not_null(k: &UniqueKind) -> Bool {
+    match k { UkPrimaryKey => true, _ => false }
+}

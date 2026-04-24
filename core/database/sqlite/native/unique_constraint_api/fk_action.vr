@@ -1,0 +1,46 @@
+// Foreign-key referential action taxonomy.
+
+module core.database.sqlite.native.unique_constraint_api.fk_action;
+
+mount base.{Bool, Text};
+
+public type FkAction is
+    | FaNoAction       // default — reject the change at commit time
+    | FaRestrict       // reject immediately (before commit)
+    | FaCascade        // propagate the change
+    | FaSetNull        // set child column(s) to NULL
+    | FaSetDefault     // set child column(s) to column DEFAULT
+    ;
+
+public fn action_name(a: &FkAction) -> Text {
+    match a {
+        FaNoAction    => "NO ACTION".clone(),
+        FaRestrict    => "RESTRICT".clone(),
+        FaCascade     => "CASCADE".clone(),
+        FaSetNull     => "SET NULL".clone(),
+        FaSetDefault  => "SET DEFAULT".clone(),
+    }
+}
+
+public fn default_action() -> FkAction { FaNoAction }
+
+public fn allows_deferred_check(a: &FkAction) -> Bool {
+    match a { FaNoAction => true, _ => false }
+}
+
+public fn propagates_change(a: &FkAction) -> Bool {
+    match a {
+        FaCascade    => true,
+        FaSetNull    => true,
+        FaSetDefault => true,
+        _            => false,
+    }
+}
+
+public fn rejects_change(a: &FkAction) -> Bool {
+    match a {
+        FaNoAction => true,
+        FaRestrict => true,
+        _          => false,
+    }
+}

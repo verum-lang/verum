@@ -1,0 +1,68 @@
+// JSON1 function registry — name + kind + arity range.
+
+module core.database.sqlite.native.json1_fn_taxonomy.entry;
+
+mount core.database.sqlite.native.json1_fn_taxonomy.kind.{
+    JsonFnKind, JfConstructor, JfAccessor, JfMutator, JfValidator, JfAggregate,
+};
+mount base.{Bool, Text, Maybe};
+mount core.collections.list.{List};
+
+public type FnEntry is {
+    name: Text,
+    kind: JsonFnKind,
+    min_args: Int,
+    max_args: Int,         // -1 means variadic
+};
+
+public fn entry(name: Text, kind: JsonFnKind, min_args: Int, max_args: Int) -> FnEntry {
+    FnEntry { name: name, kind: kind, min_args: min_args, max_args: max_args }
+}
+
+public fn is_variadic(e: &FnEntry) -> Bool {
+    e.max_args < 0
+}
+
+public fn accepts_arity(e: &FnEntry, n: Int) -> Bool {
+    if n < e.min_args { return false; }
+    if e.max_args < 0 { return true; }
+    n <= e.max_args
+}
+
+public fn registry() -> List<FnEntry> {
+    let mut out: List<FnEntry> = [].clone() as List<FnEntry>;
+    // constructors
+    out.push(entry("json".clone(),        JfConstructor, 1, 1));
+    out.push(entry("json_array".clone(),  JfConstructor, 0, -1));
+    out.push(entry("json_object".clone(), JfConstructor, 0, -1));
+    out.push(entry("json_quote".clone(),  JfConstructor, 1, 1));
+    // accessors
+    out.push(entry("json_extract".clone(),        JfAccessor, 2, -1));
+    out.push(entry("json_array_length".clone(),   JfAccessor, 1, 2));
+    out.push(entry("json_type".clone(),           JfAccessor, 1, 2));
+    // mutators
+    out.push(entry("json_set".clone(),     JfMutator, 3, -1));
+    out.push(entry("json_insert".clone(),  JfMutator, 3, -1));
+    out.push(entry("json_replace".clone(), JfMutator, 3, -1));
+    out.push(entry("json_remove".clone(),  JfMutator, 1, -1));
+    out.push(entry("json_patch".clone(),   JfMutator, 2, 2));
+    // validators
+    out.push(entry("json_valid".clone(),          JfValidator, 1, 1));
+    out.push(entry("json_error_position".clone(), JfValidator, 1, 1));
+    // aggregates
+    out.push(entry("json_group_array".clone(),  JfAggregate, 1, 1));
+    out.push(entry("json_group_object".clone(), JfAggregate, 2, 2));
+    out
+}
+
+public fn find(name: &Text) -> Maybe<FnEntry> {
+    let r = registry();
+    let mut i: Int = 0;
+    while i < r.len() {
+        if r[i].name == *name {
+            return Maybe.Some(r[i].clone());
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}

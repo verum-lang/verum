@@ -1,0 +1,60 @@
+// Per-op restrictions — SQLite rejects some ALTER TABLE combinations outright.
+
+module core.database.sqlite.native.alter_table_api.restriction;
+
+mount core.database.sqlite.native.alter_table_api.op.{
+    AlterOp, AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn,
+};
+mount base.{Bool, Text};
+
+public type Rejection is
+    | RjAllowed
+    | RjAddColumnWithPrimaryKey
+    | RjAddColumnWithUnique
+    | RjAddColumnNotNullWithoutDefault
+    | RjDropColumnPrimaryKeyPart
+    | RjDropColumnUnique
+    | RjDropColumnForeignKey
+    | RjRenameColumnView
+    ;
+
+public fn rejection_name(r: &Rejection) -> Text {
+    match r {
+        RjAllowed                       => "allowed".clone(),
+        RjAddColumnWithPrimaryKey       => "ADD COLUMN cannot have PRIMARY KEY".clone(),
+        RjAddColumnWithUnique           => "ADD COLUMN cannot have UNIQUE".clone(),
+        RjAddColumnNotNullWithoutDefault => "ADD COLUMN NOT NULL requires DEFAULT".clone(),
+        RjDropColumnPrimaryKeyPart      => "cannot DROP part of a PRIMARY KEY".clone(),
+        RjDropColumnUnique              => "cannot DROP a UNIQUE column".clone(),
+        RjDropColumnForeignKey          => "cannot DROP a FOREIGN KEY column".clone(),
+        RjRenameColumnView              => "RENAME COLUMN: column is referenced by a VIEW".clone(),
+    }
+}
+
+public fn is_allowed(r: &Rejection) -> Bool {
+    match r { RjAllowed => true, _ => false }
+}
+
+// These ops pre-flight check the target schema and emit a specific error.
+// This table mirrors the SQLite restrictions in shell docs.
+public fn classify_add_column(
+    has_primary_key: Bool,
+    has_unique: Bool,
+    not_null_without_default: Bool,
+) -> Rejection {
+    if has_primary_key { return RjAddColumnWithPrimaryKey; }
+    if has_unique      { return RjAddColumnWithUnique; }
+    if not_null_without_default { return RjAddColumnNotNullWithoutDefault; }
+    RjAllowed
+}
+
+public fn classify_drop_column(
+    in_primary_key: Bool,
+    in_unique: Bool,
+    in_foreign_key: Bool,
+) -> Rejection {
+    if in_primary_key { return RjDropColumnPrimaryKeyPart; }
+    if in_unique      { return RjDropColumnUnique; }
+    if in_foreign_key { return RjDropColumnForeignKey; }
+    RjAllowed
+}

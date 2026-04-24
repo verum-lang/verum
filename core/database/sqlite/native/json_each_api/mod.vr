@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/json_each_api/mod.vr
+// =============================================================================
+// json_each and json_tree virtual tables — row shape emitted per element.
+// Spec §16.2 — table-valued JSON1 functions.
+//
+//   SELECT * FROM json_each('[10,20,30]');
+//     key | value | type    | atom | id | parent | fullkey | path
+//      0  |  10   | integer | 10   |  1 | NULL   | $[0]    | $
+//
+// json_tree walks recursively (depth-first); json_each only walks the top
+// container (1 level).
+//
+// =============================================================================
+
+module core.database.sqlite.native.json_each_api;
+
+public module mode;
+public module row_shape;

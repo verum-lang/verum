@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, expr_index_api, sql, index
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.expr_index_api.expr_key.{
+    ExprKey, EkColumn, EkExpr,
+    key_kind, is_plain_column, is_expression, raw_text,
+};
+mount core.database.sqlite.native.expr_index_api.spec.{
+    ExprIndexSpec,
+    new, as_unique, arity, has_any_expression, has_any_plain_column, is_pure_expression,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_key_kinds() {
+    assert(key_kind(&EkColumn("name".clone())) == "column".clone());
+    assert(key_kind(&EkExpr("LOWER(name)".clone())) == "expression".clone());
+}
+
+fn test_classifiers() {
+    assert(is_plain_column(&EkColumn("n".clone())));
+    assert(!is_plain_column(&EkExpr("x+1".clone())));
+    assert(is_expression(&EkExpr("x+1".clone())));
+    assert(!is_expression(&EkColumn("n".clone())));
+}
+
+fn test_raw_text() {
+    assert(raw_text(&EkColumn("age".clone())) == "age".clone());
+    assert(raw_text(&EkExpr("LOWER(name)".clone())) == "LOWER(name)".clone());
+}
+
+fn test_spec_pure_expression() {
+    let keys: List<ExprKey> = [EkExpr("LOWER(name)".clone())].clone() as List<ExprKey>;
+    let s = new("idx".clone(), "u".clone(), keys);
+    assert_eq(arity(&s), 1);
+    assert(has_any_expression(&s));
+    assert(!has_any_plain_column(&s));
+    assert(is_pure_expression(&s));
+    assert(!s.unique);
+}
+
+fn test_spec_mixed() {
+    let keys: List<ExprKey> = [
+        EkColumn("id".clone()),
+        EkExpr("LOWER(name)".clone()),
+    ].clone() as List<ExprKey>;
+    let s = new("idx".clone(), "u".clone(), keys);
+    assert_eq(arity(&s), 2);
+    assert(has_any_expression(&s));
+    assert(has_any_plain_column(&s));
+    assert(!is_pure_expression(&s));
+}
+
+fn test_spec_unique() {
+    let keys: List<ExprKey> = [EkExpr("age * 2".clone())].clone() as List<ExprKey>;
+    let s = as_unique(new("idx".clone(), "u".clone(), keys));
+    assert(s.unique);
+}
+
+fn main() {
+    test_key_kinds();
+    test_classifiers();
+    test_raw_text();
+    test_spec_pure_expression();
+    test_spec_mixed();
+    test_spec_unique();
+}

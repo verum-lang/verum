@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/json1_fn_taxonomy/mod.vr
+// =============================================================================
+// JSON1 built-in function taxonomy.
+// Spec §15.5 — JSON1 scalar + aggregate functions.
+//
+// Covers json(), json_array(), json_array_length(), json_error_position(),
+// json_extract(), json_insert(), json_object(), json_patch(),
+// json_quote(), json_remove(), json_replace(), json_set(), json_type(),
+// json_valid(), json_group_array(), json_group_object().
+//
+// =============================================================================
+
+module core.database.sqlite.native.json1_fn_taxonomy;
+
+public module kind;
+public module entry;

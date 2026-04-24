@@ -1,0 +1,72 @@
+// Row shape emitted by json_each / json_tree.
+
+module core.database.sqlite.native.json_each_api.row_shape;
+
+mount base.{Bool, Text, Int64};
+
+// JSON element types as named constants (mirror json_type string values).
+public type JsonTypeName is
+    | JtNull
+    | JtTrue
+    | JtFalse
+    | JtInteger
+    | JtReal
+    | JtText
+    | JtArray
+    | JtObject
+    ;
+
+public fn type_name(t: &JsonTypeName) -> Text {
+    match t {
+        JtNull    => "null".clone(),
+        JtTrue    => "true".clone(),
+        JtFalse   => "false".clone(),
+        JtInteger => "integer".clone(),
+        JtReal    => "real".clone(),
+        JtText    => "text".clone(),
+        JtArray   => "array".clone(),
+        JtObject  => "object".clone(),
+    }
+}
+
+public fn is_container(t: &JsonTypeName) -> Bool {
+    match t { JtArray => true, JtObject => true, _ => false }
+}
+
+public fn is_scalar(t: &JsonTypeName) -> Bool { !is_container(t) }
+
+// Row shape per json_each/_tree documentation.
+public type WalkRow is {
+    key: Text,            // JSON-object key or integer index as text
+    value: Text,          // JSON-encoded value
+    type_name: JsonTypeName,
+    atom: Text,           // scalar value or NULL for containers
+    id: Int64,            // unique within this query
+    parent: Int64,        // -1 for root
+    fullkey: Text,        // absolute path from root ($, $.foo, $[0])
+    path: Text,           // path of parent container
+};
+
+public fn make_row(
+    key: Text, value: Text, type_name: JsonTypeName, atom: Text,
+    id: Int64, parent: Int64, fullkey: Text, path: Text,
+) -> WalkRow {
+    WalkRow {
+        key: key, value: value, type_name: type_name, atom: atom,
+        id: id, parent: parent, fullkey: fullkey, path: path,
+    }
+}
+
+public fn is_root_row(r: &WalkRow) -> Bool {
+    r.parent < 0 as Int64
+}
+
+public fn atom_is_null(r: &WalkRow) -> Bool {
+    match r.type_name {
+        JtArray => true,    // containers have NULL atom
+        JtObject => true,
+        _ => false,
+    }
+}
+
+public fn column_count() -> Int { 8 }

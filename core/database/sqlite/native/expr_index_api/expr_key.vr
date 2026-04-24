@@ -1,0 +1,32 @@
+// A single expression key — either a bare column or a raw expression text.
+
+module core.database.sqlite.native.expr_index_api.expr_key;
+
+mount base.{Bool, Text};
+
+public type ExprKey is
+    | EkColumn(Text)       // plain column reference
+    | EkExpr(Text)         // arbitrary expression; must be deterministic
+    ;
+
+public fn key_kind(k: &ExprKey) -> Text {
+    match k {
+        EkColumn(_) => "column".clone(),
+        EkExpr(_)   => "expression".clone(),
+    }
+}
+
+public fn is_plain_column(k: &ExprKey) -> Bool {
+    match k { EkColumn(_) => true, _ => false }
+}
+
+public fn is_expression(k: &ExprKey) -> Bool {
+    match k { EkExpr(_) => true, _ => false }
+}
+
+public fn raw_text(k: &ExprKey) -> Text {
+    match k {
+        EkColumn(c) => c.clone(),
+        EkExpr(e)   => e.clone(),
+    }
+}

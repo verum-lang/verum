@@ -1,0 +1,44 @@
+// One segment of a JSON path expression.
+
+module core.database.sqlite.native.json_path_api.segment;
+
+mount base.{Bool, Text, Int64};
+
+public type PathSegment is
+    | PsRoot                    // '$' prefix
+    | PsKey(Text)               // '.name' — object key
+    | PsIndex(Int64)            // '[n]' — array index
+    | PsLastIndex(Int64)        // '[#-n]' — from end; n>=1, n=1 means last
+    | PsWildcardKey             // '.**' — any descendant key (json_tree path)
+    ;
+
+public fn segment_kind(s: &PathSegment) -> Text {
+    match s {
+        PsRoot         => "root".clone(),
+        PsKey(_)       => "key".clone(),
+        PsIndex(_)     => "index".clone(),
+        PsLastIndex(_) => "last_index".clone(),
+        PsWildcardKey  => "wildcard".clone(),
+    }
+}
+
+public fn is_indexed(s: &PathSegment) -> Bool {
+    match s {
+        PsIndex(_)     => true,
+        PsLastIndex(_) => true,
+        _              => false,
+    }
+}
+
+public fn is_keyed(s: &PathSegment) -> Bool {
+    match s { PsKey(_) => true, _ => false }
+}
+
+public fn is_wildcard(s: &PathSegment) -> Bool {
+    match s { PsWildcardKey => true, _ => false }
+}
+
+// '$' always sits as the first segment; any other position is a parse error.
+public fn is_only_valid_at_position_zero(s: &PathSegment) -> Bool {
+    match s { PsRoot => true, _ => false }
+}

@@ -1,0 +1,78 @@
+// Constraint record — uniqueness spec or foreign-key spec.
+
+module core.database.sqlite.native.unique_constraint_api.constraint;
+
+mount core.database.sqlite.native.unique_constraint_api.kind.{
+    UniqueKind, UkPrimaryKey, UkUnique, is_primary_key, implies_not_null,
+};
+mount core.database.sqlite.native.unique_constraint_api.fk_action.{
+    FkAction, FaNoAction, default_action, propagates_change, rejects_change,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type UniqueConstraint is {
+    kind: UniqueKind,
+    columns: List<Text>,
+    name: Text,                 // optional named constraint; "" if anonymous
+};
+
+public fn unique(columns: List<Text>) -> UniqueConstraint {
+    UniqueConstraint { kind: UkUnique, columns: columns, name: "".clone() }
+}
+
+public fn primary_key(columns: List<Text>) -> UniqueConstraint {
+    UniqueConstraint { kind: UkPrimaryKey, columns: columns, name: "".clone() }
+}
+
+public fn with_name(mut u: UniqueConstraint, name: Text) -> UniqueConstraint {
+    u.name = name;
+    u
+}
+
+public fn forbids_null(u: &UniqueConstraint) -> Bool {
+    implies_not_null(&u.kind)
+}
+
+public type ForeignKey is {
+    columns: List<Text>,
+    ref_table: Text,
+    ref_columns: List<Text>,
+    on_delete: FkAction,
+    on_update: FkAction,
+    deferred: Bool,             // DEFERRABLE INITIALLY DEFERRED
+};
+
+public fn fk(columns: List<Text>, ref_table: Text, ref_columns: List<Text>) -> ForeignKey {
+    ForeignKey {
+        columns: columns,
+        ref_table: ref_table,
+        ref_columns: ref_columns,
+        on_delete: default_action(),
+        on_update: default_action(),
+        deferred: false,
+    }
+}
+
+public fn with_on_delete(mut f: ForeignKey, a: FkAction) -> ForeignKey {
+    f.on_delete = a;
+    f
+}
+
+public fn with_on_update(mut f: ForeignKey, a: FkAction) -> ForeignKey {
+    f.on_update = a;
+    f
+}
+
+public fn as_deferred(mut f: ForeignKey) -> ForeignKey {
+    f.deferred = true;
+    f
+}
+
+public fn requires_child_update(f: &ForeignKey) -> Bool {
+    propagates_change(&f.on_delete) || propagates_change(&f.on_update)
+}
+
+public fn arity_matches(f: &ForeignKey) -> Bool {
+    f.columns.len() == f.ref_columns.len()
+}

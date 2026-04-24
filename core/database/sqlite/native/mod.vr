@@ -444,3 +444,19 @@ public module upsert_api;
 public module index_hint_api;
 // - vtab_constraint_ops: SQLITE_INDEX_CONSTRAINT_* opcode taxonomy (EQ/LT/MATCH/LIMIT/…)
 public module vtab_constraint_ops;
+// - alter_table_api: ALTER TABLE op taxonomy + version + restriction classifier
+public module alter_table_api;
+// - json_path_api: JSON1 path grammar — $ root + key/index/wildcard segments
+public module json_path_api;
+// - json1_fn_taxonomy: JSON1 function registry (16 entries) + kind classification
+public module json1_fn_taxonomy;
+// - json_each_api: json_each / json_tree vtab walk mode + 8-column row shape
+public module json_each_api;
+// - partial_index_api: CREATE INDEX ... WHERE pred + applicability classifier
+public module partial_index_api;
+// - expr_index_api: CREATE INDEX ON t(expr) — ExprKey taxonomy + pure/mixed detection
+public module expr_index_api;
+// - unique_constraint_api: UNIQUE / PRIMARY KEY + FOREIGN KEY + 5-way referential action
+public module unique_constraint_api;
+// - default_value_api: DEFAULT literal / CURRENT_* / expression form + insert-time evaluation
+public module default_value_api;

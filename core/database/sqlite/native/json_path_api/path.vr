@@ -1,0 +1,61 @@
+// Parsed JSON path: list of segments with a root.
+
+module core.database.sqlite.native.json_path_api.path;
+
+mount core.database.sqlite.native.json_path_api.segment.{
+    PathSegment, PsRoot, PsKey, PsIndex, PsLastIndex, PsWildcardKey,
+    is_indexed, is_keyed, is_wildcard,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type JsonPath is {
+    segments: List<PathSegment>,
+};
+
+public fn root_only() -> JsonPath {
+    let mut segs: List<PathSegment> = [].clone() as List<PathSegment>;
+    segs.push(PsRoot);
+    JsonPath { segments: segs }
+}
+
+public fn push(mut p: JsonPath, s: PathSegment) -> JsonPath {
+    p.segments.push(s);
+    p
+}
+
+public fn len(p: &JsonPath) -> Int { p.segments.len() }
+
+public fn is_root(p: &JsonPath) -> Bool { p.segments.len() == 1 }
+
+// A well-formed path starts with PsRoot and nowhere else has PsRoot.
+public fn is_well_formed(p: &JsonPath) -> Bool {
+    if p.segments.len() == 0 { return false; }
+    match &p.segments[0] {
+        PsRoot => {},
+        _ => return false,
+    }
+    let mut i: Int = 1;
+    while i < p.segments.len() {
+        match &p.segments[i] {
+            PsRoot => return false,
+            _ => {},
+        }
+        i = i + 1;
+    }
+    true
+}
+
+public fn has_wildcard(p: &JsonPath) -> Bool {
+    let mut i: Int = 0;
+    while i < p.segments.len() {
+        if is_wildcard(&p.segments[i]) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// json_set / json_insert / json_remove require a concrete path (no wildcards).
+public fn is_concrete(p: &JsonPath) -> Bool {
+    is_well_formed(p) && !has_wildcard(p)
+}

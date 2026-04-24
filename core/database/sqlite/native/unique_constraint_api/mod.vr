@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/unique_constraint_api/mod.vr
+// =============================================================================
+// UNIQUE / PRIMARY KEY / FOREIGN KEY constraint shapes — plus referential
+// actions (ON DELETE, ON UPDATE).
+// Spec §17.3 — schema constraints.
+//
+// Referential actions per SQL-92 and SQLite:
+//   NO ACTION (default), RESTRICT, CASCADE, SET NULL, SET DEFAULT.
+//
+// =============================================================================
+
+module core.database.sqlite.native.unique_constraint_api;
+
+public module kind;
+public module fk_action;
+public module constraint;

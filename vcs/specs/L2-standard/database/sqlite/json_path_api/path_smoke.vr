@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, json_path_api, json1
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.json_path_api.segment.{
+    PathSegment, PsRoot, PsKey, PsIndex, PsLastIndex, PsWildcardKey,
+    segment_kind, is_indexed, is_keyed, is_wildcard, is_only_valid_at_position_zero,
+};
+mount core.database.sqlite.native.json_path_api.path.{
+    JsonPath, root_only, push, len, is_root, is_well_formed, has_wildcard, is_concrete,
+};
+mount base.{Bool, Int64};
+
+fn test_segment_kinds() {
+    assert(segment_kind(&PsRoot) == "root".clone());
+    assert(segment_kind(&PsKey("foo".clone())) == "key".clone());
+    assert(segment_kind(&PsIndex(2 as Int64)) == "index".clone());
+    assert(segment_kind(&PsLastIndex(1 as Int64)) == "last_index".clone());
+    assert(segment_kind(&PsWildcardKey) == "wildcard".clone());
+}
+
+fn test_classification_predicates() {
+    assert(is_keyed(&PsKey("x".clone())));
+    assert(!is_keyed(&PsRoot));
+    assert(is_indexed(&PsIndex(0 as Int64)));
+    assert(is_indexed(&PsLastIndex(1 as Int64)));
+    assert(!is_indexed(&PsKey("x".clone())));
+    assert(is_wildcard(&PsWildcardKey));
+    assert(!is_wildcard(&PsIndex(0 as Int64)));
+}
+
+fn test_root_only_valid_at_zero() {
+    assert(is_only_valid_at_position_zero(&PsRoot));
+    assert(!is_only_valid_at_position_zero(&PsKey("x".clone())));
+}
+
+fn test_root_only_path() {
+    let p = root_only();
+    assert_eq(len(&p), 1);
+    assert(is_root(&p));
+    assert(is_well_formed(&p));
+    assert(!has_wildcard(&p));
+    assert(is_concrete(&p));
+}
+
+fn test_deep_concrete_path() {
+    let p = push(push(push(root_only(), PsKey("a".clone())), PsIndex(0 as Int64)), PsKey("b".clone()));
+    assert_eq(len(&p), 4);
+    assert(!is_root(&p));
+    assert(is_well_formed(&p));
+    assert(is_concrete(&p));
+}
+
+fn test_wildcard_path_not_concrete() {
+    let p = push(push(root_only(), PsWildcardKey), PsKey("bar".clone()));
+    assert(is_well_formed(&p));
+    assert(has_wildcard(&p));
+    assert(!is_concrete(&p));
+}
+
+fn test_ill_formed_path_second_root() {
+    let p = push(root_only(), PsRoot);
+    assert(!is_well_formed(&p));
+    assert(!is_concrete(&p));
+}
+
+fn main() {
+    test_segment_kinds();
+    test_classification_predicates();
+    test_root_only_valid_at_zero();
+    test_root_only_path();
+    test_deep_concrete_path();
+    test_wildcard_path_not_concrete();
+    test_ill_formed_path_second_root();
+}

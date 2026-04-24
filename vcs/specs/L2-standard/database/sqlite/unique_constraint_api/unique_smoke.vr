@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, unique_constraint_api, sql, constraint
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.unique_constraint_api.kind.{
+    UniqueKind, UkPrimaryKey, UkUnique,
+    kind_name, is_primary_key, implies_not_null,
+};
+mount core.database.sqlite.native.unique_constraint_api.fk_action.{
+    FkAction, FaNoAction, FaRestrict, FaCascade, FaSetNull, FaSetDefault,
+    action_name, default_action, allows_deferred_check, propagates_change, rejects_change,
+};
+mount core.database.sqlite.native.unique_constraint_api.constraint.{
+    UniqueConstraint,
+    unique, primary_key, with_name, forbids_null,
+    ForeignKey,
+    fk, with_on_delete, with_on_update, as_deferred, requires_child_update, arity_matches,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_kind_names() {
+    assert(kind_name(&UkPrimaryKey) == "PRIMARY KEY".clone());
+    assert(kind_name(&UkUnique) == "UNIQUE".clone());
+}
+
+fn test_kind_classification() {
+    assert(is_primary_key(&UkPrimaryKey));
+    assert(!is_primary_key(&UkUnique));
+    assert(implies_not_null(&UkPrimaryKey));
+    assert(!implies_not_null(&UkUnique));
+}
+
+fn test_action_names() {
+    assert(action_name(&FaNoAction)   == "NO ACTION".clone());
+    assert(action_name(&FaCascade)    == "CASCADE".clone());
+    assert(action_name(&FaSetDefault) == "SET DEFAULT".clone());
+}
+
+fn test_default_is_no_action() {
+    match default_action() { FaNoAction => {}, _ => assert(false) }
+}
+
+fn test_action_classifiers() {
+    assert(allows_deferred_check(&FaNoAction));
+    assert(!allows_deferred_check(&FaCascade));
+    assert(propagates_change(&FaCascade));
+    assert(propagates_change(&FaSetNull));
+    assert(!propagates_change(&FaRestrict));
+    assert(rejects_change(&FaNoAction));
+    assert(rejects_change(&FaRestrict));
+    assert(!rejects_change(&FaCascade));
+}
+
+fn test_unique_pk_constraints() {
+    let cols: List<Text> = ["id".clone()].clone() as List<Text>;
+    let pk = primary_key(cols.clone());
+    assert(forbids_null(&pk));
+    let u = unique(cols);
+    assert(!forbids_null(&u));
+}
+
+fn test_with_name() {
+    let cols: List<Text> = ["a".clone(), "b".clone()].clone() as List<Text>;
+    let u = with_name(unique(cols), "uq_ab".clone());
+    assert(u.name == "uq_ab".clone());
+}
+
+fn test_fk_constructor_defaults() {
+    let child: List<Text> = ["user_id".clone()].clone() as List<Text>;
+    let parent: List<Text> = ["id".clone()].clone() as List<Text>;
+    let f = fk(child, "users".clone(), parent);
+    match f.on_delete { FaNoAction => {}, _ => assert(false) }
+    match f.on_update { FaNoAction => {}, _ => assert(false) }
+    assert(!f.deferred);
+    assert(arity_matches(&f));
+    assert(!requires_child_update(&f));
+}
+
+fn test_fk_with_cascade_and_deferred() {
+    let child: List<Text> = ["user_id".clone()].clone() as List<Text>;
+    let parent: List<Text> = ["id".clone()].clone() as List<Text>;
+    let f0 = fk(child, "users".clone(), parent);
+    let f1 = with_on_delete(f0, FaCascade);
+    let f2 = with_on_update(f1, FaSetNull);
+    let f3 = as_deferred(f2);
+    assert(f3.deferred);
+    assert(requires_child_update(&f3));
+}
+
+fn test_fk_arity_mismatch() {
+    let child: List<Text> = ["a".clone(), "b".clone()].clone() as List<Text>;
+    let parent: List<Text> = ["id".clone()].clone() as List<Text>;
+    let f = fk(child, "t".clone(), parent);
+    assert(!arity_matches(&f));
+}
+
+fn main() {
+    test_kind_names();
+    test_kind_classification();
+    test_action_names();
+    test_default_is_no_action();
+    test_action_classifiers();
+    test_unique_pk_constraints();
+    test_with_name();
+    test_fk_constructor_defaults();
+    test_fk_with_cascade_and_deferred();
+    test_fk_arity_mismatch();
+}

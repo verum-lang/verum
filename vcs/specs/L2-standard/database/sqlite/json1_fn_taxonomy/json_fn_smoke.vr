@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, json1_fn_taxonomy, json1, builtins
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.json1_fn_taxonomy.kind.{
+    JsonFnKind, JfConstructor, JfAccessor, JfMutator, JfValidator, JfAggregate,
+    kind_name, is_pure, produces_json,
+};
+mount core.database.sqlite.native.json1_fn_taxonomy.entry.{
+    FnEntry,
+    entry, is_variadic, accepts_arity, registry, find,
+};
+mount base.{Bool, Maybe};
+
+fn test_kind_names() {
+    assert(kind_name(&JfConstructor) == "constructor".clone());
+    assert(kind_name(&JfAggregate) == "aggregate".clone());
+}
+
+fn test_purity_set() {
+    assert(is_pure(&JfConstructor));
+    assert(is_pure(&JfValidator));
+    assert(!is_pure(&JfAggregate));
+}
+
+fn test_produces_json_set() {
+    assert(produces_json(&JfConstructor));
+    assert(produces_json(&JfMutator));
+    assert(produces_json(&JfAggregate));
+    assert(!produces_json(&JfAccessor));
+    assert(!produces_json(&JfValidator));
+}
+
+fn test_entry_variadic_flag() {
+    let e = entry("f".clone(), JfConstructor, 0, -1);
+    assert(is_variadic(&e));
+    let ne = entry("g".clone(), JfAccessor, 1, 3);
+    assert(!is_variadic(&ne));
+}
+
+fn test_accepts_arity_bounds() {
+    let e = entry("f".clone(), JfMutator, 3, -1);
+    assert(!accepts_arity(&e, 2));
+    assert(accepts_arity(&e, 3));
+    assert(accepts_arity(&e, 100));
+    let bounded = entry("g".clone(), JfAccessor, 1, 2);
+    assert(!accepts_arity(&bounded, 0));
+    assert(accepts_arity(&bounded, 1));
+    assert(accepts_arity(&bounded, 2));
+    assert(!accepts_arity(&bounded, 3));
+}
+
+fn test_registry_includes_key_entries() {
+    match find(&"json".clone()) {
+        Maybe.Some(e) => match &e.kind { JfConstructor => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match find(&"json_extract".clone()) {
+        Maybe.Some(e) => {
+            match &e.kind { JfAccessor => {}, _ => assert(false) }
+            assert_eq(e.min_args, 2);
+            assert(is_variadic(&e));
+        },
+        Maybe.None => assert(false),
+    }
+    match find(&"json_set".clone()) {
+        Maybe.Some(e) => match &e.kind { JfMutator => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match find(&"json_valid".clone()) {
+        Maybe.Some(e) => match &e.kind { JfValidator => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match find(&"json_group_array".clone()) {
+        Maybe.Some(e) => match &e.kind { JfAggregate => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_unknown_returns_none() {
+    match find(&"unknown_fn".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_registry_size() {
+    let r = registry();
+    assert(r.len() >= 16);
+}
+
+fn main() {
+    test_kind_names();
+    test_purity_set();
+    test_produces_json_set();
+    test_entry_variadic_flag();
+    test_accepts_arity_bounds();
+    test_registry_includes_key_entries();
+    test_unknown_returns_none();
+    test_registry_size();
+}

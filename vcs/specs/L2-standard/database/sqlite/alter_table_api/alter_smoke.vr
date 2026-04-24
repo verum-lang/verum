@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, alter_table_api, sql, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.alter_table_api.op.{
+    AlterOp, AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn,
+    op_name, is_metadata_only, min_version, touches_column,
+};
+mount core.database.sqlite.native.alter_table_api.restriction.{
+    Rejection, RjAllowed, RjAddColumnWithPrimaryKey, RjAddColumnWithUnique,
+    RjAddColumnNotNullWithoutDefault, RjDropColumnPrimaryKeyPart,
+    RjDropColumnUnique, RjDropColumnForeignKey,
+    rejection_name, is_allowed, classify_add_column, classify_drop_column,
+};
+mount base.{Bool};
+
+fn test_op_names() {
+    let rn: AlterOp = AlterOp.AoRenameTable { to: "new_t".clone() };
+    assert(op_name(&rn) == "RENAME TO".clone());
+    let rc: AlterOp = AlterOp.AoRenameColumn { from: "a".clone(), to: "b".clone() };
+    assert(op_name(&rc) == "RENAME COLUMN".clone());
+    let add: AlterOp = AlterOp.AoAddColumn { name: "c".clone(), type_name: "INTEGER".clone(), constraint_sql: "".clone() };
+    assert(op_name(&add) == "ADD COLUMN".clone());
+    let drop: AlterOp = AlterOp.AoDropColumn { name: "c".clone() };
+    assert(op_name(&drop) == "DROP COLUMN".clone());
+}
+
+fn test_metadata_only() {
+    let rn: AlterOp = AlterOp.AoRenameTable { to: "x".clone() };
+    assert(is_metadata_only(&rn));
+    let add: AlterOp = AlterOp.AoAddColumn { name: "c".clone(), type_name: "TEXT".clone(), constraint_sql: "".clone() };
+    assert(is_metadata_only(&add));
+    let drop: AlterOp = AlterOp.AoDropColumn { name: "c".clone() };
+    assert(!is_metadata_only(&drop));
+}
+
+fn test_min_version_table() {
+    let rn: AlterOp = AlterOp.AoRenameTable { to: "x".clone() };
+    assert(min_version(&rn) == "3.0.0".clone());
+    let rc: AlterOp = AlterOp.AoRenameColumn { from: "a".clone(), to: "b".clone() };
+    assert(min_version(&rc) == "3.25.0".clone());
+    let drop: AlterOp = AlterOp.AoDropColumn { name: "c".clone() };
+    assert(min_version(&drop) == "3.35.0".clone());
+}
+
+fn test_touches_column() {
+    let rn: AlterOp = AlterOp.AoRenameTable { to: "x".clone() };
+    assert(!touches_column(&rn));
+    let drop: AlterOp = AlterOp.AoDropColumn { name: "c".clone() };
+    assert(touches_column(&drop));
+}
+
+fn test_classify_add_column() {
+    let r = classify_add_column(false, false, false);
+    assert(is_allowed(&r));
+    let r_pk = classify_add_column(true, false, false);
+    match r_pk { RjAddColumnWithPrimaryKey => {}, _ => assert(false) }
+    let r_uniq = classify_add_column(false, true, false);
+    match r_uniq { RjAddColumnWithUnique => {}, _ => assert(false) }
+    let r_nn = classify_add_column(false, false, true);
+    match r_nn { RjAddColumnNotNullWithoutDefault => {}, _ => assert(false) }
+}
+
+fn test_classify_drop_column() {
+    let ok = classify_drop_column(false, false, false);
+    assert(is_allowed(&ok));
+    let pk = classify_drop_column(true, false, false);
+    match pk { RjDropColumnPrimaryKeyPart => {}, _ => assert(false) }
+    let u = classify_drop_column(false, true, false);
+    match u { RjDropColumnUnique => {}, _ => assert(false) }
+    let fk = classify_drop_column(false, false, true);
+    match fk { RjDropColumnForeignKey => {}, _ => assert(false) }
+}
+
+fn test_rejection_names() {
+    assert(rejection_name(&RjAllowed) == "allowed".clone());
+    assert(rejection_name(&RjDropColumnForeignKey) == "cannot DROP a FOREIGN KEY column".clone());
+}
+
+fn main() {
+    test_op_names();
+    test_metadata_only();
+    test_min_version_table();
+    test_touches_column();
+    test_classify_add_column();
+    test_classify_drop_column();
+    test_rejection_names();
+}

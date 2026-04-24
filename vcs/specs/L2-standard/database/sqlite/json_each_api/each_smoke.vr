@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, json_each_api, json1, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.json_each_api.mode.{
+    WalkMode, WmEach, WmTree,
+    mode_name, recursive, emits_non_leaf_rows,
+};
+mount core.database.sqlite.native.json_each_api.row_shape.{
+    JsonTypeName, JtNull, JtTrue, JtFalse, JtInteger, JtReal, JtText, JtArray, JtObject,
+    type_name, is_container, is_scalar,
+    WalkRow,
+    make_row, is_root_row, atom_is_null, column_count,
+};
+mount base.{Bool, Int64};
+
+fn test_mode_name_and_recursion() {
+    assert(mode_name(&WmEach) == "json_each".clone());
+    assert(mode_name(&WmTree) == "json_tree".clone());
+    assert(!recursive(&WmEach));
+    assert(recursive(&WmTree));
+    assert(!emits_non_leaf_rows(&WmEach));
+    assert(emits_non_leaf_rows(&WmTree));
+}
+
+fn test_json_type_names_and_predicates() {
+    assert(type_name(&JtNull) == "null".clone());
+    assert(type_name(&JtArray) == "array".clone());
+    assert(is_container(&JtArray));
+    assert(is_container(&JtObject));
+    assert(!is_container(&JtInteger));
+    assert(is_scalar(&JtNull));
+    assert(is_scalar(&JtReal));
+    assert(!is_scalar(&JtObject));
+}
+
+fn test_true_false_classifiers() {
+    assert(is_scalar(&JtTrue));
+    assert(is_scalar(&JtFalse));
+    assert(is_scalar(&JtText));
+}
+
+fn test_row_is_root() {
+    let r = make_row(
+        "".clone(), "[1,2,3]".clone(), JtArray, "".clone(),
+        0 as Int64, -1 as Int64, "$".clone(), "$".clone(),
+    );
+    assert(is_root_row(&r));
+    assert(atom_is_null(&r));
+}
+
+fn test_row_non_root_leaf() {
+    let r = make_row(
+        "0".clone(), "1".clone(), JtInteger, "1".clone(),
+        1 as Int64, 0 as Int64, "$[0]".clone(), "$".clone(),
+    );
+    assert(!is_root_row(&r));
+    assert(!atom_is_null(&r));
+}
+
+fn test_column_count_is_eight() {
+    assert_eq(column_count(), 8);
+}
+
+fn main() {
+    test_mode_name_and_recursion();
+    test_json_type_names_and_predicates();
+    test_true_false_classifiers();
+    test_row_is_root();
+    test_row_non_root_leaf();
+    test_column_count_is_eight();
+}

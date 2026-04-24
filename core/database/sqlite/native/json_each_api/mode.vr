@@ -1,0 +1,26 @@
+// json_each vs json_tree traversal mode.
+
+module core.database.sqlite.native.json_each_api.mode;
+
+mount base.{Bool, Text};
+
+public type WalkMode is
+    | WmEach       // single level — each top-level child
+    | WmTree       // full depth-first tree walk
+    ;
+
+public fn mode_name(m: &WalkMode) -> Text {
+    match m {
+        WmEach => "json_each".clone(),
+        WmTree => "json_tree".clone(),
+    }
+}
+
+public fn recursive(m: &WalkMode) -> Bool {
+    match m { WmTree => true, _ => false }
+}
+
+public fn emits_non_leaf_rows(m: &WalkMode) -> Bool {
+    // json_tree emits one row per interior node; json_each does not.
+    match m { WmTree => true, _ => false }
+}

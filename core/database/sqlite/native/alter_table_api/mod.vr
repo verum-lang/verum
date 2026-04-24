@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/alter_table_api/mod.vr
+// =============================================================================
+// ALTER TABLE surface — ADD COLUMN / RENAME TO / RENAME COLUMN / DROP COLUMN.
+// Spec §17 — schema evolution.
+//
+// SQLite grammar:
+//   ALTER TABLE t RENAME TO new_t
+//   ALTER TABLE t RENAME COLUMN old TO new                  -- 3.25+
+//   ALTER TABLE t ADD COLUMN name type_name [col_constraint ...]
+//   ALTER TABLE t DROP COLUMN name                          -- 3.35+
+//
+// =============================================================================
+
+module core.database.sqlite.native.alter_table_api;
+
+public module op;
+public module restriction;

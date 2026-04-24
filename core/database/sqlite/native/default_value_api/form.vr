@@ -1,0 +1,60 @@
+// DEFAULT-clause form taxonomy.
+
+module core.database.sqlite.native.default_value_api.form;
+
+mount core.database.sqlite.native.default_value_api.current_marker.{
+    CurrentMarker, CmDate, CmTime, CmTimestamp,
+};
+mount base.{Bool, Text, Int64};
+
+public type DefaultForm is
+    | DfNull
+    | DfIntLiteral(Int64)
+    | DfRealLiteral(Float)
+    | DfTextLiteral(Text)
+    | DfBlobLiteral              // X'hex' — raw bytes not inlined in this catalogue
+    | DfCurrent(CurrentMarker)
+    | DfExpression(Text)         // parenthesized expression, raw SQL
+    ;
+
+public fn form_name(f: &DefaultForm) -> Text {
+    match f {
+        DfNull          => "NULL".clone(),
+        DfIntLiteral(_) => "INT".clone(),
+        DfRealLiteral(_) => "REAL".clone(),
+        DfTextLiteral(_) => "TEXT".clone(),
+        DfBlobLiteral   => "BLOB".clone(),
+        DfCurrent(_)    => "CURRENT_*".clone(),
+        DfExpression(_) => "EXPRESSION".clone(),
+    }
+}
+
+public fn is_literal(f: &DefaultForm) -> Bool {
+    match f {
+        DfExpression(_) => false,
+        _               => true,
+    }
+}
+
+// Per SQLite: only literal and CURRENT_* defaults can be applied by ALTER TABLE
+// ADD COLUMN; an expression DEFAULT requires a table rebuild.
+public fn allowed_in_add_column(f: &DefaultForm) -> Bool {
+    match f {
+        DfExpression(_) => false,
+        _               => true,
+    }
+}
+
+public fn is_runtime_constant(f: &DefaultForm) -> Bool {
+    match f { DfCurrent(_) => true, _ => false }
+}
+
+// CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME are evaluated at the time
+// of row insertion — not at ALTER TABLE time.
+public fn evaluated_per_insert(f: &DefaultForm) -> Bool {
+    match f {
+        DfCurrent(_)    => true,
+        DfExpression(_) => true,
+        _               => false,
+    }
+}

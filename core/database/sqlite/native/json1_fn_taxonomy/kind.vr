@@ -1,0 +1,36 @@
+// Function-kind classification — scalar vs aggregate vs validation vs transformation.
+
+module core.database.sqlite.native.json1_fn_taxonomy.kind;
+
+mount base.{Bool, Text};
+
+public type JsonFnKind is
+    | JfConstructor    // json(), json_array(), json_object(), json_quote()
+    | JfAccessor       // json_extract(), json_array_length(), json_type()
+    | JfMutator        // json_set(), json_insert(), json_replace(), json_remove(), json_patch()
+    | JfValidator      // json_valid(), json_error_position()
+    | JfAggregate      // json_group_array(), json_group_object()
+    ;
+
+public fn kind_name(k: &JsonFnKind) -> Text {
+    match k {
+        JfConstructor => "constructor".clone(),
+        JfAccessor    => "accessor".clone(),
+        JfMutator     => "mutator".clone(),
+        JfValidator   => "validator".clone(),
+        JfAggregate   => "aggregate".clone(),
+    }
+}
+
+public fn is_pure(k: &JsonFnKind) -> Bool {
+    match k { JfAggregate => false, _ => true }
+}
+
+public fn produces_json(k: &JsonFnKind) -> Bool {
+    match k {
+        JfConstructor => true,
+        JfMutator     => true,
+        JfAggregate   => true,
+        _             => false,
+    }
+}

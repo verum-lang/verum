@@ -1,0 +1,41 @@
+// CURRENT_* built-in runtime constants used in DEFAULT and elsewhere.
+
+module core.database.sqlite.native.default_value_api.current_marker;
+
+mount base.{Bool, Text};
+
+public type CurrentMarker is
+    | CmDate           // YYYY-MM-DD
+    | CmTime           // HH:MM:SS
+    | CmTimestamp      // YYYY-MM-DD HH:MM:SS
+    ;
+
+public fn marker_name(m: &CurrentMarker) -> Text {
+    match m {
+        CmDate      => "CURRENT_DATE".clone(),
+        CmTime      => "CURRENT_TIME".clone(),
+        CmTimestamp => "CURRENT_TIMESTAMP".clone(),
+    }
+}
+
+public fn text_length(m: &CurrentMarker) -> Int {
+    match m {
+        CmDate      => 10,    // YYYY-MM-DD
+        CmTime      =>  8,    // HH:MM:SS
+        CmTimestamp => 19,    // YYYY-MM-DD HH:MM:SS
+    }
+}
+
+public fn emits_time_part(m: &CurrentMarker) -> Bool {
+    match m {
+        CmDate => false,
+        _      => true,
+    }
+}
+
+public fn emits_date_part(m: &CurrentMarker) -> Bool {
+    match m {
+        CmTime => false,
+        _      => true,
+    }
+}

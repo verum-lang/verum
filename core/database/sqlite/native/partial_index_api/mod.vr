@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/partial_index_api/mod.vr
+// =============================================================================
+// Partial indexes (SQLite 3.8+):
+//
+//   CREATE INDEX idx_active ON users(name) WHERE is_active = 1;
+//
+// Only rows matching the WHERE predicate are indexed; queries can use the
+// index only when their WHERE clause logically implies the partial-index
+// predicate.
+// Spec §13.3 — index variants.
+// =============================================================================
+
+module core.database.sqlite.native.partial_index_api;
+
+public module spec;
+public module applicability;

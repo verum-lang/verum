@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, partial_index_api, sql, index
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.partial_index_api.spec.{
+    PartialIndexSpec, new, is_partial, arity,
+};
+mount core.database.sqlite.native.partial_index_api.applicability.{
+    Applicability, AppUsable, AppUnusable, AppInconclusive,
+    applicability_name, is_usable, classify,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_new_partial() {
+    let cols: List<Text> = ["name".clone()].clone() as List<Text>;
+    let s = new("idx".clone(), "users".clone(), cols, "is_active = 1".clone());
+    assert(is_partial(&s));
+    assert_eq(arity(&s), 1);
+}
+
+fn test_empty_where_not_partial() {
+    let cols: List<Text> = ["id".clone()].clone() as List<Text>;
+    let s = new("idx".clone(), "t".clone(), cols, "".clone());
+    assert(!is_partial(&s));
+}
+
+fn test_classify_usable() {
+    let a = classify(true, false);
+    match a { AppUsable => {}, _ => assert(false) }
+    assert(is_usable(&a));
+}
+
+fn test_classify_unusable() {
+    let a = classify(false, true);
+    match a { AppUnusable => {}, _ => assert(false) }
+    assert(!is_usable(&a));
+}
+
+fn test_classify_inconclusive() {
+    let a = classify(false, false);
+    match a { AppInconclusive => {}, _ => assert(false) }
+    assert(!is_usable(&a));
+}
+
+fn test_reject_trumps_implication_is_impossible() {
+    // A predicate cannot both imply and reject — classify returns unusable
+    // because reject-path takes priority if somehow both are set.
+    let a = classify(true, true);
+    match a { AppUnusable => {}, _ => assert(false) }
+}
+
+fn test_applicability_names() {
+    assert(applicability_name(&AppUsable) == "usable".clone());
+    assert(applicability_name(&AppUnusable) == "unusable".clone());
+    assert(applicability_name(&AppInconclusive) == "inconclusive".clone());
+}
+
+fn main() {
+    test_new_partial();
+    test_empty_where_not_partial();
+    test_classify_usable();
+    test_classify_unusable();
+    test_classify_inconclusive();
+    test_reject_trumps_implication_is_impossible();
+    test_applicability_names();
+}

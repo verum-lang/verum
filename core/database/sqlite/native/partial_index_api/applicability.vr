@@ -1,0 +1,32 @@
+// Applicability probe — query WHERE must imply the index predicate.
+
+module core.database.sqlite.native.partial_index_api.applicability;
+
+mount base.{Bool, Text};
+
+public type Applicability is
+    | AppUsable           // query WHERE implies index WHERE
+    | AppUnusable         // partial predicate rejects required rows
+    | AppInconclusive     // planner can't prove implication — fall back to full scan
+    ;
+
+public fn applicability_name(a: &Applicability) -> Text {
+    match a {
+        AppUsable        => "usable".clone(),
+        AppUnusable      => "unusable".clone(),
+        AppInconclusive  => "inconclusive".clone(),
+    }
+}
+
+public fn is_usable(a: &Applicability) -> Bool {
+    match a { AppUsable => true, _ => false }
+}
+
+public fn classify(
+    query_implies_predicate: Bool,
+    query_rejects_predicate: Bool,
+) -> Applicability {
+    if query_rejects_predicate { return AppUnusable; }
+    if query_implies_predicate { return AppUsable; }
+    AppInconclusive
+}
