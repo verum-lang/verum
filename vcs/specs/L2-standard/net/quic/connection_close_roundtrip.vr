@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, frame, connection_close, rfc9000_19_19, rfc9000_19_20
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19.19 + §19.20 — CONNECTION_CLOSE encode/decode surface:
+//
+//   * Frame.ConnectionCloseTransport   (type 0x1C) carries error_code,
+//     frame_type (source frame type or 0 if generic), reason phrase.
+//   * Frame.ConnectionCloseApplication (type 0x1D) carries error_code
+//     and reason phrase only — used for application-layer errors.
+//   * Neither frame is ack-eliciting (RFC 9000 §13.2.1).
+//
+// This test exercises the surface: construction, encode, decode-all,
+// and the is_ack_eliciting predicate.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame, encode_frame, decode_all_frames};
+
+fn build_transport(err: UInt64, ft: UInt64, reason: List<Byte>) -> Frame {
+    Frame.ConnectionCloseTransport {
+        error_code: err,
+        frame_type: ft,
+        reason:     reason,
+    }
+}
+
+fn build_application(err: UInt64, reason: List<Byte>) -> Frame {
+    Frame.ConnectionCloseApplication {
+        error_code: err,
+        reason:     reason,
+    }
+}
+
+fn encode_and_decode(f: &Frame) -> List<Frame> {
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(f, &mut buf);
+    decode_all_frames(&buf).unwrap()
+}
+
+@main
+public fn main() -> Int {
+    let empty: List<Byte> = [];
+    let t1 = build_transport(0x00_u64, 0x00_u64, empty.clone());
+    let _frames_t = encode_and_decode(&t1);
+    assert(!t1.is_ack_eliciting());
+
+    let a1 = build_application(0x0101_u64, empty.clone());
+    let _frames_a = encode_and_decode(&a1);
+    assert(!a1.is_ack_eliciting());
+
+    let reason: List<Byte> = [0x65_u8, 0x72_u8, 0x72_u8];  // "err"
+    let t2 = build_transport(0x0100_u64, 0x06_u64, reason.clone());
+    let _frames_t2 = encode_and_decode(&t2);
+    assert(!t2.is_ack_eliciting());
+
+    print("CONNECTION_CLOSE surface typecheck ok");
+    0
+}

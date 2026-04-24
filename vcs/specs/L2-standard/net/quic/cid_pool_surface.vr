@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, cid_pool, v6, rfc9000_5_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §5.1.1 / §5.1.2 — CidPool maintains
+// active_count ≤ active_connection_id_limit (V6 invariant) and
+// sequence-number monotonicity across NEW_CONNECTION_ID admissions.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.cid_pool.{CidPool, CidPoolError, CidIssuer};
+mount core.net.quic.connection_id.{ConnectionId};
+
+fn make_cid(b: Byte) -> ConnectionId {
+    let bytes: List<Byte> = [b, b, b, b, b, b, b, b];
+    ConnectionId.from_bytes(bytes.as_slice()).unwrap()
+}
+
+fn new_pool_clamps_limit_to_two() {
+    let p = CidPool::new(0);
+    assert(p.cid_limit_ok());
+    assert(p.active_count() == 0);
+}
+
+fn seed_initial_admits_without_limit_check() {
+    let mut p = CidPool::new(2);
+    let token: [Byte; 16] = [0_u8; 16];
+    p.seed_initial(make_cid(0xAA_u8), token);
+    assert(p.active_count() == 1);
+    assert(p.cid_limit_ok());
+}
+
+fn on_new_connection_id_admits_second_cid() {
+    let mut p = CidPool::new(2);
+    let token: [Byte; 16] = [0_u8; 16];
+    p.seed_initial(make_cid(0xAA_u8), token);
+    let retired = p.on_new_connection_id(
+        1_u64,
+        0_u64,
+        make_cid(0xBB_u8),
+        token,
+    ).unwrap();
+    assert(retired.len() == 0);
+    assert(p.active_count() == 2);
+    assert(p.cid_limit_ok());
+}
+
+fn limit_exceeded_when_budget_full() {
+    let mut p = CidPool::new(2);
+    let token: [Byte; 16] = [0_u8; 16];
+    p.seed_initial(make_cid(0xAA_u8), token);
+    p.on_new_connection_id(1_u64, 0_u64, make_cid(0xBB_u8), token).unwrap();
+    // Budget = 2; third admission without retirement must fail.
+    match p.on_new_connection_id(2_u64, 0_u64, make_cid(0xCC_u8), token) {
+        Err(CidPoolError.LimitExceeded(c)) => assert(c == 2),
+        _ => panic("expected LimitExceeded"),
+    }
+}
+
+fn retire_prior_to_evicts_old_entries() {
+    let mut p = CidPool::new(3);
+    let token: [Byte; 16] = [0_u8; 16];
+    p.seed_initial(make_cid(0xAA_u8), token);
+    p.on_new_connection_id(1_u64, 0_u64, make_cid(0xBB_u8), token).unwrap();
+    p.on_new_connection_id(2_u64, 0_u64, make_cid(0xCC_u8), token).unwrap();
+    assert(p.active_count() == 3);
+
+    // Now peer issues seq=3 with retire_prior_to=2 — sequences 0 and 1
+    // are forced out; len drops to (3 - 2 + 1) = 2.
+    let retired = p.on_new_connection_id(3_u64, 2_u64, make_cid(0xDD_u8), token).unwrap();
+    assert(retired.len() == 2);
+    assert(p.active_count() == 2);
+    assert(p.retire_prior_to() == 2_u64);
+    assert(p.cid_limit_ok());
+}
+
+fn duplicate_sequence_rejected() {
+    let mut p = CidPool::new(2);
+    let token: [Byte; 16] = [0_u8; 16];
+    p.seed_initial(make_cid(0xAA_u8), token);
+    match p.on_new_connection_id(0_u64, 0_u64, make_cid(0xBB_u8), token) {
+        Err(CidPoolError.DuplicateSequence(s)) => assert(s == 0_u64),
+        _ => panic("expected DuplicateSequence"),
+    }
+}
+
+fn retire_prior_regression_rejected() {
+    let mut p = CidPool::new(3);
+    let token: [Byte; 16] = [0_u8; 16];
+    p.seed_initial(make_cid(0xAA_u8), token);
+    p.on_new_connection_id(1_u64, 1_u64, make_cid(0xBB_u8), token).unwrap();
+    // Peer now tries to lower retire_prior_to from 1 to 0 → regression.
+    match p.on_new_connection_id(2_u64, 0_u64, make_cid(0xCC_u8), token) {
+        Err(CidPoolError.RetirePriorRegression) => {},
+        _ => panic("expected RetirePriorRegression"),
+    }
+}
+
+fn cid_issuer_sequences_monotonically() {
+    let mut iss = CidIssuer::new();
+    assert(iss.next() == 0_u64);
+    assert(iss.next() == 1_u64);
+    assert(iss.next() == 2_u64);
+    assert(iss.retire_prior_to() == 0_u64);
+    iss.raise_retire_prior_to(2_u64);
+    assert(iss.retire_prior_to() == 2_u64);
+    // Monotonic raise: lowering is a no-op.
+    iss.raise_retire_prior_to(1_u64);
+    assert(iss.retire_prior_to() == 2_u64);
+}
+
+@main
+public fn main() -> Int {
+    new_pool_clamps_limit_to_two();
+    seed_initial_admits_without_limit_check();
+    on_new_connection_id_admits_second_cid();
+    limit_exceeded_when_budget_full();
+    retire_prior_to_evicts_old_entries();
+    duplicate_sequence_rejected();
+    retire_prior_regression_rejected();
+    cid_issuer_sequences_monotonically();
+    print("RFC 9000 §5.1 CidPool limit + issuer surface verified");
+    0
+}

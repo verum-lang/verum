@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, new_reno, congestion_control, rfc9002_7
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9002 §7 NewReno congestion-control state machine:
+//   * Initial cwnd = 10 × MDS
+//   * Slow start: cwnd += acked_bytes per ACK until cwnd ≥ ssthresh
+//   * on_packets_lost: ssthresh = cwnd/2 (floored at MIN_WINDOW), cwnd = ssthresh
+//   * V5 invariant: cwnd ≥ MIN_WINDOW_BYTES at all times
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.cc.new_reno.{NewReno};
+mount core.net.quic.recovery.cc.mod.{
+    CongestionCtrl,
+    MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES,
+};
+
+fn constants_match_rfc() {
+    assert(MAX_DATAGRAM_SIZE  == 1200_u32);
+    assert(INITIAL_WINDOW_BYTES == 12000_u32);   // 10 × 1200
+    assert(MIN_WINDOW_BYTES     == 2400_u32);    //  2 × 1200
+}
+
+fn initial_window_meets_v5() {
+    let cc = NewReno::new();
+    assert(cc.window() == INITIAL_WINDOW_BYTES);
+    assert(cc.window_min_ok());
+    assert(cc.bytes_in_flight() == 0_u32);
+}
+
+fn slow_start_grows_cwnd_on_ack() {
+    let mut cc = NewReno::new();
+    let cwnd_before = cc.window();
+    // Simulate a sent + acked 1200-byte packet.
+    cc.on_packet_sent(1200_u32);
+    assert(cc.bytes_in_flight() == 1200_u32);
+    cc.on_ack_received(1200_u32, Duration.from_millis(50), Instant.now());
+    // Slow start: cwnd += acked_bytes.
+    assert(cc.window() == cwnd_before + 1200_u32);
+    assert(cc.bytes_in_flight() == 0_u32);
+    assert(cc.window_min_ok());
+}
+
+fn loss_triggers_recovery_and_halves_cwnd() {
+    let mut cc = NewReno::new();
+    // Inflate cwnd well above MIN by repeated slow-start ACKs.
+    let mut step: Int = 0;
+    while step < 5 {
+        cc.on_packet_sent(1200_u32);
+        cc.on_ack_received(1200_u32, Duration.from_millis(50), Instant.now());
+        step = step + 1;
+    }
+    let cwnd_before_loss = cc.window();
+    assert(cwnd_before_loss >= INITIAL_WINDOW_BYTES);
+
+    // Signal a lost 1200-byte packet.
+    cc.on_packets_lost(1200_u32, Instant.now());
+
+    // cwnd halved, floored at MIN.
+    let expected = cwnd_before_loss >> 1_u32;
+    let floor_expected = if expected < MIN_WINDOW_BYTES { MIN_WINDOW_BYTES } else { expected };
+    assert(cc.window() == floor_expected);
+    assert(cc.window_min_ok());
+}
+
+fn repeated_loss_in_recovery_does_not_halve_twice() {
+    let mut cc = NewReno::new();
+    cc.on_packet_sent(1200_u32);
+    cc.on_packets_lost(1200_u32, Instant.now());
+    let cwnd_in_recovery = cc.window();
+
+    // A second loss event while still in recovery must NOT halve again.
+    cc.on_packet_sent(1200_u32);
+    cc.on_packets_lost(1200_u32, Instant.now());
+    assert(cc.window() == cwnd_in_recovery);
+    assert(cc.window_min_ok());
+}
+
+fn pto_does_not_change_cwnd() {
+    let mut cc = NewReno::new();
+    let w_before = cc.window();
+    cc.on_pto(Instant.now());
+    assert(cc.window() == w_before);
+}
+
+fn bytes_in_flight_floors_at_zero() {
+    let mut cc = NewReno::new();
+    cc.on_packet_sent(1200_u32);
+    // ACK more than we actually have in flight — bytes_in_flight must
+    // saturate at 0, not underflow.
+    cc.on_ack_received(5000_u32, Duration.from_millis(50), Instant.now());
+    assert(cc.bytes_in_flight() == 0_u32);
+}
+
+@main
+public fn main() -> Int {
+    constants_match_rfc();
+    initial_window_meets_v5();
+    slow_start_grows_cwnd_on_ack();
+    loss_triggers_recovery_and_halves_cwnd();
+    repeated_loss_in_recovery_does_not_halve_twice();
+    pto_does_not_change_cwnd();
+    bytes_in_flight_floors_at_zero();
+    print("RFC 9002 §7 NewReno state machine verified");
+    0
+}

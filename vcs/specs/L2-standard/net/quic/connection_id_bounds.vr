@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, connection_id, rfc9000_5_1, bounds
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §5.1.1 — ConnectionId MUST be ≤ 20 bytes. `from_bytes`
+// returns CidError.TooLong for oversized input; `empty()` is always
+// valid.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.connection_id.{ConnectionId, CidError, MAX_CID_LEN};
+
+fn max_cid_len_matches_rfc() {
+    assert(MAX_CID_LEN == 20);
+}
+
+fn empty_cid_always_valid() {
+    let cid = ConnectionId.empty();
+    assert(cid.len() == 0);
+}
+
+fn short_cid_accepted() {
+    let src: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let cid = ConnectionId.from_bytes(src.as_slice()).unwrap();
+    assert(cid.len() == 3);
+}
+
+fn max_len_cid_accepted() {
+    let mut src: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < MAX_CID_LEN {
+        src.push(i as Byte);
+        i = i + 1;
+    }
+    let cid = ConnectionId.from_bytes(src.as_slice()).unwrap();
+    assert(cid.len() == MAX_CID_LEN);
+}
+
+fn over_max_len_rejected() {
+    let mut src: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < MAX_CID_LEN + 1 {
+        src.push(0_u8);
+        i = i + 1;
+    }
+    match ConnectionId.from_bytes(src.as_slice()) {
+        Err(CidError.TooLong(len)) => assert(len == MAX_CID_LEN + 1),
+        _ => panic("CID of 21 bytes must be TooLong"),
+    }
+}
+
+fn far_over_max_also_rejected() {
+    let mut src: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 100 {
+        src.push(0_u8);
+        i = i + 1;
+    }
+    match ConnectionId.from_bytes(src.as_slice()) {
+        Err(CidError.TooLong(len)) => assert(len == 100),
+        _ => panic("100-byte CID must be TooLong"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    max_cid_len_matches_rfc();
+    empty_cid_always_valid();
+    short_cid_accepted();
+    max_len_cid_accepted();
+    over_max_len_rejected();
+    far_over_max_also_rejected();
+    print("RFC 9000 §5.1.1 ConnectionId length bounds verified");
+    0
+}

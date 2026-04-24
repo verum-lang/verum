@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, key_update, rfc9001_6, confidentiality_limit, integrity_limit
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §6.6 confidentiality + integrity limits per AEAD
+// (Tables 2 + 3). These values gate when keys MUST be retired
+// — the V2 theorem relies on the limits being strictly > 0.
+
+mount core.*;
+mount core.net.tls13.cipher_suite.{AeadKind};
+mount core.net.quic.key_update.{
+    KeyPhaseUsage,
+    confidentiality_limit, integrity_limit,
+};
+
+fn usage_starts_at_zero() {
+    let u = KeyPhaseUsage::new();
+    assert(u.encrypted == 0_u64);
+    assert(u.decrypted == 0_u64);
+    assert(u.integrity_failures == 0_u64);
+}
+
+fn confidentiality_limits_match_rfc_table_2() {
+    // AES-GCM: 2^23 packets per key (RFC 9001 §6.6 Table 2).
+    assert(confidentiality_limit(&AeadKind.Aes128Gcm) == (1_u64 << 23_u64));
+    assert(confidentiality_limit(&AeadKind.Aes256Gcm) == (1_u64 << 23_u64));
+    // ChaCha20-Poly1305: effectively unlimited — 2^64-1.
+    assert(confidentiality_limit(&AeadKind.ChaCha20Poly1305)
+           == 18_446_744_073_709_551_615_u64);
+    // AES-CCM: 2^23 for 16-byte tag, 2^21 for 8-byte tag.
+    assert(confidentiality_limit(&AeadKind.Aes128Ccm)  == (1_u64 << 23_u64));
+    assert(confidentiality_limit(&AeadKind.Aes128Ccm8) == (1_u64 << 21_u64));
+    // Unknown — pessimistic 1 packet (deny rollout).
+    assert(confidentiality_limit(&AeadKind.Unknown) == 1_u64);
+}
+
+fn integrity_limits_match_rfc_table_3() {
+    // AES-GCM: 2^52 failures permitted (RFC 9001 §6.6 Table 3).
+    assert(integrity_limit(&AeadKind.Aes128Gcm) == (1_u64 << 52_u64));
+    assert(integrity_limit(&AeadKind.Aes256Gcm) == (1_u64 << 52_u64));
+    // ChaCha20-Poly1305: 2^36 failures.
+    assert(integrity_limit(&AeadKind.ChaCha20Poly1305) == (1_u64 << 36_u64));
+    // AES-CCM families: 2^21 failures each (conservative).
+    assert(integrity_limit(&AeadKind.Aes128Ccm)  == (1_u64 << 21_u64));
+    assert(integrity_limit(&AeadKind.Aes128Ccm8) == (1_u64 << 21_u64));
+    // Unknown — 1 failure.
+    assert(integrity_limit(&AeadKind.Unknown) == 1_u64);
+}
+
+fn limits_strictly_positive_for_every_registered_aead() {
+    // V2-type refinement: every limit > 0 so the key-update state
+    // machine always has a non-empty budget.
+    assert(confidentiality_limit(&AeadKind.Aes128Gcm)        > 0_u64);
+    assert(confidentiality_limit(&AeadKind.Aes256Gcm)        > 0_u64);
+    assert(confidentiality_limit(&AeadKind.ChaCha20Poly1305) > 0_u64);
+    assert(integrity_limit(&AeadKind.Aes128Gcm)              > 0_u64);
+    assert(integrity_limit(&AeadKind.Aes256Gcm)              > 0_u64);
+    assert(integrity_limit(&AeadKind.ChaCha20Poly1305)       > 0_u64);
+}
+
+@main
+public fn main() -> Int {
+    usage_starts_at_zero();
+    confidentiality_limits_match_rfc_table_2();
+    integrity_limits_match_rfc_table_3();
+    limits_strictly_positive_for_every_registered_aead();
+    print("RFC 9001 §6.6 key-update confidentiality + integrity limits verified");
+    0
+}

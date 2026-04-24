@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, ack_ranges, v3, invariant, runtime
+// @timeout: 15000
+// @expected-exit: 0
+
+// V3 invariant (tls-quic.md §9) runtime coverage: a sequence of
+// AckRanges.insert_pn calls MUST leave the range set valid per
+// is_valid (non-overlapping + strictly descending + gap ≥ 2).
+// Complements the SMT-proven pairwise step in
+// v3_ackranges_theorem.vr by exercising the full linear scan across
+// every combinatorial case (A-F described in ack_ranges.vr).
+
+mount core.*;
+mount core.net.quic.ack_ranges.{AckRanges};
+mount core.net.quic.frame.{AckRange};
+
+fn inserts_preserve_invariant_across_cases() {
+    let r0 = AckRanges.empty();
+    assert(r0.is_valid());
+    assert(r0.len() == 0);
+
+    // Case F: append singleton.
+    let r1 = r0.insert_pn(100_u64);
+    assert(r1.is_valid());
+    assert(r1.len() == 1);
+
+    // Case A: duplicate insert — no-op.
+    let r2 = r1.insert_pn(100_u64);
+    assert(r2.is_valid());
+    assert(r2.len() == 1);
+
+    // Case B: extend above — 100 + 1 = 101.
+    let r3 = r2.insert_pn(101_u64);
+    assert(r3.is_valid());
+    assert(r3.len() == 1);
+
+    // Case C: extend below.
+    let r4 = r3.insert_pn(99_u64);
+    assert(r4.is_valid());
+    assert(r4.len() == 1);
+
+    // Case E: prepend — new range far above.
+    let r5 = r4.insert_pn(200_u64);
+    assert(r5.is_valid());
+    assert(r5.len() == 2);
+
+    // Case F: append below — 50 far below 99.
+    let r6 = r5.insert_pn(50_u64);
+    assert(r6.is_valid());
+    assert(r6.len() == 3);
+
+    // Case D: gap insertion — 150 falls between [99..101] and [200..200].
+    let r7 = r6.insert_pn(150_u64);
+    assert(r7.is_valid());
+    assert(r7.len() == 4);
+
+    // Case B+coalesce: inserting 102 extends [99..101] to [99..102];
+    // if the gap to 150 shrinks to 47, the coalesce step does nothing
+    // and len stays 4.
+    let r8 = r7.insert_pn(102_u64);
+    assert(r8.is_valid());
+    assert(r8.len() == 4);
+}
+
+fn largest_tracks_top_of_descending_list() {
+    let mut r = AckRanges.empty();
+    r = r.insert_pn(10_u64);
+    r = r.insert_pn(20_u64);
+    r = r.insert_pn(30_u64);
+    assert(r.is_valid());
+    match r.largest() {
+        Some(top) => assert(top == 30_u64),
+        None => panic("largest must track 30"),
+    }
+}
+
+fn contains_matches_inserted_pns() {
+    let mut r = AckRanges.empty();
+    r = r.insert_pn(5_u64);
+    r = r.insert_pn(6_u64);
+    r = r.insert_pn(7_u64);
+    r = r.insert_pn(100_u64);
+    assert(r.contains(5_u64));
+    assert(r.contains(6_u64));
+    assert(r.contains(7_u64));
+    assert(r.contains(100_u64));
+    assert(false == r.contains(4_u64));
+    assert(false == r.contains(8_u64));
+    assert(false == r.contains(99_u64));
+    assert(false == r.contains(1_000_u64));
+}
+
+fn coalesce_closes_single_gap() {
+    // [10..10] and [12..12] — gap of 1. Inserting 11 must coalesce
+    // into a single range [10..12] (len = 1).
+    let mut r = AckRanges.empty();
+    r = r.insert_pn(10_u64);
+    r = r.insert_pn(12_u64);
+    assert(r.is_valid());
+    assert(r.len() == 2);
+    r = r.insert_pn(11_u64);
+    assert(r.is_valid());
+    assert(r.len() == 1);
+}
+
+@main
+public fn main() -> Int {
+    inserts_preserve_invariant_across_cases();
+    largest_tracks_top_of_descending_list();
+    contains_matches_inserted_pns();
+    coalesce_closes_single_gap();
+    print("V3 AckRanges insert_pn invariant verified at runtime surface");
+    0
+}

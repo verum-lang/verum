@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, packet_number, rfc9000_17_1, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §17.1 packet-number encoding:
+//
+//   * `encode_packet_number_len(pn, largest_acked)` returns the
+//     (truncated_pn, byte_length) pair that the receiver can
+//     unambiguously decode given its `largest_acked` state.
+//   * `decode_packet_number(largest_pn, truncated_pn, pn_nbits)`
+//     recovers the full 62-bit PN.
+//
+// The protocol invariant: encode(pn, acked).decode(acked, ...) == pn
+// for any reasonable largest_acked state.
+
+mount core.*;
+mount core.net.quic.packet.{encode_packet_number_len, decode_packet_number};
+
+fn encode_picks_one_byte_for_small_unacked_window() {
+    // With no prior ACK the peer can't anchor — pn=0 must still
+    // be expressible, so the library picks 1 byte (min).
+    let (tr, n) = encode_packet_number_len(0_u64, None);
+    assert(n == 1_u8);
+    assert(tr == 0_u32);
+
+    // With largest_acked = 0 and pn = 1 (one packet outstanding), one
+    // byte is plenty.
+    let (tr2, n2) = encode_packet_number_len(1_u64, Some(0_u64));
+    assert(n2 == 1_u8);
+    assert(tr2 == 1_u32);
+}
+
+fn encode_grows_with_num_unacked() {
+    // pn = 255, largest_acked = None → num_unacked = 256;
+    // needs ceil(log2(256 * 2)) = 10 bits → 2 bytes.
+    let (_tr, n) = encode_packet_number_len(255_u64, None);
+    assert(n == 2_u8);
+
+    // pn = 0x10000, largest_acked = None → 17 bits → 3 bytes.
+    let (_tr2, n2) = encode_packet_number_len(0x10000_u64, None);
+    assert(n2 == 3_u8);
+}
+
+fn encode_caps_at_four_bytes() {
+    // pn extremely large (close to 2^62) must cap at 4 bytes —
+    // RFC 9000 §17.1 mandates the 4-byte max.
+    let (_tr, n) = encode_packet_number_len(0x3FFFFFFFFFFFFFFF_u64, None);
+    assert(n == 4_u8);
+}
+
+fn roundtrip_encode_decode_small_pn() {
+    // Simulate an endpoint: peer has largest_acked = 99, we send pn = 100.
+    let pn: UInt64 = 100_u64;
+    let (trunc, nbytes) = encode_packet_number_len(pn, Some(99_u64));
+    assert(nbytes == 1_u8);
+    let nbits: UInt32 = (nbytes as UInt32) * 8_u32;
+
+    // Receiver side: largest_pn = 99 (same as largest_acked for a
+    // fresh in-flight packet). Decoded value must recover pn.
+    let decoded = decode_packet_number(99_u64, trunc, nbits);
+    assert(decoded == pn);
+}
+
+fn roundtrip_encode_decode_after_gap() {
+    // Gap of ~40 packets from the peer's highest received — pn = 1040
+    // after largest_pn = 1000.
+    let pn: UInt64 = 1040_u64;
+    let (trunc, nbytes) = encode_packet_number_len(pn, Some(1000_u64));
+    let nbits: UInt32 = (nbytes as UInt32) * 8_u32;
+    let decoded = decode_packet_number(1000_u64, trunc, nbits);
+    assert(decoded == pn);
+}
+
+fn decode_handles_pn_window_wraparound() {
+    // With 1-byte encoding and largest_pn near a mod-256 boundary,
+    // the decoder MUST pick the candidate closest to expected.
+    // largest_pn = 0xFF, encoded_pn = 0x01 (1 byte, 8 bits).
+    // expected = 0x100; candidate = 0x101 — returns 0x101, not 0x01.
+    let decoded = decode_packet_number(0xFF_u64, 0x01_u32, 8_u32);
+    assert(decoded == 0x101_u64);
+}
+
+@main
+public fn main() -> Int {
+    encode_picks_one_byte_for_small_unacked_window();
+    encode_grows_with_num_unacked();
+    encode_caps_at_four_bytes();
+    roundtrip_encode_decode_small_pn();
+    roundtrip_encode_decode_after_gap();
+    decode_handles_pn_window_wraparound();
+    print("RFC 9000 §17.1 PN encode/decode KAT verified");
+    0
+}

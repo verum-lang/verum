@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, version, grease, rfc9000_15, rfc8701
+// @timeout: 15000
+// @expected-exit: 0
+
+// QUIC version field is 32 bits; RFC 9000 §15 + RFC 8701 reserve
+// `0x?a?a?a?a` (every nibble ends in 0xA) for ossification-prevention.
+// Servers that speak QUIC v1 MUST NOT accept these versions and MUST
+// respond with Version Negotiation if the client Initial carries one.
+//
+// Spec crosscheck:
+//   * VERSION_NEGOTIATION = 0x00000000 — NOT greased.
+//   * VERSION_1 (v1)      = 0x00000001 — NOT greased.
+//   * VERSION_2 (v2)      = 0x6B3343CF — NOT greased.
+//   * `0xdadadada`         — greased.
+//   * `0xbaba_baba`        — greased.
+
+mount core.*;
+mount core.net.quic.version.{
+    is_supported, is_greased,
+    VERSION_NEGOTIATION, VERSION_1, VERSION_2,
+};
+
+fn non_greased_anchors() {
+    assert(false == is_greased(VERSION_NEGOTIATION));
+    assert(false == is_greased(VERSION_1));
+    assert(false == is_greased(VERSION_2));
+}
+
+fn greased_codepoints() {
+    // Greased QUIC version pattern (RFC 8701 / RFC 9000 §15): each
+    // of the four bytes has low nibble 0xA.
+    assert(is_greased(0xAAAAAAAA_u32));
+    assert(is_greased(0xDADADADA_u32));
+    assert(is_greased(0xBABABABA_u32));
+    assert(is_greased(0x1A2A3A4A_u32));
+    assert(is_greased(0xFA0A5A9A_u32));
+    assert(is_greased(0xAABAAAAA_u32));        // high nibbles free, low = A each
+    // Negative cases — at least one byte has low nibble ≠ 0xA.
+    assert(false == is_greased(0xAAAAAAAB_u32));       // last byte low nibble = B
+    assert(false == is_greased(0xAAAAAAA0_u32));       // last byte low nibble = 0
+    assert(false == is_greased(0xAAAAAABB_u32));       // last byte low nibble = B
+}
+
+fn only_v1_is_supported() {
+    assert(is_supported(VERSION_1));
+    assert(false == is_supported(VERSION_NEGOTIATION));
+    assert(false == is_supported(VERSION_2));
+    assert(false == is_supported(0xDADADADA_u32));
+    assert(false == is_supported(0xFF000001_u32));
+}
+
+@main
+public fn main() -> Int {
+    non_greased_anchors();
+    greased_codepoints();
+    only_v1_is_supported();
+    print("QUIC version grease predicate verified");
+    0
+}

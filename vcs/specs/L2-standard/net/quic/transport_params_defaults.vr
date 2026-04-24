@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, transport_params, rfc9000_18, defaults
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §18.2 transport parameter defaults — every unspecified
+// parameter on the wire MUST resolve to the spec-assigned default.
+// This test pins the values produced by `TransportParams.defaults()`.
+
+mount core.*;
+mount core.net.quic.transport_params.{
+    TransportParams,
+    MAX_STREAMS_LIMIT, MAX_ACK_DELAY_EXPONENT,
+    MIN_ACTIVE_CID_LIMIT, MIN_MAX_UDP_PAYLOAD_SIZE,
+};
+
+fn defaults_match_rfc_9000_18_2() {
+    let d = TransportParams.defaults();
+    // max_idle_timeout — absent default is 0 (disabled).
+    assert(d.max_idle_timeout_ms == 0_u64);
+    // max_udp_payload_size — default 65527 (maximum UDP payload).
+    assert(d.max_udp_payload_size == 65527_u64);
+    // Initial flow-control state — zero (client must receive MAX_*
+    // frames before sending application data).
+    assert(d.initial_max_data                    == 0_u64);
+    assert(d.initial_max_stream_data_bidi_local  == 0_u64);
+    assert(d.initial_max_stream_data_bidi_remote == 0_u64);
+    assert(d.initial_max_stream_data_uni         == 0_u64);
+    assert(d.initial_max_streams_bidi            == 0_u64);
+    assert(d.initial_max_streams_uni             == 0_u64);
+    // ACK bookkeeping — defaults from §18.2.
+    assert(d.ack_delay_exponent == 3_u8);
+    assert(d.max_ack_delay_ms   == 25_u64);
+    // Migration disabled default = false (migration permitted).
+    assert(d.disable_active_migration == false);
+    // active_connection_id_limit default = 2.
+    assert(d.active_connection_id_limit == 2_u64);
+    // grease_quic_bit default = false (server opts in).
+    assert(d.grease_quic_bit == false);
+    // max_datagram_frame_size default = None (RFC 9221 feature-gated).
+    match d.max_datagram_frame_size {
+        None => {},
+        _ => panic("max_datagram_frame_size default must be None"),
+    }
+    // preferred_address default = None.
+    match d.preferred_address {
+        None => {},
+        _ => panic("preferred_address default must be None"),
+    }
+}
+
+fn bounds_ok_accepts_defaults() {
+    // Defaults with active_connection_id_limit = 2 satisfy bounds_ok
+    // iff max_udp_payload_size ≥ 1200. Default is 65527 → passes.
+    let d = TransportParams.defaults();
+    assert(d.bounds_ok());
+}
+
+fn bounds_ok_rejects_cid_limit_below_2() {
+    let mut d = TransportParams.defaults();
+    d.active_connection_id_limit = 1_u64;
+    assert(false == d.bounds_ok());
+}
+
+fn bounds_ok_rejects_udp_payload_below_1200() {
+    let mut d = TransportParams.defaults();
+    d.max_udp_payload_size = 1199_u64;
+    assert(false == d.bounds_ok());
+}
+
+fn bounds_ok_rejects_streams_cap_overflow() {
+    let mut d = TransportParams.defaults();
+    // MAX_STREAMS_LIMIT = 2^60. One over is invalid.
+    d.initial_max_streams_bidi = MAX_STREAMS_LIMIT + 1_u64;
+    assert(false == d.bounds_ok());
+}
+
+fn bounds_ok_rejects_ack_delay_exponent_overflow() {
+    let mut d = TransportParams.defaults();
+    d.ack_delay_exponent = MAX_ACK_DELAY_EXPONENT + 1_u8;
+    assert(false == d.bounds_ok());
+}
+
+fn constants_match_rfc() {
+    assert(MIN_ACTIVE_CID_LIMIT       == 2_u64);
+    assert(MIN_MAX_UDP_PAYLOAD_SIZE   == 1200_u64);
+    assert(MAX_ACK_DELAY_EXPONENT     == 20_u8);
+    // 2^60 per RFC 9000 §18.2.
+    assert(MAX_STREAMS_LIMIT          == 1152921504606846976_u64);
+}
+
+@main
+public fn main() -> Int {
+    defaults_match_rfc_9000_18_2();
+    bounds_ok_accepts_defaults();
+    bounds_ok_rejects_cid_limit_below_2();
+    bounds_ok_rejects_udp_payload_below_1200();
+    bounds_ok_rejects_streams_cap_overflow();
+    bounds_ok_rejects_ack_delay_exponent_overflow();
+    constants_match_rfc();
+    print("RFC 9000 §18 TransportParams defaults + bounds verified");
+    0
+}

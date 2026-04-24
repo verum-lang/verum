@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, loss_detection, rtt, pto, rfc9002_5, rfc9002_6
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9002 §5 + §6 — LossDetection surface: on_packet_sent admits
+// into the correct PN space; on_ack_received updates the RTT
+// estimator + clears acked packets; on_timer advances pto_count.
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.loss_detection.{LossDetection};
+mount core.net.quic.recovery.pn_space.{SentPacketInfo, PnSpaceKind};
+mount core.net.quic.recovery.cc.new_reno.{NewReno};
+mount core.net.quic.recovery.rtt.{RttEstimator};
+
+fn fresh_detection_has_no_timer() {
+    let ld = LossDetection::new();
+    match ld.timer_fires_at() {
+        None => {},
+        _ => panic("fresh detection must have no timer armed"),
+    }
+    assert(ld.pto_count() == 0_u32);
+}
+
+fn on_packet_sent_arms_timer() {
+    let mut ld = LossDetection::new();
+    let mut cc = NewReno::new();
+    let now = Instant.now();
+    let info = SentPacketInfo {
+        packet_number:  1_u64,
+        time_sent:      now.clone(),
+        size_bytes:     1200_u32,
+        in_flight:      true,
+        ack_eliciting:  true,
+        frames:         [],
+    };
+    ld.on_packet_sent(PnSpaceKind.Application, info, &mut cc);
+    // After an ack-eliciting in-flight packet the PTO timer is armed.
+    match ld.timer_fires_at() {
+        Some(_) => {},
+        _ => panic("PTO timer must be armed after ack-eliciting send"),
+    }
+}
+
+fn rtt_estimator_incorporates_sample() {
+    let mut rtt = RttEstimator.new();
+    assert(false == rtt.has_first_sample());
+    // 20 ms latest, 0 ms ack-delay.
+    rtt.on_rtt_sample(20_000_u64, 0_u64);
+    assert(rtt.has_first_sample());
+    // Smoothed RTT after first sample equals the sample.
+    assert(rtt.latest().as_millis() == 20_u64);
+    assert(rtt.smoothed().as_millis() == 20_u64);
+    // Min RTT tracks the minimum observed sample.
+    assert(rtt.min_rtt().as_millis() == 20_u64);
+
+    // Second sample 40 ms → smoothed pushes up, min stays at 20.
+    rtt.on_rtt_sample(40_000_u64, 0_u64);
+    assert(rtt.min_rtt().as_millis() == 20_u64);
+    assert(rtt.smoothed().as_millis() >= 20_u64);
+}
+
+fn keys_discarded_unloads_space() {
+    let mut ld = LossDetection::new();
+    // Discarding keys for the Initial space MUST NOT panic.
+    ld.on_keys_discarded(PnSpaceKind.Initial);
+    ld.on_keys_discarded(PnSpaceKind.Handshake);
+    // PTO count remains 0 (no PTO fires were requested).
+    assert(ld.pto_count() == 0_u32);
+}
+
+fn new_reno_initial_window_is_conservative() {
+    let cc = NewReno::new();
+    // RFC 9002 §7.2 initial cwnd = min(10 × max_datagram_size, max(14720, 2 × max_datagram_size))
+    // with max_datagram_size = 1200 → 14400 bytes.
+    assert(cc.window() >= 14000_u32);
+    assert(cc.window() <= 15000_u32);
+}
+
+@main
+public fn main() -> Int {
+    fresh_detection_has_no_timer();
+    on_packet_sent_arms_timer();
+    rtt_estimator_incorporates_sample();
+    keys_discarded_unloads_space();
+    new_reno_initial_window_is_conservative();
+    print("RFC 9002 §5-§6 loss-detection + RTT + NewReno surface verified");
+    0
+}

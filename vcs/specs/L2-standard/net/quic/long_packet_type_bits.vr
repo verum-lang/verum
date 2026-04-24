@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, long_header, packet_type, rfc9000_17_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §17.2 long-header packet-type 2-bit encoding:
+//   Initial   = 00
+//   0-RTT     = 01
+//   Handshake = 10
+//   Retry     = 11
+// These are bits 4-5 of the header's first byte (after the fixed-bit
+// 0x40 and the long-header bit 0x80). `to_bits()` returns the
+// unshifted 2-bit value; `from_bits` accepts any byte + masks.
+
+mount core.*;
+mount core.net.quic.packet.{LongPacketType};
+
+fn to_bits_matches_rfc() {
+    assert(LongPacketType.Initial.to_bits()   == 0_u8);
+    assert(LongPacketType.ZeroRtt.to_bits()   == 1_u8);
+    assert(LongPacketType.Handshake.to_bits() == 2_u8);
+    assert(LongPacketType.Retry.to_bits()     == 3_u8);
+}
+
+fn from_bits_roundtrip() {
+    match LongPacketType.from_bits(0_u8) { LongPacketType.Initial => {},   _ => panic("0") }
+    match LongPacketType.from_bits(1_u8) { LongPacketType.ZeroRtt => {},   _ => panic("1") }
+    match LongPacketType.from_bits(2_u8) { LongPacketType.Handshake => {}, _ => panic("2") }
+    match LongPacketType.from_bits(3_u8) { LongPacketType.Retry => {},     _ => panic("3") }
+}
+
+fn from_bits_masks_high_bits() {
+    // High bits (> 0x03) must be ignored — only the low 2 bits decide.
+    // 0xFC (11111100) & 0x03 = 0x00 → Initial.
+    match LongPacketType.from_bits(0xFC_u8) { LongPacketType.Initial => {}, _ => panic("mask FC") }
+    // 0xFD = 11111101 & 0x03 = 0x01 → ZeroRtt.
+    match LongPacketType.from_bits(0xFD_u8) { LongPacketType.ZeroRtt => {}, _ => panic("mask FD") }
+    // 0x42 = 01000010 & 0x03 = 0x02 → Handshake.
+    match LongPacketType.from_bits(0x42_u8) { LongPacketType.Handshake => {}, _ => panic("mask 42") }
+}
+
+fn header_first_byte_encodes_type_bits_at_position_4_5() {
+    // RFC 9000 §17.2: first_byte = 0x80 (long) | 0x40 (fixed) | (type << 4) | reserved
+    // So the type bits occupy bits 4-5; to_bits returns the 2-bit value which the
+    // header builder shifts by 4.
+    let initial_header_byte: UInt8 = 0xC0_u8 | (LongPacketType.Initial.to_bits() << 4_u32);
+    let retry_header_byte:   UInt8 = 0xC0_u8 | (LongPacketType.Retry.to_bits()   << 4_u32);
+    assert(initial_header_byte == 0xC0_u8);
+    assert(retry_header_byte   == 0xF0_u8);
+}
+
+@main
+public fn main() -> Int {
+    to_bits_matches_rfc();
+    from_bits_roundtrip();
+    from_bits_masks_high_bits();
+    header_first_byte_encodes_type_bits_at_position_4_5();
+    print("RFC 9000 §17.2 LongPacketType bit encoding verified");
+    0
+}
