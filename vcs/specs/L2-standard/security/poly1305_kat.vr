@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, poly1305, mac, rfc8439, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8439 §2.5.2 Poly1305 MAC test vector:
+//
+//   Key: 85 d6 be 78 57 55 6d 33 7f 44 52 fe 42 d5 06 a8
+//        01 03 80 8a fb 0d b2 fd 4a bf f6 af 41 49 f5 1b
+//
+//   Msg: "Cryptographic Forum Research Group" (34 bytes)
+//
+//   Tag: a8 06 1d c1 30 51 36 c6 c2 2b 8b af 0c 01 27 a9
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.poly1305.{
+    Poly1305Key, Poly1305Tag, poly1305_mac,
+    KEY_SIZE, TAG_SIZE,
+};
+
+fn constants_match_rfc() {
+    assert(KEY_SIZE == 32);
+    assert(TAG_SIZE == 16);
+}
+
+fn rfc_8439_2_5_2_test_vector() {
+    let mut key: [Byte; 32] = [0_u8; 32];
+    let key_bytes: [Byte; 32] = [
+        0x85_u8, 0xD6_u8, 0xBE_u8, 0x78_u8, 0x57_u8, 0x55_u8, 0x6D_u8, 0x33_u8,
+        0x7F_u8, 0x44_u8, 0x52_u8, 0xFE_u8, 0x42_u8, 0xD5_u8, 0x06_u8, 0xA8_u8,
+        0x01_u8, 0x03_u8, 0x80_u8, 0x8A_u8, 0xFB_u8, 0x0D_u8, 0xB2_u8, 0xFD_u8,
+        0x4A_u8, 0xBF_u8, 0xF6_u8, 0xAF_u8, 0x41_u8, 0x49_u8, 0xF5_u8, 0x1B_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 32 { key[i] = key_bytes[i]; i = i + 1; }
+
+    // "Cryptographic Forum Research Group"
+    let msg: List<Byte> = [
+        0x43_u8, 0x72_u8, 0x79_u8, 0x70_u8, 0x74_u8, 0x6F_u8, 0x67_u8, 0x72_u8,
+        0x61_u8, 0x70_u8, 0x68_u8, 0x69_u8, 0x63_u8, 0x20_u8, 0x46_u8, 0x6F_u8,
+        0x72_u8, 0x75_u8, 0x6D_u8, 0x20_u8, 0x52_u8, 0x65_u8, 0x73_u8, 0x65_u8,
+        0x61_u8, 0x72_u8, 0x63_u8, 0x68_u8, 0x20_u8, 0x47_u8, 0x72_u8, 0x6F_u8,
+        0x75_u8, 0x70_u8,
+    ];
+    assert(msg.len() == 34);
+
+    let tag: Poly1305Tag = poly1305_mac(&key, msg.as_slice());
+    let expected: [Byte; 16] = [
+        0xA8_u8, 0x06_u8, 0x1D_u8, 0xC1_u8, 0x30_u8, 0x51_u8, 0x36_u8, 0xC6_u8,
+        0xC2_u8, 0x2B_u8, 0x8B_u8, 0xAF_u8, 0x0C_u8, 0x01_u8, 0x27_u8, 0xA9_u8,
+    ];
+    let mut j: Int = 0;
+    while j < 16 {
+        assert(tag[j] == expected[j]);
+        j = j + 1;
+    }
+}
+
+fn empty_message_produces_s_padding_only() {
+    // Poly1305 of empty message = s (bytes 16..32 of the key) directly.
+    // Verify that the tag is deterministic + the expected last-16-bytes.
+    let mut key: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { key[i] = (0xAA_u8 ^ (i as Byte)); i = i + 1; }
+    let empty: List<Byte> = [];
+    let tag = poly1305_mac(&key, empty.as_slice());
+    // Accumulator starts at 0 and never updates; tag = 0 + s mod 2^128.
+    // s = key[16..32] little-endian, so byte j of tag = key[16+j] exactly.
+    let mut j: Int = 0;
+    while j < 16 {
+        assert(tag[j] == key[16 + j]);
+        j = j + 1;
+    }
+}
+
+fn tag_is_deterministic_same_key_same_message() {
+    let key: [Byte; 32] = [0x42_u8; 32];
+    let msg: List<Byte> = [0x11_u8, 0x22_u8, 0x33_u8];
+    let t1 = poly1305_mac(&key, msg.as_slice());
+    let t2 = poly1305_mac(&key, msg.as_slice());
+    let mut i: Int = 0;
+    while i < 16 {
+        assert(t1[i] == t2[i]);
+        i = i + 1;
+    }
+}
+
+fn tag_changes_when_message_changes() {
+    let key: [Byte; 32] = [0x55_u8; 32];
+    let a: List<Byte> = [0xAA_u8];
+    let b: List<Byte> = [0xBB_u8];
+    let ta = poly1305_mac(&key, a.as_slice());
+    let tb = poly1305_mac(&key, b.as_slice());
+    let mut differs = false;
+    let mut i: Int = 0;
+    while i < 16 {
+        if ta[i] != tb[i] { differs = true; }
+        i = i + 1;
+    }
+    assert(differs);
+}
+
+@main
+public fn main() -> Int {
+    constants_match_rfc();
+    rfc_8439_2_5_2_test_vector();
+    empty_message_produces_s_padding_only();
+    tag_is_deterministic_same_key_same_message();
+    tag_changes_when_message_changes();
+    print("RFC 8439 §2.5.2 Poly1305 MAC KAT verified");
+    0
+}
