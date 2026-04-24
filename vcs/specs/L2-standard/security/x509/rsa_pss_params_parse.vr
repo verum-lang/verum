@@ -1,0 +1,167 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, rsa_pss, algorithm, rfc8017, der
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8017 §A.2.3 RSASSA-PSS-params decode via parse_signature_alg:
+//
+//   RSASSA-PSS-params ::= SEQUENCE {
+//       hashAlgorithm      [0] HashAlgorithm DEFAULT sha1,
+//       maskGenAlgorithm   [1] MaskGenAlgorithm DEFAULT mgf1SHA1,
+//       saltLength         [2] INTEGER DEFAULT 20,
+//       trailerField       [3] INTEGER DEFAULT 1
+//   }
+//
+// Wire shapes covered:
+//   * SEQUENCE { OID rsassa_pss } — no parameters at all.
+//   * SEQUENCE { OID rsassa_pss, SEQUENCE {} } — explicit empty params.
+//   * SEQUENCE { OID rsassa_pss, SEQUENCE { [2] EXPLICIT INTEGER=32 } }
+//     — caller-specified salt length.
+//
+// rsassa_pss OID = 1.2.840.113549.1.1.10
+//   arcs (9 bytes): 2A 86 48 86 F7 0D 01 01 0A
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader};
+mount core.security.x509.algorithm.{SignatureAlg, RsaPssParams, RsaPssHash, parse_signature_alg};
+
+fn rsassa_pss_oid_no_params_returns_defaults() {
+    // 30 0B 06 09 2A 86 48 86 F7 0D 01 01 0A
+    let der: List<Byte> = [
+        0x30_u8, 0x0B_u8,
+        0x06_u8, 0x09_u8,
+        0x2A_u8, 0x86_u8, 0x48_u8, 0x86_u8, 0xF7_u8, 0x0D_u8, 0x01_u8, 0x01_u8, 0x0A_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.RsaPss(params) => {
+            // Default salt length is 20.
+            assert(params.salt_length == 20);
+            match params.hash {
+                RsaPssHash.Sha256Hash => {},
+                _ => panic("default hash must be Sha256Hash (warp policy)"),
+            }
+        },
+        _ => panic("expected RsaPss with defaults"),
+    }
+}
+
+fn rsassa_pss_empty_params_returns_defaults() {
+    // 30 0D 06 09 <oid 9 bytes> 30 00
+    let der: List<Byte> = [
+        0x30_u8, 0x0D_u8,
+        0x06_u8, 0x09_u8,
+        0x2A_u8, 0x86_u8, 0x48_u8, 0x86_u8, 0xF7_u8, 0x0D_u8, 0x01_u8, 0x01_u8, 0x0A_u8,
+        0x30_u8, 0x00_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.RsaPss(params) => {
+            assert(params.salt_length == 20);
+            match params.hash {
+                RsaPssHash.Sha256Hash => {},
+                _ => panic("empty params must inherit default hash"),
+            }
+        },
+        _ => panic("expected RsaPss with empty params"),
+    }
+}
+
+fn rsassa_pss_salt_length_32_parses() {
+    // parameters: SEQUENCE { [2] EXPLICIT INTEGER 32 }
+    //   [2] EXPLICIT = tag 0xA2, len 3, INTEGER 32 = 02 01 20
+    //   outer param SEQUENCE = 30 05 A2 03 02 01 20
+    // full wire: 30 12 06 09 <oid> 30 05 A2 03 02 01 20
+    let der: List<Byte> = [
+        0x30_u8, 0x12_u8,
+        0x06_u8, 0x09_u8,
+        0x2A_u8, 0x86_u8, 0x48_u8, 0x86_u8, 0xF7_u8, 0x0D_u8, 0x01_u8, 0x01_u8, 0x0A_u8,
+        0x30_u8, 0x05_u8,
+        0xA2_u8, 0x03_u8, 0x02_u8, 0x01_u8, 0x20_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.RsaPss(params) => {
+            assert(params.salt_length == 32);
+        },
+        _ => panic("expected RsaPss with salt=32"),
+    }
+}
+
+fn rsassa_pss_salt_length_48_parses() {
+    // INTEGER 48 = 02 01 30; outer = 30 05 A2 03 02 01 30; full size 18.
+    let der: List<Byte> = [
+        0x30_u8, 0x12_u8,
+        0x06_u8, 0x09_u8,
+        0x2A_u8, 0x86_u8, 0x48_u8, 0x86_u8, 0xF7_u8, 0x0D_u8, 0x01_u8, 0x01_u8, 0x0A_u8,
+        0x30_u8, 0x05_u8,
+        0xA2_u8, 0x03_u8, 0x02_u8, 0x01_u8, 0x30_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.RsaPss(params) => {
+            assert(params.salt_length == 48);
+        },
+        _ => panic("expected RsaPss with salt=48"),
+    }
+}
+
+fn rsassa_pss_trailer_field_non_one_rejected() {
+    // parameters: SEQUENCE { [3] EXPLICIT INTEGER 2 } — trailerField
+    // 2 is illegal per RFC 8017 §A.2.3 (MUST be 1).
+    //   [3] EXPLICIT = tag 0xA3, len 3, INTEGER 2 = 02 01 02
+    //   params SEQUENCE = 30 05 A3 03 02 01 02
+    //   full = 30 12 06 09 <oid> 30 05 A3 03 02 01 02
+    let der: List<Byte> = [
+        0x30_u8, 0x12_u8,
+        0x06_u8, 0x09_u8,
+        0x2A_u8, 0x86_u8, 0x48_u8, 0x86_u8, 0xF7_u8, 0x0D_u8, 0x01_u8, 0x01_u8, 0x0A_u8,
+        0x30_u8, 0x05_u8,
+        0xA3_u8, 0x03_u8, 0x02_u8, 0x01_u8, 0x02_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    match parse_signature_alg(&mut r) {
+        Err(_) => {},
+        _ => panic("trailerField != 1 must reject"),
+    }
+}
+
+fn rsa_pss_hash_three_variants_distinct() {
+    let hashes: [RsaPssHash; 3] = [
+        RsaPssHash.Sha256Hash,
+        RsaPssHash.Sha384Hash,
+        RsaPssHash.Sha512Hash,
+    ];
+    let mut tags: [Int; 3] = [0; 3];
+    let mut i: Int = 0;
+    while i < 3 {
+        tags[i] = match hashes[i] {
+            RsaPssHash.Sha256Hash => 1,
+            RsaPssHash.Sha384Hash => 2,
+            RsaPssHash.Sha512Hash => 3,
+        };
+        i = i + 1;
+    }
+    assert(tags[0] != tags[1]);
+    assert(tags[1] != tags[2]);
+    assert(tags[0] != tags[2]);
+}
+
+@main
+public fn main() -> Int {
+    rsassa_pss_oid_no_params_returns_defaults();
+    rsassa_pss_empty_params_returns_defaults();
+    rsassa_pss_salt_length_32_parses();
+    rsassa_pss_salt_length_48_parses();
+    rsassa_pss_trailer_field_non_one_rejected();
+    rsa_pss_hash_three_variants_distinct();
+    print("RFC 8017 §A.2.3 RSA-PSS params DER parse verified");
+    0
+}
