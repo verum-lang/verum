@@ -525,6 +525,18 @@ impl Cvc5Backend {
 
     /// Assert a formula into the solver
     pub fn assert(&mut self, term: &Cvc5Term) -> Result<(), Cvc5Error> {
+        // --solver-protocol: log the assertion. Use the term's
+        // Debug representation as the SMT-LIB approximation —
+        // cvc5-sys doesn't expose a term → SMT-LIB string
+        // function on the free API, so Debug is the best we
+        // have without calling the full term printer. Good
+        // enough for trace diagnostics; callers that want
+        // round-trippable SMT-LIB use --dump-smt for the full
+        // solver state.
+        crate::solver_diagnostics::log_send(&format!(
+            "(assert {:?})",
+            term
+        ));
         // SAFETY: FFI call to assert a formula.
         // - self.solver is a valid pointer (checked in new())
         // - term.raw is a valid CVC5 term pointer created by this backend
@@ -550,11 +562,25 @@ impl Cvc5Backend {
         let start = Instant::now();
         self.stats.total_checks += 1;
 
+        // --solver-protocol: log the boundary + --dump-smt:
+        // write the solver's current state to the dump dir.
+        // cvc5-sys's `cvc5_solver_get_assertions` would
+        // give us the SMT-LIB round-trip, but calling it
+        // requires an allocated buffer dance that's easy
+        // to break; we emit a minimal `(check-sat)` marker
+        // for now and leave the full-state dump to the
+        // caller's strategy layer.
+        crate::solver_diagnostics::log_send("(check-sat)");
+        crate::solver_diagnostics::dump_smt_query(
+            "cvc5-check-sat",
+            "(check-sat)\n",
+        );
+
         // SAFETY: FFI call to check satisfiability.
         // - self.solver is a valid pointer
         // - cvc5_solver_check_sat returns a valid Cvc5Result enum value
         // - No memory is allocated or freed in this call
-        unsafe {
+        let result = unsafe {
             let result = cvc5_sys::cvc5_solver_check_sat(self.solver);
             let elapsed = start.elapsed();
             self.stats.total_time_ms += elapsed.as_millis() as u64;
@@ -573,7 +599,18 @@ impl Cvc5Backend {
                     Ok(SatResult::Unknown)
                 }
             }
+        };
+
+        if let Ok(ref r) = result {
+            let verdict = match r {
+                SatResult::Sat => "sat",
+                SatResult::Unsat => "unsat",
+                SatResult::Unknown => "unknown",
+            };
+            crate::solver_diagnostics::log_recv(verdict);
         }
+
+        result
     }
 
     /// Check satisfiability with assumptions
