@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, handshake, encrypted_extensions, encode, rfc8446_4_3_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.3.1 EncryptedExtensions wire body:
+//
+//   struct {
+//       Extension extensions<0..2^16-1>;
+//   } EncryptedExtensions;
+//
+// Handshake wrap: 1-byte type (8 = encrypted_extensions) + uint24 length + body.
+// Body is a single u16-prefixed extensions block — no other fields.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.messages.{
+    HandshakeMessage, EncryptedExtensions, encode_handshake, decode_handshake,
+    HST_ENCRYPTED_EXTENSIONS,
+};
+mount core.net.tls13.handshake.extension.{Extension, EarlyDataIndication};
+
+fn empty_encrypted_extensions_is_six_bytes() {
+    let ee = EncryptedExtensions { extensions: [] };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.EncryptedExtensionsMsg(ee), &mut out).unwrap();
+    // Wrap header (4) + u16 empty ext-block (2) = 6.
+    assert(out.len() == 6);
+    assert(out[0] == HST_ENCRYPTED_EXTENSIONS);    // 8
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8);
+    assert(out[3] == 0x02_u8);                     // body length = 2
+    assert(out[4] == 0x00_u8 && out[5] == 0x00_u8); // extensions block len = 0
+}
+
+fn encrypted_extensions_with_alpn_h3() {
+    // ALPN ["h3"] encodes to 9 bytes (ext_type 2 + outer len 2 + inner len 2 +
+    // u8 "h3" len 1 + 2 bytes).
+    let h3: List<Byte> = [0x68_u8, 0x33_u8];
+    let alpn = Extension.AlpnExt { protocols: [h3] };
+    let ee = EncryptedExtensions { extensions: [alpn] };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.EncryptedExtensionsMsg(ee), &mut out).unwrap();
+    // Header(4) + ext-block u16(2) + 9 ALPN bytes = 15.
+    assert(out.len() == 15);
+    assert(out[0] == HST_ENCRYPTED_EXTENSIONS);
+    assert(out[1] == 0x00_u8 && out[2] == 0x00_u8 && out[3] == 0x0B_u8); // body len = 11
+    assert(out[4] == 0x00_u8 && out[5] == 0x09_u8);                       // ext-block len = 9
+    // ALPN extension header.
+    assert(out[6] == 0x00_u8 && out[7] == 0x10_u8);   // ext_type = 16
+    assert(out[8] == 0x00_u8 && out[9] == 0x05_u8);   // outer len = 5
+    assert(out[10] == 0x00_u8 && out[11] == 0x03_u8); // inner list len = 3
+    assert(out[12] == 0x02_u8);                       // "h3" len
+    assert(out[13] == 0x68_u8 && out[14] == 0x33_u8);
+}
+
+fn encrypted_extensions_with_early_data_indication() {
+    // EarlyDataClient indication — zero-length extension data.
+    // Extension wire: ext_type (2) + u16 len = 0 (2) = 4 bytes.
+    // EE body = u16 ext-block len (2) + 4 = 6 bytes.
+    // Header(4) + body(6) = 10.
+    let early = Extension.EarlyDataExt(EarlyDataIndication.EarlyDataClient);
+    let ee = EncryptedExtensions { extensions: [early] };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.EncryptedExtensionsMsg(ee), &mut out).unwrap();
+    assert(out.len() == 10);
+    assert(out[0] == HST_ENCRYPTED_EXTENSIONS);
+    assert(out[1] == 0x00_u8 && out[2] == 0x00_u8 && out[3] == 0x06_u8); // body len = 6
+    assert(out[4] == 0x00_u8 && out[5] == 0x04_u8);                       // ext-block len = 4
+    assert(out[6] == 0x00_u8 && out[7] == 0x2A_u8);                       // early_data = 42
+    assert(out[8] == 0x00_u8 && out[9] == 0x00_u8);                       // empty body
+}
+
+fn encrypted_extensions_decode_roundtrip() {
+    let h3: List<Byte> = [0x68_u8, 0x33_u8];
+    let alpn = Extension.AlpnExt { protocols: [h3] };
+    let ee = EncryptedExtensions { extensions: [alpn] };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.EncryptedExtensionsMsg(ee), &mut out).unwrap();
+    let mut r = Reader.new(out.as_slice());
+    let parsed = decode_handshake(&mut r).unwrap();
+    match parsed {
+        HandshakeMessage.EncryptedExtensionsMsg(parsed_ee) => {
+            assert(parsed_ee.extensions.len() == 1);
+        },
+        _ => panic("expected EncryptedExtensionsMsg"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    empty_encrypted_extensions_is_six_bytes();
+    encrypted_extensions_with_alpn_h3();
+    encrypted_extensions_with_early_data_indication();
+    encrypted_extensions_decode_roundtrip();
+    print("RFC 8446 §4.3.1 EncryptedExtensions encode byte-exact verified");
+    0
+}

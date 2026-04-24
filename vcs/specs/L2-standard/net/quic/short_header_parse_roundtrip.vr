@@ -1,0 +1,149 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, packet, short_header, parse, rfc9000_17_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §17.3 Short Header parse path:
+//
+//   +-+-+-+-+-+-+-+-+
+//   |0|1|S|R|R|K|P P|   Header Form=0 | Fixed=1 | Spin | Reserved | KP | PN-Len
+//   +-+-+-+-+-+-+-+-+
+//   | Destination Connection ID (dcid_len bytes, not on wire) |
+//   +--------------------------------------------------------+
+//   | Packet Number (1-4 bytes, length from low 2 bits)      |
+//   +--------------------------------------------------------+
+//   | Payload ...                                            |
+//   +--------------------------------------------------------+
+//
+// The dcid length is not on the wire; the peer knows it via prior issuance.
+// parse_short() assumes header protection is ALREADY removed from `first_byte`.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.packet.{Packet, ShortHeader, parse_short, PacketError};
+mount core.net.quic.connection_id.{ConnectionId};
+
+fn parse_short_1byte_pn_dcid4() {
+    // Layout for dcid_len=4, pn_len=1:
+    //   [0]     first_byte = 0x40 (fixed bit, pn_len bits = 00)
+    //   [1..5]  DCID (4 bytes)
+    //   [5]     PN = 0x2A (42)
+    //   [6..]   payload
+    let wire: List<Byte> = [
+        0x40_u8,                                    // first byte
+        0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,         // DCID
+        0x2A_u8,                                    // PN (1 byte)
+        0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8,         // payload
+    ];
+    let parsed = parse_short(wire.as_slice(), 4).unwrap();
+    match parsed {
+        Packet.Short(sh) => {
+            assert(sh.first_byte == 0x40_u8);
+            assert(sh.dcid.len() == 4);
+            assert(sh.packet_number == 0x2A_u32);
+            assert(sh.pn_len == 1_u8);
+            assert(sh.payload.len() == 4);
+            assert(sh.payload[0] == 0x01_u8);
+            assert(sh.payload[3] == 0x04_u8);
+        },
+        _ => panic("expected Short"),
+    }
+}
+
+fn parse_short_2byte_pn_dcid8() {
+    // dcid_len=8, pn_len=2 (low 2 bits = 01).
+    let wire: List<Byte> = [
+        0x41_u8,                                                        // first byte
+        0x11_u8, 0x22_u8, 0x33_u8, 0x44_u8, 0x55_u8, 0x66_u8, 0x77_u8, 0x88_u8,  // DCID
+        0x01_u8, 0x23_u8,                                               // PN = 0x0123
+        0xFF_u8,                                                        // payload
+    ];
+    let parsed = parse_short(wire.as_slice(), 8).unwrap();
+    match parsed {
+        Packet.Short(sh) => {
+            assert(sh.pn_len == 2_u8);
+            assert(sh.packet_number == 0x0123_u32);
+            assert(sh.dcid.len() == 8);
+            assert(sh.payload.len() == 1);
+            assert(sh.payload[0] == 0xFF_u8);
+        },
+        _ => panic("expected Short"),
+    }
+}
+
+fn parse_short_4byte_pn_dcid_zero() {
+    // dcid_len=0, pn_len=4 (low 2 bits = 11). Server may issue 0-length CIDs.
+    let wire: List<Byte> = [
+        0x43_u8,                                                        // first byte
+        // no DCID
+        0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8,                             // PN (4 bytes)
+    ];
+    let parsed = parse_short(wire.as_slice(), 0).unwrap();
+    match parsed {
+        Packet.Short(sh) => {
+            assert(sh.pn_len == 4_u8);
+            assert(sh.packet_number == 0xDEADBEEF_u32);
+            assert(sh.dcid.len() == 0);
+        },
+        _ => panic("expected Short"),
+    }
+}
+
+fn parse_short_rejects_long_header_form() {
+    // Top bit set => Long header form, not Short.
+    let wire: List<Byte> = [
+        0xC0_u8,                                                        // first byte (Long form)
+        0xAA_u8, 0xBB_u8,                                               // DCID
+        0x00_u8,                                                        // PN placeholder
+    ];
+    match parse_short(wire.as_slice(), 2) {
+        Err(PacketError.InvalidHeaderForm) => {},
+        Ok(_) => panic("expected InvalidHeaderForm"),
+        Err(_) => panic("expected InvalidHeaderForm variant"),
+    }
+}
+
+fn parse_short_rejects_truncated_pn() {
+    // pn_len encoded as 4 (low bits = 11) but only 2 bytes follow DCID.
+    let wire: List<Byte> = [
+        0x43_u8,                                                        // first byte, pn_len=4
+        0x00_u8, 0x00_u8,                                               // DCID (2 bytes)
+        0x01_u8, 0x02_u8,                                               // only 2 PN bytes
+    ];
+    match parse_short(wire.as_slice(), 2) {
+        Err(PacketError.Truncated) => {},
+        Ok(_) => panic("expected Truncated"),
+        Err(_) => panic("expected Truncated variant"),
+    }
+}
+
+fn parse_short_spin_bit_preserved_in_first_byte() {
+    // Spin bit (0x20) must round-trip through parse_short's `first_byte` field.
+    let wire: List<Byte> = [
+        0x60_u8,                                                        // fixed + spin
+        0xAA_u8,                                                        // DCID
+        0x05_u8,                                                        // PN=5
+    ];
+    let parsed = parse_short(wire.as_slice(), 1).unwrap();
+    match parsed {
+        Packet.Short(sh) => {
+            assert((sh.first_byte & 0x20_u8) == 0x20_u8);    // spin preserved
+            assert((sh.first_byte & 0x04_u8) == 0_u8);       // KP clear
+        },
+        _ => panic("expected Short"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    parse_short_1byte_pn_dcid4();
+    parse_short_2byte_pn_dcid8();
+    parse_short_4byte_pn_dcid_zero();
+    parse_short_rejects_long_header_form();
+    parse_short_rejects_truncated_pn();
+    parse_short_spin_bit_preserved_in_first_byte();
+    print("RFC 9000 §17.3 Short Header parse roundtrip verified");
+    0
+}

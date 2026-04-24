@@ -1,0 +1,157 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, frame, encode, kat, rfc9114_7_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9114 §7.2 — every frame is:
+//   Type (QUIC varint) || Length (QUIC varint) || Payload
+//
+// QUIC varint (RFC 9000 §16) — small values in 1 byte (0..=63), with the
+// top 2 bits of the first byte encoding the total length (00 = 1 byte,
+// 01 = 2, 10 = 4, 11 = 8). All tests here use values < 64, so both Type
+// and Length use the 1-byte form.
+//
+// This KAT pins the byte-exact wire for the frame forms not covered by
+// `frame_roundtrip.vr`, and asserts specific byte positions for every
+// field — not just roundtrip equality.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.frame.{
+    H3Frame, encode_frame,
+    FT_DATA, FT_HEADERS, FT_SETTINGS, FT_CANCEL_PUSH, FT_GOAWAY, FT_MAX_PUSH_ID,
+    SETTING_QPACK_MAX_TABLE_CAPACITY, SETTING_MAX_FIELD_SECTION_SIZE,
+};
+
+fn data_frame_byte_exact() {
+    // DATA frame with 3-byte body [0x48 'H', 0x49 'I', 0x21 '!'].
+    let body: List<Byte> = [0x48_u8, 0x49_u8, 0x21_u8];
+    let f = H3Frame.DataFrame(body);
+    let mut out: List<Byte> = [];
+    encode_frame(&f, &mut out);
+    // Expected: type(0x00) || length(0x03) || body.
+    assert(out.len() == 5);
+    assert(out[0] == 0x00_u8);        // type = DATA
+    assert(out[1] == 0x03_u8);        // length = 3
+    assert(out[2] == 0x48_u8);
+    assert(out[3] == 0x49_u8);
+    assert(out[4] == 0x21_u8);
+}
+
+fn empty_headers_frame_is_two_bytes() {
+    let f = H3Frame.HeadersFrame([]);
+    let mut out: List<Byte> = [];
+    encode_frame(&f, &mut out);
+    // type 0x01 || length 0x00 — no payload.
+    assert(out.len() == 2);
+    assert(out[0] == 0x01_u8);
+    assert(out[1] == 0x00_u8);
+}
+
+fn settings_frame_two_entries_byte_exact() {
+    // Two entries each with 1-byte varint id + 1-byte varint value.
+    // qpack_max_table_capacity = 0x01 → 4 (fits in 1 byte)
+    // max_field_section_size   = 0x06 → 8 (fits in 1 byte)
+    // body = [0x01, 0x04, 0x06, 0x08] = 4 bytes.
+    // Frame: type=0x04 || length=0x04 || body = 6 bytes.
+    let entries: List<(UInt64, UInt64)> = [
+        (SETTING_QPACK_MAX_TABLE_CAPACITY, 4_u64),
+        (SETTING_MAX_FIELD_SECTION_SIZE,   8_u64),
+    ];
+    let f = H3Frame.SettingsFrame(entries);
+    let mut out: List<Byte> = [];
+    encode_frame(&f, &mut out);
+    assert(out.len() == 6);
+    assert(out[0] == 0x04_u8);        // type = SETTINGS
+    assert(out[1] == 0x04_u8);        // length = 4
+    assert(out[2] == 0x01_u8);        // id(0) = qpack_max_table_capacity
+    assert(out[3] == 0x04_u8);        // value(0) = 4
+    assert(out[4] == 0x06_u8);        // id(1) = max_field_section_size
+    assert(out[5] == 0x08_u8);        // value(1) = 8
+}
+
+fn empty_settings_frame_is_two_bytes() {
+    let f = H3Frame.SettingsFrame([]);
+    let mut out: List<Byte> = [];
+    encode_frame(&f, &mut out);
+    assert(out.len() == 2);
+    assert(out[0] == 0x04_u8);        // type = SETTINGS
+    assert(out[1] == 0x00_u8);        // length = 0
+}
+
+fn goaway_frame_byte_exact() {
+    // GOAWAY with stream_id = 42 → varint 0x2A (1 byte).
+    // Frame: type=0x07 || length=0x01 || 0x2A = 3 bytes.
+    let f = H3Frame.GoawayFrame(42_u64);
+    let mut out: List<Byte> = [];
+    encode_frame(&f, &mut out);
+    assert(out.len() == 3);
+    assert(out[0] == 0x07_u8);
+    assert(out[1] == 0x01_u8);
+    assert(out[2] == 0x2A_u8);
+}
+
+fn push_promise_frame_byte_exact() {
+    // PUSH_PROMISE with push_id=7 + 2-byte encoded_headers [0xC0, 0xC1].
+    // Body = [0x07] (push_id varint) || [0xC0, 0xC1] = 3 bytes.
+    // Frame: type=0x05 || length=0x03 || body = 5 bytes.
+    let hdrs: List<Byte> = [0xC0_u8, 0xC1_u8];
+    let f = H3Frame.PushPromiseFrame { push_id: 7_u64, encoded_headers: hdrs };
+    let mut out: List<Byte> = [];
+    encode_frame(&f, &mut out);
+    assert(out.len() == 5);
+    assert(out[0] == 0x05_u8);
+    assert(out[1] == 0x03_u8);
+    assert(out[2] == 0x07_u8);        // push_id varint
+    assert(out[3] == 0xC0_u8);
+    assert(out[4] == 0xC1_u8);
+}
+
+fn cancel_push_frame_byte_exact() {
+    // CANCEL_PUSH with push_id = 0x0A → varint 0x0A (1 byte).
+    // Frame: type=0x03 || length=0x01 || 0x0A = 3 bytes.
+    let f = H3Frame.CancelPushFrame(10_u64);
+    let mut out: List<Byte> = [];
+    encode_frame(&f, &mut out);
+    assert(out.len() == 3);
+    assert(out[0] == 0x03_u8);
+    assert(out[1] == 0x01_u8);
+    assert(out[2] == 0x0A_u8);
+}
+
+fn max_push_id_frame_byte_exact() {
+    // MAX_PUSH_ID = 0x0D type; push_id = 63 → varint 0x3F (1 byte, max).
+    let f = H3Frame.MaxPushIdFrame(63_u64);
+    let mut out: List<Byte> = [];
+    encode_frame(&f, &mut out);
+    assert(out.len() == 3);
+    assert(out[0] == 0x0D_u8);
+    assert(out[1] == 0x01_u8);
+    assert(out[2] == 0x3F_u8);
+}
+
+fn frame_type_constants_match_iana() {
+    assert(FT_DATA         == 0x00_u64);
+    assert(FT_HEADERS      == 0x01_u64);
+    assert(FT_CANCEL_PUSH  == 0x03_u64);
+    assert(FT_SETTINGS     == 0x04_u64);
+    assert(FT_GOAWAY       == 0x07_u64);
+    assert(FT_MAX_PUSH_ID  == 0x0D_u64);
+}
+
+@main
+public fn main() -> Int {
+    data_frame_byte_exact();
+    empty_headers_frame_is_two_bytes();
+    settings_frame_two_entries_byte_exact();
+    empty_settings_frame_is_two_bytes();
+    goaway_frame_byte_exact();
+    push_promise_frame_byte_exact();
+    cancel_push_frame_byte_exact();
+    max_push_id_frame_byte_exact();
+    frame_type_constants_match_iana();
+    print("RFC 9114 §7.2 H3Frame encode byte-exact KAT verified");
+    0
+}

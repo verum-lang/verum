@@ -1,0 +1,126 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, handshake, certificate_request, encode, rfc8446_4_3_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.3.2 CertificateRequest wire body:
+//
+//   struct {
+//       opaque certificate_request_context<0..2^8-1>;
+//       Extension extensions<2..2^16-1>;   -- MUST contain signature_algorithms
+//   } CertificateRequest;
+//
+// Handshake wrap: 1-byte type (13 = certificate_request) + uint24 length + body.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.messages.{
+    HandshakeMessage, CertificateRequest, encode_handshake, decode_handshake,
+    HST_CERTIFICATE_REQUEST,
+};
+mount core.net.tls13.handshake.extension.{Extension};
+
+fn empty_request_context_and_extensions() {
+    // NOTE: RFC 8446 §4.3.2 requires signature_algorithms in extensions.
+    // This test exercises the encoder's byte-layout for the minimal empty
+    // case — wire legality is a separate concern from encoder correctness.
+    let cr = CertificateRequest {
+        certificate_request_context: [],
+        extensions:                  [],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateRequestMsg(cr), &mut out).unwrap();
+    // Header(4) + u8 ctx len(1) + u16 ext-block(2) = 7.
+    assert(out.len() == 7);
+    assert(out[0] == HST_CERTIFICATE_REQUEST);     // 13
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8);
+    assert(out[3] == 0x03_u8);                     // body length = 3
+    assert(out[4] == 0x00_u8);                     // ctx len = 0
+    assert(out[5] == 0x00_u8 && out[6] == 0x00_u8); // ext-block len = 0
+}
+
+fn request_context_echoed_byte_exact() {
+    // Post-handshake auth echoes the request context on the subsequent
+    // Certificate message. The request itself carries the opaque context bytes.
+    let cr = CertificateRequest {
+        certificate_request_context: [0xAA_u8, 0xBB_u8, 0xCC_u8],
+        extensions:                  [],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateRequestMsg(cr), &mut out).unwrap();
+    // Header(4) + ctx_len(1) + 3 ctx + ext-block(2) = 10.
+    assert(out.len() == 10);
+    assert(out[1] == 0x00_u8 && out[2] == 0x00_u8 && out[3] == 0x06_u8); // body = 6
+    assert(out[4] == 0x03_u8);                   // ctx len = 3
+    assert(out[5] == 0xAA_u8);
+    assert(out[6] == 0xBB_u8);
+    assert(out[7] == 0xCC_u8);
+    assert(out[8] == 0x00_u8 && out[9] == 0x00_u8);
+}
+
+fn signature_algorithms_ext_present_with_ed25519() {
+    // The mandatory extension path: empty ctx + signature_algorithms Ed25519.
+    // sig_algs wire: ext_type(2) + outer u16(2) + inner u16(2) + 2 scheme bytes = 8.
+    let sig_algs = Extension.SignatureAlgorithmsExt {
+        schemes: [SignatureScheme.Ed25519Scheme],
+    };
+    let cr = CertificateRequest {
+        certificate_request_context: [],
+        extensions:                  [sig_algs],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateRequestMsg(cr), &mut out).unwrap();
+    // Body = ctx_len(1) + ext-block u16(2) + 8 = 11. Total = 4 + 11 = 15.
+    assert(out.len() == 15);
+    assert(out[0] == HST_CERTIFICATE_REQUEST);
+    assert(out[1] == 0x00_u8 && out[2] == 0x00_u8 && out[3] == 0x0B_u8); // body = 11
+    assert(out[4] == 0x00_u8);                       // ctx len = 0
+    assert(out[5] == 0x00_u8 && out[6] == 0x08_u8);  // ext-block len = 8
+    // signature_algorithms extension header.
+    assert(out[7]  == 0x00_u8 && out[8]  == 0x0D_u8); // ext_type = 13
+    assert(out[9]  == 0x00_u8 && out[10] == 0x04_u8); // outer len = 4
+    assert(out[11] == 0x00_u8 && out[12] == 0x02_u8); // inner list len = 2
+    // Ed25519 scheme = 0x0807.
+    assert(out[13] == 0x08_u8 && out[14] == 0x07_u8);
+}
+
+fn certificate_request_decode_roundtrip() {
+    let sig_algs = Extension.SignatureAlgorithmsExt {
+        schemes: [
+            SignatureScheme.Ed25519Scheme,
+            SignatureScheme.EcdsaSecp256r1Sha256,
+        ],
+    };
+    let cr = CertificateRequest {
+        certificate_request_context: [0x01_u8, 0x02_u8],
+        extensions:                  [sig_algs],
+    };
+    let mut wire: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.CertificateRequestMsg(cr), &mut wire).unwrap();
+    let mut r = Reader.new(wire.as_slice());
+    let parsed = decode_handshake(&mut r).unwrap();
+    match parsed {
+        HandshakeMessage.CertificateRequestMsg(cr2) => {
+            assert(cr2.certificate_request_context.len() == 2);
+            assert(cr2.certificate_request_context[0] == 0x01_u8);
+            assert(cr2.certificate_request_context[1] == 0x02_u8);
+            assert(cr2.extensions.len() == 1);
+        },
+        _ => panic("expected CertificateRequestMsg"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    empty_request_context_and_extensions();
+    request_context_echoed_byte_exact();
+    signature_algorithms_ext_present_with_ed25519();
+    certificate_request_decode_roundtrip();
+    print("RFC 8446 §4.3.2 CertificateRequest encode byte-exact verified");
+    0
+}
