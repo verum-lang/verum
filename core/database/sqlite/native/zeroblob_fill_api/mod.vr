@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/zeroblob_fill_api/mod.vr
+// =============================================================================
+// zeroblob() / sqlite3_bind_zeroblob — virtual-zero BLOB encoding that
+// stores only the length, with lazy-fill on read.
+// Spec §15.2 — built-in zeroblob().
+// =============================================================================
+
+module core.database.sqlite.native.zeroblob_fill_api;
+
+public module region;

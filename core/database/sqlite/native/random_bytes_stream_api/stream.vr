@@ -1,0 +1,47 @@
+// sqlite3_randomness stream state.
+
+module core.database.sqlite.native.random_bytes_stream_api.stream;
+
+mount base.{Bool, Int64};
+
+public type RandomStream is {
+    seeded: Bool,
+    bytes_emitted: Int64,
+    reseed_requested: Int64,
+};
+
+public fn fresh() -> RandomStream {
+    RandomStream {
+        seeded: false,
+        bytes_emitted: 0 as Int64,
+        reseed_requested: 0 as Int64,
+    }
+}
+
+// sqlite3_randomness(N=0, NULL) requests a reseed.
+public fn request_reseed(mut s: RandomStream) -> RandomStream {
+    s.seeded = false;
+    s.reseed_requested = s.reseed_requested + (1 as Int64);
+    s
+}
+
+// Draw `n` bytes — first call auto-seeds.
+public fn draw(mut s: RandomStream, n: Int64) -> RandomStream {
+    if !s.seeded { s.seeded = true; }
+    if n > (0 as Int64) {
+        s.bytes_emitted = s.bytes_emitted + n;
+    }
+    s
+}
+
+public fn is_seeded(s: &RandomStream) -> Bool { s.seeded }
+public fn bytes_drawn(s: &RandomStream) -> Int64 { s.bytes_emitted }
+public fn reseed_count(s: &RandomStream) -> Int64 { s.reseed_requested }
+
+// SQLite's PRNG period before it recommends reseed (informational — the
+// ARC4 state actually has much longer effective period).
+public fn recommended_reseed_interval() -> Int64 { 1048576 as Int64 }
+
+public fn should_recommend_reseed(s: &RandomStream) -> Bool {
+    s.bytes_emitted >= recommended_reseed_interval()
+}

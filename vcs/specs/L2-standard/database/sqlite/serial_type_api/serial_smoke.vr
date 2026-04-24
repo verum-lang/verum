@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, serial_type_api, record
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.serial_type_api.kind.{
+    SerialKind,
+    SkNull, SkInt8, SkInt16, SkInt24, SkInt32, SkInt48, SkInt64,
+    SkFloat64, SkLiteralZero, SkLiteralOne, SkReserved10, SkReserved11,
+    SkBlob, SkText,
+    fixed_byte_length,
+    is_integer, is_float, is_null, is_text, is_blob, is_reserved,
+    classify, blob_byte_length, text_byte_length,
+    encode_blob_length, encode_text_length,
+};
+mount base.{Bool, Int64};
+
+fn test_fixed_byte_length_table() {
+    assert_eq(fixed_byte_length(&SkNull),        0);
+    assert_eq(fixed_byte_length(&SkInt8),        1);
+    assert_eq(fixed_byte_length(&SkInt16),       2);
+    assert_eq(fixed_byte_length(&SkInt24),       3);
+    assert_eq(fixed_byte_length(&SkInt32),       4);
+    assert_eq(fixed_byte_length(&SkInt48),       6);
+    assert_eq(fixed_byte_length(&SkInt64),       8);
+    assert_eq(fixed_byte_length(&SkFloat64),     8);
+    assert_eq(fixed_byte_length(&SkLiteralZero), 0);
+    assert_eq(fixed_byte_length(&SkLiteralOne),  0);
+    assert_eq(fixed_byte_length(&SkBlob),       -1);
+    assert_eq(fixed_byte_length(&SkText),       -1);
+}
+
+fn test_is_integer_set() {
+    assert(is_integer(&SkInt8));
+    assert(is_integer(&SkInt32));
+    assert(is_integer(&SkInt64));
+    assert(is_integer(&SkLiteralZero));
+    assert(is_integer(&SkLiteralOne));
+    assert(!is_integer(&SkNull));
+    assert(!is_integer(&SkFloat64));
+    assert(!is_integer(&SkBlob));
+    assert(!is_integer(&SkText));
+}
+
+fn test_other_classifiers() {
+    assert(is_null(&SkNull));
+    assert(is_float(&SkFloat64));
+    assert(is_text(&SkText));
+    assert(is_blob(&SkBlob));
+    assert(is_reserved(&SkReserved10));
+    assert(is_reserved(&SkReserved11));
+    assert(!is_reserved(&SkInt8));
+}
+
+fn test_classify_fixed_values() {
+    match classify(0 as Int64)  { SkNull       => {}, _ => assert(false) }
+    match classify(1 as Int64)  { SkInt8       => {}, _ => assert(false) }
+    match classify(6 as Int64)  { SkInt64      => {}, _ => assert(false) }
+    match classify(7 as Int64)  { SkFloat64    => {}, _ => assert(false) }
+    match classify(8 as Int64)  { SkLiteralZero => {}, _ => assert(false) }
+    match classify(9 as Int64)  { SkLiteralOne => {}, _ => assert(false) }
+    match classify(10 as Int64) { SkReserved10 => {}, _ => assert(false) }
+    match classify(11 as Int64) { SkReserved11 => {}, _ => assert(false) }
+}
+
+fn test_classify_blob_and_text_parity() {
+    // Even serial_type >= 12 → blob
+    match classify(12 as Int64) { SkBlob => {}, _ => assert(false) }
+    match classify(100 as Int64) { SkBlob => {}, _ => assert(false) }
+    // Odd serial_type >= 13 → text
+    match classify(13 as Int64) { SkText => {}, _ => assert(false) }
+    match classify(99 as Int64) { SkText => {}, _ => assert(false) }
+}
+
+fn test_blob_byte_length() {
+    assert_eq(blob_byte_length(12 as Int64), 0 as Int64);
+    assert_eq(blob_byte_length(14 as Int64), 1 as Int64);
+    assert_eq(blob_byte_length(22 as Int64), 5 as Int64);
+    // Odd → not blob → 0
+    assert_eq(blob_byte_length(13 as Int64), 0 as Int64);
+}
+
+fn test_text_byte_length() {
+    assert_eq(text_byte_length(13 as Int64), 0 as Int64);
+    assert_eq(text_byte_length(15 as Int64), 1 as Int64);
+    assert_eq(text_byte_length(23 as Int64), 5 as Int64);
+    // Even → not text → 0
+    assert_eq(text_byte_length(14 as Int64), 0 as Int64);
+}
+
+fn test_encode_blob_round_trip() {
+    let st = encode_blob_length(10 as Int64);
+    match classify(st) { SkBlob => {}, _ => assert(false) }
+    assert_eq(blob_byte_length(st), 10 as Int64);
+}
+
+fn test_encode_text_round_trip() {
+    let st = encode_text_length(20 as Int64);
+    match classify(st) { SkText => {}, _ => assert(false) }
+    assert_eq(text_byte_length(st), 20 as Int64);
+}
+
+fn main() {
+    test_fixed_byte_length_table();
+    test_is_integer_set();
+    test_other_classifiers();
+    test_classify_fixed_values();
+    test_classify_blob_and_text_parity();
+    test_blob_byte_length();
+    test_text_byte_length();
+    test_encode_blob_round_trip();
+    test_encode_text_round_trip();
+}

@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, page_write_back_budget_api, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.page_write_back_budget_api.budget.{
+    WriteBackBudget,
+    new, tick, try_write,
+    available_tokens, pages_written,
+    utilisation, is_saturated, is_empty,
+};
+mount base.{Bool, Int64};
+
+fn test_new_is_saturated() {
+    let b = new(10, 100);
+    assert(is_saturated(&b));
+    assert(!is_empty(&b));
+    assert_eq(available_tokens(&b), 100);
+    assert_eq(pages_written(&b), 0 as Int64);
+}
+
+fn test_tick_replenishes_capped() {
+    let b0 = new(10, 50);
+    let (b1, ok) = try_write(b0, 40);
+    assert(ok);
+    assert_eq(available_tokens(&b1), 10);
+    let b2 = tick(b1);
+    assert_eq(available_tokens(&b2), 20);
+    // Many ticks → cap at bucket_capacity
+    let mut b = b2;
+    let mut i: Int = 0;
+    while i < 10 { b = tick(b); i = i + 1; }
+    assert_eq(available_tokens(&b), 50);
+    assert(is_saturated(&b));
+}
+
+fn test_try_write_fails_when_insufficient() {
+    let b0 = new(5, 10);
+    let (b1, ok1) = try_write(b0, 8);
+    assert(ok1);
+    let (b2, ok2) = try_write(b1, 5);
+    assert(!ok2);
+    assert_eq(available_tokens(&b2), 2);
+}
+
+fn test_try_write_non_positive_passes_through() {
+    let b0 = new(5, 10);
+    let (b1, ok) = try_write(b0, 0);
+    assert(ok);
+    assert_eq(available_tokens(&b1), 10);
+    let (b2, ok2) = try_write(b1, -5);
+    assert(ok2);
+    assert_eq(available_tokens(&b2), 10);
+}
+
+fn test_pages_written_accumulates() {
+    let b0 = new(5, 100);
+    let (b1, _) = try_write(b0, 30);
+    let (b2, _) = try_write(b1, 20);
+    assert_eq(pages_written(&b2), 50 as Int64);
+}
+
+fn test_utilisation_fraction() {
+    // Over 4 ticks at 5 pages/tick capacity → 20 slots. Write 10 pages.
+    let b0 = new(5, 5);
+    let (b1, _) = try_write(b0, 5);
+    let b2 = tick(b1);
+    let (b3, _) = try_write(b2, 5);
+    let b4 = tick(tick(tick(b3)));
+    // 10 written across 4 ticks at 5 per tick → 10/20 = 0.5
+    let u = utilisation(&b4);
+    assert(u > 0.49 as Float);
+    assert(u < 0.51 as Float);
+}
+
+fn test_is_empty_flag() {
+    let b0 = new(5, 10);
+    let (b1, _) = try_write(b0, 10);
+    assert(is_empty(&b1));
+    assert(!is_saturated(&b1));
+}
+
+fn main() {
+    test_new_is_saturated();
+    test_tick_replenishes_capped();
+    test_try_write_fails_when_insufficient();
+    test_try_write_non_positive_passes_through();
+    test_pages_written_accumulates();
+    test_utilisation_fraction();
+    test_is_empty_flag();
+}

@@ -1,0 +1,111 @@
+// Serial-type classification.
+
+module core.database.sqlite.native.serial_type_api.kind;
+
+mount base.{Bool, Int64, Text};
+
+public type SerialKind is
+    | SkNull               //  0
+    | SkInt8               //  1
+    | SkInt16              //  2
+    | SkInt24              //  3
+    | SkInt32              //  4
+    | SkInt48              //  5
+    | SkInt64              //  6
+    | SkFloat64            //  7
+    | SkLiteralZero        //  8
+    | SkLiteralOne         //  9
+    | SkReserved10         // 10
+    | SkReserved11         // 11
+    | SkBlob               // >=12 even
+    | SkText               // >=13 odd
+    ;
+
+// SQLite serial-type byte-count on disk (the payload portion; the serial-type
+// header itself is encoded as a varint and counted separately).
+public fn fixed_byte_length(k: &SerialKind) -> Int {
+    match k {
+        SkNull         => 0,
+        SkInt8         => 1,
+        SkInt16        => 2,
+        SkInt24        => 3,
+        SkInt32        => 4,
+        SkInt48        => 6,
+        SkInt64        => 8,
+        SkFloat64      => 8,
+        SkLiteralZero  => 0,
+        SkLiteralOne   => 0,
+        SkReserved10   => 0,
+        SkReserved11   => 0,
+        SkBlob         => -1,    // variable; use blob_byte_length
+        SkText         => -1,
+    }
+}
+
+public fn is_integer(k: &SerialKind) -> Bool {
+    match k {
+        SkInt8 | SkInt16 | SkInt24 | SkInt32 | SkInt48 | SkInt64
+        | SkLiteralZero | SkLiteralOne => true,
+        _ => false,
+    }
+}
+
+public fn is_float(k: &SerialKind) -> Bool {
+    match k { SkFloat64 => true, _ => false }
+}
+
+public fn is_null(k: &SerialKind) -> Bool {
+    match k { SkNull => true, _ => false }
+}
+
+public fn is_text(k: &SerialKind) -> Bool {
+    match k { SkText => true, _ => false }
+}
+
+public fn is_blob(k: &SerialKind) -> Bool {
+    match k { SkBlob => true, _ => false }
+}
+
+public fn is_reserved(k: &SerialKind) -> Bool {
+    match k { SkReserved10 => true, SkReserved11 => true, _ => false }
+}
+
+// Classify a serial-type varint value (Int64).
+public fn classify(st: Int64) -> SerialKind {
+    if st == (0 as Int64) { return SkNull; }
+    if st == (1 as Int64) { return SkInt8; }
+    if st == (2 as Int64) { return SkInt16; }
+    if st == (3 as Int64) { return SkInt24; }
+    if st == (4 as Int64) { return SkInt32; }
+    if st == (5 as Int64) { return SkInt48; }
+    if st == (6 as Int64) { return SkInt64; }
+    if st == (7 as Int64) { return SkFloat64; }
+    if st == (8 as Int64) { return SkLiteralZero; }
+    if st == (9 as Int64) { return SkLiteralOne; }
+    if st == (10 as Int64) { return SkReserved10; }
+    if st == (11 as Int64) { return SkReserved11; }
+    if (st & (1 as Int64)) == (0 as Int64) { return SkBlob; }
+    SkText
+}
+
+public fn blob_byte_length(st: Int64) -> Int64 {
+    if st < (12 as Int64) { return 0 as Int64; }
+    if (st & (1 as Int64)) != (0 as Int64) { return 0 as Int64; }   // not blob
+    (st - (12 as Int64)) / (2 as Int64)
+}
+
+public fn text_byte_length(st: Int64) -> Int64 {
+    if st < (13 as Int64) { return 0 as Int64; }
+    if (st & (1 as Int64)) == (0 as Int64) { return 0 as Int64; }   // not text
+    (st - (13 as Int64)) / (2 as Int64)
+}
+
+public fn encode_blob_length(n: Int64) -> Int64 {
+    if n < (0 as Int64) { return 12 as Int64; }
+    (12 as Int64) + n * (2 as Int64)
+}
+
+public fn encode_text_length(n: Int64) -> Int64 {
+    if n < (0 as Int64) { return 13 as Int64; }
+    (13 as Int64) + n * (2 as Int64)
+}

@@ -1,0 +1,62 @@
+// Invariant checks for a balanced B-tree node.
+
+module core.database.sqlite.native.btree_balance_invariant.invariant_;
+
+mount base.{Bool, Text};
+
+public type Invariant is
+    | InCellOrder              // cells sorted by key
+    | InNoOverflowWhenEnough   // overflow pages used only when needed
+    | InRootSingleChildOk      // root may have fewer than min cells
+    | InInteriorMinFill        // interior pages ≥ min_cells
+    | InLeafMinFill            // leaf pages ≥ min_cells (root exempt)
+    | InTotalCellsMatchRows    // sum of leaf cells = rowid count
+    | InFreeSpaceNonneg        // gapBetween(cells, cellContent) ≥ 0
+    ;
+
+public fn invariant_name(i: &Invariant) -> Text {
+    match i {
+        InCellOrder              => "cell_order".clone(),
+        InNoOverflowWhenEnough   => "no_overflow_when_enough".clone(),
+        InRootSingleChildOk      => "root_single_child_ok".clone(),
+        InInteriorMinFill        => "interior_min_fill".clone(),
+        InLeafMinFill            => "leaf_min_fill".clone(),
+        InTotalCellsMatchRows    => "total_cells_match_rows".clone(),
+        InFreeSpaceNonneg        => "free_space_nonneg".clone(),
+    }
+}
+
+public fn is_structural(i: &Invariant) -> Bool {
+    match i {
+        InCellOrder              => true,
+        InRootSingleChildOk      => true,
+        InFreeSpaceNonneg        => true,
+        _                        => false,
+    }
+}
+
+public fn is_fill_rule(i: &Invariant) -> Bool {
+    match i {
+        InInteriorMinFill => true,
+        InLeafMinFill     => true,
+        _                 => false,
+    }
+}
+
+// Check one invariant value — given minimum arguments.
+public fn check_cell_order(is_sorted: Bool) -> Bool { is_sorted }
+
+public fn check_min_fill(is_root: Bool, cell_count: Int, min_cells: Int) -> Bool {
+    if is_root { return true; }    // root exempt
+    cell_count >= min_cells
+}
+
+public fn check_free_space(free_space_bytes: Int) -> Bool {
+    free_space_bytes >= 0
+}
+
+public fn check_total_cells(leaf_cell_sum: Int, rowid_count: Int) -> Bool {
+    leaf_cell_sum == rowid_count
+}
+
+public fn total_invariants() -> Int { 7 }

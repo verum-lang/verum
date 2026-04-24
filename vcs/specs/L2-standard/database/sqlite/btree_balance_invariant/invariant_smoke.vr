@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, btree_balance_invariant, btree
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.btree_balance_invariant.invariant_.{
+    Invariant,
+    InCellOrder, InNoOverflowWhenEnough, InRootSingleChildOk,
+    InInteriorMinFill, InLeafMinFill, InTotalCellsMatchRows, InFreeSpaceNonneg,
+    invariant_name, is_structural, is_fill_rule,
+    check_cell_order, check_min_fill, check_free_space, check_total_cells,
+    total_invariants,
+};
+mount base.{Bool};
+
+fn test_invariant_names() {
+    assert(invariant_name(&InCellOrder)       == "cell_order".clone());
+    assert(invariant_name(&InLeafMinFill)     == "leaf_min_fill".clone());
+    assert(invariant_name(&InFreeSpaceNonneg) == "free_space_nonneg".clone());
+}
+
+fn test_is_structural_set() {
+    assert(is_structural(&InCellOrder));
+    assert(is_structural(&InRootSingleChildOk));
+    assert(is_structural(&InFreeSpaceNonneg));
+    assert(!is_structural(&InInteriorMinFill));
+    assert(!is_structural(&InTotalCellsMatchRows));
+}
+
+fn test_is_fill_rule_set() {
+    assert(is_fill_rule(&InInteriorMinFill));
+    assert(is_fill_rule(&InLeafMinFill));
+    assert(!is_fill_rule(&InCellOrder));
+}
+
+fn test_check_cell_order() {
+    assert(check_cell_order(true));
+    assert(!check_cell_order(false));
+}
+
+fn test_check_min_fill() {
+    assert(check_min_fill(true, 1, 6));         // root exempt
+    assert(check_min_fill(false, 10, 6));       // meets min
+    assert(!check_min_fill(false, 3, 6));       // below min on non-root
+}
+
+fn test_check_free_space() {
+    assert(check_free_space(0));
+    assert(check_free_space(100));
+    assert(!check_free_space(-1));
+}
+
+fn test_check_total_cells() {
+    assert(check_total_cells(10, 10));
+    assert(!check_total_cells(10, 11));
+}
+
+fn test_total_invariants() {
+    assert_eq(total_invariants(), 7);
+}
+
+fn main() {
+    test_invariant_names();
+    test_is_structural_set();
+    test_is_fill_rule_set();
+    test_check_cell_order();
+    test_check_min_fill();
+    test_check_free_space();
+    test_check_total_cells();
+    test_total_invariants();
+}

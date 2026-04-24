@@ -1,0 +1,54 @@
+// ZeroblobRegion + read/write helpers.
+
+module core.database.sqlite.native.zeroblob_fill_api.region;
+
+mount base.{Bool, Int64};
+
+public type ZeroblobRegion is {
+    logical_size: Int64,         // reported size to the SQL layer
+    bytes_materialised: Int64,   // bytes written out since insertion
+};
+
+public fn new(size: Int64) -> ZeroblobRegion {
+    ZeroblobRegion {
+        logical_size: size,
+        bytes_materialised: 0 as Int64,
+    }
+}
+
+// Max zeroblob size per §15.2 (fits in Int32 on disk: 2^31 - 1).
+public fn max_size() -> Int64 { 0x7FFFFFFF as Int64 }
+
+public fn is_valid_size(n: Int64) -> Bool {
+    n >= (0 as Int64) && n <= max_size()
+}
+
+// Materialise `n` bytes — bumps the counter (clamped at logical size).
+public fn materialise(mut r: ZeroblobRegion, n: Int64) -> ZeroblobRegion {
+    r.bytes_materialised = r.bytes_materialised + n;
+    if r.bytes_materialised > r.logical_size {
+        r.bytes_materialised = r.logical_size;
+    }
+    r
+}
+
+public fn is_fully_materialised(r: &ZeroblobRegion) -> Bool {
+    r.bytes_materialised >= r.logical_size
+}
+
+// Reads at offset ≥ logical_size return 0 bytes (EOF).
+public fn read_byte_at(r: &ZeroblobRegion, offset: Int64) -> Int {
+    if offset < (0 as Int64) { return -1; }
+    if offset >= r.logical_size { return -1; }
+    0    // zeroblob reads always return 0
+}
+
+// Virtual byte length — always the logical size.
+public fn byte_length(r: &ZeroblobRegion) -> Int64 {
+    r.logical_size
+}
+
+public fn remaining_to_materialise(r: &ZeroblobRegion) -> Int64 {
+    if is_fully_materialised(r) { return 0 as Int64; }
+    r.logical_size - r.bytes_materialised
+}

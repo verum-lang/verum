@@ -652,3 +652,19 @@ public module online_backup_rate;
 public module varint_encode_api;
 // - fkey_check_api: PRAGMA foreign_key_check 4-column row (table/rowid/parent/fkid)
 public module fkey_check_api;
+// - serial_type_api: record serial-type taxonomy (Null/IntN/Float/Lit01/Blob/Text) + lengths
+public module serial_type_api;
+// - autoincrement_register_api: sqlite_sequence per-table register + allocate / is_at_max
+public module autoincrement_register_api;
+// - zeroblob_fill_api: virtual-zero BLOB region + materialise counter
+public module zeroblob_fill_api;
+// - json_patch_merge_api: RFC 7396 per-key action + root verdict
+public module json_patch_merge_api;
+// - btree_balance_invariant: 7 structural + fill invariants checklist
+public module btree_balance_invariant;
+// - trace_v2_payload_api: SQLITE_TRACE_* 4-event payload taxonomy + is_enabled
+public module trace_v2_payload_api;
+// - random_bytes_stream_api: sqlite3_randomness seed/bytes_emitted stream
+public module random_bytes_stream_api;
+// - page_write_back_budget_api: token-bucket budget for async write-back
+public module page_write_back_budget_api;

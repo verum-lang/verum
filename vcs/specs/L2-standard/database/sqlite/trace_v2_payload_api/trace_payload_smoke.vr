@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, trace_v2_payload_api, diagnostics
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.trace_v2_payload_api.payload.{
+    f_stmt, f_profile, f_row, f_close,
+    TraceEvent, TeStmt, TeProfile, TeRow, TeClose,
+    event_name, event_mask_bit,
+    carries_sql, carries_elapsed, is_terminal_event,
+    is_enabled, event_count,
+};
+mount base.{Bool, Int64};
+
+fn test_flag_constants() {
+    assert_eq(f_stmt(),    0x01 as Int64);
+    assert_eq(f_profile(), 0x02 as Int64);
+    assert_eq(f_row(),     0x04 as Int64);
+    assert_eq(f_close(),   0x08 as Int64);
+}
+
+fn test_event_names() {
+    let stmt: TraceEvent = TraceEvent.TeStmt { expanded_sql: "SELECT 1".clone() };
+    let prof: TraceEvent = TraceEvent.TeProfile { elapsed_ns: 1000 as Int64 };
+    assert(event_name(&stmt) == "STMT".clone());
+    assert(event_name(&prof) == "PROFILE".clone());
+    assert(event_name(&TraceEvent.TeRow)   == "ROW".clone());
+    assert(event_name(&TraceEvent.TeClose) == "CLOSE".clone());
+}
+
+fn test_event_mask_bit() {
+    let stmt: TraceEvent = TraceEvent.TeStmt { expanded_sql: "".clone() };
+    let prof: TraceEvent = TraceEvent.TeProfile { elapsed_ns: 0 as Int64 };
+    assert_eq(event_mask_bit(&stmt), f_stmt());
+    assert_eq(event_mask_bit(&prof), f_profile());
+    assert_eq(event_mask_bit(&TraceEvent.TeRow),   f_row());
+    assert_eq(event_mask_bit(&TraceEvent.TeClose), f_close());
+}
+
+fn test_carries_sql_only_stmt() {
+    let stmt: TraceEvent = TraceEvent.TeStmt { expanded_sql: "s".clone() };
+    assert(carries_sql(&stmt));
+    assert(!carries_sql(&TraceEvent.TeRow));
+}
+
+fn test_carries_elapsed_only_profile() {
+    let prof: TraceEvent = TraceEvent.TeProfile { elapsed_ns: 1 as Int64 };
+    assert(carries_elapsed(&prof));
+    assert(!carries_elapsed(&TraceEvent.TeRow));
+}
+
+fn test_is_terminal_only_close() {
+    assert(is_terminal_event(&TraceEvent.TeClose));
+    assert(!is_terminal_event(&TraceEvent.TeRow));
+}
+
+fn test_is_enabled() {
+    let stmt: TraceEvent = TraceEvent.TeStmt { expanded_sql: "".clone() };
+    assert(is_enabled(&stmt, f_stmt()));
+    assert(!is_enabled(&stmt, f_profile()));
+    let combined = f_stmt() | f_row();
+    assert(is_enabled(&stmt, combined));
+    assert(is_enabled(&TraceEvent.TeRow, combined));
+    assert(!is_enabled(&TraceEvent.TeClose, combined));
+}
+
+fn test_event_count() {
+    assert_eq(event_count(), 4);
+}
+
+fn main() {
+    test_flag_constants();
+    test_event_names();
+    test_event_mask_bit();
+    test_carries_sql_only_stmt();
+    test_carries_elapsed_only_profile();
+    test_is_terminal_only_close();
+    test_is_enabled();
+    test_event_count();
+}

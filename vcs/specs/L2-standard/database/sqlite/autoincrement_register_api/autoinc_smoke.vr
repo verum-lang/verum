@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, autoincrement_register_api, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.autoincrement_register_api.register_.{
+    rowid_max,
+    AutoIncRow, row,
+    Register,
+    new, size, find, observe,
+    AllocOutcome, AoRowid, AoFull,
+    outcome_name, allocate, is_at_max,
+};
+mount base.{Bool, Int64, Maybe};
+
+fn test_rowid_max() {
+    assert_eq(rowid_max(), 0x7FFFFFFFFFFFFFFF as Int64);
+}
+
+fn test_new_register_is_empty() {
+    let r = new();
+    assert_eq(size(&r), 0);
+    match find(&r, &"t".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_observe_creates_row() {
+    let r = observe(new(), "users".clone(), 42 as Int64);
+    assert_eq(size(&r), 1);
+    match find(&r, &"users".clone()) {
+        Maybe.Some(s) => assert_eq(s, 42 as Int64),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_observe_only_raises_seq() {
+    let mut r = new();
+    r = observe(r, "users".clone(), 42 as Int64);
+    r = observe(r, "users".clone(), 100 as Int64);
+    match find(&r, &"users".clone()) {
+        Maybe.Some(s) => assert_eq(s, 100 as Int64),
+        Maybe.None => assert(false),
+    }
+    // Lower value doesn't decrease seq.
+    let r2 = observe(r, "users".clone(), 50 as Int64);
+    match find(&r2, &"users".clone()) {
+        Maybe.Some(s) => assert_eq(s, 100 as Int64),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_allocate_starts_at_one_for_new_table() {
+    let r = new();
+    let (_, o) = allocate(r, "users".clone());
+    match o {
+        AoRowid(id) => assert_eq(id, 1 as Int64),
+        AoFull => assert(false),
+    }
+}
+
+fn test_allocate_is_monotonic() {
+    let mut r = new();
+    let (r1, o1) = allocate(r, "users".clone());
+    let (r2, o2) = allocate(r1, "users".clone());
+    let (_, o3) = allocate(r2, "users".clone());
+    match o1 { AoRowid(id) => assert_eq(id, 1 as Int64), _ => assert(false) }
+    match o2 { AoRowid(id) => assert_eq(id, 2 as Int64), _ => assert(false) }
+    match o3 { AoRowid(id) => assert_eq(id, 3 as Int64), _ => assert(false) }
+}
+
+fn test_allocate_returns_full_at_max() {
+    let r = observe(new(), "users".clone(), rowid_max());
+    assert(is_at_max(&r, &"users".clone()));
+    let (_, o) = allocate(r, "users".clone());
+    match o { AoFull => {}, _ => assert(false) }
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&AoRowid(1 as Int64)) == "rowid".clone());
+    assert(outcome_name(&AoFull) == "full".clone());
+}
+
+fn main() {
+    test_rowid_max();
+    test_new_register_is_empty();
+    test_observe_creates_row();
+    test_observe_only_raises_seq();
+    test_allocate_starts_at_one_for_new_table();
+    test_allocate_is_monotonic();
+    test_allocate_returns_full_at_max();
+    test_outcome_names();
+}

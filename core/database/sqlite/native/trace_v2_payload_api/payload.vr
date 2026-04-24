@@ -1,0 +1,56 @@
+// Per-event trace_v2 payload taxonomy.
+
+module core.database.sqlite.native.trace_v2_payload_api.payload;
+
+mount base.{Bool, Int64, Text};
+
+// SQLITE_TRACE_* mask bit constants.
+public fn f_stmt()    -> Int64 { 0x01 as Int64 }
+public fn f_profile() -> Int64 { 0x02 as Int64 }
+public fn f_row()     -> Int64 { 0x04 as Int64 }
+public fn f_close()   -> Int64 { 0x08 as Int64 }
+
+public type TraceEvent is
+    | TeStmt { expanded_sql: Text }
+    | TeProfile { elapsed_ns: Int64 }
+    | TeRow                            // a row has been produced
+    | TeClose                          // sqlite3_close
+    ;
+
+public fn event_name(e: &TraceEvent) -> Text {
+    match e {
+        TraceEvent.TeStmt { .. }    => "STMT".clone(),
+        TraceEvent.TeProfile { .. } => "PROFILE".clone(),
+        TraceEvent.TeRow            => "ROW".clone(),
+        TraceEvent.TeClose          => "CLOSE".clone(),
+    }
+}
+
+public fn event_mask_bit(e: &TraceEvent) -> Int64 {
+    match e {
+        TraceEvent.TeStmt { .. }    => f_stmt(),
+        TraceEvent.TeProfile { .. } => f_profile(),
+        TraceEvent.TeRow            => f_row(),
+        TraceEvent.TeClose          => f_close(),
+    }
+}
+
+public fn carries_sql(e: &TraceEvent) -> Bool {
+    match e { TraceEvent.TeStmt { .. } => true, _ => false }
+}
+
+public fn carries_elapsed(e: &TraceEvent) -> Bool {
+    match e { TraceEvent.TeProfile { .. } => true, _ => false }
+}
+
+public fn is_terminal_event(e: &TraceEvent) -> Bool {
+    match e { TraceEvent.TeClose => true, _ => false }
+}
+
+// Whether an event is active given the current mask.
+public fn is_enabled(e: &TraceEvent, mask: Int64) -> Bool {
+    (mask & event_mask_bit(e)) != (0 as Int64)
+}
+
+// All well-known events (4).
+public fn event_count() -> Int { 4 }

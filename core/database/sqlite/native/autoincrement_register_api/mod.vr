@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/autoincrement_register_api/mod.vr
+// =============================================================================
+// sqlite_sequence bookkeeping — AUTOINCREMENT per-table max seen + allocation.
+// Spec §17.9.4 — AUTOINCREMENT.
+//
+// sqlite_sequence(name TEXT, seq INTEGER)
+//   For each AUTOINCREMENT table, seq = max(INTEGER PRIMARY KEY seen).
+//   Next allocation = seq + 1 (with overflow → SQLITE_FULL).
+// =============================================================================
+
+module core.database.sqlite.native.autoincrement_register_api;
+
+public module register_;

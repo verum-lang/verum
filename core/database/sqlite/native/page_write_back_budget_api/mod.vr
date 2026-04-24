@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/page_write_back_budget_api/mod.vr
+// =============================================================================
+// Async page write-back budgeter — throttles the background checkpointer to
+// avoid IO-queue starvation.
+// Spec §10.4 — page cache write-back.
+// =============================================================================
+
+module core.database.sqlite.native.page_write_back_budget_api;
+
+public module budget;

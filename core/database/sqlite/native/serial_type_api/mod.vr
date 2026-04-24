@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/serial_type_api/mod.vr
+// =============================================================================
+// SQLite record-format serial-type taxonomy — per-column encoding marker.
+// Spec §15.3 — record format.
+//
+//   0   NULL
+//   1   int8
+//   2   int16
+//   3   int24
+//   4   int32
+//   5   int48
+//   6   int64
+//   7   float64
+//   8   literal 0
+//   9   literal 1
+//  10-11 reserved
+//  ≥12 even  blob,   byte_length = (st - 12) / 2
+//  ≥13 odd   text,   byte_length = (st - 13) / 2
+// =============================================================================
+
+module core.database.sqlite.native.serial_type_api;
+
+public module kind;

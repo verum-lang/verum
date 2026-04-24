@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, zeroblob_fill_api, blob
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.zeroblob_fill_api.region.{
+    ZeroblobRegion,
+    new, max_size, is_valid_size,
+    materialise, is_fully_materialised,
+    read_byte_at, byte_length, remaining_to_materialise,
+};
+mount base.{Bool, Int64};
+
+fn test_max_size_and_validity() {
+    assert_eq(max_size(), 0x7FFFFFFF as Int64);
+    assert(is_valid_size(0 as Int64));
+    assert(is_valid_size(1024 as Int64));
+    assert(is_valid_size(max_size()));
+    assert(!is_valid_size(-1 as Int64));
+    assert(!is_valid_size(max_size() + (1 as Int64)));
+}
+
+fn test_new_region_reports_logical_size() {
+    let r = new(1024 as Int64);
+    assert_eq(byte_length(&r), 1024 as Int64);
+    assert_eq(r.bytes_materialised, 0 as Int64);
+    assert(!is_fully_materialised(&r));
+}
+
+fn test_materialise_bumps_counter() {
+    let r = materialise(new(100 as Int64), 30 as Int64);
+    assert_eq(r.bytes_materialised, 30 as Int64);
+    assert(!is_fully_materialised(&r));
+    assert_eq(remaining_to_materialise(&r), 70 as Int64);
+}
+
+fn test_materialise_clamps_at_logical_size() {
+    let r = materialise(new(50 as Int64), 1000 as Int64);
+    assert_eq(r.bytes_materialised, 50 as Int64);
+    assert(is_fully_materialised(&r));
+    assert_eq(remaining_to_materialise(&r), 0 as Int64);
+}
+
+fn test_read_byte_returns_zero_when_in_range() {
+    let r = new(10 as Int64);
+    assert_eq(read_byte_at(&r, 0 as Int64), 0);
+    assert_eq(read_byte_at(&r, 9 as Int64), 0);
+}
+
+fn test_read_byte_eof() {
+    let r = new(10 as Int64);
+    assert_eq(read_byte_at(&r, 10 as Int64), -1);
+    assert_eq(read_byte_at(&r, 100 as Int64), -1);
+    assert_eq(read_byte_at(&r, -1 as Int64), -1);
+}
+
+fn test_fully_materialised_detection() {
+    let r = materialise(new(8 as Int64), 8 as Int64);
+    assert(is_fully_materialised(&r));
+}
+
+fn main() {
+    test_max_size_and_validity();
+    test_new_region_reports_logical_size();
+    test_materialise_bumps_counter();
+    test_materialise_clamps_at_logical_size();
+    test_read_byte_returns_zero_when_in_range();
+    test_read_byte_eof();
+    test_fully_materialised_detection();
+}

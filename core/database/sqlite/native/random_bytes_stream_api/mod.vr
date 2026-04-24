@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/random_bytes_stream_api/mod.vr
+// =============================================================================
+// sqlite3_randomness continuous-stream state.
+// Spec §15.1 — PRNG.
+//
+// The sqlite3_randomness() function reseeds on first call, then produces
+// bytes from an ARC4-like keystream. This catalogue tracks (seeded_yet,
+// bytes_emitted) without materialising the keystream itself (see
+// core.database.sqlite.native.prng for the algorithmic implementation).
+// =============================================================================
+
+module core.database.sqlite.native.random_bytes_stream_api;
+
+public module stream;

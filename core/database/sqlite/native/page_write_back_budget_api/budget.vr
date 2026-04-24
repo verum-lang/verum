@@ -1,0 +1,61 @@
+// Token-bucket budget for async write-back.
+
+module core.database.sqlite.native.page_write_back_budget_api.budget;
+
+mount base.{Bool, Int64};
+
+public type WriteBackBudget is {
+    pages_per_tick: Int,        // tokens added per tick
+    bucket_capacity: Int,       // max tokens held
+    tokens: Int,                // current tokens
+    ticks_elapsed: Int64,
+    pages_written: Int64,
+};
+
+public fn new(pages_per_tick: Int, capacity: Int) -> WriteBackBudget {
+    WriteBackBudget {
+        pages_per_tick: pages_per_tick,
+        bucket_capacity: capacity,
+        tokens: capacity,      // start full
+        ticks_elapsed: 0 as Int64,
+        pages_written: 0 as Int64,
+    }
+}
+
+// Advance one tick — replenish tokens up to capacity.
+public fn tick(mut b: WriteBackBudget) -> WriteBackBudget {
+    b.ticks_elapsed = b.ticks_elapsed + (1 as Int64);
+    b.tokens = b.tokens + b.pages_per_tick;
+    if b.tokens > b.bucket_capacity { b.tokens = b.bucket_capacity; }
+    b
+}
+
+// Try to write `n` pages — returns (budget, accepted).
+public fn try_write(mut b: WriteBackBudget, n: Int) -> (WriteBackBudget, Bool) {
+    if n <= 0 { return (b, true); }
+    if n > b.tokens { return (b, false); }
+    b.tokens = b.tokens - n;
+    b.pages_written = b.pages_written + (n as Int64);
+    (b, true)
+}
+
+public fn available_tokens(b: &WriteBackBudget) -> Int { b.tokens }
+public fn pages_written(b: &WriteBackBudget) -> Int64 { b.pages_written }
+
+// Utilisation = pages_written / (ticks_elapsed * pages_per_tick).
+public fn utilisation(b: &WriteBackBudget) -> Float {
+    if b.ticks_elapsed <= (0 as Int64) { return 0.0 as Float; }
+    if b.pages_per_tick <= 0 { return 0.0 as Float; }
+    let done = b.pages_written as Float;
+    let capacity = (b.ticks_elapsed as Float) * (b.pages_per_tick as Float);
+    done / capacity
+}
+
+// Whether the bucket is saturated (no capacity headroom).
+public fn is_saturated(b: &WriteBackBudget) -> Bool {
+    b.tokens >= b.bucket_capacity
+}
+
+public fn is_empty(b: &WriteBackBudget) -> Bool {
+    b.tokens == 0
+}

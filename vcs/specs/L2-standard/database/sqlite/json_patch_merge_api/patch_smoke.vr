@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, json_patch_merge_api, json1
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.json_patch_merge_api.rule.{
+    PatchValueShape, PvsNull, PvsObject, PvsScalarOrArray,
+    shape_name,
+    MergeAction, MaDelete, MaRecurse, MaReplace,
+    action_name, is_destructive, action_for,
+    RootVerdict, RvMergeInto, RvReplaceEntire, RvNullOut,
+    root_verdict, preserves_unmentioned_keys,
+};
+mount base.{Bool};
+
+fn test_shape_names() {
+    assert(shape_name(&PvsNull)           == "null".clone());
+    assert(shape_name(&PvsObject)         == "object".clone());
+    assert(shape_name(&PvsScalarOrArray)  == "scalar_or_array".clone());
+}
+
+fn test_action_names() {
+    assert(action_name(&MaDelete)  == "delete".clone());
+    assert(action_name(&MaRecurse) == "recurse".clone());
+    assert(action_name(&MaReplace) == "replace".clone());
+}
+
+fn test_destructive_set() {
+    assert(is_destructive(&MaDelete));
+    assert(is_destructive(&MaReplace));
+    assert(!is_destructive(&MaRecurse));
+}
+
+fn test_action_for_shape() {
+    match action_for(&PvsNull)          { MaDelete  => {}, _ => assert(false) }
+    match action_for(&PvsObject)        { MaRecurse => {}, _ => assert(false) }
+    match action_for(&PvsScalarOrArray) { MaReplace => {}, _ => assert(false) }
+}
+
+fn test_root_verdict() {
+    match root_verdict(&PvsObject)        { RvMergeInto     => {}, _ => assert(false) }
+    match root_verdict(&PvsNull)          { RvNullOut       => {}, _ => assert(false) }
+    match root_verdict(&PvsScalarOrArray) { RvReplaceEntire => {}, _ => assert(false) }
+}
+
+fn test_preserves_unmentioned_keys_only_merge() {
+    assert(preserves_unmentioned_keys(&RvMergeInto));
+    assert(!preserves_unmentioned_keys(&RvReplaceEntire));
+    assert(!preserves_unmentioned_keys(&RvNullOut));
+}
+
+fn main() {
+    test_shape_names();
+    test_action_names();
+    test_destructive_set();
+    test_action_for_shape();
+    test_root_verdict();
+    test_preserves_unmentioned_keys_only_merge();
+}

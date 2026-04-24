@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/btree_balance_invariant/mod.vr
+// =============================================================================
+// B-tree structural invariants used by PRAGMA integrity_check + the balance
+// decision classifier (see btree_balance_strategy for the decision).
+// Spec §12.4 — balancing invariants.
+// =============================================================================
+
+module core.database.sqlite.native.btree_balance_invariant;
+
+public module invariant_;

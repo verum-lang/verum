@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, random_bytes_stream_api, prng
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.random_bytes_stream_api.stream.{
+    RandomStream,
+    fresh, request_reseed, draw,
+    is_seeded, bytes_drawn, reseed_count,
+    recommended_reseed_interval, should_recommend_reseed,
+};
+mount base.{Bool, Int64};
+
+fn test_fresh_is_unseeded() {
+    let s = fresh();
+    assert(!is_seeded(&s));
+    assert_eq(bytes_drawn(&s), 0 as Int64);
+    assert_eq(reseed_count(&s), 0 as Int64);
+}
+
+fn test_draw_auto_seeds() {
+    let s = draw(fresh(), 32 as Int64);
+    assert(is_seeded(&s));
+    assert_eq(bytes_drawn(&s), 32 as Int64);
+}
+
+fn test_request_reseed_flips_seeded() {
+    let s0 = draw(fresh(), 10 as Int64);
+    assert(is_seeded(&s0));
+    let s1 = request_reseed(s0);
+    assert(!is_seeded(&s1));
+    assert_eq(reseed_count(&s1), 1 as Int64);
+}
+
+fn test_draw_accumulates() {
+    let s = draw(draw(draw(fresh(), 5 as Int64), 10 as Int64), 25 as Int64);
+    assert_eq(bytes_drawn(&s), 40 as Int64);
+}
+
+fn test_zero_byte_draw_does_not_bump_counter() {
+    let s = draw(fresh(), 0 as Int64);
+    assert_eq(bytes_drawn(&s), 0 as Int64);
+    assert(is_seeded(&s));   // auto-seeded on first call
+}
+
+fn test_recommended_reseed_interval() {
+    assert_eq(recommended_reseed_interval(), 1048576 as Int64);
+}
+
+fn test_should_recommend_reseed_threshold() {
+    let s0 = fresh();
+    assert(!should_recommend_reseed(&s0));
+    let s1 = draw(s0, recommended_reseed_interval());
+    assert(should_recommend_reseed(&s1));
+    let s2 = draw(fresh(), 1048575 as Int64);
+    assert(!should_recommend_reseed(&s2));
+}
+
+fn main() {
+    test_fresh_is_unseeded();
+    test_draw_auto_seeds();
+    test_request_reseed_flips_seeded();
+    test_draw_accumulates();
+    test_zero_byte_draw_does_not_bump_counter();
+    test_recommended_reseed_interval();
+    test_should_recommend_reseed_threshold();
+}

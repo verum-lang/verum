@@ -1,0 +1,68 @@
+// Per-key merge decision.
+
+module core.database.sqlite.native.json_patch_merge_api.rule;
+
+mount base.{Bool, Text};
+
+public type PatchValueShape is
+    | PvsNull                  // patch value is JSON null → delete
+    | PvsObject                // patch value is object → recursive merge
+    | PvsScalarOrArray         // scalar or array → replace
+    ;
+
+public fn shape_name(s: &PatchValueShape) -> Text {
+    match s {
+        PvsNull           => "null".clone(),
+        PvsObject         => "object".clone(),
+        PvsScalarOrArray  => "scalar_or_array".clone(),
+    }
+}
+
+public type MergeAction is
+    | MaDelete                 // remove the key
+    | MaRecurse                // descend into the subtree
+    | MaReplace                // overwrite with the patch value
+    ;
+
+public fn action_name(a: &MergeAction) -> Text {
+    match a {
+        MaDelete  => "delete".clone(),
+        MaRecurse => "recurse".clone(),
+        MaReplace => "replace".clone(),
+    }
+}
+
+public fn is_destructive(a: &MergeAction) -> Bool {
+    match a { MaReplace => true, MaDelete => true, _ => false }
+}
+
+// Top-level dispatcher — given the patch-value shape, return the merge action.
+public fn action_for(shape: &PatchValueShape) -> MergeAction {
+    match shape {
+        PvsNull          => MaDelete,
+        PvsObject        => MaRecurse,
+        PvsScalarOrArray => MaReplace,
+    }
+}
+
+// Outcome for the whole patch at the root:
+//   patch is object        → merge into target
+//   patch is array/scalar  → replace target entirely
+//   patch is null          → delete / null-out the target
+public type RootVerdict is
+    | RvMergeInto
+    | RvReplaceEntire
+    | RvNullOut
+    ;
+
+public fn root_verdict(shape: &PatchValueShape) -> RootVerdict {
+    match shape {
+        PvsObject        => RvMergeInto,
+        PvsNull          => RvNullOut,
+        PvsScalarOrArray => RvReplaceEntire,
+    }
+}
+
+public fn preserves_unmentioned_keys(v: &RootVerdict) -> Bool {
+    match v { RvMergeInto => true, _ => false }
+}

@@ -1,0 +1,96 @@
+// AUTOINCREMENT register per table.
+
+module core.database.sqlite.native.autoincrement_register_api.register_;
+
+mount base.{Bool, Int64, Text, Maybe};
+mount core.collections.list.{List};
+
+// Max rowid allowed (Int64 max).
+public fn rowid_max() -> Int64 { 0x7FFFFFFFFFFFFFFF as Int64 }
+
+public type AutoIncRow is {
+    table_name: Text,
+    seq: Int64,
+};
+
+public fn row(table_name: Text, seq: Int64) -> AutoIncRow {
+    AutoIncRow { table_name: table_name, seq: seq }
+}
+
+public type Register is {
+    entries: List<AutoIncRow>,
+};
+
+public fn new() -> Register {
+    Register { entries: [].clone() as List<AutoIncRow> }
+}
+
+public fn size(r: &Register) -> Int { r.entries.len() }
+
+public fn find(r: &Register, table_name: &Text) -> Maybe<Int64> {
+    let mut i: Int = 0;
+    while i < r.entries.len() {
+        if r.entries[i].table_name == *table_name {
+            return Maybe.Some(r.entries[i].seq);
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+// Record a new max for `table_name`; create entry if missing.
+// Only raises seq — never lowers it (per AUTOINCREMENT spec).
+public fn observe(mut r: Register, table_name: Text, rowid: Int64) -> Register {
+    let mut i: Int = 0;
+    while i < r.entries.len() {
+        if r.entries[i].table_name == table_name {
+            if rowid > r.entries[i].seq {
+                r.entries[i].seq = rowid;
+            }
+            i = r.entries.len();
+        } else {
+            i = i + 1;
+        }
+    }
+    // Not found → push new row.
+    let mut found: Bool = false;
+    let mut j: Int = 0;
+    while j < r.entries.len() {
+        if r.entries[j].table_name == table_name { found = true; j = r.entries.len(); } else { j = j + 1; }
+    }
+    if !found {
+        r.entries.push(row(table_name, rowid));
+    }
+    r
+}
+
+public type AllocOutcome is
+    | AoRowid(Int64)       // allocated rowid
+    | AoFull               // SQLITE_FULL — no more rowids
+    ;
+
+public fn outcome_name(o: &AllocOutcome) -> Text {
+    match o {
+        AoRowid(_) => "rowid".clone(),
+        AoFull     => "full".clone(),
+    }
+}
+
+// Compute the next rowid for an AUTOINCREMENT table.
+public fn allocate(mut r: Register, table_name: Text) -> (Register, AllocOutcome) {
+    let current = find(&r, &table_name);
+    let next = match current {
+        Maybe.Some(s) => s + (1 as Int64),
+        Maybe.None    => 1 as Int64,
+    };
+    if next > rowid_max() { return (r, AoFull); }
+    r = observe(r, table_name, next);
+    (r, AoRowid(next))
+}
+
+public fn is_at_max(r: &Register, table_name: &Text) -> Bool {
+    match find(r, table_name) {
+        Maybe.Some(s) => s >= rowid_max(),
+        Maybe.None    => false,
+    }
+}

@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/json_patch_merge_api/mod.vr
+// =============================================================================
+// json_patch() merge semantics — RFC 7396 JSON Merge Patch.
+// Spec §15.5 — JSON1.
+//
+// Rules:
+//   1. if patch is not an object → the whole target is replaced by patch
+//   2. for each key K in patch:
+//      * if patch[K] is null → delete target[K]
+//      * else if patch[K] is an object → recurse into target[K] (create if absent)
+//      * else → target[K] = patch[K]
+//   3. unmodified target keys are preserved
+// =============================================================================
+
+module core.database.sqlite.native.json_patch_merge_api;
+
+public module rule;
