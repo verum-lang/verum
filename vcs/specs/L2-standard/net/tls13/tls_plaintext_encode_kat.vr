@@ -1,0 +1,136 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, record, tls_plaintext, encode, rfc8446_5_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §5.1 TLSPlaintext outer-record format:
+//
+//   struct {
+//       ContentType type;
+//       ProtocolVersion legacy_record_version = 0x0303;
+//       uint16 length;
+//       opaque fragment[TLSPlaintext.length];
+//   } TLSPlaintext;
+//
+// `TlsPlaintext.encode` produces the full 5-byte header followed by
+// the fragment. Used ONLY for pre-encryption records (handshake messages
+// exchanged in the clear + the legacy ChangeCipherSpec compatibility
+// record); post-encryption uses the AEAD ciphertext form.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.record.content_type.{ContentType};
+mount core.net.tls13.record.plaintext.{
+    TlsPlaintext, RecordEncodeError, MAX_PLAINTEXT_SIZE,
+};
+
+fn empty_handshake_fragment_is_five_bytes() {
+    let rec = TlsPlaintext {
+        content_type: ContentType.Handshake,
+        fragment:     [],
+    };
+    let mut out: List<Byte> = [];
+    rec.encode(&mut out).unwrap();
+    assert(out.len() == 5);
+    assert(out[0] == 0x16_u8);        // Handshake = 22 = 0x16
+    assert(out[1] == 0x03_u8);        // legacy_record_version high
+    assert(out[2] == 0x03_u8);        // legacy_record_version low (TLS 1.2 sentinel)
+    assert(out[3] == 0x00_u8 && out[4] == 0x00_u8);    // length = 0
+}
+
+fn handshake_fragment_byte_exact_for_sixteen_bytes() {
+    let mut payload: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 16 { payload.push((0x80_u8 | (i as Byte))); i = i + 1; }
+    let rec = TlsPlaintext {
+        content_type: ContentType.Handshake,
+        fragment:     payload,
+    };
+    let mut out: List<Byte> = [];
+    rec.encode(&mut out).unwrap();
+    // 5 header + 16 fragment = 21.
+    assert(out.len() == 21);
+    assert(out[0] == 0x16_u8);
+    assert(out[3] == 0x00_u8 && out[4] == 0x10_u8);    // length = 16
+    // Fragment at [5..21].
+    assert(out[5]  == 0x80_u8);                         // first byte
+    assert(out[20] == 0x8F_u8);                         // last byte = 0x80 | 15
+}
+
+fn changecipherspec_legacy_content_type_20() {
+    // RFC 8446 §D.4 — TLS 1.3 servers/clients MAY send a dummy CCS for
+    // middlebox compatibility. ContentType = 20 (ChangeCipherSpec).
+    let rec = TlsPlaintext {
+        content_type: ContentType.ChangeCipherSpec,
+        fragment:     [0x01_u8],     // RFC 5246 CCS body (single byte 0x01)
+    };
+    let mut out: List<Byte> = [];
+    rec.encode(&mut out).unwrap();
+    assert(out.len() == 6);
+    assert(out[0] == 0x14_u8);        // ChangeCipherSpec = 20
+    assert(out[1] == 0x03_u8);
+    assert(out[2] == 0x03_u8);
+    assert(out[3] == 0x00_u8 && out[4] == 0x01_u8);    // length = 1
+    assert(out[5] == 0x01_u8);
+}
+
+fn alert_record_outer_byte_exact() {
+    // Alert record: type=21, legacy_version=0x0303, length=2 bytes.
+    let rec = TlsPlaintext {
+        content_type: ContentType.Alert,
+        fragment:     [0x02_u8, 0x28_u8],    // Fatal + handshake_failure
+    };
+    let mut out: List<Byte> = [];
+    rec.encode(&mut out).unwrap();
+    assert(out.len() == 7);
+    assert(out[0] == 0x15_u8);
+    assert(out[3] == 0x00_u8 && out[4] == 0x02_u8);
+    assert(out[5] == 0x02_u8);        // AlertLevel.Fatal
+    assert(out[6] == 0x28_u8);        // handshake_failure (40 = 0x28)
+}
+
+fn fragment_over_max_plaintext_size_rejected() {
+    // MAX_PLAINTEXT_SIZE = 16384; any fragment > 16384 must error.
+    let mut too_big: List<Byte> = [];
+    let mut i: Int = 0;
+    while i <= MAX_PLAINTEXT_SIZE { too_big.push(0_u8); i = i + 1; }
+    let rec = TlsPlaintext {
+        content_type: ContentType.Handshake,
+        fragment:     too_big,
+    };
+    let mut out: List<Byte> = [];
+    match rec.encode(&mut out) {
+        Err(RecordEncodeError.FragmentTooLarge(n)) => assert(n == MAX_PLAINTEXT_SIZE + 1),
+        Ok(_) => panic("oversize fragment must reject"),
+    }
+}
+
+fn length_big_endian_high_then_low() {
+    // Fragment of 300 bytes → length = 300 = 0x012C, high=0x01, low=0x2C.
+    let mut pad: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 300 { pad.push(0xFF_u8); i = i + 1; }
+    let rec = TlsPlaintext {
+        content_type: ContentType.ApplicationData,
+        fragment:     pad,
+    };
+    let mut out: List<Byte> = [];
+    rec.encode(&mut out).unwrap();
+    assert(out[3] == 0x01_u8);
+    assert(out[4] == 0x2C_u8);
+    assert(out.len() == 305);
+}
+
+@main
+public fn main() -> Int {
+    empty_handshake_fragment_is_five_bytes();
+    handshake_fragment_byte_exact_for_sixteen_bytes();
+    changecipherspec_legacy_content_type_20();
+    alert_record_outer_byte_exact();
+    fragment_over_max_plaintext_size_rejected();
+    length_big_endian_high_then_low();
+    print("RFC 8446 §5.1 TLSPlaintext outer encode byte-exact verified");
+    0
+}

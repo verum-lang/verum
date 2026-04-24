@@ -1,0 +1,181 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, packet, initial, handshake, parse, rfc9000_17_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §17.2.2 Initial packet — after the shared long-header prefix:
+//
+//   Token Length (varint) || Token (opaque) || Length (varint) ||
+//   Packet Number (1..4 bytes) || Payload (...)
+//
+// §17.2.4 Handshake + §17.2.3 0-RTT skip Token Length/Token.
+//
+// All caller-visible long-header fields end up in LongPacket::body; this
+// KAT exercises the Token Length + Token round-trip for Initial packets
+// and verifies Handshake packets reject an Initial-style token block.
+//
+// Long-header type bits (first byte >> 4, low 2 bits):
+//   00 = Initial, 01 = 0-RTT, 10 = Handshake, 11 = Retry.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.packet.{Packet, LongBody, parse_long, PacketError};
+mount core.net.quic.version.{VERSION_1};
+
+fn initial_packet_with_empty_token_parse() {
+    // Layout:
+    //   [0]     first = 0xC0 (long=1|fixed=1|type=00 Initial|reserved=0|pn_len=00+1 byte)
+    //   [1..5]  version = 0x00000001
+    //   [5]     DCID len = 4
+    //   [6..10] DCID = 0xAA BB CC DD
+    //   [10]    SCID len = 0
+    //   [11]    Token Length varint = 0
+    //   [12]    Length varint = 4 (1 PN byte + 3 payload)
+    //   [13]    PN = 0x02
+    //   [14..17] payload = 0x01 0x02 0x03
+    let wire: List<Byte> = [
+        0xC0_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,       // version 0x00000001
+        0x04_u8, 0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,
+        0x00_u8,                                    // SCID len = 0
+        0x00_u8,                                    // token len = 0
+        0x04_u8,                                    // length = 4
+        0x02_u8,                                    // PN = 2
+        0x01_u8, 0x02_u8, 0x03_u8,                  // payload
+    ];
+    let parsed = parse_long(wire.as_slice()).unwrap();
+    match parsed {
+        Packet.Long(lp) => {
+            assert(lp.header.version == VERSION_1);
+            assert(lp.header.dcid.len() == 4);
+            match lp.body {
+                LongBody.InitialBody { token, length, packet_number, pn_len, payload } => {
+                    assert(token.len() == 0);
+                    assert(length == 4_u64);
+                    assert(packet_number == 0x02_u32);
+                    assert(pn_len == 1_u8);
+                    assert(payload.len() == 3);
+                    assert(payload[0] == 0x01_u8);
+                    assert(payload[2] == 0x03_u8);
+                },
+                _ => panic("expected InitialBody"),
+            }
+        },
+        _ => panic("expected Long packet"),
+    }
+}
+
+fn initial_packet_with_four_byte_token_parse() {
+    // Token Length varint = 4, token = 0x74 0x6F 0x6B 0x6E ("tokn").
+    let wire: List<Byte> = [
+        0xC0_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,
+        0x00_u8,                                    // DCID len = 0
+        0x00_u8,                                    // SCID len = 0
+        0x04_u8,                                    // token len = 4
+        0x74_u8, 0x6F_u8, 0x6B_u8, 0x6E_u8,         // "tokn"
+        0x03_u8,                                    // length = 3
+        0x07_u8,                                    // PN = 7
+        0xAA_u8, 0xBB_u8,                           // payload
+    ];
+    let parsed = parse_long(wire.as_slice()).unwrap();
+    match parsed {
+        Packet.Long(lp) => {
+            match lp.body {
+                LongBody.InitialBody { token, length, packet_number, payload, .. } => {
+                    assert(token.len() == 4);
+                    assert(token[0] == 0x74_u8 && token[3] == 0x6E_u8);
+                    assert(length == 3_u64);
+                    assert(packet_number == 0x07_u32);
+                    assert(payload.len() == 2);
+                    assert(payload[0] == 0xAA_u8);
+                },
+                _ => panic("expected InitialBody"),
+            }
+        },
+        _ => panic("expected Long packet"),
+    }
+}
+
+fn handshake_packet_no_token_parse() {
+    // Handshake type bits = 10 (0x20 in bits 4-5) → first = 0xE0.
+    let wire: List<Byte> = [
+        0xE0_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,
+        0x00_u8, 0x00_u8,                           // DCID=0 SCID=0 lengths
+        0x03_u8,                                    // length = 3
+        0x01_u8,                                    // PN = 1
+        0xC0_u8, 0xC1_u8,                           // payload
+    ];
+    let parsed = parse_long(wire.as_slice()).unwrap();
+    match parsed {
+        Packet.Long(lp) => {
+            match lp.body {
+                LongBody.HandshakeBody { length, packet_number, pn_len, payload } => {
+                    assert(length == 3_u64);
+                    assert(packet_number == 0x01_u32);
+                    assert(pn_len == 1_u8);
+                    assert(payload.len() == 2);
+                },
+                _ => panic("expected HandshakeBody"),
+            }
+        },
+        _ => panic("expected Long packet"),
+    }
+}
+
+fn zero_rtt_packet_parse() {
+    // 0-RTT type bits = 01 → first = 0xD0.
+    let wire: List<Byte> = [
+        0xD0_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,
+        0x00_u8, 0x00_u8,                           // DCID=0 SCID=0
+        0x02_u8,                                    // length = 2
+        0x09_u8,                                    // PN = 9
+        0xFF_u8,                                    // payload
+    ];
+    let parsed = parse_long(wire.as_slice()).unwrap();
+    match parsed {
+        Packet.Long(lp) => {
+            match lp.body {
+                LongBody.ZeroRttBody { packet_number, pn_len, payload, .. } => {
+                    assert(packet_number == 0x09_u32);
+                    assert(pn_len == 1_u8);
+                    assert(payload.len() == 1);
+                    assert(payload[0] == 0xFF_u8);
+                },
+                _ => panic("expected ZeroRttBody"),
+            }
+        },
+        _ => panic("expected Long packet"),
+    }
+}
+
+fn initial_truncated_token_rejects() {
+    // Declares token_len=10 but only 3 bytes follow → Truncated.
+    let wire: List<Byte> = [
+        0xC0_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,
+        0x00_u8, 0x00_u8,                           // CIDs empty
+        0x0A_u8,                                    // token_len = 10
+        0x01_u8, 0x02_u8, 0x03_u8,                  // only 3 bytes
+    ];
+    match parse_long(wire.as_slice()) {
+        Err(PacketError.Truncated) => {},
+        Ok(_) => panic("truncated token must reject"),
+        Err(_) => panic("expected Truncated variant"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    initial_packet_with_empty_token_parse();
+    initial_packet_with_four_byte_token_parse();
+    handshake_packet_no_token_parse();
+    zero_rtt_packet_parse();
+    initial_truncated_token_rejects();
+    print("RFC 9000 §17.2.2-4 Initial/Handshake/0-RTT parse verified");
+    0
+}

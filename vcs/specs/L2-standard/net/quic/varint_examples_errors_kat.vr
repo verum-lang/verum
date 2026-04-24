@@ -1,0 +1,126 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, varint, rfc9000_16, rfc9000_a_1, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §A.1 "Sample Variable-Length Integer Decodings" — four
+// canonical worked examples:
+//
+//   8-byte: 0xc2 0x19 0x7c 0x5e 0xff 0x14 0xe8 0x8c → 151_288_809_941_952_652
+//   4-byte: 0x9d 0x7f 0x3e 0x7d → 494_878_333
+//   2-byte: 0x7b 0xbd → 15_293
+//   1-byte: 0x25 → 37
+//
+// `varint_kat.vr` covers the 4-byte example. This KAT covers the other
+// three plus error paths (Truncated on short input, Truncated mid-field
+// of a multi-byte varint).
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.varint.{quic_encode, quic_decode, VarintError};
+
+fn rfc9000_a1_one_byte_example() {
+    // 0x25 → 37 (6-bit prefix = 00, value = 0x25)
+    let wire: List<Byte> = [0x25_u8];
+    let (v, next) = quic_decode(wire.as_slice(), 0).unwrap();
+    assert(v == 37_u64);
+    assert(next == 1);
+    // Round-trip back to single byte 0x25.
+    let enc = quic_encode(37_u64);
+    assert(enc.len() == 1);
+    assert(enc[0] == 0x25_u8);
+}
+
+fn rfc9000_a1_two_byte_example() {
+    // 0x7b 0xbd → 15_293 (14-bit prefix = 01, value 0x3BBD ≠ 0x7BBD because
+    // the high 2 bits of byte 0 are the length flag, not the value).
+    let wire: List<Byte> = [0x7B_u8, 0xBD_u8];
+    let (v, next) = quic_decode(wire.as_slice(), 0).unwrap();
+    assert(v == 15_293_u64);
+    assert(next == 2);
+    let enc = quic_encode(15_293_u64);
+    assert(enc.len() == 2);
+    assert(enc[0] == 0x7B_u8);
+    assert(enc[1] == 0xBD_u8);
+}
+
+fn rfc9000_a1_eight_byte_example() {
+    // 0xc2 0x19 0x7c 0x5e 0xff 0x14 0xe8 0x8c → 151_288_809_941_952_652
+    let wire: List<Byte> = [
+        0xC2_u8, 0x19_u8, 0x7C_u8, 0x5E_u8,
+        0xFF_u8, 0x14_u8, 0xE8_u8, 0x8C_u8,
+    ];
+    let (v, next) = quic_decode(wire.as_slice(), 0).unwrap();
+    assert(v == 151_288_809_941_952_652_u64);
+    assert(next == 8);
+    let enc = quic_encode(151_288_809_941_952_652_u64);
+    assert(enc.len() == 8);
+    let mut i: Int = 0;
+    while i < 8 {
+        assert(enc[i] == wire[i]);
+        i = i + 1;
+    }
+}
+
+fn decode_on_empty_buffer_rejects() {
+    let empty: List<Byte> = [];
+    match quic_decode(empty.as_slice(), 0) {
+        Err(_) => {},
+        Ok(_)  => panic("decode of empty buffer must fail"),
+    }
+}
+
+fn decode_truncated_two_byte_varint_rejects() {
+    // 14-bit prefix (0x40) declared, only 1 byte present.
+    let wire: List<Byte> = [0x40_u8];
+    match quic_decode(wire.as_slice(), 0) {
+        Err(_) => {},
+        Ok(_)  => panic("1-byte input for 2-byte prefix must fail"),
+    }
+}
+
+fn decode_truncated_four_byte_varint_rejects() {
+    // 30-bit prefix (0x80) declared, only 3 bytes present.
+    let wire: List<Byte> = [0x80_u8, 0x00_u8, 0x00_u8];
+    match quic_decode(wire.as_slice(), 0) {
+        Err(_) => {},
+        Ok(_)  => panic("3-byte input for 4-byte prefix must fail"),
+    }
+}
+
+fn decode_truncated_eight_byte_varint_rejects() {
+    // 62-bit prefix (0xC0) declared, only 7 bytes present.
+    let wire: List<Byte> = [0xC0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8];
+    match quic_decode(wire.as_slice(), 0) {
+        Err(_) => {},
+        Ok(_)  => panic("7-byte input for 8-byte prefix must fail"),
+    }
+}
+
+fn decode_from_middle_position_respects_start() {
+    // decode starting from position 3 — simulates reading into a larger buffer.
+    let wire: List<Byte> = [
+        0x00_u8, 0x00_u8, 0x00_u8,          // skip bytes
+        0x25_u8,                             // 1-byte varint = 37
+        0xFF_u8,                             // extra byte after
+    ];
+    let (v, next) = quic_decode(wire.as_slice(), 3).unwrap();
+    assert(v == 37_u64);
+    assert(next == 4);    // 3 (start) + 1 (consumed)
+}
+
+@main
+public fn main() -> Int {
+    rfc9000_a1_one_byte_example();
+    rfc9000_a1_two_byte_example();
+    rfc9000_a1_eight_byte_example();
+    decode_on_empty_buffer_rejects();
+    decode_truncated_two_byte_varint_rejects();
+    decode_truncated_four_byte_varint_rejects();
+    decode_truncated_eight_byte_varint_rejects();
+    decode_from_middle_position_respects_start();
+    print("RFC 9000 §A.1 varint examples + decode error paths verified");
+    0
+}
