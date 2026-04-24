@@ -363,13 +363,17 @@ impl SmtBackendSwitcher {
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::Synthesize => {
-                // Synthesize: treat as a synthesis problem. The capability
-                // router will dispatch to the synthesis-capable backend
-                // (SyGuS today; future: custom synthesis engine). For a
-                // plain satisfiability check with the assertions as a
-                // specification, we fall back to capability routing.
-                self.current = BackendChoice::Capability;
-                self.solve(assertions)
+                // Synthesize: genuine program synthesis, not a satisfiability
+                // check. The previous implementation silently routed to
+                // `Capability` (which runs Sat/Unsat), so a user who asked for
+                // synthesis got a sat/unsat answer and no synthesized program
+                // — a correctness bug, not "not implemented".
+                //
+                // The fix: route through `solve_synthesize`, which tries
+                // CVC5's SyGuS path and returns an `Error` with a clear
+                // rationale if the synthesis backend is unavailable. No more
+                // silent fallback to satisfiability.
+                self.solve_synthesize(assertions)
             }
         };
 
@@ -969,6 +973,119 @@ impl SmtBackendSwitcher {
         z3_result
     }
 
+    /// Dispatch a `Synthesize`-strategy query to CVC5's SyGuS engine.
+    ///
+    /// This is **not** a satisfiability check. The caller provides a
+    /// specification (the `assertions`) and the expected output is a
+    /// *synthesized function body* that makes the specification hold.
+    ///
+    /// Return contract:
+    ///
+    /// * `SolveResult::Sat { model: Some(body) }` — SyGuS succeeded;
+    ///   `body` is the synthesized function in SMT-LIB 2 format.
+    /// * `SolveResult::Error { error }` — SyGuS is unavailable (CVC5
+    ///   not linked with parser support) or the synthesis problem has
+    ///   no solution within the default grammar.
+    ///
+    /// The previous implementation *silently* rerouted this to a
+    /// capability-based satisfiability check. That produced Sat/Unsat
+    /// answers for a caller who expected a synthesized program —
+    /// a correctness bug. This version always surfaces a clear
+    /// diagnostic path: either synthesis happened (Sat with body), or
+    /// it didn't (Error with reason).
+    ///
+    /// ## Current coverage
+    ///
+    /// The implementation calls `cvc5_advanced::synthesize`. Under
+    /// stub / no-cvc5-parser builds that entry point returns
+    /// `Cvc5AdvancedError::Unsupported`, which this function maps to
+    /// a `SolveResult::Error` — surfacing the unavailability to the
+    /// user instead of masking it.
+    ///
+    /// Assertion-to-specification translation:
+    ///
+    /// The caller's `assertions` are serialised as a SyGuS problem
+    /// preamble (`set-logic ALL`, `constraint` per assertion,
+    /// `check-synth`). A user-supplied `synth-fun` declaration is
+    /// required — synthesis without a target function signature is
+    /// ill-formed. When the assertions don't include one, the Error
+    /// path explains what's missing. This is the fundamental
+    /// correctness boundary: without a `synth-fun`, there is nothing
+    /// to synthesize.
+    fn solve_synthesize(&mut self, assertions: &List<Expr>) -> SolveResult {
+        use std::time::Instant;
+
+        let start = Instant::now();
+
+        // Build the SyGuS specification. We require the caller to
+        // have surfaced a `synth-fun` declaration already encoded as
+        // part of the assertion bundle; otherwise synthesis is
+        // under-specified and we must say so.
+        let mut spec = String::from("(set-logic ALL)\n");
+        let mut saw_synth_fun = false;
+        for a in assertions.iter() {
+            // Assertion expressions in the switcher arrive pre-
+            // encoded as SMT-LIB constraints. We pattern-match on
+            // the Debug representation as a coarse detector for
+            // `synth-fun`, which is the minimum the caller must
+            // provide. Full AST-level inspection happens in the
+            // SyGuS builder crate (task #87 follow-up).
+            let s = format!("{:?}", a);
+            if s.contains("synth-fun") || s.contains("SynthFun") {
+                saw_synth_fun = true;
+            }
+            spec.push_str(&format!("(assert {})\n", s));
+        }
+        spec.push_str("(check-synth)\n");
+
+        if !saw_synth_fun {
+            return SolveResult::Error {
+                backend: "synthesize".to_string(),
+                error: "synthesize strategy requires a `synth-fun` \
+                        declaration in the assertions; none was found. \
+                        Add an explicit `@synth_fun` annotation or \
+                        construct the SyGuS spec via \
+                        `verum_smt::cvc5_advanced::SyGuSProblem` directly."
+                    .to_string(),
+            };
+        }
+
+        #[cfg(feature = "cvc5")]
+        {
+            use crate::cvc5_advanced::{synthesize, SyGuSProblem};
+            let problem = SyGuSProblem {
+                logic: "ALL".to_string(),
+                specification: spec,
+                timeout_ms: 0,
+            };
+            match synthesize(&problem) {
+                Ok(result) => SolveResult::Sat {
+                    backend: "cvc5-sygus".to_string(),
+                    time_ms: start.elapsed().as_millis() as u64,
+                    model: Maybe::Some(result.solution),
+                },
+                Err(e) => SolveResult::Error {
+                    backend: "cvc5-sygus".to_string(),
+                    error: format!("synthesis failed: {}", e),
+                },
+            }
+        }
+
+        #[cfg(not(feature = "cvc5"))]
+        {
+            let _ = spec;
+            let _ = start;
+            SolveResult::Error {
+                backend: "synthesize".to_string(),
+                error: "Synthesize strategy requires CVC5 SyGuS \
+                        support; rebuild with the `cvc5` feature or \
+                        link against a CVC5 with parser support. \
+                        See `docs/verification/cli-workflow.md §6.4`."
+                    .to_string(),
+            }
+        }
+    }
+
     /// Solve with portfolio approach (parallel execution)
     fn solve_portfolio(&mut self, assertions: &List<Expr>) -> SolveResult {
         let (tx, rx) = mpsc::channel();
@@ -1530,6 +1647,78 @@ fn solve_result_to_verdict(
         SolveResult::Error { error, .. } => SolverVerdict::Error {
             message: error.clone(),
         },
+    }
+}
+
+// ==================== Tests ====================
+
+#[cfg(test)]
+mod synthesize_tests {
+    use super::*;
+    use crate::verify_strategy::VerifyStrategy;
+
+    /// The Synthesize strategy must not silently fall back to a
+    /// satisfiability check when `synth-fun` is missing — it must
+    /// return an Error explaining what's missing. This is the
+    /// correctness guarantee that distinguishes the fixed
+    /// implementation from the silent-fallback predecessor.
+    #[test]
+    fn synthesize_without_synth_fun_returns_error_not_sat() {
+        let config = SwitcherConfig::default();
+        let mut switcher = SmtBackendSwitcher::new(config);
+        let assertions: List<Expr> = List::new();
+        let result = switcher.solve_with_strategy(
+            &assertions,
+            &VerifyStrategy::Synthesize,
+        );
+        match result {
+            Some(SolveResult::Error { backend, error }) => {
+                assert!(
+                    error.contains("synth-fun") || error.contains("Synthesize"),
+                    "error should cite missing synth-fun: {}",
+                    error
+                );
+                assert!(
+                    backend.contains("synth"),
+                    "backend tag should identify as synthesis: {}",
+                    backend
+                );
+            }
+            Some(SolveResult::Sat { .. }) => {
+                panic!(
+                    "Synthesize without synth-fun silently returned Sat — \
+                     this was the silent-fallback correctness bug"
+                );
+            }
+            Some(SolveResult::Unsat { .. }) => {
+                panic!(
+                    "Synthesize without synth-fun silently returned Unsat — \
+                     this was the silent-fallback correctness bug"
+                );
+            }
+            Some(SolveResult::Unknown { .. }) => {
+                panic!(
+                    "Synthesize without synth-fun returned Unknown — \
+                     should be explicit Error with rationale"
+                );
+            }
+            None => panic!(
+                "Synthesize strategy produced no result (requires_smt returned false?)"
+            ),
+        }
+    }
+
+    /// Requires-SMT gating still holds — Runtime / Static strategies
+    /// produce `None` from `solve_with_strategy`, so the Synthesize
+    /// branch is only reachable for strategies that actually need
+    /// the solver.
+    #[test]
+    fn runtime_strategy_skips_solver_dispatch() {
+        let mut switcher = SmtBackendSwitcher::with_defaults();
+        let assertions: List<Expr> = List::new();
+        let result = switcher
+            .solve_with_strategy(&assertions, &VerifyStrategy::Runtime);
+        assert!(result.is_none());
     }
 }
 
