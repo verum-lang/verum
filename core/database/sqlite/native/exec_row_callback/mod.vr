@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/exec_row_callback/mod.vr
+// =============================================================================
+// sqlite3_exec row-callback protocol — convenience shape + SQLITE_ABORT
+// convention.
+// Spec §15.7 — sqlite3_exec.
+//
+// sqlite3_exec(db, sql, callback(user, argc, argv, colnames), user, &err)
+//   callback returns 0 to continue, non-zero to abort with SQLITE_ABORT.
+// =============================================================================
+
+module core.database.sqlite.native.exec_row_callback;
+
+public module row;
+public module verdict;

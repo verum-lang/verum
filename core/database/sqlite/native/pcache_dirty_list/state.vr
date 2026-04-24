@@ -1,0 +1,42 @@
+// Per-page dirty-tracking state.
+
+module core.database.sqlite.native.pcache_dirty_list.state;
+
+mount base.{Bool, Text};
+
+public type DirtyState is
+    | DsClean              // not modified since last fetch
+    | DsDirty              // modified but not yet written
+    | DsWriting            // in-flight write to WAL or DB
+    | DsPinned             // cannot be evicted (held reference)
+    ;
+
+public fn state_name(s: &DirtyState) -> Text {
+    match s {
+        DsClean   => "clean".clone(),
+        DsDirty   => "dirty".clone(),
+        DsWriting => "writing".clone(),
+        DsPinned  => "pinned".clone(),
+    }
+}
+
+public fn is_dirty(s: &DirtyState) -> Bool {
+    match s { DsDirty => true, _ => false }
+}
+
+public fn is_evictable(s: &DirtyState) -> Bool {
+    match s {
+        DsClean   => true,
+        DsDirty   => false,     // must flush first
+        DsWriting => false,
+        DsPinned  => false,
+    }
+}
+
+public fn needs_flush(s: &DirtyState) -> Bool {
+    match s { DsDirty => true, _ => false }
+}
+
+public fn is_in_flight(s: &DirtyState) -> Bool {
+    match s { DsWriting => true, _ => false }
+}

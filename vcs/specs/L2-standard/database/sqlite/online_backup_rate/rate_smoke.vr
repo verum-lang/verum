@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, online_backup_rate, backup
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.online_backup_rate.pacing.{
+    Pacing,
+    new,
+    is_bulk_mode, is_paced,
+    record_step, remaining_pages, progress_fraction, is_done, eta_ms,
+};
+mount base.{Bool, Int64};
+
+fn test_bulk_vs_paced() {
+    let bulk = new(-1, 0 as Int64, 1000 as Int64);
+    assert(is_bulk_mode(&bulk));
+    assert(!is_paced(&bulk));
+    let paced = new(10, 5 as Int64, 1000 as Int64);
+    assert(!is_bulk_mode(&paced));
+    assert(is_paced(&paced));
+}
+
+fn test_record_step_advances() {
+    let p0 = new(10, 5 as Int64, 100 as Int64);
+    let p1 = record_step(p0, 10 as Int64);
+    assert_eq(p1.pages_done, 10 as Int64);
+    assert_eq(p1.steps_taken, 1 as Int64);
+    assert_eq(remaining_pages(&p1), 90 as Int64);
+}
+
+fn test_record_step_clamps_to_total() {
+    let p0 = new(10, 5 as Int64, 100 as Int64);
+    let p1 = record_step(p0, 500 as Int64);
+    assert_eq(p1.pages_done, 100 as Int64);
+    assert(is_done(&p1));
+}
+
+fn test_progress_fraction_simple() {
+    let p0 = new(10, 0 as Int64, 4 as Int64);
+    let p1 = record_step(p0, 2 as Int64);
+    let f = progress_fraction(&p1);
+    assert(f > 0.49 as Float);
+    assert(f < 0.51 as Float);
+}
+
+fn test_progress_fraction_zero_total() {
+    let p = new(10, 0 as Int64, 0 as Int64);
+    assert_eq(progress_fraction(&p), 1.0 as Float);
+}
+
+fn test_is_done_transitions() {
+    let p0 = new(10, 5 as Int64, 20 as Int64);
+    assert(!is_done(&p0));
+    let p1 = record_step(p0, 20 as Int64);
+    assert(is_done(&p1));
+}
+
+fn test_eta_bulk_mode_is_zero() {
+    let bulk = new(-1, 100 as Int64, 1000 as Int64);
+    assert_eq(eta_ms(&bulk), 0 as Int64);
+}
+
+fn test_eta_paced_mode_basic_estimate() {
+    // 100 pages total, 10 per step = 10 steps. 5ms between = 50ms.
+    let p = new(10, 5 as Int64, 100 as Int64);
+    assert_eq(eta_ms(&p), 50 as Int64);
+    let p1 = record_step(p, 10 as Int64);
+    // 90 pages remain → 9 steps × 5ms = 45ms
+    assert_eq(eta_ms(&p1), 45 as Int64);
+}
+
+fn main() {
+    test_bulk_vs_paced();
+    test_record_step_advances();
+    test_record_step_clamps_to_total();
+    test_progress_fraction_simple();
+    test_progress_fraction_zero_total();
+    test_is_done_transitions();
+    test_eta_bulk_mode_is_zero();
+    test_eta_paced_mode_basic_estimate();
+}

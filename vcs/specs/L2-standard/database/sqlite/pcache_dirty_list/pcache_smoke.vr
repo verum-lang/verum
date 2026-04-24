@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pcache_dirty_list, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pcache_dirty_list.state.{
+    DirtyState, DsClean, DsDirty, DsWriting, DsPinned,
+    state_name, is_dirty, is_evictable, needs_flush, is_in_flight,
+};
+mount core.database.sqlite.native.pcache_dirty_list.list.{
+    PageEntry, entry,
+    DirtyList,
+    new, touch, size, dirty_count,
+    lru_page, mru_page, first_evictable, count_needing_flush,
+};
+mount base.{Bool, Int64};
+
+fn test_state_names() {
+    assert(state_name(&DsClean)   == "clean".clone());
+    assert(state_name(&DsDirty)   == "dirty".clone());
+    assert(state_name(&DsWriting) == "writing".clone());
+    assert(state_name(&DsPinned)  == "pinned".clone());
+}
+
+fn test_state_classifiers() {
+    assert(is_dirty(&DsDirty));
+    assert(!is_dirty(&DsClean));
+    assert(is_evictable(&DsClean));
+    assert(!is_evictable(&DsDirty));
+    assert(!is_evictable(&DsPinned));
+    assert(needs_flush(&DsDirty));
+    assert(!needs_flush(&DsWriting));
+    assert(is_in_flight(&DsWriting));
+    assert(!is_in_flight(&DsDirty));
+}
+
+fn test_empty_list() {
+    let l = new();
+    assert_eq(size(&l), 0);
+    assert_eq(dirty_count(&l), 0 as Int64);
+    assert_eq(lru_page(&l), 0 as u32);
+    assert_eq(mru_page(&l), 0 as u32);
+}
+
+fn test_touch_inserts_at_mru() {
+    let mut l = new();
+    l = touch(l, 1 as u32, DsClean);
+    l = touch(l, 2 as u32, DsClean);
+    l = touch(l, 3 as u32, DsClean);
+    assert_eq(size(&l), 3);
+    // MRU = last touched = 3
+    assert_eq(mru_page(&l), 3 as u32);
+    assert_eq(lru_page(&l), 1 as u32);
+}
+
+fn test_touch_moves_existing_to_mru() {
+    let mut l = new();
+    l = touch(l, 1 as u32, DsClean);
+    l = touch(l, 2 as u32, DsClean);
+    l = touch(l, 1 as u32, DsClean);   // re-touch 1 → MRU
+    assert_eq(size(&l), 2);
+    assert_eq(mru_page(&l), 1 as u32);
+    assert_eq(lru_page(&l), 2 as u32);
+}
+
+fn test_dirty_count_tracks_dirty() {
+    let mut l = new();
+    l = touch(l, 1 as u32, DsDirty);
+    l = touch(l, 2 as u32, DsClean);
+    l = touch(l, 3 as u32, DsDirty);
+    assert_eq(dirty_count(&l), 2 as Int64);
+}
+
+fn test_promotion_clean_to_dirty_updates_count() {
+    let mut l = new();
+    l = touch(l, 1 as u32, DsClean);
+    assert_eq(dirty_count(&l), 0 as Int64);
+    l = touch(l, 1 as u32, DsDirty);
+    assert_eq(dirty_count(&l), 1 as Int64);
+    assert_eq(size(&l), 1);
+}
+
+fn test_first_evictable_walks_lru_first() {
+    let mut l = new();
+    l = touch(l, 1 as u32, DsClean);    // evictable
+    l = touch(l, 2 as u32, DsPinned);   // not evictable
+    l = touch(l, 3 as u32, DsDirty);    // not evictable (needs flush)
+    // 3 is MRU, 1 is LRU. Walking from LRU, page 1 is evictable.
+    assert_eq(first_evictable(&l), 1 as u32);
+}
+
+fn test_first_evictable_returns_zero_when_nothing() {
+    let mut l = new();
+    l = touch(l, 1 as u32, DsDirty);
+    l = touch(l, 2 as u32, DsPinned);
+    assert_eq(first_evictable(&l), 0 as u32);
+}
+
+fn test_count_needing_flush() {
+    let mut l = new();
+    l = touch(l, 1 as u32, DsDirty);
+    l = touch(l, 2 as u32, DsWriting);   // doesn't "need flush" (in flight)
+    l = touch(l, 3 as u32, DsDirty);
+    assert_eq(count_needing_flush(&l), 2 as Int64);
+}
+
+fn main() {
+    test_state_names();
+    test_state_classifiers();
+    test_empty_list();
+    test_touch_inserts_at_mru();
+    test_touch_moves_existing_to_mru();
+    test_dirty_count_tracks_dirty();
+    test_promotion_clean_to_dirty_updates_count();
+    test_first_evictable_walks_lru_first();
+    test_first_evictable_returns_zero_when_nothing();
+    test_count_needing_flush();
+}

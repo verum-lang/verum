@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/online_backup_rate/mod.vr
+// =============================================================================
+// sqlite3_backup_step pacing — nPage argument + throttle policy.
+// Spec §7.8 — online backup.
+// =============================================================================
+
+module core.database.sqlite.native.online_backup_rate;
+
+public module pacing;

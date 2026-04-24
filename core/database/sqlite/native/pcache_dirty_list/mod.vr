@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/pcache_dirty_list/mod.vr
+// =============================================================================
+// Page-cache dirty-page LRU bookkeeping — SQLite flushes pages in LRU order
+// when cache pressure hits the spill threshold.
+// Spec §10.4 — page cache.
+// =============================================================================
+
+module core.database.sqlite.native.pcache_dirty_list;
+
+public module state;
+public module list;

@@ -1,0 +1,25 @@
+// Row payload handed to the exec callback.
+
+module core.database.sqlite.native.exec_row_callback.row;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type ExecRow is {
+    column_names: List<Text>,
+    values: List<Text>,
+};
+
+public fn new(names: List<Text>, values: List<Text>) -> ExecRow {
+    ExecRow { column_names: names, values: values }
+}
+
+public fn column_count(r: &ExecRow) -> Int { r.column_names.len() }
+
+public fn arity_consistent(r: &ExecRow) -> Bool {
+    r.column_names.len() == r.values.len()
+}
+
+public fn is_well_formed(r: &ExecRow) -> Bool {
+    arity_consistent(r) && r.column_names.len() > 0
+}

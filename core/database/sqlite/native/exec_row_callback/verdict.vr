@@ -1,0 +1,41 @@
+// Callback return-code convention + outcome classifier.
+
+module core.database.sqlite.native.exec_row_callback.verdict;
+
+mount base.{Bool, Text};
+
+public type CallbackVerdict is
+    | CvContinue          // 0 → keep iterating
+    | CvAbort             // non-zero → stop with SQLITE_ABORT
+    ;
+
+public fn from_return(n: Int) -> CallbackVerdict {
+    if n == 0 { CvContinue } else { CvAbort }
+}
+
+public fn return_code(v: &CallbackVerdict) -> Int {
+    match v { CvContinue => 0, CvAbort => 1 }
+}
+
+public fn is_abort(v: &CallbackVerdict) -> Bool {
+    match v { CvAbort => true, _ => false }
+}
+
+public fn is_continue(v: &CallbackVerdict) -> Bool {
+    match v { CvContinue => true, _ => false }
+}
+
+public fn verdict_name(v: &CallbackVerdict) -> Text {
+    match v {
+        CvContinue => "continue".clone(),
+        CvAbort    => "abort".clone(),
+    }
+}
+
+// sqlite3_exec maps abort-from-callback to SQLITE_ABORT = 4.
+public fn maps_to_sqlite_code(v: &CallbackVerdict) -> Int {
+    match v {
+        CvContinue => 0,    // SQLITE_OK
+        CvAbort    => 4,    // SQLITE_ABORT
+    }
+}

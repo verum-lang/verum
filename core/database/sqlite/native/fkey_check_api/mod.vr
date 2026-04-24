@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/fkey_check_api/mod.vr
+// =============================================================================
+// PRAGMA foreign_key_check — row shape per output line.
+// Spec §17.3.5 — foreign_key_check.
+//
+// Output columns: (table, rowid, parent_table, fkid)
+//   table   — child table that has a dangling reference
+//   rowid   — child rowid; NULL for WITHOUT ROWID tables
+//   parent_table — referenced parent
+//   fkid    — per-table FK identifier
+// =============================================================================
+
+module core.database.sqlite.native.fkey_check_api;
+
+public module row;

@@ -1,0 +1,29 @@
+// Tokenizer method slots.
+
+module core.database.sqlite.native.tokenizer_interface_api.method;
+
+mount base.{Bool, Text};
+
+public type TokenizerMethod is
+    | TmCreate        // xCreate: instantiate per tokenizer config
+    | TmDelete        // xDelete: tear down an instance
+    | TmTokenize      // xTokenize: walk text + emit tokens
+    ;
+
+public fn method_name(m: &TokenizerMethod) -> Text {
+    match m {
+        TmCreate   => "xCreate".clone(),
+        TmDelete   => "xDelete".clone(),
+        TmTokenize => "xTokenize".clone(),
+    }
+}
+
+public fn is_required(m: &TokenizerMethod) -> Bool {
+    match m {
+        TmCreate   => true,
+        TmTokenize => true,
+        _          => false,
+    }
+}
+
+public fn method_count() -> Int { 3 }

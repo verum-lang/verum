@@ -636,3 +636,19 @@ public module explain_opcode_dump;
 public module float_literal_guard;
 // - update_hook_payload: sqlite3_update_hook event (op + db_name + table + rowid)
 public module update_hook_payload;
+// - utf8_validator: UTF-8 byte validator + surrogate/overlong/max-codepoint guards
+public module utf8_validator;
+// - pcache_dirty_list: dirty-page LRU + evictable/needs-flush per entry
+public module pcache_dirty_list;
+// - subquery_coroutine_api: coroutine state + yield/resume counters + consistency invariant
+public module subquery_coroutine_api;
+// - exec_row_callback: sqlite3_exec callback row + 2-way verdict with SQLITE_ABORT=4 mapping
+public module exec_row_callback;
+// - tokenizer_interface_api: FTS5 xCreate/xDelete/xTokenize methods + 3-mode tokenize flags
+public module tokenizer_interface_api;
+// - online_backup_rate: nPage pacing + sleep_ms throttle + progress + ETA
+public module online_backup_rate;
+// - varint_encode_api: 1..9-byte varint length table + encoded_length probe
+public module varint_encode_api;
+// - fkey_check_api: PRAGMA foreign_key_check 4-column row (table/rowid/parent/fkid)
+public module fkey_check_api;

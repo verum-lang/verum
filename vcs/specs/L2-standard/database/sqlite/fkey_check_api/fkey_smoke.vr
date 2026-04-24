@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fkey_check_api, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.fkey_check_api.row.{
+    FkeyCheckRow,
+    new, without_rowid,
+    is_null_rowid, is_self_referential, column_count, eq,
+};
+mount base.{Bool, Int64};
+
+fn test_new_with_rowid() {
+    let r = new("orders".clone(), 42 as Int64, "users".clone(), 0);
+    assert(r.has_rowid);
+    assert_eq(r.rowid, 42 as Int64);
+    assert(!is_null_rowid(&r));
+    assert(!is_self_referential(&r));
+}
+
+fn test_without_rowid() {
+    let r = without_rowid("strict_t".clone(), "parent".clone(), 1);
+    assert(!r.has_rowid);
+    assert(is_null_rowid(&r));
+}
+
+fn test_self_referential() {
+    let r = new("t".clone(), 1 as Int64, "t".clone(), 0);
+    assert(is_self_referential(&r));
+}
+
+fn test_column_count_matches_pragma() {
+    assert_eq(column_count(), 4);
+}
+
+fn test_eq_same_row() {
+    let a = new("t".clone(), 1 as Int64, "p".clone(), 0);
+    let b = new("t".clone(), 1 as Int64, "p".clone(), 0);
+    assert(eq(&a, &b));
+}
+
+fn test_eq_different_tables() {
+    let a = new("t".clone(), 1 as Int64, "p".clone(), 0);
+    let b = new("s".clone(), 1 as Int64, "p".clone(), 0);
+    assert(!eq(&a, &b));
+}
+
+fn test_eq_different_fkid() {
+    let a = new("t".clone(), 1 as Int64, "p".clone(), 0);
+    let b = new("t".clone(), 1 as Int64, "p".clone(), 1);
+    assert(!eq(&a, &b));
+}
+
+fn test_eq_with_vs_without_rowid() {
+    let a = new("t".clone(), 1 as Int64, "p".clone(), 0);
+    let b = without_rowid("t".clone(), "p".clone(), 0);
+    assert(!eq(&a, &b));
+}
+
+fn main() {
+    test_new_with_rowid();
+    test_without_rowid();
+    test_self_referential();
+    test_column_count_matches_pragma();
+    test_eq_same_row();
+    test_eq_different_tables();
+    test_eq_different_fkid();
+    test_eq_with_vs_without_rowid();
+}

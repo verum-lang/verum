@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, exec_row_callback, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.exec_row_callback.row.{
+    ExecRow, new,
+    column_count, arity_consistent, is_well_formed,
+};
+mount core.database.sqlite.native.exec_row_callback.verdict.{
+    CallbackVerdict, CvContinue, CvAbort,
+    from_return, return_code,
+    is_abort, is_continue, verdict_name,
+    maps_to_sqlite_code,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_row_arity() {
+    let n: List<Text> = ["id".clone(), "name".clone()].clone() as List<Text>;
+    let v: List<Text> = ["1".clone(), "Alice".clone()].clone() as List<Text>;
+    let r = new(n, v);
+    assert_eq(column_count(&r), 2);
+    assert(arity_consistent(&r));
+    assert(is_well_formed(&r));
+}
+
+fn test_row_ill_formed_empty() {
+    let r = new([].clone() as List<Text>, [].clone() as List<Text>);
+    assert(!is_well_formed(&r));
+}
+
+fn test_row_ill_formed_arity_mismatch() {
+    let n: List<Text> = ["a".clone(), "b".clone()].clone() as List<Text>;
+    let v: List<Text> = ["1".clone()].clone() as List<Text>;
+    let r = new(n, v);
+    assert(!arity_consistent(&r));
+    assert(!is_well_formed(&r));
+}
+
+fn test_verdict_from_return() {
+    match from_return(0) { CvContinue => {}, _ => assert(false) }
+    match from_return(1) { CvAbort => {}, _ => assert(false) }
+    match from_return(-5) { CvAbort => {}, _ => assert(false) }
+}
+
+fn test_verdict_round_trip_codes() {
+    assert_eq(return_code(&CvContinue), 0);
+    assert_eq(return_code(&CvAbort), 1);
+}
+
+fn test_classifiers() {
+    assert(is_continue(&CvContinue));
+    assert(!is_continue(&CvAbort));
+    assert(is_abort(&CvAbort));
+    assert(!is_abort(&CvContinue));
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&CvContinue) == "continue".clone());
+    assert(verdict_name(&CvAbort)    == "abort".clone());
+}
+
+fn test_maps_to_sqlite_code() {
+    // CvContinue → SQLITE_OK (0); CvAbort → SQLITE_ABORT (4).
+    assert_eq(maps_to_sqlite_code(&CvContinue), 0);
+    assert_eq(maps_to_sqlite_code(&CvAbort), 4);
+}
+
+fn main() {
+    test_row_arity();
+    test_row_ill_formed_empty();
+    test_row_ill_formed_arity_mismatch();
+    test_verdict_from_return();
+    test_verdict_round_trip_codes();
+    test_classifiers();
+    test_verdict_names();
+    test_maps_to_sqlite_code();
+}

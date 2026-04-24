@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, tokenizer_interface_api, fts5
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.tokenizer_interface_api.method.{
+    TokenizerMethod, TmCreate, TmDelete, TmTokenize,
+    method_name, is_required, method_count,
+};
+mount core.database.sqlite.native.tokenizer_interface_api.token.{
+    f_query_tokenize, f_document_tokenize, f_aux_tokenize,
+    is_query_mode, is_document_mode, is_aux_mode,
+    EmittedToken, token, as_colocated,
+    byte_span_length, is_well_formed,
+    EmittedStream, stream, emit, token_count,
+};
+mount base.{Bool, Int64};
+
+fn test_method_names() {
+    assert(method_name(&TmCreate)   == "xCreate".clone());
+    assert(method_name(&TmDelete)   == "xDelete".clone());
+    assert(method_name(&TmTokenize) == "xTokenize".clone());
+}
+
+fn test_required_slots() {
+    assert(is_required(&TmCreate));
+    assert(is_required(&TmTokenize));
+    assert(!is_required(&TmDelete));
+    assert_eq(method_count(), 3);
+}
+
+fn test_tokenize_mode_flags() {
+    let q = f_query_tokenize();
+    let d = f_document_tokenize();
+    let a = f_aux_tokenize();
+    assert(is_query_mode(q));
+    assert(!is_document_mode(q));
+    assert(is_document_mode(d));
+    assert(is_aux_mode(a));
+    assert(!is_query_mode(a));
+}
+
+fn test_token_constructor() {
+    let t = token("hello".clone(), 0, 5);
+    assert(!t.is_colocated);
+    assert_eq(byte_span_length(&t), 5);
+    assert(is_well_formed(&t));
+}
+
+fn test_as_colocated() {
+    let t = as_colocated(token("a".clone(), 0, 1));
+    assert(t.is_colocated);
+}
+
+fn test_ill_formed_token() {
+    let bad = token("".clone(), 0, 5);
+    assert(!is_well_formed(&bad));
+    let bad2 = token("x".clone(), 5, 2);   // end < start
+    assert(!is_well_formed(&bad2));
+    let bad3 = token("x".clone(), -1, 1);
+    assert(!is_well_formed(&bad3));
+}
+
+fn test_stream_build() {
+    let s0 = stream(f_query_tokenize());
+    let s1 = emit(s0, token("foo".clone(), 0, 3));
+    let s2 = emit(s1, token("bar".clone(), 4, 7));
+    assert_eq(token_count(&s2), 2);
+    assert(is_query_mode(s2.mode_flags));
+}
+
+fn main() {
+    test_method_names();
+    test_required_slots();
+    test_tokenize_mode_flags();
+    test_token_constructor();
+    test_as_colocated();
+    test_ill_formed_token();
+    test_stream_build();
+}

@@ -1,0 +1,51 @@
+// fkey_check output row.
+
+module core.database.sqlite.native.fkey_check_api.row;
+
+mount base.{Bool, Int64, Text};
+
+public type FkeyCheckRow is {
+    table: Text,
+    rowid: Int64,          // -1 signals NULL (used for WITHOUT ROWID)
+    has_rowid: Bool,
+    parent_table: Text,
+    fkid: Int,
+};
+
+public fn new(table: Text, rowid: Int64, parent_table: Text, fkid: Int) -> FkeyCheckRow {
+    FkeyCheckRow {
+        table: table,
+        rowid: rowid,
+        has_rowid: true,
+        parent_table: parent_table,
+        fkid: fkid,
+    }
+}
+
+public fn without_rowid(table: Text, parent_table: Text, fkid: Int) -> FkeyCheckRow {
+    FkeyCheckRow {
+        table: table,
+        rowid: -1 as Int64,
+        has_rowid: false,
+        parent_table: parent_table,
+        fkid: fkid,
+    }
+}
+
+public fn is_null_rowid(r: &FkeyCheckRow) -> Bool { !r.has_rowid }
+
+public fn is_self_referential(r: &FkeyCheckRow) -> Bool {
+    r.table == r.parent_table
+}
+
+// Column order matches PRAGMA foreign_key_check output.
+public fn column_count() -> Int { 4 }
+
+// Equal when every field is equal; used by de-dup pass.
+public fn eq(a: &FkeyCheckRow, b: &FkeyCheckRow) -> Bool {
+    a.table == b.table
+        && a.rowid == b.rowid
+        && a.has_rowid == b.has_rowid
+        && a.parent_table == b.parent_table
+        && a.fkid == b.fkid
+}

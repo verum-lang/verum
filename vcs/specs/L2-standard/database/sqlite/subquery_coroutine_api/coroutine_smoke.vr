@@ -1,0 +1,77 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, subquery_coroutine_api, vdbe
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.subquery_coroutine_api.coroutine.{
+    CoroutineState, CsNotStarted, CsRunning, CsYielded, CsFinished,
+    state_name, is_alive, is_yielded,
+    Coroutine,
+    start, record_yield, record_resume, record_finish,
+    net_open, is_consistent,
+};
+mount base.{Bool, Int64};
+
+fn test_state_names() {
+    assert(state_name(&CsNotStarted) == "not_started".clone());
+    assert(state_name(&CsRunning)    == "running".clone());
+    assert(state_name(&CsYielded)    == "yielded".clone());
+    assert(state_name(&CsFinished)   == "finished".clone());
+}
+
+fn test_is_alive_and_yielded() {
+    assert(is_alive(&CsRunning));
+    assert(is_alive(&CsYielded));
+    assert(!is_alive(&CsFinished));
+    assert(is_yielded(&CsYielded));
+    assert(!is_yielded(&CsRunning));
+}
+
+fn test_start_sets_running() {
+    let c = start(100);
+    match c.state { CsRunning => {}, _ => assert(false) }
+    assert_eq(c.register_base, 100);
+    assert_eq(c.yields, 0 as Int64);
+    assert_eq(c.resumes, 0 as Int64);
+}
+
+fn test_yield_resume_cycle() {
+    let c = record_resume(record_yield(start(0), 42));
+    assert_eq(c.yields, 1 as Int64);
+    assert_eq(c.resumes, 1 as Int64);
+    match c.state { CsRunning => {}, _ => assert(false) }
+    assert_eq(net_open(&c), 0 as Int64);
+    assert(is_consistent(&c));
+}
+
+fn test_yield_without_resume_has_net_one() {
+    let c = record_yield(start(0), 10);
+    assert_eq(net_open(&c), 1 as Int64);
+    assert(is_consistent(&c));
+    match c.state { CsYielded => {}, _ => assert(false) }
+    assert_eq(c.return_pc, 10);
+}
+
+fn test_is_consistent_invariant() {
+    // 2 yields + 0 resumes breaks the invariant.
+    let c = record_yield(record_yield(start(0), 1), 2);
+    assert(!is_consistent(&c));
+}
+
+fn test_finish_terminates() {
+    let c = record_finish(start(0));
+    match c.state { CsFinished => {}, _ => assert(false) }
+    assert(!is_alive(&c.state));
+}
+
+fn main() {
+    test_state_names();
+    test_is_alive_and_yielded();
+    test_start_sets_running();
+    test_yield_resume_cycle();
+    test_yield_without_resume_has_net_one();
+    test_is_consistent_invariant();
+    test_finish_terminates();
+}

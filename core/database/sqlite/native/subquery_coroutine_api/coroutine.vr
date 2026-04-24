@@ -1,0 +1,75 @@
+// Coroutine state + yield/resume counters.
+
+module core.database.sqlite.native.subquery_coroutine_api.coroutine;
+
+mount base.{Bool, Text, Int64};
+
+public type CoroutineState is
+    | CsNotStarted
+    | CsRunning
+    | CsYielded
+    | CsFinished
+    ;
+
+public fn state_name(s: &CoroutineState) -> Text {
+    match s {
+        CsNotStarted => "not_started".clone(),
+        CsRunning    => "running".clone(),
+        CsYielded    => "yielded".clone(),
+        CsFinished   => "finished".clone(),
+    }
+}
+
+public fn is_alive(s: &CoroutineState) -> Bool {
+    match s { CsFinished => false, _ => true }
+}
+
+public fn is_yielded(s: &CoroutineState) -> Bool {
+    match s { CsYielded => true, _ => false }
+}
+
+public type Coroutine is {
+    state: CoroutineState,
+    yields: Int64,
+    resumes: Int64,
+    register_base: Int,
+    return_pc: Int,
+};
+
+public fn start(register_base: Int) -> Coroutine {
+    Coroutine {
+        state: CsRunning,
+        yields: 0 as Int64,
+        resumes: 0 as Int64,
+        register_base: register_base,
+        return_pc: 0,
+    }
+}
+
+public fn record_yield(mut c: Coroutine, return_pc: Int) -> Coroutine {
+    c.state = CsYielded;
+    c.return_pc = return_pc;
+    c.yields = c.yields + (1 as Int64);
+    c
+}
+
+public fn record_resume(mut c: Coroutine) -> Coroutine {
+    c.state = CsRunning;
+    c.resumes = c.resumes + (1 as Int64);
+    c
+}
+
+public fn record_finish(mut c: Coroutine) -> Coroutine {
+    c.state = CsFinished;
+    c
+}
+
+// Net open: yields - resumes. Should be 0 or 1 at any steady state.
+public fn net_open(c: &Coroutine) -> Int64 {
+    c.yields - c.resumes
+}
+
+public fn is_consistent(c: &Coroutine) -> Bool {
+    let n = net_open(c);
+    n == (0 as Int64) || n == (1 as Int64)
+}

@@ -1,0 +1,69 @@
+// Emitted-token record + xTokenize flag bits.
+
+module core.database.sqlite.native.tokenizer_interface_api.token;
+
+mount base.{Bool, Int64, Text};
+mount core.collections.list.{List};
+
+// xTokenize reason flags (SQLite 3.45+).
+public fn f_query_tokenize()   -> Int64 { 0x0001 as Int64 }
+public fn f_document_tokenize() -> Int64 { 0x0002 as Int64 }
+public fn f_aux_tokenize()     -> Int64 { 0x0004 as Int64 }
+
+public fn is_query_mode(flags: Int64) -> Bool {
+    (flags & f_query_tokenize()) != (0 as Int64)
+}
+
+public fn is_document_mode(flags: Int64) -> Bool {
+    (flags & f_document_tokenize()) != (0 as Int64)
+}
+
+public fn is_aux_mode(flags: Int64) -> Bool {
+    (flags & f_aux_tokenize()) != (0 as Int64)
+}
+
+// Per-token emission — (text, start_offset, end_offset, colocated flag).
+public type EmittedToken is {
+    text: Text,
+    start_offset: Int,
+    end_offset: Int,
+    is_colocated: Bool,
+};
+
+public fn token(text: Text, start: Int, end: Int) -> EmittedToken {
+    EmittedToken {
+        text: text,
+        start_offset: start,
+        end_offset: end,
+        is_colocated: false,
+    }
+}
+
+public fn as_colocated(mut t: EmittedToken) -> EmittedToken {
+    t.is_colocated = true;
+    t
+}
+
+public fn byte_span_length(t: &EmittedToken) -> Int {
+    t.end_offset - t.start_offset
+}
+
+public fn is_well_formed(t: &EmittedToken) -> Bool {
+    t.start_offset >= 0 && t.end_offset >= t.start_offset && t.text.len() > 0
+}
+
+public type EmittedStream is {
+    tokens: List<EmittedToken>,
+    mode_flags: Int64,
+};
+
+public fn stream(mode_flags: Int64) -> EmittedStream {
+    EmittedStream { tokens: [].clone() as List<EmittedToken>, mode_flags: mode_flags }
+}
+
+public fn emit(mut s: EmittedStream, t: EmittedToken) -> EmittedStream {
+    s.tokens.push(t);
+    s
+}
+
+public fn token_count(s: &EmittedStream) -> Int { s.tokens.len() }

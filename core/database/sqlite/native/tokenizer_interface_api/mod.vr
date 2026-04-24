@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/tokenizer_interface_api/mod.vr
+// =============================================================================
+// FTS5 xTokenize callback protocol — xCreate/xDelete + xTokenize method slots.
+// Spec §16.2.3 — FTS5 tokenizer.
+// =============================================================================
+
+module core.database.sqlite.native.tokenizer_interface_api;
+
+public module method;
+public module token;

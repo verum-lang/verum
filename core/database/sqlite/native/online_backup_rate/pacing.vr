@@ -1,0 +1,64 @@
+// Throttle pacing for sqlite3_backup_step.
+
+module core.database.sqlite.native.online_backup_rate.pacing;
+
+mount base.{Bool, Int64};
+
+public type Pacing is {
+    pages_per_step: Int,       // argument to sqlite3_backup_step
+    sleep_ms_between: Int64,   // sleep between steps
+    total_pages: Int64,
+    pages_done: Int64,
+    steps_taken: Int64,
+};
+
+public fn new(pages_per_step: Int, sleep_ms: Int64, total_pages: Int64) -> Pacing {
+    Pacing {
+        pages_per_step: pages_per_step,
+        sleep_ms_between: sleep_ms,
+        total_pages: total_pages,
+        pages_done: 0 as Int64,
+        steps_taken: 0 as Int64,
+    }
+}
+
+// Negative pages_per_step means "copy all remaining" — SQLite API convention.
+public fn is_bulk_mode(p: &Pacing) -> Bool {
+    p.pages_per_step < 0
+}
+
+public fn is_paced(p: &Pacing) -> Bool {
+    p.pages_per_step > 0
+}
+
+public fn record_step(mut p: Pacing, n: Int64) -> Pacing {
+    p.pages_done = p.pages_done + n;
+    if p.pages_done > p.total_pages { p.pages_done = p.total_pages; }
+    p.steps_taken = p.steps_taken + (1 as Int64);
+    p
+}
+
+public fn remaining_pages(p: &Pacing) -> Int64 {
+    if p.pages_done >= p.total_pages { return 0 as Int64; }
+    p.total_pages - p.pages_done
+}
+
+public fn progress_fraction(p: &Pacing) -> Float {
+    if p.total_pages <= (0 as Int64) { return 1.0 as Float; }
+    let done = p.pages_done as Float;
+    let total = p.total_pages as Float;
+    done / total
+}
+
+public fn is_done(p: &Pacing) -> Bool {
+    p.pages_done >= p.total_pages
+}
+
+// Estimated wall-clock time in ms to finish, given the current sleep.
+public fn eta_ms(p: &Pacing) -> Int64 {
+    if is_bulk_mode(p) { return 0 as Int64; }
+    if p.pages_per_step <= 0 { return 0 as Int64; }
+    let steps_left = (remaining_pages(p) + (p.pages_per_step as Int64) - (1 as Int64))
+                     / (p.pages_per_step as Int64);
+    steps_left * p.sleep_ms_between
+}

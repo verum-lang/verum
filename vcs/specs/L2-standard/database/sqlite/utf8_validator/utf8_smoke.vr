@@ -1,0 +1,131 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, utf8_validator, encoding
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.utf8_validator.validator.{
+    LeadClass, LcAscii, LcContinuation, LcTwoByte, LcThreeByte, LcFourByte, LcInvalid,
+    classify_lead, sequence_length, is_continuation_byte,
+    is_surrogate, max_codepoint, is_overlong,
+    validate, is_valid, codepoint_count,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_classify_lead_bytes() {
+    match classify_lead(0x41 as u8)  { LcAscii        => {}, _ => assert(false) }
+    match classify_lead(0x80 as u8)  { LcContinuation => {}, _ => assert(false) }
+    match classify_lead(0xC2 as u8)  { LcTwoByte      => {}, _ => assert(false) }
+    match classify_lead(0xE0 as u8)  { LcThreeByte    => {}, _ => assert(false) }
+    match classify_lead(0xF0 as u8)  { LcFourByte     => {}, _ => assert(false) }
+    match classify_lead(0xFF as u8)  { LcInvalid      => {}, _ => assert(false) }
+}
+
+fn test_sequence_length_table() {
+    assert_eq(sequence_length(&LcAscii),     1);
+    assert_eq(sequence_length(&LcTwoByte),   2);
+    assert_eq(sequence_length(&LcThreeByte), 3);
+    assert_eq(sequence_length(&LcFourByte),  4);
+    assert_eq(sequence_length(&LcContinuation), 0);
+    assert_eq(sequence_length(&LcInvalid),      0);
+}
+
+fn test_is_continuation_byte() {
+    assert(is_continuation_byte(0x80 as u8));
+    assert(is_continuation_byte(0xBF as u8));
+    assert(!is_continuation_byte(0x41 as u8));
+    assert(!is_continuation_byte(0xC2 as u8));
+}
+
+fn test_surrogate_range() {
+    assert(is_surrogate(0xD800));
+    assert(is_surrogate(0xDFFF));
+    assert(!is_surrogate(0xD7FF));
+    assert(!is_surrogate(0xE000));
+}
+
+fn test_max_codepoint() {
+    assert_eq(max_codepoint(), 0x10FFFF);
+}
+
+fn test_overlong_detection() {
+    // 2-byte but codepoint < 0x80 → overlong
+    assert(is_overlong(0x40, 2));
+    assert(!is_overlong(0x80, 2));
+    // 3-byte but < 0x800 → overlong
+    assert(is_overlong(0x7FF, 3));
+    assert(!is_overlong(0x800, 3));
+}
+
+fn test_validate_ascii() {
+    let mut bs: List<u8> = [].clone() as List<u8>;
+    bs.push(0x48 as u8);   // H
+    bs.push(0x65 as u8);   // e
+    bs.push(0x6C as u8);   // l
+    bs.push(0x6C as u8);   // l
+    bs.push(0x6F as u8);   // o
+    assert(is_valid(&bs));
+    assert_eq(codepoint_count(&bs), 5);
+}
+
+fn test_validate_two_byte_cyrillic() {
+    // U+041F CYRILLIC 'П' = F1 80 -> no, it's 0xD0 0x9F
+    let mut bs: List<u8> = [].clone() as List<u8>;
+    bs.push(0xD0 as u8);
+    bs.push(0x9F as u8);
+    assert(is_valid(&bs));
+    assert_eq(codepoint_count(&bs), 1);
+}
+
+fn test_validate_rejects_lone_continuation() {
+    let mut bs: List<u8> = [].clone() as List<u8>;
+    bs.push(0x80 as u8);
+    assert(!is_valid(&bs));
+}
+
+fn test_validate_rejects_truncated_sequence() {
+    let mut bs: List<u8> = [].clone() as List<u8>;
+    bs.push(0xD0 as u8);   // expects 2 bytes; only 1 provided
+    assert(!is_valid(&bs));
+}
+
+fn test_validate_rejects_surrogate() {
+    // U+D800 encoded "raw" as 3-byte would be ED A0 80 — explicit invalid.
+    let mut bs: List<u8> = [].clone() as List<u8>;
+    bs.push(0xED as u8);
+    bs.push(0xA0 as u8);
+    bs.push(0x80 as u8);
+    assert(!is_valid(&bs));
+}
+
+fn test_validate_rejects_overlong_null() {
+    // Overlong U+0000 as 0xC0 0x80 → must be rejected.
+    let mut bs: List<u8> = [].clone() as List<u8>;
+    bs.push(0xC0 as u8);
+    bs.push(0x80 as u8);
+    assert(!is_valid(&bs));
+}
+
+fn test_validate_empty_is_ok() {
+    let bs: List<u8> = [].clone() as List<u8>;
+    assert(is_valid(&bs));
+    assert_eq(codepoint_count(&bs), 0);
+}
+
+fn main() {
+    test_classify_lead_bytes();
+    test_sequence_length_table();
+    test_is_continuation_byte();
+    test_surrogate_range();
+    test_max_codepoint();
+    test_overlong_detection();
+    test_validate_ascii();
+    test_validate_two_byte_cyrillic();
+    test_validate_rejects_lone_continuation();
+    test_validate_rejects_truncated_sequence();
+    test_validate_rejects_surrogate();
+    test_validate_rejects_overlong_null();
+    test_validate_empty_is_ok();
+}

@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/utf8_validator/mod.vr
+// =============================================================================
+// UTF-8 byte-sequence validator — mirrors SQLite's sqlite3Utf8CharLen.
+// Spec §15.4 — text encoding.
+//
+// Ranges:
+//   U+0000..U+007F   — 1 byte  (0xxxxxxx)
+//   U+0080..U+07FF   — 2 bytes (110xxxxx 10xxxxxx)
+//   U+0800..U+FFFF   — 3 bytes (1110xxxx 10xxxxxx 10xxxxxx) minus surrogates U+D800..U+DFFF
+//   U+10000..U+10FFFF — 4 bytes (11110xxx ...)
+// =============================================================================
+
+module core.database.sqlite.native.utf8_validator;
+
+public module validator;

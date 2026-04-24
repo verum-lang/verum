@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/subquery_coroutine_api/mod.vr
+// =============================================================================
+// Co-routine subquery — an inline (SELECT ...) in the FROM clause compiled to
+// an OP_InitCoroutine + OP_Yield, so rows are materialized lazily.
+// Spec §13.5.9 — co-routine subqueries.
+// =============================================================================
+
+module core.database.sqlite.native.subquery_coroutine_api;
+
+public module coroutine;

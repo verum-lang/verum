@@ -1,0 +1,120 @@
+// UTF-8 classification helpers.
+
+module core.database.sqlite.native.utf8_validator.validator;
+
+mount base.{Bool};
+mount core.collections.list.{List};
+
+// Classify the leading byte of a codepoint.
+public type LeadClass is
+    | LcAscii          // 0xxxxxxx  (1-byte)
+    | LcContinuation   // 10xxxxxx  (invalid as lead)
+    | LcTwoByte        // 110xxxxx
+    | LcThreeByte      // 1110xxxx
+    | LcFourByte       // 11110xxx
+    | LcInvalid        // 11111xxx  (RFC-illegal)
+    ;
+
+public fn classify_lead(b: u8) -> LeadClass {
+    if (b & (0x80 as u8)) == (0 as u8) { return LcAscii; }
+    if (b & (0xC0 as u8)) == (0x80 as u8) { return LcContinuation; }
+    if (b & (0xE0 as u8)) == (0xC0 as u8) { return LcTwoByte; }
+    if (b & (0xF0 as u8)) == (0xE0 as u8) { return LcThreeByte; }
+    if (b & (0xF8 as u8)) == (0xF0 as u8) { return LcFourByte; }
+    LcInvalid
+}
+
+public fn sequence_length(c: &LeadClass) -> Int {
+    match c {
+        LcAscii        => 1,
+        LcTwoByte      => 2,
+        LcThreeByte    => 3,
+        LcFourByte     => 4,
+        LcContinuation => 0,
+        LcInvalid      => 0,
+    }
+}
+
+public fn is_continuation_byte(b: u8) -> Bool {
+    (b & (0xC0 as u8)) == (0x80 as u8)
+}
+
+// Is `cp` the surrogate range U+D800..U+DFFF? Forbidden in UTF-8.
+public fn is_surrogate(cp: Int) -> Bool {
+    cp >= 0xD800 && cp <= 0xDFFF
+}
+
+// Max valid codepoint per RFC 3629.
+public fn max_codepoint() -> Int { 0x10FFFF }
+
+// Overlong-encoding rejection: 2-byte must be >= 0x80; 3-byte >= 0x800;
+// 4-byte >= 0x10000.
+public fn is_overlong(cp: Int, lead_len: Int) -> Bool {
+    match lead_len {
+        2 => cp < 0x80,
+        3 => cp < 0x800,
+        4 => cp < 0x10000,
+        _ => false,
+    }
+}
+
+// Validate a full UTF-8 byte buffer. Returns (valid, codepoint_count).
+public fn validate(bs: &List<u8>) -> (Bool, Int) {
+    let mut i: Int = 0;
+    let mut count: Int = 0;
+    while i < bs.len() {
+        let lc = classify_lead(bs[i]);
+        let n = sequence_length(&lc);
+        if n == 0 { return (false, count); }
+        if i + n > bs.len() { return (false, count); }
+        // Rebuild codepoint from bytes.
+        let b0 = bs[i];
+        let mut cp: Int = 0;
+        match lc {
+            LcAscii => cp = b0 as Int,
+            LcTwoByte => {
+                let b1 = bs[i + 1];
+                if !is_continuation_byte(b1) { return (false, count); }
+                cp = ((b0 & (0x1F as u8)) as Int) * 64 + ((b1 & (0x3F as u8)) as Int);
+            },
+            LcThreeByte => {
+                let b1 = bs[i + 1];
+                let b2 = bs[i + 2];
+                if !is_continuation_byte(b1) { return (false, count); }
+                if !is_continuation_byte(b2) { return (false, count); }
+                cp = ((b0 & (0x0F as u8)) as Int) * 4096
+                    + ((b1 & (0x3F as u8)) as Int) * 64
+                    + ((b2 & (0x3F as u8)) as Int);
+            },
+            LcFourByte => {
+                let b1 = bs[i + 1];
+                let b2 = bs[i + 2];
+                let b3 = bs[i + 3];
+                if !is_continuation_byte(b1) { return (false, count); }
+                if !is_continuation_byte(b2) { return (false, count); }
+                if !is_continuation_byte(b3) { return (false, count); }
+                cp = ((b0 & (0x07 as u8)) as Int) * 262144
+                    + ((b1 & (0x3F as u8)) as Int) * 4096
+                    + ((b2 & (0x3F as u8)) as Int) * 64
+                    + ((b3 & (0x3F as u8)) as Int);
+            },
+            _ => return (false, count),
+        }
+        if is_surrogate(cp) { return (false, count); }
+        if cp > max_codepoint() { return (false, count); }
+        if is_overlong(cp, n) { return (false, count); }
+        count = count + 1;
+        i = i + n;
+    }
+    (true, count)
+}
+
+public fn is_valid(bs: &List<u8>) -> Bool {
+    let (ok, _) = validate(bs);
+    ok
+}
+
+public fn codepoint_count(bs: &List<u8>) -> Int {
+    let (_, n) = validate(bs);
+    n
+}
