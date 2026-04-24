@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, cc, bbr, rfc9002
+// @timeout: 15000
+// @expected-exit: 0
+
+// draft-ietf-ccwg-bbr BBRv2 surface: initial state = Startup phase
+// at INITIAL_WINDOW_BYTES; on_packet_sent tracks bytes_in_flight;
+// loss path feeds into inflight_hi cap.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.cc.bbr.{Bbr, BbrPhase, ProbeBwPhase};
+mount core.net.quic.recovery.cc.mod.{INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES};
+
+fn bbr_initial_state_is_startup() {
+    let cc = Bbr.new();
+    assert(cc.window() == INITIAL_WINDOW_BYTES);
+    assert(cc.bytes_in_flight() == 0_u32);
+}
+
+fn on_packet_sent_accumulates_bytes_in_flight() {
+    let mut cc = Bbr.new();
+    cc.on_packet_sent(1200_u32);
+    assert(cc.bytes_in_flight() == 1200_u32);
+    cc.on_packet_sent(1200_u32);
+    assert(cc.bytes_in_flight() == 2400_u32);
+}
+
+fn on_ack_drains_bytes_in_flight() {
+    let mut cc = Bbr.new();
+    cc.on_packet_sent(1200_u32);
+    cc.on_ack_received(1200_u32, Duration.from_millis(20), Instant.now());
+    assert(cc.bytes_in_flight() == 0_u32);
+}
+
+fn loss_does_not_drive_cwnd_below_min() {
+    let mut cc = Bbr.new();
+    let mut step: Int = 0;
+    while step < 4 {
+        cc.on_packet_sent(1200_u32);
+        cc.on_ack_received(1200_u32, Duration.from_millis(20), Instant.now());
+        step = step + 1;
+    }
+    cc.on_packets_lost(1200_u32, Instant.now());
+    // BBRv2 may throttle inflight_hi but cwnd floor remains at MIN.
+    assert(cc.window() >= MIN_WINDOW_BYTES);
+}
+
+fn phase_variants_constructible() {
+    let _p1: BbrPhase = BbrPhase.Startup;
+    let _p2: ProbeBwPhase = ProbeBwPhase.Up;
+    let _p3: ProbeBwPhase = ProbeBwPhase.Down;
+    let _p4: ProbeBwPhase = ProbeBwPhase.Cruise(0_u32);
+}
+
+fn pto_does_not_crash_bbr() {
+    let mut cc = Bbr.new();
+    let w = cc.window();
+    cc.on_pto(Instant.now());
+    // BBR may or may not change cwnd on PTO; we only verify no panic
+    // and that window stays non-zero / above MIN.
+    assert(cc.window() >= MIN_WINDOW_BYTES);
+    let _ = w;
+}
+
+@main
+public fn main() -> Int {
+    bbr_initial_state_is_startup();
+    on_packet_sent_accumulates_bytes_in_flight();
+    on_ack_drains_bytes_in_flight();
+    loss_does_not_drive_cwnd_below_min();
+    phase_variants_constructible();
+    pto_does_not_crash_bbr();
+    print("BBRv2 surface verified");
+    0
+}

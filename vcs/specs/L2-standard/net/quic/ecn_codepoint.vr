@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, ecn, rfc3168, rfc9000_13_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 3168 ECN codepoint layout in the IP header's ECN field (2 bits):
+//   00 = Not-ECT           (NotEct)
+//   10 = ECT(0)            (Ect0)
+//   01 = ECT(1)            (Ect1)
+//   11 = Congestion Exp.   (CE)
+//
+// QUIC RFC 9000 §13.4 consumes these via the inbound-datagram cmsg
+// (IP_TOS / IPV6_TCLASS). Both roles must round-trip through u8.
+
+mount core.net.quic.transport.abstraction.{EcnCodepoint};
+
+fn to_u8_matches_rfc_3168() {
+    assert(EcnCodepoint.NotEct.to_u8() == 0_u8);   // 00
+    assert(EcnCodepoint.Ect1.to_u8()   == 1_u8);   // 01
+    assert(EcnCodepoint.Ect0.to_u8()   == 2_u8);   // 10
+    assert(EcnCodepoint.Ce.to_u8()     == 3_u8);   // 11
+}
+
+fn from_u8_is_inverse() {
+    match EcnCodepoint.from_u8(0_u8) { EcnCodepoint.NotEct => {}, _ => panic("0") }
+    match EcnCodepoint.from_u8(1_u8) { EcnCodepoint.Ect1   => {}, _ => panic("1") }
+    match EcnCodepoint.from_u8(2_u8) { EcnCodepoint.Ect0   => {}, _ => panic("2") }
+    match EcnCodepoint.from_u8(3_u8) { EcnCodepoint.Ce     => {}, _ => panic("3") }
+}
+
+fn from_u8_out_of_range_saturates_to_ce() {
+    // Only the low 2 bits are meaningful per RFC 3168; implementations
+    // that mask higher bits should never surface an out-of-range value.
+    // Our from_u8 saturates unknown values to Ce (conservative: treat
+    // as congestion).
+    match EcnCodepoint.from_u8(42_u8) { EcnCodepoint.Ce => {}, _ => panic("42→Ce") }
+    match EcnCodepoint.from_u8(255_u8) { EcnCodepoint.Ce => {}, _ => panic("255→Ce") }
+}
+
+fn ect_and_notect_pairwise_distinct() {
+    let codes: [UInt8; 4] = [
+        EcnCodepoint.NotEct.to_u8(),
+        EcnCodepoint.Ect1.to_u8(),
+        EcnCodepoint.Ect0.to_u8(),
+        EcnCodepoint.Ce.to_u8(),
+    ];
+    let mut i: Int = 0;
+    while i < 4 {
+        let mut j: Int = i + 1;
+        while j < 4 {
+            assert(codes[i] != codes[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    to_u8_matches_rfc_3168();
+    from_u8_is_inverse();
+    from_u8_out_of_range_saturates_to_ce();
+    ect_and_notect_pairwise_distinct();
+    print("RFC 3168 / RFC 9000 §13.4 ECN codepoints verified");
+    0
+}

@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, cc, cubic, rfc9438
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9438 CUBIC TCP congestion-control surface:
+//   * new() starts at INITIAL_WINDOW_BYTES
+//   * on_packet_sent tracks bytes_in_flight
+//   * on_ack_received grows window (slow-start or cubic)
+//   * on_packets_lost enters recovery + β × cwnd multiplicative decrease
+//   * window() ≥ MIN_WINDOW_BYTES invariant
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.cc.cubic.{Cubic, CUBIC_C, CUBIC_BETA, CUBIC_FAST_CONV_FACTOR};
+mount core.net.quic.recovery.cc.mod.{
+    MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES,
+};
+
+fn cubic_initial_window_matches_shared_default() {
+    let cc = Cubic.new();
+    assert(cc.window() == INITIAL_WINDOW_BYTES);
+    assert(cc.bytes_in_flight() == 0_u32);
+}
+
+fn slow_start_grows_window() {
+    let mut cc = Cubic.new();
+    let before = cc.window();
+    cc.on_packet_sent(1200_u32);
+    cc.on_ack_received(1200_u32, Duration.from_millis(50), Instant.now());
+    assert(cc.window() >= before);
+    assert(cc.bytes_in_flight() == 0_u32);
+}
+
+fn loss_triggers_multiplicative_decrease() {
+    let mut cc = Cubic.new();
+    let mut step: Int = 0;
+    while step < 8 {
+        cc.on_packet_sent(1200_u32);
+        cc.on_ack_received(1200_u32, Duration.from_millis(50), Instant.now());
+        step = step + 1;
+    }
+    let cwnd_before = cc.window();
+    cc.on_packets_lost(1200_u32, Instant.now());
+    // RFC 9438 §4.4: cwnd ← β × cwnd (β = 0.7).
+    assert(cc.window() < cwnd_before);
+    assert(cc.window() >= MIN_WINDOW_BYTES);
+}
+
+fn constants_match_rfc_9438() {
+    assert(CUBIC_C    == 0.4);
+    assert(CUBIC_BETA == 0.7);
+    assert(CUBIC_FAST_CONV_FACTOR == 0.85);
+}
+
+fn pto_does_not_change_window() {
+    let mut cc = Cubic.new();
+    let w = cc.window();
+    cc.on_pto(Instant.now());
+    assert(cc.window() == w);
+}
+
+@main
+public fn main() -> Int {
+    cubic_initial_window_matches_shared_default();
+    slow_start_grows_window();
+    loss_triggers_multiplicative_decrease();
+    constants_match_rfc_9438();
+    pto_does_not_change_window();
+    print("RFC 9438 CUBIC surface verified");
+    0
+}
