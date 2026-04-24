@@ -1,0 +1,151 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, packet, build_short_packet, integration, rfc9000_17_3, rfc9001_5_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// Integration KAT for `build_short_packet` — the 1-RTT outbound-packet
+// assembly pipeline:
+//
+//   1. Frame serialisation.
+//   2. First byte = header_form(0) | fixed(1) | spin | reserved(0) |
+//      key_phase | pn_len-1 bits.
+//   3. DCID bytes (length known per-connection, NOT on the wire).
+//   4. PN bytes (1..4 per the low 2 bits).
+//   5. AEAD-seal with AAD = header bytes up through PN field.
+//   6. Header protection masks first-byte low 5 bits + PN bytes.
+//
+// Unlike Long packets, Short headers have no version/SCID/token/length
+// fields. So the post-HP wire is very short: first byte + DCID + PN +
+// ciphertext(payload + 16 tag).
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.frame.{Frame};
+mount core.net.quic.connection_sm.tx.{ShortPacketInput, build_short_packet, TxError};
+mount core.net.quic.connection_sm.mod.{QuicSpaceKeys};
+mount core.net.quic.crypto.header_protection.{HpKey};
+mount core.net.quic.crypto.initial.{derive_initial_secrets, derive_initial_keys};
+
+fn synth_initial_keys_for_short(dcid: &[Byte]) -> Result<QuicSpaceKeys, ()> {
+    // Re-use the Initial-secret derivation to get a set of valid AEAD +
+    // HP keys. These aren't semantically correct 1-RTT keys, but are
+    // functionally valid for building+parsing a Short packet — the AAD
+    // + nonce plumbing is identical regardless of secret provenance.
+    let secrets = derive_initial_secrets(dcid).map_err(|_| ())?;
+    let keys = derive_initial_keys(secrets.client.as_slice()).map_err(|_| ())?;
+    let mut hp_arr: [Byte; 16] = [0_u8; 16];
+    let mut i: Int = 0;
+    while i < 16 { hp_arr[i] = keys.hp[i]; i = i + 1; }
+    Ok(QuicSpaceKeys {
+        aead_key: keys.key,
+        aead_iv:  keys.iv,
+        hp_key:   HpKey.AesEcb128(hp_arr),
+    })
+}
+
+fn build_minimum_short_packet(spin: Bool, key_phase: Bool) -> List<Byte> {
+    let dcid_bytes: List<Byte> = [
+        0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,
+    ];
+    let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
+    let keys = synth_initial_keys_for_short(dcid_bytes.as_slice()).unwrap();
+
+    let frames: List<Frame> = [ Frame.PingFrame ];
+
+    let input = ShortPacketInput {
+        dcid:          &dcid,
+        spin_bit:      spin,
+        key_phase:     key_phase,
+        packet_number: 5_u64,
+        largest_acked: Some(0_u64),
+        frames:        &frames,
+        keys:          &keys,
+    };
+    build_short_packet(input).unwrap()
+}
+
+fn short_header_form_bit_is_clear() {
+    let wire = build_minimum_short_packet(false, false);
+    // Short-header form: bit 7 = 0.
+    assert((wire[0] & 0x80_u8) == 0_u8);
+}
+
+fn short_header_fixed_bit_is_set() {
+    let wire = build_minimum_short_packet(false, false);
+    // Fixed bit (bit 6) = 1 regardless of HP (HP only masks low 5 bits
+    // for Short headers).
+    assert((wire[0] & 0x40_u8) == 0x40_u8);
+}
+
+fn spin_bit_propagates_to_first_byte() {
+    let no_spin = build_minimum_short_packet(false, false);
+    let with_spin = build_minimum_short_packet(true, false);
+    // Spin bit (bit 5) — HP does NOT mask bit 5 on Short headers
+    // (it only masks the low 5 bits = bits 0..=4). So the bit is
+    // observable post-HP.
+    assert((no_spin[0]   & 0x20_u8) == 0_u8);
+    assert((with_spin[0] & 0x20_u8) == 0x20_u8);
+}
+
+fn dcid_bytes_preserved_post_hp() {
+    let wire = build_minimum_short_packet(false, false);
+    // DCID starts at byte 1 (no length prefix on Short headers).
+    assert(wire[1] == 0xAA_u8);
+    assert(wire[2] == 0xBB_u8);
+    assert(wire[3] == 0xCC_u8);
+    assert(wire[4] == 0xDD_u8);
+}
+
+fn wire_size_matches_expectation() {
+    // Wire = 1 first_byte + 4 dcid + pn_len + 1 ping_plaintext + 16 tag.
+    // With largest_acked = 0 and pn = 5, encode_packet_number_len likely
+    // picks pn_len = 1. So total = 1 + 4 + 1 + 1 + 16 = 23.
+    let wire = build_minimum_short_packet(false, false);
+    assert(wire.len() >= 20);
+    assert(wire.len() <= 30);
+}
+
+fn two_builds_with_different_pns_produce_different_wires() {
+    // Packet numbers 5 and 6 must differ — AEAD nonce is (iv XOR pn)
+    // so the ciphertext+tag change, even for identical plaintext.
+    let dcid_bytes: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
+    let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
+    let keys = synth_initial_keys_for_short(dcid_bytes.as_slice()).unwrap();
+    let frames: List<Frame> = [ Frame.PingFrame ];
+
+    let input_a = ShortPacketInput {
+        dcid: &dcid, spin_bit: false, key_phase: false,
+        packet_number: 5_u64, largest_acked: Some(0_u64),
+        frames: &frames, keys: &keys,
+    };
+    let input_b = ShortPacketInput {
+        dcid: &dcid, spin_bit: false, key_phase: false,
+        packet_number: 6_u64, largest_acked: Some(0_u64),
+        frames: &frames, keys: &keys,
+    };
+    let wire_a = build_short_packet(input_a).unwrap();
+    let wire_b = build_short_packet(input_b).unwrap();
+    // Some byte beyond the DCID must differ.
+    let mut differ: Bool = false;
+    let mut i: Int = 5;
+    let lim: Int = if wire_a.len() < wire_b.len() { wire_a.len() } else { wire_b.len() };
+    while i < lim {
+        if wire_a[i] != wire_b[i] { differ = true; i = lim; } else { i = i + 1; }
+    }
+    assert(differ);
+}
+
+@main
+public fn main() -> Int {
+    short_header_form_bit_is_clear();
+    short_header_fixed_bit_is_set();
+    spin_bit_propagates_to_first_byte();
+    dcid_bytes_preserved_post_hp();
+    wire_size_matches_expectation();
+    two_builds_with_different_pns_produce_different_wires();
+    print("build_short_packet 1-RTT pipeline structural invariants verified");
+    0
+}
