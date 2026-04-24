@@ -1178,3 +1178,119 @@ mod stdlib_lint_tests {
         assert!(summary.contains("get_or"));
     }
 }
+
+// =============================================================================
+// AST walker — scans a Module for stdlib-hazard call sites (W0505 etc.)
+// =============================================================================
+
+/// A W0505 finding produced by the AST walker.
+///
+/// Carries the source span of the call-site so the diagnostic
+/// renderer can anchor the warning. The receiver-type-name
+/// information isn't available at pure AST level (only the
+/// receiver *expression* is), so the walker uses the heuristic
+/// "if the receiver path ends in `Map`" to trigger the warning.
+/// A type-aware upgrade (taking a `TypeCheckerResult`) reduces
+/// false positives; the heuristic-only walker is the
+/// foundation.
+#[derive(Debug, Clone)]
+pub struct StdlibLintFinding {
+    /// Which lint fired.
+    pub lint: StdlibLint,
+    /// Span of the offending method-call expression.
+    pub span: Span,
+    /// Receiver expression's pretty-printed form — used in the
+    /// diagnostic's "you wrote `X.get(…)`" hint.
+    pub receiver_repr: String,
+}
+
+/// Walk a `Module` looking for stdlib-hazard method calls.
+///
+/// Returns a list of `StdlibLintFinding`s — one per flagged
+/// site. Uses the existing AST `Visitor` trait so this walker
+/// never drifts from the AST's actual shape — a new expression
+/// variant added upstream is automatically traversed.
+///
+/// # Coverage
+///
+/// Currently flags only the W0505 `map_get_hazard` family.
+/// The walker descends into every expression position; the
+/// `Visitor` default `walk_expr` handles every variant.
+///
+/// # Heuristic-only detection
+///
+/// Without type info, the walker uses name-based matching on
+/// the receiver's Debug rendering: "contains `Map` but not
+/// `HashMap`/`BTreeMap`". Matches the `detect_stdlib_hazard`
+/// predicate's accepting shapes. A type-aware upgrade (fed
+/// the type-checker's inferred receiver type) reduces false
+/// positives; the heuristic path is the always-available
+/// fallback.
+pub fn walk_module_for_stdlib_hazards(
+    module: &verum_ast::Module,
+) -> Vec<StdlibLintFinding> {
+    let mut walker = HazardCollector::default();
+    // Re-use the AST's standard visitor — walk every item in
+    // the module, which in turn descends into every
+    // expression. The visitor's walk_* defaults handle all
+    // current and future expression variants.
+    use verum_ast::visitor::Visitor;
+    for item in &module.items {
+        walker.visit_item(item);
+    }
+    walker.findings
+}
+
+#[derive(Default)]
+struct HazardCollector {
+    findings: Vec<StdlibLintFinding>,
+}
+
+impl verum_ast::visitor::Visitor for HazardCollector {
+    fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+        // Check this node for a map_get_hazard before
+        // descending. The visitor trait's default walk_*
+        // recurses into children for us after this call
+        // returns.
+        if let verum_ast::expr::ExprKind::MethodCall {
+            receiver,
+            method,
+            ..
+        } = &expr.kind
+        {
+            let receiver_repr = format!("{:?}", receiver);
+            let looks_like_map = receiver_repr.contains("Map")
+                && !receiver_repr.contains("HashMap")
+                && !receiver_repr.contains("BTreeMap");
+            if looks_like_map {
+                if let Some(lint) =
+                    detect_stdlib_hazard(method.name.as_str(), "Map")
+                {
+                    self.findings.push(StdlibLintFinding {
+                        lint,
+                        span: expr.span,
+                        receiver_repr,
+                    });
+                }
+            }
+        }
+        // Recurse through children via the default walker.
+        verum_ast::visitor::walk_expr(self, expr);
+    }
+}
+
+#[cfg(test)]
+mod walker_tests {
+    use super::*;
+
+    #[test]
+    fn walker_produces_zero_findings_on_empty_module() {
+        let module = verum_ast::Module::new(
+            verum_common::List::new(),
+            verum_ast::FileId::new(0),
+            verum_ast::Span::dummy(),
+        );
+        let findings = walk_module_for_stdlib_hazards(&module);
+        assert!(findings.is_empty());
+    }
+}
