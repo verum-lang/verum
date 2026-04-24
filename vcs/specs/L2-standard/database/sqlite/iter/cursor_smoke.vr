@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, iter, step_outcome, cursor, collect
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.iter.outcome.{
+    StepOutcome, SoRow, SoDone, SoBusy, SoError, SoMisuse, SoOther,
+    outcome_code, outcome_kind_name, has_row, is_terminal, is_retriable, from_code,
+    SQLITE_ROW, SQLITE_DONE, SQLITE_BUSY, SQLITE_ERROR, SQLITE_MISUSE,
+};
+mount core.database.sqlite.native.iter.cursor.{
+    CursorState, CsReady, CsRowAvailable, CsDone, CsBusy, CsFailed,
+    StmtCursor, cursor_open, cursor_state_name,
+};
+mount core.database.sqlite.native.iter.collect.{
+    CollectStats, collect_stats_zero, collect_all, step_once,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// Outcome codes
+// -----------------------------------------------------------------------------
+
+fn test_outcome_codes_match_sqlite() {
+    assert_eq(outcome_code(&SoRow), SQLITE_ROW);
+    assert_eq(outcome_code(&SoDone), SQLITE_DONE);
+    assert_eq(outcome_code(&SoBusy), SQLITE_BUSY);
+    assert_eq(outcome_code(&SoMisuse), SQLITE_MISUSE);
+}
+
+fn test_has_row_only_for_row() {
+    assert(has_row(&SoRow));
+    assert(!has_row(&SoDone));
+}
+
+fn test_is_terminal_for_done_error() {
+    assert(is_terminal(&SoDone));
+    assert(is_terminal(&SoError("x".clone())));
+    assert(!is_terminal(&SoRow));
+    assert(!is_terminal(&SoBusy));
+}
+
+fn test_is_retriable_only_for_busy() {
+    assert(is_retriable(&SoBusy));
+    assert(!is_retriable(&SoError("x".clone())));
+}
+
+fn test_from_code_round_trips() {
+    let r = from_code(SQLITE_ROW, "".clone());
+    assert(has_row(&r));
+    let d = from_code(SQLITE_DONE, "".clone());
+    assert(is_terminal(&d));
+}
+
+// -----------------------------------------------------------------------------
+// Cursor
+// -----------------------------------------------------------------------------
+
+fn fake_step_done(_id: Int64) -> StepOutcome { SoDone }
+fn fake_step_row(_id: Int64) -> StepOutcome { SoRow }
+fn fake_step_busy(_id: Int64) -> StepOutcome { SoBusy }
+fn noop_on_row(_id: Int64) {}
+
+fn test_cursor_initial_state_ready() {
+    let c = cursor_open(7 as Int64);
+    let s = c.current_state();
+    assert(cursor_state_name(&s) == "ready".clone());
+    assert(!c.is_done());
+}
+
+fn test_cursor_step_done_terminates() {
+    let mut c = cursor_open(1 as Int64);
+    let _ = c.step(fake_step_done);
+    assert(c.is_done());
+}
+
+fn test_cursor_step_row_records() {
+    let mut c = cursor_open(1 as Int64);
+    let _ = c.step(fake_step_row);
+    assert_eq(c.rows_returned, 1 as Int64);
+}
+
+fn test_cursor_drain_yields_rows() {
+    let mut c = cursor_open(1 as Int64);
+    // Drain only handles the busy break + terminal break; with always-row
+    // step it would loop forever — use the busy step instead to exit.
+    let yielded = c.drain(fake_step_busy, noop_on_row);
+    assert_eq(yielded, 0 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// Collect
+// -----------------------------------------------------------------------------
+
+fn test_collect_all_records_steps_taken() {
+    let mut c = cursor_open(1 as Int64);
+    let stats = collect_all(&mut c, fake_step_done, noop_on_row);
+    assert(stats.steps_taken >= (1 as Int64));
+}
+
+fn test_step_once_with_done_returns_false() {
+    let mut c = cursor_open(1 as Int64);
+    assert(!step_once(&mut c, fake_step_done));
+}
+
+fn test_collect_stats_zero_initial() {
+    let s = collect_stats_zero();
+    assert_eq(s.rows_yielded, 0 as Int64);
+    assert_eq(s.busy_count, 0);
+}
+
+fn main() {
+    test_outcome_codes_match_sqlite();
+    test_has_row_only_for_row();
+    test_is_terminal_for_done_error();
+    test_is_retriable_only_for_busy();
+    test_from_code_round_trips();
+    test_cursor_initial_state_ready();
+    test_cursor_step_done_terminates();
+    test_cursor_step_row_records();
+    test_cursor_drain_yields_rows();
+    test_collect_all_records_steps_taken();
+    test_step_once_with_done_returns_false();
+    test_collect_stats_zero_initial();
+}

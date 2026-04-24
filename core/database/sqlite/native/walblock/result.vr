@@ -1,0 +1,57 @@
+// =============================================================================
+// walblock/result.vr — CheckpointResult
+// =============================================================================
+// Spec: SQLite C API — out parameters of sqlite3_wal_checkpoint_v2
+//
+// SQLite returns:
+//
+//   pnLog  — total number of frames in the WAL after checkpoint
+//   pnCkpt — number of frames actually checkpointed (transferred to db)
+// =============================================================================
+
+module core.database.sqlite.native.walblock.result;
+
+mount core.*;
+mount base.{Bool};
+
+public type CheckpointResult is {
+    /// Frames in the WAL file after the operation (matches `pnLog`).
+    frames_in_wal: Int,
+    /// Frames actually written back to the database file (matches `pnCkpt`).
+    frames_checkpointed: Int,
+    /// True iff the checkpoint completed without unblocking — RESTART/
+    /// TRUNCATE may report `false` if a reader still holds a lock.
+    fully_completed: Bool,
+}
+
+public fn checkpoint_result(
+    frames_in_wal: Int,
+    frames_checkpointed: Int,
+    fully_completed: Bool,
+) -> CheckpointResult {
+    CheckpointResult {
+        frames_in_wal: frames_in_wal,
+        frames_checkpointed: frames_checkpointed,
+        fully_completed: fully_completed,
+    }
+}
+
+implement CheckpointResult {
+    /// True iff every frame in the WAL has been written back.
+    pub fn is_fully_caught_up(&self) -> Bool {
+        self.frames_in_wal == self.frames_checkpointed
+    }
+
+    /// Frames remaining un-checkpointed.
+    pub fn frames_remaining(&self) -> Int {
+        if self.frames_in_wal > self.frames_checkpointed {
+            self.frames_in_wal - self.frames_checkpointed
+        } else {
+            0
+        }
+    }
+}
+
+public fn empty_result() -> CheckpointResult {
+    checkpoint_result(0, 0, true)
+}

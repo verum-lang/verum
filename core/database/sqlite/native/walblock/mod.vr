@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/walblock/mod.vr
+// =============================================================================
+// Layer: 1 (pager-side checkpoint API)
+// Spec: SQLite C API — `sqlite3_wal_checkpoint_v2(db, schema, mode, *log, *cp)`
+//
+// Four checkpoint modes:
+//
+//   * `SQLITE_CHECKPOINT_PASSIVE`   = 0  — checkpoint as much as
+//                                          possible without blocking
+//                                          readers/writers
+//   * `SQLITE_CHECKPOINT_FULL`      = 1  — wait for writers, checkpoint
+//                                          all frames; readers may continue
+//   * `SQLITE_CHECKPOINT_RESTART`   = 2  — like FULL + wait for readers,
+//                                          then restart WAL from frame 0
+//   * `SQLITE_CHECKPOINT_TRUNCATE`  = 3  — like RESTART + truncate WAL
+//                                          file to zero bytes
+//
+// Submodules:
+//   * `mode`      — CheckpointMode + per-mode predicates
+//   * `result`    — CheckpointResult (frames_in_wal, frames_checkpointed)
+//   * `engine`    — CheckpointEngine: per-mode action plan
+// =============================================================================
+
+module core.database.sqlite.native.walblock;
+
+public module mode;
+public module result;
+public module engine;

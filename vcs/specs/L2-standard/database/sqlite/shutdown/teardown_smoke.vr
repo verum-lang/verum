@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, shutdown, subsystem, phase, engine
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.shutdown.subsystem.{
+    Subsystem, SsMutex, SsMem, SsPcache, SsPage, SsHeap,
+    subsystem_name, init_order, shutdown_order, precedes,
+};
+mount core.database.sqlite.native.shutdown.phase.{
+    ShutdownPhase, SpInit, SpDraining, SpClosing, SpDone, SpFailed,
+    phase_name, is_terminal, working_on,
+};
+mount core.database.sqlite.native.shutdown.engine.{
+    ShutdownEngine, engine_new,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// Subsystem
+// -----------------------------------------------------------------------------
+
+fn test_subsystem_names_unique() {
+    assert(subsystem_name(&SsMutex) == "mutex".clone());
+    assert(subsystem_name(&SsHeap) == "heap".clone());
+}
+
+fn test_init_order_size() {
+    let order = init_order();
+    assert_eq(order.len(), 5);
+}
+
+fn test_shutdown_order_reverses_init() {
+    let init = init_order();
+    let shut = shutdown_order();
+    assert_eq(init.len(), shut.len());
+    // First-init should be last-to-shut.
+    assert(subsystem_name(&init[0]) == subsystem_name(&shut[shut.len() - 1]));
+}
+
+fn test_precedes_mutex_before_mem() {
+    assert(precedes(&SsMutex, &SsMem));
+    assert(!precedes(&SsMem, &SsMutex));
+}
+
+// -----------------------------------------------------------------------------
+// Phase
+// -----------------------------------------------------------------------------
+
+fn test_phase_names_unique() {
+    assert(phase_name(&SpInit) == "init".clone());
+    assert(phase_name(&SpDraining(SsMutex)) == "draining".clone());
+    assert(phase_name(&SpDone) == "done".clone());
+}
+
+fn test_is_terminal_done_failed() {
+    assert(is_terminal(&SpDone));
+    assert(is_terminal(&SpFailed("x".clone())));
+    assert(!is_terminal(&SpInit));
+}
+
+fn test_working_on_subsystem() {
+    let p = SpClosing(SsMem);
+    assert(working_on(&p, &SsMem));
+    assert(!working_on(&p, &SsMutex));
+}
+
+// -----------------------------------------------------------------------------
+// Engine
+// -----------------------------------------------------------------------------
+
+fn test_engine_initial_phase_init() {
+    let e = engine_new();
+    let p = e.current_phase();
+    assert(phase_name(&p) == "init".clone());
+}
+
+fn test_engine_advance_through_subsystems() {
+    let mut e = engine_new();
+    let taken = e.drive_to_completion(100);
+    assert(e.is_done());
+    assert(taken > 0);
+    assert(taken < 100);
+}
+
+fn test_engine_fail_terminates() {
+    let mut e = engine_new();
+    e.fail("io error".clone());
+    assert(e.is_done());
+    let p = e.current_phase();
+    assert(phase_name(&p) == "failed".clone());
+}
+
+fn test_engine_advance_after_done_idempotent() {
+    let mut e = engine_new();
+    let _ = e.drive_to_completion(100);
+    e.advance();
+    e.advance();
+    assert(e.is_done());
+}
+
+fn main() {
+    test_subsystem_names_unique();
+    test_init_order_size();
+    test_shutdown_order_reverses_init();
+    test_precedes_mutex_before_mem();
+    test_phase_names_unique();
+    test_is_terminal_done_failed();
+    test_working_on_subsystem();
+    test_engine_initial_phase_init();
+    test_engine_advance_through_subsystems();
+    test_engine_fail_terminates();
+    test_engine_advance_after_done_idempotent();
+}

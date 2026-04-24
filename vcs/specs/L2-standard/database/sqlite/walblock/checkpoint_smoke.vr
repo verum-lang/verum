@@ -1,0 +1,153 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, walblock, checkpoint, mode, plan
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.walblock.mode.{
+    CheckpointMode, CmPassive, CmFull, CmRestart, CmTruncate,
+    mode_code, mode_name, parse_mode,
+    waits_for_writers, waits_for_readers, restarts_wal, truncates_wal,
+};
+mount core.database.sqlite.native.walblock.result.{
+    CheckpointResult, checkpoint_result, empty_result,
+};
+mount core.database.sqlite.native.walblock.engine.{
+    CheckpointStep, CsAcquireWriterLock, CsAcquireReaderBarrier, CsCopyFramesToDb,
+    CsFsyncDb, CsResetWalHeader, CsTruncateWalFile,
+    CsReleaseWriterLock, CsReleaseReaderBarrier,
+    CheckpointPlan, plan_for, step_kind_name,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// Mode taxonomy
+// -----------------------------------------------------------------------------
+
+fn test_mode_codes_match_sqlite() {
+    assert_eq(mode_code(&CmPassive), 0);
+    assert_eq(mode_code(&CmFull), 1);
+    assert_eq(mode_code(&CmRestart), 2);
+    assert_eq(mode_code(&CmTruncate), 3);
+}
+
+fn test_mode_names_unique() {
+    assert(mode_name(&CmPassive) == "passive".clone());
+    assert(mode_name(&CmTruncate) == "truncate".clone());
+}
+
+fn test_parse_mode_recognises_all() {
+    match parse_mode(&"passive".clone()) { Some(_) => {}, None => panic("passive") }
+    match parse_mode(&"full".clone()) { Some(_) => {}, None => panic("full") }
+    match parse_mode(&"restart".clone()) { Some(_) => {}, None => panic("restart") }
+    match parse_mode(&"truncate".clone()) { Some(_) => {}, None => panic("truncate") }
+}
+
+// -----------------------------------------------------------------------------
+// Per-mode predicates
+// -----------------------------------------------------------------------------
+
+fn test_passive_does_not_wait() {
+    assert(!waits_for_writers(&CmPassive));
+    assert(!waits_for_readers(&CmPassive));
+    assert(!restarts_wal(&CmPassive));
+}
+
+fn test_full_waits_for_writers_only() {
+    assert(waits_for_writers(&CmFull));
+    assert(!waits_for_readers(&CmFull));
+    assert(!restarts_wal(&CmFull));
+}
+
+fn test_restart_waits_and_restarts() {
+    assert(waits_for_writers(&CmRestart));
+    assert(waits_for_readers(&CmRestart));
+    assert(restarts_wal(&CmRestart));
+    assert(!truncates_wal(&CmRestart));
+}
+
+fn test_truncate_does_everything() {
+    assert(waits_for_writers(&CmTruncate));
+    assert(waits_for_readers(&CmTruncate));
+    assert(restarts_wal(&CmTruncate));
+    assert(truncates_wal(&CmTruncate));
+}
+
+// -----------------------------------------------------------------------------
+// Result
+// -----------------------------------------------------------------------------
+
+fn test_result_caught_up() {
+    let r = checkpoint_result(100, 100, true);
+    assert(r.is_fully_caught_up());
+    assert_eq(r.frames_remaining(), 0);
+}
+
+fn test_result_partial() {
+    let r = checkpoint_result(100, 60, false);
+    assert(!r.is_fully_caught_up());
+    assert_eq(r.frames_remaining(), 40);
+}
+
+fn test_empty_result() {
+    let r = empty_result();
+    assert_eq(r.frames_in_wal, 0);
+    assert(r.is_fully_caught_up());
+}
+
+// -----------------------------------------------------------------------------
+// Plan
+// -----------------------------------------------------------------------------
+
+fn test_passive_plan_no_lock_steps() {
+    let p = plan_for(CmPassive);
+    assert(!p.includes_step(&CsAcquireWriterLock));
+    assert(!p.includes_step(&CsAcquireReaderBarrier));
+    assert(p.includes_step(&CsCopyFramesToDb));
+    assert(p.includes_step(&CsFsyncDb));
+}
+
+fn test_full_plan_has_writer_lock() {
+    let p = plan_for(CmFull);
+    assert(p.includes_step(&CsAcquireWriterLock));
+    assert(!p.includes_step(&CsAcquireReaderBarrier));
+}
+
+fn test_restart_plan_has_reader_barrier_and_reset() {
+    let p = plan_for(CmRestart);
+    assert(p.includes_step(&CsAcquireReaderBarrier));
+    assert(p.includes_step(&CsResetWalHeader));
+    assert(!p.includes_step(&CsTruncateWalFile));
+}
+
+fn test_truncate_plan_includes_truncate() {
+    let p = plan_for(CmTruncate);
+    assert(p.includes_step(&CsTruncateWalFile));
+}
+
+fn test_step_names_unique() {
+    let n1 = step_kind_name(&CsCopyFramesToDb);
+    let n2 = step_kind_name(&CsFsyncDb);
+    let n3 = step_kind_name(&CsTruncateWalFile);
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn main() {
+    test_mode_codes_match_sqlite();
+    test_mode_names_unique();
+    test_parse_mode_recognises_all();
+    test_passive_does_not_wait();
+    test_full_waits_for_writers_only();
+    test_restart_waits_and_restarts();
+    test_truncate_does_everything();
+    test_result_caught_up();
+    test_result_partial();
+    test_empty_result();
+    test_passive_plan_no_lock_steps();
+    test_full_plan_has_writer_lock();
+    test_restart_plan_has_reader_barrier_and_reset();
+    test_truncate_plan_includes_truncate();
+    test_step_names_unique();
+}

@@ -1,0 +1,125 @@
+// =============================================================================
+// iter/cursor.vr — StmtCursor iteration handle
+// =============================================================================
+// Spec: SQLite C API
+//
+// `StmtCursor` wraps a notional PreparedStatement-id with a Step
+// loop. The host installs a `step_fn` closure that calls into the
+// L4 interpreter; the cursor turns that into iterator-shaped Verum
+// surface (next_row → Maybe<()>, drained, etc.).
+//
+// Pure-data — the actual L4 dispatch lives in l4_vdbe + l6_session.
+// =============================================================================
+
+module core.database.sqlite.native.iter.cursor;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.iter.outcome.{
+    StepOutcome, SoRow, SoDone, SoBusy, SoError,
+    has_row, is_terminal, is_retriable,
+};
+
+public type CursorState is
+      CsReady          // before first step
+    | CsRowAvailable   // last step returned ROW; client may read columns
+    | CsDone
+    | CsBusy
+    | CsFailed(base.Text);
+
+public fn cursor_state_name(s: &CursorState) -> base.Text {
+    match s {
+        CsReady           => "ready".clone(),
+        CsRowAvailable    => "row".clone(),
+        CsDone            => "done".clone(),
+        CsBusy            => "busy".clone(),
+        CsFailed(_)       => "failed".clone(),
+    }
+}
+
+public type StmtCursor is {
+    stmt_id: Int64,
+    state: CursorState,
+    /// Number of rows returned by step so far.
+    rows_returned: Int64,
+    /// Number of times step() has been invoked.
+    steps_taken: Int64,
+}
+
+public fn cursor_open(stmt_id: Int64) -> StmtCursor {
+    StmtCursor {
+        stmt_id: stmt_id,
+        state: CsReady,
+        rows_returned: 0 as Int64,
+        steps_taken: 0 as Int64,
+    }
+}
+
+implement StmtCursor {
+    public fn current_state(&self) -> CursorState { clone_state(&self.state) }
+
+    public fn is_done(&self) -> Bool {
+        match &self.state {
+            CsDone | CsFailed(_) => true,
+            _                    => false,
+        }
+    }
+
+    /// Drive one step. The supplied closure performs the real work
+    /// (calling into the L4 interpreter) + returns the raw outcome.
+    pub fn step(&mut self, step_fn: fn(Int64) -> StepOutcome) -> StepOutcome {
+        if self.is_done() {
+            return SoOther(self.stmt_id as Int);
+        }
+        let outcome = (step_fn)(self.stmt_id);
+        self.steps_taken = self.steps_taken + (1 as Int64);
+        self.note_outcome(&outcome);
+        outcome
+    }
+
+    fn note_outcome(&mut self, o: &StepOutcome) {
+        match o {
+            SoRow => {
+                self.state = CsRowAvailable;
+                self.rows_returned = self.rows_returned + (1 as Int64);
+            }
+            SoDone => self.state = CsDone,
+            SoBusy => self.state = CsBusy,
+            SoError(msg) => self.state = CsFailed(msg.clone()),
+            _ => self.state = CsDone,
+        }
+    }
+
+    /// Poll until the cursor stops returning ROW. Returns the count
+    /// of rows yielded.
+    pub fn drain(&mut self, step_fn: fn(Int64) -> StepOutcome, on_row: fn(Int64)) -> Int64 {
+        let mut yielded: Int64 = 0 as Int64;
+        loop {
+            let o = self.step(step_fn);
+            if has_row(&o) {
+                (on_row)(self.stmt_id);
+                yielded = yielded + (1 as Int64);
+            } else if is_retriable(&o) {
+                // Caller-side back-off would happen here; for the
+                // catalogue we just stop.
+                break;
+            } else if is_terminal(&o) {
+                break;
+            }
+        }
+        yielded
+    }
+}
+
+fn clone_state(s: &CursorState) -> CursorState {
+    match s {
+        CsReady          => CsReady,
+        CsRowAvailable   => CsRowAvailable,
+        CsDone           => CsDone,
+        CsBusy           => CsBusy,
+        CsFailed(m)      => CsFailed(m.clone()),
+    }
+}
+
+fn SoOther(c: Int) -> StepOutcome { core.database.sqlite.native.iter.outcome.SoOther(c) }

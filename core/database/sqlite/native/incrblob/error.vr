@@ -1,0 +1,49 @@
+// =============================================================================
+// incrblob/error.vr — BlobError taxonomy
+// =============================================================================
+// Spec: SQLite C API — error codes returned by sqlite3_blob_*
+// =============================================================================
+
+module core.database.sqlite.native.incrblob.error;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type BlobError is
+      BeNoTable(Text)             // table does not exist
+    | BeNoColumn(Text)            // column does not exist on table
+    | BeNoRow(Int64)              // rowid not present
+    | BeNotABlob                  // column value is not BLOB
+    | BeReadOnly                  // write attempt on RO handle
+    | BeOutOfRange(Int, Int)      // (offset, length) — past end-of-blob
+    | BeAborted;                  // schema change invalidated handle
+
+public fn blob_error_kind(e: &BlobError) -> Text {
+    match e {
+        BeNoTable(_)        => "no_table".clone(),
+        BeNoColumn(_)       => "no_column".clone(),
+        BeNoRow(_)          => "no_row".clone(),
+        BeNotABlob          => "not_a_blob".clone(),
+        BeReadOnly          => "read_only".clone(),
+        BeOutOfRange(_, _)  => "out_of_range".clone(),
+        BeAborted           => "aborted".clone(),
+    }
+}
+
+/// Map onto closest SQLite C-API error code:
+///   SQLITE_ABORT   = 4    (handle aborted)
+///   SQLITE_READONLY = 8
+///   SQLITE_NOTFOUND = 12  (no such table/column/row)
+///   SQLITE_RANGE   = 25
+///   SQLITE_MISMATCH = 20  (column not a BLOB)
+public fn sqlite_error_code(e: &BlobError) -> Int {
+    match e {
+        BeNoTable(_)        => 12,
+        BeNoColumn(_)       => 12,
+        BeNoRow(_)          => 12,
+        BeNotABlob          => 20,
+        BeReadOnly          => 8,
+        BeOutOfRange(_, _)  => 25,
+        BeAborted           => 4,
+    }
+}

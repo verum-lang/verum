@@ -1,0 +1,74 @@
+// =============================================================================
+// incrblob/handle.vr — BlobHandle
+// =============================================================================
+// Spec: SQLite C API
+//
+// `BlobHandle` records the (db, table, column, rowid, mode) tuple
+// the caller opened, plus the cached `bytes` length so `sqlite3_blob_bytes`
+// can answer in O(1) without re-reading the column.
+// =============================================================================
+
+module core.database.sqlite.native.incrblob.handle;
+
+mount core.*;
+mount base.{Text, Bool};
+mount core.database.sqlite.native.incrblob.flags.{
+    BlobOpenMode, BomReadOnly, BomReadWrite, permits_write,
+};
+
+public type BlobHandle is {
+    handle_id: Int64,
+    /// Schema (typically "main").
+    schema_name: Text,
+    table_name: Text,
+    column_name: Text,
+    rowid: Int64,
+    mode: BlobOpenMode,
+    /// Cached size in bytes (sqlite3_blob_bytes).
+    byte_size: Int,
+    /// True after sqlite3_blob_close.
+    closed: Bool,
+}
+
+public fn blob_handle(
+    handle_id: Int64,
+    schema_name: Text,
+    table_name: Text,
+    column_name: Text,
+    rowid: Int64,
+    mode: BlobOpenMode,
+    byte_size: Int,
+) -> BlobHandle {
+    BlobHandle {
+        handle_id: handle_id,
+        schema_name: schema_name,
+        table_name: table_name,
+        column_name: column_name,
+        rowid: rowid,
+        mode: mode,
+        byte_size: byte_size,
+        closed: false,
+    }
+}
+
+implement BlobHandle {
+    public fn is_open(&self) -> Bool { !self.closed }
+
+    pub fn close(&mut self) { self.closed = true; }
+
+    /// True iff the requested (offset, length) lies entirely within the BLOB.
+    pub fn in_bounds(&self, offset: Int, length: Int) -> Bool {
+        if offset < 0 || length < 0 { return false; }
+        offset + length <= self.byte_size
+    }
+
+    /// Reopen against a different rowid — leaves table/column intact.
+    /// SQLite's sqlite3_blob_reopen.
+    pub fn reopen(&mut self, new_rowid: Int64, new_byte_size: Int) {
+        self.rowid = new_rowid;
+        self.byte_size = new_byte_size;
+        self.closed = false;
+    }
+
+    pub fn permits_write(&self) -> Bool { permits_write(&self.mode) }
+}

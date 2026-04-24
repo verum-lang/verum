@@ -1,0 +1,56 @@
+// =============================================================================
+// shutdown/phase.vr — ShutdownPhase state machine
+// =============================================================================
+// Spec: SQLite C API
+//
+// Three top-level phases:
+//
+//   * `SpInit`              — initial state
+//   * `SpDraining(sub)`     — waiting for `sub` to drain pending work
+//   * `SpClosing(sub)`      — actively releasing `sub`'s resources
+//   * `SpDone`
+//   * `SpFailed(reason)`
+// =============================================================================
+
+module core.database.sqlite.native.shutdown.phase;
+
+mount core.*;
+mount base.{Text, Bool};
+mount core.database.sqlite.native.shutdown.subsystem.{
+    Subsystem, subsystem_name,
+};
+
+public type ShutdownPhase is
+      SpInit
+    | SpDraining(Subsystem)
+    | SpClosing(Subsystem)
+    | SpDone
+    | SpFailed(Text);
+
+public fn phase_name(p: &ShutdownPhase) -> Text {
+    match p {
+        SpInit          => "init".clone(),
+        SpDraining(_)   => "draining".clone(),
+        SpClosing(_)    => "closing".clone(),
+        SpDone          => "done".clone(),
+        SpFailed(_)     => "failed".clone(),
+    }
+}
+
+public fn is_terminal(p: &ShutdownPhase) -> Bool {
+    match p {
+        SpDone | SpFailed(_) => true,
+        _                    => false,
+    }
+}
+
+/// True iff the engine is currently working on `sub` (either draining
+/// or closing).
+public fn working_on(p: &ShutdownPhase, sub: &Subsystem) -> Bool {
+    let want = subsystem_name(sub);
+    match p {
+        SpDraining(s) => subsystem_name(s) == want,
+        SpClosing(s)  => subsystem_name(s) == want,
+        _             => false,
+    }
+}

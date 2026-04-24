@@ -1,0 +1,94 @@
+// =============================================================================
+// iter/outcome.vr — StepOutcome sum
+// =============================================================================
+// Spec: SQLite C API
+//
+// `StepOutcome` is the typed counterpart to sqlite3_step's return
+// integer. The five SQLite codes the catalogue exposes:
+//
+//   SQLITE_ROW    = 100
+//   SQLITE_DONE   = 101
+//   SQLITE_BUSY   = 5
+//   SQLITE_ERROR  = 1
+//   SQLITE_MISUSE = 21
+//
+// Anything else is wrapped in `SoOther(code)` so callers can route
+// extended error codes themselves.
+// =============================================================================
+
+module core.database.sqlite.native.iter.outcome;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type StepOutcome is
+      SoRow
+    | SoDone
+    | SoBusy
+    | SoError(Text)
+    | SoMisuse
+    | SoOther(Int);
+
+public const SQLITE_ROW: Int     = 100;
+public const SQLITE_DONE: Int    = 101;
+public const SQLITE_BUSY: Int    = 5;
+public const SQLITE_ERROR: Int   = 1;
+public const SQLITE_MISUSE: Int  = 21;
+
+public fn outcome_code(o: &StepOutcome) -> Int {
+    match o {
+        SoRow         => SQLITE_ROW,
+        SoDone        => SQLITE_DONE,
+        SoBusy        => SQLITE_BUSY,
+        SoError(_)    => SQLITE_ERROR,
+        SoMisuse      => SQLITE_MISUSE,
+        SoOther(c)    => *c,
+    }
+}
+
+public fn outcome_kind_name(o: &StepOutcome) -> Text {
+    match o {
+        SoRow         => "row".clone(),
+        SoDone        => "done".clone(),
+        SoBusy        => "busy".clone(),
+        SoError(_)    => "error".clone(),
+        SoMisuse      => "misuse".clone(),
+        SoOther(_)    => "other".clone(),
+    }
+}
+
+/// True iff this outcome means "another row is ready" — the caller
+/// should fetch the row and step again.
+public fn has_row(o: &StepOutcome) -> Bool {
+    match o {
+        SoRow => true,
+        _     => false,
+    }
+}
+
+/// True iff this outcome means "the loop should stop".
+public fn is_terminal(o: &StepOutcome) -> Bool {
+    match o {
+        SoDone | SoError(_) | SoMisuse | SoOther(_) => true,
+        _ => false,
+    }
+}
+
+/// True iff the caller may retry after a back-off.
+public fn is_retriable(o: &StepOutcome) -> Bool {
+    match o {
+        SoBusy => true,
+        _      => false,
+    }
+}
+
+/// Translate a raw C-API integer into a StepOutcome. Caller passes
+/// `error_message` only for the error-class codes.
+public fn from_code(code: Int, error_message: Text) -> StepOutcome {
+    if code == SQLITE_ROW    { return SoRow; }
+    if code == SQLITE_DONE   { return SoDone; }
+    if code == SQLITE_BUSY   { return SoBusy; }
+    if code == SQLITE_ERROR  { return SoError(error_message); }
+    if code == SQLITE_MISUSE { return SoMisuse; }
+    SoOther(code)
+}

@@ -1,0 +1,67 @@
+// =============================================================================
+// iter/collect.vr — high-level collection helpers
+// =============================================================================
+// Spec: SQLite C API (convenience layer)
+//
+// Two helpers wrapped around `StmtCursor` for common cases:
+//
+//   * `count_rows`  — drive the cursor to completion + return row count
+//   * `take_first`  — pull the first row id (or None if no rows)
+// =============================================================================
+
+module core.database.sqlite.native.iter.collect;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.iter.outcome.{
+    StepOutcome, has_row, is_terminal, is_retriable,
+};
+mount core.database.sqlite.native.iter.cursor.{
+    StmtCursor, cursor_open,
+};
+
+public type CollectStats is {
+    rows_yielded: Int64,
+    steps_taken: Int64,
+    busy_count: Int,
+}
+
+public fn collect_stats_zero() -> CollectStats {
+    CollectStats {
+        rows_yielded: 0 as Int64,
+        steps_taken: 0 as Int64,
+        busy_count: 0,
+    }
+}
+
+/// Drive the cursor to completion + record stats. The supplied
+/// `on_row` closure is invoked with the cursor's stmt_id for each row.
+public fn collect_all(
+    cursor: &mut StmtCursor,
+    step_fn: fn(Int64) -> StepOutcome,
+    on_row: fn(Int64),
+) -> CollectStats {
+    let mut stats = collect_stats_zero();
+    loop {
+        let o = cursor.step(step_fn);
+        stats.steps_taken = stats.steps_taken + (1 as Int64);
+        if has_row(&o) {
+            (on_row)(cursor.stmt_id);
+            stats.rows_yielded = stats.rows_yielded + (1 as Int64);
+        } else if is_retriable(&o) {
+            stats.busy_count = stats.busy_count + 1;
+            break;    // catalogue does not implement retry — host's job
+        } else if is_terminal(&o) {
+            break;
+        }
+    }
+    stats
+}
+
+/// Step exactly once — convenient for "did the statement produce a
+/// first row?" checks.
+public fn step_once(cursor: &mut StmtCursor, step_fn: fn(Int64) -> StepOutcome) -> Bool {
+    let o = cursor.step(step_fn);
+    has_row(&o)
+}

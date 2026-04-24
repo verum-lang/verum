@@ -180,3 +180,11 @@ public module soft_heap;
 public module deserialize;
 // - explain: EXPLAIN + EXPLAIN QUERY PLAN row shapes + tree formatter
 public module explain;
+// - iter: sqlite3_step result codes — StepOutcome + StmtCursor iteration
+public module iter;
+// - incrblob: sqlite3_blob_* incremental BLOB I/O — handle + flags + engine
+public module incrblob;
+// - walblock: sqlite3_wal_checkpoint_v2 modes (PASSIVE/FULL/RESTART/TRUNCATE)
+public module walblock;
+// - shutdown: sqlite3_shutdown sequence — subsystem + phase + engine
+public module shutdown;

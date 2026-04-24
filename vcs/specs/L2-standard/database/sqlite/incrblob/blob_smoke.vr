@@ -1,0 +1,183 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, incrblob, handle, flags, engine
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.incrblob.flags.{
+    BlobOpenMode, BomReadOnly, BomReadWrite,
+    open_mode_text, flag_int, permits_write, from_int,
+};
+mount core.database.sqlite.native.incrblob.handle.{
+    BlobHandle, blob_handle,
+};
+mount core.database.sqlite.native.incrblob.error.{
+    BlobError, BeNoTable, BeNoRow, BeNotABlob, BeReadOnly, BeOutOfRange, BeAborted,
+    blob_error_kind, sqlite_error_code,
+};
+mount core.database.sqlite.native.incrblob.engine.{
+    BlobEngine, engine_new,
+};
+mount base.{Ok, Err, Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// Flags
+// -----------------------------------------------------------------------------
+
+fn test_flag_int_values() {
+    assert_eq(flag_int(&BomReadOnly), 0);
+    assert_eq(flag_int(&BomReadWrite), 1);
+}
+
+fn test_permits_write() {
+    assert(!permits_write(&BomReadOnly));
+    assert(permits_write(&BomReadWrite));
+}
+
+fn test_open_mode_text() {
+    assert(open_mode_text(&BomReadOnly) == "ro".clone());
+    assert(open_mode_text(&BomReadWrite) == "rw".clone());
+}
+
+fn test_from_int_round_trip() {
+    let _ = from_int(0);
+    let _ = from_int(1);
+}
+
+// -----------------------------------------------------------------------------
+// Handle
+// -----------------------------------------------------------------------------
+
+fn test_handle_open_initially() {
+    let h = blob_handle(1 as Int64, "main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadWrite, 1024);
+    assert(h.is_open());
+    assert(h.permits_write());
+}
+
+fn test_handle_close_marks_closed() {
+    let mut h = blob_handle(1 as Int64, "main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadOnly, 1024);
+    h.close();
+    assert(!h.is_open());
+}
+
+fn test_handle_in_bounds_predicate() {
+    let h = blob_handle(1 as Int64, "main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadOnly, 1024);
+    assert(h.in_bounds(0, 1024));
+    assert(!h.in_bounds(1023, 2));
+    assert(!h.in_bounds(-1, 10));
+}
+
+fn test_handle_reopen_updates_size_and_rowid() {
+    let mut h = blob_handle(1 as Int64, "main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadOnly, 1024);
+    h.close();
+    h.reopen(99 as Int64, 2048);
+    assert(h.is_open());
+    assert_eq(h.rowid, 99 as Int64);
+    assert_eq(h.byte_size, 2048);
+}
+
+// -----------------------------------------------------------------------------
+// Error mapping
+// -----------------------------------------------------------------------------
+
+fn test_blob_error_kind_unique() {
+    let n1 = blob_error_kind(&BeNoTable("t".clone()));
+    let n2 = blob_error_kind(&BeNotABlob);
+    let n3 = blob_error_kind(&BeReadOnly);
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn test_sqlite_error_code_mapping() {
+    assert_eq(sqlite_error_code(&BeNoTable("t".clone())), 12);   // NOTFOUND
+    assert_eq(sqlite_error_code(&BeReadOnly), 8);                // READONLY
+    assert_eq(sqlite_error_code(&BeOutOfRange(0, 0)), 25);       // RANGE
+    assert_eq(sqlite_error_code(&BeNotABlob), 20);               // MISMATCH
+}
+
+// -----------------------------------------------------------------------------
+// Engine
+// -----------------------------------------------------------------------------
+
+fn test_engine_open_returns_handle_id() {
+    let mut e = engine_new();
+    let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadWrite, 4096);
+    assert(id > (0 as Int64));
+    assert_eq(e.open_handle_count(), 1);
+}
+
+fn test_engine_validate_read_in_bounds() {
+    let mut e = engine_new();
+    let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadWrite, 4096);
+    match e.validate_read(id, 0, 1024) {
+        Ok(_) => {},
+        Err(_) => panic("in-range read"),
+    }
+}
+
+fn test_engine_validate_read_out_of_range() {
+    let mut e = engine_new();
+    let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadOnly, 100);
+    match e.validate_read(id, 50, 100) {
+        Err(BeOutOfRange(_, _)) => {},
+        _                        => panic("out of range"),
+    }
+}
+
+fn test_engine_validate_write_on_readonly() {
+    let mut e = engine_new();
+    let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadOnly, 100);
+    match e.validate_write(id, 0, 50) {
+        Err(BeReadOnly) => {},
+        _                => panic("read-only refusal"),
+    }
+}
+
+fn test_engine_close_then_validate_aborted() {
+    let mut e = engine_new();
+    let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadWrite, 100);
+    let _ = e.close(id);
+    match e.validate_read(id, 0, 1) {
+        Err(BeAborted) => {},
+        _              => panic("aborted after close"),
+    }
+}
+
+fn test_engine_lookup_size() {
+    let mut e = engine_new();
+    let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadOnly, 4096);
+    match e.lookup_size(id) {
+        Some(n) => assert_eq(n, 4096),
+        None    => panic("size present"),
+    }
+}
+
+fn test_engine_reopen() {
+    let mut e = engine_new();
+    let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadOnly, 100);
+    match e.reopen(id, 99 as Int64, 200) {
+        Ok(_) => {},
+        Err(_) => panic("reopen succeeds"),
+    }
+}
+
+fn main() {
+    test_flag_int_values();
+    test_permits_write();
+    test_open_mode_text();
+    test_from_int_round_trip();
+    test_handle_open_initially();
+    test_handle_close_marks_closed();
+    test_handle_in_bounds_predicate();
+    test_handle_reopen_updates_size_and_rowid();
+    test_blob_error_kind_unique();
+    test_sqlite_error_code_mapping();
+    test_engine_open_returns_handle_id();
+    test_engine_validate_read_in_bounds();
+    test_engine_validate_read_out_of_range();
+    test_engine_validate_write_on_readonly();
+    test_engine_close_then_validate_aborted();
+    test_engine_lookup_size();
+    test_engine_reopen();
+}

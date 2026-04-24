@@ -1,0 +1,109 @@
+// =============================================================================
+// shutdown/engine.vr — ShutdownEngine
+// =============================================================================
+// Spec: SQLite C API
+//
+// `ShutdownEngine` walks `shutdown_order()` (mem→pcache→page→mem→mutex
+// in REVERSE init order). For each subsystem it transitions:
+//
+//   ... → SpDraining(sub) → SpClosing(sub) → next subsystem
+//
+// On any subsystem failure the engine jumps to `SpFailed(reason)`
+// and does NOT touch later subsystems (matching SQLite's policy of
+// leaving the process in a known partial state).
+// =============================================================================
+
+module core.database.sqlite.native.shutdown.engine;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.shutdown.subsystem.{
+    Subsystem, SsMutex, SsMem, SsPcache, SsPage, SsHeap,
+    subsystem_name, shutdown_order,
+};
+mount core.database.sqlite.native.shutdown.phase.{
+    ShutdownPhase, SpInit, SpDraining, SpClosing, SpDone, SpFailed,
+    is_terminal, phase_name,
+};
+
+public type ShutdownEngine is {
+    order: List<Subsystem>,
+    cursor: Int,
+    phase: ShutdownPhase,
+}
+
+public fn engine_new() -> ShutdownEngine {
+    ShutdownEngine {
+        order: shutdown_order(),
+        cursor: 0,
+        phase: SpInit,
+    }
+}
+
+implement ShutdownEngine {
+    public fn current_phase(&self) -> ShutdownPhase { clone_phase(&self.phase) }
+
+    public fn is_done(&self) -> Bool { is_terminal(&self.phase) }
+
+    pub fn fail(&mut self, reason: Text) {
+        self.phase = SpFailed(reason);
+    }
+
+    /// Step the machine. Each call walks one micro-transition:
+    ///
+    ///   SpInit → SpDraining(order[0])
+    ///   SpDraining(s) → SpClosing(s)
+    ///   SpClosing(s) → SpDraining(next) or SpDone
+    pub fn advance(&mut self) {
+        match &self.phase {
+            SpInit => {
+                if self.order.len() == 0 {
+                    self.phase = SpDone;
+                } else {
+                    self.phase = SpDraining(clone_subsystem(&self.order[self.cursor]));
+                }
+            }
+            SpDraining(s) => self.phase = SpClosing(clone_subsystem(s)),
+            SpClosing(_) => {
+                self.cursor = self.cursor + 1;
+                if self.cursor >= self.order.len() {
+                    self.phase = SpDone;
+                } else {
+                    self.phase = SpDraining(clone_subsystem(&self.order[self.cursor]));
+                }
+            }
+            SpDone | SpFailed(_) => {}
+        }
+    }
+
+    /// Drive the engine to completion in one call (for tests).
+    pub fn drive_to_completion(&mut self, max_steps: Int) -> Int {
+        let mut taken: Int = 0;
+        while !self.is_done() && taken < max_steps {
+            self.advance();
+            taken = taken + 1;
+        }
+        taken
+    }
+}
+
+fn clone_phase(p: &ShutdownPhase) -> ShutdownPhase {
+    match p {
+        SpInit          => SpInit,
+        SpDraining(s)   => SpDraining(clone_subsystem(s)),
+        SpClosing(s)    => SpClosing(clone_subsystem(s)),
+        SpDone          => SpDone,
+        SpFailed(r)     => SpFailed(r.clone()),
+    }
+}
+
+fn clone_subsystem(s: &Subsystem) -> Subsystem {
+    match s {
+        SsMutex   => SsMutex,
+        SsMem     => SsMem,
+        SsPcache  => SsPcache,
+        SsPage    => SsPage,
+        SsHeap    => SsHeap,
+    }
+}

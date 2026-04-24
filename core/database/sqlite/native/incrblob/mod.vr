@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/incrblob/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_blob_*)
+// Spec: SQLite C API — `sqlite3_blob_open`, `sqlite3_blob_close`,
+// `sqlite3_blob_bytes`, `sqlite3_blob_read`, `sqlite3_blob_write`,
+// `sqlite3_blob_reopen`.
+//
+// Use case: read/write a BLOB column WITHOUT loading the whole value
+// into memory — useful for large binary payloads.
+//
+// Submodules:
+//   * `handle`   — BlobHandle (db/table/column/rowid/flags + cursor)
+//   * `flags`    — BlobOpenFlags (READONLY/READWRITE)
+//   * `error`    — BlobError taxonomy
+//   * `engine`   — BlobEngine: open/read/write/reopen/close orchestration
+// =============================================================================
+
+module core.database.sqlite.native.incrblob;
+
+public module flags;
+public module handle;
+public module error;
+public module engine;

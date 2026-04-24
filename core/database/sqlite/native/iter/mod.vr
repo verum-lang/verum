@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/iter/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_step iteration)
+// Spec: SQLite C API — `sqlite3_step` returns one of:
+//
+//   SQLITE_ROW   = 100  → another result row available; caller reads
+//                          via sqlite3_column_*
+//   SQLITE_DONE  = 101  → execution finished; sqlite3_reset before re-stepping
+//   SQLITE_BUSY  = 5    → contended lock; caller may retry
+//   SQLITE_ERROR = 1    → execution failed; sqlite3_errmsg holds detail
+//
+// Submodules:
+//   * `outcome`   — StepOutcome sum + sqlite3 numeric code
+//   * `cursor`    — StmtCursor: iteration handle around PreparedStatement
+//   * `collect`   — collect_into helper turning a cursor into a Vec
+// =============================================================================
+
+module core.database.sqlite.native.iter;
+
+public module outcome;
+public module cursor;
+public module collect;

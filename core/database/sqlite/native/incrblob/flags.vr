@@ -1,0 +1,42 @@
+// =============================================================================
+// incrblob/flags.vr — BlobOpenFlags
+// =============================================================================
+// Spec: SQLite C API — sqlite3_blob_open's `flags` parameter
+//
+// Two writable values:
+//
+//   0  — READONLY (default; calls to write fail)
+//   1  — READWRITE (read + write allowed)
+// =============================================================================
+
+module core.database.sqlite.native.incrblob.flags;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type BlobOpenMode is BomReadOnly | BomReadWrite;
+
+public fn open_mode_text(m: &BlobOpenMode) -> Text {
+    match m {
+        BomReadOnly  => "ro".clone(),
+        BomReadWrite => "rw".clone(),
+    }
+}
+
+public fn flag_int(m: &BlobOpenMode) -> Int {
+    match m {
+        BomReadOnly  => 0,
+        BomReadWrite => 1,
+    }
+}
+
+public fn permits_write(m: &BlobOpenMode) -> Bool {
+    match m {
+        BomReadWrite => true,
+        _            => false,
+    }
+}
+
+public fn from_int(flag: Int) -> BlobOpenMode {
+    if flag == 0 { BomReadOnly } else { BomReadWrite }
+}

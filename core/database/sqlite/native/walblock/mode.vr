@@ -1,0 +1,74 @@
+// =============================================================================
+// walblock/mode.vr — CheckpointMode taxonomy
+// =============================================================================
+// Spec: SQLite C API — SQLITE_CHECKPOINT_*
+// =============================================================================
+
+module core.database.sqlite.native.walblock.mode;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+
+public type CheckpointMode is
+      CmPassive               // SQLITE_CHECKPOINT_PASSIVE  = 0
+    | CmFull                  // SQLITE_CHECKPOINT_FULL     = 1
+    | CmRestart               // SQLITE_CHECKPOINT_RESTART  = 2
+    | CmTruncate;             // SQLITE_CHECKPOINT_TRUNCATE = 3
+
+public fn mode_code(m: &CheckpointMode) -> Int {
+    match m {
+        CmPassive  => 0,
+        CmFull     => 1,
+        CmRestart  => 2,
+        CmTruncate => 3,
+    }
+}
+
+public fn mode_name(m: &CheckpointMode) -> Text {
+    match m {
+        CmPassive  => "passive".clone(),
+        CmFull     => "full".clone(),
+        CmRestart  => "restart".clone(),
+        CmTruncate => "truncate".clone(),
+    }
+}
+
+public fn parse_mode(text: &Text) -> Maybe<CheckpointMode> {
+    if *text == "passive".clone()  { return Some(CmPassive); }
+    if *text == "full".clone()     { return Some(CmFull); }
+    if *text == "restart".clone()  { return Some(CmRestart); }
+    if *text == "truncate".clone() { return Some(CmTruncate); }
+    None
+}
+
+/// True iff the mode waits for active writers before proceeding.
+pub fn waits_for_writers(m: &CheckpointMode) -> Bool {
+    match m {
+        CmPassive => false,
+        _         => true,
+    }
+}
+
+/// True iff the mode requires waiting for readers (i.e. no shared lock holders).
+pub fn waits_for_readers(m: &CheckpointMode) -> Bool {
+    match m {
+        CmRestart | CmTruncate => true,
+        _                       => false,
+    }
+}
+
+/// True iff the WAL file is restarted (frame numbering resets to 1).
+pub fn restarts_wal(m: &CheckpointMode) -> Bool {
+    match m {
+        CmRestart | CmTruncate => true,
+        _                       => false,
+    }
+}
+
+/// True iff the WAL file is truncated to zero bytes after checkpoint.
+pub fn truncates_wal(m: &CheckpointMode) -> Bool {
+    match m {
+        CmTruncate => true,
+        _          => false,
+    }
+}

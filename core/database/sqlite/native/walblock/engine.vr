@@ -1,0 +1,82 @@
+// =============================================================================
+// walblock/engine.vr — CheckpointEngine
+// =============================================================================
+// Spec: SQLite C API — sqlite3_wal_checkpoint_v2
+//
+// `CheckpointEngine` derives a `CheckpointPlan` describing what the
+// pager / VFS must do for the given mode. The plan is a sequence of
+// primitive ops; the L1 pager + L0 VFS execute them.
+// =============================================================================
+
+module core.database.sqlite.native.walblock.engine;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.walblock.mode.{
+    CheckpointMode, CmPassive, CmFull, CmRestart, CmTruncate,
+    waits_for_writers, waits_for_readers, restarts_wal, truncates_wal,
+};
+
+// -----------------------------------------------------------------------------
+// CheckpointStep — primitive op the pager performs
+// -----------------------------------------------------------------------------
+
+public type CheckpointStep is
+      CsAcquireWriterLock
+    | CsAcquireReaderBarrier
+    | CsCopyFramesToDb
+    | CsFsyncDb
+    | CsResetWalHeader
+    | CsTruncateWalFile
+    | CsReleaseWriterLock
+    | CsReleaseReaderBarrier;
+
+public fn step_kind_name(s: &CheckpointStep) -> Text {
+    match s {
+        CsAcquireWriterLock      => "acquire_writer".clone(),
+        CsAcquireReaderBarrier   => "acquire_reader_barrier".clone(),
+        CsCopyFramesToDb         => "copy_frames".clone(),
+        CsFsyncDb                => "fsync_db".clone(),
+        CsResetWalHeader         => "reset_wal_header".clone(),
+        CsTruncateWalFile        => "truncate_wal".clone(),
+        CsReleaseWriterLock      => "release_writer".clone(),
+        CsReleaseReaderBarrier   => "release_reader_barrier".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CheckpointPlan
+// -----------------------------------------------------------------------------
+
+public type CheckpointPlan is {
+    mode: CheckpointMode,
+    steps: List<CheckpointStep>,
+}
+
+public fn plan_for(mode: CheckpointMode) -> CheckpointPlan {
+    let mut steps: List<CheckpointStep> = List.new();
+    if waits_for_writers(&mode)  { steps.push(CsAcquireWriterLock); }
+    if waits_for_readers(&mode)  { steps.push(CsAcquireReaderBarrier); }
+    steps.push(CsCopyFramesToDb);
+    steps.push(CsFsyncDb);
+    if restarts_wal(&mode)       { steps.push(CsResetWalHeader); }
+    if truncates_wal(&mode)      { steps.push(CsTruncateWalFile); }
+    if waits_for_readers(&mode)  { steps.push(CsReleaseReaderBarrier); }
+    if waits_for_writers(&mode)  { steps.push(CsReleaseWriterLock); }
+    CheckpointPlan { mode: mode, steps: steps }
+}
+
+implement CheckpointPlan {
+    public fn step_count(&self) -> Int { self.steps.len() }
+
+    pub fn includes_step(&self, want: &CheckpointStep) -> Bool {
+        let want_name = step_kind_name(want);
+        let mut i: Int = 0;
+        while i < self.steps.len() {
+            if step_kind_name(&self.steps[i]) == want_name { return true; }
+            i = i + 1;
+        }
+        false
+    }
+}
