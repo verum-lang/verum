@@ -1,0 +1,139 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, psk, resume_verify, errors, rfc8446_4_2_11
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.11 server-side PSK resumption — `ResumeVerifyError`
+// enumerates the seven distinguishable failure modes the server can
+// report while processing a ClientHello `pre_shared_key` extension:
+//
+//   * NoAcceptableIdentity       — none of the offered identities matched
+//   * TicketDecryptFailure(TE)   — STEK decrypt produced TicketError
+//   * TicketExpired              — ticket.lifetime elapsed
+//   * AgeOutOfWindow             — obfuscated_age outside anti-replay window
+//   * BinderMismatch             — HMAC over truncated CH didn't match
+//   * KdfFailure(HkdfError)      — HKDF-Expand-Label underflow
+//   * CipherSuiteMismatch        — ticket's suite != ClientHello's proposed
+
+mount core.*;
+mount core.net.tls13.handshake.resume_verify.{ResumeVerifyError};
+mount core.net.tls13.handshake.resumption.{TicketError};
+mount core.security.kdf.hkdf.{HkdfError};
+
+fn no_acceptable_identity_is_a_unit_variant() {
+    let e = ResumeVerifyError.NoAcceptableIdentity;
+    match e {
+        ResumeVerifyError.NoAcceptableIdentity => {},
+        _ => panic("unit variant"),
+    }
+}
+
+fn ticket_decrypt_failure_wraps_ticket_error() {
+    let e = ResumeVerifyError.TicketDecryptFailure(TicketError.WrongKeyId);
+    match e {
+        ResumeVerifyError.TicketDecryptFailure(inner) => {
+            match inner {
+                TicketError.WrongKeyId => {},
+                _ => panic("expected WrongKeyId"),
+            }
+        },
+        _ => panic("expected TicketDecryptFailure"),
+    }
+}
+
+fn kdf_failure_wraps_hkdf_error() {
+    let e = ResumeVerifyError.KdfFailure(HkdfError.OutputTooLong { requested: 64, limit: 32 });
+    match e {
+        ResumeVerifyError.KdfFailure(inner) => {
+            match inner {
+                HkdfError.OutputTooLong { requested: _, limit: _ } => {},
+                _ => panic("expected OutputTooLong"),
+            }
+        },
+        _ => panic("expected KdfFailure"),
+    }
+}
+
+fn all_variants_constructible_and_distinct() {
+    let errs: [ResumeVerifyError; 7] = [
+        ResumeVerifyError.NoAcceptableIdentity,
+        ResumeVerifyError.TicketDecryptFailure(TicketError.SealFailure),
+        ResumeVerifyError.TicketExpired,
+        ResumeVerifyError.AgeOutOfWindow,
+        ResumeVerifyError.BinderMismatch,
+        ResumeVerifyError.KdfFailure(HkdfError.OutputTooLong { requested: 64, limit: 32 }),
+        ResumeVerifyError.CipherSuiteMismatch,
+    ];
+    let mut tags: [Int; 7] = [0; 7];
+    let mut i: Int = 0;
+    while i < 7 {
+        tags[i] = match errs[i] {
+            ResumeVerifyError.NoAcceptableIdentity        => 1,
+            ResumeVerifyError.TicketDecryptFailure(_)     => 2,
+            ResumeVerifyError.TicketExpired               => 3,
+            ResumeVerifyError.AgeOutOfWindow              => 4,
+            ResumeVerifyError.BinderMismatch              => 5,
+            ResumeVerifyError.KdfFailure(_)               => 6,
+            ResumeVerifyError.CipherSuiteMismatch         => 7,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 7 {
+        let mut k: Int = j + 1;
+        while k < 7 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn ticket_error_enum_is_six_variants() {
+    // The embedded TicketError has six distinguishable causes. Pin
+    // them so downstream servers classifying ticket-layer failures
+    // don't drift.
+    let variants: [TicketError; 6] = [
+        TicketError.SealFailure,
+        TicketError.OpenFailure,
+        TicketError.WrongKeyId,
+        TicketError.MalformedTicket,
+        TicketError.Expired,
+        TicketError.HkdfFailure,
+    ];
+    let mut tags: [Int; 6] = [0; 6];
+    let mut i: Int = 0;
+    while i < 6 {
+        tags[i] = match variants[i] {
+            TicketError.SealFailure     => 1,
+            TicketError.OpenFailure     => 2,
+            TicketError.WrongKeyId      => 3,
+            TicketError.MalformedTicket => 4,
+            TicketError.Expired         => 5,
+            TicketError.HkdfFailure     => 6,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 6 {
+        let mut k: Int = j + 1;
+        while k < 6 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    no_acceptable_identity_is_a_unit_variant();
+    ticket_decrypt_failure_wraps_ticket_error();
+    kdf_failure_wraps_hkdf_error();
+    all_variants_constructible_and_distinct();
+    ticket_error_enum_is_six_variants();
+    print("RFC 8446 §4.2.11 ResumeVerifyError + TicketError enums verified");
+    0
+}
