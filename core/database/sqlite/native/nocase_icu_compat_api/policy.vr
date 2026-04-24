@@ -1,0 +1,38 @@
+// NOCASE fold-policy taxonomy.
+
+module core.database.sqlite.native.nocase_icu_compat_api.policy;
+
+mount base.{Bool, Text};
+
+public type FoldPolicy is
+    | FpAsciiOnly        // SQLite default — A..Z ↔ a..z
+    | FpIcuLocale        // ICU-backed locale-aware fold
+    ;
+
+public fn policy_name(p: &FoldPolicy) -> Text {
+    match p {
+        FpAsciiOnly => "ascii_only".clone(),
+        FpIcuLocale => "icu_locale".clone(),
+    }
+}
+
+public fn default_policy() -> FoldPolicy { FpAsciiOnly }
+
+public fn folds_unicode(p: &FoldPolicy) -> Bool {
+    match p { FpIcuLocale => true, _ => false }
+}
+
+public fn requires_icu_build(p: &FoldPolicy) -> Bool {
+    match p { FpIcuLocale => true, _ => false }
+}
+
+// Selected non-ASCII codepoints that DEFAULT NOCASE will NOT fold.
+// (Informational — the ASCII fold table is defined in nocase_ascii_fold.)
+public fn known_unfolded_codepoint_count() -> Int { 6 }
+
+public fn ascii_fold_letter_count() -> Int { 26 }
+
+// Equality behaviour summary used by the type checker.
+public fn nocase_compares_as_binary_outside_ascii(p: &FoldPolicy) -> Bool {
+    match p { FpAsciiOnly => true, _ => false }
+}

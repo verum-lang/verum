@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vacuum_truncate_api, vacuum
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vacuum_truncate_api.plan.{
+    TruncateMode, TmReleaseAll, TmIncremental, TmNoTruncate,
+    mode_name, releases_to_fs, keeps_in_freelist,
+    TruncatePlan,
+    new,
+    pages_freed, bytes_freed, new_file_size, is_effective,
+    savings_fraction,
+};
+mount base.{Bool, Int64};
+
+fn test_mode_names() {
+    assert(mode_name(&TmReleaseAll)  == "release_all".clone());
+    assert(mode_name(&TmIncremental) == "incremental".clone());
+    assert(mode_name(&TmNoTruncate)  == "no_truncate".clone());
+}
+
+fn test_mode_behaviour() {
+    assert(releases_to_fs(&TmReleaseAll));
+    assert(!releases_to_fs(&TmIncremental));
+    assert(keeps_in_freelist(&TmIncremental));
+    assert(keeps_in_freelist(&TmNoTruncate));
+    assert(!keeps_in_freelist(&TmReleaseAll));
+}
+
+fn test_pages_freed_and_bytes_freed() {
+    let p = new(TmReleaseAll, 1000 as Int64, 600 as Int64, 4096 as Int64);
+    assert_eq(pages_freed(&p), 400 as Int64);
+    assert_eq(bytes_freed(&p), (400 as Int64) * (4096 as Int64));
+}
+
+fn test_new_file_size() {
+    let p = new(TmReleaseAll, 500 as Int64, 500 as Int64, 4096 as Int64);
+    assert_eq(new_file_size(&p), (500 as Int64) * (4096 as Int64));
+}
+
+fn test_is_effective() {
+    let p = new(TmReleaseAll, 1000 as Int64, 600 as Int64, 4096 as Int64);
+    assert(is_effective(&p));
+    let noop = new(TmReleaseAll, 500 as Int64, 500 as Int64, 4096 as Int64);
+    assert(!is_effective(&noop));
+}
+
+fn test_savings_fraction() {
+    let p = new(TmReleaseAll, 1000 as Int64, 500 as Int64, 4096 as Int64);
+    let frac = savings_fraction(&p);
+    assert(frac > 0.49 as Float);
+    assert(frac < 0.51 as Float);
+}
+
+fn test_savings_fraction_empty_before_is_zero() {
+    let p = new(TmReleaseAll, 0 as Int64, 0 as Int64, 4096 as Int64);
+    assert_eq(savings_fraction(&p), 0.0 as Float);
+}
+
+fn main() {
+    test_mode_names();
+    test_mode_behaviour();
+    test_pages_freed_and_bytes_freed();
+    test_new_file_size();
+    test_is_effective();
+    test_savings_fraction();
+    test_savings_fraction_empty_before_is_zero();
+}

@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/nocase_icu_compat_api/mod.vr
+// =============================================================================
+// Built-in NOCASE vs SQLITE_ENABLE_ICU full-Unicode case folding.
+// Spec §15.4.2 — NOCASE limitations.
+//
+// The default NOCASE collation folds ONLY the ASCII A-Z range. Code paths
+// that need Unicode folding must register an ICU-based collation (SQLite
+// provides that when built with SQLITE_ENABLE_ICU).
+// =============================================================================
+
+module core.database.sqlite.native.nocase_icu_compat_api;
+
+public module policy;

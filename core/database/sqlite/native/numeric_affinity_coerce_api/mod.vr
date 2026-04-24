@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/numeric_affinity_coerce_api/mod.vr
+// =============================================================================
+// NUMERIC affinity coercion — SQLite's column-affinity convert-on-store rules
+// (§3.3). NUMERIC affinity accepts any type but will coerce text that looks
+// like a number into INTEGER or REAL when storing.
+// =============================================================================
+
+module core.database.sqlite.native.numeric_affinity_coerce_api;
+
+public module coerce;

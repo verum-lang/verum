@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/drop_view_api/mod.vr
+// =============================================================================
+// DROP VIEW [IF EXISTS] [schema.]name
+// Spec §17.6 — views.
+// =============================================================================
+
+module core.database.sqlite.native.drop_view_api;
+
+public module spec;

@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, nocase_icu_compat_api, collation
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.nocase_icu_compat_api.policy.{
+    FoldPolicy, FpAsciiOnly, FpIcuLocale,
+    policy_name, default_policy,
+    folds_unicode, requires_icu_build,
+    known_unfolded_codepoint_count, ascii_fold_letter_count,
+    nocase_compares_as_binary_outside_ascii,
+};
+mount base.{Bool};
+
+fn test_policy_names() {
+    assert(policy_name(&FpAsciiOnly) == "ascii_only".clone());
+    assert(policy_name(&FpIcuLocale) == "icu_locale".clone());
+}
+
+fn test_default_is_ascii_only() {
+    match default_policy() { FpAsciiOnly => {}, _ => assert(false) }
+}
+
+fn test_folds_unicode() {
+    assert(!folds_unicode(&FpAsciiOnly));
+    assert(folds_unicode(&FpIcuLocale));
+}
+
+fn test_requires_icu_build() {
+    assert(requires_icu_build(&FpIcuLocale));
+    assert(!requires_icu_build(&FpAsciiOnly));
+}
+
+fn test_counts() {
+    assert_eq(ascii_fold_letter_count(), 26);
+    assert(known_unfolded_codepoint_count() >= 1);
+}
+
+fn test_binary_outside_ascii_flag() {
+    assert(nocase_compares_as_binary_outside_ascii(&FpAsciiOnly));
+    assert(!nocase_compares_as_binary_outside_ascii(&FpIcuLocale));
+}
+
+fn main() {
+    test_policy_names();
+    test_default_is_ascii_only();
+    test_folds_unicode();
+    test_requires_icu_build();
+    test_counts();
+    test_binary_outside_ascii_flag();
+}

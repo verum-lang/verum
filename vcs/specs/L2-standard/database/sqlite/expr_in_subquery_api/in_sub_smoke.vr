@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, expr_in_subquery_api, optimizer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.expr_in_subquery_api.strategy.{
+    InStrategy,
+    IsMaterialiseHash, IsMaterialiseIndex, IsCorrelatedScan,
+    IsConstantList, IsEmpty,
+    strategy_name,
+    runs_inner_once, uses_ephemeral_btree,
+    is_literal_list, is_degenerate,
+    Features, zero_features, classify,
+    not_in_on_empty_is_true,
+};
+mount base.{Bool};
+
+fn test_strategy_names() {
+    assert(strategy_name(&IsMaterialiseHash)  == "hash".clone());
+    assert(strategy_name(&IsMaterialiseIndex) == "index".clone());
+    assert(strategy_name(&IsCorrelatedScan)   == "correlated".clone());
+    assert(strategy_name(&IsConstantList)     == "constant_list".clone());
+    assert(strategy_name(&IsEmpty)            == "empty".clone());
+}
+
+fn test_runs_inner_once() {
+    assert(runs_inner_once(&IsMaterialiseHash));
+    assert(runs_inner_once(&IsMaterialiseIndex));
+    assert(!runs_inner_once(&IsCorrelatedScan));
+    assert(runs_inner_once(&IsConstantList));
+}
+
+fn test_uses_ephemeral_btree() {
+    assert(uses_ephemeral_btree(&IsMaterialiseIndex));
+    assert(!uses_ephemeral_btree(&IsMaterialiseHash));
+}
+
+fn test_is_literal_list_and_degenerate() {
+    assert(is_literal_list(&IsConstantList));
+    assert(!is_literal_list(&IsEmpty));
+    assert(is_degenerate(&IsEmpty));
+    assert(!is_degenerate(&IsConstantList));
+}
+
+fn test_classify_empty_wins_first() {
+    let mut f = zero_features();
+    f.list_is_empty = true;
+    f.correlated = true;    // should not matter
+    match classify(&f) { IsEmpty => {}, _ => assert(false) }
+}
+
+fn test_classify_constant_list() {
+    let mut f = zero_features();
+    f.is_constant_list = true;
+    match classify(&f) { IsConstantList => {}, _ => assert(false) }
+}
+
+fn test_classify_correlated() {
+    let mut f = zero_features();
+    f.correlated = true;
+    match classify(&f) { IsCorrelatedScan => {}, _ => assert(false) }
+}
+
+fn test_classify_dedup_is_index() {
+    let mut f = zero_features();
+    f.needs_dedup = true;
+    match classify(&f) { IsMaterialiseIndex => {}, _ => assert(false) }
+}
+
+fn test_classify_default_hash() {
+    let f = zero_features();
+    match classify(&f) { IsMaterialiseHash => {}, _ => assert(false) }
+}
+
+fn test_not_in_on_empty_is_true() {
+    assert(not_in_on_empty_is_true());
+}
+
+fn main() {
+    test_strategy_names();
+    test_runs_inner_once();
+    test_uses_ephemeral_btree();
+    test_is_literal_list_and_degenerate();
+    test_classify_empty_wins_first();
+    test_classify_constant_list();
+    test_classify_correlated();
+    test_classify_dedup_is_index();
+    test_classify_default_hash();
+    test_not_in_on_empty_is_true();
+}

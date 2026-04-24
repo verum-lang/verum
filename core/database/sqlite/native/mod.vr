@@ -716,3 +716,19 @@ public module scanstatus_v2_op_codes;
 public module pragma_query_only_api;
 // - pragma_foreign_keys_toggle: desired/effective/pending_flip txn-boundary toggler
 public module pragma_foreign_keys_toggle;
+// - expr_in_subquery_api: 5-strategy IN (SELECT ...) planner (hash/index/correlated/list/empty)
+public module expr_in_subquery_api;
+// - numeric_affinity_coerce_api: NUMERIC-affinity text→int/real coerce rules
+public module numeric_affinity_coerce_api;
+// - vtab_overload_function_api: sqlite3_overload_function request + 4-outcome classifier
+public module vtab_overload_function_api;
+// - drop_view_api: DROP VIEW [IF EXISTS] + 5-outcome classifier
+public module drop_view_api;
+// - pragma_mmap_size_api: per-conn mmap_size override with clamp + page-round
+public module pragma_mmap_size_api;
+// - stmt_readonly_api: 8-shape StmtShape + is_readonly + runnable_on_readonly_db gate
+public module stmt_readonly_api;
+// - nocase_icu_compat_api: default ASCII-only fold vs SQLITE_ENABLE_ICU fold policy
+public module nocase_icu_compat_api;
+// - vacuum_truncate_api: 3-mode TruncateMode (release_all/incremental/no) + pages/bytes freed
+public module vacuum_truncate_api;

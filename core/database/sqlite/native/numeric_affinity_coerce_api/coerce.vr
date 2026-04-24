@@ -1,0 +1,88 @@
+// NUMERIC-affinity coerce rules.
+
+module core.database.sqlite.native.numeric_affinity_coerce_api.coerce;
+
+mount base.{Bool, Text};
+
+public type InputKind is
+    | IkNull
+    | IkInt
+    | IkReal
+    | IkText
+    | IkBlob
+    ;
+
+public fn input_kind_name(k: &InputKind) -> Text {
+    match k {
+        IkNull => "null".clone(),
+        IkInt  => "int".clone(),
+        IkReal => "real".clone(),
+        IkText => "text".clone(),
+        IkBlob => "blob".clone(),
+    }
+}
+
+public type CoerceResult is
+    | CrKeepNull
+    | CrKeepInt
+    | CrKeepReal
+    | CrConvertTextToInt     // text parses cleanly as int
+    | CrConvertTextToReal    // text parses cleanly as real (or INT overflow)
+    | CrKeepText             // text that doesn't look numeric
+    | CrKeepBlob
+    ;
+
+public fn result_name(r: &CoerceResult) -> Text {
+    match r {
+        CrKeepNull           => "keep_null".clone(),
+        CrKeepInt            => "keep_int".clone(),
+        CrKeepReal           => "keep_real".clone(),
+        CrConvertTextToInt   => "text_to_int".clone(),
+        CrConvertTextToReal  => "text_to_real".clone(),
+        CrKeepText           => "keep_text".clone(),
+        CrKeepBlob           => "keep_blob".clone(),
+    }
+}
+
+public fn converted(r: &CoerceResult) -> Bool {
+    match r {
+        CrConvertTextToInt  => true,
+        CrConvertTextToReal => true,
+        _                   => false,
+    }
+}
+
+public fn kept_as_text(r: &CoerceResult) -> Bool {
+    match r { CrKeepText => true, _ => false }
+}
+
+// Classify a stored-value coercion given the input kind + helpers from the
+// text parser.
+public fn classify(
+    kind: &InputKind,
+    text_parses_as_int: Bool,
+    text_parses_as_real: Bool,
+) -> CoerceResult {
+    match kind {
+        IkNull => CrKeepNull,
+        IkInt  => CrKeepInt,
+        IkReal => CrKeepReal,
+        IkBlob => CrKeepBlob,
+        IkText => {
+            if text_parses_as_int  { return CrConvertTextToInt; }
+            if text_parses_as_real { return CrConvertTextToReal; }
+            CrKeepText
+        },
+    }
+}
+
+// Whether NUMERIC affinity is "lossy" on this coercion — returns true when
+// the stored type differs from the input type AND is not just a text→num.
+public fn is_lossy(r: &CoerceResult) -> Bool {
+    match r {
+        // Text → numeric is intentional, not lossy.
+        CrConvertTextToInt  => false,
+        CrConvertTextToReal => false,
+        _                   => false,
+    }
+}

@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/pragma_mmap_size_api/mod.vr
+// =============================================================================
+// PRAGMA mmap_size — per-connection override of the global mmap size.
+// Spec §18.4 — mmap_size + §10.2 — memory-mapped I/O.
+//
+// Value bounds:
+//   0          — disable mmap for this db
+//   positive   — cap in bytes (rounded to page boundary)
+//   >= ceiling — clamped to SQLITE_MAX_MMAP_SIZE
+// =============================================================================
+
+module core.database.sqlite.native.pragma_mmap_size_api;
+
+public module setting;

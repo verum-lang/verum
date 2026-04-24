@@ -1,0 +1,67 @@
+// stmt_readonly classifier.
+
+module core.database.sqlite.native.stmt_readonly_api.classify;
+
+mount base.{Bool, Text};
+
+public type StmtShape is
+    | SsSelect              // pure read
+    | SsExplain             // EXPLAIN / EXPLAIN QUERY PLAN
+    | SsPragmaRead          // PRAGMA that only reads state
+    | SsTxnControl          // BEGIN / COMMIT / ROLLBACK / SAVEPOINT
+    | SsDml                 // INSERT/UPDATE/DELETE
+    | SsDdl                 // CREATE/ALTER/DROP/ANALYZE
+    | SsPragmaWrite         // PRAGMA that mutates (foreign_keys=ON, etc.)
+    | SsVacuum              // VACUUM
+    ;
+
+public fn shape_name(s: &StmtShape) -> Text {
+    match s {
+        SsSelect       => "select".clone(),
+        SsExplain      => "explain".clone(),
+        SsPragmaRead   => "pragma_read".clone(),
+        SsTxnControl   => "txn_control".clone(),
+        SsDml          => "dml".clone(),
+        SsDdl          => "ddl".clone(),
+        SsPragmaWrite  => "pragma_write".clone(),
+        SsVacuum       => "vacuum".clone(),
+    }
+}
+
+// SQLite's sqlite3_stmt_readonly returns non-zero for SELECT and "pragma
+// statements that contain no writes" — we mirror that rule.
+public fn is_readonly(s: &StmtShape) -> Bool {
+    match s {
+        SsSelect      => true,
+        SsExplain     => true,
+        SsPragmaRead  => true,
+        SsTxnControl  => true,   // doesn't modify schema/data directly
+        _             => false,
+    }
+}
+
+// A stmt might still take a write-lock even if "readonly" (e.g. a PRAGMA
+// that reads a page-cache-heavy state). This flag is separate.
+public fn may_hold_write_lock(s: &StmtShape) -> Bool {
+    match s {
+        SsDml          => true,
+        SsDdl          => true,
+        SsVacuum       => true,
+        SsPragmaWrite  => true,
+        _              => false,
+    }
+}
+
+public fn is_txn_ctrl(s: &StmtShape) -> Bool {
+    match s { SsTxnControl => true, _ => false }
+}
+
+// A read-only stmt on a read-only database is allowed.
+public fn runnable_on_readonly_db(s: &StmtShape) -> Bool {
+    is_readonly(s)
+}
+
+// Explain shape is *never* actually executed as a schema mutation.
+public fn is_explain(s: &StmtShape) -> Bool {
+    match s { SsExplain => true, _ => false }
+}

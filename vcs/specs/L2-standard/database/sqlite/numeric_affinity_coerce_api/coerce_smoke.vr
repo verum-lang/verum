@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, numeric_affinity_coerce_api, types
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.numeric_affinity_coerce_api.coerce.{
+    InputKind, IkNull, IkInt, IkReal, IkText, IkBlob,
+    input_kind_name,
+    CoerceResult, CrKeepNull, CrKeepInt, CrKeepReal,
+    CrConvertTextToInt, CrConvertTextToReal, CrKeepText, CrKeepBlob,
+    result_name, converted, kept_as_text,
+    classify, is_lossy,
+};
+mount base.{Bool};
+
+fn test_input_kind_names() {
+    assert(input_kind_name(&IkNull) == "null".clone());
+    assert(input_kind_name(&IkInt)  == "int".clone());
+    assert(input_kind_name(&IkBlob) == "blob".clone());
+}
+
+fn test_result_names() {
+    assert(result_name(&CrKeepNull)          == "keep_null".clone());
+    assert(result_name(&CrConvertTextToInt)  == "text_to_int".clone());
+    assert(result_name(&CrKeepBlob)          == "keep_blob".clone());
+}
+
+fn test_converted_classifier() {
+    assert(converted(&CrConvertTextToInt));
+    assert(converted(&CrConvertTextToReal));
+    assert(!converted(&CrKeepText));
+    assert(!converted(&CrKeepInt));
+}
+
+fn test_kept_as_text_classifier() {
+    assert(kept_as_text(&CrKeepText));
+    assert(!kept_as_text(&CrConvertTextToInt));
+    assert(!kept_as_text(&CrKeepBlob));
+}
+
+fn test_classify_null() {
+    match classify(&IkNull, false, false) { CrKeepNull => {}, _ => assert(false) }
+}
+
+fn test_classify_int_and_real() {
+    match classify(&IkInt,  false, false) { CrKeepInt  => {}, _ => assert(false) }
+    match classify(&IkReal, false, false) { CrKeepReal => {}, _ => assert(false) }
+}
+
+fn test_classify_blob() {
+    match classify(&IkBlob, true, true) { CrKeepBlob => {}, _ => assert(false) }
+}
+
+fn test_classify_text_int_wins() {
+    match classify(&IkText, true, false)  { CrConvertTextToInt  => {}, _ => assert(false) }
+    match classify(&IkText, true, true)   { CrConvertTextToInt  => {}, _ => assert(false) }
+}
+
+fn test_classify_text_real() {
+    match classify(&IkText, false, true) { CrConvertTextToReal => {}, _ => assert(false) }
+}
+
+fn test_classify_text_keeps_as_text() {
+    match classify(&IkText, false, false) { CrKeepText => {}, _ => assert(false) }
+}
+
+fn test_is_lossy_false_for_text_conversions() {
+    assert(!is_lossy(&CrConvertTextToInt));
+    assert(!is_lossy(&CrConvertTextToReal));
+}
+
+fn main() {
+    test_input_kind_names();
+    test_result_names();
+    test_converted_classifier();
+    test_kept_as_text_classifier();
+    test_classify_null();
+    test_classify_int_and_real();
+    test_classify_blob();
+    test_classify_text_int_wins();
+    test_classify_text_real();
+    test_classify_text_keeps_as_text();
+    test_is_lossy_false_for_text_conversions();
+}

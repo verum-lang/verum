@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_overload_function_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_overload_function_api.request.{
+    OverloadRequest,
+    new, is_variadic,
+    Outcome, OoInstalled, OoAlreadyNative, OoOutOfMemory, OoNotSupported,
+    outcome_name, is_success, is_retryable, classify,
+};
+mount base.{Bool};
+
+fn test_new_and_variadic() {
+    let r = new("custom_lower".clone(), 1, "my_vtab".clone());
+    assert(!is_variadic(&r));
+    let v = new("any".clone(), -1, "my_vtab".clone());
+    assert(is_variadic(&v));
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&OoInstalled)     == "installed".clone());
+    assert(outcome_name(&OoAlreadyNative) == "already_native".clone());
+    assert(outcome_name(&OoOutOfMemory)   == "out_of_memory".clone());
+    assert(outcome_name(&OoNotSupported)  == "not_supported".clone());
+}
+
+fn test_is_success_only_installed() {
+    assert(is_success(&OoInstalled));
+    assert(!is_success(&OoAlreadyNative));
+    assert(!is_success(&OoOutOfMemory));
+    assert(!is_success(&OoNotSupported));
+}
+
+fn test_retryable_only_oom() {
+    assert(is_retryable(&OoOutOfMemory));
+    assert(!is_retryable(&OoInstalled));
+    assert(!is_retryable(&OoNotSupported));
+}
+
+fn test_classify_ok_path() {
+    match classify(true, false, true) { OoInstalled => {}, _ => assert(false) }
+}
+
+fn test_classify_no_support() {
+    match classify(false, false, true) { OoNotSupported => {}, _ => assert(false) }
+}
+
+fn test_classify_already_native() {
+    match classify(true, true, true) { OoAlreadyNative => {}, _ => assert(false) }
+}
+
+fn test_classify_oom() {
+    match classify(true, false, false) { OoOutOfMemory => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_new_and_variadic();
+    test_outcome_names();
+    test_is_success_only_installed();
+    test_retryable_only_oom();
+    test_classify_ok_path();
+    test_classify_no_support();
+    test_classify_already_native();
+    test_classify_oom();
+}

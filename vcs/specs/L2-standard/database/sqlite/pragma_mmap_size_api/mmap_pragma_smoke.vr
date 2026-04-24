@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma_mmap_size_api, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pragma_mmap_size_api.setting.{
+    max_mmap_ceiling,
+    MmapSetting,
+    disabled_setting, resolve,
+    is_enabled, was_clamped, active_bytes,
+};
+mount base.{Bool, Int64};
+
+fn test_max_ceiling_is_0x7fff0000() {
+    assert_eq(max_mmap_ceiling(), 0x7FFF0000 as Int64);
+}
+
+fn test_disabled_setting() {
+    let s = disabled_setting();
+    assert(!is_enabled(&s));
+    assert_eq(active_bytes(&s), 0 as Int64);
+}
+
+fn test_resolve_zero_disables() {
+    let s = resolve(0 as Int64, 4096 as Int64);
+    assert(!is_enabled(&s));
+}
+
+fn test_resolve_negative_disables() {
+    let s = resolve(-10 as Int64, 4096 as Int64);
+    assert(!is_enabled(&s));
+}
+
+fn test_resolve_small_pages_rounded() {
+    // 100 bytes requested + 4096 page → active = 4096
+    let s = resolve(100 as Int64, 4096 as Int64);
+    assert(is_enabled(&s));
+    assert_eq(active_bytes(&s), 4096 as Int64);
+    assert(!was_clamped(&s));
+}
+
+fn test_resolve_exact_multiple() {
+    let s = resolve(8192 as Int64, 4096 as Int64);
+    assert_eq(active_bytes(&s), 8192 as Int64);
+}
+
+fn test_resolve_clamps_above_ceiling() {
+    let huge = max_mmap_ceiling() + (1 as Int64);
+    let s = resolve(huge, 4096 as Int64);
+    assert(is_enabled(&s));
+    assert(was_clamped(&s));
+    assert(active_bytes(&s) <= max_mmap_ceiling());
+}
+
+fn test_resolve_at_ceiling_not_clamped() {
+    let s = resolve(max_mmap_ceiling(), 4096 as Int64);
+    assert(!was_clamped(&s));
+    assert_eq(active_bytes(&s), max_mmap_ceiling());
+}
+
+fn main() {
+    test_max_ceiling_is_0x7fff0000();
+    test_disabled_setting();
+    test_resolve_zero_disables();
+    test_resolve_negative_disables();
+    test_resolve_small_pages_rounded();
+    test_resolve_exact_multiple();
+    test_resolve_clamps_above_ceiling();
+    test_resolve_at_ceiling_not_clamped();
+}

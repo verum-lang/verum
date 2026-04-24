@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_readonly_api/mod.vr
+// =============================================================================
+// sqlite3_stmt_readonly — classify a prepared statement as read-only,
+// read-write, or "no-op" (COMMIT/ROLLBACK/SAVEPOINT/PRAGMA that only reads).
+// Spec §11.1 — stmt_readonly.
+// =============================================================================
+
+module core.database.sqlite.native.stmt_readonly_api;
+
+public module classify;

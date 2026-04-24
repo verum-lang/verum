@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/expr_in_subquery_api/mod.vr
+// =============================================================================
+// WHERE x IN (SELECT ...) subquery plan — materialized ephemeral table vs
+// correlated lookup vs row-by-row scan.
+// Spec §13.5.10 — IN-subquery planning.
+// =============================================================================
+
+module core.database.sqlite.native.expr_in_subquery_api;
+
+public module strategy;

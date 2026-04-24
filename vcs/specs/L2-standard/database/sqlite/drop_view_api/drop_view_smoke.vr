@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, drop_view_api, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.drop_view_api.spec.{
+    DropViewSpec,
+    new, with_schema, with_if_exists, has_schema,
+    Outcome,
+    OoDropped, OoNoSuchViewIgnored, OoNoSuchView, OoIsATable, OoProtectedName,
+    outcome_name, is_success, is_error, classify,
+};
+mount base.{Bool};
+
+fn test_new_defaults() {
+    let s = new("v".clone());
+    assert(s.name == "v".clone());
+    assert(!s.if_exists);
+    assert(!has_schema(&s));
+}
+
+fn test_with_schema_and_if_exists() {
+    let s = with_if_exists(with_schema(new("v".clone()), "aux".clone()));
+    assert(has_schema(&s));
+    assert(s.if_exists);
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&OoDropped)             == "dropped".clone());
+    assert(outcome_name(&OoNoSuchViewIgnored)   == "no_such_view_ignored".clone());
+    assert(outcome_name(&OoNoSuchView)          == "no_such_view".clone());
+    assert(outcome_name(&OoIsATable)            == "is_a_table".clone());
+    assert(outcome_name(&OoProtectedName)       == "protected_name".clone());
+}
+
+fn test_is_success_set() {
+    assert(is_success(&OoDropped));
+    assert(is_success(&OoNoSuchViewIgnored));
+    assert(!is_success(&OoNoSuchView));
+    assert(!is_success(&OoIsATable));
+    assert(!is_success(&OoProtectedName));
+    assert(is_error(&OoProtectedName));
+}
+
+fn test_classify_ok_path() {
+    let s = new("my_view".clone());
+    match classify(&s, true, true, false) { OoDropped => {}, _ => assert(false) }
+}
+
+fn test_classify_no_view_without_if_exists() {
+    let s = new("ghost".clone());
+    match classify(&s, false, false, false) { OoNoSuchView => {}, _ => assert(false) }
+}
+
+fn test_classify_no_view_with_if_exists() {
+    let s = with_if_exists(new("ghost".clone()));
+    match classify(&s, false, false, false) { OoNoSuchViewIgnored => {}, _ => assert(false) }
+}
+
+fn test_classify_target_is_table() {
+    let s = new("users".clone());
+    match classify(&s, true, false, false) { OoIsATable => {}, _ => assert(false) }
+}
+
+fn test_classify_protected_name() {
+    let s = new("sqlite_master".clone());
+    match classify(&s, true, true, true) { OoProtectedName => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_new_defaults();
+    test_with_schema_and_if_exists();
+    test_outcome_names();
+    test_is_success_set();
+    test_classify_ok_path();
+    test_classify_no_view_without_if_exists();
+    test_classify_no_view_with_if_exists();
+    test_classify_target_is_table();
+    test_classify_protected_name();
+}

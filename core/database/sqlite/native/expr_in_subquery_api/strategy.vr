@@ -1,0 +1,74 @@
+// IN-subquery materialisation strategy.
+
+module core.database.sqlite.native.expr_in_subquery_api.strategy;
+
+mount base.{Bool, Text};
+
+public type InStrategy is
+    | IsMaterialiseHash        // build hash of SELECT once, probe per outer row
+    | IsMaterialiseIndex       // build ephemeral B-tree when dedup / ordering needed
+    | IsCorrelatedScan         // re-evaluate SELECT per outer row (correlated)
+    | IsConstantList           // IN (1, 2, 3) → small literal list, no index
+    | IsEmpty                  // IN () degenerates to FALSE (NULL for NOT IN)
+    ;
+
+public fn strategy_name(s: &InStrategy) -> Text {
+    match s {
+        IsMaterialiseHash  => "hash".clone(),
+        IsMaterialiseIndex => "index".clone(),
+        IsCorrelatedScan   => "correlated".clone(),
+        IsConstantList     => "constant_list".clone(),
+        IsEmpty            => "empty".clone(),
+    }
+}
+
+public fn runs_inner_once(s: &InStrategy) -> Bool {
+    match s {
+        IsMaterialiseHash  => true,
+        IsMaterialiseIndex => true,
+        IsCorrelatedScan   => false,
+        IsConstantList     => true,
+        IsEmpty            => true,
+    }
+}
+
+public fn uses_ephemeral_btree(s: &InStrategy) -> Bool {
+    match s { IsMaterialiseIndex => true, _ => false }
+}
+
+public fn is_literal_list(s: &InStrategy) -> Bool {
+    match s { IsConstantList => true, _ => false }
+}
+
+public fn is_degenerate(s: &InStrategy) -> Bool {
+    match s { IsEmpty => true, _ => false }
+}
+
+// Inputs to the strategy classifier.
+public type Features is {
+    correlated: Bool,        // subquery references outer columns
+    is_constant_list: Bool,  // right side is a literal tuple
+    list_is_empty: Bool,
+    needs_dedup: Bool,       // duplicates in the inner SELECT are possible
+};
+
+public fn zero_features() -> Features {
+    Features {
+        correlated: false,
+        is_constant_list: false,
+        list_is_empty: false,
+        needs_dedup: false,
+    }
+}
+
+public fn classify(f: &Features) -> InStrategy {
+    if f.list_is_empty { return IsEmpty; }
+    if f.is_constant_list { return IsConstantList; }
+    if f.correlated { return IsCorrelatedScan; }
+    if f.needs_dedup { return IsMaterialiseIndex; }
+    IsMaterialiseHash
+}
+
+// NOT IN returns NULL if the right side contains NULL. In the degenerate-empty
+// case NOT IN is TRUE, because "no rows match" beats "some might be NULL".
+public fn not_in_on_empty_is_true() -> Bool { true }

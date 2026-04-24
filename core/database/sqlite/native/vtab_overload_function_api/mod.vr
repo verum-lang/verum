@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_overload_function_api/mod.vr
+// =============================================================================
+// sqlite3_overload_function — advertise that a vtab may override the named
+// scalar function. Spec §16.1.10 — function overload.
+//
+// Used by xBestIndex → sqlite3_vtab_overload_function to signal that a scalar
+// may be intercepted when applied to columns of a particular vtab.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_overload_function_api;
+
+public module request;

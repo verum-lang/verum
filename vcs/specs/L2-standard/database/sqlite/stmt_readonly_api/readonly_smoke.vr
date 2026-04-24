@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stmt_readonly_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stmt_readonly_api.classify.{
+    StmtShape,
+    SsSelect, SsExplain, SsPragmaRead, SsTxnControl,
+    SsDml, SsDdl, SsPragmaWrite, SsVacuum,
+    shape_name,
+    is_readonly, may_hold_write_lock, is_txn_ctrl,
+    runnable_on_readonly_db, is_explain,
+};
+mount base.{Bool};
+
+fn test_shape_names() {
+    assert(shape_name(&SsSelect)      == "select".clone());
+    assert(shape_name(&SsPragmaRead)  == "pragma_read".clone());
+    assert(shape_name(&SsTxnControl)  == "txn_control".clone());
+    assert(shape_name(&SsVacuum)      == "vacuum".clone());
+}
+
+fn test_is_readonly_set() {
+    assert(is_readonly(&SsSelect));
+    assert(is_readonly(&SsExplain));
+    assert(is_readonly(&SsPragmaRead));
+    assert(is_readonly(&SsTxnControl));
+    assert(!is_readonly(&SsDml));
+    assert(!is_readonly(&SsDdl));
+    assert(!is_readonly(&SsPragmaWrite));
+    assert(!is_readonly(&SsVacuum));
+}
+
+fn test_may_hold_write_lock_set() {
+    assert(may_hold_write_lock(&SsDml));
+    assert(may_hold_write_lock(&SsDdl));
+    assert(may_hold_write_lock(&SsVacuum));
+    assert(may_hold_write_lock(&SsPragmaWrite));
+    assert(!may_hold_write_lock(&SsSelect));
+    assert(!may_hold_write_lock(&SsExplain));
+}
+
+fn test_is_txn_ctrl() {
+    assert(is_txn_ctrl(&SsTxnControl));
+    assert(!is_txn_ctrl(&SsSelect));
+}
+
+fn test_is_explain() {
+    assert(is_explain(&SsExplain));
+    assert(!is_explain(&SsSelect));
+}
+
+fn test_runnable_on_readonly_db_matches_is_readonly() {
+    assert(runnable_on_readonly_db(&SsSelect));
+    assert(runnable_on_readonly_db(&SsExplain));
+    assert(!runnable_on_readonly_db(&SsDml));
+    assert(!runnable_on_readonly_db(&SsDdl));
+}
+
+fn main() {
+    test_shape_names();
+    test_is_readonly_set();
+    test_may_hold_write_lock_set();
+    test_is_txn_ctrl();
+    test_is_explain();
+    test_runnable_on_readonly_db_matches_is_readonly();
+}

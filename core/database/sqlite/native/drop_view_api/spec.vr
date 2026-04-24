@@ -1,0 +1,71 @@
+// DROP VIEW spec + outcome classifier.
+
+module core.database.sqlite.native.drop_view_api.spec;
+
+mount base.{Bool, Text};
+
+public type DropViewSpec is {
+    schema: Text,      // empty = search all schemas
+    name: Text,
+    if_exists: Bool,
+};
+
+public fn new(name: Text) -> DropViewSpec {
+    DropViewSpec { schema: "".clone(), name: name, if_exists: false }
+}
+
+public fn with_schema(mut s: DropViewSpec, schema: Text) -> DropViewSpec {
+    s.schema = schema;
+    s
+}
+
+public fn with_if_exists(mut s: DropViewSpec) -> DropViewSpec {
+    s.if_exists = true;
+    s
+}
+
+public fn has_schema(s: &DropViewSpec) -> Bool {
+    s.schema.len() > 0
+}
+
+public type Outcome is
+    | OoDropped              // view removed + schema cookie bumped
+    | OoNoSuchViewIgnored    // IF EXISTS and no matching view → silent ok
+    | OoNoSuchView           // no view + no IF EXISTS → SQLITE_ERROR
+    | OoIsATable             // named object is a table, not a view
+    | OoProtectedName        // sqlite_* reserved names
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OoDropped             => "dropped".clone(),
+        OoNoSuchViewIgnored   => "no_such_view_ignored".clone(),
+        OoNoSuchView          => "no_such_view".clone(),
+        OoIsATable            => "is_a_table".clone(),
+        OoProtectedName       => "protected_name".clone(),
+    }
+}
+
+public fn is_success(o: &Outcome) -> Bool {
+    match o {
+        OoDropped           => true,
+        OoNoSuchViewIgnored => true,
+        _                   => false,
+    }
+}
+
+public fn is_error(o: &Outcome) -> Bool { !is_success(o) }
+
+// Decide the outcome given what the resolver found.
+//   found       — an object with that name exists
+//   is_view     — the found object is a view (vs table/index/trigger)
+//   protected   — name starts with "sqlite_"
+public fn classify(s: &DropViewSpec, found: Bool, is_view: Bool, protected: Bool) -> Outcome {
+    if protected { return OoProtectedName; }
+    if !found {
+        if s.if_exists { return OoNoSuchViewIgnored; }
+        return OoNoSuchView;
+    }
+    if !is_view { return OoIsATable; }
+    OoDropped
+}

@@ -1,0 +1,74 @@
+// VACUUM truncation plan + outcome.
+
+module core.database.sqlite.native.vacuum_truncate_api.plan;
+
+mount base.{Bool, Int64};
+
+public type TruncateMode is
+    | TmReleaseAll         // default full VACUUM
+    | TmIncremental        // PRAGMA incremental_vacuum
+    | TmNoTruncate         // disabled
+    ;
+
+public fn mode_name(m: &TruncateMode) -> Text {
+    match m {
+        TmReleaseAll   => "release_all".clone(),
+        TmIncremental  => "incremental".clone(),
+        TmNoTruncate   => "no_truncate".clone(),
+    }
+}
+
+public fn releases_to_fs(m: &TruncateMode) -> Bool {
+    match m { TmReleaseAll => true, _ => false }
+}
+
+public fn keeps_in_freelist(m: &TruncateMode) -> Bool {
+    match m {
+        TmIncremental => true,
+        TmNoTruncate  => true,
+        _             => false,
+    }
+}
+
+public type TruncatePlan is {
+    mode: TruncateMode,
+    before_pages: Int64,
+    after_pages: Int64,
+    page_size: Int64,
+};
+
+public fn new(mode: TruncateMode, before_pages: Int64, after_pages: Int64, page_size: Int64) -> TruncatePlan {
+    TruncatePlan {
+        mode: mode,
+        before_pages: before_pages,
+        after_pages: after_pages,
+        page_size: page_size,
+    }
+}
+
+public fn pages_freed(p: &TruncatePlan) -> Int64 {
+    if p.before_pages <= p.after_pages { return 0 as Int64; }
+    p.before_pages - p.after_pages
+}
+
+public fn bytes_freed(p: &TruncatePlan) -> Int64 {
+    pages_freed(p) * p.page_size
+}
+
+public fn new_file_size(p: &TruncatePlan) -> Int64 {
+    p.after_pages * p.page_size
+}
+
+public fn is_effective(p: &TruncatePlan) -> Bool {
+    pages_freed(p) > (0 as Int64)
+}
+
+// Recovery space saved as a fraction of original size.
+public fn savings_fraction(p: &TruncatePlan) -> Float {
+    if p.before_pages <= (0 as Int64) { return 0.0 as Float; }
+    let freed = pages_freed(p) as Float;
+    let before = p.before_pages as Float;
+    freed / before
+}
+
+mount base.{Text};

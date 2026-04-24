@@ -1,0 +1,57 @@
+// PRAGMA mmap_size setting + clamp/round rules.
+
+module core.database.sqlite.native.pragma_mmap_size_api.setting;
+
+mount base.{Bool, Int64};
+
+public fn max_mmap_ceiling() -> Int64 { 0x7FFF0000 as Int64 }
+
+public type MmapSetting is {
+    requested: Int64,
+    active: Int64,
+    clamped_high: Bool,
+    disabled: Bool,
+};
+
+public fn disabled_setting() -> MmapSetting {
+    MmapSetting {
+        requested: 0 as Int64,
+        active: 0 as Int64,
+        clamped_high: false,
+        disabled: true,
+    }
+}
+
+// Round `n` up to the next multiple of `page_size`.
+fn round_up_to_page(n: Int64, page_size: Int64) -> Int64 {
+    if page_size <= (0 as Int64) { return n; }
+    let rem = n % page_size;
+    if rem == (0 as Int64) { n } else { n + (page_size - rem) }
+}
+
+public fn resolve(requested: Int64, page_size: Int64) -> MmapSetting {
+    if requested <= (0 as Int64) {
+        return MmapSetting {
+            requested: requested,
+            active: 0 as Int64,
+            clamped_high: false,
+            disabled: true,
+        };
+    }
+    let ceiling = max_mmap_ceiling();
+    let clamped = requested > ceiling;
+    let capped = if clamped { ceiling } else { requested };
+    let rounded = round_up_to_page(capped, page_size);
+    // Rounding may push past ceiling; re-cap.
+    let final_val = if rounded > ceiling { ceiling } else { rounded };
+    MmapSetting {
+        requested: requested,
+        active: final_val,
+        clamped_high: clamped,
+        disabled: false,
+    }
+}
+
+public fn is_enabled(s: &MmapSetting) -> Bool { !s.disabled && s.active > (0 as Int64) }
+public fn was_clamped(s: &MmapSetting) -> Bool { s.clamped_high }
+public fn active_bytes(s: &MmapSetting) -> Int64 { s.active }
