@@ -1,0 +1,174 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, codec, vec_u24, sub_reader, rfc8446_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §3 — the rest of the codec surface: vec_u24 3-byte length
+// backpatch, sub_u16 / sub_u8 / sub_u24 bounded sub-readers, take_u24
+// / take_u32 / take_vec_u* and the Overflow error when a u8-prefixed
+// body exceeds 255 bytes.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.codec.{
+    Reader, CodecError,
+    put_u8, put_u16, put_u24, put_u32, put_bytes,
+    vec_u8, vec_u16, vec_u24,
+};
+
+fn vec_u24_backpatches_three_byte_length() {
+    let mut out: List<Byte> = [];
+    vec_u24(&mut out, |b| {
+        // Write 70000 bytes — tests the full u24 range.
+        let mut i: Int = 0;
+        while i < 70_000 {
+            put_u8(b, (i & 0xFF_u32) as Byte);
+            i = i + 1;
+        }
+        Ok(())
+    }).unwrap();
+    // 3 length bytes + 70000 body = 70003.
+    assert(out.len() == 70_003);
+    // 70000 = 0x011170.
+    assert(out[0] == 0x01_u8);
+    assert(out[1] == 0x11_u8);
+    assert(out[2] == 0x70_u8);
+    // First body byte is 0x00, second is 0x01.
+    assert(out[3] == 0x00_u8);
+    assert(out[4] == 0x01_u8);
+}
+
+fn vec_u8_overflow_when_body_exceeds_255() {
+    let mut out: List<Byte> = [];
+    match vec_u8(&mut out, |b| {
+        let mut i: Int = 0;
+        while i < 256 {
+            put_u8(b, 0x42_u8);
+            i = i + 1;
+        }
+        Ok(())
+    }) {
+        Err(CodecError.Overflow) => {},
+        _ => panic("u8 body > 255 must be Overflow"),
+    }
+}
+
+fn take_u24_reads_big_endian() {
+    let bytes: List<Byte> = [0xAB_u8, 0xCD_u8, 0xEF_u8];
+    let mut r = Reader.new(bytes.as_slice());
+    assert(r.take_u24().unwrap() == 0x00ABCDEF_u32);
+    assert(r.is_at_end());
+}
+
+fn take_u32_reads_big_endian() {
+    let bytes: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let mut r = Reader.new(bytes.as_slice());
+    assert(r.take_u32().unwrap() == 0xDEADBEEF_u32);
+}
+
+fn take_vec_u8_reads_length_and_bytes() {
+    // Length prefix = 3, body = [0x11, 0x22, 0x33].
+    let wire: List<Byte> = [0x03_u8, 0x11_u8, 0x22_u8, 0x33_u8];
+    let mut r = Reader.new(wire.as_slice());
+    let body = r.take_vec_u8().unwrap();
+    assert(body.len() == 3);
+    assert(body[0] == 0x11_u8);
+    assert(body[2] == 0x33_u8);
+    assert(r.is_at_end());
+}
+
+fn take_vec_u16_reads_length_and_bytes() {
+    // Length prefix = 0x0005, body = 5 bytes.
+    let wire: List<Byte> = [0x00_u8, 0x05_u8, 0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8];
+    let mut r = Reader.new(wire.as_slice());
+    let body = r.take_vec_u16().unwrap();
+    assert(body.len() == 5);
+    assert(body[0] == 0x41_u8);
+    assert(body[4] == 0x45_u8);
+}
+
+fn take_vec_u24_reads_large_body() {
+    // Length prefix = 0x000008, body = 8 bytes.
+    let wire: List<Byte> = [
+        0x00_u8, 0x00_u8, 0x08_u8,
+        0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8, 0x07_u8, 0x08_u8,
+    ];
+    let mut r = Reader.new(wire.as_slice());
+    let body = r.take_vec_u24().unwrap();
+    assert(body.len() == 8);
+    assert(body[7] == 0x08_u8);
+}
+
+fn sub_u16_bounds_inner_reader() {
+    // Outer has 2-byte length 0x04 + 4 bytes body + 2 trailing bytes.
+    // Sub-reader must be bounded to the 4 body bytes only.
+    let wire: List<Byte> = [
+        0x00_u8, 0x04_u8,
+        0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,
+        0xEE_u8, 0xFF_u8,
+    ];
+    let mut r = Reader.new(wire.as_slice());
+    let mut sub = r.sub_u16().unwrap();
+    assert(sub.remaining() == 4);
+    assert(sub.take_u8().unwrap() == 0xAA_u8);
+    assert(sub.take_u8().unwrap() == 0xBB_u8);
+    assert(sub.take_u8().unwrap() == 0xCC_u8);
+    assert(sub.take_u8().unwrap() == 0xDD_u8);
+    assert(sub.is_at_end());
+    // Outer reader cursor advanced past both length + body.
+    assert(r.remaining() == 2);
+    assert(r.take_u8().unwrap() == 0xEE_u8);
+}
+
+fn sub_u8_bounds_inner_reader() {
+    let wire: List<Byte> = [0x02_u8, 0x11_u8, 0x22_u8, 0x99_u8];
+    let mut r = Reader.new(wire.as_slice());
+    let mut sub = r.sub_u8().unwrap();
+    assert(sub.remaining() == 2);
+    assert(sub.take_u16().unwrap() == 0x1122_u16);
+    // Outer still has the trailing byte.
+    assert(r.take_u8().unwrap() == 0x99_u8);
+}
+
+fn sub_u24_bounds_inner_reader() {
+    // 3-byte length 0x000003 + body + trailing.
+    let wire: List<Byte> = [
+        0x00_u8, 0x00_u8, 0x03_u8,
+        0xA0_u8, 0xB0_u8, 0xC0_u8,
+        0xFF_u8,
+    ];
+    let mut r = Reader.new(wire.as_slice());
+    let mut sub = r.sub_u24().unwrap();
+    assert(sub.remaining() == 3);
+    assert(sub.take_bytes(3).unwrap().len() == 3);
+    assert(r.take_u8().unwrap() == 0xFF_u8);
+}
+
+fn sub_u16_truncation_is_detected() {
+    // Length says 10 but only 4 body bytes follow — Truncated.
+    let wire: List<Byte> = [0x00_u8, 0x0A_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let mut r = Reader.new(wire.as_slice());
+    match r.sub_u16() {
+        Err(CodecError.Truncated) => {},
+        _ => panic("under-length body must be Truncated"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    vec_u24_backpatches_three_byte_length();
+    vec_u8_overflow_when_body_exceeds_255();
+    take_u24_reads_big_endian();
+    take_u32_reads_big_endian();
+    take_vec_u8_reads_length_and_bytes();
+    take_vec_u16_reads_length_and_bytes();
+    take_vec_u24_reads_large_body();
+    sub_u16_bounds_inner_reader();
+    sub_u8_bounds_inner_reader();
+    sub_u24_bounds_inner_reader();
+    sub_u16_truncation_is_detected();
+    print("RFC 8446 §3 codec vec_u24 + sub-readers verified");
+    0
+}
