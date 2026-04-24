@@ -1,0 +1,287 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, session, changeset, cdc
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Session / changeset extension:
+//   * Change construction (insert / update / delete) + pk equality
+//   * ChangeSet group_by_table + table_summary
+//   * Recorder honours attach / detach / pause
+//   * Patch lossy conversion: UPDATE with unchanged cells → None
+//   * invert / concat / strip_table / filter combinators
+//   * apply with three built-in resolvers
+
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RText};
+mount core.database.sqlite.native.session.change.{
+    Change, ChangeOp, ChangeSet,
+    OpInsert, OpUpdate, OpDelete,
+    change_op_name, change_op_code,
+    change_insert, change_update, change_delete,
+    changeset_empty,
+};
+mount core.database.sqlite.native.session.patch.{
+    Patch, PatchSet, PatchCell,
+    patchset_empty, from_changeset,
+};
+mount core.database.sqlite.native.session.recorder.{
+    AttachedTable, attached_table,
+    Session, session_new,
+};
+mount core.database.sqlite.native.session.combinator.{
+    invert, concat, strip_table, filter,
+};
+mount core.database.sqlite.native.session.apply.{
+    Conflict, ConflictResolution,
+    CfDataMismatch, CfNotFound, CfConflict, CfConstraint,
+    CrSkip, CrReplace, CrAbort, CrOmit,
+    ConflictResolver,
+    AbortAlways, abort_always,
+    SkipOnConflict, skip_on_conflict,
+    ReplaceOnPkConflict, replace_on_pk_conflict,
+    apply, apply_engine,
+    ApplyReport, ApplyDecision,
+    AdApplied, AdSkipped, AdReplaced, AdOmitted, AdAborted,
+    conflict_name, resolution_name,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// change basics
+// -----------------------------------------------------------------------------
+
+fn pk_first_only(n: Int) -> List<Bool> {
+    let mut out: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        out.push(i == 0);
+        i = i + 1;
+    }
+    out
+}
+
+fn make_row(values: List<Int64>) -> List<Register> {
+    let mut out: List<Register> = List.new();
+    let mut i: Int = 0;
+    while i < values.len() { out.push(RInt(values[i])); i = i + 1; }
+    out
+}
+
+fn test_change_op_codes() {
+    assert_eq(change_op_code(&OpInsert), 18);   // SQLITE_INSERT
+    assert_eq(change_op_code(&OpUpdate), 23);
+    assert_eq(change_op_code(&OpDelete), 9);
+}
+
+fn test_change_insert_and_pk() {
+    let mut row: List<Int64> = List.new();
+    row.push(7 as Int64); row.push(99 as Int64);
+    let c = change_insert("users".clone(), pk_first_only(2), make_row(row));
+    assert(c.column_count() == 2);
+    match c.op { OpInsert => {}, _ => panic("op insert") };
+}
+
+fn test_change_pk_matches() {
+    let mut row1: List<Int64> = List.new(); row1.push(7 as Int64); row1.push(1 as Int64);
+    let mut row2: List<Int64> = List.new(); row2.push(7 as Int64); row2.push(99 as Int64);
+    let c1 = change_insert("t".clone(), pk_first_only(2), make_row(row1));
+    let c2 = change_insert("t".clone(), pk_first_only(2), make_row(row2));
+    // PKs are both row[0]=7
+    assert(c1.pk_matches(&c2));
+}
+
+// -----------------------------------------------------------------------------
+// ChangeSet
+// -----------------------------------------------------------------------------
+
+fn build_three_change_set() -> ChangeSet {
+    let mut cs = changeset_empty();
+    let mut r1: List<Int64> = List.new(); r1.push(1 as Int64);
+    let mut r2: List<Int64> = List.new(); r2.push(2 as Int64);
+    let mut r3: List<Int64> = List.new(); r3.push(3 as Int64);
+    cs.record(change_insert("users".clone(), pk_first_only(1), make_row(r1)));
+    cs.record(change_insert("orders".clone(), pk_first_only(1), make_row(r2)));
+    cs.record(change_insert("users".clone(), pk_first_only(1), make_row(r3)));
+    cs
+}
+
+fn test_changeset_group_by_table() {
+    let cs = build_three_change_set();
+    let groups = cs.group_by_table();
+    assert_eq(groups.len(), 2);
+    let summary = cs.table_summary();
+    let mut user_count = 0;
+    let mut i: Int = 0;
+    while i < summary.len() {
+        if summary[i].0 == "users".clone() { user_count = summary[i].1; }
+        i = i + 1;
+    }
+    assert_eq(user_count, 2);
+}
+
+// -----------------------------------------------------------------------------
+// Recorder
+// -----------------------------------------------------------------------------
+
+fn test_recorder_attach_then_record() {
+    let mut s = session_new();
+    s.attach(attached_table("users".clone(), pk_first_only(1)));
+    assert_eq(s.attached_count(), 1);
+    let mut r: List<Int64> = List.new(); r.push(7 as Int64);
+    s.record_insert("users".clone(), make_row(r));
+    assert_eq(s.change_count(), 1);
+}
+
+fn test_recorder_drops_unattached_table() {
+    let mut s = session_new();
+    s.attach(attached_table("users".clone(), pk_first_only(1)));
+    let mut r: List<Int64> = List.new(); r.push(7 as Int64);
+    s.record_insert("orders".clone(), make_row(r));
+    assert_eq(s.change_count(), 0);
+}
+
+fn test_recorder_pause_blocks_recording() {
+    let mut s = session_new();
+    s.attach(attached_table("users".clone(), pk_first_only(1)));
+    s.pause();
+    let mut r: List<Int64> = List.new(); r.push(7 as Int64);
+    s.record_insert("users".clone(), make_row(r));
+    assert_eq(s.change_count(), 0);
+    s.resume();
+    s.record_insert("users".clone(), make_row(r));
+    assert_eq(s.change_count(), 1);
+}
+
+fn test_recorder_take_changeset_resets() {
+    let mut s = session_new();
+    s.attach(attached_table("users".clone(), pk_first_only(1)));
+    let mut r: List<Int64> = List.new(); r.push(7 as Int64);
+    s.record_insert("users".clone(), make_row(r));
+    let cs = s.take_changeset();
+    assert_eq(cs.len(), 1);
+    assert_eq(s.change_count(), 0);
+}
+
+fn test_recorder_detach() {
+    let mut s = session_new();
+    s.attach(attached_table("users".clone(), pk_first_only(1)));
+    assert(s.detach(&"users".clone()));
+    assert(!s.detach(&"users".clone()));
+    assert_eq(s.attached_count(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// Patch
+// -----------------------------------------------------------------------------
+
+fn test_from_changeset_compacts_unchanged_cells() {
+    let mut cs = changeset_empty();
+    let mut old_row: List<Int64> = List.new();
+    old_row.push(7 as Int64); old_row.push(99 as Int64); old_row.push(33 as Int64);
+    let mut new_row: List<Int64> = List.new();
+    new_row.push(7 as Int64); new_row.push(99 as Int64); new_row.push(77 as Int64);
+    cs.record(change_update("t".clone(), pk_first_only(3), make_row(old_row), make_row(new_row)));
+    let ps = from_changeset(&cs);
+    assert_eq(ps.len(), 1);
+    let p = &ps.patches[0];
+    assert_eq(p.new_cells.len(), 3);
+    // Cell 0 + 1 unchanged → None; cell 2 changed → Some.
+    match &p.new_cells[0].value { None => {}, _ => panic("cell 0 unchanged") };
+    match &p.new_cells[1].value { None => {}, _ => panic("cell 1 unchanged") };
+    match &p.new_cells[2].value { Some(_) => {}, _ => panic("cell 2 changed") };
+}
+
+// -----------------------------------------------------------------------------
+// Combinators
+// -----------------------------------------------------------------------------
+
+fn test_invert_swaps_op_and_rows() {
+    let mut cs = changeset_empty();
+    let mut row: List<Int64> = List.new(); row.push(7 as Int64);
+    cs.record(change_insert("t".clone(), pk_first_only(1), make_row(row)));
+    let inv = invert(&cs);
+    assert_eq(inv.len(), 1);
+    let inv_changes = inv.iter();
+    match inv_changes[0].op { OpDelete => {}, _ => panic("INSERT inverted to DELETE") };
+}
+
+fn test_concat() {
+    let cs1 = build_three_change_set();
+    let cs2 = build_three_change_set();
+    let combined = concat(&cs1, &cs2);
+    assert_eq(combined.len(), 6);
+}
+
+fn test_strip_table() {
+    let cs = build_three_change_set();
+    let s = strip_table(&cs, &"users".clone());
+    assert_eq(s.len(), 1);   // only orders survives
+}
+
+// -----------------------------------------------------------------------------
+// Apply
+// -----------------------------------------------------------------------------
+
+fn no_conflict(_c: &Change) -> Maybe<Conflict> { None }
+fn always_conflict(_c: &Change) -> Maybe<Conflict> { Some(CfConflict) }
+
+fn test_apply_clean() {
+    let cs = build_three_change_set();
+    let mut resolver: Heap<dyn ConflictResolver> = Heap.new(abort_always());
+    let (report, _decisions) = apply(&cs, &mut resolver, no_conflict);
+    assert_eq(report.applied, 3);
+    assert(!report.aborted);
+}
+
+fn test_apply_skip_resolver() {
+    let cs = build_three_change_set();
+    let mut resolver: Heap<dyn ConflictResolver> = Heap.new(skip_on_conflict());
+    let (report, _decisions) = apply(&cs, &mut resolver, always_conflict);
+    assert_eq(report.skipped, 3);
+    assert(!report.aborted);
+}
+
+fn test_apply_abort_resolver() {
+    let cs = build_three_change_set();
+    let mut resolver: Heap<dyn ConflictResolver> = Heap.new(abort_always());
+    let (report, _decisions) = apply(&cs, &mut resolver, always_conflict);
+    assert(report.aborted);
+    match report.abort_reason { Some(_) => {}, None => panic("abort reason set") };
+}
+
+fn test_apply_replace_on_pk_conflict() {
+    let cs = build_three_change_set();
+    let mut resolver: Heap<dyn ConflictResolver> = Heap.new(replace_on_pk_conflict());
+    let (report, _) = apply(&cs, &mut resolver, always_conflict);
+    assert_eq(report.replaced, 3);
+    assert(!report.aborted);
+}
+
+fn test_resolution_names() {
+    assert(resolution_name(&CrSkip) == "SKIP".clone());
+    assert(resolution_name(&CrReplace) == "REPLACE".clone());
+    assert(resolution_name(&CrAbort) == "ABORT".clone());
+    assert(resolution_name(&CrOmit) == "OMIT".clone());
+}
+
+fn main() {
+    test_change_op_codes();
+    test_change_insert_and_pk();
+    test_change_pk_matches();
+    test_changeset_group_by_table();
+    test_recorder_attach_then_record();
+    test_recorder_drops_unattached_table();
+    test_recorder_pause_blocks_recording();
+    test_recorder_take_changeset_resets();
+    test_recorder_detach();
+    test_from_changeset_compacts_unchanged_cells();
+    test_invert_swaps_op_and_rows();
+    test_concat();
+    test_strip_table();
+    test_apply_clean();
+    test_apply_skip_resolver();
+    test_apply_abort_resolver();
+    test_apply_replace_on_pk_conflict();
+    test_resolution_names();
+}

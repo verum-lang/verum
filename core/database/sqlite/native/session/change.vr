@@ -1,0 +1,273 @@
+// =============================================================================
+// session/change.vr — Change record + ChangeSet container
+// =============================================================================
+// Spec: sqlite-native.md §22 (CDC) — sqlite3session_changeset
+//
+// A `Change` is one INSERT / UPDATE / DELETE event:
+//
+//   * `op`         — what happened
+//   * `table`      — fully-qualified name (`schema.table`)
+//   * `pk_columns` — bitset of columns that form the primary key
+//                    (carried in the changeset so the applier can
+//                    skip a schema lookup)
+//   * `old_row`    — column values BEFORE the change
+//                    (empty for INSERT)
+//   * `new_row`    — column values AFTER the change
+//                    (empty for DELETE)
+//
+// `ChangeSet` is a sequence of `Change` records in commit order.
+// =============================================================================
+
+module core.database.sqlite.native.session.change;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
+};
+
+// -----------------------------------------------------------------------------
+// Op
+// -----------------------------------------------------------------------------
+
+public type ChangeOp is OpInsert | OpUpdate | OpDelete;
+
+public fn change_op_name(o: &ChangeOp) -> Text {
+    match o {
+        OpInsert => "INSERT".clone(),
+        OpUpdate => "UPDATE".clone(),
+        OpDelete => "DELETE".clone(),
+    }
+}
+
+public fn change_op_code(o: &ChangeOp) -> Int {
+    match o {
+        OpInsert => 18,    // SQLITE_INSERT
+        OpUpdate => 23,    // SQLITE_UPDATE
+        OpDelete => 9,     // SQLITE_DELETE
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Change
+// -----------------------------------------------------------------------------
+
+public type Change is {
+    op: ChangeOp,
+    table: Text,
+    /// True for each column that is part of the primary key.
+    /// Length matches the table's column count.
+    pk_columns: List<Bool>,
+    old_row: List<Register>,
+    new_row: List<Register>,
+}
+
+public fn change_insert(table: Text, pk_columns: List<Bool>, new_row: List<Register>) -> Change {
+    Change {
+        op: OpInsert,
+        table: table,
+        pk_columns: pk_columns,
+        old_row: List.new(),
+        new_row: new_row,
+    }
+}
+
+public fn change_update(
+    table: Text,
+    pk_columns: List<Bool>,
+    old_row: List<Register>,
+    new_row: List<Register>,
+) -> Change {
+    Change {
+        op: OpUpdate,
+        table: table,
+        pk_columns: pk_columns,
+        old_row: old_row,
+        new_row: new_row,
+    }
+}
+
+public fn change_delete(table: Text, pk_columns: List<Bool>, old_row: List<Register>) -> Change {
+    Change {
+        op: OpDelete,
+        table: table,
+        pk_columns: pk_columns,
+        old_row: old_row,
+        new_row: List.new(),
+    }
+}
+
+implement Change {
+    public fn column_count(&self) -> Int { self.pk_columns.len() }
+
+    /// Fast equality check on the primary-key portion of two rows.
+    public fn pk_matches(&self, other: &Change) -> Bool {
+        if self.table != other.table { return false; }
+        if self.pk_columns.len() != other.pk_columns.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.pk_columns.len() {
+            if self.pk_columns[i] {
+                let a = match self.op {
+                    OpInsert => &self.new_row,
+                    _        => &self.old_row,
+                };
+                let b = match other.op {
+                    OpInsert => &other.new_row,
+                    _        => &other.old_row,
+                };
+                if i >= a.len() || i >= b.len() { return false; }
+                if !registers_equal(&a[i], &b[i]) { return false; }
+            }
+            i = i + 1;
+        }
+        true
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ChangeSet
+// -----------------------------------------------------------------------------
+
+public type ChangeSet is {
+    changes: List<Change>,
+}
+
+public fn changeset_empty() -> ChangeSet { ChangeSet { changes: List.new() } }
+
+implement ChangeSet {
+    public fn len(&self) -> Int { self.changes.len() }
+    public fn is_empty(&self) -> Bool { self.changes.len() == 0 }
+
+    public fn record(&mut self, c: Change) {
+        self.changes.push(c);
+    }
+
+    public fn iter(&self) -> List<Change> {
+        let mut out: List<Change> = List.new();
+        let mut i: Int = 0;
+        while i < self.changes.len() {
+            out.push(clone_change(&self.changes[i]));
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Group changes by table — used by the applier to batch by
+    /// target table and avoid repeatedly looking up schema metadata.
+    public fn group_by_table(&self) -> List<(Text, List<Change>)> {
+        let mut buckets: List<(Text, List<Change>)> = List.new();
+        let mut i: Int = 0;
+        while i < self.changes.len() {
+            let table = self.changes[i].table.clone();
+            let mut found_idx: Int = -1;
+            let mut k: Int = 0;
+            while k < buckets.len() {
+                if buckets[k].0 == table { found_idx = k; break; }
+                k = k + 1;
+            }
+            if found_idx < 0 {
+                let mut bucket: List<Change> = List.new();
+                bucket.push(clone_change(&self.changes[i]));
+                buckets.push((table, bucket));
+            } else {
+                buckets[found_idx].1.push(clone_change(&self.changes[i]));
+            }
+            i = i + 1;
+        }
+        buckets
+    }
+
+    /// Per-table change counts — surface for telemetry / EXPLAIN.
+    public fn table_summary(&self) -> List<(Text, Int)> {
+        let groups = self.group_by_table();
+        let mut out: List<(Text, Int)> = List.new();
+        let mut i: Int = 0;
+        while i < groups.len() {
+            out.push((groups[i].0.clone(), groups[i].1.len()));
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_change(c: &Change) -> Change {
+    Change {
+        op: clone_op(&c.op),
+        table: c.table.clone(),
+        pk_columns: clone_bools(&c.pk_columns),
+        old_row: clone_row(&c.old_row),
+        new_row: clone_row(&c.new_row),
+    }
+}
+
+fn clone_op(o: &ChangeOp) -> ChangeOp {
+    match o { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
+}
+
+fn clone_bools(b: &List<Bool>) -> List<Bool> {
+    let mut out: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < b.len() { out.push(b[i]); i = i + 1; }
+    out
+}
+
+fn clone_row(r: &List<Register>) -> List<Register> {
+    let mut out: List<Register> = List.new();
+    let mut i: Int = 0;
+    while i < r.len() { out.push(clone_register(&r[i])); i = i + 1; }
+    out
+}
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        RNull     => RNull,
+        RInt(x)   => RInt(x),
+        RReal(x)  => RReal(x),
+        RText(s)  => RText(s.clone()),
+        RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            RBlob(out)
+        }
+        RRowId(x) => RRowId(x),
+    }
+}
+
+fn registers_equal(a: &Register, b: &Register) -> Bool {
+    match a {
+        RNull => match b { RNull => true, _ => false },
+        RInt(x) => match b {
+            RInt(y) => x == y,
+            RRowId(y) => x == y,
+            _ => false,
+        },
+        RReal(x) => match b {
+            RReal(y) => x == y,
+            RInt(y) => x == (y as Float64),
+            _ => false,
+        },
+        RText(xs) => match b { RText(ys) => xs == ys, _ => false },
+        RBlob(xb) => match b { RBlob(yb) => bytes_equal(xb, yb), _ => false },
+        RRowId(x) => match b {
+            RRowId(y) => x == y,
+            RInt(y) => x == y,
+            _ => false,
+        },
+    }
+}
+
+fn bytes_equal(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}

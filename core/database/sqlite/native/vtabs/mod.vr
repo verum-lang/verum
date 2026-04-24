@@ -31,3 +31,5 @@ public module json_each;
 public module fts5;
 // N-dimensional spatial index §16.3.
 public module rtree;
+// CSV file-backed reader vtab.
+public module csv;

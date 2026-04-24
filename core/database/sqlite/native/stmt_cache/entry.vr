@@ -1,0 +1,51 @@
+// =============================================================================
+// stmt_cache/entry.vr — CachedStatement record
+// =============================================================================
+// Spec: sqlite-native.md §11.1
+//
+// `CachedStatement` is what the cache stores per key. We carry:
+//
+//   * `key`           — the CacheKey it was registered under
+//   * `program_id`    — opaque ID into the L4 VDBE program pool
+//   * `last_used_ns`  — monotonic timestamp for LRU ordering
+//   * `use_count`     — total reuse count for LFU + telemetry
+//   * `is_pinned`     — pinned entries are never evicted (e.g. the
+//                       compiled trigger sub-program a transaction
+//                       is currently executing)
+// =============================================================================
+
+module core.database.sqlite.native.stmt_cache.entry;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.stmt_cache.key.{CacheKey};
+
+public type CachedStatement is {
+    key: CacheKey,
+    program_id: Int,
+    last_used_ns: Int64,
+    use_count: Int,
+    is_pinned: Bool,
+}
+
+public fn entry_new(key: CacheKey, program_id: Int, now_ns: Int64) -> CachedStatement {
+    CachedStatement {
+        key: key,
+        program_id: program_id,
+        last_used_ns: now_ns,
+        use_count: 0,
+        is_pinned: false,
+    }
+}
+
+implement CachedStatement {
+    public fn touch(&mut self, now_ns: Int64) {
+        self.last_used_ns = now_ns;
+        self.use_count = self.use_count + 1;
+    }
+
+    public fn pin(&mut self) { self.is_pinned = true; }
+    public fn unpin(&mut self) { self.is_pinned = false; }
+
+    public fn evictable(&self) -> Bool { !self.is_pinned }
+}

@@ -1,0 +1,37 @@
+// =============================================================================
+// core/database/sqlite/native/session/mod.vr
+// =============================================================================
+// Layer: 7 (consumer-facing — `Database.session()`)
+// Spec: sqlite-native.md §22 (operational tooling) +
+//       upstream sqlite3session_* extension
+//
+// Change-data-capture: a `Session` records every (table, op, old_row,
+// new_row) tuple between `attach` and `detach`. The recorded
+// `ChangeSet` can be serialised, transmitted, inverted, concatenated
+// and applied to a remote database.
+//
+// Two record granularities:
+//   * `ChangeSet`  — full before+after rows for every changed cell
+//                     (suitable for replication that needs to
+//                      surface OLD values, e.g. trigger emulation)
+//   * `PatchSet`   — only changed cells (smaller, but loses OLD)
+//
+// Conflict resolution is protocol-based: when applying a changeset
+// against a target whose state has diverged, a `ConflictResolver`
+// picks the winner per row.
+//
+// Submodules:
+//   * `change`         — Change record + ChangeSet
+//   * `patch`          — PatchSet (compact form)
+//   * `recorder`       — UpdateHook-driven recorder
+//   * `apply`          — applier with ConflictResolver protocol
+//   * `combinator`     — invert / concat / strip-table / filter
+// =============================================================================
+
+module core.database.sqlite.native.session;
+
+public module change;
+public module patch;
+public module recorder;
+public module apply;
+public module combinator;

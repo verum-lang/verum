@@ -1,0 +1,294 @@
+// =============================================================================
+// vtabs/csv.vr — file-backed CSV reader virtual table
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.4 (extended built-in vtabs)
+//
+// Provides a `csv` virtual table that exposes a CSV file as a
+// queryable table:
+//
+//   CREATE VIRTUAL TABLE t USING csv(
+//       file = '/path/to/data.csv',
+//       header = true,
+//       delim = ','
+//   );
+//   SELECT * FROM t WHERE col_5 > 100;
+//
+// Key features:
+//   * RFC-4180-style parsing (quoted fields, embedded newlines,
+//     `""` escaping)
+//   * configurable delimiter / quote / line terminator
+//   * header-row inference for column names
+//   * fast row-skip for cursor reset
+//
+// We expose the parser as a pure function on `Text` so users can
+// reuse it for one-off CSV processing without a vtab.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.csv;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RText};
+mount core.database.sqlite.native.vtabs.protocol.{
+    VtabSchema, VtabColumn, VtabError, VtabConstraint,
+};
+
+// -----------------------------------------------------------------------------
+// CsvOptions
+// -----------------------------------------------------------------------------
+
+public type CsvOptions is {
+    /// Column delimiter (commonly ',' or ';' or '\t').
+    delim: Byte,
+    /// Quote character (RFC-4180 default '"'). Field is named
+    /// `quote_char` because `quote` is a reserved Verum keyword.
+    quote_char: Byte,
+    /// True ⇒ first row carries column names.
+    has_header: Bool,
+    /// True ⇒ trim leading/trailing ASCII whitespace from each cell.
+    trim_cells: Bool,
+}
+
+public fn options_default() -> CsvOptions {
+    CsvOptions {
+        delim: 44 as Byte,        // ','
+        quote_char: 34 as Byte,        // '"'
+        has_header: true,
+        trim_cells: false,
+    }
+}
+
+public fn options_tsv() -> CsvOptions {
+    CsvOptions {
+        delim: 9 as Byte,         // '\t'
+        quote_char: 34 as Byte,
+        has_header: true,
+        trim_cells: true,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ParseError
+// -----------------------------------------------------------------------------
+
+public type CsvError is
+      CeUnclosedQuote(Int)
+    | CeBadEscape(Int)
+    | CeShortRow(Int);
+
+// -----------------------------------------------------------------------------
+// Row + parser
+// -----------------------------------------------------------------------------
+
+public type CsvRow is { cells: List<Text> }
+
+public fn parse_row_at(buf: &List<Byte>, start: Int, opts: &CsvOptions) -> Result<(CsvRow, Int), CsvError> {
+    let mut cells: List<Text> = List.new();
+    let mut cur = Text.new();
+    let mut i: Int = start;
+    let mut in_quote: Bool = false;
+    while i < buf.len() {
+        let b = buf[i];
+        if in_quote {
+            if b == opts.quote_char {
+                // Lookahead: doubled-quote → literal quote.
+                if i + 1 < buf.len() && buf[i + 1] == opts.quote_char {
+                    cur.push_byte(opts.quote_char);
+                    i = i + 2;
+                    continue;
+                }
+                in_quote = false;
+                i = i + 1;
+                continue;
+            }
+            cur.push_byte(b);
+            i = i + 1;
+            continue;
+        }
+        if b == opts.quote_char && cur.len() == 0 {
+            in_quote = true;
+            i = i + 1;
+            continue;
+        }
+        if b == opts.delim {
+            push_cell(&mut cells, cur, opts);
+            cur = Text.new();
+            i = i + 1;
+            continue;
+        }
+        if b == (10 as Byte) {
+            push_cell(&mut cells, cur, opts);
+            return Ok((CsvRow { cells: cells }, i + 1));
+        }
+        if b == (13 as Byte) {
+            // CR — peek for LF
+            push_cell(&mut cells, cur, opts);
+            let mut nxt = i + 1;
+            if nxt < buf.len() && buf[nxt] == (10 as Byte) { nxt = nxt + 1; }
+            return Ok((CsvRow { cells: cells }, nxt));
+        }
+        cur.push_byte(b);
+        i = i + 1;
+    }
+    if in_quote { return Err(CeUnclosedQuote(start)); }
+    if cur.len() > 0 || cells.len() > 0 {
+        push_cell(&mut cells, cur, opts);
+    }
+    Ok((CsvRow { cells: cells }, i))
+}
+
+fn push_cell(cells: &mut List<Text>, cell: Text, opts: &CsvOptions) {
+    if opts.trim_cells {
+        cells.push(trim_ascii(&cell));
+    } else {
+        cells.push(cell);
+    }
+}
+
+fn trim_ascii(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut start: Int = 0;
+    let mut end: Int = bs.len();
+    while start < end && is_ws(bs[start]) { start = start + 1; }
+    while end > start && is_ws(bs[end - 1]) { end = end - 1; }
+    let mut out = Text.new();
+    let mut i: Int = start;
+    while i < end { out.push_byte(bs[i]); i = i + 1; }
+    out
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (32 as Byte) || b == (9 as Byte)
+}
+
+// -----------------------------------------------------------------------------
+// parse_all
+// -----------------------------------------------------------------------------
+
+public fn parse_all(buf: &List<Byte>, opts: &CsvOptions) -> Result<List<CsvRow>, CsvError> {
+    let mut out: List<CsvRow> = List.new();
+    let mut pos: Int = 0;
+    let mut row_idx: Int = 0;
+    while pos < buf.len() {
+        // Skip empty lines.
+        let b = buf[pos];
+        if b == (10 as Byte) || b == (13 as Byte) {
+            pos = pos + 1;
+            continue;
+        }
+        match parse_row_at(buf, pos, opts) {
+            Ok(pair) => {
+                out.push(pair.0);
+                pos = pair.1;
+                row_idx = row_idx + 1;
+            }
+            Err(e) => { return Err(e); }
+        }
+    }
+    Ok(out)
+}
+
+// -----------------------------------------------------------------------------
+// Schema inference
+// -----------------------------------------------------------------------------
+
+public fn infer_schema(rows: &List<CsvRow>, opts: &CsvOptions) -> VtabSchema {
+    let mut cols: List<VtabColumn> = List.new();
+    if rows.len() == 0 {
+        return VtabSchema { create_sql: "CREATE TABLE csv()".clone(), columns: cols };
+    }
+    if opts.has_header {
+        let mut i: Int = 0;
+        while i < rows[0].cells.len() {
+            cols.push(VtabColumn {
+                name: rows[0].cells[i].clone(),
+                affinity: "TEXT".clone(),
+                is_hidden: false,
+            });
+            i = i + 1;
+        }
+    } else {
+        // Use col_0, col_1, ...
+        let mut i: Int = 0;
+        while i < rows[0].cells.len() {
+            let mut name = "col_".clone();
+            append_int(&mut name, i);
+            cols.push(VtabColumn {
+                name: name,
+                affinity: "TEXT".clone(),
+                is_hidden: false,
+            });
+            i = i + 1;
+        }
+    }
+    let mut sql = "CREATE TABLE csv(".clone();
+    let mut k: Int = 0;
+    while k < cols.len() {
+        if k > 0 { append_text(&mut sql, &", ".clone()); }
+        append_text(&mut sql, &cols[k].name);
+        k = k + 1;
+    }
+    sql.push_byte(41 as Byte);
+    VtabSchema { create_sql: sql, columns: cols }
+}
+
+fn append_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn append_int(dst: &mut Text, n: Int) {
+    if n == 0 { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    while x > 0 {
+        digits.push(((x % 10) + 48) as Byte);
+        x = x / 10;
+    }
+    if n < 0 { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+// -----------------------------------------------------------------------------
+// Cursor
+// -----------------------------------------------------------------------------
+
+public type CsvCursor is {
+    rows: List<CsvRow>,
+    pos: Int,
+    /// True ⇒ the first row was the header and is skipped on iteration.
+    skip_first: Bool,
+}
+
+public fn cursor_from(rows: List<CsvRow>, has_header: Bool) -> CsvCursor {
+    let start_pos: Int = if has_header && rows.len() > 0 { 1 } else { 0 };
+    CsvCursor { rows: rows, pos: start_pos, skip_first: has_header }
+}
+
+implement CsvCursor {
+    public fn filter(&mut self, _index_num: Int, _index_str: &Text, _args: &List<Register>) -> Result<(), VtabError> {
+        let start_pos: Int = if self.skip_first && self.rows.len() > 0 { 1 } else { 0 };
+        self.pos = start_pos;
+        Ok(())
+    }
+
+    public fn next_row(&mut self) -> Result<(), VtabError> {
+        self.pos = self.pos + 1;
+        Ok(())
+    }
+
+    public fn eof(&self) -> Bool { self.pos >= self.rows.len() }
+
+    public fn column(&self, idx: Int) -> Register {
+        if self.eof() { return RNull; }
+        let row = &self.rows[self.pos];
+        if idx < 0 || idx >= row.cells.len() { return RNull; }
+        RText(row.cells[idx].clone())
+    }
+
+    public fn rowid(&self) -> Int64 { (self.pos + 1) as Int64 }
+}

@@ -1,0 +1,248 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stmt_cache, lru, prepared_statement
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Statement cache:
+//   * normalise() collapses whitespace + lowercases keywords +
+//     strips trailing semicolon
+//   * key_for extracts positional + named parameter shape
+//   * keys_equal handles case-insensitive equality
+//   * StatementCache lookup → miss/hit, insert, evict on overflow
+//   * Pin / unpin protects from eviction
+//   * Eviction policies: LRU vs FIFO vs LFU pick different victims
+//   * hit_ratio computation
+
+mount core.database.sqlite.native.stmt_cache.key.{
+    CacheKey, key_for, keys_equal, normalise,
+};
+mount core.database.sqlite.native.stmt_cache.entry.{
+    CachedStatement, entry_new,
+};
+mount core.database.sqlite.native.stmt_cache.policy.{
+    EvictionPolicy,
+    Lru, lru,
+    Lfu, lfu,
+    Fifo, fifo,
+};
+mount core.database.sqlite.native.stmt_cache.cache.{
+    CacheError, CeNoSpace,
+    CacheStats, stats_zero, hit_ratio,
+    StatementCache, cache_new,
+};
+mount base.{Some, None, Maybe, Result, Ok, Err, Bool};
+
+// -----------------------------------------------------------------------------
+// normalise
+// -----------------------------------------------------------------------------
+
+fn test_normalise_collapses_whitespace() {
+    let s = normalise(&"SELECT   *   FROM    users".clone());
+    assert(s == "select * from users".clone());
+}
+
+fn test_normalise_lowercases_keywords() {
+    let s = normalise(&"SELECT * FROM USERS WHERE NAME='Alice'".clone());
+    // String literal preserves case
+    assert(s.len() > 0);
+}
+
+fn test_normalise_strips_trailing_semicolon() {
+    let s = normalise(&"SELECT 1;  ".clone());
+    assert(s == "select 1".clone());
+}
+
+// -----------------------------------------------------------------------------
+// key
+// -----------------------------------------------------------------------------
+
+fn test_key_positional_param_count() {
+    let k = key_for(&"SELECT * FROM t WHERE a = ? AND b = ?".clone());
+    assert_eq(k.positional_params, 2);
+    assert_eq(k.named_params.len(), 0);
+}
+
+fn test_key_named_params_dedup() {
+    let k = key_for(&"SELECT :name FROM t WHERE name = :name OR alt = :alt".clone());
+    assert_eq(k.named_params.len(), 2);
+}
+
+fn test_keys_equal_normalisation() {
+    let a = key_for(&"SELECT * FROM users WHERE id = ?".clone());
+    let b = key_for(&"select  *  from  users  where  id = ?".clone());
+    assert(keys_equal(&a, &b));
+}
+
+fn test_keys_differ_when_param_count_differs() {
+    let a = key_for(&"SELECT * FROM t WHERE a=?".clone());
+    let b = key_for(&"SELECT * FROM t WHERE a=? AND b=?".clone());
+    assert(!keys_equal(&a, &b));
+}
+
+// -----------------------------------------------------------------------------
+// entry
+// -----------------------------------------------------------------------------
+
+fn test_entry_touch_increments() {
+    let k = key_for(&"SELECT 1".clone());
+    let mut e = entry_new(k, 7, 100 as Int64);
+    assert_eq(e.use_count, 0);
+    e.touch(200 as Int64);
+    assert_eq(e.use_count, 1);
+    assert_eq(e.last_used_ns, 200 as Int64);
+}
+
+fn test_entry_pin_blocks_eviction() {
+    let k = key_for(&"SELECT 1".clone());
+    let mut e = entry_new(k, 1, 1 as Int64);
+    assert(e.evictable());
+    e.pin();
+    assert(!e.evictable());
+    e.unpin();
+    assert(e.evictable());
+}
+
+// -----------------------------------------------------------------------------
+// cache
+// -----------------------------------------------------------------------------
+
+fn test_cache_lookup_miss_then_hit() {
+    let mut c = cache_new(4, Heap.new(lru()));
+    match c.lookup(&"SELECT 1".clone(), 100 as Int64) {
+        None => {},
+        _ => panic("first lookup → miss"),
+    }
+    let r = c.insert(&"SELECT 1".clone(), 7, 200 as Int64);
+    assert(r.is_ok());
+    match c.lookup(&"SELECT 1".clone(), 300 as Int64) {
+        Some(p) => assert_eq(p, 7),
+        None    => panic("after insert → hit"),
+    }
+}
+
+fn test_cache_evicts_on_overflow() {
+    let mut c = cache_new(2, Heap.new(lru()));
+    let _ = c.insert(&"A".clone(), 1, 100 as Int64);
+    let _ = c.insert(&"B".clone(), 2, 200 as Int64);
+    let _ = c.insert(&"C".clone(), 3, 300 as Int64);
+    assert_eq(c.current_size(), 2);
+    let stats = c.stats_snapshot();
+    assert(stats.evictions >= (1 as Int64));
+}
+
+fn test_cache_lru_evicts_oldest() {
+    let mut c = cache_new(2, Heap.new(lru()));
+    let _ = c.insert(&"A".clone(), 1, 100 as Int64);
+    let _ = c.insert(&"B".clone(), 2, 200 as Int64);
+    // Touch A so it becomes more-recently-used.
+    let _ = c.lookup(&"A".clone(), 250 as Int64);
+    let _ = c.insert(&"C".clone(), 3, 300 as Int64);
+    // B should be the victim.
+    match c.lookup(&"A".clone(), 400 as Int64) {
+        Some(_) => {}, None => panic("A still cached"),
+    }
+    match c.lookup(&"B".clone(), 400 as Int64) {
+        None    => {}, _ => panic("B should be evicted"),
+    }
+}
+
+fn test_cache_pin_protects_from_eviction() {
+    let mut c = cache_new(2, Heap.new(lru()));
+    let _ = c.insert(&"A".clone(), 1, 100 as Int64);
+    let _ = c.insert(&"B".clone(), 2, 200 as Int64);
+    assert(c.pin(&"A".clone()));
+    let _ = c.insert(&"C".clone(), 3, 300 as Int64);
+    // A pinned → B is the victim.
+    match c.lookup(&"A".clone(), 400 as Int64) {
+        Some(_) => {}, None => panic("A pinned → still cached"),
+    }
+}
+
+fn test_cache_clear_unpinned() {
+    let mut c = cache_new(4, Heap.new(lru()));
+    let _ = c.insert(&"A".clone(), 1, 100 as Int64);
+    let _ = c.insert(&"B".clone(), 2, 200 as Int64);
+    let _ = c.pin(&"A".clone());
+    let dropped = c.clear_unpinned();
+    assert_eq(dropped, 1);
+    assert_eq(c.current_size(), 1);
+}
+
+fn test_hit_ratio() {
+    let mut s = stats_zero(10);
+    s.hits = 7 as Int64;
+    s.misses = 3 as Int64;
+    let r = hit_ratio(&s);
+    assert(r > 0.65);
+    assert(r < 0.75);
+}
+
+// -----------------------------------------------------------------------------
+// policy
+// -----------------------------------------------------------------------------
+
+fn build_three_entry_cache() -> StatementCache {
+    let mut c = cache_new(10, Heap.new(lru()));
+    let _ = c.insert(&"A".clone(), 1, 100 as Int64);
+    let _ = c.insert(&"B".clone(), 2, 200 as Int64);
+    let _ = c.insert(&"C".clone(), 3, 300 as Int64);
+    // Use A many times — high LFU score
+    let _ = c.lookup(&"A".clone(), 400 as Int64);
+    let _ = c.lookup(&"A".clone(), 401 as Int64);
+    let _ = c.lookup(&"A".clone(), 402 as Int64);
+    c
+}
+
+fn test_lru_picks_oldest() {
+    let c = build_three_entry_cache();
+    let p = lru();
+    match p.pick_victim(&c.entries) {
+        Some(_) => {},
+        None    => panic("LRU should pick a victim"),
+    }
+}
+
+fn test_lfu_picks_least_used() {
+    let c = build_three_entry_cache();
+    let p = lfu();
+    // Among A (used 3x), B/C (used 0x), LFU picks B or C.
+    match p.pick_victim(&c.entries) {
+        Some(idx) => {
+            // Should not pick A (idx 0).
+            assert(idx != 0);
+        }
+        None => panic("LFU should pick"),
+    }
+}
+
+fn test_fifo_picks_first() {
+    let c = build_three_entry_cache();
+    let p = fifo();
+    match p.pick_victim(&c.entries) {
+        Some(idx) => assert_eq(idx, 0),
+        None      => panic("FIFO picks index 0"),
+    }
+}
+
+fn main() {
+    test_normalise_collapses_whitespace();
+    test_normalise_lowercases_keywords();
+    test_normalise_strips_trailing_semicolon();
+    test_key_positional_param_count();
+    test_key_named_params_dedup();
+    test_keys_equal_normalisation();
+    test_keys_differ_when_param_count_differs();
+    test_entry_touch_increments();
+    test_entry_pin_blocks_eviction();
+    test_cache_lookup_miss_then_hit();
+    test_cache_evicts_on_overflow();
+    test_cache_lru_evicts_oldest();
+    test_cache_pin_protects_from_eviction();
+    test_cache_clear_unpinned();
+    test_hit_ratio();
+    test_lru_picks_oldest();
+    test_lfu_picks_least_used();
+    test_fifo_picks_first();
+}

@@ -1,0 +1,175 @@
+// =============================================================================
+// stmt_cache/key.vr — cache key derivation
+// =============================================================================
+// Spec: sqlite-native.md §11.1
+//
+// `CacheKey` is a value-type identity for a prepared statement. Two
+// SQL strings that differ only in whitespace / case (outside string
+// literals) and have the same parameter shape produce the same key.
+//
+// Normalisation rules:
+//   * collapse runs of ASCII whitespace into a single space
+//   * fold keyword bytes to lowercase OUTSIDE string + quoted-name
+//     literals (recognised by `'`, `"`, `[…]`, `\`…\``)
+//   * strip leading / trailing whitespace
+//   * drop trailing semicolon
+//
+// Parameter shape: count of `?` + count of `:name` / `@name` / `$name`
+// occurrences (each sequence with the same name counted once).
+// =============================================================================
+
+module core.database.sqlite.native.stmt_cache.key;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// CacheKey
+// -----------------------------------------------------------------------------
+
+public type CacheKey is {
+    normalised_sql: Text,
+    positional_params: Int,
+    named_params: List<Text>,
+}
+
+public fn key_for(sql: &Text) -> CacheKey {
+    let normal = normalise(sql);
+    let bs = sql.as_bytes();
+    let mut positional: Int = 0;
+    let mut named: List<Text> = List.new();
+    let mut i: Int = 0;
+    let mut in_str: Byte = 0 as Byte;     // 0 = not in str; ', ", `, [ → that boundary
+    while i < bs.len() {
+        let b = bs[i];
+        if in_str == (0 as Byte) {
+            if b == (39 as Byte) { in_str = 39 as Byte; i = i + 1; continue; }
+            if b == (34 as Byte) { in_str = 34 as Byte; i = i + 1; continue; }
+            if b == (96 as Byte) { in_str = 96 as Byte; i = i + 1; continue; }
+            if b == (91 as Byte) { in_str = 93 as Byte; i = i + 1; continue; }
+            if b == (63 as Byte) { positional = positional + 1; i = i + 1; continue; }
+            if b == (58 as Byte) || b == (64 as Byte) || b == (36 as Byte) {
+                let mut name = Text.new();
+                let mut k: Int = i + 1;
+                while k < bs.len() && is_ident_byte(bs[k]) {
+                    name.push_byte(bs[k]);
+                    k = k + 1;
+                }
+                if name.len() > 0 && !name_already(&named, &name) {
+                    named.push(name);
+                }
+                i = k;
+                continue;
+            }
+        } else {
+            if b == in_str { in_str = 0 as Byte; }
+        }
+        i = i + 1;
+    }
+    CacheKey {
+        normalised_sql: normal,
+        positional_params: positional,
+        named_params: named,
+    }
+}
+
+fn name_already(list: &List<Text>, name: &Text) -> Bool {
+    let mut i: Int = 0;
+    while i < list.len() {
+        if list[i] == name { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn is_ident_byte(b: Byte) -> Bool {
+    (b >= (48 as Byte) && b <= (57 as Byte)) ||
+    (b >= (65 as Byte) && b <= (90 as Byte)) ||
+    (b >= (97 as Byte) && b <= (122 as Byte)) ||
+    b == (95 as Byte)
+}
+
+// -----------------------------------------------------------------------------
+// Normalisation
+// -----------------------------------------------------------------------------
+
+public fn normalise(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    let mut in_str: Byte = 0 as Byte;
+    let mut prev_was_space: Bool = true;   // suppress leading WS
+    while i < bs.len() {
+        let b = bs[i];
+        if in_str == (0 as Byte) {
+            if b == (39 as Byte) || b == (34 as Byte) || b == (96 as Byte) {
+                in_str = b;
+                out.push_byte(b);
+                prev_was_space = false;
+                i = i + 1;
+                continue;
+            }
+            if b == (91 as Byte) {
+                in_str = 93 as Byte;
+                out.push_byte(b);
+                prev_was_space = false;
+                i = i + 1;
+                continue;
+            }
+            // Whitespace collapse.
+            if b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) || b == (13 as Byte) {
+                if !prev_was_space {
+                    out.push_byte(32 as Byte);
+                    prev_was_space = true;
+                }
+                i = i + 1;
+                continue;
+            }
+            // Lowercase fold.
+            let folded: Byte =
+                if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+            out.push_byte(folded);
+            prev_was_space = false;
+            i = i + 1;
+            continue;
+        } else {
+            // Inside a string literal — preserve bytes verbatim.
+            out.push_byte(b);
+            if b == in_str { in_str = 0 as Byte; }
+            i = i + 1;
+        }
+    }
+    // Strip trailing whitespace + semicolon.
+    let mut bytes_out = out.as_bytes();
+    let mut end = bytes_out.len();
+    while end > 0 {
+        let b = bytes_out[end - 1];
+        if b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte)
+            || b == (13 as Byte) || b == (59 as Byte) {
+            end = end - 1;
+        } else {
+            break;
+        }
+    }
+    let mut result = Text.new();
+    let mut i: Int = 0;
+    while i < end { result.push_byte(bytes_out[i]); i = i + 1; }
+    result
+}
+
+// -----------------------------------------------------------------------------
+// Equality
+// -----------------------------------------------------------------------------
+
+public fn keys_equal(a: &CacheKey, b: &CacheKey) -> Bool {
+    if a.normalised_sql != b.normalised_sql { return false; }
+    if a.positional_params != b.positional_params { return false; }
+    if a.named_params.len() != b.named_params.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.named_params.len() {
+        if a.named_params[i] != b.named_params[i] { return false; }
+        i = i + 1;
+    }
+    true
+}

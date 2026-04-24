@@ -1,0 +1,263 @@
+// =============================================================================
+// session/apply.vr — apply ChangeSet against a target with conflict resolution
+// =============================================================================
+// Spec: sqlite-native.md §22 (CDC) — sqlite3changeset_apply
+//
+// `ApplyEngine` walks a `ChangeSet` and, for each `Change`, calls
+// the target storage to perform the matching INSERT / UPDATE /
+// DELETE. When the target diverges (row already exists for INSERT,
+// row missing for DELETE / UPDATE, OLD value mismatch on UPDATE),
+// the engine consults a `ConflictResolver` for the next step.
+//
+// SQLite's six conflict reasons map onto our `Conflict`:
+//
+//   * `CfDataMismatch`     — UPDATE / DELETE with a non-matching OLD row
+//   * `CfNotFound`         — UPDATE / DELETE with no matching row
+//   * `CfConflict`         — INSERT against existing PK
+//   * `CfConstraint`       — would violate FK / NOT NULL / CHECK
+//   * `CfForeignKey`       — FK violation specifically
+//   * `CfReplaceFailed`    — REPLACE-policy retry was rejected
+//
+// The resolver returns one of:
+//   * `CrSkip`             — drop this change, continue
+//   * `CrReplace`          — replace existing row (DELETE + INSERT)
+//   * `CrAbort`            — stop the entire apply, roll back
+//   * `CrOmit`             — silently skip without bumping any counter
+// =============================================================================
+
+module core.database.sqlite.native.session.apply;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.session.change.{
+    Change, ChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
+    change_op_name,
+};
+
+// -----------------------------------------------------------------------------
+// Conflict + resolution
+// -----------------------------------------------------------------------------
+
+public type Conflict is
+      CfDataMismatch
+    | CfNotFound
+    | CfConflict
+    | CfConstraint
+    | CfForeignKey
+    | CfReplaceFailed;
+
+public fn conflict_name(c: &Conflict) -> Text {
+    match c {
+        CfDataMismatch  => "DATA".clone(),
+        CfNotFound      => "NOTFOUND".clone(),
+        CfConflict      => "CONFLICT".clone(),
+        CfConstraint    => "CONSTRAINT".clone(),
+        CfForeignKey    => "FOREIGN_KEY".clone(),
+        CfReplaceFailed => "REPLACE_FAILED".clone(),
+    }
+}
+
+public type ConflictResolution is
+      CrSkip
+    | CrReplace
+    | CrAbort
+    | CrOmit;
+
+public fn resolution_name(r: &ConflictResolution) -> Text {
+    match r {
+        CrSkip    => "SKIP".clone(),
+        CrReplace => "REPLACE".clone(),
+        CrAbort   => "ABORT".clone(),
+        CrOmit    => "OMIT".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ConflictResolver protocol
+// -----------------------------------------------------------------------------
+
+public type ConflictResolver is protocol {
+    fn name(&self) -> Text;
+    fn resolve(&mut self, change: &Change, conflict: Conflict) -> ConflictResolution;
+};
+
+// Built-in: never-resolve (always abort).
+public type AbortAlways is { unit: Bool };
+public fn abort_always() -> AbortAlways { AbortAlways { unit: true } }
+
+implement ConflictResolver for AbortAlways {
+    fn name(&self) -> Text { "abort_always".clone() }
+    fn resolve(&mut self, _c: &Change, _k: Conflict) -> ConflictResolution { CrAbort }
+}
+
+// Built-in: skip-on-mismatch (lossy but progress-guaranteed).
+public type SkipOnConflict is { unit: Bool };
+public fn skip_on_conflict() -> SkipOnConflict { SkipOnConflict { unit: true } }
+
+implement ConflictResolver for SkipOnConflict {
+    fn name(&self) -> Text { "skip_on_conflict".clone() }
+    fn resolve(&mut self, _c: &Change, _k: Conflict) -> ConflictResolution { CrSkip }
+}
+
+// Built-in: replace-existing on PK conflict, abort otherwise.
+public type ReplaceOnPkConflict is { unit: Bool };
+public fn replace_on_pk_conflict() -> ReplaceOnPkConflict { ReplaceOnPkConflict { unit: true } }
+
+implement ConflictResolver for ReplaceOnPkConflict {
+    fn name(&self) -> Text { "replace_on_pk_conflict".clone() }
+    fn resolve(&mut self, _c: &Change, k: Conflict) -> ConflictResolution {
+        match k {
+            CfConflict => CrReplace,
+            _          => CrAbort,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ApplyReport
+// -----------------------------------------------------------------------------
+
+public type ApplyReport is {
+    applied: Int,
+    skipped: Int,
+    replaced: Int,
+    aborted: Bool,
+    /// Last conflict reason if `aborted == true`.
+    abort_reason: Maybe<Conflict>,
+}
+
+public fn report_zero() -> ApplyReport {
+    ApplyReport {
+        applied: 0,
+        skipped: 0,
+        replaced: 0,
+        aborted: false,
+        abort_reason: None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ApplyDecision — what the engine did with a change
+// -----------------------------------------------------------------------------
+
+public type ApplyDecision is
+      AdApplied(Change)
+    | AdSkipped(Change, Conflict)
+    | AdReplaced(Change)
+    | AdOmitted(Change, Conflict)
+    | AdAborted(Change, Conflict);
+
+// -----------------------------------------------------------------------------
+// ApplyEngine
+// -----------------------------------------------------------------------------
+
+public type ApplyEngine is { unit: Bool };
+public fn apply_engine() -> ApplyEngine { ApplyEngine { unit: true } }
+
+/// One-shot apply of a changeset against a synthetic target.
+///
+/// The `target_check` callback returns `Some(conflict)` when the
+/// requested change conflicts with the target's current state, or
+/// `None` to indicate "apply cleanly". This indirection keeps the
+/// engine independent of any actual storage impl — tests and
+/// production code share the same dispatch.
+pub fn apply(
+    cs: &ChangeSet,
+    resolver: &mut Heap<dyn ConflictResolver>,
+    mut target_check: fn(&Change) -> Maybe<Conflict>,
+) -> (ApplyReport, List<ApplyDecision>) {
+    let mut report = report_zero();
+    let mut decisions: List<ApplyDecision> = List.new();
+    let changes = cs.iter();
+    let mut i: Int = 0;
+    while i < changes.len() {
+        let cur = clone_change_local(&changes[i]);
+        let conflict = (target_check)(&cur);
+        match conflict {
+            None => {
+                report.applied = report.applied + 1;
+                decisions.push(AdApplied(cur));
+            }
+            Some(k) => {
+                let resolution = (&mut **resolver).resolve(&cur, clone_conflict(&k));
+                match resolution {
+                    CrSkip => {
+                        report.skipped = report.skipped + 1;
+                        decisions.push(AdSkipped(cur, k));
+                    }
+                    CrReplace => {
+                        report.replaced = report.replaced + 1;
+                        decisions.push(AdReplaced(cur));
+                    }
+                    CrOmit => {
+                        decisions.push(AdOmitted(cur, k));
+                    }
+                    CrAbort => {
+                        report.aborted = true;
+                        report.abort_reason = Some(clone_conflict(&k));
+                        decisions.push(AdAborted(cur, k));
+                        break;
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    (report, decisions)
+}
+
+fn clone_change_local(c: &Change) -> Change {
+    Change {
+        op: clone_op(&c.op),
+        table: c.table.clone(),
+        pk_columns: clone_bools(&c.pk_columns),
+        old_row: clone_row(&c.old_row),
+        new_row: clone_row(&c.new_row),
+    }
+}
+
+fn clone_op(o: &ChangeOp) -> ChangeOp {
+    match o { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
+}
+
+fn clone_bools(b: &List<Bool>) -> List<Bool> {
+    let mut out: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < b.len() { out.push(b[i]); i = i + 1; }
+    out
+}
+
+fn clone_row(r: &List<core.database.sqlite.native.l4_vdbe.register.Register>) -> List<core.database.sqlite.native.l4_vdbe.register.Register> {
+    let mut out: List<core.database.sqlite.native.l4_vdbe.register.Register> = List.new();
+    let mut i: Int = 0;
+    while i < r.len() { out.push(clone_register_local(&r[i])); i = i + 1; }
+    out
+}
+
+fn clone_register_local(r: &core.database.sqlite.native.l4_vdbe.register.Register) -> core.database.sqlite.native.l4_vdbe.register.Register {
+    match r {
+        core.database.sqlite.native.l4_vdbe.register.RNull     => core.database.sqlite.native.l4_vdbe.register.RNull,
+        core.database.sqlite.native.l4_vdbe.register.RInt(x)   => core.database.sqlite.native.l4_vdbe.register.RInt(x),
+        core.database.sqlite.native.l4_vdbe.register.RReal(x)  => core.database.sqlite.native.l4_vdbe.register.RReal(x),
+        core.database.sqlite.native.l4_vdbe.register.RText(s)  => core.database.sqlite.native.l4_vdbe.register.RText(s.clone()),
+        core.database.sqlite.native.l4_vdbe.register.RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            core.database.sqlite.native.l4_vdbe.register.RBlob(out)
+        }
+        core.database.sqlite.native.l4_vdbe.register.RRowId(x) => core.database.sqlite.native.l4_vdbe.register.RRowId(x),
+    }
+}
+
+fn clone_conflict(c: &Conflict) -> Conflict {
+    match c {
+        CfDataMismatch  => CfDataMismatch,
+        CfNotFound      => CfNotFound,
+        CfConflict      => CfConflict,
+        CfConstraint    => CfConstraint,
+        CfForeignKey    => CfForeignKey,
+        CfReplaceFailed => CfReplaceFailed,
+    }
+}

@@ -1,0 +1,262 @@
+// =============================================================================
+// session/recorder.vr — Session recorder hooked to UpdateHook
+// =============================================================================
+// Spec: sqlite-native.md §22 (CDC) — sqlite3session_create + attach
+//
+// `Session` records every DML against a table that's been
+// `attach`ed. Tables not in the attach list are silently ignored.
+//
+// `Session` implements the `UpdateHook` and `PreUpdateHook` protocols
+// so it can be subscribed via the standard `FnRegistry.set_*_hook`
+// surface — no special integration with the connection needed.
+// =============================================================================
+
+module core.database.sqlite.native.session.recorder;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register};
+mount core.database.sqlite.native.ext.hooks.{
+    PreUpdateHook, UpdateHook, UpdateOp, UoInsert, UoUpdate, UoDelete,
+};
+mount core.database.sqlite.native.session.change.{
+    Change, ChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
+    changeset_empty, change_insert, change_update, change_delete,
+};
+
+// -----------------------------------------------------------------------------
+// AttachedTable — table the session is recording
+// -----------------------------------------------------------------------------
+
+public type AttachedTable is {
+    name: Text,
+    /// Per-column primary-key flag (length matches column count).
+    pk_columns: List<Bool>,
+}
+
+public fn attached_table(name: Text, pk_columns: List<Bool>) -> AttachedTable {
+    AttachedTable { name: name, pk_columns: pk_columns }
+}
+
+// -----------------------------------------------------------------------------
+// Session
+// -----------------------------------------------------------------------------
+
+public type Session is {
+    /// Tables the session captures changes for; INSERT/UPDATE/DELETE
+    /// against any other table is silently dropped.
+    attached: List<AttachedTable>,
+    /// Changes accumulated so far.
+    changeset: ChangeSet,
+    /// True ⇒ session is paused (recorder ignores events).
+    paused: Bool,
+    /// True ⇒ INDIRECT-flag changes (changes triggered by other
+    /// changes inside the same transaction — e.g. cascade FK,
+    /// triggers) are captured. SQLite default: skip.
+    record_indirect: Bool,
+}
+
+public fn session_new() -> Session {
+    Session {
+        attached: List.new(),
+        changeset: changeset_empty(),
+        paused: false,
+        record_indirect: false,
+    }
+}
+
+implement Session {
+    public fn attach(&mut self, t: AttachedTable) {
+        // Idempotent — re-attach overwrites the pk_columns spec.
+        let mut i: Int = 0;
+        while i < self.attached.len() {
+            if self.attached[i].name == t.name {
+                self.attached[i] = AttachedTable {
+                    name: t.name.clone(),
+                    pk_columns: clone_bools(&t.pk_columns),
+                };
+                return;
+            }
+            i = i + 1;
+        }
+        self.attached.push(t);
+    }
+
+    public fn detach(&mut self, name: &Text) -> Bool {
+        let mut new_list: List<AttachedTable> = List.new();
+        let mut found: Bool = false;
+        let mut i: Int = 0;
+        while i < self.attached.len() {
+            if self.attached[i].name == name {
+                found = true;
+            } else {
+                new_list.push(AttachedTable {
+                    name: self.attached[i].name.clone(),
+                    pk_columns: clone_bools(&self.attached[i].pk_columns),
+                });
+            }
+            i = i + 1;
+        }
+        self.attached = new_list;
+        found
+    }
+
+    public fn pause(&mut self) { self.paused = true; }
+    public fn resume(&mut self) { self.paused = false; }
+    public fn enable_indirect(&mut self, on: Bool) { self.record_indirect = on; }
+
+    public fn attached_count(&self) -> Int { self.attached.len() }
+    public fn change_count(&self) -> Int { self.changeset.len() }
+
+    /// Take ownership of the recorded changeset and reset the session.
+    public fn take_changeset(&mut self) -> ChangeSet {
+        let cs = clone_changeset(&self.changeset);
+        self.changeset = changeset_empty();
+        cs
+    }
+
+    fn lookup_attached(&self, name: &Text) -> base.Maybe<AttachedTable> {
+        let mut i: Int = 0;
+        while i < self.attached.len() {
+            if self.attached[i].name == name {
+                return base.Some(AttachedTable {
+                    name: self.attached[i].name.clone(),
+                    pk_columns: clone_bools(&self.attached[i].pk_columns),
+                });
+            }
+            i = i + 1;
+        }
+        base.None
+    }
+
+    /// Push an INSERT explicitly (used by tests / non-hook callers).
+    public fn record_insert(&mut self, table: Text, new_row: List<Register>) {
+        if self.paused { return; }
+        match self.lookup_attached(&table) {
+            base.Some(t) => self.changeset.record(change_insert(table, t.pk_columns, new_row)),
+            base.None    => {}
+        }
+    }
+
+    public fn record_update(
+        &mut self,
+        table: Text,
+        old_row: List<Register>,
+        new_row: List<Register>,
+    ) {
+        if self.paused { return; }
+        match self.lookup_attached(&table) {
+            base.Some(t) => self.changeset.record(change_update(table, t.pk_columns, old_row, new_row)),
+            base.None    => {}
+        }
+    }
+
+    public fn record_delete(&mut self, table: Text, old_row: List<Register>) {
+        if self.paused { return; }
+        match self.lookup_attached(&table) {
+            base.Some(t) => self.changeset.record(change_delete(table, t.pk_columns, old_row)),
+            base.None    => {}
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Hook adapters — the recorder implements both UpdateHook + PreUpdateHook
+// so the L7 façade can subscribe it via a single call.
+// -----------------------------------------------------------------------------
+
+implement UpdateHook for Session {
+    fn on_update(&mut self, op: UpdateOp, _db: &Text, table: &Text, _rowid: Int64) {
+        // The plain UpdateHook doesn't carry row values; we use
+        // the PreUpdateHook for that. This impl exists so the
+        // session can be subscribed to either surface — but the
+        // recorder is a no-op on the post-hook path.
+        let _ = op;
+        let _ = table;
+    }
+}
+
+implement PreUpdateHook for Session {
+    fn on_pre_update(
+        &mut self,
+        op: UpdateOp,
+        _db: &Text,
+        table: &Text,
+        old_row: &List<Register>,
+        new_row: &List<Register>,
+    ) {
+        if self.paused { return; }
+        let table_text = table.clone();
+        let attached = match self.lookup_attached(&table_text) {
+            base.Some(t) => t,
+            base.None    => { return; }
+        };
+        let old_clone = clone_row(old_row);
+        let new_clone = clone_row(new_row);
+        match op {
+            UoInsert => self.changeset.record(change_insert(table_text, attached.pk_columns, new_clone)),
+            UoUpdate => self.changeset.record(change_update(table_text, attached.pk_columns, old_clone, new_clone)),
+            UoDelete => self.changeset.record(change_delete(table_text, attached.pk_columns, old_clone)),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_bools(b: &List<Bool>) -> List<Bool> {
+    let mut out: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < b.len() { out.push(b[i]); i = i + 1; }
+    out
+}
+
+fn clone_row(r: &List<Register>) -> List<Register> {
+    let mut out: List<Register> = List.new();
+    let mut i: Int = 0;
+    while i < r.len() { out.push(clone_register(&r[i])); i = i + 1; }
+    out
+}
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        core.database.sqlite.native.l4_vdbe.register.RNull     => core.database.sqlite.native.l4_vdbe.register.RNull,
+        core.database.sqlite.native.l4_vdbe.register.RInt(x)   => core.database.sqlite.native.l4_vdbe.register.RInt(x),
+        core.database.sqlite.native.l4_vdbe.register.RReal(x)  => core.database.sqlite.native.l4_vdbe.register.RReal(x),
+        core.database.sqlite.native.l4_vdbe.register.RText(s)  => core.database.sqlite.native.l4_vdbe.register.RText(s.clone()),
+        core.database.sqlite.native.l4_vdbe.register.RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            core.database.sqlite.native.l4_vdbe.register.RBlob(out)
+        }
+        core.database.sqlite.native.l4_vdbe.register.RRowId(x) => core.database.sqlite.native.l4_vdbe.register.RRowId(x),
+    }
+}
+
+fn clone_changeset(cs: &ChangeSet) -> ChangeSet {
+    let mut out = changeset_empty();
+    let items = cs.iter();
+    let mut i: Int = 0;
+    while i < items.len() {
+        out.record(Change {
+            op: clone_change_op(&items[i].op),
+            table: items[i].table.clone(),
+            pk_columns: clone_bools(&items[i].pk_columns),
+            old_row: clone_row(&items[i].old_row),
+            new_row: clone_row(&items[i].new_row),
+        });
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_change_op(o: &ChangeOp) -> ChangeOp {
+    match o {
+        OpInsert => OpInsert,
+        OpUpdate => OpUpdate,
+        OpDelete => OpDelete,
+    }
+}

@@ -1,0 +1,184 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab, csv
+// @timeout: 5000
+// @expected-exit: 0
+//
+// CSV vtab parser:
+//   * options_default + options_tsv
+//   * parse_row_at handles quoted fields, embedded commas,
+//     doubled-quote escape
+//   * parse_all walks the entire buffer, skipping blank lines
+//   * infer_schema with header / no-header
+//   * cursor iterates body rows (skipping header if requested)
+
+mount core.database.sqlite.native.vtabs.csv.{
+    CsvOptions, CsvError, CsvRow, CsvCursor,
+    options_default, options_tsv,
+    parse_row_at, parse_all, infer_schema, cursor_from,
+    CeUnclosedQuote, CeBadEscape, CeShortRow,
+};
+mount core.database.sqlite.native.vtabs.protocol.{VtabSchema, VtabError};
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RText};
+mount base.{Ok, Err, Result};
+
+fn bytes_of(s: Text) -> List<Byte> {
+    let bs = s.as_bytes();
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push(bs[i]); i = i + 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// options
+// -----------------------------------------------------------------------------
+
+fn test_options_default_uses_comma() {
+    let o = options_default();
+    assert(o.delim == (44 as Byte));
+    assert(o.has_header);
+    assert(!o.trim_cells);
+}
+
+fn test_options_tsv_uses_tab() {
+    let o = options_tsv();
+    assert(o.delim == (9 as Byte));
+    assert(o.trim_cells);
+}
+
+// -----------------------------------------------------------------------------
+// parse_row_at
+// -----------------------------------------------------------------------------
+
+fn test_parse_simple_row() {
+    let buf = bytes_of("a,b,c\n".clone());
+    let opts = options_default();
+    match parse_row_at(&buf, 0, &opts) {
+        Ok(pair) => {
+            assert_eq(pair.0.cells.len(), 3);
+            assert(pair.0.cells[0] == "a".clone());
+            assert(pair.0.cells[1] == "b".clone());
+            assert(pair.0.cells[2] == "c".clone());
+        }
+        Err(_) => panic("simple row"),
+    }
+}
+
+fn test_parse_quoted_field_with_comma() {
+    let buf = bytes_of("a,\"b,c\",d\n".clone());
+    let opts = options_default();
+    match parse_row_at(&buf, 0, &opts) {
+        Ok(pair) => {
+            assert_eq(pair.0.cells.len(), 3);
+            assert(pair.0.cells[1] == "b,c".clone());
+        }
+        Err(_) => panic("quoted field"),
+    }
+}
+
+fn test_parse_doubled_quote_escape() {
+    let buf = bytes_of("a,\"He said \"\"hi\"\"\",b\n".clone());
+    let opts = options_default();
+    match parse_row_at(&buf, 0, &opts) {
+        Ok(pair) => {
+            assert_eq(pair.0.cells.len(), 3);
+            assert(pair.0.cells[1] == "He said \"hi\"".clone());
+        }
+        Err(_) => panic("doubled-quote escape"),
+    }
+}
+
+fn test_parse_unclosed_quote_errors() {
+    let buf = bytes_of("a,\"unterminated".clone());
+    let opts = options_default();
+    match parse_row_at(&buf, 0, &opts) {
+        Err(CeUnclosedQuote(_)) => {},
+        _ => panic("unclosed quote → error"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// parse_all
+// -----------------------------------------------------------------------------
+
+fn test_parse_all_multiple_rows() {
+    let buf = bytes_of("a,b\n1,2\n3,4\n".clone());
+    let opts = options_default();
+    match parse_all(&buf, &opts) {
+        Ok(rows) => assert_eq(rows.len(), 3),
+        Err(_)   => panic("parse_all"),
+    }
+}
+
+fn test_parse_all_skips_blank_lines() {
+    let buf = bytes_of("a\n\n\nb\n".clone());
+    let opts = options_default();
+    match parse_all(&buf, &opts) {
+        Ok(rows) => assert_eq(rows.len(), 2),
+        Err(_)   => panic("parse_all skipping blanks"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// schema inference
+// -----------------------------------------------------------------------------
+
+fn test_infer_schema_with_header() {
+    let buf = bytes_of("name,age\nAlice,30\nBob,25\n".clone());
+    let opts = options_default();
+    let rows = parse_all(&buf, &opts).unwrap();
+    let s = infer_schema(&rows, &opts);
+    assert_eq(s.columns.len(), 2);
+    assert(s.columns[0].name == "name".clone());
+    assert(s.columns[1].name == "age".clone());
+}
+
+fn test_infer_schema_without_header() {
+    let buf = bytes_of("Alice,30\nBob,25\n".clone());
+    let mut opts = options_default();
+    opts.has_header = false;
+    let rows = parse_all(&buf, &opts).unwrap();
+    let s = infer_schema(&rows, &opts);
+    assert_eq(s.columns.len(), 2);
+    assert(s.columns[0].name == "col_0".clone());
+    assert(s.columns[1].name == "col_1".clone());
+}
+
+// -----------------------------------------------------------------------------
+// cursor
+// -----------------------------------------------------------------------------
+
+fn test_cursor_skips_header() {
+    let buf = bytes_of("name,age\nAlice,30\nBob,25\n".clone());
+    let opts = options_default();
+    let rows = parse_all(&buf, &opts).unwrap();
+    let mut cur = cursor_from(rows, true);
+    assert(!cur.eof());
+    match cur.column(0) {
+        RText(s) => assert(s == "Alice".clone()),
+        _ => panic("first body row col 0"),
+    }
+    let _ = cur.next_row();
+    match cur.column(0) {
+        RText(s) => assert(s == "Bob".clone()),
+        _ => panic("second body row"),
+    }
+    let _ = cur.next_row();
+    assert(cur.eof());
+}
+
+fn main() {
+    test_options_default_uses_comma();
+    test_options_tsv_uses_tab();
+    test_parse_simple_row();
+    test_parse_quoted_field_with_comma();
+    test_parse_doubled_quote_escape();
+    test_parse_unclosed_quote_errors();
+    test_parse_all_multiple_rows();
+    test_parse_all_skips_blank_lines();
+    test_infer_schema_with_header();
+    test_infer_schema_without_header();
+    test_cursor_skips_header();
+}

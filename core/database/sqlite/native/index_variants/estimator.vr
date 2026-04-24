@@ -1,0 +1,102 @@
+// =============================================================================
+// index_variants/estimator.vr — cost adjustment per index kind
+// =============================================================================
+// Spec: sqlite-native.md §13.3
+//
+// Each index kind affects the planner's cost estimate differently:
+//
+//   * `Plain`        — base cost from `planner_cost.cost.estimate_access`
+//   * `Unique`       — selectivity capped at 1 row when probed by full key
+//   * `Partial`      — cost discounted by predicate-overlap fraction
+//                      (only matching rows are present in the index)
+//   * `Expression`   — base cost + per-row expression-evaluation overhead
+//   * `Covering`     — base cost minus row-payload-fetch overhead
+// =============================================================================
+
+module core.database.sqlite.native.index_variants.estimator;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.index_variants.kind.{
+    IndexKind, IkPlain, IkUnique, IkPartial, IkExpression, IkCovering,
+};
+
+// -----------------------------------------------------------------------------
+// CostAdjustment
+// -----------------------------------------------------------------------------
+//
+// The planner applies the adjustment as:
+//
+//   adjusted_cost = base_cost * row_multiplier + setup_overhead
+// =============================================================================
+
+public type CostAdjustment is {
+    /// Multiplicative factor on per-row cost.
+    row_multiplier: Float64,
+    /// Additive setup penalty.
+    setup_overhead: Float64,
+    /// True ⇒ the planner can skip the row-payload fetch (covering).
+    skip_row_fetch: Bool,
+}
+
+public fn no_adjustment() -> CostAdjustment {
+    CostAdjustment {
+        row_multiplier: 1.0,
+        setup_overhead: 0.0,
+        skip_row_fetch: false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// adjust_for(kind, partial_overlap?)
+// -----------------------------------------------------------------------------
+//
+// `partial_overlap`: if the index is partial, the fraction of rows
+// whose values satisfy the partial predicate (estimated by the
+// planner from stat4 / default 0.5).
+// =============================================================================
+
+public fn adjust_for(kind: &IndexKind, partial_overlap: Float64) -> CostAdjustment {
+    match kind {
+        IkPlain   => no_adjustment(),
+        IkUnique  => CostAdjustment {
+            row_multiplier: 0.0,    // single-row probe — no per-row scan cost
+            setup_overhead: 0.5,    // single index seek
+            skip_row_fetch: false,
+        },
+        IkPartial(_) => CostAdjustment {
+            // Selectivity already accounted for via partial_overlap
+            // (rows that pass the predicate are the only ones the
+            // index returns); per-row cost stays.
+            row_multiplier: clamp_unit(partial_overlap),
+            setup_overhead: 0.0,
+            skip_row_fetch: false,
+        },
+        IkExpression => CostAdjustment {
+            row_multiplier: 1.1,    // per-row expression evaluation cost
+            setup_overhead: 0.5,
+            skip_row_fetch: false,
+        },
+        IkCovering => CostAdjustment {
+            row_multiplier: 0.5,    // half — no row-payload fetch
+            setup_overhead: 0.0,
+            skip_row_fetch: true,
+        },
+    }
+}
+
+fn clamp_unit(x: Float64) -> Float64 {
+    if x < 0.0 { 0.0 }
+    else if x > 1.0 { 1.0 }
+    else { x }
+}
+
+// -----------------------------------------------------------------------------
+// Comparison
+// -----------------------------------------------------------------------------
+
+public fn cheaper_than(a: &CostAdjustment, b: &CostAdjustment, base_cost: Float64) -> Bool {
+    let ca = base_cost * a.row_multiplier + a.setup_overhead;
+    let cb = base_cost * b.row_multiplier + b.setup_overhead;
+    ca < cb
+}

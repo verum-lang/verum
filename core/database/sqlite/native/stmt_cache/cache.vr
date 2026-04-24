@@ -1,0 +1,228 @@
+// =============================================================================
+// stmt_cache/cache.vr — LRU container with size cap + statistics
+// =============================================================================
+// Spec: sqlite-native.md §11.1
+//
+// `StatementCache` is the container — capped at `max_entries`, with
+// pluggable `EvictionPolicy`. The L7 façade calls `lookup(sql)`
+// before parsing; on hit, the cached `program_id` is reused. On
+// miss, the caller compiles and `insert`s.
+//
+// Statistics surface (`hits`, `misses`, `evictions`, `pin_failures`)
+// are exposed via `pragma stmt_cache_stats`.
+// =============================================================================
+
+module core.database.sqlite.native.stmt_cache.cache;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.stmt_cache.key.{
+    CacheKey, key_for, keys_equal,
+};
+mount core.database.sqlite.native.stmt_cache.entry.{
+    CachedStatement, entry_new,
+};
+mount core.database.sqlite.native.stmt_cache.policy.{
+    EvictionPolicy,
+};
+
+public type CacheError is
+      CeNoSpace
+    | CeAlreadyPinned;
+
+// -----------------------------------------------------------------------------
+// Statistics
+// -----------------------------------------------------------------------------
+
+public type CacheStats is {
+    hits: Int64,
+    misses: Int64,
+    evictions: Int64,
+    pinned_count: Int,
+    capacity: Int,
+}
+
+public fn stats_zero(capacity: Int) -> CacheStats {
+    CacheStats {
+        hits: 0 as Int64,
+        misses: 0 as Int64,
+        evictions: 0 as Int64,
+        pinned_count: 0,
+        capacity: capacity,
+    }
+}
+
+public fn hit_ratio(stats: &CacheStats) -> Float64 {
+    let total = (stats.hits + stats.misses) as Float64;
+    if total == 0.0 { return 0.0; }
+    (stats.hits as Float64) / total
+}
+
+// -----------------------------------------------------------------------------
+// StatementCache
+// -----------------------------------------------------------------------------
+
+public type StatementCache is {
+    max_entries: Int,
+    entries: List<CachedStatement>,
+    policy: Heap<dyn EvictionPolicy>,
+    stats: CacheStats,
+}
+
+public fn cache_new(max_entries: Int, policy: Heap<dyn EvictionPolicy>) -> StatementCache {
+    let cap = if max_entries <= 0 { 64 } else { max_entries };
+    StatementCache {
+        max_entries: cap,
+        entries: List.new(),
+        policy: policy,
+        stats: stats_zero(cap),
+    }
+}
+
+implement StatementCache {
+    public fn capacity(&self) -> Int { self.max_entries }
+    public fn current_size(&self) -> Int { self.entries.len() }
+    public fn stats_snapshot(&self) -> CacheStats {
+        CacheStats {
+            hits: self.stats.hits,
+            misses: self.stats.misses,
+            evictions: self.stats.evictions,
+            pinned_count: self.stats.pinned_count,
+            capacity: self.stats.capacity,
+        }
+    }
+
+    fn find_idx(&self, key: &CacheKey) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if keys_equal(&self.entries[i].key, key) { return Some(i); }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Look up by SQL. On hit returns Some(program_id); on miss None.
+    public fn lookup(&mut self, sql: &Text, now_ns: Int64) -> Maybe<Int> {
+        let key = key_for(sql);
+        match self.find_idx(&key) {
+            Some(i) => {
+                self.entries[i].touch(now_ns);
+                self.stats.hits = self.stats.hits + (1 as Int64);
+                Some(self.entries[i].program_id)
+            }
+            None => {
+                self.stats.misses = self.stats.misses + (1 as Int64);
+                None
+            }
+        }
+    }
+
+    /// Insert a freshly-compiled statement. Evicts on overflow.
+    public fn insert(&mut self, sql: &Text, program_id: Int, now_ns: Int64) -> Result<(), CacheError> {
+        let key = key_for(sql);
+        // If already present — overwrite.
+        match self.find_idx(&key) {
+            Some(i) => {
+                self.entries[i].program_id = program_id;
+                self.entries[i].touch(now_ns);
+                return Ok(());
+            }
+            None => {}
+        }
+        if self.entries.len() >= self.max_entries {
+            // Evict.
+            let victim = (&*self.policy).pick_victim(&self.entries);
+            match victim {
+                Some(idx) => {
+                    let mut new_entries: List<CachedStatement> = List.new();
+                    let mut k: Int = 0;
+                    while k < self.entries.len() {
+                        if k != idx {
+                            new_entries.push(clone_entry(&self.entries[k]));
+                        }
+                        k = k + 1;
+                    }
+                    self.entries = new_entries;
+                    self.stats.evictions = self.stats.evictions + (1 as Int64);
+                }
+                None => { return Err(CeNoSpace); }
+            }
+        }
+        self.entries.push(entry_new(key, program_id, now_ns));
+        Ok(())
+    }
+
+    /// Pin a cached entry — pinned entries are never evicted.
+    pub fn pin(&mut self, sql: &Text) -> Bool {
+        let key = key_for(sql);
+        match self.find_idx(&key) {
+            Some(i) => {
+                if !self.entries[i].is_pinned {
+                    self.entries[i].pin();
+                    self.stats.pinned_count = self.stats.pinned_count + 1;
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn unpin(&mut self, sql: &Text) -> Bool {
+        let key = key_for(sql);
+        match self.find_idx(&key) {
+            Some(i) => {
+                if self.entries[i].is_pinned {
+                    self.entries[i].unpin();
+                    self.stats.pinned_count = self.stats.pinned_count - 1;
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Clear every entry except pinned ones (used by ATTACH/DETACH).
+    public fn clear_unpinned(&mut self) -> Int {
+        let mut new_entries: List<CachedStatement> = List.new();
+        let mut dropped: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].is_pinned {
+                new_entries.push(clone_entry(&self.entries[i]));
+            } else {
+                dropped = dropped + 1;
+            }
+            i = i + 1;
+        }
+        self.entries = new_entries;
+        dropped
+    }
+
+    /// Drop every entry — pinned included. Used at connection close.
+    public fn drop_all(&mut self) {
+        self.entries = List.new();
+        self.stats.pinned_count = 0;
+    }
+}
+
+fn clone_entry(e: &CachedStatement) -> CachedStatement {
+    CachedStatement {
+        key: clone_key(&e.key),
+        program_id: e.program_id,
+        last_used_ns: e.last_used_ns,
+        use_count: e.use_count,
+        is_pinned: e.is_pinned,
+    }
+}
+
+fn clone_key(k: &CacheKey) -> CacheKey {
+    let mut named: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < k.named_params.len() { named.push(k.named_params[i].clone()); i = i + 1; }
+    CacheKey {
+        normalised_sql: k.normalised_sql.clone(),
+        positional_params: k.positional_params,
+        named_params: named,
+    }
+}

@@ -1,0 +1,28 @@
+// =============================================================================
+// core/database/sqlite/native/index_variants/mod.vr
+// =============================================================================
+// Layer: 5 (planner) / 6 (schema)
+// Spec: sqlite-native.md §13.3 — index selection
+//
+// SQLite indexes come in five flavours:
+//
+//   * `Plain`        — `CREATE INDEX i ON t(a, b)`
+//   * `Unique`       — `CREATE UNIQUE INDEX`
+//   * `Partial`      — `CREATE INDEX … WHERE pred` — only rows
+//                      matching the predicate are indexed
+//   * `Expression`   — `CREATE INDEX … ON t(expr1, expr2)` —
+//                      indexes computed expressions, not raw cols
+//   * `Covering`     — index that includes EVERY column the planner
+//                      needs (no row-payload fetch required); SQLite
+//                      auto-detects this rather than declaring it
+//
+// `IndexKind` is the spec; `IndexDescriptor` carries the per-index
+// metadata; `index_estimator` returns the cost adjustment for an
+// access path that uses each kind.
+// =============================================================================
+
+module core.database.sqlite.native.index_variants;
+
+public module kind;
+public module descriptor;
+public module estimator;

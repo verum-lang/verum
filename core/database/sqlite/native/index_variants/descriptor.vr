@@ -1,0 +1,132 @@
+// =============================================================================
+// index_variants/descriptor.vr — per-index metadata
+// =============================================================================
+// Spec: sqlite-native.md §13.3
+//
+// `IndexDescriptor` carries everything the planner needs about an
+// index that's not a function of the table itself.
+// =============================================================================
+
+module core.database.sqlite.native.index_variants.descriptor;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.index_variants.kind.{
+    IndexKind, kind_name, is_unique, is_partial,
+};
+
+// -----------------------------------------------------------------------------
+// IndexedColumn
+// -----------------------------------------------------------------------------
+
+public type SortDirection is SdAsc | SdDesc;
+
+public fn sort_dir_name(d: &SortDirection) -> Text {
+    match d { SdAsc => "ASC".clone(), SdDesc => "DESC".clone() }
+}
+
+public type IndexedColumn is {
+    /// Column name OR expression text (for IkExpression indexes).
+    expr: Text,
+    direction: SortDirection,
+    /// Collation sequence — typically "BINARY" / "NOCASE" / "RTRIM".
+    collation: Text,
+}
+
+public fn indexed_column(name: Text) -> IndexedColumn {
+    IndexedColumn {
+        expr: name,
+        direction: SdAsc,
+        collation: "BINARY".clone(),
+    }
+}
+
+implement IndexedColumn {
+    public fn descending(mut self) -> IndexedColumn { self.direction = SdDesc; self }
+    public fn with_collation(mut self, name: Text) -> IndexedColumn { self.collation = name; self }
+}
+
+// -----------------------------------------------------------------------------
+// IndexDescriptor
+// -----------------------------------------------------------------------------
+
+public type IndexDescriptor is {
+    name: Text,
+    table: Text,
+    kind: IndexKind,
+    columns: List<IndexedColumn>,
+    /// Auto-bumped by ANALYZE; planner uses to compute selectivity.
+    estimated_rows: Int64,
+}
+
+public fn descriptor_new(name: Text, table: Text, kind: IndexKind) -> IndexDescriptor {
+    IndexDescriptor {
+        name: name,
+        table: table,
+        kind: kind,
+        columns: List.new(),
+        estimated_rows: 0 as Int64,
+    }
+}
+
+implement IndexDescriptor {
+    public fn add_column(&mut self, c: IndexedColumn) {
+        self.columns.push(c);
+    }
+
+    public fn arity(&self) -> Int { self.columns.len() }
+
+    pub fn covers_columns(&self, requested: &List<Text>) -> Bool {
+        let mut i: Int = 0;
+        while i < requested.len() {
+            let mut found = false;
+            let mut k: Int = 0;
+            while k < self.columns.len() {
+                if self.columns[k].expr == requested[i] { found = true; break; }
+                k = k + 1;
+            }
+            if !found { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    public fn is_unique_index(&self) -> Bool { is_unique(&self.kind) }
+
+    public fn is_partial_index(&self) -> Bool { is_partial(&self.kind) }
+
+    public fn first_n_columns(&self, n: Int) -> List<Text> {
+        let mut out: List<Text> = List.new();
+        let mut i: Int = 0;
+        let cap: Int = if n > self.columns.len() { self.columns.len() } else { n };
+        while i < cap {
+            out.push(self.columns[i].expr.clone());
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tabular descriptor for the EXPLAIN output of `pragma_index_list`
+// -----------------------------------------------------------------------------
+
+public fn describe_short(d: &IndexDescriptor) -> Text {
+    let mut out = kind_name(&d.kind);
+    out.push_byte(32 as Byte);
+    let nb = d.name.as_bytes();
+    let mut i: Int = 0;
+    while i < nb.len() { out.push_byte(nb[i]); i = i + 1; }
+    out.push_byte(40 as Byte);
+    let mut k: Int = 0;
+    while k < d.columns.len() {
+        if k > 0 { out.push_byte(44 as Byte); out.push_byte(32 as Byte); }
+        let cb = d.columns[k].expr.as_bytes();
+        let mut j: Int = 0;
+        while j < cb.len() { out.push_byte(cb[j]); j = j + 1; }
+        k = k + 1;
+    }
+    out.push_byte(41 as Byte);
+    out
+}

@@ -1,0 +1,46 @@
+// =============================================================================
+// index_variants/kind.vr — IndexKind taxonomy + helpers
+// =============================================================================
+// Spec: sqlite-native.md §13.3
+// =============================================================================
+
+module core.database.sqlite.native.index_variants.kind;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type IndexKind is
+      IkPlain
+    | IkUnique
+    | IkPartial(Text)        // partial-index predicate text
+    | IkExpression           // index over computed expressions
+    | IkCovering             // implicit — set by the planner;
+                             // a hand-declared index can also opt-in
+                             // when its column list is a superset of
+                             // every planner reference.
+    ;
+
+public fn kind_name(k: &IndexKind) -> Text {
+    match k {
+        IkPlain         => "PLAIN".clone(),
+        IkUnique        => "UNIQUE".clone(),
+        IkPartial(_)    => "PARTIAL".clone(),
+        IkExpression    => "EXPRESSION".clone(),
+        IkCovering      => "COVERING".clone(),
+    }
+}
+
+public fn is_unique(k: &IndexKind) -> Bool {
+    match k { IkUnique => true, _ => false }
+}
+
+public fn is_partial(k: &IndexKind) -> Bool {
+    match k { IkPartial(_) => true, _ => false }
+}
+
+public fn partial_predicate(k: &IndexKind) -> base.Maybe<Text> {
+    match k {
+        IkPartial(p) => base.Some(p.clone()),
+        _            => base.None,
+    }
+}

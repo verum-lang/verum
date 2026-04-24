@@ -1,0 +1,168 @@
+// =============================================================================
+// session/combinator.vr — invert / concat / strip-table / filter
+// =============================================================================
+// Spec: sqlite-native.md §22 (CDC) —
+//       sqlite3changeset_invert / _concat / _strip
+//
+// Pure operations on `ChangeSet`. None of these touch any storage —
+// they're tree rewrites that mirror upstream SQLite's combinator API.
+// =============================================================================
+
+module core.database.sqlite.native.session.combinator;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.session.change.{
+    Change, ChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
+    changeset_empty,
+};
+
+// -----------------------------------------------------------------------------
+// invert
+// -----------------------------------------------------------------------------
+//
+// INSERT becomes DELETE; DELETE becomes INSERT; UPDATE swaps OLD/NEW.
+// Logically: applying a changeset then applying its inverse leaves
+// the database unchanged (modulo conflict handling).
+// =============================================================================
+
+public fn invert(cs: &ChangeSet) -> ChangeSet {
+    let mut out = changeset_empty();
+    let changes = cs.iter();
+    let mut i: Int = changes.len() - 1;
+    while i >= 0 {
+        out.record(invert_change(&changes[i]));
+        i = i - 1;
+    }
+    out
+}
+
+fn invert_change(c: &Change) -> Change {
+    match c.op {
+        OpInsert => Change {
+            op: OpDelete,
+            table: c.table.clone(),
+            pk_columns: clone_bools(&c.pk_columns),
+            old_row: clone_row(&c.new_row),
+            new_row: List.new(),
+        },
+        OpDelete => Change {
+            op: OpInsert,
+            table: c.table.clone(),
+            pk_columns: clone_bools(&c.pk_columns),
+            old_row: List.new(),
+            new_row: clone_row(&c.old_row),
+        },
+        OpUpdate => Change {
+            op: OpUpdate,
+            table: c.table.clone(),
+            pk_columns: clone_bools(&c.pk_columns),
+            old_row: clone_row(&c.new_row),
+            new_row: clone_row(&c.old_row),
+        },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// concat — a; b
+// -----------------------------------------------------------------------------
+
+public fn concat(a: &ChangeSet, b: &ChangeSet) -> ChangeSet {
+    let mut out = changeset_empty();
+    let ai = a.iter();
+    let bi = b.iter();
+    let mut i: Int = 0;
+    while i < ai.len() {
+        out.record(clone_change(&ai[i]));
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < bi.len() {
+        out.record(clone_change(&bi[j]));
+        j = j + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// strip_table — drop every change against `table_name`
+// -----------------------------------------------------------------------------
+
+public fn strip_table(cs: &ChangeSet, table_name: &Text) -> ChangeSet {
+    let mut out = changeset_empty();
+    let changes = cs.iter();
+    let mut i: Int = 0;
+    while i < changes.len() {
+        if changes[i].table != table_name {
+            out.record(clone_change(&changes[i]));
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// filter — caller-supplied predicate
+// -----------------------------------------------------------------------------
+
+public fn filter(cs: &ChangeSet, mut pred: fn(&Change) -> Bool) -> ChangeSet {
+    let mut out = changeset_empty();
+    let changes = cs.iter();
+    let mut i: Int = 0;
+    while i < changes.len() {
+        if (pred)(&changes[i]) {
+            out.record(clone_change(&changes[i]));
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_change(c: &Change) -> Change {
+    Change {
+        op: clone_op(&c.op),
+        table: c.table.clone(),
+        pk_columns: clone_bools(&c.pk_columns),
+        old_row: clone_row(&c.old_row),
+        new_row: clone_row(&c.new_row),
+    }
+}
+
+fn clone_op(o: &ChangeOp) -> ChangeOp {
+    match o { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
+}
+
+fn clone_bools(b: &List<Bool>) -> List<Bool> {
+    let mut out: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < b.len() { out.push(b[i]); i = i + 1; }
+    out
+}
+
+fn clone_row(r: &List<core.database.sqlite.native.l4_vdbe.register.Register>) -> List<core.database.sqlite.native.l4_vdbe.register.Register> {
+    let mut out: List<core.database.sqlite.native.l4_vdbe.register.Register> = List.new();
+    let mut i: Int = 0;
+    while i < r.len() { out.push(clone_register(&r[i])); i = i + 1; }
+    out
+}
+
+fn clone_register(r: &core.database.sqlite.native.l4_vdbe.register.Register) -> core.database.sqlite.native.l4_vdbe.register.Register {
+    match r {
+        core.database.sqlite.native.l4_vdbe.register.RNull     => core.database.sqlite.native.l4_vdbe.register.RNull,
+        core.database.sqlite.native.l4_vdbe.register.RInt(x)   => core.database.sqlite.native.l4_vdbe.register.RInt(x),
+        core.database.sqlite.native.l4_vdbe.register.RReal(x)  => core.database.sqlite.native.l4_vdbe.register.RReal(x),
+        core.database.sqlite.native.l4_vdbe.register.RText(s)  => core.database.sqlite.native.l4_vdbe.register.RText(s.clone()),
+        core.database.sqlite.native.l4_vdbe.register.RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            core.database.sqlite.native.l4_vdbe.register.RBlob(out)
+        }
+        core.database.sqlite.native.l4_vdbe.register.RRowId(x) => core.database.sqlite.native.l4_vdbe.register.RRowId(x),
+    }
+}

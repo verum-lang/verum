@@ -1,0 +1,173 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, index, variants, planner
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Index-variant taxonomy:
+//   * Kind names + classification helpers
+//   * Descriptor add_column + covers_columns + first_n
+//   * Estimator: Unique 0-multiplier, Covering 0.5x, Partial scaled
+//     by overlap, Expression overhead
+
+mount core.database.sqlite.native.index_variants.kind.{
+    IndexKind, IkPlain, IkUnique, IkPartial, IkExpression, IkCovering,
+    kind_name, is_unique, is_partial, partial_predicate,
+};
+mount core.database.sqlite.native.index_variants.descriptor.{
+    SortDirection, SdAsc, SdDesc, sort_dir_name,
+    IndexedColumn, indexed_column,
+    IndexDescriptor, descriptor_new, describe_short,
+};
+mount core.database.sqlite.native.index_variants.estimator.{
+    CostAdjustment, no_adjustment, adjust_for, cheaper_than,
+};
+mount base.{Some, None, Maybe};
+
+// -----------------------------------------------------------------------------
+// kind
+// -----------------------------------------------------------------------------
+
+fn test_kind_names() {
+    assert(kind_name(&IkPlain) == "PLAIN".clone());
+    assert(kind_name(&IkUnique) == "UNIQUE".clone());
+    assert(kind_name(&IkPartial("x>0".clone())) == "PARTIAL".clone());
+    assert(kind_name(&IkExpression) == "EXPRESSION".clone());
+    assert(kind_name(&IkCovering) == "COVERING".clone());
+}
+
+fn test_kind_predicates() {
+    assert(is_unique(&IkUnique));
+    assert(!is_unique(&IkPlain));
+    assert(is_partial(&IkPartial("x>0".clone())));
+    assert(!is_partial(&IkPlain));
+}
+
+fn test_partial_predicate_extraction() {
+    match partial_predicate(&IkPartial("active=1".clone())) {
+        Some(p) => assert(p == "active=1".clone()),
+        None    => panic("partial predicate present"),
+    }
+    match partial_predicate(&IkPlain) {
+        None    => {},
+        Some(_) => panic("plain has no predicate"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// descriptor
+// -----------------------------------------------------------------------------
+
+fn test_descriptor_columns() {
+    let mut d = descriptor_new("idx_users".clone(), "users".clone(), IkUnique);
+    d.add_column(indexed_column("email".clone()));
+    d.add_column(indexed_column("status".clone()).descending());
+    assert_eq(d.arity(), 2);
+    assert(d.is_unique_index());
+}
+
+fn test_descriptor_covers_columns() {
+    let mut d = descriptor_new("idx_users".clone(), "users".clone(), IkPlain);
+    d.add_column(indexed_column("a".clone()));
+    d.add_column(indexed_column("b".clone()));
+    d.add_column(indexed_column("c".clone()));
+    let mut req: List<Text> = List.new();
+    req.push("a".clone());
+    req.push("c".clone());
+    assert(d.covers_columns(&req));
+    let mut req2: List<Text> = List.new();
+    req2.push("z".clone());
+    assert(!d.covers_columns(&req2));
+}
+
+fn test_descriptor_first_n() {
+    let mut d = descriptor_new("i".clone(), "t".clone(), IkPlain);
+    d.add_column(indexed_column("x".clone()));
+    d.add_column(indexed_column("y".clone()));
+    d.add_column(indexed_column("z".clone()));
+    let two = d.first_n_columns(2);
+    assert_eq(two.len(), 2);
+    assert(two[0] == "x".clone());
+    assert(two[1] == "y".clone());
+    let many = d.first_n_columns(99);
+    assert_eq(many.len(), 3);
+}
+
+fn test_descriptor_describe_short() {
+    let mut d = descriptor_new("idx_email".clone(), "users".clone(), IkUnique);
+    d.add_column(indexed_column("email".clone()));
+    let desc = describe_short(&d);
+    assert(desc.len() > 0);
+}
+
+fn test_sort_direction_names() {
+    assert(sort_dir_name(&SdAsc) == "ASC".clone());
+    assert(sort_dir_name(&SdDesc) == "DESC".clone());
+}
+
+fn test_indexed_column_with_collation() {
+    let c = indexed_column("name".clone()).with_collation("NOCASE".clone());
+    assert(c.collation == "NOCASE".clone());
+}
+
+// -----------------------------------------------------------------------------
+// estimator
+// -----------------------------------------------------------------------------
+
+fn test_no_adjustment_baseline() {
+    let a = no_adjustment();
+    assert(a.row_multiplier == 1.0);
+    assert(a.setup_overhead == 0.0);
+    assert(!a.skip_row_fetch);
+}
+
+fn test_unique_zero_row_multiplier() {
+    let a = adjust_for(&IkUnique, 0.5);
+    assert(a.row_multiplier == 0.0);
+    assert(a.setup_overhead > 0.0);
+}
+
+fn test_covering_skips_row_fetch() {
+    let a = adjust_for(&IkCovering, 0.5);
+    assert(a.skip_row_fetch);
+    assert(a.row_multiplier <= 1.0);
+}
+
+fn test_partial_overlap_clamped_to_unit() {
+    let a_below = adjust_for(&IkPartial("x>0".clone()), -0.5);
+    assert(a_below.row_multiplier == 0.0);
+    let a_above = adjust_for(&IkPartial("x>0".clone()), 1.5);
+    assert(a_above.row_multiplier == 1.0);
+}
+
+fn test_expression_has_overhead() {
+    let a = adjust_for(&IkExpression, 0.5);
+    assert(a.row_multiplier > 1.0);
+    assert(a.setup_overhead > 0.0);
+}
+
+fn test_cheaper_than_compares_total() {
+    let unique = adjust_for(&IkUnique, 1.0);
+    let plain = no_adjustment();
+    // For a 1000-row scan, unique (≈setup) beats plain (1000 * 1.0)
+    assert(cheaper_than(&unique, &plain, 1000.0));
+}
+
+fn main() {
+    test_kind_names();
+    test_kind_predicates();
+    test_partial_predicate_extraction();
+    test_descriptor_columns();
+    test_descriptor_covers_columns();
+    test_descriptor_first_n();
+    test_descriptor_describe_short();
+    test_sort_direction_names();
+    test_indexed_column_with_collation();
+    test_no_adjustment_baseline();
+    test_unique_zero_row_multiplier();
+    test_covering_skips_row_fetch();
+    test_partial_overlap_clamped_to_unit();
+    test_expression_has_overhead();
+    test_cheaper_than_compares_total();
+}

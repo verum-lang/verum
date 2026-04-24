@@ -110,3 +110,9 @@ public module backup;
 public module vacuum;
 // - planner_passes: subquery flatten / decorrelate / magic-sets / window-plan (§13.5-§13.6)
 public module planner_passes;
+// - session: changeset / patchset / apply with ConflictResolver protocol (§22 CDC)
+public module session;
+// - index_variants: IndexKind taxonomy (Plain/Unique/Partial/Expression/Covering) (§13.3)
+public module index_variants;
+// - stmt_cache: per-Connection LRU prepared-statement cache (§11.1)
+public module stmt_cache;

@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_cache/mod.vr
+// =============================================================================
+// Layer: 6 (per-Connection)
+// Spec: sqlite-native.md §11.1, §22 (operational tooling)
+//
+// LRU cache of prepared statements keyed by normalised SQL +
+// parameter shape. Reuse across multiple `prepare(sql)` calls
+// avoids re-parsing + re-planning + re-emitting bytecode.
+//
+// Submodules:
+//   * `key`        — normalisation + cache key
+//   * `entry`      — CachedStatement record
+//   * `cache`      — LRU container with size cap + statistics
+//   * `policy`     — eviction policies (LRU / LFU / size-bound)
+// =============================================================================
+
+module core.database.sqlite.native.stmt_cache;
+
+public module key;
+public module entry;
+public module cache;
+public module policy;

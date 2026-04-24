@@ -1,0 +1,105 @@
+// =============================================================================
+// stmt_cache/policy.vr — eviction policies
+// =============================================================================
+// Spec: sqlite-native.md §11.1
+//
+// Three pre-canned policies; users can plug in custom ones via the
+// `EvictionPolicy` protocol.
+//
+//   * `Lru`     — evict the entry with the oldest `last_used_ns`
+//   * `Lfu`     — evict the entry with the smallest `use_count`,
+//                 ties broken by oldest `last_used_ns`
+//   * `Fifo`    — evict the entry that was inserted earliest
+// =============================================================================
+
+module core.database.sqlite.native.stmt_cache.policy;
+
+mount core.*;
+mount base.{Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.stmt_cache.entry.{CachedStatement};
+
+public type EvictionPolicy is protocol {
+    fn name(&self) -> base.Text;
+    /// Pick the index of the entry to evict, or None when no entry
+    /// is evictable (every entry is pinned).
+    fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int>;
+};
+
+// -----------------------------------------------------------------------------
+// LRU
+// -----------------------------------------------------------------------------
+
+public type Lru is { unit: Bool };
+public fn lru() -> Lru { Lru { unit: true } }
+
+implement EvictionPolicy for Lru {
+    fn name(&self) -> base.Text { "lru".clone() }
+    fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int> {
+        let mut best: Int = -1;
+        let mut best_ts: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < entries.len() {
+            if entries[i].evictable() {
+                if best < 0 || entries[i].last_used_ns < best_ts {
+                    best = i;
+                    best_ts = entries[i].last_used_ns;
+                }
+            }
+            i = i + 1;
+        }
+        if best < 0 { None } else { Some(best) }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// LFU
+// -----------------------------------------------------------------------------
+
+public type Lfu is { unit: Bool };
+public fn lfu() -> Lfu { Lfu { unit: true } }
+
+implement EvictionPolicy for Lfu {
+    fn name(&self) -> base.Text { "lfu".clone() }
+    fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int> {
+        let mut best: Int = -1;
+        let mut best_count: Int = 0;
+        let mut best_ts: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < entries.len() {
+            if entries[i].evictable() {
+                let pick: Bool =
+                    if best < 0 { true }
+                    else if entries[i].use_count < best_count { true }
+                    else if entries[i].use_count == best_count && entries[i].last_used_ns < best_ts { true }
+                    else { false };
+                if pick {
+                    best = i;
+                    best_count = entries[i].use_count;
+                    best_ts = entries[i].last_used_ns;
+                }
+            }
+            i = i + 1;
+        }
+        if best < 0 { None } else { Some(best) }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// FIFO
+// -----------------------------------------------------------------------------
+
+public type Fifo is { unit: Bool };
+public fn fifo() -> Fifo { Fifo { unit: true } }
+
+implement EvictionPolicy for Fifo {
+    fn name(&self) -> base.Text { "fifo".clone() }
+    fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < entries.len() {
+            if entries[i].evictable() { return Some(i); }
+            i = i + 1;
+        }
+        None
+    }
+}
