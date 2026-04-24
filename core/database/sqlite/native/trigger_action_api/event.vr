@@ -1,0 +1,58 @@
+// Trigger event — INSERT / DELETE / UPDATE [OF col_list].
+
+module core.database.sqlite.native.trigger_action_api.event;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type TriggerEvent is
+    | TeInsert
+    | TeDelete
+    | TeUpdate { columns: List<Text> }   // empty = any column update
+    ;
+
+public fn event_name(e: &TriggerEvent) -> Text {
+    match e {
+        TriggerEvent.TeInsert     => "INSERT".clone(),
+        TriggerEvent.TeDelete     => "DELETE".clone(),
+        TriggerEvent.TeUpdate { .. } => "UPDATE".clone(),
+    }
+}
+
+public fn is_update(e: &TriggerEvent) -> Bool {
+    match e {
+        TriggerEvent.TeUpdate { .. } => true,
+        _                            => false,
+    }
+}
+
+public fn is_insert(e: &TriggerEvent) -> Bool {
+    match e { TriggerEvent.TeInsert => true, _ => false }
+}
+
+public fn is_delete(e: &TriggerEvent) -> Bool {
+    match e { TriggerEvent.TeDelete => true, _ => false }
+}
+
+public fn update_watches_any_column(e: &TriggerEvent) -> Bool {
+    match e {
+        TriggerEvent.TeUpdate { columns } => columns.len() == 0,
+        _ => false,
+    }
+}
+
+public fn update_column_count(e: &TriggerEvent) -> Int {
+    match e {
+        TriggerEvent.TeUpdate { columns } => columns.len(),
+        _ => 0,
+    }
+}
+
+// NEW.* is visible to INSERT + UPDATE; OLD.* to DELETE + UPDATE.
+public fn sees_new(e: &TriggerEvent) -> Bool {
+    match e { TriggerEvent.TeDelete => false, _ => true }
+}
+
+public fn sees_old(e: &TriggerEvent) -> Bool {
+    match e { TriggerEvent.TeInsert => false, _ => true }
+}

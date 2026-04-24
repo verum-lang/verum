@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, math_fn_package, builtins
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.math_fn_package.kind.{
+    MathKind, MkTrig, MkLogExp, MkRound, MkPowerRoot, MkModSign, MkConst, MkRadDeg,
+    kind_name, returns_integer, is_dimensionless,
+};
+mount core.database.sqlite.native.math_fn_package.registry.{
+    MathEntry,
+    entry, registry, find, is_variadic,
+};
+mount base.{Bool, Maybe};
+
+fn test_kind_names() {
+    assert(kind_name(&MkTrig) == "trig".clone());
+    assert(kind_name(&MkConst) == "const".clone());
+}
+
+fn test_returns_integer_only_round() {
+    assert(returns_integer(&MkRound));
+    assert(!returns_integer(&MkTrig));
+    assert(!returns_integer(&MkLogExp));
+}
+
+fn test_dimensionless_flags() {
+    assert(is_dimensionless(&MkTrig));
+    assert(is_dimensionless(&MkRadDeg));
+    assert(!is_dimensionless(&MkPowerRoot));
+    assert(!is_dimensionless(&MkRound));
+}
+
+fn test_registry_has_trig() {
+    match find(&"sin".clone()) {
+        Maybe.Some(e) => {
+            match &e.kind { MkTrig => {}, _ => assert(false) }
+            assert_eq(e.arity, 1);
+        },
+        Maybe.None => assert(false),
+    }
+    match find(&"atan2".clone()) {
+        Maybe.Some(e) => assert_eq(e.arity, 2),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_registry_has_log_variadic() {
+    match find(&"log".clone()) {
+        Maybe.Some(e) => {
+            match &e.kind { MkLogExp => {}, _ => assert(false) }
+            assert(is_variadic(&e));
+        },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_registry_has_round() {
+    match find(&"floor".clone()) {
+        Maybe.Some(e) => match &e.kind { MkRound => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match find(&"ceiling".clone()) {
+        Maybe.Some(e) => match &e.kind { MkRound => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_registry_has_pi_zero_arity() {
+    match find(&"pi".clone()) {
+        Maybe.Some(e) => {
+            match &e.kind { MkConst => {}, _ => assert(false) }
+            assert_eq(e.arity, 0);
+        },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_unknown_returns_none() {
+    match find(&"xyz".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_registry_size_reasonable() {
+    let r = registry();
+    assert(r.len() >= 28);
+}
+
+fn main() {
+    test_kind_names();
+    test_returns_integer_only_round();
+    test_dimensionless_flags();
+    test_registry_has_trig();
+    test_registry_has_log_variadic();
+    test_registry_has_round();
+    test_registry_has_pi_zero_arity();
+    test_unknown_returns_none();
+    test_registry_size_reasonable();
+}

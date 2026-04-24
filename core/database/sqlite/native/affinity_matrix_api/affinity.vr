@@ -1,0 +1,59 @@
+// Type affinity taxonomy.
+
+module core.database.sqlite.native.affinity_matrix_api.affinity;
+
+mount base.{Bool, Text};
+
+public type Affinity is
+    | AfInteger
+    | AfText
+    | AfBlob           // equivalent to NONE in older docs
+    | AfReal
+    | AfNumeric
+    ;
+
+public fn affinity_name(a: &Affinity) -> Text {
+    match a {
+        AfInteger => "INTEGER".clone(),
+        AfText    => "TEXT".clone(),
+        AfBlob    => "BLOB".clone(),
+        AfReal    => "REAL".clone(),
+        AfNumeric => "NUMERIC".clone(),
+    }
+}
+
+public fn stores_numbers_directly(a: &Affinity) -> Bool {
+    match a {
+        AfInteger => true,
+        AfReal    => true,
+        AfNumeric => true,
+        _         => false,
+    }
+}
+
+public fn allows_free_form_blob(a: &Affinity) -> Bool {
+    match a { AfBlob => true, _ => false }
+}
+
+// STRICT-mode tables only admit five types plus NULL:
+// INTEGER, REAL, TEXT, BLOB, ANY (= NUMERIC maps to ANY-ish behaviour).
+public fn allowed_in_strict(a: &Affinity) -> Bool {
+    match a {
+        AfInteger => true,
+        AfReal    => true,
+        AfText    => true,
+        AfBlob    => true,
+        AfNumeric => false,
+    }
+}
+
+// Column priority used during JOIN-USING and comparison coercion.
+public fn coercion_priority(a: &Affinity) -> Int {
+    match a {
+        AfInteger => 5,
+        AfReal    => 4,
+        AfNumeric => 3,
+        AfText    => 2,
+        AfBlob    => 1,
+    }
+}

@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, affinity_matrix_api, sql, types
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.affinity_matrix_api.affinity.{
+    Affinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
+    affinity_name, stores_numbers_directly, allows_free_form_blob,
+    allowed_in_strict, coercion_priority,
+};
+mount core.database.sqlite.native.affinity_matrix_api.classify.{classify};
+mount base.{Bool};
+
+fn test_affinity_names() {
+    assert(affinity_name(&AfInteger) == "INTEGER".clone());
+    assert(affinity_name(&AfText)    == "TEXT".clone());
+    assert(affinity_name(&AfBlob)    == "BLOB".clone());
+    assert(affinity_name(&AfReal)    == "REAL".clone());
+    assert(affinity_name(&AfNumeric) == "NUMERIC".clone());
+}
+
+fn test_number_predicates() {
+    assert(stores_numbers_directly(&AfInteger));
+    assert(stores_numbers_directly(&AfReal));
+    assert(stores_numbers_directly(&AfNumeric));
+    assert(!stores_numbers_directly(&AfText));
+    assert(!stores_numbers_directly(&AfBlob));
+    assert(allows_free_form_blob(&AfBlob));
+    assert(!allows_free_form_blob(&AfText));
+}
+
+fn test_strict_allowed_set() {
+    assert(allowed_in_strict(&AfInteger));
+    assert(allowed_in_strict(&AfReal));
+    assert(allowed_in_strict(&AfText));
+    assert(allowed_in_strict(&AfBlob));
+    assert(!allowed_in_strict(&AfNumeric));
+}
+
+fn test_coercion_priority_ordering() {
+    assert(coercion_priority(&AfInteger) > coercion_priority(&AfReal));
+    assert(coercion_priority(&AfReal) > coercion_priority(&AfNumeric));
+    assert(coercion_priority(&AfNumeric) > coercion_priority(&AfText));
+    assert(coercion_priority(&AfText) > coercion_priority(&AfBlob));
+}
+
+fn test_rule_1_int_match() {
+    match classify(&"INT".clone()) { AfInteger => {}, _ => assert(false) }
+    match classify(&"INTEGER".clone()) { AfInteger => {}, _ => assert(false) }
+    match classify(&"TINYINT".clone()) { AfInteger => {}, _ => assert(false) }
+    match classify(&"BIGINT".clone()) { AfInteger => {}, _ => assert(false) }
+    match classify(&"UNSIGNED BIG INT".clone()) { AfInteger => {}, _ => assert(false) }
+    match classify(&"int64".clone()) { AfInteger => {}, _ => assert(false) }
+}
+
+fn test_rule_2_text_match() {
+    match classify(&"CHARACTER(20)".clone()) { AfText => {}, _ => assert(false) }
+    match classify(&"VARCHAR(255)".clone()) { AfText => {}, _ => assert(false) }
+    match classify(&"NCHAR".clone()) { AfText => {}, _ => assert(false) }
+    match classify(&"TEXT".clone()) { AfText => {}, _ => assert(false) }
+    match classify(&"CLOB".clone()) { AfText => {}, _ => assert(false) }
+}
+
+fn test_rule_3_blob_and_empty() {
+    match classify(&"BLOB".clone()) { AfBlob => {}, _ => assert(false) }
+    match classify(&"".clone()) { AfBlob => {}, _ => assert(false) }
+}
+
+fn test_rule_4_real_match() {
+    match classify(&"REAL".clone()) { AfReal => {}, _ => assert(false) }
+    match classify(&"DOUBLE".clone()) { AfReal => {}, _ => assert(false) }
+    match classify(&"DOUBLE PRECISION".clone()) { AfReal => {}, _ => assert(false) }
+    match classify(&"FLOAT".clone()) { AfReal => {}, _ => assert(false) }
+}
+
+fn test_rule_5_numeric_fallback() {
+    match classify(&"NUMERIC".clone()) { AfNumeric => {}, _ => assert(false) }
+    match classify(&"DECIMAL(10,5)".clone()) { AfNumeric => {}, _ => assert(false) }
+    match classify(&"BOOLEAN".clone()) { AfNumeric => {}, _ => assert(false) }
+    match classify(&"DATE".clone()) { AfNumeric => {}, _ => assert(false) }
+    match classify(&"DATETIME".clone()) { AfNumeric => {}, _ => assert(false) }
+}
+
+fn test_int_overrides_other_keywords() {
+    // per §3.1 rule 1, INT takes priority over CHAR/CLOB/TEXT checks.
+    match classify(&"INTERVAL".clone()) { AfInteger => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_affinity_names();
+    test_number_predicates();
+    test_strict_allowed_set();
+    test_coercion_priority_ordering();
+    test_rule_1_int_match();
+    test_rule_2_text_match();
+    test_rule_3_blob_and_empty();
+    test_rule_4_real_match();
+    test_rule_5_numeric_fallback();
+    test_int_overrides_other_keywords();
+}

@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, view_variants_api, sql, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.view_variants_api.scope.{
+    ViewScope, VsMain, VsTemp, VsAttached,
+    scope_name, survives_connection_close, belongs_to_main, attached_db_name,
+};
+mount core.database.sqlite.native.view_variants_api.spec.{
+    ViewSpec,
+    new, as_temp, in_attached, with_if_not_exists, with_column_aliases,
+    is_persistent, in_main_schema, has_column_aliases, alias_count,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_scope_names() {
+    assert(scope_name(&VsMain) == "main".clone());
+    assert(scope_name(&VsTemp) == "temp".clone());
+    assert(scope_name(&VsAttached("aux1".clone())) == "attached".clone());
+}
+
+fn test_survives_close() {
+    assert(survives_connection_close(&VsMain));
+    assert(!survives_connection_close(&VsTemp));
+    assert(survives_connection_close(&VsAttached("a".clone())));
+}
+
+fn test_belongs_to_main() {
+    assert(belongs_to_main(&VsMain));
+    assert(!belongs_to_main(&VsTemp));
+    assert(!belongs_to_main(&VsAttached("a".clone())));
+}
+
+fn test_attached_db_name() {
+    assert(attached_db_name(&VsAttached("aux1".clone())) == "aux1".clone());
+    assert(attached_db_name(&VsMain) == "".clone());
+}
+
+fn test_view_spec_defaults() {
+    let v = new("active_users".clone(), "SELECT * FROM users WHERE is_active".clone());
+    assert(is_persistent(&v));
+    assert(in_main_schema(&v));
+    assert(!v.if_not_exists);
+    assert(!has_column_aliases(&v));
+}
+
+fn test_view_as_temp() {
+    let v = as_temp(new("v".clone(), "SELECT 1".clone()));
+    assert(!is_persistent(&v));
+    assert(!in_main_schema(&v));
+}
+
+fn test_view_in_attached() {
+    let v = in_attached(new("v".clone(), "SELECT 1".clone()), "aux".clone());
+    assert(is_persistent(&v));
+    assert(!in_main_schema(&v));
+    assert(attached_db_name(&v.scope) == "aux".clone());
+}
+
+fn test_view_if_not_exists_and_aliases() {
+    let aliases: List<Text> = ["x".clone(), "y".clone(), "z".clone()].clone() as List<Text>;
+    let v = with_column_aliases(
+        with_if_not_exists(new("v".clone(), "SELECT 1,2,3".clone())),
+        aliases,
+    );
+    assert(v.if_not_exists);
+    assert(has_column_aliases(&v));
+    assert_eq(alias_count(&v), 3);
+}
+
+fn main() {
+    test_scope_names();
+    test_survives_close();
+    test_belongs_to_main();
+    test_attached_db_name();
+    test_view_spec_defaults();
+    test_view_as_temp();
+    test_view_in_attached();
+    test_view_if_not_exists_and_aliases();
+}

@@ -1,0 +1,69 @@
+// Trigger header spec — name + timing + event + target + FOR EACH ROW + WHEN.
+
+module core.database.sqlite.native.trigger_action_api.spec;
+
+mount core.database.sqlite.native.trigger_action_api.timing.{
+    TriggerTiming, TtBefore, TtAfter, TtInsteadOf,
+    fires_before_change, target_must_be_view, target_must_be_table,
+};
+mount core.database.sqlite.native.trigger_action_api.event.{
+    TriggerEvent, TeInsert, TeDelete, TeUpdate,
+    is_insert, is_update, is_delete, sees_new, sees_old,
+};
+mount base.{Bool, Text};
+
+public type TriggerSpec is {
+    name: Text,
+    temp: Bool,
+    timing: TriggerTiming,
+    event: TriggerEvent,
+    target: Text,             // table or view name
+    for_each_row: Bool,       // SQLite only supports ROW-level; STATEMENT = false legacy
+    when_sql: Text,           // optional WHEN predicate; "" = none
+};
+
+public fn new(name: Text, timing: TriggerTiming, event: TriggerEvent, target: Text) -> TriggerSpec {
+    TriggerSpec {
+        name: name,
+        temp: false,
+        timing: timing,
+        event: event,
+        target: target,
+        for_each_row: true,    // SQLite default — statement-level triggers are parsed but behave as row-level
+        when_sql: "".clone(),
+    }
+}
+
+public fn as_temp(mut s: TriggerSpec) -> TriggerSpec {
+    s.temp = true;
+    s
+}
+
+public fn with_when(mut s: TriggerSpec, pred: Text) -> TriggerSpec {
+    s.when_sql = pred;
+    s
+}
+
+public fn has_when(s: &TriggerSpec) -> Bool {
+    s.when_sql.len() > 0
+}
+
+public fn fires_before(s: &TriggerSpec) -> Bool {
+    fires_before_change(&s.timing)
+}
+
+public fn expects_view_target(s: &TriggerSpec) -> Bool {
+    target_must_be_view(&s.timing)
+}
+
+public fn expects_table_target(s: &TriggerSpec) -> Bool {
+    target_must_be_table(&s.timing)
+}
+
+public fn can_reference_new(s: &TriggerSpec) -> Bool {
+    sees_new(&s.event)
+}
+
+public fn can_reference_old(s: &TriggerSpec) -> Bool {
+    sees_old(&s.event)
+}

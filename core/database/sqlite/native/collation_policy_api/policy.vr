@@ -1,0 +1,33 @@
+// Collation-policy taxonomy.
+
+module core.database.sqlite.native.collation_policy_api.policy;
+
+mount base.{Bool, Text};
+
+public type CollationPolicy is
+    | CpBinary      // default — byte-wise memcmp
+    | CpNoCase      // ASCII case-insensitive
+    | CpRtrim       // trailing-space-insensitive
+    ;
+
+public fn policy_name(p: &CollationPolicy) -> Text {
+    match p {
+        CpBinary => "BINARY".clone(),
+        CpNoCase => "NOCASE".clone(),
+        CpRtrim  => "RTRIM".clone(),
+    }
+}
+
+public fn default_policy() -> CollationPolicy { CpBinary }
+
+public fn is_byte_wise(p: &CollationPolicy) -> Bool {
+    match p { CpBinary => true, _ => false }
+}
+
+public fn is_case_insensitive(p: &CollationPolicy) -> Bool {
+    match p { CpNoCase => true, _ => false }
+}
+
+public fn ignores_trailing_whitespace(p: &CollationPolicy) -> Bool {
+    match p { CpRtrim => true, _ => false }
+}

@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/numeric_literal_parser_api/mod.vr
+// =============================================================================
+// Numeric literal taxonomy + classifier — decimal integer / hex integer /
+// real / binary literal (3.37+).
+// Spec §14.1 — literals.
+//
+// Examples:
+//   42                  -> decimal int
+//   0xCAFE              -> hex int
+//   3.14                -> real
+//   1.5e+10             -> real (scientific)
+//   0b1010              -> binary int (3.37+, with SQLITE_ENABLE_BINARY_LITERAL)
+//   1_000_000           -> decimal int with underscores (3.46+, SQLite)
+//
+// =============================================================================
+
+module core.database.sqlite.native.numeric_literal_parser_api;
+
+public module literal;

@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, conflict_clause_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.conflict_clause_api.action.{
+    ConflictAction, CaRollback, CaAbort, CaFail, CaIgnore, CaReplace,
+    action_name, default_action,
+    aborts_transaction, aborts_statement,
+    preserves_prior_rows, deletes_offending_rows,
+    from_or_clause, numeric_code,
+};
+mount base.{Bool};
+
+fn test_action_names() {
+    assert(action_name(&CaRollback) == "ROLLBACK".clone());
+    assert(action_name(&CaAbort)    == "ABORT".clone());
+    assert(action_name(&CaFail)     == "FAIL".clone());
+    assert(action_name(&CaIgnore)   == "IGNORE".clone());
+    assert(action_name(&CaReplace)  == "REPLACE".clone());
+}
+
+fn test_default_is_abort() {
+    match default_action() { CaAbort => {}, _ => assert(false) }
+}
+
+fn test_aborts_transaction_only_rollback() {
+    assert(aborts_transaction(&CaRollback));
+    assert(!aborts_transaction(&CaAbort));
+    assert(!aborts_transaction(&CaFail));
+    assert(!aborts_transaction(&CaIgnore));
+    assert(!aborts_transaction(&CaReplace));
+}
+
+fn test_aborts_statement_set() {
+    assert(aborts_statement(&CaRollback));
+    assert(aborts_statement(&CaAbort));
+    assert(aborts_statement(&CaFail));
+    assert(!aborts_statement(&CaIgnore));
+    assert(!aborts_statement(&CaReplace));
+}
+
+fn test_preserves_prior_rows_set() {
+    assert(preserves_prior_rows(&CaFail));
+    assert(preserves_prior_rows(&CaIgnore));
+    assert(preserves_prior_rows(&CaReplace));
+    assert(!preserves_prior_rows(&CaRollback));
+    assert(!preserves_prior_rows(&CaAbort));
+}
+
+fn test_deletes_offending_only_replace() {
+    assert(deletes_offending_rows(&CaReplace));
+    assert(!deletes_offending_rows(&CaIgnore));
+    assert(!deletes_offending_rows(&CaFail));
+}
+
+fn test_from_or_clause() {
+    match from_or_clause(&"ROLLBACK".clone()) { CaRollback => {}, _ => assert(false) }
+    match from_or_clause(&"ABORT".clone())    { CaAbort => {}, _ => assert(false) }
+    match from_or_clause(&"FAIL".clone())     { CaFail => {}, _ => assert(false) }
+    match from_or_clause(&"IGNORE".clone())   { CaIgnore => {}, _ => assert(false) }
+    match from_or_clause(&"REPLACE".clone())  { CaReplace => {}, _ => assert(false) }
+    // Unknown keyword falls back to default (ABORT).
+    match from_or_clause(&"UNKNOWN".clone())  { CaAbort => {}, _ => assert(false) }
+}
+
+fn test_numeric_codes() {
+    assert_eq(numeric_code(&CaRollback), 1);
+    assert_eq(numeric_code(&CaAbort), 2);
+    assert_eq(numeric_code(&CaFail), 3);
+    assert_eq(numeric_code(&CaIgnore), 4);
+    assert_eq(numeric_code(&CaReplace), 5);
+}
+
+fn main() {
+    test_action_names();
+    test_default_is_abort();
+    test_aborts_transaction_only_rollback();
+    test_aborts_statement_set();
+    test_preserves_prior_rows_set();
+    test_deletes_offending_only_replace();
+    test_from_or_clause();
+    test_numeric_codes();
+}

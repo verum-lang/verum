@@ -1,0 +1,109 @@
+// Numeric-literal form.
+
+module core.database.sqlite.native.numeric_literal_parser_api.literal;
+
+mount base.{Bool, Text};
+
+public type LitForm is
+    | LfDecimalInt
+    | LfHexInt             // 0xCAFE
+    | LfBinaryInt          // 0b1010 (3.37+)
+    | LfReal               // 3.14, 1.5e10
+    | LfInvalid
+    ;
+
+public fn form_name(f: &LitForm) -> Text {
+    match f {
+        LfDecimalInt => "decimal_int".clone(),
+        LfHexInt     => "hex_int".clone(),
+        LfBinaryInt  => "binary_int".clone(),
+        LfReal       => "real".clone(),
+        LfInvalid    => "invalid".clone(),
+    }
+}
+
+public fn is_integer(f: &LitForm) -> Bool {
+    match f {
+        LfDecimalInt => true,
+        LfHexInt     => true,
+        LfBinaryInt  => true,
+        _            => false,
+    }
+}
+
+public fn is_valid(f: &LitForm) -> Bool {
+    match f { LfInvalid => false, _ => true }
+}
+
+fn is_dec_digit(b: u8) -> Bool {
+    b >= 0x30 as u8 && b <= 0x39 as u8
+}
+
+fn is_hex_digit(b: u8) -> Bool {
+    if is_dec_digit(b) { return true; }
+    if b >= 0x41 as u8 && b <= 0x46 as u8 { return true; }
+    if b >= 0x61 as u8 && b <= 0x66 as u8 { return true; }
+    false
+}
+
+fn is_bin_digit(b: u8) -> Bool {
+    b == 0x30 as u8 || b == 0x31 as u8
+}
+
+// Classify a literal string (underscore separators OK for decimals).
+// Doesn't validate overflow — only shape.
+public fn classify(s: &Text) -> LitForm {
+    let bs = s.as_bytes();
+    let n = bs.len();
+    if n == 0 { return LfInvalid; }
+    // Hex / binary prefix (0x / 0b)
+    if n >= 3 {
+        let b0 = bs[0];
+        let b1 = bs[1];
+        let x_upper = b1 == 0x58 as u8 || b1 == 0x78 as u8;
+        let b_upper = b1 == 0x42 as u8 || b1 == 0x62 as u8;
+        if b0 == 0x30 as u8 && x_upper {
+            let mut i: Int = 2;
+            while i < n {
+                if !is_hex_digit(bs[i]) { return LfInvalid; }
+                i = i + 1;
+            }
+            return LfHexInt;
+        }
+        if b0 == 0x30 as u8 && b_upper {
+            let mut i: Int = 2;
+            while i < n {
+                if !is_bin_digit(bs[i]) { return LfInvalid; }
+                i = i + 1;
+            }
+            return LfBinaryInt;
+        }
+    }
+    // Scan decimal / real with optional '.' and 'e'.
+    let mut saw_dot: Bool = false;
+    let mut saw_exp: Bool = false;
+    let mut i: Int = 0;
+    while i < n {
+        let b = bs[i];
+        if is_dec_digit(b) { i = i + 1; }
+        else if b == 0x5F as u8 {           // '_'
+            i = i + 1;
+        }
+        else if b == 0x2E as u8 {           // '.'
+            if saw_dot { return LfInvalid; }
+            saw_dot = true;
+            i = i + 1;
+        }
+        else if b == 0x65 as u8 || b == 0x45 as u8 {   // 'e' / 'E'
+            if saw_exp { return LfInvalid; }
+            saw_exp = true;
+            i = i + 1;
+            if i < n && (bs[i] == 0x2B as u8 || bs[i] == 0x2D as u8) {   // '+' / '-'
+                i = i + 1;
+            }
+        }
+        else { return LfInvalid; }
+    }
+    if saw_dot || saw_exp { return LfReal; }
+    LfDecimalInt
+}

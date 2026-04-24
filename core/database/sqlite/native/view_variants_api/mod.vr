@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/view_variants_api/mod.vr
+// =============================================================================
+// View taxonomy — normal / TEMP + [IF NOT EXISTS] + column list.
+// Spec §17.6 — views.
+//
+//   CREATE [TEMP | TEMPORARY] VIEW [IF NOT EXISTS] name [(col_list)] AS select_stmt;
+//
+// SQLite does not support WITH CHECK OPTION (SQL-92 feature); this catalogue
+// records the surface shape that matches SQLite's parser.
+//
+// =============================================================================
+
+module core.database.sqlite.native.view_variants_api;
+
+public module scope;
+public module spec;

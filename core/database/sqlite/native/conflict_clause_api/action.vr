@@ -1,0 +1,71 @@
+// ON CONFLICT action taxonomy.
+
+module core.database.sqlite.native.conflict_clause_api.action;
+
+mount base.{Bool, Text};
+
+public type ConflictAction is
+    | CaRollback    // abort + rollback current transaction
+    | CaAbort       // abort + reverse changes from this statement (default)
+    | CaFail        // abort but keep prior rows inserted
+    | CaIgnore      // skip the offending row; keep going
+    | CaReplace     // delete conflicting rows + insert the new one
+    ;
+
+public fn action_name(a: &ConflictAction) -> Text {
+    match a {
+        CaRollback => "ROLLBACK".clone(),
+        CaAbort    => "ABORT".clone(),
+        CaFail     => "FAIL".clone(),
+        CaIgnore   => "IGNORE".clone(),
+        CaReplace  => "REPLACE".clone(),
+    }
+}
+
+public fn default_action() -> ConflictAction { CaAbort }
+
+public fn aborts_transaction(a: &ConflictAction) -> Bool {
+    match a { CaRollback => true, _ => false }
+}
+
+public fn aborts_statement(a: &ConflictAction) -> Bool {
+    match a {
+        CaRollback => true,
+        CaAbort    => true,
+        CaFail     => true,
+        _          => false,
+    }
+}
+
+public fn preserves_prior_rows(a: &ConflictAction) -> Bool {
+    match a {
+        CaFail     => true,
+        CaIgnore   => true,
+        CaReplace  => true,
+        _          => false,
+    }
+}
+
+public fn deletes_offending_rows(a: &ConflictAction) -> Bool {
+    match a { CaReplace => true, _ => false }
+}
+
+// INSERT OR X / UPDATE OR X map to one of the five actions.
+public fn from_or_clause(keyword: &Text) -> ConflictAction {
+    if *keyword == "ROLLBACK".clone() { return CaRollback; }
+    if *keyword == "ABORT".clone()    { return CaAbort; }
+    if *keyword == "FAIL".clone()     { return CaFail; }
+    if *keyword == "IGNORE".clone()   { return CaIgnore; }
+    if *keyword == "REPLACE".clone()  { return CaReplace; }
+    CaAbort
+}
+
+public fn numeric_code(a: &ConflictAction) -> Int {
+    match a {
+        CaRollback => 1,
+        CaAbort    => 2,
+        CaFail     => 3,
+        CaIgnore   => 4,
+        CaReplace  => 5,
+    }
+}

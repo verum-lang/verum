@@ -1,0 +1,42 @@
+// Trigger timing — BEFORE / AFTER / INSTEAD OF.
+
+module core.database.sqlite.native.trigger_action_api.timing;
+
+mount base.{Bool, Text};
+
+public type TriggerTiming is
+    | TtBefore
+    | TtAfter
+    | TtInsteadOf
+    ;
+
+public fn timing_name(t: &TriggerTiming) -> Text {
+    match t {
+        TtBefore    => "BEFORE".clone(),
+        TtAfter     => "AFTER".clone(),
+        TtInsteadOf => "INSTEAD OF".clone(),
+    }
+}
+
+// INSTEAD OF triggers only exist on views; BEFORE/AFTER on tables.
+public fn target_must_be_view(t: &TriggerTiming) -> Bool {
+    match t { TtInsteadOf => true, _ => false }
+}
+
+public fn target_must_be_table(t: &TriggerTiming) -> Bool {
+    match t {
+        TtBefore => true,
+        TtAfter  => true,
+        _        => false,
+    }
+}
+
+public fn fires_before_change(t: &TriggerTiming) -> Bool {
+    match t {
+        TtBefore    => true,
+        TtInsteadOf => true,
+        _           => false,
+    }
+}
+
+public fn default_timing() -> TriggerTiming { TtBefore }

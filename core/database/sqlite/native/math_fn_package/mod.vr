@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/math_fn_package/mod.vr
+// =============================================================================
+// Math built-ins — SQLite 3.35+ SQLITE_ENABLE_MATH_FUNCTIONS.
+// Spec §15.2 — built-in scalar functions.
+// =============================================================================
+
+module core.database.sqlite.native.math_fn_package;
+
+public module kind;
+public module registry;

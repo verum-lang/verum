@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/affinity_matrix_api/mod.vr
+// =============================================================================
+// Type-affinity classification — maps declared column type names to SQLite
+// affinities. Spec §17.7 + §6.1 — type system.
+//
+// Per SQLite §3.1 affinity rules:
+//   1. declared type contains "INT"  -> INTEGER affinity
+//   2. contains "CHAR" | "CLOB" | "TEXT"  -> TEXT
+//   3. contains "BLOB" or no type      -> BLOB (a.k.a. NONE)
+//   4. contains "REAL" | "FLOA" | "DOUB" -> REAL
+//   5. otherwise                       -> NUMERIC
+//
+// =============================================================================
+
+module core.database.sqlite.native.affinity_matrix_api;
+
+public module affinity;
+public module classify;

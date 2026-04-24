@@ -1,0 +1,77 @@
+// Math-fn name → kind registry.
+
+module core.database.sqlite.native.math_fn_package.registry;
+
+mount core.database.sqlite.native.math_fn_package.kind.{
+    MathKind, MkTrig, MkLogExp, MkRound, MkPowerRoot, MkModSign, MkConst, MkRadDeg,
+};
+mount base.{Bool, Text, Maybe};
+mount core.collections.list.{List};
+
+public type MathEntry is {
+    name: Text,
+    kind: MathKind,
+    arity: Int,     // -1 = variadic (e.g. log(b, x) vs log(x))
+};
+
+public fn entry(name: Text, kind: MathKind, arity: Int) -> MathEntry {
+    MathEntry { name: name, kind: kind, arity: arity }
+}
+
+public fn registry() -> List<MathEntry> {
+    let mut out: List<MathEntry> = [].clone() as List<MathEntry>;
+    // trig
+    out.push(entry("sin".clone(),   MkTrig, 1));
+    out.push(entry("cos".clone(),   MkTrig, 1));
+    out.push(entry("tan".clone(),   MkTrig, 1));
+    out.push(entry("asin".clone(),  MkTrig, 1));
+    out.push(entry("acos".clone(),  MkTrig, 1));
+    out.push(entry("atan".clone(),  MkTrig, 1));
+    out.push(entry("atan2".clone(), MkTrig, 2));
+    out.push(entry("sinh".clone(),  MkTrig, 1));
+    out.push(entry("cosh".clone(),  MkTrig, 1));
+    out.push(entry("tanh".clone(),  MkTrig, 1));
+    out.push(entry("asinh".clone(), MkTrig, 1));
+    out.push(entry("acosh".clone(), MkTrig, 1));
+    out.push(entry("atanh".clone(), MkTrig, 1));
+    // log / exp
+    out.push(entry("ln".clone(),    MkLogExp, 1));
+    out.push(entry("log".clone(),   MkLogExp, -1));  // log(x) or log(b, x)
+    out.push(entry("log2".clone(),  MkLogExp, 1));
+    out.push(entry("log10".clone(), MkLogExp, 1));
+    out.push(entry("exp".clone(),   MkLogExp, 1));
+    // round
+    out.push(entry("floor".clone(),   MkRound, 1));
+    out.push(entry("ceil".clone(),    MkRound, 1));
+    out.push(entry("ceiling".clone(), MkRound, 1));
+    out.push(entry("trunc".clone(),   MkRound, 1));
+    // power / root
+    out.push(entry("pow".clone(),   MkPowerRoot, 2));
+    out.push(entry("power".clone(), MkPowerRoot, 2));
+    out.push(entry("sqrt".clone(),  MkPowerRoot, 1));
+    // mod / sign
+    out.push(entry("mod".clone(),  MkModSign, 2));
+    out.push(entry("sign".clone(), MkModSign, 1));
+    // const
+    out.push(entry("pi".clone(), MkConst, 0));
+    // rad/deg
+    out.push(entry("radians".clone(), MkRadDeg, 1));
+    out.push(entry("degrees".clone(), MkRadDeg, 1));
+    out
+}
+
+public fn find(name: &Text) -> Maybe<MathEntry> {
+    let r = registry();
+    let mut i: Int = 0;
+    while i < r.len() {
+        if r[i].name == *name {
+            return Maybe.Some(r[i].clone());
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+public fn is_variadic(e: &MathEntry) -> Bool {
+    e.arity < 0
+}

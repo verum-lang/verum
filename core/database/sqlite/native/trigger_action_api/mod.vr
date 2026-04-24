@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/trigger_action_api/mod.vr
+// =============================================================================
+// Trigger timing + event + WHEN clause taxonomy.
+// Spec §17.5 — triggers.
+//
+//   CREATE [TEMP] TRIGGER name
+//     {BEFORE | AFTER | INSTEAD OF}
+//     {INSERT | DELETE | UPDATE [OF col_list]}
+//     ON table_name
+//     [FOR EACH ROW]
+//     [WHEN expr]
+//     BEGIN ... END;
+//
+// =============================================================================
+
+module core.database.sqlite.native.trigger_action_api;
+
+public module timing;
+public module event;
+public module spec;

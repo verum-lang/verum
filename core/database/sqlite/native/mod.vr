@@ -460,3 +460,19 @@ public module expr_index_api;
 public module unique_constraint_api;
 // - default_value_api: DEFAULT literal / CURRENT_* / expression form + insert-time evaluation
 public module default_value_api;
+// - trigger_action_api: BEFORE / AFTER / INSTEAD OF + INSERT/DELETE/UPDATE [OF cols] + WHEN
+public module trigger_action_api;
+// - view_variants_api: CREATE [TEMP] VIEW [IF NOT EXISTS] + column aliases + attached-db scope
+public module view_variants_api;
+// - affinity_matrix_api: declared-type → SQLite affinity (INTEGER/TEXT/BLOB/REAL/NUMERIC)
+public module affinity_matrix_api;
+// - collation_policy_api: BINARY / NOCASE / RTRIM comparators with byte-level implementation
+public module collation_policy_api;
+// - date_modifier_grammar: datetime modifier taxonomy (+N units / start of X / weekday / localtime / utc)
+public module date_modifier_grammar;
+// - math_fn_package: SQLITE_ENABLE_MATH_FUNCTIONS — 30-entry trig / log / round / power registry
+public module math_fn_package;
+// - numeric_literal_parser_api: decimal / hex / binary int + real literal classifier
+public module numeric_literal_parser_api;
+// - conflict_clause_api: ON CONFLICT 5-way (ROLLBACK / ABORT / FAIL / IGNORE / REPLACE)
+public module conflict_clause_api;

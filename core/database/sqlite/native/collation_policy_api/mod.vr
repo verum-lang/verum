@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/collation_policy_api/mod.vr
+// =============================================================================
+// Built-in collation policy — BINARY / NOCASE / RTRIM with per-policy byte-level
+// comparator. Spec §15.4 — collations.
+// =============================================================================
+
+module core.database.sqlite.native.collation_policy_api;
+
+public module policy;
+public module compare;

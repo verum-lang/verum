@@ -1,0 +1,99 @@
+// Modifier taxonomy.
+
+module core.database.sqlite.native.date_modifier_grammar.modifier;
+
+mount base.{Bool, Text, Int64};
+
+public type Unit is
+    | UDays
+    | UHours
+    | UMinutes
+    | USeconds
+    | UMonths
+    | UYears
+    ;
+
+public fn unit_name(u: &Unit) -> Text {
+    match u {
+        UDays    => "days".clone(),
+        UHours   => "hours".clone(),
+        UMinutes => "minutes".clone(),
+        USeconds => "seconds".clone(),
+        UMonths  => "months".clone(),
+        UYears   => "years".clone(),
+    }
+}
+
+public fn is_variable_length(u: &Unit) -> Bool {
+    // months and years are not fixed-duration (28–31 days / 365–366 days).
+    match u {
+        UMonths => true,
+        UYears  => true,
+        _       => false,
+    }
+}
+
+public type Modifier is
+    | MdOffset { amount: Int64, unit: Unit }        // '+N DAYS' / '-5 MINUTES'
+    | MdReplaceDate(Text)                           // 'YYYY-MM-DD'
+    | MdReplaceTime(Text)                           // 'HH:MM:SS'
+    | MdStartOfMonth
+    | MdStartOfYear
+    | MdStartOfDay
+    | MdWeekday(Int64)                              // 0..6 (0=Sun)
+    | MdLocalTime
+    | MdUtc
+    | MdUnixEpoch
+    | MdJulianDay
+    | MdSubsec
+    ;
+
+public fn modifier_kind(m: &Modifier) -> Text {
+    match m {
+        Modifier.MdOffset { .. }       => "offset".clone(),
+        Modifier.MdReplaceDate(_)      => "replace_date".clone(),
+        Modifier.MdReplaceTime(_)      => "replace_time".clone(),
+        Modifier.MdStartOfMonth        => "start_of_month".clone(),
+        Modifier.MdStartOfYear         => "start_of_year".clone(),
+        Modifier.MdStartOfDay          => "start_of_day".clone(),
+        Modifier.MdWeekday(_)          => "weekday".clone(),
+        Modifier.MdLocalTime           => "localtime".clone(),
+        Modifier.MdUtc                 => "utc".clone(),
+        Modifier.MdUnixEpoch           => "unixepoch".clone(),
+        Modifier.MdJulianDay           => "julianday".clone(),
+        Modifier.MdSubsec              => "subsec".clone(),
+    }
+}
+
+public fn is_absolute(m: &Modifier) -> Bool {
+    match m {
+        Modifier.MdReplaceDate(_) => true,
+        Modifier.MdReplaceTime(_) => true,
+        Modifier.MdStartOfMonth   => true,
+        Modifier.MdStartOfYear    => true,
+        Modifier.MdStartOfDay     => true,
+        Modifier.MdWeekday(_)     => true,
+        _                         => false,
+    }
+}
+
+public fn is_timezone(m: &Modifier) -> Bool {
+    match m {
+        Modifier.MdLocalTime => true,
+        Modifier.MdUtc       => true,
+        _                    => false,
+    }
+}
+
+public fn is_output_format(m: &Modifier) -> Bool {
+    match m {
+        Modifier.MdUnixEpoch => true,
+        Modifier.MdJulianDay => true,
+        Modifier.MdSubsec    => true,
+        _                    => false,
+    }
+}
+
+public fn valid_weekday(n: Int64) -> Bool {
+    n >= 0 as Int64 && n <= 6 as Int64
+}

@@ -1,0 +1,58 @@
+// Per-policy byte-level comparator. Returns -1 / 0 / 1.
+
+module core.database.sqlite.native.collation_policy_api.compare;
+
+mount core.database.sqlite.native.collation_policy_api.policy.{
+    CollationPolicy, CpBinary, CpNoCase, CpRtrim,
+};
+mount base.{Bool, Text, Int64};
+mount core.collections.list.{List};
+
+fn fold_nocase(b: u8) -> u8 {
+    if b >= 0x41 as u8 && b <= 0x5A as u8 {
+        return (b + 0x20 as u8) as u8;
+    }
+    b
+}
+
+fn rtrim_len(bs: &List<u8>) -> Int {
+    let mut n: Int = bs.len();
+    while n > 0 {
+        if bs[n - 1] != 0x20 as u8 { return n; }
+        n = n - 1;
+    }
+    n
+}
+
+public fn compare(a: &Text, b: &Text, policy: &CollationPolicy) -> Int {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let an = match policy {
+        CpRtrim => rtrim_len(&ab),
+        _       => ab.len(),
+    };
+    let bn = match policy {
+        CpRtrim => rtrim_len(&bb),
+        _       => bb.len(),
+    };
+    let mut i: Int = 0;
+    let mut out: Int = 0;
+    let limit = if an < bn { an } else { bn };
+    while i < limit {
+        let x = match policy {
+            CpNoCase => fold_nocase(ab[i]),
+            _        => ab[i],
+        };
+        let y = match policy {
+            CpNoCase => fold_nocase(bb[i]),
+            _        => bb[i],
+        };
+        if x < y { out = -1; i = limit; }
+        else if x > y { out = 1; i = limit; }
+        else { i = i + 1; }
+    }
+    if out != 0 { return out; }
+    if an < bn { return -1; }
+    if an > bn { return 1; }
+    0
+}

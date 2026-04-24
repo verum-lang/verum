@@ -1,0 +1,34 @@
+// Persistence scope of a view.
+
+module core.database.sqlite.native.view_variants_api.scope;
+
+mount base.{Bool, Text};
+
+public type ViewScope is
+    | VsMain        // CREATE VIEW — persisted in the main database
+    | VsTemp        // CREATE TEMP VIEW — lives for the connection lifetime
+    | VsAttached(Text)     // CREATE VIEW aux.v — attached-db scope
+    ;
+
+public fn scope_name(s: &ViewScope) -> Text {
+    match s {
+        VsMain        => "main".clone(),
+        VsTemp        => "temp".clone(),
+        VsAttached(_) => "attached".clone(),
+    }
+}
+
+public fn survives_connection_close(s: &ViewScope) -> Bool {
+    match s { VsTemp => false, _ => true }
+}
+
+public fn belongs_to_main(s: &ViewScope) -> Bool {
+    match s { VsMain => true, _ => false }
+}
+
+public fn attached_db_name(s: &ViewScope) -> Text {
+    match s {
+        VsAttached(name) => name.clone(),
+        _                => "".clone(),
+    }
+}

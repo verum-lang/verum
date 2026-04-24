@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, numeric_literal_parser_api, lexer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.numeric_literal_parser_api.literal.{
+    LitForm, LfDecimalInt, LfHexInt, LfBinaryInt, LfReal, LfInvalid,
+    form_name, is_integer, is_valid, classify,
+};
+mount base.{Bool};
+
+fn test_form_names() {
+    assert(form_name(&LfDecimalInt) == "decimal_int".clone());
+    assert(form_name(&LfHexInt) == "hex_int".clone());
+    assert(form_name(&LfBinaryInt) == "binary_int".clone());
+    assert(form_name(&LfReal) == "real".clone());
+    assert(form_name(&LfInvalid) == "invalid".clone());
+}
+
+fn test_integer_predicate() {
+    assert(is_integer(&LfDecimalInt));
+    assert(is_integer(&LfHexInt));
+    assert(is_integer(&LfBinaryInt));
+    assert(!is_integer(&LfReal));
+    assert(!is_integer(&LfInvalid));
+}
+
+fn test_valid_predicate() {
+    assert(is_valid(&LfDecimalInt));
+    assert(is_valid(&LfReal));
+    assert(!is_valid(&LfInvalid));
+}
+
+fn test_classify_decimal() {
+    match classify(&"42".clone()) { LfDecimalInt => {}, _ => assert(false) }
+    match classify(&"0".clone()) { LfDecimalInt => {}, _ => assert(false) }
+    match classify(&"1000000".clone()) { LfDecimalInt => {}, _ => assert(false) }
+}
+
+fn test_classify_hex() {
+    match classify(&"0xCAFE".clone()) { LfHexInt => {}, _ => assert(false) }
+    match classify(&"0X123".clone()) { LfHexInt => {}, _ => assert(false) }
+    match classify(&"0xabcdef".clone()) { LfHexInt => {}, _ => assert(false) }
+    match classify(&"0x1".clone()) { LfHexInt => {}, _ => assert(false) }
+}
+
+fn test_classify_binary() {
+    match classify(&"0b1010".clone()) { LfBinaryInt => {}, _ => assert(false) }
+    match classify(&"0B0".clone()) { LfBinaryInt => {}, _ => assert(false) }
+    match classify(&"0b1111111111".clone()) { LfBinaryInt => {}, _ => assert(false) }
+}
+
+fn test_classify_real() {
+    match classify(&"3.14".clone()) { LfReal => {}, _ => assert(false) }
+    match classify(&"0.1".clone()) { LfReal => {}, _ => assert(false) }
+    match classify(&"1.5e10".clone()) { LfReal => {}, _ => assert(false) }
+    match classify(&"1.5E-10".clone()) { LfReal => {}, _ => assert(false) }
+    match classify(&"42e5".clone()) { LfReal => {}, _ => assert(false) }
+}
+
+fn test_classify_invalid() {
+    match classify(&"".clone()) { LfInvalid => {}, _ => assert(false) }
+    match classify(&"0xZZ".clone()) { LfInvalid => {}, _ => assert(false) }
+    match classify(&"0b2".clone()) { LfInvalid => {}, _ => assert(false) }
+    match classify(&"1..2".clone()) { LfInvalid => {}, _ => assert(false) }
+    match classify(&"abc".clone()) { LfInvalid => {}, _ => assert(false) }
+}
+
+fn test_classify_underscore_decimal() {
+    // SQLite 3.46+: 1_000_000 is a valid decimal literal.
+    match classify(&"1_000_000".clone()) { LfDecimalInt => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_form_names();
+    test_integer_predicate();
+    test_valid_predicate();
+    test_classify_decimal();
+    test_classify_hex();
+    test_classify_binary();
+    test_classify_real();
+    test_classify_invalid();
+    test_classify_underscore_decimal();
+}

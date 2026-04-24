@@ -1,0 +1,52 @@
+// Classify a declared-type string into an Affinity using SQLite §3.1 rules.
+
+module core.database.sqlite.native.affinity_matrix_api.classify;
+
+mount core.database.sqlite.native.affinity_matrix_api.affinity.{
+    Affinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
+};
+mount base.{Bool, Text};
+
+// ASCII case-fold: map a..z to A..Z, leave others.
+fn to_upper_ascii(b: u8) -> u8 {
+    if b >= 0x61 as u8 && b <= 0x7A as u8 {
+        return (b - 0x20 as u8) as u8;
+    }
+    b
+}
+
+fn contains_substr_ci(haystack: &Text, needle: &Text) -> Bool {
+    let hb = haystack.as_bytes();
+    let nb = needle.as_bytes();
+    let hn = hb.len();
+    let nn = nb.len();
+    if nn == 0 { return true; }
+    if hn < nn { return false; }
+    let mut i: Int = 0;
+    while i + nn <= hn {
+        let mut j: Int = 0;
+        let mut matched: Bool = true;
+        while j < nn {
+            let h = to_upper_ascii(hb[i + j]);
+            let n = to_upper_ascii(nb[j]);
+            if h != n { matched = false; j = nn; } else { j = j + 1; }
+        }
+        if matched { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+public fn classify(declared: &Text) -> Affinity {
+    if declared.len() == 0 { return AfBlob; }
+    let d = declared.clone();
+    if contains_substr_ci(&d, &"INT".clone()) { return AfInteger; }
+    if contains_substr_ci(&d, &"CHAR".clone()) { return AfText; }
+    if contains_substr_ci(&d, &"CLOB".clone()) { return AfText; }
+    if contains_substr_ci(&d, &"TEXT".clone()) { return AfText; }
+    if contains_substr_ci(&d, &"BLOB".clone()) { return AfBlob; }
+    if contains_substr_ci(&d, &"REAL".clone()) { return AfReal; }
+    if contains_substr_ci(&d, &"FLOA".clone()) { return AfReal; }
+    if contains_substr_ci(&d, &"DOUB".clone()) { return AfReal; }
+    AfNumeric
+}

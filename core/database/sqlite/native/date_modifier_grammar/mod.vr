@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/date_modifier_grammar/mod.vr
+// =============================================================================
+// Modifier grammar for datetime / date / time / strftime / julianday.
+// Spec §15.6 — datetime.
+//
+// Modifiers (selected):
+//   '+N DAYS', '-N DAYS'
+//   'NNNN-NN-NN'      (replace date)
+//   'HH:MM:SS'        (replace time)
+//   'start of month', 'start of year', 'start of day'
+//   'weekday N'       (N=0..6, 0=Sunday)
+//   'localtime', 'utc', 'unixepoch', 'julianday', 'subsec' (3.42+)
+//
+// =============================================================================
+
+module core.database.sqlite.native.date_modifier_grammar;
+
+public module modifier;

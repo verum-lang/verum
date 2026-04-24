@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, trigger_action_api, sql, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.trigger_action_api.timing.{
+    TriggerTiming, TtBefore, TtAfter, TtInsteadOf,
+    timing_name, target_must_be_view, target_must_be_table,
+    fires_before_change, default_timing,
+};
+mount core.database.sqlite.native.trigger_action_api.event.{
+    TriggerEvent, TeInsert, TeDelete, TeUpdate,
+    event_name, is_insert, is_update, is_delete,
+    update_watches_any_column, update_column_count, sees_new, sees_old,
+};
+mount core.database.sqlite.native.trigger_action_api.spec.{
+    TriggerSpec,
+    new, as_temp, with_when, has_when, fires_before,
+    expects_view_target, expects_table_target,
+    can_reference_new, can_reference_old,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_timing_names() {
+    assert(timing_name(&TtBefore) == "BEFORE".clone());
+    assert(timing_name(&TtAfter) == "AFTER".clone());
+    assert(timing_name(&TtInsteadOf) == "INSTEAD OF".clone());
+}
+
+fn test_target_rules() {
+    assert(target_must_be_view(&TtInsteadOf));
+    assert(!target_must_be_view(&TtBefore));
+    assert(target_must_be_table(&TtBefore));
+    assert(target_must_be_table(&TtAfter));
+    assert(!target_must_be_table(&TtInsteadOf));
+}
+
+fn test_fires_before_change() {
+    assert(fires_before_change(&TtBefore));
+    assert(fires_before_change(&TtInsteadOf));
+    assert(!fires_before_change(&TtAfter));
+}
+
+fn test_default_timing_is_before() {
+    match default_timing() { TtBefore => {}, _ => assert(false) }
+}
+
+fn test_event_variants() {
+    let ins: TriggerEvent = TriggerEvent.TeInsert;
+    let del: TriggerEvent = TriggerEvent.TeDelete;
+    let upd: TriggerEvent = TriggerEvent.TeUpdate { columns: [].clone() as List<Text> };
+    assert(event_name(&ins) == "INSERT".clone());
+    assert(event_name(&del) == "DELETE".clone());
+    assert(event_name(&upd) == "UPDATE".clone());
+    assert(is_insert(&ins));
+    assert(is_delete(&del));
+    assert(is_update(&upd));
+    assert(!is_update(&ins));
+}
+
+fn test_update_watches_any() {
+    let any: TriggerEvent = TriggerEvent.TeUpdate { columns: [].clone() as List<Text> };
+    assert(update_watches_any_column(&any));
+    assert_eq(update_column_count(&any), 0);
+    let cols: List<Text> = ["a".clone(), "b".clone()].clone() as List<Text>;
+    let of: TriggerEvent = TriggerEvent.TeUpdate { columns: cols };
+    assert(!update_watches_any_column(&of));
+    assert_eq(update_column_count(&of), 2);
+}
+
+fn test_new_old_visibility() {
+    let ins: TriggerEvent = TriggerEvent.TeInsert;
+    assert(sees_new(&ins));
+    assert(!sees_old(&ins));
+    let del: TriggerEvent = TriggerEvent.TeDelete;
+    assert(!sees_new(&del));
+    assert(sees_old(&del));
+    let upd: TriggerEvent = TriggerEvent.TeUpdate { columns: [].clone() as List<Text> };
+    assert(sees_new(&upd));
+    assert(sees_old(&upd));
+}
+
+fn test_spec_defaults_and_fires_before() {
+    let ev: TriggerEvent = TriggerEvent.TeInsert;
+    let s = new("t1".clone(), TtBefore, ev, "users".clone());
+    assert(!s.temp);
+    assert(s.for_each_row);
+    assert(!has_when(&s));
+    assert(fires_before(&s));
+    assert(expects_table_target(&s));
+    assert(!expects_view_target(&s));
+    assert(can_reference_new(&s));
+    assert(!can_reference_old(&s));
+}
+
+fn test_spec_as_temp_and_with_when() {
+    let ev: TriggerEvent = TriggerEvent.TeUpdate { columns: [].clone() as List<Text> };
+    let s0 = new("t".clone(), TtInsteadOf, ev, "v".clone());
+    let s1 = as_temp(s0);
+    let s2 = with_when(s1, "NEW.x > 0".clone());
+    assert(s2.temp);
+    assert(has_when(&s2));
+    assert(expects_view_target(&s2));
+    assert(fires_before(&s2));
+    assert(can_reference_new(&s2));
+    assert(can_reference_old(&s2));
+}
+
+fn main() {
+    test_timing_names();
+    test_target_rules();
+    test_fires_before_change();
+    test_default_timing_is_before();
+    test_event_variants();
+    test_update_watches_any();
+    test_new_old_visibility();
+    test_spec_defaults_and_fires_before();
+    test_spec_as_temp_and_with_when();
+}

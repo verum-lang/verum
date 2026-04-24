@@ -1,0 +1,64 @@
+// View spec — scope + name + column aliases + SELECT body.
+
+module core.database.sqlite.native.view_variants_api.spec;
+
+mount core.database.sqlite.native.view_variants_api.scope.{
+    ViewScope, VsMain, VsTemp, VsAttached,
+    survives_connection_close, belongs_to_main,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type ViewSpec is {
+    name: Text,
+    scope: ViewScope,
+    if_not_exists: Bool,
+    column_aliases: List<Text>,   // empty = inherit from SELECT
+    select_sql: Text,
+};
+
+public fn new(name: Text, select_sql: Text) -> ViewSpec {
+    ViewSpec {
+        name: name,
+        scope: VsMain,
+        if_not_exists: false,
+        column_aliases: [].clone() as List<Text>,
+        select_sql: select_sql,
+    }
+}
+
+public fn as_temp(mut s: ViewSpec) -> ViewSpec {
+    s.scope = VsTemp;
+    s
+}
+
+public fn in_attached(mut s: ViewSpec, db: Text) -> ViewSpec {
+    s.scope = VsAttached(db);
+    s
+}
+
+public fn with_if_not_exists(mut s: ViewSpec) -> ViewSpec {
+    s.if_not_exists = true;
+    s
+}
+
+public fn with_column_aliases(mut s: ViewSpec, aliases: List<Text>) -> ViewSpec {
+    s.column_aliases = aliases;
+    s
+}
+
+public fn is_persistent(s: &ViewSpec) -> Bool {
+    survives_connection_close(&s.scope)
+}
+
+public fn in_main_schema(s: &ViewSpec) -> Bool {
+    belongs_to_main(&s.scope)
+}
+
+public fn has_column_aliases(s: &ViewSpec) -> Bool {
+    s.column_aliases.len() > 0
+}
+
+public fn alias_count(s: &ViewSpec) -> Int {
+    s.column_aliases.len()
+}

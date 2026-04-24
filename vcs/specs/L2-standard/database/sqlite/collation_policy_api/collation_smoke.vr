@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, collation_policy_api, sql, collation
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.collation_policy_api.policy.{
+    CollationPolicy, CpBinary, CpNoCase, CpRtrim,
+    policy_name, default_policy,
+    is_byte_wise, is_case_insensitive, ignores_trailing_whitespace,
+};
+mount core.database.sqlite.native.collation_policy_api.compare.{compare};
+mount base.{Bool};
+
+fn test_policy_names() {
+    assert(policy_name(&CpBinary) == "BINARY".clone());
+    assert(policy_name(&CpNoCase) == "NOCASE".clone());
+    assert(policy_name(&CpRtrim)  == "RTRIM".clone());
+}
+
+fn test_default_is_binary() {
+    match default_policy() { CpBinary => {}, _ => assert(false) }
+}
+
+fn test_classifiers() {
+    assert(is_byte_wise(&CpBinary));
+    assert(!is_byte_wise(&CpNoCase));
+    assert(is_case_insensitive(&CpNoCase));
+    assert(!is_case_insensitive(&CpBinary));
+    assert(ignores_trailing_whitespace(&CpRtrim));
+    assert(!ignores_trailing_whitespace(&CpNoCase));
+}
+
+fn test_binary_compare() {
+    assert_eq(compare(&"abc".clone(), &"abc".clone(), &CpBinary), 0);
+    assert(compare(&"abc".clone(), &"abd".clone(), &CpBinary) < 0);
+    assert(compare(&"abd".clone(), &"abc".clone(), &CpBinary) > 0);
+    assert(compare(&"abc".clone(), &"abcd".clone(), &CpBinary) < 0);
+}
+
+fn test_nocase_compare() {
+    assert_eq(compare(&"abc".clone(), &"ABC".clone(), &CpNoCase), 0);
+    assert_eq(compare(&"AbC".clone(), &"aBc".clone(), &CpNoCase), 0);
+    assert(compare(&"abc".clone(), &"ABD".clone(), &CpNoCase) < 0);
+    // BINARY should disagree.
+    assert(compare(&"abc".clone(), &"ABC".clone(), &CpBinary) != 0);
+}
+
+fn test_rtrim_compare() {
+    assert_eq(compare(&"abc".clone(), &"abc   ".clone(), &CpRtrim), 0);
+    assert_eq(compare(&"abc   ".clone(), &"abc".clone(), &CpRtrim), 0);
+    assert(compare(&"abc".clone(), &"abd   ".clone(), &CpRtrim) < 0);
+    // BINARY sees difference.
+    assert(compare(&"abc".clone(), &"abc   ".clone(), &CpBinary) != 0);
+}
+
+fn test_prefix_orders() {
+    assert(compare(&"abc".clone(), &"abcd".clone(), &CpBinary) < 0);
+    assert(compare(&"abcd".clone(), &"abc".clone(), &CpBinary) > 0);
+}
+
+fn main() {
+    test_policy_names();
+    test_default_is_binary();
+    test_classifiers();
+    test_binary_compare();
+    test_nocase_compare();
+    test_rtrim_compare();
+    test_prefix_orders();
+}

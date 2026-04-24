@@ -1,0 +1,39 @@
+// Math-fn grouping.
+
+module core.database.sqlite.native.math_fn_package.kind;
+
+mount base.{Bool, Text};
+
+public type MathKind is
+    | MkTrig        // sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh
+    | MkLogExp      // log, log2, log10, ln, exp
+    | MkRound       // floor, ceil, ceiling, trunc
+    | MkPowerRoot   // pow, power, sqrt
+    | MkModSign     // mod, sign, abs (abs exists pre-3.35)
+    | MkConst       // pi
+    | MkRadDeg      // radians, degrees
+    ;
+
+public fn kind_name(k: &MathKind) -> Text {
+    match k {
+        MkTrig      => "trig".clone(),
+        MkLogExp    => "log_exp".clone(),
+        MkRound     => "round".clone(),
+        MkPowerRoot => "power_root".clone(),
+        MkModSign   => "mod_sign".clone(),
+        MkConst     => "const".clone(),
+        MkRadDeg    => "rad_deg".clone(),
+    }
+}
+
+public fn returns_integer(k: &MathKind) -> Bool {
+    match k { MkRound => true, _ => false }
+}
+
+public fn is_dimensionless(k: &MathKind) -> Bool {
+    match k {
+        MkTrig   => true,
+        MkRadDeg => true,
+        _        => false,
+    }
+}
