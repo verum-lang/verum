@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, extensions, rfc5280_4_2, shape
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2 ExtensionSet — typed view of a certificate's
+// extensions block. empty() yields every field None; RawExtension
+// preserves opaque OIDs for forward-compat; X509Version (v1/v2/v3)
+// tri-state distinct under match.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ext.{ExtensionSet, RawExtension};
+mount core.security.x509.oid.{Oid};
+mount core.security.x509.certificate.{X509Version};
+
+fn empty_extension_set_has_no_parsed_fields() {
+    let s = ExtensionSet.empty();
+    match s.basic_constraints { None => {}, _ => panic("bc") }
+    match s.key_usage         { None => {}, _ => panic("ku") }
+    match s.ext_key_usage     { None => {}, _ => panic("eku") }
+    match s.subject_alt_name  { None => {}, _ => panic("san") }
+    match s.name_constraints  { None => {}, _ => panic("nc") }
+    match s.authority_key_id  { None => {}, _ => panic("aki") }
+    match s.subject_key_id    { None => {}, _ => panic("ski") }
+    assert(s.others.len() == 0);
+}
+
+fn raw_extension_constructible_with_opaque_payload() {
+    // Random OID 2.5.29.31 (cRLDistributionPoints) with opaque value.
+    let value: List<Byte> = [0x30_u8, 0x00_u8];
+    let ext = RawExtension {
+        oid:       Oid.from(&[2_u32, 5_u32, 29_u32, 31_u32]),
+        critical:  false,
+        value_der: value,
+    };
+    assert(ext.oid.len() == 4);
+    assert(ext.oid.arc(0) == 2_u32);
+    assert(ext.oid.arc(3) == 31_u32);
+    assert(ext.critical == false);
+    assert(ext.value_der.len() == 2);
+    assert(ext.value_der[0] == 0x30_u8);
+}
+
+fn raw_extension_critical_flag_round_trips() {
+    let ext = RawExtension {
+        oid:       Oid.from(&[2_u32, 5_u32, 29_u32, 19_u32]),   // basicConstraints
+        critical:  true,
+        value_der: [],
+    };
+    assert(ext.critical);
+}
+
+fn x509_version_three_variants_distinct() {
+    let versions: [X509Version; 3] = [
+        X509Version.V1,
+        X509Version.V2,
+        X509Version.V3,
+    ];
+    let mut tags: [Int; 3] = [0; 3];
+    let mut i: Int = 0;
+    while i < 3 {
+        tags[i] = match versions[i] {
+            X509Version.V1 => 1,
+            X509Version.V2 => 2,
+            X509Version.V3 => 3,
+        };
+        i = i + 1;
+    }
+    assert(tags[0] != tags[1]);
+    assert(tags[1] != tags[2]);
+    assert(tags[0] != tags[2]);
+}
+
+fn extension_set_holds_others_list() {
+    // Unknown OIDs are carried verbatim in the `others` list so forward-
+    // compat policies can still inspect them.
+    let mut s = ExtensionSet.empty();
+    s.others.push(RawExtension {
+        oid:       Oid.from(&[1_u32, 2_u32, 3_u32, 4_u32]),
+        critical:  false,
+        value_der: [0xAA_u8, 0xBB_u8],
+    });
+    s.others.push(RawExtension {
+        oid:       Oid.from(&[1_u32, 2_u32, 3_u32, 5_u32]),
+        critical:  true,
+        value_der: [0xCC_u8],
+    });
+    assert(s.others.len() == 2);
+    assert(s.others[0].critical == false);
+    assert(s.others[1].critical);
+}
+
+@main
+public fn main() -> Int {
+    empty_extension_set_has_no_parsed_fields();
+    raw_extension_constructible_with_opaque_payload();
+    raw_extension_critical_flag_round_trips();
+    x509_version_three_variants_distinct();
+    extension_set_holds_others_list();
+    print("RFC 5280 §4.2 ExtensionSet + X509Version shape verified");
+    0
+}
