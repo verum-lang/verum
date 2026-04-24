@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, stream, recv, state_machine, rfc9000_3_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §3.2 RecvStream state transitions:
+//
+//   Recv → SizeKnown (after FIN at offset O, stream bytes ≤ O)
+//   Recv → ResetRecvd (peer RESET_STREAM; data discarded)
+//   SizeKnown → DataRecvd (gap filled, buffer contiguous to O)
+//   DataRecvd → DataRead (app drained)
+//
+// Flow-control violations and duplicate-FIN-with-different-offset
+// are terminal errors.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.stream_sm.recv.{RecvStream, RecvState, RecvError};
+
+fn new_stream_is_recv_state() {
+    let s = RecvStream::new(0_u64, 1024_u64);
+    match s.state() {
+        RecvState.Recv => {},
+        _ => panic("fresh RecvStream must be Recv"),
+    }
+}
+
+fn bytes_past_max_data_violate_flow_control() {
+    let mut s = RecvStream::new(0_u64, 100_u64);
+    let data: List<Byte> = [
+        0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8,
+    ];
+    match s.on_stream_frame(99_u64, data.as_slice(), false) {
+        // High = 99 + 5 = 104 > 100 → FlowControlViolation.
+        Err(RecvError.FlowControlViolation) => {},
+        _ => panic("over-limit must return FlowControlViolation"),
+    }
+}
+
+fn accept_within_flow_control_budget() {
+    let mut s = RecvStream::new(0_u64, 1024_u64);
+    let data: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    assert(s.on_stream_frame(0_u64, data.as_slice(), false).is_ok());
+}
+
+fn fin_sets_final_size_and_transitions() {
+    let mut s = RecvStream::new(0_u64, 1024_u64);
+    let data: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    assert(s.on_stream_frame(0_u64, data.as_slice(), true).is_ok());
+    // After FIN on a contiguous run, state must advance beyond Recv.
+    match s.state() {
+        RecvState.Recv => panic("expected at least SizeKnown after FIN"),
+        _ => {},
+    }
+}
+
+fn fin_at_conflicting_offsets_rejects() {
+    let mut s = RecvStream::new(0_u64, 1024_u64);
+    let d1: List<Byte> = [0x01_u8, 0x02_u8];
+    let d2: List<Byte> = [0x03_u8];
+    assert(s.on_stream_frame(0_u64, d1.as_slice(), true).is_ok());
+    // Second FIN at a different highest offset — FinalSizeChanged.
+    match s.on_stream_frame(2_u64, d2.as_slice(), true) {
+        Err(RecvError.FinalSizeChanged) => {},
+        _ => panic("second FIN with new size must reject"),
+    }
+}
+
+fn reset_transitions_to_reset_state() {
+    let mut s = RecvStream::new(0_u64, 1024_u64);
+    assert(s.on_reset(0_u64, 0_u64).is_ok());
+    match s.state() {
+        RecvState.ResetRecvd => {},
+        _ => panic("expected ResetRecvd"),
+    }
+}
+
+fn frames_after_reset_are_rejected() {
+    let mut s = RecvStream::new(0_u64, 1024_u64);
+    let _ = s.on_reset(0_u64, 0_u64);
+    let data: List<Byte> = [0x00_u8];
+    match s.on_stream_frame(0_u64, data.as_slice(), false) {
+        Err(RecvError.ReceiveAfterReset) => {},
+        _ => panic("frame after reset must be rejected"),
+    }
+}
+
+fn suggested_max_stream_data_tracks_read() {
+    let mut s = RecvStream::new(0_u64, 1024_u64);
+    let data: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
+    let _ = s.on_stream_frame(0_u64, data.as_slice(), false);
+    let (_read_bytes, _fin) = s.read();
+    // After draining the buffer, the suggested new MSD is
+    // bytes_read + window.
+    let suggested = s.suggested_max_stream_data(8192_u64);
+    assert(suggested >= 4_u64);
+}
+
+@main
+public fn main() -> Int {
+    new_stream_is_recv_state();
+    bytes_past_max_data_violate_flow_control();
+    accept_within_flow_control_budget();
+    fin_sets_final_size_and_transitions();
+    fin_at_conflicting_offsets_rejects();
+    reset_transitions_to_reset_state();
+    frames_after_reset_are_rejected();
+    suggested_max_stream_data_tracks_read();
+    print("RFC 9000 §3.2 RecvStream state transitions verified");
+    0
+}

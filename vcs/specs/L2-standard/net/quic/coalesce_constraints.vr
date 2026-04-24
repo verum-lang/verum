@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, coalesce, rfc9000_12_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §12.2 packet coalescing invariants:
+//   * Only one Short-header (1-RTT) packet per datagram.
+//   * Short-header, when present, MUST be the last packet.
+//
+// assemble() validates both rules before touching crypto state;
+// violations produce CoalesceError without invoking any AEAD path.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.connection_sm.coalesce.{
+    CoalescedPacket, CoalescePlan, CoalesceError, assemble,
+};
+mount core.net.quic.connection_sm.mod.{QuicSpaceKeys};
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.crypto.header_protection.{HpKey};
+
+fn stub_keys() -> QuicSpaceKeys {
+    QuicSpaceKeys {
+        aead_key: [],
+        aead_iv:  [0_u8; 12],
+        hp_key:   HpKey.AesEcb128([0_u8; 16]),
+    }
+}
+
+fn assemble_marker(plan: &CoalescePlan) -> Text {
+    match assemble(plan) {
+        Err(CoalesceError.MultipleShortHeaders) => f"MultipleShortHeaders",
+        Err(CoalesceError.ShortHeaderNotLast)   => f"ShortHeaderNotLast",
+        Err(_)                                  => f"OtherErr",
+        Ok(_)                                   => f"Ok",
+    }
+}
+
+fn plan_with_two_short_headers_rejected() {
+    let short_a = CoalescedPacket.OneRttPkt {
+        frames: [], pn: 0_u64, pn_len: 1_u8, largest_acked: None,
+        keys: stub_keys(), spin_bit: false, key_phase: false,
+    };
+    let short_b = CoalescedPacket.OneRttPkt {
+        frames: [], pn: 1_u64, pn_len: 1_u8, largest_acked: None,
+        keys: stub_keys(), spin_bit: false, key_phase: false,
+    };
+    let plan = CoalescePlan {
+        version: 0x00000001_u32,
+        dcid:    ConnectionId.empty(),
+        scid:    ConnectionId.empty(),
+        packets: [short_a, short_b],
+        pad_to:  0,
+    };
+    let r = assemble_marker(&plan);
+    assert(r == f"MultipleShortHeaders");
+}
+
+fn single_short_header_path_does_not_trip_constraints() {
+    let short = CoalescedPacket.OneRttPkt {
+        frames: [], pn: 0_u64, pn_len: 1_u8, largest_acked: None,
+        keys: stub_keys(), spin_bit: false, key_phase: false,
+    };
+    let plan = CoalescePlan {
+        version: 0x00000001_u32,
+        dcid:    ConnectionId.empty(),
+        scid:    ConnectionId.empty(),
+        packets: [short],
+        pad_to:  0,
+    };
+    let r = assemble_marker(&plan);
+    assert(r != f"MultipleShortHeaders");
+    assert(r != f"ShortHeaderNotLast");
+}
+
+@main
+public fn main() -> Int {
+    plan_with_two_short_headers_rejected();
+    single_short_header_path_does_not_trip_constraints();
+    print("RFC 9000 §12.2 coalesce constraints verified");
+    0
+}

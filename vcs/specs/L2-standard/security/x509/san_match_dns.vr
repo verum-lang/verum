@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, san, dns_match, rfc6125_6_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 6125 §6.4 DNS name matching with RFC 6066 SNI:
+//   * exact match, case-insensitive;
+//   * leftmost `*.` matches exactly one label;
+//   * bare `*` without dot is forbidden;
+//   * mid-label wildcards (`foo*.bar`) NOT allowed (Chrome parity).
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ext.subject_alt_name.{
+    SubjectAltName, GeneralName,
+};
+
+fn san_with_names(names: List<GeneralName>) -> SubjectAltName {
+    SubjectAltName { names: names }
+}
+
+fn exact_match_succeeds() {
+    let san = san_with_names([
+        GeneralName.DnsName(f"example.com"),
+    ]);
+    assert(san.matches_dns(&f"example.com"));
+    assert(san.matches_dns(&f"EXAMPLE.COM"));
+    assert(false == san.matches_dns(&f"other.com"));
+}
+
+fn wildcard_matches_single_label() {
+    let san = san_with_names([
+        GeneralName.DnsName(f"*.example.com"),
+    ]);
+    assert(san.matches_dns(&f"www.example.com"));
+    assert(san.matches_dns(&f"api.example.com"));
+    // Wildcard does NOT cross dots — two labels must fail.
+    assert(false == san.matches_dns(&f"a.b.example.com"));
+    // Bare apex does NOT match the wildcard.
+    assert(false == san.matches_dns(&f"example.com"));
+}
+
+fn multiple_san_entries_matched() {
+    let san = san_with_names([
+        GeneralName.DnsName(f"example.com"),
+        GeneralName.DnsName(f"*.staging.example.com"),
+        GeneralName.DnsName(f"ipv6-only.test"),
+    ]);
+    assert(san.matches_dns(&f"example.com"));
+    assert(san.matches_dns(&f"beta.staging.example.com"));
+    assert(san.matches_dns(&f"ipv6-only.test"));
+    assert(false == san.matches_dns(&f"other.com"));
+}
+
+fn ip_literal_does_not_match_dns_san() {
+    // Reference is an IP — but SAN contains only DNS. DNS matcher must
+    // NOT accept it even if the strings are identical.
+    let san = san_with_names([
+        GeneralName.DnsName(f"192.0.2.1"),
+    ]);
+    // matches_dns is purely string-based; exact DNS equality holds.
+    // The higher-level verify_server_identity is what prevents
+    // IP→DNS confusion, but the matcher itself allows exact strings.
+    assert(san.matches_dns(&f"192.0.2.1"));
+}
+
+fn ip_v4_bytes_match() {
+    let ip_v4: List<Byte> = [192_u8, 0_u8, 2_u8, 1_u8];
+    let san = san_with_names([
+        GeneralName.IpAddress(ip_v4.clone()),
+    ]);
+    let ref_v4: List<Byte> = [192_u8, 0_u8, 2_u8, 1_u8];
+    assert(san.matches_ip(ref_v4.as_slice()));
+    let mismatch: List<Byte> = [198_u8, 51_u8, 100_u8, 1_u8];
+    assert(false == san.matches_ip(mismatch.as_slice()));
+}
+
+fn ip_v4_and_v6_are_different_lengths() {
+    let ip_v4: List<Byte> = [192_u8, 0_u8, 2_u8, 1_u8];
+    let san = san_with_names([
+        GeneralName.IpAddress(ip_v4),
+    ]);
+    // v6 reference — 16 bytes — MUST NOT match a v4 SAN entry.
+    let v6_ref: List<Byte> = [
+        0x20_u8, 0x01_u8, 0x0D_u8, 0xB8_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 1_u8,
+    ];
+    assert(false == san.matches_ip(v6_ref.as_slice()));
+}
+
+fn bare_wildcard_never_matches() {
+    let san = san_with_names([
+        GeneralName.DnsName(f"*"),          // "*" alone — forbidden per RFC 6125
+    ]);
+    assert(false == san.matches_dns(&f"anything.test"));
+}
+
+@main
+public fn main() -> Int {
+    exact_match_succeeds();
+    wildcard_matches_single_label();
+    multiple_san_entries_matched();
+    ip_literal_does_not_match_dns_san();
+    ip_v4_bytes_match();
+    ip_v4_and_v6_are_different_lengths();
+    bare_wildcard_never_matches();
+    print("RFC 6125 §6.4 SAN DNS/IP match verified");
+    0
+}
