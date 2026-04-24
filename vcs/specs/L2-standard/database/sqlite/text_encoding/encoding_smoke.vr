@@ -15,8 +15,8 @@ mount core.database.sqlite.native.text_encoding.bom.{
     BomKind, BkNone, BkUtf8, BkUtf16Le, BkUtf16Be,
     bom_bytes, detect_bom,
 };
-mount core.database.sqlite.native.text_encoding.detect.{
-    detect,
+mount core.database.sqlite.native.text_encoding.detect_encoding.{
+    detect_encoding,
 };
 mount collections.List;
 mount base.{Bool};
@@ -96,7 +96,7 @@ fn test_detect_picks_utf16_le_for_bom() {
     b.push(0xFE as u8);
     b.push(0x61 as u8);
     b.push(0x00 as u8);
-    match detect(&b) { TeUtf16Le => {}, _ => assert(false) }
+    match detect_encoding(&b) { TeUtf16Le => {}, _ => assert(false) }
 }
 
 fn test_detect_picks_utf8_for_plain_ascii() {
@@ -104,7 +104,7 @@ fn test_detect_picks_utf8_for_plain_ascii() {
     b.push(0x48 as u8);
     b.push(0x69 as u8);
     b.push(0x21 as u8);
-    match detect(&b) { TeUtf8 => {}, _ => assert(false) }
+    match detect_encoding(&b) { TeUtf8 => {}, _ => assert(false) }
 }
 
 fn test_detect_picks_utf16_be_for_alternating_zeros() {
@@ -116,7 +116,7 @@ fn test_detect_picks_utf16_be_for_alternating_zeros() {
     b.push(0x69 as u8);
     b.push(0x00 as u8);
     b.push(0x21 as u8);
-    match detect(&b) { TeUtf16Be => {}, _ => assert(false) }
+    match detect_encoding(&b) { TeUtf16Be => {}, _ => assert(false) }
 }
 
 fn main() {

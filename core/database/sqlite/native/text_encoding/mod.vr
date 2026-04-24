@@ -23,4 +23,4 @@ module core.database.sqlite.native.text_encoding;
 
 public module kind;
 public module bom;
-public module detect;
+public module detect_encoding;

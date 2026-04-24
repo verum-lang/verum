@@ -32,10 +32,10 @@ fn test_swap_pairs_even_len() {
     b.push(0x03 as u8);
     b.push(0x04 as u8);
     let s = swap_pairs(&b);
-    assert_eq(s.get(0), &(0x02 as u8));
-    assert_eq(s.get(1), &(0x01 as u8));
-    assert_eq(s.get(2), &(0x04 as u8));
-    assert_eq(s.get(3), &(0x03 as u8));
+    assert_eq(s[0], 0x02 as u8);
+    assert_eq(s[1], 0x01 as u8);
+    assert_eq(s[2], 0x04 as u8);
+    assert_eq(s[3], 0x03 as u8);
 }
 
 fn test_swap_pairs_odd_preserves_tail() {
@@ -45,7 +45,7 @@ fn test_swap_pairs_odd_preserves_tail() {
     b.push(0x05 as u8);
     let s = swap_pairs(&b);
     assert_eq(s.len(), 3);
-    assert_eq(s.get(2), &(0x05 as u8));
+    assert_eq(s[2], 0x05 as u8);
 }
 
 fn test_decode_u16_le() {
