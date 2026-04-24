@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, integer, rfc9204_4_1, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9204 §4.1.1 prefixed-integer encoding. The N-bit prefix picks
+// a mask (2^N - 1); values < mask fit in the first byte's low N bits,
+// values ≥ mask spill into continuation bytes.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.integer.{encode, decode, IntError};
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn small_5bit_value_fits_in_prefix() {
+    // Prefix 5, value 10, opcode 0xC0 (indexed-header-field, static=1).
+    // Mask = 2^5-1 = 31. 10 < 31 → single-byte output: 0xC0 | 0x0A = 0xCA.
+    let mut out: List<Byte> = [];
+    encode(&mut out, 5, 0xC0_u8, 10_u64);
+    assert(out.len() == 1);
+    assert(out[0] == 0xCA_u8);
+}
+
+fn value_at_mask_spills_to_continuation() {
+    // Prefix 5, value 31 (= mask). Can't fit → first byte = 0xFF (opcode
+    // 0xE0 | 0x1F), then a single continuation byte carrying value-mask=0.
+    let mut out: List<Byte> = [];
+    encode(&mut out, 5, 0xE0_u8, 31_u64);
+    assert(out.len() == 2);
+    assert(out[0] == 0xFF_u8);
+    assert(out[1] == 0x00_u8);
+}
+
+fn value_needs_two_continuation_bytes() {
+    // Prefix 7, value 200, opcode 0x80.
+    // Mask = 2^7-1 = 127. 200 > 127 so:
+    //   byte0 = 0x80 | 0x7F = 0xFF
+    //   v - mask = 73 (< 128) → byte1 = 0x49.
+    let mut out: List<Byte> = [];
+    encode(&mut out, 7, 0x80_u8, 200_u64);
+    assert(out.len() == 2);
+    assert(out[0] == 0xFF_u8);
+    assert(out[1] == 0x49_u8);
+}
+
+fn value_spanning_two_continuation_bytes() {
+    // Prefix 5, value 1337, opcode 0xC0.
+    // Mask = 31. 1337 - 31 = 1306. 1306 = 10 * 128 + 26 = 0x51A.
+    // Continuation: low 7 bits 0x1A | 0x80 = 0x9A; then 10 (high) = 0x0A.
+    let mut out: List<Byte> = [];
+    encode(&mut out, 5, 0xC0_u8, 1337_u64);
+    assert(out.len() == 3);
+    assert(out[0] == 0xDF_u8);    // 0xC0 | 0x1F
+    assert(out[1] == 0x9A_u8);    // continuation (bit 7 set)
+    assert(out[2] == 0x0A_u8);    // final
+}
+
+fn decode_roundtrip_small_value() {
+    let mut out: List<Byte> = [];
+    encode(&mut out, 5, 0xC0_u8, 10_u64);
+    let (v, cur) = decode(out.as_slice(), 0, 5).unwrap();
+    assert(v == 10_u64);
+    assert(cur == 1);
+}
+
+fn decode_roundtrip_spilled_value() {
+    let mut out: List<Byte> = [];
+    encode(&mut out, 5, 0xC0_u8, 1337_u64);
+    let (v, cur) = decode(out.as_slice(), 0, 5).unwrap();
+    assert(v == 1337_u64);
+    assert(cur == 3);
+}
+
+fn decode_truncated_continuation() {
+    // First byte signals continuation but no follow-up byte → Truncated.
+    let buf: List<Byte> = [0xDF_u8, 0x9A_u8];   // high-bit continuation cut off
+    match decode(buf.as_slice(), 0, 5) {
+        Err(IntError.Truncated) => {},
+        _ => panic("expected Truncated"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    small_5bit_value_fits_in_prefix();
+    value_at_mask_spills_to_continuation();
+    value_needs_two_continuation_bytes();
+    value_spanning_two_continuation_bytes();
+    decode_roundtrip_small_value();
+    decode_roundtrip_spilled_value();
+    decode_truncated_continuation();
+    print("RFC 9204 §4.1.1 QPACK integer encoding KAT verified");
+    0
+}

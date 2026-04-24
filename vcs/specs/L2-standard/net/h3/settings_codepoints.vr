@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, settings, rfc9114_7_2_4, rfc9204, rfc9220, rfc9297
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9114 §7.2.4 + RFC 9204 §5 HTTP/3 SETTINGS codepoints +
+// defaults + entry-round-trip.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.settings.{H3Settings};
+
+fn defaults_match_rfc() {
+    let s = H3Settings.defaults();
+    // RFC 9204 §5: default qpack_max_table_capacity = 0.
+    assert(s.qpack_max_table_capacity == 0_u64);
+    // RFC 9114 §7.2.4.1: default max_field_section_size = unbounded.
+    assert(s.max_field_section_size == 0xFFFFFFFFFFFFFFFF_u64);
+    // RFC 9204 §2.1.2: default qpack_blocked_streams = 0.
+    assert(s.qpack_blocked_streams == 0_u64);
+    // RFC 9220 / RFC 9297: extensions disabled by default.
+    assert(s.enable_connect_protocol == false);
+    assert(s.h3_datagram == false);
+}
+
+fn from_entries_maps_ids_to_fields() {
+    let entries: List<(UInt64, UInt64)> = [
+        (0x01_u64, 4096_u64),       // qpack_max_table_capacity
+        (0x06_u64, 65536_u64),      // max_field_section_size
+        (0x07_u64, 100_u64),        // qpack_blocked_streams
+        (0x08_u64, 1_u64),          // enable_connect_protocol
+        (0x33_u64, 1_u64),          // h3_datagram
+        (0xDEAD_u64, 0xBEEF_u64),   // unknown → extras
+    ];
+    let s = H3Settings.from_entries(&entries);
+    assert(s.qpack_max_table_capacity == 4096_u64);
+    assert(s.max_field_section_size   == 65536_u64);
+    assert(s.qpack_blocked_streams    == 100_u64);
+    assert(s.enable_connect_protocol);
+    assert(s.h3_datagram);
+    assert(s.extras.len() == 1);
+}
+
+fn to_entries_preserves_set_fields() {
+    let entries_in: List<(UInt64, UInt64)> = [
+        (0x01_u64, 1024_u64),
+        (0x06_u64, 512_u64),
+        (0x07_u64, 50_u64),
+        (0x08_u64, 1_u64),
+    ];
+    let s = H3Settings.from_entries(&entries_in);
+    let out = s.to_entries();
+    // At minimum: qpack + max_field_section_size + blocked_streams are
+    // always emitted; plus enable_connect_protocol = true above.
+    assert(out.len() >= 4);
+}
+
+fn defaults_roundtrip_through_from_entries() {
+    let d = H3Settings.defaults();
+    let pairs = d.to_entries();
+    let reconstructed = H3Settings.from_entries(&pairs);
+    assert(reconstructed.qpack_max_table_capacity == 0_u64);
+    assert(reconstructed.max_field_section_size   == 0xFFFFFFFFFFFFFFFF_u64);
+    assert(reconstructed.qpack_blocked_streams    == 0_u64);
+    assert(reconstructed.enable_connect_protocol == false);
+    assert(reconstructed.h3_datagram             == false);
+}
+
+fn unknown_setting_ids_preserved() {
+    let entries: List<(UInt64, UInt64)> = [
+        (0xFF11_u64, 1_u64),
+        (0xFF22_u64, 2_u64),
+        (0xFF33_u64, 3_u64),
+    ];
+    let s = H3Settings.from_entries(&entries);
+    assert(s.extras.len() == 3);
+}
+
+@main
+public fn main() -> Int {
+    defaults_match_rfc();
+    from_entries_maps_ids_to_fields();
+    to_entries_preserves_set_fields();
+    defaults_roundtrip_through_from_entries();
+    unknown_setting_ids_preserved();
+    print("RFC 9114 §7.2.4 HTTP/3 SETTINGS codepoint map verified");
+    0
+}

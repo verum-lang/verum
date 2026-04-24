@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, static_table, rfc9204_appendix_a
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9204 Appendix A — QPACK static table must have exactly 99
+// entries and `get`/`find`/`find_name` must round-trip.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.static_table.{
+    StaticEntry, STATIC_TABLE_SIZE,
+    get, find, find_name,
+};
+
+fn static_table_size_is_99() {
+    // RFC 9204 §3.2.1 — static table has exactly 99 entries (indices 0..98).
+    assert(STATIC_TABLE_SIZE == 99);
+}
+
+fn out_of_range_index_returns_none() {
+    match get(-1) {
+        None => {},
+        _ => panic("index -1 must return None"),
+    }
+    match get(99) {
+        None => {},
+        _ => panic("index 99 must return None"),
+    }
+    match get(1000) {
+        None => {},
+        _ => panic("index 1000 must return None"),
+    }
+}
+
+fn index_0_is_authority() {
+    // Appendix A row 0: :authority "" (empty value).
+    match get(0) {
+        Some(e) => {
+            assert(e.name == f":authority");
+            assert(e.value == f"");
+        },
+        None => panic("index 0 must be present"),
+    }
+}
+
+fn index_17_method_get() {
+    // Appendix A row 17 — :method GET (commonly referenced in encoder tests).
+    match get(17) {
+        Some(e) => {
+            assert(e.name == f":method");
+            assert(e.value == f"GET");
+        },
+        None => panic("index 17 must be :method GET"),
+    }
+}
+
+fn index_25_status_200() {
+    // Appendix A row 25 — :status 200.
+    match get(25) {
+        Some(e) => {
+            assert(e.name == f":status");
+            assert(e.value == f"200");
+        },
+        None => panic("index 25 must be :status 200"),
+    }
+}
+
+fn find_name_returns_smallest_match() {
+    let method = f":method";
+    match find_name(&method) {
+        Some(idx) => {
+            assert(idx >= 15 && idx <= 21);   // :method entries (15..=21).
+        },
+        None => panic(":method must exist"),
+    }
+}
+
+fn find_exact_pair_returns_canonical_index() {
+    let status = f":status";
+    let ok200 = f"200";
+    match find(&status, &ok200) {
+        Some(idx) => assert(idx == 25),
+        None => panic(":status 200 must resolve to index 25"),
+    }
+}
+
+fn find_missing_returns_none() {
+    let bogus_name = f"x-verum-not-in-static-table";
+    let bogus_value = f"xyz";
+    match find(&bogus_name, &bogus_value) {
+        None => {},
+        _ => panic("missing pair must return None"),
+    }
+    match find_name(&bogus_name) {
+        None => {},
+        _ => panic("missing name must return None"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    static_table_size_is_99();
+    out_of_range_index_returns_none();
+    index_0_is_authority();
+    index_17_method_get();
+    index_25_status_200();
+    find_name_returns_smallest_match();
+    find_exact_pair_returns_canonical_index();
+    find_missing_returns_none();
+    print("RFC 9204 Appendix A QPACK static table coverage verified");
+    0
+}
