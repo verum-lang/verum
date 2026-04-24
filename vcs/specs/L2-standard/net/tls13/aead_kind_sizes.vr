@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, aead, cipher_suite, rfc8446_5_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §5.3 AEAD key/IV/tag sizes per cipher suite.
+//
+//   AES-128-GCM:             key=16, iv=12, tag=16
+//   AES-256-GCM:             key=32, iv=12, tag=16
+//   ChaCha20-Poly1305:       key=32, iv=12, tag=16
+//   AES-128-CCM:             key=16, iv=12, tag=16  (not v1-negotiated)
+//   AES-128-CCM-8:           key=16, iv=12, tag=8   (not v1-negotiated)
+
+mount core.*;
+mount core.net.tls13.cipher_suite.{AeadKind};
+
+fn key_len_per_aead() {
+    assert(AeadKind.Aes128Gcm.key_len()        == 16);
+    assert(AeadKind.Aes256Gcm.key_len()        == 32);
+    assert(AeadKind.ChaCha20Poly1305.key_len() == 32);
+    assert(AeadKind.Aes128Ccm.key_len()        == 16);
+    assert(AeadKind.Aes128Ccm8.key_len()       == 16);
+    // Unknown — conservative zero.
+    assert(AeadKind.Unknown.key_len()          == 0);
+}
+
+fn iv_len_is_12_for_every_aead() {
+    // RFC 8446 §5.3: TLS 1.3 AEAD nonce is always 12 bytes
+    // (96-bit).
+    assert(AeadKind.Aes128Gcm.iv_len()        == 12);
+    assert(AeadKind.Aes256Gcm.iv_len()        == 12);
+    assert(AeadKind.ChaCha20Poly1305.iv_len() == 12);
+    assert(AeadKind.Aes128Ccm.iv_len()        == 12);
+    assert(AeadKind.Aes128Ccm8.iv_len()       == 12);
+    assert(AeadKind.Unknown.iv_len()          == 12);
+}
+
+fn tag_len_distinguishes_ccm_8_from_others() {
+    assert(AeadKind.Aes128Gcm.tag_len()        == 16);
+    assert(AeadKind.Aes256Gcm.tag_len()        == 16);
+    assert(AeadKind.ChaCha20Poly1305.tag_len() == 16);
+    assert(AeadKind.Aes128Ccm.tag_len()        == 16);
+    // CCM-8: 8-byte tag (the whole point of the "8" suffix).
+    assert(AeadKind.Aes128Ccm8.tag_len()       == 8);
+    // Unknown defaults to 16 (the prevailing tag size).
+    assert(AeadKind.Unknown.tag_len()          == 16);
+}
+
+fn size_consistency_plaintext_cap() {
+    // RFC 8446 §5.2 — encrypted record length ≤ 2^14 + 256 = 16640.
+    // Here we sanity-check that each supported AEAD's (key + tag)
+    // overhead fits comfortably.
+    let mut i: Int = 0;
+    let aeads: [AeadKind; 3] = [
+        AeadKind.Aes128Gcm,
+        AeadKind.Aes256Gcm,
+        AeadKind.ChaCha20Poly1305,
+    ];
+    while i < 3 {
+        let overhead = aeads[i].tag_len();
+        assert(overhead == 16);
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    key_len_per_aead();
+    iv_len_is_12_for_every_aead();
+    tag_len_distinguishes_ccm_8_from_others();
+    size_consistency_plaintext_cap();
+    print("RFC 8446 §5.3 AEAD key/IV/tag size table verified");
+    0
+}

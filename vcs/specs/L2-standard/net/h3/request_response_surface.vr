@@ -1,0 +1,117 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, request, response, pseudo_headers, rfc9114_4_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9114 §4.3 HTTP/3 request/response shape: pseudo-headers MUST
+// appear before regular headers. H3Method.as_text()/from_text()
+// round-trip the 8 canonical methods + Other pass-through.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.request.{H3Method, H3Request, H3Response};
+
+fn method_canonical_texts() {
+    assert(H3Method.Get.as_text()     == f"GET");
+    assert(H3Method.Post.as_text()    == f"POST");
+    assert(H3Method.Put.as_text()     == f"PUT");
+    assert(H3Method.Delete.as_text()  == f"DELETE");
+    assert(H3Method.Head.as_text()    == f"HEAD");
+    assert(H3Method.Options.as_text() == f"OPTIONS");
+    assert(H3Method.Patch.as_text()   == f"PATCH");
+    assert(H3Method.Connect.as_text() == f"CONNECT");
+}
+
+fn method_from_text_roundtrip() {
+    match H3Method.from_text(&f"GET")     { H3Method.Get     => {}, _ => panic("GET") }
+    match H3Method.from_text(&f"POST")    { H3Method.Post    => {}, _ => panic("POST") }
+    match H3Method.from_text(&f"CONNECT") { H3Method.Connect => {}, _ => panic("CONNECT") }
+    // Unknown methods round-trip via Other(Text).
+    match H3Method.from_text(&f"BREW") {
+        H3Method.Other(t) => assert(t == f"BREW"),
+        _ => panic("custom method must be Other"),
+    }
+}
+
+fn request_get_defaults_to_https_scheme() {
+    let req = H3Request.get(f"example.com", f"/api");
+    match req.method {
+        H3Method.Get => {},
+        _ => panic("must be GET"),
+    }
+    assert(req.scheme    == f"https");
+    assert(req.authority == f"example.com");
+    assert(req.path      == f"/api");
+    assert(req.body.len() == 0);
+    assert(req.headers.len() == 0);
+}
+
+fn request_post_carries_body() {
+    let body: List<Byte> = [0x7B_u8, 0x7D_u8];   // "{}"
+    let req = H3Request.post(f"example.com", f"/api", body.clone());
+    match req.method {
+        H3Method.Post => {},
+        _ => panic("must be POST"),
+    }
+    assert(req.body.len() == 2);
+}
+
+fn request_to_field_list_starts_with_pseudo_headers() {
+    let req = H3Request.get(f"example.com", f"/index.html")
+        .with_header(f"accept-encoding", f"gzip");
+    let fields = req.to_field_list();
+    // 4 pseudo + 1 regular = 5.
+    assert(fields.len() == 5);
+    // RFC 9114 §4.3.1: pseudo-headers first, in the order
+    // :method, :scheme, :authority, :path.
+    assert(fields[0].name == f":method");
+    assert(fields[0].value == f"GET");
+    assert(fields[1].name == f":scheme");
+    assert(fields[2].name == f":authority");
+    assert(fields[2].value == f"example.com");
+    assert(fields[3].name == f":path");
+    assert(fields[3].value == f"/index.html");
+    // Regular header retained after pseudos.
+    assert(fields[4].name == f"accept-encoding");
+    assert(fields[4].value == f"gzip");
+}
+
+fn response_ok_has_status_200_and_empty_body_or_not() {
+    let body: List<Byte> = [0x4F_u8, 0x4B_u8];
+    let resp = H3Response.ok(body);
+    assert(resp.status == 200_u16);
+    assert(resp.body.len() == 2);
+    assert(resp.trailers.len() == 0);
+}
+
+fn response_status_factory_preserves_code() {
+    let r = H3Response.status(404_u16);
+    assert(r.status == 404_u16);
+}
+
+fn response_to_field_list_starts_with_status_pseudo() {
+    let resp = H3Response.status(200_u16)
+        .with_header(f"content-type", f"text/html");
+    let fields = resp.to_field_list();
+    // 1 pseudo + 1 regular = 2.
+    assert(fields.len() == 2);
+    assert(fields[0].name == f":status");
+    assert(fields[0].value == f"200");
+    assert(fields[1].name == f"content-type");
+}
+
+@main
+public fn main() -> Int {
+    method_canonical_texts();
+    method_from_text_roundtrip();
+    request_get_defaults_to_https_scheme();
+    request_post_carries_body();
+    request_to_field_list_starts_with_pseudo_headers();
+    response_ok_has_status_200_and_empty_body_or_not();
+    response_status_factory_preserves_code();
+    response_to_field_list_starts_with_status_pseudo();
+    print("RFC 9114 §4.3 H3Request / H3Response surface verified");
+    0
+}
