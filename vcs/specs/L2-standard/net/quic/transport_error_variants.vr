@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, transport, errors
+// @timeout: 15000
+// @expected-exit: 0
+
+// UDP transport TransportError — the 4 failure modes the pump's
+// send/recv can bubble up:
+//
+//   * Closed           — transport shut down; connection is terminal.
+//   * TooLarge(Int)    — outbound datagram exceeds effective MTU.
+//   * Io(Text)         — kernel syscall error with diagnostic text.
+//   * WouldBlock       — non-blocking mode; retry after readiness.
+
+mount core.*;
+mount core.net.quic.transport.abstraction.{TransportError};
+
+fn all_four_variants_constructible() {
+    let _a: TransportError = TransportError.Closed;
+    let _b: TransportError = TransportError.TooLarge(1500);
+    let _c: TransportError = TransportError.Io(f"permission denied");
+    let _d: TransportError = TransportError.WouldBlock;
+}
+
+fn too_large_carries_size() {
+    let e = TransportError.TooLarge(65_507);
+    match e {
+        TransportError.TooLarge(n) => assert(n == 65_507),
+        _ => panic("expected TooLarge(65507)"),
+    }
+}
+
+fn io_carries_text() {
+    let e = TransportError.Io(f"address family not supported");
+    match e {
+        TransportError.Io(t) => {
+            // Compare as bytes so we don't depend on string interning.
+            let s = t.as_bytes();
+            assert(s.len() > 0);
+        },
+        _ => panic("expected Io(text)"),
+    }
+}
+
+fn variants_are_pairwise_distinct_under_match() {
+    let errs: [TransportError; 4] = [
+        TransportError.Closed,
+        TransportError.TooLarge(0),
+        TransportError.Io(f"x"),
+        TransportError.WouldBlock,
+    ];
+    let mut tags: [Int; 4] = [0; 4];
+    let mut i: Int = 0;
+    while i < 4 {
+        tags[i] = match errs[i] {
+            TransportError.Closed        => 1,
+            TransportError.TooLarge(_)   => 2,
+            TransportError.Io(_)         => 3,
+            TransportError.WouldBlock    => 4,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 4 {
+        let mut k: Int = j + 1;
+        while k < 4 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn would_block_is_retriable_while_others_terminal() {
+    // Operational classification: WouldBlock is the only retry-safe
+    // variant. Encode this as a predicate the test pins.
+    let codes: [TransportError; 4] = [
+        TransportError.Closed,
+        TransportError.TooLarge(1200),
+        TransportError.Io(f"x"),
+        TransportError.WouldBlock,
+    ];
+    let mut i: Int = 0;
+    while i < 4 {
+        let retriable = match codes[i] {
+            TransportError.WouldBlock => true,
+            _                         => false,
+        };
+        if i == 3 { assert(retriable); } else { assert(retriable == false); }
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    all_four_variants_constructible();
+    too_large_carries_size();
+    io_carries_text();
+    variants_are_pairwise_distinct_under_match();
+    would_block_is_retriable_while_others_terminal();
+    print("UDP TransportError variants verified");
+    0
+}
