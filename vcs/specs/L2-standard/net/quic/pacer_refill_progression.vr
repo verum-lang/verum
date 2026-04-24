@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, pacer, token_bucket, refill, rfc9002_7_7
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9002 §7.7 Pacer — internal refill progression:
+//
+//   tokens += rate_bps × elapsed_us / 1_000_000
+//   tokens = min(tokens, capacity)
+//
+// The pacer clamps `elapsed_us` at 1 second internally so an idle pacer
+// that hasn't ticked in a week doesn't overflow the multiplication.
+// After a refill the tokens never exceed capacity; check(bytes_requested)
+// then admits if and only if tokens ≥ bytes_requested.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.pacer.{Pacer, PacerDecision};
+
+fn empty_bucket_fills_proportionally_to_elapsed() {
+    let mut p = Pacer.new(10_000_u64);
+    p.set_rate(1_000_000_u64);   // 1 Mbps = 125_000 bytes/s
+    let t0 = Instant.now();
+    // Drain the whole bucket at t0.
+    p.on_packet_sent(10_000_u64, t0.clone());
+    assert(p.tokens() == 0_u64);
+    // 100ms later — expect 125_000 × 0.1 = 12_500 tokens, clamped at 10_000.
+    let t1 = t0.checked_add(Duration.from_millis(100)).unwrap();
+    // check() implicitly refills; inspect tokens after.
+    match p.check(5_000_u64, t1) {
+        PacerDecision.Send => {},
+        _ => panic("after 100ms refill, 5000 bytes should be admissible"),
+    }
+    // Tokens were refilled to capacity (clamped).
+    assert(p.tokens() == 10_000_u64);
+}
+
+fn refill_clamps_at_capacity_under_long_idle() {
+    let mut p = Pacer.new(2_000_u64);
+    p.set_rate(1_000_000_u64);
+    let t0 = Instant.now();
+    p.on_packet_sent(2_000_u64, t0.clone());
+    assert(p.tokens() == 0_u64);
+    // 10 seconds idle — internal elapsed clamp keeps the multiplication
+    // at 1s × rate = 125_000 bytes, which then clamps to capacity 2000.
+    let t_far = t0.checked_add(Duration.from_secs(10)).unwrap();
+    let _ = p.check(1_000_u64, t_far);
+    assert(p.tokens() == 2_000_u64);
+}
+
+fn refill_is_partial_below_ask_when_bucket_would_not_cover() {
+    // With a small rate and a short elapsed, the bucket may refill only
+    // partially — check() then returns NotYet.
+    let mut p = Pacer.new(10_000_u64);
+    p.set_rate(1_000_000_u64);   // 125_000 bytes/s
+    let t0 = Instant.now();
+    p.on_packet_sent(10_000_u64, t0.clone());
+    assert(p.tokens() == 0_u64);
+    // 1ms later — expect ~125 tokens only.
+    let t1 = t0.checked_add(Duration.from_millis(1)).unwrap();
+    match p.check(1_200_u64, t1) {
+        PacerDecision.NotYet(d) => {
+            // Deficit ≈ 1200 - 125 = 1075 bytes; wait ≈ 1075 × 1e6 / 1e6 = 1075 µs ≈ 1ms.
+            assert(d.as_micros() >= 500);
+            assert(d.as_micros() <= 10_000);
+        },
+        _ => panic("1200 bytes must NotYet after only 1ms of refill at 1 Mbps"),
+    }
+}
+
+fn unlimited_mode_resets_bucket_full_on_each_check() {
+    let mut p = Pacer.new(300_u64);
+    // No set_rate — stays at 0 bps (unlimited).
+    let t0 = Instant.now();
+    p.on_packet_sent(300_u64, t0.clone());
+    // Unlimited mode keeps the bucket full regardless of tokens drained.
+    let t1 = t0.checked_add(Duration.from_millis(10)).unwrap();
+    let _ = p.check(100_u64, t1);
+    assert(p.tokens() == 300_u64);
+}
+
+@main
+public fn main() -> Int {
+    empty_bucket_fills_proportionally_to_elapsed();
+    refill_clamps_at_capacity_under_long_idle();
+    refill_is_partial_below_ask_when_bucket_would_not_cover();
+    unlimited_mode_resets_bucket_full_on_each_check();
+    print("RFC 9002 §7.7 Pacer refill progression verified");
+    0
+}
