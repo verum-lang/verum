@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, dhe, keypair, rfc8446_4_2_8
+// @timeout: 15000
+// @expected-exit: 0
+
+// TLS 1.3 LocalDhePool (§4.2.8 key_share) — the default in-process
+// ephemeral keypair source:
+//
+//   * X25519 → 32-byte private + 32-byte public.
+//   * Secp256r1 → 32-byte private + 65-byte uncompressed SEC1 public
+//     (0x04 || X || Y).
+//   * Any other group → TlsError.IllegalParameter.
+//
+// `generate_client_keyshares` walks a caller-supplied group list and
+// emits matched (public, private) pairs in request order.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.handshake.dhe_pool.{
+    DheKeyPair, LocalDhePool,
+};
+
+fn x25519_keypair_is_32_bytes_each() {
+    let mut pool = LocalDhePool.new();
+    let kp = pool.take(NamedGroup.X25519).unwrap();
+    match kp.group {
+        NamedGroup.X25519 => {},
+        _ => panic("group must be X25519"),
+    }
+    assert(kp.private_bytes.len() == 32);
+    assert(kp.public_bytes.len()  == 32);
+}
+
+fn secp256r1_keypair_is_sec1_uncompressed() {
+    let mut pool = LocalDhePool.new();
+    let kp = pool.take(NamedGroup.Secp256r1).unwrap();
+    match kp.group {
+        NamedGroup.Secp256r1 => {},
+        _ => panic("group must be Secp256r1"),
+    }
+    assert(kp.private_bytes.len() == 32);
+    // Uncompressed EC point: 1 + 32 + 32 = 65 bytes, first byte 0x04.
+    assert(kp.public_bytes.len() == 65);
+    assert(kp.public_bytes[0]    == 0x04_u8);
+}
+
+fn unsupported_group_returns_illegal_parameter() {
+    let mut pool = LocalDhePool.new();
+    match pool.take(NamedGroup.Secp521r1) {
+        Err(TlsError.IllegalParameter) => {},
+        _ => panic("P-521 must be IllegalParameter from LocalDhePool"),
+    }
+    match pool.take(NamedGroup.X448) {
+        Err(TlsError.IllegalParameter) => {},
+        _ => panic("X448 must be IllegalParameter"),
+    }
+    match pool.take(NamedGroup.Ffdhe2048) {
+        Err(TlsError.IllegalParameter) => {},
+        _ => panic("FFDHE must be IllegalParameter"),
+    }
+}
+
+fn each_take_generates_fresh_keypair() {
+    let mut pool = LocalDhePool.new();
+    let a = pool.take(NamedGroup.X25519).unwrap();
+    let b = pool.take(NamedGroup.X25519).unwrap();
+    // Probabilistic guarantee: CSPRNG keypairs differ (birthday bound
+    // 2^-128 for X25519 — safe to assert). Compare bytes strictly.
+    let mut any_priv_diff = false;
+    let mut any_pub_diff  = false;
+    let mut i: Int = 0;
+    while i < 32 {
+        if a.private_bytes[i] != b.private_bytes[i] { any_priv_diff = true; }
+        if a.public_bytes[i]  != b.public_bytes[i]  { any_pub_diff  = true; }
+        i = i + 1;
+    }
+    assert(any_priv_diff);
+    assert(any_pub_diff);
+}
+
+fn dhe_keypair_group_tag_matches_request() {
+    // Both supported groups round-trip their group tag through the
+    // pool — keypairs are self-tagging so callers can dispatch on
+    // which curve produced them.
+    let mut pool = LocalDhePool.new();
+    let kp_x = pool.take(NamedGroup.X25519).unwrap();
+    match kp_x.group {
+        NamedGroup.X25519 => {},
+        _ => panic("X25519 keypair must retain X25519 tag"),
+    }
+    let kp_p = pool.take(NamedGroup.Secp256r1).unwrap();
+    match kp_p.group {
+        NamedGroup.Secp256r1 => {},
+        _ => panic("P-256 keypair must retain Secp256r1 tag"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    x25519_keypair_is_32_bytes_each();
+    secp256r1_keypair_is_sec1_uncompressed();
+    unsupported_group_returns_illegal_parameter();
+    each_take_generates_fresh_keypair();
+    dhe_keypair_group_tag_matches_request();
+    print("TLS 1.3 LocalDhePool keypair generation verified");
+    0
+}
