@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, keyschedule, traffic_secret, direction, rfc8446_7_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §7.1 directional domain separation — client vs server
+// traffic secrets derive from the SAME parent secret + transcript
+// but MUST differ bytewise because the HKDF-Expand-Label uses
+// different labels:
+//
+//   client_handshake_traffic_secret = Derive-Secret(HS, "c hs traffic", TH)
+//   server_handshake_traffic_secret = Derive-Secret(HS, "s hs traffic", TH)
+//   client_application_traffic_secret_0 = Derive-Secret(MS, "c ap traffic", TH)
+//   server_application_traffic_secret_0 = Derive-Secret(MS, "s ap traffic", TH)
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{HashKind};
+mount core.net.tls13.keyschedule.schedule.{
+    EarlySecret, HandshakeSecret, MasterSecret,
+    TrafficDirection, TrafficPhase,
+};
+
+fn bytes_differ(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return true; }
+    let mut any_diff = false;
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { any_diff = true; }
+        i = i + 1;
+    }
+    any_diff
+}
+
+fn handshake_client_vs_server_traffic_differ() {
+    let hash = HashKind.Sha256;
+    let es = EarlySecret.derive_no_psk(hash).unwrap();
+    let d0 = es.to_handshake_input().unwrap();
+    let dhe: [Byte; 32] = [0x42_u8; 32];
+    let hs = HandshakeSecret.derive(hash, d0.as_slice(), &dhe).unwrap();
+
+    let tr: [Byte; 32] = [0x11_u8; 32];
+    let c_hs = hs.client_traffic(&tr).unwrap();
+    let s_hs = hs.server_traffic(&tr).unwrap();
+
+    assert(bytes_differ(c_hs.secret.as_slice(), s_hs.secret.as_slice()));
+    // Directional tag faithfully reflects derivation path.
+    match c_hs.dir {
+        TrafficDirection.ClientToServer => {},
+        _ => panic("c_hs must tag as C→S"),
+    }
+    match s_hs.dir {
+        TrafficDirection.ServerToClient => {},
+        _ => panic("s_hs must tag as S→C"),
+    }
+    // Both sit in the HandshakePhase.
+    match c_hs.phase {
+        TrafficPhase.HandshakePhase => {},
+        _ => panic("c_hs phase must be Handshake"),
+    }
+}
+
+fn application_client_vs_server_traffic_differ() {
+    let hash = HashKind.Sha256;
+    let es = EarlySecret.derive_no_psk(hash).unwrap();
+    let d0 = es.to_handshake_input().unwrap();
+    let dhe: [Byte; 32] = [0x33_u8; 32];
+    let hs = HandshakeSecret.derive(hash, d0.as_slice(), &dhe).unwrap();
+    let d1 = hs.to_master_input().unwrap();
+    let ms = MasterSecret.derive(hash, d1.as_slice()).unwrap();
+
+    let tr: [Byte; 32] = [0x22_u8; 32];
+    let c_ap = ms.client_traffic(&tr).unwrap();
+    let s_ap = ms.server_traffic(&tr).unwrap();
+    assert(bytes_differ(c_ap.secret.as_slice(), s_ap.secret.as_slice()));
+    match c_ap.phase {
+        TrafficPhase.ApplicationPhase => {},
+        _ => panic("c_ap phase must be Application"),
+    }
+}
+
+fn handshake_secret_has_correct_hash_len() {
+    let hash = HashKind.Sha384;
+    let es = EarlySecret.derive_no_psk(hash).unwrap();
+    let d0 = es.to_handshake_input().unwrap();
+    let dhe: [Byte; 48] = [0x55_u8; 48];
+    let hs = HandshakeSecret.derive(hash, d0.as_slice(), &dhe).unwrap();
+    assert(hs.secret.len() == 48);
+}
+
+fn master_secret_derives_same_length_as_handshake() {
+    let hash = HashKind.Sha256;
+    let es = EarlySecret.derive_no_psk(hash).unwrap();
+    let d0 = es.to_handshake_input().unwrap();
+    let dhe: [Byte; 32] = [0x77_u8; 32];
+    let hs = HandshakeSecret.derive(hash, d0.as_slice(), &dhe).unwrap();
+    let d1 = hs.to_master_input().unwrap();
+    let ms = MasterSecret.derive(hash, d1.as_slice()).unwrap();
+    // Both are 32 bytes under SHA-256.
+    assert(hs.secret.len() == 32);
+    assert(ms.secret.len() == 32);
+    // They must also differ — the derive sequence can't be an identity.
+    assert(bytes_differ(hs.secret.as_slice(), ms.secret.as_slice()));
+}
+
+fn exporter_vs_resumption_master_differ() {
+    // Exporter-master and resumption-master both derive from MasterSecret
+    // against the post-server-Finished transcript, but use different
+    // labels ("exp master" vs "res master") so they bytewise differ.
+    let hash = HashKind.Sha256;
+    let es = EarlySecret.derive_no_psk(hash).unwrap();
+    let d0 = es.to_handshake_input().unwrap();
+    let dhe: [Byte; 32] = [0x88_u8; 32];
+    let hs = HandshakeSecret.derive(hash, d0.as_slice(), &dhe).unwrap();
+    let d1 = hs.to_master_input().unwrap();
+    let ms = MasterSecret.derive(hash, d1.as_slice()).unwrap();
+
+    let tr: [Byte; 32] = [0x99_u8; 32];
+    let exp = ms.exporter_master(&tr).unwrap();
+    let res = ms.resumption_master(&tr).unwrap();
+    assert(bytes_differ(exp.as_slice(), res.as_slice()));
+}
+
+@main
+public fn main() -> Int {
+    handshake_client_vs_server_traffic_differ();
+    application_client_vs_server_traffic_differ();
+    handshake_secret_has_correct_hash_len();
+    master_secret_derives_same_length_as_handshake();
+    exporter_vs_resumption_master_differ();
+    print("RFC 8446 §7.1 traffic directional separation verified");
+    0
+}
