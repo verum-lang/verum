@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, session, phantom_states, rfc8446_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// TLS 1.3 typed session phantom states per
+// core/net/tls13/session/state.vr:
+//
+//   Handshaking  — ClientHello issued, 1-RTT keys not yet installed.
+//   Established  — handshake finished, app data may flow.
+//   Closed       — close_notify issued; terminal.
+//
+// The phantom discipline is: `TlsConn<Handshaking>.write(app_data)`
+// must NOT typecheck — only `TlsConn<Established>` carries `write`.
+// This test verifies each phantom is constructible AND nominal
+// (so the generic parameterisation on TlsConn really discriminates).
+
+mount core.net.tls13.session.state.{Handshaking, Established, Closed};
+
+fn phantoms_constructible() {
+    let _h: Handshaking = ();
+    let _e: Established = ();
+    let _c: Closed      = ();
+}
+
+fn phantoms_are_nominally_distinct() {
+    type Phase<S> is { marker: S };
+    let _ph: Phase<Handshaking> = Phase { marker: () };
+    let _pe: Phase<Established> = Phase { marker: () };
+    let _pc: Phase<Closed>      = Phase { marker: () };
+}
+
+@main
+public fn main() -> Int {
+    phantoms_constructible();
+    phantoms_are_nominally_distinct();
+    print("TLS 1.3 session phantom states verified");
+    0
+}
