@@ -135,6 +135,60 @@ pub fn run(ctx: &LintCtx<'_>) -> Vec<LintIssue> {
     out
 }
 
+/// One file's parsed state, retained across the per-file phase so
+/// cross-file passes can inspect the whole corpus at once.
+pub struct CorpusFile {
+    pub path: std::path::PathBuf,
+    pub source: String,
+    pub module: Module,
+}
+
+/// Aggregated context for cross-file passes. Built after every
+/// file has been parsed once during the per-file phase.
+pub struct CorpusCtx<'a> {
+    pub files: &'a [CorpusFile],
+    pub config: Option<&'a LintConfig>,
+}
+
+/// Cross-file lint pass — operates on the assembled corpus rather
+/// than one file at a time. Used for rules that need to see the
+/// entire mount graph (circular-import), the full set of public
+/// symbols (unused-public), or every file path (orphan-module).
+pub trait CrossFilePass: Sync {
+    fn name(&self) -> &'static str;
+    fn description(&self) -> &'static str;
+    fn default_level(&self) -> LintLevel;
+    fn category(&self) -> LintCategory;
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue>;
+}
+
+/// Static registry of cross-file passes. Mirrors `passes()` but for
+/// the post-aggregation phase.
+pub fn cross_file_passes() -> &'static [&'static (dyn CrossFilePass + 'static)] {
+    static PASSES: &[&(dyn CrossFilePass + Sync + 'static)] = &[
+        &CircularImportPass,
+        &OrphanModulePass,
+        &UnusedPublicPass,
+    ];
+    unsafe {
+        std::mem::transmute::<
+            &[&(dyn CrossFilePass + Sync + 'static)],
+            &[&(dyn CrossFilePass + 'static)],
+        >(PASSES)
+    }
+}
+
+/// Run every cross-file pass against the corpus, merging the
+/// diagnostics. The caller applies severity filtering downstream
+/// using the same flow as per-file rules.
+pub fn run_cross_file(ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+    let mut out = Vec::new();
+    for pass in cross_file_passes() {
+        out.extend(pass.check_corpus(ctx));
+    }
+    out
+}
+
 // ===================================================================
 // Helpers — span → (line, column) resolution
 // ===================================================================
@@ -2363,6 +2417,397 @@ fn run_ast_match(
         v.visit_item(item);
     }
     v.issues
+}
+
+// ===================================================================
+// Cross-file passes
+// ===================================================================
+
+/// Extract every `mount foo.bar.baz;` path from a module, returned
+/// in dotted form so they're directly comparable to the corpus's
+/// canonical module-path strings. Walks `MountTree` recursively so
+/// nested forms (`mount foo.{a, b.{c, d}}`) all surface.
+fn collect_mount_paths(module: &Module) -> Vec<String> {
+    let mut out = Vec::new();
+    for item in &module.items {
+        if let ItemKind::Mount(m) = &item.kind {
+            walk_mount_tree(&m.tree, &[], &mut out);
+        }
+    }
+    out
+}
+
+fn walk_mount_tree(tree: &verum_ast::MountTree, prefix: &[String], out: &mut Vec<String>) {
+    use verum_ast::MountTreeKind;
+    match &tree.kind {
+        MountTreeKind::Path(p) | MountTreeKind::Glob(p) => {
+            let dotted = path_segments_to_string(p);
+            if dotted.is_empty() && prefix.is_empty() {
+                return;
+            }
+            let combined: String = if prefix.is_empty() {
+                dotted
+            } else if dotted.is_empty() {
+                prefix.join(".")
+            } else {
+                format!("{}.{}", prefix.join("."), dotted)
+            };
+            if !combined.is_empty() {
+                out.push(combined);
+            }
+        }
+        MountTreeKind::Nested { prefix: p, trees } => {
+            let mut new_prefix: Vec<String> = prefix.to_vec();
+            let p_dotted = path_segments_to_string(p);
+            if !p_dotted.is_empty() {
+                new_prefix.push(p_dotted);
+            }
+            for t in trees {
+                walk_mount_tree(t, &new_prefix, out);
+            }
+        }
+    }
+}
+
+/// Map a corpus file's path to its dotted module name so it can be
+/// matched against `mount` targets. e.g. `src/foo/bar.vr` → `foo.bar`.
+fn module_name_for_path(path: &Path) -> Option<String> {
+    let parts: Vec<&str> = path.iter().filter_map(|os| os.to_str()).collect();
+    let start = parts.iter().position(|p| *p == "src" || *p == "core")?;
+    let after_root = &parts[start + 1..];
+    if after_root.is_empty() {
+        return None;
+    }
+    let mut segs: Vec<String> = Vec::new();
+    for (i, p) in after_root.iter().enumerate() {
+        let stem = if i == after_root.len() - 1 {
+            p.strip_suffix(".vr").unwrap_or(p)
+        } else {
+            p
+        };
+        if stem.is_empty() {
+            continue;
+        }
+        segs.push(stem.to_string());
+    }
+    if segs.is_empty() {
+        None
+    } else {
+        Some(segs.join("."))
+    }
+}
+
+// ── circular-import ─────────────────────────────────────────────────
+//
+// Walk the mount graph; report any cycle. A cycle on a corpus is
+// almost always a layering mistake — the linter calls it out at
+// error severity so it cannot ship.
+
+struct CircularImportPass;
+
+impl CrossFilePass for CircularImportPass {
+    fn name(&self) -> &'static str { "circular-import" }
+    fn description(&self) -> &'static str {
+        "Module graph contains a cycle — module A mounts B, B (transitively) mounts A"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Error }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+        // Build graph: mod-name → list of mounted mod-names that
+        // also exist in our corpus. External mounts (e.g.
+        // `mount stdlib.collections`) aren't in the graph because
+        // we can't see across crate boundaries.
+        let mut name_of: std::collections::HashMap<String, &CorpusFile> =
+            std::collections::HashMap::new();
+        for f in ctx.files {
+            if let Some(n) = module_name_for_path(&f.path) {
+                name_of.insert(n, f);
+            }
+        }
+        let mut graph: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for (n, f) in &name_of {
+            let mounts: Vec<String> = collect_mount_paths(&f.module)
+                .into_iter()
+                .filter(|m| name_of.contains_key(m))
+                .collect();
+            graph.insert(n.clone(), mounts);
+        }
+
+        // DFS each node looking for a back-edge to an ancestor on
+        // the active path. Report each cycle once at the first
+        // node visited along it.
+        let mut issues = Vec::new();
+        let mut visited: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for start in graph.keys() {
+            if visited.contains(start) {
+                continue;
+            }
+            let mut path: Vec<String> = vec![start.clone()];
+            let mut path_set: std::collections::HashSet<String> =
+                [start.clone()].into_iter().collect();
+            cycle_dfs(start, &graph, &mut path, &mut path_set, &mut visited, &name_of, &mut issues);
+        }
+        issues
+    }
+}
+
+fn cycle_dfs(
+    node: &str,
+    graph: &std::collections::HashMap<String, Vec<String>>,
+    path: &mut Vec<String>,
+    path_set: &mut std::collections::HashSet<String>,
+    visited: &mut std::collections::HashSet<String>,
+    name_of: &std::collections::HashMap<String, &CorpusFile>,
+    issues: &mut Vec<LintIssue>,
+) {
+    if let Some(neighbours) = graph.get(node) {
+        for n in neighbours {
+            if path_set.contains(n) {
+                // Found a cycle starting from the position of `n`
+                // in `path`. Report once on the file that opens
+                // the cycle.
+                let start_idx = path.iter().position(|x| x == n).unwrap_or(0);
+                let cycle = &path[start_idx..];
+                if let Some(f) = name_of.get(n) {
+                    let mut chain = cycle.join(" → ");
+                    chain.push_str(" → ");
+                    chain.push_str(n);
+                    issues.push(LintIssue {
+                        rule: "circular-import",
+                        level: LintLevel::Error,
+                        file: f.path.clone(),
+                        line: 1,
+                        column: 1,
+                        message: format!("circular import: {chain}"),
+                        suggestion: Some(
+                            "break the cycle by extracting the shared types/fns into a leaf module"
+                                .into(),
+                        ),
+                        fixable: false,
+                    });
+                }
+                continue;
+            }
+            if visited.contains(n) {
+                continue;
+            }
+            path.push(n.clone());
+            path_set.insert(n.clone());
+            cycle_dfs(n, graph, path, path_set, visited, name_of, issues);
+            path.pop();
+            path_set.remove(n);
+        }
+    }
+    visited.insert(node.to_string());
+}
+
+// ── orphan-module ───────────────────────────────────────────────────
+//
+// Files no other corpus file mounts. `main.vr` and `lib.vr` are
+// project entry points and never count as orphaned.
+
+struct OrphanModulePass;
+
+impl CrossFilePass for OrphanModulePass {
+    fn name(&self) -> &'static str { "orphan-module" }
+    fn description(&self) -> &'static str {
+        "File under src/ that no other corpus file mounts (excluding main.vr / lib.vr entry points)"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+        // Collect every mount target across the corpus.
+        let mut mounted: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for f in ctx.files {
+            for m in collect_mount_paths(&f.module) {
+                mounted.insert(m);
+            }
+        }
+        let mut issues = Vec::new();
+        for f in ctx.files {
+            let stem = f
+                .path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            if matches!(stem, "main.vr" | "lib.vr" | "mod.vr") {
+                continue;
+            }
+            let name = match module_name_for_path(&f.path) {
+                Some(n) => n,
+                None => continue,
+            };
+            // The file is mounted if its full dotted name OR any
+            // suffix-shortened form (parent crate paths) is in
+            // the mounted set. `mount foo.bar` covers `foo.bar.vr`
+            // and `foo.bar/mod.vr` alike.
+            if mounted.contains(&name) {
+                continue;
+            }
+            // Also skip if any *prefix* of the file's name is a
+            // module the corpus mounts — e.g. mount foo covers
+            // foo.bar without naming it explicitly. This is a
+            // conservative bias — false negatives over false
+            // positives, since this rule is opt-in already.
+            let mut shadowed = false;
+            for m in &mounted {
+                if name.starts_with(m) {
+                    shadowed = true;
+                    break;
+                }
+            }
+            if shadowed {
+                continue;
+            }
+            issues.push(LintIssue {
+                rule: "orphan-module",
+                level: LintLevel::Hint,
+                file: f.path.clone(),
+                line: 1,
+                column: 1,
+                message: format!(
+                    "module `{name}` is not mounted by any other file in the corpus"
+                ),
+                suggestion: Some(
+                    "either delete the file or add a `mount` statement that brings it in"
+                        .into(),
+                ),
+                fixable: false,
+            });
+        }
+        issues
+    }
+}
+
+// ── unused-public ───────────────────────────────────────────────────
+//
+// Public symbol whose name appears in no other file's source. This
+// is a heuristic — qualified renames and reflective use are out of
+// scope — so it's off by default; opt in via [lint.severity] or
+// [lint.policy.unused_public_enabled].
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct UnusedPublicConfig {
+    enabled: bool,
+}
+
+struct UnusedPublicPass;
+
+impl CrossFilePass for UnusedPublicPass {
+    fn name(&self) -> &'static str { "unused-public" }
+    fn description(&self) -> &'static str {
+        "Public symbol whose name does not appear in any other file in the corpus (heuristic — opt-in via [lint.policy].unused_public_enabled)"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+        let cfg: UnusedPublicConfig = ctx
+            .config
+            .and_then(|c| c.rule_config::<UnusedPublicConfig>("unused-public"))
+            .unwrap_or_default();
+        if !cfg.enabled {
+            return Vec::new();
+        }
+
+        // Collect every public fn/type name + its defining file.
+        let mut publics: Vec<(String, &CorpusFile, u32)> = Vec::new();
+        for f in ctx.files {
+            for item in &f.module.items {
+                let (name, span_start, is_pub) = match &item.kind {
+                    ItemKind::Function(func) => {
+                        (func.name.as_str().to_string(), item.span.start, is_public_fn(func))
+                    }
+                    ItemKind::Type(t) => (
+                        t.name.as_str().to_string(),
+                        item.span.start,
+                        matches!(
+                            t.visibility,
+                            verum_ast::Visibility::Public
+                                | verum_ast::Visibility::PublicCrate
+                                | verum_ast::Visibility::PublicSuper
+                                | verum_ast::Visibility::PublicIn(_)
+                        ),
+                    ),
+                    _ => continue,
+                };
+                if !is_pub {
+                    continue;
+                }
+                publics.push((name, f, span_start));
+            }
+        }
+
+        let mut issues = Vec::new();
+        for (name, def_file, span_start) in &publics {
+            // Look for any other file whose source contains the
+            // bare identifier — `\b<name>\b`. We approximate the
+            // word boundary with byte-level alphanumeric checks.
+            let mut found_use = false;
+            for f in ctx.files {
+                if std::ptr::eq(f, *def_file) {
+                    continue;
+                }
+                if contains_identifier(&f.source, name) {
+                    found_use = true;
+                    break;
+                }
+            }
+            if !found_use {
+                let (line, col) = span_to_line_col(&def_file.source, *span_start);
+                issues.push(LintIssue {
+                    rule: "unused-public",
+                    level: LintLevel::Hint,
+                    file: def_file.path.clone(),
+                    line,
+                    column: col,
+                    message: format!(
+                        "public symbol `{name}` has no callers in this corpus"
+                    ),
+                    suggestion: Some(
+                        "drop `public`, or remove the symbol if truly unused (export status is part of the API contract)"
+                            .into(),
+                    ),
+                    fixable: false,
+                });
+            }
+        }
+        issues
+    }
+}
+
+/// Word-boundary substring check — true when `needle` appears in
+/// `haystack` as a standalone identifier (surrounded by non-
+/// alphanumeric / non-underscore characters or at a string edge).
+fn contains_identifier(haystack: &str, needle: &str) -> bool {
+    let nb = needle.as_bytes();
+    if nb.is_empty() {
+        return false;
+    }
+    let hb = haystack.as_bytes();
+    let n = nb.len();
+    let mut i = 0;
+    while i + n <= hb.len() {
+        if &hb[i..i + n] == nb {
+            let before_ok = i == 0 || !is_ident_byte(hb[i - 1]);
+            let after_ok = i + n == hb.len() || !is_ident_byte(hb[i + n]);
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 #[cfg(test)]
