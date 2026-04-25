@@ -47,7 +47,7 @@
 module core.net.weft.zero_rtt_gate;
 
 mount core.*;
-mount core.net.http.{Method, Response, StatusCode, Headers};
+mount core.net.http.{Method, Response, StatusCode, Headers, Version};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.service.{Layer};
 mount core.net.weft.error.{WeftError};
@@ -180,6 +180,7 @@ implement<H: Handler> Handler for ZeroRttGateHandler<H> {
         h.append(f"connection", f"close");
         Ok(Response {
             status:  StatusCode { code: self.layer.reject_status as Int },
+            version: Version.Http11,
             headers: h,
             body:    [],
         })

@@ -37,7 +37,7 @@ mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.encoding.json.{JsonValue, JsonError, parse as json_parse};
-mount core.net.http.{Response, StatusCode, Headers};
+mount core.net.http.{Response, StatusCode, Headers, Version};
 mount core.net.weft.handler.{WeftRequest, FromRequest};
 mount core.net.weft.error.{WeftError};
 
@@ -83,6 +83,7 @@ implement JsonExtractError {
         headers.append(f"content-type", f"text/plain; charset=utf-8");
         Response {
             status:  StatusCode { code: status_code },
+            version: Version.Http11,
             headers: headers,
             body:    message.into_bytes(),
         }
