@@ -79,7 +79,21 @@ public type RetryLayer is {
     backoff_base_ms: Int,
     backoff_max_ms: Int,
     budget: Maybe<RetryBudget>,
+    /// Non-idempotent retry policy. The default `Disabled` matches
+    /// pre-Phase-2 behaviour: only safe idempotent methods are
+    /// retried, body or no body. The `WhenIdempotencyKeyed` mode
+    /// permits POST/PATCH retries when the request carries an
+    /// RFC-9110-style `Idempotency-Key` header (or an explicitly
+    /// configured header name) — caller is responsible for
+    /// server-side dedupe.
+    non_idempotent_policy: NonIdempotentPolicy,
 };
+
+/// How RetryLayer treats methods that aren't safe to replay by
+/// default (POST, PATCH, ...). See RFC 9110 §9.2.2.
+public type NonIdempotentPolicy is
+      Disabled
+    | WhenIdempotencyKeyed { header_name: Text };
 
 implement RetryLayer {
     public fn new(max_attempts: Int) -> RetryLayer {
@@ -88,6 +102,7 @@ implement RetryLayer {
             backoff_base_ms: 50,
             backoff_max_ms: 5_000,
             budget: None,
+            non_idempotent_policy: NonIdempotentPolicy.Disabled,
         }
     }
 
@@ -97,6 +112,42 @@ implement RetryLayer {
 
     public fn with_budget(self, budget: RetryBudget) -> RetryLayer {
         RetryLayer { budget: Some(budget), ..self }
+    }
+
+    /// Allow non-idempotent retries when the request carries the
+    /// canonical `Idempotency-Key` header (RFC 9110 §9.2.2 + the
+    /// well-known IETF draft).
+    public fn with_idempotency_key_retry(self) -> RetryLayer {
+        RetryLayer {
+            non_idempotent_policy: NonIdempotentPolicy.WhenIdempotencyKeyed {
+                header_name: f"idempotency-key",
+            },
+            ..self
+        }
+    }
+
+    /// Same as `with_idempotency_key_retry` but with a custom header
+    /// name — used by gateways that brand their own idempotency
+    /// scheme (e.g. Stripe's `Idempotency-Key`, AWS `X-Amzn-Idempotency-Token`).
+    public fn with_idempotency_header(self, name: Text) -> RetryLayer {
+        RetryLayer {
+            non_idempotent_policy: NonIdempotentPolicy.WhenIdempotencyKeyed {
+                header_name: name,
+            },
+            ..self
+        }
+    }
+
+    /// True iff this RetryLayer would retry a request with the given
+    /// method + headers. Useful for callers deciding whether to clone
+    /// the request body up-front.
+    public fn would_retry(&self, req: &WeftRequest) -> Bool {
+        if req.method.is_idempotent() { return true; }
+        match &self.non_idempotent_policy {
+            NonIdempotentPolicy.Disabled => false,
+            NonIdempotentPolicy.WhenIdempotencyKeyed { header_name } =>
+                req.headers.get(header_name).is_some(),
+        }
     }
 
     fn backoff_ms_for(&self, attempt: Int) -> Int {
@@ -130,6 +181,13 @@ implement<H: Handler> Layer<H> for RetryLayer {
                     }),
                     None => None,
                 },
+                non_idempotent_policy: match &self.non_idempotent_policy {
+                    NonIdempotentPolicy.Disabled => NonIdempotentPolicy.Disabled,
+                    NonIdempotentPolicy.WhenIdempotencyKeyed { header_name } =>
+                        NonIdempotentPolicy.WhenIdempotencyKeyed {
+                            header_name: header_name.clone(),
+                        },
+                },
             },
         }
     }
@@ -142,10 +200,10 @@ public type RetryHandler<H> is {
 
 implement<H: Handler> Handler for RetryHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
-        // WeftRequest doesn't currently implement Clone (body can be
-        // huge); retries only work for methods that carry no body (safe
-        // + idempotent). See http.vr Method.is_idempotent().
-        if !req.method.is_idempotent() {
+        // Default — only safe/idempotent methods retry. The
+        // `with_idempotency_key_retry` builder opts non-idempotent
+        // methods in when they carry the configured header.
+        if !self.layer.would_retry(&req) {
             return self.inner.handle(req).await;
         }
 

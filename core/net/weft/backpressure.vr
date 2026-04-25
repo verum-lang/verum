@@ -244,6 +244,271 @@ implement<H: Handler> Handler for LoadShedHandler<H> {
 }
 
 // =============================================================================
+// CoDel — Controlled-Delay sojourn-time admission (§5.5)
+// =============================================================================
+//
+// CoDel (RFC 8289) tracks the *sojourn time* of work items in the
+// queue — the wait between submission and dispatch. When the minimum
+// sojourn observed over a sliding window exceeds `target_ms`, CoDel
+// drops admission until sojourn returns below target. Drop schedule
+// is sub-linear: drop at intervals `interval / sqrt(count)` so a
+// long-saturated queue sheds aggressively while a brief spike sheds
+// gently.
+//
+// Defaults match Linux fq_codel:
+//   target_ms   = 5    (5 ms — humans don't notice tail latency below)
+//   interval_ms = 100  (sliding window for the min-sojourn observation)
+
+public type CoDelLayer is {
+    target_ms:    Int,
+    interval_ms:  Int,
+    state:        Shared<CoDelState>,
+};
+
+type CoDelState is {
+    min_sojourn_ms:    AtomicInt,
+    interval_end_ms:   AtomicInt,
+    drop_count:        AtomicInt,
+    dropping:          Shared<core.sync.atomic.AtomicBool>,
+    next_drop_at_ms:   AtomicInt,
+};
+
+implement CoDelLayer {
+    public fn new() -> CoDelLayer {
+        CoDelLayer.with_target_interval(5, 100)
+    }
+
+    public fn with_target_interval(target_ms: Int, interval_ms: Int) -> CoDelLayer {
+        let now = monotonic_ms();
+        CoDelLayer {
+            target_ms:    target_ms,
+            interval_ms:  interval_ms,
+            state: Shared.new(CoDelState {
+                min_sojourn_ms:  AtomicInt.new(0x7FFFFFFF),
+                interval_end_ms: AtomicInt.new(now + interval_ms),
+                drop_count:      AtomicInt.new(0),
+                dropping:        Shared.new(core.sync.atomic.AtomicBool.new(false)),
+                next_drop_at_ms: AtomicInt.new(0),
+            }),
+        }
+    }
+
+    /// Per-request decision. Returns `true` when the request MUST
+    /// be dropped, `false` to proceed.
+    public fn should_drop(&self, sojourn_ms: Int) -> Bool {
+        let now = monotonic_ms();
+        let s = &*self.state;
+
+        // Update min-sojourn observed in the current window.
+        let cur = s.min_sojourn_ms.load(MemoryOrdering.Acquire);
+        if sojourn_ms < cur {
+            s.min_sojourn_ms.store(sojourn_ms, MemoryOrdering.Release);
+        }
+
+        // Close the window if expired.
+        let win_end = s.interval_end_ms.load(MemoryOrdering.Acquire);
+        if now >= win_end {
+            let min = s.min_sojourn_ms.swap(0x7FFFFFFF, MemoryOrdering.AcqRel);
+            s.interval_end_ms.store(now + self.interval_ms, MemoryOrdering.Release);
+            if min > self.target_ms {
+                s.dropping.store(true, MemoryOrdering.Release);
+            } else {
+                s.dropping.store(false, MemoryOrdering.Release);
+                s.drop_count.store(0, MemoryOrdering.Release);
+            }
+        }
+
+        if !s.dropping.load(MemoryOrdering.Acquire) {
+            return false;
+        }
+        let next = s.next_drop_at_ms.load(MemoryOrdering.Acquire);
+        if now < next {
+            return false;
+        }
+        let cnt = s.drop_count.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+        let gap = drop_interval_ms(self.interval_ms, cnt);
+        s.next_drop_at_ms.store(now + gap, MemoryOrdering.Release);
+        true
+    }
+}
+
+/// `interval / sqrt(count)` — the canonical CoDel control law.
+fn drop_interval_ms(interval_ms: Int, count: Int) -> Int {
+    if count <= 1 { return interval_ms; }
+    let mut s = count;
+    let mut i: Int = 0;
+    while i < 6 { s = (s + count / s) / 2; i = i + 1; }
+    let g = interval_ms / s;
+    if g < 1 { 1 } else { g }
+}
+
+public type CoDelHandler<H> is {
+    inner: H,
+    layer: CoDelLayer,
+};
+
+implement<H: Handler> Layer<H> for CoDelLayer {
+    type Wrapped = CoDelHandler<H>;
+    fn wrap(&self, inner: H) -> CoDelHandler<H> {
+        CoDelHandler {
+            inner: inner,
+            layer: CoDelLayer {
+                target_ms:   self.target_ms,
+                interval_ms: self.interval_ms,
+                state:       self.state.clone(),
+            },
+        }
+    }
+}
+
+implement<H: Handler> Handler for CoDelHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        let sojourn_ms = match req.headers.get(&"x-weft-submitted-at") {
+            Some(t) => {
+                let now = monotonic_ms();
+                match t.parse_int() {
+                    Ok(submitted) => {
+                        let s = now - submitted;
+                        if s < 0 { 0 } else { s }
+                    },
+                    Err(_) => 0,
+                }
+            },
+            None => 0,
+        };
+        if self.layer.should_drop(sojourn_ms) {
+            return Err(WeftError.Overloaded);
+        }
+        self.inner.handle(req).await
+    }
+}
+
+// =============================================================================
+// WFQ — Weighted Fair Queueing across tenants (§5.5)
+// =============================================================================
+//
+// Deficit-round-robin (DRR) variant — O(1) admission decision per
+// request. Each tenant has a `deficit_us` counter; on each admission
+// every tenant accrues `quantum_us * weight` micro-credits. Admission
+// is allowed when `deficit_us >= cost_us`.
+//
+// Tenant identity is read from the `x-weft-tenant` header. Requests
+// without a tenant land in the `_default` class (caller registers it
+// as needed). `x-weft-cost-us` overrides the default request cost.
+
+public type WfqLayer is {
+    quantum_us:  Int,
+    state:       Shared<WfqState>,
+};
+
+type WfqState is {
+    tenants: Shared<core.collections.map.Map<Text, TenantSlot>>,
+};
+
+type TenantSlot is {
+    weight:     Int,
+    deficit_us: Shared<AtomicInt>,
+};
+
+implement WfqLayer {
+    public fn new() -> WfqLayer {
+        WfqLayer.with_quantum_us(1000)
+    }
+
+    public fn with_quantum_us(quantum_us: Int) -> WfqLayer {
+        WfqLayer {
+            quantum_us: quantum_us,
+            state: Shared.new(WfqState {
+                tenants: Shared.new(core.collections.map.Map.new()),
+            }),
+        }
+    }
+
+    /// Register / re-register a tenant with its weight. Existing
+    /// deficit is preserved on a re-register so config changes don't
+    /// reset the fairness ledger.
+    public fn register_tenant(&self, name: Text, weight: Int) {
+        let s = &*self.state;
+        let mut tenants = s.tenants.lock();
+        match tenants.get(&name) {
+            Some(slot) => {
+                let preserved = slot.deficit_us.clone();
+                tenants.insert(name, TenantSlot {
+                    weight:     weight,
+                    deficit_us: preserved,
+                });
+            },
+            None => {
+                tenants.insert(name, TenantSlot {
+                    weight:     weight,
+                    deficit_us: Shared.new(AtomicInt.new(0)),
+                });
+            },
+        }
+    }
+
+    /// Per-request admission gate.
+    public fn admit(&self, tenant: &Text, cost_us: Int) -> Bool {
+        let s = &*self.state;
+        let tenants = s.tenants.lock();
+        let slot = match tenants.get(tenant) {
+            Some(t) => t,
+            None => match tenants.get(&"_default") {
+                Some(d) => d,
+                None    => return true,    // no policy → allow
+            }
+        };
+        let credits = self.quantum_us * slot.weight;
+        let new_deficit = slot.deficit_us.fetch_add(credits, MemoryOrdering.AcqRel)
+            + credits;
+        if new_deficit >= cost_us {
+            slot.deficit_us.fetch_sub(cost_us, MemoryOrdering.AcqRel);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+public type WfqHandler<H> is {
+    inner: H,
+    layer: WfqLayer,
+};
+
+implement<H: Handler> Layer<H> for WfqLayer {
+    type Wrapped = WfqHandler<H>;
+    fn wrap(&self, inner: H) -> WfqHandler<H> {
+        WfqHandler {
+            inner: inner,
+            layer: WfqLayer {
+                quantum_us: self.quantum_us,
+                state:      self.state.clone(),
+            },
+        }
+    }
+}
+
+implement<H: Handler> Handler for WfqHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        let tenant = match req.headers.get(&"x-weft-tenant") {
+            Some(t) => t.clone(),
+            None    => Text.from_str("_default"),
+        };
+        let cost_us = match req.headers.get(&"x-weft-cost-us") {
+            Some(t) => match t.parse_int() {
+                Ok(n)  => n,
+                Err(_) => self.layer.quantum_us,
+            },
+            None => self.layer.quantum_us,
+        };
+        if !self.layer.admit(&tenant, cost_us) {
+            return Err(WeftError.Overloaded);
+        }
+        self.inner.handle(req).await
+    }
+}
+
+// =============================================================================
 // Monotonic clock helper
 // =============================================================================
 

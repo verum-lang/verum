@@ -1,0 +1,108 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: weft, proxy, retry, idempotency_key, rfc9110, surface
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/proxy/retry.vr` — surface check for the
+// `with_idempotency_key_retry` / `with_idempotency_header` builders
+// that close the Phase 2 follow-up "Non-idempotent retry (requires
+// body-clone on the WeftRequest)" from net-framework.md §11.
+//
+// Validates that:
+//
+//   1. Default RetryLayer.new() rejects non-idempotent methods.
+//   2. `with_idempotency_key_retry()` accepts POST when the
+//      `idempotency-key` header is present.
+//   3. Custom header name via `with_idempotency_header()` works
+//      (Stripe uses `Idempotency-Key`, AWS uses
+//      `X-Amzn-Idempotency-Token`).
+//   4. Idempotent methods (GET/HEAD/OPTIONS) always retry without
+//      the keyed override.
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.net.http.{Headers, Method};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.proxy.retry.{RetryLayer, NonIdempotentPolicy};
+
+fn make_request(method: Method, idempotency_header: Maybe<(Text, Text)>) -> WeftRequest {
+    let mut h = Headers.new();
+    match idempotency_header {
+        Some(pair) => {
+            let (name, value) = pair;
+            h.append(name, value);
+        },
+        None => {},
+    }
+    WeftRequest {
+        method:      method,
+        path:        f"/api/v1/charge",
+        raw_query:   None,
+        headers:     h,
+        body:        [0xAA_u8, 0xBB_u8],
+        path_params: Map.new(),
+        peer_addr:   None,
+    }
+}
+
+fn default_rejects_non_idempotent() {
+    let layer = RetryLayer.new(3);
+    let post = make_request(Method.Post, None);
+    assert(false == layer.would_retry(&post));
+}
+
+fn default_allows_idempotent() {
+    let layer = RetryLayer.new(3);
+    let get  = make_request(Method.Get,  None);
+    let head = make_request(Method.Head, None);
+    let opts = make_request(Method.Options, None);
+    assert(layer.would_retry(&get));
+    assert(layer.would_retry(&head));
+    assert(layer.would_retry(&opts));
+}
+
+fn idempotency_keyed_post_passes() {
+    let layer = RetryLayer.new(3).with_idempotency_key_retry();
+    let post_with = make_request(Method.Post,
+        Some((f"idempotency-key", f"550e8400-e29b-41d4-a716-446655440000")));
+    assert(layer.would_retry(&post_with));
+}
+
+fn idempotency_keyed_post_without_header_rejected() {
+    let layer = RetryLayer.new(3).with_idempotency_key_retry();
+    let post_without = make_request(Method.Post, None);
+    assert(false == layer.would_retry(&post_without));
+}
+
+fn custom_idempotency_header_aws() {
+    let aws = f"x-amzn-idempotency-token";
+    let layer = RetryLayer.new(3).with_idempotency_header(aws);
+    let post = make_request(Method.Post,
+        Some((f"x-amzn-idempotency-token", f"abc-123")));
+    assert(layer.would_retry(&post));
+    // The default header doesn't cover this layer.
+    let post_default = make_request(Method.Post,
+        Some((f"idempotency-key", f"abc-123")));
+    assert(false == layer.would_retry(&post_default));
+}
+
+fn idempotency_keyed_does_not_break_idempotent() {
+    let layer = RetryLayer.new(3).with_idempotency_key_retry();
+    let get = make_request(Method.Get, None);
+    assert(layer.would_retry(&get));
+}
+
+@main
+public fn main() -> Int {
+    default_rejects_non_idempotent();
+    default_allows_idempotent();
+    idempotency_keyed_post_passes();
+    idempotency_keyed_post_without_header_rejected();
+    custom_idempotency_header_aws();
+    idempotency_keyed_does_not_break_idempotent();
+    print("RetryLayer idempotency-key gate verified");
+    0
+}

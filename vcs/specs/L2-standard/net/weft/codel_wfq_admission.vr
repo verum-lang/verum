@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: weft, backpressure, codel, wfq, admission, surface
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/weft/backpressure.vr` — surface check for Phase 2 §5.5
+// follow-up admission controllers:
+//
+//   * CoDelLayer — RFC 8289 controlled-delay sojourn-time admission.
+//   * WfqLayer   — deficit-round-robin tenant-aware fair queueing.
+//
+// Validates constructors + per-request decision functions. Full
+// dropping/admission cycles are exercised at runtime in the
+// integration suite; this typecheck-pass smoke locks down the
+// public shape.
+
+mount core.*;
+mount core.net.weft.backpressure.{CoDelLayer, WfqLayer};
+
+fn codel_default_construct() {
+    let _layer = CoDelLayer.new();
+}
+
+fn codel_custom_target_interval() {
+    // 10 ms target, 200 ms window — looser tail latency budget.
+    let _layer = CoDelLayer.with_target_interval(10, 200);
+}
+
+fn codel_zero_sojourn_never_drops() {
+    let layer = CoDelLayer.new();
+    // Sojourn 0 < target 5 — first arrival always passes.
+    assert(false == layer.should_drop(0));
+}
+
+fn codel_below_target_does_not_drop() {
+    let layer = CoDelLayer.with_target_interval(50, 1000);
+    assert(false == layer.should_drop(10));
+    assert(false == layer.should_drop(20));
+    assert(false == layer.should_drop(30));
+}
+
+fn wfq_default_construct() {
+    let _layer = WfqLayer.new();
+}
+
+fn wfq_custom_quantum() {
+    let _layer = WfqLayer.with_quantum_us(2_000);
+}
+
+fn wfq_register_and_admit_known_tenant() {
+    let layer = WfqLayer.with_quantum_us(1_000);
+    layer.register_tenant(f"acme", 2);
+    layer.register_tenant(f"_default", 1);
+    // Tenant exists + weight 2 → first admission accrues 2_000 µs of
+    // credits, request cost 1_000 µs → deficit 1_000 → admit.
+    let acme = f"acme";
+    assert(layer.admit(&acme, 1_000));
+}
+
+fn wfq_unknown_tenant_falls_back_to_default() {
+    let layer = WfqLayer.with_quantum_us(1_000);
+    layer.register_tenant(f"_default", 1);
+    let stranger = f"never-registered";
+    // Default class: weight 1, quantum 1000, cost 1000 → admit on
+    // first arrival; second arrival has deficit 0 again — depends on
+    // accrual timing. Just verify the call shape compiles.
+    let _ = layer.admit(&stranger, 1_000);
+}
+
+fn wfq_no_policy_admits_freely() {
+    // Empty layer (no tenants registered, no _default) → always admit.
+    let layer = WfqLayer.new();
+    let any = f"anyone";
+    assert(layer.admit(&any, 1_000));
+}
+
+fn wfq_re_register_preserves_weight_change() {
+    let layer = WfqLayer.with_quantum_us(1_000);
+    layer.register_tenant(f"acme", 1);
+    layer.register_tenant(f"acme", 5);    // weight bump
+    let acme = f"acme";
+    // Higher weight → larger credits per admit → more likely to pass
+    // a high-cost request. Just a smoke-call here.
+    let _ = layer.admit(&acme, 4_000);
+}
+
+@main
+public fn main() -> Int {
+    codel_default_construct();
+    codel_custom_target_interval();
+    codel_zero_sojourn_never_drops();
+    codel_below_target_does_not_drop();
+    wfq_default_construct();
+    wfq_custom_quantum();
+    wfq_register_and_admit_known_tenant();
+    wfq_unknown_tenant_falls_back_to_default();
+    wfq_no_policy_admits_freely();
+    wfq_re_register_preserves_weight_change();
+    print("CoDel + WFQ admission control surface verified");
+    0
+}
