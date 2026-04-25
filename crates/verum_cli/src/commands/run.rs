@@ -189,7 +189,7 @@ fn run_vbc_interpreted(
 
     let result = interpreter
         .execute_function(main_id)
-        .map_err(|e| CliError::Custom(format!("Runtime error: {:?}", e)))?;
+        .map_err(|e| CliError::Custom(format!("Runtime error: {}", e)))?;
 
     let exec_time = exec_start.elapsed();
 

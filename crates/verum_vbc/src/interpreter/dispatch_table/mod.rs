@@ -1308,6 +1308,22 @@ pub fn dispatch_loop_table_with_entry_depth(
                         pc,
                     }
                 }
+                // Enrich bare `NullPointer` with the PC and opcode so the
+                // developer gets enough context to map the error back to
+                // a specific instruction. Without this every null deref
+                // surfaces as a single line "Null pointer dereference"
+                // with no way to locate the failing site.
+                InterpreterError::NullPointer => {
+                    let site = state
+                        .call_stack
+                        .current_function_name(&state.module)
+                        .unwrap_or_else(|| "<unknown>".to_string());
+                    InterpreterError::NullPointerAt {
+                        op: format!("opcode 0x{:02x}", opcode_byte),
+                        site,
+                        pc: pc as u32,
+                    }
+                }
                 other => other,
             }
         })?;

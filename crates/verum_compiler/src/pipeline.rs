@@ -10444,7 +10444,7 @@ impl<'s> CompilationPipeline<'s> {
                 Ok(())
             }
             Err(e) => {
-                Err(anyhow::anyhow!("VBC execution error: {:?}", e))
+                Err(anyhow::anyhow!("VBC execution error: {}", e))
             }
         }
     }
@@ -10492,7 +10492,7 @@ impl<'s> CompilationPipeline<'s> {
                     info!("VBC execution completed successfully: {:?}", value);
                     Ok(())
                 }
-                Err(e) => Err(anyhow::anyhow!("VBC execution error: {:?}", e)),
+                Err(e) => Err(anyhow::anyhow!("VBC execution error: {}", e)),
             };
         }
 
@@ -10509,7 +10509,7 @@ impl<'s> CompilationPipeline<'s> {
                 info!("VBC execution completed successfully: {:?}", value);
                 Ok(())
             }
-            Err(e) => Err(anyhow::anyhow!("VBC execution error: {:?}", e)),
+            Err(e) => Err(anyhow::anyhow!("VBC execution error: {}", e)),
         }
     }
 

@@ -156,6 +156,16 @@ impl CallStack {
         self.frames.last()
     }
 
+    /// Resolve the current frame's function name from the module's
+    /// string table. Used by error-enrichment paths that turn bare
+    /// `NullPointer` into `NullPointerAt { site, ... }` so developers
+    /// can map a runtime fault back to the source function.
+    pub fn current_function_name(&self, module: &crate::module::VbcModule) -> Option<String> {
+        let frame = self.frames.last()?;
+        let func = module.get_function(frame.function)?;
+        module.get_string(func.name).map(|s| s.to_string())
+    }
+
     /// Returns a mutable reference to the current frame.
     pub fn current_mut(&mut self) -> Option<&mut CallFrame> {
         self.frames.last_mut()

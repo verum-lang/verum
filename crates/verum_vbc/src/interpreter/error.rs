@@ -84,7 +84,27 @@ pub enum InterpreterError {
     },
 
     /// Null pointer dereference.
+    ///
+    /// `context` carries optional diagnostic data: which opcode triggered
+    /// the deref, which register / field, current PC, and a hint about
+    /// the originating operation. Bare `NullPointer` without context is
+    /// preserved as a wire-compat default for sites that haven't been
+    /// migrated; new sites should construct via
+    /// `InterpreterError::null_pointer(...)` so developers get a usable
+    /// trace instead of a single line of "Null pointer dereference".
     NullPointer,
+    /// Null pointer dereference with diagnostic context.
+    NullPointerAt {
+        /// One-line description of the operation that hit null
+        /// (e.g. "GetVariantData on variant register"
+        /// or "field access on Heap<T>").
+        op: String,
+        /// Source-level hint: function name, method name, or
+        /// "<unknown>" if the dispatcher couldn't resolve.
+        site: String,
+        /// PC at the failing instruction (bytecode offset).
+        pc: u32,
+    },
 
     /// Invalid field index.
     InvalidFieldIndex {
@@ -324,6 +344,10 @@ impl fmt::Display for InterpreterError {
                 write!(f, "Integer overflow in {}", operation)
             }
             Self::NullPointer => write!(f, "Null pointer dereference"),
+            Self::NullPointerAt { op, site, pc } => write!(
+                f,
+                "Null pointer dereference: op={op} at {site} (pc={pc})"
+            ),
             Self::InvalidFieldIndex {
                 type_id,
                 field,
@@ -451,6 +475,29 @@ impl fmt::Display for InterpreterError {
 }
 
 impl std::error::Error for InterpreterError {}
+
+impl InterpreterError {
+    /// Construct a null-pointer error with diagnostic context. Use this
+    /// at any site where a null deref is detected instead of bare
+    /// `InterpreterError::NullPointer`. The extra `op` / `site` /
+    /// `pc` fields turn the error from a one-line "Null pointer
+    /// dereference" into something a developer can map back to the
+    /// failing opcode + the function it was running in.
+    ///
+    /// Example:
+    ///   return Err(InterpreterError::null_pointer(
+    ///       "GetVariantData",
+    ///       state.current_function_name(),
+    ///       state.pc(),
+    ///   ));
+    pub fn null_pointer(op: impl Into<String>, site: impl Into<String>, pc: u32) -> Self {
+        Self::NullPointerAt {
+            op: op.into(),
+            site: site.into(),
+            pc,
+        }
+    }
+}
 
 // Note: Display for CbgrViolationKind is implemented in verum_common
 
