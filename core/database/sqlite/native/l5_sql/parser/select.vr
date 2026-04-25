@@ -39,7 +39,7 @@ mount core.database.sqlite.native.l5_sql.lexer.{
 };
 mount core.database.sqlite.native.l5_sql.ast.{
     SqlStatement, Expr, SelectStmt, SelectKind, SimpleSelect,
-    ResultColumnItem, FromItem, JoinClause, JoinKind,
+    ResultColumnItem, FromItem, JoinClause, SqlJoinKind,
     OrderTerm, OrderDirection, LimitClause,
     TableRef, CompoundOp,
 };
@@ -351,7 +351,7 @@ fn parse_from_item(ts: &mut SqlTokenStream) -> Result<FromItem, ParseError> {
     }))
 }
 
-fn try_parse_join_kind(ts: &mut SqlTokenStream) -> Result<Maybe<JoinKind>, ParseError> {
+fn try_parse_join_kind(ts: &mut SqlTokenStream) -> Result<Maybe<SqlJoinKind>, ParseError> {
     let natural = ts.accept_keyword(KwNatural);
     let _ = natural;
 

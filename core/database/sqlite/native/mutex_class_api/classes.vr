@@ -101,13 +101,13 @@ public fn class_name(c: &Class) -> Text {
 }
 
 // Three high-level kinds.
-public type Kind is
+public type MutexClassKind is
     | KAlloc          // FAST or RECURSIVE — sqlite3_mutex_alloc may free
     | KStatic         // pre-allocated; sqlite3_mutex_free is a no-op
     | KUnknown
     ;
 
-public fn kind_for(c: &Class) -> Kind {
+public fn kind_for(c: &Class) -> MutexClassKind {
     match c {
         MFast       => KAlloc,
         MRecursive  => KAlloc,
@@ -116,7 +116,7 @@ public fn kind_for(c: &Class) -> Kind {
     }
 }
 
-public fn kind_name(k: &Kind) -> Text {
+public fn kind_name(k: &MutexClassKind) -> Text {
     match k {
         KAlloc   => "alloc".clone(),
         KStatic  => "static".clone(),

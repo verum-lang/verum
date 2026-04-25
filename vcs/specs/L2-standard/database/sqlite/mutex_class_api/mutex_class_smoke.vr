@@ -17,7 +17,7 @@ mount core.database.sqlite.native.mutex_class_api.classes.{
     MStaticApp1, MStaticApp2, MStaticApp3,
     MStaticVfs1, MStaticVfs2, MStaticVfs3, MUnknown,
     from_code, to_code, class_name,
-    Kind, KAlloc, KStatic, KUnknown,
+    MutexClassKind, KAlloc, KStatic, KUnknown,
     kind_for, kind_name,
     is_recursive, free_is_noop,
 };

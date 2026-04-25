@@ -87,10 +87,10 @@ implement AuthorizerHook for AllowAll {
 }
 
 /// Read-only mode — denies every DDL and DML, allows reads.
-public type ReadOnly is { unit: Bool };
-public fn read_only() -> ReadOnly { ReadOnly { unit: true } }
+public type AuthReadOnly is { unit: Bool };
+public fn read_only() -> AuthReadOnly { AuthReadOnly { unit: true } }
 
-implement AuthorizerHook for ReadOnly {
+implement AuthorizerHook for AuthReadOnly {
     fn authorize(&mut self, action: &AuthAction) -> AuthDecision {
         // Direct match keeps the protocol body free of cross-module
         // imports; classification helpers live in `auth.action`.

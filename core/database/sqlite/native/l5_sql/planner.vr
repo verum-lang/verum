@@ -38,7 +38,7 @@ mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
     Statement, Expr, Literal, BinOp,
     SelectStmt, SelectKind, SimpleSelect, CompoundOp,
-    ResultColumnItem, FromItem, JoinKind, JoinClause,
+    ResultColumnItem, FromItem, SqlJoinKind, JoinClause,
     OrderTerm, LimitClause, OrderDirection,
     InsertStmt, InsertSource, OnConflict,
     UpdateStmt, UpdateAssignment,

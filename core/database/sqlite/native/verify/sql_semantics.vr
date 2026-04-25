@@ -33,10 +33,10 @@ public fn filter_is_monotone(input_size: Int, filtered_size: Int) -> Bool {
 // S2 — join cardinality bounds
 // -----------------------------------------------------------------------------
 
-public type JoinKind is JkInner | JkLeftOuter | JkRightOuter | JkFull | JkCross;
+public type VerifyJoinKind is JkInner | JkLeftOuter | JkRightOuter | JkFull | JkCross;
 
 public fn join_cardinality_legal(
-    kind: &JoinKind,
+    kind: &VerifyJoinKind,
     left_size: Int64,
     right_size: Int64,
     result_size: Int64,

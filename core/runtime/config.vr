@@ -60,7 +60,7 @@ mount core.sync.atomic.{AtomicU32, MemoryOrdering};
 
 /// Runtime initialization error
 @repr(UInt8)
-public type InitError is
+public type RuntimeInitError is
     /// Thread-local storage initialization failed
     | TlsInitFailed
     /// Allocator initialization failed
@@ -74,7 +74,7 @@ public type InitError is
     /// Already initialized
     | AlreadyInitialized;
 
-implement InitError {
+implement RuntimeInitError {
     public fn message(&self) -> Text {
         match self {
             TlsInitFailed => "Failed to initialize thread-local storage",
@@ -87,20 +87,20 @@ implement InitError {
     }
 }
 
-implement Debug for InitError {
+implement Debug for RuntimeInitError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            TlsInitFailed => f.write_str("InitError.TlsInitFailed"),
-            AllocatorInitFailed(_) => f.write_str("InitError.AllocatorInitFailed(..)"),
-            IoDriverInitFailed(msg) => f.write_str(f"InitError.IoDriverInitFailed({msg})"),
-            ExecutorInitFailed(msg) => f.write_str(f"InitError.ExecutorInitFailed({msg})"),
-            PlatformNotSupported => f.write_str("InitError.PlatformNotSupported"),
-            AlreadyInitialized => f.write_str("InitError.AlreadyInitialized"),
+            TlsInitFailed => f.write_str("RuntimeInitError.TlsInitFailed"),
+            AllocatorInitFailed(_) => f.write_str("RuntimeInitError.AllocatorInitFailed(..)"),
+            IoDriverInitFailed(msg) => f.write_str(f"RuntimeInitError.IoDriverInitFailed({msg})"),
+            ExecutorInitFailed(msg) => f.write_str(f"RuntimeInitError.ExecutorInitFailed({msg})"),
+            PlatformNotSupported => f.write_str("RuntimeInitError.PlatformNotSupported"),
+            AlreadyInitialized => f.write_str("RuntimeInitError.AlreadyInitialized"),
         }
     }
 }
 
-implement Display for InitError {
+implement Display for RuntimeInitError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.message())
     }
@@ -147,8 +147,8 @@ public type RuntimeConfig is protocol {
     /// 4. Executor initialization
     ///
     /// # Errors
-    /// Returns InitError if any component fails to initialize.
-    fn init() -> Result<Self, InitError>;
+    /// Returns RuntimeInitError if any component fails to initialize.
+    fn init() -> Result<Self, RuntimeInitError>;
 
     /// Shutdown the runtime and release all resources
     ///
@@ -365,23 +365,23 @@ implement RuntimeConfig for FullRuntime {
     type Executor = WorkStealingExecutor;
     type IoDriver = PlatformIOEngine;
 
-    fn init() -> Result<Self, InitError> {
+    fn init() -> Result<Self, RuntimeInitError> {
         // 1. Initialize TLS
         init_runtime()
-            .map_err(|_| InitError.TlsInitFailed)?;
+            .map_err(|_| RuntimeInitError.TlsInitFailed)?;
 
         // 2. Initialize allocator
         let allocator = TieredAllocator.init()
-            .map_err(|e| InitError.AllocatorInitFailed(e))?;
+            .map_err(|e| RuntimeInitError.AllocatorInitFailed(e))?;
 
         // 3. Initialize I/O driver
         let io_driver = PlatformIOEngine.init()
-            .map_err(|e| InitError.IoDriverInitFailed(e))?;
+            .map_err(|e| RuntimeInitError.IoDriverInitFailed(e))?;
 
         // 4. Initialize executor with worker count based on CPU cores
         let worker_count = num_cpus();
         let executor = WorkStealingExecutor.init(worker_count, &io_driver)
-            .map_err(|e| InitError.ExecutorInitFailed(e))?;
+            .map_err(|e| RuntimeInitError.ExecutorInitFailed(e))?;
 
         Ok(Self {
             allocator,
@@ -448,22 +448,22 @@ implement RuntimeConfig for SingleThreadRuntime {
     type Executor = SingleThreadExecutor;
     type IoDriver = PollDriver;
 
-    fn init() -> Result<Self, InitError> {
+    fn init() -> Result<Self, RuntimeInitError> {
         // 1. Initialize TLS (still needed for context system)
         init_runtime()
-            .map_err(|_| InitError.TlsInitFailed)?;
+            .map_err(|_| RuntimeInitError.TlsInitFailed)?;
 
         // 2. Initialize simple allocator
         let allocator = SimpleAllocator.init()
-            .map_err(|e| InitError.AllocatorInitFailed(e))?;
+            .map_err(|e| RuntimeInitError.AllocatorInitFailed(e))?;
 
         // 3. Initialize poll-based I/O driver
         let io_driver = PollDriver.init()
-            .map_err(|e| InitError.IoDriverInitFailed(e))?;
+            .map_err(|e| RuntimeInitError.IoDriverInitFailed(e))?;
 
         // 4. Initialize single-threaded executor
         let executor = SingleThreadExecutor.init(&io_driver)
-            .map_err(|e| InitError.ExecutorInitFailed(e))?;
+            .map_err(|e| RuntimeInitError.ExecutorInitFailed(e))?;
 
         Ok(Self {
             allocator,
@@ -523,18 +523,18 @@ implement RuntimeConfig for SyncRuntime {
     type Executor = NoopExecutor;
     type IoDriver = NoopDriver;
 
-    fn init() -> Result<Self, InitError> {
+    fn init() -> Result<Self, RuntimeInitError> {
         // 1. Initialize TLS
         init_runtime()
-            .map_err(|_| InitError.TlsInitFailed)?;
+            .map_err(|_| RuntimeInitError.TlsInitFailed)?;
 
         // 2. Initialize allocator
         let allocator = TieredAllocator.init()
-            .map_err(|e| InitError.AllocatorInitFailed(e))?;
+            .map_err(|e| RuntimeInitError.AllocatorInitFailed(e))?;
 
         // 3. Initialize thread pool
         let thread_pool = ThreadPool.init(num_cpus())
-            .map_err(|e| InitError.ExecutorInitFailed(f"ThreadPool: {e}"))?;
+            .map_err(|e| RuntimeInitError.ExecutorInitFailed(f"ThreadPool: {e}"))?;
 
         Ok(Self {
             allocator,
@@ -590,13 +590,13 @@ implement RuntimeConfig for EmbeddedRuntime {
     type Executor = NoopExecutor;
     type IoDriver = NoopDriver;
 
-    fn init() -> Result<Self, InitError> {
+    fn init() -> Result<Self, RuntimeInitError> {
         // No TLS in embedded (single-threaded)
         // Just initialize stack allocator
 
         // Stack buffer is compile-time allocated
         let allocator = StackAllocator.init()
-            .map_err(|e| InitError.AllocatorInitFailed(e))?;
+            .map_err(|e| RuntimeInitError.AllocatorInitFailed(e))?;
 
         Ok(Self { allocator })
     }

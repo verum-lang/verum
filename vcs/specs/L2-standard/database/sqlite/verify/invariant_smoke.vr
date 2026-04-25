@@ -33,7 +33,7 @@ mount core.database.sqlite.native.verify.vdbe_register_consistency.{
     UseSite, use_site_consistent, all_uses_consistent,
 };
 mount core.database.sqlite.native.verify.sql_semantics.{
-    JoinKind, JkInner, JkLeftOuter, JkCross,
+    VerifyJoinKind, JkInner, JkLeftOuter, JkCross,
     filter_is_monotone, join_cardinality_legal,
     ColumnType, CtInt, CtReal, CtText, CtAny, CtNull,
     RowShape, types_compatible, row_matches_schema,

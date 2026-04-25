@@ -87,11 +87,11 @@ public type ResultColumnItem is
     | RcTableStar(TableRef)                        // `SELECT t.*`
     | RcExpr(Expr, Text);                          // `expr AS alias` (alias "" if absent)
 
-public type JoinKind is
+public type SqlJoinKind is
       JInner | JLeftOuter | JRightOuter | JFullOuter | JCross;
 
 public type JoinClause is {
-    kind: JoinKind,
+    kind: SqlJoinKind,
     right: Heap<FromItem>,
     on: Maybe<Expr>,
     using_cols: List<Text>,

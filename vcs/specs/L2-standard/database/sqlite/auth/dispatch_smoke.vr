@@ -9,7 +9,7 @@
 //   * decision combinators (Deny > Ignore > Allow)
 //   * empty-list default: Allow when open_by_default
 //   * built-in AllowAll permits everything
-//   * built-in ReadOnly denies DML/DDL but allows SELECT/PRAGMA
+//   * built-in AuthReadOnly denies DML/DDL but allows SELECT/PRAGMA
 //   * multi-hook composition picks the most restrictive
 //   * action display + classification helpers
 
@@ -29,7 +29,7 @@ mount core.database.sqlite.native.auth.action.{
 mount core.database.sqlite.native.auth.dispatch.{
     Authorizer, authorizer_new,
     AllowAll, allow_all,
-    ReadOnly, read_only,
+    AuthReadOnly, read_only,
 };
 
 // -----------------------------------------------------------------------------
@@ -117,18 +117,18 @@ fn test_allow_all_subscribed() {
 fn test_read_only_denies_dml() {
     let mut a = authorizer_new();
     a.subscribe(Heap.new(read_only()));
-    match a.authorize(&AaInsert("t".clone())) { AdDeny => {}, _ => panic("ReadOnly must deny INSERT") };
-    match a.authorize(&AaUpdate("t".clone())) { AdDeny => {}, _ => panic("ReadOnly must deny UPDATE") };
-    match a.authorize(&AaDelete("t".clone())) { AdDeny => {}, _ => panic("ReadOnly must deny DELETE") };
-    match a.authorize(&AaCreateTable("t".clone())) { AdDeny => {}, _ => panic("ReadOnly must deny DDL") };
+    match a.authorize(&AaInsert("t".clone())) { AdDeny => {}, _ => panic("AuthReadOnly must deny INSERT") };
+    match a.authorize(&AaUpdate("t".clone())) { AdDeny => {}, _ => panic("AuthReadOnly must deny UPDATE") };
+    match a.authorize(&AaDelete("t".clone())) { AdDeny => {}, _ => panic("AuthReadOnly must deny DELETE") };
+    match a.authorize(&AaCreateTable("t".clone())) { AdDeny => {}, _ => panic("AuthReadOnly must deny DDL") };
 }
 
 fn test_read_only_allows_reads() {
     let mut a = authorizer_new();
     a.subscribe(Heap.new(read_only()));
-    match a.authorize(&AaSelect) { AdAllow => {}, _ => panic("ReadOnly must allow SELECT") };
-    match a.authorize(&AaReadColumn("t".clone(), "c".clone())) { AdAllow => {}, _ => panic("ReadOnly allows READ column") };
-    match a.authorize(&AaPragma("foreign_keys".clone())) { AdAllow => {}, _ => panic("ReadOnly allows PRAGMA") };
+    match a.authorize(&AaSelect) { AdAllow => {}, _ => panic("AuthReadOnly must allow SELECT") };
+    match a.authorize(&AaReadColumn("t".clone(), "c".clone())) { AdAllow => {}, _ => panic("AuthReadOnly allows READ column") };
+    match a.authorize(&AaPragma("foreign_keys".clone())) { AdAllow => {}, _ => panic("AuthReadOnly allows PRAGMA") };
 }
 
 fn test_multi_hook_most_restrictive_wins() {

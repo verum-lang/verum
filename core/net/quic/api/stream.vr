@@ -1,5 +1,5 @@
 // =============================================================================
-// net/quic/api/stream.vr — High-level QuicStream byte-stream handle
+// net/quic/api/stream.vr — High-level QuicApiStream byte-stream handle
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // =============================================================================
@@ -7,7 +7,7 @@
 // Thin async wrapper around the SendStream / RecvStream halves in
 // core.net.quic.stream_sm. Adds:
 //
-//   * AsyncRead / AsyncWrite protocol impls so `QuicStream` composes
+//   * AsyncRead / AsyncWrite protocol impls so `QuicApiStream` composes
 //     with the rest of the stdlib (io.copy, async_iterator).
 //   * Cancellation-aware reads that honour the connection's idle
 //     timer + per-connection Nursery scope.
@@ -31,7 +31,7 @@ public type QuicStreamError is
 
 /// Bidirectional QUIC stream handle. Both halves owned — caller may
 /// split via `into_halves()` for independent read/write tasks.
-public type QuicStream is {
+public type QuicApiStream is {
     stream_id: UInt64,
     send:      SendStream,
     recv:      RecvStream,
@@ -50,7 +50,7 @@ public type QuicSendStream is {
     send:      SendStream,
 };
 
-implement QuicStream {
+implement QuicApiStream {
     /// Write as many bytes as fit in the current connection + stream
     /// flow-control budget. Returns `Ok(n)` where n may be < data.len()
     /// — caller loops on a QuicStreamError-free result.
