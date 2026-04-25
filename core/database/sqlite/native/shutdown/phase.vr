@@ -17,13 +17,13 @@ module core.database.sqlite.native.shutdown.phase;
 mount core.*;
 mount base.{Text, Bool};
 mount core.database.sqlite.native.shutdown.subsystem.{
-    Subsystem, subsystem_name,
+    ShutdownSubsystem, subsystem_name,
 };
 
 public type ShutdownPhase is
       SpInit
-    | SpDraining(Subsystem)
-    | SpClosing(Subsystem)
+    | SpDraining(ShutdownSubsystem)
+    | SpClosing(ShutdownSubsystem)
     | SpDone
     | SpFailed(Text);
 
@@ -46,7 +46,7 @@ public fn is_terminal(p: &ShutdownPhase) -> Bool {
 
 /// True iff the engine is currently working on `sub` (either draining
 /// or closing).
-public fn working_on(p: &ShutdownPhase, sub: &Subsystem) -> Bool {
+public fn working_on(p: &ShutdownPhase, sub: &ShutdownSubsystem) -> Bool {
     let want = subsystem_name(sub);
     match p {
         SpDraining(s) => subsystem_name(s) == want,

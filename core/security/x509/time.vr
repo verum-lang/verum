@@ -29,14 +29,14 @@ mount core.encoding.der.{Time};
 mount core.time.instant.{Instant};
 
 // =============================================================================
-// Validity window
+// CertValidity window
 // =============================================================================
 
 /// Certificate validity window. Both ends are inclusive per RFC 5280
 /// §4.1.2.5 ("[...] the GeneralTime type shall be used for all validity
 /// periods ending after December 31, 9999, and the UTCTime type shall
 /// be used otherwise.").
-public type Validity is {
+public type CertValidity is {
     not_before: Time,
     not_after:  Time,
 };
@@ -112,7 +112,7 @@ public fn is_in_future(t: &Time, now_secs: Int64) -> Bool {
 /// Is Unix-second timestamp `now_secs` contained in `[validity.not_before,
 /// validity.not_after]` (inclusive)? This is the RFC 5280 §6.1.3(a)(2)
 /// certificate validity check.
-public fn is_valid_at(validity: &Validity, now_secs: Int64) -> Bool {
+public fn is_valid_at(validity: &CertValidity, now_secs: Int64) -> Bool {
     let nb = time_to_unix(&validity.not_before);
     let na = time_to_unix(&validity.not_after);
     nb <= now_secs && now_secs <= na

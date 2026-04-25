@@ -5,15 +5,15 @@ module core.database.sqlite.native.stat1_schema_api.row;
 mount base.{Bool, Int64, Text};
 mount core.collections.list.{List};
 
-public type Stat1Row is {
+public type Stat1SchemaRow is {
     table_name: Text,
     index_name: Text,      // empty = whole-table stats
     total_rows: Int64,
     avg_per_prefix: List<Int64>,
 };
 
-public fn new(table_name: Text, index_name: Text, total_rows: Int64) -> Stat1Row {
-    Stat1Row {
+public fn new(table_name: Text, index_name: Text, total_rows: Int64) -> Stat1SchemaRow {
+    Stat1SchemaRow {
         table_name: table_name,
         index_name: index_name,
         total_rows: total_rows,
@@ -21,23 +21,23 @@ public fn new(table_name: Text, index_name: Text, total_rows: Int64) -> Stat1Row
     }
 }
 
-public fn push_prefix_count(mut r: Stat1Row, n: Int64) -> Stat1Row {
+public fn push_prefix_count(mut r: Stat1SchemaRow, n: Int64) -> Stat1SchemaRow {
     r.avg_per_prefix.push(n);
     r
 }
 
-public fn is_whole_table(r: &Stat1Row) -> Bool {
+public fn is_whole_table(r: &Stat1SchemaRow) -> Bool {
     r.index_name.len() == 0
 }
 
-public fn index_column_count(r: &Stat1Row) -> Int {
+public fn index_column_count(r: &Stat1SchemaRow) -> Int {
     r.avg_per_prefix.len()
 }
 
 public fn column_count() -> Int { 3 }    // matches PRAGMA-style columns
 
 // Selectivity estimator for N key-columns given a row with `avg_per_prefix`.
-public fn rows_for_prefix(r: &Stat1Row, prefix_cols: Int) -> Int64 {
+public fn rows_for_prefix(r: &Stat1SchemaRow, prefix_cols: Int) -> Int64 {
     if prefix_cols <= 0 { return r.total_rows; }
     let idx = if prefix_cols > r.avg_per_prefix.len() {
         r.avg_per_prefix.len() - 1
@@ -70,7 +70,7 @@ fn int_to_text(n: Int64) -> Text {
 }
 
 // Render the "stat" column text "N k1 k2 ... kM".
-public fn render_stat_text(r: &Stat1Row) -> Text {
+public fn render_stat_text(r: &Stat1SchemaRow) -> Text {
     let mut out = int_to_text(r.total_rows);
     let mut i: Int = 0;
     while i < r.avg_per_prefix.len() {

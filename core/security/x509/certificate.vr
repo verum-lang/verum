@@ -16,7 +16,7 @@
 //     serialNumber         CertificateSerialNumber,
 //     signature            AlgorithmIdentifier,
 //     issuer               Name,
-//     validity             Validity,
+//     validity             CertValidity,
 //     subject              Name,
 //     subjectPublicKeyInfo SubjectPublicKeyInfo,
 //     issuerUniqueID   [1] IMPLICIT UniqueIdentifier OPTIONAL,  -- v2
@@ -57,7 +57,7 @@ mount core.security.x509.algorithm.{
 };
 mount core.security.x509.name.{DistinguishedName, parse_name};
 mount core.security.x509.spki.{Spki, parse_spki};
-mount core.security.x509.time.{Validity};
+mount core.security.x509.time.{CertValidity};
 mount core.security.x509.ext.{ExtensionSet, parse_extensions};
 
 // =============================================================================
@@ -71,7 +71,7 @@ public type TbsCertificate is {
     serial_number: List<Byte>,          // raw INTEGER bytes (may exceed i64)
     signature_alg: SignatureAlg,
     issuer:        DistinguishedName,
-    validity:      Validity,
+    validity:      CertValidity,
     subject:       DistinguishedName,
     spki:          Spki,
     extensions:    ExtensionSet,
@@ -205,12 +205,12 @@ fn parse_tbs(r: &mut DerReader) -> Result<(TbsCertificate, List<Byte>), DerError
     }, tbs_der))
 }
 
-fn parse_validity(r: &mut DerReader) -> Result<Validity, DerError> {
+fn parse_validity(r: &mut DerReader) -> Result<CertValidity, DerError> {
     let mut s = r.read_sequence()?;
     let not_before = parse_time_choice(&mut s)?;
     let not_after  = parse_time_choice(&mut s)?;
     s.expect_end()?;
-    Ok(Validity { not_before: not_before, not_after: not_after })
+    Ok(CertValidity { not_before: not_before, not_after: not_after })
 }
 
 fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
@@ -220,7 +220,7 @@ fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
         return Err(DerError {
             kind: DerErrorKind.UnexpectedTag,
             position: 0,
-            message: "Validity time not a universal tag",
+            message: "CertValidity time not a universal tag",
         });
     }
     if t.number == der.TAG_UTC_TIME {
@@ -231,7 +231,7 @@ fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
         Err(DerError {
             kind: DerErrorKind.UnexpectedTag,
             position: 0,
-            message: "Validity expected UTCTime or GeneralizedTime",
+            message: "CertValidity expected UTCTime or GeneralizedTime",
         })
     }
 }

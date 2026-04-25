@@ -15,7 +15,7 @@
 mount core.*;
 mount core.encoding.der.{Time};
 mount core.security.x509.time.{
-    Validity, is_valid_at, time_to_unix,
+    CertValidity, is_valid_at, time_to_unix,
 };
 
 fn make_time(year: UInt32, month: UInt8, day: UInt8, hour: UInt8, minute: UInt8, second: UInt8) -> Time {
@@ -23,7 +23,7 @@ fn make_time(year: UInt32, month: UInt8, day: UInt8, hour: UInt8, minute: UInt8,
 }
 
 fn inside_window_is_valid() {
-    let v = Validity {
+    let v = CertValidity {
         not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
         not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
     };
@@ -33,7 +33,7 @@ fn inside_window_is_valid() {
 }
 
 fn exactly_at_not_before_is_valid() {
-    let v = Validity {
+    let v = CertValidity {
         not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
         not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
     };
@@ -43,7 +43,7 @@ fn exactly_at_not_before_is_valid() {
 }
 
 fn exactly_at_not_after_is_valid() {
-    let v = Validity {
+    let v = CertValidity {
         not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
         not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
     };
@@ -52,7 +52,7 @@ fn exactly_at_not_after_is_valid() {
 }
 
 fn one_second_before_window_is_invalid() {
-    let v = Validity {
+    let v = CertValidity {
         not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
         not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
     };
@@ -61,7 +61,7 @@ fn one_second_before_window_is_invalid() {
 }
 
 fn one_second_after_window_is_invalid() {
-    let v = Validity {
+    let v = CertValidity {
         not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
         not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
     };
@@ -72,7 +72,7 @@ fn one_second_after_window_is_invalid() {
 fn zero_width_validity_accepts_exact_point() {
     // notBefore == notAfter — the cert is valid at exactly one instant.
     let pt = make_time(2024_u32, 6_u8, 15_u8, 12_u8, 0_u8, 0_u8);
-    let v = Validity { not_before: pt.clone(), not_after: pt.clone() };
+    let v = CertValidity { not_before: pt.clone(), not_after: pt.clone() };
     let at = time_to_unix(&pt);
     assert(is_valid_at(&v, at));
     assert(false == is_valid_at(&v, at - 1_i64));

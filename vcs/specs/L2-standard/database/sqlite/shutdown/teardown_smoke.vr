@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.shutdown.subsystem.{
-    Subsystem, SsMutex, SsMem, SsPcache, SsPage, SsHeap,
+    ShutdownSubsystem, SsMutex, SsMem, SsPcache, SsPage, SsHeap,
     subsystem_name, init_order, shutdown_order, precedes,
 };
 mount core.database.sqlite.native.shutdown.phase.{
@@ -19,7 +19,7 @@ mount core.database.sqlite.native.shutdown.engine.{
 mount base.{Bool};
 
 // -----------------------------------------------------------------------------
-// Subsystem
+// ShutdownSubsystem
 // -----------------------------------------------------------------------------
 
 fn test_subsystem_names_unique() {

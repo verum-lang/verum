@@ -1,5 +1,5 @@
 // =============================================================================
-// shutdown/subsystem.vr — Subsystem taxonomy
+// shutdown/subsystem.vr — ShutdownSubsystem taxonomy
 // =============================================================================
 // Spec: SQLite C API
 //
@@ -13,14 +13,14 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 
-public type Subsystem is
+public type ShutdownSubsystem is
       SsMutex
     | SsMem
     | SsPcache
     | SsPage
     | SsHeap;
 
-public fn subsystem_name(s: &Subsystem) -> Text {
+public fn subsystem_name(s: &ShutdownSubsystem) -> Text {
     match s {
         SsMutex   => "mutex".clone(),
         SsMem     => "mem".clone(),
@@ -31,8 +31,8 @@ public fn subsystem_name(s: &Subsystem) -> Text {
 }
 
 /// Initialisation order — sqlite3_initialize walks this list low → high.
-public fn init_order() -> List<Subsystem> {
-    let mut out: List<Subsystem> = List.new();
+public fn init_order() -> List<ShutdownSubsystem> {
+    let mut out: List<ShutdownSubsystem> = List.new();
     out.push(SsMutex);     // 1. mutexes first — every other subsystem needs them
     out.push(SsMem);       // 2. memory allocator
     out.push(SsPage);      // 3. page allocator (depends on mem)
@@ -42,9 +42,9 @@ public fn init_order() -> List<Subsystem> {
 }
 
 /// sqlite3_shutdown walks the same list in REVERSE.
-public fn shutdown_order() -> List<Subsystem> {
+public fn shutdown_order() -> List<ShutdownSubsystem> {
     let init = init_order();
-    let mut out: List<Subsystem> = List.new();
+    let mut out: List<ShutdownSubsystem> = List.new();
     let mut i: Int = init.len() - 1;
     while i >= 0 {
         out.push(clone_subsystem(&init[i]));
@@ -53,7 +53,7 @@ public fn shutdown_order() -> List<Subsystem> {
     out
 }
 
-fn clone_subsystem(s: &Subsystem) -> Subsystem {
+fn clone_subsystem(s: &ShutdownSubsystem) -> ShutdownSubsystem {
     match s {
         SsMutex   => SsMutex,
         SsMem     => SsMem,
@@ -65,7 +65,7 @@ fn clone_subsystem(s: &Subsystem) -> Subsystem {
 
 /// True iff subsystem `before` must be initialised strictly before
 /// subsystem `after` (i.e. `after` depends on `before`).
-public fn precedes(before: &Subsystem, after: &Subsystem) -> Bool {
+public fn precedes(before: &ShutdownSubsystem, after: &ShutdownSubsystem) -> Bool {
     let order = init_order();
     let mut idx_before: Int = -1;
     let mut idx_after: Int = -1;

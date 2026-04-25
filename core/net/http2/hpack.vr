@@ -46,18 +46,18 @@ implement HeaderField {
 }
 
 // =============================================================================
-// DynamicTable — FIFO ring-buffer of HeaderFields, size-bounded
+// Http2DynamicTable — FIFO ring-buffer of HeaderFields, size-bounded
 // =============================================================================
 
-public type DynamicTable is {
+public type Http2DynamicTable is {
     entries: List<HeaderField>,
     total_size: Int,
     max_size: Int,
 }
 
-implement DynamicTable {
-    public fn new(max_size: Int) -> DynamicTable {
-        DynamicTable {
+implement Http2DynamicTable {
+    public fn new(max_size: Int) -> Http2DynamicTable {
+        Http2DynamicTable {
             entries: List.new(),
             total_size: 0,
             max_size: max_size,
@@ -252,7 +252,7 @@ public fn decode_string(buf: &[Byte], pos: Int, max_length: Int)
 // =============================================================================
 
 public type HpackEncoder is {
-    table: DynamicTable,
+    table: Http2DynamicTable,
     huffman_enabled: Bool,
     pending_resize: Maybe<Int>,
 }
@@ -260,7 +260,7 @@ public type HpackEncoder is {
 implement HpackEncoder {
     public fn new() -> HpackEncoder {
         HpackEncoder {
-            table: DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
+            table: Http2DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
             huffman_enabled: true,
             pending_resize: None,
         }
@@ -268,7 +268,7 @@ implement HpackEncoder {
 
     public fn with_max_table_size(size: Int) -> HpackEncoder {
         HpackEncoder {
-            table: DynamicTable.new(size),
+            table: Http2DynamicTable.new(size),
             huffman_enabled: true,
             pending_resize: None,
         }
@@ -328,7 +328,7 @@ implement HpackEncoder {
 // =============================================================================
 
 public type HpackDecoder is {
-    table: DynamicTable,
+    table: Http2DynamicTable,
     max_table_size_settings: Int,
     max_header_list_size: Int,
 }
@@ -336,7 +336,7 @@ public type HpackDecoder is {
 implement HpackDecoder {
     public fn new() -> HpackDecoder {
         HpackDecoder {
-            table: DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
+            table: Http2DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
             max_table_size_settings: DEFAULT_HEADER_TABLE_SIZE as Int,
             max_header_list_size: 0x7FFFFFFF,
         }
@@ -344,7 +344,7 @@ implement HpackDecoder {
 
     public fn with_max_table_size(size: Int) -> HpackDecoder {
         HpackDecoder {
-            table: DynamicTable.new(size),
+            table: Http2DynamicTable.new(size),
             max_table_size_settings: size,
             max_header_list_size: 0x7FFFFFFF,
         }

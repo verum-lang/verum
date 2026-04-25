@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @expected-exit: 0
 
-// RFC 5280 §4.1.2.5 Validity: two time points `not_before` /
+// RFC 5280 §4.1.2.5 CertValidity: two time points `not_before` /
 // `not_after`. The invariant is `not_before ≤ not_after`. Time
 // comparisons use time_cmp / time_eq / time_lt / time_le / time_gt
 // / time_ge helpers defined in security/x509/time.vr.
@@ -13,7 +13,7 @@
 mount core.*;
 mount core.encoding.der.{Time};
 mount core.security.x509.time.{
-    Validity,
+    CertValidity,
     time_cmp, time_eq, time_lt, time_le, time_gt, time_ge,
     time_to_unix, is_in_past, is_in_future,
 };
@@ -45,7 +45,7 @@ fn time_helpers_consistent() {
 }
 
 fn validity_struct_carries_both_endpoints() {
-    let v = Validity {
+    let v = CertValidity {
         not_before: make_time(2024_u32, 1_u8, 1_u8),
         not_after:  make_time(2026_u32, 1_u8, 1_u8),
     };
@@ -72,6 +72,6 @@ public fn main() -> Int {
     time_helpers_consistent();
     validity_struct_carries_both_endpoints();
     time_is_in_past_and_future();
-    print("RFC 5280 §4.1.2.5 Validity + Time helpers verified");
+    print("RFC 5280 §4.1.2.5 CertValidity + Time helpers verified");
     0
 }

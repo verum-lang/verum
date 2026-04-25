@@ -57,7 +57,7 @@ public module server_identity;
 public mount .oid.Oid;
 
 // Re-exports — time
-public mount .time.{Validity, time_cmp, time_eq, time_lt, time_le, time_gt, time_ge, time_to_unix, is_valid_at};
+public mount .time.{CertValidity, time_cmp, time_eq, time_lt, time_le, time_gt, time_ge, time_to_unix, is_valid_at};
 
 // Re-exports — algorithm
 public mount .algorithm.{

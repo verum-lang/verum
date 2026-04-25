@@ -15,7 +15,7 @@
 //   5. heap       — global heap state (soft + hard limits)
 //
 // Submodules:
-//   * `subsystem`  — Subsystem taxonomy + reverse-order helper
+//   * `subsystem`  — ShutdownSubsystem taxonomy + reverse-order helper
 //   * `phase`      — ShutdownPhase state machine
 //   * `engine`     — ShutdownEngine: drives the phase machine + dispatch
 // =============================================================================

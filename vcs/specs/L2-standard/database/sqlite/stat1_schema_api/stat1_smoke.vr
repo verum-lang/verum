@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.stat1_schema_api.row.{
-    Stat1Row,
+    Stat1SchemaRow,
     new, push_prefix_count,
     is_whole_table, index_column_count, column_count,
     rows_for_prefix, render_stat_text,

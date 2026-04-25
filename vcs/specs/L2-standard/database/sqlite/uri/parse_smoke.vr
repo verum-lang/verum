@@ -14,7 +14,7 @@ mount core.database.sqlite.native.uri.decode.{percent_decode};
 mount core.database.sqlite.native.uri.params.{
     OpenMode, OmReadOnly, OmReadWrite, OmReadWriteCreate, OmMemory,
     CacheMode, CmShared, CmPrivate,
-    QueryParam, query_param,
+    UriQueryParam, query_param,
     UriParams, uri_params_default,
     open_mode_text, cache_mode_text, parse_mode, parse_cache,
 };
