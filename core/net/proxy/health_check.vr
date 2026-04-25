@@ -115,3 +115,175 @@ implement HealthCheck {
         }
     }
 }
+
+// =============================================================================
+// ActiveHealthChecker — runs a periodic GET probe loop per upstream
+// =============================================================================
+//
+// One ActiveHealthChecker holds a (Upstream, HealthStatus) pair plus a
+// configured `HealthCheck.Active`. The `run` method is the loop entry
+// point that callers spawn into a nursery — it never returns (until
+// the cancellation token fires) and updates the status atomically on
+// each tick.
+//
+// Spec §9.3 Phase 2 follow-up: "Active health-check runner (inspect
+// HTTP GET → bump HealthStatus)".
+
+public type ActiveHealthChecker is {
+    upstream: Upstream,
+    status:   HealthStatus,
+    cfg:      HealthCheck,
+    /// Strictly-increasing counter of probes attempted; observable
+    /// via `probes_attempted()` for debugging / metrics.
+    attempts: Shared<AtomicInt>,
+    /// Strictly-increasing counter of successful probes.
+    ok_count: Shared<AtomicInt>,
+    /// Cancel signal — when set, `run` exits before the next sleep.
+    cancel:   Shared<AtomicBool>,
+};
+
+implement ActiveHealthChecker {
+    /// Construct a checker bound to a specific upstream + shared status
+    /// handle. Caller wires `status.clone_handle()` so the
+    /// load-balancer's read path sees the same atomics.
+    public fn new(
+        upstream: Upstream,
+        status:   HealthStatus,
+        cfg:      HealthCheck,
+    ) -> ActiveHealthChecker {
+        ActiveHealthChecker {
+            upstream: upstream,
+            status:   status,
+            cfg:      cfg,
+            attempts: Shared.new(AtomicInt.new(0)),
+            ok_count: Shared.new(AtomicInt.new(0)),
+            cancel:   Shared.new(AtomicBool.new(false)),
+        }
+    }
+
+    /// Snapshot the probe counter — total ticks attempted (including
+    /// failures and cancelled probes).
+    public fn probes_attempted(&self) -> Int {
+        self.attempts.load(MemoryOrdering.Acquire)
+    }
+
+    /// Snapshot the success counter — strictly-increasing count of
+    /// 2xx replies observed by the probe loop.
+    public fn probes_ok(&self) -> Int {
+        self.ok_count.load(MemoryOrdering.Acquire)
+    }
+
+    /// Request a graceful shutdown of the probe loop. Idempotent —
+    /// the loop checks `cancel` at every tick boundary.
+    public fn stop(&self) {
+        self.cancel.store(true, MemoryOrdering.Release);
+    }
+
+    /// Apply a single observed outcome to the bound `HealthStatus`.
+    /// Threshold semantics follow `HealthCheck.Active.{healthy,unhealthy}_threshold`:
+    ///
+    ///   * After `healthy_threshold` consecutive OKs → `mark_healthy`.
+    ///   * After `unhealthy_threshold` consecutive failures → `mark_unhealthy`.
+    ///
+    /// Other outcomes leave the status unchanged but still bump the
+    /// internal counters so the next transition fires correctly.
+    public fn record_outcome(&self, ok: Bool) {
+        match self.cfg {
+            HealthCheck.Active { healthy_threshold, unhealthy_threshold, .. } => {
+                if ok {
+                    let succ = self.status.consecutive_successes
+                        .fetch_add(1, MemoryOrdering.AcqRel) + 1;
+                    self.status.consecutive_failures.store(0, MemoryOrdering.Release);
+                    if succ >= healthy_threshold && !self.status.is_healthy() {
+                        self.status.mark_healthy();
+                    }
+                    self.ok_count.fetch_add(1, MemoryOrdering.AcqRel);
+                } else {
+                    let fails = self.status.consecutive_failures
+                        .fetch_add(1, MemoryOrdering.AcqRel) + 1;
+                    self.status.consecutive_successes.store(0, MemoryOrdering.Release);
+                    if fails >= unhealthy_threshold && self.status.is_healthy() {
+                        self.status.mark_unhealthy();
+                    }
+                }
+            },
+            _ => {
+                // Passive / Disabled — no thresholds; just bump the
+                // raw counter so probes_ok() stays accurate.
+                if ok {
+                    self.status.mark_healthy();
+                    self.ok_count.fetch_add(1, MemoryOrdering.AcqRel);
+                } else {
+                    self.status.mark_unhealthy();
+                }
+            },
+        }
+    }
+
+    /// Tick once. Bumps `attempts`, calls `probe`, applies the outcome
+    /// via `record_outcome`. Returns `Ok(true)` when the probe passed
+    /// and `Ok(false)` when it failed; `Err(_)` on infrastructure-level
+    /// trouble (no socket, DNS failure, etc.) — caller decides whether
+    /// to treat that as a fail.
+    pub async fn tick<P: HealthProbe>(&self, probe: &P) -> Result<Bool, HealthCheckError> {
+        self.attempts.fetch_add(1, MemoryOrdering.AcqRel);
+        let path = match self.cfg {
+            HealthCheck.Active { path, .. } => path.clone(),
+            _ => Text.from_str("/healthz"),
+        };
+        let timeout_ms = match self.cfg {
+            HealthCheck.Active { timeout_ms, .. } => timeout_ms,
+            _ => 1000,
+        };
+        let outcome = probe.probe(&self.upstream, &path, timeout_ms).await?;
+        self.record_outcome(outcome);
+        Ok(outcome)
+    }
+
+    /// Run the active probe loop until cancelled. The caller spawns
+    /// this into a nursery — `cancel` is the only graceful exit.
+    /// `Disabled` / `Passive` configs return immediately.
+    pub async fn run<P: HealthProbe>(&self, probe: &P) -> Result<(), HealthCheckError> {
+        let period_ms = match self.cfg {
+            HealthCheck.Active { period_ms, .. } => period_ms,
+            _ => return Ok(()),       // not an active config — no-op
+        };
+        loop {
+            if self.cancel.load(MemoryOrdering.Acquire) {
+                return Ok(());
+            }
+            // Treat an Err as a failed probe — the loop continues
+            // ticking (transient network failure shouldn't kill the
+            // checker).
+            let _ = self.tick(probe).await
+                .map_err(|_| {
+                    self.record_outcome(false);
+                });
+            core.async.timer.sleep_ms(period_ms).await;
+        }
+    }
+}
+
+// =============================================================================
+// HealthProbe — pluggable probe transport (HTTP/1.1, H3, custom)
+// =============================================================================
+
+/// A probe transport. Real implementations live in callers (so we
+/// don't pull http_client into the proxy crate). The protocol is
+/// async + boolean-result so any backend works.
+public type HealthProbe is protocol {
+    /// Issue a single probe against `(upstream, path)`. Return
+    /// `Ok(true)` on a 2xx response within `timeout_ms`, `Ok(false)`
+    /// on any other status code, `Err(_)` on transport-level failure.
+    async fn probe(
+        &self,
+        upstream: &Upstream,
+        path: &Text,
+        timeout_ms: Int,
+    ) -> Result<Bool, HealthCheckError>;
+};
+
+public type HealthCheckError is
+      Connect(Text)
+    | Timeout
+    | InvalidResponse;

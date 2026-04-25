@@ -1,0 +1,122 @@
+// =============================================================================
+// core/net/weft/h3_priority.vr — RFC 9218 priority extractor for Weft
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6.10 (RFC 9218 priority)
+// RFC:   9218 — Extensible Prioritization Scheme for HTTP
+// =============================================================================
+//
+// Phase 4 follow-up — closes the spec line:
+//
+//   "Priority header (§6.10 RFC 9218)"
+//
+// Reads the inbound request's `priority` header (Structured-Field
+// dictionary per RFC 9218 §4) and exposes the typed `H3Priority`
+// value to handlers. When the header is absent or malformed, the
+// default `H3Priority { urgency: 3, incremental: false }` lands —
+// this is the conservative interpretation specified by §4.2.
+//
+// The middleware itself doesn't reorder requests — it only annotates
+// the WeftRequest's `priority` slot. The scheduler (typically
+// `core.net.h3.server.H3Connection`'s send queue or a custom
+// `Layer`) consumes the value to ordered-emit responses.
+//
+// Note: the priority encoded in the optional `PRIORITY_UPDATE` H3
+// frame (RFC 9218 §7) is consumed by `core.net.h3.connection`'s
+// frame dispatcher, not here. This middleware deals only with the
+// header surface, which is the case 90% of clients exercise.
+//
+// =============================================================================
+
+module core.net.weft.h3_priority;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.h3.priority.{
+    H3Priority, PriorityParseError, parse_header,
+    DEFAULT_URGENCY, MAX_URGENCY,
+};
+mount core.net.weft.handler.{WeftRequest};
+
+// =============================================================================
+// PrioritySlot — typed annotation that handlers query
+// =============================================================================
+
+/// Per-request priority annotation, materialised by
+/// `extract_priority`. Always populated; defaults when no header
+/// was sent.
+public type PrioritySlot is {
+    /// 0..=7; 0 = highest priority.
+    urgency:     UInt8,
+    /// `i` flag — see RFC 9218 §4.1.
+    incremental: Bool,
+    /// True iff the value came from a parseable inbound header.
+    /// `false` means we fell back to the spec default.
+    explicit:    Bool,
+};
+
+implement PrioritySlot {
+    public fn default() -> PrioritySlot {
+        PrioritySlot {
+            urgency:     DEFAULT_URGENCY,
+            incremental: false,
+            explicit:    false,
+        }
+    }
+
+    public fn from_header_value(value: &[Byte]) -> PrioritySlot {
+        match parse_header(value) {
+            Ok(p) => PrioritySlot {
+                urgency:     p.urgency,
+                incremental: p.incremental,
+                explicit:    true,
+            },
+            Err(_) => PrioritySlot.default(),
+        }
+    }
+
+    /// Comparison hook for the scheduler: `lhs.before(rhs)` is true
+    /// when `lhs` should send before `rhs`. Lower urgency wins;
+    /// ties favour non-incremental traffic.
+    public fn before(&self, other: &PrioritySlot) -> Bool {
+        if self.urgency != other.urgency {
+            return self.urgency < other.urgency;
+        }
+        // Same urgency — non-incremental gets contiguous delivery first.
+        !self.incremental && other.incremental
+    }
+
+    public fn into_h3_priority(&self) -> H3Priority {
+        H3Priority {
+            urgency:     self.urgency,
+            incremental: self.incremental,
+        }
+    }
+}
+
+// =============================================================================
+// Extraction
+// =============================================================================
+
+/// Read the `priority` header from a WeftRequest if present and
+/// return the typed slot. Falls back to defaults when absent or
+/// malformed.
+public fn extract(req: &WeftRequest) -> PrioritySlot {
+    match req.headers.get(&"priority") {
+        Some(text) => {
+            let bytes = text.as_bytes();
+            PrioritySlot.from_header_value(bytes)
+        },
+        None => PrioritySlot.default(),
+    }
+}
+
+/// True iff the header is present and the value is a valid
+/// Structured-Field dictionary (per RFC 9218 §4). Convenience
+/// for telemetry / debug logging.
+public fn header_is_valid(req: &WeftRequest) -> Bool {
+    match req.headers.get(&"priority") {
+        Some(text) => parse_header(text.as_bytes()).is_ok(),
+        None => false,
+    }
+}

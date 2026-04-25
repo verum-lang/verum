@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: weft, h3, priority, rfc9218, surface
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/weft/h3_priority.vr` — Phase 4 follow-up extractor that
+// reads the inbound `priority` header (RFC 9218 §4) into a typed
+// PrioritySlot. Validates default fallback, urgency ordering, and
+// explicit-flag accounting.
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.weft.h3_priority.{PrioritySlot, extract, header_is_valid};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.http.{Headers, Method};
+mount core.collections.map.{Map};
+
+fn make_request(priority_header: Maybe<Text>) -> WeftRequest {
+    let mut h = Headers.new();
+    match priority_header {
+        Some(v) => h.append(f"priority", v),
+        None    => {},
+    }
+    WeftRequest {
+        method:      Method.Get,
+        path:        f"/",
+        raw_query:   None,
+        headers:     h,
+        body:        [],
+        path_params: Map.new(),
+        peer_addr:   None,
+    }
+}
+
+fn default_when_header_absent() {
+    let req = make_request(None);
+    let slot = extract(&req);
+    assert(slot.urgency == 3_u8);          // DEFAULT_URGENCY
+    assert(slot.incremental == false);
+    assert(slot.explicit == false);
+}
+
+fn parses_explicit_urgency_zero() {
+    let req = make_request(Some(f"u=0"));
+    let slot = extract(&req);
+    assert(slot.urgency == 0_u8);
+    assert(slot.explicit == true);
+}
+
+fn parses_incremental_flag() {
+    let req = make_request(Some(f"u=4, i"));
+    let slot = extract(&req);
+    assert(slot.urgency == 4_u8);
+    assert(slot.incremental == true);
+    assert(slot.explicit == true);
+}
+
+fn malformed_header_falls_back_to_default() {
+    let req = make_request(Some(f"this-is-not-structured-fields-syntax!!!"));
+    let slot = extract(&req);
+    assert(slot.urgency == 3_u8);
+    assert(slot.explicit == false);
+}
+
+fn before_orders_lower_urgency_first() {
+    let urgent = PrioritySlot { urgency: 0_u8, incremental: false, explicit: true };
+    let bg     = PrioritySlot { urgency: 7_u8, incremental: false, explicit: true };
+    assert(urgent.before(&bg));
+    assert(false == bg.before(&urgent));
+}
+
+fn before_breaks_ties_with_non_incremental_first() {
+    let inc     = PrioritySlot { urgency: 3_u8, incremental: true,  explicit: true };
+    let non_inc = PrioritySlot { urgency: 3_u8, incremental: false, explicit: true };
+    assert(non_inc.before(&inc));
+    assert(false == inc.before(&non_inc));
+}
+
+fn header_is_valid_passes_explicit() {
+    let req_ok = make_request(Some(f"u=2"));
+    assert(header_is_valid(&req_ok));
+    let req_bad = make_request(Some(f"!!!"));
+    assert(false == header_is_valid(&req_bad));
+    let req_none = make_request(None);
+    assert(false == header_is_valid(&req_none));
+}
+
+@main
+public fn main() -> Int {
+    default_when_header_absent();
+    parses_explicit_urgency_zero();
+    parses_incremental_flag();
+    malformed_header_falls_back_to_default();
+    before_orders_lower_urgency_first();
+    before_breaks_ties_with_non_incremental_first();
+    header_is_valid_passes_explicit();
+    print("RFC 9218 weft priority extractor verified");
+    0
+}
