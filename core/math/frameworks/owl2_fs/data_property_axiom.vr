@@ -4,22 +4,73 @@
 //
 // §2.3.3 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 6 axioms
 // constraining data properties (the d-sort side of OWL 2).
+//
+// V2 status (#134, 2026-04-25): all 6 axioms ship verbatim
+// W3C OWL 2 DS §5.6 bodies.
 // =============================================================================
 
+mount core.math.frameworks.owl2_fs.types.{
+    ClassExpression,
+    DataPropertyExpression,
+    DataRange,
+    Interpretation,
+};
+
+/// `SubDataPropertyOf(DPE₁, DPE₂)` (W3C §5.6.1):
+/// ⟦DPE₁⟧^I ⊆ ⟦DPE₂⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: SubDataPropertyOf")
-public axiom SubDataPropertyOf() -> Bool ensures true;
+public axiom SubDataPropertyOf<I: Interpretation, D: DataPropertyExpression>(
+    interp: I,
+    sub:    D,
+    sup:    D,
+) -> Bool
+    ensures interp.data_property_subset(sub, sup);
 
+/// `EquivalentDataProperties(DPE₁, …, DPEₙ)` (W3C §5.6.2):
+/// ⟦DPEᵢ⟧^I = ⟦DPEⱼ⟧^I for every pair. Binary core; n-ary at helper.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: EquivalentDataProperties")
-public axiom EquivalentDataProperties() -> Bool ensures true;
+public axiom EquivalentDataProperties<I: Interpretation, D: DataPropertyExpression>(
+    interp: I,
+    a:      D,
+    b:      D,
+) -> Bool
+    ensures interp.data_property_equal(a, b);
 
+/// `DisjointDataProperties(DPE₁, …, DPEₙ)` (W3C §5.6.3):
+/// ⟦DPEᵢ⟧^I ∩ ⟦DPEⱼ⟧^I = ∅ for every distinct pair. Binary core.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: DisjointDataProperties")
-public axiom DisjointDataProperties() -> Bool ensures true;
+public axiom DisjointDataProperties<I: Interpretation, D: DataPropertyExpression>(
+    interp: I,
+    a:      D,
+    b:      D,
+) -> Bool
+    ensures interp.data_property_disjoint(a, b);
 
+/// `DataPropertyDomain(DPE, CE)` (W3C §5.6.4): for every (a, lt) ∈
+/// ⟦DPE⟧^I, a is a member of CE.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: DataPropertyDomain")
-public axiom DataPropertyDomain() -> Bool ensures true;
+public axiom DataPropertyDomain<I: Interpretation, D: DataPropertyExpression, C: ClassExpression>(
+    interp: I,
+    dpe:    D,
+    ce:     C,
+) -> Bool
+    ensures interp.data_property_domain(dpe, ce);
 
+/// `DataPropertyRange(DPE, DR)` (W3C §5.6.5): for every (a, lt) ∈
+/// ⟦DPE⟧^I, lt belongs to data range DR.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: DataPropertyRange")
-public axiom DataPropertyRange() -> Bool ensures true;
+public axiom DataPropertyRange<I: Interpretation, D: DataPropertyExpression, R: DataRange>(
+    interp: I,
+    dpe:    D,
+    dr:     R,
+) -> Bool
+    ensures interp.data_property_range(dpe, dr);
 
+/// `FunctionalDataProperty(DPE)` (W3C §5.6.6): every individual has
+/// at most one DPE-value under I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: FunctionalDataProperty")
-public axiom FunctionalDataProperty() -> Bool ensures true;
+public axiom FunctionalDataProperty<I: Interpretation, D: DataPropertyExpression>(
+    interp: I,
+    dpe:    D,
+) -> Bool
+    ensures interp.data_property_functional(dpe);

@@ -216,4 +216,53 @@ public type Interpretation is protocol {
     fn object_property_chain<P: ObjectPropertyExpression>(
         self, first: P, second: P, sup: P,
     ) -> Bool;
+
+    // ─── Data-property predicates (§5.6) ────────────────────────────
+
+    /// W3C §5.6.1 SubDataPropertyOf: ⟦DPE₁⟧^I ⊆ ⟦DPE₂⟧^I.
+    fn data_property_subset<D: DataPropertyExpression>(
+        self, sub: D, sup: D,
+    ) -> Bool;
+
+    /// W3C §5.6.2 EquivalentDataProperties (binary core).
+    fn data_property_equal<D: DataPropertyExpression>(
+        self, a: D, b: D,
+    ) -> Bool;
+
+    /// W3C §5.6.3 DisjointDataProperties (binary core).
+    fn data_property_disjoint<D: DataPropertyExpression>(
+        self, a: D, b: D,
+    ) -> Bool;
+
+    /// W3C §5.6.4 DataPropertyDomain: ∀(a, lt) ∈ ⟦DPE⟧^I, a ∈ ⟦CE⟧^I.
+    fn data_property_domain<D: DataPropertyExpression, C: ClassExpression>(
+        self, dpe: D, ce: C,
+    ) -> Bool;
+
+    /// W3C §5.6.5 DataPropertyRange: ∀(a, lt) ∈ ⟦DPE⟧^I, lt ∈ ⟦DR⟧^I.
+    fn data_property_range<D: DataPropertyExpression, R: DataRange>(
+        self, dpe: D, dr: R,
+    ) -> Bool;
+
+    /// W3C §5.6.6 FunctionalDataProperty: every individual has at most
+    /// one DPE-value under I.
+    fn data_property_functional<D: DataPropertyExpression>(
+        self, dpe: D,
+    ) -> Bool;
+
+    /// W3C §5.7 DatatypeDefinition: ⟦DT⟧^I = ⟦DR⟧^I (the named
+    /// datatype DT has the same value space as the data range DR).
+    fn datatype_definition<R: DataRange>(
+        self, dt: R, dr: R,
+    ) -> Bool;
+
+    /// W3C §5.8 HasKey (NAMED restriction): if every property in the
+    /// key list (object + data) gives the SAME value when applied to
+    /// two NamedIndividuals a, b that are members of CE under I, then
+    /// a^I = b^I.
+    /// V2 ships the binary-key core (one OPE + one DPE); n-ary lists
+    /// fold via Verum-level helper.
+    fn has_key_named<C: ClassExpression, P: ObjectPropertyExpression, D: DataPropertyExpression>(
+        self, ce: C, ope: P, dpe: D,
+    ) -> Bool;
 };

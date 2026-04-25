@@ -4,7 +4,22 @@
 //
 // §2.3.4 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 1 axiom
 // defining a named datatype as an alias for a data range.
+//
+// V2 status (#134, 2026-04-25): verbatim W3C OWL 2 DS §5.7 body.
 // =============================================================================
 
+mount core.math.frameworks.owl2_fs.types.{
+    DataRange,
+    Interpretation,
+};
+
+/// `DatatypeDefinition(DT, DR)` (W3C §5.7): the named datatype DT
+/// has the same value space as the data range DR.
+/// ⟦DT⟧^I = ⟦DR⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.4 Table 8: DatatypeDefinition")
-public axiom DatatypeDefinition() -> Bool ensures true;
+public axiom DatatypeDefinition<I: Interpretation, R: DataRange>(
+    interp: I,
+    dt:     R,
+    dr:     R,
+) -> Bool
+    ensures interp.datatype_definition(dt, dr);

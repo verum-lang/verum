@@ -7,7 +7,34 @@
 // it applies *only* to NamedIndividuals, not to anonymous ones.
 // VUVA §21.3 Table maps HasKey-with-NAMED to `@verify(proof)` because
 // the DL reasoner case requires user-supplied tactic per Shkotin §2.3.5.
+//
+// V2 status (#134, 2026-04-25): verbatim W3C OWL 2 DS §5.8 body.
 // =============================================================================
 
+mount core.math.frameworks.owl2_fs.types.{
+    ClassExpression,
+    ObjectPropertyExpression,
+    DataPropertyExpression,
+    Interpretation,
+};
+
+/// `HasKey(CE, (OPE₁ … OPEₙ) (DPE₁ … DPEₘ))` (W3C §5.8): if two
+/// NamedIndividuals a, b are members of CE under I and they agree on
+/// every property in the key list, then a^I = b^I.
+///
+/// Anonymous individuals are EXCLUDED from this constraint —
+/// HasKey applies under the NAMED restriction only (per Shkotin
+/// §2.3.5 and the W3C §5.8 explicit "named individuals" clause).
+/// VUVA §21.3 routes HasKey-with-NAMED to `@verify(proof)` because
+/// the DL-reasoner case requires user-supplied tactic.
+///
+/// V2 ships the binary-key core (one OPE + one DPE);  n-ary key
+/// lists fold over `has_key_named` via a Verum-level helper.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.5 Table 9: HasKey (NAMED restriction)")
-public axiom HasKey() -> Bool ensures true;
+public axiom HasKey<I: Interpretation, C: ClassExpression, P: ObjectPropertyExpression, D: DataPropertyExpression>(
+    interp: I,
+    ce:     C,
+    ope:    P,
+    dpe:    D,
+) -> Bool
+    ensures interp.has_key_named(ce, ope, dpe);
