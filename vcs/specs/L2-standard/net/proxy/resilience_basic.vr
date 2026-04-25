@@ -14,7 +14,7 @@ mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError};
 mount core.net.weft.response_ext.{resp_ok};
 mount core.net.proxy.upstream_pool.{Upstream};
-mount core.net.proxy.health_check.{HealthCheck, HealthStatus};
+mount core.net.proxy.health_check.{HealthCheck, ProxyHealthStatus};
 mount core.net.proxy.loadbalancer.{LoadBalancer, LbPool, UpstreamEntry};
 mount core.net.proxy.circuit_breaker.{CircuitBreakerLayer};
 mount core.net.proxy.retry.{RetryLayer, RetryBudget};

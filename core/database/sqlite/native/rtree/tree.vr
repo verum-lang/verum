@@ -22,7 +22,7 @@ mount core.database.sqlite.native.rtree.bbox.{
 };
 mount core.database.sqlite.native.rtree.node.{
     RNode, RnInterior, RnLeaf,
-    LeafEntry, leaf_entry,
+    RtreeNodeLeafEntry, leaf_entry,
     InteriorEntry, interior_entry,
     node_id, entry_count, is_leaf, cover_mbb,
 };
@@ -113,13 +113,13 @@ implement RTree {
         while i < self.nodes.len() {
             match &mut self.nodes[i] {
                 RnLeaf(_id, entries) => {
-                    let mut new_entries: List<LeafEntry> = List.new();
+                    let mut new_entries: List<RtreeNodeLeafEntry> = List.new();
                     let mut k: Int = 0;
                     while k < entries.len() {
                         if entries[k].rowid == rowid {
                             found = true;
                         } else {
-                            new_entries.push(LeafEntry {
+                            new_entries.push(RtreeNodeLeafEntry {
                                 rowid: entries[k].rowid,
                                 mbb: clone_bbox(&entries[k].mbb),
                             });

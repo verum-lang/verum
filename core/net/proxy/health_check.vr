@@ -13,7 +13,7 @@
 //               consecutive failures mark the upstream unhealthy until
 //               `recovery_check_interval_ms` passes.
 //
-// A single `HealthStatus` snapshot is queried by the load-balancer on
+// A single `ProxyHealthStatus` snapshot is queried by the load-balancer on
 // every request pick. Updates are cheap atomic writes — probing tasks
 // run on the shared runtime via `core.async.task.spawn`.
 //
@@ -27,12 +27,12 @@ mount core.time.{Duration};
 mount core.net.proxy.upstream_pool.{Upstream};
 
 // =============================================================================
-// HealthStatus
+// ProxyHealthStatus
 // =============================================================================
 
 /// Observed health for a single upstream. Thread-safe: consumers read
 /// the atomics with `Acquire`, probing tasks update with `Release`.
-public type HealthStatus is {
+public type ProxyHealthStatus is {
     healthy: Shared<AtomicBool>,
     /// Monotonic count of consecutive failures. Feeds passive policy.
     consecutive_failures: Shared<AtomicInt>,
@@ -40,9 +40,9 @@ public type HealthStatus is {
     consecutive_successes: Shared<AtomicInt>,
 };
 
-implement HealthStatus {
-    public fn new() -> HealthStatus {
-        HealthStatus {
+implement ProxyHealthStatus {
+    public fn new() -> ProxyHealthStatus {
+        ProxyHealthStatus {
             healthy: Shared.new(AtomicBool.new(true)),
             consecutive_failures: Shared.new(AtomicInt.new(0)),
             consecutive_successes: Shared.new(AtomicInt.new(0)),
@@ -65,8 +65,8 @@ implement HealthStatus {
         self.consecutive_failures.fetch_add(1, MemoryOrdering.AcqRel);
     }
 
-    public fn clone_handle(&self) -> HealthStatus {
-        HealthStatus {
+    public fn clone_handle(&self) -> ProxyHealthStatus {
+        ProxyHealthStatus {
             healthy: self.healthy.clone(),
             consecutive_failures: self.consecutive_failures.clone(),
             consecutive_successes: self.consecutive_successes.clone(),
@@ -120,18 +120,18 @@ implement HealthCheck {
 // ActiveHealthChecker — runs a periodic GET probe loop per upstream
 // =============================================================================
 //
-// One ActiveHealthChecker holds a (Upstream, HealthStatus) pair plus a
+// One ActiveHealthChecker holds a (Upstream, ProxyHealthStatus) pair plus a
 // configured `HealthCheck.Active`. The `run` method is the loop entry
 // point that callers spawn into a nursery — it never returns (until
 // the cancellation token fires) and updates the status atomically on
 // each tick.
 //
 // Spec §9.3 Phase 2 follow-up: "Active health-check runner (inspect
-// HTTP GET → bump HealthStatus)".
+// HTTP GET → bump ProxyHealthStatus)".
 
 public type ActiveHealthChecker is {
     upstream: Upstream,
-    status:   HealthStatus,
+    status:   ProxyHealthStatus,
     cfg:      HealthCheck,
     /// Strictly-increasing counter of probes attempted; observable
     /// via `probes_attempted()` for debugging / metrics.
@@ -148,7 +148,7 @@ implement ActiveHealthChecker {
     /// load-balancer's read path sees the same atomics.
     public fn new(
         upstream: Upstream,
-        status:   HealthStatus,
+        status:   ProxyHealthStatus,
         cfg:      HealthCheck,
     ) -> ActiveHealthChecker {
         ActiveHealthChecker {
@@ -179,7 +179,7 @@ implement ActiveHealthChecker {
         self.cancel.store(true, MemoryOrdering.Release);
     }
 
-    /// Apply a single observed outcome to the bound `HealthStatus`.
+    /// Apply a single observed outcome to the bound `ProxyHealthStatus`.
     /// Threshold semantics follow `HealthCheck.Active.{healthy,unhealthy}_threshold`:
     ///
     ///   * After `healthy_threshold` consecutive OKs → `mark_healthy`.

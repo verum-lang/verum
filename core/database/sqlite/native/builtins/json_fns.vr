@@ -31,18 +31,18 @@ mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
 
 // -----------------------------------------------------------------------------
-// JsonValue — minimal value tree (avoids hard-coupling to core.encoding.json)
+// SqlJsonValue — minimal value tree (avoids hard-coupling to core.encoding.json)
 // -----------------------------------------------------------------------------
 
-public type JsonValue is
+public type SqlJsonValue is
       JNull
     | JBool(Bool)
     | JNumber(Float64)
     | JString(Text)
-    | JArray(List<JsonValue>)
+    | JArray(List<SqlJsonValue>)
     | JObject(List<JsonField>);
 
-public type JsonField is { key: Text, value: JsonValue };
+public type JsonField is { key: Text, value: SqlJsonValue };
 
 // -----------------------------------------------------------------------------
 // JSON_VALID
@@ -86,7 +86,7 @@ public fn json_type(v: &Register, _path: &Register) -> Register {
     }
 }
 
-fn type_name(v: &JsonValue) -> Text {
+fn type_name(v: &SqlJsonValue) -> Text {
     match v {
         JNull       => "null".clone(),
         JBool(b)    => { if b { "true".clone() } else { "false".clone() } }
@@ -135,10 +135,10 @@ public fn json_extract(v: &Register, path: &Register) -> Register {
     }
 }
 
-fn resolve_path(root: &JsonValue, path: &Text) -> Maybe<JsonValue> {
+fn resolve_path(root: &SqlJsonValue, path: &Text) -> Maybe<SqlJsonValue> {
     let bs = path.as_bytes();
     if bs.len() == 0 || bs[0] != (36 as Byte) { return None; }  // must start with $
-    let mut cur: JsonValue = clone_json(root);
+    let mut cur: SqlJsonValue = clone_json(root);
     let mut i: Int = 1;
     while i < bs.len() {
         let b = bs[i];
@@ -182,7 +182,7 @@ fn resolve_path(root: &JsonValue, path: &Text) -> Maybe<JsonValue> {
     Some(cur)
 }
 
-fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<JsonValue> {
+fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<SqlJsonValue> {
     let mut i: Int = 0;
     while i < fields.len() {
         if fields[i].key == key {
@@ -193,7 +193,7 @@ fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<JsonValue> {
     None
 }
 
-fn json_to_register(v: &JsonValue) -> Register {
+fn json_to_register(v: &SqlJsonValue) -> Register {
     match v {
         JNull      => RNull,
         JBool(b)   => RInt(if b { 1 as Int64 } else { 0 as Int64 }),
@@ -213,7 +213,7 @@ fn json_to_register(v: &JsonValue) -> Register {
 // -----------------------------------------------------------------------------
 
 public fn json_array(args: &List<Register>) -> Register {
-    let mut items: List<JsonValue> = List.new();
+    let mut items: List<SqlJsonValue> = List.new();
     let mut i: Int = 0;
     while i < args.len() {
         items.push(register_to_json(&args[i]));
@@ -241,7 +241,7 @@ public fn json_quote(v: &Register) -> Register {
     RText(serialise(&jv))
 }
 
-fn register_to_json(r: &Register) -> JsonValue {
+fn register_to_json(r: &Register) -> SqlJsonValue {
     match r {
         RNull     => JNull,
         RInt(x)   => JNumber(x as Float64),
@@ -258,7 +258,7 @@ fn register_to_json(r: &Register) -> JsonValue {
 
 public type ParseState is { bs: List<Byte>, pos: Int };
 
-public fn parse_json(s: &Text) -> Maybe<JsonValue> {
+public fn parse_json(s: &Text) -> Maybe<SqlJsonValue> {
     let bsv = s.as_bytes();
     let mut bs: List<Byte> = List.new();
     let mut i: Int = 0;
@@ -284,7 +284,7 @@ fn skip_ws(st: &mut ParseState) {
     }
 }
 
-fn parse_value(st: &mut ParseState) -> Maybe<JsonValue> {
+fn parse_value(st: &mut ParseState) -> Maybe<SqlJsonValue> {
     skip_ws(st);
     if st.pos >= st.bs.len() { return None; }
     let b = st.bs[st.pos];
@@ -299,7 +299,7 @@ fn parse_value(st: &mut ParseState) -> Maybe<JsonValue> {
     None
 }
 
-fn parse_keyword(st: &mut ParseState) -> Maybe<JsonValue> {
+fn parse_keyword(st: &mut ParseState) -> Maybe<SqlJsonValue> {
     if matches_keyword(st, &"true".clone()) { return Some(JBool(true)); }
     if matches_keyword(st, &"false".clone()) { return Some(JBool(false)); }
     if matches_keyword(st, &"null".clone()) { return Some(JNull); }
@@ -318,7 +318,7 @@ fn matches_keyword(st: &mut ParseState, kw: &Text) -> Bool {
     true
 }
 
-fn parse_number(st: &mut ParseState) -> Maybe<JsonValue> {
+fn parse_number(st: &mut ParseState) -> Maybe<SqlJsonValue> {
     let start = st.pos;
     if st.bs[st.pos] == (45 as Byte) { st.pos = st.pos + 1; }
     while st.pos < st.bs.len() {
@@ -360,7 +360,7 @@ fn parse_real_text(s: &Text) -> Float64 {
     sign * (intp + frac)
 }
 
-fn parse_string_value(st: &mut ParseState) -> Maybe<JsonValue> {
+fn parse_string_value(st: &mut ParseState) -> Maybe<SqlJsonValue> {
     match parse_json_string(st) {
         Some(s) => Some(JString(s)),
         None    => None,
@@ -397,9 +397,9 @@ fn parse_json_string(st: &mut ParseState) -> Maybe<Text> {
     None
 }
 
-fn parse_array(st: &mut ParseState) -> Maybe<JsonValue> {
+fn parse_array(st: &mut ParseState) -> Maybe<SqlJsonValue> {
     st.pos = st.pos + 1;  // skip [
-    let mut items: List<JsonValue> = List.new();
+    let mut items: List<SqlJsonValue> = List.new();
     skip_ws(st);
     if st.pos < st.bs.len() && st.bs[st.pos] == (93 as Byte) {
         st.pos = st.pos + 1;
@@ -424,7 +424,7 @@ fn parse_array(st: &mut ParseState) -> Maybe<JsonValue> {
     None
 }
 
-fn parse_object(st: &mut ParseState) -> Maybe<JsonValue> {
+fn parse_object(st: &mut ParseState) -> Maybe<SqlJsonValue> {
     st.pos = st.pos + 1;  // skip {
     let mut fields: List<JsonField> = List.new();
     skip_ws(st);
@@ -463,13 +463,13 @@ fn parse_object(st: &mut ParseState) -> Maybe<JsonValue> {
 // Serialisation (compact, no extra whitespace)
 // -----------------------------------------------------------------------------
 
-public fn serialise(v: &JsonValue) -> Text {
+public fn serialise(v: &SqlJsonValue) -> Text {
     let mut out = Text.new();
     write_value(&mut out, v);
     out
 }
 
-fn write_value(out: &mut Text, v: &JsonValue) {
+fn write_value(out: &mut Text, v: &SqlJsonValue) {
     match v {
         JNull => append(out, &"null".clone()),
         JBool(b) => append(out, &(if b { "true".clone() } else { "false".clone() })),
@@ -535,14 +535,14 @@ fn real_to_text(_x: Float64) -> Text {
     "0".clone()
 }
 
-fn clone_json(v: &JsonValue) -> JsonValue {
+fn clone_json(v: &SqlJsonValue) -> SqlJsonValue {
     match v {
         JNull       => JNull,
         JBool(b)    => JBool(b),
         JNumber(x)  => JNumber(x),
         JString(s)  => JString(s.clone()),
         JArray(its) => {
-            let mut out: List<JsonValue> = List.new();
+            let mut out: List<SqlJsonValue> = List.new();
             let mut i: Int = 0;
             while i < its.len() { out.push(clone_json(&its[i])); i = i + 1; }
             JArray(out)

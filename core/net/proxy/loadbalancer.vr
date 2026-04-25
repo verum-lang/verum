@@ -28,7 +28,7 @@ mount core.*;
 mount core.collections.list.{List};
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 mount core.net.proxy.upstream_pool.{Upstream};
-mount core.net.proxy.health_check.{HealthStatus};
+mount core.net.proxy.health_check.{ProxyHealthStatus};
 
 // =============================================================================
 // LoadBalancer
@@ -42,7 +42,7 @@ public type LoadBalancer is
 /// A concrete upstream entry with live counters the LB can read.
 public type UpstreamEntry is {
     upstream: Upstream,
-    health: HealthStatus,
+    health: ProxyHealthStatus,
     in_flight: Shared<AtomicInt>,
 };
 
@@ -50,7 +50,7 @@ implement UpstreamEntry {
     public fn new(upstream: Upstream) -> UpstreamEntry {
         UpstreamEntry {
             upstream: upstream,
-            health: HealthStatus.new(),
+            health: ProxyHealthStatus.new(),
             in_flight: Shared.new(AtomicInt.new(0)),
         }
     }

@@ -1,5 +1,5 @@
 // =============================================================================
-// async/timer.vr - Async Timer and Interval Utilities
+// async/timer.vr - Async Timer and TimerInterval Utilities
 // =============================================================================
 // Layer: 4 (Async)
 // Dependencies: core, async/future, async/poll, time
@@ -10,7 +10,7 @@
 // - sleep(duration): Future that completes after a duration
 // - sleep_ms(ms): Convenience for millisecond sleep
 // - sleep_until(deadline): Sleep until an absolute time
-// - Interval: Repeating timer that yields at fixed intervals
+// - TimerInterval: Repeating timer that yields at fixed intervals
 // - Timeout: Wraps a future with a deadline
 // - Delay: Delays execution of a future
 //
@@ -140,7 +140,7 @@ public fn sleep_until(deadline: Instant) -> SleepUntil {
 }
 
 // =============================================================================
-// Interval
+// TimerInterval
 // =============================================================================
 
 /// A stream that yields at fixed intervals.
@@ -151,33 +151,33 @@ public fn sleep_until(deadline: Instant) -> SleepUntil {
 /// # Example
 ///
 /// ```verum
-/// let mut ticker = Interval.new(Duration.from_millis(100));
+/// let mut ticker = TimerInterval.new(Duration.from_millis(100));
 /// loop {
 ///     ticker.tick().await;
 ///     do_periodic_work();
 /// }
 /// ```
-public type Interval is {
+public type TimerInterval is {
     /// Period between ticks
     period: Duration,
     /// Next deadline
     next_tick: Maybe<Instant>,
 };
 
-implement Interval {
+implement TimerInterval {
     /// Create a new interval with the given period.
     ///
     /// The first tick will be `period` from now.
-    public fn new(period: Duration) -> Interval {
-        Interval {
+    public fn new(period: Duration) -> TimerInterval {
+        TimerInterval {
             period: period,
             next_tick: None,
         }
     }
 
     /// Create an interval that ticks immediately on first call.
-    public fn immediate(period: Duration) -> Interval {
-        Interval {
+    public fn immediate(period: Duration) -> TimerInterval {
+        TimerInterval {
             period: period,
             next_tick: Some(Instant.now()),
         }

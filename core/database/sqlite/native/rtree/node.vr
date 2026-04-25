@@ -23,13 +23,13 @@ mount core.database.sqlite.native.rtree.bbox.{
 };
 
 // -----------------------------------------------------------------------------
-// LeafEntry — (rowid, box) pair stored in a leaf
+// RtreeNodeLeafEntry — (rowid, box) pair stored in a leaf
 // -----------------------------------------------------------------------------
 
-public type LeafEntry is { rowid: Int64, mbb: BoundingBox }
+public type RtreeNodeLeafEntry is { rowid: Int64, mbb: BoundingBox }
 
-public fn leaf_entry(rowid: Int64, mbb: BoundingBox) -> LeafEntry {
-    LeafEntry { rowid: rowid, mbb: mbb }
+public fn leaf_entry(rowid: Int64, mbb: BoundingBox) -> RtreeNodeLeafEntry {
+    RtreeNodeLeafEntry { rowid: rowid, mbb: mbb }
 }
 
 // -----------------------------------------------------------------------------
@@ -48,7 +48,7 @@ public fn interior_entry(child_id: Int64, mbb: BoundingBox) -> InteriorEntry {
 
 public type RNode is
       RnInterior(Int64, List<InteriorEntry>)        // (node_id, entries)
-    | RnLeaf(Int64, List<LeafEntry>);               // (node_id, entries)
+    | RnLeaf(Int64, List<RtreeNodeLeafEntry>);               // (node_id, entries)
 
 public fn node_id(n: &RNode) -> Int64 {
     match n {

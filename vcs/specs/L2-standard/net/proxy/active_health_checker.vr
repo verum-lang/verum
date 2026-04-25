@@ -11,7 +11,7 @@
 //
 // Validates that:
 //
-//   1. ActiveHealthChecker.new ties an Upstream + HealthStatus + cfg.
+//   1. ActiveHealthChecker.new ties an Upstream + ProxyHealthStatus + cfg.
 //   2. record_outcome respects healthy_threshold / unhealthy_threshold.
 //   3. `Disabled` / `Passive` configs make `run` exit immediately.
 //   4. The HealthProbe protocol is constructible.
@@ -19,14 +19,14 @@
 mount core.*;
 mount core.collections.list.{List};
 mount core.net.proxy.health_check.{
-    HealthCheck, HealthStatus, ActiveHealthChecker,
+    HealthCheck, ProxyHealthStatus, ActiveHealthChecker,
     HealthProbe, HealthCheckError,
 };
 mount core.net.proxy.upstream_pool.{Upstream};
 
 fn checker_construction() {
     let up = Upstream.new(f"http", f"backend.local", 8080);
-    let status = HealthStatus.new();
+    let status = ProxyHealthStatus.new();
     let cfg = HealthCheck.active(5_000, f"/healthz");
     let chk = ActiveHealthChecker.new(up, status, cfg);
     assert(chk.probes_attempted() == 0);
@@ -35,7 +35,7 @@ fn checker_construction() {
 
 fn record_outcome_threshold_marks_unhealthy_after_three_failures() {
     let up = Upstream.new(f"http", f"backend.local", 8080);
-    let status = HealthStatus.new();
+    let status = ProxyHealthStatus.new();
     // active(5s, /healthz) defaults — healthy_threshold=2,
     // unhealthy_threshold=3.
     let cfg = HealthCheck.active(5_000, f"/healthz");
@@ -52,7 +52,7 @@ fn record_outcome_threshold_marks_unhealthy_after_three_failures() {
 
 fn record_outcome_two_successes_recover() {
     let up = Upstream.new(f"http", f"backend.local", 8080);
-    let status = HealthStatus.new();
+    let status = ProxyHealthStatus.new();
     let cfg = HealthCheck.active(5_000, f"/healthz");
     let chk = ActiveHealthChecker.new(up, status.clone_handle(), cfg);
 
@@ -71,7 +71,7 @@ fn record_outcome_two_successes_recover() {
 
 fn stop_signals_cancel() {
     let up = Upstream.new(f"http", f"backend.local", 8080);
-    let status = HealthStatus.new();
+    let status = ProxyHealthStatus.new();
     let cfg = HealthCheck.active(1_000, f"/health");
     let chk = ActiveHealthChecker.new(up, status, cfg);
     chk.stop();

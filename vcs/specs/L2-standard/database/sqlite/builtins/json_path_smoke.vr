@@ -12,7 +12,7 @@
 //   * apply_patch merges via RFC 7396 (null deletes, object recurses)
 
 mount core.database.sqlite.native.builtins.json_fns.{
-    JsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
+    SqlJsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
 };
 mount core.database.sqlite.native.builtins.json_path.{
     PathSeg, PsField, PsIndex,
@@ -93,7 +93,7 @@ fn test_parse_empty() {
 // apply_mutation
 // -----------------------------------------------------------------------------
 
-fn make_obj_ab() -> JsonValue {
+fn make_obj_ab() -> SqlJsonValue {
     let mut fs: List<JsonField> = List.new();
     fs.push(JsonField { key: "a".clone(), value: JNumber(1.0) });
     fs.push(JsonField { key: "b".clone(), value: JString("x".clone()) });
@@ -158,7 +158,7 @@ fn test_insert_skips_existing() {
 }
 
 fn test_set_array_index() {
-    let mut items: List<JsonValue> = List.new();
+    let mut items: List<SqlJsonValue> = List.new();
     items.push(JNumber(10.0));
     items.push(JNumber(20.0));
     items.push(JNumber(30.0));
@@ -191,7 +191,7 @@ fn test_remove_field() {
 }
 
 fn test_remove_index() {
-    let mut items: List<JsonValue> = List.new();
+    let mut items: List<SqlJsonValue> = List.new();
     items.push(JNumber(1.0));
     items.push(JNumber(2.0));
     items.push(JNumber(3.0));

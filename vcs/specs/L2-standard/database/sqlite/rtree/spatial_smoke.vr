@@ -17,7 +17,7 @@ mount core.database.sqlite.native.rtree.bbox.{
 };
 mount core.database.sqlite.native.rtree.node.{
     RNode, RnInterior, RnLeaf,
-    LeafEntry, leaf_entry,
+    RtreeNodeLeafEntry, leaf_entry,
     InteriorEntry, interior_entry,
     node_id, entry_count, is_leaf, cover_mbb,
 };
