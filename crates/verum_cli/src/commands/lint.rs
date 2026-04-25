@@ -219,6 +219,32 @@ const LINT_RULES: &[LintRule] = &[
         description: "Identifier doesn't match the project's [lint.naming] convention",
         category: LintCategory::Style,
     },
+    // Phase C.1 — refinement-policy enforcement (off by default;
+    // projects opt in via [lint.refinement_policy].* flags).
+    LintRule {
+        name: "unrefined-public-int",
+        level: LintLevel::Warning,
+        description:
+            "Public fn parameter or return is Int/Text without a refinement — \
+             tighten the type to express valid usage at the type level",
+        category: LintCategory::Verification,
+    },
+    LintRule {
+        name: "verify-implied-by-refinement",
+        level: LintLevel::Warning,
+        description:
+            "Function uses refinement types but lacks @verify — \
+             the type-level obligation will only be checked at runtime",
+        category: LintCategory::Verification,
+    },
+    LintRule {
+        name: "public-must-have-verify",
+        level: LintLevel::Hint,
+        description:
+            "Public function lacks @verify(...) — declare its verification \
+             strategy explicitly (runtime | static | formal | …)",
+        category: LintCategory::Verification,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
@@ -728,12 +754,25 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
         }
     }
 
-    // [lint.naming] — naming-convention enforcement (Phase B.3).
-    // Stored under the synthetic rule key "naming-convention" so it
-    // travels through the same `cfg.rule_config::<NamingConfig>` path
-    // as every other rule.
-    if let Some(naming) = lint.get("naming") {
-        config.rules.insert("naming-convention".to_string(), naming.clone());
+    // Synthetic rule keys — section blocks that drive multi-rule
+    // policy enforcement. Each block lands under one synthetic key
+    // so the rules consuming them go through the same
+    // `cfg.rule_config::<T>` path as every other rule.
+    let synthetic_keys = [
+        ("naming",                "naming-convention"),     // Phase B.3
+        ("refinement_policy",     "refinement-policy"),     // Phase C.1
+        ("capability_policy",     "capability-policy"),     // Phase C.2
+        ("context_policy",        "context-policy"),        // Phase C.3
+        ("cbgr_budgets",          "cbgr-budgets"),          // Phase C.4
+        ("verification_policy",   "verification-policy"),   // Phase C.5
+        ("documentation",         "documentation-policy"),  // Phase C.5
+        ("style",                 "style-policy"),          // Phase C.6
+        ("architecture",          "architecture-policy"),   // Phase B.4
+    ];
+    for (toml_key, rule_key) in synthetic_keys {
+        if let Some(v) = lint.get(toml_key) {
+            config.rules.insert(rule_key.to_string(), v.clone());
+        }
     }
 
     // [lint.severity] — per-rule severity map

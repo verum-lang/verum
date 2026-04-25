@@ -98,6 +98,9 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
         &RedundantRefinementPass,
         &EmptyRefinementBoundPass,
         &NamingConventionPass,
+        &UnrefinedPublicIntPass,
+        &VerifyImpliedByRefinementPass,
+        &PublicMustHaveVerifyPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
@@ -801,6 +804,303 @@ fn item_attributes(item: &verum_ast::Item) -> &[Attribute] {
         // silently ignored — same as on a comment. Add support here
         // when the corresponding decl gains an `attributes` field.
         _ => &[],
+    }
+}
+
+// ===================================================================
+// Phase C.1: Refinement-policy enforcement
+// ===================================================================
+//
+// Three passes that police how a project uses Verum's refinement-type
+// system. Configured via the synthetic rule key
+// `refinement-policy` populated from the `[lint.refinement_policy]`
+// manifest block:
+//
+//     [lint.refinement_policy]
+//     public_api_must_refine_int      = true
+//     require_verify_on_refined_fn    = true
+//     disallow_redundant_refinements  = true
+//
+// Each policy is a separate rule so users can dial them independently
+// via `[lint.severity]` or `@allow / @deny / @warn`.
+//
+// ===================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+struct RefinementPolicyConfig {
+    public_api_must_refine_int: bool,
+    public_api_must_refine_text: bool,
+    require_verify_on_refined_fn: bool,
+}
+
+impl Default for RefinementPolicyConfig {
+    fn default() -> Self {
+        Self {
+            public_api_must_refine_int: false,
+            public_api_must_refine_text: false,
+            require_verify_on_refined_fn: false,
+        }
+    }
+}
+
+fn refinement_policy(ctx: &LintCtx<'_>) -> RefinementPolicyConfig {
+    ctx.config
+        .and_then(|c| c.rule_config::<RefinementPolicyConfig>("refinement-policy"))
+        .unwrap_or_default()
+}
+
+/// Recurse into `Refined { base, ... }` chains to reveal the
+/// underlying base type (Int, Text, …). Returns the base reference.
+fn unwrap_refinement_kind(ty: &Type) -> &TypeKind {
+    match &ty.kind {
+        TypeKind::Refined { base, .. } => unwrap_refinement_kind(base),
+        _ => &ty.kind,
+    }
+}
+
+/// True iff `ty` is a refinement (one or more `Refined { base, .. }`
+/// layers wrapping the actual base).
+fn is_refined(ty: &Type) -> bool {
+    matches!(ty.kind, TypeKind::Refined { .. })
+}
+
+/// True iff the function is publicly visible — public, public(crate),
+/// public(super), or path-restricted public. Internal / private fns
+/// don't trigger public-API policies.
+fn is_public_fn(func: &FunctionDecl) -> bool {
+    use verum_ast::Visibility::*;
+    matches!(
+        func.visibility,
+        Public | PublicCrate | PublicSuper | PublicIn(_)
+    )
+}
+
+// ── unrefined-public-int ────────────────────────────────────────────
+// Public function takes (or returns) an `Int` / `Text` parameter
+// without a refinement. The type system has no way to express a
+// usage constraint — every caller can pass any value, and any bug is
+// only caught at runtime.
+//
+// Fires when `[lint.refinement_policy].public_api_must_refine_int`
+// (or `.public_api_must_refine_text`) is true. Off by default;
+// projects opt in by flipping the flag.
+
+struct UnrefinedPublicIntPass;
+
+impl LintPass for UnrefinedPublicIntPass {
+    fn name(&self) -> &'static str { "unrefined-public-int" }
+    fn description(&self) -> &'static str {
+        "Public fn parameter or return is Int/Text without a refinement — \
+         tighten the type to express valid usage at the type level"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Verification }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let policy = refinement_policy(ctx);
+        if !policy.public_api_must_refine_int && !policy.public_api_must_refine_text {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let func = match &item.kind {
+                ItemKind::Function(f) => f,
+                _ => continue,
+            };
+            if !is_public_fn(func) {
+                continue;
+            }
+            // Walk parameters
+            for param in &func.params {
+                if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
+                    if let Some(reason) = check_unrefined_int_or_text(ty, &policy) {
+                        let (line, col) = span_to_line_col(ctx.source, param.span.start);
+                        issues.push(LintIssue {
+                            rule: "unrefined-public-int",
+                            level: LintLevel::Warning,
+                            file: ctx.file.to_path_buf(),
+                            line,
+                            column: col,
+                            message: format!(
+                                "public fn `{}` takes an unrefined {} parameter — \
+                                 add a refinement like `{}{{ … }}`",
+                                func.name, reason, reason
+                            ),
+                            suggestion: None,
+                            fixable: false,
+                        });
+                    }
+                }
+            }
+            // Walk return type
+            if let Some(ret) = func.return_type.as_ref() {
+                if let Some(reason) = check_unrefined_int_or_text(ret, &policy) {
+                    let (line, col) = span_to_line_col(ctx.source, ret.span.start);
+                    issues.push(LintIssue {
+                        rule: "unrefined-public-int",
+                        level: LintLevel::Warning,
+                        file: ctx.file.to_path_buf(),
+                        line,
+                        column: col,
+                        message: format!(
+                            "public fn `{}` returns unrefined {} — \
+                             add a refinement to express the postcondition",
+                            func.name, reason
+                        ),
+                        suggestion: None,
+                        fixable: false,
+                    });
+                }
+            }
+        }
+        issues
+    }
+}
+
+fn check_unrefined_int_or_text(ty: &Type, policy: &RefinementPolicyConfig) -> Option<&'static str> {
+    if is_refined(ty) {
+        return None;
+    }
+    match unwrap_refinement_kind(ty) {
+        TypeKind::Int if policy.public_api_must_refine_int => Some("Int"),
+        TypeKind::Text if policy.public_api_must_refine_text => Some("Text"),
+        _ => None,
+    }
+}
+
+// ── verify-implied-by-refinement ────────────────────────────────────
+// A function that uses refinement types in its parameters or return
+// MUST carry a `@verify(...)` annotation, otherwise the obligation
+// expressed by the refinement is checked only at runtime — losing
+// the static-verification value of refinement types.
+
+struct VerifyImpliedByRefinementPass;
+
+impl LintPass for VerifyImpliedByRefinementPass {
+    fn name(&self) -> &'static str { "verify-implied-by-refinement" }
+    fn description(&self) -> &'static str {
+        "Function uses refinement types but lacks @verify — \
+         the type-level obligation will only be checked at runtime"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Verification }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let policy = refinement_policy(ctx);
+        if !policy.require_verify_on_refined_fn {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let func = match &item.kind {
+                ItemKind::Function(f) => f,
+                _ => continue,
+            };
+            // Has @verify already? Done.
+            if attrs_contain(&func.attributes, "verify") {
+                continue;
+            }
+            let has_refined_param = func.params.iter().any(|p| {
+                if let verum_ast::FunctionParamKind::Regular { ty, .. } = &p.kind {
+                    is_refined(ty)
+                } else {
+                    false
+                }
+            });
+            let has_refined_return =
+                func.return_type.as_ref().map(|t| is_refined(t)).unwrap_or(false);
+            if has_refined_param || has_refined_return {
+                let (line, col) = span_to_line_col(ctx.source, item.span.start);
+                issues.push(LintIssue {
+                    rule: "verify-implied-by-refinement",
+                    level: LintLevel::Warning,
+                    file: ctx.file.to_path_buf(),
+                    line,
+                    column: col,
+                    message: format!(
+                        "fn `{}` uses refinement types but lacks @verify(...) — \
+                         add @verify(formal) so the obligation is statically checked",
+                        func.name
+                    ),
+                    suggestion: None,
+                    fixable: false,
+                });
+            }
+        }
+        issues
+    }
+}
+
+// ── public-must-have-verify ─────────────────────────────────────────
+// Configured via `[lint.verification_policy].public_must_have_verify`.
+// Every public function should carry a `@verify(...)` attribute —
+// from `runtime` (no proof, just runtime asserts) to `formal` (full
+// SMT proof). The default is "off" because not every project wants
+// every public fn formally verified, but for security-critical
+// codebases this is the policy that turns "you forgot @verify" into
+// a build error.
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+struct VerificationPolicyConfig {
+    public_must_have_verify: bool,
+}
+
+impl Default for VerificationPolicyConfig {
+    fn default() -> Self {
+        Self { public_must_have_verify: false }
+    }
+}
+
+struct PublicMustHaveVerifyPass;
+
+impl LintPass for PublicMustHaveVerifyPass {
+    fn name(&self) -> &'static str { "public-must-have-verify" }
+    fn description(&self) -> &'static str {
+        "Public function lacks @verify(...) — declare its verification \
+         strategy explicitly (runtime | static | formal | …)"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Verification }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let policy: VerificationPolicyConfig = ctx
+            .config
+            .and_then(|c| c.rule_config::<VerificationPolicyConfig>("verification-policy"))
+            .unwrap_or_default();
+        if !policy.public_must_have_verify {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let func = match &item.kind {
+                ItemKind::Function(f) => f,
+                _ => continue,
+            };
+            if !is_public_fn(func) {
+                continue;
+            }
+            if attrs_contain(&func.attributes, "verify") {
+                continue;
+            }
+            let (line, col) = span_to_line_col(ctx.source, item.span.start);
+            issues.push(LintIssue {
+                rule: "public-must-have-verify",
+                level: LintLevel::Hint,
+                file: ctx.file.to_path_buf(),
+                line,
+                column: col,
+                message: format!(
+                    "public fn `{}` lacks @verify(...) — declare its \
+                     verification strategy explicitly",
+                    func.name
+                ),
+                suggestion: None,
+                fixable: false,
+            });
+        }
+        issues
     }
 }
 
