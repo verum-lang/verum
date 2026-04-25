@@ -7,7 +7,32 @@
 // citation so `verum audit --framework-axioms` can enumerate the trusted
 // boundary of any proof that depends on them.
 //
-// The six packaged frameworks are:
+// ARCHITECTURE: meta-classifier-relative coordinates.
+//
+// Of the packaged frameworks below, `diakrisis` is the L5+ canonical-
+// primitive meta-classifier — it defines the coordinate system (ν, τ, ε)
+// in which the other frameworks live. Concretely:
+//
+//   • `diakrisis` declares the 5 foundational axioms (relative consistency,
+//     articulation/enactment Morita duality, dual no-go, dual gauge kernel,
+//     dual-primitive initiality) that establish the (Fw, ν, τ) coordinate
+//     space.
+//
+//   • All OTHER frameworks (`lurie_htt`, `schreiber_dcct`, `connes_*`, etc.)
+//     are *named coordinate points* within that space — each carries a
+//     specific (ν, τ) location read by `core.theory_interop.coord` and
+//     `verum audit --coord`. The framework itself is rigorous in its own
+//     standard literature; its *position relative to all others* is
+//     governed by the meta-classifier.
+//
+// In other words: when you write `@framework(lurie_htt, "HTT 5.2.7")` you
+// are simultaneously saying "this axiom postulates HTT 5.2.7" AND "this
+// axiom lives at coordinate (ν=ω, τ=intensional) in the meta-classifier
+// system shipped by `core.math.frameworks.diakrisis`". The two readings
+// coexist because Diakrisis is meta-classifier-neutral about *which*
+// theorems hold inside each framework — it only fixes the ordering.
+//
+// The seven packaged frameworks are:
 //
 //   lurie_htt               — Lurie, "Higher Topos Theory" (2009).
 //                             Presentability, ∞-topos formation, adjoint
@@ -34,6 +59,14 @@
 //   baez_dolan              — Gordon–Power–Street (1995) / Baez–Dolan
 //                             coherence for tricategories and higher
 //                             n-category theories.
+//
+//   diakrisis               — Canonical-primitive metaclassification
+//                             package: relative-consistency under 2
+//                             inaccessibles, articulation/enactment
+//                             Morita duality (M ⊣ A biadjunction),
+//                             dual no-go for absolute practice, dual
+//                             gauge-surjection kernel, dual-primitive
+//                             initiality.
 //
 // Every use of one of these axioms in downstream code surfaces as an
 // entry in `verum audit --framework-axioms`. The kernel's AxiomRegistry

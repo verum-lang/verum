@@ -982,6 +982,52 @@ public fn theorem_coord(t: Theorem) -> (Set<Framework>, Ordinal, TauFlag) {
 
 **Well-definedness.** `theorem_coord` is single-valued because `Ordinal` and `Set<Framework>` admit canonical joins (ordinal sup; set union); `TauFlag` is a Bool and `∧` is well-defined. The empty-dependency case (`∅, 0, intensional`) is the lattice's bottom element and matches the kernel-only baseline.
 
+### 10.4.1 Architectural relationship — meta-classifier vs. coordinate-point frameworks
+
+The (Framework, ν, τ) coordinate space introduced above is not abstract structure that materialises out of nothing — it is supplied by **one specific framework that occupies the meta-classifier role**. In the current packaging this framework is `diakrisis`; in principle any L5+ canonical-primitive metaclassification system could play the same role.
+
+**Two levels of `@framework` declarations:**
+
+1. **Meta-classifier framework** — declares the canonical-primitive structure that *defines* the (ν, τ, ε) coordinate space. The five axioms (relative-consistency under 2 inaccessibles, articulation/enactment Morita duality, dual no-go for absolute practice, dual gauge-surjection kernel, dual-primitive initial-object) jointly establish the metaclassification. See `core.math.frameworks.diakrisis`.
+
+2. **Coordinate-point frameworks** — every other `@framework` package (`lurie_htt`, `schreiber_dcct`, `connes_reconstruction`, `petz_classification`, `arnold_catastrophe`, `baez_dolan`, `owl2_fs`, `bounded_arithmetic_*`, ...) is a *named coordinate point* within that space. Each such framework carries a fixed `(ν, τ)` location that records its meta-classifier-relative position; the meta-classifier doesn't decide *which* theorems hold inside a coordinate-point framework — it only fixes the framework's stratification depth and intensionality flag relative to all other points.
+
+**Concretely**, when downstream code writes
+
+```verum
+@framework(lurie_htt, "HTT 5.2.7 (Adjoint Functor Theorem)")
+public axiom adjoint_functor_theorem<F>(...) -> Bool ensures ...;
+```
+
+two simultaneous claims are being made:
+
+- **(External rigour)** "this axiom postulates HTT 5.2.7" — the framework is rigorous in its own external literature, and an auditor can re-check the cited theorem against the source.
+- **(Coordinate-relative position)** "this axiom lives at coordinate `(ν=ω, τ=intensional)` in the meta-classifier system" — and that coordinate value is fixed by the meta-classifier's prescriptive lookup, NOT by lurie_htt itself.
+
+The two readings coexist because the meta-classifier is *coordinate-system-defining* but *theorem-content-neutral*: it tells you where a framework sits but not what it asserts.
+
+**Implementation contract:**
+
+- `core.math.frameworks.diakrisis` (the meta-classifier package) ships **5 axioms** describing the coordinate system itself.
+- Every other framework file ships axioms describing its own theorems, and its `(ν, τ)` coordinate is supplied by `core.theory_interop.coord::known_ordinal` / `known_tau` lookup. Those lookups are **prescribed** by the meta-classifier's canonical coordinate table; CLI `verum audit --coord` synchronises the two.
+- Because the meta-classifier *is* the coordinate system, it does NOT itself have a `(ν, τ)` value. Asking "what is `coord(diakrisis)`?" is a category mistake — analogous to asking "what coordinate does the origin of a coordinate system have?". Implementations should reflect this: `coord_of(α)` returns a sentinel for the meta-classifier (or alternatively the lattice top, by convention) so user code that accidentally queries the meta-classifier's coord doesn't silently produce a wrong number.
+- When the meta-classifier's prescriptive table updates (a coordinate-point framework's `(ν, τ)` is refined), Verum's lookup MUST follow. Drift between the meta-classifier prescription and Verum's lookup is a bug, not a degree of freedom.
+
+**Consequence for `theorem_coord`:**
+
+A theorem that depends on framework axioms from `lurie_htt` and `petz_classification` has
+
+```
+theorem_coord(T) = ({lurie_htt, petz_classification}, sup(ω, 2), intensional ∧ extensional)
+                = ({lurie_htt, petz_classification}, ω, extensional)
+```
+
+The `diakrisis` meta-classifier itself is an *implicit* dependency of every coordinate-bearing theorem (because the coordinate values are read from its prescriptive table), but it is not a *content* dependency — the theorem doesn't postulate any of the 5 meta-classifier axioms unless the user wrote `@framework(diakrisis, …)` explicitly. CLI tooling reflects this by listing `diakrisis` as a "structural dependency" rather than a "content dependency" in audit reports.
+
+**Future: pluggable meta-classifiers.**
+
+VUVA leaves room for a second meta-classifier (a non-Diakrisis L5+ framework that defines its own (ν, τ, ε) system). If such a thing is ever introduced — for example to support a non-2-inaccessible cardinal hierarchy or a different gauge primitive — it would be a *parallel* coordinate system, and theorems would carry one coordinate per active meta-classifier. Until then, `diakrisis` is the *unique* meta-classifier and the coordinate space is single.
+
 ---
 
 ## 11. Dual Stdlib — OC + DC
