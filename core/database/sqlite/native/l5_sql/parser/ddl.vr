@@ -42,7 +42,7 @@ mount core.database.sqlite.native.l5_sql.lexer.{
     Token, Keyword, Operator, Punct,
 };
 mount core.database.sqlite.native.l5_sql.ast.{
-    Statement, Expr, TableRef,
+    SqlStatement, Expr, TableRef,
     CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
     OnConflict,
 };
@@ -55,7 +55,7 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 // CREATE
 // -----------------------------------------------------------------------------
 
-public fn parse_create(ts: &mut SqlTokenStream) -> Result<Statement, ParseError> {
+public fn parse_create(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
     match ts.expect_keyword(KwCreate) { Ok(_) => {}, Err(e) => { return Err(e); } }
 
     let temporary = ts.accept_keyword(KwTemp) || ts.accept_keyword(KwTemporary);
@@ -451,7 +451,7 @@ fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<OnConflic
 // DROP
 // -----------------------------------------------------------------------------
 
-public fn parse_drop(ts: &mut SqlTokenStream) -> Result<Statement, ParseError> {
+public fn parse_drop(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
     match ts.expect_keyword(KwDrop) { Ok(_) => {}, Err(e) => { return Err(e); } }
 
     let kind_tag = if ts.accept_keyword(KwTable)   { 0 }

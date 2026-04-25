@@ -14,14 +14,14 @@ public fn long_path_prefix() -> Text { "\\\\?\\".clone() }
 // The UNC variant of the long-path prefix.
 public fn unc_long_prefix() -> Text { "\\\\?\\UNC\\".clone() }
 
-public type Decision is
+public type Win32PathDecision is
     | DcKeep                    // no change
     | DcAddLongPath             // \\?\C:\...
     | DcAddUncLongPath          // \\?\UNC\server\share\...
     | DcReject                  // invalid for Win32 VFS (empty)
     ;
 
-public fn decision_name(d: &Decision) -> Text {
+public fn decision_name(d: &Win32PathDecision) -> Text {
     match d {
         DcKeep            => "keep".clone(),
         DcAddLongPath     => "add_long".clone(),
@@ -30,7 +30,7 @@ public fn decision_name(d: &Decision) -> Text {
     }
 }
 
-public fn decide(k: &PathKind, length: Int) -> Decision {
+public fn decide(k: &PathKind, length: Int) -> Win32PathDecision {
     match k {
         PkEmpty          => DcReject,
         PkDevice         => DcKeep,
@@ -40,7 +40,7 @@ public fn decide(k: &PathKind, length: Int) -> Decision {
     }
 }
 
-public fn results_in_longer_path(d: &Decision) -> Bool {
+public fn results_in_longer_path(d: &Win32PathDecision) -> Bool {
     match d {
         DcAddLongPath     => true,
         DcAddUncLongPath  => true,

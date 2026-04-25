@@ -10,12 +10,12 @@
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l5_sql.{
-    Statement, CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
+    SqlStatement, CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
     OnConflict, TableRef,
     ParseError, parse_one, parse_batch,
 };
 
-fn parse(src: &Text) -> Result<Statement, ParseError> {
+fn parse(src: &Text) -> Result<SqlStatement, ParseError> {
     parse_one(src)
 }
 

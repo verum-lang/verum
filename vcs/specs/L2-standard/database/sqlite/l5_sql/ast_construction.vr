@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: sqlite, native, sql, ast
 // @timeout: 10000
-// @description: SQL AST — construct Statement / SelectStmt / Expr / DML nodes
+// @description: SQL AST — construct SqlStatement / SelectStmt / Expr / DML nodes
 //
 // Spec: internal/specs/sqlite-native.md §12.3
 
@@ -11,7 +11,7 @@ mount core.*;
 mount collections.List;
 mount base.{Maybe};
 mount core.database.sqlite.native.l5_sql.{
-    Statement, Expr, Literal, BinOp, UnOp,
+    SqlStatement, Expr, Literal, BinOp, UnOp,
     SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
     FromItem, OrderTerm, OrderDirection, LimitClause,
     TableRef,

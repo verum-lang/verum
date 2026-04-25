@@ -27,21 +27,21 @@ public fn allows_auto_index(m: &Mode) -> Bool {
     match m { AiOn => true, AiOff => false }
 }
 
-// Decision passed to the planner per join sub-plan.
-public type Decision is
+// AutoIndexDecision passed to the planner per join sub-plan.
+public type AutoIndexDecision is
     | DUseExisting       // an existing index covers the lookup
     | DBuildAuto         // no index covers; planner wants to build one
     | DLinearScan        // mode forbids auto-index; nested-loop scan
     ;
 
-public fn decide(m: &Mode, has_existing_index: Bool, predicate_is_selective: Bool) -> Decision {
+public fn decide(m: &Mode, has_existing_index: Bool, predicate_is_selective: Bool) -> AutoIndexDecision {
     if has_existing_index { return DUseExisting; }
     if !predicate_is_selective { return DLinearScan; }
     if !allows_auto_index(m) { return DLinearScan; }
     DBuildAuto
 }
 
-public fn decision_name(d: &Decision) -> Text {
+public fn decision_name(d: &AutoIndexDecision) -> Text {
     match d {
         DUseExisting => "use_existing".clone(),
         DBuildAuto   => "build_auto".clone(),
@@ -49,7 +49,7 @@ public fn decision_name(d: &Decision) -> Text {
     }
 }
 
-public fn would_warn(d: &Decision) -> Bool {
+public fn would_warn(d: &AutoIndexDecision) -> Bool {
     // SQLite logs an "automatic index" warning for DBuildAuto decisions.
     match d { DBuildAuto => true, _ => false }
 }

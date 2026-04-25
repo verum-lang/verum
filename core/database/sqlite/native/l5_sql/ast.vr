@@ -216,10 +216,10 @@ public type CreateTableStmt is {
 public type DropTargetKind is DtkTable | DtkIndex | DtkView | DtkTrigger;
 
 // -----------------------------------------------------------------------------
-// Top-level Statement
+// Top-level SqlStatement
 // -----------------------------------------------------------------------------
 
-public type Statement is
+public type SqlStatement is
       SSelect(SelectStmt)
     | SInsert(InsertStmt)
     | SUpdate(UpdateStmt)
@@ -235,7 +235,7 @@ public type Statement is
     | SSavepoint(Text)
     | SRelease(Text)
     | SPragma(Text /* name */, Maybe<Expr> /* value */)
-    | SExplain(Heap<Statement>, Bool /* query_plan */)
+    | SExplain(Heap<SqlStatement>, Bool /* query_plan */)
     | SVacuum(Maybe<Text> /* into */)
     | SReindex(Maybe<TableRef>)
     | SAttach(Expr /* path */, Expr /* name */)

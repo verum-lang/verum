@@ -37,7 +37,7 @@ public mount .lexer.{
 };
 
 public mount .ast.{
-    Statement, Expr, Literal, BinOp, UnOp,
+    SqlStatement, Expr, Literal, BinOp, UnOp,
     SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
     FromItem, JoinClause, JoinKind, CompoundOp,
     OrderTerm, OrderDirection, LimitClause,

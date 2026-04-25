@@ -11,7 +11,7 @@ mount core.database.sqlite.native.win32_vfs_paths.kind.{
 };
 mount core.database.sqlite.native.win32_vfs_paths.prefix.{
     long_path_prefix, unc_long_prefix,
-    Decision, DcKeep, DcAddLongPath, DcAddUncLongPath, DcReject,
+    Win32PathDecision, DcKeep, DcAddLongPath, DcAddUncLongPath, DcReject,
     decision_name, decide, results_in_longer_path,
 };
 mount base.{Bool};

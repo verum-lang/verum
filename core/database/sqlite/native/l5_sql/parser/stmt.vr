@@ -8,11 +8,11 @@ module core.database.sqlite.native.l5_sql.parser.stmt;
 //
 // The parser's public entry points:
 //
-//   parse_statement(ts) -> Result<Statement, ParseError>
+//   parse_statement(ts) -> Result<SqlStatement, ParseError>
 //       Parses one statement (no leading/trailing ';'). Dispatches on
 //       the leading keyword.
 //
-//   parse_batch(src) -> Result<List<Statement>, ParseError>
+//   parse_batch(src) -> Result<List<SqlStatement>, ParseError>
 //       Tokenises `src` and parses until EOF, consuming ';' between
 //       statements. Empty statements (';;') are silently skipped.
 // =============================================================================
@@ -23,7 +23,7 @@ mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l5_sql.lexer.{
     Token, Keyword, Operator, Punct, lex,
 };
-mount core.database.sqlite.native.l5_sql.ast.Statement;
+mount core.database.sqlite.native.l5_sql.ast.SqlStatement;
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
     SqlTokenStream, ParseError, parse_error, stream_new,
 };
@@ -44,7 +44,7 @@ mount core.database.sqlite.native.l5_sql.parser.misc.{
 // Single-statement dispatch
 // -----------------------------------------------------------------------------
 
-public fn parse_statement(ts: &mut SqlTokenStream) -> Result<Statement, ParseError> {
+public fn parse_statement(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
     // Leading `WITH` — counts as SELECT for the v1 since we haven't
     // wired CTE storage yet; fall through.
     match ts.peek() {
@@ -111,13 +111,13 @@ public fn parse_statement(ts: &mut SqlTokenStream) -> Result<Statement, ParseErr
 /// Parse every statement in `src`, separated by `;`. Trailing
 /// semicolons are optional; empty statements (double `;`) are
 /// tolerated.
-public fn parse_batch(src: &Text) -> Result<List<Statement>, ParseError> {
+public fn parse_batch(src: &Text) -> Result<List<SqlStatement>, ParseError> {
     let toks = match lex(src) {
         Ok(t)  => t,
         Err(e) => { return Err(ParseError { message: e.message, position: e.position }); }
     };
     let mut ts = stream_new(toks);
-    let mut out: List<Statement> = List.new();
+    let mut out: List<SqlStatement> = List.new();
     loop {
         // Skip leading semicolons (empty statements).
         while ts.accept_punct(PSemicolon) {}
@@ -141,7 +141,7 @@ public fn parse_batch(src: &Text) -> Result<List<Statement>, ParseError> {
 /// Single-statement convenience — parse exactly one statement from
 /// the string; ignore a trailing `;` if present. Fails if the input
 /// contains more than one statement.
-public fn parse_one(src: &Text) -> Result<Statement, ParseError> {
+public fn parse_one(src: &Text) -> Result<SqlStatement, ParseError> {
     let batch = match parse_batch(src) {
         Ok(v)  => v,
         Err(e) => { return Err(e); }

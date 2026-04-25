@@ -10,7 +10,7 @@
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l5_sql.{
-    Statement, PlanNode, plan_statement,
+    SqlStatement, PlanNode, plan_statement,
     CodegenError, codegen,
     CompileError, compile, compile_raw,
     parse_one,
