@@ -9,11 +9,11 @@ module core.database.sqlite.native.malloc_fault_injection.engine;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.malloc_fault_injection.schedule.{
-    FaultSchedule, FsDisabled, FsAfterNth, FsEveryNth, FsAlways,
+    MallocFaultSchedule, FsDisabled, FsAfterNth, FsEveryNth, FsAlways,
 };
 
 public type FaultEngine is {
-    schedule: FaultSchedule,
+    schedule: MallocFaultSchedule,
     /// Monotone malloc call count.
     mallocs_observed: Int64,
     faults_issued: Int64,
@@ -28,7 +28,7 @@ public fn new_engine() -> FaultEngine {
 }
 
 implement FaultEngine {
-    pub fn install(&mut self, s: FaultSchedule) {
+    pub fn install(&mut self, s: MallocFaultSchedule) {
         self.schedule = s;
         self.mallocs_observed = 0 as Int64;
         self.faults_issued = 0 as Int64;

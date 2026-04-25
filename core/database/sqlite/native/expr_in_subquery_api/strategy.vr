@@ -45,15 +45,15 @@ public fn is_degenerate(s: &InStrategy) -> Bool {
 }
 
 // Inputs to the strategy classifier.
-public type Features is {
+public type SubqueryStrategyFeatures is {
     correlated: Bool,        // subquery references outer columns
     is_constant_list: Bool,  // right side is a literal tuple
     list_is_empty: Bool,
     needs_dedup: Bool,       // duplicates in the inner SELECT are possible
 };
 
-public fn zero_features() -> Features {
-    Features {
+public fn zero_features() -> SubqueryStrategyFeatures {
+    SubqueryStrategyFeatures {
         correlated: false,
         is_constant_list: false,
         list_is_empty: false,
@@ -61,7 +61,7 @@ public fn zero_features() -> Features {
     }
 }
 
-public fn classify(f: &Features) -> InStrategy {
+public fn classify(f: &SubqueryStrategyFeatures) -> InStrategy {
     if f.list_is_empty { return IsEmpty; }
     if f.is_constant_list { return IsConstantList; }
     if f.correlated { return IsCorrelatedScan; }

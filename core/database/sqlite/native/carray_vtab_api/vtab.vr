@@ -39,14 +39,14 @@ public fn bytes_per_element(t: &ElemType) -> Int {
 }
 
 // Validation of carray() args at xFilter time.
-public type FilterCheck is
+public type CArrayFilterCheck is
     | FcOk
     | FcNullPointer            // P was unbound or sqlite3_value_pointer mismatched
     | FcNegativeLength         // N < 0
     | FcUnknownType            // T not in the well-known set
     ;
 
-public fn check_filter(p_present: Bool, n: Int64, type_str: Text) -> FilterCheck {
+public fn check_filter(p_present: Bool, n: Int64, type_str: Text) -> CArrayFilterCheck {
     if !p_present { return FcNullPointer; }
     if n < (0 as Int64) { return FcNegativeLength; }
     if type_str != "int32".clone()
@@ -58,7 +58,7 @@ public fn check_filter(p_present: Bool, n: Int64, type_str: Text) -> FilterCheck
     FcOk
 }
 
-public fn check_name(c: &FilterCheck) -> Text {
+public fn check_name(c: &CArrayFilterCheck) -> Text {
     match c {
         FcOk              => "ok".clone(),
         FcNullPointer     => "null_pointer".clone(),
@@ -67,7 +67,7 @@ public fn check_name(c: &FilterCheck) -> Text {
     }
 }
 
-public fn is_ok(c: &FilterCheck) -> Bool {
+public fn is_ok(c: &CArrayFilterCheck) -> Bool {
     match c { FcOk => true, _ => false }
 }
 

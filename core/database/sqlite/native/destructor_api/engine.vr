@@ -12,7 +12,7 @@ module core.database.sqlite.native.destructor_api.engine;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.destructor_api.kind.{
-    Destructor, DStatic, DTransient, DCustom, will_copy, will_invoke_callback,
+    BindDestructorKind, DStatic, DTransient, DCustom, will_copy, will_invoke_callback,
 };
 
 public type DestructorEngine is {
@@ -30,7 +30,7 @@ public fn new_engine() -> DestructorEngine {
 }
 
 implement DestructorEngine {
-    pub fn observe(&mut self, d: &Destructor) {
+    pub fn observe(&mut self, d: &BindDestructorKind) {
         match d {
             DStatic     => self.static_refs = self.static_refs + (1 as Int64),
             DTransient  => self.transient_copies = self.transient_copies + (1 as Int64),

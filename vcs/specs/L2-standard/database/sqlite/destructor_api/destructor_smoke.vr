@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.destructor_api.kind.{
-    Destructor, DStatic, DTransient, DCustom,
+    BindDestructorKind, DStatic, DTransient, DCustom,
     SQLITE_STATIC, SQLITE_TRANSIENT,
     destructor_ptr, destructor_name,
     will_copy, will_invoke_callback, from_ptr,

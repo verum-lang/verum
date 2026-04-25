@@ -12,7 +12,7 @@ mount core.database.sqlite.native.expr_in_subquery_api.strategy.{
     strategy_name,
     runs_inner_once, uses_ephemeral_btree,
     is_literal_list, is_degenerate,
-    Features, zero_features, classify,
+    SubqueryStrategyFeatures, zero_features, classify,
     not_in_on_empty_is_true,
 };
 mount base.{Bool};

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.malloc_fault_injection.schedule.{
-    FaultSchedule,
+    MallocFaultSchedule,
     FsDisabled, FsAfterNth, FsEveryNth, FsAlways,
     schedule_name, is_active,
 };

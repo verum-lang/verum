@@ -13,7 +13,7 @@ module core.database.sqlite.native.csv_vtab_api.schema;
 mount core.*;
 mount base.{Bool, Maybe, Text};
 mount core.database.sqlite.native.csv_vtab_api.options.{
-    CsvOptions,
+    CsvVtabOptions,
 };
 
 fn push_text(dst: &mut Text, s: &Text) {
@@ -38,7 +38,7 @@ fn push_int(dst: &mut Text, mut n: Int) {
     }
 }
 
-public fn infer_schema(opts: &CsvOptions, first_row_columns: Int) -> Text {
+public fn infer_schema(opts: &CsvVtabOptions, first_row_columns: Int) -> Text {
     match &opts.schema {
         Maybe.Some(s) => return s.clone(),
         Maybe.None => {}
@@ -60,7 +60,7 @@ public fn infer_schema(opts: &CsvOptions, first_row_columns: Int) -> Text {
     out
 }
 
-public fn effective_column_count(opts: &CsvOptions, first_row_columns: Int) -> Int {
+public fn effective_column_count(opts: &CsvVtabOptions, first_row_columns: Int) -> Int {
     match &opts.columns {
         Maybe.Some(n) => *n,
         Maybe.None => first_row_columns,

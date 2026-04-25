@@ -7,7 +7,7 @@
 
 mount core.database.sqlite.native.csv_vtab_api.options.{
     DataSource, DsFilename, DsInline,
-    CsvOptions,
+    CsvVtabOptions,
     default_options, with_header, with_tab_delim, without_quoting, is_quoted,
 };
 mount core.database.sqlite.native.csv_vtab_api.schema.{

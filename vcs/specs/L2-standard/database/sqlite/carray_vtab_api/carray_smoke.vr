@@ -8,7 +8,7 @@
 mount core.database.sqlite.native.carray_vtab_api.vtab.{
     ElemType, EtInt32, EtInt64, EtDouble, EtText,
     type_string, from_type_string, bytes_per_element,
-    FilterCheck, FcOk, FcNullPointer, FcNegativeLength, FcUnknownType,
+    CArrayFilterCheck, FcOk, FcNullPointer, FcNegativeLength, FcUnknownType,
     check_filter, check_name, is_ok, pointer_tag,
     Column, ColValue, ColRowid, ColPointer,
     column_name, column_index, well_known_column_count,

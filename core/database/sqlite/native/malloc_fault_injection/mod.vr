@@ -14,7 +14,7 @@
 //   * Always                  — every malloc fails
 //
 // Submodules:
-//   * `schedule`  — FaultSchedule sum
+//   * `schedule`  — MallocFaultSchedule sum
 //   * `engine`    — ticker that issues the pass/fail verdict
 // =============================================================================
 

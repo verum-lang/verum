@@ -13,7 +13,7 @@ mount core.database.sqlite.native.errors.code.{
     IOERR_READ, IOERR_WRITE, IOERR_FSYNC,
 };
 mount core.database.sqlite.native.errors.message.{
-    ErrorMessage, new_message, ok_message, errstr,
+    SqlErrorMessage, new_message, ok_message, errstr,
 };
 mount core.database.sqlite.native.errors.engine.{
     sqlite3_errcode, sqlite3_extended_errcode,

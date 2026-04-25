@@ -19,26 +19,26 @@ mount core.database.sqlite.native.errors.code.{
     PrimaryCode, primary_numeric, extended_numeric,
 };
 mount core.database.sqlite.native.errors.message.{
-    ErrorMessage, errstr,
+    SqlErrorMessage, errstr,
 };
 
-public fn sqlite3_errcode(m: &ErrorMessage) -> Int {
+public fn sqlite3_errcode(m: &SqlErrorMessage) -> Int {
     primary_numeric(&m.code.primary)
 }
 
-public fn sqlite3_extended_errcode(m: &ErrorMessage) -> Int {
+public fn sqlite3_extended_errcode(m: &SqlErrorMessage) -> Int {
     extended_numeric(&m.code)
 }
 
-public fn sqlite3_errmsg(m: &ErrorMessage) -> Text {
+public fn sqlite3_errmsg(m: &SqlErrorMessage) -> Text {
     m.text.clone()
 }
 
-public fn sqlite3_error_offset(m: &ErrorMessage) -> Int {
+public fn sqlite3_error_offset(m: &SqlErrorMessage) -> Int {
     m.offset
 }
 
-public fn sqlite3_system_errno(m: &ErrorMessage) -> Int {
+public fn sqlite3_system_errno(m: &SqlErrorMessage) -> Int {
     m.system_errno
 }
 

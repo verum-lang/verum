@@ -1,5 +1,5 @@
 // =============================================================================
-// csv_vtab_api/options.vr — CsvOptions
+// csv_vtab_api/options.vr — CsvVtabOptions
 // =============================================================================
 // Spec: SQLite ext/misc/csv.c
 // =============================================================================
@@ -13,7 +13,7 @@ public type DataSource is
       DsFilename(Text)
     | DsInline(Text);
 
-public type CsvOptions is {
+public type CsvVtabOptions is {
     source: DataSource,
     /// Column delimiter byte (default 0x2C = ',').
     delim: u8,
@@ -27,8 +27,8 @@ public type CsvOptions is {
     schema: Maybe<Text>,
 }
 
-public fn default_options(source: DataSource) -> CsvOptions {
-    CsvOptions {
+public fn default_options(source: DataSource) -> CsvVtabOptions {
+    CsvVtabOptions {
         source: source,
         delim: 0x2C as u8,
         quote_byte: 0x22 as u8,
@@ -38,10 +38,10 @@ public fn default_options(source: DataSource) -> CsvOptions {
     }
 }
 
-public fn with_header(o: &mut CsvOptions) { o.header = true; }
+public fn with_header(o: &mut CsvVtabOptions) { o.header = true; }
 
-public fn with_tab_delim(o: &mut CsvOptions) { o.delim = 0x09 as u8; }
+public fn with_tab_delim(o: &mut CsvVtabOptions) { o.delim = 0x09 as u8; }
 
-public fn without_quoting(o: &mut CsvOptions) { o.quote_byte = 0 as u8; }
+public fn without_quoting(o: &mut CsvVtabOptions) { o.quote_byte = 0 as u8; }
 
-public fn is_quoted(o: &CsvOptions) -> Bool { o.quote_byte != (0 as u8) }
+public fn is_quoted(o: &CsvVtabOptions) -> Bool { o.quote_byte != (0 as u8) }

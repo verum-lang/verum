@@ -3,7 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_errmsg / sqlite3_errstr / sqlite3_error_offset
 //
-// `ErrorMessage` is the value returned by sqlite3_errmsg.  It carries:
+// `SqlErrorMessage` is the value returned by sqlite3_errmsg.  It carries:
 //   * the extended code (for sqlite3_extended_errcode),
 //   * the diagnostic text,
 //   * an optional byte-offset into the *current* SQL for parse errors
@@ -21,7 +21,7 @@ mount core.database.sqlite.native.errors.code.{
     extended_is_success,
 };
 
-public type ErrorMessage is {
+public type SqlErrorMessage is {
     code: ExtendedCode,
     text: Text,
     /// -1 → no offset available (not a parse-time error).
@@ -30,8 +30,8 @@ public type ErrorMessage is {
     system_errno: Int,
 }
 
-public fn ok_message() -> ErrorMessage {
-    ErrorMessage {
+public fn ok_message() -> SqlErrorMessage {
+    SqlErrorMessage {
         code: ExtendedCode { primary: PcOk, extension: 0 },
         text: "".clone(),
         offset: -1,
@@ -39,11 +39,11 @@ public fn ok_message() -> ErrorMessage {
     }
 }
 
-public fn new_message(code: ExtendedCode, text: Text) -> ErrorMessage {
-    ErrorMessage { code: code, text: text, offset: -1, system_errno: 0 }
+public fn new_message(code: ExtendedCode, text: Text) -> SqlErrorMessage {
+    SqlErrorMessage { code: code, text: text, offset: -1, system_errno: 0 }
 }
 
-implement ErrorMessage {
+implement SqlErrorMessage {
     pub fn with_offset(&mut self, offset: Int) {
         self.offset = offset;
     }

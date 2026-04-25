@@ -12,7 +12,7 @@
 //   any other ptr    — engine calls it when releasing the value
 //
 // Submodules:
-//   * `kind`    — Destructor sum (Static / Transient / Custom(handle))
+//   * `kind`    — BindDestructorKind sum (Static / Transient / Custom(handle))
 //   * `engine`  — invocation bookkeeping
 // =============================================================================
 

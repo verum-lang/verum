@@ -13,7 +13,7 @@
 //   );
 //
 // Submodules:
-//   * `options`   — CsvOptions (delimiter/quote/header/columns)
+//   * `options`   — CsvVtabOptions (delimiter/quote/header/columns)
 //   * `schema`    — derived-column inference when schema not supplied
 // =============================================================================
 
