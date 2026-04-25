@@ -10,6 +10,34 @@
 
 ## 0. Executive Summary для разработчиков
 
+### 0.0 Authority, versioning, governance
+
+**Authority gradient**:
+- **VUVA** ([verification-architecture.md](./verification-architecture.md)) — *authoritative architectural specification*. Single source of truth for current architecture.
+- **VFE** (этот документ) — *forward-looking proposal*. Subject to technical review + RFC process before adoption.
+
+**Что VFE НЕ делает**:
+- Не отменяет и не заменяет VUVA.
+- Не вводит breaking changes без обсуждения.
+- Не обходит RFC-процесс.
+
+**RFC-process для VFE-N**:
+1. **Stage 0** (proposal): этот документ.
+2. **Stage 1** (RFC): отдельная RFC с конкретными API + migration plan + rejection criteria.
+3. **Stage 2** (prototype): proof-of-concept implementation в feature branch.
+4. **Stage 3** (review): kernel team + theory reviewer sign-off.
+5. **Stage 4** (merge): включение в main с update VUVA.
+
+**Versioning**:
+- VUVA: stable, semver.
+- VFE: experimental until merged. After merge — VUVA-versioned.
+- Каждое VFE-N принятие — minor version bump VUVA (e.g., VUVA 1.5 + VFE-1 → VUVA 2.0 после kernel rule addition).
+
+**Backward compatibility**:
+- Все VFE kernel rules **опт-ин** через `@require_extension(vfe_N)` annotation.
+- Без annotation — kernel работает в VUVA-baseline mode.
+- 2-year deprecation window before extensions become default.
+
 ### 0.1 Что предлагается
 
 VFE предлагает **6 фундаментальных расширений** ядра Verum, основанных на закрытых теоремах Diakrisis. Каждое расширение — отдельная инженерная программа на 6–18 месяцев; вместе они образуют **операциональное замыкание Verum** относительно полной Diakrisis-теории.
@@ -751,16 +779,16 @@ theorem weak_coherence<P, φ>(prog: P, prop: φ)
 | `runtime` | Runtime assertions | 0 | O(1) | existing |
 | `static` | Conservative dataflow | 1 | Fast | existing |
 | `fast` | Bounded SMT | 2 | ≤ 100 ms | existing |
-| `complexity_typed` | Bounded-arithmetic verification | n < ω | Polynomial | VFE-8 |
-| `formal` | Full SMT portfolio | ω | ≤ 5 s | existing |
-| `proof` | User tactic proof | ω+1 | Unbounded | existing |
-| `thorough` | `formal` + invariants | ω·2 | 2× | existing |
-| `reliable` | Cross-solver agreement | ω·2+1 | Racing | existing |
-| `certified` | Certificate re-check | ω·2+2 | + recheck | existing |
-| `synthesize` | Inverse proof search | ≤ω·3+1 | Unbounded | existing |
-| **`coherent`** | **α/ε bidirectional check** | **ω·3** | **O(2^O(\|P\|+\|φ\|))** | **VFE-6 strict** |
-| **`coherent_static`** | **α-cert + symbolic ε-claim** | **ω·3** | **O(\|P\|·\|φ\|)** | **VFE-6 weak** |
-| **`coherent_runtime`** | **α-cert + runtime ε-monitor** | **ω·3** | **O(\|trace\|·\|φ\|)** | **VFE-6 hybrid** |
+| `complexity_typed` | Bounded-arithmetic verification | n < ω | Polynomial; CI budget ≤ 30 s | VFE-8 |
+| `formal` | Full SMT portfolio | ω | ≤ 5 s; CI budget ≤ 60 s | existing |
+| `proof` | User tactic proof | ω+1 | Unbounded; CI budget ≤ 5 min | existing |
+| `thorough` | `formal` + invariants | ω·2 | 2×; CI budget ≤ 10 min | existing |
+| `reliable` | Cross-solver agreement | ω·2+1 | Racing; CI budget ≤ 15 min | existing |
+| `certified` | Certificate re-check | ω·2+2 | + recheck; CI budget ≤ 20 min | existing |
+| **`coherent_static`** | **α-cert + symbolic ε-claim** | **ω·2 + 3** | **O(\|P\|·\|φ\|); ≤ 60 s** | **VFE-6 weak** |
+| **`coherent_runtime`** | **α-cert + runtime ε-monitor** | **ω·2 + 4** | **O(\|trace\|·\|φ\|); ≤ 5 min** | **VFE-6 hybrid** |
+| **`coherent`** | **α/ε bidirectional check** | **ω·2 + 5** | **O(2^O(\|P\|+\|φ\|)); ≤ 30 min** | **VFE-6 strict** |
+| `synthesize` | Inverse proof search | ≤ω·3+1 | Unbounded; soft cap ≤ 60 min | existing (top of ladder) |
 
 **Семантика трёх уровней**:
 - `coherent` (full): полный bidirectional roundtrip check, single-exponential, для critical-safety code.
@@ -1000,21 +1028,42 @@ theorem ludics_perf_equivalence()
 
 ---
 
-## 12. Roadmap — 6 phases over 36 months
+## 12. Roadmap — VFE как continuation VUVA Phase 6+
 
-| Phase | Months | Deliverables | VFE IDs |
+**Critical pre-condition**: VFE начинается **после** завершения VUVA Phase 5 (см. [verification-architecture.md §16.5](./verification-architecture.md)). VFE расширяет VUVA Phase 6 ("Full MSFS self-recognition"), не заменяет более ранние phases.
+
+**Reconciliation table** (VUVA → VFE):
+
+| VUVA Phase | VFE Phase | Months (from VUVA T0) | Pre-conditions |
 |---|---|---|---|
-| **P1** | 0-6 | ε-arithmetic + K-Eps-Mu kernel rule | VFE-1 |
-| **P2** | 6-12 | Round-trip 108.T algorithm + canonicalize | VFE-2 |
-| **P3** | 12-18 | Stack-model semantics + κ-башня | VFE-3, VFE-7, VFE-8 |
-| **P4** | 18-24 | (∞,∞)-categorical support | VFE-4 |
-| **P5** | 24-30 | Eff layer + autopoiesis runtime + BHK extraction | VFE-5, VFE-9, VFE-10 |
-| **P6** | 30-36 | Operational coherence checker | VFE-6 (final synthesis) |
+| Phase 1-5 | (none — VFE depends) | 0-24 | VUVA baseline |
+| **Phase 6** + **VFE-P1** | ε-arithmetic + K-Eps-Mu | 24-30 | VUVA Phase 5 complete |
+| **VFE-P2** | Round-trip 108.T + canonicalize | 30-36 | VFE-P1 |
+| **VFE-P3** | Stack-model semantics + κ-tower + complexity-typed | 36-42 | VFE-P2 |
+| **VFE-P4** | (∞,∞)-categorical support | 42-48 | VFE-P3 |
+| **VFE-P5** | Eff layer + autopoiesis runtime + BHK extraction + ludics | 48-54 | VFE-P4 |
+| **VFE-P6** | Operational coherence checker | 54-60 | VFE-P5 |
+
+**Перевод сроков**: VFE — **5-летняя программа** после VUVA stabilization (суммарно ~5 лет от VUVA T0 до VFE-P6 completion). Реалистично для proof-assistant evolution.
 
 Каждая фаза завершается публикацией:
 - Working build с unit tests на 100% покрытие.
 - Performance benchmarks vs Coq/Lean/Agda.
 - Diakrisis-corpus verification: все 142 теоремы проходят соответствующие checks.
+- **Update VUVA** с новой stable version (VUVA 1.5 + VFE-P1 → VUVA 2.0).
+- **Update [/12-actic/10-implementation-status](https://...)** на стороне Diakrisis (cross-ownership).
+
+**Migration policy**:
+- Каждое VFE-N — opt-in через `@require_extension(vfe_N)` annotation на module/file/project level.
+- Без annotation — VUVA-baseline mode (kernel rules не активны).
+- After 2 years opt-in → kernel rules становятся default; old behavior — opt-out через `@disable_extension(vfe_N)`.
+- After 4 years — old behavior removed; opt-out invalidated.
+
+**Critical kernel rule rollout**:
+- K-Eps-Mu (VFE-P1): low risk (additional check; не отвергает VUVA-correct programs).
+- K-Round-Trip (VFE-P2): medium risk (отвергает programs с broken α/ε naturality).
+- K-Universe-Ascent (VFE-P3): high risk (требует universe-tagging для всех артикуляций).
+- K-Refine-omega (VFE-P3): medium risk (отвергает modal paradoxes; но мало programs их используют).
 
 ---
 
@@ -1045,6 +1094,52 @@ theorem ludics_perf_equivalence()
 )
 public axiom adjunction_M_dashv_A: ...
 ```
+
+---
+
+## 13.5 Per-VFE engineering caveats (red-team-derived)
+
+После second-round red-team следующие caveats явно фиксированы:
+
+**VFE-1 (K-Eps-Mu) — decidability**:
+- Полная τ-naturality проверка в общем случае — **полу-разрешимое** (Σ_1).
+- Decidable для finitely-axiomatized articulations (как и round-trip 16.10).
+- Compiler **не** требует full naturality check; проверяет canonicity τ через explicit data в `@framework` declarations.
+
+**VFE-2 (round-trip) — fallback для не-finitely-axiomatized R-S**:
+- `lurie_htt`, `schreiber_dcct` (ν=ω, ω+2) — **не** finitely-axiomatized.
+- Для них round-trip — **semi-decidable** (Σ_1 per Theorem 16.6).
+- Fallback: `@verify(coherent_static)` (без full round-trip), не `coherent`.
+- CLI report: `verum audit --round-trip` явно показывает decidable / semi-decidable status per framework.
+
+**VFE-3 (universe-tagging) — performance**:
+- Universe metadata: 1 byte per `@framework` declaration (κ_1=0, κ_2=1, truncated=2).
+- Type-check overhead: ≤ 5% (estimated; benchmark required Phase VFE-P3).
+- Memory: ≤ 100 bytes per articulation (negligible).
+
+**VFE-5 (Eff layer) — symbolic vs execution**:
+- $\omega^2$-итерация в Eff — **symbolic** (proof-level), не runtime execution.
+- `approximate_autopoiesis(ε, depth)` — **только** этот API runtime-executable; finite depth.
+- Verum runtime **не** выполняет higher-type computability в production execution.
+- Eff layer — это **denotational** semantic для verification, не operational runtime.
+
+**VFE-7 (K-Refine-omega) — open formulas**:
+- md^ω определён для closed terms (no free vars).
+- Для open formulas: $\mathrm{md}^\omega(P(x_1, \ldots, x_n))$ определяется как $\mathrm{md}^\omega$ closure $\forall x_1 \ldots x_n. P$.
+- Universal closure technique — стандартная (Smoryński 1985 §1.2).
+- Compiler implementation: ~50 LOC additional для open-formula handling.
+
+**VFE-9 (effects vs HoTT path types) — interaction**:
+- Path types: HoTT-construct (cubical kernel).
+- Effect monads: stdlib-construct (`core.action.effects`).
+- **Взаимодействие**: effects на typed values, paths на types. Нет direct interaction; они в orthogonal планах.
+- Edge case: `Path<T<A>, T<B>>` для effect monad T — это path в effect-typed values; обрабатывается через cubical operators (transp, hcomp).
+
+**VFE-10 (Ludics) — infinite-branching**:
+- Ludics designs могут быть infinite-branching trees.
+- Verum implementation: **lazy evaluation** для design trees через cofix.
+- Cut-elimination: bounded depth (configurable, default 1000 reduction steps); divergent computations — UNKNOWN verdict.
+- Memory: ≤ 100 MB для typical proofs; может потребовать optimization для UHM-scale (223 теоремы).
 
 ---
 
@@ -1449,7 +1544,127 @@ Verum-Foundation-Marketplace:
 
 Прагматичный план: сначала Tier A (закрепить closed teorems), затем Tier B (добавить practical features), Tier C — после стабилизации экосистемы.
 
-### 18.9 Rejected ideas (антипаттерны)
+### 18.9 Radikal extensions VFE+ (10-летний горизонт)
+
+После завершения VFE-1..10 + 18.1-18.7 архитектура Verum достигает уровня, при котором становятся возможны **системные расширения**, выходящие за рамки proof assistant в смежные домены.
+
+#### VFE+1: Proof Network Federation Protocol (PNFP)
+
+**Концепция**: Verum-сеть как distributed system для cross-institutional verification.
+
+```
+University A (Lean-foundation) ──┐
+                                 │
+University B (Coq-foundation) ───┼─── Verum Federation Hub ─── Verified Knowledge Pool
+                                 │
+University C (Diakrisis-stack) ──┘
+```
+
+Каждый node:
+- Поддерживает свою α-семантику.
+- Экспортирует certificates через 108.T-bridge.
+- Проверяет import-сертификаты через round-trip 16.10.
+
+**Технологический impact**: первая **формально верифицированная** distributed scientific infrastructure. Каждое published math result в federation — globally cross-checkable.
+
+**Прецедент**: Lean's mathlib как centralized; Verum federation — decentralized version.
+
+#### VFE+2: AI co-author с verification-integrity
+
+**Концепция**: AI agent как proof author, Verum как verification gatekeeper.
+
+```
+LLM Agent ──proposes proof──> Verum kernel
+                                   │
+                                   ├─► reject (with explanation)
+                                   └─► accept (with certificate)
+                                          │
+                                          ├─► export to mathlib
+                                          └─► add to corpus
+```
+
+Critical safety property: **AI не может обойти kernel** (LCF discipline + certificate recheck из VUVA §2.5). AI generates **suggestions**, kernel **decides**.
+
+**Применение**: автоматизация Pathway-B УГМ (223 теоремы → AI-генерированные proofs → Verum verification → mathlib publication).
+
+#### VFE+3: Verum-based AI alignment
+
+**Концепция**: Использовать ε-координаты для AI safety constraints.
+
+Каждое AI-action в production system аннотируется `@enact(epsilon = ...)`. Через VFE-6 coherence checker:
+
+```verum
+@enact(epsilon = "ω")  // atomic decision
+@verify(coherent)
+fn ai_decide(input: Context) -> Decision {
+    // ...
+}
+
+@enact(epsilon = "ω·2")  // tradition-level (e.g., medical protocol)
+@verify(coherent_runtime)
+fn ai_treatment_recommendation(patient: PatientData) -> Treatment {
+    // ...
+}
+
+@enact(epsilon = "ω²")  // institutional (e.g., self-modification)
+@verify(coherent)  // strict — must be bidirectionally checked
+@require_extension(vfe_6)
+fn ai_self_modify(plan: ModificationPlan) -> Result<NewWeights> {
+    // ...
+}
+```
+
+**Result**: AI system has **mathematically verified** ε-bound. Never crosses ε-threshold without explicit human approval.
+
+**Применение**: AGI alignment, autonomous systems safety, medical AI.
+
+#### VFE+4: Cross-disciplinary verified knowledge
+
+**Концепция**: Verum + Noesis (см. /11-noesis/ в Diakrisis) = formally verified knowledge graph across disciplines.
+
+```
+Math knowledge ─── Verum (Diakrisis) ─── Physics knowledge
+       │                                          │
+       └──── Bridges via Theorem 108.T ─────────┘
+                       │
+              Biology knowledge
+                       │
+              Economics knowledge
+```
+
+Each fact в graph has:
+- α-семантика (which foundation it lives in).
+- ε-координата (operational level).
+- ν-координата (depth).
+- Verified bridges to other domains.
+
+**Применение**: scientific knowledge management, evidence-based policy, integrative research.
+
+#### VFE+5: Verum as theory-design tool
+
+**Концепция**: Не только verify existing theories, но и **explore design space** через round-trip + coherence.
+
+Workflow:
+1. Designer specifies new α-семантика partially (axioms + intended models).
+2. Verum runs `coherent` checks against known α (ZFC, HoTT, NCG).
+3. Verum reports: «Your candidate α is Morita-equivalent to NCG with extension X. Or it has obstruction Y at depth ν=ω+1.»
+4. Designer iterates.
+
+**Применение**: research mathematics, foundation engineering, exploring неклассические логики.
+
+**Прецедент**: Lean's `decide` tactic as theory-design feedback. VFE+5 — масштабирование на foundation-level.
+
+#### Feasibility assessment для VFE+
+
+| Idea | Feasibility | Decade |
+|---|---|---|
+| VFE+1 PNFP | Medium | 2030s |
+| VFE+2 AI co-author | High (already happening with LLMs) | Late 2020s |
+| VFE+3 AI alignment | Medium | 2030s |
+| VFE+4 Cross-disciplinary | Long-term | 2040s |
+| VFE+5 Theory-design | High (extension of existing tactics) | Late 2020s |
+
+### 18.10 Rejected ideas (антипаттерны)
 
 Чтобы документ был честным, явно отмечаю идеи, которые **не** включены, и почему:
 
