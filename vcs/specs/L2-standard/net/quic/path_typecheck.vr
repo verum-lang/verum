@@ -6,7 +6,7 @@
 // @expect: pass
 
 mount core.net.quic.path.{
-    Path, PathState, PathError, PathManager, TimerOutcome,
+    QuicPath, PathState, PathError, PathManager, TimerOutcome,
     ANTI_AMPLIFICATION_FACTOR, CHALLENGE_TIMEOUT, MAX_CHALLENGE_ATTEMPTS,
 };
 mount core.net.addr.{SocketAddr};
@@ -22,7 +22,7 @@ fn dummy_addr() -> SocketAddr {
 fn check_validation_flow() {
     let local = dummy_addr();
     let remote = dummy_addr();
-    let mut path = Path.new(local, remote, false);
+    let mut path = QuicPath.new(local, remote, false);
 
     // Initially unvalidated → cannot send without peer receive.
     let _ = path.can_send(100_u64);
@@ -44,7 +44,7 @@ fn check_validation_flow() {
 }
 
 fn check_path_manager() {
-    let initial = Path.new(dummy_addr(), dummy_addr(), true);
+    let initial = QuicPath.new(dummy_addr(), dummy_addr(), true);
     let mut pm = PathManager.new(initial);
     pm.on_new_remote(dummy_addr(), dummy_addr());
     let _ = pm.promote_standby();

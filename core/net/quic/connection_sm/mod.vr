@@ -99,10 +99,10 @@ mount core.net.quic.error.{QuicError};
 public mount .state.{Initial, Handshake, OneRtt, Closing, Draining};
 
 // =============================================================================
-// Role + outbound datagram
+// QuicRole + outbound datagram
 // =============================================================================
 
-public type Role is ClientEnd | ServerEnd;
+public type QuicRole is ClientEnd | ServerEnd;
 
 public type Datagram is {
     bytes: List<Byte>,
@@ -141,7 +141,7 @@ implement QuicKeys {
 /// move forward in lockstep with the SM phase; read-only ones (role,
 /// version, etc.) are set at construction and never change.
 public type ConnState is {
-    role:          Role,
+    role:          QuicRole,
     version:       UInt32,
 
     // QuicConnectionSm IDs
@@ -208,7 +208,7 @@ implement QuicConnectionSm<Initial> {
         );
         QuicConnectionSm {
             inner: ConnState {
-                role:          Role.ClientEnd,
+                role:          QuicRole.ClientEnd,
                 version:       0x00000001_u32,
                 dcid_peer:     peer_dcid,
                 scid_local:    scid_local,
@@ -276,8 +276,8 @@ implement QuicConnectionSm<OneRtt> {
     /// Open a locally-initiated bidirectional stream.
     public fn open_bidi(&mut self) -> Result<UInt64, QuicError> {
         let is_server = match self.inner.role {
-            Role.ClientEnd => false,
-            Role.ServerEnd => true,
+            QuicRole.ClientEnd => false,
+            QuicRole.ServerEnd => true,
         };
         match self.inner.flow.alloc_stream_bidi(is_server) {
             Some(sid) => {
@@ -296,8 +296,8 @@ implement QuicConnectionSm<OneRtt> {
     /// Open a locally-initiated unidirectional stream (send only).
     public fn open_uni(&mut self) -> Result<UInt64, QuicError> {
         let is_server = match self.inner.role {
-            Role.ClientEnd => false,
-            Role.ServerEnd => true,
+            QuicRole.ClientEnd => false,
+            QuicRole.ServerEnd => true,
         };
         match self.inner.flow.alloc_stream_uni(is_server) {
             Some(sid) => {
@@ -355,7 +355,7 @@ implement QuicConnectionSm<Draining> {
 // =============================================================================
 
 implement<S> QuicConnectionSm<S> {
-    public fn role(&self) -> Role { self.inner.role.clone() }
+    public fn role(&self) -> QuicRole { self.inner.role.clone() }
     public fn version(&self) -> UInt32 { self.inner.version }
     public fn peer_cid(&self) -> &ConnectionId { &self.inner.dcid_peer }
     public fn local_cid(&self) -> &ConnectionId { &self.inner.scid_local }

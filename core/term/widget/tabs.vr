@@ -5,14 +5,14 @@ module tabs;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;
-mount super.paragraph.{Line, Span};
+mount super.paragraph.{Line, TextSpan};
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
 
 /// Tabs — horizontal tab bar with selection indicator.
 /// Titles are stored as Lines, supporting styled tab labels.
-/// The divider is a Span, allowing styled separators.
+/// The divider is a TextSpan, allowing styled separators.
 /// Padding is specified as integer column counts.
 public type Tabs is {
     titles: List<Line>,
@@ -20,7 +20,7 @@ public type Tabs is {
     block: Maybe<Block>,
     style: Style,
     highlight_style: Style,
-    divider: Span,
+    divider: TextSpan,
     padding_left: Int,
     padding_right: Int,
 };
@@ -39,7 +39,7 @@ implement Tabs {
             block: None,
             style: Style.DEFAULT,
             highlight_style: Style.new().bold().reversed(),
-            divider: Span.raw(" | "),
+            divider: TextSpan.raw(" | "),
             padding_left: 1,
             padding_right: 1,
         }
@@ -53,7 +53,7 @@ implement Tabs {
             block: None,
             style: Style.DEFAULT,
             highlight_style: Style.new().bold().reversed(),
-            divider: Span.raw(" | "),
+            divider: TextSpan.raw(" | "),
             padding_left: 1,
             padding_right: 1,
         }
@@ -76,13 +76,13 @@ implement Tabs {
         Tabs { highlight_style: style, ..self }
     }
 
-    /// Set the divider text (creates an unstyled Span).
+    /// Set the divider text (creates an unstyled TextSpan).
     public fn divider(self, div: Text) -> Tabs {
-        Tabs { divider: Span.raw(div), ..self }
+        Tabs { divider: TextSpan.raw(div), ..self }
     }
 
-    /// Set the divider as a styled Span.
-    public fn divider_span(self, span: Span) -> Tabs {
+    /// Set the divider as a styled TextSpan.
+    public fn divider_span(self, span: TextSpan) -> Tabs {
         Tabs { divider: span, ..self }
     }
 

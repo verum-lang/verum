@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @expected-exit: 0
 
-// Path MTU Discovery scaffold surface — RFC 9000 §14 + RFC 8899.
+// QuicPath MTU Discovery scaffold surface — RFC 9000 §14 + RFC 8899.
 
 mount core.*;
 mount core.time.instant.{Instant};
@@ -117,6 +117,6 @@ public fn main() -> Int {
     clamp_send_size_respects_base_and_plpmtu();
     probe_in_flight_reflects_state();
     next_probe_size_binary_searches();
-    print("Path-MTU Discovery scaffold surface verified");
+    print("QuicPath-MTU Discovery scaffold surface verified");
     0
 }

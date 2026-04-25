@@ -18,7 +18,7 @@
 mount core.*;
 mount core.time.instant.{Instant};
 mount core.net.addr.{SocketAddr, SocketAddrV4, Ipv4Addr};
-mount core.net.quic.path.{Path, PathManager, PathState};
+mount core.net.quic.path.{QuicPath, PathManager, PathState};
 mount core.net.quic.connection_sm.path_control.{
     on_path_response, PathUpdate,
 };
@@ -31,7 +31,7 @@ fn main() {
     // =========================================================================
     // Fresh connection: active path validated at handshake.
     // =========================================================================
-    let initial = Path.new(v4(4000), v4(5000), true);
+    let initial = QuicPath.new(v4(4000), v4(5000), true);
     let mut pm = PathManager.new(initial);
     assert_eq(pm.active().is_validated(), true);
     match pm.standby_mut() {

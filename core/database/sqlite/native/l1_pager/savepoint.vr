@@ -49,19 +49,19 @@ public type SavepointError is
     | BadName(reason: Text);
 
 /// LIFO savepoint stack. Call `push`, `release`, `rollback_to`.
-public type SavepointStack is {
+public type PagerSavepointStack is {
     entries: List<Savepoint>,
 };
 
-public fn savepoint_stack_new() -> SavepointStack {
-    SavepointStack { entries: List.new() }
+public fn savepoint_stack_new() -> PagerSavepointStack {
+    PagerSavepointStack { entries: List.new() }
 }
 
 // -----------------------------------------------------------------------------
 // API
 // -----------------------------------------------------------------------------
 
-implement SavepointStack {
+implement PagerSavepointStack {
     /// Number of live savepoints.
     public fn depth(&self) -> Int { self.entries.len() }
 

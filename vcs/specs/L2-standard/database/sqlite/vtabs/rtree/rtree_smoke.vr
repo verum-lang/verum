@@ -8,7 +8,7 @@
 // R-Tree N-dim spatial index:
 //   * BBox geometry (volume / contains / overlaps / union /
 //     enlargement)
-//   * RTree insert / search / delete with 2D + 3D inputs
+//   * VtabRTree insert / search / delete with 2D + 3D inputs
 //   * RTreeNode split when leaf exceeds RTREE_MAX_CELLS
 //   * QueryBuilder translates per-coord predicates into a probe bbox
 
@@ -22,7 +22,7 @@ mount core.database.sqlite.native.vtabs.rtree.node.{
     RTREE_MAX_CELLS, RTREE_MIN_CELLS,
 };
 mount core.database.sqlite.native.vtabs.rtree.tree.{
-    RTree, rtree_new,
+    VtabRTree, rtree_new,
 };
 mount core.database.sqlite.native.vtabs.rtree.query.{
     CoordOp, OpLE, OpGE, OpEq,
@@ -99,7 +99,7 @@ fn test_internal_new() {
 }
 
 fn test_node_full() {
-    // Build a fully-loaded leaf via the RTree's own insert path so
+    // Build a fully-loaded leaf via the VtabRTree's own insert path so
     // the borrow scope is short-lived.
     let mut t = rtree_new(2);
     let mut i: Int = 0;
@@ -113,7 +113,7 @@ fn test_node_full() {
 }
 
 // -----------------------------------------------------------------------------
-// RTree insert / search
+// VtabRTree insert / search
 // -----------------------------------------------------------------------------
 
 fn test_rtree_insert_and_search_overlap() {

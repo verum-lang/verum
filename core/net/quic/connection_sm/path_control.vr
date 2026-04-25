@@ -1,11 +1,11 @@
 // =============================================================================
-// net/quic/connection_sm/path_control.vr — Path + dispatch/tx integration
+// net/quic/connection_sm/path_control.vr — QuicPath + dispatch/tx integration
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, core.time, core.net.quic.{path, frame}
 // =============================================================================
 //
-// Ties the Phase-5 Path / PathManager primitives into the RX / TX
+// Ties the Phase-5 QuicPath / PathManager primitives into the RX / TX
 // pipeline:
 //
 //   * Inbound bytes → `on_inbound_bytes(pm, n)` — feeds byte-count
@@ -16,7 +16,7 @@
 //     validates the active / standby path (whichever matches) and
 //     potentially promotes standby to active.
 //   * Outbound tx gate → `gate_outbound(pm, bytes)` — before the
-//     sender picks a packet size, this checks Path.can_send against
+//     sender picks a packet size, this checks QuicPath.can_send against
 //     the anti-amplification budget and returns the clamped byte
 //     budget the sender is allowed to emit right now.
 //
@@ -33,7 +33,7 @@ mount core.*;
 mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.net.quic.frame.{Frame};
-mount core.net.quic.path.{Path, PathManager, PathError, TimerOutcome};
+mount core.net.quic.path.{QuicPath, PathManager, PathError, TimerOutcome};
 
 // =============================================================================
 // Inbound byte accounting
@@ -119,7 +119,7 @@ public type PathUpdate is
 /// Given a desired packet size `requested`, return the actual byte
 /// budget the caller is allowed to emit right now. Returns 0 when
 /// the path is Failed or when the unvalidated budget is exhausted.
-public fn gate_outbound(pm: &Path, requested: UInt64) -> UInt64 {
+public fn gate_outbound(pm: &QuicPath, requested: UInt64) -> UInt64 {
     match pm.can_send(requested) {
         Ok(())  => requested,
         Err(PathError.AmplificationLimitExceeded) => {
@@ -132,11 +132,11 @@ public fn gate_outbound(pm: &Path, requested: UInt64) -> UInt64 {
     }
 }
 
-fn amplification_remaining(_p: &Path) -> UInt64 {
-    // Budget inspection goes through a matching view on Path.state;
+fn amplification_remaining(_p: &QuicPath) -> UInt64 {
+    // Budget inspection goes through a matching view on QuicPath.state;
     // the exact accessor lives inside path.vr and is private by
     // design. Callers that need precise remaining bytes compute
-    // against `3 * received_bytes - sent_bytes` via the Path view;
+    // against `3 * received_bytes - sent_bytes` via the QuicPath view;
     // until a public accessor lands we conservatively return 0 so
     // the caller retries on the next inbound-byte event.
     0_u64

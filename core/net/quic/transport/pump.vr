@@ -54,7 +54,7 @@ mount core.net.quic.recovery.{LossDetection, NewReno, PnSpaceKind, SentPacketInf
 mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
 mount core.net.quic.transport_params.{TransportParams};
 mount core.net.quic.error.{QuicError, TransportErrorCode};
-mount core.net.quic.path.{Path, PathManager};
+mount core.net.quic.path.{QuicPath, PathManager};
 
 mount core.net.quic.connection_sm.{
     QuicConnection, ConnState, Role, QuicSpaceKeys,
@@ -148,7 +148,7 @@ implement ConnectionPump {
         handshake: HandshakeDriver,
     ) -> ConnectionPump {
         let local = transport.local_addr();
-        let path  = Path.new(local, peer_addr.clone(), /* initially_validated */ false);
+        let path  = QuicPath.new(local, peer_addr.clone(), /* initially_validated */ false);
         ConnectionPump {
             transport:       transport,
             peer_addr:       peer_addr,
@@ -173,7 +173,7 @@ implement ConnectionPump {
         let local = transport.local_addr();
         // Server starts unvalidated — enforces RFC 9000 §21.1.1.3
         // anti-amplification until peer echoes a PATH_RESPONSE.
-        let path  = Path.new(local, peer_addr.clone(), false);
+        let path  = QuicPath.new(local, peer_addr.clone(), false);
         ConnectionPump {
             transport:       transport,
             peer_addr:       peer_addr,

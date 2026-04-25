@@ -41,7 +41,7 @@ public mount .resources.Listener;
 public mount .resources.Cluster;
 public mount .resources.RouteConfiguration;
 public mount .resources.ClusterLoadAssignment;
-public mount .resources.Resource;
+public mount .resources.XdsResource;
 
 public mount .client.AdsClient;
 public mount .client.Subscription;

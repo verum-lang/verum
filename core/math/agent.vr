@@ -524,11 +524,11 @@ public type Agent is protocol {
 };
 
 // Message role in conversation
-public type Role is System | User | Assistant | ToolResult;
+public type AgentRole is System | User | Assistant | ToolResult;
 
 // Conversation message
 public type Message is {
-    role: Role,
+    role: AgentRole,
     content: Text,
 };
 
@@ -573,7 +573,7 @@ where
     // Generate response
     public fn generate(&self, prompt: &Text) -> Text {
         let mut messages = self.memory.clone();
-        messages.push(Message { role: Role.User, content: prompt.clone() });
+        messages.push(Message { role: AgentRole.User, content: prompt.clone() });
 
         let input = format_messages(&messages, &self.system_prompt);
         let tokens = self.tokenizer.encode(&input);
@@ -603,9 +603,9 @@ where
     Tok: Tokenizer,
 {
     fn think(&mut self, observation: &Text) -> Text {
-        self.memory.push(Message { role: Role.User, content: observation.clone() });
+        self.memory.push(Message { role: AgentRole.User, content: observation.clone() });
         let response = self.generate(observation);
-        self.memory.push(Message { role: Role.Assistant, content: response.clone() });
+        self.memory.push(Message { role: AgentRole.Assistant, content: response.clone() });
         response
     }
 
@@ -616,7 +616,7 @@ where
         if let Maybe.Some(tool) = self.tools.get(&tool_name) {
             let result = tool.execute(&args)?;
             self.memory.push(Message {
-                role: Role.ToolResult,
+                role: AgentRole.ToolResult,
                 content: format_value(&result),
             });
             Ok(result)
@@ -961,10 +961,10 @@ fn format_messages(messages: &List<Message>, system_prompt: &Text) -> Text {
     let mut result = f"<|system|>\n{system_prompt}\n<|end|>\n";
     for msg in messages {
         let role_str = match msg.role {
-            Role.System => "system",
-            Role.User => "user",
-            Role.Assistant => "assistant",
-            Role.ToolResult => "tool",
+            AgentRole.System => "system",
+            AgentRole.User => "user",
+            AgentRole.Assistant => "assistant",
+            AgentRole.ToolResult => "tool",
         };
         result = f"{result}<|{role_str}|>\n{msg.content}\n<|end|>\n";
     }
@@ -1052,14 +1052,14 @@ public type ImageDetail is Auto | Low | High;
 
 // Structured chat message with typed content
 public type ChatMessage is {
-    role: Role,
+    role: AgentRole,
     content: MessageContent,
     name: Maybe<Text>,  // Optional function/tool name
 };
 
 implement ChatMessage {
     // Create text message
-    public fn text(role: Role, content: Text) -> Self {
+    public fn text(role: AgentRole, content: Text) -> Self {
         ChatMessage {
             role,
             content: MessageContent.TextContent(content),
@@ -1069,23 +1069,23 @@ implement ChatMessage {
 
     // Create system message
     public fn system(content: Text) -> Self {
-        Self.text(Role.System, content)
+        Self.text(AgentRole.System, content)
     }
 
     // Create user message
     public fn user(content: Text) -> Self {
-        Self.text(Role.User, content)
+        Self.text(AgentRole.User, content)
     }
 
     // Create assistant message
     public fn assistant(content: Text) -> Self {
-        Self.text(Role.Assistant, content)
+        Self.text(AgentRole.Assistant, content)
     }
 
     // Create function result message
     public fn tool_result(name: Text, content: Text) -> Self {
         ChatMessage {
-            role: Role.ToolResult,
+            role: AgentRole.ToolResult,
             content: MessageContent.FunctionResultContent { name: name.clone(), content },
             name: Maybe.Some(name),
         }
@@ -1726,7 +1726,7 @@ where
                 Maybe.Some(calls) if tool_calls_count < self.max_tool_calls => {
                     // Add assistant message with function calls
                     conversation.push(ChatMessage {
-                        role: Role.Assistant,
+                        role: AgentRole.Assistant,
                         content: MessageContent.TextContent(response.clone()),
                         name: Maybe.None,
                     });
@@ -1745,7 +1745,7 @@ where
                             output: result,
                         };
                         conversation.push(ChatMessage {
-                            role: Role.ToolResult,
+                            role: AgentRole.ToolResult,
                             content: result_obj.to_message_content(),
                             name: Maybe.Some(call.name.clone()),
                         });
@@ -1755,7 +1755,7 @@ where
                 _ => {
                     // No function calls or max reached - return final response
                     return Ok(ChatMessage {
-                        role: Role.Assistant,
+                        role: AgentRole.Assistant,
                         content: MessageContent.TextContent(response),
                         name: Maybe.None,
                     });
@@ -1815,10 +1815,10 @@ fn format_chat_messages(messages: &List<ChatMessage>, tools_json: &List<Text>) -
     // Add messages
     for msg in messages {
         let role_str = match msg.role {
-            Role.System => "system",
-            Role.User => "user",
-            Role.Assistant => "assistant",
-            Role.ToolResult => "tool",
+            AgentRole.System => "system",
+            AgentRole.User => "user",
+            AgentRole.Assistant => "assistant",
+            AgentRole.ToolResult => "tool",
         };
         let content_str = match &msg.content {
             MessageContent.TextContent(t) => t.clone(),

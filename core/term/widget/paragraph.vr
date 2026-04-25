@@ -18,28 +18,28 @@ public type Wrap is
 
 /// A line of styled text — sequence of spans.
 public type Line is {
-    spans: List<Span>,
+    spans: List<TextSpan>,
 };
 
 /// A span — fragment of text with a single style.
-public type Span is {
+public type TextSpan is {
     content: Text,
     style: Style,
 };
 
-implement Span {
+implement TextSpan {
     /// Create an unstyled span.
-    public fn raw(content: Text) -> Span {
-        Span { content: content, style: Style.DEFAULT }
+    public fn raw(content: Text) -> TextSpan {
+        TextSpan { content: content, style: Style.DEFAULT }
     }
 
     /// Create a styled span.
-    public fn styled(content: Text, style: Style) -> Span {
-        Span { content: content, style: style }
+    public fn styled(content: Text, style: Style) -> TextSpan {
+        TextSpan { content: content, style: style }
     }
 
     /// Chain two spans into a Line: span1.then(span2) -> Line.
-    public fn then(self, next: Span) -> Line {
+    public fn then(self, next: TextSpan) -> Line {
         let mut spans = List.new();
         spans.push(self);
         spans.push(next);
@@ -70,21 +70,21 @@ implement Span {
 
 implement Line {
     /// Create a line from a list of spans.
-    public fn from(spans: List<Span>) -> Line {
+    public fn from(spans: List<TextSpan>) -> Line {
         Line { spans: spans }
     }
 
     /// Create a line from raw (unstyled) text.
     public fn raw(text: Text) -> Line {
         let mut spans = List.new();
-        spans.push(Span.raw(text));
+        spans.push(TextSpan.raw(text));
         Line { spans: spans }
     }
 
     /// Create a line from a single styled span.
     public fn styled(text: Text, style: Style) -> Line {
         let mut spans = List.new();
-        spans.push(Span.styled(text, style));
+        spans.push(TextSpan.styled(text, style));
         Line { spans: spans }
     }
 
