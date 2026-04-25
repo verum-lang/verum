@@ -1943,17 +1943,45 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // Pass 5.5: Register stdlib types with the unifier for coercion support.
-        // Per the architectural rule in `verum_types/src/CLAUDE.md`
+        // Pass 5.5a: Protocol-based discovery of coercion-friendly types.
+        // Walks loaded AST modules looking for `implement <Coercion> for
+        // X` blocks (where Coercion ∈ {IntCoercible, TensorLike,
+        // Indexable, RangeLike} from core/base/coercion.vr) and registers
+        // each target type with the unifier. Stdlib types that already
+        // declare these implement-blocks are picked up here — zero
+        // architectural violation for those.
+        let mut all_ast_modules: Vec<&verum_ast::Module> = Vec::new();
+        for (_, ast_modules) in all_modules {
+            for (_, ast_module) in ast_modules {
+                all_ast_modules.push(ast_module);
+            }
+        }
+        let registered_via_protocol =
+            crate::stdlib_coercion_registry::scan_protocol_implementations(
+                type_checker.unifier_mut(),
+                all_ast_modules.iter().copied(),
+            );
+        if registered_via_protocol > 0 {
+            debug!(
+                "[coercion-registry] discovered {} stdlib-coercion impl blocks via protocol scan",
+                registered_via_protocol
+            );
+        }
+
+        // Pass 5.5b: Hardcoded fallback registration for stdlib types
+        // not yet retrofitted with implement blocks. Per the
+        // architectural rule in `verum_types/src/CLAUDE.md`
         // ("NEVER hardcode stdlib/core type knowledge in the
         // compiler"), the hardcoded scaffolding is contained in the
         // dedicated `stdlib_coercion_registry` module so the violation
-        // lives in one identifiable spot. The follow-up task (#101)
-        // replaces that registry with a protocol-walking pass that
-        // scans loaded modules for `implement IntCoercible / TensorLike
-        // / Indexable / RangeLike for X` blocks. The call site here
-        // stays the same once the body of `register_stdlib_coercions`
-        // gets swapped over.
+        // lives in one identifiable spot.
+        //
+        // The unifier's register_*_type methods de-duplicate via
+        // HashSet, so calling 5.5b after 5.5a is harmless when an
+        // already-discovered type happens to be in the hardcoded list.
+        // Each stdlib retrofit (adding `implement IntCoercible for X`)
+        // lets us delete X from the hardcoded list with safe
+        // rollback at every step.
         crate::stdlib_coercion_registry::register_stdlib_coercions(
             type_checker.unifier_mut(),
         );
@@ -2766,6 +2794,25 @@ impl<'s> CompilationPipeline<'s> {
                                 // Other items don't need registration
                             }
                         }
+                    }
+
+                    // VUVA #155 — header validation at every
+                    // user-source parse_module site. The
+                    // virtual_path is a PathBuf reflecting the
+                    // logical source path; pass it through to the
+                    // validator so dangling forward-decls and
+                    // inline-vs-filesystem overlaps surface here too.
+                    let header_warnings =
+                        verum_modules::loader::validate_module_headers_against_filesystem(
+                            &PathBuf::from(path.as_str()),
+                            &module,
+                        );
+                    for warning in header_warnings {
+                        let diag = DiagnosticBuilder::warning()
+                            .code(warning.code())
+                            .message(warning.message())
+                            .build();
+                        self.session.emit_diagnostic(diag);
                     }
 
                     self.modules.insert(path.clone(), Arc::new(module));
@@ -4137,6 +4184,24 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // VUVA #155 — header validation at the parse_and_register
+        // user-source path. Surfaces dangling forward-decls and
+        // inline-vs-filesystem overlaps for files that don't go
+        // through phase_parse (e.g. multi-source registration in
+        // run_full_compilation).
+        let header_warnings =
+            verum_modules::loader::validate_module_headers_against_filesystem(
+                &PathBuf::from(path.as_str()),
+                &module,
+            );
+        for warning in header_warnings {
+            let diag = DiagnosticBuilder::warning()
+                .code(warning.code())
+                .message(warning.message())
+                .build();
+            self.session.emit_diagnostic(diag);
+        }
+
         Ok(module)
     }
 
@@ -4695,6 +4760,26 @@ impl<'s> CompilationPipeline<'s> {
                             let cfg_evaluator = self.session.cfg_evaluator();
                             imported_module.items = cfg_evaluator.filter_items(&imported_module.items);
 
+                            // VUVA #155 — header validation at the
+                            // import-on-demand parse path. The
+                            // imported module's filesystem path is
+                            // `candidate`; pass it to the validator
+                            // so cross-file `module foo;` headers
+                            // pointing to nothing surface as
+                            // warnings here too.
+                            let header_warnings =
+                                verum_modules::loader::validate_module_headers_against_filesystem(
+                                    &candidate,
+                                    &imported_module,
+                                );
+                            for warning in &header_warnings {
+                                let diag = DiagnosticBuilder::warning()
+                                    .code(warning.code())
+                                    .message(warning.message())
+                                    .build();
+                                self.session.emit_diagnostic(diag);
+                            }
+
                             // Allocate module ID and create ModuleInfo
                             let registry = self.session.module_registry();
                             let module_id = {
@@ -4709,6 +4794,7 @@ impl<'s> CompilationPipeline<'s> {
                                 file_id,
                                 source_text.clone().into(),
                             );
+                            module_info.header_warnings = header_warnings;
 
                             // Extract exports from the module's AST
                             match extract_exports_from_module(
