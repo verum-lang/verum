@@ -49,14 +49,14 @@ public type Violation is
     | DbSizeMismatch(declared: Int, actual: Int)
     | PageReachedTwice(page_no: Int);
 
-public type IntegrityReport is {
+public type BtreeIntegrityReport is {
     violations: List<Violation>,
     pages_visited: Int,
     max_depth_seen: Int,
 };
 
-public fn integrity_report_new() -> IntegrityReport {
-    IntegrityReport {
+public fn integrity_report_new() -> BtreeIntegrityReport {
+    BtreeIntegrityReport {
         violations: List.new(),
         pages_visited: 0,
         max_depth_seen: 0,
@@ -65,7 +65,7 @@ public fn integrity_report_new() -> IntegrityReport {
 
 /// Has the checker found any problems? Callers rendering PRAGMA
 /// integrity_check output report "ok" iff `len(violations) == 0`.
-public fn integrity_is_ok(report: &IntegrityReport) -> Bool {
+public fn integrity_is_ok(report: &BtreeIntegrityReport) -> Bool {
     report.violations.len() == 0
 }
 
@@ -134,7 +134,7 @@ public fn check_page(
 public fn check_tree(
     root_page: Int,
     pages: &Map<Int, List<Byte>>,
-) -> IntegrityReport {
+) -> BtreeIntegrityReport {
     let mut report = integrity_report_new();
     let mut seen: Map<Int, Bool> = Map.new();
     walk(root_page, pages, &mut report, &mut seen, 0);
@@ -144,7 +144,7 @@ public fn check_tree(
 fn walk(
     page_no: Int,
     pages: &Map<Int, List<Byte>>,
-    report: &mut IntegrityReport,
+    report: &mut BtreeIntegrityReport,
     seen: &mut Map<Int, Bool>,
     depth: Int,
 ) {
@@ -195,7 +195,7 @@ public fn check_freelist(
     first_freelist_page: Int,
     freelist_pages_count: Int,
     pages: &Map<Int, List<Byte>>,
-    report: &mut IntegrityReport,
+    report: &mut BtreeIntegrityReport,
 ) {
     if first_freelist_page == 0 {
         // Empty free-list — verify count == 0.

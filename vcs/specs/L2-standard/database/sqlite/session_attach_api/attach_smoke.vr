@@ -11,7 +11,7 @@ mount core.database.sqlite.native.session_attach_api.mode.{
     target_name, table_eligible_when_all,
 };
 mount core.database.sqlite.native.session_attach_api.session.{
-    Session, new, apply, records_table, attached_count, is_attach_all,
+    SessionAttach, new, apply, records_table, attached_count, is_attach_all,
 };
 mount base.{Bool};
 

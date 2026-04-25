@@ -15,7 +15,7 @@ mount core.*;
 mount base.{Bool, Maybe};
 mount collections.List;
 
-public type Phase is PhAlpha | PhBeta | PhGamma | PhRelease;
+public type CoveragePhase is PhAlpha | PhBeta | PhGamma | PhRelease;
 
 public type Stratum is StL0 | StL1 | StL2 | StL3 | StDifferential;
 
@@ -100,7 +100,7 @@ implement CoverageReport {
 
     /// True if every stratum's pass-rate meets the spec threshold for
     /// the requested phase. Thresholds match sqlite-native.md §22.7.
-    public fn meets_phase(&self, phase: &Phase) -> Bool {
+    public fn meets_phase(&self, phase: &CoveragePhase) -> Bool {
         let q = phase_quotas(phase);
         if self.l0.pass_rate() < q.l0_min { return false; }
         if self.l1.pass_rate() < q.l1_min { return false; }
@@ -123,7 +123,7 @@ public type PhaseQuota is {
     diff_min: Int,
 };
 
-public fn phase_quotas(p: &Phase) -> PhaseQuota {
+public fn phase_quotas(p: &CoveragePhase) -> PhaseQuota {
     match p {
         PhAlpha   => PhaseQuota { l0_min: 100, l1_min:  80, l2_min:  30, l3_min:   0, diff_min:  70 },
         PhBeta    => PhaseQuota { l0_min: 100, l1_min: 100, l2_min:  80, l3_min:  40, diff_min:  95 },

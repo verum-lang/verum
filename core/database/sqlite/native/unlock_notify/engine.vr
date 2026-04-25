@@ -17,14 +17,14 @@ mount core.database.sqlite.native.unlock_notify.request.{
     RegistrationRequest, is_cancellation,
 };
 
-public type Registration is {
+public type UnlockRegistration is {
     blocked: Int64,
     blocker: Int64,
     arg: Int64,
 }
 
 public type UnlockNotifyEngine is {
-    pending: List<Registration>,
+    pending: List<UnlockRegistration>,
     deadlock_rejects: Int64,
     notifications_fired: Int64,
 }
@@ -77,7 +77,7 @@ implement UnlockNotifyEngine {
             self.deadlock_rejects = self.deadlock_rejects + (1 as Int64);
             return 6;
         }
-        self.pending.push(Registration {
+        self.pending.push(UnlockRegistration {
             blocked: req.blocked,
             blocker: req.blocker,
             arg: req.arg,

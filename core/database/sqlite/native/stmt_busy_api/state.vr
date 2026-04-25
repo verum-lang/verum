@@ -5,14 +5,14 @@ module core.database.sqlite.native.stmt_busy_api.state;
 mount base.{Bool, Text};
 
 // Compiled-stmt lifecycle phase.
-public type Phase is
+public type StmtBusyPhase is
     | PhFresh         // just compiled or just sqlite3_reset()
     | PhRunning       // step() returned ROW; row is buffered
     | PhFinished      // step() returned DONE / ERROR
     | PhFinalized     // sqlite3_finalize() invoked
     ;
 
-public fn phase_name(p: &Phase) -> Text {
+public fn phase_name(p: &StmtBusyPhase) -> Text {
     match p {
         PhFresh     => "fresh".clone(),
         PhRunning   => "running".clone(),
@@ -22,11 +22,11 @@ public fn phase_name(p: &Phase) -> Text {
 }
 
 // sqlite3_stmt_busy returns 1 only in the Running phase.
-public fn is_busy(p: &Phase) -> Int {
+public fn is_busy(p: &StmtBusyPhase) -> Int {
     match p { PhRunning => 1, _ => 0 }
 }
 
-public fn busy_bool(p: &Phase) -> Bool {
+public fn busy_bool(p: &StmtBusyPhase) -> Bool {
     is_busy(p) == 1
 }
 
@@ -45,7 +45,7 @@ public fn event_name(e: &Event) -> Text {
     }
 }
 
-public fn next_phase(p: &Phase, e: &Event, last_step_returned_row: Bool) -> Phase {
+public fn next_phase(p: &StmtBusyPhase, e: &Event, last_step_returned_row: Bool) -> StmtBusyPhase {
     match p {
         PhFinalized => PhFinalized,         // terminal
         _ => match e {
@@ -62,7 +62,7 @@ public type CallCheck is
     | CcMisuseFinalized
     ;
 
-public fn check_call(p: &Phase, e: &Event) -> CallCheck {
+public fn check_call(p: &StmtBusyPhase, e: &Event) -> CallCheck {
     match p {
         PhFinalized => match e { EFinalize => CcAllowed, _ => CcMisuseFinalized },
         _ => CcAllowed,

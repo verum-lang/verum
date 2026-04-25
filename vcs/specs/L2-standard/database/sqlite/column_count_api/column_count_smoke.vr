@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.column_count_api.count.{
-    StmtKind, SkSelect, SkPragma, SkExplain,
+    ColumnStmtKind, SkSelect, SkPragma, SkExplain,
     SkDml, SkDmlReturning, SkDdl, SkTx,
     kind_label, well_known_kind_count, produces_rows,
     explain_column_count, explain_query_plan_column_count,

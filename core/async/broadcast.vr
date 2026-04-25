@@ -21,8 +21,8 @@
 //
 // # Async receive
 //
-// `BroadcastReceiver<T>` implements `Future<Output = Result<T, RecvError>>`
-// AND `Stream<Item = Result<T, RecvError>>`, so both `rx.recv().await` and
+// `BroadcastReceiver<T>` implements `Future<Output = Result<T, BroadcastRecvError>>`
+// AND `Stream<Item = Result<T, BroadcastRecvError>>`, so both `rx.recv().await` and
 // `for await msg in rx { ... }` work. Empty buffer → Poll.Pending + waker
 // registration. Sender publish drains all registered-waker snapshots.
 //
@@ -62,7 +62,7 @@ public type SendError<T> is {
 };
 
 /// Error returned when receiving from a broadcast channel.
-public type RecvError is
+public type BroadcastRecvError is
     /// All senders have been dropped and no more messages will arrive.
     | Closed
     /// Receiver fell behind by N messages; advanced to oldest available.
@@ -77,7 +77,7 @@ public type TryRecvResult<T> is
 
 /// Policy for what to do when a receiver falls behind capacity.
 public type LagPolicy is
-    /// (default) Return `RecvError.Lagged(n)` and advance to oldest.
+    /// (default) Return `BroadcastRecvError.Lagged(n)` and advance to oldest.
     | LagTolerant
     /// Advance; drop oldest so senders never block.
     | DropOldest
@@ -184,7 +184,7 @@ implement<T> BroadcastSender<T> {
     ///
     /// If a receiver is slow enough that the write wraps past its read_pos,
     /// the `LagPolicy` determines what happens (default: receiver observes
-    /// `RecvError.Lagged(skipped)` on its next recv).
+    /// `BroadcastRecvError.Lagged(skipped)` on its next recv).
     public fn send(&self, value: T) -> Result<Int, SendError<T>> {
         if self.inner.closed.load(MemoryOrdering.Acquire) {
             return Err(SendError { value: value });
@@ -327,7 +327,7 @@ implement<T> BroadcastReceiver<T> {
     public async fn recv_cancellable(
         &self,
         token: &CancellationToken,
-    ) -> Result<Result<T, RecvError>, CancellationError> {
+    ) -> Result<Result<T, BroadcastRecvError>, CancellationError> {
         select {
             r = self.recv().await => Ok(r),
             reason = token.cancelled().await => Err(CancellationError.new(reason)),
@@ -347,42 +347,42 @@ implement<T> Drop for BroadcastReceiver<T> {
 }
 
 /// Receiver also implements Future directly for `.await` ergonomics.
-/// (Returns `Result<T, RecvError>` — different from the MPSC Receiver
+/// (Returns `Result<T, BroadcastRecvError>` — different from the MPSC Receiver
 /// which yields `Maybe<T>`.)
 implement<T> Future for BroadcastReceiver<T> {
-    type Output = Result<T, RecvError>;
+    type Output = Result<T, BroadcastRecvError>;
 
-    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, RecvError>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, BroadcastRecvError>> {
         match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
             TryRecvResult.Value(v) => Poll.Ready(Ok(v)),
-            TryRecvResult.Lagged(n) => Poll.Ready(Err(RecvError.Lagged(n))),
-            TryRecvResult.Closed => Poll.Ready(Err(RecvError.Closed)),
+            TryRecvResult.Lagged(n) => Poll.Ready(Err(BroadcastRecvError.Lagged(n))),
+            TryRecvResult.Closed => Poll.Ready(Err(BroadcastRecvError.Closed)),
             TryRecvResult.Empty => Poll.Pending,
         }
     }
 }
 
-/// Stream<Item = Result<T, RecvError>> — for `for await msg in rx { ... }`.
+/// Stream<Item = Result<T, BroadcastRecvError>> — for `for await msg in rx { ... }`.
 implement<T> Stream for BroadcastReceiver<T> {
-    type Item = Result<T, RecvError>;
+    type Item = Result<T, BroadcastRecvError>;
 
-    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<T, RecvError>>> {
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<T, BroadcastRecvError>>> {
         match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
             TryRecvResult.Value(v) => Poll.Ready(Some(Ok(v))),
-            TryRecvResult.Lagged(n) => Poll.Ready(Some(Err(RecvError.Lagged(n)))),
+            TryRecvResult.Lagged(n) => Poll.Ready(Some(Err(BroadcastRecvError.Lagged(n)))),
             TryRecvResult.Closed => Poll.Ready(None),
             TryRecvResult.Empty => Poll.Pending,
         }
     }
 }
 
-// AsyncIterator for for-await ergonomics. Item is Result<T, RecvError> —
+// AsyncIterator for for-await ergonomics. Item is Result<T, BroadcastRecvError> —
 // loop body may observe Lagged errors without terminating the iterator.
 implement<T> AsyncIterator for BroadcastReceiver<T> {
-    type Item = Result<T, RecvError>;
+    type Item = Result<T, BroadcastRecvError>;
 
     @inline
-    async fn next(&mut self) -> Maybe<Result<T, RecvError>> {
+    async fn next(&mut self) -> Maybe<Result<T, BroadcastRecvError>> {
         StreamNext { stream: self }.await
     }
 }
@@ -397,13 +397,13 @@ public type BroadcastRecv<T> is {
 };
 
 implement<T> Future for BroadcastRecv<T> {
-    type Output = Result<T, RecvError>;
+    type Output = Result<T, BroadcastRecvError>;
 
-    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, RecvError>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, BroadcastRecvError>> {
         match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
             TryRecvResult.Value(v) => Poll.Ready(Ok(v)),
-            TryRecvResult.Lagged(n) => Poll.Ready(Err(RecvError.Lagged(n))),
-            TryRecvResult.Closed => Poll.Ready(Err(RecvError.Closed)),
+            TryRecvResult.Lagged(n) => Poll.Ready(Err(BroadcastRecvError.Lagged(n))),
+            TryRecvResult.Closed => Poll.Ready(Err(BroadcastRecvError.Closed)),
             TryRecvResult.Empty => Poll.Pending,
         }
     }

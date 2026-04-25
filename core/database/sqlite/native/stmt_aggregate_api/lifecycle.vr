@@ -4,14 +4,14 @@ module core.database.sqlite.native.stmt_aggregate_api.lifecycle;
 
 mount base.{Bool, Text, Int64};
 
-public type Phase is
+public type AggregatePhase is
     | PaIdle           // no active aggregation
     | PaAccumulating   // xStep calls in progress
     | PaFinalizing     // xFinal running (terminal call)
     | PaDone
     ;
 
-public fn phase_name(p: &Phase) -> Text {
+public fn phase_name(p: &AggregatePhase) -> Text {
     match p {
         PaIdle         => "idle".clone(),
         PaAccumulating => "accumulating".clone(),
@@ -21,7 +21,7 @@ public fn phase_name(p: &Phase) -> Text {
 }
 
 public type AggState is {
-    phase: Phase,
+    phase: AggregatePhase,
     rows_stepped: Int64,
     rows_inverted: Int64,
     values_emitted: Int64,

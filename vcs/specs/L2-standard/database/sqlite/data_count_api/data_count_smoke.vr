@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.data_count_api.probe.{
-    Phase, PhFresh, PhRowAvailable, PhDoneOrError, PhFinalized,
+    DataCountPhase, PhFresh, PhRowAvailable, PhDoneOrError, PhFinalized,
     phase_label,
     data_count_for, column_count_for, row_data_available,
     Trigger, TgStepRow, TgStepDone, TgStepError, TgReset, TgFinalize,

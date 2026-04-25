@@ -35,7 +35,7 @@ mount core.database.sqlite.native.testing.fuzz.{
     GrammarFuzzer, grammar_fuzzer,
 };
 mount core.database.sqlite.native.testing.coverage.{
-    Phase, PhAlpha, PhBeta, PhRelease,
+    CoveragePhase, PhAlpha, PhBeta, PhRelease,
     Stratum, StL0, StL1, StL2, StL3, StDifferential,
     StratumTally, tally_new,
     CoverageReport, report_new,

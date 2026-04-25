@@ -13,7 +13,7 @@ mount core.database.sqlite.native.integrity_walker_api.finding.{
     Finding, ok_sentinel, finding,
 };
 mount core.database.sqlite.native.integrity_walker_api.walker.{
-    IntegrityReport,
+    WalkerIntegrityReport,
     fresh, record, count_page,
     finding_count, has_issues,
     pragma_output_line_count, first_finding_or_ok,

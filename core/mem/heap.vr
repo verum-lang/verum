@@ -45,7 +45,7 @@
 
 module core.mem.heap;
 mount super.segment.{
-    Segment, SegmentError, SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
+    MemSegment, SegmentError, SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
     segment_alloc, segment_free, segment_abandon, ptr_to_segment,
     SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE,
 };
@@ -154,7 +154,7 @@ public type PageHeader is {
     prev: &unsafe PageHeader,
 
     /// Parent segment
-    segment: &Segment,
+    segment: &MemSegment,
 
     /// Starting slice index in segment
     slice_index: UInt32,
@@ -187,7 +187,7 @@ implement PageHeader {
     /// Initialize a page header for a given size class
     public fn init(
         &mut self,
-        segment: &Segment,
+        segment: &MemSegment,
         slice_index: Int,
         bin: Int,
     ) {
@@ -601,11 +601,11 @@ public type LocalHeap is {
     pages: [PageQueue; 75],
 
     // =========================================================================
-    // Segment Management (24 bytes)
+    // MemSegment Management (24 bytes)
     // =========================================================================
 
     /// First owned segment
-    segments: &unsafe Segment,
+    segments: &unsafe MemSegment,
 
     /// Cross-thread delayed free list
     thread_delayed_free: UInt64,
@@ -627,7 +627,7 @@ implement LocalHeap {
             thread_id: thread_id,
             pages_direct: [0 as &unsafe PageHeader; 129],
             pages: [PageQueue.empty(); 75],
-            segments: 0 as &unsafe Segment,
+            segments: 0 as &unsafe MemSegment,
             thread_delayed_free: 0,
             cached_epoch: GLOBAL_EPOCH.current_epoch() as UInt64,
             stats: HeapStats.new(),
@@ -781,11 +781,11 @@ implement LocalHeap {
     }
 
     /// Find segment space for slices
-    fn find_segment_space(&mut self, slices_needed: Int) -> Result<(&mut Segment, Int), HeapError> {
+    fn find_segment_space(&mut self, slices_needed: Int) -> Result<(&mut MemSegment, Int), HeapError> {
         // First, try existing segments
         let mut seg_ptr = self.segments;
         while (seg_ptr as Int) != 0 {
-            let segment = seg_ptr as &mut Segment;
+            let segment = seg_ptr as &mut MemSegment;
 
             if let Some(slice_idx) = segment.alloc_slices(slices_needed, 0) {
                 return Ok((segment, slice_idx));
@@ -799,7 +799,7 @@ implement LocalHeap {
 
         // Add to our segment list
         segment.next = self.segments;
-        self.segments = segment as &unsafe Segment;
+        self.segments = segment as &unsafe MemSegment;
         self.stats.segments_owned = self.stats.segments_owned + 1;
 
         // Allocate slices from new segment
@@ -858,7 +858,7 @@ implement LocalHeap {
 
         // Add to segment list
         segment.next = self.segments;
-        self.segments = segment as &unsafe Segment;
+        self.segments = segment as &unsafe MemSegment;
         self.stats.segments_owned = self.stats.segments_owned + 1;
 
         // User data starts after segment header
@@ -883,7 +883,7 @@ implement LocalHeap {
         } else if owner_tid == 0 {
             // Abandoned segment - try to reclaim
             if segment.try_claim(self.thread_id) {
-                self.reclaim_segment(segment as &mut Segment);
+                self.reclaim_segment(segment as &mut MemSegment);
                 self.free_local(ptr, segment)
             } else {
                 self.free_xthread(ptr, segment)
@@ -895,7 +895,7 @@ implement LocalHeap {
     }
 
     /// Free local (same thread)
-    fn free_local(&mut self, ptr: &unsafe Byte, segment: &Segment) -> Result<(), HeapError> {
+    fn free_local(&mut self, ptr: &unsafe Byte, segment: &MemSegment) -> Result<(), HeapError> {
         let slice_idx = segment.slice_index(ptr);
         let page = segment.slice_ptr(slice_idx) as &mut PageHeader;
 
@@ -929,7 +929,7 @@ implement LocalHeap {
     }
 
     /// Cross-thread free
-    fn free_xthread(&mut self, ptr: &unsafe Byte, segment: &Segment) -> Result<(), HeapError> {
+    fn free_xthread(&mut self, ptr: &unsafe Byte, segment: &MemSegment) -> Result<(), HeapError> {
         let slice_idx = segment.slice_index(ptr);
         let page = segment.slice_ptr(slice_idx) as &mut PageHeader;
 
@@ -971,7 +971,7 @@ implement LocalHeap {
         self.clear_direct_lookup_if_matches(bin, page);
 
         // Free slices back to segment
-        let segment = page.segment as &mut Segment;
+        let segment = page.segment as &mut MemSegment;
         segment.free_slices(page.slice_index as Int);
 
         self.stats.pages_in_use = self.stats.pages_in_use - 1;
@@ -983,23 +983,23 @@ implement LocalHeap {
     }
 
     /// Release an empty segment
-    fn release_segment(&mut self, segment: &mut Segment) {
+    fn release_segment(&mut self, segment: &mut MemSegment) {
         // Remove from our segment list
         // This requires finding the previous segment
-        let mut prev: &unsafe Segment = 0 as &unsafe Segment;
+        let mut prev: &unsafe MemSegment = 0 as &unsafe MemSegment;
         let mut curr = self.segments;
 
         while (curr as Int) != 0 {
             if (curr as Int) == (segment as Int) {
                 if (prev as Int) != 0 {
-                    unsafe { (prev as &mut Segment).next = segment.next; }
+                    unsafe { (prev as &mut MemSegment).next = segment.next; }
                 } else {
                     self.segments = segment.next;
                 }
                 break;
             }
             prev = curr;
-            curr = unsafe { (curr as &Segment).next };
+            curr = unsafe { (curr as &MemSegment).next };
         }
 
         self.stats.segments_owned = self.stats.segments_owned - 1;
@@ -1009,10 +1009,10 @@ implement LocalHeap {
     }
 
     /// Reclaim an abandoned segment
-    fn reclaim_segment(&mut self, segment: &mut Segment) {
+    fn reclaim_segment(&mut self, segment: &mut MemSegment) {
         // Add to our segment list
         segment.next = self.segments;
-        self.segments = segment as &unsafe Segment;
+        self.segments = segment as &unsafe MemSegment;
         self.stats.segments_owned = self.stats.segments_owned + 1;
 
         // Process pages in the segment
@@ -1059,14 +1059,14 @@ implement LocalHeap {
         let mut seg_ptr = self.segments;
 
         while (seg_ptr as Int) != 0 {
-            let segment = seg_ptr as &mut Segment;
+            let segment = seg_ptr as &mut MemSegment;
             let next = segment.next;
 
             segment_abandon(segment);
             seg_ptr = next;
         }
 
-        self.segments = 0 as &unsafe Segment;
+        self.segments = 0 as &unsafe MemSegment;
         self.stats.segments_owned = 0;
     }
 }

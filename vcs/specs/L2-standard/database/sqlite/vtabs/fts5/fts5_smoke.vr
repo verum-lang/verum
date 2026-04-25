@@ -7,7 +7,7 @@
 //
 // FTS5 smoke test:
 //   * tokenizers (Simple / Porter / Unicode61 / Trigram)
-//   * Segment build + lookup
+//   * Fts5VtabSegment build + lookup
 //   * Index add_document + lookup across segments
 //   * MATCH parser → AND/OR/NOT/NEAR/phrase
 //   * Executor returns matching rowids
@@ -23,7 +23,7 @@ mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
 };
 mount core.database.sqlite.native.vtabs.fts5.segment.{
     Fts5SegmentPosting, Fts5SegmentPostingList, posting_list_new, posting_less,
-    Segment, segment_empty, segment_from_tokens, segment_lookup, segment_merge,
+    Fts5VtabSegment, segment_empty, segment_from_tokens, segment_lookup, segment_merge,
 };
 mount core.database.sqlite.native.vtabs.fts5.index.{
     Index, index_new,
@@ -95,10 +95,10 @@ fn test_trigram_tokenizer() {
 }
 
 // -----------------------------------------------------------------------------
-// Segment
+// Fts5VtabSegment
 // -----------------------------------------------------------------------------
 
-fn make_doc_segment(rowid: Int64, text: Text) -> Segment {
+fn make_doc_segment(rowid: Int64, text: Text) -> Fts5VtabSegment {
     let t = simple_tokenizer();
     let opts = options_default();
     let toks = t.tokenise(&text, &opts);

@@ -19,7 +19,7 @@ mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Token};
 mount core.database.sqlite.native.vtabs.fts5.segment.{
-    Segment, Fts5SegmentPostingList, Fts5SegmentPosting,
+    Fts5VtabSegment, Fts5SegmentPostingList, Fts5SegmentPosting,
     segment_empty, segment_from_tokens, segment_lookup, segment_merge,
     posting_list_new,
 };
@@ -30,7 +30,7 @@ mount core.database.sqlite.native.vtabs.fts5.segment.{
 
 public type Fts5VtabSegmentLevel is {
     level: Int,
-    segments: List<Segment>,
+    segments: List<Fts5VtabSegment>,
 };
 
 public fn level_new(n: Int) -> Fts5VtabSegmentLevel { Fts5VtabSegmentLevel { level: n, segments: List.new() } }
@@ -53,7 +53,7 @@ public fn index_new() -> Index {
 
 implement Index {
     /// Append a new level-0 segment.
-    public fn add_segment(&mut self, seg: Segment) {
+    public fn add_segment(&mut self, seg: Fts5VtabSegment) {
         self.ensure_level(0);
         self.levels[0].segments.push(seg);
     }

@@ -1,5 +1,5 @@
 // =============================================================================
-// session_api/handle.vr — Session descriptor
+// session_api/handle.vr — SessionHandle descriptor
 // =============================================================================
 // Spec: SQLite C API — session extension.
 // =============================================================================
@@ -10,7 +10,7 @@ mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 
-public type Session is {
+public type SessionHandle is {
     id: Int64,
     /// "main" / "temp" / ATTACH-ed schema.
     schema: Text,
@@ -25,8 +25,8 @@ public type Session is {
     released: Bool,
 }
 
-public fn new_session(id: Int64, schema: Text) -> Session {
-    Session {
+public fn new_session(id: Int64, schema: Text) -> SessionHandle {
+    SessionHandle {
         id: id,
         schema: schema,
         enabled: true,
@@ -36,7 +36,7 @@ public fn new_session(id: Int64, schema: Text) -> Session {
     }
 }
 
-implement Session {
+implement SessionHandle {
     pub fn enable(&mut self, on: Bool) { self.enabled = on; }
     pub fn set_indirect(&mut self, on: Bool) { self.indirect = on; }
 
