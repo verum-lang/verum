@@ -29064,6 +29064,54 @@ impl TypeChecker {
             return Ok(());
         }
 
+        // VUVA #144 cycle guard: nested explicit imports (`mount A.{Item}`)
+        // can re-enter through impl-block elaboration, type-resolution
+        // chains, and re-export walks. The existing `glob_imports_in_progress`
+        // covers ONLY glob expansion; this path needs its own check.
+        //
+        // Key shape: (module_path, item_name) pair — the same Item can be
+        // imported by many call sites (function signature, impl block,
+        // type body) but only ONE in-flight resolution per (module, item)
+        // is allowed; a second entry means a cycle.
+        //
+        // Discipline mirrors `glob_imports_in_progress` (see lines 28157/
+        // 28161): insert before the body, remove at every clean exit. We
+        // factor the body into `import_item_from_module_body` so the
+        // remove can sit at exactly one site (Ok or Err alike).
+        let cycle_key: (Text, Text) = (module_path.clone(), item_name.to_string().into());
+        if self.imports_in_progress.contains(&cycle_key) {
+            return Err(crate::TypeError::ImportCycle {
+                cycle_path: format!(
+                    "{}.{}: nested-import cycle (re-entered while resolving)",
+                    module_path.as_str(), item_name
+                ).into(),
+                modules_in_cycle: vec![module_path.clone()].into(),
+                span: import_span.unwrap_or_else(verum_ast::span::Span::dummy),
+            });
+        }
+        self.imports_in_progress.insert(cycle_key.clone());
+        let outcome = self.import_item_from_module_body(
+            module_path, item_name, local_name, registry, import_span, register_name,
+        );
+        self.imports_in_progress.remove(&cycle_key);
+        outcome
+    }
+
+    /// Inner body of `import_item_from_module_impl` — extracted purely so
+    /// the cycle-guard insert/remove pair can sit around a single call.
+    /// Do NOT add additional callers; this is a private helper.
+    fn import_item_from_module_body(
+        &mut self,
+        module_path: &Text,
+        item_name: &str,
+        local_name: Option<&str>,
+        registry: &verum_modules::ModuleRegistry,
+        import_span: Option<Span>,
+        register_name: &str,
+    ) -> Result<()> {
+        use verum_modules::ExportKind;
+        let _ = (local_name, register_name); // shadow for body
+
         // Look up the source module in the registry.
         // For inline modules, try multiple path variants:
         // 1. Full qualified path (e.g., "file_name.data.models")
