@@ -1667,17 +1667,17 @@ Extending VUVA §16 with OWL 2 work items:
 | **F6** — bridges `owl2_fs → {baez_dolan, schreiber_dcct, …}` | Phase 6 | F5 |
 | **F7** — Morita-equivalence theorem `owl2_morita_bridge` | Phase 6 | F5, F6 |
 
-### 21.11 Open questions deferred to implementation
+### 21.11 Open questions — RESOLVED 2026-04-25 (Shkotin confirmation)
 
-Three questions flagged for confirmation during C7 implementation (should be resolved via e-mail to paper author `ashkotin@acm.org` before merging C7, or accepted as documented defaults):
+Three questions previously flagged were sent to paper author A.B. Shkotin (`ashkotin@acm.org`) and answered. Resolutions below are now binding for C7 V2.
 
-1. **HOL variant** — which HOL system is Shkotin's target (Church / HOL4 / HOL Light / Isabelle-HOL)? Default assumption: classical HOL (so Verum OWL 2 package depends on `@framework(classical_lem, "W3C OWL 2 DS. 2012.")`).
+1. **HOL variant — RESOLVED.** Shkotin: «да. и по идее HOL любой где можно выписать эти определения». Default = classical HOL (Church 1940 / Andrews 2002), `@framework(classical_lem, classical_choice)`. The DS axiom set is also expressible verbatim in HOL with extensional equality (Isabelle/HOL, HOL4), HOL Light (Harrison 2009), and Cubical HOL (preserves all classical theorems, adds path equality — useful for HoTT-based ontology alignment in Noesis). NOT compatible without losing axioms: constructive HOL (loses `DisjointClasses`/`ComplementOf` and other LEM-dependent axioms), predicative HOL (DS is impredicative through OWL 2 punning), modal HOL (epistemic/temporal extensions only, not plain DS), linear/affine HOL (incompatible with axiom re-use over graphs).
 
-2. **Quantifier `#` on potentially infinite domains** — Shkotin does not specify. Default: `count_o` requires `@owl2_class(closed_domain = true)` when domain finiteness is not inferable by the SMT backend.
+2. **Quantifier `#` on potentially infinite domains — RESOLVED.** Shkotin: «да. по идее — надо требовать конечной мощности фактического параметра». The constraint is on the **actual parameter**, not just an attribute on the consuming class. Implementation in `core/math/frameworks/owl2_fs/count.vr` already enforces this: `count_o<I>(domain: List<I>, pred)` takes a `List<I>` as the witness — finiteness is guaranteed by type construction. The `count_o_unbounded` variant takes `Maybe<List<I>>` and returns `Maybe::None` with `E_OWL2_UNBOUNDED_COUNT` when the witness is absent. V2 wires CVC5 Finite Model Finding to populate the witness automatically when domain finiteness is provable.
 
-3. **Anonymous-individual negation scope** — `NegativeObjectPropertyAssertion(OPE :a _:b)` is `¬OPE(a, b_anon)` or `¬∃b_anon. OPE(a, b_anon)`? Default: OWA-semantically `¬∃b_anon. OPE(a, b_anon)` (matches W3C DS §5.6).
+3. **Anonymous-individual negation scope — RESOLVED with correction.** Shkotin: «да, формализация именно эта. а причём здесь OWA? в §5.6 нет. и OWA тоже». The formalization `(a^I, b^I) ∉ ⟦OPE⟧^I` is correct; the OWA framing was a misnomer. W3C OWL 2 DS §5.6 defines NegativeObjectPropertyAssertion via classical negation only — no OWA carve-out. Anonymous individuals get unique denotations through the standard interpretation function (§5.2); the negation is bog-standard classical regardless of named/anonymous distinction. The OWA reference conflated (a) the syntactic Skolem-style scoping of anonymous individuals at RDF parse time with (b) the meta-logical OWA of OWL 2 entailment overall — neither belongs in §5.6 itself. C7 V2 body must implement classical `¬⟦OPE⟧^I(a^I, b^I)` without any OWA condition; `@framework(classical_lem)` carries the LEM dependency.
 
-All three are documented in `core/math/frameworks/owl2_fs/README.md` at C7 ship time with explicit citation of the default choice.
+All three resolutions are reflected in `core/math/frameworks/owl2_fs/` source-comment headers; C7 V2 (#134) translates them into verbatim HOL bodies.
 
 ### 21.12 Success criteria (OWL 2-specific extensions to VUVA §18)
 

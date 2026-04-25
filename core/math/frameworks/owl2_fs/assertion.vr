@@ -19,6 +19,21 @@ public axiom ClassAssertion() -> Bool ensures true;
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: ObjectPropertyAssertion")
 public axiom ObjectPropertyAssertion() -> Bool ensures true;
 
+// Semantics — W3C OWL 2 DS §5.6 (verbatim):
+//
+//   ⟦NegativeObjectPropertyAssertion(OPE, a, b)⟧^I = true
+//      iff
+//   (a^I, b^I) ∉ ⟦OPE⟧^I
+//
+// V2 NOTE (Shkotin email confirmation 2026-04-25): the semantics is
+// classical negation pure-and-simple. There is NO OWA carve-out in
+// §5.6 — anonymous individuals get distinct denotations under the
+// standard interpretation function (§5.2) and the negation treats
+// them identically to named ones. C7 V2 body must NOT introduce
+// `¬∃b_anon. ⟦OPE⟧^I(a, b_anon)` framing — that confuses the
+// syntactic Skolem-style scoping of anonymous individuals at RDF
+// parse time with the meta-logical OWA of OWL 2 entailment. Both
+// belong elsewhere; §5.6 itself is bog-standard classical.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: NegativeObjectPropertyAssertion")
 public axiom NegativeObjectPropertyAssertion() -> Bool ensures true;
 
