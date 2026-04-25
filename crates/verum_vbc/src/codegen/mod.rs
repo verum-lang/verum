@@ -2583,6 +2583,81 @@ impl VbcCodegen {
         Self::check_type_layout_invariants_inner(&self.types, &self.ctx.strings)
     }
 
+    /// Phase 2 of #146 — scan emitted bytecode and report when a
+    /// `MakeVariant { tag, field_count }` instruction has no matching
+    /// (tag, payload-width) pair in any declared type's variant
+    /// table.  Reports as a `tracing::warn!` rather than failing the
+    /// compile because variant constructors registered for types
+    /// declared in other loaded modules (e.g. `Result.Ok` from
+    /// `core.base.result` referenced from a downstream module) live
+    /// in those modules' TypeDescriptor arrays, not this one's.
+    /// A hard fail would be a false positive for every cross-module
+    /// variant emission.
+    ///
+    /// The whole-program version of this check belongs at the level
+    /// where the unified type table is materialized — out of scope
+    /// for the per-module finalize.  Keeping the warning here at
+    /// least surfaces module-internal layout drift early.
+    ///
+    /// Returns the number of instructions reported (zero in clean
+    /// builds), useful for tests that want a structural assertion.
+    pub fn report_make_variant_inconsistencies(&self) -> usize {
+        use crate::instruction::Instruction;
+        use crate::types::VariantKind;
+        // Build the set of valid (tag, field_count) combos.  Stored as
+        // a HashSet<(u32, u32)> for O(1) membership check.
+        let mut valid: std::collections::HashSet<(u32, u32)> =
+            std::collections::HashSet::new();
+        for ty in &self.types {
+            for v in &ty.variants {
+                let count = match v.kind {
+                    VariantKind::Unit => 0u32,
+                    VariantKind::Tuple => v.arity as u32,
+                    VariantKind::Record => v.fields.len() as u32,
+                };
+                valid.insert((v.tag, count));
+            }
+        }
+        // Empty type table = nothing to compare against.
+        if valid.is_empty() {
+            return 0;
+        }
+        let mut reported: usize = 0;
+        for f in &self.functions {
+            for ins in &f.instructions {
+                if let Instruction::MakeVariant {
+                    dst: _,
+                    tag,
+                    field_count,
+                } = ins
+                {
+                    if !valid.contains(&(*tag, *field_count)) {
+                        let fname = self
+                            .ctx
+                            .strings
+                            .get(f.descriptor.name.0 as usize)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                format!("<FunctionId({})>", f.descriptor.id.0)
+                            });
+                        tracing::warn!(
+                            "[layout] MakeVariant {{ tag: {}, field_count: \
+                             {} }} in `{}` has no matching variant in this \
+                             module's type table — may be cross-module \
+                             (legitimate) or stale-FunctionInfo drift \
+                             (latent bug). See #146 Phase 2.",
+                            tag,
+                            field_count,
+                            fname,
+                        );
+                        reported += 1;
+                    }
+                }
+            }
+        }
+        reported
+    }
+
     /// Test-only: intern a string in the codegen's string table and
     /// return its index, for constructing synthetic TypeDescriptors in
     /// integration tests of `verify_type_layout_invariants`.

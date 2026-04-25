@@ -1,0 +1,191 @@
+// =============================================================================
+// core.math.stack_model — (∞,2)-stack semantics + κ-universe tower (VFE-3)
+// =============================================================================
+//
+// Operational realisation of the (∞,2)-stack model that underlies the
+// canonical-primitive 13-axiom system. Theoretical foundation: the
+// `core.math.frameworks.diakrisis_stack_model` package; this module
+// provides the *operational* surface that lets verifier code reason
+// about universe levels, descent data, and the meta-classifier
+// reflection.
+//
+// The Cat-model used as the Verum baseline (the standard six-pack +
+// owl2_fs) is the canonical truncation of this stack model:
+//
+//     CatBaseline ≃ truncate(stack_model, level = 2, universe = κ_1)
+//
+// Working at the full stack-model level becomes necessary whenever
+// any axiom requires Axi-7 / Axi-8 non-triviality (the 14.T2 family of
+// witnesses), at which point the Cat-truncation is insufficient.
+//
+// V0 (this file) ships:
+//   • `Universe` enum with κ_1 / κ_2 levels (no κ_3 per the tight
+//     bound Theorem 134.T).
+//   • `StackArticulation` protocol extending `Articulation` with
+//     `universe_level`, `stack_object`, `descent_data`.
+//   • `meta_classify_stack` — operational image of M_stack
+//     (foundation-neutral name; the diakrisis citation is recorded
+//     via the framework annotation).
+//   • Trusted-boundary axioms for the four key 131.T sub-results +
+//     the truncation theorem.
+//
+// LOC budget: 3000 LOC stdlib total per VFE-3 V0 plan; ~200 LOC
+// kernel rule (`K-Universe-Ascent`) deferred to V1 once kernel work
+// schedules.
+// =============================================================================
+
+mount core.action.articulation.{Articulation};
+
+// =============================================================================
+// Universe levels — κ-tower
+// =============================================================================
+
+/// Universe levels in the κ-tower. Per Theorem 134.T (tight 2-inacc
+/// bound), the canonical-primitive system requires *exactly* two
+/// inaccessible cardinals: 1 is insufficient, 3 is unnecessary.
+/// Hence the enum has exactly two non-trivial levels plus the
+/// `Truncated` marker for the Cat-baseline.
+@derive(Clone)
+public type Universe is
+    Truncated      // Cat-model baseline: only set-level objects
+  | Kappa1         // first Grothendieck universe (κ_1-inaccessible)
+  | Kappa2;        // second Grothendieck universe (κ_2-inaccessible)
+
+public fn universe_as_text(u: Universe) -> Text {
+    match u {
+        Truncated => "truncated",
+        Kappa1    => "κ_1",
+        Kappa2    => "κ_2",
+    }
+}
+
+public fn universe_eq(a: Universe, b: Universe) -> Bool {
+    universe_as_text(a).eq(universe_as_text(b))
+}
+
+/// Strict universe ordering: Truncated < κ_1 < κ_2.
+public fn universe_lt(a: Universe, b: Universe) -> Bool {
+    match a {
+        Truncated => match b {
+            Truncated => false,
+            _         => true,
+        },
+        Kappa1 => match b {
+            Kappa2 => true,
+            _      => false,
+        },
+        Kappa2 => false,
+    }
+}
+
+// =============================================================================
+// StackArticulation protocol
+// =============================================================================
+
+/// `StackArticulation` extends `Articulation` with the additional
+/// data needed for stack-model reasoning: a universe level, a
+/// representative stack-object, and descent data witnessing the
+/// hyperdescent property.
+///
+/// Concrete reasoners furnish their own implementation per their
+/// supported universe range. The Cat-baseline implementation pins
+/// `universe_level = Truncated` for every articulation; the full
+/// stack-model implementation distinguishes κ_1 from κ_2 articulations.
+public type StackArticulation is protocol {
+    /// Universe level at which the articulation is realised.
+    fn universe_level(self) -> Universe;
+
+    /// Has hyperdescent — the canonical descent property at the
+    /// articulation's universe level.
+    fn has_hyperdescent(self) -> Bool;
+};
+
+// =============================================================================
+// Meta-classifier on stack — operational M_stack
+// =============================================================================
+
+/// `meta_classify_stack(F)` lifts a stack-articulation through the
+/// meta-classifier. By Lemma 131.L1 the lift maps κ_1-articulations
+/// to κ_2-articulations (universe ascent); by Lemma 131.L3 the lift
+/// is INTERNAL at κ_2 (no further ascent — Drake reflection closure).
+///
+/// V0 form: trusted-boundary signature + axiom characterisation.
+/// V1 will wire the actual stack-classification computation.
+@enact(epsilon = "ω·2")
+@framework(diakrisis, "Lemma 131.L1+L3 (M_stack: κ_1 → κ_2 with Drake-reflection closure)")
+public axiom meta_classify_stack<S: StackArticulation>(f: S) -> Bool
+    ensures true;
+
+/// Universe-ascent invariant: meta_classify_stack lifts κ_1 to κ_2.
+@framework(diakrisis, "Lemma 131.L1 (universe ascent: κ_1 → κ_2)")
+public axiom meta_classify_stack_universe_ascent<S: StackArticulation>(f: S) -> Bool
+    requires universe_eq(f.universe_level(), Kappa1)
+    ensures  true;
+
+/// Internal-reflector closure at κ_2: subsequent applications of
+/// meta_classify_stack on κ_2-articulations stay at κ_2 (no κ_3).
+@framework(diakrisis, "Lemma 131.L3 (internal-reflector closure at κ_2 via Drake reflection)")
+public axiom meta_classify_stack_kappa_2_closure<S: StackArticulation>(f: S) -> Bool
+    requires universe_eq(f.universe_level(), Kappa2)
+    ensures  true;
+
+// =============================================================================
+// κ-tower colimit obstruction — Lemma 131.L2
+// =============================================================================
+
+/// The colimit of the iterated meta_classify_stack tower across all
+/// finite applications is NOT representable as a single object inside
+/// the stack model. This is the obstruction that prevents Axi-8 from
+/// collapsing back into the Cat-baseline.
+///
+/// V0 form: trusted-boundary axiom; V1 will surface a constructive
+/// witness (the canonical non-representable cocone) for use by
+/// downstream reasoners.
+@framework(diakrisis, "Lemma 131.L2 (κ-tower colimit not representable)")
+public axiom stack_tower_colimit_not_representable() -> Bool ensures true;
+
+// =============================================================================
+// Cat-baseline as canonical truncation — Theorem 131.T(г)
+// =============================================================================
+
+/// The Cat-baseline (used as the standard Verum implementation across
+/// the seven coordinate-point frameworks) is the canonical truncation
+/// of the stack-model:
+///
+///     CatBaseline ≃ truncate(stack_model, level = 2, universe = κ_1).
+///
+/// Operational consequence: any verification that completes inside
+/// the Cat-baseline lifts trivially to the full stack model.
+/// Verification that requires Axi-8 non-triviality CANNOT be done in
+/// the Cat-baseline and MUST escalate to the stack-model surface.
+@framework(diakrisis, "Theorem 131.T(г) (Cat-baseline ≃ truncate(stack_model))")
+public axiom cat_baseline_is_truncation_of_stack() -> Bool ensures true;
+
+// =============================================================================
+// Tight 2-inaccessibles bound — Theorem 134.T
+// =============================================================================
+
+/// The 2-inaccessibles consistency bound is *tight*: 1 inaccessible
+/// is insufficient (Axi-7 / Axi-8 fail to realise); 3 is unnecessary
+/// (Drake reflection at κ_2 closes the tower).
+///
+/// Operational consequence: the `Universe` enum has exactly two
+/// non-trivial levels (κ_1 and κ_2). Adding `Kappa3` to the enum
+/// would be a structural error.
+@framework(diakrisis, "Theorem 134.T (tight 2-inaccessibles bound)")
+public axiom tight_2_inaccessibles_bound() -> Bool ensures true;
+
+// =============================================================================
+// Axi-8 non-triviality — Theorem 131.T(а)
+// =============================================================================
+
+/// The meta-classifier is NOT Yoneda-representable: there is no
+/// single articulation `α` whose representable functor recovers
+/// the meta-classifier's behaviour. This is the Axi-8 non-triviality
+/// witness; in the Cat-baseline it would *fail* (per Theorem 14.T2),
+/// but in the full stack model it *holds* (per Theorem 131.T Step 3).
+///
+/// V0 form: trusted-boundary axiom; downstream reasoners that depend
+/// on Axi-8 non-triviality cite this through the framework annotation.
+@framework(diakrisis, "Theorem 131.T(а) Step 3 (Axi-8: meta-classifier not Yoneda-representable in stack)")
+public axiom axi_8_meta_classifier_not_yoneda_representable() -> Bool ensures true;
