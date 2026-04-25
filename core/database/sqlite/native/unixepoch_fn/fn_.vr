@@ -32,16 +32,16 @@ public fn parse(input: Text) -> TimeValue {
     TvIso(input)
 }
 
-public type Result is
+public type UnixepochResult is
     | RNull
     | REpoch(Int64)
     ;
 
-public fn result_is_null(r: &Result) -> Bool {
+public fn result_is_null(r: &UnixepochResult) -> Bool {
     match r { RNull => true, _ => false }
 }
 
-public fn result_seconds(r: &Result) -> Int64 {
+public fn result_seconds(r: &UnixepochResult) -> Int64 {
     match r {
         REpoch(n) => n.clone(),
         RNull     => 0 as Int64,
@@ -51,7 +51,7 @@ public fn result_seconds(r: &Result) -> Int64 {
 // Minimal evaluator: the taxonomy proves the result *kind*; numerical
 // conversion uses fixed deltas.  "now" → 0 sentinel for the catalogue
 // (real engine plugs in clock).
-public fn evaluate(tv: &TimeValue, now_seconds: Int64) -> Result {
+public fn evaluate(tv: &TimeValue, now_seconds: Int64) -> UnixepochResult {
     match tv {
         TvInvalid          => RNull,
         TvNow              => REpoch(now_seconds),

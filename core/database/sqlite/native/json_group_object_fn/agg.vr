@@ -64,12 +64,12 @@ public fn step(mut s: State, k: &Key, v: &Value) -> State {
     s
 }
 
-public type Result is
+public type JsonGroupObjectResult is
     | RJsonObject(Int)
     | RJsonError
     ;
 
-public fn finalize(s: &State) -> Result {
+public fn finalize(s: &State) -> JsonGroupObjectResult {
     if s.saw_null_key || s.saw_blob_value { return RJsonError; }
     RJsonObject(s.pair_count)
 }
@@ -78,18 +78,18 @@ public fn result_subtype_byte() -> Int { 0x4A }
 
 public fn empty_finalize_yields_empty_object() -> Bool { true }
 
-public fn pair_count(r: &Result) -> Int {
+public fn pair_count(r: &JsonGroupObjectResult) -> Int {
     match r {
         RJsonObject(n) => n.clone(),
         RJsonError     => 0,
     }
 }
 
-public fn is_error(r: &Result) -> Bool {
+public fn is_error(r: &JsonGroupObjectResult) -> Bool {
     match r { RJsonError => true, _ => false }
 }
 
-public fn result_name(r: &Result) -> Text {
+public fn result_name(r: &JsonGroupObjectResult) -> Text {
     match r {
         RJsonObject(_) => "json_object".clone(),
         RJsonError     => "json_error".clone(),

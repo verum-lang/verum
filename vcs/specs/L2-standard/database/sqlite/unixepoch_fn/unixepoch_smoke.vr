@@ -8,7 +8,7 @@
 mount core.database.sqlite.native.unixepoch_fn.fn_.{
     TimeValue, TvNow, TvIso, TvJulian, TvUnixSeconds, TvInvalid,
     parse,
-    Result, RNull, REpoch,
+    UnixepochResult, RNull, REpoch,
     result_is_null, result_seconds, evaluate,
     ModifierKind,
     MkOffsetSeconds, MkOffsetMinutes, MkOffsetHours, MkOffsetDays,

@@ -9,7 +9,7 @@ mount core.database.sqlite.native.string_agg_fn.agg.{
     State, empty,
     Operand, OpNull, OpText,
     step,
-    Result, RNull, RText,
+    AggResult, RNull, RText,
     finalize, result_is_null, result_text, has_any_row,
 };
 mount base.{Bool};

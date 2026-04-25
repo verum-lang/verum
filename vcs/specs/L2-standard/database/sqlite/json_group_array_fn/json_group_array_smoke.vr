@@ -9,7 +9,7 @@ mount core.database.sqlite.native.json_group_array_fn.agg.{
     Element, EJsonNull, EJsonInt, EJsonText, EJsonBlobError,
     from_int, from_text, from_null,
     State, empty_state, step,
-    Result, RJsonArray, RJsonError,
+    JsonGroupArrayResult, RJsonArray, RJsonError,
     finalize, result_name, is_error, element_count,
     result_subtype_byte, empty_finalize_yields_empty_array,
     supports_window_aggregate,

@@ -36,28 +36,28 @@ public fn step(mut s: State, e: &Element) -> State {
     s
 }
 
-public type Result is
+public type JsonGroupArrayResult is
     | RJsonArray(Int)      // element count; engine emits "[v0, v1, ...]"
     | RJsonError           // SQLITE_ERROR — BLOB encountered
     ;
 
-public fn finalize(s: &State) -> Result {
+public fn finalize(s: &State) -> JsonGroupArrayResult {
     if s.saw_blob { return RJsonError; }
     RJsonArray(s.elements)
 }
 
-public fn result_name(r: &Result) -> Text {
+public fn result_name(r: &JsonGroupArrayResult) -> Text {
     match r {
         RJsonArray(_) => "json_array".clone(),
         RJsonError    => "json_error".clone(),
     }
 }
 
-public fn is_error(r: &Result) -> Bool {
+public fn is_error(r: &JsonGroupArrayResult) -> Bool {
     match r { RJsonError => true, _ => false }
 }
 
-public fn element_count(r: &Result) -> Int {
+public fn element_count(r: &JsonGroupArrayResult) -> Int {
     match r {
         RJsonArray(n) => n.clone(),
         RJsonError    => 0,

@@ -47,21 +47,21 @@ public fn step(mut s: State, value: &Operand, sep: &Operand) -> State {
     s
 }
 
-public type Result is
+public type AggResult is
     | RNull
     | RText(Text)
     ;
 
-public fn finalize(s: &State) -> Result {
+public fn finalize(s: &State) -> AggResult {
     if !s.have_value { return RNull; }
     RText(s.out.clone())
 }
 
-public fn result_is_null(r: &Result) -> Bool {
+public fn result_is_null(r: &AggResult) -> Bool {
     match r { RNull => true, _ => false }
 }
 
-public fn result_text(r: &Result) -> Text {
+public fn result_text(r: &AggResult) -> Text {
     match r {
         RText(t) => t.clone(),
         RNull    => "".clone(),

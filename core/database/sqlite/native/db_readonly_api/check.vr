@@ -4,13 +4,13 @@ module core.database.sqlite.native.db_readonly_api.check;
 
 mount base.{Bool, Text};
 
-public type Result is
+public type ReadonlyCheckResult is
     | RWritable          // 0
     | RReadonly          // 1
     | RUnknownSchema     // -1
     ;
 
-public fn to_code(r: &Result) -> Int {
+public fn to_code(r: &ReadonlyCheckResult) -> Int {
     match r {
         RWritable       =>  0,
         RReadonly       =>  1,
@@ -18,13 +18,13 @@ public fn to_code(r: &Result) -> Int {
     }
 }
 
-public fn from_code(n: Int) -> Result {
+public fn from_code(n: Int) -> ReadonlyCheckResult {
     if n < 0  { return RUnknownSchema; }
     if n == 0 { return RWritable; }
     RReadonly
 }
 
-public fn result_name(r: &Result) -> Text {
+public fn result_name(r: &ReadonlyCheckResult) -> Text {
     match r {
         RWritable       => "writable".clone(),
         RReadonly       => "readonly".clone(),
@@ -32,7 +32,7 @@ public fn result_name(r: &Result) -> Text {
     }
 }
 
-public fn is_readonly(r: &Result) -> Bool {
+public fn is_readonly(r: &ReadonlyCheckResult) -> Bool {
     match r { RReadonly => true, _ => false }
 }
 
@@ -53,7 +53,7 @@ public fn writable_inputs() -> Inputs {
     }
 }
 
-public fn check(i: &Inputs) -> Result {
+public fn check(i: &Inputs) -> ReadonlyCheckResult {
     if !i.schema_known       { return RUnknownSchema; }
     if i.opened_readonly     { return RReadonly; }
     if !i.file_mode_writable { return RReadonly; }

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.db_readonly_api.check.{
-    Result, RWritable, RReadonly, RUnknownSchema,
+    ReadonlyCheckResult, RWritable, RReadonly, RUnknownSchema,
     to_code, from_code, result_name, is_readonly,
     Inputs, writable_inputs, check,
     Reason, RnNotReadonly, RnOpenedReadonly, RnFsPermissions,

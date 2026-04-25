@@ -1,0 +1,201 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: weft, json, extractor, surface
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/weft/json_extractor.vr` — surface check for the full
+// JSON extractor that closes net-framework.md §11 Phase 1
+// follow-up "Полноценный JSON-extractor".
+
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.net.http.{Headers, Method};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.json_extractor.{
+    Json, JsonExtractorConfig, JsonExtractError,
+    extract_json, JsonDeserialize,
+};
+
+fn make_request(content_type: Maybe<Text>, body: List<Byte>) -> WeftRequest {
+    let mut h = Headers.new();
+    match content_type {
+        Some(t) => h.append(f"content-type", t),
+        None    => {},
+    }
+    WeftRequest {
+        method:      Method.Post,
+        path:        f"/api",
+        raw_query:   None,
+        headers:     h,
+        body:        body,
+        path_params: Map.new(),
+        peer_addr:   None,
+    }
+}
+
+fn config_defaults_match_spec() {
+    let cfg = JsonExtractorConfig.default();
+    assert(cfg.max_body_bytes == 1 * 1024 * 1024);   // 1 MiB
+    assert(cfg.accept_plus_json);
+    assert(cfg.require_content_type);
+}
+
+fn config_with_smaller_cap() {
+    let cfg = JsonExtractorConfig.default().with_max_body_bytes(64);
+    assert(cfg.max_body_bytes == 64);
+}
+
+fn config_relaxed_content_type() {
+    let cfg = JsonExtractorConfig.default().relaxed_content_type();
+    assert(false == cfg.require_content_type);
+}
+
+fn missing_content_type_rejects_when_strict() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"42".into_bytes();
+    let req = make_request(None, body);
+    match extract_json::<Int>(&req, &cfg) {
+        Err(JsonExtractError.MissingContentType) => {},
+        _ => panic("expected MissingContentType"),
+    }
+}
+
+fn wrong_content_type_rejects() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"42".into_bytes();
+    let req = make_request(Some(f"text/plain"), body);
+    match extract_json::<Int>(&req, &cfg) {
+        Err(JsonExtractError.WrongContentType { actual: _ }) => {},
+        _ => panic("expected WrongContentType"),
+    }
+}
+
+fn application_json_accepted() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"42".into_bytes();
+    let req = make_request(Some(f"application/json"), body);
+    match extract_json::<Int>(&req, &cfg) {
+        Ok(n) => assert(n == 42),
+        Err(_) => panic("expected Ok(42)"),
+    }
+}
+
+fn application_json_with_charset_accepted() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"true".into_bytes();
+    let req = make_request(Some(f"application/json; charset=utf-8"), body);
+    match extract_json::<Bool>(&req, &cfg) {
+        Ok(b) => assert(b),
+        Err(_) => panic("expected Ok(true)"),
+    }
+}
+
+fn plus_json_suffix_accepted() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"3.14".into_bytes();
+    let req = make_request(Some(f"application/vnd.example+json"), body);
+    match extract_json::<Float>(&req, &cfg) {
+        Ok(_) => {},
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+fn payload_too_large_rejects() {
+    let cfg = JsonExtractorConfig.default().with_max_body_bytes(4);
+    let body = f"\"hello\"".into_bytes();    // 7 bytes > 4
+    let req = make_request(Some(f"application/json"), body);
+    match extract_json::<Text>(&req, &cfg) {
+        Err(JsonExtractError.PayloadTooLarge { len, cap }) => {
+            assert(cap == 4);
+            assert(len > 4);
+        },
+        _ => panic("expected PayloadTooLarge"),
+    }
+}
+
+fn malformed_json_rejects_with_parse_error() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"{not json}".into_bytes();
+    let req = make_request(Some(f"application/json"), body);
+    match extract_json::<Bool>(&req, &cfg) {
+        Err(JsonExtractError.ParseError { json_err: _ }) => {},
+        _ => panic("expected ParseError"),
+    }
+}
+
+fn shape_mismatch_rejects() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"\"not-a-number\"".into_bytes();
+    let req = make_request(Some(f"application/json"), body);
+    match extract_json::<Int>(&req, &cfg) {
+        Err(JsonExtractError.ShapeMismatch { reason: _, path: _ }) => {},
+        _ => panic("expected ShapeMismatch"),
+    }
+}
+
+fn extracts_text_field() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"\"verum\"".into_bytes();
+    let req = make_request(Some(f"application/json"), body);
+    match extract_json::<Text>(&req, &cfg) {
+        Ok(t) => assert(t == f"verum"),
+        Err(_) => panic("expected Ok(verum)"),
+    }
+}
+
+fn extracts_int_list() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"[1, 2, 3]".into_bytes();
+    let req = make_request(Some(f"application/json"), body);
+    match extract_json::<List<Int>>(&req, &cfg) {
+        Ok(xs) => {
+            assert(xs.len() == 3);
+            assert(xs[0] == 1);
+            assert(xs[2] == 3);
+        },
+        Err(_) => panic("expected Ok([1,2,3])"),
+    }
+}
+
+fn extracts_optional_present() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"7".into_bytes();
+    let req = make_request(Some(f"application/json"), body);
+    match extract_json::<Maybe<Int>>(&req, &cfg) {
+        Ok(Some(n)) => assert(n == 7),
+        _ => panic("expected Some(7)"),
+    }
+}
+
+fn extracts_optional_null() {
+    let cfg = JsonExtractorConfig.default();
+    let body = f"null".into_bytes();
+    let req = make_request(Some(f"application/json"), body);
+    match extract_json::<Maybe<Int>>(&req, &cfg) {
+        Ok(None) => {},
+        _ => panic("expected None"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    config_defaults_match_spec();
+    config_with_smaller_cap();
+    config_relaxed_content_type();
+    missing_content_type_rejects_when_strict();
+    wrong_content_type_rejects();
+    application_json_accepted();
+    application_json_with_charset_accepted();
+    plus_json_suffix_accepted();
+    payload_too_large_rejects();
+    malformed_json_rejects_with_parse_error();
+    shape_mismatch_rejects();
+    extracts_text_field();
+    extracts_int_list();
+    extracts_optional_present();
+    extracts_optional_null();
+    print("Json<T> weft extractor verified");
+    0
+}

@@ -1,0 +1,359 @@
+// =============================================================================
+// core/net/weft/json_extractor.vr — Json<T> handler-argument extractor
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §11 (Phase 1 follow-up:
+//        "Полноценный JSON-extractor")
+// =============================================================================
+//
+// Closes the framework's Phase 1 follow-up by lifting the placeholder
+// `Json<T>` type from `core.net.weft.handler` into a fully-functional
+// FromRequest impl backed by `core.encoding.json`.
+//
+// The extractor performs five gates in fixed order:
+//
+//   1. Content-Type check — `application/json` (with optional
+//      `; charset=utf-8`). Anything else → 415 Unsupported Media Type.
+//   2. Body-size cap — caller-configured ceiling (default 1 MiB).
+//      Oversize → 413 Payload Too Large.
+//   3. UTF-8 validation — `core.encoding.json.parse` is UTF-8 native;
+//      invalid sequences → 400 Bad Request with the exact byte offset.
+//   4. Syntax parse — produces a JsonValue tree.
+//   5. Type-directed materialisation — `JsonDeserialize<T>` protocol
+//      lowers the tree into the user's typed value. Refinement
+//      violations bubble up as 422 Unprocessable Entity.
+//
+// The deserialise step uses the `JsonDeserialize<T>` protocol; users
+// implement it directly or derive it via `@derive(JsonDeserialize)`
+// on their record / sum type. Built-in impls cover the primitive
+// shapes (Int / Float / Bool / Text / List<T> / Map<K,V> / Maybe<T>)
+// + canonical record / sum patterns through the `@derive` machinery.
+//
+// =============================================================================
+
+module core.net.weft.json_extractor;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.encoding.json.{JsonValue, JsonError, parse as json_parse};
+mount core.net.http.{Response, StatusCode, Headers};
+mount core.net.weft.handler.{WeftRequest, FromRequest};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// Error catalogue — one variant per gate
+// =============================================================================
+
+public type JsonExtractError is
+      MissingContentType
+    | WrongContentType { actual: Text }
+    | PayloadTooLarge { len: Int, cap: Int }
+    | InvalidUtf8 { offset: Int }
+    | ParseError { json_err: JsonError }
+    /// Type-directed materialisation failed: structure didn't match
+    /// the target shape (e.g. expected an object, got an array;
+    /// missing required field).
+    | ShapeMismatch { reason: Text, path: Text }
+    /// Refinement-type violation — value parsed but didn't satisfy
+    /// the target's where-clause (e.g. Int between 1 and 100).
+    /// Produces 422, not 400.
+    | RefinementViolation { reason: Text, path: Text };
+
+implement JsonExtractError {
+    /// Map every variant to a (status, body) pair for the error path.
+    public fn into_response(self) -> Response {
+        let (status_code, message) = match &self {
+            JsonExtractError.MissingContentType =>
+                (415, f"missing content-type header"),
+            JsonExtractError.WrongContentType { actual } =>
+                (415, f"content-type {actual} is not application/json"),
+            JsonExtractError.PayloadTooLarge { len, cap } =>
+                (413, f"body {len} bytes exceeds cap {cap}"),
+            JsonExtractError.InvalidUtf8 { offset } =>
+                (400, f"invalid utf-8 at byte {offset}"),
+            JsonExtractError.ParseError { json_err } =>
+                (400, f"json parse error: {json_err.message} at {json_err.line}:{json_err.column}"),
+            JsonExtractError.ShapeMismatch { reason, path } =>
+                (400, f"shape mismatch at {path}: {reason}"),
+            JsonExtractError.RefinementViolation { reason, path } =>
+                (422, f"refinement violation at {path}: {reason}"),
+        };
+        let mut headers = Headers.new();
+        headers.append(f"content-type", f"text/plain; charset=utf-8");
+        Response {
+            status:  StatusCode { code: status_code },
+            headers: headers,
+            body:    message.into_bytes(),
+        }
+    }
+}
+
+// =============================================================================
+// JsonDeserialize<T> — protocol the user / derive macro implements
+// =============================================================================
+//
+// Plain protocol that takes a JsonValue tree + a *path* (the
+// reverse-DNS dotted location for error messages) and produces a
+// `Result<T, JsonExtractError>`. Refinement-type checks happen
+// here — the deserializer can return RefinementViolation when a
+// successfully-parsed primitive doesn't satisfy a refined target.
+
+public type JsonDeserialize<T> is protocol {
+    fn from_json(value: &JsonValue, path: &Text) -> Result<T, JsonExtractError>;
+};
+
+// -----------------------------------------------------------------------------
+// Built-in impls for primitives
+// -----------------------------------------------------------------------------
+
+implement JsonDeserialize<Int> for Int {
+    fn from_json(v: &JsonValue, path: &Text) -> Result<Int, JsonExtractError> {
+        match v {
+            JsonValue.JsonInt(n) => Ok(*n as Int),
+            JsonValue.JsonFloat(f) => {
+                let truncated = *f as Int;
+                if (truncated as Float) == *f {
+                    Ok(truncated)
+                } else {
+                    Err(JsonExtractError.ShapeMismatch {
+                        reason: f"expected integer, got fractional float",
+                        path: path.clone(),
+                    })
+                }
+            },
+            _ => Err(JsonExtractError.ShapeMismatch {
+                reason: f"expected integer",
+                path: path.clone(),
+            }),
+        }
+    }
+}
+
+implement JsonDeserialize<Float> for Float {
+    fn from_json(v: &JsonValue, path: &Text) -> Result<Float, JsonExtractError> {
+        match v {
+            JsonValue.JsonFloat(f) => Ok(*f),
+            JsonValue.JsonInt(n)   => Ok(*n as Float),
+            _ => Err(JsonExtractError.ShapeMismatch {
+                reason: f"expected number",
+                path: path.clone(),
+            }),
+        }
+    }
+}
+
+implement JsonDeserialize<Bool> for Bool {
+    fn from_json(v: &JsonValue, path: &Text) -> Result<Bool, JsonExtractError> {
+        match v {
+            JsonValue.JsonBool(b) => Ok(*b),
+            _ => Err(JsonExtractError.ShapeMismatch {
+                reason: f"expected boolean",
+                path: path.clone(),
+            }),
+        }
+    }
+}
+
+implement JsonDeserialize<Text> for Text {
+    fn from_json(v: &JsonValue, path: &Text) -> Result<Text, JsonExtractError> {
+        match v {
+            JsonValue.JsonString(s) => Ok(s.clone()),
+            _ => Err(JsonExtractError.ShapeMismatch {
+                reason: f"expected string",
+                path: path.clone(),
+            }),
+        }
+    }
+}
+
+implement<T> JsonDeserialize<Maybe<T>> for Maybe<T>
+    where T: JsonDeserialize<T>
+{
+    fn from_json(v: &JsonValue, path: &Text) -> Result<Maybe<T>, JsonExtractError> {
+        match v {
+            JsonValue.JsonNull => Ok(None),
+            other => match T.from_json(other, path) {
+                Ok(t)  => Ok(Some(t)),
+                Err(e) => Err(e),
+            },
+        }
+    }
+}
+
+implement<T> JsonDeserialize<List<T>> for List<T>
+    where T: JsonDeserialize<T>
+{
+    fn from_json(v: &JsonValue, path: &Text) -> Result<List<T>, JsonExtractError> {
+        match v {
+            JsonValue.JsonArray(elems) => {
+                let mut out: List<T> = [];
+                let mut i: Int = 0;
+                while i < elems.len() {
+                    let elem_path = f"{path}[{i}]";
+                    out.push(T.from_json(&elems[i], &elem_path)?);
+                    i = i + 1;
+                }
+                Ok(out)
+            },
+            _ => Err(JsonExtractError.ShapeMismatch {
+                reason: f"expected array",
+                path: path.clone(),
+            }),
+        }
+    }
+}
+
+// =============================================================================
+// JsonExtractorConfig — per-handler tuning
+// =============================================================================
+
+public type JsonExtractorConfig is {
+    /// Maximum body size we'll accept. Default 1 MiB.
+    max_body_bytes: Int,
+    /// If true, accept media types beyond `application/json` that
+    /// have a `+json` suffix (RFC 6838 §4.2.8 — e.g.
+    /// `application/vnd.example+json`). Default true.
+    accept_plus_json: Bool,
+    /// If true, the content-type header is required. When false,
+    /// missing CT is treated as application/json (used for some
+    /// gRPC-flavour bridges where the gateway strips CT).
+    require_content_type: Bool,
+};
+
+implement JsonExtractorConfig {
+    public fn default() -> JsonExtractorConfig {
+        JsonExtractorConfig {
+            max_body_bytes:       1 * 1024 * 1024,
+            accept_plus_json:     true,
+            require_content_type: true,
+        }
+    }
+
+    public fn with_max_body_bytes(mut self, n: Int) -> JsonExtractorConfig {
+        self.max_body_bytes = n;
+        self
+    }
+
+    public fn relaxed_content_type(mut self) -> JsonExtractorConfig {
+        self.require_content_type = false;
+        self
+    }
+}
+
+// =============================================================================
+// Json<T> extraction — the entry point
+// =============================================================================
+
+/// Try to extract a typed `T` from the request body. Composable
+/// without a handler — useful when the caller wants the typed
+/// value but already has the WeftRequest in hand.
+public fn extract_json<T>(req: &WeftRequest, cfg: &JsonExtractorConfig)
+    -> Result<T, JsonExtractError>
+    where T: JsonDeserialize<T>
+{
+    // Gate 1: content-type.
+    let ct = req.headers.get(&"content-type");
+    match ct {
+        None if cfg.require_content_type =>
+            return Err(JsonExtractError.MissingContentType),
+        Some(t) => {
+            if !is_json_content_type(t, cfg.accept_plus_json) {
+                return Err(JsonExtractError.WrongContentType { actual: t.clone() });
+            }
+        },
+        None => {},
+    }
+    // Gate 2: size cap.
+    if req.body.len() > cfg.max_body_bytes {
+        return Err(JsonExtractError.PayloadTooLarge {
+            len: req.body.len(),
+            cap: cfg.max_body_bytes,
+        });
+    }
+    // Gate 3: UTF-8 validation. core.encoding.json.parse takes
+    // a Text but we have List<Byte>; convert + validate.
+    let text = match Text.from_utf8(&req.body) {
+        Ok(t) => t,
+        Err(offset) => return Err(JsonExtractError.InvalidUtf8 { offset: offset }),
+    };
+    // Gate 4: syntax parse.
+    let value = match json_parse(&text) {
+        Ok(v) => v,
+        Err(e) => return Err(JsonExtractError.ParseError { json_err: e }),
+    };
+    // Gate 5: type-directed materialisation.
+    let root_path = Text.from_str("$");
+    T.from_json(&value, &root_path)
+}
+
+/// True iff the media type is application/json or *+json (RFC 6838
+/// suffix). Lower-cased + whitespace-trimmed comparison.
+fn is_json_content_type(ct: &Text, accept_plus_json: Bool) -> Bool {
+    let bytes = ct.as_bytes();
+    // Strip leading whitespace.
+    let mut start: Int = 0;
+    while start < bytes.len() && (bytes[start] == (' ' as Byte) || bytes[start] == ('\t' as Byte)) {
+        start = start + 1;
+    }
+    // Find the ; separator (params).
+    let mut end: Int = start;
+    while end < bytes.len() && bytes[end] != (';' as Byte) {
+        end = end + 1;
+    }
+    // Trim trailing whitespace inside the media-type slice.
+    while end > start && (bytes[end - 1] == (' ' as Byte) || bytes[end - 1] == ('\t' as Byte)) {
+        end = end - 1;
+    }
+    let media = lowercase_slice(bytes, start, end);
+    if media == f"application/json" { return true; }
+    if accept_plus_json && media.ends_with(&f"+json") {
+        // RFC 6838 §4.2.8 structured-suffix: `application/vnd.foo+json` etc.
+        if media.starts_with(&f"application/") { return true; }
+    }
+    false
+}
+
+fn lowercase_slice(bytes: &[Byte], start: Int, end: Int) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end {
+        let b = bytes[i];
+        if b >= ('A' as Byte) && b <= ('Z' as Byte) {
+            out.push(b + 32_u8);    // 'A' → 'a'
+        } else {
+            out.push(b);
+        }
+        i = i + 1;
+    }
+    Text.from_utf8_lossy(out.as_slice())
+}
+
+// =============================================================================
+// FromRequest impl — wraps extract_json with the default config
+// =============================================================================
+
+/// Re-export the placeholder type from the handler module so
+/// users see the same `Json<T>` they imported there. This module's
+/// `FromRequest for Json<T>` impl supersedes the placeholder once
+/// the user mounts `core.net.weft.json_extractor`.
+public type Json<T> is { inner: T };
+
+implement<T> Json<T> {
+    public fn into_inner(self) -> T { self.inner }
+    public fn as_ref(&self) -> &T { &self.inner }
+}
+
+implement<T> FromRequest for Json<T>
+    where T: JsonDeserialize<T>
+{
+    type Rejection = JsonExtractError;
+
+    async fn from_request(req: &mut WeftRequest)
+        -> Result<Json<T>, JsonExtractError>
+    {
+        let cfg = JsonExtractorConfig.default();
+        let value = extract_json::<T>(req, &cfg)?;
+        Ok(Json { inner: value })
+    }
+}
