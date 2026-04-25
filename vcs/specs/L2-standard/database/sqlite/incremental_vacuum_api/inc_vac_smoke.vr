@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, incremental_vacuum_api, vacuum
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.incremental_vacuum_api.step.{
+    Request, RqAll, RqAtMost,
+    from_arg, target_page_count,
+    Outcome, OkReclaimed, ErrModeNotIncremental, ErrInTransaction, ErrCorrupt,
+    outcome_name, is_ok, pages_reclaimed,
+    pre_check,
+};
+mount base.{Bool, Int64};
+
+fn test_from_arg_branches() {
+    match from_arg(0 as Int64)   { RqAll       => {}, _ => assert(false) }
+    match from_arg(-5 as Int64)  { RqAll       => {}, _ => assert(false) }
+    match from_arg(10 as Int64)  {
+        RqAtMost(n) => assert_eq(n, 10 as Int64),
+        _ => assert(false),
+    }
+}
+
+fn test_target_page_count_all_takes_full_freelist() {
+    assert_eq(target_page_count(&RqAll, 250 as Int64), 250 as Int64);
+}
+
+fn test_target_page_count_atmost_caps_at_freelist() {
+    assert_eq(target_page_count(&RqAtMost(50 as Int64), 250 as Int64), 50 as Int64);
+    assert_eq(target_page_count(&RqAtMost(500 as Int64), 250 as Int64), 250 as Int64);
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&OkReclaimed(0 as Int64))        == "ok_reclaimed".clone());
+    assert(outcome_name(&ErrModeNotIncremental)          == "err_mode_not_incremental".clone());
+    assert(outcome_name(&ErrInTransaction)               == "err_in_transaction".clone());
+    assert(outcome_name(&ErrCorrupt)                     == "err_corrupt".clone());
+}
+
+fn test_is_ok_and_pages_reclaimed() {
+    assert(is_ok(&OkReclaimed(7 as Int64)));
+    assert(!is_ok(&ErrCorrupt));
+    assert_eq(pages_reclaimed(&OkReclaimed(7 as Int64)), 7 as Int64);
+    assert_eq(pages_reclaimed(&ErrInTransaction), 0 as Int64);
+}
+
+fn test_pre_check_mode_required() {
+    match pre_check(false, false) { ErrModeNotIncremental => {}, _ => assert(false) }
+}
+
+fn test_pre_check_no_txn_required() {
+    match pre_check(true, true) { ErrInTransaction => {}, _ => assert(false) }
+}
+
+fn test_pre_check_ok_path() {
+    match pre_check(true, false) {
+        OkReclaimed(n) => assert_eq(n, 0 as Int64),
+        _ => assert(false),
+    }
+}
+
+fn main() {
+    test_from_arg_branches();
+    test_target_page_count_all_takes_full_freelist();
+    test_target_page_count_atmost_caps_at_freelist();
+    test_outcome_names();
+    test_is_ok_and_pages_reclaimed();
+    test_pre_check_mode_required();
+    test_pre_check_no_txn_required();
+    test_pre_check_ok_path();
+}

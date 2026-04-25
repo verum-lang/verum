@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/journal_mode_pragma_api/mod.vr
+// =============================================================================
+// PRAGMA journal_mode — one of DELETE / TRUNCATE / PERSIST / MEMORY / WAL / OFF.
+// Switching to WAL is persistent across sessions; switching back to a non-WAL
+// mode is also persistent.  MEMORY/OFF are connection-local for non-persistent
+// databases; for file-backed they're rejected or short-lived.
+// Spec §15.4 + §18.4.
+// =============================================================================
+
+module core.database.sqlite.native.journal_mode_pragma_api;
+
+public module mode_;

@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/locking_mode_pragma/mod.vr
+// =============================================================================
+// PRAGMA locking_mode — NORMAL or EXCLUSIVE.
+//   NORMAL:    locks released after each transaction (default).
+//   EXCLUSIVE: connection retains locks across transactions; other connections
+//              are blocked but the cost of acquiring/releasing locks vanishes.
+// EXCLUSIVE also lets WAL mode run without -shm.
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.locking_mode_pragma;
+
+public module gate;

@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, locking_mode_pragma, locking
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.locking_mode_pragma.gate.{
+    Mode, LmNormal, LmExclusive,
+    default_mode, from_text, mode_name,
+    retains_locks_across_txns, allows_walwithout_shm,
+    SwitchEffect, SeImmediate, SeLazy,
+    effect_of_switch, effect_name, is_immediate,
+};
+mount base.{Bool};
+
+fn test_default_is_normal() {
+    match default_mode() { LmNormal => {}, _ => assert(false) }
+}
+
+fn test_from_text() {
+    match from_text("normal".clone())    { LmNormal    => {}, _ => assert(false) }
+    match from_text("exclusive".clone()) { LmExclusive => {}, _ => assert(false) }
+    match from_text("xyzzy".clone())     { LmNormal    => {}, _ => assert(false) }
+}
+
+fn test_mode_names() {
+    assert(mode_name(&LmNormal)    == "normal".clone());
+    assert(mode_name(&LmExclusive) == "exclusive".clone());
+}
+
+fn test_retains_locks_across_txns() {
+    assert(!retains_locks_across_txns(&LmNormal));
+    assert(retains_locks_across_txns(&LmExclusive));
+}
+
+fn test_allows_wal_without_shm() {
+    assert(!allows_walwithout_shm(&LmNormal));
+    assert(allows_walwithout_shm(&LmExclusive));
+}
+
+fn test_switch_effect_normal_to_exclusive_is_lazy() {
+    match effect_of_switch(&LmNormal, &LmExclusive) { SeLazy => {}, _ => assert(false) }
+}
+
+fn test_switch_effect_other_paths_immediate() {
+    match effect_of_switch(&LmNormal,    &LmNormal)    { SeImmediate => {}, _ => assert(false) }
+    match effect_of_switch(&LmExclusive, &LmExclusive) { SeImmediate => {}, _ => assert(false) }
+    match effect_of_switch(&LmExclusive, &LmNormal)    { SeImmediate => {}, _ => assert(false) }
+}
+
+fn test_effect_names_and_is_immediate() {
+    assert(effect_name(&SeImmediate) == "immediate".clone());
+    assert(effect_name(&SeLazy)      == "lazy".clone());
+    assert(is_immediate(&SeImmediate));
+    assert(!is_immediate(&SeLazy));
+}
+
+fn main() {
+    test_default_is_normal();
+    test_from_text();
+    test_mode_names();
+    test_retains_locks_across_txns();
+    test_allows_wal_without_shm();
+    test_switch_effect_normal_to_exclusive_is_lazy();
+    test_switch_effect_other_paths_immediate();
+    test_effect_names_and_is_immediate();
+}

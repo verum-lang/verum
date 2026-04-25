@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, journal_mode_pragma_api, journal
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.journal_mode_pragma_api.mode_.{
+    JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+    default_mode, from_text, mode_name,
+    is_rollback_journal, keeps_journal_file, is_wal,
+    is_safe_for_durability, persists_across_sessions, reply_text,
+};
+mount base.{Bool};
+
+fn test_default_is_delete() {
+    match default_mode() { JmDelete => {}, _ => assert(false) }
+}
+
+fn test_from_text_round_trip() {
+    match from_text("delete".clone())   { JmDelete   => {}, _ => assert(false) }
+    match from_text("truncate".clone()) { JmTruncate => {}, _ => assert(false) }
+    match from_text("persist".clone())  { JmPersist  => {}, _ => assert(false) }
+    match from_text("memory".clone())   { JmMemory   => {}, _ => assert(false) }
+    match from_text("wal".clone())      { JmWal      => {}, _ => assert(false) }
+    match from_text("off".clone())      { JmOff      => {}, _ => assert(false) }
+    match from_text("xyzzy".clone())    { JmDelete   => {}, _ => assert(false) }
+}
+
+fn test_mode_names() {
+    assert(mode_name(&JmDelete)   == "delete".clone());
+    assert(mode_name(&JmTruncate) == "truncate".clone());
+    assert(mode_name(&JmPersist)  == "persist".clone());
+    assert(mode_name(&JmMemory)   == "memory".clone());
+    assert(mode_name(&JmWal)      == "wal".clone());
+    assert(mode_name(&JmOff)      == "off".clone());
+}
+
+fn test_is_rollback_journal() {
+    assert(is_rollback_journal(&JmDelete));
+    assert(is_rollback_journal(&JmTruncate));
+    assert(is_rollback_journal(&JmPersist));
+    assert(!is_rollback_journal(&JmMemory));
+    assert(!is_rollback_journal(&JmWal));
+    assert(!is_rollback_journal(&JmOff));
+}
+
+fn test_keeps_journal_file() {
+    assert(keeps_journal_file(&JmDelete));
+    assert(keeps_journal_file(&JmTruncate));
+    assert(keeps_journal_file(&JmPersist));
+    assert(!keeps_journal_file(&JmMemory));
+    assert(!keeps_journal_file(&JmWal));
+    assert(!keeps_journal_file(&JmOff));
+}
+
+fn test_is_wal() {
+    assert(is_wal(&JmWal));
+    assert(!is_wal(&JmDelete));
+    assert(!is_wal(&JmMemory));
+}
+
+fn test_durability() {
+    assert(is_safe_for_durability(&JmDelete));
+    assert(is_safe_for_durability(&JmTruncate));
+    assert(is_safe_for_durability(&JmPersist));
+    assert(is_safe_for_durability(&JmWal));
+    assert(!is_safe_for_durability(&JmMemory));
+    assert(!is_safe_for_durability(&JmOff));
+}
+
+fn test_persists_across_sessions() {
+    assert(persists_across_sessions(&JmDelete));
+    assert(persists_across_sessions(&JmTruncate));
+    assert(persists_across_sessions(&JmPersist));
+    assert(persists_across_sessions(&JmWal));
+    assert(!persists_across_sessions(&JmMemory));
+    assert(!persists_across_sessions(&JmOff));
+}
+
+fn test_reply_text_matches_mode_name() {
+    assert(reply_text(&JmWal) == mode_name(&JmWal));
+}
+
+fn main() {
+    test_default_is_delete();
+    test_from_text_round_trip();
+    test_mode_names();
+    test_is_rollback_journal();
+    test_keeps_journal_file();
+    test_is_wal();
+    test_durability();
+    test_persists_across_sessions();
+    test_reply_text_matches_mode_name();
+}

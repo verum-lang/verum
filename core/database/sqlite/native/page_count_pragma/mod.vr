@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/page_count_pragma/mod.vr
+// =============================================================================
+// PRAGMA page_count — total pages in the main database file.  Read-only on the
+// main schema.  Combined with PRAGMA page_size you can compute the file size.
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.page_count_pragma;
+
+public module reading;

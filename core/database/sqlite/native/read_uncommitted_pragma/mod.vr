@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/read_uncommitted_pragma/mod.vr
+// =============================================================================
+// PRAGMA read_uncommitted — applies only to shared-cache mode.  Default OFF
+// (READ_COMMITTED isolation).  ON allows reads to see uncommitted writes from
+// other connections sharing the same cache (NO snapshot isolation).
+// No effect outside shared-cache; ignored in WAL mode.  Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.read_uncommitted_pragma;
+
+public module gate;

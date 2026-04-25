@@ -1,0 +1,60 @@
+// PRAGMA data_version — change-detection counter.
+
+module core.database.sqlite.native.data_version_pragma.reading;
+
+mount base.{Bool, Int64, Text};
+
+public type Reading is {
+    counter: Int64,
+};
+
+public fn from_pragma_value(n: Int64) -> Reading {
+    let zero = 0 as Int64;
+    let v = if n < zero { zero } else { n };
+    Reading { counter: v }
+}
+
+public fn to_pragma_value(r: &Reading) -> Int64 { r.counter }
+
+// Comparison between an old reading (snapshot the application kept) and
+// the current reading.
+public type ChangeStatus is
+    | CsUnchanged
+    | CsExternallyModified     // counter advanced
+    | CsRolledBack             // counter decreased — abnormal; treat as changed
+    ;
+
+public fn detect(prev: &Reading, now: &Reading) -> ChangeStatus {
+    if now.counter == prev.counter { return CsUnchanged; }
+    if now.counter > prev.counter  { return CsExternallyModified; }
+    CsRolledBack
+}
+
+public fn status_name(s: &ChangeStatus) -> Text {
+    match s {
+        CsUnchanged          => "unchanged".clone(),
+        CsExternallyModified => "modified".clone(),
+        CsRolledBack         => "rolled_back".clone(),
+    }
+}
+
+public fn is_unchanged(s: &ChangeStatus) -> Bool {
+    match s { CsUnchanged => true, _ => false }
+}
+
+// Difference helper for telemetry — how many commits did we miss?
+// Negative result for rollback case is folded to 0 (caller can re-detect).
+public fn delta(prev: &Reading, now: &Reading) -> Int64 {
+    let zero = 0 as Int64;
+    if now.counter < prev.counter { return zero; }
+    now.counter - prev.counter
+}
+
+public fn empty_reading() -> Reading {
+    Reading { counter: 0 as Int64 }
+}
+
+// Whether *any* commit has ever been observed (counter > 0).
+public fn has_been_committed(r: &Reading) -> Bool {
+    r.counter > (0 as Int64)
+}

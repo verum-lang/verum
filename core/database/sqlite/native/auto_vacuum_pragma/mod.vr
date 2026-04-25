@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/auto_vacuum_pragma/mod.vr
+// =============================================================================
+// PRAGMA auto_vacuum — three modes:
+//   0 NONE (default)        — freelist grows; VACUUM compacts on demand
+//   1 FULL                   — freelist pages are returned at every commit
+//   2 INCREMENTAL            — pointer-map maintained; reclaim via PRAGMA
+// May only be changed before any tables are created (or via VACUUM INTO).
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.auto_vacuum_pragma;
+
+public module mode;

@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, data_version_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.data_version_pragma.reading.{
+    Reading,
+    from_pragma_value, to_pragma_value, empty_reading,
+    ChangeStatus, CsUnchanged, CsExternallyModified, CsRolledBack,
+    detect, status_name, is_unchanged, delta, has_been_committed,
+};
+mount base.{Bool, Int64};
+
+fn test_empty_reading() {
+    let r = empty_reading();
+    assert_eq(r.counter, 0 as Int64);
+    assert(!has_been_committed(&r));
+}
+
+fn test_pragma_round_trip() {
+    let r = from_pragma_value(42 as Int64);
+    assert_eq(to_pragma_value(&r), 42 as Int64);
+    let neg = from_pragma_value(-5 as Int64);
+    assert_eq(to_pragma_value(&neg), 0 as Int64);
+}
+
+fn test_detect_unchanged() {
+    let prev = from_pragma_value(7 as Int64);
+    let now  = from_pragma_value(7 as Int64);
+    match detect(&prev, &now) { CsUnchanged => {}, _ => assert(false) }
+    assert_eq(delta(&prev, &now), 0 as Int64);
+}
+
+fn test_detect_modified() {
+    let prev = from_pragma_value(7 as Int64);
+    let now  = from_pragma_value(15 as Int64);
+    match detect(&prev, &now) { CsExternallyModified => {}, _ => assert(false) }
+    assert_eq(delta(&prev, &now), 8 as Int64);
+}
+
+fn test_detect_rolled_back() {
+    let prev = from_pragma_value(15 as Int64);
+    let now  = from_pragma_value(7 as Int64);
+    match detect(&prev, &now) { CsRolledBack => {}, _ => assert(false) }
+    assert_eq(delta(&prev, &now), 0 as Int64);   // floored to 0
+}
+
+fn test_status_names() {
+    assert(status_name(&CsUnchanged)          == "unchanged".clone());
+    assert(status_name(&CsExternallyModified) == "modified".clone());
+    assert(status_name(&CsRolledBack)         == "rolled_back".clone());
+}
+
+fn test_is_unchanged_predicate() {
+    assert(is_unchanged(&CsUnchanged));
+    assert(!is_unchanged(&CsExternallyModified));
+    assert(!is_unchanged(&CsRolledBack));
+}
+
+fn test_has_been_committed_threshold() {
+    assert(!has_been_committed(&from_pragma_value(0 as Int64)));
+    assert(has_been_committed(&from_pragma_value(1 as Int64)));
+}
+
+fn main() {
+    test_empty_reading();
+    test_pragma_round_trip();
+    test_detect_unchanged();
+    test_detect_modified();
+    test_detect_rolled_back();
+    test_status_names();
+    test_is_unchanged_predicate();
+    test_has_been_committed_threshold();
+}

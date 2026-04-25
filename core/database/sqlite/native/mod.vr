@@ -828,3 +828,19 @@ public module format_fn;
 public module octet_length_fn;
 // - error_str_api: sqlite3_errstr(rc) primary-code lookup table (29 entries + ROW/DONE)
 public module error_str_api;
+// - freelist_count_pragma: PRAGMA freelist_count + fragmentation% + VacuumAdvice
+public module freelist_count_pragma;
+// - page_count_pragma: PRAGMA page_count + page_size validity (pow2 + 512..65536)
+public module page_count_pragma;
+// - data_version_pragma: PRAGMA data_version + ChangeStatus (Unchanged/Modified/RolledBack)
+public module data_version_pragma;
+// - incremental_vacuum_api: PRAGMA incremental_vacuum(N) (Request + 4-outcome + pre_check)
+public module incremental_vacuum_api;
+// - auto_vacuum_pragma: PRAGMA auto_vacuum NONE/FULL/INCREMENTAL + empty-db gate
+public module auto_vacuum_pragma;
+// - journal_mode_pragma_api: PRAGMA journal_mode 6-mode + persistence + durability classifiers
+public module journal_mode_pragma_api;
+// - locking_mode_pragma: PRAGMA locking_mode NORMAL/EXCLUSIVE + lazy-vs-immediate switch
+public module locking_mode_pragma;
+// - read_uncommitted_pragma: PRAGMA read_uncommitted (shared-cache only) + WAL-ignore
+public module read_uncommitted_pragma;

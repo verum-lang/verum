@@ -1,0 +1,62 @@
+// PRAGMA incremental_vacuum(N) — partial-VACUUM step.
+
+module core.database.sqlite.native.incremental_vacuum_api.step;
+
+mount base.{Bool, Int64, Text};
+
+public type Request is
+    | RqAll                  // PRAGMA incremental_vacuum   (no arg or N<=0)
+    | RqAtMost(Int64)         // PRAGMA incremental_vacuum(N)
+    ;
+
+public fn from_arg(n: Int64) -> Request {
+    let zero = 0 as Int64;
+    if n <= zero { return RqAll; }
+    RqAtMost(n)
+}
+
+public fn target_page_count(r: &Request, freelist_total: Int64) -> Int64 {
+    match r {
+        RqAll        => freelist_total,
+        RqAtMost(n)  => {
+            if n.clone() < freelist_total { n.clone() } else { freelist_total }
+        },
+    }
+}
+
+public type Outcome is
+    | OkReclaimed(Int64)         // pages actually reclaimed (>= 0)
+    | ErrModeNotIncremental       // auto_vacuum != INCREMENTAL
+    | ErrInTransaction            // VACUUM forbidden inside an explicit txn
+    | ErrCorrupt                  // SQLITE_CORRUPT detected mid-step
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkReclaimed(_)         => "ok_reclaimed".clone(),
+        ErrModeNotIncremental  => "err_mode_not_incremental".clone(),
+        ErrInTransaction       => "err_in_transaction".clone(),
+        ErrCorrupt             => "err_corrupt".clone(),
+    }
+}
+
+public fn is_ok(o: &Outcome) -> Bool {
+    match o { OkReclaimed(_) => true, _ => false }
+}
+
+public fn pages_reclaimed(o: &Outcome) -> Int64 {
+    match o {
+        OkReclaimed(n) => n.clone(),
+        _              => 0 as Int64,
+    }
+}
+
+// Pre-checks before attempting the step.
+public fn pre_check(
+    auto_vacuum_is_incremental: Bool,
+    in_explicit_txn: Bool,
+) -> Outcome {
+    if !auto_vacuum_is_incremental { return ErrModeNotIncremental; }
+    if in_explicit_txn             { return ErrInTransaction; }
+    OkReclaimed(0 as Int64)        // engine then proceeds with reclaim
+}

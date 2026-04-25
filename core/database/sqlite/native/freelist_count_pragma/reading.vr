@@ -1,0 +1,93 @@
+// PRAGMA freelist_count — read-only freelist size projection.
+
+module core.database.sqlite.native.freelist_count_pragma.reading;
+
+mount base.{Bool, Int64, Text};
+mount core.collections.list.{List};
+
+// One observation: total free pages and the database's page total.
+public type Reading is {
+    free_pages: Int64,
+    total_pages: Int64,
+};
+
+public fn new(free_pages: Int64, total_pages: Int64) -> Reading {
+    let zero = 0 as Int64;
+    let mut f = if free_pages < zero { zero } else { free_pages };
+    let mut t = if total_pages < zero { zero } else { total_pages };
+    if f > t { f = t; }
+    Reading { free_pages: f, total_pages: t }
+}
+
+public fn empty_reading() -> Reading {
+    Reading { free_pages: 0 as Int64, total_pages: 0 as Int64 }
+}
+
+public fn is_empty(r: &Reading) -> Bool {
+    r.free_pages == (0 as Int64)
+}
+
+public fn fragmentation_percent(r: &Reading) -> Int {
+    if r.total_pages == (0 as Int64) { return 0; }
+    let frac = (r.free_pages * (100 as Int64)) / r.total_pages;
+    frac as Int
+}
+
+// Decision: should we VACUUM now?  Threshold is a percentage (0..100).
+public type VacuumAdvice is
+    | VaSkip
+    | VaConsider
+    | VaRecommend
+    ;
+
+public fn advise(r: &Reading, threshold_pct: Int) -> VacuumAdvice {
+    let pct = fragmentation_percent(r);
+    if pct < threshold_pct / 2 { return VaSkip; }
+    if pct < threshold_pct      { return VaConsider; }
+    VaRecommend
+}
+
+public fn advice_name(v: &VacuumAdvice) -> Text {
+    match v {
+        VaSkip      => "skip".clone(),
+        VaConsider  => "consider".clone(),
+        VaRecommend => "recommend".clone(),
+    }
+}
+
+// Snapshot rendering "freelist=X / total=Y (Z%)".
+public fn snapshot_text(r: &Reading) -> Text {
+    let mut s = Text.new();
+    s = s.append("freelist=".clone());
+    s = s.append(int64_decimal(r.free_pages));
+    s = s.append(" total=".clone());
+    s = s.append(int64_decimal(r.total_pages));
+    s = s.append(" (".clone());
+    s = s.append(int_decimal(fragmentation_percent(r)));
+    s = s.append("%)".clone());
+    s
+}
+
+fn int64_decimal(n: Int64) -> Text {
+    let zero = 0 as Int64;
+    if n == zero { return "0".clone(); }
+    let ten = 10 as Int64;
+    let mut x = n;
+    let mut digits: List<Int> = List.new();
+    while x > zero {
+        digits.push((x % ten) as Int);
+        x = x / ten;
+    }
+    let mut out = Text.new();
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 {
+        let d = digits.get(i as Int);
+        out = out.append_byte(0x30 + d);
+        i = i - 1;
+    }
+    out
+}
+
+fn int_decimal(n: Int) -> Text {
+    int64_decimal(n as Int64)
+}

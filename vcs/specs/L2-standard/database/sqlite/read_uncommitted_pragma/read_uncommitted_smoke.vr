@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, read_uncommitted_pragma, isolation
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.read_uncommitted_pragma.gate.{
+    Mode, RuOff, RuOn,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    Effect, EfReadCommitted, EfReadUncommitted, EfIgnoredInWal,
+    resolve_effect, effect_name, allows_dirty_reads, is_risky,
+};
+mount base.{Bool};
+
+fn test_default_is_off() {
+    match default_mode() { RuOff => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { RuOff => {}, _ => assert(false) }
+    match from_pragma_value(1) { RuOn  => {}, _ => assert(false) }
+    match from_pragma_value(7) { RuOn  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&RuOff), 0);
+    assert_eq(to_pragma_value(&RuOn),  1);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&RuOff) == "off".clone());
+    assert(mode_name(&RuOn)  == "on".clone());
+}
+
+fn test_effect_off_always_committed() {
+    match resolve_effect(&RuOff, true,  false) { EfReadCommitted => {}, _ => assert(false) }
+    match resolve_effect(&RuOff, false, false) { EfReadCommitted => {}, _ => assert(false) }
+    match resolve_effect(&RuOff, true,  true)  { EfReadCommitted => {}, _ => assert(false) }
+}
+
+fn test_effect_non_shared_cache_always_committed() {
+    match resolve_effect(&RuOn, false, false) { EfReadCommitted => {}, _ => assert(false) }
+}
+
+fn test_effect_on_shared_cache_non_wal_uncommitted() {
+    match resolve_effect(&RuOn, true, false) { EfReadUncommitted => {}, _ => assert(false) }
+}
+
+fn test_effect_on_in_wal_ignored() {
+    match resolve_effect(&RuOn, true, true) { EfIgnoredInWal => {}, _ => assert(false) }
+}
+
+fn test_effect_names_and_dirty_reads() {
+    assert(effect_name(&EfReadCommitted)   == "read_committed".clone());
+    assert(effect_name(&EfReadUncommitted) == "read_uncommitted".clone());
+    assert(effect_name(&EfIgnoredInWal)    == "ignored_in_wal".clone());
+    assert(allows_dirty_reads(&EfReadUncommitted));
+    assert(!allows_dirty_reads(&EfReadCommitted));
+    assert(!allows_dirty_reads(&EfIgnoredInWal));
+}
+
+fn test_risk_classification() {
+    assert(is_risky(&EfReadUncommitted));
+    assert(!is_risky(&EfReadCommitted));
+    assert(!is_risky(&EfIgnoredInWal));
+}
+
+fn main() {
+    test_default_is_off();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_effect_off_always_committed();
+    test_effect_non_shared_cache_always_committed();
+    test_effect_on_shared_cache_non_wal_uncommitted();
+    test_effect_on_in_wal_ignored();
+    test_effect_names_and_dirty_reads();
+    test_risk_classification();
+}

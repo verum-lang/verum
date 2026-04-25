@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, auto_vacuum_pragma, vacuum
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.auto_vacuum_pragma.mode.{
+    AutoVacuum, AvNone, AvFull, AvIncremental,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    maintains_pointer_map, reclaims_at_commit, supports_incremental_pragma,
+    SetOutcome, SoApplied, SoIgnoredNotEmpty,
+    try_apply, outcome_name, was_applied,
+};
+mount base.{Bool};
+
+fn test_default_is_none() {
+    match default_mode() { AvNone => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0)  { AvNone        => {}, _ => assert(false) }
+    match from_pragma_value(1)  { AvFull        => {}, _ => assert(false) }
+    match from_pragma_value(2)  { AvIncremental => {}, _ => assert(false) }
+    match from_pragma_value(7)  { AvIncremental => {}, _ => assert(false) }
+    match from_pragma_value(-1) { AvNone        => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&AvNone),        0);
+    assert_eq(to_pragma_value(&AvFull),        1);
+    assert_eq(to_pragma_value(&AvIncremental), 2);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&AvNone)        == "none".clone());
+    assert(mode_name(&AvFull)        == "full".clone());
+    assert(mode_name(&AvIncremental) == "incremental".clone());
+}
+
+fn test_pointer_map_predicate() {
+    assert(!maintains_pointer_map(&AvNone));
+    assert(maintains_pointer_map(&AvFull));
+    assert(maintains_pointer_map(&AvIncremental));
+}
+
+fn test_reclaims_at_commit() {
+    assert(!reclaims_at_commit(&AvNone));
+    assert(reclaims_at_commit(&AvFull));
+    assert(!reclaims_at_commit(&AvIncremental));
+}
+
+fn test_supports_incremental_pragma() {
+    assert(!supports_incremental_pragma(&AvNone));
+    assert(!supports_incremental_pragma(&AvFull));
+    assert(supports_incremental_pragma(&AvIncremental));
+}
+
+fn test_try_apply_branches() {
+    match try_apply(false) { SoApplied         => {}, _ => assert(false) }
+    match try_apply(true)  { SoIgnoredNotEmpty => {}, _ => assert(false) }
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&SoApplied)         == "applied".clone());
+    assert(outcome_name(&SoIgnoredNotEmpty) == "ignored_not_empty".clone());
+}
+
+fn test_was_applied_predicate() {
+    assert(was_applied(&SoApplied));
+    assert(!was_applied(&SoIgnoredNotEmpty));
+}
+
+fn main() {
+    test_default_is_none();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_pointer_map_predicate();
+    test_reclaims_at_commit();
+    test_supports_incremental_pragma();
+    test_try_apply_branches();
+    test_outcome_names();
+    test_was_applied_predicate();
+}

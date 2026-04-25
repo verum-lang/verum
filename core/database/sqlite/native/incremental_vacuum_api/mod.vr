@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/incremental_vacuum_api/mod.vr
+// =============================================================================
+// PRAGMA incremental_vacuum(N) — reclaims up to N freelist pages.  Only valid
+// when auto_vacuum=INCREMENTAL.  N=0 (or omitted) reclaims everything possible.
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.incremental_vacuum_api;
+
+public module step;

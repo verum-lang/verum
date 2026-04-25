@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, page_count_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.page_count_pragma.reading.{
+    Reading, new, empty_reading, is_empty,
+    file_size_bytes, megabytes, pages_per_megabyte,
+    SizeCheck, ScValid, ScNotPowerOfTwo, ScOutOfRange,
+    check_page_size, check_name, is_valid_size,
+};
+mount base.{Bool, Int64};
+
+fn test_empty_reading() {
+    let r = empty_reading();
+    assert(is_empty(&r));
+    assert_eq(file_size_bytes(&r), 0 as Int64);
+}
+
+fn test_new_clamps_negative() {
+    let r = new(-1 as Int64, -100);
+    assert_eq(r.total_pages, 0 as Int64);
+    assert_eq(r.page_size_bytes, 0);
+}
+
+fn test_file_size_bytes() {
+    let r = new(256 as Int64, 4096);
+    assert_eq(file_size_bytes(&r), 1_048_576 as Int64);
+    assert_eq(megabytes(&r), 1 as Int64);
+}
+
+fn test_pages_per_megabyte() {
+    let r = new(0 as Int64, 4096);
+    assert_eq(pages_per_megabyte(&r), 256 as Int64);
+}
+
+fn test_pages_per_megabyte_zero_size() {
+    let r = new(0 as Int64, 0);
+    assert_eq(pages_per_megabyte(&r), 0 as Int64);
+}
+
+fn test_check_page_size_valid_powers() {
+    match check_page_size(512)   { ScValid => {}, _ => assert(false) }
+    match check_page_size(1024)  { ScValid => {}, _ => assert(false) }
+    match check_page_size(4096)  { ScValid => {}, _ => assert(false) }
+    match check_page_size(65536) { ScValid => {}, _ => assert(false) }
+}
+
+fn test_check_page_size_not_pow2() {
+    match check_page_size(1000) { ScNotPowerOfTwo => {}, _ => assert(false) }
+    match check_page_size(1500) { ScNotPowerOfTwo => {}, _ => assert(false) }
+}
+
+fn test_check_page_size_out_of_range() {
+    match check_page_size(0)      { ScOutOfRange => {}, _ => assert(false) }
+    match check_page_size(256)    { ScOutOfRange => {}, _ => assert(false) }
+    match check_page_size(131072) { ScOutOfRange => {}, _ => assert(false) }
+}
+
+fn test_check_name_strings() {
+    assert(check_name(&ScValid)         == "valid".clone());
+    assert(check_name(&ScNotPowerOfTwo) == "not_pow2".clone());
+    assert(check_name(&ScOutOfRange)    == "out_of_range".clone());
+}
+
+fn test_is_valid_size_predicate() {
+    assert(is_valid_size(&ScValid));
+    assert(!is_valid_size(&ScNotPowerOfTwo));
+    assert(!is_valid_size(&ScOutOfRange));
+}
+
+fn main() {
+    test_empty_reading();
+    test_new_clamps_negative();
+    test_file_size_bytes();
+    test_pages_per_megabyte();
+    test_pages_per_megabyte_zero_size();
+    test_check_page_size_valid_powers();
+    test_check_page_size_not_pow2();
+    test_check_page_size_out_of_range();
+    test_check_name_strings();
+    test_is_valid_size_predicate();
+}

@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, freelist_count_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.freelist_count_pragma.reading.{
+    Reading, new, empty_reading, is_empty,
+    fragmentation_percent,
+    VacuumAdvice, VaSkip, VaConsider, VaRecommend,
+    advise, advice_name, snapshot_text,
+};
+mount base.{Bool, Int64};
+
+fn test_empty_reading() {
+    let r = empty_reading();
+    assert(is_empty(&r));
+    assert_eq(fragmentation_percent(&r), 0);
+}
+
+fn test_new_clamps_negative() {
+    let r = new(-5 as Int64, -10 as Int64);
+    assert_eq(r.free_pages, 0 as Int64);
+    assert_eq(r.total_pages, 0 as Int64);
+}
+
+fn test_new_clamps_free_above_total() {
+    let r = new(100 as Int64, 50 as Int64);
+    assert_eq(r.free_pages, 50 as Int64);
+    assert_eq(r.total_pages, 50 as Int64);
+}
+
+fn test_fragmentation_percent_basic() {
+    let r = new(25 as Int64, 100 as Int64);
+    assert_eq(fragmentation_percent(&r), 25);
+}
+
+fn test_fragmentation_percent_zero_total() {
+    let r = new(0 as Int64, 0 as Int64);
+    assert_eq(fragmentation_percent(&r), 0);
+}
+
+fn test_advise_skip_below_half_threshold() {
+    let r = new(5 as Int64, 100 as Int64);   // 5%
+    match advise(&r, 30) { VaSkip => {}, _ => assert(false) }
+}
+
+fn test_advise_consider_in_middle_band() {
+    let r = new(20 as Int64, 100 as Int64);  // 20%, threshold 30 → half=15
+    match advise(&r, 30) { VaConsider => {}, _ => assert(false) }
+}
+
+fn test_advise_recommend_above_threshold() {
+    let r = new(40 as Int64, 100 as Int64);  // 40%
+    match advise(&r, 30) { VaRecommend => {}, _ => assert(false) }
+}
+
+fn test_advice_names() {
+    assert(advice_name(&VaSkip)      == "skip".clone());
+    assert(advice_name(&VaConsider)  == "consider".clone());
+    assert(advice_name(&VaRecommend) == "recommend".clone());
+}
+
+fn test_snapshot_text_format() {
+    let r = new(25 as Int64, 100 as Int64);
+    let s = snapshot_text(&r);
+    assert(s == "freelist=25 total=100 (25%)".clone());
+}
+
+fn main() {
+    test_empty_reading();
+    test_new_clamps_negative();
+    test_new_clamps_free_above_total();
+    test_fragmentation_percent_basic();
+    test_fragmentation_percent_zero_total();
+    test_advise_skip_below_half_threshold();
+    test_advise_consider_in_middle_band();
+    test_advise_recommend_above_threshold();
+    test_advice_names();
+    test_snapshot_text_format();
+}

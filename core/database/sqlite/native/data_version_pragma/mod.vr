@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/data_version_pragma/mod.vr
+// =============================================================================
+// PRAGMA data_version — read-only counter that increments whenever any
+// connection (this one or another) commits to the database.  Used by
+// applications to detect external changes since the last read.
+// Differs from sqlite_schema.schema_cookie which only tracks schema mutations.
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.data_version_pragma;
+
+public module reading;

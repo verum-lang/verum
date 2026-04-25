@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/freelist_count_pragma/mod.vr
+// =============================================================================
+// PRAGMA freelist_count — number of unused pages on the freelist.  Read-only.
+// Useful for monitoring fragmentation and deciding when to VACUUM.
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.freelist_count_pragma;
+
+public module reading;
