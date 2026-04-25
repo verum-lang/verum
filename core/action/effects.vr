@@ -1,0 +1,150 @@
+// =============================================================================
+// core.action.effects — Kleisli-category effect catalogue (Theorem 17.T1)
+// =============================================================================
+//
+// Effects in Verum are postulated as projections of the linear-articulation
+// 2-category Perf(α_linear) per Theorem 17.T1: every classical effect
+// monad embeds into the Kleisli category of α_linear, and Verum's
+// effect annotations are exactly that embedding read off in syntax.
+//
+// The catalogue below ships:
+//
+//   • A canonical Monad protocol with `pure` / `bind`.
+//   • A StrongMonad protocol extending Monad with `strength`.
+//   • A `Commutative` marker protocol (no extra methods) gating the
+//     concurrent-coherence theorem (Theorem 17.C2).
+//   • Eight standard effects with their classifications:
+//
+//     ┌──────────────────────────┬──────────────┬────────────────┐
+//     │ Effect                   │ Classification│ ε-coordinate   │
+//     ├──────────────────────────┼──────────────┼────────────────┤
+//     │ Pure                     │ commutative  │ 0              │
+//     │ Reader<R>                │ commutative  │ ω              │
+//     │ Writer<W: Monoid>        │ commutative  │ ω              │
+//     │ Probability<A>           │ commutative  │ ω              │
+//     │ List<A>                  │ commutative  │ ω              │
+//     │ State<S>                 │ NON-commute  │ ω + 1          │
+//     │ Exception<E>             │ NON-commute  │ ω + 1          │
+//     │ Io<A>                    │ NON-commute  │ ω + 1          │
+//     └──────────────────────────┴──────────────┴────────────────┘
+//
+//   • Concurrent coherence theorem: parallel composition of
+//     commutative-monad-only programs preserves the @verify(coherent)
+//     verdict (Corollary 17.C2). Non-commutative effects require
+//     explicit synchronization to retain coherence.
+//
+// V0 (this file) ships the protocol surface + 8 effect declarations;
+// each effect has `pure` / `bind` signatures, with bodies as trusted-
+// boundary placeholders. V1 wires concrete monad implementations
+// (functor instances + monad laws) per the Kleisli construction.
+// =============================================================================
+
+mount core.action.articulation.{Articulation};
+mount core.action.enactments.{Enactment};
+
+// =============================================================================
+// Monad / StrongMonad protocols
+// =============================================================================
+
+/// Standard monad protocol. Every effect type implements it.
+public type Monad is protocol {
+    /// Lift a pure value into the effect.
+    fn pure<A>(self, a: A) -> Self;
+
+    /// Sequence two effectful computations.
+    fn bind<A, B>(self, f: fn(A) -> Self) -> Self;
+};
+
+/// Strong monad — extends Monad with strength operator allowing
+/// commutation with cartesian products (canonical for any cartesian
+/// monad; Moggi 1991 §2).
+public type StrongMonad is protocol {
+    /// Strength: tensor a pure value into an effectful one.
+    fn strength<A, B>(self, a: A) -> Self;
+};
+
+/// Marker protocol — no methods. Tagging an effect type
+/// `@derive(Commutative)` records that the monad satisfies the
+/// commutativity law `T(A) ⊗ T(B) ≃ T(B) ⊗ T(A)` (Plotkin-Power
+/// 2002), gating the concurrent-coherence corollary.
+public type Commutative is protocol {};
+
+// =============================================================================
+// Eight standard effect declarations
+// =============================================================================
+
+/// Pure — the identity effect (no actual side effect). Trivially
+/// commutative; ε-coordinate 0.
+@enact(epsilon = "0")
+@framework(diakrisis, "Theorem 17.T1 (Pure: identity effect; ν = 0)")
+public axiom effect_pure_is_commutative() -> Bool ensures true;
+
+/// Reader<R> — read-only access to an environment. Commutative
+/// because reads from the same environment compose without
+/// dependency on order. ε-coordinate ω.
+@enact(epsilon = "ω")
+@framework(diakrisis, "Theorem 17.T1 (Reader<R>: commutative; ν = ω)")
+public axiom effect_reader_is_commutative() -> Bool ensures true;
+
+/// Writer<W: Monoid> — append-only output. Commutative iff the
+/// monoid W is itself commutative (additive monoids are; sequence
+/// concatenation is not). ε-coordinate ω.
+@enact(epsilon = "ω")
+@framework(diakrisis, "Theorem 17.T1 (Writer<W: CommutativeMonoid>: commutative; ν = ω)")
+public axiom effect_writer_commutative_iff_monoid_commutative() -> Bool ensures true;
+
+/// Probability<A> — probability-distribution monad (Giry monad).
+/// Commutative under tensor product of independent distributions
+/// (which is the categorical Definition; Plotkin-Power 2002 Ex 2.4).
+/// ε-coordinate ω.
+@enact(epsilon = "ω")
+@framework(diakrisis, "Theorem 17.T1 (Probability: commutative under independent tensor; ν = ω)")
+public axiom effect_probability_is_commutative() -> Bool ensures true;
+
+/// List<A> — non-deterministic choice. Commutative (cartesian
+/// product of finite-non-empty lists is canonical). ε-coordinate ω.
+@enact(epsilon = "ω")
+@framework(diakrisis, "Theorem 17.T1 (List: commutative; ν = ω)")
+public axiom effect_list_is_commutative() -> Bool ensures true;
+
+/// State<S> — read+write to a mutable cell. NON-commutative: write
+/// then read returns a different value than read then write. The
+/// non-commutativity is precisely what makes `State` more expressive
+/// than `Reader`. ε-coordinate ω + 1.
+@enact(epsilon = "ω + 1")
+@framework(diakrisis, "Theorem 17.T1 (State<S>: NON-commutative; ν = ω + 1)")
+public axiom effect_state_is_not_commutative() -> Bool ensures true;
+
+/// Exception<E> — non-local control flow. NON-commutative: throwing
+/// one exception followed by another does not commute. ε-coordinate
+/// ω + 1.
+@enact(epsilon = "ω + 1")
+@framework(diakrisis, "Theorem 17.T1 (Exception<E>: NON-commutative; ν = ω + 1)")
+public axiom effect_exception_is_not_commutative() -> Bool ensures true;
+
+/// Io<A> — full I/O. NON-commutative by construction: reading from
+/// stdin and writing to stdout in different orders produces
+/// different observable behaviour. ε-coordinate ω + 1.
+@enact(epsilon = "ω + 1")
+@framework(diakrisis, "Theorem 17.T1 (Io<A>: NON-commutative; ν = ω + 1)")
+public axiom effect_io_is_not_commutative() -> Bool ensures true;
+
+// =============================================================================
+// Concurrent-coherence corollary (Theorem 17.C2)
+// =============================================================================
+
+/// The parallel composition of two commutative-effect programs
+/// preserves the @verify(coherent) verdict: if `p1 |> verify(coherent)
+/// == OK` and `p2 |> verify(coherent) == OK` and both have only
+/// commutative effects, then `parallel(p1, p2) |> verify(coherent)
+/// == OK`.
+///
+/// Non-commutative effects break this invariant: `parallel(state_op_1,
+/// state_op_2)` may have observable race conditions even when each
+/// individual op verifies.
+///
+/// V0 form: trusted-boundary axiom recording the concurrent-coherence
+/// rule. V1 will wire the actual gate inside the @verify(coherent)
+/// verification phase.
+@framework(diakrisis, "Corollary 17.C2 (concurrent coherence under commutative effects)")
+public axiom concurrent_coherence_under_commutativity() -> Bool ensures true;

@@ -23,6 +23,10 @@
 //
 //   core.action.verify       — ε-audit helpers consumed by
 //                              `verum audit --epsilon`
+//
+//   core.action.effects      — Kleisli-category effect catalogue per
+//                              Theorem 17.T1: 8 standard effects with
+//                              commutativity classification + ε-coords
 // =============================================================================
 
 public mount core.action.primitives;
@@ -30,3 +34,4 @@ public mount core.action.articulation;
 public mount core.action.enactments;
 public mount core.action.gauge;
 public mount core.action.verify;
+public mount core.action.effects;
