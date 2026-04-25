@@ -1297,17 +1297,62 @@ fn print_epsilon_report_json(
 /// (ordinal, tau) for a known framework name. Mirrors
 /// `core/theory_interop/coord.vr::known_ordinal` + `known_tau`. Unknown
 /// frameworks get (0, true) — the same fall-through the stdlib uses.
-fn msfs_lookup(framework_name: &str) -> (u32, bool) {
+/// Cantor-normal-form prefix below ε_0: every ordinal we emit lives in
+/// the (omega_coefficient, finite_offset) shape — same encoding as
+/// `core.theory_interop.coord::Ordinal` (single source of truth between
+/// stdlib + CLI). Comparison is lex on the pair; rendering uses Unicode
+/// `ω` so reports match the spec verbatim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CliOrdinal {
+    omega_coeff: u32,
+    finite_offset: u32,
+}
+
+impl CliOrdinal {
+    const fn finite(n: u32) -> Self {
+        Self { omega_coeff: 0, finite_offset: n }
+    }
+    const fn omega() -> Self {
+        Self { omega_coeff: 1, finite_offset: 0 }
+    }
+    const fn omega_plus(k: u32) -> Self {
+        Self { omega_coeff: 1, finite_offset: k }
+    }
+
+    fn render(&self) -> String {
+        if self.omega_coeff == 0 {
+            return self.finite_offset.to_string();
+        }
+        let coeff = if self.omega_coeff == 1 {
+            "ω".to_string()
+        } else {
+            format!("ω·{}", self.omega_coeff)
+        };
+        if self.finite_offset == 0 {
+            coeff
+        } else {
+            format!("{}+{}", coeff, self.finite_offset)
+        }
+    }
+}
+
+/// (ν, τ) lookup for the standard six-pack + neutral Actic. Mirrors
+/// `core/theory_interop/coord.vr::known_ordinal` + `known_tau` — when
+/// the two drift, the .vr table is the authoritative source. ν-values
+/// are transfinite ordinals below ε_0 (lex-encoded); the previous
+/// flat-Int collapse silently dropped the ω-stratum used by lurie_htt
+/// / schreiber_dcct / baez_dolan.
+fn msfs_lookup(framework_name: &str) -> (CliOrdinal, bool) {
     match framework_name {
-        "actic.raw"             => (0, false),
-        "lurie_htt"             => (3, true),
-        "schreiber_dcct"        => (4, true),
-        "connes_reconstruction" => (3, false),
-        "petz_classification"   => (2, false),
-        "arnold_catastrophe"    => (2, true),
-        "baez_dolan"            => (4, true),
-        "owl2_fs"               => (1, true),
-        _                       => (0, true),
+        "actic.raw"             => (CliOrdinal::finite(0),  false),
+        "lurie_htt"             => (CliOrdinal::omega(),    true),
+        "schreiber_dcct"        => (CliOrdinal::omega_plus(2), true),
+        "connes_reconstruction" => (CliOrdinal::omega(),    false),
+        "petz_classification"   => (CliOrdinal::finite(2),  false),
+        "arnold_catastrophe"    => (CliOrdinal::finite(2),  true),
+        "baez_dolan"            => (CliOrdinal::omega_plus(1), true),
+        "owl2_fs"               => (CliOrdinal::finite(1),  true),
+        _                       => (CliOrdinal::finite(0),  true),
     }
 }
 
@@ -1448,7 +1493,7 @@ fn print_coord_report(
             "  {} {}  ν={}  {}  ({} marker{})",
             "▸".magenta(),
             framework.as_str().bold(),
-            ordinal,
+            ordinal.render(),
             tau_str.dimmed(),
             uses.len(),
             if uses.len() == 1 { "" } else { "s" }
@@ -1495,7 +1540,21 @@ fn print_coord_report_json(
             "      \"framework\": \"{}\",\n",
             json_escape(framework.as_str())
         ));
-        out.push_str(&format!("      \"ordinal\": {},\n", ordinal));
+        // Structured ν: emit both the human-readable string ("ω", "ω+2",
+        // …) and the (omega_coefficient, finite_offset) pair so JSON
+        // consumers can sort lexicographically without re-parsing.
+        out.push_str(&format!(
+            "      \"ordinal\": \"{}\",\n",
+            json_escape(&ordinal.render())
+        ));
+        out.push_str(&format!(
+            "      \"ordinal_omega_coefficient\": {},\n",
+            ordinal.omega_coeff
+        ));
+        out.push_str(&format!(
+            "      \"ordinal_finite_offset\": {},\n",
+            ordinal.finite_offset
+        ));
         out.push_str(&format!("      \"tau\": {},\n", tau));
         out.push_str("      \"usages\": [\n");
         let total_u = uses.len();
