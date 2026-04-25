@@ -116,4 +116,16 @@ public type Interpretation is protocol {
 
     /// `a^I = b^I`: individuals a and b denote the same element of ΔᴵO.
     fn same_individual(self, a: Individual, b: Individual) -> Bool;
+
+    /// `⟦CE₁⟧^I ⊆ ⟦CE₂⟧^I`: every member of CE₁ is also a member of
+    /// CE₂ under I (W3C §5.1 SubClassOf).
+    fn class_subset<C: ClassExpression>(self, sub: C, sup: C) -> Bool;
+
+    /// `⟦CE₁⟧^I = ⟦CE₂⟧^I`: equal class extensions under I (§5.2
+    /// EquivalentClasses, binary core).
+    fn class_equal<C: ClassExpression>(self, a: C, b: C) -> Bool;
+
+    /// `⟦CE₁⟧^I ∩ ⟦CE₂⟧^I = ∅`: disjoint class extensions under I
+    /// (§5.3 DisjointClasses, binary core).
+    fn class_disjoint<C: ClassExpression>(self, a: C, b: C) -> Bool;
 };
