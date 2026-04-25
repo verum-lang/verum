@@ -1,5 +1,5 @@
 // =============================================================================
-// net/quic/stream_sm/flow_control.vr — Connection-level flow control (RFC 9000 §4)
+// net/quic/stream_sm/flow_control.vr — QuicConnection-level flow control (RFC 9000 §4)
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // =============================================================================

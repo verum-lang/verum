@@ -99,7 +99,7 @@ public type QuicAccepted is {
     peer_addr:    SocketAddr,
     alpn:         Maybe<List<Byte>>,
     /// Opaque handle the integration layer uses to look up the
-    /// underlying QuicConnection<OneRtt> for stream creation /
+    /// underlying QuicConnectionSm<OneRtt> for stream creation /
     /// datagram send / close.
     connection_id: core.net.quic.connection_id.ConnectionId,
 };
@@ -165,11 +165,11 @@ implement QuicServer {
         //   2. For each datagram: parse Initial packet, check the
         //      5-tuple against the live connection table; if new,
         //      check anti-amplification budget against max_connections;
-        //      spin up a fresh QuicConnection<Initial> + HandshakeDriver
+        //      spin up a fresh QuicConnectionSm<Initial> + HandshakeDriver
         //      on ServerSm.
         //   3. Drive handshake until 1-RTT keys installed + peer
         //      transport params parsed.
-        //   4. Wrap the QuicConnection<OneRtt> in a QuicAccepted and
+        //   4. Wrap the QuicConnectionSm<OneRtt> in a QuicAccepted and
         //      return.
         //
         // The shape is carried here for the integration commit;

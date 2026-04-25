@@ -206,20 +206,20 @@ public fn write_bytes(out: &mut List<Byte>, value: &[Byte]) {
 }
 
 // =============================================================================
-// Cursor — streaming reader
+// ProtobufCursor — streaming reader
 // =============================================================================
 
-public type Cursor is {
+public type ProtobufCursor is {
     buf: List<Byte>,
     pos: Int,
 }
 
-implement Cursor {
-    public fn new(buf: &[Byte]) -> Cursor {
+implement ProtobufCursor {
+    public fn new(buf: &[Byte]) -> ProtobufCursor {
         let mut copy = List.with_capacity(buf.len());
         let mut i = 0;
         while i < buf.len() { copy.push(buf[i]); i = i + 1; }
-        Cursor { buf: copy, pos: 0 }
+        ProtobufCursor { buf: copy, pos: 0 }
     }
 
     public fn at_end(&self) -> Bool { self.pos >= self.buf.len() }

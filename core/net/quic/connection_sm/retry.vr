@@ -14,7 +14,7 @@
 //   2. Discard every Initial packet it has sent so far (their PNs
 //      and AEAD state).
 //   3. Reset the Initial crypto stream: the server's initial
-//      secret derivation input becomes the NEW Source Connection ID
+//      secret derivation input becomes the NEW Source QuicConnection ID
 //      from the Retry packet.
 //   4. Re-emit ClientHello carrying the Retry Token.
 //

@@ -21,12 +21,12 @@ public const SQLITE_ACCESS_EXISTS: Int    = 0;
 public const SQLITE_ACCESS_READWRITE: Int = 1;
 public const SQLITE_ACCESS_READ: Int      = 2;
 
-public type AccessMode is
+public type SqliteAccessMode is
       AmExists
     | AmReadWrite
     | AmRead;
 
-public fn mode_numeric(m: &AccessMode) -> Int {
+public fn mode_numeric(m: &SqliteAccessMode) -> Int {
     match m {
         AmExists    => SQLITE_ACCESS_EXISTS,
         AmReadWrite => SQLITE_ACCESS_READWRITE,
@@ -34,7 +34,7 @@ public fn mode_numeric(m: &AccessMode) -> Int {
     }
 }
 
-public fn mode_name(m: &AccessMode) -> Text {
+public fn mode_name(m: &SqliteAccessMode) -> Text {
     match m {
         AmExists    => "EXISTS".clone(),
         AmReadWrite => "READWRITE".clone(),
@@ -42,18 +42,18 @@ public fn mode_name(m: &AccessMode) -> Text {
     }
 }
 
-public fn from_numeric(n: Int) -> AccessMode {
+public fn from_numeric(n: Int) -> SqliteAccessMode {
     if n == SQLITE_ACCESS_READWRITE { return AmReadWrite; }
     if n == SQLITE_ACCESS_READ      { return AmRead; }
     AmExists
 }
 
 public type AccessResult is {
-    mode: AccessMode,
+    mode: SqliteAccessMode,
     allowed: Bool,
 }
 
-public fn new_result(mode: AccessMode, allowed: Bool) -> AccessResult {
+public fn new_result(mode: SqliteAccessMode, allowed: Bool) -> AccessResult {
     AccessResult { mode: mode, allowed: allowed }
 }
 

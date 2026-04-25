@@ -61,7 +61,7 @@ fn check_handshake_encode_decode() -> Result<(), CodecError> {
     let mut wire: List<Byte> = [];
     encode_handshake(&msg, &mut wire)?;
 
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let _ = decode_handshake(&mut r)?;
     Ok(())
 }

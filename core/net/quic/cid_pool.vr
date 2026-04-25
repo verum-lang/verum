@@ -92,7 +92,7 @@ implement CidPool {
     }
 
     /// Initial CID — sequence 0, typically the one issued in the Initial
-    /// packet's Source Connection ID. Admits without any limit check.
+    /// packet's Source QuicConnection ID. Admits without any limit check.
     public fn seed_initial(&mut self, cid: ConnectionId, reset_token: [Byte; 16]) {
         self.entries.push(CidEntry {
             sequence: 0_u64, cid: cid, reset_token: reset_token, retired: false,

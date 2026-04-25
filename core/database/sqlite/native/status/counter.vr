@@ -1,10 +1,10 @@
 // =============================================================================
-// status/counter.vr — Counter w/ value + high-water-mark
+// status/counter.vr — StatusCounter w/ value + high-water-mark
 // =============================================================================
 // Spec: SQLite C API
 //
 // SQLite's counter API returns BOTH the current value and the
-// high-water-mark since the last reset. `Counter.observe(v)` advances
+// high-water-mark since the last reset. `StatusCounter.observe(v)` advances
 // both; `reset_high_water` clears just the HWM.
 // =============================================================================
 
@@ -13,16 +13,16 @@ module core.database.sqlite.native.status.counter;
 mount core.*;
 mount base.{Bool};
 
-public type Counter is {
+public type StatusCounter is {
     current: Int64,
     high_water: Int64,
 }
 
-public fn counter_zero() -> Counter {
-    Counter { current: 0 as Int64, high_water: 0 as Int64 }
+public fn counter_zero() -> StatusCounter {
+    StatusCounter { current: 0 as Int64, high_water: 0 as Int64 }
 }
 
-implement Counter {
+implement StatusCounter {
     pub fn observe(&mut self, v: Int64) {
         self.current = v;
         if v > self.high_water { self.high_water = v; }
@@ -49,7 +49,7 @@ implement Counter {
 // CounterPair — for counters where both directions matter (hits/misses)
 // -----------------------------------------------------------------------------
 
-public type CounterPair is { hits: Counter, misses: Counter }
+public type CounterPair is { hits: StatusCounter, misses: StatusCounter }
 
 public fn counter_pair_zero() -> CounterPair {
     CounterPair { hits: counter_zero(), misses: counter_zero() }

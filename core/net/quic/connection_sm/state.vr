@@ -1,5 +1,5 @@
 // =============================================================================
-// net/quic/connection_sm/state.vr — Connection state phases (RFC 9000 §4)
+// net/quic/connection_sm/state.vr — QuicConnection state phases (RFC 9000 §4)
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // =============================================================================
@@ -20,7 +20,7 @@
 //                     expiry, then drop state.
 //
 // Rather than a runtime enum with state-guarded method dispatch, each
-// phase is its own type; `QuicConnection<Initial>` exposes only the
+// phase is its own type; `QuicConnectionSm<Initial>` exposes only the
 // initial-phase surface (send CRYPTO / receive CRYPTO / derive handshake
 // keys), and so on.
 //

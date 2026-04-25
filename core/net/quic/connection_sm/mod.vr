@@ -11,13 +11,13 @@
 // crypto + recovery + stream SM + transport params). Ship as
 // `core.net.quic.connection_sm` (not `connection`) to avoid
 // colliding with the existing intrinsic-backed
-// `core.net.quic.connection.Connection` type during the co-existence
+// `core.net.quic.connection.QuicConnectionSm` type during the co-existence
 // phase; the two merge once the QUIC transport fully replaces the
 // FFI stack.
 //
 // # Top-level shape
 //
-//   QuicConnection<S>  where S ∈ { Initial, Handshake, OneRtt, Closing, Draining }
+//   QuicConnectionSm<S>  where S ∈ { Initial, Handshake, OneRtt, Closing, Draining }
 //
 // The inner state struct carries:
 //   * role (client / server)
@@ -34,21 +34,21 @@
 //
 // Per phase, the SM exposes narrow APIs:
 //
-//   QuicConnection<Initial>
+//   QuicConnectionSm<Initial>
 //     .handshake_step(inbound: &[Byte]) -> Result<Outbound, QuicError>
-//     .promote_to_handshake(hs_keys) -> QuicConnection<Handshake>
+//     .promote_to_handshake(hs_keys) -> QuicConnectionSm<Handshake>
 //
-//   QuicConnection<Handshake>
+//   QuicConnectionSm<Handshake>
 //     .handshake_step(inbound) -> Result<Outbound, QuicError>
-//     .promote_to_app(app_keys) -> QuicConnection<OneRtt>
+//     .promote_to_app(app_keys) -> QuicConnectionSm<OneRtt>
 //
-//   QuicConnection<OneRtt>
+//   QuicConnectionSm<OneRtt>
 //     .open_bidi_stream() -> Result<SendStream, QuicError>
 //     .on_datagram(bytes) -> Result<(), QuicError>   — receive + decrypt + dispatch
 //     .drain_outbound() -> List<Datagram>             — pull encrypted UDP datagrams
-//     .close(error_code, reason) -> QuicConnection<Closing>
+//     .close(error_code, reason) -> QuicConnectionSm<Closing>
 //
-//   QuicConnection<Closing> / <Draining>
+//   QuicConnectionSm<Closing> / <Draining>
 //     .on_datagram — accept CONNECTION_CLOSE ack, handle echoes
 //     .is_expired() -> Bool
 //
@@ -62,7 +62,7 @@
 //
 // ```
 // core.net.quic.connection_sm
-// ├── mod.vr        ← this file — facade + QuicConnection<S>
+// ├── mod.vr        ← this file — facade + QuicConnectionSm<S>
 // └── state.vr      — Initial / Handshake / OneRtt / Closing / Draining phantoms
 // ```
 //
@@ -144,7 +144,7 @@ public type ConnState is {
     role:          Role,
     version:       UInt32,
 
-    // Connection IDs
+    // QuicConnectionSm IDs
     dcid_peer:     ConnectionId,    // what we put in DCID on wire toward peer
     scid_local:    ConnectionId,    // what we advertise as our SCID
     retry_src_cid: Maybe<ConnectionId>,    // set post-Retry
@@ -176,15 +176,15 @@ public type ConnState is {
 };
 
 // =============================================================================
-// QuicConnection<S> — typed outer wrapper
+// QuicConnectionSm<S> — typed outer wrapper
 // =============================================================================
 
-public type QuicConnection<S> is {
+public type QuicConnectionSm<S> is {
     inner: ConnState,
     // `_phase` is conceptual — compilers track via the generic parameter.
 };
 
-implement QuicConnection<Initial> {
+implement QuicConnectionSm<Initial> {
     /// Construct a client-side connection bound for `peer_dcid` with
     /// initial keys derived from the client's Destination CID per
     /// RFC 9001 §5.2.
@@ -195,7 +195,7 @@ implement QuicConnection<Initial> {
         initial_keys_tx: QuicSpaceKeys,
         initial_keys_rx: QuicSpaceKeys,
         now: Instant,
-    ) -> QuicConnection<Initial> {
+    ) -> QuicConnectionSm<Initial> {
         let mut keys = QuicKeys.empty();
         keys.initial = Some((initial_keys_tx, initial_keys_rx));
         let flow = ConnFlowControl.new(
@@ -206,7 +206,7 @@ implement QuicConnection<Initial> {
             params_local.initial_max_streams_uni,
             params_local.initial_max_streams_uni,
         );
-        QuicConnection {
+        QuicConnectionSm {
             inner: ConnState {
                 role:          Role.ClientEnd,
                 version:       0x00000001_u32,
@@ -236,13 +236,13 @@ implement QuicConnection<Initial> {
         mut self,
         hs_keys_tx: QuicSpaceKeys,
         hs_keys_rx: QuicSpaceKeys,
-    ) -> QuicConnection<Handshake> {
+    ) -> QuicConnectionSm<Handshake> {
         self.inner.keys.handshake = Some((hs_keys_tx, hs_keys_rx));
-        QuicConnection { inner: self.inner }
+        QuicConnectionSm { inner: self.inner }
     }
 }
 
-implement QuicConnection<Handshake> {
+implement QuicConnectionSm<Handshake> {
     /// Promote to 1-RTT phase. After promotion, caller should call
     /// `discard_initial_keys` and `discard_handshake_keys` at the
     /// RFC 9001 §4.9 discharge points.
@@ -250,9 +250,9 @@ implement QuicConnection<Handshake> {
         mut self,
         app_keys_tx: QuicSpaceKeys,
         app_keys_rx: QuicSpaceKeys,
-    ) -> QuicConnection<OneRtt> {
+    ) -> QuicConnectionSm<OneRtt> {
         self.inner.keys.app = Some((app_keys_tx, app_keys_rx));
-        QuicConnection { inner: self.inner }
+        QuicConnectionSm { inner: self.inner }
     }
 
     /// RFC 9001 §4.9.1 — drop Initial keys on first Handshake packet
@@ -264,7 +264,7 @@ implement QuicConnection<Handshake> {
     }
 }
 
-implement QuicConnection<OneRtt> {
+implement QuicConnectionSm<OneRtt> {
     /// RFC 9001 §4.9.2 — drop Handshake keys on first HANDSHAKE_DONE
     /// (client) or after sending 1-RTT response to HANDSHAKE_DONE
     /// (server). Idempotent.
@@ -313,17 +313,17 @@ implement QuicConnection<OneRtt> {
 
     /// Transition to Closing — caller sends a CONNECTION_CLOSE frame
     /// and waits 3*PTO before fully releasing state.
-    public fn close(mut self, error_code: UInt64, reason: List<Byte>, now: Instant) -> QuicConnection<Closing> {
+    public fn close(mut self, error_code: UInt64, reason: List<Byte>, now: Instant) -> QuicConnectionSm<Closing> {
         let _ = error_code;
         self.inner.close_reason = Some(reason);
         self.inner.close_sent_at = Some(now);
         // Drain expiry = now + 3 * PTO (approximate — caller refines).
         self.inner.drain_expiry = Some(now);
-        QuicConnection { inner: self.inner }
+        QuicConnectionSm { inner: self.inner }
     }
 }
 
-implement QuicConnection<Closing> {
+implement QuicConnectionSm<Closing> {
     /// Incoming packet during close: may re-trigger an echo of the
     /// CONNECTION_CLOSE frame. Caller re-emits if needed.
     public fn is_expired(&self, now: Instant) -> Bool {
@@ -335,13 +335,13 @@ implement QuicConnection<Closing> {
 
     /// Peer signalled close — we move to Draining (stop sending, wait
     /// for timer).
-    public fn recv_peer_close(mut self, now: Instant) -> QuicConnection<Draining> {
+    public fn recv_peer_close(mut self, now: Instant) -> QuicConnectionSm<Draining> {
         self.inner.drain_expiry = Some(now);   // refine externally
-        QuicConnection { inner: self.inner }
+        QuicConnectionSm { inner: self.inner }
     }
 }
 
-implement QuicConnection<Draining> {
+implement QuicConnectionSm<Draining> {
     public fn is_expired(&self, now: Instant) -> Bool {
         match self.inner.drain_expiry {
             Some(d) => now >= d,
@@ -354,7 +354,7 @@ implement QuicConnection<Draining> {
 // Accessors — same on every phase, no state-specific guards needed.
 // =============================================================================
 
-implement<S> QuicConnection<S> {
+implement<S> QuicConnectionSm<S> {
     public fn role(&self) -> Role { self.inner.role.clone() }
     public fn version(&self) -> UInt32 { self.inner.version }
     public fn peer_cid(&self) -> &ConnectionId { &self.inner.dcid_peer }

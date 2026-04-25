@@ -13,7 +13,7 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.tls13.handshake.codec.{
-    Reader, CodecError,
+    Tls13HandshakeReader, CodecError,
     put_u8, put_u16, put_u24, put_u32, put_bytes,
     vec_u8, vec_u16, vec_u24,
 };
@@ -57,21 +57,21 @@ fn vec_u8_overflow_when_body_exceeds_255() {
 
 fn take_u24_reads_big_endian() {
     let bytes: List<Byte> = [0xAB_u8, 0xCD_u8, 0xEF_u8];
-    let mut r = Reader.new(bytes.as_slice());
+    let mut r = Tls13HandshakeReader.new(bytes.as_slice());
     assert(r.take_u24().unwrap() == 0x00ABCDEF_u32);
     assert(r.is_at_end());
 }
 
 fn take_u32_reads_big_endian() {
     let bytes: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
-    let mut r = Reader.new(bytes.as_slice());
+    let mut r = Tls13HandshakeReader.new(bytes.as_slice());
     assert(r.take_u32().unwrap() == 0xDEADBEEF_u32);
 }
 
 fn take_vec_u8_reads_length_and_bytes() {
     // Length prefix = 3, body = [0x11, 0x22, 0x33].
     let wire: List<Byte> = [0x03_u8, 0x11_u8, 0x22_u8, 0x33_u8];
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let body = r.take_vec_u8().unwrap();
     assert(body.len() == 3);
     assert(body[0] == 0x11_u8);
@@ -82,7 +82,7 @@ fn take_vec_u8_reads_length_and_bytes() {
 fn take_vec_u16_reads_length_and_bytes() {
     // Length prefix = 0x0005, body = 5 bytes.
     let wire: List<Byte> = [0x00_u8, 0x05_u8, 0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8];
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let body = r.take_vec_u16().unwrap();
     assert(body.len() == 5);
     assert(body[0] == 0x41_u8);
@@ -95,7 +95,7 @@ fn take_vec_u24_reads_large_body() {
         0x00_u8, 0x00_u8, 0x08_u8,
         0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8, 0x07_u8, 0x08_u8,
     ];
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let body = r.take_vec_u24().unwrap();
     assert(body.len() == 8);
     assert(body[7] == 0x08_u8);
@@ -109,7 +109,7 @@ fn sub_u16_bounds_inner_reader() {
         0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,
         0xEE_u8, 0xFF_u8,
     ];
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let mut sub = r.sub_u16().unwrap();
     assert(sub.remaining() == 4);
     assert(sub.take_u8().unwrap() == 0xAA_u8);
@@ -124,7 +124,7 @@ fn sub_u16_bounds_inner_reader() {
 
 fn sub_u8_bounds_inner_reader() {
     let wire: List<Byte> = [0x02_u8, 0x11_u8, 0x22_u8, 0x99_u8];
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let mut sub = r.sub_u8().unwrap();
     assert(sub.remaining() == 2);
     assert(sub.take_u16().unwrap() == 0x1122_u16);
@@ -139,7 +139,7 @@ fn sub_u24_bounds_inner_reader() {
         0xA0_u8, 0xB0_u8, 0xC0_u8,
         0xFF_u8,
     ];
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let mut sub = r.sub_u24().unwrap();
     assert(sub.remaining() == 3);
     assert(sub.take_bytes(3).unwrap().len() == 3);
@@ -149,7 +149,7 @@ fn sub_u24_bounds_inner_reader() {
 fn sub_u16_truncation_is_detected() {
     // Length says 10 but only 4 body bytes follow — Truncated.
     let wire: List<Byte> = [0x00_u8, 0x0A_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     match r.sub_u16() {
         Err(CodecError.Truncated) => {},
         _ => panic("under-length body must be Truncated"),

@@ -33,12 +33,12 @@ mount core.net.weft.error.{WeftError};
 // Metric types
 // =============================================================================
 
-public type Counter is {
+public type WeftCounter is {
     inner: Mutex<Int>,
 };
 
-implement Counter {
-    public fn new() -> Counter { Counter { inner: Mutex.new(0) } }
+implement WeftCounter {
+    public fn new() -> WeftCounter { WeftCounter { inner: Mutex.new(0) } }
 
     public fn incr(&self) {
         let mut g = self.inner.lock();
@@ -107,7 +107,7 @@ implement Histogram {
 // =============================================================================
 
 public type WeftMetricsRegistry is {
-    counters: Mutex<Map<Text, Shared<Counter>>>,
+    counters: Mutex<Map<Text, Shared<WeftCounter>>>,
     histograms: Mutex<Map<Text, Shared<Histogram>>>,
 };
 
@@ -120,12 +120,12 @@ implement WeftMetricsRegistry {
     }
 
     /// Get-or-create a counter with the given name.
-    public fn counter(&self, name: &Text) -> Shared<Counter> {
+    public fn counter(&self, name: &Text) -> Shared<WeftCounter> {
         let mut m = self.counters.lock();
         match m.get(name) {
             Some(c) => c.clone(),
             None => {
-                let c = Shared.new(Counter.new());
+                let c = Shared.new(WeftCounter.new());
                 m.insert(name.clone(), c.clone());
                 c
             }

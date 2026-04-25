@@ -4,22 +4,22 @@ module core.database.sqlite.native.progress_handler_api.handler;
 
 mount base.{Bool, Int64, Text};
 
-public type Config is {
+public type ProgressConfig is {
     interval: Int,         // N — every N opcodes invoke callback
     installed: Bool,       // false ↔ no progress handler set
 };
 
-public fn unconfigured() -> Config {
-    Config { interval: 0, installed: false }
+public fn unconfigured() -> ProgressConfig {
+    ProgressConfig { interval: 0, installed: false }
 }
 
 // Install the handler.  N=0 (or negative) clears it.
-public fn install(n: Int) -> Config {
+public fn install(n: Int) -> ProgressConfig {
     if n <= 0 { return unconfigured(); }
-    Config { interval: n, installed: true }
+    ProgressConfig { interval: n, installed: true }
 }
 
-public fn is_active(c: &Config) -> Bool { c.installed }
+public fn is_active(c: &ProgressConfig) -> Bool { c.installed }
 
 // ProgressEffect of a single callback return code.
 public type ProgressEffect is
@@ -49,7 +49,7 @@ public type Tick is
     | TkInvoke
     ;
 
-public fn tick(c: &Config, opcodes_executed: Int64) -> Tick {
+public fn tick(c: &ProgressConfig, opcodes_executed: Int64) -> Tick {
     if !c.installed { return TkSilent; }
     if c.interval == 0 { return TkSilent; }
     let n = c.interval as Int64;

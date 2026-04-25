@@ -1,12 +1,12 @@
 // =============================================================================
-// net/quic/transport/pump.vr — Connection-level async I/O pump
+// net/quic/transport/pump.vr — QuicConnection-level async I/O pump
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, core.async, core.net.quic.*
 // =============================================================================
 //
 // The ConnectionPump is the center of the pure-Verum transport: it
-// takes a bound UdpTransport + a QuicConnection<S> and runs the
+// takes a bound UdpTransport + a QuicConnectionSm<S> and runs the
 // inbound/outbound/timer loop until the connection closes.
 //
 // Each pump tick:

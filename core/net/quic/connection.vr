@@ -1,5 +1,5 @@
 // =============================================================================
-// net/quic/connection.vr — QUIC Connection + QuicListener
+// net/quic/connection.vr — QUIC QuicConnection + QuicListener
 // =============================================================================
 // Handle types over the runtime-level quiche (or equivalent) bindings.
 // Actual packet processing — endpoint + send/recv — is driven by the
@@ -22,10 +22,10 @@ type ConnectionHandle is UInt64;
 type ListenerHandle is UInt64;
 
 // =============================================================================
-// Connection — one QUIC session
+// QuicConnection — one QUIC session
 // =============================================================================
 
-public type Connection is {
+public type QuicConnection is {
     handle: ConnectionHandle,
     peer: SocketAddr,
     local: SocketAddr,
@@ -39,12 +39,12 @@ public type ConnectionEvent is
     | PeerClosed { code: ApplicationErrorCode, reason: Text }
     | Closed;
 
-implement Connection {
+implement QuicConnection {
     /// Initiate a client-side connection. Performs handshake before returning.
     pub async fn connect(
         peer: &SocketAddr,
         config: core.net.quic.QuicConfig,
-    ) -> Result<Connection, QuicError> {
+    ) -> Result<QuicConnection, QuicError> {
         @intrinsic("verum.quic.connect", peer, &config).await
     }
 
@@ -84,7 +84,7 @@ implement Connection {
     }
 }
 
-implement Drop for Connection {
+implement Drop for QuicConnection {
     fn drop(&mut self) {
         let _ = @intrinsic("verum.quic.drop", self.handle);
     }
@@ -110,7 +110,7 @@ implement QuicListener {
 
     public fn local_addr(&self) -> &SocketAddr { &self.local }
 
-    pub async fn accept(&self) -> Result<(Connection, SocketAddr), QuicError> {
+    pub async fn accept(&self) -> Result<(QuicConnection, SocketAddr), QuicError> {
         @intrinsic("verum.quic.accept", self.handle).await
     }
 }

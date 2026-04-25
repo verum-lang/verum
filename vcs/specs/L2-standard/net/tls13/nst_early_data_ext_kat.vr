@@ -19,7 +19,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.codec.{Tls13HandshakeReader};
 mount core.net.tls13.handshake.messages.{
     HandshakeMessage, NewSessionTicket, encode_handshake, decode_handshake,
     HST_NEW_SESSION_TICKET,
@@ -94,7 +94,7 @@ fn nst_early_data_decode_roundtrip() {
     };
     let mut wire: List<Byte> = [];
     encode_handshake(&HandshakeMessage.NewSessionTicketMsg(nst), &mut wire).unwrap();
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let parsed = decode_handshake(&mut r).unwrap();
     match parsed {
         HandshakeMessage.NewSessionTicketMsg(nst2) => {

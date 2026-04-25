@@ -1,10 +1,10 @@
 // =============================================================================
-// net/quic/connection_id.vr — QUIC Connection ID (RFC 9000 §5.1)
+// net/quic/connection_id.vr — QUIC QuicConnection ID (RFC 9000 §5.1)
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
-// RFC 9000 §5.1: A Connection ID (CID) is an opaque sequence of
+// RFC 9000 §5.1: A QuicConnection ID (CID) is an opaque sequence of
 // 0..=20 bytes. Length-0 CIDs appear in Short-header packets when the
 // peer knows which connection the packet belongs to by other means
 // (typically 4-tuple for a short-lived client).

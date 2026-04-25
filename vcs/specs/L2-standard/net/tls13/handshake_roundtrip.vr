@@ -13,7 +13,7 @@ mount core.*;
 mount core.collections.List;
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.version.{LEGACY_VERSION_TLS_1_2};
-mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.codec.{Tls13HandshakeReader};
 mount core.net.tls13.handshake.messages.{
     HandshakeMessage, ClientHello, ServerHello,
     Finished, KeyUpdate, KeyUpdateRequest,
@@ -32,7 +32,7 @@ fn client_hello_roundtrip() {
     };
     let mut wire: List<Byte> = [];
     encode_handshake(&HandshakeMessage.ClientHelloMsg(ch), &mut wire).unwrap();
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let decoded = decode_handshake(&mut r).unwrap();
     match decoded {
         HandshakeMessage.ClientHelloMsg(ch2) => {
@@ -63,7 +63,7 @@ fn server_hello_roundtrip() {
     };
     let mut wire: List<Byte> = [];
     encode_handshake(&HandshakeMessage.ServerHelloMsg(sh), &mut wire).unwrap();
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let decoded = decode_handshake(&mut r).unwrap();
     match decoded {
         HandshakeMessage.ServerHelloMsg(sh2) => {
@@ -82,7 +82,7 @@ fn finished_roundtrip_sha256() {
     };
     let mut wire: List<Byte> = [];
     encode_handshake(&HandshakeMessage.FinishedMsg(fin), &mut wire).unwrap();
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let decoded = decode_handshake(&mut r).unwrap();
     match decoded {
         HandshakeMessage.FinishedMsg(f) => {
@@ -98,7 +98,7 @@ fn key_update_roundtrip() {
     let ku = KeyUpdate { request_update: KeyUpdateRequest.UpdateRequested };
     let mut wire: List<Byte> = [];
     encode_handshake(&HandshakeMessage.KeyUpdateMsg(ku), &mut wire).unwrap();
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let decoded = decode_handshake(&mut r).unwrap();
     match decoded {
         HandshakeMessage.KeyUpdateMsg(ku2) => {
@@ -114,7 +114,7 @@ fn key_update_roundtrip() {
 fn end_of_early_data_roundtrip() {
     let mut wire: List<Byte> = [];
     encode_handshake(&HandshakeMessage.EndOfEarlyDataMsg, &mut wire).unwrap();
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let decoded = decode_handshake(&mut r).unwrap();
     match decoded {
         HandshakeMessage.EndOfEarlyDataMsg => {},

@@ -6435,10 +6435,23 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // verum_tcp_listen(port: i64, backlog: i64) -> i64
         // ============================================================
         {
+            let trace = std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some();
+            if trace { eprintln!("[aot-net] verum_tcp_listen"); }
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             let func = module.get_function("verum_tcp_listen")
                 .unwrap_or_else(|| module.add_function("verum_tcp_listen", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Skip body emission if the existing function has wrong arity —
+            // means a Verum-side function with the same name was lowered
+            // from VBC with a different signature, and emitting our
+            // helper body against it would fail with `missing param N`.
+            if func.count_params() != fn_type.count_param_types() {
+                if trace {
+                    eprintln!("[aot-net] verum_tcp_listen: arity mismatch ({} != {}), skipping",
+                        func.count_params(), fn_type.count_param_types());
+                }
+                // Continue out of this scope — leave the existing
+                // function intact rather than emitting an incompatible body.
+            } else if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let sock_fail = self.context.append_basic_block(func, "sock_fail");
                 let sock_ok = self.context.append_basic_block(func, "sock_ok");

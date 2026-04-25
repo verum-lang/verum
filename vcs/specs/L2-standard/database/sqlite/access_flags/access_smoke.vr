@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.access_flags.{
-    AccessMode, AmExists, AmReadWrite, AmRead,
+    SqliteAccessMode, AmExists, AmReadWrite, AmRead,
     SQLITE_ACCESS_EXISTS, SQLITE_ACCESS_READWRITE, SQLITE_ACCESS_READ,
     mode_numeric, mode_name, from_numeric,
     AccessResult, new_result, result_to_int,

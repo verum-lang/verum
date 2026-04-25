@@ -5,7 +5,7 @@ module core.database.sqlite.native.generate_series_vtab.series;
 mount base.{Bool, Int64, Text};
 
 // Effective filter arguments after applying defaults.
-public type Args is {
+public type SeriesArgs is {
     start: Int64,
     stop: Int64,
     step: Int64,
@@ -15,8 +15,8 @@ public fn default_start() -> Int64 { 0 as Int64 }
 public fn default_stop()  -> Int64 { 9_223_372_036_854_775_806 as Int64 }
 public fn default_step()  -> Int64 { 1 as Int64 }
 
-public fn defaults() -> Args {
-    Args { start: default_start(), stop: default_stop(), step: default_step() }
+public fn defaults() -> SeriesArgs {
+    SeriesArgs { start: default_start(), stop: default_stop(), step: default_step() }
 }
 
 // xFilter validation — step=0 is rejected.
@@ -25,7 +25,7 @@ public type FilterCheck is
     | FcZeroStep
     ;
 
-public fn check(args: &Args) -> FilterCheck {
+public fn check(args: &SeriesArgs) -> FilterCheck {
     if args.step == (0 as Int64) { return FcZeroStep; }
     FcOk
 }
@@ -44,7 +44,7 @@ public type SeriesDirection is
     | DirDescending
     ;
 
-public fn direction_for(args: &Args) -> SeriesDirection {
+public fn direction_for(args: &SeriesArgs) -> SeriesDirection {
     if args.step > (0 as Int64) { DirAscending } else { DirDescending }
 }
 
@@ -57,7 +57,7 @@ public fn direction_name(d: &SeriesDirection) -> Text {
 
 // Number of rows produced.  For ascending: floor((stop-start)/step)+1 if
 // start <= stop, else 0.  For descending: mirror.
-public fn row_count(args: &Args) -> Int64 {
+public fn row_count(args: &SeriesArgs) -> Int64 {
     let zero = 0 as Int64;
     if args.step == zero { return zero; }
     if args.step > zero {
@@ -71,12 +71,12 @@ public fn row_count(args: &Args) -> Int64 {
 }
 
 // Generate the value at the given 0-based row index.
-public fn value_at(args: &Args, row: Int64) -> Int64 {
+public fn value_at(args: &SeriesArgs, row: Int64) -> Int64 {
     args.start + args.step * row
 }
 
 // Termination check used by xNext.
-public fn at_end(args: &Args, current: Int64) -> Bool {
+public fn at_end(args: &SeriesArgs, current: Int64) -> Bool {
     let zero = 0 as Int64;
     if args.step > zero { return current > args.stop; }
     current < args.stop

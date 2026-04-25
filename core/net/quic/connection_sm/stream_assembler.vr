@@ -9,7 +9,7 @@
 // them into STREAM frames for the outbound tx pipeline, respecting:
 //
 //   * Per-stream flow-control (max_stream_data from peer).
-//   * Connection-level flow-control (max_data from peer).
+//   * QuicConnection-level flow-control (max_data from peer).
 //   * CC window — `cc.window() - cc.bytes_in_flight()`.
 //   * Target packet budget — remaining bytes the caller is willing
 //     to fill this packet with.
@@ -206,7 +206,7 @@ public fn maybe_emit_flow_control_updates(
 ) -> List<Frame> {
     let mut out: List<Frame> = [];
 
-    // Connection-level MAX_DATA.
+    // QuicConnection-level MAX_DATA.
     let suggested = flow.suggested_max_data(window);
     if suggested > flow.max_data_local {
         flow.update_max_data_local(suggested);
