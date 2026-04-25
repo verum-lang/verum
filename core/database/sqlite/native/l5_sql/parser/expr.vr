@@ -30,7 +30,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{
-    Token, Keyword, Operator, Punct, VariableKind,
+    Token, SqlKeyword, Operator, Punct, VariableKind,
 };
 mount core.database.sqlite.native.l5_sql.ast.{
     Expr, Literal, BinOp, UnOp, TableRef,

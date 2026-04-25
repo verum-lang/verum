@@ -26,10 +26,10 @@ mount base.{Result, Ok, Err, Text, Maybe};
 mount core.text.case_fold.fold_byte_ascii;
 
 // -----------------------------------------------------------------------------
-// Keyword catalog — SQLite reserves ~160 tokens.
+// SqlKeyword catalog — SQLite reserves ~160 tokens.
 // -----------------------------------------------------------------------------
 
-public type Keyword is
+public type SqlKeyword is
       KwSelect | KwFrom | KwWhere | KwGroup | KwBy | KwHaving
     | KwOrder | KwAsc | KwDesc | KwLimit | KwOffset
     | KwInsert | KwInto | KwValues | KwReplace
@@ -83,7 +83,7 @@ public type VariableKind is
     | VNamedDollar(Text);
 
 public type Token is
-      TKeyword(Keyword)
+      TKeyword(SqlKeyword)
     | TIdent(Text)
     | TStringLit(Text)
     | TBlobLit(List<Byte>)
@@ -101,11 +101,11 @@ public type SqlLexError is {
 };
 
 // -----------------------------------------------------------------------------
-// Keyword lookup
+// SqlKeyword lookup
 // -----------------------------------------------------------------------------
 
 /// Case-insensitive keyword table. Returns `None` for identifiers.
-public fn lookup_keyword(s: &Text) -> Maybe<Keyword> {
+public fn lookup_keyword(s: &Text) -> Maybe<SqlKeyword> {
     let raw = s.as_bytes();
     let mut folded: List<Byte> = List.new();
     let mut i: Int = 0;
@@ -127,7 +127,7 @@ fn eq_literal(buf: &List<Byte>, lit: &str) -> Bool {
     true
 }
 
-fn lookup_folded(b: &List<Byte>) -> Maybe<Keyword> {
+fn lookup_folded(b: &List<Byte>) -> Maybe<SqlKeyword> {
     // A hand table works at this scale — under 200 entries.
     if eq_literal(b, "select")     { return Some(KwSelect); }
     if eq_literal(b, "from")       { return Some(KwFrom); }

@@ -114,7 +114,7 @@ implement Copy for ThreadId {}
 ///
 /// handle.join().expect("Thread panicked");
 /// ```
-public type JoinHandle<T> is {
+public type ThreadJoinHandle<T> is {
     /// Platform-specific thread handle
     platform: PlatformThread,
     /// Result storage (set when thread completes)
@@ -123,7 +123,7 @@ public type JoinHandle<T> is {
     name: Maybe<Text>,
 };
 
-implement JoinHandle<T> {
+implement ThreadJoinHandle<T> {
     /// Wait for the thread to finish and return its result.
     ///
     /// Returns Err if the thread panicked.
@@ -212,7 +212,7 @@ implement ThreadBuilder {
     }
 
     /// Spawn a thread with this configuration.
-    public fn spawn<T: Send>(self, f: fn() -> T) -> Result<JoinHandle<T>, ThreadError> {
+    public fn spawn<T: Send>(self, f: fn() -> T) -> Result<ThreadJoinHandle<T>, ThreadError> {
         let result_storage = Shared.new(None);
         let result_ref = result_storage.clone();
 
@@ -224,7 +224,7 @@ implement ThreadBuilder {
         let platform_thread = platform_spawn(wrapper)
             .map_err(|_| ThreadError.SpawnFailed)?;
 
-        Ok(JoinHandle {
+        Ok(ThreadJoinHandle {
             platform: platform_thread,
             result: result_storage,
             name: self.name,
@@ -252,7 +252,7 @@ implement Thread {
     /// let result = handle.join().unwrap();
     /// assert_eq(result, 42);
     /// ```
-    public fn spawn<T: Send>(f: fn() -> T) -> JoinHandle<T> {
+    public fn spawn<T: Send>(f: fn() -> T) -> ThreadJoinHandle<T> {
         ThreadBuilder.new()
             .spawn(f)
             .expect("Failed to spawn thread")

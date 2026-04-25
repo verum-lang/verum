@@ -31,7 +31,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{
-    Token, Keyword, Operator, Punct,
+    Token, SqlKeyword, Operator, Punct,
 };
 mount core.database.sqlite.native.l5_sql.ast.{
     Expr, ResultColumnItem, TableRef,

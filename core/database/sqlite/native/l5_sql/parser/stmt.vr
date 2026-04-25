@@ -21,7 +21,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l5_sql.lexer.{
-    Token, Keyword, Operator, Punct, lex,
+    Token, SqlKeyword, Operator, Punct, lex,
 };
 mount core.database.sqlite.native.l5_sql.ast.SqlStatement;
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{

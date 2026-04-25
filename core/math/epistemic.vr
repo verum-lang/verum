@@ -654,12 +654,12 @@ public fn propagate_status(theory: &mut Theory) -> List<StatusChange> {
 }
 
 // =============================================================================
-// 11. KanDirection — direction of Kan extension
+// 11. EpistemicKanDirection — direction of Kan extension
 // =============================================================================
 
 /// Selects whether to compute the left (colimit) or right (limit) Kan
 /// extension.
-public type KanDirection is Left | Right;
+public type EpistemicKanDirection is Left | Right;
 
 // =============================================================================
 // 12. EpistemicCommaObject — an object of the comma category ι / c
@@ -684,7 +684,7 @@ public type EpistemicCommaObject is {
 };
 
 // =============================================================================
-// 13. KanExtensionResult — output of compute_kan_extension
+// 13. EpistemicKanExtensionResult — output of compute_kan_extension
 // =============================================================================
 
 /// The result of a Kan extension computation on the finite theory subsite.
@@ -693,14 +693,14 @@ public type EpistemicCommaObject is {
 /// `comma_objects` — the comma category ι / c (or c / ι) used in the computation
 /// `pointwise_map` — maps each claim id to its (co)limit status value
 /// `functor_handle`— opaque Int handle for downstream ∞-functor plumbing
-public type KanExtensionResult is {
-    direction:      KanDirection,
+public type EpistemicKanExtensionResult is {
+    direction:      EpistemicKanDirection,
     comma_objects:  List<EpistemicCommaObject>,
     pointwise_map:  Map<Text, EpistemicStatus>,
     functor_handle: Int,
 };
 
-implement KanExtensionResult {
+implement EpistemicKanExtensionResult {
     /// Retrieve the computed status for a given claim id.
     public fn status_at(&self, id: &Text) -> Maybe<EpistemicStatus> {
         self.pointwise_map.get(id)
@@ -731,13 +731,13 @@ implement KanExtensionResult {
 /// `a ∈ subsite_ids` and `g` is a reverse dependency path from `c` to `a`.
 /// The holimit is the MEET (minimum) of F(a) over all such `a`.
 ///
-/// Returns a `KanExtensionResult` containing the comma objects and the
+/// Returns a `EpistemicKanExtensionResult` containing the comma objects and the
 /// pointwise status map.
 public fn compute_kan_extension(
     subsite_ids: &List<Text>,
     theory:      &Theory,
-    direction:   KanDirection,
-) -> KanExtensionResult {
+    direction:   EpistemicKanDirection,
+) -> EpistemicKanExtensionResult {
     // Build a set for fast membership testing of the subsite.
     let mut in_subsite: Map<Text, Bool> = {};
     for id in subsite_ids {
@@ -830,7 +830,7 @@ public fn compute_kan_extension(
         },
     }
 
-    KanExtensionResult {
+    EpistemicKanExtensionResult {
         direction,
         comma_objects,
         pointwise_map,
@@ -897,7 +897,7 @@ public fn compute_obstruction(
     subsite_ids: &List<Text>,
 ) -> ObstructionData {
     // Step 1 — left Kan extension.
-    let lan = compute_kan_extension(subsite_ids, theory, KanDirection.Left);
+    let lan = compute_kan_extension(subsite_ids, theory, EpistemicKanDirection.Left);
 
     // Build a fast set of subsite ids.
     let mut in_subsite: Map<Text, Bool> = {};
@@ -1045,7 +1045,7 @@ theorem left_kan_is_pointwise_join(
     c_id:        &Text,
 )
     ensures
-        match compute_kan_extension(subsite_ids, theory, KanDirection.Left)
+        match compute_kan_extension(subsite_ids, theory, EpistemicKanDirection.Left)
             .pointwise_map.get(c_id)
         {
             Some(_) => true,
@@ -1062,7 +1062,7 @@ theorem right_kan_is_pointwise_meet(
     c_id:        &Text,
 )
     ensures
-        match compute_kan_extension(subsite_ids, theory, KanDirection.Right)
+        match compute_kan_extension(subsite_ids, theory, EpistemicKanDirection.Right)
             .pointwise_map.get(c_id)
         {
             Some(_) => true,

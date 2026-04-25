@@ -18,7 +18,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{
-    Token, Keyword, Operator, Punct, VariableKind,
+    Token, SqlKeyword, Operator, Punct, VariableKind,
 };
 
 // -----------------------------------------------------------------------------
@@ -83,7 +83,7 @@ implement SqlTokenStream {
     // -------------------------------------------------------------------------
 
     /// True if the current token is `kw`. Does NOT advance.
-    public fn check_keyword(&self, kw: Keyword) -> Bool {
+    public fn check_keyword(&self, kw: SqlKeyword) -> Bool {
         match self.peek() {
             TKeyword(k) => keyword_eq(k, kw),
             _ => false,
@@ -91,7 +91,7 @@ implement SqlTokenStream {
     }
 
     /// Advance iff the current token is `kw`.
-    public fn accept_keyword(&mut self, kw: Keyword) -> Bool {
+    public fn accept_keyword(&mut self, kw: SqlKeyword) -> Bool {
         if self.check_keyword(kw) {
             let _ = self.advance();
             return true;
@@ -100,7 +100,7 @@ implement SqlTokenStream {
     }
 
     /// Consume a specific keyword or raise a ParseError.
-    public fn expect_keyword(&mut self, kw: Keyword) -> Result<(), ParseError> {
+    public fn expect_keyword(&mut self, kw: SqlKeyword) -> Result<(), ParseError> {
         if self.accept_keyword(kw) { return Ok(()); }
         Err(parse_error("expected keyword".clone(), self.pos))
     }
@@ -229,7 +229,7 @@ fn clone_var(v: &VariableKind) -> VariableKind {
 // Variant equality helpers (no derive(PartialEq) in Verum v1 for these enums)
 // -----------------------------------------------------------------------------
 
-fn keyword_eq(a: Keyword, b: Keyword) -> Bool {
+fn keyword_eq(a: SqlKeyword, b: SqlKeyword) -> Bool {
     // Hacky but effective: match on one, test the other branch.
     // Each keyword variant is its own discriminant; a == b iff their
     // pair matches.

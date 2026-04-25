@@ -10,7 +10,7 @@
 module shortcuts;
 
 mount super.rect.Rect;
-mount super.constraint.{Constraint, Layout};
+mount super.constraint.{Constraint, TermLayout};
 
 /// Split into header, body, footer areas.
 public fn header_body_footer(area: Rect, header_h: Int, footer_h: Int) -> (Rect, Rect, Rect) {
@@ -18,7 +18,7 @@ public fn header_body_footer(area: Rect, header_h: Int, footer_h: Int) -> (Rect,
     constraints.push(Constraint.Length(header_h));
     constraints.push(Constraint.Fill(1));
     constraints.push(Constraint.Length(footer_h));
-    let areas = Layout.vertical().constraints(constraints).split(area);
+    let areas = TermLayout.vertical().constraints(constraints).split(area);
     (areas[0], areas[1], areas[2])
 }
 
@@ -27,7 +27,7 @@ public fn sidebar_main(area: Rect, sidebar_width: Int) -> (Rect, Rect) {
     let mut constraints = List.new();
     constraints.push(Constraint.Length(sidebar_width));
     constraints.push(Constraint.Fill(1));
-    let areas = Layout.horizontal().constraints(constraints).split(area);
+    let areas = TermLayout.horizontal().constraints(constraints).split(area);
     (areas[0], areas[1])
 }
 
@@ -37,13 +37,13 @@ public fn centered(area: Rect, width: Int, height: Int) -> Rect {
     v_constraints.push(Constraint.Fill(1));
     v_constraints.push(Constraint.Length(height));
     v_constraints.push(Constraint.Fill(1));
-    let vert = Layout.vertical().constraints(v_constraints).split(area);
+    let vert = TermLayout.vertical().constraints(v_constraints).split(area);
 
     let mut h_constraints = List.new();
     h_constraints.push(Constraint.Fill(1));
     h_constraints.push(Constraint.Length(width));
     h_constraints.push(Constraint.Fill(1));
-    let horiz = Layout.horizontal().constraints(h_constraints).split(vert[1]);
+    let horiz = TermLayout.horizontal().constraints(h_constraints).split(vert[1]);
     horiz[1]
 }
 
@@ -51,26 +51,26 @@ public fn centered(area: Rect, width: Int, height: Int) -> Rect {
 public fn equal_columns(area: Rect, n: Int) -> List<Rect> {
     let mut constraints = List.new();
     for _ in 0..n { constraints.push(Constraint.Fill(1)); }
-    Layout.horizontal().constraints(constraints).spacing(1).split(area)
+    TermLayout.horizontal().constraints(constraints).spacing(1).split(area)
 }
 
 /// Create N equal-height rows.
 public fn equal_rows(area: Rect, n: Int) -> List<Rect> {
     let mut constraints = List.new();
     for _ in 0..n { constraints.push(Constraint.Fill(1)); }
-    Layout.vertical().constraints(constraints).split(area)
+    TermLayout.vertical().constraints(constraints).split(area)
 }
 
 /// Create a percentage-based horizontal split.
 public fn percentage_split(area: Rect, percentages: &List<Int>) -> List<Rect> {
     let mut constraints = List.new();
     for p in percentages { constraints.push(Constraint.Percentage(p)); }
-    Layout.horizontal().constraints(constraints).split(area)
+    TermLayout.horizontal().constraints(constraints).split(area)
 }
 
 /// Create a percentage-based vertical split.
 public fn percentage_rows(area: Rect, percentages: &List<Int>) -> List<Rect> {
     let mut constraints = List.new();
     for p in percentages { constraints.push(Constraint.Percentage(p)); }
-    Layout.vertical().constraints(constraints).split(area)
+    TermLayout.vertical().constraints(constraints).split(area)
 }
