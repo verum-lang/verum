@@ -1,0 +1,61 @@
+// =============================================================================
+// core.action.monads.pure — identity (no-effect) monad
+// =============================================================================
+//
+// `Pure<A>` — the identity monad: no side effect at all. Trivially
+// commutative; ε-coordinate 0. Acts as the unit of the Kleisli
+// composition law and as the canonical baseline against which the
+// other effects are measured.
+// =============================================================================
+
+@derive(Clone)
+public type Pure<A> is Pure(A);
+
+/// `pure : A -> Pure<A>` — identity wrapping (the unit of the monad).
+public fn pure_unit<A>(a: A) -> Pure<A> {
+    Pure(a)
+}
+
+/// `bind : Pure<A> -> (A -> Pure<B>) -> Pure<B>` — sequence two
+/// pure computations. For the identity monad, bind degenerates to
+/// function application: `bind(Pure(a), f) = f(a)`.
+public fn pure_bind<A, B>(m: Pure<A>, f: fn(A) -> Pure<B>) -> Pure<B> {
+    let Pure(a) = m;
+    f(a)
+}
+
+/// `strength : A -> Pure<B> -> Pure<(A, B)>` — tensor a pure value
+/// alongside an effectful one. For Pure this is just pairing.
+public fn pure_strength<A, B>(a: A, mb: Pure<B>) -> Pure<(A, B)> {
+    let Pure(b) = mb;
+    Pure((a, b))
+}
+
+/// Extract the wrapped value (only for Pure — other monads do NOT
+/// admit unwrapping in general).
+public fn pure_extract<A>(m: Pure<A>) -> A {
+    let Pure(a) = m;
+    a
+}
+
+// =============================================================================
+// Monad laws (V1 trusted-boundary axioms; V2 promotes to @verify(formal))
+// =============================================================================
+
+/// Left identity: `bind(pure(a), f) ≡ f(a)`.
+@framework(diakrisis, "Theorem 17.T1 (Pure left-identity monad law)")
+public axiom pure_left_identity() -> Bool ensures true;
+
+/// Right identity: `bind(m, pure) ≡ m`.
+@framework(diakrisis, "Theorem 17.T1 (Pure right-identity monad law)")
+public axiom pure_right_identity() -> Bool ensures true;
+
+/// Associativity: `bind(bind(m, f), g) ≡ bind(m, |x| bind(f(x), g))`.
+@framework(diakrisis, "Theorem 17.T1 (Pure associativity monad law)")
+public axiom pure_associativity() -> Bool ensures true;
+
+/// Commutativity: `bind(m1, |a| bind(m2, |b| pure((a,b))))
+///                ≡ bind(m2, |b| bind(m1, |a| pure((a,b))))`.
+/// Holds because Pure has no side effects at all.
+@framework(diakrisis, "Corollary 17.C2 (Pure tensor-commutativity)")
+public axiom pure_commutativity() -> Bool ensures true;

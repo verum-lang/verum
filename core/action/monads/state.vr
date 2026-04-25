@@ -1,0 +1,123 @@
+// =============================================================================
+// core.action.monads.state — read+write mutable-cell monad
+// =============================================================================
+//
+// `State<S, A>` — read+write access to a single cell of type `S`. The
+// Kleisli shape is `S -> (A, S)`: a State-effectful computation
+// receives the current state, produces a result and a possibly-
+// modified state.
+//
+// **NON-commutative** by design: `write(s1) >> read` and
+// `read >> write(s1)` produce different observable behaviours. State
+// is the canonical *non-commutative* monad in the Verum effect
+// catalogue and serves as the negative example for
+// @verify(coherent_concurrent): parallel composition of State-
+// effectful programs requires explicit synchronisation (mutex,
+// transaction, …) to preserve coherence.
+//
+// ε-coordinate ω + 1 (one rank above the commutative monads at ω).
+// =============================================================================
+
+/// State<S, A> = S -> (A, S). The Kleisli embedding of read+write
+/// access to a mutable cell of type `S`.
+@derive(Clone)
+public type State<S, A> is {
+    run: fn(S) -> (A, S),
+};
+
+/// `pure : A -> State<S, A>` — return a value without modifying the
+/// state.
+public fn state_unit<S, A>(a: A) -> State<S, A> {
+    State { run: |s: S| -> (A, S) { (a.clone(), s) } }
+}
+
+/// `get : State<S, S>` — read the current state, leaving it unchanged.
+public fn state_get<S>() -> State<S, S> {
+    State { run: |s: S| -> (S, S) { (s.clone(), s) } }
+}
+
+/// `put : S -> State<S, ()>` — replace the state with a new value;
+/// return unit.
+public fn state_put<S>(new_state: S) -> State<S, ()> {
+    State { run: |_old: S| -> ((), S) { ((), new_state.clone()) } }
+}
+
+/// `modify : (S -> S) -> State<S, ()>` — apply a transformation to
+/// the state in place. Standard combinator (Hudak-Peyton Jones-
+/// Wadler 1992).
+public fn state_modify<S>(f: fn(S) -> S) -> State<S, ()> {
+    State { run: |s: S| -> ((), S) { ((), f(s)) } }
+}
+
+/// `bind : State<S, A> -> (A -> State<S, B>) -> State<S, B>` —
+/// sequence two State computations, threading the state through.
+public fn state_bind<S, A, B>(
+    m: State<S, A>,
+    f: fn(A) -> State<S, B>,
+) -> State<S, B> {
+    State {
+        run: |s: S| -> (B, S) {
+            let (a, s1) = (m.run.clone())(s);
+            let inner: State<S, B> = f(a);
+            (inner.run)(s1)
+        },
+    }
+}
+
+/// `strength : A -> State<S, B> -> State<S, (A, B)>` — tensor a
+/// pure value alongside the State-effectful one. Both threaded
+/// state and output value preserved.
+public fn state_strength<S, A, B>(a: A, mb: State<S, B>) -> State<S, (A, B)> {
+    State {
+        run: |s: S| -> ((A, B), S) {
+            let (b, s1) = (mb.run.clone())(s);
+            ((a.clone(), b), s1)
+        },
+    }
+}
+
+/// `run : State<S, A> -> S -> (A, S)` — execute a State computation
+/// against an initial state, producing the value-state pair.
+public fn state_run<S, A>(m: State<S, A>, initial: S) -> (A, S) {
+    (m.run)(initial)
+}
+
+/// `eval : State<S, A> -> S -> A` — execute and discard the final state.
+public fn state_eval<S, A>(m: State<S, A>, initial: S) -> A {
+    let (a, _) = (m.run)(initial);
+    a
+}
+
+/// `exec : State<S, A> -> S -> S` — execute and discard the value,
+/// keeping only the final state.
+public fn state_exec<S, A>(m: State<S, A>, initial: S) -> S {
+    let (_, s) = (m.run)(initial);
+    s
+}
+
+// =============================================================================
+// Monad laws + non-commutativity (V1 trusted-boundary axioms)
+// =============================================================================
+
+@framework(diakrisis, "Theorem 17.T1 (State left-identity monad law)")
+public axiom state_left_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (State right-identity monad law)")
+public axiom state_right_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (State associativity monad law)")
+public axiom state_associativity() -> Bool ensures true;
+
+/// State is **NOT** commutative: `bind(write(s1), |_| read)` and
+/// `bind(read, |r| bind(write(s1), |_| pure(r)))` produce different
+/// observable behaviours. This axiom encodes the negative
+/// commutativity result that gates concurrent-coherence verification.
+@framework(diakrisis, "Corollary 17.C2 (State NON-commutativity)")
+public axiom state_is_not_commutative() -> Bool ensures true;
+
+/// Concurrent composition of State-effectful programs requires
+/// explicit synchronisation (mutex / transaction / …) to preserve
+/// the @verify(coherent) verdict. Without synchronisation, parallel
+/// State updates may observe interleaved intermediate states.
+@framework(diakrisis, "Corollary 17.C2 (State requires synchronisation under parallel composition)")
+public axiom state_requires_sync_under_parallel() -> Bool ensures true;

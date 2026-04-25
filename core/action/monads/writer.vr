@@ -1,0 +1,107 @@
+// =============================================================================
+// core.action.monads.writer — append-only output monad
+// =============================================================================
+//
+// `Writer<W, A>` — pair of an output buffer of type `W` (required to
+// be a monoid via combine + zero) with a result of type `A`. The
+// Kleisli shape is `(A, W)`: a Writer computation produces both a
+// value and a side-output.
+//
+// Commutative *iff* the underlying monoid `W` is commutative
+// (additive monoids over numeric types are; sequence concatenation
+// is NOT). ε-coordinate ω. The protocol-level Commutative marker is
+// instantiated only for the commutative-monoid case; non-commutative
+// monoid Writer-effectful programs are NOT admitted under
+// @verify(coherent_concurrent) without explicit synchronisation.
+// =============================================================================
+
+/// Writer<W, A> = (A, W). Pair of a result and an output log.
+@derive(Clone)
+public type Writer<W, A> is {
+    value: A,
+    output: W,
+};
+
+/// `pure : zero -> A -> Writer<W, A>` — wrap a value with the empty
+/// output (the monoid identity). The caller supplies `zero`
+/// explicitly because Verum's protocol surface for monoidal
+/// identity is per-corpus rather than universal.
+public fn writer_unit<W, A>(a: A, zero: W) -> Writer<W, A> {
+    Writer {
+        value: a,
+        output: zero,
+    }
+}
+
+/// `tell : W -> Writer<W, ()>` — append `w` to the output log,
+/// producing a unit value.
+public fn writer_tell<W>(w: W) -> Writer<W, ()> {
+    Writer {
+        value: (),
+        output: w,
+    }
+}
+
+/// `bind : Writer<W, A> -> (A -> Writer<W, B>) -> (W, W) -> W -> Writer<W, B>`
+/// — sequence two writer computations, combining their outputs via
+/// the supplied monoid operation `combine`.
+///
+/// V1 takes `combine` explicitly to avoid baking in a specific
+/// monoid; V1.5 will introduce a `Monoid<W>` protocol that the
+/// generic bind can resolve at elaboration time.
+public fn writer_bind<W, A, B>(
+    m: Writer<W, A>,
+    f: fn(A) -> Writer<W, B>,
+    combine: fn(W, W) -> W,
+) -> Writer<W, B> {
+    let inner: Writer<W, B> = f(m.value);
+    Writer {
+        value: inner.value,
+        output: combine(m.output, inner.output),
+    }
+}
+
+/// `strength : A -> Writer<W, B> -> Writer<W, (A, B)>` — tensor a
+/// pure value alongside the Writer-effectful one. Output is
+/// preserved unchanged.
+public fn writer_strength<W, A, B>(a: A, mb: Writer<W, B>) -> Writer<W, (A, B)> {
+    Writer {
+        value: (a, mb.value),
+        output: mb.output,
+    }
+}
+
+/// `run : Writer<W, A> -> (A, W)` — extract the value-and-output pair.
+public fn writer_run<W, A>(m: Writer<W, A>) -> (A, W) {
+    (m.value, m.output)
+}
+
+/// `censor : (W -> W) -> Writer<W, A> -> Writer<W, A>` — apply a
+/// transformation to the output log without changing the value.
+/// Standard Writer combinator (Wadler 1990).
+public fn writer_censor<W, A>(f: fn(W) -> W, m: Writer<W, A>) -> Writer<W, A> {
+    Writer {
+        value: m.value,
+        output: f(m.output),
+    }
+}
+
+// =============================================================================
+// Monad laws (V1 trusted-boundary axioms)
+// =============================================================================
+
+@framework(diakrisis, "Theorem 17.T1 (Writer left-identity monad law; modulo monoid)")
+public axiom writer_left_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (Writer right-identity monad law; modulo monoid)")
+public axiom writer_right_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (Writer associativity monad law; modulo monoid)")
+public axiom writer_associativity() -> Bool ensures true;
+
+/// Writer is commutative ONLY if the underlying monoid is commutative.
+/// This axiom encodes the conditional commutativity per Plotkin-Power
+/// 2002 Example 2.4: tensor commutativity in Writer<W, _> requires
+/// `combine(w1, w2) = combine(w2, w1)` for all w1, w2 ∈ W.
+@framework(diakrisis, "Corollary 17.C2 (Writer commutativity iff monoid commutative)")
+public axiom writer_commutativity_iff_monoid_commutative() -> Bool ensures true;

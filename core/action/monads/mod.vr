@@ -1,0 +1,36 @@
+// =============================================================================
+// core.action.monads — concrete strong-monad implementations (VFE-9 V1)
+// =============================================================================
+//
+// Concrete data-type-and-impl pairs for each effect declared in
+// `core.action.effects` per Theorem 17.T1 (effects ≃ Perf(α_linear)
+// projections via Kleisli embedding). The protocol surface lives in
+// `core.action.effects`; this module ships the witness data types.
+//
+// V1 scope (this module): the four most-used monads — `Pure` (identity),
+// `Reader<R, A>` (env-reading), `Writer<W, A>` (append-only output),
+// and `State<S, A>` (mutable cell). Together they cover:
+//
+//   • the canonical commutative monads (`Pure`, `Reader`, `Writer`)
+//     that compose under @verify(coherent_concurrent) per Theorem 17.C2;
+//   • the canonical non-commutative monad (`State`) that DOES NOT
+//     compose under coherent-concurrent without explicit
+//     synchronisation — used by VUVA §11.2 to demonstrate the gate.
+//
+// V1.5 will add `List`, `Probability`, `Exception`, `Io`. V2 will add
+// monad-laws verification through `@verify(formal)` instead of the
+// V1 trusted-boundary axioms.
+//
+// Each monad ships:
+//   - data type with the canonical Kleisli shape;
+//   - `pure` / `bind` / `strength` standalone functions
+//     (protocol-implementation form pending VUVA §11.5 protocol-impl
+//     syntax landing for parameterised types);
+//   - three monad-law axioms (left identity / right identity /
+//     associativity).
+// =============================================================================
+
+public mount core.action.monads.pure;
+public mount core.action.monads.reader;
+public mount core.action.monads.writer;
+public mount core.action.monads.state;
