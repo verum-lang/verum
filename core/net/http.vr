@@ -710,7 +710,7 @@ implement Describable for HttpError {
 ///
 /// A minimal URL parser for HTTP client use. For full RFC 3986 compliance,
 /// use a dedicated URL parsing cog.
-public type Url is {
+public type HttpUrl is {
     scheme: Text,
     host: Text,
     port: Maybe<Int>,
@@ -719,11 +719,11 @@ public type Url is {
     fragment: Maybe<Text>,
 };
 
-implement Url {
+implement HttpUrl {
     /// Parse a URL string.
     ///
     /// Supports http:// and https:// schemes.
-    public fn parse(s: &Text) -> Result<Url, HttpError> {
+    public fn parse(s: &Text) -> Result<HttpUrl, HttpError> {
         // Extract scheme
         let (scheme, rest) = if s.starts_with("https://") {
             ("https", s.slice(8, s.len()))
@@ -767,7 +767,7 @@ implement Url {
             }
         };
 
-        Ok(Url {
+        Ok(HttpUrl {
             scheme: scheme,
             host: host,
             port: port,
@@ -810,21 +810,21 @@ implement Url {
     }
 }
 
-implement Debug for Url {
+implement Debug for HttpUrl {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.to_string())
     }
 }
 
-implement Display for Url {
+implement Display for HttpUrl {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.to_string())
     }
 }
 
-implement Clone for Url {
-    fn clone(&self) -> Url {
-        Url {
+implement Clone for HttpUrl {
+    fn clone(&self) -> HttpUrl {
+        HttpUrl {
             scheme: self.scheme.clone(),
             host: self.host.clone(),
             port: self.port,
@@ -835,8 +835,8 @@ implement Clone for Url {
     }
 }
 
-implement Eq for Url {
-    fn eq(&self, other: &Url) -> Bool {
+implement Eq for HttpUrl {
+    fn eq(&self, other: &HttpUrl) -> Bool {
         self.to_string() == other.to_string()
     }
 }
@@ -1064,7 +1064,7 @@ type PoolKey is {
 };
 
 implement PoolKey {
-    fn from_url(url: &Url) -> PoolKey {
+    fn from_url(url: &HttpUrl) -> PoolKey {
         PoolKey {
             scheme: url.scheme.clone(),
             host: url.host.clone(),

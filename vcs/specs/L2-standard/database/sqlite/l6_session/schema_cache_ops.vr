@@ -11,7 +11,7 @@ mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l6_session.{
     ColumnMeta, TableKind, TableMeta, IndexMeta,
-    SchemaError, SchemaCache,
+    SessionSchemaError, SchemaCache,
     schema_cache_new,
 };
 mount core.database.sqlite.native.l2_record.Affinity;

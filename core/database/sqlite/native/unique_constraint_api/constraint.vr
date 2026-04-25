@@ -11,26 +11,26 @@ mount core.database.sqlite.native.unique_constraint_api.fk_action.{
 mount base.{Bool, Text};
 mount core.collections.list.{List};
 
-public type UniqueConstraint is {
+public type UniqueConstraintSpec is {
     kind: UniqueKind,
     columns: List<Text>,
     name: Text,                 // optional named constraint; "" if anonymous
 };
 
-public fn unique(columns: List<Text>) -> UniqueConstraint {
-    UniqueConstraint { kind: UkUnique, columns: columns, name: "".clone() }
+public fn unique(columns: List<Text>) -> UniqueConstraintSpec {
+    UniqueConstraintSpec { kind: UkUnique, columns: columns, name: "".clone() }
 }
 
-public fn primary_key(columns: List<Text>) -> UniqueConstraint {
-    UniqueConstraint { kind: UkPrimaryKey, columns: columns, name: "".clone() }
+public fn primary_key(columns: List<Text>) -> UniqueConstraintSpec {
+    UniqueConstraintSpec { kind: UkPrimaryKey, columns: columns, name: "".clone() }
 }
 
-public fn with_name(mut u: UniqueConstraint, name: Text) -> UniqueConstraint {
+public fn with_name(mut u: UniqueConstraintSpec, name: Text) -> UniqueConstraintSpec {
     u.name = name;
     u
 }
 
-public fn forbids_null(u: &UniqueConstraint) -> Bool {
+public fn forbids_null(u: &UniqueConstraintSpec) -> Bool {
     implies_not_null(&u.kind)
 }
 

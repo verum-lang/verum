@@ -12,7 +12,7 @@
 //   * b-tree cell vectors for all 4 page kinds
 
 mount core.database.sqlite.native.testing.test_vectors.{
-    VarintVector, RecordHeaderVector, WalChecksumVector, BtreeCellTestSample,
+    VarintTestSample, RecordHeaderVector, WalChecksumVector, BtreeCellTestSample,
     varint_vectors, record_vectors, wal_checksum_vectors, btree_cell_vectors,
     varint_vector_count, record_vector_count, wal_vector_count, btree_vector_count,
 };

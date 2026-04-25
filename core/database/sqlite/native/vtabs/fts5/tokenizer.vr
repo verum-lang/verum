@@ -73,10 +73,10 @@ public type Tokenizer is protocol {
 // Simple tokenizer — ASCII word-split + lowercase
 // -----------------------------------------------------------------------------
 
-public type SimpleTokenizer is { unit: Bool };
-public fn simple_tokenizer() -> SimpleTokenizer { SimpleTokenizer { unit: true } }
+public type Fts5VtabSimpleTokenizer is { unit: Bool };
+public fn simple_tokenizer() -> Fts5VtabSimpleTokenizer { Fts5VtabSimpleTokenizer { unit: true } }
 
-implement Tokenizer for SimpleTokenizer {
+implement Tokenizer for Fts5VtabSimpleTokenizer {
     fn name(&self) -> Text { "simple".clone() }
 
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token> {
@@ -215,10 +215,10 @@ fn bs_replace_at(_len: &mut Int, _at: Int, _new_byte: Int) {
 // rule — covers the common Latin-1 Supplement range.
 // =============================================================================
 
-public type Unicode61Tokenizer is { unit: Bool };
-public fn unicode61_tokenizer() -> Unicode61Tokenizer { Unicode61Tokenizer { unit: true } }
+public type Fts5VtabUnicode61Tokenizer is { unit: Bool };
+public fn unicode61_tokenizer() -> Fts5VtabUnicode61Tokenizer { Fts5VtabUnicode61Tokenizer { unit: true } }
 
-implement Tokenizer for Unicode61Tokenizer {
+implement Tokenizer for Fts5VtabUnicode61Tokenizer {
     fn name(&self) -> Text { "unicode61".clone() }
 
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token> {
@@ -297,10 +297,10 @@ fn is_combining_lead(b: Byte) -> Bool {
 // Trigram tokenizer — overlapping 3-grams for substring search
 // -----------------------------------------------------------------------------
 
-public type TrigramTokenizer is { unit: Bool };
-public fn trigram_tokenizer() -> TrigramTokenizer { TrigramTokenizer { unit: true } }
+public type Fts5VtabTrigramTokenizer is { unit: Bool };
+public fn trigram_tokenizer() -> Fts5VtabTrigramTokenizer { Fts5VtabTrigramTokenizer { unit: true } }
 
-implement Tokenizer for TrigramTokenizer {
+implement Tokenizer for Fts5VtabTrigramTokenizer {
     fn name(&self) -> Text { "trigram".clone() }
 
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token> {

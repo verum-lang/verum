@@ -14,7 +14,7 @@ mount core.database.sqlite.native.unique_constraint_api.fk_action.{
     action_name, default_action, allows_deferred_check, propagates_change, rejects_change,
 };
 mount core.database.sqlite.native.unique_constraint_api.constraint.{
-    UniqueConstraint,
+    UniqueConstraintSpec,
     unique, primary_key, with_name, forbids_null,
     ForeignKey,
     fk, with_on_delete, with_on_update, as_deferred, requires_child_update, arity_matches,

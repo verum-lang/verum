@@ -16,10 +16,10 @@
 
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
     Token, TokenizerOptions, options_default,
-    Tokenizer, SimpleTokenizer, simple_tokenizer,
+    Tokenizer, Fts5VtabSimpleTokenizer, simple_tokenizer,
     Fts5VtabPorterTokenizer, porter_tokenizer,
-    Unicode61Tokenizer, unicode61_tokenizer,
-    TrigramTokenizer, trigram_tokenizer,
+    Fts5VtabUnicode61Tokenizer, unicode61_tokenizer,
+    Fts5VtabTrigramTokenizer, trigram_tokenizer,
 };
 mount core.database.sqlite.native.vtabs.fts5.segment.{
     Fts5SegmentPosting, Fts5SegmentPostingList, posting_list_new, posting_less,

@@ -835,7 +835,7 @@ where type
     T: Send,
 {
     // Generate task ID
-    let task_id = TaskId.new(Some(child_env.concurrency.task_id));
+    let task_id = EnvTaskId.new(Some(child_env.concurrency.task_id));
 
     // Wrap future to set environment as current for the task
     let wrapped_future = async move {
@@ -1000,4 +1000,4 @@ where type
 
 mount super.{current_env, EXEC_ENV_SLOT};
 mount sys.common.ctx_set;
-mount super.env.TaskId;
+mount super.env.EnvTaskId;

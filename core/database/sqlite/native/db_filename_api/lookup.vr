@@ -32,19 +32,19 @@ public fn path_text(o: &Outcome) -> Text {
 
 // "main" / "temp" / attached schema names are well-known; anything else is
 // unknown.  We model only main + temp explicitly.
-public type SchemaKind is
+public type DbFilenameSchemaKind is
     | SkMain
     | SkTemp
     | SkAttached
     ;
 
-public fn schema_kind_for(name: Text) -> SchemaKind {
+public fn schema_kind_for(name: Text) -> DbFilenameSchemaKind {
     if name == "main".clone() { return SkMain; }
     if name == "temp".clone() { return SkTemp; }
     SkAttached
 }
 
-public fn schema_kind_name(k: &SchemaKind) -> Text {
+public fn schema_kind_name(k: &DbFilenameSchemaKind) -> Text {
     match k {
         SkMain     => "main".clone(),
         SkTemp     => "temp".clone(),

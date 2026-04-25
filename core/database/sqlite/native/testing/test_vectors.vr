@@ -25,17 +25,17 @@ mount base.{Text};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// VarintVector
+// VarintTestSample
 // -----------------------------------------------------------------------------
 
-public type VarintVector is {
+public type VarintTestSample is {
     encoded: List<Byte>,
     decoded: Int64,
     label: Text,
 };
 
-fn vec(label: Text, decoded: Int64, bytes: List<Byte>) -> VarintVector {
-    VarintVector { encoded: bytes, decoded: decoded, label: label }
+fn vec(label: Text, decoded: Int64, bytes: List<Byte>) -> VarintTestSample {
+    VarintTestSample { encoded: bytes, decoded: decoded, label: label }
 }
 
 fn b(values: List<Int>) -> List<Byte> {
@@ -51,8 +51,8 @@ fn b(values: List<Int>) -> List<Byte> {
 /// E.1 varint round-trip vectors. Pairs `(decoded, encoded-bytes)`.
 /// Covers every byte length 1..9 with both the smallest and largest
 /// value at that length.
-public fn varint_vectors() -> List<VarintVector> {
-    let mut out: List<VarintVector> = List.new();
+public fn varint_vectors() -> List<VarintTestSample> {
+    let mut out: List<VarintTestSample> = List.new();
     // 1-byte
     out.push(vec("0".clone(),       0 as Int64,                   b([0x00])));
     out.push(vec("1".clone(),       1 as Int64,                   b([0x01])));
