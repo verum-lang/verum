@@ -24,8 +24,8 @@ mount core.runtime.spawn.{
     SpawnConfig, SpawnConfigBuilder, PriorityLevel,
 };
 mount core.runtime.recovery.{
-    RetryPolicy, RetryConfig, RecoveryCircuitBreaker, RecoveryCircuitState,
-    RecoveryBackoffStrategy, RecoveryStrategy,
+    RetryPolicy, RuntimeRetryConfig, RecoveryCircuitBreaker, RecoveryCircuitState,
+    RecoveryBackoffStrategy, RuntimeRecoveryStrategy,
 };
 mount core.runtime.supervisor.{
     Supervisor, SupervisorId, SupervisorHandle,
@@ -279,7 +279,7 @@ fn test_retry_policy_type_exists() {
 
 @test
 fn test_retry_config_type_exists() {
-    let _ = RetryConfig;
+    let _ = RuntimeRetryConfig;
 }
 
 @test

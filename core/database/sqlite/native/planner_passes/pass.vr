@@ -36,21 +36,21 @@ public type PlannerPass is protocol {
 
 public const DEFAULT_MAX_ITERATIONS: Int = 8;
 
-public type PipelineReport is {
+public type PlannerPipelineReport is {
     passes_run: Int,
     iterations: Int,
     total_edits: Int,
 }
 
-public fn pipeline_report_default() -> PipelineReport {
-    PipelineReport { passes_run: 0, iterations: 0, total_edits: 0 }
+public fn pipeline_report_default() -> PlannerPipelineReport {
+    PlannerPipelineReport { passes_run: 0, iterations: 0, total_edits: 0 }
 }
 
 public fn run_pipeline(
     passes: List<Heap<dyn PlannerPass>>,
     input: PvNode,
     max_iterations: Int,
-) -> (PvNode, PipelineReport) {
+) -> (PvNode, PlannerPipelineReport) {
     let mut plan = input;
     let mut report = pipeline_report_default();
     let mut iter: Int = 0;

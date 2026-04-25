@@ -92,7 +92,7 @@ public mount .channel.RecvError;
 public mount .channel.TryRecvError;
 
 // From executor
-public mount .executor.Runtime;
+public mount .executor.AsyncRuntime;
 public mount .executor.block_on;
 
 // From select

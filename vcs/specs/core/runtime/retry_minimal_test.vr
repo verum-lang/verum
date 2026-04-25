@@ -2,12 +2,12 @@
 // @level: L1
 // @tier: 0
 // @tags: runtime, retry, minimal
-// @description: Minimal test to isolate RetryConfig phantom type parameter
+// @description: Minimal test to isolate RuntimeRetryConfig phantom type parameter
 
 mount core.runtime.recovery.{
     RecoveryBackoffStrategy,
     JitterConfig,
-    RetryConfig,
+    RuntimeRetryConfig,
     RetryPredicate,
 };
 
@@ -31,7 +31,7 @@ fn test_retry_predicate_all() {
 
 @test
 fn test_retry_config() {
-    let config: RetryConfig = RetryConfig {
+    let config: RuntimeRetryConfig = RuntimeRetryConfig {
         max_attempts: 3,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,

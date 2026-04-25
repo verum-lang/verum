@@ -67,9 +67,9 @@ public fn types_compatible(declared: &ColumnType, observed: &ColumnType) -> Bool
     }
 }
 
-public type RowShape is { columns: List<ColumnType> };
+public type VerifyRowShape is { columns: List<ColumnType> };
 
-public fn row_matches_schema(schema: &RowShape, observed: &RowShape) -> Bool {
+public fn row_matches_schema(schema: &VerifyRowShape, observed: &VerifyRowShape) -> Bool {
     if schema.columns.len() != observed.columns.len() { return false; }
     let mut i: Int = 0;
     while i < schema.columns.len() {
@@ -79,7 +79,7 @@ public fn row_matches_schema(schema: &RowShape, observed: &RowShape) -> Bool {
     true
 }
 
-public fn rows_match_schema(schema: &RowShape, rows: &List<RowShape>) -> Bool {
+public fn rows_match_schema(schema: &VerifyRowShape, rows: &List<VerifyRowShape>) -> Bool {
     let mut i: Int = 0;
     while i < rows.len() {
         if !row_matches_schema(schema, &rows[i]) { return false; }
