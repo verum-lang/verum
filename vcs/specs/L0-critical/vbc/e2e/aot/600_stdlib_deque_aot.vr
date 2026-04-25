@@ -1,0 +1,44 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, deque, stdlib, lowering
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Regression for the NewDeque AOT lowering hole. The VBC codegen
+// intercepts `Deque.new()` / `Deque.with_capacity(n)` and emits the
+// NewDeque (0xCD) opcode rather than a function Call — necessary so
+// the Tier-0 interpreter can use its custom heap layout. That intercept
+// left Tier-1 (LLVM AOT) crashing with
+//   "Unimplemented VBC instruction in AOT lowering: NewDeque"
+// because no LLVM lowering existed for the opcode. This test exercises
+// the stdlib Deque<T> path at AOT to lock in the lowering.
+
+mount core.collections.deque.Deque;
+
+fn main() -> Int {
+    let mut d: Deque<Int> = Deque.new();
+    assert(d.is_empty());
+
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_front(0);
+    assert(d.len() == 4);
+
+    let back = d.pop_back();
+    match back {
+        Some(v) => assert(v == 3),
+        None => panic("Expected Some(3)"),
+    }
+
+    let front = d.pop_front();
+    match front {
+        Some(v) => assert(v == 0),
+        None => panic("Expected Some(0)"),
+    }
+
+    assert(d.len() == 2);
+    print("[OK] 600_stdlib_deque_aot");
+    0
+}

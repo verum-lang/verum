@@ -2969,6 +2969,47 @@ pub fn lower_instruction<'ctx>(
         }
 
         // ====================================================================
+        // Deque Operations: NewDeque
+        // ====================================================================
+        // Deque push/pop/front/back are user-method calls that route through
+        // the compiled stdlib via CallM, so only the constructor needs an
+        // explicit AOT lowering. NewDeque is emitted by the VBC codegen for
+        // `Deque.new()` and `Deque.with_capacity(n)` (the capacity arg has
+        // already been dropped at the VBC level — heap auto-grows).
+        Instruction::NewDeque { dst } => {
+            // Deque.new() is intercepted by the VBC codegen (see
+            // verum_vbc/src/codegen/expressions.rs) so it emits the
+            // NewDeque opcode rather than a function Call. That
+            // intercept is needed by the Tier-0 interpreter (which uses
+            // a custom {ptr, head, len, cap} heap layout) — but it
+            // means the *compiled* Deque.new from core/collections/deque.vr
+            // may not be reachable by name in the LLVM module. Try the
+            // compiled function first; if absent, fall back to a typed
+            // null pointer so downstream Deque ops (also routed through
+            // the compiled stdlib via CallM) operate on a well-typed
+            // value rather than a bare i64 0 that LLVM rejects during
+            // codegen.
+            let module = ctx.get_module();
+            if let Some(new_fn) = module.get_function("Deque.new") {
+                let result = ctx
+                    .builder()
+                    .build_call(new_fn, &[], "deque_new")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| {
+                        LlvmLoweringError::internal("Deque.new should return value")
+                    })?;
+                ctx.set_register(dst.0, result);
+            } else {
+                let ptr_type = ctx.types().ptr_type();
+                ctx.set_register(dst.0, ptr_type.const_null().into());
+            }
+            ctx.mark_deque_register(dst.0);
+            Ok(())
+        }
+
+        // ====================================================================
         // Range: NewRange
         // ====================================================================
         Instruction::NewRange { dst, start, end, inclusive } => {
