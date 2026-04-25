@@ -2938,10 +2938,46 @@ impl VbcCodegen {
         // Use resolved_name for error messages below
         let _ = resolved_name;
 
-        // Check if this is a variant constructor — emit MakeVariant + SetVariantData
+        // Check if this is a variant constructor — emit MakeVariant + SetVariantData.
+        //
+        // Disambiguation: if the resolved `func_info` is a variant whose
+        // parent type does not match the surrounding return-type/scrutinee
+        // context (e.g., we're in `fn new_v4() -> SocketAddr` but the
+        // simple-name lookup returned `IpAddr.V4` because IpAddr was
+        // registered first), redirect to the suffix-and-args lookup that
+        // honours `current_return_type_name`. Without this redirect, two
+        // types declaring the same variant simple name in the same module
+        // produce a layout-mismatched payload at runtime — symptom
+        // class #76. Mirrors the same fix in compile_variant_constructor.
         if let Some(tag) = func_info.variant_tag {
+            let context_type: Option<String> = self.ctx.current_return_type_name
+                .as_ref()
+                .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
+                .or_else(|| {
+                    self.ctx.match_scrutinee_type
+                        .as_ref()
+                        .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
+                });
+            let parent_matches = match (&context_type, func_info.parent_type_name.as_deref()) {
+                (Some(ctx), Some(parent)) => ctx == parent,
+                (None, _) => true,
+                (Some(_), None) => false,
+            };
+            let final_tag = if parent_matches {
+                tag
+            } else {
+                // Try to redirect via the suffix-and-args lookup; if it
+                // resolves to a different variant whose parent matches the
+                // context, use that one.
+                let simple_name = func_name.rsplit("::").next()
+                    .or_else(|| func_name.rsplit('.').next())
+                    .unwrap_or(&func_name);
+                self.ctx
+                    .find_variant_by_suffix_and_args(simple_name, args.len())
+                    .unwrap_or(tag)
+            };
             let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
+            self.ctx.emit(Instruction::MakeVariant { dst: result, tag: final_tag, field_count: args.len() as u32 });
             for (i, arg) in args.iter().enumerate() {
                 let arg_val = self
                     .compile_expr(arg)?
@@ -4388,13 +4424,44 @@ impl VbcCodegen {
 
         // Look up the variant tag from the registered FunctionInfo.
         // Tags are assigned as declaration-order indices when the type is registered.
-        let tag = self.ctx.lookup_function(name)
-            .and_then(|info| info.variant_tag)
+        //
+        // Disambiguation rule: when the simple lookup hits a variant whose
+        // parent type does NOT match the surrounding return-type / scrutinee
+        // context, prefer the qualified-suffix lookup (which uses
+        // `current_return_type_name` to pick the correct parent). Without
+        // this, two types declaring the same variant name in the same module
+        // (e.g. `IpAddr.V4` and `SocketAddr.V4` in core/net/addr.vr) can
+        // collapse the simple name onto whichever was registered first, and
+        // the wrong constructor's tag flows through to MakeVariant —
+        // producing a layout-mismatched payload at runtime. Tracked as #76.
+        let context_type: Option<String> = self.ctx.current_return_type_name
+            .as_ref()
+            .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
             .or_else(|| {
-                // Simple name not found (likely in collision set).
-                // Try to disambiguate using argument count: find a qualified
-                // variant "TypeName.VariantName" whose param_count matches.
-                self.ctx.find_variant_by_suffix_and_args(name, args.len())
+                self.ctx.match_scrutinee_type
+                    .as_ref()
+                    .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
+            });
+        let direct_tag = self.ctx.lookup_function(name).and_then(|info| {
+            // Only accept the direct hit when we lack a context type or
+            // when the parent matches it; otherwise fall through to the
+            // suffix-and-args lookup which uses the disambiguation table.
+            let parent_ok = match (&context_type, info.parent_type_name.as_deref()) {
+                (Some(ctx), Some(parent)) => ctx == parent,
+                // No context type — accept whatever lookup returned.
+                (None, _) => true,
+                // Have context type but variant has no parent registered — be conservative and reject.
+                (Some(_), None) => false,
+            };
+            if parent_ok { info.variant_tag } else { None }
+        });
+        let tag = direct_tag
+            .or_else(|| self.ctx.find_variant_by_suffix_and_args(name, args.len()))
+            .or_else(|| {
+                // Last-resort: re-try the direct lookup ignoring parent
+                // matching, in case the disambiguation rejected it
+                // because the context type wasn't actually populated.
+                self.ctx.lookup_function(name).and_then(|info| info.variant_tag)
             })
             .unwrap_or_else(|| {
                 // Final fallback for variants we still cannot resolve — most
