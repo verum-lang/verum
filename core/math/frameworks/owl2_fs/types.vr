@@ -301,4 +301,122 @@ public type Interpretation is protocol {
     fn datatype_restriction<R: DataRange>(
         self, result: R, base: R, facet: Text, value: Literal,
     ) -> Bool;
+
+    // ─── Class-expression constructor predicates (§3.2) ──────────
+
+    /// W3C §3.2 ObjectIntersectionOf (binary core):
+    /// ⟦…⟧^I = ⟦CE₁⟧^I ∩ ⟦CE₂⟧^I.
+    fn class_intersection<C: ClassExpression>(
+        self, result: C, a: C, b: C,
+    ) -> Bool;
+
+    /// W3C §3.2 ObjectUnionOf (binary core).
+    fn class_union<C: ClassExpression>(
+        self, result: C, a: C, b: C,
+    ) -> Bool;
+
+    /// W3C §3.2 ObjectComplementOf:
+    /// ⟦…⟧^I = ΔᴵO ∖ ⟦CE⟧^I.
+    fn class_complement<C: ClassExpression>(
+        self, result: C, base: C,
+    ) -> Bool;
+
+    /// W3C §3.2 ObjectOneOf (singleton core):
+    /// ⟦…⟧^I = { a^I }. n-ary at helper.
+    fn class_one_of<C: ClassExpression>(
+        self, result: C, a: Individual,
+    ) -> Bool;
+
+    // ─── Object-property class-expression restrictions (§3.3) ────
+
+    /// W3C §3.3 ObjectSomeValuesFrom: ⟦…⟧^I =
+    /// { x : ∃y. (x,y) ∈ ⟦OPE⟧^I ∧ y ∈ ⟦CE⟧^I }.
+    fn class_object_some_values_from<C: ClassExpression, P: ObjectPropertyExpression>(
+        self, result: C, ope: P, filler: C,
+    ) -> Bool;
+
+    /// W3C §3.3 ObjectAllValuesFrom: ⟦…⟧^I =
+    /// { x : ∀y. (x,y) ∈ ⟦OPE⟧^I → y ∈ ⟦CE⟧^I }.
+    fn class_object_all_values_from<C: ClassExpression, P: ObjectPropertyExpression>(
+        self, result: C, ope: P, filler: C,
+    ) -> Bool;
+
+    /// W3C §3.3 ObjectHasValue: ⟦…⟧^I = { x : (x, a^I) ∈ ⟦OPE⟧^I }.
+    fn class_object_has_value<C: ClassExpression, P: ObjectPropertyExpression>(
+        self, result: C, ope: P, a: Individual,
+    ) -> Bool;
+
+    /// W3C §3.3 ObjectHasSelf: ⟦…⟧^I = { x : (x, x) ∈ ⟦OPE⟧^I }.
+    fn class_object_has_self<C: ClassExpression, P: ObjectPropertyExpression>(
+        self, result: C, ope: P,
+    ) -> Bool;
+
+    /// W3C §3.3 ObjectMinCardinality(n, OPE): ⟦…⟧^I =
+    /// { x : #{y : (x,y) ∈ ⟦OPE⟧^I} ≥ n }.
+    fn class_object_min_cardinality<C: ClassExpression, P: ObjectPropertyExpression>(
+        self, result: C, n: Int, ope: P,
+    ) -> Bool;
+
+    /// W3C §3.3 ObjectMaxCardinality(n, OPE): #{…} ≤ n.
+    fn class_object_max_cardinality<C: ClassExpression, P: ObjectPropertyExpression>(
+        self, result: C, n: Int, ope: P,
+    ) -> Bool;
+
+    /// W3C §3.3 ObjectExactCardinality(n, OPE): #{…} = n.
+    fn class_object_exact_cardinality<C: ClassExpression, P: ObjectPropertyExpression>(
+        self, result: C, n: Int, ope: P,
+    ) -> Bool;
+
+    /// W3C §3.3 ObjectQualifiedExactCardinality(n, OPE, CE):
+    /// #{y : (x,y) ∈ ⟦OPE⟧^I ∧ y ∈ ⟦CE⟧^I} = n.
+    fn class_object_qualified_exact_cardinality<C: ClassExpression, P: ObjectPropertyExpression>(
+        self, result: C, n: Int, ope: P, filler: C,
+    ) -> Bool;
+
+    // ─── Data-property class-expression restrictions (§3.3) ──────
+
+    /// W3C §3.3 DataSomeValuesFrom: ⟦…⟧^I =
+    /// { x : ∃lt. (x,lt) ∈ ⟦DPE⟧^I ∧ lt ∈ ⟦DR⟧^I }.
+    fn class_data_some_values_from<C: ClassExpression, D: DataPropertyExpression, R: DataRange>(
+        self, result: C, dpe: D, filler: R,
+    ) -> Bool;
+
+    /// W3C §3.3 DataAllValuesFrom: ⟦…⟧^I =
+    /// { x : ∀lt. (x,lt) ∈ ⟦DPE⟧^I → lt ∈ ⟦DR⟧^I }.
+    fn class_data_all_values_from<C: ClassExpression, D: DataPropertyExpression, R: DataRange>(
+        self, result: C, dpe: D, filler: R,
+    ) -> Bool;
+
+    /// W3C §3.3 DataHasValue: ⟦…⟧^I = { x : (x, lt^I) ∈ ⟦DPE⟧^I }.
+    fn class_data_has_value<C: ClassExpression, D: DataPropertyExpression>(
+        self, result: C, dpe: D, lt: Literal,
+    ) -> Bool;
+
+    /// W3C §3.3 DataMinCardinality / DataMaxCardinality /
+    /// DataExactCardinality / DataQualified*: counting predicates over
+    /// DPE-values per individual under I. V2 ships them as separate
+    /// predicates so SMT dispatch can pick the most specific encoding.
+    fn class_data_min_cardinality<C: ClassExpression, D: DataPropertyExpression>(
+        self, result: C, n: Int, dpe: D,
+    ) -> Bool;
+
+    fn class_data_max_cardinality<C: ClassExpression, D: DataPropertyExpression>(
+        self, result: C, n: Int, dpe: D,
+    ) -> Bool;
+
+    fn class_data_exact_cardinality<C: ClassExpression, D: DataPropertyExpression>(
+        self, result: C, n: Int, dpe: D,
+    ) -> Bool;
+
+    fn class_data_qualified_min_cardinality<C: ClassExpression, D: DataPropertyExpression, R: DataRange>(
+        self, result: C, n: Int, dpe: D, filler: R,
+    ) -> Bool;
+
+    fn class_data_qualified_max_cardinality<C: ClassExpression, D: DataPropertyExpression, R: DataRange>(
+        self, result: C, n: Int, dpe: D, filler: R,
+    ) -> Bool;
+
+    fn class_data_qualified_exact_cardinality<C: ClassExpression, D: DataPropertyExpression, R: DataRange>(
+        self, result: C, n: Int, dpe: D, filler: R,
+    ) -> Bool;
 };
