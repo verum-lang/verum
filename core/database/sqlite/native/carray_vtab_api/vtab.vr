@@ -1,0 +1,100 @@
+// carray() vtab — element-type taxonomy + filter argv shape.
+
+module core.database.sqlite.native.carray_vtab_api.vtab;
+
+mount base.{Bool, Int64, Text};
+
+// Element types accepted by carray().
+public type ElemType is
+    | EtInt32
+    | EtInt64
+    | EtDouble
+    | EtText           // C "char*"
+    ;
+
+public fn type_string(t: &ElemType) -> Text {
+    match t {
+        EtInt32  => "int32".clone(),
+        EtInt64  => "int64".clone(),
+        EtDouble => "double".clone(),
+        EtText   => "char*".clone(),
+    }
+}
+
+public fn from_type_string(s: Text) -> ElemType {
+    if s == "int32".clone()  { return EtInt32; }
+    if s == "int64".clone()  { return EtInt64; }
+    if s == "double".clone() { return EtDouble; }
+    EtText
+}
+
+// Bytes per element on a typical 64-bit host.
+public fn bytes_per_element(t: &ElemType) -> Int {
+    match t {
+        EtInt32  => 4,
+        EtInt64  => 8,
+        EtDouble => 8,
+        EtText   => 8,    // pointer width
+    }
+}
+
+// Validation of carray() args at xFilter time.
+public type FilterCheck is
+    | FcOk
+    | FcNullPointer            // P was unbound or sqlite3_value_pointer mismatched
+    | FcNegativeLength         // N < 0
+    | FcUnknownType            // T not in the well-known set
+    ;
+
+public fn check_filter(p_present: Bool, n: Int64, type_str: Text) -> FilterCheck {
+    if !p_present { return FcNullPointer; }
+    if n < (0 as Int64) { return FcNegativeLength; }
+    if type_str != "int32".clone()
+        && type_str != "int64".clone()
+        && type_str != "double".clone()
+        && type_str != "char*".clone() {
+        return FcUnknownType;
+    }
+    FcOk
+}
+
+public fn check_name(c: &FilterCheck) -> Text {
+    match c {
+        FcOk              => "ok".clone(),
+        FcNullPointer     => "null_pointer".clone(),
+        FcNegativeLength  => "negative_length".clone(),
+        FcUnknownType     => "unknown_type".clone(),
+    }
+}
+
+public fn is_ok(c: &FilterCheck) -> Bool {
+    match c { FcOk => true, _ => false }
+}
+
+// Required type-tag string for sqlite3_value_pointer().
+public fn pointer_tag() -> Text { "carray".clone() }
+
+// Column index taxonomy — the three vtab columns.
+public type Column is
+    | ColValue
+    | ColRowid
+    | ColPointer
+    ;
+
+public fn column_name(c: &Column) -> Text {
+    match c {
+        ColValue   => "value".clone(),
+        ColRowid   => "rowid".clone(),
+        ColPointer => "pointer".clone(),
+    }
+}
+
+public fn column_index(c: &Column) -> Int {
+    match c {
+        ColValue   => 0,
+        ColRowid   => 1,
+        ColPointer => 2,
+    }
+}
+
+public fn well_known_column_count() -> Int { 3 }

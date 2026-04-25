@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, json_tree_vtab_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.json_tree_vtab_api.walker.{
+    Variant, VtJsonEach, VtJsonTree, variant_name, is_recursive,
+    well_known_column_count, column_name,
+    JsonType, JtNull, JtTrue, JtFalse, JtInteger, JtReal, JtText, JtArray, JtObject,
+    json_type_text, well_known_type_count, has_children, has_atom,
+    WalkMode, WmTopOnly, WmDepthFirst,
+    walk_mode_for, walk_mode_name, estimate_rows,
+};
+mount base.{Bool, Int64};
+
+fn test_variant_classification() {
+    assert(variant_name(&VtJsonEach) == "json_each".clone());
+    assert(variant_name(&VtJsonTree) == "json_tree".clone());
+    assert(!is_recursive(&VtJsonEach));
+    assert(is_recursive(&VtJsonTree));
+}
+
+fn test_columns() {
+    assert_eq(well_known_column_count(), 8);
+    assert(column_name(0) == "key".clone());
+    assert(column_name(1) == "value".clone());
+    assert(column_name(2) == "type".clone());
+    assert(column_name(3) == "atom".clone());
+    assert(column_name(4) == "id".clone());
+    assert(column_name(5) == "parent".clone());
+    assert(column_name(6) == "fullkey".clone());
+    assert(column_name(7) == "path".clone());
+    assert(column_name(99) == "".clone());
+}
+
+fn test_json_type_texts() {
+    assert(json_type_text(&JtNull)    == "null".clone());
+    assert(json_type_text(&JtTrue)    == "true".clone());
+    assert(json_type_text(&JtFalse)   == "false".clone());
+    assert(json_type_text(&JtInteger) == "integer".clone());
+    assert(json_type_text(&JtReal)    == "real".clone());
+    assert(json_type_text(&JtText)    == "text".clone());
+    assert(json_type_text(&JtArray)   == "array".clone());
+    assert(json_type_text(&JtObject)  == "object".clone());
+}
+
+fn test_well_known_type_count() {
+    assert_eq(well_known_type_count(), 8);
+}
+
+fn test_has_children() {
+    assert(has_children(&JtArray));
+    assert(has_children(&JtObject));
+    assert(!has_children(&JtNull));
+    assert(!has_children(&JtInteger));
+    assert(!has_children(&JtText));
+}
+
+fn test_has_atom() {
+    assert(has_atom(&JtNull));
+    assert(has_atom(&JtInteger));
+    assert(has_atom(&JtText));
+    assert(!has_atom(&JtArray));
+    assert(!has_atom(&JtObject));
+}
+
+fn test_walk_mode_dispatch() {
+    match walk_mode_for(&VtJsonEach) { WmTopOnly    => {}, _ => assert(false) }
+    match walk_mode_for(&VtJsonTree) { WmDepthFirst => {}, _ => assert(false) }
+    assert(walk_mode_name(&WmTopOnly)    == "top_only".clone());
+    assert(walk_mode_name(&WmDepthFirst) == "depth_first".clone());
+}
+
+fn test_estimate_rows() {
+    assert_eq(estimate_rows(&VtJsonEach, 5 as Int64, 50 as Int64), 5 as Int64);
+    assert_eq(estimate_rows(&VtJsonTree, 5 as Int64, 50 as Int64), 50 as Int64);
+}
+
+fn main() {
+    test_variant_classification();
+    test_columns();
+    test_json_type_texts();
+    test_well_known_type_count();
+    test_has_children();
+    test_has_atom();
+    test_walk_mode_dispatch();
+    test_estimate_rows();
+}

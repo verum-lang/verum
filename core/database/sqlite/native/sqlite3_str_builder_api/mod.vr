@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/sqlite3_str_builder_api/mod.vr
+// =============================================================================
+// sqlite3_str — opaque dynamic-text-builder.  API:
+//   sqlite3_str_new(db)            — allocate
+//   sqlite3_str_appendf(s, fmt, ...) — printf into the buffer
+//   sqlite3_str_append(s, z, n)    — append n bytes
+//   sqlite3_str_appendchar(s, n, c)
+//   sqlite3_str_value(s)           — read current text (still owned)
+//   sqlite3_str_length(s)          — current byte length
+//   sqlite3_str_finish(s)          — return malloced text + free builder
+//   sqlite3_str_errcode(s)         — TOOBIG / NOMEM detection
+//   sqlite3_str_reset(s)           — clear contents but keep allocation
+// Spec App E.S.
+// =============================================================================
+
+module core.database.sqlite.native.sqlite3_str_builder_api;
+
+public module builder;

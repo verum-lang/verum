@@ -1,0 +1,106 @@
+// json_tree() / json_each() vtab — depth-first walker shape.
+
+module core.database.sqlite.native.json_tree_vtab_api.walker;
+
+mount base.{Bool, Int64, Text};
+
+public type Variant is
+    | VtJsonEach     // top-level only
+    | VtJsonTree     // depth-first recursive
+    ;
+
+public fn variant_name(v: &Variant) -> Text {
+    match v {
+        VtJsonEach => "json_each".clone(),
+        VtJsonTree => "json_tree".clone(),
+    }
+}
+
+public fn is_recursive(v: &Variant) -> Bool {
+    match v { VtJsonTree => true, _ => false }
+}
+
+// Per-row column shape — both vtabs expose the same 8 columns.
+public fn well_known_column_count() -> Int { 8 }
+
+public fn column_name(idx: Int) -> Text {
+    if idx == 0 { return "key".clone(); }
+    if idx == 1 { return "value".clone(); }
+    if idx == 2 { return "type".clone(); }
+    if idx == 3 { return "atom".clone(); }
+    if idx == 4 { return "id".clone(); }
+    if idx == 5 { return "parent".clone(); }
+    if idx == 6 { return "fullkey".clone(); }
+    if idx == 7 { return "path".clone(); }
+    "".clone()
+}
+
+// JSON value type — emitted in the `type` column.
+public type JsonType is
+    | JtNull
+    | JtTrue
+    | JtFalse
+    | JtInteger
+    | JtReal
+    | JtText
+    | JtArray
+    | JtObject
+    ;
+
+public fn json_type_text(t: &JsonType) -> Text {
+    match t {
+        JtNull    => "null".clone(),
+        JtTrue    => "true".clone(),
+        JtFalse   => "false".clone(),
+        JtInteger => "integer".clone(),
+        JtReal    => "real".clone(),
+        JtText    => "text".clone(),
+        JtArray   => "array".clone(),
+        JtObject  => "object".clone(),
+    }
+}
+
+public fn well_known_type_count() -> Int { 8 }
+
+// Whether the type yields child rows in json_tree's recursion.
+public fn has_children(t: &JsonType) -> Bool {
+    match t { JtArray => true, JtObject => true, _ => false }
+}
+
+// Whether the type's atomic-value column is non-NULL.
+public fn has_atom(t: &JsonType) -> Bool {
+    match t {
+        JtArray  => false,
+        JtObject => false,
+        _ => true,
+    }
+}
+
+// Walk-mode classifier.
+public type WalkMode is
+    | WmTopOnly
+    | WmDepthFirst
+    ;
+
+public fn walk_mode_for(v: &Variant) -> WalkMode {
+    match v {
+        VtJsonEach => WmTopOnly,
+        VtJsonTree => WmDepthFirst,
+    }
+}
+
+public fn walk_mode_name(w: &WalkMode) -> Text {
+    match w {
+        WmTopOnly    => "top_only".clone(),
+        WmDepthFirst => "depth_first".clone(),
+    }
+}
+
+// Estimated row count for cardinality hints.  TopOnly returns at most
+// `direct_children`; DepthFirst returns total node count.
+public fn estimate_rows(v: &Variant, direct_children: Int64, total_nodes: Int64) -> Int64 {
+    match v {
+        VtJsonEach => direct_children,
+        VtJsonTree => total_nodes,
+    }
+}

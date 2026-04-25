@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/json_group_object_fn/mod.vr
+// =============================================================================
+// json_group_object(NAME, VALUE) — aggregate that builds {name: value, ...}
+// JSON object.  Duplicate keys are kept (last-write-wins semantics in JSON
+// readers, though the literal text is emitted in step order).  NULL keys
+// are rejected with SQLITE_ERROR; NULL values become JSON null.
+// Spec §15.5 (json1).
+// =============================================================================
+
+module core.database.sqlite.native.json_group_object_fn;
+
+public module agg;

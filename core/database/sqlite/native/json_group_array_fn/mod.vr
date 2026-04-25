@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/json_group_array_fn/mod.vr
+// =============================================================================
+// json_group_array(X) — aggregate that collects each input row into a JSON
+// array.  Built-in subtype = 'J' on the result so consumers know the TEXT
+// is JSON.  Spec §15.5 (json1).
+// =============================================================================
+
+module core.database.sqlite.native.json_group_array_fn;
+
+public module agg;

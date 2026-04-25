@@ -892,3 +892,19 @@ public module vtab_in_first_next_api;
 public module system_errno_api;
 // - result_subtype_api: 3.9+ value-subtype byte + json/jsonb tags + AnNoChange (3.45+)
 public module result_subtype_api;
+// - carray_vtab_api: carray() table-valued fn + ElemType (int32/64/double/text)
+public module carray_vtab_api;
+// - generate_series_vtab: generate_series() vtab + Direction + zero-step rejected
+public module generate_series_vtab;
+// - json_group_array_fn: json_group_array aggregate (NULL preserved + BLOB→err)
+public module json_group_array_fn;
+// - json_group_object_fn: json_group_object (NULL key→err + BLOB value→err)
+public module json_group_object_fn;
+// - json_tree_vtab_api: json_tree/json_each (8 cols + 8 JsonType + recursive walk)
+public module json_tree_vtab_api;
+// - sqlite3_str_builder_api: dynamic Text builder (TOOBIG=18 + cap + Finish)
+public module sqlite3_str_builder_api;
+// - open_v2_flags_api: SQLITE_OPEN_* 11-bit field + AccessMode + MutexMode + CacheMode
+public module open_v2_flags_api;
+// - set_authorizer_codes: 33-action codes + Verdict (Allow/Deny/Ignore) + 7-cat
+public module set_authorizer_codes;

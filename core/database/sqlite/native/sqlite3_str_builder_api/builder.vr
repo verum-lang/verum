@@ -1,0 +1,98 @@
+// sqlite3_str builder — append + finish lifecycle.
+
+module core.database.sqlite.native.sqlite3_str_builder_api.builder;
+
+mount base.{Bool, Int64, Text};
+
+// Hard cap (SQLITE_MAX_LENGTH) — bytes the builder will accept before TOOBIG.
+public fn default_max_length() -> Int { 1_000_000_000 }
+
+public type Builder is {
+    contents: Text,
+    err: Int,            // 0=ok, SQLITE_TOOBIG=18, SQLITE_NOMEM=7
+    max_bytes: Int,
+};
+
+public fn new_with_default_cap() -> Builder {
+    Builder {
+        contents: Text.new(),
+        err: 0,
+        max_bytes: default_max_length(),
+    }
+}
+
+public fn new_with_cap(max: Int) -> Builder {
+    let mut m = max;
+    if m < 0 { m = 0; }
+    Builder { contents: Text.new(), err: 0, max_bytes: m }
+}
+
+public fn errcode(b: &Builder) -> Int { b.err }
+
+public fn length(b: &Builder) -> Int {
+    let bs = b.contents.as_bytes();
+    bs.len()
+}
+
+public fn is_ok(b: &Builder) -> Bool { b.err == 0 }
+
+public fn toobig_code() -> Int { 18 }
+public fn nomem_code() -> Int  { 7 }
+
+// Append n raw bytes (modeled here as a Text snippet).
+public fn append(mut b: Builder, snippet: Text) -> Builder {
+    if b.err != 0 { return b; }
+    let cur_len = length(&b);
+    let snip_bytes = snippet.as_bytes();
+    let snip_len = snip_bytes.len();
+    if cur_len + snip_len > b.max_bytes {
+        b.err = toobig_code();
+        return b;
+    }
+    b.contents = b.contents.append(snippet);
+    b
+}
+
+// Append a single byte n times.
+public fn append_char(mut b: Builder, n: Int, c: Int) -> Builder {
+    if b.err != 0 { return b; }
+    let mut i = 0;
+    while i < n {
+        if length(&b) >= b.max_bytes {
+            b.err = toobig_code();
+            return b;
+        }
+        b.contents = b.contents.append_byte(c & 0xFF);
+        i = i + 1;
+    }
+    b
+}
+
+// Reset clears contents but leaves cap and clears error.
+public fn reset(mut b: Builder) -> Builder {
+    b.contents = Text.new();
+    b.err = 0;
+    b
+}
+
+// Outcome of finish().
+public type Finish is
+    | FOk(Text)
+    | FErr(Int)        // SQLITE_TOOBIG or SQLITE_NOMEM
+    ;
+
+public fn finish(b: &Builder) -> Finish {
+    if b.err != 0 { return FErr(b.err); }
+    FOk(b.contents.clone())
+}
+
+public fn finish_kind(f: &Finish) -> Text {
+    match f {
+        FOk(_)  => "ok".clone(),
+        FErr(_) => "err".clone(),
+    }
+}
+
+public fn finished_ok(f: &Finish) -> Bool {
+    match f { FOk(_) => true, _ => false }
+}

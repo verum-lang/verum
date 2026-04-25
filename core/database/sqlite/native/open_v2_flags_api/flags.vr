@@ -1,0 +1,135 @@
+// SQLITE_OPEN_* flag bits.
+
+module core.database.sqlite.native.open_v2_flags_api.flags;
+
+mount base.{Bool, Int64, Text};
+
+public fn f_readonly()      -> Int64 { 0x00000001 as Int64 }
+public fn f_readwrite()     -> Int64 { 0x00000002 as Int64 }
+public fn f_create()        -> Int64 { 0x00000004 as Int64 }
+public fn f_uri()           -> Int64 { 0x00000040 as Int64 }
+public fn f_memory()        -> Int64 { 0x00000080 as Int64 }
+public fn f_nomutex()       -> Int64 { 0x00008000 as Int64 }
+public fn f_fullmutex()     -> Int64 { 0x00010000 as Int64 }
+public fn f_sharedcache()   -> Int64 { 0x00020000 as Int64 }
+public fn f_privatecache()  -> Int64 { 0x00040000 as Int64 }
+public fn f_nofollow()      -> Int64 { 0x01000000 as Int64 }
+public fn f_exrescode()     -> Int64 { 0x02000000 as Int64 }
+
+public fn well_known_bit_count() -> Int { 11 }
+
+public fn well_known_mask() -> Int64 {
+    f_readonly()
+        | f_readwrite()
+        | f_create()
+        | f_uri()
+        | f_memory()
+        | f_nomutex()
+        | f_fullmutex()
+        | f_sharedcache()
+        | f_privatecache()
+        | f_nofollow()
+        | f_exrescode()
+}
+
+public fn is_set(fl: Int64, bit: Int64) -> Bool {
+    (fl & bit) != (0 as Int64)
+}
+
+public fn set(fl: Int64, bit: Int64) -> Int64 { fl | bit }
+public fn clear(fl: Int64, bit: Int64) -> Int64 { fl & !bit }
+
+public fn is_known_only(fl: Int64) -> Bool {
+    (fl & !well_known_mask()) == (0 as Int64)
+}
+
+// Read/Write/Create resolution.  Engine treats CREATE as no-op without RW.
+public type AccessMode is
+    | AmReadOnly
+    | AmReadWrite
+    | AmReadWriteCreate
+    ;
+
+public fn access_for(fl: Int64) -> AccessMode {
+    if is_set(fl, f_readwrite()) {
+        if is_set(fl, f_create()) { return AmReadWriteCreate; }
+        return AmReadWrite;
+    }
+    AmReadOnly
+}
+
+public fn access_name(a: &AccessMode) -> Text {
+    match a {
+        AmReadOnly         => "readonly".clone(),
+        AmReadWrite        => "readwrite".clone(),
+        AmReadWriteCreate  => "readwrite_create".clone(),
+    }
+}
+
+// Mutex policy.
+public type MutexMode is
+    | MxDefault         // global config
+    | MxNone            // SQLITE_OPEN_NOMUTEX
+    | MxFull            // SQLITE_OPEN_FULLMUTEX
+    | MxConflict        // both bits set — invalid
+    ;
+
+public fn mutex_for(fl: Int64) -> MutexMode {
+    let no = is_set(fl, f_nomutex());
+    let fu = is_set(fl, f_fullmutex());
+    if no && fu { return MxConflict; }
+    if no { return MxNone; }
+    if fu { return MxFull; }
+    MxDefault
+}
+
+public fn mutex_name(m: &MutexMode) -> Text {
+    match m {
+        MxDefault  => "default".clone(),
+        MxNone     => "none".clone(),
+        MxFull     => "full".clone(),
+        MxConflict => "conflict".clone(),
+    }
+}
+
+// Cache mode.
+public type CacheMode is
+    | CmDefault
+    | CmShared
+    | CmPrivate
+    | CmConflict
+    ;
+
+public fn cache_for(fl: Int64) -> CacheMode {
+    let sh = is_set(fl, f_sharedcache());
+    let pr = is_set(fl, f_privatecache());
+    if sh && pr { return CmConflict; }
+    if sh { return CmShared; }
+    if pr { return CmPrivate; }
+    CmDefault
+}
+
+public fn cache_name(c: &CacheMode) -> Text {
+    match c {
+        CmDefault  => "default".clone(),
+        CmShared   => "shared".clone(),
+        CmPrivate  => "private".clone(),
+        CmConflict => "conflict".clone(),
+    }
+}
+
+// Bit-name lookup for diagnostics.
+public fn bit_name(bit: Int64) -> Text {
+    if bit == f_readonly()      { return "READONLY".clone(); }
+    if bit == f_readwrite()     { return "READWRITE".clone(); }
+    if bit == f_create()        { return "CREATE".clone(); }
+    if bit == f_uri()           { return "URI".clone(); }
+    if bit == f_memory()        { return "MEMORY".clone(); }
+    if bit == f_nomutex()       { return "NOMUTEX".clone(); }
+    if bit == f_fullmutex()     { return "FULLMUTEX".clone(); }
+    if bit == f_sharedcache()   { return "SHAREDCACHE".clone(); }
+    if bit == f_privatecache()  { return "PRIVATECACHE".clone(); }
+    if bit == f_nofollow()      { return "NOFOLLOW".clone(); }
+    if bit == f_exrescode()     { return "EXRESCODE".clone(); }
+    "UNKNOWN".clone()
+}

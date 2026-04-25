@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/json_tree_vtab_api/mod.vr
+// =============================================================================
+// json_tree(JSON, [PATH]) — recursive walker.  Yields one row per node in
+// the JSON document, with depth-first traversal order.  json_each() is the
+// non-recursive variant (top-level only).  Spec §15.5 (json1).
+// =============================================================================
+
+module core.database.sqlite.native.json_tree_vtab_api;
+
+public module walker;

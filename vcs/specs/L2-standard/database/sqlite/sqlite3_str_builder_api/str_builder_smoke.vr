@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, sqlite3_str_builder_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.sqlite3_str_builder_api.builder.{
+    Builder, default_max_length, new_with_default_cap, new_with_cap,
+    errcode, length, is_ok, toobig_code, nomem_code,
+    append, append_char, reset,
+    Finish, FOk, FErr, finish, finish_kind, finished_ok,
+};
+mount base.{Bool};
+
+fn test_default_cap() {
+    assert_eq(default_max_length(), 1_000_000_000);
+    let b = new_with_default_cap();
+    assert(is_ok(&b));
+    assert_eq(length(&b), 0);
+    assert_eq(errcode(&b), 0);
+}
+
+fn test_error_code_constants() {
+    assert_eq(toobig_code(), 18);
+    assert_eq(nomem_code(),  7);
+}
+
+fn test_new_with_cap_clamps_negative() {
+    let b = new_with_cap(-1);
+    assert_eq(b.max_bytes, 0);
+}
+
+fn test_append_grows_length() {
+    let mut b = new_with_default_cap();
+    b = append(b, "hello".clone());
+    assert_eq(length(&b), 5);
+    b = append(b, " world".clone());
+    assert_eq(length(&b), 11);
+    assert(is_ok(&b));
+}
+
+fn test_append_over_cap_marks_toobig() {
+    let mut b = new_with_cap(5);
+    b = append(b, "abcde".clone());
+    assert(is_ok(&b));
+    b = append(b, "f".clone());
+    assert_eq(errcode(&b), toobig_code());
+    assert(!is_ok(&b));
+}
+
+fn test_append_after_error_is_noop() {
+    let mut b = new_with_cap(2);
+    b = append(b, "abc".clone());     // toobig
+    let after_err_len = length(&b);
+    b = append(b, "x".clone());
+    assert_eq(length(&b), after_err_len);
+}
+
+fn test_append_char() {
+    let mut b = new_with_default_cap();
+    b = append_char(b, 5, 0x41);     // "AAAAA"
+    assert_eq(length(&b), 5);
+}
+
+fn test_append_char_over_cap_toobig() {
+    let mut b = new_with_cap(3);
+    b = append_char(b, 10, 0x42);
+    assert_eq(errcode(&b), toobig_code());
+}
+
+fn test_reset_clears_state() {
+    let mut b = new_with_cap(3);
+    b = append(b, "hello".clone());      // toobig
+    b = reset(b);
+    assert(is_ok(&b));
+    assert_eq(length(&b), 0);
+}
+
+fn test_finish_ok() {
+    let mut b = new_with_default_cap();
+    b = append(b, "abc".clone());
+    let f = finish(&b);
+    match f {
+        FOk(t) => assert(t == "abc".clone()),
+        _ => assert(false),
+    }
+    assert(finish_kind(&FOk("abc".clone())) == "ok".clone());
+    assert(finished_ok(&FOk("abc".clone())));
+}
+
+fn test_finish_err_after_overflow() {
+    let mut b = new_with_cap(1);
+    b = append(b, "abc".clone());
+    let f = finish(&b);
+    match f {
+        FErr(c) => assert_eq(c, toobig_code()),
+        _ => assert(false),
+    }
+    assert(!finished_ok(&FErr(toobig_code())));
+}
+
+fn main() {
+    test_default_cap();
+    test_error_code_constants();
+    test_new_with_cap_clamps_negative();
+    test_append_grows_length();
+    test_append_over_cap_marks_toobig();
+    test_append_after_error_is_noop();
+    test_append_char();
+    test_append_char_over_cap_toobig();
+    test_reset_clears_state();
+    test_finish_ok();
+    test_finish_err_after_overflow();
+}

@@ -1,0 +1,75 @@
+// json_group_array — aggregate accumulator.
+//
+// Step rules:
+//   * NULL X → JSON null  (json_group_array preserves NULLs unlike GROUP_CONCAT)
+//   * Numeric X → JSON number
+//   * Text X → JSON string (escaping done at finalize)
+//   * BLOB X → engine raises SQLITE_ERROR (json1 doesn't accept blobs)
+
+module core.database.sqlite.native.json_group_array_fn.agg;
+
+mount base.{Bool, Int64, Text};
+
+public type Element is
+    | EJsonNull
+    | EJsonInt(Int64)
+    | EJsonText(Text)
+    | EJsonBlobError       // engine returns SQLITE_ERROR if BLOB encountered
+    ;
+
+public fn from_int(n: Int64) -> Element { EJsonInt(n) }
+public fn from_text(t: Text) -> Element { EJsonText(t) }
+public fn from_null() -> Element { EJsonNull }
+
+public type State is {
+    elements: Int,        // count of accepted elements
+    saw_blob: Bool,       // sticky error flag
+};
+
+public fn empty_state() -> State { State { elements: 0, saw_blob: false } }
+
+public fn step(mut s: State, e: &Element) -> State {
+    match e {
+        EJsonBlobError => { s.saw_blob = true; },
+        _ => { s.elements = s.elements + 1; },
+    }
+    s
+}
+
+public type Result is
+    | RJsonArray(Int)      // element count; engine emits "[v0, v1, ...]"
+    | RJsonError           // SQLITE_ERROR — BLOB encountered
+    ;
+
+public fn finalize(s: &State) -> Result {
+    if s.saw_blob { return RJsonError; }
+    RJsonArray(s.elements)
+}
+
+public fn result_name(r: &Result) -> Text {
+    match r {
+        RJsonArray(_) => "json_array".clone(),
+        RJsonError    => "json_error".clone(),
+    }
+}
+
+public fn is_error(r: &Result) -> Bool {
+    match r { RJsonError => true, _ => false }
+}
+
+public fn element_count(r: &Result) -> Int {
+    match r {
+        RJsonArray(n) => n.clone(),
+        RJsonError    => 0,
+    }
+}
+
+// The result has subtype 'J' (0x4A) — ties into result_subtype_api.
+public fn result_subtype_byte() -> Int { 0x4A }
+
+// Empty result — finalising an empty state yields "[]" (NOT NULL like
+// other aggregates).
+public fn empty_finalize_yields_empty_array() -> Bool { true }
+
+// Aggregate vs. window-function support — json_group_array supports both.
+public fn supports_window_aggregate() -> Bool { true }

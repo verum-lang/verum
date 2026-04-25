@@ -1,0 +1,117 @@
+// sqlite3_set_authorizer action codes + return codes.
+
+module core.database.sqlite.native.set_authorizer_codes.codes;
+
+mount base.{Bool, Text};
+
+// Return codes the callback may produce.
+public fn ok_code()     -> Int { 0 }
+public fn deny_code()   -> Int { 1 }
+public fn ignore_code() -> Int { 2 }
+
+public type Verdict is
+    | VAllow            // SQLITE_OK
+    | VDeny             // SQLITE_DENY
+    | VIgnore           // SQLITE_IGNORE
+    ;
+
+public fn verdict_from_code(n: Int) -> Verdict {
+    if n == 0 { return VAllow; }
+    if n == 1 { return VDeny; }
+    if n == 2 { return VIgnore; }
+    VAllow    // unknown → allow (matches engine fallback)
+}
+
+public fn verdict_to_code(v: &Verdict) -> Int {
+    match v {
+        VAllow  => 0,
+        VDeny   => 1,
+        VIgnore => 2,
+    }
+}
+
+public fn verdict_name(v: &Verdict) -> Text {
+    match v {
+        VAllow  => "ok".clone(),
+        VDeny   => "deny".clone(),
+        VIgnore => "ignore".clone(),
+    }
+}
+
+// Selected action-code constants.  Full set has gaps; we model the common 21
+// + 1 (RECURSIVE=33) for breadth.
+public fn create_index()      -> Int { 1 }
+public fn create_table()      -> Int { 2 }
+public fn create_temp_index() -> Int { 3 }
+public fn create_temp_table() -> Int { 4 }
+public fn create_temp_trigger() -> Int { 5 }
+public fn create_temp_view()  -> Int { 6 }
+public fn create_trigger()    -> Int { 7 }
+public fn create_view()       -> Int { 8 }
+public fn delete_action()     -> Int { 9 }
+public fn drop_index()        -> Int { 10 }
+public fn drop_table()        -> Int { 11 }
+public fn drop_temp_index()   -> Int { 12 }
+public fn drop_temp_table()   -> Int { 13 }
+public fn drop_temp_trigger() -> Int { 14 }
+public fn drop_temp_view()    -> Int { 15 }
+public fn drop_trigger()      -> Int { 16 }
+public fn drop_view()         -> Int { 17 }
+public fn insert()            -> Int { 18 }
+public fn pragma()            -> Int { 19 }
+public fn read()              -> Int { 20 }
+public fn select()            -> Int { 21 }
+public fn transaction()       -> Int { 22 }
+public fn update()            -> Int { 23 }
+public fn attach()            -> Int { 24 }
+public fn detach()            -> Int { 25 }
+public fn alter_table()       -> Int { 26 }
+public fn reindex_action()    -> Int { 27 }
+public fn analyze_action()    -> Int { 28 }
+public fn create_vtable()     -> Int { 29 }
+public fn drop_vtable()       -> Int { 30 }
+public fn function_action()   -> Int { 31 }
+public fn savepoint_action()  -> Int { 32 }
+public fn recursive()         -> Int { 33 }
+
+public fn well_known_action_count() -> Int { 33 }
+
+public fn is_known_action(n: Int) -> Bool {
+    n >= 1 && n <= 33
+}
+
+// Group an action by category.
+public type Category is
+    | CtCreate
+    | CtDrop
+    | CtRead
+    | CtWrite
+    | CtAdmin           // PRAGMA / ATTACH / DETACH / ALTER / REINDEX / ANALYZE / SAVEPOINT / TXN / RECURSIVE
+    | CtFunction
+    | CtUnknown
+    ;
+
+public fn classify(action: Int) -> Category {
+    if action >= 1 && action <= 8 { return CtCreate; }
+    if action >= 10 && action <= 17 { return CtDrop; }
+    if action == 9 || action == 18 || action == 23 { return CtWrite; }
+    if action == 20 || action == 21 { return CtRead; }
+    if action == 19 || action == 22 || action == 24 || action == 25 ||
+       action == 26 || action == 27 || action == 28 || action == 32 ||
+       action == 33 { return CtAdmin; }
+    if action == 29 || action == 30 { return CtCreate; }
+    if action == 31 { return CtFunction; }
+    CtUnknown
+}
+
+public fn category_name(c: &Category) -> Text {
+    match c {
+        CtCreate   => "create".clone(),
+        CtDrop     => "drop".clone(),
+        CtRead     => "read".clone(),
+        CtWrite    => "write".clone(),
+        CtAdmin    => "admin".clone(),
+        CtFunction => "function".clone(),
+        CtUnknown  => "unknown".clone(),
+    }
+}

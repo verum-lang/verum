@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/set_authorizer_codes/mod.vr
+// =============================================================================
+// sqlite3_set_authorizer(db, callback, ud) — install per-stmt action filter.
+// Callback receives an action code + 4 string args; returns SQLITE_OK,
+// SQLITE_DENY, or SQLITE_IGNORE.
+// 27 well-known action codes (CREATE_TABLE = 1 ... RECURSIVE = 33, with gaps).
+// Spec App E.A.
+// =============================================================================
+
+module core.database.sqlite.native.set_authorizer_codes;
+
+public module codes;

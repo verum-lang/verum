@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/generate_series_vtab/mod.vr
+// =============================================================================
+// generate_series(start, stop, step) — bundled table-valued function.
+// Yields rows where value = start, start+step, ..., capped by stop.  start
+// defaults to 0, stop to 9223372036854775806 (Int64::MAX-1), step to 1.
+// Negative step iterates downward.  Spec App E.X.
+// =============================================================================
+
+module core.database.sqlite.native.generate_series_vtab;
+
+public module series;

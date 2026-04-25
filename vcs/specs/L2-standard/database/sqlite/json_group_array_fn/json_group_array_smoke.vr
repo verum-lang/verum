@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, json_group_array_fn, sql-aggregates
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.json_group_array_fn.agg.{
+    Element, EJsonNull, EJsonInt, EJsonText, EJsonBlobError,
+    from_int, from_text, from_null,
+    State, empty_state, step,
+    Result, RJsonArray, RJsonError,
+    finalize, result_name, is_error, element_count,
+    result_subtype_byte, empty_finalize_yields_empty_array,
+    supports_window_aggregate,
+};
+mount base.{Bool, Int64};
+
+fn test_constructors() {
+    match from_int(7 as Int64) { EJsonInt(n) => assert_eq(n, 7 as Int64), _ => assert(false) }
+    match from_text("a".clone()) { EJsonText(_) => {}, _ => assert(false) }
+    match from_null() { EJsonNull => {}, _ => assert(false) }
+}
+
+fn test_empty_finalize_is_empty_array() {
+    let s = empty_state();
+    let r = finalize(&s);
+    match r { RJsonArray(n) => assert_eq(n, 0), _ => assert(false) }
+    assert(empty_finalize_yields_empty_array());
+}
+
+fn test_step_accepts_null_and_text() {
+    let mut s = empty_state();
+    s = step(s, &from_int(1 as Int64));
+    s = step(s, &from_null());
+    s = step(s, &from_text("hello".clone()));
+    let r = finalize(&s);
+    match r { RJsonArray(n) => assert_eq(n, 3), _ => assert(false) }
+}
+
+fn test_blob_marks_error() {
+    let mut s = empty_state();
+    s = step(s, &from_int(1 as Int64));
+    s = step(s, &EJsonBlobError);
+    s = step(s, &from_int(2 as Int64));
+    let r = finalize(&s);
+    match r { RJsonError => {}, _ => assert(false) }
+    assert(is_error(&RJsonError));
+}
+
+fn test_result_names_and_count() {
+    assert(result_name(&RJsonArray(5)) == "json_array".clone());
+    assert(result_name(&RJsonError)    == "json_error".clone());
+    assert_eq(element_count(&RJsonArray(5)), 5);
+    assert_eq(element_count(&RJsonError), 0);
+}
+
+fn test_subtype_byte_is_J() {
+    assert_eq(result_subtype_byte(), 0x4A);
+}
+
+fn test_supports_window_aggregate() {
+    assert(supports_window_aggregate());
+}
+
+fn main() {
+    test_constructors();
+    test_empty_finalize_is_empty_array();
+    test_step_accepts_null_and_text();
+    test_blob_marks_error();
+    test_result_names_and_count();
+    test_subtype_byte_is_J();
+    test_supports_window_aggregate();
+}

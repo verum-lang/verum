@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, carray_vtab_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.carray_vtab_api.vtab.{
+    ElemType, EtInt32, EtInt64, EtDouble, EtText,
+    type_string, from_type_string, bytes_per_element,
+    FilterCheck, FcOk, FcNullPointer, FcNegativeLength, FcUnknownType,
+    check_filter, check_name, is_ok, pointer_tag,
+    Column, ColValue, ColRowid, ColPointer,
+    column_name, column_index, well_known_column_count,
+};
+mount base.{Bool, Int64};
+
+fn test_type_strings() {
+    assert(type_string(&EtInt32)  == "int32".clone());
+    assert(type_string(&EtInt64)  == "int64".clone());
+    assert(type_string(&EtDouble) == "double".clone());
+    assert(type_string(&EtText)   == "char*".clone());
+}
+
+fn test_from_type_string_round_trip() {
+    match from_type_string("int32".clone())  { EtInt32  => {}, _ => assert(false) }
+    match from_type_string("int64".clone())  { EtInt64  => {}, _ => assert(false) }
+    match from_type_string("double".clone()) { EtDouble => {}, _ => assert(false) }
+    match from_type_string("char*".clone())  { EtText   => {}, _ => assert(false) }
+    match from_type_string("xyzzy".clone())  { EtText   => {}, _ => assert(false) }
+}
+
+fn test_bytes_per_element() {
+    assert_eq(bytes_per_element(&EtInt32),  4);
+    assert_eq(bytes_per_element(&EtInt64),  8);
+    assert_eq(bytes_per_element(&EtDouble), 8);
+    assert_eq(bytes_per_element(&EtText),   8);
+}
+
+fn test_filter_ok() {
+    match check_filter(true, 100 as Int64, "int64".clone()) { FcOk => {}, _ => assert(false) }
+}
+
+fn test_filter_null_pointer() {
+    match check_filter(false, 0 as Int64, "int32".clone()) { FcNullPointer => {}, _ => assert(false) }
+}
+
+fn test_filter_negative_length() {
+    match check_filter(true, -1 as Int64, "int32".clone()) { FcNegativeLength => {}, _ => assert(false) }
+}
+
+fn test_filter_unknown_type() {
+    match check_filter(true, 5 as Int64, "blob".clone()) { FcUnknownType => {}, _ => assert(false) }
+}
+
+fn test_check_names_and_is_ok() {
+    assert(check_name(&FcOk)              == "ok".clone());
+    assert(check_name(&FcNullPointer)     == "null_pointer".clone());
+    assert(check_name(&FcNegativeLength)  == "negative_length".clone());
+    assert(check_name(&FcUnknownType)     == "unknown_type".clone());
+    assert(is_ok(&FcOk));
+    assert(!is_ok(&FcNullPointer));
+}
+
+fn test_pointer_tag() {
+    assert(pointer_tag() == "carray".clone());
+}
+
+fn test_columns() {
+    assert(column_name(&ColValue)   == "value".clone());
+    assert(column_name(&ColRowid)   == "rowid".clone());
+    assert(column_name(&ColPointer) == "pointer".clone());
+    assert_eq(column_index(&ColValue),   0);
+    assert_eq(column_index(&ColRowid),   1);
+    assert_eq(column_index(&ColPointer), 2);
+    assert_eq(well_known_column_count(), 3);
+}
+
+fn main() {
+    test_type_strings();
+    test_from_type_string_round_trip();
+    test_bytes_per_element();
+    test_filter_ok();
+    test_filter_null_pointer();
+    test_filter_negative_length();
+    test_filter_unknown_type();
+    test_check_names_and_is_ok();
+    test_pointer_tag();
+    test_columns();
+}

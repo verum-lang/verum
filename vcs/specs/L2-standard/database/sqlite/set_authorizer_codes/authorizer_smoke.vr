@@ -1,0 +1,131 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, set_authorizer_codes, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.set_authorizer_codes.codes.{
+    ok_code, deny_code, ignore_code,
+    Verdict, VAllow, VDeny, VIgnore,
+    verdict_from_code, verdict_to_code, verdict_name,
+    create_index, create_table, create_temp_table, create_view,
+    drop_table, drop_index, drop_view,
+    insert, pragma, read, select, transaction, update,
+    attach, detach, alter_table, reindex_action, analyze_action,
+    create_vtable, drop_vtable, function_action, savepoint_action,
+    recursive,
+    well_known_action_count, is_known_action,
+    Category, CtCreate, CtDrop, CtRead, CtWrite, CtAdmin, CtFunction, CtUnknown,
+    classify, category_name,
+};
+mount base.{Bool};
+
+fn test_return_codes() {
+    assert_eq(ok_code(),     0);
+    assert_eq(deny_code(),   1);
+    assert_eq(ignore_code(), 2);
+}
+
+fn test_verdict_round_trip() {
+    match verdict_from_code(0) { VAllow  => {}, _ => assert(false) }
+    match verdict_from_code(1) { VDeny   => {}, _ => assert(false) }
+    match verdict_from_code(2) { VIgnore => {}, _ => assert(false) }
+    match verdict_from_code(99) { VAllow => {}, _ => assert(false) }    // fallback
+    assert_eq(verdict_to_code(&VAllow),  0);
+    assert_eq(verdict_to_code(&VDeny),   1);
+    assert_eq(verdict_to_code(&VIgnore), 2);
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&VAllow)  == "ok".clone());
+    assert(verdict_name(&VDeny)   == "deny".clone());
+    assert(verdict_name(&VIgnore) == "ignore".clone());
+}
+
+fn test_action_constants() {
+    assert_eq(create_index(),     1);
+    assert_eq(create_table(),     2);
+    assert_eq(create_temp_table(), 4);
+    assert_eq(create_view(),      8);
+    assert_eq(drop_index(),      10);
+    assert_eq(drop_table(),      11);
+    assert_eq(drop_view(),       17);
+    assert_eq(insert(),          18);
+    assert_eq(pragma(),          19);
+    assert_eq(read(),            20);
+    assert_eq(select(),          21);
+    assert_eq(transaction(),     22);
+    assert_eq(update(),          23);
+    assert_eq(attach(),          24);
+    assert_eq(detach(),          25);
+    assert_eq(alter_table(),     26);
+    assert_eq(reindex_action(),  27);
+    assert_eq(analyze_action(),  28);
+    assert_eq(create_vtable(),   29);
+    assert_eq(drop_vtable(),     30);
+    assert_eq(function_action(), 31);
+    assert_eq(savepoint_action(), 32);
+    assert_eq(recursive(),       33);
+}
+
+fn test_action_count_and_validity() {
+    assert_eq(well_known_action_count(), 33);
+    assert(is_known_action(1));
+    assert(is_known_action(33));
+    assert(!is_known_action(0));
+    assert(!is_known_action(34));
+    assert(!is_known_action(-1));
+}
+
+fn test_classify_create() {
+    match classify(create_index()) { CtCreate => {}, _ => assert(false) }
+    match classify(create_table()) { CtCreate => {}, _ => assert(false) }
+    match classify(create_view())  { CtCreate => {}, _ => assert(false) }
+    match classify(create_vtable()) { CtCreate => {}, _ => assert(false) }
+}
+
+fn test_classify_drop() {
+    match classify(drop_table()) { CtDrop => {}, _ => assert(false) }
+    match classify(drop_index()) { CtDrop => {}, _ => assert(false) }
+    match classify(drop_view())  { CtDrop => {}, _ => assert(false) }
+}
+
+fn test_classify_read_write() {
+    match classify(read())   { CtRead  => {}, _ => assert(false) }
+    match classify(select()) { CtRead  => {}, _ => assert(false) }
+    match classify(insert()) { CtWrite => {}, _ => assert(false) }
+    match classify(update()) { CtWrite => {}, _ => assert(false) }
+}
+
+fn test_classify_admin_and_function() {
+    match classify(pragma())          { CtAdmin    => {}, _ => assert(false) }
+    match classify(transaction())     { CtAdmin    => {}, _ => assert(false) }
+    match classify(attach())          { CtAdmin    => {}, _ => assert(false) }
+    match classify(recursive())       { CtAdmin    => {}, _ => assert(false) }
+    match classify(function_action()) { CtFunction => {}, _ => assert(false) }
+    match classify(99)                { CtUnknown  => {}, _ => assert(false) }
+}
+
+fn test_category_names() {
+    assert(category_name(&CtCreate)   == "create".clone());
+    assert(category_name(&CtDrop)     == "drop".clone());
+    assert(category_name(&CtRead)     == "read".clone());
+    assert(category_name(&CtWrite)    == "write".clone());
+    assert(category_name(&CtAdmin)    == "admin".clone());
+    assert(category_name(&CtFunction) == "function".clone());
+    assert(category_name(&CtUnknown)  == "unknown".clone());
+}
+
+fn main() {
+    test_return_codes();
+    test_verdict_round_trip();
+    test_verdict_names();
+    test_action_constants();
+    test_action_count_and_validity();
+    test_classify_create();
+    test_classify_drop();
+    test_classify_read_write();
+    test_classify_admin_and_function();
+    test_category_names();
+}

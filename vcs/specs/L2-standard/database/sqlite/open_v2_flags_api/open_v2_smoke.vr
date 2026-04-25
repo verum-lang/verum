@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, open_v2_flags_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.open_v2_flags_api.flags.{
+    f_readonly, f_readwrite, f_create, f_uri, f_memory,
+    f_nomutex, f_fullmutex, f_sharedcache, f_privatecache,
+    f_nofollow, f_exrescode,
+    well_known_bit_count, well_known_mask,
+    is_set, set, clear, is_known_only,
+    AccessMode, AmReadOnly, AmReadWrite, AmReadWriteCreate,
+    access_for, access_name,
+    MutexMode, MxDefault, MxNone, MxFull, MxConflict,
+    mutex_for, mutex_name,
+    CacheMode, CmDefault, CmShared, CmPrivate, CmConflict,
+    cache_for, cache_name, bit_name,
+};
+mount base.{Bool, Int64};
+
+fn test_bit_constants() {
+    assert_eq(f_readonly(),      0x00000001 as Int64);
+    assert_eq(f_readwrite(),     0x00000002 as Int64);
+    assert_eq(f_create(),        0x00000004 as Int64);
+    assert_eq(f_uri(),           0x00000040 as Int64);
+    assert_eq(f_memory(),        0x00000080 as Int64);
+    assert_eq(f_nomutex(),       0x00008000 as Int64);
+    assert_eq(f_fullmutex(),     0x00010000 as Int64);
+    assert_eq(f_sharedcache(),   0x00020000 as Int64);
+    assert_eq(f_privatecache(),  0x00040000 as Int64);
+    assert_eq(f_nofollow(),      0x01000000 as Int64);
+    assert_eq(f_exrescode(),     0x02000000 as Int64);
+    assert_eq(well_known_bit_count(), 11);
+}
+
+fn test_set_clear_is_set() {
+    let fl = set(set(0 as Int64, f_readwrite()), f_create());
+    assert(is_set(fl, f_readwrite()));
+    assert(is_set(fl, f_create()));
+    assert(!is_set(fl, f_uri()));
+    let cleared = clear(fl, f_create());
+    assert(!is_set(cleared, f_create()));
+}
+
+fn test_is_known_only() {
+    assert(is_known_only(0 as Int64));
+    assert(is_known_only(f_readonly() | f_uri()));
+    assert(!is_known_only(0x80000000 as Int64));
+}
+
+fn test_access_for_branches() {
+    match access_for(0 as Int64)                    { AmReadOnly        => {}, _ => assert(false) }
+    match access_for(f_readonly())                  { AmReadOnly        => {}, _ => assert(false) }
+    match access_for(f_readwrite())                  { AmReadWrite       => {}, _ => assert(false) }
+    match access_for(f_readwrite() | f_create())     { AmReadWriteCreate => {}, _ => assert(false) }
+}
+
+fn test_access_names() {
+    assert(access_name(&AmReadOnly)        == "readonly".clone());
+    assert(access_name(&AmReadWrite)       == "readwrite".clone());
+    assert(access_name(&AmReadWriteCreate) == "readwrite_create".clone());
+}
+
+fn test_mutex_resolution() {
+    match mutex_for(0 as Int64)                       { MxDefault  => {}, _ => assert(false) }
+    match mutex_for(f_nomutex())                       { MxNone     => {}, _ => assert(false) }
+    match mutex_for(f_fullmutex())                     { MxFull     => {}, _ => assert(false) }
+    match mutex_for(f_nomutex() | f_fullmutex())       { MxConflict => {}, _ => assert(false) }
+}
+
+fn test_mutex_names() {
+    assert(mutex_name(&MxDefault)  == "default".clone());
+    assert(mutex_name(&MxNone)     == "none".clone());
+    assert(mutex_name(&MxFull)     == "full".clone());
+    assert(mutex_name(&MxConflict) == "conflict".clone());
+}
+
+fn test_cache_resolution() {
+    match cache_for(0 as Int64)                            { CmDefault  => {}, _ => assert(false) }
+    match cache_for(f_sharedcache())                       { CmShared   => {}, _ => assert(false) }
+    match cache_for(f_privatecache())                      { CmPrivate  => {}, _ => assert(false) }
+    match cache_for(f_sharedcache() | f_privatecache())    { CmConflict => {}, _ => assert(false) }
+}
+
+fn test_cache_names() {
+    assert(cache_name(&CmDefault)  == "default".clone());
+    assert(cache_name(&CmShared)   == "shared".clone());
+    assert(cache_name(&CmPrivate)  == "private".clone());
+    assert(cache_name(&CmConflict) == "conflict".clone());
+}
+
+fn test_bit_names() {
+    assert(bit_name(f_readonly())     == "READONLY".clone());
+    assert(bit_name(f_readwrite())    == "READWRITE".clone());
+    assert(bit_name(f_uri())          == "URI".clone());
+    assert(bit_name(f_nofollow())     == "NOFOLLOW".clone());
+    assert(bit_name(0x80000000 as Int64) == "UNKNOWN".clone());
+}
+
+fn main() {
+    test_bit_constants();
+    test_set_clear_is_set();
+    test_is_known_only();
+    test_access_for_branches();
+    test_access_names();
+    test_mutex_resolution();
+    test_mutex_names();
+    test_cache_resolution();
+    test_cache_names();
+    test_bit_names();
+}

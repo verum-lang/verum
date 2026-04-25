@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, json_group_object_fn, sql-aggregates
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.json_group_object_fn.agg.{
+    Key, KText, KNullErr,
+    Value, VNull, VInt, VText, VBlobErr,
+    StepCheck, OkPair, ErrNullKey, ErrBlobValue,
+    check_step, check_name, is_ok,
+    State, empty_state, step,
+    Result, RJsonObject, RJsonError,
+    finalize, result_subtype_byte,
+    empty_finalize_yields_empty_object,
+    pair_count, is_error, result_name,
+};
+mount base.{Bool, Int64};
+
+fn test_check_step_branches() {
+    match check_step(&KText("a".clone()), &VInt(1 as Int64)) { OkPair       => {}, _ => assert(false) }
+    match check_step(&KText("a".clone()), &VNull)            { OkPair       => {}, _ => assert(false) }
+    match check_step(&KNullErr,            &VInt(1 as Int64)) { ErrNullKey   => {}, _ => assert(false) }
+    match check_step(&KText("a".clone()), &VBlobErr)         { ErrBlobValue => {}, _ => assert(false) }
+}
+
+fn test_check_names() {
+    assert(check_name(&OkPair)       == "ok".clone());
+    assert(check_name(&ErrNullKey)   == "err_null_key".clone());
+    assert(check_name(&ErrBlobValue) == "err_blob_value".clone());
+    assert(is_ok(&OkPair));
+    assert(!is_ok(&ErrNullKey));
+}
+
+fn test_step_accepts_pairs() {
+    let mut s = empty_state();
+    s = step(s, &KText("a".clone()), &VInt(1 as Int64));
+    s = step(s, &KText("b".clone()), &VText("hello".clone()));
+    let r = finalize(&s);
+    match r { RJsonObject(n) => assert_eq(n, 2), _ => assert(false) }
+}
+
+fn test_step_null_key_marks_error() {
+    let mut s = empty_state();
+    s = step(s, &KText("a".clone()), &VInt(1 as Int64));
+    s = step(s, &KNullErr,            &VInt(2 as Int64));
+    let r = finalize(&s);
+    match r { RJsonError => {}, _ => assert(false) }
+}
+
+fn test_step_blob_value_marks_error() {
+    let mut s = empty_state();
+    s = step(s, &KText("a".clone()), &VBlobErr);
+    let r = finalize(&s);
+    match r { RJsonError => {}, _ => assert(false) }
+}
+
+fn test_empty_finalize_is_empty_object() {
+    let s = empty_state();
+    let r = finalize(&s);
+    match r { RJsonObject(n) => assert_eq(n, 0), _ => assert(false) }
+    assert(empty_finalize_yields_empty_object());
+}
+
+fn test_subtype_and_helpers() {
+    assert_eq(result_subtype_byte(), 0x4A);
+    assert_eq(pair_count(&RJsonObject(7)), 7);
+    assert_eq(pair_count(&RJsonError), 0);
+    assert(is_error(&RJsonError));
+    assert(!is_error(&RJsonObject(0)));
+    assert(result_name(&RJsonObject(0)) == "json_object".clone());
+    assert(result_name(&RJsonError)     == "json_error".clone());
+}
+
+fn main() {
+    test_check_step_branches();
+    test_check_names();
+    test_step_accepts_pairs();
+    test_step_null_key_marks_error();
+    test_step_blob_value_marks_error();
+    test_empty_finalize_is_empty_object();
+    test_subtype_and_helpers();
+}

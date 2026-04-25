@@ -1,0 +1,97 @@
+// json_group_object — aggregate accumulator.
+
+module core.database.sqlite.native.json_group_object_fn.agg;
+
+mount base.{Bool, Int64, Text};
+
+public type Key is
+    | KText(Text)
+    | KNullErr           // NULL key — SQLITE_ERROR at step time
+    ;
+
+public type Value is
+    | VNull
+    | VInt(Int64)
+    | VText(Text)
+    | VBlobErr           // BLOB → SQLITE_ERROR
+    ;
+
+public type StepCheck is
+    | OkPair
+    | ErrNullKey
+    | ErrBlobValue
+    ;
+
+public fn check_step(k: &Key, v: &Value) -> StepCheck {
+    match k {
+        KNullErr  => return ErrNullKey,
+        KText(_)  => {},
+    }
+    match v {
+        VBlobErr => ErrBlobValue,
+        _ => OkPair,
+    }
+}
+
+public fn check_name(c: &StepCheck) -> Text {
+    match c {
+        OkPair       => "ok".clone(),
+        ErrNullKey   => "err_null_key".clone(),
+        ErrBlobValue => "err_blob_value".clone(),
+    }
+}
+
+public fn is_ok(c: &StepCheck) -> Bool {
+    match c { OkPair => true, _ => false }
+}
+
+public type State is {
+    pair_count: Int,
+    saw_null_key: Bool,
+    saw_blob_value: Bool,
+};
+
+public fn empty_state() -> State {
+    State { pair_count: 0, saw_null_key: false, saw_blob_value: false }
+}
+
+public fn step(mut s: State, k: &Key, v: &Value) -> State {
+    match check_step(k, v) {
+        OkPair       => { s.pair_count = s.pair_count + 1; },
+        ErrNullKey   => { s.saw_null_key = true; },
+        ErrBlobValue => { s.saw_blob_value = true; },
+    }
+    s
+}
+
+public type Result is
+    | RJsonObject(Int)
+    | RJsonError
+    ;
+
+public fn finalize(s: &State) -> Result {
+    if s.saw_null_key || s.saw_blob_value { return RJsonError; }
+    RJsonObject(s.pair_count)
+}
+
+public fn result_subtype_byte() -> Int { 0x4A }
+
+public fn empty_finalize_yields_empty_object() -> Bool { true }
+
+public fn pair_count(r: &Result) -> Int {
+    match r {
+        RJsonObject(n) => n.clone(),
+        RJsonError     => 0,
+    }
+}
+
+public fn is_error(r: &Result) -> Bool {
+    match r { RJsonError => true, _ => false }
+}
+
+public fn result_name(r: &Result) -> Text {
+    match r {
+        RJsonObject(_) => "json_object".clone(),
+        RJsonError     => "json_error".clone(),
+    }
+}

@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/carray_vtab_api/mod.vr
+// =============================================================================
+// carray(P, N, T) — table-valued function that exposes a host-language array
+// to SQL.  Three columns: value, rowid (alias of value), pointer.  P is a
+// caller-bound pointer (sqlite3_bind_pointer with type "carray"), N is the
+// element count, T is one of int32 / int64 / double / char* (text).
+// Spec App E.X — bundled extensions.
+// =============================================================================
+
+module core.database.sqlite.native.carray_vtab_api;
+
+public module vtab;
