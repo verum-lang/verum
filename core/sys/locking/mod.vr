@@ -10,7 +10,7 @@ module sys.locking;
 // primitives in `core.sys.common`. Gives callers:
 //
 //   * `LockRegion`       — explicit start/length (length == -1 ≡ to EOF)
-//   * `LockKind`         — Shared | Exclusive (no Unlock variant; unlock
+//   * `FileLockKind`     — Shared | Exclusive (no Unlock variant; unlock
 //                          is expressed by consuming the affine handle)
 //   * `LockError`        — Conflict(owner_pid) | IoError(OSError); the
 //                          backend's EAGAIN/EWOULDBLOCK maps to Conflict
@@ -37,7 +37,11 @@ mount core.base.result.Result;
 ///
 /// There is no `Unlock` variant: unlocking is expressed by consuming
 /// the affine `LockHandle` returned from `try_lock`.
-public type LockKind is Shared | Exclusive;
+///
+/// Renamed from the historic `LockKind` to avoid simple-name
+/// collision with `core.database.sqlite.native.l0_vfs.vfs_protocol::LockKind`
+/// (the SQLite VFS five-state protocol type).  See task #160.
+public type FileLockKind is Shared | Exclusive;
 
 /// Absolute byte range to lock.
 ///
@@ -68,7 +72,7 @@ public type LockError is
 public type affine LockHandle is {
     fd: common.FileDesc,
     region: LockRegion,
-    kind: LockKind,
+    kind: FileLockKind,
     active: Bool,
 };
 
@@ -111,13 +115,13 @@ implement LockRegion {
 
 implement LockHandle {
     /// Private — handles are only constructed inside `try_lock`.
-    fn new(fd: common.FileDesc, region: LockRegion, kind: LockKind) -> LockHandle {
+    fn new(fd: common.FileDesc, region: LockRegion, kind: FileLockKind) -> LockHandle {
         LockHandle { fd: fd, region: region, kind: kind, active: true }
     }
 
     public fn fd(&self) -> common.FileDesc { self.fd }
     public fn region(&self) -> &LockRegion { &self.region }
-    public fn kind(&self) -> LockKind { self.kind }
+    public fn kind(&self) -> FileLockKind { self.kind }
     public fn is_active(&self) -> Bool { self.active }
 }
 
@@ -138,9 +142,9 @@ implement LockHandle {
 public fn try_lock(
     fd: common.FileDesc,
     region: LockRegion,
-    kind: LockKind,
+    kind: FileLockKind,
 ) -> Result<LockHandle, LockError> {
-    let backend_kind: common.LockKind = match kind {
+    let backend_kind: common.FcntlLockKind = match kind {
         Shared    => common.Shared,
         Exclusive => common.Exclusive,
     };

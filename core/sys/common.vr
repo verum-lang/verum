@@ -686,12 +686,20 @@ public const F_WRLCK: Int16 = 1;
 public const F_UNLCK: Int16 = 2;
 
 /// Kind of byte-range lock — the caller's side of the type.
-public type LockKind is
+///
+/// Renamed from the historic `LockKind` to avoid simple-name
+/// collision with `core.database.sqlite.native.l0_vfs.vfs_protocol::LockKind`
+/// (the SQLite VFS five-state protocol type).  The codegen variant
+/// table is keyed by simple type name, so two stdlib types named
+/// `LockKind` first-wins each other and one set of variants
+/// (Unlocked / Reserved / Pending / …) silently drops out — see
+/// task #160 in the developer log.
+public type FcntlLockKind is
       Shared       // F_RDLCK — multiple holders permitted
     | Exclusive    // F_WRLCK — sole holder
     | Unlock;      // F_UNLCK — release
 
-fn lock_kind_to_ltype(k: LockKind) -> Int16 {
+fn lock_kind_to_ltype(k: FcntlLockKind) -> Int16 {
     match k {
         Shared    => F_RDLCK,
         Exclusive => F_WRLCK,
@@ -711,7 +719,7 @@ fn lock_kind_to_ltype(k: LockKind) -> Int16 {
 ///   * Darwin — uses `F_SETLK`. Traditional POSIX semantics apply.
 ///   * Windows — not implemented in v0.1; returns an informative
 ///     `OSError`.
-public fn try_lock_region(fd: FileDesc, kind: LockKind, start: Int, len: Int) -> Result<(), OSError> {
+public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: Int) -> Result<(), OSError> {
     let mut fl: Flock = Flock {
         l_type: lock_kind_to_ltype(kind),
         l_whence: SEEK_SET,

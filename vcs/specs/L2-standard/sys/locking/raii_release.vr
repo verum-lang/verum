@@ -15,7 +15,7 @@
 
 mount core.*;
 mount sys.common.FileDesc;
-mount sys.locking.{try_lock, unlock, LockRegion, LockKind, LockHandle, LockError};
+mount sys.locking.{try_lock, unlock, LockRegion, FileLockKind, LockHandle, LockError};
 mount base.result.Result;
 
 fn try_acquire(fd: FileDesc) -> Result<LockHandle, LockError> {
