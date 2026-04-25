@@ -25,7 +25,7 @@
 use verum_ast::attr::*;
 use verum_ast::span::{FileId, Span, Spanned};
 use verum_common::List;
-use verum_common::{Maybe, Text};
+use verum_common::{Heap, Maybe, Text};
 
 // ============================================================================
 // Profile Tests
@@ -729,4 +729,341 @@ fn test_framework_attr_display_roundtrip() {
         format!("{}", fw),
         r#"@framework(schreiber_dcct, "DCCT §3.9")"#
     );
+}
+
+// ============================================================================
+// OWL 2 ATTRIBUTION FAMILY — VUVA §21.6 Phase 3 C8
+// ============================================================================
+//
+// Round-trip tests for every Owl2*Attr from typed.rs. Builds a generic
+// `Attribute` representing the surface form, then asserts the typed
+// extractor produces the expected struct (or returns None for malformed
+// shapes — silent acceptance of a typo would be a bug).
+
+use verum_ast::expr::{ArrayExpr, BinOp, ExprKind};
+
+/// Build a `name = "value"` Binary-Assign expression — the lowering
+/// the parser produces for both `name: "value"` (colon) and `name =
+/// "value"` (equals) named-arg forms.
+fn named_string(name: &str, value: &str) -> Expr {
+    let span = Span::default();
+    let key = Expr::ident(Ident::new(Text::from(name), span));
+    let lit = Literal::new(
+        LiteralKind::Text(StringLit::Regular(Text::from(value))),
+        span,
+    );
+    Expr::new(
+        ExprKind::Binary {
+            op: BinOp::Assign,
+            left: Heap::new(key),
+            right: Heap::new(Expr::literal(lit)),
+        },
+        span,
+    )
+}
+
+/// Build a `name = ClassPath` Binary-Assign expression for typed-class
+/// references (`@owl2_property(domain = Animal)`).
+fn named_class(name: &str, class: &str) -> Expr {
+    let span = Span::default();
+    let key = Expr::ident(Ident::new(Text::from(name), span));
+    let class_expr = Expr::ident(Ident::new(Text::from(class), span));
+    Expr::new(
+        ExprKind::Binary {
+            op: BinOp::Assign,
+            left: Heap::new(key),
+            right: Heap::new(class_expr),
+        },
+        span,
+    )
+}
+
+/// Build a `name = [Class1, Class2, ...]` Binary-Assign expression for
+/// the `characteristic = [Transitive, Symmetric]` argument shape.
+fn named_class_list(name: &str, classes: &[&str]) -> Expr {
+    let span = Span::default();
+    let key = Expr::ident(Ident::new(Text::from(name), span));
+    let mut elems: List<Expr> = List::new();
+    for c in classes {
+        elems.push(Expr::ident(Ident::new(Text::from(*c), span)));
+    }
+    let arr = Expr::new(
+        ExprKind::Array(ArrayExpr::List(elems)),
+        span,
+    );
+    Expr::new(
+        ExprKind::Binary {
+            op: BinOp::Assign,
+            left: Heap::new(key),
+            right: Heap::new(arr),
+        },
+        span,
+    )
+}
+
+fn class_ident(name: &str) -> Expr {
+    Expr::ident(Ident::new(Text::from(name), Span::default()))
+}
+
+fn class_array(names: &[&str]) -> Expr {
+    let span = Span::default();
+    let mut elems: List<Expr> = List::new();
+    for n in names {
+        elems.push(class_ident(n));
+    }
+    Expr::new(ExprKind::Array(ArrayExpr::List(elems)), span)
+}
+
+// ----- @owl2_class -----
+
+#[test]
+fn owl2_class_attr_no_args_defaults_to_closed_world() {
+    let raw = Attribute::new(Text::from("owl2_class"), Maybe::None, Span::default());
+    let typed = Owl2ClassAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(c) => assert!(matches!(c.semantics, Maybe::None)),
+        Maybe::None    => panic!("@owl2_class without args must default-accept"),
+    }
+}
+
+#[test]
+fn owl2_class_attr_open_world_explicit() {
+    let mut args: List<Expr> = List::new();
+    args.push(named_string("semantics", "OpenWorld"));
+    let raw = Attribute::new(Text::from("owl2_class"), Maybe::Some(args), Span::default());
+    let typed = Owl2ClassAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(c) => assert!(matches!(c.semantics, Maybe::Some(Owl2Semantics::OpenWorld))),
+        Maybe::None    => panic!("@owl2_class(semantics: OpenWorld) must parse"),
+    }
+}
+
+#[test]
+fn owl2_class_attr_rejects_unknown_semantics() {
+    let mut args: List<Expr> = List::new();
+    args.push(named_string("semantics", "TimeShared"));
+    let raw = Attribute::new(Text::from("owl2_class"), Maybe::Some(args), Span::default());
+    assert!(matches!(Owl2ClassAttr::from_attribute(&raw), Maybe::None));
+}
+
+// ----- @owl2_subclass_of -----
+
+#[test]
+fn owl2_subclass_of_accepts_path_form() {
+    let mut args: List<Expr> = List::new();
+    args.push(class_ident("Animal"));
+    let raw = Attribute::new(Text::from("owl2_subclass_of"), Maybe::Some(args), Span::default());
+    let typed = Owl2SubClassOfAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(s) => assert_eq!(s.parent.as_str(), "Animal"),
+        Maybe::None    => panic!("@owl2_subclass_of(Animal) must parse"),
+    }
+}
+
+// ----- @owl2_disjoint_with -----
+
+#[test]
+fn owl2_disjoint_with_accepts_bracketed_list() {
+    let mut args: List<Expr> = List::new();
+    args.push(class_array(&["Foo", "Bar", "Baz"]));
+    let raw = Attribute::new(Text::from("owl2_disjoint_with"), Maybe::Some(args), Span::default());
+    let typed = Owl2DisjointWithAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(d) => {
+            assert_eq!(d.disjoint_classes.len(), 3);
+            assert_eq!(d.disjoint_classes[0].as_str(), "Foo");
+            assert_eq!(d.disjoint_classes[2].as_str(), "Baz");
+        }
+        Maybe::None => panic!("@owl2_disjoint_with([Foo, Bar, Baz]) must parse"),
+    }
+}
+
+#[test]
+fn owl2_disjoint_with_accepts_positional_form() {
+    let mut args: List<Expr> = List::new();
+    args.push(class_ident("Pizza"));
+    args.push(class_ident("IceCream"));
+    let raw = Attribute::new(Text::from("owl2_disjoint_with"), Maybe::Some(args), Span::default());
+    let typed = Owl2DisjointWithAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(d) => {
+            assert_eq!(d.disjoint_classes.len(), 2);
+            assert_eq!(d.disjoint_classes[1].as_str(), "IceCream");
+        }
+        Maybe::None => panic!("@owl2_disjoint_with(Pizza, IceCream) must parse"),
+    }
+}
+
+// ----- @owl2_characteristic -----
+
+#[test]
+fn owl2_characteristic_parses_seven_canonical_names() {
+    for &name in &[
+        "Transitive", "Symmetric", "Asymmetric", "Reflexive",
+        "Irreflexive", "Functional", "InverseFunctional",
+    ] {
+        let mut args: List<Expr> = List::new();
+        args.push(class_ident(name));
+        let raw = Attribute::new(
+            Text::from("owl2_characteristic"),
+            Maybe::Some(args),
+            Span::default(),
+        );
+        let typed = Owl2CharacteristicAttr::from_attribute(&raw);
+        match typed {
+            Maybe::Some(c) => assert_eq!(c.characteristic.as_str(), name),
+            Maybe::None    => panic!("@owl2_characteristic({name}) must parse"),
+        }
+    }
+}
+
+#[test]
+fn owl2_characteristic_rejects_unknown_flag() {
+    let mut args: List<Expr> = List::new();
+    args.push(class_ident("Idempotent"));
+    let raw = Attribute::new(
+        Text::from("owl2_characteristic"),
+        Maybe::Some(args),
+        Span::default(),
+    );
+    assert!(matches!(
+        Owl2CharacteristicAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+}
+
+// ----- @owl2_property -----
+
+#[test]
+fn owl2_property_full_form_with_inverse_and_characteristics() {
+    let mut args: List<Expr> = List::new();
+    args.push(named_class("domain", "Person"));
+    args.push(named_class("range", "Person"));
+    args.push(named_class_list("characteristic", &["Symmetric", "Transitive"]));
+    args.push(named_class("inverse_of", "knownBy"));
+    let raw = Attribute::new(
+        Text::from("owl2_property"),
+        Maybe::Some(args),
+        Span::default(),
+    );
+    let typed = Owl2PropertyAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(p) => {
+            assert!(matches!(&p.domain, Maybe::Some(d) if d.as_str() == "Person"));
+            assert!(matches!(&p.range, Maybe::Some(r) if r.as_str() == "Person"));
+            assert_eq!(p.characteristics.len(), 2);
+            assert!(matches!(p.characteristics[0], Owl2Characteristic::Symmetric));
+            assert!(matches!(p.characteristics[1], Owl2Characteristic::Transitive));
+            assert!(matches!(&p.inverse_of, Maybe::Some(i) if i.as_str() == "knownBy"));
+        }
+        Maybe::None => panic!("full @owl2_property form must parse"),
+    }
+}
+
+#[test]
+fn owl2_property_requires_domain_and_range() {
+    // domain only — should fail.
+    let mut args: List<Expr> = List::new();
+    args.push(named_class("domain", "Person"));
+    let raw = Attribute::new(
+        Text::from("owl2_property"),
+        Maybe::Some(args),
+        Span::default(),
+    );
+    assert!(matches!(
+        Owl2PropertyAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+}
+
+#[test]
+fn owl2_property_rejects_unknown_named_arg() {
+    let mut args: List<Expr> = List::new();
+    args.push(named_class("domain", "Person"));
+    args.push(named_class("range", "Person"));
+    args.push(named_string("typo_key", "something")); // unknown key
+    let raw = Attribute::new(
+        Text::from("owl2_property"),
+        Maybe::Some(args),
+        Span::default(),
+    );
+    assert!(matches!(
+        Owl2PropertyAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+}
+
+// ----- @owl2_equivalent_class -----
+
+#[test]
+fn owl2_equivalent_class_parses_class_path() {
+    let mut args: List<Expr> = List::new();
+    args.push(class_ident("HumanBeing"));
+    let raw = Attribute::new(
+        Text::from("owl2_equivalent_class"),
+        Maybe::Some(args),
+        Span::default(),
+    );
+    let typed = Owl2EquivalentClassAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(eq) => assert_eq!(eq.equivalent_to.as_str(), "HumanBeing"),
+        Maybe::None     => panic!("@owl2_equivalent_class(HumanBeing) must parse"),
+    }
+}
+
+// ----- @owl2_has_key -----
+
+#[test]
+fn owl2_has_key_accepts_property_list() {
+    let mut args: List<Expr> = List::new();
+    args.push(class_ident("ssn"));
+    args.push(class_ident("birth_date"));
+    let raw = Attribute::new(
+        Text::from("owl2_has_key"),
+        Maybe::Some(args),
+        Span::default(),
+    );
+    let typed = Owl2HasKeyAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(k) => {
+            assert_eq!(k.key_properties.len(), 2);
+            assert_eq!(k.key_properties[0].as_str(), "ssn");
+            assert_eq!(k.key_properties[1].as_str(), "birth_date");
+        }
+        Maybe::None => panic!("@owl2_has_key(ssn, birth_date) must parse"),
+    }
+}
+
+#[test]
+fn owl2_has_key_accepts_bracketed_form() {
+    let mut args: List<Expr> = List::new();
+    args.push(class_array(&["isbn", "edition"]));
+    let raw = Attribute::new(
+        Text::from("owl2_has_key"),
+        Maybe::Some(args),
+        Span::default(),
+    );
+    let typed = Owl2HasKeyAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(k) => assert_eq!(k.key_properties.len(), 2),
+        Maybe::None    => panic!("@owl2_has_key([isbn, edition]) must parse"),
+    }
+}
+
+// ----- Reject wrong attribute name across the family -----
+
+#[test]
+fn owl2_attrs_reject_wrong_attribute_name() {
+    let raw = Attribute::new(
+        Text::from("inline"),
+        Maybe::None,
+        Span::default(),
+    );
+    assert!(matches!(Owl2ClassAttr::from_attribute(&raw),         Maybe::None));
+    assert!(matches!(Owl2SubClassOfAttr::from_attribute(&raw),    Maybe::None));
+    assert!(matches!(Owl2DisjointWithAttr::from_attribute(&raw),  Maybe::None));
+    assert!(matches!(Owl2CharacteristicAttr::from_attribute(&raw), Maybe::None));
+    assert!(matches!(Owl2PropertyAttr::from_attribute(&raw),      Maybe::None));
+    assert!(matches!(Owl2EquivalentClassAttr::from_attribute(&raw), Maybe::None));
+    assert!(matches!(Owl2HasKeyAttr::from_attribute(&raw),        Maybe::None));
 }

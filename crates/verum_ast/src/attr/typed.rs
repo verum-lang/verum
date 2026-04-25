@@ -5058,3 +5058,675 @@ impl std::fmt::Display for EnactAttr {
         write!(f, "@enact(epsilon = \"{}\")", self.epsilon)
     }
 }
+
+// =============================================================================
+// OWL 2 ATTRIBUTION FAMILY (VUVA §21.6 Phase 3 C8 V1)
+//
+// Vocabulary-preserving typed attributes for the OWL 2 Direct Semantics
+// surface. Each attribute installs (1) a `CoreTerm::FrameworkAxiom`
+// reference into `core.math.frameworks.owl2_fs.*`, (2) a `@verify(...)`
+// obligation per VUVA §21.3 Table, and (3) a round-trip marker consumed
+// by `verum export --to owl2-fs` (B5, deferred).
+//
+// V1 ships four attributes covering the most common OWL 2 surface forms;
+// V2 adds the richer `@owl2_property(domain = ..., range = ...,
+// characteristic = [...], inverse_of = ...)` named-arg form per §21.6.
+//
+//   @owl2_class[(semantics = "OpenWorld" | "ClosedWorld")]
+//   @owl2_subclass_of(<class_name>)
+//   @owl2_disjoint_with([<class_name>, ...])
+//   @owl2_characteristic("Transitive" | "Symmetric" | "Asymmetric"
+//                       | "Reflexive" | "Irreflexive" | "Functional"
+//                       | "InverseFunctional")
+//
+// All four follow the FrameworkAttr / EnactAttr pattern: a struct with
+// a `from_attribute(attr: &Attribute) -> Maybe<Self>` parser. Syntax
+// errors (wrong arg count, unknown enum variant) return Maybe::None;
+// the elaboration pass is responsible for emitting a diagnostic in
+// that case rather than silently dropping the attribute.
+// =============================================================================
+
+/// Open-world / closed-world semantics flag.  OWL 2 DS is normally
+/// open-world; Verum's typed refinement system is closed-world.
+/// VUVA §21.4 picks CWA as the default and admits OWA only when
+/// the user explicitly opts in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Owl2Semantics {
+    /// Open World Assumption — absence of an assertion does not imply
+    /// negation. Queries return `Maybe<Bool>` with `Unknown` when the
+    /// class membership is neither provable nor refutable.
+    OpenWorld,
+    /// Closed World Assumption — a predicate either holds or fails.
+    /// Queries return plain `Bool`. Default for `@owl2_class` without
+    /// an explicit `semantics` argument.
+    ClosedWorld,
+}
+
+impl Owl2Semantics {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenWorld   => "OpenWorld",
+            Self::ClosedWorld => "ClosedWorld",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "OpenWorld" | "open_world" | "OWA"   => Some(Self::OpenWorld),
+            "ClosedWorld" | "closed_world" | "CWA" => Some(Self::ClosedWorld),
+            _ => None,
+        }
+    }
+}
+
+/// `@owl2_class` — marks a Verum type as an OWL 2 Class. Optional
+/// `semantics = "OpenWorld" | "ClosedWorld"` argument selects the
+/// semantic regime per VUVA §21.4.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Owl2ClassAttr {
+    /// Optional semantics qualifier; default is ClosedWorld per VUVA §21.4.
+    pub semantics: Maybe<Owl2Semantics>,
+    pub span: Span,
+}
+
+impl Owl2ClassAttr {
+    pub fn new(semantics: Maybe<Owl2Semantics>, span: Span) -> Self {
+        Self { semantics, span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("owl2_class") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None    => {
+                // `@owl2_class` without args is valid — defaults to
+                // ClosedWorld semantics.
+                return Maybe::Some(Self::new(Maybe::None, attr.span));
+            }
+        };
+        if args.is_empty() {
+            return Maybe::Some(Self::new(Maybe::None, attr.span));
+        }
+        if args.len() != 1 {
+            return Maybe::None;
+        }
+        // Expect a single named-arg `semantics: "..."` lowered to
+        // Binary { Assign, Path("semantics"), Literal("...") }.
+        let semantics = parse_named_string_arg(args.get(0)?, "semantics")
+            .and_then(|s| Owl2Semantics::parse(s.as_str()));
+        match semantics {
+            Some(sem) => Maybe::Some(Self::new(Maybe::Some(sem), attr.span)),
+            None      => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for Owl2ClassAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// `@owl2_subclass_of(<class_name>)` — marks the decorated type as a
+/// subclass of the named OWL 2 class.  The class name resolves through
+/// the surrounding module's import graph.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Owl2SubClassOfAttr {
+    pub parent: Text,
+    pub span: Span,
+}
+
+impl Owl2SubClassOfAttr {
+    pub fn new(parent: Text, span: Span) -> Self {
+        Self { parent, span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("owl2_subclass_of") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None    => return Maybe::None,
+        };
+        if args.len() != 1 {
+            return Maybe::None;
+        }
+        // Single positional argument — either an identifier path or a
+        // string literal naming the parent class.
+        let parent = parse_class_name_arg(args.get(0)?);
+        match parent {
+            Some(p) => Maybe::Some(Self::new(p, attr.span)),
+            None    => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for Owl2SubClassOfAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// `@owl2_disjoint_with([<class_name>, ...])` — marks the decorated
+/// type as disjoint from each of the listed OWL 2 classes.  Lowers to
+/// a `DisjointClasses(self, c1, c2, ...)` axiom invocation per
+/// Shkotin Table 5.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Owl2DisjointWithAttr {
+    pub disjoint_classes: Vec<Text>,
+    pub span: Span,
+}
+
+impl Owl2DisjointWithAttr {
+    pub fn new(disjoint_classes: Vec<Text>, span: Span) -> Self {
+        Self { disjoint_classes, span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("owl2_disjoint_with") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None    => return Maybe::None,
+        };
+        // Accept two equivalent shapes:
+        //   1. `@owl2_disjoint_with([Foo, Bar])` — single Array list arg
+        //   2. `@owl2_disjoint_with(Foo, Bar)`   — multiple positional args
+        // The parser surfaces (1) as a single ExprKind::Array(ArrayExpr::List)
+        // and (2) as multiple Path / Literal args; both lower to the
+        // same disjoint_classes set. Repeat-form arrays `[x; n]` are
+        // not legal in this context — disjoint-class lists are
+        // semantically a set, repeat would collapse to one class.
+        use crate::expr::{ArrayExpr, ExprKind};
+        let mut classes: Vec<Text> = Vec::new();
+        if args.len() == 1 {
+            let single = args.get(0).unwrap();
+            match &single.kind {
+                ExprKind::Array(ArrayExpr::List(elems)) => {
+                    let mut i: usize = 0;
+                    while i < elems.len() {
+                        if let Some(elem_ref) = elems.get(i) {
+                            if let Some(name) = parse_class_name_arg(elem_ref) {
+                                classes.push(name);
+                            }
+                        }
+                        i += 1;
+                    }
+                }
+                _ => {
+                    // Degenerate single-class form (2).
+                    if let Some(name) = parse_class_name_arg(single) {
+                        classes.push(name);
+                    }
+                }
+            }
+        } else {
+            // Form (2): multiple positional args.
+            for arg in args.iter() {
+                if let Some(name) = parse_class_name_arg(arg) {
+                    classes.push(name);
+                }
+            }
+        }
+        if classes.is_empty() {
+            return Maybe::None;
+        }
+        Maybe::Some(Self::new(classes, attr.span))
+    }
+}
+
+impl Spanned for Owl2DisjointWithAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// One of the seven OWL 2 object-property characteristics from
+/// Shkotin 2019 Table 6 / VUVA §21.6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Owl2Characteristic {
+    Transitive,
+    Symmetric,
+    Asymmetric,
+    Reflexive,
+    Irreflexive,
+    Functional,
+    InverseFunctional,
+}
+
+impl Owl2Characteristic {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Transitive        => "Transitive",
+            Self::Symmetric         => "Symmetric",
+            Self::Asymmetric        => "Asymmetric",
+            Self::Reflexive         => "Reflexive",
+            Self::Irreflexive       => "Irreflexive",
+            Self::Functional        => "Functional",
+            Self::InverseFunctional => "InverseFunctional",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "Transitive"        => Some(Self::Transitive),
+            "Symmetric"         => Some(Self::Symmetric),
+            "Asymmetric"        => Some(Self::Asymmetric),
+            "Reflexive"         => Some(Self::Reflexive),
+            "Irreflexive"       => Some(Self::Irreflexive),
+            "Functional"        => Some(Self::Functional),
+            "InverseFunctional" => Some(Self::InverseFunctional),
+            _                   => None,
+        }
+    }
+}
+
+/// `@owl2_characteristic("Transitive" | "Symmetric" | ...)` — marks
+/// the decorated function (interpreted as an OWL 2 ObjectProperty) with
+/// one of the seven Shkotin Table 6 characteristic flags.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Owl2CharacteristicAttr {
+    pub characteristic: Owl2Characteristic,
+    pub span: Span,
+}
+
+impl Owl2CharacteristicAttr {
+    pub fn new(characteristic: Owl2Characteristic, span: Span) -> Self {
+        Self { characteristic, span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("owl2_characteristic") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None    => return Maybe::None,
+        };
+        if args.len() != 1 {
+            return Maybe::None;
+        }
+        // Accept either a Path (`Transitive`) or a string literal
+        // (`"Transitive"`); both resolve to the canonical enum.
+        let arg = args.get(0).unwrap();
+        let name: Option<Text> = parse_class_name_arg(arg);
+        let parsed = name.and_then(|s| Owl2Characteristic::parse(s.as_str()));
+        match parsed {
+            Some(c) => Maybe::Some(Self::new(c, attr.span)),
+            None    => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for Owl2CharacteristicAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Internal helpers for OwlAttr parsers.
+// -----------------------------------------------------------------------------
+
+/// Parse a named-arg shape `name: "value"` (the parser lowers `:` to
+/// Binary Assign; `=` lowers the same way) where `value` is a string
+/// literal. Returns the literal text when the key matches; None
+/// otherwise.
+fn parse_named_string_arg(
+    arg: &crate::expr::Expr,
+    expected_key: &str,
+) -> Option<Text> {
+    use crate::expr::{BinOp, ExprKind};
+    use crate::literal::{LiteralKind, StringLit};
+    let (left, right) = match &arg.kind {
+        ExprKind::Binary { op: BinOp::Assign, left, right } => (left, right),
+        _ => return None,
+    };
+    let key_ok = match &left.kind {
+        ExprKind::Path(p) => p
+            .segments
+            .last()
+            .and_then(|seg| match seg {
+                crate::ty::PathSegment::Name(id) => Some(id.name.as_str() == expected_key),
+                _ => None,
+            })
+            .unwrap_or(false),
+        _ => false,
+    };
+    if !key_ok {
+        return None;
+    }
+    match &right.kind {
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Text(StringLit::Regular(s))
+            | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Parse a class-name argument: either a Path expression
+/// (`@owl2_subclass_of(Animal)`) or a string literal
+/// (`@owl2_subclass_of("Animal")`). Returns the last path segment or
+/// the literal text. Returns None for any other shape.
+fn parse_class_name_arg(arg: &crate::expr::Expr) -> Option<Text> {
+    use crate::expr::ExprKind;
+    use crate::literal::{LiteralKind, StringLit};
+    match &arg.kind {
+        ExprKind::Path(p) => p.segments.last().and_then(|seg| match seg {
+            crate::ty::PathSegment::Name(id) => Some(id.name.clone()),
+            _ => None,
+        }),
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Text(StringLit::Regular(s))
+            | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// =============================================================================
+// OWL 2 ATTRIBUTION FAMILY — Full §21.6 surface (Phase 3 C8 V1 closeout)
+// =============================================================================
+//
+// V1+ extension covering the three remaining attributes from the
+// VUVA §21.6 catalogue:
+//
+//   @owl2_property(domain = ..., range = ...,
+//                  characteristic = [...], inverse_of = ...)
+//   @owl2_equivalent_class(<class_expr>)
+//   @owl2_has_key(<property>, ...)
+//
+// These complete the four-attribute V1 set (Owl2ClassAttr,
+// Owl2SubClassOfAttr, Owl2DisjointWithAttr, Owl2CharacteristicAttr)
+// shipped earlier in this file. Together the seven attributes round-trip
+// the full OWL 2 Functional-Style Syntax surface that
+// `verum export --to owl2-fs` (B5) produces.
+
+/// `@owl2_property(domain = X, range = Y[, characteristic = [Trans, Sym, ...]][, inverse_of = Foo])`
+///
+/// Marks a Verum function as an OWL 2 ObjectProperty (or DataProperty)
+/// with explicit domain and range types and an optional list of
+/// characteristic flags + an optional inverse-property reference.
+/// Lowers to a chain of `ObjectPropertyDomain` + `ObjectPropertyRange`
+/// + per-flag `<Char>ObjectProperty` axiom invocations + (when
+/// inverse_of is supplied) `InverseObjectProperties`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Owl2PropertyAttr {
+    pub domain: Maybe<Text>,
+    pub range:  Maybe<Text>,
+    pub characteristics: Vec<Owl2Characteristic>,
+    pub inverse_of: Maybe<Text>,
+    pub span: Span,
+}
+
+impl Owl2PropertyAttr {
+    pub fn new(
+        domain: Maybe<Text>,
+        range: Maybe<Text>,
+        characteristics: Vec<Owl2Characteristic>,
+        inverse_of: Maybe<Text>,
+        span: Span,
+    ) -> Self {
+        Self { domain, range, characteristics, inverse_of, span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("owl2_property") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None    => return Maybe::None,
+        };
+        if args.is_empty() {
+            return Maybe::None;
+        }
+        let mut domain: Maybe<Text> = Maybe::None;
+        let mut range:  Maybe<Text> = Maybe::None;
+        let mut characteristics: Vec<Owl2Characteristic> = Vec::new();
+        let mut inverse_of: Maybe<Text> = Maybe::None;
+
+        // Walk each named argument; unknown keys are treated as a
+        // shape error and the whole attribute is rejected — silent
+        // discard would let typos slip through unnoticed.
+        for arg in args.iter() {
+            // Try each known key; first-match wins.
+            if let Some(value) = parse_named_string_arg(arg, "domain") {
+                domain = Maybe::Some(value);
+                continue;
+            }
+            if let Some(value) = parse_named_class_arg(arg, "domain") {
+                domain = Maybe::Some(value);
+                continue;
+            }
+            if let Some(value) = parse_named_string_arg(arg, "range") {
+                range = Maybe::Some(value);
+                continue;
+            }
+            if let Some(value) = parse_named_class_arg(arg, "range") {
+                range = Maybe::Some(value);
+                continue;
+            }
+            if let Some(value) = parse_named_string_arg(arg, "inverse_of") {
+                inverse_of = Maybe::Some(value);
+                continue;
+            }
+            if let Some(value) = parse_named_class_arg(arg, "inverse_of") {
+                inverse_of = Maybe::Some(value);
+                continue;
+            }
+            if let Some(list) = parse_named_characteristic_list_arg(arg, "characteristic") {
+                characteristics = list;
+                continue;
+            }
+            // Unknown / malformed key — reject the whole attribute.
+            return Maybe::None;
+        }
+        // Domain and range are MANDATORY per VUVA §21.6 grammar — the
+        // attribute is meaningless without them.
+        match (&domain, &range) {
+            (Maybe::Some(_), Maybe::Some(_)) => Maybe::Some(Self::new(
+                domain, range, characteristics, inverse_of, attr.span,
+            )),
+            _ => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for Owl2PropertyAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// `@owl2_equivalent_class(<class_expr>)` — declares the decorated
+/// class equivalent to another class expression. Lowers to
+/// `EquivalentClasses(self, expr)` per Shkotin Table 5.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Owl2EquivalentClassAttr {
+    pub equivalent_to: Text,
+    pub span: Span,
+}
+
+impl Owl2EquivalentClassAttr {
+    pub fn new(equivalent_to: Text, span: Span) -> Self {
+        Self { equivalent_to, span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("owl2_equivalent_class") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None    => return Maybe::None,
+        };
+        if args.len() != 1 {
+            return Maybe::None;
+        }
+        let class = parse_class_name_arg(args.get(0).unwrap());
+        match class {
+            Some(c) => Maybe::Some(Self::new(c, attr.span)),
+            None    => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for Owl2EquivalentClassAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// `@owl2_has_key(<prop>, <prop>, ...)` — the NAMED-restricted key
+/// constraint per Shkotin Table 9. The decorated class has a key
+/// composed of the listed properties; two NamedIndividuals agreeing on
+/// every key property must be the same individual.
+///
+/// The NAMED restriction means this constraint applies only to
+/// `NamedIndividual`s, not anonymous individuals — a deliberate OWL 2
+/// design decision per Shkotin §2.3.5; VUVA §21.3 routes HasKey
+/// obligations to `@verify(proof)` because the DL reasoner case
+/// requires a user-supplied tactic.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Owl2HasKeyAttr {
+    pub key_properties: Vec<Text>,
+    pub span: Span,
+}
+
+impl Owl2HasKeyAttr {
+    pub fn new(key_properties: Vec<Text>, span: Span) -> Self {
+        Self { key_properties, span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("owl2_has_key") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None    => return Maybe::None,
+        };
+        if args.is_empty() {
+            return Maybe::None;
+        }
+        // Accept positional list of identifiers (the spec grammar form)
+        // or a single bracketed list. Two equivalent shapes by analogy
+        // with @owl2_disjoint_with.
+        use crate::expr::{ArrayExpr, ExprKind};
+        let mut props: Vec<Text> = Vec::new();
+        if args.len() == 1 {
+            let single = args.get(0).unwrap();
+            match &single.kind {
+                ExprKind::Array(ArrayExpr::List(elems)) => {
+                    for elem in elems.iter() {
+                        if let Some(name) = parse_class_name_arg(elem) {
+                            props.push(name);
+                        }
+                    }
+                }
+                _ => {
+                    if let Some(name) = parse_class_name_arg(single) {
+                        props.push(name);
+                    }
+                }
+            }
+        } else {
+            for arg in args.iter() {
+                if let Some(name) = parse_class_name_arg(arg) {
+                    props.push(name);
+                }
+            }
+        }
+        if props.is_empty() {
+            return Maybe::None;
+        }
+        Maybe::Some(Self::new(props, attr.span))
+    }
+}
+
+impl Spanned for Owl2HasKeyAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Internal helpers — extension of the OwlAttr parsing infrastructure
+// -----------------------------------------------------------------------------
+
+/// Parse a named-arg `key = ClassName` shape where the value is a Path
+/// (rather than a string literal). Mirrors `parse_named_string_arg`
+/// for the typed-class-reference case used by `@owl2_property(domain
+/// = Animal)` etc.
+fn parse_named_class_arg(
+    arg: &crate::expr::Expr,
+    expected_key: &str,
+) -> Option<Text> {
+    use crate::expr::{BinOp, ExprKind};
+    let (left, right) = match &arg.kind {
+        ExprKind::Binary { op: BinOp::Assign, left, right } => (left, right),
+        _ => return None,
+    };
+    let key_ok = match &left.kind {
+        ExprKind::Path(p) => p
+            .segments
+            .last()
+            .and_then(|seg| match seg {
+                crate::ty::PathSegment::Name(id) => Some(id.name.as_str() == expected_key),
+                _ => None,
+            })
+            .unwrap_or(false),
+        _ => false,
+    };
+    if !key_ok {
+        return None;
+    }
+    parse_class_name_arg(right)
+}
+
+/// Parse a named-arg `characteristic = [Transitive, Symmetric, ...]`
+/// shape. Returns the parsed list when the key matches and every
+/// element is a recognised characteristic; None otherwise.
+fn parse_named_characteristic_list_arg(
+    arg: &crate::expr::Expr,
+    expected_key: &str,
+) -> Option<Vec<Owl2Characteristic>> {
+    use crate::expr::{ArrayExpr, BinOp, ExprKind};
+    let (left, right) = match &arg.kind {
+        ExprKind::Binary { op: BinOp::Assign, left, right } => (left, right),
+        _ => return None,
+    };
+    let key_ok = match &left.kind {
+        ExprKind::Path(p) => p
+            .segments
+            .last()
+            .and_then(|seg| match seg {
+                crate::ty::PathSegment::Name(id) => Some(id.name.as_str() == expected_key),
+                _ => None,
+            })
+            .unwrap_or(false),
+        _ => false,
+    };
+    if !key_ok {
+        return None;
+    }
+    let elems = match &right.kind {
+        ExprKind::Array(ArrayExpr::List(es)) => es,
+        _ => return None,
+    };
+    let mut chars: Vec<Owl2Characteristic> = Vec::new();
+    for elem in elems.iter() {
+        let name = parse_class_name_arg(elem)?;
+        let ch = Owl2Characteristic::parse(name.as_str())?;
+        chars.push(ch);
+    }
+    Some(chars)
+}
