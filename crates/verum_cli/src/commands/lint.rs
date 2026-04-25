@@ -3645,6 +3645,129 @@ fn emit_tap(issues: &[LintIssue]) {
 /// `run_with_format`. Always falls through to the per-format emitter
 /// `run_with_format` for json/github-actions, or the existing
 /// `execute` for pretty (with the new layers wired in).
+/// CLI entry: `verum lint --watch`. Lints once, then enters a debounced
+/// file-watch loop that re-lints on every `.vr` change. Uses the same
+/// per-file cache as one-shot runs, so untouched files cost ~nothing
+/// per iteration.
+///
+/// The loop never returns an error to the caller — Ctrl-C is the
+/// signal to exit. Lint failures are printed and the watch resumes;
+/// build crashes never abort the watch.
+pub fn run_watch(
+    fix: bool,
+    deny_warnings: bool,
+    format: LintOutputFormat,
+    profile: Option<String>,
+    since: Option<String>,
+    severity_min: Option<LintLevel>,
+    clear: bool,
+) -> Result<()> {
+    use notify::{Event, RecursiveMode, Watcher};
+    use std::sync::mpsc::{channel, RecvTimeoutError};
+    use std::time::{Duration, Instant};
+
+    // Initial run — establish the cache and surface every issue.
+    print_watch_banner(clear, "initial scan");
+    let _ = run_extended(
+        fix,
+        deny_warnings,
+        format,
+        profile.clone(),
+        since.clone(),
+        severity_min,
+    );
+
+    let (tx, rx) = channel::<Event>();
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
+        if let Ok(ev) = res {
+            let _ = tx.send(ev);
+        }
+    })?;
+
+    // Watch every existing search root recursively.
+    for d in ["src", "core"] {
+        let p = PathBuf::from(d);
+        if p.exists() {
+            watcher.watch(&p, RecursiveMode::Recursive)?;
+        }
+    }
+    watcher.watch(Path::new("verum.toml"), RecursiveMode::NonRecursive).ok();
+
+    ui::step("Watching for changes — press Ctrl-C to exit.");
+
+    // Debounce: after a burst of events, wait DEBOUNCE_MS of quiet
+    // before triggering a re-lint. Tracks both the last event arrival
+    // time and whether at least one event has accumulated.
+    const DEBOUNCE: Duration = Duration::from_millis(300);
+
+    loop {
+        // Block until the first event arrives.
+        let first = match rx.recv() {
+            Ok(ev) => ev,
+            Err(_) => break,
+        };
+        if !is_relevant_event(&first) {
+            continue;
+        }
+
+        // Drain follow-up events for DEBOUNCE_MS.
+        let mut last_event = Instant::now();
+        let mut saw_any = true;
+        while saw_any {
+            let remaining = DEBOUNCE.saturating_sub(last_event.elapsed());
+            match rx.recv_timeout(remaining) {
+                Ok(ev) => {
+                    if is_relevant_event(&ev) {
+                        last_event = Instant::now();
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            }
+            saw_any = last_event.elapsed() < DEBOUNCE;
+        }
+
+        print_watch_banner(clear, "change detected, re-running");
+        let _ = run_extended(
+            fix,
+            deny_warnings,
+            format,
+            profile.clone(),
+            since.clone(),
+            severity_min,
+        );
+        ui::step("Watching for changes — press Ctrl-C to exit.");
+    }
+    Ok(())
+}
+
+fn print_watch_banner(clear: bool, label: &str) {
+    if clear {
+        // ANSI clear-screen + cursor-home. Avoids piling up scrollback
+        // in long watch sessions.
+        print!("\x1B[2J\x1B[H");
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    ui::step(&format!("verum lint --watch [{}] {}", now, label));
+}
+
+fn is_relevant_event(ev: &notify::Event) -> bool {
+    use notify::EventKind;
+    matches!(
+        ev.kind,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    ) && ev
+        .paths
+        .iter()
+        .any(|p| {
+            p.extension().and_then(|s| s.to_str()) == Some("vr")
+                || p.file_name().and_then(|s| s.to_str()) == Some("verum.toml")
+        })
+}
+
 pub fn run_extended(
     fix: bool,
     deny_warnings: bool,
