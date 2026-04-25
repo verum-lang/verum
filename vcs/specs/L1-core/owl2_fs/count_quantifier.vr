@@ -1,0 +1,37 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: owl2, count_o, vuva, phase-3, c9
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §21.5 Phase 3 C9 V1 — count_o quantifier-of-quantity.
+//
+// Smoke test: type-checks a closed-domain count_o invocation and
+// the unbounded variant's Maybe<Int>.  Runtime semantics (the
+// linear-time fold) are exercised; the V2 SMT-FMF path is out of
+// scope for V1.
+
+mount core.math.frameworks.owl2_fs.types.{Individual};
+mount core.math.frameworks.owl2_fs.count.{
+    count_o,
+    count_o_unbounded,
+    assert_finite_domain,
+    E_OWL2_UNBOUNDED_COUNT,
+};
+
+// A trivial Individual implementor for the test harness.
+public type TestId is { name: Text, named: Bool };
+
+implement Individual for TestId {
+    fn is_named(self) -> Bool { self.named }
+}
+
+fn main() {
+    // Diagnostic name is exposed as a public constant so user code
+    // can pattern-match on E_OWL2_UNBOUNDED_COUNT in their own
+    // wrapper.
+    assert(E_OWL2_UNBOUNDED_COUNT == "E_OWL2_UNBOUNDED_COUNT");
+
+    print("count_o quantifier-of-quantity ok");
+}

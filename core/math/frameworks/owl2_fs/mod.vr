@@ -53,6 +53,7 @@
 // =============================================================================
 
 public mount core.math.frameworks.owl2_fs.types;
+public mount core.math.frameworks.owl2_fs.count;
 public mount core.math.frameworks.owl2_fs.object_property;
 public mount core.math.frameworks.owl2_fs.data_range;
 public mount core.math.frameworks.owl2_fs.class_expr;
