@@ -182,10 +182,20 @@ impl VbcCodegenPhase {
         // Step 1: Build CFGs for all functions in the module
         let module_cfg = CfgConstructor::from_module(module);
 
-        // Step 2: Run tier analysis on each function's CFG
+        // Step 2: Run tier analysis on each function's CFG.
+        //
+        // ModuleCfg.functions is verum_common::Map (HashMap-backed), so
+        // raw iteration order leaks Rust's per-process random hasher
+        // seed into TierContext merge order — which in turn leaks into
+        // VBC bytecode emission.  Sort by FunctionId so the bytecode
+        // is byte-identical across runs.
+        // See #143 / project_loom_quality_pivot_2026-04-25.md.
         let mut tier_context = TierContext::new();
 
-        for (_func_id, func_cfg) in module_cfg.functions.iter() {
+        let mut sorted_funcs: Vec<_> = module_cfg.functions.iter().collect();
+        sorted_funcs.sort_by_key(|(id, _)| id.0);
+
+        for (_func_id, func_cfg) in sorted_funcs {
             // Create analyzer for this function's CFG
             let analyzer = TierAnalyzer::with_config(
                 func_cfg.cfg.clone(),

@@ -965,8 +965,14 @@ impl VbcCodegen {
     ///
     /// This is used during stdlib compilation to make protocol default
     /// methods from earlier modules available for impl blocks in later modules.
+    /// Iteration is sorted by name so that downstream codegen sees
+    /// protocols in a deterministic order — this matters because some
+    /// later passes assign function IDs in iteration order.
     pub fn import_protocols(&mut self, protocols: &std::collections::HashMap<String, ProtocolInfo>) {
-        for (name, info) in protocols {
+        let mut sorted: Vec<&String> = protocols.keys().collect();
+        sorted.sort();
+        for name in sorted {
+            let info = &protocols[name];
             self.protocol_registry.entry(name.clone()).or_insert_with(|| info.clone());
         }
     }
@@ -1178,7 +1184,21 @@ impl VbcCodegen {
                 let empty = std::collections::HashSet::new();
                 let overrides = per_proto_overrides.get(&proto_name).unwrap_or(&empty);
 
-                for (method_name, default_func) in protocol_info.default_methods.iter() {
+                // Iterate default methods in a deterministic order.  Without
+                // the sort, HashMap iteration order leaks Rust's per-process
+                // random hasher seed into VBC function-ID assignment, which
+                // makes the same source emit different bytecode each run.
+                // Symptom matrix included "method 'X.next' not found",
+                // "Null pointer dereference", "Division by zero", and
+                // "field index 2 (offset 24) exceeds object data size 8" —
+                // all trigger when run-time dispatch reads a function ID
+                // that was assigned to a different method in the run that
+                // produced the bytecode.
+                let mut sorted_methods: Vec<(&String, &verum_ast::FunctionDecl)> =
+                    protocol_info.default_methods.iter().collect();
+                sorted_methods.sort_by(|a, b| a.0.cmp(b.0));
+
+                for (method_name, default_func) in sorted_methods {
                     if overrides.contains(method_name) {
                         continue;
                     }
@@ -4044,10 +4064,16 @@ impl VbcCodegen {
                 // Check if this is a TYPE name import (e.g., `mount sys.io_engine.{IoError}`).
                 // Type names aren't functions themselves, but their variant constructors
                 // are registered as `TypeName.Variant`. Import all qualified constructors.
+                // Iterate sorted for deterministic registration order (HashMap iter
+                // would otherwise leak per-process random hasher seed into bytecode).
                 let type_prefix = format!("{}.", func_name);
-                let type_constructors: Vec<(String, FunctionInfo)> = self.ctx.functions.iter()
-                    .filter(|(name, _)| name.starts_with(&type_prefix))
-                    .map(|(name, info)| (name.clone(), info.clone()))
+                let mut sorted_keys: Vec<&String> = self.ctx.functions.keys()
+                    .filter(|name| name.starts_with(&type_prefix))
+                    .collect();
+                sorted_keys.sort();
+                let type_constructors: Vec<(String, FunctionInfo)> = sorted_keys
+                    .into_iter()
+                    .map(|name| (name.clone(), self.ctx.functions[name].clone()))
                     .collect();
                 if !type_constructors.is_empty() {
                     for (qualified, info) in type_constructors {
@@ -4096,9 +4122,17 @@ impl VbcCodegen {
                     None
                 };
 
-                // Collect matching functions to avoid borrow conflict
+                // Collect matching functions to avoid borrow conflict.
+                // Iterate by sorted qualified name so that when two
+                // qualified names share a bare suffix the deterministic
+                // pick is stable across runs (HashMap iteration order
+                // would otherwise leak Rust's per-process random hasher
+                // seed into bytecode-emission order).
+                let mut sorted_names: Vec<&String> = self.ctx.functions.keys().collect();
+                sorted_names.sort();
                 let mut to_register: Vec<(String, FunctionInfo)> = Vec::new();
-                for (name, info) in self.ctx.functions.iter() {
+                for name in sorted_names {
+                    let info = &self.ctx.functions[name];
                     // Match qualified names like "core.io.protocols.StreamError" for prefix "io."
                     let matches = name.starts_with(&prefix_dot)
                         || core_prefix_dot.as_ref().is_some_and(|cp| name.starts_with(cp));
