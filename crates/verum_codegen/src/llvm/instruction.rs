@@ -1708,6 +1708,92 @@ pub fn lower_instruction<'ctx>(
             Ok(())
         }
 
+        // ====================================================================
+        // Dependent-type runtime packaging (T1-H, FIPS-equivalent in spirit):
+        //   MakePi (0x8D) — Π function value: {param, return_type_id}
+        //   MakeSigma (0x8E) — Σ pair: {witness, payload}
+        //   MakeWitness (0x8F) — refined value with proof hash: {value, proof_hash}
+        //
+        // All three share the variant-shaped 2-slot payload layout
+        // (OBJECT_HEADER_SIZE + 8-byte tag/len word + 2 × 8-byte slots),
+        // so the same `lower_make_variant(tag=0, field_count=2)` carrier
+        // works for the allocation; only the slot-write semantics differ.
+        // The TypeId distinction (PI=524 / SIGMA=525 / WITNESS=526)
+        // observed by the interpreter is implicit at AOT — the heap
+        // header carries the variant marker, and well-typed downstream
+        // reads via GetVariantData with field 0/1 already produce the
+        // right answer regardless of the tag. (When a future
+        // `PiProj` / `SigmaFst` / `SigmaSnd` opcode lands, that opcode
+        // can introspect the TypeId via the runtime.)
+        //
+        // Optimisation note: the spec allows Tier-1 to elide
+        // MakeWitness once the static verifier discharged the predicate
+        // — the materialisation here exists so subsequent
+        // `GetVariantData(witness, 0)` reads the original value, but
+        // LLVM's DCE pass elides the whole alloc when the witness
+        // register is unused downstream (no GetVariantData / GetTag /
+        // SetVariantData on the register). When it IS used, the
+        // alloc is needed for byte-exact parity with the interpreter.
+        // Future improvement (#80 follow-up): annotate the carrier
+        // alloc with `noalias` + `nofree` + `inaccessiblememonly` so
+        // the optimiser can hoist projections through unrelated calls.
+        Instruction::MakePi { dst, param, return_type_id } => {
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let i64_type = ctx.types().i64_type();
+            let carrier = runtime.lower_make_variant(ctx.builder(), ctx.get_module(), 0, 2)?;
+
+            // Slot 0 — captured parameter (Value)
+            let slot0 = as_i64(ctx, ctx.get_register(param.0)?, "pi_param")?;
+            runtime.lower_set_variant_data(ctx.builder(), carrier, 0, slot0)?;
+
+            // Slot 1 — return type id widened to i64 (FIPS-style fixed-width
+            // payload so a later projection can use the same i64 read path
+            // as for Sigma's pointer-bearing slot 1).
+            let slot1 = i64_type.const_int(*return_type_id as u64, false);
+            runtime.lower_set_variant_data(ctx.builder(), carrier, 1, slot1)?;
+
+            ctx.set_register(dst.0, carrier.into());
+            ctx.mark_variant_register(dst.0);
+            Ok(())
+        }
+
+        Instruction::MakeSigma { dst, witness, payload } => {
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let carrier = runtime.lower_make_variant(ctx.builder(), ctx.get_module(), 0, 2)?;
+
+            // Slot 0 — witness (the projection-0 component)
+            let slot0 = as_i64(ctx, ctx.get_register(witness.0)?, "sigma_witness")?;
+            runtime.lower_set_variant_data(ctx.builder(), carrier, 0, slot0)?;
+
+            // Slot 1 — payload (the dependent component, type U(witness))
+            let slot1 = as_i64(ctx, ctx.get_register(payload.0)?, "sigma_payload")?;
+            runtime.lower_set_variant_data(ctx.builder(), carrier, 1, slot1)?;
+
+            ctx.set_register(dst.0, carrier.into());
+            ctx.mark_variant_register(dst.0);
+            Ok(())
+        }
+
+        Instruction::MakeWitness { dst, value, proof_hash } => {
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let i64_type = ctx.types().i64_type();
+            let carrier = runtime.lower_make_variant(ctx.builder(), ctx.get_module(), 0, 2)?;
+
+            // Slot 0 — refined value
+            let slot0 = as_i64(ctx, ctx.get_register(value.0)?, "witness_value")?;
+            runtime.lower_set_variant_data(ctx.builder(), carrier, 0, slot0)?;
+
+            // Slot 1 — 32-bit proof hash widened to i64. The static
+            // verifier emits this hash so downstream gradual-verification
+            // boundaries can compare without re-running the SMT solver.
+            let slot1 = i64_type.const_int(*proof_hash as u64, false);
+            runtime.lower_set_variant_data(ctx.builder(), carrier, 1, slot1)?;
+
+            ctx.set_register(dst.0, carrier.into());
+            ctx.mark_variant_register(dst.0);
+            Ok(())
+        }
+
         Instruction::SetVariantData { variant, field, value } => {
             let variant_val = ctx.get_register(variant.0)?;
             let variant_ptr = match variant_val {
