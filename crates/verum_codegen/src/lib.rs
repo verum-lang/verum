@@ -110,6 +110,10 @@ pub mod mlir;
 // VBC → LLVM IR lowering (Tier 1/2 JIT, Tier 3 AOT)
 pub mod llvm;
 
+// AOT-time analysis & transformation passes operating on VbcModule
+// before lowering. See passes/mod.rs for the catalogue.
+pub mod passes;
+
 // Linking infrastructure (integrated from verum_link)
 pub mod link;
 
