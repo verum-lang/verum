@@ -1,0 +1,45 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: codegen, regression, variant-tag, result-match
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Regression: L6 open_memory Result<_,_> match dispatch (task #146).
+//
+// `l6_session::open_memory(CmAdmin)` returns `Result<Connection,
+// ConnectionError>` and ALWAYS produces `Ok(_)` for an in-memory open.
+// Without the L1 import below, the consumer's match dispatch picks the
+// `Err(_)` arm — Result variant-tag drift between producer's bytecode
+// (compiled with full type info for Connection's `pager: Pager` field)
+// and consumer's bytecode (compiled without `Pager` in scope).
+//
+// Workaround: explicit `mount l1_pager.{Pager, pager_open_memory}`
+// brings the transitive Pager type into the consumer's type table so
+// codegen can align variant tags.
+//
+// Once the layout-invariant verification pass (#146) lands, the L1
+// import will become unnecessary; flip the test then by removing it
+// and confirming green.
+
+mount core.database.sqlite.native.l1_pager.{Pager, pager_open_memory};
+mount core.database.sqlite.native.l6_session.{
+    Connection, ConnectionError, ConnectionMode, open_memory,
+};
+mount base.{Result, Ok, Err};
+
+fn main() {
+    print("L1 pager_open_memory");
+    match pager_open_memory() {
+        Ok(_)  => print("  Ok"),
+        Err(_) => { panic("L1 pager_open_memory unexpectedly Err"); return; }
+    }
+
+    print("L6 open_memory(CmAdmin)");
+    match open_memory(CmAdmin) {
+        Ok(_)  => print("  Ok"),
+        Err(_) => { panic("L6 open_memory unexpectedly Err — variant-tag layout drift; #146"); return; }
+    }
+
+    print("done");
+}
