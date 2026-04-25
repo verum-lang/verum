@@ -5208,6 +5208,144 @@ impl std::fmt::Display for EnactAttr {
 }
 
 // =============================================================================
+// @require_extension / @disable_extension — VFE §0.0 governance gate
+// =============================================================================
+
+/// VFE §0.0 governance — `@require_extension(vfe_N)` opts a module /
+/// declaration into a specific VFE extension's kernel rules /
+/// strategies / typed attributes. Without this annotation the kernel
+/// runs in VUVA-baseline mode for the affected scope.
+///
+/// Per the VFE rollout policy:
+///   • Year 0–2: opt-in only (`@require_extension(vfe_N)`).
+///   • Year 2–4: extensions become default; opt-out via
+///                `@disable_extension(vfe_N)`.
+///   • Year 4+:   opt-out is removed; extension is a hard requirement.
+///
+/// `kind` discriminates require vs disable; `extension` is the
+/// foundation-neutral identifier (`vfe_1`, `vfe_2`, …, `vfe_10`,
+/// `vfe_plus_1`, …) of the extension being toggled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExtensionToggleKind {
+    /// `@require_extension(vfe_N)` — opt-in.
+    Require,
+    /// `@disable_extension(vfe_N)` — opt-out (during deprecation window).
+    Disable,
+}
+
+impl ExtensionToggleKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExtensionToggleKind::Require => "require_extension",
+            ExtensionToggleKind::Disable => "disable_extension",
+        }
+    }
+}
+
+/// Typed attribute for `@require_extension(vfe_N)` /
+/// `@disable_extension(vfe_N)`. The `extension` field holds the
+/// validated extension identifier; the `kind` field discriminates
+/// require / disable so the elaborator can run two parallel
+/// extension-set walks.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExtensionRequirementAttr {
+    /// Whether this is a `@require_extension` or `@disable_extension`.
+    pub kind: ExtensionToggleKind,
+    /// Foundation-neutral extension identifier, e.g. `"vfe_1"`,
+    /// `"vfe_2"`, …, `"vfe_10"`, `"vfe_plus_1"`, … . The validator
+    /// in `from_attribute` accepts only the canonical pattern
+    /// `vfe_<digits>` or `vfe_plus_<digits>` so future extensions
+    /// register cleanly without grammar changes.
+    pub extension: Text,
+    pub span: Span,
+}
+
+impl ExtensionRequirementAttr {
+    pub fn new(kind: ExtensionToggleKind, extension: Text, span: Span) -> Self {
+        Self { kind, extension, span }
+    }
+
+    /// Validate an extension identifier. Accepts `vfe_<digits>` and
+    /// `vfe_plus_<digits>`; everything else is a structural error.
+    /// Returns the canonical (lowercased) form on success.
+    pub fn canonicalise_extension(raw: &str) -> Option<String> {
+        let lowered = raw.to_ascii_lowercase();
+        // Match `vfe_<digits>` or `vfe_plus_<digits>`.
+        let body = lowered.strip_prefix("vfe_")?;
+        // Body must be either pure digits, or `plus_<digits>`.
+        let body = body.strip_prefix("plus_").map(|t| (true, t)).unwrap_or((false, body));
+        let (plus, digits) = body;
+        if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        if plus {
+            Some(format!("vfe_plus_{}", digits))
+        } else {
+            Some(format!("vfe_{}", digits))
+        }
+    }
+
+    /// Extract from a generic Attribute. Accepts both forms:
+    ///
+    ///   @require_extension(vfe_1)
+    ///   @disable_extension(vfe_2)
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        let kind = match attr.name.as_str() {
+            "require_extension" => ExtensionToggleKind::Require,
+            "disable_extension" => ExtensionToggleKind::Disable,
+            _ => return Maybe::None,
+        };
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None => return Maybe::None,
+        };
+        if args.len() != 1 {
+            return Maybe::None;
+        }
+        use crate::expr::{Expr, ExprKind};
+        // Accept either a bare path identifier (vfe_1) or a string
+        // literal ("vfe_1"). The path form is canonical.
+        let raw_opt: Option<String> = match args.get(0) {
+            Some(Expr { kind: ExprKind::Path(p), .. }) => p
+                .segments
+                .last()
+                .and_then(|seg| match seg {
+                    crate::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    _ => None,
+                }),
+            Some(Expr { kind: ExprKind::Literal(lit), .. }) => match &lit.kind {
+                crate::literal::LiteralKind::Text(crate::literal::StringLit::Regular(s))
+                | crate::literal::LiteralKind::Text(crate::literal::StringLit::MultiLine(s)) => {
+                    Some(s.as_str().to_string())
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        let canonical = raw_opt
+            .as_ref()
+            .and_then(|s| Self::canonicalise_extension(s.as_str()))
+            .map(Text::from);
+        match canonical {
+            Some(c) => Maybe::Some(Self::new(kind, c, attr.span)),
+            None => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for ExtensionRequirementAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for ExtensionRequirementAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}({})", self.kind.as_str(), self.extension)
+    }
+}
+
+// =============================================================================
 // OWL 2 ATTRIBUTION FAMILY (VUVA §21.6 Phase 3 C8 V1)
 //
 // Vocabulary-preserving typed attributes for the OWL 2 Direct Semantics
