@@ -2579,31 +2579,42 @@ impl VbcCodegen {
     ///
     /// Spec hooks: `verum_vbc::types::VariantKind`,
     /// `verum_vbc::types::VariantDescriptor`.
-    fn verify_type_layout_invariants(&self) -> CodegenResult<()> {
+    pub fn verify_type_layout_invariants(&self) -> CodegenResult<()> {
+        Self::check_type_layout_invariants_inner(&self.types, &self.ctx.strings)
+    }
+
+    /// Test-only: intern a string in the codegen's string table and
+    /// return its index, for constructing synthetic TypeDescriptors in
+    /// integration tests of `verify_type_layout_invariants`.
+    #[doc(hidden)]
+    pub fn intern_string_for_test(&mut self, s: &str) -> u32 {
+        self.ctx.intern_string_raw(s)
+    }
+
+    /// Test-only: push a synthetic `TypeDescriptor` into the codegen's
+    /// type table.  Used by integration tests for the layout verifier
+    /// to construct deliberately-malformed types and assert the
+    /// verifier rejects them.
+    #[doc(hidden)]
+    pub fn push_type_for_test(&mut self, ty: crate::types::TypeDescriptor) {
+        self.types.push(ty);
+    }
+
+    fn check_type_layout_invariants_inner(
+        types: &[crate::types::TypeDescriptor],
+        strings: &[String],
+    ) -> CodegenResult<()> {
         use crate::types::VariantKind;
-        for ty in &self.types {
+        let resolve_name = |idx: u32| -> String {
+            strings.get(idx as usize).cloned().unwrap_or_else(|| format!("<id {}>", idx))
+        };
+        for ty in types {
             if ty.variants.is_empty() {
                 continue;
             }
-            // Pre-compute the type name once for diagnostic messages.
-            // Look it up via the codegen string table; fallback to the
-            // raw StringId index when the string isn't yet interned
-            // (shouldn't happen at finalize time but is harmless).
-            let type_name: String = self
-                .ctx
-                .strings
-                .get(ty.name.0 as usize)
-                .cloned()
-                .unwrap_or_else(|| format!("<TypeId({})>", ty.id.0));
-
-            // Per-variant shape invariants.
+            let type_name = resolve_name(ty.name.0);
             for v in &ty.variants {
-                let v_name: String = self
-                    .ctx
-                    .strings
-                    .get(v.name.0 as usize)
-                    .cloned()
-                    .unwrap_or_else(|| format!("<variant tag {}>", v.tag));
+                let v_name = resolve_name(v.name.0);
                 match v.kind {
                     VariantKind::Unit => {
                         if v.arity != 0 || !v.fields.is_empty() {
@@ -2611,10 +2622,7 @@ impl VbcCodegen {
                                 "type-layout invariant: variant `{}.{}` is `Unit` \
                                  but has arity={} and {} record-field(s); \
                                  unit variants must carry no payload",
-                                type_name,
-                                v_name,
-                                v.arity,
-                                v.fields.len(),
+                                type_name, v_name, v.arity, v.fields.len(),
                             )));
                         }
                     }
@@ -2625,10 +2633,7 @@ impl VbcCodegen {
                                  (arity={}) but also has {} record-field(s); \
                                  tuple variants store payload count in `arity`, \
                                  not `fields`",
-                                type_name,
-                                v_name,
-                                v.arity,
-                                v.fields.len(),
+                                type_name, v_name, v.arity, v.fields.len(),
                             )));
                         }
                         if v.arity == 0 {
@@ -2647,10 +2652,7 @@ impl VbcCodegen {
                                  (with {} field(s)) but also reports arity={}; \
                                  record variants store payload count in `fields`, \
                                  not `arity`",
-                                type_name,
-                                v_name,
-                                v.fields.len(),
-                                v.arity,
+                                type_name, v_name, v.fields.len(), v.arity,
                             )));
                         }
                         if v.fields.is_empty() {
@@ -2664,10 +2666,6 @@ impl VbcCodegen {
                     }
                 }
             }
-
-            // Cross-variant: tags must be dense `0..n` with no gaps and
-            // no duplicates.  The runtime indexes the variants array by
-            // tag during dispatch.
             let n = ty.variants.len() as u32;
             let mut seen = vec![false; n as usize];
             for v in &ty.variants {

@@ -114,3 +114,10 @@ harness = false
 [[bench]]
 name = "production_targets"
 harness = false
+
+# Layout-invariant verifier integration tests need the `codegen` feature
+# because they construct synthetic `TypeDescriptor` values via the
+# codegen surface and call `VbcCodegen::verify_type_layout_invariants`.
+[[test]]
+name = "layout_invariant_verifier_tests"
+required-features = ["codegen"]
