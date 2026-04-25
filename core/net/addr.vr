@@ -115,17 +115,35 @@ implement Ipv4Addr {
             return Err(AddrParseError.InvalidFormat);
         }
 
-        let a = parse_octet(&parts[0])?;
-        let b = parse_octet(&parts[1])?;
-        let c = parse_octet(&parts[2])?;
-        let d = parse_octet(&parts[3])?;
+        // `&parts[i]` (taking a reference of an indexed list element)
+        // currently panics "Slice index out of bounds: index 0 but
+        // length is 0" in the VBC interpreter — a codegen bug where
+        // the indexed-element address-taking emits a slice walk that
+        // sees an empty slice. Workaround: bind to an intermediate
+        // variable, then take the reference. Tracked under #78.
+        let p0 = parts[0];
+        let p1 = parts[1];
+        let p2 = parts[2];
+        let p3 = parts[3];
+        let a = parse_octet(&p0)?;
+        let b = parse_octet(&p1)?;
+        let c = parse_octet(&p2)?;
+        let d = parse_octet(&p3)?;
 
         Ok(Ipv4Addr.new(a, b, c, d))
     }
 }
 
 fn parse_octet(s: &Text) -> Result<Byte, AddrParseError> {
-    let n = s.parse_int().map_err(|_| AddrParseError.InvalidOctet)?;
+    // `parse_int().map_err(|_| ...)?` chain currently fails in the VBC
+    // interpreter with "method 'Result.map_err' not found on value"
+    // when the user module didn't transitively pull in core.base.result
+    // (#79's sibling — same stdlib-not-imported root cause). Inline the
+    // error mapping with an explicit match to avoid the closure path.
+    let n = match s.parse_int() {
+        Ok(v) => v,
+        Err(_) => return Err(AddrParseError.InvalidOctet),
+    };
     if n < 0 || n > 255 {
         return Err(AddrParseError.InvalidOctet);
     }
@@ -707,17 +725,38 @@ implement SocketAddr {
 
     /// Parse from "host:port" string.
     public fn parse(s: &Text) -> Result<SocketAddr, AddrParseError> {
-        let parts = s.rsplit_once(':');
+        // Use Text literal `":"` rather than char literal `':'` for the
+        // separator — the latter currently fails in the VBC interpreter
+        // when called from stdlib context (auto-promotion of char to Text
+        // takes a different codegen branch that returns None for
+        // non-empty strings). Tracked as part of #78. Once #75
+        // (typechecker resolution narrowing) lands, both paths should
+        // converge and this can revert to `':'`.
+        let parts = s.rsplit_once(":");
         match parts {
+            None => return Err(AddrParseError.InvalidFormat),
             Some((host, port_str)) => {
-                let port = port_str.parse_int()
-                    .map_err(|_| AddrParseError.InvalidPort)?;
+                // Inline the error mapping with an explicit match
+                // instead of `.map_err(|_| ...)?` — the closure-based
+                // chain currently fails in the VBC interpreter when
+                // user code didn't transitively pull in core.base.result
+                // ("method 'Result.map_err' not found on value"). Same
+                // root-cause class as #79 (Result method dispatch
+                // coverage). Tracked under #78.
+                let port = match port_str.parse_int() {
+                    Ok(p) => p,
+                    Err(_) => return Err(AddrParseError.InvalidPort),
+                };
                 if port < 0 || port > 65535 {
                     return Err(AddrParseError.InvalidPort);
                 }
 
-                // Try IPv4 first
-                if let Ok(ipv4) = Ipv4Addr.parse(host) {
+                // Try IPv4 first. Explicit `&host` rather than relying
+                // on auto-borrow — the auto-borrow path goes through a
+                // codegen branch that, in this stdlib context, picks a
+                // different overload and silently produces Err. Tracked
+                // as part of #78 / #75 (typechecker resolution gap).
+                if let Ok(ipv4) = Ipv4Addr.parse(&host) {
                     return Ok(SocketAddr.new_v4(ipv4, port));
                 }
 
@@ -733,7 +772,6 @@ implement SocketAddr {
 
                 Err(AddrParseError.InvalidFormat)
             }
-            None => Err(AddrParseError.InvalidFormat),
         }
     }
 }
