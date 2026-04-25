@@ -11,7 +11,7 @@ mount core.database.sqlite.native.compile_options_pragma.flags.{
     category_name, classify,
     enables_fts5, enables_rtree, enables_json1, enables_geopoly,
     has_option,
-    Availability, AvAvailable, AvOmitted, AvNotEnabled,
+    CompileOptionAvailability, AvAvailable, AvOmitted, AvNotEnabled,
     availability_name, is_available, resolve,
 };
 mount base.{Bool, Text};

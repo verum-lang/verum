@@ -253,17 +253,17 @@ implement Debug for WriteError {
 public type FormatResult is Result<(), FormatError>;
 
 // =============================================================================
-// Alignment
+// TextAlignment
 // =============================================================================
 
 // Text alignment in formatted output.
-public type Alignment is
+public type TextAlignment is
     | Left      // Left-align (default)
     | Center    // Center-align
     | Right;    // Right-align
 
-implement Default for Alignment {
-    fn default() -> Alignment {
+implement Default for TextAlignment {
+    fn default() -> TextAlignment {
         Left
     }
 }
@@ -292,8 +292,8 @@ implement Default for Sign {
 public type FormatSpec is {
     // Fill character for padding
     fill: Char,
-    // Alignment mode
-    align: Alignment,
+    // TextAlignment mode
+    align: TextAlignment,
     // Sign handling for numbers
     sign: Sign,
     // Minimum width
@@ -333,7 +333,7 @@ implement FormatSpec {
     }
 
     // Set alignment.
-    fn with_align(mut self, a: Alignment) -> FormatSpec {
+    fn with_align(mut self, a: TextAlignment) -> FormatSpec {
         self.align = a;
         self
     }
@@ -697,7 +697,7 @@ implement Formatter {
     }
 
     // Get current alignment.
-    public fn align(&self) -> Alignment {
+    public fn align(&self) -> TextAlignment {
         self.spec.align
     }
 

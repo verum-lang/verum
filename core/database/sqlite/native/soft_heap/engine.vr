@@ -10,7 +10,7 @@
 //   3. Fire SoftThresholdCrossing — handler reclaims K bytes; retry
 //   4. If `used + bytes ≤ hard.threshold` (after reclaim) → succeed
 //   5. Fire HardThresholdImminent → handler reclaims more; retry
-//   6. If still over hard → return AllocOutcome.Refused (NOMEM)
+//   6. If still over hard → return SoftHeapAllocOutcome.Refused (NOMEM)
 // =============================================================================
 
 module core.database.sqlite.native.soft_heap.engine;
@@ -25,16 +25,16 @@ mount core.database.sqlite.native.soft_heap.pressure.{
 };
 
 // -----------------------------------------------------------------------------
-// AllocOutcome
+// SoftHeapAllocOutcome
 // -----------------------------------------------------------------------------
 
-public type AllocOutcome is
+public type SoftHeapAllocOutcome is
       AoGranted
     | AoGrantedAfterReclaim(Int64)             // bytes reclaimed
     | AoRefusedSoft                            // handler refused / no handler
     | AoRefusedHard;
 
-public fn outcome_kind_name(o: &AllocOutcome) -> base.Text {
+public fn outcome_kind_name(o: &SoftHeapAllocOutcome) -> base.Text {
     match o {
         AoGranted                  => "granted".clone(),
         AoGrantedAfterReclaim(_)   => "granted_after_reclaim".clone(),
@@ -43,7 +43,7 @@ public fn outcome_kind_name(o: &AllocOutcome) -> base.Text {
     }
 }
 
-public fn is_granted(o: &AllocOutcome) -> Bool {
+public fn is_granted(o: &SoftHeapAllocOutcome) -> Bool {
     match o {
         AoGranted | AoGrantedAfterReclaim(_) => true,
         _ => false,
@@ -78,7 +78,7 @@ implement SoftHeapEngine {
 
     /// Plan an allocation. The host applies the returned reclaim hint
     /// and re-invokes if necessary.
-    pub fn plan(&self, bytes: Int64) -> AllocOutcome {
+    pub fn plan(&self, bytes: Int64) -> SoftHeapAllocOutcome {
         if self.soft.would_exceed(bytes) {
             if self.hard.would_exceed(bytes) {
                 return AoRefusedHard;
@@ -107,7 +107,7 @@ implement SoftHeapEngine {
 
     /// Convenience: whole try-with-reclaim pipeline. Returns the outcome
     /// + bytes reclaimed during the attempt.
-    pub fn try_allocate(&mut self, bytes: Int64, reclaim_callback: fn(&PressureEvent) -> Int64) -> AllocOutcome {
+    pub fn try_allocate(&mut self, bytes: Int64, reclaim_callback: fn(&PressureEvent) -> Int64) -> SoftHeapAllocOutcome {
         match self.plan(bytes) {
             AoGranted => {
                 self.note_allocation(bytes);

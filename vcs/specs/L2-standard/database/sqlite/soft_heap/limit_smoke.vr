@@ -16,7 +16,7 @@ mount core.database.sqlite.native.soft_heap.pressure.{
     event_kind_name,
 };
 mount core.database.sqlite.native.soft_heap.engine.{
-    AllocOutcome, AoGranted, AoGrantedAfterReclaim, AoRefusedSoft, AoRefusedHard,
+    SoftHeapAllocOutcome, AoGranted, AoGrantedAfterReclaim, AoRefusedSoft, AoRefusedHard,
     SoftHeapEngine, engine_new,
     is_granted,
     outcome_kind_name,

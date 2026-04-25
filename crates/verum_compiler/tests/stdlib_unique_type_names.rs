@@ -64,9 +64,9 @@ const ROOT: &str = "core";
 /// the entry from this baseline and run the test to confirm the
 /// duplicate is gone.
 const BASELINE_DUPLICATES: &[&str] = &[
-    "AccessMode", "Activation", "Affinity", "Alignment", "AllocHandle",
-    "AllocOutcome", "ApplyOutcome", "Args", "AttributeValue",
-    "Availability", "BackoffStrategy",
+    "AccessMode", "Affinity", "AllocHandle",
+    "ApplyOutcome", "Args",
+    "BackoffStrategy",
     "BitVec", "Block", "BtreeCellVector",
     "CacheMode", "Category", "Cell", "Certificate",
     "ChangeOp", "CheckpointMode", "ChildSpecOpaque",

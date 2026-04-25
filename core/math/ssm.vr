@@ -725,14 +725,14 @@ public type BalanceLoss is
 public type Expert<D: meta USize{D > 0}, H: meta USize{H > 0}> is {
     w1: Linear,      // up-projection: D -> H
     w2: Linear,      // down-projection: H -> D
-    activation: Activation,
+    activation: SsmActivation,
 };
 
-// Activation function type
-public type Activation is GELU | SiLU | ReLU | Tanh | Sigmoid;
+// SsmActivation function type
+public type SsmActivation is GELU | SiLU | ReLU | Tanh | Sigmoid;
 
 implement<D: meta USize{D > 0}, H: meta USize{H > 0}> Expert<D, H> {
-    public fn new(activation: Activation) -> Self {
+    public fn new(activation: SsmActivation) -> Self {
         Expert {
             w1: Linear.new(D, H, false),
             w2: Linear.new(H, D, false),
@@ -748,11 +748,11 @@ implement<D: meta USize{D > 0}, H: meta USize{H > 0}>
     fn forward(&self, x: DynTensor<Float>) -> DynTensor<Float> {
         let h = self.w1.forward(x);
         let h = match self.activation {
-            Activation.GELU => gelu(&h),
-            Activation.SiLU => silu(&h),
-            Activation.ReLU => relu(&h),
-            Activation.Tanh => tanh(&h),
-            Activation.Sigmoid => sigmoid(&h),
+            SsmActivation.GELU => gelu(&h),
+            SsmActivation.SiLU => silu(&h),
+            SsmActivation.ReLU => relu(&h),
+            SsmActivation.Tanh => tanh(&h),
+            SsmActivation.Sigmoid => sigmoid(&h),
         };
         self.w2.forward(h)
     }
@@ -881,7 +881,7 @@ implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
 {
     public fn new(
         strategy: RoutingStrategy,
-        activation: Activation,
+        activation: SsmActivation,
         balance_loss: BalanceLoss,
         capacity_factor: Float{capacity_factor > 0.0},
     ) -> Self {
@@ -1011,7 +1011,7 @@ implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
     public fn new(
         num_heads: USize,
         top_k: USize,
-        activation: Activation,
+        activation: SsmActivation,
     ) -> Self {
         MoETransformerBlock {
             ln1: RMSNorm.new(D),

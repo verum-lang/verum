@@ -73,13 +73,13 @@ public fn has_option(name: Text, options: List<Text>) -> Bool {
 }
 
 // Decision summary for "is feature X available?".
-public type Availability is
+public type CompileOptionAvailability is
     | AvAvailable
     | AvOmitted        // SQLITE_OMIT_<feature>
     | AvNotEnabled     // missing the corresponding ENABLE flag
     ;
 
-public fn availability_name(a: &Availability) -> Text {
+public fn availability_name(a: &CompileOptionAvailability) -> Text {
     match a {
         AvAvailable  => "available".clone(),
         AvOmitted    => "omitted".clone(),
@@ -87,7 +87,7 @@ public fn availability_name(a: &Availability) -> Text {
     }
 }
 
-public fn is_available(a: &Availability) -> Bool {
+public fn is_available(a: &CompileOptionAvailability) -> Bool {
     match a { AvAvailable => true, _ => false }
 }
 
@@ -96,7 +96,7 @@ public fn resolve(
     enable_flag: Text,
     omit_flag: Text,
     options: &List<Text>,
-) -> Availability {
+) -> CompileOptionAvailability {
     if has_option(omit_flag, options.clone())   { return AvOmitted; }
     if has_option(enable_flag, options.clone()) { return AvAvailable; }
     AvNotEnabled
