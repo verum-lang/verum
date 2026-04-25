@@ -147,7 +147,7 @@ implement QuicClient {
         let sid = self.opened_bidi << 2;          // client bidi: 0, 4, 8, ...
         self.opened_bidi = self.opened_bidi + 1_u64;
         // Placeholder — integration layer creates real SendStream /
-        // RecvStream halves against the underlying QuicConnection<OneRtt>.
+        // RecvStream halves against the underlying QuicConnectionSm<OneRtt>.
         Err(QuicClientError.Handshake(Text.from_str("pure-Verum stream opening awaits transport wire-up")))
             .or_else(|_| {
                 // The shape the integration returns — SendStream +

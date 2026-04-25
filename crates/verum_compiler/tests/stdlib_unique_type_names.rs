@@ -64,16 +64,14 @@ const ROOT: &str = "core";
 /// the entry from this baseline and run the test to confirm the
 /// duplicate is gone.
 const BASELINE_DUPLICATES: &[&str] = &[
-    "AccessMode", "Affinity", "AllocHandle",
-    "ApplyOutcome", "Args",
-    "Block",
+    "AllocHandle",
+    "ApplyOutcome",
     "ChildSpecOpaque",
     "CircuitBreakerOpaque",
-    "Condvar", "Config",
-    "Connection",
+    "Condvar",
     "ContextEntry", "ContextError", "ContextSlots",
-    "Counter", "CpuContext", "CpuFeatures",
-    "Cursor", "DeadlineTimer",
+    "CpuContext", "CpuFeatures",
+    "DeadlineTimer",
     "Duration",
     "EnginePhase", "Event",
     "ExceptionFrame", "ExecutionEnv", "ExecutionEnvOpaque",

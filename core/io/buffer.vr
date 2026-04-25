@@ -10,7 +10,7 @@
 // - BufReader<R>: Buffered reader wrapper
 // - BufWriter<W>: Buffered writer wrapper
 // - LineWriter<W>: Line-buffered writer
-// - Cursor<T>: In-memory buffer with Read/Write/Seek
+// - BufferCursor<T>: In-memory buffer with Read/Write/Seek
 //
 // Buffering significantly improves performance by reducing system calls.
 //
@@ -431,18 +431,18 @@ implement<W: Write> Write for LineWriter<W> {
 }
 
 // =============================================================================
-// Cursor - In-Memory Buffer
+// BufferCursor - In-Memory Buffer
 // =============================================================================
 
 /// In-memory buffer with Read, Write, && Seek capabilities.
 ///
-/// Cursor wraps an in-memory buffer (typically List<Byte>) && provides
+/// BufferCursor wraps an in-memory buffer (typically List<Byte>) && provides
 /// file-like semantics for reading && writing.
 ///
 /// # Example
 ///
 /// ```verum
-/// let mut cursor = Cursor.new(List.new());
+/// let mut cursor = BufferCursor.new(List.new());
 ///
 /// // Write data
 /// cursor.write("Hello, World!".as_bytes())?;
@@ -454,15 +454,15 @@ implement<W: Write> Write for LineWriter<W> {
 /// let mut buf = List.from_elem(0, 13);
 /// cursor.read(&mut buf)?;
 /// ```
-public type Cursor<T> is {
+public type BufferCursor<T> is {
     inner: T,
     pos: Int,
 };
 
-implement<T> Cursor<T> {
-    /// Create a new Cursor wrapping the given buffer.
-    public fn new(inner: T) -> Cursor<T> {
-        Cursor {
+implement<T> BufferCursor<T> {
+    /// Create a new BufferCursor wrapping the given buffer.
+    public fn new(inner: T) -> BufferCursor<T> {
+        BufferCursor {
             inner: inner,
             pos: 0,
         }
@@ -478,7 +478,7 @@ implement<T> Cursor<T> {
         &mut self.inner
     }
 
-    /// Consume the Cursor && return the underlying buffer.
+    /// Consume the BufferCursor && return the underlying buffer.
     public fn into_inner(self) -> T {
         self.inner
     }
@@ -494,7 +494,7 @@ implement<T> Cursor<T> {
     }
 }
 
-implement Cursor<List<Byte>> {
+implement BufferCursor<List<Byte>> {
     /// Get remaining slice from current position.
     fn remaining(&self) -> &[Byte] {
         if self.pos >= self.inner.len() {
@@ -505,7 +505,7 @@ implement Cursor<List<Byte>> {
     }
 }
 
-implement Read for Cursor<List<Byte>> {
+implement Read for BufferCursor<List<Byte>> {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
         let remaining = self.inner.len() - self.pos;
         if remaining == 0 {
@@ -522,7 +522,7 @@ implement Read for Cursor<List<Byte>> {
     }
 }
 
-implement Write for Cursor<List<Byte>> {
+implement Write for BufferCursor<List<Byte>> {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
         // Extend if writing past end
         while self.pos + buf.len() > self.inner.len() {
@@ -543,7 +543,7 @@ implement Write for Cursor<List<Byte>> {
     }
 }
 
-implement Seek for Cursor<List<Byte>> {
+implement Seek for BufferCursor<List<Byte>> {
     fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
         let new_pos = match pos {
             SeekFrom.Start(n) => n,
@@ -560,7 +560,7 @@ implement Seek for Cursor<List<Byte>> {
     }
 }
 
-implement BufRead for Cursor<List<Byte>> {
+implement BufRead for BufferCursor<List<Byte>> {
     fn fill_buf(&mut self) -> IoResult<&[Byte]> {
         Ok(self.remaining())
     }
@@ -637,7 +637,7 @@ public fn read_all<R: Read>(reader: &mut R) -> IoResult<List<Byte>> {
 @test
 fn test_buf_reader_basic() {
     let data = List.from([1, 2, 3, 4, 5, 6, 7, 8]);
-    let cursor = Cursor.new(data);
+    let cursor = BufferCursor.new(data);
     let mut reader = BufReader.new(cursor);
 
     let mut buf = List.from_elem(0, 4);
@@ -648,7 +648,7 @@ fn test_buf_reader_basic() {
 
 @test
 fn test_buf_writer_basic() {
-    let cursor = Cursor.new(List.new());
+    let cursor = BufferCursor.new(List.new());
     let mut writer = BufWriter.new(cursor);
 
     writer.write(&[1, 2, 3, 4]).unwrap();
@@ -661,7 +661,7 @@ fn test_buf_writer_basic() {
 @test
 fn test_cursor_seek() {
     let data = List.from([1, 2, 3, 4, 5]);
-    let mut cursor = Cursor.new(data);
+    let mut cursor = BufferCursor.new(data);
 
     cursor.seek(SeekFrom.Start(2)).unwrap();
     assert_eq(cursor.position(), 2);

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.affinity_matrix_api.affinity.{
-    Affinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
+    MatrixAffinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
     affinity_name, stores_numbers_directly, allows_free_form_blob,
     allowed_in_strict, coercion_priority,
 };

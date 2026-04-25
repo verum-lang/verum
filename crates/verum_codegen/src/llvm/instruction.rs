@@ -6927,29 +6927,51 @@ if func_name == "__file_read_to_string_raw"
         "__tcp_connect_raw" | "__tcp_listen_raw" | "__tcp_accept_raw"
         | "__tcp_send_raw" | "__tcp_recv_raw" | "__tcp_close_raw"
         | "__udp_bind_raw" | "__udp_send_raw" | "__udp_recv_raw" | "__udp_close_raw" => {
-            // These are already handled by the existing TCP/UDP dispatch
-            // via function name matching (tcp_connect, tcp_listen, etc.)
-            // Strip the __*_raw prefix and delegate to existing handler
-            // For now, just emit C function call directly
-            let c_name = match func_name {
-                "__tcp_connect_raw" => "verum_tcp_connect",
-                "__tcp_listen_raw" => "verum_tcp_listen",
-                "__tcp_accept_raw" => "verum_tcp_accept",
-                "__tcp_send_raw" => "verum_tcp_send_text",
-                "__tcp_recv_raw" => "verum_tcp_recv_text",
-                "__tcp_close_raw" => "verum_tcp_close",
-                "__udp_bind_raw" => "verum_udp_bind",
-                "__udp_send_raw" => "verum_udp_send_text",
-                "__udp_recv_raw" => "verum_udp_recv_text",
-                "__udp_close_raw" => "verum_udp_close",
+            // Map @intrinsic("tcp_listen") → verum_tcp_listen runtime helper.
+            // Each runtime helper has a CANONICAL signature defined by
+            // emit_verum_networking_functions in runtime.rs. The
+            // intrinsic call may pass fewer args than the canonical
+            // signature — pad with defaults for missing trailing args.
+            //
+            // Previously this site used args.count to derive the
+            // function signature, which made the runtime function
+            // shape vary with each call site. When
+            // emit_verum_networking_functions later tried to emit the
+            // helper body against `func.get_nth_param(canonical_idx)`,
+            // get_nth_param returned None, propagating up as
+            // "missing param N" (#105). Pinning to the canonical
+            // signature here removes that signature drift.
+            let (c_name, canonical_arity, default_padding): (&str, usize, &[i64]) = match func_name {
+                "__tcp_connect_raw" => ("verum_tcp_connect", 2, &[]),
+                "__tcp_listen_raw"  => ("verum_tcp_listen", 2, &[10]), // default backlog=10
+                "__tcp_accept_raw"  => ("verum_tcp_accept", 1, &[]),
+                "__tcp_send_raw"    => ("verum_tcp_send_text", 2, &[]),
+                "__tcp_recv_raw"    => ("verum_tcp_recv_text", 1, &[]),
+                "__tcp_close_raw"   => ("verum_tcp_close", 1, &[]),
+                "__udp_bind_raw"    => ("verum_udp_bind", 1, &[]),
+                "__udp_send_raw"    => ("verum_udp_send_text", 3, &[]),
+                "__udp_recv_raw"    => ("verum_udp_recv_text", 2, &[]),
+                "__udp_close_raw"   => ("verum_udp_close", 1, &[]),
                 _ => unreachable!(),
             };
-            let mut call_args: Vec<BasicMetadataValueEnum> = Vec::new();
-            for i in 0..args.count {
+            let mut call_args: Vec<BasicMetadataValueEnum> = Vec::with_capacity(canonical_arity);
+            // Materialise user args, then pad with defaults to reach
+            // the canonical arity.
+            let n_user = args.count as usize;
+            for i in 0..n_user.min(canonical_arity) {
                 let v = ctx.get_register(args.start.0 + i as u16)?;
                 call_args.push(v.into());
             }
-            let param_types: Vec<BasicMetadataTypeEnum> = (0..args.count).map(|_| i64_type.into()).collect();
+            // Defaults fill any trailing canonical slots beyond what
+            // the user supplied.
+            let supplied = call_args.len();
+            for j in 0..(canonical_arity - supplied) {
+                let dv = default_padding.get(j).copied().unwrap_or(0);
+                call_args.push(i64_type.const_int(dv as u64, true).into());
+            }
+            let param_types: Vec<BasicMetadataTypeEnum> = (0..canonical_arity)
+                .map(|_| i64_type.into())
+                .collect();
             let c_fn = module.get_function(c_name).unwrap_or_else(|| {
                 let fn_type = i64_type.fn_type(&param_types, false);
                 module.add_function(c_name, fn_type, None)

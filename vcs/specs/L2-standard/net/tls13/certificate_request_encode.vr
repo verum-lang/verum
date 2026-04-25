@@ -17,7 +17,7 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.tls13.sig_scheme.{SignatureScheme};
-mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.codec.{Tls13HandshakeReader};
 mount core.net.tls13.handshake.messages.{
     HandshakeMessage, CertificateRequest, encode_handshake, decode_handshake,
     HST_CERTIFICATE_REQUEST,
@@ -102,7 +102,7 @@ fn certificate_request_decode_roundtrip() {
     };
     let mut wire: List<Byte> = [];
     encode_handshake(&HandshakeMessage.CertificateRequestMsg(cr), &mut wire).unwrap();
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let parsed = decode_handshake(&mut r).unwrap();
     match parsed {
         HandshakeMessage.CertificateRequestMsg(cr2) => {

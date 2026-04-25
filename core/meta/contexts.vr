@@ -589,7 +589,7 @@ public context AstAccess {
     fn parse_statement(tokens: TokenStream) -> MetaResult<Statement>;
 
     /// Parse token stream as block
-    fn parse_block(tokens: TokenStream) -> MetaResult<Block>;
+    fn parse_block(tokens: TokenStream) -> MetaResult<MetaBlock>;
 
     /// Emit AST node as token stream
     ///
@@ -3129,9 +3129,9 @@ public type Pattern is ();
 @compiler_type
 public type Statement is ();
 
-/// Block AST node (sequence of statements)
+/// MetaBlock AST node (sequence of statements)
 @compiler_type
-public type Block is ();
+public type MetaBlock is ();
 
 // =============================================================================
 // Parse Result Types

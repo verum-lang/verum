@@ -9,7 +9,7 @@
 //
 // Servers accept many peers over one UDP socket, so every inbound
 // datagram must be routed to the correct `ConnectionPump` based on
-// its Destination Connection ID. RFC 9000 §5.1 mandates:
+// its Destination QuicConnection ID. RFC 9000 §5.1 mandates:
 //
 //   * Client Initial packets carry a fresh DCID the server echoes
 //     in ServerHello; the same DCID indexes until the server issues

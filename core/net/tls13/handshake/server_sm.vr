@@ -54,7 +54,7 @@ mount core.net.tls13.handshake.messages.{
     HandshakeMessage, encode_handshake, decode_handshake,
 };
 mount core.net.tls13.handshake.transcript.{Transcript};
-mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.codec.{Tls13HandshakeReader};
 mount core.net.tls13.handshake.dhe_pool.{DhePool, LocalDhePool, DheKeyPair};
 mount core.security.ecc.x25519.{X25519};
 mount core.security.ecc.p256.{P256};
@@ -150,7 +150,7 @@ implement ServerSm {
 
     /// Feed an inbound handshake message.
     public fn on_handshake(self, wire: &[Byte]) -> Result<(ServerSm, ServerStepOutput), TlsError> {
-        let mut r = Reader.new(wire);
+        let mut r = Tls13HandshakeReader.new(wire);
         let msg = decode_handshake(&mut r).map_err(|_| TlsError.DecodeError)?;
 
         match self {

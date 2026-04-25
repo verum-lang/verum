@@ -104,22 +104,22 @@ where F: fn(&mut List<Byte>) -> Result<(), CodecError>,
 }
 
 // =============================================================================
-// Reader — a cursor over a byte slice
+// Tls13HandshakeReader — a cursor over a byte slice
 // =============================================================================
 
-public type Reader is {
+public type Tls13HandshakeReader is {
     buf: List<Byte>,   // owned copy (cheap — backing arena)
     pos: Int,
     end: Int,
 };
 
-implement Reader {
-    public fn new(input: &[Byte]) -> Reader {
+implement Tls13HandshakeReader {
+    public fn new(input: &[Byte]) -> Tls13HandshakeReader {
         let mut b: List<Byte> = [];
         let mut i: Int = 0;
         while i < input.len() { b.push(input[i]); i = i + 1; }
         let n = b.len();
-        Reader { buf: b, pos: 0, end: n }
+        Tls13HandshakeReader { buf: b, pos: 0, end: n }
     }
 
     public fn remaining(&self) -> Int { self.end - self.pos }
@@ -189,27 +189,27 @@ implement Reader {
 
     /// Enter a length-prefixed sub-region; returns a sub-reader bounded
     /// to that region's contents. Parent advances past it.
-    public fn sub_u16(&mut self) -> Result<Reader, CodecError> {
+    public fn sub_u16(&mut self) -> Result<Tls13HandshakeReader, CodecError> {
         let len = self.take_u16()? as Int;
         if self.pos + len > self.end { return Err(CodecError.Truncated); }
         let start = self.pos;
         self.pos = self.pos + len;
-        Ok(Reader { buf: self.buf.clone(), pos: start, end: start + len })
+        Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
     }
 
-    public fn sub_u8(&mut self) -> Result<Reader, CodecError> {
+    public fn sub_u8(&mut self) -> Result<Tls13HandshakeReader, CodecError> {
         let len = self.take_u8()? as Int;
         if self.pos + len > self.end { return Err(CodecError.Truncated); }
         let start = self.pos;
         self.pos = self.pos + len;
-        Ok(Reader { buf: self.buf.clone(), pos: start, end: start + len })
+        Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
     }
 
-    public fn sub_u24(&mut self) -> Result<Reader, CodecError> {
+    public fn sub_u24(&mut self) -> Result<Tls13HandshakeReader, CodecError> {
         let len = self.take_u24()? as Int;
         if self.pos + len > self.end { return Err(CodecError.Truncated); }
         let start = self.pos;
         self.pos = self.pos + len;
-        Ok(Reader { buf: self.buf.clone(), pos: start, end: start + len })
+        Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
     }
 }

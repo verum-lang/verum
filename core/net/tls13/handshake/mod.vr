@@ -42,7 +42,7 @@ public module zero_rtt_antireplay;
 public module sni_resolver;
 
 // Re-exports — codec
-public mount .codec.{Reader, CodecError};
+public mount .codec.{Tls13HandshakeReader, CodecError};
 
 // Re-exports — extensions
 public mount .extension.{

@@ -156,7 +156,7 @@ public type Grid is {
 };
 
 /// Thread block configuration.
-public type Block is {
+public type GpuBlock is {
     x: Int,
     y: Int,
     z: Int,
@@ -171,13 +171,13 @@ implement Grid {
     public fn d3(x: Int, y: Int, z: Int) -> Grid { Grid { x: x, y: y, z: z } }
 }
 
-implement Block {
+implement GpuBlock {
     /// Create 1D block.
-    public fn d1(x: Int) -> Block { Block { x: x, y: 1, z: 1 } }
+    public fn d1(x: Int) -> GpuBlock { GpuBlock { x: x, y: 1, z: 1 } }
     /// Create 2D block.
-    public fn d2(x: Int, y: Int) -> Block { Block { x: x, y: y, z: 1 } }
+    public fn d2(x: Int, y: Int) -> GpuBlock { GpuBlock { x: x, y: y, z: 1 } }
     /// Create 3D block.
-    public fn d3(x: Int, y: Int, z: Int) -> Block { Block { x: x, y: y, z: z } }
+    public fn d3(x: Int, y: Int, z: Int) -> GpuBlock { GpuBlock { x: x, y: y, z: z } }
 
     /// Calculate total threads in block.
     public fn total_threads(&self) -> Int { self.x * self.y * self.z }

@@ -35,7 +35,7 @@ module core.net.tls13.handshake.messages;
 mount core.*;
 mount core.collections.List;
 mount core.net.tls13.handshake.codec.{
-    Reader, CodecError,
+    Tls13HandshakeReader, CodecError,
     put_u8, put_u16, put_u24, put_u32, put_bytes,
     vec_u8, vec_u16, vec_u24,
 };
@@ -271,7 +271,7 @@ fn encode_new_session_ticket(nst: &NewSessionTicket, out: &mut List<Byte>) -> Re
 // Decoder — parses type + u24 length then the body.
 // =============================================================================
 
-public fn decode_handshake(r: &mut Reader) -> Result<HandshakeMessage, CodecError> {
+public fn decode_handshake(r: &mut Tls13HandshakeReader) -> Result<HandshakeMessage, CodecError> {
     let msg_type = r.take_u8()?;
     let mut body = r.sub_u24()?;
     let msg = match msg_type {
@@ -306,7 +306,7 @@ public fn decode_handshake(r: &mut Reader) -> Result<HandshakeMessage, CodecErro
     Ok(msg)
 }
 
-fn decode_client_hello(r: &mut Reader) -> Result<ClientHello, CodecError> {
+fn decode_client_hello(r: &mut Tls13HandshakeReader) -> Result<ClientHello, CodecError> {
     let legacy_version = ProtocolVersion.from_u16(r.take_u16()?);
     let rbytes = r.take_bytes(32)?;
     let mut random: [Byte; 32] = [0_u8; 32];
@@ -334,7 +334,7 @@ fn decode_client_hello(r: &mut Reader) -> Result<ClientHello, CodecError> {
     })
 }
 
-fn decode_server_hello(r: &mut Reader) -> Result<ServerHello, CodecError> {
+fn decode_server_hello(r: &mut Tls13HandshakeReader) -> Result<ServerHello, CodecError> {
     let legacy_version = ProtocolVersion.from_u16(r.take_u16()?);
     let rbytes = r.take_bytes(32)?;
     let mut random: [Byte; 32] = [0_u8; 32];
@@ -363,7 +363,7 @@ fn decode_server_hello(r: &mut Reader) -> Result<ServerHello, CodecError> {
     })
 }
 
-fn decode_certificate(r: &mut Reader) -> Result<CertificateMessage, CodecError> {
+fn decode_certificate(r: &mut Tls13HandshakeReader) -> Result<CertificateMessage, CodecError> {
     let context = r.take_vec_u8()?;
     let mut list: List<CertificateEntry> = [];
     let mut sub = r.sub_u24()?;
@@ -375,19 +375,19 @@ fn decode_certificate(r: &mut Reader) -> Result<CertificateMessage, CodecError> 
     Ok(CertificateMessage { certificate_request_context: context, certificate_list: list })
 }
 
-fn decode_certificate_request(r: &mut Reader) -> Result<CertificateRequest, CodecError> {
+fn decode_certificate_request(r: &mut Tls13HandshakeReader) -> Result<CertificateRequest, CodecError> {
     let context = r.take_vec_u8()?;
     let exts = decode_extensions_block(r, ExtensionContext.CertificateRequestCtx)?;
     Ok(CertificateRequest { certificate_request_context: context, extensions: exts })
 }
 
-fn decode_certificate_verify(r: &mut Reader) -> Result<CertificateVerify, CodecError> {
+fn decode_certificate_verify(r: &mut Tls13HandshakeReader) -> Result<CertificateVerify, CodecError> {
     let alg = SignatureScheme.from_u16(r.take_u16()?);
     let sig = r.take_vec_u16()?;
     Ok(CertificateVerify { algorithm: alg, signature: sig })
 }
 
-fn decode_new_session_ticket(r: &mut Reader) -> Result<NewSessionTicket, CodecError> {
+fn decode_new_session_ticket(r: &mut Tls13HandshakeReader) -> Result<NewSessionTicket, CodecError> {
     let lifetime = r.take_u32()?;
     let age_add = r.take_u32()?;
     let nonce = r.take_vec_u8()?;

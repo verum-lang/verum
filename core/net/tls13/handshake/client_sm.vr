@@ -72,7 +72,7 @@ mount core.net.tls13.handshake.resumption.{
     ClientSession, client_session_from_nst,
 };
 mount core.net.tls13.handshake.transcript.{Transcript};
-mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.codec.{Tls13HandshakeReader};
 
 // =============================================================================
 // Client configuration
@@ -218,7 +218,7 @@ implement ClientSm {
     /// record layer). Returns an updated SM + any outbound messages
     /// that must be transmitted in response.
     public fn on_handshake(self, wire: &[Byte]) -> Result<(ClientSm, StepOutput), TlsError> {
-        let mut r = Reader.new(wire);
+        let mut r = Tls13HandshakeReader.new(wire);
         let msg = decode_handshake(&mut r)
             .map_err(|_| TlsError.DecodeError)?;
 
@@ -255,7 +255,7 @@ implement ClientSm {
     ) -> Result<PostHandshakeOutcome, TlsError> {
         match self {
             ClientSm.ConnectedSm(c) => {
-                let mut r = Reader.new(wire);
+                let mut r = Tls13HandshakeReader.new(wire);
                 let msg = decode_handshake(&mut r)
                     .map_err(|_| TlsError.DecodeError)?;
                 match msg {

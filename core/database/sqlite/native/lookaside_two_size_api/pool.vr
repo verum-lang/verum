@@ -9,19 +9,19 @@ module core.database.sqlite.native.lookaside_two_size_api.pool;
 
 mount base.{Bool, Int64, Text};
 
-public type Config is {
+public type LookasidePoolConfig is {
     sz_small: Int,         // bytes per small slot
     n_small:  Int,         // number of small slots
     sz_large: Int,         // bytes per large slot (>= sz_small)
     n_large:  Int,         // number of large slots
 };
 
-public fn default_config() -> Config {
+public fn default_config() -> LookasidePoolConfig {
     // Defaults match SQLite's compile-time numbers (sz_small=128, n_small=500).
-    Config { sz_small: 128, n_small: 500, sz_large: 1024, n_large: 100 }
+    LookasidePoolConfig { sz_small: 128, n_small: 500, sz_large: 1024, n_large: 100 }
 }
 
-public fn is_well_formed(c: &Config) -> Bool {
+public fn is_well_formed(c: &LookasidePoolConfig) -> Bool {
     if c.sz_small <= 0 { return false; }
     if c.n_small  <= 0 { return false; }
     if c.sz_large < c.sz_small { return false; }
@@ -29,13 +29,13 @@ public fn is_well_formed(c: &Config) -> Bool {
     true
 }
 
-public fn total_bytes(c: &Config) -> Int64 {
+public fn total_bytes(c: &LookasidePoolConfig) -> Int64 {
     let s = (c.sz_small as Int64) * (c.n_small as Int64);
     let l = (c.sz_large as Int64) * (c.n_large as Int64);
     s + l
 }
 
-public fn slot_count(c: &Config) -> Int {
+public fn slot_count(c: &LookasidePoolConfig) -> Int {
     c.n_small + c.n_large
 }
 
@@ -45,7 +45,7 @@ public type SlotKind is
     | SkHeapFallback     // request too large; allocator falls back to malloc
     ;
 
-public fn pick_slot(c: &Config, request_bytes: Int) -> SlotKind {
+public fn pick_slot(c: &LookasidePoolConfig, request_bytes: Int) -> SlotKind {
     if request_bytes <= c.sz_small { return SkSmall; }
     if request_bytes <= c.sz_large { return SkLarge; }
     SkHeapFallback

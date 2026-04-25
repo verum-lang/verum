@@ -44,13 +44,13 @@ public fn is_known_only(fl: Int64) -> Bool {
 }
 
 // Read/Write/Create resolution.  Engine treats CREATE as no-op without RW.
-public type AccessMode is
+public type OpenAccessMode is
     | AmReadOnly
     | AmReadWrite
     | AmReadWriteCreate
     ;
 
-public fn access_for(fl: Int64) -> AccessMode {
+public fn access_for(fl: Int64) -> OpenAccessMode {
     if is_set(fl, f_readwrite()) {
         if is_set(fl, f_create()) { return AmReadWriteCreate; }
         return AmReadWrite;
@@ -58,7 +58,7 @@ public fn access_for(fl: Int64) -> AccessMode {
     AmReadOnly
 }
 
-public fn access_name(a: &AccessMode) -> Text {
+public fn access_name(a: &OpenAccessMode) -> Text {
     match a {
         AmReadOnly         => "readonly".clone(),
         AmReadWrite        => "readwrite".clone(),

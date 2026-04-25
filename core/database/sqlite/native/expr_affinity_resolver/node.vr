@@ -3,13 +3,13 @@
 module core.database.sqlite.native.expr_affinity_resolver.node;
 
 mount core.database.sqlite.native.affinity_matrix_api.affinity.{
-    Affinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
+    MatrixAffinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
 };
 mount core.database.sqlite.native.affinity_matrix_api.classify.{classify as classify_type};
 mount base.{Bool, Text};
 
 public type ExprNode is
-    | EnColumn(Affinity)        // known column affinity
+    | EnColumn(MatrixAffinity)        // known column affinity
     | EnCast(Text)              // CAST expr AS <type> — resolve via classify_type
     | EnLiteralInt              // 42
     | EnLiteralReal             // 3.14
@@ -23,7 +23,7 @@ public type ExprNode is
     | EnFunction                // generic function call
     ;
 
-public fn resolve(e: &ExprNode) -> Affinity {
+public fn resolve(e: &ExprNode) -> MatrixAffinity {
     match e {
         EnColumn(a)      => a.clone(),
         EnCast(ty)       => classify_type(ty),
@@ -42,7 +42,7 @@ public fn resolve(e: &ExprNode) -> Affinity {
 
 // §4.2 — when comparing two operands, if either has numeric affinity and the
 // other has TEXT or BLOB, coerce the non-numeric to numeric.
-public fn comparison_result_affinity(a: &Affinity, b: &Affinity) -> Affinity {
+public fn comparison_result_affinity(a: &MatrixAffinity, b: &MatrixAffinity) -> MatrixAffinity {
     let a_num = match a {
         AfInteger => true, AfReal => true, AfNumeric => true,
         _ => false,
@@ -57,6 +57,6 @@ public fn comparison_result_affinity(a: &Affinity, b: &Affinity) -> Affinity {
     a.clone()
 }
 
-public fn affinity_of_column_expr(affinity: Affinity) -> Affinity {
+public fn affinity_of_column_expr(affinity: MatrixAffinity) -> MatrixAffinity {
     affinity
 }

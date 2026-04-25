@@ -16,7 +16,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.codec.{Tls13HandshakeReader};
 mount core.net.tls13.handshake.messages.{
     HandshakeMessage, EncryptedExtensions, encode_handshake, decode_handshake,
     HST_ENCRYPTED_EXTENSIONS,
@@ -80,7 +80,7 @@ fn encrypted_extensions_decode_roundtrip() {
     let ee = EncryptedExtensions { extensions: [alpn] };
     let mut out: List<Byte> = [];
     encode_handshake(&HandshakeMessage.EncryptedExtensionsMsg(ee), &mut out).unwrap();
-    let mut r = Reader.new(out.as_slice());
+    let mut r = Tls13HandshakeReader.new(out.as_slice());
     let parsed = decode_handshake(&mut r).unwrap();
     match parsed {
         HandshakeMessage.EncryptedExtensionsMsg(parsed_ee) => {

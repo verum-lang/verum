@@ -137,10 +137,10 @@ fn emit_connection(out: &mut TextBuilder, s: &QuicStats, conn_label: &Text) {
     emit_counter(out, "verum_quic_integrity_failures_total", "AEAD integrity failures", s.integrity_failures, labels.as_slice());
 
     emit_counter(out, "verum_quic_paths_validated_total", "Paths validated (RFC 9000 §8)", s.paths_validated, labels.as_slice());
-    emit_counter(out, "verum_quic_migrations_completed_total", "Connection migrations completed", s.migrations_completed, labels.as_slice());
+    emit_counter(out, "verum_quic_migrations_completed_total", "QuicConnection migrations completed", s.migrations_completed, labels.as_slice());
 
-    emit_counter(out, "verum_quic_cids_issued_total", "Connection IDs issued", s.cids_issued, labels.as_slice());
-    emit_counter(out, "verum_quic_cids_retired_total", "Connection IDs retired", s.cids_retired, labels.as_slice());
+    emit_counter(out, "verum_quic_cids_issued_total", "QuicConnection IDs issued", s.cids_issued, labels.as_slice());
+    emit_counter(out, "verum_quic_cids_retired_total", "QuicConnection IDs retired", s.cids_retired, labels.as_slice());
 }
 
 fn build_conn_labels(conn_label: &Text) -> List<(Text, Text)> {

@@ -384,13 +384,13 @@ public fn d_squared_zero(alpha: DifferentialForm) -> Bool {
 
 /// A connection ∇ on a vector bundle  E → M.
 /// Encoded by Christoffel symbols:  Γ^k_{ij}  (shape [n][n][n]).
-public type Connection is {
+public type SdgConnection is {
     dimension:   Int{>= 1},
     christoffel: List<List<List<Float>>>,   // Γ^k_{ij}
 };
 
 /// Build the flat Euclidean connection on R^n (all Γ = 0).
-public fn flat_connection(n: Int{>= 1}) -> Connection {
+public fn flat_connection(n: Int{>= 1}) -> SdgConnection {
     let mut gamma: List<List<List<Float>>> = [];
     let mut i: Int = 0;
     while i < n {
@@ -406,14 +406,14 @@ public fn flat_connection(n: Int{>= 1}) -> Connection {
         gamma.push(row);
         i = i + 1;
     }
-    Connection { dimension: n, christoffel: gamma }
+    SdgConnection { dimension: n, christoffel: gamma }
 }
 
 /// Curvature 2-form  R(X, Y)Z = ∇_X ∇_Y Z − ∇_Y ∇_X Z − ∇_{[X,Y]} Z.
 /// For a flat connection all components vanish.
 /// General formula:  R^l_{kij} = ∂_i Γ^l_{jk} − ∂_j Γ^l_{ik} + Γ^l_{im} Γ^m_{jk} − Γ^l_{jm} Γ^m_{ik}.
 @verify(formal)
-public fn curvature(conn: Connection) -> DifferentialForm {
+public fn curvature(conn: SdgConnection) -> DifferentialForm {
     let n = conn.dimension;
     zero_form(2, n)
 }
@@ -443,7 +443,7 @@ public fn straight_path(start: List<Float>, end_pt: List<Float>) -> SmoothPath {
 /// For a flat connection V is constant (holonomy trivial).
 @verify(formal)
 public fn parallel_transport(
-    conn:    Connection,
+    conn:    SdgConnection,
     path:    SmoothPath,
     initial: List<Float>,
 ) -> List<Float> {

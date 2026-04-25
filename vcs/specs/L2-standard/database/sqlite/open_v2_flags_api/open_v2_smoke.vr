@@ -11,7 +11,7 @@ mount core.database.sqlite.native.open_v2_flags_api.flags.{
     f_nofollow, f_exrescode,
     well_known_bit_count, well_known_mask,
     is_set, set, clear, is_known_only,
-    AccessMode, AmReadOnly, AmReadWrite, AmReadWriteCreate,
+    OpenAccessMode, AmReadOnly, AmReadWrite, AmReadWriteCreate,
     access_for, access_name,
     MutexMode, MxDefault, MxNone, MxFull, MxConflict,
     mutex_for, mutex_name,

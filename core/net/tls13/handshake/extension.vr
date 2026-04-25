@@ -41,7 +41,7 @@ module core.net.tls13.handshake.extension;
 mount core.*;
 mount core.collections.List;
 mount core.net.tls13.handshake.codec.{
-    Reader, CodecError,
+    Tls13HandshakeReader, CodecError,
     put_u8, put_u16, put_u24, put_u32, put_bytes,
     vec_u8, vec_u16, vec_u24,
 };
@@ -386,7 +386,7 @@ public type ExtensionContext is
     | NewSessionTicketCtx;
 
 public fn decode_extensions_block(
-    r: &mut Reader,
+    r: &mut Tls13HandshakeReader,
     ctx: ExtensionContext,
 ) -> Result<List<Extension>, CodecError> {
     let mut sub = r.sub_u16()?;
@@ -398,7 +398,7 @@ public fn decode_extensions_block(
     Ok(out)
 }
 
-public fn decode_extension(r: &mut Reader, ctx: ExtensionContext) -> Result<Extension, CodecError> {
+public fn decode_extension(r: &mut Tls13HandshakeReader, ctx: ExtensionContext) -> Result<Extension, CodecError> {
     let ext_type = r.take_u16()?;
     let mut body = r.sub_u16()?;
     let result = match ext_type {
@@ -546,7 +546,7 @@ public fn decode_extension(r: &mut Reader, ctx: ExtensionContext) -> Result<Exte
     Ok(result)
 }
 
-fn take_sig_scheme_list(r: &mut Reader) -> Result<List<SignatureScheme>, CodecError> {
+fn take_sig_scheme_list(r: &mut Tls13HandshakeReader) -> Result<List<SignatureScheme>, CodecError> {
     let mut out: List<SignatureScheme> = [];
     let mut list = r.sub_u16()?;
     while !list.is_at_end() {

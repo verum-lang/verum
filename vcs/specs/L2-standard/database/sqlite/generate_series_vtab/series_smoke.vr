@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.generate_series_vtab.series.{
-    Args, default_start, default_stop, default_step, defaults,
+    SeriesArgs, default_start, default_stop, default_step, defaults,
     FilterCheck, FcOk, FcZeroStep, check, check_name, is_ok,
     SeriesDirection, DirAscending, DirDescending,
     direction_for, direction_name,
@@ -22,12 +22,12 @@ fn test_default_constants() {
 }
 
 fn test_check_zero_step_rejected() {
-    let args = Args { start: 0 as Int64, stop: 10 as Int64, step: 0 as Int64 };
+    let args = SeriesArgs { start: 0 as Int64, stop: 10 as Int64, step: 0 as Int64 };
     match check(&args) { FcZeroStep => {}, _ => assert(false) }
 }
 
 fn test_check_ok() {
-    let args = Args { start: 0 as Int64, stop: 10 as Int64, step: 2 as Int64 };
+    let args = SeriesArgs { start: 0 as Int64, stop: 10 as Int64, step: 2 as Int64 };
     match check(&args) { FcOk => {}, _ => assert(false) }
     assert(is_ok(&FcOk));
 }
@@ -38,8 +38,8 @@ fn test_check_names() {
 }
 
 fn test_direction() {
-    let asc  = Args { start: 0 as Int64, stop: 10 as Int64, step:  1 as Int64 };
-    let desc = Args { start: 10 as Int64, stop: 0 as Int64, step: -1 as Int64 };
+    let asc  = SeriesArgs { start: 0 as Int64, stop: 10 as Int64, step:  1 as Int64 };
+    let desc = SeriesArgs { start: 10 as Int64, stop: 0 as Int64, step: -1 as Int64 };
     match direction_for(&asc)  { DirAscending  => {}, _ => assert(false) }
     match direction_for(&desc) { DirDescending => {}, _ => assert(false) }
     assert(direction_name(&DirAscending)  == "ascending".clone());
@@ -47,34 +47,34 @@ fn test_direction() {
 }
 
 fn test_row_count_ascending() {
-    let a = Args { start: 0 as Int64, stop: 10 as Int64, step: 1 as Int64 };
+    let a = SeriesArgs { start: 0 as Int64, stop: 10 as Int64, step: 1 as Int64 };
     assert_eq(row_count(&a), 11 as Int64);     // 0..10 inclusive
-    let b = Args { start: 0 as Int64, stop: 10 as Int64, step: 2 as Int64 };
+    let b = SeriesArgs { start: 0 as Int64, stop: 10 as Int64, step: 2 as Int64 };
     assert_eq(row_count(&b), 6 as Int64);      // 0,2,4,6,8,10
-    let c = Args { start: 5 as Int64, stop: 4 as Int64, step: 1 as Int64 };
+    let c = SeriesArgs { start: 5 as Int64, stop: 4 as Int64, step: 1 as Int64 };
     assert_eq(row_count(&c), 0 as Int64);
 }
 
 fn test_row_count_descending() {
-    let d = Args { start: 10 as Int64, stop: 0 as Int64, step: -1 as Int64 };
+    let d = SeriesArgs { start: 10 as Int64, stop: 0 as Int64, step: -1 as Int64 };
     assert_eq(row_count(&d), 11 as Int64);
-    let e = Args { start: 10 as Int64, stop: 0 as Int64, step: -2 as Int64 };
+    let e = SeriesArgs { start: 10 as Int64, stop: 0 as Int64, step: -2 as Int64 };
     assert_eq(row_count(&e), 6 as Int64);     // 10,8,6,4,2,0
-    let f = Args { start: 4 as Int64, stop: 5 as Int64, step: -1 as Int64 };
+    let f = SeriesArgs { start: 4 as Int64, stop: 5 as Int64, step: -1 as Int64 };
     assert_eq(row_count(&f), 0 as Int64);
 }
 
 fn test_value_at() {
-    let a = Args { start: 5 as Int64, stop: 15 as Int64, step: 2 as Int64 };
+    let a = SeriesArgs { start: 5 as Int64, stop: 15 as Int64, step: 2 as Int64 };
     assert_eq(value_at(&a, 0 as Int64), 5 as Int64);
     assert_eq(value_at(&a, 3 as Int64), 11 as Int64);
 }
 
 fn test_at_end() {
-    let a = Args { start: 0 as Int64, stop: 10 as Int64, step: 1 as Int64 };
+    let a = SeriesArgs { start: 0 as Int64, stop: 10 as Int64, step: 1 as Int64 };
     assert(!at_end(&a, 10 as Int64));
     assert(at_end(&a, 11 as Int64));
-    let d = Args { start: 10 as Int64, stop: 0 as Int64, step: -1 as Int64 };
+    let d = SeriesArgs { start: 10 as Int64, stop: 0 as Int64, step: -1 as Int64 };
     assert(!at_end(&d, 0 as Int64));
     assert(at_end(&d, -1 as Int64));
 }

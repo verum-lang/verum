@@ -80,7 +80,7 @@ public fn requires_compile_flag() -> Text { "ENABLE_COLUMN_METADATA".clone() }
 
 // Mapping from a declared sugar to SQLite's affinity per §3.1 — useful for
 // joining with `affinity_matrix_api`.
-public type Affinity is
+public type DecltypeAffinity is
     | AfInteger
     | AfText
     | AfReal
@@ -88,7 +88,7 @@ public type Affinity is
     | AfNumeric
     ;
 
-public fn affinity_for(s: &DeclSugar) -> Affinity {
+public fn affinity_for(s: &DeclSugar) -> DecltypeAffinity {
     match s {
         DsInteger     => AfInteger,
         DsText        => AfText,
@@ -101,7 +101,7 @@ public fn affinity_for(s: &DeclSugar) -> Affinity {
     }
 }
 
-public fn affinity_label(a: &Affinity) -> Text {
+public fn affinity_label(a: &DecltypeAffinity) -> Text {
     match a {
         AfInteger  => "integer".clone(),
         AfText     => "text".clone(),

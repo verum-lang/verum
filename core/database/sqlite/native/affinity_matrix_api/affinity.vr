@@ -4,7 +4,7 @@ module core.database.sqlite.native.affinity_matrix_api.affinity;
 
 mount base.{Bool, Text};
 
-public type Affinity is
+public type MatrixAffinity is
     | AfInteger
     | AfText
     | AfBlob           // equivalent to NONE in older docs
@@ -12,7 +12,7 @@ public type Affinity is
     | AfNumeric
     ;
 
-public fn affinity_name(a: &Affinity) -> Text {
+public fn affinity_name(a: &MatrixAffinity) -> Text {
     match a {
         AfInteger => "INTEGER".clone(),
         AfText    => "TEXT".clone(),
@@ -22,7 +22,7 @@ public fn affinity_name(a: &Affinity) -> Text {
     }
 }
 
-public fn stores_numbers_directly(a: &Affinity) -> Bool {
+public fn stores_numbers_directly(a: &MatrixAffinity) -> Bool {
     match a {
         AfInteger => true,
         AfReal    => true,
@@ -31,13 +31,13 @@ public fn stores_numbers_directly(a: &Affinity) -> Bool {
     }
 }
 
-public fn allows_free_form_blob(a: &Affinity) -> Bool {
+public fn allows_free_form_blob(a: &MatrixAffinity) -> Bool {
     match a { AfBlob => true, _ => false }
 }
 
 // STRICT-mode tables only admit five types plus NULL:
 // INTEGER, REAL, TEXT, BLOB, ANY (= NUMERIC maps to ANY-ish behaviour).
-public fn allowed_in_strict(a: &Affinity) -> Bool {
+public fn allowed_in_strict(a: &MatrixAffinity) -> Bool {
     match a {
         AfInteger => true,
         AfReal    => true,
@@ -48,7 +48,7 @@ public fn allowed_in_strict(a: &Affinity) -> Bool {
 }
 
 // Column priority used during JOIN-USING and comparison coercion.
-public fn coercion_priority(a: &Affinity) -> Int {
+public fn coercion_priority(a: &MatrixAffinity) -> Int {
     match a {
         AfInteger => 5,
         AfReal    => 4,

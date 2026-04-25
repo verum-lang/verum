@@ -11,7 +11,7 @@ mount core.database.sqlite.native.column_decltype_api.decltype.{
     sugar_text, from_text, well_known_sugar_count, is_well_known,
     Outcome, OkDecl, OkNullExpression, OkNullDisabled,
     outcome_label, returned_text, decl_text, requires_compile_flag,
-    Affinity, AfInteger, AfText, AfReal, AfBlob, AfNumeric,
+    DecltypeAffinity, AfInteger, AfText, AfReal, AfBlob, AfNumeric,
     affinity_for, affinity_label,
 };
 mount base.{Bool};

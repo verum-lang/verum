@@ -17,7 +17,7 @@
 // core.net.quic
 // ├── mod.vr          — this file (re-exports, Config types)
 // ├── error.vr        — QuicError (transport + app error codes)
-// ├── connection.vr   — Connection handle, send/recv/close
+// ├── connection.vr   — QuicConnection handle, send/recv/close
 // └── stream.vr       — QuicStream (send, recv, shutdown)
 // ```
 //
@@ -31,7 +31,7 @@
 //     .with_alpn(&["h3".into()])
 //     .with_initial_max_data(1 << 20)
 //     .with_initial_max_stream_data_bidi_local(1 << 16);
-// let conn = Connection.connect(&peer_addr, config).await?;
+// let conn = QuicConnection.connect(&peer_addr, config).await?;
 //
 // // Server
 // let listener = QuicListener.bind(&local_addr, server_config).await?;
@@ -89,7 +89,7 @@ public mount .error.QuicError;
 public mount .error.TransportErrorCode;
 public mount .error.ApplicationErrorCode;
 
-public mount .connection.Connection;
+public mount .connection.QuicConnection;
 public mount .connection.QuicListener;
 public mount .connection.ConnectionEvent;
 

@@ -29,7 +29,7 @@ mount core.net.tls13.handshake.extension.{
     Extension, ExtensionContext, EXT_POST_HANDSHAKE_AUTH,
     encode_extension, decode_extension,
 };
-mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.codec.{Tls13HandshakeReader};
 mount core.net.tls13.handshake.client_sm.{PostHandshakeOutcome};
 mount core.collections.List;
 
@@ -46,7 +46,7 @@ fn check_extension_roundtrip() {
     assert(wire[3] == 0x00_u8);   // length 0
 
     // Decode — context is ClientHelloCtx (client-issued).
-    let mut r = Reader.new(wire.as_slice());
+    let mut r = Tls13HandshakeReader.new(wire.as_slice());
     let decoded = decode_extension(&mut r, ExtensionContext.ClientHelloCtx);
     match decoded {
         Ok(ext) => {

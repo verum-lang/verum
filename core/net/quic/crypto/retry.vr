@@ -8,7 +8,7 @@
 //
 //   Retry_Pseudo-Packet ::= {
 //       ODCID Length (u8)
-//       Original Destination Connection ID (0..160 bits)
+//       Original Destination QuicConnection ID (0..160 bits)
 //       Retry Packet (bytes without the integrity tag)
 //   }
 //

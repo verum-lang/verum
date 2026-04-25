@@ -1,11 +1,11 @@
 // =============================================================================
-// observability/metric.vr — Counter / Gauge / Histogram primitives
+// observability/metric.vr — MetricObsCounter / Gauge / Histogram primitives
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
 // Three flavour primitives:
 //
-//   * `Counter`   — strictly-monotonic Int64 (rows_read,
+//   * `MetricObsCounter`   — strictly-monotonic Int64 (rows_read,
 //                    queries_total, ...)
 //   * `Gauge`     — observable Int64 that may go up or down
 //                    (cache_size_bytes, open_cursors, ...)
@@ -23,16 +23,16 @@ mount base.{Text, Bool, Maybe};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// Counter
+// MetricObsCounter
 // -----------------------------------------------------------------------------
 
-public type Counter is { name: Text, value: Int64 }
+public type MetricObsCounter is { name: Text, value: Int64 }
 
-public fn counter_new(name: Text) -> Counter {
-    Counter { name: name, value: 0 as Int64 }
+public fn counter_new(name: Text) -> MetricObsCounter {
+    MetricObsCounter { name: name, value: 0 as Int64 }
 }
 
-implement Counter {
+implement MetricObsCounter {
     public fn inc(&mut self) { self.value = self.value + (1 as Int64); }
     public fn add(&mut self, n: Int64) { self.value = self.value + n; }
     public fn get(&self) -> Int64 { self.value }
