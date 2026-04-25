@@ -19,10 +19,10 @@ mount base.{Text, Bool};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// SerialType — abstracted form of one column's serial-type code
+// RecordEncodingSerialType — abstracted form of one column's serial-type code
 // -----------------------------------------------------------------------------
 
-public type SerialType is
+public type RecordEncodingSerialType is
       StNull
     | StInt8
     | StInt16
@@ -36,7 +36,7 @@ public type SerialType is
     | StBlob(Int)            // length
     | StText(Int);           // length
 
-public fn serial_type_code(t: &SerialType) -> Int {
+public fn serial_type_code(t: &RecordEncodingSerialType) -> Int {
     match t {
         StNull       => 0,
         StInt8       => 1,
@@ -59,12 +59,12 @@ public fn serial_type_code(t: &SerialType) -> Int {
 
 public type RecordVector is {
     name: Text,
-    serial_types: List<SerialType>,
+    serial_types: List<RecordEncodingSerialType>,
     /// Canonical encoded bytes — header_varint || serial_type varints || data.
     encoded: List<Byte>,
 }
 
-public fn record_vec(name: Text, types: List<SerialType>, encoded: List<Byte>) -> RecordVector {
+public fn record_vec(name: Text, types: List<RecordEncodingSerialType>, encoded: List<Byte>) -> RecordVector {
     RecordVector { name: name, serial_types: types, encoded: encoded }
 }
 
@@ -117,14 +117,14 @@ public fn appendix_e2() -> List<RecordVector> {
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn types(arr: &List<SerialType>) -> List<SerialType> {
-    let mut out: List<SerialType> = List.new();
+fn types(arr: &List<RecordEncodingSerialType>) -> List<RecordEncodingSerialType> {
+    let mut out: List<RecordEncodingSerialType> = List.new();
     let mut i: Int = 0;
     while i < arr.len() { out.push(clone_st(&arr[i])); i = i + 1; }
     out
 }
 
-fn clone_st(t: &SerialType) -> SerialType {
+fn clone_st(t: &RecordEncodingSerialType) -> RecordEncodingSerialType {
     match t {
         StNull       => StNull,
         StInt8       => StInt8,

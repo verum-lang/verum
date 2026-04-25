@@ -9,7 +9,7 @@ mount core.database.sqlite.native.vfs_api.entry.{
     VfsEntry, new_entry, promote_to_default, entry_matches,
 };
 mount core.database.sqlite.native.vfs_api.registry.{
-    VfsRegistry, new_registry,
+    VfsApiRegistry, new_registry,
 };
 mount base.{Bool, Maybe};
 

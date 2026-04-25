@@ -16,18 +16,18 @@ mount core.database.sqlite.native.vfs_api.entry.{
     VfsEntry, new_entry, entry_matches, promote_to_default,
 };
 
-public type VfsRegistry is {
+public type VfsApiRegistry is {
     entries: List<VfsEntry>,
     /// 0 ⇒ no default installed.  Otherwise it's the handle of the
     /// entry at the head of the chain.
     default_handle: Int64,
 }
 
-public fn new_registry() -> VfsRegistry {
-    VfsRegistry { entries: List.new(), default_handle: 0 as Int64 }
+public fn new_registry() -> VfsApiRegistry {
+    VfsApiRegistry { entries: List.new(), default_handle: 0 as Int64 }
 }
 
-implement VfsRegistry {
+implement VfsApiRegistry {
     /// sqlite3_vfs_register: returns 0 on success, 1 on misuse
     /// (duplicate name).
     pub fn sqlite3_vfs_register(&mut self, name: Text, handle: Int64, make_default: Bool) -> Int {

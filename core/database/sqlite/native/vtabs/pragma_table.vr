@@ -44,7 +44,7 @@ public fn table_info_schema() -> VtabSchema {
     }
 }
 
-public type ColumnInfo is {
+public type PragmaTableColumnInfo is {
     cid: Int,
     name: Text,
     type_name: Text,
@@ -54,11 +54,11 @@ public type ColumnInfo is {
 };
 
 public type TableInfoCursor is {
-    rows: List<ColumnInfo>,
+    rows: List<PragmaTableColumnInfo>,
     pos: Int,
 };
 
-public fn table_info_cursor(rows: List<ColumnInfo>) -> TableInfoCursor {
+public fn table_info_cursor(rows: List<PragmaTableColumnInfo>) -> TableInfoCursor {
     TableInfoCursor { rows: rows, pos: 0 }
 }
 

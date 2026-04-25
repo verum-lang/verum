@@ -71,8 +71,8 @@ const BASELINE_DUPLICATES: &[&str] = &[
     "CacheMode", "Category", "Cell", "Certificate",
     "ChangeOp", "CheckpointMode", "ChildSpecOpaque",
     "CircuitBreaker", "CircuitBreakerConfig", "CircuitBreakerOpaque",
-    "CircuitState", "ClientConfig", "ColorProfile", "ColumnDef",
-    "ColumnInfo", "CommaObject", "Condvar", "Config",
+    "CircuitState", "ClientConfig", "ColorProfile",
+    "CommaObject", "Condvar", "Config",
     "ConflictResolution", "Connection", "Constraint",
     "ConstraintOp", "ContextEntry", "ContextError", "ContextSlots",
     "Counter", "CpuContext", "CpuFeatures", "CrlReason", "CsvOptions",
@@ -112,7 +112,7 @@ const BASELINE_DUPLICATES: &[&str] = &[
     "ResultRow", "RetryConfig", "Role", "Router", "Row", "RowShape",
     "RsaPublicKey", "RTree", "Runtime", "SavepointStack", "SchemaError",
     "SchemaKind", "Scope", "Segment", "SegmentLevel", "SendError",
-    "SerialType", "Session", "SetOutcome", "Setting",
+    "Session", "SetOutcome", "Setting",
     "SharedRegistryOpaque", "Signal", "SimpleTokenizer",
     "SingleThreadExecutorOpaque", "Snapshot", "SnapshotHandle",
     "SnapshotView", "SockaddrIn", "SockaddrIn6", "Source",
@@ -130,7 +130,7 @@ const BASELINE_DUPLICATES: &[&str] = &[
     "TriggerTiming", "TrigramTokenizer", "TxnState", "Unicode61Tokenizer",
     "UniqueConstraint", "UpdateOp", "Url", "ValidationError", "Validity",
     "Value", "VarintVector", "Verdict", "VerifyOptions", "Version",
-    "VfsRegistry", "Viewport", "WalChecksumVector", "WalFrameHeader",
+    "Viewport", "WalChecksumVector", "WalFrameHeader",
     "WalkMode", "YieldNow",
 ];
 

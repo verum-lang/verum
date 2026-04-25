@@ -20,10 +20,10 @@ mount base.{Text, Maybe, Bool};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// ColumnDef — minimal subset needed for ADD COLUMN
+// AlterColumnDef — minimal subset needed for ADD COLUMN
 // -----------------------------------------------------------------------------
 
-public type ColumnDef is {
+public type AlterColumnDef is {
     name: Text,
     type_affinity: Text,
     not_null: Bool,
@@ -31,8 +31,8 @@ public type ColumnDef is {
     is_unique: Bool,
 }
 
-public fn column_def(name: Text, type_affinity: Text) -> ColumnDef {
-    ColumnDef {
+public fn column_def(name: Text, type_affinity: Text) -> AlterColumnDef {
+    AlterColumnDef {
         name: name,
         type_affinity: type_affinity,
         not_null: false,
@@ -41,10 +41,10 @@ public fn column_def(name: Text, type_affinity: Text) -> ColumnDef {
     }
 }
 
-implement ColumnDef {
-    public fn require_not_null(mut self) -> ColumnDef { self.not_null = true; self }
-    public fn with_default(mut self, expr: Text) -> ColumnDef { self.default_expr = Some(expr); self }
-    public fn unique(mut self) -> ColumnDef { self.is_unique = true; self }
+implement AlterColumnDef {
+    public fn require_not_null(mut self) -> AlterColumnDef { self.not_null = true; self }
+    public fn with_default(mut self, expr: Text) -> AlterColumnDef { self.default_expr = Some(expr); self }
+    public fn unique(mut self) -> AlterColumnDef { self.is_unique = true; self }
 }
 
 // -----------------------------------------------------------------------------
@@ -54,7 +54,7 @@ implement ColumnDef {
 public type AlterOp is
       AoRenameTable(Text, Text)            // (old_name, new_name)
     | AoRenameColumn(Text, Text, Text)     // (table, old_col, new_col)
-    | AoAddColumn(Text, ColumnDef)
+    | AoAddColumn(Text, AlterColumnDef)
     | AoDropColumn(Text, Text)
     | AoAlterColumnDefault(Text, Text, Maybe<Text>);
 
@@ -90,7 +90,7 @@ public fn rename_column(table: Text, old_col: Text, new_col: Text) -> AlterOp {
     AoRenameColumn(table, old_col, new_col)
 }
 
-public fn add_column(table: Text, def: ColumnDef) -> AlterOp {
+public fn add_column(table: Text, def: AlterColumnDef) -> AlterOp {
     AoAddColumn(table, def)
 }
 
