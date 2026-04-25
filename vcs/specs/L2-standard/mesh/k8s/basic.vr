@@ -10,7 +10,7 @@
 mount core.mesh.k8s.{
     KubeConfig, ClusterEndpoint, AuthInfo, KubeConfigError,
     KubeClient, KubeError, ListOptions, WatchEvent, Patch,
-    Gateway, GatewayClass, Listener, ListenerAddress, ListenerTls,
+    Gateway, GatewayClass, K8sListener, ListenerAddress, ListenerTls,
     HTTPRoute, HttpRouteRule, HttpRouteMatch, HttpBackendRef,
     TLSRoute, TlsRouteRule,
 };
@@ -147,7 +147,7 @@ fn typecheck_patches() -> List<Patch> {
     xs
 }
 
-// Listener protocol + TLS mode enums.
+// K8sListener protocol + TLS mode enums.
 fn typecheck_listener_protocols() -> (ListenerProtocol, ListenerProtocol, TlsMode) {
     (ListenerProtocol.Https, ListenerProtocol.Grpc, TlsMode.Passthrough)
 }

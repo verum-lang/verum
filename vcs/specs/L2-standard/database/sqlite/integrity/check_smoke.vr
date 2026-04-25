@@ -27,7 +27,7 @@ mount core.database.sqlite.native.integrity.report.{
 };
 mount core.database.sqlite.native.integrity.engine.{
     IntegrityEngine, engine_new,
-    EnginePhase, IpInit, IpScanningPages, IpVerifyingBtree, IpDone, IpFailed,
+    IntegrityEnginePhase, IpInit, IpScanningPages, IpVerifyingBtree, IpDone, IpFailed,
     engine_phase_name,
 };
 mount base.{Bool, Text};

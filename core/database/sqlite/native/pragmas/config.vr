@@ -22,7 +22,7 @@ mount base.{Text, Maybe};
 // Mode-tagged enums
 // -----------------------------------------------------------------------------
 
-public type JournalMode is
+public type PragmaJournalMode is
       JmDelete
     | JmTruncate
     | JmPersist
@@ -30,7 +30,7 @@ public type JournalMode is
     | JmWal
     | JmOff;
 
-public fn journal_mode_name(m: &JournalMode) -> Text {
+public fn journal_mode_name(m: &PragmaJournalMode) -> Text {
     match m {
         JmDelete   => "delete".clone(),
         JmTruncate => "truncate".clone(),
@@ -41,7 +41,7 @@ public fn journal_mode_name(m: &JournalMode) -> Text {
     }
 }
 
-public fn journal_mode_from_text(s: &Text) -> Maybe<JournalMode> {
+public fn journal_mode_from_text(s: &Text) -> Maybe<PragmaJournalMode> {
     let lo = ascii_lower(s);
     if lo == "delete".clone()   { return Some(JmDelete); }
     if lo == "truncate".clone() { return Some(JmTruncate); }
@@ -113,7 +113,7 @@ public fn encoding_name(e: &Encoding) -> Text {
 public type PragmaConfig is {
     cache_size_pages: Int,        // negative = bytes form (SQLite quirk)
     page_size: Int,
-    journal_mode: JournalMode,
+    journal_mode: PragmaJournalMode,
     synchronous: Synchronous,
     foreign_keys: Bool,
     recursive_triggers: Bool,

@@ -25,11 +25,11 @@ public type Gateway is {
     name: Text,
     namespace: Text,
     gateway_class_name: Text,
-    listeners: List<Listener>,
+    listeners: List<K8sListener>,
     addresses: List<ListenerAddress>,
 }
 
-public type Listener is {
+public type K8sListener is {
     name: Text,
     port: UInt16,
     protocol: ListenerProtocol,

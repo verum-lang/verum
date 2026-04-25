@@ -10,7 +10,7 @@
 mount core.mesh.xds.{
     XdsError,
     TypeUrl, ResourceName, Node, AdsConfig,
-    Listener, Cluster, RouteConfiguration, ClusterLoadAssignment, Resource,
+    XdsListener, Cluster, RouteConfiguration, ClusterLoadAssignment, Resource,
     AdsClient, Subscription, DiscoveryResponse, DiscoveryDelta,
 };
 mount core.mesh.xds.types.{AdsAuth};
@@ -37,7 +37,7 @@ fn typecheck_type_urls() -> (TypeUrl, TypeUrl, TypeUrl, TypeUrl) {
 fn typecheck_xdstp_name() -> ResourceName {
     ResourceName.xdstp(
         &"istiod.example.com".into(),
-        &"envoy.config.listener.v3.Listener".into(),
+        &"envoy.config.listener.v3.XdsListener".into(),
         &"my-vhost".into(),
     )
 }

@@ -41,13 +41,13 @@ public fn keeps_going(d: &ChangesetDisposition) -> Bool {
 }
 
 // Aggregate outcome after running through a changeset — a single ABORT wins.
-public type ApplyOutcome is
+public type ApplyPolicyOutcome is
     | AoOk
     | AoOkWithSkips(Int64)       // number of omitted entries
     | AoAborted
     ;
 
-public fn outcome_name(o: &ApplyOutcome) -> Text {
+public fn outcome_name(o: &ApplyPolicyOutcome) -> Text {
     match o {
         AoOk              => "ok".clone(),
         AoOkWithSkips(_)  => "ok_with_skips".clone(),
@@ -58,13 +58,13 @@ public fn outcome_name(o: &ApplyOutcome) -> Text {
 public fn summarise(
     any_aborted: Bool,
     omit_count: Int64,
-) -> ApplyOutcome {
+) -> ApplyPolicyOutcome {
     if any_aborted { return AoAborted; }
     if omit_count > (0 as Int64) { return AoOkWithSkips(omit_count); }
     AoOk
 }
 
-public fn omit_count(o: &ApplyOutcome) -> Int64 {
+public fn omit_count(o: &ApplyPolicyOutcome) -> Int64 {
     match o {
         AoOkWithSkips(n) => n.clone(),
         _                => 0 as Int64,

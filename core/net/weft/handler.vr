@@ -300,9 +300,9 @@ implement FromRequest for BodyText {
 }
 
 /// JSON extractor placeholder. Actual deserialization binds in phase 2.
-public type Json<T> is { inner: T };
+public type WeftHandlerJson<T> is { inner: T };
 
-implement<T> Json<T> {
+implement<T> WeftHandlerJson<T> {
     public fn into_inner(self) -> T { self.inner }
     public fn as_ref(&self) -> &T { &self.inner }
 }

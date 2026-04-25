@@ -4,7 +4,7 @@ module core.database.sqlite.native.journal_mode_transition.action;
 
 mount base.{Bool, Text};
 
-public type JournalMode is
+public type JournalTransitionMode is
     | JmDelete
     | JmTruncate
     | JmPersist
@@ -13,7 +13,7 @@ public type JournalMode is
     | JmOff
     ;
 
-public fn mode_name(m: &JournalMode) -> Text {
+public fn mode_name(m: &JournalTransitionMode) -> Text {
     match m {
         JmDelete   => "DELETE".clone(),
         JmTruncate => "TRUNCATE".clone(),
@@ -24,16 +24,16 @@ public fn mode_name(m: &JournalMode) -> Text {
     }
 }
 
-public fn is_wal(m: &JournalMode) -> Bool {
+public fn is_wal(m: &JournalTransitionMode) -> Bool {
     match m { JmWal => true, _ => false }
 }
 
-public fn is_off(m: &JournalMode) -> Bool {
+public fn is_off(m: &JournalTransitionMode) -> Bool {
     match m { JmOff => true, _ => false }
 }
 
 // Rollback-journal family (DELETE, TRUNCATE, PERSIST all use rollback-journal).
-public fn is_rollback_family(m: &JournalMode) -> Bool {
+public fn is_rollback_family(m: &JournalTransitionMode) -> Bool {
     match m {
         JmDelete   => true,
         JmTruncate => true,
@@ -71,7 +71,7 @@ public fn needs_exclusive_lock(a: &TransitionAction) -> Bool {
     }
 }
 
-public fn plan(from: &JournalMode, to: &JournalMode) -> TransitionAction {
+public fn plan(from: &JournalTransitionMode, to: &JournalTransitionMode) -> TransitionAction {
     let from_wal = is_wal(from);
     let to_wal   = is_wal(to);
     let same_family = is_rollback_family(from) && is_rollback_family(to);

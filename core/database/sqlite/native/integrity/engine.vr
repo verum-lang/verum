@@ -28,10 +28,10 @@ mount core.database.sqlite.native.integrity.report.{
 };
 
 // -----------------------------------------------------------------------------
-// EnginePhase
+// IntegrityEnginePhase
 // -----------------------------------------------------------------------------
 
-public type EnginePhase is
+public type IntegrityEnginePhase is
       IpInit
     | IpScanningPages
     | IpVerifyingBtree
@@ -41,7 +41,7 @@ public type EnginePhase is
     | IpDone
     | IpFailed(Text);
 
-public fn engine_phase_name(p: &EnginePhase) -> Text {
+public fn engine_phase_name(p: &IntegrityEnginePhase) -> Text {
     match p {
         IpInit                  => "init".clone(),
         IpScanningPages         => "scanning_pages".clone(),
@@ -60,7 +60,7 @@ public fn engine_phase_name(p: &EnginePhase) -> Text {
 
 public type IntegrityEngine is {
     mode: CheckMode,
-    phase: EnginePhase,
+    phase: IntegrityEnginePhase,
     report: IntegrityReport,
 }
 
@@ -73,7 +73,7 @@ public fn engine_new(mode: CheckMode) -> IntegrityEngine {
 }
 
 implement IntegrityEngine {
-    public fn current_phase(&self) -> EnginePhase { clone_phase(&self.phase) }
+    public fn current_phase(&self) -> IntegrityEnginePhase { clone_phase(&self.phase) }
 
     public fn is_terminal(&self) -> Bool {
         match &self.phase {
@@ -105,7 +105,7 @@ implement IntegrityEngine {
     pub fn report_view(&self) -> &IntegrityReport { &self.report }
 }
 
-fn next_phase_for(mode: &CheckMode, current: &EnginePhase) -> EnginePhase {
+fn next_phase_for(mode: &CheckMode, current: &IntegrityEnginePhase) -> IntegrityEnginePhase {
     // quick_check + cell_size_check skip record / FK / index phases.
     let full = match mode {
         CmIntegrity => true,
@@ -134,7 +134,7 @@ fn clone_mode(m: &CheckMode) -> CheckMode {
     }
 }
 
-fn clone_phase(p: &EnginePhase) -> EnginePhase {
+fn clone_phase(p: &IntegrityEnginePhase) -> IntegrityEnginePhase {
     match p {
         IpInit                  => IpInit,
         IpScanningPages         => IpScanningPages,

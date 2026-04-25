@@ -22,7 +22,7 @@ mount core.database.sqlite.native.pragmas.registry.{
 };
 mount core.database.sqlite.native.pragmas.config.{
     PragmaConfig, pragma_config_default,
-    JournalMode, JmDelete, JmWal, journal_mode_name,
+    PragmaJournalMode, JmDelete, JmWal, journal_mode_name,
     Synchronous, SyncFull,
 };
 mount core.database.sqlite.native.pragmas.dispatch.{

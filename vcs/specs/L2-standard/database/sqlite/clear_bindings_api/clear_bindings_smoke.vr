@@ -8,7 +8,7 @@
 mount core.database.sqlite.native.clear_bindings_api.clear.{
     ClearStats, empty_stats, record_slot,
     was_noop, relative_pressure,
-    ApplyOutcome, OkApplied, ErrMisuseFinalized,
+    ClearBindingsOutcome, OkApplied, ErrMisuseFinalized,
     outcome_label, is_ok, slots_reset, misuse_code,
 };
 mount base.{Bool};
