@@ -13796,7 +13796,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 3 { return Ok(()); }
             let dst = operands[0] as u16;
             let fat_ref = ctx.get_register(operands[1] as u16)?;
-            let index = ctx.get_register(operands[2] as u16)?;
+            let index_raw = ctx.get_register(operands[2] as u16)?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             // Load base pointer from fat ref. Registers can store either a
@@ -13809,10 +13809,17 @@ fn lower_cbgr_extended<'ctx>(
             let base_ptr = ctx.builder()
                 .build_int_to_ptr(base_int.into_int_value(), ptr_ty, "base_ptr")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // The index register can be a PointerValue (e.g. when an
+            // intermediate is a heap-tagged Int from a variant payload)
+            // or an IntValue (the typical case). `as_i64` handles both
+            // — the bare `index_raw.into_int_value()` was panicking the
+            // backend when the index came in as a pointer (real plaintext
+            // server hit this on the bind path's iter advance).
+            let index = as_i64(ctx, index_raw, "slice_index")?;
             // GEP to element
             // SAFETY: GEP into the slice backing array to access element at the given index; bounds checking is caller's responsibility (SliceGetUnchecked skips it)
             let elem_ptr = unsafe {
-                ctx.builder().build_in_bounds_gep(i64_ty, base_ptr, &[index.into_int_value()], "elem_ptr")
+                ctx.builder().build_in_bounds_gep(i64_ty, base_ptr, &[index], "elem_ptr")
                     .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
             };
             let elem = ctx.builder()
