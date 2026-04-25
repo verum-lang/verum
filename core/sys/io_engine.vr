@@ -464,6 +464,17 @@ implement IoError {
         IoError.from_errno(err)
     }
 
+    /// Convert a structured `OSError {code, message}` into a tagged
+    /// `IoError`. Use this with `.map_err(IoError.from_os)` when the
+    /// source is a `Result<T, OSError>` (the shape returned by every
+    /// `safe_*` syscall wrapper in `core.sys`). Without this adapter
+    /// callers had to use `.map_err(IoError.from_os_error)` which
+    /// silently fed an `OSError` struct into a function that expects
+    /// `Int32`, producing nonsense `IoError` values at runtime.
+    public pure fn from_os(err: OSError) -> IoError {
+        IoError.from_errno(err.code as Int32)
+    }
+
     /// Create from Windows error code
     @cfg(target_os = "windows")
     public pure fn from_win32(err: UInt32) -> IoError {

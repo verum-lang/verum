@@ -238,10 +238,10 @@ implement Read for UnixStream {
         @cfg(any(target_os = "linux", target_os = "windows"))
         let r = {
             const MSG_NOSIGNAL: Int = 0x4000;
-            recv(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os_error)
+            recv(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os)
         };
         @cfg(target_os = "macos")
-        let r = sys_recv(self.fd, buf, 0).map_err(IoError.from_os_error);
+        let r = sys_recv(self.fd, buf, 0).map_err(IoError.from_os);
         r
     }
 }
@@ -251,10 +251,10 @@ implement Write for UnixStream {
         @cfg(any(target_os = "linux", target_os = "windows"))
         let r = {
             const MSG_NOSIGNAL: Int = 0x4000;
-            send(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os_error)
+            send(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os)
         };
         @cfg(target_os = "macos")
-        let r = sys_send(self.fd, buf, 0).map_err(IoError.from_os_error);
+        let r = sys_send(self.fd, buf, 0).map_err(IoError.from_os);
         r
     }
 
@@ -293,7 +293,7 @@ implement AsyncRead for UnixStream {
                 io_engine.register(self.fd, IOInterest.Read, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Err(IoError.from_os_error(e))),
+            Err(e) => Poll.Ready(Err(IoError.from_os(e))),
         }
     }
 }
@@ -324,7 +324,7 @@ implement AsyncWrite for UnixStream {
                 io_engine.register(self.fd, IOInterest.Write, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Err(IoError.from_os_error(e))),
+            Err(e) => Poll.Ready(Err(IoError.from_os(e))),
         }
     }
 

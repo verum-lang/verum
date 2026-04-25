@@ -1,0 +1,31 @@
+# Standalone workspace — keeps build artifacts in a sibling target/
+# dir so the main verum workspace's lock isn't held while load-gen
+# compiles.
+[workspace]
+
+[package]
+name = "verum-techempower-loadgen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Closed-loop HTTP/1.1 load generator for Verum TechEmpower R23 acceptance gates"
+
+[[bin]]
+name = "loadgen"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "time", "signal"] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+http-body-util = "0.1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

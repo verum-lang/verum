@@ -301,10 +301,10 @@ implement TcpStream {
         // Create socket using native V-LLSI syscalls
         // Use statement-level @cfg to keep fd in function scope
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let fd = socket(domain, SOCK_STREAM, 0).map_err(IoError.from_os_error)?;
+        let fd = socket(domain, SOCK_STREAM, 0).map_err(IoError.from_os)?;
 
         @cfg(target_os = "macos")
-        let fd = sys_socket(domain, SOCK_STREAM, 0).map_err(IoError.from_os_error)?;
+        let fd = sys_socket(domain, SOCK_STREAM, 0).map_err(IoError.from_os)?;
 
         // macOS: set SO_NOSIGPIPE to prevent SIGPIPE on write to closed socket
         @cfg(target_os = "macos")
@@ -336,7 +336,7 @@ implement TcpStream {
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
 
-                Err(IoError.from_os_error(e))
+                Err(IoError.from_os(e))
             }
         }
     }
@@ -373,14 +373,14 @@ implement TcpStream {
         // Create socket - use statement-level @cfg to ensure fd is in function scope
         @cfg(any(target_os = "linux", target_os = "windows"))
         let fd = socket(domain, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)
-            .map_err(IoError.from_os_error)?;
+            .map_err(IoError.from_os)?;
 
         @cfg(target_os = "macos")
-        let fd = sys_socket(domain, SOCK_STREAM, 0).map_err(IoError.from_os_error)?;
+        let fd = sys_socket(domain, SOCK_STREAM, 0).map_err(IoError.from_os)?;
 
         // macOS: set non-blocking after creation
         @cfg(target_os = "macos")
-        let _ = safe_set_nonblocking(fd, true).map_err(IoError.from_os_error)?;
+        let _ = safe_set_nonblocking(fd, true).map_err(IoError.from_os)?;
 
         @cfg(target_os = "macos")
         let _ = safe_set_nosigpipe(fd, true);
@@ -423,7 +423,7 @@ implement TcpStream {
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
 
-                return Err(IoError.from_os_error(e));
+                return Err(IoError.from_os(e));
             }
         }
 
@@ -457,7 +457,7 @@ implement TcpStream {
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
 
-                Err(IoError.from_os_error(e))
+                Err(IoError.from_os(e))
             }
         }
     }
@@ -479,11 +479,11 @@ implement TcpStream {
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
             getsockname(self.fd, &mut addr_buf, &mut addr_len)
-                .map_err(IoError.from_os_error)?;
+                .map_err(IoError.from_os)?;
         }
         @cfg(target_os = "macos") {
             safe_getsockname(self.fd, &mut addr_buf, &mut addr_len)
-                .map_err(IoError.from_os_error)?;
+                .map_err(IoError.from_os)?;
         }
 
         deserialize_socket_addr(&addr_buf[..addr_len as Int])
@@ -501,10 +501,10 @@ implement TcpStream {
         };
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            shutdown(self.fd, how_int).map_err(IoError.from_os_error)
+            shutdown(self.fd, how_int).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
-            sys_shutdown(self.fd, how_int).map_err(IoError.from_os_error)
+            sys_shutdown(self.fd, how_int).map_err(IoError.from_os)
         }
     }
 
@@ -515,10 +515,10 @@ implement TcpStream {
     public fn set_read_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_socket_timeout(self.fd, ms, true).map_err(IoError.from_os_error)
+            set_socket_timeout(self.fd, ms, true).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
-            safe_set_socket_timeout(self.fd, ms, true).map_err(IoError.from_os_error)
+            safe_set_socket_timeout(self.fd, ms, true).map_err(IoError.from_os)
         }
     }
 
@@ -529,10 +529,10 @@ implement TcpStream {
     public fn set_write_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_socket_timeout(self.fd, ms, false).map_err(IoError.from_os_error)
+            set_socket_timeout(self.fd, ms, false).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
-            safe_set_socket_timeout(self.fd, ms, false).map_err(IoError.from_os_error)
+            safe_set_socket_timeout(self.fd, ms, false).map_err(IoError.from_os)
         }
     }
 
@@ -546,10 +546,10 @@ implement TcpStream {
     /// - Disabled: Higher latency, better bandwidth utilization
     public fn set_nodelay(&self, nodelay: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_tcp_nodelay(self.fd, nodelay).map_err(IoError.from_os_error)
+            set_tcp_nodelay(self.fd, nodelay).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
-            safe_set_tcp_nodelay(self.fd, nodelay).map_err(IoError.from_os_error)
+            safe_set_tcp_nodelay(self.fd, nodelay).map_err(IoError.from_os)
         }
     }
 
@@ -559,10 +559,10 @@ implement TcpStream {
     /// Recommended for long-lived connections (database, message queue clients).
     public fn set_keepalive(&self, keepalive: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_keepalive(self.fd, keepalive).map_err(IoError.from_os_error)
+            set_keepalive(self.fd, keepalive).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
-            safe_set_keepalive(self.fd, keepalive).map_err(IoError.from_os_error)
+            safe_set_keepalive(self.fd, keepalive).map_err(IoError.from_os)
         }
     }
 
@@ -572,10 +572,10 @@ implement TcpStream {
     /// EWOULDBLOCK/EAGAIN if they would block. Use with async I/O or poll/select.
     public fn set_nonblocking(&self, nonblocking: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_nonblocking(self.fd, nonblocking).map_err(IoError.from_os_error)
+            set_nonblocking(self.fd, nonblocking).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
-            safe_set_nonblocking(self.fd, nonblocking).map_err(IoError.from_os_error)
+            safe_set_nonblocking(self.fd, nonblocking).map_err(IoError.from_os)
         }
     }
 
@@ -604,10 +604,10 @@ implement TcpStream {
         const F_DUPFD_CLOEXEC: Int = 67;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let new_fd = fcntl(self.fd, F_DUPFD_CLOEXEC, 0).map_err(IoError.from_os_error)?;
+        let new_fd = fcntl(self.fd, F_DUPFD_CLOEXEC, 0).map_err(IoError.from_os)?;
 
         @cfg(target_os = "macos")
-        let new_fd = safe_fcntl(self.fd, F_DUPFD_CLOEXEC, 0).map_err(IoError.from_os_error)?;
+        let new_fd = safe_fcntl(self.fd, F_DUPFD_CLOEXEC, 0).map_err(IoError.from_os)?;
 
         Ok(TcpStream {
             fd: new_fd as FileDesc,
@@ -621,11 +621,11 @@ implement Read for TcpStream {
         @cfg(any(target_os = "linux", target_os = "windows")) {
             // Use recv with MSG_NOSIGNAL to prevent SIGPIPE on closed connection
             const MSG_NOSIGNAL: Int = 0x4000;
-            recv(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os_error)
+            recv(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
             // macOS uses SO_NOSIGPIPE set at socket creation time
-            sys_recv(self.fd, buf, 0).map_err(IoError.from_os_error)
+            sys_recv(self.fd, buf, 0).map_err(IoError.from_os)
         }
     }
 }
@@ -635,10 +635,10 @@ implement Write for TcpStream {
         @cfg(any(target_os = "linux", target_os = "windows")) {
             // Use send with MSG_NOSIGNAL to prevent SIGPIPE
             const MSG_NOSIGNAL: Int = 0x4000;
-            send(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os_error)
+            send(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
-            sys_send(self.fd, buf, 0).map_err(IoError.from_os_error)
+            sys_send(self.fd, buf, 0).map_err(IoError.from_os)
         }
     }
 
@@ -695,7 +695,7 @@ implement AsyncRead for TcpStream {
                 io_engine.register(self.fd, IOInterest.Read, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Err(IoError.from_os_error(e))),
+            Err(e) => Poll.Ready(Err(IoError.from_os(e))),
         }
     }
 }
@@ -728,7 +728,7 @@ implement AsyncWrite for TcpStream {
                 io_engine.register(self.fd, IOInterest.Write, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Err(IoError.from_os_error(e))),
+            Err(e) => Poll.Ready(Err(IoError.from_os(e))),
         }
     }
 
@@ -938,11 +938,11 @@ implement TcpListener {
         // Create socket - use statement-level @cfg to ensure fd is in function scope
         @cfg(any(target_os = "linux", target_os = "windows"))
         let fd = socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0)
-            .map_err(IoError.from_os_error)?;
+            .map_err(IoError.from_os)?;
 
         @cfg(target_os = "macos")
         let fd = sys_socket(domain, SOCK_STREAM, 0)
-            .map_err(IoError.from_os_error)?;
+            .map_err(IoError.from_os)?;
 
         // Set SO_REUSEADDR for quick restart
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -957,26 +957,26 @@ implement TcpListener {
         @cfg(any(target_os = "linux", target_os = "windows"))
         if let Err(e) = bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
             let _ = close(fd);
-            return Err(IoError.from_os_error(e));
+            return Err(IoError.from_os(e));
         }
 
         @cfg(target_os = "macos")
         if let Err(e) = sys_bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
             let _ = sys_close(fd);
-            return Err(IoError.from_os_error(e));
+            return Err(IoError.from_os(e));
         }
 
         // Start listening
         @cfg(any(target_os = "linux", target_os = "windows"))
         if let Err(e) = listen(fd, backlog) {
             let _ = close(fd);
-            return Err(IoError.from_os_error(e));
+            return Err(IoError.from_os(e));
         }
 
         @cfg(target_os = "macos")
         if let Err(e) = sys_listen(fd, backlog) {
             let _ = sys_close(fd);
-            return Err(IoError.from_os_error(e));
+            return Err(IoError.from_os(e));
         }
 
         Ok(TcpListener {
@@ -992,11 +992,11 @@ implement TcpListener {
         // Create socket - use statement-level @cfg to ensure fd is in function scope
         @cfg(any(target_os = "linux", target_os = "windows"))
         let fd = socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0)
-            .map_err(IoError.from_os_error)?;
+            .map_err(IoError.from_os)?;
 
         @cfg(target_os = "macos")
         let fd = sys_socket(domain, SOCK_STREAM, 0)
-            .map_err(IoError.from_os_error)?;
+            .map_err(IoError.from_os)?;
 
         // Set SO_REUSEADDR and SO_REUSEPORT
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -1021,25 +1021,25 @@ implement TcpListener {
         @cfg(any(target_os = "linux", target_os = "windows"))
         if let Err(e) = bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
             let _ = close(fd);
-            return Err(IoError.from_os_error(e));
+            return Err(IoError.from_os(e));
         }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
         if let Err(e) = listen(fd, backlog) {
             let _ = close(fd);
-            return Err(IoError.from_os_error(e));
+            return Err(IoError.from_os(e));
         }
 
         @cfg(target_os = "macos")
         if let Err(e) = sys_bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
             let _ = sys_close(fd);
-            return Err(IoError.from_os_error(e));
+            return Err(IoError.from_os(e));
         }
 
         @cfg(target_os = "macos")
         if let Err(e) = sys_listen(fd, backlog) {
             let _ = sys_close(fd);
-            return Err(IoError.from_os_error(e));
+            return Err(IoError.from_os(e));
         }
 
         Ok(TcpListener {
@@ -1059,11 +1059,11 @@ implement TcpListener {
         // Linux: use accept4 with SOCK_CLOEXEC for atomic close-on-exec
         @cfg(any(target_os = "linux", target_os = "windows"))
         let client_fd = accept4(self.fd, &mut addr_buf, &mut addr_len, SOCK_CLOEXEC)
-            .map_err(IoError.from_os_error)?;
+            .map_err(IoError.from_os)?;
 
         @cfg(target_os = "macos")
         let client_fd = sys_accept(self.fd, &mut addr_buf, &mut addr_len)
-            .map_err(IoError.from_os_error)?;
+            .map_err(IoError.from_os)?;
 
         // macOS: set SO_NOSIGPIPE on accepted socket
         @cfg(target_os = "macos")
@@ -1122,7 +1122,7 @@ implement TcpListener {
                     continue;
                 }
                 Err(e) => {
-                    return Err(IoError.from_os_error(e));
+                    return Err(IoError.from_os(e));
                 }
             }
         }
@@ -1147,10 +1147,10 @@ implement TcpListener {
     /// connection is pending instead of blocking.
     public fn set_nonblocking(&self, nonblocking: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_nonblocking(self.fd, nonblocking).map_err(IoError.from_os_error)
+            set_nonblocking(self.fd, nonblocking).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
-            safe_set_nonblocking(self.fd, nonblocking).map_err(IoError.from_os_error)
+            safe_set_nonblocking(self.fd, nonblocking).map_err(IoError.from_os)
         }
     }
 
@@ -1245,7 +1245,7 @@ implement<'a> Stream for AsyncIncoming<'a> {
                 io_engine.register(self.listener.fd, IOInterest.Read, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Some(Err(IoError.from_os_error(e)))),
+            Err(e) => Poll.Ready(Some(Err(IoError.from_os(e)))),
         }
     }
 }

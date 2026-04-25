@@ -1,0 +1,85 @@
+// =============================================================================
+// TechEmpower R23 — Plaintext server (real TCP, not just smoke)
+// =============================================================================
+// Runnable binary: opens TCP 0.0.0.0:8080 and serves "Hello, World!" on
+// every GET /plaintext. Used by the load-gen harness for both
+// interpreter-tier and AOT-tier perf measurement.
+//
+// Usage:
+//   verum run --bin plaintext-server -- --addr 0.0.0.0:8080
+// =============================================================================
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.async.cancellation.{CancellationToken};
+mount core.net.http.{Headers, Method, Response, StatusCode, Version};
+mount core.net.weft.handler.{Handler, WeftRequest};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.listener.{Server, ListenerConfig};
+mount core.net.weft.connection.{ConnectionConfig};
+
+// =============================================================================
+// PlaintextHandler — minimal Handler impl
+// =============================================================================
+
+type PlaintextHandler is ();
+
+implement Handler for PlaintextHandler {
+    pub async fn handle(&self, _req: &WeftRequest) -> Result<Response, WeftError> {
+        let mut h = Headers.new();
+        h.append(f"content-type", f"text/plain");
+        h.append(f"server",       f"verum-weft");
+        // "Hello, World!" — 13 bytes.
+        let body: List<Byte> = [
+            0x48_u8, 0x65_u8, 0x6C_u8, 0x6C_u8, 0x6F_u8, 0x2C_u8, 0x20_u8,
+            0x57_u8, 0x6F_u8, 0x72_u8, 0x6C_u8, 0x64_u8, 0x21_u8,
+        ];
+        Ok(Response {
+            status:  StatusCode { code: 200 },
+            version: Version.Http11,
+            headers: h,
+            body:    body,
+        })
+    }
+}
+
+// =============================================================================
+// main
+// =============================================================================
+
+@main
+pub async fn main() -> Int {
+    let addr = f"0.0.0.0:8080";
+    let config = ListenerConfig {
+        max_concurrent_connections: 65_536,
+        connection: ConnectionConfig {
+            keep_alive:           true,
+            read_buffer_capacity: 8_192,
+            max_request_size:     1_048_576,
+        },
+        drain_grace_ms: 30_000,
+        reuseport:      false,
+    };
+
+    let server = match Server.bind(addr, PlaintextHandler {}, config) {
+        Ok(s) => s,
+        Err(e) => {
+            print(f"bind failed: {e}");
+            return 1;
+        }
+    };
+
+    match server.local_addr() {
+        Ok(a) => print(f"plaintext server listening on {a}"),
+        Err(_) => print(f"plaintext server listening (addr unknown)"),
+    }
+
+    match server.serve().await {
+        Ok(_) => 0,
+        Err(e) => {
+            print(f"serve error: {e}");
+            1
+        }
+    }
+}
