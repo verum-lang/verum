@@ -136,4 +136,84 @@ public type Interpretation is protocol {
     fn object_property_inverse<P: ObjectPropertyExpression>(
         self, ope1: P, ope2: P,
     ) -> Bool;
+
+    /// `⟦OPE₁⟧^I ⊆ ⟦OPE₂⟧^I`: every pair in OPE₁ is also in OPE₂
+    /// (W3C §5.5.1 SubObjectPropertyOf).
+    fn object_property_subset<P: ObjectPropertyExpression>(
+        self, sub: P, sup: P,
+    ) -> Bool;
+
+    /// `⟦OPE₁⟧^I = ⟦OPE₂⟧^I`: equal extensions (W3C §5.5.4
+    /// EquivalentObjectProperties, binary core).
+    fn object_property_equal<P: ObjectPropertyExpression>(
+        self, a: P, b: P,
+    ) -> Bool;
+
+    /// `⟦OPE₁⟧^I ∩ ⟦OPE₂⟧^I = ∅`: disjoint extensions (W3C §5.5.5
+    /// DisjointObjectProperties, binary core).
+    fn object_property_disjoint<P: ObjectPropertyExpression>(
+        self, a: P, b: P,
+    ) -> Bool;
+
+    /// `for all (a, b) ∈ ⟦OPE⟧^I, a ∈ ⟦CE⟧^I` (W3C §5.5.6
+    /// ObjectPropertyDomain): the domain of OPE is contained in CE.
+    fn object_property_domain<P: ObjectPropertyExpression, C: ClassExpression>(
+        self, ope: P, ce: C,
+    ) -> Bool;
+
+    /// `for all (a, b) ∈ ⟦OPE⟧^I, b ∈ ⟦CE⟧^I` (W3C §5.5.7
+    /// ObjectPropertyRange): the range of OPE is contained in CE.
+    fn object_property_range<P: ObjectPropertyExpression, C: ClassExpression>(
+        self, ope: P, ce: C,
+    ) -> Bool;
+
+    /// W3C §5.5.8 FunctionalObjectProperty: every individual has at
+    /// most one OPE-successor under I.
+    fn object_property_functional<P: ObjectPropertyExpression>(
+        self, ope: P,
+    ) -> Bool;
+
+    /// W3C §5.5.9 InverseFunctionalObjectProperty: every individual
+    /// has at most one OPE-predecessor under I.
+    fn object_property_inverse_functional<P: ObjectPropertyExpression>(
+        self, ope: P,
+    ) -> Bool;
+
+    /// W3C §5.5.10 ReflexiveObjectProperty: (a, a) ∈ ⟦OPE⟧^I for
+    /// every a ∈ ΔᴵO.
+    fn object_property_reflexive<P: ObjectPropertyExpression>(
+        self, ope: P,
+    ) -> Bool;
+
+    /// W3C §5.5.11 IrreflexiveObjectProperty: (a, a) ∉ ⟦OPE⟧^I for
+    /// every a ∈ ΔᴵO.
+    fn object_property_irreflexive<P: ObjectPropertyExpression>(
+        self, ope: P,
+    ) -> Bool;
+
+    /// W3C §5.5.12 SymmetricObjectProperty: (a,b) ∈ ⟦OPE⟧^I  iff
+    /// (b,a) ∈ ⟦OPE⟧^I.
+    fn object_property_symmetric<P: ObjectPropertyExpression>(
+        self, ope: P,
+    ) -> Bool;
+
+    /// W3C §5.5.13 AsymmetricObjectProperty: (a,b) ∈ ⟦OPE⟧^I implies
+    /// (b,a) ∉ ⟦OPE⟧^I.
+    fn object_property_asymmetric<P: ObjectPropertyExpression>(
+        self, ope: P,
+    ) -> Bool;
+
+    /// W3C §5.5.14 TransitiveObjectProperty: (a,b) ∈ ⟦OPE⟧^I ∧ (b,c)
+    /// ∈ ⟦OPE⟧^I imply (a,c) ∈ ⟦OPE⟧^I.
+    fn object_property_transitive<P: ObjectPropertyExpression>(
+        self, ope: P,
+    ) -> Bool;
+
+    /// W3C §5.5.2/§5.5.3 SubObjectPropertyOfChain (binary core):
+    /// ⟦OPE₁⟧^I ∘ ⟦OPE₂⟧^I ⊆ ⟦OPE_super⟧^I (relation composition).
+    /// V2 ships the binary-chain core; n-ary chains via Verum-level
+    /// fold over consecutive pairs.
+    fn object_property_chain<P: ObjectPropertyExpression>(
+        self, first: P, second: P, sup: P,
+    ) -> Bool;
 };

@@ -7,54 +7,158 @@
 // range, and the seven characteristic flags (Functional,
 // InverseFunctional, Reflexive, Irreflexive, Symmetric, Asymmetric,
 // Transitive).
+//
+// V2 status (#134, 2026-04-25): all 14 axioms ship verbatim
+// W3C OWL 2 DS §5.5 bodies.
 // =============================================================================
 
-// --- Hierarchy + chains (3) ---
+mount core.math.frameworks.owl2_fs.types.{
+    ClassExpression,
+    ObjectPropertyExpression,
+    Interpretation,
+};
 
+// ─── §5.5.1–§5.5.3 Hierarchy + chains ─────────────────────────────
+
+/// `SubObjectPropertyOf(OPE₁, OPE₂)` (W3C §5.5.1):
+/// ⟦OPE₁⟧^I ⊆ ⟦OPE₂⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: SubObjectPropertyOf")
-public axiom SubObjectPropertyOf() -> Bool ensures true;
+public axiom SubObjectPropertyOf<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    sub:    P,
+    sup:    P,
+) -> Bool
+    ensures interp.object_property_subset(sub, sup);
 
+/// `SubObjectPropertyOfChain(OPE₁..n, OPE)` (W3C §5.5.2/§5.5.3):
+/// the relational composition ⟦OPE₁⟧^I ∘ ⟦OPE₂⟧^I ∘ … ⊆ ⟦OPE⟧^I.
+/// V2 ships the binary-chain core (n=2); n-ary chains via
+/// Verum-level fold over consecutive pairs.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: SubObjectPropertyOfChain")
-public axiom SubObjectPropertyOfChain() -> Bool ensures true;
+public axiom SubObjectPropertyOfChain<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    first:  P,
+    second: P,
+    sup:    P,
+) -> Bool
+    ensures interp.object_property_chain(first, second, sup);
 
+/// `InverseObjectProperties(OPE₁, OPE₂)` (W3C §5.5.3):
+/// ⟦OPE₁⟧^I = (⟦OPE₂⟧^I)⁻¹.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: InverseObjectProperties")
-public axiom InverseObjectProperties() -> Bool ensures true;
+public axiom InverseObjectProperties<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    a:      P,
+    b:      P,
+) -> Bool
+    ensures interp.object_property_inverse(a, b);
 
-// --- Equivalence / disjointness (2) ---
+// ─── §5.5.4–§5.5.5 Equivalence / disjointness ─────────────────────
 
+/// `EquivalentObjectProperties(OPE₁, …, OPEₙ)` (W3C §5.5.4):
+/// ⟦OPEᵢ⟧^I = ⟦OPEⱼ⟧^I for every pair. Binary core; n-ary via
+/// Verum-level fold.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: EquivalentObjectProperties")
-public axiom EquivalentObjectProperties() -> Bool ensures true;
+public axiom EquivalentObjectProperties<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    a:      P,
+    b:      P,
+) -> Bool
+    ensures interp.object_property_equal(a, b);
 
+/// `DisjointObjectProperties(OPE₁, …, OPEₙ)` (W3C §5.5.5):
+/// ⟦OPEᵢ⟧^I ∩ ⟦OPEⱼ⟧^I = ∅ for every distinct pair. Binary core.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: DisjointObjectProperties")
-public axiom DisjointObjectProperties() -> Bool ensures true;
+public axiom DisjointObjectProperties<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    a:      P,
+    b:      P,
+) -> Bool
+    ensures interp.object_property_disjoint(a, b);
 
-// --- Domain / range (2) ---
+// ─── §5.5.6–§5.5.7 Domain / range ─────────────────────────────────
 
+/// `ObjectPropertyDomain(OPE, CE)` (W3C §5.5.6): for every (a, b) in
+/// the OPE-relation, a is a member of CE.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: ObjectPropertyDomain")
-public axiom ObjectPropertyDomain() -> Bool ensures true;
+public axiom ObjectPropertyDomain<I: Interpretation, P: ObjectPropertyExpression, C: ClassExpression>(
+    interp: I,
+    ope:    P,
+    ce:     C,
+) -> Bool
+    ensures interp.object_property_domain(ope, ce);
 
+/// `ObjectPropertyRange(OPE, CE)` (W3C §5.5.7): for every (a, b) in
+/// the OPE-relation, b is a member of CE.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: ObjectPropertyRange")
-public axiom ObjectPropertyRange() -> Bool ensures true;
+public axiom ObjectPropertyRange<I: Interpretation, P: ObjectPropertyExpression, C: ClassExpression>(
+    interp: I,
+    ope:    P,
+    ce:     C,
+) -> Bool
+    ensures interp.object_property_range(ope, ce);
 
-// --- Seven characteristic flags ---
+// ─── §5.5.8–§5.5.14 Seven characteristic flags ────────────────────
 
+/// `FunctionalObjectProperty(OPE)` (W3C §5.5.8): every individual
+/// has at most one OPE-successor under I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: FunctionalObjectProperty")
-public axiom FunctionalObjectProperty() -> Bool ensures true;
+public axiom FunctionalObjectProperty<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+) -> Bool
+    ensures interp.object_property_functional(ope);
 
+/// `InverseFunctionalObjectProperty(OPE)` (W3C §5.5.9): every
+/// individual has at most one OPE-predecessor under I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: InverseFunctionalObjectProperty")
-public axiom InverseFunctionalObjectProperty() -> Bool ensures true;
+public axiom InverseFunctionalObjectProperty<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+) -> Bool
+    ensures interp.object_property_inverse_functional(ope);
 
+/// `ReflexiveObjectProperty(OPE)` (W3C §5.5.10): (a, a) ∈ ⟦OPE⟧^I
+/// for every a ∈ ΔᴵO.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: ReflexiveObjectProperty")
-public axiom ReflexiveObjectProperty() -> Bool ensures true;
+public axiom ReflexiveObjectProperty<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+) -> Bool
+    ensures interp.object_property_reflexive(ope);
 
+/// `IrreflexiveObjectProperty(OPE)` (W3C §5.5.11): (a, a) ∉ ⟦OPE⟧^I
+/// for every a ∈ ΔᴵO.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: IrreflexiveObjectProperty")
-public axiom IrreflexiveObjectProperty() -> Bool ensures true;
+public axiom IrreflexiveObjectProperty<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+) -> Bool
+    ensures interp.object_property_irreflexive(ope);
 
+/// `SymmetricObjectProperty(OPE)` (W3C §5.5.12): (a,b) ∈ ⟦OPE⟧^I
+/// iff (b,a) ∈ ⟦OPE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: SymmetricObjectProperty")
-public axiom SymmetricObjectProperty() -> Bool ensures true;
+public axiom SymmetricObjectProperty<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+) -> Bool
+    ensures interp.object_property_symmetric(ope);
 
+/// `AsymmetricObjectProperty(OPE)` (W3C §5.5.13): (a,b) ∈ ⟦OPE⟧^I
+/// implies (b,a) ∉ ⟦OPE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: AsymmetricObjectProperty")
-public axiom AsymmetricObjectProperty() -> Bool ensures true;
+public axiom AsymmetricObjectProperty<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+) -> Bool
+    ensures interp.object_property_asymmetric(ope);
 
+/// `TransitiveObjectProperty(OPE)` (W3C §5.5.14): (a,b) ∈ ⟦OPE⟧^I ∧
+/// (b,c) ∈ ⟦OPE⟧^I imply (a,c) ∈ ⟦OPE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: TransitiveObjectProperty")
-public axiom TransitiveObjectProperty() -> Bool ensures true;
+public axiom TransitiveObjectProperty<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+) -> Bool
+    ensures interp.object_property_transitive(ope);
