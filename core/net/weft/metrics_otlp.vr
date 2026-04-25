@@ -51,13 +51,13 @@
 //       string name = 1;
 //       string description = 2;
 //       string unit = 3;
-//       oneof data { Sum sum = 7; Histogram histogram = 9; ... }
+//       oneof data { Sum sum = 7; WeftHistogram histogram = 9; ... }
 //   }
 //
 // Sum.aggregation_temporality = AGGREGATION_TEMPORALITY_CUMULATIVE
-//   for monotonic counters (the variant `core.net.weft.metrics.Counter`
+//   for monotonic counters (the variant `core.net.weft.metrics.WeftCounter`
 //   produces).
-// Histogram with bucket bounds matches `metrics.Histogram.bounds_ms`.
+// WeftHistogram with bucket bounds matches `metrics.WeftHistogram.bounds_ms`.
 //
 // =============================================================================
 
@@ -71,7 +71,7 @@ mount core.async.task;
 mount core.async.timer;
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, MemoryOrdering};
-mount core.net.weft.metrics.{Registry, Counter, Histogram};
+mount core.net.weft.metrics.{Registry, WeftCounter, WeftHistogram};
 
 // =============================================================================
 // OtlpExporterConfig
@@ -430,7 +430,7 @@ fn encode_number_data_point(value: Int) -> List<Byte> {
 fn encode_histogram_metric(name: &Text, snap: &OtlpHistogramSnapshot) -> List<Byte> {
     let mut m: List<Byte> = [];
     write_string(&mut m, 1, name);
-    // Field 9: Histogram.
+    // Field 9: WeftHistogram.
     let mut hist: List<Byte> = [];
     let dp = encode_histogram_data_point(snap);
     write_tag_len(&mut hist, 1, &dp);
@@ -495,7 +495,7 @@ fn encode_histogram_data_point(snap: &OtlpHistogramSnapshot) -> List<Byte> {
 }
 
 // =============================================================================
-// OtlpHistogramSnapshot — read-only view of a Histogram for export
+// OtlpHistogramSnapshot — read-only view of a WeftHistogram for export
 // =============================================================================
 
 public type OtlpHistogramSnapshot is {

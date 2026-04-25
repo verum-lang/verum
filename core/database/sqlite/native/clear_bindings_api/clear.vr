@@ -37,23 +37,23 @@ public fn relative_pressure(s: &ClearStats) -> Int {
 
 // API outcome — clear_bindings always succeeds in production (apart from
 // SQLITE_MISUSE on an already-finalized stmt).
-public type ApplyOutcome is
+public type ClearBindingsOutcome is
     | OkApplied(Int)             // count of slots reset
     | ErrMisuseFinalized
     ;
 
-public fn outcome_label(o: &ApplyOutcome) -> Text {
+public fn outcome_label(o: &ClearBindingsOutcome) -> Text {
     match o {
         OkApplied(_)         => "ok".clone(),
         ErrMisuseFinalized   => "misuse_finalized".clone(),
     }
 }
 
-public fn is_ok(o: &ApplyOutcome) -> Bool {
+public fn is_ok(o: &ClearBindingsOutcome) -> Bool {
     match o { OkApplied(_) => true, _ => false }
 }
 
-public fn slots_reset(o: &ApplyOutcome) -> Int {
+public fn slots_reset(o: &ClearBindingsOutcome) -> Int {
     match o {
         OkApplied(n)         => n.clone(),
         ErrMisuseFinalized   => 0,

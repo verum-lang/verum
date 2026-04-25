@@ -24,17 +24,17 @@ public type Resource is {
 }
 
 public type ParsedResource is
-    | L(Listener)
+    | L(XdsListener)
     | C(Cluster)
     | R(RouteConfiguration)
     | E(ClusterLoadAssignment)
     | Opaque;
 
 // =============================================================================
-// Listener (LDS)
+// XdsListener (LDS)
 // =============================================================================
 
-public type Listener is {
+public type XdsListener is {
     name: Text,
     address: Text,
     port: UInt16,

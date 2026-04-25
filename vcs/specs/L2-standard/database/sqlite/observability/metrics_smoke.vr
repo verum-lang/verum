@@ -6,16 +6,16 @@
 // @expected-exit: 0
 //
 // Observability:
-//   * Counter inc / add monotonic
-//   * Gauge set / inc / dec
-//   * Histogram bucket placement + cumulative + approx_quantile
+//   * MetricObsCounter inc / add monotonic
+//   * MetricObsGauge set / inc / dec
+//   * MetricObsHistogram bucket placement + cumulative + approx_quantile
 //   * MetricRegistry get-or-create + register_defaults
 //   * TracingSpan start / end / duration
 //   * BufferingSink protocol
 //   * Prometheus / JSONL / OTLP exporters
 
 mount core.database.sqlite.native.observability.metric.{
-    Counter, Gauge, Histogram,
+    MetricObsCounter, MetricObsGauge, MetricObsHistogram,
     counter_new, gauge_new, histogram_new, histogram_default,
     default_bucket_bounds_ns,
     NS_PER_US, NS_PER_MS, NS_PER_S,

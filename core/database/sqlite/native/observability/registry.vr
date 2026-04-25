@@ -22,7 +22,7 @@ mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.observability.metric.{
-    Counter, Gauge, Histogram,
+    MetricObsCounter, MetricObsGauge, MetricObsHistogram,
     counter_new, gauge_new, histogram_default,
 };
 
@@ -31,9 +31,9 @@ mount core.database.sqlite.native.observability.metric.{
 // -----------------------------------------------------------------------------
 
 public type MetricRegistry is {
-    counters: List<Counter>,
-    gauges: List<Gauge>,
-    histograms: List<Histogram>,
+    counters: List<MetricObsCounter>,
+    gauges: List<MetricObsGauge>,
+    histograms: List<MetricObsHistogram>,
 }
 
 public fn registry_new() -> MetricRegistry {

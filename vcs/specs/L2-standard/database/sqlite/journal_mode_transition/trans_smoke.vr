@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.journal_mode_transition.action.{
-    JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+    JournalTransitionMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
     mode_name, is_wal, is_off, is_rollback_family,
     TransitionAction,
     TaNoop, TaInPlace, TaDeleteJournal, TaCheckpointAndDrop,

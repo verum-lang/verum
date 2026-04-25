@@ -22,7 +22,7 @@ mount core.database.sqlite.native.vacuum.relocator.{
     VacuumMapEntry, Relocator, relocator_new,
 };
 mount core.database.sqlite.native.vacuum.engine.{
-    EnginePhase, EpInit, EpCounting, EpCopying, EpRewriting,
+    VacuumEnginePhase, EpInit, EpCounting, EpCopying, EpRewriting,
     EpSwapping, EpDone, EpFailed,
     Engine, engine_new,
     phase_name as engine_phase_name,

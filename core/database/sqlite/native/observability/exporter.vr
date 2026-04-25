@@ -21,7 +21,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.observability.metric.{
-    Counter, Gauge, Histogram,
+    MetricObsCounter, MetricObsGauge, MetricObsHistogram,
 };
 mount core.database.sqlite.native.observability.registry.{MetricRegistry};
 

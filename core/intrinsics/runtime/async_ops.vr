@@ -41,7 +41,7 @@ public type RecoveryContextOpaque is (*const Byte);
 public type CircuitBreakerOpaque is (*const Byte);
 
 /// Opaque handle for allocator
-public type AllocHandle is (*const Byte);
+public type RawAllocHandle is (*const Byte);
 
 /// Opaque handle for I/O driver
 public type IODriverHandle is (*const Byte);
@@ -165,7 +165,7 @@ public fn inline_cb_as_ref(inline_storage: *const Byte) -> CircuitBreakerOpaque;
 ///
 /// Requires: Global allocator registration
 @intrinsic("global_allocator")
-public fn global_allocator() -> AllocHandle;
+public fn global_allocator() -> RawAllocHandle;
 
 /// Get default I/O driver.
 ///

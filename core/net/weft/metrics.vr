@@ -58,20 +58,20 @@ implement WeftCounter {
 /// Fixed-bucket histogram. The default set of bucket boundaries is the
 /// Prometheus client default (in ms — SLI-style), adjusted for web
 /// handlers: 5 15 30 60 120 250 500 1000 2500 5000 10000.
-public type Histogram is {
+public type WeftHistogram is {
     bounds_ms: List<Int>,
     counts: Mutex<List<Int>>,
     sum_ms: Mutex<Int>,
     count: Mutex<Int>,
 };
 
-implement Histogram {
-    public fn new() -> Histogram {
+implement WeftHistogram {
+    public fn new() -> WeftHistogram {
         let bounds = List.from([5, 15, 30, 60, 120, 250, 500, 1000, 2500, 5000, 10000]);
         let mut zero = List.with_capacity(bounds.len() + 1);
         let mut i: Int = 0;
         while i <= bounds.len() { zero.push(0); i = i + 1; }
-        Histogram {
+        WeftHistogram {
             bounds_ms: bounds,
             counts: Mutex.new(zero),
             sum_ms: Mutex.new(0),
@@ -108,7 +108,7 @@ implement Histogram {
 
 public type WeftMetricsRegistry is {
     counters: Mutex<Map<Text, Shared<WeftCounter>>>,
-    histograms: Mutex<Map<Text, Shared<Histogram>>>,
+    histograms: Mutex<Map<Text, Shared<WeftHistogram>>>,
 };
 
 implement WeftMetricsRegistry {
@@ -133,12 +133,12 @@ implement WeftMetricsRegistry {
     }
 
     /// Get-or-create a histogram with the given name.
-    public fn histogram(&self, name: &Text) -> Shared<Histogram> {
+    public fn histogram(&self, name: &Text) -> Shared<WeftHistogram> {
         let mut m = self.histograms.lock();
         match m.get(name) {
             Some(h) => h.clone(),
             None => {
-                let h = Shared.new(Histogram.new());
+                let h = Shared.new(WeftHistogram.new());
                 m.insert(name.clone(), h.clone());
                 h
             }

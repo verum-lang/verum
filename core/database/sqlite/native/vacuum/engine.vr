@@ -32,7 +32,7 @@ mount core.database.sqlite.native.vacuum.mode.{
 // Phase
 // -----------------------------------------------------------------------------
 
-public type EnginePhase is
+public type VacuumEnginePhase is
       EpInit
     | EpCounting
     | EpCopying(Int)              // current src page
@@ -41,7 +41,7 @@ public type EnginePhase is
     | EpDone
     | EpFailed(Text);
 
-public fn phase_name(p: &EnginePhase) -> Text {
+public fn phase_name(p: &VacuumEnginePhase) -> Text {
     match p {
         EpInit         => "init".clone(),
         EpCounting     => "counting".clone(),
@@ -58,7 +58,7 @@ public fn phase_name(p: &EnginePhase) -> Text {
 // -----------------------------------------------------------------------------
 
 public type Engine is {
-    phase: EnginePhase,
+    phase: VacuumEnginePhase,
     src_page_count: Int,
     src_alive_count: Int,
     dst_next_page: Int,
@@ -84,7 +84,7 @@ public fn engine_new(auto_mode: AutoVacuumMode) -> Engine {
 }
 
 implement Engine {
-    public fn current_phase(&self) -> EnginePhase {
+    public fn current_phase(&self) -> VacuumEnginePhase {
         clone_phase(&self.phase)
     }
 
@@ -109,7 +109,7 @@ implement Engine {
     }
 
     /// Advance the engine by one operation. Returns the new phase.
-    public fn step(&mut self) -> EnginePhase {
+    public fn step(&mut self) -> VacuumEnginePhase {
         match &self.phase {
             EpInit       => { self.phase = EpCounting; }
             EpCounting   => {
@@ -180,7 +180,7 @@ implement Engine {
     }
 }
 
-fn clone_phase(p: &EnginePhase) -> EnginePhase {
+fn clone_phase(p: &VacuumEnginePhase) -> VacuumEnginePhase {
     match p {
         EpInit         => EpInit,
         EpCounting     => EpCounting,

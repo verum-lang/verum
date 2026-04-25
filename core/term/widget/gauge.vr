@@ -11,10 +11,10 @@ mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
 mount super.super.style.color.Color;
 
-/// Gauge — horizontal progress bar using Unicode block characters.
+/// TermGauge — horizontal progress bar using Unicode block characters.
 /// Supports smooth sub-cell rendering with ▏▎▍▌▋▊▉█ when use_unicode is true.
 /// Label is a Maybe<Span> for styled label text, centered over the gauge.
-public type Gauge is {
+public type TermGauge is {
     ratio: Float,           // Progress [0.0, 1.0]
     label: Maybe<Span>,     // Optional styled label (e.g., Span.styled("42%", style))
     block: Maybe<Block>,
@@ -23,9 +23,9 @@ public type Gauge is {
     use_unicode: Bool,      // Use Unicode sub-cell characters for smooth progress
 };
 
-implement Gauge {
-    public fn new() -> Gauge {
-        Gauge {
+implement TermGauge {
+    public fn new() -> TermGauge {
+        TermGauge {
             ratio: 0.0,
             label: None,
             block: None,
@@ -36,47 +36,47 @@ implement Gauge {
     }
 
     /// Set progress ratio [0.0, 1.0].
-    public fn ratio(self, r: Float) -> Gauge {
-        Gauge { ratio: r.clamp(0.0, 1.0), ..self }
+    public fn ratio(self, r: Float) -> TermGauge {
+        TermGauge { ratio: r.clamp(0.0, 1.0), ..self }
     }
 
     /// Set progress as percentage [0, 100].
-    public fn percent(self, p: Int) -> Gauge {
-        Gauge { ratio: (p as Float / 100.0).clamp(0.0, 1.0), ..self }
+    public fn percent(self, p: Int) -> TermGauge {
+        TermGauge { ratio: (p as Float / 100.0).clamp(0.0, 1.0), ..self }
     }
 
     /// Set a styled label Span.
-    public fn label(self, label: Span) -> Gauge {
-        Gauge { label: Some(label), ..self }
+    public fn label(self, label: Span) -> TermGauge {
+        TermGauge { label: Some(label), ..self }
     }
 
     /// Set a plain text label (creates an unstyled Span).
-    public fn label_text(self, text: Text) -> Gauge {
-        Gauge { label: Some(Span.raw(text)), ..self }
+    public fn label_text(self, text: Text) -> TermGauge {
+        TermGauge { label: Some(Span.raw(text)), ..self }
     }
 
     /// Set the block wrapper.
-    public fn block(self, block: Block) -> Gauge {
-        Gauge { block: Some(block), ..self }
+    public fn block(self, block: Block) -> TermGauge {
+        TermGauge { block: Some(block), ..self }
     }
 
     /// Set the style of the filled portion.
-    public fn gauge_style(self, style: Style) -> Gauge {
-        Gauge { gauge_style: style, ..self }
+    public fn gauge_style(self, style: Style) -> TermGauge {
+        TermGauge { gauge_style: style, ..self }
     }
 
     /// Set the overall gauge style.
-    public fn style(self, style: Style) -> Gauge {
-        Gauge { style: style, ..self }
+    public fn style(self, style: Style) -> TermGauge {
+        TermGauge { style: style, ..self }
     }
 
     /// Enable or disable Unicode sub-cell rendering.
-    public fn use_unicode(self, enabled: Bool) -> Gauge {
-        Gauge { use_unicode: enabled, ..self }
+    public fn use_unicode(self, enabled: Bool) -> TermGauge {
+        TermGauge { use_unicode: enabled, ..self }
     }
 }
 
-implement Widget for Gauge {
+implement Widget for TermGauge {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let gauge_area = match self.block {
             Some(block) => {

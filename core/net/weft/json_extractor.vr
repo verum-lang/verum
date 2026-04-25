@@ -1,5 +1,5 @@
 // =============================================================================
-// core/net/weft/json_extractor.vr — Json<T> handler-argument extractor
+// core/net/weft/json_extractor.vr — WeftExtractorJson<T> handler-argument extractor
 // =============================================================================
 // Layer: 6 (Weft)
 // Spec:  internal/specs/net-framework.md §11 (Phase 1 follow-up:
@@ -7,7 +7,7 @@
 // =============================================================================
 //
 // Closes the framework's Phase 1 follow-up by lifting the placeholder
-// `Json<T>` type from `core.net.weft.handler` into a fully-functional
+// `WeftExtractorJson<T>` type from `core.net.weft.handler` into a fully-functional
 // FromRequest impl backed by `core.encoding.json`.
 //
 // The extractor performs five gates in fixed order:
@@ -243,7 +243,7 @@ implement JsonExtractorConfig {
 }
 
 // =============================================================================
-// Json<T> extraction — the entry point
+// WeftExtractorJson<T> extraction — the entry point
 // =============================================================================
 
 /// Try to extract a typed `T` from the request body. Composable
@@ -335,26 +335,26 @@ fn lowercase_slice(bytes: &[Byte], start: Int, end: Int) -> Text {
 // =============================================================================
 
 /// Re-export the placeholder type from the handler module so
-/// users see the same `Json<T>` they imported there. This module's
-/// `FromRequest for Json<T>` impl supersedes the placeholder once
+/// users see the same `WeftExtractorJson<T>` they imported there. This module's
+/// `FromRequest for WeftExtractorJson<T>` impl supersedes the placeholder once
 /// the user mounts `core.net.weft.json_extractor`.
-public type Json<T> is { inner: T };
+public type WeftExtractorJson<T> is { inner: T };
 
-implement<T> Json<T> {
+implement<T> WeftExtractorJson<T> {
     public fn into_inner(self) -> T { self.inner }
     public fn as_ref(&self) -> &T { &self.inner }
 }
 
-implement<T> FromRequest for Json<T>
+implement<T> FromRequest for WeftExtractorJson<T>
     where T: JsonDeserialize<T>
 {
     type Rejection = JsonExtractError;
 
     async fn from_request(req: &mut WeftRequest)
-        -> Result<Json<T>, JsonExtractError>
+        -> Result<WeftExtractorJson<T>, JsonExtractError>
     {
         let cfg = JsonExtractorConfig.default();
         let value = extract_json::<T>(req, &cfg)?;
-        Ok(Json { inner: value })
+        Ok(WeftExtractorJson { inner: value })
     }
 }

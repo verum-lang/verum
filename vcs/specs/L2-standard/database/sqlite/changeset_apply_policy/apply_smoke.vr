@@ -15,7 +15,7 @@ mount core.database.sqlite.native.changeset_apply_policy.policy.{
     ChangesetDisposition, DpOmit, DpReplace, DpAbort,
     code as disposition_code, default_disposition,
     disposition_name, is_terminal, keeps_going,
-    ApplyOutcome, AoOk, AoOkWithSkips, AoAborted,
+    ApplyPolicyOutcome, AoOk, AoOkWithSkips, AoAborted,
     outcome_name, summarise, omit_count,
     wraps_in_savepoint, reverses_direction,
 };

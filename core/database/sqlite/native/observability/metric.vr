@@ -1,5 +1,5 @@
 // =============================================================================
-// observability/metric.vr — MetricObsCounter / Gauge / Histogram primitives
+// observability/metric.vr — MetricObsCounter / MetricObsGauge / MetricObsHistogram primitives
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
@@ -7,9 +7,9 @@
 //
 //   * `MetricObsCounter`   — strictly-monotonic Int64 (rows_read,
 //                    queries_total, ...)
-//   * `Gauge`     — observable Int64 that may go up or down
+//   * `MetricObsGauge`     — observable Int64 that may go up or down
 //                    (cache_size_bytes, open_cursors, ...)
-//   * `Histogram` — bucketed distribution with O(1) record;
+//   * `MetricObsHistogram` — bucketed distribution with O(1) record;
 //                    SQLite-shaped buckets:
 //                    [10us, 100us, 1ms, 10ms, 100ms, 1s, 10s, +inf]
 //                    (matches the latency profile of typical
@@ -39,16 +39,16 @@ implement MetricObsCounter {
 }
 
 // -----------------------------------------------------------------------------
-// Gauge
+// MetricObsGauge
 // -----------------------------------------------------------------------------
 
-public type Gauge is { name: Text, value: Int64 }
+public type MetricObsGauge is { name: Text, value: Int64 }
 
-public fn gauge_new(name: Text) -> Gauge {
-    Gauge { name: name, value: 0 as Int64 }
+public fn gauge_new(name: Text) -> MetricObsGauge {
+    MetricObsGauge { name: name, value: 0 as Int64 }
 }
 
-implement Gauge {
+implement MetricObsGauge {
     public fn set(&mut self, value: Int64) { self.value = value; }
     public fn inc(&mut self) { self.value = self.value + (1 as Int64); }
     public fn dec(&mut self) { self.value = self.value - (1 as Int64); }
@@ -58,7 +58,7 @@ implement Gauge {
 }
 
 // -----------------------------------------------------------------------------
-// Histogram
+// MetricObsHistogram
 // -----------------------------------------------------------------------------
 
 public const NS_PER_US: Int64 = 1000 as Int64;
@@ -78,7 +78,7 @@ public fn default_bucket_bounds_ns() -> List<Int64> {
     out
 }
 
-public type Histogram is {
+public type MetricObsHistogram is {
     name: Text,
     bounds_ns: List<Int64>,
     /// Bucket counts; len() == bounds_ns.len() + 1 (last bucket = +inf).
@@ -87,12 +87,12 @@ public type Histogram is {
     count_total: Int64,
 }
 
-public fn histogram_new(name: Text, bounds_ns: List<Int64>) -> Histogram {
+public fn histogram_new(name: Text, bounds_ns: List<Int64>) -> MetricObsHistogram {
     let n = bounds_ns.len() + 1;
     let mut counts: List<Int64> = List.new();
     let mut i: Int = 0;
     while i < n { counts.push(0 as Int64); i = i + 1; }
-    Histogram {
+    MetricObsHistogram {
         name: name,
         bounds_ns: bounds_ns,
         counts: counts,
@@ -101,11 +101,11 @@ public fn histogram_new(name: Text, bounds_ns: List<Int64>) -> Histogram {
     }
 }
 
-public fn histogram_default(name: Text) -> Histogram {
+public fn histogram_default(name: Text) -> MetricObsHistogram {
     histogram_new(name, default_bucket_bounds_ns())
 }
 
-implement Histogram {
+implement MetricObsHistogram {
     public fn observe(&mut self, value_ns: Int64) {
         self.sum_ns = self.sum_ns + value_ns;
         self.count_total = self.count_total + (1 as Int64);

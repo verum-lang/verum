@@ -5,7 +5,7 @@ module core.database.sqlite.native.journal_mode_pragma_api.mode_;
 
 mount base.{Bool, Text};
 
-public type JournalMode is
+public type JournalPragmaMode is
     | JmDelete       // default
     | JmTruncate
     | JmPersist
@@ -14,9 +14,9 @@ public type JournalMode is
     | JmOff
     ;
 
-public fn default_mode() -> JournalMode { JmDelete }
+public fn default_mode() -> JournalPragmaMode { JmDelete }
 
-public fn from_text(t: Text) -> JournalMode {
+public fn from_text(t: Text) -> JournalPragmaMode {
     if t == "delete".clone()   { return JmDelete; }
     if t == "truncate".clone() { return JmTruncate; }
     if t == "persist".clone()  { return JmPersist; }
@@ -26,7 +26,7 @@ public fn from_text(t: Text) -> JournalMode {
     JmDelete    // unknown → default
 }
 
-public fn mode_name(m: &JournalMode) -> Text {
+public fn mode_name(m: &JournalPragmaMode) -> Text {
     match m {
         JmDelete   => "delete".clone(),
         JmTruncate => "truncate".clone(),
@@ -39,7 +39,7 @@ public fn mode_name(m: &JournalMode) -> Text {
 
 // Three classifications.
 
-public fn is_rollback_journal(m: &JournalMode) -> Bool {
+public fn is_rollback_journal(m: &JournalPragmaMode) -> Bool {
     match m {
         JmDelete   => true,
         JmTruncate => true,
@@ -48,7 +48,7 @@ public fn is_rollback_journal(m: &JournalMode) -> Bool {
     }
 }
 
-public fn keeps_journal_file(m: &JournalMode) -> Bool {
+public fn keeps_journal_file(m: &JournalPragmaMode) -> Bool {
     match m {
         JmDelete   => true,
         JmTruncate => true,
@@ -59,11 +59,11 @@ public fn keeps_journal_file(m: &JournalMode) -> Bool {
     }
 }
 
-public fn is_wal(m: &JournalMode) -> Bool {
+public fn is_wal(m: &JournalPragmaMode) -> Bool {
     match m { JmWal => true, _ => false }
 }
 
-public fn is_safe_for_durability(m: &JournalMode) -> Bool {
+public fn is_safe_for_durability(m: &JournalPragmaMode) -> Bool {
     match m {
         JmOff    => false,
         JmMemory => false,
@@ -72,7 +72,7 @@ public fn is_safe_for_durability(m: &JournalMode) -> Bool {
 }
 
 // Whether the choice is persistent across sessions (stored in the file).
-public fn persists_across_sessions(m: &JournalMode) -> Bool {
+public fn persists_across_sessions(m: &JournalPragmaMode) -> Bool {
     match m {
         JmWal      => true,
         JmDelete   => true,
@@ -84,4 +84,4 @@ public fn persists_across_sessions(m: &JournalMode) -> Bool {
 
 // PRAGMA reply text: SQLite returns the *new* mode name on success.  Used
 // by drivers to confirm the change actually applied.
-public fn reply_text(m: &JournalMode) -> Text { mode_name(m) }
+public fn reply_text(m: &JournalPragmaMode) -> Text { mode_name(m) }

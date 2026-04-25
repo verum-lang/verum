@@ -39,7 +39,7 @@ mount core.database.sqlite.native.alter.delta.{
 };
 mount core.database.sqlite.native.alter.engine.{
     AlterEngine, engine_new,
-    EnginePhase, EpInit, EpValidating, EpGeneratingSql,
+    AlterEnginePhase, EpInit, EpValidating, EpGeneratingSql,
     EpExecuting, EpApplyingDelta, EpDone, EpFailed,
     AlterEngineFailure, AefValidation, AefExecution,
     phase_name as engine_phase_name,

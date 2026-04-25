@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.journal_mode_pragma_api.mode_.{
-    JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+    JournalPragmaMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
     default_mode, from_text, mode_name,
     is_rollback_journal, keeps_journal_file, is_wal,
     is_safe_for_durability, persists_across_sessions, reply_text,
