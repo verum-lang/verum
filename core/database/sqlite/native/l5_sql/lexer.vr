@@ -6,7 +6,7 @@ module core.database.sqlite.native.l5_sql.lexer;
 // Layer: 5
 // Spec: sqlite-native.md §12.1, sqlite.org/lang.html
 //
-// Breaks an input `Text` into a stream of `Token` values ready for the
+// Breaks an input `Text` into a stream of `SqlToken` values ready for the
 // recursive-descent parser in `parser/`. SQLite's SQL dialect is
 // case-insensitive for keywords, allows `--` line comments and
 // `/* ... */` block comments, double-quoted identifiers, single-quoted
@@ -82,7 +82,7 @@ public type VariableKind is
     | VNamedAt(Text)
     | VNamedDollar(Text);
 
-public type Token is
+public type SqlToken is
       TKeyword(SqlKeyword)
     | TIdent(Text)
     | TStringLit(Text)
@@ -312,7 +312,7 @@ fn hex_digit_value(b: Byte) -> Int64 {
 public type LexerState is {
     input: List<Byte>,
     pos: Int,
-    tokens: List<Token>,
+    tokens: List<SqlToken>,
 };
 
 fn lexer_new(input: &Text) -> LexerState {
@@ -336,7 +336,7 @@ fn at_eof(st: &LexerState) -> Bool {
     st.pos >= st.input.len()
 }
 
-fn push_tok(st: &mut LexerState, t: Token) {
+fn push_tok(st: &mut LexerState, t: SqlToken) {
     st.tokens.push(t);
 }
 
@@ -344,7 +344,7 @@ fn push_tok(st: &mut LexerState, t: Token) {
 // Main tokenizer
 // -----------------------------------------------------------------------------
 
-public fn lex(input: &Text) -> Result<List<Token>, SqlLexError> {
+public fn lex(input: &Text) -> Result<List<SqlToken>, SqlLexError> {
     let mut st = lexer_new(input);
 
     while !at_eof(&st) {
@@ -462,7 +462,7 @@ public fn lex(input: &Text) -> Result<List<Token>, SqlLexError> {
 // Sub-lexers
 // -----------------------------------------------------------------------------
 
-fn lex_string(st: &mut LexerState) -> Result<Token, SqlLexError> {
+fn lex_string(st: &mut LexerState) -> Result<SqlToken, SqlLexError> {
     // Consume opening quote.
     st.pos = st.pos + 1;
     let mut out: List<Byte> = List.new();
@@ -484,11 +484,11 @@ fn lex_string(st: &mut LexerState) -> Result<Token, SqlLexError> {
     Err(SqlLexError { message: "unterminated string literal".clone(), position: st.pos })
 }
 
-fn lex_quoted_ident(st: &mut LexerState) -> Result<Token, SqlLexError> {
+fn lex_quoted_ident(st: &mut LexerState) -> Result<SqlToken, SqlLexError> {
     lex_quoted_ident_with_delim(st, 0x22 as Byte)
 }
 
-fn lex_quoted_ident_with_delim(st: &mut LexerState, delim: Byte) -> Result<Token, SqlLexError> {
+fn lex_quoted_ident_with_delim(st: &mut LexerState, delim: Byte) -> Result<SqlToken, SqlLexError> {
     st.pos = st.pos + 1;
     let mut out: List<Byte> = List.new();
     while !at_eof(st) {
@@ -508,7 +508,7 @@ fn lex_quoted_ident_with_delim(st: &mut LexerState, delim: Byte) -> Result<Token
     Err(SqlLexError { message: "unterminated quoted identifier".clone(), position: st.pos })
 }
 
-fn lex_blob(st: &mut LexerState) -> Result<Token, SqlLexError> {
+fn lex_blob(st: &mut LexerState) -> Result<SqlToken, SqlLexError> {
     // Skip 'X' / 'x'.
     st.pos = st.pos + 1;
     // Opening quote.
@@ -540,7 +540,7 @@ fn lex_blob(st: &mut LexerState) -> Result<Token, SqlLexError> {
     Err(SqlLexError { message: "unterminated blob literal".clone(), position: st.pos })
 }
 
-fn lex_number(st: &mut LexerState) -> Result<Token, SqlLexError> {
+fn lex_number(st: &mut LexerState) -> Result<SqlToken, SqlLexError> {
     // Hex literal `0x...`.
     if peek(st, 0) == (0x30 as Byte) && (peek(st, 1) == (0x78 as Byte) || peek(st, 1) == (0x58 as Byte)) {
         st.pos = st.pos + 2;
@@ -641,7 +641,7 @@ fn parse_float_from_bytes(b: &List<Byte>) -> Float64 {
     value
 }
 
-fn lex_identifier(st: &mut LexerState) -> Token {
+fn lex_identifier(st: &mut LexerState) -> SqlToken {
     let start = st.pos;
     while !at_eof(st) && is_ident_cont(peek(st, 0)) {
         st.pos = st.pos + 1;
@@ -659,7 +659,7 @@ fn lex_identifier(st: &mut LexerState) -> Token {
     }
 }
 
-fn lex_anon_or_indexed(st: &mut LexerState) -> Token {
+fn lex_anon_or_indexed(st: &mut LexerState) -> SqlToken {
     st.pos = st.pos + 1;
     if at_eof(st) || !is_digit(peek(st, 0)) {
         return TVariable(VAnon);
@@ -672,7 +672,7 @@ fn lex_anon_or_indexed(st: &mut LexerState) -> Token {
     TVariable(VIndexed(n))
 }
 
-fn lex_named_variable(st: &mut LexerState, sigil: Byte, wrapper: fn(Text) -> VariableKind) -> Token {
+fn lex_named_variable(st: &mut LexerState, sigil: Byte, wrapper: fn(Text) -> VariableKind) -> SqlToken {
     let _ = sigil;
     st.pos = st.pos + 1;
     let start = st.pos;
@@ -688,7 +688,7 @@ fn lex_named_variable(st: &mut LexerState, sigil: Byte, wrapper: fn(Text) -> Var
     TVariable(wrapper(Text.from_bytes(&raw).unwrap_or("".clone())))
 }
 
-fn lex_punct_or_op(st: &mut LexerState) -> Result<Token, SqlLexError> {
+fn lex_punct_or_op(st: &mut LexerState) -> Result<SqlToken, SqlLexError> {
     let b = peek(st, 0);
     match b {
         0x28 => { st.pos = st.pos + 1; Ok(TPunct(PLParen)) },

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.data_version_pragma.reading.{
-    Reading,
+    DataVersionReading,
     from_pragma_value, to_pragma_value, empty_reading,
     ChangeStatus, CsUnchanged, CsExternallyModified, CsRolledBack,
     detect, status_name, is_unchanged, delta, has_been_committed,

@@ -3,7 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/tokenizer/
 //
-// A tokenizer turns a raw text input into a stream of `Token` records.
+// A tokenizer turns a raw text input into a stream of `Fts5VtabToken` records.
 // Each token records the byte offset/length in the original input
 // (so `highlight()` / `snippet()` can re-index back into source) plus
 // the normalised term to write into the inverted index.
@@ -25,10 +25,10 @@ mount base.{Text, Bool};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// Token
+// Fts5VtabToken
 // -----------------------------------------------------------------------------
 
-public type Token is {
+public type Fts5VtabToken is {
     /// Normalised form (lowercase / stemmed / etc.).
     term: Text,
     /// Byte offset of the *original* text where this token starts.
@@ -51,7 +51,7 @@ public type TokenizerOptions is {
     case_fold: Bool,
     /// Strip combining diacritics (Unicode61 only).
     remove_diacritics: Bool,
-    /// Token boundary characters in addition to whitespace.
+    /// Fts5VtabToken boundary characters in addition to whitespace.
     custom_separators: List<Byte>,
 };
 
@@ -66,7 +66,7 @@ public fn options_default() -> TokenizerOptions {
 
 public type Tokenizer is protocol {
     fn name(&self) -> Text;
-    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token>;
+    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken>;
 };
 
 // -----------------------------------------------------------------------------
@@ -79,9 +79,9 @@ public fn simple_tokenizer() -> Fts5VtabSimpleTokenizer { Fts5VtabSimpleTokenize
 implement Tokenizer for Fts5VtabSimpleTokenizer {
     fn name(&self) -> Text { "simple".clone() }
 
-    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token> {
+    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken> {
         let bs = input.as_bytes();
-        let mut out: List<Token> = List.new();
+        let mut out: List<Fts5VtabToken> = List.new();
         let mut start: Int = 0;
         let mut pos: Int = 0;
         while start < bs.len() {
@@ -105,7 +105,7 @@ implement Tokenizer for Fts5VtabSimpleTokenizer {
                 term.push_byte(b);
                 k = k + 1;
             }
-            out.push(Token {
+            out.push(Fts5VtabToken {
                 term: term,
                 start: start,
                 length: end - start,
@@ -153,14 +153,14 @@ public fn porter_tokenizer() -> Fts5VtabPorterTokenizer { Fts5VtabPorterTokenize
 implement Tokenizer for Fts5VtabPorterTokenizer {
     fn name(&self) -> Text { "porter".clone() }
 
-    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token> {
+    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken> {
         let simple = simple_tokenizer();
         let words = simple.tokenise(input, options);
-        let mut out: List<Token> = List.new();
+        let mut out: List<Fts5VtabToken> = List.new();
         let mut i: Int = 0;
         while i < words.len() {
             let stem = porter_stem(&words[i].term);
-            out.push(Token {
+            out.push(Fts5VtabToken {
                 term: stem,
                 start: words[i].start,
                 length: words[i].length,
@@ -221,9 +221,9 @@ public fn unicode61_tokenizer() -> Fts5VtabUnicode61Tokenizer { Fts5VtabUnicode6
 implement Tokenizer for Fts5VtabUnicode61Tokenizer {
     fn name(&self) -> Text { "unicode61".clone() }
 
-    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token> {
+    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken> {
         let bs = input.as_bytes();
-        let mut out: List<Token> = List.new();
+        let mut out: List<Fts5VtabToken> = List.new();
         let mut start: Int = 0;
         let mut pos: Int = 0;
         while start < bs.len() {
@@ -255,7 +255,7 @@ implement Tokenizer for Fts5VtabUnicode61Tokenizer {
                 }
                 k = k + utf8_len(lead);
             }
-            out.push(Token {
+            out.push(Fts5VtabToken {
                 term: term,
                 start: start,
                 length: end - start,
@@ -303,9 +303,9 @@ public fn trigram_tokenizer() -> Fts5VtabTrigramTokenizer { Fts5VtabTrigramToken
 implement Tokenizer for Fts5VtabTrigramTokenizer {
     fn name(&self) -> Text { "trigram".clone() }
 
-    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token> {
+    fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken> {
         let bs = input.as_bytes();
-        let mut out: List<Token> = List.new();
+        let mut out: List<Fts5VtabToken> = List.new();
         if bs.len() < 3 { return out; }
         let mut i: Int = 0;
         let mut pos: Int = 0;
@@ -320,7 +320,7 @@ implement Tokenizer for Fts5VtabTrigramTokenizer {
                 term.push_byte(b);
                 k = k + 1;
             }
-            out.push(Token {
+            out.push(Fts5VtabToken {
                 term: term,
                 start: i,
                 length: 3,

@@ -10,7 +10,7 @@
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l5_sql.{
-    Token, lex,
+    SqlToken, lex,
     SqlStatement, SelectStmt, SelectKind, SimpleSelect,
     Expr, ResultColumnItem, FromItem, OrderTerm, LimitClause,
     SqlTokenStream, ParseError, stream_new, parse_select, parse_expr,

@@ -384,11 +384,11 @@ implement CompletionResult {
 
     /// Convert to Result type for idiomatic error handling
     @inline
-    public fn to_result(&self) -> Result<BytesTransferred, IoError> {
+    public fn to_result(&self) -> Result<BytesTransferred, EngineIoError> {
         if self.result >= 0 {
             Ok(self.result as UInt32)
         } else {
-            Err(IoError.from_errno(-self.result))
+            Err(EngineIoError.from_errno(-self.result))
         }
     }
 
@@ -410,7 +410,7 @@ implement CompletionResult {
 // =============================================================================
 
 /// Unified I/O error type for IOEngine operations
-public type IoError is
+public type EngineIoError is
     /// Operation would block (non-blocking I/O)
     | WouldBlock
     /// Operation was interrupted by signal
@@ -449,13 +449,11 @@ public type IoError is
     | Other(Text)
     ;
 
-/// Alias for backward compatibility
-public type EngineIoError is IoError;
 
-implement IoError {
+implement EngineIoError {
     /// Create from POSIX errno value
     /// Handles both Linux and Darwin (BSD) errno differences
-    public pure fn from_errno(err: Int32) -> IoError {
+    public pure fn from_errno(err: Int32) -> EngineIoError {
         match err {
             11 | 35 => WouldBlock,                            // EAGAIN (11 Linux, 35 Darwin) / EWOULDBLOCK
             4 => Interrupted,                                  // EINTR
@@ -476,24 +474,24 @@ implement IoError {
     }
 
     /// Alias for from_errno (POSIX error code)
-    public pure fn from_os_error(err: Int32) -> IoError {
-        IoError.from_errno(err)
+    public pure fn from_os_error(err: Int32) -> EngineIoError {
+        EngineIoError.from_errno(err)
     }
 
     /// Convert a structured `OSError {code, message}` into a tagged
-    /// `IoError`. Use this with `.map_err(IoError.from_os)` when the
+    /// `EngineIoError`. Use this with `.map_err(EngineIoError.from_os)` when the
     /// source is a `Result<T, OSError>` (the shape returned by every
     /// `safe_*` syscall wrapper in `core.sys`). Without this adapter
-    /// callers had to use `.map_err(IoError.from_os_error)` which
+    /// callers had to use `.map_err(EngineIoError.from_os_error)` which
     /// silently fed an `OSError` struct into a function that expects
-    /// `Int32`, producing nonsense `IoError` values at runtime.
-    public pure fn from_os(err: OSError) -> IoError {
-        IoError.from_errno(err.code as Int32)
+    /// `Int32`, producing nonsense `EngineIoError` values at runtime.
+    public pure fn from_os(err: OSError) -> EngineIoError {
+        EngineIoError.from_errno(err.code as Int32)
     }
 
     /// Create from Windows error code
     @cfg(target_os = "windows")
-    public pure fn from_win32(err: UInt32) -> IoError {
+    public pure fn from_win32(err: UInt32) -> EngineIoError {
         match err {
             997 => WouldBlock,              // ERROR_IO_PENDING
             995 => Cancelled,               // ERROR_OPERATION_ABORTED
@@ -627,10 +625,10 @@ public type IOEngine is protocol {
     /// - io_uring: Single syscall for entire batch
     /// - IOCP: Individual PostQueuedCompletionStatus per op
     @must_use("Submitted count should be checked to verify all ops were accepted")
-    fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, IoError>;
+    fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, EngineIoError>;
 
     /// Submit a single operation (convenience wrapper).
-    fn submit_one(&mut self, op: CompletionOp, user_data: UInt64) -> Result<(), IoError> {
+    fn submit_one(&mut self, op: CompletionOp, user_data: UInt64) -> Result<(), EngineIoError> {
         let count = self.submit(&[(op, user_data)])?;
         if count == 1 {
             Ok(())
@@ -664,13 +662,13 @@ public type IOEngine is protocol {
         results: &mut [CompletionResult],
         min_complete: UInt32,
         timeout: Maybe<Duration>,
-    ) -> Result<Int{>= 0}, IoError>;
+    ) -> Result<Int{>= 0}, EngineIoError>;
 
     /// Poll for completions without blocking.
     ///
     /// Equivalent to wait() with min_complete=0 and timeout=0.
     /// Returns immediately with any available completions.
-    fn poll(&mut self, results: &mut [CompletionResult]) -> Result<Int{>= 0}, IoError> {
+    fn poll(&mut self, results: &mut [CompletionResult]) -> Result<Int{>= 0}, EngineIoError> {
         self.wait(results, 0, Some(Duration.ZERO))
     }
 
@@ -680,7 +678,7 @@ public type IOEngine is protocol {
     /// that new work has been submitted or that shutdown is requested.
     ///
     /// Thread Safety: Safe to call from any thread while wait() is blocked.
-    fn wake(&self) -> Result<(), IoError>;
+    fn wake(&self) -> Result<(), EngineIoError>;
 
     /// Get number of pending (submitted but not completed) operations.
     ///
@@ -699,7 +697,7 @@ public type IOEngine is protocol {
     /// Call this to ensure all submitted operations are in flight.
     ///
     /// Note: wait() implicitly flushes before blocking.
-    fn flush(&mut self) -> Result<(), IoError>;
+    fn flush(&mut self) -> Result<(), EngineIoError>;
 
     /// Shutdown the engine and cancel pending operations.
     ///
@@ -709,7 +707,7 @@ public type IOEngine is protocol {
     /// - Engine resources are released
     ///
     /// Idempotent: safe to call multiple times.
-    fn shutdown(&mut self) -> Result<(), IoError>;
+    fn shutdown(&mut self) -> Result<(), EngineIoError>;
 
     /// Check if engine is still operational.
     pure fn is_open(&self) -> Bool;
@@ -726,7 +724,7 @@ public type IOEngine is protocol {
 /// On Darwin, returns kqueue driver.
 /// On Windows, returns IOCP driver.
 @cfg(target_os = "linux")
-public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, IoError> {
+public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, EngineIoError> {
     mount sys.linux.io.{IoUringDriver, EpollDriver, IoDriver};
 
     // Try io_uring first (Linux 5.1+)
@@ -741,14 +739,14 @@ public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, IoErr
 }
 
 @cfg(target_os = "macos")
-public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, IoError> {
+public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, EngineIoError> {
     mount sys.darwin.io.KqueueDriver;
 
     KqueueDriver.new()
 }
 
 @cfg(target_os = "windows")
-public fn create_io_engine(num_concurrent: UInt32) -> Result<some E: IOEngine, IoError> {
+public fn create_io_engine(num_concurrent: UInt32) -> Result<some E: IOEngine, EngineIoError> {
     mount sys.windows.io.IocpDriver;
 
     IocpDriver.new_with_concurrency(num_concurrent)
@@ -964,7 +962,7 @@ implement OpBatch {
     }
 
     /// Submit batch to engine
-    public fn submit_to<E: IOEngine>(&self, engine: &mut E) -> Result<Int{>= 0}, IoError> {
+    public fn submit_to<E: IOEngine>(&self, engine: &mut E) -> Result<Int{>= 0}, EngineIoError> {
         engine.submit(self.as_slice())
     }
 }

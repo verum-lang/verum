@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.system_errno_api.probe.{
-    Reading, RNone, RPosix, RWindowsHr,
+    SystemErrnoReading, RNone, RPosix, RWindowsHr,
     reading_name, errno_value, has_value,
     PosixClass, PcEnoent, PcEacces, PcEnospc, PcEio, PcEbusy, PcEnomem, PcEother,
     classify_posix, class_name, is_disk_full, is_permission_denied,

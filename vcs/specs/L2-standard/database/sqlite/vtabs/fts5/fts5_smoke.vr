@@ -15,7 +15,7 @@
 //   * highlight() / snippet() / bm25_for_row()
 
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
-    Token, TokenizerOptions, options_default,
+    Fts5VtabToken, TokenizerOptions, options_default,
     Tokenizer, Fts5VtabSimpleTokenizer, simple_tokenizer,
     Fts5VtabPorterTokenizer, porter_tokenizer,
     Fts5VtabUnicode61Tokenizer, unicode61_tokenizer,

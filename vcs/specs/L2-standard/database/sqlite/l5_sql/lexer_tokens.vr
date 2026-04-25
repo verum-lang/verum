@@ -10,7 +10,7 @@
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l5_sql.{
-    Token, Keyword, Operator, Punct, VariableKind, SqlLexError,
+    SqlToken, Keyword, Operator, Punct, VariableKind, SqlLexError,
     lex, lookup_keyword,
 };
 

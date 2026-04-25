@@ -10,7 +10,7 @@
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l5_sql.{
-    Token, lex,
+    SqlToken, lex,
     Expr, InsertStmt, InsertSource, SqlOnConflict,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,

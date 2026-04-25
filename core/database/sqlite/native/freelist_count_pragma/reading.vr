@@ -6,28 +6,28 @@ mount base.{Bool, Int64, Text};
 mount core.collections.list.{List};
 
 // One observation: total free pages and the database's page total.
-public type Reading is {
+public type FreelistCountReading is {
     free_pages: Int64,
     total_pages: Int64,
 };
 
-public fn new(free_pages: Int64, total_pages: Int64) -> Reading {
+public fn new(free_pages: Int64, total_pages: Int64) -> FreelistCountReading {
     let zero = 0 as Int64;
     let mut f = if free_pages < zero { zero } else { free_pages };
     let mut t = if total_pages < zero { zero } else { total_pages };
     if f > t { f = t; }
-    Reading { free_pages: f, total_pages: t }
+    FreelistCountReading { free_pages: f, total_pages: t }
 }
 
-public fn empty_reading() -> Reading {
-    Reading { free_pages: 0 as Int64, total_pages: 0 as Int64 }
+public fn empty_reading() -> FreelistCountReading {
+    FreelistCountReading { free_pages: 0 as Int64, total_pages: 0 as Int64 }
 }
 
-public fn is_empty(r: &Reading) -> Bool {
+public fn is_empty(r: &FreelistCountReading) -> Bool {
     r.free_pages == (0 as Int64)
 }
 
-public fn fragmentation_percent(r: &Reading) -> Int {
+public fn fragmentation_percent(r: &FreelistCountReading) -> Int {
     if r.total_pages == (0 as Int64) { return 0; }
     let frac = (r.free_pages * (100 as Int64)) / r.total_pages;
     frac as Int
@@ -40,7 +40,7 @@ public type VacuumAdvice is
     | VaRecommend
     ;
 
-public fn advise(r: &Reading, threshold_pct: Int) -> VacuumAdvice {
+public fn advise(r: &FreelistCountReading, threshold_pct: Int) -> VacuumAdvice {
     let pct = fragmentation_percent(r);
     if pct < threshold_pct / 2 { return VaSkip; }
     if pct < threshold_pct      { return VaConsider; }
@@ -56,7 +56,7 @@ public fn advice_name(v: &VacuumAdvice) -> Text {
 }
 
 // Snapshot rendering "freelist=X / total=Y (Z%)".
-public fn snapshot_text(r: &Reading) -> Text {
+public fn snapshot_text(r: &FreelistCountReading) -> Text {
     let mut s = Text.new();
     s = s.append("freelist=".clone());
     s = s.append(int64_decimal(r.free_pages));
