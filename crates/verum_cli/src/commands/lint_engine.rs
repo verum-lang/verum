@@ -101,6 +101,7 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
         &UnrefinedPublicIntPass,
         &VerifyImpliedByRefinementPass,
         &PublicMustHaveVerifyPass,
+        &ForbiddenContextPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
@@ -1102,6 +1103,199 @@ impl LintPass for PublicMustHaveVerifyPass {
         }
         issues
     }
+}
+
+// ===================================================================
+// Phase C.3: Context-policy enforcement (`using [...]`)
+// ===================================================================
+//
+// Per-module `using [...]` policy. Configured via the synthetic rule
+// key `context-policy` populated from `[lint.context_policy.modules]`:
+//
+//     [lint.context_policy.modules]
+//     "core.*"        = { forbid    = ["Database", "Logger", "Clock"] }
+//     "core.math.*"   = { forbid_all = true }
+//     "app.handlers"  = { allow     = ["Database", "Logger"] }
+//
+// The pass walks every function's `using [...]` requirement list,
+// resolves the most-specific applicable rule for the current file's
+// module path, and fires when:
+//
+//   - `forbid_all = true` and the function uses any context, OR
+//   - `forbid = […]` contains the requested context, OR
+//   - `allow  = […]` is set and the requested context is NOT in it.
+//
+// "Most-specific applicable rule": longer pattern wins
+// ("core.math.*" beats "core.*"). Exact path match beats any glob.
+//
+// ===================================================================
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct ContextPolicyConfig {
+    /// modules.<glob> = { forbid|allow|forbid_all }
+    modules: std::collections::HashMap<String, ContextRule>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct ContextRule {
+    forbid: Vec<String>,
+    allow: Vec<String>,
+    forbid_all: bool,
+}
+
+/// Resolve the module path for a file. `src/` is treated as a build
+/// directory (stripped); `core/`, `tests/`, `benches/`, `app/` etc.
+/// are legitimate top-level namespaces (kept). Translates `/` to `.`,
+/// strips the `.vr` extension. Robust against absolute paths — finds
+/// the *last* `src/` segment when present.
+///
+/// Examples:
+///   `core/math/linalg.vr`       → `core.math.linalg`
+///   `src/foo/bar.vr`            → `foo.bar`
+///   `/abs/path/to/src/lib.vr`   → `lib`
+///   `tests/integration.vr`      → `tests.integration`
+fn module_path_for_file(file: &Path) -> String {
+    let s = file.to_string_lossy();
+    // Strip the build directory if it appears in the path — but only
+    // `src/`. Other top-level dirs (core/tests/benches/app/…) are
+    // legitimate module namespaces and stay.
+    let trimmed = if let Some(idx) = s.rfind("/src/") {
+        &s[idx + 5..]
+    } else if let Some(rest) = s.strip_prefix("src/") {
+        rest
+    } else {
+        s.as_ref()
+    };
+    let stem = trimmed.strip_suffix(".vr").unwrap_or(trimmed);
+    stem.replace('/', ".")
+}
+
+/// Glob match for module paths. Pattern semantics:
+///
+///   - `*` at the end of a segment matches that whole segment.
+///   - `*` as a sole segment matches any one segment.
+///   - `**` matches zero or more segments (greedy).
+///   - Exact match otherwise.
+///
+/// Examples:
+///   pattern "core"          ↔ "core"                     ✓ exact
+///   pattern "core.*"        ↔ "core.foo", "core.foo.bar" ✓
+///   pattern "core.math.*"   ↔ "core.math.linalg"         ✓
+///   pattern "core.math.*"   ↔ "core.parser"              ✗
+fn glob_module_match(pattern: &str, path: &str) -> bool {
+    if pattern == path {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix(".*") {
+        return path.starts_with(prefix)
+            && (path.len() == prefix.len() || path.as_bytes().get(prefix.len()) == Some(&b'.'));
+    }
+    if pattern == "*" {
+        return !path.is_empty();
+    }
+    if let Some(prefix) = pattern.strip_suffix(".**") {
+        return path == prefix || path.starts_with(&format!("{}.", prefix));
+    }
+    false
+}
+
+/// Pick the most-specific matching rule for `module_path`. Pattern
+/// length is the tiebreak — longer patterns win because they encode
+/// more constraints than shorter ones.
+fn resolve_context_rule<'a>(
+    cfg: &'a ContextPolicyConfig,
+    module_path: &str,
+) -> Option<(&'a String, &'a ContextRule)> {
+    cfg.modules
+        .iter()
+        .filter(|(pat, _)| glob_module_match(pat, module_path))
+        .max_by_key(|(pat, _)| pat.len())
+}
+
+struct ForbiddenContextPass;
+
+impl LintPass for ForbiddenContextPass {
+    fn name(&self) -> &'static str { "forbidden-context" }
+    fn description(&self) -> &'static str {
+        "Function uses a context (`using [X]`) that the project's \
+         [lint.context_policy.modules] forbids in this module path"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Error }
+    fn category(&self) -> LintCategory { LintCategory::Safety }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg: ContextPolicyConfig = match ctx
+            .config
+            .and_then(|c| c.rule_config::<ContextPolicyConfig>("context-policy"))
+        {
+            Some(c) if !c.modules.is_empty() => c,
+            _ => return Vec::new(),
+        };
+
+        let module_path = module_path_for_file(ctx.file);
+        let (matched_pattern, rule) = match resolve_context_rule(&cfg, &module_path) {
+            Some(x) => x,
+            None => return Vec::new(),
+        };
+
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let func = match &item.kind {
+                ItemKind::Function(f) => f,
+                _ => continue,
+            };
+            for req in &func.contexts {
+                let name = path_segments_to_string(&req.path);
+                let violated = if rule.forbid_all {
+                    Some("forbid_all = true")
+                } else if rule.forbid.iter().any(|n| n == &name) {
+                    Some("listed in `forbid`")
+                } else if !rule.allow.is_empty() && !rule.allow.iter().any(|n| n == &name) {
+                    Some("not listed in `allow`")
+                } else {
+                    None
+                };
+                if let Some(why) = violated {
+                    let (line, col) = span_to_line_col(ctx.source, req.span.start);
+                    issues.push(LintIssue {
+                        rule: "forbidden-context",
+                        level: LintLevel::Error,
+                        file: ctx.file.to_path_buf(),
+                        line,
+                        column: col,
+                        message: format!(
+                            "module `{}` may not use context `{}` (matched pattern `{}`, {})",
+                            module_path, name, matched_pattern, why
+                        ),
+                        suggestion: None,
+                        fixable: false,
+                    });
+                }
+            }
+        }
+        issues
+    }
+}
+
+/// Convert a Verum `Path` (sequence of segments) to a dotted string.
+/// Used when comparing context names to allow/forbid lists.
+fn path_segments_to_string(p: &verum_ast::Path) -> String {
+    let mut out = String::new();
+    for (i, seg) in p.segments.iter().enumerate() {
+        if i > 0 {
+            out.push('.');
+        }
+        match seg {
+            verum_ast::PathSegment::Name(id) => out.push_str(id.name.as_str()),
+            verum_ast::PathSegment::SelfValue => out.push_str("self"),
+            verum_ast::PathSegment::Super => out.push_str("super"),
+            verum_ast::PathSegment::Cog => out.push_str("cog"),
+            verum_ast::PathSegment::Relative => out.push('.'),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

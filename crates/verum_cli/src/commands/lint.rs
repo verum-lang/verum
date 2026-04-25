@@ -245,6 +245,16 @@ const LINT_RULES: &[LintRule] = &[
              strategy explicitly (runtime | static | formal | …)",
         category: LintCategory::Verification,
     },
+    // Phase C.3 — context-policy enforcement (off by default; opt in
+    // via [lint.context_policy.modules].<glob>).
+    LintRule {
+        name: "forbidden-context",
+        level: LintLevel::Error,
+        description:
+            "Function uses a context (`using [X]`) that the project's \
+             [lint.context_policy.modules] forbids in this module path",
+        category: LintCategory::Safety,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
