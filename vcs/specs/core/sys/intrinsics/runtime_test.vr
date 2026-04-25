@@ -30,7 +30,7 @@ module test.stdlib.sys.intrinsics.runtime_test;
 
 mount core.intrinsics.{
     // Basic types that should always be available
-    FutureHandle, JoinHandleOpaque, ExecutorHandle,
+    RawFutureHandle, RawJoinHandleOpaque, RawExecutorHandle,
 
     // Null pointer for handle initialization
     null_ptr,
@@ -57,16 +57,16 @@ fn test_basic_handle_types() {
     let ptr3: *const Byte = null_ptr();
 
     // Construct newtypes using constructor syntax
-    // FutureHandle - basic async handle
-    let null_future = FutureHandle(ptr1);
+    // RawFutureHandle - basic async handle
+    let null_future = RawFutureHandle(ptr1);
     assert((null_future as Int) == 0);
 
-    // JoinHandleOpaque - join handle for spawned tasks
-    let null_join = JoinHandleOpaque(ptr2);
+    // RawJoinHandleOpaque - join handle for spawned tasks
+    let null_join = RawJoinHandleOpaque(ptr2);
     assert((null_join as Int) == 0);
 
-    // ExecutorHandle - executor reference
-    let null_executor = ExecutorHandle(ptr3);
+    // RawExecutorHandle - executor reference
+    let null_executor = RawExecutorHandle(ptr3);
     assert((null_executor as Int) == 0);
 
     // Verify handles contain null pointers
@@ -86,7 +86,7 @@ fn test_basic_handle_types() {
 //
 // Full runtime testing would include:
 //
-// 1. SupervisorHandleOpaque, ChildSpecOpaque, ExecutionEnvOpaque
+// 1. RawSupervisorHandleOpaque, RawChildSpecOpaque, RawExecutionEnvOpaque
 //    - Supervisor system handles for task supervision
 //
 // 2. RecoveryError type with variants:
@@ -96,20 +96,20 @@ fn test_basic_handle_types() {
 //    - InnerError(Error)
 //
 // 3. Supervisor intrinsics:
-//    - spawn_supervised(supervisor, future, spec, env) -> JoinHandleOpaque
+//    - spawn_supervised(supervisor, future, spec, env) -> RawJoinHandleOpaque
 //    - supervisor_log_escalation(reason: *const Byte)
 //    - supervisor_set_parent(child, parent)
 //
 // 4. Recovery intrinsics:
 //    - exec_with_recovery(ctx, factory) -> Result<*const Byte, RecoveryError>
-//    - inline_cb_as_ref(storage) -> CircuitBreakerOpaque
+//    - inline_cb_as_ref(storage) -> RawCircuitBreakerOpaque
 //
 // 5. Global resource intrinsics:
 //    - global_allocator() -> AllocHandle
-//    - default_executor() -> ExecutorHandle
-//    - default_io_driver() -> IODriverHandle
-//    - shared_registry_global() -> SharedRegistryOpaque
-//    - middleware_chain_empty() -> MiddlewareChainOpaque
+//    - default_executor() -> RawExecutorHandle
+//    - default_io_driver() -> RawIODriverHandle
+//    - shared_registry_global() -> RawSharedRegistryOpaque
+//    - middleware_chain_empty() -> RawMiddlewareChainOpaque
 //
 // 6. Single-thread executor:
 //    - single_thread_block_on(executor, future) -> *const Byte
