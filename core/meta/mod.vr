@@ -279,6 +279,25 @@ public mount .token.TokenTree;
 // Re-exports: Span & Location
 // =============================================================================
 
+// VFE-Quality — meta-programming layer for framework-axiom hygiene.
+// Compile-time discipline that enforces foundation-neutral naming
+// (R1) + ε-coordinate canonicalisability (R2) + meta-classifier
+// uniqueness (R3) over `@framework(name, citation)` and
+// `@enact(epsilon = "...")` declarations. Designed so the
+// verification phase can call run_all_hygiene_rules once per module
+// and gate downstream phases on the (severity == Error)-free result.
+public mount .framework_hygiene.HygieneSeverity;
+public mount .framework_hygiene.HygieneDiagnostic;
+public mount .framework_hygiene.MetaClassifierTally;
+public mount .framework_hygiene.hygiene_diagnostic;
+public mount .framework_hygiene.severity_as_text;
+public mount .framework_hygiene.name_has_brand_prefix;
+public mount .framework_hygiene.validate_foundation_neutral_name;
+public mount .framework_hygiene.validate_epsilon_canonicalisable;
+public mount .framework_hygiene.validate_meta_classifier_uniqueness;
+public mount .framework_hygiene.meta_classifier_tally_new;
+public mount .framework_hygiene.run_all_hygiene_rules;
+
 /// Source span
 public mount .span.Span;
 
