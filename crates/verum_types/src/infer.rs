@@ -29066,28 +29066,37 @@ impl TypeChecker {
 
         // VUVA #144 cycle guard: nested explicit imports (`mount A.{Item}`)
         // can re-enter through impl-block elaboration, type-resolution
-        // chains, and re-export walks. The existing `glob_imports_in_progress`
-        // covers ONLY glob expansion; this path needs its own check.
+        // chains, and re-export walks.
         //
-        // Key shape: (module_path, item_name) pair — the same Item can be
-        // imported by many call sites (function signature, impl block,
-        // type body) but only ONE in-flight resolution per (module, item)
-        // is allowed; a second entry means a cycle.
+        // Key shape: (module_path, item_name) pair tracked while a
+        // resolution is in-flight.  A second entry means we've recursed
+        // back into the SAME (module, item) — typically a forward
+        // reference that's resolved by the outer expansion completing.
         //
-        // Discipline mirrors `glob_imports_in_progress` (see lines 28157/
-        // 28161): insert before the body, remove at every clean exit. We
-        // factor the body into `import_item_from_module_body` so the
-        // remove can sit at exactly one site (Ok or Err alike).
+        // Treatment: skip the inner re-entry with Ok(()) — the symbol
+        // will be visible once the outer resolution finishes registering
+        // it.  This matches the older `imports_in_progress` discipline
+        // at `import_item_from_module_inner` (the soft skip that has
+        // existed since cycle handling was first introduced).  Returning
+        // a hard `TypeError::ImportCycle` here surfaces as E0811 on
+        // legitimate stdlib re-export topologies (every sqlite-native
+        // run-test failed E0811 with `mount l1_pager.{Pager}` /
+        // `mount core.base.{Result}` after the original strict-Err
+        // shape landed).
+        //
+        // Discipline mirrors `glob_imports_in_progress`: insert before
+        // the body, remove at every clean exit.  The body is factored
+        // into `import_item_from_module_body` so the remove sits at
+        // exactly one site.
         let cycle_key: (Text, Text) = (module_path.clone(), item_name.to_string().into());
         if self.imports_in_progress.contains(&cycle_key) {
-            return Err(crate::TypeError::ImportCycle {
-                cycle_path: format!(
-                    "{}.{}: nested-import cycle (re-entered while resolving)",
-                    module_path.as_str(), item_name
-                ).into(),
-                modules_in_cycle: vec![module_path.clone()].into(),
-                span: import_span.unwrap_or_else(verum_ast::span::Span::dummy),
-            });
+            tracing::debug!(
+                "Nested-import cycle on '{}.{}' — skipping inner resolution; \
+                 outer expansion will register the symbol",
+                module_path.as_str(),
+                item_name
+            );
+            return Ok(());
         }
         self.imports_in_progress.insert(cycle_key.clone());
         let outcome = self.import_item_from_module_body(

@@ -2928,6 +2928,36 @@ impl VbcCodegen {
                         return self.compile_imported_intrinsic_call(&intrinsic_info, args);
                     }
 
+                    // Diagnostic: dump near-matches so stdlib-hygiene gaps
+                    // and missing-import bugs surface at compile time
+                    // instead of leaving "undefined function: X" with no
+                    // hint about whether X is registered under a qualified
+                    // name nearby.
+                    let near_matches: Vec<String> = self
+                        .ctx
+                        .functions
+                        .keys()
+                        .filter(|k| {
+                            k.ends_with(&format!(".{}", func_name))
+                                || k.ends_with(&format!("::{}", func_name))
+                                || (k.contains(&func_name) && k.len() < func_name.len() + 64)
+                        })
+                        .take(8)
+                        .cloned()
+                        .collect();
+                    if !near_matches.is_empty() {
+                        tracing::debug!(
+                            "[undef-fn] '{}' unresolved; near-matches in ctx.functions: {:?}",
+                            func_name,
+                            near_matches
+                        );
+                    } else {
+                        tracing::debug!(
+                            "[undef-fn] '{}' unresolved; ctx.functions has {} entries, none matching",
+                            func_name,
+                            self.ctx.functions.len()
+                        );
+                    }
                     return Err(CodegenError::with_span(
                         CodegenErrorKind::UndefinedFunction(func_name.clone()),
                         func.span,
