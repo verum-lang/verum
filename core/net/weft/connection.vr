@@ -10,6 +10,7 @@ module core.net.weft.connection;
 mount core.*;
 mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
+mount core.time.instant.{Instant};
 mount core.net.weft.transport.{WeftTransport};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
 mount core.net.http_parser.{
@@ -104,6 +105,13 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     token: &CancellationToken,
     config: &ConnectionConfig,
 ) -> Result<KeepAlive, ConnError> {
+    // §6.1 listener stamping (Phase K, #68): capture the wall-clock
+    // moment we started reading this request. The CoDelLayer
+    // (backpressure.vr) reads `x-weft-submitted-at` as a millisecond
+    // monotonic to compute sojourn time; without this stamp it sees
+    // 0 and CoDel admission becomes a no-op.
+    let submitted_at_ms = Instant.now().duration_since_epoch().as_millis();
+
     let mut parser = HttpParser.request();
     let mut accum: List<Int> = List.with_capacity(config.read_buffer_capacity);
     let mut hdr_frame: Maybe<HeaderFrame> = None;
@@ -156,7 +164,17 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     };
     let version = parser.version();
     let (path, raw_query) = split_path_query(parser.path(&buf_bytes));
-    let headers = materialize_headers(parser.headers(), &buf_bytes);
+    let mut headers = materialize_headers(parser.headers(), &buf_bytes);
+
+    // §6.1 listener stamping (Phase K, #68): inject the
+    // submission timestamp captured at message-read entry. Existing
+    // value (if the client sent one) is preserved as a separate
+    // `x-weft-submitted-at-client` header so attempts to inject a
+    // bogus sojourn from the network can be detected at audit time.
+    if let Some(client_ts) = headers.get(&"x-weft-submitted-at") {
+        headers.append(&"x-weft-submitted-at-client", &client_ts.clone());
+    }
+    headers.set(&"x-weft-submitted-at", &submitted_at_ms.to_text());
 
     let body: List<Byte> = if parser.is_chunked() {
         match read_chunked_body(stream, &mut accum, hdr.body_start, token, config).await {

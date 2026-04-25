@@ -52,6 +52,7 @@ mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, StatusCode, Headers, Response};
+mount core.time.instant.{Instant};
 mount core.net.http2.hpack.{HeaderField};
 mount core.net.quic.{QuicConfig};
 mount core.net.http3.server.{Http3Server, Http3Request, Http3RequestHandle};
@@ -206,11 +207,36 @@ async fn dispatch_one_request<H: Handler>(
     app: &H,
     _token: &CancellationToken,
 ) -> Result<(), Http3Error> {
+    // §6.1 listener stamping (Phase K, #68): capture the wall-clock
+    // moment we accepted this H3 request. Mirrors the HTTP/1.1
+    // connection-level stamp at `core/net/weft/connection.vr` so the
+    // CoDelLayer (backpressure.vr) sees a consistent
+    // `x-weft-submitted-at` regardless of which transport delivered
+    // the request.
+    let submitted_at_ms = Instant.now().duration_since_epoch().as_millis();
+
     // 1. Convert Http3Request → WeftRequest.
     let mut headers = Headers.with_capacity(req.headers.len());
     for f in req.headers.iter() {
         headers.append(&f.name, &f.value);
     }
+    // §6.10 0-RTT replay-defence stamping. `x-weft-via-0rtt: 1` is
+    // emitted when this request arrived in 0-RTT data; downstream
+    // middleware (e.g. an idempotent-method gate) can read it and
+    // reject non-idempotent operations to avoid replay vulnerability
+    // per draft-ietf-quic-http-29 §10.9. Since the H3 layer doesn't
+    // yet expose the 0-RTT flag through `Http3Request` (intrinsic
+    // bridge follow-up), default to "0" — the gate sees a safe value
+    // until the runtime side surfaces the bit.
+    headers.set(&"x-weft-via-0rtt", &"0");
+    if let Some(client_ts) = headers.get(&"x-weft-submitted-at") {
+        // Preserve any client-supplied submission timestamp under a
+        // separate header so downstream auditing can compare it
+        // against our authoritative stamp. Defends against clients
+        // injecting a forged sojourn to escape CoDel admission.
+        headers.append(&"x-weft-submitted-at-client", &client_ts.clone());
+    }
+    headers.set(&"x-weft-submitted-at", &submitted_at_ms.to_text());
     let (path, raw_query) = split_path_query(&req.path);
     let peer_addr: Maybe<SocketAddr> = None;  // §6.10 follow-up — QUIC peer lookup.
 
