@@ -15,13 +15,13 @@ mount core.*;
 mount base.{Text, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.protocol.{
-    IndexInfo, Constraint, ConstraintUsage, OrderBy, ConstraintOp,
+    IndexInfo, Constraint, ConstraintUsage, OrderBy, VtabProtocolConstraintOp,
     OpEq, OpGt, OpLt, OpGe, OpLe, OpMatch, OpLike, OpGlob, OpRegexp,
     OpIsNotNull, OpIsNull, OpIsNotEqual,
     index_info_new,
 };
 
-public fn add_constraint(info: &mut IndexInfo, column: Int, op: ConstraintOp, usable: Bool) {
+public fn add_constraint(info: &mut IndexInfo, column: Int, op: VtabProtocolConstraintOp, usable: Bool) {
     info.constraints.push(Constraint { column: column, op: op, usable: usable });
     info.constraint_usage.push(ConstraintUsage { arg_slot: 0, omit: false });
 }
@@ -35,7 +35,7 @@ public fn use_constraint(info: &mut IndexInfo, idx: Int, arg_slot: Int, omit: Bo
     info.constraint_usage[idx] = ConstraintUsage { arg_slot: arg_slot, omit: omit };
 }
 
-public fn op_name(op: &ConstraintOp) -> Text {
+public fn op_name(op: &VtabProtocolConstraintOp) -> Text {
     match op {
         OpEq         => "=".clone(),
         OpGt         => ">".clone(),

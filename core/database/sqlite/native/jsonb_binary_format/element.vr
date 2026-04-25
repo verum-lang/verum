@@ -4,7 +4,7 @@ module core.database.sqlite.native.jsonb_binary_format.element;
 
 mount base.{Bool, Text, Maybe};
 
-public type ElementType is
+public type JsonbElementType is
     | EtNull        //  0
     | EtTrue        //  1
     | EtFalse       //  2
@@ -20,7 +20,7 @@ public type ElementType is
     | EtObject      // 12
     ;
 
-public fn tag_nibble(e: &ElementType) -> Int {
+public fn tag_nibble(e: &JsonbElementType) -> Int {
     match e {
         EtNull      => 0,
         EtTrue      => 1,
@@ -38,7 +38,7 @@ public fn tag_nibble(e: &ElementType) -> Int {
     }
 }
 
-public fn from_nibble(n: Int) -> Maybe<ElementType> {
+public fn from_nibble(n: Int) -> Maybe<JsonbElementType> {
     if n == 0  { return Maybe.Some(EtNull); }
     if n == 1  { return Maybe.Some(EtTrue); }
     if n == 2  { return Maybe.Some(EtFalse); }
@@ -55,7 +55,7 @@ public fn from_nibble(n: Int) -> Maybe<ElementType> {
     Maybe.None
 }
 
-public fn element_name(e: &ElementType) -> Text {
+public fn element_name(e: &JsonbElementType) -> Text {
     match e {
         EtNull     => "null".clone(),
         EtTrue     => "true".clone(),
@@ -73,13 +73,13 @@ public fn element_name(e: &ElementType) -> Text {
     }
 }
 
-public fn is_container(e: &ElementType) -> Bool {
+public fn is_container(e: &JsonbElementType) -> Bool {
     match e { EtArray => true, EtObject => true, _ => false }
 }
 
-public fn is_scalar(e: &ElementType) -> Bool { !is_container(e) }
+public fn is_scalar(e: &JsonbElementType) -> Bool { !is_container(e) }
 
-public fn is_empty_payload(e: &ElementType) -> Bool {
+public fn is_empty_payload(e: &JsonbElementType) -> Bool {
     // NULL / TRUE / FALSE have zero-length payload.
     match e {
         EtNull  => true,

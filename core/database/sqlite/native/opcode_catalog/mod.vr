@@ -15,7 +15,7 @@
 //   * `metadata`      — OpcodeKind + name table (~180 codes)
 //   * `operand_shape` — operand kinds (jump-target / register / literal)
 //   * `effects`       — pure / writes-cursor / writes-pager / yields-row
-//   * `error_codes`   — SQLITE_* code table mapped to DbError
+//   * `error_codes`   — SQLITE_* code table mapped to OpcodeDbError
 // =============================================================================
 
 module core.database.sqlite.native.opcode_catalog;

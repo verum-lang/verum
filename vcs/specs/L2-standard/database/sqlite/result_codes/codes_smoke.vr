@@ -13,7 +13,7 @@ mount core.database.sqlite.native.result_codes.checkpoint.{
     mode_numeric, mode_name, from_numeric as checkpoint_from_numeric,
 };
 mount core.database.sqlite.native.result_codes.vtab.{
-    ConstraintOp,
+    ConstraintOpResultCode,
     VcoEq, VcoGt, VcoLimit, VcoOffset, VcoFunction,
     SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_INDEX_CONSTRAINT_GT,
     SQLITE_INDEX_CONSTRAINT_LIMIT, SQLITE_INDEX_CONSTRAINT_OFFSET,

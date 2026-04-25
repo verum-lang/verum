@@ -3,18 +3,18 @@
 module core.database.sqlite.native.jsonb_binary_format.header;
 
 mount core.database.sqlite.native.jsonb_binary_format.element.{
-    ElementType, from_nibble, tag_nibble, is_empty_payload,
+    JsonbElementType, from_nibble, tag_nibble, is_empty_payload,
 };
 mount base.{Bool, Int64, Maybe};
 
 public type Header is {
-    element: ElementType,
+    element: JsonbElementType,
     inline_payload_len: Int,    // nibble value when 0..11 (fast path)
     ext_bytes: Int,             // 0 if inline; 1/2/4/8 if extended
 };
 
 // Decode a 1-byte header + (optional) extended-length bytes summary.
-// Returns Maybe.None if the nibble is not a known ElementType.
+// Returns Maybe.None if the nibble is not a known JsonbElementType.
 public fn decode(byte0: u8) -> Maybe<Header> {
     let nibble = (byte0 & (0x0F as u8)) as Int;
     let cls    = ((byte0 >> (4 as u8)) & (0x0F as u8)) as Int;
@@ -36,7 +36,7 @@ public fn decode(byte0: u8) -> Maybe<Header> {
 }
 
 // Reverse: build a single byte from element-type + payload-class nibble.
-public fn encode_byte(e: &ElementType, len_class: Int) -> u8 {
+public fn encode_byte(e: &JsonbElementType, len_class: Int) -> u8 {
     let tag = tag_nibble(e) as u8;
     let cls = (len_class as u8) & (0x0F as u8);
     (tag | (cls << (4 as u8))) as u8

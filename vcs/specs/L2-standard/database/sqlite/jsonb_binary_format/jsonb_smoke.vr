@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.jsonb_binary_format.element.{
-    ElementType,
+    JsonbElementType,
     EtNull, EtTrue, EtFalse, EtInt, EtInt5, EtFloat, EtFloat5,
     EtText, EtTextJ, EtText5, EtTextRaw, EtArray, EtObject,
     tag_nibble, from_nibble, element_name,
