@@ -10,14 +10,14 @@
 mount core.*;
 mount core.net.addr.{SocketAddr, SocketAddrV4, Ipv4Addr};
 mount core.time.instant.{Instant};
-mount core.net.quic.path.{Path, PathError};
+mount core.net.quic.path.{QuicPath, PathError};
 
 fn addr(port: Int) -> SocketAddr {
     SocketAddr.V4(SocketAddrV4.new(Ipv4Addr.localhost(), port))
 }
 
 fn main() {
-    let mut p = Path.new(addr(4000), addr(5000), false);
+    let mut p = QuicPath.new(addr(4000), addr(5000), false);
     assert_eq(p.amp_budget_ok(), true);  // zero-sent, zero-received trivially ok
 
     // Receive 1000 bytes — budget becomes 3000 outbound.

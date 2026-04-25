@@ -1,5 +1,5 @@
 // =============================================================================
-// span.vr - Source Span and Location Tracking
+// span.vr - Source MetaSpan and Location Tracking
 // =============================================================================
 // Version: 0.1.0
 // =============================================================================
@@ -9,7 +9,7 @@
 // Spans track source code locations for error reporting and code generation.
 // They enable precise diagnostic messages and accurate source mapping.
 //
-// ## Span Resolution
+// ## MetaSpan Resolution
 //
 // ```
 // ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -35,7 +35,7 @@ module meta.span;
 mount core.{Maybe, Text, Ordering};
 
 // =============================================================================
-// Span
+// MetaSpan
 // =============================================================================
 
 /// Source code span
@@ -68,31 +68,31 @@ mount core.{Maybe, Text, Ordering};
 /// }
 /// ```
 @repr(C)
-public type Span is {
+public type MetaSpan is {
     /// Internal span ID (opaque to users)
     id: UInt64,
 
     /// Hygiene context ID
     hygiene: UInt32,
 
-    /// Span flags
+    /// MetaSpan flags
     flags: SpanFlags,
 };
 
-/// Span flags
+/// MetaSpan flags
 @repr(UInt8)
 public type SpanFlags is {
-    /// Span is from macro expansion
+    /// MetaSpan is from macro expansion
     is_expansion: Bool,
 
-    /// Span is synthetic (generated, not from source)
+    /// MetaSpan is synthetic (generated, not from source)
     is_synthetic: Bool,
 
-    /// Span should be hidden in error messages
+    /// MetaSpan should be hidden in error messages
     is_hidden: Bool,
 };
 
-implement Span {
+implement MetaSpan {
     // =========================================================================
     // Constructors
     // =========================================================================
@@ -170,13 +170,13 @@ implement Span {
     /// Join two spans into one covering both
     ///
     /// # Arguments
-    /// - `other`: Span to join with
+    /// - `other`: MetaSpan to join with
     ///
     /// # Returns
-    /// Span covering from start of self to end of other,
+    /// MetaSpan covering from start of self to end of other,
     /// or self if spans are from different files.
     @compiler_intrinsic
-    public fn join(&self, other: Span) -> Self;
+    public fn join(&self, other: MetaSpan) -> Self;
 
     /// Get subspan from byte offset
     ///
@@ -212,12 +212,12 @@ implement Span {
     // =========================================================================
 
     /// Check if spans overlap
-    public fn overlaps(&self, other: &Span) -> Bool {
+    public fn overlaps(&self, other: &MetaSpan) -> Bool {
         self.start() < other.end() && other.start() < self.end()
     }
 
     /// Check if this span contains another
-    public fn contains(&self, other: &Span) -> Bool {
+    public fn contains(&self, other: &MetaSpan) -> Bool {
         self.start() <= other.start() && other.end() <= self.end()
     }
 
@@ -228,14 +228,14 @@ implement Span {
 }
 
 // Implement equality
-implement Eq for Span {
+implement Eq for MetaSpan {
     fn eq(&self, other: &Self) -> Bool {
         self.id == other.id && self.hygiene == other.hygiene
     }
 }
 
 // Implement ordering (by position)
-implement Ord for Span {
+implement Ord for MetaSpan {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.start().cmp(&other.start()) {
             Ordering.Equal => self.end().cmp(&other.end()),
@@ -245,7 +245,7 @@ implement Ord for Span {
 }
 
 // Implement Debug
-implement Debug for Span {
+implement Debug for MetaSpan {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         match self.location() {
             Some(loc) => f.write_str(f"{loc.file}:{loc.line}:{loc.column}"),
@@ -310,25 +310,25 @@ implement Eq for SourceLocation {
 /// Used for multi-span diagnostics covering a range of code.
 public type SpanRange is {
     /// Start span
-    start: Span,
+    start: MetaSpan,
 
     /// End span
-    end: Span,
+    end: MetaSpan,
 };
 
 implement SpanRange {
     /// Create span range from two spans
-    public fn new(start: Span, end: Span) -> Self {
+    public fn new(start: MetaSpan, end: MetaSpan) -> Self {
         Self { start, end }
     }
 
     /// Create span range from single span
-    public fn single(span: Span) -> Self {
+    public fn single(span: MetaSpan) -> Self {
         Self { start: span, end: span }
     }
 
     /// Get combined span covering entire range
-    public fn to_span(&self) -> Span {
+    public fn to_span(&self) -> MetaSpan {
         self.start.join(self.end)
     }
 
@@ -343,7 +343,7 @@ implement SpanRange {
     }
 
     /// Check if range contains a span
-    public fn contains(&self, span: &Span) -> Bool {
+    public fn contains(&self, span: &MetaSpan) -> Bool {
         self.start.start() <= span.start() && span.end() <= self.end.end()
     }
 }
@@ -357,10 +357,10 @@ implement SpanRange {
 /// Used when a diagnostic refers to multiple locations in the source.
 public type MultiSpan is {
     /// Primary span (main location)
-    primary: Maybe<Span>,
+    primary: Maybe<MetaSpan>,
 
     /// Additional spans with labels
-    spans: List<(Span, Text)>,
+    spans: List<(MetaSpan, Text)>,
 };
 
 implement MultiSpan {
@@ -373,7 +373,7 @@ implement MultiSpan {
     }
 
     /// Create multi-span with single primary span
-    public fn from_span(span: Span) -> Self {
+    public fn from_span(span: MetaSpan) -> Self {
         Self {
             primary: Some(span),
             spans: List.new(),
@@ -381,13 +381,13 @@ implement MultiSpan {
     }
 
     /// Set primary span
-    public fn with_primary(mut self, span: Span) -> Self {
+    public fn with_primary(mut self, span: MetaSpan) -> Self {
         self.primary = Some(span);
         self
     }
 
     /// Add labeled span
-    public fn with_span(mut self, span: Span, label: Text) -> Self {
+    public fn with_span(mut self, span: MetaSpan, label: Text) -> Self {
         self.spans.push((span, label));
         self
     }
@@ -398,12 +398,12 @@ implement MultiSpan {
     }
 
     /// Get primary span
-    public fn primary_span(&self) -> Maybe<Span> {
+    public fn primary_span(&self) -> Maybe<MetaSpan> {
         self.primary
     }
 
     /// Iterate over all spans with labels
-    public fn iter(&self) -> some I: Iterator<Item = (Span, Maybe<Text>)> {
+    public fn iter(&self) -> some I: Iterator<Item = (MetaSpan, Maybe<Text>)> {
         let primary_iter = self.primary.iter().map(|s| (s, None));
         let spans_iter = self.spans.iter().map(|(s, l)| (s, Some(l)));
         primary_iter.chain(spans_iter)

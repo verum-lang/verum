@@ -5,7 +5,7 @@ module tree;
 
 mount super.protocol.{StatefulWidget, Styled};
 mount super.block.Block;
-mount super.paragraph.{Line, Span};
+mount super.paragraph.{Line, TextSpan};
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;

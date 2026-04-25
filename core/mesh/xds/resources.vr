@@ -12,10 +12,10 @@ mount core.*;
 mount core.time.duration.{Duration};
 
 // =============================================================================
-// Resource — any xDS payload (with raw bytes for opaque passthrough)
+// XdsResource — any xDS payload (with raw bytes for opaque passthrough)
 // =============================================================================
 
-public type Resource is {
+public type XdsResource is {
     type_url: Text,
     name: Text,
     version: Text,

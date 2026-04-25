@@ -18,7 +18,7 @@
 //     (largest_acked, sent_packets, ack_ranges, keys) so a packet
 //     loss on one path doesn't artificially shrink another's window.
 //
-//   * Path Identifier (varint) prepended to every long-header packet
+//   * QuicPath Identifier (varint) prepended to every long-header packet
 //     once multipath is negotiated — indexes the PathSet entry.
 //
 //   * MP_NEW_PATH frame (type 0x15228c00) — server announces a new
@@ -30,9 +30,9 @@
 //     keys + PN-space + scheduler entry.
 //
 //   * MP_ACK frame (type 0x15228c02 / 0x15228c03 with ECN) — ACK
-//     per-path, indexed by Path Identifier.
+//     per-path, indexed by QuicPath Identifier.
 //
-// Path scheduler:
+// QuicPath scheduler:
 //
 // The scheduler decides which path each next-out packet uses. The
 // module ships three production-tested algorithms:

@@ -12,7 +12,7 @@
 // Modules:
 //   * `bbox`     — axis-aligned bounding box geometry
 //   * `node`     — internal + leaf node records
-//   * `tree`     — RTree handle: insert / delete / search / split
+//   * `tree`     — VtabRTree handle: insert / delete / search / split
 //   * `query`    — `WHERE` predicate translator
 // =============================================================================
 

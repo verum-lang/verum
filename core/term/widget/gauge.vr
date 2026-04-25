@@ -5,7 +5,7 @@ module gauge;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;
-mount super.paragraph.Span;
+mount super.paragraph.TextSpan;
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
@@ -13,10 +13,10 @@ mount super.super.style.color.Color;
 
 /// TermGauge — horizontal progress bar using Unicode block characters.
 /// Supports smooth sub-cell rendering with ▏▎▍▌▋▊▉█ when use_unicode is true.
-/// Label is a Maybe<Span> for styled label text, centered over the gauge.
+/// Label is a Maybe<TextSpan> for styled label text, centered over the gauge.
 public type TermGauge is {
     ratio: Float,           // Progress [0.0, 1.0]
-    label: Maybe<Span>,     // Optional styled label (e.g., Span.styled("42%", style))
+    label: Maybe<TextSpan>,     // Optional styled label (e.g., TextSpan.styled("42%", style))
     block: Maybe<Block>,
     style: Style,
     gauge_style: Style,
@@ -45,14 +45,14 @@ implement TermGauge {
         TermGauge { ratio: (p as Float / 100.0).clamp(0.0, 1.0), ..self }
     }
 
-    /// Set a styled label Span.
-    public fn label(self, label: Span) -> TermGauge {
+    /// Set a styled label TextSpan.
+    public fn label(self, label: TextSpan) -> TermGauge {
         TermGauge { label: Some(label), ..self }
     }
 
-    /// Set a plain text label (creates an unstyled Span).
+    /// Set a plain text label (creates an unstyled TextSpan).
     public fn label_text(self, text: Text) -> TermGauge {
-        TermGauge { label: Some(Span.raw(text)), ..self }
+        TermGauge { label: Some(TextSpan.raw(text)), ..self }
     }
 
     /// Set the block wrapper.

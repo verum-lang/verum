@@ -1,5 +1,5 @@
 // =============================================================================
-// rtree/tree.vr — RTree handle: insert / delete / search
+// rtree/tree.vr — VtabRTree handle: insert / delete / search
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
@@ -30,20 +30,20 @@ mount core.database.sqlite.native.vtabs.rtree.node.{
 };
 
 // -----------------------------------------------------------------------------
-// RTree
+// VtabRTree
 // -----------------------------------------------------------------------------
 
-public type RTree is {
+public type VtabRTree is {
     nodes: List<Node>,
     root_id: Int,
     n_dims: Int,
     next_id: Int,
 };
 
-public fn rtree_new(n_dims: Int) -> RTree {
+public fn rtree_new(n_dims: Int) -> VtabRTree {
     let mut nodes: List<Node> = List.new();
     nodes.push(leaf_new(0));
-    RTree {
+    VtabRTree {
         nodes: nodes,
         root_id: 0,
         n_dims: n_dims,
@@ -51,7 +51,7 @@ public fn rtree_new(n_dims: Int) -> RTree {
     }
 }
 
-implement RTree {
+implement VtabRTree {
     pub fn dimensions(&self) -> Int { self.n_dims }
     pub fn node_count(&self) -> Int { self.nodes.len() }
     pub fn root(&self) -> Int { self.root_id }

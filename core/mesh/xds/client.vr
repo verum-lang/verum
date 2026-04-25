@@ -21,7 +21,7 @@ mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 mount core.mesh.xds.error.{XdsError};
 mount core.mesh.xds.types.{AdsConfig, TypeUrl, ResourceName};
-mount core.mesh.xds.resources.{Resource};
+mount core.mesh.xds.resources.{XdsResource};
 
 // =============================================================================
 // XdsSubscription — a per-TypeUrl resource-set interest
@@ -40,7 +40,7 @@ public type DiscoveryResponse is {
     version: Text,
     nonce: Text,
     type_url: TypeUrl,
-    resources: List<Resource>,
+    resources: List<XdsResource>,
     /// For state-of-the-world mode: the response is authoritative,
     /// anything missing should be removed from the local cache.
     is_sotw_full: Bool,
@@ -49,7 +49,7 @@ public type DiscoveryResponse is {
 public type DiscoveryDelta is {
     nonce: Text,
     type_url: TypeUrl,
-    resources_added_or_updated: List<Resource>,
+    resources_added_or_updated: List<XdsResource>,
     resources_removed: List<ResourceName>,
     system_version_info: Text,
 }

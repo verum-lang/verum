@@ -6,8 +6,8 @@
 //       CCHM cubical type theory (Cohen–Coquand–Huber–Mörtberg, 2015)
 //
 // Complete cubical HoTT library providing:
-//   §1  Interval and Path primitives (I, i0, i1, Path, transport, hcomp)
-//   §2  Path algebra (refl, sym, trans, ap, apd, cong)
+//   §1  Interval and HottPath primitives (I, i0, i1, HottPath, transport, hcomp)
+//   §2  HottPath algebra (refl, sym, trans, ap, apd, cong)
 //   §3  Equivalences (IsEquiv, Equiv, half-adjoint, biinvertible)
 //   §4  Truncation levels (IsContr, IsProp, IsSet, IsGroupoid, n-Type)
 //   §5  Fibers and contractible maps
@@ -17,7 +17,7 @@
 //   §9  Transport lemmas and path-over
 //   §10 Proven theorems (SMT-discharged)
 //
-// All witness types use Path<A>(a, b) — no Bool placeholders.
+// All witness types use HottPath<A>(a, b) — no Bool placeholders.
 // The cubical normalizer (crates/verum_types/src/cubical.rs) provides
 // 8 reduction rules for computational content.
 //
@@ -30,7 +30,7 @@
 module core.math.hott;
 
 // =============================================================================
-// §1. Cubical Interval and Path Primitives
+// §1. Cubical Interval and HottPath Primitives
 // =============================================================================
 
 /// The abstract interval type with two endpoints.
@@ -49,9 +49,9 @@ public let i0: I = @builtin_i0;
 /// Right endpoint of the interval.
 public let i1: I = @builtin_i1;
 
-/// Path type: the type of paths from `a` to `b` in type `A`.
+/// HottPath type: the type of paths from `a` to `b` in type `A`.
 ///
-/// A term `p : Path<A>(a, b)` is a function `f : I → A` such that
+/// A term `p : HottPath<A>(a, b)` is a function `f : I → A` such that
 /// `f(i0) ≡ a` and `f(i1) ≡ b` (definitional equalities).
 ///
 /// Introduction: `λ(i : I). e(i)` where `e(i0) ≡ a` and `e(i1) ≡ b`
@@ -63,23 +63,23 @@ public let i1: I = @builtin_i1;
 ///   refl(x) @ _         ↦ x             (refl elimination)
 ///   transport(refl, x)  ↦ x             (identity transport)
 ///   transport(ua(e), x) ↦ e.forward(x)  (computational univalence)
-public type Path<A>(a: A, b: A) is @builtin_path;
+public type HottPath<A>(a: A, b: A) is @builtin_path;
 
 /// Reflexivity: the constant path at a point.
-///   refl(x) : Path<A>(x, x)
+///   refl(x) : HottPath<A>(x, x)
 ///   refl(x) = λ(i : I). x
-public fn refl<A>(x: A) -> Path<A>(x, x) {
+public fn refl<A>(x: A) -> HottPath<A>(x, x) {
     @builtin_refl(x)
 }
 
 /// Transport: move a value along a path of types.
-///   transport(p, x) : B   where p : Path<Type>(A, B) and x : A
+///   transport(p, x) : B   where p : HottPath<Type>(A, B) and x : A
 ///
 /// Key reductions:
 ///   transport(refl, x)       ↦ x
 ///   transport(ua(e), x)      ↦ e.forward(x)
 ///   transport(sym(ua(e)), x) ↦ e.inverse(x)
-public fn transport<A, B>(p: Path<Type>(A, B), x: A) -> B {
+public fn transport<A, B>(p: HottPath<Type>(A, B), x: A) -> B {
     @builtin_transport(p, x)
 }
 
@@ -96,48 +96,48 @@ public fn hcomp<A>(phi: I, walls: fn(I) -> A, base: A) -> A {
 }
 
 // =============================================================================
-// §2. Path Algebra
+// §2. HottPath Algebra
 // =============================================================================
 
-/// Path symmetry (inversion): `sym(p) : Path<A>(b, a)` given `p : Path<A>(a, b)`.
+/// HottPath symmetry (inversion): `sym(p) : HottPath<A>(b, a)` given `p : HottPath<A>(a, b)`.
 ///   sym(p) = λ(i). p @ (1 - i)
-public fn sym<A>(a: A, b: A, p: Path<A>(a, b)) -> Path<A>(b, a) {
+public fn sym<A>(a: A, b: A, p: HottPath<A>(a, b)) -> HottPath<A>(b, a) {
     @builtin_sym(p)
 }
 
-/// Path transitivity (composition): compose two paths.
-///   trans(p, q) : Path<A>(a, c)   given p : Path<A>(a, b), q : Path<A>(b, c)
-public fn trans<A>(a: A, b: A, c: A, p: Path<A>(a, b), q: Path<A>(b, c)) -> Path<A>(a, c) {
+/// HottPath transitivity (composition): compose two paths.
+///   trans(p, q) : HottPath<A>(a, c)   given p : HottPath<A>(a, b), q : HottPath<A>(b, c)
+public fn trans<A>(a: A, b: A, c: A, p: HottPath<A>(a, b), q: HottPath<A>(b, c)) -> HottPath<A>(a, c) {
     @builtin_trans(p, q)
 }
 
 /// Action on paths (ap / cong): apply a function to a path.
-///   ap(f, p) : Path<B>(f(a), f(b))   given f : A → B, p : Path<A>(a, b)
+///   ap(f, p) : HottPath<B>(f(a), f(b))   given f : A → B, p : HottPath<A>(a, b)
 ///   ap(f, p) = λ(i). f(p @ i)
-public fn ap<A, B>(f: fn(A) -> B, a: A, b: A, p: Path<A>(a, b)) -> Path<B>(f(a), f(b)) {
+public fn ap<A, B>(f: fn(A) -> B, a: A, b: A, p: HottPath<A>(a, b)) -> HottPath<B>(f(a), f(b)) {
     @builtin_ap(f, p)
 }
 
 /// Dependent action on paths (apd): apply a dependent function along a path.
 ///   apd(f, p) : PathOver<B>(p, f(a), f(b))
-///   given f : (x : A) → B(x), p : Path<A>(a, b)
+///   given f : (x : A) → B(x), p : HottPath<A>(a, b)
 public fn apd<A, B: fn(A) -> Type>(
     f: fn(x: A) -> B(x),
     a: A,
     b: A,
-    p: Path<A>(a, b),
-) -> Path<B(b)>(transport(ap(|x| B(x), a, b, p), f(a)), f(b)) {
+    p: HottPath<A>(a, b),
+) -> HottPath<B(b)>(transport(ap(|x| B(x), a, b, p), f(a)), f(b)) {
     @builtin_apd(f, p)
 }
 
 /// Congruence: paths are preserved under function application.
 /// Alias for `ap` matching common mathematical notation.
-public fn cong<A, B>(f: fn(A) -> B, a: A, b: A, p: Path<A>(a, b)) -> Path<B>(f(a), f(b)) {
+public fn cong<A, B>(f: fn(A) -> B, a: A, b: A, p: HottPath<A>(a, b)) -> HottPath<B>(f(a), f(b)) {
     ap(f, a, b, p)
 }
 
-/// Path concatenation operator (alias for trans).
-public fn concat<A>(a: A, b: A, c: A, p: Path<A>(a, b), q: Path<A>(b, c)) -> Path<A>(a, c) {
+/// HottPath concatenation operator (alias for trans).
+public fn concat<A>(a: A, b: A, c: A, p: HottPath<A>(a, b), q: HottPath<A>(b, c)) -> HottPath<A>(a, c) {
     trans(a, b, c, p, q)
 }
 
@@ -154,10 +154,10 @@ public fn concat<A>(a: A, b: A, c: A, p: Path<A>(a, b), q: Path<A>(b, c)) -> Pat
 public type IsEquiv<A, B> is {
     forward: fn(A) -> B,
     inverse: fn(B) -> A,
-    section: fn(b: B) -> Path<B>(forward(inverse(b)), b),
-    retraction: fn(a: A) -> Path<A>(inverse(forward(a)), a),
+    section: fn(b: B) -> HottPath<B>(forward(inverse(b)), b),
+    retraction: fn(a: A) -> HottPath<A>(inverse(forward(a)), a),
     @verify(formal)
-    coherence: fn(a: A) -> Path<Path<B>(forward(inverse(forward(a))), forward(a))>(
+    coherence: fn(a: A) -> HottPath<HottPath<B>(forward(inverse(forward(a))), forward(a))>(
         ap(forward, inverse(forward(a)), a, retraction(a)),
         section(forward(a)),
     ),
@@ -261,32 +261,32 @@ public fn equiv_compose<A, B, C>(e1: Equiv<A, B>, e2: Equiv<B, C>) -> Equiv<A, C
 
 /// Contractible type (h-level −2): exactly one element up to paths.
 ///   center : A
-///   contraction : ∀ (a : A). Path<A>(center, a)
+///   contraction : ∀ (a : A). HottPath<A>(center, a)
 public type IsContr<A> is {
     center: A,
-    contraction: fn(a: A) -> Path<A>(center, a),
+    contraction: fn(a: A) -> HottPath<A>(center, a),
 };
 
 /// Proposition (h-level −1): any two elements are path-equal.
-///   all_paths : ∀ (a b : A). Path<A>(a, b)
+///   all_paths : ∀ (a b : A). HottPath<A>(a, b)
 public type IsProp<A> is {
-    all_paths: fn(a: A, b: A) -> Path<A>(a, b),
+    all_paths: fn(a: A, b: A) -> HottPath<A>(a, b),
 };
 
 /// Set (h-level 0): path types are propositions (UIP).
-///   uip : ∀ (a b : A) (p q : Path<A>(a,b)). Path<Path<A>(a,b)>(p, q)
+///   uip : ∀ (a b : A) (p q : HottPath<A>(a,b)). HottPath<HottPath<A>(a,b)>(p, q)
 public type IsSet<A> is {
-    uip: fn(a: A, b: A, p: Path<A>(a, b), q: Path<A>(a, b)) -> Path<Path<A>(a, b)>(p, q),
+    uip: fn(a: A, b: A, p: HottPath<A>(a, b), q: HottPath<A>(a, b)) -> HottPath<HottPath<A>(a, b)>(p, q),
 };
 
 /// Groupoid (h-level 1): path types are sets.
 public type IsGroupoid<A> is {
-    groupoid_witness: fn(a: A, b: A) -> IsSet<Path<A>(a, b)>,
+    groupoid_witness: fn(a: A, b: A) -> IsSet<HottPath<A>(a, b)>,
 };
 
 /// General n-truncation: `IsTrunc<A, n>`.
 ///   IsTrunc<A, -2> ≡ IsContr<A>
-///   IsTrunc<A, n+1> ≡ ∀ (a b : A). IsTrunc<Path<A>(a,b), n>
+///   IsTrunc<A, n+1> ≡ ∀ (a b : A). IsTrunc<HottPath<A>(a,b), n>
 public type IsTrunc<A, N: meta Int> is protocol {
     fn trunc_level(&self) -> Int;
     @verify(formal)
@@ -310,10 +310,10 @@ public type HSet is NType<0>;
 // =============================================================================
 
 /// The homotopy fiber of `f : A → B` over `b : B`.
-///   Fiber(f, b) = Σ(a : A). Path<B>(f(a), b)
+///   Fiber(f, b) = Σ(a : A). HottPath<B>(f(a), b)
 public type Fiber<A, B>(f: fn(A) -> B, b: B) is {
     point: A,
-    path: Path<B>(f(point), b),
+    path: HottPath<B>(f(point), b),
 };
 
 /// A function is a contractible map if all its fibers are contractible.
@@ -351,17 +351,17 @@ public fn equiv_from_contr_map<A, B>(f: fn(A) -> B, cm: IsContrMap<A, B>(f)) -> 
 // =============================================================================
 
 /// The univalence axiom (Voevodsky): equivalences of types are paths in Type.
-///   ua : Equiv<A, B> → Path<Type>(A, B)
+///   ua : Equiv<A, B> → HottPath<Type>(A, B)
 ///
 /// Computational content via cubical normalizer:
 ///   transport(ua(e), x)       ↦ e.forward(x)
 ///   transport(sym(ua(e)), x)  ↦ e.inverse(x)
 ///   ua(id_equiv)              ↦ refl(A)
-public axiom ua<A, B>(e: Equiv<A, B>) -> Path<Type>(A, B);
+public axiom ua<A, B>(e: Equiv<A, B>) -> HottPath<Type>(A, B);
 
 /// Inverse of univalence: a path of types induces an equivalence.
 ///   ua_inv(p) builds the equivalence from transport along p.
-public fn ua_inv<A, B>(p: Path<Type>(A, B)) -> Equiv<A, B> {
+public fn ua_inv<A, B>(p: HottPath<Type>(A, B)) -> Equiv<A, B> {
     let fwd = |a: A| transport(p, a);
     let bwd = |b: B| transport(sym(A, B, p), b);
     Equiv {
@@ -380,23 +380,23 @@ public fn ua_inv<A, B>(p: Path<Type>(A, B)) -> Equiv<A, B> {
 }
 
 /// Function extensionality: pointwise equal functions are path-equal.
-///   funext(h) : Path<fn(A) → B>(f, g)
-///   given h : ∀ (x : A). Path<B>(f(x), g(x))
+///   funext(h) : HottPath<fn(A) → B>(f, g)
+///   given h : ∀ (x : A). HottPath<B>(f(x), g(x))
 public axiom funext<A, B>(
     f: fn(A) -> B,
     g: fn(A) -> B,
-    h: fn(x: A) -> Path<B>(f(x), g(x)),
-) -> Path<fn(A) -> B>(f, g);
+    h: fn(x: A) -> HottPath<B>(f(x), g(x)),
+) -> HottPath<fn(A) -> B>(f, g);
 
 /// Inverse of funext: extract pointwise paths from a function path.
-///   happly(p, x) : Path<B>(f(x), g(x))
-///   given p : Path<fn(A) → B>(f, g)
+///   happly(p, x) : HottPath<B>(f(x), g(x))
+///   given p : HottPath<fn(A) → B>(f, g)
 public fn happly<A, B>(
     f: fn(A) -> B,
     g: fn(A) -> B,
-    p: Path<fn(A) -> B>(f, g),
+    p: HottPath<fn(A) -> B>(f, g),
     x: A,
-) -> Path<B>(f(x), g(x)) {
+) -> HottPath<B>(f(x), g(x)) {
     ap(|h: fn(A) -> B| h(x), f, g, p)
 }
 
@@ -406,7 +406,7 @@ public fn propext<P, Q>(
     g: fn(Q) -> P,
     p_prop: IsProp<P>,
     q_prop: IsProp<Q>,
-) -> Path<Type>(P, Q) {
+) -> HottPath<Type>(P, Q) {
     ua(Equiv {
         forward: f,
         backward: g,
@@ -429,7 +429,7 @@ public fn propext<P, Q>(
 /// The circle S¹: one point and one non-trivial loop.
 ///   Constructors:
 ///     base : S1
-///     loop : Path<S1>(base, base)
+///     loop : HottPath<S1>(base, base)
 ///
 ///   Eliminator:
 ///     S1_elim(P, b, l) : (x : S1) → P(x)
@@ -439,7 +439,7 @@ public type S1 is
     | loop_path() = base..base;
 
 /// Recursion principle for S¹.
-public fn s1_rec<B>(b: B, l: Path<B>(b, b)) -> fn(S1) -> B {
+public fn s1_rec<B>(b: B, l: HottPath<B>(b, b)) -> fn(S1) -> B {
     |x: S1| -> B {
         match x {
             S1.base => b,
@@ -453,7 +453,7 @@ public fn s1_rec<B>(b: B, l: Path<B>(b, b)) -> fn(S1) -> B {
 /// Suspension: Susp(A) has north, south, and a path for each a : A.
 ///   north : Susp(A)
 ///   south : Susp(A)
-///   merid : A → Path<Susp(A)>(north, south)
+///   merid : A → HottPath<Susp(A)>(north, south)
 public type Susp<A> is
     | north
     | south
@@ -472,12 +472,12 @@ public type Trunc<A> is
 
 /// Quotient type: A/R — identifies elements related by R.
 ///   class(a) : A/R
-///   relate(a, b, r) : Path<A/R>(class(a), class(b))   when r : R(a, b)
+///   relate(a, b, r) : HottPath<A/R>(class(a), class(b))   when r : R(a, b)
 ///   set_trunc : IsSet<A/R>
 public type Quotient<A, R: fn(A, A) -> Type> is protocol {
     type Q;
     fn class(a: A) -> Q;
-    fn relate(a: A, b: A, r: R(a, b)) -> Path<Q>(class(a), class(b));
+    fn relate(a: A, b: A, r: R(a, b)) -> HottPath<Q>(class(a), class(b));
     fn q_is_set() -> IsSet<Q>;
 };
 
@@ -485,7 +485,7 @@ public type Quotient<A, R: fn(A, A) -> Type> is protocol {
 public type Pushout<A, B, C>(f: fn(C) -> A, g: fn(C) -> B) is
     | inl(a: A)
     | inr(b: B)
-    | push(c: C): Path<Pushout<A, B, C>(f, g)>(inl(f(c)), inr(g(c)));
+    | push(c: C): HottPath<Pushout<A, B, C>(f, g)>(inl(f(c)), inr(g(c)));
 
 // =============================================================================
 // §8. Decidable Equality and Hedberg's Theorem
@@ -493,7 +493,7 @@ public type Pushout<A, B, C>(f: fn(C) -> A, g: fn(C) -> B) is
 
 /// Decidable equality: for any x, y, either a path or a refutation.
 public type DecidableEq<A> is protocol {
-    fn decide_eq(x: A, y: A) -> Result<Path<A>(x, y), fn(Path<A>(x, y)) -> Void>;
+    fn decide_eq(x: A, y: A) -> Result<HottPath<A>(x, y), fn(HottPath<A>(x, y)) -> Void>;
 };
 
 /// Hedberg's theorem: decidable equality implies set truncation.
@@ -511,38 +511,38 @@ proof {
 /// Every proposition has decidable equality.
 @verify(formal)
 public theorem prop_has_decidable_eq<A>(h: IsProp<A>, x: A, y: A)
-    -> Result<Path<A>(x, y), fn(Path<A>(x, y)) -> Void>
+    -> Result<HottPath<A>(x, y), fn(HottPath<A>(x, y)) -> Void>
 proof {
     // A proposition always has a path between any two elements.
     exact Ok(h.all_paths(x, y));
 };
 
 // =============================================================================
-// §9. Transport Lemmas and Path-Over
+// §9. Transport Lemmas and HottPath-Over
 // =============================================================================
 
-/// Path-over: a path in a dependent type lying over a base path.
-///   PathOver<B>(p, u, v) where p : Path<A>(a, b), u : B(a), v : B(b)
-/// is equivalent to Path<B(b)>(transport(ap(B, p), u), v).
+/// HottPath-over: a path in a dependent type lying over a base path.
+///   PathOver<B>(p, u, v) where p : HottPath<A>(a, b), u : B(a), v : B(b)
+/// is equivalent to HottPath<B(b)>(transport(ap(B, p), u), v).
 public type PathOver<A, B: fn(A) -> Type>(
     a: A, b: A,
-    p: Path<A>(a, b),
+    p: HottPath<A>(a, b),
     u: B(a),
     v: B(b),
 ) is {
-    over: Path<B(b)>(transport(ap(|x: A| B(x), a, b, p), u), v),
+    over: HottPath<B(b)>(transport(ap(|x: A| B(x), a, b, p), u), v),
 };
 
 /// Transport is functorial: transporting along a composite is composing transports.
 @verify(formal)
 public theorem transport_concat<A>(
     a: A, b: A, c: A,
-    p: Path<A>(a, b),
-    q: Path<A>(b, c),
+    p: HottPath<A>(a, b),
+    q: HottPath<A>(b, c),
     B: fn(A) -> Type,
     x: B(a),
 )
-    -> Path<B(c)>(
+    -> HottPath<B(c)>(
         transport(ap(B, a, c, trans(a, b, c, p, q)), x),
         transport(ap(B, b, c, q), transport(ap(B, a, b, p), x)),
     )
@@ -555,17 +555,17 @@ public theorem transport_refl<A>(
     B: fn(A) -> Type,
     x: B(a),
 )
-    -> Path<B(a)>(transport(refl(a), x), x)
+    -> HottPath<B(a)>(transport(refl(a), x), x)
 proof by auto;
 
 /// Transport in a constant family is the identity.
 @verify(formal)
 public theorem transport_const<A, B>(
     a1: A, a2: A,
-    p: Path<A>(a1, a2),
+    p: HottPath<A>(a1, a2),
     b: B,
 )
-    -> Path<B>(transport(ap(|_: A| B, a1, a2, p), b), b)
+    -> HottPath<B>(transport(ap(|_: A| B, a1, a2, p), b), b)
 proof by auto;
 
 // =============================================================================
@@ -574,37 +574,37 @@ proof by auto;
 
 /// Left identity: refl · p = p.
 @verify(formal)
-public theorem path_left_identity<A>(a: A, b: A, p: Path<A>(a, b))
-    -> Path<Path<A>(a, b)>(trans(a, a, b, refl(a), p), p)
+public theorem path_left_identity<A>(a: A, b: A, p: HottPath<A>(a, b))
+    -> HottPath<HottPath<A>(a, b)>(trans(a, a, b, refl(a), p), p)
 proof by auto;
 
 /// Right identity: p · refl = p.
 @verify(formal)
-public theorem path_right_identity<A>(a: A, b: A, p: Path<A>(a, b))
-    -> Path<Path<A>(a, b)>(trans(a, b, b, p, refl(b)), p)
+public theorem path_right_identity<A>(a: A, b: A, p: HottPath<A>(a, b))
+    -> HottPath<HottPath<A>(a, b)>(trans(a, b, b, p, refl(b)), p)
 proof by auto;
 
 /// Left inverse: sym(p) · p = refl.
 @verify(formal)
-public theorem path_left_inverse<A>(a: A, b: A, p: Path<A>(a, b))
-    -> Path<Path<A>(b, b)>(trans(b, a, b, sym(a, b, p), p), refl(b))
+public theorem path_left_inverse<A>(a: A, b: A, p: HottPath<A>(a, b))
+    -> HottPath<HottPath<A>(b, b)>(trans(b, a, b, sym(a, b, p), p), refl(b))
 proof by auto;
 
 /// Right inverse: p · sym(p) = refl.
 @verify(formal)
-public theorem path_right_inverse<A>(a: A, b: A, p: Path<A>(a, b))
-    -> Path<Path<A>(a, a)>(trans(a, b, a, p, sym(a, b, p)), refl(a))
+public theorem path_right_inverse<A>(a: A, b: A, p: HottPath<A>(a, b))
+    -> HottPath<HottPath<A>(a, a)>(trans(a, b, a, p, sym(a, b, p)), refl(a))
 proof by auto;
 
 /// Associativity: (p · q) · r = p · (q · r).
 @verify(formal)
 public theorem path_assoc<A>(
     a: A, b: A, c: A, d: A,
-    p: Path<A>(a, b),
-    q: Path<A>(b, c),
-    r: Path<A>(c, d),
+    p: HottPath<A>(a, b),
+    q: HottPath<A>(b, c),
+    r: HottPath<A>(c, d),
 )
-    -> Path<Path<A>(a, d)>(
+    -> HottPath<HottPath<A>(a, d)>(
         trans(a, c, d, trans(a, b, c, p, q), r),
         trans(a, b, d, p, trans(b, c, d, q, r)),
     )
@@ -612,8 +612,8 @@ proof by auto;
 
 /// Double inversion: sym(sym(p)) = p.
 @verify(formal)
-public theorem path_sym_sym<A>(a: A, b: A, p: Path<A>(a, b))
-    -> Path<Path<A>(a, b)>(sym(b, a, sym(a, b, p)), p)
+public theorem path_sym_sym<A>(a: A, b: A, p: HottPath<A>(a, b))
+    -> HottPath<HottPath<A>(a, b)>(sym(b, a, sym(a, b, p)), p)
 proof by auto;
 
 /// Functoriality of ap: ap(f, p · q) = ap(f, p) · ap(f, q).
@@ -621,10 +621,10 @@ proof by auto;
 public theorem ap_concat<A, B>(
     f: fn(A) -> B,
     a: A, b: A, c: A,
-    p: Path<A>(a, b),
-    q: Path<A>(b, c),
+    p: HottPath<A>(a, b),
+    q: HottPath<A>(b, c),
 )
-    -> Path<Path<B>(f(a), f(c))>(
+    -> HottPath<HottPath<B>(f(a), f(c))>(
         ap(f, a, c, trans(a, b, c, p, q)),
         trans(f(a), f(b), f(c), ap(f, a, b, p), ap(f, b, c, q)),
     )
@@ -635,9 +635,9 @@ proof by auto;
 public theorem ap_sym<A, B>(
     f: fn(A) -> B,
     a: A, b: A,
-    p: Path<A>(a, b),
+    p: HottPath<A>(a, b),
 )
-    -> Path<Path<B>(f(b), f(a))>(
+    -> HottPath<HottPath<B>(f(b), f(a))>(
         ap(f, b, a, sym(a, b, p)),
         sym(f(a), f(b), ap(f, a, b, p)),
     )
@@ -645,8 +645,8 @@ proof by auto;
 
 /// ap of identity: ap(id, p) = p.
 @verify(formal)
-public theorem ap_id<A>(a: A, b: A, p: Path<A>(a, b))
-    -> Path<Path<A>(a, b)>(ap(|x: A| x, a, b, p), p)
+public theorem ap_id<A>(a: A, b: A, p: HottPath<A>(a, b))
+    -> HottPath<HottPath<A>(a, b)>(ap(|x: A| x, a, b, p), p)
 proof by auto;
 
 /// ap of composition: ap(g ∘ f, p) = ap(g, ap(f, p)).
@@ -655,9 +655,9 @@ public theorem ap_compose<A, B, C>(
     f: fn(A) -> B,
     g: fn(B) -> C,
     a: A, b: A,
-    p: Path<A>(a, b),
+    p: HottPath<A>(a, b),
 )
-    -> Path<Path<C>(g(f(a)), g(f(b)))>(
+    -> HottPath<HottPath<C>(g(f(a)), g(f(b)))>(
         ap(|x: A| g(f(x)), a, b, p),
         ap(g, f(a), f(b), ap(f, a, b, p)),
     )
@@ -692,7 +692,7 @@ public theorem set_is_groupoid<A>(h: IsSet<A>) -> IsGroupoid<A>
 proof {
     exact IsGroupoid {
         groupoid_witness: fn(a: A, b: A) -> prop_is_set(IsProp {
-            all_paths: fn(p: Path<A>(a, b), q: Path<A>(a, b)) -> h.uip(a, b, p, q),
+            all_paths: fn(p: HottPath<A>(a, b), q: HottPath<A>(a, b)) -> h.uip(a, b, p, q),
         }),
     };
 };
@@ -720,7 +720,7 @@ public fn void_is_prop() -> IsProp<Void> {
     // `Void` has no constructors, so the closure is vacuously total:
     // it can never be called, and the absurd path is derivable by `auto`.
     IsProp {
-        all_paths: |a: Void, _b: Void| -> Path<Void>(a, _b) {
+        all_paths: |a: Void, _b: Void| -> HottPath<Void>(a, _b) {
             @builtin_absurd(a)
         },
     }
@@ -736,18 +736,18 @@ public fn bool_is_set(_a: Bool, _b: Bool) -> IsSet<Bool> {
 }
 
 // =============================================================================
-// §12. Sigma Types and Path Characterization
+// §12. Sigma Types and HottPath Characterization
 // =============================================================================
 
-/// Path in a Sigma type: a path in Σ(a : A). B(a) is a pair of
-///   - a path p : Path<A>(a₁, a₂) in the base
+/// HottPath in a Sigma type: a path in Σ(a : A). B(a) is a pair of
+///   - a path p : HottPath<A>(a₁, a₂) in the base
 ///   - a path-over PathOver<B>(p, b₁, b₂) in the fiber
 public fn sigma_path<A, B: fn(A) -> Type>(
     a1: A, b1: B(a1),
     a2: A, b2: B(a2),
-    p: Path<A>(a1, a2),
+    p: HottPath<A>(a1, a2),
     q: PathOver<A, B>(a1, a2, p, b1, b2),
-) -> Path<(a: A, B(a))>((a1, b1), (a2, b2)) {
+) -> HottPath<(a: A, B(a))>((a1, b1), (a2, b2)) {
     @builtin_sigma_path(p, q)
 }
 
@@ -755,13 +755,13 @@ public fn sigma_path<A, B: fn(A) -> Type>(
 public fn sigma_path_fst<A, B: fn(A) -> Type>(
     s1: (a: A, B(a)),
     s2: (a: A, B(a)),
-    p: Path<(a: A, B(a))>(s1, s2),
-) -> Path<A>(s1.0, s2.0) {
+    p: HottPath<(a: A, B(a))>(s1, s2),
+) -> HottPath<A>(s1.0, s2.0) {
     ap(fn(s: (a: A, B(a))) -> s.0, s1, s2, p)
 }
 
 // =============================================================================
-// §13. Concrete Path Algebra (PathInt — backward compatibility)
+// §13. Concrete HottPath Algebra (PathInt — backward compatibility)
 // =============================================================================
 
 /// A path between two integers — concrete instance for testing.

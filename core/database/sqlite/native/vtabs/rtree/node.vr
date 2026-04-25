@@ -1,5 +1,5 @@
 // =============================================================================
-// rtree/node.vr — RTree internal + leaf node records
+// rtree/node.vr — VtabRTree internal + leaf node records
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //

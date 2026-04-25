@@ -10,7 +10,7 @@
 //      AND y_min <= 20 AND y_max >= 15;
 //
 // We collect every per-dimension lower / upper bound and build the
-// final query bbox; the caller then runs `RTree.search(&bbox)`.
+// final query bbox; the caller then runs `VtabRTree.search(&bbox)`.
 // =============================================================================
 
 module core.database.sqlite.native.vtabs.rtree.query;
