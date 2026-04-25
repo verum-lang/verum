@@ -763,6 +763,13 @@ enum Commands {
         #[clap(long)]
         epsilon: bool,
 
+        /// Project the @framework markers to their MSFS coordinate
+        /// (Framework, ν, τ) per VUVA §10.4. Reads the same source as
+        /// `--framework-axioms` and additionally annotates each
+        /// framework with its Diakrisis ν-rank and intensional flag.
+        #[clap(long)]
+        coord: bool,
+
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
@@ -1816,6 +1823,7 @@ fn run_command(cli: Cli) -> Result<()> {
             framework_axioms,
             kernel_rules,
             epsilon,
+            coord,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -1837,6 +1845,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_framework_axioms_with_format(output_format)
             } else if epsilon {
                 commands::audit::audit_epsilon_with_format(output_format)
+            } else if coord {
+                commands::audit::audit_coord_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,

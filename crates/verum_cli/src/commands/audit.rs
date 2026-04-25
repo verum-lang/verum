@@ -1283,3 +1283,260 @@ fn print_epsilon_report_json(
     out.push_str("}\n");
     print!("{}", out);
 }
+
+// =============================================================================
+// MSFS-coord audit — `verum audit --coord` (VUVA §10.4 Phase 5 E4)
+//
+// Walks the same `@framework(name, "citation")` markers that `--framework-
+// axioms` enumerates, and projects each unique framework to its MSFS
+// coordinate (Framework, ν, τ) per VUVA §10.4. The (ν, τ) lookup mirrors
+// `core.theory_interop.coord::coord_of` for the standard six-pack — when
+// they drift, this is the canonical source for the CLI surface.
+// =============================================================================
+
+/// (ordinal, tau) for a known framework name. Mirrors
+/// `core/theory_interop/coord.vr::known_ordinal` + `known_tau`. Unknown
+/// frameworks get (0, true) — the same fall-through the stdlib uses.
+fn msfs_lookup(framework_name: &str) -> (u32, bool) {
+    match framework_name {
+        "actic.raw"             => (0, false),
+        "lurie_htt"             => (3, true),
+        "schreiber_dcct"        => (4, true),
+        "connes_reconstruction" => (3, false),
+        "petz_classification"   => (2, false),
+        "arnold_catastrophe"    => (2, true),
+        "baez_dolan"            => (4, true),
+        "owl2_fs"               => (1, true),
+        _                       => (0, true),
+    }
+}
+
+/// Legacy entry — defaults to plain output.
+pub fn audit_coord() -> Result<()> {
+    audit_coord_with_format(AuditFormat::Plain)
+}
+
+/// Entry-point for `verum audit --coord [--format FORMAT]`.
+pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Computing MSFS coordinate (Framework, ν, τ) per theorem");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    // Re-use the framework collector so OC and coord audits read from one
+    // ground truth.
+    let mut by_framework: BTreeMap<Text, Vec<FrameworkUsage>> = BTreeMap::new();
+    let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        for item in &module.items {
+            let (kind_label, item_name, decl_attrs): (
+                &'static str,
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                ItemKind::Theorem(decl) => {
+                    ("theorem", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Lemma(decl) => {
+                    ("lemma", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Corollary(decl) => {
+                    ("corollary", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Axiom(decl) => {
+                    ("axiom", decl.name.name.clone(), &decl.attributes)
+                }
+                _ => continue,
+            };
+            collect_framework_markers_from(
+                &item.attributes,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_framework,
+                &mut malformed,
+            );
+            collect_framework_markers_from(
+                decl_attrs,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_framework,
+                &mut malformed,
+            );
+        }
+    }
+
+    match format {
+        AuditFormat::Plain => print_coord_report(
+            parsed_files,
+            skipped_files,
+            &by_framework,
+            &malformed,
+        ),
+        AuditFormat::Json => print_coord_report_json(
+            parsed_files,
+            skipped_files,
+            &by_framework,
+            &malformed,
+        ),
+    }
+    Ok(())
+}
+
+fn print_coord_report(
+    parsed_files: usize,
+    skipped_files: usize,
+    by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
+    malformed: &[(PathBuf, Text)],
+) {
+    println!();
+    println!("{}", "MSFS coordinate (Framework, ν, τ) per theorem".bold());
+    println!("{}", "─".repeat(50).dimmed());
+    println!(
+        "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
+        parsed_files, skipped_files
+    );
+    println!();
+
+    if by_framework.is_empty() {
+        println!("  {} no @framework(...) markers found.", "·".dimmed());
+        println!(
+            "  {} the corpus declares no Rich-foundation footprint;",
+            "·".dimmed()
+        );
+        println!("    every theorem is rigorous in the bare kernel.");
+        println!();
+        return;
+    }
+
+    let total_markers: usize = by_framework.values().map(|v| v.len()).sum();
+    println!(
+        "  Found {} theorem-level marker(s) across {} framework(s):",
+        total_markers.to_string().bold(),
+        by_framework.len().to_string().bold()
+    );
+    println!();
+
+    for (framework, uses) in by_framework {
+        let (ordinal, tau) = msfs_lookup(framework.as_str());
+        let tau_str = if tau { "τ=intensional" } else { "τ=extensional" };
+        println!(
+            "  {} {}  ν={}  {}  ({} marker{})",
+            "▸".magenta(),
+            framework.as_str().bold(),
+            ordinal,
+            tau_str.dimmed(),
+            uses.len(),
+            if uses.len() == 1 { "" } else { "s" }
+        );
+        for u in uses {
+            println!(
+                "    {} {} {}  —  {}  ({})",
+                "·".dimmed(),
+                u.item_kind,
+                u.item_name.as_str().cyan(),
+                u.citation.as_str(),
+                u.file.display()
+            );
+        }
+        println!();
+    }
+
+    if !malformed.is_empty() {
+        ui::warn(&format!(
+            "{} malformed @framework(...) marker(s) skipped from coord report.",
+            malformed.len()
+        ));
+        println!();
+    }
+}
+
+fn print_coord_report_json(
+    parsed_files: usize,
+    skipped_files: usize,
+    by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
+    malformed: &[(PathBuf, Text)],
+) {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
+    out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
+    out.push_str("  \"frameworks\": [\n");
+    let total_fw = by_framework.len();
+    for (i, (framework, uses)) in by_framework.iter().enumerate() {
+        let (ordinal, tau) = msfs_lookup(framework.as_str());
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"framework\": \"{}\",\n",
+            json_escape(framework.as_str())
+        ));
+        out.push_str(&format!("      \"ordinal\": {},\n", ordinal));
+        out.push_str(&format!("      \"tau\": {},\n", tau));
+        out.push_str("      \"usages\": [\n");
+        let total_u = uses.len();
+        for (j, u) in uses.iter().enumerate() {
+            out.push_str("        {\n");
+            out.push_str(&format!(
+                "          \"item_kind\": \"{}\",\n",
+                u.item_kind
+            ));
+            out.push_str(&format!(
+                "          \"item_name\": \"{}\",\n",
+                json_escape(u.item_name.as_str())
+            ));
+            out.push_str(&format!(
+                "          \"citation\": \"{}\",\n",
+                json_escape(u.citation.as_str())
+            ));
+            out.push_str(&format!(
+                "          \"file\": \"{}\"\n",
+                json_escape(&u.file.display().to_string())
+            ));
+            out.push_str(if j + 1 == total_u { "        }\n" } else { "        },\n" });
+        }
+        out.push_str("      ]\n");
+        out.push_str(if i + 1 == total_fw { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ],\n");
+    out.push_str("  \"malformed\": [\n");
+    for (i, (file, item_name)) in malformed.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"file\": \"{}\",\n",
+            json_escape(&file.display().to_string())
+        ));
+        out.push_str(&format!(
+            "      \"item_name\": \"{}\"\n",
+            json_escape(item_name.as_str())
+        ));
+        out.push_str(if i + 1 == malformed.len() { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ]\n");
+    out.push_str("}\n");
+    print!("{}", out);
+}

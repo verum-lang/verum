@@ -1,0 +1,172 @@
+// =============================================================================
+// core.theory_interop.coord — VUVA §10.2 obstruction verdict + §10.4 MSFS coord
+// =============================================================================
+//
+// Lightweight, stdlib-grade companion to core.theory_interop.core: turns the
+// numeric obstruction Obs(F) returned by Kan-extension translation into the
+// VUVA §10.2 verdict enum, and projects an Articulation to its MSFS
+// coordinate (framework, ν, τ) per §10.4.
+//
+// Kept deliberately small and free of category-theoretic dependencies so it
+// can be `mount`-ed by audit tooling and frontend integrations without
+// pulling in core.math.{kan_extension, infinity_topos}.
+// =============================================================================
+
+mount core.action.articulation;
+
+// -----------------------------------------------------------------------------
+// §10.2 — Obstruction verdict
+// -----------------------------------------------------------------------------
+
+public type TranslationVerdict is
+    Morita
+  | Strong
+  | Moderate
+  | Weak
+  | Untranslatable;
+
+/// Map an obstruction severity Obs(F) ∈ [0, 1] to its §10.2 verdict.
+///
+///   Obs == 0          → Morita-equivalence witness
+///   (0, 0.05]         → Strong
+///   (0.05, 0.20]      → Moderate
+///   (0.20, 0.50]      → Weak
+///   (0.50, 1]         → Untranslatable (reject)
+///
+/// Inputs outside [0, 1] clamp to the nearest valid bucket (defensive — a
+/// well-typed caller should already be inside the unit interval).
+public fn verdict_of(obstruction: Float) -> TranslationVerdict {
+    if obstruction <= 0.0 {
+        return Morita;
+    }
+    if obstruction <= 0.05 {
+        return Strong;
+    }
+    if obstruction <= 0.20 {
+        return Moderate;
+    }
+    if obstruction <= 0.50 {
+        return Weak;
+    }
+    Untranslatable
+}
+
+public fn verdict_as_text(v: TranslationVerdict) -> Text {
+    match v {
+        Morita         => "morita",
+        Strong         => "strong",
+        Moderate       => "moderate",
+        Weak           => "weak",
+        Untranslatable => "untranslatable",
+    }
+}
+
+/// True iff the verdict admits the translation (Morita / Strong / Moderate /
+/// Weak); Untranslatable is the only rejection bucket.
+public fn verdict_admits(v: TranslationVerdict) -> Bool {
+    match v {
+        Untranslatable => false,
+        _              => true,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §10.4 — MSFS coordinate
+// -----------------------------------------------------------------------------
+
+@derive(Clone)
+public type MsfsCoord is {
+    framework: Text,
+    ordinal:   Int,   // ν — Diakrisis depth-stratification rank
+    tau:       Bool,  // τ — intensional flag (true = intensional, false = extensional)
+};
+
+public fn msfs_coord(framework: Text, ordinal: Int, tau: Bool) -> MsfsCoord {
+    MsfsCoord {
+        framework: framework,
+        ordinal:   ordinal,
+        tau:       tau,
+    }
+}
+
+/// Lookup table for the VUVA standard six-pack (§6.2) + the neutral Actic
+/// articulation; user-defined frameworks fall through to (ordinal=0, τ=true)
+/// until a project-level `register_framework_coord` mechanism lands.
+fn known_ordinal(framework_name: Text) -> Int {
+    if framework_name.eq("actic.raw") {
+        return 0;
+    }
+    if framework_name.eq("lurie_htt") {
+        return 3;
+    }
+    if framework_name.eq("schreiber_dcct") {
+        return 4;
+    }
+    if framework_name.eq("connes_reconstruction") {
+        return 3;
+    }
+    if framework_name.eq("petz_classification") {
+        return 2;
+    }
+    if framework_name.eq("arnold_catastrophe") {
+        return 2;
+    }
+    if framework_name.eq("baez_dolan") {
+        return 4;
+    }
+    if framework_name.eq("owl2_fs") {
+        return 1;
+    }
+    0
+}
+
+fn known_tau(framework_name: Text) -> Bool {
+    if framework_name.eq("actic.raw") {
+        return false;
+    }
+    if framework_name.eq("petz_classification") {
+        return false;
+    }
+    if framework_name.eq("connes_reconstruction") {
+        return false;
+    }
+    true
+}
+
+/// MSFS coordinate of an articulation (VUVA §10.4):
+///   coord(α) = (α.framework, ν(α), τ(intensional(α)))
+public fn coord_of(alpha: Articulation) -> MsfsCoord {
+    MsfsCoord {
+        framework: alpha.framework.clone(),
+        ordinal:   known_ordinal(alpha.framework.clone()),
+        tau:       known_tau(alpha.framework.clone()),
+    }
+}
+
+public fn coord_as_text(c: MsfsCoord) -> Text {
+    let tau_str: Text = if c.tau { "τ=intensional" } else { "τ=extensional" };
+    c.framework
+      .clone()
+      .concat(", ν=")
+      .concat(int_to_text(c.ordinal))
+      .concat(", ")
+      .concat(tau_str)
+}
+
+fn int_to_text(n: Int) -> Text {
+    if n == 0 { return "0"; }
+    if n == 1 { return "1"; }
+    if n == 2 { return "2"; }
+    if n == 3 { return "3"; }
+    if n == 4 { return "4"; }
+    if n == 5 { return "5"; }
+    if n == 6 { return "6"; }
+    if n == 7 { return "7"; }
+    if n == 8 { return "8"; }
+    if n == 9 { return "9"; }
+    "n"
+}
+
+public fn coord_eq(a: MsfsCoord, b: MsfsCoord) -> Bool {
+    a.framework.eq(b.framework) && a.ordinal == b.ordinal && a.tau == b.tau
+}
