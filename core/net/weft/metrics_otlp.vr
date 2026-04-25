@@ -427,7 +427,7 @@ fn encode_number_data_point(value: Int) -> List<Byte> {
     dp
 }
 
-fn encode_histogram_metric(name: &Text, snap: &HistogramSnapshot) -> List<Byte> {
+fn encode_histogram_metric(name: &Text, snap: &OtlpHistogramSnapshot) -> List<Byte> {
     let mut m: List<Byte> = [];
     write_string(&mut m, 1, name);
     // Field 9: Histogram.
@@ -439,7 +439,7 @@ fn encode_histogram_metric(name: &Text, snap: &HistogramSnapshot) -> List<Byte> 
     m
 }
 
-fn encode_histogram_data_point(snap: &HistogramSnapshot) -> List<Byte> {
+fn encode_histogram_data_point(snap: &OtlpHistogramSnapshot) -> List<Byte> {
     let mut dp: List<Byte> = [];
     // HistogramDataPoint:
     //   3: time_unix_nano (fixed64)
@@ -495,10 +495,10 @@ fn encode_histogram_data_point(snap: &HistogramSnapshot) -> List<Byte> {
 }
 
 // =============================================================================
-// HistogramSnapshot — read-only view of a Histogram for export
+// OtlpHistogramSnapshot — read-only view of a Histogram for export
 // =============================================================================
 
-public type HistogramSnapshot is {
+public type OtlpHistogramSnapshot is {
     bounds_ms:     List<Int>,
     bucket_counts: List<Int>,
     total:         Int,

@@ -50,7 +50,7 @@ public type QpackDecodeError is
     | HuffmanError
     | IntegerError;
 
-public type HeaderField is {
+public type QpackHeaderField is {
     name:  Text,
     value: Text,
 };
@@ -61,7 +61,7 @@ public type HeaderField is {
 
 /// Decode a QPACK field section. Returns the decoded headers in
 /// emission order.
-public fn decode_field_section(buf: &[Byte]) -> Result<List<HeaderField>, QpackDecodeError> {
+public fn decode_field_section(buf: &[Byte]) -> Result<List<QpackHeaderField>, QpackDecodeError> {
     // Required Insert Count (8-bit prefix, varint).
     let (required_insert_count, p1) = int_decode(buf, 0, 8)
         .map_err(|_| QpackDecodeError.IntegerError)?;
@@ -78,7 +78,7 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<HeaderField>, QpackD
         return Err(QpackDecodeError.DynamicTableNotSupported);
     }
 
-    let mut headers: List<HeaderField> = [];
+    let mut headers: List<QpackHeaderField> = [];
     let mut cur: Int = p2;
     while cur < buf.len() {
         let b0 = buf[cur];
@@ -97,7 +97,7 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<HeaderField>, QpackD
                 Some(e) => e,
                 None => return Err(QpackDecodeError.InvalidIndex(index)),
             };
-            headers.push(HeaderField { name: hit.name, value: hit.value });
+            headers.push(QpackHeaderField { name: hit.name, value: hit.value });
             cur = next;
         } else if (b0 & 0x40_u8) != 0_u8 {
             // Literal Field Line with Name Reference — 01NTxxxx
@@ -112,13 +112,13 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<HeaderField>, QpackD
                 None => return Err(QpackDecodeError.InvalidIndex(name_index)),
             };
             let (value, next) = read_string(buf, p1)?;
-            headers.push(HeaderField { name: entry.name, value: value });
+            headers.push(QpackHeaderField { name: entry.name, value: value });
             cur = next;
         } else if (b0 & 0x20_u8) != 0_u8 {
             // Literal Field Line with Literal Name — 001Nxxxx
             let (name, p1) = read_name_literal(buf, cur)?;
             let (value, next) = read_string(buf, p1)?;
-            headers.push(HeaderField { name: name, value: value });
+            headers.push(QpackHeaderField { name: name, value: value });
             cur = next;
         } else if (b0 & 0x10_u8) != 0_u8 {
             // Indexed Field Line with Post-Base Index — 0001xxxx

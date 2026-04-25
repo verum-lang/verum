@@ -17,7 +17,7 @@
 // =============================================================================
 //
 // This module provides the formatting infrastructure for Verum:
-// - Extended Formatter with width, precision, alignment options
+// - Extended TextFormatter with width, precision, alignment options
 // - Write protocol for output targets
 // - print/println/eprint/eprintln functions
 // - Debug && Display helper implementations
@@ -235,7 +235,7 @@ implement WriteError {
 }
 
 implement Debug for WriteError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_debug(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         match self.kind {
             Io => f.write_str("WriteError.Io"),
             BufferFull => f.write_str("WriteError.BufferFull"),
@@ -376,30 +376,30 @@ implement Default for FormatSpec {
 }
 
 // =============================================================================
-// Extended Formatter
+// Extended TextFormatter
 // =============================================================================
 
 // Extended formatter with formatting options.
 // Used by format strings && Debug/Display implementations.
-public type Formatter is {
+public type TextFormatter is {
     // Output buffer
     buffer: &mut Text,
     // Current format specification
     spec: FormatSpec,
 };
 
-implement Formatter {
+implement TextFormatter {
     // Create a new formatter writing to a buffer.
-    public fn new(buffer: &mut Text) -> Formatter {
-        Formatter {
+    public fn new(buffer: &mut Text) -> TextFormatter {
+        TextFormatter {
             buffer: buffer,
             spec: FormatSpec.new(),
         }
     }
 
     // Create formatter with spec.
-    public fn with_spec(buffer: &mut Text, spec: FormatSpec) -> Formatter {
-        Formatter {
+    public fn with_spec(buffer: &mut Text, spec: FormatSpec) -> TextFormatter {
+        TextFormatter {
             buffer: buffer,
             spec: spec,
         }
@@ -718,7 +718,7 @@ implement Formatter {
 
 // Helper for formatting structs.
 public type DebugStruct is {
-    formatter: &mut Formatter,
+    formatter: &mut TextFormatter,
     name: Text,
     fields: List<(Text, Text)>,
 };
@@ -727,7 +727,7 @@ implement DebugStruct {
     // Add a field.
     public fn field<T: Debug>(&mut self, name: &Text, value: &T) -> &mut DebugStruct {
         let mut buf = Text.new();
-        let mut f = Formatter.new(&mut buf);
+        let mut f = TextFormatter.new(&mut buf);
         value.fmt_debug(&mut f);
         self.fields.push((name.clone(), buf));
         self
@@ -753,7 +753,7 @@ implement DebugStruct {
 
 // Helper for formatting tuples.
 public type DebugTuple is {
-    formatter: &mut Formatter,
+    formatter: &mut TextFormatter,
     name: Text,
     fields: List<Text>,
 };
@@ -762,7 +762,7 @@ implement DebugTuple {
     // Add a field.
     public fn field<T: Debug>(&mut self, value: &T) -> &mut DebugTuple {
         let mut buf = Text.new();
-        let mut f = Formatter.new(&mut buf);
+        let mut f = TextFormatter.new(&mut buf);
         value.fmt_debug(&mut f);
         self.fields.push(buf);
         self
@@ -786,7 +786,7 @@ implement DebugTuple {
 
 // Helper for formatting lists.
 public type DebugList is {
-    formatter: &mut Formatter,
+    formatter: &mut TextFormatter,
     items: List<Text>,
 };
 
@@ -794,7 +794,7 @@ implement DebugList {
     // Add an item.
     public fn entry<T: Debug>(&mut self, value: &T) -> &mut DebugList {
         let mut buf = Text.new();
-        let mut f = Formatter.new(&mut buf);
+        let mut f = TextFormatter.new(&mut buf);
         value.fmt_debug(&mut f);
         self.items.push(buf);
         self
@@ -827,7 +827,7 @@ implement DebugList {
 
 // Helper for formatting maps.
 public type DebugMap is {
-    formatter: &mut Formatter,
+    formatter: &mut TextFormatter,
     entries: List<(Text, Text)>,
 };
 
@@ -835,11 +835,11 @@ implement DebugMap {
     // Add an entry.
     public fn entry<K: Debug, V: Debug>(&mut self, key: &K, value: &V) -> &mut DebugMap {
         let mut key_buf = Text.new();
-        let mut key_f = Formatter.new(&mut key_buf);
+        let mut key_f = TextFormatter.new(&mut key_buf);
         key.fmt_debug(&mut key_f);
 
         let mut val_buf = Text.new();
-        let mut val_f = Formatter.new(&mut val_buf);
+        let mut val_f = TextFormatter.new(&mut val_buf);
         value.fmt_debug(&mut val_f);
 
         self.entries.push((key_buf, val_buf));
@@ -906,7 +906,7 @@ public fn eprintln(s: &Text) {
 // Format a Debug value to Text.
 public fn format_debug<T: Debug>(value: &T) -> Text {
     let mut buf = Text.new();
-    let mut f = Formatter.new(&mut buf);
+    let mut f = TextFormatter.new(&mut buf);
     value.fmt_debug(&mut f);
     buf
 }
@@ -914,7 +914,7 @@ public fn format_debug<T: Debug>(value: &T) -> Text {
 // Format a Display value to Text.
 public fn format_display<T: Display>(value: &T) -> Text {
     let mut buf = Text.new();
-    let mut f = Formatter.new(&mut buf);
+    let mut f = TextFormatter.new(&mut buf);
     value.fmt(&mut f);
     buf
 }
@@ -939,20 +939,20 @@ public fn dbg<T: Debug>(value: T) -> T {
 // Do NOT duplicate them here.
 
 implement<T: Debug> Debug for &T {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_debug(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         (*self).fmt_debug(f)
     }
 }
 
 implement<T: Debug> Debug for &mut T {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_debug(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         (**self).fmt_debug(f)
     }
 }
 
 // Tuple implementations
 implement<A: Debug> Debug for (A,) {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_debug(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         f.write_char('(')?;
         self.0.fmt_debug(f)?;
         f.write_str(",)")
@@ -960,7 +960,7 @@ implement<A: Debug> Debug for (A,) {
 }
 
 implement<A: Debug, B: Debug> Debug for (A, B) {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_debug(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         f.write_char('(')?;
         self.0.fmt_debug(f)?;
         f.write_str(", ")?;
@@ -970,7 +970,7 @@ implement<A: Debug, B: Debug> Debug for (A, B) {
 }
 
 implement<A: Debug, B: Debug, C: Debug> Debug for (A, B, C) {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_debug(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         f.write_char('(')?;
         self.0.fmt_debug(f)?;
         f.write_str(", ")?;
@@ -983,7 +983,7 @@ implement<A: Debug, B: Debug, C: Debug> Debug for (A, B, C) {
 
 // Slice/array debug
 implement<T: Debug> Debug for [T] {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_debug(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         f.write_char('[')?;
         for (i, item) in self.iter().enumerate() {
             if i > 0 {
@@ -1003,69 +1003,69 @@ implement<T: Debug> Debug for [T] {
 ///
 /// Types implementing this protocol support `{:x}` formatting.
 public type LowerHex is protocol {
-    fn fmt_lower_hex(&self, f: &mut Formatter) -> Result<(), FormatError>;
+    fn fmt_lower_hex(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
 };
 
 /// Format a value as uppercase hexadecimal (e.g., "FF", "DEADBEEF").
 ///
 /// Types implementing this protocol support `{:X}` formatting.
 public type UpperHex is protocol {
-    fn fmt_upper_hex(&self, f: &mut Formatter) -> Result<(), FormatError>;
+    fn fmt_upper_hex(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
 };
 
 /// Format a value as binary (e.g., "1010", "11111111").
 ///
 /// Types implementing this protocol support `{:b}` formatting.
 public type Binary is protocol {
-    fn fmt_binary(&self, f: &mut Formatter) -> Result<(), FormatError>;
+    fn fmt_binary(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
 };
 
 /// Format a value as octal (e.g., "77", "377").
 ///
 /// Types implementing this protocol support `{:o}` formatting.
 public type Octal is protocol {
-    fn fmt_octal(&self, f: &mut Formatter) -> Result<(), FormatError>;
+    fn fmt_octal(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
 };
 
 /// Format a value in lowercase exponential notation (e.g., "1.5e2").
 ///
 /// Types implementing this protocol support `{:e}` formatting.
 public type LowerExp is protocol {
-    fn fmt_lower_exp(&self, f: &mut Formatter) -> Result<(), FormatError>;
+    fn fmt_lower_exp(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
 };
 
 /// Format a value in uppercase exponential notation (e.g., "1.5E2").
 ///
 /// Types implementing this protocol support `{:E}` formatting.
 public type UpperExp is protocol {
-    fn fmt_upper_exp(&self, f: &mut Formatter) -> Result<(), FormatError>;
+    fn fmt_upper_exp(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
 };
 
 // =============================================================================
 // LowerHex / UpperHex / Binary / Octal for Int
 // =============================================================================
-// These use the Formatter's write_int_base method for the actual conversion.
+// These use the TextFormatter's write_int_base method for the actual conversion.
 
 implement LowerHex for Int {
-    fn fmt_lower_hex(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_lower_hex(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         f.write_int_base(*self, 16, false)
     }
 }
 
 implement UpperHex for Int {
-    fn fmt_upper_hex(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_upper_hex(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         f.write_int_base(*self, 16, true)
     }
 }
 
 implement Binary for Int {
-    fn fmt_binary(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_binary(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         f.write_int_base(*self, 2, false)
     }
 }
 
 implement Octal for Int {
-    fn fmt_octal(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_octal(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         f.write_int_base(*self, 8, false)
     }
 }
@@ -1075,7 +1075,7 @@ implement Octal for Int {
 // =============================================================================
 
 implement LowerExp for Float {
-    fn fmt_lower_exp(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_lower_exp(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         let precision = f.precision().unwrap_or(6);
         let s = float_to_exp(*self, precision, false);
         f.write_str(&s)
@@ -1083,7 +1083,7 @@ implement LowerExp for Float {
 }
 
 implement UpperExp for Float {
-    fn fmt_upper_exp(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_upper_exp(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
         let precision = f.precision().unwrap_or(6);
         let s = float_to_exp(*self, precision, true);
         f.write_str(&s)

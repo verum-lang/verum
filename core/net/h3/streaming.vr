@@ -51,7 +51,7 @@ mount core.collections.list.{List};
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.net.h3.error.{H3Error};
-mount core.net.h3.qpack.decoder.{HeaderField};
+mount core.net.h3.qpack.decoder.{QpackHeaderField};
 
 // =============================================================================
 // H3DataSink — server-provided writer the user emits chunks into
@@ -238,11 +238,11 @@ public type H3StreamWriter is protocol {
 
 public type H3StreamingResponse is {
     status:    UInt16,
-    headers:   List<HeaderField>,
+    headers:   List<QpackHeaderField>,
     /// User-supplied chunk producer.
     writer:    Heap<dyn H3StreamWriter>,
     /// Optional trailing-header section. Empty for the common case.
-    trailers:  List<HeaderField>,
+    trailers:  List<QpackHeaderField>,
 };
 
 implement H3StreamingResponse {
@@ -273,17 +273,17 @@ implement H3StreamingResponse {
     public fn with_header(mut self, name: Text, value: Text)
         -> H3StreamingResponse
     {
-        self.headers.push(HeaderField { name: name, value: value });
+        self.headers.push(QpackHeaderField { name: name, value: value });
         self
     }
 
     /// Materialise the pseudo-headers + headers list for QPACK
     /// emission. Same shape as `H3Response.to_field_list` so the
     /// connection encodes identically.
-    public fn to_field_list(&self) -> List<HeaderField> {
-        let mut out: List<HeaderField> = [];
+    public fn to_field_list(&self) -> List<QpackHeaderField> {
+        let mut out: List<QpackHeaderField> = [];
         let s = format_status(self.status);
-        out.push(HeaderField { name: f":status", value: s });
+        out.push(QpackHeaderField { name: f":status", value: s });
         let mut i: Int = 0;
         while i < self.headers.len() {
             out.push(self.headers[i].clone());

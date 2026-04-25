@@ -15,7 +15,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 
-public type FrameHeader is {
+public type ReplicationFrameHeader is {
     /// Page number this frame writes.
     page_no: Int,
     /// `db_size_after` — non-zero for commit frames; carries the
@@ -36,12 +36,12 @@ public type WalFrameRecord is {
     epoch: Int64,
     /// Monotonic frame index within this epoch.
     seq: Int64,
-    header: FrameHeader,
+    header: ReplicationFrameHeader,
     /// Page payload bytes (page_size bytes).
     payload: List<Byte>,
 }
 
-public fn frame_record(epoch: Int64, seq: Int64, header: FrameHeader, payload: List<Byte>) -> WalFrameRecord {
+public fn frame_record(epoch: Int64, seq: Int64, header: ReplicationFrameHeader, payload: List<Byte>) -> WalFrameRecord {
     WalFrameRecord {
         epoch: epoch,
         seq: seq,

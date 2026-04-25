@@ -32,7 +32,7 @@ mount core.database.sqlite.native.dbstat.index_info.{
     origin_text,
 };
 mount core.database.sqlite.native.dbstat.foreign_key_info.{
-    FkAction, FaNoAction, FaRestrict, FaCascade,
+    DbstatFkAction, FaNoAction, FaRestrict, FaCascade,
     FkMatch, FmNone,
     ForeignKeyRow, foreign_key_row,
     ForeignKeyListSet, fk_list_set,

@@ -45,7 +45,7 @@ public module session;
 
 // Re-exports
 public mount .static_table.{StaticEntry, STATIC_TABLE_SIZE};
-public mount .decoder.{HeaderField, QpackDecodeError, decode_field_section};
+public mount .decoder.{QpackHeaderField, QpackDecodeError, decode_field_section};
 public mount .encoder.{encode_field_section};
 public mount .huffman.{HuffError};
 

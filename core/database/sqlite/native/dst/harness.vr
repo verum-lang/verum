@@ -31,7 +31,7 @@ mount core.database.sqlite.native.dst.op.{
     DbOp, OpStream, OpCommit,
 };
 mount core.database.sqlite.native.dst.generator.{
-    Generator, generator_new, default_mix,
+    DstGenerator, generator_new, default_mix,
 };
 mount core.database.sqlite.native.dst.fault.{
     Fault, FaultPowerLoss, ScheduledFault, FaultSchedule,

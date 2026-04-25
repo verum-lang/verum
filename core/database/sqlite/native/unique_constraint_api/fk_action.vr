@@ -4,7 +4,7 @@ module core.database.sqlite.native.unique_constraint_api.fk_action;
 
 mount base.{Bool, Text};
 
-public type FkAction is
+public type UniqueFkAction is
     | FaNoAction       // default — reject the change at commit time
     | FaRestrict       // reject immediately (before commit)
     | FaCascade        // propagate the change
@@ -12,7 +12,7 @@ public type FkAction is
     | FaSetDefault     // set child column(s) to column DEFAULT
     ;
 
-public fn action_name(a: &FkAction) -> Text {
+public fn action_name(a: &UniqueFkAction) -> Text {
     match a {
         FaNoAction    => "NO ACTION".clone(),
         FaRestrict    => "RESTRICT".clone(),
@@ -22,13 +22,13 @@ public fn action_name(a: &FkAction) -> Text {
     }
 }
 
-public fn default_action() -> FkAction { FaNoAction }
+public fn default_action() -> UniqueFkAction { FaNoAction }
 
-public fn allows_deferred_check(a: &FkAction) -> Bool {
+public fn allows_deferred_check(a: &UniqueFkAction) -> Bool {
     match a { FaNoAction => true, _ => false }
 }
 
-public fn propagates_change(a: &FkAction) -> Bool {
+public fn propagates_change(a: &UniqueFkAction) -> Bool {
     match a {
         FaCascade    => true,
         FaSetNull    => true,
@@ -37,7 +37,7 @@ public fn propagates_change(a: &FkAction) -> Bool {
     }
 }
 
-public fn rejects_change(a: &FkAction) -> Bool {
+public fn rejects_change(a: &UniqueFkAction) -> Bool {
     match a {
         FaNoAction => true,
         FaRestrict => true,

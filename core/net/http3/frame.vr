@@ -55,7 +55,7 @@ public const H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY: UInt64 = 0x01;
 public const H3_SETTINGS_MAX_FIELD_SECTION_SIZE: UInt64   = 0x06;
 public const H3_SETTINGS_QPACK_BLOCKED_STREAMS: UInt64    = 0x07;
 
-public type H3Frame is
+public type Http3Frame is
     | DataFrame { stream_id: UInt64, data: List<Byte> }
     | HeadersFrame { stream_id: UInt64, encoded_headers: List<Byte> }
     | SettingsFrame { params: List<(UInt64, UInt64)> }

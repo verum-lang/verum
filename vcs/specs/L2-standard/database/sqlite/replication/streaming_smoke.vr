@@ -18,7 +18,7 @@ mount core.database.sqlite.native.replication.role.{
     PromotionResult, PrAllowed, PrRejected,
 };
 mount core.database.sqlite.native.replication.frame.{
-    FrameHeader, WalFrameRecord, FrameBatch,
+    ReplicationFrameHeader, WalFrameRecord, FrameBatch,
     frame_record, frame_position, batch_empty,
 };
 mount core.database.sqlite.native.replication.stream.{
@@ -66,8 +66,8 @@ fn test_role_promotion_paths() {
 // Frame + position
 // -----------------------------------------------------------------------------
 
-fn make_header() -> FrameHeader {
-    FrameHeader {
+fn make_header() -> ReplicationFrameHeader {
+    ReplicationFrameHeader {
         page_no: 7,
         db_size_after: 1024,
         salt1: 1,

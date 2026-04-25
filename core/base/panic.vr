@@ -334,7 +334,7 @@ public fn debug_print(msg: &Text) {
 public fn dbg<T: Debug>(value: T) -> T {
     let mut buffer = Text.new();
     {
-        let mut formatter = Formatter.new(&mut buffer);
+        let mut formatter = TextFormatter.new(&mut buffer);
         let _ = value.fmt_debug(&mut formatter);
     }
     debug_print(&buffer);

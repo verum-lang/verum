@@ -13,7 +13,7 @@
 // =============================================================================
 
 mount core.text.format.{
-    Formatter, FormatSpec,
+    TextFormatter, FormatSpec,
     LowerHex, UpperHex, Binary, Octal, LowerExp, UpperExp,
     format_hex, format_binary, format_octal,
     format_lower_exp, format_upper_exp,
@@ -28,7 +28,7 @@ mount core.base.protocols.{FormatError};
 @test
 fn test_lower_hex_zero() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 0;
     let result = val.fmt_lower_hex(&mut fmt);
     assert(result is Ok);
@@ -38,7 +38,7 @@ fn test_lower_hex_zero() {
 @test
 fn test_lower_hex_ten() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 10;
     let result = val.fmt_lower_hex(&mut fmt);
     assert(result is Ok);
@@ -48,7 +48,7 @@ fn test_lower_hex_ten() {
 @test
 fn test_lower_hex_255() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 255;
     let result = val.fmt_lower_hex(&mut fmt);
     assert(result is Ok);
@@ -58,7 +58,7 @@ fn test_lower_hex_255() {
 @test
 fn test_lower_hex_256() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 256;
     let result = val.fmt_lower_hex(&mut fmt);
     assert(result is Ok);
@@ -68,7 +68,7 @@ fn test_lower_hex_256() {
 @test
 fn test_lower_hex_one() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 1;
     let result = val.fmt_lower_hex(&mut fmt);
     assert(result is Ok);
@@ -78,7 +78,7 @@ fn test_lower_hex_one() {
 @test
 fn test_lower_hex_sixteen() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 16;
     let result = val.fmt_lower_hex(&mut fmt);
     assert(result is Ok);
@@ -92,7 +92,7 @@ fn test_lower_hex_sixteen() {
 @test
 fn test_upper_hex_zero() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 0;
     let result = val.fmt_upper_hex(&mut fmt);
     assert(result is Ok);
@@ -102,7 +102,7 @@ fn test_upper_hex_zero() {
 @test
 fn test_upper_hex_255() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 255;
     let result = val.fmt_upper_hex(&mut fmt);
     assert(result is Ok);
@@ -112,7 +112,7 @@ fn test_upper_hex_255() {
 @test
 fn test_upper_hex_171() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 171;  // 0xAB
     let result = val.fmt_upper_hex(&mut fmt);
     assert(result is Ok);
@@ -122,7 +122,7 @@ fn test_upper_hex_171() {
 @test
 fn test_upper_hex_large() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 4096; // 0x1000
     let result = val.fmt_upper_hex(&mut fmt);
     assert(result is Ok);
@@ -136,7 +136,7 @@ fn test_upper_hex_large() {
 @test
 fn test_binary_zero() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 0;
     let result = val.fmt_binary(&mut fmt);
     assert(result is Ok);
@@ -146,7 +146,7 @@ fn test_binary_zero() {
 @test
 fn test_binary_one() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 1;
     let result = val.fmt_binary(&mut fmt);
     assert(result is Ok);
@@ -156,7 +156,7 @@ fn test_binary_one() {
 @test
 fn test_binary_ten() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 10;
     let result = val.fmt_binary(&mut fmt);
     assert(result is Ok);
@@ -166,7 +166,7 @@ fn test_binary_ten() {
 @test
 fn test_binary_255() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 255;
     let result = val.fmt_binary(&mut fmt);
     assert(result is Ok);
@@ -176,7 +176,7 @@ fn test_binary_255() {
 @test
 fn test_binary_power_of_two() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 8;
     let result = val.fmt_binary(&mut fmt);
     assert(result is Ok);
@@ -186,7 +186,7 @@ fn test_binary_power_of_two() {
 @test
 fn test_binary_two() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 2;
     let result = val.fmt_binary(&mut fmt);
     assert(result is Ok);
@@ -200,7 +200,7 @@ fn test_binary_two() {
 @test
 fn test_octal_zero() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 0;
     let result = val.fmt_octal(&mut fmt);
     assert(result is Ok);
@@ -210,7 +210,7 @@ fn test_octal_zero() {
 @test
 fn test_octal_seven() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 7;
     let result = val.fmt_octal(&mut fmt);
     assert(result is Ok);
@@ -220,7 +220,7 @@ fn test_octal_seven() {
 @test
 fn test_octal_eight() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 8;
     let result = val.fmt_octal(&mut fmt);
     assert(result is Ok);
@@ -230,7 +230,7 @@ fn test_octal_eight() {
 @test
 fn test_octal_255() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 255;
     let result = val.fmt_octal(&mut fmt);
     assert(result is Ok);
@@ -240,7 +240,7 @@ fn test_octal_255() {
 @test
 fn test_octal_64() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 64;
     let result = val.fmt_octal(&mut fmt);
     assert(result is Ok);
@@ -316,7 +316,7 @@ fn test_upper_exp_protocol_exists() {
 @test
 fn test_hex_negative() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = -1;
     let result = val.fmt_lower_hex(&mut fmt);
     assert(result is Ok);
@@ -326,7 +326,7 @@ fn test_hex_negative() {
 @test
 fn test_binary_large() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 1023;
     let result = val.fmt_binary(&mut fmt);
     assert(result is Ok);
@@ -336,7 +336,7 @@ fn test_binary_large() {
 @test
 fn test_octal_large() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Int = 511;
     let result = val.fmt_octal(&mut fmt);
     assert(result is Ok);
@@ -348,11 +348,11 @@ fn test_hex_and_binary_consistency() {
     // 15 in hex is "f", in binary is "1111"
     let val: Int = 15;
     let mut hex_buf = "";
-    let mut hex_fmt = Formatter.new(&mut hex_buf);
+    let mut hex_fmt = TextFormatter.new(&mut hex_buf);
     let _ = val.fmt_lower_hex(&mut hex_fmt);
 
     let mut bin_buf = "";
-    let mut bin_fmt = Formatter.new(&mut bin_buf);
+    let mut bin_fmt = TextFormatter.new(&mut bin_buf);
     let _ = val.fmt_binary(&mut bin_fmt);
 
     assert_eq(hex_buf, "f");
@@ -366,7 +366,7 @@ fn test_hex_and_binary_consistency() {
 @test
 fn test_lower_exp_one() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Float = 1.0;
     let result = val.fmt_lower_exp(&mut fmt);
     assert(result is Ok);
@@ -376,7 +376,7 @@ fn test_lower_exp_one() {
 @test
 fn test_lower_exp_large() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Float = 1500.0;
     let result = val.fmt_lower_exp(&mut fmt);
     assert(result is Ok);
@@ -387,7 +387,7 @@ fn test_lower_exp_large() {
 @test
 fn test_lower_exp_small() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Float = 0.005;
     let result = val.fmt_lower_exp(&mut fmt);
     assert(result is Ok);
@@ -398,7 +398,7 @@ fn test_lower_exp_small() {
 @test
 fn test_lower_exp_negative() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Float = -42.5;
     let result = val.fmt_lower_exp(&mut fmt);
     assert(result is Ok);
@@ -409,7 +409,7 @@ fn test_lower_exp_negative() {
 @test
 fn test_lower_exp_zero() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Float = 0.0;
     let result = val.fmt_lower_exp(&mut fmt);
     assert(result is Ok);
@@ -424,7 +424,7 @@ fn test_lower_exp_zero() {
 @test
 fn test_upper_exp_one() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Float = 1.0;
     let result = val.fmt_upper_exp(&mut fmt);
     assert(result is Ok);
@@ -434,7 +434,7 @@ fn test_upper_exp_one() {
 @test
 fn test_upper_exp_large() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Float = 2500.0;
     let result = val.fmt_upper_exp(&mut fmt);
     assert(result is Ok);
@@ -445,7 +445,7 @@ fn test_upper_exp_large() {
 @test
 fn test_upper_exp_negative() {
     let mut buf = "";
-    let mut fmt = Formatter.new(&mut buf);
+    let mut fmt = TextFormatter.new(&mut buf);
     let val: Float = -0.001;
     let result = val.fmt_upper_exp(&mut fmt);
     assert(result is Ok);

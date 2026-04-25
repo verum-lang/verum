@@ -33,10 +33,10 @@ mount core.collections.List;
 mount core.net.h3.qpack.huffman as huff;
 mount core.net.h3.qpack.integer.{encode as int_encode};
 mount core.net.h3.qpack.static_table as stat;
-mount core.net.h3.qpack.decoder.{HeaderField};
+mount core.net.h3.qpack.decoder.{QpackHeaderField};
 
 /// Encode a field section into a fresh byte vector.
-public fn encode_field_section(headers: &List<HeaderField>) -> List<Byte> {
+public fn encode_field_section(headers: &List<QpackHeaderField>) -> List<Byte> {
     let mut out: List<Byte> = [];
 
     // Required Insert Count = 0 (§4.5.1 — `Encoded Required Insert Count = 0`).
@@ -54,7 +54,7 @@ public fn encode_field_section(headers: &List<HeaderField>) -> List<Byte> {
     out
 }
 
-fn emit_header(h: &HeaderField, out: &mut List<Byte>) {
+fn emit_header(h: &QpackHeaderField, out: &mut List<Byte>) {
     // Best case — exact (name, value) in the static table.
     match stat.find(&h.name, &h.value) {
         Some(idx) => {
