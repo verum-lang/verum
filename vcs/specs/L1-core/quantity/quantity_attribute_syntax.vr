@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: quantity, qtt, atkey, linearity, vuva, phase-3, c5
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §7.6 Phase 3 C5 V1 — Atkey Quantitative Type Theory annotations.
+//
+// Smoke test: type-checks every legal `@quantity(...)` shape on
+// function parameters. The actual linearity-tracking pass that
+// raises E_LINEAR_DOUBLE_USE / E_LINEAR_NEVER_USED / E_ERASED_AT_RUNTIME
+// is V2 work (verum_types-level usage tracking); V1 ships the surface
+// declaration discipline so user code can opt in without yet being
+// enforced.
+
+// q = 1 (linear) on file-handle-shaped argument.
+public fn consume_file(@quantity(1) handle: Int) -> Int { handle }
+
+// q = 0 (erased / compile-time-only) — phantom width parameter for
+// statically-sized data.
+public fn fixed_width(@quantity(0) width: Int, value: Int) -> Int { value }
+
+// q = ω (unrestricted) — explicit annotation, identical to no
+// annotation at all (the default).
+public fn read_freely(@quantity(omega) x: Int) -> Int { x + x }
+
+// Default (no annotation) — currently still ω. Existing code stays
+// unchanged.
+public fn untouched(x: Int) -> Int { x }
+
+// Mixed — a function with one of each quantity. Type-checks today;
+// V2 will validate the linearity discipline of `linear`'s body.
+public fn mixed(@quantity(0) phantom: Int, @quantity(1) one: Int, @quantity(omega) free: Int) -> Int { one + free }
+
+fn main() {
+    let _ = consume_file(42);
+    let _ = fixed_width(8, 100);
+    let _ = read_freely(7);
+    let _ = untouched(3);
+    let _ = mixed(8, 1, 2);
+    print("quantity attribute syntax ok");
+}

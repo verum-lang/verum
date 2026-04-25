@@ -181,6 +181,8 @@ pub use typed::{
     Owl2Semantics,
     Owl2SubClassOfAttr,
     ParallelAttr,
+    Quantity,
+    QuantityAttr,
     PerformanceContract,
     PgoAttr,
     PrefetchAccess,

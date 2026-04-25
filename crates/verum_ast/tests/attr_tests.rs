@@ -1067,3 +1067,107 @@ fn owl2_attrs_reject_wrong_attribute_name() {
     assert!(matches!(Owl2EquivalentClassAttr::from_attribute(&raw), Maybe::None));
     assert!(matches!(Owl2HasKeyAttr::from_attribute(&raw),        Maybe::None));
 }
+
+// ============================================================================
+// QUANTITATIVE TYPE THEORY (Atkey QTT) — VUVA §7.6 Phase 3 C5 V1
+// ============================================================================
+//
+// Round-trip tests for QuantityAttr. The attribute accepts five
+// equivalent surface shapes for each of the three quantities (`0`,
+// `1`, `omega`), all canonicalised to the `Quantity` enum. Rejection
+// paths are covered explicitly — silent acceptance of a typo would
+// let a faulty linearity declaration compile.
+
+fn build_int_quantity_attr(n: i128) -> Attribute {
+    let span = Span::default();
+    let lit = Literal::new(LiteralKind::Int(verum_ast::literal::IntLit::new(n)), span);
+    let mut args: List<Expr> = List::new();
+    args.push(Expr::literal(lit));
+    Attribute::new(Text::from("quantity"), Maybe::Some(args), span)
+}
+
+fn build_ident_quantity_attr(name: &str) -> Attribute {
+    let span = Span::default();
+    let mut args: List<Expr> = List::new();
+    args.push(Expr::ident(Ident::new(Text::from(name), span)));
+    Attribute::new(Text::from("quantity"), Maybe::Some(args), span)
+}
+
+#[test]
+fn quantity_attr_accepts_zero_via_int_literal() {
+    let raw = build_int_quantity_attr(0);
+    match QuantityAttr::from_attribute(&raw) {
+        Maybe::Some(q) => assert_eq!(q.quantity, Quantity::Zero),
+        Maybe::None    => panic!("@quantity(0) must parse"),
+    }
+}
+
+#[test]
+fn quantity_attr_accepts_one_via_int_literal() {
+    let raw = build_int_quantity_attr(1);
+    match QuantityAttr::from_attribute(&raw) {
+        Maybe::Some(q) => assert_eq!(q.quantity, Quantity::One),
+        Maybe::None    => panic!("@quantity(1) must parse"),
+    }
+}
+
+#[test]
+fn quantity_attr_accepts_omega_via_path() {
+    let raw = build_ident_quantity_attr("omega");
+    match QuantityAttr::from_attribute(&raw) {
+        Maybe::Some(q) => assert_eq!(q.quantity, Quantity::Many),
+        Maybe::None    => panic!("@quantity(omega) must parse"),
+    }
+}
+
+#[test]
+fn quantity_attr_accepts_keyword_aliases() {
+    for &name in &["zero", "linear", "many", "unrestricted", "erased"] {
+        let raw = build_ident_quantity_attr(name);
+        let parsed = QuantityAttr::from_attribute(&raw);
+        assert!(matches!(parsed, Maybe::Some(_)), "alias '{name}' must parse");
+    }
+}
+
+#[test]
+fn quantity_attr_rejects_invalid_quantity() {
+    let raw = build_int_quantity_attr(2);
+    assert!(matches!(QuantityAttr::from_attribute(&raw), Maybe::None));
+
+    let bad_name = build_ident_quantity_attr("affine");
+    assert!(matches!(QuantityAttr::from_attribute(&bad_name), Maybe::None));
+}
+
+#[test]
+fn quantity_attr_rejects_wrong_attribute_name() {
+    let raw = Attribute::new(Text::from("inline"), Maybe::None, Span::default());
+    assert!(matches!(QuantityAttr::from_attribute(&raw), Maybe::None));
+}
+
+#[test]
+fn quantity_attr_rejects_missing_args() {
+    let raw = Attribute::new(Text::from("quantity"), Maybe::None, Span::default());
+    assert!(matches!(QuantityAttr::from_attribute(&raw), Maybe::None));
+}
+
+#[test]
+fn quantity_predicates_partition_correctly() {
+    assert!(Quantity::Zero.is_finite() && Quantity::Zero.is_erased());
+    assert!(Quantity::One.is_finite()  && Quantity::One.is_linear());
+    assert!(!Quantity::Many.is_finite() && !Quantity::Many.is_linear());
+
+    assert_eq!(Quantity::default(), Quantity::Many);
+
+    assert_eq!(Quantity::Zero.surface_glyph(), "0");
+    assert_eq!(Quantity::One.surface_glyph(),  "1");
+    assert_eq!(Quantity::Many.surface_glyph(), "ω");
+}
+
+#[test]
+fn quantity_attr_display_round_trip() {
+    let q = QuantityAttr::new(Quantity::One, Span::default());
+    assert_eq!(format!("{}", q), "@quantity(1)");
+
+    let q = QuantityAttr::new(Quantity::Many, Span::default());
+    assert_eq!(format!("{}", q), "@quantity(omega)");
+}

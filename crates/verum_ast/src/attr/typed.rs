@@ -5734,3 +5734,164 @@ fn parse_named_characteristic_list_arg(
     }
     Some(chars)
 }
+
+// =============================================================================
+// QUANTITATIVE TYPE THEORY (Atkey QTT — VUVA §7.6 Phase 3 C5 V1)
+// =============================================================================
+//
+// Atkey 2018 / McBride 2016 QTT: every binder carries a **quantity**
+// `q ∈ {0, 1, ω}` controlling how many times its body may use the
+// bound variable. The three levels:
+//
+//   q = 0  — the variable is *erased* at runtime. Only type-level
+//            information; the variable may NOT appear in computational
+//            positions. Use case: phantom indices, ghost state,
+//            spec-only parameters.
+//   q = 1  — the variable is *linear*. Body must use it exactly once
+//            (no double-spend, no leak). Use case: file handles,
+//            mutexes, capabilities.
+//   q = ω  — the variable is *unrestricted*. Body may use it any
+//            number of times including zero. This is the standard
+//            functional-programming default.
+//
+// VUVA §7.6 chooses ω as the kernel default — without an explicit
+// quantity annotation a binder is unrestricted. The opt-in form is
+// `@quantity(0)` / `@quantity(1)` / `@quantity(omega)` per the
+// existing attribute grammar; bare-form `@0` / `@1` / `@ω` is a
+// future extension once the parser accepts numeric and Greek-letter
+// attribute names.
+//
+// Diagnostics (issued by the linearity-tracking pass in verum_types):
+//   E_LINEAR_DOUBLE_USE    — q=1 var referenced more than once
+//   E_LINEAR_NEVER_USED    — q=1 var never referenced (must be exactly once)
+//   E_ERASED_AT_RUNTIME    — q=0 var appears in a computational position
+//
+// V1 scope (this commit): typed AST surface (`Quantity` enum +
+// `QuantityAttr` typed attribute). The linearity-tracking pass that
+// raises the three diagnostics is a follow-up — V1 lets users
+// *declare* the quantity discipline on their bindings without yet
+// enforcing it. This matches the staging used by C2 (positivity
+// shipped now; full elaboration of Inductive eliminators continues).
+
+/// Atkey QTT quantity. Default at parse sites without an annotation
+/// is `Many` per VUVA §7.6 (existing code stays unchanged).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Quantity {
+    /// `@quantity(0)` — erased (compile-time only).
+    Zero,
+    /// `@quantity(1)` — linear (use exactly once).
+    One,
+    /// `@quantity(omega)` — unrestricted (the default; VUVA §7.6).
+    Many,
+}
+
+impl Quantity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Zero => "0",
+            Self::One  => "1",
+            Self::Many => "omega",
+        }
+    }
+
+    pub fn surface_glyph(&self) -> &'static str {
+        match self {
+            Self::Zero => "0",
+            Self::One  => "1",
+            Self::Many => "ω",
+        }
+    }
+
+    /// True iff this quantity admits at most one use (Zero or One).
+    pub fn is_finite(&self) -> bool {
+        matches!(self, Self::Zero | Self::One)
+    }
+
+    /// True iff this quantity demands exactly one use.
+    pub fn is_linear(&self) -> bool {
+        matches!(self, Self::One)
+    }
+
+    /// True iff this quantity demands zero uses (erased).
+    pub fn is_erased(&self) -> bool {
+        matches!(self, Self::Zero)
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "0"     | "Zero"     | "zero"     | "erased"   => Some(Self::Zero),
+            "1"     | "One"      | "one"      | "linear"   => Some(Self::One),
+            "omega" | "ω"        | "Many"     | "many"     | "unrestricted"
+                                                            => Some(Self::Many),
+            _ => None,
+        }
+    }
+}
+
+impl Default for Quantity {
+    fn default() -> Self { Self::Many }
+}
+
+/// `@quantity(0 | 1 | omega)` — Atkey QTT quantity annotation on a
+/// binder (function parameter, let-binding, type-level binding, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct QuantityAttr {
+    pub quantity: Quantity,
+    pub span: Span,
+}
+
+impl QuantityAttr {
+    pub fn new(quantity: Quantity, span: Span) -> Self {
+        Self { quantity, span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("quantity") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None    => return Maybe::None,
+        };
+        if args.len() != 1 {
+            return Maybe::None;
+        }
+        // Accept any of: integer literal `0` / `1`, identifier
+        // `omega` / `ω`, string literal `"omega"`. Reject everything
+        // else with Maybe::None — the elaborator surfaces this as a
+        // parse-time diagnostic rather than silently dropping it.
+        use crate::expr::ExprKind;
+        use crate::literal::{LiteralKind, StringLit};
+        let arg = args.get(0).unwrap();
+        let raw: Option<Text> = match &arg.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(n)        => Some(Text::from(n.value.to_string().as_str())),
+                LiteralKind::Text(StringLit::Regular(s))
+                | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
+                _ => None,
+            },
+            ExprKind::Path(p) => p.segments.last().and_then(|seg| match seg {
+                crate::ty::PathSegment::Name(id) => Some(id.name.clone()),
+                _ => None,
+            }),
+            _ => None,
+        };
+        let q = raw.as_deref().and_then(Quantity::parse);
+        match q {
+            Some(q) => Maybe::Some(Self::new(q, attr.span)),
+            None    => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for QuantityAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for QuantityAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@quantity({})", self.quantity.as_str())
+    }
+}
