@@ -47153,6 +47153,47 @@ impl TypeChecker {
                     variant_map.insert(variant_name, payload_type);
                 }
 
+                // VUVA #150 / C2-WIRE — strict-positivity check on the
+                // variant body. Translates each variant's payload type
+                // into an InductiveConstructor and runs the AST walker
+                // (mirrors the kernel's CoreTerm-level walker so any
+                // path that bypasses one still hits the other). On
+                // violation, surface a TypeError with the breadcrumb
+                // pointing at the offending position.
+                {
+                    let mut user_ctors: List<crate::ty::InductiveConstructor> =
+                        List::new();
+                    for (vname, vtype) in variant_map.iter() {
+                        // For positivity, we need to walk each
+                        // constructor's argument types — for variant
+                        // bodies the payload is a single Type that
+                        // may be Unit, a single Type, a Tuple of
+                        // types, or a Record of fields. We model
+                        // this as a single arg whose Type is the
+                        // payload — the walker correctly recurses
+                        // through Tuple / Record to find any
+                        // function-domain occurrence of `type_name`.
+                        let args: List<Box<Type>> = match vtype {
+                            Type::Unit => List::new(),
+                            other => List::from_iter(vec![Box::new(other.clone())]),
+                        };
+                        user_ctors.push(crate::ty::InductiveConstructor {
+                            name: vname.clone(),
+                            type_params: List::new(),
+                            args,
+                            return_type: Box::new(Type::Unit), // unused by walker
+                        });
+                    }
+                    if let Err(violation) = crate::positivity::check_user_inductive(
+                        type_name.as_str(),
+                        &user_ctors,
+                    ) {
+                        return Err(TypeError::Other(verum_common::Text::from(
+                            violation.to_string(),
+                        )));
+                    }
+                }
+
                 let variant_type = Type::Variant(variant_map.clone());
                 // Module-aware registration: the same name (e.g. `RecvError`)
                 // can legitimately appear in multiple stdlib modules. Publish
@@ -47287,6 +47328,24 @@ impl TypeChecker {
                     };
                     inductive_constructors.push(constructor);
                 }
+
+                // VUVA #150 / C2-WIRE — strict-positivity check at user-
+                // decl registration. The kernel's CoreTerm-level
+                // `verum_kernel::check_strict_positivity` fires on
+                // elaborated terms; this AST-level walker fires BEFORE
+                // elaboration so an ill-formed declaration is rejected
+                // with a useful span pointing at the offending constructor
+                // argument. Berardi's paradox witness `type Bad is
+                // Wrap(Bad -> A)` is rejected here.
+                if let Err(violation) = crate::positivity::check_user_inductive(
+                    type_name.as_str(),
+                    &inductive_constructors,
+                ) {
+                    return Err(TypeError::Other(verum_common::Text::from(
+                        violation.to_string(),
+                    )));
+                }
+
                 self.ctx.register_inductive_type(type_name.clone(), inductive_constructors);
 
                 // Register variant constructor parent mappings for scope-aware resolution.

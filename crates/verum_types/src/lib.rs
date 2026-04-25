@@ -135,6 +135,11 @@ pub mod core_pipeline; // Dependency-ordered stdlib compilation (Stdlib bootstra
 pub mod capability; // Capability attenuation for contexts (Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0)
 pub mod const_eval;
 pub mod context;
+// VUVA #150 — strict-positivity check for user-declared inductive types
+// (AST-level, runs before kernel elaboration; mirrors verum_kernel's
+// CoreTerm-level walker so any path that bypasses one still hits the
+// other).
+pub mod positivity;
 pub mod context_check;
 pub mod context_resolution; // Context group resolution for type checking
 pub mod contract_integration; // Phase 3a → Phase 4 contract integration
