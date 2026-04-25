@@ -255,6 +255,16 @@ const LINT_RULES: &[LintRule] = &[
              [lint.context_policy.modules] forbids in this module path",
         category: LintCategory::Safety,
     },
+    // Phase B.4 — architecture layering + bans (off by default; opt
+    // in via [lint.architecture.layers] and/or .bans).
+    LintRule {
+        name: "architecture-violation",
+        level: LintLevel::Error,
+        description:
+            "`mount` crosses a layer boundary or matches an explicit ban — \
+             the project's [lint.architecture] forbids this import",
+        category: LintCategory::Style,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {

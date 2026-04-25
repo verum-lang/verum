@@ -102,6 +102,7 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
         &VerifyImpliedByRefinementPass,
         &PublicMustHaveVerifyPass,
         &ForbiddenContextPass,
+        &ArchitectureViolationPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
@@ -1296,6 +1297,194 @@ fn path_segments_to_string(p: &verum_ast::Path) -> String {
         }
     }
     out
+}
+
+// ===================================================================
+// Phase B.4: Architecture-layering enforcement
+// ===================================================================
+//
+// Module-import constraints turned into compile-time errors. Configured
+// via `[lint.architecture.layers]` (allow-list per layer) and
+// `[lint.architecture.bans]` (explicit deny pairs):
+//
+//   [lint.architecture.layers]
+//   core    = { allow_imports = ["core", "std"] }
+//   domain  = { allow_imports = ["core", "std", "domain"] }
+//   adapter = { allow_imports = ["core", "std", "domain", "adapter"] }
+//
+//   [lint.architecture.bans]
+//   "app.ui"      = ["app.persistence", "app.network"]
+//   "core.crypto" = ["core.testing"]
+//
+// Resolution: each file's module path picks the most-specific layer
+// by prefix match. Every `mount X.Y.Z` in that file is then checked
+// against the layer's `allow_imports` (whitelist) plus any explicit
+// ban entry. Both checks must pass; either can fire the rule.
+//
+// ===================================================================
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct ArchitectureConfig {
+    layers: std::collections::HashMap<String, LayerRule>,
+    bans: std::collections::HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct LayerRule {
+    allow_imports: Vec<String>,
+}
+
+/// Pick the layer whose name is the longest prefix of `module_path`.
+/// Layer names are top-segment prefixes (`"core"`, `"domain"`, …);
+/// match by checking `module_path == name` or `module_path.starts_with(name + ".")`.
+fn resolve_layer<'a>(
+    cfg: &'a ArchitectureConfig,
+    module_path: &str,
+) -> Option<(&'a String, &'a LayerRule)> {
+    cfg.layers
+        .iter()
+        .filter(|(name, _)| {
+            module_path == name.as_str()
+                || module_path
+                    .as_bytes()
+                    .get(name.len())
+                    .map(|b| *b == b'.')
+                    .unwrap_or(false)
+                    && module_path.starts_with(name.as_str())
+        })
+        .max_by_key(|(name, _)| name.len())
+}
+
+/// True iff `path` is in the layer's allow_imports (matched as a
+/// top-segment prefix). `"core"` allows `core`, `core.foo`, etc.
+fn layer_allows(rule: &LayerRule, imported_path: &str) -> bool {
+    rule.allow_imports.is_empty() // empty allow-list = unconstrained
+        || rule.allow_imports.iter().any(|allowed| {
+            imported_path == allowed
+                || (imported_path.len() > allowed.len()
+                    && imported_path.starts_with(allowed)
+                    && imported_path.as_bytes()[allowed.len()] == b'.')
+        })
+}
+
+/// Convert a `MountDecl` to the dotted path being imported. Returns
+/// the ROOT path of the mount — for `mount foo.bar.{Baz, Qux}` that's
+/// `foo.bar`; for `mount foo.bar.*` it's `foo.bar`. Unrepresentable
+/// shapes (relative paths, super, …) return None.
+fn mount_root_path(mount: &verum_ast::MountDecl) -> Option<String> {
+    let path = match &mount.tree.kind {
+        verum_ast::MountTreeKind::Path(p) => p,
+        verum_ast::MountTreeKind::Glob(p) => p,
+        verum_ast::MountTreeKind::Nested { prefix, .. } => prefix,
+    };
+    Some(path_segments_to_string(path))
+}
+
+struct ArchitectureViolationPass;
+
+impl LintPass for ArchitectureViolationPass {
+    fn name(&self) -> &'static str { "architecture-violation" }
+    fn description(&self) -> &'static str {
+        "`mount` crosses a layer boundary or matches an explicit ban — \
+         the project's [lint.architecture] forbids this import"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Error }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg: ArchitectureConfig = match ctx
+            .config
+            .and_then(|c| c.rule_config::<ArchitectureConfig>("architecture-policy"))
+        {
+            Some(c) if !c.layers.is_empty() || !c.bans.is_empty() => c,
+            _ => return Vec::new(),
+        };
+
+        let module_path = module_path_for_file(ctx.file);
+        let layer_match = resolve_layer(&cfg, &module_path);
+
+        // Build the explicit ban list for this module path. A ban
+        // key acts as a top-segment prefix — `"core.crypto"` covers
+        // `core.crypto` itself plus everything under it. Most-
+        // specific (longest) ban-key wins on overlap.
+        let ban_match = cfg
+            .bans
+            .iter()
+            .filter(|(pat, _)| {
+                // Exact match
+                module_path == pat.as_str()
+                    // Or prefix: pat must end at a `.`-boundary in module_path
+                    || (module_path.len() > pat.len()
+                        && module_path.starts_with(pat.as_str())
+                        && module_path.as_bytes()[pat.len()] == b'.')
+                    // Or pat is a glob
+                    || glob_module_match(pat, &module_path)
+            })
+            .max_by_key(|(pat, _)| pat.len());
+
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let mount = match &item.kind {
+                ItemKind::Mount(m) => m,
+                _ => continue,
+            };
+            let imported_path = match mount_root_path(mount) {
+                Some(p) if !p.is_empty() => p,
+                _ => continue,
+            };
+
+            // Check layer allow-list.
+            if let Some((layer_name, rule)) = layer_match {
+                if !layer_allows(rule, &imported_path) {
+                    let (line, col) = span_to_line_col(ctx.source, mount.span.start);
+                    issues.push(LintIssue {
+                        rule: "architecture-violation",
+                        level: LintLevel::Error,
+                        file: ctx.file.to_path_buf(),
+                        line,
+                        column: col,
+                        message: format!(
+                            "module `{}` (layer `{}`) may not import `{}` — \
+                             not in `allow_imports`",
+                            module_path, layer_name, imported_path
+                        ),
+                        suggestion: None,
+                        fixable: false,
+                    });
+                    continue; // already reported; don't double-fire on bans
+                }
+            }
+
+            // Check explicit bans.
+            if let Some((ban_key, banned)) = ban_match {
+                if banned.iter().any(|b| {
+                    imported_path == *b
+                        || (imported_path.len() > b.len()
+                            && imported_path.starts_with(b)
+                            && imported_path.as_bytes()[b.len()] == b'.')
+                }) {
+                    let (line, col) = span_to_line_col(ctx.source, mount.span.start);
+                    issues.push(LintIssue {
+                        rule: "architecture-violation",
+                        level: LintLevel::Error,
+                        file: ctx.file.to_path_buf(),
+                        line,
+                        column: col,
+                        message: format!(
+                            "module `{}` may not import `{}` — \
+                             explicit ban (matched `{}`)",
+                            module_path, imported_path, ban_key
+                        ),
+                        suggestion: None,
+                        fixable: false,
+                    });
+                }
+            }
+        }
+        issues
+    }
 }
 
 #[cfg(test)]
