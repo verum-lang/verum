@@ -1273,6 +1273,59 @@ fn apply_fixes(content: &str, issues: &List<&LintIssue>) -> String {
                     result_lines[idx] = Some(fixed);
                 }
             }
+            "redundant-clone" => {
+                if let Some(ref current) = result_lines[idx] {
+                    result_lines[idx] = Some(fix_redundant_clone(current));
+                }
+            }
+            "single-variant-match" => {
+                // Single-line `match e { Pat(a) => body }` → `if let Pat(a) = e { body }`.
+                // Only triggers on the easy single-line form to avoid
+                // the multi-line block-rewrite hazard.
+                if let Some(ref current) = result_lines[idx] {
+                    if let Some(rewritten) = fix_single_variant_match_inline(current) {
+                        result_lines[idx] = Some(rewritten);
+                    }
+                }
+            }
+            "empty-match-arm" => {
+                // Drop arms that are `_ => ()` / `Pat => {}` / similar
+                // empty bodies — let the match exhaustiveness check
+                // surface any breakage.
+                if let Some(ref current) = result_lines[idx] {
+                    if is_empty_match_arm_line(current) {
+                        result_lines[idx] = None;
+                    }
+                }
+            }
+            "redundant-refinement" => {
+                // `Type{ true }` → `Type`. Strip the always-true predicate.
+                if let Some(ref current) = result_lines[idx] {
+                    result_lines[idx] = Some(fix_redundant_refinement(current));
+                }
+            }
+            "shadow-binding" => {
+                // Conservative fix: rename `let x =` → `let x2 =` on
+                // the inner binding. Only applies to `let` / `let mut`
+                // forms; downstream uses on the same line are NOT
+                // rewritten (the user must update them or the code
+                // will fail to compile, which is the desired signal).
+                if let Some(ref current) = result_lines[idx] {
+                    if let Some(rewritten) = fix_shadow_rename_inner(current) {
+                        result_lines[idx] = Some(rewritten);
+                    }
+                }
+            }
+            "todo-in-code" => {
+                // Auto-append a placeholder issue tag so the
+                // require-issue-link convention is satisfied. The
+                // user is expected to replace the `0000` with a real
+                // tracker number; the next lint pass will keep
+                // failing until they do.
+                if let Some(ref current) = result_lines[idx] {
+                    result_lines[idx] = Some(fix_todo_with_placeholder_issue(current));
+                }
+            }
             _ => {}
         }
     }
@@ -1353,6 +1406,143 @@ fn fix_unnecessary_heap(line: &str) -> String {
     }
     let _ = chars; // suppress unused
     output
+}
+
+/// Fix `expr.clone()` → `expr` on a single line. Targets the simple
+/// trailing-clone shape; nested `clone()` chains and method-chain
+/// suffix forms are left alone (the user can rerun on shrunken
+/// input or fix manually).
+fn fix_redundant_clone(line: &str) -> String {
+    // Walk left-to-right, collapsing `something.clone()` into
+    // `something`. We honour the receiver boundary: the substring
+    // immediately to the left of `.clone()` is preserved verbatim,
+    // including any whitespace, so layout is intact.
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(pos) = rest.find(".clone()") {
+        out.push_str(&rest[..pos]);
+        rest = &rest[pos + ".clone()".len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Rewrite a single-line `match e { Pat(args) => body }` (one arm,
+/// no semicolon-separated trailing arms) into the equivalent
+/// `if let Pat(args) = e { body }`. Returns `None` when the line
+/// doesn't fit the simple shape — a multi-arm or multi-line match
+/// is out of scope for the line-based fixer.
+fn fix_single_variant_match_inline(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with("match ") {
+        return None;
+    }
+    let indent = &line[..line.len() - trimmed.len()];
+    // Locate the boundaries: `match <scrutinee> { <Pat> => <body> }`.
+    let after_match = &trimmed["match ".len()..];
+    let brace = after_match.find('{')?;
+    let scrutinee = after_match[..brace].trim();
+    let inside = after_match[brace + 1..].trim_end_matches('}').trim();
+    // Inside must be exactly one arm: `Pat => body[,]` (single arrow).
+    let arrow = inside.find("=>")?;
+    let pat = inside[..arrow].trim();
+    let body = inside[arrow + 2..].trim().trim_end_matches(',').trim();
+    if pat.is_empty() || body.is_empty() {
+        return None;
+    }
+    // Reject the underscore-arm case — `match x { _ => ... }` is
+    // already legitimately one-arm; an `if let _ = x` is not the
+    // same construct.
+    if pat == "_" {
+        return None;
+    }
+    Some(format!("{indent}if let {pat} = {scrutinee} {{ {body} }}"))
+}
+
+/// True when the line is a match-arm line whose body is empty —
+/// `_ => ()`, `Pat => {}`, `Pat => {},`. The fixer drops these so
+/// match exhaustiveness handles the missing arm.
+fn is_empty_match_arm_line(line: &str) -> bool {
+    let trimmed = line.trim().trim_end_matches(',').trim();
+    trimmed.ends_with("=> ()") || trimmed.ends_with("=> {}") || trimmed.ends_with("=>{}")
+}
+
+/// `Type{ true }` → `Type`. Strips the always-true predicate while
+/// leaving every other refinement shape alone.
+fn fix_redundant_refinement(line: &str) -> String {
+    // Search for the literal `{ true }` and the variants `{true}` /
+    // `{ true}` / `{true }`. The receiver token immediately to the
+    // left is whatever the type name is — we don't need to inspect
+    // it.
+    let mut out = line.to_string();
+    for needle in &["{ true }", "{true}", "{true }", "{ true}"] {
+        out = out.replace(needle, "");
+    }
+    out
+}
+
+/// Conservative shadow-binding fix: rename the `let x = …` /
+/// `let mut x = …` on this line to `let x2 = …`. Downstream uses on
+/// later lines are NOT rewritten — the deliberate compile error is
+/// the signal for the author to finish the rename.
+fn fix_shadow_rename_inner(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let indent_len = line.len() - trimmed.len();
+    let indent = &line[..indent_len];
+    let rest = if let Some(r) = trimmed.strip_prefix("let mut ") {
+        r
+    } else if let Some(r) = trimmed.strip_prefix("let ") {
+        r
+    } else {
+        return None;
+    };
+    // Find the binding name (first identifier).
+    let name_end = rest
+        .char_indices()
+        .find(|(_, c)| !(c.is_alphanumeric() || *c == '_'))
+        .map(|(i, _)| i)
+        .unwrap_or(rest.len());
+    let name = &rest[..name_end];
+    if name.is_empty() {
+        return None;
+    }
+    let suffix = &rest[name_end..];
+    let new_name = format!("{name}2");
+    let prefix = if trimmed.starts_with("let mut ") {
+        "let mut "
+    } else {
+        "let "
+    };
+    Some(format!("{indent}{prefix}{new_name}{suffix}"))
+}
+
+/// `// TODO` → `// TODO(#0000)` (and the same for FIXME / HACK /
+/// XXX). The user is expected to fill in a real tracker number; the
+/// next lint pass keeps complaining if they don't.
+fn fix_todo_with_placeholder_issue(line: &str) -> String {
+    let mut out = line.to_string();
+    for marker in &["TODO", "FIXME", "HACK", "XXX"] {
+        // Skip lines that already carry an issue tag.
+        if out.contains(&format!("{marker}(#")) {
+            continue;
+        }
+        // Replace the bare marker followed by a delimiter (':',
+        // ' ', or end-of-line) — but only the first occurrence.
+        let needle = format!("{marker}:");
+        if let Some(pos) = out.find(&needle) {
+            let head = &out[..pos];
+            let tail = &out[pos + needle.len()..];
+            out = format!("{head}{marker}(#0000):{tail}");
+            continue;
+        }
+        let bare = format!("{marker} ");
+        if let Some(pos) = out.find(&bare) {
+            let head = &out[..pos];
+            let tail = &out[pos + bare.len()..];
+            out = format!("{head}{marker}(#0000) {tail}");
+        }
+    }
+    out
 }
 
 /// Check if a string is a small literal (Int, Float, Bool)
@@ -2766,8 +2956,8 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                         line: line_num + 1,
                         column: trimmed.find(marker).unwrap_or(0) + 1,
                         message: format!("{} comment in code", marker),
-                        suggestion: None,
-                        fixable: false,
+                        suggestion: Some(format!("{}(#0000)", marker).into()),
+                        fixable: true,
                     });
                     break;
                 }
@@ -2846,8 +3036,8 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                 line: line_num + 1,
                 column: 1,
                 message: "Match arm has empty body".to_string(),
-                suggestion: Some("Add a comment explaining why this arm is intentionally empty, or handle it".into()),
-                fixable: false,
+                suggestion: Some("drop the arm and let exhaustiveness handle it, or add a body".into()),
+                fixable: true,
             });
         }
 
@@ -2867,8 +3057,8 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                         line: line_num + 1,
                         column: col,
                         message: format!("{} comment in code", marker),
-                        suggestion: None,
-                        fixable: false,
+                        suggestion: Some(format!("{}(#0000)", marker).into()),
+                        fixable: true,
                     });
                     break;
                 }
@@ -2909,8 +3099,8 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                                     line: line_num + 1,
                                     column: 1,
                                     message: format!("Variable `{}` shadows previous binding", var_name),
-                                    suggestion: None,
-                                    fixable: false,
+                                    suggestion: Some(format!("rename the inner binding (e.g. `{var_name}2`)").into()),
+                                    fixable: true,
                                 });
                                 break;
                             }
@@ -3875,7 +4065,10 @@ pub fn run_extended(
         println!();
     }
 
-    let _ = fix;
+    if fix {
+        apply_autofix_run(&all_issues);
+    }
+
     if errors > 0 {
         Err(CliError::Custom(format!("{} lint errors", errors)))
     } else if deny_warnings && warnings > 0 {
@@ -3883,6 +4076,35 @@ pub fn run_extended(
     } else {
         Ok(())
     }
+}
+
+/// Apply auto-fixes to disk for every `fixable` issue in `issues`.
+/// Issues are grouped per-file so a file is rewritten exactly once
+/// regardless of how many fixable issues it carries.
+fn apply_autofix_run(issues: &[LintIssue]) {
+    let fixable: Vec<&LintIssue> = issues.iter().filter(|i| i.fixable).collect();
+    if fixable.is_empty() {
+        return;
+    }
+    let mut by_file: HashMap<PathBuf, List<&LintIssue>> = HashMap::new();
+    for issue in &fixable {
+        by_file
+            .entry(issue.file.clone())
+            .or_default()
+            .push(*issue);
+    }
+    let mut fixed = 0usize;
+    for (path, file_issues) in by_file {
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let new_content = apply_fixes(&content, &file_issues);
+        if new_content != content && fs::write(&path, &new_content).is_ok() {
+            fixed += file_issues.len();
+        }
+    }
+    ui::success(&format!("Fixed {} issues", fixed));
 }
 
 /// Whether `level` meets the `min` severity bar — error > warn > info > hint > off.

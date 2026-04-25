@@ -209,8 +209,8 @@ impl LintPass for RedundantRefinementPass {
                             message: "refinement predicate is always true — \
                                       drop the `{ … }` to simplify the type"
                                 .to_string(),
-                            suggestion: None,
-                            fixable: false,
+                            suggestion: Some("drop the `{ true }` predicate".into()),
+                            fixable: true,
                         });
                     }
                 }
