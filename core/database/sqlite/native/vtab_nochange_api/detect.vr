@@ -1,0 +1,82 @@
+// sqlite3_vtab_nochange — UPDATE column-not-modified detector.
+
+module core.database.sqlite.native.vtab_nochange_api.detect;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+// Per-column flag carried by xUpdate's argv[].
+public type ColumnState is
+    | CsExplicitNew         // UPDATE assigned a new value
+    | CsExplicitNull        // UPDATE assigned NULL
+    | CsUnchanged           // SET clause omitted; xUpdate may skip
+    ;
+
+public fn state_name(s: &ColumnState) -> Text {
+    match s {
+        CsExplicitNew  => "explicit_new".clone(),
+        CsExplicitNull => "explicit_null".clone(),
+        CsUnchanged    => "unchanged".clone(),
+    }
+}
+
+// sqlite3_value_nochange(value) — boolean projection of ColumnState.
+public fn value_nochange(s: &ColumnState) -> Int {
+    match s {
+        CsUnchanged    => 1,
+        CsExplicitNew  => 0,
+        CsExplicitNull => 0,
+    }
+}
+
+// sqlite3_vtab_nochange(ctx) — same idea but called inside a default-value
+// generator, returns true when the engine is just calling xColumn with a
+// "we don't actually want this value" hint.
+public type CallContext is
+    | CtUpdate                     // xUpdate
+    | CtDefaultValueGenerator      // xColumn-on-virtual-default
+    ;
+
+public fn vtab_nochange_returns(ctx: &CallContext, s: &ColumnState) -> Int {
+    match ctx {
+        CtUpdate                  => value_nochange(s),
+        CtDefaultValueGenerator   => value_nochange(s),
+    }
+}
+
+// Decision helper: should xUpdate skip writing this column?
+public type WriteAction is
+    | WaSkip
+    | WaWrite
+    ;
+
+public fn xupdate_action(s: &ColumnState) -> WriteAction {
+    match s {
+        CsUnchanged => WaSkip,
+        _ => WaWrite,
+    }
+}
+
+public fn action_name(a: &WriteAction) -> Text {
+    match a {
+        WaSkip  => "skip".clone(),
+        WaWrite => "write".clone(),
+    }
+}
+
+public fn skips_write(a: &WriteAction) -> Bool {
+    match a { WaSkip => true, _ => false }
+}
+
+// Aggregate: how many columns of an UPDATE are unchanged?
+public fn count_unchanged(states: &List<ColumnState>) -> Int {
+    let mut i = 0;
+    let mut c = 0;
+    let n = states.len() as Int;
+    while i < n {
+        let s = states.get(i);
+        if skips_write(&xupdate_action(&s)) { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}

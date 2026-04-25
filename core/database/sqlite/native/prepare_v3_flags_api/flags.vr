@@ -1,0 +1,62 @@
+// sqlite3_prepare_v3 prepFlags bit field.
+
+module core.database.sqlite.native.prepare_v3_flags_api.flags;
+
+mount base.{Bool, Int64, Text};
+
+public fn f_persistent() -> Int64 { 0x01 as Int64 }
+public fn f_normalize()  -> Int64 { 0x02 as Int64 }    // deprecated; engine ignores
+public fn f_no_vtab()    -> Int64 { 0x04 as Int64 }
+public fn f_dont_log()   -> Int64 { 0x10 as Int64 }
+
+// Mask of all known bits.
+public fn well_known_mask() -> Int64 {
+    f_persistent() | f_normalize() | f_no_vtab() | f_dont_log()
+}
+
+public fn well_known_bit_count() -> Int { 4 }
+
+public fn is_set(fl: Int64, bit: Int64) -> Bool {
+    (fl & bit) != (0 as Int64)
+}
+
+public fn set(fl: Int64, bit: Int64) -> Int64 { fl | bit }
+public fn clear(fl: Int64, bit: Int64) -> Int64 { fl & !bit }
+
+public fn is_known_only(fl: Int64) -> Bool {
+    (fl & !well_known_mask()) == (0 as Int64)
+}
+
+// Classifiers — used by docs and the planner.
+
+public fn is_persistent(fl: Int64) -> Bool { is_set(fl, f_persistent()) }
+
+public fn forbids_vtab(fl: Int64) -> Bool { is_set(fl, f_no_vtab()) }
+
+public fn suppresses_logging(fl: Int64) -> Bool { is_set(fl, f_dont_log()) }
+
+// Bit names for diagnostics.
+public fn bit_name(bit: Int64) -> Text {
+    if bit == f_persistent() { return "PERSISTENT".clone(); }
+    if bit == f_normalize()  { return "NORMALIZE".clone(); }
+    if bit == f_no_vtab()    { return "NO_VTAB".clone(); }
+    if bit == f_dont_log()   { return "DONT_LOG".clone(); }
+    "UNKNOWN".clone()
+}
+
+// LRU-eviction policy: persistent stmts skip the cache eviction list.
+public type EvictionPolicy is
+    | EpEvictable
+    | EpPinned
+    ;
+
+public fn eviction_for(fl: Int64) -> EvictionPolicy {
+    if is_persistent(fl) { EpPinned } else { EpEvictable }
+}
+
+public fn policy_name(p: &EvictionPolicy) -> Text {
+    match p {
+        EpEvictable => "evictable".clone(),
+        EpPinned    => "pinned".clone(),
+    }
+}

@@ -1,0 +1,67 @@
+// sqlite3_aggregate_context — per-call allocation state machine.
+
+module core.database.sqlite.native.aggregate_context_api.slot;
+
+mount base.{Bool, Int64, Text};
+
+// Per-aggregate slot.  In SQLite this is opaque; here we model the user-
+// visible state.
+public type Slot is {
+    allocated: Bool,
+    bytes: Int,
+    nomem: Bool,        // last allocation request hit OOM
+};
+
+public fn empty_slot() -> Slot {
+    Slot { allocated: false, bytes: 0, nomem: false }
+}
+
+// Outcome of one sqlite3_aggregate_context call.
+public type Outcome is
+    | OkPtr               // returned a non-NULL pointer (existing or freshly allocated)
+    | OkNullN0            // n=0 + no prior allocation → NULL
+    | OkNomem             // OOM during the new allocation → NULL + nomem flag
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkPtr     => "ok_ptr".clone(),
+        OkNullN0  => "ok_null_n0".clone(),
+        OkNomem   => "ok_nomem".clone(),
+    }
+}
+
+public fn returned_non_null(o: &Outcome) -> Bool {
+    match o { OkPtr => true, _ => false }
+}
+
+public type CallResult is { slot: Slot, outcome: Outcome };
+
+// Step the slot one call.  `simulate_oom` lets tests inject allocator failure.
+public fn call(mut s: Slot, n: Int, simulate_oom: Bool) -> CallResult {
+    if n <= 0 {
+        if s.allocated { return CallResult { slot: s, outcome: OkPtr }; }
+        return CallResult { slot: s, outcome: OkNullN0 };
+    }
+    if s.allocated { return CallResult { slot: s, outcome: OkPtr }; }
+    if simulate_oom {
+        s.nomem = true;
+        return CallResult { slot: s, outcome: OkNomem };
+    }
+    s.allocated = true;
+    s.bytes = n;
+    s.nomem = false;
+    CallResult { slot: s, outcome: OkPtr }
+}
+
+// First-call detector — useful for xStep on the first row.
+public fn is_first_call(s: &Slot) -> Bool { !s.allocated }
+
+// Diagnostics helper: was the slot ever observed to OOM?
+public fn ever_oomed(s: &Slot) -> Bool { s.nomem }
+
+// Reset on stmt finalize / sqlite3_reset_auto_extension etc.  Engine releases
+// the allocation; the slot returns to empty.
+public fn release(_s: Slot) -> Slot {
+    empty_slot()
+}

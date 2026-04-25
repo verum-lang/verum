@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/progress_handler_api/mod.vr
+// =============================================================================
+// sqlite3_progress_handler(db, N, callback, arg) — invoked every N VDBE
+// instructions while a stmt is executing.  Returning non-zero from the
+// callback aborts the stmt with SQLITE_INTERRUPT.  Spec App E.P.
+// =============================================================================
+
+module core.database.sqlite.native.progress_handler_api;
+
+public module handler;

@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/compile_options_pragma/mod.vr
+// =============================================================================
+// PRAGMA compile_options — emits one row per SQLITE_ENABLE_* / OMIT_* / DEFAULT_*
+// flag the build was compiled with.  Equivalent to sqlite3_compileoption_get(N).
+// Spec App E.C.
+// =============================================================================
+
+module core.database.sqlite.native.compile_options_pragma;
+
+public module flags;

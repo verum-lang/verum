@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_nochange_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_nochange_api.detect.{
+    ColumnState, CsExplicitNew, CsExplicitNull, CsUnchanged, state_name,
+    value_nochange,
+    CallContext, CtUpdate, CtDefaultValueGenerator, vtab_nochange_returns,
+    WriteAction, WaSkip, WaWrite,
+    xupdate_action, action_name, skips_write,
+    count_unchanged,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_state_names() {
+    assert(state_name(&CsExplicitNew)  == "explicit_new".clone());
+    assert(state_name(&CsExplicitNull) == "explicit_null".clone());
+    assert(state_name(&CsUnchanged)    == "unchanged".clone());
+}
+
+fn test_value_nochange_projection() {
+    assert_eq(value_nochange(&CsUnchanged),    1);
+    assert_eq(value_nochange(&CsExplicitNew),  0);
+    assert_eq(value_nochange(&CsExplicitNull), 0);
+}
+
+fn test_vtab_nochange_returns_in_both_contexts() {
+    assert_eq(vtab_nochange_returns(&CtUpdate, &CsUnchanged),    1);
+    assert_eq(vtab_nochange_returns(&CtUpdate, &CsExplicitNew),  0);
+    assert_eq(vtab_nochange_returns(&CtDefaultValueGenerator, &CsUnchanged), 1);
+}
+
+fn test_xupdate_action_dispatch() {
+    match xupdate_action(&CsUnchanged)    { WaSkip  => {}, _ => assert(false) }
+    match xupdate_action(&CsExplicitNew)  { WaWrite => {}, _ => assert(false) }
+    match xupdate_action(&CsExplicitNull) { WaWrite => {}, _ => assert(false) }
+}
+
+fn test_action_names_and_skips() {
+    assert(action_name(&WaSkip)  == "skip".clone());
+    assert(action_name(&WaWrite) == "write".clone());
+    assert(skips_write(&WaSkip));
+    assert(!skips_write(&WaWrite));
+}
+
+fn test_count_unchanged_aggregation() {
+    let mut states = List.new();
+    states.push(CsExplicitNew);
+    states.push(CsUnchanged);
+    states.push(CsUnchanged);
+    states.push(CsExplicitNull);
+    states.push(CsUnchanged);
+    assert_eq(count_unchanged(&states), 3);
+}
+
+fn test_count_unchanged_empty() {
+    let states: List<ColumnState> = List.new();
+    assert_eq(count_unchanged(&states), 0);
+}
+
+fn test_count_unchanged_all_changed() {
+    let mut states = List.new();
+    states.push(CsExplicitNew);
+    states.push(CsExplicitNull);
+    assert_eq(count_unchanged(&states), 0);
+}
+
+fn main() {
+    test_state_names();
+    test_value_nochange_projection();
+    test_vtab_nochange_returns_in_both_contexts();
+    test_xupdate_action_dispatch();
+    test_action_names_and_skips();
+    test_count_unchanged_aggregation();
+    test_count_unchanged_empty();
+    test_count_unchanged_all_changed();
+}

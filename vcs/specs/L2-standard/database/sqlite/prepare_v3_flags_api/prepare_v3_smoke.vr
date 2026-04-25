@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, prepare_v3_flags_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.prepare_v3_flags_api.flags.{
+    f_persistent, f_normalize, f_no_vtab, f_dont_log,
+    well_known_mask, well_known_bit_count,
+    is_set, set, clear, is_known_only,
+    is_persistent, forbids_vtab, suppresses_logging, bit_name,
+    EvictionPolicy, EpEvictable, EpPinned,
+    eviction_for, policy_name,
+};
+mount base.{Bool, Int64};
+
+fn test_bit_constants() {
+    assert_eq(f_persistent(), 0x01 as Int64);
+    assert_eq(f_normalize(),  0x02 as Int64);
+    assert_eq(f_no_vtab(),    0x04 as Int64);
+    assert_eq(f_dont_log(),   0x10 as Int64);
+    assert_eq(well_known_bit_count(), 4);
+}
+
+fn test_well_known_mask() {
+    assert_eq(well_known_mask(), 0x17 as Int64);
+}
+
+fn test_set_and_is_set() {
+    let fl = set(set(0 as Int64, f_persistent()), f_no_vtab());
+    assert(is_set(fl, f_persistent()));
+    assert(is_set(fl, f_no_vtab()));
+    assert(!is_set(fl, f_dont_log()));
+    let cleared = clear(fl, f_persistent());
+    assert(!is_set(cleared, f_persistent()));
+}
+
+fn test_is_known_only() {
+    assert(is_known_only(0 as Int64));
+    assert(is_known_only(f_persistent() | f_dont_log()));
+    assert(!is_known_only(0x80 as Int64));
+}
+
+fn test_classifiers() {
+    let fl = set(set(0 as Int64, f_persistent()), f_dont_log());
+    assert(is_persistent(fl));
+    assert(suppresses_logging(fl));
+    assert(!forbids_vtab(fl));
+}
+
+fn test_bit_names() {
+    assert(bit_name(f_persistent()) == "PERSISTENT".clone());
+    assert(bit_name(f_normalize())  == "NORMALIZE".clone());
+    assert(bit_name(f_no_vtab())    == "NO_VTAB".clone());
+    assert(bit_name(f_dont_log())   == "DONT_LOG".clone());
+    assert(bit_name(0x80 as Int64)  == "UNKNOWN".clone());
+}
+
+fn test_eviction_policy_dispatch() {
+    match eviction_for(0 as Int64)             { EpEvictable => {}, _ => assert(false) }
+    match eviction_for(f_persistent())          { EpPinned    => {}, _ => assert(false) }
+    match eviction_for(f_dont_log())            { EpEvictable => {}, _ => assert(false) }
+}
+
+fn test_policy_names() {
+    assert(policy_name(&EpEvictable) == "evictable".clone());
+    assert(policy_name(&EpPinned)    == "pinned".clone());
+}
+
+fn main() {
+    test_bit_constants();
+    test_well_known_mask();
+    test_set_and_is_set();
+    test_is_known_only();
+    test_classifiers();
+    test_bit_names();
+    test_eviction_policy_dispatch();
+    test_policy_names();
+}

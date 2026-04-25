@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_nochange_api/mod.vr
+// =============================================================================
+// sqlite3_vtab_nochange(ctx) / sqlite3_value_nochange(value) — added 3.22.
+// Used inside vtab xUpdate to detect "this column wasn't actually changed
+// by the UPDATE" so the implementation can skip writing it (important for
+// sparsely-updated rows).  Spec §16.1.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_nochange_api;
+
+public module detect;

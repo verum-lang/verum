@@ -1,0 +1,103 @@
+// PRAGMA compile_options — build-flag inventory.
+
+module core.database.sqlite.native.compile_options_pragma.flags;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+// Categories of compile-time flag.
+public type Category is
+    | CtEnable           // SQLITE_ENABLE_*
+    | CtOmit             // SQLITE_OMIT_*
+    | CtDefault          // SQLITE_DEFAULT_*
+    | CtMax              // SQLITE_MAX_*
+    | CtThreadsafe       // SQLITE_THREADSAFE
+    | CtCompiler         // COMPILER=...
+    | CtOther
+    ;
+
+public fn category_name(c: &Category) -> Text {
+    match c {
+        CtEnable     => "enable".clone(),
+        CtOmit       => "omit".clone(),
+        CtDefault    => "default".clone(),
+        CtMax        => "max".clone(),
+        CtThreadsafe => "threadsafe".clone(),
+        CtCompiler   => "compiler".clone(),
+        CtOther      => "other".clone(),
+    }
+}
+
+// Classify a compile-option name.  Match by prefix.
+public fn classify(name: Text) -> Category {
+    if starts_with(&name, "ENABLE_".clone())   { return CtEnable; }
+    if starts_with(&name, "OMIT_".clone())     { return CtOmit; }
+    if starts_with(&name, "DEFAULT_".clone())  { return CtDefault; }
+    if starts_with(&name, "MAX_".clone())      { return CtMax; }
+    if name == "THREADSAFE=0".clone()          { return CtThreadsafe; }
+    if name == "THREADSAFE=1".clone()          { return CtThreadsafe; }
+    if name == "THREADSAFE=2".clone()          { return CtThreadsafe; }
+    if starts_with(&name, "COMPILER=".clone()) { return CtCompiler; }
+    CtOther
+}
+
+fn starts_with(name: &Text, prefix: Text) -> Bool {
+    let nb = name.as_bytes();
+    let pb = prefix.as_bytes();
+    let nn = nb.len();
+    let pn = pb.len();
+    if pn > nn { return false; }
+    let mut i: Int = 0;
+    while i < pn {
+        if nb[i] != pb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Common flags that gate visible features.
+public fn enables_fts5() -> Text  { "ENABLE_FTS5".clone() }
+public fn enables_rtree() -> Text { "ENABLE_RTREE".clone() }
+public fn enables_json1() -> Text { "ENABLE_JSON1".clone() }
+public fn enables_geopoly() -> Text { "ENABLE_GEOPOLY".clone() }
+
+// Decide whether a feature should be available given a list of compile options.
+public fn has_option(name: Text, options: List<Text>) -> Bool {
+    let mut i = 0;
+    let n = options.len() as Int;
+    while i < n {
+        if options.get(i) == name { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// Decision summary for "is feature X available?".
+public type Availability is
+    | AvAvailable
+    | AvOmitted        // SQLITE_OMIT_<feature>
+    | AvNotEnabled     // missing the corresponding ENABLE flag
+    ;
+
+public fn availability_name(a: &Availability) -> Text {
+    match a {
+        AvAvailable  => "available".clone(),
+        AvOmitted    => "omitted".clone(),
+        AvNotEnabled => "not_enabled".clone(),
+    }
+}
+
+public fn is_available(a: &Availability) -> Bool {
+    match a { AvAvailable => true, _ => false }
+}
+
+// Resolve feature availability for a given (enable_flag, omit_flag, options).
+public fn resolve(
+    enable_flag: Text,
+    omit_flag: Text,
+    options: &List<Text>,
+) -> Availability {
+    if has_option(omit_flag, options.clone())   { return AvOmitted; }
+    if has_option(enable_flag, options.clone()) { return AvAvailable; }
+    AvNotEnabled
+}

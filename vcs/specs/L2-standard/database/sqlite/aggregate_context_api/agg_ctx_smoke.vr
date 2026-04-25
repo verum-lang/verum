@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, aggregate_context_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.aggregate_context_api.slot.{
+    Slot, empty_slot,
+    Outcome, OkPtr, OkNullN0, OkNomem, outcome_name, returned_non_null,
+    CallResult, call,
+    is_first_call, ever_oomed, release,
+};
+mount base.{Bool};
+
+fn test_empty_slot_state() {
+    let s = empty_slot();
+    assert(!s.allocated);
+    assert(is_first_call(&s));
+    assert(!ever_oomed(&s));
+}
+
+fn test_first_call_with_n0_returns_null() {
+    let s = empty_slot();
+    let r = call(s, 0, false);
+    match r.outcome { OkNullN0 => {}, _ => assert(false) }
+    assert(!r.slot.allocated);
+}
+
+fn test_first_call_with_n_allocates() {
+    let s = empty_slot();
+    let r = call(s, 64, false);
+    match r.outcome { OkPtr => {}, _ => assert(false) }
+    assert(r.slot.allocated);
+    assert_eq(r.slot.bytes, 64);
+    assert(!is_first_call(&r.slot));
+}
+
+fn test_subsequent_call_reuses_allocation() {
+    let r1 = call(empty_slot(), 64, false);
+    let r2 = call(r1.slot, 64, false);
+    match r2.outcome { OkPtr => {}, _ => assert(false) }
+    assert(r2.slot.allocated);
+}
+
+fn test_n0_after_allocation_returns_existing_ptr() {
+    let r1 = call(empty_slot(), 64, false);
+    let r2 = call(r1.slot, 0, false);
+    match r2.outcome { OkPtr => {}, _ => assert(false) }
+}
+
+fn test_oom_marks_slot() {
+    let r = call(empty_slot(), 64, true);
+    match r.outcome { OkNomem => {}, _ => assert(false) }
+    assert(!r.slot.allocated);
+    assert(ever_oomed(&r.slot));
+    assert(!returned_non_null(&OkNomem));
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&OkPtr)    == "ok_ptr".clone());
+    assert(outcome_name(&OkNullN0) == "ok_null_n0".clone());
+    assert(outcome_name(&OkNomem)  == "ok_nomem".clone());
+}
+
+fn test_release_resets_slot() {
+    let r = call(empty_slot(), 64, false);
+    let cleared = release(r.slot);
+    assert(!cleared.allocated);
+    assert(is_first_call(&cleared));
+}
+
+fn main() {
+    test_empty_slot_state();
+    test_first_call_with_n0_returns_null();
+    test_first_call_with_n_allocates();
+    test_subsequent_call_reuses_allocation();
+    test_n0_after_allocation_returns_existing_ptr();
+    test_oom_marks_slot();
+    test_outcome_names();
+    test_release_resets_slot();
+}

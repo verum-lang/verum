@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, compile_options_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.compile_options_pragma.flags.{
+    Category, CtEnable, CtOmit, CtDefault, CtMax,
+    CtThreadsafe, CtCompiler, CtOther,
+    category_name, classify,
+    enables_fts5, enables_rtree, enables_json1, enables_geopoly,
+    has_option,
+    Availability, AvAvailable, AvOmitted, AvNotEnabled,
+    availability_name, is_available, resolve,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+fn test_classify_enable() {
+    match classify("ENABLE_FTS5".clone())   { CtEnable => {}, _ => assert(false) }
+    match classify("ENABLE_RTREE".clone())  { CtEnable => {}, _ => assert(false) }
+    match classify("ENABLE_JSON1".clone())  { CtEnable => {}, _ => assert(false) }
+}
+
+fn test_classify_omit() {
+    match classify("OMIT_AUTHORIZATION".clone()) { CtOmit => {}, _ => assert(false) }
+    match classify("OMIT_TRIGGER".clone())       { CtOmit => {}, _ => assert(false) }
+}
+
+fn test_classify_default_and_max() {
+    match classify("DEFAULT_PAGE_SIZE=4096".clone()) { CtDefault => {}, _ => assert(false) }
+    match classify("MAX_VARIABLE_NUMBER=999".clone()) { CtMax => {}, _ => assert(false) }
+}
+
+fn test_classify_threadsafe() {
+    match classify("THREADSAFE=1".clone()) { CtThreadsafe => {}, _ => assert(false) }
+    match classify("THREADSAFE=0".clone()) { CtThreadsafe => {}, _ => assert(false) }
+    match classify("THREADSAFE=2".clone()) { CtThreadsafe => {}, _ => assert(false) }
+}
+
+fn test_classify_compiler() {
+    match classify("COMPILER=clang-15".clone()) { CtCompiler => {}, _ => assert(false) }
+}
+
+fn test_classify_other() {
+    match classify("HAVE_ISNAN".clone())      { CtOther => {}, _ => assert(false) }
+    match classify("USE_URI=1".clone())       { CtOther => {}, _ => assert(false) }
+}
+
+fn test_category_names() {
+    assert(category_name(&CtEnable)     == "enable".clone());
+    assert(category_name(&CtOmit)       == "omit".clone());
+    assert(category_name(&CtDefault)    == "default".clone());
+    assert(category_name(&CtMax)        == "max".clone());
+    assert(category_name(&CtThreadsafe) == "threadsafe".clone());
+    assert(category_name(&CtCompiler)   == "compiler".clone());
+    assert(category_name(&CtOther)      == "other".clone());
+}
+
+fn test_enable_helpers() {
+    assert(enables_fts5()    == "ENABLE_FTS5".clone());
+    assert(enables_rtree()   == "ENABLE_RTREE".clone());
+    assert(enables_json1()   == "ENABLE_JSON1".clone());
+    assert(enables_geopoly() == "ENABLE_GEOPOLY".clone());
+}
+
+fn test_has_option() {
+    let mut opts = List.new();
+    opts.push("ENABLE_FTS5".clone());
+    opts.push("THREADSAFE=1".clone());
+    assert(has_option("ENABLE_FTS5".clone(), opts.clone()));
+    assert(has_option("THREADSAFE=1".clone(), opts.clone()));
+    assert(!has_option("ENABLE_RTREE".clone(), opts.clone()));
+}
+
+fn test_availability_names() {
+    assert(availability_name(&AvAvailable)  == "available".clone());
+    assert(availability_name(&AvOmitted)    == "omitted".clone());
+    assert(availability_name(&AvNotEnabled) == "not_enabled".clone());
+    assert(is_available(&AvAvailable));
+    assert(!is_available(&AvOmitted));
+    assert(!is_available(&AvNotEnabled));
+}
+
+fn test_resolve_available() {
+    let mut opts = List.new();
+    opts.push("ENABLE_FTS5".clone());
+    match resolve("ENABLE_FTS5".clone(), "OMIT_FTS5".clone(), &opts) {
+        AvAvailable => {}, _ => assert(false),
+    }
+}
+
+fn test_resolve_omitted_wins() {
+    let mut opts = List.new();
+    opts.push("ENABLE_FTS5".clone());
+    opts.push("OMIT_FTS5".clone());
+    match resolve("ENABLE_FTS5".clone(), "OMIT_FTS5".clone(), &opts) {
+        AvOmitted => {}, _ => assert(false),
+    }
+}
+
+fn test_resolve_not_enabled() {
+    let opts: List<Text> = List.new();
+    match resolve("ENABLE_RTREE".clone(), "OMIT_RTREE".clone(), &opts) {
+        AvNotEnabled => {}, _ => assert(false),
+    }
+}
+
+fn main() {
+    test_classify_enable();
+    test_classify_omit();
+    test_classify_default_and_max();
+    test_classify_threadsafe();
+    test_classify_compiler();
+    test_classify_other();
+    test_category_names();
+    test_enable_helpers();
+    test_has_option();
+    test_availability_names();
+    test_resolve_available();
+    test_resolve_omitted_wins();
+    test_resolve_not_enabled();
+}

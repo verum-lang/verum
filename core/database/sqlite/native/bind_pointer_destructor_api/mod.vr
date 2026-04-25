@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/bind_pointer_destructor_api/mod.vr
+// =============================================================================
+// sqlite3_bind_pointer(stmt, idx, ptr, type, destructor) — added 3.20.
+// Carries an opaque caller-managed pointer + a type-tag string + a destructor
+// callback.  Engine invokes the destructor when the bound parameter is reset
+// or the stmt is finalised.  Used by carray() and json_each() etc.
+// Spec App E.B.
+// =============================================================================
+
+module core.database.sqlite.native.bind_pointer_destructor_api;
+
+public module slot;

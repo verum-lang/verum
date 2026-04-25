@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, progress_handler_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.progress_handler_api.handler.{
+    Config, unconfigured, install, is_active,
+    Effect, EfContinue, EfInterrupt,
+    effect_for_return, effect_name, aborts_stmt,
+    Tick, TkSilent, TkInvoke,
+    tick, tick_name, invokes_callback, interrupt_code,
+};
+mount base.{Bool, Int64};
+
+fn test_unconfigured_state() {
+    let c = unconfigured();
+    assert(!is_active(&c));
+    assert_eq(c.interval, 0);
+}
+
+fn test_install_clears_on_zero_or_negative() {
+    let c1 = install(0);
+    assert(!is_active(&c1));
+    let c2 = install(-5);
+    assert(!is_active(&c2));
+}
+
+fn test_install_positive_n() {
+    let c = install(1000);
+    assert(is_active(&c));
+    assert_eq(c.interval, 1000);
+}
+
+fn test_effect_for_return() {
+    match effect_for_return(0)  { EfContinue  => {}, _ => assert(false) }
+    match effect_for_return(1)  { EfInterrupt => {}, _ => assert(false) }
+    match effect_for_return(99) { EfInterrupt => {}, _ => assert(false) }
+}
+
+fn test_effect_names_and_aborts() {
+    assert(effect_name(&EfContinue)  == "continue".clone());
+    assert(effect_name(&EfInterrupt) == "interrupt".clone());
+    assert(aborts_stmt(&EfInterrupt));
+    assert(!aborts_stmt(&EfContinue));
+}
+
+fn test_tick_silent_when_unconfigured() {
+    let c = unconfigured();
+    match tick(&c, 1000 as Int64) { TkSilent => {}, _ => assert(false) }
+}
+
+fn test_tick_silent_when_not_at_interval() {
+    let c = install(100);
+    match tick(&c, 50 as Int64)  { TkSilent => {}, _ => assert(false) }
+    match tick(&c, 99 as Int64)  { TkSilent => {}, _ => assert(false) }
+    match tick(&c, 101 as Int64) { TkSilent => {}, _ => assert(false) }
+}
+
+fn test_tick_invokes_at_interval_boundaries() {
+    let c = install(100);
+    match tick(&c, 0 as Int64)   { TkInvoke => {}, _ => assert(false) }
+    match tick(&c, 100 as Int64) { TkInvoke => {}, _ => assert(false) }
+    match tick(&c, 200 as Int64) { TkInvoke => {}, _ => assert(false) }
+    match tick(&c, 1000 as Int64) { TkInvoke => {}, _ => assert(false) }
+}
+
+fn test_tick_names_and_invokes() {
+    assert(tick_name(&TkSilent) == "silent".clone());
+    assert(tick_name(&TkInvoke) == "invoke".clone());
+    assert(invokes_callback(&TkInvoke));
+    assert(!invokes_callback(&TkSilent));
+}
+
+fn test_interrupt_code() {
+    assert_eq(interrupt_code(), 9);
+}
+
+fn main() {
+    test_unconfigured_state();
+    test_install_clears_on_zero_or_negative();
+    test_install_positive_n();
+    test_effect_for_return();
+    test_effect_names_and_aborts();
+    test_tick_silent_when_unconfigured();
+    test_tick_silent_when_not_at_interval();
+    test_tick_invokes_at_interval_boundaries();
+    test_tick_names_and_invokes();
+    test_interrupt_code();
+}

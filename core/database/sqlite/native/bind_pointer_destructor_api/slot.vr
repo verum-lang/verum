@@ -1,0 +1,98 @@
+// sqlite3_bind_pointer slot lifecycle.
+
+module core.database.sqlite.native.bind_pointer_destructor_api.slot;
+
+mount base.{Bool, Int64, Text};
+
+// SQLite uses three "well-known" destructor sentinel values:
+//   SQLITE_STATIC      ((destructor*)0)         — caller manages, no callback
+//   SQLITE_TRANSIENT   ((destructor*)-1)        — engine copies + frees its copy
+//   custom callback                              — engine calls user fn
+public type Destructor is
+    | DStatic
+    | DTransient
+    | DCallback         // user-supplied; we model presence only
+    ;
+
+public fn destructor_name(d: &Destructor) -> Text {
+    match d {
+        DStatic    => "static".clone(),
+        DTransient => "transient".clone(),
+        DCallback  => "callback".clone(),
+    }
+}
+
+// Per-slot state.
+public type Slot is {
+    bound: Bool,
+    type_tag: Text,         // e.g. "carray" — sqlite3_value_pointer requires match
+    destructor: Destructor,
+};
+
+public fn empty_slot() -> Slot {
+    Slot { bound: false, type_tag: "".clone(), destructor: DStatic }
+}
+
+public fn bind(mut s: Slot, type_tag: Text, d: Destructor) -> Slot {
+    s.bound = true;
+    s.type_tag = type_tag;
+    s.destructor = d;
+    s
+}
+
+// Reset: invoked when sqlite3_reset / sqlite3_clear_bindings / sqlite3_finalize
+// drops the binding.  Returns whether the destructor needs to fire.
+public type ResetEffect is
+    | ReNoop
+    | ReFireCallback
+    | ReEngineFreesCopy   // SQLITE_TRANSIENT — engine already owns the copy
+    ;
+
+public fn reset_effect(s: &Slot) -> ResetEffect {
+    if !s.bound { return ReNoop; }
+    match s.destructor {
+        DStatic    => ReNoop,
+        DTransient => ReEngineFreesCopy,
+        DCallback  => ReFireCallback,
+    }
+}
+
+public fn reset_effect_name(e: &ResetEffect) -> Text {
+    match e {
+        ReNoop              => "noop".clone(),
+        ReFireCallback      => "fire_callback".clone(),
+        ReEngineFreesCopy   => "engine_frees_copy".clone(),
+    }
+}
+
+public fn fires_callback(e: &ResetEffect) -> Bool {
+    match e { ReFireCallback => true, _ => false }
+}
+
+// After the reset effect fires, the slot is logically unbound.
+public fn after_reset(s: &Slot) -> Slot {
+    let mut out = empty_slot();
+    let _ = s;
+    out
+}
+
+// Tag-mismatch validator — used by sqlite3_value_pointer.
+public type TagMatch is
+    | TmExact
+    | TmDifferent
+    | TmEmpty           // slot has no type tag
+    ;
+
+public fn match_tag(s: &Slot, expected: Text) -> TagMatch {
+    if !s.bound { return TmEmpty; }
+    if s.type_tag == expected { return TmExact; }
+    TmDifferent
+}
+
+public fn match_name(t: &TagMatch) -> Text {
+    match t {
+        TmExact     => "exact".clone(),
+        TmDifferent => "different".clone(),
+        TmEmpty     => "empty".clone(),
+    }
+}

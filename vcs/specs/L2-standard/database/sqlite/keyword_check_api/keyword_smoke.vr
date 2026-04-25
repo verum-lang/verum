@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, keyword_check_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.keyword_check_api.table.{
+    keyword_count,
+    Hardness, KhFallback, KhAlways, hardness_of, hardness_name,
+    CheckResult, CrIsKeyword, CrNotKeyword,
+    check, check_int, check_name, is_valid_index,
+    QuoteAdvice, QaUnquoted, QaDoubleQuote,
+    quoting_for, quote_name,
+};
+mount base.{Bool};
+
+fn test_keyword_count() {
+    assert_eq(keyword_count(), 147);
+}
+
+fn test_hardness_always() {
+    match hardness_of("select".clone()) { KhAlways => {}, _ => assert(false) }
+    match hardness_of("from".clone())   { KhAlways => {}, _ => assert(false) }
+    match hardness_of("create".clone()) { KhAlways => {}, _ => assert(false) }
+}
+
+fn test_hardness_fallback() {
+    match hardness_of("rowid".clone())  { KhFallback => {}, _ => assert(false) }
+    match hardness_of("oid".clone())    { KhFallback => {}, _ => assert(false) }
+    match hardness_of("match".clone())  { KhFallback => {}, _ => assert(false) }
+    match hardness_of("regexp".clone()) { KhFallback => {}, _ => assert(false) }
+}
+
+fn test_hardness_names() {
+    assert(hardness_name(&KhAlways)   == "always".clone());
+    assert(hardness_name(&KhFallback) == "fallback".clone());
+}
+
+fn test_check_known_keywords() {
+    match check("select".clone()) { CrIsKeyword => {}, _ => assert(false) }
+    match check("update".clone()) { CrIsKeyword => {}, _ => assert(false) }
+    match check("rowid".clone())  { CrIsKeyword => {}, _ => assert(false) }
+}
+
+fn test_check_non_keyword() {
+    match check("foo".clone())     { CrNotKeyword => {}, _ => assert(false) }
+    match check("user_id".clone()) { CrNotKeyword => {}, _ => assert(false) }
+}
+
+fn test_check_int_projection() {
+    assert_eq(check_int(&CrIsKeyword), 1);
+    assert_eq(check_int(&CrNotKeyword), 0);
+}
+
+fn test_check_names() {
+    assert(check_name(&CrIsKeyword)  == "is_keyword".clone());
+    assert(check_name(&CrNotKeyword) == "not_keyword".clone());
+}
+
+fn test_index_validity() {
+    assert(is_valid_index(0));
+    assert(is_valid_index(146));
+    assert(!is_valid_index(-1));
+    assert(!is_valid_index(147));
+    assert(!is_valid_index(1000));
+}
+
+fn test_quoting_advice() {
+    match quoting_for("select".clone()) { QaDoubleQuote => {}, _ => assert(false) }
+    match quoting_for("foo".clone())    { QaUnquoted    => {}, _ => assert(false) }
+    assert(quote_name(&QaUnquoted)    == "unquoted".clone());
+    assert(quote_name(&QaDoubleQuote) == "double_quote".clone());
+}
+
+fn main() {
+    test_keyword_count();
+    test_hardness_always();
+    test_hardness_fallback();
+    test_hardness_names();
+    test_check_known_keywords();
+    test_check_non_keyword();
+    test_check_int_projection();
+    test_check_names();
+    test_index_validity();
+    test_quoting_advice();
+}

@@ -1,0 +1,57 @@
+// sqlite3_value_pointer — type-tagged pointer retrieval.
+
+module core.database.sqlite.native.value_pointer_type_api.retrieve;
+
+mount base.{Bool, Text};
+
+// What the engine stored in the value cell.
+public type StoredKind is
+    | SkNoPointer        // value is INTEGER/TEXT/BLOB/etc — no pointer at all
+    | SkPointer(Text)    // pointer with the given type tag
+    ;
+
+public fn stored_name(s: &StoredKind) -> Text {
+    match s {
+        SkNoPointer    => "no_pointer".clone(),
+        SkPointer(_)   => "pointer".clone(),
+    }
+}
+
+// Result of sqlite3_value_pointer(value, expected_type).
+public type Outcome is
+    | OkMatch              // pointer returned; type matched
+    | OkNullDifferentTag    // returned NULL — pointer exists but tag mismatched
+    | OkNullNoPointer       // returned NULL — value has no pointer at all
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkMatch             => "ok_match".clone(),
+        OkNullDifferentTag  => "ok_null_different_tag".clone(),
+        OkNullNoPointer     => "ok_null_no_pointer".clone(),
+    }
+}
+
+public fn returned_non_null(o: &Outcome) -> Bool {
+    match o { OkMatch => true, _ => false }
+}
+
+public fn retrieve(stored: &StoredKind, expected: Text) -> Outcome {
+    match stored {
+        SkNoPointer     => OkNullNoPointer,
+        SkPointer(tag)  => {
+            if tag.clone() == expected { OkMatch } else { OkNullDifferentTag }
+        },
+    }
+}
+
+// Common type tags used in the SQLite extension corpus.
+public fn tag_carray() -> Text { "carray".clone() }
+public fn tag_pointer_passthrough() -> Text { "carray".clone() }
+public fn tag_jsonb() -> Text { "jsonb".clone() }
+
+// Validity check: tag must be a non-empty ASCII string in upstream contracts.
+// We don't enforce ASCII here — only emptiness.
+public fn is_valid_tag(t: Text) -> Bool {
+    !(t == "".clone())
+}

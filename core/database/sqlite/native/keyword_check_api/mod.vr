@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/keyword_check_api/mod.vr
+// =============================================================================
+// sqlite3_keyword_count() / sqlite3_keyword_name(idx, ...) /
+// sqlite3_keyword_check(name, len) — added 3.24.  Accessor for the SQLite
+// reserved-word table (147 keywords as of 3.45).  Useful for IDE auto-quoting
+// and identifier-validation logic.  Spec App E.K.
+// =============================================================================
+
+module core.database.sqlite.native.keyword_check_api;
+
+public module table;

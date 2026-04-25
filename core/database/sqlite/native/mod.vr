@@ -860,3 +860,19 @@ public module union_all_flatten_api;
 public module vtab_savepoint_methods;
 // - aggregate_window_fn_api: xStep/xFinal/xValue/xInverse capability + Verdict + FrameAction
 public module aggregate_window_fn_api;
+// - prepare_v3_flags_api: PREPARE_PERSISTENT/NORMALIZE/NO_VTAB/DONT_LOG bit field
+public module prepare_v3_flags_api;
+// - bind_pointer_destructor_api: STATIC/TRANSIENT/CALLBACK destructor + tag-match
+public module bind_pointer_destructor_api;
+// - value_pointer_type_api: sqlite3_value_pointer + StoredKind + 3-outcome retrieve
+public module value_pointer_type_api;
+// - aggregate_context_api: lazy-allocate slot + 3-outcome (Ptr/NullN0/Nomem) + CallResult
+public module aggregate_context_api;
+// - keyword_check_api: 147-keyword count + Hardness (always/fallback) + QuoteAdvice
+public module keyword_check_api;
+// - compile_options_pragma: SQLITE_ENABLE/OMIT/DEFAULT/MAX/THREADSAFE/COMPILER + Availability
+public module compile_options_pragma;
+// - progress_handler_api: VDBE-tick callback + EfContinue/Interrupt + interrupt_code=9
+public module progress_handler_api;
+// - vtab_nochange_api: ColumnState (ExplicitNew/Null/Unchanged) + xUpdate WriteAction
+public module vtab_nochange_api;

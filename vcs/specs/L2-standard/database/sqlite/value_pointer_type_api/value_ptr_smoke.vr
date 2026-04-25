@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, value_pointer_type_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.value_pointer_type_api.retrieve.{
+    StoredKind, SkNoPointer, SkPointer, stored_name,
+    Outcome, OkMatch, OkNullDifferentTag, OkNullNoPointer,
+    outcome_name, returned_non_null, retrieve,
+    tag_carray, tag_jsonb, is_valid_tag,
+};
+mount base.{Bool};
+
+fn test_stored_kind_names() {
+    assert(stored_name(&SkNoPointer)               == "no_pointer".clone());
+    assert(stored_name(&SkPointer("carray".clone())) == "pointer".clone());
+}
+
+fn test_retrieve_no_pointer_returns_null() {
+    match retrieve(&SkNoPointer, tag_carray()) { OkNullNoPointer => {}, _ => assert(false) }
+}
+
+fn test_retrieve_matching_tag_returns_pointer() {
+    match retrieve(&SkPointer(tag_carray()), tag_carray()) { OkMatch => {}, _ => assert(false) }
+}
+
+fn test_retrieve_mismatched_tag_returns_null() {
+    match retrieve(&SkPointer(tag_carray()), tag_jsonb()) { OkNullDifferentTag => {}, _ => assert(false) }
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&OkMatch)             == "ok_match".clone());
+    assert(outcome_name(&OkNullDifferentTag)  == "ok_null_different_tag".clone());
+    assert(outcome_name(&OkNullNoPointer)     == "ok_null_no_pointer".clone());
+}
+
+fn test_returned_non_null_predicate() {
+    assert(returned_non_null(&OkMatch));
+    assert(!returned_non_null(&OkNullDifferentTag));
+    assert(!returned_non_null(&OkNullNoPointer));
+}
+
+fn test_tag_helpers() {
+    assert(tag_carray() == "carray".clone());
+    assert(tag_jsonb()  == "jsonb".clone());
+}
+
+fn test_is_valid_tag() {
+    assert(is_valid_tag("carray".clone()));
+    assert(!is_valid_tag("".clone()));
+}
+
+fn main() {
+    test_stored_kind_names();
+    test_retrieve_no_pointer_returns_null();
+    test_retrieve_matching_tag_returns_pointer();
+    test_retrieve_mismatched_tag_returns_null();
+    test_outcome_names();
+    test_returned_non_null_predicate();
+    test_tag_helpers();
+    test_is_valid_tag();
+}

@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/prepare_v3_flags_api/mod.vr
+// =============================================================================
+// sqlite3_prepare_v3() — added 3.20.  Adds a `prepFlags` argument:
+//   SQLITE_PREPARE_PERSISTENT (0x01) — long-lived stmt; planner avoids LRU evict
+//   SQLITE_PREPARE_NORMALIZE  (0x02) — deprecated, ignored
+//   SQLITE_PREPARE_NO_VTAB    (0x04) — never reference virtual tables
+//   SQLITE_PREPARE_DONT_LOG   (0x10) — suppress "no such table" log entries
+// Spec App E.P.
+// =============================================================================
+
+module core.database.sqlite.native.prepare_v3_flags_api;
+
+public module flags;

@@ -1,0 +1,104 @@
+// SQLite reserved-word table — sqlite3_keyword_count / _name / _check.
+
+module core.database.sqlite.native.keyword_check_api.table;
+
+mount base.{Bool, Text};
+
+// Count of well-known reserved words (147 in 3.45).
+public fn keyword_count() -> Int { 147 }
+
+// Subset that always behaves as a reserved keyword (cannot be used as
+// unquoted identifier even outside of context-sensitive positions).
+public type Hardness is
+    | KhFallback        // can be used as identifier (e.g. ROWID, OID)
+    | KhAlways           // always reserved (SELECT, FROM, etc.)
+    ;
+
+public fn hardness_of(name: Text) -> Hardness {
+    if name == "select".clone() { return KhAlways; }
+    if name == "from".clone()   { return KhAlways; }
+    if name == "where".clone()  { return KhAlways; }
+    if name == "create".clone() { return KhAlways; }
+    if name == "table".clone()  { return KhAlways; }
+    if name == "index".clone()  { return KhAlways; }
+    if name == "delete".clone() { return KhAlways; }
+    if name == "update".clone() { return KhAlways; }
+    if name == "insert".clone() { return KhAlways; }
+    if name == "join".clone()   { return KhAlways; }
+    if name == "rowid".clone()  { return KhFallback; }
+    if name == "oid".clone()    { return KhFallback; }
+    if name == "match".clone()  { return KhFallback; }
+    if name == "regexp".clone() { return KhFallback; }
+    KhAlways    // safe default for the catalogue surface
+}
+
+public fn hardness_name(h: &Hardness) -> Text {
+    match h {
+        KhFallback => "fallback".clone(),
+        KhAlways   => "always".clone(),
+    }
+}
+
+// sqlite3_keyword_check(name, len) → 1 if name is a keyword, 0 otherwise.
+public type CheckResult is
+    | CrIsKeyword
+    | CrNotKeyword
+    ;
+
+public fn check(name: Text) -> CheckResult {
+    if name == "select".clone() { return CrIsKeyword; }
+    if name == "from".clone()   { return CrIsKeyword; }
+    if name == "where".clone()  { return CrIsKeyword; }
+    if name == "create".clone() { return CrIsKeyword; }
+    if name == "table".clone()  { return CrIsKeyword; }
+    if name == "index".clone()  { return CrIsKeyword; }
+    if name == "delete".clone() { return CrIsKeyword; }
+    if name == "update".clone() { return CrIsKeyword; }
+    if name == "insert".clone() { return CrIsKeyword; }
+    if name == "join".clone()   { return CrIsKeyword; }
+    if name == "rowid".clone()  { return CrIsKeyword; }
+    if name == "oid".clone()    { return CrIsKeyword; }
+    if name == "match".clone()  { return CrIsKeyword; }
+    if name == "regexp".clone() { return CrIsKeyword; }
+    if name == "cast".clone()   { return CrIsKeyword; }
+    if name == "case".clone()   { return CrIsKeyword; }
+    if name == "when".clone()   { return CrIsKeyword; }
+    CrNotKeyword
+}
+
+public fn check_int(c: &CheckResult) -> Int {
+    match c { CrIsKeyword => 1, CrNotKeyword => 0 }
+}
+
+public fn check_name(c: &CheckResult) -> Text {
+    match c {
+        CrIsKeyword  => "is_keyword".clone(),
+        CrNotKeyword => "not_keyword".clone(),
+    }
+}
+
+// Index validity for sqlite3_keyword_name(idx, ...).
+public fn is_valid_index(i: Int) -> Bool {
+    i >= 0 && i < keyword_count()
+}
+
+// Identifier-quoting recommendation: if the candidate is a keyword we'd quote
+// it with double-quotes.
+public type QuoteAdvice is
+    | QaUnquoted
+    | QaDoubleQuote
+    ;
+
+public fn quoting_for(name: Text) -> QuoteAdvice {
+    match check(name) {
+        CrIsKeyword  => QaDoubleQuote,
+        CrNotKeyword => QaUnquoted,
+    }
+}
+
+public fn quote_name(q: &QuoteAdvice) -> Text {
+    match q {
+        QaUnquoted    => "unquoted".clone(),
+        QaDoubleQuote => "double_quote".clone(),
+    }
+}

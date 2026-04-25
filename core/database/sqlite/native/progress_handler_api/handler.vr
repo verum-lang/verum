@@ -1,0 +1,71 @@
+// sqlite3_progress_handler — VDBE-instruction-tick callback model.
+
+module core.database.sqlite.native.progress_handler_api.handler;
+
+mount base.{Bool, Int64, Text};
+
+public type Config is {
+    interval: Int,         // N — every N opcodes invoke callback
+    installed: Bool,       // false ↔ no progress handler set
+};
+
+public fn unconfigured() -> Config {
+    Config { interval: 0, installed: false }
+}
+
+// Install the handler.  N=0 (or negative) clears it.
+public fn install(n: Int) -> Config {
+    if n <= 0 { return unconfigured(); }
+    Config { interval: n, installed: true }
+}
+
+public fn is_active(c: &Config) -> Bool { c.installed }
+
+// Effect of a single callback return code.
+public type Effect is
+    | EfContinue           // return 0 → keep running
+    | EfInterrupt          // non-zero → abort with SQLITE_INTERRUPT
+    ;
+
+public fn effect_for_return(rc: Int) -> Effect {
+    if rc == 0 { EfContinue } else { EfInterrupt }
+}
+
+public fn effect_name(e: &Effect) -> Text {
+    match e {
+        EfContinue  => "continue".clone(),
+        EfInterrupt => "interrupt".clone(),
+    }
+}
+
+public fn aborts_stmt(e: &Effect) -> Bool {
+    match e { EfInterrupt => true, _ => false }
+}
+
+// Counter of executed opcodes.  When (count % interval == 0) the engine
+// invokes the callback.
+public type Tick is
+    | TkSilent
+    | TkInvoke
+    ;
+
+public fn tick(c: &Config, opcodes_executed: Int64) -> Tick {
+    if !c.installed { return TkSilent; }
+    if c.interval == 0 { return TkSilent; }
+    let n = c.interval as Int64;
+    if (opcodes_executed % n) == (0 as Int64) { TkInvoke } else { TkSilent }
+}
+
+public fn tick_name(t: &Tick) -> Text {
+    match t {
+        TkSilent => "silent".clone(),
+        TkInvoke => "invoke".clone(),
+    }
+}
+
+public fn invokes_callback(t: &Tick) -> Bool {
+    match t { TkInvoke => true, _ => false }
+}
+
+// Result code constant for SQLITE_INTERRUPT.
+public fn interrupt_code() -> Int { 9 }

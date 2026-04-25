@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind_pointer_destructor_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bind_pointer_destructor_api.slot.{
+    Destructor, DStatic, DTransient, DCallback, destructor_name,
+    Slot, empty_slot, bind,
+    ResetEffect, ReNoop, ReFireCallback, ReEngineFreesCopy,
+    reset_effect, reset_effect_name, fires_callback, after_reset,
+    TagMatch, TmExact, TmDifferent, TmEmpty,
+    match_tag, match_name,
+};
+mount base.{Bool};
+
+fn test_destructor_names() {
+    assert(destructor_name(&DStatic)    == "static".clone());
+    assert(destructor_name(&DTransient) == "transient".clone());
+    assert(destructor_name(&DCallback)  == "callback".clone());
+}
+
+fn test_empty_slot_state() {
+    let s = empty_slot();
+    assert(!s.bound);
+    assert(s.type_tag == "".clone());
+    match reset_effect(&s) { ReNoop => {}, _ => assert(false) }
+}
+
+fn test_bind_and_reset_static() {
+    let s = bind(empty_slot(), "carray".clone(), DStatic);
+    match reset_effect(&s) { ReNoop => {}, _ => assert(false) }
+}
+
+fn test_bind_and_reset_transient() {
+    let s = bind(empty_slot(), "carray".clone(), DTransient);
+    match reset_effect(&s) { ReEngineFreesCopy => {}, _ => assert(false) }
+    assert(!fires_callback(&ReEngineFreesCopy));
+}
+
+fn test_bind_and_reset_callback() {
+    let s = bind(empty_slot(), "jsonb".clone(), DCallback);
+    let r = reset_effect(&s);
+    match r { ReFireCallback => {}, _ => assert(false) }
+    assert(fires_callback(&r));
+}
+
+fn test_reset_effect_names() {
+    assert(reset_effect_name(&ReNoop)            == "noop".clone());
+    assert(reset_effect_name(&ReFireCallback)    == "fire_callback".clone());
+    assert(reset_effect_name(&ReEngineFreesCopy) == "engine_frees_copy".clone());
+}
+
+fn test_after_reset_clears() {
+    let s = bind(empty_slot(), "carray".clone(), DCallback);
+    let cleared = after_reset(&s);
+    assert(!cleared.bound);
+}
+
+fn test_match_tag_outcomes() {
+    let bound = bind(empty_slot(), "carray".clone(), DStatic);
+    match match_tag(&bound, "carray".clone()) { TmExact     => {}, _ => assert(false) }
+    match match_tag(&bound, "jsonb".clone())  { TmDifferent => {}, _ => assert(false) }
+    match match_tag(&empty_slot(), "carray".clone()) { TmEmpty => {}, _ => assert(false) }
+}
+
+fn test_match_names() {
+    assert(match_name(&TmExact)     == "exact".clone());
+    assert(match_name(&TmDifferent) == "different".clone());
+    assert(match_name(&TmEmpty)     == "empty".clone());
+}
+
+fn main() {
+    test_destructor_names();
+    test_empty_slot_state();
+    test_bind_and_reset_static();
+    test_bind_and_reset_transient();
+    test_bind_and_reset_callback();
+    test_reset_effect_names();
+    test_after_reset_clears();
+    test_match_tag_outcomes();
+    test_match_names();
+}
