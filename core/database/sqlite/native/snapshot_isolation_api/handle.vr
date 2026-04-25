@@ -4,15 +4,15 @@ module core.database.sqlite.native.snapshot_isolation_api.handle;
 
 mount base.{Bool, Int64};
 
-public type SnapshotHandle is {
+public type SnapshotIsolationHandle is {
     id: Int64,
     wal_generation: Int64,
     cookie: Int64,
     freed: Bool,
 };
 
-public fn new(id: Int64, wal_generation: Int64, cookie: Int64) -> SnapshotHandle {
-    SnapshotHandle {
+public fn new(id: Int64, wal_generation: Int64, cookie: Int64) -> SnapshotIsolationHandle {
+    SnapshotIsolationHandle {
         id: id,
         wal_generation: wal_generation,
         cookie: cookie,
@@ -20,17 +20,17 @@ public fn new(id: Int64, wal_generation: Int64, cookie: Int64) -> SnapshotHandle
     }
 }
 
-public fn free(mut h: SnapshotHandle) -> SnapshotHandle {
+public fn free(mut h: SnapshotIsolationHandle) -> SnapshotIsolationHandle {
     h.freed = true;
     h
 }
 
-public fn is_live(h: &SnapshotHandle) -> Bool {
+public fn is_live(h: &SnapshotIsolationHandle) -> Bool {
     !h.freed
 }
 
 // Snapshot ordering via WAL generation — needed for sqlite3_snapshot_cmp.
-public fn compare(a: &SnapshotHandle, b: &SnapshotHandle) -> Int {
+public fn compare(a: &SnapshotIsolationHandle, b: &SnapshotIsolationHandle) -> Int {
     if a.wal_generation < b.wal_generation { return -1; }
     if a.wal_generation > b.wal_generation { return 1; }
     if a.cookie < b.cookie { return -1; }
@@ -38,6 +38,6 @@ public fn compare(a: &SnapshotHandle, b: &SnapshotHandle) -> Int {
     0
 }
 
-public fn same_snapshot(a: &SnapshotHandle, b: &SnapshotHandle) -> Bool {
+public fn same_snapshot(a: &SnapshotIsolationHandle, b: &SnapshotIsolationHandle) -> Bool {
     compare(a, b) == 0
 }

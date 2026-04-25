@@ -12,7 +12,7 @@ mount core.database.sqlite.native.snapshot_isolation_api.level.{
     default_in_wal_mode, strictness_rank, is_stronger_than,
 };
 mount core.database.sqlite.native.snapshot_isolation_api.handle.{
-    SnapshotHandle,
+    SnapshotIsolationHandle,
     new, free, is_live, compare, same_snapshot,
 };
 mount base.{Bool, Int64};

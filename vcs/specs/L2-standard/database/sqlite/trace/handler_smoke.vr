@@ -6,14 +6,14 @@
 // @expected-exit: 0
 //
 // trace_v2 surface:
-//   * TraceEvent kind names
+//   * SqliteTraceEvent kind names
 //   * TraceMask include/exclude/covers
 //   * TracePayload kind names
 //   * CountingHandler observes every event
 //   * SilentHandler discards everything
 
 mount core.database.sqlite.native.trace.event.{
-    TraceEvent, TeStmt, TeProfile, TeRow, TeClose,
+    SqliteTraceEvent, TeStmt, TeProfile, TeRow, TeClose,
     event_kind_name, event_bit, mask_includes,
     TraceMask, mask_empty, mask_all,
     TRACE_STMT, TRACE_PROFILE, TRACE_ROW, TRACE_CLOSE,

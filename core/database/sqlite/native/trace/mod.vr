@@ -18,7 +18,7 @@
 // L4 interpreter + L7 façade.
 //
 // Submodules:
-//   * `event`     — TraceEvent sum + mask flags
+//   * `event`     — SqliteTraceEvent sum + mask flags
 //   * `payload`   — per-event payload records
 //   * `handler`   — TraceHandler protocol + chain composition
 // =============================================================================

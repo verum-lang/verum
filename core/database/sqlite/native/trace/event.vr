@@ -1,5 +1,5 @@
 // =============================================================================
-// trace/event.vr — TraceEvent + mask flags
+// trace/event.vr — SqliteTraceEvent + mask flags
 // =============================================================================
 // Spec: sqlite-native.md §22 (sqlite3_trace_v2)
 //
@@ -16,9 +16,9 @@ module core.database.sqlite.native.trace.event;
 mount core.*;
 mount base.{Text, Bool};
 
-public type TraceEvent is TeStmt | TeProfile | TeRow | TeClose;
+public type SqliteTraceEvent is TeStmt | TeProfile | TeRow | TeClose;
 
-public fn event_kind_name(e: &TraceEvent) -> Text {
+public fn event_kind_name(e: &SqliteTraceEvent) -> Text {
     match e {
         TeStmt    => "stmt".clone(),
         TeProfile => "profile".clone(),
@@ -32,7 +32,7 @@ public const TRACE_PROFILE: Int = 0x02;
 public const TRACE_ROW: Int     = 0x04;
 public const TRACE_CLOSE: Int   = 0x08;
 
-public fn event_bit(e: &TraceEvent) -> Int {
+public fn event_bit(e: &SqliteTraceEvent) -> Int {
     match e {
         TeStmt    => TRACE_STMT,
         TeProfile => TRACE_PROFILE,
@@ -41,7 +41,7 @@ public fn event_bit(e: &TraceEvent) -> Int {
     }
 }
 
-public fn mask_includes(mask: Int, e: &TraceEvent) -> Bool {
+public fn mask_includes(mask: Int, e: &SqliteTraceEvent) -> Bool {
     (mask & event_bit(e)) != 0
 }
 
@@ -58,17 +58,17 @@ public fn mask_all() -> TraceMask {
 }
 
 implement TraceMask {
-    pub fn include(mut self, e: TraceEvent) -> TraceMask {
+    pub fn include(mut self, e: SqliteTraceEvent) -> TraceMask {
         self.bits = self.bits | event_bit(&e);
         self
     }
 
-    pub fn exclude(mut self, e: TraceEvent) -> TraceMask {
+    pub fn exclude(mut self, e: SqliteTraceEvent) -> TraceMask {
         self.bits = self.bits & !event_bit(&e);
         self
     }
 
-    public fn covers(&self, e: &TraceEvent) -> Bool { mask_includes(self.bits, e) }
+    public fn covers(&self, e: &SqliteTraceEvent) -> Bool { mask_includes(self.bits, e) }
 
     public fn raw_bits(&self) -> Int { self.bits }
 }

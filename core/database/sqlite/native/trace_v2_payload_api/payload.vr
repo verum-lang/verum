@@ -10,45 +10,45 @@ public fn f_profile() -> Int64 { 0x02 as Int64 }
 public fn f_row()     -> Int64 { 0x04 as Int64 }
 public fn f_close()   -> Int64 { 0x08 as Int64 }
 
-public type TraceEvent is
+public type TraceV2Event is
     | TeStmt { expanded_sql: Text }
     | TeProfile { elapsed_ns: Int64 }
     | TeRow                            // a row has been produced
     | TeClose                          // sqlite3_close
     ;
 
-public fn event_name(e: &TraceEvent) -> Text {
+public fn event_name(e: &TraceV2Event) -> Text {
     match e {
-        TraceEvent.TeStmt { .. }    => "STMT".clone(),
-        TraceEvent.TeProfile { .. } => "PROFILE".clone(),
-        TraceEvent.TeRow            => "ROW".clone(),
-        TraceEvent.TeClose          => "CLOSE".clone(),
+        TraceV2Event.TeStmt { .. }    => "STMT".clone(),
+        TraceV2Event.TeProfile { .. } => "PROFILE".clone(),
+        TraceV2Event.TeRow            => "ROW".clone(),
+        TraceV2Event.TeClose          => "CLOSE".clone(),
     }
 }
 
-public fn event_mask_bit(e: &TraceEvent) -> Int64 {
+public fn event_mask_bit(e: &TraceV2Event) -> Int64 {
     match e {
-        TraceEvent.TeStmt { .. }    => f_stmt(),
-        TraceEvent.TeProfile { .. } => f_profile(),
-        TraceEvent.TeRow            => f_row(),
-        TraceEvent.TeClose          => f_close(),
+        TraceV2Event.TeStmt { .. }    => f_stmt(),
+        TraceV2Event.TeProfile { .. } => f_profile(),
+        TraceV2Event.TeRow            => f_row(),
+        TraceV2Event.TeClose          => f_close(),
     }
 }
 
-public fn carries_sql(e: &TraceEvent) -> Bool {
-    match e { TraceEvent.TeStmt { .. } => true, _ => false }
+public fn carries_sql(e: &TraceV2Event) -> Bool {
+    match e { TraceV2Event.TeStmt { .. } => true, _ => false }
 }
 
-public fn carries_elapsed(e: &TraceEvent) -> Bool {
-    match e { TraceEvent.TeProfile { .. } => true, _ => false }
+public fn carries_elapsed(e: &TraceV2Event) -> Bool {
+    match e { TraceV2Event.TeProfile { .. } => true, _ => false }
 }
 
-public fn is_terminal_event(e: &TraceEvent) -> Bool {
-    match e { TraceEvent.TeClose => true, _ => false }
+public fn is_terminal_event(e: &TraceV2Event) -> Bool {
+    match e { TraceV2Event.TeClose => true, _ => false }
 }
 
 // Whether an event is active given the current mask.
-public fn is_enabled(e: &TraceEvent, mask: Int64) -> Bool {
+public fn is_enabled(e: &TraceV2Event, mask: Int64) -> Bool {
     (mask & event_mask_bit(e)) != (0 as Int64)
 }
 

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.wal_autocheckpoint_pragma.setting.{
-    Setting, default_threshold, default_setting, new,
+    WalAutocheckpointSetting, default_threshold, default_setting, new,
     is_enabled, record_frame, record_commit,
     should_checkpoint, reset_after_checkpoint,
     frames_until_checkpoint, mode_name,

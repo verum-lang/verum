@@ -15,7 +15,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.trace.event.{
-    TraceEvent, TraceMask, mask_empty, mask_all,
+    SqliteTraceEvent, TraceMask, mask_empty, mask_all,
 };
 mount core.database.sqlite.native.trace.payload.{TracePayload};
 
@@ -83,6 +83,6 @@ implement TraceHandler for SilentHandler {
 // Decision helper — should this handler observe `event`?
 // -----------------------------------------------------------------------------
 
-public fn handler_observes(handler_mask: &TraceMask, event: &TraceEvent) -> Bool {
+public fn handler_observes(handler_mask: &TraceMask, event: &SqliteTraceEvent) -> Bool {
     handler_mask.covers(event)
 }

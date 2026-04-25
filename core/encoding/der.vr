@@ -129,10 +129,10 @@ public type BitString is {
 };
 
 // =============================================================================
-// Time — UTCTime + GeneralizedTime both lowered to this shape
+// DerTime — UTCTime + GeneralizedTime both lowered to this shape
 // =============================================================================
 
-public type Time is {
+public type DerTime is {
     year:   UInt32,
     month:  UInt8,      // 1..=12
     day:    UInt8,      // 1..=31
@@ -535,10 +535,10 @@ implement DerReader {
         Ok(Text.from_utf8_lossy(bytes.as_slice()))
     }
 
-    // --- Time ---
+    // --- DerTime ---
 
     /// UTCTime: YYMMDDHHMMSSZ — RFC 5280 restricts to YYMMDDHHMMSSZ form.
-    public fn read_utc_time(&mut self) -> Result<Time, DerError> {
+    public fn read_utc_time(&mut self) -> Result<DerTime, DerError> {
         let len = self.read_universal(TAG_UTC_TIME, false)?;
         if len != 13 {
             return Err(err(InvalidTime, self.pos, "UTCTime must be 13 bytes"));
@@ -556,14 +556,14 @@ implement DerReader {
         let mn = parse_digits_2(&bytes, 8)?;
         let ss = parse_digits_2(&bytes, 10)?;
         validate_time(year, mm, dd, hh, mn, ss, self.pos)?;
-        Ok(Time {
+        Ok(DerTime {
             year: year, month: mm as UInt8, day: dd as UInt8,
             hour: hh as UInt8, minute: mn as UInt8, second: ss as UInt8,
         })
     }
 
     /// GeneralizedTime: YYYYMMDDHHMMSSZ — RFC 5280 restricts form.
-    public fn read_generalized_time(&mut self) -> Result<Time, DerError> {
+    public fn read_generalized_time(&mut self) -> Result<DerTime, DerError> {
         let len = self.read_universal(TAG_GENERALIZED_TIME, false)?;
         if len != 15 {
             return Err(err(InvalidTime, self.pos, "GeneralizedTime must be 15 bytes"));
@@ -581,7 +581,7 @@ implement DerReader {
         let mn = parse_digits_2(&bytes, 10)?;
         let ss = parse_digits_2(&bytes, 12)?;
         validate_time(year, mm, dd, hh, mn, ss, self.pos)?;
-        Ok(Time {
+        Ok(DerTime {
             year: year, month: mm as UInt8, day: dd as UInt8,
             hour: hh as UInt8, minute: mn as UInt8, second: ss as UInt8,
         })
