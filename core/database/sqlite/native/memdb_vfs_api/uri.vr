@@ -10,11 +10,11 @@ mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 
-public type CacheMode is
+public type MemdbCacheMode is
       CmPrivate         // default — each open creates a fresh memdb
     | CmShared;         // cache=shared — multiple opens see the same memdb
 
-public fn cache_mode_name(m: &CacheMode) -> Text {
+public fn cache_mode_name(m: &MemdbCacheMode) -> Text {
     match m {
         CmPrivate => "private".clone(),
         CmShared  => "shared".clone(),
@@ -25,7 +25,7 @@ public type MemdbOpenSpec is {
     /// Name component after `/memdb?` or the literal ":memory:".
     /// Empty for the classic :memory: form.
     name: Text,
-    cache: CacheMode,
+    cache: MemdbCacheMode,
 }
 
 public fn classic_memory() -> MemdbOpenSpec {

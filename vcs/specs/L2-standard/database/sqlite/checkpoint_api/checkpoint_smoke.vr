@@ -20,7 +20,7 @@ mount core.database.sqlite.native.checkpoint_api.autoconfig.{
     is_disabled, should_fire,
 };
 mount core.database.sqlite.native.result_codes.checkpoint.{
-    CheckpointMode, CmPassive, CmFull, CmRestart, CmTruncate,
+    CheckpointResultMode, CmPassive, CmFull, CmRestart, CmTruncate,
 };
 mount base.{Bool};
 

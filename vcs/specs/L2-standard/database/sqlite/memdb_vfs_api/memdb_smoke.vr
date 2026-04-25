@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.memdb_vfs_api.uri.{
-    CacheMode, CmPrivate, CmShared,
+    MemdbCacheMode, CmPrivate, CmShared,
     MemdbOpenSpec,
     cache_mode_name, classic_memory, named_shared, is_shared, is_memdb_uri,
 };

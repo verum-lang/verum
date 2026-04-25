@@ -151,8 +151,8 @@ public mount .env.{
 public mount .recovery.{
     RetryPolicy,
     RetryConfig,
-    CircuitBreaker,
-    CircuitState,
+    RecoveryCircuitBreaker,
+    RecoveryCircuitState,
     RecoveryBackoffStrategy,
     RecoveryStrategy,
 };

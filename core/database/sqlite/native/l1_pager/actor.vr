@@ -45,7 +45,7 @@ mount core.database.sqlite.native.l1_pager.page_cache.{
 // Checkpoint modes (mirrors SQLite)
 // -----------------------------------------------------------------------------
 
-public type CheckpointMode is
+public type PagerCheckpointMode is
       Passive      // checkpoint until first blocked write
     | Full         // drain WAL fully; blocks new writers
     | Restart      // Full + reset WAL file to empty
@@ -64,7 +64,7 @@ public type PagerRequest is
       Read(page: Int, reply_token: Int)
     | Write(frame: PageFrame, reply_token: Int)
     | Commit(reply_token: Int)
-    | Checkpoint(mode: CheckpointMode, reply_token: Int);
+    | Checkpoint(mode: PagerCheckpointMode, reply_token: Int);
 
 /// The three reply shapes. Matched against in the test harness and,
 /// once the async harness lands, by the request originator.

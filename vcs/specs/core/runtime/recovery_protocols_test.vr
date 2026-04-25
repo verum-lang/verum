@@ -9,10 +9,10 @@
 // =============================================================================
 
 mount core.runtime.recovery.{
-    BackoffStrategy,
-    CircuitState,
+    RecoveryBackoffStrategy,
+    RecoveryCircuitState,
     JitterConfig,
-    CircuitBreakerConfig,
+    RecoveryCircuitBreakerConfig,
     ErrorPredicate,
     RetryConfig,
     RetryPredicate,
@@ -21,72 +21,72 @@ mount core.runtime.recovery.{
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
-// Section 1: CircuitState Eq
+// Section 1: RecoveryCircuitState Eq
 // =============================================================================
 
 @test
 fn test_circuit_state_eq_closed() {
-    let a = CircuitState.Closed;
-    let b = CircuitState.Closed;
+    let a = RecoveryCircuitState.Closed;
+    let b = RecoveryCircuitState.Closed;
     assert(a == b);
 }
 
 @test
 fn test_circuit_state_eq_open() {
-    let a = CircuitState.Open;
-    let b = CircuitState.Open;
+    let a = RecoveryCircuitState.Open;
+    let b = RecoveryCircuitState.Open;
     assert(a == b);
 }
 
 @test
 fn test_circuit_state_eq_half_open() {
-    let a = CircuitState.HalfOpen;
-    let b = CircuitState.HalfOpen;
+    let a = RecoveryCircuitState.HalfOpen;
+    let b = RecoveryCircuitState.HalfOpen;
     assert(a == b);
 }
 
 @test
 fn test_circuit_state_neq() {
-    let a = CircuitState.Closed;
-    let b = CircuitState.Open;
+    let a = RecoveryCircuitState.Closed;
+    let b = RecoveryCircuitState.Open;
     assert(a != b);
 }
 
 @test
 fn test_circuit_state_neq_half_open() {
-    let a = CircuitState.Open;
-    let b = CircuitState.HalfOpen;
+    let a = RecoveryCircuitState.Open;
+    let b = RecoveryCircuitState.HalfOpen;
     assert(a != b);
 }
 
 // =============================================================================
-// Section 2: BackoffStrategy Clone
+// Section 2: RecoveryBackoffStrategy Clone
 // =============================================================================
 
 @test
 fn test_clone_backoff_fixed() {
-    let orig = BackoffStrategy.Fixed { delay_ms: 100 };
+    let orig = RecoveryBackoffStrategy.Fixed { delay_ms: 100 };
     let cloned = orig.clone();
     assert_eq(cloned.calculate_delay_ms(0), 100 as UInt64);
 }
 
 @test
 fn test_clone_backoff_linear() {
-    let orig = BackoffStrategy.Linear { base_ms: 50, increment_ms: 25, max_ms: 200 };
+    let orig = RecoveryBackoffStrategy.Linear { base_ms: 50, increment_ms: 25, max_ms: 200 };
     let cloned = orig.clone();
     assert_eq(cloned.calculate_delay_ms(0), 50 as UInt64);
 }
 
 @test
 fn test_clone_backoff_exponential() {
-    let orig = BackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 };
+    let orig = RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 };
     let cloned = orig.clone();
     assert_eq(cloned.calculate_delay_ms(0), 100 as UInt64);
 }
 
 @test
 fn test_clone_backoff_none() {
-    let orig = BackoffStrategy.None;
+    let orig = RecoveryBackoffStrategy.None;
     let cloned = orig.clone();
     assert_eq(cloned.calculate_delay_ms(0), 0 as UInt64);
 }
@@ -156,7 +156,7 @@ fn test_clone_retry_predicate_transient() {
 fn test_clone_retry_config() {
     let orig = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -218,12 +218,12 @@ fn test_clone_error_predicate_all() {
 }
 
 // =============================================================================
-// Section 8: CircuitBreakerConfig Clone
+// Section 8: RecoveryCircuitBreakerConfig Clone
 // =============================================================================
 
 @test
 fn test_clone_circuit_breaker_config() {
-    let orig = CircuitBreakerConfig {
+    let orig = RecoveryCircuitBreakerConfig {
         failure_threshold: 5,
         required_successes: 3,
         timeout_ms: 60000,

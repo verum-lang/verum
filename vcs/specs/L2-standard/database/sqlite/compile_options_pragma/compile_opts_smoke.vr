@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.compile_options_pragma.flags.{
-    Category, CtEnable, CtOmit, CtDefault, CtMax,
+    CompileOptionCategory, CtEnable, CtOmit, CtDefault, CtMax,
     CtThreadsafe, CtCompiler, CtOther,
     category_name, classify,
     enables_fts5, enables_rtree, enables_json1, enables_geopoly,

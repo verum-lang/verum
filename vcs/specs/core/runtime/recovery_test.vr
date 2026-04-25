@@ -5,15 +5,15 @@
 // @level: L1
 // @tier: 0
 // @tags: runtime, recovery, circuit-breaker, retry, backoff, core
-// @description: Tests for error recovery types: BackoffStrategy, CircuitState, JitterConfig
+// @description: Tests for error recovery types: RecoveryBackoffStrategy, RecoveryCircuitState, JitterConfig
 // =============================================================================
 
 mount core.runtime.recovery.{
-    BackoffStrategy,
-    CircuitState,
+    RecoveryBackoffStrategy,
+    RecoveryCircuitState,
     JitterConfig,
-    CircuitBreaker,
-    CircuitBreakerConfig,
+    RecoveryCircuitBreaker,
+    RecoveryCircuitBreakerConfig,
     CircuitBreakerStats,
     CircuitBreakerError,
     ErrorPredicate,
@@ -25,40 +25,40 @@ mount core.runtime.recovery.{
 };
 
 // =============================================================================
-// Section 1: BackoffStrategy Variants
+// Section 1: RecoveryBackoffStrategy Variants
 // =============================================================================
 
 @test
 fn test_backoff_fixed() {
-    let backoff: BackoffStrategy = BackoffStrategy.Fixed { delay_ms: 100 };
-    assert(backoff is BackoffStrategy.Fixed);
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Fixed { delay_ms: 100 };
+    assert(backoff is RecoveryBackoffStrategy.Fixed);
 }
 
 @test
 fn test_backoff_linear() {
-    let backoff: BackoffStrategy = BackoffStrategy.Linear { base_ms: 100, increment_ms: 50, max_ms: 1000 };
-    assert(backoff is BackoffStrategy.Linear);
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 50, max_ms: 1000 };
+    assert(backoff is RecoveryBackoffStrategy.Linear);
 }
 
 @test
 fn test_backoff_exponential() {
-    let backoff: BackoffStrategy = BackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 };
-    assert(backoff is BackoffStrategy.Exponential);
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 };
+    assert(backoff is RecoveryBackoffStrategy.Exponential);
 }
 
 @test
 fn test_backoff_none() {
-    let backoff: BackoffStrategy = BackoffStrategy.None;
-    assert(backoff is BackoffStrategy.None);
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.None;
+    assert(backoff is RecoveryBackoffStrategy.None);
 }
 
 // =============================================================================
-// Section 2: BackoffStrategy.calculate_delay_ms
+// Section 2: RecoveryBackoffStrategy.calculate_delay_ms
 // =============================================================================
 
 @test
 fn test_backoff_fixed_delay() {
-    let backoff: BackoffStrategy = BackoffStrategy.Fixed { delay_ms: 100 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Fixed { delay_ms: 100 };
     assert_eq(backoff.calculate_delay_ms(0), 100);
     assert_eq(backoff.calculate_delay_ms(1), 100);
     assert_eq(backoff.calculate_delay_ms(5), 100);
@@ -66,7 +66,7 @@ fn test_backoff_fixed_delay() {
 
 @test
 fn test_backoff_linear_delay() {
-    let backoff: BackoffStrategy = BackoffStrategy.Linear { base_ms: 100, increment_ms: 50, max_ms: 1000 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 50, max_ms: 1000 };
     assert_eq(backoff.calculate_delay_ms(0), 100);
     assert_eq(backoff.calculate_delay_ms(1), 150);
     assert_eq(backoff.calculate_delay_ms(2), 200);
@@ -74,14 +74,14 @@ fn test_backoff_linear_delay() {
 
 @test
 fn test_backoff_linear_delay_capped() {
-    let backoff: BackoffStrategy = BackoffStrategy.Linear { base_ms: 100, increment_ms: 200, max_ms: 500 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 200, max_ms: 500 };
     // 100 + 3 * 200 = 700, but capped at 500
     assert_eq(backoff.calculate_delay_ms(3), 500);
 }
 
 @test
 fn test_backoff_exponential_delay() {
-    let backoff: BackoffStrategy = BackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 };
     assert_eq(backoff.calculate_delay_ms(0), 100);
     assert_eq(backoff.calculate_delay_ms(1), 200);
     assert_eq(backoff.calculate_delay_ms(2), 400);
@@ -90,23 +90,23 @@ fn test_backoff_exponential_delay() {
 
 @test
 fn test_backoff_exponential_delay_capped() {
-    let backoff: BackoffStrategy = BackoffStrategy.Exponential { base_ms: 100, max_ms: 500, multiplier: 2 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 500, multiplier: 2 };
     // 100 * 2^3 = 800, but capped at 500
     assert_eq(backoff.calculate_delay_ms(3), 500);
 }
 
 @test
 fn test_backoff_none_delay() {
-    let backoff: BackoffStrategy = BackoffStrategy.None;
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.None;
     assert_eq(backoff.calculate_delay_ms(0), 0);
     assert_eq(backoff.calculate_delay_ms(10), 0);
 }
 
 @test
 fn test_backoff_exponential_constructor() {
-    let backoff: BackoffStrategy = BackoffStrategy.exponential(200, 10000);
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.exponential(200, 10000);
     match backoff {
-        BackoffStrategy.Exponential { base_ms, max_ms, multiplier } => {
+        RecoveryBackoffStrategy.Exponential { base_ms, max_ms, multiplier } => {
             assert_eq(base_ms, 200);
             assert_eq(max_ms, 10000);
             assert_eq(multiplier, 2);
@@ -117,9 +117,9 @@ fn test_backoff_exponential_constructor() {
 
 @test
 fn test_backoff_match_fixed() {
-    let backoff: BackoffStrategy = BackoffStrategy.Fixed { delay_ms: 250 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Fixed { delay_ms: 250 };
     match backoff {
-        BackoffStrategy.Fixed { delay_ms } => {
+        RecoveryBackoffStrategy.Fixed { delay_ms } => {
             assert_eq(delay_ms, 250);
         }
         _ => panic("Expected Fixed"),
@@ -128,9 +128,9 @@ fn test_backoff_match_fixed() {
 
 @test
 fn test_backoff_match_linear() {
-    let backoff: BackoffStrategy = BackoffStrategy.Linear { base_ms: 100, increment_ms: 25, max_ms: 2000 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 25, max_ms: 2000 };
     match backoff {
-        BackoffStrategy.Linear { base_ms, increment_ms, max_ms } => {
+        RecoveryBackoffStrategy.Linear { base_ms, increment_ms, max_ms } => {
             assert_eq(base_ms, 100);
             assert_eq(increment_ms, 25);
             assert_eq(max_ms, 2000);
@@ -140,56 +140,56 @@ fn test_backoff_match_linear() {
 }
 
 // =============================================================================
-// Section 3: CircuitState
+// Section 3: RecoveryCircuitState
 // =============================================================================
 
 @test
 fn test_circuit_state_closed() {
-    let state: CircuitState = CircuitState.Closed;
-    assert(state is CircuitState.Closed);
-    assert(!(state is CircuitState.Open));
-    assert(!(state is CircuitState.HalfOpen));
+    let state: RecoveryCircuitState = RecoveryCircuitState.Closed;
+    assert(state is RecoveryCircuitState.Closed);
+    assert(!(state is RecoveryCircuitState.Open));
+    assert(!(state is RecoveryCircuitState.HalfOpen));
 }
 
 @test
 fn test_circuit_state_open() {
-    let state: CircuitState = CircuitState.Open;
-    assert(state is CircuitState.Open);
-    assert(!(state is CircuitState.Closed));
-    assert(!(state is CircuitState.HalfOpen));
+    let state: RecoveryCircuitState = RecoveryCircuitState.Open;
+    assert(state is RecoveryCircuitState.Open);
+    assert(!(state is RecoveryCircuitState.Closed));
+    assert(!(state is RecoveryCircuitState.HalfOpen));
 }
 
 @test
 fn test_circuit_state_half_open() {
-    let state: CircuitState = CircuitState.HalfOpen;
-    assert(state is CircuitState.HalfOpen);
-    assert(!(state is CircuitState.Closed));
-    assert(!(state is CircuitState.Open));
+    let state: RecoveryCircuitState = RecoveryCircuitState.HalfOpen;
+    assert(state is RecoveryCircuitState.HalfOpen);
+    assert(!(state is RecoveryCircuitState.Closed));
+    assert(!(state is RecoveryCircuitState.Open));
 }
 
 @test
 fn test_circuit_state_to_u8() {
-    assert_eq(CircuitState.Closed.to_u8(), 0);
-    assert_eq(CircuitState.Open.to_u8(), 1);
-    assert_eq(CircuitState.HalfOpen.to_u8(), 2);
+    assert_eq(RecoveryCircuitState.Closed.to_u8(), 0);
+    assert_eq(RecoveryCircuitState.Open.to_u8(), 1);
+    assert_eq(RecoveryCircuitState.HalfOpen.to_u8(), 2);
 }
 
 @test
 fn test_circuit_state_from_u8() {
-    assert(CircuitState.from_u8(0) is CircuitState.Closed);
-    assert(CircuitState.from_u8(1) is CircuitState.Open);
-    assert(CircuitState.from_u8(2) is CircuitState.HalfOpen);
+    assert(RecoveryCircuitState.from_u8(0) is RecoveryCircuitState.Closed);
+    assert(RecoveryCircuitState.from_u8(1) is RecoveryCircuitState.Open);
+    assert(RecoveryCircuitState.from_u8(2) is RecoveryCircuitState.HalfOpen);
     // Unknown values default to Closed
-    assert(CircuitState.from_u8(255) is CircuitState.Closed);
+    assert(RecoveryCircuitState.from_u8(255) is RecoveryCircuitState.Closed);
 }
 
 @test
 fn test_circuit_state_match() {
-    let state: CircuitState = CircuitState.HalfOpen;
+    let state: RecoveryCircuitState = RecoveryCircuitState.HalfOpen;
     match state {
-        CircuitState.Closed => panic("Expected HalfOpen"),
-        CircuitState.Open => panic("Expected HalfOpen"),
-        CircuitState.HalfOpen => {} // Expected
+        RecoveryCircuitState.Closed => panic("Expected HalfOpen"),
+        RecoveryCircuitState.Open => panic("Expected HalfOpen"),
+        RecoveryCircuitState.HalfOpen => {} // Expected
     }
 }
 
@@ -253,7 +253,7 @@ fn test_jitter_match_fixed() {
 
 @test
 fn test_backoff_linear_zero_increment() {
-    let backoff: BackoffStrategy = BackoffStrategy.Linear { base_ms: 100, increment_ms: 0, max_ms: 1000 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 0, max_ms: 1000 };
     // With zero increment, delay stays at base
     assert_eq(backoff.calculate_delay_ms(0), 100);
     assert_eq(backoff.calculate_delay_ms(10), 100);
@@ -261,7 +261,7 @@ fn test_backoff_linear_zero_increment() {
 
 @test
 fn test_backoff_exponential_multiplier_one() {
-    let backoff: BackoffStrategy = BackoffStrategy.Exponential { base_ms: 100, max_ms: 1000, multiplier: 1 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 1000, multiplier: 1 };
     // With multiplier 1, delay stays at base
     assert_eq(backoff.calculate_delay_ms(0), 100);
     assert_eq(backoff.calculate_delay_ms(5), 100);
@@ -269,17 +269,17 @@ fn test_backoff_exponential_multiplier_one() {
 
 @test
 fn test_backoff_fixed_zero() {
-    let backoff: BackoffStrategy = BackoffStrategy.Fixed { delay_ms: 0 };
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Fixed { delay_ms: 0 };
     assert_eq(backoff.calculate_delay_ms(0), 0);
 }
 
 // =============================================================================
-// Section 6: CircuitBreakerConfig
+// Section 6: RecoveryCircuitBreakerConfig
 // =============================================================================
 
 @test
 fn test_circuit_breaker_config_construction() {
-    let config: CircuitBreakerConfig = CircuitBreakerConfig {
+    let config: RecoveryCircuitBreakerConfig = RecoveryCircuitBreakerConfig {
         failure_threshold: 5,
         required_successes: 3,
         timeout_ms: 60000,
@@ -292,7 +292,7 @@ fn test_circuit_breaker_config_construction() {
 
 @test
 fn test_circuit_breaker_config_custom_threshold() {
-    let config: CircuitBreakerConfig = CircuitBreakerConfig {
+    let config: RecoveryCircuitBreakerConfig = RecoveryCircuitBreakerConfig {
         failure_threshold: 10,
         required_successes: 5,
         timeout_ms: 30000,
@@ -304,46 +304,46 @@ fn test_circuit_breaker_config_custom_threshold() {
 }
 
 // =============================================================================
-// Section 7: CircuitBreaker Construction and State
+// Section 7: RecoveryCircuitBreaker Construction and State
 // =============================================================================
 
 @test
 fn test_circuit_breaker_new() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 5,
         required_successes: 3,
         timeout_ms: 60000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
-    assert(cb.state() is CircuitState.Closed);
+    let cb = RecoveryCircuitBreaker.new(config);
+    assert(cb.state() is RecoveryCircuitState.Closed);
 }
 
 @test
 fn test_circuit_breaker_initial_state_closed() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 3,
         required_successes: 2,
         timeout_ms: 10000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
     // New circuit breaker should be closed
-    assert(cb.state() is CircuitState.Closed);
+    assert(cb.state() is RecoveryCircuitState.Closed);
     assert(cb.allow_request());
 }
 
 @test
 fn test_circuit_breaker_stats_initial() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 5,
         required_successes: 3,
         timeout_ms: 60000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
     let stats: CircuitBreakerStats = cb.stats();
-    assert(stats.state is CircuitState.Closed);
+    assert(stats.state is RecoveryCircuitState.Closed);
     assert_eq(stats.failure_count, 0);
     assert_eq(stats.success_count, 0);
     assert_eq(stats.total_calls, 0);
@@ -352,24 +352,24 @@ fn test_circuit_breaker_stats_initial() {
 }
 
 // =============================================================================
-// Section 8: CircuitBreaker State Transitions
+// Section 8: RecoveryCircuitBreaker State Transitions
 // =============================================================================
 
 @test
 fn test_circuit_breaker_success_stays_closed() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 3,
         required_successes: 2,
         timeout_ms: 10000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
 
     cb.record_success();
     cb.record_success();
     cb.record_success();
 
-    assert(cb.state() is CircuitState.Closed);
+    assert(cb.state() is RecoveryCircuitState.Closed);
     let stats = cb.stats();
     assert_eq(stats.total_calls, 3);
     assert_eq(stats.total_failures, 0);
@@ -377,37 +377,37 @@ fn test_circuit_breaker_success_stays_closed() {
 
 @test
 fn test_circuit_breaker_opens_on_threshold() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 3,
         required_successes: 2,
         timeout_ms: 10000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
 
     // Record failures up to threshold
     cb.record_failure();
-    assert(cb.state() is CircuitState.Closed);
+    assert(cb.state() is RecoveryCircuitState.Closed);
     cb.record_failure();
-    assert(cb.state() is CircuitState.Closed);
+    assert(cb.state() is RecoveryCircuitState.Closed);
     cb.record_failure();  // This should open the circuit
-    assert(cb.state() is CircuitState.Open);
+    assert(cb.state() is RecoveryCircuitState.Open);
 }
 
 @test
 fn test_circuit_breaker_open_rejects_requests() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 2,
         required_successes: 1,
         timeout_ms: 999999999,  // Very long timeout to ensure it stays open
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
 
     // Open the circuit
     cb.record_failure();
     cb.record_failure();
-    assert(cb.state() is CircuitState.Open);
+    assert(cb.state() is RecoveryCircuitState.Open);
 
     // Should not allow requests while open (with large timeout)
     // Note: allow_request checks timeout - with large timeout it stays open
@@ -416,13 +416,13 @@ fn test_circuit_breaker_open_rejects_requests() {
 
 @test
 fn test_circuit_breaker_success_resets_failure_count() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 3,
         required_successes: 2,
         timeout_ms: 60000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
 
     // Two failures...
     cb.record_failure();
@@ -431,39 +431,39 @@ fn test_circuit_breaker_success_resets_failure_count() {
     cb.record_success();
     // Now one more failure should NOT open (count was reset)
     cb.record_failure();
-    assert(cb.state() is CircuitState.Closed);
+    assert(cb.state() is RecoveryCircuitState.Closed);
 }
 
 @test
 fn test_circuit_breaker_reset() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 2,
         required_successes: 1,
         timeout_ms: 999999999,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
 
     // Open the circuit
     cb.record_failure();
     cb.record_failure();
-    assert(cb.state() is CircuitState.Open);
+    assert(cb.state() is RecoveryCircuitState.Open);
 
     // Reset should close it
     cb.reset();
-    assert(cb.state() is CircuitState.Closed);
+    assert(cb.state() is RecoveryCircuitState.Closed);
     assert(cb.allow_request());
 }
 
 @test
 fn test_circuit_breaker_stats_after_operations() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 5,
         required_successes: 3,
         timeout_ms: 60000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
 
     cb.record_success();
     cb.record_success();
@@ -502,7 +502,7 @@ fn test_circuit_breaker_error_failed() {
 fn test_retry_config_construction() {
     let config: RetryConfig = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 },
+        backoff: RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -513,7 +513,7 @@ fn test_retry_config_construction() {
 fn test_retry_policy_new() {
     let config = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -527,7 +527,7 @@ fn test_retry_policy_new() {
 fn test_retry_policy_should_retry() {
     let config = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -540,7 +540,7 @@ fn test_retry_policy_should_retry() {
 fn test_retry_policy_next_delay_fixed() {
     let config = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 200 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 200 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -552,7 +552,7 @@ fn test_retry_policy_next_delay_fixed() {
 fn test_retry_policy_reset() {
     let config = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -645,7 +645,7 @@ fn test_inline_retry_policy_default() {
 fn test_retry_policy_record_retry() {
     let config = RetryConfig {
         max_attempts: 5,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -660,7 +660,7 @@ fn test_retry_policy_record_retry() {
 fn test_retry_policy_multiple_retries() {
     let config = RetryConfig {
         max_attempts: 5,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -677,7 +677,7 @@ fn test_retry_policy_multiple_retries() {
 fn test_retry_policy_exhausted() {
     let config = RetryConfig {
         max_attempts: 2,
-        backoff: BackoffStrategy.Fixed { delay_ms: 50 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 50 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -691,7 +691,7 @@ fn test_retry_policy_exhausted() {
 fn test_retry_policy_reset_after_retries() {
     let config = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -709,7 +709,7 @@ fn test_retry_policy_reset_after_retries() {
 fn test_retry_policy_last_error_updates() {
     let config = RetryConfig {
         max_attempts: 5,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -727,19 +727,19 @@ fn test_retry_policy_last_error_updates() {
 }
 
 // =============================================================================
-// Section 16: BackoffStrategy Delay Calculations Extended
+// Section 16: RecoveryBackoffStrategy Delay Calculations Extended
 // =============================================================================
 
 @test
 fn test_backoff_exponential_large_attempt() {
-    let backoff = BackoffStrategy.Exponential { base_ms: 100, max_ms: 60000, multiplier: 2 };
+    let backoff = RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 60000, multiplier: 2 };
     // attempt 10: 100 * 2^10 = 102400, capped at 60000
     assert_eq(backoff.calculate_delay_ms(10), 60000);
 }
 
 @test
 fn test_backoff_linear_exact_cap() {
-    let backoff = BackoffStrategy.Linear { base_ms: 100, increment_ms: 100, max_ms: 500 };
+    let backoff = RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 100, max_ms: 500 };
     // attempt 4: 100 + 4*100 = 500 (exactly at cap)
     assert_eq(backoff.calculate_delay_ms(4), 500);
     // attempt 5: 100 + 5*100 = 600, capped at 500
@@ -748,7 +748,7 @@ fn test_backoff_linear_exact_cap() {
 
 @test
 fn test_backoff_exponential_multiplier_three() {
-    let backoff = BackoffStrategy.Exponential { base_ms: 10, max_ms: 100000, multiplier: 3 };
+    let backoff = RecoveryBackoffStrategy.Exponential { base_ms: 10, max_ms: 100000, multiplier: 3 };
     assert_eq(backoff.calculate_delay_ms(0), 10);
     assert_eq(backoff.calculate_delay_ms(1), 30);
     assert_eq(backoff.calculate_delay_ms(2), 90);
@@ -756,18 +756,18 @@ fn test_backoff_exponential_multiplier_three() {
 }
 
 // =============================================================================
-// Section 17: CircuitBreaker Extended State Transitions
+// Section 17: RecoveryCircuitBreaker Extended State Transitions
 // =============================================================================
 
 @test
 fn test_circuit_breaker_failure_count_in_stats() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 5,
         required_successes: 3,
         timeout_ms: 60000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
     cb.record_failure();
     cb.record_failure();
     let stats = cb.stats();
@@ -777,13 +777,13 @@ fn test_circuit_breaker_failure_count_in_stats() {
 
 @test
 fn test_circuit_breaker_mixed_operations() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 5,
         required_successes: 3,
         timeout_ms: 60000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
     cb.record_success();
     cb.record_failure();
     cb.record_success();
@@ -792,41 +792,41 @@ fn test_circuit_breaker_mixed_operations() {
     let stats = cb.stats();
     assert_eq(stats.total_calls, 5);
     assert_eq(stats.total_failures, 2);
-    assert(cb.state() is CircuitState.Closed);
+    assert(cb.state() is RecoveryCircuitState.Closed);
 }
 
 @test
 fn test_circuit_breaker_opens_then_stats() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 2,
         required_successes: 1,
         timeout_ms: 999999999,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
     cb.record_failure();
     cb.record_failure();
-    assert(cb.state() is CircuitState.Open);
+    assert(cb.state() is RecoveryCircuitState.Open);
     let stats = cb.stats();
-    assert(stats.state is CircuitState.Open);
+    assert(stats.state is RecoveryCircuitState.Open);
     assert(stats.state_changes > 0);
 }
 
 @test
 fn test_circuit_breaker_reset_clears_stats() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 3,
         required_successes: 2,
         timeout_ms: 60000,
         error_predicate: ErrorPredicate.AllErrors,
     };
-    let cb = CircuitBreaker.new(config);
+    let cb = RecoveryCircuitBreaker.new(config);
     cb.record_failure();
     cb.record_failure();
     cb.record_failure();
-    assert(cb.state() is CircuitState.Open);
+    assert(cb.state() is RecoveryCircuitState.Open);
     cb.reset();
-    assert(cb.state() is CircuitState.Closed);
+    assert(cb.state() is RecoveryCircuitState.Closed);
     assert(cb.allow_request());
     let stats = cb.stats();
     assert_eq(stats.failure_count, 0);
@@ -885,19 +885,19 @@ fn test_recovery_strategy_match_all_variants() {
 fn test_retry_config_with_linear_backoff() {
     let config = RetryConfig {
         max_attempts: 5,
-        backoff: BackoffStrategy.Linear { base_ms: 100, increment_ms: 50, max_ms: 500 },
+        backoff: RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 50, max_ms: 500 },
         jitter: JitterConfig.Proportional(10),
         retry_on: RetryPredicate.AllErrors,
     };
     assert_eq(config.max_attempts, 5);
-    assert(config.backoff is BackoffStrategy.Linear);
+    assert(config.backoff is RecoveryBackoffStrategy.Linear);
 }
 
 @test
 fn test_retry_config_with_no_backoff() {
     let config = RetryConfig {
         max_attempts: 10,
-        backoff: BackoffStrategy.None,
+        backoff: RecoveryBackoffStrategy.None,
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.TransientOnly,
     };
@@ -909,7 +909,7 @@ fn test_retry_config_with_no_backoff() {
 fn test_retry_policy_next_delay_exponential() {
     let config = RetryConfig {
         max_attempts: 5,
-        backoff: BackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 },
+        backoff: RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };

@@ -79,7 +79,7 @@ mount super.recovery.{
     RecoveryStrategy,
     RetryConfig,
     RecoveryBackoffStrategy,
-    CircuitBreakerConfig,
+    RecoveryCircuitBreakerConfig,
 };
 mount super.supervisor.{
     SupervisorHandle,
@@ -256,7 +256,7 @@ public type SpawnConfig is {
     priority: PriorityLevel,
 
     /// Circuit breaker configuration (creates new breaker for this task)
-    circuit_breaker: Maybe<CircuitBreakerConfig>,
+    circuit_breaker: Maybe<RecoveryCircuitBreakerConfig>,
 
     /// Retry configuration (creates retry policy for this task)
     retry: Maybe<RetryConfig>,
@@ -360,7 +360,7 @@ implement SpawnConfig {
     /// ## Performance
     /// - ~5ns (struct copy)
     @inline
-    public fn with_circuit_breaker(mut self, config: CircuitBreakerConfig) -> Self {
+    public fn with_circuit_breaker(mut self, config: RecoveryCircuitBreakerConfig) -> Self {
         self.circuit_breaker = Some(config);
         self
     }
@@ -697,7 +697,7 @@ implement SpawnConfigBuilder {
     /// Enable circuit breaker with default settings
     @inline
     public fn with_circuit_breaker_default(mut self) -> Self {
-        self.config = self.config.with_circuit_breaker(CircuitBreakerConfig.default());
+        self.config = self.config.with_circuit_breaker(RecoveryCircuitBreakerConfig.default());
         self
     }
 

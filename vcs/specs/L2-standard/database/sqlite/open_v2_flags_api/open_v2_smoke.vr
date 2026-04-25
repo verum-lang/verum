@@ -15,7 +15,7 @@ mount core.database.sqlite.native.open_v2_flags_api.flags.{
     access_for, access_name,
     MutexMode, MxDefault, MxNone, MxFull, MxConflict,
     mutex_for, mutex_name,
-    CacheMode, CmDefault, CmShared, CmPrivate, CmConflict,
+    OpenCacheMode, CmDefault, CmShared, CmPrivate, CmConflict,
     cache_for, cache_name, bit_name,
 };
 mount base.{Bool, Int64};

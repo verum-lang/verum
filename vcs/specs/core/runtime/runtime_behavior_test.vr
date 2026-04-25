@@ -6,16 +6,16 @@
 // @level: L1
 // @tags: runtime, recovery, circuit-breaker, retry, backoff, supervisor, spawn,
 //        behavior, lifecycle, config
-// @description: Extended tests for runtime behavior: CircuitBreaker lifecycle,
-//               BackoffStrategy edge cases, RetryConfig, RecoveryStrategy,
+// @description: Extended tests for runtime behavior: RecoveryCircuitBreaker lifecycle,
+//               RecoveryBackoffStrategy edge cases, RetryConfig, RecoveryStrategy,
 //               JitterConfig, Supervisor, SpawnConfig, TaskQueue.
 // =============================================================================
 
 module specs.core.runtime.runtime_behavior_test;
 
 mount core.runtime.recovery.{
-    BackoffStrategy, CircuitState, JitterConfig,
-    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats,
+    RecoveryBackoffStrategy, RecoveryCircuitState, JitterConfig,
+    RecoveryCircuitBreaker, RecoveryCircuitBreakerConfig, CircuitBreakerStats,
     CircuitBreakerError, ErrorPredicate,
     RetryConfig, RetryPredicate,
     RecoveryStrategy, InlineRetryPolicy,
@@ -43,12 +43,12 @@ mount core.base.protocols.TypeId;
 mount core.collections.list.List;
 
 // =============================================================================
-// Section 1: CircuitBreakerConfig
+// Section 1: RecoveryCircuitBreakerConfig
 // =============================================================================
 
 @test
 fn test_circuit_breaker_config_default() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 5 as UInt16,
         required_successes: 3 as UInt16,
         timeout_ms: 30000 as UInt32,
@@ -60,7 +60,7 @@ fn test_circuit_breaker_config_default() {
 
 @test
 fn test_circuit_breaker_config_aggressive() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 1 as UInt16,
         required_successes: 1 as UInt16,
         timeout_ms: 1000 as UInt32,
@@ -71,7 +71,7 @@ fn test_circuit_breaker_config_aggressive() {
 
 @test
 fn test_circuit_breaker_config_conservative() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 100 as UInt16,
         required_successes: 50 as UInt16,
         timeout_ms: 600000 as UInt32,
@@ -83,28 +83,28 @@ fn test_circuit_breaker_config_conservative() {
 @test
 fn test_circuit_breaker_stats_initial() {
     let stats = CircuitBreakerStats {
-        state: CircuitState.Closed,
+        state: RecoveryCircuitState.Closed,
         failure_count: 0 as UInt16,
         success_count: 0 as UInt16,
         total_calls: 0 as UInt64,
         total_failures: 0 as UInt64,
         state_changes: 0 as UInt64,
     };
-    assert(stats.state is CircuitState.Closed);
+    assert(stats.state is RecoveryCircuitState.Closed);
     assert_eq(stats.failure_count as Int, 0);
 }
 
 @test
 fn test_circuit_breaker_stats_after_activity() {
     let stats = CircuitBreakerStats {
-        state: CircuitState.Closed,
+        state: RecoveryCircuitState.Closed,
         failure_count: 2 as UInt16,
         success_count: 100 as UInt16,
         total_calls: 105 as UInt64,
         total_failures: 5 as UInt64,
         state_changes: 3 as UInt64,
     };
-    assert(stats.state is CircuitState.Closed);
+    assert(stats.state is RecoveryCircuitState.Closed);
 }
 
 @test
@@ -120,32 +120,32 @@ fn test_circuit_breaker_error_failed() {
 }
 
 // =============================================================================
-// Section 2: BackoffStrategy Edge Cases
+// Section 2: RecoveryBackoffStrategy Edge Cases
 // =============================================================================
 
 @test
 fn test_backoff_exponential_zero_attempt() {
-    let backoff = BackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 };
+    let backoff = RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 };
     assert_eq(backoff.calculate_delay_ms(0), 100);
 }
 
 @test
 fn test_backoff_exponential_high_attempt() {
-    let backoff = BackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 };
+    let backoff = RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 };
     let delay = backoff.calculate_delay_ms(10);
     assert_eq(delay, 10000);
 }
 
 @test
 fn test_backoff_linear_zero_increment() {
-    let backoff = BackoffStrategy.Linear { base_ms: 500, increment_ms: 0, max_ms: 5000 };
+    let backoff = RecoveryBackoffStrategy.Linear { base_ms: 500, increment_ms: 0, max_ms: 5000 };
     assert_eq(backoff.calculate_delay_ms(0), 500);
     assert_eq(backoff.calculate_delay_ms(5), 500);
 }
 
 @test
 fn test_backoff_linear_large_increment() {
-    let backoff = BackoffStrategy.Linear { base_ms: 100, increment_ms: 1000, max_ms: 2000 };
+    let backoff = RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 1000, max_ms: 2000 };
     assert_eq(backoff.calculate_delay_ms(0), 100);
     assert_eq(backoff.calculate_delay_ms(1), 1100);
     assert_eq(backoff.calculate_delay_ms(2), 2000);
@@ -153,14 +153,14 @@ fn test_backoff_linear_large_increment() {
 
 @test
 fn test_backoff_none_always_zero() {
-    let backoff = BackoffStrategy.None;
+    let backoff = RecoveryBackoffStrategy.None;
     assert_eq(backoff.calculate_delay_ms(0), 0);
     assert_eq(backoff.calculate_delay_ms(100), 0);
 }
 
 @test
 fn test_backoff_fixed_consistent() {
-    let backoff = BackoffStrategy.Fixed { delay_ms: 250 };
+    let backoff = RecoveryBackoffStrategy.Fixed { delay_ms: 250 };
     for i in range(0, 10) {
         assert_eq(backoff.calculate_delay_ms(i), 250);
     }
@@ -168,56 +168,56 @@ fn test_backoff_fixed_consistent() {
 
 @test
 fn test_backoff_exponential_convenience() {
-    let backoff = BackoffStrategy.exponential(100, 10000);
-    assert(backoff is BackoffStrategy.Exponential);
+    let backoff = RecoveryBackoffStrategy.exponential(100, 10000);
+    assert(backoff is RecoveryBackoffStrategy.Exponential);
     assert_eq(backoff.calculate_delay_ms(0), 100);
 }
 
 @test
 fn test_backoff_exponential_multiplier_3() {
-    let backoff = BackoffStrategy.Exponential { base_ms: 10, max_ms: 100000, multiplier: 3 };
+    let backoff = RecoveryBackoffStrategy.Exponential { base_ms: 10, max_ms: 100000, multiplier: 3 };
     assert_eq(backoff.calculate_delay_ms(0), 10);
     assert_eq(backoff.calculate_delay_ms(1), 30);
     assert_eq(backoff.calculate_delay_ms(2), 90);
 }
 
 // =============================================================================
-// Section 3: CircuitState
+// Section 3: RecoveryCircuitState
 // =============================================================================
 
 @test
 fn test_circuit_state_closed() {
-    let s = CircuitState.Closed;
-    assert(s is CircuitState.Closed);
+    let s = RecoveryCircuitState.Closed;
+    assert(s is RecoveryCircuitState.Closed);
     assert_eq(s.to_u8(), 0);
 }
 
 @test
 fn test_circuit_state_open() {
-    let s = CircuitState.Open;
+    let s = RecoveryCircuitState.Open;
     assert_eq(s.to_u8(), 1);
 }
 
 @test
 fn test_circuit_state_half_open() {
-    let s = CircuitState.HalfOpen;
+    let s = RecoveryCircuitState.HalfOpen;
     assert_eq(s.to_u8(), 2);
 }
 
 @test
 fn test_circuit_state_from_u8() {
-    assert(CircuitState.from_u8(0) is CircuitState.Closed);
-    assert(CircuitState.from_u8(1) is CircuitState.Open);
-    assert(CircuitState.from_u8(2) is CircuitState.HalfOpen);
+    assert(RecoveryCircuitState.from_u8(0) is RecoveryCircuitState.Closed);
+    assert(RecoveryCircuitState.from_u8(1) is RecoveryCircuitState.Open);
+    assert(RecoveryCircuitState.from_u8(2) is RecoveryCircuitState.HalfOpen);
 }
 
 @test
 fn test_circuit_state_round_trip() {
-    let states = [CircuitState.Closed, CircuitState.Open, CircuitState.HalfOpen];
+    let states = [RecoveryCircuitState.Closed, RecoveryCircuitState.Open, RecoveryCircuitState.HalfOpen];
     for i in range(0, 3) {
         let s = states[i];
         let n = s.to_u8();
-        let recovered = CircuitState.from_u8(n);
+        let recovered = RecoveryCircuitState.from_u8(n);
         assert_eq(recovered.to_u8(), n);
     }
 }
@@ -270,7 +270,7 @@ fn test_jitter_none_zero_delay() {
 fn test_retry_config_basic() {
     let config = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -281,7 +281,7 @@ fn test_retry_config_basic() {
 fn test_retry_config_with_exponential() {
     let config = RetryConfig {
         max_attempts: 5,
-        backoff: BackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 },
+        backoff: RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 },
         jitter: JitterConfig.Proportional(10),
         retry_on: RetryPredicate.TransientOnly,
     };
@@ -292,7 +292,7 @@ fn test_retry_config_with_exponential() {
 fn test_retry_config_no_retries() {
     let config = RetryConfig {
         max_attempts: 0,
-        backoff: BackoffStrategy.None,
+        backoff: RecoveryBackoffStrategy.None,
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -313,7 +313,7 @@ fn test_recovery_strategy_none() {
 fn test_recovery_strategy_retry() {
     let config = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
@@ -323,7 +323,7 @@ fn test_recovery_strategy_retry() {
 
 @test
 fn test_recovery_strategy_use_breaker() {
-    let config = CircuitBreakerConfig {
+    let config = RecoveryCircuitBreakerConfig {
         failure_threshold: 5 as UInt16,
         required_successes: 3 as UInt16,
         timeout_ms: 30000 as UInt32,
