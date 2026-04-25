@@ -285,9 +285,9 @@ implement MapFlags {
 // =============================================================================
 
 /// Memory ordering for atomic operations.
-public type MemoryOrdering is Relaxed | Acquire | Release | AcqRel | SeqCst;
+public type SysMemoryOrdering is Relaxed | Acquire | Release | AcqRel | SeqCst;
 
-implement MemoryOrdering {
+implement SysMemoryOrdering {
     /// Convert to VBC opcode encoding.
     fn to_opcode(&self) -> Int {
         match self {

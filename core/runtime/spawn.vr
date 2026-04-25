@@ -1,10 +1,10 @@
-/// # SpawnConfig - Task Spawn Configuration
+/// # SupervisorSpawnConfig - Task Spawn Configuration
 ///
 /// Spec: docs/detailed/26-unified-execution-architecture.md#spawn-configuration-type
 /// Spec: docs/detailed/26-unified-execution-architecture.md#spawn_with()
 ///
 /// Provides fine-grained control over spawned task behavior with a zero-cost
-/// builder pattern. SpawnConfig allows customization of:
+/// builder pattern. SupervisorSpawnConfig allows customization of:
 /// - Recovery strategy (retry, circuit breaker)
 /// - Restart policy (permanent, transient, temporary)
 /// - Isolation level (shared, send-only, full)
@@ -19,7 +19,7 @@
 /// │                       spawn_with() FLOW                                    │
 /// ├────────────────────────────────────────────────────────────────────────────┤
 /// │                                                                            │
-/// │    SpawnConfig                    ExecutionEnv                             │
+/// │    SupervisorSpawnConfig                    ExecutionEnv                             │
 /// │   ┌─────────────┐              ┌─────────────┐                             │
 /// │   │ recovery    │──override───▶│error_recovery│                            │
 /// │   │ restart     │──override───▶│concurrency   │                            │
@@ -48,7 +48,7 @@
 ///
 /// | Operation               | Time      | Notes                           |
 /// |-------------------------|-----------|----------------------------------|
-/// | SpawnConfig::new()      | ~10ns     | Zero-cost builder init          |
+/// | SupervisorSpawnConfig::new()      | ~10ns     | Zero-cost builder init          |
 /// | Each builder method     | ~0-5ns    | Inline assignment               |
 /// | apply_to_env()          | ~50-100ns | Conditional overrides           |
 /// | Context merge           | ~5-30ns   | Per context                     |
@@ -56,7 +56,7 @@
 ///
 /// ## Zero-Allocation Design
 ///
-/// SpawnConfig uses inline storage for all fields:
+/// SupervisorSpawnConfig uses inline storage for all fields:
 /// - No heap allocation for default configs
 /// - Inline context storage (up to 4 contexts)
 /// - Overflow to heap only for >4 contexts (rare)
@@ -217,12 +217,12 @@ implement InlineContextStorage {
 }
 
 // =============================================================================
-// SpawnConfig
+// SupervisorSpawnConfig
 // =============================================================================
 
 /// Spawn configuration for task spawning with custom overrides
 ///
-/// SpawnConfig allows customization of spawned task behavior:
+/// SupervisorSpawnConfig allows customization of spawned task behavior:
 /// - Override parent error recovery strategy
 /// - Override parent restart policy
 /// - Override parent isolation level
@@ -239,7 +239,7 @@ implement InlineContextStorage {
 /// - Config is value type (Copy for small configs)
 /// - Safe to build and pass across threads
 /// - Applied to task-local ExecutionEnv fork
-public type SpawnConfig is {
+public type SupervisorSpawnConfig is {
     /// Task name for identification and logging
     name: Maybe<Text>,
 
@@ -280,7 +280,7 @@ public type SpawnConfig is {
     stack_size: Int,
 };
 
-implement SpawnConfig {
+implement SupervisorSpawnConfig {
     /// Create new spawn config with default values
     ///
     /// ## Performance
@@ -571,13 +571,13 @@ implement SpawnConfig {
     }
 }
 
-implement Default for SpawnConfig {
+implement Default for SupervisorSpawnConfig {
     fn default() -> Self {
         Self.new()
     }
 }
 
-implement Clone for SpawnConfig {
+implement Clone for SupervisorSpawnConfig {
     fn clone(&self) -> Self {
         Self {
             name: self.name.clone(),
@@ -601,11 +601,11 @@ implement Clone for SpawnConfig {
 // SpawnConfigBuilder
 // =============================================================================
 
-/// Builder for SpawnConfig with validation
+/// Builder for SupervisorSpawnConfig with validation
 ///
-/// Provides additional validation and convenience methods over SpawnConfig.
+/// Provides additional validation and convenience methods over SupervisorSpawnConfig.
 public type SpawnConfigBuilder is {
-    config: SpawnConfig,
+    config: SupervisorSpawnConfig,
     errors: List<Text>,
 };
 
@@ -613,13 +613,13 @@ implement SpawnConfigBuilder {
     /// Create new builder
     public fn new() -> Self {
         Self {
-            config: SpawnConfig.new(),
+            config: SupervisorSpawnConfig.new(),
             errors: List.new(),
         }
     }
 
     /// Create builder from existing config
-    public fn from_config(config: SpawnConfig) -> Self {
+    public fn from_config(config: SupervisorSpawnConfig) -> Self {
         Self {
             config: config,
             errors: List.new(),
@@ -718,7 +718,7 @@ implement SpawnConfigBuilder {
     /// Validate and build configuration
     ///
     /// Returns Err if validation fails.
-    public fn build(self) -> Result<SpawnConfig, Text> {
+    public fn build(self) -> Result<SupervisorSpawnConfig, Text> {
         // Validation checks
         if let Some(retry) = &self.config.retry {
             if retry.max_attempts == 0 {
@@ -741,7 +741,7 @@ implement SpawnConfigBuilder {
 
     /// Build without validation (trust the caller)
     @inline
-    public fn build_unchecked(self) -> SpawnConfig {
+    public fn build_unchecked(self) -> SupervisorSpawnConfig {
         self.config
     }
 }
@@ -765,7 +765,7 @@ implement SpawnConfigBuilder {
 /// ## Behavior
 /// 1. Get or create current ExecutionEnv
 /// 2. Fork environment (inherits parent state)
-/// 3. Apply SpawnConfig overrides to forked environment
+/// 3. Apply SupervisorSpawnConfig overrides to forked environment
 /// 4. Spawn task with customized environment
 /// 5. Return JoinHandle for awaiting result
 ///
@@ -781,7 +781,7 @@ implement SpawnConfigBuilder {
 ///         // Work here with automatic retry on failure
 ///         Ok(42)
 ///     },
-///     SpawnConfig.new()
+///     SupervisorSpawnConfig.new()
 ///         .with_name("my-task")
 ///         .with_simple_retry(3, 100),
 /// );
@@ -790,7 +790,7 @@ implement SpawnConfigBuilder {
 /// ```
 public fn spawn_with<F, T>(
     future: F,
-    config: SpawnConfig,
+    config: SupervisorSpawnConfig,
 ) -> JoinHandle<T>
 where type
     F: Future<T> + Send,
@@ -904,7 +904,7 @@ where type
     F: Future<T> + Send,
     T: Send,
 {
-    spawn_with(future, SpawnConfig.new().with_simple_retry(max_attempts, delay_ms))
+    spawn_with(future, SupervisorSpawnConfig.new().with_simple_retry(max_attempts, delay_ms))
 }
 
 /// Spawn a high-priority task
@@ -920,7 +920,7 @@ where type
     F: Future<T> + Send,
     T: Send,
 {
-    spawn_with(future, SpawnConfig.new().with_priority(PriorityLevel.High))
+    spawn_with(future, SupervisorSpawnConfig.new().with_priority(PriorityLevel.High))
 }
 
 /// Spawn a background task
@@ -936,7 +936,7 @@ where type
     F: Future<T> + Send,
     T: Send,
 {
-    spawn_with(future, SpawnConfig.new().with_priority(PriorityLevel.Background))
+    spawn_with(future, SupervisorSpawnConfig.new().with_priority(PriorityLevel.Background))
 }
 
 /// Spawn a task with timeout
@@ -956,7 +956,7 @@ where type
     F: Future<T> + Send,
     T: Send,
 {
-    spawn_with(future, SpawnConfig.new().with_timeout_ms(timeout_ms))
+    spawn_with(future, SupervisorSpawnConfig.new().with_timeout_ms(timeout_ms))
 }
 
 /// Spawn a named task
@@ -975,7 +975,7 @@ where type
     F: Future<T> + Send,
     T: Send,
 {
-    spawn_with(future, SpawnConfig.new().with_name(name))
+    spawn_with(future, SupervisorSpawnConfig.new().with_name(name))
 }
 
 /// Spawn an isolated task (full memory isolation)
@@ -991,7 +991,7 @@ where type
     F: Future<T> + Send,
     T: Send,
 {
-    spawn_with(future, SpawnConfig.new().with_isolation(IsolationLevel.Full))
+    spawn_with(future, SupervisorSpawnConfig.new().with_isolation(IsolationLevel.Full))
 }
 
 // =============================================================================

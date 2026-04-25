@@ -9,9 +9,9 @@
 
 mount core.mesh.xds.{
     XdsError,
-    TypeUrl, ResourceName, Node, AdsConfig,
+    TypeUrl, ResourceName, XdsNode, AdsConfig,
     XdsListener, Cluster, RouteConfiguration, ClusterLoadAssignment, Resource,
-    AdsClient, Subscription, DiscoveryResponse, DiscoveryDelta,
+    AdsClient, XdsSubscription, DiscoveryResponse, DiscoveryDelta,
 };
 mount core.mesh.xds.types.{AdsAuth};
 mount core.mesh.xds.client.{DiscoveryEvent};
@@ -42,16 +42,16 @@ fn typecheck_xdstp_name() -> ResourceName {
     )
 }
 
-// Node builder.
-fn typecheck_node() -> Node {
-    Node.new("sidecar-0".into(), "my-cluster".into())
+// XdsNode builder.
+fn typecheck_node() -> XdsNode {
+    XdsNode.new("sidecar-0".into(), "my-cluster".into())
         .with_locality("us-east".into(), "us-east-1a".into(), None)
         .with_user_agent("verum-envoy".into(), "0.1".into())
 }
 
 // AdsConfig + auth variants.
 fn typecheck_ads_config() -> AdsConfig {
-    let node = Node.new("id".into(), "c".into());
+    let node = XdsNode.new("id".into(), "c".into());
     AdsConfig.new("istiod:15010".into(), node)
         .with_auth(AdsAuth.Bearer("token".into()))
         .with_use_delta(true)
@@ -71,20 +71,20 @@ async fn typecheck_connect(config: AdsConfig) -> Result<AdsClient, XdsError> {
     AdsClient.connect(config).await
 }
 
-async fn typecheck_subscribe(c: &AdsClient) -> Result<Subscription, XdsError> {
+async fn typecheck_subscribe(c: &AdsClient) -> Result<XdsSubscription, XdsError> {
     let t = TypeUrl.new(TypeUrl.LISTENER.into());
     let names: [ResourceName; 1] = [ResourceName.new("listener_0".into())];
     c.subscribe(t, &names).await
 }
 
-async fn typecheck_update_watch(c: &AdsClient, s: &Subscription)
+async fn typecheck_update_watch(c: &AdsClient, s: &XdsSubscription)
     -> Result<(), XdsError>
 {
     let names: [ResourceName; 0] = [];
     c.update_watch(s, &names).await
 }
 
-async fn typecheck_unsubscribe(c: &AdsClient, s: Subscription) -> Result<(), XdsError> {
+async fn typecheck_unsubscribe(c: &AdsClient, s: XdsSubscription) -> Result<(), XdsError> {
     c.unsubscribe(s).await
 }
 

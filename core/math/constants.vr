@@ -182,7 +182,7 @@ public type UnitInterval is Float{it >= 0.0 && it <= 1.0};
 
 // Open unit interval: (0, 1)
 // Used for: probabilities (excluding certainties)
-public type Probability is Float{it > 0.0 && it < 1.0};
+public type MathProbability is Float{it > 0.0 && it < 1.0};
 
 // Closed probability: [0, 1]
 // Used for: general probabilities including 0 and 1

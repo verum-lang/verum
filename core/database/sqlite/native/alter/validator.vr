@@ -32,7 +32,7 @@ mount core.database.sqlite.native.alter.op.{
 // Errors
 // -----------------------------------------------------------------------------
 
-public type ValidationError is
+public type AlterValidationError is
       VeNoSuchTable(Text)
     | VeNoSuchColumn(Text, Text)        // (table, col)
     | VeDuplicateName(Text)
@@ -40,7 +40,7 @@ public type ValidationError is
     | VePrimaryKey(Text, Text)
     | VeForeignKey(Text, Text);
 
-public fn error_kind(e: &ValidationError) -> Text {
+public fn error_kind(e: &AlterValidationError) -> Text {
     match e {
         VeNoSuchTable(_)            => "no_such_table".clone(),
         VeNoSuchColumn(_, _)        => "no_such_column".clone(),
@@ -158,7 +158,7 @@ fn clone_table(t: &TableShape) -> TableShape {
 // validate
 // -----------------------------------------------------------------------------
 
-public fn validate(op: &AlterOp, snap: &SchemaSnapshot) -> Result<(), ValidationError> {
+public fn validate(op: &AlterOp, snap: &SchemaSnapshot) -> Result<(), AlterValidationError> {
     match op {
         AoRenameTable(old, new) => {
             if snap.table(old).is_none() { return Err(VeNoSuchTable(old.clone())); }

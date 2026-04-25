@@ -293,7 +293,7 @@ public mount .constants.{
     NonNegative,
     Positive,
     UnitInterval,
-    Probability,
+    MathProbability,
     Angle,
 };
 

@@ -9,14 +9,14 @@
 //   * BBox geometry (volume / contains / overlaps / union /
 //     enlargement)
 //   * RTree insert / search / delete with 2D + 3D inputs
-//   * Node split when leaf exceeds RTREE_MAX_CELLS
+//   * RTreeNode split when leaf exceeds RTREE_MAX_CELLS
 //   * QueryBuilder translates per-coord predicates into a probe bbox
 
 mount core.database.sqlite.native.vtabs.rtree.bbox.{
     BBox, bbox_new, bbox_1d, bbox_2d, bbox_3d, bbox_equal, MAX_DIMS,
 };
 mount core.database.sqlite.native.vtabs.rtree.node.{
-    Node, Leaf, Internal, LeafEntry, InternalEntry,
+    RTreeNode, Leaf, Internal, LeafEntry, InternalEntry,
     leaf_new, internal_new, node_id, node_entry_count,
     node_is_full, node_mbb,
     RTREE_MAX_CELLS, RTREE_MIN_CELLS,
@@ -79,7 +79,7 @@ fn test_bbox_3d() {
 }
 
 // -----------------------------------------------------------------------------
-// Node basics
+// RTreeNode basics
 // -----------------------------------------------------------------------------
 
 fn test_leaf_new_empty() {

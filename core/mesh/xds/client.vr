@@ -24,10 +24,10 @@ mount core.mesh.xds.types.{AdsConfig, TypeUrl, ResourceName};
 mount core.mesh.xds.resources.{Resource};
 
 // =============================================================================
-// Subscription — a per-TypeUrl resource-set interest
+// XdsSubscription — a per-TypeUrl resource-set interest
 // =============================================================================
 
-public type Subscription is {
+public type XdsSubscription is {
     handle: UInt64,
     type_url: TypeUrl,
 }
@@ -78,21 +78,21 @@ implement AdsClient {
         &self,
         type_url: TypeUrl,
         resource_names: &[ResourceName],
-    ) -> Result<Subscription, XdsError> {
+    ) -> Result<XdsSubscription, XdsError> {
         @intrinsic("verum.xds.subscribe", self.handle, &type_url, resource_names).await
     }
 
     /// Update the watch set for an existing subscription.
     pub async fn update_watch(
         &self,
-        subscription: &Subscription,
+        subscription: &XdsSubscription,
         resource_names: &[ResourceName],
     ) -> Result<(), XdsError> {
         @intrinsic("verum.xds.update_watch",
             self.handle, subscription.handle, resource_names).await
     }
 
-    pub async fn unsubscribe(&self, subscription: Subscription) -> Result<(), XdsError> {
+    pub async fn unsubscribe(&self, subscription: XdsSubscription) -> Result<(), XdsError> {
         @intrinsic("verum.xds.unsubscribe", self.handle, subscription.handle).await
     }
 
