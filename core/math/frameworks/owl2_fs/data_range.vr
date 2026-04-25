@@ -4,26 +4,75 @@
 //
 // §2.2.2 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 5 operators
 // constructing the data-value side of OWL 2 (the `d` sort).
+//
+// V2 status (#134, 2026-04-25): all 5 data-range constructors ship
+// verbatim W3C OWL 2 DS §3.4 bodies.
 // =============================================================================
 
-/// `DataIntersectionOf(DR1 ... DRn)` — intersection of n data ranges.
+mount core.math.frameworks.owl2_fs.types.{
+    DataRange,
+    Literal,
+    Interpretation,
+};
+
+/// `DataIntersectionOf(DR₁ ... DRₙ)` (W3C §3.4): the data range
+/// whose interpretation is the set-theoretic intersection of the
+/// component ranges.
+/// ⟦DataIntersectionOf(DR₁, DR₂)⟧^I = ⟦DR₁⟧^I ∩ ⟦DR₂⟧^I.
+/// V2 ships the binary core; n-ary at helper layer.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.2 Table 3: DataIntersectionOf")
-public axiom DataIntersectionOf() -> Bool ensures true;
+public axiom DataIntersectionOf<I: Interpretation, R: DataRange>(
+    interp: I,
+    result: R,
+    a:      R,
+    b:      R,
+) -> Bool
+    ensures interp.data_intersection(result, a, b);
 
-/// `DataUnionOf(DR1 ... DRn)` — union of n data ranges.
+/// `DataUnionOf(DR₁ ... DRₙ)` (W3C §3.4): set-theoretic union.
+/// ⟦DataUnionOf(DR₁, DR₂)⟧^I = ⟦DR₁⟧^I ∪ ⟦DR₂⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.2 Table 3: DataUnionOf")
-public axiom DataUnionOf() -> Bool ensures true;
+public axiom DataUnionOf<I: Interpretation, R: DataRange>(
+    interp: I,
+    result: R,
+    a:      R,
+    b:      R,
+) -> Bool
+    ensures interp.data_union(result, a, b);
 
-/// `DataComplementOf(DR)` — complement of a data range with respect
-/// to the value space of its datatype.
+/// `DataComplementOf(DR)` (W3C §3.4): complement of DR with respect
+/// to the global data domain Δᴵᴰ.
+/// ⟦DataComplementOf(DR)⟧^I = Δᴵᴰ ∖ ⟦DR⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.2 Table 3: DataComplementOf")
-public axiom DataComplementOf() -> Bool ensures true;
+public axiom DataComplementOf<I: Interpretation, R: DataRange>(
+    interp: I,
+    result: R,
+    base:   R,
+) -> Bool
+    ensures interp.data_complement(result, base);
 
-/// `DataOneOf(lit1 ... litn)` — finite enumeration of literals.
+/// `DataOneOf(lit₁ ... litₙ)` (W3C §3.4): finite enumeration of
+/// literals interpreted as the set of their interpretations.
+/// ⟦DataOneOf(lt)⟧^I = { lt^I }. V2 ships the singleton core;
+/// n-ary enumerations via Verum-level fold.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.2 Table 3: DataOneOf")
-public axiom DataOneOf() -> Bool ensures true;
+public axiom DataOneOf<I: Interpretation, R: DataRange>(
+    interp: I,
+    result: R,
+    lt:     Literal,
+) -> Bool
+    ensures interp.data_one_of(result, lt);
 
-/// `DatatypeRestriction(DT facets...)` — datatype with constraining
-/// facets such as xsd:minInclusive / xsd:pattern.
+/// `DatatypeRestriction(DT, F₁ v₁ ... Fₙ vₙ)` (W3C §3.4): datatype
+/// constrained by facets such as xsd:minInclusive / xsd:pattern.
+/// ⟦DatatypeRestriction(DT, F v)⟧^I = ⟦DT⟧^I ∩ { x : F(x, v) }.
+/// V2 ships single-facet core; n-ary facet conjunction at helper.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.2 Table 3: DatatypeRestriction")
-public axiom DatatypeRestriction() -> Bool ensures true;
+public axiom DatatypeRestriction<I: Interpretation, R: DataRange>(
+    interp: I,
+    result: R,
+    base:   R,
+    facet:  Text,
+    value:  Literal,
+) -> Bool
+    ensures interp.datatype_restriction(result, base, facet, value);

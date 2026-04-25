@@ -265,4 +265,40 @@ public type Interpretation is protocol {
     fn has_key_named<C: ClassExpression, P: ObjectPropertyExpression, D: DataPropertyExpression>(
         self, ce: C, ope: P, dpe: D,
     ) -> Bool;
+
+    // ─── Data-range constructor predicates (§3.4) ────────────────
+
+    /// W3C §3.4 DataIntersectionOf (binary core):
+    /// ⟦DataIntersectionOf(DR₁, DR₂)⟧^I = ⟦DR₁⟧^I ∩ ⟦DR₂⟧^I.
+    fn data_intersection<R: DataRange>(
+        self, result: R, a: R, b: R,
+    ) -> Bool;
+
+    /// W3C §3.4 DataUnionOf (binary core):
+    /// ⟦DataUnionOf(DR₁, DR₂)⟧^I = ⟦DR₁⟧^I ∪ ⟦DR₂⟧^I.
+    fn data_union<R: DataRange>(
+        self, result: R, a: R, b: R,
+    ) -> Bool;
+
+    /// W3C §3.4 DataComplementOf:
+    /// ⟦DataComplementOf(DR)⟧^I = Δᴵᴰ ∖ ⟦DR⟧^I.
+    fn data_complement<R: DataRange>(
+        self, result: R, base: R,
+    ) -> Bool;
+
+    /// W3C §3.4 DataOneOf (singleton core):
+    /// ⟦DataOneOf(lt)⟧^I = { lt^I }.
+    /// V2 ships the singleton; n-ary enumerations via Verum-level fold.
+    fn data_one_of<R: DataRange>(
+        self, result: R, lt: Literal,
+    ) -> Bool;
+
+    /// W3C §3.4 DatatypeRestriction:
+    /// ⟦DatatypeRestriction(DT, F₁ v₁, ..., Fₙ vₙ)⟧^I
+    ///    =  ⟦DT⟧^I  ∩  facet-conjunction(F₁ v₁, ..., Fₙ vₙ).
+    /// V2 ships a single-facet form `(DT, facet_iri, value)`; n-ary
+    /// facet conjunction via Verum-level fold.
+    fn datatype_restriction<R: DataRange>(
+        self, result: R, base: R, facet: Text, value: Literal,
+    ) -> Bool;
 };
