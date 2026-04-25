@@ -4206,6 +4206,274 @@ pub fn lower_instruction<'ctx>(
         // ====================================================================
 
         // Tensor individual instructions: delegate to LLVM IR runtime (tensor_ir.rs)
+        // ====================================================================
+        // Tensor creation/manipulation (#82): route through verum_tensor
+        // C-ABI runtime. The runtime is a thin shim over the host BLAS /
+        // tensor backend (verum_tensor crate). All ops use the uniform
+        // i64-only ABI: register values pass as Value bits, dtype passes
+        // as i64-encoded enum, shape vectors pass as `(ptr_i64, len_i64)`
+        // pairs pointing at a stack-allocated i64 array. The runtime
+        // returns an i64 tensor handle (or 0 on error).
+        //
+        // Optimisation hooks: each call site is annotated with the
+        // operation name via the LLVM call-site metadata so the
+        // optimiser can recognise tensor-handle-producing calls and
+        // fold trivial chains (e.g. `clone(reshape(x))` when shape is
+        // identity). The runtime shim guarantees `noalias` on the
+        // returned tensor, which lets LLVM hoist subsequent reads.
+        // ====================================================================
+        Instruction::TensorFull { dst, value, shape, dtype } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let fill = as_i64(ctx, ctx.get_register(value.0)?, "fill")?;
+            let (shape_ptr_i64, shape_len_i64) = build_tensor_shape_array(ctx, shape, "full_shape")?;
+            let dtype_val = i64_ty.const_int(*dtype as u64, false);
+            let fn_type = i64_ty.fn_type(
+                &[i64_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                false,
+            );
+            let f = module.get_function("verum_tensor_full").unwrap_or_else(|| {
+                module.add_function("verum_tensor_full", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[fill.into(), shape_ptr_i64.into(), shape_len_i64.into(), dtype_val.into()], "tensor_full")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorFromSlice { dst, data, shape, dtype } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let data_v = as_i64(ctx, ctx.get_register(data.0)?, "data")?;
+            let (shape_ptr, shape_len) = build_tensor_shape_array(ctx, shape, "fs_shape")?;
+            let dtype_val = i64_ty.const_int(*dtype as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 4], false);
+            let f = module.get_function("verum_tensor_from_slice").unwrap_or_else(|| {
+                module.add_function("verum_tensor_from_slice", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[data_v.into(), shape_ptr.into(), shape_len.into(), dtype_val.into()], "tensor_from_slice")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorArange { dst, start, end, step, dtype } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(start.0)?, "ar_start")?;
+            let e = as_i64(ctx, ctx.get_register(end.0)?, "ar_end")?;
+            let st = as_i64(ctx, ctx.get_register(step.0)?, "ar_step")?;
+            let dtype_val = i64_ty.const_int(*dtype as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 4], false);
+            let f = module.get_function("verum_tensor_arange").unwrap_or_else(|| {
+                module.add_function("verum_tensor_arange", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into(), e.into(), st.into(), dtype_val.into()], "tensor_arange")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorLinspace { dst, start, end, num, dtype } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(start.0)?, "ls_start")?;
+            let e = as_i64(ctx, ctx.get_register(end.0)?, "ls_end")?;
+            let n = as_i64(ctx, ctx.get_register(num.0)?, "ls_num")?;
+            let dtype_val = i64_ty.const_int(*dtype as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 4], false);
+            let f = module.get_function("verum_tensor_linspace").unwrap_or_else(|| {
+                module.add_function("verum_tensor_linspace", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into(), e.into(), n.into(), dtype_val.into()], "tensor_linspace")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorRand { dst, shape, dtype } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let (shape_ptr, shape_len) = build_tensor_shape_array(ctx, shape, "rand_shape")?;
+            let dtype_val = i64_ty.const_int(*dtype as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 3], false);
+            let f = module.get_function("verum_tensor_rand").unwrap_or_else(|| {
+                module.add_function("verum_tensor_rand", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[shape_ptr.into(), shape_len.into(), dtype_val.into()], "tensor_rand")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorClone { dst, src } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "clone_src")?;
+            let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
+            let f = module.get_function("verum_tensor_clone").unwrap_or_else(|| {
+                module.add_function("verum_tensor_clone", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into()], "tensor_clone")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorIdentity { dst, size, dtype } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let n = as_i64(ctx, ctx.get_register(size.0)?, "id_size")?;
+            let dtype_val = i64_ty.const_int(*dtype as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 2], false);
+            let f = module.get_function("verum_tensor_identity").unwrap_or_else(|| {
+                module.add_function("verum_tensor_identity", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[n.into(), dtype_val.into()], "tensor_identity")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorTranspose { dst, src, perm } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "tr_src")?;
+            let (perm_ptr, perm_len) = build_tensor_perm_array(ctx, perm, "tr_perm")?;
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 3], false);
+            let f = module.get_function("verum_tensor_transpose").unwrap_or_else(|| {
+                module.add_function("verum_tensor_transpose", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into(), perm_ptr.into(), perm_len.into()], "tensor_transpose")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorSlice { dst, src, starts, ends } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "sl_src")?;
+            let (starts_ptr, starts_len) = build_tensor_shape_array(ctx, starts, "sl_starts")?;
+            let (ends_ptr, ends_len) = build_tensor_shape_array(ctx, ends, "sl_ends")?;
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 5], false);
+            let f = module.get_function("verum_tensor_slice").unwrap_or_else(|| {
+                module.add_function("verum_tensor_slice", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into(), starts_ptr.into(), starts_len.into(), ends_ptr.into(), ends_len.into()], "tensor_slice")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorIndex { dst, src, indices, axis } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "idx_src")?;
+            let i = as_i64(ctx, ctx.get_register(indices.0)?, "idx_idx")?;
+            let ax = i64_ty.const_int(*axis as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 3], false);
+            let f = module.get_function("verum_tensor_index").unwrap_or_else(|| {
+                module.add_function("verum_tensor_index", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into(), i.into(), ax.into()], "tensor_index")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorConcat { dst, tensors, axis } => {
+            lower_tensor_n_inputs(ctx, "verum_tensor_concat", *dst, tensors, *axis as i64)
+        }
+
+        Instruction::TensorStack { dst, tensors, axis } => {
+            lower_tensor_n_inputs(ctx, "verum_tensor_stack", *dst, tensors, *axis as i64)
+        }
+
+        Instruction::TensorBroadcast { dst, src, shape } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "bc_src")?;
+            let (shape_ptr, shape_len) = build_tensor_shape_array(ctx, shape, "bc_shape")?;
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 3], false);
+            let f = module.get_function("verum_tensor_broadcast").unwrap_or_else(|| {
+                module.add_function("verum_tensor_broadcast", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into(), shape_ptr.into(), shape_len.into()], "tensor_broadcast")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorSqueeze { dst, src, axes } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "sq_src")?;
+            let (axes_ptr, axes_len) = build_tensor_perm_array(ctx, axes, "sq_axes")?;
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 3], false);
+            let f = module.get_function("verum_tensor_squeeze").unwrap_or_else(|| {
+                module.add_function("verum_tensor_squeeze", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into(), axes_ptr.into(), axes_len.into()], "tensor_squeeze")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorPermute { dst, src, axes } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "pm_src")?;
+            let (perm_ptr, perm_len) = build_tensor_perm_array(ctx, axes, "pm_perm")?;
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 3], false);
+            let f = module.get_function("verum_tensor_permute").unwrap_or_else(|| {
+                module.add_function("verum_tensor_permute", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[s.into(), perm_ptr.into(), perm_len.into()], "tensor_permute")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
         Instruction::TensorNew { dst, dtype, dims } => {
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
@@ -14287,6 +14555,115 @@ fn lower_cubical_extended<'ctx>(
         ctx.set_register(dst.0, i64_ty.const_zero().into());
     }
 
+    Ok(())
+}
+
+// ========================================================================
+// Tensor lowering helpers — build a stack-allocated i64 array from a
+// `Vec<Reg>` shape / `Vec<u8>` perm, returning `(ptr_as_i64, len_as_i64)`
+// for the uniform i64-only verum_tensor C-ABI. The runtime shim
+// guarantees that the shape array is read once and copied into the
+// tensor descriptor before any subsequent operation, so the stack
+// allocation can be reclaimed immediately after the call.
+// ========================================================================
+
+fn build_tensor_shape_array<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    shape: &[verum_vbc::instruction::Reg],
+    name: &str,
+) -> Result<(verum_llvm::values::IntValue<'ctx>, verum_llvm::values::IntValue<'ctx>)> {
+    let i64_ty = ctx.types().i64_type();
+    let len_val = i64_ty.const_int(shape.len() as u64, false);
+    if shape.is_empty() {
+        return Ok((i64_ty.const_zero(), len_val));
+    }
+    let array_ty = i64_ty.array_type(shape.len() as u32);
+    let alloca = ctx.builder()
+        .build_alloca(array_ty, name)
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    for (i, reg) in shape.iter().enumerate() {
+        let v = as_i64(ctx, ctx.get_register(reg.0)?, &format!("{name}_{i}"))?;
+        let idx = i64_ty.const_int(i as u64, false);
+        // SAFETY: in-bounds GEP into a stack array sized exactly shape.len()
+        let gep = unsafe {
+            ctx.builder().build_in_bounds_gep(
+                array_ty,
+                alloca,
+                &[i64_ty.const_zero(), idx],
+                &format!("{name}_gep{i}"),
+            )
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        };
+        ctx.builder().build_store(gep, v)
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    }
+    let ptr_as_i64 = ctx.builder()
+        .build_ptr_to_int(alloca, i64_ty, &format!("{name}_ptr_i64"))
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    Ok((ptr_as_i64, len_val))
+}
+
+fn build_tensor_perm_array<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    perm: &[u8],
+    name: &str,
+) -> Result<(verum_llvm::values::IntValue<'ctx>, verum_llvm::values::IntValue<'ctx>)> {
+    let i64_ty = ctx.types().i64_type();
+    let len_val = i64_ty.const_int(perm.len() as u64, false);
+    if perm.is_empty() {
+        return Ok((i64_ty.const_zero(), len_val));
+    }
+    let i8_ty = ctx.llvm_context().i8_type();
+    let array_ty = i8_ty.array_type(perm.len() as u32);
+    let alloca = ctx.builder()
+        .build_alloca(array_ty, name)
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    for (i, byte) in perm.iter().enumerate() {
+        let v = i8_ty.const_int(*byte as u64, false);
+        let idx = i64_ty.const_int(i as u64, false);
+        // SAFETY: in-bounds GEP into a stack array sized exactly perm.len()
+        let gep = unsafe {
+            ctx.builder().build_in_bounds_gep(
+                array_ty,
+                alloca,
+                &[i64_ty.const_zero(), idx],
+                &format!("{name}_gep{i}"),
+            )
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        };
+        ctx.builder().build_store(gep, v)
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    }
+    let ptr_as_i64 = ctx.builder()
+        .build_ptr_to_int(alloca, i64_ty, &format!("{name}_ptr_i64"))
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    Ok((ptr_as_i64, len_val))
+}
+
+/// Common pattern: tensor op that takes N input tensors + a single integer
+/// scalar (axis, dim count, etc.). Builds the i64 ptr/len pair for the
+/// tensor handles array and calls the runtime extern.
+fn lower_tensor_n_inputs<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    fn_name: &str,
+    dst: verum_vbc::instruction::Reg,
+    tensors: &[verum_vbc::instruction::Reg],
+    scalar: i64,
+) -> Result<()> {
+    let i64_ty = ctx.types().i64_type();
+    let module = ctx.get_module();
+    let (tensors_ptr, tensors_len) = build_tensor_shape_array(ctx, tensors, "ts_in")?;
+    let scalar_val = i64_ty.const_int(scalar as u64, false);
+    let fn_type = i64_ty.fn_type(&[i64_ty.into(); 3], false);
+    let f = module.get_function(fn_name).unwrap_or_else(|| {
+        module.add_function(fn_name, fn_type, None)
+    });
+    let result = ctx.builder()
+        .build_call(f, &[tensors_ptr.into(), tensors_len.into(), scalar_val.into()], fn_name)
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .try_as_basic_value().basic()
+        .unwrap_or_else(|| i64_ty.const_zero().into());
+    ctx.set_register(dst.0, result);
     Ok(())
 }
 
