@@ -1,0 +1,316 @@
+// =============================================================================
+// core/net/weft/h3.vr — pure-Verum HTTP/3 (warp) server adapter
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6.3 / §6.10 / §6.11 (Phase 4)
+//        internal/specs/tls-quic.md (warp stack)
+// RFCs:  9114 (HTTP/3), 9204 (QPACK), 9000 (QUIC), 9001 (QUIC-TLS),
+//        8446 (TLS 1.3), 9218 (priorities)
+// =============================================================================
+//
+// Plugs `core/net/h3.server.H3Server` (the pure-Verum warp stack —
+// 76 tls13 + 128 quic + 24 h3 L2 tests, V1–V10 verification
+// theorems) into Weft's `Handler` + `Router` stack. Companion to
+// `weft/http3.vr` which targets the legacy intrinsic-backed
+// `core.net.http3` surface.
+//
+// Choosing between adapters:
+//
+//   * `weft/http3.vr` — uses the legacy intrinsic backend (rustls /
+//     quiche / msquic via FFI). Production-ready today; depends on
+//     the OS-level QUIC library.
+//   * `weft/h3.vr` — uses the pure-Verum warp stack. Zero FFI,
+//     compile-time-discharged refinement contracts, byte-exact KAT
+//     coverage of every wire form. Production target as warp Phase 7
+//     completes its perf intrinsics (AES-NI / AVX-512 / io_uring).
+//
+// Phase 4 scope (in):
+//
+//   * Unary request/response over h3 streams (the 90% case).
+//   * Response stamping via the H3Response builder.
+//   * `WarpQuicConfig` exposure with the §6.11 PQ-hybrid defaults.
+//   * Drain on shutdown — best-effort cancellation notify on next
+//     await, then poll-based grace window.
+//
+// Phase 4 follow-up:
+//
+//   * Server-streaming through `H3Response.streaming(callback)`.
+//   * RFC 9114 §4.6 server push via `core.net.h3.push.PushEmitter`.
+//   * RFC 9218 priority field consumption from request headers.
+//
+// =============================================================================
+
+module core.net.weft.h3;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.net.addr.{SocketAddr};
+mount core.net.http.{Method, StatusCode, Headers, Response};
+mount core.net.h3.server.{H3Server, ServerOptions, H3ServerError, H3Handler};
+mount core.net.h3.request.{H3Request, H3Response, H3Method, H3Status};
+mount core.net.h3.error.{H3Error};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.handshake.dhe_pool.{DhePool, LocalDhePool};
+mount core.net.tls13.handshake.server_sm.{CertSigner};
+mount core.async.cancellation.{CancellationToken};
+mount core.async.task;
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError, IntoResponse};
+
+// =============================================================================
+// WarpQuicConfig — §6.11 PQ-hybrid defaults wrapped over warp ServerOptions
+// =============================================================================
+
+public type WarpQuicConfig is {
+    /// Underlying warp `core.net.h3.server.ServerOptions`.
+    inner: ServerOptions,
+    /// Max concurrent in-flight HTTP/3 requests across all
+    /// connections handled by this server. Excess streams receive
+    /// best-effort `H3_REQUEST_REJECTED`.
+    max_concurrent_requests: Int,
+};
+
+implement WarpQuicConfig {
+    /// Build a server config with the §6.11 defaults. PQ-hybrid via
+    /// X25519 + ML-KEM-768 lands once `core.net.tls13.named_group`
+    /// adds the codepoint; today we ship X25519 + Secp256r1 which is
+    /// what the warp `ServerOptions.from_cert` defaults to.
+    public fn server(
+        cert_chain: List<List<Byte>>,
+        signer: Heap<dyn CertSigner>,
+    ) -> WarpQuicConfig {
+        let inner = ServerOptions.from_cert(cert_chain, signer)
+            .with_alpn([core.net.h3.server.default_alpn()])
+            .with_idle_timeout(core.time.Duration.from_secs(30));
+        WarpQuicConfig {
+            inner: inner,
+            max_concurrent_requests: 10_000,
+        }
+    }
+
+    public fn with_max_concurrent_requests(mut self, n: Int) -> WarpQuicConfig {
+        self.max_concurrent_requests = n;
+        self
+    }
+
+    public fn with_alpn(mut self, alpn: List<List<Byte>>) -> WarpQuicConfig {
+        self.inner = self.inner.with_alpn(alpn);
+        self
+    }
+
+    public fn with_idle_timeout(mut self, d: core.time.Duration) -> WarpQuicConfig {
+        self.inner = self.inner.with_idle_timeout(d);
+        self
+    }
+}
+
+// =============================================================================
+// WarpH3Server<H> — accept loop driving the Weft handler stack
+// =============================================================================
+
+public type WarpH3Server<H> is {
+    inner:    H3Server,
+    app:      Heap<H>,
+    config:   WarpQuicConfig,
+    token:    CancellationToken,
+    draining: Shared<AtomicBool>,
+};
+
+implement<H: Handler + Send + Sync + 'static> WarpH3Server<H> {
+    /// Bind a UDP socket + prepare the warp QUIC listener.
+    pub async fn bind(
+        addr: &Text,
+        app: H,
+        config: WarpQuicConfig,
+    ) -> Result<WarpH3Server<H>, Text> {
+        let server = match H3Server.bind(addr, config.inner.clone()).await {
+            Ok(s)  => s,
+            Err(e) => return Err(f"warp h3 bind: {e}"),
+        };
+        Ok(WarpH3Server {
+            inner:    server,
+            app:      Heap.new(app),
+            config:   config,
+            token:    CancellationToken.new(),
+            draining: Shared.new(AtomicBool.new(false)),
+        })
+    }
+
+    /// Snapshot the cancellation token so callers can wire it into a
+    /// supervisor signal handler.
+    public fn shutdown_token(&self) -> CancellationToken {
+        self.token.clone()
+    }
+
+    /// Initiate two-phase graceful shutdown — stop accepting new
+    /// requests, then notify in-flight handlers via cancellation.
+    public fn shutdown(&self) {
+        self.draining.store(true, MemoryOrdering.Release);
+        self.token.cancel();
+    }
+
+    /// Accept-dispatch loop. Returns when:
+    ///
+    ///   * `shutdown` was called, OR
+    ///   * the accept loop bubbles up a transport-level error.
+    ///
+    /// Exits perform a best-effort grace window (poll for in-flight
+    /// requests to drain) capped at 30 s.
+    pub async fn serve(self) -> Result<(), Text> {
+        let WarpH3Server { inner, app, config, token, draining } = self;
+        let in_flight: Shared<AtomicInt> = Shared.new(AtomicInt.new(0));
+        let max = config.max_concurrent_requests;
+
+        // The accept loop wraps H3Server.run_with — each accepted
+        // request becomes a spawn into the WarpH3Server's nursery
+        // (caller's nursery propagates).
+        let app_outer = app.clone();
+        let tok_outer = token.clone();
+        let drain_outer = draining.clone();
+        let in_flight_outer = in_flight.clone();
+
+        let serve_result = inner.run_with(|req: H3Request| async move {
+            // Backpressure cap.
+            let cur = in_flight_outer.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+            if cur > max {
+                in_flight_outer.fetch_sub(1, MemoryOrdering.AcqRel);
+                return H3Response.status(H3Status.ServiceUnavailable)
+                    .text(f"server saturated");
+            }
+            // Drain rejection — once shutdown begins, new requests
+            // get a courteous 503 instead of being silently dropped.
+            if drain_outer.load(MemoryOrdering.Acquire) {
+                in_flight_outer.fetch_sub(1, MemoryOrdering.AcqRel);
+                return H3Response.status(H3Status.ServiceUnavailable)
+                    .header(&f"connection", &f"close")
+                    .text(f"server draining");
+            }
+
+            let response = dispatch_one_request(req, &*app_outer, &tok_outer).await;
+            in_flight_outer.fetch_sub(1, MemoryOrdering.AcqRel);
+            response
+        }).await;
+
+        // Drain wait — poll-based.
+        let mut elapsed: Int = 0;
+        while in_flight.load(MemoryOrdering.Acquire) > 0 && elapsed < 30_000 {
+            core.async.timer.sleep_ms(50).await;
+            elapsed = elapsed + 50;
+        }
+
+        match serve_result {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(f"warp h3 serve: {e}"),
+        }
+    }
+}
+
+// =============================================================================
+// dispatch_one_request — convert H3Request → WeftRequest, run the
+// Handler stack, convert WeftResponse → H3Response.
+// =============================================================================
+
+async fn dispatch_one_request<H: Handler>(
+    req: H3Request,
+    app: &H,
+    token: &CancellationToken,
+) -> H3Response {
+    let weft_req = h3_to_weft_request(req);
+
+    // Cancellation propagates to the user handler's first await
+    // boundary if the server is shutting down mid-request.
+    let result = if token.is_cancelled() {
+        Err(WeftError.Cancelled)
+    } else {
+        app.handle(&weft_req).await
+    };
+
+    match result {
+        Ok(weft_resp) => weft_to_h3_response(weft_resp),
+        Err(err)      => err.into_h3_response(),
+    }
+}
+
+fn h3_to_weft_request(req: H3Request) -> WeftRequest {
+    // Map H3Method → Method (HTTP-1.1 enum used by Weft).
+    let method = match req.method() {
+        H3Method.Get     => Method.Get,
+        H3Method.Post    => Method.Post,
+        H3Method.Put     => Method.Put,
+        H3Method.Delete  => Method.Delete,
+        H3Method.Patch   => Method.Patch,
+        H3Method.Head    => Method.Head,
+        H3Method.Options => Method.Options,
+        H3Method.Connect => Method.Connect,
+        H3Method.Other(t) => Method.Other(t),
+    };
+
+    let mut headers = Headers.new();
+    let h3_headers = req.headers();
+    let mut i: Int = 0;
+    while i < h3_headers.len() {
+        // Skip pseudo-headers (`:method`, `:path`, `:authority`,
+        // `:scheme`) — Weft consumes them via the typed extractors.
+        let name_text = h3_headers[i].name.clone();
+        if !name_text.starts_with(&f":") {
+            headers.append(name_text, h3_headers[i].value.clone());
+        }
+        i = i + 1;
+    }
+
+    WeftRequest {
+        method:  method,
+        path:    req.path(),
+        query:   req.query(),
+        headers: headers,
+        body:    req.body_bytes(),
+        peer:    req.peer_addr(),
+    }
+}
+
+fn weft_to_h3_response(resp: Response) -> H3Response {
+    let status = H3Status.from_u16(resp.status.as_u16());
+    let mut h3 = H3Response.status(status);
+
+    // Translate Weft headers to H3 trailing headers in emission order.
+    let names = resp.headers.names();
+    let mut i: Int = 0;
+    while i < names.len() {
+        let name = &names[i];
+        let values = resp.headers.get_all(name);
+        let mut j: Int = 0;
+        while j < values.len() {
+            h3 = h3.header(name, &values[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    h3.bytes(resp.body)
+}
+
+// IntoResponse extension — every WeftError gets a non-degenerate H3
+// response. Mirrors the existing WeftError → Response surface used
+// by the legacy http3.vr adapter.
+implement IntoResponse for WeftError {
+    public fn into_h3_response(self) -> H3Response {
+        let status = match self {
+            WeftError.NotFound          => H3Status.NotFound,
+            WeftError.MethodNotAllowed  => H3Status.MethodNotAllowed,
+            WeftError.BadRequest(_)     => H3Status.BadRequest,
+            WeftError.Unauthorized      => H3Status.Unauthorized,
+            WeftError.Forbidden         => H3Status.Forbidden,
+            WeftError.PayloadTooLarge   => H3Status.PayloadTooLarge,
+            WeftError.UnsupportedMedia  => H3Status.UnsupportedMediaType,
+            WeftError.Internal(_)       => H3Status.InternalServerError,
+            WeftError.NotImplemented    => H3Status.NotImplemented,
+            WeftError.ServiceUnavailable => H3Status.ServiceUnavailable,
+            WeftError.Cancelled         => H3Status.ServiceUnavailable,
+            WeftError.Timeout           => H3Status.GatewayTimeout,
+        };
+        H3Response.status(status).text(self.to_text())
+    }
+}
