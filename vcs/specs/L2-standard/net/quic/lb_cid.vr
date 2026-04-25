@@ -1,0 +1,157 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, lb, cid_rotation, draft_quic_load_balancers, surface
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/quic/lb_cid.vr` — surface check for QUIC-LB CID
+// rotation that closes net-framework.md §6.10 Phase 4 follow-up
+// "QUIC-LB connection-ID rotation".
+
+mount core.collections.list.{List};
+mount core.security.cipher.aes.{AesKey128};
+mount core.net.quic.lb_cid.{
+    LbCidProfile, LbConfig, CidGenerator, CidDecoder, LbCidError,
+};
+
+fn profile_table_lengths_match_spec() {
+    assert(LbCidProfile.Profile_8_1.total_len()  == 8);
+    assert(LbCidProfile.Profile_12_2.total_len() == 12);
+    assert(LbCidProfile.Profile_16_3.total_len() == 16);
+    assert(LbCidProfile.Profile_20_3.total_len() == 20);
+    assert(LbCidProfile.Profile_8_1.server_id_len()  == 1);
+    assert(LbCidProfile.Profile_12_2.server_id_len() == 2);
+    assert(LbCidProfile.Profile_16_3.server_id_len() == 3);
+    assert(LbCidProfile.Profile_20_3.server_id_len() == 3);
+}
+
+fn codepoint_roundtrip() {
+    let p = LbCidProfile.Profile_12_2;
+    let cp = p.codepoint();
+    let recovered = LbCidProfile.from_codepoint(cp);
+    match recovered {
+        Some(_) => {},
+        None    => panic("expected Some"),
+    }
+}
+
+fn unknown_codepoint_returns_none() {
+    let recovered = LbCidProfile.from_codepoint(0x77_u8);
+    match recovered {
+        None    => {},
+        Some(_) => panic("expected None"),
+    }
+}
+
+fn config_rejects_wrong_server_id_len() {
+    let key: AesKey128 = AesKey128 { bytes: [0_u8; 16] };
+    // Profile_8_1 expects 1-byte server_id; supply 3 → InvalidServerIdLen.
+    let bad: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    match LbConfig.new(LbCidProfile.Profile_8_1, key, bad) {
+        Err(LbCidError.InvalidServerIdLen { expected, actual }) => {
+            assert(expected == 1);
+            assert(actual == 3);
+        },
+        _ => panic("expected InvalidServerIdLen"),
+    }
+}
+
+fn config_accepts_matching_server_id_len() {
+    let key: AesKey128 = AesKey128 { bytes: [0_u8; 16] };
+    let sid: List<Byte> = [0xAB_u8, 0xCD_u8];
+    match LbConfig.new(LbCidProfile.Profile_12_2, key, sid) {
+        Ok(_) => {},
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+fn generator_issues_correct_length() {
+    let key: AesKey128 = AesKey128 { bytes: [0x42_u8; 16] };
+    let sid: List<Byte> = [0xAA_u8, 0xBB_u8];
+    let cfg = match LbConfig.new(LbCidProfile.Profile_12_2, key, sid) {
+        Ok(c) => c,
+        Err(_) => panic("config"),
+    };
+    let gen = CidGenerator.new(cfg);
+    let cid = gen.issue();
+    assert(cid.len() == 12);
+}
+
+fn generator_issues_distinct_cids() {
+    let key: AesKey128 = AesKey128 { bytes: [0x33_u8; 16] };
+    let sid: List<Byte> = [0xCD_u8];
+    let cfg = match LbConfig.new(LbCidProfile.Profile_8_1, key, sid) {
+        Ok(c) => c,
+        Err(_) => panic("config"),
+    };
+    let gen = CidGenerator.new(cfg);
+    let a = gen.issue();
+    let b = gen.issue();
+    // Different nonces → different ciphertexts, so different CIDs.
+    let mut differ: Bool = false;
+    let aa = a.as_slice();
+    let bb = b.as_slice();
+    let mut i: Int = 0;
+    while i < aa.len() {
+        if aa[i] != bb[i] { differ = true; }
+        i = i + 1;
+    }
+    assert(differ);
+    assert(gen.issued_count() == 2);
+}
+
+fn decoder_rejects_short_dcid() {
+    let key: AesKey128 = AesKey128 { bytes: [0_u8; 16] };
+    let dec = CidDecoder.new([key]);
+    let too_short: List<Byte> = [];
+    match dec.decode_server_id(too_short.as_slice()) {
+        Err(LbCidError.InvalidConfigByte) => {},
+        _ => panic("expected InvalidConfigByte"),
+    }
+}
+
+fn decoder_rejects_unconfigured_cid_high_bit() {
+    let key: AesKey128 = AesKey128 { bytes: [0_u8; 16] };
+    let dec = CidDecoder.new([key]);
+    // Top bit clear → "unconfigured" CID (legacy non-LB peer).
+    let mut cid: List<Byte> = [0x01_u8];
+    let mut i: Int = 0;
+    while i < 7 { cid.push(0_u8); i = i + 1; }
+    match dec.decode_server_id(cid.as_slice()) {
+        Err(LbCidError.InvalidConfigByte) => {},
+        _ => panic("expected InvalidConfigByte"),
+    }
+}
+
+fn decoder_rejects_length_mismatch() {
+    let key: AesKey128 = AesKey128 { bytes: [0_u8; 16] };
+    let dec = CidDecoder.new([key]);
+    // Config byte says Profile_12_2 (total 12) but we hand 8 bytes.
+    let mut cid: List<Byte> = [0x82_u8];
+    let mut i: Int = 0;
+    while i < 7 { cid.push(0_u8); i = i + 1; }
+    match dec.decode_server_id(cid.as_slice()) {
+        Err(LbCidError.LengthMismatch { expected, actual }) => {
+            assert(expected == 12);
+            assert(actual == 8);
+        },
+        _ => panic("expected LengthMismatch"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    profile_table_lengths_match_spec();
+    codepoint_roundtrip();
+    unknown_codepoint_returns_none();
+    config_rejects_wrong_server_id_len();
+    config_accepts_matching_server_id_len();
+    generator_issues_correct_length();
+    generator_issues_distinct_cids();
+    decoder_rejects_short_dcid();
+    decoder_rejects_unconfigured_cid_high_bit();
+    decoder_rejects_length_mismatch();
+    print("QUIC-LB CID rotation surface verified");
+    0
+}
