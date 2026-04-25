@@ -276,6 +276,41 @@ const LINT_RULES: &[LintRule] = &[
              per-deref cost — promote to `&checked` (0ns) or `&unsafe`",
         category: LintCategory::Performance,
     },
+    // Phase C.6 — style ceilings (off by default; opt in via
+    // [lint.style] config).
+    LintRule {
+        name: "max-line-length",
+        level: LintLevel::Hint,
+        description: "Source line exceeds [lint.style].max_line_length characters",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "max-fn-lines",
+        level: LintLevel::Hint,
+        description: "Function body exceeds [lint.style].max_fn_lines",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "max-fn-params",
+        level: LintLevel::Hint,
+        description: "Function takes more parameters than [lint.style].max_fn_params",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "max-match-arms",
+        level: LintLevel::Hint,
+        description: "match expression has more arms than [lint.style].max_match_arms",
+        category: LintCategory::Style,
+    },
+    // Phase C.5 — documentation policy.
+    LintRule {
+        name: "public-must-have-doc",
+        level: LintLevel::Hint,
+        description:
+            "Public item lacks a doc comment (`///`) — add one or set \
+             [lint.documentation].public_must_have_doc = false",
+        category: LintCategory::Style,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {

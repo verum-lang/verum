@@ -104,6 +104,11 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
         &ForbiddenContextPass,
         &ArchitectureViolationPass,
         &CbgrBudgetExceededPass,
+        &MaxLineLengthPass,
+        &MaxFnLinesPass,
+        &MaxFnParamsPass,
+        &MaxMatchArmsPass,
+        &PublicMustHaveDocPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
@@ -1640,6 +1645,355 @@ impl LintPass for CbgrBudgetExceededPass {
             v.visit_item(item);
         }
         v.issues
+    }
+}
+
+// ===================================================================
+// Phase C.6: Style ceilings + Phase C.5: documentation policy
+// ===================================================================
+//
+// Configured via `[lint.style]` and `[lint.documentation]`:
+//
+//     [lint.style]
+//     max_line_length          = 100
+//     max_fn_lines             = 80
+//     max_fn_params            = 5
+//     max_match_arms           = 12
+//
+//     [lint.documentation]
+//     public_must_have_doc     = true
+//
+// Each ceiling is its own LintPass so users can dial them
+// individually via `[lint.severity]` / `@allow / @deny / @warn`.
+//
+// ===================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+struct StylePolicyConfig {
+    max_line_length: u32,
+    max_fn_lines: u32,
+    max_fn_params: u32,
+    max_match_arms: u32,
+}
+
+impl Default for StylePolicyConfig {
+    fn default() -> Self {
+        Self {
+            max_line_length: 100,
+            max_fn_lines: 80,
+            max_fn_params: 5,
+            max_match_arms: 12,
+        }
+    }
+}
+
+fn style_policy(ctx: &LintCtx<'_>) -> Option<StylePolicyConfig> {
+    ctx.config
+        .and_then(|c| c.rule_config::<StylePolicyConfig>("style-policy"))
+}
+
+// ── max-line-length ────────────────────────────────────────────────
+
+struct MaxLineLengthPass;
+
+impl LintPass for MaxLineLengthPass {
+    fn name(&self) -> &'static str { "max-line-length" }
+    fn description(&self) -> &'static str {
+        "Source line exceeds [lint.style].max_line_length characters"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg = match style_policy(ctx) {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        if cfg.max_line_length == 0 {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for (i, line) in ctx.source.lines().enumerate() {
+            // Count characters not bytes — UTF-8 width matters.
+            let len = line.chars().count() as u32;
+            if len > cfg.max_line_length {
+                issues.push(LintIssue {
+                    rule: "max-line-length",
+                    level: LintLevel::Hint,
+                    file: ctx.file.to_path_buf(),
+                    line: i + 1,
+                    column: cfg.max_line_length as usize + 1,
+                    message: format!(
+                        "line is {} characters; budget is {}",
+                        len, cfg.max_line_length
+                    ),
+                    suggestion: None,
+                    fixable: false,
+                });
+            }
+        }
+        issues
+    }
+}
+
+// ── max-fn-lines ────────────────────────────────────────────────────
+
+struct MaxFnLinesPass;
+
+impl LintPass for MaxFnLinesPass {
+    fn name(&self) -> &'static str { "max-fn-lines" }
+    fn description(&self) -> &'static str {
+        "Function body exceeds [lint.style].max_fn_lines"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg = match style_policy(ctx) {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        if cfg.max_fn_lines == 0 {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let func = match &item.kind {
+                ItemKind::Function(f) => f,
+                _ => continue,
+            };
+            let (start_line, _) = span_to_line_col(ctx.source, item.span.start);
+            let (end_line, _) = span_to_line_col(ctx.source, item.span.end);
+            let lines = end_line.saturating_sub(start_line).saturating_add(1) as u32;
+            if lines > cfg.max_fn_lines {
+                issues.push(LintIssue {
+                    rule: "max-fn-lines",
+                    level: LintLevel::Hint,
+                    file: ctx.file.to_path_buf(),
+                    line: start_line,
+                    column: 1,
+                    message: format!(
+                        "fn `{}` is {} lines; budget is {}",
+                        func.name, lines, cfg.max_fn_lines
+                    ),
+                    suggestion: None,
+                    fixable: false,
+                });
+            }
+        }
+        issues
+    }
+}
+
+// ── max-fn-params ──────────────────────────────────────────────────
+
+struct MaxFnParamsPass;
+
+impl LintPass for MaxFnParamsPass {
+    fn name(&self) -> &'static str { "max-fn-params" }
+    fn description(&self) -> &'static str {
+        "Function takes more parameters than [lint.style].max_fn_params"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg = match style_policy(ctx) {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        if cfg.max_fn_params == 0 {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let func = match &item.kind {
+                ItemKind::Function(f) => f,
+                _ => continue,
+            };
+            let n = func.params.len() as u32;
+            if n > cfg.max_fn_params {
+                let (line, col) = span_to_line_col(ctx.source, item.span.start);
+                issues.push(LintIssue {
+                    rule: "max-fn-params",
+                    level: LintLevel::Hint,
+                    file: ctx.file.to_path_buf(),
+                    line,
+                    column: col,
+                    message: format!(
+                        "fn `{}` takes {} parameters; budget is {}",
+                        func.name, n, cfg.max_fn_params
+                    ),
+                    suggestion: None,
+                    fixable: false,
+                });
+            }
+        }
+        issues
+    }
+}
+
+// ── max-match-arms ─────────────────────────────────────────────────
+
+struct MaxMatchArmsPass;
+
+impl LintPass for MaxMatchArmsPass {
+    fn name(&self) -> &'static str { "max-match-arms" }
+    fn description(&self) -> &'static str {
+        "match expression has more arms than [lint.style].max_match_arms"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg = match style_policy(ctx) {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        if cfg.max_match_arms == 0 {
+            return Vec::new();
+        }
+
+        struct V<'s, 'p> {
+            source: &'s str,
+            file: &'p Path,
+            limit: u32,
+            issues: Vec<LintIssue>,
+        }
+        impl<'s, 'p> Visitor for V<'s, 'p> {
+            fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+                use verum_ast::ExprKind;
+                if let ExprKind::Match { arms, .. } = &expr.kind {
+                    let n = arms.len() as u32;
+                    if n > self.limit {
+                        let (line, col) = span_to_line_col(self.source, expr.span.start);
+                        self.issues.push(LintIssue {
+                            rule: "max-match-arms",
+                            level: LintLevel::Hint,
+                            file: self.file.to_path_buf(),
+                            line,
+                            column: col,
+                            message: format!(
+                                "match expression has {} arms; budget is {}",
+                                n, self.limit
+                            ),
+                            suggestion: None,
+                            fixable: false,
+                        });
+                    }
+                }
+                visitor::walk_expr(self, expr);
+            }
+        }
+        let mut v = V {
+            source: ctx.source,
+            file: ctx.file,
+            limit: cfg.max_match_arms,
+            issues: Vec::new(),
+        };
+        for item in &ctx.module.items {
+            v.visit_item(item);
+        }
+        v.issues
+    }
+}
+
+// ── public-must-have-doc ───────────────────────────────────────────
+//
+// Phase C.5 documentation policy. Configured via
+// [lint.documentation].public_must_have_doc. A public fn/type/const
+// without a doc comment fires the rule. Detection: scan the source
+// lines immediately preceding the item's start line for `///`. We
+// don't rely on AST attribute parsing for doc comments because Verum
+// stores them in a separate channel.
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct DocumentationPolicyConfig {
+    public_must_have_doc: bool,
+}
+
+struct PublicMustHaveDocPass;
+
+impl LintPass for PublicMustHaveDocPass {
+    fn name(&self) -> &'static str { "public-must-have-doc" }
+    fn description(&self) -> &'static str {
+        "Public item lacks a doc comment (`///`) — \
+         add one or set [lint.documentation].public_must_have_doc = false"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg: DocumentationPolicyConfig = ctx
+            .config
+            .and_then(|c| c.rule_config::<DocumentationPolicyConfig>("documentation-policy"))
+            .unwrap_or_default();
+        if !cfg.public_must_have_doc {
+            return Vec::new();
+        }
+        let lines: Vec<&str> = ctx.source.lines().collect();
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let (kind_label, name, is_public) = match &item.kind {
+                ItemKind::Function(f) => ("fn", f.name.as_str().to_string(), is_public_fn(f)),
+                ItemKind::Type(t) => (
+                    "type",
+                    t.name.as_str().to_string(),
+                    matches!(
+                        t.visibility,
+                        verum_ast::Visibility::Public
+                            | verum_ast::Visibility::PublicCrate
+                            | verum_ast::Visibility::PublicSuper
+                            | verum_ast::Visibility::PublicIn(_)
+                    ),
+                ),
+                _ => continue,
+            };
+            if !is_public {
+                continue;
+            }
+            let (item_line, _) = span_to_line_col(ctx.source, item.span.start);
+            // Scan the lines immediately above for ///. Skip empty
+            // lines and other attributes; stop at the first line that
+            // is neither blank nor an attribute / doc comment.
+            let mut has_doc = false;
+            if item_line >= 2 {
+                let mut idx = item_line - 2; // 0-indexed prev line
+                loop {
+                    let t = lines.get(idx).map(|s| s.trim()).unwrap_or("");
+                    if t.starts_with("///") {
+                        has_doc = true;
+                        break;
+                    }
+                    if t.is_empty() || t.starts_with("@") || t.starts_with("//") {
+                        if idx == 0 {
+                            break;
+                        }
+                        idx -= 1;
+                        continue;
+                    }
+                    break;
+                }
+            }
+            if !has_doc {
+                issues.push(LintIssue {
+                    rule: "public-must-have-doc",
+                    level: LintLevel::Hint,
+                    file: ctx.file.to_path_buf(),
+                    line: item_line,
+                    column: 1,
+                    message: format!(
+                        "public {} `{}` lacks a `///` doc comment",
+                        kind_label, name
+                    ),
+                    suggestion: None,
+                    fixable: false,
+                });
+            }
+        }
+        issues
     }
 }
 

@@ -305,6 +305,16 @@ impl Spanned for Module {
     }
 }
 
+/// Self-referential `AsRef` so callers that take `M: AsRef<Module>`
+/// generic bounds can pass either `Module` or `&Module` uniformly.
+/// Required by `verum_compiler::stdlib_coercion_registry::scan_protocol_implementations`
+/// and similar generic over-iter-of-modules entry points.
+impl AsRef<Module> for Module {
+    fn as_ref(&self) -> &Module {
+        self
+    }
+}
+
 /// A complete compilation unit (potentially multiple modules).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CompilationUnit {
