@@ -844,3 +844,19 @@ public module journal_mode_pragma_api;
 public module locking_mode_pragma;
 // - read_uncommitted_pragma: PRAGMA read_uncommitted (shared-cache only) + WAL-ignore
 public module read_uncommitted_pragma;
+// - glob_pattern_api: GLOB token kinds + LIKE-vs-GLOB cs/wildcard mapping + reduction
+public module glob_pattern_api;
+// - regexp_fn_api: REGEXP operator → regexp(pattern, subject) hook + LookupOutcome
+public module regexp_fn_api;
+// - between_op_api: BETWEEN/NOT-BETWEEN rewrite + tri-valued evaluator + degenerate range
+public module between_op_api;
+// - null_op_api: IS NULL / IS NOT NULL / IS / IS NOT operators + sargability
+public module null_op_api;
+// - subquery_materialization_api: 3-strategy (flatten/coroutine/materialize) + cost class
+public module subquery_materialization_api;
+// - union_all_flatten_api: UNION ALL flattening rule + 5-verdict classifier
+public module union_all_flatten_api;
+// - vtab_savepoint_methods: xSavepoint/xRelease/xRollbackTo + StackOp + 4-outcome
+public module vtab_savepoint_methods;
+// - aggregate_window_fn_api: xStep/xFinal/xValue/xInverse capability + Verdict + FrameAction
+public module aggregate_window_fn_api;

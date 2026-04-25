@@ -1,0 +1,76 @@
+// xSavepoint / xRelease / xRollbackTo vtab methods.
+
+module core.database.sqlite.native.vtab_savepoint_methods.methods;
+
+mount base.{Bool, Text};
+
+public type Method is
+    | MSavepoint        // create / advance to id N
+    | MRelease          // discard savepoints with id >= N
+    | MRollbackTo       // restore state at id N (drop later savepoints)
+    ;
+
+public fn method_name(m: &Method) -> Text {
+    match m {
+        MSavepoint  => "xSavepoint".clone(),
+        MRelease    => "xRelease".clone(),
+        MRollbackTo => "xRollbackTo".clone(),
+    }
+}
+
+public fn well_known_count() -> Int { 3 }
+
+// Whether the method modifies persistent state.
+public fn writes_state(m: &Method) -> Bool {
+    match m { MSavepoint => true, MRollbackTo => true, MRelease => false }
+}
+
+// Whether implementing this method is mandatory for table v2.  All three are
+// optional; engine treats absence as "no nested-txn support".
+public fn is_optional(_m: &Method) -> Bool { true }
+
+// Outcome contract.
+public type Outcome is
+    | OOk
+    | OErrUnsupported       // SQLITE_ERROR — vtab declined
+    | OErrCorrupt           // SQLITE_CORRUPT
+    | OErrIo                // SQLITE_IOERR
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OOk             => "ok".clone(),
+        OErrUnsupported => "err_unsupported".clone(),
+        OErrCorrupt     => "err_corrupt".clone(),
+        OErrIo          => "err_io".clone(),
+    }
+}
+
+public fn is_ok(o: &Outcome) -> Bool {
+    match o { OOk => true, _ => false }
+}
+
+public fn classify_failure(o: &Outcome) -> Text {
+    match o {
+        OOk             => "none".clone(),
+        OErrUnsupported => "user".clone(),     // app-level
+        OErrCorrupt     => "data".clone(),
+        OErrIo          => "transient".clone(),
+    }
+}
+
+// Stack semantics: SAVEPOINT ids are dense, monotonically increasing.
+// `RELEASE id N` keeps savepoints with id < N; `ROLLBACK TO N` restores.
+public type StackOp is
+    | SoPush(Int)             // SAVEPOINT id N
+    | SoPopThrough(Int)       // RELEASE id N — drop ≥ N
+    | SoRestoreTo(Int)        // ROLLBACK TO id N — restore
+    ;
+
+public fn op_for(m: &Method, id: Int) -> StackOp {
+    match m {
+        MSavepoint  => SoPush(id),
+        MRelease    => SoPopThrough(id),
+        MRollbackTo => SoRestoreTo(id),
+    }
+}

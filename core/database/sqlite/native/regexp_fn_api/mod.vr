@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/regexp_fn_api/mod.vr
+// =============================================================================
+// REGEXP operator — `X REGEXP Y` is syntactic sugar for `regexp(Y, X)`.
+// SQLite ships no built-in regex engine; the function is unbound until the
+// app installs one (e.g. via the `re.c` extension or sqlite3_create_function).
+// Spec §15.5.
+// =============================================================================
+
+module core.database.sqlite.native.regexp_fn_api;
+
+public module hook;

@@ -1,0 +1,129 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, aggregate_window_fn_api, sql-aggregates
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.aggregate_window_fn_api.hook.{
+    Method, MStep, MFinal, MValue, MInverse,
+    method_name,
+    required_for_aggregate, required_for_window,
+    Capabilities, empty_capabilities,
+    aggregate_capable, window_capable,
+    Verdict, VOk, VMissingValue, VMissingInverse, VMissingBoth, VNotAggregate,
+    classify, verdict_name, is_ok,
+    FrameAction, FaAddRow, FaRemoveRow, FaPeek, FaFinalize,
+    method_for_action, action_name,
+};
+mount base.{Bool};
+
+fn test_method_names() {
+    assert(method_name(&MStep)    == "xStep".clone());
+    assert(method_name(&MFinal)   == "xFinal".clone());
+    assert(method_name(&MValue)   == "xValue".clone());
+    assert(method_name(&MInverse) == "xInverse".clone());
+}
+
+fn test_required_for_aggregate() {
+    assert(required_for_aggregate(&MStep));
+    assert(required_for_aggregate(&MFinal));
+    assert(!required_for_aggregate(&MValue));
+    assert(!required_for_aggregate(&MInverse));
+}
+
+fn test_required_for_window_all() {
+    assert(required_for_window(&MStep));
+    assert(required_for_window(&MFinal));
+    assert(required_for_window(&MValue));
+    assert(required_for_window(&MInverse));
+}
+
+fn test_aggregate_capable_predicate() {
+    let mut c = empty_capabilities();
+    assert(!aggregate_capable(&c));
+    c.has_step = true;
+    assert(!aggregate_capable(&c));
+    c.has_final = true;
+    assert(aggregate_capable(&c));
+}
+
+fn test_window_capable_predicate() {
+    let mut c = empty_capabilities();
+    c.has_step = true;
+    c.has_final = true;
+    c.has_value = true;
+    assert(!window_capable(&c));
+    c.has_inverse = true;
+    assert(window_capable(&c));
+}
+
+fn test_classify_not_aggregate() {
+    let c = empty_capabilities();
+    match classify(&c) { VNotAggregate => {}, _ => assert(false) }
+}
+
+fn test_classify_missing_value_only() {
+    let mut c = empty_capabilities();
+    c.has_step = true; c.has_final = true; c.has_inverse = true;
+    match classify(&c) { VMissingValue => {}, _ => assert(false) }
+}
+
+fn test_classify_missing_inverse_only() {
+    let mut c = empty_capabilities();
+    c.has_step = true; c.has_final = true; c.has_value = true;
+    match classify(&c) { VMissingInverse => {}, _ => assert(false) }
+}
+
+fn test_classify_missing_both() {
+    let mut c = empty_capabilities();
+    c.has_step = true; c.has_final = true;
+    match classify(&c) { VMissingBoth => {}, _ => assert(false) }
+}
+
+fn test_classify_ok() {
+    let mut c = empty_capabilities();
+    c.has_step = true; c.has_final = true;
+    c.has_value = true; c.has_inverse = true;
+    match classify(&c) { VOk => {}, _ => assert(false) }
+    assert(is_ok(&VOk));
+    assert(!is_ok(&VNotAggregate));
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&VOk)             == "ok".clone());
+    assert(verdict_name(&VMissingValue)   == "missing_value".clone());
+    assert(verdict_name(&VMissingInverse) == "missing_inverse".clone());
+    assert(verdict_name(&VMissingBoth)    == "missing_both".clone());
+    assert(verdict_name(&VNotAggregate)   == "not_aggregate".clone());
+}
+
+fn test_method_for_action_dispatch() {
+    match method_for_action(&FaAddRow)    { MStep    => {}, _ => assert(false) }
+    match method_for_action(&FaRemoveRow) { MInverse => {}, _ => assert(false) }
+    match method_for_action(&FaPeek)      { MValue   => {}, _ => assert(false) }
+    match method_for_action(&FaFinalize)  { MFinal   => {}, _ => assert(false) }
+}
+
+fn test_action_names() {
+    assert(action_name(&FaAddRow)    == "add_row".clone());
+    assert(action_name(&FaRemoveRow) == "remove_row".clone());
+    assert(action_name(&FaPeek)      == "peek".clone());
+    assert(action_name(&FaFinalize)  == "finalize".clone());
+}
+
+fn main() {
+    test_method_names();
+    test_required_for_aggregate();
+    test_required_for_window_all();
+    test_aggregate_capable_predicate();
+    test_window_capable_predicate();
+    test_classify_not_aggregate();
+    test_classify_missing_value_only();
+    test_classify_missing_inverse_only();
+    test_classify_missing_both();
+    test_classify_ok();
+    test_verdict_names();
+    test_method_for_action_dispatch();
+    test_action_names();
+}

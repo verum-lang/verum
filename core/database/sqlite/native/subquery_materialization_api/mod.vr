@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/subquery_materialization_api/mod.vr
+// =============================================================================
+// Sub-query materialization — the planner picks one of three strategies:
+//   * inline (flatten into outer query)
+//   * coroutine (re-enter sub-query SELECT one row at a time)
+//   * materialise (fill an ephemeral table once, scan thereafter)
+// Spec §13.5 — flattening + coroutine + materialise.
+// =============================================================================
+
+module core.database.sqlite.native.subquery_materialization_api;
+
+public module strategy;

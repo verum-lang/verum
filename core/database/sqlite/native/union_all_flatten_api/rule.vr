@@ -1,0 +1,83 @@
+// UNION ALL flattening rule.
+
+module core.database.sqlite.native.union_all_flatten_api.rule;
+
+mount base.{Bool, Text};
+
+public type Compound is
+    | CpUnionAll       // flattening candidate
+    | CpUnion          // dedups; needs sort
+    | CpIntersect      // set ops; not flattened
+    | CpExcept
+    ;
+
+public fn compound_name(c: &Compound) -> Text {
+    match c {
+        CpUnionAll  => "union_all".clone(),
+        CpUnion     => "union".clone(),
+        CpIntersect => "intersect".clone(),
+        CpExcept    => "except".clone(),
+    }
+}
+
+public fn is_flatten_candidate(c: &Compound) -> Bool {
+    match c { CpUnionAll => true, _ => false }
+}
+
+// Per-arm conditions checked at flattening time.
+public type ArmCheck is {
+    has_order_by: Bool,
+    has_limit: Bool,
+    has_offset: Bool,
+    column_count_matches: Bool,
+};
+
+public fn empty_check() -> ArmCheck {
+    ArmCheck {
+        has_order_by: false,
+        has_limit: false,
+        has_offset: false,
+        column_count_matches: true,
+    }
+}
+
+public fn arm_eligible(a: &ArmCheck) -> Bool {
+    if !a.column_count_matches { return false; }
+    if a.has_order_by { return false; }
+    if a.has_limit { return false; }
+    if a.has_offset { return false; }
+    true
+}
+
+public type FlattenVerdict is
+    | FvFlatten
+    | FvBlockedNotUnionAll
+    | FvBlockedColumnMismatch
+    | FvBlockedOrderByOnArm
+    | FvBlockedLimitOnArm
+    ;
+
+public fn classify(c: &Compound, a: &ArmCheck) -> FlattenVerdict {
+    if !is_flatten_candidate(c)     { return FvBlockedNotUnionAll; }
+    if !a.column_count_matches      { return FvBlockedColumnMismatch; }
+    if a.has_order_by               { return FvBlockedOrderByOnArm; }
+    if a.has_limit || a.has_offset  { return FvBlockedLimitOnArm; }
+    FvFlatten
+}
+
+public fn verdict_name(v: &FlattenVerdict) -> Text {
+    match v {
+        FvFlatten                  => "flatten".clone(),
+        FvBlockedNotUnionAll       => "blocked_not_union_all".clone(),
+        FvBlockedColumnMismatch    => "blocked_column_mismatch".clone(),
+        FvBlockedOrderByOnArm      => "blocked_order_by".clone(),
+        FvBlockedLimitOnArm        => "blocked_limit".clone(),
+    }
+}
+
+public fn flattens(v: &FlattenVerdict) -> Bool {
+    match v { FvFlatten => true, _ => false }
+}
+
+// Number of well-known blocking reasons.
+public fn well_known_block_count() -> Int { 4 }

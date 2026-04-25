@@ -1,0 +1,72 @@
+// REGEXP operator — function-name hook + lookup outcomes.
+
+module core.database.sqlite.native.regexp_fn_api.hook;
+
+mount base.{Bool, Text};
+
+// The conventional name SQLite searches for at prepare time.
+public fn function_name() -> Text { "regexp".clone() }
+
+// Function arity: 2 (pattern, subject).
+public fn well_known_arity() -> Int { 2 }
+
+// Operator-to-function rewrite: `X REGEXP Y` becomes `regexp(Y, X)`.
+// Note the argument swap (pattern first, subject second) — easy to get wrong.
+public type RewriteOrder is
+    | PatternFirst        // SQLite's ordering
+    ;
+
+public fn rewrite_order() -> RewriteOrder { PatternFirst }
+
+// Lookup outcome at prepare time.
+public type LookupOutcome is
+    | LoFound
+    | LoMissingFunction      // SQLITE_ERROR — "no such function: regexp"
+    | LoArityMismatch         // function exists but with wrong arg count
+    ;
+
+public fn lookup(installed: Bool, registered_arity: Int) -> LookupOutcome {
+    if !installed { return LoMissingFunction; }
+    if registered_arity != well_known_arity() { return LoArityMismatch; }
+    LoFound
+}
+
+public fn outcome_name(o: &LookupOutcome) -> Text {
+    match o {
+        LoFound           => "found".clone(),
+        LoMissingFunction => "missing_function".clone(),
+        LoArityMismatch   => "arity_mismatch".clone(),
+    }
+}
+
+public fn is_ok(o: &LookupOutcome) -> Bool {
+    match o { LoFound => true, _ => false }
+}
+
+// Result of evaluating regexp(pattern, subject) — SQLite expects a non-zero
+// integer for "match" and zero for "no match".
+public type MatchResult is
+    | MrMatch
+    | MrNoMatch
+    | MrError(Text)
+    ;
+
+public fn result_int(r: &MatchResult) -> Int {
+    match r {
+        MrMatch     => 1,
+        MrNoMatch   => 0,
+        MrError(_)  => 0,
+    }
+}
+
+public fn is_match(r: &MatchResult) -> Bool {
+    match r { MrMatch => true, _ => false }
+}
+
+public fn result_kind_name(r: &MatchResult) -> Text {
+    match r {
+        MrMatch     => "match".clone(),
+        MrNoMatch   => "no_match".clone(),
+        MrError(_)  => "error".clone(),
+    }
+}

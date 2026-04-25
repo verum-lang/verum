@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_savepoint_methods/mod.vr
+// =============================================================================
+// xSavepoint / xRelease / xRollbackTo — optional vtab methods (table v2+).
+// Called by the engine when SAVEPOINT / RELEASE / ROLLBACK TO is issued
+// on a transaction containing the vtab.  All three take an int savepoint id.
+// Spec §16.1.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_savepoint_methods;
+
+public module methods;

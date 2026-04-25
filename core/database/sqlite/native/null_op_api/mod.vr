@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/null_op_api/mod.vr
+// =============================================================================
+// IS NULL / IS NOT NULL / IS / IS NOT — NULL-aware comparison operators.
+//   X IS NULL        -> 1 iff X is NULL
+//   X IS NOT NULL    -> 1 iff X is not NULL
+//   X IS Y           -> 1 iff (X NULL & Y NULL) or (X = Y)   (no NULL propagation)
+//   X IS NOT Y       -> 1 iff X != Y treating NULL as a distinct value
+// Spec §15.5.
+// =============================================================================
+
+module core.database.sqlite.native.null_op_api;
+
+public module ops;

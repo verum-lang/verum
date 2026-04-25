@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/union_all_flatten_api/mod.vr
+// =============================================================================
+// UNION ALL flattening — when a SELECT contains UNION ALL of compatible
+// sub-queries the planner can hoist them to a single OP_OpenEphemeral with
+// row-stream concatenation.  Strict UNION (deduplicating) requires sort or
+// hash so it isn't flattened the same way.
+// Spec §13.5.
+// =============================================================================
+
+module core.database.sqlite.native.union_all_flatten_api;
+
+public module rule;

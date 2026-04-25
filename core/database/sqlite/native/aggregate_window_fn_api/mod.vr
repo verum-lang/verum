@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/aggregate_window_fn_api/mod.vr
+// =============================================================================
+// Window-aggregate hook — to use a user-defined aggregate as a window function
+// the implementer must register xInverse and xValue in addition to xStep and
+// xFinal.  xInverse "removes" the row contribution as the window slides off
+// it; xValue exposes the current accumulator without finalising.  Spec §15.5.
+// =============================================================================
+
+module core.database.sqlite.native.aggregate_window_fn_api;
+
+public module hook;

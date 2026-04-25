@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, between_op_api, sql-operators
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.between_op_api.rewrite.{
+    Form, FBetween, FNotBetween, form_name,
+    Rewrite, RwAndPair, RwOrPair, rewrite_for, rewrite_name,
+    SqlBool, SbTrue, SbFalse, SbNull,
+    Value, VNull, VInt,
+    evaluate, bool_name, is_true, is_degenerate_range,
+};
+mount base.{Bool, Int64};
+
+fn test_form_names_and_rewrite_dispatch() {
+    assert(form_name(&FBetween)    == "between".clone());
+    assert(form_name(&FNotBetween) == "not_between".clone());
+    match rewrite_for(&FBetween)    { RwAndPair => {}, _ => assert(false) }
+    match rewrite_for(&FNotBetween) { RwOrPair  => {}, _ => assert(false) }
+}
+
+fn test_rewrite_names() {
+    assert(rewrite_name(&RwAndPair) == "and_pair".clone());
+    assert(rewrite_name(&RwOrPair)  == "or_pair".clone());
+}
+
+fn test_evaluate_between_true() {
+    let r = evaluate(&FBetween, &VInt(5 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    match r { SbTrue => {}, _ => assert(false) }
+}
+
+fn test_evaluate_between_false_outside() {
+    let r = evaluate(&FBetween, &VInt(50 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    match r { SbFalse => {}, _ => assert(false) }
+}
+
+fn test_evaluate_between_inclusive_endpoints() {
+    let lo = evaluate(&FBetween, &VInt(1 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    let hi = evaluate(&FBetween, &VInt(10 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    match lo { SbTrue => {}, _ => assert(false) }
+    match hi { SbTrue => {}, _ => assert(false) }
+}
+
+fn test_evaluate_not_between_inverts() {
+    let inside  = evaluate(&FNotBetween, &VInt(5 as Int64),  &VInt(1 as Int64), &VInt(10 as Int64));
+    let outside = evaluate(&FNotBetween, &VInt(50 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    match inside  { SbFalse => {}, _ => assert(false) }
+    match outside { SbTrue  => {}, _ => assert(false) }
+}
+
+fn test_evaluate_null_propagates() {
+    let r1 = evaluate(&FBetween, &VNull,  &VInt(1 as Int64), &VInt(10 as Int64));
+    let r2 = evaluate(&FBetween, &VInt(5 as Int64), &VNull, &VInt(10 as Int64));
+    let r3 = evaluate(&FBetween, &VInt(5 as Int64), &VInt(1 as Int64), &VNull);
+    match r1 { SbNull => {}, _ => assert(false) }
+    match r2 { SbNull => {}, _ => assert(false) }
+    match r3 { SbNull => {}, _ => assert(false) }
+}
+
+fn test_bool_names_and_is_true() {
+    assert(bool_name(&SbTrue)  == "true".clone());
+    assert(bool_name(&SbFalse) == "false".clone());
+    assert(bool_name(&SbNull)  == "null".clone());
+    assert(is_true(&SbTrue));
+    assert(!is_true(&SbFalse));
+    assert(!is_true(&SbNull));
+}
+
+fn test_degenerate_range() {
+    assert(is_degenerate_range(&VInt(10 as Int64), &VInt(5 as Int64)));
+    assert(!is_degenerate_range(&VInt(1 as Int64), &VInt(10 as Int64)));
+    assert(!is_degenerate_range(&VInt(5 as Int64), &VInt(5 as Int64)));
+    assert(!is_degenerate_range(&VNull,             &VInt(5 as Int64)));
+    assert(!is_degenerate_range(&VInt(5 as Int64), &VNull));
+}
+
+fn main() {
+    test_form_names_and_rewrite_dispatch();
+    test_rewrite_names();
+    test_evaluate_between_true();
+    test_evaluate_between_false_outside();
+    test_evaluate_between_inclusive_endpoints();
+    test_evaluate_not_between_inverts();
+    test_evaluate_null_propagates();
+    test_bool_names_and_is_true();
+    test_degenerate_range();
+}

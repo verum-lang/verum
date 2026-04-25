@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, glob_pattern_api, sql-operators
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.glob_pattern_api.pattern.{
+    Token, TLiteral, TAny, TOne, TClassOpen, TClassClose, TClassNot,
+    token_kind_name,
+    Operator, OpLike, OpGlob,
+    is_case_sensitive, wildcard_one, wildcard_any, supports_char_class,
+    ReductionVerdict, RvFullScan, RvPrefixMatch, RvExactLiteral,
+    classify_reduction, verdict_name, allows_index_range,
+};
+mount base.{Bool};
+
+fn test_token_names() {
+    assert(token_kind_name(&TLiteral(0x61)) == "literal".clone());
+    assert(token_kind_name(&TAny)            == "any".clone());
+    assert(token_kind_name(&TOne)            == "one".clone());
+    assert(token_kind_name(&TClassOpen)      == "class_open".clone());
+    assert(token_kind_name(&TClassClose)     == "class_close".clone());
+    assert(token_kind_name(&TClassNot)       == "class_not".clone());
+}
+
+fn test_operator_case_sensitivity() {
+    assert(!is_case_sensitive(&OpLike));
+    assert(is_case_sensitive(&OpGlob));
+}
+
+fn test_wildcard_byte_codes() {
+    assert_eq(wildcard_one(&OpLike), 0x5F);   // '_'
+    assert_eq(wildcard_any(&OpLike), 0x25);   // '%'
+    assert_eq(wildcard_one(&OpGlob), 0x3F);   // '?'
+    assert_eq(wildcard_any(&OpGlob), 0x2A);   // '*'
+}
+
+fn test_char_class_support() {
+    assert(!supports_char_class(&OpLike));
+    assert(supports_char_class(&OpGlob));
+}
+
+fn test_reduction_exact_literal() {
+    match classify_reduction("hello".clone(), &OpGlob) { RvExactLiteral => {}, _ => assert(false) }
+    match classify_reduction("".clone(), &OpGlob)      { RvExactLiteral => {}, _ => assert(false) }
+}
+
+fn test_reduction_prefix_match() {
+    match classify_reduction("foo*".clone(), &OpGlob) { RvPrefixMatch => {}, _ => assert(false) }
+    match classify_reduction("a*".clone(), &OpGlob)   { RvPrefixMatch => {}, _ => assert(false) }
+}
+
+fn test_reduction_full_scan() {
+    match classify_reduction("*foo".clone(), &OpGlob) { RvFullScan => {}, _ => assert(false) }
+    match classify_reduction("a*b".clone(), &OpGlob)  { RvFullScan => {}, _ => assert(false) }
+    match classify_reduction("?abc".clone(), &OpGlob) { RvFullScan => {}, _ => assert(false) }
+}
+
+fn test_reduction_uses_correct_wildcard_per_op() {
+    // Same input "foo%" — % is wildcard for LIKE but literal for GLOB.
+    match classify_reduction("foo%".clone(), &OpLike) { RvPrefixMatch  => {}, _ => assert(false) }
+    match classify_reduction("foo%".clone(), &OpGlob) { RvExactLiteral => {}, _ => assert(false) }
+}
+
+fn test_verdict_names_and_index_predicate() {
+    assert(verdict_name(&RvFullScan)     == "full_scan".clone());
+    assert(verdict_name(&RvPrefixMatch)  == "prefix_match".clone());
+    assert(verdict_name(&RvExactLiteral) == "exact_literal".clone());
+    assert(allows_index_range(&RvPrefixMatch));
+    assert(allows_index_range(&RvExactLiteral));
+    assert(!allows_index_range(&RvFullScan));
+}
+
+fn main() {
+    test_token_names();
+    test_operator_case_sensitivity();
+    test_wildcard_byte_codes();
+    test_char_class_support();
+    test_reduction_exact_literal();
+    test_reduction_prefix_match();
+    test_reduction_full_scan();
+    test_reduction_uses_correct_wildcard_per_op();
+    test_verdict_names_and_index_predicate();
+}

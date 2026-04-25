@@ -1,0 +1,103 @@
+// GLOB operator — pattern compiler / classifier.
+
+module core.database.sqlite.native.glob_pattern_api.pattern;
+
+mount base.{Bool, Text};
+
+public type Token is
+    | TLiteral(Int)        // a single byte to match
+    | TAny                  // '*' — zero+ bytes
+    | TOne                  // '?' — exactly one byte
+    | TClassOpen            // '['
+    | TClassClose           // ']'
+    | TClassNot             // '!'  (when first char in [...])
+    ;
+
+public fn token_kind_name(t: &Token) -> Text {
+    match t {
+        TLiteral(_) => "literal".clone(),
+        TAny        => "any".clone(),
+        TOne        => "one".clone(),
+        TClassOpen  => "class_open".clone(),
+        TClassClose => "class_close".clone(),
+        TClassNot   => "class_not".clone(),
+    }
+}
+
+// LIKE vs GLOB classification.  Same operator surface, different defaults.
+public type Operator is
+    | OpLike
+    | OpGlob
+    ;
+
+public fn is_case_sensitive(op: &Operator) -> Bool {
+    match op {
+        OpLike => false,    // LIKE is ASCII-fold by default (PRAGMA changes it)
+        OpGlob => true,     // GLOB is always byte-exact
+    }
+}
+
+public fn wildcard_one(op: &Operator) -> Int {
+    match op {
+        OpLike => 0x5F,    // '_'
+        OpGlob => 0x3F,    // '?'
+    }
+}
+
+public fn wildcard_any(op: &Operator) -> Int {
+    match op {
+        OpLike => 0x25,    // '%'
+        OpGlob => 0x2A,    // '*'
+    }
+}
+
+public fn supports_char_class(op: &Operator) -> Bool {
+    match op {
+        OpLike => false,
+        OpGlob => true,
+    }
+}
+
+// Whether the pattern can be reduced to a prefix-match (literal head followed
+// by `*` and nothing else).  Reduction enables index range scans.
+public type ReductionVerdict is
+    | RvFullScan
+    | RvPrefixMatch
+    | RvExactLiteral
+    ;
+
+public fn classify_reduction(pattern: Text, op: &Operator) -> ReductionVerdict {
+    let bs = pattern.as_bytes();
+    let n = bs.len();
+    if n == 0 { return RvExactLiteral; }
+    let any = wildcard_any(op) as Int;
+    let one = wildcard_one(op) as Int;
+    let mut has_wild = false;
+    let mut last_was_any = false;
+    let mut last_pos: Int = -1;
+    let mut i: Int = 0;
+    while i < n {
+        let c = bs[i] as Int;
+        if c == any || c == one {
+            has_wild = true;
+            last_pos = i;
+            last_was_any = c == any;
+        }
+        i = i + 1;
+    }
+    if !has_wild { return RvExactLiteral; }
+    if last_was_any && last_pos == n - 1 { return RvPrefixMatch; }
+    RvFullScan
+}
+
+public fn verdict_name(v: &ReductionVerdict) -> Text {
+    match v {
+        RvFullScan      => "full_scan".clone(),
+        RvPrefixMatch   => "prefix_match".clone(),
+        RvExactLiteral  => "exact_literal".clone(),
+    }
+}
+
+public fn allows_index_range(v: &ReductionVerdict) -> Bool {
+    match v { RvFullScan => false, _ => true }
+}

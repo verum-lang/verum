@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, null_op_api, sql-operators
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.null_op_api.ops.{
+    Op, OpIsNull, OpIsNotNull, OpIs, OpIsNot, op_name,
+    Value, VNull, VInt, is_null_value,
+    eval_unary, eval_binary,
+    ArityKind, AkUnary, AkBinary, arity, arity_name,
+    is_sargable,
+};
+mount base.{Bool, Int64};
+
+fn test_op_names() {
+    assert(op_name(&OpIsNull)    == "is_null".clone());
+    assert(op_name(&OpIsNotNull) == "is_not_null".clone());
+    assert(op_name(&OpIs)        == "is".clone());
+    assert(op_name(&OpIsNot)     == "is_not".clone());
+}
+
+fn test_is_null_value_predicate() {
+    assert(is_null_value(&VNull));
+    assert(!is_null_value(&VInt(0 as Int64)));
+}
+
+fn test_eval_unary_is_null() {
+    assert_eq(eval_unary(&OpIsNull,    &VNull),               1);
+    assert_eq(eval_unary(&OpIsNull,    &VInt(0 as Int64)),    0);
+    assert_eq(eval_unary(&OpIsNotNull, &VNull),               0);
+    assert_eq(eval_unary(&OpIsNotNull, &VInt(7 as Int64)),    1);
+}
+
+fn test_eval_binary_is_null_eq_null() {
+    assert_eq(eval_binary(&OpIs,    &VNull,             &VNull),                      1);
+    assert_eq(eval_binary(&OpIsNot, &VNull,             &VNull),                      0);
+    assert_eq(eval_binary(&OpIs,    &VInt(5 as Int64), &VInt(5 as Int64)),            1);
+    assert_eq(eval_binary(&OpIs,    &VInt(5 as Int64), &VInt(6 as Int64)),            0);
+    assert_eq(eval_binary(&OpIsNot, &VInt(5 as Int64), &VInt(6 as Int64)),            1);
+}
+
+fn test_eval_binary_null_one_side() {
+    // NULL IS 5 -> 0; NULL IS NOT 5 -> 1
+    assert_eq(eval_binary(&OpIs,    &VNull,             &VInt(5 as Int64)),  0);
+    assert_eq(eval_binary(&OpIsNot, &VNull,             &VInt(5 as Int64)),  1);
+    assert_eq(eval_binary(&OpIs,    &VInt(5 as Int64), &VNull),              0);
+    assert_eq(eval_binary(&OpIsNot, &VInt(5 as Int64), &VNull),              1);
+}
+
+fn test_arity_dispatch() {
+    match arity(&OpIsNull)    { AkUnary  => {}, _ => assert(false) }
+    match arity(&OpIsNotNull) { AkUnary  => {}, _ => assert(false) }
+    match arity(&OpIs)        { AkBinary => {}, _ => assert(false) }
+    match arity(&OpIsNot)     { AkBinary => {}, _ => assert(false) }
+}
+
+fn test_arity_names() {
+    assert(arity_name(&AkUnary)  == "unary".clone());
+    assert(arity_name(&AkBinary) == "binary".clone());
+}
+
+fn test_sargability_classification() {
+    assert(is_sargable(&OpIsNull));
+    assert(is_sargable(&OpIs));
+    assert(!is_sargable(&OpIsNotNull));
+    assert(!is_sargable(&OpIsNot));
+}
+
+fn main() {
+    test_op_names();
+    test_is_null_value_predicate();
+    test_eval_unary_is_null();
+    test_eval_binary_is_null_eq_null();
+    test_eval_binary_null_one_side();
+    test_arity_dispatch();
+    test_arity_names();
+    test_sargability_classification();
+}

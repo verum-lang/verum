@@ -1,0 +1,92 @@
+// IS / IS NOT NULL / IS / IS NOT — NULL-aware operators.
+
+module core.database.sqlite.native.null_op_api.ops;
+
+mount base.{Bool, Int64, Text};
+
+public type Op is
+    | OpIsNull
+    | OpIsNotNull
+    | OpIs            // distinct-from comparison (NULL = NULL)
+    | OpIsNot
+    ;
+
+public fn op_name(o: &Op) -> Text {
+    match o {
+        OpIsNull    => "is_null".clone(),
+        OpIsNotNull => "is_not_null".clone(),
+        OpIs        => "is".clone(),
+        OpIsNot     => "is_not".clone(),
+    }
+}
+
+public type Value is
+    | VNull
+    | VInt(Int64)
+    ;
+
+public fn is_null_value(v: &Value) -> Bool {
+    match v { VNull => true, _ => false }
+}
+
+// IS NULL / IS NOT NULL apply to a single operand; returns 1 / 0 (never NULL).
+public fn eval_unary(op: &Op, x: &Value) -> Int {
+    let isnull = is_null_value(x);
+    match op {
+        OpIsNull    => if isnull { 1 } else { 0 },
+        OpIsNotNull => if isnull { 0 } else { 1 },
+        OpIs        => 0,    // misuse — engine flags this at parse time
+        OpIsNot     => 0,
+    }
+}
+
+// IS / IS NOT compare two operands; never NULL.
+public fn eval_binary(op: &Op, x: &Value, y: &Value) -> Int {
+    let xn = is_null_value(x);
+    let yn = is_null_value(y);
+    let equal = match x {
+        VNull   => yn,
+        VInt(a) => match y {
+            VNull   => false,
+            VInt(b) => a.clone() == b.clone(),
+        },
+    };
+    match op {
+        OpIs        => if equal { 1 } else { 0 },
+        OpIsNot     => if equal { 0 } else { 1 },
+        OpIsNull    => if xn { 1 } else { 0 },
+        OpIsNotNull => if xn { 0 } else { 1 },
+    }
+}
+
+public type ArityKind is
+    | AkUnary
+    | AkBinary
+    ;
+
+public fn arity(op: &Op) -> ArityKind {
+    match op {
+        OpIsNull    => AkUnary,
+        OpIsNotNull => AkUnary,
+        OpIs        => AkBinary,
+        OpIsNot     => AkBinary,
+    }
+}
+
+public fn arity_name(a: &ArityKind) -> Text {
+    match a {
+        AkUnary  => "unary".clone(),
+        AkBinary => "binary".clone(),
+    }
+}
+
+// Sargability — these all combine with index lookups iff the operand is the
+// indexed column.
+public fn is_sargable(op: &Op) -> Bool {
+    match op {
+        OpIsNull    => true,
+        OpIsNotNull => false,    // typically a full-scan with a NOT-NULL check
+        OpIs        => true,
+        OpIsNot     => false,
+    }
+}

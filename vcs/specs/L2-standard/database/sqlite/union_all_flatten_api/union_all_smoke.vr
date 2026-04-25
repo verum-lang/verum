@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, union_all_flatten_api, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.union_all_flatten_api.rule.{
+    Compound, CpUnionAll, CpUnion, CpIntersect, CpExcept,
+    compound_name, is_flatten_candidate,
+    ArmCheck, empty_check, arm_eligible,
+    FlattenVerdict,
+    FvFlatten, FvBlockedNotUnionAll, FvBlockedColumnMismatch,
+    FvBlockedOrderByOnArm, FvBlockedLimitOnArm,
+    classify, verdict_name, flattens, well_known_block_count,
+};
+mount base.{Bool};
+
+fn test_compound_names() {
+    assert(compound_name(&CpUnionAll)  == "union_all".clone());
+    assert(compound_name(&CpUnion)     == "union".clone());
+    assert(compound_name(&CpIntersect) == "intersect".clone());
+    assert(compound_name(&CpExcept)    == "except".clone());
+}
+
+fn test_flatten_candidate() {
+    assert(is_flatten_candidate(&CpUnionAll));
+    assert(!is_flatten_candidate(&CpUnion));
+    assert(!is_flatten_candidate(&CpIntersect));
+    assert(!is_flatten_candidate(&CpExcept));
+}
+
+fn test_arm_eligibility_default_ok() {
+    let a = empty_check();
+    assert(arm_eligible(&a));
+}
+
+fn test_arm_blocks() {
+    let mut a = empty_check();
+    a.has_order_by = true;
+    assert(!arm_eligible(&a));
+    let mut b = empty_check();
+    b.has_limit = true;
+    assert(!arm_eligible(&b));
+    let mut c = empty_check();
+    c.column_count_matches = false;
+    assert(!arm_eligible(&c));
+}
+
+fn test_classify_blocks_non_union_all() {
+    let a = empty_check();
+    match classify(&CpUnion,     &a) { FvBlockedNotUnionAll => {}, _ => assert(false) }
+    match classify(&CpIntersect, &a) { FvBlockedNotUnionAll => {}, _ => assert(false) }
+    match classify(&CpExcept,    &a) { FvBlockedNotUnionAll => {}, _ => assert(false) }
+}
+
+fn test_classify_column_mismatch() {
+    let mut a = empty_check();
+    a.column_count_matches = false;
+    match classify(&CpUnionAll, &a) { FvBlockedColumnMismatch => {}, _ => assert(false) }
+}
+
+fn test_classify_order_by_block() {
+    let mut a = empty_check();
+    a.has_order_by = true;
+    match classify(&CpUnionAll, &a) { FvBlockedOrderByOnArm => {}, _ => assert(false) }
+}
+
+fn test_classify_limit_block() {
+    let mut a = empty_check();
+    a.has_limit = true;
+    match classify(&CpUnionAll, &a) { FvBlockedLimitOnArm => {}, _ => assert(false) }
+    let mut b = empty_check();
+    b.has_offset = true;
+    match classify(&CpUnionAll, &b) { FvBlockedLimitOnArm => {}, _ => assert(false) }
+}
+
+fn test_classify_flattens_when_clean() {
+    let a = empty_check();
+    match classify(&CpUnionAll, &a) { FvFlatten => {}, _ => assert(false) }
+}
+
+fn test_verdict_names_and_predicate() {
+    assert(verdict_name(&FvFlatten)               == "flatten".clone());
+    assert(verdict_name(&FvBlockedNotUnionAll)    == "blocked_not_union_all".clone());
+    assert(verdict_name(&FvBlockedColumnMismatch) == "blocked_column_mismatch".clone());
+    assert(verdict_name(&FvBlockedOrderByOnArm)   == "blocked_order_by".clone());
+    assert(verdict_name(&FvBlockedLimitOnArm)     == "blocked_limit".clone());
+    assert(flattens(&FvFlatten));
+    assert(!flattens(&FvBlockedColumnMismatch));
+}
+
+fn test_block_count() {
+    assert_eq(well_known_block_count(), 4);
+}
+
+fn main() {
+    test_compound_names();
+    test_flatten_candidate();
+    test_arm_eligibility_default_ok();
+    test_arm_blocks();
+    test_classify_blocks_non_union_all();
+    test_classify_column_mismatch();
+    test_classify_order_by_block();
+    test_classify_limit_block();
+    test_classify_flattens_when_clean();
+    test_verdict_names_and_predicate();
+    test_block_count();
+}

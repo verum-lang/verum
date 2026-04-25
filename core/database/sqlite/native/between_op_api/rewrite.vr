@@ -1,0 +1,79 @@
+// BETWEEN / NOT BETWEEN rewrite + tri-valued evaluator.
+
+module core.database.sqlite.native.between_op_api.rewrite;
+
+mount base.{Bool, Int64, Text};
+
+public type Form is
+    | FBetween       // X BETWEEN LO AND HI
+    | FNotBetween    // X NOT BETWEEN LO AND HI
+    ;
+
+public fn form_name(f: &Form) -> Text {
+    match f { FBetween => "between".clone(), FNotBetween => "not_between".clone() }
+}
+
+// Rewrite shape — the AND-of-pair vs OR-of-pair structure.
+public type Rewrite is
+    | RwAndPair        // X >= LO AND X <= HI
+    | RwOrPair         // X <  LO OR  X >  HI
+    ;
+
+public fn rewrite_for(f: &Form) -> Rewrite {
+    match f { FBetween => RwAndPair, FNotBetween => RwOrPair }
+}
+
+public fn rewrite_name(r: &Rewrite) -> Text {
+    match r {
+        RwAndPair => "and_pair".clone(),
+        RwOrPair  => "or_pair".clone(),
+    }
+}
+
+// Tri-valued evaluator over comparable Int64 inputs.
+public type SqlBool is
+    | SbTrue
+    | SbFalse
+    | SbNull
+    ;
+
+// Note: SQLite returns NULL whenever any operand is NULL; we model NULL as
+// a separate Value tag.
+public type Value is
+    | VNull
+    | VInt(Int64)
+    ;
+
+public fn evaluate(form: &Form, x: &Value, lo: &Value, hi: &Value) -> SqlBool {
+    let xv = match x  { VInt(n) => n.clone(), VNull => return SbNull };
+    let lv = match lo { VInt(n) => n.clone(), VNull => return SbNull };
+    let hv = match hi { VInt(n) => n.clone(), VNull => return SbNull };
+    let inside = xv >= lv && xv <= hv;
+    match form {
+        FBetween    => if inside { SbTrue }  else { SbFalse },
+        FNotBetween => if inside { SbFalse } else { SbTrue },
+    }
+}
+
+public fn bool_name(b: &SqlBool) -> Text {
+    match b {
+        SbTrue  => "true".clone(),
+        SbFalse => "false".clone(),
+        SbNull  => "null".clone(),
+    }
+}
+
+public fn is_true(b: &SqlBool) -> Bool {
+    match b { SbTrue => true, _ => false }
+}
+
+// LO > HI is degenerate — engine emits an empty-range diagnostic.
+public fn is_degenerate_range(lo: &Value, hi: &Value) -> Bool {
+    match lo {
+        VNull => false,
+        VInt(l) => match hi {
+            VNull => false,
+            VInt(h) => l.clone() > h.clone(),
+        },
+    }
+}

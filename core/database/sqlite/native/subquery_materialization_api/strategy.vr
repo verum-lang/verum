@@ -1,0 +1,102 @@
+// Sub-query materialization strategy.
+
+module core.database.sqlite.native.subquery_materialization_api.strategy;
+
+mount base.{Bool, Int64, Text};
+
+public type Strategy is
+    | StFlatten        // inline into outer query
+    | StCoroutine      // re-enter sub-query per-row
+    | StMaterialize    // ephemeral table populated once
+    ;
+
+public fn strategy_name(s: &Strategy) -> Text {
+    match s {
+        StFlatten     => "flatten".clone(),
+        StCoroutine   => "coroutine".clone(),
+        StMaterialize => "materialize".clone(),
+    }
+}
+
+// Hints passed in by the parser / planner.
+public type Inputs is {
+    is_correlated: Bool,
+    has_aggregates: Bool,
+    has_distinct: Bool,
+    has_order_by: Bool,
+    has_limit: Bool,
+    multi_row_output: Bool,
+    referenced_count: Int,    // how many times the parent uses this sub-query
+};
+
+public fn empty_inputs() -> Inputs {
+    Inputs {
+        is_correlated: false,
+        has_aggregates: false,
+        has_distinct: false,
+        has_order_by: false,
+        has_limit: false,
+        multi_row_output: false,
+        referenced_count: 1,
+    }
+}
+
+// Flattening allowed only when sub-query has no aggregates/DISTINCT/ORDER
+// BY/LIMIT and is not correlated.
+public fn flattening_allowed(i: &Inputs) -> Bool {
+    if i.is_correlated { return false; }
+    if i.has_aggregates { return false; }
+    if i.has_distinct { return false; }
+    if i.has_order_by { return false; }
+    if i.has_limit { return false; }
+    true
+}
+
+// Materialization beats coroutine when the sub-query is referenced multiple
+// times (avoids re-evaluation) and it's not correlated (caching makes sense).
+public fn prefer_materialization(i: &Inputs) -> Bool {
+    if i.is_correlated { return false; }
+    i.referenced_count > 1
+}
+
+public fn pick(i: &Inputs) -> Strategy {
+    if flattening_allowed(i) { return StFlatten; }
+    if prefer_materialization(i) { return StMaterialize; }
+    StCoroutine
+}
+
+// Predicates over the picked strategy.
+public fn writes_ephemeral_table(s: &Strategy) -> Bool {
+    match s { StMaterialize => true, _ => false }
+}
+
+public fn re_enters_subquery(s: &Strategy) -> Bool {
+    match s { StCoroutine => true, _ => false }
+}
+
+public fn merges_into_outer(s: &Strategy) -> Bool {
+    match s { StFlatten => true, _ => false }
+}
+
+// Cost-class summary for EXPLAIN QUERY PLAN.
+public type CostClass is
+    | CcCheap        // flatten — no extra copy
+    | CcOnce         // materialize — one full pass
+    | CcPerRow       // coroutine — once per outer row
+    ;
+
+public fn cost_class_for(s: &Strategy) -> CostClass {
+    match s {
+        StFlatten     => CcCheap,
+        StMaterialize => CcOnce,
+        StCoroutine   => CcPerRow,
+    }
+}
+
+public fn cost_class_name(c: &CostClass) -> Text {
+    match c {
+        CcCheap  => "cheap".clone(),
+        CcOnce   => "once".clone(),
+        CcPerRow => "per_row".clone(),
+    }
+}

@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/glob_pattern_api/mod.vr
+// =============================================================================
+// GLOB operator — Unix-style globbing.  Always case-sensitive (independent of
+// PRAGMA case_sensitive_like).  Wildcards: `*` (zero+) and `?` (one), plus
+// `[...]` character classes.  Spec §15.5.
+// =============================================================================
+
+module core.database.sqlite.native.glob_pattern_api;
+
+public module pattern;

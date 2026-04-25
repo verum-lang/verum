@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/between_op_api/mod.vr
+// =============================================================================
+// BETWEEN operator — sugar for `X >= LO AND X <= HI`.  NOT BETWEEN sugar for
+// `X < LO OR X > HI`.  Affinity rules per §3.1: comparison happens with the
+// affinity of X.  Spec §15.5.
+// =============================================================================
+
+module core.database.sqlite.native.between_op_api;
+
+public module rewrite;

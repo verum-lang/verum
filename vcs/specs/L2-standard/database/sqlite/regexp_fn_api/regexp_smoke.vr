@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, regexp_fn_api, sql-operators
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.regexp_fn_api.hook.{
+    function_name, well_known_arity,
+    RewriteOrder, PatternFirst, rewrite_order,
+    LookupOutcome, LoFound, LoMissingFunction, LoArityMismatch,
+    lookup, outcome_name, is_ok,
+    MatchResult, MrMatch, MrNoMatch, MrError,
+    result_int, is_match, result_kind_name,
+};
+mount base.{Bool};
+
+fn test_function_name_and_arity() {
+    assert(function_name() == "regexp".clone());
+    assert_eq(well_known_arity(), 2);
+}
+
+fn test_rewrite_order() {
+    match rewrite_order() { PatternFirst => {} }
+}
+
+fn test_lookup_missing_function() {
+    match lookup(false, 2) { LoMissingFunction => {}, _ => assert(false) }
+}
+
+fn test_lookup_arity_mismatch() {
+    match lookup(true, 1) { LoArityMismatch => {}, _ => assert(false) }
+    match lookup(true, 3) { LoArityMismatch => {}, _ => assert(false) }
+}
+
+fn test_lookup_found() {
+    match lookup(true, 2) { LoFound => {}, _ => assert(false) }
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&LoFound)            == "found".clone());
+    assert(outcome_name(&LoMissingFunction)  == "missing_function".clone());
+    assert(outcome_name(&LoArityMismatch)    == "arity_mismatch".clone());
+}
+
+fn test_is_ok_predicate() {
+    assert(is_ok(&LoFound));
+    assert(!is_ok(&LoMissingFunction));
+    assert(!is_ok(&LoArityMismatch));
+}
+
+fn test_match_result_int_projection() {
+    assert_eq(result_int(&MrMatch),                          1);
+    assert_eq(result_int(&MrNoMatch),                        0);
+    assert_eq(result_int(&MrError("bad regex".clone())),     0);
+}
+
+fn test_is_match() {
+    assert(is_match(&MrMatch));
+    assert(!is_match(&MrNoMatch));
+    assert(!is_match(&MrError("x".clone())));
+}
+
+fn test_result_kind_name() {
+    assert(result_kind_name(&MrMatch)               == "match".clone());
+    assert(result_kind_name(&MrNoMatch)             == "no_match".clone());
+    assert(result_kind_name(&MrError("e".clone())) == "error".clone());
+}
+
+fn main() {
+    test_function_name_and_arity();
+    test_rewrite_order();
+    test_lookup_missing_function();
+    test_lookup_arity_mismatch();
+    test_lookup_found();
+    test_outcome_names();
+    test_is_ok_predicate();
+    test_match_result_int_projection();
+    test_is_match();
+    test_result_kind_name();
+}

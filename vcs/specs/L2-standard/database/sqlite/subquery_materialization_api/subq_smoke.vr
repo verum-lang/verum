@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, subquery_materialization_api, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.subquery_materialization_api.strategy.{
+    Strategy, StFlatten, StCoroutine, StMaterialize, strategy_name,
+    Inputs, empty_inputs,
+    flattening_allowed, prefer_materialization, pick,
+    writes_ephemeral_table, re_enters_subquery, merges_into_outer,
+    CostClass, CcCheap, CcOnce, CcPerRow,
+    cost_class_for, cost_class_name,
+};
+mount base.{Bool};
+
+fn test_default_pick_is_flatten() {
+    let i = empty_inputs();
+    match pick(&i) { StFlatten => {}, _ => assert(false) }
+}
+
+fn test_aggregate_blocks_flatten() {
+    let mut i = empty_inputs();
+    i.has_aggregates = true;
+    assert(!flattening_allowed(&i));
+    match pick(&i) { StCoroutine => {}, _ => assert(false) }
+}
+
+fn test_correlated_blocks_materialization() {
+    let mut i = empty_inputs();
+    i.is_correlated = true;
+    i.has_aggregates = true;
+    i.referenced_count = 5;
+    assert(!prefer_materialization(&i));
+    match pick(&i) { StCoroutine => {}, _ => assert(false) }
+}
+
+fn test_uncorrelated_multi_ref_picks_materialize() {
+    let mut i = empty_inputs();
+    i.has_aggregates = true;
+    i.referenced_count = 3;
+    match pick(&i) { StMaterialize => {}, _ => assert(false) }
+}
+
+fn test_distinct_blocks_flatten() {
+    let mut i = empty_inputs();
+    i.has_distinct = true;
+    match pick(&i) { StCoroutine => {}, _ => assert(false) }
+}
+
+fn test_strategy_predicates() {
+    assert(merges_into_outer(&StFlatten));
+    assert(!merges_into_outer(&StMaterialize));
+    assert(writes_ephemeral_table(&StMaterialize));
+    assert(!writes_ephemeral_table(&StFlatten));
+    assert(re_enters_subquery(&StCoroutine));
+    assert(!re_enters_subquery(&StFlatten));
+}
+
+fn test_cost_class_dispatch() {
+    match cost_class_for(&StFlatten)     { CcCheap  => {}, _ => assert(false) }
+    match cost_class_for(&StMaterialize) { CcOnce   => {}, _ => assert(false) }
+    match cost_class_for(&StCoroutine)   { CcPerRow => {}, _ => assert(false) }
+}
+
+fn test_strategy_names() {
+    assert(strategy_name(&StFlatten)     == "flatten".clone());
+    assert(strategy_name(&StCoroutine)   == "coroutine".clone());
+    assert(strategy_name(&StMaterialize) == "materialize".clone());
+}
+
+fn test_cost_class_names() {
+    assert(cost_class_name(&CcCheap)  == "cheap".clone());
+    assert(cost_class_name(&CcOnce)   == "once".clone());
+    assert(cost_class_name(&CcPerRow) == "per_row".clone());
+}
+
+fn main() {
+    test_default_pick_is_flatten();
+    test_aggregate_blocks_flatten();
+    test_correlated_blocks_materialization();
+    test_uncorrelated_multi_ref_picks_materialize();
+    test_distinct_blocks_flatten();
+    test_strategy_predicates();
+    test_cost_class_dispatch();
+    test_strategy_names();
+    test_cost_class_names();
+}

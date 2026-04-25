@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_savepoint_methods, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_savepoint_methods.methods.{
+    Method, MSavepoint, MRelease, MRollbackTo,
+    method_name, well_known_count, writes_state, is_optional,
+    Outcome, OOk, OErrUnsupported, OErrCorrupt, OErrIo,
+    outcome_name, is_ok, classify_failure,
+    StackOp, SoPush, SoPopThrough, SoRestoreTo,
+    op_for,
+};
+mount base.{Bool};
+
+fn test_method_names_and_count() {
+    assert(method_name(&MSavepoint)  == "xSavepoint".clone());
+    assert(method_name(&MRelease)    == "xRelease".clone());
+    assert(method_name(&MRollbackTo) == "xRollbackTo".clone());
+    assert_eq(well_known_count(), 3);
+}
+
+fn test_writes_state() {
+    assert(writes_state(&MSavepoint));
+    assert(!writes_state(&MRelease));
+    assert(writes_state(&MRollbackTo));
+}
+
+fn test_all_optional() {
+    assert(is_optional(&MSavepoint));
+    assert(is_optional(&MRelease));
+    assert(is_optional(&MRollbackTo));
+}
+
+fn test_outcome_names_and_is_ok() {
+    assert(outcome_name(&OOk)             == "ok".clone());
+    assert(outcome_name(&OErrUnsupported) == "err_unsupported".clone());
+    assert(outcome_name(&OErrCorrupt)     == "err_corrupt".clone());
+    assert(outcome_name(&OErrIo)          == "err_io".clone());
+    assert(is_ok(&OOk));
+    assert(!is_ok(&OErrUnsupported));
+}
+
+fn test_failure_classification() {
+    assert(classify_failure(&OOk)             == "none".clone());
+    assert(classify_failure(&OErrUnsupported) == "user".clone());
+    assert(classify_failure(&OErrCorrupt)     == "data".clone());
+    assert(classify_failure(&OErrIo)          == "transient".clone());
+}
+
+fn test_op_for_dispatch() {
+    match op_for(&MSavepoint, 7) {
+        SoPush(n) => assert_eq(n, 7),
+        _ => assert(false),
+    }
+    match op_for(&MRelease, 3) {
+        SoPopThrough(n) => assert_eq(n, 3),
+        _ => assert(false),
+    }
+    match op_for(&MRollbackTo, 9) {
+        SoRestoreTo(n) => assert_eq(n, 9),
+        _ => assert(false),
+    }
+}
+
+fn main() {
+    test_method_names_and_count();
+    test_writes_state();
+    test_all_optional();
+    test_outcome_names_and_is_ok();
+    test_failure_classification();
+    test_op_for_dispatch();
+}

@@ -1,0 +1,111 @@
+// Window-aggregate hook — xStep / xFinal / xInverse / xValue capability set.
+
+module core.database.sqlite.native.aggregate_window_fn_api.hook;
+
+mount base.{Bool, Text};
+
+public type Method is
+    | MStep        // xStep — required for any aggregate
+    | MFinal       // xFinal — required
+    | MValue       // xValue — required for window use
+    | MInverse     // xInverse — required for window use (slide-off)
+    ;
+
+public fn method_name(m: &Method) -> Text {
+    match m {
+        MStep    => "xStep".clone(),
+        MFinal   => "xFinal".clone(),
+        MValue   => "xValue".clone(),
+        MInverse => "xInverse".clone(),
+    }
+}
+
+public fn required_for_aggregate(m: &Method) -> Bool {
+    match m { MStep => true, MFinal => true, _ => false }
+}
+
+public fn required_for_window(m: &Method) -> Bool { true }
+
+// Capability set declared by the function registration.
+public type Capabilities is {
+    has_step: Bool,
+    has_final: Bool,
+    has_value: Bool,
+    has_inverse: Bool,
+};
+
+public fn empty_capabilities() -> Capabilities {
+    Capabilities {
+        has_step: false,
+        has_final: false,
+        has_value: false,
+        has_inverse: false,
+    }
+}
+
+public fn aggregate_capable(c: &Capabilities) -> Bool {
+    c.has_step && c.has_final
+}
+
+public fn window_capable(c: &Capabilities) -> Bool {
+    c.has_step && c.has_final && c.has_value && c.has_inverse
+}
+
+// Outcome of asking "can this be used as a window function?"
+public type Verdict is
+    | VOk
+    | VMissingValue
+    | VMissingInverse
+    | VMissingBoth
+    | VNotAggregate
+    ;
+
+public fn classify(c: &Capabilities) -> Verdict {
+    if !aggregate_capable(c) { return VNotAggregate; }
+    let mv = !c.has_value;
+    let mi = !c.has_inverse;
+    if mv && mi { return VMissingBoth; }
+    if mv { return VMissingValue; }
+    if mi { return VMissingInverse; }
+    VOk
+}
+
+public fn verdict_name(v: &Verdict) -> Text {
+    match v {
+        VOk              => "ok".clone(),
+        VMissingValue    => "missing_value".clone(),
+        VMissingInverse  => "missing_inverse".clone(),
+        VMissingBoth     => "missing_both".clone(),
+        VNotAggregate    => "not_aggregate".clone(),
+    }
+}
+
+public fn is_ok(v: &Verdict) -> Bool {
+    match v { VOk => true, _ => false }
+}
+
+// Frame action — what the engine does at each frame transition.
+public type FrameAction is
+    | FaAddRow         // window grew; engine calls xStep
+    | FaRemoveRow      // window shrank from the leading edge; engine calls xInverse
+    | FaPeek           // emit a row's value; engine calls xValue
+    | FaFinalize       // window ended; engine calls xFinal
+    ;
+
+public fn method_for_action(a: &FrameAction) -> Method {
+    match a {
+        FaAddRow    => MStep,
+        FaRemoveRow => MInverse,
+        FaPeek      => MValue,
+        FaFinalize  => MFinal,
+    }
+}
+
+public fn action_name(a: &FrameAction) -> Text {
+    match a {
+        FaAddRow    => "add_row".clone(),
+        FaRemoveRow => "remove_row".clone(),
+        FaPeek      => "peek".clone(),
+        FaFinalize  => "finalize".clone(),
+    }
+}
