@@ -5,7 +5,7 @@
 // @description: Minimal test to isolate RetryConfig phantom type parameter
 
 mount core.runtime.recovery.{
-    BackoffStrategy,
+    RecoveryBackoffStrategy,
     JitterConfig,
     RetryConfig,
     RetryPredicate,
@@ -13,8 +13,8 @@ mount core.runtime.recovery.{
 
 @test
 fn test_backoff_fixed() {
-    let backoff: BackoffStrategy = BackoffStrategy.Fixed { delay_ms: 100 };
-    assert(backoff is BackoffStrategy.Fixed);
+    let backoff: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Fixed { delay_ms: 100 };
+    assert(backoff is RecoveryBackoffStrategy.Fixed);
 }
 
 @test
@@ -33,7 +33,7 @@ fn test_retry_predicate_all() {
 fn test_retry_config() {
     let config: RetryConfig = RetryConfig {
         max_attempts: 3,
-        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };

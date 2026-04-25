@@ -315,7 +315,7 @@ implement JitterConfig {
 ///               Back to Closed       Back to Open
 /// ```
 @repr(UInt8)
-public type CircuitState is
+public type RecoveryCircuitState is
     /// Normal operation, requests pass through
     | Closed
     /// Failure threshold reached, requests rejected
@@ -323,13 +323,13 @@ public type CircuitState is
     /// Testing recovery, limited requests allowed
     | HalfOpen;
 
-implement CircuitState {
+implement RecoveryCircuitState {
     fn from_u8(val: UInt8) -> Self {
         match val {
-            0 => CircuitState.Closed,
-            1 => CircuitState.Open,
-            2 => CircuitState.HalfOpen,
-            _ => CircuitState.Closed,
+            0 => RecoveryCircuitState.Closed,
+            1 => RecoveryCircuitState.Open,
+            2 => RecoveryCircuitState.HalfOpen,
+            _ => RecoveryCircuitState.Closed,
         }
     }
 
@@ -343,7 +343,7 @@ implement CircuitState {
 }
 
 /// Circuit breaker configuration
-public type CircuitBreakerConfig is {
+public type RecoveryCircuitBreakerConfig is {
     /// Number of failures before opening circuit
     failure_threshold: UInt16,
 
@@ -380,7 +380,7 @@ public type RecoveryStrategy is
     /// Retry with specified policy
     | Retry(RetryConfig)
     /// Use circuit breaker for external service calls
-    | UseBreaker(CircuitBreakerConfig)
+    | UseBreaker(RecoveryCircuitBreakerConfig)
     /// Supervision tree handles recovery
     | Supervision
     /// Composed strategies (try in order)
@@ -403,7 +403,7 @@ implement RecoveryStrategy {
 
     /// Create circuit breaker strategy with defaults
     public fn circuit_breaker(failure_threshold: Int) -> Self {
-        RecoveryStrategy.UseBreaker(CircuitBreakerConfig {
+        RecoveryStrategy.UseBreaker(RecoveryCircuitBreakerConfig {
             failure_threshold: failure_threshold as UInt16,
             required_successes: 3,
             timeout_ms: 60000, // 1 minute
@@ -413,9 +413,9 @@ implement RecoveryStrategy {
 }
 
 /// Full circuit breaker with heap storage (for complex scenarios)
-public type CircuitBreaker is {
+public type RecoveryCircuitBreaker is {
     /// Configuration
-    config: CircuitBreakerConfig,
+    config: RecoveryCircuitBreakerConfig,
 
     /// Current state (atomic for lock-free access)
     state: AtomicU8,
@@ -439,12 +439,12 @@ public type CircuitBreaker is {
     state_changes: AtomicU64,
 };
 
-implement CircuitBreaker {
+implement RecoveryCircuitBreaker {
     /// Create new circuit breaker
-    public fn new(config: CircuitBreakerConfig) -> Self {
+    public fn new(config: RecoveryCircuitBreakerConfig) -> Self {
         Self {
             config,
-            state: AtomicU8.new(CircuitState.Closed.to_u8()),
+            state: AtomicU8.new(RecoveryCircuitState.Closed.to_u8()),
             failure_count: AtomicU16.new(0),
             success_count: AtomicU16.new(0),
             last_transition_nanos: AtomicU64.new(monotonic_nanos()),
@@ -456,8 +456,8 @@ implement CircuitBreaker {
 
     /// Get current state
     @inline
-    public fn state(&self) -> CircuitState {
-        CircuitState.from_u8(self.state.load(MemoryOrdering.Acquire))
+    public fn state(&self) -> RecoveryCircuitState {
+        RecoveryCircuitState.from_u8(self.state.load(MemoryOrdering.Acquire))
     }
 
     /// Check if request is allowed
@@ -474,7 +474,7 @@ implement CircuitBreaker {
                 let elapsed_ms = (monotonic_nanos() - self.last_transition_nanos.load(MemoryOrdering.Acquire)) / 1_000_000;
                 if elapsed_ms >= self.config.timeout_ms as UInt64 {
                     // Transition to HalfOpen
-                    self.transition_to(CircuitState.HalfOpen);
+                    self.transition_to(RecoveryCircuitState.HalfOpen);
                     true
                 } else {
                     false
@@ -497,12 +497,12 @@ implement CircuitBreaker {
                 let successes = self.success_count.fetch_add(1, MemoryOrdering.SeqCst) + 1;
                 if successes >= self.config.required_successes {
                     // Close the circuit
-                    self.transition_to(CircuitState.Closed);
+                    self.transition_to(RecoveryCircuitState.Closed);
                 }
             }
             Open => {
                 // Shouldn't happen, but transition to Closed anyway
-                self.transition_to(CircuitState.Closed);
+                self.transition_to(RecoveryCircuitState.Closed);
             }
         }
     }
@@ -518,12 +518,12 @@ implement CircuitBreaker {
                 let failures = self.failure_count.fetch_add(1, MemoryOrdering.SeqCst) + 1;
                 if failures >= self.config.failure_threshold {
                     // Open the circuit
-                    self.transition_to(CircuitState.Open);
+                    self.transition_to(RecoveryCircuitState.Open);
                 }
             }
             HalfOpen => {
                 // Any failure in HalfOpen immediately reopens
-                self.transition_to(CircuitState.Open);
+                self.transition_to(RecoveryCircuitState.Open);
             }
             Open => {
                 // Already open, nothing to do
@@ -532,7 +532,7 @@ implement CircuitBreaker {
     }
 
     /// Transition to new state
-    fn transition_to(&self, new_state: CircuitState) {
+    fn transition_to(&self, new_state: RecoveryCircuitState) {
         let old_state = self.state();
         if old_state != new_state {
             self.state.store(new_state.to_u8(), MemoryOrdering.Release);
@@ -558,7 +558,7 @@ implement CircuitBreaker {
 
     /// Reset circuit breaker to initial state
     public fn reset(&self) {
-        self.transition_to(CircuitState.Closed);
+        self.transition_to(RecoveryCircuitState.Closed);
         self.failure_count.store(0, MemoryOrdering.SeqCst);
         self.success_count.store(0, MemoryOrdering.SeqCst);
     }
@@ -578,7 +578,7 @@ implement CircuitBreaker {
 
 /// Circuit breaker statistics
 public type CircuitBreakerStats is {
-    state: CircuitState,
+    state: RecoveryCircuitState,
     failure_count: UInt16,
     success_count: UInt16,
     total_calls: UInt64,
@@ -598,7 +598,7 @@ public type CircuitBreakerError<E> is
 /// ## Performance
 /// - Overhead: ~20-30ns (state check + recording)
 public async fn execute_with_circuit_breaker<F, T, E>(
-    breaker: &CircuitBreaker,
+    breaker: &RecoveryCircuitBreaker,
     operation: fn() -> Future<Result<T, E>>,
 ) -> Result<T, CircuitBreakerError<E>>
 where E: Display
@@ -691,7 +691,7 @@ implement InlineCircuitBreaker {
     }
 
     /// Create from config
-    public fn from_config(name: Text, config: CircuitBreakerConfig) -> Self {
+    public fn from_config(name: Text, config: RecoveryCircuitBreakerConfig) -> Self {
         let mut cb = Self.default();
         cb.set_name(name);
         cb.failure_threshold = config.failure_threshold;
@@ -724,8 +724,8 @@ implement InlineCircuitBreaker {
         true
     }
 
-    /// Convert to full CircuitBreaker reference interface
-    public fn as_ref(&self) -> &CircuitBreaker {
+    /// Convert to full RecoveryCircuitBreaker reference interface
+    public fn as_ref(&self) -> &RecoveryCircuitBreaker {
         // SAFETY: InlineCircuitBreaker has same memory layout for state access
         inline_cb_as_ref(self)
     }
@@ -816,8 +816,8 @@ fn min(a: UInt64, b: UInt64) -> UInt64 {
 
 // --- Eq ---
 
-implement Eq for CircuitState {
-    fn eq(&self, other: &CircuitState) -> Bool {
+implement Eq for RecoveryCircuitState {
+    fn eq(&self, other: &RecoveryCircuitState) -> Bool {
         self.to_u8() == other.to_u8()
     }
 }
@@ -881,9 +881,9 @@ implement Clone for ErrorPredicate {
     }
 }
 
-implement Clone for CircuitBreakerConfig {
-    fn clone(&self) -> CircuitBreakerConfig {
-        CircuitBreakerConfig {
+implement Clone for RecoveryCircuitBreakerConfig {
+    fn clone(&self) -> RecoveryCircuitBreakerConfig {
+        RecoveryCircuitBreakerConfig {
             failure_threshold: self.failure_threshold,
             required_successes: self.required_successes,
             timeout_ms: self.timeout_ms,
@@ -912,12 +912,12 @@ implement Clone for RecoveryStrategy {
 
 // --- Debug ---
 
-implement Debug for CircuitState {
+implement Debug for RecoveryCircuitState {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            Closed => f.write_str("CircuitState.Closed"),
-            Open => f.write_str("CircuitState.Open"),
-            HalfOpen => f.write_str("CircuitState.HalfOpen"),
+            Closed => f.write_str("RecoveryCircuitState.Closed"),
+            Open => f.write_str("RecoveryCircuitState.Open"),
+            HalfOpen => f.write_str("RecoveryCircuitState.HalfOpen"),
         }
     }
 }

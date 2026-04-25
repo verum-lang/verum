@@ -14,13 +14,13 @@ public const SQLITE_CHECKPOINT_FULL: Int     = 1;
 public const SQLITE_CHECKPOINT_RESTART: Int  = 2;
 public const SQLITE_CHECKPOINT_TRUNCATE: Int = 3;
 
-public type CheckpointMode is
+public type CheckpointResultMode is
       CmPassive
     | CmFull
     | CmRestart
     | CmTruncate;
 
-public fn mode_numeric(m: &CheckpointMode) -> Int {
+public fn mode_numeric(m: &CheckpointResultMode) -> Int {
     match m {
         CmPassive  => SQLITE_CHECKPOINT_PASSIVE,
         CmFull     => SQLITE_CHECKPOINT_FULL,
@@ -29,7 +29,7 @@ public fn mode_numeric(m: &CheckpointMode) -> Int {
     }
 }
 
-public fn mode_name(m: &CheckpointMode) -> Text {
+public fn mode_name(m: &CheckpointResultMode) -> Text {
     match m {
         CmPassive  => "PASSIVE".clone(),
         CmFull     => "FULL".clone(),
@@ -38,7 +38,7 @@ public fn mode_name(m: &CheckpointMode) -> Text {
     }
 }
 
-public fn from_numeric(n: Int) -> CheckpointMode {
+public fn from_numeric(n: Int) -> CheckpointResultMode {
     if n == SQLITE_CHECKPOINT_TRUNCATE { return CmTruncate; }
     if n == SQLITE_CHECKPOINT_RESTART  { return CmRestart; }
     if n == SQLITE_CHECKPOINT_FULL     { return CmFull; }

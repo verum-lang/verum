@@ -33,7 +33,7 @@ module core.database.sqlite.native.l1_pager.checkpointer;
 
 mount core.*;
 mount base.{Result, Ok, Err, Text};
-mount core.database.sqlite.native.l1_pager.actor.CheckpointMode;
+mount core.database.sqlite.native.l1_pager.actor.PagerCheckpointMode;
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -42,7 +42,7 @@ mount core.database.sqlite.native.l1_pager.actor.CheckpointMode;
 /// Knobs that control when and how the checkpointer runs.
 public type CheckpointConfig is {
     auto_frames_threshold: Int,   // -1 = auto-checkpoint off
-    default_mode: CheckpointMode, // mode for auto-triggered runs
+    default_mode: PagerCheckpointMode, // mode for auto-triggered runs
     idle_interval_ms: Int,        // wake the background task at least this often
 };
 
@@ -59,13 +59,13 @@ public fn checkpoint_config_default() -> CheckpointConfig {
 // -----------------------------------------------------------------------------
 
 public type CheckpointStats is {
-    mode: CheckpointMode,
+    mode: PagerCheckpointMode,
     frames_applied: Int,
     bytes_truncated: Int,   // > 0 only when mode == Truncate
     wal_reset: Bool,        // true for Restart / Truncate
 };
 
-public fn checkpoint_stats_empty(mode: CheckpointMode) -> CheckpointStats {
+public fn checkpoint_stats_empty(mode: PagerCheckpointMode) -> CheckpointStats {
     CheckpointStats {
         mode: mode,
         frames_applied: 0,
@@ -88,7 +88,7 @@ public fn should_trigger(cfg: &CheckpointConfig, wal_frame_count: Int) -> Bool {
 
 /// Does this mode reset the WAL file (drop the salts, rewind the
 /// frame counter)? True for Restart and Truncate.
-public fn mode_resets_wal(mode: CheckpointMode) -> Bool {
+public fn mode_resets_wal(mode: PagerCheckpointMode) -> Bool {
     match mode {
         Restart | Truncate => true,
         Passive | Full     => false,
@@ -97,7 +97,7 @@ public fn mode_resets_wal(mode: CheckpointMode) -> Bool {
 
 /// Does this mode truncate the underlying WAL file to zero bytes?
 /// Only Truncate.
-public fn mode_truncates_file(mode: CheckpointMode) -> Bool {
+public fn mode_truncates_file(mode: PagerCheckpointMode) -> Bool {
     match mode {
         Truncate => true,
         _        => false,
@@ -106,7 +106,7 @@ public fn mode_truncates_file(mode: CheckpointMode) -> Bool {
 
 /// Does this mode block new writers for the duration? Full, Restart,
 /// and Truncate all do; Passive alone yields to writers.
-public fn mode_blocks_writers(mode: CheckpointMode) -> Bool {
+public fn mode_blocks_writers(mode: PagerCheckpointMode) -> Bool {
     match mode {
         Passive => false,
         _       => true,
@@ -125,7 +125,7 @@ public fn mode_blocks_writers(mode: CheckpointMode) -> Bool {
 ///                       pager; Passive yields when this is true.
 /// `wal_file_bytes`   — size of the WAL file; used only in Truncate.
 public fn run_checkpoint(
-    mode: CheckpointMode,
+    mode: PagerCheckpointMode,
     available_frames: Int,
     writer_waiting: Bool,
     wal_file_bytes: Int,

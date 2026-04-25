@@ -27,7 +27,7 @@ mount core.runtime.spawn.{
     spawn_with_timeout, spawn_named, spawn_isolated,
 };
 mount core.runtime.recovery.{
-    BackoffStrategy,
+    RecoveryBackoffStrategy,
     RecoveryStrategy,
     RetryConfig, JitterConfig, RetryPredicate,
 };

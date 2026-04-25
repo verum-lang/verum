@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.result_codes.checkpoint.{
-    CheckpointMode,
+    CheckpointResultMode,
     CmPassive, CmFull, CmRestart, CmTruncate,
     SQLITE_CHECKPOINT_PASSIVE, SQLITE_CHECKPOINT_FULL,
     SQLITE_CHECKPOINT_RESTART, SQLITE_CHECKPOINT_TRUNCATE,

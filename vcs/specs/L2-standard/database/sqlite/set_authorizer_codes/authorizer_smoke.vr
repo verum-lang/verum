@@ -16,7 +16,7 @@ mount core.database.sqlite.native.set_authorizer_codes.codes.{
     create_vtable, drop_vtable, function_action, savepoint_action,
     recursive,
     well_known_action_count, is_known_action,
-    Category, CtCreate, CtDrop, CtRead, CtWrite, CtAdmin, CtFunction, CtUnknown,
+    AuthorizerCategory, CtCreate, CtDrop, CtRead, CtWrite, CtAdmin, CtFunction, CtUnknown,
     classify, category_name,
 };
 mount base.{Bool};

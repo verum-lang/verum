@@ -6,7 +6,7 @@ mount base.{Bool, Text};
 mount core.collections.list.{List};
 
 // Categories of compile-time flag.
-public type Category is
+public type CompileOptionCategory is
     | CtEnable           // SQLITE_ENABLE_*
     | CtOmit             // SQLITE_OMIT_*
     | CtDefault          // SQLITE_DEFAULT_*
@@ -16,7 +16,7 @@ public type Category is
     | CtOther
     ;
 
-public fn category_name(c: &Category) -> Text {
+public fn category_name(c: &CompileOptionCategory) -> Text {
     match c {
         CtEnable     => "enable".clone(),
         CtOmit       => "omit".clone(),
@@ -29,7 +29,7 @@ public fn category_name(c: &Category) -> Text {
 }
 
 // Classify a compile-option name.  Match by prefix.
-public fn classify(name: Text) -> Category {
+public fn classify(name: Text) -> CompileOptionCategory {
     if starts_with(&name, "ENABLE_".clone())   { return CtEnable; }
     if starts_with(&name, "OMIT_".clone())     { return CtOmit; }
     if starts_with(&name, "DEFAULT_".clone())  { return CtDefault; }

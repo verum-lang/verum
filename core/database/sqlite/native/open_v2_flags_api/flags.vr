@@ -93,14 +93,14 @@ public fn mutex_name(m: &MutexMode) -> Text {
 }
 
 // Cache mode.
-public type CacheMode is
+public type OpenCacheMode is
     | CmDefault
     | CmShared
     | CmPrivate
     | CmConflict
     ;
 
-public fn cache_for(fl: Int64) -> CacheMode {
+public fn cache_for(fl: Int64) -> OpenCacheMode {
     let sh = is_set(fl, f_sharedcache());
     let pr = is_set(fl, f_privatecache());
     if sh && pr { return CmConflict; }
@@ -109,7 +109,7 @@ public fn cache_for(fl: Int64) -> CacheMode {
     CmDefault
 }
 
-public fn cache_name(c: &CacheMode) -> Text {
+public fn cache_name(c: &OpenCacheMode) -> Text {
     match c {
         CmDefault  => "default".clone(),
         CmShared   => "shared".clone(),

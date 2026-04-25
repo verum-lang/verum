@@ -24,8 +24,8 @@ mount core.runtime.spawn.{
     SpawnConfig, SpawnConfigBuilder, PriorityLevel,
 };
 mount core.runtime.recovery.{
-    RetryPolicy, RetryConfig, CircuitBreaker, CircuitState,
-    BackoffStrategy, RecoveryStrategy,
+    RetryPolicy, RetryConfig, RecoveryCircuitBreaker, RecoveryCircuitState,
+    RecoveryBackoffStrategy, RecoveryStrategy,
 };
 mount core.runtime.supervisor.{
     Supervisor, SupervisorId, SupervisorHandle,
@@ -134,34 +134,34 @@ fn test_priority_level_match() {
 }
 
 // =============================================================================
-// SECTION 5: CircuitState Type Tests
+// SECTION 5: RecoveryCircuitState Type Tests
 // =============================================================================
 
 @test
 fn test_circuit_state_closed() {
-    let state = CircuitState.Closed;
-    assert(state is CircuitState.Closed);
+    let state = RecoveryCircuitState.Closed;
+    assert(state is RecoveryCircuitState.Closed);
 }
 
 @test
 fn test_circuit_state_open() {
-    let state = CircuitState.Open;
-    assert(state is CircuitState.Open);
+    let state = RecoveryCircuitState.Open;
+    assert(state is RecoveryCircuitState.Open);
 }
 
 @test
 fn test_circuit_state_half_open() {
-    let state = CircuitState.HalfOpen;
-    assert(state is CircuitState.HalfOpen);
+    let state = RecoveryCircuitState.HalfOpen;
+    assert(state is RecoveryCircuitState.HalfOpen);
 }
 
 @test
 fn test_circuit_state_match() {
-    let s = CircuitState.HalfOpen;
+    let s = RecoveryCircuitState.HalfOpen;
     let val = match s {
-        CircuitState.Closed => "closed",
-        CircuitState.Open => "open",
-        CircuitState.HalfOpen => "half-open",
+        RecoveryCircuitState.Closed => "closed",
+        RecoveryCircuitState.Open => "open",
+        RecoveryCircuitState.HalfOpen => "half-open",
     };
     assert_eq(val, "half-open");
 }
@@ -189,27 +189,27 @@ fn test_supervision_strategy_rest_for_one() {
 }
 
 // =============================================================================
-// SECTION 7: BackoffStrategy Type Tests
+// SECTION 7: RecoveryBackoffStrategy Type Tests
 // =============================================================================
 
 @test
 fn test_backoff_strategy_fixed() {
-    let strat = BackoffStrategy.Fixed { delay_ms: 1000 as UInt64 };
+    let strat = RecoveryBackoffStrategy.Fixed { delay_ms: 1000 as UInt64 };
     match strat {
-        BackoffStrategy.Fixed { delay_ms } => { assert_eq(delay_ms, 1000 as UInt64); }
+        RecoveryBackoffStrategy.Fixed { delay_ms } => { assert_eq(delay_ms, 1000 as UInt64); }
         _ => { assert(false); }
     }
 }
 
 @test
 fn test_backoff_strategy_exponential() {
-    let strat = BackoffStrategy.Exponential {
+    let strat = RecoveryBackoffStrategy.Exponential {
         base_ms: 100 as UInt64,
         max_ms: 10000 as UInt64,
         multiplier: 2,
     };
     match strat {
-        BackoffStrategy.Exponential { base_ms, max_ms, multiplier } => {
+        RecoveryBackoffStrategy.Exponential { base_ms, max_ms, multiplier } => {
             assert_eq(base_ms, 100 as UInt64);
             assert_eq(multiplier, 2);
         }
@@ -219,18 +219,18 @@ fn test_backoff_strategy_exponential() {
 
 @test
 fn test_backoff_strategy_none() {
-    let strat = BackoffStrategy.None;
-    assert(strat is BackoffStrategy.None);
+    let strat = RecoveryBackoffStrategy.None;
+    assert(strat is RecoveryBackoffStrategy.None);
 }
 
 @test
 fn test_backoff_strategy_linear() {
-    let strat = BackoffStrategy.Linear {
+    let strat = RecoveryBackoffStrategy.Linear {
         base_ms: 100 as UInt64,
         increment_ms: 50 as UInt64,
         max_ms: 5000 as UInt64,
     };
-    assert(strat is BackoffStrategy.Linear);
+    assert(strat is RecoveryBackoffStrategy.Linear);
 }
 
 // =============================================================================
@@ -284,7 +284,7 @@ fn test_retry_config_type_exists() {
 
 @test
 fn test_circuit_breaker_type_exists() {
-    let _ = CircuitBreaker;
+    let _ = RecoveryCircuitBreaker;
 }
 
 @test
@@ -343,31 +343,31 @@ fn test_isolation_level_match_exhaustive() {
 }
 
 // =============================================================================
-// SECTION 10: CircuitState All-Pairs Distinctness
+// SECTION 10: RecoveryCircuitState All-Pairs Distinctness
 // =============================================================================
 
 @test
 fn test_circuit_state_closed_not_others() {
-    let s = CircuitState.Closed;
-    assert(s is CircuitState.Closed);
-    assert(!(s is CircuitState.Open));
-    assert(!(s is CircuitState.HalfOpen));
+    let s = RecoveryCircuitState.Closed;
+    assert(s is RecoveryCircuitState.Closed);
+    assert(!(s is RecoveryCircuitState.Open));
+    assert(!(s is RecoveryCircuitState.HalfOpen));
 }
 
 @test
 fn test_circuit_state_open_not_others() {
-    let s = CircuitState.Open;
-    assert(s is CircuitState.Open);
-    assert(!(s is CircuitState.Closed));
-    assert(!(s is CircuitState.HalfOpen));
+    let s = RecoveryCircuitState.Open;
+    assert(s is RecoveryCircuitState.Open);
+    assert(!(s is RecoveryCircuitState.Closed));
+    assert(!(s is RecoveryCircuitState.HalfOpen));
 }
 
 @test
 fn test_circuit_state_half_open_not_others() {
-    let s = CircuitState.HalfOpen;
-    assert(s is CircuitState.HalfOpen);
-    assert(!(s is CircuitState.Closed));
-    assert(!(s is CircuitState.Open));
+    let s = RecoveryCircuitState.HalfOpen;
+    assert(s is RecoveryCircuitState.HalfOpen);
+    assert(!(s is RecoveryCircuitState.Closed));
+    assert(!(s is RecoveryCircuitState.Open));
 }
 
 // =============================================================================
@@ -400,25 +400,25 @@ fn test_supervision_strategy_all_distinct() {
 }
 
 // =============================================================================
-// SECTION 12: BackoffStrategy Edge Cases
+// SECTION 12: RecoveryBackoffStrategy Edge Cases
 // =============================================================================
 
 @test
 fn test_backoff_strategy_fixed_zero_delay() {
-    let strat = BackoffStrategy.Fixed { delay_ms: 0 as UInt64 };
+    let strat = RecoveryBackoffStrategy.Fixed { delay_ms: 0 as UInt64 };
     match strat {
-        BackoffStrategy.Fixed { delay_ms } => { assert_eq(delay_ms, 0 as UInt64); }
+        RecoveryBackoffStrategy.Fixed { delay_ms } => { assert_eq(delay_ms, 0 as UInt64); }
         _ => { assert(false); }
     }
 }
 
 @test
 fn test_backoff_strategy_none_not_others() {
-    let s = BackoffStrategy.None;
-    assert(s is BackoffStrategy.None);
-    assert(!(s is BackoffStrategy.Fixed));
-    assert(!(s is BackoffStrategy.Linear));
-    assert(!(s is BackoffStrategy.Exponential));
+    let s = RecoveryBackoffStrategy.None;
+    assert(s is RecoveryBackoffStrategy.None);
+    assert(!(s is RecoveryBackoffStrategy.Fixed));
+    assert(!(s is RecoveryBackoffStrategy.Linear));
+    assert(!(s is RecoveryBackoffStrategy.Exponential));
 }
 
 // =============================================================================
@@ -461,13 +461,13 @@ fn test_isolation_level_full_not_shared() {
 
 @test
 fn test_backoff_strategy_linear_fields() {
-    let strat = BackoffStrategy.Linear {
+    let strat = RecoveryBackoffStrategy.Linear {
         base_ms: 100 as UInt64,
         increment_ms: 50 as UInt64,
         max_ms: 5000 as UInt64,
     };
     match strat {
-        BackoffStrategy.Linear { base_ms, increment_ms, max_ms } => {
+        RecoveryBackoffStrategy.Linear { base_ms, increment_ms, max_ms } => {
             assert_eq(base_ms, 100 as UInt64);
             assert_eq(increment_ms, 50 as UInt64);
             assert_eq(max_ms, 5000 as UInt64);
@@ -478,13 +478,13 @@ fn test_backoff_strategy_linear_fields() {
 
 @test
 fn test_backoff_strategy_exponential_fields() {
-    let strat = BackoffStrategy.Exponential {
+    let strat = RecoveryBackoffStrategy.Exponential {
         base_ms: 100 as UInt64,
         max_ms: 10000 as UInt64,
         multiplier: 2,
     };
     match strat {
-        BackoffStrategy.Exponential { base_ms, max_ms, multiplier } => {
+        RecoveryBackoffStrategy.Exponential { base_ms, max_ms, multiplier } => {
             assert_eq(base_ms, 100 as UInt64);
             assert_eq(max_ms, 10000 as UInt64);
             assert_eq(multiplier, 2);
