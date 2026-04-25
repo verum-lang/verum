@@ -11,12 +11,12 @@ mount base.{Text, Bool, Maybe};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// OpenMode
+// UriOpenMode
 // -----------------------------------------------------------------------------
 
-public type OpenMode is OmReadOnly | OmReadWrite | OmReadWriteCreate | OmMemory;
+public type UriOpenMode is OmReadOnly | OmReadWrite | OmReadWriteCreate | OmMemory;
 
-public fn open_mode_text(m: &OpenMode) -> Text {
+public fn open_mode_text(m: &UriOpenMode) -> Text {
     match m {
         OmReadOnly         => "ro".clone(),
         OmReadWrite        => "rw".clone(),
@@ -25,7 +25,7 @@ public fn open_mode_text(m: &OpenMode) -> Text {
     }
 }
 
-public fn parse_mode(text: &Text) -> Maybe<OpenMode> {
+public fn parse_mode(text: &Text) -> Maybe<UriOpenMode> {
     if *text == "ro".clone()     { return Some(OmReadOnly); }
     if *text == "rw".clone()     { return Some(OmReadWrite); }
     if *text == "rwc".clone()    { return Some(OmReadWriteCreate); }
@@ -69,7 +69,7 @@ public fn query_param(key: Text, value: Text) -> UriQueryParam {
 public type UriParams is {
     /// VFS module name (None ⇒ default).
     vfs: Maybe<Text>,
-    mode: Maybe<OpenMode>,
+    mode: Maybe<UriOpenMode>,
     cache: Maybe<CacheMode>,
     /// Powersafe overwrite — None ⇒ VFS default.
     psow: Maybe<Bool>,

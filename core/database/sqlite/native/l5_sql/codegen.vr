@@ -39,7 +39,7 @@ mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
     Expr, Literal, BinOp, UnOp,
-    TableRef, OrderTerm, UpdateAssignment, OnConflict,
+    TableRef, OrderTerm, UpdateAssignment, SqlOnConflict,
     CreateTableStmt,
 };
 mount core.database.sqlite.native.l5_sql.planner.{
@@ -1801,7 +1801,7 @@ fn emit_insert(
     table: &TableRef,
     columns: &List<Text>,
     source: &PlanNode,
-    on_conflict: &Maybe<OnConflict>,
+    on_conflict: &Maybe<SqlOnConflict>,
 ) -> Result<(), CodegenError> {
     let _ = columns;
     let _ = on_conflict;

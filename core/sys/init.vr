@@ -298,7 +298,7 @@ fn shutdown_allocator() {
 // =============================================================================
 
 /// Default panic handler that writes to stderr and aborts.
-fn default_panic_handler(info: &PanicInfo) {
+fn default_panic_handler(info: &SysInitPanicInfo) {
     // Write panic message to stderr
     let msg = f"panic: {info.message}\n";
 
@@ -331,10 +331,10 @@ fn default_panic_handler(info: &PanicInfo) {
 }
 
 /// Current panic handler.
-static mut PANIC_HANDLER: fn(&PanicInfo) = default_panic_handler;
+static mut PANIC_HANDLER: fn(&SysInitPanicInfo) = default_panic_handler;
 
 /// Panic information passed to handler.
-public type PanicInfo is {
+public type SysInitPanicInfo is {
     /// Panic message.
     public message: Text,
     /// Source file where panic occurred.
@@ -371,7 +371,7 @@ fn shutdown_panic_handler() {
 /// # Safety
 ///
 /// The handler must not panic itself (double-panic is undefined behavior).
-public unsafe fn set_panic_handler(handler: fn(&PanicInfo)) {
+public unsafe fn set_panic_handler(handler: fn(&SysInitPanicInfo)) {
     PANIC_HANDLER = handler;
 }
 
@@ -381,7 +381,7 @@ public unsafe fn set_panic_handler(handler: fn(&PanicInfo)) {
 @cold
 @no_inline
 public fn panic_impl(message: Text, file: Text, line: Int, column: Int) -> ! {
-    let info = PanicInfo {
+    let info = SysInitPanicInfo {
         message: message,
         file: file,
         line: line,

@@ -51,22 +51,22 @@ public fn yields_origin_metadata(s: &Source) -> Bool {
 }
 
 // Per-column metadata triple.
-public type Metadata is {
+public type ColumnOriginMetadata is {
     database: Text,    // empty when unavailable
     table: Text,
     origin: Text,
 };
 
-public fn empty_metadata() -> Metadata {
-    Metadata {
+public fn empty_metadata() -> ColumnOriginMetadata {
+    ColumnOriginMetadata {
         database: "".clone(),
         table: "".clone(),
         origin: "".clone(),
     }
 }
 
-public fn from_simple(db: Text, tab: Text, col: Text) -> Metadata {
-    Metadata { database: db, table: tab, origin: col }
+public fn from_simple(db: Text, tab: Text, col: Text) -> ColumnOriginMetadata {
+    ColumnOriginMetadata { database: db, table: tab, origin: col }
 }
 
 // Result of accessing a particular field.
@@ -78,7 +78,7 @@ public type FieldResult is
 
 public fn lookup(
     src: &Source,
-    md: &Metadata,
+    md: &ColumnOriginMetadata,
     field: &Field,
     build_has_metadata: Bool,
 ) -> FieldResult {

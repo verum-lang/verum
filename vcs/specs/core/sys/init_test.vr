@@ -12,7 +12,7 @@
 // - verum_init, verum_shutdown: Runtime lifecycle
 // - is_initialized: Runtime state checking
 // - init_thread, cleanup_thread: Thread lifecycle
-// - PanicInfo: Panic information structure
+// - SysInitPanicInfo: Panic information structure
 //
 // Test Strategy:
 // - Error type construction and method testing
@@ -26,7 +26,7 @@
 module test.stdlib.sys.init_test;
 
 mount core.sys.init.{
-    InitError, PanicInfo,
+    InitError, SysInitPanicInfo,
     verum_init, verum_shutdown, is_initialized,
     init_thread, cleanup_thread,
 };
@@ -155,13 +155,13 @@ fn test_init_error_messages() {
 }
 
 // =============================================================================
-// PanicInfo Tests
+// SysInitPanicInfo Tests
 // =============================================================================
 
 @test
 fn test_panic_info() {
     // Create panic info
-    let info = PanicInfo {
+    let info = SysInitPanicInfo {
         message: "Something went wrong",
         file: "test.vr",
         line: 42,
@@ -175,7 +175,7 @@ fn test_panic_info() {
     assert(info.column == 10);
 
     // Create with different values
-    let info2 = PanicInfo {
+    let info2 = SysInitPanicInfo {
         message: "Index out of bounds",
         file: "collections/list.vr",
         line: 100,
@@ -188,7 +188,7 @@ fn test_panic_info() {
     assert(info2.column == 5);
 
     // Edge cases
-    let info_empty = PanicInfo {
+    let info_empty = SysInitPanicInfo {
         message: "",
         file: "",
         line: 0,
@@ -198,7 +198,7 @@ fn test_panic_info() {
     assert(info_empty.message == "");
     assert(info_empty.line == 0);
 
-    let info_large = PanicInfo {
+    let info_large = SysInitPanicInfo {
         message: "Very long error message that spans multiple words",
         file: "/very/long/path/to/file.vr",
         line: 999999,
@@ -208,7 +208,7 @@ fn test_panic_info() {
     assert(info_large.line == 999999);
     assert(info_large.column == 65535);
 
-    print("PanicInfo tests passed");
+    print("SysInitPanicInfo tests passed");
 }
 
 // =============================================================================

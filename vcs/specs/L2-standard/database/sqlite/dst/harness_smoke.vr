@@ -16,7 +16,7 @@ mount core.database.sqlite.native.dst.seed.{
     DstSeed, seed_from_u64,
 };
 mount core.database.sqlite.native.dst.op.{
-    DbOp, OpInsert, OpBegin, OpCommit, OpStream, op_stream_empty,
+    DbOp, OpInsert, OpBegin, OpCommit, DstOpStream, op_stream_empty,
     is_mutation, is_tx_boundary,
 };
 mount core.database.sqlite.native.dst.generator.{
@@ -53,7 +53,7 @@ fn test_seed_bounded_draw_in_range() {
 }
 
 // -----------------------------------------------------------------------------
-// Op + OpStream
+// Op + DstOpStream
 // -----------------------------------------------------------------------------
 
 fn test_is_mutation_classifies() {

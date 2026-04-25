@@ -11,7 +11,7 @@ mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l5_sql.{
     SqlStatement, CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
-    OnConflict, TableRef,
+    SqlOnConflict, TableRef,
     ParseError, parse_one, parse_batch,
 };
 

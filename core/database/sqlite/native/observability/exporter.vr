@@ -7,7 +7,7 @@
 //
 //   * `PrometheusExporter` — text-format scrape rendering
 //                            (HELP/TYPE/value lines)
-//   * `OtlpExporter`       — pre-shaped record matching the OTLP
+//   * `SqliteOtlpExporter`       — pre-shaped record matching the OTLP
 //                            metric data-point schema (no actual
 //                            wire encoding — that's the host's
 //                            responsibility)
@@ -168,10 +168,10 @@ public type OtlpDataPoint is {
     count: Int64,
 }
 
-public type OtlpExporter is { unit: Bool };
-public fn otlp() -> OtlpExporter { OtlpExporter { unit: true } }
+public type SqliteOtlpExporter is { unit: Bool };
+public fn otlp() -> SqliteOtlpExporter { SqliteOtlpExporter { unit: true } }
 
-public fn otlp_export(_e: &OtlpExporter, registry: &MetricRegistry) -> List<OtlpDataPoint> {
+public fn otlp_export(_e: &SqliteOtlpExporter, registry: &MetricRegistry) -> List<OtlpDataPoint> {
     let mut out: List<OtlpDataPoint> = List.new();
     let mut i: Int = 0;
     while i < registry.counters.len() {

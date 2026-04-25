@@ -127,7 +127,7 @@ public mount .init.{
     // Error types
     InitError,
     // Panic handling
-    PanicInfo,
+    SysInitPanicInfo,
     panic_impl,
     set_panic_handler,
     // Thread initialization

@@ -60,14 +60,14 @@ public fn is_tx_boundary(o: &DbOp) -> Bool {
 }
 
 // -----------------------------------------------------------------------------
-// OpStream — a recorded op sequence
+// DstOpStream — a recorded op sequence
 // -----------------------------------------------------------------------------
 
-public type OpStream is { ops: List<DbOp> }
+public type DstOpStream is { ops: List<DbOp> }
 
-public fn op_stream_empty() -> OpStream { OpStream { ops: List.new() } }
+public fn op_stream_empty() -> DstOpStream { DstOpStream { ops: List.new() } }
 
-implement OpStream {
+implement DstOpStream {
     public fn len(&self) -> Int { self.ops.len() }
 
     pub fn push(&mut self, o: DbOp) { self.ops.push(o); }

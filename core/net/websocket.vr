@@ -74,7 +74,7 @@ mount core.encoding.base64;
 // Opcodes
 // =============================================================================
 
-public type Opcode is
+public type WsOpcode is
     | Continuation
     | Textual
     | Binary
@@ -83,41 +83,41 @@ public type Opcode is
     | Pong
     | Reserved(UInt8);
 
-implement Opcode {
+implement WsOpcode {
     public fn to_byte(&self) -> UInt8 {
         match self {
-            Opcode.Continuation => 0x0,
-            Opcode.Textual      => 0x1,
-            Opcode.Binary       => 0x2,
-            Opcode.Close        => 0x8,
-            Opcode.Ping         => 0x9,
-            Opcode.Pong         => 0xA,
-            Opcode.Reserved(b)  => *b,
+            WsOpcode.Continuation => 0x0,
+            WsOpcode.Textual      => 0x1,
+            WsOpcode.Binary       => 0x2,
+            WsOpcode.Close        => 0x8,
+            WsOpcode.Ping         => 0x9,
+            WsOpcode.Pong         => 0xA,
+            WsOpcode.Reserved(b)  => *b,
         }
     }
 
-    public fn from_byte(b: UInt8) -> Opcode {
+    public fn from_byte(b: UInt8) -> WsOpcode {
         match b {
-            0x0 => Opcode.Continuation,
-            0x1 => Opcode.Textual,
-            0x2 => Opcode.Binary,
-            0x8 => Opcode.Close,
-            0x9 => Opcode.Ping,
-            0xA => Opcode.Pong,
-            _   => Opcode.Reserved(b),
+            0x0 => WsOpcode.Continuation,
+            0x1 => WsOpcode.Textual,
+            0x2 => WsOpcode.Binary,
+            0x8 => WsOpcode.Close,
+            0x9 => WsOpcode.Ping,
+            0xA => WsOpcode.Pong,
+            _   => WsOpcode.Reserved(b),
         }
     }
 
     public fn is_control(&self) -> Bool {
         match self {
-            Opcode.Close | Opcode.Ping | Opcode.Pong => true,
+            WsOpcode.Close | WsOpcode.Ping | WsOpcode.Pong => true,
             _ => false,
         }
     }
 
     public fn is_data(&self) -> Bool {
         match self {
-            Opcode.Textual | Opcode.Binary | Opcode.Continuation => true,
+            WsOpcode.Textual | WsOpcode.Binary | WsOpcode.Continuation => true,
             _ => false,
         }
     }
@@ -154,7 +154,7 @@ public type Frame is {
     rsv1: Bool,
     rsv2: Bool,
     rsv3: Bool,
-    opcode: Opcode,
+    opcode: WsOpcode,
     payload: List<Byte>,
 }
 
@@ -162,14 +162,14 @@ implement Frame {
     public fn text(payload: List<Byte>) -> Frame {
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
-            opcode: Opcode.Textual, payload: payload,
+            opcode: WsOpcode.Textual, payload: payload,
         }
     }
 
     public fn binary(payload: List<Byte>) -> Frame {
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
-            opcode: Opcode.Binary, payload: payload,
+            opcode: WsOpcode.Binary, payload: payload,
         }
     }
 
@@ -185,21 +185,21 @@ implement Frame {
         }
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
-            opcode: Opcode.Close, payload: payload,
+            opcode: WsOpcode.Close, payload: payload,
         }
     }
 
     public fn ping(payload: List<Byte>) -> Frame {
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
-            opcode: Opcode.Ping, payload: payload,
+            opcode: WsOpcode.Ping, payload: payload,
         }
     }
 
     public fn pong(payload: List<Byte>) -> Frame {
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
-            opcode: Opcode.Pong, payload: payload,
+            opcode: WsOpcode.Pong, payload: payload,
         }
     }
 }
@@ -292,7 +292,7 @@ public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> WebSock
     let rsv2 = (b0 & 0x20) != 0;
     let rsv3 = (b0 & 0x10) != 0;
     let op_byte = b0 & 0x0F;
-    let opcode = Opcode.from_byte(op_byte);
+    let opcode = WsOpcode.from_byte(op_byte);
 
     if rsv1 || rsv2 || rsv3 {
         // RSV bits are reserved for extensions (permessage-deflate uses RSV1);

@@ -35,7 +35,7 @@ mount core.database.sqlite.native.l5_sql.lexer.{
 };
 mount core.database.sqlite.native.l5_sql.ast.{
     Expr, ResultColumnItem, TableRef,
-    InsertStmt, InsertSource, OnConflict,
+    InsertStmt, InsertSource, SqlOnConflict,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,
 };
@@ -50,7 +50,7 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 
 public fn parse_insert(ts: &mut SqlTokenStream) -> Result<InsertStmt, ParseError> {
     let replacing_form = ts.accept_keyword(KwReplace);
-    let mut conflict: Maybe<OnConflict> = None;
+    let mut conflict: Maybe<SqlOnConflict> = None;
 
     if !replacing_form {
         match ts.expect_keyword(KwInsert) { Ok(_) => {}, Err(e) => { return Err(e); } }
@@ -143,7 +143,7 @@ fn parse_insert_source(ts: &mut SqlTokenStream) -> Result<InsertSource, ParseErr
 public fn parse_update(ts: &mut SqlTokenStream) -> Result<UpdateStmt, ParseError> {
     match ts.expect_keyword(KwUpdate) { Ok(_) => {}, Err(e) => { return Err(e); } }
 
-    let mut conflict: Maybe<OnConflict> = None;
+    let mut conflict: Maybe<SqlOnConflict> = None;
     if ts.accept_keyword(KwOr) {
         let c = match parse_conflict_action(ts) {
             Ok(c)  => c, Err(e) => { return Err(e); }
@@ -229,7 +229,7 @@ public fn parse_delete(ts: &mut SqlTokenStream) -> Result<DeleteStmt, ParseError
 // Shared helpers
 // -----------------------------------------------------------------------------
 
-fn parse_conflict_action(ts: &mut SqlTokenStream) -> Result<OnConflict, ParseError> {
+fn parse_conflict_action(ts: &mut SqlTokenStream) -> Result<SqlOnConflict, ParseError> {
     if ts.accept_keyword(KwAbort)    { return Ok(OcAbort); }
     if ts.accept_keyword(KwFail)     { return Ok(OcFail); }
     if ts.accept_keyword(KwIgnore)   { return Ok(OcIgnore); }

@@ -41,7 +41,7 @@ public mount .ast.{
     SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
     FromItem, JoinClause, SqlJoinKind, CompoundOp,
     OrderTerm, OrderDirection, LimitClause,
-    InsertStmt, InsertSource, OnConflict,
+    InsertStmt, InsertSource, SqlOnConflict,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,
     CreateTableStmt, ColumnDef, TableConstraint,
