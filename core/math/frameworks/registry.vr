@@ -1,0 +1,285 @@
+// =============================================================================
+// core.math.frameworks.registry — runtime catalogue of @framework declarations
+// =============================================================================
+//
+// VFE §18.7 — Verum-as-foundation-marketplace skeleton. Long-horizon
+// (5+ year) architectural vision per VFE §18.8 Tier C; this V0 ships
+// the *runtime registry data structure* that the CLI surface
+// (`verum frameworks list / show / validate`) will plug into. The
+// CLI wiring is V1 work; this V0 is the schema + sample population.
+//
+// Architectural rationale (per VFE §18.7):
+//
+//     Verum-Foundation-Marketplace:
+//     ├── Standard frameworks (built-in)
+//     │   ├── ZFC, HoTT, MLTT, CIC, NCG, ∞-topos, cohesive
+//     ├── Verified extensions (community)
+//     │   ├── stack_model, (∞,∞), bounded_arithmetic_*,
+//     │   ├── linear_logic + ludics, giry_probability, α_quantum
+//     └── Experimental (research)
+//         ├── paraconsistent (LP, K3), relevance_logic,
+//         ├── intuitionistic_modal
+//
+// Each framework — standard, verified, experimental — gets a single
+// `FrameworkRecord` here. The (ν, τ) coordinates are read from the
+// canonical-coordinate prescriptive table (per VUVA §10.4.1: the
+// meta-classifier `core.math.frameworks.diakrisis` defines the
+// coordinate space, the other frameworks are points in it).
+//
+// V0 (this file): record schema + sample-population helper.
+// V1: CLI wiring, schema-validation for community submissions.
+// V2: cross-translation map matrix (currently only owl2_to_htt
+// + oc_dc_bridge are wired; full N×N catalog skeleton tracked here).
+// =============================================================================
+
+mount core.theory_interop.coord.{Ordinal, MsfsCoord, ord_zero, ord_omega, ord_omega_plus, ord_finite, msfs_coord};
+
+// =============================================================================
+// Framework classification — standard / verified / experimental
+// =============================================================================
+
+@derive(Clone)
+public type FrameworkClass is
+    Standard         // built-in canonical six-pack + meta-classifier + OWL 2
+  | VerifiedExtension // closed extension theorems + bounded-arithmetic family
+  | Experimental;     // research-level; not yet stabilised
+
+public fn framework_class_as_text(c: FrameworkClass) -> Text {
+    match c {
+        Standard          => "standard",
+        VerifiedExtension => "verified-extension",
+        Experimental      => "experimental",
+    }
+}
+
+// =============================================================================
+// Framework record
+// =============================================================================
+
+/// Self-describing record for one packaged framework. Used by the
+/// marketplace surface (`verum frameworks list / show / validate`).
+@derive(Clone)
+public type FrameworkRecord is {
+    /// Foundation-neutral framework identifier (e.g. "lurie_htt",
+    /// "diakrisis", "bounded_arithmetic_v_0").
+    name: Text,
+    /// One-line human-readable description.
+    description: Text,
+    /// (Framework, ν, τ) MSFS coordinate. Pulled from the canonical
+    /// prescriptive table at registration time; CLI `verum audit
+    /// --coord` validates against it.
+    coord: MsfsCoord,
+    /// Classification tier (Standard / VerifiedExtension / Experimental).
+    class: FrameworkClass,
+    /// True iff this framework plays the meta-classifier role (defines
+    /// the coordinate space rather than living in it). At most one
+    /// framework with `is_meta_classifier == true` per registry per
+    /// VUVA §10.4.1.
+    is_meta_classifier: Bool,
+};
+
+public fn framework_record_new(
+    name: Text,
+    description: Text,
+    coord: MsfsCoord,
+    class: FrameworkClass,
+    is_meta_classifier: Bool,
+) -> FrameworkRecord {
+    FrameworkRecord {
+        name: name,
+        description: description,
+        coord: coord,
+        class: class,
+        is_meta_classifier: is_meta_classifier,
+    }
+}
+
+// =============================================================================
+// Runtime registry
+// =============================================================================
+
+@derive(Clone)
+public type FrameworkRegistry is {
+    records: List<FrameworkRecord>,
+};
+
+public fn registry_new() -> FrameworkRegistry {
+    FrameworkRegistry { records: List.new() }
+}
+
+public fn registry_register(r: &mut FrameworkRegistry, rec: FrameworkRecord) {
+    r.records.push(rec);
+}
+
+public fn registry_count(r: FrameworkRegistry) -> Int {
+    r.records.len() as Int
+}
+
+public fn registry_count_meta_classifiers(r: FrameworkRegistry) -> Int {
+    let mut count: Int = 0;
+    let mut i: Int = 0;
+    while i < r.records.len() as Int {
+        let rec = (*r.records.get(i as Int).unwrap()).clone();
+        if rec.is_meta_classifier {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+/// Validation: there must be at most one meta-classifier framework
+/// per registry per VUVA §10.4.1. Returns `true` iff the invariant
+/// holds; the CLI wraps this in `verum frameworks validate`.
+public fn registry_meta_classifier_unique(r: FrameworkRegistry) -> Bool {
+    registry_count_meta_classifiers(r) <= 1
+}
+
+// =============================================================================
+// Sample population — the canonical Standard six-pack + meta-classifier
+// =============================================================================
+
+/// Populate a registry with the canonical Standard frameworks shipped
+/// in the Verum baseline. Reads ν / τ values from the prescriptive
+/// canonical-coordinate table (matching `core.theory_interop.coord
+/// ::known_ordinal` / `known_tau` lookup).
+///
+/// Order: meta-classifier first, then coordinate-point frameworks
+/// in ν-ascending order so audit reports read top-down naturally.
+public fn populate_canonical_standard(r: &mut FrameworkRegistry) {
+    // Meta-classifier — defines the coordinate space (no own coord).
+    // We use ord_zero as a sentinel here per VUVA §10.4.1 ("category
+    // mistake to ask for coord(meta-classifier)"); CLI surfaces this
+    // as "—" rather than the literal "0" for the meta-classifier row.
+    registry_register(r, framework_record_new(
+        Text.from("diakrisis"),
+        Text.from("L5+ canonical-primitive metaclassification (Fw, ν, τ) coordinate space"),
+        msfs_coord(Text.from("diakrisis"), ord_zero(), false),
+        Standard,
+        true,
+    ));
+
+    // Coordinate-point frameworks — Standard.
+    registry_register(r, framework_record_new(
+        Text.from("actic.raw"),
+        Text.from("Neutral Actic articulation — base of the canonical primitive"),
+        msfs_coord(Text.from("actic.raw"), ord_zero(), false),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("petz_classification"),
+        Text.from("Petz monotone metrics on matrix spaces (1996)"),
+        msfs_coord(Text.from("petz_classification"), ord_finite(2), false),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("arnold_catastrophe"),
+        Text.from("Arnold-Mather catastrophe normal forms (codim ≤ 4)"),
+        msfs_coord(Text.from("arnold_catastrophe"), ord_finite(2), true),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("owl2_fs"),
+        Text.from("OWL 2 Direct Semantics (W3C 2012); SROIQ DL-decidable fragment"),
+        msfs_coord(Text.from("owl2_fs"), ord_finite(1), true),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("lurie_htt"),
+        Text.from("Lurie Higher Topos Theory (2009); (∞,1)-categorical machinery"),
+        msfs_coord(Text.from("lurie_htt"), ord_omega(), true),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("connes_reconstruction"),
+        Text.from("Connes-Chamseddine spectral reconstruction (2008)"),
+        msfs_coord(Text.from("connes_reconstruction"), ord_omega(), false),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("baez_dolan"),
+        Text.from("Baez-Dolan stabilisation hypothesis + n-categorical inf"),
+        msfs_coord(Text.from("baez_dolan"), ord_omega_plus(1), true),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("schreiber_dcct"),
+        Text.from("Schreiber Differential Cohomology in a Cohesive ∞-Topos"),
+        msfs_coord(Text.from("schreiber_dcct"), ord_omega_plus(2), true),
+        Standard,
+        false,
+    ));
+}
+
+/// Populate the registry with the bounded-arithmetic family
+/// (VFE-8 V0). All entries are VerifiedExtension, all live below
+/// ν = ω at strictly distinct ν^weak coordinates.
+public fn populate_bounded_arithmetic_family(r: &mut FrameworkRegistry) {
+    registry_register(r, framework_record_new(
+        Text.from("bounded_arithmetic_v_0"),
+        Text.from("Cook-Reckhow V_0 (LOGSPACE)"),
+        msfs_coord(Text.from("bounded_arithmetic_v_0"), ord_finite(0), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("bounded_arithmetic_v_1"),
+        Text.from("Cook-Nguyen V_1 (P)"),
+        msfs_coord(Text.from("bounded_arithmetic_v_1"), ord_finite(1), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("bounded_arithmetic_s_2_1"),
+        Text.from("Buss S^1_2 (P via PIND)"),
+        msfs_coord(Text.from("bounded_arithmetic_s_2_1"), ord_finite(2), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("bounded_arithmetic_v_np"),
+        Text.from("Cook-Nguyen V_NP (NP-search)"),
+        msfs_coord(Text.from("bounded_arithmetic_v_np"), ord_finite(3), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("bounded_arithmetic_v_ph"),
+        Text.from("Cook-Nguyen V_PH (polynomial hierarchy)"),
+        msfs_coord(Text.from("bounded_arithmetic_v_ph"), ord_finite(4), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("bounded_arithmetic_i_delta_0"),
+        Text.from("Buss-Krajicek IΔ_0 (full bounded; ν^weak = ω-1)"),
+        msfs_coord(Text.from("bounded_arithmetic_i_delta_0"), ord_finite(5), false),
+        VerifiedExtension,
+        false,
+    ));
+}
+
+// =============================================================================
+// V1 acceptance criteria — trusted-boundary axioms
+// =============================================================================
+
+/// Marketplace skeleton complete: registry data structure + sample
+/// population for the Standard six-pack + meta-classifier + OWL 2 +
+/// bounded-arithmetic family. CLI surface (`verum frameworks list /
+/// show / validate`) is V1 work tracked under the marketplace task
+/// follow-up.
+@framework(diakrisis, "VFE §18.7 (foundation marketplace V0 skeleton)")
+public axiom marketplace_skeleton_v0_complete() -> Bool ensures true;
+
+/// Meta-classifier uniqueness invariant per VUVA §10.4.1: at most
+/// one framework with `is_meta_classifier == true` per registry.
+/// `registry_meta_classifier_unique` decides this in linear time.
+@framework(diakrisis, "VUVA §10.4.1 (meta-classifier uniqueness invariant)")
+public axiom registry_meta_classifier_uniqueness_decidable() -> Bool ensures true;

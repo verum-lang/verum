@@ -107,3 +107,12 @@ public mount core.math.frameworks.diakrisis_acts;
 // strategy for polynomial-time verification of bounded-arithmetic
 // programs.
 public mount core.math.frameworks.bounded_arithmetic;
+
+// VFE §18.7 — foundation-marketplace runtime registry. Self-describing
+// catalogue of every framework with its (Fw, ν, τ) coordinate +
+// classification tier (Standard / VerifiedExtension / Experimental).
+// Exposes registry_meta_classifier_unique invariant (per VUVA §10.4.1)
+// + sample population for the canonical Standard six-pack + meta-
+// classifier + bounded-arithmetic family. CLI wiring (`verum
+// frameworks list / show / validate`) is V1 work.
+public mount core.math.frameworks.registry;
