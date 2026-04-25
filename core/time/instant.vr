@@ -30,6 +30,7 @@
 
 module core.time.instant;
 mount core.*;
+mount core.base.coercion.{IntCoercible};
 mount time.duration.Duration;
 
 // =============================================================================
@@ -227,6 +228,11 @@ implement Clone for Instant {
 }
 
 implement Copy for Instant {}
+
+// IntCoercible (core.base.coercion) — Instant carries an Int-encoded
+// monotonic-nanosecond count, so the unifier should accept Instant ↔ Int
+// coercion in arithmetic / comparison contexts.
+implement IntCoercible for Instant {}
 
 implement Hash for Instant {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
