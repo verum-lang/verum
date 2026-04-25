@@ -47679,6 +47679,47 @@ impl TypeChecker {
                     record_map.insert(field_name, field_type);
                 }
 
+                // VUVA #152 / C2-WIRE V3 — strict-positivity check on
+                // record-shaped types. Berardi-shaped declarations
+                // through records (e.g. `type Bad is { wrap: fn(Bad)
+                // -> Bool };`) were slipping through V1+V2 because
+                // those only fired on Variant arms. We model the
+                // record body as a single synthetic constructor whose
+                // payload is the record itself, then run the walker
+                // with the placeholder TypeVar so it recognises
+                // post-elaboration `Type::Var(placeholder_var)`
+                // occurrences as references to the recursive type.
+                {
+                    let synthetic_ctor = crate::ty::InductiveConstructor {
+                        name: type_name.clone(),
+                        type_params: List::new(),
+                        args: List::from_iter(vec![Box::new(
+                            Type::Record(record_map.clone()),
+                        )]),
+                        return_type: Box::new(Type::Unit),
+                    };
+                    let ctors: List<crate::ty::InductiveConstructor> =
+                        List::from_iter(vec![synthetic_ctor]);
+                    if let Err(violation) = crate::positivity::check_user_inductive_with_self_var(
+                        type_name.as_str(),
+                        &ctors,
+                        Some(placeholder_var),
+                    ) {
+                        return Err(TypeError::PositivityViolation {
+                            type_name: verum_common::Text::from(
+                                violation.type_name.as_str(),
+                            ),
+                            constructor: verum_common::Text::from(
+                                violation.constructor.as_str(),
+                            ),
+                            position: verum_common::Text::from(
+                                violation.position.as_str(),
+                            ),
+                            span: type_decl.span,
+                        });
+                    }
+                }
+
                 // CRITICAL: Empty records (e.g., `type AtomicUsize is { };`) are opaque builtin types.
                 // These are used for types that have runtime representations but no accessible fields.
                 // They must be treated as opaque Named types, NOT as structural empty records.
@@ -49171,6 +49212,44 @@ impl TypeChecker {
                         Err(_) => self.ast_to_type_lenient(&field.ty),
                     };
                     record_map.insert(field_name, field_type);
+                }
+
+                // VUVA #152 / C2-WIRE V3 — strict-positivity for the
+                // `verum build` path's record-form types. Mirror of
+                // the V3 site at register_type_declaration_inner. Uses
+                // the placeholder_var hint so that Type::Var
+                // occurrences left over from the placeholder
+                // pre-registration are recognised as the recursive
+                // type.
+                {
+                    let synthetic_ctor = crate::ty::InductiveConstructor {
+                        name: type_name.clone(),
+                        type_params: List::new(),
+                        args: List::from_iter(vec![Box::new(
+                            Type::Record(record_map.clone()),
+                        )]),
+                        return_type: Box::new(Type::Unit),
+                    };
+                    let ctors: List<crate::ty::InductiveConstructor> =
+                        List::from_iter(vec![synthetic_ctor]);
+                    if let Err(violation) = crate::positivity::check_user_inductive_with_self_var(
+                        type_name.as_str(),
+                        &ctors,
+                        Some(placeholder_var),
+                    ) {
+                        return Err(crate::TypeError::PositivityViolation {
+                            type_name: verum_common::Text::from(
+                                violation.type_name.as_str(),
+                            ),
+                            constructor: verum_common::Text::from(
+                                violation.constructor.as_str(),
+                            ),
+                            position: verum_common::Text::from(
+                                violation.position.as_str(),
+                            ),
+                            span: type_decl.span,
+                        });
+                    }
                 }
 
                 // Empty records (e.g., `type Empty is { };`) need field structure for pattern matching.

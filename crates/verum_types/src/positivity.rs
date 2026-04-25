@@ -29,7 +29,7 @@
 //! domain, descend into return-types, sub-tuples, sub-records,
 //! generic-arg lists, and so on.
 
-use crate::ty::{InductiveConstructor, Type};
+use crate::ty::{InductiveConstructor, Type, TypeVar};
 use verum_common::List;
 
 /// Outcome of the positivity check on a user-declared inductive.
@@ -66,10 +66,25 @@ pub fn check_user_inductive(
     type_name: &str,
     constructors: &List<InductiveConstructor>,
 ) -> Result<(), PositivityViolation> {
+    check_user_inductive_with_self_var(type_name, constructors, None)
+}
+
+/// Run strict-positivity with an optional `self_var` hint that the
+/// walker also treats as a reference to `type_name`. Needed when the
+/// type-decl pre-pass installed `Type::Var(self_var)` as a placeholder
+/// for the recursive type before resolving field types — without the
+/// hint, occurrences of the type inside record/variant bodies look
+/// like fresh type variables and the walker can't recognise them as
+/// the target.
+pub fn check_user_inductive_with_self_var(
+    type_name: &str,
+    constructors: &List<InductiveConstructor>,
+    self_var: Option<TypeVar>,
+) -> Result<(), PositivityViolation> {
     for ctor in constructors.iter() {
         for (i, arg_ty) in ctor.args.iter().enumerate() {
             let mut breadcrumb = format!("constructor '{}' arg #{}", ctor.name.as_str(), i);
-            check_strictly_positive(type_name, arg_ty, &mut breadcrumb).map_err(|pos| {
+            check_strictly_positive(type_name, self_var, arg_ty, &mut breadcrumb).map_err(|pos| {
                 PositivityViolation {
                     type_name: type_name.to_string(),
                     constructor: ctor.name.as_str().to_string(),
@@ -86,20 +101,27 @@ pub fn check_user_inductive(
 /// the negative position of a Function. Conservative: false-negatives
 /// are acceptable (would under-report); false-positives are not
 /// (would over-flag legitimate code).
-fn name_appears_in(target: &str, ty: &Type) -> bool {
+///
+/// `self_var` is the placeholder TypeVar (if any) the type-decl
+/// pre-pass installed for this name; the walker treats `Type::Var`
+/// of that variable as a target reference, which is necessary to
+/// catch Berardi-shaped record types where field-type elaboration
+/// has already substituted the placeholder.
+fn name_appears_in(target: &str, self_var: Option<TypeVar>, ty: &Type) -> bool {
     match ty {
+        Type::Var(tv) => self_var == Some(*tv),
         Type::Inductive { name, params, indices, .. } => {
             if name.as_str() == target {
                 return true;
             }
-            params.iter().any(|(_, t)| name_appears_in(target, t))
-                || indices.iter().any(|(_, t)| name_appears_in(target, t))
+            params.iter().any(|(_, t)| name_appears_in(target, self_var, t))
+                || indices.iter().any(|(_, t)| name_appears_in(target, self_var, t))
         }
         Type::Generic { name, args } => {
             if name.as_str() == target {
                 return true;
             }
-            args.iter().any(|a| name_appears_in(target, a))
+            args.iter().any(|a| name_appears_in(target, self_var, a))
         }
         Type::Named { path, args } => {
             // The placeholder a recursive type-decl registers under
@@ -117,22 +139,23 @@ fn name_appears_in(target: &str, ty: &Type) -> bool {
             if name_matches {
                 return true;
             }
-            args.iter().any(|a| name_appears_in(target, a))
+            args.iter().any(|a| name_appears_in(target, self_var, a))
         }
         Type::Function { params, return_type, .. } => {
-            params.iter().any(|p| name_appears_in(target, p))
-                || name_appears_in(target, return_type)
+            params.iter().any(|p| name_appears_in(target, self_var, p))
+                || name_appears_in(target, self_var, return_type)
         }
-        Type::Tuple(types) => types.iter().any(|t| name_appears_in(target, t)),
-        Type::Array { element, .. } => name_appears_in(target, element),
-        Type::Slice { element } => name_appears_in(target, element),
+        Type::Tuple(types) => types.iter().any(|t| name_appears_in(target, self_var, t)),
+        Type::Array { element, .. } => name_appears_in(target, self_var, element),
+        Type::Slice { element } => name_appears_in(target, self_var, element),
         Type::Reference { inner, .. }
         | Type::CheckedReference { inner, .. }
-        | Type::UnsafeReference { inner, .. } => name_appears_in(target, inner),
-        Type::Record(fields) => fields.values().any(|t| name_appears_in(target, t)),
-        Type::Variant(variants) => variants.values().any(|t| name_appears_in(target, t)),
+        | Type::UnsafeReference { inner, .. } => name_appears_in(target, self_var, inner),
+        Type::Record(fields) => fields.values().any(|t| name_appears_in(target, self_var, t)),
+        Type::Variant(variants) => variants.values().any(|t| name_appears_in(target, self_var, t)),
         Type::Pi { param_type, return_type, .. } => {
-            name_appears_in(target, param_type) || name_appears_in(target, return_type)
+            name_appears_in(target, self_var, param_type)
+                || name_appears_in(target, self_var, return_type)
         }
         // User-named types are referenced by `Inductive` / `Generic`
         // (handled above) or `TypeAlias` — for the latter we
@@ -147,6 +170,7 @@ fn name_appears_in(target: &str, ty: &Type) -> bool {
 /// `target` appears in a forbidden position; Ok otherwise.
 fn check_strictly_positive(
     target: &str,
+    self_var: Option<TypeVar>,
     ty: &Type,
     breadcrumb: &mut String,
 ) -> Result<(), String> {
@@ -154,7 +178,7 @@ fn check_strictly_positive(
         Type::Function { params, return_type, .. } => {
             // Negative position: target must not appear in any param.
             for (i, p) in params.iter().enumerate() {
-                if name_appears_in(target, p) {
+                if name_appears_in(target, self_var, p) {
                     return Err(format!(
                         "{} → param #{} (left of an arrow / negative position)",
                         breadcrumb, i,
@@ -166,12 +190,12 @@ fn check_strictly_positive(
             // inner arrow's domain is also a negative position.
             let saved = breadcrumb.clone();
             breadcrumb.push_str(" → return_type");
-            check_strictly_positive(target, return_type, breadcrumb)?;
+            check_strictly_positive(target, self_var, return_type, breadcrumb)?;
             *breadcrumb = saved;
             Ok(())
         }
         Type::Pi { param_type, return_type, .. } => {
-            if name_appears_in(target, param_type) {
+            if name_appears_in(target, self_var, param_type) {
                 return Err(format!(
                     "{} → Π-domain (left of an arrow / negative position)",
                     breadcrumb,
@@ -179,7 +203,7 @@ fn check_strictly_positive(
             }
             let saved = breadcrumb.clone();
             breadcrumb.push_str(" → Π-codomain");
-            check_strictly_positive(target, return_type, breadcrumb)?;
+            check_strictly_positive(target, self_var, return_type, breadcrumb)?;
             *breadcrumb = saved;
             Ok(())
         }
@@ -187,13 +211,13 @@ fn check_strictly_positive(
             for (i, (_, t)) in params.iter().enumerate() {
                 let saved = breadcrumb.clone();
                 breadcrumb.push_str(&format!(" → Inductive param #{}", i));
-                check_strictly_positive(target, t, breadcrumb)?;
+                check_strictly_positive(target, self_var, t, breadcrumb)?;
                 *breadcrumb = saved;
             }
             for (i, (_, t)) in indices.iter().enumerate() {
                 let saved = breadcrumb.clone();
                 breadcrumb.push_str(&format!(" → Inductive index #{}", i));
-                check_strictly_positive(target, t, breadcrumb)?;
+                check_strictly_positive(target, self_var, t, breadcrumb)?;
                 *breadcrumb = saved;
             }
             Ok(())
@@ -202,7 +226,7 @@ fn check_strictly_positive(
             for (i, a) in args.iter().enumerate() {
                 let saved = breadcrumb.clone();
                 breadcrumb.push_str(&format!(" → typed arg #{}", i));
-                check_strictly_positive(target, a, breadcrumb)?;
+                check_strictly_positive(target, self_var, a, breadcrumb)?;
                 *breadcrumb = saved;
             }
             Ok(())
@@ -211,7 +235,7 @@ fn check_strictly_positive(
             for (i, t) in types.iter().enumerate() {
                 let saved = breadcrumb.clone();
                 breadcrumb.push_str(&format!(" → Tuple element #{}", i));
-                check_strictly_positive(target, t, breadcrumb)?;
+                check_strictly_positive(target, self_var, t, breadcrumb)?;
                 *breadcrumb = saved;
             }
             Ok(())
@@ -219,7 +243,7 @@ fn check_strictly_positive(
         Type::Array { element, .. } | Type::Slice { element } => {
             let saved = breadcrumb.clone();
             breadcrumb.push_str(" → Array/Slice element");
-            check_strictly_positive(target, element, breadcrumb)?;
+            check_strictly_positive(target, self_var, element, breadcrumb)?;
             *breadcrumb = saved;
             Ok(())
         }
@@ -228,7 +252,7 @@ fn check_strictly_positive(
         | Type::UnsafeReference { inner, .. } => {
             let saved = breadcrumb.clone();
             breadcrumb.push_str(" → Reference target");
-            check_strictly_positive(target, inner, breadcrumb)?;
+            check_strictly_positive(target, self_var, inner, breadcrumb)?;
             *breadcrumb = saved;
             Ok(())
         }
@@ -236,7 +260,7 @@ fn check_strictly_positive(
             for (name, t) in fields.iter() {
                 let saved = breadcrumb.clone();
                 breadcrumb.push_str(&format!(" → Record field '{}'", name));
-                check_strictly_positive(target, t, breadcrumb)?;
+                check_strictly_positive(target, self_var, t, breadcrumb)?;
                 *breadcrumb = saved;
             }
             Ok(())
@@ -245,7 +269,7 @@ fn check_strictly_positive(
             for (name, t) in variants.iter() {
                 let saved = breadcrumb.clone();
                 breadcrumb.push_str(&format!(" → Variant '{}'", name));
-                check_strictly_positive(target, t, breadcrumb)?;
+                check_strictly_positive(target, self_var, t, breadcrumb)?;
                 *breadcrumb = saved;
             }
             Ok(())
@@ -399,5 +423,47 @@ mod tests {
             ),
         ]);
         assert!(check_user_inductive("List", &ctors).is_ok());
+    }
+
+    #[test]
+    fn record_form_berardi_with_self_var_rejected() {
+        // type Bad is { wrap: fn(Bad) -> Bool };
+        // The record-arm pre-pass installs `Type::Var(self_var)` as
+        // the placeholder for `Bad`, then resolves the field type.
+        // Without the self_var hint the walker can't recognise the
+        // placeholder as the recursive type and the witness slips
+        // through.
+        let self_var = TypeVar::fresh();
+        let bad_var = Type::Var(self_var);
+        let arrow_with_var = Type::Function {
+            params: List::from_iter(vec![bad_var]),
+            return_type: Box::new(Type::Bool),
+            contexts: None,
+            type_params: List::new(),
+            properties: None,
+        };
+        let mut record_map: indexmap::IndexMap<Text, Type> = indexmap::IndexMap::new();
+        record_map.insert(Text::from("wrap"), arrow_with_var);
+        let synthetic_ctor = InductiveConstructor::with_args(
+            "Bad".into(),
+            List::from_iter(vec![Type::Record(record_map)]),
+            ind("Bad", vec![]),
+        );
+        let ctors = List::from_iter(vec![synthetic_ctor]);
+
+        // Without the self_var hint: walker can't see the placeholder
+        // and the witness slips through (regression baseline).
+        assert!(check_user_inductive("Bad", &ctors).is_ok());
+
+        // With the self_var hint: walker recognises Type::Var and
+        // rejects the witness.
+        let result = check_user_inductive_with_self_var("Bad", &ctors, Some(self_var));
+        match result {
+            Err(violation) => {
+                assert_eq!(violation.constructor, "Bad");
+                assert!(violation.position.contains("left of an arrow"));
+            }
+            Ok(_) => panic!("record-form Berardi via self_var must be rejected"),
+        }
     }
 }
