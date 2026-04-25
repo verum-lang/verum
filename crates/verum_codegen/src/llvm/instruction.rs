@@ -5233,6 +5233,426 @@ pub fn lower_instruction<'ctx>(
         }
 
         // ====================================================================
+        // GPU device management (#85): Get/Set/Reset/Property/MemoryInfo/Peer
+        // ====================================================================
+        Instruction::GpuGetDevice { dst } => {
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_get_device", &[], "gpu_dev")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuSetDevice { device } => {
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "dev")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_set_device", &[d])
+        }
+        Instruction::GpuGetDeviceCount { dst } => {
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_get_device_count", &[], "gpu_cnt")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuGetDeviceProperty { dst, device, property_id } => {
+            let i64_ty = ctx.types().i64_type();
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "dev")?;
+            let pid = i64_ty.const_int(*property_id as u64, false);
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_get_device_property", &[d, pid], "gpu_prop")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuGetMemoryInfo { free, total, device } => {
+            // Multi-result via sret-style [i64; 2] slot array.
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let pair_ty = i64_ty.array_type(2);
+            let slots = ctx.builder().build_alloca(pair_ty, "gpu_meminfo")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let slots_i64 = ctx.builder().build_ptr_to_int(slots, i64_ty, "gpu_meminfo_i64")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "dev")?;
+            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into(); 2], false);
+            let f = module.get_function("verum_gpu_get_memory_info").unwrap_or_else(|| {
+                module.add_function("verum_gpu_get_memory_info", fn_type, None)
+            });
+            ctx.builder().build_call(f, &[d.into(), slots_i64.into()], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // SAFETY: in-bounds GEP into [i64;2] just allocated above
+            let f_gep = unsafe {
+                ctx.builder().build_in_bounds_gep(pair_ty, slots,
+                    &[i64_ty.const_zero(), i64_ty.const_int(0, false)], "free_gep")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
+            let t_gep = unsafe {
+                ctx.builder().build_in_bounds_gep(pair_ty, slots,
+                    &[i64_ty.const_zero(), i64_ty.const_int(1, false)], "total_gep")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
+            let f_val = ctx.builder().build_load(i64_ty, f_gep, "free")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let t_val = ctx.builder().build_load(i64_ty, t_gep, "total")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(free.0, f_val);
+            ctx.set_register(total.0, t_val);
+            Ok(())
+        }
+        Instruction::GpuCanAccessPeer { dst, device, peer_device } => {
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "d")?;
+            let p = as_i64(ctx, ctx.get_register(peer_device.0)?, "p")?;
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_can_access_peer", &[d, p], "gpu_pa")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuEnablePeerAccess { device, peer_device } => {
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "d")?;
+            let p = as_i64(ctx, ctx.get_register(peer_device.0)?, "p")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_enable_peer_access", &[d, p])
+        }
+        Instruction::GpuDisablePeerAccess { device, peer_device } => {
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "d")?;
+            let p = as_i64(ctx, ctx.get_register(peer_device.0)?, "p")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_disable_peer_access", &[d, p])
+        }
+        Instruction::GpuDeviceReset { device } => {
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "d")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_device_reset", &[d])
+        }
+        Instruction::GpuSetDeviceFlags { flags } => {
+            let i64_ty = ctx.types().i64_type();
+            let f = i64_ty.const_int(*flags as u64, false);
+            call_tensor_runtime_void(ctx, "verum_gpu_set_device_flags", &[f])
+        }
+        Instruction::GpuEnumerateDevices { dst, backend } => {
+            let i64_ty = ctx.types().i64_type();
+            let b = i64_ty.const_int(*backend as u64, false);
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_enumerate_devices", &[b], "gpu_enum")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+
+        // ====================================================================
+        // GPU memory (#85): Alloc/Free, Memcpy*, Memset*, Pin/Unpin/Prefetch,
+        // Managed memory (MallocManaged, MemAdvise, PrefetchAsync,
+        // MemGetAttribute), 2D variants.
+        // ====================================================================
+        Instruction::GpuAlloc { dst, size, device } => {
+            let s = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "dv")?;
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_alloc", &[s, d], "gpu_alloc")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuFree { ptr } => {
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "ptr")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_free", &[p])
+        }
+        Instruction::GpuMemcpy { dst, src, direction } => {
+            let i64_ty = ctx.types().i64_type();
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let dir = i64_ty.const_int(*direction as u64, false);
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy", &[d, s, dir])
+        }
+        Instruction::GpuMemcpyAsync { dst, src, size, direction, stream } => {
+            let i64_ty = ctx.types().i64_type();
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let sz = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            let dir = i64_ty.const_int(*direction as u64, false);
+            let st = as_i64(ctx, ctx.get_register(stream.0)?, "st")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy_async", &[d, s, sz, dir, st])
+        }
+        Instruction::GpuMemcpyH2D { dst, src, size } => {
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let sz = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy_h2d", &[d, s, sz])
+        }
+        Instruction::GpuMemcpyD2H { dst, src, size } => {
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let sz = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy_d2h", &[d, s, sz])
+        }
+        Instruction::GpuMemcpyD2D { dst, src, size } => {
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let sz = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy_d2d", &[d, s, sz])
+        }
+        Instruction::GpuMemcpyAsyncH2D { dst, src, size, stream } => {
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let sz = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            let st = as_i64(ctx, ctx.get_register(stream.0)?, "st")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy_async_h2d", &[d, s, sz, st])
+        }
+        Instruction::GpuMemcpyAsyncD2H { dst, src, size, stream } => {
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let sz = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            let st = as_i64(ctx, ctx.get_register(stream.0)?, "st")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy_async_d2h", &[d, s, sz, st])
+        }
+        Instruction::GpuMemcpy2D { dst, dst_pitch, src, src_pitch, width, height, direction } => {
+            let i64_ty = ctx.types().i64_type();
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let dp = as_i64(ctx, ctx.get_register(dst_pitch.0)?, "dp")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let sp = as_i64(ctx, ctx.get_register(src_pitch.0)?, "sp")?;
+            let w = as_i64(ctx, ctx.get_register(width.0)?, "w")?;
+            let h = as_i64(ctx, ctx.get_register(height.0)?, "h")?;
+            let dir = i64_ty.const_int(*direction as u64, false);
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy_2d", &[d, dp, s, sp, w, h, dir])
+        }
+        Instruction::GpuMemcpy2DAsync { dst, dst_pitch, src, src_pitch, width, height, direction, stream } => {
+            let i64_ty = ctx.types().i64_type();
+            let d = as_i64(ctx, ctx.get_register(dst.0)?, "dst")?;
+            let dp = as_i64(ctx, ctx.get_register(dst_pitch.0)?, "dp")?;
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "src")?;
+            let sp = as_i64(ctx, ctx.get_register(src_pitch.0)?, "sp")?;
+            let w = as_i64(ctx, ctx.get_register(width.0)?, "w")?;
+            let h = as_i64(ctx, ctx.get_register(height.0)?, "h")?;
+            let dir = i64_ty.const_int(*direction as u64, false);
+            let st = as_i64(ctx, ctx.get_register(stream.0)?, "st")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memcpy_2d_async", &[d, dp, s, sp, w, h, dir, st])
+        }
+        Instruction::GpuMemset { ptr, value, size } => {
+            let i64_ty = ctx.types().i64_type();
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "p")?;
+            let v = i64_ty.const_int(*value as u64, false);
+            let sz = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memset", &[p, v, sz])
+        }
+        Instruction::GpuMemsetAsync { ptr, value, size, stream } => {
+            let i64_ty = ctx.types().i64_type();
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "p")?;
+            let v = i64_ty.const_int(*value as u64, false);
+            let sz = as_i64(ctx, ctx.get_register(size.0)?, "sz")?;
+            let st = as_i64(ctx, ctx.get_register(stream.0)?, "st")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_memset_async", &[p, v, sz, st])
+        }
+        Instruction::GpuPinMemory { ptr, size } => {
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "p")?;
+            let s = as_i64(ctx, ctx.get_register(size.0)?, "s")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_pin_memory", &[p, s])
+        }
+        Instruction::GpuUnpinMemory { ptr } => {
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "p")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_unpin_memory", &[p])
+        }
+        Instruction::GpuPrefetch { ptr, size, device, stream } => {
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "p")?;
+            let s = as_i64(ctx, ctx.get_register(size.0)?, "s")?;
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "d")?;
+            let st = as_i64(ctx, ctx.get_register(stream.0)?, "st")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_prefetch", &[p, s, d, st])
+        }
+        Instruction::GpuPrefetchAsync { ptr, size, device, stream } => {
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "p")?;
+            let s = as_i64(ctx, ctx.get_register(size.0)?, "s")?;
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "d")?;
+            let st = as_i64(ctx, ctx.get_register(stream.0)?, "st")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_prefetch_async", &[p, s, d, st])
+        }
+        Instruction::GpuMallocManaged { dst, size, attach_flags } => {
+            let i64_ty = ctx.types().i64_type();
+            let s = as_i64(ctx, ctx.get_register(size.0)?, "s")?;
+            let af = i64_ty.const_int(*attach_flags as u64, false);
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_malloc_managed", &[s, af], "mm")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuMemAdvise { ptr, size, advice, device } => {
+            let i64_ty = ctx.types().i64_type();
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "p")?;
+            let s = as_i64(ctx, ctx.get_register(size.0)?, "s")?;
+            let a = i64_ty.const_int(*advice as u64, false);
+            let d = as_i64(ctx, ctx.get_register(device.0)?, "d")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_mem_advise", &[p, s, a, d])
+        }
+        Instruction::GpuMemGetAttribute { dst, ptr, attribute } => {
+            let i64_ty = ctx.types().i64_type();
+            let p = as_i64(ctx, ctx.get_register(ptr.0)?, "p")?;
+            let a = i64_ty.const_int(*attribute as u64, false);
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_mem_get_attribute", &[p, a], "mga")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+
+        // ====================================================================
+        // GPU streams & events (#86)
+        // ====================================================================
+        Instruction::GpuStreamCreate { dst } => {
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_stream_create", &[], "stream")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuStreamCreateNonBlocking { dst } => {
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_stream_create_non_blocking", &[], "stream")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuStreamCreateWithPriority { dst, priority } => {
+            let p = as_i64(ctx, ctx.get_register(priority.0)?, "pri")?;
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_stream_create_with_priority", &[p], "stream")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuStreamDestroy { stream } => {
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_stream_destroy", &[s])
+        }
+        Instruction::GpuStreamQuery { dst, stream } => {
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_stream_query", &[s], "sq")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuStreamWaitEvent { stream, event } => {
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            let e = as_i64(ctx, ctx.get_register(event.0)?, "e")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_stream_wait_event", &[s, e])
+        }
+        Instruction::GpuStreamGetPriority { dst, stream } => {
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_stream_get_priority", &[s], "sgp")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuStreamAddCallback { stream, callback_id, user_data } => {
+            let i64_ty = ctx.types().i64_type();
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            let cb = i64_ty.const_int(*callback_id as u64, false);
+            let ud = as_i64(ctx, ctx.get_register(user_data.0)?, "ud")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_stream_add_callback", &[s, cb, ud])
+        }
+        Instruction::GpuEventCreate { dst } => {
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_event_create", &[], "evt")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuEventCreateWithFlags { dst, flags } => {
+            let i64_ty = ctx.types().i64_type();
+            let f = i64_ty.const_int(*flags as u64, false);
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_event_create_with_flags", &[f], "evt")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuEventDestroy { event } => {
+            let e = as_i64(ctx, ctx.get_register(event.0)?, "e")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_event_destroy", &[e])
+        }
+        Instruction::GpuEventRecord { event, stream } => {
+            let e = as_i64(ctx, ctx.get_register(event.0)?, "e")?;
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_event_record", &[e, s])
+        }
+        Instruction::GpuEventRecordWithFlags { event, stream, flags } => {
+            let i64_ty = ctx.types().i64_type();
+            let e = as_i64(ctx, ctx.get_register(event.0)?, "e")?;
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            let f = i64_ty.const_int(*flags as u64, false);
+            call_tensor_runtime_void(ctx, "verum_gpu_event_record_with_flags", &[e, s, f])
+        }
+        Instruction::GpuEventSynchronize { event } => {
+            let e = as_i64(ctx, ctx.get_register(event.0)?, "e")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_event_synchronize", &[e])
+        }
+        Instruction::GpuEventQuery { dst, event } => {
+            let e = as_i64(ctx, ctx.get_register(event.0)?, "e")?;
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_event_query", &[e], "eq")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuEventElapsed { dst, start_event, end_event } => {
+            let s = as_i64(ctx, ctx.get_register(start_event.0)?, "s")?;
+            let e = as_i64(ctx, ctx.get_register(end_event.0)?, "e")?;
+            let r = call_tensor_runtime_f64(ctx, "verum_gpu_event_elapsed", &[s, e], "ee")?;
+            ctx.set_register(dst.0, r);
+            Ok(())
+        }
+        Instruction::GpuProfileMarkerPush { name_id } => {
+            let i64_ty = ctx.types().i64_type();
+            let n = i64_ty.const_int(*name_id as u64, false);
+            call_tensor_runtime_void(ctx, "verum_gpu_profile_marker_push", &[n])
+        }
+        Instruction::GpuProfileRangeStart { name_id } => {
+            let i64_ty = ctx.types().i64_type();
+            let n = i64_ty.const_int(*name_id as u64, false);
+            call_tensor_runtime_void(ctx, "verum_gpu_profile_range_start", &[n])
+        }
+
+        // ====================================================================
+        // GPU graphs & advanced launch (#87)
+        // ====================================================================
+        Instruction::GpuGraphCreate { dst } => {
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_graph_create", &[], "g")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuGraphBeginCapture { stream, mode } => {
+            let i64_ty = ctx.types().i64_type();
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            let m = i64_ty.const_int(*mode as u64, false);
+            call_tensor_runtime_void(ctx, "verum_gpu_graph_begin_capture", &[s, m])
+        }
+        Instruction::GpuGraphEndCapture { dst, stream } => {
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_graph_end_capture", &[s], "g")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuGraphInstantiate { dst, graph } => {
+            let g = as_i64(ctx, ctx.get_register(graph.0)?, "g")?;
+            let r = call_tensor_runtime_i64(ctx, "verum_gpu_graph_instantiate", &[g], "ge")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(())
+        }
+        Instruction::GpuGraphLaunch { graph_exec, stream } => {
+            let g = as_i64(ctx, ctx.get_register(graph_exec.0)?, "g")?;
+            let s = as_i64(ctx, ctx.get_register(stream.0)?, "s")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_graph_launch", &[g, s])
+        }
+        Instruction::GpuGraphDestroy { graph } => {
+            let g = as_i64(ctx, ctx.get_register(graph.0)?, "g")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_graph_destroy", &[g])
+        }
+        Instruction::GpuGraphExecDestroy { graph_exec } => {
+            let g = as_i64(ctx, ctx.get_register(graph_exec.0)?, "g")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_graph_exec_destroy", &[g])
+        }
+        Instruction::GpuGraphExecUpdate { graph_exec, graph } => {
+            let ge = as_i64(ctx, ctx.get_register(graph_exec.0)?, "ge")?;
+            let g = as_i64(ctx, ctx.get_register(graph.0)?, "g")?;
+            call_tensor_runtime_void(ctx, "verum_gpu_graph_exec_update", &[ge, g])
+        }
+        Instruction::GpuLaunchCooperative { kernel_id, grid, block, shared_mem, stream, args } => {
+            let i64_ty = ctx.types().i64_type();
+            let k = i64_ty.const_int(*kernel_id as u64, false);
+            let g = as_i64(ctx, ctx.get_register(grid[0].0)?, "g")?;
+            let b = as_i64(ctx, ctx.get_register(block[0].0)?, "b")?;
+            let sm = as_i64(ctx, ctx.get_register(shared_mem.0)?, "sm")?;
+            let st = as_i64(ctx, ctx.get_register(stream.0)?, "st")?;
+            let a = if let Some(first) = args.first() {
+                as_i64(ctx, ctx.get_register(first.0)?, "a")?
+            } else {
+                i64_ty.const_zero()
+            };
+            call_tensor_runtime_void(ctx, "verum_gpu_launch_cooperative", &[k, g, b, sm, st, a])
+        }
+        Instruction::GpuLaunchMultiDevice { kernel_id, devices, grid, block, shared_mem, args } => {
+            let i64_ty = ctx.types().i64_type();
+            let k = i64_ty.const_int(*kernel_id as u64, false);
+            let d = as_i64(ctx, ctx.get_register(devices.0)?, "d")?;
+            let g = as_i64(ctx, ctx.get_register(grid[0].0)?, "g")?;
+            let b = as_i64(ctx, ctx.get_register(block[0].0)?, "b")?;
+            let sm = as_i64(ctx, ctx.get_register(shared_mem.0)?, "sm")?;
+            let a = if let Some(first) = args.first() {
+                as_i64(ctx, ctx.get_register(first.0)?, "a")?
+            } else {
+                i64_ty.const_zero()
+            };
+            call_tensor_runtime_void(ctx, "verum_gpu_launch_multi_device", &[k, d, g, b, sm, a])
+        }
+
+        // ====================================================================
         // Catch-all: fail on unimplemented instructions
         // ====================================================================
         _ => {
