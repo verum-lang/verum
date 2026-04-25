@@ -22,6 +22,7 @@
 
 module core.time.duration;
 mount core.*;
+mount core.base.coercion.{IntCoercible};
 
 // =============================================================================
 // Constants
@@ -335,6 +336,13 @@ implement Clone for Duration {
 }
 
 implement Copy for Duration {}
+
+// IntCoercible (core.base.coercion) — Duration carries an Int-encoded
+// nanosecond count, so the unifier should accept Duration ↔ Int
+// bidirectional coercion in arithmetic / comparison contexts. Marker
+// protocol with no methods; the implementation block alone signals
+// the intent to the compiler.
+implement IntCoercible for Duration {}
 
 implement Hash for Duration {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
