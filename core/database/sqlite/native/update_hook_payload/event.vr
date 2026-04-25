@@ -4,13 +4,13 @@ module core.database.sqlite.native.update_hook_payload.event;
 
 mount base.{Bool, Text, Int64};
 
-public type UpdateOp is
+public type UpdateHookOp is
     | UoInsert      // SQLITE_INSERT = 18
     | UoUpdate      // SQLITE_UPDATE = 23
     | UoDelete      // SQLITE_DELETE =  9
     ;
 
-public fn op_code(o: &UpdateOp) -> Int {
+public fn op_code(o: &UpdateHookOp) -> Int {
     match o {
         UoInsert => 18,
         UoUpdate => 23,
@@ -18,7 +18,7 @@ public fn op_code(o: &UpdateOp) -> Int {
     }
 }
 
-public fn op_name(o: &UpdateOp) -> Text {
+public fn op_name(o: &UpdateHookOp) -> Text {
     match o {
         UoInsert => "INSERT".clone(),
         UoUpdate => "UPDATE".clone(),
@@ -26,18 +26,18 @@ public fn op_name(o: &UpdateOp) -> Text {
     }
 }
 
-public fn is_insert(o: &UpdateOp) -> Bool { match o { UoInsert => true, _ => false } }
-public fn is_update(o: &UpdateOp) -> Bool { match o { UoUpdate => true, _ => false } }
-public fn is_delete(o: &UpdateOp) -> Bool { match o { UoDelete => true, _ => false } }
+public fn is_insert(o: &UpdateHookOp) -> Bool { match o { UoInsert => true, _ => false } }
+public fn is_update(o: &UpdateHookOp) -> Bool { match o { UoUpdate => true, _ => false } }
+public fn is_delete(o: &UpdateHookOp) -> Bool { match o { UoDelete => true, _ => false } }
 
 public type UpdateEvent is {
-    op: UpdateOp,
+    op: UpdateHookOp,
     db_name: Text,      // "main" / "temp" / attached name
     table: Text,
     rowid: Int64,
 };
 
-public fn event(op: UpdateOp, db_name: Text, table: Text, rowid: Int64) -> UpdateEvent {
+public fn event(op: UpdateHookOp, db_name: Text, table: Text, rowid: Int64) -> UpdateEvent {
     UpdateEvent { op: op, db_name: db_name, table: table, rowid: rowid }
 }
 

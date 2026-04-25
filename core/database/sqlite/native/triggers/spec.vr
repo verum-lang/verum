@@ -25,14 +25,14 @@ mount collections.List;
 // Timing & event
 // -----------------------------------------------------------------------------
 
-public type TriggerTiming is TtBefore | TtAfter | TtInsteadOf;
+public type SqlTriggerTiming is TtBefore | TtAfter | TtInsteadOf;
 
-public type TriggerEvent is
+public type SqlTriggerEvent is
       TeInsert
     | TeDelete
     | TeUpdate(List<Text>);  // empty list = "any column"
 
-public fn timing_name(t: &TriggerTiming) -> Text {
+public fn timing_name(t: &SqlTriggerTiming) -> Text {
     match t {
         TtBefore    => "BEFORE".clone(),
         TtAfter     => "AFTER".clone(),
@@ -40,7 +40,7 @@ public fn timing_name(t: &TriggerTiming) -> Text {
     }
 }
 
-public fn event_name(e: &TriggerEvent) -> Text {
+public fn event_name(e: &SqlTriggerEvent) -> Text {
     match e {
         TeInsert    => "INSERT".clone(),
         TeDelete    => "DELETE".clone(),
@@ -59,8 +59,8 @@ public type TriggerBodyStmt is { sql: Text };
 public type TriggerDef is {
     name: Text,
     schema_name: Text,         // "main", "temp", "<attach-alias>"
-    timing: TriggerTiming,
-    event: TriggerEvent,
+    timing: SqlTriggerTiming,
+    event: SqlTriggerEvent,
     table_name: Text,
     for_each_row: Bool,        // SQLite always true; kept for spec parity
     when_clause: Maybe<Text>,  // optional WHEN <expr>
@@ -73,8 +73,8 @@ public type TriggerDef is {
 public fn trigger_def_new(
     name: Text,
     table_name: Text,
-    timing: TriggerTiming,
-    event: TriggerEvent,
+    timing: SqlTriggerTiming,
+    event: SqlTriggerEvent,
 ) -> TriggerDef {
     TriggerDef {
         name: name,
@@ -102,7 +102,7 @@ implement TriggerDef {
         self.schema_name = schema;
     }
 
-    public fn fires_on_event(&self, evt: &TriggerEvent) -> Bool {
+    public fn fires_on_event(&self, evt: &SqlTriggerEvent) -> Bool {
         match self.event {
             TeInsert    => match evt { TeInsert    => true, _ => false },
             TeDelete    => match evt { TeDelete    => true, _ => false },
@@ -142,7 +142,7 @@ public fn row_binding_name(k: &RowBindingKind) -> Text {
     }
 }
 
-public fn row_binding_available_for_event(k: &RowBindingKind, e: &TriggerEvent) -> Bool {
+public fn row_binding_available_for_event(k: &RowBindingKind, e: &SqlTriggerEvent) -> Bool {
     match e {
         TeInsert    => match k { RbNew => true, RbOld => false },
         TeDelete    => match k { RbNew => false, RbOld => true },

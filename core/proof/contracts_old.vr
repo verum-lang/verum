@@ -46,21 +46,21 @@ module core.proof.contracts_old;
 public type SnapshotEntry is { loc: Text, value: Text };
 
 /// A pre-state snapshot.
-public type Snapshot is { entries: List<SnapshotEntry> };
+public type ContractsSnapshot is { entries: List<SnapshotEntry> };
 
-public fn snapshot_empty() -> Snapshot {
-    Snapshot { entries: [] }
+public fn snapshot_empty() -> ContractsSnapshot {
+    ContractsSnapshot { entries: [] }
 }
 
 /// Record that `loc` had value `value` before execution.
-public fn snapshot_record(s: Snapshot, loc: Text, value: Text) -> Snapshot {
+public fn snapshot_record(s: ContractsSnapshot, loc: Text, value: Text) -> ContractsSnapshot {
     let mut new_entries = s.entries;
     new_entries.push(SnapshotEntry { loc, value });
-    Snapshot { entries: new_entries }
+    ContractsSnapshot { entries: new_entries }
 }
 
 /// Look up a snapshotted value, defaulting to empty Text if absent.
-public fn snapshot_lookup(s: Snapshot, loc: Text) -> Text {
+public fn snapshot_lookup(s: ContractsSnapshot, loc: Text) -> Text {
     let mut i: Int = 0;
     while i < s.entries.len() {
         if s.entries[i].loc == loc {

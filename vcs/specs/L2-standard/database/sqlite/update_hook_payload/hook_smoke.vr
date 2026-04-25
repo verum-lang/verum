@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.update_hook_payload.event.{
-    UpdateOp, UoInsert, UoUpdate, UoDelete,
+    UpdateHookOp, UoInsert, UoUpdate, UoDelete,
     op_code, op_name, is_insert, is_update, is_delete,
     UpdateEvent, event,
     is_main_db, is_temp_db, is_attached_db,

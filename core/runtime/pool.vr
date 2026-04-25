@@ -40,7 +40,7 @@ public type ThreadPool is {
 };
 
 /// A handle to a submitted task, used to retrieve the result.
-public type TaskHandle is {
+public type PoolTaskHandle is {
     handle: Int,
 };
 
@@ -68,10 +68,10 @@ implement ThreadPool {
         ThreadPool { handle: h }
     }
 
-    /// Submit a task to the pool. Returns a TaskHandle to await the result.
-    public fn submit(&self, func: fn(Int) -> Int, arg: Int) -> TaskHandle {
+    /// Submit a task to the pool. Returns a PoolTaskHandle to await the result.
+    public fn submit(&self, func: fn(Int) -> Int, arg: Int) -> PoolTaskHandle {
         let h = __pool_submit_raw(self.handle, func as Int, arg);
-        TaskHandle { handle: h }
+        PoolTaskHandle { handle: h }
     }
 
     /// Destroy the pool, joining all worker threads.
@@ -80,13 +80,13 @@ implement ThreadPool {
     }
 
     /// Submit a task to the global (lazily initialized) thread pool.
-    public fn global_submit(func: fn(Int) -> Int, arg: Int) -> TaskHandle {
+    public fn global_submit(func: fn(Int) -> Int, arg: Int) -> PoolTaskHandle {
         let h = __pool_global_submit_raw(func as Int, arg);
-        TaskHandle { handle: h }
+        PoolTaskHandle { handle: h }
     }
 }
 
-implement TaskHandle {
+implement PoolTaskHandle {
     /// Block until the task completes and return its result.
     public fn await(&self) -> Int {
         __pool_await_raw(self.handle)

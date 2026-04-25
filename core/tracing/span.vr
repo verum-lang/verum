@@ -39,30 +39,30 @@ public type SpanKind is
 // SpanStatus — final status
 // =============================================================================
 
-public type StatusCode is
+public type SpanStatusCode is
     | Unset
     | Ok
     | Error;
 
 public type SpanStatus is {
-    code: StatusCode,
+    code: SpanStatusCode,
     description: Maybe<Text>,
 };
 
 implement SpanStatus {
     public fn unset() -> SpanStatus {
-        SpanStatus { code: StatusCode.Unset, description: None }
+        SpanStatus { code: SpanStatusCode.Unset, description: None }
     }
 
     public fn ok() -> SpanStatus {
-        SpanStatus { code: StatusCode.Ok, description: None }
+        SpanStatus { code: SpanStatusCode.Ok, description: None }
     }
 
     public fn error(description: Text) -> SpanStatus {
-        SpanStatus { code: StatusCode.Error, description: Some(description) }
+        SpanStatus { code: SpanStatusCode.Error, description: Some(description) }
     }
 
-    public fn code(&self) -> StatusCode { self.code }
+    public fn code(&self) -> SpanStatusCode { self.code }
     public fn description(&self) -> &Maybe<Text> { &self.description }
 }
 
@@ -257,9 +257,9 @@ implement Span {
         let cur_code = inner.status.code();
         let new_code = new_status.code();
         let should_set = match cur_code {
-            StatusCode.Error => false,
-            StatusCode.Ok => match new_code { StatusCode.Error => true, _ => false },
-            StatusCode.Unset => true,
+            SpanStatusCode.Error => false,
+            SpanStatusCode.Ok => match new_code { SpanStatusCode.Error => true, _ => false },
+            SpanStatusCode.Unset => true,
         };
         if should_set {
             inner.status = new_status;
@@ -330,7 +330,7 @@ implement Display for Span {
     }
 }
 
-fn span_status_code(inner: &SpanInner) -> StatusCode {
+fn span_status_code(inner: &SpanInner) -> SpanStatusCode {
     inner.status.code()
 }
 
