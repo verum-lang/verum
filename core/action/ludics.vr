@@ -1,0 +1,122 @@
+// =============================================================================
+// core.action.ludics — Ludics designs as Perf(α_linear) (Theorem 120.T)
+// =============================================================================
+//
+// Operational treatment of Ludics-style proof-as-strategy semantics
+// realising Theorem 120.T:
+//
+//     Design ≃ Perf(α_linear),  Desseins ≃ 2-cells in >>·<<.
+//
+// The Verum surface gives:
+//
+//   • `Locus<A>` — an SMCC-position (locus in Girard's sense),
+//                  parameterised by the carrier type A.
+//   • `Design<L1, L2>` — a strategy from L1 to L2, the central object
+//                        of the Ludics catalogue.
+//   • `Dessein<D1, D2>` — a 2-cell-style modification between designs.
+//   • `cut_elim(d)` — canonical-form reduction (Lemma 120.L3).
+//   • `orthogonal(d1, d2)` — gauge-incompatibility test (Lemma 120.L4).
+//
+// V0 (this file) ships protocol-level signatures + axiom-form theorems.
+// Concrete implementations of cut-elimination and orthogonality
+// procedures are deferred to V1 due to two practical considerations:
+//
+//   (a) Designs are infinite-branching trees in general; Verum needs
+//       lazy evaluation through cofix to avoid eager blow-up. The
+//       cofix infrastructure exists in core.coinductive but the
+//       Ludics-specific lazy interaction is not yet wired.
+//
+//   (b) Cut-elimination should be bounded-depth (default 1000 steps)
+//       to give predictable termination; divergent computations
+//       return UNKNOWN verdicts. Bound is configurable per
+//       VUVA §13.6 (Ludics caveat).
+//
+// Memory budget: ≤ 100 MB for typical proofs; UHM-scale corpora (223
+// theorems) may need optimization tracked separately.
+// =============================================================================
+
+mount core.action.articulation.{Articulation};
+mount core.action.enactments.{Enactment};
+
+// =============================================================================
+// Protocol surface — Locus / Design / Dessein
+// =============================================================================
+
+/// `Locus<A>` — symmetric monoidal closed category position carrying
+/// the carrier type A. Two loci can be brought into interaction
+/// through a design.
+public type Locus is protocol {
+    /// Polarity flag: positive (proponent) vs negative (opponent).
+    fn is_positive(self) -> Bool;
+};
+
+/// `Design<L1, L2>` — strategy from L1 to L2. In Girard's Ludics this
+/// is a tree of moves; categorically this is a morphism in
+/// `Perf(α_linear)` per Theorem 120.T.
+public type Design is protocol {
+    /// Source locus.
+    fn source(self) -> Locus;
+
+    /// Target locus.
+    fn target(self) -> Locus;
+};
+
+/// `Dessein<D1, D2>` — 2-cell modification between designs.
+/// Categorically: a 2-cell in the activation 2-category `>>·<<`.
+public type Dessein is protocol {};
+
+// =============================================================================
+// Cut-elimination — Lemma 120.L3
+// =============================================================================
+
+/// Canonical cut-elimination on designs. Reduces a design to its
+/// normal form through bounded reduction steps.
+///
+/// V0 form: trusted-boundary axiom recording the existence of
+/// canonical normal form. V1 will wire bounded-depth reduction
+/// (default 1000 steps) with UNKNOWN verdict on divergence.
+@framework(diakrisis, "Lemma 120.L3 (cut-elimination = canonicalization)")
+public axiom cut_elim_normal_form_exists<D: Design>(d: D) -> Bool ensures true;
+
+/// Cut-elimination commutes with composition: reducing a composition
+/// equals composing the reductions (up to canonical 2-cell).
+@framework(diakrisis, "Lemma 120.L3 (cut-elim commutes with composition)")
+public axiom cut_elim_commutes_with_composition<D: Design>(d1: D, d2: D) -> Bool ensures true;
+
+// =============================================================================
+// Orthogonality — Lemma 120.L4
+// =============================================================================
+
+/// Two designs are *orthogonal* iff their composition cuts to a
+/// successful normal form (no deadlock / divergence). Orthogonality
+/// is the gauge-incompatibility test at the strategy level.
+///
+/// V0 form: trusted-boundary axiom; V1 wires the bounded-depth
+/// orthogonality procedure.
+@framework(diakrisis, "Lemma 120.L4 (orthogonality = gauge-incompatibility)")
+public axiom orthogonal_iff_cut_succeeds<D: Design>(d1: D, d2: D) -> Bool ensures true;
+
+// =============================================================================
+// Headline equivalence — Theorem 120.T
+// =============================================================================
+
+/// Ludics designs are *equivalent* (as a 2-category) to performances
+/// in the linear articulation:
+///
+///     Design ≃ Perf(α_linear),
+///     Dessein ≃ 2-cells in >>·<<.
+///
+/// The equivalence is witnessed by the canonical functor
+/// Φ : Ludics → Perf(α_linear) constructed in the corpus source.
+/// V0 records the existence statement; V1 will package the witness
+/// functor into a usable Verum surface.
+@framework(diakrisis, "Theorem 120.T (Ludics ≃ Perf(α_linear) headline equivalence)")
+public axiom ludics_perf_equivalence<D: Design>(d: D) -> Bool ensures true;
+
+/// Lazy evaluation note: the Verum implementation MUST NOT
+/// eagerly evaluate a design tree (designs may be infinite-branching).
+/// Cofix-based lazy semantics from `core.coinductive` is the
+/// canonical mechanism. V0 documents this constraint; V1 wires the
+/// actual cofix integration.
+@framework(diakrisis, "Caveat (V0): Ludics designs require lazy / cofix evaluation")
+public axiom ludics_lazy_evaluation_required() -> Bool ensures true;
