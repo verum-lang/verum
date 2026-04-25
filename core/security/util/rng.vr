@@ -1,0 +1,81 @@
+// =============================================================================
+// security/util/rng.vr — cryptographically secure random byte filling
+// =============================================================================
+// Layer: 0 (no dependencies beyond core primitives + the runtime
+// intrinsic that wraps the platform CSPRNG)
+// =============================================================================
+//
+// `fill_secure(&mut buf)` overwrites every byte of `buf` with a fresh
+// draw from the platform's cryptographically secure RNG.  The
+// underlying entropy source is selected by the runtime intrinsic
+// `@intrinsic("verum.rng.fill_secure", N)` — `getrandom(2)` on Linux,
+// `arc4random_buf(3)` on macOS / BSD, `BCryptGenRandom` on Windows.
+// Every call samples N fresh bytes; sequential calls have no
+// observable correlation under the standard CSPRNG threat model.
+//
+// # Threat model
+//
+// Outputs are suitable for cryptographic use — keying, nonce
+// generation, salt sampling, IV construction, key-share blinding,
+// session-token issuance.  Callers MUST NOT replace this with a
+// faster non-cryptographic PRNG (e.g. xoshiro, splitmix) for any
+// secret-bearing draw — under the standard CRYPTO-RNG model, an
+// attacker observing N consecutive outputs of a non-CSPRNG can
+// recover internal state and predict every future output.
+//
+// # Failure mode
+//
+// The intrinsic dispatches to a syscall that under POSIX cannot
+// fail except on extreme system corruption (`getrandom(2)` blocks
+// rather than returning short until the kernel CSPRNG has enough
+// entropy at boot, then never again).  Internal failure terminates
+// the process — silently returning weak randomness is the worst
+// possible outcome, so we do not surface a `Result` here.  Spec:
+// SP 800-90A Annex C.4.
+//
+// # Performance
+//
+// Modern kernels keep the CSPRNG state warm in per-CPU caches; a
+// 32-byte draw is a single syscall returning in <500ns on Linux 5.x
+// and <300ns on Darwin.  Hot-path callers should batch draws when
+// possible (one 256-byte draw is cheaper than eight 32-byte draws).
+
+module core.security.util.rng;
+mount core.*;
+
+/// Fill `buf` with `buf.len()` cryptographically secure random bytes.
+///
+/// Overwrites every existing byte; previous contents are not
+/// observable in the result.  The destination is mutable — the
+/// function does not allocate.
+///
+/// Thin wrapper around the runtime intrinsic
+/// `@intrinsic("verum.rng.fill_secure", N)` that returns a fresh
+/// length-N byte sequence.  We copy element-wise rather than
+/// memcpy because the intrinsic surface is a value, not a pointer
+/// — the codegen lowers the intrinsic-result-to-buffer copy to a
+/// vectorised store on the native target.
+///
+/// Spec: NIST SP 800-90A — DRBG draw, full-entropy reseed.
+public fn fill_secure(buf: &mut List<Byte>) {
+    let n = buf.len();
+    let filled = @intrinsic("verum.rng.fill_secure", n);
+    let mut i = 0;
+    while i < n {
+        buf[i] = filled[i];
+        i = i + 1;
+    }
+}
+
+/// Fill a fixed-length byte array with `N` cryptographically secure
+/// random bytes.  Compile-time `N` enables stack allocation for the
+/// destination at every call site, which the AOT path lowers to a
+/// register-resident draw on `N <= 64` for x86-64 / aarch64.
+public fn fill_secure_array<const N: Int>(buf: &mut [Byte; N]) {
+    let filled = @intrinsic("verum.rng.fill_secure", N);
+    let mut i = 0;
+    while i < N {
+        buf[i] = filled[i];
+        i = i + 1;
+    }
+}

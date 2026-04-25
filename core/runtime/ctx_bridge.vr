@@ -21,6 +21,7 @@
 
 module core.runtime.ctx_bridge;
 mount sys.common.{ctx_get, ctx_set};
+mount mem.raw_ops.{load_i64};
 
 // =============================================================================
 // Context Get/Set Bridge
@@ -69,9 +70,11 @@ public fn env_active_slot_count() -> Int {
 public fn env_install_parent_contexts(slots_ptr: Int, count: Int) {
     let mut i = 0;
     while i < count {
-        // Each entry is 16 bytes: [slot_id: i64, value: i64]
-        let slot_id = __load_i64(slots_ptr + i * 16);
-        let value = __load_i64(slots_ptr + i * 16 + 8);
+        // Each entry is 16 bytes: [slot_id: i64, value: i64].
+        // `load_i64` is the `@intrinsic("load_i64")` raw-pointer load
+        // exported from `core/mem/raw_ops.vr`.
+        let slot_id = load_i64(slots_ptr + i * 16);
+        let value = load_i64(slots_ptr + i * 16 + 8);
         ctx_set(slot_id, value);
         i = i + 1;
     }

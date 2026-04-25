@@ -44,7 +44,7 @@ mount core.*;
 mount core.collections.*;
 mount sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
 mount sync.mutex.Mutex;
-mount base.memory.{Shared, take as mem_take};
+mount base.memory.{Shared};
 mount .poll.{Poll};
 mount .waker.{Waker, Context};
 mount .future.{Future};

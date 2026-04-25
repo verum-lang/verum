@@ -66,7 +66,7 @@ module core.async.cancellation;
 mount core.*;
 mount sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
 mount sync.mutex.Mutex;
-mount base.memory.{Shared, Weak, take as mem_take};
+mount base.memory.{Shared, Weak, replace};
 mount .poll.{Poll};
 mount .waker.{Waker, Context};
 mount .future.{Future};
@@ -232,9 +232,17 @@ implement CancellationFlag {
 
         // Drain wakers — take ownership of the list and release lock
         // before invoking wakers (avoid re-entrancy under lock).
+        //
+        // Uses `replace(&mut <guard>, List.new())` rather than the
+        // generic `take<T: Default>` helper from `base.memory` —
+        // bounded generics on top-level functions are not yet
+        // registered into the VBC function table by stdlib loading
+        // (task #159), so callers that imported `take`/`mem_take`
+        // hit `[lenient] SKIP … undefined function`.  The
+        // `replace<T>` form has no bound and registers cleanly.
         let waiters_drained = {
             let mut wg = self.waiters.lock().unwrap();
-            let list = mem_take(&mut *wg);
+            let list = replace(&mut *wg, List.new());
             list
         };
         for entry in waiters_drained {
@@ -244,7 +252,7 @@ implement CancellationFlag {
         // Drain callbacks.
         let callbacks_drained = {
             let mut cg = self.callbacks.lock().unwrap();
-            let list = mem_take(&mut *cg);
+            let list = replace(&mut *cg, List.new());
             list
         };
         for entry in callbacks_drained {

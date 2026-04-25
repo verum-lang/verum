@@ -34,6 +34,11 @@ mount sys.darwin.thread.{
     futex_wake as sys_futex_wake,
 };
 
+// Synchronous sleep for the bounded-channel send/recv timeout
+// busy-loops below.  Imported under the historic `sleep_millis` alias
+// since that's the name the busy-loop sites use.
+mount sys.time_ops.{sleep_ms as sleep_millis};
+
 @cfg(target_os = "windows")
 mount sys.windows.thread.{
     futex_wait as sys_futex_wait,
