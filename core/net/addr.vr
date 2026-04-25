@@ -774,8 +774,16 @@ implement Display for SocketAddr {
 // =============================================================================
 
 /// Protocol for types that can be converted to socket addresses.
+///
+/// `Iter` is the iterator the impl produces (typically `OnceIter` for
+/// a single address, `List` for hostname-DNS expansion). The bound
+/// `Iterator<Item = SocketAddr>` would be the proper way to express
+/// "yields SocketAddrs", but the typechecker doesn't yet enforce
+/// associated-type bindings on protocol-bounded generics (#75), and
+/// the prior form `Iterator<Item>` was a no-op (Item was unbound).
+/// Drop the bound entirely until #75 lands.
 public type ToSocketAddrs is protocol {
-    type Iter: Iterator<Item>;
+    type Iter;
     fn to_socket_addrs(&self) -> Result<Self.Iter, IoError>;
 };
 
