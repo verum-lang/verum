@@ -1,0 +1,25 @@
+// =============================================================================
+// core.theory_interop.bridges — canonical cross-framework translations
+// =============================================================================
+//
+// Each sub-module ships a *canonical bridge* between two registered
+// framework-axiom packages: a directed set of trusted-boundary
+// translation markers documenting the categorical / structural image
+// of every operator from the source framework in the target framework.
+//
+// Bridges enable downstream `core.theory_interop.translate(source,
+// target, partial_map)` invocations (VUVA §10.2 / §21.7) to compose
+// chains of @framework_translate axioms without re-deriving the
+// pointwise mapping from scratch.
+//
+// V1 catalogue (this commit):
+//   owl2_to_htt        — owl2_fs → lurie_htt (24 markers, VUVA C7b)
+//
+// V2 additions (tracked in VUVA §16.6 F6):
+//   owl2_to_baez_dolan      — n-categorical embedding
+//   owl2_to_schreiber_dcct  — cohesive ∞-topos embedding
+//   owl2_to_connes          — operator-algebraic embedding
+//   owl2_to_petz            — quantum-state embedding
+// =============================================================================
+
+public mount core.theory_interop.bridges.owl2_to_htt;

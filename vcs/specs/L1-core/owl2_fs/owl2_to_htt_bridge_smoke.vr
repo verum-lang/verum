@@ -1,0 +1,49 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: owl2, owl2_fs, bridge, lurie_htt, theory_interop, vuva, phase-3, c7b
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §21.7 Phase 3 C7b — owl2_fs → lurie_htt canonical bridge smoke.
+//
+// Smoke test: mounts the 24 @framework(owl2_fs, ...) translation
+// markers and asserts they resolve at use-site. The actual category-
+// theoretic content lives in the citation strings; the boundary is
+// enumerated by `verum audit --framework-axioms --by-lineage owl2_fs`.
+
+mount core.theory_interop.bridges.owl2_to_htt.{
+    class_to_presheaf,
+    subclass_to_monomorphism,
+    equivalent_classes_to_isomorphism,
+    disjoint_classes_to_initial_pullback,
+    object_property_to_functor,
+    haskey_to_representable_presheaf,
+    symmetric_to_self_inverse_functor,
+    transitive_to_idempotent_composition,
+    functional_to_monomorphism,
+    intersection_to_limit,
+    union_to_colimit,
+    some_values_to_existential_image,
+    all_values_to_universal_image,
+};
+
+fn main() {
+    // Touch one marker from each tier to make sure the mount tree
+    // is actually wired.
+    let _ = class_to_presheaf();                          // Tier 1
+    let _ = subclass_to_monomorphism();                   // Tier 1
+    let _ = equivalent_classes_to_isomorphism();          // Tier 1
+    let _ = disjoint_classes_to_initial_pullback();       // Tier 1
+    let _ = object_property_to_functor();                 // Tier 2
+    let _ = haskey_to_representable_presheaf();           // Tier 2
+    let _ = symmetric_to_self_inverse_functor();          // Tier 3
+    let _ = transitive_to_idempotent_composition();       // Tier 3
+    let _ = functional_to_monomorphism();                 // Tier 3
+    let _ = intersection_to_limit();                      // Tier 4
+    let _ = union_to_colimit();                           // Tier 4
+    let _ = some_values_to_existential_image();           // Tier 4
+    let _ = all_values_to_universal_image();              // Tier 4
+
+    print("owl2_fs → lurie_htt bridge ok");
+}

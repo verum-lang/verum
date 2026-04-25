@@ -69,6 +69,10 @@ public module core;
 // VUVA §10.2 obstruction verdict + §10.4 MSFS coordinate
 public module coord;
 
+// VUVA §21.7 canonical cross-framework bridges (owl2_fs → lurie_htt
+// shipped today; VUVA §16.6 F6 catalogue is the V2 destination).
+public module bridges;
+
 // JSON-RPC wire protocol for external tooling
 public module protocol;
 
