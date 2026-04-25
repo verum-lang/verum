@@ -4,31 +4,31 @@ module core.database.sqlite.native.cross_db_ref_api.reference;
 
 mount base.{Bool, Text};
 
-public type TableRef is {
+public type CrossDbTableRef is {
     schema: Text,      // empty means unqualified
     table: Text,
 };
 
-public fn unqualified(table: Text) -> TableRef {
-    TableRef { schema: "".clone(), table: table }
+public fn unqualified(table: Text) -> CrossDbTableRef {
+    CrossDbTableRef { schema: "".clone(), table: table }
 }
 
-public fn qualified(schema: Text, table: Text) -> TableRef {
-    TableRef { schema: schema, table: table }
+public fn qualified(schema: Text, table: Text) -> CrossDbTableRef {
+    CrossDbTableRef { schema: schema, table: table }
 }
 
-public fn is_qualified(r: &TableRef) -> Bool {
+public fn is_qualified(r: &CrossDbTableRef) -> Bool {
     r.schema.len() > 0
 }
 
-public fn names_temp(r: &TableRef) -> Bool {
+public fn names_temp(r: &CrossDbTableRef) -> Bool {
     r.schema == "temp".clone()
 }
 
-public fn names_main(r: &TableRef) -> Bool {
+public fn names_main(r: &CrossDbTableRef) -> Bool {
     r.schema == "main".clone()
 }
 
-public fn is_reserved_schema(r: &TableRef) -> Bool {
+public fn is_reserved_schema(r: &CrossDbTableRef) -> Bool {
     names_main(r) || names_temp(r)
 }

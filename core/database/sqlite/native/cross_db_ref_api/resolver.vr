@@ -3,7 +3,7 @@
 module core.database.sqlite.native.cross_db_ref_api.resolver;
 
 mount core.database.sqlite.native.cross_db_ref_api.reference.{
-    TableRef, is_qualified, names_main, names_temp, is_reserved_schema,
+    CrossDbTableRef, is_qualified, names_main, names_temp, is_reserved_schema,
 };
 mount base.{Bool, Text, Maybe};
 mount core.collections.list.{List};
@@ -46,8 +46,8 @@ public fn attach(mut r: SchemaRegistry, d: AttachedDb) -> SchemaRegistry {
     r
 }
 
-// Resolve a TableRef to a schema name; Maybe.None if not found.
-public fn resolve(r: &SchemaRegistry, tref: &TableRef) -> Maybe<Text> {
+// Resolve a CrossDbTableRef to a schema name; Maybe.None if not found.
+public fn resolve(r: &SchemaRegistry, tref: &CrossDbTableRef) -> Maybe<Text> {
     if is_qualified(tref) {
         if names_main(tref) && list_contains(&r.main.has_table, &tref.table) {
             return Maybe.Some("main".clone());
@@ -85,7 +85,7 @@ public fn resolve(r: &SchemaRegistry, tref: &TableRef) -> Maybe<Text> {
 }
 
 // Convenience: whether a table exists anywhere.
-public fn table_exists(r: &SchemaRegistry, tref: &TableRef) -> Bool {
+public fn table_exists(r: &SchemaRegistry, tref: &CrossDbTableRef) -> Bool {
     match resolve(r, tref) {
         Maybe.Some(_) => true,
         Maybe.None    => false,

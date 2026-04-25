@@ -3,7 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (CDC) — sqlite3session_patchset
 //
-// `Patch` is the compact analogue of `Change`: only the modified
+// `SessionPatch` is the compact analogue of `Change`: only the modified
 // columns are present, with NULL standing for "unchanged" in the
 // `new_row`. Used when the consumer doesn't need OLD row values
 // and bandwidth matters (replication over WAN).
@@ -36,10 +36,10 @@ mount core.database.sqlite.native.session.change.{
 public type PatchCell is { value: Maybe<Register> };
 
 // -----------------------------------------------------------------------------
-// Patch
+// SessionPatch
 // -----------------------------------------------------------------------------
 
-public type Patch is {
+public type SessionPatch is {
     op: ChangeOp,
     table: base.Text,
     pk_columns: List<Bool>,
@@ -53,14 +53,14 @@ public type Patch is {
 // PatchSet
 // -----------------------------------------------------------------------------
 
-public type PatchSet is { patches: List<Patch> }
+public type PatchSet is { patches: List<SessionPatch> }
 
 public fn patchset_empty() -> PatchSet { PatchSet { patches: List.new() } }
 
 implement PatchSet {
     public fn len(&self) -> Int { self.patches.len() }
 
-    public fn record(&mut self, p: Patch) {
+    public fn record(&mut self, p: SessionPatch) {
         self.patches.push(p);
     }
 }
@@ -80,7 +80,7 @@ public fn from_changeset(cs: &ChangeSet) -> PatchSet {
     out
 }
 
-fn patch_from_change(c: &Change) -> Patch {
+fn patch_from_change(c: &Change) -> SessionPatch {
     let mut pk_values: List<Register> = List.new();
     let mut k: Int = 0;
     while k < c.pk_columns.len() {
@@ -123,7 +123,7 @@ fn patch_from_change(c: &Change) -> Patch {
             // No new values for delete.
         }
     }
-    Patch {
+    SessionPatch {
         op: clone_op(&c.op),
         table: c.table.clone(),
         pk_columns: clone_bools(&c.pk_columns),

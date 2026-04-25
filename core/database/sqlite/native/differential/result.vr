@@ -37,16 +37,16 @@ public fn status_name(s: &RunStatus) -> Text {
 }
 
 // -----------------------------------------------------------------------------
-// ResultRow — one row of a result set
+// DifferentialResultRow — one row of a result set
 // -----------------------------------------------------------------------------
 
-public type ResultRow is { values: List<SqlValue> }
+public type DifferentialResultRow is { values: List<SqlValue> }
 
-public fn result_row(values: List<SqlValue>) -> ResultRow {
-    ResultRow { values: values }
+public fn result_row(values: List<SqlValue>) -> DifferentialResultRow {
+    DifferentialResultRow { values: values }
 }
 
-implement ResultRow {
+implement DifferentialResultRow {
     public fn arity(&self) -> Int { self.values.len() }
 }
 
@@ -85,7 +85,7 @@ public type RunResult is {
     /// "loom" or "c-sqlite" — used purely for reporting.
     end_label: Text,
     status: RunStatus,
-    rows: List<ResultRow>,
+    rows: List<DifferentialResultRow>,
     effects: SideEffect,
     /// Wall-clock the case took.
     elapsed_ns: Int64,
@@ -102,7 +102,7 @@ public fn run_result(end_label: Text, status: RunStatus) -> RunResult {
 }
 
 implement RunResult {
-    pub fn with_rows(mut self, rows: List<ResultRow>) -> RunResult {
+    pub fn with_rows(mut self, rows: List<DifferentialResultRow>) -> RunResult {
         self.rows = rows;
         self
     }

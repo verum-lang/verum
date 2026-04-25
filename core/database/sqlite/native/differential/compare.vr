@@ -21,7 +21,7 @@ mount core.database.sqlite.native.differential.case.{
 };
 mount core.database.sqlite.native.differential.result.{
     RunResult, RunStatus, RsOk, RsError, RsTimeout, RsCrash,
-    ResultRow, status_name,
+    DifferentialResultRow, status_name,
 };
 
 // -----------------------------------------------------------------------------
@@ -167,7 +167,7 @@ fn compare_side_effects(loom: &RunResult, c: &RunResult) -> DiffOutcome {
 // Row equality + rendering
 // -----------------------------------------------------------------------------
 
-fn rows_equal(a: &ResultRow, b: &ResultRow) -> Bool {
+fn rows_equal(a: &DifferentialResultRow, b: &DifferentialResultRow) -> Bool {
     if a.values.len() != b.values.len() { return false; }
     let mut i: Int = 0;
     while i < a.values.len() {
@@ -212,7 +212,7 @@ fn bytes_equal(a: &List<Byte>, b: &List<Byte>) -> Bool {
     true
 }
 
-fn render_row(r: &ResultRow) -> Text {
+fn render_row(r: &DifferentialResultRow) -> Text {
     let mut out = "[".clone();
     let mut i: Int = 0;
     while i < r.values.len() {

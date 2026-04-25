@@ -9,7 +9,7 @@
 //   * Change construction (insert / update / delete) + pk equality
 //   * ChangeSet group_by_table + table_summary
 //   * Recorder honours attach / detach / pause
-//   * Patch lossy conversion: UPDATE with unchanged cells → None
+//   * SessionPatch lossy conversion: UPDATE with unchanged cells → None
 //   * invert / concat / strip_table / filter combinators
 //   * apply with three built-in resolvers
 
@@ -22,7 +22,7 @@ mount core.database.sqlite.native.session.change.{
     changeset_empty,
 };
 mount core.database.sqlite.native.session.patch.{
-    Patch, PatchSet, PatchCell,
+    SessionPatch, PatchSet, PatchCell,
     patchset_empty, from_changeset,
 };
 mount core.database.sqlite.native.session.recorder.{
@@ -172,7 +172,7 @@ fn test_recorder_detach() {
 }
 
 // -----------------------------------------------------------------------------
-// Patch
+// SessionPatch
 // -----------------------------------------------------------------------------
 
 fn test_from_changeset_compacts_unchanged_cells() {

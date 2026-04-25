@@ -54,7 +54,7 @@ mount core.security.x509.algorithm.{
 
 /// Structurally-typed public key; ready for signature-verify passes.
 public type SubjectPublicKey is
-      Rsa(RsaPublicKey)
+      Rsa(SpkiRsaPublicKey)
     | EcP256(EcPublicKeyBytes)
     | EcP384(EcPublicKeyBytes)
     | EcP521(EcPublicKeyBytes)
@@ -64,7 +64,7 @@ public type SubjectPublicKey is
     | X448(X448PublicKeyBytes)
     | Unsupported;
 
-public type RsaPublicKey is {
+public type SpkiRsaPublicKey is {
     modulus:  List<Byte>,    // big-endian, minimal encoding (no leading 0x00)
     exponent: List<Byte>,    // big-endian, minimal encoding
 };
@@ -179,7 +179,7 @@ fn decode_rsa(bytes: &List<Byte>) -> Result<SubjectPublicKey, DerError> {
         });
     }
 
-    Ok(SubjectPublicKey.Rsa(RsaPublicKey {
+    Ok(SubjectPublicKey.Rsa(SpkiRsaPublicKey {
         modulus:  modulus,
         exponent: exponent,
     }))

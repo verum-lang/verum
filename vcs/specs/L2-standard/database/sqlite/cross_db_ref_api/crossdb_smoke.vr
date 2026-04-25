@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.cross_db_ref_api.reference.{
-    TableRef, unqualified, qualified,
+    CrossDbTableRef, unqualified, qualified,
     is_qualified, names_temp, names_main, is_reserved_schema,
 };
 mount core.database.sqlite.native.cross_db_ref_api.resolver.{

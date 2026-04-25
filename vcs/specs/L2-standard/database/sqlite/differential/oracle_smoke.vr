@@ -19,7 +19,7 @@ mount core.database.sqlite.native.differential.case.{
 };
 mount core.database.sqlite.native.differential.result.{
     RunStatus, RsOk, RsError, RsTimeout,
-    ResultRow, result_row,
+    DifferentialResultRow, result_row,
     RunResult, run_result,
     SideEffect, side_effect_zero,
     status_name,
@@ -67,14 +67,14 @@ fn test_setup_kind_names() {
 // Result
 // -----------------------------------------------------------------------------
 
-fn make_row(id: Int, name: Text) -> ResultRow {
+fn make_row(id: Int, name: Text) -> DifferentialResultRow {
     let mut vals: List<SqlValue> = List.new();
     vals.push(SvInteger(id as Int64));
     vals.push(SvText(name));
     result_row(vals)
 }
 
-fn make_result(label: Text, rows: List<ResultRow>) -> RunResult {
+fn make_result(label: Text, rows: List<DifferentialResultRow>) -> RunResult {
     run_result(label, RsOk).with_rows(rows).with_elapsed(100 as Int64)
 }
 
@@ -88,10 +88,10 @@ fn test_status_names() {
 // -----------------------------------------------------------------------------
 
 fn test_compare_exact_match() {
-    let mut a: List<ResultRow> = List.new();
+    let mut a: List<DifferentialResultRow> = List.new();
     a.push(make_row(1, "Ada".clone()));
     a.push(make_row(2, "Bob".clone()));
-    let mut b: List<ResultRow> = List.new();
+    let mut b: List<DifferentialResultRow> = List.new();
     b.push(make_row(1, "Ada".clone()));
     b.push(make_row(2, "Bob".clone()));
     let l = make_result("loom".clone(), a);
@@ -101,9 +101,9 @@ fn test_compare_exact_match() {
 }
 
 fn test_compare_exact_row_count_mismatch() {
-    let mut a: List<ResultRow> = List.new();
+    let mut a: List<DifferentialResultRow> = List.new();
     a.push(make_row(1, "Ada".clone()));
-    let b: List<ResultRow> = List.new();
+    let b: List<DifferentialResultRow> = List.new();
     let l = make_result("loom".clone(), a);
     let c = make_result("c".clone(), b);
     let out = compare(&l, &c, &CmExactRows);
@@ -114,10 +114,10 @@ fn test_compare_exact_row_count_mismatch() {
 }
 
 fn test_compare_rowset_orders_independent() {
-    let mut a: List<ResultRow> = List.new();
+    let mut a: List<DifferentialResultRow> = List.new();
     a.push(make_row(1, "Ada".clone()));
     a.push(make_row(2, "Bob".clone()));
-    let mut b: List<ResultRow> = List.new();
+    let mut b: List<DifferentialResultRow> = List.new();
     b.push(make_row(2, "Bob".clone()));
     b.push(make_row(1, "Ada".clone()));
     let l = make_result("loom".clone(), a);
@@ -158,15 +158,15 @@ fn test_oracle_accumulates_match_and_mismatch() {
     let mut o = oracle_new();
     let case_a = differential_case("a".clone(), "SELECT 1".clone(), CmExactRows);
     let case_b = differential_case("b".clone(), "SELECT 2".clone(), CmExactRows);
-    let r_a_l: List<ResultRow> = List.new();
-    let r_a_c: List<ResultRow> = List.new();
+    let r_a_l: List<DifferentialResultRow> = List.new();
+    let r_a_c: List<DifferentialResultRow> = List.new();
     let _ = o.observe(&case_a,
         &make_result("loom".clone(), r_a_l),
         &make_result("c".clone(), r_a_c));
     // Mismatch: different row counts.
-    let mut nonempty: List<ResultRow> = List.new();
+    let mut nonempty: List<DifferentialResultRow> = List.new();
     nonempty.push(make_row(1, "X".clone()));
-    let r_b_c: List<ResultRow> = List.new();
+    let r_b_c: List<DifferentialResultRow> = List.new();
     let _ = o.observe(&case_b,
         &make_result("loom".clone(), nonempty),
         &make_result("c".clone(), r_b_c));
@@ -191,8 +191,8 @@ fn test_oracle_first_mismatch() {
 fn test_oracle_summary() {
     let mut o = oracle_new();
     let case = differential_case("ok".clone(), "SELECT".clone(), CmExactRows);
-    let l: List<ResultRow> = List.new();
-    let c: List<ResultRow> = List.new();
+    let l: List<DifferentialResultRow> = List.new();
+    let c: List<DifferentialResultRow> = List.new();
     let _ = o.observe(&case, &make_result("loom".clone(), l), &make_result("c".clone(), c));
     let s = o.summary();
     assert(s.len() > 0);
