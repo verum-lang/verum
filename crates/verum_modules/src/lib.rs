@@ -429,14 +429,21 @@ impl ModuleRegistry {
     ///
     /// This is used for glob re-exports (`public import path.*`).
     /// The source exports are copied to the target module's export table.
+    ///
+    /// Returns the number of *new* exports actually added to the target —
+    /// items already present in the target's exports do NOT count. The
+    /// closure driver in `resolve_glob_reexports` consumes this count to
+    /// detect a fixed point (zero new exports added = stable).
     pub fn add_exports_to_module(
         &mut self,
         target_id: ModuleId,
         source_exports: &exports::ExportTable,
-    ) {
+    ) -> usize {
+        let mut newly_added = 0usize;
         if let Some(existing) = self.modules.get(&target_id) {
             // Clone the existing ModuleInfo
             let mut updated = (**existing).clone();
+            let pre_len = updated.exports.len();
 
             // Add each export from source to target
             for (name, item) in source_exports.all_exports() {
@@ -451,11 +458,14 @@ impl ModuleRegistry {
                 let _ = updated.exports.add_export(reexport);
             }
 
+            newly_added = updated.exports.len().saturating_sub(pre_len);
+
             // Replace the module in the registry
             let path_str = updated.path.to_string();
             self.modules.insert(target_id, Shared::new(updated));
             self.path_to_id.insert(Text::from(path_str.as_str()), target_id);
         }
+        newly_added
     }
 
     /// Check if a module exists

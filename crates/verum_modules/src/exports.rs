@@ -956,9 +956,52 @@ fn add_reexports_from_link(
 ///
 /// Returns the number of glob re-exports resolved.
 ///
+/// **MOD-MED-3 (transitive closure).** When chain A → B → C (each
+/// `public mount`-re-exports the next), a single pass would leave A's
+/// exports table with B's items (filled before B's pass added C's),
+/// missing C's items. The fix: drive the resolver to a fixed point —
+/// keep iterating until no new exports are added in a full pass. Cap
+/// at `MAX_REEXPORT_DEPTH = 16` so a misbehaving cycle (which
+/// `resolve_export_kind_with_reexports_inner` is supposed to catch
+/// upstream) can't block the build forever.
+///
 /// Extracts exports from module AST items based on visibility modifiers.
 /// Re-exports (public import) flatten module hierarchy for public API.
 pub fn resolve_glob_reexports(
+    module_registry: &mut crate::ModuleRegistry,
+) -> ModuleResult<usize> {
+    /// Maximum re-export chain depth. Hard cap protects against
+    /// pathological cycles slipping past the upstream cycle guard.
+    /// Sixteen is two orders of magnitude above any realistic
+    /// stdlib chain (the deepest path in `core/` today is 3).
+    const MAX_REEXPORT_DEPTH: usize = 16;
+    let mut grand_total = 0usize;
+    for _depth in 0..MAX_REEXPORT_DEPTH {
+        let added = resolve_glob_reexports_one_pass(module_registry)?;
+        grand_total += added;
+        if added == 0 {
+            return Ok(grand_total);
+        }
+    }
+    // We hit the cap: surface a soft warning (but don't fail) so the
+    // build still finishes. The upstream `resolve_export_kind_with_
+    // reexports_inner` cycle guard catches truly cyclic chains; this
+    // path triggers when the chain is long-but-finite (≥ 16) which
+    // is itself worth flagging to the user.
+    eprintln!(
+        "warning<E_MODULE_INVALID_REEXPORT>: re-export chain reached depth {} \
+         without converging — capping the closure to keep the build moving. \
+         Either flatten the re-export tree or split it into independent stages.",
+        MAX_REEXPORT_DEPTH,
+    );
+    Ok(grand_total)
+}
+
+/// Single pass over the registry: collect every glob re-export and
+/// apply each one's source exports onto the target. Returns the
+/// number of exports added in this pass — used by the closure
+/// driver above to detect a fixed point (zero added = stable).
+fn resolve_glob_reexports_one_pass(
     module_registry: &mut crate::ModuleRegistry,
 ) -> ModuleResult<usize> {
     use verum_ast::ItemKind;
@@ -1005,17 +1048,20 @@ pub fn resolve_glob_reexports(
 
             if export_count > 0 {
                 updates.push((*module_id, source_exports.clone()));
-                total_resolved += export_count;
             }
         }
     }
+    let _ = total_resolved; // shadow the legacy "raw count" — see below.
 
-    // Now apply the updates
+    // Apply each update. We count ONLY newly-added exports — pre-existing
+    // entries don't count because the closure driver above uses zero-added
+    // as the fixed-point signal.
+    let mut newly_added_total = 0usize;
     for (target_id, source_exports) in updates {
-        module_registry.add_exports_to_module(target_id, &source_exports);
+        newly_added_total += module_registry.add_exports_to_module(target_id, &source_exports);
     }
 
-    Ok(total_resolved)
+    Ok(newly_added_total)
 }
 
 /// Resolve the ExportKind for specific item re-exports after all modules are loaded.
