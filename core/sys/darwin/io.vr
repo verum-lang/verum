@@ -24,7 +24,7 @@ module sys.darwin.io;
 mount sys.common.{OSError, FileDesc};
 mount sys.io_engine.{
     IOEngine, CompletionOp, CompletionResult, Duration,
-    ValidFd, Fd, SocketAddr, TimeSpec as EngineTimeSpec, MsgHdr,
+    ValidFd, Fd, RawSocketAddr, TimeSpec as EngineTimeSpec, MsgHdr,
     IoError as EngineIoError,
 };
 mount super.libsystem.{

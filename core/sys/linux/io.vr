@@ -27,7 +27,7 @@ mount core.intrinsics.{
 };
 mount sys.io_engine.{
     IOEngine, CompletionOp, CompletionResult, Duration,
-    ValidFd, Fd, SocketAddr, TimeSpec, MsgHdr,
+    ValidFd, Fd, RawSocketAddr, TimeSpec, MsgHdr,
     IoError as EngineIoError,
 };
 mount sys.linux.syscall.{
@@ -1320,11 +1320,11 @@ implement IOEngine for IoUringDriver {
                     self.prep_accept(fd.as_raw() as Int, user_data)
                 }
                 CompletionOp.Connect { fd, addr } => {
-                    // Convert SocketAddr to raw bytes
+                    // Convert RawSocketAddr to raw bytes
                     let addr_ptr = addr as &Byte;
                     let addrlen = match addr {
-                        SocketAddr.V4 { .. } => 16 as UInt32,  // sizeof(sockaddr_in)
-                        SocketAddr.V6 { .. } => 28 as UInt32,  // sizeof(sockaddr_in6)
+                        RawSocketAddr.V4 { .. } => 16 as UInt32,  // sizeof(sockaddr_in)
+                        RawSocketAddr.V6 { .. } => 28 as UInt32,  // sizeof(sockaddr_in6)
                     };
                     self.prep_connect(fd.as_raw() as Int, addr_ptr, addrlen, user_data)
                 }

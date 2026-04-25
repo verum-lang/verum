@@ -50,8 +50,19 @@ public type Port is UInt16;
 /// Valid port for explicit binding (non-zero)
 public type BoundPort is Port{> 0};
 
-/// Socket address (IPv4/IPv6 union)
-public type SocketAddr is
+/// Kernel-level socket address (IPv4/IPv6 union) — raw memory layout
+/// suitable for direct io_uring/kqueue submission without an extra
+/// serialization step.
+///
+/// Renamed from `SocketAddr` to `RawSocketAddr` so that user code using
+/// `mount core.net.addr.{SocketAddr}` doesn't inadvertently resolve to
+/// this kernel-shape definition (which has a `addr: UInt32` field
+/// rather than the `ip: Ipv4Addr`/`SocketAddrV4` indirection that
+/// `core.net.addr.SocketAddr` exposes). The collision broke
+/// `addr.port()` method lookup and `TcpListener.bind(addr)`
+/// param-type narrowing — tracked under #75. The user-facing API
+/// stays in `core.net.addr`.
+public type RawSocketAddr is
     | V4 { addr: UInt32, port: Port }
     | V6 { addr: [UInt8; 16], port: Port, flowinfo: UInt32, scope_id: UInt32 }
     ;
@@ -235,9 +246,9 @@ public type CompletionOp is
     /// Vectored write (gather)
     | WriteV { fd: ValidFd, iovecs: &[IOVec] }
     /// Accept incoming connection (fd is listening socket)
-    | Accept { fd: ValidFd, addr: &mut SocketAddr }
+    | Accept { fd: ValidFd, addr: &mut RawSocketAddr }
     /// Connect to remote address
-    | Connect { fd: ValidFd, addr: &SocketAddr }
+    | Connect { fd: ValidFd, addr: &RawSocketAddr }
     /// Receive from socket
     | Recv { fd: ValidFd, buf: &mut [Byte], flags: Int32 }
     /// Send to socket
@@ -785,7 +796,7 @@ public pure fn op_writev(fd: ValidFd, iovecs: &[IOVec]) -> CompletionOp {
 /// * `fd` - Valid listening socket file descriptor
 /// * `addr` - Buffer to store peer address
 @inline
-public pure fn op_accept(fd: ValidFd, addr: &mut SocketAddr) -> CompletionOp {
+public pure fn op_accept(fd: ValidFd, addr: &mut RawSocketAddr) -> CompletionOp {
     CompletionOp.Accept { fd: fd, addr: addr }
 }
 
@@ -795,7 +806,7 @@ public pure fn op_accept(fd: ValidFd, addr: &mut SocketAddr) -> CompletionOp {
 /// * `fd` - Valid socket file descriptor
 /// * `addr` - Remote address to connect to
 @inline
-public pure fn op_connect(fd: ValidFd, addr: &SocketAddr) -> CompletionOp {
+public pure fn op_connect(fd: ValidFd, addr: &RawSocketAddr) -> CompletionOp {
     CompletionOp.Connect { fd: fd, addr: addr }
 }
 
