@@ -1112,25 +1112,62 @@ impl Spanned for LikelihoodAttr {
 
 /// Verification mode for @verify attribute
 ///
-/// Performance contract specifying expected latency/throughput guarantees.
+/// Performance contract specifying expected latency/throughput
+/// guarantees and the ν-coordinate carried by the verification ladder.
+/// Ordered from cheapest (Runtime, ν=0) to most expensive
+/// (Synthesize, ν≤ω·3+1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VerificationMode {
-    /// @verify(proof) - SMT solver proof (highest confidence, slowest)
-    Proof,
-    /// @verify(static) - Dataflow analysis (medium ~100-500ms per function)
-    Static,
-    /// @verify(runtime) - Runtime assertions (fastest, adds ~5ns overhead)
+    /// @verify(runtime) — runtime assertions, ν=0, ~5ns overhead.
     Runtime,
-    /// @verify(assume) - Trust programmer, no verification (dangerous)
+    /// @verify(static) — conservative dataflow analysis, ν=1, fast.
+    Static,
+    /// @verify(fast) — bounded SMT, ν=2, ≤100 ms.
+    Fast,
+    /// @verify(complexity_typed) — bounded-arithmetic verification
+    /// (VFE-8). Polynomial-time; CI budget ≤30 s. ν<ω.
+    ComplexityTyped,
+    /// @verify(formal) — full SMT portfolio, ν=ω, ≤5 s.
+    Formal,
+    /// @verify(proof) — user tactic proof, ν=ω+1, unbounded.
+    Proof,
+    /// @verify(thorough) — formal + invariants, ν=ω·2.
+    Thorough,
+    /// @verify(reliable) — cross-solver agreement, ν=ω·2+1.
+    Reliable,
+    /// @verify(certified) — certificate re-check, ν=ω·2+2.
+    Certified,
+    /// @verify(coherent_static) — α-cert + symbolic ε-claim
+    /// (VFE-6 weak). Polynomial; ≤60 s. ν=ω·2+3.
+    CoherentStatic,
+    /// @verify(coherent_runtime) — α-cert + runtime ε-monitor
+    /// (VFE-6 hybrid). Trace-bounded; ≤5 min. ν=ω·2+4.
+    CoherentRuntime,
+    /// @verify(coherent) — α/ε bidirectional check (VFE-6 strict).
+    /// Single-exponential; ≤30 min. ν=ω·2+5.
+    Coherent,
+    /// @verify(synthesize) — inverse proof search, ν≤ω·3+1.
+    Synthesize,
+    /// @verify(assume) — trust programmer (dangerous, no verification).
     Assume,
 }
 
 impl VerificationMode {
     pub fn from_str(s: &str) -> Maybe<Self> {
         match s {
-            "proof" => Maybe::Some(VerificationMode::Proof),
-            "static" => Maybe::Some(VerificationMode::Static),
             "runtime" => Maybe::Some(VerificationMode::Runtime),
+            "static" => Maybe::Some(VerificationMode::Static),
+            "fast" => Maybe::Some(VerificationMode::Fast),
+            "complexity_typed" => Maybe::Some(VerificationMode::ComplexityTyped),
+            "formal" => Maybe::Some(VerificationMode::Formal),
+            "proof" => Maybe::Some(VerificationMode::Proof),
+            "thorough" => Maybe::Some(VerificationMode::Thorough),
+            "reliable" => Maybe::Some(VerificationMode::Reliable),
+            "certified" => Maybe::Some(VerificationMode::Certified),
+            "coherent_static" => Maybe::Some(VerificationMode::CoherentStatic),
+            "coherent_runtime" => Maybe::Some(VerificationMode::CoherentRuntime),
+            "coherent" => Maybe::Some(VerificationMode::Coherent),
+            "synthesize" => Maybe::Some(VerificationMode::Synthesize),
             "assume" => Maybe::Some(VerificationMode::Assume),
             _ => Maybe::None,
         }
@@ -1138,9 +1175,19 @@ impl VerificationMode {
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            VerificationMode::Proof => "proof",
-            VerificationMode::Static => "static",
             VerificationMode::Runtime => "runtime",
+            VerificationMode::Static => "static",
+            VerificationMode::Fast => "fast",
+            VerificationMode::ComplexityTyped => "complexity_typed",
+            VerificationMode::Formal => "formal",
+            VerificationMode::Proof => "proof",
+            VerificationMode::Thorough => "thorough",
+            VerificationMode::Reliable => "reliable",
+            VerificationMode::Certified => "certified",
+            VerificationMode::CoherentStatic => "coherent_static",
+            VerificationMode::CoherentRuntime => "coherent_runtime",
+            VerificationMode::Coherent => "coherent",
+            VerificationMode::Synthesize => "synthesize",
             VerificationMode::Assume => "assume",
         }
     }

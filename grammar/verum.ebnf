@@ -438,10 +438,17 @@ derive_attribute = 'derive' , '(' , identifier , { ',' , identifier } , ')' ;
  *                              ladder, ν is an upper bound that collapses
  *                              to the witness-strategy on success.
  *)
+(* VFE-6 / VFE-8 — coherent verification strategies + complexity-typed *)
+(* coherent_static       — α + symbolic ε-claim         (polynomial)    *)
+(* coherent_runtime      — α + runtime ε-monitor        (trace-bound)   *)
+(* coherent              — α/ε bidirectional check      (single-exp)    *)
+(* complexity_typed      — bounded-arithmetic verification (poly)        *)
 verify_attribute = 'verify' , '(' ,
     ( 'runtime' | 'static' | 'formal' | 'proof'
     | 'fast' | 'thorough' | 'reliable'
-    | 'certified' | 'synthesize' ) ,
+    | 'certified' | 'synthesize'
+    | 'coherent' | 'coherent_static' | 'coherent_runtime'
+    | 'complexity_typed' ) ,
     ')' ;
 context_group_identifier = identifier ;
 
