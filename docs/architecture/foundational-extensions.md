@@ -370,10 +370,25 @@ theorem cat_is_truncation_of_stack()
 |---|---|---|
 | `core.math.stack_model` | stdlib | ~3000 |
 | Universe tracking via `@framework` metadata | stdlib | ~500 |
-| `K-Universe-Ascent` kernel rule (только check Лемма 131.L1 на τ-уровне) | kernel | ~200 |
+| `K-Universe-Ascent` kernel rule (см. ниже) | kernel | ~200 |
 | `verum audit --coord --universe` CLI extension | tooling | ~300 |
 
 Из ~4000 LOC общего объёма — только **200 LOC попадает в kernel**. Остальное — stdlib, runtime tooling.
+
+#### K-Universe-Ascent — формальная спецификация
+
+```
+  Γ ⊢ α : Articulation@U_k       Γ ⊢ M_stack(α) : Articulation@U_{k+1}
+  ──────────────────────────────────────────────────────────────────── (K-Universe-Ascent)
+  Γ ⊢ M_stack : Functor[Articulation@U_k → Articulation@U_{k+1}]
+```
+
+Где `@U_k` — универсе-аннотация (k ∈ {1, 2}). Правило проверяет:
+1. Корректность κ-уровня артикуляции (через `@framework` metadata).
+2. Согласованность $\mathsf{M}^\mathrm{stack}$ как functor U_1 → U_2 (Лемма 131.L1).
+3. Drake reflection retract на U_2-уровне (Лемма 131.L3) — для повторного применения $\mathsf{M}^\mathrm{stack}$ на U_2 без выхода в U_3.
+
+Реализация в kernel: ~200 LOC, проверяет только metadata-tags + composition. Полная Drake reflection и Tarski undefinability аргументы — в stdlib (`core.math.stack_model`).
 
 ### 3.6 Migration path
 
@@ -660,6 +675,7 @@ theorem weak_coherence<P, φ>(prog: P, prop: φ)
 | `runtime` | Runtime assertions | 0 | O(1) | existing |
 | `static` | Conservative dataflow | 1 | Fast | existing |
 | `fast` | Bounded SMT | 2 | ≤ 100 ms | existing |
+| `complexity_typed` | Bounded-arithmetic verification | n < ω | Polynomial | VFE-8 |
 | `formal` | Full SMT portfolio | ω | ≤ 5 s | existing |
 | `proof` | User tactic proof | ω+1 | Unbounded | existing |
 | `thorough` | `formal` + invariants | ω·2 | 2× | existing |
@@ -1319,6 +1335,35 @@ Verum-Foundation-Marketplace:
 - Acceptance criteria для inclusion в standard library.
 
 **Это превращает Verum из proof assistant в инфраструктуру foundational pluralism** — реализация MSFS-видения как практической инженерной системы.
+
+### 18.8 Reality check — feasibility ladder
+
+Не все идеи 18.1-18.7 одинаково реализуемы. Делю на 3 tier по feasibility:
+
+**Tier A (high feasibility, 1-2 года)**:
+- 18.4 Quantum effect class — стандартная категорная семантика, можно сделать.
+- 18.5 Probabilistic coherence — Giry monad стандартен.
+- 18.3 Real-time coherence — комбинация VFE-8 + VFE-6, эксплуатация уже доказанной weak-coherence.
+
+**Tier B (medium, 2-4 года)**:
+- 18.2 ML-augmented synthesis — требует training data + integration с existing tactics.
+- 18.6 Cohesive type theory — Schreiber DCCT хорошо известен, но интеграция с Verum kernel сложна.
+
+**Tier C (long-horizon, 5+ лет)**:
+- 18.1 Distributed Verum — federation protocol — research challenge.
+- 18.7 Foundation marketplace — требует community + ecosystem maturity.
+
+Прагматичный план: сначала Tier A (закрепить closed teorems), затем Tier B (добавить practical features), Tier C — после стабилизации экосистемы.
+
+### 18.9 Rejected ideas (антипаттерны)
+
+Чтобы документ был честным, явно отмечаю идеи, которые **не** включены, и почему:
+
+- **❌ "Universal kernel for all foundations"**: невозможно по AFN-T (нет уровня 6). Verum правильно остаётся foundation-neutral host.
+- **❌ "Auto-verify everything via ML"**: нарушает LCF принцип (kernel re-check). ML может предлагать tactic, не writing certificate.
+- **❌ "Native integration with each Tier 1 system (Lean/Coq/Agda)"**: certificate export — да, native integration — нет (это превратит Verum в meta-system, не proof assistant).
+- **❌ "GPT-style natural language proofs"**: Verum работает на формальном уровне; NL — UI/UX layer, не core capability.
+- **❌ "Quantum proof acceleration"**: spectulative; сейчас quantum computers не подходят для proof search.
 
 ---
 
