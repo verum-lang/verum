@@ -1,0 +1,5 @@
+fn item_4() {
+    // TODO: clean up
+    let x = Box::new(4);
+    let y = Heap(4);
+}
