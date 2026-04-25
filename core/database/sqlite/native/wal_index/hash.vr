@@ -39,12 +39,12 @@ implement HashSlot {
 }
 
 // -----------------------------------------------------------------------------
-// FrameRecord — per-frame metadata
+// WalIndexFrameRecord — per-frame metadata
 // -----------------------------------------------------------------------------
 
-public type FrameRecord is { page_no: Int }
+public type WalIndexFrameRecord is { page_no: Int }
 
-public fn frame_record(page_no: Int) -> FrameRecord { FrameRecord { page_no: page_no } }
+public fn frame_record(page_no: Int) -> WalIndexFrameRecord { WalIndexFrameRecord { page_no: page_no } }
 
 // -----------------------------------------------------------------------------
 // HashGroup — one 4096-frame group
@@ -54,7 +54,7 @@ public type HashGroup is {
     /// Index of this group (0-based) — frame 1..4096 → group 0, etc.
     group_index: Int,
     slots: List<HashSlot>,                 // length = HASHTABLE_SIZE
-    frames: List<FrameRecord>,             // length = FRAMES_PER_GROUP
+    frames: List<WalIndexFrameRecord>,             // length = FRAMES_PER_GROUP
     /// Number of frames currently registered in this group.
     populated: Int,
 }
@@ -63,7 +63,7 @@ public fn hash_group_new(group_index: Int) -> HashGroup {
     let mut slots: List<HashSlot> = List.new();
     let mut i: Int = 0;
     while i < HASHTABLE_SIZE { slots.push(empty_slot()); i = i + 1; }
-    let mut frames: List<FrameRecord> = List.new();
+    let mut frames: List<WalIndexFrameRecord> = List.new();
     let mut k: Int = 0;
     while k < FRAMES_PER_GROUP { frames.push(frame_record(0)); k = k + 1; }
     HashGroup {

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.vfs_xrandomness_api.method.{
-    Source, SrcDevUrandom, SrcGetrandom, SrcArc4Random,
+    RandomnessSource, SrcDevUrandom, SrcGetrandom, SrcArc4Random,
     SrcCryptGenRandom, SrcRdrand, SrcMockSeed,
     source_name, well_known_source_count,
     Quality, QHigh, QMedium, QLow, QMockOnly,

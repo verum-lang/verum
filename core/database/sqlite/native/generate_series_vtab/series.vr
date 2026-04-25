@@ -38,17 +38,17 @@ public fn is_ok(c: &FilterCheck) -> Bool {
     match c { FcOk => true, _ => false }
 }
 
-// Direction.
-public type Direction is
+// SeriesDirection.
+public type SeriesDirection is
     | DirAscending
     | DirDescending
     ;
 
-public fn direction_for(args: &Args) -> Direction {
+public fn direction_for(args: &Args) -> SeriesDirection {
     if args.step > (0 as Int64) { DirAscending } else { DirDescending }
 }
 
-public fn direction_name(d: &Direction) -> Text {
+public fn direction_name(d: &SeriesDirection) -> Text {
     match d {
         DirAscending  => "ascending".clone(),
         DirDescending => "descending".clone(),

@@ -4,8 +4,8 @@ module core.database.sqlite.native.vfs_xrandomness_api.method;
 
 mount base.{Bool, Int64, Text};
 
-// Source classes a VFS may implement.
-public type Source is
+// RandomnessSource classes a VFS may implement.
+public type RandomnessSource is
     | SrcDevUrandom        // /dev/urandom (POSIX)
     | SrcGetrandom         // getrandom() syscall (Linux 3.17+)
     | SrcArc4Random        // arc4random_buf (BSD/macOS)
@@ -14,7 +14,7 @@ public type Source is
     | SrcMockSeed          // test VFS — deterministic counter
     ;
 
-public fn source_name(s: &Source) -> Text {
+public fn source_name(s: &RandomnessSource) -> Text {
     match s {
         SrcDevUrandom    => "/dev/urandom".clone(),
         SrcGetrandom     => "getrandom".clone(),
@@ -35,7 +35,7 @@ public type Quality is
     | QMockOnly        // test only, NOT for prod
     ;
 
-public fn quality_for(s: &Source) -> Quality {
+public fn quality_for(s: &RandomnessSource) -> Quality {
     match s {
         SrcDevUrandom     => QMedium,
         SrcGetrandom      => QHigh,

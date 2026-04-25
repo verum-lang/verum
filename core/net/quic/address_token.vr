@@ -56,7 +56,7 @@ mount core.security.util.rng.{fill_secure};
 
 public const WIRE_VERSION: UInt8 = 1_u8;
 
-public type TokenKind is
+public type QuicTokenKind is
       Retry              // short-lived; issued in Retry packet
     | NewToken;          // longer-lived; issued via NEW_TOKEN frame
 
@@ -87,7 +87,7 @@ public type TokenError is
     | ClientIpMismatch;
 
 public type TokenPlaintext is {
-    kind:         TokenKind,
+    kind:         QuicTokenKind,
     issued_unix:  UInt64,
     /// Client address bytes (4 for IPv4, 16 for IPv6) that validates
     /// the token. On replay from a different client IP, verification
@@ -154,7 +154,7 @@ public type VerifyOptions is {
     expected_client_ip: Maybe<List<Byte>>,
     /// If provided, the token MUST be of this kind. Mixing Retry
     /// and NewToken semantics is a protocol error caught here.
-    required_kind:    Maybe<TokenKind>,
+    required_kind:    Maybe<QuicTokenKind>,
 };
 
 implement VerifyOptions {
@@ -186,8 +186,8 @@ public fn verify(
     }
     if wire[8] != WIRE_VERSION { return Err(TokenError.Malformed); }
     let kind = match wire[9] {
-        0_u8 => TokenKind.Retry,
-        1_u8 => TokenKind.NewToken,
+        0_u8 => QuicTokenKind.Retry,
+        1_u8 => QuicTokenKind.NewToken,
         _    => return Err(TokenError.Malformed),
     };
     match &opts.required_kind {
@@ -274,11 +274,11 @@ fn encode_plaintext(p: &TokenPlaintext) -> List<Byte> {
     out
 }
 
-fn decode_plaintext(buf: &[Byte], kind_hint: TokenKind) -> Result<TokenPlaintext, TokenError> {
+fn decode_plaintext(buf: &[Byte], kind_hint: QuicTokenKind) -> Result<TokenPlaintext, TokenError> {
     if buf.len() < 1 + 8 + 1 { return Err(TokenError.Malformed); }
     let kind = match buf[0] {
-        0_u8 => TokenKind.Retry,
-        1_u8 => TokenKind.NewToken,
+        0_u8 => QuicTokenKind.Retry,
+        1_u8 => QuicTokenKind.NewToken,
         _    => return Err(TokenError.Malformed),
     };
     if !kind_eq(&kind, &kind_hint) { return Err(TokenError.Malformed); }
@@ -337,14 +337,14 @@ public fn ip_bytes_from(addr: &IpAddr) -> List<Byte> {
 // Helpers
 // =============================================================================
 
-fn kind_byte(k: &TokenKind) -> Byte {
+fn kind_byte(k: &QuicTokenKind) -> Byte {
     match k {
-        TokenKind.Retry    => 0_u8,
-        TokenKind.NewToken => 1_u8,
+        QuicTokenKind.Retry    => 0_u8,
+        QuicTokenKind.NewToken => 1_u8,
     }
 }
 
-fn kind_eq(a: &TokenKind, b: &TokenKind) -> Bool {
+fn kind_eq(a: &QuicTokenKind, b: &QuicTokenKind) -> Bool {
     kind_byte(a) == kind_byte(b)
 }
 
