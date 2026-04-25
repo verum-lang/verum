@@ -28,8 +28,8 @@ mount core.runtime.spawn.{
 };
 mount core.runtime.recovery.{
     RecoveryBackoffStrategy,
-    RecoveryStrategy,
-    RetryConfig, JitterConfig, RetryPredicate,
+    RuntimeRecoveryStrategy,
+    RuntimeRetryConfig, JitterConfig, RetryPredicate,
 };
 mount core.runtime.env.{IsolationLevel, RestartPolicy, RestartStrategy};
 
@@ -803,42 +803,42 @@ fn test_spawn_isolated_exists() {
 }
 
 // =============================================================================
-// Section 16: RecoveryStrategy Type Tests
+// Section 16: RuntimeRecoveryStrategy Type Tests
 // =============================================================================
 
 @test
 fn test_recovery_strategy_none() {
-    let strat = RecoveryStrategy.None;
-    assert(strat is RecoveryStrategy.None);
+    let strat = RuntimeRecoveryStrategy.None;
+    assert(strat is RuntimeRecoveryStrategy.None);
 }
 
 @test
 fn test_recovery_strategy_supervision() {
-    let strat = RecoveryStrategy.Supervision;
-    assert(strat is RecoveryStrategy.Supervision);
+    let strat = RuntimeRecoveryStrategy.Supervision;
+    assert(strat is RuntimeRecoveryStrategy.Supervision);
 }
 
 @test
 fn test_recovery_strategy_retry_factory() {
-    let strat = RecoveryStrategy.retry(3);
-    assert(strat is RecoveryStrategy.Retry);
+    let strat = RuntimeRecoveryStrategy.retry(3);
+    assert(strat is RuntimeRecoveryStrategy.Retry);
 }
 
 @test
 fn test_recovery_strategy_circuit_breaker_factory() {
-    let strat = RecoveryStrategy.circuit_breaker(5);
-    assert(strat is RecoveryStrategy.UseBreaker);
+    let strat = RuntimeRecoveryStrategy.circuit_breaker(5);
+    assert(strat is RuntimeRecoveryStrategy.UseBreaker);
 }
 
 @test
 fn test_recovery_strategy_match() {
-    let strat = RecoveryStrategy.None;
+    let strat = RuntimeRecoveryStrategy.None;
     let val = match strat {
-        RecoveryStrategy.None => "none",
-        RecoveryStrategy.Retry(_) => "retry",
-        RecoveryStrategy.UseBreaker(_) => "breaker",
-        RecoveryStrategy.Supervision => "supervision",
-        RecoveryStrategy.Composed(_) => "composed",
+        RuntimeRecoveryStrategy.None => "none",
+        RuntimeRecoveryStrategy.Retry(_) => "retry",
+        RuntimeRecoveryStrategy.UseBreaker(_) => "breaker",
+        RuntimeRecoveryStrategy.Supervision => "supervision",
+        RuntimeRecoveryStrategy.Composed(_) => "composed",
     };
     assert_eq(val, "none");
 }

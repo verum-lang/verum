@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 4 (Async)
 // Dependencies: core, collections, sync, async/future, async/waker, async/task
-// Spec: docs/architecture/new-arch-spec.md Section 7 (Async Runtime)
+// Spec: docs/architecture/new-arch-spec.md Section 7 (Async AsyncRuntime)
 // =============================================================================
 //
 // This module provides a production-quality async executor using native V-LLSI
@@ -87,7 +87,7 @@ const SLOT_DATABASE: UInt8 = 10;
 const SLOT_LOGGER: UInt8 = 11;
 
 // =============================================================================
-// Runtime Configuration
+// AsyncRuntime Configuration
 // =============================================================================
 
 /// Maximum number of tasks to poll per executor tick.
@@ -218,7 +218,7 @@ implement<F: Future> TaskState<F> {
 }
 
 // =============================================================================
-// Runtime
+// AsyncRuntime
 // =============================================================================
 
 /// Native async runtime using V-LLSI infrastructure.
@@ -231,13 +231,13 @@ implement<F: Future> TaskState<F> {
 ///
 /// # Example
 /// ```verum
-/// let rt = Runtime.new();
+/// let rt = AsyncRuntime.new();
 /// rt.block_on(async {
 ///     let res = some_async_operation().await;
 ///     print(f"Result: {result}");
 /// });
 /// ```
-public type Runtime is {
+public type AsyncRuntime is {
     config: RuntimeConfig,
     /// Number of active tasks
     task_count: AtomicInt,
@@ -280,15 +280,15 @@ type TaskEntry is {
     completed: Bool,
 };
 
-implement Runtime {
+implement AsyncRuntime {
     /// Create new runtime with default configuration.
-    public fn new() -> Runtime {
-        Runtime.with_config(RuntimeConfig.default())
+    public fn new() -> AsyncRuntime {
+        AsyncRuntime.with_config(RuntimeConfig.default())
     }
 
     /// Create runtime with custom configuration.
-    public fn with_config(config: RuntimeConfig) -> Runtime {
-        Runtime {
+    public fn with_config(config: RuntimeConfig) -> AsyncRuntime {
+        AsyncRuntime {
             config: config,
             task_count: AtomicInt.new(0),
             running: AtomicBool.new(false),
@@ -439,7 +439,7 @@ implement Runtime {
     /// # Example
     /// ```verum
     /// fn main() {
-    ///     let rt = Runtime.new();
+    ///     let rt = AsyncRuntime.new();
     ///     let res = rt.block_on(async {
     ///         fetch_data().await
     ///     });
@@ -448,7 +448,7 @@ implement Runtime {
     /// ```
     public fn block_on<F: Future>(&self, future: F) -> F.Output {
         if self.running.swap(true, MemoryOrdering.AcqRel) {
-            panic("Runtime already running - cannot nest block_on");
+            panic("AsyncRuntime already running - cannot nest block_on");
         }
 
         // Set runtime context
@@ -458,7 +458,7 @@ implement Runtime {
         if self.config.enable_io {
             match create_io_engine(self.config.io_sq_entries) {
                 Ok(engine) => {
-                    // Store IOEngine pointer both in Runtime (for wait_for_events)
+                    // Store IOEngine pointer both in AsyncRuntime (for wait_for_events)
                     // and in context slot (for async operations to submit I/O)
                     let engine_ptr = Heap.new(engine);
                     let raw_ptr = Heap.into_raw(engine_ptr);
@@ -811,7 +811,7 @@ implement Runtime {
     }
 }
 
-implement Drop for Runtime {
+implement Drop for AsyncRuntime {
     fn drop(&mut self) {
         self.shutdown();
     }
@@ -868,7 +868,7 @@ public fn block_on<F: Future>(future: F) -> F.Output {
 // Builder Pattern
 // =============================================================================
 
-/// Builder for creating a Runtime with custom configuration.
+/// Builder for creating a AsyncRuntime with custom configuration.
 public type RuntimeBuilder is {
     config: RuntimeConfig,
 };
@@ -912,8 +912,8 @@ implement RuntimeBuilder {
     }
 
     /// Build the runtime.
-    public fn build(self) -> Runtime {
-        Runtime.with_config(self.config)
+    public fn build(self) -> AsyncRuntime {
+        AsyncRuntime.with_config(self.config)
     }
 }
 
@@ -923,7 +923,7 @@ implement RuntimeBuilder {
 
 /// A lightweight single-threaded executor for `!Send` futures.
 ///
-/// Unlike `Runtime`, `LocalExecutor` does not use Mutex-protected queues.
+/// Unlike `AsyncRuntime`, `LocalExecutor` does not use Mutex-protected queues.
 /// All operations happen on a single thread, making it suitable for:
 /// - `!Send` futures (e.g., futures capturing `Rc` or raw pointers)
 /// - Minimal overhead when multi-threading is not needed
@@ -1258,11 +1258,11 @@ public fn spawn_blocking<T: Send, F: fn() -> T + Send>(f: F) -> JoinHandle<T> {
 /// Waker data for runtime integration.
 type RuntimeWakerData is {
     task_id: Int,
-    runtime: &Runtime,
+    runtime: &AsyncRuntime,
 };
 
 /// Create a waker that wakes a task on the given runtime.
-fn create_runtime_waker(task_id: Int, runtime: &Runtime) -> Waker {
+fn create_runtime_waker(task_id: Int, runtime: &AsyncRuntime) -> Waker {
     let data = Heap.new(RuntimeWakerData {
         task_id: task_id,
         runtime: runtime,

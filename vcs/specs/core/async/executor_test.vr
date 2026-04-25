@@ -5,13 +5,13 @@
 // @level: L1
 // @tier: 0
 // @tags: async, executor, runtime, config, sleep, timeout, builder
-// @description: Tests for RuntimeConfig, Runtime, RuntimeBuilder,
+// @description: Tests for RuntimeConfig, AsyncRuntime, RuntimeBuilder,
 //               Sleep, TimeoutError, Timeout, ExecutionEnv types,
 //               builder patterns, and configuration presets
 // =============================================================================
 
 mount core.async.executor.{
-    RuntimeConfig, Runtime, RuntimeBuilder,
+    RuntimeConfig, AsyncRuntime, RuntimeBuilder,
     Sleep, TimeoutError, Timeout,
     ExecutionEnv,
     sleep_ms, sleep_secs,
@@ -161,7 +161,7 @@ fn test_runtime_builder_chain() {
 
 @test
 fn test_runtime_builder_build() {
-    let runtime: Runtime = RuntimeBuilder.new()
+    let runtime: AsyncRuntime = RuntimeBuilder.new()
         .max_tasks(100)
         .build();
     assert_eq(runtime.task_count(), 0);
@@ -270,12 +270,12 @@ fn test_ready_future_bool() {
 }
 
 // =============================================================================
-// Section 9: Runtime Type
+// Section 9: AsyncRuntime Type
 // =============================================================================
 
 @test
 fn test_runtime_new() {
-    let rt: Runtime = Runtime.new();
+    let rt: AsyncRuntime = AsyncRuntime.new();
     assert_eq(rt.task_count(), 0);
     assert(!rt.is_running());
 }
@@ -283,7 +283,7 @@ fn test_runtime_new() {
 @test
 fn test_runtime_with_config() {
     let config = RuntimeConfig.cpu_bound();
-    let rt: Runtime = Runtime.with_config(config);
+    let rt: AsyncRuntime = AsyncRuntime.with_config(config);
     assert_eq(rt.task_count(), 0);
     assert(!rt.is_running());
     assert_eq(rt.config.max_tasks, 1000);
@@ -403,24 +403,24 @@ fn test_timeout_ok_result() {
 }
 
 // =============================================================================
-// Section 15: Runtime State After Construction
+// Section 15: AsyncRuntime State After Construction
 // =============================================================================
 
 @test
 fn test_runtime_initial_not_running() {
-    let rt = Runtime.new();
+    let rt = AsyncRuntime.new();
     assert(!rt.is_running());
 }
 
 @test
 fn test_runtime_initial_zero_tasks() {
-    let rt = Runtime.new();
+    let rt = AsyncRuntime.new();
     assert_eq(rt.task_count(), 0);
 }
 
 @test
 fn test_runtime_config_accessible() {
-    let rt = Runtime.new();
+    let rt = AsyncRuntime.new();
     assert_eq(rt.config.max_tasks, 10000);
     assert(rt.config.enable_work_stealing);
     assert(rt.config.enable_io);
@@ -429,7 +429,7 @@ fn test_runtime_config_accessible() {
 
 @test
 fn test_runtime_cpu_bound_config() {
-    let rt = Runtime.with_config(RuntimeConfig.cpu_bound());
+    let rt = AsyncRuntime.with_config(RuntimeConfig.cpu_bound());
     assert_eq(rt.config.max_tasks, 1000);
     assert(!rt.config.enable_io);
     assert(!rt.config.enable_time);
@@ -567,12 +567,12 @@ fn test_runtime_builder_all_options() {
 }
 
 // =============================================================================
-// Section 19: Runtime with Various Configs
+// Section 19: AsyncRuntime with Various Configs
 // =============================================================================
 
 @test
 fn test_runtime_with_io_bound_config() {
-    let rt = Runtime.with_config(RuntimeConfig.io_bound());
+    let rt = AsyncRuntime.with_config(RuntimeConfig.io_bound());
     assert_eq(rt.config.max_tasks, 100000);
     assert(rt.config.enable_io);
     assert(rt.config.enable_time);
@@ -586,7 +586,7 @@ fn test_runtime_with_custom_config() {
         .max_tasks(42)
         .task_stack_size(999)
         .work_stealing(false);
-    let rt = Runtime.with_config(config);
+    let rt = AsyncRuntime.with_config(config);
     assert_eq(rt.config.max_tasks, 42);
     assert_eq(rt.config.task_stack_size, 999);
     assert(!rt.config.enable_work_stealing);
@@ -594,9 +594,9 @@ fn test_runtime_with_custom_config() {
 
 @test
 fn test_runtime_multiple_instances() {
-    let rt1 = Runtime.new();
-    let rt2 = Runtime.new();
-    let rt3 = Runtime.with_config(RuntimeConfig.cpu_bound());
+    let rt1 = AsyncRuntime.new();
+    let rt2 = AsyncRuntime.new();
+    let rt3 = AsyncRuntime.with_config(RuntimeConfig.cpu_bound());
     assert_eq(rt1.task_count(), 0);
     assert_eq(rt2.task_count(), 0);
     assert_eq(rt3.task_count(), 0);
@@ -644,7 +644,7 @@ fn test_block_on_ready_float() {
 fn test_block_on_ready_unit() {
     let result: () = block_on(ready(()));
     // Unit value returned successfully
-    assert(!false); // Runtime-only: async executor required
+    assert(!false); // AsyncRuntime-only: async executor required
 }
 
 @test

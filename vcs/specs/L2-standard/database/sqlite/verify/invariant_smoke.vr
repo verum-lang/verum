@@ -36,7 +36,7 @@ mount core.database.sqlite.native.verify.sql_semantics.{
     VerifyJoinKind, JkInner, JkLeftOuter, JkCross,
     filter_is_monotone, join_cardinality_legal,
     ColumnType, CtInt, CtReal, CtText, CtAny, CtNull,
-    RowShape, types_compatible, row_matches_schema,
+    VerifyRowShape, types_compatible, row_matches_schema,
     count_is_partition_safe, sum_is_partition_safe,
 };
 
@@ -255,18 +255,18 @@ fn test_row_shape() {
     let mut sch_cols: List<ColumnType> = List.new();
     sch_cols.push(CtInt);
     sch_cols.push(CtText);
-    let schema = RowShape { columns: sch_cols };
+    let schema = VerifyRowShape { columns: sch_cols };
 
     let mut row_cols: List<ColumnType> = List.new();
     row_cols.push(CtInt);
     row_cols.push(CtText);
-    let row = RowShape { columns: row_cols };
+    let row = VerifyRowShape { columns: row_cols };
     assert(row_matches_schema(&schema, &row));
 
     let mut bad_cols: List<ColumnType> = List.new();
     bad_cols.push(CtText);
     bad_cols.push(CtText);
-    let bad_row = RowShape { columns: bad_cols };
+    let bad_row = VerifyRowShape { columns: bad_cols };
     assert(!row_matches_schema(&schema, &bad_row));
 }
 

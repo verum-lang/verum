@@ -30,10 +30,10 @@ mount core.database.sqlite.native.migrations.migration.{
 };
 
 // -----------------------------------------------------------------------------
-// PlanError
+// MigrationPlanError
 // -----------------------------------------------------------------------------
 
-public type PlanError is
+public type MigrationPlanError is
       PeDuplicateVersion(Int)
     | PeUnknownDependency(Int, Int)   // (migration version, missing dep)
     | PeCycle(List<Int>);
@@ -49,7 +49,7 @@ public type MigrationPlan is {
     is_reversible: Bool,
 }
 
-public fn build(steps: List<Migration>) -> Result<MigrationPlan, PlanError> {
+public fn build(steps: List<Migration>) -> Result<MigrationPlan, MigrationPlanError> {
     // 1. Detect duplicate versions.
     let mut i: Int = 0;
     while i < steps.len() {
@@ -120,7 +120,7 @@ fn version_present(steps: &List<Migration>, version: Int) -> Bool {
 // Kahn's algorithm — O(V+E) topological sort
 // -----------------------------------------------------------------------------
 
-fn toposort(steps: &List<Migration>) -> Result<List<Migration>, PlanError> {
+fn toposort(steps: &List<Migration>) -> Result<List<Migration>, MigrationPlanError> {
     let mut in_degree: List<Int> = List.new();
     let mut i: Int = 0;
     while i < steps.len() {

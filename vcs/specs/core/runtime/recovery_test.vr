@@ -17,10 +17,10 @@ mount core.runtime.recovery.{
     CircuitBreakerStats,
     CircuitBreakerError,
     ErrorPredicate,
-    RetryConfig,
+    RuntimeRetryConfig,
     RetryPolicy,
     RetryPredicate,
-    RecoveryStrategy,
+    RuntimeRecoveryStrategy,
     InlineRetryPolicy,
 };
 
@@ -495,12 +495,12 @@ fn test_circuit_breaker_error_failed() {
 }
 
 // =============================================================================
-// Section 10: RetryConfig and RetryPolicy
+// Section 10: RuntimeRetryConfig and RetryPolicy
 // =============================================================================
 
 @test
 fn test_retry_config_construction() {
-    let config: RetryConfig = RetryConfig {
+    let config: RuntimeRetryConfig = RuntimeRetryConfig {
         max_attempts: 3,
         backoff: RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 },
         jitter: JitterConfig.None,
@@ -511,7 +511,7 @@ fn test_retry_config_construction() {
 
 @test
 fn test_retry_policy_new() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 3,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
@@ -525,7 +525,7 @@ fn test_retry_policy_new() {
 
 @test
 fn test_retry_policy_should_retry() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 3,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
@@ -538,7 +538,7 @@ fn test_retry_policy_should_retry() {
 
 @test
 fn test_retry_policy_next_delay_fixed() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 3,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 200 },
         jitter: JitterConfig.None,
@@ -550,7 +550,7 @@ fn test_retry_policy_next_delay_fixed() {
 
 @test
 fn test_retry_policy_reset() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 3,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
@@ -580,31 +580,31 @@ fn test_retry_predicate_transient_only() {
 }
 
 // =============================================================================
-// Section 12: RecoveryStrategy
+// Section 12: RuntimeRecoveryStrategy
 // =============================================================================
 
 @test
 fn test_recovery_strategy_none() {
-    let strategy: RecoveryStrategy = RecoveryStrategy.None;
-    assert(strategy is RecoveryStrategy.None);
+    let strategy: RuntimeRecoveryStrategy = RuntimeRecoveryStrategy.None;
+    assert(strategy is RuntimeRecoveryStrategy.None);
 }
 
 @test
 fn test_recovery_strategy_supervision() {
-    let strategy: RecoveryStrategy = RecoveryStrategy.Supervision;
-    assert(strategy is RecoveryStrategy.Supervision);
+    let strategy: RuntimeRecoveryStrategy = RuntimeRecoveryStrategy.Supervision;
+    assert(strategy is RuntimeRecoveryStrategy.Supervision);
 }
 
 @test
 fn test_recovery_strategy_retry_constructor() {
-    let strategy: RecoveryStrategy = RecoveryStrategy.retry(5);
-    assert(strategy is RecoveryStrategy.Retry);
+    let strategy: RuntimeRecoveryStrategy = RuntimeRecoveryStrategy.retry(5);
+    assert(strategy is RuntimeRecoveryStrategy.Retry);
 }
 
 @test
 fn test_recovery_strategy_circuit_breaker_constructor() {
-    let strategy: RecoveryStrategy = RecoveryStrategy.circuit_breaker(10);
-    assert(strategy is RecoveryStrategy.UseBreaker);
+    let strategy: RuntimeRecoveryStrategy = RuntimeRecoveryStrategy.circuit_breaker(10);
+    assert(strategy is RuntimeRecoveryStrategy.UseBreaker);
 }
 
 // =============================================================================
@@ -643,7 +643,7 @@ fn test_inline_retry_policy_default() {
 
 @test
 fn test_retry_policy_record_retry() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 5,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
@@ -658,7 +658,7 @@ fn test_retry_policy_record_retry() {
 
 @test
 fn test_retry_policy_multiple_retries() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 5,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
@@ -675,7 +675,7 @@ fn test_retry_policy_multiple_retries() {
 
 @test
 fn test_retry_policy_exhausted() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 2,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 50 },
         jitter: JitterConfig.None,
@@ -689,7 +689,7 @@ fn test_retry_policy_exhausted() {
 
 @test
 fn test_retry_policy_reset_after_retries() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 3,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
@@ -707,7 +707,7 @@ fn test_retry_policy_reset_after_retries() {
 
 @test
 fn test_retry_policy_last_error_updates() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 5,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
@@ -834,14 +834,14 @@ fn test_circuit_breaker_reset_clears_stats() {
 }
 
 // =============================================================================
-// Section 18: RecoveryStrategy Pattern Extraction
+// Section 18: RuntimeRecoveryStrategy Pattern Extraction
 // =============================================================================
 
 @test
 fn test_recovery_strategy_retry_extracts_config() {
-    let strategy = RecoveryStrategy.retry(3);
+    let strategy = RuntimeRecoveryStrategy.retry(3);
     match strategy {
-        RecoveryStrategy.Retry(config) => {
+        RuntimeRecoveryStrategy.Retry(config) => {
             assert_eq(config.max_attempts, 3);
         }
         _ => panic("Expected Retry"),
@@ -850,9 +850,9 @@ fn test_recovery_strategy_retry_extracts_config() {
 
 @test
 fn test_recovery_strategy_circuit_breaker_extracts_config() {
-    let strategy = RecoveryStrategy.circuit_breaker(5);
+    let strategy = RuntimeRecoveryStrategy.circuit_breaker(5);
     match strategy {
-        RecoveryStrategy.UseBreaker(config) => {
+        RuntimeRecoveryStrategy.UseBreaker(config) => {
             assert_eq(config.failure_threshold, 5);
         }
         _ => panic("Expected UseBreaker"),
@@ -862,28 +862,28 @@ fn test_recovery_strategy_circuit_breaker_extracts_config() {
 @test
 fn test_recovery_strategy_match_all_variants() {
     let strategies = [
-        RecoveryStrategy.None,
-        RecoveryStrategy.Supervision,
+        RuntimeRecoveryStrategy.None,
+        RuntimeRecoveryStrategy.Supervision,
     ];
     for s in strategies {
         let matched = match s {
-            RecoveryStrategy.None => true,
-            RecoveryStrategy.Retry(_) => true,
-            RecoveryStrategy.UseBreaker(_) => true,
-            RecoveryStrategy.Composed(_) => true,
-            RecoveryStrategy.Supervision => true,
+            RuntimeRecoveryStrategy.None => true,
+            RuntimeRecoveryStrategy.Retry(_) => true,
+            RuntimeRecoveryStrategy.UseBreaker(_) => true,
+            RuntimeRecoveryStrategy.Composed(_) => true,
+            RuntimeRecoveryStrategy.Supervision => true,
         };
         assert(matched);
     }
 }
 
 // =============================================================================
-// Section 19: RetryConfig with Different Backoff Strategies
+// Section 19: RuntimeRetryConfig with Different Backoff Strategies
 // =============================================================================
 
 @test
 fn test_retry_config_with_linear_backoff() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 5,
         backoff: RecoveryBackoffStrategy.Linear { base_ms: 100, increment_ms: 50, max_ms: 500 },
         jitter: JitterConfig.Proportional(10),
@@ -895,7 +895,7 @@ fn test_retry_config_with_linear_backoff() {
 
 @test
 fn test_retry_config_with_no_backoff() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 10,
         backoff: RecoveryBackoffStrategy.None,
         jitter: JitterConfig.None,
@@ -907,7 +907,7 @@ fn test_retry_config_with_no_backoff() {
 
 @test
 fn test_retry_policy_next_delay_exponential() {
-    let config = RetryConfig {
+    let config = RuntimeRetryConfig {
         max_attempts: 5,
         backoff: RecoveryBackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 },
         jitter: JitterConfig.None,

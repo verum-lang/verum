@@ -17,7 +17,7 @@
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
     Token, TokenizerOptions, options_default,
     Tokenizer, SimpleTokenizer, simple_tokenizer,
-    PorterTokenizer, porter_tokenizer,
+    Fts5VtabPorterTokenizer, porter_tokenizer,
     Unicode61Tokenizer, unicode61_tokenizer,
     TrigramTokenizer, trigram_tokenizer,
 };

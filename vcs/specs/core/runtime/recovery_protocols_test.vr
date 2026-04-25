@@ -14,9 +14,9 @@ mount core.runtime.recovery.{
     JitterConfig,
     RecoveryCircuitBreakerConfig,
     ErrorPredicate,
-    RetryConfig,
+    RuntimeRetryConfig,
     RetryPredicate,
-    RecoveryStrategy,
+    RuntimeRecoveryStrategy,
 };
 mount core.base.result.{Result, Ok, Err};
 
@@ -149,12 +149,12 @@ fn test_clone_retry_predicate_transient() {
 }
 
 // =============================================================================
-// Section 5: RetryConfig Clone
+// Section 5: RuntimeRetryConfig Clone
 // =============================================================================
 
 @test
 fn test_clone_retry_config() {
-    let orig = RetryConfig {
+    let orig = RuntimeRetryConfig {
         max_attempts: 3,
         backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100 },
         jitter: JitterConfig.None,
@@ -165,45 +165,45 @@ fn test_clone_retry_config() {
 }
 
 // =============================================================================
-// Section 6: RecoveryStrategy Clone
+// Section 6: RuntimeRecoveryStrategy Clone
 // =============================================================================
 
 @test
 fn test_clone_recovery_none() {
-    let orig = RecoveryStrategy.None;
+    let orig = RuntimeRecoveryStrategy.None;
     let cloned = orig.clone();
-    assert(cloned is RecoveryStrategy.None);
+    assert(cloned is RuntimeRecoveryStrategy.None);
 }
 
 @test
 fn test_clone_recovery_supervision() {
-    let orig = RecoveryStrategy.Supervision;
+    let orig = RuntimeRecoveryStrategy.Supervision;
     let cloned = orig.clone();
-    assert(cloned is RecoveryStrategy.Supervision);
+    assert(cloned is RuntimeRecoveryStrategy.Supervision);
 }
 
 @test
 fn test_clone_recovery_retry() {
-    let orig = RecoveryStrategy.retry(3);
+    let orig = RuntimeRecoveryStrategy.retry(3);
     let cloned = orig.clone();
-    assert(cloned is RecoveryStrategy.Retry);
+    assert(cloned is RuntimeRecoveryStrategy.Retry);
 }
 
 @test
 fn test_clone_recovery_circuit_breaker() {
-    let orig = RecoveryStrategy.circuit_breaker(5);
+    let orig = RuntimeRecoveryStrategy.circuit_breaker(5);
     let cloned = orig.clone();
-    assert(cloned is RecoveryStrategy.UseBreaker);
+    assert(cloned is RuntimeRecoveryStrategy.UseBreaker);
 }
 
 @test
 fn test_clone_recovery_composed() {
-    let mut strategies: List<RecoveryStrategy> = [];
-    strategies.push(RecoveryStrategy.None);
-    strategies.push(RecoveryStrategy.Supervision);
-    let orig = RecoveryStrategy.Composed(strategies);
+    let mut strategies: List<RuntimeRecoveryStrategy> = [];
+    strategies.push(RuntimeRecoveryStrategy.None);
+    strategies.push(RuntimeRecoveryStrategy.Supervision);
+    let orig = RuntimeRecoveryStrategy.Composed(strategies);
     let cloned = orig.clone();
-    assert(cloned is RecoveryStrategy.Composed);
+    assert(cloned is RuntimeRecoveryStrategy.Composed);
 }
 
 // =============================================================================

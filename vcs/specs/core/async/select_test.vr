@@ -5,7 +5,7 @@
 // @level: L1
 // @tier: 0
 // @tags: async, select, race, join, timeout, combinators, either
-// @description: Tests for Either, SelectAllResult, TimeoutError, ReadyFuture,
+// @description: Tests for Either, SelectAllResult, TimeoutError, SelectReadyFuture,
 //               NeverFuture, combinator type signatures, Duration with timeout,
 //               and various async utility types
 // =============================================================================
@@ -14,7 +14,7 @@ mount core.async.select.{
     Either, Left, Right,
     SelectAllResult,
     TimeoutError,
-    ReadyFuture, NeverFuture, YieldNow,
+    SelectReadyFuture, NeverFuture, YieldNow,
     select_either, race, select_all,
     join, join3, join4, join_all,
     timeout, try_first,
@@ -146,12 +146,12 @@ fn test_timeout_error_match() {
 }
 
 // =============================================================================
-// Section 4: ReadyFuture
+// Section 4: SelectReadyFuture
 // =============================================================================
 
 @test
 fn test_ready_future_int() {
-    let mut fut: ReadyFuture<Int> = ready(42);
+    let mut fut: SelectReadyFuture<Int> = ready(42);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     let poll = fut.poll(&mut cx);
@@ -161,7 +161,7 @@ fn test_ready_future_int() {
 
 @test
 fn test_ready_future_text() {
-    let mut fut: ReadyFuture<Text> = ready("hello");
+    let mut fut: SelectReadyFuture<Text> = ready("hello");
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     let poll = fut.poll(&mut cx);
@@ -171,7 +171,7 @@ fn test_ready_future_text() {
 
 @test
 fn test_ready_future_bool() {
-    let mut fut: ReadyFuture<Bool> = ready(false);
+    let mut fut: SelectReadyFuture<Bool> = ready(false);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     let poll = fut.poll(&mut cx);
@@ -181,7 +181,7 @@ fn test_ready_future_bool() {
 
 @test
 fn test_ready_future_unit() {
-    let mut fut: ReadyFuture<()> = ready(());
+    let mut fut: SelectReadyFuture<()> = ready(());
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     assert(fut.poll(&mut cx).is_ready());
@@ -224,12 +224,12 @@ fn test_pending_forever_poll_multiple() {
 
 @test
 fn test_select_either_signature() {
-    let f1: ReadyFuture<Int> = ready(42);
-    let f2: ReadyFuture<Text> = ready("hello");
+    let f1: SelectReadyFuture<Int> = ready(42);
+    let f2: SelectReadyFuture<Text> = ready("hello");
     // Verify the types are compatible with select_either
-    let _: ReadyFuture<Int> = f1;
-    let _: ReadyFuture<Text> = f2;
-    // Both futures are valid ReadyFuture that implement Future
+    let _: SelectReadyFuture<Int> = f1;
+    let _: SelectReadyFuture<Text> = f2;
+    // Both futures are valid SelectReadyFuture that implement Future
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     let mut f = ready(42);
@@ -238,8 +238,8 @@ fn test_select_either_signature() {
 
 @test
 fn test_race_signature() {
-    let mut f1: ReadyFuture<Int> = ready(42);
-    let mut f2: ReadyFuture<Int> = ready(99);
+    let mut f1: SelectReadyFuture<Int> = ready(42);
+    let mut f2: SelectReadyFuture<Int> = ready(99);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     // Both futures are same type - race requires same Output type
@@ -249,8 +249,8 @@ fn test_race_signature() {
 
 @test
 fn test_join_signature() {
-    let mut f1: ReadyFuture<Int> = ready(42);
-    let mut f2: ReadyFuture<Text> = ready("hello");
+    let mut f1: SelectReadyFuture<Int> = ready(42);
+    let mut f2: SelectReadyFuture<Text> = ready("hello");
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     // join produces (A, B) - both futures complete
@@ -260,9 +260,9 @@ fn test_join_signature() {
 
 @test
 fn test_join3_signature() {
-    let mut f1: ReadyFuture<Int> = ready(1);
-    let mut f2: ReadyFuture<Int> = ready(2);
-    let mut f3: ReadyFuture<Int> = ready(3);
+    let mut f1: SelectReadyFuture<Int> = ready(1);
+    let mut f2: SelectReadyFuture<Int> = ready(2);
+    let mut f3: SelectReadyFuture<Int> = ready(3);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     assert_eq(f1.poll(&mut cx).unwrap(), 1);
@@ -272,10 +272,10 @@ fn test_join3_signature() {
 
 @test
 fn test_join4_signature() {
-    let mut f1: ReadyFuture<Int> = ready(1);
-    let mut f2: ReadyFuture<Int> = ready(2);
-    let mut f3: ReadyFuture<Int> = ready(3);
-    let mut f4: ReadyFuture<Int> = ready(4);
+    let mut f1: SelectReadyFuture<Int> = ready(1);
+    let mut f2: SelectReadyFuture<Int> = ready(2);
+    let mut f3: SelectReadyFuture<Int> = ready(3);
+    let mut f4: SelectReadyFuture<Int> = ready(4);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     assert_eq(f1.poll(&mut cx).unwrap(), 1);
@@ -297,13 +297,13 @@ fn test_timeout_duration_type() {
 
 @test
 fn test_join_all_with_list() {
-    let futures: List<ReadyFuture<Int>> = List.from([
+    let futures: List<SelectReadyFuture<Int>> = List.from([
         ready(1),
         ready(2),
         ready(3),
     ]);
     assert_eq(futures.len(), 3);
-    // Each future in the list is a valid ReadyFuture
+    // Each future in the list is a valid SelectReadyFuture
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     let mut f = ready(100);
@@ -339,19 +339,19 @@ fn test_timeout_duration_large() {
 }
 
 // =============================================================================
-// Section 8: ReadyFuture Polling Behavior
+// Section 8: SelectReadyFuture Polling Behavior
 // =============================================================================
 
 @test
 fn test_ready_future_value_field() {
-    let fut: ReadyFuture<Int> = ready(99);
-    // ReadyFuture stores value as Maybe<T>
+    let fut: SelectReadyFuture<Int> = ready(99);
+    // SelectReadyFuture stores value as Maybe<T>
     assert(fut.value is Some);
 }
 
 @test
 fn test_ready_future_consumed_after_poll() {
-    let mut fut: ReadyFuture<Int> = ready(42);
+    let mut fut: SelectReadyFuture<Int> = ready(42);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     let _ = fut.poll(&mut cx);
@@ -361,7 +361,7 @@ fn test_ready_future_consumed_after_poll() {
 
 @test
 fn test_ready_future_negative() {
-    let mut fut: ReadyFuture<Int> = ready(-100);
+    let mut fut: SelectReadyFuture<Int> = ready(-100);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     assert_eq(fut.poll(&mut cx).unwrap(), -100);
@@ -541,12 +541,12 @@ fn test_either_with_result() {
 }
 
 // =============================================================================
-// Section 14: ReadyFuture Edge Cases
+// Section 14: SelectReadyFuture Edge Cases
 // =============================================================================
 
 @test
 fn test_ready_future_zero() {
-    let mut fut: ReadyFuture<Int> = ready(0);
+    let mut fut: SelectReadyFuture<Int> = ready(0);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     assert_eq(fut.poll(&mut cx).unwrap(), 0);
@@ -554,7 +554,7 @@ fn test_ready_future_zero() {
 
 @test
 fn test_ready_future_large_value() {
-    let mut fut: ReadyFuture<Int> = ready(999_999_999);
+    let mut fut: SelectReadyFuture<Int> = ready(999_999_999);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     assert_eq(fut.poll(&mut cx).unwrap(), 999_999_999);
@@ -562,7 +562,7 @@ fn test_ready_future_large_value() {
 
 @test
 fn test_ready_future_empty_text() {
-    let mut fut: ReadyFuture<Text> = ready("");
+    let mut fut: SelectReadyFuture<Text> = ready("");
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     assert_eq(fut.poll(&mut cx).unwrap(), "");
@@ -570,7 +570,7 @@ fn test_ready_future_empty_text() {
 
 @test
 fn test_ready_future_value_consumed() {
-    let mut fut: ReadyFuture<Int> = ready(42);
+    let mut fut: SelectReadyFuture<Int> = ready(42);
     assert(fut.value is Some);
     let waker: Waker = noop_waker();
     let mut cx = Context.from_waker(&waker);

@@ -19,7 +19,7 @@ mount core.database.sqlite.native.migrations.migration.{
     migration_new, status_name,
 };
 mount core.database.sqlite.native.migrations.plan.{
-    PlanError, PeDuplicateVersion, PeUnknownDependency, PeCycle,
+    MigrationPlanError, PeDuplicateVersion, PeUnknownDependency, PeCycle,
     MigrationPlan, build,
 };
 mount core.database.sqlite.native.migrations.journal.{

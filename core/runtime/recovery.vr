@@ -46,10 +46,10 @@ mount sync.{AtomicU8, AtomicU16, AtomicU32, AtomicU64, MemoryOrdering};
 // =============================================================================
 // Retry Policy
 // =============================================================================
-// NOTE: RecoveryStrategy is defined later (after all its dependencies)
+// NOTE: RuntimeRecoveryStrategy is defined later (after all its dependencies)
 
 /// Retry configuration
-public type RetryConfig is {
+public type RuntimeRetryConfig is {
     /// Maximum number of retry attempts
     max_attempts: Int,
 
@@ -75,7 +75,7 @@ public type RetryPredicate is
 /// Retry policy with runtime state
 public type RetryPolicy is {
     /// Configuration
-    config: RetryConfig,
+    config: RuntimeRetryConfig,
 
     /// Current attempt number (1-indexed)
     current_attempt: Int,
@@ -89,7 +89,7 @@ public type RetryPolicy is {
 
 implement RetryPolicy {
     /// Create new retry policy from config
-    public fn new(config: RetryConfig) -> Self {
+    public fn new(config: RuntimeRetryConfig) -> Self {
         Self {
             config: config,
             current_attempt: 0,
@@ -374,22 +374,22 @@ public type ErrorPredicate is
 /// Top-level recovery strategy selection
 ///
 /// Determines how errors are handled at the task level.
-public type RecoveryStrategy is
+public type RuntimeRecoveryStrategy is
     /// No automatic recovery (propagate errors immediately)
     | None
     /// Retry with specified policy
-    | Retry(RetryConfig)
+    | Retry(RuntimeRetryConfig)
     /// Use circuit breaker for external service calls
     | UseBreaker(RecoveryCircuitBreakerConfig)
     /// Supervision tree handles recovery
     | Supervision
     /// Composed strategies (try in order)
-    | Composed(List<RecoveryStrategy>);
+    | Composed(List<RuntimeRecoveryStrategy>);
 
-implement RecoveryStrategy {
+implement RuntimeRecoveryStrategy {
     /// Create retry strategy with defaults
     public fn retry(max_attempts: Int) -> Self {
-        RecoveryStrategy.Retry(RetryConfig {
+        RuntimeRecoveryStrategy.Retry(RuntimeRetryConfig {
             max_attempts: max_attempts,
             backoff: RecoveryBackoffStrategy.Exponential {
                 base_ms: 100,
@@ -403,7 +403,7 @@ implement RecoveryStrategy {
 
     /// Create circuit breaker strategy with defaults
     public fn circuit_breaker(failure_threshold: Int) -> Self {
-        RecoveryStrategy.UseBreaker(RecoveryCircuitBreakerConfig {
+        RuntimeRecoveryStrategy.UseBreaker(RecoveryCircuitBreakerConfig {
             failure_threshold: failure_threshold as UInt16,
             required_successes: 3,
             timeout_ms: 60000, // 1 minute
@@ -860,9 +860,9 @@ implement Clone for RetryPredicate {
     }
 }
 
-implement Clone for RetryConfig {
-    fn clone(&self) -> RetryConfig {
-        RetryConfig {
+implement Clone for RuntimeRetryConfig {
+    fn clone(&self) -> RuntimeRetryConfig {
+        RuntimeRetryConfig {
             max_attempts: self.max_attempts,
             backoff: self.backoff.clone(),
             jitter: self.jitter.clone(),
@@ -892,19 +892,19 @@ implement Clone for RecoveryCircuitBreakerConfig {
     }
 }
 
-implement Clone for RecoveryStrategy {
-    fn clone(&self) -> RecoveryStrategy {
+implement Clone for RuntimeRecoveryStrategy {
+    fn clone(&self) -> RuntimeRecoveryStrategy {
         match self {
-            None => RecoveryStrategy.None,
-            Retry(config) => RecoveryStrategy.Retry(config.clone()),
-            UseBreaker(config) => RecoveryStrategy.UseBreaker(config.clone()),
-            Supervision => RecoveryStrategy.Supervision,
+            None => RuntimeRecoveryStrategy.None,
+            Retry(config) => RuntimeRecoveryStrategy.Retry(config.clone()),
+            UseBreaker(config) => RuntimeRecoveryStrategy.UseBreaker(config.clone()),
+            Supervision => RuntimeRecoveryStrategy.Supervision,
             Composed(strategies) => {
-                let mut cloned: List<RecoveryStrategy> = [];
+                let mut cloned: List<RuntimeRecoveryStrategy> = [];
                 for i in range(0, strategies.len()) {
                     cloned.push(strategies[i].clone());
                 }
-                RecoveryStrategy.Composed(cloned)
+                RuntimeRecoveryStrategy.Composed(cloned)
             }
         }
     }
@@ -954,14 +954,14 @@ implement Debug for RetryPredicate {
     }
 }
 
-implement Debug for RecoveryStrategy {
+implement Debug for RuntimeRecoveryStrategy {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            None => f.write_str("RecoveryStrategy.None"),
-            Retry(_) => f.write_str("RecoveryStrategy.Retry(...)"),
-            UseBreaker(_) => f.write_str("RecoveryStrategy.UseBreaker(...)"),
-            Supervision => f.write_str("RecoveryStrategy.Supervision"),
-            Composed(strategies) => f.write_str(f"RecoveryStrategy.Composed({strategies.len()} strategies)"),
+            None => f.write_str("RuntimeRecoveryStrategy.None"),
+            Retry(_) => f.write_str("RuntimeRecoveryStrategy.Retry(...)"),
+            UseBreaker(_) => f.write_str("RuntimeRecoveryStrategy.UseBreaker(...)"),
+            Supervision => f.write_str("RuntimeRecoveryStrategy.Supervision"),
+            Composed(strategies) => f.write_str(f"RuntimeRecoveryStrategy.Composed({strategies.len()} strategies)"),
         }
     }
 }

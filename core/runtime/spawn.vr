@@ -76,8 +76,8 @@ mount super.env.{
     RestartPolicy,
 };
 mount super.recovery.{
-    RecoveryStrategy,
-    RetryConfig,
+    RuntimeRecoveryStrategy,
+    RuntimeRetryConfig,
     RecoveryBackoffStrategy,
     RecoveryCircuitBreakerConfig,
 };
@@ -244,7 +244,7 @@ public type SpawnConfig is {
     name: Maybe<Text>,
 
     /// Override parent error recovery strategy
-    recovery: Maybe<RecoveryStrategy>,
+    recovery: Maybe<RuntimeRecoveryStrategy>,
 
     /// Override parent restart policy
     restart: Maybe<RestartPolicy>,
@@ -259,7 +259,7 @@ public type SpawnConfig is {
     circuit_breaker: Maybe<RecoveryCircuitBreakerConfig>,
 
     /// Retry configuration (creates retry policy for this task)
-    retry: Maybe<RetryConfig>,
+    retry: Maybe<RuntimeRetryConfig>,
 
     /// Inline context storage (up to 4 contexts)
     contexts_inline: InlineContextStorage,
@@ -318,7 +318,7 @@ implement SpawnConfig {
     /// ## Performance
     /// - 0ns (inline enum assignment)
     @inline
-    public fn with_recovery(mut self, strategy: RecoveryStrategy) -> Self {
+    public fn with_recovery(mut self, strategy: RuntimeRecoveryStrategy) -> Self {
         self.recovery = Some(strategy);
         self
     }
@@ -370,9 +370,9 @@ implement SpawnConfig {
     /// ## Performance
     /// - 0ns (inline)
     @inline
-    public fn with_retry(mut self, config: RetryConfig) -> Self {
+    public fn with_retry(mut self, config: RuntimeRetryConfig) -> Self {
         self.retry = Some(config);
-        self.recovery = Some(RecoveryStrategy.Retry);
+        self.recovery = Some(RuntimeRecoveryStrategy.Retry);
         self
     }
 
@@ -382,7 +382,7 @@ implement SpawnConfig {
     /// - 0ns (inline)
     @inline
     public fn with_simple_retry(mut self, max_attempts: UInt16, delay_ms: UInt32) -> Self {
-        self.retry = Some(RetryConfig {
+        self.retry = Some(RuntimeRetryConfig {
             max_attempts: max_attempts,
             backoff: RecoveryBackoffStrategy.Fixed,
             backoff_base_ms: delay_ms,
@@ -390,7 +390,7 @@ implement SpawnConfig {
             jitter_factor: 0.0,
             retryable_errors: None,
         });
-        self.recovery = Some(RecoveryStrategy.Retry);
+        self.recovery = Some(RuntimeRecoveryStrategy.Retry);
         self
     }
 
@@ -406,7 +406,7 @@ implement SpawnConfig {
         max_ms: UInt32,
         jitter: Float32,
     ) -> Self {
-        self.retry = Some(RetryConfig {
+        self.retry = Some(RuntimeRetryConfig {
             max_attempts: max_attempts,
             backoff: RecoveryBackoffStrategy.Exponential,
             backoff_base_ms: base_ms,
@@ -414,7 +414,7 @@ implement SpawnConfig {
             jitter_factor: jitter,
             retryable_errors: None,
         });
-        self.recovery = Some(RecoveryStrategy.Retry);
+        self.recovery = Some(RuntimeRecoveryStrategy.Retry);
         self
     }
 

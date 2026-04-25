@@ -667,21 +667,21 @@ implement<T> Future for NeverFuture<T> {
 /// let fut = ready(42);
 /// assert_eq(fut.await, 42);
 /// ```
-public fn ready<T>(value: T) -> ReadyFuture<T> {
-    ReadyFuture { value: Some(value) }
+public fn ready<T>(value: T) -> SelectReadyFuture<T> {
+    SelectReadyFuture { value: Some(value) }
 }
 
-public type ReadyFuture<T> is {
+public type SelectReadyFuture<T> is {
     value: Maybe<T>,
 };
 
-implement<T> Future for ReadyFuture<T> {
+implement<T> Future for SelectReadyFuture<T> {
     type Output = T;
 
     fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
         match self.value.take() {
             Some(v) => Poll.Ready(v),
-            None => panic("ReadyFuture polled after completion"),
+            None => panic("SelectReadyFuture polled after completion"),
         }
     }
 }

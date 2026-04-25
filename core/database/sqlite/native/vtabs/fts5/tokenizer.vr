@@ -147,10 +147,10 @@ fn is_separator(b: Byte, options: &TokenizerOptions) -> Bool {
 // common case for FTS5.
 // =============================================================================
 
-public type PorterTokenizer is { unit: Bool };
-public fn porter_tokenizer() -> PorterTokenizer { PorterTokenizer { unit: true } }
+public type Fts5VtabPorterTokenizer is { unit: Bool };
+public fn porter_tokenizer() -> Fts5VtabPorterTokenizer { Fts5VtabPorterTokenizer { unit: true } }
 
-implement Tokenizer for PorterTokenizer {
+implement Tokenizer for Fts5VtabPorterTokenizer {
     fn name(&self) -> Text { "porter".clone() }
 
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Token> {
