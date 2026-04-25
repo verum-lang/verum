@@ -12,7 +12,7 @@ use verum_common::{List, Text};
 use walkdir::WalkDir;
 
 /// Lint severity level
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LintLevel {
     Error,
     Warning,
@@ -2582,6 +2582,16 @@ fn lint_paths_parallel(
     search_dirs: &[PathBuf],
     cfg: &LintConfig,
 ) -> (Vec<LintIssue>, usize) {
+    let cache = build_lint_cache(cfg);
+    cache.gc();
+    lint_paths_parallel_with_cache(search_dirs, cfg, &cache)
+}
+
+fn lint_paths_parallel_with_cache(
+    search_dirs: &[PathBuf],
+    cfg: &LintConfig,
+    cache: &super::lint_cache::LintCache,
+) -> (Vec<LintIssue>, usize) {
     use rayon::prelude::*;
 
     let files: Vec<PathBuf> = search_dirs
@@ -2600,18 +2610,136 @@ fn lint_paths_parallel(
 
     let issues: Vec<LintIssue> = files
         .par_iter()
-        .flat_map(|path| match lint_file_with(path, cfg) {
-            Ok(list) => list.into_iter().collect::<Vec<_>>(),
-            Err(e) => {
-                eprintln!("warning: failed to lint {}: {}", path.display(), e);
-                Vec::new()
-            }
-        })
+        .flat_map(|path| lint_one_with_cache(path, cfg, cache))
         .collect();
 
     let mut issues = issues;
     issues.sort_by(|a, b| issue_sort_key(a).cmp(&issue_sort_key(b)));
     (issues, total_files)
+}
+
+/// Process one file: cache hit → reuse; cache miss → lint, persist,
+/// return. Read-error files are surfaced as warnings and contribute
+/// no issues.
+fn lint_one_with_cache(
+    path: &Path,
+    cfg: &LintConfig,
+    cache: &super::lint_cache::LintCache,
+) -> Vec<LintIssue> {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warning: failed to read {}: {}", path.display(), e);
+            return Vec::new();
+        }
+    };
+    let sh = super::lint_cache::source_hash(&content);
+    if let Some(cached) = cache.load(&sh) {
+        return cached;
+    }
+    let issues = match lint_content_with(path, &content, cfg) {
+        Ok(i) => i.into_iter().collect::<Vec<_>>(),
+        Err(e) => {
+            eprintln!("warning: failed to lint {}: {}", path.display(), e);
+            Vec::new()
+        }
+    };
+    cache.store(&sh, &issues);
+    issues
+}
+
+/// Lint already-loaded content. Hot-path counterpart to
+/// `lint_file_with` for the cache flow that has the bytes in hand.
+fn lint_content_with(
+    path: &Path,
+    content: &str,
+    cfg: &LintConfig,
+) -> Result<List<LintIssue>> {
+    let mut issues = List::new();
+    let info = FileInfo::parse(content);
+
+    check_unchecked_refinement(path, &info, &mut issues);
+    check_missing_context_decl(path, &info, &mut issues);
+    check_unused_imports(path, &info, &mut issues);
+    check_unnecessary_heap(path, &info, &mut issues);
+    check_missing_error_context(path, &info, &mut issues);
+    check_large_copy(path, &info, &mut issues);
+    check_unused_result(path, &info, &mut issues);
+    check_missing_cleanup(path, &info, &mut issues);
+    check_deprecated_syntax(path, &info, &mut issues);
+    check_cbgr_hotspot(path, &info, &mut issues);
+    check_extended_rules(path, &info, &mut issues);
+    for issue in lint_custom_rules(path, content, cfg) {
+        issues.push(issue);
+    }
+
+    use verum_ast::FileId;
+    use verum_lexer::Lexer;
+    use verum_parser::VerumParser;
+    let fid = FileId::new(0);
+    let lexer = Lexer::new(content, fid);
+    let parser = VerumParser::new();
+    if let Ok(module) = parser.parse_module(lexer, fid) {
+        let ctx = super::lint_engine::LintCtx {
+            file: path,
+            source: content,
+            module: &module,
+            config: Some(cfg),
+        };
+        for issue in super::lint_engine::run(&ctx) {
+            issues.push(issue);
+        }
+        let scopes = super::lint_engine::collect_suppressions(&module, content);
+        if !scopes.is_empty() {
+            let collected: Vec<_> = std::mem::take(&mut issues).into_iter().collect();
+            let suppressed = super::lint_engine::apply_suppressions(collected, &scopes);
+            for i in suppressed {
+                issues.push(i);
+            }
+        }
+    }
+    Ok(issues)
+}
+
+/// CLI entry: wipe the lint cache and exit. Idempotent — calling
+/// when the cache doesn't exist is a no-op.
+pub fn clean_cache() -> Result<()> {
+    let target = std::env::current_dir()
+        .map(|cwd| cwd.join("target"))
+        .unwrap_or_else(|_| PathBuf::from("target"));
+    let cache_root = target.join("lint-cache");
+    if cache_root.exists() {
+        std::fs::remove_dir_all(&cache_root).map_err(|e| {
+            CliError::Custom(format!(
+                "failed to remove {}: {}",
+                cache_root.display(),
+                e
+            ))
+        })?;
+        ui::success(&format!("removed {}", cache_root.display()));
+    } else {
+        ui::info(&format!("{}: nothing to clean", cache_root.display()));
+    }
+    Ok(())
+}
+
+/// Build a cache rooted at `target/lint-cache/` for the project.
+/// `target/` is the conventional Cargo-style artefact directory; the
+/// cache lives under it so a `cargo clean` (or `verum clean`) removes
+/// stale entries with the rest of the build artefacts.
+///
+/// The cache is enabled by default; set `VERUM_LINT_NO_CACHE=1`
+/// (or pass `--no-cache` on the CLI, which exports the same var) to
+/// bypass it for this run.
+fn build_lint_cache(cfg: &LintConfig) -> super::lint_cache::LintCache {
+    let enabled = match std::env::var("VERUM_LINT_NO_CACHE") {
+        Ok(v) => !matches!(v.as_str(), "1" | "true" | "yes"),
+        Err(_) => true,
+    };
+    let target = std::env::current_dir()
+        .map(|cwd| cwd.join("target"))
+        .unwrap_or_else(|_| PathBuf::from("target"));
+    super::lint_cache::LintCache::new(&target, cfg, enabled)
 }
 
 /// Extended lint rules (11-20): Verum-specific analysis beyond Clippy.
@@ -3571,12 +3699,11 @@ pub fn run_extended(
         .collect();
 
     use rayon::prelude::*;
+    let cache = build_lint_cache(&cfg);
+    cache.gc();
     let raw_issues: Vec<LintIssue> = files
         .par_iter()
-        .flat_map(|path| match lint_file_with(path, &cfg) {
-            Ok(list) => list.into_iter().collect::<Vec<_>>(),
-            Err(_) => Vec::new(),
-        })
+        .flat_map(|path| lint_one_with_cache(path, &cfg, &cache))
         .collect();
 
     let mut all_issues: Vec<LintIssue> = raw_issues
