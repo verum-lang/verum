@@ -9,7 +9,7 @@
 //               RecoveryError enum, and function type verification.
 //
 // Coverage:
-// - Opaque handle types: JoinHandleOpaque, ExecutorHandle, FutureHandle, etc.
+// - Opaque handle types: RawJoinHandleOpaque, RawExecutorHandle, RawFutureHandle, etc.
 // - RecoveryError: all 4 variants
 // - Function existence: spawn_with_env, executor_spawn, etc.
 //
@@ -22,19 +22,19 @@
 module specs.core.intrinsics.runtime.async_ops_test;
 
 mount core.intrinsics.runtime.async_ops.{
-    JoinHandleOpaque,
-    ExecutorHandle,
-    FutureHandle,
-    SupervisorHandleOpaque,
-    ChildSpecOpaque,
-    ExecutionEnvOpaque,
-    RecoveryContextOpaque,
-    CircuitBreakerOpaque,
+    RawJoinHandleOpaque,
+    RawExecutorHandle,
+    RawFutureHandle,
+    RawSupervisorHandleOpaque,
+    RawChildSpecOpaque,
+    RawExecutionEnvOpaque,
+    RawRecoveryContextOpaque,
+    RawCircuitBreakerOpaque,
     AllocHandle,
-    IODriverHandle,
-    SharedRegistryOpaque,
-    MiddlewareChainOpaque,
-    SingleThreadExecutorOpaque,
+    RawIODriverHandle,
+    RawSharedRegistryOpaque,
+    RawMiddlewareChainOpaque,
+    RawSingleThreadExecutorOpaque,
     RecoveryError,
 };
 
@@ -91,43 +91,43 @@ fn test_recovery_error_inner_error() {
 
 @test
 fn test_join_handle_opaque_type_exists() {
-    // Verify JoinHandleOpaque is a valid type
-    let _: JoinHandleOpaque;
+    // Verify RawJoinHandleOpaque is a valid type
+    let _: RawJoinHandleOpaque;
 }
 
 @test
 fn test_executor_handle_type_exists() {
-    let _: ExecutorHandle;
+    let _: RawExecutorHandle;
 }
 
 @test
 fn test_future_handle_type_exists() {
-    let _: FutureHandle;
+    let _: RawFutureHandle;
 }
 
 @test
 fn test_supervisor_handle_type_exists() {
-    let _: SupervisorHandleOpaque;
+    let _: RawSupervisorHandleOpaque;
 }
 
 @test
 fn test_child_spec_opaque_type_exists() {
-    let _: ChildSpecOpaque;
+    let _: RawChildSpecOpaque;
 }
 
 @test
 fn test_execution_env_opaque_type_exists() {
-    let _: ExecutionEnvOpaque;
+    let _: RawExecutionEnvOpaque;
 }
 
 @test
 fn test_recovery_context_opaque_type_exists() {
-    let _: RecoveryContextOpaque;
+    let _: RawRecoveryContextOpaque;
 }
 
 @test
 fn test_circuit_breaker_opaque_type_exists() {
-    let _: CircuitBreakerOpaque;
+    let _: RawCircuitBreakerOpaque;
 }
 
 @test
@@ -137,20 +137,20 @@ fn test_alloc_handle_type_exists() {
 
 @test
 fn test_io_driver_handle_type_exists() {
-    let _: IODriverHandle;
+    let _: RawIODriverHandle;
 }
 
 @test
 fn test_shared_registry_opaque_type_exists() {
-    let _: SharedRegistryOpaque;
+    let _: RawSharedRegistryOpaque;
 }
 
 @test
 fn test_middleware_chain_opaque_type_exists() {
-    let _: MiddlewareChainOpaque;
+    let _: RawMiddlewareChainOpaque;
 }
 
 @test
 fn test_single_thread_executor_opaque_type_exists() {
-    let _: SingleThreadExecutorOpaque;
+    let _: RawSingleThreadExecutorOpaque;
 }

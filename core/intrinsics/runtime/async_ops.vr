@@ -17,43 +17,43 @@ module core.intrinsics.runtime.async_ops;
 // =============================================================================
 
 /// Opaque handle for async join results (actual type: async.task.JoinHandle<T>)
-public type JoinHandleOpaque is (*const Byte);
+public type RawJoinHandleOpaque is (*const Byte);
 
 /// Opaque handle for executors (actual type: implements async.Executor protocol)
-public type ExecutorHandle is (*const Byte);
+public type RawExecutorHandle is (*const Byte);
 
 /// Opaque handle for futures (actual type: implements async.Future protocol)
-public type FutureHandle is (*const Byte);
+public type RawFutureHandle is (*const Byte);
 
 /// Opaque handle for supervisors
-public type SupervisorHandleOpaque is (*const Byte);
+public type RawSupervisorHandleOpaque is (*const Byte);
 
 /// Opaque handle for child specs
-public type ChildSpecOpaque is (*const Byte);
+public type RawChildSpecOpaque is (*const Byte);
 
 /// Opaque handle for execution environment
-public type ExecutionEnvOpaque is (*const Byte);
+public type RawExecutionEnvOpaque is (*const Byte);
 
 /// Opaque handle for recovery context
-public type RecoveryContextOpaque is (*const Byte);
+public type RawRecoveryContextOpaque is (*const Byte);
 
 /// Opaque handle for circuit breaker
-public type CircuitBreakerOpaque is (*const Byte);
+public type RawCircuitBreakerOpaque is (*const Byte);
 
 /// Opaque handle for allocator
 public type RawAllocHandle is (*const Byte);
 
 /// Opaque handle for I/O driver
-public type IODriverHandle is (*const Byte);
+public type RawIODriverHandle is (*const Byte);
 
 /// Opaque handle for shared registry
-public type SharedRegistryOpaque is (*const Byte);
+public type RawSharedRegistryOpaque is (*const Byte);
 
 /// Opaque handle for middleware chain
-public type MiddlewareChainOpaque is (*const Byte);
+public type RawMiddlewareChainOpaque is (*const Byte);
 
 /// Opaque handle for single-thread executor
-public type SingleThreadExecutorOpaque is (*const Byte);
+public type RawSingleThreadExecutorOpaque is (*const Byte);
 
 // =============================================================================
 // SECTION 2: Task Spawning
@@ -64,33 +64,33 @@ public type SingleThreadExecutorOpaque is (*const Byte);
 /// VBC Opcode: Spawn (0xA0)
 /// Requires: Async runtime
 @intrinsic("spawn_with_env")
-public fn spawn_with_env(future: FutureHandle, task_id: UInt64) -> JoinHandleOpaque;
+public fn spawn_with_env(future: RawFutureHandle, task_id: UInt64) -> RawJoinHandleOpaque;
 
 /// Spawn a task on an executor.
 ///
 /// VBC Opcode: Spawn (0xA0)
 /// Requires: Async runtime
 @intrinsic("executor_spawn")
-public fn executor_spawn(executor: ExecutorHandle, task: FutureHandle) -> JoinHandleOpaque;
+public fn executor_spawn(executor: RawExecutorHandle, task: RawFutureHandle) -> RawJoinHandleOpaque;
 
 /// Block on a future until completion.
 ///
 /// Uses Await opcode (0xA1) in a loop
 /// Requires: Async runtime
 @intrinsic("executor_block_on")
-public fn executor_block_on(executor: ExecutorHandle, future: FutureHandle) -> *const Byte;
+public fn executor_block_on(executor: RawExecutorHandle, future: RawFutureHandle) -> *const Byte;
 
 /// Poll a future synchronously (for no-async mode).
 ///
 /// Requires: Async runtime (or no-op in sync mode)
 @intrinsic("future_poll_sync")
-public fn future_poll_sync(future: FutureHandle) -> *const Byte;
+public fn future_poll_sync(future: RawFutureHandle) -> *const Byte;
 
 /// Get default executor handle.
 ///
 /// Requires: Async runtime global state (via TLS)
 @intrinsic("default_executor")
-public fn default_executor() -> ExecutorHandle;
+public fn default_executor() -> RawExecutorHandle;
 
 // =============================================================================
 // SECTION 3: Async Sleep
@@ -126,11 +126,11 @@ public type RecoveryError is
 /// Requires: Supervisor runtime
 @intrinsic("spawn_supervised")
 public fn spawn_supervised(
-    supervisor: SupervisorHandleOpaque,
-    future: FutureHandle,
-    spec: ChildSpecOpaque,
-    env: ExecutionEnvOpaque,
-) -> JoinHandleOpaque;
+    supervisor: RawSupervisorHandleOpaque,
+    future: RawFutureHandle,
+    spec: RawChildSpecOpaque,
+    env: RawExecutionEnvOpaque,
+) -> RawJoinHandleOpaque;
 
 /// Log an escalation event.
 ///
@@ -142,20 +142,20 @@ public fn supervisor_log_escalation(reason: *const Byte);
 ///
 /// Requires: Supervisor runtime
 @intrinsic("supervisor_set_parent")
-public fn supervisor_set_parent(child: SupervisorHandleOpaque, parent: SupervisorHandleOpaque);
+public fn supervisor_set_parent(child: RawSupervisorHandleOpaque, parent: RawSupervisorHandleOpaque);
 
 /// Execute a future with recovery strategy.
 ///
 /// Requires: Recovery runtime
 @intrinsic("exec_with_recovery")
 public async fn exec_with_recovery(
-    recovery_ctx: RecoveryContextOpaque,
-    future_factory: fn() -> FutureHandle,
+    recovery_ctx: RawRecoveryContextOpaque,
+    future_factory: fn() -> RawFutureHandle,
 ) -> Result<*const Byte, RecoveryError>;
 
 /// Get reference to inline circuit breaker.
 @intrinsic("inline_cb_as_ref")
-public fn inline_cb_as_ref(inline_storage: *const Byte) -> CircuitBreakerOpaque;
+public fn inline_cb_as_ref(inline_storage: *const Byte) -> RawCircuitBreakerOpaque;
 
 // =============================================================================
 // SECTION 5: Global Resources
@@ -171,16 +171,16 @@ public fn global_allocator() -> RawAllocHandle;
 ///
 /// Requires: I/O runtime
 @intrinsic("default_io_driver")
-public fn default_io_driver() -> IODriverHandle;
+public fn default_io_driver() -> RawIODriverHandle;
 
 /// Get global shared registry.
 @intrinsic("shared_registry_global")
-public fn shared_registry_global() -> SharedRegistryOpaque;
+public fn shared_registry_global() -> RawSharedRegistryOpaque;
 
 /// Create empty middleware chain.
 @intrinsic("middleware_chain_empty")
-public fn middleware_chain_empty() -> MiddlewareChainOpaque;
+public fn middleware_chain_empty() -> RawMiddlewareChainOpaque;
 
 /// Block on a future with single-threaded executor.
 @intrinsic("single_thread_block_on")
-public fn single_thread_block_on(executor: SingleThreadExecutorOpaque, future: FutureHandle) -> *const Byte;
+public fn single_thread_block_on(executor: RawSingleThreadExecutorOpaque, future: RawFutureHandle) -> *const Byte;
