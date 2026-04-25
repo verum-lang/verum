@@ -649,13 +649,24 @@ public type SocketAddr is
 
 implement SocketAddr {
     /// Create an IPv4 socket address.
+    ///
+    /// `SocketAddr.V4(...)` rather than the bare `V4(...)`: the latter
+    /// hits a VBC codegen path that miscompiles the nested record
+    /// argument when both `SocketAddrV4` and `SocketAddr` live in the
+    /// same module — the variant payload arrives at the receiver as
+    /// the inner record's first FIELD value rather than a pointer to
+    /// the full record (object size 8 instead of 16). Tracked as #76.
+    /// The qualified form forces the resolver to treat the
+    /// constructor as `SocketAddr::V4` and dispatches through the
+    /// path that user code uses, which compiles correctly.
     public fn new_v4(ip: Ipv4Addr, port: Int) -> SocketAddr {
-        V4(SocketAddrV4.new(ip, port))
+        SocketAddr.V4(SocketAddrV4.new(ip, port))
     }
 
-    /// Create an IPv6 socket address.
+    /// Create an IPv6 socket address. See `new_v4` for the
+    /// `SocketAddr.V6(...)` qualification rationale.
     public fn new_v6(ip: Ipv6Addr, port: Int) -> SocketAddr {
-        V6(SocketAddrV6.new(ip, port, 0, 0))
+        SocketAddr.V6(SocketAddrV6.new(ip, port, 0, 0))
     }
 
     /// Get the IP address.
