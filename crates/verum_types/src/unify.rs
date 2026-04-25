@@ -1225,9 +1225,15 @@ impl Unifier {
             // Verum's `Int` is the universal integer type (64-bit signed).
             // Sized integers (UInt32, UInt16, etc.) coerce bidirectionally with Int
             // to allow natural usage: `let epoch: UInt32 = 42;` or `assert(epoch == 0);`
-            // Uses data-driven int_coercible_named_types set instead of hardcoded name list.
-            // TODO: Replace with structural checks (query type declarations for integer
-            // newtype wrappers) or an IntCoercible protocol.
+            //
+            // The lookup is structural via the `IntCoercible` protocol from
+            // `core/base/coercion.vr` — populated by
+            // `verum_compiler::stdlib_coercion_registry::scan_protocol_implementations`
+            // which walks loaded AST modules for `implement IntCoercible for X`
+            // blocks. Language-level primitives (UInt8, Int32, U64, ...) are
+            // pre-seeded in `Unifier::new`. The HashSet here acts as a fast
+            // O(1) cache of the protocol-implementation discovery result —
+            // the structural check happens at pipeline-load time.
             (Int, Named { path, .. }) | (Named { path, .. }, Int) => {
                 let name = path.segments.last().map(|s| match s {
                     verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
@@ -3696,8 +3702,12 @@ impl Unifier {
             // In tensor libraries, scalar types (Float, Int, Bool) and their tensor
             // wrappers (DynTensor<Float>, etc.) are used interchangeably.
             // This bidirectional coercion allows natural math code without explicit wraps.
-            // Uses data-driven tensor_family_types set instead of hardcoded name lists.
-            // TODO: Replace with TensorLike protocol check once available.
+            //
+            // The lookup is structural via the `TensorLike` protocol from
+            // `core/base/coercion.vr` — populated by
+            // `scan_protocol_implementations` (see #101 step 2). The HashSet
+            // here is a fast O(1) cache of the protocol-implementation
+            // discovery result.
             (Float, Generic { name, args })
             | (Generic { name, args }, Float)
                 if args.len() == 1
@@ -3816,8 +3826,12 @@ impl Unifier {
             // Generic/Named collection ↔ scalar coercion
             // List<USize> vs Int, Range<Int> vs (Maybe<USize>, Maybe<USize>), etc.
             // These arise from type inference through indexing and slicing operations.
-            // Uses data-driven indexable_collection_types / range_like_types sets.
-            // TODO: Replace with Indexable / RangeLike protocol checks.
+            //
+            // The lookup is structural via the `Indexable` and `RangeLike`
+            // protocols from `core/base/coercion.vr` — populated by
+            // `scan_protocol_implementations` (see #101 step 2). The HashSets
+            // here are fast O(1) caches of the protocol-implementation
+            // discovery result.
             (Generic { name, .. }, Int) | (Int, Generic { name, .. })
                 if self.is_indexable_collection(name.as_str()) =>
             {
