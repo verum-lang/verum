@@ -13,7 +13,7 @@ use walkdir::WalkDir;
 
 /// Lint severity level
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LintLevel {
+pub enum LintLevel {
     Error,
     Warning,
     Info,
@@ -24,7 +24,7 @@ enum LintLevel {
 }
 
 impl LintLevel {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             LintLevel::Error => "error",
             LintLevel::Warning => "warn",
@@ -33,7 +33,7 @@ impl LintLevel {
             LintLevel::Off => "off",
         }
     }
-    fn parse(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "error" | "deny" => Some(LintLevel::Error),
             "warn" | "warning" => Some(LintLevel::Warning),
@@ -55,7 +55,7 @@ struct LintRule {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LintCategory {
+pub enum LintCategory {
     Performance,
     Safety,
     Style,
@@ -64,15 +64,15 @@ enum LintCategory {
 
 /// Lint issue found in code
 #[derive(Debug, Clone)]
-struct LintIssue {
-    rule: &'static str,
-    level: LintLevel,
-    file: PathBuf,
-    line: usize,
-    column: usize,
-    message: String,
-    suggestion: Option<Text>,
-    fixable: bool,
+pub struct LintIssue {
+    pub rule: &'static str,
+    pub level: LintLevel,
+    pub file: PathBuf,
+    pub line: usize,
+    pub column: usize,
+    pub message: String,
+    pub suggestion: Option<Text>,
+    pub fixable: bool,
 }
 
 /// Verum-specific lint rules
@@ -197,6 +197,21 @@ const LINT_RULES: &[LintRule] = &[
         level: LintLevel::Info,
         description: "Variable shadows an existing binding in outer scope",
         category: LintCategory::Style,
+    },
+    // ── AST-driven passes (Phase B.1+) — implementations live in
+    //    `commands/lint_engine.rs`. They appear in --list-rules,
+    //    --explain, --validate-config exactly like text-scan rules. ──
+    LintRule {
+        name: "redundant-refinement",
+        level: LintLevel::Hint,
+        description: "Refinement predicate evaluates to a tautology — base type would do",
+        category: LintCategory::Verification,
+    },
+    LintRule {
+        name: "empty-refinement-bound",
+        level: LintLevel::Error,
+        description: "Refinement bound has no inhabitants (e.g. `it > 100 && it < 50`)",
+        category: LintCategory::Verification,
     },
 ];
 
@@ -2091,6 +2106,36 @@ fn lint_file(path: &Path) -> Result<List<LintIssue>> {
 
     // Extended rules (11-20)
     check_extended_rules(path, &info, &mut issues);
+
+    // AST-driven passes (Phase B.1+). These parse the source via
+    // verum_parser and walk the resulting Module via the verum_ast
+    // Visitor trait, giving them structural knowledge that text-scan
+    // rules can't have. New refinement / capability / context /
+    // CBGR / verification / naming / architecture rules implement
+    // `LintPass` in `lint_engine.rs` and become available here
+    // automatically via `lint_engine::passes()`.
+    //
+    // Parse failures fall through silently — we still want text-scan
+    // rules to report on a file that doesn't fully parse. AST rules
+    // simply don't fire on such files.
+    {
+        use verum_ast::FileId;
+        use verum_lexer::Lexer;
+        use verum_parser::VerumParser;
+        let fid = FileId::new(0);
+        let lexer = Lexer::new(&content, fid);
+        let parser = VerumParser::new();
+        if let Ok(module) = parser.parse_module(lexer, fid) {
+            let ctx = super::lint_engine::LintCtx {
+                file: path,
+                source: &content,
+                module: &module,
+            };
+            for issue in super::lint_engine::run(&ctx) {
+                issues.push(issue);
+            }
+        }
+    }
 
     Ok(issues)
 }

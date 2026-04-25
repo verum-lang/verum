@@ -13,6 +13,7 @@ pub mod file;
 pub mod fmt;
 pub mod init;
 pub mod lint;
+pub mod lint_engine;
 pub mod lsp;
 pub mod new;
 pub mod playbook;
