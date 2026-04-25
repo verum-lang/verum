@@ -440,6 +440,16 @@ enum Commands {
         /// without running any rules.
         #[clap(long)]
         clean_cache: bool,
+        /// Watch the project for changes and re-lint affected files.
+        /// The first run lints everything; subsequent runs use the
+        /// per-file cache so untouched files cost ~nothing. Press
+        /// Ctrl-C to exit.
+        #[clap(long)]
+        watch: bool,
+        /// When `--watch` is set, clear the screen between runs so
+        /// stale output doesn't pile up. No effect without `--watch`.
+        #[clap(long)]
+        watch_clear: bool,
 
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
@@ -1475,6 +1485,8 @@ fn run_command(cli: Cli) -> Result<()> {
             threads,
             no_cache,
             clean_cache,
+            watch,
+            watch_clear,
             feature_overrides,
         } => {
             feature_overrides::install(feature_overrides);
@@ -1530,14 +1542,26 @@ fn run_command(cli: Cli) -> Result<()> {
                     .build_global();
             }
 
-            commands::lint::run_extended(
-                fix,
-                deny_warnings,
-                fmt,
-                profile_name,
-                since_ref,
-                severity_filter,
-            )
+            if watch {
+                commands::lint::run_watch(
+                    fix,
+                    deny_warnings,
+                    fmt,
+                    profile_name,
+                    since_ref,
+                    severity_filter,
+                    watch_clear,
+                )
+            } else {
+                commands::lint::run_extended(
+                    fix,
+                    deny_warnings,
+                    fmt,
+                    profile_name,
+                    since_ref,
+                    severity_filter,
+                )
+            }
         }
         Commands::Doc {
             open,
