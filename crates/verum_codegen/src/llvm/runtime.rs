@@ -1613,26 +1613,37 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Emit all text runtime functions as LLVM IR.
     /// Call this during module setup (after function lowering, before verify).
     pub fn emit_text_ir_functions(&self, module: &Module<'ctx>) -> Result<()> {
-        self.emit_verum_text_get_ptr(module)?;
-        self.emit_verum_text_alloc(module)?;
-        self.emit_verum_text_from_cstr(module)?;
-        self.emit_verum_text_concat(module)?;
-        self.emit_verum_text_free(module)?;
-        self.emit_verum_generic_len(module)?;
-        self.emit_verum_strlen_export(module)?;
-        self.emit_verum_text_from_static(module)?;
-        self.emit_verum_generic_eq(module)?;
-        self.emit_verum_generic_hash(module)?;
-        self.emit_verum_int_to_text(module)?;
-        self.emit_verum_float_to_text(module)?;
-        self.emit_verum_string_parse_int(module)?;
-        self.emit_verum_string_parse_float(module)?;
-        self.emit_verum_text_char_len(module)?;
-        self.fixup_text_len(module)?;
-        self.fixup_map_get(module)?;
-        self.fixup_map_contains_key(module)?;
-        self.fixup_map_remove(module)?;
-        self.fixup_map_insert(module)?;
+        // VERUM_AOT_TRACE_RUNTIME=1 prints each runtime helper as it's
+        // emitted, so signature-mismatch panics deep inside one of them
+        // can be pinpointed by reading the abort tail. Companion to the
+        // VERUM_AOT_TRACE_LOWER bisect helper added in commit 06e0a307.
+        let trace = std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some();
+        macro_rules! step {
+            ($name:literal, $expr:expr) => {{
+                if trace { eprintln!("[aot-runtime] {}", $name); }
+                $expr?;
+            }};
+        }
+        step!("emit_verum_text_get_ptr",     self.emit_verum_text_get_ptr(module));
+        step!("emit_verum_text_alloc",       self.emit_verum_text_alloc(module));
+        step!("emit_verum_text_from_cstr",   self.emit_verum_text_from_cstr(module));
+        step!("emit_verum_text_concat",      self.emit_verum_text_concat(module));
+        step!("emit_verum_text_free",        self.emit_verum_text_free(module));
+        step!("emit_verum_generic_len",      self.emit_verum_generic_len(module));
+        step!("emit_verum_strlen_export",    self.emit_verum_strlen_export(module));
+        step!("emit_verum_text_from_static", self.emit_verum_text_from_static(module));
+        step!("emit_verum_generic_eq",       self.emit_verum_generic_eq(module));
+        step!("emit_verum_generic_hash",     self.emit_verum_generic_hash(module));
+        step!("emit_verum_int_to_text",      self.emit_verum_int_to_text(module));
+        step!("emit_verum_float_to_text",    self.emit_verum_float_to_text(module));
+        step!("emit_verum_string_parse_int", self.emit_verum_string_parse_int(module));
+        step!("emit_verum_string_parse_float", self.emit_verum_string_parse_float(module));
+        step!("emit_verum_text_char_len",    self.emit_verum_text_char_len(module));
+        step!("fixup_text_len",              self.fixup_text_len(module));
+        step!("fixup_map_get",               self.fixup_map_get(module));
+        step!("fixup_map_contains_key",      self.fixup_map_contains_key(module));
+        step!("fixup_map_remove",            self.fixup_map_remove(module));
+        step!("fixup_map_insert",            self.fixup_map_insert(module));
         Ok(())
     }
 
@@ -3832,20 +3843,27 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Emit all miscellaneous runtime functions as LLVM IR.
     pub fn emit_misc_ir_functions(&self, module: &Module<'ctx>) -> Result<()> {
-        self.emit_verum_time_monotonic_nanos(module)?;
-        self.emit_verum_time_realtime_nanos(module)?;
-        self.emit_verum_time_sleep_nanos(module)?;
-        self.emit_verum_random_u64(module)?;
-        self.emit_verum_random_float(module)?;
-        self.emit_verum_range_new(module)?;
-        self.emit_verum_log_functions(module)?;
-        self.emit_verum_file_ir_functions(module)?;
-        self.emit_verum_sync_bridge_functions(module)?;
-        self.emit_verum_sys_functions(module)?;
-        self.emit_verum_string_join(module)?;
-        self.emit_verum_cbgr_functions(module)?;
-        self.emit_verum_networking_functions(module)?;
-        self.emit_verum_process_functions(module)?;
+        let trace = std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some();
+        macro_rules! step {
+            ($name:literal, $expr:expr) => {{
+                if trace { eprintln!("[aot-misc] {}", $name); }
+                $expr?;
+            }};
+        }
+        step!("emit_verum_time_monotonic_nanos", self.emit_verum_time_monotonic_nanos(module));
+        step!("emit_verum_time_realtime_nanos",  self.emit_verum_time_realtime_nanos(module));
+        step!("emit_verum_time_sleep_nanos",     self.emit_verum_time_sleep_nanos(module));
+        step!("emit_verum_random_u64",           self.emit_verum_random_u64(module));
+        step!("emit_verum_random_float",         self.emit_verum_random_float(module));
+        step!("emit_verum_range_new",            self.emit_verum_range_new(module));
+        step!("emit_verum_log_functions",        self.emit_verum_log_functions(module));
+        step!("emit_verum_file_ir_functions",    self.emit_verum_file_ir_functions(module));
+        step!("emit_verum_sync_bridge_functions", self.emit_verum_sync_bridge_functions(module));
+        step!("emit_verum_sys_functions",        self.emit_verum_sys_functions(module));
+        step!("emit_verum_string_join",          self.emit_verum_string_join(module));
+        step!("emit_verum_cbgr_functions",       self.emit_verum_cbgr_functions(module));
+        step!("emit_verum_networking_functions", self.emit_verum_networking_functions(module));
+        step!("emit_verum_process_functions",    self.emit_verum_process_functions(module));
         // Note: verum_store_args/get_argc/get_argv kept in C because the entry point
         // (main/_start) calls verum_store_args which writes to C-global variables.
         // IR versions would use separate globals and not see the stored values.

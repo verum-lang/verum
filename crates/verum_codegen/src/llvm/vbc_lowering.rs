@@ -737,24 +737,36 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // the IR versions become module-internal and don't conflict with C runtime
         // symbols at link time.
         {
+            // VERUM_AOT_TRACE_RUNTIME=1 prints which top-level
+            // runtime-emit phase is running so signature-mismatch
+            // panics deep inside one of them can be pinpointed by
+            // reading the abort tail.
+            let trace = std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some();
+
             let runtime = super::runtime::RuntimeLowering::new(self.context);
+            if trace { eprintln!("[aot-runtime-stage] emit_text_ir_functions"); }
             runtime.emit_text_ir_functions(&self.module)?;
+            if trace { eprintln!("[aot-runtime-stage] emit_misc_ir_functions"); }
             runtime.emit_misc_ir_functions(&self.module)?;
 
             // Emit platform-native runtime functions as LLVM IR.
             // These shadow C runtime functions for full LTO optimization.
+            if trace { eprintln!("[aot-runtime-stage] emit_platform_functions"); }
             let platform = super::platform_ir::PlatformIR::new(self.context);
             platform.emit_platform_functions(&self.module)?;
 
             // Emit tensor runtime functions as LLVM IR.
             // Replaces verum_tensor.c — uses LLVM intrinsics for math (native HW speed).
+            if trace { eprintln!("[aot-runtime-stage] emit_tensor_functions"); }
             let tensor = super::tensor_ir::TensorIR::new(self.context);
             tensor.emit_tensor_functions(&self.module)?;
 
             // Emit Metal GPU runtime functions as LLVM IR.
             // Replaces verum_metal.m — uses ObjC runtime calls via objc_msgSend.
+            if trace { eprintln!("[aot-runtime-stage] emit_metal_functions"); }
             let metal = super::metal_ir::MetalIR::new(self.context);
             metal.emit_metal_functions(&self.module)?;
+            if trace { eprintln!("[aot-runtime-stage] all_done"); }
         }
 
         // Phase 3.7: Set internal linkage on all defined functions except verum_main.
