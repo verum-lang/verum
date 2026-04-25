@@ -3040,6 +3040,8 @@ pub enum LintOutputFormat {
     Pretty,
     Json,
     GithubActions,
+    Sarif,
+    Tap,
 }
 
 impl LintOutputFormat {
@@ -3048,8 +3050,10 @@ impl LintOutputFormat {
             "pretty" | "" => Ok(Self::Pretty),
             "json" => Ok(Self::Json),
             "github-actions" | "gha" => Ok(Self::GithubActions),
+            "sarif" => Ok(Self::Sarif),
+            "tap" => Ok(Self::Tap),
             other => Err(CliError::InvalidArgument(format!(
-                "unknown lint format `{}` (expected: pretty | json | github-actions)",
+                "unknown lint format `{}` (expected: pretty | json | github-actions | sarif | tap)",
                 other
             ))),
         }
@@ -3168,12 +3172,8 @@ pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat)
             LintLevel::Warning => warnings += 1,
             _ => {}
         }
-        match format {
-            LintOutputFormat::Json => emit_issue_json(issue),
-            LintOutputFormat::GithubActions => emit_issue_gha(issue),
-            LintOutputFormat::Pretty => unreachable!(),
-        }
     }
+    emit_issues(&all_issues, format)?;
 
     let _ = fix; // auto-fix in machine modes deferred to Phase B
     if errors > 0 {
@@ -3182,6 +3182,127 @@ pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat)
         Err(CliError::Custom(format!("{} lint warnings (denied)", warnings)))
     } else {
         Ok(())
+    }
+}
+
+/// Batch-aware issue emission. Per-issue formats (Json, GitHub
+/// Actions) iterate; document-level formats (SARIF, TAP) emit a
+/// single payload for the whole run.
+fn emit_issues(issues: &[LintIssue], format: LintOutputFormat) -> Result<()> {
+    match format {
+        LintOutputFormat::Pretty => {
+            for i in issues {
+                print_issue(i, false);
+            }
+        }
+        LintOutputFormat::Json => {
+            for i in issues {
+                emit_issue_json(i);
+            }
+        }
+        LintOutputFormat::GithubActions => {
+            for i in issues {
+                emit_issue_gha(i);
+            }
+        }
+        LintOutputFormat::Sarif => emit_sarif(issues),
+        LintOutputFormat::Tap => emit_tap(issues),
+    }
+    Ok(())
+}
+
+/// SARIF 2.1.0 emitter — one driver "verum-lint", every shipped rule
+/// listed under tool.driver.rules, every issue as a result with
+/// physicalLocation.artifactLocation + region.startLine/Column.
+fn emit_sarif(issues: &[LintIssue]) {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    s.push_str("{\n");
+    s.push_str("  \"$schema\": \"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\n");
+    s.push_str("  \"version\": \"2.1.0\",\n");
+    s.push_str("  \"runs\": [{\n");
+    s.push_str("    \"tool\": { \"driver\": {\n");
+    s.push_str("      \"name\": \"verum-lint\",\n");
+    s.push_str("      \"informationUri\": \"https://verum-lang.dev\",\n");
+    s.push_str("      \"rules\": [\n");
+    let mut first_rule = true;
+    for r in LINT_RULES {
+        if !first_rule {
+            s.push_str(",\n");
+        }
+        first_rule = false;
+        let _ = write!(
+            s,
+            "        {{ \"id\": {}, \"shortDescription\": {{ \"text\": {} }} }}",
+            json_string(r.name),
+            json_string(r.description),
+        );
+    }
+    s.push_str("\n      ]\n    } },\n");
+    s.push_str("    \"results\": [\n");
+    let mut first_res = true;
+    for i in issues {
+        if !first_res {
+            s.push_str(",\n");
+        }
+        first_res = false;
+        let level = match i.level {
+            LintLevel::Error => "error",
+            LintLevel::Warning => "warning",
+            LintLevel::Info => "note",
+            LintLevel::Hint => "note",
+            LintLevel::Off => continue,
+        };
+        let _ = write!(
+            s,
+            "      {{ \"ruleId\": {}, \"level\": \"{}\", \"message\": {{ \"text\": {} }}, \
+             \"locations\": [{{ \"physicalLocation\": {{ \
+             \"artifactLocation\": {{ \"uri\": {} }}, \
+             \"region\": {{ \"startLine\": {}, \"startColumn\": {} }} }} }}] }}",
+            json_string(i.rule),
+            level,
+            json_string(&i.message),
+            json_string(&i.file.display().to_string()),
+            i.line,
+            i.column,
+        );
+    }
+    s.push_str("\n    ]\n");
+    s.push_str("  }]\n");
+    s.push_str("}\n");
+    print!("{}", s);
+}
+
+/// TAP v13 emitter — `TAP version 13`, `1..N` plan, `ok N - msg` /
+/// `not ok N - msg` per issue with YAML diagnostic block on failures.
+/// `not ok` is emitted for Error and Warning; Info/Hint are `ok` with
+/// `# SKIP info` to avoid breaking strict TAP consumers.
+fn emit_tap(issues: &[LintIssue]) {
+    println!("TAP version 13");
+    println!("1..{}", issues.len());
+    for (idx, i) in issues.iter().enumerate() {
+        let n = idx + 1;
+        let directive = match i.level {
+            LintLevel::Error | LintLevel::Warning => "not ok",
+            LintLevel::Info | LintLevel::Hint => "ok",
+            LintLevel::Off => continue,
+        };
+        let skip = matches!(i.level, LintLevel::Info | LintLevel::Hint);
+        if skip {
+            println!(
+                "{} {} - {} [{}] # SKIP {} ({})",
+                directive, n, i.message, i.rule, i.level.as_str(), i.file.display()
+            );
+        } else {
+            println!("{} {} - {} [{}]", directive, n, i.message, i.rule);
+            println!("  ---");
+            println!("  rule: {}", i.rule);
+            println!("  level: {}", i.level.as_str());
+            println!("  file: {}", i.file.display());
+            println!("  line: {}", i.line);
+            println!("  column: {}", i.column);
+            println!("  ...");
+        }
     }
 }
 
@@ -3262,12 +3383,8 @@ pub fn run_extended(
             LintLevel::Warning => warnings += 1,
             _ => {}
         }
-        match format {
-            LintOutputFormat::Pretty => print_issue(issue, deny_warnings),
-            LintOutputFormat::Json => emit_issue_json(issue),
-            LintOutputFormat::GithubActions => emit_issue_gha(issue),
-        }
     }
+    emit_issues(&all_issues, format)?;
 
     if format == LintOutputFormat::Pretty {
         // Summary block consistent with execute()'s pretty output.
