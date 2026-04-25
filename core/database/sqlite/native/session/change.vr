@@ -31,9 +31,9 @@ mount core.database.sqlite.native.l4_vdbe.register.{
 // Op
 // -----------------------------------------------------------------------------
 
-public type ChangeOp is OpInsert | OpUpdate | OpDelete;
+public type SessionChangeOp is OpInsert | OpUpdate | OpDelete;
 
-public fn change_op_name(o: &ChangeOp) -> Text {
+public fn change_op_name(o: &SessionChangeOp) -> Text {
     match o {
         OpInsert => "INSERT".clone(),
         OpUpdate => "UPDATE".clone(),
@@ -41,7 +41,7 @@ public fn change_op_name(o: &ChangeOp) -> Text {
     }
 }
 
-public fn change_op_code(o: &ChangeOp) -> Int {
+public fn change_op_code(o: &SessionChangeOp) -> Int {
     match o {
         OpInsert => 18,    // SQLITE_INSERT
         OpUpdate => 23,    // SQLITE_UPDATE
@@ -54,7 +54,7 @@ public fn change_op_code(o: &ChangeOp) -> Int {
 // -----------------------------------------------------------------------------
 
 public type Change is {
-    op: ChangeOp,
+    op: SessionChangeOp,
     table: Text,
     /// True for each column that is part of the primary key.
     /// Length matches the table's column count.
@@ -205,7 +205,7 @@ fn clone_change(c: &Change) -> Change {
     }
 }
 
-fn clone_op(o: &ChangeOp) -> ChangeOp {
+fn clone_op(o: &SessionChangeOp) -> SessionChangeOp {
     match o { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
 }
 

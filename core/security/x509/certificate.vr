@@ -1,11 +1,11 @@
 // =============================================================================
-// security/x509/certificate.vr — X.509 Certificate + TBSCertificate (RFC 5280)
+// security/x509/certificate.vr — X.509 X509Certificate + TBSCertificate (RFC 5280)
 // =============================================================================
 // Layer: 3 (X.509 subsystem)
 // Dependencies: core, encoding.der, x509.{oid, algorithm, name, spki, time, ext}
 // =============================================================================
 //
-// Certificate ::= SEQUENCE {
+// X509Certificate ::= SEQUENCE {
 //     tbsCertificate       TBSCertificate,
 //     signatureAlgorithm   AlgorithmIdentifier,
 //     signatureValue       BIT STRING
@@ -28,7 +28,7 @@
 //
 // # What we do with this
 //
-// The parse produces a `Certificate` ADT that's ready for:
+// The parse produces a `X509Certificate` ADT that's ready for:
 //
 //   1. Chain validation (RFC 5280 §6.1) — path construction + checks.
 //   2. Signature verification (signature_value + inner tbs_der bytes
@@ -37,9 +37,9 @@
 //
 // We capture two raw byte slices alongside the structured data:
 //
-//   * `raw_der` — full Certificate DER (tag + length + everything).
+//   * `raw_der` — full X509Certificate DER (tag + length + everything).
 //     Needed for cert-level SHA-256 fingerprints (HPKP pins,
-//     Certificate Transparency).
+//     X509Certificate Transparency).
 //   * `tbs_der` — exactly the bytes over which `signatureValue` was
 //     computed. The signature verify path feeds this directly to the
 //     appropriate hash + verify function without re-serialising.
@@ -77,7 +77,7 @@ public type TbsCertificate is {
     extensions:    ExtensionSet,
 };
 
-public type Certificate is {
+public type X509Certificate is {
     tbs:             TbsCertificate,
     signature_alg:   SignatureAlg,      // outer — must equal tbs.signature_alg
     signature_value: List<Byte>,        // BIT STRING contents (no leading unused-bits byte)
@@ -91,7 +91,7 @@ public type Certificate is {
 // Parser
 // =============================================================================
 
-public fn parse_certificate(bytes: &[Byte]) -> Result<Certificate, DerError> {
+public fn parse_certificate(bytes: &[Byte]) -> Result<X509Certificate, DerError> {
     let mut r = DerReader.new(bytes);
 
     // Capture the full DER span; the reader internal buffer is a
@@ -107,7 +107,7 @@ public fn parse_certificate(bytes: &[Byte]) -> Result<Certificate, DerError> {
         return Err(DerError {
             kind: DerErrorKind.InvalidBitString,
             position: 0,
-            message: "Certificate.signatureValue has unused bits",
+            message: "X509Certificate.signatureValue has unused bits",
         });
     }
     cert_seq.expect_end()?;
@@ -125,7 +125,7 @@ public fn parse_certificate(bytes: &[Byte]) -> Result<Certificate, DerError> {
         });
     }
 
-    Ok(Certificate {
+    Ok(X509Certificate {
         tbs:             tbs,
         signature_alg:   sig_alg,
         signature_value: sig_bs.bytes,
@@ -262,7 +262,7 @@ fn signature_alg_matches(a: &SignatureAlg, b: &SignatureAlg) -> Bool {
 // High-level accessors
 // =============================================================================
 
-implement Certificate {
+implement X509Certificate {
     /// Is this a CA certificate? Per RFC 5280 §4.2.1.9, the
     /// basicConstraints extension must be present with cA = TRUE for a
     /// cert to legitimately issue other certs.

@@ -1,10 +1,10 @@
 // =============================================================================
-// security/x509/sct.vr — Signed Certificate Timestamp (RFC 6962)
+// security/x509/sct.vr — Signed X509Certificate Timestamp (RFC 6962)
 // =============================================================================
-// Layer: 3 (Certificate)
+// Layer: 3 (X509Certificate)
 // =============================================================================
 //
-// RFC 6962 Certificate Transparency: every publicly-trusted
+// RFC 6962 X509Certificate Transparency: every publicly-trusted
 // certificate MUST carry at least two SCTs from independent CT logs
 // (current Chrome / Apple policy). SCTs are delivered three ways:
 //

@@ -1,7 +1,7 @@
 // =============================================================================
 // security/x509/mod.vr — X.509 certificate subsystem (RFC 5280)
 // =============================================================================
-// Layer: 3 (Certificate layer — sits above encoding.der + security.{sig, ecc})
+// Layer: 3 (X509Certificate layer — sits above encoding.der + security.{sig, ecc})
 // Dependencies: core, collections, encoding.der, security.{sig, hash, ecc}
 // Spec: internal/specs/tls-quic.md §6.5, §12 Phase 1
 // =============================================================================
@@ -18,7 +18,7 @@
 // fn verify_server(chain_der: &List<List<Byte>>, hostname: Text) -> Result<(), ChainError> {
 //     let trust = TrustStore.system().map_err(|_| ChainError.UnknownIssuer)?;
 //
-//     let mut certs: List<Certificate> = [];
+//     let mut certs: List<X509Certificate> = [];
 //     let mut i: Int = 0;
 //     while i < chain_der.len() {
 //         certs.push(parse_certificate(chain_der[i].as_slice())
@@ -86,7 +86,7 @@ public mount .ext.{
 };
 
 // Re-exports — certificate
-public mount .certificate.{Certificate, TbsCertificate, X509Version, parse_certificate};
+public mount .certificate.{X509Certificate, TbsCertificate, X509Version, parse_certificate};
 
 // Re-exports — chain validation
 public mount .chain.{ChainError, VerifiedChain, validate_chain};

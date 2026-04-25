@@ -78,7 +78,7 @@ mount core.net.tls13.handshake.codec.{Reader};
 // Client configuration
 // =============================================================================
 
-public type ClientConfig is {
+public type Tls13ClientConfig is {
     server_name: Text,
     alpn:        List<List<Byte>>,            // offered protocols
     trust:       TrustStore,
@@ -112,7 +112,7 @@ public type StateConnected is ();
 // =============================================================================
 
 public type WaitServerHello is {
-    config:     ClientConfig,
+    config:     Tls13ClientConfig,
     transcript: Transcript,
     saw_hrr:    Bool,
     /// DHE private keys keyed by group — caller matches ServerHello.key_share.group.
@@ -122,7 +122,7 @@ public type WaitServerHello is {
 };
 
 public type WaitEncryptedExtensions is {
-    config:     ClientConfig,
+    config:     Tls13ClientConfig,
     transcript: Transcript,
     chosen_suite: CipherSuite,
     hash:       HashKind,
@@ -148,7 +148,7 @@ public type WaitFinished is {
 };
 
 public type Connected is {
-    config:     ClientConfig,
+    config:     Tls13ClientConfig,
     suite:      CipherSuite,
     hash:       HashKind,
     master_secret:    MasterSecret,
@@ -164,7 +164,7 @@ public type Connected is {
 // =============================================================================
 
 public type ClientSm is
-      StartSm { config: ClientConfig }
+      StartSm { config: Tls13ClientConfig }
     | WaitServerHelloSm(WaitServerHello)
     | WaitEncryptedExtensionsSm(WaitEncryptedExtensions)
     | WaitCertOrCrSm(WaitCertOrCr)
@@ -188,7 +188,7 @@ public type StepOutput is {
 
 implement ClientSm {
     /// Initial state; emit ClientHello.
-    public fn new(config: ClientConfig) -> ClientSm {
+    public fn new(config: Tls13ClientConfig) -> ClientSm {
         ClientSm.StartSm { config: config }
     }
 
@@ -592,7 +592,7 @@ fn on_finished(
 // Helpers
 // =============================================================================
 
-fn build_client_hello(config: &ClientConfig) -> (ClientHello, Transcript, List<(NamedGroup, List<Byte>)>) {
+fn build_client_hello(config: &Tls13ClientConfig) -> (ClientHello, Transcript, List<(NamedGroup, List<Byte>)>) {
     let mut exts: List<Extension> = [];
     // server_name
     let mut names: List<ServerName> = [];
@@ -630,7 +630,7 @@ fn build_client_hello(config: &ClientConfig) -> (ClientHello, Transcript, List<(
 }
 
 fn rebuild_client_hello_for_hrr(
-    config: &ClientConfig,
+    config: &Tls13ClientConfig,
     sh: &ServerHello,
 ) -> Result<ClientHello, TlsError> {
     // Per RFC 8446 §4.1.4, the retry ClientHello must:
@@ -761,7 +761,7 @@ fn compute_dhe(
         },
 
         // P-384 / P-521 / X448 — not in v1 (spec §1.1). These groups
-        // should never be selected if ClientConfig.groups was built
+        // should never be selected if Tls13ClientConfig.groups was built
         // via default_offer_list.
         _ => Err(TlsError.IllegalParameter),
     }

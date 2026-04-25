@@ -14,7 +14,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.session.change.{
-    Change, ChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
+    Change, SessionChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
     changeset_empty,
 };
 
@@ -133,7 +133,7 @@ fn clone_change(c: &Change) -> Change {
     }
 }
 
-fn clone_op(o: &ChangeOp) -> ChangeOp {
+fn clone_op(o: &SessionChangeOp) -> SessionChangeOp {
     match o { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
 }
 

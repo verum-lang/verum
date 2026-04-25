@@ -1,5 +1,5 @@
 // =============================================================================
-// security/x509/time.vr — Certificate validity time helpers (RFC 5280 §4.1.2.5)
+// security/x509/time.vr — X509Certificate validity time helpers (RFC 5280 §4.1.2.5)
 // =============================================================================
 // Layer: 3 (X.509 subsystem)
 // Dependencies: core, encoding.der (Time type), time.instant
@@ -32,7 +32,7 @@ mount core.time.instant.{Instant};
 // CertValidity window
 // =============================================================================
 
-/// Certificate validity window. Both ends are inclusive per RFC 5280
+/// X509Certificate validity window. Both ends are inclusive per RFC 5280
 /// §4.1.2.5 ("[...] the GeneralTime type shall be used for all validity
 /// periods ending after December 31, 9999, and the UTCTime type shall
 /// be used otherwise.").

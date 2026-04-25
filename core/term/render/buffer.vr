@@ -3,14 +3,14 @@
 // =============================================================================
 module buffer;
 
-mount super.cell.{Cell, grapheme_width, char_display_width};
+mount super.cell.{RenderCell, grapheme_width, char_display_width};
 mount super.super.style.Style;
 mount super.super.layout.Rect;
 
 /// 2D buffer of terminal cells — the basis of rendering.
-/// Stored as a flat List<Cell> with y*width+x indexing.
+/// Stored as a flat List<RenderCell> with y*width+x indexing.
 public type Buffer is {
-    cells: List<Cell>,
+    cells: List<RenderCell>,
     width: Int,
     height: Int,
 };
@@ -23,7 +23,7 @@ implement Buffer {
         let size = w * h;
         let mut cells = List.with_capacity(size);
         for _ in 0..size {
-            cells.push(Cell.EMPTY);
+            cells.push(RenderCell.EMPTY);
         }
         Buffer { cells: cells, width: w, height: h }
     }
@@ -34,12 +34,12 @@ implement Buffer {
     }
 
     /// Access a cell by coordinates.
-    public fn get(&self, x: Int, y: Int) -> &Cell {
+    public fn get(&self, x: Int, y: Int) -> &RenderCell {
         &self.cells[y * self.width + x]
     }
 
     /// Access a mutable cell by coordinates.
-    public fn get_mut(&mut self, x: Int, y: Int) -> &mut Cell {
+    public fn get_mut(&mut self, x: Int, y: Int) -> &mut RenderCell {
         &mut self.cells[y * self.width + x]
     }
 

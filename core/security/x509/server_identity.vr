@@ -43,7 +43,7 @@ module core.security.x509.server_identity;
 mount core.*;
 mount core.collections.List;
 mount core.net.addr.{Ipv4Addr, Ipv6Addr};
-mount core.security.x509.certificate.{Certificate};
+mount core.security.x509.certificate.{X509Certificate};
 mount core.security.x509.ext.subject_alt_name.{SubjectAltName};
 
 // =============================================================================
@@ -73,7 +73,7 @@ public type ServerIdentityError is
 /// }
 /// ```
 public fn verify_server_identity(
-    cert: &Certificate,
+    cert: &X509Certificate,
     reference_name: &Text,
 ) -> Result<(), ServerIdentityError> {
     if reference_name.is_empty() {
@@ -121,7 +121,7 @@ fn parse_ip_literal(s: &Text) -> Maybe<List<Byte>> {
 // =============================================================================
 
 fn verify_ip_identity(
-    cert: &Certificate,
+    cert: &X509Certificate,
     ip_bytes: List<Byte>,
 ) -> Result<(), ServerIdentityError> {
     match &cert.tbs.extensions.subject_alt_name {
@@ -144,7 +144,7 @@ fn verify_ip_identity(
 }
 
 fn verify_dns_identity(
-    cert: &Certificate,
+    cert: &X509Certificate,
     hostname: &Text,
 ) -> Result<(), ServerIdentityError> {
     match &cert.tbs.extensions.subject_alt_name {

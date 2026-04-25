@@ -15,7 +15,7 @@
 
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RText};
 mount core.database.sqlite.native.session.change.{
-    Change, ChangeOp, ChangeSet,
+    Change, SessionChangeOp, ChangeSet,
     OpInsert, OpUpdate, OpDelete,
     change_op_name, change_op_code,
     change_insert, change_update, change_delete,

@@ -9,7 +9,7 @@
 // verifies structural equality on ed25519 + sha256_with_rsa against the
 // known arc sequences, and cross-checks that distinct OIDs compare
 // unequal. Does not execute — Phase 1 adds full run-mode coverage once
-// the Certificate ADT lands and we need to decode real OIDs off the wire.
+// the X509Certificate ADT lands and we need to decode real OIDs off the wire.
 
 mount core.security.x509.oid.*;
 

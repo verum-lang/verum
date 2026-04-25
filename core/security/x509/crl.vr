@@ -1,10 +1,10 @@
 // =============================================================================
-// security/x509/crl.vr — Certificate Revocation List (RFC 5280 §5)
+// security/x509/crl.vr — X509Certificate Revocation List (RFC 5280 §5)
 // =============================================================================
-// Layer: 3 (Certificate)
+// Layer: 3 (X509Certificate)
 // =============================================================================
 //
-// RFC 5280 §5 CRL (Certificate Revocation List) structure:
+// RFC 5280 §5 CRL (X509Certificate Revocation List) structure:
 //
 //   CertificateList ::= SEQUENCE {
 //       tbsCertList          TBSCertList,

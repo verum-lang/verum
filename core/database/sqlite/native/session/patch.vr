@@ -25,7 +25,7 @@ mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RNull, RInt, RReal, RText, RBlob, RRowId,
 };
 mount core.database.sqlite.native.session.change.{
-    Change, ChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
+    Change, SessionChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
     change_op_name,
 };
 
@@ -40,7 +40,7 @@ public type PatchCell is { value: Maybe<Register> };
 // -----------------------------------------------------------------------------
 
 public type SessionPatch is {
-    op: ChangeOp,
+    op: SessionChangeOp,
     table: base.Text,
     pk_columns: List<Bool>,
     /// PK column values (used to locate the target row).
@@ -152,7 +152,7 @@ fn clone_register(r: &Register) -> Register {
     }
 }
 
-fn clone_op(o: &ChangeOp) -> ChangeOp {
+fn clone_op(o: &SessionChangeOp) -> SessionChangeOp {
     match o { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
 }
 

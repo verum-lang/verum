@@ -4,7 +4,7 @@
 module frame;
 
 mount core.io.{IoResult, StreamError, IoErrorKind};
-mount super.cell.Cell;
+mount super.cell.RenderCell;
 mount super.buffer.Buffer;
 mount super.diff.flush_diff;
 mount super.super.raw.{RawTerminal, PosixTerminal, TerminalSize, TermCapabilities, CursorShape, EscapeWriter};

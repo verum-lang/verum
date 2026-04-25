@@ -13,7 +13,7 @@
 // Used in three places per cert:
 //
 //   * TBSCertificate.signature — the signature algorithm over TBS
-//   * Certificate.signatureAlgorithm — same value, MUST match inner
+//   * X509Certificate.signatureAlgorithm — same value, MUST match inner
 //     (RFC 5280 §4.1.1.2 — verify this equality during validation)
 //   * SubjectPublicKeyInfo.algorithm — the key's own algorithm + params
 //     (e.g. ecPublicKey + namedCurve parameter)

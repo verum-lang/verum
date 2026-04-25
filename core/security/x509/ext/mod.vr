@@ -1,10 +1,10 @@
 // =============================================================================
-// security/x509/ext/mod.vr — Certificate Extension subtree (RFC 5280 §4.2)
+// security/x509/ext/mod.vr — X509Certificate Extension subtree (RFC 5280 §4.2)
 // =============================================================================
 // Layer: 3 (X.509 subsystem)
 // =============================================================================
 //
-// Certificate ::= SEQUENCE { ... extensions [3] EXPLICIT Extensions OPTIONAL }
+// X509Certificate ::= SEQUENCE { ... extensions [3] EXPLICIT Extensions OPTIONAL }
 // Extensions ::= SEQUENCE SIZE (1..MAX) OF Extension
 // Extension ::= SEQUENCE {
 //     extnID    OBJECT IDENTIFIER,

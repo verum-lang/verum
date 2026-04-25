@@ -12,14 +12,14 @@ mount super.super.style.{Style, Color, Modifier};
 
 /// A terminal cell — one position in the buffer.
 /// Stores a grapheme cluster (not a single char) + style.
-public type Cell is {
+public type RenderCell is {
     grapheme: Text,
     style: Style,
     skip: Bool,         // Skip during rendering (second cell of wide grapheme)
 };
 
-implement Cell {
-    public const EMPTY: Cell = Cell {
+implement RenderCell {
+    public const EMPTY: RenderCell = RenderCell {
         grapheme: " ",
         style: Style.DEFAULT,
         skip: false,
@@ -45,7 +45,7 @@ implement Cell {
     }
 
     /// Equality for diffing. Must be cheap.
-    public fn eq(&self, other: &Cell) -> Bool {
+    public fn eq(&self, other: &RenderCell) -> Bool {
         self.grapheme == other.grapheme
             && self.style.fg == other.style.fg
             && self.style.bg == other.style.bg

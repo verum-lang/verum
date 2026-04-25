@@ -1,10 +1,10 @@
 // =============================================================================
 // security/x509/ocsp.vr — OCSP client + stapling (RFC 6960)
 // =============================================================================
-// Layer: 3 (Certificate)
+// Layer: 3 (X509Certificate)
 // =============================================================================
 //
-// RFC 6960 Online Certificate Status Protocol:
+// RFC 6960 Online X509Certificate Status Protocol:
 //
 //   OCSPRequest ::= SEQUENCE {
 //       tbsRequest      TBSRequest,
@@ -25,7 +25,7 @@
 //       tbsResponseData         ResponseData,
 //       signatureAlgorithm      AlgorithmIdentifier,
 //       signature               BIT STRING,
-//       certs               [0] EXPLICIT SEQUENCE OF Certificate OPTIONAL
+//       certs               [0] EXPLICIT SEQUENCE OF X509Certificate OPTIONAL
 //   }
 //
 //   ResponseData ::= SEQUENCE {

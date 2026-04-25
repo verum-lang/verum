@@ -40,7 +40,7 @@ module core.security.x509.trust_store;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.x509.certificate.{Certificate, parse_certificate};
+mount core.security.x509.certificate.{X509Certificate, parse_certificate};
 mount core.security.x509.name.{DistinguishedName};
 
 // =============================================================================
@@ -57,7 +57,7 @@ public type TrustError is
 // =============================================================================
 
 public type TrustStore is {
-    anchors: List<Certificate>,
+    anchors: List<X509Certificate>,
 };
 
 implement TrustStore {
@@ -66,7 +66,7 @@ implement TrustStore {
     }
 
     public fn from_der(ders: &[List<Byte>]) -> Result<TrustStore, TrustError> {
-        let mut out: List<Certificate> = [];
+        let mut out: List<X509Certificate> = [];
         let mut i: Int = 0;
         while i < ders.len() {
             match parse_certificate(ders[i].as_slice()) {
@@ -95,7 +95,7 @@ implement TrustStore {
         load_bundled_mozilla()
     }
 
-    public fn add(&mut self, cert: Certificate) {
+    public fn add(&mut self, cert: X509Certificate) {
         self.anchors.push(cert);
     }
 
@@ -106,7 +106,7 @@ implement TrustStore {
     /// identify self-signed roots present both in the chain and the
     /// store (avoid spurious "UnknownIssuer" when chain carries its
     /// own root).
-    public fn contains(&self, cert: &Certificate) -> Bool {
+    public fn contains(&self, cert: &X509Certificate) -> Bool {
         let mut i: Int = 0;
         while i < self.anchors.len() {
             let a = &self.anchors[i];
@@ -129,7 +129,7 @@ implement TrustStore {
     /// Used by chain-builder to look up the root when the chain omits it
     /// (typical case: TLS server sends EE + intermediates, root stays
     /// on the client).
-    public fn find_by_subject(&self, issuer_dn: &DistinguishedName) -> Maybe<Certificate> {
+    public fn find_by_subject(&self, issuer_dn: &DistinguishedName) -> Maybe<X509Certificate> {
         let mut i: Int = 0;
         while i < self.anchors.len() {
             if self.anchors[i].tbs.subject.raw_eq(issuer_dn) {

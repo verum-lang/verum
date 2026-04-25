@@ -21,7 +21,7 @@ mount core.database.sqlite.native.ext.hooks.{
     PreUpdateHook, UpdateHook, UpdateOp, UoInsert, UoUpdate, UoDelete,
 };
 mount core.database.sqlite.native.session.change.{
-    Change, ChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
+    Change, SessionChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
     changeset_empty, change_insert, change_update, change_delete,
 };
 
@@ -253,7 +253,7 @@ fn clone_changeset(cs: &ChangeSet) -> ChangeSet {
     out
 }
 
-fn clone_change_op(o: &ChangeOp) -> ChangeOp {
+fn clone_change_op(o: &SessionChangeOp) -> SessionChangeOp {
     match o {
         OpInsert => OpInsert,
         OpUpdate => OpUpdate,

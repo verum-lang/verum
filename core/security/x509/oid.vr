@@ -126,7 +126,7 @@ public fn x25519() -> Oid { Oid.from(&[1, 3, 101, 110]) }
 public fn x448()   -> Oid { Oid.from(&[1, 3, 101, 111]) }
 
 // =============================================================================
-// Certificate extensions — id-ce (2.5.29.*) — RFC 5280 §4.2
+// X509Certificate extensions — id-ce (2.5.29.*) — RFC 5280 §4.2
 // =============================================================================
 
 public fn ext_subject_key_identifier()        -> Oid { Oid.from(&[2, 5, 29, 14]) }
@@ -148,7 +148,7 @@ public fn ext_inhibit_any_policy()            -> Oid { Oid.from(&[2, 5, 29, 54])
 public fn ext_authority_info_access()         -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 1, 1]) }
 public fn ext_subject_info_access()           -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 1, 11]) }
 
-// Certificate Transparency (RFC 6962) — embedded SCT list
+// X509Certificate Transparency (RFC 6962) — embedded SCT list
 public fn ext_sct_list() -> Oid {
     Oid.from(&[1, 3, 6, 1, 4, 1, 11129, 2, 4, 2])
 }

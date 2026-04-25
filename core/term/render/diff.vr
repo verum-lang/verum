@@ -11,7 +11,7 @@
 module diff;
 
 mount core.io.{Write, IoResult};
-mount super.cell.Cell;
+mount super.cell.RenderCell;
 mount super.buffer.Buffer;
 mount super.super.raw.{EscapeWriter, ClearMode};
 mount super.super.style.{Style, Color, Modifier};
