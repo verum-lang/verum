@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.between_op_api.rewrite.{
-    Form, FBetween, FNotBetween, form_name,
+    BetweenForm, FBetween, FNotBetween, form_name,
     Rewrite, RwAndPair, RwOrPair, rewrite_for, rewrite_name,
     SqlBool, SbTrue, SbFalse, SbNull,
     Value, VNull, VInt,

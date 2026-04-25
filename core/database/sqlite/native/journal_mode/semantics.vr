@@ -98,9 +98,9 @@ public fn commit_speed(m: &JournalMode) -> CommitSpeed {
 // Mode selection helper — pick the safest mode that satisfies a goal
 // -----------------------------------------------------------------------------
 
-public type Goal is GMaxConcurrency | GMaxSpeed | GCrashSafety;
+public type JournalModeGoal is GMaxConcurrency | GMaxSpeed | GCrashSafety;
 
-public fn recommend_for(goal: &Goal) -> JournalMode {
+public fn recommend_for(goal: &JournalModeGoal) -> JournalMode {
     match goal {
         GMaxConcurrency => JmWal,
         GMaxSpeed       => JmMemory,

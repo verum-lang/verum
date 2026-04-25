@@ -36,16 +36,16 @@ public fn is_readonly(r: &ReadonlyCheckResult) -> Bool {
     match r { RReadonly => true, _ => false }
 }
 
-// Inputs that determine the result.
-public type Inputs is {
+// DbReadonlyInputs that determine the result.
+public type DbReadonlyInputs is {
     schema_known: Bool,
     opened_readonly: Bool,
     file_mode_writable: Bool,
     query_only_on: Bool,
 };
 
-public fn writable_inputs() -> Inputs {
-    Inputs {
+public fn writable_inputs() -> DbReadonlyInputs {
+    DbReadonlyInputs {
         schema_known: true,
         opened_readonly: false,
         file_mode_writable: true,
@@ -53,7 +53,7 @@ public fn writable_inputs() -> Inputs {
     }
 }
 
-public fn check(i: &Inputs) -> ReadonlyCheckResult {
+public fn check(i: &DbReadonlyInputs) -> ReadonlyCheckResult {
     if !i.schema_known       { return RUnknownSchema; }
     if i.opened_readonly     { return RReadonly; }
     if !i.file_mode_writable { return RReadonly; }
@@ -61,9 +61,9 @@ public fn check(i: &Inputs) -> ReadonlyCheckResult {
     RWritable
 }
 
-// Reason taxonomy — used by introspection tools to explain why something
+// DbReadonlyReason taxonomy — used by introspection tools to explain why something
 // is read-only.
-public type Reason is
+public type DbReadonlyReason is
     | RnNotReadonly
     | RnOpenedReadonly
     | RnFsPermissions
@@ -71,7 +71,7 @@ public type Reason is
     | RnSchemaUnknown
     ;
 
-public fn reason_for(i: &Inputs) -> Reason {
+public fn reason_for(i: &DbReadonlyInputs) -> DbReadonlyReason {
     if !i.schema_known       { return RnSchemaUnknown; }
     if i.opened_readonly     { return RnOpenedReadonly; }
     if !i.file_mode_writable { return RnFsPermissions; }
@@ -79,7 +79,7 @@ public fn reason_for(i: &Inputs) -> Reason {
     RnNotReadonly
 }
 
-public fn reason_name(r: &Reason) -> Text {
+public fn reason_name(r: &DbReadonlyReason) -> Text {
     match r {
         RnNotReadonly      => "writable".clone(),
         RnOpenedReadonly   => "opened_readonly".clone(),

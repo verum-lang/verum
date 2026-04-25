@@ -265,6 +265,17 @@ const LINT_RULES: &[LintRule] = &[
              the project's [lint.architecture] forbids this import",
         category: LintCategory::Style,
     },
+    // Phase C.4 — CBGR-budget enforcement. Off by default; opt in via
+    // [lint.cbgr_budgets].default_check_ns < 15 or per-module overrides.
+    LintRule {
+        name: "cbgr-budget-exceeded",
+        level: LintLevel::Warning,
+        description:
+            "Managed CBGR reference (`&` / `&mut`) used in a module whose \
+             [lint.cbgr_budgets].max_check_ns budget is below the static \
+             per-deref cost — promote to `&checked` (0ns) or `&unsafe`",
+        category: LintCategory::Performance,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {

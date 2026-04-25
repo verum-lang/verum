@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.expanded_sql_api.forms.{
-    Form, FOriginal, FExpanded, FNormalized, form_name,
+    SqlForm, FOriginal, FExpanded, FNormalized, form_name,
     may_return_null,
     Lifetime, LtInternalOwned, LtCallerFrees,
     lifetime_for, lifetime_name, caller_frees,

@@ -103,6 +103,7 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
         &PublicMustHaveVerifyPass,
         &ForbiddenContextPass,
         &ArchitectureViolationPass,
+        &CbgrBudgetExceededPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
@@ -1484,6 +1485,161 @@ impl LintPass for ArchitectureViolationPass {
             }
         }
         issues
+    }
+}
+
+// ===================================================================
+// Phase C.4: CBGR-budget enforcement
+// ===================================================================
+//
+// Per-module `max_check_ns` budget for managed CBGR references.
+// Configured via `[lint.cbgr_budgets]`:
+//
+//     [lint.cbgr_budgets]
+//     default_check_ns = 15
+//
+//     [lint.cbgr_budgets.modules]
+//     "app.handlers.*" = { max_check_ns = 30 }
+//     "core.runtime.*" = { max_check_ns = 0  }    # 0 = managed refs forbidden
+//
+// The pass walks every `UnOp::Ref` / `UnOp::RefMut` (Tier-0, ~15ns
+// per deref) in the module's expressions and compares against the
+// budget for the current module path. Today's enforcement is static:
+//
+//   max_check_ns = 0      → every managed ref is reported
+//   max_check_ns < 15     → every managed ref is reported (budget
+//                            < the cheapest single check)
+//   max_check_ns >= 15    → silent (within static estimate)
+//
+// Profile-driven enforcement (compare measured runtime cost from
+// `target/profile/last.json` against the budget) is Stage 3.
+//
+// ===================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+struct CbgrBudgetsConfig {
+    default_check_ns: u64,
+    modules: std::collections::HashMap<String, CbgrModuleBudget>,
+}
+
+impl Default for CbgrBudgetsConfig {
+    fn default() -> Self {
+        Self {
+            default_check_ns: 15, // matches CBGR spec: ~15ns per managed deref
+            modules: std::collections::HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct CbgrModuleBudget {
+    max_check_ns: u64,
+}
+
+/// Cost of one managed-tier CBGR reference deref, per the CBGR spec
+/// (`docs/detailed/26-cbgr-implementation.md`). This is the static
+/// estimate; profile-driven enforcement is Stage 3.
+const CBGR_MANAGED_DEREF_NS: u64 = 15;
+
+struct CbgrBudgetExceededPass;
+
+impl LintPass for CbgrBudgetExceededPass {
+    fn name(&self) -> &'static str { "cbgr-budget-exceeded" }
+    fn description(&self) -> &'static str {
+        "Managed CBGR reference (`&` / `&mut`) used in a module whose \
+         [lint.cbgr_budgets].max_check_ns budget is below the static \
+         per-deref cost — promote to `&checked` (0ns) or `&unsafe`"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Performance }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg: CbgrBudgetsConfig = match ctx
+            .config
+            .and_then(|c| c.rule_config::<CbgrBudgetsConfig>("cbgr-budgets"))
+        {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+
+        let module_path = module_path_for_file(ctx.file);
+        // Most-specific module budget; fall back to default_check_ns.
+        let budget = cfg
+            .modules
+            .iter()
+            .filter(|(pat, _)| {
+                module_path == pat.as_str()
+                    || (module_path.len() > pat.len()
+                        && module_path.starts_with(pat.as_str())
+                        && module_path.as_bytes()[pat.len()] == b'.')
+                    || glob_module_match(pat, &module_path)
+            })
+            .max_by_key(|(pat, _)| pat.len())
+            .map(|(_, b)| b.max_check_ns)
+            .unwrap_or(cfg.default_check_ns);
+
+        // Static estimate: every managed deref costs at least
+        // CBGR_MANAGED_DEREF_NS. If the budget is below that, every
+        // managed ref violates the budget.
+        if budget >= CBGR_MANAGED_DEREF_NS {
+            return Vec::new();
+        }
+
+        // Walk every Ref / RefMut occurrence in fn bodies.
+        struct V<'s, 'p> {
+            source: &'s str,
+            file: &'p Path,
+            budget: u64,
+            module_path: String,
+            issues: Vec<LintIssue>,
+        }
+        impl<'s, 'p> Visitor for V<'s, 'p> {
+            fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+                use verum_ast::{ExprKind, UnOp};
+                if let ExprKind::Unary { op, .. } = &expr.kind {
+                    if matches!(op, UnOp::Ref | UnOp::RefMut) {
+                        let (line, col) = span_to_line_col(self.source, expr.span.start);
+                        let promote_hint = if matches!(op, UnOp::Ref) {
+                            "&checked"
+                        } else {
+                            "&checked mut"
+                        };
+                        self.issues.push(LintIssue {
+                            rule: "cbgr-budget-exceeded",
+                            level: LintLevel::Warning,
+                            file: self.file.to_path_buf(),
+                            line,
+                            column: col,
+                            message: format!(
+                                "managed `{}` reference in `{}` exceeds budget \
+                                 ({}ns budget < {}ns/deref); promote to `{}` for 0ns",
+                                op.as_str(),
+                                self.module_path,
+                                self.budget,
+                                CBGR_MANAGED_DEREF_NS,
+                                promote_hint,
+                            ),
+                            suggestion: None,
+                            fixable: false,
+                        });
+                    }
+                }
+                visitor::walk_expr(self, expr);
+            }
+        }
+        let mut v = V {
+            source: ctx.source,
+            file: ctx.file,
+            budget,
+            module_path,
+            issues: Vec::new(),
+        };
+        for item in &ctx.module.items {
+            v.visit_item(item);
+        }
+        v.issues
     }
 }
 

@@ -1,0 +1,136 @@
+// =============================================================================
+// coercion.vr — marker protocols driving unifier coercion behaviour
+// =============================================================================
+// Layer: 0 (Foundation)
+// Dependencies: none
+//
+// Replaces hardcoded stdlib-name lists in the compiler with
+// implement-block discovery. Each protocol below corresponds to a
+// data-driven coercion rule the type-checker's unifier applies:
+//
+//   * IntCoercible — `Type ↔ Int` bidirectional coercion. Stdlib FFI
+//     handles, time scalars, bitflags, and resource handles
+//     `implement IntCoercible` to opt into automatic conversion to
+//     and from `Int` at use sites where unification would otherwise
+//     refuse.
+//
+//   * TensorLike — tensor-family marker. Types that present a
+//     tensor-shaped API (DynTensor, Tensor, Vector, Cotangent,
+//     Tangent) `implement TensorLike` so the unifier accepts
+//     `Float ↔ Tensor<Float>` coercion in math expressions
+//     without an explicit `.scalar()` call at every site.
+//
+//   * Indexable — types that support `t[i: Int]` indexing where the
+//     index is a plain integer. The unifier treats Indexable's
+//     `Generic { name, .. } ↔ Int` shape as compatible so derived
+//     index expressions don't need explicit casts.
+//
+//   * RangeLike — types that present a (start, end) interval shape
+//     compatible with `Range<Int>`. Slicing operations (a[lo..hi])
+//     produce values that unify against tuple types via this
+//     marker.
+//
+// All four are MARKER protocols — they have no methods. The compiler
+// only cares that the implement-block exists; the protocol body is
+// empty so users can opt in with a one-line declaration:
+//
+// ```verum
+// implement IntCoercible for MyHandle {};
+// implement TensorLike for SparseMatrix<T> {};
+// ```
+//
+// Spec: docs/detailed/03-type-system.md §6.4 (coercion protocols),
+//       crates/verum_types/src/CLAUDE.md (architectural rule:
+//       "NEVER hardcode stdlib/core type knowledge in the compiler").
+
+module core.base.coercion;
+
+// =============================================================================
+// IntCoercible — marker for Type ↔ Int bidirectional coercion
+// =============================================================================
+//
+// Types that implement IntCoercible are accepted by the unifier in
+// arithmetic, comparison, and indexing contexts where one side is
+// `Int`. The conversion at runtime depends on each type's Cast /
+// From<Int> implementation; this protocol only opts the type into
+// the coercion check.
+//
+// # Examples (typical stdlib uses)
+//
+// ```verum
+// implement IntCoercible for Duration {};   // Duration as nanoseconds → Int
+// implement IntCoercible for FileDesc {};   // POSIX fd as raw int
+// implement IntCoercible for Port {};       // network port as 0..65535
+// implement IntCoercible for VmAddress {};  // memory address as i64
+// ```
+//
+// # When NOT to implement
+//
+// If `Type → Int` is genuinely meaningless (e.g. `String`, `Map<K,V>`)
+// do NOT implement IntCoercible — the unifier will then correctly
+// surface a type-mismatch error at use sites.
+public type IntCoercible is protocol {};
+
+// =============================================================================
+// TensorLike — tensor-family marker for Float ↔ Tensor<_> coercion
+// =============================================================================
+//
+// Types that implement TensorLike are recognised by the unifier as
+// tensor-shaped values. This enables `Float ↔ Tensor<Float>`
+// bidirectional coercion in arithmetic so `tensor + 1.0` doesn't
+// require `tensor + Tensor.scalar(1.0)`.
+//
+// # Examples
+//
+// ```verum
+// implement<T> TensorLike for DynTensor<T> {};
+// implement<T> TensorLike for Vector<T> {};
+// implement<T> TensorLike for Cotangent<T> {};
+// implement<T> TensorLike for Tangent<T> {};
+// ```
+public type TensorLike is protocol {};
+
+// =============================================================================
+// Indexable — marker for `t[i: Int]` integer indexing coercion
+// =============================================================================
+//
+// Types that implement Indexable opt into `Generic<...> ↔ Int` shape
+// coercion in the unifier — necessary because the index operation
+// produces an `Int` even when the container itself is `List<USize>`,
+// `Slice<UInt8>`, etc., and the surrounding context expects a plain
+// `Int`.
+//
+// Implement when:
+//   * The type supports `[i: Int]` indexing at runtime.
+//   * Index coercions naturally arise (e.g. `slice[i] + 1` where
+//     `slice[i]` produces some sized integer that the unifier
+//     should accept where `Int` is expected).
+//
+// # Examples
+//
+// ```verum
+// implement<T> Indexable for List<T> {};
+// implement<T> Indexable for Slice<T> {};
+// implement Indexable for Range {};
+// ```
+public type Indexable is protocol {};
+
+// =============================================================================
+// RangeLike — marker for (start, end) interval shape
+// =============================================================================
+//
+// Types that implement RangeLike are accepted by the unifier where
+// a `(Maybe<USize>, Maybe<USize>)` tuple-shape arrival is expected
+// (e.g. from slicing operations: `vec[lo..hi]` produces a
+// `Range<Int>` value that reaches a function expecting the tuple
+// form).
+//
+// # Examples
+//
+// ```verum
+// implement RangeLike for Range {};
+// implement RangeLike for RangeInclusive {};
+// implement RangeLike for RangeFrom {};
+// implement RangeLike for RangeTo {};
+// ```
+public type RangeLike is protocol {};

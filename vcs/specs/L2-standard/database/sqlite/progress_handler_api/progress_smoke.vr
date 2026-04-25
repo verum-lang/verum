@@ -7,7 +7,7 @@
 
 mount core.database.sqlite.native.progress_handler_api.handler.{
     Config, unconfigured, install, is_active,
-    Effect, EfContinue, EfInterrupt,
+    ProgressEffect, EfContinue, EfInterrupt,
     effect_for_return, effect_name, aborts_stmt,
     Tick, TkSilent, TkInvoke,
     tick, tick_name, invokes_callback, interrupt_code,

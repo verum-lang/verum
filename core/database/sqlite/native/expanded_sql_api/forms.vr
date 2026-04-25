@@ -4,13 +4,13 @@ module core.database.sqlite.native.expanded_sql_api.forms;
 
 mount base.{Bool, Text};
 
-public type Form is
+public type SqlForm is
     | FOriginal       // sqlite3_sql      — never NULL
     | FExpanded       // sqlite3_expanded_sql — may be NULL on OOM
     | FNormalized     // sqlite3_normalized_sql — NULL if not built with NORMALIZE
     ;
 
-public fn form_name(f: &Form) -> Text {
+public fn form_name(f: &SqlForm) -> Text {
     match f {
         FOriginal   => "original".clone(),
         FExpanded   => "expanded".clone(),
@@ -18,7 +18,7 @@ public fn form_name(f: &Form) -> Text {
     }
 }
 
-public fn may_return_null(f: &Form) -> Bool {
+public fn may_return_null(f: &SqlForm) -> Bool {
     match f { FOriginal => false, _ => true }
 }
 
@@ -28,7 +28,7 @@ public type Lifetime is
     | LtCallerFrees       // sqlite3_expanded_sql — caller calls sqlite3_free
     ;
 
-public fn lifetime_for(f: &Form) -> Lifetime {
+public fn lifetime_for(f: &SqlForm) -> Lifetime {
     match f {
         FOriginal   => LtInternalOwned,
         FExpanded   => LtCallerFrees,
@@ -48,7 +48,7 @@ public fn caller_frees(l: &Lifetime) -> Bool {
 }
 
 // Build-time gate for normalized form.
-public fn requires_compile_flag(f: &Form) -> Bool {
+public fn requires_compile_flag(f: &SqlForm) -> Bool {
     match f { FNormalized => true, _ => false }
 }
 

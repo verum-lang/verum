@@ -9,7 +9,7 @@
 
 mount core.net.websocket.{
     Opcode, CloseCode, Frame,
-    encode, decode, DecodeResult, DecodeError,
+    encode, decode, WebSocketDecodeResult, WebSocketDecodeError,
     accept_key, validate_server_handshake,
     WEBSOCKET_MAGIC,
 };
@@ -55,34 +55,34 @@ fn typecheck_encode_client(frame: &Frame) -> List<Byte> {
 }
 
 // Decode — server (expects masked) vs client (expects unmasked).
-fn typecheck_decode_server(buf: &[Byte]) -> DecodeResult {
+fn typecheck_decode_server(buf: &[Byte]) -> WebSocketDecodeResult {
     decode(buf, true, 1024 * 1024)
 }
 
-fn typecheck_decode_client(buf: &[Byte]) -> DecodeResult {
+fn typecheck_decode_client(buf: &[Byte]) -> WebSocketDecodeResult {
     decode(buf, false, 1024 * 1024)
 }
 
-// Pattern-match on all DecodeResult variants.
-fn typecheck_decode_result(r: DecodeResult) -> Int {
+// Pattern-match on all WebSocketDecodeResult variants.
+fn typecheck_decode_result(r: WebSocketDecodeResult) -> Int {
     match r {
-        DecodeResult.Decoded { frame: _, consumed } => consumed,
-        DecodeResult.NeedMore => 0,
-        DecodeResult.Err(_) => -1,
+        WebSocketDecodeResult.Decoded { frame: _, consumed } => consumed,
+        WebSocketDecodeResult.NeedMore => 0,
+        WebSocketDecodeResult.Err(_) => -1,
     }
 }
 
 // Error variants.
-fn typecheck_errors() -> List<DecodeError> {
-    let mut xs: List<DecodeError> = List.new();
-    xs.push(DecodeError.IncompleteFrame);
-    xs.push(DecodeError.InvalidOpcode(0x0F));
-    xs.push(DecodeError.ControlFrameFragmented);
-    xs.push(DecodeError.ControlFramePayloadTooLong);
-    xs.push(DecodeError.ReservedBitsSet);
-    xs.push(DecodeError.PayloadTooLong { limit: 1024 });
-    xs.push(DecodeError.ExpectedMasked);
-    xs.push(DecodeError.UnexpectedlyMasked);
+fn typecheck_errors() -> List<WebSocketDecodeError> {
+    let mut xs: List<WebSocketDecodeError> = List.new();
+    xs.push(WebSocketDecodeError.IncompleteFrame);
+    xs.push(WebSocketDecodeError.InvalidOpcode(0x0F));
+    xs.push(WebSocketDecodeError.ControlFrameFragmented);
+    xs.push(WebSocketDecodeError.ControlFramePayloadTooLong);
+    xs.push(WebSocketDecodeError.ReservedBitsSet);
+    xs.push(WebSocketDecodeError.PayloadTooLong { limit: 1024 });
+    xs.push(WebSocketDecodeError.ExpectedMasked);
+    xs.push(WebSocketDecodeError.UnexpectedlyMasked);
     xs
 }
 

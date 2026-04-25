@@ -6009,6 +6009,47 @@ impl VbcCodegen {
         } else {
             method.name.to_string()
         };
+        // VUVA #153 — receiver-narrowing safety net. The giant match
+        // above tries to extract the receiver type from a closed list
+        // of expression shapes (Path / Call / MethodCall / Field /
+        // Literal / Unary / Paren). When none match we fall through
+        // to bare `method.name`, which lets `Result<Int,Int>::Err(99)
+        // .unwrap()` pick the wrong implementation: multiple stdlib
+        // types declare `fn unwrap(self)`, the dispatcher narrows by
+        // name+arity and the WRONG candidate wins (the one whose
+        // unwrap does not panic on Err). The narrowing has to happen
+        // BEFORE dispatch — once `method_id` is interned, the
+        // interpreter can't tell us we picked the wrong receiver
+        // type. If the explicit-case computation produced a bare
+        // name (no `.` separator), retry via `infer_expr_type_name`,
+        // which is a generic best-effort type-inference helper that
+        // handles arbitrary receiver expressions.
+        let effective_method_name = if !effective_method_name.contains('.')
+            && !effective_method_name.contains('$')
+        {
+            if let Some(inferred_type) = self.infer_expr_type_name(receiver) {
+                let base_type = VbcCodegen::strip_generic_args(&inferred_type);
+                let resolved = self.resolve_type_alias(base_type);
+                let final_base = VbcCodegen::strip_generic_args(&resolved);
+                if !final_base.is_empty()
+                    && final_base
+                        .chars()
+                        .next()
+                        .map(|c| c.is_ascii_uppercase())
+                        .unwrap_or(false)
+                    && final_base.len() > 1
+                {
+                    format!("{}.{}", final_base, method.name)
+                } else {
+                    effective_method_name
+                }
+            } else {
+                effective_method_name
+            }
+        } else {
+            effective_method_name
+        };
+
         // Normalize slice-type prefixes: `[T].method` is the natural name
         // produced by `extract_type_name_from_ast` for field/variable types
         // of kind `[T]`, but `implement<T> [T]` blocks register under the

@@ -21,24 +21,24 @@ public fn install(n: Int) -> Config {
 
 public fn is_active(c: &Config) -> Bool { c.installed }
 
-// Effect of a single callback return code.
-public type Effect is
+// ProgressEffect of a single callback return code.
+public type ProgressEffect is
     | EfContinue           // return 0 → keep running
     | EfInterrupt          // non-zero → abort with SQLITE_INTERRUPT
     ;
 
-public fn effect_for_return(rc: Int) -> Effect {
+public fn effect_for_return(rc: Int) -> ProgressEffect {
     if rc == 0 { EfContinue } else { EfInterrupt }
 }
 
-public fn effect_name(e: &Effect) -> Text {
+public fn effect_name(e: &ProgressEffect) -> Text {
     match e {
         EfContinue  => "continue".clone(),
         EfInterrupt => "interrupt".clone(),
     }
 }
 
-public fn aborts_stmt(e: &Effect) -> Bool {
+public fn aborts_stmt(e: &ProgressEffect) -> Bool {
     match e { EfInterrupt => true, _ => false }
 }
 

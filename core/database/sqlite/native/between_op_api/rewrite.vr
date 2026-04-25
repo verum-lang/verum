@@ -4,12 +4,12 @@ module core.database.sqlite.native.between_op_api.rewrite;
 
 mount base.{Bool, Int64, Text};
 
-public type Form is
+public type BetweenForm is
     | FBetween       // X BETWEEN LO AND HI
     | FNotBetween    // X NOT BETWEEN LO AND HI
     ;
 
-public fn form_name(f: &Form) -> Text {
+public fn form_name(f: &BetweenForm) -> Text {
     match f { FBetween => "between".clone(), FNotBetween => "not_between".clone() }
 }
 
@@ -19,7 +19,7 @@ public type Rewrite is
     | RwOrPair         // X <  LO OR  X >  HI
     ;
 
-public fn rewrite_for(f: &Form) -> Rewrite {
+public fn rewrite_for(f: &BetweenForm) -> Rewrite {
     match f { FBetween => RwAndPair, FNotBetween => RwOrPair }
 }
 
@@ -44,7 +44,7 @@ public type Value is
     | VInt(Int64)
     ;
 
-public fn evaluate(form: &Form, x: &Value, lo: &Value, hi: &Value) -> SqlBool {
+public fn evaluate(form: &BetweenForm, x: &Value, lo: &Value, hi: &Value) -> SqlBool {
     let xv = match x  { VInt(n) => n.clone(), VNull => return SbNull };
     let lv = match lo { VInt(n) => n.clone(), VNull => return SbNull };
     let hv = match hi { VInt(n) => n.clone(), VNull => return SbNull };

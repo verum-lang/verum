@@ -147,3 +147,103 @@ pub fn register_stdlib_coercions(unifier: &mut verum_types::unify::Unifier) {
         unifier.register_int_coercible_type(verum_common::Text::from(*name));
     }
 }
+
+// ============================================================================
+// Step 2 of #101 — protocol-based discovery
+// ============================================================================
+//
+// Walks AST `ItemKind::Impl(ImplKind::Protocol { protocol, for_type, ..})`
+// blocks and registers the target type with the unifier when the
+// protocol path's tail matches one of the four coercion markers
+// declared in `core/base/coercion.vr`. Combined with the hardcoded
+// fallback above, this gives:
+//
+//   * Stdlib types that already `implement <Coercion>` get registered
+//     by the protocol scan (ZERO architectural violation for those
+//     types).
+//   * Stdlib types that haven't yet been retrofitted with implement
+//     blocks still get registered via the hardcoded fallback,
+//     keeping behaviour stable.
+//   * Each retrofit (adding `implement IntCoercible for X` to one
+//     stdlib type) lets us delete X from the hardcoded list and
+//     verify nothing regresses — incremental migration with safe
+//     rollback at every step.
+
+/// Match the four coercion-marker protocol names against the LAST
+/// segment of an impl-block's protocol path. Returns the name as a
+/// stable `&'static str` we can dispatch on, or `None` for any other
+/// protocol.
+fn match_coercion_protocol(path: &verum_ast::ty::Path) -> Option<&'static str> {
+    let last = path.segments.iter().rev().find_map(|s| match s {
+        verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+        _ => None,
+    })?;
+    match last {
+        "IntCoercible" => Some("IntCoercible"),
+        "TensorLike" => Some("TensorLike"),
+        "Indexable" => Some("Indexable"),
+        "RangeLike" => Some("RangeLike"),
+        _ => None,
+    }
+}
+
+/// Extract the head type name from an impl-block's `for_type`. We only
+/// look at the OUTER name; generic args don't matter for unifier
+/// registration since the unifier treats e.g. `Vector<T>` the same
+/// way regardless of T.
+fn impl_target_head_name(ty: &verum_ast::ty::Type) -> Option<String> {
+    use verum_ast::ty::{Type, TypeKind, PathSegment};
+    fn head_of_path(path: &verum_ast::ty::Path) -> Option<String> {
+        path.segments.iter().rev().find_map(|s| match s {
+            PathSegment::Name(id) => Some(id.name.to_string()),
+            _ => None,
+        })
+    }
+    fn walk(ty: &Type) -> Option<String> {
+        match &ty.kind {
+            TypeKind::Path(path) => head_of_path(path),
+            TypeKind::Generic { base, .. } => walk(base),
+            TypeKind::Reference { inner, .. } => walk(inner),
+            _ => None,
+        }
+    }
+    walk(ty)
+}
+
+/// Scan a list of AST modules for `implement <Coercion> for X` blocks
+/// and register the target types with the unifier. Idempotent — calling
+/// it more than once is harmless because the unifier's register_*
+/// methods de-duplicate via HashSet.
+///
+/// Public so `pipeline.rs` Pass 5.5 can call it with the loaded
+/// stdlib + user modules.
+pub fn scan_protocol_implementations<I, M>(
+    unifier: &mut verum_types::unify::Unifier,
+    ast_modules: I,
+) -> usize
+where
+    I: IntoIterator<Item = M>,
+    M: AsRef<verum_ast::Module>,
+{
+    use verum_ast::{ItemKind, decl::ImplKind};
+    let mut registered = 0usize;
+    for module in ast_modules {
+        let module = module.as_ref();
+        for item in module.items.iter() {
+            let ItemKind::Impl(impl_decl) = &item.kind else { continue };
+            let ImplKind::Protocol { protocol, for_type, .. } = &impl_decl.kind else { continue };
+            let Some(coercion_name) = match_coercion_protocol(protocol) else { continue };
+            let Some(target) = impl_target_head_name(for_type) else { continue };
+            let target_text = verum_common::Text::from(target.as_str());
+            match coercion_name {
+                "IntCoercible" => unifier.register_int_coercible_type(target_text),
+                "TensorLike" => unifier.register_tensor_family_type(target_text),
+                "Indexable" => unifier.register_indexable_type(target_text),
+                "RangeLike" => unifier.register_range_like_type(target_text),
+                _ => unreachable!("match_coercion_protocol guards this set"),
+            }
+            registered += 1;
+        }
+    }
+    registered
+}

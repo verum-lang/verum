@@ -9,7 +9,7 @@
 //   * JournalMode parse round-trips
 //   * Per-mode semantics predicates
 //   * commit_speed classification
-//   * Goal → recommended mode
+//   * JournalModeGoal → recommended mode
 //   * TransitionPlan steps for WAL → DELETE includes checkpoint+remove
 //   * TransitionPlan steps for non-WAL → non-WAL omits exclusive lock
 
@@ -23,7 +23,7 @@ mount core.database.sqlite.native.journal_mode.semantics.{
     journal_persists_between_tx, is_memory_only,
     CommitSpeed, CsSlow, CsMedium, CsFast,
     speed_name, commit_speed,
-    Goal, GMaxConcurrency, GMaxSpeed, GCrashSafety,
+    JournalModeGoal, GMaxConcurrency, GMaxSpeed, GCrashSafety,
     recommend_for,
 };
 mount core.database.sqlite.native.journal_mode.transition.{
