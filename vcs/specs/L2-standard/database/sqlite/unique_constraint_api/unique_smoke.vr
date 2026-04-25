@@ -10,7 +10,7 @@ mount core.database.sqlite.native.unique_constraint_api.kind.{
     kind_name, is_primary_key, implies_not_null,
 };
 mount core.database.sqlite.native.unique_constraint_api.fk_action.{
-    FkAction, FaNoAction, FaRestrict, FaCascade, FaSetNull, FaSetDefault,
+    UniqueFkAction, FaNoAction, FaRestrict, FaCascade, FaSetNull, FaSetDefault,
     action_name, default_action, allows_deferred_check, propagates_change, rejects_change,
 };
 mount core.database.sqlite.native.unique_constraint_api.constraint.{

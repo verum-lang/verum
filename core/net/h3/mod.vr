@@ -61,7 +61,7 @@ public mount .error.{H3Error, H3ErrorCode};
 
 // Re-exports — QPACK
 public mount .qpack.{
-    HeaderField, QpackDecodeError,
+    QpackHeaderField, QpackDecodeError,
     encode_field_section, decode_field_section,
 };
 

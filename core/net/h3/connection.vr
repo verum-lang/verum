@@ -41,7 +41,7 @@ mount core.net.h3.frame.{
 };
 mount core.net.h3.settings.{H3Settings};
 mount core.net.h3.error.{H3Error, H3ErrorCode};
-mount core.net.h3.qpack.{HeaderField, encode_field_section, decode_field_section};
+mount core.net.h3.qpack.{QpackHeaderField, encode_field_section, decode_field_section};
 mount core.net.h3.request.{
     H3Request, H3Response, H3Method,
     parse_request_from_fields, parse_response_from_fields,
@@ -92,7 +92,7 @@ type PeerUniState is {
 
 type RequestPhase is
       AwaitingHeaders
-    | ReceivingBody { decoded_headers: List<HeaderField>, body: List<Byte> }
+    | ReceivingBody { decoded_headers: List<QpackHeaderField>, body: List<Byte> }
     | Complete { request: H3Request };
 
 type RequestStreamState is {
@@ -452,7 +452,7 @@ implement H3Connection {
         while i < bytes.len() { st.buf.push(bytes[i]); i = i + 1; }
 
         // Drain frames.
-        let mut decoded_headers: Maybe<List<HeaderField>> = None;
+        let mut decoded_headers: Maybe<List<QpackHeaderField>> = None;
         let mut accumulated_body: List<Byte> = [];
         loop {
             if st.buf.len() == 0 { break; }

@@ -27,7 +27,7 @@ module core.net.h3.request;
 
 mount core.*;
 mount core.collections.List;
-mount core.net.h3.qpack.decoder.{HeaderField};
+mount core.net.h3.qpack.decoder.{QpackHeaderField};
 
 public type H3Method is Get | Post | Put | Delete | Head | Options | Patch | Connect | Other(Text);
 
@@ -66,17 +66,17 @@ public type H3Request is {
     scheme:    Text,        // "http" | "https"
     authority: Text,        // host[:port]
     path:      Text,        // absolute path + ?query
-    headers:   List<HeaderField>,   // excluding pseudo-headers
+    headers:   List<QpackHeaderField>,   // excluding pseudo-headers
     body:      List<Byte>,
 };
 
 public type H3Response is {
     status:    UInt16,
-    headers:   List<HeaderField>,
+    headers:   List<QpackHeaderField>,
     body:      List<Byte>,
     /// Trailing headers section (sent as a second HEADERS frame
     /// after DATA). Empty when peer didn't send trailers.
-    trailers:  List<HeaderField>,
+    trailers:  List<QpackHeaderField>,
 };
 
 implement H3Request {
@@ -103,7 +103,7 @@ implement H3Request {
     }
 
     public fn with_header(mut self, name: Text, value: Text) -> H3Request {
-        self.headers.push(HeaderField { name: name, value: value });
+        self.headers.push(QpackHeaderField { name: name, value: value });
         self
     }
 
@@ -111,12 +111,12 @@ implement H3Request {
     /// headers, ready for QPACK encoding. Per RFC 9114 §4.3.1,
     /// pseudo-headers MUST appear in the field section before any
     /// regular headers.
-    public fn to_field_list(&self) -> List<HeaderField> {
-        let mut out: List<HeaderField> = [];
-        out.push(HeaderField { name: Text.from_str(":method"),    value: self.method.as_text() });
-        out.push(HeaderField { name: Text.from_str(":scheme"),    value: self.scheme.clone() });
-        out.push(HeaderField { name: Text.from_str(":authority"), value: self.authority.clone() });
-        out.push(HeaderField { name: Text.from_str(":path"),      value: self.path.clone() });
+    public fn to_field_list(&self) -> List<QpackHeaderField> {
+        let mut out: List<QpackHeaderField> = [];
+        out.push(QpackHeaderField { name: Text.from_str(":method"),    value: self.method.as_text() });
+        out.push(QpackHeaderField { name: Text.from_str(":scheme"),    value: self.scheme.clone() });
+        out.push(QpackHeaderField { name: Text.from_str(":authority"), value: self.authority.clone() });
+        out.push(QpackHeaderField { name: Text.from_str(":path"),      value: self.path.clone() });
         let mut i: Int = 0;
         while i < self.headers.len() {
             out.push(self.headers[i].clone());
@@ -146,14 +146,14 @@ implement H3Response {
     }
 
     public fn with_header(mut self, name: Text, value: Text) -> H3Response {
-        self.headers.push(HeaderField { name: name, value: value });
+        self.headers.push(QpackHeaderField { name: name, value: value });
         self
     }
 
-    public fn to_field_list(&self) -> List<HeaderField> {
-        let mut out: List<HeaderField> = [];
+    public fn to_field_list(&self) -> List<QpackHeaderField> {
+        let mut out: List<QpackHeaderField> = [];
         let s = format_status(self.status);
-        out.push(HeaderField { name: Text.from_str(":status"), value: s });
+        out.push(QpackHeaderField { name: Text.from_str(":status"), value: s });
         let mut i: Int = 0;
         while i < self.headers.len() {
             out.push(self.headers[i].clone());
@@ -177,12 +177,12 @@ fn format_status(code: UInt16) -> Text {
 // Field-list → structured parsers
 // =============================================================================
 
-public fn parse_request_from_fields(fields: &List<HeaderField>, body: List<Byte>) -> Maybe<H3Request> {
+public fn parse_request_from_fields(fields: &List<QpackHeaderField>, body: List<Byte>) -> Maybe<H3Request> {
     let mut method:    Maybe<Text> = None;
     let mut scheme:    Maybe<Text> = None;
     let mut authority: Maybe<Text> = None;
     let mut path:      Maybe<Text> = None;
-    let mut headers:   List<HeaderField> = [];
+    let mut headers:   List<QpackHeaderField> = [];
 
     let mut i: Int = 0;
     while i < fields.len() {
@@ -211,9 +211,9 @@ public fn parse_request_from_fields(fields: &List<HeaderField>, body: List<Byte>
     }
 }
 
-public fn parse_response_from_fields(fields: &List<HeaderField>, body: List<Byte>) -> Maybe<H3Response> {
+public fn parse_response_from_fields(fields: &List<QpackHeaderField>, body: List<Byte>) -> Maybe<H3Response> {
     let mut status_text: Maybe<Text> = None;
-    let mut headers:     List<HeaderField> = [];
+    let mut headers:     List<QpackHeaderField> = [];
     let mut i: Int = 0;
     while i < fields.len() {
         let f = &fields[i];

@@ -19,7 +19,7 @@ mount core.*;
 mount base.{Text, Bool, Maybe, Result, Ok, Err};
 mount collections.List;
 mount core.database.sqlite.native.replication.frame.{
-    WalFrameRecord, FrameHeader, FrameBatch,
+    WalFrameRecord, ReplicationFrameHeader, FrameBatch,
     frame_record, batch_empty, frame_position, frame_precedes,
 };
 
@@ -105,7 +105,7 @@ implement StreamProducer {
     }
 
     /// Append a frame to every replica's outbox.
-    pub fn enqueue_frame(&mut self, header: FrameHeader, payload: List<Byte>) -> Int64 {
+    pub fn enqueue_frame(&mut self, header: ReplicationFrameHeader, payload: List<Byte>) -> Int64 {
         let seq = self.next_seq;
         self.next_seq = seq + (1 as Int64);
         let mut i: Int = 0;
@@ -189,8 +189,8 @@ fn clone_frame(f: &WalFrameRecord) -> WalFrameRecord {
     }
 }
 
-fn clone_header(h: &FrameHeader) -> FrameHeader {
-    FrameHeader {
+fn clone_header(h: &ReplicationFrameHeader) -> ReplicationFrameHeader {
+    ReplicationFrameHeader {
         page_no: h.page_no,
         db_size_after: h.db_size_after,
         salt1: h.salt1,

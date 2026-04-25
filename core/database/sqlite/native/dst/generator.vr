@@ -48,10 +48,10 @@ public fn default_mix() -> OpMix {
 }
 
 // -----------------------------------------------------------------------------
-// Generator state
+// DstGenerator state
 // -----------------------------------------------------------------------------
 
-public type Generator is {
+public type DstGenerator is {
     seed: DstSeed,
     mix: OpMix,
     /// Live primary-key universe — populated as the generator emits Insert.
@@ -62,8 +62,8 @@ public type Generator is {
     next_id: Int,
 }
 
-public fn generator_new(seed: DstSeed, mix: OpMix) -> Generator {
-    Generator {
+public fn generator_new(seed: DstSeed, mix: OpMix) -> DstGenerator {
+    DstGenerator {
         seed: seed,
         mix: mix,
         live_keys: List.new(),
@@ -72,7 +72,7 @@ public fn generator_new(seed: DstSeed, mix: OpMix) -> Generator {
     }
 }
 
-implement Generator {
+implement DstGenerator {
     pub fn live_count(&self) -> Int { self.live_keys.len() }
 
     /// Emit `n` ops into a fresh OpStream.

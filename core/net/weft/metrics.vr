@@ -159,9 +159,9 @@ implement WeftMetricsRegistry {
         out
     }
 
-    /// Snapshot every histogram as `(name, HistogramSnapshot)` pairs.
+    /// Snapshot every histogram as `(name, OtlpHistogramSnapshot)` pairs.
     public fn histogram_snapshot(&self)
-        -> core.collections.list.List<(Text, core.net.weft.metrics_otlp.HistogramSnapshot)>
+        -> core.collections.list.List<(Text, core.net.weft.metrics_otlp.OtlpHistogramSnapshot)>
     {
         let mut out = core.collections.list.List.new();
         let hs = self.histograms.lock();
@@ -169,7 +169,7 @@ implement WeftMetricsRegistry {
             let counts = hist.counts.lock().clone();
             let total = *hist.count.lock();
             let sum_ms = *hist.sum_ms.lock();
-            out.push((name.clone(), core.net.weft.metrics_otlp.HistogramSnapshot {
+            out.push((name.clone(), core.net.weft.metrics_otlp.OtlpHistogramSnapshot {
                 bounds_ms:     hist.bounds_ms.clone(),
                 bucket_counts: counts,
                 total:         total,

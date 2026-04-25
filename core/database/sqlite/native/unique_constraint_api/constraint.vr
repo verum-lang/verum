@@ -6,7 +6,7 @@ mount core.database.sqlite.native.unique_constraint_api.kind.{
     UniqueKind, UkPrimaryKey, UkUnique, is_primary_key, implies_not_null,
 };
 mount core.database.sqlite.native.unique_constraint_api.fk_action.{
-    FkAction, FaNoAction, default_action, propagates_change, rejects_change,
+    UniqueFkAction, FaNoAction, default_action, propagates_change, rejects_change,
 };
 mount base.{Bool, Text};
 mount core.collections.list.{List};
@@ -38,8 +38,8 @@ public type ForeignKey is {
     columns: List<Text>,
     ref_table: Text,
     ref_columns: List<Text>,
-    on_delete: FkAction,
-    on_update: FkAction,
+    on_delete: UniqueFkAction,
+    on_update: UniqueFkAction,
     deferred: Bool,             // DEFERRABLE INITIALLY DEFERRED
 };
 
@@ -54,12 +54,12 @@ public fn fk(columns: List<Text>, ref_table: Text, ref_columns: List<Text>) -> F
     }
 }
 
-public fn with_on_delete(mut f: ForeignKey, a: FkAction) -> ForeignKey {
+public fn with_on_delete(mut f: ForeignKey, a: UniqueFkAction) -> ForeignKey {
     f.on_delete = a;
     f
 }
 
-public fn with_on_update(mut f: ForeignKey, a: FkAction) -> ForeignKey {
+public fn with_on_update(mut f: ForeignKey, a: UniqueFkAction) -> ForeignKey {
     f.on_update = a;
     f
 }

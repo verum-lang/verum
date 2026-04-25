@@ -61,7 +61,7 @@ mount core.collections.map.{Map};
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.net.h3.error.{H3Error};
-mount core.net.h3.qpack.decoder.{HeaderField};
+mount core.net.h3.qpack.decoder.{QpackHeaderField};
 mount core.net.h3.streaming.{H3DataSink, H3StreamWriter};
 
 // =============================================================================
@@ -91,7 +91,7 @@ public type WtConnectRequest is {
     scheme:    Text,
     /// Extra application headers (excluding the four pseudo-headers
     /// + sec-webtransport-http3-draft).
-    headers:   List<HeaderField>,
+    headers:   List<QpackHeaderField>,
     /// The draft codepoint advertised by the client. Production
     /// peers send "draft02"; older browsers may send "draft00" or
     /// be missing the header entirely.
@@ -106,14 +106,14 @@ implement WtConnectRequest {
     ///   * :authority / :path are missing.
     /// Conformant H3 servers MUST close the stream with
     /// H3_FRAME_UNEXPECTED in those cases (handled by the caller).
-    public fn from_h3_headers(fields: &List<HeaderField>) -> Maybe<WtConnectRequest> {
+    public fn from_h3_headers(fields: &List<QpackHeaderField>) -> Maybe<WtConnectRequest> {
         let mut method: Text       = Text.from_utf8_lossy(&[]);
         let mut protocol: Text     = Text.from_utf8_lossy(&[]);
         let mut authority: Text    = Text.from_utf8_lossy(&[]);
         let mut path: Text         = Text.from_utf8_lossy(&[]);
         let mut scheme: Text       = Text.from_utf8_lossy(&[]);
         let mut draft: Text        = Text.from_utf8_lossy(&[]);
-        let mut extras: List<HeaderField> = [];
+        let mut extras: List<QpackHeaderField> = [];
         let mut i: Int = 0;
         while i < fields.len() {
             let n = &fields[i].name;

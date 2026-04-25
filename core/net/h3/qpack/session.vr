@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (Network — HTTP/3 / QPACK)
 // Dependencies: core, collections, .{dynamic_table, instructions, static_table,
-//               integer, huffman, decoder (for HeaderField)}
+//               integer, huffman, decoder (for QpackHeaderField)}
 // =============================================================================
 //
 // One side of a QPACK session is exactly two tables + two streams:
@@ -18,7 +18,7 @@
 //
 // `QpackSession` carries both tables and emits / consumes both
 // instruction streams. High-level `encode_field_section` /
-// `decode_field_section` methods accept/produce HeaderField lists
+// `decode_field_section` methods accept/produce QpackHeaderField lists
 // with the full dynamic-table plus static-table matching path.
 //
 // # Blocked streams (RFC 9204 §2.1.2)
@@ -46,7 +46,7 @@ mount core.net.h3.qpack.instructions.{
 mount core.net.h3.qpack.static_table as stat;
 mount core.net.h3.qpack.integer.{encode as int_encode, decode as int_decode};
 mount core.net.h3.qpack.huffman as huff;
-mount core.net.h3.qpack.decoder.{HeaderField, QpackDecodeError};
+mount core.net.h3.qpack.decoder.{QpackHeaderField, QpackDecodeError};
 
 // =============================================================================
 // Error type
@@ -118,7 +118,7 @@ implement QpackSession {
     /// `encoder_out` — caller drains separately.
     public fn encode_field_section(
         &mut self,
-        headers: &List<HeaderField>,
+        headers: &List<QpackHeaderField>,
     ) -> Result<List<Byte>, QpackSessionError> {
         let mut body: List<Byte> = [];
 
@@ -192,7 +192,7 @@ implement QpackSession {
     public fn decode_field_section(
         &mut self,
         buf: &[Byte],
-    ) -> Result<List<HeaderField>, QpackSessionError> {
+    ) -> Result<List<QpackHeaderField>, QpackSessionError> {
         // Inline the RFC 9204 §4.5 walk — shares shape with
         // qpack.decoder.decode_field_section but with dynamic-table
         // references resolved against `self.decoder_table`.
@@ -213,7 +213,7 @@ implement QpackSession {
             return Err(QpackSessionError.InvalidState);
         }
 
-        let mut headers: List<HeaderField> = [];
+        let mut headers: List<QpackHeaderField> = [];
         let mut cur: Int = p2;
         while cur < buf.len() {
             let b0 = buf[cur];
@@ -235,7 +235,7 @@ implement QpackSession {
                             QpackDecodeError.InvalidIndex(idx))),
                     }
                 };
-                headers.push(HeaderField { name: hit.name, value: hit.value });
+                headers.push(QpackHeaderField { name: hit.name, value: hit.value });
                 cur = next;
             } else if (b0 & 0x40_u8) != 0_u8 {
                 // Literal Field Line with Name Reference
@@ -256,13 +256,13 @@ implement QpackSession {
                     }
                 };
                 let (value, next) = read_string(buf, p1)?;
-                headers.push(HeaderField { name: name, value: value });
+                headers.push(QpackHeaderField { name: name, value: value });
                 cur = next;
             } else if (b0 & 0x20_u8) != 0_u8 {
                 // Literal Field Line with Literal Name
                 let (name, p1) = read_name_literal(buf, cur)?;
                 let (value, next) = read_string(buf, p1)?;
-                headers.push(HeaderField { name: name, value: value });
+                headers.push(QpackHeaderField { name: name, value: value });
                 cur = next;
             } else {
                 // Post-Base Index or Literal Post-Base Name Reference — v0.2 rejects.

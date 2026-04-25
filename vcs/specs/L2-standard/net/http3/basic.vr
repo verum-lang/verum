@@ -9,7 +9,7 @@
 
 mount core.net.http3.{
     Http3Error, Http3ErrorCode,
-    H3FrameType, H3Frame,
+    H3FrameType, Http3Frame,
     QpackEncoder, QpackDecoder, QpackError,
     Http3Client, Http3Server,
     ALPN,

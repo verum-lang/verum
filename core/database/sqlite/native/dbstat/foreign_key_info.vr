@@ -22,17 +22,17 @@ mount base.{Text, Bool};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// FkAction taxonomy
+// DbstatFkAction taxonomy
 // -----------------------------------------------------------------------------
 
-public type FkAction is
+public type DbstatFkAction is
       FaNoAction
     | FaRestrict
     | FaSetNull
     | FaSetDefault
     | FaCascade;
 
-public fn fk_action_text(a: &FkAction) -> Text {
+public fn fk_action_text(a: &DbstatFkAction) -> Text {
     match a {
         FaNoAction    => "NO ACTION".clone(),
         FaRestrict    => "RESTRICT".clone(),
@@ -64,8 +64,8 @@ public type ForeignKeyRow is {
     referenced_table: Text,
     from_column: Text,
     to_column: Text,
-    on_update: FkAction,
-    on_delete: FkAction,
+    on_update: DbstatFkAction,
+    on_delete: DbstatFkAction,
     match_kind: FkMatch,
 }
 
@@ -73,7 +73,7 @@ public fn foreign_key_row(
     id: Int, seq: Int,
     referenced_table: Text,
     from_column: Text, to_column: Text,
-    on_update: FkAction, on_delete: FkAction,
+    on_update: DbstatFkAction, on_delete: DbstatFkAction,
     match_kind: FkMatch,
 ) -> ForeignKeyRow {
     ForeignKeyRow {

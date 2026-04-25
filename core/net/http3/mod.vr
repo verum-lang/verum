@@ -39,7 +39,7 @@ public mount .error.Http3Error;
 public mount .error.Http3ErrorCode;
 
 public mount .frame.H3FrameType;
-public mount .frame.H3Frame;
+public mount .frame.Http3Frame;
 
 public mount .qpack.QpackEncoder;
 public mount .qpack.QpackDecoder;
