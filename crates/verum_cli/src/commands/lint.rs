@@ -342,6 +342,35 @@ const LINT_RULES: &[LintRule] = &[
              extra fields: method | path | name",
         category: LintCategory::Style,
     },
+    // Cross-file rules — operate on the assembled corpus rather than
+    // a single file at a time. Cycle detection and orphan detection
+    // require the full mount graph; unused-public requires the full
+    // identifier-reference set.
+    LintRule {
+        name: "circular-import",
+        level: LintLevel::Error,
+        description:
+            "Module graph contains a cycle — module A mounts B, \
+             B (transitively) mounts A. Break the cycle by extracting \
+             the shared types into a leaf module.",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "orphan-module",
+        level: LintLevel::Hint,
+        description:
+            "File under src/ that no other corpus file mounts. \
+             Excludes main.vr / lib.vr / mod.vr entry points.",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "unused-public",
+        level: LintLevel::Hint,
+        description:
+            "Public symbol whose name does not appear in any other file. \
+             Heuristic — opt-in via [lint.rules.unused-public].enabled = true.",
+        category: LintCategory::Style,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
@@ -2891,6 +2920,41 @@ fn lint_content_with(
     Ok(issues)
 }
 
+/// Build the corpus, run every cross-file pass, return the issues.
+/// Files that fail to parse are excluded — cross-file rules need a
+/// `Module`, and the per-file phase already surfaced the parse
+/// error. This is the single place that re-parses for the corpus
+/// view; future work could share the per-file parses if memory
+/// budget allows.
+fn run_cross_file_phase(files: &[PathBuf], cfg: &LintConfig) -> Vec<LintIssue> {
+    use rayon::prelude::*;
+    use verum_ast::FileId;
+    use verum_lexer::Lexer;
+    use verum_parser::VerumParser;
+
+    let parsed: Vec<super::lint_engine::CorpusFile> = files
+        .par_iter()
+        .filter_map(|path| {
+            let source = fs::read_to_string(path).ok()?;
+            let fid = FileId::new(0);
+            let lexer = Lexer::new(&source, fid);
+            let parser = VerumParser::new();
+            let module = parser.parse_module(lexer, fid).ok()?;
+            Some(super::lint_engine::CorpusFile {
+                path: path.clone(),
+                source,
+                module,
+            })
+        })
+        .collect();
+
+    let ctx = super::lint_engine::CorpusCtx {
+        files: &parsed,
+        config: Some(cfg),
+    };
+    super::lint_engine::run_cross_file(&ctx)
+}
+
 /// CLI entry: wipe the lint cache and exit. Idempotent — calling
 /// when the cache doesn't exist is a no-op.
 pub fn clean_cache() -> Result<()> {
@@ -4019,8 +4083,15 @@ pub fn run_extended(
         .flat_map(|path| lint_one_with_cache(path, &cfg, &cache))
         .collect();
 
+    // Cross-file phase. Re-parses each file once to feed the
+    // corpus-level passes (circular-import / orphan-module /
+    // unused-public). The per-file phase already paid for the
+    // parser warm-up so this is incremental work.
+    let cross_issues = run_cross_file_phase(&files, &cfg);
+
     let mut all_issues: Vec<LintIssue> = raw_issues
         .into_iter()
+        .chain(cross_issues.into_iter())
         .filter_map(|mut i| {
             let lvl = cfg.effective_level_for_file(i.rule, &i.file, i.level)?;
             if let Some(min) = severity_min {
