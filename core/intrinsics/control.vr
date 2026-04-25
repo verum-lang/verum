@@ -104,14 +104,14 @@ public type IntrinsicSourceLocation is {
 };
 
 /// Panic information structure
-public type PanicInfo is {
+public type IntrinsicPanicInfo is {
     message: Text,
     location: Maybe<IntrinsicSourceLocation>,
 };
 
 /// Execute a closure and catch any panics
-/// Returns Ok(result) if no panic, Err(PanicInfo) if panic occurred
-public fn catch_unwind<T>(f: fn() -> T) -> Result<T, PanicInfo> {
+/// Returns Ok(result) if no panic, Err(IntrinsicPanicInfo) if panic occurred
+public fn catch_unwind<T>(f: fn() -> T) -> Result<T, IntrinsicPanicInfo> {
     @intrinsic("catch_unwind", f)
 }
 

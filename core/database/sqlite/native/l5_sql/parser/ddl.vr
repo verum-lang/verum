@@ -44,7 +44,7 @@ mount core.database.sqlite.native.l5_sql.lexer.{
 mount core.database.sqlite.native.l5_sql.ast.{
     SqlStatement, Expr, TableRef,
     CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
-    OnConflict,
+    SqlOnConflict,
 };
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
     SqlTokenStream, ParseError, parse_error,
@@ -436,7 +436,7 @@ fn parse_table_constraint(ts: &mut SqlTokenStream) -> Result<TableConstraint, Pa
     Err(parse_error("expected table constraint".clone(), ts.position()))
 }
 
-fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<OnConflict>, ParseError> {
+fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<SqlOnConflict>, ParseError> {
     if !ts.accept_keyword(KwOn) { return Ok(None); }
     match ts.expect_keyword(KwConflict) { Ok(_) => {}, Err(e) => { return Err(e); } }
     if ts.accept_keyword(KwAbort)    { return Ok(Some(OcAbort)); }

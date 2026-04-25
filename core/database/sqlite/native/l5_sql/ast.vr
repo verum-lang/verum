@@ -140,7 +140,7 @@ public type SelectStmt is {
 // DML — INSERT / UPDATE / DELETE
 // -----------------------------------------------------------------------------
 
-public type OnConflict is OcAbort | OcFail | OcIgnore | OcReplace | OcRollback;
+public type SqlOnConflict is OcAbort | OcFail | OcIgnore | OcReplace | OcRollback;
 
 public type InsertSource is
       IsValues(List<List<Expr>>)                   // VALUES (...), (...)
@@ -151,7 +151,7 @@ public type InsertStmt is {
     table: TableRef,
     columns: List<Text>,                           // empty → all columns
     source: InsertSource,
-    on_conflict: Maybe<OnConflict>,
+    on_conflict: Maybe<SqlOnConflict>,
     returning: List<ResultColumnItem>,
 };
 
@@ -168,7 +168,7 @@ public type UpdateStmt is {
     assignments: List<UpdateAssignment>,
     from: Maybe<FromItem>,
     where_clause: Maybe<Expr>,
-    on_conflict: Maybe<OnConflict>,
+    on_conflict: Maybe<SqlOnConflict>,
     returning: List<ResultColumnItem>,
 };
 
@@ -183,8 +183,8 @@ public type DeleteStmt is {
 // -----------------------------------------------------------------------------
 
 public type TableConstraint is
-      TcPrimaryKey(List<Text> /* columns */, Maybe<OnConflict>, Bool /* autoincrement */)
-    | TcUnique(List<Text>, Maybe<OnConflict>)
+      TcPrimaryKey(List<Text> /* columns */, Maybe<SqlOnConflict>, Bool /* autoincrement */)
+    | TcUnique(List<Text>, Maybe<SqlOnConflict>)
     | TcCheck(Expr)
     | TcForeignKey(List<Text>, TableRef, List<Text>);
 
@@ -195,9 +195,9 @@ public type ColumnDef is {
 };
 
 public type ColumnConstraint is
-      CcPrimaryKey(Maybe<OnConflict>, Bool /* autoincrement */)
-    | CcNotNull(Maybe<OnConflict>)
-    | CcUnique(Maybe<OnConflict>)
+      CcPrimaryKey(Maybe<SqlOnConflict>, Bool /* autoincrement */)
+    | CcNotNull(Maybe<SqlOnConflict>)
+    | CcUnique(Maybe<SqlOnConflict>)
     | CcCheck(Expr)
     | CcDefault(Expr)
     | CcCollate(Text)

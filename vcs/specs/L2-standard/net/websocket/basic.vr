@@ -8,18 +8,18 @@
 // RFC 6455 WebSocket API surface.
 
 mount core.net.websocket.{
-    Opcode, CloseCode, Frame,
+    WsOpcode, CloseCode, Frame,
     encode, decode, WebSocketDecodeResult, WebSocketDecodeError,
     accept_key, validate_server_handshake,
     WEBSOCKET_MAGIC,
 };
 mount core.net.http.{Headers};
 
-// Opcode round-trip.
-fn typecheck_opcode() -> (Opcode, UInt8, Bool, Bool) {
-    let op = Opcode.Binary;
+// WsOpcode round-trip.
+fn typecheck_opcode() -> (WsOpcode, UInt8, Bool, Bool) {
+    let op = WsOpcode.Binary;
     let b = op.to_byte();
-    let round = Opcode.from_byte(b);
+    let round = WsOpcode.from_byte(b);
     (round, b, op.is_data(), op.is_control())
 }
 

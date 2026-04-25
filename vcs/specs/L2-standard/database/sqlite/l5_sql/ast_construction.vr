@@ -15,7 +15,7 @@ mount core.database.sqlite.native.l5_sql.{
     SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
     FromItem, OrderTerm, OrderDirection, LimitClause,
     TableRef,
-    InsertStmt, InsertSource, OnConflict,
+    InsertStmt, InsertSource, SqlOnConflict,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,
     CreateTableStmt, ColumnDef, TableConstraint, ColumnConstraint,

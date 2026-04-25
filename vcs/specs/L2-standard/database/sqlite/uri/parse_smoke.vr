@@ -12,7 +12,7 @@
 
 mount core.database.sqlite.native.uri.decode.{percent_decode};
 mount core.database.sqlite.native.uri.params.{
-    OpenMode, OmReadOnly, OmReadWrite, OmReadWriteCreate, OmMemory,
+    UriOpenMode, OmReadOnly, OmReadWrite, OmReadWriteCreate, OmMemory,
     CacheMode, CmShared, CmPrivate,
     UriQueryParam, query_param,
     UriParams, uri_params_default,
@@ -45,7 +45,7 @@ fn test_decode_no_percent_round_trip() {
 }
 
 // -----------------------------------------------------------------------------
-// OpenMode / CacheMode round-trip
+// UriOpenMode / CacheMode round-trip
 // -----------------------------------------------------------------------------
 
 fn test_open_mode_text() {

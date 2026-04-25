@@ -839,7 +839,7 @@ public fn compute_kan_extension(
 }
 
 // =============================================================================
-// 15. ObstructionPoint and ObstructionData
+// 15. EpistemicObstructionPoint and EpistemicObstructionData
 // =============================================================================
 
 /// A single point at which the counit of the Kan adjunction fails to
@@ -848,7 +848,7 @@ public fn compute_kan_extension(
 /// `claim_id`  — the claim where the obstruction is observed
 /// `deviation` — the rank difference  original_rank − double_ext_rank  (> 0)
 /// `severity`  — normalised deviation in [0.0, 1.0] (deviation / 6.0)
-public type ObstructionPoint is {
+public type EpistemicObstructionPoint is {
     claim_id:  Text,
     deviation: Int,
     severity:  Float,
@@ -860,8 +860,8 @@ public type ObstructionPoint is {
 /// `max_deviation`  — the worst-case rank difference across all claims
 /// `is_faithful`    — true iff no obstruction points were found (subsite is
 ///                    epistemically faithful to the full theory)
-public type ObstructionData is {
-    points:        List<ObstructionPoint>,
+public type EpistemicObstructionData is {
+    points:        List<EpistemicObstructionPoint>,
     max_deviation: Int,
     is_faithful:   Bool,
 };
@@ -891,11 +891,11 @@ public type ObstructionData is {
 ///   4. A positive deviation signals that the finite subsite loses
 ///      epistemic information at claim `c`.
 ///
-/// Returns `ObstructionData` summarising all obstruction points.
+/// Returns `EpistemicObstructionData` summarising all obstruction points.
 public fn compute_obstruction(
     theory:      &Theory,
     subsite_ids: &List<Text>,
-) -> ObstructionData {
+) -> EpistemicObstructionData {
     // Step 1 — left Kan extension.
     let lan = compute_kan_extension(subsite_ids, theory, EpistemicKanDirection.Left);
 
@@ -905,7 +905,7 @@ public fn compute_obstruction(
         in_subsite.insert(id.clone(), true);
     }
 
-    let mut points: List<ObstructionPoint> = [];
+    let mut points: List<EpistemicObstructionPoint> = [];
     let mut max_dev: Int = 0;
 
     for c_id in &theory.statements {
@@ -947,7 +947,7 @@ public fn compute_obstruction(
         let dev = if raw_dev < 0 { 0 } else { raw_dev };
 
         if dev > 0 {
-            points.push(ObstructionPoint {
+            points.push(EpistemicObstructionPoint {
                 claim_id:  c_id.clone(),
                 deviation: dev,
                 severity:  dev as Float / 6.0,
@@ -960,7 +960,7 @@ public fn compute_obstruction(
 
     let faithful = points.is_empty();
 
-    ObstructionData {
+    EpistemicObstructionData {
         points,
         max_deviation: max_dev,
         is_faithful:   faithful,

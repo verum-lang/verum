@@ -9,7 +9,7 @@
 //
 // Coverage:
 // - catch_unwind: Verifies import resolution
-// - PanicInfo: Tests from core.intrinsics.control
+// - IntrinsicPanicInfo: Tests from core.intrinsics.control
 // - SourceLocation: Source location for panic origin
 //
 // Note: catch_unwind is an @intrinsic that returns Unit in typecheck mode.
@@ -26,7 +26,7 @@ mount core.maybe.{Maybe, Some, None};
 // Then link intrinsics that depend on core types
 mount core.intrinsics.{
     catch_unwind,
-    PanicInfo, SourceLocation,
+    IntrinsicPanicInfo, SourceLocation,
     panic,
     monotonic_nanos,
 };
@@ -126,20 +126,20 @@ fn test_source_location_equality() {
 }
 
 // =============================================================================
-// PanicInfo Import Verification
+// IntrinsicPanicInfo Import Verification
 // =============================================================================
 
 @test
 fn test_panic_info_import() {
-    // Verify PanicInfo type resolves from core.intrinsics
-    // Note: PanicInfo from intrinsics has {message, location: Maybe<SourceLocation>}
-    // but may conflict with core.sys.init.PanicInfo {message, file, line, column}
+    // Verify IntrinsicPanicInfo type resolves from core.intrinsics
+    // Note: IntrinsicPanicInfo from intrinsics has {message, location: Maybe<SourceLocation>}
+    // but may conflict with core.sys.init.IntrinsicPanicInfo {message, file, line, column}
     // Direct construction may fail due to name resolution.
     // Instead, verify the import resolves.
     let _ = catch_unwind;  // Verify import
-    let _ = PanicInfo;     // Verify type import
+    let _ = IntrinsicPanicInfo;     // Verify type import
 
-    print("PanicInfo import verification passed");
+    print("IntrinsicPanicInfo import verification passed");
 }
 
 // =============================================================================
@@ -153,7 +153,7 @@ fn test_catch_unwind_import() {
     let _ = catch_unwind;
 
     // Verify it accepts a closure argument (typecheck only)
-    // Note: actual return type is Result<T, PanicInfo> at runtime
+    // Note: actual return type is Result<T, IntrinsicPanicInfo> at runtime
     // but resolves to Unit in typecheck mode
     assert(true);  // Runtime: catch_unwind behavioral tests
 

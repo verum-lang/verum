@@ -40,7 +40,7 @@ mount core.database.sqlite.native.l5_sql.ast.{
     SelectStmt, SelectKind, SimpleSelect, CompoundOp,
     ResultColumnItem, FromItem, SqlJoinKind, JoinClause,
     OrderTerm, LimitClause, OrderDirection,
-    InsertStmt, InsertSource, OnConflict,
+    InsertStmt, InsertSource, SqlOnConflict,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,
     TableRef, CreateTableStmt,
@@ -104,7 +104,7 @@ public type PlanNode is
           is_left_outer: Bool,
       )
     | PnLimit(child: Heap<PlanNode>, limit: Expr, offset: Maybe<Expr>)
-    | PnInsert(table: TableRef, columns: List<Text>, source: Heap<PlanNode>, on_conflict: Maybe<OnConflict>)
+    | PnInsert(table: TableRef, columns: List<Text>, source: Heap<PlanNode>, on_conflict: Maybe<SqlOnConflict>)
     | PnDelete(table: TableRef, cursor_id: Int, predicate: Maybe<Expr>)
     | PnUpdate(table: TableRef, cursor_id: Int, n_cols: Int, assignments: List<UpdateAssignment>, predicate: Maybe<Expr>)
     | PnCreateTable(stmt: CreateTableStmt)
@@ -310,7 +310,7 @@ fn clone_opt_text(o: &Maybe<Text>) -> Maybe<Text> {
     }
 }
 
-fn clone_opt_on_conflict(o: &Maybe<OnConflict>) -> Maybe<OnConflict> {
+fn clone_opt_on_conflict(o: &Maybe<SqlOnConflict>) -> Maybe<SqlOnConflict> {
     match o {
         Some(ref c) => Some(c),
         None => None,

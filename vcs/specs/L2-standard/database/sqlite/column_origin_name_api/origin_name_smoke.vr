@@ -10,7 +10,7 @@ mount core.database.sqlite.native.column_origin_name_api.trace.{
     field_name, well_known_field_count, requires_compile_flag,
     Source, SrcSimpleColumn, SrcAlias, SrcExpression, SrcLiteral, SrcAggregate,
     source_name, yields_origin_metadata,
-    Metadata, empty_metadata, from_simple,
+    ColumnOriginMetadata, empty_metadata, from_simple,
     FieldResult, OkText, OkNullExpression, OkNullDisabled,
     lookup, result_name, returned_text,
 };
