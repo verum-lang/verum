@@ -19,24 +19,37 @@ mount super.raw.*;
 // TCP
 // =============================================================================
 
-/// A TCP connection.
-public type TcpStream is {
+// User-facing API lives in `core.net.tcp` / `core.net.udp` —
+// `TcpStream` / `TcpListener` / `UdpSocket` there have rich
+// async/CBGR/IoError surface. The types in *this* module are the
+// raw FFI-only shape kept around as a fallback for code paths that
+// don't go through the IOEngine. They were originally named
+// `TcpStream`, `TcpListener`, `UdpSocket` — same as the
+// user-facing API — which silently shadowed the rich
+// `core.net.tcp.TcpListener` whenever both were transitively in
+// scope, breaking method dispatch (`TcpListener.bind(addr:
+// SocketAddr)` resolved to `Raw*` `bind(port: Int)` and produced
+// "Type mismatch: expected 'Int'"). Renamed to `Raw*` so the
+// shadow disappears. Tracked under #75.
+
+/// A TCP connection (raw FFI-only fallback — prefer `core.net.tcp.TcpStream`).
+public type RawTcpStream is {
     fd: Int,
 };
 
-/// A TCP server socket.
-public type TcpListener is {
+/// A TCP server socket (raw FFI-only fallback — prefer `core.net.tcp.TcpListener`).
+public type RawTcpListener is {
     fd: Int,
 };
 
-implement TcpStream {
+implement RawTcpStream {
     /// Connect to a remote host:port.
-    public fn connect(host: Text, port: Int) -> Maybe<TcpStream> {
+    public fn connect(host: Text, port: Int) -> Maybe<RawTcpStream> {
         let fd = __tcp_connect_raw(host, port);
         if fd < 0 {
             None
         } else {
-            Some(TcpStream { fd: fd })
+            Some(RawTcpStream { fd: fd })
         }
     }
 
@@ -61,24 +74,24 @@ implement TcpStream {
     }
 }
 
-implement TcpListener {
+implement RawTcpListener {
     /// Bind and listen on a port. Returns listener.
-    public fn bind(port: Int) -> Maybe<TcpListener> {
+    public fn bind(port: Int) -> Maybe<RawTcpListener> {
         let fd = __tcp_listen_raw(port);
         if fd < 0 {
             None
         } else {
-            Some(TcpListener { fd: fd })
+            Some(RawTcpListener { fd: fd })
         }
     }
 
     /// Accept an incoming connection.
-    public fn accept(&self) -> Maybe<TcpStream> {
+    public fn accept(&self) -> Maybe<RawTcpStream> {
         let client_fd = __tcp_accept_raw(self.fd);
         if client_fd < 0 {
             None
         } else {
-            Some(TcpStream { fd: client_fd })
+            Some(RawTcpStream { fd: client_fd })
         }
     }
 
@@ -98,18 +111,18 @@ implement TcpListener {
 // =============================================================================
 
 /// A UDP socket.
-public type UdpSocket is {
+public type RawUdpSocket is {
     fd: Int,
 };
 
-implement UdpSocket {
+implement RawUdpSocket {
     /// Bind to a local port.
-    public fn bind(port: Int) -> Maybe<UdpSocket> {
+    public fn bind(port: Int) -> Maybe<RawUdpSocket> {
         let fd = __udp_bind_raw(port);
         if fd < 0 {
             None
         } else {
-            Some(UdpSocket { fd: fd })
+            Some(RawUdpSocket { fd: fd })
         }
     }
 
