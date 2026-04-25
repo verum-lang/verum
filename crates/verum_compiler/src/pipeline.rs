@@ -330,13 +330,24 @@ fn save_registry_to_disk(
         return;
     }
 
-    // Convert registry to serializable form
-    let mut modules = Vec::new();
-    let mut path_to_id = Vec::new();
-
-    for (id, info) in registry.all_modules() {
-        modules.push((id.as_u32(), (**info).clone()));
-        path_to_id.push((info.path.to_string(), id.as_u32()));
+    // Convert registry to serializable form. Sort by module path so the
+    // cache file content is byte-stable across processes — the `Map`
+    // backing `all_modules()` is a HashMap, so raw iteration leaks the
+    // per-process random hasher seed into the on-disk cache. Without
+    // this, the same workspace produces a different cache file on every
+    // run, and downstream consumers that walk `modules` in stored
+    // order assign different FunctionIds / TypeIds — the documented
+    // VBC-nondeterminism bug class.
+    let mut modules: Vec<(u32, ModuleInfo)> = Vec::new();
+    let mut path_to_id: Vec<(String, u32)> = Vec::new();
+    let mut entries: Vec<(String, u32, verum_modules::ModuleInfo)> = registry
+        .all_modules()
+        .map(|(id, info)| (info.path.to_string(), id.as_u32(), (**info).clone()))
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    for (path, id, info) in entries {
+        modules.push((id, info));
+        path_to_id.push((path, id));
     }
 
     let cached = SerializableRegistryCache {
@@ -3160,12 +3171,22 @@ impl<'s> CompilationPipeline<'s> {
                     *session_registry = cloned;
                 }
 
-                // Also populate the local modules map from the registry
+                // Also populate the local modules map from the registry.
+                // Sort by module path before iterating: ModuleRegistry.modules
+                // is Map (HashMap-backed via verum_common::Map), so raw
+                // iteration order leaks Rust's per-process random hasher
+                // seed into downstream codegen, producing non-deterministic
+                // bytecode (see #143).  Path-sorted iteration is stable
+                // across runs.
                 let session_registry = self.session.module_registry();
                 let reg = session_registry.read();
-                for (_id, info) in reg.all_modules() {
-                    let path_str = info.path.to_string();
-                    self.modules.insert(Text::from(path_str), Arc::new(info.ast.clone()));
+                let mut entries: Vec<(String, Arc<verum_ast::Module>)> = reg
+                    .all_modules()
+                    .map(|(_id, info)| (info.path.to_string(), Arc::new(info.ast.clone())))
+                    .collect();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                for (path_str, ast_arc) in entries {
+                    self.modules.insert(Text::from(path_str), ast_arc);
                 }
                 drop(reg);
 
@@ -3271,12 +3292,16 @@ impl<'s> CompilationPipeline<'s> {
                         *session_registry = disk_registry.deep_clone();
                     }
 
-                    // Populate local modules map
+                    // Populate local modules map (path-sorted — see #143).
                     let session_registry = self.session.module_registry();
                     let reg = session_registry.read();
-                    for (_id, info) in reg.all_modules() {
-                        let path_str = info.path.to_string();
-                        self.modules.insert(Text::from(path_str), Arc::new(info.ast.clone()));
+                    let mut entries: Vec<(String, Arc<verum_ast::Module>)> = reg
+                        .all_modules()
+                        .map(|(_id, info)| (info.path.to_string(), Arc::new(info.ast.clone())))
+                        .collect();
+                    entries.sort_by(|a, b| a.0.cmp(&b.0));
+                    for (path_str, ast_arc) in entries {
+                        self.modules.insert(Text::from(path_str), ast_arc);
                     }
                     drop(reg);
 
@@ -4736,7 +4761,16 @@ impl<'s> CompilationPipeline<'s> {
         // Note: src_root computation was removed since path_text is already in module path format
         // (e.g., "domain.errors") after being processed by check_project/compile_project.
 
-        for (path_text, module_rc) in self.modules.iter() {
+        // Path-sorted iteration: `self.modules` is a HashMap so the raw
+        // iteration order leaks the per-process random hasher seed into
+        // ModuleId allocation (`registry.allocate_id()` is a counter).
+        // Non-deterministic ModuleIds in turn produce non-deterministic
+        // FunctionIds at codegen time when imports resolve via the
+        // registry. See module.rs:229-231 + audit memo.
+        let mut sorted_modules: Vec<(&Text, &std::sync::Arc<Module>)> =
+            self.modules.iter().collect();
+        sorted_modules.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        for (path_text, module_rc) in sorted_modules {
             // The path_text is already in module path format (e.g., "domain.errors")
             // since it was converted when loading sources in check_project.
             // We just need to create a ModulePath from the string directly.
@@ -10734,7 +10768,19 @@ impl<'s> CompilationPipeline<'s> {
         let is_macos = cfg!(target_os = "macos");
         let is_linux = cfg!(target_os = "linux");
 
-        for (path, module_rc) in self.modules.iter() {
+        // Sort by path before iterating: `self.modules` is a HashMap and
+        // its raw iteration order leaks the per-process random hasher
+        // seed into VBC codegen. Downstream codegen assigns FunctionId
+        // and TypeId by counter-push order, so a non-deterministic
+        // module sequence here turns the same source into different
+        // bytecode every run — surfacing as the symptom matrix
+        // documented at module.rs:229-231 ("method 'X.write_str' not
+        // found", "field index 2 OOB", "NullPointer", SIGSEGV,
+        // misaligned atomic store, …).
+        let mut modules_sorted: Vec<(&Text, &Arc<verum_ast::Module>)> =
+            self.modules.iter().collect();
+        modules_sorted.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        for (path, module_rc) in modules_sorted {
             let path_str = path.as_str().to_string();
             let is_excluded = EXCLUDED_MODULES.iter().any(|m| {
                 path_str.ends_with(m) || path_str.ends_with(&format!("{}.vr", m))
@@ -10848,9 +10894,14 @@ impl<'s> CompilationPipeline<'s> {
 
                         // Also include submodules that may contain the actual implementations.
                         // For example, when importing `core.math`, also load `core.math.linalg`
-                        // which contains the Vector and Matrix implementations.
+                        // which contains the Vector and Matrix implementations. Sort the
+                        // HashMap iteration before pushing — same determinism reasoning as
+                        // the top-of-function loop.
                         let prefix = format!("{}.", candidate);
-                        for (path, submodule) in self.modules.iter() {
+                        let mut sub_sorted: Vec<(&Text, &Arc<verum_ast::Module>)> =
+                            self.modules.iter().collect();
+                        sub_sorted.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+                        for (path, submodule) in sub_sorted {
                             if path.as_str().starts_with(&prefix) {
                                 let subpath = path.as_str().to_string();
                                 // Skip cross-platform submodules.
