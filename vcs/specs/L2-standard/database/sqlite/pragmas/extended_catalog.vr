@@ -14,7 +14,7 @@ mount core.database.sqlite.native.pragmas.extended.{
     ExtendedPragma, extended_catalogue, extended_lookup, extended_count,
 };
 mount core.database.sqlite.native.pragmas.registry.{
-    Scope, SConnection, SDatabase, SReadOnly, SDangerous,
+    PragmaScope, SConnection, SDatabase, SReadOnly, SDangerous,
     EffectPhase, EImmediate, EOnNextTxn, EBeforeCreate, EOnNextOpen,
 };
 mount base.{Some, None};

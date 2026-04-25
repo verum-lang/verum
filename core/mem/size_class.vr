@@ -312,7 +312,7 @@ public fn aligned_size(size: Int, align: Int) -> Int {
 // =============================================================================
 
 /// Page type based on size class
-public type PageKind is
+public type SizeClassKind is
     | Small     // 1 slice (64 KiB) for sizes ≤ 8 KiB
     | Medium    // 8 slices (512 KiB) for sizes ≤ 64 KiB
     | Large     // Variable slices for sizes ≤ 16 MiB
@@ -321,17 +321,17 @@ public type PageKind is
 
 /// Get page kind for a bin
 @inline
-public fn page_kind_for_bin(bin: Int) -> PageKind {
+public fn page_kind_for_bin(bin: Int) -> SizeClassKind {
     if bin >= BIN_HUGE {
-        PageKind.Huge
+        SizeClassKind.Huge
     } else {
         let size = SIZE_CLASSES[bin];
         if size <= SMALL_SIZE_MAX {
-            PageKind.Small
+            SizeClassKind.Small
         } else if size <= MEDIUM_SIZE_MAX {
-            PageKind.Medium
+            SizeClassKind.Medium
         } else {
-            PageKind.Large
+            SizeClassKind.Large
         }
     }
 }

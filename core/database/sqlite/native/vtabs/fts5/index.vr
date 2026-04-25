@@ -25,28 +25,28 @@ mount core.database.sqlite.native.vtabs.fts5.segment.{
 };
 
 // -----------------------------------------------------------------------------
-// SegmentLevel
+// Fts5VtabSegmentLevel
 // -----------------------------------------------------------------------------
 
-public type SegmentLevel is {
+public type Fts5VtabSegmentLevel is {
     level: Int,
     segments: List<Segment>,
 };
 
-public fn level_new(n: Int) -> SegmentLevel { SegmentLevel { level: n, segments: List.new() } }
+public fn level_new(n: Int) -> Fts5VtabSegmentLevel { Fts5VtabSegmentLevel { level: n, segments: List.new() } }
 
 // -----------------------------------------------------------------------------
 // Index
 // -----------------------------------------------------------------------------
 
 public type Index is {
-    levels: List<SegmentLevel>,
+    levels: List<Fts5VtabSegmentLevel>,
     /// Level-0 segments above this count trigger a merge.
     merge_threshold: Int,
 };
 
 public fn index_new() -> Index {
-    let mut levels: List<SegmentLevel> = List.new();
+    let mut levels: List<Fts5VtabSegmentLevel> = List.new();
     levels.push(level_new(0));
     Index { levels: levels, merge_threshold: 4 }
 }

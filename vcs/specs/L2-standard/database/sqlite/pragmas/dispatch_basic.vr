@@ -17,7 +17,7 @@ mount core.database.sqlite.native.pragmas.registry.{
     PragmaKind,
     PCacheSize, PJournalMode, PSynchronous, PForeignKeys, PUserVersion,
     PIntegrityCheck, PWritableSchema, PCompileOptions, PPragmaList,
-    Scope, SConnection, SDatabase, SReadOnly, SDangerous,
+    PragmaScope, SConnection, SDatabase, SReadOnly, SDangerous,
     pragma_from_name, pragma_spec,
 };
 mount core.database.sqlite.native.pragmas.config.{

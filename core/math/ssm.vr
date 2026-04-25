@@ -716,7 +716,7 @@ public type RoutingStrategy is
 public type BalanceLoss is
     // Standard auxiliary loss
     | Auxiliary { coefficient: Float }
-    // Router z-loss
+    // MoeRouter z-loss
     | ZLoss { coefficient: Float }
     // Combined auxiliary and z-loss
     | Combined { aux: Float, z: Float };
@@ -770,16 +770,16 @@ implement<D: meta USize{D > 0}, H: meta USize{H > 0}>
     }
 }
 
-// Router network for expert selection
-public type Router<D: meta USize{D > 0}, E: meta USize{E > 1}> is {
+// MoeRouter network for expert selection
+public type MoeRouter<D: meta USize{D > 0}, E: meta USize{E > 1}> is {
     gate: Linear,           // D -> E (logits for each expert)
     noise_std: Float,       // Noise for load balancing during training
     strategy: RoutingStrategy,
 };
 
-implement<D: meta USize{D > 0}, E: meta USize{E > 1}> Router<D, E> {
+implement<D: meta USize{D > 0}, E: meta USize{E > 1}> MoeRouter<D, E> {
     public fn new(strategy: RoutingStrategy, noise_std: Float) -> Self {
-        Router {
+        MoeRouter {
             gate: Linear.new(D, E, false),
             noise_std,
             strategy,
@@ -866,7 +866,7 @@ public type MoELayer<
     H: meta USize{H > 0},
     E: meta USize{E > 1},
 > is {
-    router: Router<D, E>,
+    router: MoeRouter<D, E>,
     experts: List<Expert<D, H>>,
     balance_loss: BalanceLoss,
     // Capacity factor: max tokens per expert = (total_tokens / E) · capacity_factor
@@ -893,7 +893,7 @@ implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
         }
 
         MoELayer {
-            router: Router.new(strategy, 0.1),
+            router: MoeRouter.new(strategy, 0.1),
             experts,
             balance_loss,
             capacity_factor,

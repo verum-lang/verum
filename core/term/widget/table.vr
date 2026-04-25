@@ -46,25 +46,25 @@ implement TableCell {
 public type HighlightSpacing is Always | WhenSelected | Never;
 
 // =============================================================================
-// Row — a row of cells in the table
+// TableRow — a row of cells in the table
 // =============================================================================
 
 /// A row in the table.
-public type Row is {
+public type TableRow is {
     cells: List<TableCell>,
     height: Int,
     style: Style,
     bottom_margin: Int,
 };
 
-implement Row {
+implement TableRow {
     /// Create a new row from a list of text strings.
-    public fn new(cells: List<Text>) -> Row {
+    public fn new(cells: List<Text>) -> TableRow {
         let mut table_cells = List.new();
         for c in &cells {
             table_cells.push(TableCell.raw(c.clone()));
         }
-        Row {
+        TableRow {
             cells: table_cells,
             height: 1,
             style: Style.DEFAULT,
@@ -73,12 +73,12 @@ implement Row {
     }
 
     /// Create a new row from text strings with a uniform style.
-    public fn styled(cells: List<Text>, style: Style) -> Row {
+    public fn styled(cells: List<Text>, style: Style) -> TableRow {
         let mut table_cells = List.new();
         for c in &cells {
             table_cells.push(TableCell.styled(c.clone(), style));
         }
-        Row {
+        TableRow {
             cells: table_cells,
             height: 1,
             style: style,
@@ -87,18 +87,18 @@ implement Row {
     }
 
     /// Set the row height in lines.
-    public fn height(self, h: Int) -> Row {
-        Row { height: h, ..self }
+    public fn height(self, h: Int) -> TableRow {
+        TableRow { height: h, ..self }
     }
 
     /// Set the row style.
-    public fn style(self, s: Style) -> Row {
-        Row { style: s, ..self }
+    public fn style(self, s: Style) -> TableRow {
+        TableRow { style: s, ..self }
     }
 
     /// Set the bottom margin (gap below this row).
-    public fn bottom_margin(self, m: Int) -> Row {
-        Row { bottom_margin: m, ..self }
+    public fn bottom_margin(self, m: Int) -> TableRow {
+        TableRow { bottom_margin: m, ..self }
     }
 }
 
@@ -159,9 +159,9 @@ implement TableState {
 
 /// Table widget with headers, column widths, footer, and row selection.
 public type Table is {
-    rows: List<Row>,
-    header: Maybe<Row>,
-    footer: Maybe<Row>,
+    rows: List<TableRow>,
+    header: Maybe<TableRow>,
+    footer: Maybe<TableRow>,
     widths: List<Constraint>,
     column_spacing: Int,
     block: Maybe<Block>,
@@ -172,7 +172,7 @@ public type Table is {
 };
 
 implement Table {
-    public fn new(rows: List<Row>, widths: List<Constraint>) -> Table {
+    public fn new(rows: List<TableRow>, widths: List<Constraint>) -> Table {
         Table {
             rows: rows,
             header: None,
@@ -188,11 +188,11 @@ implement Table {
     }
 
     // Builder chain
-    public fn header(self, row: Row) -> Table {
+    public fn header(self, row: TableRow) -> Table {
         Table { header: Some(row), ..self }
     }
 
-    public fn footer(self, row: Row) -> Table {
+    public fn footer(self, row: TableRow) -> Table {
         Table { footer: Some(row), ..self }
     }
 
@@ -328,7 +328,7 @@ implement StatefulWidget for Table {
 }
 
 /// Render a single row of TableCells into column areas.
-fn render_row(buf: &mut Buffer, row: &Row, col_areas: &List<Rect>, y: Int, total_width: Int) {
+fn render_row(buf: &mut Buffer, row: &TableRow, col_areas: &List<Rect>, y: Int, total_width: Int) {
     let num_cols = row.cells.len().min(col_areas.len());
     for col in 0..num_cols {
         let cell_area = Rect.new(col_areas[col].x, y, col_areas[col].width, row.height);

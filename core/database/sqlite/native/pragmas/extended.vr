@@ -9,7 +9,7 @@
 //
 // We catalogue them here so EXPLAIN, `pragma_list`, and the help-
 // text surface a complete list without touching `pragmas/registry.vr`.
-// The classification is the same `Scope`/`EffectPhase` taxonomy.
+// The classification is the same `PragmaScope`/`EffectPhase` taxonomy.
 // =============================================================================
 
 module core.database.sqlite.native.pragmas.extended;
@@ -18,7 +18,7 @@ mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.pragmas.registry.{
-    Scope, SConnection, SDatabase, SReadOnly, SDangerous,
+    PragmaScope, SConnection, SDatabase, SReadOnly, SDangerous,
     EffectPhase, EImmediate, EOnNextTxn, EBeforeCreate,
 };
 
@@ -28,14 +28,14 @@ mount core.database.sqlite.native.pragmas.registry.{
 
 public type ExtendedPragma is {
     name: Text,
-    scope: Scope,
+    scope: PragmaScope,
     is_settable: Bool,
     effect: EffectPhase,
     /// Free-text help string surfaced via `PRAGMA help`.
     help: Text,
 };
 
-fn ext(name: Text, scope: Scope, is_settable: Bool, effect: EffectPhase, help: Text) -> ExtendedPragma {
+fn ext(name: Text, scope: PragmaScope, is_settable: Bool, effect: EffectPhase, help: Text) -> ExtendedPragma {
     ExtendedPragma {
         name: name,
         scope: scope,
@@ -222,7 +222,7 @@ fn clone_ext(p: &ExtendedPragma) -> ExtendedPragma {
     }
 }
 
-fn clone_scope(s: &Scope) -> Scope {
+fn clone_scope(s: &PragmaScope) -> PragmaScope {
     match s {
         SConnection => SConnection,
         SDatabase   => SDatabase,
