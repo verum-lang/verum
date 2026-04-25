@@ -1,0 +1,250 @@
+// =============================================================================
+// Diakrisis acts — articulation/enactment 2-categorical content (110.T–127.T)
+// =============================================================================
+//
+// Diakrisis-corpus extension postulating the 2-categorical structural
+// content of the dual-classification (DC / Actic) side: classifying
+// space, Grothendieck construction, universal performance, autopoiesis
+// fixed-point, CPTP duality, ρ-reflection, two-pointer measurement,
+// self-modifying dynamics, embodied/cognitive enactment, Goldilocks
+// activity range, knowledge indexing, composition depth invariance,
+// formal dialogue depth, and closure of the formal-logical
+// sub-category.
+//
+// Catalogue covers theorems 110.T-127.T (excluding 124.T and 125.T,
+// which live in `core.math.frameworks.diakrisis_biadjunction`).
+//
+// Public axiom names describe the mathematical conclusion VERBATIM
+// per the corpus statements; framework annotations cite the catalogue
+// entry for trusted-boundary audit. V0 ships the trusted-boundary
+// axioms with `ensures true` placeholders; V1 will replace each with
+// the full operational ensures clause.
+// =============================================================================
+
+mount core.action.articulation.{Articulation};
+mount core.action.enactments.{Enactment};
+
+// =============================================================================
+// 110.T — Classifying space of the activation 2-category
+// =============================================================================
+
+/// There exists a classifying space for the activation 2-category:
+///
+///     E_Fnd ≃ N(>>·<<)_gauge / ~_Morita
+///
+/// — the Morita-quotient of the simplicial nerve of the gauge-equivalent
+/// activation 2-category. Classifying-space existence anchors every
+/// downstream catalogue construction.
+@framework(diakrisis, "Theorem 110.T (classifying space E_Fnd)")
+public axiom classifying_space_of_activation() -> Bool ensures true;
+
+// =============================================================================
+// 111.T — Grothendieck construction on E_Fnd (universal-final-homotopy)
+// =============================================================================
+
+/// There exists a Grothendieck construction on the classifying space:
+///
+///     ∫_{E_Fnd} Perf : Prac → >>·<<
+///
+/// — a 2-functor lifting the practice category into the activation
+/// 2-category through the performance fibration.
+@framework(diakrisis, "Theorem 111.T (Grothendieck construction on E_Fnd)")
+public axiom grothendieck_construction_on_e_fnd() -> Bool ensures true;
+
+// =============================================================================
+// 112.T — Universal performance ε_actic
+// =============================================================================
+
+/// There exists a canonical universal performance ε_actic in the
+/// activation 2-category, satisfying the universality
+///
+///     ε(α_diakrisis) ≃ ε_actic
+///
+/// — every articulation classified by the meta-classifier α_diakrisis
+/// has its enactment image canonically equivalent to ε_actic.
+@framework(diakrisis, "Theorem 112.T (canonical universal performance ε_actic)")
+public axiom canonical_universal_performance() -> Bool ensures true;
+
+// =============================================================================
+// 113.T — Autopoiesis as transfinite-iteration fixed point
+// =============================================================================
+
+/// An act of "living-system class" is autopoietic (in the
+/// Maturana-Varela sense) if and only if there exists an ordinal
+/// κ ≥ ω² such that
+///
+///     A^κ(ε) ≃ ε.
+///
+/// The lower bound κ ≥ ω² is sharp; below ω² the activation iterate
+/// lacks the structural closure that autopoiesis requires.
+@framework(diakrisis, "Theorem 113.T (autopoiesis as A^κ-fixed-point with κ ≥ ω²)")
+public axiom autopoiesis_a_kappa_fixed_point<E: Enactment>(e: E) -> Bool ensures true;
+
+// =============================================================================
+// 114.T — Performance morphisms are CPTP maps preserving act-hom
+// =============================================================================
+
+/// Morphisms between performances `f : ε_1 → ε_2` in the activation
+/// 2-category are exactly the completely-positive-trace-preserving
+/// (CPTP) maps that preserve the act-hom structure:
+///
+///     Hom_{>>·<<}(ε_1, ε_2) ≃ CPTP^act(ρ^act(ε_1), ρ^act(ε_2)).
+///
+/// This identifies the morphism type-class with the operational
+/// quantum-channel structure.
+@framework(diakrisis, "Theorem 114.T (performance morphisms = CPTP^act)")
+public axiom performance_morphisms_are_cptp() -> Bool ensures true;
+
+// =============================================================================
+// 115.T — ρ-reflection equals act-substitution closure
+// =============================================================================
+
+/// For an act ε with ρ-reflection ρ^act(ε), the equality
+///
+///     ρ^act(ε) = φ^act(Γ_ε)
+///
+/// holds — the ρ-reflection coincides with the act-substitution
+/// closure of the act's environment Γ_ε. This is the ε-version of
+/// the canonical-primitive self-consistent reflection.
+@framework(diakrisis, "Theorem 115.T (ρ^act(ε) = φ^act(Γ_ε); ε-self-reflection)")
+public axiom rho_reflection_eq_act_substitution() -> Bool ensures true;
+
+// =============================================================================
+// 116.T — Two-Pointer Measurement DC-dual
+// =============================================================================
+
+/// The Two-Pointer Measurement (TPM) protocol from quantum
+/// thermodynamics has a canonical DC-dual:
+///
+///     ε_TPM = (ε_pre-measure, ε_post-measure)
+///
+/// — a pair of activation acts realising the pre- and post-measurement
+/// states respectively.
+@framework(diakrisis, "Theorem 116.T (TPM DC-dual: pre/post-measure pair)")
+public axiom tpm_dc_dual_pair() -> Bool ensures true;
+
+// =============================================================================
+// 117.T — Self-modifying-dynamics as A^{ω²}-fixed-point
+// =============================================================================
+
+/// Self-modifying-dynamics (Schedrovitsky-style activity systems)
+/// instantiate the A^{ω²}-fixed-point structure:
+///
+///     ε_SMD ≃ A^{ω²}(ε_SMD).
+///
+/// This is *strictly stronger* than ordinary autopoiesis (113.T):
+/// the rank ω² is exact, not merely a lower bound.
+@framework(diakrisis, "Theorem 117.T (SMD as A^{ω²}-fixed-point with exact rank)")
+public axiom smd_as_a_omega_squared_fixed_point() -> Bool ensures true;
+
+// =============================================================================
+// 118.T — Embodied/cognitive enactment functor
+// =============================================================================
+
+/// There exists an ℵ_0-accessible 2-functor
+///
+///     Enact : >>·<<_embodied → >>·<<_cognitive
+///
+/// realising the philosophical doctrine of enactivism as a structural
+/// transformation between the embodied and cognitive sub-2-categories
+/// of the activation 2-category.
+@framework(diakrisis, "Theorem 118.T (Enact: embodied → cognitive ℵ_0-accessible 2-functor)")
+public axiom enact_embodied_cognitive_functor() -> Bool ensures true;
+
+// =============================================================================
+// 119.T — Goldilocks activity range
+// =============================================================================
+
+/// For an act ε with A-depth κ, "activity" (life / consciousness-
+/// protocol presence) exists only at
+///
+///     ω ≤ κ ≤ ω·3.
+///
+/// Below ω the act is sub-active (purely structural); above ω·3 the
+/// act has dissolved into transfinite self-reference and ceases to be
+/// an "act" in the canonical sense.
+@framework(diakrisis, "Theorem 119.T (Goldilocks activity range: ω ≤ κ ≤ ω·3)")
+public axiom goldilocks_activity_range() -> Bool ensures true;
+
+// =============================================================================
+// 120.T — Ludics-Performance equivalence (catalogue boundary)
+// =============================================================================
+
+/// Ludics (Girard) admits a canonical Actic embedding:
+///
+///     Design ≃ Perf(α_linear),
+///     Desseins ≃ 2-cells in >>·<<.
+///
+/// Operational content lives in `core.action.ludics` (VFE-10); this
+/// axiom records the catalogue boundary for trusted-boundary audit.
+@framework(diakrisis, "Theorem 120.T (Design ≃ Perf(α_linear); see core.action.ludics)")
+public axiom ludics_performance_equivalence_catalogue() -> Bool ensures true;
+
+// =============================================================================
+// 121.T — BHK semantics is exactly ε-semantics (catalogue boundary)
+// =============================================================================
+
+/// The Brouwer-Heyting-Kolmogorov semantics for intuitionistic logic
+/// is exactly the ε-semantics:
+///
+///     ⟦φ⟧_BHK = ε(α_φ).
+///
+/// Operational content lives in `core.proof.bhk` (VFE-5); this axiom
+/// records the catalogue boundary.
+@framework(diakrisis, "Theorem 121.T (⟦φ⟧_BHK = ε(α_φ); see core.proof.bhk)")
+public axiom bhk_eq_epsilon_semantics_catalogue() -> Bool ensures true;
+
+// =============================================================================
+// 122.T — Knowledge indexing functor
+// =============================================================================
+
+/// There exists a canonical knowledge-indexing 2-functor
+///
+///     Idx : Knowledge → M_Fnd × E_Fnd
+///
+/// — every knowledge item indexes to a pair (articulation depth,
+/// enactment height) in the canonical-primitive product space. The
+/// two coordinates are interlinked through 108.T but track
+/// independent structural content.
+@framework(diakrisis, "Theorem 122.T (Idx: Knowledge → M_Fnd × E_Fnd)")
+public axiom knowledge_indexing_functor() -> Bool ensures true;
+
+// =============================================================================
+// 123.T — Composition preserves A-depths at endpoints
+// =============================================================================
+
+/// For acts ε_1, ε_2, ε_3 with A-depths κ_1, κ_2, κ_3, and 1-cells
+/// f : ε_1 → ε_2, g : ε_2 → ε_3, the composition g ∘ f satisfies
+///
+///     e(cod(g ∘ f)) = κ_3,    e(dom(g ∘ f)) = κ_1.
+///
+/// — composition does NOT increase the A-depth at either endpoint.
+@framework(diakrisis, "Theorem 123.T (composition preserves endpoint A-depths)")
+public axiom composition_preserves_endpoint_depths<E: Enactment>(e1: E, e2: E) -> Bool ensures true;
+
+// =============================================================================
+// 126.T — Lorenzen dialogue depth equals ω + k for k moves
+// =============================================================================
+
+/// A formal Lorenzen-style dialogue with k moves has activation depth
+///
+///     e(ε_D) = ω + k.
+///
+/// In the limit k → ∞ the depth saturates at ω·2 (second full layer),
+/// coinciding with the upper Goldilocks bound from 119.T (tradition
+/// stabilisation).
+@framework(diakrisis, "Theorem 126.T (Lorenzen dialogue depth: e = ω + k)")
+public axiom lorenzen_dialogue_depth_omega_plus_k() -> Bool ensures true;
+
+// =============================================================================
+// 127.T — Closure of formal-logical DC-subcategory
+// =============================================================================
+
+/// The formal-logical sub-2-category of the activation 2-category,
+/// generated by the canonical seven formal-logical directions
+/// (BHK, MLTT, Lorenzen dialogue, Hintikka game semantics, Ludics,
+/// Curry-Howard-Lambek, π-calculus / Actor / CSP), is closed under
+/// 1-cell composition, parallel composition, and activation —
+/// itself a well-defined 2-subcategory.
+@framework(diakrisis, "Theorem 127.T (closure of formal-logical DC-subcategory)")
+public axiom formal_logical_subcategory_closure() -> Bool ensures true;
