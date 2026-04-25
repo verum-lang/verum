@@ -656,6 +656,15 @@ impl From<TypeError> for VerumError {
             TypeError::RecursionLimit(msg) => VerumError::Other {
                 message: format!("recursion limit exceeded: {}", msg).into(),
             },
+
+            TypeError::PositivityViolation { type_name, constructor, position, .. } => {
+                VerumError::Other {
+                    message: format!(
+                        "strict-positivity violation in type '{}' constructor '{}': {}",
+                        type_name, constructor, position
+                    ).into(),
+                }
+            }
         }
     }
 }

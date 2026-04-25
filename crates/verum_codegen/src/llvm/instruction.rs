@@ -4518,6 +4518,328 @@ pub fn lower_instruction<'ctx>(
         }
 
         // ====================================================================
+        // Tensor compute (#83): the rest of the heavy compute surface.
+        // All route through verum_tensor_<op> runtime externs with the
+        // same i64-only ABI. Optional Reg fields encode "absent" as
+        // i64::MIN sentinel — the runtime treats that as `None`.
+        // ====================================================================
+        Instruction::TensorClamp { dst, src, min, max } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_clamp", *dst,
+                &[*src, *min, *max], &[])
+        }
+
+        Instruction::TensorWhere { dst, cond, x, y } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_where", *dst,
+                &[*cond, *x, *y], &[])
+        }
+
+        Instruction::TensorCmp { op, dst, a, b } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_cmp", *dst,
+                &[*a, *b], &[*op as u8 as i64])
+        }
+
+        Instruction::TensorCast { dst, src, dtype } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_cast", *dst,
+                &[*src], &[*dtype as i64])
+        }
+
+        Instruction::TensorBatchMatmul { dst, a, b } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_batch_matmul", *dst,
+                &[*a, *b], &[])
+        }
+
+        Instruction::TensorOuter { dst, a, b } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_outer", *dst,
+                &[*a, *b], &[])
+        }
+
+        Instruction::TensorSoftmax { dst, src, axis } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_softmax", *dst,
+                &[*src], &[*axis as i64])
+        }
+
+        Instruction::TensorArgmax { dst, src, axis, keepdim } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_argmax", *dst,
+                &[*src], &[*axis as i64, *keepdim as i64])
+        }
+
+        Instruction::TensorArgmin { dst, src, axis, keepdim } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_argmin", *dst,
+                &[*src], &[*axis as i64, *keepdim as i64])
+        }
+
+        Instruction::TensorTrace { dst, src } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_trace", *dst, &[*src], &[])
+        }
+
+        Instruction::TensorMaskedFill { dst, src, mask, value } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_masked_fill", *dst,
+                &[*src, *mask, *value], &[])
+        }
+
+        Instruction::TensorLerp { dst, a, b, t } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_lerp", *dst,
+                &[*a, *b, *t], &[])
+        }
+
+        Instruction::TensorCumulative { op, dst, src, axis } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_cumulative", *dst,
+                &[*src], &[*op as u8 as i64, *axis as i64])
+        }
+
+        Instruction::TensorGather { dst, src, index, axis } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_gather", *dst,
+                &[*src, *index], &[*axis as i64])
+        }
+
+        Instruction::TensorDot { dst, a, b, axes_a, axes_b } => {
+            // Variadic: pack two perm arrays alongside the regs
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let av = as_i64(ctx, ctx.get_register(a.0)?, "dot_a")?;
+            let bv = as_i64(ctx, ctx.get_register(b.0)?, "dot_b")?;
+            let (axes_a_ptr, axes_a_len) = build_tensor_perm_array(ctx, axes_a, "dot_axes_a")?;
+            let (axes_b_ptr, axes_b_len) = build_tensor_perm_array(ctx, axes_b, "dot_axes_b")?;
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 6], false);
+            let f = module.get_function("verum_tensor_dot").unwrap_or_else(|| {
+                module.add_function("verum_tensor_dot", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[av.into(), bv.into(), axes_a_ptr.into(), axes_a_len.into(), axes_b_ptr.into(), axes_b_len.into()], "tensor_dot")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorEinsum { dst, inputs, equation_id } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let (in_ptr, in_len) = build_tensor_shape_array(ctx, inputs, "es_in")?;
+            let eq_id = i64_ty.const_int(*equation_id as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 3], false);
+            let f = module.get_function("verum_tensor_einsum").unwrap_or_else(|| {
+                module.add_function("verum_tensor_einsum", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[in_ptr.into(), in_len.into(), eq_id.into()], "tensor_einsum")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorTopk { values, indices, src, k, axis, largest } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "topk_src")?;
+            let kv = as_i64(ctx, ctx.get_register(k.0)?, "topk_k")?;
+            let ax = i64_ty.const_int(*axis as u64, true); // signed sext
+            let lg = i64_ty.const_int(*largest as u64, false);
+            // Returns a 2-result handle packed as a single i64 (low 32 = values, high 32 = indices)
+            // OR uses sret-style: we pass the values+indices regs as out-pointers.
+            // Simpler approach: runtime packs two handles into stack-allocated [i64;2],
+            // we read both back into registers.
+            let pair_ty = i64_ty.array_type(2);
+            let pair_alloca = ctx.builder()
+                .build_alloca(pair_ty, "topk_pair")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let pair_ptr_i64 = ctx.builder()
+                .build_ptr_to_int(pair_alloca, i64_ty, "topk_pair_i64")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into(); 5], false);
+            let f = module.get_function("verum_tensor_topk").unwrap_or_else(|| {
+                module.add_function("verum_tensor_topk", fn_type, None)
+            });
+            ctx.builder()
+                .build_call(f, &[s.into(), kv.into(), ax.into(), lg.into(), pair_ptr_i64.into()], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // Read pair[0] and pair[1] into values/indices registers.
+            // SAFETY: in-bounds GEP into [i64;2] just allocated above
+            let v_gep = unsafe {
+                ctx.builder().build_in_bounds_gep(
+                    pair_ty, pair_alloca,
+                    &[i64_ty.const_zero(), i64_ty.const_int(0, false)],
+                    "topk_v_gep",
+                )
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
+            let i_gep = unsafe {
+                ctx.builder().build_in_bounds_gep(
+                    pair_ty, pair_alloca,
+                    &[i64_ty.const_zero(), i64_ty.const_int(1, false)],
+                    "topk_i_gep",
+                )
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
+            let v_val = ctx.builder().build_load(i64_ty, v_gep, "topk_v")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let i_val = ctx.builder().build_load(i64_ty, i_gep, "topk_i")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(values.0, v_val);
+            ctx.set_register(indices.0, i_val);
+            Ok(())
+        }
+
+        Instruction::TensorBatchNorm {
+            dst, input, gamma, beta, running_mean, running_var, training, momentum, eps,
+        } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let i = as_i64(ctx, ctx.get_register(input.0)?, "bn_in")?;
+            let g = optional_reg_as_i64(ctx, gamma.as_ref(), "bn_gamma")?;
+            let b = optional_reg_as_i64(ctx, beta.as_ref(), "bn_beta")?;
+            let rm = optional_reg_as_i64(ctx, running_mean.as_ref(), "bn_rm")?;
+            let rv = optional_reg_as_i64(ctx, running_var.as_ref(), "bn_rv")?;
+            let tr = i64_ty.const_int(*training as u64, false);
+            // momentum and eps are f32 — bit-cast to i32 then zext to i64 so the
+            // runtime can read them with std::mem::transmute<i32, f32>.
+            let mom = i64_ty.const_int(momentum.to_bits() as u64, false);
+            let ep  = i64_ty.const_int(eps.to_bits() as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 8], false);
+            let f = module.get_function("verum_tensor_batch_norm").unwrap_or_else(|| {
+                module.add_function("verum_tensor_batch_norm", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[i.into(), g.into(), b.into(), rm.into(), rv.into(), tr.into(), mom.into(), ep.into()], "tensor_batch_norm")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorLayerNorm { dst, input, gamma, beta, normalized_shape, eps } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let i = as_i64(ctx, ctx.get_register(input.0)?, "ln_in")?;
+            let g = optional_reg_as_i64(ctx, gamma.as_ref(), "ln_gamma")?;
+            let b = optional_reg_as_i64(ctx, beta.as_ref(), "ln_beta")?;
+            let ns = i64_ty.const_int(*normalized_shape as u64, false);
+            let ep = i64_ty.const_int(eps.to_bits() as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 5], false);
+            let f = module.get_function("verum_tensor_layer_norm").unwrap_or_else(|| {
+                module.add_function("verum_tensor_layer_norm", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[i.into(), g.into(), b.into(), ns.into(), ep.into()], "tensor_layer_norm")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorConv {
+            dst, input, kernel, bias, stride, padding, dilation, groups,
+        } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let i = as_i64(ctx, ctx.get_register(input.0)?, "cv_in")?;
+            let k = as_i64(ctx, ctx.get_register(kernel.0)?, "cv_kernel")?;
+            let bi = optional_reg_as_i64(ctx, bias.as_ref(), "cv_bias")?;
+            let (str_ptr, str_len) = build_tensor_perm_array(ctx, stride, "cv_str")?;
+            let (pad_ptr, pad_len) = build_tensor_perm_array(ctx, padding, "cv_pad")?;
+            let (dil_ptr, dil_len) = build_tensor_perm_array(ctx, dilation, "cv_dil")?;
+            let g = i64_ty.const_int(*groups as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 10], false);
+            let f = module.get_function("verum_tensor_conv").unwrap_or_else(|| {
+                module.add_function("verum_tensor_conv", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[i.into(), k.into(), bi.into(), str_ptr.into(), str_len.into(), pad_ptr.into(), pad_len.into(), dil_ptr.into(), dil_len.into(), g.into()], "tensor_conv")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorPool { op, dst, src, kernel_size, stride, padding } => {
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let s = as_i64(ctx, ctx.get_register(src.0)?, "pl_src")?;
+            let (ks_ptr, ks_len) = build_tensor_perm_array(ctx, kernel_size, "pl_ks")?;
+            let (str_ptr, str_len) = build_tensor_perm_array(ctx, stride, "pl_str")?;
+            let (pad_ptr, pad_len) = build_tensor_perm_array(ctx, padding, "pl_pad")?;
+            let opv = i64_ty.const_int(*op as u8 as u64, false);
+            let fn_type = i64_ty.fn_type(&[i64_ty.into(); 8], false);
+            let f = module.get_function("verum_tensor_pool").unwrap_or_else(|| {
+                module.add_function("verum_tensor_pool", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(f, &[opv.into(), s.into(), ks_ptr.into(), ks_len.into(), str_ptr.into(), str_len.into(), pad_ptr.into(), pad_len.into()], "tensor_pool")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_ty.const_zero().into());
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
+
+        Instruction::TensorNorm { dst, src, ord } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_norm", *dst,
+                &[*src], &[*ord as i64])
+        }
+
+        // ====================================================================
+        // Tensor linear-algebra (#84): dispatch to LAPACK-backed runtime.
+        // Multi-output ops (QR/SVD/LU/Eig/Lstsq) write each result into
+        // its own pre-allocated register via a slot-array pattern: the
+        // runtime takes a pointer to an [i64; N] array, fills each slot,
+        // and we read each slot back into its destination register.
+        // ====================================================================
+        Instruction::TensorSolve { dst, a, b } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_solve", *dst, &[*a, *b], &[])
+        }
+
+        Instruction::TensorTriSolve { dst, a, b, upper } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_tri_solve", *dst,
+                &[*a, *b], &[*upper as i64])
+        }
+
+        Instruction::TensorCholesky { dst, src, upper } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_cholesky", *dst,
+                &[*src], &[*upper as i64])
+        }
+
+        Instruction::TensorDet { dst, src } => {
+            lower_tensor_simple_call(ctx, "verum_tensor_det", *dst, &[*src], &[])
+        }
+
+        Instruction::TensorQR { q, r, src, mode } => {
+            lower_tensor_multi_result(ctx, "verum_tensor_qr", &[*q, *r],
+                &[*src], &[*mode as i64])
+        }
+
+        Instruction::TensorSVD { u, s, vh, src, full_matrices, compute_uv } => {
+            lower_tensor_multi_result(ctx, "verum_tensor_svd", &[*u, *s, *vh],
+                &[*src], &[*full_matrices as i64, *compute_uv as i64])
+        }
+
+        Instruction::TensorLU { p, l, u, src } => {
+            lower_tensor_multi_result(ctx, "verum_tensor_lu", &[*p, *l, *u],
+                &[*src], &[])
+        }
+
+        Instruction::TensorEig { eigenvalues, eigenvectors, src, compute_v } => {
+            lower_tensor_multi_result(ctx, "verum_tensor_eig",
+                &[*eigenvalues, *eigenvectors], &[*src], &[*compute_v as i64])
+        }
+
+        Instruction::TensorEigSymmetric { eigenvalues, eigenvectors, src, upper } => {
+            lower_tensor_multi_result(ctx, "verum_tensor_eig_symmetric",
+                &[*eigenvalues, *eigenvectors], &[*src], &[*upper as i64])
+        }
+
+        Instruction::TensorLstsq { x, residuals, rank, s, a, b, rcond } => {
+            lower_tensor_multi_result(ctx, "verum_tensor_lstsq",
+                &[*x, *residuals, *rank, *s], &[*a, *b],
+                &[rcond.to_bits() as i64])
+        }
+
+        // ====================================================================
         // Remaining explicitly-matched instructions
         // ====================================================================
         Instruction::RandomFloat { dst, low, high } => {
@@ -14638,6 +14960,135 @@ fn build_tensor_perm_array<'ctx>(
         .build_ptr_to_int(alloca, i64_ty, &format!("{name}_ptr_i64"))
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
     Ok((ptr_as_i64, len_val))
+}
+
+/// Materialise an `Option<&Reg>` argument as i64 for the runtime ABI.
+/// `None` lowers to the i64::MIN sentinel — the runtime treats that as
+/// the "absent" marker. Picking i64::MIN (0x8000_0000_0000_0000) keeps
+/// the encoding distinct from any plausible positive Value pointer
+/// AND from the all-ones tag bits of typical NaN-boxed values.
+fn optional_reg_as_i64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    reg: Option<&verum_vbc::instruction::Reg>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    match reg {
+        Some(r) => as_i64(ctx, ctx.get_register(r.0)?, name),
+        None => Ok(i64_ty.const_int(i64::MIN as u64, true)),
+    }
+}
+
+/// Common pattern: tensor op with N register args + M integer scalar
+/// args, returning a single tensor handle. Routes to a runtime extern
+/// using the uniform i64-only ABI. Each register lowers to its Value
+/// bits; each scalar lowers to a const_int (sign-extended where
+/// needed). The runtime declares its own signature; we declare a
+/// matching `fn(i64, ...) -> i64` here.
+fn lower_tensor_simple_call<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    fn_name: &str,
+    dst: verum_vbc::instruction::Reg,
+    regs: &[verum_vbc::instruction::Reg],
+    scalars: &[i64],
+) -> Result<()> {
+    let i64_ty = ctx.types().i64_type();
+    let module = ctx.get_module();
+    let mut args: Vec<verum_llvm::values::BasicMetadataValueEnum<'ctx>> =
+        Vec::with_capacity(regs.len() + scalars.len());
+    for (i, r) in regs.iter().enumerate() {
+        let v = as_i64(ctx, ctx.get_register(r.0)?, &format!("{fn_name}_r{i}"))?;
+        args.push(v.into());
+    }
+    for s in scalars {
+        // const_int treats the bit pattern as unsigned, but allows sext later
+        let v = i64_ty.const_int(*s as u64, true);
+        args.push(v.into());
+    }
+    let total = regs.len() + scalars.len();
+    let param_tys: Vec<verum_llvm::types::BasicMetadataTypeEnum<'ctx>> =
+        std::iter::repeat(i64_ty.into()).take(total).collect();
+    let fn_type = i64_ty.fn_type(&param_tys, false);
+    let f = module
+        .get_function(fn_name)
+        .unwrap_or_else(|| module.add_function(fn_name, fn_type, None));
+    let result = ctx
+        .builder()
+        .build_call(f, &args, fn_name)
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .try_as_basic_value()
+        .basic()
+        .unwrap_or_else(|| i64_ty.const_zero().into());
+    ctx.set_register(dst.0, result);
+    Ok(())
+}
+
+/// Multi-output tensor op: the runtime fills a stack-allocated
+/// `[i64; N]` slot array via a sret-style pointer. We pass the slot
+/// array as the LAST argument; on return we read each slot into the
+/// corresponding destination register. Used for QR/SVD/LU/Eig/Lstsq.
+fn lower_tensor_multi_result<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    fn_name: &str,
+    dsts: &[verum_vbc::instruction::Reg],
+    regs: &[verum_vbc::instruction::Reg],
+    scalars: &[i64],
+) -> Result<()> {
+    let i64_ty = ctx.types().i64_type();
+    let module = ctx.get_module();
+    let n = dsts.len() as u32;
+    let slot_array_ty = i64_ty.array_type(n);
+    let slots = ctx
+        .builder()
+        .build_alloca(slot_array_ty, &format!("{fn_name}_slots"))
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    let slots_i64 = ctx
+        .builder()
+        .build_ptr_to_int(slots, i64_ty, &format!("{fn_name}_slots_i64"))
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+    let mut args: Vec<verum_llvm::values::BasicMetadataValueEnum<'ctx>> =
+        Vec::with_capacity(regs.len() + scalars.len() + 1);
+    for (i, r) in regs.iter().enumerate() {
+        let v = as_i64(ctx, ctx.get_register(r.0)?, &format!("{fn_name}_r{i}"))?;
+        args.push(v.into());
+    }
+    for s in scalars {
+        args.push(i64_ty.const_int(*s as u64, true).into());
+    }
+    args.push(slots_i64.into());
+
+    let total = regs.len() + scalars.len() + 1;
+    let param_tys: Vec<verum_llvm::types::BasicMetadataTypeEnum<'ctx>> =
+        std::iter::repeat(i64_ty.into()).take(total).collect();
+    let fn_type = ctx.types().void_type().fn_type(&param_tys, false);
+    let f = module
+        .get_function(fn_name)
+        .unwrap_or_else(|| module.add_function(fn_name, fn_type, None));
+    ctx.builder()
+        .build_call(f, &args, "")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+    // Read each slot back into its dst register.
+    for (i, dst) in dsts.iter().enumerate() {
+        // SAFETY: in-bounds GEP into slot_array of size dsts.len()
+        let gep = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(
+                    slot_array_ty,
+                    slots,
+                    &[i64_ty.const_zero(), i64_ty.const_int(i as u64, false)],
+                    &format!("{fn_name}_slot{i}_gep"),
+                )
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        };
+        let v = ctx
+            .builder()
+            .build_load(i64_ty, gep, &format!("{fn_name}_slot{i}"))
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        ctx.set_register(dst.0, v);
+    }
+    Ok(())
 }
 
 /// Common pattern: tensor op that takes N input tensors + a single integer
