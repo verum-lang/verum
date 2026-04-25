@@ -2459,6 +2459,24 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Lower instructions, switching blocks as needed
         let mut _current_block_start_idx = 0usize;
 
+        // Build the tensor-fusion plan once per function. Per-instruction
+        // dispatch consults `skip_at` / `anchor_at` to absorb fused
+        // chain members into a single fused-kernel call at the chain
+        // anchor. When the function has no fusable chains the plan's
+        // sets are empty and the loop behaves identically to before.
+        // Tracked under #91-2 / #96.
+        let fusion_plan = crate::passes::tensor_fusion::FusionPlan::build(
+            &vbc_func.instructions,
+        );
+        if !fusion_plan.chains.is_empty() {
+            tracing::debug!(
+                "[fusion] fn '{}': {} fusable chains, {} instructions absorbed",
+                func_name,
+                fusion_plan.chains.len(),
+                fusion_plan.fused_indices.len(),
+            );
+        }
+
         for (instr_idx, instr) in vbc_func.instructions.iter().enumerate() {
             // Check if this instruction starts a new block
             if instr_idx > 0 {
