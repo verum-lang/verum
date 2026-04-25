@@ -34,3 +34,6 @@ public mount core.action.monads.pure;
 public mount core.action.monads.reader;
 public mount core.action.monads.writer;
 public mount core.action.monads.state;
+// VFE-Tier-A V0 — probabilistic + quantum effect classes.
+public mount core.action.monads.probability;
+public mount core.action.monads.quantum;

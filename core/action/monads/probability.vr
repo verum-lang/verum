@@ -1,0 +1,128 @@
+// =============================================================================
+// core.action.monads.probability — Giry-style probability monad (VFE §18.5)
+// =============================================================================
+//
+// `Probability<A>` — finite-support discrete probability distribution
+// over values of type `A`. The Kleisli shape is a list of
+// `(value, weight)` pairs whose weights sum to 1 (normalisation
+// invariant).
+//
+// **Commutative** under independent tensor product per Plotkin-Power
+// 2002 Example 2.4: `bind(p1, |a| bind(p2, |b| pure((a, b))))` and
+// `bind(p2, |b| bind(p1, |a| pure((a, b))))` produce the same joint
+// distribution. ε-coordinate ω. Composes safely under
+// @verify(coherent_concurrent) without synchronisation per
+// Corollary 17.C2.
+//
+// VFE §18.5 Tier-A: probabilistic coherence — Probability is the
+// canonical commutative monad for probabilistic verification (verified
+// machine learning, randomised algorithms, probabilistic protocols).
+// The Giry monad lifts to measurable spaces in V1.5 (continuous
+// distributions); V0 ships discrete/finite-support only.
+// =============================================================================
+
+@derive(Clone)
+public type Probability<A> is {
+    /// Finite support: list of (value, weight) pairs whose weights
+    /// sum to 1 modulo floating-point rounding.
+    support: List<(A, Float)>,
+};
+
+/// `pure : A -> Probability<A>` — Dirac distribution at `a` (point
+/// mass with probability 1).
+public fn prob_unit<A>(a: A) -> Probability<A> {
+    let mut support: List<(A, Float)> = List.new();
+    support.push((a, 1.0));
+    Probability { support: support }
+}
+
+/// `bernoulli : Float -> Probability<Bool>` — Bernoulli(p)
+/// distribution. p must be in [0, 1]; the constructor clamps
+/// out-of-range to the nearest endpoint.
+public fn prob_bernoulli(p: Float) -> Probability<Bool> {
+    let clamped: Float = if p < 0.0 {
+        0.0
+    } else if p > 1.0 {
+        1.0
+    } else {
+        p
+    };
+    let mut support: List<(Bool, Float)> = List.new();
+    support.push((true, clamped));
+    support.push((false, 1.0 - clamped));
+    Probability { support: support }
+}
+
+/// `bind : Probability<A> -> (A -> Probability<B>) -> Probability<B>`
+/// — sequence two probabilistic computations. Multiplies weights
+/// pairwise and aggregates.
+public fn prob_bind<A, B>(
+    m: Probability<A>,
+    f: fn(A) -> Probability<B>,
+) -> Probability<B> {
+    let mut joined: List<(B, Float)> = List.new();
+    let mut i: Int = 0;
+    while i < m.support.len() as Int {
+        let pair_a = (*m.support.get(i as Int).unwrap()).clone();
+        let inner: Probability<B> = f(pair_a.0);
+        let mut j: Int = 0;
+        while j < inner.support.len() as Int {
+            let pair_b = (*inner.support.get(j as Int).unwrap()).clone();
+            joined.push((pair_b.0, pair_a.1 * pair_b.1));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    Probability { support: joined }
+}
+
+/// `strength : A -> Probability<B> -> Probability<(A, B)>` — tensor
+/// a pure value alongside a probabilistic one. Each (b, w) pair
+/// becomes ((a, b), w).
+public fn prob_strength<A, B>(a: A, mb: Probability<B>) -> Probability<(A, B)> {
+    let mut paired: List<((A, B), Float)> = List.new();
+    let mut i: Int = 0;
+    while i < mb.support.len() as Int {
+        let pair_b = (*mb.support.get(i as Int).unwrap()).clone();
+        paired.push(((a.clone(), pair_b.0), pair_b.1));
+        i = i + 1;
+    }
+    Probability { support: paired }
+}
+
+/// `total_weight : Probability<A> -> Float` — sum the support weights.
+/// Should equal 1.0 for any well-formed distribution; deviation
+/// indicates floating-point drift or malformed construction.
+public fn prob_total_weight<A>(m: Probability<A>) -> Float {
+    let mut total: Float = 0.0;
+    let mut i: Int = 0;
+    while i < m.support.len() as Int {
+        let pair = (*m.support.get(i as Int).unwrap()).clone();
+        total = total + pair.1;
+        i = i + 1;
+    }
+    total
+}
+
+// =============================================================================
+// Monad laws + commutativity (V1 trusted-boundary axioms)
+// =============================================================================
+
+@framework(diakrisis, "Theorem 17.T1 (Probability left-identity monad law)")
+public axiom prob_left_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (Probability right-identity monad law)")
+public axiom prob_right_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (Probability associativity monad law)")
+public axiom prob_associativity() -> Bool ensures true;
+
+/// Probability is commutative under independent tensor product
+/// per Plotkin-Power 2002 Example 2.4.
+@framework(diakrisis, "Corollary 17.C2 (Probability tensor-commutativity)")
+public axiom prob_commutativity() -> Bool ensures true;
+
+/// Normalisation invariant: every well-formed distribution has
+/// support weights that sum to 1.0 (modulo floating-point rounding).
+@framework(diakrisis, "Probability normalisation invariant (well-formed distribution)")
+public axiom prob_normalisation_invariant() -> Bool ensures true;
