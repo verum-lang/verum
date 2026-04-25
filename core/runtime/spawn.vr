@@ -78,7 +78,7 @@ mount super.env.{
 mount super.recovery.{
     RecoveryStrategy,
     RetryConfig,
-    BackoffStrategy,
+    RecoveryBackoffStrategy,
     CircuitBreakerConfig,
 };
 mount super.supervisor.{
@@ -384,7 +384,7 @@ implement SpawnConfig {
     public fn with_simple_retry(mut self, max_attempts: UInt16, delay_ms: UInt32) -> Self {
         self.retry = Some(RetryConfig {
             max_attempts: max_attempts,
-            backoff: BackoffStrategy.Fixed,
+            backoff: RecoveryBackoffStrategy.Fixed,
             backoff_base_ms: delay_ms,
             backoff_max_ms: delay_ms,
             jitter_factor: 0.0,
@@ -408,7 +408,7 @@ implement SpawnConfig {
     ) -> Self {
         self.retry = Some(RetryConfig {
             max_attempts: max_attempts,
-            backoff: BackoffStrategy.Exponential,
+            backoff: RecoveryBackoffStrategy.Exponential,
             backoff_base_ms: base_ms,
             backoff_max_ms: max_ms,
             jitter_factor: jitter,

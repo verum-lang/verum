@@ -662,7 +662,7 @@ public fn propagate_status(theory: &mut Theory) -> List<StatusChange> {
 public type KanDirection is Left | Right;
 
 // =============================================================================
-// 12. CommaObject — an object of the comma category ι / c
+// 12. EpistemicCommaObject — an object of the comma category ι / c
 // =============================================================================
 
 /// An object of the comma category `ι / c` for the left Kan extension,
@@ -677,7 +677,7 @@ public type KanDirection is Left | Right;
 ///
 /// `morphism_rank` records the "distance" (number of dependency hops)
 /// used as a weight in the (co)limit computation.
-public type CommaObject is {
+public type EpistemicCommaObject is {
     source_id:     Text,
     target_id:     Text,
     morphism_rank: Int,
@@ -695,7 +695,7 @@ public type CommaObject is {
 /// `functor_handle`— opaque Int handle for downstream ∞-functor plumbing
 public type KanExtensionResult is {
     direction:      KanDirection,
-    comma_objects:  List<CommaObject>,
+    comma_objects:  List<EpistemicCommaObject>,
     pointwise_map:  Map<Text, EpistemicStatus>,
     functor_handle: Int,
 };
@@ -744,7 +744,7 @@ public fn compute_kan_extension(
         in_subsite.insert(id.clone(), true);
     }
 
-    let mut comma_objects: List<CommaObject> = [];
+    let mut comma_objects: List<EpistemicCommaObject> = [];
     let mut pointwise_map: Map<Text, EpistemicStatus> = {};
 
     match direction {
@@ -770,7 +770,7 @@ public fn compute_kan_extension(
                             None     => EpistemicStatus.Retracted,
                         };
                         // Record a comma object for this (a → c) pair.
-                        comma_objects.push(CommaObject {
+                        comma_objects.push(EpistemicCommaObject {
                             source_id:     a_id.clone(),
                             target_id:     c_id.clone(),
                             morphism_rank: hop,
@@ -809,7 +809,7 @@ public fn compute_kan_extension(
                             Some(cl) => cl.status,
                             None     => EpistemicStatus.Retracted,
                         };
-                        comma_objects.push(CommaObject {
+                        comma_objects.push(EpistemicCommaObject {
                             source_id:     c_id.clone(),
                             target_id:     a_id.clone(),
                             morphism_rank: hop,
