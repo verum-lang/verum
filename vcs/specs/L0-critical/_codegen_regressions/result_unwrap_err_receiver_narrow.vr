@@ -1,0 +1,34 @@
+// @test: run-interpreter-panic
+// @level: L0
+// @tier: 0
+// @tags: codegen, method-dispatch, receiver-narrowing, vuva-153
+// @expected-panic: called `unwrap` on an Err value
+// @description: VUVA #153 — method-dispatch receiver-type narrowing.
+//
+// Multiple stdlib types declare `fn unwrap(self)` — Result.unwrap
+// (panics on Err), Maybe.unwrap (panics on None), Poll.unwrap
+// (panics on Pending), and historic generic-T unwraps. The codegen
+// in `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`
+// builds `effective_method_name` via a giant match over receiver
+// expression shapes; before #153 the catch-all fell through to
+// bare `unwrap` whenever the expression shape wasn't covered, and
+// the dispatcher then picked WHICHEVER candidate was registered
+// first by name+arity. For `Result<Int,Int>::Err(99).unwrap()`,
+// that frequently resolved to a candidate whose unwrap does NOT
+// panic on Err — the call returned 99 and downstream code saw a
+// malformed value.
+//
+// VUVA #153 added a safety net: after the giant match, if the
+// resulting `effective_method_name` is still bare (no `.` no `$`),
+// retry via `infer_expr_type_name(receiver)` — a generic
+// best-effort type-inference helper — and prefix as `Type.method`
+// when the inference succeeds with an Uppercase-typed base name.
+//
+// This test pins the soundness contract: `r.unwrap()` on a known
+// Err value must panic, not return the inner Err payload.
+
+fn main() {
+    let r: Result<Int, Int> = Result.Err(99);
+    let v = r.unwrap();           // must panic with the message below
+    print(f"unreachable v = {v}");
+}
