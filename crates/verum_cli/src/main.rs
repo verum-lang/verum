@@ -413,6 +413,17 @@ enum Commands {
         /// Output format: pretty (default) | json | github-actions.
         #[clap(long, value_name = "FMT", default_value = "pretty")]
         format: Text,
+        /// Apply named profile from `[lint.profiles.<name>]`. Falls
+        /// back to `$VERUM_LINT_PROFILE` env var.
+        #[clap(long, value_name = "NAME")]
+        profile: Option<Text>,
+        /// Lint only files changed since the given git ref. Calls
+        /// `git diff --name-only <REF>...HEAD -- '*.vr'`.
+        #[clap(long, value_name = "GIT_REF")]
+        since: Option<Text>,
+        /// Filter to issues at this level or higher: error | warn | info | hint.
+        #[clap(long, value_name = "LEVEL")]
+        severity: Option<Text>,
 
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
@@ -1442,6 +1453,9 @@ fn run_command(cli: Cli) -> Result<()> {
             explain,
             validate_config,
             format,
+            profile,
+            since,
+            severity,
             feature_overrides,
         } => {
             feature_overrides::install(feature_overrides);
@@ -1455,7 +1469,29 @@ fn run_command(cli: Cli) -> Result<()> {
                 return commands::lint::validate_config();
             }
             let fmt = commands::lint::LintOutputFormat::parse(format.as_str())?;
-            commands::lint::run_with_format(fix, deny_warnings, fmt)
+            // Profile selection: explicit --profile flag wins over the
+            // VERUM_LINT_PROFILE env var.
+            let profile_name: Option<String> = profile
+                .map(|t| t.as_str().to_string())
+                .or_else(|| std::env::var("VERUM_LINT_PROFILE").ok());
+            let severity_filter: Option<commands::lint::LintLevel> = match severity {
+                Some(level) => Some(commands::lint::LintLevel::parse(level.as_str()).ok_or_else(
+                    || CliError::InvalidArgument(format!(
+                        "unknown --severity `{}` (expected: error|warn|info|hint)",
+                        level
+                    )),
+                )?),
+                None => None,
+            };
+            let since_ref: Option<String> = since.map(|t| t.as_str().to_string());
+            commands::lint::run_extended(
+                fix,
+                deny_warnings,
+                fmt,
+                profile_name,
+                since_ref,
+                severity_filter,
+            )
         }
         Commands::Doc {
             open,

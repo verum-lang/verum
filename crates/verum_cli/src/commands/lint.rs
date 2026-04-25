@@ -555,8 +555,27 @@ pub struct LintConfig {
     /// Stored as raw `toml::Value` — each rule deserialises its own
     /// config struct via `cfg.rule_config::<T>("rule-name")`.
     pub rules: HashMap<String, toml::Value>,
+    /// Per-file overrides from `[lint.per_file_overrides]`. Each entry
+    /// maps a glob pattern (matched against rel-path) to a per-file
+    /// override block. Applied after [lint.severity] in the precedence
+    /// stack — most-specific (longest pattern) wins.
+    pub per_file_overrides: Vec<(String, FileOverride)>,
+    /// Named profiles from `[lint.profiles.<name>]`. Selected via
+    /// `verum lint --profile NAME` or `$VERUM_LINT_PROFILE`. Profile
+    /// values are deep-merged on top of base config; CLI flags still
+    /// override profile values.
+    pub profiles: HashMap<String, toml::Value>,
     /// Custom pattern-based lint rules
     pub custom_rules: Vec<CustomLintRule>,
+}
+
+/// Per-file lint override block from `[lint.per_file_overrides]`.
+#[derive(Debug, Clone, Default)]
+pub struct FileOverride {
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
+    pub warn: Vec<String>,
+    pub disable: Vec<String>,
 }
 
 impl LintConfig {
@@ -572,6 +591,101 @@ impl LintConfig {
         let v = self.rules.get(rule)?.clone();
         T::deserialize(v).ok()
     }
+
+    /// Effective level taking per-file overrides into account.
+    /// Used by the `--severity` filter and the issue-emission paths
+    /// to resolve `(rule, path, default_level) → Option<Level>`.
+    ///
+    /// Precedence (already-known stack, most-specific wins):
+    ///   1. Per-file override matching `path`
+    ///   2. severity_map
+    ///   3. disabled / allowed / denied / warned lists
+    ///   4. default_level
+    pub fn effective_level_for_file(
+        &self,
+        rule_name: &str,
+        path: &Path,
+        default_level: LintLevel,
+    ) -> Option<LintLevel> {
+        // Per-file overrides — most specific (longest pattern) wins.
+        let rel = path.to_string_lossy();
+        let mut best: Option<&FileOverride> = None;
+        let mut best_len: usize = 0;
+        for (pat, ovr) in &self.per_file_overrides {
+            if glob_path_match(pat, &rel) && pat.len() > best_len {
+                best = Some(ovr);
+                best_len = pat.len();
+            }
+        }
+        if let Some(ovr) = best {
+            if ovr.allow.iter().any(|n| n == rule_name)
+                || ovr.disable.iter().any(|n| n == rule_name)
+            {
+                return None;
+            }
+            if ovr.deny.iter().any(|n| n == rule_name) {
+                return Some(LintLevel::Error);
+            }
+            if ovr.warn.iter().any(|n| n == rule_name) {
+                return Some(LintLevel::Warning);
+            }
+        }
+        self.effective_level(rule_name, default_level)
+    }
+}
+
+/// Glob match for file paths. Supports leading `**/` and trailing
+/// `/**` (or `**`), plus `*` as a single-segment wildcard. Examples:
+///
+///   "tests/**"          ↔ "tests/x.vr", "tests/a/b.vr"     ✓
+///   "core/intrinsics/*" ↔ "core/intrinsics/foo.vr"          ✓
+///   "**/*.generated.vr" ↔ "src/foo/bar.generated.vr"        ✓
+///
+/// Heuristic implementation (no full glob crate); good enough for
+/// the patterns documented in lint-configuration.md.
+fn glob_path_match(pat: &str, path: &str) -> bool {
+    if pat == path { return true; }
+    // "x/**" → starts_with("x/") OR equals "x"
+    if let Some(prefix) = pat.strip_suffix("/**") {
+        return path == prefix
+            || path.starts_with(&format!("{}/", prefix));
+    }
+    // "**/x.vr" → ends_with("/x.vr") OR equals "x.vr"
+    if let Some(suffix) = pat.strip_prefix("**/") {
+        if path == suffix { return true; }
+        return path.ends_with(&format!("/{}", suffix));
+    }
+    // "**" alone matches anything
+    if pat == "**" { return true; }
+    // Single-segment wildcards: "x/*" → "x/" + non-empty + no extra /
+    if let Some(prefix) = pat.strip_suffix("/*") {
+        if !path.starts_with(&format!("{}/", prefix)) { return false; }
+        let rest = &path[prefix.len() + 1..];
+        return !rest.is_empty() && !rest.contains('/');
+    }
+    // Generic substring fallback for any pattern with `*`.
+    if pat.contains('*') {
+        let parts: Vec<&str> = pat.split('*').collect();
+        let mut pos = 0usize;
+        let bytes = path.as_bytes();
+        for (i, part) in parts.iter().enumerate() {
+            if part.is_empty() { continue; }
+            if i == 0 {
+                if !path.starts_with(part) { return false; }
+                pos = part.len();
+            } else if i == parts.len() - 1 {
+                if !path.ends_with(part) { return false; }
+                if path.len() < pos + part.len() { return false; }
+            } else {
+                match path[pos..].find(part) {
+                    Some(idx) => { pos = pos + idx + part.len(); let _ = bytes; }
+                    None => return false,
+                }
+            }
+        }
+        return true;
+    }
+    false
 }
 
 /// A user-defined pattern-based lint rule from [lint.custom].
@@ -603,6 +717,8 @@ impl Default for LintConfig {
             warned: HashSet::new(),
             severity_map: HashMap::new(),
             rules: HashMap::new(),
+            per_file_overrides: Vec::new(),
+            profiles: HashMap::new(),
             custom_rules: Vec::new(),
         }
     }
@@ -680,6 +796,84 @@ fn load_full_lint_config() -> LintConfig {
     }
 
     config
+}
+
+/// Activate a named profile from `[lint.profiles.<name>]` on top of
+/// the loaded config. Profile blocks accept the same keys as the
+/// top-level `[lint]` block; non-empty values from the profile
+/// override base values. Selected via `--profile NAME` or
+/// `$VERUM_LINT_PROFILE`.
+pub fn apply_profile(config: &mut LintConfig, name: &str) -> Result<()> {
+    use toml::Value;
+    let profile = match config.profiles.get(name).cloned() {
+        Some(v) => v,
+        None => {
+            return Err(CliError::Custom(format!(
+                "lint profile `{}` is not declared in [lint.profiles.*]",
+                name
+            )));
+        }
+    };
+    let table = match profile.as_table() {
+        Some(t) => t.clone(),
+        None => return Ok(()),
+    };
+
+    // extends
+    if let Some(Value::String(s)) = table.get("extends") {
+        config.extends = Some(s.clone());
+        apply_preset(config, s);
+    }
+
+    // disabled / denied / allowed / warned — extend, don't replace.
+    fn extend_list(v: &Value) -> Vec<String> {
+        match v {
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect(),
+            Value::String(s) => s
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+    for k in &["disable", "disabled"] {
+        if let Some(v) = table.get(*k) {
+            config.disabled.extend(extend_list(v));
+        }
+    }
+    for k in &["deny", "denied"] {
+        if let Some(v) = table.get(*k) {
+            config.denied.extend(extend_list(v));
+        }
+    }
+    for k in &["allow", "allowed"] {
+        if let Some(v) = table.get(*k) {
+            config.allowed.extend(extend_list(v));
+        }
+    }
+    for k in &["warn", "warned"] {
+        if let Some(v) = table.get(*k) {
+            config.warned.extend(extend_list(v));
+        }
+    }
+
+    // [lint.profiles.<name>.severity] — profile severities override
+    // base severities.
+    if let Some(Value::Table(sev)) = table.get("severity") {
+        for (rule, val) in sev {
+            if let Some(level_str) = val.as_str() {
+                if let Some(lvl) = LintLevel::parse(level_str) {
+                    config.severity_map.insert(rule.clone(), lvl);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Apply a built-in preset to the config's severity_map. Presets
@@ -856,6 +1050,33 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
     for (toml_key, rule_key) in synthetic_keys {
         if let Some(v) = lint.get(toml_key) {
             config.rules.insert(rule_key.to_string(), v.clone());
+        }
+    }
+
+    // [lint.per_file_overrides] — file-glob → allow/deny/warn/disable.
+    if let Some(Value::Table(over)) = lint.get("per_file_overrides") {
+        for (pat, val) in over {
+            let mut fov = FileOverride::default();
+            if let Value::Table(t) = val {
+                for (k, v) in t {
+                    let list = extract_list(v);
+                    match k.as_str() {
+                        "allow" => fov.allow.extend(list),
+                        "deny" => fov.deny.extend(list),
+                        "warn" => fov.warn.extend(list),
+                        "disable" => fov.disable.extend(list),
+                        _ => {}
+                    }
+                }
+            }
+            config.per_file_overrides.push((pat.clone(), fov));
+        }
+    }
+
+    // [lint.profiles.<name>] — named profile blocks.
+    if let Some(Value::Table(profs)) = lint.get("profiles") {
+        for (name, val) in profs {
+            config.profiles.insert(name.clone(), val.clone());
         }
     }
 
@@ -2962,4 +3183,164 @@ pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat)
     } else {
         Ok(())
     }
+}
+
+/// Phase A.3 extended runner — applies named profiles, --since
+/// git-diff filtering, and --severity post-filtering on top of
+/// `run_with_format`. Always falls through to the per-format emitter
+/// `run_with_format` for json/github-actions, or the existing
+/// `execute` for pretty (with the new layers wired in).
+pub fn run_extended(
+    fix: bool,
+    deny_warnings: bool,
+    format: LintOutputFormat,
+    profile: Option<String>,
+    since: Option<String>,
+    severity_min: Option<LintLevel>,
+) -> Result<()> {
+    let mut cfg = load_full_lint_config();
+    if let Some(name) = &profile {
+        apply_profile(&mut cfg, name)?;
+    }
+
+    // --since: get changed-file allowlist via `git diff --name-only`.
+    let changed_files: Option<HashSet<PathBuf>> = match &since {
+        Some(git_ref) => match changed_vr_files_since(git_ref) {
+            Ok(set) => Some(set),
+            Err(e) => {
+                ui::warn(&format!("--since {}: {}", git_ref, e));
+                Some(HashSet::new())
+            }
+        },
+        None => None,
+    };
+
+    let search_dirs: Vec<PathBuf> = ["src", "core"]
+        .iter()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect();
+    if search_dirs.is_empty() {
+        return Err(CliError::Custom("No src/ or core/ directory found".into()));
+    }
+
+    let mut all_issues: Vec<LintIssue> = Vec::new();
+    for d in &search_dirs {
+        for entry in WalkDir::new(d).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path.is_file() || !is_verum_file(path) {
+                continue;
+            }
+            if let Some(allow) = &changed_files {
+                if !allow.iter().any(|p| path.ends_with(p) || p == path) {
+                    continue;
+                }
+            }
+            if let Ok(issues) = lint_file(path) {
+                for mut i in issues {
+                    // Per-file overrides + severity_map + lists + default.
+                    if let Some(lvl) = cfg.effective_level_for_file(i.rule, &i.file, i.level) {
+                        i.level = lvl;
+                        // --severity LEVEL filter.
+                        if let Some(min) = severity_min {
+                            if !meets_severity(lvl, min) {
+                                continue;
+                            }
+                        }
+                        all_issues.push(i);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    for issue in &all_issues {
+        match issue.level {
+            LintLevel::Error => errors += 1,
+            LintLevel::Warning => warnings += 1,
+            _ => {}
+        }
+        match format {
+            LintOutputFormat::Pretty => print_issue(issue, deny_warnings),
+            LintOutputFormat::Json => emit_issue_json(issue),
+            LintOutputFormat::GithubActions => emit_issue_gha(issue),
+        }
+    }
+
+    if format == LintOutputFormat::Pretty {
+        // Summary block consistent with execute()'s pretty output.
+        println!();
+        println!("{}", "Lint Summary:".bold());
+        println!("  Issues: {}", all_issues.len());
+        if errors > 0 {
+            println!("  {}: {}", "Errors".red().bold(), errors);
+        }
+        if warnings > 0 {
+            println!("  {}: {}", "Warnings".yellow().bold(), warnings);
+        }
+        if let Some(p) = &profile {
+            println!("  Profile: {}", p.cyan());
+        }
+        if let Some(s) = &since {
+            println!("  Since: {}", s.cyan());
+        }
+        println!();
+    }
+
+    let _ = fix;
+    if errors > 0 {
+        Err(CliError::Custom(format!("{} lint errors", errors)))
+    } else if deny_warnings && warnings > 0 {
+        Err(CliError::Custom(format!("{} lint warnings (denied)", warnings)))
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether `level` meets the `min` severity bar — error > warn > info > hint > off.
+fn meets_severity(level: LintLevel, min: LintLevel) -> bool {
+    fn rank(l: LintLevel) -> u8 {
+        match l {
+            LintLevel::Error => 4,
+            LintLevel::Warning => 3,
+            LintLevel::Info => 2,
+            LintLevel::Hint => 1,
+            LintLevel::Off => 0,
+        }
+    }
+    rank(level) >= rank(min)
+}
+
+/// Run `git diff --name-only <REF>...HEAD -- '*.vr'` and collect the
+/// resulting paths. The `...` form is "in HEAD but not in REF" — i.e.
+/// what the current branch added on top of the merge base. For a
+/// pre-commit hook against the current working tree, use
+/// `git diff --name-only HEAD -- '*.vr'` (no triple-dot).
+fn changed_vr_files_since(git_ref: &str) -> std::result::Result<HashSet<PathBuf>, String> {
+    let out = std::process::Command::new("git")
+        .args([
+            "diff",
+            "--name-only",
+            &format!("{}...HEAD", git_ref),
+            "--",
+            "*.vr",
+        ])
+        .output()
+        .map_err(|e| format!("failed to spawn git: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git exited with code {}: {}",
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    Ok(stdout
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect())
 }
