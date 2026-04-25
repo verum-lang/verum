@@ -8,33 +8,36 @@
 // other effects are measured.
 // =============================================================================
 
+/// `Pure<A>` — the identity-monad container. The constructor is
+/// `Identity(A)` to avoid the variant-vs-type name clash that
+/// arises when a single-variant type re-uses its own type name.
 @derive(Clone)
-public type Pure<A> is Pure(A);
+public type Pure<A> is Identity(A);
 
 /// `pure : A -> Pure<A>` — identity wrapping (the unit of the monad).
 public fn pure_unit<A>(a: A) -> Pure<A> {
-    Pure(a)
+    Identity(a)
 }
 
 /// `bind : Pure<A> -> (A -> Pure<B>) -> Pure<B>` — sequence two
 /// pure computations. For the identity monad, bind degenerates to
-/// function application: `bind(Pure(a), f) = f(a)`.
+/// function application: `bind(Identity(a), f) = f(a)`.
 public fn pure_bind<A, B>(m: Pure<A>, f: fn(A) -> Pure<B>) -> Pure<B> {
-    let Pure(a) = m;
+    let Identity(a) = m;
     f(a)
 }
 
 /// `strength : A -> Pure<B> -> Pure<(A, B)>` — tensor a pure value
 /// alongside an effectful one. For Pure this is just pairing.
 public fn pure_strength<A, B>(a: A, mb: Pure<B>) -> Pure<(A, B)> {
-    let Pure(b) = mb;
-    Pure((a, b))
+    let Identity(b) = mb;
+    Identity((a, b))
 }
 
 /// Extract the wrapped value (only for Pure — other monads do NOT
 /// admit unwrapping in general).
 public fn pure_extract<A>(m: Pure<A>) -> A {
-    let Pure(a) = m;
+    let Identity(a) = m;
     a
 }
 
