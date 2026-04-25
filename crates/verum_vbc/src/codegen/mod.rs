@@ -2413,13 +2413,17 @@ impl VbcCodegen {
                 self.ctx.generic_type_params.clear();
                 self.ctx.const_generic_params.clear();
                 if let Err(e) = self.compile_function(func, None) {
-                    // Symmetric with the impl-item branch below: log at
-                    // `debug` so the drop is diagnosable. Without this the
-                    // body silently disappears, the signature stays in the
-                    // function table, and callers hit
-                    // `FunctionNotFound(FunctionId(N))` at runtime with no
-                    // hint as to why.
+                    // Symmetric with the impl-item branch below.  Promoted to
+                    // warn-level (was debug) so silent skips of user-callable
+                    // top-level functions surface as "method/function not
+                    // found on value" only AFTER the warning fires, instead
+                    // of being completely silent.
                     let fname = func.name.name.as_str();
+                    tracing::warn!(
+                        "[lenient] SKIP top-level fn {}: {} — runtime calls \
+                         will panic with `FunctionNotFound`",
+                        fname, e
+                    );
                     tracing::debug!("[lenient] SKIP top-level fn {}: {}", fname, e);
                 }
                 // Compile nested functions even if parent failed
@@ -2462,11 +2466,33 @@ impl VbcCodegen {
                             self.ctx.const_generic_params.insert(g.clone());
                         }
 
-                        // Compile function individually - skip if it fails
+                        // Compile function individually - skip if it fails.
+                        //
+                        // Lenient skips were originally a debug-only diagnostic
+                        // because most are routine (FFI prototypes, conditional
+                        // platform stubs).  But silent skips of *user-callable*
+                        // impl-block methods are insidious: they show up at
+                        // runtime as `method 'X.Y' not found on value` with no
+                        // hint that compilation dropped the body.  Emit a
+                        // warn-level trace so the underlying cause (typically
+                        // an unresolved cross-module function reference) is
+                        // visible in normal CI / dev runs without RUST_LOG
+                        // tweaking.
                         if let Err(e) = self.compile_function(func, type_name.as_ref()) {
-                            // Skip - this function has unresolvable dependencies
                             let fname = func.name.name.as_str();
-                            tracing::debug!("[lenient] SKIP {}.{}: {}", type_name.as_deref().unwrap_or("?"), fname, e);
+                            let ty = type_name.as_deref().unwrap_or("?");
+                            tracing::warn!(
+                                "[lenient] SKIP {}.{}: {} — runtime calls to \
+                                 this method will panic 'method '{}.{}' not found \
+                                 on value'.  Add the missing dependency to the \
+                                 caller's mount list or fix the cross-module \
+                                 reference in {} stdlib.",
+                                ty, fname, e, ty, fname, ty
+                            );
+                            // Always also keep the debug trace for log-replay
+                            // tooling that filters by the exact "[lenient] SKIP"
+                            // marker.
+                            tracing::debug!("[lenient] SKIP {}.{}: {}", ty, fname, e);
                         }
 
                         // Compile nested functions even if parent failed
