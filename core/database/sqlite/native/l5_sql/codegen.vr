@@ -5,6 +5,8 @@ module core.database.sqlite.native.l5_sql.codegen;
 // =============================================================================
 // Layer: 5
 // Spec: sqlite-native.md §14
+// Status: see internal/website/docs/stdlib/database-sqlite-architecture.md
+//         for the L5 capability matrix and the testing-strategy table.
 //
 // Consumes a planner `PlanNode` and emits a `VdbeProgram`. The v1
 // subset handles:
