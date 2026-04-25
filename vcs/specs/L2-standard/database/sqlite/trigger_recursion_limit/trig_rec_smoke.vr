@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, trigger_recursion_limit, triggers
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.trigger_recursion_limit.gate.{
+    default_limit, hard_max_limit, min_legal_limit, too_big_code,
+    RecursionState,
+    fresh, enter, leave,
+    would_exceed, is_at_limit, at_top_level,
+    raise_outcome_for, peak_depth_seen,
+};
+mount base.{Bool};
+
+fn test_default_and_max_constants() {
+    assert_eq(default_limit(), 1000);
+    assert_eq(hard_max_limit(), 1000000);
+    assert_eq(min_legal_limit(), 0);
+    assert_eq(too_big_code(), 18);
+}
+
+fn test_fresh_state() {
+    let s = fresh(default_limit());
+    assert_eq(s.current_depth, 0);
+    assert_eq(s.high_water, 0);
+    assert(at_top_level(&s));
+    assert(!is_at_limit(&s));
+}
+
+fn test_fresh_clamps_to_legal_range() {
+    let neg = fresh(-5);
+    assert_eq(neg.limit, 0);
+    let huge = fresh(hard_max_limit() * 2);
+    assert_eq(huge.limit, hard_max_limit());
+}
+
+fn test_enter_leave_walks_depth() {
+    let mut s = fresh(10);
+    s = enter(s);
+    assert_eq(s.current_depth, 1);
+    s = enter(enter(s));
+    assert_eq(s.current_depth, 3);
+    assert_eq(peak_depth_seen(&s), 3);
+    s = leave(leave(s));
+    assert_eq(s.current_depth, 1);
+    assert_eq(peak_depth_seen(&s), 3);
+}
+
+fn test_leave_below_zero_is_floored() {
+    let s = leave(fresh(10));
+    assert_eq(s.current_depth, 0);
+}
+
+fn test_would_exceed_at_boundary() {
+    let mut s = fresh(2);
+    s = enter(s);
+    s = enter(s);
+    assert(is_at_limit(&s));
+    assert(would_exceed(&s));
+    let _ = s;
+}
+
+fn test_raise_outcome_returns_too_big() {
+    let mut s = fresh(2);
+    s = enter(s);
+    s = enter(s);
+    assert_eq(raise_outcome_for(&s), too_big_code());
+}
+
+fn test_raise_outcome_zero_when_within_limit() {
+    let s = enter(fresh(5));
+    assert_eq(raise_outcome_for(&s), 0);
+}
+
+fn main() {
+    test_default_and_max_constants();
+    test_fresh_state();
+    test_fresh_clamps_to_legal_range();
+    test_enter_leave_walks_depth();
+    test_leave_below_zero_is_floored();
+    test_would_exceed_at_boundary();
+    test_raise_outcome_returns_too_big();
+    test_raise_outcome_zero_when_within_limit();
+}

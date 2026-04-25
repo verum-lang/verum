@@ -1,0 +1,57 @@
+// Trigger recursion gate.
+
+module core.database.sqlite.native.trigger_recursion_limit.gate;
+
+mount base.{Bool, Int64, Text};
+
+public fn default_limit() -> Int { 1000 }
+
+public fn hard_max_limit() -> Int { 1000000 }
+
+public fn min_legal_limit() -> Int { 0 }
+
+// SQLITE_TOOBIG = 18 when limit exceeded.
+public fn too_big_code() -> Int { 18 }
+
+public type RecursionState is {
+    current_depth: Int,
+    high_water: Int,
+    limit: Int,
+};
+
+public fn fresh(limit: Int) -> RecursionState {
+    let capped = if limit < min_legal_limit() { min_legal_limit() }
+                 else if limit > hard_max_limit() { hard_max_limit() }
+                 else { limit };
+    RecursionState { current_depth: 0, high_water: 0, limit: capped }
+}
+
+public fn enter(mut s: RecursionState) -> RecursionState {
+    s.current_depth = s.current_depth + 1;
+    if s.current_depth > s.high_water { s.high_water = s.current_depth; }
+    s
+}
+
+public fn leave(mut s: RecursionState) -> RecursionState {
+    if s.current_depth > 0 { s.current_depth = s.current_depth - 1; }
+    s
+}
+
+public fn would_exceed(s: &RecursionState) -> Bool {
+    s.current_depth + 1 > s.limit
+}
+
+public fn is_at_limit(s: &RecursionState) -> Bool {
+    s.current_depth >= s.limit
+}
+
+public fn at_top_level(s: &RecursionState) -> Bool {
+    s.current_depth == 0
+}
+
+public fn raise_outcome_for(s: &RecursionState) -> Int {
+    if would_exceed(s) { too_big_code() } else { 0 }
+}
+
+// Helper for tests / planner: peak observed depth.
+public fn peak_depth_seen(s: &RecursionState) -> Int { s.high_water }

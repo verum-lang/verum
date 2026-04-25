@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/xshm_barrier_doc/mod.vr
+// =============================================================================
+// xShmBarrier semantics + double-checked locking model in WAL header reads.
+// Spec §6.6.4 — shm barriers.
+//
+// The xShmBarrier method MUST emit a memory barrier (full fence). SQLite calls
+// it before reading the wal-index header during reader-mark acquisition to
+// ensure that writes by other processes are visible.
+// =============================================================================
+
+module core.database.sqlite.native.xshm_barrier_doc;
+
+public module memory_order;

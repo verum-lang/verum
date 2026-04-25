@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/random_vtab_api/mod.vr
+// =============================================================================
+// `random` and `randomblob(N)` built-in scalar functions backed by the PRNG.
+// Spec §15.1 — built-in scalar fns.
+//
+//   random()        → random Int64
+//   randomblob(N)   → BLOB of N random bytes (N >= 1; SQLite caps at SQLITE_MAX_LENGTH)
+// =============================================================================
+
+module core.database.sqlite.native.random_vtab_api;
+
+public module fn_;

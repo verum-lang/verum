@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, btree_seek_op_codes, btree
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.btree_seek_op_codes.op.{
+    SeekOp, SoEq, SoGe, SoLe, SoGt, SoLt,
+    op_name,
+    WalkDirection, WdForward, WdBackward, WdNone,
+    fallback_direction,
+    allows_strict, requires_exact_match, includes_target_when_match,
+    invert, well_known_count,
+};
+mount base.{Bool};
+
+fn test_op_names() {
+    assert(op_name(&SoEq) == "EQ".clone());
+    assert(op_name(&SoGe) == "GE".clone());
+    assert(op_name(&SoLe) == "LE".clone());
+    assert(op_name(&SoGt) == "GT".clone());
+    assert(op_name(&SoLt) == "LT".clone());
+}
+
+fn test_fallback_direction() {
+    match fallback_direction(&SoEq) { WdNone     => {}, _ => assert(false) }
+    match fallback_direction(&SoGe) { WdForward  => {}, _ => assert(false) }
+    match fallback_direction(&SoGt) { WdForward  => {}, _ => assert(false) }
+    match fallback_direction(&SoLe) { WdBackward => {}, _ => assert(false) }
+    match fallback_direction(&SoLt) { WdBackward => {}, _ => assert(false) }
+}
+
+fn test_allows_strict_set() {
+    assert(allows_strict(&SoGt));
+    assert(allows_strict(&SoLt));
+    assert(!allows_strict(&SoGe));
+    assert(!allows_strict(&SoLe));
+    assert(!allows_strict(&SoEq));
+}
+
+fn test_requires_exact_match_only_eq() {
+    assert(requires_exact_match(&SoEq));
+    assert(!requires_exact_match(&SoGe));
+    assert(!requires_exact_match(&SoLt));
+}
+
+fn test_includes_target_when_match() {
+    assert(includes_target_when_match(&SoEq));
+    assert(includes_target_when_match(&SoGe));
+    assert(includes_target_when_match(&SoLe));
+    assert(!includes_target_when_match(&SoGt));
+    assert(!includes_target_when_match(&SoLt));
+}
+
+fn test_invert() {
+    match invert(&SoEq) { SoEq => {}, _ => assert(false) }
+    match invert(&SoGe) { SoLe => {}, _ => assert(false) }
+    match invert(&SoLe) { SoGe => {}, _ => assert(false) }
+    match invert(&SoGt) { SoLt => {}, _ => assert(false) }
+    match invert(&SoLt) { SoGt => {}, _ => assert(false) }
+}
+
+fn test_well_known_count() {
+    assert_eq(well_known_count(), 5);
+}
+
+fn main() {
+    test_op_names();
+    test_fallback_direction();
+    test_allows_strict_set();
+    test_requires_exact_match_only_eq();
+    test_includes_target_when_match();
+    test_invert();
+    test_well_known_count();
+}

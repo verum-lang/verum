@@ -1,0 +1,50 @@
+// random / randomblob taxonomy.
+
+module core.database.sqlite.native.random_vtab_api.fn_;
+
+mount base.{Bool, Int64, Text};
+
+public type RandomFn is
+    | RfInt              // random()
+    | RfBlob             // randomblob(n)
+    ;
+
+public fn fn_name(f: &RandomFn) -> Text {
+    match f {
+        RfInt  => "random".clone(),
+        RfBlob => "randomblob".clone(),
+    }
+}
+
+public fn arity(f: &RandomFn) -> Int {
+    match f {
+        RfInt  => 0,
+        RfBlob => 1,
+    }
+}
+
+public fn returns_int(f: &RandomFn) -> Bool {
+    match f { RfInt => true, _ => false }
+}
+
+public fn returns_blob(f: &RandomFn) -> Bool {
+    match f { RfBlob => true, _ => false }
+}
+
+public fn is_deterministic(f: &RandomFn) -> Bool {
+    // Both are non-deterministic.
+    false
+}
+
+// SQLite's randomblob upper bound is min(SQLITE_MAX_LENGTH, requested).
+public fn max_blob_length() -> Int64 { 1000000000 as Int64 }
+
+public fn clamp_blob_length(n: Int64) -> Int64 {
+    if n < (1 as Int64) { return 1 as Int64; }    // SQLite returns 1-byte for n<=0
+    if n > max_blob_length() { return max_blob_length(); }
+    n
+}
+
+public fn is_within_blob_range(n: Int64) -> Bool {
+    n >= (1 as Int64) && n <= max_blob_length()
+}

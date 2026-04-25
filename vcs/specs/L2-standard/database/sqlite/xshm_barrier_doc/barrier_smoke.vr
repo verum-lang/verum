@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, xshm_barrier_doc, vfs
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.xshm_barrier_doc.memory_order.{
+    MemoryOrder, MoRelaxed, MoAcquire, MoRelease, MoAcqRel, MoSeqCst,
+    order_name,
+    xshmbarrier_required_order, is_strong_enough_for_xshmbarrier,
+    provides_acquire, provides_release,
+    double_check_pattern_safe,
+    known_orders_count,
+};
+mount base.{Bool};
+
+fn test_order_names() {
+    assert(order_name(&MoRelaxed) == "relaxed".clone());
+    assert(order_name(&MoAcquire) == "acquire".clone());
+    assert(order_name(&MoRelease) == "release".clone());
+    assert(order_name(&MoAcqRel)  == "acq_rel".clone());
+    assert(order_name(&MoSeqCst)  == "seq_cst".clone());
+}
+
+fn test_required_order_is_seqcst() {
+    match xshmbarrier_required_order() { MoSeqCst => {}, _ => assert(false) }
+}
+
+fn test_is_strong_enough_only_seqcst() {
+    assert(is_strong_enough_for_xshmbarrier(&MoSeqCst));
+    assert(!is_strong_enough_for_xshmbarrier(&MoAcqRel));
+    assert(!is_strong_enough_for_xshmbarrier(&MoAcquire));
+    assert(!is_strong_enough_for_xshmbarrier(&MoRelease));
+    assert(!is_strong_enough_for_xshmbarrier(&MoRelaxed));
+}
+
+fn test_provides_acquire_set() {
+    assert(provides_acquire(&MoAcquire));
+    assert(provides_acquire(&MoAcqRel));
+    assert(provides_acquire(&MoSeqCst));
+    assert(!provides_acquire(&MoRelease));
+    assert(!provides_acquire(&MoRelaxed));
+}
+
+fn test_provides_release_set() {
+    assert(provides_release(&MoRelease));
+    assert(provides_release(&MoAcqRel));
+    assert(provides_release(&MoSeqCst));
+    assert(!provides_release(&MoAcquire));
+    assert(!provides_release(&MoRelaxed));
+}
+
+fn test_double_check_pattern_safe() {
+    assert(double_check_pattern_safe(&MoSeqCst, &MoSeqCst));
+    assert(!double_check_pattern_safe(&MoSeqCst, &MoAcquire));
+    assert(!double_check_pattern_safe(&MoAcquire, &MoSeqCst));
+    assert(!double_check_pattern_safe(&MoRelaxed, &MoRelaxed));
+}
+
+fn test_known_orders_count() {
+    assert_eq(known_orders_count(), 5);
+}
+
+fn main() {
+    test_order_names();
+    test_required_order_is_seqcst();
+    test_is_strong_enough_only_seqcst();
+    test_provides_acquire_set();
+    test_provides_release_set();
+    test_double_check_pattern_safe();
+    test_known_orders_count();
+}

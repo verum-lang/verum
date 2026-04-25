@@ -1,0 +1,42 @@
+// stat4 sample-blob shape + sizing helpers.
+
+module core.database.sqlite.native.stat4_sample_blob.shape;
+
+mount base.{Bool, Int64, Text};
+
+public type SampleBlob is {
+    column_count: Int,             // number of leading key columns sampled
+    serial_types_byte_len: Int,    // bytes of serial-type header
+    payload_byte_len: Int,         // bytes of payload section
+};
+
+public fn new(column_count: Int, header_bytes: Int, payload_bytes: Int) -> SampleBlob {
+    SampleBlob {
+        column_count: column_count,
+        serial_types_byte_len: header_bytes,
+        payload_byte_len: payload_bytes,
+    }
+}
+
+public fn total_blob_bytes(s: &SampleBlob) -> Int {
+    s.serial_types_byte_len + s.payload_byte_len
+}
+
+public fn is_empty(s: &SampleBlob) -> Bool {
+    total_blob_bytes(s) == 0
+}
+
+// SQLite caps the sampled-key blob at SQLITE_MAX_LENGTH (default ~1GB);
+// catalogue exposes the more practical default of 50 bytes per stat4 sample.
+public fn typical_max_bytes() -> Int { 65536 }
+
+public fn fits_in_typical_blob(s: &SampleBlob) -> Bool {
+    total_blob_bytes(s) <= typical_max_bytes()
+}
+
+// Sample interleaves with neq/nlt/ndlt arrays from stat4_sample_api.
+public fn aligned_with_stat4_arrays(arity: Int, expected_arity: Int) -> Bool {
+    arity == expected_arity
+}
+
+public fn header_size_byte_count() -> Int { 1 }    // SQLite uses 1-byte hdr-size prefix

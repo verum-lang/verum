@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, expr_collation_carry, collation
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.expr_collation_carry.rule.{
+    ExprNodeKind,
+    EkColumn, EkLiteral, EkBindParam, EkCast, EkBinaryOp,
+    EkConcat, EkFunctionCall, EkExplicitCollate,
+    kind_name, carries_column_collation, has_explicit_collate,
+    explicit_collation,
+    carried, default_collation_name, effective_or_default,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&EkColumn("c".clone())) == "column".clone());
+    assert(kind_name(&EkLiteral)             == "literal".clone());
+    assert(kind_name(&EkBindParam)           == "bind".clone());
+    assert(kind_name(&EkCast("INT".clone())) == "cast".clone());
+    assert(kind_name(&EkBinaryOp)            == "binary_op".clone());
+    assert(kind_name(&EkConcat)              == "concat".clone());
+    assert(kind_name(&EkFunctionCall)        == "function".clone());
+    assert(kind_name(&EkExplicitCollate("NOCASE".clone())) == "explicit_collate".clone());
+}
+
+fn test_carries_column_collation_only_column() {
+    assert(carries_column_collation(&EkColumn("c".clone())));
+    assert(!carries_column_collation(&EkLiteral));
+}
+
+fn test_has_explicit_collate() {
+    assert(has_explicit_collate(&EkExplicitCollate("NOCASE".clone())));
+    assert(!has_explicit_collate(&EkColumn("c".clone())));
+    assert(explicit_collation(&EkExplicitCollate("RTRIM".clone())) == "RTRIM".clone());
+    assert(explicit_collation(&EkLiteral) == "".clone());
+}
+
+fn test_default_collation_is_binary() {
+    assert(default_collation_name() == "BINARY".clone());
+}
+
+fn test_carried_explicit_wins() {
+    let e: ExprNodeKind = EkExplicitCollate("RTRIM".clone());
+    let result = carried(&e, &"NOCASE".clone(), &"BINARY".clone());
+    assert(result == "RTRIM".clone());
+}
+
+fn test_carried_column_uses_column_coll() {
+    let e: ExprNodeKind = EkColumn("name".clone());
+    let result = carried(&e, &"".clone(), &"NOCASE".clone());
+    assert(result == "NOCASE".clone());
+}
+
+fn test_carried_literal_returns_empty() {
+    let result = carried(&EkLiteral, &"NOCASE".clone(), &"BINARY".clone());
+    assert(result == "".clone());
+}
+
+fn test_carried_binary_inherits_left() {
+    let result = carried(&EkBinaryOp, &"NOCASE".clone(), &"".clone());
+    assert(result == "NOCASE".clone());
+}
+
+fn test_carried_cast_inherits_left() {
+    let e: ExprNodeKind = EkCast("TEXT".clone());
+    let result = carried(&e, &"RTRIM".clone(), &"".clone());
+    assert(result == "RTRIM".clone());
+}
+
+fn test_effective_or_default() {
+    assert(effective_or_default(&"".clone()) == "BINARY".clone());
+    assert(effective_or_default(&"NOCASE".clone()) == "NOCASE".clone());
+}
+
+fn main() {
+    test_kind_names();
+    test_carries_column_collation_only_column();
+    test_has_explicit_collate();
+    test_default_collation_is_binary();
+    test_carried_explicit_wins();
+    test_carried_column_uses_column_coll();
+    test_carried_literal_returns_empty();
+    test_carried_binary_inherits_left();
+    test_carried_cast_inherits_left();
+    test_effective_or_default();
+}

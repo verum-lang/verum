@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/expr_collation_carry/mod.vr
+// =============================================================================
+// Implicit collation carrying through expressions — §15.4 collation rules.
+//
+// Ordering precedence:
+//   1. column reference                  carries column collation
+//   2. CAST(...) / + - * / etc.          inherits left operand
+//   3. concatenation X || Y               inherits X
+//   4. literal / parameter                no collation (BINARY default)
+// =============================================================================
+
+module core.database.sqlite.native.expr_collation_carry;
+
+public module rule;

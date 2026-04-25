@@ -1,0 +1,60 @@
+// Memory-ordering taxonomy for xShmBarrier.
+
+module core.database.sqlite.native.xshm_barrier_doc.memory_order;
+
+mount base.{Bool, Text};
+
+public type MemoryOrder is
+    | MoRelaxed         // not guaranteed; never used by SQLite
+    | MoAcquire         // sufficient for "I will read after this point"
+    | MoRelease         // sufficient for "I wrote before this point"
+    | MoAcqRel          // both directions
+    | MoSeqCst          // full fence — what xShmBarrier needs
+    ;
+
+public fn order_name(m: &MemoryOrder) -> Text {
+    match m {
+        MoRelaxed => "relaxed".clone(),
+        MoAcquire => "acquire".clone(),
+        MoRelease => "release".clone(),
+        MoAcqRel  => "acq_rel".clone(),
+        MoSeqCst  => "seq_cst".clone(),
+    }
+}
+
+// xShmBarrier is required to behave as MoSeqCst.
+public fn xshmbarrier_required_order() -> MemoryOrder { MoSeqCst }
+
+public fn is_strong_enough_for_xshmbarrier(m: &MemoryOrder) -> Bool {
+    match m { MoSeqCst => true, _ => false }
+}
+
+public fn provides_acquire(m: &MemoryOrder) -> Bool {
+    match m {
+        MoAcquire => true,
+        MoAcqRel  => true,
+        MoSeqCst  => true,
+        _         => false,
+    }
+}
+
+public fn provides_release(m: &MemoryOrder) -> Bool {
+    match m {
+        MoRelease => true,
+        MoAcqRel  => true,
+        MoSeqCst  => true,
+        _         => false,
+    }
+}
+
+// Double-checked locking pattern uses two barriers around the wal-index
+// header read. Returns whether a sequence is correctly fenced.
+public fn double_check_pattern_safe(
+    barrier_before_read: &MemoryOrder,
+    barrier_after_read: &MemoryOrder,
+) -> Bool {
+    is_strong_enough_for_xshmbarrier(barrier_before_read)
+        && is_strong_enough_for_xshmbarrier(barrier_after_read)
+}
+
+public fn known_orders_count() -> Int { 5 }

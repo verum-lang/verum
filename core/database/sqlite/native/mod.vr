@@ -748,3 +748,19 @@ public module readonly_shm_mode_api;
 public module stat1_schema_api;
 // - text_to_int_strict_api: SQLite sqlite3Atoi64 parser — sign + digits + overflow clamp
 public module text_to_int_strict_api;
+// - uri_param_decode_api: sqlite3_uri_boolean / _int64 / _parameter parsers (8 bool keywords)
+public module uri_param_decode_api;
+// - dbstatus_op_codes: SQLITE_DBSTATUS_* 13-entry opcode taxonomy
+public module dbstatus_op_codes;
+// - expr_collation_carry: 8-kind ExprNode + carried-collation rules + COLLATE-clause override
+public module expr_collation_carry;
+// - random_vtab_api: random() / randomblob(n) builtin arity + return-type taxonomy
+public module random_vtab_api;
+// - btree_seek_op_codes: 5-op SeekOp (EQ/GE/LE/GT/LT) + WalkDirection + invert
+public module btree_seek_op_codes;
+// - xshm_barrier_doc: MemoryOrder taxonomy + xShmBarrier MoSeqCst requirement
+public module xshm_barrier_doc;
+// - stat4_sample_blob: sqlite_stat4 sample-BLOB shape + 65KB typical max
+public module stat4_sample_blob;
+// - trigger_recursion_limit: SQLITE_LIMIT_TRIGGER_DEPTH 1000 default + would_exceed gate
+public module trigger_recursion_limit;

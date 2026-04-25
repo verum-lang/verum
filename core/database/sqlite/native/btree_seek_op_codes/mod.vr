@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/btree_seek_op_codes/mod.vr
+// =============================================================================
+// B-tree cursor seek-op codes — sqlite3BtreeMovetoUnpacked direction hints.
+// Spec §12.5 — cursor seek.
+//
+//   GE  — find smallest key >= target
+//   LE  — largest key <= target
+//   EQ  — exact match (else miss)
+//   GT  — strict greater
+//   LT  — strict less
+// =============================================================================
+
+module core.database.sqlite.native.btree_seek_op_codes;
+
+public module op;

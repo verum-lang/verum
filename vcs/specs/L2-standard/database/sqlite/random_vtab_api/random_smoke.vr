@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, random_vtab_api, builtins
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.random_vtab_api.fn_.{
+    RandomFn, RfInt, RfBlob,
+    fn_name, arity,
+    returns_int, returns_blob,
+    is_deterministic,
+    max_blob_length, clamp_blob_length, is_within_blob_range,
+};
+mount base.{Bool, Int64};
+
+fn test_fn_names() {
+    assert(fn_name(&RfInt)  == "random".clone());
+    assert(fn_name(&RfBlob) == "randomblob".clone());
+}
+
+fn test_arity() {
+    assert_eq(arity(&RfInt), 0);
+    assert_eq(arity(&RfBlob), 1);
+}
+
+fn test_return_types() {
+    assert(returns_int(&RfInt));
+    assert(!returns_int(&RfBlob));
+    assert(returns_blob(&RfBlob));
+    assert(!returns_blob(&RfInt));
+}
+
+fn test_neither_deterministic() {
+    assert(!is_deterministic(&RfInt));
+    assert(!is_deterministic(&RfBlob));
+}
+
+fn test_blob_length_bounds() {
+    assert_eq(max_blob_length(), 1000000000 as Int64);
+    assert(is_within_blob_range(1 as Int64));
+    assert(is_within_blob_range(max_blob_length()));
+    assert(!is_within_blob_range(0 as Int64));
+    assert(!is_within_blob_range(-1 as Int64));
+    assert(!is_within_blob_range(max_blob_length() + (1 as Int64)));
+}
+
+fn test_clamp_blob_length() {
+    assert_eq(clamp_blob_length(100 as Int64), 100 as Int64);
+    assert_eq(clamp_blob_length(0 as Int64), 1 as Int64);
+    assert_eq(clamp_blob_length(-5 as Int64), 1 as Int64);
+    assert_eq(clamp_blob_length(max_blob_length() + (10 as Int64)), max_blob_length());
+}
+
+fn main() {
+    test_fn_names();
+    test_arity();
+    test_return_types();
+    test_neither_deterministic();
+    test_blob_length_bounds();
+    test_clamp_blob_length();
+}

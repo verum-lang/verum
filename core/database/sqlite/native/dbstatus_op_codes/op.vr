@@ -1,0 +1,98 @@
+// SQLITE_DBSTATUS_* codes.
+
+module core.database.sqlite.native.dbstatus_op_codes.op;
+
+mount base.{Bool, Text, Maybe};
+
+public type DbStatusOp is
+    | DsLookasideUsed         //  0
+    | DsCacheUsed             //  1
+    | DsSchemaUsed            //  2
+    | DsStmtUsed              //  3
+    | DsLookasideHit          //  4
+    | DsLookasideMissSize     //  5
+    | DsLookasideMissFull     //  6
+    | DsCacheHit              //  7
+    | DsCacheMiss             //  8
+    | DsCacheWrite            //  9
+    | DsDeferredFkChks        // 10
+    | DsCacheUsedShared       // 11
+    | DsCacheSpill            // 12
+    ;
+
+public fn op_code(o: &DbStatusOp) -> Int {
+    match o {
+        DsLookasideUsed       =>  0,
+        DsCacheUsed           =>  1,
+        DsSchemaUsed          =>  2,
+        DsStmtUsed            =>  3,
+        DsLookasideHit        =>  4,
+        DsLookasideMissSize   =>  5,
+        DsLookasideMissFull   =>  6,
+        DsCacheHit            =>  7,
+        DsCacheMiss           =>  8,
+        DsCacheWrite          =>  9,
+        DsDeferredFkChks      => 10,
+        DsCacheUsedShared     => 11,
+        DsCacheSpill          => 12,
+    }
+}
+
+public fn from_code(c: Int) -> Maybe<DbStatusOp> {
+    if c ==  0 { return Maybe.Some(DsLookasideUsed); }
+    if c ==  1 { return Maybe.Some(DsCacheUsed); }
+    if c ==  2 { return Maybe.Some(DsSchemaUsed); }
+    if c ==  3 { return Maybe.Some(DsStmtUsed); }
+    if c ==  4 { return Maybe.Some(DsLookasideHit); }
+    if c ==  5 { return Maybe.Some(DsLookasideMissSize); }
+    if c ==  6 { return Maybe.Some(DsLookasideMissFull); }
+    if c ==  7 { return Maybe.Some(DsCacheHit); }
+    if c ==  8 { return Maybe.Some(DsCacheMiss); }
+    if c ==  9 { return Maybe.Some(DsCacheWrite); }
+    if c == 10 { return Maybe.Some(DsDeferredFkChks); }
+    if c == 11 { return Maybe.Some(DsCacheUsedShared); }
+    if c == 12 { return Maybe.Some(DsCacheSpill); }
+    Maybe.None
+}
+
+public fn op_name(o: &DbStatusOp) -> Text {
+    match o {
+        DsLookasideUsed       => "LOOKASIDE_USED".clone(),
+        DsCacheUsed           => "CACHE_USED".clone(),
+        DsSchemaUsed          => "SCHEMA_USED".clone(),
+        DsStmtUsed            => "STMT_USED".clone(),
+        DsLookasideHit        => "LOOKASIDE_HIT".clone(),
+        DsLookasideMissSize   => "LOOKASIDE_MISS_SIZE".clone(),
+        DsLookasideMissFull   => "LOOKASIDE_MISS_FULL".clone(),
+        DsCacheHit            => "CACHE_HIT".clone(),
+        DsCacheMiss           => "CACHE_MISS".clone(),
+        DsCacheWrite          => "CACHE_WRITE".clone(),
+        DsDeferredFkChks      => "DEFERRED_FKS".clone(),
+        DsCacheUsedShared     => "CACHE_USED_SHARED".clone(),
+        DsCacheSpill          => "CACHE_SPILL".clone(),
+    }
+}
+
+public fn is_lookaside_counter(o: &DbStatusOp) -> Bool {
+    match o {
+        DsLookasideUsed       => true,
+        DsLookasideHit        => true,
+        DsLookasideMissSize   => true,
+        DsLookasideMissFull   => true,
+        _                     => false,
+    }
+}
+
+public fn is_cache_counter(o: &DbStatusOp) -> Bool {
+    match o {
+        DsCacheUsed       => true,
+        DsCacheHit        => true,
+        DsCacheMiss       => true,
+        DsCacheWrite      => true,
+        DsCacheUsedShared => true,
+        DsCacheSpill      => true,
+        _                 => false,
+    }
+}
+
+public fn well_known_count() -> Int { 13 }

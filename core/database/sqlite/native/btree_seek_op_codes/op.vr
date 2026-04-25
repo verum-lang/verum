@@ -1,0 +1,73 @@
+// Btree seek-op taxonomy.
+
+module core.database.sqlite.native.btree_seek_op_codes.op;
+
+mount base.{Bool, Text};
+
+public type SeekOp is
+    | SoEq          // exact match required
+    | SoGe          // smallest >= target
+    | SoLe          // largest  <= target
+    | SoGt          // strict greater
+    | SoLt          // strict less
+    ;
+
+public fn op_name(o: &SeekOp) -> Text {
+    match o {
+        SoEq => "EQ".clone(),
+        SoGe => "GE".clone(),
+        SoLe => "LE".clone(),
+        SoGt => "GT".clone(),
+        SoLt => "LT".clone(),
+    }
+}
+
+// Direction the cursor walks if the exact key is missing.
+public type WalkDirection is
+    | WdForward
+    | WdBackward
+    | WdNone        // exact-only
+    ;
+
+public fn fallback_direction(o: &SeekOp) -> WalkDirection {
+    match o {
+        SoEq => WdNone,
+        SoGe => WdForward,
+        SoGt => WdForward,
+        SoLe => WdBackward,
+        SoLt => WdBackward,
+    }
+}
+
+public fn allows_strict(o: &SeekOp) -> Bool {
+    match o {
+        SoGt => true,
+        SoLt => true,
+        _    => false,
+    }
+}
+
+public fn requires_exact_match(o: &SeekOp) -> Bool {
+    match o { SoEq => true, _ => false }
+}
+
+public fn includes_target_when_match(o: &SeekOp) -> Bool {
+    match o {
+        SoGt => false,
+        SoLt => false,
+        _    => true,
+    }
+}
+
+// Inverse of the seek-op (used by reverse-scan optimisation).
+public fn invert(o: &SeekOp) -> SeekOp {
+    match o {
+        SoEq => SoEq,
+        SoGe => SoLe,
+        SoLe => SoGe,
+        SoGt => SoLt,
+        SoLt => SoGt,
+    }
+}
+
+public fn well_known_count() -> Int { 5 }

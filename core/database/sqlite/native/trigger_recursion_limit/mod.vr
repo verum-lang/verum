@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/trigger_recursion_limit/mod.vr
+// =============================================================================
+// SQLITE_LIMIT_TRIGGER_DEPTH — bounds nested trigger firing depth.
+// Spec §17.5.4 — recursive triggers.
+//
+// SQLite default: 1000. Recursive triggers can chain CASCADE FK actions,
+// causing deep nesting. SQLite returns SQLITE_TOOBIG (18) when exceeded.
+// =============================================================================
+
+module core.database.sqlite.native.trigger_recursion_limit;
+
+public module gate;

@@ -1,0 +1,77 @@
+// Collation-carry rule taxonomy.
+
+module core.database.sqlite.native.expr_collation_carry.rule;
+
+mount base.{Bool, Text};
+
+public type ExprNodeKind is
+    | EkColumn(Text)        // column with declared collation
+    | EkLiteral             // string / blob literal
+    | EkBindParam           // ? / :name
+    | EkCast(Text)          // CAST(... AS type) — uses CAST'd type's collation
+    | EkBinaryOp            // + - * / % &  | etc.
+    | EkConcat              // ||
+    | EkFunctionCall        // generic fn call
+    | EkExplicitCollate(Text) // (expr) COLLATE NOCASE — overrides
+    ;
+
+public fn kind_name(k: &ExprNodeKind) -> Text {
+    match k {
+        EkColumn(_)           => "column".clone(),
+        EkLiteral             => "literal".clone(),
+        EkBindParam           => "bind".clone(),
+        EkCast(_)             => "cast".clone(),
+        EkBinaryOp            => "binary_op".clone(),
+        EkConcat              => "concat".clone(),
+        EkFunctionCall        => "function".clone(),
+        EkExplicitCollate(_)  => "explicit_collate".clone(),
+    }
+}
+
+public fn carries_column_collation(k: &ExprNodeKind) -> Bool {
+    match k { EkColumn(_) => true, _ => false }
+}
+
+public fn has_explicit_collate(k: &ExprNodeKind) -> Bool {
+    match k { EkExplicitCollate(_) => true, _ => false }
+}
+
+// COLLATE-clause attached collation always wins.
+public fn explicit_collation(k: &ExprNodeKind) -> Text {
+    match k {
+        EkExplicitCollate(c) => c.clone(),
+        _                    => "".clone(),
+    }
+}
+
+// Compute the carried collation given:
+//   self_kind         — the expression's own node kind
+//   left_collation    — collation of left operand (for binary/concat/cast)
+//   column_collation  — column's declared collation (when EkColumn)
+public fn carried(
+    self_kind: &ExprNodeKind,
+    left_collation: &Text,
+    column_collation: &Text,
+) -> Text {
+    match self_kind {
+        EkExplicitCollate(c) => c.clone(),
+        EkColumn(_)          => column_collation.clone(),
+        EkLiteral            => "".clone(),
+        EkBindParam          => "".clone(),
+        EkCast(_)            => left_collation.clone(),
+        EkBinaryOp           => left_collation.clone(),
+        EkConcat             => left_collation.clone(),
+        EkFunctionCall       => left_collation.clone(),
+    }
+}
+
+// "Default" collation when nothing is set is BINARY.
+public fn default_collation_name() -> Text { "BINARY".clone() }
+
+public fn effective_or_default(carried_text: &Text) -> Text {
+    if carried_text.len() == 0 {
+        default_collation_name()
+    } else {
+        carried_text.clone()
+    }
+}

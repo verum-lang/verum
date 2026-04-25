@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, dbstatus_op_codes, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.dbstatus_op_codes.op.{
+    DbStatusOp,
+    DsLookasideUsed, DsCacheUsed, DsSchemaUsed, DsStmtUsed,
+    DsLookasideHit, DsLookasideMissSize, DsLookasideMissFull,
+    DsCacheHit, DsCacheMiss, DsCacheWrite,
+    DsDeferredFkChks, DsCacheUsedShared, DsCacheSpill,
+    op_code, from_code, op_name,
+    is_lookaside_counter, is_cache_counter, well_known_count,
+};
+mount base.{Bool, Maybe};
+
+fn test_codes_match_header() {
+    assert_eq(op_code(&DsLookasideUsed),       0);
+    assert_eq(op_code(&DsCacheUsed),           1);
+    assert_eq(op_code(&DsSchemaUsed),          2);
+    assert_eq(op_code(&DsStmtUsed),            3);
+    assert_eq(op_code(&DsLookasideHit),        4);
+    assert_eq(op_code(&DsLookasideMissSize),   5);
+    assert_eq(op_code(&DsLookasideMissFull),   6);
+    assert_eq(op_code(&DsCacheHit),            7);
+    assert_eq(op_code(&DsCacheMiss),           8);
+    assert_eq(op_code(&DsCacheWrite),          9);
+    assert_eq(op_code(&DsDeferredFkChks),      10);
+    assert_eq(op_code(&DsCacheUsedShared),     11);
+    assert_eq(op_code(&DsCacheSpill),          12);
+}
+
+fn test_round_trip() {
+    match from_code(0) {
+        Maybe.Some(o) => match &o { DsLookasideUsed => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(12) {
+        Maybe.Some(o) => match &o { DsCacheSpill => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(13) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+    match from_code(-1) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_lookaside_set() {
+    assert(is_lookaside_counter(&DsLookasideUsed));
+    assert(is_lookaside_counter(&DsLookasideHit));
+    assert(is_lookaside_counter(&DsLookasideMissSize));
+    assert(is_lookaside_counter(&DsLookasideMissFull));
+    assert(!is_lookaside_counter(&DsCacheUsed));
+}
+
+fn test_cache_set() {
+    assert(is_cache_counter(&DsCacheUsed));
+    assert(is_cache_counter(&DsCacheHit));
+    assert(is_cache_counter(&DsCacheMiss));
+    assert(is_cache_counter(&DsCacheWrite));
+    assert(is_cache_counter(&DsCacheUsedShared));
+    assert(is_cache_counter(&DsCacheSpill));
+    assert(!is_cache_counter(&DsLookasideUsed));
+}
+
+fn test_op_names() {
+    assert(op_name(&DsLookasideUsed)     == "LOOKASIDE_USED".clone());
+    assert(op_name(&DsCacheSpill)        == "CACHE_SPILL".clone());
+    assert(op_name(&DsDeferredFkChks)    == "DEFERRED_FKS".clone());
+}
+
+fn test_well_known_count() {
+    assert_eq(well_known_count(), 13);
+}
+
+fn main() {
+    test_codes_match_header();
+    test_round_trip();
+    test_lookaside_set();
+    test_cache_set();
+    test_op_names();
+    test_well_known_count();
+}

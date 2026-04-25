@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, uri_param_decode_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.uri_param_decode_api.decoder.{
+    parse_boolean, known_boolean_keyword_count,
+    parse_int64,
+    parameter_value, is_present,
+};
+mount base.{Bool, Int64};
+
+fn test_boolean_truthy_keywords() {
+    assert(parse_boolean(&"1".clone(),     false));
+    assert(parse_boolean(&"yes".clone(),   false));
+    assert(parse_boolean(&"on".clone(),    false));
+    assert(parse_boolean(&"true".clone(),  false));
+    assert(parse_boolean(&"YES".clone(),   false));
+    assert(parse_boolean(&"True".clone(),  false));
+}
+
+fn test_boolean_falsy_keywords() {
+    assert(!parse_boolean(&"0".clone(),     true));
+    assert(!parse_boolean(&"no".clone(),    true));
+    assert(!parse_boolean(&"off".clone(),   true));
+    assert(!parse_boolean(&"false".clone(), true));
+    assert(!parse_boolean(&"OFF".clone(),   true));
+}
+
+fn test_boolean_default_when_missing() {
+    assert(parse_boolean(&"".clone(),  true));
+    assert(!parse_boolean(&"".clone(), false));
+}
+
+fn test_boolean_unknown_returns_default() {
+    assert(parse_boolean(&"maybe".clone(), true));
+    assert(!parse_boolean(&"maybe".clone(), false));
+}
+
+fn test_known_boolean_keyword_count() {
+    assert_eq(known_boolean_keyword_count(), 8);
+}
+
+fn test_int64_basic() {
+    assert_eq(parse_int64(&"42".clone(), -1 as Int64), 42 as Int64);
+    assert_eq(parse_int64(&"-100".clone(), -1 as Int64), -100 as Int64);
+    assert_eq(parse_int64(&"+7".clone(), -1 as Int64), 7 as Int64);
+}
+
+fn test_int64_invalid_returns_default() {
+    assert_eq(parse_int64(&"".clone(),     -5 as Int64), -5 as Int64);
+    assert_eq(parse_int64(&"abc".clone(),  -5 as Int64), -5 as Int64);
+    assert_eq(parse_int64(&"42abc".clone(), -5 as Int64), -5 as Int64);
+    assert_eq(parse_int64(&"+".clone(),    -5 as Int64), -5 as Int64);
+}
+
+fn test_parameter_value_trimming() {
+    assert(parameter_value(&"  hello  ".clone()) == "hello".clone());
+    assert(parameter_value(&"\thi\t".clone()) == "hi".clone());
+    assert(parameter_value(&"".clone()) == "".clone());
+}
+
+fn test_is_present_after_trim() {
+    assert(is_present(&"x".clone()));
+    assert(is_present(&"  x  ".clone()));
+    assert(!is_present(&"   ".clone()));
+    assert(!is_present(&"".clone()));
+}
+
+fn main() {
+    test_boolean_truthy_keywords();
+    test_boolean_falsy_keywords();
+    test_boolean_default_when_missing();
+    test_boolean_unknown_returns_default();
+    test_known_boolean_keyword_count();
+    test_int64_basic();
+    test_int64_invalid_returns_default();
+    test_parameter_value_trimming();
+    test_is_present_after_trim();
+}
