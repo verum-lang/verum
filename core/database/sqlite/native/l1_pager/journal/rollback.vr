@@ -158,7 +158,7 @@ public fn rollback_serialize_record(
         out.push(page_bytes[i]);
         i = i + 1;
     }
-    let cksum = record_checksum(nonce, page_bytes);
+    let cksum = rollback_record_checksum(nonce, page_bytes);
     write_u32_be(&mut out, cksum);
     out
 }
@@ -184,7 +184,7 @@ public fn rollback_parse_record(
         i = i + 1;
     }
     let stored_cksum = read_u32_be(buf, start + 4 + page_size);
-    let computed = record_checksum(nonce, &page_bytes);
+    let computed = rollback_record_checksum(nonce, &page_bytes);
     if stored_cksum != computed {
         return Err(BadChecksum(page_no, computed, stored_cksum));
     }
@@ -220,7 +220,7 @@ public fn rollback_replay(
     };
     let mut seen: Int = 0;
     while pos + record_size <= journal_bytes.len() {
-        match parse_record(journal_bytes, pos, page_size, header.checksum_nonce) {
+        match rollback_parse_record(journal_bytes, pos, page_size, header.checksum_nonce) {
             Ok((pn, bytes)) => {
                 out.push((pn, bytes));
                 seen = seen + 1;

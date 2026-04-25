@@ -171,3 +171,34 @@ fn stdlib_loading_emits_no_lenient_skips_sqlite() {
         skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
     );
 }
+
+/// Even-wider coverage: the L1 pager round-trip pulls in sys.time_ops
+/// (Instant.now / sleep_*), the rollback journal helpers, the WAL
+/// frame layout, plus the L0 VFS layer that the SQLite-VFS smoke
+/// already exercises.  Covers the historical hot-paths for both the
+/// "missing FFI intrinsic" cluster (`__time_*_nanos_raw`) and the
+/// "rollback record helpers not exported" cluster.
+#[test]
+#[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
+fn stdlib_loading_emits_no_lenient_skips_l1_pager() {
+    let root = workspace_root();
+    let target = root.join(
+        "vcs/specs/L2-standard/database/sqlite/l1_pager/page_roundtrip.vr",
+    );
+    if !target.is_file() {
+        // Spec is optional in some workspace layouts; skip silently
+        // rather than fail when the fixture is unavailable.
+        return;
+    }
+
+    let (code, skips) = collect_lenient_skips(&target);
+    assert!(
+        skips.is_empty(),
+        "L1 pager smoke triggered {} lenient `SKIP` warning(s) during \
+         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
+        skips.len(),
+        code,
+        FAILURE_HINT,
+        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+    );
+}
