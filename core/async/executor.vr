@@ -1132,7 +1132,7 @@ implement LocalExecutor {
 }
 
 // =============================================================================
-// Timeout Support
+// ExecutorTimeout Support
 // =============================================================================
 
 // NOTE: Sleep future and sleep_ms/sleep_secs/sleep are defined in
@@ -1140,10 +1140,10 @@ implement LocalExecutor {
 // instead of duplicating here.
 
 // =============================================================================
-// Timeout Combinator
+// ExecutorTimeout Combinator
 // =============================================================================
 
-/// Timeout error when a future doesn't complete in time.
+/// ExecutorTimeout error when a future doesn't complete in time.
 public type ExecutorTimeoutError is ();
 
 implement Debug for ExecutorTimeoutError {
@@ -1159,7 +1159,7 @@ implement Display for ExecutorTimeoutError {
 }
 
 /// Future that wraps another future with a timeout.
-public type Timeout<F: Future> is {
+public type ExecutorTimeout<F: Future> is {
     future: F,
     timeout_ns: UInt64,
     /// Absolute deadline in nanoseconds since boot
@@ -1174,9 +1174,9 @@ fn time_now_ns() -> UInt64 {
     monotonic_nanos()
 }
 
-implement<F: Future> Timeout<F> {
-    public fn new(future: F, timeout_ns: UInt64) -> Timeout<F> {
-        Timeout {
+implement<F: Future> ExecutorTimeout<F> {
+    public fn new(future: F, timeout_ns: UInt64) -> ExecutorTimeout<F> {
+        ExecutorTimeout {
             future: future,
             timeout_ns: timeout_ns,
             deadline_ns: 0,  // Set on first poll
@@ -1185,7 +1185,7 @@ implement<F: Future> Timeout<F> {
     }
 }
 
-implement<F: Future> Future for Timeout<F> {
+implement<F: Future> Future for ExecutorTimeout<F> {
     type Output = Result<F.Output, ExecutorTimeoutError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<F.Output, ExecutorTimeoutError>> {
@@ -1228,8 +1228,8 @@ implement<F: Future> Future for Timeout<F> {
 ///     Err(ExecutorTimeoutError) => print("Request timed out"),
 /// }
 /// ```
-public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> Timeout<F> {
-    Timeout.new(future, timeout_ms * 1_000_000)
+public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> ExecutorTimeout<F> {
+    ExecutorTimeout.new(future, timeout_ms * 1_000_000)
 }
 
 // =============================================================================

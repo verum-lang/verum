@@ -38,13 +38,13 @@ public type SqlBool is
     ;
 
 // Note: SQLite returns NULL whenever any operand is NULL; we model NULL as
-// a separate Value tag.
-public type Value is
+// a separate BetweenValue tag.
+public type BetweenValue is
     | VNull
     | VInt(Int64)
     ;
 
-public fn evaluate(form: &BetweenForm, x: &Value, lo: &Value, hi: &Value) -> SqlBool {
+public fn evaluate(form: &BetweenForm, x: &BetweenValue, lo: &BetweenValue, hi: &BetweenValue) -> SqlBool {
     let xv = match x  { VInt(n) => n.clone(), VNull => return SbNull };
     let lv = match lo { VInt(n) => n.clone(), VNull => return SbNull };
     let hv = match hi { VInt(n) => n.clone(), VNull => return SbNull };
@@ -68,7 +68,7 @@ public fn is_true(b: &SqlBool) -> Bool {
 }
 
 // LO > HI is degenerate — engine emits an empty-range diagnostic.
-public fn is_degenerate_range(lo: &Value, hi: &Value) -> Bool {
+public fn is_degenerate_range(lo: &BetweenValue, hi: &BetweenValue) -> Bool {
     match lo {
         VNull => false,
         VInt(l) => match hi {

@@ -115,7 +115,7 @@ public async fn async_sleep_ns(ns: UInt64);
 // =============================================================================
 
 /// Recovery error type
-public type RecoveryError is
+public type RawRecoveryError is
     | MaxRetriesExceeded
     | CircuitOpen
     | Timeout
@@ -151,7 +151,7 @@ public fn supervisor_set_parent(child: RawSupervisorHandleOpaque, parent: RawSup
 public async fn exec_with_recovery(
     recovery_ctx: RawRecoveryContextOpaque,
     future_factory: fn() -> RawFutureHandle,
-) -> Result<*const Byte, RecoveryError>;
+) -> Result<*const Byte, RawRecoveryError>;
 
 /// Get reference to inline circuit breaker.
 @intrinsic("inline_cb_as_ref")

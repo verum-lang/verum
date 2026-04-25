@@ -16,14 +16,14 @@ public fn op_name(o: &NullSafeCompareOp) -> Text {
     }
 }
 
-public type Value is
+public type NullSafeCmpValue is
     | VNull
     | VInt(Int64)
     | VText(Text)
     ;
 
 // Equality with NULL=NULL semantics.
-public fn null_safe_equal(x: &Value, y: &Value) -> Bool {
+public fn null_safe_equal(x: &NullSafeCmpValue, y: &NullSafeCmpValue) -> Bool {
     match x {
         VNull => match y {
             VNull   => true,
@@ -40,7 +40,7 @@ public fn null_safe_equal(x: &Value, y: &Value) -> Bool {
     }
 }
 
-public fn evaluate(op: &NullSafeCompareOp, x: &Value, y: &Value) -> Int {
+public fn evaluate(op: &NullSafeCompareOp, x: &NullSafeCmpValue, y: &NullSafeCmpValue) -> Int {
     let eq = null_safe_equal(x, y);
     match op {
         OpDistinctFrom    => if eq { 0 } else { 1 },
@@ -63,7 +63,7 @@ public type ResultClass is
     | RcDifferent
     ;
 
-public fn classify_result(x: &Value, y: &Value) -> ResultClass {
+public fn classify_result(x: &NullSafeCmpValue, y: &NullSafeCmpValue) -> ResultClass {
     if null_safe_equal(x, y) { RcEqual } else { RcDifferent }
 }
 

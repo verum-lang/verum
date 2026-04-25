@@ -552,7 +552,7 @@ public context AstAccess {
     ///
     /// # Returns
     /// - `Ok(MetaExpr)`: Parsed expression AST
-    /// - `Err(ParseError)`: Syntax error in tokens
+    /// - `Err(MetaParseError)`: Syntax error in tokens
     fn parse_expr(tokens: TokenStream) -> MetaResult<MetaExpr>;
 
     /// Parse token stream as type
@@ -562,7 +562,7 @@ public context AstAccess {
     ///
     /// # Returns
     /// - `Ok(Type)`: Parsed type AST
-    /// - `Err(ParseError)`: Syntax error in tokens
+    /// - `Err(MetaParseError)`: Syntax error in tokens
     fn parse_type(tokens: TokenStream) -> MetaResult<Type>;
 
     /// Parse token stream as item (function, type, etc.)
@@ -572,7 +572,7 @@ public context AstAccess {
     ///
     /// # Returns
     /// - `Ok(Item)`: Parsed item AST
-    /// - `Err(ParseError)`: Syntax error in tokens
+    /// - `Err(MetaParseError)`: Syntax error in tokens
     fn parse_item(tokens: TokenStream) -> MetaResult<Item>;
 
     /// Parse token stream as pattern
@@ -582,7 +582,7 @@ public context AstAccess {
     ///
     /// # Returns
     /// - `Ok(Pattern)`: Parsed pattern AST
-    /// - `Err(ParseError)`: Syntax error in tokens
+    /// - `Err(MetaParseError)`: Syntax error in tokens
     fn parse_pattern(tokens: TokenStream) -> MetaResult<Pattern>;
 
     /// Parse token stream as statement
@@ -3145,7 +3145,7 @@ public type ParseResult<T> is {
     value: Maybe<T>,
 
     /// List of parse errors encountered
-    errors: List<ParseError>,
+    errors: List<MetaParseError>,
 
     /// Recovered tokens that couldn't be parsed
     remaining: TokenStream,
@@ -3180,7 +3180,7 @@ implement<T> ParseResult<T> {
 }
 
 /// Parse error information
-public type ParseError is {
+public type MetaParseError is {
     /// Error message
     message: Text,
 
@@ -3197,7 +3197,7 @@ public type ParseError is {
     found: Maybe<Text>,
 };
 
-implement ParseError {
+implement MetaParseError {
     /// Format error for display
     public fn format(&self) -> Text {
         let mut msg = self.message.clone();

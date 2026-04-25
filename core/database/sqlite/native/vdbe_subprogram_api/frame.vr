@@ -1,4 +1,4 @@
-// Frame record + push/pop stack.
+// VdbeFrame record + push/pop stack.
 
 module core.database.sqlite.native.vdbe_subprogram_api.frame;
 
@@ -21,7 +21,7 @@ public fn frame_kind_name(k: &FrameKind) -> Text {
     }
 }
 
-public type Frame is {
+public type VdbeFrame is {
     kind: FrameKind,
     program_id: Int,          // compiled sub-program identifier
     return_pc: Int,           // caller's next instruction
@@ -33,8 +33,8 @@ public type Frame is {
 public fn new(
     kind: FrameKind, program_id: Int, return_pc: Int,
     register_base: Int, register_count: Int, depth: Int,
-) -> Frame {
-    Frame {
+) -> VdbeFrame {
+    VdbeFrame {
         kind: kind,
         program_id: program_id,
         return_pc: return_pc,
@@ -45,19 +45,19 @@ public fn new(
 }
 
 public type CallStack is {
-    frames: List<Frame>,
+    frames: List<VdbeFrame>,
     max_depth_seen: Int,
 };
 
 public fn empty_stack() -> CallStack {
-    CallStack { frames: [].clone() as List<Frame>, max_depth_seen: 0 }
+    CallStack { frames: [].clone() as List<VdbeFrame>, max_depth_seen: 0 }
 }
 
 public fn depth(cs: &CallStack) -> Int { cs.frames.len() }
 
 public fn is_empty(cs: &CallStack) -> Bool { cs.frames.len() == 0 }
 
-public fn push(mut cs: CallStack, f: Frame) -> CallStack {
+public fn push(mut cs: CallStack, f: VdbeFrame) -> CallStack {
     let new_depth = f.depth;
     cs.frames.push(f);
     if new_depth > cs.max_depth_seen { cs.max_depth_seen = new_depth; }

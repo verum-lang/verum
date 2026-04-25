@@ -256,14 +256,14 @@ fn register_to_json(r: &Register) -> SqlJsonValue {
 // Minimal JSON parser (relaxed — no UTF-16 escape handling beyond \\uxxxx)
 // -----------------------------------------------------------------------------
 
-public type ParseState is { bs: List<Byte>, pos: Int };
+public type JsonParseState is { bs: List<Byte>, pos: Int };
 
 public fn parse_json(s: &Text) -> Maybe<SqlJsonValue> {
     let bsv = s.as_bytes();
     let mut bs: List<Byte> = List.new();
     let mut i: Int = 0;
     while i < bsv.len() { bs.push(bsv[i]); i = i + 1; }
-    let mut st = ParseState { bs: bs, pos: 0 };
+    let mut st = JsonParseState { bs: bs, pos: 0 };
     skip_ws(&mut st);
     let r = parse_value(&mut st);
     skip_ws(&mut st);
@@ -275,7 +275,7 @@ public fn parse_json(s: &Text) -> Maybe<SqlJsonValue> {
     }
 }
 
-fn skip_ws(st: &mut ParseState) {
+fn skip_ws(st: &mut JsonParseState) {
     while st.pos < st.bs.len() {
         let b = st.bs[st.pos];
         if b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) || b == (13 as Byte) {
@@ -284,7 +284,7 @@ fn skip_ws(st: &mut ParseState) {
     }
 }
 
-fn parse_value(st: &mut ParseState) -> Maybe<SqlJsonValue> {
+fn parse_value(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     skip_ws(st);
     if st.pos >= st.bs.len() { return None; }
     let b = st.bs[st.pos];
@@ -299,14 +299,14 @@ fn parse_value(st: &mut ParseState) -> Maybe<SqlJsonValue> {
     None
 }
 
-fn parse_keyword(st: &mut ParseState) -> Maybe<SqlJsonValue> {
+fn parse_keyword(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     if matches_keyword(st, &"true".clone()) { return Some(JBool(true)); }
     if matches_keyword(st, &"false".clone()) { return Some(JBool(false)); }
     if matches_keyword(st, &"null".clone()) { return Some(JNull); }
     None
 }
 
-fn matches_keyword(st: &mut ParseState, kw: &Text) -> Bool {
+fn matches_keyword(st: &mut JsonParseState, kw: &Text) -> Bool {
     let kbs = kw.as_bytes();
     if st.pos + kbs.len() > st.bs.len() { return false; }
     let mut i: Int = 0;
@@ -318,7 +318,7 @@ fn matches_keyword(st: &mut ParseState, kw: &Text) -> Bool {
     true
 }
 
-fn parse_number(st: &mut ParseState) -> Maybe<SqlJsonValue> {
+fn parse_number(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     let start = st.pos;
     if st.bs[st.pos] == (45 as Byte) { st.pos = st.pos + 1; }
     while st.pos < st.bs.len() {
@@ -360,14 +360,14 @@ fn parse_real_text(s: &Text) -> Float64 {
     sign * (intp + frac)
 }
 
-fn parse_string_value(st: &mut ParseState) -> Maybe<SqlJsonValue> {
+fn parse_string_value(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     match parse_json_string(st) {
         Some(s) => Some(JString(s)),
         None    => None,
     }
 }
 
-fn parse_json_string(st: &mut ParseState) -> Maybe<Text> {
+fn parse_json_string(st: &mut JsonParseState) -> Maybe<Text> {
     if st.pos >= st.bs.len() || st.bs[st.pos] != (34 as Byte) { return None; }
     st.pos = st.pos + 1;
     let mut out = Text.new();
@@ -397,7 +397,7 @@ fn parse_json_string(st: &mut ParseState) -> Maybe<Text> {
     None
 }
 
-fn parse_array(st: &mut ParseState) -> Maybe<SqlJsonValue> {
+fn parse_array(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     st.pos = st.pos + 1;  // skip [
     let mut items: List<SqlJsonValue> = List.new();
     skip_ws(st);
@@ -424,7 +424,7 @@ fn parse_array(st: &mut ParseState) -> Maybe<SqlJsonValue> {
     None
 }
 
-fn parse_object(st: &mut ParseState) -> Maybe<SqlJsonValue> {
+fn parse_object(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     st.pos = st.pos + 1;  // skip {
     let mut fields: List<JsonField> = List.new();
     skip_ws(st);

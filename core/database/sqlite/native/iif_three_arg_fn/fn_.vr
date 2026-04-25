@@ -9,23 +9,23 @@ module core.database.sqlite.native.iif_three_arg_fn.fn_;
 
 mount base.{Bool, Int64, Text};
 
-public type Value is
+public type IifThreeArgValue is
     | VNull
     | VInt(Int64)
     | VText(Text)
     ;
 
-public fn null_value() -> Value { VNull }
-public fn int_value(n: Int64) -> Value { VInt(n) }
-public fn text_value(t: Text) -> Value { VText(t) }
+public fn null_value() -> IifThreeArgValue { VNull }
+public fn int_value(n: Int64) -> IifThreeArgValue { VInt(n) }
+public fn text_value(t: Text) -> IifThreeArgValue { VText(t) }
 
-public fn is_null(v: &Value) -> Bool {
+public fn is_null(v: &IifThreeArgValue) -> Bool {
     match v { VNull => true, _ => false }
 }
 
 // Truthiness: SQL coerces non-zero numbers and non-empty text to true; NULL
 // and zero are false.  iif() tests the standard "truth" projection on X.
-public fn is_truthy(v: &Value) -> Bool {
+public fn is_truthy(v: &IifThreeArgValue) -> Bool {
     match v {
         VNull    => false,
         VInt(n)  => n.clone() != (0 as Int64),
@@ -33,7 +33,7 @@ public fn is_truthy(v: &Value) -> Bool {
     }
 }
 
-public fn evaluate(x: &Value, y: &Value, z: &Value) -> Value {
+public fn evaluate(x: &IifThreeArgValue, y: &IifThreeArgValue, z: &IifThreeArgValue) -> IifThreeArgValue {
     if is_truthy(x) {
         clone_value(y)
     } else {
@@ -41,7 +41,7 @@ public fn evaluate(x: &Value, y: &Value, z: &Value) -> Value {
     }
 }
 
-fn clone_value(v: &Value) -> Value {
+fn clone_value(v: &IifThreeArgValue) -> IifThreeArgValue {
     match v {
         VNull    => VNull,
         VInt(n)  => VInt(n.clone()),

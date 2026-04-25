@@ -364,8 +364,8 @@ where
 // Continuous Batching
 // =============================================================================
 
-// Request for continuous batching
-public type Request is {
+// AgentRequest for continuous batching
+public type AgentRequest is {
     id: U64,
     input_ids: List<U32>,
     max_new_tokens: USize,
@@ -379,8 +379,8 @@ public const EOS_TOKEN: U32 = 2;
 // Continuous batching scheduler for high-throughput LLM serving
 public type ContinuousBatcher<M> is {
     model: M,
-    pending_requests: List<Request>,
-    active_requests: List<Request>,
+    pending_requests: List<AgentRequest>,
+    active_requests: List<AgentRequest>,
     max_batch_size: USize,
     kv_caches: Map<U64, KVCache>,
     next_request_id: U64,
@@ -403,7 +403,7 @@ implement<M: Module<DynTensor<USize>, DynTensor<Float>>> ContinuousBatcher<M> {
     public fn add_request(&mut self, input_ids: List<U32>, max_new_tokens: USize) -> U64 {
         let id = self.next_request_id;
         self.next_request_id += 1;
-        self.pending_requests.push(Request {
+        self.pending_requests.push(AgentRequest {
             id,
             input_ids,
             max_new_tokens,
@@ -1366,7 +1366,7 @@ implement<Schema: JsonSchema + Default> StructuredOutputPrompt<Schema> {
     }
 
     // Parse structured response from LLM output
-    public fn parse_response(&self, response: Text) -> Result<Schema, ParseError> {
+    public fn parse_response(&self, response: Text) -> Result<Schema, AgentParseError> {
         // Extract JSON from response (handles markdown code blocks)
         let json = extract_json(&response)?;
         Schema.from_json(&json)
@@ -1374,7 +1374,7 @@ implement<Schema: JsonSchema + Default> StructuredOutputPrompt<Schema> {
 }
 
 // Extract JSON from text that may include markdown code blocks
-fn extract_json(text: &Text) -> Result<Text, ParseError> {
+fn extract_json(text: &Text) -> Result<Text, AgentParseError> {
     // Try to find JSON in code block first
     if let Maybe.Some(start) = text.find("```json") {
         let after_marker = text.slice_from(start + 7);
@@ -1404,7 +1404,7 @@ fn extract_json(text: &Text) -> Result<Text, ParseError> {
         return Ok(trimmed.to_text());
     }
 
-    Err(ParseError.new("Could not extract JSON from response"))
+    Err(AgentParseError.new("Could not extract JSON from response"))
 }
 
 // =============================================================================
@@ -1566,7 +1566,7 @@ implement FunctionCall {
     }
 
     // Parse arguments as JSON
-    public fn parse_arguments<T: Deserialize>(&self) -> Result<T, ParseError> {
+    public fn parse_arguments<T: Deserialize>(&self) -> Result<T, AgentParseError> {
         T.from_json(&self.arguments)
     }
 }
@@ -1849,24 +1849,24 @@ fn format_content_part(content: &MessageContent) -> Text {
 }
 
 // Parse error type
-public type ParseError is {
+public type AgentParseError is {
     message: Text,
     position: Maybe<USize>,
 };
 
-implement ParseError {
+implement AgentParseError {
     // Create new parse error
     public fn new(message: Text) -> Self {
-        ParseError { message, position: Maybe.None }
+        AgentParseError { message, position: Maybe.None }
     }
 
     // Create parse error with position
     public fn at(message: Text, pos: USize) -> Self {
-        ParseError { message, position: Maybe.Some(pos) }
+        AgentParseError { message, position: Maybe.Some(pos) }
     }
 }
 
-implement Error for ParseError {
+implement Error for AgentParseError {
     fn message(&self) -> Text {
         if let Maybe.Some(pos) = self.position {
             f"{self.message} at position {pos}"

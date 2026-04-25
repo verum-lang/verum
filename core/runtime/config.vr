@@ -791,10 +791,10 @@ implement AsyncExecutor for SingleThreadExecutor {
 public type PlatformIOEngine is { inner: IoUringDriver };
 
 @cfg(all(runtime = "full", target_os = "macos"))
-public type PlatformIOEngine is { inner: KqueueDriver };
+public type MacosPlatformIOEngine is { inner: KqueueDriver };
 
 @cfg(all(runtime = "full", target_os = "windows"))
-public type PlatformIOEngine is { inner: IocpDriver };
+public type WindowsPlatformIOEngine is { inner: IocpDriver };
 
 /// Poll-based I/O driver for single-threaded runtime
 @cfg(runtime = "single_thread")

@@ -21,14 +21,14 @@ public fn from_int(n: Int64) -> Element { EJsonInt(n) }
 public fn from_text(t: Text) -> Element { EJsonText(t) }
 public fn from_null() -> Element { EJsonNull }
 
-public type State is {
+public type JsonArrAggState is {
     elements: Int,        // count of accepted elements
     saw_blob: Bool,       // sticky error flag
 };
 
-public fn empty_state() -> State { State { elements: 0, saw_blob: false } }
+public fn empty_state() -> JsonArrAggState { JsonArrAggState { elements: 0, saw_blob: false } }
 
-public fn step(mut s: State, e: &Element) -> State {
+public fn step(mut s: JsonArrAggState, e: &Element) -> JsonArrAggState {
     match e {
         EJsonBlobError => { s.saw_blob = true; },
         _ => { s.elements = s.elements + 1; },
@@ -41,7 +41,7 @@ public type JsonGroupArrayResult is
     | RJsonError           // SQLITE_ERROR — BLOB encountered
     ;
 
-public fn finalize(s: &State) -> JsonGroupArrayResult {
+public fn finalize(s: &JsonArrAggState) -> JsonGroupArrayResult {
     if s.saw_blob { return RJsonError; }
     RJsonArray(s.elements)
 }

@@ -537,9 +537,9 @@ public const SEEK_SET: Int = 0;  // From beginning
 public const SEEK_CUR: Int = 1;  // From current position
 public const SEEK_END: Int = 2;  // From end
 
-/// Stat structure for fstat/stat.
+/// LinuxStat structure for fstat/stat.
 @repr(C)
-public type Stat is {
+public type LinuxStat is {
     st_dev: UInt64,
     st_ino: UInt64,
     st_nlink: UInt64,
@@ -612,7 +612,7 @@ public fn lseek(fd: FileDesc, offset: Int, whence: Int) -> Result<Int, OSError> 
 }
 
 /// Get file status.
-public fn fstat(fd: FileDesc, stat: &mut Stat) -> Result<(), OSError> {
+public fn fstat(fd: FileDesc, stat: &mut LinuxStat) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(SYS_FSTAT, fd.as_raw(), stat as Int, 0, 0, 0, 0)
     };
@@ -625,7 +625,7 @@ public fn fstat(fd: FileDesc, stat: &mut Stat) -> Result<(), OSError> {
 }
 
 /// Get file status by path.
-public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
+public fn stat(path: &[Byte], stat_buf: &mut LinuxStat) -> Result<(), OSError> {
     // Ensure null-terminated path
     let mut path_buf = [0_u8; 4096];
     let len = path.len().min(4095);
@@ -644,7 +644,7 @@ public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
 }
 
 /// Get symbolic link status (doesn't follow symlinks).
-public fn lstat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
+public fn lstat(path: &[Byte], stat_buf: &mut LinuxStat) -> Result<(), OSError> {
     // Ensure null-terminated path
     let mut path_buf = [0_u8; 4096];
     let len = path.len().min(4095);

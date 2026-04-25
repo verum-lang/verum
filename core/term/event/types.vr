@@ -1,7 +1,7 @@
 // =============================================================================
-// event/types.vr - Event Types
+// event/types.vr - TermEvent Types
 // =============================================================================
-// Layer: 1 (Event System)
+// Layer: 1 (TermEvent System)
 // Dependencies: keys.vr
 // =============================================================================
 //
@@ -16,11 +16,11 @@ module types;
 mount super.keys.{KeyCode, Modifiers};
 
 // =============================================================================
-// Event — top-level sum type
+// TermEvent — top-level sum type
 // =============================================================================
 
 /// Top-level terminal event. Exhaustive sum type covering all input.
-public type Event is
+public type TermEvent is
     | Key(KeyEvent)
     | Mouse(MouseEvent)
     | Resize(ResizeEvent)
@@ -127,14 +127,14 @@ implement ResizeEvent {
 }
 
 // =============================================================================
-// Event helpers
+// TermEvent helpers
 // =============================================================================
 
-implement Event {
+implement TermEvent {
     /// Check if this is a key event.
     public fn is_key(&self) -> Bool {
         match self {
-            Event.Key(_) => true,
+            TermEvent.Key(_) => true,
             _ => false,
         }
     }
@@ -142,7 +142,7 @@ implement Event {
     /// Check if this is a mouse event.
     public fn is_mouse(&self) -> Bool {
         match self {
-            Event.Mouse(_) => true,
+            TermEvent.Mouse(_) => true,
             _ => false,
         }
     }
@@ -150,7 +150,7 @@ implement Event {
     /// Check if this is a resize event.
     public fn is_resize(&self) -> Bool {
         match self {
-            Event.Resize(_) => true,
+            TermEvent.Resize(_) => true,
             _ => false,
         }
     }
@@ -158,7 +158,7 @@ implement Event {
     /// Extract the key event, if this is a Key variant.
     public fn as_key(&self) -> Maybe<KeyEvent> {
         match self {
-            Event.Key(ke) => Some(ke),
+            TermEvent.Key(ke) => Some(ke),
             _ => None,
         }
     }
@@ -166,7 +166,7 @@ implement Event {
     /// Extract the mouse event, if this is a Mouse variant.
     public fn as_mouse(&self) -> Maybe<MouseEvent> {
         match self {
-            Event.Mouse(me) => Some(me),
+            TermEvent.Mouse(me) => Some(me),
             _ => None,
         }
     }

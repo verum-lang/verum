@@ -129,24 +129,24 @@ implement Certificate {
     /// <base64 data>
     /// -----END CERTIFICATE-----
     /// ```
-    public fn from_pem(pem: &Text) -> Result<Certificate, TlsError> {
+    public fn from_pem(pem: &Text) -> Result<Certificate, LegacyTlsError> {
         let start_marker = "-----BEGIN CERTIFICATE-----";
         let end_marker = "-----END CERTIFICATE-----";
 
         let start = pem.find(start_marker)
-            .ok_or(TlsError.InvalidCertificate("missing BEGIN CERTIFICATE marker"))?;
+            .ok_or(LegacyTlsError.InvalidCertificate("missing BEGIN CERTIFICATE marker"))?;
         let end = pem.find(end_marker)
-            .ok_or(TlsError.InvalidCertificate("missing END CERTIFICATE marker"))?;
+            .ok_or(LegacyTlsError.InvalidCertificate("missing END CERTIFICATE marker"))?;
 
         let base64_data = pem.slice(start + start_marker.len(), end).trim();
         let der_bytes = base64_decode(base64_data)
-            .map_err(|e| TlsError.InvalidCertificate(f"invalid base64: {e}"))?;
+            .map_err(|e| LegacyTlsError.InvalidCertificate(f"invalid base64: {e}"))?;
 
         Ok(Certificate { der_data: der_bytes })
     }
 
     /// Parse multiple PEM-encoded certificates from a single string.
-    public fn from_pem_chain(pem: &Text) -> Result<List<Certificate>, TlsError> {
+    public fn from_pem_chain(pem: &Text) -> Result<List<Certificate>, LegacyTlsError> {
         let mut certs = List.new();
         let marker = "-----BEGIN CERTIFICATE-----";
         let mut search_start = 0;
@@ -155,14 +155,14 @@ implement Certificate {
             let abs_pos = search_start + pos;
             let end_marker = "-----END CERTIFICATE-----";
             let end_pos = pem.slice(abs_pos, pem.len()).find(end_marker)
-                .ok_or(TlsError.InvalidCertificate("unterminated PEM block"))?;
+                .ok_or(LegacyTlsError.InvalidCertificate("unterminated PEM block"))?;
             let block = pem.slice(abs_pos, abs_pos + end_pos + end_marker.len());
             certs.push(Certificate.from_pem(&block)?);
             search_start = abs_pos + end_pos + end_marker.len();
         }
 
         if certs.is_empty() {
-            return Err(TlsError.InvalidCertificate("no certificates found in PEM data"));
+            return Err(LegacyTlsError.InvalidCertificate("no certificates found in PEM data"));
         }
 
         Ok(certs)
@@ -244,7 +244,7 @@ implement PrivateKey {
     }
 
     /// Parse a PEM-encoded private key.
-    public fn from_pem(pem: &Text) -> Result<PrivateKey, TlsError> {
+    public fn from_pem(pem: &Text) -> Result<PrivateKey, LegacyTlsError> {
         let key_type = if pem.contains("RSA PRIVATE KEY") {
             KeyType.Rsa
         } else if pem.contains("EC PRIVATE KEY") {
@@ -253,7 +253,7 @@ implement PrivateKey {
             // PKCS#8 - could be any type, default to RSA
             KeyType.Rsa
         } else {
-            return Err(TlsError.InvalidKey("unrecognized PEM key format"));
+            return Err(LegacyTlsError.InvalidKey("unrecognized PEM key format"));
         };
 
         // Extract base64 data between markers
@@ -262,7 +262,7 @@ implement PrivateKey {
             .collect();
         let base64_data = lines.join("");
         let der_bytes = base64_decode(&base64_data)
-            .map_err(|e| TlsError.InvalidKey(f"invalid base64: {e}"))?;
+            .map_err(|e| LegacyTlsError.InvalidKey(f"invalid base64: {e}"))?;
 
         Ok(PrivateKey { der_data: der_bytes, key_type: key_type })
     }
@@ -570,7 +570,7 @@ implement TlsStream {
         tcp: TcpStream,
         server_name: &Text,
         config: &TlsConfig,
-    ) -> Result<TlsStream, TlsError> {
+    ) -> Result<TlsStream, LegacyTlsError> {
         // Platform-specific TLS handshake
         let session = @intrinsic("verum.tls.client_handshake",
             &tcp, server_name, config);
@@ -590,9 +590,9 @@ implement TlsStream {
     public async fn accept(
         tcp: TcpStream,
         config: &TlsConfig,
-    ) -> Result<TlsStream, TlsError> {
+    ) -> Result<TlsStream, LegacyTlsError> {
         if config.identity_cert.is_none() || config.identity_key.is_none() {
-            return Err(TlsError.HandshakeFailed("server requires identity certificate and key"));
+            return Err(LegacyTlsError.HandshakeFailed("server requires identity certificate and key"));
         }
 
         let session = @intrinsic("verum.tls.server_handshake",
@@ -610,22 +610,22 @@ implement TlsStream {
     }
 
     /// Read decrypted data from the TLS stream.
-    public async fn read(&self, buf: &mut List<Byte>) -> Result<Int, TlsError> {
+    public async fn read(&self, buf: &mut List<Byte>) -> Result<Int, LegacyTlsError> {
         @intrinsic("verum.tls.read", &self.session, buf)
     }
 
     /// Write data to the TLS stream (encrypts before sending).
-    public async fn write(&self, data: &[Byte]) -> Result<Int, TlsError> {
+    public async fn write(&self, data: &[Byte]) -> Result<Int, LegacyTlsError> {
         @intrinsic("verum.tls.write", &self.session, data)
     }
 
     /// Write all data to the TLS stream.
-    public async fn write_all(&self, data: &[Byte]) -> Result<(), TlsError> {
+    public async fn write_all(&self, data: &[Byte]) -> Result<(), LegacyTlsError> {
         let mut written = 0;
         while written < data.len() {
             let n = self.write(&data[written..]).await?;
             if n == 0 {
-                return Err(TlsError.IoError("write returned 0 bytes"));
+                return Err(LegacyTlsError.IoError("write returned 0 bytes"));
             }
             written = written + n;
         }
@@ -636,7 +636,7 @@ implement TlsStream {
     ///
     /// Sends a close_notify alert to the peer and waits for their
     /// close_notify in response.
-    public async fn shutdown(&self) -> Result<(), TlsError> {
+    public async fn shutdown(&self) -> Result<(), LegacyTlsError> {
         @intrinsic("verum.tls.shutdown", &self.session)
     }
 
@@ -675,7 +675,7 @@ implement TlsStream {
         label: &Text,
         context: Maybe<&[Byte]>,
         length: Int,
-    ) -> Result<List<Byte>, TlsError> {
+    ) -> Result<List<Byte>, LegacyTlsError> {
         @intrinsic("verum.tls.export_keying_material",
             &self.session, label, context, length)
     }
@@ -689,7 +689,7 @@ implement TlsStream {
     /// keys to the kernel so `sendfile(2)` zero-copies through NIC crypto
     /// hardware. Requires Linux ≥ 6.0 + OpenSSL ≥ 3.2 / rustls ktls-feature
     /// backend. Returns Err(Unsupported) if backend doesn't expose keys.
-    public fn enable_ktls(&mut self) -> Result<(), TlsError> {
+    public fn enable_ktls(&mut self) -> Result<(), LegacyTlsError> {
         @intrinsic("verum.tls.enable_ktls", &self.session, self.inner.fd)
     }
 }
@@ -837,10 +837,10 @@ implement TlsConnector {
     }
 
     /// Connect to a TLS server.
-    public async fn connect(&self, host: &Text, port: Int) -> Result<TlsStream, TlsError> {
+    public async fn connect(&self, host: &Text, port: Int) -> Result<TlsStream, LegacyTlsError> {
         let addr = f"{host}:{port}";
         let tcp = TcpStream.connect(&addr).await
-            .map_err(|e| TlsError.IoError(f"TCP connect failed: {e}"))?;
+            .map_err(|e| LegacyTlsError.IoError(f"TCP connect failed: {e}"))?;
         TlsStream.connect(tcp, host, &self.config).await
     }
 }
@@ -899,7 +899,7 @@ implement TlsAcceptor {
     }
 
     /// Accept a TLS connection.
-    public async fn accept(&self, tcp: TcpStream) -> Result<TlsStream, TlsError> {
+    public async fn accept(&self, tcp: TcpStream) -> Result<TlsStream, LegacyTlsError> {
         TlsStream.accept(tcp, &self.config).await
     }
 }
@@ -923,7 +923,7 @@ implement Debug for TlsAcceptor {
 // =============================================================================
 
 /// Errors that can occur during TLS operations.
-public type TlsError is
+public type LegacyTlsError is
     /// TLS handshake failed.
     | HandshakeFailed(Text)
     /// Certificate is invalid or could not be parsed.
@@ -945,24 +945,24 @@ public type TlsError is
     /// No shared cipher suites.
     | NoCipherSuites;
 
-implement Debug for TlsError {
+implement Debug for LegacyTlsError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            HandshakeFailed(msg) => f.write_str(f"TlsError.HandshakeFailed({msg})"),
-            InvalidCertificate(msg) => f.write_str(f"TlsError.InvalidCertificate({msg})"),
-            InvalidKey(msg) => f.write_str(f"TlsError.InvalidKey({msg})"),
-            CertificateVerificationFailed(msg) => f.write_str(f"TlsError.CertificateVerificationFailed({msg})"),
-            CertificateExpired => f.write_str("TlsError.CertificateExpired"),
-            HostnameMismatch(name) => f.write_str(f"TlsError.HostnameMismatch({name})"),
-            AlertReceived(code, msg) => f.write_str(f"TlsError.AlertReceived({code}, {msg})"),
-            IoError(msg) => f.write_str(f"TlsError.IoError({msg})"),
-            UnsupportedVersion(v) => f.write_str(f"TlsError.UnsupportedVersion({v})"),
-            NoCipherSuites => f.write_str("TlsError.NoCipherSuites"),
+            HandshakeFailed(msg) => f.write_str(f"LegacyTlsError.HandshakeFailed({msg})"),
+            InvalidCertificate(msg) => f.write_str(f"LegacyTlsError.InvalidCertificate({msg})"),
+            InvalidKey(msg) => f.write_str(f"LegacyTlsError.InvalidKey({msg})"),
+            CertificateVerificationFailed(msg) => f.write_str(f"LegacyTlsError.CertificateVerificationFailed({msg})"),
+            CertificateExpired => f.write_str("LegacyTlsError.CertificateExpired"),
+            HostnameMismatch(name) => f.write_str(f"LegacyTlsError.HostnameMismatch({name})"),
+            AlertReceived(code, msg) => f.write_str(f"LegacyTlsError.AlertReceived({code}, {msg})"),
+            IoError(msg) => f.write_str(f"LegacyTlsError.IoError({msg})"),
+            UnsupportedVersion(v) => f.write_str(f"LegacyTlsError.UnsupportedVersion({v})"),
+            NoCipherSuites => f.write_str("LegacyTlsError.NoCipherSuites"),
         }
     }
 }
 
-implement Display for TlsError {
+implement Display for LegacyTlsError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             HandshakeFailed(msg) => f.write_str(f"TLS handshake failed: {msg}"),
@@ -979,7 +979,7 @@ implement Display for TlsError {
     }
 }
 
-implement Describable for TlsError {
+implement Describable for LegacyTlsError {
     fn description(&self) -> Text {
         match self {
             HandshakeFailed(msg) => f"TLS handshake failed: {msg}",

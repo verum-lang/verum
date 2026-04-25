@@ -32,9 +32,9 @@ module sys.mmio;
 /// ```verum
 /// // Define a peripheral register block
 /// type UartRegisters is RegisterBlock<0x4001_0000> {
-///     data: Register<UInt8, ReadWrite>,
-///     status: Register<UInt8, ReadOnly>,
-///     control: Register<UInt8, ReadWrite>,
+///     data: MmioRegister<UInt8, ReadWrite>,
+///     status: MmioRegister<UInt8, ReadOnly>,
+///     control: MmioRegister<UInt8, ReadWrite>,
 /// };
 ///
 /// // Access registers
@@ -49,12 +49,12 @@ module sys.mmio;
 // ACCESS MODE TYPES
 // =============================================================================
 
-/// Register access mode - determines allowed operations.
+/// MmioRegister access mode - determines allowed operations.
 ///
 /// Access modes are phantom types (unit types) used as compile-time
 /// type parameters to enforce correct usage patterns at the type level.
 /// Each mode is a distinct type, enabling the type system to select
-/// the correct implement block for each Register specialization.
+/// the correct implement block for each MmioRegister specialization.
 
 /// Can only read (e.g., status registers).
 public type ReadOnly is ();
@@ -177,7 +177,7 @@ public fn isb();
 /// - `T`: The data type of the register (must be Copy)
 /// - `MODE`: Access mode (ReadOnly, WriteOnly, ReadWrite, etc.)
 @repr(transparent)
-public type Register<T: Copy, MODE> is {
+public type MmioRegister<T: Copy, MODE> is {
     addr: *volatile mut T
 };
 
@@ -185,11 +185,11 @@ public type Register<T: Copy, MODE> is {
 ///
 /// This is a compile-time operation that creates a register wrapper
 /// for a known hardware address.
-implement<T: Copy, MODE> Register<T, MODE> {
+implement<T: Copy, MODE> MmioRegister<T, MODE> {
     /// Create register at compile-time known address.
     @const
-    public fn at(addr: USize) -> Register<T, MODE> {
-        Register { addr: addr as *volatile mut T }
+    public fn at(addr: USize) -> MmioRegister<T, MODE> {
+        MmioRegister { addr: addr as *volatile mut T }
     }
 
     /// Get the raw address of this register.
@@ -204,7 +204,7 @@ implement<T: Copy, MODE> Register<T, MODE> {
 // =============================================================================
 
 /// Read operations for ReadOnly registers.
-implement<T: Copy> Register<T, ReadOnly> {
+implement<T: Copy> MmioRegister<T, ReadOnly> {
     /// Read the register value.
     @inline(always)
     public fn read(&self) -> T {
@@ -213,7 +213,7 @@ implement<T: Copy> Register<T, ReadOnly> {
 }
 
 /// Read operations for ReadWrite registers.
-implement<T: Copy> Register<T, ReadWrite> {
+implement<T: Copy> MmioRegister<T, ReadWrite> {
     /// Read the register value.
     @inline(always)
     public fn read(&self) -> T {
@@ -222,7 +222,7 @@ implement<T: Copy> Register<T, ReadWrite> {
 }
 
 /// Read operations for WriteOneToClear registers.
-implement<T: Copy> Register<T, WriteOneToClear> {
+implement<T: Copy> MmioRegister<T, WriteOneToClear> {
     /// Read the register value.
     @inline(always)
     public fn read(&self) -> T {
@@ -231,7 +231,7 @@ implement<T: Copy> Register<T, WriteOneToClear> {
 }
 
 /// Read operations for WriteOneToSet registers.
-implement<T: Copy> Register<T, WriteOneToSet> {
+implement<T: Copy> MmioRegister<T, WriteOneToSet> {
     /// Read the register value.
     @inline(always)
     public fn read(&self) -> T {
@@ -244,7 +244,7 @@ implement<T: Copy> Register<T, WriteOneToSet> {
 // =============================================================================
 
 /// Write operations for WriteOnly registers.
-implement<T: Copy> Register<T, WriteOnly> {
+implement<T: Copy> MmioRegister<T, WriteOnly> {
     /// Write a value to the register.
     @inline(always)
     public fn write(&self, value: T) {
@@ -253,7 +253,7 @@ implement<T: Copy> Register<T, WriteOnly> {
 }
 
 /// Write operations for ReadWrite registers.
-implement<T: Copy> Register<T, ReadWrite> {
+implement<T: Copy> MmioRegister<T, ReadWrite> {
     /// Write a value to the register.
     @inline(always)
     public fn write(&self, value: T) {
@@ -281,7 +281,7 @@ implement<T: Copy> Register<T, ReadWrite> {
 // =============================================================================
 
 /// Bit manipulation for ReadWrite UInt32 registers.
-implement Register<UInt32, ReadWrite> {
+implement MmioRegister<UInt32, ReadWrite> {
     /// Set bits using a mask (read-modify-write).
     @inline(always)
     public fn set_bits(&self, mask: UInt32) {
@@ -317,7 +317,7 @@ implement Register<UInt32, ReadWrite> {
 }
 
 /// Write-one-to-clear operations (e.g., interrupt status).
-implement Register<UInt32, WriteOneToClear> {
+implement MmioRegister<UInt32, WriteOneToClear> {
     /// Clear specific bits by writing 1s.
     @inline(always)
     public fn clear(&self, bits: UInt32) {
@@ -332,7 +332,7 @@ implement Register<UInt32, WriteOneToClear> {
 }
 
 /// Write-one-to-set operations (e.g., interrupt enable).
-implement Register<UInt32, WriteOneToSet> {
+implement MmioRegister<UInt32, WriteOneToSet> {
     /// Set specific bits by writing 1s.
     @inline(always)
     public fn set(&self, bits: UInt32) {
@@ -361,9 +361,9 @@ public type RegisterBlock is protocol {
 /// ```verum
 /// @register_block(0x4001_0000)
 /// type UartRegisters is {
-///     @offset(0x00) data: Register<UInt8, ReadWrite>,
-///     @offset(0x04) status: Register<UInt8, ReadOnly>,
-///     @offset(0x08) control: Register<UInt8, ReadWrite>,
+///     @offset(0x00) data: MmioRegister<UInt8, ReadWrite>,
+///     @offset(0x04) status: MmioRegister<UInt8, ReadOnly>,
+///     @offset(0x08) control: MmioRegister<UInt8, ReadWrite>,
 /// };
 /// ```
 ///
@@ -428,7 +428,7 @@ implement MemoryRegion {
 /// Use @verify(formal) to enable SMT verification of register protocols.
 @verify(formal)
 public type VerifiedRegister<T: Copy, MODE> is {
-    reg: Register<T, MODE>,
+    reg: MmioRegister<T, MODE>,
 
     /// Ghost state: last value written (for WriteOnly verification)
     @ghost last_write: Maybe<T>,

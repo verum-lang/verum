@@ -108,7 +108,7 @@ public type FaultKind is
     | FkAppendFail
     | FkOpenFail;
 
-public type Fault is {
+public type DstTestingFault is {
     at_op_index: Int,             // which I/O op number triggers
     kind: FaultKind,
 };
@@ -128,11 +128,11 @@ implement FaultInjector for NoFaults {
 }
 
 public type ScriptedFaults is {
-    schedule: List<Fault>,
+    schedule: List<DstTestingFault>,
     cursor: Int,
 };
 
-public fn scripted_faults(schedule: List<Fault>) -> ScriptedFaults {
+public fn scripted_faults(schedule: List<DstTestingFault>) -> ScriptedFaults {
     ScriptedFaults { schedule: schedule, cursor: 0 }
 }
 

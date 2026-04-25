@@ -49,7 +49,7 @@ mount core.collections.List;
 
 public type SendState is Ready | Send | DataSent | DataRecvd | ResetSent | ResetRecvd;
 
-public type SendError is
+public type QuicSendError is
       AlreadyReset
     | AlreadyFinished
     | FinalSizeViolation
@@ -101,10 +101,10 @@ implement SendStream {
     /// Append app data. Fails if the stream is already in a terminal
     /// state, if FIN has been set, or if the connection-level FC limit
     /// would be exceeded (caller passes the remaining connection budget).
-    public fn write(&mut self, data: &[Byte], conn_fc_budget: UInt64) -> Result<Int, SendError> {
+    public fn write(&mut self, data: &[Byte], conn_fc_budget: UInt64) -> Result<Int, QuicSendError> {
         match self.state {
-            SendState.ResetSent | SendState.ResetRecvd => return Err(SendError.AlreadyReset),
-            SendState.DataSent | SendState.DataRecvd    => return Err(SendError.AlreadyFinished),
+            SendState.ResetSent | SendState.ResetRecvd => return Err(QuicSendError.AlreadyReset),
+            SendState.DataSent | SendState.DataRecvd    => return Err(QuicSendError.AlreadyFinished),
             _ => {},
         }
         // Accept bytes up to the min of stream and connection FC budget.
@@ -134,10 +134,10 @@ implement SendStream {
     /// Schedule the FIN bit — any already-buffered data will carry it on
     /// the final STREAM frame. Transitions Send/Ready → DataSent once
     /// the last byte is emitted.
-    public fn close(&mut self) -> Result<(), SendError> {
+    public fn close(&mut self) -> Result<(), QuicSendError> {
         match self.state {
-            SendState.ResetSent | SendState.ResetRecvd => Err(SendError.AlreadyReset),
-            SendState.DataSent | SendState.DataRecvd    => Err(SendError.AlreadyFinished),
+            SendState.ResetSent | SendState.ResetRecvd => Err(QuicSendError.AlreadyReset),
+            SendState.DataSent | SendState.DataRecvd    => Err(QuicSendError.AlreadyFinished),
             _ => {
                 self.final_size = Some(self.next_write_off);
                 Ok(())
@@ -148,10 +148,10 @@ implement SendStream {
     /// Abort the stream. Emits a RESET_STREAM frame (caller handles).
     /// Transitions to ResetSent; the wire RESET carries `error_code`
     /// and `final_size = next_write_off`.
-    public fn reset(&mut self, error_code: UInt64) -> Result<UInt64, SendError> {
+    public fn reset(&mut self, error_code: UInt64) -> Result<UInt64, QuicSendError> {
         match self.state {
-            SendState.ResetSent | SendState.ResetRecvd => return Err(SendError.AlreadyReset),
-            SendState.DataRecvd                         => return Err(SendError.AlreadyFinished),
+            SendState.ResetSent | SendState.ResetRecvd => return Err(QuicSendError.AlreadyReset),
+            SendState.DataRecvd                         => return Err(QuicSendError.AlreadyFinished),
             _ => {},
         }
         self.state = SendState.ResetSent;

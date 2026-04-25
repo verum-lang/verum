@@ -63,31 +63,7 @@ const ROOT: &str = "core";
 /// triplet).  Update every site that imports the old name. Then drop
 /// the entry from this baseline and run the test to confirm the
 /// duplicate is gone.
-const BASELINE_DUPLICATES: &[&str] = &[
-    "Duration",
-    "Event",
-    "ExceptionFrame",
-    "Fault",
-    "Frame",
-    "Instant",
-    "PageHeader",
-    "ParseError", "ParseState",
-    "PlatformIOEngine",
-    "RecoveryError",
-    "Register", "Request",
-    "SendError",
-    "SetOutcome",
-    "Signal",
-    "SpinLock", "Split", "StackAllocator",
-    "Stat", "State", "StaticEntry",
-    "StepResult",
-    "SupervisionStrategy",
-    "Timeout",
-    "TlsError",
-    "TxnState",
-    "Value",
-    "YieldNow",
-];
+const BASELINE_DUPLICATES: &[&str] = &[];
 
 #[test]
 fn stdlib_public_type_names_ratchet() {

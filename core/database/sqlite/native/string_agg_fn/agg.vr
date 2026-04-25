@@ -9,15 +9,15 @@ module core.database.sqlite.native.string_agg_fn.agg;
 
 mount base.{Bool, Text, Maybe};
 
-public type State is {
+public type StringAggState is {
     have_value: Bool,
     out: Text,
     sep: Text,
     has_sep: Bool,
 };
 
-public fn empty() -> State {
-    State { have_value: false, out: Text.new(), sep: Text.new(), has_sep: false }
+public fn empty() -> StringAggState {
+    StringAggState { have_value: false, out: Text.new(), sep: Text.new(), has_sep: false }
 }
 
 public type StringAggOperand is
@@ -25,7 +25,7 @@ public type StringAggOperand is
     | OpText(Text)
     ;
 
-public fn step(mut s: State, value: &StringAggOperand, sep: &StringAggOperand) -> State {
+public fn step(mut s: StringAggState, value: &StringAggOperand, sep: &StringAggOperand) -> StringAggState {
     // NULL value skipped entirely.
     let v = match value {
         OpNull    => return s,
@@ -52,7 +52,7 @@ public type AggResult is
     | RText(Text)
     ;
 
-public fn finalize(s: &State) -> AggResult {
+public fn finalize(s: &StringAggState) -> AggResult {
     if !s.have_value { return RNull; }
     RText(s.out.clone())
 }
@@ -68,5 +68,5 @@ public fn result_text(r: &AggResult) -> Text {
     }
 }
 
-public fn has_any_row(s: &State) -> Bool { s.have_value }
+public fn has_any_row(s: &StringAggState) -> Bool { s.have_value }
 

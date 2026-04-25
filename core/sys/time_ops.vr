@@ -15,45 +15,45 @@ module sys.time_ops;
 mount super.raw.*;
 
 /// A monotonic timestamp (nanoseconds since some fixed point).
-public type Instant is {
+public type SysTimeOpsInstant is {
     nanos: Int,
 };
 
 /// A duration in nanoseconds.
-public type Duration is {
+public type SysTimeOpsDuration is {
     nanos: Int,
 };
 
-implement Instant {
+implement SysTimeOpsInstant {
     /// Get current monotonic time.
-    public fn now() -> Instant {
-        Instant { nanos: __time_monotonic_nanos_raw() }
+    public fn now() -> SysTimeOpsInstant {
+        SysTimeOpsInstant { nanos: __time_monotonic_nanos_raw() }
     }
 
     /// Elapsed time since this instant.
-    public fn elapsed(&self) -> Duration {
+    public fn elapsed(&self) -> SysTimeOpsDuration {
         let now = __time_monotonic_nanos_raw();
-        Duration { nanos: now - self.nanos }
+        SysTimeOpsDuration { nanos: now - self.nanos }
     }
 
-    /// Duration since another instant.
-    public fn duration_since(&self, earlier: Instant) -> Duration {
-        Duration { nanos: self.nanos - earlier.nanos }
+    /// SysTimeOpsDuration since another instant.
+    public fn duration_since(&self, earlier: SysTimeOpsInstant) -> SysTimeOpsDuration {
+        SysTimeOpsDuration { nanos: self.nanos - earlier.nanos }
     }
 }
 
-implement Duration {
+implement SysTimeOpsDuration {
     /// Create duration from nanoseconds.
-    public fn from_nanos(ns: Int) -> Duration { Duration { nanos: ns } }
+    public fn from_nanos(ns: Int) -> SysTimeOpsDuration { SysTimeOpsDuration { nanos: ns } }
 
     /// Create duration from microseconds.
-    public fn from_micros(us: Int) -> Duration { Duration { nanos: us * 1000 } }
+    public fn from_micros(us: Int) -> SysTimeOpsDuration { SysTimeOpsDuration { nanos: us * 1000 } }
 
     /// Create duration from milliseconds.
-    public fn from_millis(ms: Int) -> Duration { Duration { nanos: ms * 1000000 } }
+    public fn from_millis(ms: Int) -> SysTimeOpsDuration { SysTimeOpsDuration { nanos: ms * 1000000 } }
 
     /// Create duration from seconds.
-    public fn from_secs(s: Int) -> Duration { Duration { nanos: s * 1000000000 } }
+    public fn from_secs(s: Int) -> SysTimeOpsDuration { SysTimeOpsDuration { nanos: s * 1000000000 } }
 
     /// Get as milliseconds.
     public fn as_millis(&self) -> Int { self.nanos / 1000000 }
@@ -68,11 +68,11 @@ implement Duration {
     public fn as_secs(&self) -> Int { self.nanos / 1000000000 }
 
     /// Zero duration.
-    public fn zero() -> Duration { Duration { nanos: 0 } }
+    public fn zero() -> SysTimeOpsDuration { SysTimeOpsDuration { nanos: 0 } }
 }
 
 /// Sleep for a specified duration.
-public fn sleep(d: Duration) {
+public fn sleep(d: SysTimeOpsDuration) {
     __time_sleep_nanos_raw(d.nanos);
 }
 

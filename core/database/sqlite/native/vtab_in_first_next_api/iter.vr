@@ -41,29 +41,29 @@ public fn returned_row(o: &VtabInFirstNextOutcome) -> Bool {
 
 // Step result combines new position + outcome.  Use a record (tuple returns
 // remain unsupported in Verum).
-public type StepResult is { pos: VtabInPosition, outcome: VtabInFirstNextOutcome };
+public type VtabInFirstStepResult is { pos: VtabInPosition, outcome: VtabInFirstNextOutcome };
 
-public fn first_call(values: &List<Int64>, is_in_constraint: Bool) -> StepResult {
+public fn first_call(values: &List<Int64>, is_in_constraint: Bool) -> VtabInFirstStepResult {
     if !is_in_constraint {
-        return StepResult { pos: PFresh, outcome: OkErrNotInList };
+        return VtabInFirstStepResult { pos: PFresh, outcome: OkErrNotInList };
     }
     if (values.len() as Int) == 0 {
-        return StepResult { pos: PExhausted, outcome: OkDone };
+        return VtabInFirstStepResult { pos: PExhausted, outcome: OkDone };
     }
-    StepResult { pos: PAtRow(0), outcome: OkRow }
+    VtabInFirstStepResult { pos: PAtRow(0), outcome: OkRow }
 }
 
-public fn next_call(p: &VtabInPosition, values: &List<Int64>) -> StepResult {
+public fn next_call(p: &VtabInPosition, values: &List<Int64>) -> VtabInFirstStepResult {
     let n = values.len() as Int;
     match p {
-        PFresh        => StepResult { pos: PFresh,      outcome: OkErrNotInList },
-        PExhausted    => StepResult { pos: PExhausted,  outcome: OkDone },
+        PFresh        => VtabInFirstStepResult { pos: PFresh,      outcome: OkErrNotInList },
+        PExhausted    => VtabInFirstStepResult { pos: PExhausted,  outcome: OkDone },
         PAtRow(i)     => {
             let next_idx = i.clone() + 1;
             if next_idx >= n {
-                StepResult { pos: PExhausted, outcome: OkDone }
+                VtabInFirstStepResult { pos: PExhausted, outcome: OkDone }
             } else {
-                StepResult { pos: PAtRow(next_idx), outcome: OkRow }
+                VtabInFirstStepResult { pos: PAtRow(next_idx), outcome: OkRow }
             }
         },
     }

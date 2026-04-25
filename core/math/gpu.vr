@@ -30,7 +30,7 @@
 // ├─────────────────────────────────────────────────────────────────────────┤
 // │  LaunchConfig: grid, block, shared memory                               │
 // │  Stream: async execution context                                        │
-// │  Event: timing and synchronization                                      │
+// │  GpuEvent: timing and synchronization                                      │
 // └─────────────────────────────────────────────────────────────────────────┘
 // ```
 //
@@ -1221,7 +1221,7 @@ implement Stream {
     }
 
     // Wait for event on this stream
-    public fn wait_event(&self, event: &Event) {
+    public fn wait_event(&self, event: &GpuEvent) {
         @vbc(GPU_STREAM_WAIT_EVENT, self.handle, event.handle)
     }
 }
@@ -1249,30 +1249,30 @@ public fn all_device_synchronize() {
 }
 
 // =============================================================================
-// Event Handle
+// GpuEvent Handle
 // =============================================================================
 
 // Opaque event handle
 public type EventHandle is (U64);
 
 // =============================================================================
-// GPU Event
+// GPU GpuEvent
 // =============================================================================
 
 // GPU event for timing and synchronization
-public type Event is {
+public type GpuEvent is {
     handle: EventHandle,
 };
 
-implement Event {
+implement GpuEvent {
     // Create new event
     public fn new() -> Self {
-        Event { handle: @vbc(GPU_EVENT_CREATE) }
+        GpuEvent { handle: @vbc(GPU_EVENT_CREATE) }
     }
 
     // Create event with timing disabled (lower overhead)
     public fn new_no_timing() -> Self {
-        Event { handle: @vbc(GPU_EVENT_CREATE_F, 0x02) }  // cudaEventDisableTiming
+        GpuEvent { handle: @vbc(GPU_EVENT_CREATE_F, 0x02) }  // cudaEventDisableTiming
     }
 
     // Record event on stream
@@ -1291,12 +1291,12 @@ implement Event {
     }
 
     // Elapsed time between two events in milliseconds
-    public fn elapsed_ms(start: &Event, end: &Event) -> Float {
+    public fn elapsed_ms(start: &GpuEvent, end: &GpuEvent) -> Float {
         @vbc(GPU_EVENT_ELAPSED, start.handle, end.handle)
     }
 }
 
-implement Drop for Event {
+implement Drop for GpuEvent {
     fn drop(&mut self) {
         @vbc(GPU_EVENT_DESTROY, self.handle)
     }
@@ -1338,15 +1338,15 @@ public fn launch_cooperative<K: GPUKernel>(config: LaunchConfig, kernel: K, args
 // Profile a GPU operation and return result with elapsed time
 public fn profile<T>(name: &Text, f: fn() -> T) -> (T, Float) {
     let stream = Stream.new();
-    let start = Event.new();
-    let end = Event.new();
+    let start = GpuEvent.new();
+    let end = GpuEvent.new();
 
     start.record(&stream);
     let result = f();
     end.record(&stream);
     stream.sync();
 
-    let elapsed = Event.elapsed_ms(&start, &end);
+    let elapsed = GpuEvent.elapsed_ms(&start, &end);
     (result, elapsed)
 }
 

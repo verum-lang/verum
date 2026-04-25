@@ -56,7 +56,7 @@ public const GUARD_PAGE_SIZE: Int = 4096;
 // =============================================================================
 
 /// TLS operation error
-public type TlsError is
+public type WindowsTlsError is
     | NotInitialized
     | AlreadyInitialized
     | AllocationFailed { code: UInt32, size: USize }
@@ -67,7 +67,7 @@ public type TlsError is
     | TlsIndexExhausted
     ;
 
-implement TlsError {
+implement WindowsTlsError {
     public fn message(&self) -> Text {
         match self {
             NotInitialized => "TLS not initialized for this thread",
@@ -148,7 +148,7 @@ static mut TLS_INDEX_INITIALIZED: Bool = false;
 // =============================================================================
 
 /// Initialize the global TLS index (call once per process)
-public fn init_tls_index() -> Result<(), TlsError> {
+public fn init_tls_index() -> Result<(), WindowsTlsError> {
     unsafe {
         if TLS_INDEX_INITIALIZED {
             return Ok(());
@@ -168,7 +168,7 @@ public fn init_tls_index() -> Result<(), TlsError> {
 /// Initialize TLS for the main thread.
 ///
 /// Must be called once at program startup before any context operations.
-public fn init_main_thread_tls() -> Result<&mut WindowsThreadControlBlock, TlsError> {
+public fn init_main_thread_tls() -> Result<&mut WindowsThreadControlBlock, WindowsTlsError> {
     // Ensure TLS index is allocated
     init_tls_index()?;
 
@@ -186,7 +186,7 @@ public fn init_main_thread_tls() -> Result<&mut WindowsThreadControlBlock, TlsEr
 ///
 /// Called automatically for threads created via spawn, or manually
 /// for threads created by other means.
-public fn create_thread_tls() -> Result<&mut WindowsThreadControlBlock, TlsError> {
+public fn create_thread_tls() -> Result<&mut WindowsThreadControlBlock, WindowsTlsError> {
     // Ensure TLS index exists
     init_tls_index()?;
 
@@ -254,7 +254,7 @@ public fn create_thread_tls() -> Result<&mut WindowsThreadControlBlock, TlsError
 }
 
 /// Clean up TLS for the current thread.
-public fn cleanup_thread_tls() -> Result<(), TlsError> {
+public fn cleanup_thread_tls() -> Result<(), WindowsTlsError> {
     let tcb = get_current_tcb_raw();
     if tcb as Int == 0 {
         return Ok(());  // Nothing to clean up
@@ -312,7 +312,7 @@ public fn get_context_slots() -> Maybe<&mut WindowsContextSlots> {
 }
 
 /// Set context slots for the current thread.
-public fn set_context_slots(slots: WindowsContextSlots) -> Result<(), TlsError> {
+public fn set_context_slots(slots: WindowsContextSlots) -> Result<(), WindowsTlsError> {
     match get_current_tcb() {
         Some(tcb) => {
             tcb.context_slots = slots;
@@ -381,7 +381,7 @@ public fn ctx_get_mut(slot: Int) -> Maybe<&unsafe Byte> {
 }
 
 /// Set a context value in a slot.
-public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), TlsError> {
+public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), WindowsTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
         return Err(InvalidSlot { slot: slot });
     }
@@ -397,14 +397,14 @@ public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), TlsError> {
 
 /// Clear a context slot.
 /// The type parameter is used for type safety at call sites but has no runtime effect.
-public fn ctx_clear<T>(slot: Int) -> Result<(), TlsError> {
+public fn ctx_clear<T>(slot: Int) -> Result<(), WindowsTlsError> {
     ctx_set(slot, 0 as &unsafe Byte)
 }
 
 /// Push a new context value onto a slot's stack.
 ///
 /// The previous value is saved and can be restored with ctx_pop.
-public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), TlsError> {
+public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), WindowsTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
         return Err(InvalidSlot { slot: slot });
     }
@@ -431,7 +431,7 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), TlsError> {
 /// Pop a context value from a slot's stack.
 ///
 /// Restores the previous value that was saved by ctx_push.
-public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, TlsError> {
+public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, WindowsTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
         return Err(InvalidSlot { slot: slot });
     }
@@ -508,7 +508,7 @@ public fn get_user_data() -> Maybe<&unsafe Byte> {
 }
 
 /// Set user data pointer in TCB.
-public fn set_user_data(data: &unsafe Byte) -> Result<(), TlsError> {
+public fn set_user_data(data: &unsafe Byte) -> Result<(), WindowsTlsError> {
     match get_current_tcb() {
         Some(tcb) => {
             tcb.user_data = data;

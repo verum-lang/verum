@@ -92,7 +92,7 @@ const MAX_HEADER_COUNT: Int = 128;
 // Parse errors
 // =============================================================================
 
-public type ParseError is
+public type HttpParseError is
     | InvalidMethod(Text)
     | InvalidVersion(Text)
     | InvalidStatusCode(Int)
@@ -126,7 +126,7 @@ public type ParseProgress is
         body_start: Int,
     }
     /// Fatal error — caller must close the connection.
-    | Error(ParseError);
+    | Error(HttpParseError);
 
 // =============================================================================
 // HeaderView — zero-copy reference into input buffer
@@ -235,7 +235,7 @@ implement HttpParser {
                 State.StartLine => {
                     match self.parse_start_line(remaining) {
                         Ok(consumed) => { self.pos = self.pos + consumed; self.state = State.Headers; continue; }
-                        Err(ParseError.IncompleteFrame) => return ParseProgress.NeedMore,
+                        Err(HttpParseError.IncompleteFrame) => return ParseProgress.NeedMore,
                         Err(e) => return ParseProgress.Error(e),
                     }
                 }
@@ -257,7 +257,7 @@ implement HttpParser {
                                 }
                             }
                         }
-                        Err(ParseError.IncompleteFrame) => return ParseProgress.NeedMore,
+                        Err(HttpParseError.IncompleteFrame) => return ParseProgress.NeedMore,
                         Err(e) => return ParseProgress.Error(e),
                     }
                 }
@@ -312,20 +312,20 @@ type HeaderStep is
 implement HttpParser {
     /// Parse request-line `METHOD SP target SP HTTP/x.y CRLF` or status-line
     /// `HTTP/x.y SP status SP reason CRLF`. Returns bytes consumed (incl CRLF).
-    fn parse_start_line(&mut self, buf: &[Byte]) -> Result<Int, ParseError> {
+    fn parse_start_line(&mut self, buf: &[Byte]) -> Result<Int, HttpParseError> {
         // Locate CRLF — bounded by MAX_REQUEST_LINE.
         let scan_end = if buf.len() < MAX_REQUEST_LINE { buf.len() } else { MAX_REQUEST_LINE };
         let lf_pos = match find_byte(&buf[..scan_end], LF) {
             Some(i) => i,
             None => {
                 if buf.len() >= MAX_REQUEST_LINE {
-                    return Err(ParseError.RequestLineTooLong { limit: MAX_REQUEST_LINE });
+                    return Err(HttpParseError.RequestLineTooLong { limit: MAX_REQUEST_LINE });
                 }
-                return Err(ParseError.IncompleteFrame);
+                return Err(HttpParseError.IncompleteFrame);
             }
         };
         if lf_pos == 0 || buf[lf_pos - 1] != CR {
-            return Err(ParseError.BadRequestLine("missing CR before LF".into()));
+            return Err(HttpParseError.BadRequestLine("missing CR before LF".into()));
         }
         let line_end = lf_pos - 1;
         let line = &buf[..line_end];
@@ -338,12 +338,12 @@ implement HttpParser {
         Ok(lf_pos + 1)    // include the LF
     }
 
-    fn parse_request_line(&mut self, line: &[Byte]) -> Result<(), ParseError> {
+    fn parse_request_line(&mut self, line: &[Byte]) -> Result<(), HttpParseError> {
         // method SP path SP HTTP/x.y
-        let sp1 = find_byte(line, SP).ok_or(ParseError.BadRequestLine("missing first SP".into()))?;
+        let sp1 = find_byte(line, SP).ok_or(HttpParseError.BadRequestLine("missing first SP".into()))?;
         let method_slice = &line[..sp1];
         let rest = &line[sp1 + 1..];
-        let sp2 = find_byte(rest, SP).ok_or(ParseError.BadRequestLine("missing second SP".into()))?;
+        let sp2 = find_byte(rest, SP).ok_or(HttpParseError.BadRequestLine("missing second SP".into()))?;
         let path_slice = &rest[..sp2];
         let version_slice = &rest[sp2 + 1..];
 
@@ -358,12 +358,12 @@ implement HttpParser {
         Ok(())
     }
 
-    fn parse_status_line(&mut self, line: &[Byte]) -> Result<(), ParseError> {
+    fn parse_status_line(&mut self, line: &[Byte]) -> Result<(), HttpParseError> {
         // HTTP/x.y SP code SP reason
-        let sp1 = find_byte(line, SP).ok_or(ParseError.BadRequestLine("status SP1".into()))?;
+        let sp1 = find_byte(line, SP).ok_or(HttpParseError.BadRequestLine("status SP1".into()))?;
         let version_slice = &line[..sp1];
         let rest = &line[sp1 + 1..];
-        let sp2 = find_byte(rest, SP).ok_or(ParseError.BadRequestLine("status SP2".into()))?;
+        let sp2 = find_byte(rest, SP).ok_or(HttpParseError.BadRequestLine("status SP2".into()))?;
         let code_slice = &rest[..sp2];
         let reason_slice = &rest[sp2 + 1..];
 
@@ -385,18 +385,18 @@ implement HttpParser {
     /// Parse one `NAME ":" OWS VALUE OWS CRLF` header line, or detect
     /// the terminating empty line (single CRLF). Returns `End(n)` on
     /// terminator, `Consumed(n)` on successful header.
-    fn parse_one_header(&mut self, buf: &[Byte], full: &[Byte]) -> Result<HeaderStep, ParseError> {
+    fn parse_one_header(&mut self, buf: &[Byte], full: &[Byte]) -> Result<HeaderStep, HttpParseError> {
         // Check for terminator — empty line (just CRLF).
         if buf.len() >= 2 && buf[0] == CR && buf[1] == LF {
             return Ok(HeaderStep.End(2));
         }
         if buf.len() < 2 {
-            return Err(ParseError.IncompleteFrame);
+            return Err(HttpParseError.IncompleteFrame);
         }
 
         // Header count guard.
         if self.headers.len() >= MAX_HEADER_COUNT {
-            return Err(ParseError.TooManyHeaders { limit: MAX_HEADER_COUNT });
+            return Err(HttpParseError.TooManyHeaders { limit: MAX_HEADER_COUNT });
         }
 
         // Locate CRLF bounded by MAX_HEADER_LINE.
@@ -405,22 +405,22 @@ implement HttpParser {
             Some(i) => i,
             None => {
                 if buf.len() >= MAX_HEADER_LINE {
-                    return Err(ParseError.HeaderTooLong { limit: MAX_HEADER_LINE });
+                    return Err(HttpParseError.HeaderTooLong { limit: MAX_HEADER_LINE });
                 }
-                return Err(ParseError.IncompleteFrame);
+                return Err(HttpParseError.IncompleteFrame);
             }
         };
         if lf_pos == 0 || buf[lf_pos - 1] != CR {
-            return Err(ParseError.InvalidHeaderValue("missing CR before LF".into()));
+            return Err(HttpParseError.InvalidHeaderValue("missing CR before LF".into()));
         }
         let line_len = lf_pos + 1;   // includes LF
         let line = &buf[..lf_pos - 1];
 
         // Split at first colon.
         let colon = find_byte(line, COLON)
-            .ok_or(ParseError.InvalidHeaderName("no colon".into()))?;
+            .ok_or(HttpParseError.InvalidHeaderName("no colon".into()))?;
         if colon == 0 {
-            return Err(ParseError.InvalidHeaderName("empty name".into()));
+            return Err(HttpParseError.InvalidHeaderName("empty name".into()));
         }
         // Key must be token chars per RFC 7230 §3.2.6. Skip strict
         // validation here for hot-path speed; call sites that care invoke
@@ -444,7 +444,7 @@ implement HttpParser {
 
         self.headers_bytes_total = self.headers_bytes_total + line_len;
         if self.headers_bytes_total > MAX_HEADERS_TOTAL {
-            return Err(ParseError.HeaderTooLong { limit: MAX_HEADERS_TOTAL });
+            return Err(HttpParseError.HeaderTooLong { limit: MAX_HEADERS_TOTAL });
         }
 
         self.headers.push(HeaderView {
@@ -460,7 +460,7 @@ implement HttpParser {
     /// Scan parsed headers to extract body-framing mode per RFC 7230 §3.3.3:
     /// Transfer-Encoding: chunked takes precedence; Content-Length otherwise;
     /// both → protocol error.
-    fn resolve_body_framing(&mut self, buf: &[Byte]) -> Result<(), ParseError> {
+    fn resolve_body_framing(&mut self, buf: &[Byte]) -> Result<(), HttpParseError> {
         let mut saw_te_chunked = false;
         let mut content_length: Maybe<Int> = None;
 
@@ -475,11 +475,11 @@ implement HttpParser {
             } else if ascii_eq_ci(key, &HDR_CONTENT_LENGTH) {
                 let val = hv.value(buf);
                 let n = parse_decimal_u32(val)
-                    .ok_or(ParseError.InvalidContentLength(
+                    .ok_or(HttpParseError.InvalidContentLength(
                         Text.from_utf8_lossy(val)
                     ))?;
                 match content_length {
-                    Some(prev) if prev != n as Int => return Err(ParseError.ConflictingContentLength),
+                    Some(prev) if prev != n as Int => return Err(HttpParseError.ConflictingContentLength),
                     _ => content_length = Some(n as Int),
                 }
             }
@@ -503,10 +503,10 @@ implement HttpParser {
 // =============================================================================
 
 @inline
-fn parse_method(bytes: &[Byte]) -> Result<Method, ParseError> {
+fn parse_method(bytes: &[Byte]) -> Result<Method, HttpParseError> {
     // First-byte dispatch eliminates most comparisons in the hot path.
     if bytes.is_empty() {
-        return Err(ParseError.InvalidMethod(Text.from_utf8_lossy(bytes)));
+        return Err(HttpParseError.InvalidMethod(Text.from_utf8_lossy(bytes)));
     }
     let first = bytes[0];
     if first == 0x47 && bytes_eq(bytes, METHOD_GET) { return Ok(Method.Get); }      // 'G'
@@ -520,17 +520,17 @@ fn parse_method(bytes: &[Byte]) -> Result<Method, ParseError> {
     if first == 0x43 && bytes_eq(bytes, METHOD_CONNECT) { return Ok(Method.Connect); } // 'C'
     if first == 0x4F && bytes_eq(bytes, METHOD_OPTIONS) { return Ok(Method.Options); } // 'O'
     if first == 0x54 && bytes_eq(bytes, METHOD_TRACE) { return Ok(Method.Trace); }   // 'T'
-    Err(ParseError.InvalidMethod(Text.from_utf8_lossy(bytes)))
+    Err(HttpParseError.InvalidMethod(Text.from_utf8_lossy(bytes)))
 }
 
 @inline
-fn parse_version(bytes: &[Byte]) -> Result<Version, ParseError> {
+fn parse_version(bytes: &[Byte]) -> Result<Version, HttpParseError> {
     if bytes_eq(bytes, VERSION_HTTP_1_1) { return Ok(Version.Http11); }
     if bytes_eq(bytes, VERSION_HTTP_1_0) { return Ok(Version.Http10); }
     if bytes_eq(bytes, VERSION_HTTP_2_0) { return Ok(Version.Http2); }
     if bytes_eq(bytes, VERSION_HTTP_2)   { return Ok(Version.Http2); }
     if bytes_eq(bytes, VERSION_HTTP_3)   { return Ok(Version.Http3); }
-    Err(ParseError.InvalidVersion(Text.from_utf8_lossy(bytes)))
+    Err(HttpParseError.InvalidVersion(Text.from_utf8_lossy(bytes)))
 }
 
 // Static byte arrays for method / version lookup.
@@ -577,22 +577,22 @@ fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
 }
 
 @inline
-fn parse_status_code(bytes: &[Byte]) -> Result<StatusCode, ParseError> {
+fn parse_status_code(bytes: &[Byte]) -> Result<StatusCode, HttpParseError> {
     if bytes.len() != 3 {
-        return Err(ParseError.InvalidStatusCode(0));
+        return Err(HttpParseError.InvalidStatusCode(0));
     }
     let mut code: Int = 0;
     let mut i = 0;
     while i < 3 {
         let b = bytes[i];
         if b < 0x30 || b > 0x39 {
-            return Err(ParseError.InvalidStatusCode(0));
+            return Err(HttpParseError.InvalidStatusCode(0));
         }
         code = code * 10 + (b - 0x30) as Int;
         i = i + 1;
     }
     if code < 100 || code > 599 {
-        return Err(ParseError.InvalidStatusCode(code));
+        return Err(HttpParseError.InvalidStatusCode(code));
     }
     Ok(StatusCode.new(code))
 }
@@ -672,7 +672,7 @@ public type ChunkProgress is
     | ChunkNeedMore
     | ChunkOutput { consumed: Int, data_start: Int, data_len: Int }
     | ChunkEnd { consumed: Int }
-    | ChunkErr(ParseError);
+    | ChunkErr(HttpParseError);
 
 implement ChunkedDecoder {
     public fn new() -> ChunkedDecoder {
@@ -698,7 +698,7 @@ implement ChunkedDecoder {
                     };
                     if lf == 0 || remaining[lf - 1] != CR {
                         return ChunkProgress.ChunkErr(
-                            ParseError.InvalidChunkSize("missing CR".into())
+                            HttpParseError.InvalidChunkSize("missing CR".into())
                         );
                     }
                     let line = &remaining[..lf - 1];
@@ -710,7 +710,7 @@ implement ChunkedDecoder {
                     let size = match parse_hex_u32(size_slice) {
                         Some(n) => n as Int,
                         None => return ChunkProgress.ChunkErr(
-                            ParseError.InvalidChunkSize(Text.from_utf8_lossy(size_slice))
+                            HttpParseError.InvalidChunkSize(Text.from_utf8_lossy(size_slice))
                         ),
                     };
                     self.pos = self.pos + lf + 1;
@@ -741,7 +741,7 @@ implement ChunkedDecoder {
                     if remaining.len() < 2 { return ChunkProgress.ChunkNeedMore; }
                     if remaining[0] != CR || remaining[1] != LF {
                         return ChunkProgress.ChunkErr(
-                            ParseError.InvalidChunkSize("CRLF expected after chunk-data".into())
+                            HttpParseError.InvalidChunkSize("CRLF expected after chunk-data".into())
                         );
                     }
                     self.pos = self.pos + 2;
@@ -762,7 +762,7 @@ implement ChunkedDecoder {
                     };
                     if lf == 0 || remaining[lf - 1] != CR {
                         return ChunkProgress.ChunkErr(
-                            ParseError.InvalidTrailer("no CR before LF".into())
+                            HttpParseError.InvalidTrailer("no CR before LF".into())
                         );
                     }
                     self.pos = self.pos + lf + 1;

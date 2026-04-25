@@ -99,19 +99,19 @@ public fn parse_state(tokens: List<Tok>) -> ParseState {
     ParseState { tokens: tokens, pos: 0 }
 }
 
-public type ParseError is
+public type Fts5ParseError is
       PeUnexpected(Text)
     | PeUnclosedQuote
     | PeEmpty;
 
-public fn parse(text: &Text) -> base.Result<MatchAst, ParseError> {
+public fn parse(text: &Text) -> base.Result<MatchAst, Fts5ParseError> {
     let toks = lex(text);
     if toks.len() == 1 { return base.Err(PeEmpty); }
     let mut state = parse_state(toks);
     parse_or(&mut state)
 }
 
-fn parse_or(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
+fn parse_or(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
     let mut left = match parse_and(s) { base.Ok(v) => v, base.Err(e) => return base.Err(e) };
     loop {
         match peek(s) {
@@ -129,7 +129,7 @@ fn parse_or(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
     base.Ok(left)
 }
 
-fn parse_and(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
+fn parse_and(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
     let mut left = match parse_not(s) { base.Ok(v) => v, base.Err(e) => return base.Err(e) };
     loop {
         match peek(s) {
@@ -155,7 +155,7 @@ fn parse_and(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
     base.Ok(left)
 }
 
-fn parse_not(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
+fn parse_not(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
     match peek(s) {
         TokNot => {
             bump(s);
@@ -169,7 +169,7 @@ fn parse_not(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
     }
 }
 
-fn parse_atom(s: &mut ParseState) -> base.Result<MatchAst, ParseError> {
+fn parse_atom(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
     match peek(s) {
         TokWord(w) => {
             let val = w.clone();

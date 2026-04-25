@@ -40,7 +40,7 @@ public type MiddlewareChainOpaque is (Int);
 public type SingleThreadExecutorOpaque is (Int);
 
 /// Recovery error type.
-public type RecoveryError is {
+public type AsyncRecoveryError is {
     message: Text,
 };
 

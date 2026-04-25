@@ -128,7 +128,7 @@ public type LinuxContextSlots is {
 };
 
 /// TLS initialization error types
-public type TlsError is
+public type LinuxTlsError is
     | MmapFailed { code: Int }
     | ArchPrctlFailed { code: Int }
     | AlreadyInitialized
@@ -146,8 +146,8 @@ public type TlsError is
 ///
 /// # Returns
 /// * `Ok(())` - TLS initialized successfully
-/// * `Err(TlsError)` - Initialization failed
-public fn init_main_thread_tls() -> Result<(), TlsError> {
+/// * `Err(LinuxTlsError)` - Initialization failed
+public fn init_main_thread_tls() -> Result<(), LinuxTlsError> {
     init_thread_tls_with_size(DEFAULT_TLS_SIZE)
 }
 
@@ -155,7 +155,7 @@ public fn init_main_thread_tls() -> Result<(), TlsError> {
 ///
 /// # Arguments
 /// * `tls_size` - Size of TLS data segment (will be rounded up to alignment)
-public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), TlsError> {
+public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), LinuxTlsError> {
     // Round up to alignment
     let aligned_tls_size = (tls_size + TLS_ALIGN - 1) & !(TLS_ALIGN - 1);
 
@@ -179,7 +179,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), TlsError> {
 
     // Check for mmap failure
     if mem < 0 && mem > -4096 {
-        return Err(TlsError.MmapFailed { code: -mem as Int });
+        return Err(LinuxTlsError.MmapFailed { code: -mem as Int });
     }
 
     let base = mem as &unsafe Byte;
@@ -219,7 +219,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), TlsError> {
     if result != 0 {
         // Clean up allocated memory on failure
         unsafe { syscall_raw(SYS_MUNMAP, mem, total_size as Int, 0, 0, 0, 0) };
-        return Err(TlsError.ArchPrctlFailed { code: -result as Int });
+        return Err(LinuxTlsError.ArchPrctlFailed { code: -result as Int });
     }
 
     // Register clear_child_tid for robust futex support
@@ -237,7 +237,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), TlsError> {
 /// Create TLS block for a new thread (called before clone).
 ///
 /// Returns a pointer suitable for CLONE_SETTLS argument.
-public fn create_thread_tls(stack_size: USize) -> Result<&unsafe LinuxThreadControlBlock, TlsError> {
+public fn create_thread_tls(stack_size: USize) -> Result<&unsafe LinuxThreadControlBlock, LinuxTlsError> {
     init_thread_tls_with_size(DEFAULT_TLS_SIZE)?;
     get_current_tcb()
 }
@@ -251,7 +251,7 @@ public fn create_thread_tls(stack_size: USize) -> Result<&unsafe LinuxThreadCont
 /// # Safety
 /// TLS must be initialized via init_main_thread_tls() first.
 @inline
-public fn get_current_tcb() -> Result<&unsafe LinuxThreadControlBlock, TlsError> {
+public fn get_current_tcb() -> Result<&unsafe LinuxThreadControlBlock, LinuxTlsError> {
     // Read TCB pointer from fs:[0] using TLS intrinsic
     let tcb: &unsafe LinuxThreadControlBlock = tls_read_ptr(0);
     Ok(tcb)

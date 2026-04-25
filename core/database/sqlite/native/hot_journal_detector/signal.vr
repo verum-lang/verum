@@ -4,7 +4,7 @@ module core.database.sqlite.native.hot_journal_detector.signal;
 
 mount base.{Bool, Int64};
 
-public type Signal is {
+public type HotJournalSignal is {
     journal_exists: Bool,
     journal_nonempty: Bool,
     exclusive_held_on_db: Bool,     // if another process holds EXCLUSIVE, not hot (owner will replay)
@@ -13,8 +13,8 @@ public type Signal is {
     journal_size_bytes: Int64,
 };
 
-public fn empty_snapshot() -> Signal {
-    Signal {
+public fn empty_snapshot() -> HotJournalSignal {
+    HotJournalSignal {
         journal_exists: false,
         journal_nonempty: false,
         exclusive_held_on_db: false,
@@ -24,18 +24,18 @@ public fn empty_snapshot() -> Signal {
     }
 }
 
-public fn is_absent(s: &Signal) -> Bool {
+public fn is_absent(s: &HotJournalSignal) -> Bool {
     !s.journal_exists
 }
 
-public fn is_empty(s: &Signal) -> Bool {
+public fn is_empty(s: &HotJournalSignal) -> Bool {
     s.journal_exists && !s.journal_nonempty
 }
 
-public fn has_owner(s: &Signal) -> Bool {
+public fn has_owner(s: &HotJournalSignal) -> Bool {
     s.exclusive_held_on_db
 }
 
-public fn header_intact(s: &Signal) -> Bool {
+public fn header_intact(s: &HotJournalSignal) -> Bool {
     s.magic_matches && s.reserved_byte_matches
 }

@@ -24,7 +24,7 @@
 //                                                                    │
 // ┌──────────────────────────────────────────────────────────────────▼─┐
 // │ LAYER 1: Page Manager (64KB pages, slab allocation)                │
-// │   PageHeader { generation, epoch, slots[], free_list }             │
+// │   AllocPageHeader { generation, epoch, slots[], free_list }             │
 // └──────────────────────────────────────────────────────────────────┬─┘
 //                                                                    │
 // ┌──────────────────────────────────────────────────────────────────▼─┐
@@ -293,7 +293,7 @@ public fn size_class_to_size(class_idx: Int) -> Int {
 @inline
 fn slots_per_page(class_idx: Int) -> Int {
     let slot_size = SIZE_CLASSES[class_idx];
-    let header_size = PageHeader.SIZE;
+    let header_size = AllocPageHeader.SIZE;
     let usable = PAGE_SIZE - header_size;
     // Account for slot metadata (1 byte per slot)
     // slots * slot_size + slots * 1 <= usable
@@ -313,7 +313,7 @@ fn slots_per_page(class_idx: Int) -> Int {
 /// Page header for slab-allocated pages.
 /// Contains page-level CBGR tracking and slot management.
 @repr(C, align(64))
-public type PageHeader is {
+public type AllocPageHeader is {
     /// Size class index (into SIZE_CLASSES array)
     size_class: UInt16,
 
@@ -342,10 +342,10 @@ public type PageHeader is {
     remote_free_head: Int32,
 
     /// Next page in linked list
-    next_page: &unsafe PageHeader,
+    next_page: &unsafe AllocPageHeader,
 
     /// Previous page in linked list
-    prev_page: &unsafe PageHeader,
+    prev_page: &unsafe AllocPageHeader,
 
     /// Reserved for alignment (pad to 64 bytes)
     reserved: [UInt32; 4],
@@ -354,12 +354,12 @@ public type PageHeader is {
 /// Page header size
 public const PAGE_HEADER_SIZE: Int = 64;
 
-implement PageHeader {
+implement AllocPageHeader {
     /// Size constant for compile-time use
     public const SIZE: Int = 64;
 
     /// Set next page pointer
-    public fn set_next(&mut self, next: &unsafe PageHeader) {
+    public fn set_next(&mut self, next: &unsafe AllocPageHeader) {
         self.next_page = next;
     }
 
@@ -381,8 +381,8 @@ implement PageHeader {
         self.flags = 0;
         self.thread_id = thread_id;
         self.remote_free_head = -1;
-        self.next_page = 0 as &unsafe PageHeader;
-        self.prev_page = 0 as &unsafe PageHeader;
+        self.next_page = 0 as &unsafe AllocPageHeader;
+        self.prev_page = 0 as &unsafe AllocPageHeader;
         self.reserved = [0, 0, 0, 0];
 
         // Initialize free list: each slot points to next
@@ -591,7 +591,7 @@ implement LargeAllocHeader {
 /// Thread-local heap structure for fast allocation.
 public type AllocatorLocalHeap is {
     /// Active page for each size class
-    pages: [&mut PageHeader; 11],
+    pages: [&mut AllocPageHeader; 11],
 
     /// Thread ID
     thread_id: UInt32,
@@ -607,7 +607,7 @@ implement AllocatorLocalHeap {
     /// Create a new thread-local heap.
     public fn new(thread_id: UInt32) -> AllocatorLocalHeap {
         AllocatorLocalHeap {
-            pages: [0 as &mut PageHeader; 11],
+            pages: [0 as &mut AllocPageHeader; 11],
             thread_id: thread_id,
             alloc_count: 0,
             dealloc_count: 0,
@@ -696,12 +696,12 @@ implement AllocatorLocalHeap {
     /// Deallocate memory by pointer.
     public fn dealloc(&mut self, ptr: &unsafe Byte) -> Result<(), AllocError> {
         // Determine if this is a large or small allocation
-        let page_base = ((ptr as Int) & !(PAGE_SIZE - 1)) as &PageHeader;
+        let page_base = ((ptr as Int) & !(PAGE_SIZE - 1)) as &AllocPageHeader;
 
         // Check if it's a valid page (has our signature in flags or is large alloc)
         unsafe {
             if is_slab_page(page_base) {
-                self.dealloc_small(ptr, page_base as &mut PageHeader)
+                self.dealloc_small(ptr, page_base as &mut AllocPageHeader)
             } else {
                 self.dealloc_large(ptr)
             }
@@ -709,7 +709,7 @@ implement AllocatorLocalHeap {
     }
 
     /// Deallocate small object.
-    fn dealloc_small(&mut self, ptr: &unsafe Byte, page: &mut PageHeader) -> Result<(), AllocError> {
+    fn dealloc_small(&mut self, ptr: &unsafe Byte, page: &mut AllocPageHeader) -> Result<(), AllocError> {
         let slot_idx = page.slot_index_from_ptr(ptr);
 
         // Check if same thread owns the page
@@ -759,18 +759,18 @@ implement AllocatorLocalHeap {
 /// Page pool for size class
 type PagePool is {
     /// Free pages list
-    free_pages: &mut PageHeader,
+    free_pages: &mut AllocPageHeader,
     /// Full pages list
-    full_pages: &mut PageHeader,
+    full_pages: &mut AllocPageHeader,
     /// Partial pages list
-    partial_pages: &mut PageHeader,
+    partial_pages: &mut AllocPageHeader,
     /// Total pages allocated
     total_pages: Int,
 };
 
 /// Global page manager (protected by spinlock)
 static mut GLOBAL_PAGE_POOLS: [PagePool; 11] = [
-    PagePool { free_pages: 0 as &mut PageHeader, full_pages: 0 as &mut PageHeader, partial_pages: 0 as &mut PageHeader, total_pages: 0 };
+    PagePool { free_pages: 0 as &mut AllocPageHeader, full_pages: 0 as &mut AllocPageHeader, partial_pages: 0 as &mut AllocPageHeader, total_pages: 0 };
     11
 ];
 
@@ -804,7 +804,7 @@ fn unlock_page_manager() {
 }
 
 /// Request a new page for a size class
-fn request_new_page(class_idx: Int, thread_id: UInt32) -> Result<&mut PageHeader, AllocError> {
+fn request_new_page(class_idx: Int, thread_id: UInt32) -> Result<&mut AllocPageHeader, AllocError> {
     lock_page_manager();
 
     let pool = unsafe { &mut GLOBAL_PAGE_POOLS[class_idx] };
@@ -812,13 +812,13 @@ fn request_new_page(class_idx: Int, thread_id: UInt32) -> Result<&mut PageHeader
     // Try to get from free pages first
     let page = if (pool.free_pages as Int) != 0 {
         let page = pool.free_pages;
-        pool.free_pages = page.next_page as &mut PageHeader;
+        pool.free_pages = page.next_page as &mut AllocPageHeader;
         page
     } else {
         // Allocate new page via mmap
         let ptr = os_mmap(PAGE_SIZE)?;
         pool.total_pages = pool.total_pages + 1;
-        ptr as &mut PageHeader
+        ptr as &mut AllocPageHeader
     };
 
     // Initialize the page
@@ -831,14 +831,14 @@ fn request_new_page(class_idx: Int, thread_id: UInt32) -> Result<&mut PageHeader
 }
 
 /// Return a page to the global pool
-fn return_page(page: &mut PageHeader) {
+fn return_page(page: &mut AllocPageHeader) {
     lock_page_manager();
 
     let class_idx = page.size_class as Int;
     let pool = unsafe { &mut GLOBAL_PAGE_POOLS[class_idx] };
 
     // Add to free pages list - set next_page field via page's set method
-    page.set_next(pool.free_pages as &unsafe PageHeader);
+    page.set_next(pool.free_pages as &unsafe AllocPageHeader);
     pool.free_pages = page;
 
     unlock_page_manager();
@@ -846,8 +846,8 @@ fn return_page(page: &mut PageHeader) {
 
 /// Check if a page base is a slab page (vs large allocation)
 @inline
-unsafe fn is_slab_page(page_base: &PageHeader) -> Bool {
-    // Check if it looks like a valid PageHeader
+unsafe fn is_slab_page(page_base: &AllocPageHeader) -> Bool {
+    // Check if it looks like a valid AllocPageHeader
     // Size class should be in valid range
     page_base.size_class < SIZE_CLASS_COUNT as UInt16 &&
     page_base.slot_count > 0 &&
@@ -1094,7 +1094,7 @@ public fn cbgr_realloc(
 /// Get allocation header from user pointer (for CBGR validation).
 @inline
 public fn get_header_from_ptr(ptr: &unsafe Byte) -> &AllocationHeader {
-    let page_base = ((ptr as Int) & !(PAGE_SIZE - 1)) as &PageHeader;
+    let page_base = ((ptr as Int) & !(PAGE_SIZE - 1)) as &AllocPageHeader;
 
     unsafe {
         if is_slab_page(page_base) {
@@ -1531,7 +1531,7 @@ implement Allocator for SimpleAllocator {
 /// - Cannot free individual allocations
 /// - Fixed capacity — panics on overflow (use `try_alloc` for fallible)
 /// - Not thread-safe — use one per thread
-public type StackAllocator is {
+public type MemStackAllocator is {
     /// Base pointer to the backing memory region.
     base: &unsafe Byte,
     /// Current bump offset from base.
@@ -1544,7 +1544,7 @@ public type StackAllocator is {
     alloc_count: Int,
 };
 
-implement StackAllocator {
+implement MemStackAllocator {
     /// Create a new bump allocator with the given capacity in bytes.
     ///
     /// The backing memory is obtained from the global allocator.
@@ -1554,14 +1554,14 @@ implement StackAllocator {
     /// # Panics
     ///
     /// Panics if the backing memory cannot be allocated.
-    public fn init(capacity: Int) -> Result<StackAllocator, AllocError> {
+    public fn init(capacity: Int) -> Result<MemStackAllocator, AllocError> {
         if capacity <= 0 {
             return Err(AllocError.InvalidSize { size: capacity });
         }
         let result = cbgr_alloc(capacity, 16);
         match result {
             Ok((ptr, _gen, _caps)) => {
-                Ok(StackAllocator {
+                Ok(MemStackAllocator {
                     base: ptr,
                     offset: 0,
                     capacity: capacity,
@@ -1574,8 +1574,8 @@ implement StackAllocator {
     }
 
     /// Create a bump allocator with default capacity (64KB).
-    public fn new() -> Result<StackAllocator, AllocError> {
-        StackAllocator.init(65536)
+    public fn new() -> Result<MemStackAllocator, AllocError> {
+        MemStackAllocator.init(65536)
     }
 
     /// Reset the allocator, logically freeing all allocations.
@@ -1622,7 +1622,7 @@ implement StackAllocator {
     }
 }
 
-implement Allocator for StackAllocator {
+implement Allocator for MemStackAllocator {
     fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
         // Align the current offset
         let aligned_offset = align_up(self.offset, align);
@@ -1636,7 +1636,7 @@ implement Allocator for StackAllocator {
 
         // Update state (safe interior mutation for bump allocator)
         unsafe {
-            let self_mut = &mut *(self as &unsafe StackAllocator);
+            let self_mut = &mut *(self as &unsafe MemStackAllocator);
             self_mut.offset = new_offset;
             self_mut.alloc_count = self_mut.alloc_count + 1;
             if new_offset > self_mut.peak_usage {

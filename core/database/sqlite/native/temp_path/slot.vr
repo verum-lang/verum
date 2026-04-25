@@ -9,7 +9,7 @@ module core.database.sqlite.native.temp_path.slot;
 mount core.*;
 mount base.{Bool, Maybe, Text};
 
-public type SetOutcome is
+public type TempPathSetOutcome is
       SoOk
     | SoFrozen;         // sqlite3_initialize was already called
 
@@ -26,7 +26,7 @@ public fn empty_slot() -> PathSlot {
 
 public fn freeze(s: &mut PathSlot) { s.frozen = true; }
 
-public fn set_path(s: &mut PathSlot, path: Maybe<Text>) -> SetOutcome {
+public fn set_path(s: &mut PathSlot, path: Maybe<Text>) -> TempPathSetOutcome {
     if s.frozen { return SoFrozen; }
     s.path = path;
     SoOk

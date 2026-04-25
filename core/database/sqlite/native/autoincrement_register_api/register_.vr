@@ -17,17 +17,17 @@ public fn row(table_name: Text, seq: Int64) -> AutoIncRow {
     AutoIncRow { table_name: table_name, seq: seq }
 }
 
-public type Register is {
+public type AutoincrementRegister is {
     entries: List<AutoIncRow>,
 };
 
-public fn new() -> Register {
-    Register { entries: [].clone() as List<AutoIncRow> }
+public fn new() -> AutoincrementRegister {
+    AutoincrementRegister { entries: [].clone() as List<AutoIncRow> }
 }
 
-public fn size(r: &Register) -> Int { r.entries.len() }
+public fn size(r: &AutoincrementRegister) -> Int { r.entries.len() }
 
-public fn find(r: &Register, table_name: &Text) -> Maybe<Int64> {
+public fn find(r: &AutoincrementRegister, table_name: &Text) -> Maybe<Int64> {
     let mut i: Int = 0;
     while i < r.entries.len() {
         if r.entries[i].table_name == *table_name {
@@ -40,7 +40,7 @@ public fn find(r: &Register, table_name: &Text) -> Maybe<Int64> {
 
 // Record a new max for `table_name`; create entry if missing.
 // Only raises seq — never lowers it (per AUTOINCREMENT spec).
-public fn observe(mut r: Register, table_name: Text, rowid: Int64) -> Register {
+public fn observe(mut r: AutoincrementRegister, table_name: Text, rowid: Int64) -> AutoincrementRegister {
     let mut i: Int = 0;
     while i < r.entries.len() {
         if r.entries[i].table_name == table_name {
@@ -77,7 +77,7 @@ public fn outcome_name(o: &AllocOutcome) -> Text {
 }
 
 // Compute the next rowid for an AUTOINCREMENT table.
-public fn allocate(mut r: Register, table_name: Text) -> (Register, AllocOutcome) {
+public fn allocate(mut r: AutoincrementRegister, table_name: Text) -> (AutoincrementRegister, AllocOutcome) {
     let current = find(&r, &table_name);
     let next = match current {
         Maybe.Some(s) => s + (1 as Int64),
@@ -88,7 +88,7 @@ public fn allocate(mut r: Register, table_name: Text) -> (Register, AllocOutcome
     (r, AoRowid(next))
 }
 
-public fn is_at_max(r: &Register, table_name: &Text) -> Bool {
+public fn is_at_max(r: &AutoincrementRegister, table_name: &Text) -> Bool {
     match find(r, table_name) {
         Maybe.Some(s) => s >= rowid_max(),
         Maybe.None    => false,

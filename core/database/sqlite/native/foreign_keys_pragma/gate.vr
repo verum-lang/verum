@@ -28,28 +28,28 @@ public fn enforces(m: &ForeignKeysPragmaMode) -> Bool {
 }
 
 // Outcome of a SET attempt depending on whether a transaction is open.
-public type SetOutcome is
+public type ForeignKeysSetOutcome is
     | SoApplied
     | SoIgnoredInsideTxn      // SQLite silently ignores changes during a txn
     ;
 
-public fn try_apply(in_txn: Bool) -> SetOutcome {
+public fn try_apply(in_txn: Bool) -> ForeignKeysSetOutcome {
     if in_txn { SoIgnoredInsideTxn } else { SoApplied }
 }
 
-public fn outcome_name(o: &SetOutcome) -> Text {
+public fn outcome_name(o: &ForeignKeysSetOutcome) -> Text {
     match o {
         SoApplied            => "applied".clone(),
         SoIgnoredInsideTxn   => "ignored_inside_txn".clone(),
     }
 }
 
-public fn was_applied(o: &SetOutcome) -> Bool {
+public fn was_applied(o: &ForeignKeysSetOutcome) -> Bool {
     match o { SoApplied => true, _ => false }
 }
 
 // Whether changing the mode requires the engine to re-prepare cached stmts
 // (it does — FK gate affects codegen of write statements).
-public fn invalidates_prepared_stmts(o: &SetOutcome) -> Bool {
+public fn invalidates_prepared_stmts(o: &ForeignKeysSetOutcome) -> Bool {
     was_applied(o)
 }

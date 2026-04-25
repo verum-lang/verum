@@ -77,7 +77,7 @@ public type ExceptionFrame is {
 /// AArch64 Exception Frame.
 @repr(C)
 @cfg(target_arch = "aarch64")
-public type ExceptionFrame is {
+public type Aarch64ExceptionFrame is {
     // Exception syndrome register
     esr: UInt64,
 

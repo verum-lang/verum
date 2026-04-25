@@ -380,18 +380,18 @@ implement Drop for DarwinCondvar {
 }
 
 // =============================================================================
-// SpinLock
+// DarwinSpinLock
 // =============================================================================
 
 /// Spin lock for very short critical sections
-public type SpinLock is {
+public type DarwinSpinLock is {
     locked: UInt32,  // 0 = unlocked, 1 = locked
 };
 
-implement SpinLock {
+implement DarwinSpinLock {
     /// Create a new spin lock.
-    public fn new() -> SpinLock {
-        SpinLock { locked: 0 }
+    public fn new() -> DarwinSpinLock {
+        DarwinSpinLock { locked: 0 }
     }
 
     /// Acquire the spin lock (busy-wait).
