@@ -5578,6 +5578,15 @@ pub fn lower_instruction<'ctx>(
             let n = i64_ty.const_int(*name_id as u64, false);
             call_tensor_runtime_void(ctx, "verum_gpu_profile_range_start", &[n])
         }
+        Instruction::GpuProfileRangeEnd => {
+            call_tensor_runtime_void(ctx, "verum_gpu_profile_range_end", &[])
+        }
+        Instruction::GpuProfileMarkerPop => {
+            call_tensor_runtime_void(ctx, "verum_gpu_profile_marker_pop", &[])
+        }
+        Instruction::GpuDeviceSync => {
+            call_tensor_runtime_void(ctx, "verum_gpu_device_sync", &[])
+        }
 
         // ====================================================================
         // GPU graphs & advanced launch (#87)
