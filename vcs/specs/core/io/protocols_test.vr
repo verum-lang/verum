@@ -16,7 +16,7 @@ mount core.io.protocols.{
     TimedOut, WriteZero, Interrupted, UnexpectedEof, OutOfMemory,
     Unsupported, Other,
     Start, End, Current,
-    Empty, ByteRepeat, Sink,
+    EmptyReader, ByteRepeat, Sink,
     empty_reader, repeat_byte, sink,
 };
 mount core.maybe.{Maybe, Some, None};
@@ -214,14 +214,14 @@ fn test_seek_from_is_pattern() {
 }
 
 // =============================================================================
-// Section 4: Empty Reader
+// Section 4: EmptyReader Reader
 // =============================================================================
 
 @test
 fn test_empty_reader_construction() {
-    let reader: Empty = empty_reader();
-    // Empty reader created - it's a unit type
-    let _: &Empty = &reader;
+    let reader: EmptyReader = empty_reader();
+    // EmptyReader reader created - it's a unit type
+    let _: &EmptyReader = &reader;
 }
 
 // =============================================================================

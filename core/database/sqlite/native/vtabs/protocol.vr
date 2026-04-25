@@ -126,13 +126,13 @@ public type VirtualTable is protocol {
 // access plans (vtab vs. brute-force scan).
 // =============================================================================
 
-public type ConstraintOp is
+public type VtabProtocolConstraintOp is
       OpEq | OpGt | OpLe | OpLt | OpGe | OpMatch | OpLike | OpGlob
     | OpRegexp | OpIsNotNull | OpIsNull | OpIsNotEqual;
 
 public type Constraint is {
     column: Int,
-    op: ConstraintOp,
+    op: VtabProtocolConstraintOp,
     usable: Bool,
 };
 

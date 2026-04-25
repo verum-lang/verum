@@ -20,7 +20,7 @@ mount core.tracing.attribute.{AttributeValue};
 // Protocol
 // =============================================================================
 
-public type ExportResult is
+public type TraceExportResult is
     | Success
     | Failure(Text);
 
@@ -28,13 +28,13 @@ public type SpanExporter is protocol {
     /// Export a batch of spans. Called from a processor (usually the
     /// Batch one, on a worker task). May block on I/O — should be made
     /// async by the processor, not the exporter.
-    fn export(&self, spans: &List<SpanData>) -> ExportResult;
+    fn export(&self, spans: &List<SpanData>) -> TraceExportResult;
 
     /// Flush any pending spans. Called during shutdown + on timer.
-    fn force_flush(&self, timeout: Duration) -> ExportResult;
+    fn force_flush(&self, timeout: Duration) -> TraceExportResult;
 
     /// Shutdown — the exporter should release all resources.
-    fn shutdown(&self, timeout: Duration) -> ExportResult;
+    fn shutdown(&self, timeout: Duration) -> TraceExportResult;
 };
 
 // =============================================================================
@@ -48,9 +48,9 @@ implement NoopExporter {
 }
 
 implement SpanExporter for NoopExporter {
-    fn export(&self, _spans: &List<SpanData>) -> ExportResult { ExportResult.Success }
-    fn force_flush(&self, _t: Duration) -> ExportResult { ExportResult.Success }
-    fn shutdown(&self, _t: Duration) -> ExportResult { ExportResult.Success }
+    fn export(&self, _spans: &List<SpanData>) -> TraceExportResult { TraceExportResult.Success }
+    fn force_flush(&self, _t: Duration) -> TraceExportResult { TraceExportResult.Success }
+    fn shutdown(&self, _t: Duration) -> TraceExportResult { TraceExportResult.Success }
 }
 
 // =============================================================================
@@ -74,7 +74,7 @@ implement StdoutExporter {
 }
 
 implement SpanExporter for StdoutExporter {
-    fn export(&self, spans: &List<SpanData>) -> ExportResult {
+    fn export(&self, spans: &List<SpanData>) -> TraceExportResult {
         let _guard = self.lock.lock();
         let mut i = 0;
         while i < spans.len() {
@@ -84,15 +84,15 @@ implement SpanExporter for StdoutExporter {
             println("");
             i = i + 1;
         }
-        ExportResult.Success
+        TraceExportResult.Success
     }
 
-    fn force_flush(&self, _t: Duration) -> ExportResult {
-        ExportResult.Success
+    fn force_flush(&self, _t: Duration) -> TraceExportResult {
+        TraceExportResult.Success
     }
 
-    fn shutdown(&self, _t: Duration) -> ExportResult {
-        ExportResult.Success
+    fn shutdown(&self, _t: Duration) -> TraceExportResult {
+        TraceExportResult.Success
     }
 }
 

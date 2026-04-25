@@ -51,7 +51,7 @@ public mount .protocols.Seek;
 public mount .protocols.BufRead;
 
 // Utility types
-public mount .protocols.Empty;
+public mount .protocols.EmptyReader;
 public mount .protocols.ByteRepeat;
 public mount .protocols.Sink;
 public mount .protocols.Cursor;

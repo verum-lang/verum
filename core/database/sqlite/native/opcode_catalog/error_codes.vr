@@ -1,11 +1,11 @@
 // =============================================================================
-// opcode_catalog/error_codes.vr — SQLITE_* result code → DbError taxonomy
+// opcode_catalog/error_codes.vr — SQLITE_* result code → OpcodeDbError taxonomy
 // =============================================================================
 // Spec: sqlite-native.md Appendix D
 //
 // SQLite has ~30 primary result codes plus ~60 extended codes.
 // We carry both as a flat enum so the L7 façade can map any
-// SQLite-shaped error into a strongly-typed `DbError` for callers.
+// SQLite-shaped error into a strongly-typed `OpcodeDbError` for callers.
 //
 // Wire codes match SQLite C ABI exactly so debugger / log
 // aggregator tooling can decode them with the same tables.
@@ -131,10 +131,10 @@ public type IoSubKind is
     | IokClose;
 
 // -----------------------------------------------------------------------------
-// DbError — what L7 surfaces to user code
+// OpcodeDbError — what L7 surfaces to user code
 // -----------------------------------------------------------------------------
 
-public type DbError is
+public type OpcodeDbError is
       DbeOk
     | DbeGeneric(Text)
     | DbeBusy
@@ -156,7 +156,7 @@ public type DbError is
     | DbeProtocolFailure
     | DbeAbort(Text);
 
-public fn primary_to_dberror(c: &OpcodeErrorCode, msg: Text) -> DbError {
+public fn primary_to_dberror(c: &OpcodeErrorCode, msg: Text) -> OpcodeDbError {
     match c {
         EcOk             => DbeOk,
         EcError          => DbeGeneric(msg),

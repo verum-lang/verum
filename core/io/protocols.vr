@@ -702,19 +702,19 @@ implement<T: Read> Take<T> {
 }
 
 // =============================================================================
-// Empty && Repeat Readers
+// EmptyReader && Repeat Readers
 // =============================================================================
 
-// Empty reader (always EOF).
-public type Empty is ();
+// EmptyReader reader (always EOF).
+public type EmptyReader is ();
 
-implement Read for Empty {
+implement Read for EmptyReader {
     fn read(&mut self, _buf: &mut [Byte]) -> IoResult<Int> {
         Ok(0)
     }
 }
 
-implement BufRead for Empty {
+implement BufRead for EmptyReader {
     fn fill_buf(&mut self) -> IoResult<&[Byte]> {
         Ok(&[])
     }
@@ -723,8 +723,8 @@ implement BufRead for Empty {
 }
 
 // Create empty reader.
-public fn empty_reader() -> Empty {
-    Empty
+public fn empty_reader() -> EmptyReader {
+    EmptyReader
 }
 
 // Repeat byte forever.

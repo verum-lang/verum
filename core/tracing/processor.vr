@@ -23,7 +23,7 @@ mount core.sync.mutex.{Mutex};
 mount core.time.duration.{Duration};
 mount core.tracing.span.{Span, SpanData};
 mount core.tracing.context.{SpanContext};
-mount core.tracing.exporter.{SpanExporter, ExportResult};
+mount core.tracing.exporter.{SpanExporter, TraceExportResult};
 
 // =============================================================================
 // Protocol
@@ -37,11 +37,11 @@ public type SpanProcessor is protocol {
     fn on_end(&self, span: SpanData);
 
     /// Flush. Blocks up to `timeout`.
-    fn force_flush(&self, timeout: Duration) -> ExportResult;
+    fn force_flush(&self, timeout: Duration) -> TraceExportResult;
 
     /// Shutdown. Drains remaining spans up to `timeout` then calls
     /// exporter shutdown.
-    fn shutdown(&self, timeout: Duration) -> ExportResult;
+    fn shutdown(&self, timeout: Duration) -> TraceExportResult;
 };
 
 // =============================================================================
@@ -68,11 +68,11 @@ implement SpanProcessor for SimpleProcessor {
         let _ = self.exporter.export(&buf);
     }
 
-    fn force_flush(&self, timeout: Duration) -> ExportResult {
+    fn force_flush(&self, timeout: Duration) -> TraceExportResult {
         self.exporter.force_flush(timeout)
     }
 
-    fn shutdown(&self, timeout: Duration) -> ExportResult {
+    fn shutdown(&self, timeout: Duration) -> TraceExportResult {
         self.exporter.shutdown(timeout)
     }
 }
@@ -161,13 +161,13 @@ implement SpanProcessor for BatchProcessor {
         let _ = self.sender.try_send(BatchMessage.BatchSpan(span));
     }
 
-    fn force_flush(&self, timeout: Duration) -> ExportResult {
+    fn force_flush(&self, timeout: Duration) -> TraceExportResult {
         // Send a flush sentinel; the worker drains buffered spans on receipt.
         let _ = self.sender.try_send(BatchMessage.BatchFlush);
         self.exporter.force_flush(timeout)
     }
 
-    fn shutdown(&self, timeout: Duration) -> ExportResult {
+    fn shutdown(&self, timeout: Duration) -> TraceExportResult {
         let _ = self.sender.try_send(BatchMessage.BatchShutdown);
         self.exporter.shutdown(timeout)
     }

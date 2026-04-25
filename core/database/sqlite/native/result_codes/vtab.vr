@@ -36,7 +36,7 @@ public const SQLITE_VTAB_INNOCUOUS: Int               = 2;
 public const SQLITE_VTAB_DIRECTONLY: Int              = 3;
 public const SQLITE_VTAB_USES_ALL_SCHEMAS: Int        = 4;
 
-public type ConstraintOp is
+public type ConstraintOpResultCode is
       VcoEq
     | VcoGt
     | VcoLe
@@ -55,7 +55,7 @@ public type ConstraintOp is
     | VcoOffset
     | VcoFunction;
 
-public fn constraint_numeric(c: &ConstraintOp) -> Int {
+public fn constraint_numeric(c: &ConstraintOpResultCode) -> Int {
     match c {
         VcoEq          => SQLITE_INDEX_CONSTRAINT_EQ,
         VcoGt          => SQLITE_INDEX_CONSTRAINT_GT,
@@ -77,7 +77,7 @@ public fn constraint_numeric(c: &ConstraintOp) -> Int {
     }
 }
 
-public fn constraint_name(c: &ConstraintOp) -> Text {
+public fn constraint_name(c: &ConstraintOpResultCode) -> Text {
     match c {
         VcoEq          => "EQ".clone(),
         VcoGt          => "GT".clone(),

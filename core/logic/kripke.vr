@@ -46,19 +46,19 @@ public fn world(id: Text) -> World {
 }
 
 /// An accessibility edge `from → to`.
-public type Edge is { from: World, to: World };
+public type KripkeEdge is { from: World, to: World };
 
-public fn edge(from: World, to: World) -> Edge {
-    Edge { from, to }
+public fn edge(from: World, to: World) -> KripkeEdge {
+    KripkeEdge { from, to }
 }
 
 /// A Kripke frame: worlds + accessibility edges.
 public type KripkeFrame is {
     worlds: List<World>,
-    edges: List<Edge>,
+    edges: List<KripkeEdge>,
 };
 
-public fn frame(worlds: List<World>, edges: List<Edge>) -> KripkeFrame {
+public fn frame(worlds: List<World>, edges: List<KripkeEdge>) -> KripkeFrame {
     KripkeFrame { worlds, edges }
 }
 
@@ -86,7 +86,7 @@ public fn accessible(f: KripkeFrame, w: World) -> List<World> {
 // applies to modal-logic semantics without bespoke traversal code.
 //
 // The wiring is a small shim because the field names differ:
-// Kripke's `Edge { from, to }` vs graph.vr's `Edge<V, L> { src, tgt, label }`.
+// Kripke's `KripkeEdge { from, to }` vs graph.vr's `KripkeEdge<V, L> { src, tgt, label }`.
 // The shim converts on the fly; concrete `impl Graph for KripkeFrame`
 // is available via a companion `implement Graph for KripkeFrame {…}`
 // wrapper once the modal-logic library promotes the frame to a
@@ -94,19 +94,19 @@ public fn accessible(f: KripkeFrame, w: World) -> List<World> {
 //
 // For now, expose the graph view as a free function.
 
-/// Convert a Kripke edge to the canonical graph Edge shape.
-public fn kripke_edge_to_graph(e: Edge) -> core.math.graph.Edge<World, ()> {
-    core.math.graph.Edge { src: e.from, tgt: e.to, label: () }
+/// Convert a Kripke edge to the canonical graph KripkeEdge shape.
+public fn kripke_edge_to_graph(e: KripkeEdge) -> core.math.graph.KripkeEdge<World, ()> {
+    core.math.graph.KripkeEdge { src: e.from, tgt: e.to, label: () }
 }
 
-/// Graph-view of a Kripke frame: edges in the canonical `core.math.graph.Edge`
+/// Graph-view of a Kripke frame: edges in the canonical `core.math.graph.KripkeEdge`
 /// shape. This lets `bfs`, `dfs`, `reachable`, etc. from `core.math.graph`
 /// apply directly to the frame's accessibility relation.
-public fn kripke_edges_as_graph(f: &KripkeFrame) -> List<core.math.graph.Edge<World, ()>> {
-    let mut out: List<core.math.graph.Edge<World, ()>> = [];
+public fn kripke_edges_as_graph(f: &KripkeFrame) -> List<core.math.graph.KripkeEdge<World, ()>> {
+    let mut out: List<core.math.graph.KripkeEdge<World, ()>> = [];
     let mut i: Int = 0;
     while i < f.edges.len() {
-        out.push(core.math.graph.Edge {
+        out.push(core.math.graph.KripkeEdge {
             src: f.edges[i].from,
             tgt: f.edges[i].to,
             label: (),
@@ -118,12 +118,12 @@ public fn kripke_edges_as_graph(f: &KripkeFrame) -> List<core.math.graph.Edge<Wo
 
 /// The out-neighbourhood of a world in the frame, returned as
 /// canonical graph edges. Mirrors `Graph<World, ()>.out_edges`.
-public fn kripke_out_edges(f: &KripkeFrame, w: &World) -> List<core.math.graph.Edge<World, ()>> {
-    let mut out: List<core.math.graph.Edge<World, ()>> = [];
+public fn kripke_out_edges(f: &KripkeFrame, w: &World) -> List<core.math.graph.KripkeEdge<World, ()>> {
+    let mut out: List<core.math.graph.KripkeEdge<World, ()>> = [];
     let mut i: Int = 0;
     while i < f.edges.len() {
         if f.edges[i].from.id == w.id {
-            out.push(core.math.graph.Edge {
+            out.push(core.math.graph.KripkeEdge {
                 src: f.edges[i].from,
                 tgt: f.edges[i].to,
                 label: (),
