@@ -329,6 +329,19 @@ const LINT_RULES: &[LintRule] = &[
              the foreign-boundary capability explicitly",
         category: LintCategory::Safety,
     },
+    // Phase D — meta-rule for [[lint.custom]] entries with ast_match.
+    // Per-user-rule diagnostics carry the user-chosen rule name; this
+    // entry exists so `--list-rules` and `--explain` can describe the
+    // mechanism for users who haven't yet authored their own rules.
+    LintRule {
+        name: "custom-ast-rule",
+        level: LintLevel::Warning,
+        description:
+            "User-authored AST-pattern rule from [[lint.custom]] (Phase D) — \
+             accepts kind = \"method_call|call|unsafe_block|attribute\" with \
+             extra fields: method | path | name",
+        category: LintCategory::Style,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
@@ -688,23 +701,73 @@ fn glob_path_match(pat: &str, path: &str) -> bool {
     false
 }
 
+/// Structured AST-pattern matcher for [[lint.custom]] rules.
+/// Users author these in TOML for a Verum-aware alternative to the
+/// regex `pattern` field. Patterns match a single AST shape; multiple
+/// shapes produce one CustomLintRule each.
+///
+///   [[lint.custom]]
+///   name = "no-unwrap-in-prod"
+///   message = "use `?` or `expect(\"why\")` instead of unwrap()"
+///   level = "warn"
+///   [lint.custom.ast_match]            # one of:
+///   kind = "method_call"
+///   method = "unwrap"                  # specific method name
+///
+///   # OR
+///   [lint.custom.ast_match]
+///   kind = "call"
+///   path = "core.unsafe.from_raw"      # dotted path to the callee
+///
+///   # OR
+///   [lint.custom.ast_match]
+///   kind = "attribute"
+///   name = "deprecated"                # any item with @deprecated
+///
+///   # OR
+///   [lint.custom.ast_match]
+///   kind = "unsafe_block"              # any `unsafe { ... }` block
+///
+/// Multiple rules are independent — each runs as a separate AST walk
+/// inside CustomAstRulesPass.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct AstMatchSpec {
+    /// What AST shape to match. Recognised: "method_call", "call",
+    /// "attribute", "unsafe_block".
+    pub kind: String,
+    /// For method_call: the method name (e.g. "unwrap").
+    pub method: Option<String>,
+    /// For call: the dotted callee path (e.g. "core.unsafe.from_raw").
+    pub path: Option<String>,
+    /// For attribute: the attribute name (without @).
+    pub name: Option<String>,
+}
+
 /// A user-defined pattern-based lint rule from [lint.custom].
 #[derive(Debug, Clone)]
 pub struct CustomLintRule {
     /// Rule name (used in diagnostics and disable/deny)
-    name: String,
-    /// Text pattern to search for (substring match)
-    pattern: String,
+    pub name: String,
+    /// Text pattern to search for (substring match) — Phase D rules
+    /// can leave this empty when `ast_match` is set.
+    pub pattern: String,
     /// Diagnostic message
-    message: String,
+    pub message: String,
     /// Severity level
-    level: LintLevel,
+    pub level: LintLevel,
     /// Only check files under these paths (empty = all files)
-    paths: Vec<String>,
+    pub paths: Vec<String>,
     /// Exclude files under these paths
-    exclude: Vec<String>,
+    pub exclude: Vec<String>,
     /// Optional fix suggestion
-    suggestion: Option<String>,
+    pub suggestion: Option<String>,
+    /// Phase D: structured AST matcher. When present, this rule
+    /// fires via the AST-walking custom-rules pass instead of the
+    /// regex/text-scan path. Strictly more precise — a `match: {
+    /// kind = "method_call", method = "unwrap" }` cannot be fooled
+    /// by `unwrap` appearing inside a string literal or comment.
+    pub ast_match: Option<AstMatchSpec>,
 }
 
 impl Default for LintConfig {
@@ -1103,6 +1166,7 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
                     paths: Vec::new(),
                     exclude: Vec::new(),
                     suggestion: None,
+                    ast_match: None,
                 };
                 if let Some(s) = t.get("name").and_then(|v| v.as_str()) {
                     rule.name = s.to_string();
@@ -1110,10 +1174,14 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
                 if let Some(s) = t.get("pattern").and_then(|v| v.as_str()) {
                     rule.pattern = s.to_string();
                 }
-                if let Some(s) = t.get("message").and_then(|v| v.as_str()) {
+                if let Some(s) = t.get("message").and_then(|v| v.as_str())
+                    .or_else(|| t.get("description").and_then(|v| v.as_str()))
+                {
                     rule.message = s.to_string();
                 }
-                if let Some(s) = t.get("level").and_then(|v| v.as_str()) {
+                if let Some(s) = t.get("level").and_then(|v| v.as_str())
+                    .or_else(|| t.get("severity").and_then(|v| v.as_str()))
+                {
                     if let Some(lvl) = LintLevel::parse(s) {
                         rule.level = lvl;
                     }
@@ -1129,7 +1197,19 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
                 if let Some(v) = t.get("exclude") {
                     rule.exclude = extract_list(v);
                 }
-                if !rule.name.is_empty() && !rule.pattern.is_empty() {
+                // Phase D: structured AST matcher (alternative to
+                // the regex `pattern` field).
+                if let Some(am) = t.get("ast_match") {
+                    if let Ok(spec) = <AstMatchSpec as serde::Deserialize>::deserialize(am.clone()) {
+                        if !spec.kind.is_empty() {
+                            rule.ast_match = Some(spec);
+                        }
+                    }
+                }
+                // Accept rule when EITHER pattern OR ast_match is set.
+                let has_pattern = !rule.pattern.is_empty();
+                let has_ast = rule.ast_match.is_some();
+                if !rule.name.is_empty() && (has_pattern || has_ast) {
                     config.custom_rules.push(rule);
                 }
             }

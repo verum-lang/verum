@@ -111,6 +111,7 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
         &PublicMustHaveDocPass,
         &UnsafeWithoutCapabilityPass,
         &FfiWithoutCapabilityPass,
+        &CustomAstRulesPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
@@ -2162,6 +2163,206 @@ impl LintPass for FfiWithoutCapabilityPass {
         }
         issues
     }
+}
+
+// ===================================================================
+// Phase D: Custom AST-pattern rules
+// ===================================================================
+//
+// User-authored rules from [[lint.custom]] entries with an
+// `ast_match` field (Phase D supersedes the regex-only Phase A.1
+// `pattern` field — both still parse, projects can mix). Each
+// matcher kind walks the AST looking for one specific shape:
+//
+//   kind = "method_call"  + method = "unwrap"
+//                              → fires on any `.unwrap(...)` call
+//   kind = "call"         + path   = "core.unsafe.from_raw"
+//                              → fires on `core.unsafe.from_raw(...)`
+//   kind = "attribute"    + name   = "deprecated"
+//                              → fires on any item with @deprecated
+//   kind = "unsafe_block"
+//                              → fires on every `unsafe { … }`
+//
+// Each user rule is identified by its `name` field and emits issues
+// under that name — so the same severity_map / @allow / per-file
+// override / preset flow that built-in rules use applies uniformly.
+//
+// ===================================================================
+
+struct CustomAstRulesPass;
+
+impl LintPass for CustomAstRulesPass {
+    fn name(&self) -> &'static str {
+        // The pass itself doesn't emit under a fixed rule name; each
+        // diagnostic carries the user-rule name. This identifier is
+        // only used for `--list-rules` / `--explain` lookup, where
+        // it surfaces alongside the LINT_RULES "custom-ast-rule"
+        // entry below.
+        "custom-ast-rule"
+    }
+    fn description(&self) -> &'static str {
+        "User-authored AST-pattern rule from [[lint.custom]] (Phase D)"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let cfg = match ctx.config {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        // Filter to rules that have an ast_match spec set.
+        let rules: Vec<&super::lint::CustomLintRule> = cfg
+            .custom_rules
+            .iter()
+            .filter(|r| r.ast_match.is_some())
+            .collect();
+        if rules.is_empty() {
+            return Vec::new();
+        }
+
+        // Apply path filters: rule.paths (allowlist) + rule.exclude.
+        let path_str = ctx.file.to_string_lossy();
+        let rules: Vec<&super::lint::CustomLintRule> = rules
+            .into_iter()
+            .filter(|r| {
+                if !r.paths.is_empty()
+                    && !r.paths.iter().any(|p| path_str.contains(p))
+                {
+                    return false;
+                }
+                if r.exclude.iter().any(|p| path_str.contains(p)) {
+                    return false;
+                }
+                true
+            })
+            .collect();
+        if rules.is_empty() {
+            return Vec::new();
+        }
+
+        let mut issues = Vec::new();
+        for rule in &rules {
+            let spec = rule.ast_match.as_ref().unwrap();
+            issues.extend(run_ast_match(ctx, rule, spec));
+        }
+        issues
+    }
+}
+
+fn run_ast_match(
+    ctx: &LintCtx<'_>,
+    rule: &super::lint::CustomLintRule,
+    spec: &super::lint::AstMatchSpec,
+) -> Vec<LintIssue> {
+    use verum_ast::ExprKind;
+
+    // Each match kind has its own visitor. We allocate the issues
+    // vec on the heap and shape each visitor as a thin closure-equivalent.
+    struct V<'a, 'p, 's> {
+        source: &'s str,
+        file: &'p Path,
+        rule_name: &'static str, // leaked from rule.name, see below
+        message: &'a str,
+        level: LintLevel,
+        rule: super::lint::CustomLintRule,
+        spec: super::lint::AstMatchSpec,
+        issues: Vec<LintIssue>,
+    }
+    impl<'a, 'p, 's> Visitor for V<'a, 'p, 's> {
+        fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+            let mut hit: Option<(u32,)> = None;
+            match self.spec.kind.as_str() {
+                "method_call" => {
+                    if let ExprKind::MethodCall { method, .. } = &expr.kind {
+                        let want = self.spec.method.as_deref().unwrap_or("");
+                        if want.is_empty() || method.as_str() == want {
+                            hit = Some((expr.span.start,));
+                        }
+                    }
+                }
+                "call" => {
+                    if let ExprKind::Call { func, .. } = &expr.kind {
+                        // We only match explicit Path callees; lambda
+                        // / dynamic callees are out of scope.
+                        if let ExprKind::Path(p) = &func.kind {
+                            let want = self.spec.path.as_deref().unwrap_or("");
+                            let actual = path_segments_to_string(p);
+                            if want.is_empty() || actual == want {
+                                hit = Some((expr.span.start,));
+                            }
+                        }
+                    }
+                }
+                "unsafe_block" => {
+                    if let ExprKind::Unsafe(_) = &expr.kind {
+                        hit = Some((expr.span.start,));
+                    }
+                }
+                _ => {}
+            }
+            if let Some((offset,)) = hit {
+                let (line, col) = span_to_line_col(self.source, offset);
+                self.issues.push(LintIssue {
+                    rule: self.rule_name,
+                    level: self.level,
+                    file: self.file.to_path_buf(),
+                    line,
+                    column: col,
+                    message: self.message.to_string(),
+                    suggestion: self.rule.suggestion.clone().map(verum_common::Text::from),
+                    fixable: self.rule.suggestion.is_some(),
+                });
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+
+    // The `rule: &'static str` field on `LintIssue` requires a
+    // static-lifetime name. User-rule names live in user config
+    // strings — leak them. The leaked count is bounded by the number
+    // of distinct user rule names defined across all loads, which
+    // is small. Engineering trade-off documented here for auditors.
+    let static_name: &'static str = Box::leak(rule.name.clone().into_boxed_str());
+    let mut v = V {
+        source: ctx.source,
+        file: ctx.file,
+        rule_name: static_name,
+        message: &rule.message,
+        level: rule.level,
+        rule: rule.clone(),
+        spec: spec.clone(),
+        issues: Vec::new(),
+    };
+
+    // Attribute kind iterates over items, not exprs.
+    if spec.kind == "attribute" {
+        if let Some(want) = &spec.name {
+            for item in &ctx.module.items {
+                let attrs = item_attributes(item);
+                if attrs.iter().any(|a| a.name.as_str() == want.as_str()) {
+                    let (line, col) = span_to_line_col(ctx.source, item.span.start);
+                    v.issues.push(LintIssue {
+                        rule: static_name,
+                        level: rule.level,
+                        file: ctx.file.to_path_buf(),
+                        line,
+                        column: col,
+                        message: rule.message.clone(),
+                        suggestion: rule.suggestion.clone().map(verum_common::Text::from),
+                        fixable: rule.suggestion.is_some(),
+                    });
+                }
+            }
+        }
+        return v.issues;
+    }
+
+    // Otherwise walk the module's expressions.
+    for item in &ctx.module.items {
+        v.visit_item(item);
+    }
+    v.issues
 }
 
 #[cfg(test)]
