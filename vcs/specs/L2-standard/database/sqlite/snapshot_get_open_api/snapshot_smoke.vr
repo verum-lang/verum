@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.snapshot_get_open_api.snap.{
-    Snapshot, new, schema_name, equal,
+    WalSnapshot, new, schema_name, equal,
     CmpResult, CmLess, CmEqual, CmGreater, CmIncomparable,
     compare, cmp_to_int,
     Op, OpGet, OpOpen, OpFree, OpCmp, OpRecover, op_name,

@@ -41,7 +41,7 @@ mount core.database.sqlite.native.ext.window.{
 };
 mount core.database.sqlite.native.ext.hooks.{
     BusyHandler, ConstantBusyHandler, constant_busy,
-    UpdateOp, UoInsert, UoUpdate, UoDelete, update_op_name,
+    ExtUpdateOp, UoInsert, UoUpdate, UoDelete, update_op_name,
     AuthAction, AuthDecision, AdAllow, AdDeny, AaSelect, AaInsert,
     CommitDecision, CdAllow, CdAbort,
 };

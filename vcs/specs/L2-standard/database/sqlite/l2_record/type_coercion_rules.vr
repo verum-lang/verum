@@ -10,7 +10,7 @@
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l2_record.{
-    SqliteValue, ValueClass, Affinity,
+    CoercionSqliteValue, ValueClass, Affinity,
     classify, looks_int, looks_real,
     coerce, parse_int64,
 };

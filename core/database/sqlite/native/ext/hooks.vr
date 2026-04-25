@@ -38,9 +38,9 @@ public type RollbackHook is protocol {
 // UpdateHook / PreUpdateHook — observe DML
 // -----------------------------------------------------------------------------
 
-public type UpdateOp is UoInsert | UoUpdate | UoDelete;
+public type ExtUpdateOp is UoInsert | UoUpdate | UoDelete;
 
-public fn update_op_name(o: &UpdateOp) -> Text {
+public fn update_op_name(o: &ExtUpdateOp) -> Text {
     match o {
         UoInsert => "INSERT".clone(),
         UoUpdate => "UPDATE".clone(),
@@ -49,13 +49,13 @@ public fn update_op_name(o: &UpdateOp) -> Text {
 }
 
 public type UpdateHook is protocol {
-    fn on_update(&mut self, op: UpdateOp, db: &Text, table: &Text, rowid: Int64);
+    fn on_update(&mut self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64);
 };
 
 public type PreUpdateHook is protocol {
     fn on_pre_update(
         &mut self,
-        op: UpdateOp,
+        op: ExtUpdateOp,
         db: &Text,
         table: &Text,
         old_row: &List<Register>,
