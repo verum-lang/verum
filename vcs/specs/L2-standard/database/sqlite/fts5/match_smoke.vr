@@ -16,7 +16,7 @@ mount core.database.sqlite.native.fts5.posting.{
     Posting, PostingList, posting, posting_list_empty,
 };
 mount core.database.sqlite.native.fts5.tokenizer.core.{
-    Token, Tokenizer, token,
+    Fts5Token, Tokenizer, token,
 };
 mount core.database.sqlite.native.fts5.tokenizer.simple.{
     SimpleTokenizer, simple_tokenizer,

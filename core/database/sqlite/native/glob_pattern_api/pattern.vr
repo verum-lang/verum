@@ -4,7 +4,7 @@ module core.database.sqlite.native.glob_pattern_api.pattern;
 
 mount base.{Bool, Text};
 
-public type Token is
+public type GlobToken is
     | TLiteral(Int)        // a single byte to match
     | TAny                  // '*' — zero+ bytes
     | TOne                  // '?' — exactly one byte
@@ -13,7 +13,7 @@ public type Token is
     | TClassNot             // '!'  (when first char in [...])
     ;
 
-public fn token_kind_name(t: &Token) -> Text {
+public fn token_kind_name(t: &GlobToken) -> Text {
     match t {
         TLiteral(_) => "literal".clone(),
         TAny        => "any".clone(),

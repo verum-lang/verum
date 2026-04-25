@@ -1,5 +1,5 @@
 // =============================================================================
-// fts5/tokenizer/core.vr — Tokenizer protocol + Token type
+// fts5/tokenizer/core.vr — Tokenizer protocol + Fts5Token type
 // =============================================================================
 // Spec: sqlite-native.md §16.2
 // =============================================================================
@@ -11,10 +11,10 @@ mount base.{Text, Bool};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// Token
+// Fts5Token
 // -----------------------------------------------------------------------------
 
-public type Token is {
+public type Fts5Token is {
     /// The normalised token text. May differ from the surface form
     /// (e.g. lowercased, stemmed).
     text: Text,
@@ -26,8 +26,8 @@ public type Token is {
     position: Int,
 }
 
-public fn token(text: Text, start_byte: Int, end_byte: Int, position: Int) -> Token {
-    Token { text: text, start_byte: start_byte, end_byte: end_byte, position: position }
+public fn token(text: Text, start_byte: Int, end_byte: Int, position: Int) -> Fts5Token {
+    Fts5Token { text: text, start_byte: start_byte, end_byte: end_byte, position: position }
 }
 
 // -----------------------------------------------------------------------------
@@ -36,7 +36,7 @@ public fn token(text: Text, start_byte: Int, end_byte: Int, position: Int) -> To
 
 public type Tokenizer is protocol {
     fn name(&self) -> Text;
-    fn tokenize(&self, text: &Text) -> List<Token>;
+    fn tokenize(&self, text: &Text) -> List<Fts5Token>;
 };
 
 // -----------------------------------------------------------------------------

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.page_count_pragma.reading.{
-    Reading, new, empty_reading, is_empty,
+    PageCountReading, new, empty_reading, is_empty,
     file_size_bytes, megabytes, pages_per_megabyte,
     SizeCheck, ScValid, ScNotPowerOfTwo, ScOutOfRange,
     check_page_size, check_name, is_valid_size,

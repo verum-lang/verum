@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.freelist_count_pragma.reading.{
-    Reading, new, empty_reading, is_empty,
+    FreelistCountReading, new, empty_reading, is_empty,
     fragmentation_percent,
     VacuumAdvice, VaSkip, VaConsider, VaRecommend,
     advise, advice_name, snapshot_text,

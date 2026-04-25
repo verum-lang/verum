@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.glob_pattern_api.pattern.{
-    Token, TLiteral, TAny, TOne, TClassOpen, TClassClose, TClassNot,
+    GlobToken, TLiteral, TAny, TOne, TClassOpen, TClassClose, TClassNot,
     token_kind_name,
     GlobOperator, OpLike, OpGlob,
     is_case_sensitive, wildcard_one, wildcard_any, supports_char_class,

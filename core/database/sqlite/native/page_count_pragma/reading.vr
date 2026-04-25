@@ -4,28 +4,28 @@ module core.database.sqlite.native.page_count_pragma.reading;
 
 mount base.{Bool, Int64, Text};
 
-public type Reading is {
+public type PageCountReading is {
     total_pages: Int64,
     page_size_bytes: Int,
 };
 
-public fn new(total_pages: Int64, page_size: Int) -> Reading {
+public fn new(total_pages: Int64, page_size: Int) -> PageCountReading {
     let zero = 0 as Int64;
     let mut t = if total_pages < zero { zero } else { total_pages };
     let mut ps = page_size;
     if ps < 0 { ps = 0; }
-    Reading { total_pages: t, page_size_bytes: ps }
+    PageCountReading { total_pages: t, page_size_bytes: ps }
 }
 
-public fn empty_reading() -> Reading {
-    Reading { total_pages: 0 as Int64, page_size_bytes: 0 }
+public fn empty_reading() -> PageCountReading {
+    PageCountReading { total_pages: 0 as Int64, page_size_bytes: 0 }
 }
 
-public fn is_empty(r: &Reading) -> Bool {
+public fn is_empty(r: &PageCountReading) -> Bool {
     r.total_pages == (0 as Int64)
 }
 
-public fn file_size_bytes(r: &Reading) -> Int64 {
+public fn file_size_bytes(r: &PageCountReading) -> Int64 {
     r.total_pages * (r.page_size_bytes as Int64)
 }
 
@@ -59,11 +59,11 @@ public fn is_valid_size(c: &SizeCheck) -> Bool {
 }
 
 // Common multipliers for human readability.
-public fn megabytes(r: &Reading) -> Int64 {
+public fn megabytes(r: &PageCountReading) -> Int64 {
     file_size_bytes(r) / (1_048_576 as Int64)
 }
 
-public fn pages_per_megabyte(r: &Reading) -> Int64 {
+public fn pages_per_megabyte(r: &PageCountReading) -> Int64 {
     if r.page_size_bytes == 0 { return 0 as Int64; }
     (1_048_576 as Int64) / (r.page_size_bytes as Int64)
 }

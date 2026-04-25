@@ -4,13 +4,13 @@ module core.database.sqlite.native.system_errno_api.probe;
 
 mount base.{Bool, Text};
 
-public type Reading is
+public type SystemErrnoReading is
     | RNone               // 0 — no captured errno
     | RPosix(Int)         // POSIX errno
     | RWindowsHr(Int)     // Windows GetLastError code
     ;
 
-public fn reading_name(r: &Reading) -> Text {
+public fn reading_name(r: &SystemErrnoReading) -> Text {
     match r {
         RNone        => "none".clone(),
         RPosix(_)    => "posix".clone(),
@@ -18,7 +18,7 @@ public fn reading_name(r: &Reading) -> Text {
     }
 }
 
-public fn errno_value(r: &Reading) -> Int {
+public fn errno_value(r: &SystemErrnoReading) -> Int {
     match r {
         RNone         => 0,
         RPosix(n)     => n.clone(),
@@ -26,7 +26,7 @@ public fn errno_value(r: &Reading) -> Int {
     }
 }
 
-public fn has_value(r: &Reading) -> Bool {
+public fn has_value(r: &SystemErrnoReading) -> Bool {
     match r { RNone => false, _ => true }
 }
 

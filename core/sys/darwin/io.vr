@@ -53,7 +53,7 @@ public const DEFAULT_TIMEOUT_NS: Int = 1_000_000_000;
 // =============================================================================
 
 /// I/O operation error
-public type IoDriverError is
+public type DarwinIoDriverError is
     | WouldBlock
     | Interrupted
     | NotFound { path: Text }
@@ -69,8 +69,8 @@ public type IoDriverError is
     | Other { code: Int, message: Text }
     ;
 
-implement IoDriverError {
-    public fn from_errno(err: Int) -> IoDriverError {
+implement DarwinIoDriverError {
+    public fn from_errno(err: Int) -> DarwinIoDriverError {
         match err {
             35 => WouldBlock,                                              // EAGAIN
             4 => Interrupted,                                              // EINTR
@@ -118,7 +118,7 @@ implement IoDriverError {
 // =============================================================================
 
 /// Type of I/O operation
-public type IoOpKind is
+public type DarwinIoOpKind is
     | Read
     | Write
     | Accept
@@ -131,16 +131,16 @@ public type IoOpKind is
     ;
 
 /// I/O completion token
-public type IoToken is (UInt64);
+public type DarwinIoToken is (UInt64);
 
 /// I/O operation submission
-public type IoOp is {
+public type DarwinIoOp is {
     /// Operation kind
-    kind: IoOpKind,
+    kind: DarwinIoOpKind,
     /// File descriptor (or timer id for timers)
     fd: Int,
     /// User token for completion identification
-    token: IoToken,
+    token: DarwinIoToken,
     /// Buffer address (for read/write)
     buf_addr: Int,
     /// Buffer length (for read/write) or timeout (for timer)
@@ -150,9 +150,9 @@ public type IoOp is {
 };
 
 /// I/O completion result
-public type IoCqe is {
+public type DarwinIoCqe is {
     /// User token from submission
-    token: IoToken,
+    token: DarwinIoToken,
     /// Result (bytes transferred, or error code if negative)
     result: Int,
     /// Flags from completion
@@ -186,10 +186,10 @@ public type KqueueDriver is {
 
 implement KqueueDriver {
     /// Create a new kqueue driver.
-    public fn new() -> Result<KqueueDriver, IoDriverError> {
+    public fn new() -> Result<KqueueDriver, DarwinIoDriverError> {
         let kq_fd = unsafe { raw_kqueue() };
         if kq_fd < 0 {
-            return Err(IoDriverError.from_errno(errno()));
+            return Err(DarwinIoDriverError.from_errno(errno()));
         }
 
         let mut driver = KqueueDriver {
@@ -231,7 +231,7 @@ implement KqueueDriver {
     }
 
     /// Close the kqueue driver.
-    public fn close(&mut self) -> Result<(), IoDriverError> {
+    public fn close(&mut self) -> Result<(), DarwinIoDriverError> {
         if !self.open {
             return Ok(());
         }
@@ -241,7 +241,7 @@ implement KqueueDriver {
         self.kq = -1;
 
         if result < 0 {
-            Err(IoDriverError.from_errno(errno()))
+            Err(DarwinIoDriverError.from_errno(errno()))
         } else {
             Ok(())
         }
@@ -262,33 +262,33 @@ implement KqueueDriver {
     // =========================================================================
 
     /// Add interest in read events for a file descriptor.
-    public fn add_read(&mut self, fd: Int, token: IoToken) -> Result<(), IoDriverError> {
+    public fn add_read(&mut self, fd: Int, token: DarwinIoToken) -> Result<(), DarwinIoDriverError> {
         self.add_event(fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, token)
     }
 
     /// Add interest in write events for a file descriptor.
-    public fn add_write(&mut self, fd: Int, token: IoToken) -> Result<(), IoDriverError> {
+    public fn add_write(&mut self, fd: Int, token: DarwinIoToken) -> Result<(), DarwinIoDriverError> {
         self.add_event(fd, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, token)
     }
 
     /// Add a one-shot read event.
-    public fn add_read_oneshot(&mut self, fd: Int, token: IoToken) -> Result<(), IoDriverError> {
+    public fn add_read_oneshot(&mut self, fd: Int, token: DarwinIoToken) -> Result<(), DarwinIoDriverError> {
         self.add_event(fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, token)
     }
 
     /// Add a one-shot write event.
-    public fn add_write_oneshot(&mut self, fd: Int, token: IoToken) -> Result<(), IoDriverError> {
+    public fn add_write_oneshot(&mut self, fd: Int, token: DarwinIoToken) -> Result<(), DarwinIoDriverError> {
         self.add_event(fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, token)
     }
 
     /// Remove interest in read events.
-    public fn remove_read(&mut self, fd: Int) -> Result<(), IoDriverError> {
-        self.add_event(fd, EVFILT_READ, EV_DELETE, 0, IoToken(0))
+    public fn remove_read(&mut self, fd: Int) -> Result<(), DarwinIoDriverError> {
+        self.add_event(fd, EVFILT_READ, EV_DELETE, 0, DarwinIoToken(0))
     }
 
     /// Remove interest in write events.
-    public fn remove_write(&mut self, fd: Int) -> Result<(), IoDriverError> {
-        self.add_event(fd, EVFILT_WRITE, EV_DELETE, 0, IoToken(0))
+    public fn remove_write(&mut self, fd: Int) -> Result<(), DarwinIoDriverError> {
+        self.add_event(fd, EVFILT_WRITE, EV_DELETE, 0, DarwinIoToken(0))
     }
 
     /// Add a timer event.
@@ -302,9 +302,9 @@ implement KqueueDriver {
         &mut self,
         ident: Int,
         timeout_ms: Int,
-        token: IoToken,
+        token: DarwinIoToken,
         oneshot: Bool,
-    ) -> Result<(), IoDriverError> {
+    ) -> Result<(), DarwinIoDriverError> {
         let flags = if oneshot {
             EV_ADD | EV_ONESHOT
         } else {
@@ -318,9 +318,9 @@ implement KqueueDriver {
         &mut self,
         ident: Int,
         timeout_ns: Int,
-        token: IoToken,
+        token: DarwinIoToken,
         oneshot: Bool,
-    ) -> Result<(), IoDriverError> {
+    ) -> Result<(), DarwinIoDriverError> {
         let flags = if oneshot {
             EV_ADD | EV_ONESHOT
         } else {
@@ -330,18 +330,18 @@ implement KqueueDriver {
     }
 
     /// Remove a timer.
-    public fn remove_timer(&mut self, ident: Int) -> Result<(), IoDriverError> {
-        self.add_event(ident, EVFILT_TIMER, EV_DELETE, 0, IoToken(0))
+    public fn remove_timer(&mut self, ident: Int) -> Result<(), DarwinIoDriverError> {
+        self.add_event(ident, EVFILT_TIMER, EV_DELETE, 0, DarwinIoToken(0))
     }
 
     /// Add a user event (for cross-thread signaling).
-    public fn add_user_event(&mut self, ident: Int, token: IoToken) -> Result<(), IoDriverError> {
+    public fn add_user_event(&mut self, ident: Int, token: DarwinIoToken) -> Result<(), DarwinIoDriverError> {
         self.add_event(ident, EVFILT_USER, EV_ADD | EV_CLEAR, 0, token)
     }
 
     /// Trigger a user event.
-    public fn trigger_user_event(&mut self, ident: Int) -> Result<(), IoDriverError> {
-        self.add_event(ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, IoToken(0))
+    public fn trigger_user_event(&mut self, ident: Int) -> Result<(), DarwinIoDriverError> {
+        self.add_event(ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, DarwinIoToken(0))
     }
 
     /// Internal: Add event to change list.
@@ -351,8 +351,8 @@ implement KqueueDriver {
         filter: Int16,
         flags: UInt16,
         fflags: UInt32,
-        token: IoToken,
-    ) -> Result<(), IoDriverError> {
+        token: DarwinIoToken,
+    ) -> Result<(), DarwinIoDriverError> {
         self.add_event_with_data(ident, filter, flags, fflags, 0, token)
     }
 
@@ -363,8 +363,8 @@ implement KqueueDriver {
         flags: UInt16,
         fflags: UInt32,
         data: Int,
-        token: IoToken,
-    ) -> Result<(), IoDriverError> {
+        token: DarwinIoToken,
+    ) -> Result<(), DarwinIoDriverError> {
         if !self.open {
             return Err(Closed);
         }
@@ -388,7 +388,7 @@ implement KqueueDriver {
     }
 
     /// Flush pending changes to kqueue.
-    fn flush_changes(&mut self) -> Result<(), IoDriverError> {
+    fn flush_changes(&mut self) -> Result<(), DarwinIoDriverError> {
         if self.num_changes == 0 {
             return Ok(());
         }
@@ -408,7 +408,7 @@ implement KqueueDriver {
         self.num_changes = 0;
 
         if result < 0 {
-            Err(IoDriverError.from_errno(errno()))
+            Err(DarwinIoDriverError.from_errno(errno()))
         } else {
             Ok(())
         }
@@ -425,7 +425,7 @@ implement KqueueDriver {
     ///
     /// # Returns
     /// Number of events ready
-    public fn poll(&mut self, timeout_ms: Int) -> Result<Int, IoDriverError> {
+    public fn poll(&mut self, timeout_ms: Int) -> Result<Int, DarwinIoDriverError> {
         if !self.open {
             return Err(Closed);
         }
@@ -466,7 +466,7 @@ implement KqueueDriver {
             if err == 4 {  // EINTR
                 Ok(0)
             } else {
-                Err(IoDriverError.from_errno(err))
+                Err(DarwinIoDriverError.from_errno(err))
             }
         } else {
             Ok(result)
@@ -474,7 +474,7 @@ implement KqueueDriver {
     }
 
     /// Poll without waiting.
-    public fn poll_nowait(&mut self) -> Result<Int, IoDriverError> {
+    public fn poll_nowait(&mut self) -> Result<Int, DarwinIoDriverError> {
         self.poll(0)
     }
 
@@ -482,7 +482,7 @@ implement KqueueDriver {
     ///
     /// Only valid after poll() returns > 0, and for indices 0..n-1
     /// where n is the return value.
-    public fn get_event(&self, index: Int) -> Maybe<IoCqe> {
+    public fn get_event(&self, index: Int) -> Maybe<DarwinIoCqe> {
         if index < 0 || index >= MAX_EVENTS {
             return None;
         }
@@ -496,8 +496,8 @@ implement KqueueDriver {
             ev.data as Int
         };
 
-        Some(IoCqe {
-            token: IoToken(ev.udata as UInt64),
+        Some(DarwinIoCqe {
+            token: DarwinIoToken(ev.udata as UInt64),
             result: result,
             flags: ev.fflags,
         })
@@ -517,7 +517,7 @@ implement KqueueDriver {
     // =========================================================================
 
     /// Submit an I/O operation and poll immediately.
-    public fn submit_and_poll(&mut self, ops: &[IoOp], timeout_ms: Int) -> Result<Int, IoDriverError> {
+    public fn submit_and_poll(&mut self, ops: &[DarwinIoOp], timeout_ms: Int) -> Result<Int, DarwinIoDriverError> {
         for op in ops {
             match op.kind {
                 Read => {
@@ -568,7 +568,7 @@ public type KqueueEventIter is {
 };
 
 implement KqueueEventIter {
-    public fn next(&mut self) -> Maybe<IoCqe> {
+    public fn next(&mut self) -> Maybe<DarwinIoCqe> {
         if self.index >= self.count {
             None
         } else {
@@ -580,15 +580,15 @@ implement KqueueEventIter {
 }
 
 // =============================================================================
-// IoDriver Unified Interface
+// DarwinIoDriver Unified Interface
 // =============================================================================
 
 /// Unified I/O driver interface (macOS only has kqueue)
-public type IoDriver is {
+public type DarwinIoDriver is {
     kqueue: KqueueDriver,
 };
 
-implement IoDriver {
+implement DarwinIoDriver {
     public fn kqueue(&self) -> &KqueueDriver {
         &self.kqueue
     }
@@ -601,9 +601,9 @@ implement IoDriver {
 /// Create the best available I/O driver.
 ///
 /// On macOS, this always returns a kqueue-based driver.
-public fn create_io_driver() -> Result<IoDriver, IoDriverError> {
+public fn create_io_driver() -> Result<DarwinIoDriver, DarwinIoDriverError> {
     let kqueue = KqueueDriver.new()?;
-    Ok(IoDriver { kqueue: kqueue })
+    Ok(DarwinIoDriver { kqueue: kqueue })
 }
 
 /// Check if kqueue is available.
@@ -623,8 +623,8 @@ public fn is_kqueue_available() -> Bool {
 // Note: kqueue is a readiness-based API, so we wrap it in completion semantics.
 // This means we register interest and perform actual I/O when fd is ready.
 
-/// Convert local IoDriverError to IOEngine's IoError
-fn convert_error(err: IoDriverError) -> EngineIoError {
+/// Convert local DarwinIoDriverError to IOEngine's IoError
+fn convert_error(err: DarwinIoDriverError) -> EngineIoError {
     match err {
         WouldBlock => IoError.WouldBlock,
         Interrupted => IoError.Interrupted,
@@ -662,43 +662,43 @@ implement IOEngine for KqueueDriver {
             let result = match op {
                 CompletionOp.Read { fd, .. } => {
                     // Register read interest
-                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_read_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.Write { fd, .. } => {
                     // Register write interest
-                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_write_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.Accept { fd, .. } => {
                     // Accept = read on listening socket
-                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_read_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.Connect { fd, .. } => {
                     // Connect completion = write ready
-                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_write_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.Recv { fd, .. } => {
-                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_read_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.Send { fd, .. } => {
-                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_write_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.RecvMsg { fd, .. } => {
-                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_read_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.SendMsg { fd, .. } => {
-                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_write_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.Fsync { fd, .. } => {
                     // fsync is synchronous on kqueue — just perform it directly
                     // kqueue notifies when data has been synced
-                    self.add_event(fd.as_raw() as Int, EVFILT_VNODE, EV_ADD | EV_ONESHOT, 0, IoToken(user_data))
+                    self.add_event(fd.as_raw() as Int, EVFILT_VNODE, EV_ADD | EV_ONESHOT, 0, DarwinIoToken(user_data))
                 }
                 CompletionOp.Poll { fd, events } => {
                     // Register appropriate filter based on poll events
                     if (events & 0x0001) != 0 {  // POLLIN
-                        self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                        self.add_read_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                     } else {
-                        self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                        self.add_write_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                     }
                 }
                 CompletionOp.Cancel { user_data: target } => {
@@ -710,7 +710,7 @@ implement IOEngine for KqueueDriver {
                 CompletionOp.Timeout { ts } => {
                     // Use kqueue timer for timeout
                     let timeout_ms = (ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000) as Int;
-                    self.add_timer(user_data as Int, timeout_ms, IoToken(user_data), true)
+                    self.add_timer(user_data as Int, timeout_ms, DarwinIoToken(user_data), true)
                 }
                 CompletionOp.Close { fd } => {
                     // Close is synchronous, but we'll return it as completion
@@ -720,10 +720,10 @@ implement IOEngine for KqueueDriver {
                     Ok(())
                 }
                 CompletionOp.ReadV { fd, .. } => {
-                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_read_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.WriteV { fd, .. } => {
-                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    self.add_write_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
                 }
                 CompletionOp.Nop => {
                     // Use user event for NOP
@@ -838,8 +838,8 @@ implement IOEngine for KqueueDriver {
     }
 }
 
-/// Implement IOEngine for IoDriver (wrapper)
-implement IOEngine for IoDriver {
+/// Implement IOEngine for DarwinIoDriver (wrapper)
+implement IOEngine for DarwinIoDriver {
     fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, EngineIoError> {
         self.kqueue.submit(ops)
     }
