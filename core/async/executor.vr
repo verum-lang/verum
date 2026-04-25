@@ -47,7 +47,7 @@ mount core.intrinsics.platform.{spin_hint};
 mount sys.common.{
     ctx_get, ctx_set, ctx_clear, ctx_has,
     ctx_push_frame, ctx_pop_frame,
-    MAX_CONTEXT_SLOTS, ContextError,
+    MAX_CONTEXT_SLOTS, SysContextError,
 };
 
 // Platform-specific time functions

@@ -15,7 +15,7 @@ mount core.database.sqlite.native.log.level.{
     LogLevel, level_from_primary,
 };
 
-public type LogRecord is {
+public type SqliteLogRecord is {
     /// Extended error code as passed to sqlite3_log.
     errcode: Int,
     level: LogLevel,
@@ -31,9 +31,9 @@ public fn new_record(
     message: Text,
     timestamp_ns: Int64,
     seq: Int64,
-) -> LogRecord {
+) -> SqliteLogRecord {
     let primary: Int = errcode - ((errcode / 256) * 256);
-    LogRecord {
+    SqliteLogRecord {
         errcode: errcode,
         level: level_from_primary(primary),
         message: message,

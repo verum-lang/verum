@@ -14,13 +14,13 @@ module core.database.sqlite.native.log.engine;
 mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
-mount core.database.sqlite.native.log.level.{LogLevel};
-mount core.database.sqlite.native.log.record.{LogRecord, new_record};
+mount core.database.sqlite.native.log.level.{SqliteLogLevel};
+mount core.database.sqlite.native.log.record.{SqliteLogRecord, new_record};
 mount core.database.sqlite.native.log.sink.{LogSink, sink_accepts};
 
 public type LogEngine is {
     sink: Maybe<LogSink>,
-    recent: List<LogRecord>,
+    recent: List<SqliteLogRecord>,
     seq: Int64,
     dropped: Int64,
 }

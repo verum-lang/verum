@@ -26,7 +26,7 @@
 // - RetryBackoff and RetryOptions
 // - Recovery (recover, recover_with)
 // - Context wrapping (context, with_context)
-// - ContextError type
+// - ResultContextError type
 // - Exit<E, A> two-channel model
 // - Cause<E> lossless error chain
 // - Validated<E, A> error accumulation
@@ -38,7 +38,7 @@ mount core.base.result.{
     Error,
     RetryBackoff,
     RetryOptions,
-    ContextError,
+    ResultContextError,
     Exit, Success, Failure, Defect, DefectInfo,
     Cause, Fail, Die, Then, Both, Empty,
     Validated, Valid, Invalid,
@@ -1009,10 +1009,10 @@ fn test_with_context_lazy() {
     assert(!called, "Context function should not be called for Ok");
 }
 
-/// Test ContextError methods
+/// Test ResultContextError methods
 @test
 fn test_context_error_methods() {
-    let err = ContextError.new("context message", "source error");
+    let err = ResultContextError.new("context message", "source error");
     assert_eq(*err.message(), "context message");
     assert_eq(*err.source(), "source error");
     assert_eq(err.into_source(), "source error");

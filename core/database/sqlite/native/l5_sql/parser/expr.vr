@@ -33,7 +33,7 @@ mount core.database.sqlite.native.l5_sql.lexer.{
     Token, SqlKeyword, Operator, Punct, VariableKind,
 };
 mount core.database.sqlite.native.l5_sql.ast.{
-    Expr, Literal, BinOp, UnOp, TableRef,
+    Expr, SqlLiteral, BinOp, UnOp, TableRef,
 };
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
     SqlTokenStream, ParseError, parse_error,

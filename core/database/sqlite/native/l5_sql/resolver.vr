@@ -26,7 +26,7 @@ mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
-    Statement, Expr, Literal, UnOp, BinOp, TableRef,
+    Statement, Expr, SqlLiteral, UnOp, BinOp, TableRef,
     SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
     FromItem, OrderTerm, LimitClause,
     InsertStmt, InsertSource, UpdateStmt, UpdateAssignment, DeleteStmt,
@@ -277,7 +277,7 @@ fn clone_leaf(e: &Expr) -> Expr {
     }
 }
 
-fn clone_literal(l: &Literal) -> Literal {
+fn clone_literal(l: &SqlLiteral) -> SqlLiteral {
     match l {
         LNull  => LNull,
         LInt(i) => LInt(i),

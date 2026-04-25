@@ -899,7 +899,7 @@ public mount .agent.{
     ContinuousBatcher,
     // Agent framework
     Tool,
-    Message,
+    AgentMessage,
     Role,
     Agent,
     LLMAgent,

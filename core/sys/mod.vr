@@ -90,7 +90,7 @@ public mount .common.{
     // Cross-platform context system (V-LLSI)
     MAX_CONTEXT_SLOTS,
     CONTEXT_STACK_DEPTH,
-    ContextError,
+    SysContextError,
     ctx_get,
     ctx_get_mut,
     ctx_set,

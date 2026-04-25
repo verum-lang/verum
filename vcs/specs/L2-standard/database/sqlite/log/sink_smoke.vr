@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.log.level.{
-    LogLevel, LlNotice, LlWarning, LlError,
+    SqliteLogLevel, LlNotice, LlWarning, LlError,
     level_name, is_actionable, level_from_primary,
 };
 mount core.database.sqlite.native.log.record.{

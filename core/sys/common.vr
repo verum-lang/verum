@@ -907,7 +907,7 @@ implement ContextSlots {
 }
 
 /// Context system error types.
-public type ContextError is
+public type SysContextError is
     | SlotNotFound { slot: UInt8 }
     | SlotOverflow { slot: UInt8 }
     | StackOverflow { depth: Int }
@@ -915,15 +915,15 @@ public type ContextError is
     | InvalidSlot { slot: Int }
     ;
 
-implement ContextError {
+implement SysContextError {
     /// Get error message.
     public fn message(&self) -> Text {
         match self {
-            ContextError.SlotNotFound { slot } => f"Context slot {slot} not found",
-            ContextError.SlotOverflow { slot } => f"Context slot {slot} overflow",
-            ContextError.StackOverflow { depth } => f"Context stack overflow at depth {depth}",
-            ContextError.TlsNotInitialized => "TLS not initialized",
-            ContextError.InvalidSlot { slot } => f"Invalid context slot: {slot}",
+            SysContextError.SlotNotFound { slot } => f"Context slot {slot} not found",
+            SysContextError.SlotOverflow { slot } => f"Context slot {slot} overflow",
+            SysContextError.StackOverflow { depth } => f"Context stack overflow at depth {depth}",
+            SysContextError.TlsNotInitialized => "TLS not initialized",
+            SysContextError.InvalidSlot { slot } => f"Invalid context slot: {slot}",
         }
     }
 }
@@ -1030,7 +1030,7 @@ public fn ctx_clear(slot: UInt8) {
 ///
 /// The new frame inherits from the current frame but allows overrides.
 /// Returns the previous frame for restoration.
-public fn ctx_push_frame() -> Result<&unsafe Byte, ContextError> {
+public fn ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
     @cfg(target_os = "linux")
     {
         let current = super.linux.tls.get_context_slots();
@@ -1123,10 +1123,10 @@ module embedded_context {
         }
     }
 
-    public fn embedded_ctx_push_frame() -> Result<&unsafe Byte, ContextError> {
+    public fn embedded_ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
         unsafe {
             if EMBEDDED_CONTEXT.stack_depth >= CONTEXT_STACK_DEPTH {
-                return Err(ContextError.StackOverflow { depth: EMBEDDED_CONTEXT.stack_depth });
+                return Err(SysContextError.StackOverflow { depth: EMBEDDED_CONTEXT.stack_depth });
             }
             // Save current slots to stack
             EMBEDDED_CONTEXT.stack[EMBEDDED_CONTEXT.stack_depth] = EMBEDDED_CONTEXT.slots;

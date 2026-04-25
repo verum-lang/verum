@@ -514,7 +514,7 @@ public type SyncRuntime is {
     allocator: TieredAllocator,
 
     /// Thread pool for parallel work
-    thread_pool: ThreadPool,
+    thread_pool: RuntimeConfigThreadPool,
 };
 
 @cfg(runtime = "no_async")
@@ -533,8 +533,8 @@ implement RuntimeConfig for SyncRuntime {
             .map_err(|e| RuntimeInitError.AllocatorInitFailed(e))?;
 
         // 3. Initialize thread pool
-        let thread_pool = ThreadPool.init(num_cpus())
-            .map_err(|e| RuntimeInitError.ExecutorInitFailed(f"ThreadPool: {e}"))?;
+        let thread_pool = RuntimeConfigThreadPool.init(num_cpus())
+            .map_err(|e| RuntimeInitError.ExecutorInitFailed(f"RuntimeConfigThreadPool: {e}"))?;
 
         Ok(Self {
             allocator,
@@ -812,7 +812,7 @@ public type PollDriver is {
 
 /// Thread pool for parallel work in sync runtime
 @cfg(runtime = "no_async")
-public type ThreadPool is {
+public type RuntimeConfigThreadPool is {
     /// Worker threads
     workers: &[Thread],
 
@@ -824,7 +824,7 @@ public type ThreadPool is {
 };
 
 @cfg(runtime = "no_async")
-implement ThreadPool {
+implement RuntimeConfigThreadPool {
     public fn init(worker_count: Int) -> Result<Self, Text> {
         let job_queue = &JobQueue.new();
         let workers = allocate_thread_pool(worker_count, job_queue)?;
@@ -853,7 +853,7 @@ implement ThreadPool {
 // =============================================================================
 // These types are used by the runtime configurations above.
 // They provide the concrete structures needed by WorkStealingExecutor,
-// SingleThreadExecutor, ThreadPool, and PollDriver.
+// SingleThreadExecutor, RuntimeConfigThreadPool, and PollDriver.
 
 /// Worker thread for the work-stealing executor.
 ///

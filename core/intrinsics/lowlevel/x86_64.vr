@@ -37,7 +37,7 @@ module core.intrinsics.lowlevel.x86_64;
 // =============================================================================
 
 /// CPU feature flags detected at runtime.
-public type CpuFeatures is {
+public type X86CpuFeatures is {
     // Basic features
     has_sse3: Bool,
     has_ssse3: Bool,
@@ -66,11 +66,11 @@ public type CpuFeatures is {
 
 /// Detect CPU features at runtime using CPUID instruction.
 @inline(never)
-public fn cpu_features() -> CpuFeatures {
+public fn cpu_features() -> X86CpuFeatures {
     let (eax, ebx, ecx, edx) = cpuid(1, 0);
     let (_, ebx7, ecx7, _) = cpuid(7, 0);
 
-    CpuFeatures {
+    X86CpuFeatures {
         has_sse3: (ecx & (1 << 0)) != 0,
         has_ssse3: (ecx & (1 << 9)) != 0,
         has_sse41: (ecx & (1 << 19)) != 0,

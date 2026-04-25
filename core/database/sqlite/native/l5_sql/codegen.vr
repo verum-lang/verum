@@ -38,7 +38,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
-    Expr, Literal, BinOp, UnOp,
+    Expr, SqlLiteral, BinOp, UnOp,
     TableRef, OrderTerm, UpdateAssignment, SqlOnConflict,
     CreateTableStmt,
 };
@@ -941,7 +941,7 @@ fn emit_having_expr(
     }
 }
 
-fn literal_equals(a: &Literal, b: &Literal) -> Bool {
+fn literal_equals(a: &SqlLiteral, b: &SqlLiteral) -> Bool {
     match a {
         LInt(x)  => match b { LInt(y)  => x == y, _ => false },
         LReal(x) => match b { LReal(y) => x == y, _ => false },
@@ -1343,7 +1343,7 @@ fn clone_expr_local(e: &Expr) -> Expr {
     }
 }
 
-fn clone_literal_local(l: &Literal) -> Literal {
+fn clone_literal_local(l: &SqlLiteral) -> SqlLiteral {
     match l {
         LInt(x)  => LInt(x),
         LReal(x) => LReal(x),
@@ -2357,7 +2357,7 @@ fn emit_scalar_call(
     Ok(())
 }
 
-fn emit_literal(st: &mut CgState, lit: &Literal, dst: Int) -> Result<(), CodegenError> {
+fn emit_literal(st: &mut CgState, lit: &SqlLiteral, dst: Int) -> Result<(), CodegenError> {
     match lit {
         LNull  => { let _ = st.program.emit(Null(dst, dst)); Ok(()) }
         LInt(i) => {
