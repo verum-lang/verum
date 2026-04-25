@@ -795,7 +795,7 @@ impl LintConfig {
     ///   3. `denied` list                 → error
     ///   4. `warned` list                 → warning
     ///   5. `default_level` (built-in or preset-provided)
-    fn effective_level(&self, rule_name: &str, default_level: LintLevel) -> Option<LintLevel> {
+    pub fn effective_level(&self, rule_name: &str, default_level: LintLevel) -> Option<LintLevel> {
         if let Some(level) = self.severity_map.get(rule_name).copied() {
             return if matches!(level, LintLevel::Off) {
                 None
@@ -1644,25 +1644,24 @@ fn check_unchecked_refinement(path: &Path, info: &FileInfo, issues: &mut List<Li
     for (line_num, line) in info.lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Track @verify annotations
         if trimmed.starts_with("@verify") {
             prev_lines_have_verify = true;
             continue;
         }
 
-        // Look for function signatures with refinement types
-        // Refinement types in Verum look like: param: { x: Int | x > 0 }
-        if (trimmed.starts_with("fn ") || trimmed.starts_with("pub fn "))
-            && trimmed.contains('{')
-            && trimmed.contains('|')
-        {
-            // Heuristic: if line has "fn" and contains "{ ... | ... }" before the body,
-            // it likely has a refinement type in the signature
-            if let Some(paren_end) = trimmed.find(')') {
-                let sig_part = &trimmed[..paren_end + 1];
-                // Check for refinement pattern: { ident : Type | predicate }
-                if sig_part.contains('{') && sig_part.contains('|') {
-                    if !prev_lines_have_verify {
+        // Look for function signatures bearing a refinement-typed
+        // parameter. Verum syntax: `<BaseType>{ <predicate> }` —
+        // the `{` follows the type name with no whitespace. Heuristic:
+        // an `Int{` / `Text{` / `Float{` / `<Custom>{` token inside
+        // the parameter list of an `fn` declaration.
+        let is_fn_decl = trimmed.starts_with("fn ")
+            || trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("public fn ");
+        if is_fn_decl {
+            if let (Some(open), Some(close)) = (trimmed.find('('), trimmed.rfind(')')) {
+                if close > open {
+                    let params = &trimmed[open + 1..close];
+                    if has_refinement_token(params) && !prev_lines_have_verify {
                         let fn_name = extract_fn_name(trimmed).unwrap_or_default();
                         issues.push(LintIssue {
                             rule: "unchecked-refinement",
@@ -1674,56 +1673,10 @@ fn check_unchecked_refinement(path: &Path, info: &FileInfo, issues: &mut List<Li
                                 "Function '{}' has refinement type parameters without @verify annotation",
                                 fn_name
                             ),
-                            suggestion: Some("Add @verify above the function to enable SMT checking".into()),
-                            fixable: false,
-                        });
-                    }
-                }
-            }
-        }
-
-        // Also check for standalone refinement type annotations in params
-        // Pattern: param_name: { val: Type | condition }
-        if (trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ")) && !prev_lines_have_verify {
-            // Scan for refinement-style braces in the parameter list
-            if let Some(paren_start) = trimmed.find('(') {
-                if let Some(paren_end) = trimmed.rfind(')') {
-                    let params = &trimmed[paren_start + 1..paren_end];
-                    // Refinement: contains "{ ... | ... }" in param types
-                    let mut depth = 0;
-                    let mut has_refinement = false;
-                    let mut in_brace = false;
-                    for ch in params.chars() {
-                        match ch {
-                            '{' => {
-                                depth += 1;
-                                in_brace = true;
-                            }
-                            '}' => {
-                                depth -= 1;
-                                if depth == 0 {
-                                    in_brace = false;
-                                }
-                            }
-                            '|' if in_brace && depth == 1 => {
-                                has_refinement = true;
-                            }
-                            _ => {}
-                        }
-                    }
-                    if has_refinement {
-                        let fn_name = extract_fn_name(trimmed).unwrap_or_default();
-                        issues.push(LintIssue {
-                            rule: "unchecked-refinement",
-                            level: LintLevel::Warning,
-                            file: path.to_path_buf(),
-                            line: line_num + 1,
-                            column: 1,
-                            message: format!(
-                                "Function '{}' has refinement type parameters without @verify annotation",
-                                fn_name
+                            suggestion: Some(
+                                "Add @verify(formal) above the function to discharge the refinement obligation"
+                                    .into(),
                             ),
-                            suggestion: Some("Add @verify above the function to enable SMT checking".into()),
                             fixable: false,
                         });
                     }
@@ -1731,11 +1684,28 @@ fn check_unchecked_refinement(path: &Path, info: &FileInfo, issues: &mut List<Li
             }
         }
 
-        // Reset verify tracking for non-annotation, non-blank lines
+        // Reset @verify tracking once we leave the annotation block.
         if !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with('@') {
             prev_lines_have_verify = false;
         }
     }
+}
+
+/// Detect `<TypeName>{` — a refinement-bearing type token. The `{`
+/// must immediately follow an alphanumeric character (no
+/// intervening whitespace) so that bodies like `fn foo(x: Int) {`
+/// don't match.
+fn has_refinement_token(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for i in 1..bytes.len() {
+        if bytes[i] == b'{' {
+            let prev = bytes[i - 1];
+            if prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'>' {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Rule 2: MissingContextDecl
@@ -2632,8 +2602,33 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
     for (line_num, line) in info.lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Skip comments
-        if trimmed.starts_with("//") { continue; }
+        // todo-in-code is the one rule that needs to read comment
+        // lines — every other rule below skips them, so we run it
+        // first and then early-out on comments.
+        if trimmed.starts_with("//") {
+            for marker in &["TODO", "FIXME", "HACK", "XXX"] {
+                if trimmed.contains(marker)
+                    // Suppress when the marker carries a tracking ref
+                    // such as TODO(#1234) — that's the form
+                    // [lint.rules.todo-in-code].require-issue-link
+                    // expects.
+                    && !trimmed.contains(&format!("{}(#", marker))
+                {
+                    issues.push(LintIssue {
+                        rule: "todo-in-code",
+                        level: LintLevel::Warning,
+                        file: path.to_path_buf(),
+                        line: line_num + 1,
+                        column: trimmed.find(marker).unwrap_or(0) + 1,
+                        message: format!("{} comment in code", marker),
+                        suggestion: None,
+                        fixable: false,
+                    });
+                    break;
+                }
+            }
+            continue;
+        }
 
         // Rule 11: mutable-capture-in-spawn
         // `spawn { ... mut_var ... }` where mut_var is `let mut` in outer scope
@@ -2664,8 +2659,11 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
             }
         }
 
-        // Rule 12: unbounded-channel
-        if trimmed.contains("Channel.new()") && !trimmed.contains("Channel.new(") {
+        // Rule 12: unbounded-channel — `Channel.new()` with zero
+        // args. The empty parenthesis pair is the literal signature
+        // we want; any other shape (`Channel.new(64)` /
+        // `Channel.bounded(...)`) is fine.
+        if trimmed.contains("Channel.new()") {
             issues.push(LintIssue {
                 rule: "unbounded-channel",
                 level: LintLevel::Warning,
@@ -2708,20 +2706,27 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
             });
         }
 
-        // Rule 17: todo-in-code
-        for marker in &["TODO", "FIXME", "HACK", "XXX"] {
-            if trimmed.contains(marker) && (trimmed.starts_with("//") || trimmed.contains(&format!("// {}", marker))) {
-                issues.push(LintIssue {
-                    rule: "todo-in-code",
-                    level: LintLevel::Warning,
-                    file: path.to_path_buf(),
-                    line: line_num + 1,
-                    column: trimmed.find(marker).unwrap_or(0) + 1,
-                    message: format!("{} comment in code", marker),
-                    suggestion: None,
-                    fixable: false,
-                });
-                break; // one per line
+        // todo-in-code on inline trailing comments (`code; // TODO`).
+        // Pure comment-line cases are handled at the top of the loop.
+        if let Some(comment_at) = trimmed.find("//") {
+            let after = &trimmed[comment_at..];
+            for marker in &["TODO", "FIXME", "HACK", "XXX"] {
+                if after.contains(marker) && !after.contains(&format!("{}(#", marker)) {
+                    let col = comment_at
+                        + after.find(marker).unwrap_or(0)
+                        + 1;
+                    issues.push(LintIssue {
+                        rule: "todo-in-code",
+                        level: LintLevel::Warning,
+                        file: path.to_path_buf(),
+                        line: line_num + 1,
+                        column: col,
+                        message: format!("{} comment in code", marker),
+                        suggestion: None,
+                        fixable: false,
+                    });
+                    break;
+                }
             }
         }
 
@@ -2821,6 +2826,77 @@ fn print_issue(issue: &LintIssue, deny_warnings: bool) {
 // ---------------------------------------------------------------------------
 // Public API for workspace support
 // ---------------------------------------------------------------------------
+
+/// Run every text-scan + AST + custom rule against in-memory content
+/// and return the raw diagnostics. The caller decides whether to
+/// apply `effective_level` filtering (for tests we want to see every
+/// issue at its default level).
+///
+/// Used by integration tests so per-rule fires/silent assertions
+/// don't depend on disk I/O. Production code paths still go through
+/// `lint_file` to keep the on-disk caching/paralleism story
+/// centralised.
+pub fn lint_source(
+    path: &Path,
+    content: &str,
+    config: Option<&LintConfig>,
+) -> List<LintIssue> {
+    let mut issues = List::new();
+    let info = FileInfo::parse(content);
+
+    check_unchecked_refinement(path, &info, &mut issues);
+    check_missing_context_decl(path, &info, &mut issues);
+    check_unused_imports(path, &info, &mut issues);
+    check_unnecessary_heap(path, &info, &mut issues);
+    check_missing_error_context(path, &info, &mut issues);
+    check_large_copy(path, &info, &mut issues);
+    check_unused_result(path, &info, &mut issues);
+    check_missing_cleanup(path, &info, &mut issues);
+    check_deprecated_syntax(path, &info, &mut issues);
+    check_cbgr_hotspot(path, &info, &mut issues);
+    check_extended_rules(path, &info, &mut issues);
+
+    if let Some(cfg) = config {
+        for issue in lint_custom_rules(path, content, cfg) {
+            issues.push(issue);
+        }
+    }
+
+    use verum_ast::FileId;
+    use verum_lexer::Lexer;
+    use verum_parser::VerumParser;
+    let fid = FileId::new(0);
+    let lexer = Lexer::new(content, fid);
+    let parser = VerumParser::new();
+    if let Ok(module) = parser.parse_module(lexer, fid) {
+        let ctx = super::lint_engine::LintCtx {
+            file: path,
+            source: content,
+            module: &module,
+            config,
+        };
+        for issue in super::lint_engine::run(&ctx) {
+            issues.push(issue);
+        }
+
+        let scopes = super::lint_engine::collect_suppressions(&module, content);
+        if !scopes.is_empty() {
+            let collected: Vec<_> = std::mem::take(&mut issues).into_iter().collect();
+            let suppressed = super::lint_engine::apply_suppressions(collected, &scopes);
+            for i in suppressed {
+                issues.push(i);
+            }
+        }
+    }
+
+    issues
+}
+
+/// Convenience predicate for tests: does the diagnostic stream
+/// contain at least one issue under `rule`?
+pub fn has_issue(issues: &[LintIssue], rule: &str) -> bool {
+    issues.iter().any(|i| i.rule == rule)
+}
 
 /// Lint specific path (for workspace support)
 pub fn lint_path(path: &Path, fix: bool, deny_warnings: bool) -> Result<()> {
@@ -3140,8 +3216,18 @@ impl LintOutputFormat {
     }
 }
 
-/// Emit a single issue in `--format json` (one NDJSON line).
-fn emit_issue_json(issue: &LintIssue) {
+/// Render a single issue as one NDJSON line.
+///
+/// `schema_version: 1` is the stable contract — every documented
+/// field below MUST be present on every line; new fields may be
+/// added in a backward-compatible fashion. A consumer parsing this
+/// stream can rely on:
+///
+/// - `event`: always `"lint"` for issue lines.
+/// - `schema_version`: integer; bump = breaking change.
+/// - `rule`, `level`, `file`, `line`, `column`, `message`, `fixable`.
+/// - `suggestion`: present only when `fixable` is true.
+pub fn format_issue_json(issue: &LintIssue) -> String {
     let level = match issue.level {
         LintLevel::Error => "error",
         LintLevel::Warning => "warning",
@@ -3154,8 +3240,8 @@ fn emit_issue_json(issue: &LintIssue) {
         .as_ref()
         .map(|t| format!(",\"suggestion\":{}", json_string(t.as_str())))
         .unwrap_or_default();
-    println!(
-        "{{\"event\":\"lint\",\"rule\":{rule},\"level\":\"{lvl}\",\"file\":{file},\"line\":{ln},\"column\":{col},\"message\":{msg},\"fixable\":{fixable}{suggestion}}}",
+    format!(
+        "{{\"event\":\"lint\",\"schema_version\":1,\"rule\":{rule},\"level\":\"{lvl}\",\"file\":{file},\"line\":{ln},\"column\":{col},\"message\":{msg},\"fixable\":{fixable}{suggestion}}}",
         rule = json_string(issue.rule),
         lvl = level,
         file = json_string(&issue.file.display().to_string()),
@@ -3164,20 +3250,25 @@ fn emit_issue_json(issue: &LintIssue) {
         msg = json_string(&issue.message),
         fixable = issue.fixable,
         suggestion = suggestion,
-    );
+    )
 }
 
-/// Emit a single issue as a GitHub Actions annotation.
-/// Format: `::warning file=path,line=N,col=M::message`
-fn emit_issue_gha(issue: &LintIssue) {
+fn emit_issue_json(issue: &LintIssue) {
+    println!("{}", format_issue_json(issue));
+}
+
+/// Render a single issue as a GitHub Actions workflow annotation.
+/// Format: `::warning file=path,line=N,col=M::message`. Off-level
+/// issues return an empty string (no output).
+pub fn format_issue_gha(issue: &LintIssue) -> String {
     let level = match issue.level {
         LintLevel::Error => "error",
         LintLevel::Warning => "warning",
         LintLevel::Info => "notice",
         LintLevel::Hint => "notice",
-        LintLevel::Off => return,
+        LintLevel::Off => return String::new(),
     };
-    println!(
+    format!(
         "::{lvl} file={file},line={ln},col={col},title={title}::{msg}",
         lvl = level,
         file = issue.file.display(),
@@ -3185,7 +3276,14 @@ fn emit_issue_gha(issue: &LintIssue) {
         col = issue.column,
         title = issue.rule,
         msg = issue.message.replace('\n', "%0A"),
-    );
+    )
+}
+
+fn emit_issue_gha(issue: &LintIssue) {
+    let line = format_issue_gha(issue);
+    if !line.is_empty() {
+        println!("{}", line);
+    }
 }
 
 fn json_string(s: &str) -> String {
@@ -3294,7 +3392,10 @@ fn emit_issues(issues: &[LintIssue], format: LintOutputFormat) -> Result<()> {
 /// SARIF 2.1.0 emitter — one driver "verum-lint", every shipped rule
 /// listed under tool.driver.rules, every issue as a result with
 /// physicalLocation.artifactLocation + region.startLine/Column.
-fn emit_sarif(issues: &[LintIssue]) {
+/// Render the entire batch of issues as a SARIF 2.1.0 document.
+/// Single document per run; consumers (GitHub Code Scanning, Azure
+/// DevOps) treat one SARIF JSON object as one analysis run.
+pub fn format_sarif(issues: &[LintIssue]) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     s.push_str("{\n");
@@ -3350,16 +3451,22 @@ fn emit_sarif(issues: &[LintIssue]) {
     s.push_str("\n    ]\n");
     s.push_str("  }]\n");
     s.push_str("}\n");
-    print!("{}", s);
+    s
 }
 
-/// TAP v13 emitter — `TAP version 13`, `1..N` plan, `ok N - msg` /
-/// `not ok N - msg` per issue with YAML diagnostic block on failures.
-/// `not ok` is emitted for Error and Warning; Info/Hint are `ok` with
-/// `# SKIP info` to avoid breaking strict TAP consumers.
-fn emit_tap(issues: &[LintIssue]) {
-    println!("TAP version 13");
-    println!("1..{}", issues.len());
+fn emit_sarif(issues: &[LintIssue]) {
+    print!("{}", format_sarif(issues));
+}
+
+/// TAP v13 — `TAP version 13`, `1..N` plan, `ok N - msg` / `not ok
+/// N - msg` per issue with a YAML diagnostic block on failures.
+/// `not ok` is emitted for Error and Warning; Info/Hint are `ok`
+/// with `# SKIP info` so strict TAP consumers don't fail the run.
+pub fn format_tap(issues: &[LintIssue]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "TAP version 13");
+    let _ = writeln!(out, "1..{}", issues.len());
     for (idx, i) in issues.iter().enumerate() {
         let n = idx + 1;
         let directive = match i.level {
@@ -3369,21 +3476,32 @@ fn emit_tap(issues: &[LintIssue]) {
         };
         let skip = matches!(i.level, LintLevel::Info | LintLevel::Hint);
         if skip {
-            println!(
+            let _ = writeln!(
+                out,
                 "{} {} - {} [{}] # SKIP {} ({})",
-                directive, n, i.message, i.rule, i.level.as_str(), i.file.display()
+                directive,
+                n,
+                i.message,
+                i.rule,
+                i.level.as_str(),
+                i.file.display()
             );
         } else {
-            println!("{} {} - {} [{}]", directive, n, i.message, i.rule);
-            println!("  ---");
-            println!("  rule: {}", i.rule);
-            println!("  level: {}", i.level.as_str());
-            println!("  file: {}", i.file.display());
-            println!("  line: {}", i.line);
-            println!("  column: {}", i.column);
-            println!("  ...");
+            let _ = writeln!(out, "{} {} - {} [{}]", directive, n, i.message, i.rule);
+            let _ = writeln!(out, "  ---");
+            let _ = writeln!(out, "  rule: {}", i.rule);
+            let _ = writeln!(out, "  level: {}", i.level.as_str());
+            let _ = writeln!(out, "  file: {}", i.file.display());
+            let _ = writeln!(out, "  line: {}", i.line);
+            let _ = writeln!(out, "  column: {}", i.column);
+            let _ = writeln!(out, "  ...");
         }
     }
+    out
+}
+
+fn emit_tap(issues: &[LintIssue]) {
+    print!("{}", format_tap(issues));
 }
 
 /// Phase A.3 extended runner — applies named profiles, --since
