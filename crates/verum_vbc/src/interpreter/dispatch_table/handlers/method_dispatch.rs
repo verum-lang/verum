@@ -325,7 +325,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         && state.module.find_function_by_name(&method_name).is_some();
     if !prefer_user_compiled
         && dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil()
-        && let Some(result) = dispatch_variant_method(state, dispatch_receiver, &bare_method_name, &args)? {
+        && let Some(result) = dispatch_variant_method(state, dispatch_receiver, &bare_method_name, &args, &method_name)? {
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
         }
@@ -5627,11 +5627,20 @@ pub(super) fn list_push(state: &mut InterpreterState, list_val: Value, new_val: 
 /// Conventions:
 ///   Result<T, E> = Ok(T) | Err(E)  → Ok = tag 0, Err = tag 1
 ///   Maybe<T>     = None  | Some(T) → None = tag 0 (field_count=0), Some = tag 1
+///
+/// `method_full` is the qualified call-site method name (e.g.
+/// `"Result.unwrap"` vs `"Maybe.unwrap"`). When it starts with
+/// `Result.` the dispatcher applies Result semantics — `unwrap`
+/// panics on `Err`. When it starts with `Maybe.` it applies Maybe
+/// semantics. Without a qualified prefix (bare `"unwrap"`) it
+/// preserves the historic "return payload if fc > 0" behaviour for
+/// back-compatibility with generic-parameter dispatch.
 pub(super) fn dispatch_variant_method(
     state: &mut InterpreterState,
     receiver: Value,
     method: &str,
     args: &RegRange,
+    method_full: &str,
 ) -> InterpreterResult<Option<Value>> {
     let base_ptr = receiver.as_ptr::<u8>();
     if base_ptr.is_null() {
@@ -5667,36 +5676,56 @@ pub(super) fn dispatch_variant_method(
         "is_some" => Ok(Some(Value::from_bool(field_count > 0))),
         "is_none" => Ok(Some(Value::from_bool(field_count == 0))),
 
-        // Value extraction: works for both Maybe.Some and Result.Ok (any
-        // variant with payload > 0). Maybe.None and Result.Err-no-payload
-        // panic. The payload lives immediately after the tag/field_count
-        // header at offset OBJECT_HEADER_SIZE + 8 (tag) + 8 (field_count).
-        // stdlib's maybe.vr is excluded from compilation to avoid type
-        // collision with user-defined `Maybe`, so these methods must be
-        // provided as interpreter intrinsics — otherwise any call to
-        // `x.unwrap()` on a Maybe/Result value panics with "not found".
+        // Value extraction with type-aware semantics.
+        //
+        //   Maybe.None  (tag=0, fc=0) → panic
+        //   Maybe.Some  (tag=1, fc=1) → extract payload
+        //   Result.Ok   (tag=0, fc=1) → extract payload
+        //   Result.Err  (tag=1, fc=1) → panic (when method_full says Result.*)
+        //
+        // Without `method_full`, `Maybe.Some` and `Result.Err` are
+        // indistinguishable from runtime data alone (same `(tag, fc)`
+        // after `MakeVariant`; `TypeId = 0x8000 + tag` collapses both
+        // into the same id range). The qualified call-site name —
+        // emitted by codegen as `Result.unwrap` vs `Maybe.unwrap` — is
+        // load-bearing here: it lets the dispatcher distinguish the
+        // two type semantics without needing the type tag in the heap
+        // header. Bare `unwrap` (no type prefix) preserves the
+        // historic "return payload if fc > 0" route.
         "unwrap" | "expect" => {
-            // Variant payload extraction:
-            //
-            //   Maybe.None  (tag=0, fc=0) → panic
-            //   Maybe.Some  (tag=1, fc=1) → extract payload
-            //   Result.Ok   (tag=0, fc=1) → extract payload
-            //   Result.Err  (tag=1, fc=1) → see note below
-            //
-            // `Maybe.Some` and `Result.Err` are indistinguishable at runtime
-            // (same `(tag, fc)` after `MakeVariant`; `TypeId = 0x8000 + tag`
-            // collapses Maybe and Result into the same id range). Between
-            // breaking every `Maybe.Some.unwrap()` (prior behaviour) and
-            // returning an error payload on `Result.Err.unwrap()` we prefer
-            // the latter: `Maybe.unwrap` on present values is idiomatic and
-            // pervasive; `Result.Err.unwrap` is always a programmer error, so
-            // either silently succeeding or panicking surfaces the same
-            // underlying bug. The stdlib's own `Result.unwrap` panics on
-            // `Err` via `match` (MatchVariant + GetVariantData) and is
-            // reached by user-defined dispatch whenever the compiled method
-            // is available, so this fallback only fires for code paths that
-            // bypass the stdlib route.
-            if field_count > 0 {
+            let is_result = method_full.starts_with("Result.")
+                || method_full == "Result::unwrap"
+                || method_full == "Result::expect";
+            let is_maybe = method_full.starts_with("Maybe.")
+                || method_full.starts_with("Option.")
+                || method_full == "Maybe::unwrap"
+                || method_full == "Option::unwrap";
+            if is_result {
+                // Result semantics: tag 0 = Ok, tag != 0 = Err.
+                if tag == 0 && field_count > 0 {
+                    let payload_ptr = unsafe {
+                        base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
+                    };
+                    Ok(Some(unsafe { *payload_ptr }))
+                } else {
+                    Err(InterpreterError::Panic {
+                        message: format!("called `{}` on an Err value", method),
+                    })
+                }
+            } else if is_maybe {
+                // Maybe semantics: payload extraction iff fc > 0.
+                if field_count > 0 {
+                    let payload_ptr = unsafe {
+                        base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
+                    };
+                    Ok(Some(unsafe { *payload_ptr }))
+                } else {
+                    Err(InterpreterError::Panic {
+                        message: format!("called `{}` on a None value", method),
+                    })
+                }
+            } else if field_count > 0 {
+                // Bare-name dispatch (no type prefix). Historic behaviour.
                 let payload_ptr = unsafe {
                     base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
                 };
