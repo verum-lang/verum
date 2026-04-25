@@ -22,7 +22,7 @@ module core.database.sqlite.native.vacuum.engine;
 mount core.*;
 mount base.{Text, Bool, Maybe};
 mount core.database.sqlite.native.vacuum.relocator.{
-    Relocator, MapEntry, relocator_new,
+    Relocator, VacuumMapEntry, relocator_new,
 };
 mount core.database.sqlite.native.vacuum.mode.{
     AutoVacuumMode, AvNone, AvFull, AvIncremental,

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.vtab_in_first_next_api.iter.{
-    Position, PFresh, PAtRow, PExhausted, position_name,
+    VtabInPosition, PFresh, PAtRow, PExhausted, position_name,
     Outcome, OkRow, OkDone, OkErrNotInList,
     outcome_name, returned_row,
     StepResult, first_call, next_call, current_value,

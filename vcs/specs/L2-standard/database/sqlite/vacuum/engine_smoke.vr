@@ -19,7 +19,7 @@ mount core.database.sqlite.native.vacuum.mode.{
     vacuum_op_name, mode_permits,
 };
 mount core.database.sqlite.native.vacuum.relocator.{
-    MapEntry, Relocator, relocator_new,
+    VacuumMapEntry, Relocator, relocator_new,
 };
 mount core.database.sqlite.native.vacuum.engine.{
     EnginePhase, EpInit, EpCounting, EpCopying, EpRewriting,

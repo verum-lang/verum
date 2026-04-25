@@ -8,7 +8,7 @@
 mount core.database.sqlite.native.regexp_fn_api.hook.{
     function_name, well_known_arity,
     RewriteOrder, PatternFirst, rewrite_order,
-    LookupOutcome, LoFound, LoMissingFunction, LoArityMismatch,
+    RegexpLookupOutcome, LoFound, LoMissingFunction, LoArityMismatch,
     lookup, outcome_name, is_ok,
     MatchResult, MrMatch, MrNoMatch, MrError,
     result_int, is_match, result_kind_name,

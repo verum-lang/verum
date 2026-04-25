@@ -19,19 +19,19 @@ public type RewriteOrder is
 public fn rewrite_order() -> RewriteOrder { PatternFirst }
 
 // Lookup outcome at prepare time.
-public type LookupOutcome is
+public type RegexpLookupOutcome is
     | LoFound
     | LoMissingFunction      // SQLITE_ERROR — "no such function: regexp"
     | LoArityMismatch         // function exists but with wrong arg count
     ;
 
-public fn lookup(installed: Bool, registered_arity: Int) -> LookupOutcome {
+public fn lookup(installed: Bool, registered_arity: Int) -> RegexpLookupOutcome {
     if !installed { return LoMissingFunction; }
     if registered_arity != well_known_arity() { return LoArityMismatch; }
     LoFound
 }
 
-public fn outcome_name(o: &LookupOutcome) -> Text {
+public fn outcome_name(o: &RegexpLookupOutcome) -> Text {
     match o {
         LoFound           => "found".clone(),
         LoMissingFunction => "missing_function".clone(),
@@ -39,7 +39,7 @@ public fn outcome_name(o: &LookupOutcome) -> Text {
     }
 }
 
-public fn is_ok(o: &LookupOutcome) -> Bool {
+public fn is_ok(o: &RegexpLookupOutcome) -> Bool {
     match o { LoFound => true, _ => false }
 }
 

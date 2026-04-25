@@ -22,10 +22,10 @@ mount base.{Bool, Maybe};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// MapEntry
+// VacuumMapEntry
 // -----------------------------------------------------------------------------
 
-public type MapEntry is { src: Int, dst: Int };
+public type VacuumMapEntry is { src: Int, dst: Int };
 
 // -----------------------------------------------------------------------------
 // Relocator
@@ -34,7 +34,7 @@ public type MapEntry is { src: Int, dst: Int };
 public type Relocator is {
     /// Sorted by `src` for binary lookup; insertion-sorted append
     /// keeps it cheap when relocations come in dense order.
-    entries: List<MapEntry>,
+    entries: List<VacuumMapEntry>,
     /// Pages explicitly dropped (released to OS).
     dropped: List<Int>,
 }
@@ -54,13 +54,13 @@ implement Relocator {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].src == src {
-                self.entries[i] = MapEntry { src: src, dst: dst };
+                self.entries[i] = VacuumMapEntry { src: src, dst: dst };
                 found = true;
                 break;
             }
             i = i + 1;
         }
-        if !found { self.entries.push(MapEntry { src: src, dst: dst }); }
+        if !found { self.entries.push(VacuumMapEntry { src: src, dst: dst }); }
     }
 
     /// Mark a page as dropped (no destination — the page is freed).

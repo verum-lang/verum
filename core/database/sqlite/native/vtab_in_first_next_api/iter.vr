@@ -5,14 +5,14 @@ module core.database.sqlite.native.vtab_in_first_next_api.iter;
 mount base.{Bool, Int64, Text};
 mount core.collections.list.{List};
 
-// Position state.
-public type Position is
+// VtabInPosition state.
+public type VtabInPosition is
     | PFresh             // before any call
     | PAtRow(Int)         // 0-based index of the current value
     | PExhausted          // past the last value
     ;
 
-public fn position_name(p: &Position) -> Text {
+public fn position_name(p: &VtabInPosition) -> Text {
     match p {
         PFresh       => "fresh".clone(),
         PAtRow(_)    => "at_row".clone(),
@@ -41,7 +41,7 @@ public fn returned_row(o: &Outcome) -> Bool {
 
 // Step result combines new position + outcome.  Use a record (tuple returns
 // remain unsupported in Verum).
-public type StepResult is { pos: Position, outcome: Outcome };
+public type StepResult is { pos: VtabInPosition, outcome: Outcome };
 
 public fn first_call(values: &List<Int64>, is_in_constraint: Bool) -> StepResult {
     if !is_in_constraint {
@@ -53,7 +53,7 @@ public fn first_call(values: &List<Int64>, is_in_constraint: Bool) -> StepResult
     StepResult { pos: PAtRow(0), outcome: OkRow }
 }
 
-public fn next_call(p: &Position, values: &List<Int64>) -> StepResult {
+public fn next_call(p: &VtabInPosition, values: &List<Int64>) -> StepResult {
     let n = values.len() as Int;
     match p {
         PFresh        => StepResult { pos: PFresh,      outcome: OkErrNotInList },
@@ -69,7 +69,7 @@ public fn next_call(p: &Position, values: &List<Int64>) -> StepResult {
     }
 }
 
-public fn current_value(p: &Position, values: &List<Int64>) -> Int64 {
+public fn current_value(p: &VtabInPosition, values: &List<Int64>) -> Int64 {
     match p {
         PAtRow(i)   => values.get(i.clone()),
         _ => 0 as Int64,

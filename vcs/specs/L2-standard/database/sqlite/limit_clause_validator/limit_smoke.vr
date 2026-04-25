@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.limit_clause_validator.clause.{
-    LimitClause,
+    SqlLimitClause,
     unbounded, resolve,
     is_unbounded, emits_zero_rows, applies_offset,
     int64_max, offset_overflows_after_n,
