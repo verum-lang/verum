@@ -787,11 +787,22 @@ public type ToSocketAddrs is protocol {
     fn to_socket_addrs(&self) -> Result<Self.Iter, IoError>;
 };
 
-// Implementations for common types
+// Implementations for common types.
+//
+// `Iter = List<SocketAddr>` rather than `OnceIter<SocketAddr>`: the
+// other two impls in this module (`(&Text, Int)`, `Text`) already
+// return `List<SocketAddr>`, and using a single Iter type across
+// every impl avoids a class of impl-method-dispatch codegen failure
+// where the same call site emits "field index 2 (offset 16+8 = 24)
+// exceeds object data size 8" panics through the SocketAddr branch
+// only. Allocating a one-element list is a fixed cost per bind call,
+// dwarfed by the syscall.
 implement ToSocketAddrs for SocketAddr {
-    type Iter = OnceIter<SocketAddr>;
-    fn to_socket_addrs(&self) -> Result<OnceIter<SocketAddr>, IoError> {
-        Ok(once(*self))
+    type Iter = List<SocketAddr>;
+    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
+        let mut v: List<SocketAddr> = [];
+        v.push(*self);
+        Ok(v)
     }
 }
 
