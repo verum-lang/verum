@@ -4558,7 +4558,26 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
                 let builder = self.context.create_builder();
                 builder.position_at_end(entry);
-                let path = func.get_nth_param(0).or_internal("missing param 0")?.into_pointer_value();
+                // Defensive: a previously-declared function with the same
+                // name (e.g. a Verum-side stdlib function lowered with
+                // the int parameter shape) leaks through `get_function`,
+                // and `into_pointer_value()` panics. Coerce param 0 via
+                // int_to_ptr when it arrives as Int — same pattern the
+                // SliceGet / SliceSubslice fixes use.
+                let raw_path = func.get_nth_param(0).or_internal("missing param 0")?;
+                let path = match raw_path {
+                    verum_llvm::values::BasicValueEnum::PointerValue(p) => p,
+                    verum_llvm::values::BasicValueEnum::IntValue(i) => {
+                        builder
+                            .build_int_to_ptr(i, ptr_type, "path_ptr")
+                            .or_llvm_err()?
+                    }
+                    _ => {
+                        return Err(LlvmLoweringError::internal(
+                            "verum_file_delete: param 0 has unexpected variant",
+                        ));
+                    }
+                };
                 let is_null = builder.build_is_null(path, "is_null").or_llvm_err()?;
                 builder.build_conditional_branch(is_null, null_bb, ok_bb).or_llvm_err()?;
 

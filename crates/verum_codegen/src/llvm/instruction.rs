@@ -13832,8 +13832,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 4 { return Ok(()); }
             let dst = operands[0] as u16;
             let src = ctx.get_register(operands[1] as u16)?;
-            let start = ctx.get_register(operands[2] as u16)?;
-            let end = ctx.get_register(operands[3] as u16)?;
+            let start_raw = ctx.get_register(operands[2] as u16)?;
+            let end_raw = ctx.get_register(operands[3] as u16)?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             // Load base from fat ref. Same variance as SliceGet.
@@ -13841,16 +13841,22 @@ fn lower_cbgr_extended<'ctx>(
             let base_int = ctx.builder()
                 .build_load(i64_ty, src_ptr, "base_int")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // Defensive: start/end can arrive as PointerValue (heap-tagged
+            // Int from a variant payload) — same shape as the SliceGet
+            // fix (4f649325). Route through `as_i64` so both Pointer and
+            // Int forms work.
+            let start = as_i64(ctx, start_raw, "sub_start")?;
+            let end = as_i64(ctx, end_raw, "sub_end")?;
             // Compute new base = base + start * 8
             let offset = ctx.builder()
-                .build_int_mul(start.into_int_value(), i64_ty.const_int(8, false), "sub_off")
+                .build_int_mul(start, i64_ty.const_int(8, false), "sub_off")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             let new_base = ctx.builder()
                 .build_int_add(base_int.into_int_value(), offset, "sub_base")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             // Compute new len = end - start
             let new_len = ctx.builder()
-                .build_int_sub(end.into_int_value(), start.into_int_value(), "sub_len")
+                .build_int_sub(end, start, "sub_len")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             // Allocate new fat ref
             let module = ctx.get_module();

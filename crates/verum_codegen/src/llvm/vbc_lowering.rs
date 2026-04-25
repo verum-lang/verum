@@ -646,6 +646,15 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     let bb_count = self.functions.get(&func_desc.id.0).map_or(0, |f| f.count_basic_blocks());
                     tracing::debug!("[LOWER] {} id={} blocks_before={}", func_name, func_desc.id.0, bb_count);
                 }
+                // VERUM_AOT_TRACE_LOWER=1: print every function name to
+                // stderr before lowering. Survives panics and SIGABRT
+                // because the print is line-buffered to stderr (which
+                // libc flushes on signal). Used for bisecting a crash
+                // that happens during LLVM IR construction by reading
+                // the last-printed name from the abort output.
+                if std::env::var_os("VERUM_AOT_TRACE_LOWER").is_some() {
+                    eprintln!("[aot-lower] id={} name={}", func_desc.id.0, func_name);
+                }
                 if let Err(e) = self.lower_vbc_function(vbc_module, &vbc_func) {
                     // Stdlib functions may fail to lower (e.g. methods using
                     // unimplemented intrinsics). Skip gracefully.
