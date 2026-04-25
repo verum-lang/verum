@@ -1289,7 +1289,7 @@ Receipts are content-addressed; CI compares against a committed baseline.
 ### 16.3 Phase 3 (6–12 months) — Dependent types
 
 - **Task C1**: Π / Σ / Path CoreTerm nodes (partially present — complete).
-- **Task C2**: Inductive types with positivity check.
+- **Task C2** (✓ shipped): Inductive types with strict-positivity check (`K-Pos`). `crates/verum_kernel/src/lib.rs` ships `InductiveRegistry`, `RegisteredInductive { name, params, constructors }`, `ConstructorSig { name, arg_types }`, and `check_strict_positivity(target, ty, ctx)` — the strict-positivity walker per VUVA §7.3. The walker descends through `Pi`, `Sigma`, `Inductive`, `App`, `Refine`, `PathTy`, `Lam`; on `Pi(domain, codomain)` it forbids any occurrence of `target` in the negative position (`domain`) and recursively validates `codomain`. `KernelError::PositivityViolation { type_name, constructor, position }` carries a breadcrumb to the offending site. Berardi-shaped definitions (`type Bad = Wrap(Bad → A)`, second-order `Bad2 = Wrap((Bad2 → A) → A)`, indirect non-positive via parametrised inductives) are all rejected. Thirteen end-to-end tests at `crates/verum_kernel/tests/k_pos_strict_positivity.rs` exercise both directions.
 - **Task C3**: HITs with eliminator auto-gen.
 - **Task C4**: Quotient types.
 - **Task C5**: Quantitative annotations.
