@@ -33,7 +33,7 @@ mount core.database.sqlite.native.session.combinator.{
     invert, concat, strip_table, filter,
 };
 mount core.database.sqlite.native.session.apply.{
-    Conflict, ConflictResolution,
+    Conflict, SessionConflictResolution,
     CfDataMismatch, CfNotFound, CfConflict, CfConstraint,
     CrSkip, CrReplace, CrAbort, CrOmit,
     ConflictResolver,

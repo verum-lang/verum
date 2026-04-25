@@ -11,7 +11,7 @@
 mount core.*;
 mount core.collections.List;
 mount core.security.x509.crl.{
-    CertificateList, RevokedEntry, CrlError, CrlReason,
+    CertificateList, RevokedEntry, CrlError, OcspCrlReason,
     parse_crl, serials_equal, find_revoked, decode_reason,
 };
 
@@ -26,19 +26,19 @@ fn serials_equal_handles_length_and_content() {
 }
 
 fn decode_reason_maps_all_rfc_codes() {
-    match decode_reason(0_u32) { CrlReason.Unspecified => {}, _ => panic("0") }
-    match decode_reason(1_u32) { CrlReason.KeyCompromise => {}, _ => panic("1") }
-    match decode_reason(2_u32) { CrlReason.CaCompromise => {}, _ => panic("2") }
-    match decode_reason(3_u32) { CrlReason.AffiliationChanged => {}, _ => panic("3") }
-    match decode_reason(4_u32) { CrlReason.Superseded => {}, _ => panic("4") }
-    match decode_reason(5_u32) { CrlReason.CessationOfOperation => {}, _ => panic("5") }
-    match decode_reason(6_u32) { CrlReason.CertificateHold => {}, _ => panic("6") }
+    match decode_reason(0_u32) { OcspCrlReason.Unspecified => {}, _ => panic("0") }
+    match decode_reason(1_u32) { OcspCrlReason.KeyCompromise => {}, _ => panic("1") }
+    match decode_reason(2_u32) { OcspCrlReason.CaCompromise => {}, _ => panic("2") }
+    match decode_reason(3_u32) { OcspCrlReason.AffiliationChanged => {}, _ => panic("3") }
+    match decode_reason(4_u32) { OcspCrlReason.Superseded => {}, _ => panic("4") }
+    match decode_reason(5_u32) { OcspCrlReason.CessationOfOperation => {}, _ => panic("5") }
+    match decode_reason(6_u32) { OcspCrlReason.CertificateHold => {}, _ => panic("6") }
     // 7 is reserved — absent from enum.
-    match decode_reason(8_u32) { CrlReason.RemoveFromCrl => {}, _ => panic("8") }
-    match decode_reason(9_u32) { CrlReason.PrivilegeWithdrawn => {}, _ => panic("9") }
-    match decode_reason(10_u32) { CrlReason.AaCompromise => {}, _ => panic("10") }
+    match decode_reason(8_u32) { OcspCrlReason.RemoveFromCrl => {}, _ => panic("8") }
+    match decode_reason(9_u32) { OcspCrlReason.PrivilegeWithdrawn => {}, _ => panic("9") }
+    match decode_reason(10_u32) { OcspCrlReason.AaCompromise => {}, _ => panic("10") }
     match decode_reason(255_u32) {
-        CrlReason.UnknownReason(c) => assert(c == 255_u32),
+        OcspCrlReason.UnknownReason(c) => assert(c == 255_u32),
         _ => panic("255 should be UnknownReason"),
     }
 }

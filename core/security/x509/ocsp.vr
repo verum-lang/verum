@@ -113,7 +113,7 @@ implement OcspResponseStatus {
 // Per-cert status (RFC 6960 §4.2.1 SingleResponse.certStatus)
 // =============================================================================
 
-public type CrlReason is
+public type OcspCrlReason is
       Unspecified
     | KeyCompromise
     | CaCompromise
@@ -128,7 +128,7 @@ public type CrlReason is
 
 public type CertStatus is
       Good
-    | Revoked { revocation_time: Time, reason: Maybe<CrlReason> }
+    | Revoked { revocation_time: Time, reason: Maybe<OcspCrlReason> }
     | Unknown;
 
 // =============================================================================
@@ -233,18 +233,18 @@ fn serials_equal(a: &[Byte], b: &[Byte]) -> Bool {
 }
 
 /// Decode the numeric reason code field from a `revoked` SingleResponse.
-public fn decode_crl_reason(code: UInt32) -> CrlReason {
+public fn decode_crl_reason(code: UInt32) -> OcspCrlReason {
     match code {
-        0_u32  => CrlReason.Unspecified,
-        1_u32  => CrlReason.KeyCompromise,
-        2_u32  => CrlReason.CaCompromise,
-        3_u32  => CrlReason.AffiliationChanged,
-        4_u32  => CrlReason.Superseded,
-        5_u32  => CrlReason.CessationOfOperation,
-        6_u32  => CrlReason.CertificateHold,
-        8_u32  => CrlReason.RemoveFromCrl,
-        9_u32  => CrlReason.PrivilegeWithdrawn,
-        10_u32 => CrlReason.AaCompromise,
-        other  => CrlReason.UnknownReason(other),
+        0_u32  => OcspCrlReason.Unspecified,
+        1_u32  => OcspCrlReason.KeyCompromise,
+        2_u32  => OcspCrlReason.CaCompromise,
+        3_u32  => OcspCrlReason.AffiliationChanged,
+        4_u32  => OcspCrlReason.Superseded,
+        5_u32  => OcspCrlReason.CessationOfOperation,
+        6_u32  => OcspCrlReason.CertificateHold,
+        8_u32  => OcspCrlReason.RemoveFromCrl,
+        9_u32  => OcspCrlReason.PrivilegeWithdrawn,
+        10_u32 => OcspCrlReason.AaCompromise,
+        other  => OcspCrlReason.UnknownReason(other),
     }
 }

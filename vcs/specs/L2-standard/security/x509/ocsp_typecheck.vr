@@ -11,7 +11,7 @@
 mount core.*;
 mount core.collections.List;
 mount core.security.x509.ocsp.{
-    OcspResponseStatus, CertStatus, CrlReason,
+    OcspResponseStatus, CertStatus, OcspCrlReason,
     OcspResponse, OcspError, BasicOcspResponse,
     SingleResponse, CertId, ResponderId,
     parse_ocsp_response, find_single_response, decode_crl_reason,
@@ -40,12 +40,12 @@ fn response_status_codepoints_match_rfc() {
 }
 
 fn decode_crl_reason_maps_all_codes() {
-    match decode_crl_reason(0_u32)  { CrlReason.Unspecified => {}, _ => panic("0") }
-    match decode_crl_reason(1_u32)  { CrlReason.KeyCompromise => {}, _ => panic("1") }
-    match decode_crl_reason(6_u32)  { CrlReason.CertificateHold => {}, _ => panic("6") }
-    match decode_crl_reason(10_u32) { CrlReason.AaCompromise => {}, _ => panic("10") }
+    match decode_crl_reason(0_u32)  { OcspCrlReason.Unspecified => {}, _ => panic("0") }
+    match decode_crl_reason(1_u32)  { OcspCrlReason.KeyCompromise => {}, _ => panic("1") }
+    match decode_crl_reason(6_u32)  { OcspCrlReason.CertificateHold => {}, _ => panic("6") }
+    match decode_crl_reason(10_u32) { OcspCrlReason.AaCompromise => {}, _ => panic("10") }
     match decode_crl_reason(99_u32) {
-        CrlReason.UnknownReason(c) => assert(c == 99_u32),
+        OcspCrlReason.UnknownReason(c) => assert(c == 99_u32),
         _ => panic("99"),
     }
 }

@@ -1,7 +1,7 @@
 // =============================================================================
-// constraint.vr - Constraint types and Layout solver
+// constraint.vr - LayoutConstraint types and Layout solver
 // =============================================================================
-// Constraint-based layout splitting for terminal areas. Supports exact lengths,
+// LayoutConstraint-based layout splitting for terminal areas. Supports exact lengths,
 // min/max bounds, percentages, ratios, and weighted fill. The solver uses a
 // greedy 5-pass algorithm with priority: Length > Min/Max > Percentage > Ratio > Fill.
 //
@@ -12,8 +12,8 @@ module constraint;
 
 mount super.rect.{Rect, Margin};
 
-/// Constraint on a single dimension (width or height).
-public type Constraint is
+/// LayoutConstraint on a single dimension (width or height).
+public type LayoutConstraint is
     | Length(Int)        // Exact size in cells
     | Min(Int)          // Minimum size
     | Max(Int)          // Maximum size
@@ -36,7 +36,7 @@ public type Flex is
 /// Supports builder-pattern configuration.
 public type Layout is {
     direction: Direction,
-    constraints: List<Constraint>,
+    constraints: List<LayoutConstraint>,
     margin: Margin,
     flex: Flex,
     spacing: Int,
@@ -66,7 +66,7 @@ implement Layout {
     }
 
     /// Set the constraints for this layout.
-    public fn constraints(self, constraints: List<Constraint>) -> Layout {
+    public fn constraints(self, constraints: List<LayoutConstraint>) -> Layout {
         Layout { constraints: constraints, ..self }
     }
 
@@ -132,7 +132,7 @@ implement Layout {
 
 /// Resolve constraints using a greedy 5-pass algorithm.
 /// Priority order: Length -> Min/Max -> Percentage -> Ratio -> Fill.
-fn resolve_constraints(constraints: &List<Constraint>, available: Int) -> List<Int> {
+fn resolve_constraints(constraints: &List<LayoutConstraint>, available: Int) -> List<Int> {
     let n = constraints.len();
     let mut sizes = List.with_capacity(n);
     for _ in 0..n { sizes.push(0); }

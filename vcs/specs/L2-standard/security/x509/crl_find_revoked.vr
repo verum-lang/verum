@@ -14,7 +14,7 @@ mount core.*;
 mount core.collections.List;
 mount core.encoding.der.{Time};
 mount core.security.x509.crl.{
-    CertificateList, RevokedEntry, CrlReason,
+    CertificateList, RevokedEntry, OcspCrlReason,
     find_revoked, decode_reason,
 };
 
@@ -120,7 +120,7 @@ fn decode_reason_key_compromise_is_pinned() {
     // fatal) from Superseded (may permit cached chains under some
     // policy regimes).
     match decode_reason(1_u32) {
-        CrlReason.KeyCompromise => {},
+        OcspCrlReason.KeyCompromise => {},
         _ => panic("decode_reason(1) must be KeyCompromise"),
     }
 }

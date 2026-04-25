@@ -58,13 +58,13 @@ public fn conflict_name(c: &Conflict) -> Text {
     }
 }
 
-public type ConflictResolution is
+public type SessionConflictResolution is
       CrSkip
     | CrReplace
     | CrAbort
     | CrOmit;
 
-public fn resolution_name(r: &ConflictResolution) -> Text {
+public fn resolution_name(r: &SessionConflictResolution) -> Text {
     match r {
         CrSkip    => "SKIP".clone(),
         CrReplace => "REPLACE".clone(),
@@ -79,7 +79,7 @@ public fn resolution_name(r: &ConflictResolution) -> Text {
 
 public type ConflictResolver is protocol {
     fn name(&self) -> Text;
-    fn resolve(&mut self, change: &Change, conflict: Conflict) -> ConflictResolution;
+    fn resolve(&mut self, change: &Change, conflict: Conflict) -> SessionConflictResolution;
 };
 
 // Built-in: never-resolve (always abort).
@@ -88,7 +88,7 @@ public fn abort_always() -> AbortAlways { AbortAlways { unit: true } }
 
 implement ConflictResolver for AbortAlways {
     fn name(&self) -> Text { "abort_always".clone() }
-    fn resolve(&mut self, _c: &Change, _k: Conflict) -> ConflictResolution { CrAbort }
+    fn resolve(&mut self, _c: &Change, _k: Conflict) -> SessionConflictResolution { CrAbort }
 }
 
 // Built-in: skip-on-mismatch (lossy but progress-guaranteed).
@@ -97,7 +97,7 @@ public fn skip_on_conflict() -> SkipOnConflict { SkipOnConflict { unit: true } }
 
 implement ConflictResolver for SkipOnConflict {
     fn name(&self) -> Text { "skip_on_conflict".clone() }
-    fn resolve(&mut self, _c: &Change, _k: Conflict) -> ConflictResolution { CrSkip }
+    fn resolve(&mut self, _c: &Change, _k: Conflict) -> SessionConflictResolution { CrSkip }
 }
 
 // Built-in: replace-existing on PK conflict, abort otherwise.
@@ -106,7 +106,7 @@ public fn replace_on_pk_conflict() -> ReplaceOnPkConflict { ReplaceOnPkConflict 
 
 implement ConflictResolver for ReplaceOnPkConflict {
     fn name(&self) -> Text { "replace_on_pk_conflict".clone() }
-    fn resolve(&mut self, _c: &Change, k: Conflict) -> ConflictResolution {
+    fn resolve(&mut self, _c: &Change, k: Conflict) -> SessionConflictResolution {
         match k {
             CfConflict => CrReplace,
             _          => CrAbort,

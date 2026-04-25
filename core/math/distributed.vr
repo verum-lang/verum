@@ -660,11 +660,11 @@ public type FSDP<M> is {
     model: M,
     process_group: ProcessGroup,
     sharding_strategy: ShardingStrategy,
-    mixed_precision: Maybe<DType>,
+    mixed_precision: Maybe<DistributedDType>,
 };
 
 // Data type for mixed precision
-public type DType is Float32 | Float16 | BFloat16;
+public type DistributedDType is Float32 | Float16 | BFloat16;
 
 implement<M: Module<In, Out>, In, Out> FSDP<M> {
     public fn new(model: M, process_group: ProcessGroup) -> Self {
@@ -683,7 +683,7 @@ implement<M: Module<In, Out>, In, Out> FSDP<M> {
     }
 
     // Enable mixed precision
-    public fn with_mixed_precision(mut self, dtype: DType) -> Self {
+    public fn with_mixed_precision(mut self, dtype: DistributedDType) -> Self {
         self.mixed_precision = Maybe.Some(dtype);
         self
     }
@@ -967,7 +967,7 @@ public type RdmaRef<T> is {
     owner_actor: ActorId,
     remote_ptr: USize,
     shape: List<USize>,
-    dtype: DType,
+    dtype: DistributedDType,
     generation: U64,  // For CBGR validation
 };
 
