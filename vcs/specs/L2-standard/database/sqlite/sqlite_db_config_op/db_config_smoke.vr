@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.sqlite_db_config_op.op.{
-    DbConfigOp,
+    SqliteDbConfigOp,
     DcMainDbName, DcLookaside, DcEnableFkey, DcEnableTrigger,
     DcEnableFts3Tokenizer, DcEnableLoadExtension, DcNoCkptOnClose,
     DcEnableQpsg, DcTriggerEqpTrace, DcResetDatabase,

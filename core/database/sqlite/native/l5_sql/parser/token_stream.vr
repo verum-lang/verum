@@ -35,19 +35,19 @@ public fn parse_error(msg: Text, position: Int) -> ParseError {
 }
 
 // -----------------------------------------------------------------------------
-// TokenStream
+// SqlTokenStream
 // -----------------------------------------------------------------------------
 
-public type TokenStream is {
+public type SqlTokenStream is {
     tokens: List<Token>,
     pos: Int,
 };
 
-public fn stream_new(tokens: List<Token>) -> TokenStream {
-    TokenStream { tokens: tokens, pos: 0 }
+public fn stream_new(tokens: List<Token>) -> SqlTokenStream {
+    SqlTokenStream { tokens: tokens, pos: 0 }
 }
 
-implement TokenStream {
+implement SqlTokenStream {
     public fn position(&self) -> Int { self.pos }
     public fn len(&self) -> Int { self.tokens.len() }
 
@@ -165,8 +165,8 @@ implement TokenStream {
 
     /// Fork the stream at the current position — useful for lookahead
     /// that may need to be rewound. The original stream is unaffected.
-    public fn fork(&self) -> TokenStream {
-        TokenStream {
+    public fn fork(&self) -> SqlTokenStream {
+        SqlTokenStream {
             tokens: clone_token_list(&self.tokens),
             pos: self.pos,
         }

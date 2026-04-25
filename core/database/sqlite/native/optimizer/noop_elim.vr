@@ -19,7 +19,7 @@ mount core.database.sqlite.native.opcode_catalog.metadata.{
 };
 mount core.database.sqlite.native.optimizer.opstream.{OpStream};
 mount core.database.sqlite.native.optimizer.pass.{
-    OptimizationPass, PassResult, pass_result,
+    OptimizationPass, OptimizerPassResult, pass_result,
 };
 
 public type NoopElim is { unit: Bool };
@@ -28,7 +28,7 @@ public fn noop_elim() -> NoopElim { NoopElim { unit: true } }
 implement OptimizationPass for NoopElim {
     fn name(&self) -> Text { "noop_elim".clone() }
 
-    fn apply(&self, stream: OpStream) -> PassResult {
+    fn apply(&self, stream: OpStream) -> OptimizerPassResult {
         let mut stream = stream;
         let mut edits: Int = 0;
         let mut i: Int = 0;

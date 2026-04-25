@@ -5,24 +5,24 @@ module core.database.sqlite.native.rtree_index_info.bbox;
 mount base.{Bool};
 mount core.collections.list.{List};
 
-public type BBox is {
+public type RTreeIndexBBox is {
     min_coords: List<Float>,
     max_coords: List<Float>,
 };
 
-public fn new(min_coords: List<Float>, max_coords: List<Float>) -> BBox {
-    BBox { min_coords: min_coords, max_coords: max_coords }
+public fn new(min_coords: List<Float>, max_coords: List<Float>) -> RTreeIndexBBox {
+    RTreeIndexBBox { min_coords: min_coords, max_coords: max_coords }
 }
 
-public fn dimension(b: &BBox) -> Int {
+public fn dimension(b: &RTreeIndexBBox) -> Int {
     b.min_coords.len()
 }
 
-public fn arity_consistent(b: &BBox) -> Bool {
+public fn arity_consistent(b: &RTreeIndexBBox) -> Bool {
     b.min_coords.len() == b.max_coords.len()
 }
 
-public fn is_well_formed(b: &BBox) -> Bool {
+public fn is_well_formed(b: &RTreeIndexBBox) -> Bool {
     if !arity_consistent(b) { return false; }
     let n = b.min_coords.len();
     if n == 0 { return false; }
@@ -35,7 +35,7 @@ public fn is_well_formed(b: &BBox) -> Bool {
     true
 }
 
-public fn intersects(a: &BBox, b: &BBox) -> Bool {
+public fn intersects(a: &RTreeIndexBBox, b: &RTreeIndexBBox) -> Bool {
     if a.min_coords.len() != b.min_coords.len() { return false; }
     let n = a.min_coords.len();
     let mut i: Int = 0;
@@ -47,7 +47,7 @@ public fn intersects(a: &BBox, b: &BBox) -> Bool {
     true
 }
 
-public fn contains_point(b: &BBox, coords: &List<Float>) -> Bool {
+public fn contains_point(b: &RTreeIndexBBox, coords: &List<Float>) -> Bool {
     if b.min_coords.len() != coords.len() { return false; }
     let n = b.min_coords.len();
     let mut i: Int = 0;
@@ -59,6 +59,6 @@ public fn contains_point(b: &BBox, coords: &List<Float>) -> Bool {
     true
 }
 
-public fn extent(b: &BBox, axis: Int) -> Float {
+public fn extent(b: &RTreeIndexBBox, axis: Int) -> Float {
     b.max_coords[axis] - b.min_coords[axis]
 }

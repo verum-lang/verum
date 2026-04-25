@@ -3,7 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22
 //
-// Wraps a `BackupHandle` with a per-step counter ledger and an ETA
+// Wraps a `BackupEngineHandle` with a per-step counter ledger and an ETA
 // estimator (constant-throughput model). The L7 façade exposes
 // `Database.backup_progress(handle) -> ProgressSnapshot` so callers
 // can render a progress bar / log line.
@@ -14,7 +14,7 @@ module core.database.sqlite.native.backup.progress;
 mount core.*;
 mount base.{Text, Bool};
 mount core.database.sqlite.native.backup.state.{
-    BackupHandle, BackupPhase, phase_name, phase_is_terminal,
+    BackupEngineHandle, BackupPhase, phase_name, phase_is_terminal,
 };
 
 // -----------------------------------------------------------------------------
@@ -53,7 +53,7 @@ public fn tracker_new(now_ns: Int64) -> ProgressTracker {
 }
 
 implement ProgressTracker {
-    public fn snapshot(&mut self, h: &BackupHandle, now_ns: Int64) -> ProgressSnapshot {
+    public fn snapshot(&mut self, h: &BackupEngineHandle, now_ns: Int64) -> ProgressSnapshot {
         let elapsed: Int64 = if now_ns > self.started_ns { now_ns - self.started_ns } else { 1 as Int64 };
         let elapsed_secs: Float64 = (elapsed as Float64) / 1000000000.0;
         let copied = h.copied_pages;
@@ -83,7 +83,7 @@ implement ProgressTracker {
         }
     }
 
-    public fn is_terminal(&self, h: &BackupHandle) -> Bool {
+    public fn is_terminal(&self, h: &BackupEngineHandle) -> Bool {
         phase_is_terminal(&h.phase_ref())
     }
 }

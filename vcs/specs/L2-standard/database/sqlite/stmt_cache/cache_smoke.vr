@@ -29,7 +29,7 @@ mount core.database.sqlite.native.stmt_cache.policy.{
 };
 mount core.database.sqlite.native.stmt_cache.cache.{
     CacheError, CeNoSpace,
-    CacheStats, stats_zero, hit_ratio,
+    StmtCacheStats, stats_zero, hit_ratio,
     StatementCache, cache_new,
 };
 mount base.{Some, None, Maybe, Result, Ok, Err, Bool};

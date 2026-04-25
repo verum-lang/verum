@@ -40,7 +40,7 @@ mount core.database.sqlite.native.l5_sql.ast.{
     DeleteStmt,
 };
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
-    TokenStream, ParseError, parse_error,
+    SqlTokenStream, ParseError, parse_error,
 };
 mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 
@@ -48,7 +48,7 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 // INSERT
 // -----------------------------------------------------------------------------
 
-public fn parse_insert(ts: &mut TokenStream) -> Result<InsertStmt, ParseError> {
+public fn parse_insert(ts: &mut SqlTokenStream) -> Result<InsertStmt, ParseError> {
     let replacing_form = ts.accept_keyword(KwReplace);
     let mut conflict: Maybe<OnConflict> = None;
 
@@ -103,7 +103,7 @@ public fn parse_insert(ts: &mut TokenStream) -> Result<InsertStmt, ParseError> {
     })
 }
 
-fn parse_insert_source(ts: &mut TokenStream) -> Result<InsertSource, ParseError> {
+fn parse_insert_source(ts: &mut SqlTokenStream) -> Result<InsertSource, ParseError> {
     if ts.accept_keyword(KwDefault) {
         match ts.expect_keyword(KwValues) { Ok(_) => {}, Err(e) => { return Err(e); } }
         return Ok(IsDefault);
@@ -140,7 +140,7 @@ fn parse_insert_source(ts: &mut TokenStream) -> Result<InsertSource, ParseError>
 // UPDATE
 // -----------------------------------------------------------------------------
 
-public fn parse_update(ts: &mut TokenStream) -> Result<UpdateStmt, ParseError> {
+public fn parse_update(ts: &mut SqlTokenStream) -> Result<UpdateStmt, ParseError> {
     match ts.expect_keyword(KwUpdate) { Ok(_) => {}, Err(e) => { return Err(e); } }
 
     let mut conflict: Maybe<OnConflict> = None;
@@ -198,7 +198,7 @@ public fn parse_update(ts: &mut TokenStream) -> Result<UpdateStmt, ParseError> {
 // DELETE
 // -----------------------------------------------------------------------------
 
-public fn parse_delete(ts: &mut TokenStream) -> Result<DeleteStmt, ParseError> {
+public fn parse_delete(ts: &mut SqlTokenStream) -> Result<DeleteStmt, ParseError> {
     match ts.expect_keyword(KwDelete) { Ok(_) => {}, Err(e) => { return Err(e); } }
     match ts.expect_keyword(KwFrom) { Ok(_) => {}, Err(e) => { return Err(e); } }
 
@@ -229,7 +229,7 @@ public fn parse_delete(ts: &mut TokenStream) -> Result<DeleteStmt, ParseError> {
 // Shared helpers
 // -----------------------------------------------------------------------------
 
-fn parse_conflict_action(ts: &mut TokenStream) -> Result<OnConflict, ParseError> {
+fn parse_conflict_action(ts: &mut SqlTokenStream) -> Result<OnConflict, ParseError> {
     if ts.accept_keyword(KwAbort)    { return Ok(OcAbort); }
     if ts.accept_keyword(KwFail)     { return Ok(OcFail); }
     if ts.accept_keyword(KwIgnore)   { return Ok(OcIgnore); }
@@ -238,7 +238,7 @@ fn parse_conflict_action(ts: &mut TokenStream) -> Result<OnConflict, ParseError>
     Err(parse_error("expected conflict action".clone(), ts.position()))
 }
 
-fn parse_qualified_name(ts: &mut TokenStream) -> Result<TableRef, ParseError> {
+fn parse_qualified_name(ts: &mut SqlTokenStream) -> Result<TableRef, ParseError> {
     let first = match ts.expect_ident() {
         Ok(s)  => s, Err(e) => { return Err(e); }
     };
@@ -251,7 +251,7 @@ fn parse_qualified_name(ts: &mut TokenStream) -> Result<TableRef, ParseError> {
     Ok(TableRef { schema: "".clone(), name: first, alias: "".clone() })
 }
 
-fn parse_returning(ts: &mut TokenStream) -> Result<List<ResultColumnItem>, ParseError> {
+fn parse_returning(ts: &mut SqlTokenStream) -> Result<List<ResultColumnItem>, ParseError> {
     let mut out: List<ResultColumnItem> = List.new();
     if !ts.accept_keyword(KwReturning) { return Ok(out); }
     loop {

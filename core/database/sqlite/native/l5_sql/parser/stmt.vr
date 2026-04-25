@@ -25,7 +25,7 @@ mount core.database.sqlite.native.l5_sql.lexer.{
 };
 mount core.database.sqlite.native.l5_sql.ast.Statement;
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
-    TokenStream, ParseError, parse_error, stream_new,
+    SqlTokenStream, ParseError, parse_error, stream_new,
 };
 mount core.database.sqlite.native.l5_sql.parser.select.parse_select;
 mount core.database.sqlite.native.l5_sql.parser.dml.{
@@ -44,7 +44,7 @@ mount core.database.sqlite.native.l5_sql.parser.misc.{
 // Single-statement dispatch
 // -----------------------------------------------------------------------------
 
-public fn parse_statement(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+public fn parse_statement(ts: &mut SqlTokenStream) -> Result<Statement, ParseError> {
     // Leading `WITH` — counts as SELECT for the v1 since we haven't
     // wired CTE storage yet; fall through.
     match ts.peek() {

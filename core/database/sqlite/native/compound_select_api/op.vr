@@ -4,14 +4,14 @@ module core.database.sqlite.native.compound_select_api.op;
 
 mount base.{Bool, Text, Maybe};
 
-public type CompoundOp is
+public type CompoundSelectOp is
     | CoUnion           // set-union, deduplicated
     | CoUnionAll        // bag-union, no dedup
     | CoIntersect       // set-intersection, deduplicated
     | CoExcept          // set-difference, deduplicated
     ;
 
-public fn op_name(o: &CompoundOp) -> Text {
+public fn op_name(o: &CompoundSelectOp) -> Text {
     match o {
         CoUnion     => "UNION".clone(),
         CoUnionAll  => "UNION ALL".clone(),
@@ -20,7 +20,7 @@ public fn op_name(o: &CompoundOp) -> Text {
     }
 }
 
-public fn from_keyword(kw: &Text) -> Maybe<CompoundOp> {
+public fn from_keyword(kw: &Text) -> Maybe<CompoundSelectOp> {
     if *kw == "UNION".clone()     { return Maybe.Some(CoUnion); }
     if *kw == "UNION ALL".clone() { return Maybe.Some(CoUnionAll); }
     if *kw == "INTERSECT".clone() { return Maybe.Some(CoIntersect); }
@@ -28,17 +28,17 @@ public fn from_keyword(kw: &Text) -> Maybe<CompoundOp> {
     Maybe.None
 }
 
-public fn deduplicates(o: &CompoundOp) -> Bool {
+public fn deduplicates(o: &CompoundSelectOp) -> Bool {
     match o { CoUnionAll => false, _ => true }
 }
 
-public fn preserves_duplicates(o: &CompoundOp) -> Bool {
+public fn preserves_duplicates(o: &CompoundSelectOp) -> Bool {
     !deduplicates(o)
 }
 
 // UNION ALL is associative + commutative; others are associative only for
 // same-operator chains.
-public fn is_commutative(o: &CompoundOp) -> Bool {
+public fn is_commutative(o: &CompoundSelectOp) -> Bool {
     match o {
         CoUnion     => true,
         CoUnionAll  => true,
@@ -47,14 +47,14 @@ public fn is_commutative(o: &CompoundOp) -> Bool {
     }
 }
 
-public fn requires_dedup_pass(o: &CompoundOp) -> Bool {
+public fn requires_dedup_pass(o: &CompoundSelectOp) -> Bool {
     deduplicates(o)
 }
 
 // Per SQLite grammar, you can't mix different ops at the same precedence
 // level without parens — the parser groups them left-associatively when
 // compatible. This helper tells whether the parser allows direct juxtaposition.
-public fn allows_direct_chain(prev: &CompoundOp, next: &CompoundOp) -> Bool {
+public fn allows_direct_chain(prev: &CompoundSelectOp, next: &CompoundSelectOp) -> Bool {
     let same = match (prev, next) {
         (CoUnion,     CoUnion)     => true,
         (CoUnionAll,  CoUnionAll)  => true,

@@ -6,7 +6,7 @@
 // Throttling determines how aggressively the backup process copies
 // pages. Two facets:
 //
-//   * `pages_per_step`  — pages copied per call to `BackupHandle.step`
+//   * `pages_per_step`  — pages copied per call to `BackupEngineHandle.step`
 //   * `sleep_between_ns` — caller-driven inter-step wait in nanoseconds
 //
 // Three pre-canned policies cover the common cases:

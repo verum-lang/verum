@@ -8,13 +8,13 @@ mount core.database.sqlite.native.changeset_apply_policy.flags.{
 };
 mount base.{Bool, Int64, Text};
 
-public type Disposition is
+public type ChangesetDisposition is
     | DpOmit       // xConflict returned SQLITE_CHANGESET_OMIT (0)
     | DpReplace    // SQLITE_CHANGESET_REPLACE (1)
     | DpAbort      // SQLITE_CHANGESET_ABORT (2)
     ;
 
-public fn code(d: &Disposition) -> Int {
+public fn code(d: &ChangesetDisposition) -> Int {
     match d {
         DpOmit    => 0,
         DpReplace => 1,
@@ -22,9 +22,9 @@ public fn code(d: &Disposition) -> Int {
     }
 }
 
-public fn default_disposition() -> Disposition { DpAbort }
+public fn default_disposition() -> ChangesetDisposition { DpAbort }
 
-public fn disposition_name(d: &Disposition) -> Text {
+public fn disposition_name(d: &ChangesetDisposition) -> Text {
     match d {
         DpOmit    => "OMIT".clone(),
         DpReplace => "REPLACE".clone(),
@@ -32,11 +32,11 @@ public fn disposition_name(d: &Disposition) -> Text {
     }
 }
 
-public fn is_terminal(d: &Disposition) -> Bool {
+public fn is_terminal(d: &ChangesetDisposition) -> Bool {
     match d { DpAbort => true, _ => false }
 }
 
-public fn keeps_going(d: &Disposition) -> Bool {
+public fn keeps_going(d: &ChangesetDisposition) -> Bool {
     !is_terminal(d)
 }
 

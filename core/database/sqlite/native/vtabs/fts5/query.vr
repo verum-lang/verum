@@ -25,7 +25,7 @@ module core.database.sqlite.native.vtabs.fts5.query;
 mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
-mount core.database.sqlite.native.vtabs.fts5.segment.{Posting, PostingList};
+mount core.database.sqlite.native.vtabs.fts5.segment.{Fts5SegmentPosting, Fts5SegmentPostingList};
 mount core.database.sqlite.native.vtabs.fts5.index.{Index};
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
     Tokenizer, Token, options_default,
@@ -240,7 +240,7 @@ public fn execute(expr: &MatchExpr, idx: &Index) -> List<RowMatch> {
     rank_bm25(&postings, idx)
 }
 
-fn eval(expr: &MatchExpr, idx: &Index) -> PostingList {
+fn eval(expr: &MatchExpr, idx: &Index) -> Fts5SegmentPostingList {
     match expr {
         MeTerm(t)      => idx.lookup(t),
         MePhrase(words) => eval_phrase(words, idx),
@@ -262,7 +262,7 @@ fn eval(expr: &MatchExpr, idx: &Index) -> PostingList {
     }
 }
 
-fn eval_phrase(words: &List<Text>, idx: &Index) -> PostingList {
+fn eval_phrase(words: &List<Text>, idx: &Index) -> Fts5SegmentPostingList {
     if words.len() == 0 {
         return core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
     }
@@ -277,7 +277,7 @@ fn eval_phrase(words: &List<Text>, idx: &Index) -> PostingList {
     acc
 }
 
-fn intersect(a: &PostingList, b: &PostingList) -> PostingList {
+fn intersect(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {
     let mut out = core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
     let ai = a.iter();
     let bi = b.iter();
@@ -285,7 +285,7 @@ fn intersect(a: &PostingList, b: &PostingList) -> PostingList {
     let mut j: Int = 0;
     while i < ai.len() && j < bi.len() {
         if ai[i].rowid == bi[j].rowid {
-            out.add(Posting { rowid: ai[i].rowid, column: ai[i].column, position: ai[i].position });
+            out.add(Fts5SegmentPosting { rowid: ai[i].rowid, column: ai[i].column, position: ai[i].position });
             i = i + 1;
             j = j + 1;
         } else if ai[i].rowid < bi[j].rowid {
@@ -297,24 +297,24 @@ fn intersect(a: &PostingList, b: &PostingList) -> PostingList {
     out
 }
 
-fn union(a: &PostingList, b: &PostingList) -> PostingList {
+fn union(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {
     let mut out = core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
     let ai = a.iter();
     let bi = b.iter();
     let mut i: Int = 0;
     while i < ai.len() {
-        out.add(Posting { rowid: ai[i].rowid, column: ai[i].column, position: ai[i].position });
+        out.add(Fts5SegmentPosting { rowid: ai[i].rowid, column: ai[i].column, position: ai[i].position });
         i = i + 1;
     }
     let mut j: Int = 0;
     while j < bi.len() {
-        out.add(Posting { rowid: bi[j].rowid, column: bi[j].column, position: bi[j].position });
+        out.add(Fts5SegmentPosting { rowid: bi[j].rowid, column: bi[j].column, position: bi[j].position });
         j = j + 1;
     }
     out
 }
 
-fn adjacent(a: &PostingList, b: &PostingList) -> PostingList {
+fn adjacent(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {
     let mut out = core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
     let ai = a.iter();
     let bi = b.iter();
@@ -324,7 +324,7 @@ fn adjacent(a: &PostingList, b: &PostingList) -> PostingList {
         while j < bi.len() {
             if ai[i].rowid == bi[j].rowid && ai[i].column == bi[j].column
                 && bi[j].position == ai[i].position + 1 {
-                out.add(Posting {
+                out.add(Fts5SegmentPosting {
                     rowid: ai[i].rowid,
                     column: ai[i].column,
                     position: ai[i].position,
@@ -337,7 +337,7 @@ fn adjacent(a: &PostingList, b: &PostingList) -> PostingList {
     out
 }
 
-fn near(a: &PostingList, b: &PostingList, dist: Int) -> PostingList {
+fn near(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList, dist: Int) -> Fts5SegmentPostingList {
     let mut out = core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
     let ai = a.iter();
     let bi = b.iter();
@@ -349,7 +349,7 @@ fn near(a: &PostingList, b: &PostingList, dist: Int) -> PostingList {
                 let diff: Int = ai[i].position - bi[j].position;
                 let abs_d: Int = if diff < 0 { -diff } else { diff };
                 if abs_d <= dist {
-                    out.add(Posting {
+                    out.add(Fts5SegmentPosting {
                         rowid: ai[i].rowid,
                         column: ai[i].column,
                         position: ai[i].position,
@@ -377,7 +377,7 @@ fn near(a: &PostingList, b: &PostingList, dist: Int) -> PostingList {
 // length into docstore.
 // =============================================================================
 
-public fn rank_bm25(pl: &PostingList, idx: &Index) -> List<RowMatch> {
+public fn rank_bm25(pl: &Fts5SegmentPostingList, idx: &Index) -> List<RowMatch> {
     let n_docs: Int = idx.segment_count();
     if n_docs == 0 { return List.new(); }
     let n_docs_f = n_docs as Float64;

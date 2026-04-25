@@ -12,7 +12,7 @@ mount core.database.sqlite.native.changeset_apply_policy.flags.{
     is_known_only, well_known_bit_count,
 };
 mount core.database.sqlite.native.changeset_apply_policy.policy.{
-    Disposition, DpOmit, DpReplace, DpAbort,
+    ChangesetDisposition, DpOmit, DpReplace, DpAbort,
     code as disposition_code, default_disposition,
     disposition_name, is_terminal, keeps_going,
     ApplyOutcome, AoOk, AoOkWithSkips, AoAborted,

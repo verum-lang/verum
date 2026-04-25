@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.temp_store_policy.store.{
-    TempStore, TsDefault, TsFile, TsMemory,
+    TempStorePolicy, TsDefault, TsFile, TsMemory,
     code, from_code, store_name,
     CompileTimeDefault,
     CtdAlwaysFile, CtdFilePreferred, CtdMemoryPreferred, CtdAlwaysMemory,

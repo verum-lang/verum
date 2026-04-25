@@ -3,7 +3,7 @@
 module core.database.sqlite.native.explain_opcode_dump.formatter;
 
 mount core.database.sqlite.native.explain_opcode_dump.row.{
-    ExplainRow, has_p4, has_p5, has_comment,
+    ExplainOpcodeRow, has_p4, has_p5, has_comment,
 };
 mount base.{Bool, Text, Int64};
 
@@ -30,7 +30,7 @@ fn int_to_text(n: Int) -> Text {
     out
 }
 
-public fn format_row(r: &ExplainRow) -> Text {
+public fn format_row(r: &ExplainOpcodeRow) -> Text {
     let sep = "|".clone();
     let mut out = "".clone();
     out = out + int_to_text(r.addr);
@@ -53,6 +53,6 @@ public fn format_row(r: &ExplainRow) -> Text {
     out
 }
 
-public fn has_trailing_comment_column(r: &ExplainRow) -> Bool {
+public fn has_trailing_comment_column(r: &ExplainOpcodeRow) -> Bool {
     has_comment(r)
 }

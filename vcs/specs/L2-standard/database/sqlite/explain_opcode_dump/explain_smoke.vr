@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.explain_opcode_dump.row.{
-    ExplainRow,
+    ExplainOpcodeRow,
     new, with_operands, with_p4, with_p5, with_comment,
     has_p4, has_p5, has_comment, column_count,
 };

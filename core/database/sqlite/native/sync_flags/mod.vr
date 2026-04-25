@@ -46,28 +46,28 @@ public fn is_full(m: &SyncMode) -> Bool {
     }
 }
 
-public type SyncFlags is {
+public type SyncFlagsPragma is {
     mode: SyncMode,
     data_only: Bool,
 }
 
-public fn new_flags(mode: SyncMode, data_only: Bool) -> SyncFlags {
-    SyncFlags { mode: mode, data_only: data_only }
+public fn new_flags(mode: SyncMode, data_only: Bool) -> SyncFlagsPragma {
+    SyncFlagsPragma { mode: mode, data_only: data_only }
 }
 
-public fn flags_numeric(f: &SyncFlags) -> Int {
+public fn flags_numeric(f: &SyncFlagsPragma) -> Int {
     let mut v = mode_numeric(&f.mode);
     if f.data_only { v = v | SQLITE_SYNC_DATAONLY; }
     v
 }
 
-public fn from_numeric(n: Int) -> SyncFlags {
+public fn from_numeric(n: Int) -> SyncFlagsPragma {
     let mode = if (n & SQLITE_SYNC_FULL) == SQLITE_SYNC_FULL {
         SmFull
     } else {
         SmNormal
     };
-    SyncFlags {
+    SyncFlagsPragma {
         mode: mode,
         data_only: (n & SQLITE_SYNC_DATAONLY) != 0,
     }

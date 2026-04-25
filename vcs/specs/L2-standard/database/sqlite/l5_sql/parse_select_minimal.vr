@@ -13,7 +13,7 @@ mount core.database.sqlite.native.l5_sql.{
     Token, lex,
     Statement, SelectStmt, SelectKind, SimpleSelect,
     Expr, ResultColumnItem, FromItem, OrderTerm, LimitClause,
-    TokenStream, ParseError, stream_new, parse_select, parse_expr,
+    SqlTokenStream, ParseError, stream_new, parse_select, parse_expr,
 };
 
 fn parse_via_stream(src: &Text) -> Result<SelectStmt, ParseError> {

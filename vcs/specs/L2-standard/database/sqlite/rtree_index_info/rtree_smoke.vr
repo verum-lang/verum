@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.rtree_index_info.bbox.{
-    BBox,
+    RTreeIndexBBox,
     new, dimension, arity_consistent, is_well_formed,
     intersects, contains_point, extent,
 };

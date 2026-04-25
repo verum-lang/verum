@@ -1,0 +1,17 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @timeout: 10000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.l6_session.{Connection, ConnectionMode, open_memory};
+mount base.{Result, Ok, Err};
+
+fn main() {
+    print("call stdlib L6 open_memory(CmAdmin)");
+    match open_memory(CmAdmin) {
+        Ok(_) => print("  Ok"),
+        Err(_) => panic("expected Ok"),
+    }
+    print("done");
+}

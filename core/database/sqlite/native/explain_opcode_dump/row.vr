@@ -4,7 +4,7 @@ module core.database.sqlite.native.explain_opcode_dump.row;
 
 mount base.{Bool, Text};
 
-public type ExplainRow is {
+public type ExplainOpcodeRow is {
     addr: Int,
     opcode: Text,
     p1: Int,
@@ -15,8 +15,8 @@ public type ExplainRow is {
     comment: Text, // optional trailing comment (PRAGMA vdbe_addoptrace=1)
 };
 
-public fn new(addr: Int, opcode: Text) -> ExplainRow {
-    ExplainRow {
+public fn new(addr: Int, opcode: Text) -> ExplainOpcodeRow {
+    ExplainOpcodeRow {
         addr: addr,
         opcode: opcode,
         p1: 0, p2: 0, p3: 0,
@@ -26,29 +26,29 @@ public fn new(addr: Int, opcode: Text) -> ExplainRow {
     }
 }
 
-public fn with_operands(mut r: ExplainRow, p1: Int, p2: Int, p3: Int) -> ExplainRow {
+public fn with_operands(mut r: ExplainOpcodeRow, p1: Int, p2: Int, p3: Int) -> ExplainOpcodeRow {
     r.p1 = p1; r.p2 = p2; r.p3 = p3;
     r
 }
 
-public fn with_p4(mut r: ExplainRow, p4: Text) -> ExplainRow {
+public fn with_p4(mut r: ExplainOpcodeRow, p4: Text) -> ExplainOpcodeRow {
     r.p4 = p4;
     r
 }
 
-public fn with_p5(mut r: ExplainRow, p5: Int) -> ExplainRow {
+public fn with_p5(mut r: ExplainOpcodeRow, p5: Int) -> ExplainOpcodeRow {
     r.p5 = p5;
     r
 }
 
-public fn with_comment(mut r: ExplainRow, c: Text) -> ExplainRow {
+public fn with_comment(mut r: ExplainOpcodeRow, c: Text) -> ExplainOpcodeRow {
     r.comment = c;
     r
 }
 
-public fn has_p4(r: &ExplainRow) -> Bool { r.p4.len() > 0 }
-public fn has_p5(r: &ExplainRow) -> Bool { r.p5 != 0 }
-public fn has_comment(r: &ExplainRow) -> Bool { r.comment.len() > 0 }
+public fn has_p4(r: &ExplainOpcodeRow) -> Bool { r.p4.len() > 0 }
+public fn has_p5(r: &ExplainOpcodeRow) -> Bool { r.p5 != 0 }
+public fn has_comment(r: &ExplainOpcodeRow) -> Bool { r.comment.len() > 0 }
 
 // Columns in order — matches sqlite_shell_type(addr INTEGER, opcode TEXT, ...).
 public fn column_count() -> Int { 8 }

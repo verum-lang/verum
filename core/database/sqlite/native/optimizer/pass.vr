@@ -23,10 +23,10 @@ mount collections.List;
 mount core.database.sqlite.native.optimizer.opstream.{OpStream};
 
 // -----------------------------------------------------------------------------
-// PassResult — what a single pass returns
+// OptimizerPassResult — what a single pass returns
 // -----------------------------------------------------------------------------
 
-public type PassResult is {
+public type OptimizerPassResult is {
     /// Optimised stream (may be unchanged).
     stream: OpStream,
     /// Number of edits the pass performed; pipeline stops when this
@@ -34,8 +34,8 @@ public type PassResult is {
     n_edits: Int,
 };
 
-public fn pass_result(stream: OpStream, n_edits: Int) -> PassResult {
-    PassResult { stream: stream, n_edits: n_edits }
+public fn pass_result(stream: OpStream, n_edits: Int) -> OptimizerPassResult {
+    OptimizerPassResult { stream: stream, n_edits: n_edits }
 }
 
 // -----------------------------------------------------------------------------
@@ -46,7 +46,7 @@ public type OptimizationPass is protocol {
     fn name(&self) -> Text;
     /// Pure: same input → same output.
     fn is_idempotent(&self) -> Bool { true }
-    fn apply(&self, stream: OpStream) -> PassResult;
+    fn apply(&self, stream: OpStream) -> OptimizerPassResult;
 };
 
 // -----------------------------------------------------------------------------

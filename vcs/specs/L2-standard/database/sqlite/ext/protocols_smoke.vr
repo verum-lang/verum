@@ -34,7 +34,7 @@ mount core.database.sqlite.native.ext.aggregate.{
 };
 mount core.database.sqlite.native.ext.window.{
     WindowFn, WindowFrame, frame_default,
-    FrameKind, FrkRows, FrameBoundary, FbUnboundedPreceding, FbCurrent,
+    WindowFrameKind, FrkRows, FrameBoundary, FbUnboundedPreceding, FbCurrent,
     FrameExclusion, FxNone,
     RowNumber, row_number,
     WSum, w_sum,

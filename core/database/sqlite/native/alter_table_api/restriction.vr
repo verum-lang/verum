@@ -3,7 +3,7 @@
 module core.database.sqlite.native.alter_table_api.restriction;
 
 mount core.database.sqlite.native.alter_table_api.op.{
-    AlterOp, AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn,
+    AlterTableOp, AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn,
 };
 mount base.{Bool, Text};
 

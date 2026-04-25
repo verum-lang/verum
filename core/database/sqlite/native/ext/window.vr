@@ -26,7 +26,7 @@ mount core.database.sqlite.native.ext.aggregate.{AggregateFn};
 // Frame specification (passed at frame setup)
 // -----------------------------------------------------------------------------
 
-public type FrameKind is FrkRows | FrkRange | FrkGroups;
+public type WindowFrameKind is FrkRows | FrkRange | FrkGroups;
 
 public type FrameBoundary is
       FbUnboundedPreceding
@@ -38,7 +38,7 @@ public type FrameBoundary is
 public type FrameExclusion is FxNone | FxCurrentRow | FxGroup | FxTies;
 
 public type WindowFrame is {
-    kind: FrameKind,
+    kind: WindowFrameKind,
     start: FrameBoundary,
     end: FrameBoundary,
     exclusion: FrameExclusion,

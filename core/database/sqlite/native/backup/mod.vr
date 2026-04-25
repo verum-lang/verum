@@ -6,14 +6,14 @@
 //
 // Online backup, the loom analogue of `sqlite3_online_backup`.
 //
-// The protocol is page-by-page: a `BackupHandle` is initialised
+// The protocol is page-by-page: a `BackupEngineHandle` is initialised
 // against a (source, target) connection pair, then stepped one or
 // more pages at a time. While stepping, the source connection
 // continues to take writes; pages already copied that get dirtied
 // are simply re-read from the source on the next step.
 //
 // Submodules:
-//   * `state`   — BackupHandle state machine + step result
+//   * `state`   — BackupEngineHandle state machine + step result
 //   * `policy`  — throttle policy (pages-per-step, sleep-between)
 //   * `progress` — observable counters
 // =============================================================================

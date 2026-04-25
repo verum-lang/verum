@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.alter_table_api.op.{
-    AlterOp, AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn,
+    AlterTableOp, AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn,
     op_name, is_metadata_only, min_version, touches_column,
 };
 mount core.database.sqlite.native.alter_table_api.restriction.{
@@ -18,38 +18,38 @@ mount core.database.sqlite.native.alter_table_api.restriction.{
 mount base.{Bool};
 
 fn test_op_names() {
-    let rn: AlterOp = AlterOp.AoRenameTable { to: "new_t".clone() };
+    let rn: AlterTableOp = AlterTableOp.AoRenameTable { to: "new_t".clone() };
     assert(op_name(&rn) == "RENAME TO".clone());
-    let rc: AlterOp = AlterOp.AoRenameColumn { from: "a".clone(), to: "b".clone() };
+    let rc: AlterTableOp = AlterTableOp.AoRenameColumn { from: "a".clone(), to: "b".clone() };
     assert(op_name(&rc) == "RENAME COLUMN".clone());
-    let add: AlterOp = AlterOp.AoAddColumn { name: "c".clone(), type_name: "INTEGER".clone(), constraint_sql: "".clone() };
+    let add: AlterTableOp = AlterTableOp.AoAddColumn { name: "c".clone(), type_name: "INTEGER".clone(), constraint_sql: "".clone() };
     assert(op_name(&add) == "ADD COLUMN".clone());
-    let drop: AlterOp = AlterOp.AoDropColumn { name: "c".clone() };
+    let drop: AlterTableOp = AlterTableOp.AoDropColumn { name: "c".clone() };
     assert(op_name(&drop) == "DROP COLUMN".clone());
 }
 
 fn test_metadata_only() {
-    let rn: AlterOp = AlterOp.AoRenameTable { to: "x".clone() };
+    let rn: AlterTableOp = AlterTableOp.AoRenameTable { to: "x".clone() };
     assert(is_metadata_only(&rn));
-    let add: AlterOp = AlterOp.AoAddColumn { name: "c".clone(), type_name: "TEXT".clone(), constraint_sql: "".clone() };
+    let add: AlterTableOp = AlterTableOp.AoAddColumn { name: "c".clone(), type_name: "TEXT".clone(), constraint_sql: "".clone() };
     assert(is_metadata_only(&add));
-    let drop: AlterOp = AlterOp.AoDropColumn { name: "c".clone() };
+    let drop: AlterTableOp = AlterTableOp.AoDropColumn { name: "c".clone() };
     assert(!is_metadata_only(&drop));
 }
 
 fn test_min_version_table() {
-    let rn: AlterOp = AlterOp.AoRenameTable { to: "x".clone() };
+    let rn: AlterTableOp = AlterTableOp.AoRenameTable { to: "x".clone() };
     assert(min_version(&rn) == "3.0.0".clone());
-    let rc: AlterOp = AlterOp.AoRenameColumn { from: "a".clone(), to: "b".clone() };
+    let rc: AlterTableOp = AlterTableOp.AoRenameColumn { from: "a".clone(), to: "b".clone() };
     assert(min_version(&rc) == "3.25.0".clone());
-    let drop: AlterOp = AlterOp.AoDropColumn { name: "c".clone() };
+    let drop: AlterTableOp = AlterTableOp.AoDropColumn { name: "c".clone() };
     assert(min_version(&drop) == "3.35.0".clone());
 }
 
 fn test_touches_column() {
-    let rn: AlterOp = AlterOp.AoRenameTable { to: "x".clone() };
+    let rn: AlterTableOp = AlterTableOp.AoRenameTable { to: "x".clone() };
     assert(!touches_column(&rn));
-    let drop: AlterOp = AlterOp.AoDropColumn { name: "c".clone() };
+    let drop: AlterTableOp = AlterTableOp.AoDropColumn { name: "c".clone() };
     assert(touches_column(&drop));
 }
 

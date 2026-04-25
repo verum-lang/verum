@@ -28,19 +28,19 @@ public fn validates_on_load(m: &Mode) -> Bool {
 }
 
 // Outcome of the per-page validation routine.
-public type CheckResult is
+public type CellCheckResult is
     | CrSkipped              // mode off; engine doesn't run the check
     | CrWellFormed
     | CrCorrupt              // SQLITE_CORRUPT
     ;
 
-public fn validate(m: &Mode, all_cells_well_formed: Bool) -> CheckResult {
+public fn validate(m: &Mode, all_cells_well_formed: Bool) -> CellCheckResult {
     if !validates_on_load(m) { return CrSkipped; }
     if all_cells_well_formed { return CrWellFormed; }
     CrCorrupt
 }
 
-public fn result_name(r: &CheckResult) -> Text {
+public fn result_name(r: &CellCheckResult) -> Text {
     match r {
         CrSkipped     => "skipped".clone(),
         CrWellFormed  => "well_formed".clone(),
@@ -48,7 +48,7 @@ public fn result_name(r: &CheckResult) -> Text {
     }
 }
 
-public fn is_corrupt(r: &CheckResult) -> Bool {
+public fn is_corrupt(r: &CellCheckResult) -> Bool {
     match r { CrCorrupt => true, _ => false }
 }
 

@@ -50,7 +50,7 @@ public mount .ast.{
 };
 
 public mount .parser.{
-    TokenStream, ParseError,
+    SqlTokenStream, ParseError,
     stream_new, parse_error,
     parse_expr, parse_select,
     parse_insert, parse_update, parse_delete,

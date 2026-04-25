@@ -21,7 +21,7 @@ mount core.database.sqlite.native.optimizer.opstream.{
     OpStream, OpEntry, op_entry, opstream_new, opstream_from,
 };
 mount core.database.sqlite.native.optimizer.pass.{
-    OptimizationPass, PassResult, run_pipeline, DEFAULT_MAX_ITERATIONS,
+    OptimizationPass, OptimizerPassResult, run_pipeline, DEFAULT_MAX_ITERATIONS,
 };
 mount core.database.sqlite.native.optimizer.noop_elim.{
     NoopElim, noop_elim,

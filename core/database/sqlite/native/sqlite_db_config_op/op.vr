@@ -4,7 +4,7 @@ module core.database.sqlite.native.sqlite_db_config_op.op;
 
 mount base.{Bool, Text, Maybe};
 
-public type DbConfigOp is
+public type SqliteDbConfigOp is
     | DcMainDbName             // 1000
     | DcLookaside              // 1001
     | DcEnableFkey             // 1002
@@ -27,7 +27,7 @@ public type DbConfigOp is
     | DcReverseScanOrder       // 1019 (3.45+)
     ;
 
-public fn op_code(o: &DbConfigOp) -> Int {
+public fn op_code(o: &SqliteDbConfigOp) -> Int {
     match o {
         DcMainDbName           => 1000,
         DcLookaside            => 1001,
@@ -52,7 +52,7 @@ public fn op_code(o: &DbConfigOp) -> Int {
     }
 }
 
-public fn from_code(code: Int) -> Maybe<DbConfigOp> {
+public fn from_code(code: Int) -> Maybe<SqliteDbConfigOp> {
     if code == 1000 { return Maybe.Some(DcMainDbName); }
     if code == 1001 { return Maybe.Some(DcLookaside); }
     if code == 1002 { return Maybe.Some(DcEnableFkey); }
@@ -76,7 +76,7 @@ public fn from_code(code: Int) -> Maybe<DbConfigOp> {
     Maybe.None
 }
 
-public fn op_name(o: &DbConfigOp) -> Text {
+public fn op_name(o: &SqliteDbConfigOp) -> Text {
     match o {
         DcMainDbName           => "MAINDBNAME".clone(),
         DcLookaside            => "LOOKASIDE".clone(),
@@ -102,7 +102,7 @@ public fn op_name(o: &DbConfigOp) -> Text {
 }
 
 // Ops that take a bool-int argument (vs. a complex struct).
-public fn is_boolean_toggle(o: &DbConfigOp) -> Bool {
+public fn is_boolean_toggle(o: &SqliteDbConfigOp) -> Bool {
     match o {
         DcEnableFkey          => true,
         DcEnableTrigger       => true,

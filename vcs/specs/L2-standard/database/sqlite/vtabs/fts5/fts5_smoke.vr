@@ -22,7 +22,7 @@ mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
     TrigramTokenizer, trigram_tokenizer,
 };
 mount core.database.sqlite.native.vtabs.fts5.segment.{
-    Posting, PostingList, posting_list_new, posting_less,
+    Fts5SegmentPosting, Fts5SegmentPostingList, posting_list_new, posting_less,
     Segment, segment_empty, segment_from_tokens, segment_lookup, segment_merge,
 };
 mount core.database.sqlite.native.vtabs.fts5.index.{
@@ -128,10 +128,10 @@ fn test_segment_merge() {
 }
 
 fn test_posting_less() {
-    let p1 = Posting { rowid: 1 as Int64, column: 0, position: 0 };
-    let p2 = Posting { rowid: 2 as Int64, column: 0, position: 0 };
+    let p1 = Fts5SegmentPosting { rowid: 1 as Int64, column: 0, position: 0 };
+    let p2 = Fts5SegmentPosting { rowid: 2 as Int64, column: 0, position: 0 };
     assert(posting_less(&p1, &p2));
-    let p3 = Posting { rowid: 1 as Int64, column: 0, position: 5 };
+    let p3 = Fts5SegmentPosting { rowid: 1 as Int64, column: 0, position: 5 };
     assert(posting_less(&p1, &p3));
 }
 

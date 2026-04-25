@@ -19,7 +19,7 @@ mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Token};
 mount core.database.sqlite.native.vtabs.fts5.segment.{
-    Segment, PostingList, Posting,
+    Segment, Fts5SegmentPostingList, Fts5SegmentPosting,
     segment_empty, segment_from_tokens, segment_lookup, segment_merge,
     posting_list_new,
 };
@@ -71,7 +71,7 @@ implement Index {
     }
 
     /// Lookup `term` across every segment + union the posting lists.
-    public fn lookup(&self, term: &Text) -> PostingList {
+    public fn lookup(&self, term: &Text) -> Fts5SegmentPostingList {
         let mut union = posting_list_new();
         let mut l: Int = 0;
         while l < self.levels.len() {
@@ -82,7 +82,7 @@ implement Index {
                         let mut k: Int = 0;
                         let postings = pl.iter();
                         while k < postings.len() {
-                            union.add(Posting {
+                            union.add(Fts5SegmentPosting {
                                 rowid: postings[k].rowid,
                                 column: postings[k].column,
                                 position: postings[k].position,

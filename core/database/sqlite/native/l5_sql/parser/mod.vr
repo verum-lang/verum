@@ -10,7 +10,7 @@ module core.database.sqlite.native.l5_sql.parser;
 // Hand-written recursive-descent parser, split by statement kind so
 // each grammar production lives in its own file:
 //
-//   * token_stream — shared TokenStream + ParseError
+//   * token_stream — shared SqlTokenStream + ParseError
 //   * expr         — operator-precedence expression parser
 //   * select       — SELECT with compound, ORDER BY, LIMIT, FROM+JOIN
 //   * insert/update/delete (upcoming)
@@ -27,7 +27,7 @@ public module misc;
 public module stmt;
 
 public mount .token_stream.{
-    TokenStream, ParseError,
+    SqlTokenStream, ParseError,
     stream_new, parse_error,
 };
 

@@ -9,7 +9,7 @@ mount core.database.sqlite.native.cell_size_check_pragma.gate.{
     Mode, CcOff, CcOn,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     validates_on_load,
-    CheckResult, CrSkipped, CrWellFormed, CrCorrupt,
+    CellCheckResult, CrSkipped, CrWellFormed, CrCorrupt,
     validate, result_name, is_corrupt, corrupt_code,
 };
 mount base.{Bool};

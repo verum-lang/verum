@@ -51,7 +51,7 @@ mount core.database.sqlite.native.fts5.query.executor.{
     MatchedRowid, execute,
 };
 mount core.database.sqlite.native.fts5.query.ranker.{
-    Bm25Params, bm25_default, DocStats, doc_stats, bm25_score,
+    Fts5RankerParams, bm25_default, DocStats, doc_stats, bm25_score,
 };
 mount core.database.sqlite.native.fts5.helpers.{
     MatchRange, match_range, highlight, snippet,

@@ -4,46 +4,46 @@ module core.database.sqlite.native.alter_table_api.op;
 
 mount base.{Bool, Text};
 
-public type AlterOp is
+public type AlterTableOp is
     | AoRenameTable { to: Text }
     | AoRenameColumn { from: Text, to: Text }
     | AoAddColumn { name: Text, type_name: Text, constraint_sql: Text }
     | AoDropColumn { name: Text }
     ;
 
-public fn op_name(o: &AlterOp) -> Text {
+public fn op_name(o: &AlterTableOp) -> Text {
     match o {
-        AlterOp.AoRenameTable { .. }  => "RENAME TO".clone(),
-        AlterOp.AoRenameColumn { .. } => "RENAME COLUMN".clone(),
-        AlterOp.AoAddColumn { .. }    => "ADD COLUMN".clone(),
-        AlterOp.AoDropColumn { .. }   => "DROP COLUMN".clone(),
+        AlterTableOp.AoRenameTable { .. }  => "RENAME TO".clone(),
+        AlterTableOp.AoRenameColumn { .. } => "RENAME COLUMN".clone(),
+        AlterTableOp.AoAddColumn { .. }    => "ADD COLUMN".clone(),
+        AlterTableOp.AoDropColumn { .. }   => "DROP COLUMN".clone(),
     }
 }
 
 // Whether the op only touches the sqlite_schema text (cheap) vs. requires
 // a full table rewrite (expensive; SQLite internally CREATE TABLE ... INSERT INTO).
-public fn is_metadata_only(o: &AlterOp) -> Bool {
+public fn is_metadata_only(o: &AlterTableOp) -> Bool {
     match o {
-        AlterOp.AoRenameTable { .. }  => true,
-        AlterOp.AoRenameColumn { .. } => true,
-        AlterOp.AoAddColumn { .. }    => true,    // default value stored in schema
-        AlterOp.AoDropColumn { .. }   => false,   // requires row-by-row rewrite
+        AlterTableOp.AoRenameTable { .. }  => true,
+        AlterTableOp.AoRenameColumn { .. } => true,
+        AlterTableOp.AoAddColumn { .. }    => true,    // default value stored in schema
+        AlterTableOp.AoDropColumn { .. }   => false,   // requires row-by-row rewrite
     }
 }
 
 // Minimum SQLite version that supports this op.
-public fn min_version(o: &AlterOp) -> Text {
+public fn min_version(o: &AlterTableOp) -> Text {
     match o {
-        AlterOp.AoRenameTable { .. }  => "3.0.0".clone(),
-        AlterOp.AoRenameColumn { .. } => "3.25.0".clone(),
-        AlterOp.AoAddColumn { .. }    => "3.2.0".clone(),
-        AlterOp.AoDropColumn { .. }   => "3.35.0".clone(),
+        AlterTableOp.AoRenameTable { .. }  => "3.0.0".clone(),
+        AlterTableOp.AoRenameColumn { .. } => "3.25.0".clone(),
+        AlterTableOp.AoAddColumn { .. }    => "3.2.0".clone(),
+        AlterTableOp.AoDropColumn { .. }   => "3.35.0".clone(),
     }
 }
 
-public fn touches_column(o: &AlterOp) -> Bool {
+public fn touches_column(o: &AlterTableOp) -> Bool {
     match o {
-        AlterOp.AoRenameTable { .. } => false,
+        AlterTableOp.AoRenameTable { .. } => false,
         _                            => true,
     }
 }

@@ -14,7 +14,7 @@ mount core.database.sqlite.native.l5_sql.{
     Expr, InsertStmt, InsertSource, OnConflict,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,
-    TokenStream, ParseError, stream_new,
+    SqlTokenStream, ParseError, stream_new,
     parse_insert, parse_update, parse_delete,
 };
 

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.compound_select_api.op.{
-    CompoundOp, CoUnion, CoUnionAll, CoIntersect, CoExcept,
+    CompoundSelectOp, CoUnion, CoUnionAll, CoIntersect, CoExcept,
     op_name, from_keyword,
     deduplicates, preserves_duplicates,
     is_commutative, requires_dedup_pass, allows_direct_chain,

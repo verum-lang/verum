@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.open_v2.flags.{
-    OpenFlags,
+    OpenV2Flags,
     SQLITE_OPEN_READONLY, SQLITE_OPEN_READWRITE, SQLITE_OPEN_CREATE,
     SQLITE_OPEN_MEMORY, SQLITE_OPEN_URI,
     SQLITE_OPEN_NOMUTEX, SQLITE_OPEN_FULLMUTEX,

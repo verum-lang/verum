@@ -14,7 +14,7 @@
 //   * ProgressTracker computes pages-per-sec + ETA
 
 mount core.database.sqlite.native.backup.state.{
-    BackupHandle, BackupPhase, BackupError,
+    BackupEngineHandle, BackupPhase, BackupError,
     BpInitialised, BpStreaming, BpDone, BpFailed,
     BeIoError, BeSchemaChanged,
     handle_new, phase_name, phase_is_terminal,

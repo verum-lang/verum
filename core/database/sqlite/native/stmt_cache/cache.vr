@@ -35,7 +35,7 @@ public type CacheError is
 // Statistics
 // -----------------------------------------------------------------------------
 
-public type CacheStats is {
+public type StmtCacheStats is {
     hits: Int64,
     misses: Int64,
     evictions: Int64,
@@ -43,8 +43,8 @@ public type CacheStats is {
     capacity: Int,
 }
 
-public fn stats_zero(capacity: Int) -> CacheStats {
-    CacheStats {
+public fn stats_zero(capacity: Int) -> StmtCacheStats {
+    StmtCacheStats {
         hits: 0 as Int64,
         misses: 0 as Int64,
         evictions: 0 as Int64,
@@ -53,7 +53,7 @@ public fn stats_zero(capacity: Int) -> CacheStats {
     }
 }
 
-public fn hit_ratio(stats: &CacheStats) -> Float64 {
+public fn hit_ratio(stats: &StmtCacheStats) -> Float64 {
     let total = (stats.hits + stats.misses) as Float64;
     if total == 0.0 { return 0.0; }
     (stats.hits as Float64) / total
@@ -67,7 +67,7 @@ public type StatementCache is {
     max_entries: Int,
     entries: List<CachedStatement>,
     policy: Heap<dyn EvictionPolicy>,
-    stats: CacheStats,
+    stats: StmtCacheStats,
 }
 
 public fn cache_new(max_entries: Int, policy: Heap<dyn EvictionPolicy>) -> StatementCache {
@@ -83,8 +83,8 @@ public fn cache_new(max_entries: Int, policy: Heap<dyn EvictionPolicy>) -> State
 implement StatementCache {
     public fn capacity(&self) -> Int { self.max_entries }
     public fn current_size(&self) -> Int { self.entries.len() }
-    public fn stats_snapshot(&self) -> CacheStats {
-        CacheStats {
+    public fn stats_snapshot(&self) -> StmtCacheStats {
+        StmtCacheStats {
             hits: self.stats.hits,
             misses: self.stats.misses,
             evictions: self.stats.evictions,

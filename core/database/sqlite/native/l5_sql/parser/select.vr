@@ -44,7 +44,7 @@ mount core.database.sqlite.native.l5_sql.ast.{
     TableRef, CompoundOp,
 };
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
-    TokenStream, ParseError, parse_error,
+    SqlTokenStream, ParseError, parse_error,
 };
 mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 
@@ -52,7 +52,7 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 // Entry point
 // -----------------------------------------------------------------------------
 
-public fn parse_select(ts: &mut TokenStream) -> Result<SelectStmt, ParseError> {
+public fn parse_select(ts: &mut SqlTokenStream) -> Result<SelectStmt, ParseError> {
     let first = match parse_simple(ts) {
         Ok(s)  => s, Err(e) => { return Err(e); }
     };
@@ -111,7 +111,7 @@ public fn parse_select(ts: &mut TokenStream) -> Result<SelectStmt, ParseError> {
 // Simple SELECT
 // -----------------------------------------------------------------------------
 
-fn parse_simple(ts: &mut TokenStream) -> Result<SimpleSelect, ParseError> {
+fn parse_simple(ts: &mut SqlTokenStream) -> Result<SimpleSelect, ParseError> {
     match ts.expect_keyword(KwSelect) { Ok(_) => {}, Err(e) => { return Err(e); } }
 
     let mut distinct = false;
@@ -175,7 +175,7 @@ fn parse_simple(ts: &mut TokenStream) -> Result<SimpleSelect, ParseError> {
 // Result columns
 // -----------------------------------------------------------------------------
 
-fn parse_result_columns(ts: &mut TokenStream) -> Result<List<ResultColumnItem>, ParseError> {
+fn parse_result_columns(ts: &mut SqlTokenStream) -> Result<List<ResultColumnItem>, ParseError> {
     let mut out: List<ResultColumnItem> = List.new();
     loop {
         let item = match parse_result_column(ts) {
@@ -187,7 +187,7 @@ fn parse_result_columns(ts: &mut TokenStream) -> Result<List<ResultColumnItem>, 
     Ok(out)
 }
 
-fn parse_result_column(ts: &mut TokenStream) -> Result<ResultColumnItem, ParseError> {
+fn parse_result_column(ts: &mut SqlTokenStream) -> Result<ResultColumnItem, ParseError> {
     // `*`
     if ts.accept_punct(PStar) {
         return Ok(RcStar);
@@ -232,7 +232,7 @@ fn parse_result_column(ts: &mut TokenStream) -> Result<ResultColumnItem, ParseEr
 
 /// Parse `AS ident` or a bare identifier as an alias. Returns "" for
 /// none.
-fn parse_alias(ts: &mut TokenStream) -> Text {
+fn parse_alias(ts: &mut SqlTokenStream) -> Text {
     if ts.accept_keyword(KwAs) {
         match ts.expect_ident() {
             Ok(s)  => s,
@@ -259,7 +259,7 @@ fn parse_alias(ts: &mut TokenStream) -> Text {
 // FROM clause
 // -----------------------------------------------------------------------------
 
-fn parse_from_clause(ts: &mut TokenStream) -> Result<FromItem, ParseError> {
+fn parse_from_clause(ts: &mut SqlTokenStream) -> Result<FromItem, ParseError> {
     let mut left = match parse_from_item(ts) {
         Ok(fi) => fi, Err(e) => { return Err(e); }
     };
@@ -322,7 +322,7 @@ fn parse_from_clause(ts: &mut TokenStream) -> Result<FromItem, ParseError> {
     Ok(left)
 }
 
-fn parse_from_item(ts: &mut TokenStream) -> Result<FromItem, ParseError> {
+fn parse_from_item(ts: &mut SqlTokenStream) -> Result<FromItem, ParseError> {
     // `(subquery) alias` not yet supported at L5.3 initial cut.
     let name = match ts.peek() {
         TIdent(_) => match ts.expect_ident() {
@@ -351,7 +351,7 @@ fn parse_from_item(ts: &mut TokenStream) -> Result<FromItem, ParseError> {
     }))
 }
 
-fn try_parse_join_kind(ts: &mut TokenStream) -> Result<Maybe<JoinKind>, ParseError> {
+fn try_parse_join_kind(ts: &mut SqlTokenStream) -> Result<Maybe<JoinKind>, ParseError> {
     let natural = ts.accept_keyword(KwNatural);
     let _ = natural;
 
@@ -393,7 +393,7 @@ fn try_parse_join_kind(ts: &mut TokenStream) -> Result<Maybe<JoinKind>, ParseErr
 // ORDER BY terms
 // -----------------------------------------------------------------------------
 
-fn parse_order_term(ts: &mut TokenStream) -> Result<OrderTerm, ParseError> {
+fn parse_order_term(ts: &mut SqlTokenStream) -> Result<OrderTerm, ParseError> {
     let e = match parse_expr(ts) {
         Ok(x)  => x, Err(err) => { return Err(err); }
     };
@@ -415,7 +415,7 @@ fn parse_order_term(ts: &mut TokenStream) -> Result<OrderTerm, ParseError> {
 // Compound detection
 // -----------------------------------------------------------------------------
 
-fn detect_compound_op(ts: &mut TokenStream) -> Maybe<CompoundOp> {
+fn detect_compound_op(ts: &mut SqlTokenStream) -> Maybe<CompoundOp> {
     if ts.accept_keyword(KwUnion) {
         if ts.accept_keyword(KwAll) {
             return Some(CoUnionAll);

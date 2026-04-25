@@ -32,7 +32,7 @@ mount core.database.sqlite.native.optimizer.opstream.{
     OpStream, OpEntry,
 };
 mount core.database.sqlite.native.optimizer.pass.{
-    OptimizationPass, PassResult, pass_result,
+    OptimizationPass, OptimizerPassResult, pass_result,
 };
 
 public type DeadCodeElim is { unit: Bool };
@@ -76,7 +76,7 @@ fn falls_through(op: &OpcodeKind) -> Bool {
 implement OptimizationPass for DeadCodeElim {
     fn name(&self) -> Text { "dead_code_elim".clone() }
 
-    fn apply(&self, stream: OpStream) -> PassResult {
+    fn apply(&self, stream: OpStream) -> OptimizerPassResult {
         let n = stream.len();
         if n == 0 { return pass_result(stream, 0); }
         let mut reachable: List<Bool> = List.new();

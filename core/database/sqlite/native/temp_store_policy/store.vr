@@ -4,13 +4,13 @@ module core.database.sqlite.native.temp_store_policy.store;
 
 mount base.{Bool, Text, Maybe};
 
-public type TempStore is
+public type TempStorePolicy is
     | TsDefault       // 0 — follow compile-time SQLITE_TEMP_STORE
     | TsFile          // 1 — disk
     | TsMemory        // 2 — RAM
     ;
 
-public fn code(t: &TempStore) -> Int {
+public fn code(t: &TempStorePolicy) -> Int {
     match t {
         TsDefault => 0,
         TsFile    => 1,
@@ -18,14 +18,14 @@ public fn code(t: &TempStore) -> Int {
     }
 }
 
-public fn from_code(c: Int) -> Maybe<TempStore> {
+public fn from_code(c: Int) -> Maybe<TempStorePolicy> {
     if c == 0 { return Maybe.Some(TsDefault); }
     if c == 1 { return Maybe.Some(TsFile); }
     if c == 2 { return Maybe.Some(TsMemory); }
     Maybe.None
 }
 
-public fn store_name(t: &TempStore) -> Text {
+public fn store_name(t: &TempStorePolicy) -> Text {
     match t {
         TsDefault => "DEFAULT".clone(),
         TsFile    => "FILE".clone(),
@@ -51,7 +51,7 @@ public fn compile_time_name(d: &CompileTimeDefault) -> Text {
 }
 
 // Resolve the effective store given compile-time default + pragma value.
-public fn resolve(pragma: &TempStore, compile_default: &CompileTimeDefault) -> TempStore {
+public fn resolve(pragma: &TempStorePolicy, compile_default: &CompileTimeDefault) -> TempStorePolicy {
     match pragma {
         TsFile    => TsFile,
         TsMemory  => TsMemory,

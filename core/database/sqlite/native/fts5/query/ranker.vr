@@ -27,13 +27,13 @@ mount core.database.sqlite.native.fts5.query.executor.{MatchedRowid};
 // BM25 parameters
 // -----------------------------------------------------------------------------
 
-public type Bm25Params is {
+public type Fts5RankerParams is {
     k1: Float64,
     b: Float64,
 }
 
-public fn bm25_default() -> Bm25Params {
-    Bm25Params { k1: 1.2 as Float64, b: 0.75 as Float64 }
+public fn bm25_default() -> Fts5RankerParams {
+    Fts5RankerParams { k1: 1.2 as Float64, b: 0.75 as Float64 }
 }
 
 // -----------------------------------------------------------------------------
@@ -70,7 +70,7 @@ public fn bm25_score(
     doc_len: Int,
     df: Int,
     stats: &DocStats,
-    params: &Bm25Params,
+    params: &Fts5RankerParams,
 ) -> Float64 {
     let idf = idf_term(stats.n_docs, df);
     let tf_f = tf as Float64;
@@ -109,7 +109,7 @@ public fn rank(
     df: Int,
     doc_len_for: fn(Int64) -> Int,
     stats: &DocStats,
-    params: &Bm25Params,
+    params: &Fts5RankerParams,
 ) -> List<RankedRow> {
     let mut out: List<RankedRow> = List.new();
     let mut i: Int = 0;

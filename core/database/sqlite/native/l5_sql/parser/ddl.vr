@@ -47,7 +47,7 @@ mount core.database.sqlite.native.l5_sql.ast.{
     OnConflict,
 };
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
-    TokenStream, ParseError, parse_error,
+    SqlTokenStream, ParseError, parse_error,
 };
 mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 
@@ -55,7 +55,7 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 // CREATE
 // -----------------------------------------------------------------------------
 
-public fn parse_create(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+public fn parse_create(ts: &mut SqlTokenStream) -> Result<Statement, ParseError> {
     match ts.expect_keyword(KwCreate) { Ok(_) => {}, Err(e) => { return Err(e); } }
 
     let temporary = ts.accept_keyword(KwTemp) || ts.accept_keyword(KwTemporary);
@@ -99,7 +99,7 @@ public fn parse_create(ts: &mut TokenStream) -> Result<Statement, ParseError> {
 }
 
 fn parse_create_table_rest(
-    ts: &mut TokenStream,
+    ts: &mut SqlTokenStream,
     temporary: Bool,
 ) -> Result<CreateTableStmt, ParseError> {
     let if_not_exists = if ts.accept_keyword(KwIf) {
@@ -185,7 +185,7 @@ fn parse_create_table_rest(
 // Column definition
 // -----------------------------------------------------------------------------
 
-fn parse_column_def(ts: &mut TokenStream) -> Result<ColumnDef, ParseError> {
+fn parse_column_def(ts: &mut SqlTokenStream) -> Result<ColumnDef, ParseError> {
     let name = match ts.expect_ident() {
         Ok(s)  => s, Err(e) => { return Err(e); }
     };
@@ -213,7 +213,7 @@ fn parse_column_def(ts: &mut TokenStream) -> Result<ColumnDef, ParseError> {
 /// Parse an optional type name after a column name. The grammar is
 /// lax: `VARCHAR(255)`, `INTEGER`, `DOUBLE PRECISION`, etc. We absorb
 /// any identifier(s) followed by an optional `(N [, M])` size spec.
-fn parse_type_name(ts: &mut TokenStream) -> Text {
+fn parse_type_name(ts: &mut SqlTokenStream) -> Text {
     match ts.peek() {
         TIdent(_) => {},
         _ => return "".clone(),
@@ -243,7 +243,7 @@ fn parse_type_name(ts: &mut TokenStream) -> Text {
     out
 }
 
-fn consume_through_rparen(ts: &mut TokenStream) -> Bool {
+fn consume_through_rparen(ts: &mut SqlTokenStream) -> Bool {
     let mut depth: Int = 1;
     while !ts.at_eof() {
         if ts.accept_punct(PLParen) { depth = depth + 1; continue; }
@@ -261,7 +261,7 @@ fn consume_through_rparen(ts: &mut TokenStream) -> Bool {
 // Column constraints
 // -----------------------------------------------------------------------------
 
-fn try_parse_column_constraint(ts: &mut TokenStream) -> Result<Maybe<ColumnConstraint>, ParseError> {
+fn try_parse_column_constraint(ts: &mut SqlTokenStream) -> Result<Maybe<ColumnConstraint>, ParseError> {
     if ts.accept_keyword(KwPrimary) {
         match ts.expect_keyword(KwKey) { Ok(_) => {}, Err(e) => { return Err(e); } }
         // Optional ASC / DESC — ignored for v1.
@@ -347,7 +347,7 @@ fn try_parse_column_constraint(ts: &mut TokenStream) -> Result<Maybe<ColumnConst
 // Table constraints
 // -----------------------------------------------------------------------------
 
-fn is_table_constraint_start(ts: &TokenStream) -> Bool {
+fn is_table_constraint_start(ts: &SqlTokenStream) -> Bool {
     match ts.peek() {
         TKeyword(KwPrimary) => true,
         TKeyword(KwUnique)  => true,
@@ -357,7 +357,7 @@ fn is_table_constraint_start(ts: &TokenStream) -> Bool {
     }
 }
 
-fn parse_table_constraint(ts: &mut TokenStream) -> Result<TableConstraint, ParseError> {
+fn parse_table_constraint(ts: &mut SqlTokenStream) -> Result<TableConstraint, ParseError> {
     if ts.accept_keyword(KwPrimary) {
         match ts.expect_keyword(KwKey) { Ok(_) => {}, Err(e) => { return Err(e); } }
         match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
@@ -436,7 +436,7 @@ fn parse_table_constraint(ts: &mut TokenStream) -> Result<TableConstraint, Parse
     Err(parse_error("expected table constraint".clone(), ts.position()))
 }
 
-fn parse_optional_on_conflict(ts: &mut TokenStream) -> Result<Maybe<OnConflict>, ParseError> {
+fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<OnConflict>, ParseError> {
     if !ts.accept_keyword(KwOn) { return Ok(None); }
     match ts.expect_keyword(KwConflict) { Ok(_) => {}, Err(e) => { return Err(e); } }
     if ts.accept_keyword(KwAbort)    { return Ok(Some(OcAbort)); }
@@ -451,7 +451,7 @@ fn parse_optional_on_conflict(ts: &mut TokenStream) -> Result<Maybe<OnConflict>,
 // DROP
 // -----------------------------------------------------------------------------
 
-public fn parse_drop(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+public fn parse_drop(ts: &mut SqlTokenStream) -> Result<Statement, ParseError> {
     match ts.expect_keyword(KwDrop) { Ok(_) => {}, Err(e) => { return Err(e); } }
 
     let kind_tag = if ts.accept_keyword(KwTable)   { 0 }
@@ -486,7 +486,7 @@ public fn parse_drop(ts: &mut TokenStream) -> Result<Statement, ParseError> {
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn parse_qualified_name(ts: &mut TokenStream) -> Result<TableRef, ParseError> {
+fn parse_qualified_name(ts: &mut SqlTokenStream) -> Result<TableRef, ParseError> {
     let first = match ts.expect_ident() {
         Ok(s)  => s, Err(e) => { return Err(e); }
     };

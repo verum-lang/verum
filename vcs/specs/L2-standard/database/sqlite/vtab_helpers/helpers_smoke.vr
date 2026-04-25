@@ -18,7 +18,7 @@ mount core.database.sqlite.native.vtab_helpers.nochange.{
     NoChangeSignal, signal_on, signal_off, is_active, as_int,
 };
 mount core.database.sqlite.native.vtab_helpers.on_conflict.{
-    ConflictAction,
+    OnConflictAction,
     CaRollback, CaIgnore, CaFail, CaAbort, CaReplace,
     action_numeric, action_name, from_numeric as conflict_from_numeric,
 };

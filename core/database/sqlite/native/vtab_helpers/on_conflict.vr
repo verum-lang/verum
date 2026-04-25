@@ -12,14 +12,14 @@ module core.database.sqlite.native.vtab_helpers.on_conflict;
 mount core.*;
 mount base.{Text};
 
-public type ConflictAction is
+public type OnConflictAction is
       CaRollback    // 1
     | CaIgnore      // 2
     | CaFail        // 3
     | CaAbort       // 4
     | CaReplace;    // 5
 
-public fn action_numeric(a: &ConflictAction) -> Int {
+public fn action_numeric(a: &OnConflictAction) -> Int {
     match a {
         CaRollback => 1,
         CaIgnore   => 2,
@@ -29,7 +29,7 @@ public fn action_numeric(a: &ConflictAction) -> Int {
     }
 }
 
-public fn action_name(a: &ConflictAction) -> Text {
+public fn action_name(a: &OnConflictAction) -> Text {
     match a {
         CaRollback => "ROLLBACK".clone(),
         CaIgnore   => "IGNORE".clone(),
@@ -39,7 +39,7 @@ public fn action_name(a: &ConflictAction) -> Text {
     }
 }
 
-public fn from_numeric(n: Int) -> ConflictAction {
+public fn from_numeric(n: Int) -> OnConflictAction {
     if n == 2 { return CaIgnore; }
     if n == 3 { return CaFail; }
     if n == 5 { return CaReplace; }

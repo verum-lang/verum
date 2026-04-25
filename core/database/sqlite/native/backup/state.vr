@@ -1,9 +1,9 @@
 // =============================================================================
-// backup/state.vr — BackupHandle state machine
+// backup/state.vr — BackupEngineHandle state machine
 // =============================================================================
 // Spec: sqlite-native.md §22
 //
-// A `BackupHandle` walks a source database page-by-page into a target
+// A `BackupEngineHandle` walks a source database page-by-page into a target
 // database. The state machine has four phases:
 //
 //   * `Initialised`  — handle created, no pages copied yet
@@ -61,10 +61,10 @@ public fn phase_is_terminal(p: &BackupPhase) -> Bool {
 }
 
 // -----------------------------------------------------------------------------
-// BackupHandle
+// BackupEngineHandle
 // -----------------------------------------------------------------------------
 
-public type BackupHandle is {
+public type BackupEngineHandle is {
     /// Logical name for diagnostics (e.g. "main->dest").
     label: Text,
     phase: BackupPhase,
@@ -77,8 +77,8 @@ public type BackupHandle is {
     page_size: Int,
 }
 
-public fn handle_new(label: Text, total_pages: Int, page_size: Int) -> BackupHandle {
-    BackupHandle {
+public fn handle_new(label: Text, total_pages: Int, page_size: Int) -> BackupEngineHandle {
+    BackupEngineHandle {
         label: label,
         phase: BpInitialised,
         total_pages: total_pages,
@@ -88,7 +88,7 @@ public fn handle_new(label: Text, total_pages: Int, page_size: Int) -> BackupHan
     }
 }
 
-implement BackupHandle {
+implement BackupEngineHandle {
     public fn phase_ref(&self) -> BackupPhase {
         clone_phase(&self.phase)
     }

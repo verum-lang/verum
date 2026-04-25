@@ -12,7 +12,7 @@
 //     one document's token stream
 //   * `merge(s1, s2)` — k-way merge two sorted segments
 //
-// Posting lists store `(rowid, column, position)` tuples sorted by
+// Fts5SegmentPosting lists store `(rowid, column, position)` tuples sorted by
 // rowid then position so AND/NEAR queries can intersect them in
 // linear time.
 // =============================================================================
@@ -25,45 +25,45 @@ mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Token};
 
 // -----------------------------------------------------------------------------
-// Posting
+// Fts5SegmentPosting
 // -----------------------------------------------------------------------------
 
-public type Posting is {
+public type Fts5SegmentPosting is {
     rowid: Int64,
     column: Int,
     position: Int,
 };
 
-public fn posting_less(a: &Posting, b: &Posting) -> Bool {
+public fn posting_less(a: &Fts5SegmentPosting, b: &Fts5SegmentPosting) -> Bool {
     if a.rowid != b.rowid { return a.rowid < b.rowid; }
     if a.column != b.column { return a.column < b.column; }
     a.position < b.position
 }
 
 // -----------------------------------------------------------------------------
-// PostingList
+// Fts5SegmentPostingList
 // -----------------------------------------------------------------------------
 
-public type PostingList is {
-    postings: List<Posting>,
+public type Fts5SegmentPostingList is {
+    postings: List<Fts5SegmentPosting>,
 };
 
-public fn posting_list_new() -> PostingList { PostingList { postings: List.new() } }
+public fn posting_list_new() -> Fts5SegmentPostingList { Fts5SegmentPostingList { postings: List.new() } }
 
-implement PostingList {
+implement Fts5SegmentPostingList {
     public fn len(&self) -> Int { self.postings.len() }
 
-    public fn add(&mut self, p: Posting) { self.postings.push(p); }
+    public fn add(&mut self, p: Fts5SegmentPosting) { self.postings.push(p); }
 
     /// Insertion-sorted append for postings (kept sorted by rowid + position).
-    public fn add_sorted(&mut self, p: Posting) {
+    public fn add_sorted(&mut self, p: Fts5SegmentPosting) {
         // Try at the end first — common case for sequential builds.
         if self.postings.len() == 0 || posting_less(&self.postings[self.postings.len() - 1], &p) {
             self.postings.push(p);
             return;
         }
         // Linear scan for insert position.
-        let mut new_list: List<Posting> = List.new();
+        let mut new_list: List<Fts5SegmentPosting> = List.new();
         let mut inserted: Bool = false;
         let mut i: Int = 0;
         while i < self.postings.len() {
@@ -78,8 +78,8 @@ implement PostingList {
         self.postings = new_list;
     }
 
-    public fn iter(&self) -> List<Posting> {
-        let mut out: List<Posting> = List.new();
+    public fn iter(&self) -> List<Fts5SegmentPosting> {
+        let mut out: List<Fts5SegmentPosting> = List.new();
         let mut i: Int = 0;
         while i < self.postings.len() {
             out.push(clone_p(&self.postings[i]));
@@ -89,8 +89,8 @@ implement PostingList {
     }
 }
 
-fn clone_p(p: &Posting) -> Posting {
-    Posting { rowid: p.rowid, column: p.column, position: p.position }
+fn clone_p(p: &Fts5SegmentPosting) -> Fts5SegmentPosting {
+    Fts5SegmentPosting { rowid: p.rowid, column: p.column, position: p.position }
 }
 
 // -----------------------------------------------------------------------------
@@ -99,7 +99,7 @@ fn clone_p(p: &Posting) -> Posting {
 
 public type TermEntry is {
     term: Text,
-    postings: PostingList,
+    postings: Fts5SegmentPostingList,
 };
 
 // -----------------------------------------------------------------------------
@@ -130,7 +130,7 @@ public fn segment_from_tokens(rowid: Int64, column: Int, tokens: List<Token>) ->
     let mut entries: List<TermEntry> = List.new();
     let mut i: Int = 0;
     while i < tokens.len() {
-        let posting = Posting {
+        let posting = Fts5SegmentPosting {
             rowid: rowid,
             column: column,
             position: tokens[i].position,
@@ -164,7 +164,7 @@ fn find_or_create_term(entries: &mut List<TermEntry>, term: &Text) -> Int {
 // Lookup
 // -----------------------------------------------------------------------------
 
-public fn segment_lookup(seg: &Segment, term: &Text) -> Maybe<PostingList> {
+public fn segment_lookup(seg: &Segment, term: &Text) -> Maybe<Fts5SegmentPostingList> {
     let mut i: Int = 0;
     while i < seg.entries.len() {
         if seg.entries[i].term == term {
@@ -175,14 +175,14 @@ public fn segment_lookup(seg: &Segment, term: &Text) -> Maybe<PostingList> {
     None
 }
 
-fn clone_pl(pl: &PostingList) -> PostingList {
-    let mut out: List<Posting> = List.new();
+fn clone_pl(pl: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {
+    let mut out: List<Fts5SegmentPosting> = List.new();
     let mut i: Int = 0;
     while i < pl.postings.len() {
         out.push(clone_p(&pl.postings[i]));
         i = i + 1;
     }
-    PostingList { postings: out }
+    Fts5SegmentPostingList { postings: out }
 }
 
 // -----------------------------------------------------------------------------
@@ -244,8 +244,8 @@ public fn segment_merge(a: &Segment, b: &Segment) -> Segment {
     }
 }
 
-fn merge_posting_lists(a: &PostingList, b: &PostingList) -> PostingList {
-    let mut out: List<Posting> = List.new();
+fn merge_posting_lists(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {
+    let mut out: List<Fts5SegmentPosting> = List.new();
     let mut i: Int = 0;
     let mut j: Int = 0;
     while i < a.postings.len() && j < b.postings.len() {
@@ -259,5 +259,5 @@ fn merge_posting_lists(a: &PostingList, b: &PostingList) -> PostingList {
     }
     while i < a.postings.len() { out.push(clone_p(&a.postings[i])); i = i + 1; }
     while j < b.postings.len() { out.push(clone_p(&b.postings[j])); j = j + 1; }
-    PostingList { postings: out }
+    Fts5SegmentPostingList { postings: out }
 }

@@ -35,7 +35,7 @@ mount core.database.sqlite.native.optimizer.opstream.{
     OpStream, OpEntry, op_entry,
 };
 mount core.database.sqlite.native.optimizer.pass.{
-    OptimizationPass, PassResult, pass_result,
+    OptimizationPass, OptimizerPassResult, pass_result,
 };
 
 public type ConstFold is { unit: Bool };
@@ -67,7 +67,7 @@ fn fold_op(name: &Text, a: Int, b: Int) -> base.Maybe<Int> {
 implement OptimizationPass for ConstFold {
     fn name(&self) -> Text { "const_fold".clone() }
 
-    fn apply(&self, stream: OpStream) -> PassResult {
+    fn apply(&self, stream: OpStream) -> OptimizerPassResult {
         let mut stream = stream;
         let mut edits: Int = 0;
         // Tag-based scan: for every arithmetic instruction at PC i,

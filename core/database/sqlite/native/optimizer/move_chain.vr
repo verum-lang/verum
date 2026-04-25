@@ -28,7 +28,7 @@ mount core.database.sqlite.native.optimizer.opstream.{
     OpStream, OpEntry, op_entry,
 };
 mount core.database.sqlite.native.optimizer.pass.{
-    OptimizationPass, PassResult, pass_result,
+    OptimizationPass, OptimizerPassResult, pass_result,
 };
 
 public type MoveChain is { unit: Bool };
@@ -46,7 +46,7 @@ fn is_move(e: &OpEntry) -> Bool {
 implement OptimizationPass for MoveChain {
     fn name(&self) -> Text { "move_chain".clone() }
 
-    fn apply(&self, stream: OpStream) -> PassResult {
+    fn apply(&self, stream: OpStream) -> OptimizerPassResult {
         let mut stream = stream;
         let mut edits: Int = 0;
         let mut i: Int = 0;

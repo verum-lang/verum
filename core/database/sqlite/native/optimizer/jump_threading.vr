@@ -20,7 +20,7 @@ mount core.database.sqlite.native.optimizer.opstream.{
     OpStream, OpEntry, op_entry,
 };
 mount core.database.sqlite.native.optimizer.pass.{
-    OptimizationPass, PassResult, pass_result,
+    OptimizationPass, OptimizerPassResult, pass_result,
 };
 
 public type JumpThreading is { unit: Bool };
@@ -41,7 +41,7 @@ fn target_at(stream: &OpStream, idx: Int) -> Maybe<Int> {
 implement OptimizationPass for JumpThreading {
     fn name(&self) -> Text { "jump_threading".clone() }
 
-    fn apply(&self, stream: OpStream) -> PassResult {
+    fn apply(&self, stream: OpStream) -> OptimizerPassResult {
         let mut stream = stream;
         let mut edits: Int = 0;
         let mut i: Int = 0;

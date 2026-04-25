@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.exec_row_callback.row.{
-    ExecRow, new,
+    ExecCallbackRow, new,
     column_count, arity_consistent, is_well_formed,
 };
 mount core.database.sqlite.native.exec_row_callback.verdict.{

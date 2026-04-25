@@ -14,7 +14,7 @@ mount core.database.sqlite.native.errors.code.{
     ExtendedCode, extended_numeric,
 };
 mount core.database.sqlite.native.open_v2.flags.{
-    OpenFlags, is_valid,
+    OpenV2Flags, is_valid,
 };
 mount core.database.sqlite.native.open_v2.target.{
     OpenTarget,
@@ -46,6 +46,6 @@ public fn result_reason(r: &OpenResult) -> Text {
     }
 }
 
-public fn validate(flags: &OpenFlags) -> Bool {
+public fn validate(flags: &OpenV2Flags) -> Bool {
     is_valid(flags)
 }

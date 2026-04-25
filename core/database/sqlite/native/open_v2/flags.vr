@@ -45,44 +45,44 @@ public const SQLITE_OPEN_WAL: Int               = 0x00080000;
 public const SQLITE_OPEN_NOFOLLOW: Int          = 0x01000000;
 public const SQLITE_OPEN_EXRESCODE: Int         = 0x02000000;
 
-public type OpenFlags is {
+public type OpenV2Flags is {
     bits: Int,
 }
 
-public fn new_flags(bits: Int) -> OpenFlags {
-    OpenFlags { bits: bits }
+public fn new_flags(bits: Int) -> OpenV2Flags {
+    OpenV2Flags { bits: bits }
 }
 
-public fn default_rw_create() -> OpenFlags {
+public fn default_rw_create() -> OpenV2Flags {
     new_flags(SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
 }
 
-public fn readonly_flags() -> OpenFlags {
+public fn readonly_flags() -> OpenV2Flags {
     new_flags(SQLITE_OPEN_READONLY)
 }
 
-public fn memory_flags() -> OpenFlags {
+public fn memory_flags() -> OpenV2Flags {
     new_flags(SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_MEMORY)
 }
 
-public fn has(f: &OpenFlags, bit: Int) -> Bool {
+public fn has(f: &OpenV2Flags, bit: Int) -> Bool {
     (f.bits & bit) != 0
 }
 
-public fn is_readonly(f: &OpenFlags) -> Bool {
+public fn is_readonly(f: &OpenV2Flags) -> Bool {
     has(f, SQLITE_OPEN_READONLY)
 }
 
-public fn is_memory(f: &OpenFlags) -> Bool {
+public fn is_memory(f: &OpenV2Flags) -> Bool {
     has(f, SQLITE_OPEN_MEMORY)
 }
 
-public fn is_uri_enabled(f: &OpenFlags) -> Bool {
+public fn is_uri_enabled(f: &OpenV2Flags) -> Bool {
     has(f, SQLITE_OPEN_URI)
 }
 
 /// Reject conflicting access-mode bits (all three set at once etc.).
-public fn is_valid(f: &OpenFlags) -> Bool {
+public fn is_valid(f: &OpenV2Flags) -> Bool {
     let rw = has(f, SQLITE_OPEN_READWRITE);
     let ro = has(f, SQLITE_OPEN_READONLY);
     if rw && ro { return false; }
