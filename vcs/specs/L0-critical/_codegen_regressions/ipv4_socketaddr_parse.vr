@@ -1,0 +1,42 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: codegen, regression, vbc, dispatch, parse, stdlib-context, issue-78
+// @timeout: 10000
+// @expected-stdout: ipv4 OK
+//                   socketaddr OK
+// @expected-exit: 0
+//
+// Regression for #78: Three stdlib-context codegen path divergences
+// that combined to make Ipv4Addr.parse / SocketAddr.parse return Err
+// (or panic with slice-OOB) in user code:
+//
+//   1. `&parts[i]` indexed-element reference panics
+//      "Slice index out of bounds: index 0 but length is 0".
+//   2. `.map_err(|_| ...)?` chain fails when user module didn't
+//      transitively pull in core.base.result (#79 sibling).
+//   3. Char-literal separator `':'` returns None on non-empty
+//      input from stdlib context (works from user context).
+//
+// Fix in commit 28d166b4: bind indexed elements to intermediates
+// before taking a reference; replace `.map_err(...)?` with
+// explicit match; use Text literal `":"` instead of char literal.
+//
+// Once #75 (typechecker resolution narrowing) lands, all three
+// idiomatic forms should work uniformly across user/stdlib
+// contexts and the workarounds can revert.
+
+mount core.net.addr.{Ipv4Addr, SocketAddr};
+
+@main
+pub fn main() -> Int {
+    match Ipv4Addr.parse("127.0.0.1") {
+        Ok(_) => print("ipv4 OK"),
+        Err(_) => print("ipv4 ERR"),
+    }
+    match SocketAddr.parse("127.0.0.1:18099") {
+        Ok(_) => print("socketaddr OK"),
+        Err(_) => print("socketaddr ERR"),
+    }
+    0
+}
