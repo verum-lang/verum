@@ -1,0 +1,75 @@
+// sqlite3_data_count — current-row column count.
+
+module core.database.sqlite.native.data_count_api.probe;
+
+mount base.{Bool, Text};
+
+// Stmt phase relevant to data_count semantics.
+public type Phase is
+    | PhFresh             // never stepped (or just sqlite3_reset)
+    | PhRowAvailable      // last step returned SQLITE_ROW
+    | PhDoneOrError       // last step returned DONE / ERROR
+    | PhFinalized
+    ;
+
+public fn phase_label(p: &Phase) -> Text {
+    match p {
+        PhFresh         => "fresh".clone(),
+        PhRowAvailable  => "row".clone(),
+        PhDoneOrError   => "done_or_error".clone(),
+        PhFinalized     => "finalized".clone(),
+    }
+}
+
+// Decide what data_count() returns for the given phase.
+public fn data_count_for(p: &Phase, prepare_count: Int) -> Int {
+    match p {
+        PhRowAvailable  => prepare_count,
+        _ => 0,
+    }
+}
+
+// Difference vs sqlite3_column_count: the latter is constant.
+public fn column_count_for(_p: &Phase, prepare_count: Int) -> Int {
+    prepare_count
+}
+
+// Useful predicate for client iteration: should we read this row's columns?
+public fn row_data_available(p: &Phase) -> Bool {
+    match p { PhRowAvailable => true, _ => false }
+}
+
+// Phase transitions that affect data_count's value.
+public type Trigger is
+    | TgStepRow          // sqlite3_step → ROW
+    | TgStepDone         // sqlite3_step → DONE
+    | TgStepError        // sqlite3_step → ERROR
+    | TgReset
+    | TgFinalize
+    ;
+
+public fn trigger_label(t: &Trigger) -> Text {
+    match t {
+        TgStepRow    => "step_row".clone(),
+        TgStepDone   => "step_done".clone(),
+        TgStepError  => "step_error".clone(),
+        TgReset      => "reset".clone(),
+        TgFinalize   => "finalize".clone(),
+    }
+}
+
+public fn next_phase(p: &Phase, t: &Trigger) -> Phase {
+    match p {
+        PhFinalized => PhFinalized,
+        _ => match t {
+            TgStepRow    => PhRowAvailable,
+            TgStepDone   => PhDoneOrError,
+            TgStepError  => PhDoneOrError,
+            TgReset      => PhFresh,
+            TgFinalize   => PhFinalized,
+        },
+    }
+}
+
+public fn well_known_phase_count() -> Int { 4 }
+public fn well_known_trigger_count() -> Int { 5 }

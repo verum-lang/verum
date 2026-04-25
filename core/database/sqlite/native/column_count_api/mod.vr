@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/column_count_api/mod.vr
+// =============================================================================
+// sqlite3_column_count(stmt) — number of result columns the statement will
+// produce.  Stable from prepare time.  Returns 0 for non-SELECT.  Spec App
+// E.C.
+// =============================================================================
+
+module core.database.sqlite.native.column_count_api;
+
+public module count;

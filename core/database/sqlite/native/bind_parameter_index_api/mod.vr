@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/bind_parameter_index_api/mod.vr
+// =============================================================================
+// sqlite3_bind_parameter_index(stmt, name) — given the parameter name (with
+// its sigil — e.g. ":foo", "@foo", "$foo"), returns the 1-based parameter
+// index, or 0 if no matching parameter exists.  Spec App E.B.
+// =============================================================================
+
+module core.database.sqlite.native.bind_parameter_index_api;
+
+public module lookup;

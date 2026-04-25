@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, column_type_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.column_type_api.type_.{
+    integer_code, float_code, text_code, blob_code, null_code,
+    RuntimeKind, RkInteger, RkFloat, RkText, RkBlob, RkNull,
+    from_code, to_code, kind_label, well_known_kind_count,
+    is_null, is_numeric, is_textlike, is_binary,
+    Coercion,
+    CnIdentity, CnIntegerToFloat, CnFloatToInteger,
+    CnTextToInteger, CnTextToFloat, CnIntegerToText, CnFloatToText,
+    CnBlobToText, CnTextToBlob, CnNullToZero, CnNullToEmpty,
+    coercion_label, requires_allocation,
+};
+mount base.{Bool};
+
+fn test_code_constants() {
+    assert_eq(integer_code(), 1);
+    assert_eq(float_code(),   2);
+    assert_eq(text_code(),    3);
+    assert_eq(blob_code(),    4);
+    assert_eq(null_code(),    5);
+}
+
+fn test_from_code_round_trip() {
+    match from_code(1)  { RkInteger => {}, _ => assert(false) }
+    match from_code(2)  { RkFloat   => {}, _ => assert(false) }
+    match from_code(3)  { RkText    => {}, _ => assert(false) }
+    match from_code(4)  { RkBlob    => {}, _ => assert(false) }
+    match from_code(5)  { RkNull    => {}, _ => assert(false) }
+    match from_code(99) { RkNull    => {}, _ => assert(false) }
+    assert_eq(to_code(&RkInteger), 1);
+    assert_eq(to_code(&RkFloat),   2);
+    assert_eq(to_code(&RkText),    3);
+    assert_eq(to_code(&RkBlob),    4);
+    assert_eq(to_code(&RkNull),    5);
+}
+
+fn test_kind_labels() {
+    assert(kind_label(&RkInteger) == "integer".clone());
+    assert(kind_label(&RkFloat)   == "float".clone());
+    assert(kind_label(&RkText)    == "text".clone());
+    assert(kind_label(&RkBlob)    == "blob".clone());
+    assert(kind_label(&RkNull)    == "null".clone());
+    assert_eq(well_known_kind_count(), 5);
+}
+
+fn test_kind_predicates() {
+    assert(is_null(&RkNull));
+    assert(!is_null(&RkInteger));
+    assert(is_numeric(&RkInteger));
+    assert(is_numeric(&RkFloat));
+    assert(!is_numeric(&RkText));
+    assert(is_textlike(&RkText));
+    assert(!is_textlike(&RkBlob));
+    assert(is_binary(&RkBlob));
+    assert(!is_binary(&RkText));
+}
+
+fn test_coercion_labels() {
+    assert(coercion_label(&CnIdentity)        == "identity".clone());
+    assert(coercion_label(&CnIntegerToFloat)  == "i_to_f".clone());
+    assert(coercion_label(&CnFloatToInteger)  == "f_to_i".clone());
+    assert(coercion_label(&CnTextToInteger)   == "t_to_i".clone());
+    assert(coercion_label(&CnTextToFloat)     == "t_to_f".clone());
+    assert(coercion_label(&CnIntegerToText)   == "i_to_t".clone());
+    assert(coercion_label(&CnFloatToText)     == "f_to_t".clone());
+    assert(coercion_label(&CnBlobToText)      == "b_to_t".clone());
+    assert(coercion_label(&CnTextToBlob)      == "t_to_b".clone());
+    assert(coercion_label(&CnNullToZero)      == "null_to_zero".clone());
+    assert(coercion_label(&CnNullToEmpty)     == "null_to_empty".clone());
+}
+
+fn test_requires_allocation() {
+    assert(requires_allocation(&CnIntegerToText));
+    assert(requires_allocation(&CnFloatToText));
+    assert(requires_allocation(&CnTextToBlob));
+    assert(!requires_allocation(&CnIdentity));
+    assert(!requires_allocation(&CnNullToZero));
+}
+
+fn main() {
+    test_code_constants();
+    test_from_code_round_trip();
+    test_kind_labels();
+    test_kind_predicates();
+    test_coercion_labels();
+    test_requires_allocation();
+}

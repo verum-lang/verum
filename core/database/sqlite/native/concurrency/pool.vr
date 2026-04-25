@@ -40,7 +40,7 @@ public type PoolError is
 
 public type SlotId is { id: Int };
 
-public type Slot is {
+public type PoolSlot is {
     slot_id: SlotId,
     /// Bumped on each release — leases stamped with the matching seq
     /// can be detected as stale.
@@ -68,18 +68,18 @@ implement Lease {
 
 public type DbConnectionPool is {
     capacity: Int,
-    slots: List<Slot>,
+    slots: List<PoolSlot>,
     /// LIFO free-list of slot indices.
     free: List<Int>,
     closed: Bool,
 };
 
 public fn db_pool_new(capacity: Int) -> DbConnectionPool {
-    let mut slots: List<Slot> = List.new();
+    let mut slots: List<PoolSlot> = List.new();
     let mut free: List<Int> = List.new();
     let mut i: Int = 0;
     while i < capacity {
-        slots.push(Slot {
+        slots.push(PoolSlot {
             slot_id: SlotId { id: i },
             sequence: 0 as Int64,
             in_use: false,

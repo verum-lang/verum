@@ -10,11 +10,11 @@ mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 mount core.database.sqlite.native.client_data.slot.{
-    Slot, new_slot, is_unset,
+    ClientDataSlot, new_slot, is_unset,
 };
 
 public type ClientDataRegistry is {
-    slots: List<Slot>,
+    slots: List<ClientDataSlot>,
     /// Total destructor calls (fires when a slot is replaced / cleared).
     destructors_invoked: Int64,
 }

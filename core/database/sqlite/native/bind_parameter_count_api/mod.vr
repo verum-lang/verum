@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/bind_parameter_count_api/mod.vr
+// =============================================================================
+// sqlite3_bind_parameter_count(stmt) — returns the highest 1-based parameter
+// index referenced in the SQL.  For `?` parameters this is the count; for
+// numbered (`?N`) it is the highest N; named/`@n`/`:n`/`$n` follow the
+// numbering they got at compile time.  Spec App E.B.
+// =============================================================================
+
+module core.database.sqlite.native.bind_parameter_count_api;
+
+public module count;

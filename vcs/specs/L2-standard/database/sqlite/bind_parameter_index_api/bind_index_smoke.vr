@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind_parameter_index_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bind_parameter_index_api.lookup.{
+    BindIndexSlot, empty_slot,
+    Outcome, OkFound, OkNotFound, OkAnonymous,
+    outcome_int, outcome_name, was_found,
+    find_by_name,
+    NameCheck, NcOk, NcEmptyBody, NcMissingSigil,
+    check_name_token, name_check_label,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_empty_slot() {
+    let s = empty_slot();
+    assert_eq(s.index, 0);
+    assert(s.name == "".clone());
+}
+
+fn test_find_anonymous_returns_anonymous_for_empty() {
+    let slots: List<BindIndexSlot> = List.new();
+    match find_by_name("".clone(), &slots) { OkAnonymous => {}, _ => assert(false) }
+}
+
+fn test_find_not_found_in_empty_list() {
+    let slots: List<BindIndexSlot> = List.new();
+    match find_by_name(":nope".clone(), &slots) { OkNotFound => {}, _ => assert(false) }
+}
+
+fn test_find_match() {
+    let mut slots = List.new();
+    slots.push(BindIndexSlot { index: 1, name: ":foo".clone() });
+    slots.push(BindIndexSlot { index: 2, name: "@bar".clone() });
+    slots.push(BindIndexSlot { index: 3, name: "$baz".clone() });
+    match find_by_name(":foo".clone(), &slots) {
+        OkFound(n) => assert_eq(n, 1),
+        _ => assert(false),
+    }
+    match find_by_name("@bar".clone(), &slots) {
+        OkFound(n) => assert_eq(n, 2),
+        _ => assert(false),
+    }
+    match find_by_name("$baz".clone(), &slots) {
+        OkFound(n) => assert_eq(n, 3),
+        _ => assert(false),
+    }
+}
+
+fn test_find_no_partial_match() {
+    let mut slots = List.new();
+    slots.push(BindIndexSlot { index: 1, name: ":foo".clone() });
+    // "foo" without sigil should NOT match.
+    match find_by_name("foo".clone(), &slots) { OkNotFound => {}, _ => assert(false) }
+}
+
+fn test_outcome_int_and_name() {
+    assert_eq(outcome_int(&OkFound(7)),  7);
+    assert_eq(outcome_int(&OkNotFound),  0);
+    assert_eq(outcome_int(&OkAnonymous), 0);
+    assert(outcome_name(&OkFound(1))  == "found".clone());
+    assert(outcome_name(&OkNotFound)  == "not_found".clone());
+    assert(outcome_name(&OkAnonymous) == "anonymous".clone());
+    assert(was_found(&OkFound(1)));
+    assert(!was_found(&OkNotFound));
+    assert(!was_found(&OkAnonymous));
+}
+
+fn test_check_name_token() {
+    match check_name_token(":foo".clone()) { NcOk           => {}, _ => assert(false) }
+    match check_name_token("@bar".clone()) { NcOk           => {}, _ => assert(false) }
+    match check_name_token("$baz".clone()) { NcOk           => {}, _ => assert(false) }
+    match check_name_token("".clone())     { NcMissingSigil => {}, _ => assert(false) }
+    match check_name_token("foo".clone())  { NcMissingSigil => {}, _ => assert(false) }
+    match check_name_token(":".clone())    { NcEmptyBody    => {}, _ => assert(false) }
+}
+
+fn test_name_check_labels() {
+    assert(name_check_label(&NcOk)            == "ok".clone());
+    assert(name_check_label(&NcEmptyBody)     == "empty_body".clone());
+    assert(name_check_label(&NcMissingSigil)  == "missing_sigil".clone());
+}
+
+fn main() {
+    test_empty_slot();
+    test_find_anonymous_returns_anonymous_for_empty();
+    test_find_not_found_in_empty_list();
+    test_find_match();
+    test_find_no_partial_match();
+    test_outcome_int_and_name();
+    test_check_name_token();
+    test_name_check_labels();
+}

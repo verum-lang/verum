@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, column_decltype_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.column_decltype_api.decltype.{
+    DeclSugar, DsInteger, DsText, DsReal, DsBlob, DsNumeric,
+    DsBoolean, DsAny, DsCustom,
+    sugar_text, from_text, well_known_sugar_count, is_well_known,
+    Outcome, OkDecl, OkNullExpression, OkNullDisabled,
+    outcome_label, returned_text, decl_text, requires_compile_flag,
+    Affinity, AfInteger, AfText, AfReal, AfBlob, AfNumeric,
+    affinity_for, affinity_label,
+};
+mount base.{Bool};
+
+fn test_sugar_round_trip() {
+    assert(sugar_text(&DsInteger) == "INTEGER".clone());
+    assert(sugar_text(&DsText)    == "TEXT".clone());
+    assert(sugar_text(&DsReal)    == "REAL".clone());
+    assert(sugar_text(&DsBlob)    == "BLOB".clone());
+    assert(sugar_text(&DsNumeric) == "NUMERIC".clone());
+    assert(sugar_text(&DsBoolean) == "BOOLEAN".clone());
+    assert(sugar_text(&DsAny)     == "ANY".clone());
+    assert(sugar_text(&DsCustom("VARCHAR(255)".clone())) == "VARCHAR(255)".clone());
+    assert_eq(well_known_sugar_count(), 7);
+}
+
+fn test_from_text() {
+    match from_text("INTEGER".clone()) { DsInteger    => {}, _ => assert(false) }
+    match from_text("TEXT".clone())    { DsText       => {}, _ => assert(false) }
+    match from_text("BOOLEAN".clone()) { DsBoolean    => {}, _ => assert(false) }
+    match from_text("ANY".clone())     { DsAny        => {}, _ => assert(false) }
+    match from_text("VARCHAR(255)".clone()) {
+        DsCustom(t) => assert(t == "VARCHAR(255)".clone()),
+        _ => assert(false),
+    }
+}
+
+fn test_is_well_known() {
+    assert(is_well_known(&DsInteger));
+    assert(is_well_known(&DsAny));
+    assert(!is_well_known(&DsCustom("Foo".clone())));
+}
+
+fn test_outcome() {
+    assert(outcome_label(&OkDecl("INTEGER".clone())) == "decl".clone());
+    assert(outcome_label(&OkNullExpression)            == "expression".clone());
+    assert(outcome_label(&OkNullDisabled)              == "disabled".clone());
+    assert(returned_text(&OkDecl("X".clone())));
+    assert(!returned_text(&OkNullExpression));
+    assert(!returned_text(&OkNullDisabled));
+    assert(decl_text(&OkDecl("X".clone())) == "X".clone());
+    assert(decl_text(&OkNullDisabled)        == "".clone());
+}
+
+fn test_compile_flag() {
+    assert(requires_compile_flag() == "ENABLE_COLUMN_METADATA".clone());
+}
+
+fn test_affinity_dispatch() {
+    match affinity_for(&DsInteger)                  { AfInteger => {}, _ => assert(false) }
+    match affinity_for(&DsText)                     { AfText    => {}, _ => assert(false) }
+    match affinity_for(&DsReal)                     { AfReal    => {}, _ => assert(false) }
+    match affinity_for(&DsBlob)                     { AfBlob    => {}, _ => assert(false) }
+    match affinity_for(&DsNumeric)                  { AfNumeric => {}, _ => assert(false) }
+    match affinity_for(&DsBoolean)                  { AfNumeric => {}, _ => assert(false) }
+    match affinity_for(&DsAny)                      { AfBlob    => {}, _ => assert(false) }
+    match affinity_for(&DsCustom("XXX".clone()))    { AfNumeric => {}, _ => assert(false) }
+}
+
+fn test_affinity_labels() {
+    assert(affinity_label(&AfInteger) == "integer".clone());
+    assert(affinity_label(&AfText)    == "text".clone());
+    assert(affinity_label(&AfReal)    == "real".clone());
+    assert(affinity_label(&AfBlob)    == "blob".clone());
+    assert(affinity_label(&AfNumeric) == "numeric".clone());
+}
+
+fn main() {
+    test_sugar_round_trip();
+    test_from_text();
+    test_is_well_known();
+    test_outcome();
+    test_compile_flag();
+    test_affinity_dispatch();
+    test_affinity_labels();
+}

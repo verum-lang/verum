@@ -7,7 +7,7 @@
 
 mount core.database.sqlite.native.bind_pointer_destructor_api.slot.{
     Destructor, DStatic, DTransient, DCallback, destructor_name,
-    Slot, empty_slot, bind,
+    BindDestructorSlot, empty_slot, bind,
     ResetEffect, ReNoop, ReFireCallback, ReEngineFreesCopy,
     reset_effect, reset_effect_name, fires_callback, after_reset,
     TagMatch, TmExact, TmDifferent, TmEmpty,

@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/column_decltype_api/mod.vr
+// =============================================================================
+// sqlite3_column_decltype(stmt, i) — declared type-name of the source column
+// from CREATE TABLE; NULL for expression columns.  Available only when built
+// with SQLITE_ENABLE_COLUMN_METADATA.  Distinct from sqlite3_column_type which
+// returns the *runtime* SQLITE_INTEGER/REAL/TEXT/BLOB/NULL of the bound row.
+// Spec App E.C.
+// =============================================================================
+
+module core.database.sqlite.native.column_decltype_api;
+
+public module decltype;

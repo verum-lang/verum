@@ -23,17 +23,17 @@ public fn destructor_name(d: &Destructor) -> Text {
 }
 
 // Per-slot state.
-public type Slot is {
+public type BindDestructorSlot is {
     bound: Bool,
     type_tag: Text,         // e.g. "carray" — sqlite3_value_pointer requires match
     destructor: Destructor,
 };
 
-public fn empty_slot() -> Slot {
-    Slot { bound: false, type_tag: "".clone(), destructor: DStatic }
+public fn empty_slot() -> BindDestructorSlot {
+    BindDestructorSlot { bound: false, type_tag: "".clone(), destructor: DStatic }
 }
 
-public fn bind(mut s: Slot, type_tag: Text, d: Destructor) -> Slot {
+public fn bind(mut s: BindDestructorSlot, type_tag: Text, d: Destructor) -> BindDestructorSlot {
     s.bound = true;
     s.type_tag = type_tag;
     s.destructor = d;
@@ -48,7 +48,7 @@ public type ResetEffect is
     | ReEngineFreesCopy   // SQLITE_TRANSIENT — engine already owns the copy
     ;
 
-public fn reset_effect(s: &Slot) -> ResetEffect {
+public fn reset_effect(s: &BindDestructorSlot) -> ResetEffect {
     if !s.bound { return ReNoop; }
     match s.destructor {
         DStatic    => ReNoop,
@@ -70,7 +70,7 @@ public fn fires_callback(e: &ResetEffect) -> Bool {
 }
 
 // After the reset effect fires, the slot is logically unbound.
-public fn after_reset(s: &Slot) -> Slot {
+public fn after_reset(s: &BindDestructorSlot) -> BindDestructorSlot {
     let mut out = empty_slot();
     let _ = s;
     out
@@ -83,7 +83,7 @@ public type TagMatch is
     | TmEmpty           // slot has no type tag
     ;
 
-public fn match_tag(s: &Slot, expected: Text) -> TagMatch {
+public fn match_tag(s: &BindDestructorSlot, expected: Text) -> TagMatch {
     if !s.bound { return TmEmpty; }
     if s.type_tag == expected { return TmExact; }
     TmDifferent

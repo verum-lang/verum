@@ -1,0 +1,74 @@
+// sqlite3_bind_parameter_name — slot → name token.
+
+module core.database.sqlite.native.bind_parameter_name_api.reverse;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type BindNameSlot is { index: Int, name: Text };
+
+public type Outcome is
+    | OkName(Text)
+    | OkNullAnonymous          // anonymous `?` — engine returns NULL
+    | OkNullOutOfRange         // idx <= 0 or > param count
+    ;
+
+public fn outcome_name_label(o: &Outcome) -> Text {
+    match o {
+        OkName(_)            => "name".clone(),
+        OkNullAnonymous      => "anonymous".clone(),
+        OkNullOutOfRange     => "out_of_range".clone(),
+    }
+}
+
+public fn returned_text(o: &Outcome) -> Bool {
+    match o { OkName(_) => true, _ => false }
+}
+
+public fn name_text(o: &Outcome) -> Text {
+    match o {
+        OkName(t)         => t.clone(),
+        _                  => "".clone(),
+    }
+}
+
+// Reverse lookup.  BindNameSlot list is the same shape as in
+// `bind_parameter_index_api`.  An anonymous slot is encoded with name = "".
+public fn name_for(idx: Int, slots: &List<BindNameSlot>) -> Outcome {
+    let n = slots.len() as Int;
+    if idx < 1 || idx > n { return OkNullOutOfRange; }
+    let s = slots.get(idx - 1);
+    if s.name == "".clone() { return OkNullAnonymous; }
+    OkName(s.name.clone())
+}
+
+// Sigil classification — useful for pretty-printing ALL parameters.
+public type Sigil is
+    | SgNone           // anonymous
+    | SgColon
+    | SgAt
+    | SgDollar
+    | SgUnknown
+    ;
+
+public fn classify_sigil(name: Text) -> Sigil {
+    let bs = name.as_bytes();
+    if bs.len() == 0 { return SgNone; }
+    let first = bs[0] as Int;
+    if first == 0x3A { return SgColon; }
+    if first == 0x40 { return SgAt; }
+    if first == 0x24 { return SgDollar; }
+    SgUnknown
+}
+
+public fn sigil_label(s: &Sigil) -> Text {
+    match s {
+        SgNone     => "none".clone(),
+        SgColon    => "colon".clone(),
+        SgAt       => "at".clone(),
+        SgDollar   => "dollar".clone(),
+        SgUnknown  => "unknown".clone(),
+    }
+}
+
+public fn well_known_sigil_count() -> Int { 5 }

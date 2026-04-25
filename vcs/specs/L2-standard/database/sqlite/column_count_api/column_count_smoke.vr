@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, column_count_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.column_count_api.count.{
+    StmtKind, SkSelect, SkPragma, SkExplain,
+    SkDml, SkDmlReturning, SkDdl, SkTx,
+    kind_label, well_known_kind_count, produces_rows,
+    explain_column_count, explain_query_plan_column_count,
+    predicted_count,
+    LookupOutcome, OkCount, ErrMisuseFinalized,
+    outcome_count, is_ok, outcome_label,
+};
+mount base.{Bool};
+
+fn test_kind_labels() {
+    assert(kind_label(&SkSelect)        == "select".clone());
+    assert(kind_label(&SkPragma)        == "pragma".clone());
+    assert(kind_label(&SkExplain)       == "explain".clone());
+    assert(kind_label(&SkDml)           == "dml".clone());
+    assert(kind_label(&SkDmlReturning)  == "dml_returning".clone());
+    assert(kind_label(&SkDdl)           == "ddl".clone());
+    assert(kind_label(&SkTx)            == "tx".clone());
+    assert_eq(well_known_kind_count(), 7);
+}
+
+fn test_produces_rows() {
+    assert(produces_rows(&SkSelect));
+    assert(produces_rows(&SkPragma));
+    assert(produces_rows(&SkExplain));
+    assert(produces_rows(&SkDmlReturning));
+    assert(!produces_rows(&SkDml));
+    assert(!produces_rows(&SkDdl));
+    assert(!produces_rows(&SkTx));
+}
+
+fn test_explain_column_constants() {
+    assert_eq(explain_column_count(),            8);
+    assert_eq(explain_query_plan_column_count(), 4);
+}
+
+fn test_predicted_count() {
+    assert_eq(predicted_count(&SkSelect, 5),         5);
+    assert_eq(predicted_count(&SkPragma, 3),         3);
+    assert_eq(predicted_count(&SkDmlReturning, 2),   2);
+    assert_eq(predicted_count(&SkExplain, 99),       8);   // overrides user count
+    assert_eq(predicted_count(&SkDml, 7),            0);
+    assert_eq(predicted_count(&SkDdl, 7),            0);
+    assert_eq(predicted_count(&SkTx, 7),             0);
+}
+
+fn test_outcome_helpers() {
+    assert_eq(outcome_count(&OkCount(5)),         5);
+    assert_eq(outcome_count(&ErrMisuseFinalized), 0);
+    assert(is_ok(&OkCount(0)));
+    assert(!is_ok(&ErrMisuseFinalized));
+    assert(outcome_label(&OkCount(0))           == "ok".clone());
+    assert(outcome_label(&ErrMisuseFinalized)   == "misuse_finalized".clone());
+}
+
+fn main() {
+    test_kind_labels();
+    test_produces_rows();
+    test_explain_column_constants();
+    test_predicted_count();
+    test_outcome_helpers();
+}

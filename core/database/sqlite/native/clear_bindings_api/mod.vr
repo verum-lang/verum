@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/clear_bindings_api/mod.vr
+// =============================================================================
+// sqlite3_clear_bindings(stmt) — reset every bound parameter to NULL.  Does
+// NOT reset the program counter (sqlite3_reset does that); commonly called
+// after a row-batch insert to avoid stale binds leaking into the next set.
+// Spec App E.B.
+// =============================================================================
+
+module core.database.sqlite.native.clear_bindings_api;
+
+public module clear;

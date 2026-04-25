@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.client_data.slot.{
-    Slot, new_slot, is_unset,
+    ClientDataSlot, new_slot, is_unset,
 };
 mount core.database.sqlite.native.client_data.registry.{
     ClientDataRegistry, new_registry,

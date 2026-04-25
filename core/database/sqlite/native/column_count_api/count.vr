@@ -1,0 +1,80 @@
+// sqlite3_column_count — compile-time-stable column-count probe.
+
+module core.database.sqlite.native.column_count_api.count;
+
+mount base.{Bool, Text};
+
+public type StmtKind is
+    | SkSelect          // user SELECT — column_count > 0 (or 0 for SELECT;)
+    | SkPragma          // some PRAGMAs return rows; column_count > 0
+    | SkExplain         // EXPLAIN/EQP — fixed shape
+    | SkDml             // INSERT/UPDATE/DELETE without RETURNING — count = 0
+    | SkDmlReturning    // DML with RETURNING — count > 0
+    | SkDdl             // CREATE/DROP/ALTER — count = 0
+    | SkTx              // BEGIN/COMMIT/ROLLBACK — count = 0
+    ;
+
+public fn kind_label(k: &StmtKind) -> Text {
+    match k {
+        SkSelect         => "select".clone(),
+        SkPragma         => "pragma".clone(),
+        SkExplain        => "explain".clone(),
+        SkDml            => "dml".clone(),
+        SkDmlReturning   => "dml_returning".clone(),
+        SkDdl            => "ddl".clone(),
+        SkTx             => "tx".clone(),
+    }
+}
+
+public fn well_known_kind_count() -> Int { 7 }
+
+// Whether the statement can produce result rows.
+public fn produces_rows(k: &StmtKind) -> Bool {
+    match k {
+        SkSelect         => true,
+        SkPragma         => true,
+        SkExplain        => true,
+        SkDmlReturning   => true,
+        _ => false,
+    }
+}
+
+// EXPLAIN-specific column count.  See `stmt_isexplain_api` for the
+// result-shape constants — replicate here for self-containment.
+public fn explain_column_count() -> Int { 8 }
+public fn explain_query_plan_column_count() -> Int { 4 }
+
+// Predicted column count given the kind + a pre-computed user-column count.
+public fn predicted_count(k: &StmtKind, user_columns: Int) -> Int {
+    match k {
+        SkExplain         => explain_column_count(),
+        SkSelect          => user_columns,
+        SkPragma          => user_columns,
+        SkDmlReturning    => user_columns,
+        _ => 0,
+    }
+}
+
+// API outcome — only fails on SQLITE_MISUSE (finalized stmt).
+public type LookupOutcome is
+    | OkCount(Int)
+    | ErrMisuseFinalized
+    ;
+
+public fn outcome_count(o: &LookupOutcome) -> Int {
+    match o {
+        OkCount(n)            => n.clone(),
+        ErrMisuseFinalized    => 0,
+    }
+}
+
+public fn is_ok(o: &LookupOutcome) -> Bool {
+    match o { OkCount(_) => true, _ => false }
+}
+
+public fn outcome_label(o: &LookupOutcome) -> Text {
+    match o {
+        OkCount(_)            => "ok".clone(),
+        ErrMisuseFinalized    => "misuse_finalized".clone(),
+    }
+}

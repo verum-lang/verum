@@ -1,0 +1,66 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind_parameter_count_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bind_parameter_count_api.count.{
+    ParamKind, PkAnonymous, PkNumbered, PkNamedColon, PkNamedAt, PkNamedDollar,
+    kind_name, well_known_kind_count, classify_first_byte,
+    highest_index,
+    IndexCheck, IcOk, IcOutOfRange,
+    check_index, check_name, is_ok, range_code,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&PkAnonymous)   == "anonymous".clone());
+    assert(kind_name(&PkNumbered)    == "numbered".clone());
+    assert(kind_name(&PkNamedColon)  == "colon".clone());
+    assert(kind_name(&PkNamedAt)     == "at".clone());
+    assert(kind_name(&PkNamedDollar) == "dollar".clone());
+    assert_eq(well_known_kind_count(), 5);
+}
+
+fn test_classify_first_byte() {
+    match classify_first_byte(0x3F) { PkAnonymous   => {}, _ => assert(false) }
+    match classify_first_byte(0x3A) { PkNamedColon  => {}, _ => assert(false) }
+    match classify_first_byte(0x40) { PkNamedAt     => {}, _ => assert(false) }
+    match classify_first_byte(0x24) { PkNamedDollar => {}, _ => assert(false) }
+    match classify_first_byte(0x61) { PkAnonymous   => {}, _ => assert(false) }
+}
+
+fn test_highest_index() {
+    assert_eq(highest_index(3, 5), 5);
+    assert_eq(highest_index(5, 3), 5);
+    assert_eq(highest_index(0, 0), 0);
+}
+
+fn test_check_index() {
+    match check_index(1, 5)  { IcOk         => {}, _ => assert(false) }
+    match check_index(5, 5)  { IcOk         => {}, _ => assert(false) }
+    match check_index(0, 5)  { IcOutOfRange => {}, _ => assert(false) }
+    match check_index(6, 5)  { IcOutOfRange => {}, _ => assert(false) }
+    match check_index(-1, 5) { IcOutOfRange => {}, _ => assert(false) }
+}
+
+fn test_check_names_and_is_ok() {
+    assert(check_name(&IcOk)         == "ok".clone());
+    assert(check_name(&IcOutOfRange) == "out_of_range".clone());
+    assert(is_ok(&IcOk));
+    assert(!is_ok(&IcOutOfRange));
+}
+
+fn test_range_code() {
+    assert_eq(range_code(), 25);
+}
+
+fn main() {
+    test_kind_names();
+    test_classify_first_byte();
+    test_highest_index();
+    test_check_index();
+    test_check_names_and_is_ok();
+    test_range_code();
+}

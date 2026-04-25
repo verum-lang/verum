@@ -1,5 +1,5 @@
 // =============================================================================
-// client_data/slot.vr — Slot record
+// client_data/slot.vr — ClientDataSlot record
 // =============================================================================
 // Spec: SQLite C API
 // =============================================================================
@@ -9,16 +9,16 @@ module core.database.sqlite.native.client_data.slot;
 mount core.*;
 mount base.{Bool, Text};
 
-public type Slot is {
+public type ClientDataSlot is {
     name: Text,
     handle: Int64,
     has_destructor: Bool,
 }
 
-public fn new_slot(name: Text, handle: Int64, has_destructor: Bool) -> Slot {
-    Slot { name: name, handle: handle, has_destructor: has_destructor }
+public fn new_slot(name: Text, handle: Int64, has_destructor: Bool) -> ClientDataSlot {
+    ClientDataSlot { name: name, handle: handle, has_destructor: has_destructor }
 }
 
-public fn is_unset(s: &Slot) -> Bool {
+public fn is_unset(s: &ClientDataSlot) -> Bool {
     s.handle == (0 as Int64)
 }

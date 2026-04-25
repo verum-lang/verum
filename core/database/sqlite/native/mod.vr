@@ -924,3 +924,19 @@ public module value_frombind_api;
 public module null_safe_compare_op_api;
 // - mutex_class_api: 14 SQLITE_MUTEX_* classes + KAlloc/KStatic kind dispatch
 public module mutex_class_api;
+// - bind_parameter_count_api: 5-kind ParamKind + first-byte sigil sniff + range_code=25
+public module bind_parameter_count_api;
+// - bind_parameter_index_api: name → 1-based slot lookup + 3-NameCheck (sigil/body)
+public module bind_parameter_index_api;
+// - bind_parameter_name_api: slot → name (NULL for anonymous/OOR) + Sigil 5-class
+public module bind_parameter_name_api;
+// - clear_bindings_api: per-call ClearStats + ApplyOutcome + misuse_code=21
+public module clear_bindings_api;
+// - column_count_api: 7-StmtKind classifier + EXPLAIN col-count constants
+public module column_count_api;
+// - column_decltype_api: 7-DeclSugar (INTEGER/TEXT/REAL/BLOB/NUMERIC/BOOLEAN/ANY) + Affinity
+public module column_decltype_api;
+// - column_type_api: SQLITE_INTEGER/FLOAT/TEXT/BLOB/NULL = 1..5 + 11-Coercion taxonomy
+public module column_type_api;
+// - data_count_api: 4-Phase machine (Fresh/RowAvail/DoneOrErr/Finalized) + 5-Trigger
+public module data_count_api;

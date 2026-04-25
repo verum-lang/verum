@@ -1,0 +1,64 @@
+// sqlite3_clear_bindings — reset all parameters to NULL.
+
+module core.database.sqlite.native.clear_bindings_api.clear;
+
+mount base.{Bool, Int64, Text};
+
+// Per-call statistics — used by audit-style tooling.
+public type ClearStats is {
+    slots_total: Int,
+    slots_reset: Int,        // = slots_total minus those already NULL
+    fired_destructors: Int,  // sqlite3_bind_pointer slots with custom dtor
+};
+
+public fn empty_stats() -> ClearStats {
+    ClearStats { slots_total: 0, slots_reset: 0, fired_destructors: 0 }
+}
+
+public fn record_slot(mut s: ClearStats, was_set: Bool, had_callback_dtor: Bool) -> ClearStats {
+    s.slots_total = s.slots_total + 1;
+    if was_set {
+        s.slots_reset = s.slots_reset + 1;
+        if had_callback_dtor {
+            s.fired_destructors = s.fired_destructors + 1;
+        }
+    }
+    s
+}
+
+public fn was_noop(s: &ClearStats) -> Bool {
+    s.slots_reset == 0
+}
+
+public fn relative_pressure(s: &ClearStats) -> Int {
+    if s.slots_total == 0 { return 0; }
+    (s.slots_reset * 100) / s.slots_total
+}
+
+// API outcome — clear_bindings always succeeds in production (apart from
+// SQLITE_MISUSE on an already-finalized stmt).
+public type ApplyOutcome is
+    | OkApplied(Int)             // count of slots reset
+    | ErrMisuseFinalized
+    ;
+
+public fn outcome_label(o: &ApplyOutcome) -> Text {
+    match o {
+        OkApplied(_)         => "ok".clone(),
+        ErrMisuseFinalized   => "misuse_finalized".clone(),
+    }
+}
+
+public fn is_ok(o: &ApplyOutcome) -> Bool {
+    match o { OkApplied(_) => true, _ => false }
+}
+
+public fn slots_reset(o: &ApplyOutcome) -> Int {
+    match o {
+        OkApplied(n)         => n.clone(),
+        ErrMisuseFinalized   => 0,
+    }
+}
+
+// SQLITE_MISUSE result code.
+public fn misuse_code() -> Int { 21 }

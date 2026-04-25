@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind_parameter_name_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bind_parameter_name_api.reverse.{
+    BindNameSlot,
+    Outcome, OkName, OkNullAnonymous, OkNullOutOfRange,
+    outcome_name_label, returned_text, name_text,
+    name_for,
+    Sigil, SgNone, SgColon, SgAt, SgDollar, SgUnknown,
+    classify_sigil, sigil_label, well_known_sigil_count,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn build_slots() -> List<BindNameSlot> {
+    let mut s = List.new();
+    s.push(BindNameSlot { index: 1, name: ":foo".clone() });
+    s.push(BindNameSlot { index: 2, name: "".clone() });        // anonymous
+    s.push(BindNameSlot { index: 3, name: "@bar".clone() });
+    s
+}
+
+fn test_name_for_named_slot() {
+    let slots = build_slots();
+    match name_for(1, &slots) {
+        OkName(t) => assert(t == ":foo".clone()),
+        _ => assert(false),
+    }
+    match name_for(3, &slots) {
+        OkName(t) => assert(t == "@bar".clone()),
+        _ => assert(false),
+    }
+}
+
+fn test_name_for_anonymous_slot() {
+    let slots = build_slots();
+    match name_for(2, &slots) { OkNullAnonymous => {}, _ => assert(false) }
+}
+
+fn test_name_for_out_of_range() {
+    let slots = build_slots();
+    match name_for(0, &slots)   { OkNullOutOfRange => {}, _ => assert(false) }
+    match name_for(-1, &slots)  { OkNullOutOfRange => {}, _ => assert(false) }
+    match name_for(99, &slots)  { OkNullOutOfRange => {}, _ => assert(false) }
+}
+
+fn test_outcome_helpers() {
+    assert(outcome_name_label(&OkName(":a".clone())) == "name".clone());
+    assert(outcome_name_label(&OkNullAnonymous)        == "anonymous".clone());
+    assert(outcome_name_label(&OkNullOutOfRange)       == "out_of_range".clone());
+    assert(returned_text(&OkName(":a".clone())));
+    assert(!returned_text(&OkNullAnonymous));
+    assert(!returned_text(&OkNullOutOfRange));
+    assert(name_text(&OkName(":a".clone())) == ":a".clone());
+    assert(name_text(&OkNullAnonymous)        == "".clone());
+}
+
+fn test_classify_sigil() {
+    match classify_sigil("".clone())     { SgNone    => {}, _ => assert(false) }
+    match classify_sigil(":foo".clone()) { SgColon   => {}, _ => assert(false) }
+    match classify_sigil("@bar".clone()) { SgAt      => {}, _ => assert(false) }
+    match classify_sigil("$baz".clone()) { SgDollar  => {}, _ => assert(false) }
+    match classify_sigil("Xfoo".clone()) { SgUnknown => {}, _ => assert(false) }
+}
+
+fn test_sigil_labels() {
+    assert(sigil_label(&SgNone)    == "none".clone());
+    assert(sigil_label(&SgColon)   == "colon".clone());
+    assert(sigil_label(&SgAt)      == "at".clone());
+    assert(sigil_label(&SgDollar)  == "dollar".clone());
+    assert(sigil_label(&SgUnknown) == "unknown".clone());
+    assert_eq(well_known_sigil_count(), 5);
+}
+
+fn main() {
+    test_name_for_named_slot();
+    test_name_for_anonymous_slot();
+    test_name_for_out_of_range();
+    test_outcome_helpers();
+    test_classify_sigil();
+    test_sigil_labels();
+}

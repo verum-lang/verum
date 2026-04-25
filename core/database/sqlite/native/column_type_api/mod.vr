@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/column_type_api/mod.vr
+// =============================================================================
+// sqlite3_column_type(stmt, i) — runtime SQL-type tag of the value bound to
+// the i-th column on the most recently stepped row.  Returns one of
+// SQLITE_INTEGER (1) / SQLITE_FLOAT (2) / SQLITE_TEXT (3) / SQLITE_BLOB (4) /
+// SQLITE_NULL (5).  Spec App E.C.
+// =============================================================================
+
+module core.database.sqlite.native.column_type_api;
+
+public module type_;

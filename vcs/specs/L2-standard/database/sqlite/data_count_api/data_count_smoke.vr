@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, data_count_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.data_count_api.probe.{
+    Phase, PhFresh, PhRowAvailable, PhDoneOrError, PhFinalized,
+    phase_label,
+    data_count_for, column_count_for, row_data_available,
+    Trigger, TgStepRow, TgStepDone, TgStepError, TgReset, TgFinalize,
+    trigger_label, next_phase,
+    well_known_phase_count, well_known_trigger_count,
+};
+mount base.{Bool};
+
+fn test_phase_labels() {
+    assert(phase_label(&PhFresh)        == "fresh".clone());
+    assert(phase_label(&PhRowAvailable) == "row".clone());
+    assert(phase_label(&PhDoneOrError)  == "done_or_error".clone());
+    assert(phase_label(&PhFinalized)    == "finalized".clone());
+    assert_eq(well_known_phase_count(), 4);
+}
+
+fn test_data_count_for() {
+    assert_eq(data_count_for(&PhRowAvailable, 5), 5);
+    assert_eq(data_count_for(&PhFresh,         5), 0);
+    assert_eq(data_count_for(&PhDoneOrError,   5), 0);
+    assert_eq(data_count_for(&PhFinalized,     5), 0);
+}
+
+fn test_column_count_for_constant() {
+    // sqlite3_column_count is stable from prepare regardless of phase.
+    assert_eq(column_count_for(&PhFresh,        7), 7);
+    assert_eq(column_count_for(&PhRowAvailable, 7), 7);
+    assert_eq(column_count_for(&PhDoneOrError,  7), 7);
+}
+
+fn test_row_data_available() {
+    assert(row_data_available(&PhRowAvailable));
+    assert(!row_data_available(&PhFresh));
+    assert(!row_data_available(&PhDoneOrError));
+    assert(!row_data_available(&PhFinalized));
+}
+
+fn test_trigger_labels() {
+    assert(trigger_label(&TgStepRow)   == "step_row".clone());
+    assert(trigger_label(&TgStepDone)  == "step_done".clone());
+    assert(trigger_label(&TgStepError) == "step_error".clone());
+    assert(trigger_label(&TgReset)     == "reset".clone());
+    assert(trigger_label(&TgFinalize)  == "finalize".clone());
+    assert_eq(well_known_trigger_count(), 5);
+}
+
+fn test_next_phase_step_row() {
+    match next_phase(&PhFresh,        &TgStepRow) { PhRowAvailable => {}, _ => assert(false) }
+    match next_phase(&PhRowAvailable, &TgStepRow) { PhRowAvailable => {}, _ => assert(false) }
+    match next_phase(&PhDoneOrError,  &TgStepRow) { PhRowAvailable => {}, _ => assert(false) }
+}
+
+fn test_next_phase_step_done_or_error() {
+    match next_phase(&PhFresh,        &TgStepDone)  { PhDoneOrError => {}, _ => assert(false) }
+    match next_phase(&PhRowAvailable, &TgStepDone)  { PhDoneOrError => {}, _ => assert(false) }
+    match next_phase(&PhFresh,        &TgStepError) { PhDoneOrError => {}, _ => assert(false) }
+}
+
+fn test_next_phase_reset() {
+    match next_phase(&PhRowAvailable, &TgReset) { PhFresh => {}, _ => assert(false) }
+    match next_phase(&PhDoneOrError,  &TgReset) { PhFresh => {}, _ => assert(false) }
+}
+
+fn test_next_phase_finalize_terminal() {
+    match next_phase(&PhFresh,        &TgFinalize) { PhFinalized => {}, _ => assert(false) }
+    match next_phase(&PhFinalized,    &TgStepRow)  { PhFinalized => {}, _ => assert(false) }
+    match next_phase(&PhFinalized,    &TgReset)    { PhFinalized => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_phase_labels();
+    test_data_count_for();
+    test_column_count_for_constant();
+    test_row_data_available();
+    test_trigger_labels();
+    test_next_phase_step_row();
+    test_next_phase_step_done_or_error();
+    test_next_phase_reset();
+    test_next_phase_finalize_terminal();
+}

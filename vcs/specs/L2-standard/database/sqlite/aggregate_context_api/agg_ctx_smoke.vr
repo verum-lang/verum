@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.aggregate_context_api.slot.{
-    Slot, empty_slot,
+    AggSlot, empty_slot,
     Outcome, OkPtr, OkNullN0, OkNomem, outcome_name, returned_non_null,
     CallResult, call,
     is_first_call, ever_oomed, release,

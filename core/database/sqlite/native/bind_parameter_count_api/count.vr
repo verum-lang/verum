@@ -1,0 +1,66 @@
+// sqlite3_bind_parameter_count — highest-index probe.
+
+module core.database.sqlite.native.bind_parameter_count_api.count;
+
+mount base.{Bool, Text};
+
+// Per-parameter "kind" — the four literal forms SQL accepts.
+public type ParamKind is
+    | PkAnonymous       // `?`
+    | PkNumbered        // `?N`
+    | PkNamedColon      // `:name`
+    | PkNamedAt         // `@name`
+    | PkNamedDollar     // `$name`
+    ;
+
+public fn kind_name(k: &ParamKind) -> Text {
+    match k {
+        PkAnonymous   => "anonymous".clone(),
+        PkNumbered    => "numbered".clone(),
+        PkNamedColon  => "colon".clone(),
+        PkNamedAt     => "at".clone(),
+        PkNamedDollar => "dollar".clone(),
+    }
+}
+
+public fn well_known_kind_count() -> Int { 5 }
+
+// First-byte sniff: classify the parameter token by its leading sigil.
+public fn classify_first_byte(b: Int) -> ParamKind {
+    if b == 0x3F { return PkAnonymous; }   // '?'
+    if b == 0x3A { return PkNamedColon; }  // ':'
+    if b == 0x40 { return PkNamedAt; }     // '@'
+    if b == 0x24 { return PkNamedDollar; } // '$'
+    PkAnonymous
+}
+
+// Highest-1-based index probe.  Return value matches SQLite's contract:
+// the largest parameter slot index, irrespective of the kind sequence.
+public fn highest_index(slots: Int, max_numbered: Int) -> Int {
+    if slots > max_numbered { slots } else { max_numbered }
+}
+
+// Pre-check on the requested index used by sqlite3_bind_*.  Out-of-range
+// returns SQLITE_RANGE (25).
+public type IndexCheck is
+    | IcOk
+    | IcOutOfRange
+    ;
+
+public fn check_index(idx: Int, count: Int) -> IndexCheck {
+    if idx < 1 || idx > count { IcOutOfRange } else { IcOk }
+}
+
+public fn check_name(c: &IndexCheck) -> Text {
+    match c {
+        IcOk          => "ok".clone(),
+        IcOutOfRange  => "out_of_range".clone(),
+    }
+}
+
+public fn is_ok(c: &IndexCheck) -> Bool {
+    match c { IcOk => true, _ => false }
+}
+
+// SQLITE_RANGE result code.
+public fn range_code() -> Int { 25 }

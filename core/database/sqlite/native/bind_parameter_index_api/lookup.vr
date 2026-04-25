@@ -1,0 +1,79 @@
+// sqlite3_bind_parameter_index — name → 1-based slot.
+
+module core.database.sqlite.native.bind_parameter_index_api.lookup;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+// Per-slot record kept by the engine for named lookup.
+public type BindIndexSlot is { index: Int, name: Text };
+
+public fn empty_slot() -> BindIndexSlot { BindIndexSlot { index: 0, name: "".clone() } }
+
+public type Outcome is
+    | OkFound(Int)        // 1-based index
+    | OkNotFound          // SQLite returns 0
+    | OkAnonymous         // anonymous `?` slots have no name; never matches
+    ;
+
+public fn outcome_int(o: &Outcome) -> Int {
+    match o {
+        OkFound(n)   => n.clone(),
+        OkNotFound   => 0,
+        OkAnonymous  => 0,
+    }
+}
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkFound(_)   => "found".clone(),
+        OkNotFound   => "not_found".clone(),
+        OkAnonymous  => "anonymous".clone(),
+    }
+}
+
+public fn was_found(o: &Outcome) -> Bool {
+    match o { OkFound(_) => true, _ => false }
+}
+
+// Lookup is exact-match on the *full* token (including sigil).  E.g.
+// the SQL `:foo` is stored as `":foo"`; client code must call
+// `bind_parameter_index(stmt, ":foo")`, not `("foo")`.
+public fn find_by_name(name: Text, slots: &List<BindIndexSlot>) -> Outcome {
+    if name == "".clone() { return OkAnonymous; }
+    let mut i = 0;
+    let n = slots.len() as Int;
+    while i < n {
+        let s = slots.get(i);
+        if s.name == name { return OkFound(s.index); }
+        i = i + 1;
+    }
+    OkNotFound
+}
+
+// Validation of a name token.  SQLite accepts ":a"-style names as long
+// as the body is non-empty after the sigil.
+public type NameCheck is
+    | NcOk
+    | NcEmptyBody       // ":" alone
+    | NcMissingSigil    // doesn't start with :, @, or $
+    ;
+
+public fn check_name_token(name: Text) -> NameCheck {
+    let bs = name.as_bytes();
+    let n = bs.len();
+    if n == 0 { return NcMissingSigil; }
+    let first = bs[0] as Int;
+    let is_sigil = first == 0x3A || first == 0x40 || first == 0x24;
+    if !is_sigil { return NcMissingSigil; }
+    if n == 1 { return NcEmptyBody; }
+    NcOk
+}
+
+public fn name_check_label(c: &NameCheck) -> Text {
+    match c {
+        NcOk            => "ok".clone(),
+        NcEmptyBody     => "empty_body".clone(),
+        NcMissingSigil  => "missing_sigil".clone(),
+    }
+}

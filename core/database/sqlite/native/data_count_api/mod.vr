@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/data_count_api/mod.vr
+// =============================================================================
+// sqlite3_data_count(stmt) — number of columns in the most recently fetched
+// row.  Differs from sqlite3_column_count: the latter is fixed from prepare;
+// the former returns 0 unless the most recent step() returned ROW.  Spec App
+// E.C.
+// =============================================================================
+
+module core.database.sqlite.native.data_count_api;
+
+public module probe;

@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/bind_parameter_name_api/mod.vr
+// =============================================================================
+// sqlite3_bind_parameter_name(stmt, idx) — reverse of _index: returns the
+// parameter name token (with sigil) for the given 1-based slot, or NULL for
+// anonymous `?` parameters.  Spec App E.B.
+// =============================================================================
+
+module core.database.sqlite.native.bind_parameter_name_api;
+
+public module reverse;

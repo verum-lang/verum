@@ -41,6 +41,11 @@ const ROOT: &str = "core/database/sqlite/native";
 const RESERVED_TYPE_NAMES: &[&str] = &[
     "Result", "Maybe", "List", "Map", "Set", "Bytes", "Iterator",
     "Ok", "Err", "Some", "None",
+    // `Slot<K, V>` lives in core/collections/map.vr.  Catalogues that
+    // declared `public type Slot is { … }` (bind_parameter_index_api,
+    // bind_parameter_name_api) tripped type inference with
+    // "expected 'Slot', found 'Slot<_, _>'" when used inside `List<Slot>`.
+    "Slot",
 ];
 
 #[test]

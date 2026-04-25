@@ -1,0 +1,112 @@
+// sqlite3_column_decltype — declared-type accessor.
+
+module core.database.sqlite.native.column_decltype_api.decltype;
+
+mount base.{Bool, Text};
+
+// Most-common SQLite declared types — full set is open since SQLite uses
+// affinity rules over arbitrary text declarations.
+public type DeclSugar is
+    | DsInteger
+    | DsText
+    | DsReal
+    | DsBlob
+    | DsNumeric
+    | DsBoolean        // common but non-standard; coerced via NUMERIC affinity
+    | DsAny            // STRICT-table ANY column
+    | DsCustom(Text)   // anything else (e.g. "VARCHAR(255)", "DECIMAL(8,2)")
+    ;
+
+public fn sugar_text(s: &DeclSugar) -> Text {
+    match s {
+        DsInteger    => "INTEGER".clone(),
+        DsText       => "TEXT".clone(),
+        DsReal       => "REAL".clone(),
+        DsBlob       => "BLOB".clone(),
+        DsNumeric    => "NUMERIC".clone(),
+        DsBoolean    => "BOOLEAN".clone(),
+        DsAny        => "ANY".clone(),
+        DsCustom(t)  => t.clone(),
+    }
+}
+
+public fn from_text(decl: Text) -> DeclSugar {
+    if decl == "INTEGER".clone() { return DsInteger; }
+    if decl == "TEXT".clone()    { return DsText; }
+    if decl == "REAL".clone()    { return DsReal; }
+    if decl == "BLOB".clone()    { return DsBlob; }
+    if decl == "NUMERIC".clone() { return DsNumeric; }
+    if decl == "BOOLEAN".clone() { return DsBoolean; }
+    if decl == "ANY".clone()     { return DsAny; }
+    DsCustom(decl)
+}
+
+public fn well_known_sugar_count() -> Int { 7 }
+
+public fn is_well_known(s: &DeclSugar) -> Bool {
+    match s { DsCustom(_) => false, _ => true }
+}
+
+// Outcome of sqlite3_column_decltype — NULL when the column is an
+// expression (no source column), or when the build lacks
+// ENABLE_COLUMN_METADATA.
+public type Outcome is
+    | OkDecl(Text)
+    | OkNullExpression
+    | OkNullDisabled
+    ;
+
+public fn outcome_label(o: &Outcome) -> Text {
+    match o {
+        OkDecl(_)         => "decl".clone(),
+        OkNullExpression  => "expression".clone(),
+        OkNullDisabled    => "disabled".clone(),
+    }
+}
+
+public fn returned_text(o: &Outcome) -> Bool {
+    match o { OkDecl(_) => true, _ => false }
+}
+
+public fn decl_text(o: &Outcome) -> Text {
+    match o {
+        OkDecl(t)          => t.clone(),
+        _                   => "".clone(),
+    }
+}
+
+// Build flag required.
+public fn requires_compile_flag() -> Text { "ENABLE_COLUMN_METADATA".clone() }
+
+// Mapping from a declared sugar to SQLite's affinity per §3.1 — useful for
+// joining with `affinity_matrix_api`.
+public type Affinity is
+    | AfInteger
+    | AfText
+    | AfReal
+    | AfBlob
+    | AfNumeric
+    ;
+
+public fn affinity_for(s: &DeclSugar) -> Affinity {
+    match s {
+        DsInteger     => AfInteger,
+        DsText        => AfText,
+        DsReal        => AfReal,
+        DsBlob        => AfBlob,
+        DsNumeric     => AfNumeric,
+        DsBoolean     => AfNumeric,
+        DsAny         => AfBlob,
+        DsCustom(_)   => AfNumeric,    // catch-all per §3.1 step 4
+    }
+}
+
+public fn affinity_label(a: &Affinity) -> Text {
+    match a {
+        AfInteger  => "integer".clone(),
+        AfText     => "text".clone(),
+        AfReal     => "real".clone(),
+        AfBlob     => "blob".clone(),
+        AfNumeric  => "numeric".clone(),
+    }
+}

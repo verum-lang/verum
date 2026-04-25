@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, clear_bindings_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.clear_bindings_api.clear.{
+    ClearStats, empty_stats, record_slot,
+    was_noop, relative_pressure,
+    ApplyOutcome, OkApplied, ErrMisuseFinalized,
+    outcome_label, is_ok, slots_reset, misuse_code,
+};
+mount base.{Bool};
+
+fn test_empty_stats() {
+    let s = empty_stats();
+    assert_eq(s.slots_total, 0);
+    assert_eq(s.slots_reset, 0);
+    assert_eq(s.fired_destructors, 0);
+    assert(was_noop(&s));
+    assert_eq(relative_pressure(&s), 0);
+}
+
+fn test_record_slot_unset() {
+    let s = record_slot(empty_stats(), false, false);
+    assert_eq(s.slots_total, 1);
+    assert_eq(s.slots_reset, 0);
+    assert_eq(s.fired_destructors, 0);
+}
+
+fn test_record_slot_set_no_dtor() {
+    let s = record_slot(empty_stats(), true, false);
+    assert_eq(s.slots_total, 1);
+    assert_eq(s.slots_reset, 1);
+    assert_eq(s.fired_destructors, 0);
+}
+
+fn test_record_slot_set_with_dtor() {
+    let s = record_slot(empty_stats(), true, true);
+    assert_eq(s.slots_reset, 1);
+    assert_eq(s.fired_destructors, 1);
+}
+
+fn test_relative_pressure() {
+    let mut s = empty_stats();
+    s = record_slot(s, true, false);
+    s = record_slot(s, true, false);
+    s = record_slot(s, false, false);
+    s = record_slot(s, false, false);
+    assert_eq(relative_pressure(&s), 50);
+}
+
+fn test_was_noop() {
+    let mut s = empty_stats();
+    s = record_slot(s, false, false);
+    assert(was_noop(&s));
+    s = record_slot(s, true, false);
+    assert(!was_noop(&s));
+}
+
+fn test_outcome_helpers() {
+    assert(outcome_label(&OkApplied(7))         == "ok".clone());
+    assert(outcome_label(&ErrMisuseFinalized)   == "misuse_finalized".clone());
+    assert(is_ok(&OkApplied(0)));
+    assert(!is_ok(&ErrMisuseFinalized));
+    assert_eq(slots_reset(&OkApplied(7)),       7);
+    assert_eq(slots_reset(&ErrMisuseFinalized), 0);
+}
+
+fn test_misuse_code() {
+    assert_eq(misuse_code(), 21);
+}
+
+fn main() {
+    test_empty_stats();
+    test_record_slot_unset();
+    test_record_slot_set_no_dtor();
+    test_record_slot_set_with_dtor();
+    test_relative_pressure();
+    test_was_noop();
+    test_outcome_helpers();
+    test_misuse_code();
+}

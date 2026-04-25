@@ -1,0 +1,106 @@
+// sqlite3_column_type — runtime-type tag of a column value.
+
+module core.database.sqlite.native.column_type_api.type_;
+
+mount base.{Bool, Text};
+
+// SQLITE_<TYPE> codes per the C-API.
+public fn integer_code() -> Int { 1 }
+public fn float_code() -> Int   { 2 }
+public fn text_code() -> Int    { 3 }
+public fn blob_code() -> Int    { 4 }
+public fn null_code() -> Int    { 5 }
+
+public type RuntimeKind is
+    | RkInteger
+    | RkFloat
+    | RkText
+    | RkBlob
+    | RkNull
+    ;
+
+public fn from_code(c: Int) -> RuntimeKind {
+    if c == 1 { return RkInteger; }
+    if c == 2 { return RkFloat; }
+    if c == 3 { return RkText; }
+    if c == 4 { return RkBlob; }
+    RkNull
+}
+
+public fn to_code(k: &RuntimeKind) -> Int {
+    match k {
+        RkInteger => 1,
+        RkFloat   => 2,
+        RkText    => 3,
+        RkBlob    => 4,
+        RkNull    => 5,
+    }
+}
+
+public fn kind_label(k: &RuntimeKind) -> Text {
+    match k {
+        RkInteger => "integer".clone(),
+        RkFloat   => "float".clone(),
+        RkText    => "text".clone(),
+        RkBlob    => "blob".clone(),
+        RkNull    => "null".clone(),
+    }
+}
+
+public fn well_known_kind_count() -> Int { 5 }
+
+public fn is_null(k: &RuntimeKind) -> Bool {
+    match k { RkNull => true, _ => false }
+}
+
+public fn is_numeric(k: &RuntimeKind) -> Bool {
+    match k { RkInteger => true, RkFloat => true, _ => false }
+}
+
+public fn is_textlike(k: &RuntimeKind) -> Bool {
+    match k { RkText => true, _ => false }
+}
+
+public fn is_binary(k: &RuntimeKind) -> Bool {
+    match k { RkBlob => true, _ => false }
+}
+
+// Coercion path the engine may follow when accessor type ≠ stored type.
+public type Coercion is
+    | CnIdentity            // accessor matches stored type
+    | CnIntegerToFloat
+    | CnFloatToInteger
+    | CnTextToInteger       // sqlite3Atoi64 — see text_to_int_strict_api
+    | CnTextToFloat
+    | CnIntegerToText
+    | CnFloatToText
+    | CnBlobToText          // engine assumes UTF-8 valid; corrupts otherwise
+    | CnTextToBlob
+    | CnNullToZero          // sqlite3_column_int(NULL) → 0
+    | CnNullToEmpty         // sqlite3_column_text(NULL) → ""
+    ;
+
+public fn coercion_label(c: &Coercion) -> Text {
+    match c {
+        CnIdentity         => "identity".clone(),
+        CnIntegerToFloat   => "i_to_f".clone(),
+        CnFloatToInteger   => "f_to_i".clone(),
+        CnTextToInteger    => "t_to_i".clone(),
+        CnTextToFloat      => "t_to_f".clone(),
+        CnIntegerToText    => "i_to_t".clone(),
+        CnFloatToText      => "f_to_t".clone(),
+        CnBlobToText       => "b_to_t".clone(),
+        CnTextToBlob       => "t_to_b".clone(),
+        CnNullToZero       => "null_to_zero".clone(),
+        CnNullToEmpty      => "null_to_empty".clone(),
+    }
+}
+
+public fn requires_allocation(c: &Coercion) -> Bool {
+    match c {
+        CnIntegerToText  => true,
+        CnFloatToText    => true,
+        CnTextToBlob     => true,
+        _ => false,
+    }
+}
