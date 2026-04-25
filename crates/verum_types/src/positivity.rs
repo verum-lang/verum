@@ -30,7 +30,8 @@
 //! generic-arg lists, and so on.
 
 use crate::ty::{InductiveConstructor, Type, TypeVar};
-use verum_common::List;
+use indexmap::IndexMap;
+use verum_common::{List, Text};
 
 /// Outcome of the positivity check on a user-declared inductive.
 /// Carries breadcrumb information so the diagnostic can pinpoint the
@@ -95,6 +96,65 @@ pub fn check_user_inductive_with_self_var(
         }
     }
     Ok(())
+}
+
+// ─── #154 — single-source-of-truth helpers for type-decl invariants
+// ───
+// The K-Pos check is reached from FIVE call sites across two giant
+// registration functions (register_type_declaration_inner and
+// resolve_type_definition). Each duplication is a soundness gap
+// source — V1 missed the `verum build` path, V2 missed record-form,
+// V3 missed the placeholder-shadowing. The helpers below fold the
+// "translate body shape into synthetic constructor list" boilerplate
+// into a single named site so the call sites become one-liners and
+// future contracts (coinductive productivity, totality, refinements)
+// can attach in one place.
+
+/// Strict-positivity on a Variant body presented as `IndexMap<Text,
+/// Type>` (variant_name → payload_type). Builds one synthetic
+/// `InductiveConstructor` per variant whose single arg is the
+/// payload, then delegates to the walker. Mirrors the V1 / V2
+/// inline shape so all variant call sites collapse to this single
+/// entry point.
+pub fn check_variant_body_positivity(
+    type_name: &str,
+    variant_map: &IndexMap<Text, Type>,
+) -> Result<(), PositivityViolation> {
+    let mut user_ctors: List<InductiveConstructor> = List::new();
+    for (vname, vtype) in variant_map.iter() {
+        let args: List<Box<Type>> = match vtype {
+            Type::Unit => List::new(),
+            other => List::from_iter(vec![Box::new(other.clone())]),
+        };
+        user_ctors.push(InductiveConstructor {
+            name: vname.clone(),
+            type_params: List::new(),
+            args,
+            return_type: Box::new(Type::Unit),
+        });
+    }
+    check_user_inductive(type_name, &user_ctors)
+}
+
+/// Strict-positivity on a Record body presented as `IndexMap<Text,
+/// Type>` (field_name → field_type). Wraps the entire record into a
+/// single synthetic constructor whose arg is `Type::Record(record_map)`,
+/// passing the placeholder `self_var` through so post-elaboration
+/// `Type::Var` occurrences are recognised as references to the
+/// recursive type. Mirrors the V3 inline shape.
+pub fn check_record_body_positivity(
+    type_name: &str,
+    record_map: &IndexMap<Text, Type>,
+    self_var: Option<TypeVar>,
+) -> Result<(), PositivityViolation> {
+    let synthetic_ctor = InductiveConstructor {
+        name: Text::from(type_name),
+        type_params: List::new(),
+        args: List::from_iter(vec![Box::new(Type::Record(record_map.clone()))]),
+        return_type: Box::new(Type::Unit),
+    };
+    let ctors: List<InductiveConstructor> = List::from_iter(vec![synthetic_ctor]);
+    check_user_inductive_with_self_var(type_name, &ctors, self_var)
 }
 
 /// True iff `target` appears anywhere inside `ty` — used to detect

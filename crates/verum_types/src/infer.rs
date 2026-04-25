@@ -47355,54 +47355,31 @@ impl TypeChecker {
                     variant_map.insert(variant_name, payload_type);
                 }
 
-                // VUVA #150 / C2-WIRE — strict-positivity check on the
-                // variant body. Translates each variant's payload type
-                // into an InductiveConstructor and runs the AST walker
-                // (mirrors the kernel's CoreTerm-level walker so any
-                // path that bypasses one still hits the other). On
-                // violation, surface a TypeError with the breadcrumb
-                // pointing at the offending position.
-                {
-                    let mut user_ctors: List<crate::ty::InductiveConstructor> =
-                        List::new();
-                    for (vname, vtype) in variant_map.iter() {
-                        // For positivity, we need to walk each
-                        // constructor's argument types — for variant
-                        // bodies the payload is a single Type that
-                        // may be Unit, a single Type, a Tuple of
-                        // types, or a Record of fields. We model
-                        // this as a single arg whose Type is the
-                        // payload — the walker correctly recurses
-                        // through Tuple / Record to find any
-                        // function-domain occurrence of `type_name`.
-                        let args: List<Box<Type>> = match vtype {
-                            Type::Unit => List::new(),
-                            other => List::from_iter(vec![Box::new(other.clone())]),
-                        };
-                        user_ctors.push(crate::ty::InductiveConstructor {
-                            name: vname.clone(),
-                            type_params: List::new(),
-                            args,
-                            return_type: Box::new(Type::Unit), // unused by walker
-                        });
-                    }
-                    if let Err(violation) = crate::positivity::check_user_inductive(
+                // VUVA #150 / C2-WIRE V1+#154 unified call site —
+                // strict-positivity check on the variant body via
+                // the canonical `check_variant_body_positivity`
+                // helper. Mirrors the kernel's CoreTerm-level
+                // walker so any path that bypasses one still hits
+                // the other. Five sites previously inlined this
+                // pattern; #154 collapsed them into the helper.
+                if let Err(violation) =
+                    crate::positivity::check_variant_body_positivity(
                         type_name.as_str(),
-                        &user_ctors,
-                    ) {
-                        return Err(TypeError::PositivityViolation {
-                            type_name: verum_common::Text::from(
-                                violation.type_name.as_str(),
-                            ),
-                            constructor: verum_common::Text::from(
-                                violation.constructor.as_str(),
-                            ),
-                            position: verum_common::Text::from(
-                                violation.position.as_str(),
-                            ),
-                            span: type_decl.span,
-                        });
-                    }
+                        &variant_map,
+                    )
+                {
+                    return Err(TypeError::PositivityViolation {
+                        type_name: verum_common::Text::from(
+                            violation.type_name.as_str(),
+                        ),
+                        constructor: verum_common::Text::from(
+                            violation.constructor.as_str(),
+                        ),
+                        position: verum_common::Text::from(
+                            violation.position.as_str(),
+                        ),
+                        span: type_decl.span,
+                    });
                 }
 
                 let variant_type = Type::Variant(variant_map.clone());
@@ -47540,21 +47517,32 @@ impl TypeChecker {
                     inductive_constructors.push(constructor);
                 }
 
-                // VUVA #150 / C2-WIRE — strict-positivity check at user-
-                // decl registration. The kernel's CoreTerm-level
-                // `verum_kernel::check_strict_positivity` fires on
-                // elaborated terms; this AST-level walker fires BEFORE
-                // elaboration so an ill-formed declaration is rejected
-                // with a useful span pointing at the offending constructor
-                // argument. Berardi's paradox witness `type Bad is
-                // Wrap(Bad -> A)` is rejected here.
+                // VUVA #150 / C2-WIRE V1 + #154 unified — second
+                // strict-positivity gate, this time on the
+                // well-typed inductive_constructors (with full
+                // type_params and return_type bookkeeping).
+                // Defence-in-depth alongside the variant_map check
+                // above: both must agree, by construction, on what
+                // counts as a positive position. Now uses the
+                // structured PositivityViolation error so the
+                // diagnostic carries span/code instead of an opaque
+                // text payload.
                 if let Err(violation) = crate::positivity::check_user_inductive(
                     type_name.as_str(),
                     &inductive_constructors,
                 ) {
-                    return Err(TypeError::Other(verum_common::Text::from(
-                        violation.to_string(),
-                    )));
+                    return Err(TypeError::PositivityViolation {
+                        type_name: verum_common::Text::from(
+                            violation.type_name.as_str(),
+                        ),
+                        constructor: verum_common::Text::from(
+                            violation.constructor.as_str(),
+                        ),
+                        position: verum_common::Text::from(
+                            violation.position.as_str(),
+                        ),
+                        span: type_decl.span,
+                    });
                 }
 
                 self.ctx.register_inductive_type(type_name.clone(), inductive_constructors);
@@ -47796,45 +47784,32 @@ impl TypeChecker {
                     record_map.insert(field_name, field_type);
                 }
 
-                // VUVA #152 / C2-WIRE V3 — strict-positivity check on
-                // record-shaped types. Berardi-shaped declarations
-                // through records (e.g. `type Bad is { wrap: fn(Bad)
-                // -> Bool };`) were slipping through V1+V2 because
-                // those only fired on Variant arms. We model the
-                // record body as a single synthetic constructor whose
-                // payload is the record itself, then run the walker
-                // with the placeholder TypeVar so it recognises
-                // post-elaboration `Type::Var(placeholder_var)`
-                // occurrences as references to the recursive type.
-                {
-                    let synthetic_ctor = crate::ty::InductiveConstructor {
-                        name: type_name.clone(),
-                        type_params: List::new(),
-                        args: List::from_iter(vec![Box::new(
-                            Type::Record(record_map.clone()),
-                        )]),
-                        return_type: Box::new(Type::Unit),
-                    };
-                    let ctors: List<crate::ty::InductiveConstructor> =
-                        List::from_iter(vec![synthetic_ctor]);
-                    if let Err(violation) = crate::positivity::check_user_inductive_with_self_var(
+                // VUVA #152 / C2-WIRE V3 + #154 unified call site —
+                // strict-positivity on record-shaped types via the
+                // canonical helper. The placeholder TypeVar is
+                // passed through so post-elaboration `Type::Var`
+                // occurrences (left over from the recursive
+                // pre-pass placeholder) are recognised as the
+                // recursive type.
+                if let Err(violation) =
+                    crate::positivity::check_record_body_positivity(
                         type_name.as_str(),
-                        &ctors,
+                        &record_map,
                         Some(placeholder_var),
-                    ) {
-                        return Err(TypeError::PositivityViolation {
-                            type_name: verum_common::Text::from(
-                                violation.type_name.as_str(),
-                            ),
-                            constructor: verum_common::Text::from(
-                                violation.constructor.as_str(),
-                            ),
-                            position: verum_common::Text::from(
-                                violation.position.as_str(),
-                            ),
-                            span: type_decl.span,
-                        });
-                    }
+                    )
+                {
+                    return Err(TypeError::PositivityViolation {
+                        type_name: verum_common::Text::from(
+                            violation.type_name.as_str(),
+                        ),
+                        constructor: verum_common::Text::from(
+                            violation.constructor.as_str(),
+                        ),
+                        position: verum_common::Text::from(
+                            violation.position.as_str(),
+                        ),
+                        span: type_decl.span,
+                    });
                 }
 
                 // CRITICAL: Empty records (e.g., `type AtomicUsize is { };`) are opaque builtin types.
@@ -49074,47 +49049,31 @@ impl TypeChecker {
                     }
                 }
 
-                // VUVA #151 / C2-WIRE V2 — strict-positivity check on
-                // the resolved variant body. This second site exists
-                // because `resolve_type_definition` is reached by the
-                // `verum build` two-pass type-resolution loop (see
-                // `phase_type_check` Pass 1b) and does NOT funnel
-                // through `register_type_declaration_inner`. Without
-                // this guard, Berardi-shaped declarations slipped past
-                // V1 (`verum check`-only) wiring and produced working
-                // binaries.
-                {
-                    let mut user_ctors: List<crate::ty::InductiveConstructor> =
-                        List::new();
-                    for (vname, vtype) in variant_map.iter() {
-                        let args: List<Box<Type>> = match vtype {
-                            Type::Unit => List::new(),
-                            other => List::from_iter(vec![Box::new(other.clone())]),
-                        };
-                        user_ctors.push(crate::ty::InductiveConstructor {
-                            name: vname.clone(),
-                            type_params: List::new(),
-                            args,
-                            return_type: Box::new(Type::Unit),
-                        });
-                    }
-                    if let Err(violation) = crate::positivity::check_user_inductive(
+                // VUVA #151 / C2-WIRE V2 + #154 unified call site —
+                // strict-positivity on the resolved variant body for
+                // the `verum build` two-pass type-resolution loop
+                // (Pass 1b — see phase_type_check). Routes through
+                // the same canonical helper as the
+                // register_type_declaration_inner site so both
+                // paths agree on what counts as positive.
+                if let Err(violation) =
+                    crate::positivity::check_variant_body_positivity(
                         type_name.as_str(),
-                        &user_ctors,
-                    ) {
-                        return Err(crate::TypeError::PositivityViolation {
-                            type_name: verum_common::Text::from(
-                                violation.type_name.as_str(),
-                            ),
-                            constructor: verum_common::Text::from(
-                                violation.constructor.as_str(),
-                            ),
-                            position: verum_common::Text::from(
-                                violation.position.as_str(),
-                            ),
-                            span: type_decl.span,
-                        });
-                    }
+                        &variant_map,
+                    )
+                {
+                    return Err(crate::TypeError::PositivityViolation {
+                        type_name: verum_common::Text::from(
+                            violation.type_name.as_str(),
+                        ),
+                        constructor: verum_common::Text::from(
+                            violation.constructor.as_str(),
+                        ),
+                        position: verum_common::Text::from(
+                            violation.position.as_str(),
+                        ),
+                        span: type_decl.span,
+                    });
                 }
 
                 let variant_type = Type::Variant(variant_map.clone());
@@ -49331,42 +49290,30 @@ impl TypeChecker {
                     record_map.insert(field_name, field_type);
                 }
 
-                // VUVA #152 / C2-WIRE V3 — strict-positivity for the
-                // `verum build` path's record-form types. Mirror of
-                // the V3 site at register_type_declaration_inner. Uses
-                // the placeholder_var hint so that Type::Var
-                // occurrences left over from the placeholder
-                // pre-registration are recognised as the recursive
-                // type.
-                {
-                    let synthetic_ctor = crate::ty::InductiveConstructor {
-                        name: type_name.clone(),
-                        type_params: List::new(),
-                        args: List::from_iter(vec![Box::new(
-                            Type::Record(record_map.clone()),
-                        )]),
-                        return_type: Box::new(Type::Unit),
-                    };
-                    let ctors: List<crate::ty::InductiveConstructor> =
-                        List::from_iter(vec![synthetic_ctor]);
-                    if let Err(violation) = crate::positivity::check_user_inductive_with_self_var(
+                // VUVA #152 / C2-WIRE V3 + #154 unified call site —
+                // strict-positivity for record-form types in the
+                // `verum build` path. Routes through the same
+                // canonical helper as the
+                // register_type_declaration_inner record-arm site.
+                if let Err(violation) =
+                    crate::positivity::check_record_body_positivity(
                         type_name.as_str(),
-                        &ctors,
+                        &record_map,
                         Some(placeholder_var),
-                    ) {
-                        return Err(crate::TypeError::PositivityViolation {
-                            type_name: verum_common::Text::from(
-                                violation.type_name.as_str(),
-                            ),
-                            constructor: verum_common::Text::from(
-                                violation.constructor.as_str(),
-                            ),
-                            position: verum_common::Text::from(
-                                violation.position.as_str(),
-                            ),
-                            span: type_decl.span,
-                        });
-                    }
+                    )
+                {
+                    return Err(crate::TypeError::PositivityViolation {
+                        type_name: verum_common::Text::from(
+                            violation.type_name.as_str(),
+                        ),
+                        constructor: verum_common::Text::from(
+                            violation.constructor.as_str(),
+                        ),
+                        position: verum_common::Text::from(
+                            violation.position.as_str(),
+                        ),
+                        span: type_decl.span,
+                    });
                 }
 
                 // Empty records (e.g., `type Empty is { };`) need field structure for pattern matching.
