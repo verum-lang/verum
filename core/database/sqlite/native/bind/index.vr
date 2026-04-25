@@ -11,7 +11,7 @@
 //   `$name`          — named (dollar — Tcl convention)
 //   `@name`          — named (at — sqlite extension)
 //
-// `ParamSpec` records ONE source-form occurrence; `ParamIndex` is the
+// `BindParamSpec` records ONE source-form occurrence; `ParamIndex` is the
 // per-statement collection that lets the binder resolve `name → 1-based idx`.
 // =============================================================================
 
@@ -61,24 +61,24 @@ fn prefix_with(b: Byte, name: &Text) -> Text {
 }
 
 // -----------------------------------------------------------------------------
-// ParamSpec — one occurrence in the parsed SQL
+// BindParamSpec — one occurrence in the parsed SQL
 // -----------------------------------------------------------------------------
 
-public type ParamSpec is {
+public type BindParamSpec is {
     /// 1-based index into the parameter array.
     index: Int,
     form: ParamForm,
 }
 
-public fn param_spec(index: Int, form: ParamForm) -> ParamSpec {
-    ParamSpec { index: index, form: form }
+public fn param_spec(index: Int, form: ParamForm) -> BindParamSpec {
+    BindParamSpec { index: index, form: form }
 }
 
 // -----------------------------------------------------------------------------
 // ParamIndex — per-statement registry
 // -----------------------------------------------------------------------------
 
-public type ParamIndex is { specs: List<ParamSpec> }
+public type ParamIndex is { specs: List<BindParamSpec> }
 
 public fn param_index_empty() -> ParamIndex { ParamIndex { specs: List.new() } }
 
@@ -120,7 +120,7 @@ implement ParamIndex {
     }
 
     /// Look up by 1-based index.
-    pub fn lookup(&self, index: Int) -> Maybe<ParamSpec> {
+    pub fn lookup(&self, index: Int) -> Maybe<BindParamSpec> {
         let mut i: Int = 0;
         while i < self.specs.len() {
             if self.specs[i].index == index {
@@ -132,7 +132,7 @@ implement ParamIndex {
         None
     }
 
-    pub fn find_by_name(&self, full_name: &Text) -> Maybe<ParamSpec> {
+    pub fn find_by_name(&self, full_name: &Text) -> Maybe<BindParamSpec> {
         let mut i: Int = 0;
         while i < self.specs.len() {
             match form_name(&self.specs[i].form) {

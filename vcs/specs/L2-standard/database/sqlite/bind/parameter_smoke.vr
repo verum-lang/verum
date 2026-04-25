@@ -18,7 +18,7 @@ mount core.database.sqlite.native.bind.param.{
 };
 mount core.database.sqlite.native.bind.index.{
     ParamForm, PfAnonymous, PfNumbered, PfNamedColon, PfNamedDollar, PfNamedAt,
-    ParamSpec, param_spec, ParamIndex, param_index_empty,
+    BindParamSpec, param_spec, ParamIndex, param_index_empty,
     form_name, form_kind_name,
 };
 mount core.database.sqlite.native.bind.bindset.{

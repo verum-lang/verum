@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.bind_parameter_count_api.count.{
-    ParamKind, PkAnonymous, PkNumbered, PkNamedColon, PkNamedAt, PkNamedDollar,
+    BindParamCountKind, PkAnonymous, PkNumbered, PkNamedColon, PkNamedAt, PkNamedDollar,
     kind_name, well_known_kind_count, classify_first_byte,
     highest_index,
     IndexCheck, IcOk, IcOutOfRange,

@@ -12,14 +12,14 @@
 //   * open(wire) → (inner_type, inner_content).
 //   * seq monotonic-increment-by-one per call (V8 theorem).
 //   * Outer AAD covers the 5-byte outer header — tampering or AEAD
-//     failure → RecordError.AeadFailure.
+//     failure → Tls13RecordError.AeadFailure.
 //   * Non-ApplicationData outer type → BadContentType.
 
 mount core.*;
 mount core.collections.List;
 mount core.net.tls13.cipher_suite.{AeadKind};
 mount core.net.tls13.record.content_type.{ContentType};
-mount core.net.tls13.record.aead.{AeadState, RecordError};
+mount core.net.tls13.record.aead.{AeadState, Tls13RecordError};
 mount core.net.tls13.keyschedule.schedule.{SecretBytes};
 
 fn make_key_16() -> SecretBytes {
@@ -113,7 +113,7 @@ fn tampered_tag_fails_open() {
     let last = wire.len() - 1;
     wire[last] = wire[last] ^ 0x01_u8;
     match rx.open(wire.as_slice()) {
-        Err(RecordError.AeadFailure) => {},
+        Err(Tls13RecordError.AeadFailure) => {},
         _ => panic("tampered tag must reject"),
     }
 }
@@ -128,7 +128,7 @@ fn wrong_key_fails_open() {
     let payload: List<Byte> = [0x42_u8];
     let wire = tx.seal(payload.as_slice(), ContentType.ApplicationData, 0).unwrap();
     match rx.open(wire.as_slice()) {
-        Err(RecordError.AeadFailure) => {},
+        Err(Tls13RecordError.AeadFailure) => {},
         _ => panic("wrong key must reject"),
     }
 }
@@ -146,7 +146,7 @@ fn non_application_data_outer_rejected() {
     let mut pad: Int = 0;
     while pad < 17 { wire.push(0_u8); pad = pad + 1; }
     match rx.open(wire.as_slice()) {
-        Err(RecordError.BadContentType) => {},
+        Err(Tls13RecordError.BadContentType) => {},
         _ => panic("Handshake outer must be BadContentType"),
     }
 }
@@ -156,7 +156,7 @@ fn short_ciphertext_is_rejected() {
     // 4-byte payload is below the 5-byte header floor.
     let buf: List<Byte> = [0_u8, 0_u8, 0_u8, 0_u8];
     match rx.open(buf.as_slice()) {
-        Err(RecordError.CiphertextTooShort) => {},
+        Err(Tls13RecordError.CiphertextTooShort) => {},
         _ => panic("short buffer must reject"),
     }
 }

@@ -43,5 +43,5 @@ public module fragment;
 // Re-exports
 public mount .content_type.ContentType;
 public mount .plaintext.{TlsPlaintext, MAX_PLAINTEXT_SIZE, MAX_CIPHERTEXT_SIZE};
-public mount .aead.{AeadState, RecordError};
+public mount .aead.{AeadState, Tls13RecordError};
 public mount .fragment.{seal_all, HandshakeReassembler};

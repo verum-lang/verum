@@ -10,7 +10,7 @@ mount core.database.sqlite.native.pcache_api.page_slot.{
     pin, unpin, mark_dirty, mark_clean,
 };
 mount core.database.sqlite.native.pcache_api.cache.{
-    PageCache, new_cache,
+    PCache, new_cache,
 };
 mount core.database.sqlite.native.pcache_api.engine.{
     FetchOutcome, FoHit, FoMiss, FoRefused,

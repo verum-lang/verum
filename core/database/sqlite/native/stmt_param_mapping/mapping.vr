@@ -1,10 +1,10 @@
 // Per-statement parameter slot allocator — converts a parse-order stream of
-// ParamForm into slot indices.
+// StmtParamForm into slot indices.
 
 module core.database.sqlite.native.stmt_param_mapping.mapping;
 
 mount core.database.sqlite.native.stmt_param_mapping.form.{
-    ParamForm, PfAnonymous, PfPositional, PfColon, PfAt, PfDollar,
+    StmtParamForm, PfAnonymous, PfPositional, PfColon, PfAt, PfDollar,
     is_named, param_name, explicit_slot,
 };
 mount base.{Bool, Text, Maybe};
@@ -44,7 +44,7 @@ fn find_named_slot(m: &Mapping, name: &Text) -> Int {
 }
 
 // Add one parameter occurrence; returns the new mapping.
-public fn add(mut m: Mapping, p: ParamForm) -> Mapping {
+public fn add(mut m: Mapping, p: StmtParamForm) -> Mapping {
     match p {
         PfAnonymous => {
             let slot = m.next_auto;

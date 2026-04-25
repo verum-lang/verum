@@ -10,7 +10,7 @@
 
 mount core.*;
 mount core.database.sqlite.native.l0_vfs.{
-    VfsKind, ParsedUri, VfsRegistry,
+    VfsKind, VfsParsedUri, VfsRegistry,
     parse_uri, default_registry, platform_default,
     vfs_kind_name, vfs_kind_from_name,
 };

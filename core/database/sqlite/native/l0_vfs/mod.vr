@@ -86,7 +86,7 @@ public mount .clock.timestamp_wall;
 public mount .clock.timestamp_monotonic_mock;
 public mount .clock.timestamp_wall_mock;
 public mount .registry.VfsKind;
-public mount .registry.ParsedUri;
+public mount .registry.VfsParsedUri;
 public mount .registry.VfsRegistry;
 public mount .registry.parse_uri;
 public mount .registry.default_registry;

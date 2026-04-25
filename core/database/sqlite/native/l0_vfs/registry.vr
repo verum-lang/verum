@@ -72,13 +72,13 @@ public fn vfs_kind_from_name(name: &Text) -> Maybe<VfsKind> {
 /// * `kind`   — which backend to use
 /// * `path`   — filesystem path (empty for `:memory:`)
 /// * `flags`  — open-flag overrides extracted from the URI
-public type ParsedUri is {
+public type VfsParsedUri is {
     kind: VfsKind,
     path: Text,
     flags: OpenFlags,
 };
 
-/// Parse a path (or `file:` URI) into a `ParsedUri`. Supported forms:
+/// Parse a path (or `file:` URI) into a `VfsParsedUri`. Supported forms:
 ///
 ///   `"/abs/path"`                  → Posix default, no flag override
 ///   `":memory:"`                    → Memory, path "", rwc flags
@@ -91,7 +91,7 @@ public type ParsedUri is {
 /// Matches SQLite's URI rules (sqlite.org/uri.html) up to query-string
 /// options; anything unrecognised is preserved but ignored. Returns a
 /// `VfsError { kind: InvalidArgument }` on empty / malformed input.
-public fn parse_uri(uri: &Text) -> Result<ParsedUri, VfsError> {
+public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
     if uri.len() == 0 {
         return Err(VfsError {
             kind: InvalidArgument,
@@ -101,7 +101,7 @@ public fn parse_uri(uri: &Text) -> Result<ParsedUri, VfsError> {
 
     // Fast path — ":memory:" bare literal.
     if uri == &":memory:".clone() {
-        return Ok(ParsedUri {
+        return Ok(VfsParsedUri {
             kind: Memory,
             path: "".clone(),
             flags: flags_rwc(),
@@ -110,7 +110,7 @@ public fn parse_uri(uri: &Text) -> Result<ParsedUri, VfsError> {
 
     // No "file:" prefix → raw path, platform default, rwc.
     if !starts_with_bytes(uri, "file:") {
-        return Ok(ParsedUri {
+        return Ok(VfsParsedUri {
             kind: platform_default(),
             path: uri.clone(),
             flags: flags_rwc(),
@@ -168,7 +168,7 @@ public fn parse_uri(uri: &Text) -> Result<ParsedUri, VfsError> {
         i = i + 1;
     }
 
-    Ok(ParsedUri {
+    Ok(VfsParsedUri {
         kind: kind,
         path: path_part,
         flags: flags,

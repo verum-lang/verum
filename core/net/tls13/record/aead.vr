@@ -53,7 +53,7 @@ mount core.net.tls13.keyschedule.schedule.{SecretBytes};
 // Error
 // =============================================================================
 
-public type RecordError is
+public type Tls13RecordError is
       SequenceOverflow
     | AeadFailure
     | PlaintextTooLarge(Int)
@@ -111,16 +111,16 @@ implement AeadState {
         content: &[Byte],
         content_type: ContentType,
         padding_len: Int,
-    ) -> Result<List<Byte>, RecordError> {
+    ) -> Result<List<Byte>, Tls13RecordError> {
         // Pre-seq overflow check (well below 2^64, but guard the
         // monotonic invariant for verifiability).
         if self.seq >= 0xFFFFFFFFFFFFFFFF_u64 {
-            return Err(RecordError.SequenceOverflow);
+            return Err(Tls13RecordError.SequenceOverflow);
         }
 
         let inner = build_inner_plaintext(content, content_type, padding_len);
         if inner.len() > MAX_PLAINTEXT_SIZE {
-            return Err(RecordError.PlaintextTooLarge(inner.len()));
+            return Err(Tls13RecordError.PlaintextTooLarge(inner.len()));
         }
 
         // AAD = outer record header. Ciphertext length = plaintext len + tag.
@@ -156,12 +156,12 @@ implement AeadState {
     /// Open a wire record. `record` is the full ciphertext including
     /// the 5-byte outer header. Returns (inner content_type, plaintext
     /// content without type + padding).
-    public fn open(&mut self, record: &[Byte]) -> Result<(ContentType, List<Byte>), RecordError> {
+    public fn open(&mut self, record: &[Byte]) -> Result<(ContentType, List<Byte>), Tls13RecordError> {
         if self.seq >= 0xFFFFFFFFFFFFFFFF_u64 {
-            return Err(RecordError.SequenceOverflow);
+            return Err(Tls13RecordError.SequenceOverflow);
         }
         if record.len() < 5 + self.kind.tag_len() {
-            return Err(RecordError.CiphertextTooShort);
+            return Err(Tls13RecordError.CiphertextTooShort);
         }
 
         // Validate outer header — RFC 8446 §5.2 forbids anything other
@@ -170,16 +170,16 @@ implement AeadState {
         let outer_type = ContentType.from_u8(record[0]);
         match outer_type {
             ContentType.ApplicationData => {},
-            _ => return Err(RecordError.BadContentType),
+            _ => return Err(Tls13RecordError.BadContentType),
         }
 
         let ct_len_u16: UInt16 = ((record[3] as UInt16) << 8) | (record[4] as UInt16);
         let ct_len: Int = ct_len_u16 as Int;
         if ct_len > MAX_CIPHERTEXT_SIZE {
-            return Err(RecordError.CiphertextTooShort);
+            return Err(Tls13RecordError.CiphertextTooShort);
         }
         if record.len() != 5 + ct_len {
-            return Err(RecordError.CiphertextTooShort);
+            return Err(Tls13RecordError.CiphertextTooShort);
         }
 
         let aad = &record[..5];
@@ -197,7 +197,7 @@ implement AeadState {
 
         match parse_inner_plaintext(inner.as_slice()) {
             Ok(pair) => Ok(pair),
-            Err(_)  => Err(RecordError.InnerPlaintextMalformed),
+            Err(_)  => Err(Tls13RecordError.InnerPlaintextMalformed),
         }
     }
 }
@@ -212,39 +212,39 @@ fn aead_seal(
     nonce: &[Byte; 12],
     aad: &[Byte],
     plaintext: &[Byte],
-) -> Result<List<Byte>, RecordError> {
+) -> Result<List<Byte>, Tls13RecordError> {
     match kind {
         AeadKind.Aes128Gcm => {
             if key.len() != 16 {
-                return Err(RecordError.AeadFailure);
+                return Err(Tls13RecordError.AeadFailure);
             }
             let mut out: List<Byte> = [];
             match aes128_gcm_seal(key, nonce, aad, plaintext, &mut out) {
                 Ok(()) => Ok(out),
-                Err(_) => Err(RecordError.AeadFailure),
+                Err(_) => Err(Tls13RecordError.AeadFailure),
             }
         },
         AeadKind.Aes256Gcm => {
             if key.len() != 32 {
-                return Err(RecordError.AeadFailure);
+                return Err(Tls13RecordError.AeadFailure);
             }
             let mut out: List<Byte> = [];
             match aes256_gcm_seal(key, nonce, aad, plaintext, &mut out) {
                 Ok(()) => Ok(out),
-                Err(_) => Err(RecordError.AeadFailure),
+                Err(_) => Err(Tls13RecordError.AeadFailure),
             }
         },
         AeadKind.ChaCha20Poly1305 => {
             if key.len() != 32 {
-                return Err(RecordError.AeadFailure);
+                return Err(Tls13RecordError.AeadFailure);
             }
             let mut out: List<Byte> = [];
             match chacha20_poly1305_seal(key, nonce, aad, plaintext, &mut out) {
                 Ok(()) => Ok(out),
-                Err(_) => Err(RecordError.AeadFailure),
+                Err(_) => Err(Tls13RecordError.AeadFailure),
             }
         },
-        _ => Err(RecordError.AeadFailure),
+        _ => Err(Tls13RecordError.AeadFailure),
     }
 }
 
@@ -254,38 +254,38 @@ fn aead_open(
     nonce: &[Byte; 12],
     aad: &[Byte],
     ciphertext: &[Byte],
-) -> Result<List<Byte>, RecordError> {
+) -> Result<List<Byte>, Tls13RecordError> {
     match kind {
         AeadKind.Aes128Gcm => {
             if key.len() != 16 {
-                return Err(RecordError.AeadFailure);
+                return Err(Tls13RecordError.AeadFailure);
             }
             let mut out: List<Byte> = [];
             match aes128_gcm_open(key, nonce, aad, ciphertext, &mut out) {
                 Ok(()) => Ok(out),
-                Err(_) => Err(RecordError.AeadFailure),
+                Err(_) => Err(Tls13RecordError.AeadFailure),
             }
         },
         AeadKind.Aes256Gcm => {
             if key.len() != 32 {
-                return Err(RecordError.AeadFailure);
+                return Err(Tls13RecordError.AeadFailure);
             }
             let mut out: List<Byte> = [];
             match aes256_gcm_open(key, nonce, aad, ciphertext, &mut out) {
                 Ok(()) => Ok(out),
-                Err(_) => Err(RecordError.AeadFailure),
+                Err(_) => Err(Tls13RecordError.AeadFailure),
             }
         },
         AeadKind.ChaCha20Poly1305 => {
             if key.len() != 32 {
-                return Err(RecordError.AeadFailure);
+                return Err(Tls13RecordError.AeadFailure);
             }
             let mut out: List<Byte> = [];
             match chacha20_poly1305_open(key, nonce, aad, ciphertext, &mut out) {
                 Ok(()) => Ok(out),
-                Err(_) => Err(RecordError.AeadFailure),
+                Err(_) => Err(Tls13RecordError.AeadFailure),
             }
         },
-        _ => Err(RecordError.AeadFailure),
+        _ => Err(Tls13RecordError.AeadFailure),
     }
 }

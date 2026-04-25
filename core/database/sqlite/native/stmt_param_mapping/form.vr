@@ -4,7 +4,7 @@ module core.database.sqlite.native.stmt_param_mapping.form;
 
 mount base.{Bool, Text};
 
-public type ParamForm is
+public type StmtParamForm is
     | PfAnonymous         // ?
     | PfPositional(Int)   // ?NNN — 1-based
     | PfColon(Text)       // :name
@@ -12,7 +12,7 @@ public type ParamForm is
     | PfDollar(Text)      // $name
     ;
 
-public fn form_name(p: &ParamForm) -> Text {
+public fn form_name(p: &StmtParamForm) -> Text {
     match p {
         PfAnonymous     => "anonymous".clone(),
         PfPositional(_) => "positional".clone(),
@@ -22,7 +22,7 @@ public fn form_name(p: &ParamForm) -> Text {
     }
 }
 
-public fn is_named(p: &ParamForm) -> Bool {
+public fn is_named(p: &StmtParamForm) -> Bool {
     match p {
         PfColon(_)  => true,
         PfAt(_)     => true,
@@ -31,7 +31,7 @@ public fn is_named(p: &ParamForm) -> Bool {
     }
 }
 
-public fn is_positional(p: &ParamForm) -> Bool {
+public fn is_positional(p: &StmtParamForm) -> Bool {
     match p {
         PfAnonymous     => true,
         PfPositional(_) => true,
@@ -39,7 +39,7 @@ public fn is_positional(p: &ParamForm) -> Bool {
     }
 }
 
-public fn param_name(p: &ParamForm) -> Text {
+public fn param_name(p: &StmtParamForm) -> Text {
     match p {
         PfColon(name)  => ":".clone() + name.clone(),
         PfAt(name)     => "@".clone() + name.clone(),
@@ -49,7 +49,7 @@ public fn param_name(p: &ParamForm) -> Text {
 }
 
 // Explicit positional slot number, or 0 for auto-assigned.
-public fn explicit_slot(p: &ParamForm) -> Int {
+public fn explicit_slot(p: &StmtParamForm) -> Int {
     match p {
         PfPositional(n) => n,
         _               => 0,

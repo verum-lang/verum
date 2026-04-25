@@ -14,7 +14,7 @@ mount core.database.sqlite.native.pcache_api.page_slot.{
     mark_dirty, mark_clean,
 };
 
-public type PageCache is {
+public type PCache is {
     slots: List<PageSlot>,
     max_pages: Int,
     generation: Int64,
@@ -23,8 +23,8 @@ public type PageCache is {
     evictions: Int64,
 }
 
-public fn new_cache(max_pages: Int) -> PageCache {
-    PageCache {
+public fn new_cache(max_pages: Int) -> PCache {
+    PCache {
         slots: List.new(),
         max_pages: max_pages,
         generation: 0 as Int64,
@@ -34,7 +34,7 @@ public fn new_cache(max_pages: Int) -> PageCache {
     }
 }
 
-implement PageCache {
+implement PCache {
     fn tick(&mut self) -> Int64 {
         self.generation = self.generation + (1 as Int64);
         self.generation

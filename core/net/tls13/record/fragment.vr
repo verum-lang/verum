@@ -28,7 +28,7 @@ module core.net.tls13.record.fragment;
 
 mount core.*;
 mount core.collections.List;
-mount core.net.tls13.record.aead.{AeadState, RecordError};
+mount core.net.tls13.record.aead.{AeadState, Tls13RecordError};
 mount core.net.tls13.record.content_type.{ContentType};
 mount core.net.tls13.record.plaintext.{MAX_PLAINTEXT_SIZE};
 
@@ -43,7 +43,7 @@ public fn seal_all(
     aead: &mut AeadState,
     content_type: ContentType,
     data: &[Byte],
-) -> Result<List<Byte>, RecordError> {
+) -> Result<List<Byte>, Tls13RecordError> {
     let mut out: List<Byte> = [];
     let total = data.len();
     let mut off: Int = 0;

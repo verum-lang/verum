@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.stmt_param_mapping.form.{
-    ParamForm, PfAnonymous, PfPositional, PfColon, PfAt, PfDollar,
+    StmtParamForm, PfAnonymous, PfPositional, PfColon, PfAt, PfDollar,
     form_name, is_named, is_positional, param_name, explicit_slot,
 };
 mount core.database.sqlite.native.stmt_param_mapping.mapping.{

@@ -5,7 +5,7 @@ module core.database.sqlite.native.bind_parameter_count_api.count;
 mount base.{Bool, Text};
 
 // Per-parameter "kind" — the four literal forms SQL accepts.
-public type ParamKind is
+public type BindParamCountKind is
     | PkAnonymous       // `?`
     | PkNumbered        // `?N`
     | PkNamedColon      // `:name`
@@ -13,7 +13,7 @@ public type ParamKind is
     | PkNamedDollar     // `$name`
     ;
 
-public fn kind_name(k: &ParamKind) -> Text {
+public fn kind_name(k: &BindParamCountKind) -> Text {
     match k {
         PkAnonymous   => "anonymous".clone(),
         PkNumbered    => "numbered".clone(),
@@ -26,7 +26,7 @@ public fn kind_name(k: &ParamKind) -> Text {
 public fn well_known_kind_count() -> Int { 5 }
 
 // First-byte sniff: classify the parameter token by its leading sigil.
-public fn classify_first_byte(b: Int) -> ParamKind {
+public fn classify_first_byte(b: Int) -> BindParamCountKind {
     if b == 0x3F { return PkAnonymous; }   // '?'
     if b == 0x3A { return PkNamedColon; }  // ':'
     if b == 0x40 { return PkNamedAt; }     // '@'

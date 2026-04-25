@@ -13,7 +13,7 @@ module core.database.sqlite.native.pcache_api.engine;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.pcache_api.cache.{
-    PageCache,
+    PCache,
 };
 
 public type FetchOutcome is
@@ -31,7 +31,7 @@ public fn is_hit(o: &FetchOutcome) -> Bool {
 /// xFetch with createFlag >= 1 (allocate if necessary).  Returns Hit
 /// on immediate re-use, Miss on fresh allocation, Refused when the
 /// cache is over-limit with only pinned/dirty slots.
-public fn sqlite3_pcache_fetch(c: &mut PageCache, page_no: Int64) -> FetchOutcome {
+public fn sqlite3_pcache_fetch(c: &mut PCache, page_no: Int64) -> FetchOutcome {
     let before = c.len();
     let hit = c.pin_page(page_no);
     let after = c.len();
@@ -40,14 +40,14 @@ public fn sqlite3_pcache_fetch(c: &mut PageCache, page_no: Int64) -> FetchOutcom
     FoMiss
 }
 
-public fn sqlite3_pcache_unpin(c: &mut PageCache, page_no: Int64) -> Bool {
+public fn sqlite3_pcache_unpin(c: &mut PCache, page_no: Int64) -> Bool {
     c.unpin_page(page_no)
 }
 
-public fn sqlite3_pcache_truncate(c: &mut PageCache, watermark: Int64) -> Int {
+public fn sqlite3_pcache_truncate(c: &mut PCache, watermark: Int64) -> Int {
     c.truncate(watermark)
 }
 
-public fn sqlite3_pcache_mark_dirty(c: &mut PageCache, page_no: Int64) -> Bool {
+public fn sqlite3_pcache_mark_dirty(c: &mut PCache, page_no: Int64) -> Bool {
     c.mark_dirty_page(page_no)
 }
