@@ -103,17 +103,17 @@ implement Histogram {
 }
 
 // =============================================================================
-// Registry
+// WeftMetricsRegistry
 // =============================================================================
 
-public type Registry is {
+public type WeftMetricsRegistry is {
     counters: Mutex<Map<Text, Shared<Counter>>>,
     histograms: Mutex<Map<Text, Shared<Histogram>>>,
 };
 
-implement Registry {
-    public fn new() -> Registry {
-        Registry {
+implement WeftMetricsRegistry {
+    public fn new() -> WeftMetricsRegistry {
+        WeftMetricsRegistry {
             counters: Mutex.new(Map.new()),
             histograms: Mutex.new(Map.new()),
         }
@@ -216,17 +216,17 @@ implement Registry {
 // =============================================================================
 
 public type MetricsLayer is {
-    registry: Shared<Registry>,
+    registry: Shared<WeftMetricsRegistry>,
 };
 
 implement MetricsLayer {
-    public fn new(registry: Shared<Registry>) -> MetricsLayer {
+    public fn new(registry: Shared<WeftMetricsRegistry>) -> MetricsLayer {
         MetricsLayer { registry: registry }
     }
 
-    /// Convenience: wire up a fresh Registry and return both.
-    public fn with_new_registry() -> (MetricsLayer, Shared<Registry>) {
-        let reg = Shared.new(Registry.new());
+    /// Convenience: wire up a fresh WeftMetricsRegistry and return both.
+    public fn with_new_registry() -> (MetricsLayer, Shared<WeftMetricsRegistry>) {
+        let reg = Shared.new(WeftMetricsRegistry.new());
         (MetricsLayer { registry: reg.clone() }, reg)
     }
 }
@@ -243,7 +243,7 @@ implement<H: Handler> Layer<H> for MetricsLayer {
 
 public type MetricsHandler<H> is {
     inner: H,
-    registry: Shared<Registry>,
+    registry: Shared<WeftMetricsRegistry>,
 };
 
 implement<H: Handler> Handler for MetricsHandler<H> {

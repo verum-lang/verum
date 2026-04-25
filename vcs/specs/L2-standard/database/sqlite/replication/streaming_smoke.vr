@@ -24,7 +24,7 @@ mount core.database.sqlite.native.replication.frame.{
 mount core.database.sqlite.native.replication.stream.{
     StreamProducer, producer_new,
     StreamConsumer, consumer_new,
-    StreamError, SeOutOfOrder, SeEpochMismatch, SeChecksumMismatch, SeApplyFailed,
+    ReplicationStreamError, SeOutOfOrder, SeEpochMismatch, SeChecksumMismatch, SeApplyFailed,
 };
 mount core.database.sqlite.native.replication.lag.{
     LagSeverity, LsHealthy, LsWarning, LsCritical,

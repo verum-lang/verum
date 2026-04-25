@@ -71,7 +71,7 @@ public type PragmaKind is
     | PFreelistCount
     | PPageCount;
 
-public type Scope is SConnection | SDatabase | SReadOnly | SDangerous;
+public type PragmaScope is SConnection | SDatabase | SReadOnly | SDangerous;
 
 public type EffectPhase is
       EImmediate
@@ -81,7 +81,7 @@ public type EffectPhase is
 
 public type PragmaSpec is {
     kind: PragmaKind,
-    scope: Scope,
+    scope: PragmaScope,
     is_settable: Bool,
     effect: EffectPhase,
 };
@@ -219,7 +219,7 @@ public fn pragma_spec(k: &PragmaKind) -> PragmaSpec {
     }
 }
 
-fn spec(k: PragmaKind, scope: Scope, is_settable: Bool, effect: EffectPhase) -> PragmaSpec {
+fn spec(k: PragmaKind, scope: PragmaScope, is_settable: Bool, effect: EffectPhase) -> PragmaSpec {
     PragmaSpec { kind: k, scope: scope, is_settable: is_settable, effect: effect }
 }
 

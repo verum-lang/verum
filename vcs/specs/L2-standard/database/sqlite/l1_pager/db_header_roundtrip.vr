@@ -10,7 +10,7 @@
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l1_pager.{
-    DatabaseHeader, FileFormat, TextEncoding,
+    DatabaseHeader, FileFormat, DbHeaderTextEncoding,
     DB_HEADER_SIZE, DB_PAGE_SIZE_SENTINEL,
     parse_header, serialize_header, default_header,
 };

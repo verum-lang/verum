@@ -22,7 +22,7 @@ mount core.database.sqlite.native.vtabs.fts5.segment.{
     Segment, segment_merge, segment_empty,
 };
 mount core.database.sqlite.native.vtabs.fts5.index.{
-    Index, SegmentLevel, level_new,
+    Index, Fts5VtabSegmentLevel, level_new,
 };
 
 // -----------------------------------------------------------------------------

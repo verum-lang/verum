@@ -27,7 +27,7 @@ mount core.database.sqlite.native.replication.frame.{
 // Errors
 // -----------------------------------------------------------------------------
 
-public type StreamError is
+public type ReplicationStreamError is
       SeOutOfOrder(Int64, Int64)        // (expected_position, got_position)
     | SeEpochMismatch(Int64, Int64)
     | SeChecksumMismatch
@@ -230,7 +230,7 @@ implement StreamConsumer {
         &mut self,
         frame: &WalFrameRecord,
         applier: fn(&WalFrameRecord) -> Maybe<Text>,
-    ) -> Result<Int64, StreamError> {
+    ) -> Result<Int64, ReplicationStreamError> {
         if self.epoch_initialised && frame.epoch < self.expected_epoch {
             return Err(SeEpochMismatch(self.expected_epoch, frame.epoch));
         }
@@ -256,7 +256,7 @@ implement StreamConsumer {
         &mut self,
         batch: &FrameBatch,
         applier: fn(&WalFrameRecord) -> Maybe<Text>,
-    ) -> Result<Int, StreamError> {
+    ) -> Result<Int, ReplicationStreamError> {
         let mut applied: Int = 0;
         let mut i: Int = 0;
         while i < batch.frames.len() {
