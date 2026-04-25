@@ -106,6 +106,102 @@ pub enum TensorOpKind {
     FlashAttention,
 }
 
+/// Fusion plan derived from a `Vec<TensorChain>`. Tells the LLVM
+/// lowering pass:
+///
+///   * which instruction indices are part of a fused chain (skip
+///     their per-op lowering — `chain_replaces[idx]` would emit
+///     duplicate runtime calls)
+///   * which instruction index is the "anchor" for each chain (the
+///     index where the fused-kernel runtime call is emitted in
+///     place of the original op)
+///
+/// Anchors are picked as the LAST instruction of each chain so all
+/// chain inputs are guaranteed to be live at the anchor PC — earlier
+/// anchor positions would let LLVM SSA construction dead-code the
+/// inputs before they reach the fused kernel.
+#[derive(Debug, Default)]
+pub struct FusionPlan {
+    /// Instruction indices that participate in a fused chain. These
+    /// are skipped by the normal per-op lowering.
+    pub fused_indices: HashSet<usize>,
+
+    /// Map from anchor instruction index → chain index in `chains`.
+    /// The lowering emits the fused call when it encounters the
+    /// anchor index.
+    pub anchor_to_chain: HashMap<usize, usize>,
+
+    /// The chains themselves (indexed by chain_idx).
+    pub chains: Vec<TensorChain>,
+}
+
+impl FusionPlan {
+    /// Build a fusion plan for an instruction stream. This combines
+    /// `analyze_instructions` with index bookkeeping so the LLVM
+    /// lowering can drive off `fused_indices` / `anchor_to_chain`
+    /// without re-walking the chains itself.
+    pub fn build(instructions: &[Instruction]) -> Self {
+        let chains = analyze_instructions(instructions);
+        let mut fused_indices = HashSet::new();
+        let mut anchor_to_chain = HashMap::new();
+
+        // Re-scan to recover per-op instruction indices. We pay this
+        // cost (linear walk) once per function — cheap.
+        let mut tensor_op_indices: Vec<usize> = Vec::new();
+        for (idx, instr) in instructions.iter().enumerate() {
+            if classify(instr).is_some() {
+                tensor_op_indices.push(idx);
+            }
+        }
+
+        for (chain_idx, chain) in chains.iter().enumerate() {
+            // Re-walk the chain's ops against tensor_op_indices.
+            // Each ChainOp's dst is unique (every op writes a fresh
+            // register), so we can match by dst.
+            let mut chain_pc_indices: Vec<usize> = Vec::new();
+            for op in &chain.ops {
+                for &pc in &tensor_op_indices {
+                    if let Some(matched) = match_op_at(&instructions[pc], op) {
+                        if matched {
+                            chain_pc_indices.push(pc);
+                            break;
+                        }
+                    }
+                }
+            }
+            for pc in &chain_pc_indices {
+                fused_indices.insert(*pc);
+            }
+            if let Some(&anchor) = chain_pc_indices.last() {
+                anchor_to_chain.insert(anchor, chain_idx);
+            }
+        }
+
+        FusionPlan { fused_indices, anchor_to_chain, chains }
+    }
+
+    /// True if the lowering should skip the per-op handler at this
+    /// PC — either because the chain anchor will absorb it (any
+    /// non-anchor index inside the chain) or because nothing
+    /// fusion-related happens here.
+    pub fn skip_at(&self, pc: usize) -> bool {
+        self.fused_indices.contains(&pc) && !self.anchor_to_chain.contains_key(&pc)
+    }
+
+    /// Returns the chain index whose fused call should be emitted at
+    /// this PC, if any.
+    pub fn anchor_at(&self, pc: usize) -> Option<usize> {
+        self.anchor_to_chain.get(&pc).copied()
+    }
+}
+
+/// Helper: does `pc_instr` correspond to ChainOp `op` (same kind +
+/// same destination register)?
+fn match_op_at(pc_instr: &Instruction, op: &ChainOp) -> Option<bool> {
+    let pc_chain_op = classify(pc_instr)?;
+    Some(pc_chain_op.dst.0 == op.dst.0 && pc_chain_op.kind == op.kind)
+}
+
 /// Public entry: scan an instruction stream (typically a VbcFunction's
 /// `instructions` field) and return all fusable tensor chains found.
 /// Ordered by their starting program-counter offset in the original
@@ -417,5 +513,37 @@ mod tests {
         assert_eq!(chains.len(), 2);
         assert_eq!(chains[0].output.0, 12);
         assert_eq!(chains[1].output.0, 22);
+    }
+
+    /// FusionPlan correctness: anchor at the last op of each chain,
+    /// every non-anchor chain op gets `skip_at == true`.
+    #[test]
+    fn fusion_plan_anchors_last_op() {
+        let stream = vec![
+            matmul(10, 1, 2),                       // chain 1 op 0 (pc 0)
+            binop(TensorBinaryOp::Add, 12, 10, 3),  // chain 1 op 1 — anchor (pc 1)
+            // intervening non-tensor instr breaks chain bookkeeping
+            // — but does not break the chain itself since the
+            // analyzer only cares about tensor-op data dependencies.
+            // (Here we omit it; pc 2 is the next chain anchor.)
+            matmul(20, 4, 5),                       // chain 2 op 0 (pc 2)
+            binop(TensorBinaryOp::Sub, 22, 20, 6),  // chain 2 op 1 — anchor (pc 3)
+        ];
+        let plan = FusionPlan::build(&stream);
+        // 4 instructions, all fused
+        assert_eq!(plan.fused_indices.len(), 4);
+        // 2 anchors: pc 1 and pc 3
+        assert_eq!(plan.anchor_to_chain.len(), 2);
+        assert!(plan.anchor_to_chain.contains_key(&1));
+        assert!(plan.anchor_to_chain.contains_key(&3));
+        // Skip predicates
+        assert!(plan.skip_at(0));        // chain 1 op 0 — skipped
+        assert!(!plan.skip_at(1));       // anchor — NOT skipped
+        assert!(plan.skip_at(2));        // chain 2 op 0 — skipped
+        assert!(!plan.skip_at(3));       // anchor — NOT skipped
+        // anchor_at maps anchors to chain indices
+        assert_eq!(plan.anchor_at(1), Some(0));
+        assert_eq!(plan.anchor_at(3), Some(1));
+        assert_eq!(plan.anchor_at(0), None);
     }
 }
