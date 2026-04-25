@@ -345,12 +345,33 @@ impl VbcModule {
     /// `Result.Err.unwrap()` from `Maybe.Some.unwrap()`. Returns the
     /// FunctionId for chaining or None if no function with that name
     /// exists in this module.
+    ///
+    /// First tries exact match. If exact match fails AND the queried name
+    /// looks qualified (contains `.`), falls back to suffix-match against
+    /// the queried name preceded by `.` — so `find_function_by_name("Result.unwrap")`
+    /// also matches a fully-namespaced registration like
+    /// `core.base.result.Result.unwrap`. This is the canonical disambiguation
+    /// discipline used elsewhere in codegen (`find_variant_by_suffix_and_args`,
+    /// `find_function_by_suffix`) and keeps the dispatcher's `prefer_user_compiled`
+    /// guard sound regardless of whether stdlib symbols are registered with
+    /// short or fully-qualified module paths.
     pub fn find_function_by_name(&self, name: &str) -> Option<FunctionId> {
+        // Exact match first
         for (idx, desc) in self.functions.iter().enumerate() {
             if let Some(fname) = self.get_string(desc.name)
                 && fname == name {
                     return Some(FunctionId(idx as u32));
                 }
+        }
+        // Suffix match: ".name" against fully-qualified registrations
+        if name.contains('.') {
+            let suffix = format!(".{}", name);
+            for (idx, desc) in self.functions.iter().enumerate() {
+                if let Some(fname) = self.get_string(desc.name)
+                    && fname.ends_with(&suffix) {
+                        return Some(FunctionId(idx as u32));
+                    }
+            }
         }
         None
     }
