@@ -306,7 +306,7 @@ public type CpuContext is {
 
 @repr(C)
 @cfg(target_arch = "aarch64")
-public type CpuContext is {
+public type Aarch64CpuContext is {
     // Callee-saved registers x19-x29, x30 (link register), sp
     x19: UInt64,
     x20: UInt64,

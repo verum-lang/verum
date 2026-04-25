@@ -37,7 +37,7 @@
 //
 // // Provide at application boundary
 // fn main() {
-//     provide Logger = ConsoleLogger.new(LogLevel.Info);
+//     provide Logger = ConsoleLogger.new(ContextLogLevel.Info);
 //     provide Database = PostgresPool.connect("postgres://localhost/mydb");
 //     provide Auth = JwtAuth.new(secret: env.var("JWT_SECRET"));
 //
@@ -61,7 +61,7 @@ mount core.io.protocols.{Write};
 // =============================================================================
 
 /// Log severity levels.
-public type LogLevel is
+public type ContextLogLevel is
     | Trace
     | Debug
     | Info
@@ -69,7 +69,7 @@ public type LogLevel is
     | Error
     | Fatal;
 
-implement LogLevel {
+implement ContextLogLevel {
     /// Get the numeric severity (higher = more severe).
     public fn severity(&self) -> Int {
         match self {
@@ -95,44 +95,44 @@ implement LogLevel {
     }
 
     /// Check if this level is at least as severe as the given level.
-    public fn is_enabled(&self, min_level: LogLevel) -> Bool {
+    public fn is_enabled(&self, min_level: ContextLogLevel) -> Bool {
         self.severity() >= min_level.severity()
     }
 }
 
-implement Eq for LogLevel {
-    fn eq(&self, other: &LogLevel) -> Bool {
+implement Eq for ContextLogLevel {
+    fn eq(&self, other: &ContextLogLevel) -> Bool {
         self.severity() == other.severity()
     }
 }
 
-implement Ord for LogLevel {
-    fn cmp(&self, other: &LogLevel) -> Ordering {
+implement Ord for ContextLogLevel {
+    fn cmp(&self, other: &ContextLogLevel) -> Ordering {
         self.severity().cmp(&other.severity())
     }
 }
 
-implement Clone for LogLevel {
-    fn clone(&self) -> LogLevel { *self }
+implement Clone for ContextLogLevel {
+    fn clone(&self) -> ContextLogLevel { *self }
 }
 
-implement Copy for LogLevel {}
+implement Copy for ContextLogLevel {}
 
-implement Debug for LogLevel {
+implement Debug for ContextLogLevel {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(self.name())
     }
 }
 
-implement Display for LogLevel {
+implement Display for ContextLogLevel {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(self.name())
     }
 }
 
 /// A structured log record.
-public type LogRecord is {
-    level: LogLevel,
+public type ContextLogRecord is {
+    level: ContextLogLevel,
     message: Text,
     target: Text,
     timestamp: SystemTime,
@@ -153,13 +153,13 @@ public type LogRecord is {
 /// ```
 public context Logger {
     /// Log a message at the given level.
-    fn log(level: LogLevel, message: Text);
+    fn log(level: ContextLogLevel, message: Text);
 
     /// Log a structured record.
-    fn log_record(record: LogRecord);
+    fn log_record(record: ContextLogRecord);
 
     /// Check if the given log level is enabled.
-    fn is_enabled(level: LogLevel) -> Bool;
+    fn is_enabled(level: ContextLogLevel) -> Bool;
 
     /// Log at TRACE level.
     fn trace(message: Text);
@@ -565,13 +565,13 @@ public context FileSystem {
 // Debug/Display Implementations for Data Types
 // =============================================================================
 
-implement Debug for LogRecord {
+implement Debug for ContextLogRecord {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"LogRecord {{ level: {self.level:?}, message: \"{self.message}\", target: \"{self.target}\" }}")
+        f.write_str(f"ContextLogRecord {{ level: {self.level:?}, message: \"{self.message}\", target: \"{self.target}\" }}")
     }
 }
 
-implement Display for LogRecord {
+implement Display for ContextLogRecord {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(f"[{self.level}] {self.target}: {self.message}")
     }

@@ -21,7 +21,7 @@ mount base.{Text, Maybe};
 // Literals + expressions
 // -----------------------------------------------------------------------------
 
-public type Literal is
+public type SqlLiteral is
       LNull
     | LInt(Int64)
     | LReal(Float64)
@@ -55,7 +55,7 @@ public type TableRef is {
 };
 
 public type Expr is
-      ELit(Literal)
+      ELit(SqlLiteral)
     | EColumn(TableRef, Text)                   // `t.name` or `name` (if schema/table empty)
     | EVar(Text)                                // named parameter ':x'
     | EPositional(Int)                          // '?' or '?N'

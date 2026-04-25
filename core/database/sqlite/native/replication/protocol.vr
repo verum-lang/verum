@@ -7,7 +7,7 @@
 // responsibility (typically protobuf or flatbuffers); we expose
 // the shape + the validation rules.
 //
-// Message flow:
+// ReplicationMessage flow:
 //
 //   Replica → Primary: HELLO {replica_id, last_known_position, role_request}
 //   Primary → Replica: HELLO_ACK {epoch, server_id, accepted_role}
@@ -98,10 +98,10 @@ public type ErrorMessage is {
 }
 
 // -----------------------------------------------------------------------------
-// Message
+// ReplicationMessage
 // -----------------------------------------------------------------------------
 
-public type Message is
+public type ReplicationMessage is
       MsgHello(Hello)
     | MsgHelloAck(HelloAck)
     | MsgRequestFrames(RequestFrames)
@@ -109,7 +109,7 @@ public type Message is
     | MsgAck(Ack)
     | MsgError(ErrorMessage);
 
-public fn message_kind(m: &Message) -> Text {
+public fn message_kind(m: &ReplicationMessage) -> Text {
     match m {
         MsgHello(_)         => "HELLO".clone(),
         MsgHelloAck(_)      => "HELLO_ACK".clone(),

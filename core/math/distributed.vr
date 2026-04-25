@@ -19,7 +19,7 @@
 //
 // - NCCL: NVIDIA Collective Communications Library (GPU)
 // - Gloo: Facebook's collective communications library (CPU)
-// - MPI: Message Passing Interface
+// - MPI: DistributedMessage Passing Interface
 //
 // Spec: docs/architecture/math-spec.md#41-44
 // =============================================================================
@@ -48,7 +48,7 @@ public type CommBackend is
     | NCCL
     // Facebook Gloo (CPU-optimized)
     | Gloo
-    // Message Passing Interface
+    // DistributedMessage Passing Interface
     | MPI;
 
 // Process group for distributed communication
@@ -827,11 +827,11 @@ public type ActorHandle<A> is {
     id: ActorId,
     rank: USize,
     device: ActorDeviceId,
-    mailbox: Channel<Message<A>>,
+    mailbox: Channel<DistributedMessage<A>>,
 };
 
-// Message wrapper
-public type Message<A> is (A);
+// DistributedMessage wrapper
+public type DistributedMessage<A> is (A);
 
 // N-dimensional mesh of actors with compile-time bounds checking
 public type ActorMesh<A, DIMS: meta MeshDims> is {
@@ -842,7 +842,7 @@ public type ActorMesh<A, DIMS: meta MeshDims> is {
 
 // Actor protocol
 public type Actor is protocol {
-    fn handle_message(&mut self, msg: Message<Self>) -> Maybe<Message<Self>>;
+    fn handle_message(&mut self, msg: DistributedMessage<Self>) -> Maybe<DistributedMessage<Self>>;
 };
 
 implement<A: Actor, DIMS: meta MeshDims> ActorMesh<A, DIMS> {
@@ -882,7 +882,7 @@ implement<A: Actor, DIMS: meta MeshDims> ActorMesh<A, DIMS> {
     // Broadcast message to all actors in mesh
     public fn broadcast<M: Clone>(&self, msg: M) -> List<Future<M>> {
         self.actors.iter().map(|actor| {
-            actor.mailbox.send(Message(msg.clone()))
+            actor.mailbox.send(DistributedMessage(msg.clone()))
         }).collect()
     }
 

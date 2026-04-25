@@ -11,12 +11,12 @@ module core.database.sqlite.native.log.level;
 mount core.*;
 mount base.{Bool, Text};
 
-public type LogLevel is
+public type SqliteLogLevel is
       LlNotice
     | LlWarning
     | LlError;
 
-public fn level_name(l: &LogLevel) -> Text {
+public fn level_name(l: &SqliteLogLevel) -> Text {
     match l {
         LlNotice  => "notice".clone(),
         LlWarning => "warning".clone(),
@@ -24,15 +24,15 @@ public fn level_name(l: &LogLevel) -> Text {
     }
 }
 
-public fn is_actionable(l: &LogLevel) -> Bool {
+public fn is_actionable(l: &SqliteLogLevel) -> Bool {
     match l {
         LlError => true,
         _ => false,
     }
 }
 
-/// Derive a LogLevel from the primary error-code integer.
-public fn level_from_primary(primary: Int) -> LogLevel {
+/// Derive a SqliteLogLevel from the primary error-code integer.
+public fn level_from_primary(primary: Int) -> SqliteLogLevel {
     if primary == 27 { return LlNotice; }   // SQLITE_NOTICE
     if primary == 28 { return LlWarning; }  // SQLITE_WARNING
     if primary == 0  { return LlNotice; }   // SQLITE_OK → informational

@@ -64,8 +64,6 @@ const ROOT: &str = "core";
 /// the entry from this baseline and run the test to confirm the
 /// duplicate is gone.
 const BASELINE_DUPLICATES: &[&str] = &[
-    "ContextError",
-    "CpuContext", "CpuFeatures",
     "Duration",
     "Event",
     "ExceptionFrame",
@@ -74,9 +72,7 @@ const BASELINE_DUPLICATES: &[&str] = &[
     "Instant",
     "IoCqe", "IoDriver", "IoDriverError",
     "IoError", "IoOp", "IoOpKind", "IoToken",
-    "Literal",
-    "LogLevel", "LogRecord",
-    "Message", "Method", "MethodSet",
+    "Method", "MethodSet",
     "Mode",
     "Op",
     "Outcome", "PageHeader",
@@ -92,7 +88,7 @@ const BASELINE_DUPLICATES: &[&str] = &[
     "Stat", "State", "StaticEntry",
     "StepResult",
     "SupervisionStrategy",
-    "ThreadPool", "Timeout",
+    "Timeout",
     "TlsError", "Token",
     "TxnState",
     "Value", "Verdict",

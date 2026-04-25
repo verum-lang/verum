@@ -36,7 +36,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
-    Statement, Expr, Literal, BinOp,
+    Statement, Expr, SqlLiteral, BinOp,
     SelectStmt, SelectKind, SimpleSelect, CompoundOp,
     ResultColumnItem, FromItem, SqlJoinKind, JoinClause,
     OrderTerm, LimitClause, OrderDirection,
@@ -433,7 +433,7 @@ fn clone_case_arms(xs: &List<(Expr, Expr)>) -> List<(Expr, Expr)> {
     out
 }
 
-fn clone_literal(l: &Literal) -> Literal {
+fn clone_literal(l: &SqlLiteral) -> SqlLiteral {
     match l {
         LNull  => LNull,
         LInt(i) => LInt(i),

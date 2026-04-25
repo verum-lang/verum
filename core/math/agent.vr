@@ -523,11 +523,11 @@ public type Agent is protocol {
     fn reset(&mut self);
 };
 
-// Message role in conversation
+// AgentMessage role in conversation
 public type AgentRole is System | User | Assistant | ToolResult;
 
 // Conversation message
-public type Message is {
+public type AgentMessage is {
     role: AgentRole,
     content: Text,
 };
@@ -537,7 +537,7 @@ public type LLMAgent<M, Tok> is {
     model: M,
     tokenizer: Tok,
     tools: Map<Text, Heap<Tool>>,
-    memory: List<Message>,
+    memory: List<AgentMessage>,
     system_prompt: Text,
     max_tokens: USize,
 };
@@ -573,7 +573,7 @@ where
     // Generate response
     public fn generate(&self, prompt: &Text) -> Text {
         let mut messages = self.memory.clone();
-        messages.push(Message { role: AgentRole.User, content: prompt.clone() });
+        messages.push(AgentMessage { role: AgentRole.User, content: prompt.clone() });
 
         let input = format_messages(&messages, &self.system_prompt);
         let tokens = self.tokenizer.encode(&input);
@@ -603,9 +603,9 @@ where
     Tok: Tokenizer,
 {
     fn think(&mut self, observation: &Text) -> Text {
-        self.memory.push(Message { role: AgentRole.User, content: observation.clone() });
+        self.memory.push(AgentMessage { role: AgentRole.User, content: observation.clone() });
         let response = self.generate(observation);
-        self.memory.push(Message { role: AgentRole.Assistant, content: response.clone() });
+        self.memory.push(AgentMessage { role: AgentRole.Assistant, content: response.clone() });
         response
     }
 
@@ -615,7 +615,7 @@ where
 
         if let Maybe.Some(tool) = self.tools.get(&tool_name) {
             let result = tool.execute(&args)?;
-            self.memory.push(Message {
+            self.memory.push(AgentMessage {
                 role: AgentRole.ToolResult,
                 content: format_value(&result),
             });
@@ -957,7 +957,7 @@ fn sample_tokens(logits: &DynTensor<Float>) -> List<U32> {
 // =============================================================================
 
 // Format messages for model input
-fn format_messages(messages: &List<Message>, system_prompt: &Text) -> Text {
+fn format_messages(messages: &List<AgentMessage>, system_prompt: &Text) -> Text {
     let mut result = f"<|system|>\n{system_prompt}\n<|end|>\n";
     for msg in messages {
         let role_str = match msg.role {
@@ -1039,7 +1039,7 @@ fn generate_request_id() -> U64 {
 // Prompt Engineering APIs (Section 49)
 // =============================================================================
 
-// Message content types for multimodal interactions
+// AgentMessage content types for multimodal interactions
 public type MessageContent is
     | TextContent(Text)
     | ImageUrl { url: Text, detail: ImageDetail }

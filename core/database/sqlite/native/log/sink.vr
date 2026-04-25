@@ -13,21 +13,21 @@ module core.database.sqlite.native.log.sink;
 mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.log.level.{
-    LogLevel, LlNotice, LlWarning, LlError,
+    SqliteLogLevel, LlNotice, LlWarning, LlError,
 };
 
 public type LogSink is {
     name: Text,
-    min_level: LogLevel,
+    min_level: SqliteLogLevel,
     ring_capacity: Int,
 }
 
-public fn new_sink(name: Text, min_level: LogLevel, ring_capacity: Int) -> LogSink {
+public fn new_sink(name: Text, min_level: SqliteLogLevel, ring_capacity: Int) -> LogSink {
     LogSink { name: name, min_level: min_level, ring_capacity: ring_capacity }
 }
 
 /// Level ordering: notice < warning < error.
-fn level_rank(l: &LogLevel) -> Int {
+fn level_rank(l: &SqliteLogLevel) -> Int {
     match l {
         LlNotice  => 0,
         LlWarning => 1,
@@ -35,7 +35,7 @@ fn level_rank(l: &LogLevel) -> Int {
     }
 }
 
-public fn sink_accepts(s: &LogSink, level: &LogLevel) -> Bool {
+public fn sink_accepts(s: &LogSink, level: &SqliteLogLevel) -> Bool {
     level_rank(level) >= level_rank(&s.min_level)
 }
 

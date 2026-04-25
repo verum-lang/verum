@@ -801,18 +801,18 @@ implement<T, E> Result<T, E> {
     /// let result = parse_config(path)
     ///     .context(f"Failed to parse config at {path}");
     /// ```
-    public fn context(self, ctx: Text) -> Result<T, ContextError<E>> {
+    public fn context(self, ctx: Text) -> Result<T, ResultContextError<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(ContextError { context: ctx, source: e }),
+            Err(e) => Err(ResultContextError { context: ctx, source: e }),
         }
     }
 
     /// Add lazy context to an error.
-    public fn with_context<F: fn() -> Text>(self, ctx_fn: F) -> Result<T, ContextError<E>> {
+    public fn with_context<F: fn() -> Text>(self, ctx_fn: F) -> Result<T, ResultContextError<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(ContextError { context: ctx_fn(), source: e }),
+            Err(e) => Err(ResultContextError { context: ctx_fn(), source: e }),
         }
     }
 
@@ -941,17 +941,17 @@ implement<E> RetryOptions<E> {
 /// Error wrapped with additional context.
 ///
 /// Forms a chain of errors preserving the full error history.
-public type ContextError<E> is {
+public type ResultContextError<E> is {
     /// Human-readable context description.
     context: Text,
     /// The underlying error.
     source: E,
 };
 
-implement<E> ContextError<E> {
+implement<E> ResultContextError<E> {
     /// Create new context error.
-    public fn new(context: Text, source: E) -> ContextError<E> {
-        ContextError { context: context, source: source }
+    public fn new(context: Text, source: E) -> ResultContextError<E> {
+        ResultContextError { context: context, source: source }
     }
 
     /// Get the context message.
@@ -970,7 +970,7 @@ implement<E> ContextError<E> {
     }
 }
 
-implement<E: Debug> Debug for ContextError<E> {
+implement<E: Debug> Debug for ResultContextError<E> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.context)?;
         f.write_str("\n  caused by: ")?;
@@ -978,7 +978,7 @@ implement<E: Debug> Debug for ContextError<E> {
     }
 }
 
-implement<E: Display> Display for ContextError<E> {
+implement<E: Display> Display for ResultContextError<E> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.context)?;
         f.write_str(": ")?;
@@ -986,9 +986,9 @@ implement<E: Display> Display for ContextError<E> {
     }
 }
 
-implement<E: Clone> Clone for ContextError<E> {
-    fn clone(&self) -> ContextError<E> {
-        ContextError {
+implement<E: Clone> Clone for ResultContextError<E> {
+    fn clone(&self) -> ResultContextError<E> {
+        ResultContextError {
             context: self.context.clone(),
             source: self.source.clone(),
         }
