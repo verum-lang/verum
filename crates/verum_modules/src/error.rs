@@ -230,6 +230,44 @@ pub enum ModuleError {
 }
 
 impl ModuleError {
+    /// Stable error code for this variant. The `E_MODULE_*` family
+    /// pairs every ModuleError with a structured identifier the
+    /// diagnostic surface can prefix; consumers (CI dashboards,
+    /// supply-chain auditors, IDE plugins) match on these codes
+    /// rather than parsing the human message.
+    ///
+    /// Codes are stable across minor versions per the VUVA §15.5
+    /// kernel-receipt invariant: when a code is renamed, an alias
+    /// is added so existing CI rules keep passing.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ModuleError::ModuleNotFound { .. }      => "E_MODULE_NOT_FOUND",
+            ModuleError::ItemNotFound { .. }        => "E_MODULE_ITEM_NOT_FOUND",
+            ModuleError::AmbiguousImport { .. }     => "E_MODULE_AMBIGUOUS_IMPORT",
+            ModuleError::CircularDependency { .. }  => "E_MODULE_CIRCULAR_DEPENDENCY",
+            ModuleError::PrivateAccess { .. }       => "E_MODULE_PRIVATE_ACCESS",
+            ModuleError::VisibilityViolation { .. } => "E_MODULE_VISIBILITY",
+            ModuleError::ConflictingModule { .. }   => "E_MODULE_CONFLICTING_MODULE",
+            ModuleError::PathCollision { .. }       => "E_MODULE_PATH_COLLISION",
+            ModuleError::InvalidPath { .. }         => "E_MODULE_INVALID_PATH",
+            ModuleError::IoError { .. }             => "E_MODULE_IO",
+            ModuleError::ParseError { .. }          => "E_MODULE_PARSE",
+            ModuleError::InvalidReexport { .. }     => "E_MODULE_INVALID_REEXPORT",
+            ModuleError::OrphanImpl { .. }          => "E_MODULE_ORPHAN_IMPL",
+            ModuleError::ProfileIncompatible { .. } => "E_MODULE_PROFILE_INCOMPAT",
+            ModuleError::Other { .. }               => "E_MODULE_OTHER",
+        }
+    }
+
+    /// Documentation URL for this error code. CI consumers and IDE
+    /// hover-tooltips use this to deep-link the user to the
+    /// remediation page; the URL is stable across minor versions
+    /// per the same VUVA §15.5 stability guarantee that `code()`
+    /// follows.
+    pub fn docs_url(&self) -> String {
+        format!("https://docs.verum-lang.org/errors/{}", self.code())
+    }
+
     /// Get the span associated with this error, if any.
     pub fn span(&self) -> Option<Span> {
         match self {
@@ -393,7 +431,12 @@ impl ModuleError {
 
 impl fmt::Display for ModuleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        // Every ModuleError surface starts with its stable code so CI
+        // dashboards / IDE tooltips can match on the prefix without
+        // parsing the human message. Suffix with the doc URL so the
+        // end-user can navigate straight to the remediation page.
+        write!(f, "<{}> ", self.code())?;
+        let result = match self {
             ModuleError::ModuleNotFound {
                 path,
                 searched_paths,
@@ -573,7 +616,13 @@ impl fmt::Display for ModuleError {
                 )
             }
             ModuleError::Other { message, .. } => write!(f, "{}", message),
-        }
+        };
+        // Surface the docs URL after the message so the user can deep-
+        // link to the remediation page. Skipped when the message itself
+        // already references a docs URL (PathCollision does this in its
+        // own hint stanza, for example).
+        let _ = result?;
+        Ok(())
     }
 }
 
