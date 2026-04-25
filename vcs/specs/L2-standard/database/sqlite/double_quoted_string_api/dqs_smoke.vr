@@ -9,7 +9,7 @@ mount core.database.sqlite.native.double_quoted_string_api.context.{
     DqsConfig,
     defensive_default, legacy_default, fully_permissive,
     dml_enabled, ddl_enabled, all_disabled,
-    StmtKind, SkDml, SkDdl, SkPragma, stmt_kind_name,
+    DqsStmtKind, SkDml, SkDdl, SkPragma, stmt_kind_name,
 };
 mount core.database.sqlite.native.double_quoted_string_api.resolver.{
     DoubleQuotedResolution, RsIdentifier, RsStringLiteralLegacy, RsError,

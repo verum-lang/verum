@@ -14,7 +14,7 @@ mount core.async.broadcast.{
     BroadcastSender,
     BroadcastReceiver,
     SendError,
-    RecvError,
+    BroadcastRecvError,
     TryRecvResult,
     LagPolicy,
     broadcast_channel,
@@ -58,14 +58,14 @@ fn test_try_recv_shape() {
     }
 }
 
-// recv() returns an awaitable Future<Result<T, RecvError>>.
-async fn test_recv_future() -> Result<Int, RecvError> {
+// recv() returns an awaitable Future<Result<T, BroadcastRecvError>>.
+async fn test_recv_future() -> Result<Int, BroadcastRecvError> {
     let (_tx, rx) = broadcast_channel::<Int>(4);
     rx.recv().await
 }
 
 // Receiver is also a Future (by direct .await).
-async fn test_receiver_is_future() -> Result<Int, RecvError> {
+async fn test_receiver_is_future() -> Result<Int, BroadcastRecvError> {
     let (_tx, mut rx) = broadcast_channel::<Int>(4);
     // Note: direct .await on receiver also works (Future impl).
     let _ = &mut rx;

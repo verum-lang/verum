@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.session_api.handle.{
-    Session, new_session,
+    SessionHandle, new_session,
 };
 mount core.database.sqlite.native.session_api.op.{
     SessionOp,

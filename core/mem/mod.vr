@@ -117,9 +117,9 @@ public mount .arena.{
 // Mimalloc-Style Allocator Components (Industrial Grade)
 // =============================================================================
 
-/// Segment management (32 MiB chunks with lazy commit).
+/// MemSegment management (32 MiB chunks with lazy commit).
 public mount .segment.{
-    Segment, SliceInfo, SegmentError, SegmentStats,
+    MemSegment, SliceInfo, SegmentError, SegmentStats,
     segment_alloc, segment_free, segment_abandon, ptr_to_segment,
     get_segment_stats,
     SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,

@@ -475,11 +475,11 @@ implement<T, F: Future<Output>> Future for JoinAll<T, F> {
 // =============================================================================
 
 /// Error returned when a timeout expires.
-public type TimeoutError is ();
+public type SelectTimeoutError is ();
 
 /// Add a timeout to a future.
 ///
-/// If the future doesn't complete within the timeout, returns TimeoutError.
+/// If the future doesn't complete within the timeout, returns SelectTimeoutError.
 ///
 /// # Example
 ///
@@ -492,7 +492,7 @@ public type TimeoutError is ();
 public async fn timeout<T, F: Future<Output>>(
     duration: Duration,
     future: F,
-) -> Result<T, TimeoutError> {
+) -> Result<T, SelectTimeoutError> {
     let now = Instant.now();
     let deadline = now.checked_add(duration).unwrap_or(now);
     SelectTimeout {
@@ -507,12 +507,12 @@ type SelectTimeout<T, F: Future<Output>> is {
 };
 
 implement<T, F: Future<Output>> Future for SelectTimeout<T, F> {
-    type Output = Result<T, TimeoutError>;
+    type Output = Result<T, SelectTimeoutError>;
 
-    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, TimeoutError>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, SelectTimeoutError>> {
         // Check timeout first
         if Instant.now() >= self.deadline {
-            return Poll.Ready(Err(TimeoutError()));
+            return Poll.Ready(Err(SelectTimeoutError()));
         }
 
         // Poll the inner future

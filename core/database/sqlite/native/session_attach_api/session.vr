@@ -9,14 +9,14 @@ mount core.database.sqlite.native.session_attach_api.mode.{
 mount base.{Bool, Text};
 mount core.collections.list.{List};
 
-public type Session is {
+public type SessionAttach is {
     attached_tables: List<Text>,
     attach_all_mode: Bool,
     has_filter: Bool,
 };
 
-public fn new() -> Session {
-    Session {
+public fn new() -> SessionAttach {
+    SessionAttach {
         attached_tables: [].clone() as List<Text>,
         attach_all_mode: false,
         has_filter: false,
@@ -32,7 +32,7 @@ fn list_contains(l: &List<Text>, s: &Text) -> Bool {
     false
 }
 
-public fn apply(mut s: Session, m: &AttachMode) -> Session {
+public fn apply(mut s: SessionAttach, m: &AttachMode) -> SessionAttach {
     match m {
         AmAll => { s.attach_all_mode = true; },
         AmSpecific(name) => {
@@ -47,7 +47,7 @@ public fn apply(mut s: Session, m: &AttachMode) -> Session {
 
 // Which tables actually end up recorded — given the table's metadata.
 public fn records_table(
-    s: &Session,
+    s: &SessionAttach,
     table_name: &Text,
     has_rowid: Bool,
     is_virtual: Bool,
@@ -60,5 +60,5 @@ public fn records_table(
     list_contains(&s.attached_tables, table_name)
 }
 
-public fn attached_count(s: &Session) -> Int { s.attached_tables.len() }
-public fn is_attach_all(s: &Session) -> Bool { s.attach_all_mode }
+public fn attached_count(s: &SessionAttach) -> Int { s.attached_tables.len() }
+public fn is_attach_all(s: &SessionAttach) -> Bool { s.attach_all_mode }

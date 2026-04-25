@@ -12,35 +12,35 @@ mount core.database.sqlite.native.integrity_walker_api.finding.{
 mount base.{Bool, Int64};
 mount core.collections.list.{List};
 
-public type IntegrityReport is {
+public type WalkerIntegrityReport is {
     findings: List<Finding>,
     pages_scanned: Int64,
     highest_severity: Int,
 };
 
-public fn fresh() -> IntegrityReport {
-    IntegrityReport {
+public fn fresh() -> WalkerIntegrityReport {
+    WalkerIntegrityReport {
         findings: [].clone() as List<Finding>,
         pages_scanned: 0 as Int64,
         highest_severity: 0,
     }
 }
 
-public fn record(mut r: IntegrityReport, f: Finding) -> IntegrityReport {
+public fn record(mut r: WalkerIntegrityReport, f: Finding) -> WalkerIntegrityReport {
     let sev = severity_rank(&f.kind);
     if sev > r.highest_severity { r.highest_severity = sev; }
     r.findings.push(f);
     r
 }
 
-public fn count_page(mut r: IntegrityReport) -> IntegrityReport {
+public fn count_page(mut r: WalkerIntegrityReport) -> WalkerIntegrityReport {
     r.pages_scanned = r.pages_scanned + (1 as Int64);
     r
 }
 
-public fn finding_count(r: &IntegrityReport) -> Int { r.findings.len() }
+public fn finding_count(r: &WalkerIntegrityReport) -> Int { r.findings.len() }
 
-public fn has_issues(r: &IntegrityReport) -> Bool {
+public fn has_issues(r: &WalkerIntegrityReport) -> Bool {
     // Any finding that isn't an OK sentinel.
     let mut i: Int = 0;
     while i < r.findings.len() {
@@ -51,7 +51,7 @@ public fn has_issues(r: &IntegrityReport) -> Bool {
 }
 
 // PRAGMA integrity_check returns "ok" when the report is issue-free.
-public fn pragma_output_line_count(r: &IntegrityReport) -> Int {
+public fn pragma_output_line_count(r: &WalkerIntegrityReport) -> Int {
     if !has_issues(r) { return 1; }    // just "ok"
     // Otherwise one line per finding (SQLite caps at integrity_check(N)).
     let mut n: Int = 0;
@@ -63,7 +63,7 @@ public fn pragma_output_line_count(r: &IntegrityReport) -> Int {
     n
 }
 
-public fn first_finding_or_ok(r: &IntegrityReport) -> Finding {
+public fn first_finding_or_ok(r: &WalkerIntegrityReport) -> Finding {
     if r.findings.len() == 0 { return ok_sentinel(); }
     let mut i: Int = 0;
     while i < r.findings.len() {

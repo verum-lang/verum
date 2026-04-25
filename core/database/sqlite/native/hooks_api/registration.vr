@@ -31,17 +31,17 @@ public fn kind_name(k: &HookKind) -> Text {
     }
 }
 
-public type Registration is {
+public type HookRegistration is {
     kind: HookKind,
     tag: Text,
     /// Opaque `pArg` value; 0 => no hook installed.
     handle: Int64,
 }
 
-public fn new_registration(kind: HookKind, tag: Text, handle: Int64) -> Registration {
-    Registration { kind: kind, tag: tag, handle: handle }
+public fn new_registration(kind: HookKind, tag: Text, handle: Int64) -> HookRegistration {
+    HookRegistration { kind: kind, tag: tag, handle: handle }
 }
 
-public fn is_installed(r: &Registration) -> Bool {
+public fn is_installed(r: &HookRegistration) -> Bool {
     r.handle != (0 as Int64)
 }

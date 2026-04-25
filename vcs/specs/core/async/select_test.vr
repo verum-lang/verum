@@ -5,7 +5,7 @@
 // @level: L1
 // @tier: 0
 // @tags: async, select, race, join, timeout, combinators, either
-// @description: Tests for Either, SelectAllResult, TimeoutError, SelectReadyFuture,
+// @description: Tests for Either, SelectAllResult, SelectTimeoutError, SelectReadyFuture,
 //               NeverFuture, combinator type signatures, Duration with timeout,
 //               and various async utility types
 // =============================================================================
@@ -13,7 +13,7 @@
 mount core.async.select.{
     Either, Left, Right,
     SelectAllResult,
-    TimeoutError,
+    SelectTimeoutError,
     SelectReadyFuture, NeverFuture, YieldNow,
     select_either, race, select_all,
     join, join3, join4, join_all,
@@ -113,31 +113,31 @@ fn test_select_all_result_fields() {
 }
 
 // =============================================================================
-// Section 3: TimeoutError
+// Section 3: SelectTimeoutError
 // =============================================================================
 
 @test
 fn test_timeout_error_type() {
-    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    let result: Result<Int, SelectTimeoutError> = Err(SelectTimeoutError);
     assert(result.is_err());
 }
 
 @test
 fn test_timeout_error_in_err_result() {
-    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    let result: Result<Int, SelectTimeoutError> = Err(SelectTimeoutError);
     assert(result.is_err());
 }
 
 @test
 fn test_timeout_error_in_ok_result() {
-    let result: Result<Int, TimeoutError> = Ok(42);
+    let result: Result<Int, SelectTimeoutError> = Ok(42);
     assert(result.is_ok());
     assert_eq(result.unwrap(), 42);
 }
 
 @test
 fn test_timeout_error_match() {
-    let result: Result<Text, TimeoutError> = Err(TimeoutError);
+    let result: Result<Text, SelectTimeoutError> = Err(SelectTimeoutError);
     let is_timeout = match result {
         Ok(_) => false,
         Err(_) => true,
@@ -288,9 +288,9 @@ fn test_join4_signature() {
 fn test_timeout_duration_type() {
     let dur: Duration = Duration.from_secs(5);
     assert_eq(dur.as_secs(), 5);
-    // timeout(dur, future) returns Result<T, TimeoutError>
-    let _ok: Result<Int, TimeoutError> = Ok(42);
-    let _err: Result<Int, TimeoutError> = Err(TimeoutError);
+    // timeout(dur, future) returns Result<T, SelectTimeoutError>
+    let _ok: Result<Int, SelectTimeoutError> = Ok(42);
+    let _err: Result<Int, SelectTimeoutError> = Err(SelectTimeoutError);
     assert(_ok.is_ok());
     assert(_err.is_err());
 }
@@ -667,12 +667,12 @@ fn test_select_all_result_with_list_remaining() {
 }
 
 // =============================================================================
-// Section 18: TimeoutError in Various Result Combinations
+// Section 18: SelectTimeoutError in Various Result Combinations
 // =============================================================================
 
 @test
 fn test_timeout_error_result_match_ok() {
-    let result: Result<Text, TimeoutError> = Ok("success");
+    let result: Result<Text, SelectTimeoutError> = Ok("success");
     let val = match result {
         Ok(s) => s,
         Err(_) => "timeout",
@@ -682,7 +682,7 @@ fn test_timeout_error_result_match_ok() {
 
 @test
 fn test_timeout_error_result_match_err() {
-    let result: Result<Text, TimeoutError> = Err(TimeoutError);
+    let result: Result<Text, SelectTimeoutError> = Err(SelectTimeoutError);
     let val = match result {
         Ok(s) => s,
         Err(_) => "timeout",
@@ -692,8 +692,8 @@ fn test_timeout_error_result_match_err() {
 
 @test
 fn test_timeout_error_is_unit_type() {
-    let err = TimeoutError;
-    let result: Result<Int, TimeoutError> = Err(err);
+    let err = SelectTimeoutError;
+    let result: Result<Int, SelectTimeoutError> = Err(err);
     assert(result.is_err());
 }
 

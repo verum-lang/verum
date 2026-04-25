@@ -48,7 +48,7 @@ mount core.collections.List;
 
 public type RecvState is Recv | SizeKnown | DataRecvd | DataRead | ResetRecvd | ResetRead;
 
-public type RecvError is
+public type QuicRecvError is
       FinalSizeChanged        // peer sent FIN twice with different offsets, or
                               // sent data past final_size
     | ResetAfterFin
@@ -98,23 +98,23 @@ implement RecvStream {
         offset: UInt64,
         data: &[Byte],
         is_fin: Bool,
-    ) -> Result<(), RecvError> {
+    ) -> Result<(), QuicRecvError> {
         match self.state {
-            RecvState.ResetRecvd | RecvState.ResetRead => return Err(RecvError.ReceiveAfterReset),
+            RecvState.ResetRecvd | RecvState.ResetRead => return Err(QuicRecvError.ReceiveAfterReset),
             _ => {},
         }
         // Flow control violation if the highest byte offset is past
         // our advertised limit.
         let high = offset + (data.len() as UInt64);
         if high > self.max_data_recv {
-            return Err(RecvError.FlowControlViolation);
+            return Err(QuicRecvError.FlowControlViolation);
         }
 
         // Final-size consistency if FIN.
         if is_fin {
             match self.final_size {
                 Some(existing) => {
-                    if existing != high { return Err(RecvError.FinalSizeChanged); }
+                    if existing != high { return Err(QuicRecvError.FinalSizeChanged); }
                 },
                 None => { self.final_size = Some(high); },
             }
@@ -122,7 +122,7 @@ implement RecvStream {
         // Also: no byte may land past final_size.
         match self.final_size {
             Some(fs) => {
-                if high > fs { return Err(RecvError.FinalSizeChanged); }
+                if high > fs { return Err(QuicRecvError.FinalSizeChanged); }
             },
             None => {},
         }
@@ -133,9 +133,9 @@ implement RecvStream {
     }
 
     /// Peer RESET_STREAM — transitions to ResetRecvd.
-    public fn on_reset(&mut self, error_code: UInt64, final_size: UInt64) -> Result<(), RecvError> {
+    public fn on_reset(&mut self, error_code: UInt64, final_size: UInt64) -> Result<(), QuicRecvError> {
         match self.state {
-            RecvState.DataRead => return Err(RecvError.ResetAfterFin),
+            RecvState.DataRead => return Err(QuicRecvError.ResetAfterFin),
             RecvState.ResetRecvd | RecvState.ResetRead => {
                 // Idempotent if arriving twice with same code — just ignore.
                 return Ok(());
@@ -152,7 +152,7 @@ implement RecvStream {
             i = i + 1;
         }
         if final_size < max_obs {
-            return Err(RecvError.FinalSizeChanged);
+            return Err(QuicRecvError.FinalSizeChanged);
         }
         self.state = RecvState.ResetRecvd;
         self.reset_code = Some(error_code);

@@ -28,13 +28,13 @@ public fn all_disabled(c: &DqsConfig) -> Bool {
     !c.dqs_dml && !c.dqs_ddl
 }
 
-public type StmtKind is
+public type DqsStmtKind is
     | SkDml                 // SELECT / INSERT / UPDATE / DELETE
     | SkDdl                 // CREATE / ALTER / DROP
     | SkPragma              // PRAGMA
     ;
 
-public fn stmt_kind_name(s: &StmtKind) -> Text {
+public fn stmt_kind_name(s: &DqsStmtKind) -> Text {
     match s {
         SkDml    => "DML".clone(),
         SkDdl    => "DDL".clone(),

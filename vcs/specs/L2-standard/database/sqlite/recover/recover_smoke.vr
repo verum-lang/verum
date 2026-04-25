@@ -19,7 +19,7 @@ mount core.database.sqlite.native.recover.stats.{
     RecoveryStats, new_stats,
 };
 mount core.database.sqlite.native.recover.outcome.{
-    StepOutcome, SoMoreWork, SoDone, SoFailed,
+    RecoverStepOutcome, SoMoreWork, SoDone, SoFailed,
     FinishOutcome, FoOk, FoFailed,
     step_is_ok, step_is_done, finish_is_ok, finish_numeric,
 };
@@ -85,7 +85,7 @@ fn test_step_outcome_classification() {
     assert(step_is_ok(&SoDone));
     assert(step_is_done(&SoDone));
     assert(!step_is_done(&SoMoreWork));
-    let failed: StepOutcome = SoFailed {
+    let failed: RecoverStepOutcome = SoFailed {
         code: extended_of(PcCorrupt, 0),
         reason: "corrupt".clone(),
     };

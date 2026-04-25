@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.stmt_busy_api.state.{
-    Phase, PhFresh, PhRunning, PhFinished, PhFinalized, phase_name,
+    StmtBusyPhase, PhFresh, PhRunning, PhFinished, PhFinalized, phase_name,
     is_busy, busy_bool,
     Event, EStep, EReset, EFinalize, event_name,
     next_phase,

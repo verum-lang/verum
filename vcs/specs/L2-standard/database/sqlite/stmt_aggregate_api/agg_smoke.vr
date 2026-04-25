@@ -11,7 +11,7 @@ mount core.database.sqlite.native.stmt_aggregate_api.callback.{
     window_requires_all_four,
 };
 mount core.database.sqlite.native.stmt_aggregate_api.lifecycle.{
-    Phase, PaIdle, PaAccumulating, PaFinalizing, PaDone,
+    AggregatePhase, PaIdle, PaAccumulating, PaFinalizing, PaDone,
     phase_name,
     AggState,
     fresh, begin, step, inverse, emit_value, finalize, complete,

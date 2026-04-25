@@ -15,19 +15,19 @@ mount core.database.sqlite.native.errors.code.{
     ExtendedCode, extended_numeric,
 };
 
-public type StepOutcome is
+public type RecoverStepOutcome is
       SoMoreWork
     | SoDone
     | SoFailed { code: ExtendedCode, reason: Text };
 
-public fn step_is_ok(s: &StepOutcome) -> Bool {
+public fn step_is_ok(s: &RecoverStepOutcome) -> Bool {
     match s {
         SoMoreWork | SoDone => true,
         _ => false,
     }
 }
 
-public fn step_is_done(s: &StepOutcome) -> Bool {
+public fn step_is_done(s: &RecoverStepOutcome) -> Bool {
     match s {
         SoDone => true,
         _ => false,

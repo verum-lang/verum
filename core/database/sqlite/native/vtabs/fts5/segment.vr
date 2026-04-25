@@ -3,7 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/segment.vr
 //
-// A `Segment` is an immutable sorted set of `(term, posting_list)`
+// A `Fts5VtabSegment` is an immutable sorted set of `(term, posting_list)`
 // pairs, plus a small bloom filter to skip segments that don't
 // contain a queried term.
 //
@@ -103,10 +103,10 @@ public type TermEntry is {
 };
 
 // -----------------------------------------------------------------------------
-// Segment
+// Fts5VtabSegment
 // -----------------------------------------------------------------------------
 
-public type Segment is {
+public type Fts5VtabSegment is {
     /// Sorted by `term`.
     entries: List<TermEntry>,
     /// Total number of postings (sum across all entries).
@@ -116,8 +116,8 @@ public type Segment is {
     max_rowid: Int64,
 };
 
-public fn segment_empty() -> Segment {
-    Segment {
+public fn segment_empty() -> Fts5VtabSegment {
+    Fts5VtabSegment {
         entries: List.new(),
         n_postings: 0,
         min_rowid: (0 as Int64),
@@ -126,7 +126,7 @@ public fn segment_empty() -> Segment {
 }
 
 /// Build a segment from one document's token stream.
-public fn segment_from_tokens(rowid: Int64, column: Int, tokens: List<Token>) -> Segment {
+public fn segment_from_tokens(rowid: Int64, column: Int, tokens: List<Token>) -> Fts5VtabSegment {
     let mut entries: List<TermEntry> = List.new();
     let mut i: Int = 0;
     while i < tokens.len() {
@@ -139,7 +139,7 @@ public fn segment_from_tokens(rowid: Int64, column: Int, tokens: List<Token>) ->
         entries[pos].postings.add(posting);
         i = i + 1;
     }
-    Segment {
+    Fts5VtabSegment {
         entries: entries,
         n_postings: tokens.len(),
         min_rowid: rowid,
@@ -164,7 +164,7 @@ fn find_or_create_term(entries: &mut List<TermEntry>, term: &Text) -> Int {
 // Lookup
 // -----------------------------------------------------------------------------
 
-public fn segment_lookup(seg: &Segment, term: &Text) -> Maybe<Fts5SegmentPostingList> {
+public fn segment_lookup(seg: &Fts5VtabSegment, term: &Text) -> Maybe<Fts5SegmentPostingList> {
     let mut i: Int = 0;
     while i < seg.entries.len() {
         if seg.entries[i].term == term {
@@ -189,7 +189,7 @@ fn clone_pl(pl: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {
 // Merge two segments — k-way merge for the background merger
 // -----------------------------------------------------------------------------
 
-public fn segment_merge(a: &Segment, b: &Segment) -> Segment {
+public fn segment_merge(a: &Fts5VtabSegment, b: &Fts5VtabSegment) -> Fts5VtabSegment {
     let mut out: List<TermEntry> = List.new();
     let mut i: Int = 0;
     let mut j: Int = 0;
@@ -236,7 +236,7 @@ public fn segment_merge(a: &Segment, b: &Segment) -> Segment {
     }
     let min_r: Int64 = if a.min_rowid < b.min_rowid { a.min_rowid } else { b.min_rowid };
     let max_r: Int64 = if a.max_rowid > b.max_rowid { a.max_rowid } else { b.max_rowid };
-    Segment {
+    Fts5VtabSegment {
         entries: out,
         n_postings: total,
         min_rowid: min_r,

@@ -11,7 +11,7 @@ mount core.*;
 mount collections.List;
 mount collections.map.Map;
 mount core.database.sqlite.native.l3_btree.{
-    Violation, IntegrityReport,
+    Violation, BtreeIntegrityReport,
     integrity_report_new, integrity_is_ok,
     check_page, check_tree, check_freelist,
 };

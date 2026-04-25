@@ -6,13 +6,13 @@
 // @tier: 0
 // @tags: async, executor, runtime, config, sleep, timeout, builder
 // @description: Tests for RuntimeConfig, AsyncRuntime, RuntimeBuilder,
-//               Sleep, TimeoutError, Timeout, ExecutionEnv types,
+//               Sleep, ExecutorTimeoutError, Timeout, ExecutionEnv types,
 //               builder patterns, and configuration presets
 // =============================================================================
 
 mount core.async.executor.{
     RuntimeConfig, AsyncRuntime, RuntimeBuilder,
-    Sleep, TimeoutError, Timeout,
+    Sleep, ExecutorTimeoutError, Timeout,
     ExecutionEnv,
     sleep_ms, sleep_secs,
     block_on,
@@ -169,32 +169,32 @@ fn test_runtime_builder_build() {
 }
 
 // =============================================================================
-// Section 6: TimeoutError
+// Section 6: ExecutorTimeoutError
 // =============================================================================
 
 @test
 fn test_timeout_error_type() {
-    let _err: TimeoutError = TimeoutError;
-    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    let _err: ExecutorTimeoutError = ExecutorTimeoutError;
+    let result: Result<Int, ExecutorTimeoutError> = Err(ExecutorTimeoutError);
     assert(result.is_err());
 }
 
 @test
 fn test_timeout_error_in_err_result() {
-    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    let result: Result<Int, ExecutorTimeoutError> = Err(ExecutorTimeoutError);
     assert(result.is_err());
 }
 
 @test
 fn test_timeout_error_in_ok_result() {
-    let result: Result<Int, TimeoutError> = Ok(42);
+    let result: Result<Int, ExecutorTimeoutError> = Ok(42);
     assert(result.is_ok());
     assert_eq(result.unwrap(), 42);
 }
 
 @test
 fn test_timeout_error_match() {
-    let result: Result<Text, TimeoutError> = Err(TimeoutError);
+    let result: Result<Text, ExecutorTimeoutError> = Err(ExecutorTimeoutError);
     assert(result.is_err());
 }
 
@@ -385,7 +385,7 @@ fn test_sleep_new_is_not_completed() {
 
 @test
 fn test_timeout_error_in_result_match() {
-    let result: Result<Text, TimeoutError> = Err(TimeoutError);
+    let result: Result<Text, ExecutorTimeoutError> = Err(ExecutorTimeoutError);
     let msg = match result {
         Ok(v) => v,
         Err(_) => "timed out",
@@ -395,7 +395,7 @@ fn test_timeout_error_in_result_match() {
 
 @test
 fn test_timeout_ok_result() {
-    let result: Result<Int, TimeoutError> = Ok(100);
+    let result: Result<Int, ExecutorTimeoutError> = Ok(100);
     match result {
         Ok(v) => assert_eq(v, 100),
         Err(_) => panic("expected Ok"),
@@ -758,7 +758,7 @@ fn test_sleep_future_poll_completes() {
 
 @test
 fn test_timeout_result_ok_match_value() {
-    let result: Result<Int, TimeoutError> = Ok(7);
+    let result: Result<Int, ExecutorTimeoutError> = Ok(7);
     let val = match result {
         Ok(v) => v,
         Err(_) => -1,
@@ -768,7 +768,7 @@ fn test_timeout_result_ok_match_value() {
 
 @test
 fn test_timeout_result_err_match_value() {
-    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    let result: Result<Int, ExecutorTimeoutError> = Err(ExecutorTimeoutError);
     let val = match result {
         Ok(v) => v,
         Err(_) => -1,
@@ -778,14 +778,14 @@ fn test_timeout_result_err_match_value() {
 
 @test
 fn test_timeout_result_text_ok() {
-    let result: Result<Text, TimeoutError> = Ok("data");
+    let result: Result<Text, ExecutorTimeoutError> = Ok("data");
     assert(result.is_ok());
     assert_eq(result.unwrap(), "data");
 }
 
 @test
 fn test_timeout_result_bool_ok() {
-    let result: Result<Bool, TimeoutError> = Ok(true);
+    let result: Result<Bool, ExecutorTimeoutError> = Ok(true);
     assert(result.is_ok());
     assert_eq(result.unwrap(), true);
 }

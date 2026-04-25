@@ -19,7 +19,7 @@ mount core.*;
 mount base.{Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.segment.{
-    Segment, segment_merge, segment_empty,
+    Fts5VtabSegment, segment_merge, segment_empty,
 };
 mount core.database.sqlite.native.vtabs.fts5.index.{
     Index, Fts5VtabSegmentLevel, level_new,
@@ -73,7 +73,7 @@ fn ensure_level(idx: &mut Index, level: Int) {
     }
 }
 
-fn merge_level(idx: &Index, level: Int) -> Segment {
+fn merge_level(idx: &Index, level: Int) -> Fts5VtabSegment {
     if level >= idx.level_count() { return segment_empty(); }
     let segs = &idx.levels[level].segments;
     if segs.len() == 0 { return segment_empty(); }
@@ -86,7 +86,7 @@ fn merge_level(idx: &Index, level: Int) -> Segment {
     acc
 }
 
-fn clone_segment(s: &Segment) -> Segment {
+fn clone_segment(s: &Fts5VtabSegment) -> Fts5VtabSegment {
     // We use segment_merge with empty to deep-clone.
     segment_merge(s, &segment_empty())
 }

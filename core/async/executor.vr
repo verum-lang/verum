@@ -1144,15 +1144,15 @@ implement LocalExecutor {
 // =============================================================================
 
 /// Timeout error when a future doesn't complete in time.
-public type TimeoutError is ();
+public type ExecutorTimeoutError is ();
 
-implement Debug for TimeoutError {
+implement Debug for ExecutorTimeoutError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str("TimeoutError")
+        f.write_str("ExecutorTimeoutError")
     }
 }
 
-implement Display for TimeoutError {
+implement Display for ExecutorTimeoutError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("operation timed out")
     }
@@ -1186,9 +1186,9 @@ implement<F: Future> Timeout<F> {
 }
 
 implement<F: Future> Future for Timeout<F> {
-    type Output = Result<F.Output, TimeoutError>;
+    type Output = Result<F.Output, ExecutorTimeoutError>;
 
-    fn poll(&mut self, cx: &mut Context) -> Poll<Result<F.Output, TimeoutError>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<F.Output, ExecutorTimeoutError>> {
         // Initialize deadline on first poll
         if !self.started {
             let now = time_now_ns();
@@ -1199,7 +1199,7 @@ implement<F: Future> Future for Timeout<F> {
         // Check if deadline has passed
         let now = time_now_ns();
         if now >= self.deadline_ns {
-            return Poll.Ready(Err(TimeoutError));
+            return Poll.Ready(Err(ExecutorTimeoutError));
         }
 
         // Try to poll the inner future
@@ -1225,7 +1225,7 @@ implement<F: Future> Future for Timeout<F> {
 /// let res = timeout_ms_raw(fetch_data(), 5000).await;
 /// match result {
 ///     Ok(data) => print(f"Got: {data}"),
-///     Err(TimeoutError) => print("Request timed out"),
+///     Err(ExecutorTimeoutError) => print("Request timed out"),
 /// }
 /// ```
 public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> Timeout<F> {

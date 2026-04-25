@@ -4,7 +4,7 @@ module core.database.sqlite.native.column_count_api.count;
 
 mount base.{Bool, Text};
 
-public type StmtKind is
+public type ColumnStmtKind is
     | SkSelect          // user SELECT — column_count > 0 (or 0 for SELECT;)
     | SkPragma          // some PRAGMAs return rows; column_count > 0
     | SkExplain         // EXPLAIN/EQP — fixed shape
@@ -14,7 +14,7 @@ public type StmtKind is
     | SkTx              // BEGIN/COMMIT/ROLLBACK — count = 0
     ;
 
-public fn kind_label(k: &StmtKind) -> Text {
+public fn kind_label(k: &ColumnStmtKind) -> Text {
     match k {
         SkSelect         => "select".clone(),
         SkPragma         => "pragma".clone(),
@@ -29,7 +29,7 @@ public fn kind_label(k: &StmtKind) -> Text {
 public fn well_known_kind_count() -> Int { 7 }
 
 // Whether the statement can produce result rows.
-public fn produces_rows(k: &StmtKind) -> Bool {
+public fn produces_rows(k: &ColumnStmtKind) -> Bool {
     match k {
         SkSelect         => true,
         SkPragma         => true,
@@ -45,7 +45,7 @@ public fn explain_column_count() -> Int { 8 }
 public fn explain_query_plan_column_count() -> Int { 4 }
 
 // Predicted column count given the kind + a pre-computed user-column count.
-public fn predicted_count(k: &StmtKind, user_columns: Int) -> Int {
+public fn predicted_count(k: &ColumnStmtKind, user_columns: Int) -> Int {
     match k {
         SkExplain         => explain_column_count(),
         SkSelect          => user_columns,
