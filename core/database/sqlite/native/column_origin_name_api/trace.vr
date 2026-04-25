@@ -1,0 +1,104 @@
+// sqlite3_column_*_name — origin-trace accessors.
+
+module core.database.sqlite.native.column_origin_name_api.trace;
+
+mount base.{Bool, Text};
+
+public type Field is
+    | FDatabase       // sqlite3_column_database_name
+    | FTable          // sqlite3_column_table_name
+    | FOrigin         // sqlite3_column_origin_name
+    ;
+
+public fn field_name(f: &Field) -> Text {
+    match f {
+        FDatabase => "database".clone(),
+        FTable    => "table".clone(),
+        FOrigin   => "origin".clone(),
+    }
+}
+
+public fn well_known_field_count() -> Int { 3 }
+
+// Required compile flag.
+public fn requires_compile_flag() -> Text { "ENABLE_COLUMN_METADATA".clone() }
+
+// Source classification — what kind of column-expression backs the result.
+public type Source is
+    | SrcSimpleColumn      // SELECT t.x FROM t — all 3 names available
+    | SrcAlias             // SELECT t.x AS y FROM t — origin = "x", display = "y"
+    | SrcExpression        // SELECT t.x + 1 FROM t — all NULL
+    | SrcLiteral           // SELECT 42 — all NULL
+    | SrcAggregate         // SELECT count(*) FROM t — all NULL
+    ;
+
+public fn source_name(s: &Source) -> Text {
+    match s {
+        SrcSimpleColumn => "simple_column".clone(),
+        SrcAlias        => "alias".clone(),
+        SrcExpression   => "expression".clone(),
+        SrcLiteral      => "literal".clone(),
+        SrcAggregate    => "aggregate".clone(),
+    }
+}
+
+public fn yields_origin_metadata(s: &Source) -> Bool {
+    match s {
+        SrcSimpleColumn => true,
+        SrcAlias        => true,
+        _ => false,
+    }
+}
+
+// Per-column metadata triple.
+public type Metadata is {
+    database: Text,    // empty when unavailable
+    table: Text,
+    origin: Text,
+};
+
+public fn empty_metadata() -> Metadata {
+    Metadata {
+        database: "".clone(),
+        table: "".clone(),
+        origin: "".clone(),
+    }
+}
+
+public fn from_simple(db: Text, tab: Text, col: Text) -> Metadata {
+    Metadata { database: db, table: tab, origin: col }
+}
+
+// Result of accessing a particular field.
+public type FieldResult is
+    | OkText(Text)
+    | OkNullExpression       // column is an expression — field is NULL
+    | OkNullDisabled          // build lacks ENABLE_COLUMN_METADATA
+    ;
+
+public fn lookup(
+    src: &Source,
+    md: &Metadata,
+    field: &Field,
+    build_has_metadata: Bool,
+) -> FieldResult {
+    if !build_has_metadata { return OkNullDisabled; }
+    if !yields_origin_metadata(src) { return OkNullExpression; }
+    match field {
+        FDatabase => OkText(md.database.clone()),
+        FTable    => OkText(md.table.clone()),
+        FOrigin   => OkText(md.origin.clone()),
+    }
+}
+
+public fn result_name(r: &FieldResult) -> Text {
+    match r {
+        OkText(_)         => "ok_text".clone(),
+        OkNullExpression  => "ok_null_expression".clone(),
+        OkNullDisabled    => "ok_null_disabled".clone(),
+    }
+}
+
+public fn returned_text(r: &FieldResult) -> Bool {
+    match r { OkText(_) => true, _ => false }
+}

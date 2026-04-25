@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/mutex_class_api/mod.vr
+// =============================================================================
+// SQLITE_MUTEX_FAST / RECURSIVE / STATIC_* — categories of sqlite3_mutex.
+// FAST is non-recursive (one acquire allowed).  RECURSIVE allows the same
+// thread to lock multiple times.  STATIC_* are pre-allocated mutexes with
+// well-known names.  Spec App E.M.
+// =============================================================================
+
+module core.database.sqlite.native.mutex_class_api;
+
+public module classes;

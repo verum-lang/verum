@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, null_safe_compare_op_api, sql-operators
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.null_safe_compare_op_api.ops.{
+    Op, OpDistinctFrom, OpNotDistinctFrom, op_name,
+    Value, VNull, VInt, VText, null_safe_equal, evaluate,
+    equivalent_to_is, equivalent_to_is_not,
+    ResultClass, RcEqual, RcDifferent, classify_result, class_name,
+    is_sargable, well_known_arity,
+};
+mount base.{Bool, Int64};
+
+fn test_op_names_and_arity() {
+    assert(op_name(&OpDistinctFrom)    == "is_distinct_from".clone());
+    assert(op_name(&OpNotDistinctFrom) == "is_not_distinct_from".clone());
+    assert_eq(well_known_arity(), 2);
+}
+
+fn test_null_safe_equal_branches() {
+    assert(null_safe_equal(&VNull, &VNull));
+    assert(!null_safe_equal(&VNull, &VInt(0 as Int64)));
+    assert(!null_safe_equal(&VInt(0 as Int64), &VNull));
+    assert(null_safe_equal(&VInt(5 as Int64), &VInt(5 as Int64)));
+    assert(!null_safe_equal(&VInt(5 as Int64), &VInt(6 as Int64)));
+    assert(null_safe_equal(&VText("a".clone()), &VText("a".clone())));
+    assert(!null_safe_equal(&VText("a".clone()), &VText("b".clone())));
+    assert(!null_safe_equal(&VInt(1 as Int64), &VText("1".clone())));
+}
+
+fn test_evaluate_distinct_from() {
+    assert_eq(evaluate(&OpDistinctFrom, &VNull,             &VNull),                   0);
+    assert_eq(evaluate(&OpDistinctFrom, &VInt(1 as Int64), &VInt(1 as Int64)),         0);
+    assert_eq(evaluate(&OpDistinctFrom, &VInt(1 as Int64), &VInt(2 as Int64)),         1);
+    assert_eq(evaluate(&OpDistinctFrom, &VNull,             &VInt(1 as Int64)),         1);
+}
+
+fn test_evaluate_not_distinct_from() {
+    assert_eq(evaluate(&OpNotDistinctFrom, &VNull,             &VNull),                  1);
+    assert_eq(evaluate(&OpNotDistinctFrom, &VInt(1 as Int64), &VInt(1 as Int64)),         1);
+    assert_eq(evaluate(&OpNotDistinctFrom, &VInt(1 as Int64), &VInt(2 as Int64)),         0);
+    assert_eq(evaluate(&OpNotDistinctFrom, &VNull,             &VInt(1 as Int64)),         0);
+}
+
+fn test_equivalence_to_is_ops() {
+    assert(equivalent_to_is(&OpNotDistinctFrom));
+    assert(!equivalent_to_is(&OpDistinctFrom));
+    assert(equivalent_to_is_not(&OpDistinctFrom));
+    assert(!equivalent_to_is_not(&OpNotDistinctFrom));
+}
+
+fn test_classify_result() {
+    match classify_result(&VNull,             &VNull)                  { RcEqual     => {}, _ => assert(false) }
+    match classify_result(&VInt(7 as Int64), &VInt(7 as Int64))         { RcEqual     => {}, _ => assert(false) }
+    match classify_result(&VNull,             &VInt(7 as Int64))         { RcDifferent => {}, _ => assert(false) }
+    assert(class_name(&RcEqual)     == "equal".clone());
+    assert(class_name(&RcDifferent) == "different".clone());
+}
+
+fn test_sargability() {
+    assert(is_sargable(&OpDistinctFrom));
+    assert(is_sargable(&OpNotDistinctFrom));
+}
+
+fn main() {
+    test_op_names_and_arity();
+    test_null_safe_equal_branches();
+    test_evaluate_distinct_from();
+    test_evaluate_not_distinct_from();
+    test_equivalence_to_is_ops();
+    test_classify_result();
+    test_sargability();
+}

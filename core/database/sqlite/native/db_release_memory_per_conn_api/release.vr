@@ -1,0 +1,93 @@
+// sqlite3_db_release_memory — best-effort per-connection heap release.
+
+module core.database.sqlite.native.db_release_memory_per_conn_api.release;
+
+mount base.{Bool, Int64, Text};
+
+// Subsystems whose caches the call walks.
+public type Subsystem is
+    | SsPageCache         // dirty-page LRU
+    | SsSchemaCache       // sqlite_schema parse cache
+    | SsStmtCache         // prepared-stmt LRU
+    | SsLookaside         // per-conn lookaside slabs
+    ;
+
+public fn subsystem_name(s: &Subsystem) -> Text {
+    match s {
+        SsPageCache   => "page_cache".clone(),
+        SsSchemaCache => "schema_cache".clone(),
+        SsStmtCache   => "stmt_cache".clone(),
+        SsLookaside   => "lookaside".clone(),
+    }
+}
+
+public fn well_known_subsystem_count() -> Int { 4 }
+
+// Per-subsystem result.
+public type ReleaseStat is { subsystem: Subsystem, bytes_freed: Int64 };
+
+public fn empty_stat(s: Subsystem) -> ReleaseStat {
+    ReleaseStat { subsystem: s, bytes_freed: 0 as Int64 }
+}
+
+// The aggregate result of one db_release_memory() call.
+public type Report is {
+    page_cache: Int64,
+    schema_cache: Int64,
+    stmt_cache: Int64,
+    lookaside: Int64,
+};
+
+public fn empty_report() -> Report {
+    Report {
+        page_cache:   0 as Int64,
+        schema_cache: 0 as Int64,
+        stmt_cache:   0 as Int64,
+        lookaside:    0 as Int64,
+    }
+}
+
+public fn record(mut r: Report, sub: &Subsystem, bytes: Int64) -> Report {
+    let zero = 0 as Int64;
+    let n = if bytes < zero { zero } else { bytes };
+    match sub {
+        SsPageCache   => { r.page_cache   = r.page_cache   + n; },
+        SsSchemaCache => { r.schema_cache = r.schema_cache + n; },
+        SsStmtCache   => { r.stmt_cache   = r.stmt_cache   + n; },
+        SsLookaside   => { r.lookaside    = r.lookaside    + n; },
+    }
+    r
+}
+
+public fn total_bytes_released(r: &Report) -> Int64 {
+    r.page_cache + r.schema_cache + r.stmt_cache + r.lookaside
+}
+
+// SQLITE_OK is always the API return code; the bytes-freed figure is
+// exposed only via db_status.
+public fn always_returns_ok() -> Int { 0 }
+
+// Effectiveness classification — used by docs / introspection tools.
+public type Effectiveness is
+    | EfNoOp           // 0 bytes freed
+    | EfMinor          // < 4 KiB
+    | EfNotable        // 4 KiB ≤ x < 1 MiB
+    | EfSubstantial    // ≥ 1 MiB
+    ;
+
+public fn classify(r: &Report) -> Effectiveness {
+    let total = total_bytes_released(r);
+    if total == (0 as Int64) { return EfNoOp; }
+    if total < (4096 as Int64) { return EfMinor; }
+    if total < (1_048_576 as Int64) { return EfNotable; }
+    EfSubstantial
+}
+
+public fn effectiveness_name(e: &Effectiveness) -> Text {
+    match e {
+        EfNoOp        => "no_op".clone(),
+        EfMinor       => "minor".clone(),
+        EfNotable     => "notable".clone(),
+        EfSubstantial => "substantial".clone(),
+    }
+}

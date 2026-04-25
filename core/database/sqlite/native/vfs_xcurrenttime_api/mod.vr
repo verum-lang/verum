@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/vfs_xcurrenttime_api/mod.vr
+// =============================================================================
+// VFS clock methods — xCurrentTime (Julian-day Float, deprecated) and
+// xCurrentTimeInt64 (milliseconds since 1970, recommended since 3.7.x).
+// Used by date functions when "now" is requested.  Spec §6.1.
+// =============================================================================
+
+module core.database.sqlite.native.vfs_xcurrenttime_api;
+
+public module clock;

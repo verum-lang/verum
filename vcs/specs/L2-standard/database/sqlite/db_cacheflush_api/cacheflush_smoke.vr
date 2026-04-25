@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, db_cacheflush_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.db_cacheflush_api.flush.{
+    Outcome, OkFlushed, ErrBusyStmt, ErrIo, ErrCorrupt,
+    outcome_name, is_ok, pages_flushed, result_code,
+    PreCheck, PcReady, PcBusyStmt,
+    pre_check, check_name, is_ready, touches_wal,
+};
+mount base.{Bool, Int64};
+
+fn test_outcome_names() {
+    assert(outcome_name(&OkFlushed(50 as Int64)) == "ok_flushed".clone());
+    assert(outcome_name(&ErrBusyStmt)             == "err_busy_stmt".clone());
+    assert(outcome_name(&ErrIo)                   == "err_io".clone());
+    assert(outcome_name(&ErrCorrupt)              == "err_corrupt".clone());
+}
+
+fn test_is_ok() {
+    assert(is_ok(&OkFlushed(0 as Int64)));
+    assert(!is_ok(&ErrBusyStmt));
+}
+
+fn test_pages_flushed() {
+    assert_eq(pages_flushed(&OkFlushed(7 as Int64)), 7 as Int64);
+    assert_eq(pages_flushed(&ErrBusyStmt),           0 as Int64);
+    assert_eq(pages_flushed(&ErrIo),                 0 as Int64);
+}
+
+fn test_result_codes() {
+    assert_eq(result_code(&OkFlushed(0 as Int64)),  0);
+    assert_eq(result_code(&ErrBusyStmt),            5);
+    assert_eq(result_code(&ErrIo),                 10);
+    assert_eq(result_code(&ErrCorrupt),            11);
+}
+
+fn test_pre_check() {
+    match pre_check(0)  { PcReady    => {}, _ => assert(false) }
+    match pre_check(1)  { PcBusyStmt => {}, _ => assert(false) }
+    match pre_check(99) { PcBusyStmt => {}, _ => assert(false) }
+}
+
+fn test_check_names_and_is_ready() {
+    assert(check_name(&PcReady)    == "ready".clone());
+    assert(check_name(&PcBusyStmt) == "busy_stmt".clone());
+    assert(is_ready(&PcReady));
+    assert(!is_ready(&PcBusyStmt));
+}
+
+fn test_touches_wal_always_false() {
+    assert(!touches_wal(&OkFlushed(100 as Int64)));
+    assert(!touches_wal(&ErrIo));
+}
+
+fn main() {
+    test_outcome_names();
+    test_is_ok();
+    test_pages_flushed();
+    test_result_codes();
+    test_pre_check();
+    test_check_names_and_is_ready();
+    test_touches_wal_always_false();
+}

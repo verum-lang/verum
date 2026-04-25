@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/db_cacheflush_api/mod.vr
+// =============================================================================
+// sqlite3_db_cacheflush(db) — flush cached pages of all attached schemas to
+// the file system without committing.  Returns SQLITE_OK on success,
+// SQLITE_BUSY if a stmt is mid-execution, or SQLITE_IOERR on disk failure.
+// Spec App E.D.
+// =============================================================================
+
+module core.database.sqlite.native.db_cacheflush_api;
+
+public module flush;

@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/vfs_xrandomness_api/mod.vr
+// =============================================================================
+// sqlite3_vfs.xRandomness(vfs, nByte, zOut) — VFS method that fills nByte
+// random bytes into the buffer.  Used to seed the PRNG for VACUUM-INTO names,
+// rollback-journal cookies, and SQLite's own randomness.  Spec §6.1.
+// =============================================================================
+
+module core.database.sqlite.native.vfs_xrandomness_api;
+
+public module method;

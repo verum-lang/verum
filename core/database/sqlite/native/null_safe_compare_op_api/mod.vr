@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/null_safe_compare_op_api/mod.vr
+// =============================================================================
+// IS DISTINCT FROM / IS NOT DISTINCT FROM — null-safe relational operators
+// added 3.39.  Equivalent to `IS NOT` and `IS` respectively but written in
+// SQL-standard syntax.  Result is always 0/1, never NULL.  Spec §15.5.
+// =============================================================================
+
+module core.database.sqlite.native.null_safe_compare_op_api;
+
+public module ops;

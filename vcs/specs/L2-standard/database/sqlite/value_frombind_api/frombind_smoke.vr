@@ -1,0 +1,66 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, value_frombind_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.value_frombind_api.probe.{
+    Origin, OrBindParam, OrLiteral, OrInternal,
+    origin_name, frombind_int, is_bind_param,
+    AuditTag, AtUserSupplied, AtCompiledIn, AtEngineDerived,
+    tag_for, tag_name, is_taintable_input, requires_sanitisation,
+};
+mount base.{Bool};
+
+fn test_origin_names() {
+    assert(origin_name(&OrBindParam) == "bind_param".clone());
+    assert(origin_name(&OrLiteral)   == "literal".clone());
+    assert(origin_name(&OrInternal)  == "internal".clone());
+}
+
+fn test_frombind_int_only_for_bind() {
+    assert_eq(frombind_int(&OrBindParam), 1);
+    assert_eq(frombind_int(&OrLiteral),   0);
+    assert_eq(frombind_int(&OrInternal),  0);
+}
+
+fn test_is_bind_param_predicate() {
+    assert(is_bind_param(&OrBindParam));
+    assert(!is_bind_param(&OrLiteral));
+    assert(!is_bind_param(&OrInternal));
+}
+
+fn test_tag_for_dispatch() {
+    match tag_for(&OrBindParam) { AtUserSupplied  => {}, _ => assert(false) }
+    match tag_for(&OrLiteral)   { AtCompiledIn    => {}, _ => assert(false) }
+    match tag_for(&OrInternal)  { AtEngineDerived => {}, _ => assert(false) }
+}
+
+fn test_tag_names() {
+    assert(tag_name(&AtUserSupplied)  == "user_supplied".clone());
+    assert(tag_name(&AtCompiledIn)    == "compiled_in".clone());
+    assert(tag_name(&AtEngineDerived) == "engine_derived".clone());
+}
+
+fn test_is_taintable_input() {
+    assert(is_taintable_input(&AtUserSupplied));
+    assert(!is_taintable_input(&AtCompiledIn));
+    assert(!is_taintable_input(&AtEngineDerived));
+}
+
+fn test_requires_sanitisation_only_for_bind() {
+    assert(requires_sanitisation(&OrBindParam));
+    assert(!requires_sanitisation(&OrLiteral));
+    assert(!requires_sanitisation(&OrInternal));
+}
+
+fn main() {
+    test_origin_names();
+    test_frombind_int_only_for_bind();
+    test_is_bind_param_predicate();
+    test_tag_for_dispatch();
+    test_tag_names();
+    test_is_taintable_input();
+    test_requires_sanitisation_only_for_bind();
+}

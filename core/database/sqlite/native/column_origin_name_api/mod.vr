@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/column_origin_name_api/mod.vr
+// =============================================================================
+// sqlite3_column_database_name(stmt, i) / _table_name / _origin_name —
+// trace each result column back to its source schema/table/column.  Returns
+// NULL when the column is an expression (no single source).  Build-time
+// gated by SQLITE_ENABLE_COLUMN_METADATA.  Spec App E.C.
+// =============================================================================
+
+module core.database.sqlite.native.column_origin_name_api;
+
+public module trace;

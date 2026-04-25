@@ -908,3 +908,19 @@ public module sqlite3_str_builder_api;
 public module open_v2_flags_api;
 // - set_authorizer_codes: 33-action codes + Verdict (Allow/Deny/Ignore) + 7-cat
 public module set_authorizer_codes;
+// - db_cacheflush_api: sqlite3_db_cacheflush + 4-outcome + active-stmt pre-check
+public module db_cacheflush_api;
+// - db_release_memory_per_conn_api: 4-subsystem report + Effectiveness classifier
+public module db_release_memory_per_conn_api;
+// - vfs_xrandomness_api: 6-source entropy + Quality classifier + 3-outcome
+public module vfs_xrandomness_api;
+// - vfs_xcurrenttime_api: xCurrentTime/xCurrentTimeInt64 + Resolution sec/ms/μs
+public module vfs_xcurrenttime_api;
+// - column_origin_name_api: database/table/origin name + Source classifier + 3-result
+public module column_origin_name_api;
+// - value_frombind_api: 3.28+ bind-vs-literal probe + AuditTag taxonomy
+public module value_frombind_api;
+// - null_safe_compare_op_api: 3.39+ IS DISTINCT FROM / IS NOT DISTINCT FROM
+public module null_safe_compare_op_api;
+// - mutex_class_api: 14 SQLITE_MUTEX_* classes + KAlloc/KStatic kind dispatch
+public module mutex_class_api;

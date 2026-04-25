@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, mutex_class_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.mutex_class_api.classes.{
+    fast_code, recursive_code,
+    static_master_code, static_mem_code, static_open_code, static_prng_code,
+    static_lru_code, static_pmem_code,
+    static_app1_code, static_app2_code, static_app3_code,
+    static_vfs1_code, static_vfs2_code, static_vfs3_code,
+    well_known_class_count,
+    Class, MFast, MRecursive,
+    MStaticMaster, MStaticMem, MStaticOpen, MStaticPrng, MStaticLru, MStaticPmem,
+    MStaticApp1, MStaticApp2, MStaticApp3,
+    MStaticVfs1, MStaticVfs2, MStaticVfs3, MUnknown,
+    from_code, to_code, class_name,
+    Kind, KAlloc, KStatic, KUnknown,
+    kind_for, kind_name,
+    is_recursive, free_is_noop,
+};
+mount base.{Bool};
+
+fn test_code_constants() {
+    assert_eq(fast_code(),         0);
+    assert_eq(recursive_code(),    1);
+    assert_eq(static_master_code(), 2);
+    assert_eq(static_mem_code(),   3);
+    assert_eq(static_open_code(),  4);
+    assert_eq(static_prng_code(),  5);
+    assert_eq(static_lru_code(),   6);
+    assert_eq(static_pmem_code(),  7);
+    assert_eq(static_app1_code(),  8);
+    assert_eq(static_app2_code(),  9);
+    assert_eq(static_app3_code(),  10);
+    assert_eq(static_vfs1_code(),  11);
+    assert_eq(static_vfs2_code(),  12);
+    assert_eq(static_vfs3_code(),  13);
+    assert_eq(well_known_class_count(), 14);
+}
+
+fn test_from_code_branches() {
+    match from_code(0)  { MFast          => {}, _ => assert(false) }
+    match from_code(1)  { MRecursive     => {}, _ => assert(false) }
+    match from_code(2)  { MStaticMaster  => {}, _ => assert(false) }
+    match from_code(13) { MStaticVfs3    => {}, _ => assert(false) }
+    match from_code(99) { MUnknown       => {}, _ => assert(false) }
+    match from_code(-5) { MUnknown       => {}, _ => assert(false) }
+}
+
+fn test_to_code_round_trip() {
+    assert_eq(to_code(&MFast),         0);
+    assert_eq(to_code(&MRecursive),    1);
+    assert_eq(to_code(&MStaticMaster), 2);
+    assert_eq(to_code(&MStaticVfs3),   13);
+    assert_eq(to_code(&MUnknown),      -1);
+}
+
+fn test_class_names() {
+    assert(class_name(&MFast)          == "fast".clone());
+    assert(class_name(&MRecursive)     == "recursive".clone());
+    assert(class_name(&MStaticMaster)  == "static_master".clone());
+    assert(class_name(&MStaticPrng)    == "static_prng".clone());
+    assert(class_name(&MUnknown)       == "unknown".clone());
+}
+
+fn test_kind_dispatch() {
+    match kind_for(&MFast)         { KAlloc   => {}, _ => assert(false) }
+    match kind_for(&MRecursive)    { KAlloc   => {}, _ => assert(false) }
+    match kind_for(&MStaticMaster) { KStatic  => {}, _ => assert(false) }
+    match kind_for(&MStaticVfs3)   { KStatic  => {}, _ => assert(false) }
+    match kind_for(&MUnknown)      { KUnknown => {}, _ => assert(false) }
+}
+
+fn test_kind_names() {
+    assert(kind_name(&KAlloc)   == "alloc".clone());
+    assert(kind_name(&KStatic)  == "static".clone());
+    assert(kind_name(&KUnknown) == "unknown".clone());
+}
+
+fn test_is_recursive() {
+    assert(is_recursive(&MRecursive));
+    assert(!is_recursive(&MFast));
+    assert(!is_recursive(&MStaticMaster));
+}
+
+fn test_free_is_noop() {
+    assert(!free_is_noop(&MFast));
+    assert(!free_is_noop(&MRecursive));
+    assert(free_is_noop(&MStaticMaster));
+    assert(free_is_noop(&MStaticVfs3));
+}
+
+fn main() {
+    test_code_constants();
+    test_from_code_branches();
+    test_to_code_round_trip();
+    test_class_names();
+    test_kind_dispatch();
+    test_kind_names();
+    test_is_recursive();
+    test_free_is_noop();
+}

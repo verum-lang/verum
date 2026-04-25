@@ -1,0 +1,137 @@
+// SQLITE_MUTEX_* class taxonomy.
+
+module core.database.sqlite.native.mutex_class_api.classes;
+
+mount base.{Bool, Text};
+
+// Allocation-style mutex types.
+public fn fast_code() -> Int { 0 }
+public fn recursive_code() -> Int { 1 }
+
+// Pre-allocated static mutex codes (selected — full set has gaps).
+public fn static_master_code() -> Int { 2 }
+public fn static_mem_code()    -> Int { 3 }
+public fn static_open_code()   -> Int { 4 }
+public fn static_prng_code()   -> Int { 5 }
+public fn static_lru_code()    -> Int { 6 }
+public fn static_pmem_code()   -> Int { 7 }
+public fn static_app1_code()   -> Int { 8 }
+public fn static_app2_code()   -> Int { 9 }
+public fn static_app3_code()   -> Int { 10 }
+public fn static_vfs1_code()   -> Int { 11 }
+public fn static_vfs2_code()   -> Int { 12 }
+public fn static_vfs3_code()   -> Int { 13 }
+
+public fn well_known_class_count() -> Int { 14 }
+
+public type Class is
+    | MFast
+    | MRecursive
+    | MStaticMaster
+    | MStaticMem
+    | MStaticOpen
+    | MStaticPrng
+    | MStaticLru
+    | MStaticPmem
+    | MStaticApp1
+    | MStaticApp2
+    | MStaticApp3
+    | MStaticVfs1
+    | MStaticVfs2
+    | MStaticVfs3
+    | MUnknown
+    ;
+
+public fn from_code(c: Int) -> Class {
+    if c == 0  { return MFast; }
+    if c == 1  { return MRecursive; }
+    if c == 2  { return MStaticMaster; }
+    if c == 3  { return MStaticMem; }
+    if c == 4  { return MStaticOpen; }
+    if c == 5  { return MStaticPrng; }
+    if c == 6  { return MStaticLru; }
+    if c == 7  { return MStaticPmem; }
+    if c == 8  { return MStaticApp1; }
+    if c == 9  { return MStaticApp2; }
+    if c == 10 { return MStaticApp3; }
+    if c == 11 { return MStaticVfs1; }
+    if c == 12 { return MStaticVfs2; }
+    if c == 13 { return MStaticVfs3; }
+    MUnknown
+}
+
+public fn to_code(c: &Class) -> Int {
+    match c {
+        MFast          => 0,
+        MRecursive     => 1,
+        MStaticMaster  => 2,
+        MStaticMem     => 3,
+        MStaticOpen    => 4,
+        MStaticPrng    => 5,
+        MStaticLru     => 6,
+        MStaticPmem    => 7,
+        MStaticApp1    => 8,
+        MStaticApp2    => 9,
+        MStaticApp3    => 10,
+        MStaticVfs1    => 11,
+        MStaticVfs2    => 12,
+        MStaticVfs3    => 13,
+        MUnknown       => -1,
+    }
+}
+
+public fn class_name(c: &Class) -> Text {
+    match c {
+        MFast          => "fast".clone(),
+        MRecursive     => "recursive".clone(),
+        MStaticMaster  => "static_master".clone(),
+        MStaticMem     => "static_mem".clone(),
+        MStaticOpen    => "static_open".clone(),
+        MStaticPrng    => "static_prng".clone(),
+        MStaticLru     => "static_lru".clone(),
+        MStaticPmem    => "static_pmem".clone(),
+        MStaticApp1    => "static_app1".clone(),
+        MStaticApp2    => "static_app2".clone(),
+        MStaticApp3    => "static_app3".clone(),
+        MStaticVfs1    => "static_vfs1".clone(),
+        MStaticVfs2    => "static_vfs2".clone(),
+        MStaticVfs3    => "static_vfs3".clone(),
+        MUnknown       => "unknown".clone(),
+    }
+}
+
+// Three high-level kinds.
+public type Kind is
+    | KAlloc          // FAST or RECURSIVE — sqlite3_mutex_alloc may free
+    | KStatic         // pre-allocated; sqlite3_mutex_free is a no-op
+    | KUnknown
+    ;
+
+public fn kind_for(c: &Class) -> Kind {
+    match c {
+        MFast       => KAlloc,
+        MRecursive  => KAlloc,
+        MUnknown    => KUnknown,
+        _ => KStatic,
+    }
+}
+
+public fn kind_name(k: &Kind) -> Text {
+    match k {
+        KAlloc   => "alloc".clone(),
+        KStatic  => "static".clone(),
+        KUnknown => "unknown".clone(),
+    }
+}
+
+public fn is_recursive(c: &Class) -> Bool {
+    match c { MRecursive => true, _ => false }
+}
+
+// Whether sqlite3_mutex_free actually frees memory.
+public fn free_is_noop(c: &Class) -> Bool {
+    match kind_for(c) {
+        KStatic => true,
+        _ => false,
+    }
+}

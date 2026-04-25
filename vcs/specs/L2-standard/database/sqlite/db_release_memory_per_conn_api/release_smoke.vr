@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, db_release_memory_per_conn_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.db_release_memory_per_conn_api.release.{
+    Subsystem, SsPageCache, SsSchemaCache, SsStmtCache, SsLookaside,
+    subsystem_name, well_known_subsystem_count,
+    ReleaseStat, empty_stat,
+    Report, empty_report, record, total_bytes_released,
+    always_returns_ok,
+    Effectiveness, EfNoOp, EfMinor, EfNotable, EfSubstantial,
+    classify, effectiveness_name,
+};
+mount base.{Bool, Int64};
+
+fn test_subsystem_names() {
+    assert(subsystem_name(&SsPageCache)   == "page_cache".clone());
+    assert(subsystem_name(&SsSchemaCache) == "schema_cache".clone());
+    assert(subsystem_name(&SsStmtCache)   == "stmt_cache".clone());
+    assert(subsystem_name(&SsLookaside)   == "lookaside".clone());
+    assert_eq(well_known_subsystem_count(), 4);
+}
+
+fn test_empty_stat() {
+    let s = empty_stat(SsPageCache);
+    assert_eq(s.bytes_freed, 0 as Int64);
+}
+
+fn test_record_accumulates() {
+    let mut r = empty_report();
+    r = record(r, &SsPageCache,   100 as Int64);
+    r = record(r, &SsSchemaCache, 200 as Int64);
+    r = record(r, &SsStmtCache,   300 as Int64);
+    r = record(r, &SsLookaside,   400 as Int64);
+    assert_eq(r.page_cache,   100 as Int64);
+    assert_eq(r.schema_cache, 200 as Int64);
+    assert_eq(r.stmt_cache,   300 as Int64);
+    assert_eq(r.lookaside,    400 as Int64);
+    assert_eq(total_bytes_released(&r), 1000 as Int64);
+}
+
+fn test_record_clamps_negative() {
+    let mut r = empty_report();
+    r = record(r, &SsPageCache, -100 as Int64);
+    assert_eq(r.page_cache, 0 as Int64);
+}
+
+fn test_always_returns_ok() {
+    assert_eq(always_returns_ok(), 0);
+}
+
+fn test_classify_effectiveness() {
+    let r0 = empty_report();
+    match classify(&r0) { EfNoOp => {}, _ => assert(false) }
+
+    let mut rm = empty_report();
+    rm = record(rm, &SsPageCache, 1000 as Int64);
+    match classify(&rm) { EfMinor => {}, _ => assert(false) }
+
+    let mut rn = empty_report();
+    rn = record(rn, &SsPageCache, 100_000 as Int64);
+    match classify(&rn) { EfNotable => {}, _ => assert(false) }
+
+    let mut rs = empty_report();
+    rs = record(rs, &SsPageCache, 2_097_152 as Int64);
+    match classify(&rs) { EfSubstantial => {}, _ => assert(false) }
+}
+
+fn test_effectiveness_names() {
+    assert(effectiveness_name(&EfNoOp)        == "no_op".clone());
+    assert(effectiveness_name(&EfMinor)       == "minor".clone());
+    assert(effectiveness_name(&EfNotable)     == "notable".clone());
+    assert(effectiveness_name(&EfSubstantial) == "substantial".clone());
+}
+
+fn main() {
+    test_subsystem_names();
+    test_empty_stat();
+    test_record_accumulates();
+    test_record_clamps_negative();
+    test_always_returns_ok();
+    test_classify_effectiveness();
+    test_effectiveness_names();
+}

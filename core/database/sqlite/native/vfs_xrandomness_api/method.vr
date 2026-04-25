@@ -1,0 +1,92 @@
+// VFS xRandomness — entropy source for the engine's PRNG seed.
+
+module core.database.sqlite.native.vfs_xrandomness_api.method;
+
+mount base.{Bool, Int64, Text};
+
+// Source classes a VFS may implement.
+public type Source is
+    | SrcDevUrandom        // /dev/urandom (POSIX)
+    | SrcGetrandom         // getrandom() syscall (Linux 3.17+)
+    | SrcArc4Random        // arc4random_buf (BSD/macOS)
+    | SrcCryptGenRandom    // CryptGenRandom (Windows)
+    | SrcRdrand            // RDRAND CPU instr
+    | SrcMockSeed          // test VFS — deterministic counter
+    ;
+
+public fn source_name(s: &Source) -> Text {
+    match s {
+        SrcDevUrandom    => "/dev/urandom".clone(),
+        SrcGetrandom     => "getrandom".clone(),
+        SrcArc4Random    => "arc4random".clone(),
+        SrcCryptGenRandom => "CryptGenRandom".clone(),
+        SrcRdrand        => "rdrand".clone(),
+        SrcMockSeed      => "mock".clone(),
+    }
+}
+
+public fn well_known_source_count() -> Int { 6 }
+
+// Quality classification for entropy.
+public type Quality is
+    | QHigh            // CSPRNG: getrandom, arc4random, CryptGenRandom
+    | QMedium          // file-based: /dev/urandom
+    | QLow             // RDRAND alone (CPU bug history)
+    | QMockOnly        // test only, NOT for prod
+    ;
+
+public fn quality_for(s: &Source) -> Quality {
+    match s {
+        SrcDevUrandom     => QMedium,
+        SrcGetrandom      => QHigh,
+        SrcArc4Random     => QHigh,
+        SrcCryptGenRandom => QHigh,
+        SrcRdrand         => QLow,
+        SrcMockSeed       => QMockOnly,
+    }
+}
+
+public fn quality_name(q: &Quality) -> Text {
+    match q {
+        QHigh     => "high".clone(),
+        QMedium   => "medium".clone(),
+        QLow      => "low".clone(),
+        QMockOnly => "mock_only".clone(),
+    }
+}
+
+public fn is_production_acceptable(q: &Quality) -> Bool {
+    match q { QHigh => true, QMedium => true, _ => false }
+}
+
+// Outcome of one xRandomness call.
+public type Outcome is
+    | OkBytes(Int)         // exactly N bytes filled
+    | ErrShortRead(Int)    // got fewer than requested
+    | ErrUnavailable        // entropy source unavailable
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkBytes(_)       => "ok".clone(),
+        ErrShortRead(_)  => "short_read".clone(),
+        ErrUnavailable   => "unavailable".clone(),
+    }
+}
+
+public fn is_ok(o: &Outcome) -> Bool {
+    match o { OkBytes(_) => true, _ => false }
+}
+
+public fn bytes_actually_filled(o: &Outcome) -> Int {
+    match o {
+        OkBytes(n)      => n.clone(),
+        ErrShortRead(n) => n.clone(),
+        ErrUnavailable  => 0,
+    }
+}
+
+// Validate request size (engine refuses absurd sizes).
+public fn is_valid_request_size(n: Int) -> Bool {
+    n >= 1 && n <= 256
+}

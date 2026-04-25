@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/db_release_memory_per_conn_api/mod.vr
+// =============================================================================
+// sqlite3_db_release_memory(db) — try to release as much heap as possible from
+// this connection's caches (page cache, schema cache, prepared-stmt cache).
+// Distinct from the global sqlite3_release_memory(N) — this is per-connection.
+// Returns SQLITE_OK; the bytes-released figure is observable via db_status.
+// Spec App E.D.
+// =============================================================================
+
+module core.database.sqlite.native.db_release_memory_per_conn_api;
+
+public module release;

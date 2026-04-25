@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/value_frombind_api/mod.vr
+// =============================================================================
+// sqlite3_value_frombind(value) — added 3.28.  Returns 1 if `value` was
+// supplied via sqlite3_bind_*(); 0 if it came from a literal in the SQL or
+// from an internal computation.  Used by audit-style functions to
+// distinguish caller input from constant-folded values.  Spec App E.V.
+// =============================================================================
+
+module core.database.sqlite.native.value_frombind_api;
+
+public module probe;

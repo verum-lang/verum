@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, column_origin_name_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.column_origin_name_api.trace.{
+    Field, FDatabase, FTable, FOrigin,
+    field_name, well_known_field_count, requires_compile_flag,
+    Source, SrcSimpleColumn, SrcAlias, SrcExpression, SrcLiteral, SrcAggregate,
+    source_name, yields_origin_metadata,
+    Metadata, empty_metadata, from_simple,
+    FieldResult, OkText, OkNullExpression, OkNullDisabled,
+    lookup, result_name, returned_text,
+};
+mount base.{Bool};
+
+fn test_field_constants() {
+    assert(field_name(&FDatabase) == "database".clone());
+    assert(field_name(&FTable)    == "table".clone());
+    assert(field_name(&FOrigin)   == "origin".clone());
+    assert_eq(well_known_field_count(), 3);
+    assert(requires_compile_flag() == "ENABLE_COLUMN_METADATA".clone());
+}
+
+fn test_source_names() {
+    assert(source_name(&SrcSimpleColumn) == "simple_column".clone());
+    assert(source_name(&SrcAlias)        == "alias".clone());
+    assert(source_name(&SrcExpression)   == "expression".clone());
+    assert(source_name(&SrcLiteral)      == "literal".clone());
+    assert(source_name(&SrcAggregate)    == "aggregate".clone());
+}
+
+fn test_yields_origin_metadata() {
+    assert(yields_origin_metadata(&SrcSimpleColumn));
+    assert(yields_origin_metadata(&SrcAlias));
+    assert(!yields_origin_metadata(&SrcExpression));
+    assert(!yields_origin_metadata(&SrcLiteral));
+    assert(!yields_origin_metadata(&SrcAggregate));
+}
+
+fn test_metadata_constructors() {
+    let e = empty_metadata();
+    assert(e.database == "".clone());
+    let m = from_simple("main".clone(), "users".clone(), "id".clone());
+    assert(m.database == "main".clone());
+    assert(m.table    == "users".clone());
+    assert(m.origin   == "id".clone());
+}
+
+fn test_lookup_disabled_build() {
+    let m = from_simple("main".clone(), "t".clone(), "x".clone());
+    match lookup(&SrcSimpleColumn, &m, &FDatabase, false) { OkNullDisabled => {}, _ => assert(false) }
+}
+
+fn test_lookup_expression_yields_null() {
+    let m = empty_metadata();
+    match lookup(&SrcExpression, &m, &FOrigin, true) { OkNullExpression => {}, _ => assert(false) }
+    match lookup(&SrcAggregate,  &m, &FTable,  true) { OkNullExpression => {}, _ => assert(false) }
+    match lookup(&SrcLiteral,    &m, &FDatabase, true) { OkNullExpression => {}, _ => assert(false) }
+}
+
+fn test_lookup_simple_column_returns_text() {
+    let m = from_simple("main".clone(), "users".clone(), "id".clone());
+    match lookup(&SrcSimpleColumn, &m, &FDatabase, true) {
+        OkText(t) => assert(t == "main".clone()),
+        _ => assert(false),
+    }
+    match lookup(&SrcSimpleColumn, &m, &FTable, true) {
+        OkText(t) => assert(t == "users".clone()),
+        _ => assert(false),
+    }
+    match lookup(&SrcSimpleColumn, &m, &FOrigin, true) {
+        OkText(t) => assert(t == "id".clone()),
+        _ => assert(false),
+    }
+}
+
+fn test_result_names_and_predicate() {
+    assert(result_name(&OkText("x".clone()))   == "ok_text".clone());
+    assert(result_name(&OkNullExpression)      == "ok_null_expression".clone());
+    assert(result_name(&OkNullDisabled)        == "ok_null_disabled".clone());
+    assert(returned_text(&OkText("a".clone())));
+    assert(!returned_text(&OkNullExpression));
+    assert(!returned_text(&OkNullDisabled));
+}
+
+fn main() {
+    test_field_constants();
+    test_source_names();
+    test_yields_origin_metadata();
+    test_metadata_constructors();
+    test_lookup_disabled_build();
+    test_lookup_expression_yields_null();
+    test_lookup_simple_column_returns_text();
+    test_result_names_and_predicate();
+}

@@ -1,0 +1,82 @@
+// IS DISTINCT FROM / IS NOT DISTINCT FROM — null-safe comparison.
+
+module core.database.sqlite.native.null_safe_compare_op_api.ops;
+
+mount base.{Bool, Int64, Text};
+
+public type Op is
+    | OpDistinctFrom        // X IS DISTINCT FROM Y
+    | OpNotDistinctFrom     // X IS NOT DISTINCT FROM Y
+    ;
+
+public fn op_name(o: &Op) -> Text {
+    match o {
+        OpDistinctFrom    => "is_distinct_from".clone(),
+        OpNotDistinctFrom => "is_not_distinct_from".clone(),
+    }
+}
+
+public type Value is
+    | VNull
+    | VInt(Int64)
+    | VText(Text)
+    ;
+
+// Equality with NULL=NULL semantics.
+public fn null_safe_equal(x: &Value, y: &Value) -> Bool {
+    match x {
+        VNull => match y {
+            VNull   => true,
+            _ => false,
+        },
+        VInt(a) => match y {
+            VInt(b) => a.clone() == b.clone(),
+            _ => false,
+        },
+        VText(a) => match y {
+            VText(b) => a.clone() == b.clone(),
+            _ => false,
+        },
+    }
+}
+
+public fn evaluate(op: &Op, x: &Value, y: &Value) -> Int {
+    let eq = null_safe_equal(x, y);
+    match op {
+        OpDistinctFrom    => if eq { 0 } else { 1 },
+        OpNotDistinctFrom => if eq { 1 } else { 0 },
+    }
+}
+
+// Equivalence with the IS / IS NOT operators (added pre-3.39).
+public fn equivalent_to_is(op: &Op) -> Bool {
+    match op { OpNotDistinctFrom => true, _ => false }
+}
+
+public fn equivalent_to_is_not(op: &Op) -> Bool {
+    match op { OpDistinctFrom => true, _ => false }
+}
+
+// Result classifications.
+public type ResultClass is
+    | RcEqual              // both same kind + same payload (or both NULL)
+    | RcDifferent
+    ;
+
+public fn classify_result(x: &Value, y: &Value) -> ResultClass {
+    if null_safe_equal(x, y) { RcEqual } else { RcDifferent }
+}
+
+public fn class_name(c: &ResultClass) -> Text {
+    match c {
+        RcEqual     => "equal".clone(),
+        RcDifferent => "different".clone(),
+    }
+}
+
+// Sargability — these operators ARE index-friendly when one operand is a
+// literal column reference (unlike `=` which propagates NULL).
+public fn is_sargable(_op: &Op) -> Bool { true }
+
+// Standardised arity.
+public fn well_known_arity() -> Int { 2 }

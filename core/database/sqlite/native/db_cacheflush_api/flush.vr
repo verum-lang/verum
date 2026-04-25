@@ -1,0 +1,66 @@
+// sqlite3_db_cacheflush — fsync all dirty pages without committing.
+
+module core.database.sqlite.native.db_cacheflush_api.flush;
+
+mount base.{Bool, Int64, Text};
+
+public type Outcome is
+    | OkFlushed(Int64)         // pages written to disk
+    | ErrBusyStmt              // SQLITE_BUSY — a stmt is mid-execution
+    | ErrIo                     // SQLITE_IOERR
+    | ErrCorrupt                // SQLITE_CORRUPT detected during write
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkFlushed(_)  => "ok_flushed".clone(),
+        ErrBusyStmt   => "err_busy_stmt".clone(),
+        ErrIo         => "err_io".clone(),
+        ErrCorrupt    => "err_corrupt".clone(),
+    }
+}
+
+public fn is_ok(o: &Outcome) -> Bool {
+    match o { OkFlushed(_) => true, _ => false }
+}
+
+public fn pages_flushed(o: &Outcome) -> Int64 {
+    match o {
+        OkFlushed(n)  => n.clone(),
+        _ => 0 as Int64,
+    }
+}
+
+public fn result_code(o: &Outcome) -> Int {
+    match o {
+        OkFlushed(_) => 0,    // SQLITE_OK
+        ErrBusyStmt  => 5,    // SQLITE_BUSY
+        ErrIo        => 10,   // SQLITE_IOERR
+        ErrCorrupt   => 11,   // SQLITE_CORRUPT
+    }
+}
+
+// Pre-conditions checked before attempting flush.
+public type PreCheck is
+    | PcReady
+    | PcBusyStmt
+    ;
+
+public fn pre_check(active_stmt_count: Int) -> PreCheck {
+    if active_stmt_count > 0 { PcBusyStmt } else { PcReady }
+}
+
+public fn check_name(c: &PreCheck) -> Text {
+    match c {
+        PcReady    => "ready".clone(),
+        PcBusyStmt => "busy_stmt".clone(),
+    }
+}
+
+public fn is_ready(c: &PreCheck) -> Bool {
+    match c { PcReady => true, _ => false }
+}
+
+// Whether this operation should affect WAL frame ordering.  Cache flush
+// only writes the in-memory dirty pages — does NOT checkpoint WAL.
+public fn touches_wal(_o: &Outcome) -> Bool { false }

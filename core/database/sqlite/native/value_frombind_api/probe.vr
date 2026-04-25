@@ -1,0 +1,65 @@
+// sqlite3_value_frombind — bind-vs-literal probe.
+
+module core.database.sqlite.native.value_frombind_api.probe;
+
+mount base.{Bool, Text};
+
+// Origin of a sqlite3_value.
+public type Origin is
+    | OrBindParam        // sqlite3_bind_*()
+    | OrLiteral          // SQL constant — folded by parser/planner
+    | OrInternal         // engine-generated (e.g. coerced default)
+    ;
+
+public fn origin_name(o: &Origin) -> Text {
+    match o {
+        OrBindParam => "bind_param".clone(),
+        OrLiteral   => "literal".clone(),
+        OrInternal  => "internal".clone(),
+    }
+}
+
+// frombind() return — only OrBindParam returns 1.
+public fn frombind_int(o: &Origin) -> Int {
+    match o {
+        OrBindParam => 1,
+        _ => 0,
+    }
+}
+
+public fn is_bind_param(o: &Origin) -> Bool {
+    match o { OrBindParam => true, _ => false }
+}
+
+// Audit-style classifiers.
+public type AuditTag is
+    | AtUserSupplied
+    | AtCompiledIn
+    | AtEngineDerived
+    ;
+
+public fn tag_for(o: &Origin) -> AuditTag {
+    match o {
+        OrBindParam => AtUserSupplied,
+        OrLiteral   => AtCompiledIn,
+        OrInternal  => AtEngineDerived,
+    }
+}
+
+public fn tag_name(t: &AuditTag) -> Text {
+    match t {
+        AtUserSupplied  => "user_supplied".clone(),
+        AtCompiledIn    => "compiled_in".clone(),
+        AtEngineDerived => "engine_derived".clone(),
+    }
+}
+
+public fn is_taintable_input(t: &AuditTag) -> Bool {
+    match t { AtUserSupplied => true, _ => false }
+}
+
+// Decision helper for audit-fn implementations: should this argument
+// trigger sanitisation logic?
+public fn requires_sanitisation(o: &Origin) -> Bool {
+    is_taintable_input(&tag_for(o))
+}

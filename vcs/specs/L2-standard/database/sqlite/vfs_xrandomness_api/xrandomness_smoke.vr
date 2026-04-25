@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vfs_xrandomness_api, vfs
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vfs_xrandomness_api.method.{
+    Source, SrcDevUrandom, SrcGetrandom, SrcArc4Random,
+    SrcCryptGenRandom, SrcRdrand, SrcMockSeed,
+    source_name, well_known_source_count,
+    Quality, QHigh, QMedium, QLow, QMockOnly,
+    quality_for, quality_name, is_production_acceptable,
+    Outcome, OkBytes, ErrShortRead, ErrUnavailable,
+    outcome_name, is_ok, bytes_actually_filled,
+    is_valid_request_size,
+};
+mount base.{Bool};
+
+fn test_source_names() {
+    assert(source_name(&SrcDevUrandom)     == "/dev/urandom".clone());
+    assert(source_name(&SrcGetrandom)      == "getrandom".clone());
+    assert(source_name(&SrcArc4Random)     == "arc4random".clone());
+    assert(source_name(&SrcCryptGenRandom) == "CryptGenRandom".clone());
+    assert(source_name(&SrcRdrand)         == "rdrand".clone());
+    assert(source_name(&SrcMockSeed)       == "mock".clone());
+    assert_eq(well_known_source_count(), 6);
+}
+
+fn test_quality_for_sources() {
+    match quality_for(&SrcDevUrandom)     { QMedium   => {}, _ => assert(false) }
+    match quality_for(&SrcGetrandom)      { QHigh     => {}, _ => assert(false) }
+    match quality_for(&SrcArc4Random)     { QHigh     => {}, _ => assert(false) }
+    match quality_for(&SrcCryptGenRandom) { QHigh     => {}, _ => assert(false) }
+    match quality_for(&SrcRdrand)         { QLow      => {}, _ => assert(false) }
+    match quality_for(&SrcMockSeed)       { QMockOnly => {}, _ => assert(false) }
+}
+
+fn test_quality_names() {
+    assert(quality_name(&QHigh)     == "high".clone());
+    assert(quality_name(&QMedium)   == "medium".clone());
+    assert(quality_name(&QLow)      == "low".clone());
+    assert(quality_name(&QMockOnly) == "mock_only".clone());
+}
+
+fn test_production_acceptable() {
+    assert(is_production_acceptable(&QHigh));
+    assert(is_production_acceptable(&QMedium));
+    assert(!is_production_acceptable(&QLow));
+    assert(!is_production_acceptable(&QMockOnly));
+}
+
+fn test_outcome_names_and_is_ok() {
+    assert(outcome_name(&OkBytes(16))      == "ok".clone());
+    assert(outcome_name(&ErrShortRead(4))  == "short_read".clone());
+    assert(outcome_name(&ErrUnavailable)   == "unavailable".clone());
+    assert(is_ok(&OkBytes(8)));
+    assert(!is_ok(&ErrShortRead(4)));
+    assert(!is_ok(&ErrUnavailable));
+}
+
+fn test_bytes_actually_filled() {
+    assert_eq(bytes_actually_filled(&OkBytes(16)),     16);
+    assert_eq(bytes_actually_filled(&ErrShortRead(7)),  7);
+    assert_eq(bytes_actually_filled(&ErrUnavailable),   0);
+}
+
+fn test_is_valid_request_size() {
+    assert(!is_valid_request_size(0));
+    assert(is_valid_request_size(1));
+    assert(is_valid_request_size(256));
+    assert(!is_valid_request_size(257));
+    assert(!is_valid_request_size(-5));
+}
+
+fn main() {
+    test_source_names();
+    test_quality_for_sources();
+    test_quality_names();
+    test_production_acceptable();
+    test_outcome_names_and_is_ok();
+    test_bytes_actually_filled();
+    test_is_valid_request_size();
+}

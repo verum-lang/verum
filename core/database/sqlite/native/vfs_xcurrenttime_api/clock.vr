@@ -1,0 +1,91 @@
+// VFS xCurrentTime / xCurrentTimeInt64 — wall-clock readers.
+
+module core.database.sqlite.native.vfs_xcurrenttime_api.clock;
+
+mount base.{Bool, Int64, Text};
+
+public type Method is
+    | MFloatJulian       // xCurrentTime — deprecated double Julian
+    | MInt64Millis       // xCurrentTimeInt64 — Int64 ms since unix epoch
+    ;
+
+public fn method_name(m: &Method) -> Text {
+    match m {
+        MFloatJulian => "xCurrentTime".clone(),
+        MInt64Millis => "xCurrentTimeInt64".clone(),
+    }
+}
+
+public fn is_deprecated(m: &Method) -> Bool {
+    match m { MFloatJulian => true, _ => false }
+}
+
+// Constants the engine uses internally.
+//   Unix epoch = JD 2440587.5 (midnight 1970-01-01 UTC).
+public fn unix_epoch_julian_x10000() -> Int64 {
+    // 2440587.5 stored as integer ×1e4 to avoid float dependency.
+    24_405_875_000 as Int64
+}
+
+public fn ms_per_day() -> Int64 { 86_400_000 as Int64 }
+
+// Convert Int64 ms to "Julian × 1e4" surrogate (the engine uses Float
+// internally; here we model the bridge formula).
+public fn millis_to_julian_x10000(ms_since_epoch: Int64) -> Int64 {
+    let day_x10000 = (ms_since_epoch * (10_000 as Int64)) / ms_per_day();
+    unix_epoch_julian_x10000() + day_x10000
+}
+
+// Convert Julian × 1e4 surrogate back to ms.
+public fn julian_x10000_to_millis(jd_x10000: Int64) -> Int64 {
+    let zero = 0 as Int64;
+    let delta = jd_x10000 - unix_epoch_julian_x10000();
+    if delta < zero { return zero; }
+    (delta * ms_per_day()) / (10_000 as Int64)
+}
+
+// Outcome.
+public type Outcome is
+    | OkTime(Int64)        // ms-since-epoch, normalised
+    | ErrUnavailable       // OS clock not readable (extremely rare)
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkTime(_)      => "ok".clone(),
+        ErrUnavailable => "unavailable".clone(),
+    }
+}
+
+public fn is_ok(o: &Outcome) -> Bool {
+    match o { OkTime(_) => true, _ => false }
+}
+
+public fn millis_value(o: &Outcome) -> Int64 {
+    match o {
+        OkTime(t)      => t.clone(),
+        ErrUnavailable => 0 as Int64,
+    }
+}
+
+// Resolution classes used by date-fn modifiers.
+public type Resolution is
+    | RsSeconds       // when xCurrentTime delivers Float (Julian)
+    | RsMillis        // xCurrentTimeInt64
+    | RsMicros        // future-proof; SQLite doesn't ship this yet
+    ;
+
+public fn resolution_for(m: &Method) -> Resolution {
+    match m {
+        MFloatJulian => RsSeconds,
+        MInt64Millis => RsMillis,
+    }
+}
+
+public fn resolution_name(r: &Resolution) -> Text {
+    match r {
+        RsSeconds => "seconds".clone(),
+        RsMillis  => "millis".clone(),
+        RsMicros  => "micros".clone(),
+    }
+}

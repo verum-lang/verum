@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vfs_xcurrenttime_api, vfs
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vfs_xcurrenttime_api.clock.{
+    Method, MFloatJulian, MInt64Millis,
+    method_name, is_deprecated,
+    unix_epoch_julian_x10000, ms_per_day,
+    millis_to_julian_x10000, julian_x10000_to_millis,
+    Outcome, OkTime, ErrUnavailable,
+    outcome_name, is_ok, millis_value,
+    Resolution, RsSeconds, RsMillis, RsMicros,
+    resolution_for, resolution_name,
+};
+mount base.{Bool, Int64};
+
+fn test_method_names_and_deprecated() {
+    assert(method_name(&MFloatJulian) == "xCurrentTime".clone());
+    assert(method_name(&MInt64Millis) == "xCurrentTimeInt64".clone());
+    assert(is_deprecated(&MFloatJulian));
+    assert(!is_deprecated(&MInt64Millis));
+}
+
+fn test_constants() {
+    assert_eq(unix_epoch_julian_x10000(), 24_405_875_000 as Int64);
+    assert_eq(ms_per_day(),               86_400_000 as Int64);
+}
+
+fn test_millis_to_julian_zero() {
+    assert_eq(millis_to_julian_x10000(0 as Int64), unix_epoch_julian_x10000());
+}
+
+fn test_millis_to_julian_one_day() {
+    let day = ms_per_day();
+    assert_eq(
+        millis_to_julian_x10000(day),
+        unix_epoch_julian_x10000() + (10_000 as Int64),
+    );
+}
+
+fn test_julian_to_millis_round_trip() {
+    let day = ms_per_day();
+    let jd  = millis_to_julian_x10000(day);
+    assert_eq(julian_x10000_to_millis(jd), day);
+}
+
+fn test_julian_to_millis_floors_negative() {
+    let neg = unix_epoch_julian_x10000() - (10_000 as Int64);
+    assert_eq(julian_x10000_to_millis(neg), 0 as Int64);
+}
+
+fn test_outcome_names_and_is_ok() {
+    assert(outcome_name(&OkTime(1234 as Int64)) == "ok".clone());
+    assert(outcome_name(&ErrUnavailable)         == "unavailable".clone());
+    assert(is_ok(&OkTime(0 as Int64)));
+    assert(!is_ok(&ErrUnavailable));
+}
+
+fn test_millis_value() {
+    assert_eq(millis_value(&OkTime(1700_000_000_000 as Int64)), 1700_000_000_000 as Int64);
+    assert_eq(millis_value(&ErrUnavailable),                    0 as Int64);
+}
+
+fn test_resolution_for() {
+    match resolution_for(&MFloatJulian) { RsSeconds => {}, _ => assert(false) }
+    match resolution_for(&MInt64Millis) { RsMillis  => {}, _ => assert(false) }
+    assert(resolution_name(&RsSeconds) == "seconds".clone());
+    assert(resolution_name(&RsMillis)  == "millis".clone());
+    assert(resolution_name(&RsMicros)  == "micros".clone());
+}
+
+fn main() {
+    test_method_names_and_deprecated();
+    test_constants();
+    test_millis_to_julian_zero();
+    test_millis_to_julian_one_day();
+    test_julian_to_millis_round_trip();
+    test_julian_to_millis_floors_negative();
+    test_outcome_names_and_is_ok();
+    test_millis_value();
+    test_resolution_for();
+}
