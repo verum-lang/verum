@@ -7,7 +7,7 @@
 
 mount core.net.quic.address_token.{
     AddressTokenKey, TokenKind, TokenPlaintext, TokenError,
-    VerifyOptions,
+    QuicTokenVerifyOptions,
     issue, verify, ip_bytes_from,
 };
 mount core.net.addr.{IpAddr, Ipv4Addr};
@@ -32,7 +32,7 @@ fn exercise_retry_token() -> Result<(), TokenError> {
     let wire = issue(&key, &plain)?;
 
     // Verify with the matching key + client IP.
-    let opts = VerifyOptions {
+    let opts = QuicTokenVerifyOptions {
         max_age_sec:        30_u64,          // Retry tokens are short-lived
         expected_client_ip: Some(client_ip_bytes),
         required_kind:      Some(TokenKind.Retry),
@@ -53,7 +53,7 @@ fn exercise_new_token() -> Result<(), TokenError> {
     };
     let wire = issue(&key, &plain)?;
 
-    let opts = VerifyOptions.defaults();
+    let opts = QuicTokenVerifyOptions.defaults();
     let _ = verify(&key, wire.as_slice(), 1_700_000_010_u64, &opts)?;
     Ok(())
 }

@@ -128,9 +128,8 @@ const BASELINE_DUPLICATES: &[&str] = &[
     "TriggerEvent",
     "TriggerTiming", "TrigramTokenizer", "TxnState", "Unicode61Tokenizer",
     "UniqueConstraint", "UpdateOp", "Url", "ValidationError",
-    "Value", "VarintVector", "Verdict", "VerifyOptions", "Version",
-    "Viewport", "WalChecksumVector", "WalFrameHeader",
-    "WalkMode", "YieldNow",
+    "Value", "VarintVector", "Verdict",
+    "YieldNow",
 ];
 
 #[test]

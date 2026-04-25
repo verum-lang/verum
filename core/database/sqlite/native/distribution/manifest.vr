@@ -15,7 +15,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.distribution.version.{
-    Version, loom_version, version_string,
+    DistributionVersion, loom_version, version_string,
 };
 mount core.database.sqlite.native.distribution.features.{
     FeatureFlag, loom_features, enabled_features,
@@ -27,7 +27,7 @@ mount core.database.sqlite.native.distribution.features.{
 
 public type BuildManifest is {
     /// Loom version triple.
-    version: Version,
+    version: DistributionVersion,
     /// Compile-time host triple, e.g. "aarch64-apple-darwin".
     host_triple: Text,
     /// Compile-time profile, e.g. "release".

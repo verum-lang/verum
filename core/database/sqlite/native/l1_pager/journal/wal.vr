@@ -79,7 +79,7 @@ public type WalHeader is {
 /// Parsed WAL frame header. `db_size_after_commit == 0` marks an
 /// intermediate frame; `> 0` marks a commit marker and records the
 /// resulting DB size in pages.
-public type WalFrameHeader is {
+public type PagerWalFrameHeader is {
     page_number: UInt32,
     db_size_after_commit: UInt32,
     salt_1: UInt32,
@@ -223,7 +223,7 @@ public fn wal_header_parse(buf: &[Byte]) -> Result<WalHeader, Text> {
 }
 
 /// Serialise a 24-byte frame header.
-public fn wal_frame_header_serialize(h: &WalFrameHeader) -> List<Byte> {
+public fn wal_frame_header_serialize(h: &PagerWalFrameHeader) -> List<Byte> {
     let mut out: List<Byte> = List.new();
     u32_be(&mut out, h.page_number);
     u32_be(&mut out, h.db_size_after_commit);
@@ -235,11 +235,11 @@ public fn wal_frame_header_serialize(h: &WalFrameHeader) -> List<Byte> {
 }
 
 /// Parse a frame header from a 24-byte slice.
-public fn wal_frame_header_parse(buf: &[Byte]) -> Result<WalFrameHeader, Text> {
+public fn wal_frame_header_parse(buf: &[Byte]) -> Result<PagerWalFrameHeader, Text> {
     if buf.len() < WAL_FRAME_HEADER_SIZE {
         return Err("wal_frame_header_parse: short buffer".clone());
     }
-    Ok(WalFrameHeader {
+    Ok(PagerWalFrameHeader {
         page_number: read_u32_be(buf, 0),
         db_size_after_commit: read_u32_be(buf, 4),
         salt_1: read_u32_be(buf, 8),

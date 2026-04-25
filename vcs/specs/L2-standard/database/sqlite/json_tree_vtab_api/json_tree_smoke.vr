@@ -10,7 +10,7 @@ mount core.database.sqlite.native.json_tree_vtab_api.walker.{
     well_known_column_count, column_name,
     JsonType, JtNull, JtTrue, JtFalse, JtInteger, JtReal, JtText, JtArray, JtObject,
     json_type_text, well_known_type_count, has_children, has_atom,
-    WalkMode, WmTopOnly, WmDepthFirst,
+    JsonTreeWalkMode, WmTopOnly, WmDepthFirst,
     walk_mode_for, walk_mode_name, estimate_rows,
 };
 mount base.{Bool, Int64};

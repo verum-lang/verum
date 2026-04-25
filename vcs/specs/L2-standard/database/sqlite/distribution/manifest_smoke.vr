@@ -6,12 +6,12 @@
 // @expected-exit: 0
 //
 // Distribution metadata:
-//   * Version triple + comparison + display
+//   * DistributionVersion triple + comparison + display
 //   * Feature catalogue defaults + lookup
 //   * BuildManifest construction + summary
 
 mount core.database.sqlite.native.distribution.version.{
-    Version, loom_version, version_string, sqlite_version_compat,
+    DistributionVersion, loom_version, version_string, sqlite_version_compat,
     precedes, at_least,
 };
 mount core.database.sqlite.native.distribution.features.{
@@ -49,8 +49,8 @@ fn test_sqlite_compat_string() {
 }
 
 fn test_version_precedes() {
-    let a = Version { major: 0, minor: 1, patch: 0, suffix: "".clone(), sqlite_compat: "".clone() };
-    let b = Version { major: 0, minor: 2, patch: 0, suffix: "".clone(), sqlite_compat: "".clone() };
+    let a = DistributionVersion { major: 0, minor: 1, patch: 0, suffix: "".clone(), sqlite_compat: "".clone() };
+    let b = DistributionVersion { major: 0, minor: 2, patch: 0, suffix: "".clone(), sqlite_compat: "".clone() };
     assert(precedes(&a, &b));
     assert(!precedes(&b, &a));
     assert(at_least(&b, &a));

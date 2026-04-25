@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.sqlite_version_fmt.version.{
-    Version,
+    SqliteVersion,
     new, libversion_number, from_libversion_number,
     to_dotted_text, at_least, before, is_sqlite3_family,
 };

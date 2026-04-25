@@ -13,7 +13,7 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.quic.address_token.{
-    AddressTokenKey, TokenKind, TokenError, VerifyOptions,
+    AddressTokenKey, TokenKind, TokenError, QuicTokenVerifyOptions,
     WIRE_VERSION,
 };
 
@@ -53,7 +53,7 @@ fn key_generate_produces_distinct_random_values() {
 }
 
 fn verify_options_defaults_match_spec() {
-    let o = VerifyOptions.defaults();
+    let o = QuicTokenVerifyOptions.defaults();
     // Default 24-hour lifetime (86 400 seconds).
     assert(o.max_age_sec == 86_400_u64);
     // IP check not enforced by default.

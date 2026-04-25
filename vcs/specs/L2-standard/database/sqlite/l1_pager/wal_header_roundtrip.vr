@@ -10,7 +10,7 @@
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l1_pager.{
-    WalHeader, WalFrameHeader, Wal,
+    WalHeader, PagerWalFrameHeader, Wal,
     WAL_MAGIC_LE, WAL_MAGIC_BE,
     WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE,
     WAL_FORMAT_VERSION,
@@ -48,7 +48,7 @@ fn wal_header_roundtrip() {
 }
 
 fn frame_header_roundtrip() {
-    let fh = WalFrameHeader {
+    let fh = PagerWalFrameHeader {
         page_number: 42 as UInt32,
         db_size_after_commit: 100 as UInt32,
         salt_1: 1 as UInt32,

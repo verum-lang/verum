@@ -143,7 +143,7 @@ public fn issue(
 // Verify
 // =============================================================================
 
-public type VerifyOptions is {
+public type QuicTokenVerifyOptions is {
     /// Maximum acceptable age in seconds. Tokens issued earlier than
     /// (now_unix - max_age_sec) are rejected with `Expired`.
     max_age_sec:      UInt64,
@@ -157,9 +157,9 @@ public type VerifyOptions is {
     required_kind:    Maybe<QuicTokenKind>,
 };
 
-implement VerifyOptions {
-    public fn defaults() -> VerifyOptions {
-        VerifyOptions {
+implement QuicTokenVerifyOptions {
+    public fn defaults() -> QuicTokenVerifyOptions {
+        QuicTokenVerifyOptions {
             max_age_sec:        86_400_u64,           // 24 h
             expected_client_ip: None,
             required_kind:      None,
@@ -171,7 +171,7 @@ public fn verify(
     key:        &AddressTokenKey,
     wire:       &[Byte],
     now_unix:   UInt64,
-    opts:       &VerifyOptions,
+    opts:       &QuicTokenVerifyOptions,
 ) -> Result<TokenPlaintext, TokenError> {
     if wire.len() < 8 + 1 + 1 + 12 + 16 {
         return Err(TokenError.Malformed);

@@ -22,7 +22,7 @@ mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 
-public type WalChecksumVector is {
+public type TestVectorsWalChecksum is {
     name: Text,
     cs0_init: Int64,
     cs1_init: Int64,
@@ -37,8 +37,8 @@ public fn vec(
     cs0_init: Int64, cs1_init: Int64,
     body: List<Byte>,
     cs0: Int64, cs1: Int64,
-) -> WalChecksumVector {
-    WalChecksumVector {
+) -> TestVectorsWalChecksum {
+    TestVectorsWalChecksum {
         name: name,
         cs0_init: cs0_init, cs1_init: cs1_init,
         body: body,
@@ -46,8 +46,8 @@ public fn vec(
     }
 }
 
-public fn appendix_e3() -> List<WalChecksumVector> {
-    let mut out: List<WalChecksumVector> = List.new();
+public fn appendix_e3() -> List<TestVectorsWalChecksum> {
+    let mut out: List<TestVectorsWalChecksum> = List.new();
 
     // Empty body — checksums unchanged.
     out.push(vec(

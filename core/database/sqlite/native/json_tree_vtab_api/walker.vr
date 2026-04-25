@@ -77,19 +77,19 @@ public fn has_atom(t: &JsonType) -> Bool {
 }
 
 // Walk-mode classifier.
-public type WalkMode is
+public type JsonTreeWalkMode is
     | WmTopOnly
     | WmDepthFirst
     ;
 
-public fn walk_mode_for(v: &Variant) -> WalkMode {
+public fn walk_mode_for(v: &Variant) -> JsonTreeWalkMode {
     match v {
         VtJsonEach => WmTopOnly,
         VtJsonTree => WmDepthFirst,
     }
 }
 
-public fn walk_mode_name(w: &WalkMode) -> Text {
+public fn walk_mode_name(w: &JsonTreeWalkMode) -> Text {
     match w {
         WmTopOnly    => "top_only".clone(),
         WmDepthFirst => "depth_first".clone(),
