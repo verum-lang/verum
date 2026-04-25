@@ -1,0 +1,50 @@
+// =============================================================================
+// owl2_fs.types — primitive sorts of the OWL 2 Direct Semantics
+// =============================================================================
+//
+// Shkotin 2019 (`internal/OWL2.DS2HOL.pdf`) §Notation: the DS2HOL
+// translation rests on two carrier sorts and one metric:
+//
+//   o  — Individual (the carrier of the OWL 2 universe ΔᴵO)
+//   d  — Literal    (the carrier of typed data values)
+//   #  — quantifier of quantity (count_o)
+//
+// We surface these as Verum types so every framework axiom in
+// `core.math.frameworks.owl2_fs.*` can name them by the canonical
+// Shkotin spelling.  The types are *abstract* — concrete encodings
+// (IRI for Individual, RDF literal-shape for Literal) live at
+// `core.math.frameworks.owl2_fs.encoding` (V2).
+//
+// `count_o` (Shkotin's # quantifier-of-quantity) is shipped here as
+// the smallest ergonomic site rather than as a one-axiom file.  See
+// VUVA §21.5 — V1 ships the signature, V2 wires CVC5 Finite Model
+// Finding and the `E_OWL2_UNBOUNDED_COUNT` diagnostic.
+// =============================================================================
+
+/// The carrier sort `o` of the OWL 2 Direct Semantics universe ΔᴵO.
+/// Shkotin 2019 treats it as an opaque set; concrete OWL 2 reasoners
+/// instantiate `o` with IRIs (NamedIndividual) or anonymous IDs.
+public type Individual is protocol {
+    /// Discriminator — every OWL 2 individual is either named (an
+    /// IRI) or anonymous (a local _:b identifier).
+    fn is_named(self) -> Bool;
+};
+
+/// The carrier sort `d` of OWL 2 data values (Literals).  Shkotin's
+/// "d" sort; concrete RDF literals factor through the lexical-form +
+/// datatype-IRI representation.
+public type Literal is protocol {
+    fn datatype_iri(self) -> Text;
+    fn lexical_form(self) -> Text;
+};
+
+/// VUVA §21.5 — quantifier of quantity.  `count_o(pred)` is the
+/// number of `Individual`s satisfying `pred`.  Returns `Int >= 0`
+/// at runtime.  When the domain is not finite, the V2 SMT dispatch
+/// returns `E_OWL2_UNBOUNDED_COUNT`.  V1 ships the axiom with a
+/// `true` placeholder body; V2 will replace it with the full HOL
+/// definition `#y:o P(y) ≡ |{y : Individual | P(y)}|` plus the
+/// finite-domain side condition.
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §Notation (quantifier of quantity #)")
+public axiom count_o_spec() -> Bool
+    ensures true;

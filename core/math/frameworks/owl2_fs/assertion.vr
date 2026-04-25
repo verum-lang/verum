@@ -1,0 +1,29 @@
+// =============================================================================
+// owl2_fs.assertion — Shkotin 2019 Table 10 (Assertions)
+// =============================================================================
+//
+// §2.3.6 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 7 axioms
+// asserting facts about specific Individuals — the ABox of an OWL 2
+// ontology.
+// =============================================================================
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: SameIndividual")
+public axiom SameIndividual() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: DifferentIndividuals")
+public axiom DifferentIndividuals() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: ClassAssertion")
+public axiom ClassAssertion() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: ObjectPropertyAssertion")
+public axiom ObjectPropertyAssertion() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: NegativeObjectPropertyAssertion")
+public axiom NegativeObjectPropertyAssertion() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: DataPropertyAssertion")
+public axiom DataPropertyAssertion() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: NegativeDataPropertyAssertion")
+public axiom NegativeDataPropertyAssertion() -> Bool ensures true;

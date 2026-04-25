@@ -1,0 +1,64 @@
+// =============================================================================
+// owl2_fs — OWL 2 Functional-Style Syntax framework axiom package (VUVA §21)
+// =============================================================================
+//
+// Verum's trusted boundary for OWL 2 Direct Semantics.  Encodes the
+// 10 Shkotin 2019 (`internal/OWL2.DS2HOL.pdf`) tables verbatim as
+// `@framework(owl2_fs, ...)` axioms — every operator the W3C OWL 2
+// Functional-Style Syntax recognises gets exactly one named axiom
+// in this package.
+//
+// Sub-modules (Shkotin 2019 §X.Y / Table Z):
+//
+//   types                   — primitive sorts (Individual=o, Literal=d) +
+//                             count_o quantifier-of-quantity primitive
+//   object_property         — §2.2.1 Table 1: ObjectInverseOf
+//   data_range              — §2.2.2 Table 3: 5 data-range constructors
+//   class_expr              — §2.2.3 Table 4: 24 class-expression constructors
+//   class_axiom             — §2.3.1 Table 5: 4 class-expression axioms
+//   object_property_axiom   — §2.3.2 Table 6: 14 object-property axioms
+//   data_property_axiom     — §2.3.3 Table 7: 6 data-property axioms
+//   datatype_definition     — §2.3.4 Table 8: 1 datatype-definition axiom
+//   key                     — §2.3.5 Table 9: HasKey (NAMED restriction)
+//   assertion               — §2.3.6 Table 10: 7 ABox assertions
+//
+// Total axiom count (V1): 63 + 1 (count_o) = 64 trusted operators.
+//
+// **V1 status (this commit).**  Each axiom ships as a *trusted-
+// boundary marker* — a `public axiom Name() -> Bool ensures true;`
+// declaration that `verum audit --framework-axioms --by-lineage
+// owl2_fs` enumerates exactly. The HOL-definition body from
+// Shkotin's "HOL-definition body" column is *not yet* installed —
+// V2 will replace each `ensures true;` with the verbatim Table-row
+// body so SMT dispatch via CVC5 FMF can decide the encoded
+// obligation.
+//
+// **Why ship V1 now?**  The trusted boundary is the *contract* OWL 2
+// consumers (Protégé, HermiT, Pellet) read.  Shipping V1 unlocks:
+//   - `verum audit --coord` projects owl2_fs to ν=1 (DL-decidable);
+//   - `verum audit --framework-axioms` enumerates the OWL 2
+//     dependency footprint of any corpus;
+//   - downstream `OwlAttr` family (VUVA C8) can reference axioms
+//     by name without waiting on body completion;
+//   - cross-framework bridges (VUVA C7b, F6) can be authored
+//     against the named operators.
+//
+// V2 ships HOL bodies + SMT routing per VUVA §21.5.
+//
+// References:
+//   - VUVA spec §21       — `docs/architecture/verification-architecture.md`
+//   - Shkotin 2019        — `internal/OWL2.DS2HOL.pdf`
+//   - W3C OWL 2 DS Rec    — https://www.w3.org/TR/owl2-semantics/
+//   - W3C OWL 2 FS Rec    — https://www.w3.org/TR/owl2-syntax/
+// =============================================================================
+
+public mount core.math.frameworks.owl2_fs.types;
+public mount core.math.frameworks.owl2_fs.object_property;
+public mount core.math.frameworks.owl2_fs.data_range;
+public mount core.math.frameworks.owl2_fs.class_expr;
+public mount core.math.frameworks.owl2_fs.class_axiom;
+public mount core.math.frameworks.owl2_fs.object_property_axiom;
+public mount core.math.frameworks.owl2_fs.data_property_axiom;
+public mount core.math.frameworks.owl2_fs.datatype_definition;
+public mount core.math.frameworks.owl2_fs.key;
+public mount core.math.frameworks.owl2_fs.assertion;

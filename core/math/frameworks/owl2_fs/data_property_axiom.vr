@@ -1,0 +1,25 @@
+// =============================================================================
+// owl2_fs.data_property_axiom — Shkotin 2019 Table 7 (Data Property Axioms)
+// =============================================================================
+//
+// §2.3.3 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 6 axioms
+// constraining data properties (the d-sort side of OWL 2).
+// =============================================================================
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: SubDataPropertyOf")
+public axiom SubDataPropertyOf() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: EquivalentDataProperties")
+public axiom EquivalentDataProperties() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: DisjointDataProperties")
+public axiom DisjointDataProperties() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: DataPropertyDomain")
+public axiom DataPropertyDomain() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: DataPropertyRange")
+public axiom DataPropertyRange() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.3 Table 7: FunctionalDataProperty")
+public axiom FunctionalDataProperty() -> Bool ensures true;

@@ -1,0 +1,13 @@
+// =============================================================================
+// owl2_fs.key — Shkotin 2019 Table 9 (HasKey, NAMED restriction)
+// =============================================================================
+//
+// §2.3.5 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 1 axiom.
+// HasKey is the NAMED-restricted relational uniqueness constraint —
+// it applies *only* to NamedIndividuals, not to anonymous ones.
+// VUVA §21.3 Table maps HasKey-with-NAMED to `@verify(proof)` because
+// the DL reasoner case requires user-supplied tactic per Shkotin §2.3.5.
+// =============================================================================
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.5 Table 9: HasKey (NAMED restriction)")
+public axiom HasKey() -> Bool ensures true;

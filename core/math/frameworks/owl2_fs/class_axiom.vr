@@ -1,0 +1,19 @@
+// =============================================================================
+// owl2_fs.class_axiom — Shkotin 2019 Table 5 (Class Expression Axioms)
+// =============================================================================
+//
+// §2.3.1 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 4 axioms
+// asserting relationships between class expressions.
+// =============================================================================
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.1 Table 5: SubClassOf")
+public axiom SubClassOf() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.1 Table 5: EquivalentClasses")
+public axiom EquivalentClasses() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.1 Table 5: DisjointClasses")
+public axiom DisjointClasses() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.1 Table 5: DisjointUnion")
+public axiom DisjointUnion() -> Bool ensures true;

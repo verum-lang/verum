@@ -1,0 +1,18 @@
+// =============================================================================
+// owl2_fs.object_property — Shkotin 2019 Table 1 (Object Property Expressions)
+// =============================================================================
+//
+// §2.2.1 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 1 operator.
+// Shkotin 2019 Table 1 gives the HOL definition of `ObjectInverseOf`.
+//
+// V1: skeleton @framework axiom shipping the *trusted boundary* — the
+// citation marker that `verum audit --framework-axioms --by-lineage
+// owl2_fs` enumerates.  V2 will replace the placeholder body with the
+// HOL-definition body verbatim from the Shkotin Table 1 row.
+// =============================================================================
+
+/// `ObjectInverseOf(OPE)` — the inverse of an object property
+/// expression.  Domain and range are swapped relative to OPE.
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.1 Table 1: ObjectInverseOf")
+public axiom ObjectInverseOf() -> Bool
+    ensures true;

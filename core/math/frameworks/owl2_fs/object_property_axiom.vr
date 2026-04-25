@@ -1,0 +1,60 @@
+// =============================================================================
+// owl2_fs.object_property_axiom — Shkotin 2019 Table 6 (Object Property Axioms)
+// =============================================================================
+//
+// §2.3.2 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 14 axioms
+// constraining object properties — sub-property hierarchy, domain /
+// range, and the seven characteristic flags (Functional,
+// InverseFunctional, Reflexive, Irreflexive, Symmetric, Asymmetric,
+// Transitive).
+// =============================================================================
+
+// --- Hierarchy + chains (3) ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: SubObjectPropertyOf")
+public axiom SubObjectPropertyOf() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: SubObjectPropertyOfChain")
+public axiom SubObjectPropertyOfChain() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: InverseObjectProperties")
+public axiom InverseObjectProperties() -> Bool ensures true;
+
+// --- Equivalence / disjointness (2) ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: EquivalentObjectProperties")
+public axiom EquivalentObjectProperties() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: DisjointObjectProperties")
+public axiom DisjointObjectProperties() -> Bool ensures true;
+
+// --- Domain / range (2) ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: ObjectPropertyDomain")
+public axiom ObjectPropertyDomain() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: ObjectPropertyRange")
+public axiom ObjectPropertyRange() -> Bool ensures true;
+
+// --- Seven characteristic flags ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: FunctionalObjectProperty")
+public axiom FunctionalObjectProperty() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: InverseFunctionalObjectProperty")
+public axiom InverseFunctionalObjectProperty() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: ReflexiveObjectProperty")
+public axiom ReflexiveObjectProperty() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: IrreflexiveObjectProperty")
+public axiom IrreflexiveObjectProperty() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: SymmetricObjectProperty")
+public axiom SymmetricObjectProperty() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: AsymmetricObjectProperty")
+public axiom AsymmetricObjectProperty() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: TransitiveObjectProperty")
+public axiom TransitiveObjectProperty() -> Bool ensures true;

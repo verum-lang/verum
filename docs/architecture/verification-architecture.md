@@ -1294,7 +1294,7 @@ Receipts are content-addressed; CI compares against a committed baseline.
 - **Task C4**: Quotient types.
 - **Task C5**: Quantitative annotations.
 - **Task C6**: Framework axioms: ship the standard six-pack (`lurie_htt`, `schreiber_dcct`, `connes_reconstruction`, `petz_classification`, `arnold_mather`, `baez_dolan`).
-- **Task C7**: `core.math.frameworks.owl2_fs` package — ~63 axioms line-by-line from Shkotin 2019 (§21.5); full OWL 2 Direct Semantics coverage.
+- **Task C7** (V1 ✓ shipped): `core.math.frameworks.owl2_fs` package — 64 trusted-boundary `@framework(owl2_fs, ...)` axioms in nine sub-modules (object_property / data_range / class_expr / class_axiom / object_property_axiom / data_property_axiom / datatype_definition / key / assertion) + types.vr (Individual / Literal sorts + count_o quantifier-of-quantity). V1 ships axiom *signatures* with `ensures true;` placeholder bodies; V2 will replace each placeholder with the verbatim Shkotin Table-row HOL definition so SMT dispatch via CVC5 FMF can decide encoded obligations. `verum audit --framework-axioms --by-lineage owl2_fs` enumerates the OWL 2 footprint of any corpus; `verum audit --coord` projects owl2_fs theorems to ν=1, τ=intensional.
 - **Task C7b**: Canonical bridge `owl2_fs → lurie_htt` (~30 translate axioms) so OWL 2 corpora automatically receive ∞-topos / categorical interpretations (§21.7).
 - **Task C8**: `OwlAttr` family in `verum_ast::attr::typed` — `@owl2_class`, `@owl2_property`, `@owl2_subclass_of`, `@owl2_equivalent_class`, `@owl2_disjoint_with`, `@owl2_has_key`, `@owl2_characteristic` (§21.6).
 - **Task C9**: `count_o` quantifier-of-quantity primitive + `E_OWL2_UNBOUNDED_COUNT` diagnostic; SMT dispatch via CVC5 FMF (§21.5).

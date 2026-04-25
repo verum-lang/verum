@@ -1,0 +1,10 @@
+// =============================================================================
+// owl2_fs.datatype_definition — Shkotin 2019 Table 8 (Datatype Definitions)
+// =============================================================================
+//
+// §2.3.4 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 1 axiom
+// defining a named datatype as an alias for a data range.
+// =============================================================================
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.4 Table 8: DatatypeDefinition")
+public axiom DatatypeDefinition() -> Bool ensures true;

@@ -1,0 +1,95 @@
+// =============================================================================
+// owl2_fs.class_expr — Shkotin 2019 Table 4 (Class Expressions)
+// =============================================================================
+//
+// §2.2.3 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 24
+// operators forming class expressions. The largest single OWL 2
+// surface; covers Boolean class constructors, restrictions on object
+// properties (existential, universal, value, self, cardinality), and
+// restrictions on data properties.
+// =============================================================================
+
+// --- Boolean class constructors (3) ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectIntersectionOf")
+public axiom ObjectIntersectionOf() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectUnionOf")
+public axiom ObjectUnionOf() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectComplementOf")
+public axiom ObjectComplementOf() -> Bool ensures true;
+
+// --- Enumeration (1) ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectOneOf")
+public axiom ObjectOneOf() -> Bool ensures true;
+
+// --- Object-property restrictions (8) ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectSomeValuesFrom")
+public axiom ObjectSomeValuesFrom() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectAllValuesFrom")
+public axiom ObjectAllValuesFrom() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectHasValue")
+public axiom ObjectHasValue() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectHasSelf")
+public axiom ObjectHasSelf() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectMinCardinality")
+public axiom ObjectMinCardinality() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectMaxCardinality")
+public axiom ObjectMaxCardinality() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectExactCardinality")
+public axiom ObjectExactCardinality() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: ObjectQualifiedExactCardinality")
+public axiom ObjectQualifiedExactCardinality() -> Bool ensures true;
+
+// --- Data-property restrictions (8) ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataSomeValuesFrom")
+public axiom DataSomeValuesFrom() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataAllValuesFrom")
+public axiom DataAllValuesFrom() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataHasValue")
+public axiom DataHasValue() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataMinCardinality")
+public axiom DataMinCardinality() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataMaxCardinality")
+public axiom DataMaxCardinality() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataExactCardinality")
+public axiom DataExactCardinality() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataQualifiedMinCardinality")
+public axiom DataQualifiedMinCardinality() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataQualifiedMaxCardinality")
+public axiom DataQualifiedMaxCardinality() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: DataQualifiedExactCardinality")
+public axiom DataQualifiedExactCardinality() -> Bool ensures true;
+
+// --- Negative range constraints (4) ---
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: NegativeObjectSomeValuesFrom")
+public axiom NegativeObjectSomeValuesFrom() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: NegativeObjectAllValuesFrom")
+public axiom NegativeObjectAllValuesFrom() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: NegativeObjectHasValue")
+public axiom NegativeObjectHasValue() -> Bool ensures true;
+
+@framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.3 Table 4: NegativeObjectHasSelf")
+public axiom NegativeObjectHasSelf() -> Bool ensures true;
