@@ -1599,3 +1599,336 @@ fn print_coord_report_json(
     out.push_str("}\n");
     print!("{}", out);
 }
+
+// =============================================================================
+// Articulation Hygiene audit — `verum audit --hygiene` (VUVA §13.3, F3)
+//
+// Walks every type / function declaration in the project and classifies each
+// "self-X" surface form per the §13.2 hygiene table:
+//
+//   Surface                                  Factorisation (Φ, κ, t)
+//   ──────────────────────────────────────   ───────────────────────────
+//   Inductive `Rec(T)` in `type T is Rec(T)` (T_succ, ω,    least_fp)
+//   Coinductive `Stream<A> = Cons(A, …)`     (T_prod_A, ω^{op}, greatest_fp)
+//   Newtype `type X is (Y)`                   (Id, 1,        Y)
+//   HIT path-cell variant (`Foo() = a..b`)    (path_action, ω, base)
+//   `@recursive fn f(… -> Self) …`            (unfold_f, ω,  fix_f)
+//   `@corecursive fn g(…)` (productivity)     (corec_g, ω^{op}, fix_g)
+//
+// V1 scope:
+//   * variant-self-reference detection (a constructor arg that mentions the
+//     surrounding type's own name) — covers Inductive + sum-type recursion;
+//   * explicit Inductive / Coinductive bodies detected via TypeDeclBody;
+//   * HIT path-cell variants flagged by `path_endpoints`;
+//   * `@recursive` / `@corecursive` attributes on FunctionDecl.
+//
+// Out of scope (V1, deferred to a kernel-pass follow-up):
+//   * raw `self` keyword usage inside function bodies (requires
+//     expression-tree walk);
+//   * §13.2's `Self::Item` and `&mut self` factorisations (require a typed
+//     resolution layer).
+// =============================================================================
+
+#[derive(Debug, Clone, Copy)]
+enum HygieneClass {
+    Inductive,             // (T_succ, ω, least_fp)
+    Coinductive,           // (T_prod, ω^{op}, greatest_fp)
+    Newtype,               // (Id, 1, base)
+    HigherInductive,       // (path_action, ω, base)
+    Recursive,             // @recursive — (unfold_f, ω, fix_f)
+    Corecursive,           // @corecursive — (corec_g, ω^{op}, fix_g)
+}
+
+impl HygieneClass {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Inductive       => "inductive",
+            Self::Coinductive     => "coinductive",
+            Self::Newtype         => "newtype",
+            Self::HigherInductive => "higher-inductive",
+            Self::Recursive       => "recursive-fn",
+            Self::Corecursive     => "corecursive-fn",
+        }
+    }
+
+    fn factorisation(&self) -> &'static str {
+        match self {
+            Self::Inductive       => "(T_succ, ω, least_fp)",
+            Self::Coinductive     => "(T_prod, ω^op, greatest_fp)",
+            Self::Newtype         => "(Id, 1, base)",
+            Self::HigherInductive => "(path_action, ω, base)",
+            Self::Recursive       => "(unfold_f, ω, fix_f)",
+            Self::Corecursive     => "(corec_g, ω^op, fix_g)",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HygieneEntry {
+    class: HygieneClass,
+    item_name: Text,
+    file: PathBuf,
+}
+
+/// True iff the named type appears anywhere inside `t`. Walks Path,
+/// Generic, Tuple, Array, Slice, Function (params + return), Reference,
+/// DependentApp, and PathType — covers every nesting site that could
+/// transport a self-recursive constructor argument such as `tail:
+/// List<A>` inside `type List<A> is Cons(head: A, tail: List<A>)`.
+/// Conservative: false negatives are acceptable (under-report); false
+/// positives are not (over-flag).
+fn type_mentions_name(t: &verum_ast::ty::Type, target: &str) -> bool {
+    use verum_ast::ty::{GenericArg, PathSegment, TypeKind};
+    match &t.kind {
+        TypeKind::Path(p) => p
+            .segments
+            .iter()
+            .any(|seg| matches!(seg, PathSegment::Name(id) if id.name.as_str() == target)),
+        TypeKind::Generic { base, args, .. } => {
+            type_mentions_name(base, target)
+                || args.iter().any(|arg| match arg {
+                    GenericArg::Type(ty) => type_mentions_name(ty, target),
+                    _ => false,
+                })
+        }
+        TypeKind::Tuple(types) => types.iter().any(|x| type_mentions_name(x, target)),
+        TypeKind::Array { element, .. } => type_mentions_name(element, target),
+        TypeKind::Slice(inner) => type_mentions_name(inner, target),
+        TypeKind::Function { params, return_type, .. } => {
+            params.iter().any(|x| type_mentions_name(x, target))
+                || type_mentions_name(return_type, target)
+        }
+        TypeKind::Reference { inner, .. } => type_mentions_name(inner, target),
+        TypeKind::DependentApp { carrier, .. } => type_mentions_name(carrier, target),
+        TypeKind::PathType { carrier, .. } => type_mentions_name(carrier, target),
+        _ => false,
+    }
+}
+
+fn variant_is_self_recursive(v: &verum_ast::decl::Variant, type_name: &str) -> bool {
+    use verum_ast::decl::VariantData;
+    let data = match &v.data {
+        Maybe::Some(d) => d,
+        Maybe::None    => return false,
+    };
+    match data {
+        VariantData::Tuple(types) => types.iter().any(|t| type_mentions_name(t, type_name)),
+        VariantData::Record(fields) => fields.iter().any(|f| type_mentions_name(&f.ty, type_name)),
+    }
+}
+
+fn variant_is_path_cell(v: &verum_ast::decl::Variant) -> bool {
+    matches!(&v.path_endpoints, Maybe::Some(_))
+}
+
+fn classify_type_decl(
+    decl: &verum_ast::decl::TypeDecl,
+    rel_path: &Path,
+    out: &mut Vec<HygieneEntry>,
+) {
+    use verum_ast::decl::TypeDeclBody;
+    let name_str = decl.name.name.as_str().to_string();
+    match &decl.body {
+        TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants) => {
+            let any_path_cell = variants.iter().any(variant_is_path_cell);
+            let any_recursive = variants.iter().any(|v| variant_is_self_recursive(v, &name_str));
+            if any_path_cell {
+                out.push(HygieneEntry {
+                    class: HygieneClass::HigherInductive,
+                    item_name: decl.name.name.clone(),
+                    file: rel_path.to_path_buf(),
+                });
+            } else if any_recursive {
+                out.push(HygieneEntry {
+                    class: HygieneClass::Inductive,
+                    item_name: decl.name.name.clone(),
+                    file: rel_path.to_path_buf(),
+                });
+            }
+        }
+        TypeDeclBody::Coinductive(_) => {
+            out.push(HygieneEntry {
+                class: HygieneClass::Coinductive,
+                item_name: decl.name.name.clone(),
+                file: rel_path.to_path_buf(),
+            });
+        }
+        TypeDeclBody::Newtype(_) => {
+            out.push(HygieneEntry {
+                class: HygieneClass::Newtype,
+                item_name: decl.name.name.clone(),
+                file: rel_path.to_path_buf(),
+            });
+        }
+        _ => {}
+    }
+}
+
+fn classify_function_decl(
+    decl: &verum_ast::decl::FunctionDecl,
+    rel_path: &Path,
+    out: &mut Vec<HygieneEntry>,
+) {
+    let mut has_recursive   = false;
+    let mut has_corecursive = false;
+    for attr in decl.attributes.iter() {
+        if attr.is_named("recursive")   { has_recursive   = true; }
+        if attr.is_named("corecursive") { has_corecursive = true; }
+    }
+    if has_corecursive {
+        out.push(HygieneEntry {
+            class: HygieneClass::Corecursive,
+            item_name: decl.name.name.clone(),
+            file: rel_path.to_path_buf(),
+        });
+    }
+    if has_recursive {
+        out.push(HygieneEntry {
+            class: HygieneClass::Recursive,
+            item_name: decl.name.name.clone(),
+            file: rel_path.to_path_buf(),
+        });
+    }
+}
+
+pub fn audit_hygiene() -> Result<()> {
+    audit_hygiene_with_format(AuditFormat::Plain)
+}
+
+pub fn audit_hygiene_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Walking Articulation Hygiene factorisations (VUVA §13.2)");
+    }
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut entries: Vec<HygieneEntry> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+        for item in &module.items {
+            match &item.kind {
+                ItemKind::Type(decl) => classify_type_decl(decl, &rel_path, &mut entries),
+                ItemKind::Function(decl) => classify_function_decl(decl, &rel_path, &mut entries),
+                _ => {}
+            }
+        }
+    }
+
+    let mut by_class: BTreeMap<&'static str, Vec<&HygieneEntry>> = BTreeMap::new();
+    for e in &entries {
+        by_class.entry(e.class.as_str()).or_default().push(e);
+    }
+
+    match format {
+        AuditFormat::Plain => print_hygiene_report(parsed_files, skipped_files, &by_class, &entries),
+        AuditFormat::Json  => print_hygiene_report_json(parsed_files, skipped_files, &by_class, &entries),
+    }
+    Ok(())
+}
+
+fn print_hygiene_report(
+    parsed_files: usize,
+    skipped_files: usize,
+    by_class: &BTreeMap<&'static str, Vec<&HygieneEntry>>,
+    entries: &[HygieneEntry],
+) {
+    println!();
+    println!("{}", "Articulation Hygiene factorisations (VUVA §13.2)".bold());
+    println!("{}", "─".repeat(50).dimmed());
+    println!(
+        "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
+        parsed_files, skipped_files
+    );
+    println!();
+    if entries.is_empty() {
+        println!("  {} no self-referential surfaces detected.", "·".dimmed());
+        println!();
+        return;
+    }
+    println!(
+        "  Found {} self-referential surface(s) across {} hygiene class(es):",
+        entries.len().to_string().bold(),
+        by_class.len().to_string().bold()
+    );
+    println!();
+    for (class_name, items) in by_class {
+        let factor = items.first().map(|e| e.class.factorisation()).unwrap_or("");
+        println!(
+            "  {} {}  factorisation={}",
+            "▸".magenta(),
+            class_name.bold(),
+            factor.dimmed()
+        );
+        for e in items {
+            println!(
+                "    {} {}  —  {}",
+                "·".dimmed(),
+                e.item_name.as_str().cyan(),
+                e.file.display()
+            );
+        }
+        println!();
+    }
+}
+
+fn print_hygiene_report_json(
+    parsed_files: usize,
+    skipped_files: usize,
+    by_class: &BTreeMap<&'static str, Vec<&HygieneEntry>>,
+    entries: &[HygieneEntry],
+) {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
+    out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
+    out.push_str("  \"classes\": [\n");
+    let total = by_class.len();
+    for (i, (class_name, items)) in by_class.iter().enumerate() {
+        let factor = items.first().map(|e| e.class.factorisation()).unwrap_or("");
+        out.push_str("    {\n");
+        out.push_str(&format!("      \"class\": \"{}\",\n", class_name));
+        out.push_str(&format!(
+            "      \"factorisation\": \"{}\",\n",
+            json_escape(factor)
+        ));
+        out.push_str("      \"entries\": [\n");
+        let total_e = items.len();
+        for (j, e) in items.iter().enumerate() {
+            out.push_str("        {\n");
+            out.push_str(&format!(
+                "          \"item_name\": \"{}\",\n",
+                json_escape(e.item_name.as_str())
+            ));
+            out.push_str(&format!(
+                "          \"file\": \"{}\"\n",
+                json_escape(&e.file.display().to_string())
+            ));
+            out.push_str(if j + 1 == total_e { "        }\n" } else { "        },\n" });
+        }
+        out.push_str("      ]\n");
+        out.push_str(if i + 1 == total { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ],\n");
+    out.push_str(&format!("  \"total_entries\": {}\n", entries.len()));
+    out.push_str("}\n");
+    print!("{}", out);
+}

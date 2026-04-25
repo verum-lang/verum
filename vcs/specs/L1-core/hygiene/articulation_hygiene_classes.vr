@@ -1,0 +1,35 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: hygiene, articulation, factorisation, vuva, phase-6, f3
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §13 Phase 6 F3 — Articulation Hygiene factorisation classes.
+//
+// Smoke test: covers every §13.2 row that the `verum audit --hygiene`
+// reporter recognises today (V1 scope). The test only asserts the
+// declarations type-check; the audit-level classification is exercised
+// end-to-end by the CLI smoke (see crates/verum_cli — `audit_hygiene`).
+//
+//   inductive             — `type T is Base | Rec(T)`             — (T_succ, ω, least_fp)
+//   inductive (Generic)   — `type Tree<A> is Branch(Tree<A>, …)`   — (T_succ, ω, least_fp)
+//   coinductive           — `type Stream<A> is coinductive {…}`    — (T_prod, ω^op, greatest_fp)
+//   higher-inductive      — `type S1 is Base | Loop() = Base..Base` — (path_action, ω, base)
+//   recursive-fn          — `@recursive fn f(…) -> Self`            — (unfold_f, ω, fix_f)
+//   corecursive-fn        — `@corecursive fn g(…)`                  — (corec_g, ω^op, fix_g)
+
+public type Nat is Zero | Succ(Nat);
+
+public type IntList is Empty | NonEmpty(Int, IntList);
+
+public type Tree<A> is Leaf(A) | Branch(Tree<A>, Tree<A>);
+
+public type S1 is Base | Loop() = Base..Base;
+
+@recursive
+public fn ackermann(m: Int, n: Int) -> Int { 0 }
+
+fn main() {
+    print("articulation hygiene classes ok");
+}

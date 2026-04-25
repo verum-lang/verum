@@ -123,7 +123,7 @@ The kernel implements **one** non-trivial typing rule beyond CCHM + refinements 
   Γ ⊢ { x:A | P } : Type_n
 ```
 
-where `dp` is the M-iteration depth function on CoreTerms (defined formally in §4.3), and `dp(A) + 1` is the M-stratum at which a comprehension over `A` lives — exactly the threshold T-2f* forbids `P` from reaching. The conclusion `Refined(A, x, P)` lives at the same universe as `A` (no universe inflation), but at strictly *higher* M-stratum than its predicate. If `dp(P) ≥ dp(A) + 1`, the kernel rejects the term with `E_K_DEPTH_VIOLATION`.
+where `dp` is the M-iteration depth function on CoreTerms (defined formally in §4.3), and `dp(A) + 1` is the M-stratum at which a comprehension over `A` lives — exactly the threshold T-2f* forbids `P` from reaching. The conclusion `Refined(A, x, P)` lives at the same universe as `A` (no universe inflation), but at strictly *higher* M-stratum than its predicate. If `dp(P) ≥ dp(A) + 1`, the kernel rejects the term with `KernelError::DepthViolation { binder, base_depth, pred_depth }` (informally `E_K_DEPTH_VIOLATION`); the exact variant is the one in `crates/verum_kernel/src/lib.rs::KernelError`.
 
 The rule presented here is **identical** to §4.4's K-Refine — the formal calculus and the executive summary use the same inequality (`dp(P) < dp(A) + 1`).
 
@@ -1171,9 +1171,23 @@ Every surface "self-X" (`Self`, `This`, `Same`, `Own`, …) in Verum must factor
 
 ### 13.3 Compiler enforcement (`core.articulation.hygiene`)
 
-`verum check --hygiene src/` walks each `@recursive` / `@corecursive` / `self` occurrence and verifies the factorisation exists. Missing or ambiguous factorisation → `E_HYGIENE_UNFACTORED_SELF`.
+**V1 reporter (shipped)** — `verum audit --hygiene` (`crates/verum_cli/src/commands/audit.rs::audit_hygiene_with_format`) walks every type and function declaration in the project and classifies each self-referential surface form per the §13.2 hygiene table, emitting the (Φ, κ, t) factorisation alongside each item. Recognised classes:
 
-Rationale: Yanofsky paradox closure (105.T) requires that every self-reference goes through an explicit iteration with depth witness. `K-Refine` enforces this at the CoreTerm level; `core.articulation.hygiene` lifts the same discipline to surface syntax.
+| Surface detected by V1 | Hygiene class | Factorisation |
+|---|---|---|
+| `type T is Base \| Rec(T)` | `inductive` | `(T_succ, ω, least_fp)` |
+| `type Tree<A> is Branch(Tree<A>, Tree<A>)` (Generic-arg recursion) | `inductive` | as above |
+| `type Stream<A> is coinductive { … }` | `coinductive` | `(T_prod, ω^op, greatest_fp)` |
+| `type S1 is Base \| Loop() = Base..Base` (path-cell variant) | `higher-inductive` | `(path_action, ω, base)` |
+| `type X is (Y)` (newtype body) | `newtype` | `(Id, 1, base)` |
+| `@recursive fn f(...) -> Self` | `recursive-fn` | `(unfold_f, ω, fix_f)` |
+| `@corecursive fn g(...)` | `corecursive-fn` | `(corec_g, ω^op, fix_g)` |
+
+Output formats: `plain` (default, with Unicode rendering of the factorisation) and `json` (stable schema_version=1, with `classes[].entries[].file` for CI consumption).
+
+**V2 enforcement (deferred)** — `verum check --hygiene src/` will additionally walk raw `self` occurrences inside function bodies and the `Self::Item` / `&mut self` factorisations from §13.2 (these require a typed resolution pass beyond the syntactic AST walk used by the V1 reporter). Missing or ambiguous factorisation will produce `E_HYGIENE_UNFACTORED_SELF`.
+
+**Rationale.** Yanofsky paradox closure (105.T) requires that every self-reference goes through an explicit iteration with depth witness. `K-Refine` enforces this at the CoreTerm level; `core.articulation.hygiene` lifts the same discipline to surface syntax. The V1 reporter is non-binding (advisory only) so existing code is not broken; V2 promotes the diagnostics to errors once the surface coverage is complete.
 
 ---
 
@@ -1263,7 +1277,7 @@ Receipts are content-addressed; CI compares against a committed baseline.
 - **Task A2**: document the three refinement forms' canonical `Refined` CoreTerm (this spec, §5). Land a grammar test.
 - **Task A3**: land `@framework(name, citation)` parsing + kernel `FrameworkAxiom` node.
 - **Task A4**: expose `verum audit --framework-axioms` CLI.
-- **Task A5**: wire `K-Refine` depth-check into the existing `verum_types` refinement checker. Add diagnostic `E_K_DEPTH_VIOLATION`.
+- **Task A5** (✓ shipped): `K-Refine` depth-check is wired in the kernel — `crates/verum_kernel/src/lib.rs::KernelError::DepthViolation { binder, base_depth, pred_depth }` (variant at line 1010, emitted at 1325). Ten regression tests exercise the rule end-to-end at `crates/verum_kernel/tests/k_refine_depth.rs`. The spec-name `E_K_DEPTH_VIOLATION` is an informal alias of the variant.
 
 ### 16.2 Phase 2 (3–6 months) — Gradual ladder
 
@@ -1305,7 +1319,7 @@ Receipts are content-addressed; CI compares against a committed baseline.
 
 - **Task F1**: `verum self-verify --corpus-coord` produces $(\mathrm{Fw}, \nu, \tau)$ per theorem.
 - **Task F2**: Verum proves its own four correspondence theorems (Theorems 4.1–4.4 of the Verum-MSFS integration paper) inside Verum itself.
-- **Task F3**: Articulation Hygiene compiler pass.
+- **Task F3** (V1 ✓ shipped): Articulation Hygiene reporter at `verum audit --hygiene` — covers six §13.2 surface forms (inductive / coinductive / higher-inductive / newtype / `@recursive` / `@corecursive`); plain + JSON output. V2 enforcement (raw `self` walk + `E_HYGIENE_UNFACTORED_SELF` diagnostic) deferred.
 - **Task F4**: Quantum-epistemic lattice (Noesis research surface only; not in Verum stdlib).
 - **Task F5**: `verum audit --owl2-classify` — OWL 2 classification hierarchy for the current corpus (§21.10).
 - **Task F6**: OWL 2 bridges to other framework packages — `owl2_fs → {baez_dolan, schreiber_dcct, connes_reconstruction, petz_classification}` via `core.theory_interop` (§21.7).

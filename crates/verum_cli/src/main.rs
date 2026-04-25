@@ -770,6 +770,15 @@ enum Commands {
         #[clap(long)]
         coord: bool,
 
+        /// Articulation Hygiene audit (VUVA §13.3, F3): walk every type
+        /// and function declaration, classify each self-referential
+        /// surface form per the §13.2 hygiene table, and report the
+        /// (Φ, κ, t) factorisation for each. Detects inductive,
+        /// coinductive, higher-inductive, newtype, @recursive, and
+        /// @corecursive surfaces.
+        #[clap(long)]
+        hygiene: bool,
+
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
@@ -1824,6 +1833,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_rules,
             epsilon,
             coord,
+            hygiene,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -1847,6 +1857,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_epsilon_with_format(output_format)
             } else if coord {
                 commands::audit::audit_coord_with_format(output_format)
+            } else if hygiene {
+                commands::audit::audit_hygiene_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,
