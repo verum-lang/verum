@@ -424,6 +424,13 @@ enum Commands {
         /// Filter to issues at this level or higher: error | warn | info | hint.
         #[clap(long, value_name = "LEVEL")]
         severity: Option<Text>,
+        /// Worker thread count for the parallel file scanner. `0`
+        /// falls back to a sequential single-threaded run (useful
+        /// for debugging non-deterministic output). The default is
+        /// `rayon::current_num_threads()`, which honours
+        /// `RAYON_NUM_THREADS` if set.
+        #[clap(long, value_name = "N")]
+        threads: Option<usize>,
 
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
@@ -1456,6 +1463,7 @@ fn run_command(cli: Cli) -> Result<()> {
             profile,
             since,
             severity,
+            threads,
             feature_overrides,
         } => {
             feature_overrides::install(feature_overrides);
@@ -1484,6 +1492,21 @@ fn run_command(cli: Cli) -> Result<()> {
                 None => None,
             };
             let since_ref: Option<String> = since.map(|t| t.as_str().to_string());
+
+            // Thread-pool sizing: `--threads 0` forces a sequential
+            // run (single-thread rayon pool); any other value passes
+            // straight through. We build a *global* pool because
+            // rayon's API only allows it once per process.
+            if let Some(n) = threads {
+                let pool_threads = if n == 0 { 1 } else { n };
+                // Best-effort: if a pool is already initialised
+                // (e.g. by an earlier subcommand), the second call
+                // is a no-op — the existing pool is left in place.
+                let _ = rayon::ThreadPoolBuilder::new()
+                    .num_threads(pool_threads)
+                    .build_global();
+            }
+
             commands::lint::run_extended(
                 fix,
                 deny_warnings,

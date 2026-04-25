@@ -1,0 +1,5 @@
+fn item_11() {
+    // TODO: clean up
+    let x = Box::new(11);
+    let y = Heap(11);
+}

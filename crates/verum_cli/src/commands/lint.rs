@@ -352,8 +352,6 @@ pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
     let cfg = load_full_lint_config();
 
     let mut all_issues = List::new();
-    let mut total_files = 0;
-
     // Find all .vr files in src/ and core/
     let search_dirs: Vec<PathBuf> = ["src", "core"]
         .iter()
@@ -365,35 +363,11 @@ pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
         return Err(CliError::Custom("No src/ or core/ directory found".into()));
     }
 
-    for search_dir in &search_dirs {
-        for entry in WalkDir::new(search_dir)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if path.is_file() && is_verum_file(path) {
-                total_files += 1;
-
-                match lint_file(path) {
-                    Ok(issues) => {
-                        // Apply effective_level — covers severity_map,
-                        // disabled/denied/allowed/warned, plus the
-                        // preset's contribution to severity_map.
-                        let filtered: Vec<_> = issues.into_iter()
-                            .filter_map(|mut i| {
-                                let lvl = cfg.effective_level(i.rule, i.level)?;
-                                i.level = lvl;
-                                Some(i)
-                            })
-                            .collect();
-                        all_issues.extend(filtered);
-                    }
-                    Err(e) => {
-                        ui::error(&format!("Failed to lint {}: {}", path.display(), e));
-                    }
-                }
-            }
+    let (parallel_issues, total_files) = lint_paths_parallel(&search_dirs, &cfg);
+    for mut i in parallel_issues {
+        if let Some(lvl) = cfg.effective_level(i.rule, i.level) {
+            i.level = lvl;
+            all_issues.push(i);
         }
     }
 
@@ -2524,15 +2498,23 @@ fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>
 // Main file linting
 // ---------------------------------------------------------------------------
 
-/// Lint a single file by running all rules.
+/// Lint a single file by running all rules. Reloads the config
+/// per call — used by entry points that don't have a pre-loaded
+/// `LintConfig` to share. Hot paths (the parallel runner) should
+/// call `lint_file_with` instead so the config is loaded once.
 fn lint_file(path: &Path) -> Result<List<LintIssue>> {
+    let cfg = load_full_lint_config();
+    lint_file_with(path, &cfg)
+}
+
+/// Lint a single file with an externally-provided `LintConfig`.
+/// Reading the file is the only I/O performed here, which makes
+/// this function trivially `Send + Sync` and parallelisable.
+fn lint_file_with(path: &Path, cfg: &LintConfig) -> Result<List<LintIssue>> {
     let content = fs::read_to_string(path)?;
     let mut issues = List::new();
-
-    // Parse file info once for all rules
     let info = FileInfo::parse(&content);
 
-    // Core rules (1-10)
     check_unchecked_refinement(path, &info, &mut issues);
     check_missing_context_decl(path, &info, &mut issues);
     check_unused_imports(path, &info, &mut issues);
@@ -2543,58 +2525,93 @@ fn lint_file(path: &Path) -> Result<List<LintIssue>> {
     check_missing_cleanup(path, &info, &mut issues);
     check_deprecated_syntax(path, &info, &mut issues);
     check_cbgr_hotspot(path, &info, &mut issues);
-
-    // Extended rules (11-20)
     check_extended_rules(path, &info, &mut issues);
+    for issue in lint_custom_rules(path, &content, cfg) {
+        issues.push(issue);
+    }
 
-    // AST-driven passes (Phase B.1+). These parse the source via
-    // verum_parser and walk the resulting Module via the verum_ast
-    // Visitor trait, giving them structural knowledge that text-scan
-    // rules can't have. New refinement / capability / context /
-    // CBGR / verification / naming / architecture rules implement
-    // `LintPass` in `lint_engine.rs` and become available here
-    // automatically via `lint_engine::passes()`.
-    //
-    // Parse failures fall through silently — we still want text-scan
-    // rules to report on a file that doesn't fully parse. AST rules
-    // simply don't fire on such files.
-    {
-        use verum_ast::FileId;
-        use verum_lexer::Lexer;
-        use verum_parser::VerumParser;
-        let fid = FileId::new(0);
-        let lexer = Lexer::new(&content, fid);
-        let parser = VerumParser::new();
-        if let Ok(module) = parser.parse_module(lexer, fid) {
-            let cfg = load_full_lint_config();
-            let ctx = super::lint_engine::LintCtx {
-                file: path,
-                source: &content,
-                module: &module,
-                config: Some(&cfg),
-            };
-            for issue in super::lint_engine::run(&ctx) {
-                issues.push(issue);
-            }
+    // AST-driven passes — parse the source via verum_parser and walk
+    // the Module with verum_ast::Visitor. Parse failures fall through
+    // silently so text-scan output is still produced.
+    use verum_ast::FileId;
+    use verum_lexer::Lexer;
+    use verum_parser::VerumParser;
+    let fid = FileId::new(0);
+    let lexer = Lexer::new(&content, fid);
+    let parser = VerumParser::new();
+    if let Ok(module) = parser.parse_module(lexer, fid) {
+        let ctx = super::lint_engine::LintCtx {
+            file: path,
+            source: &content,
+            module: &module,
+            config: Some(cfg),
+        };
+        for issue in super::lint_engine::run(&ctx) {
+            issues.push(issue);
+        }
 
-            // In-source suppression: collect every @allow / @deny /
-            // @warn(rule, reason = "...") attribute on every item, scope
-            // it to the item's source-line span, and apply it to ALL
-            // diagnostics from this file (text-scan + AST). Most-
-            // specific (smallest line range) wins on overlap.
-            let scopes =
-                super::lint_engine::collect_suppressions(&module, &content);
-            if !scopes.is_empty() {
-                let collected: Vec<_> = std::mem::take(&mut issues).into_iter().collect();
-                let suppressed = super::lint_engine::apply_suppressions(collected, &scopes);
-                for i in suppressed {
-                    issues.push(i);
-                }
+        let scopes = super::lint_engine::collect_suppressions(&module, &content);
+        if !scopes.is_empty() {
+            let collected: Vec<_> = std::mem::take(&mut issues).into_iter().collect();
+            let suppressed = super::lint_engine::apply_suppressions(collected, &scopes);
+            for i in suppressed {
+                issues.push(i);
             }
         }
     }
 
     Ok(issues)
+}
+
+/// Sort key that gives us deterministic output regardless of which
+/// thread reported the issue first.
+fn issue_sort_key(i: &LintIssue) -> (String, usize, usize, &'static str) {
+    (
+        i.file.to_string_lossy().into_owned(),
+        i.line,
+        i.column,
+        i.rule,
+    )
+}
+
+/// Discover every `.vr` file under each search root, lint them in
+/// parallel, return a flat sorted issue list. Errors per-file are
+/// surfaced via `eprintln!` rather than failing the whole run — one
+/// unreadable fixture should not block the rest of the corpus.
+fn lint_paths_parallel(
+    search_dirs: &[PathBuf],
+    cfg: &LintConfig,
+) -> (Vec<LintIssue>, usize) {
+    use rayon::prelude::*;
+
+    let files: Vec<PathBuf> = search_dirs
+        .iter()
+        .flat_map(|d| {
+            WalkDir::new(d)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .map(|e| e.into_path())
+                .filter(|p| p.is_file() && is_verum_file(p))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let total_files = files.len();
+
+    let issues: Vec<LintIssue> = files
+        .par_iter()
+        .flat_map(|path| match lint_file_with(path, cfg) {
+            Ok(list) => list.into_iter().collect::<Vec<_>>(),
+            Err(e) => {
+                eprintln!("warning: failed to lint {}: {}", path.display(), e);
+                Vec::new()
+            }
+        })
+        .collect();
+
+    let mut issues = issues;
+    issues.sort_by(|a, b| issue_sort_key(a).cmp(&issue_sort_key(b)));
+    (issues, total_files)
 }
 
 /// Extended lint rules (11-20): Verum-specific analysis beyond Clippy.
@@ -3325,20 +3342,11 @@ pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat)
         return Err(CliError::Custom("No src/ or core/ directory found".into()));
     }
 
-    for d in &search_dirs {
-        for entry in WalkDir::new(d).follow_links(false).into_iter().filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if !path.is_file() || !is_verum_file(path) {
-                continue;
-            }
-            if let Ok(issues) = lint_file(path) {
-                for mut i in issues {
-                    if let Some(lvl) = cfg.effective_level(i.rule, i.level) {
-                        i.level = lvl;
-                        all_issues.push(i);
-                    }
-                }
-            }
+    let (parallel_issues, _files_seen) = lint_paths_parallel(&search_dirs, &cfg);
+    for mut i in parallel_issues {
+        if let Some(lvl) = cfg.effective_level(i.rule, i.level) {
+            i.level = lvl;
+            all_issues.push(i);
         }
     }
 
@@ -3353,7 +3361,7 @@ pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat)
     }
     emit_issues(&all_issues, format)?;
 
-    let _ = fix; // auto-fix in machine modes deferred to Phase B
+    let _ = fix; // auto-fix in machine modes is handled by the pretty runner.
     if errors > 0 {
         Err(CliError::Custom(format!("{} lint errors", errors)))
     } else if deny_warnings && warnings > 0 {
@@ -3543,35 +3551,48 @@ pub fn run_extended(
         return Err(CliError::Custom("No src/ or core/ directory found".into()));
     }
 
-    let mut all_issues: Vec<LintIssue> = Vec::new();
-    for d in &search_dirs {
-        for entry in WalkDir::new(d).follow_links(false).into_iter().filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if !path.is_file() || !is_verum_file(path) {
-                continue;
-            }
-            if let Some(allow) = &changed_files {
-                if !allow.iter().any(|p| path.ends_with(p) || p == path) {
-                    continue;
+    // Build the file list with the --since filter pre-applied. The
+    // parallel runner then sees only the work it needs to do.
+    let files: Vec<PathBuf> = search_dirs
+        .iter()
+        .flat_map(|d| {
+            WalkDir::new(d)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .map(|e| e.into_path())
+                .filter(|p| p.is_file() && is_verum_file(p))
+                .collect::<Vec<_>>()
+        })
+        .filter(|p| match &changed_files {
+            Some(allow) => allow.iter().any(|q| p.ends_with(q) || q == p),
+            None => true,
+        })
+        .collect();
+
+    use rayon::prelude::*;
+    let raw_issues: Vec<LintIssue> = files
+        .par_iter()
+        .flat_map(|path| match lint_file_with(path, &cfg) {
+            Ok(list) => list.into_iter().collect::<Vec<_>>(),
+            Err(_) => Vec::new(),
+        })
+        .collect();
+
+    let mut all_issues: Vec<LintIssue> = raw_issues
+        .into_iter()
+        .filter_map(|mut i| {
+            let lvl = cfg.effective_level_for_file(i.rule, &i.file, i.level)?;
+            if let Some(min) = severity_min {
+                if !meets_severity(lvl, min) {
+                    return None;
                 }
             }
-            if let Ok(issues) = lint_file(path) {
-                for mut i in issues {
-                    // Per-file overrides + severity_map + lists + default.
-                    if let Some(lvl) = cfg.effective_level_for_file(i.rule, &i.file, i.level) {
-                        i.level = lvl;
-                        // --severity LEVEL filter.
-                        if let Some(min) = severity_min {
-                            if !meets_severity(lvl, min) {
-                                continue;
-                            }
-                        }
-                        all_issues.push(i);
-                    }
-                }
-            }
-        }
-    }
+            i.level = lvl;
+            Some(i)
+        })
+        .collect();
+    all_issues.sort_by(|a, b| issue_sort_key(a).cmp(&issue_sort_key(b)));
 
     let mut errors = 0usize;
     let mut warnings = 0usize;
