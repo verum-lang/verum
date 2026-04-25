@@ -12,7 +12,7 @@
 // Covers sqlite-native.md §7.5 (MemDbVfs).
 
 mount core.database.sqlite.native.l0_vfs.memdb_vfs.{
-    open_memory, memdb_size, memdb_read, memdb_write, memdb_close
+    memdb_open, memdb_size, memdb_read, memdb_write, memdb_close
 };
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{flags_rwc};
 mount collections.List;
@@ -20,9 +20,9 @@ mount collections.List;
 fn main() {
     let flags = flags_rwc();
     let name: Text = ":memory:";
-    let mut file = match open_memory(&name, flags) {
+    let mut file = match memdb_open(&name, flags) {
         Ok(f) => f,
-        Err(_) => { panic("open_memory failed"); return; }
+        Err(_) => { panic("memdb_open failed"); return; }
     };
 
     // Scattered writes on page boundaries.

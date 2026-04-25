@@ -11531,14 +11531,19 @@ impl TypeChecker {
                             if provided_args < required_params && !has_explicit_type_args
                                 && !self.stdlib_single_file_mode
                             {
-                                return Err(TypeError::OtherWithCode {
+                                return Err(TypeError::OtherWithCodeSpanned {
                                     code: verum_common::Text::from("E102"),
                                     msg: verum_common::Text::from(format!(
-                                        "Function requires at least {} argument{}, got {}",
+                                        "Function requires at least {} argument{}, got {}{}",
                                         required_params,
                                         if required_params == 1 { "" } else { "s" },
-                                        provided_args
+                                        provided_args,
+                                        func_name
+                                            .as_ref()
+                                            .map(|n| format!(" (calling `{}`)", n))
+                                            .unwrap_or_default()
                                     )),
+                                    span: expr.span,
                                 });
                             }
 
@@ -31799,74 +31804,51 @@ impl TypeChecker {
         path: &str,
         registry: &verum_modules::ModuleRegistry,
     ) -> Option<verum_common::Shared<verum_modules::ModuleInfo>> {
-        // Try direct path first
-        if let Some(module) = registry.get_by_path(path) {
+        // MOD-CRIT-1: route every path-alias decision through the
+        // registry's central alias map. The hardcoded table that used
+        // to live here now lives in pipeline.rs::install_canonical_
+        // module_aliases, owned by ModuleRegistry. This funnel point
+        // eliminates the loader/type-resolver path-dedup incoherence:
+        // both subsystems consult the same alias map, so a path
+        // resolved here ALWAYS matches the canonical decision the
+        // loader made at registration time.
+        if let verum_common::Maybe::Some(module) = registry.get_by_path_aliased(path) {
             return Some(module);
         }
 
-        // Generate and try candidate paths
-        // Modules are registered with "core." prefix, so normalize paths to that form
+        // Prefix transformations — kept here because they are
+        // syntactic, not alias-bound. Modules are registered with
+        // "core." prefix, so normalise paths to that form on miss.
         if path.starts_with("core.") {
-            // core.io.path is already canonical
-            // Also try bare path: core.io.path -> io.path
+            // core.io.path is already canonical;
+            // also try bare path: core.io.path -> io.path
             let stripped = &path[5..];
-            if let Some(module) = registry.get_by_path(stripped) {
+            if let verum_common::Maybe::Some(module) = registry.get_by_path_aliased(stripped) {
                 return Some(module);
             }
         } else if path.starts_with("std.") {
             // std.io.path -> core.io.path (legacy compatibility)
             let stripped = &path[4..];
-            if let Some(module) = registry.get_by_path(&format!("core.{}", stripped)) {
+            if let verum_common::Maybe::Some(module) =
+                registry.get_by_path_aliased(&format!("core.{}", stripped))
+            {
                 return Some(module);
             }
-            // Also try bare path
-            if let Some(module) = registry.get_by_path(stripped) {
+            if let verum_common::Maybe::Some(module) = registry.get_by_path_aliased(stripped) {
                 return Some(module);
             }
         } else {
             // io.path -> core.io.path (canonical form)
-            if let Some(module) = registry.get_by_path(&format!("core.{}", path)) {
-                return Some(module);
-            }
-        }
-
-        // Module path aliases: semantic short names that map to actual module paths.
-        // Tests and user code may use intuitive names like `core.memory` or `core.maybe`
-        // instead of the canonical `core.mem` or `core.base.maybe`.
-        let aliased_path = match path {
-            "core.memory" => Some("core.base.memory"),
-            "core.maybe" => Some("core.base.maybe"),
-            "core.result" => Some("core.base.result"),
-            // Platform-dependent thread module: resolve to host platform
-            "core.thread" => {
-                if cfg!(target_os = "macos") {
-                    Some("core.sys.darwin.thread")
-                } else if cfg!(target_os = "linux") {
-                    Some("core.sys.linux.thread")
-                } else if cfg!(target_os = "windows") {
-                    Some("core.sys.windows.thread")
-                } else {
-                    None
-                }
-            }
-            "core.process" => Some("core.io.process"),
-            "core.string" | "core.text" => Some("core.text.text"),
-            "core.list" => Some("core.collections.list"),
-            "core.map" => Some("core.collections.map"),
-            "core.set" => Some("core.collections.set"),
-            // Channel module alias (tests use core.sync.mpsc but it's core.async.channel)
-            "core.sync.mpsc" => Some("core.async.channel"),
-            _ => None,
-        };
-        if let Some(alias) = aliased_path {
-            if let Some(module) = registry.get_by_path(alias) {
+            if let verum_common::Maybe::Some(module) =
+                registry.get_by_path_aliased(&format!("core.{}", path))
+            {
                 return Some(module);
             }
         }
 
         // Try matching with `.mod` suffix stripped (handles residual mod.vr paths)
         let with_mod = format!("{}.mod", path);
-        if let Some(module) = registry.get_by_path(&with_mod) {
+        if let verum_common::Maybe::Some(module) = registry.get_by_path_aliased(&with_mod) {
             return Some(module);
         }
 

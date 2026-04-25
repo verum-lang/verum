@@ -254,6 +254,9 @@ impl From<TypeError> for VerumError {
             TypeError::OtherWithCode { msg, .. } => VerumError::Other {
                 message: msg.clone(),
             },
+            TypeError::OtherWithCodeSpanned { msg, .. } => VerumError::Other {
+                message: msg.clone(),
+            },
             TypeError::NonContextProtocolInUsing { name, .. } => VerumError::Other {
                 message: format!(
                     "protocol '{}' cannot be used as a context; use 'context protocol {}' to make it injectable",

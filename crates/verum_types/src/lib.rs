@@ -1787,6 +1787,13 @@ pub enum TypeError {
 
     #[error("{msg}")]
     OtherWithCode { code: Text, msg: Text },
+
+    #[error("{msg}")]
+    OtherWithCodeSpanned {
+        code: Text,
+        msg: Text,
+        span: verum_ast::span::Span,
+    },
 }
 
 impl TypeError {
@@ -1902,6 +1909,7 @@ impl TypeError {
             InvalidAsmConstType { span, .. } => *span,
             AsmOutputNotLvalue { span } => *span,
             RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
+            OtherWithCodeSpanned { span, .. } => *span,
         }
     }
 
@@ -2901,6 +2909,16 @@ impl TypeError {
             Other(msg) => DiagnosticBuilder::error().message(msg.as_str()).build(),
 
             OtherWithCode { code, msg } => DiagnosticBuilder::error().code(code.as_str()).message(msg.as_str()).build(),
+
+            OtherWithCodeSpanned { code, msg, span } => {
+                let mut builder = DiagnosticBuilder::error()
+                    .code(code.as_str())
+                    .message(msg.as_str());
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder.build()
+            }
 
             // Definite Assignment Analysis Errors (E201)
             UseOfUninitializedVariable { name, span } => {

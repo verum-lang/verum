@@ -39,7 +39,7 @@ mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
 // =============================================================================
 
 public type MemDbVfs is {
-    // Module-level instance has no state — each `open_memory` returns a
+    // Module-level instance has no state — each `memdb_open` returns a
     // fresh MemDbFile. A future SharedMemDbVfs will hold a path → blob
     // registry here to let multiple connections see the same
     // :memory:?cache=shared URI.
@@ -59,11 +59,11 @@ public type MemDbFile is {
 /// Open (or create) an in-memory file. `flags.create` is accepted for API
 /// parity but always honoured since in-memory files cannot pre-exist.
 /// `flags.read_only` is respected on write attempts.
-public fn open_memory(name: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsError> {
+public fn memdb_open(name: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsError> {
     if !flags.read_only && !flags.read_write {
         return Err(VfsError {
             kind: InvalidArgument,
-            message: "open_memory: neither read_only nor read_write set",
+            message: "memdb_open: neither read_only nor read_write set",
         });
     }
     Ok(MemDbFile {
@@ -75,7 +75,7 @@ public fn open_memory(name: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsErr
 }
 
 /// Shorthand: open an in-memory file in read-write + create mode.
-/// Equivalent to `open_memory(name, flags_rwc())` but skips the
+/// Equivalent to `memdb_open(name, flags_rwc())` but skips the
 /// intermediate `OpenFlags` struct — useful for callers that don't
 /// care about the flag matrix (e.g. the in-memory Pager skeleton).
 public fn open_memory_rwc(name: &Text) -> Result<MemDbFile, VfsError> {
@@ -311,7 +311,7 @@ implement VfsProtocol for MemDbVfs {
     type File = MemDbFile;
 
     fn open(&self, path: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsError> {
-        open_memory(path, flags)
+        memdb_open(path, flags)
     }
 
     fn delete(&self, _path: &Text, _sync_dir: Bool) -> Result<(), VfsError> {

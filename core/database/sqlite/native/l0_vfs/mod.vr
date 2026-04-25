@@ -50,7 +50,7 @@ public mount .vfs_protocol.SqliteFile;
 public mount .vfs_protocol.VfsProtocol;
 public mount .memdb_vfs.MemDbVfs;
 public mount .memdb_vfs.MemDbFile;
-public mount .memdb_vfs.open_memory;
+public mount .memdb_vfs.memdb_open;
 public mount .memdb_vfs.open_memory_rwc;
 public mount .memdb_vfs.memdb_size;
 public mount .memdb_vfs.memdb_read;
