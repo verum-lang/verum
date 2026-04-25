@@ -82,3 +82,18 @@ public mount core.math.frameworks.petz_classification;
 public mount core.math.frameworks.arnold_catastrophe;
 public mount core.math.frameworks.baez_dolan;
 public mount core.math.frameworks.owl2_fs;
+
+// Meta-classifier package (L5+ canonical-primitive metaclassification)
+// — defines the (Framework, ν, τ) coordinate space of VUVA §10.4 in
+// which the six coordinate-point frameworks above live. See
+// `core.math.frameworks.diakrisis` for the five foundational axioms
+// and VUVA §10.4.1 for the architectural relationship.
+public mount core.math.frameworks.diakrisis;
+
+// Meta-classifier extension packages — carry further structural
+// theorems atop the canonical-primitive five. Each axiom name is
+// foundation-neutral; framework annotation cites the corpus theorem
+// for trusted-boundary audit.
+public mount core.math.frameworks.diakrisis_biadjunction;
+public mount core.math.frameworks.diakrisis_stack_model;
+public mount core.math.frameworks.diakrisis_extensions;

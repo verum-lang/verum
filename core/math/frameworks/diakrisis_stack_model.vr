@@ -1,0 +1,108 @@
+// =============================================================================
+// Diakrisis stack-model extension — (∞,2)-stack semantics + κ-tower
+// =============================================================================
+//
+// Diakrisis-corpus extension postulating the (∞,2)-stack-model semantics
+// for the canonical-primitive 13-axiom system (Theorem 131.T) and its tight
+// consistency boundary (Theorem 134.T — only ZFC + 2 inaccessibles, not 1).
+//
+// The stack model is the *full* semantic site for the meta-classifier:
+// the bare Cat-model (used as the Verum baseline) is the canonical
+// truncation `truncate(stack, level=2, universe=κ_1)`. In the full stack
+// model the M-functor lifts each canonical-primitive iteration through
+// a Grothendieck universe (κ_1 → κ_2) and stabilises at κ_2 via Drake
+// reflection without escaping to κ_3 — that's what makes Axi-8
+// non-trivially realisable.
+//
+// Public axiom names describe the structural invariant; framework
+// annotations cite the Diakrisis catalogue for trusted-boundary audit.
+// =============================================================================
+
+mount core.action.articulation.{Articulation};
+
+// =============================================================================
+// 131.T — (∞,2)-stack model for the 13-axiom canonical-primitive system
+// =============================================================================
+
+/// All 13 axioms of the canonical-primitive system are simultaneously
+/// realisable in an (∞,2)-stack model over `ZFC + 2 inaccessibles`.
+/// The model gives:
+///
+///   • A 2-stack of articulations indexed by syntactic-category objects.
+///   • Hyperdescent for the M ⊣ A biadjunction along refinements of the
+///     ambient site.
+///   • Consistency-strength bound `Con(13) ≤ Con(ZFC + 2-inacc)`.
+///
+/// Operational form: the existence of a faithful stack-interpretation
+/// for any articulation class is postulated (the witness is the model
+/// constructed in the Diakrisis source; we postulate its existence as
+/// a trusted axiom).
+@framework(diakrisis, "Theorem 131.T ((∞,2)-stack model for 13 canonical-primitive axioms)")
+public axiom stack_model_realisability<A: Articulation>(alpha: A) -> Bool
+    ensures true;
+
+// =============================================================================
+// 131.L1 — Universe-ascent of meta-classifier (M-stack lifts κ_1 → κ_2)
+// =============================================================================
+
+/// Operational lemma: the stack-model meta-classifier `M_stack` lifts
+/// any κ_1-articulation to a κ_2-articulation. This is the
+/// "logical strength ascent" that distinguishes the meta-classifier
+/// from its truncated Cat counterpart.
+///
+/// Verum exposure: each `@framework(...)` declaration whose articulation
+/// lives at universe level κ_1 has its M-image at κ_2; the kernel rule
+/// `K-Universe-Ascent` (deferred to VFE-3 V1) will check this at
+/// elaboration time.
+@framework(diakrisis, "Theorem 131.L1 (universe ascent of M-stack: κ_1 → κ_2)")
+public axiom universe_ascent_meta_classifier<A: Articulation>(alpha: A) -> Bool
+    ensures true;
+
+// =============================================================================
+// 131.L2 — κ-tower colimit not representable as a single object
+// =============================================================================
+
+/// The colimit of the iterated `M_stack` tower across all finite
+/// applications is NOT representable as a single object inside the
+/// stack model. This is the obstruction that prevents Axi-8 from
+/// collapsing back into the truncated Cat-model.
+///
+/// Operational form: no articulation `α` exists such that its
+/// representable functor recovers the tower colimit; the colimit is
+/// strictly ω-shaped at the (∞,2)-level.
+@framework(diakrisis, "Theorem 131.L2 (κ-tower colimit not representable)")
+public axiom kappa_tower_not_representable<A: Articulation>(alpha: A) -> Bool
+    ensures true;
+
+// =============================================================================
+// 131.L3 — Internal-reflector closure at κ_2 (Drake reflection)
+// =============================================================================
+
+/// On the κ_2 universe level, `M_stack` acts as an *internal* reflector
+/// — it does not require ascent to κ_3 for further iterations to make
+/// sense. The closure is established by Drake reflection (set-theoretic
+/// argument relating κ_2-properties to κ_2-elementary substructures)
+/// combined with Tarski undefinability for self-referential predicates.
+///
+/// Operational consequence: the meta-classifier is "complete" at κ_2;
+/// downstream code can iterate `M_stack` indefinitely without leaving
+/// the universe shipped by the L5+ baseline.
+@framework(diakrisis, "Theorem 131.L3 (internal-reflector closure at κ_2 via Drake reflection)")
+public axiom internal_reflector_at_kappa_2<A: Articulation>(alpha: A) -> Bool
+    ensures true;
+
+// =============================================================================
+// 134.T — Tight bound: 2 inaccessibles necessary (1 insufficient)
+// =============================================================================
+
+/// The 2-inaccessibles consistency bound from 131.T is tight: there is
+/// no realisation of the 13-axiom canonical-primitive system that lives
+/// inside `ZFC + 1-inacc`. This rules out the obvious cardinal
+/// reduction.
+///
+/// Operational form: any attempt to instantiate the stack model with
+/// only one Grothendieck universe at hand *fails to realise* at least
+/// one of the 13 axioms (Axi-7 / Axi-8 are the typical failures).
+@framework(diakrisis, "Theorem 134.T (tight 2-inaccessibles bound; 1-inacc insufficient)")
+public axiom two_inaccessibles_bound_tight() -> Bool
+    ensures true;

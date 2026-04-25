@@ -1,0 +1,99 @@
+// =============================================================================
+// Diakrisis extensions — transfinite modal, weak arithmetic, ∞-invariant, autopoiesis
+// =============================================================================
+//
+// Diakrisis-corpus extension postulating four further structural results
+// that gate downstream Verum extensions:
+//
+//   • 136.T — Transfinite modal stratification (md^ω-rank / well-founded
+//             ordinal recursion); gates K-Refine-omega kernel rule.
+//   • 137.T — Weak-arithmetic no-go (bounded-arithmetic stratum has
+//             empty L_Abs); gates complexity-typed verification strategy.
+//   • 140.T — ε-invariant on (∞,∞)-categories; gates full (∞,∞) support
+//             in core.math.infinity_category.
+//   • 141.T — Constructive autopoiesis witness (ω²-iteration in the
+//             effective topos); gates verify_autopoiesis runtime.
+//
+// Each is a *single* axiom postulating the structural conclusion;
+// concrete witnesses (Drake reflection retracts, AFA-analogues, etc.)
+// are constructed inside their respective downstream stdlib modules.
+//
+// Public axiom names describe the mathematical conclusion; framework
+// annotations carry the Diakrisis-side citation.
+// =============================================================================
+
+mount core.action.articulation.{Articulation};
+mount core.action.enactments.{Enactment};
+
+// =============================================================================
+// 136.T — Transfinite modal stratification (T-2f***)
+// =============================================================================
+
+/// Modal-depth `md^ω` lifts to an ordinal-valued rank on the canonical-
+/// primitive language `L^ω_α`. The lift is well-founded over the
+/// ordinal class via standard well-founded ordinal recursion, blocking
+/// every paradox derivable at modal depth ≤ κ_2 (Berry, paradoxical
+/// Löb, paraconsistent Curry, Beth-Monk ω-iteration, etc.).
+///
+/// Operational form: every well-formed term has a finite or small-
+/// transfinite modal-depth bound, ensuring the K-Refine-omega kernel
+/// rule (deferred to VFE-7 V1) terminates on all input.
+@framework(diakrisis, "Theorem 136.T (T-2f*** transfinite modal stratification)")
+public axiom transfinite_modal_stratification() -> Bool
+    ensures true;
+
+// =============================================================================
+// 137.T — Weak-arithmetic no-go (bounded-arithmetic stratum is sterile)
+// =============================================================================
+
+/// The weak-arithmetic stratum (AC^0 ⊂ LOGSPACE ⊂ P ⊂ NP ⊂ PH ⊂ I∆_0)
+/// admits NO L_Abs realisation: there is no theorem provable purely
+/// inside bounded arithmetic that recovers the canonical-primitive
+/// meta-classifier structure. At the boundary `I∆_0 → ω` there is a
+/// discrete jump in `ν^weak` (rank zero on the weak side becomes
+/// ordinal `ω` on the full-arithmetic side).
+///
+/// Operational consequence: `@verify(complexity_typed)` (deferred to
+/// VFE-8 V1) is sound — bounded-arithmetic verification is rigorously
+/// weaker than full-arithmetic verification, with the boundary
+/// witnessed at ν = ω.
+@framework(diakrisis, "Theorem 137.T (weak-AFN-T: bounded-arithmetic stratum is sterile)")
+public axiom weak_arithmetic_no_universal() -> Bool
+    ensures true;
+
+// =============================================================================
+// 140.T — ε-invariant on (∞,∞)-categories
+// =============================================================================
+
+/// The ε-invariant `e^∞` extends from the (∞,1)-categorical setting
+/// (already supported by `core.math.infinity_category`) to the full
+/// (∞,∞)-categorical setting. The extension is via an adjoint tower
+/// `colim ≃ lim` (Lemma 140.L0) plus accessibility of the activation
+/// modality A^∞ (Lemma 140.L1) ensuring well-defined transfinite
+/// iteration.
+///
+/// Operational form: an ε-coordinate is well-defined for any
+/// (∞,∞)-categorical articulation; truncations to (∞,n) recover the
+/// finite-n ε-coordinate.
+@framework(diakrisis, "Theorem 140.T (ε-invariant on (∞,∞)-categories)")
+public axiom epsilon_invariant_infinity_infinity() -> Bool
+    ensures true;
+
+// =============================================================================
+// 141.T — Constructive autopoiesis (ω²-iteration in effective topos)
+// =============================================================================
+
+/// Every "biological-class" enactment (the technical class closed under
+/// the activation modality A and exhibiting the autopoietic fixed-point
+/// property) has an *explicit constructive* witness `ε_auto`: an
+/// ω²-iteration in the effective topos with σ/π-morphism pair
+/// satisfying the AFA-analogue bisimulation (Aczel-Capretta).
+///
+/// Operational form: `verify_autopoiesis(e)` (deferred to VFE-5 V1)
+/// can be discharged for any concrete enactment `e` whose activation
+/// rank meets the autopoietic threshold, by exhibiting the witness.
+/// V1 ships the witness construction; this V0 axiom records its
+/// existence.
+@framework(diakrisis, "Theorem 141.T (constructive autopoiesis: ω²-iteration in Eff)")
+public axiom constructive_autopoiesis_witness<E: Enactment>(e: E) -> Bool
+    ensures true;

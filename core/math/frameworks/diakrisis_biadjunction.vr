@@ -1,0 +1,63 @@
+// =============================================================================
+// Diakrisis biadjunction extensions — articulation/enactment 2-categorical structure
+// =============================================================================
+//
+// Diakrisis-corpus extension postulating the full 2-categorical biadjunction
+// structure between articulation and enactment 2-categories (Theorem 124.T)
+// and a concrete instance witnessing the dual-classification practice
+// (Theorem 125.T — metastemological practice with ε = ω·2 + 1).
+//
+// These theorems live "above" the canonical-primitive five (see
+// `core.math.frameworks.diakrisis`): they are still meta-classifier-level
+// content but they go beyond the bare existence of the M ⊣ A duality to
+// describe its full 2-categorical structure (hom-bijection Φ, explicit
+// unit/counit, triangle identities) and to instantiate it on a concrete
+// dual-classification practice.
+//
+// Public axiom names are foundation-neutral; the framework annotation
+// records the trusted boundary against the Diakrisis catalogue.
+// =============================================================================
+
+mount core.action.articulation.{Articulation};
+mount core.action.enactments.{Enactment, alpha_of, epsilon, is_adjoint};
+
+// =============================================================================
+// 124.T — Full 2-categorical biadjunction M ⊣ A
+// =============================================================================
+
+/// The canonical pair (M, A) lifts to a full 2-categorical biadjunction
+/// in the mixed 2-category of articulations and enactments. The
+/// biadjunction is witnessed by:
+///
+///   • a hom-bijection Φ : Hom_Enact(M(α), e) ≃ Hom_Artic(α, A(e))
+///     natural in both arguments;
+///   • explicit unit  η_α  : id_Artic ⇒ A ∘ M (canonical image of id_α)
+///     and counit ε_e : M ∘ A ⇒ id_Enact (canonical image of id_e);
+///   • triangle identities (M·η) ∘ (ε·M) = id_M and (η·A) ∘ (A·ε) = id_A.
+///
+/// Operational form: for any articulation α the biadjunction-witness
+/// pair `(α, ε(α))` satisfies the one-direction axiom `is_adjoint`
+/// already used by the canonical-primitive package, but here we further
+/// postulate that the witness extends to the full triangle structure.
+/// Triangle-identity content is preserved in trusted-boundary form;
+/// downstream proof obligations reduce to one-direction adjointness.
+@framework(diakrisis, "Theorem 124.T (full 2-categorical biadjunction M ⊣ A)")
+public axiom biadjunction_full_2_categorical<A: Articulation>(alpha: A) -> Bool
+    ensures is_adjoint(alpha.clone(), epsilon(alpha));
+
+// =============================================================================
+// 125.T — Metastemological practice as a concrete biadjunction instance
+// =============================================================================
+
+/// A specific dual-classification practice — the "metastemological" act
+/// that classifies meta-knowledge claims — instantiates the M ⊣ A
+/// biadjunction at coordinate ε = ω·2 + 1 (one rank above the
+/// tradition-level ω·2 cap, marking the institutional / cross-tradition
+/// stratum).
+///
+/// Operational form: there exists an enactment whose articulation
+/// closure recovers the tradition-level meta-classifier and whose own
+/// enactment-side coordinate is ω·2 + 1 (the institutional rank).
+@framework(diakrisis, "Theorem 125.T (metastemological practice; ε = ω·2 + 1 instance)")
+public axiom metastemological_practice_instance<E: Enactment>(e: E) -> Bool
+    ensures is_adjoint(alpha_of(e.clone()), e);
