@@ -1,0 +1,48 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: action, actic, epsilon, classify, owl2, vuva
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §11.2 + §21 — ε_classify primitive (Diakrisis Actic catalogue
+// extension for ontology-classification work). The new primitive
+// pairs with the OWL 2 V1 ecosystem (C7 + C8 + C9): a function decorated
+// `@enact(epsilon = "ε_classify")` is recognised by `verum audit
+// --epsilon` as ontology-classification work and by Noesis NP's
+// `ontology/classify` endpoint.
+
+mount core.action.primitives;
+mount core.action.articulation;
+mount core.action.enactments;
+mount core.action.gauge;
+mount core.action.verify;
+
+fn main() {
+    // --- ε_classify primitive surface --------------------------------
+    assert(primitive_as_text(EpsilonClassify) == "ε_classify");
+    assert(is_classification(EpsilonClassify));
+
+    // ε_classify is its own equivalence class — distinct from every
+    // other primitive's classifier predicate.
+    assert(!is_observational(EpsilonClassify));
+    assert(!is_constructive(EpsilonClassify));
+    assert(!is_proof_producing(EpsilonClassify));
+    assert(!is_decision_point(EpsilonClassify));
+    assert(!is_translation(EpsilonClassify));
+    assert(!is_classification(EpsilonProve));
+    assert(!is_classification(EpsilonObserve));
+
+    // --- Lifts to an Enactment with the canonical articulation -------
+    let e: Enactment = primitive_enact(EpsilonClassify);
+    let alpha: Articulation = alpha_of(e.clone());
+    assert(alpha.lineage == "ε_classify");
+
+    // --- verify_epsilon admits ε_classify chains ---------------------
+    match verify_epsilon(EpsilonClassify, e) {
+        Consistent => {}
+        _          => panic("ε_classify must verify as Consistent"),
+    }
+
+    print("ε_classify primitive ok");
+}

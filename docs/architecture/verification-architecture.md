@@ -1073,7 +1073,7 @@ The implementation in `core/action/enactments.vr` provides `is_adjoint(α, e)` a
 public fn prove_yoneda() -> Proven<Yoneda> using [Theorem] { … }
 ```
 
-- Accepted values: `"ε_math"`, `"ε_compute"`, `"ε_observe"`, `"ε_prove"`, `"ε_decide"`, `"ε_translate"`, `"ε_construct"`, or a user-defined ε from `core.action.primitives`.
+- Accepted values: `"ε_math"`, `"ε_compute"`, `"ε_observe"`, `"ε_prove"`, `"ε_decide"`, `"ε_translate"`, `"ε_construct"`, `"ε_classify"` (the OWL 2 ontology-classification primitive added in the VUVA §21 V1 ecosystem), or a user-defined ε from `core.action.primitives`. Both Unicode and ASCII spellings (`epsilon_*`) are accepted; the typed attribute canonicalises to the Unicode form for deterministic audit output.
 - Audited by `verum audit --epsilon src/` — prints a distribution.
 - Enforces consistency: a function with `ε_prove` cannot call `ε_compute`-only operations (type-level check).
 

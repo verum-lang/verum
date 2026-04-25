@@ -50,6 +50,7 @@ public fn verify_epsilon(declared: Primitive, observed: Enactment) -> AuditVerdi
         EpsilonCompute   => Consistent,
         EpsilonDecide    => Consistent,
         EpsilonTranslate => Consistent,
+        EpsilonClassify  => Consistent,
     }
 }
 

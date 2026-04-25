@@ -995,12 +995,14 @@ fn print_framework_report(
 // ε-primitive, so a reviewer sees the DC coordinate of the corpus
 // parallel to the OC coordinate produced by `--framework-axioms`.
 //
-// Per VUVA §11.2, the seven canonical primitives are
+// Per VUVA §11.2 + §21 (OWL 2 ecosystem), the eight canonical primitives are
 //   ε_math, ε_compute, ε_observe, ε_prove,
-//   ε_decide, ε_translate, ε_construct
-// — see `core.action.primitives.Primitive`. Only these seven are
+//   ε_decide, ε_translate, ε_construct, ε_classify
+// — see `core.action.primitives.Primitive`. Only these eight are
 // recognised. Unknown strings land in the `malformed` bucket with a
-// diagnostic suggesting the expected primitive set.
+// diagnostic suggesting the expected primitive set. ε_classify is the
+// catalogue extension for ontology classification / subsumption /
+// instance-check obligations introduced by VUVA §21 (OWL 2 V1).
 // =============================================================================
 
 /// One `@enact(...)` usage collected from the project AST.
@@ -1215,7 +1217,7 @@ fn print_epsilon_report(
         }
         println!(
             "  known primitives: {}",
-            "ε_math, ε_compute, ε_observe, ε_prove, ε_decide, ε_translate, ε_construct"
+            "ε_math, ε_compute, ε_observe, ε_prove, ε_decide, ε_translate, ε_construct, ε_classify"
                 .dimmed()
         );
         println!();

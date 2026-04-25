@@ -1,5 +1,21 @@
 // =============================================================================
-// core.action.primitives — seven primitive acts (Diakrisis Actic §1)
+// core.action.primitives — eight primitive acts (Diakrisis Actic §1 + §21)
+// =============================================================================
+//
+// Seven canonical Diakrisis Actic primitives + ε_classify (added per the
+// Diakrisis ↔ Noesis ↔ Verum cross-audit recommendation #3 — needed by
+// the OWL 2 V1 ecosystem for ontology classification / subsumption /
+// instance-check obligations that don't fit cleanly into the original
+// seven primitives).
+//
+// VUVA §21.3 routes every OWL 2 reasoning task through `@verify(...)` —
+// `ε_classify` lets the @enact attribute carry the Actic dual coordinate
+// for the function performing that reasoning. Functions decorated with
+// `@enact(epsilon = "ε_classify")` are recognised by `verum audit
+// --epsilon` as ontology-classification work; downstream tooling
+// (Noesis NP `ontology/classify` endpoint per audit recommendation #4)
+// reads this distribution to gate which functions are surfaced as DL
+// reasoners.
 // =============================================================================
 
 @derive(Clone)
@@ -10,7 +26,8 @@ public type Primitive is
   | EpsilonProve
   | EpsilonDecide
   | EpsilonTranslate
-  | EpsilonConstruct;
+  | EpsilonConstruct
+  | EpsilonClassify;
 
 public fn primitive_as_text(e: Primitive) -> Text {
     match e {
@@ -21,6 +38,7 @@ public fn primitive_as_text(e: Primitive) -> Text {
         EpsilonDecide    => "ε_decide",
         EpsilonTranslate => "ε_translate",
         EpsilonConstruct => "ε_construct",
+        EpsilonClassify  => "ε_classify",
     }
 }
 
@@ -58,6 +76,17 @@ public fn is_translation(e: Primitive) -> Bool {
     match e {
         EpsilonTranslate => true,
         _                => false,
+    }
+}
+
+/// True iff the primitive is an *ontology-classification* act —
+/// subsumption, instance check, classification hierarchy walk. The
+/// Diakrisis Actic catalogue extension that pairs with the OWL 2
+/// V1 ecosystem (VUVA §21).
+public fn is_classification(e: Primitive) -> Bool {
+    match e {
+        EpsilonClassify => true,
+        _               => false,
     }
 }
 

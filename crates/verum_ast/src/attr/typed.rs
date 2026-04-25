@@ -4967,6 +4967,10 @@ impl EnactAttr {
             "ε_decide"    | "epsilon_decide"    => Some("ε_decide"),
             "ε_translate" | "epsilon_translate" => Some("ε_translate"),
             "ε_construct" | "epsilon_construct" => Some("ε_construct"),
+            // OWL 2 ontology-classification primitive (Diakrisis Actic
+            // catalogue extension per the Verum cross-audit; pairs
+            // with the C7+C8+C9 OWL 2 V1 ecosystem).
+            "ε_classify"  | "epsilon_classify"  => Some("ε_classify"),
             _ => None,
         }
     }
