@@ -204,8 +204,8 @@ pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
     ui::step("Running Verum linter");
     println!();
 
-    // Load config for disabled rules
-    let disabled_rules = load_lint_config();
+    // Load full config (covers `disabled` + `severity_map` + `extends`).
+    let cfg = load_full_lint_config();
 
     let mut all_issues = List::new();
     let mut total_files = 0;
@@ -233,9 +233,15 @@ pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
 
                 match lint_file(path) {
                     Ok(issues) => {
-                        // Filter out disabled rules
+                        // Apply effective_level — covers severity_map,
+                        // disabled/denied/allowed/warned, plus the
+                        // preset's contribution to severity_map.
                         let filtered: Vec<_> = issues.into_iter()
-                            .filter(|i| !disabled_rules.contains(&i.rule.to_string()))
+                            .filter_map(|mut i| {
+                                let lvl = cfg.effective_level(i.rule, i.level)?;
+                                i.level = lvl;
+                                Some(i)
+                            })
                             .collect();
                         all_issues.extend(filtered);
                     }
@@ -398,6 +404,10 @@ fn is_verum_file(path: &Path) -> bool {
 /// exclude = ["tests/", "benches/"]
 /// ```
 struct LintConfig {
+    /// `extends = "minimal" | "recommended" | "strict" | "relaxed"`.
+    /// Applied before all other config. None = no preset (= legacy behaviour;
+    /// rule levels come from `LINT_RULES.<rule>.level`).
+    extends: Option<String>,
     /// Rules that are completely disabled (no output)
     disabled: HashSet<String>,
     /// Rules promoted to error level
@@ -406,6 +416,10 @@ struct LintConfig {
     allowed: HashSet<String>,
     /// Rules explicitly set to warning level
     warned: HashSet<String>,
+    /// Per-rule severity map from `[lint.severity]` — most precise
+    /// per-rule control. Wins over the disabled/denied/allowed/warned
+    /// lists when both reference the same rule.
+    severity_map: HashMap<String, LintLevel>,
     /// Custom pattern-based lint rules
     custom_rules: Vec<CustomLintRule>,
 }
@@ -432,10 +446,12 @@ struct CustomLintRule {
 impl Default for LintConfig {
     fn default() -> Self {
         Self {
+            extends: None,
             disabled: HashSet::new(),
             denied: HashSet::new(),
             allowed: HashSet::new(),
             warned: HashSet::new(),
+            severity_map: HashMap::new(),
             custom_rules: Vec::new(),
         }
     }
@@ -443,9 +459,22 @@ impl Default for LintConfig {
 
 impl LintConfig {
     /// Get effective level for a rule, considering user overrides.
+    /// Precedence (highest → lowest):
+    ///   1. `[lint.severity].<rule>` map
+    ///   2. `disabled` / `allowed` lists  → suppressed
+    ///   3. `denied` list                 → error
+    ///   4. `warned` list                 → warning
+    ///   5. `default_level` (built-in or preset-provided)
     fn effective_level(&self, rule_name: &str, default_level: LintLevel) -> Option<LintLevel> {
+        if let Some(level) = self.severity_map.get(rule_name).copied() {
+            return if matches!(level, LintLevel::Off) {
+                None
+            } else {
+                Some(level)
+            };
+        }
         if self.disabled.contains(rule_name) || self.allowed.contains(rule_name) {
-            return None; // Suppressed
+            return None;
         }
         if self.denied.contains(rule_name) {
             return Some(LintLevel::Error);
@@ -465,46 +494,203 @@ fn load_lint_config() -> HashSet<String> {
 fn load_full_lint_config() -> LintConfig {
     let mut config = LintConfig::default();
 
-    for name in &[".verum.toml", "verum.toml", "Verum.toml"] {
-        let path = PathBuf::from(name);
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                parse_lint_config_from_toml(&content, &mut config);
-            }
-            break; // Use first found config file
+    // Layer 1: dedicated .verum/lint.toml takes priority over the
+    // manifest, matching the design doc — projects that prefer to
+    // keep verum.toml clean can drop a separate lint config without
+    // touching the manifest.
+    let dedicated = PathBuf::from(".verum/lint.toml");
+    let manifest_candidates: &[&str] = &[".verum.toml", "verum.toml", "Verum.toml"];
+
+    if dedicated.exists() {
+        if let Ok(content) = fs::read_to_string(&dedicated) {
+            // For .verum/lint.toml the file IS the [lint] block, so the
+            // user can drop the section header.
+            parse_lint_config_from_toml_v2(&content, &mut config, /* lint_root = */ true);
         }
+    } else {
+        for name in manifest_candidates {
+            let path = PathBuf::from(name);
+            if path.exists() {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    parse_lint_config_from_toml_v2(&content, &mut config, false);
+                }
+                break;
+            }
+        }
+    }
+
+    // Apply preset (extends) AFTER the file load so explicit per-rule
+    // overrides win over preset defaults. The preset fills the
+    // severity_map with built-in defaults appropriate for the chosen
+    // preset; explicit `[lint.severity].<rule>` entries from the file
+    // already populated the map and are NOT overwritten.
+    if let Some(preset) = config.extends.clone() {
+        apply_preset(&mut config, &preset);
     }
 
     config
 }
 
-fn parse_lint_config_from_toml(content: &str, config: &mut LintConfig) {
-    let mut in_lint_section = false;
-    let mut in_custom_section = false;
-    let mut current_custom: Option<CustomLintRule> = None;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Skip comments and empty lines
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+/// Apply a built-in preset to the config's severity_map. Presets
+/// fill in defaults for every rule; explicit `[lint.severity]`
+/// entries from user config take precedence and are preserved.
+fn apply_preset(config: &mut LintConfig, name: &str) {
+    let preset = match name {
+        "minimal" => LintPreset::Minimal,
+        "recommended" => LintPreset::Recommended,
+        "strict" => LintPreset::Strict,
+        "relaxed" => LintPreset::Relaxed,
+        _ => {
+            // Unknown preset is silently ignored at load-time;
+            // --validate-config surfaces it.
+            return;
+        }
+    };
+    for rule in LINT_RULES {
+        // Don't override explicit user choices.
+        if config.severity_map.contains_key(rule.name) {
             continue;
         }
+        let preset_level = preset.level_for(rule);
+        config.severity_map.insert(rule.name.to_string(), preset_level);
+    }
+}
 
-        // Section headers
-        if trimmed.starts_with('[') {
-            // Flush any pending custom rule
-            if let Some(rule) = current_custom.take() {
-                if !rule.name.is_empty() && !rule.pattern.is_empty() {
-                    config.custom_rules.push(rule);
+#[derive(Debug, Clone, Copy)]
+enum LintPreset {
+    /// Hard errors only — `deprecated-syntax`, `missing-context-decl`,
+    /// `mutable-capture-in-spawn`. Everything else is `Off`. For
+    /// porting legacy code without a flood of warnings.
+    Minimal,
+    /// Default. All Safety + Verification rules at their built-in
+    /// level; Performance / Style at warn / info / hint.
+    Recommended,
+    /// CI-grade. Everything `recommended` ships, plus warnings
+    /// promoted to errors for high-stakes categories.
+    Strict,
+    /// IDE-only suggestions. Errors stay errors, warnings → info,
+    /// info → hint.
+    Relaxed,
+}
+
+impl LintPreset {
+    fn level_for(self, rule: &LintRule) -> LintLevel {
+        match self {
+            LintPreset::Minimal => match rule.level {
+                LintLevel::Error => LintLevel::Error,
+                _ => LintLevel::Off,
+            },
+            LintPreset::Recommended => rule.level,
+            LintPreset::Strict => match (rule.level, rule.category) {
+                (LintLevel::Error, _) => LintLevel::Error,
+                (LintLevel::Warning, LintCategory::Safety)
+                | (LintLevel::Warning, LintCategory::Verification) => LintLevel::Error,
+                (LintLevel::Warning, _) => LintLevel::Warning,
+                (LintLevel::Info, _) => LintLevel::Info,
+                (LintLevel::Hint, _) => LintLevel::Hint,
+                (LintLevel::Off, _) => LintLevel::Off,
+            },
+            LintPreset::Relaxed => match rule.level {
+                LintLevel::Error => LintLevel::Error,
+                LintLevel::Warning => LintLevel::Info,
+                LintLevel::Info => LintLevel::Hint,
+                LintLevel::Hint => LintLevel::Hint,
+                LintLevel::Off => LintLevel::Off,
+            },
+        }
+    }
+}
+
+/// `toml`-crate-based parser. Replaces the line-based parser for
+/// new-form config (severity map, extends preset). Old-form keys
+/// (`disabled`, `denied`, `allowed`, `warned` lists at the top of
+/// `[lint]`) and `[[lint.custom]]` arrays remain supported via the
+/// same parser for backwards compatibility.
+///
+/// `lint_root = true` means the parsed file IS the `[lint]` block
+/// directly (used for `.verum/lint.toml`).
+fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_root: bool) {
+    use toml::Value;
+    let parsed: Value = match toml::from_str::<Value>(content) {
+        Ok(v) => v,
+        Err(_) => return, // best-effort
+    };
+    let lint_table = if lint_root {
+        match parsed {
+            Value::Table(t) => Value::Table(t),
+            _ => return,
+        }
+    } else {
+        match parsed.get("lint") {
+            Some(v) => v.clone(),
+            None => match parsed.get("linter") {
+                Some(v) => v.clone(),
+                None => return,
+            },
+        }
+    };
+    let lint = match lint_table.as_table() {
+        Some(t) => t,
+        None => return,
+    };
+
+    // extends preset
+    if let Some(Value::String(s)) = lint.get("extends") {
+        config.extends = Some(s.clone());
+    }
+
+    // disabled/denied/allowed/warned — accept array OR comma-separated string
+    fn extract_list(v: &Value) -> Vec<String> {
+        match v {
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect(),
+            Value::String(s) => s
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+    for key in &["disable", "disabled"] {
+        if let Some(v) = lint.get(*key) {
+            config.disabled.extend(extract_list(v));
+        }
+    }
+    for key in &["deny", "denied"] {
+        if let Some(v) = lint.get(*key) {
+            config.denied.extend(extract_list(v));
+        }
+    }
+    for key in &["allow", "allowed"] {
+        if let Some(v) = lint.get(*key) {
+            config.allowed.extend(extract_list(v));
+        }
+    }
+    for key in &["warn", "warned"] {
+        if let Some(v) = lint.get(*key) {
+            config.warned.extend(extract_list(v));
+        }
+    }
+
+    // [lint.severity] — per-rule severity map
+    if let Some(Value::Table(sev)) = lint.get("severity") {
+        for (rule, val) in sev {
+            if let Some(level_str) = val.as_str() {
+                if let Some(lvl) = LintLevel::parse(level_str) {
+                    config.severity_map.insert(rule.clone(), lvl);
                 }
             }
+        }
+    }
 
-            in_lint_section = trimmed == "[lint]" || trimmed == "[linter]";
-            in_custom_section = trimmed == "[[lint.custom]]" || trimmed == "[[linter.custom]]";
-
-            if in_custom_section {
-                current_custom = Some(CustomLintRule {
+    // [[lint.custom]] — array of tables
+    if let Some(Value::Array(arr)) = lint.get("custom") {
+        for entry in arr {
+            if let Value::Table(t) = entry {
+                let mut rule = CustomLintRule {
                     name: String::new(),
                     pattern: String::new(),
                     message: String::new(),
@@ -512,72 +698,40 @@ fn parse_lint_config_from_toml(content: &str, config: &mut LintConfig) {
                     paths: Vec::new(),
                     exclude: Vec::new(),
                     suggestion: None,
-                });
-            }
-            continue;
-        }
-
-        if let Some((key, value)) = trimmed.split_once('=') {
-            let key = key.trim();
-            let value = value.trim().trim_matches('"');
-
-            if in_lint_section && !in_custom_section {
-                let rules: Vec<String> = value.split(',')
-                    .map(|r| r.trim().to_string())
-                    .filter(|r| !r.is_empty())
-                    .collect();
-
-                match key {
-                    "disable" | "disabled" => config.disabled.extend(rules),
-                    "deny" | "denied" => config.denied.extend(rules),
-                    "allow" | "allowed" => config.allowed.extend(rules),
-                    "warn" | "warned" => config.warned.extend(rules),
-                    _ => {}
+                };
+                if let Some(s) = t.get("name").and_then(|v| v.as_str()) {
+                    rule.name = s.to_string();
                 }
-            }
-
-            if in_custom_section {
-                if let Some(ref mut rule) = current_custom {
-                    match key {
-                        "name" => rule.name = value.to_string(),
-                        "pattern" => rule.pattern = value.to_string(),
-                        "message" => rule.message = value.to_string(),
-                        "level" => {
-                            rule.level = match value {
-                                "error" => LintLevel::Error,
-                                "warning" | "warn" => LintLevel::Warning,
-                                "info" => LintLevel::Info,
-                                "hint" => LintLevel::Hint,
-                                _ => LintLevel::Warning,
-                            };
-                        }
-                        "suggestion" | "fix" => rule.suggestion = Some(value.to_string()),
-                        "paths" => {
-                            rule.paths = value.split(',')
-                                .map(|p| p.trim().to_string())
-                                .filter(|p| !p.is_empty())
-                                .collect();
-                        }
-                        "exclude" => {
-                            rule.exclude = value.split(',')
-                                .map(|p| p.trim().to_string())
-                                .filter(|p| !p.is_empty())
-                                .collect();
-                        }
-                        _ => {}
+                if let Some(s) = t.get("pattern").and_then(|v| v.as_str()) {
+                    rule.pattern = s.to_string();
+                }
+                if let Some(s) = t.get("message").and_then(|v| v.as_str()) {
+                    rule.message = s.to_string();
+                }
+                if let Some(s) = t.get("level").and_then(|v| v.as_str()) {
+                    if let Some(lvl) = LintLevel::parse(s) {
+                        rule.level = lvl;
                     }
                 }
+                if let Some(s) = t.get("suggestion").and_then(|v| v.as_str())
+                    .or_else(|| t.get("fix").and_then(|v| v.as_str()))
+                {
+                    rule.suggestion = Some(s.to_string());
+                }
+                if let Some(v) = t.get("paths") {
+                    rule.paths = extract_list(v);
+                }
+                if let Some(v) = t.get("exclude") {
+                    rule.exclude = extract_list(v);
+                }
+                if !rule.name.is_empty() && !rule.pattern.is_empty() {
+                    config.custom_rules.push(rule);
+                }
             }
-        }
-    }
-
-    // Flush last custom rule
-    if let Some(rule) = current_custom {
-        if !rule.name.is_empty() && !rule.pattern.is_empty() {
-            config.custom_rules.push(rule);
         }
     }
 }
+
 
 /// Run custom lint rules against a file.
 fn lint_custom_rules(path: &Path, content: &str, config: &LintConfig) -> Vec<LintIssue> {
@@ -2322,8 +2476,25 @@ pub fn explain_rule(name: &str) -> Result<()> {
 /// rule name.
 pub fn validate_config() -> Result<()> {
     let cfg = load_full_lint_config();
+    let mut errors: Vec<String> = Vec::new();
 
-    // Collect unknown rule references.
+    // 1. extends preset must be a known name.
+    if let Some(p) = &cfg.extends {
+        if !matches!(p.as_str(), "minimal" | "recommended" | "strict" | "relaxed") {
+            let known_presets = ["minimal", "recommended", "strict", "relaxed"];
+            let suggest = known_presets
+                .iter()
+                .min_by_key(|cand| levenshtein(cand, p))
+                .copied()
+                .unwrap_or("recommended");
+            errors.push(format!(
+                "unknown preset `extends = \"{}\"` — did you mean `\"{}\"`? (valid: minimal | recommended | strict | relaxed)",
+                p, suggest
+            ));
+        }
+    }
+
+    // 2. Collect unknown rule references across every config surface.
     let known: std::collections::HashSet<&'static str> =
         LINT_RULES.iter().map(|r| r.name).collect();
     let mut unknown: Vec<String> = Vec::new();
@@ -2334,6 +2505,13 @@ pub fn validate_config() -> Result<()> {
             {
                 unknown.push(name.clone());
             }
+        }
+    }
+    for name in cfg.severity_map.keys() {
+        if !known.contains(name.as_str())
+            && !cfg.custom_rules.iter().any(|r| &r.name == name)
+        {
+            unknown.push(name.clone());
         }
     }
     if !unknown.is_empty() {
@@ -2359,15 +2537,24 @@ pub fn validate_config() -> Result<()> {
                 }
             ));
         }
-        return Err(CliError::Custom(msg));
+        errors.push(msg.trim_end().to_string());
     }
 
-    let custom_count = cfg.custom_rules.len();
-    let _ = (cfg.disabled.len(), cfg.denied.len(), cfg.allowed.len(), cfg.warned.len());
+    if !errors.is_empty() {
+        return Err(CliError::Custom(errors.join("\n\n")));
+    }
+
+    let preset_summary = cfg
+        .extends
+        .as_deref()
+        .map(|p| format!(" (extends = `{}`)", p))
+        .unwrap_or_default();
     ui::success(&format!(
-        "lint config is valid ({} built-in + {} custom rules)",
+        "lint config is valid ({} built-in + {} custom rules; {} severity overrides{})",
         LINT_RULES.len(),
-        custom_count
+        cfg.custom_rules.len(),
+        cfg.severity_map.len(),
+        preset_summary,
     ));
     Ok(())
 }
@@ -2492,7 +2679,7 @@ pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat)
     }
 
     // Replicate the discovery / lint-collection flow with structured emission.
-    let disabled_rules = load_lint_config();
+    let cfg = load_full_lint_config();
     let mut all_issues: Vec<LintIssue> = Vec::new();
 
     let search_dirs: Vec<PathBuf> = ["src", "core"]
@@ -2511,8 +2698,9 @@ pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat)
                 continue;
             }
             if let Ok(issues) = lint_file(path) {
-                for i in issues {
-                    if !disabled_rules.contains(&i.rule.to_string()) {
+                for mut i in issues {
+                    if let Some(lvl) = cfg.effective_level(i.rule, i.level) {
+                        i.level = lvl;
                         all_issues.push(i);
                     }
                 }
