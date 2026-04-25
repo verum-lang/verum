@@ -18,14 +18,14 @@ public fn is_variadic(r: &OverloadRequest) -> Bool {
     r.arity < 0
 }
 
-public type Outcome is
+public type VtabOverloadOutcome is
     | OoInstalled          // overload registered successfully
     | OoAlreadyNative      // SQLite already has this fn; overload not used
     | OoOutOfMemory        // SQLITE_NOMEM
     | OoNotSupported       // vtab doesn't support xFindFunction
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &VtabOverloadOutcome) -> Text {
     match o {
         OoInstalled      => "installed".clone(),
         OoAlreadyNative  => "already_native".clone(),
@@ -34,11 +34,11 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn is_success(o: &Outcome) -> Bool {
+public fn is_success(o: &VtabOverloadOutcome) -> Bool {
     match o { OoInstalled => true, _ => false }
 }
 
-public fn is_retryable(o: &Outcome) -> Bool {
+public fn is_retryable(o: &VtabOverloadOutcome) -> Bool {
     match o { OoOutOfMemory => true, _ => false }
 }
 
@@ -47,7 +47,7 @@ public fn classify(
     vtab_has_xfindfunction: Bool,
     sqlite_has_native_impl: Bool,
     allocation_succeeded: Bool,
-) -> Outcome {
+) -> VtabOverloadOutcome {
     if !vtab_has_xfindfunction { return OoNotSupported; }
     if sqlite_has_native_impl { return OoAlreadyNative; }
     if !allocation_succeeded { return OoOutOfMemory; }

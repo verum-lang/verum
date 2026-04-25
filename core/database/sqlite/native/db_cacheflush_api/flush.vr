@@ -4,14 +4,14 @@ module core.database.sqlite.native.db_cacheflush_api.flush;
 
 mount base.{Bool, Int64, Text};
 
-public type Outcome is
+public type CacheflushOutcome is
     | OkFlushed(Int64)         // pages written to disk
     | ErrBusyStmt              // SQLITE_BUSY — a stmt is mid-execution
     | ErrIo                     // SQLITE_IOERR
     | ErrCorrupt                // SQLITE_CORRUPT detected during write
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &CacheflushOutcome) -> Text {
     match o {
         OkFlushed(_)  => "ok_flushed".clone(),
         ErrBusyStmt   => "err_busy_stmt".clone(),
@@ -20,18 +20,18 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn is_ok(o: &Outcome) -> Bool {
+public fn is_ok(o: &CacheflushOutcome) -> Bool {
     match o { OkFlushed(_) => true, _ => false }
 }
 
-public fn pages_flushed(o: &Outcome) -> Int64 {
+public fn pages_flushed(o: &CacheflushOutcome) -> Int64 {
     match o {
         OkFlushed(n)  => n.clone(),
         _ => 0 as Int64,
     }
 }
 
-public fn result_code(o: &Outcome) -> Int {
+public fn result_code(o: &CacheflushOutcome) -> Int {
     match o {
         OkFlushed(_) => 0,    // SQLITE_OK
         ErrBusyStmt  => 5,    // SQLITE_BUSY
@@ -63,4 +63,4 @@ public fn is_ready(c: &PreCheck) -> Bool {
 
 // Whether this operation should affect WAL frame ordering.  Cache flush
 // only writes the in-memory dirty pages — does NOT checkpoint WAL.
-public fn touches_wal(_o: &Outcome) -> Bool { false }
+public fn touches_wal(_o: &CacheflushOutcome) -> Bool { false }

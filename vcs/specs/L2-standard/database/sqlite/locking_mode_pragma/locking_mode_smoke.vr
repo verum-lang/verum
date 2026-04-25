@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.locking_mode_pragma.gate.{
-    Mode, LmNormal, LmExclusive,
+    LockingPragmaMode, LmNormal, LmExclusive,
     default_mode, from_text, mode_name,
     retains_locks_across_txns, allows_walwithout_shm,
     SwitchEffect, SeImmediate, SeLazy,

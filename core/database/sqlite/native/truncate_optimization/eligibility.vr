@@ -26,7 +26,7 @@ public fn zero() -> Features {
     }
 }
 
-public type Verdict is
+public type TruncateOptVerdict is
     | VdEligible
     | VdBlockedByWhere
     | VdBlockedByTrigger
@@ -36,7 +36,7 @@ public type Verdict is
     | VdBlockedByReturning
     ;
 
-public fn verdict_name(v: &Verdict) -> Text {
+public fn verdict_name(v: &TruncateOptVerdict) -> Text {
     match v {
         VdEligible                 => "eligible".clone(),
         VdBlockedByWhere           => "where_clause".clone(),
@@ -48,12 +48,12 @@ public fn verdict_name(v: &Verdict) -> Text {
     }
 }
 
-public fn is_eligible(v: &Verdict) -> Bool {
+public fn is_eligible(v: &TruncateOptVerdict) -> Bool {
     match v { VdEligible => true, _ => false }
 }
 
 // Classify — first blocker wins; empty blockers → eligible.
-public fn classify(f: &Features) -> Verdict {
+public fn classify(f: &Features) -> TruncateOptVerdict {
     if f.has_where_clause              { return VdBlockedByWhere; }
     if f.has_delete_trigger            { return VdBlockedByTrigger; }
     if f.has_foreign_key_referring_in  { return VdBlockedByFkIn; }

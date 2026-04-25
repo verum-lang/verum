@@ -4,21 +4,21 @@ module core.database.sqlite.native.secure_delete_pragma.gate;
 
 mount base.{Bool, Text};
 
-public type Mode is
+public type SecureDeleteMode is
     | SdOff       // 0 — default; do not overwrite
     | SdOn        // 1 — overwrite freed bytes with zeros immediately
     | SdFast      // 2 — overwrite only while page is in the freelist (3.31+)
     ;
 
-public fn default_mode() -> Mode { SdOff }
+public fn default_mode() -> SecureDeleteMode { SdOff }
 
-public fn from_pragma_value(n: Int) -> Mode {
+public fn from_pragma_value(n: Int) -> SecureDeleteMode {
     if n <= 0 { return SdOff; }
     if n == 1 { return SdOn; }
     SdFast
 }
 
-public fn to_pragma_value(m: &Mode) -> Int {
+public fn to_pragma_value(m: &SecureDeleteMode) -> Int {
     match m {
         SdOff  => 0,
         SdOn   => 1,
@@ -26,7 +26,7 @@ public fn to_pragma_value(m: &Mode) -> Int {
     }
 }
 
-public fn mode_name(m: &Mode) -> Text {
+public fn mode_name(m: &SecureDeleteMode) -> Text {
     match m {
         SdOff  => "off".clone(),
         SdOn   => "on".clone(),
@@ -34,19 +34,19 @@ public fn mode_name(m: &Mode) -> Text {
     }
 }
 
-public fn zeros_freed_pages(m: &Mode) -> Bool {
+public fn zeros_freed_pages(m: &SecureDeleteMode) -> Bool {
     match m { SdOff => false, _ => true }
 }
 
-public fn zeros_immediately(m: &Mode) -> Bool {
+public fn zeros_immediately(m: &SecureDeleteMode) -> Bool {
     match m { SdOn => true, _ => false }
 }
 
-public fn zeros_only_in_freelist(m: &Mode) -> Bool {
+public fn zeros_only_in_freelist(m: &SecureDeleteMode) -> Bool {
     match m { SdFast => true, _ => false }
 }
 
 // Increases write-amplification when not OFF.
-public fn increases_write_amp(m: &Mode) -> Bool {
+public fn increases_write_amp(m: &SecureDeleteMode) -> Bool {
     zeros_freed_pages(m)
 }

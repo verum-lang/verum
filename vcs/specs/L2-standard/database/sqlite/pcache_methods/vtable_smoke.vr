@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.pcache_methods.vtable.{
-    MethodSet, default_method_set, is_viable, missing,
+    PcacheMethodSet, default_method_set, is_viable, missing,
 };
 mount core.database.sqlite.native.pcache_methods.flags.{
     CreateFlags, FetchDemand,

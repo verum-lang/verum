@@ -55,7 +55,7 @@ public fn cmp_to_int(r: &CmpResult) -> Int {
 }
 
 // API operations.
-public type Op is
+public type SnapshotOpenOp is
     | OpGet
     | OpOpen
     | OpFree
@@ -63,7 +63,7 @@ public type Op is
     | OpRecover
     ;
 
-public fn op_name(o: &Op) -> Text {
+public fn op_name(o: &SnapshotOpenOp) -> Text {
     match o {
         OpGet     => "snapshot_get".clone(),
         OpOpen    => "snapshot_open".clone(),
@@ -73,8 +73,8 @@ public fn op_name(o: &Op) -> Text {
     }
 }
 
-// Outcome of sqlite3_snapshot_get / _open.
-public type Outcome is
+// SnapshotOpenOutcome of sqlite3_snapshot_get / _open.
+public type SnapshotOpenOutcome is
     | OkSnapshot
     | ErrNotWal           // snapshot APIs require WAL mode
     | ErrNoTxn            // _open requires an active read txn
@@ -82,7 +82,7 @@ public type Outcome is
     | ErrCheckpointMoved  // requested snapshot was checkpointed away
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &SnapshotOpenOutcome) -> Text {
     match o {
         OkSnapshot          => "ok".clone(),
         ErrNotWal           => "err_not_wal".clone(),
@@ -92,6 +92,6 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn is_ok(o: &Outcome) -> Bool {
+public fn is_ok(o: &SnapshotOpenOutcome) -> Bool {
     match o { OkSnapshot => true, _ => false }
 }

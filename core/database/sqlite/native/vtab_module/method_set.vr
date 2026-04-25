@@ -9,7 +9,7 @@ module core.database.sqlite.native.vtab_module.method_set;
 mount core.*;
 mount base.{Bool, Text};
 
-public type MethodSet is {
+public type VtabModuleMethodSet is {
     // Always required (iVersion 1+).
     has_best_index: Bool,
     has_disconnect: Bool,
@@ -44,8 +44,8 @@ public type MethodSet is {
     has_integrity: Bool,      // iVersion >= 4
 }
 
-public fn minimal_read_only_set() -> MethodSet {
-    MethodSet {
+public fn minimal_read_only_set() -> VtabModuleMethodSet {
+    VtabModuleMethodSet {
         has_best_index: true,
         has_disconnect: true,
         has_open: true,
@@ -73,25 +73,25 @@ public fn minimal_read_only_set() -> MethodSet {
     }
 }
 
-public fn supports_write(m: &MethodSet) -> Bool {
+public fn supports_write(m: &VtabModuleMethodSet) -> Bool {
     m.has_update
 }
 
-public fn supports_transactions(m: &MethodSet) -> Bool {
+public fn supports_transactions(m: &VtabModuleMethodSet) -> Bool {
     m.has_begin && m.has_sync && m.has_commit && m.has_rollback
 }
 
-public fn supports_savepoints(m: &MethodSet) -> Bool {
+public fn supports_savepoints(m: &VtabModuleMethodSet) -> Bool {
     m.has_savepoint && m.has_release && m.has_rollback_to
 }
 
-public fn is_eponymous(m: &MethodSet) -> Bool {
+public fn is_eponymous(m: &VtabModuleMethodSet) -> Bool {
     m.has_connect && !m.has_create
 }
 
 /// True iff the required slots are all filled; returns the name of
 /// the first missing mandatory slot as the failure reason.
-public fn missing_required(m: &MethodSet) -> Text {
+public fn missing_required(m: &VtabModuleMethodSet) -> Text {
     if !m.has_connect      { return "xConnect".clone(); }
     if !m.has_best_index   { return "xBestIndex".clone(); }
     if !m.has_disconnect   { return "xDisconnect".clone(); }
@@ -105,6 +105,6 @@ public fn missing_required(m: &MethodSet) -> Text {
     "".clone()
 }
 
-public fn is_viable(m: &MethodSet) -> Bool {
+public fn is_viable(m: &VtabModuleMethodSet) -> Bool {
     missing_required(m).len() == 0
 }

@@ -4,14 +4,14 @@ module core.database.sqlite.native.null_op_api.ops;
 
 mount base.{Bool, Int64, Text};
 
-public type Op is
+public type NullOp is
     | OpIsNull
     | OpIsNotNull
     | OpIs            // distinct-from comparison (NULL = NULL)
     | OpIsNot
     ;
 
-public fn op_name(o: &Op) -> Text {
+public fn op_name(o: &NullOp) -> Text {
     match o {
         OpIsNull    => "is_null".clone(),
         OpIsNotNull => "is_not_null".clone(),
@@ -30,7 +30,7 @@ public fn is_null_value(v: &Value) -> Bool {
 }
 
 // IS NULL / IS NOT NULL apply to a single operand; returns 1 / 0 (never NULL).
-public fn eval_unary(op: &Op, x: &Value) -> Int {
+public fn eval_unary(op: &NullOp, x: &Value) -> Int {
     let isnull = is_null_value(x);
     match op {
         OpIsNull    => if isnull { 1 } else { 0 },
@@ -41,7 +41,7 @@ public fn eval_unary(op: &Op, x: &Value) -> Int {
 }
 
 // IS / IS NOT compare two operands; never NULL.
-public fn eval_binary(op: &Op, x: &Value, y: &Value) -> Int {
+public fn eval_binary(op: &NullOp, x: &Value, y: &Value) -> Int {
     let xn = is_null_value(x);
     let yn = is_null_value(y);
     let equal = match x {
@@ -64,7 +64,7 @@ public type ArityKind is
     | AkBinary
     ;
 
-public fn arity(op: &Op) -> ArityKind {
+public fn arity(op: &NullOp) -> ArityKind {
     match op {
         OpIsNull    => AkUnary,
         OpIsNotNull => AkUnary,
@@ -82,7 +82,7 @@ public fn arity_name(a: &ArityKind) -> Text {
 
 // Sargability — these all combine with index lookups iff the operand is the
 // indexed column.
-public fn is_sargable(op: &Op) -> Bool {
+public fn is_sargable(op: &NullOp) -> Bool {
     match op {
         OpIsNull    => true,
         OpIsNotNull => false,    // typically a full-scan with a NOT-NULL check

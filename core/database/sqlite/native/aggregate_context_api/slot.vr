@@ -16,14 +16,14 @@ public fn empty_slot() -> AggSlot {
     AggSlot { allocated: false, bytes: 0, nomem: false }
 }
 
-// Outcome of one sqlite3_aggregate_context call.
-public type Outcome is
+// AggregateContextOutcome of one sqlite3_aggregate_context call.
+public type AggregateContextOutcome is
     | OkPtr               // returned a non-NULL pointer (existing or freshly allocated)
     | OkNullN0            // n=0 + no prior allocation → NULL
     | OkNomem             // OOM during the new allocation → NULL + nomem flag
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &AggregateContextOutcome) -> Text {
     match o {
         OkPtr     => "ok_ptr".clone(),
         OkNullN0  => "ok_null_n0".clone(),
@@ -31,11 +31,11 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn returned_non_null(o: &Outcome) -> Bool {
+public fn returned_non_null(o: &AggregateContextOutcome) -> Bool {
     match o { OkPtr => true, _ => false }
 }
 
-public type CallResult is { slot: AggSlot, outcome: Outcome };
+public type CallResult is { slot: AggSlot, outcome: AggregateContextOutcome };
 
 // Step the slot one call.  `simulate_oom` lets tests inject allocator failure.
 public fn call(mut s: AggSlot, n: Int, simulate_oom: Bool) -> CallResult {

@@ -10,13 +10,13 @@ public type BindIndexSlot is { index: Int, name: Text };
 
 public fn empty_slot() -> BindIndexSlot { BindIndexSlot { index: 0, name: "".clone() } }
 
-public type Outcome is
+public type BindIndexOutcome is
     | OkFound(Int)        // 1-based index
     | OkNotFound          // SQLite returns 0
     | OkAnonymous         // anonymous `?` slots have no name; never matches
     ;
 
-public fn outcome_int(o: &Outcome) -> Int {
+public fn outcome_int(o: &BindIndexOutcome) -> Int {
     match o {
         OkFound(n)   => n.clone(),
         OkNotFound   => 0,
@@ -24,7 +24,7 @@ public fn outcome_int(o: &Outcome) -> Int {
     }
 }
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &BindIndexOutcome) -> Text {
     match o {
         OkFound(_)   => "found".clone(),
         OkNotFound   => "not_found".clone(),
@@ -32,14 +32,14 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn was_found(o: &Outcome) -> Bool {
+public fn was_found(o: &BindIndexOutcome) -> Bool {
     match o { OkFound(_) => true, _ => false }
 }
 
 // Lookup is exact-match on the *full* token (including sigil).  E.g.
 // the SQL `:foo` is stored as `":foo"`; client code must call
 // `bind_parameter_index(stmt, ":foo")`, not `("foo")`.
-public fn find_by_name(name: Text, slots: &List<BindIndexSlot>) -> Outcome {
+public fn find_by_name(name: Text, slots: &List<BindIndexSlot>) -> BindIndexOutcome {
     if name == "".clone() { return OkAnonymous; }
     let mut i = 0;
     let n = slots.len() as Int;

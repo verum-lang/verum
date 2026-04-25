@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.query_only_pragma.gate.{
-    Mode, QoOff, QoOn,
+    QueryOnlyMode, QoOff, QoOn,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     forbids_writes,
     WriteCheck, WcAllow, WcReadOnlyError,

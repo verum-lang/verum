@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.stmt_isexplain_api.probe.{
-    Mode, MNotExplain, MExplain, MQueryPlan,
+    StmtIsexplainMode, MNotExplain, MExplain, MQueryPlan,
     from_code, to_code, mode_name,
     is_explain, is_opcode_dump, is_query_plan,
     result_column_count, first_column_name,

@@ -18,13 +18,13 @@ public fn stored_name(s: &StoredKind) -> Text {
 }
 
 // Result of sqlite3_value_pointer(value, expected_type).
-public type Outcome is
+public type ValuePointerOutcome is
     | OkMatch              // pointer returned; type matched
     | OkNullDifferentTag    // returned NULL — pointer exists but tag mismatched
     | OkNullNoPointer       // returned NULL — value has no pointer at all
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &ValuePointerOutcome) -> Text {
     match o {
         OkMatch             => "ok_match".clone(),
         OkNullDifferentTag  => "ok_null_different_tag".clone(),
@@ -32,11 +32,11 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn returned_non_null(o: &Outcome) -> Bool {
+public fn returned_non_null(o: &ValuePointerOutcome) -> Bool {
     match o { OkMatch => true, _ => false }
 }
 
-public fn retrieve(stored: &StoredKind, expected: Text) -> Outcome {
+public fn retrieve(stored: &StoredKind, expected: Text) -> ValuePointerOutcome {
     match stored {
         SkNoPointer     => OkNullNoPointer,
         SkPointer(tag)  => {

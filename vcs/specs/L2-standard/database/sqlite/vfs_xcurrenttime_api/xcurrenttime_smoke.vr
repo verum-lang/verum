@@ -10,7 +10,7 @@ mount core.database.sqlite.native.vfs_xcurrenttime_api.clock.{
     method_name, is_deprecated,
     unix_epoch_julian_x10000, ms_per_day,
     millis_to_julian_x10000, julian_x10000_to_millis,
-    Outcome, OkTime, ErrUnavailable,
+    VfsCurrentTimeOutcome, OkTime, ErrUnavailable,
     outcome_name, is_ok, millis_value,
     Resolution, RsSeconds, RsMillis, RsMicros,
     resolution_for, resolution_name,

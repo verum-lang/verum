@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.null_op_api.ops.{
-    Op, OpIsNull, OpIsNotNull, OpIs, OpIsNot, op_name,
+    NullOp, OpIsNull, OpIsNotNull, OpIs, OpIsNot, op_name,
     Value, VNull, VInt, is_null_value,
     eval_unary, eval_binary,
     ArityKind, AkUnary, AkBinary, arity, arity_name,

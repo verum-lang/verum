@@ -20,14 +20,14 @@ public fn position_name(p: &VtabInPosition) -> Text {
     }
 }
 
-// Outcome of one xVtab_in_{first,next} call.
-public type Outcome is
+// VtabInFirstNextOutcome of one xVtab_in_{first,next} call.
+public type VtabInFirstNextOutcome is
     | OkRow             // result-value populated
     | OkDone            // SQLITE_DONE — no more values
     | OkErrNotInList    // SQLITE_ERROR — not an IN constraint
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &VtabInFirstNextOutcome) -> Text {
     match o {
         OkRow         => "row".clone(),
         OkDone        => "done".clone(),
@@ -35,13 +35,13 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn returned_row(o: &Outcome) -> Bool {
+public fn returned_row(o: &VtabInFirstNextOutcome) -> Bool {
     match o { OkRow => true, _ => false }
 }
 
 // Step result combines new position + outcome.  Use a record (tuple returns
 // remain unsupported in Verum).
-public type StepResult is { pos: VtabInPosition, outcome: Outcome };
+public type StepResult is { pos: VtabInPosition, outcome: VtabInFirstNextOutcome };
 
 public fn first_call(values: &List<Int64>, is_in_constraint: Bool) -> StepResult {
     if !is_in_constraint {

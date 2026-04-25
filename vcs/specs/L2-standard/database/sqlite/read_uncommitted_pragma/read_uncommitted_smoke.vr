@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.read_uncommitted_pragma.gate.{
-    Mode, RuOff, RuOn,
+    ReadUncommittedMode, RuOff, RuOn,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     ReadUncommittedEffect, EfReadCommitted, EfReadUncommitted, EfIgnoredInWal,
     resolve_effect, effect_name, allows_dirty_reads, is_risky,

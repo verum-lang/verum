@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.db_cacheflush_api.flush.{
-    Outcome, OkFlushed, ErrBusyStmt, ErrIo, ErrCorrupt,
+    CacheflushOutcome, OkFlushed, ErrBusyStmt, ErrIo, ErrCorrupt,
     outcome_name, is_ok, pages_flushed, result_code,
     PreCheck, PcReady, PcBusyStmt,
     pre_check, check_name, is_ready, touches_wal,

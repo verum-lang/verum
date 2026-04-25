@@ -9,20 +9,20 @@ public fn ok_code()     -> Int { 0 }
 public fn deny_code()   -> Int { 1 }
 public fn ignore_code() -> Int { 2 }
 
-public type Verdict is
+public type AuthorizerVerdict is
     | VAllow            // SQLITE_OK
     | VDeny             // SQLITE_DENY
     | VIgnore           // SQLITE_IGNORE
     ;
 
-public fn verdict_from_code(n: Int) -> Verdict {
+public fn verdict_from_code(n: Int) -> AuthorizerVerdict {
     if n == 0 { return VAllow; }
     if n == 1 { return VDeny; }
     if n == 2 { return VIgnore; }
     VAllow    // unknown → allow (matches engine fallback)
 }
 
-public fn verdict_to_code(v: &Verdict) -> Int {
+public fn verdict_to_code(v: &AuthorizerVerdict) -> Int {
     match v {
         VAllow  => 0,
         VDeny   => 1,
@@ -30,7 +30,7 @@ public fn verdict_to_code(v: &Verdict) -> Int {
     }
 }
 
-public fn verdict_name(v: &Verdict) -> Text {
+public fn verdict_name(v: &AuthorizerVerdict) -> Text {
     match v {
         VAllow  => "ok".clone(),
         VDeny   => "deny".clone(),

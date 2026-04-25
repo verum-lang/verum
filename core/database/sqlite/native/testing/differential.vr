@@ -53,7 +53,7 @@ public type SqlOracle is protocol {
 // Comparison modes
 // -----------------------------------------------------------------------------
 
-public type Mode is MdRowsetEquality | MdRowsetSorted | MdErrorEquivalence;
+public type DifferentialMode is MdRowsetEquality | MdRowsetSorted | MdErrorEquivalence;
 
 public type Diff is
       DfMatch
@@ -63,7 +63,7 @@ public type Diff is
     | DfRowsVsError(Text)
     | DfBothErrorDifferent(Text, Text);
 
-pub fn compare(left: &DiffResult, right: &DiffResult, mode: &Mode) -> Diff {
+pub fn compare(left: &DiffResult, right: &DiffResult, mode: &DifferentialMode) -> Diff {
     match mode {
         MdErrorEquivalence => compare_error_equivalence(left, right),
         MdRowsetEquality   => compare_rows_strict(left, right),

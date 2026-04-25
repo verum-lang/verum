@@ -4,13 +4,13 @@ module core.database.sqlite.native.vtab_savepoint_methods.methods;
 
 mount base.{Bool, Text};
 
-public type Method is
+public type VtabSavepointMethod is
     | MSavepoint        // create / advance to id N
     | MRelease          // discard savepoints with id >= N
     | MRollbackTo       // restore state at id N (drop later savepoints)
     ;
 
-public fn method_name(m: &Method) -> Text {
+public fn method_name(m: &VtabSavepointMethod) -> Text {
     match m {
         MSavepoint  => "xSavepoint".clone(),
         MRelease    => "xRelease".clone(),
@@ -21,23 +21,23 @@ public fn method_name(m: &Method) -> Text {
 public fn well_known_count() -> Int { 3 }
 
 // Whether the method modifies persistent state.
-public fn writes_state(m: &Method) -> Bool {
+public fn writes_state(m: &VtabSavepointMethod) -> Bool {
     match m { MSavepoint => true, MRollbackTo => true, MRelease => false }
 }
 
 // Whether implementing this method is mandatory for table v2.  All three are
 // optional; engine treats absence as "no nested-txn support".
-public fn is_optional(_m: &Method) -> Bool { true }
+public fn is_optional(_m: &VtabSavepointMethod) -> Bool { true }
 
-// Outcome contract.
-public type Outcome is
+// VtabSavepointOutcome contract.
+public type VtabSavepointOutcome is
     | OOk
     | OErrUnsupported       // SQLITE_ERROR — vtab declined
     | OErrCorrupt           // SQLITE_CORRUPT
     | OErrIo                // SQLITE_IOERR
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &VtabSavepointOutcome) -> Text {
     match o {
         OOk             => "ok".clone(),
         OErrUnsupported => "err_unsupported".clone(),
@@ -46,11 +46,11 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn is_ok(o: &Outcome) -> Bool {
+public fn is_ok(o: &VtabSavepointOutcome) -> Bool {
     match o { OOk => true, _ => false }
 }
 
-public fn classify_failure(o: &Outcome) -> Text {
+public fn classify_failure(o: &VtabSavepointOutcome) -> Text {
     match o {
         OOk             => "none".clone(),
         OErrUnsupported => "user".clone(),     // app-level
@@ -67,7 +67,7 @@ public type StackOp is
     | SoRestoreTo(Int)        // ROLLBACK TO id N — restore
     ;
 
-public fn op_for(m: &Method, id: Int) -> StackOp {
+public fn op_for(m: &VtabSavepointMethod, id: Int) -> StackOp {
     match m {
         MSavepoint  => SoPush(id),
         MRelease    => SoPopThrough(id),

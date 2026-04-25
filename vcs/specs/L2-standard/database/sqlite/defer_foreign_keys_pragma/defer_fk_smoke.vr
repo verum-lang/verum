@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.defer_foreign_keys_pragma.gate.{
-    Mode, DfOff, DfOn,
+    DeferForeignKeysMode, DfOff, DfOn,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     CheckTime, CtImmediate, CtAtCommit,
     check_time_for, check_name, is_deferred, after_txn_end,

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.legacy_file_format_pragma.gate.{
-    Mode, FfModern, FfLegacy,
+    LegacyFileFormatMode, FfModern, FfLegacy,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     write_format_for, read_format_min_for, read_format_max_for,
     supports_descending_index, is_deprecated,

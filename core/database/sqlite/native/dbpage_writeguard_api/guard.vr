@@ -13,7 +13,7 @@ module core.database.sqlite.native.dbpage_writeguard_api.guard;
 
 mount base.{Bool, Int64, Text};
 
-public type Outcome is
+public type DbpageWriteguardOutcome is
     | Allow
     | DenyNoTxn
     | DenySchemaReadonly
@@ -23,7 +23,7 @@ public type Outcome is
     | DenyJournalPage
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &DbpageWriteguardOutcome) -> Text {
     match o {
         Allow                  => "allow".clone(),
         DenyNoTxn              => "deny_no_txn".clone(),
@@ -35,7 +35,7 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn is_allowed(o: &Outcome) -> Bool {
+public fn is_allowed(o: &DbpageWriteguardOutcome) -> Bool {
     match o { Allow => true, _ => false }
 }
 
@@ -72,7 +72,7 @@ public fn new_request(
     }
 }
 
-public fn check(r: &Request) -> Outcome {
+public fn check(r: &Request) -> DbpageWriteguardOutcome {
     if !r.in_write_txn          { return DenyNoTxn; }
     if r.schema_readonly        { return DenySchemaReadonly; }
     if r.is_journal_or_wal_page { return DenyJournalPage; }
@@ -85,7 +85,7 @@ public fn check(r: &Request) -> Outcome {
 
 // Severity: hard-failures must propagate as SQLITE_ERROR; soft failures
 // may turn into SQLITE_CONSTRAINT depending on context.
-public fn is_hard_error(o: &Outcome) -> Bool {
+public fn is_hard_error(o: &DbpageWriteguardOutcome) -> Bool {
     match o {
         Allow                  => false,
         DenyNoTxn              => true,

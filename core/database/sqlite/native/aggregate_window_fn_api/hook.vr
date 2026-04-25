@@ -4,14 +4,14 @@ module core.database.sqlite.native.aggregate_window_fn_api.hook;
 
 mount base.{Bool, Text};
 
-public type Method is
+public type WindowFnMethod is
     | MStep        // xStep — required for any aggregate
     | MFinal       // xFinal — required
     | MValue       // xValue — required for window use
     | MInverse     // xInverse — required for window use (slide-off)
     ;
 
-public fn method_name(m: &Method) -> Text {
+public fn method_name(m: &WindowFnMethod) -> Text {
     match m {
         MStep    => "xStep".clone(),
         MFinal   => "xFinal".clone(),
@@ -20,11 +20,11 @@ public fn method_name(m: &Method) -> Text {
     }
 }
 
-public fn required_for_aggregate(m: &Method) -> Bool {
+public fn required_for_aggregate(m: &WindowFnMethod) -> Bool {
     match m { MStep => true, MFinal => true, _ => false }
 }
 
-public fn required_for_window(m: &Method) -> Bool { true }
+public fn required_for_window(m: &WindowFnMethod) -> Bool { true }
 
 // Capability set declared by the function registration.
 public type Capabilities is {
@@ -52,7 +52,7 @@ public fn window_capable(c: &Capabilities) -> Bool {
 }
 
 // Outcome of asking "can this be used as a window function?"
-public type Verdict is
+public type WindowFnVerdict is
     | VOk
     | VMissingValue
     | VMissingInverse
@@ -60,7 +60,7 @@ public type Verdict is
     | VNotAggregate
     ;
 
-public fn classify(c: &Capabilities) -> Verdict {
+public fn classify(c: &Capabilities) -> WindowFnVerdict {
     if !aggregate_capable(c) { return VNotAggregate; }
     let mv = !c.has_value;
     let mi = !c.has_inverse;
@@ -70,7 +70,7 @@ public fn classify(c: &Capabilities) -> Verdict {
     VOk
 }
 
-public fn verdict_name(v: &Verdict) -> Text {
+public fn verdict_name(v: &WindowFnVerdict) -> Text {
     match v {
         VOk              => "ok".clone(),
         VMissingValue    => "missing_value".clone(),
@@ -80,7 +80,7 @@ public fn verdict_name(v: &Verdict) -> Text {
     }
 }
 
-public fn is_ok(v: &Verdict) -> Bool {
+public fn is_ok(v: &WindowFnVerdict) -> Bool {
     match v { VOk => true, _ => false }
 }
 
@@ -92,7 +92,7 @@ public type FrameAction is
     | FaFinalize       // window ended; engine calls xFinal
     ;
 
-public fn method_for_action(a: &FrameAction) -> Method {
+public fn method_for_action(a: &FrameAction) -> WindowFnMethod {
     match a {
         FaAddRow    => MStep,
         FaRemoveRow => MInverse,

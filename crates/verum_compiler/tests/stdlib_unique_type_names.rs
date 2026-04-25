@@ -72,10 +72,7 @@ const BASELINE_DUPLICATES: &[&str] = &[
     "Instant",
     "IoCqe", "IoDriver", "IoDriverError",
     "IoError", "IoOp", "IoOpKind", "IoToken",
-    "Method", "MethodSet",
-    "Mode",
-    "Op",
-    "Outcome", "PageHeader",
+    "PageHeader",
     "ParseError", "ParseState",
     "PlatformIOEngine",
     "Reading",
@@ -91,7 +88,7 @@ const BASELINE_DUPLICATES: &[&str] = &[
     "Timeout",
     "TlsError", "Token",
     "TxnState",
-    "Value", "Verdict",
+    "Value",
     "YieldNow",
 ];
 

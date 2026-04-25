@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.cell_size_check_pragma.gate.{
-    Mode, CcOff, CcOn,
+    CellSizeCheckMode, CcOff, CcOn,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     validates_on_load,
     CellCheckResult, CrSkipped, CrWellFormed, CrCorrupt,

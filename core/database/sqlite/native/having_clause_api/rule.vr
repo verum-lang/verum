@@ -10,13 +10,13 @@ mount core.database.sqlite.native.having_clause_api.reference.{
 mount base.{Bool, Text};
 mount core.collections.list.{List};
 
-public type Verdict is
+public type HavingClauseVerdict is
     | VdOk
     | VdBareColumnReferenced
     | VdNoGroupByWithoutAggregate
     ;
 
-public fn verdict_name(v: &Verdict) -> Text {
+public fn verdict_name(v: &HavingClauseVerdict) -> Text {
     match v {
         VdOk                        => "ok".clone(),
         VdBareColumnReferenced      => "bare_column".clone(),
@@ -24,14 +24,14 @@ public fn verdict_name(v: &Verdict) -> Text {
     }
 }
 
-public fn is_accepted(v: &Verdict) -> Bool {
+public fn is_accepted(v: &HavingClauseVerdict) -> Bool {
     match v { VdOk => true, _ => false }
 }
 
 // Classify a HAVING expression made up of several references.
 //   refs — per-sub-expression kind (in parse order)
 //   has_group_by — whether the query has a GROUP BY clause
-public fn classify(refs: &List<ExprRefKind>, has_group_by: Bool) -> Verdict {
+public fn classify(refs: &List<ExprRefKind>, has_group_by: Bool) -> HavingClauseVerdict {
     // First blocker: a bare-column reference fails.
     let mut i: Int = 0;
     while i < refs.len() {
