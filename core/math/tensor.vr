@@ -30,6 +30,7 @@
 
 module core.math.tensor;
 
+mount core.base.coercion.{IntCoercible, TensorLike, Indexable};
 mount super.linalg.Numeric;
 mount super.elementary.{sqrt, exp, log, sin, cos, abs};
 mount super.random.{RandomKey};
@@ -272,6 +273,14 @@ public type DynTensor<T: Numeric> is {
     data: TensorHandle,
     shape: List<USize>,
 };
+
+// TensorLike: DynTensor is the canonical tensor-shaped value;
+// IntCoercible: index ops on DynTensor produce Int that should
+// coerce against scalar Int contexts;
+// Indexable: `tensor[i]` integer indexing.
+implement<T: Numeric> TensorLike for DynTensor<T> {}
+implement<T: Numeric> IntCoercible for DynTensor<T> {}
+implement<T: Numeric> Indexable for DynTensor<T> {}
 
 // Semantic alias for explicit naming
 public type RuntimeShapedTensor<T: Numeric> is DynTensor<T>;

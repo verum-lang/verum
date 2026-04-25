@@ -29,6 +29,7 @@
 
 module core.math.linalg;
 
+mount core.base.coercion.{IntCoercible, TensorLike, Indexable};
 mount super.constants.{EPSILON};
 mount super.elementary.{sqrt, hypot, abs, fma};
 mount super.ieee754.{is_nan, copysign};
@@ -74,6 +75,13 @@ public type Vector<T: Numeric> is {
     data: List<T>,
     len: Int,
 };
+
+// TensorLike + IntCoercible + Indexable: Vector behaves as a 1-D
+// tensor for unifier coercion purposes. Indexing produces an Int that
+// should coerce against scalar Int contexts (e.g. `vec[i] + 1`).
+implement<T: Numeric> TensorLike for Vector<T> {}
+implement<T: Numeric> IntCoercible for Vector<T> {}
+implement<T: Numeric> Indexable for Vector<T> {}
 
 // Static vector with compile-time size
 public type StaticVector<T: Numeric, N: meta USize{N > 0}> is {
