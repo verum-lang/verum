@@ -65,7 +65,7 @@ public type IndexMeta is {
     unique: Bool,
 };
 
-public type SchemaError is
+public type SessionSchemaError is
       NotFound(name: Text)
     | AlreadyExists(name: Text)
     | InvalidMetadata(why: Text);
@@ -102,7 +102,7 @@ implement SchemaCache {
 
     /// Insert a new table metadata entry. Returns AlreadyExists if the
     /// qualified name is already in the cache.
-    public fn register_table(&mut self, meta: TableMeta) -> Result<(), SchemaError> {
+    public fn register_table(&mut self, meta: TableMeta) -> Result<(), SessionSchemaError> {
         let key = qualify(&meta.schema, &meta.name);
         if self.tables.contains_key(key.clone()) {
             return Err(AlreadyExists(key));
@@ -117,7 +117,7 @@ implement SchemaCache {
         let _ = self.tables.insert(key, meta);
     }
 
-    public fn register_index(&mut self, idx: IndexMeta) -> Result<(), SchemaError> {
+    public fn register_index(&mut self, idx: IndexMeta) -> Result<(), SessionSchemaError> {
         let key = qualify(&idx.schema, &idx.name);
         if self.indexes.contains_key(key.clone()) {
             return Err(AlreadyExists(key));
@@ -130,7 +130,7 @@ implement SchemaCache {
     // Lookup
     // -------------------------------------------------------------------------
 
-    public fn lookup_table(&self, schema: &Text, name: &Text) -> Result<TableMeta, SchemaError> {
+    public fn lookup_table(&self, schema: &Text, name: &Text) -> Result<TableMeta, SessionSchemaError> {
         let key = qualify(schema, name);
         if !self.tables.contains_key(key.clone()) {
             return Err(NotFound(key));
@@ -138,7 +138,7 @@ implement SchemaCache {
         Ok(clone_table_meta(&self.tables.get(key)))
     }
 
-    public fn lookup_index(&self, schema: &Text, name: &Text) -> Result<IndexMeta, SchemaError> {
+    public fn lookup_index(&self, schema: &Text, name: &Text) -> Result<IndexMeta, SessionSchemaError> {
         let key = qualify(schema, name);
         if !self.indexes.contains_key(key.clone()) {
             return Err(NotFound(key));
@@ -155,7 +155,7 @@ implement SchemaCache {
     // DDL hooks
     // -------------------------------------------------------------------------
 
-    public fn drop_table(&mut self, schema: &Text, name: &Text) -> Result<(), SchemaError> {
+    public fn drop_table(&mut self, schema: &Text, name: &Text) -> Result<(), SessionSchemaError> {
         let key = qualify(schema, name);
         if !self.tables.contains_key(key.clone()) {
             return Err(NotFound(key));
@@ -165,7 +165,7 @@ implement SchemaCache {
         Ok(())
     }
 
-    public fn drop_index(&mut self, schema: &Text, name: &Text) -> Result<(), SchemaError> {
+    public fn drop_index(&mut self, schema: &Text, name: &Text) -> Result<(), SessionSchemaError> {
         let key = qualify(schema, name);
         if !self.indexes.contains_key(key.clone()) {
             return Err(NotFound(key));
