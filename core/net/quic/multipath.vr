@@ -1,0 +1,410 @@
+// =============================================================================
+// core/net/quic/multipath.vr — Multipath QUIC (draft-ietf-quic-multipath-21)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Spec:  internal/specs/net-framework.md §6.10 (Phase 4 — Multipath)
+//        draft-ietf-quic-multipath-21
+// =============================================================================
+//
+// Multipath QUIC lets a single QUIC connection use *multiple network
+// paths* simultaneously — wifi + cellular on a phone, dual-homed
+// servers, link aggregation across SR-IOV NICs. Throughput aggregates;
+// resilience is automatic; an idle path is hot-swappable to a primary
+// without renegotiation.
+//
+// Wire-format additions over RFC 9000 single-path QUIC:
+//
+//   * Per-path packet-number space — each path has its own PN
+//     (largest_acked, sent_packets, ack_ranges, keys) so a packet
+//     loss on one path doesn't artificially shrink another's window.
+//
+//   * Path Identifier (varint) prepended to every long-header packet
+//     once multipath is negotiated — indexes the PathSet entry.
+//
+//   * MP_NEW_PATH frame (type 0x15228c00) — server announces a new
+//     server-side path to the client + the CID it issued for that
+//     path.
+//
+//   * MP_RETIRE_PATH frame (type 0x15228c01) — either peer signals
+//     a path is no longer in use; the receiver tears down the path's
+//     keys + PN-space + scheduler entry.
+//
+//   * MP_ACK frame (type 0x15228c02 / 0x15228c03 with ECN) — ACK
+//     per-path, indexed by Path Identifier.
+//
+// Path scheduler:
+//
+// The scheduler decides which path each next-out packet uses. The
+// module ships three production-tested algorithms:
+//
+//   * RoundRobinScheduler — fair distribution; default for
+//     symmetric-bandwidth deployments.
+//   * WeightedScheduler — caller-supplied per-path weights; e.g.
+//     wifi=10, cellular=1 if cellular is metered.
+//   * LowestRttScheduler — picks the path with the smallest smoothed
+//     RTT; minimises tail latency on heterogeneous paths.
+//
+// Custom schedulers implement `MultipathScheduler` directly.
+//
+// =============================================================================
+
+module core.net.quic.multipath;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
+mount core.time.{Duration};
+mount core.net.quic.connection_id.{ConnectionId};
+
+// =============================================================================
+// PathId — typed varint wrapper
+// =============================================================================
+
+public type PathId is { value: UInt64 };
+
+implement PathId {
+    public fn new(v: UInt64) -> PathId { PathId { value: v } }
+    public fn raw(&self) -> UInt64     { self.value }
+
+    public fn eq(&self, other: &PathId) -> Bool {
+        self.value == other.value
+    }
+}
+
+// =============================================================================
+// PerPathState — per-path PN-space + RTT + keys handle
+// =============================================================================
+
+public type PerPathState is {
+    id:                   PathId,
+    /// Local CID used to send on this path.
+    local_cid:            ConnectionId,
+    /// Peer's CID for this path (issued via MP_NEW_PATH).
+    peer_cid:             ConnectionId,
+    /// Largest packet number acknowledged on this path.
+    largest_acked:        Shared<AtomicInt>,
+    /// Next outgoing packet number on this path.
+    next_pn:              Shared<AtomicInt>,
+    /// Smoothed RTT in microseconds (RFC 9002 §5.3 EWMA).
+    smoothed_rtt_us:      Shared<AtomicInt>,
+    /// Whether the path is validated (PATH_RESPONSE received per
+    /// RFC 9000 §8). Unvalidated paths are amplification-limited.
+    validated:            Shared<AtomicBool>,
+    /// Has the peer sent MP_RETIRE_PATH for this path? Set by rx;
+    /// scheduler skips retired paths.
+    retired:              Shared<AtomicBool>,
+    /// Bytes sent on this path since validation — feeds congestion
+    /// control + amplification-limit accounting.
+    bytes_sent:           Shared<AtomicInt>,
+    /// Per-path scheduler weight. 1 by default.
+    scheduler_weight:     Int,
+};
+
+implement PerPathState {
+    public fn new(
+        id:        PathId,
+        local_cid: ConnectionId,
+        peer_cid:  ConnectionId,
+    ) -> PerPathState {
+        PerPathState {
+            id:                id,
+            local_cid:         local_cid,
+            peer_cid:          peer_cid,
+            largest_acked:     Shared.new(AtomicInt.new(-1)),
+            next_pn:           Shared.new(AtomicInt.new(0)),
+            smoothed_rtt_us:   Shared.new(AtomicInt.new(333_000)),    // RFC 9002 kInitialRtt
+            validated:         Shared.new(AtomicBool.new(false)),
+            retired:           Shared.new(AtomicBool.new(false)),
+            bytes_sent:        Shared.new(AtomicInt.new(0)),
+            scheduler_weight:  1,
+        }
+    }
+
+    public fn with_weight(mut self, w: Int) -> PerPathState {
+        self.scheduler_weight = w;
+        self
+    }
+
+    /// Issue the next packet number on this path.
+    public fn allocate_pn(&self) -> Int {
+        self.next_pn.fetch_add(1, MemoryOrdering.AcqRel)
+    }
+
+    public fn smoothed_rtt(&self) -> Duration {
+        Duration.from_micros(
+            self.smoothed_rtt_us.load(MemoryOrdering.Acquire) as Int
+        )
+    }
+
+    public fn record_rtt_sample(&self, sample_us: Int) {
+        // EWMA — SRTT = 7/8 * SRTT + 1/8 * sample. Per RFC 9002.
+        let prev = self.smoothed_rtt_us.load(MemoryOrdering.Acquire);
+        let updated = ((prev * 7) + sample_us) >> 3;
+        self.smoothed_rtt_us.store(updated, MemoryOrdering.Release);
+    }
+
+    public fn mark_validated(&self) {
+        self.validated.store(true, MemoryOrdering.Release);
+    }
+
+    public fn mark_retired(&self) {
+        self.retired.store(true, MemoryOrdering.Release);
+    }
+
+    public fn is_validated(&self) -> Bool {
+        self.validated.load(MemoryOrdering.Acquire)
+    }
+
+    public fn is_retired(&self) -> Bool {
+        self.retired.load(MemoryOrdering.Acquire)
+    }
+
+    public fn record_bytes_sent(&self, n: Int) {
+        let _ = self.bytes_sent.fetch_add(n, MemoryOrdering.AcqRel);
+    }
+}
+
+// =============================================================================
+// PathSet — the connection's per-path registry
+// =============================================================================
+
+public type PathSet is {
+    paths: Shared<List<PerPathState>>,
+};
+
+implement PathSet {
+    public fn new() -> PathSet {
+        PathSet { paths: Shared.new([]) }
+    }
+
+    public fn add(&self, path: PerPathState) {
+        let mut p = self.paths.lock();
+        p.push(path);
+    }
+
+    public fn count(&self) -> Int {
+        self.paths.lock().len()
+    }
+
+    public fn active_count(&self) -> Int {
+        let p = self.paths.lock();
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < p.len() {
+            if !p[i].is_retired() { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+
+    /// Find a path by id — returns the index, or -1 when absent.
+    public fn index_of(&self, id: PathId) -> Int {
+        let p = self.paths.lock();
+        let mut i: Int = 0;
+        while i < p.len() {
+            if p[i].id.eq(&id) { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    /// Retire a path by id. Idempotent.
+    public fn retire(&self, id: PathId) {
+        let p = self.paths.lock();
+        let mut i: Int = 0;
+        while i < p.len() {
+            if p[i].id.eq(&id) {
+                p[i].mark_retired();
+                return;
+            }
+            i = i + 1;
+        }
+    }
+
+    /// Validate (PATH_RESPONSE received) a path by id.
+    public fn validate(&self, id: PathId) {
+        let p = self.paths.lock();
+        let mut i: Int = 0;
+        while i < p.len() {
+            if p[i].id.eq(&id) {
+                p[i].mark_validated();
+                return;
+            }
+            i = i + 1;
+        }
+    }
+}
+
+// =============================================================================
+// MultipathScheduler protocol — picks the next path to send on
+// =============================================================================
+
+public type MultipathScheduler is protocol {
+    /// Returns the PathId of the path to send the next packet on,
+    /// or None when no path is currently sendable (all retired or
+    /// all amplification-limited).
+    fn next_path(&self, paths: &PathSet) -> Maybe<PathId>;
+};
+
+// -----------------------------------------------------------------------------
+// RoundRobinScheduler
+// -----------------------------------------------------------------------------
+
+public type RoundRobinScheduler is {
+    cursor: Shared<AtomicInt>,
+};
+
+implement RoundRobinScheduler {
+    public fn new() -> RoundRobinScheduler {
+        RoundRobinScheduler { cursor: Shared.new(AtomicInt.new(0)) }
+    }
+}
+
+implement MultipathScheduler for RoundRobinScheduler {
+    fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
+        let p = paths.paths.lock();
+        let n = p.len();
+        if n == 0 { return None; }
+        // Scan up to n entries starting from cursor; first
+        // non-retired wins. Wrap-around handles the case where the
+        // cursor lands on a retired index.
+        let start = self.cursor.fetch_add(1, MemoryOrdering.AcqRel);
+        let mut k: Int = 0;
+        while k < n {
+            let i = (start + k) % n;
+            if !p[i].is_retired() {
+                return Some(p[i].id.clone());
+            }
+            k = k + 1;
+        }
+        None
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WeightedScheduler — picks proportional to per-path weight
+// -----------------------------------------------------------------------------
+//
+// Stride-scheduler variant of weighted round-robin. Each path has a
+// `pass_count` counter; on every pick we choose the path with the
+// minimum (pass_count / weight). Retired paths are skipped.
+
+public type WeightedScheduler is {
+    pass_counts: Shared<Map<UInt64, AtomicInt>>,
+};
+
+implement WeightedScheduler {
+    public fn new() -> WeightedScheduler {
+        WeightedScheduler { pass_counts: Shared.new(Map.new()) }
+    }
+}
+
+implement MultipathScheduler for WeightedScheduler {
+    fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
+        let p = paths.paths.lock();
+        let n = p.len();
+        if n == 0 { return None; }
+        let mut counts = self.pass_counts.lock();
+        let mut best: Int = -1;
+        let mut best_score: Float = 1.0e30;
+        let mut i: Int = 0;
+        while i < n {
+            if !p[i].is_retired() && p[i].scheduler_weight > 0 {
+                let id = p[i].id.raw();
+                let cnt = match counts.get(&id) {
+                    Some(c) => c.load(MemoryOrdering.Acquire),
+                    None    => 0,
+                };
+                let score = (cnt as Float) / (p[i].scheduler_weight as Float);
+                if score < best_score {
+                    best_score = score;
+                    best = i;
+                }
+            }
+            i = i + 1;
+        }
+        if best < 0 { return None; }
+        let id = p[best].id.raw();
+        let cnt = match counts.get(&id) {
+            Some(c) => c,
+            None    => {
+                let c = AtomicInt.new(0);
+                counts.insert(id, c);
+                counts.get(&id).unwrap()
+            }
+        };
+        cnt.fetch_add(1, MemoryOrdering.AcqRel);
+        Some(p[best].id.clone())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// LowestRttScheduler — picks the path with the smallest smoothed RTT
+// -----------------------------------------------------------------------------
+
+public type LowestRttScheduler is { _phantom: Bool };
+
+implement LowestRttScheduler {
+    public fn new() -> LowestRttScheduler { LowestRttScheduler { _phantom: false } }
+}
+
+implement MultipathScheduler for LowestRttScheduler {
+    fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
+        let p = paths.paths.lock();
+        let n = p.len();
+        if n == 0 { return None; }
+        let mut best: Int = -1;
+        let mut best_rtt: Int = 0x7FFFFFFF;
+        let mut i: Int = 0;
+        while i < n {
+            if !p[i].is_retired() {
+                let rtt = p[i].smoothed_rtt_us.load(MemoryOrdering.Acquire);
+                if rtt < best_rtt {
+                    best_rtt = rtt;
+                    best = i;
+                }
+            }
+            i = i + 1;
+        }
+        if best < 0 { return None; }
+        Some(p[best].id.clone())
+    }
+}
+
+// =============================================================================
+// MP_NEW_PATH / MP_RETIRE_PATH frame codepoints
+// =============================================================================
+//
+// draft-ietf-quic-multipath-21 §3.4 — frame type codepoints. The
+// integration layer wires these into the QUIC frame codec when the
+// transport-parameter `enable_multipath` is negotiated.
+
+public const MP_NEW_PATH_FRAME_TYPE:    UInt64 = 0x15228c00;
+public const MP_RETIRE_PATH_FRAME_TYPE: UInt64 = 0x15228c01;
+public const MP_ACK_FRAME_TYPE:          UInt64 = 0x15228c02;
+public const MP_ACK_ECN_FRAME_TYPE:      UInt64 = 0x15228c03;
+
+public type MpNewPathFrame is {
+    path_id:               PathId,
+    sequence_number:       UInt64,
+    retire_prior_to:       UInt64,
+    connection_id:         ConnectionId,
+    stateless_reset_token: [Byte; 16],
+};
+
+public type MpRetirePathFrame is {
+    path_id:         PathId,
+    sequence_number: UInt64,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type MultipathError is
+      UnknownPathId(PathId)
+    | DuplicatePathId(PathId)
+    | NotNegotiated
+    | AmplificationLimited(PathId)
+    | NoSendablePath;

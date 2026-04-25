@@ -1,0 +1,229 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, multipath, draft_quic_multipath, surface
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/quic/multipath.vr` — surface check for the Multipath QUIC
+// machinery that closes net-framework.md §6.10 Phase 4 follow-up
+// "Multipath QUIC path scheduler".
+
+mount core.collections.list.{List};
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.multipath.{
+    PathId, PerPathState, PathSet,
+    MultipathScheduler, RoundRobinScheduler, WeightedScheduler,
+    LowestRttScheduler,
+    MP_NEW_PATH_FRAME_TYPE, MP_RETIRE_PATH_FRAME_TYPE,
+    MP_ACK_FRAME_TYPE, MP_ACK_ECN_FRAME_TYPE,
+};
+
+fn path_id_eq() {
+    let a = PathId.new(7_u64);
+    let b = PathId.new(7_u64);
+    let c = PathId.new(8_u64);
+    assert(a.eq(&b));
+    assert(false == a.eq(&c));
+}
+
+fn frame_codepoints_match_draft() {
+    // draft-ietf-quic-multipath-21 §3.4 fixed codepoints.
+    assert(MP_NEW_PATH_FRAME_TYPE    == 0x15228c00_u64);
+    assert(MP_RETIRE_PATH_FRAME_TYPE == 0x15228c01_u64);
+    assert(MP_ACK_FRAME_TYPE         == 0x15228c02_u64);
+    assert(MP_ACK_ECN_FRAME_TYPE     == 0x15228c03_u64);
+}
+
+fn per_path_initial_state() {
+    let local: List<Byte> = [0x01_u8, 0x02_u8];
+    let peer:  List<Byte> = [0x0A_u8, 0x0B_u8];
+    let path = PerPathState.new(
+        PathId.new(1_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    );
+    assert(false == path.is_validated());
+    assert(false == path.is_retired());
+}
+
+fn per_path_pn_allocator_is_monotonic() {
+    let local: List<Byte> = [0x01_u8];
+    let peer:  List<Byte> = [0x0A_u8];
+    let path = PerPathState.new(
+        PathId.new(1_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    );
+    let a = path.allocate_pn();
+    let b = path.allocate_pn();
+    let c = path.allocate_pn();
+    assert(a == 0);
+    assert(b == 1);
+    assert(c == 2);
+}
+
+fn per_path_with_weight_propagates() {
+    let local: List<Byte> = [0x01_u8];
+    let peer:  List<Byte> = [0x0A_u8];
+    let path = PerPathState.new(
+        PathId.new(1_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    ).with_weight(10);
+    assert(path.scheduler_weight == 10);
+}
+
+fn pathset_add_count_index_retire() {
+    let set = PathSet.new();
+    let local: List<Byte> = [0x01_u8];
+    let peer:  List<Byte> = [0x0A_u8];
+    let p1 = PerPathState.new(
+        PathId.new(1_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    );
+    let p2 = PerPathState.new(
+        PathId.new(2_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    );
+    set.add(p1);
+    set.add(p2);
+    assert(set.count() == 2);
+    assert(set.active_count() == 2);
+    assert(set.index_of(PathId.new(2_u64)) == 1);
+    assert(set.index_of(PathId.new(99_u64)) == -1);
+    set.retire(PathId.new(1_u64));
+    assert(set.active_count() == 1);
+}
+
+fn round_robin_returns_none_on_empty() {
+    let set = PathSet.new();
+    let s = RoundRobinScheduler.new();
+    match s.next_path(&set) {
+        None => {},
+        Some(_) => panic("expected None"),
+    }
+}
+
+fn round_robin_distributes_across_paths() {
+    let set = PathSet.new();
+    let local: List<Byte> = [0x01_u8];
+    let peer:  List<Byte> = [0x0A_u8];
+    set.add(PerPathState.new(
+        PathId.new(1_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    ));
+    set.add(PerPathState.new(
+        PathId.new(2_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    ));
+    let s = RoundRobinScheduler.new();
+    let pick1 = s.next_path(&set);
+    let pick2 = s.next_path(&set);
+    let pick3 = s.next_path(&set);
+    // Three picks across two paths must span both ids — round-robin
+    // doesn't get stuck on a single path.
+    let mut saw_1: Bool = false;
+    let mut saw_2: Bool = false;
+    let mut iter_picks: List<Maybe<PathId>> = [pick1, pick2, pick3];
+    let mut i: Int = 0;
+    while i < iter_picks.len() {
+        match &iter_picks[i] {
+            Some(id) => {
+                if id.raw() == 1_u64 { saw_1 = true; }
+                if id.raw() == 2_u64 { saw_2 = true; }
+            },
+            None => panic("expected Some"),
+        }
+        i = i + 1;
+    }
+    assert(saw_1);
+    assert(saw_2);
+}
+
+fn round_robin_skips_retired_paths() {
+    let set = PathSet.new();
+    let local: List<Byte> = [0x01_u8];
+    let peer:  List<Byte> = [0x0A_u8];
+    set.add(PerPathState.new(
+        PathId.new(1_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    ));
+    set.add(PerPathState.new(
+        PathId.new(2_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    ));
+    set.retire(PathId.new(1_u64));
+    let s = RoundRobinScheduler.new();
+    let pick = s.next_path(&set);
+    match pick {
+        Some(id) => assert(id.raw() == 2_u64),
+        None     => panic("expected Some(2)"),
+    }
+}
+
+fn round_robin_returns_none_when_all_retired() {
+    let set = PathSet.new();
+    let local: List<Byte> = [0x01_u8];
+    let peer:  List<Byte> = [0x0A_u8];
+    set.add(PerPathState.new(
+        PathId.new(1_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    ));
+    set.retire(PathId.new(1_u64));
+    let s = RoundRobinScheduler.new();
+    match s.next_path(&set) {
+        None => {},
+        Some(_) => panic("expected None"),
+    }
+}
+
+fn weighted_scheduler_constructs() {
+    let _s = WeightedScheduler.new();
+}
+
+fn lowest_rtt_constructs() {
+    let _s = LowestRttScheduler.new();
+}
+
+fn rtt_ewma_advances_toward_sample() {
+    let local: List<Byte> = [0x01_u8];
+    let peer:  List<Byte> = [0x0A_u8];
+    let path = PerPathState.new(
+        PathId.new(1_u64),
+        ConnectionId.from_bytes(local.as_slice()).unwrap(),
+        ConnectionId.from_bytes(peer.as_slice()).unwrap(),
+    );
+    // Initial 333 ms (kInitialRtt). After feeding a 10 ms sample the
+    // EWMA should drop noticeably (7/8 * 333 + 1/8 * 10 ≈ 292).
+    path.record_rtt_sample(10_000);
+    let post = path.smoothed_rtt().as_millis();
+    assert(post < 333);
+    assert(post > 200);
+}
+
+@main
+public fn main() -> Int {
+    path_id_eq();
+    frame_codepoints_match_draft();
+    per_path_initial_state();
+    per_path_pn_allocator_is_monotonic();
+    per_path_with_weight_propagates();
+    pathset_add_count_index_retire();
+    round_robin_returns_none_on_empty();
+    round_robin_distributes_across_paths();
+    round_robin_skips_retired_paths();
+    round_robin_returns_none_when_all_retired();
+    weighted_scheduler_constructs();
+    lowest_rtt_constructs();
+    rtt_ewma_advances_toward_sample();
+    print("Multipath QUIC surface verified");
+    0
+}
