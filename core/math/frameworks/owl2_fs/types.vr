@@ -48,3 +48,72 @@ public type Literal is protocol {
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §Notation (quantifier of quantity #)")
 public axiom count_o_spec() -> Bool
     ensures true;
+
+// ─── #134 / C7 V2 — Direct-Semantics carrier sorts ──────────────────
+//
+// W3C OWL 2 Direct Semantics §3.1 defines an interpretation `I` over
+// two carrier sets:
+//
+//   ΔᴵO  — the "object domain", where Individuals and class members
+//          live (sort `o`)
+//   Δᴵᴰ  — the "data domain", a fixed superset of all RDF datatype
+//          value spaces, where Literals live (sort `d`)
+//
+// The interpretation function `⟦·⟧^I` maps:
+//
+//   • Individual → ΔᴵO          (§3.1, "individual interpretation")
+//   • Class      → 𝒫(ΔᴵO)        (§3.1, "class interpretation")
+//   • OPE        → 𝒫(ΔᴵO × ΔᴵO)  (§3.1, "object-property interpretation")
+//   • DPE        → 𝒫(ΔᴵO × Δᴵᴰ)  (§3.1, "data-property interpretation")
+//   • DR  / DT   → 𝒫(Δᴵᴰ)        (§3.1, "data-range interpretation")
+//   • Literal    → Δᴵᴰ           (§3.1, "literal interpretation")
+//
+// Every assertion / class / property axiom of OWL 2 DS is a Boolean
+// proposition over these mappings. V2 axiom bodies in this package
+// state those propositions via `ensures` clauses on
+// `Interpretation::contains_*` predicates. The predicates are
+// *abstract* — concrete reasoners instantiate `Interpretation` with
+// the specific domain witness (Pellet, HermiT, Z3-based, …) at
+// `verum verify --owl2-reasoner=…` ship time.
+
+/// Generic class expression — anything that can stand to the right
+/// of `ClassAssertion`. The trusted-boundary axioms in this file
+/// treat it opaquely; concrete encodings (NamedClass / ObjectIntersectionOf / …)
+/// live at `core.math.frameworks.owl2_fs.class_expr`.
+public type ClassExpression is protocol {};
+
+/// Generic object-property expression — `OPE` in W3C parlance.
+public type ObjectPropertyExpression is protocol {};
+
+/// Generic data-property expression.
+public type DataPropertyExpression is protocol {};
+
+/// Generic data range — anything that interprets to a subset of Δᴵᴰ.
+public type DataRange is protocol {};
+
+/// W3C OWL 2 DS §3.1 interpretation function. The protocol exposes
+/// the four membership predicates that every DS axiom body refers to.
+/// Each method's contract is: "true iff the named entity's
+/// interpretation under I contains the given tuple/value".
+///
+/// V1 (this commit) ships the protocol as a trusted boundary —
+/// concrete reasoners furnish their own witness implementation
+/// when they invoke a V2 axiom. V2 SMT dispatch will discharge
+/// goals over `Interpretation` via Z3/CVC5 first-order encodings.
+public type Interpretation is protocol {
+    /// `a^I ∈ ⟦CE⟧^I`: individual `a` is a member of class CE under I.
+    fn class_member<C: ClassExpression>(self, ce: C, a: Individual) -> Bool;
+
+    /// `(a^I, b^I) ∈ ⟦OPE⟧^I`: pair (a, b) is in the OPE relation under I.
+    fn object_property_pair<P: ObjectPropertyExpression>(
+        self, ope: P, a: Individual, b: Individual,
+    ) -> Bool;
+
+    /// `(a^I, lt^I) ∈ ⟦DPE⟧^I`: pair (a, lt) is in the DPE relation under I.
+    fn data_property_pair<P: DataPropertyExpression>(
+        self, dpe: P, a: Individual, lt: Literal,
+    ) -> Bool;
+
+    /// `a^I = b^I`: individuals a and b denote the same element of ΔᴵO.
+    fn same_individual(self, a: Individual, b: Individual) -> Bool;
+};

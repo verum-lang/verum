@@ -5,21 +5,84 @@
 // §2.3.6 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 7 axioms
 // asserting facts about specific Individuals — the ABox of an OWL 2
 // ontology.
+//
+// V2 status (#134, 2026-04-25): all 7 ABox axioms now ship verbatim
+// W3C OWL 2 DS §5.6 / §5.10 / §5.11 bodies. Earlier `ensures true`
+// placeholders are replaced with classical Boolean propositions over
+// the `Interpretation` carrier protocol from `types.vr`.
+//
+// Pattern for the rest of the C7 V2 conveyor (class_axiom, class_expr,
+// data_property_axiom, data_range, object_property_axiom, key,
+// datatype_definition, count): mirror the shape used here — take the
+// W3C entity arguments by parameter, write the membership predicate
+// in the `ensures` clause, route through `Interpretation::*` so SMT
+// dispatch remains framework-agnostic.
 // =============================================================================
 
+mount core.math.frameworks.owl2_fs.types.{
+    Individual,
+    Literal,
+    ClassExpression,
+    ObjectPropertyExpression,
+    DataPropertyExpression,
+    Interpretation,
+};
+
+// ─── §5.6 Individual equality ──────────────────────────────────────
+
+/// `SameIndividual(a₁, …, aₙ)` (W3C OWL 2 DS §5.6.1, "Same
+/// Individuals"): under interpretation I every pair of the listed
+/// individuals denotes the same element of ΔᴵO.
+///
+/// The full Shkotin Table 10 entry is the n-ary fold over pairs;
+/// V2 ships the binary core — `SameIndividual(a, b)` — and leaves
+/// the n-ary fold to a higher-level helper.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: SameIndividual")
-public axiom SameIndividual() -> Bool ensures true;
+public axiom SameIndividual<I: Interpretation>(
+    interp: I,
+    a:      Individual,
+    b:      Individual,
+) -> Bool
+    ensures interp.same_individual(a, b);
 
+/// `DifferentIndividuals(a₁, …, aₙ)` (W3C OWL 2 DS §5.6.2): under I
+/// every pair denotes DISTINCT elements of ΔᴵO. Binary core — n-ary
+/// fold via Verum-level helper.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: DifferentIndividuals")
-public axiom DifferentIndividuals() -> Bool ensures true;
+public axiom DifferentIndividuals<I: Interpretation>(
+    interp: I,
+    a:      Individual,
+    b:      Individual,
+) -> Bool
+    ensures !interp.same_individual(a, b);
 
+// ─── §5.7 Class assertion ──────────────────────────────────────────
+
+/// `ClassAssertion(CE, a)` (W3C OWL 2 DS §5.7): under I, `a` is a
+/// member of class CE. ⟦ClassAssertion(CE, a)⟧^I  iff  a^I ∈ ⟦CE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: ClassAssertion")
-public axiom ClassAssertion() -> Bool ensures true;
+public axiom ClassAssertion<I: Interpretation, CE: ClassExpression>(
+    interp: I,
+    ce:     CE,
+    a:      Individual,
+) -> Bool
+    ensures interp.class_member(ce, a);
 
+// ─── §5.8 Object-property assertions ───────────────────────────────
+
+/// `ObjectPropertyAssertion(OPE, a, b)` (W3C OWL 2 DS §5.8.1):
+/// under I, the pair `(a, b)` is in the OPE relation.
+/// ⟦OPA(OPE, a, b)⟧^I  iff  (a^I, b^I) ∈ ⟦OPE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: ObjectPropertyAssertion")
-public axiom ObjectPropertyAssertion() -> Bool ensures true;
+public axiom ObjectPropertyAssertion<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+    a:      Individual,
+    b:      Individual,
+) -> Bool
+    ensures interp.object_property_pair(ope, a, b);
 
-// Semantics — W3C OWL 2 DS §5.6 (verbatim):
+// Semantics — W3C OWL 2 DS §5.8.2 (verbatim):
 //
 //   ⟦NegativeObjectPropertyAssertion(OPE, a, b)⟧^I = true
 //      iff
@@ -27,18 +90,45 @@ public axiom ObjectPropertyAssertion() -> Bool ensures true;
 //
 // V2 NOTE (Shkotin email confirmation 2026-04-25): the semantics is
 // classical negation pure-and-simple. There is NO OWA carve-out in
-// §5.6 — anonymous individuals get distinct denotations under the
-// standard interpretation function (§5.2) and the negation treats
-// them identically to named ones. C7 V2 body must NOT introduce
-// `¬∃b_anon. ⟦OPE⟧^I(a, b_anon)` framing — that confuses the
-// syntactic Skolem-style scoping of anonymous individuals at RDF
-// parse time with the meta-logical OWA of OWL 2 entailment. Both
-// belong elsewhere; §5.6 itself is bog-standard classical.
+// §5.8 — anonymous individuals get distinct denotations under the
+// standard interpretation function (§3.1) and the negation treats
+// them identically to named ones. The body below uses bog-standard
+// Verum `!` over `Interpretation::object_property_pair`; do NOT
+// introduce `¬∃b_anon. ⟦OPE⟧^I(a, b_anon)` framing — that confuses
+// the syntactic Skolem-style scoping of anonymous individuals at
+// RDF parse time with the meta-logical OWA of OWL 2 entailment.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: NegativeObjectPropertyAssertion")
-public axiom NegativeObjectPropertyAssertion() -> Bool ensures true;
+public axiom NegativeObjectPropertyAssertion<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    ope:    P,
+    a:      Individual,
+    b:      Individual,
+) -> Bool
+    ensures !interp.object_property_pair(ope, a, b);
 
+// ─── §5.9 Data-property assertions ─────────────────────────────────
+
+/// `DataPropertyAssertion(DPE, a, lt)` (W3C OWL 2 DS §5.9.1):
+/// under I, the pair `(a, lt)` is in the DPE relation.
+/// ⟦DPA(DPE, a, lt)⟧^I  iff  (a^I, lt^I) ∈ ⟦DPE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: DataPropertyAssertion")
-public axiom DataPropertyAssertion() -> Bool ensures true;
+public axiom DataPropertyAssertion<I: Interpretation, D: DataPropertyExpression>(
+    interp: I,
+    dpe:    D,
+    a:      Individual,
+    lt:     Literal,
+) -> Bool
+    ensures interp.data_property_pair(dpe, a, lt);
 
+/// `NegativeDataPropertyAssertion(DPE, a, lt)` (W3C OWL 2 DS §5.9.2):
+/// under I, the pair `(a, lt)` is NOT in the DPE relation. Same
+/// classical-negation discipline as NegativeObjectPropertyAssertion;
+/// no OWA carve-out.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: NegativeDataPropertyAssertion")
-public axiom NegativeDataPropertyAssertion() -> Bool ensures true;
+public axiom NegativeDataPropertyAssertion<I: Interpretation, D: DataPropertyExpression>(
+    interp: I,
+    dpe:    D,
+    a:      Individual,
+    lt:     Literal,
+) -> Bool
+    ensures !interp.data_property_pair(dpe, a, lt);
