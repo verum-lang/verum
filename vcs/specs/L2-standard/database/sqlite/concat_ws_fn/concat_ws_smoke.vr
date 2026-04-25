@@ -8,7 +8,7 @@
 mount core.database.sqlite.native.concat_ws_fn.fn_.{
     Operand, OpNull, OpText,
     null_operand, text_operand, is_null,
-    Result, RNull, RText,
+    ConcatWsResult, RNull, RText,
     result_is_null, result_text, evaluate,
     ArityClass, AcInvalid, AcSeparatorOnly, AcVariadic,
     classify_arity, arity_name, count_non_null,

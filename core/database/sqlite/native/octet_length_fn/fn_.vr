@@ -12,16 +12,16 @@ public type ValueKind is
     | VkBlob(Int)         // blob byte count
     ;
 
-public type Result is
+public type OctetLengthResult is
     | RNull
     | RBytes(Int)
     ;
 
-public fn result_is_null(r: &Result) -> Bool {
+public fn result_is_null(r: &OctetLengthResult) -> Bool {
     match r { RNull => true, _ => false }
 }
 
-public fn result_bytes(r: &Result) -> Int {
+public fn result_bytes(r: &OctetLengthResult) -> Int {
     match r { RBytes(n) => n.clone(), RNull => 0 }
 }
 
@@ -40,7 +40,7 @@ public fn integer_serial_width(n: Int64) -> Int {
     8
 }
 
-public fn evaluate(v: &ValueKind) -> Result {
+public fn evaluate(v: &ValueKind) -> OctetLengthResult {
     match v {
         VkNull       => RNull,
         VkInt(n)     => RBytes(integer_serial_width(n.clone())),

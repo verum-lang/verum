@@ -7,7 +7,7 @@
 
 mount core.database.sqlite.native.octet_length_fn.fn_.{
     ValueKind, VkNull, VkInt, VkFloat, VkText, VkBlob,
-    Result, RNull, RBytes,
+    OctetLengthResult, RNull, RBytes,
     result_is_null, result_bytes,
     integer_serial_width, evaluate,
     length_minus_octet_length_text, arity_is_well_known,

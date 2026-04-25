@@ -1,6 +1,6 @@
 // concat_ws(sep, X1, X2, ...) — variadic concat with separator (3.45+).
 //
-// Result rules:
+// ConcatWsResult rules:
 //   * sep is NULL                       -> result is NULL
 //   * all operands NULL                 -> result is "" (empty Text)
 //   * otherwise NULLs in operands skipped, remaining joined by sep
@@ -23,17 +23,17 @@ public fn is_null(o: &Operand) -> Bool {
     match o { OpNull => true, _ => false }
 }
 
-// Result also can be NULL (when separator is NULL).
-public type Result is
+// ConcatWsResult also can be NULL (when separator is NULL).
+public type ConcatWsResult is
     | RNull
     | RText(Text)
     ;
 
-public fn result_is_null(r: &Result) -> Bool {
+public fn result_is_null(r: &ConcatWsResult) -> Bool {
     match r { RNull => true, _ => false }
 }
 
-public fn result_text(r: &Result) -> Text {
+public fn result_text(r: &ConcatWsResult) -> Text {
     match r {
         RText(t) => t.clone(),
         RNull    => "".clone(),
@@ -41,7 +41,7 @@ public fn result_text(r: &Result) -> Text {
 }
 
 // Compute concat_ws(sep, args...).
-public fn evaluate(sep: &Operand, args: &List<Operand>) -> Result {
+public fn evaluate(sep: &Operand, args: &List<Operand>) -> ConcatWsResult {
     match sep {
         OpNull => return RNull,
         OpText(_) => {},
