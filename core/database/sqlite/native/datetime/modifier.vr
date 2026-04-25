@@ -3,7 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.6 (date/time modifiers)
 //
-// Each `Modifier` shifts an `Instant`. Recognised modifier strings:
+// Each `DatetimeModifier` shifts an `Instant`. Recognised modifier strings:
 //
 //   'now'                 — replace with current wall-clock instant
 //   '+N days'             — add N days
@@ -36,10 +36,10 @@ mount core.database.sqlite.native.datetime.julian.{
 };
 
 // -----------------------------------------------------------------------------
-// Modifier
+// DatetimeModifier
 // -----------------------------------------------------------------------------
 
-public type Modifier is
+public type DatetimeModifier is
       MNow
     | MAddDays(Int64)
     | MAddHours(Int64)
@@ -55,7 +55,7 @@ public type Modifier is
     | MUtc
     | MLocaltime;
 
-public fn modifier_kind_name(m: &Modifier) -> Text {
+public fn modifier_kind_name(m: &DatetimeModifier) -> Text {
     match m {
         MNow              => "now".clone(),
         MAddDays(_)       => "add_days".clone(),
@@ -75,10 +75,10 @@ public fn modifier_kind_name(m: &Modifier) -> Text {
 }
 
 // -----------------------------------------------------------------------------
-// parse — Text → Maybe<Modifier>
+// parse — Text → Maybe<DatetimeModifier>
 // -----------------------------------------------------------------------------
 
-public fn parse(text: &Text) -> Maybe<Modifier> {
+public fn parse(text: &Text) -> Maybe<DatetimeModifier> {
     if *text == "now".clone() { return Some(MNow); }
     if *text == "start of day".clone() { return Some(MStartOfDay); }
     if *text == "start of month".clone() { return Some(MStartOfMonth); }
@@ -142,10 +142,10 @@ public fn parse(text: &Text) -> Maybe<Modifier> {
 }
 
 // -----------------------------------------------------------------------------
-// apply — shift an Instant by a Modifier
+// apply — shift an Instant by a DatetimeModifier
 // -----------------------------------------------------------------------------
 
-public fn apply(inst: &Instant, m: &Modifier, now_ns: Int64) -> Instant {
+public fn apply(inst: &Instant, m: &DatetimeModifier, now_ns: Int64) -> Instant {
     match m {
         MNow => from_unix_seconds(now_ns / (1_000_000_000 as Int64)),
         MAddDays(n)     => Instant { jd_int: inst.jd_int + (*n), frac_day: inst.frac_day },

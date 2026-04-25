@@ -19,7 +19,7 @@
 //                                                                    │
 // ┌──────────────────────────────────────────────────────────────────▼─┐
 // │ LAYER 2: Thread-Local Heap (no locks on fast path)                 │
-// │   LocalHeap { pages: [PagePtr; SIZE_CLASSES], cache, stats }       │
+// │   AllocatorLocalHeap { pages: [PagePtr; SIZE_CLASSES], cache, stats }       │
 // └──────────────────────────────────────────────────────────────────┬─┘
 //                                                                    │
 // ┌──────────────────────────────────────────────────────────────────▼─┐
@@ -589,7 +589,7 @@ implement LargeAllocHeader {
 // =============================================================================
 
 /// Thread-local heap structure for fast allocation.
-public type LocalHeap is {
+public type AllocatorLocalHeap is {
     /// Active page for each size class
     pages: [&mut PageHeader; 11],
 
@@ -603,10 +603,10 @@ public type LocalHeap is {
     bytes_allocated: UInt64,
 };
 
-implement LocalHeap {
+implement AllocatorLocalHeap {
     /// Create a new thread-local heap.
-    public fn new(thread_id: UInt32) -> LocalHeap {
-        LocalHeap {
+    public fn new(thread_id: UInt32) -> AllocatorLocalHeap {
+        AllocatorLocalHeap {
             pages: [0 as &mut PageHeader; 11],
             thread_id: thread_id,
             alloc_count: 0,
@@ -965,18 +965,18 @@ fn os_munmap(ptr: &unsafe Byte, size: Int) -> Result<(), AllocError> {
 
 /// Thread-local heap storage
 @thread_local
-static mut LOCAL_HEAP: Maybe<LocalHeap> = None;
+static mut LOCAL_HEAP: Maybe<AllocatorLocalHeap> = None;
 
 /// Get or create the thread-local heap
 @inline
-fn get_local_heap() -> &mut LocalHeap {
+fn get_local_heap() -> &mut AllocatorLocalHeap {
     unsafe {
         match LOCAL_HEAP {
             Some(ref mut heap) => heap,
             None => {
                 // Get thread ID from TLS
                 let tid = get_thread_id();
-                LOCAL_HEAP = Some(LocalHeap.new(tid));
+                LOCAL_HEAP = Some(AllocatorLocalHeap.new(tid));
                 LOCAL_HEAP.as_mut().unwrap()
             }
         }
@@ -1333,7 +1333,7 @@ public fn get_global_alloc_stats() -> AllocStats {
 /// allocation system which operates in three tiers:
 ///
 /// 1. **Thread-local fast path** (~20ns): Small allocations (≤2KB) are served
-///    from thread-local `LocalHeap` with no locking. Size-class-based slabs
+///    from thread-local `AllocatorLocalHeap` with no locking. Size-class-based slabs
 ///    minimize fragmentation.
 ///
 /// 2. **Page manager** (~100ns): When thread-local caches are exhausted,
@@ -1350,7 +1350,7 @@ public type TieredAllocator is ();
 implement TieredAllocator {
     /// Initialize the tiered allocator.
     ///
-    /// The underlying LocalHeap and page infrastructure is initialized
+    /// The underlying AllocatorLocalHeap and page infrastructure is initialized
     /// lazily on first allocation per thread.
     public fn init() -> Result<TieredAllocator, AllocError> {
         Ok(TieredAllocator())

@@ -39,10 +39,10 @@ mount core.base.protocols.{Eq, Ord};
 // § 1. Proof State Types
 // =============================================================================
 
-/// A proposition (goal) to be proved.  In the surface language, `Prop` is
+/// A proposition (goal) to be proved.  In the surface language, `TacticProp` is
 /// an alias for the unit type of logical statements; here we model it as an
 /// opaque identifier that the SMT backend resolves.
-public type Prop is (Int);
+public type TacticProp is (Int);
 
 /// The result returned by every tactic.  A tactic either closes a goal
 /// (Success with zero remaining goals) or produces new sub-goals, or it
@@ -51,16 +51,16 @@ public type Prop is (Int);
 /// @verify(formal): TacticResult is a discriminated union; exhaustive match
 /// is required at every call site.
 public type TacticResult is
-    | Success { remaining_goals: List<Prop> }
+    | Success { remaining_goals: List<TacticProp> }
     | Failure { reason: Text };
 
 /// A single proof goal: a proposition together with its local context
 /// (hypotheses available at this point in the proof).
 public type Goal is {
     /// The proposition to be proved.
-    proposition: Prop,
+    proposition: TacticProp,
     /// Local hypotheses in scope, keyed by name.
-    hypotheses: List<{ name: Text, hyp: Prop }>,
+    hypotheses: List<{ name: Text, hyp: TacticProp }>,
     /// An optional display hint used by the interactive mode.
     label: Maybe<Text>,
 };
@@ -96,8 +96,8 @@ public type ProofContext is {
 ///
 /// Each proposition becomes a `Goal` with an empty hypothesis list.
 /// The state is marked `dirty = false`; no tactic has been applied yet.
-public fn new_proof_state(goals: List<Prop>) -> ProofState {
-    let goal_list: List<Goal> = goals.map(fn(p: Prop) -> Goal {
+public fn new_proof_state(goals: List<TacticProp>) -> ProofState {
+    let goal_list: List<Goal> = goals.map(fn(p: TacticProp) -> Goal {
         Goal {
             proposition: p,
             hypotheses: [],
@@ -133,7 +133,7 @@ public fn all_solved(state: ProofState) -> Bool {
 }
 
 /// Add a hypothesis to the current (first) goal.
-public fn push_hypothesis(state: ProofState, name: Text, hyp: Prop) -> ProofState {
+public fn push_hypothesis(state: ProofState, name: Text, hyp: TacticProp) -> ProofState {
     match state.goals {
         [] => state,
         [head, ..rest] => {
@@ -572,9 +572,9 @@ tactic homotopy() {
 ///
 /// @verify(formal): the oracle NEVER bypasses SMT verification.
 @verify(formal)
-tactic oracle(goal: Prop, confidence: Float = 0.9) {
-    let candidates: Giry<Prop> = @llm_oracle(goal);
-    let best: Maybe<Prop> = sample_above(candidates, confidence);
+tactic oracle(goal: TacticProp, confidence: Float = 0.9) {
+    let candidates: Giry<TacticProp> = @llm_oracle(goal);
+    let best: Maybe<TacticProp> = sample_above(candidates, confidence);
     match best {
         Maybe.Some(proof_term) => {
             apply(proof_term);

@@ -151,7 +151,7 @@ implement SupervisionStrategy {
 
 /// Restart strategy for individual children (Erlang-style)
 @repr(UInt8)
-public type RestartStrategy is
+public type SupervisorRestartStrategy is
     /// Always restart on any exit (service workers, critical processes)
     | Permanent
     /// Restart only on abnormal exit (crash, panic, error)
@@ -159,7 +159,7 @@ public type RestartStrategy is
     /// Never restart (one-shot tasks, cleanup jobs)
     | Temporary;
 
-implement RestartStrategy {
+implement SupervisorRestartStrategy {
     /// Check if this exit should trigger a restart
     public fn should_restart(self, reason: &FailureReason) -> Bool {
         match self {
@@ -283,7 +283,7 @@ public type ChildSpec is {
     name: Text,
 
     /// Restart strategy
-    restart: RestartStrategy,
+    restart: SupervisorRestartStrategy,
 
     /// Shutdown timeout (milliseconds)
     shutdown_timeout_ms: UInt32,
@@ -303,7 +303,7 @@ implement ChildSpec {
     public fn new(name: Text) -> Self {
         Self {
             name: name.into(),
-            restart: RestartStrategy.Transient,
+            restart: SupervisorRestartStrategy.Transient,
             shutdown_timeout_ms: 5000, // 5 seconds
             max_restarts: 10,
             restart_window_secs: 60, // 1 minute
@@ -315,7 +315,7 @@ implement ChildSpec {
     public fn permanent(name: Text) -> Self {
         Self {
             name: name.into(),
-            restart: RestartStrategy.Permanent,
+            restart: SupervisorRestartStrategy.Permanent,
             shutdown_timeout_ms: 5000,
             max_restarts: 10,
             restart_window_secs: 60,
@@ -327,7 +327,7 @@ implement ChildSpec {
     public fn temporary(name: Text) -> Self {
         Self {
             name: name.into(),
-            restart: RestartStrategy.Temporary,
+            restart: SupervisorRestartStrategy.Temporary,
             shutdown_timeout_ms: 1000,
             max_restarts: 0,
             restart_window_secs: 0,
@@ -336,7 +336,7 @@ implement ChildSpec {
     }
 
     /// Set restart strategy
-    public fn with_restart(mut self, restart: RestartStrategy) -> Self {
+    public fn with_restart(mut self, restart: SupervisorRestartStrategy) -> Self {
         self.restart = restart;
         self
     }

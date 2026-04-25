@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.snapshot_isolation_api.level.{
-    IsolationLevel, IlReadCommitted, IlRepeatableRead, IlSerializable,
+    SqliteIsolationLevel, IlReadCommitted, IlRepeatableRead, IlSerializable,
     level_name,
     allows_nonrepeatable_read, allows_phantom_read,
     default_in_wal_mode, strictness_rank, is_stronger_than,

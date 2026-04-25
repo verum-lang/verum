@@ -31,7 +31,7 @@ mount core.runtime.recovery.{
     RuntimeRecoveryStrategy,
     RuntimeRetryConfig, JitterConfig, RetryPredicate,
 };
-mount core.runtime.env.{IsolationLevel, RestartPolicy, RestartStrategy};
+mount core.runtime.env.{EnvIsolationLevel, RuntimeRestartPolicy, RuntimeRestartStrategy};
 
 // =============================================================================
 // Section 1: PriorityLevel Tests
@@ -190,14 +190,14 @@ fn test_spawn_config_with_priority() {
 
 @test
 fn test_spawn_config_with_isolation() {
-    let shared = SupervisorSpawnConfig.new().with_isolation(IsolationLevel.Shared);
-    assert(shared.isolation == Maybe.Some(IsolationLevel.Shared));
+    let shared = SupervisorSpawnConfig.new().with_isolation(EnvIsolationLevel.Shared);
+    assert(shared.isolation == Maybe.Some(EnvIsolationLevel.Shared));
 
-    let send_only = SupervisorSpawnConfig.new().with_isolation(IsolationLevel.SendOnly);
-    assert(send_only.isolation == Maybe.Some(IsolationLevel.SendOnly));
+    let send_only = SupervisorSpawnConfig.new().with_isolation(EnvIsolationLevel.SendOnly);
+    assert(send_only.isolation == Maybe.Some(EnvIsolationLevel.SendOnly));
 
-    let full = SupervisorSpawnConfig.new().with_isolation(IsolationLevel.Full);
-    assert(full.isolation == Maybe.Some(IsolationLevel.Full));
+    let full = SupervisorSpawnConfig.new().with_isolation(EnvIsolationLevel.Full);
+    assert(full.isolation == Maybe.Some(EnvIsolationLevel.Full));
 
     print("SupervisorSpawnConfig.with_isolation() test passed");
 }
@@ -241,14 +241,14 @@ fn test_spawn_config_builder_chain() {
     let config = SupervisorSpawnConfig.new()
         .with_name("worker-1")
         .with_priority(PriorityLevel.High)
-        .with_isolation(IsolationLevel.Full)
+        .with_isolation(EnvIsolationLevel.Full)
         .with_timeout_ms(10000 as UInt64)
         .with_stack_size(32768);
 
     // Verify all settings
     assert_eq(config.name, Maybe.Some("worker-1"));
     assert(config.priority is PriorityLevel.High);
-    assert(config.isolation == Maybe.Some(IsolationLevel.Full));
+    assert(config.isolation == Maybe.Some(EnvIsolationLevel.Full));
     assert(config.deadline_ns > 0);  // 0 = no deadline, > 0 = set
     assert_eq(config.stack_size, 32768);  // stack_size is Int
 
@@ -341,7 +341,7 @@ fn test_spawn_config_builder_isolated() {
         .isolated()
         .build_unchecked();
 
-    assert(config.isolation == Maybe.Some(IsolationLevel.Full));
+    assert(config.isolation == Maybe.Some(EnvIsolationLevel.Full));
 
     print("SpawnConfigBuilder.isolated() test passed");
 }
@@ -352,7 +352,7 @@ fn test_spawn_config_builder_send_only() {
         .send_only()
         .build_unchecked();
 
-    assert(config.isolation == Maybe.Some(IsolationLevel.SendOnly));
+    assert(config.isolation == Maybe.Some(EnvIsolationLevel.SendOnly));
 
     print("SpawnConfigBuilder.send_only() test passed");
 }
@@ -584,34 +584,34 @@ fn test_builder_build_unchecked_returns_config() {
 }
 
 // =============================================================================
-// Section 11: RestartPolicy and RestartStrategy Type Tests
+// Section 11: RuntimeRestartPolicy and RuntimeRestartStrategy Type Tests
 // =============================================================================
 
 @test
 fn test_restart_strategy_permanent() {
-    let strat = RestartStrategy.Permanent;
-    assert(strat is RestartStrategy.Permanent);
+    let strat = RuntimeRestartStrategy.Permanent;
+    assert(strat is RuntimeRestartStrategy.Permanent);
 }
 
 @test
 fn test_restart_strategy_transient() {
-    let strat = RestartStrategy.Transient;
-    assert(strat is RestartStrategy.Transient);
+    let strat = RuntimeRestartStrategy.Transient;
+    assert(strat is RuntimeRestartStrategy.Transient);
 }
 
 @test
 fn test_restart_strategy_temporary() {
-    let strat = RestartStrategy.Temporary;
-    assert(strat is RestartStrategy.Temporary);
+    let strat = RuntimeRestartStrategy.Temporary;
+    assert(strat is RuntimeRestartStrategy.Temporary);
 }
 
 @test
 fn test_restart_strategy_match() {
-    let strat = RestartStrategy.Transient;
+    let strat = RuntimeRestartStrategy.Transient;
     let val = match strat {
-        RestartStrategy.Permanent => "permanent",
-        RestartStrategy.Transient => "transient",
-        RestartStrategy.Temporary => "temporary",
+        RuntimeRestartStrategy.Permanent => "permanent",
+        RuntimeRestartStrategy.Transient => "transient",
+        RuntimeRestartStrategy.Temporary => "temporary",
     };
     assert_eq(val, "transient");
 }
@@ -624,7 +624,7 @@ fn test_builder_permanent_sets_restart_policy() {
 
     assert(config.restart.is_some());
     let policy = config.restart.unwrap();
-    assert(policy.strategy is RestartStrategy.Permanent);
+    assert(policy.strategy is RuntimeRestartStrategy.Permanent);
     assert_eq(policy.max_restarts, 10);
     assert_eq(policy.time_window_secs, 60 as UInt64);
 }
@@ -637,7 +637,7 @@ fn test_builder_transient_sets_restart_policy() {
 
     assert(config.restart.is_some());
     let policy = config.restart.unwrap();
-    assert(policy.strategy is RestartStrategy.Transient);
+    assert(policy.strategy is RuntimeRestartStrategy.Transient);
     assert_eq(policy.max_restarts, 5);
 }
 
@@ -649,7 +649,7 @@ fn test_builder_temporary_sets_restart_policy() {
 
     assert(config.restart.is_some());
     let policy = config.restart.unwrap();
-    assert(policy.strategy is RestartStrategy.Temporary);
+    assert(policy.strategy is RuntimeRestartStrategy.Temporary);
     assert_eq(policy.max_restarts, 0);
 }
 
@@ -664,7 +664,7 @@ fn test_spawn_config_with_restart_limits_fields() {
 
     assert(config.restart.is_some());
     let policy = config.restart.unwrap();
-    assert(policy.strategy is RestartStrategy.Permanent);
+    assert(policy.strategy is RuntimeRestartStrategy.Permanent);
     assert_eq(policy.max_restarts, 5);
     assert_eq(policy.time_window_secs, 60000 as UInt64);
 }
@@ -731,7 +731,7 @@ fn test_builder_combined_name_priority_restart() {
     assert(config.priority is PriorityLevel.High);
     assert(config.restart.is_some());
     let policy = config.restart.unwrap();
-    assert(policy.strategy is RestartStrategy.Permanent);
+    assert(policy.strategy is RuntimeRestartStrategy.Permanent);
 }
 
 @test
@@ -741,7 +741,7 @@ fn test_builder_combined_isolation_retry() {
         .with_retry_default()
         .build_unchecked();
 
-    assert(config.isolation == Maybe.Some(IsolationLevel.Full));
+    assert(config.isolation == Maybe.Some(EnvIsolationLevel.Full));
     assert(config.recovery.is_some());
 }
 
@@ -765,7 +765,7 @@ fn test_builder_last_restart_wins() {
 
     assert(config.restart.is_some());
     let policy = config.restart.unwrap();
-    assert(policy.strategy is RestartStrategy.Temporary);
+    assert(policy.strategy is RuntimeRestartStrategy.Temporary);
 }
 
 // =============================================================================

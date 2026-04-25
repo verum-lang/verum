@@ -4,13 +4,13 @@ module core.database.sqlite.native.snapshot_isolation_api.level;
 
 mount base.{Bool, Text};
 
-public type IsolationLevel is
+public type SqliteIsolationLevel is
     | IlReadCommitted      // default in WAL — fresh snapshot per stmt
     | IlRepeatableRead     // BEGIN pins a snapshot — reads never diverge
     | IlSerializable       // BEGIN EXCLUSIVE — plus write-write conflicts ordered
     ;
 
-public fn level_name(l: &IsolationLevel) -> Text {
+public fn level_name(l: &SqliteIsolationLevel) -> Text {
     match l {
         IlReadCommitted  => "READ COMMITTED".clone(),
         IlRepeatableRead => "REPEATABLE READ".clone(),
@@ -22,21 +22,21 @@ public fn level_name(l: &IsolationLevel) -> Text {
 //   ReadCommitted:    allows non-repeatable reads + phantoms
 //   RepeatableRead:   allows phantoms, blocks non-repeatable reads
 //   Serializable:     blocks all three
-public fn allows_nonrepeatable_read(l: &IsolationLevel) -> Bool {
+public fn allows_nonrepeatable_read(l: &SqliteIsolationLevel) -> Bool {
     match l { IlReadCommitted => true, _ => false }
 }
 
-public fn allows_phantom_read(l: &IsolationLevel) -> Bool {
+public fn allows_phantom_read(l: &SqliteIsolationLevel) -> Bool {
     match l {
         IlSerializable => false,
         _              => true,
     }
 }
 
-public fn default_in_wal_mode() -> IsolationLevel { IlReadCommitted }
+public fn default_in_wal_mode() -> SqliteIsolationLevel { IlReadCommitted }
 
 // Sort order by strictness for the planner's rules.
-public fn strictness_rank(l: &IsolationLevel) -> Int {
+public fn strictness_rank(l: &SqliteIsolationLevel) -> Int {
     match l {
         IlReadCommitted  => 0,
         IlRepeatableRead => 1,
@@ -44,6 +44,6 @@ public fn strictness_rank(l: &IsolationLevel) -> Int {
     }
 }
 
-public fn is_stronger_than(a: &IsolationLevel, b: &IsolationLevel) -> Bool {
+public fn is_stronger_than(a: &SqliteIsolationLevel, b: &SqliteIsolationLevel) -> Bool {
     strictness_rank(a) > strictness_rank(b)
 }

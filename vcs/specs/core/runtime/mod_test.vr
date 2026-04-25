@@ -14,7 +14,7 @@
 mount core.runtime.{
     ExecutionEnv, MemoryContext, CapabilityContext,
     RecoveryContext, ConcurrencyContext,
-    ExecutionTier, RestartPolicy, IsolationLevel,
+    ExecutionTier, RuntimeRestartPolicy, EnvIsolationLevel,
     EXEC_ENV_SLOT, SUPERVISOR_SLOT, RECOVERY_SLOT,
     // Function existence verification
     current_env, current_env_mut, is_initialized,
@@ -94,14 +94,14 @@ fn test_shutdown_exists() {
 
 @test
 fn test_isolation_level_shared() {
-    let level = IsolationLevel.Shared;
-    assert(level is IsolationLevel.Shared);
+    let level = EnvIsolationLevel.Shared;
+    assert(level is EnvIsolationLevel.Shared);
 }
 
 @test
 fn test_isolation_level_variants() {
     // Verify all variants exist
-    let _ = IsolationLevel.Shared;
+    let _ = EnvIsolationLevel.Shared;
 }
 
 // =============================================================================
@@ -313,31 +313,31 @@ fn test_restart_intensity_type_exists() {
 }
 
 // =============================================================================
-// SECTION 9: IsolationLevel All Variants
+// SECTION 9: EnvIsolationLevel All Variants
 // =============================================================================
 
 @test
 fn test_isolation_level_send_only() {
-    let level = IsolationLevel.SendOnly;
-    assert(level is IsolationLevel.SendOnly);
-    assert(!(level is IsolationLevel.Shared));
+    let level = EnvIsolationLevel.SendOnly;
+    assert(level is EnvIsolationLevel.SendOnly);
+    assert(!(level is EnvIsolationLevel.Shared));
 }
 
 @test
 fn test_isolation_level_full() {
-    let level = IsolationLevel.Full;
-    assert(level is IsolationLevel.Full);
-    assert(!(level is IsolationLevel.Shared));
-    assert(!(level is IsolationLevel.SendOnly));
+    let level = EnvIsolationLevel.Full;
+    assert(level is EnvIsolationLevel.Full);
+    assert(!(level is EnvIsolationLevel.Shared));
+    assert(!(level is EnvIsolationLevel.SendOnly));
 }
 
 @test
 fn test_isolation_level_match_exhaustive() {
-    let level = IsolationLevel.SendOnly;
+    let level = EnvIsolationLevel.SendOnly;
     let val = match level {
-        IsolationLevel.Shared => 0,
-        IsolationLevel.SendOnly => 1,
-        IsolationLevel.Full => 2,
+        EnvIsolationLevel.Shared => 0,
+        EnvIsolationLevel.SendOnly => 1,
+        EnvIsolationLevel.Full => 2,
     };
     assert_eq(val, 1);
 }
@@ -446,17 +446,17 @@ fn test_execution_tier_all_variants() {
 
 @test
 fn test_isolation_level_send_only() {
-    let level = IsolationLevel.SendOnly;
-    assert(level is IsolationLevel.SendOnly);
-    assert(!(level is IsolationLevel.Shared));
-    assert(!(level is IsolationLevel.Full));
+    let level = EnvIsolationLevel.SendOnly;
+    assert(level is EnvIsolationLevel.SendOnly);
+    assert(!(level is EnvIsolationLevel.Shared));
+    assert(!(level is EnvIsolationLevel.Full));
 }
 
 @test
 fn test_isolation_level_full_not_shared() {
-    let level = IsolationLevel.Full;
-    assert(level is IsolationLevel.Full);
-    assert(!(level is IsolationLevel.Shared));
+    let level = EnvIsolationLevel.Full;
+    assert(level is EnvIsolationLevel.Full);
+    assert(!(level is EnvIsolationLevel.Shared));
 }
 
 @test

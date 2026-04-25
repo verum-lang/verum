@@ -10,7 +10,7 @@
 // Coverage:
 // - SupervisorId and ChildId generation
 // - SupervisionStrategy variants
-// - RestartStrategy behavior
+// - SupervisorRestartStrategy behavior
 // - FailureReason classification
 // - ChildStatus transitions
 // - ChildSpec construction and variants
@@ -26,7 +26,7 @@ mount core.runtime.supervisor.{
     SupervisorId,
     ChildId,
     SupervisionStrategy,
-    RestartStrategy,
+    SupervisorRestartStrategy,
     FailureReason,
     ChildStatus,
     ChildSpec,
@@ -165,26 +165,26 @@ fn test_supervision_strategy_rest_for_one() {
 }
 
 // =============================================================================
-// Section 4: RestartStrategy Tests
+// Section 4: SupervisorRestartStrategy Tests
 // =============================================================================
 
 @test
 fn test_restart_strategy_variants() {
-    let permanent = RestartStrategy.Permanent;
-    let transient = RestartStrategy.Transient;
-    let temporary = RestartStrategy.Temporary;
+    let permanent = SupervisorRestartStrategy.Permanent;
+    let transient = SupervisorRestartStrategy.Transient;
+    let temporary = SupervisorRestartStrategy.Temporary;
 
-    assert(permanent is RestartStrategy.Permanent);
-    assert(transient is RestartStrategy.Transient);
-    assert(temporary is RestartStrategy.Temporary);
+    assert(permanent is SupervisorRestartStrategy.Permanent);
+    assert(transient is SupervisorRestartStrategy.Transient);
+    assert(temporary is SupervisorRestartStrategy.Temporary);
 
-    print("RestartStrategy variants test passed");
+    print("SupervisorRestartStrategy variants test passed");
 }
 
 @test
 fn test_restart_strategy_permanent() {
     // Permanent: Always restart
-    let strategy = RestartStrategy.Permanent;
+    let strategy = SupervisorRestartStrategy.Permanent;
 
     // Should restart for any failure
     let normal_exit = FailureReason.NormalExit;
@@ -193,13 +193,13 @@ fn test_restart_strategy_permanent() {
     assert(strategy.should_restart(normal_exit));
     assert(strategy.should_restart(crash));
 
-    print("RestartStrategy Permanent test passed");
+    print("SupervisorRestartStrategy Permanent test passed");
 }
 
 @test
 fn test_restart_strategy_transient() {
     // Transient: Only restart on abnormal exit
-    let strategy = RestartStrategy.Transient;
+    let strategy = SupervisorRestartStrategy.Transient;
 
     let normal_exit = FailureReason.NormalExit;
     let crash = FailureReason.Panic("test");
@@ -207,13 +207,13 @@ fn test_restart_strategy_transient() {
     assert(!strategy.should_restart(normal_exit));  // Normal exit: don't restart
     assert(strategy.should_restart(crash));          // Crash: restart
 
-    print("RestartStrategy Transient test passed");
+    print("SupervisorRestartStrategy Transient test passed");
 }
 
 @test
 fn test_restart_strategy_temporary() {
     // Temporary: Never restart
-    let strategy = RestartStrategy.Temporary;
+    let strategy = SupervisorRestartStrategy.Temporary;
 
     let normal_exit = FailureReason.NormalExit;
     let crash = FailureReason.Panic("test");
@@ -221,7 +221,7 @@ fn test_restart_strategy_temporary() {
     assert(!strategy.should_restart(normal_exit));
     assert(!strategy.should_restart(crash));
 
-    print("RestartStrategy Temporary test passed");
+    print("SupervisorRestartStrategy Temporary test passed");
 }
 
 // =============================================================================
@@ -342,7 +342,7 @@ fn test_child_spec_new() {
     let spec = ChildSpec.new("test");
 
     // Default values
-    assert(spec.restart is RestartStrategy.Transient);
+    assert(spec.restart is SupervisorRestartStrategy.Transient);
 
     print("ChildSpec.new() test passed");
 }
@@ -351,7 +351,7 @@ fn test_child_spec_new() {
 fn test_child_spec_permanent() {
     let spec = ChildSpec.permanent("test");
 
-    assert(spec.restart is RestartStrategy.Permanent);
+    assert(spec.restart is SupervisorRestartStrategy.Permanent);
 
     print("ChildSpec.permanent() test passed");
 }
@@ -360,7 +360,7 @@ fn test_child_spec_permanent() {
 fn test_child_spec_temporary() {
     let spec = ChildSpec.temporary("test");
 
-    assert(spec.restart is RestartStrategy.Temporary);
+    assert(spec.restart is SupervisorRestartStrategy.Temporary);
 
     print("ChildSpec.temporary() test passed");
 }
@@ -370,7 +370,7 @@ fn test_child_spec_default() {
     let spec = ChildSpec.default();
 
     // Default should be Transient
-    assert(spec.restart is RestartStrategy.Transient);
+    assert(spec.restart is SupervisorRestartStrategy.Transient);
 
     print("ChildSpec.default() test passed");
 }
@@ -378,9 +378,9 @@ fn test_child_spec_default() {
 @test
 fn test_child_spec_with_restart() {
     let spec = ChildSpec.new("test")
-        .with_restart(RestartStrategy.Permanent);
+        .with_restart(SupervisorRestartStrategy.Permanent);
 
-    assert(spec.restart is RestartStrategy.Permanent);
+    assert(spec.restart is SupervisorRestartStrategy.Permanent);
 
     print("ChildSpec.with_restart() test passed");
 }
@@ -421,12 +421,12 @@ fn test_child_spec_with_priority() {
 @test
 fn test_child_spec_builder_chain() {
     let spec = ChildSpec.new("test")
-        .with_restart(RestartStrategy.Permanent)
+        .with_restart(SupervisorRestartStrategy.Permanent)
         .with_shutdown_timeout_ms(10000)
         .with_restart_limits(5, 120000)
         .with_priority(PriorityLevel.Critical.to_u8());
 
-    assert(spec.restart is RestartStrategy.Permanent);
+    assert(spec.restart is SupervisorRestartStrategy.Permanent);
     assert_eq(spec.shutdown_timeout_ms, 10000);
     assert_eq(spec.max_restarts, 5);
     assert_eq(spec.restart_window_secs, 120000);
@@ -834,14 +834,14 @@ fn test_failure_reason_manual() {
 
 @test
 fn test_restart_strategy_transient_with_error_exit() {
-    let strategy = RestartStrategy.Transient;
+    let strategy = SupervisorRestartStrategy.Transient;
     let error_exit = FailureReason.ErrorExit("disk full");
     assert(strategy.should_restart(error_exit));
 }
 
 @test
 fn test_restart_strategy_transient_with_cancelled() {
-    let strategy = RestartStrategy.Transient;
+    let strategy = SupervisorRestartStrategy.Transient;
     let cancelled = FailureReason.Cancelled;
     // Cancelled is abnormal, so Transient should restart
     assert(strategy.should_restart(cancelled));

@@ -535,7 +535,7 @@ public context TypeInfo {
 ///
 ///     let transformed = transform_expr(expr, |e| {
 ///         match e {
-///             Expr.Literal(Literal.Int(n)) => Expr.Literal(Literal.Int(n * 2)),
+///             MetaExpr.Literal(Literal.Int(n)) => MetaExpr.Literal(Literal.Int(n * 2)),
 ///             other => other,
 ///         }
 ///     });
@@ -551,9 +551,9 @@ public context AstAccess {
     /// - `tokens`: Token stream to parse
     ///
     /// # Returns
-    /// - `Ok(Expr)`: Parsed expression AST
+    /// - `Ok(MetaExpr)`: Parsed expression AST
     /// - `Err(ParseError)`: Syntax error in tokens
-    fn parse_expr(tokens: TokenStream) -> MetaResult<Expr>;
+    fn parse_expr(tokens: TokenStream) -> MetaResult<MetaExpr>;
 
     /// Parse token stream as type
     ///
@@ -635,14 +635,14 @@ public context AstAccess {
     ///     let expr = AstAccess.parse_expr(input)?;
     ///     let transformed = AstAccess.visit_expr(expr, |e| {
     ///         match e {
-    ///             Expr.Literal(Literal.Int(n)) => Expr.Literal(Literal.Int(n * 2)),
+    ///             MetaExpr.Literal(Literal.Int(n)) => MetaExpr.Literal(Literal.Int(n * 2)),
     ///             other => other,
     ///         }
     ///     });
     ///     AstAccess.emit(transformed)
     /// }
     /// ```
-    fn visit_expr(expr: Expr, visitor: fn(Expr) -> Expr) -> Expr;
+    fn visit_expr(expr: MetaExpr, visitor: fn(MetaExpr) -> MetaExpr) -> MetaExpr;
 
     /// Visit and transform type tree
     fn visit_type(ty: Type, visitor: fn(Type) -> Type) -> Type;
@@ -660,7 +660,7 @@ public context AstAccess {
     ///
     /// Visits every expression in an item including function bodies,
     /// default values, etc.
-    fn visit_all_exprs(item: Item, visitor: fn(Expr) -> Expr) -> Item;
+    fn visit_all_exprs(item: Item, visitor: fn(MetaExpr) -> MetaExpr) -> Item;
 
     // =========================================================================
     // Error Recovery Parsing (NEW)
@@ -695,7 +695,7 @@ public context AstAccess {
     ///     }
     /// }
     /// ```
-    fn parse_expr_recovery(tokens: TokenStream) -> ParseResult<Expr>;
+    fn parse_expr_recovery(tokens: TokenStream) -> ParseResult<MetaExpr>;
 
     /// Parse type with error recovery
     fn parse_type_recovery(tokens: TokenStream) -> ParseResult<Type>;
@@ -726,7 +726,7 @@ public context AstAccess {
     fn pretty_print_with(tokens: TokenStream, options: FormatOptions) -> Text;
 
     /// Pretty print expression
-    fn pretty_print_expr(expr: Expr) -> Text;
+    fn pretty_print_expr(expr: MetaExpr) -> Text;
 
     /// Pretty print type
     fn pretty_print_type(ty: Type) -> Text;
@@ -3111,7 +3111,7 @@ public using MetaTooling = [
 
 /// Expression AST node
 @compiler_type
-public type Expr is ();
+public type MetaExpr is ();
 
 /// Type AST node
 @compiler_type
@@ -3286,7 +3286,7 @@ public type ToTokens is protocol {
 };
 
 // Implement ToTokens for AST nodes
-implement ToTokens for Expr {
+implement ToTokens for MetaExpr {
     meta fn to_tokens(&self) -> TokenStream using AstAccess {
         AstAccess.emit(*self)
     }
