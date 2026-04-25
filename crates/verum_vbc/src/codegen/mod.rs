@@ -2548,7 +2548,149 @@ impl VbcCodegen {
         self.compile_pending_constants()?;
         // Compile any pending @thread_local initializations
         self.compile_pending_tls_inits()?;
+        // Verify type-descriptor self-consistency before emitting bytecode.
+        // Catches the class of bugs where codegen produces a TypeDescriptor
+        // whose variants disagree with their declared `kind`/`arity`/
+        // `fields` shape — historically these surfaced at runtime as
+        // `field index N (offset M) exceeds object data size K` /
+        // `Null pointer dereference` panics, far from the codegen site.
+        self.verify_type_layout_invariants()?;
         self.build_module()
+    }
+
+    /// Verify that every `TypeDescriptor` in `self.types` satisfies the
+    /// per-variant shape invariants implied by its `VariantKind`.  Runs
+    /// at module-finalization time so misshapen descriptors fail loudly
+    /// here rather than producing bytecode that crashes at runtime.
+    ///
+    /// Per-variant invariants:
+    ///   * `Unit`   → `arity == 0` and `fields` is empty.
+    ///   * `Tuple`  → `arity > 0` and `fields` is empty (the arity
+    ///                counts payload elements; tuple variants don't
+    ///                use `fields`).
+    ///   * `Record` → `arity == 0` and `fields` is non-empty (records
+    ///                track their layout in `fields`, not `arity`).
+    ///
+    /// Cross-variant invariants:
+    ///   * Tags within a sum type are dense: `0..variants.len()` with
+    ///     no duplicates and no gaps.  The runtime resolves variant
+    ///     dispatch by indexing into the variants array by tag, so any
+    ///     gap or duplicate yields wrong-variant dispatch later.
+    ///
+    /// Spec hooks: `verum_vbc::types::VariantKind`,
+    /// `verum_vbc::types::VariantDescriptor`.
+    fn verify_type_layout_invariants(&self) -> CodegenResult<()> {
+        use crate::types::VariantKind;
+        for ty in &self.types {
+            if ty.variants.is_empty() {
+                continue;
+            }
+            // Pre-compute the type name once for diagnostic messages.
+            // Look it up via the codegen string table; fallback to the
+            // raw StringId index when the string isn't yet interned
+            // (shouldn't happen at finalize time but is harmless).
+            let type_name: String = self
+                .ctx
+                .strings
+                .get(ty.name.0 as usize)
+                .cloned()
+                .unwrap_or_else(|| format!("<TypeId({})>", ty.id.0));
+
+            // Per-variant shape invariants.
+            for v in &ty.variants {
+                let v_name: String = self
+                    .ctx
+                    .strings
+                    .get(v.name.0 as usize)
+                    .cloned()
+                    .unwrap_or_else(|| format!("<variant tag {}>", v.tag));
+                match v.kind {
+                    VariantKind::Unit => {
+                        if v.arity != 0 || !v.fields.is_empty() {
+                            return Err(CodegenError::internal(format!(
+                                "type-layout invariant: variant `{}.{}` is `Unit` \
+                                 but has arity={} and {} record-field(s); \
+                                 unit variants must carry no payload",
+                                type_name,
+                                v_name,
+                                v.arity,
+                                v.fields.len(),
+                            )));
+                        }
+                    }
+                    VariantKind::Tuple => {
+                        if !v.fields.is_empty() {
+                            return Err(CodegenError::internal(format!(
+                                "type-layout invariant: variant `{}.{}` is `Tuple` \
+                                 (arity={}) but also has {} record-field(s); \
+                                 tuple variants store payload count in `arity`, \
+                                 not `fields`",
+                                type_name,
+                                v_name,
+                                v.arity,
+                                v.fields.len(),
+                            )));
+                        }
+                        if v.arity == 0 {
+                            return Err(CodegenError::internal(format!(
+                                "type-layout invariant: variant `{}.{}` is `Tuple` \
+                                 with arity=0; a zero-arity payload should be \
+                                 declared as `Unit` instead",
+                                type_name, v_name,
+                            )));
+                        }
+                    }
+                    VariantKind::Record => {
+                        if v.arity != 0 {
+                            return Err(CodegenError::internal(format!(
+                                "type-layout invariant: variant `{}.{}` is `Record` \
+                                 (with {} field(s)) but also reports arity={}; \
+                                 record variants store payload count in `fields`, \
+                                 not `arity`",
+                                type_name,
+                                v_name,
+                                v.fields.len(),
+                                v.arity,
+                            )));
+                        }
+                        if v.fields.is_empty() {
+                            return Err(CodegenError::internal(format!(
+                                "type-layout invariant: variant `{}.{}` is `Record` \
+                                 with no fields; a fieldless variant should be \
+                                 declared as `Unit` instead",
+                                type_name, v_name,
+                            )));
+                        }
+                    }
+                }
+            }
+
+            // Cross-variant: tags must be dense `0..n` with no gaps and
+            // no duplicates.  The runtime indexes the variants array by
+            // tag during dispatch.
+            let n = ty.variants.len() as u32;
+            let mut seen = vec![false; n as usize];
+            for v in &ty.variants {
+                if v.tag >= n {
+                    return Err(CodegenError::internal(format!(
+                        "type-layout invariant: variant tag {} on type `{}` is \
+                         outside the dense range 0..{} for {} variant(s); \
+                         runtime dispatch indexes the variants array by tag",
+                        v.tag, type_name, n, n,
+                    )));
+                }
+                if seen[v.tag as usize] {
+                    return Err(CodegenError::internal(format!(
+                        "type-layout invariant: duplicate variant tag {} on \
+                         type `{}` — every variant of a sum type must have a \
+                         unique tag",
+                        v.tag, type_name,
+                    )));
+                }
+                seen[v.tag as usize] = true;
+            }
+        }
+        Ok(())
     }
 
     /// Compiles an AST module to VBC.
