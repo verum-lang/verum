@@ -311,6 +311,24 @@ const LINT_RULES: &[LintRule] = &[
              [lint.documentation].public_must_have_doc = false",
         category: LintCategory::Style,
     },
+    // Phase C.2 — capability-policy enforcement (off by default;
+    // opt in via [lint.capability_policy].require_cap_for_*).
+    LintRule {
+        name: "unsafe-without-capability",
+        level: LintLevel::Warning,
+        description:
+            "Function uses `unsafe { … }` but lacks @cap(...) — declare \
+             the capability explicitly so the trust boundary is auditable",
+        category: LintCategory::Safety,
+    },
+    LintRule {
+        name: "ffi-without-capability",
+        level: LintLevel::Warning,
+        description:
+            "FFI item (`@ffi` / `@extern`) lacks @cap(...) — declare \
+             the foreign-boundary capability explicitly",
+        category: LintCategory::Safety,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {

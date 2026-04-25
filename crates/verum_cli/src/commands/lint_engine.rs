@@ -109,6 +109,8 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
         &MaxFnParamsPass,
         &MaxMatchArmsPass,
         &PublicMustHaveDocPass,
+        &UnsafeWithoutCapabilityPass,
+        &FfiWithoutCapabilityPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
@@ -1992,6 +1994,171 @@ impl LintPass for PublicMustHaveDocPass {
                     fixable: false,
                 });
             }
+        }
+        issues
+    }
+}
+
+// ===================================================================
+// Phase C.2: Capability-policy enforcement
+// ===================================================================
+//
+// Configured via `[lint.capability_policy]`:
+//
+//   [lint.capability_policy]
+//   require_cap_for_unsafe = true
+//   require_cap_for_ffi    = true
+//
+// `unsafe-without-capability` (warn, safety):
+//   Function declares `unsafe { ... }` blocks but doesn't carry a
+//   `@cap(...)` attribute documenting WHY this unsafe is permitted.
+//   Verum's capability system is designed to make every safety-
+//   relaxation explicit at the type level; this rule turns that
+//   convention into a static check.
+//
+// `ffi-without-capability` (warn, safety):
+//   Same idea for FFI declarations — extern blocks and FFI-bound
+//   functions should declare `@cap(name = "ffi.libfoo", ...)`.
+//
+// ===================================================================
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct CapabilityPolicyConfig {
+    require_cap_for_unsafe: bool,
+    require_cap_for_ffi: bool,
+}
+
+fn capability_policy(ctx: &LintCtx<'_>) -> CapabilityPolicyConfig {
+    ctx.config
+        .and_then(|c| c.rule_config::<CapabilityPolicyConfig>("capability-policy"))
+        .unwrap_or_default()
+}
+
+/// Whether `func` contains any `unsafe { ... }` block in its body.
+/// Walks the body via verum_ast::Visitor.
+fn fn_uses_unsafe_block(func: &FunctionDecl) -> bool {
+    use verum_ast::ExprKind;
+    struct V {
+        found: bool,
+    }
+    impl Visitor for V {
+        fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+            if matches!(&expr.kind, ExprKind::Unsafe(_)) {
+                self.found = true;
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let mut v = V { found: false };
+    if let Some(body) = &func.body {
+        match body {
+            verum_ast::FunctionBody::Block(b) => v.visit_block(b),
+            verum_ast::FunctionBody::Expr(e) => v.visit_expr(e),
+        }
+    }
+    v.found
+}
+
+struct UnsafeWithoutCapabilityPass;
+
+impl LintPass for UnsafeWithoutCapabilityPass {
+    fn name(&self) -> &'static str { "unsafe-without-capability" }
+    fn description(&self) -> &'static str {
+        "Function uses `unsafe { … }` but lacks @cap(...) — declare \
+         the capability explicitly so the trust boundary is auditable"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Safety }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let policy = capability_policy(ctx);
+        if !policy.require_cap_for_unsafe {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let func = match &item.kind {
+                ItemKind::Function(f) => f,
+                _ => continue,
+            };
+            if attrs_contain(&func.attributes, "cap") {
+                continue;
+            }
+            if !fn_uses_unsafe_block(func) {
+                continue;
+            }
+            let (line, col) = span_to_line_col(ctx.source, item.span.start);
+            issues.push(LintIssue {
+                rule: "unsafe-without-capability",
+                level: LintLevel::Warning,
+                file: ctx.file.to_path_buf(),
+                line,
+                column: col,
+                message: format!(
+                    "fn `{}` uses `unsafe` block but lacks @cap(...) — \
+                     declare a capability so the trust boundary is auditable",
+                    func.name
+                ),
+                suggestion: None,
+                fixable: false,
+            });
+        }
+        issues
+    }
+}
+
+struct FfiWithoutCapabilityPass;
+
+impl LintPass for FfiWithoutCapabilityPass {
+    fn name(&self) -> &'static str { "ffi-without-capability" }
+    fn description(&self) -> &'static str {
+        "FFI item (`@ffi` / `@extern`) lacks @cap(...) — declare \
+         the foreign-boundary capability explicitly"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Safety }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        let policy = capability_policy(ctx);
+        if !policy.require_cap_for_ffi {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let attrs: &[Attribute] = match &item.kind {
+                ItemKind::Function(f) => f.attributes.as_slice(),
+                _ => continue,
+            };
+            // `@ffi(...)` / `@extern(...)` mark FFI items.
+            let is_ffi = attrs
+                .iter()
+                .any(|a| matches!(a.name.as_str(), "ffi" | "extern"));
+            if !is_ffi {
+                continue;
+            }
+            if attrs.iter().any(|a| a.name.as_str() == "cap") {
+                continue;
+            }
+            let func_name = match &item.kind {
+                ItemKind::Function(f) => f.name.as_str().to_string(),
+                _ => "?".to_string(),
+            };
+            let (line, col) = span_to_line_col(ctx.source, item.span.start);
+            issues.push(LintIssue {
+                rule: "ffi-without-capability",
+                level: LintLevel::Warning,
+                file: ctx.file.to_path_buf(),
+                line,
+                column: col,
+                message: format!(
+                    "FFI fn `{}` lacks @cap(...) — declare the \
+                     foreign-boundary capability explicitly",
+                    func_name
+                ),
+                suggestion: None,
+                fixable: false,
+            });
         }
         issues
     }
