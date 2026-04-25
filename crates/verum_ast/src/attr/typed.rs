@@ -5287,7 +5287,7 @@ impl Spanned for Owl2DisjointWithAttr {
 
 /// One of the seven OWL 2 object-property characteristics from
 /// Shkotin 2019 Table 6 / VUVA §21.6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Owl2Characteristic {
     Transitive,
     Symmetric,

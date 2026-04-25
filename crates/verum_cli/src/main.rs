@@ -779,6 +779,16 @@ enum Commands {
         #[clap(long)]
         hygiene: bool,
 
+        /// OWL 2 classification hierarchy audit (VUVA §21.10, F5):
+        /// walk every Owl2*Attr in the project, build the
+        /// classification graph (subclass closure + equivalence
+        /// partition + disjointness pairs + property characteristics
+        /// + has-key constraints), detect cycles and disjoint /
+        /// subclass conflicts, and emit a graph-aware report. Exits
+        /// non-zero on any cycle or violation.
+        #[clap(long)]
+        owl2_classify: bool,
+
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
@@ -1834,6 +1844,7 @@ fn run_command(cli: Cli) -> Result<()> {
             epsilon,
             coord,
             hygiene,
+            owl2_classify,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -1859,6 +1870,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_coord_with_format(output_format)
             } else if hygiene {
                 commands::audit::audit_hygiene_with_format(output_format)
+            } else if owl2_classify {
+                commands::audit::audit_owl2_classify_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,

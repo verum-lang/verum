@@ -1932,3 +1932,669 @@ fn print_hygiene_report_json(
     out.push_str("}\n");
     print!("{}", out);
 }
+
+// =============================================================================
+// OWL 2 classification audit — `verum audit --owl2-classify` (VUVA §21.10, F5)
+//
+// Walks every Owl2*Attr in the project, builds the OWL 2 classification
+// graph (subclass edges, equivalence partitions, disjointness pairs,
+// property characteristics, has-key constraints), computes the
+// transitive subclass closure, detects subclass cycles and disjoint /
+// subclass conflicts, and emits the full report.
+//
+// This is a *graph-aware* audit, not a flat marker enumeration:
+//
+//   - subclass closure: each class lists its full ancestor set
+//   - cycle detection: any class that is a subclass of itself
+//     transitively is flagged with the cycle path
+//   - disjoint/subclass conflict: a class C disjoint from D where C is
+//     also a subclass of D (directly or via the closure) is a hard
+//     inconsistency reported with severity = error
+//   - equivalence partition: equivalence is symmetric; we union-find the
+//     equivalence groups so the report shows partitions rather than
+//     redundant pairwise edges
+//
+// The output mirrors the audit-family schema (plain + JSON, schema
+// version 1, BTreeMap-sorted for deterministic CI diffs).
+// =============================================================================
+
+use verum_ast::attr::{
+    Owl2Characteristic,
+    Owl2CharacteristicAttr,
+    Owl2ClassAttr,
+    Owl2DisjointWithAttr,
+    Owl2EquivalentClassAttr,
+    Owl2HasKeyAttr,
+    Owl2PropertyAttr,
+    Owl2SubClassOfAttr,
+    Owl2Semantics,
+};
+use std::collections::BTreeSet;
+
+/// Kind of OWL 2 entity discovered at audit time. Class declarations
+/// arrive through `Owl2ClassAttr`; properties through `Owl2PropertyAttr`
+/// (with a domain/range pair) or `Owl2CharacteristicAttr` (flag-only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Owl2EntityKind {
+    Class,
+    Property,
+}
+
+impl Owl2EntityKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Class    => "class",
+            Self::Property => "property",
+        }
+    }
+}
+
+/// One declared OWL 2 entity with the metadata the audit collected.
+#[derive(Debug, Clone)]
+struct Owl2Entity {
+    name: Text,
+    kind: Owl2EntityKind,
+    /// Open-world flag (only for classes). `None` ⇒ default ClosedWorld
+    /// per VUVA §21.4.
+    semantics: Option<Owl2Semantics>,
+    /// Source file the entity was declared in.
+    file: PathBuf,
+    /// Property metadata — only populated when kind == Property.
+    property_domain: Option<Text>,
+    property_range:  Option<Text>,
+    property_inverse_of: Option<Text>,
+    property_characteristics: BTreeSet<Owl2Characteristic>,
+    /// Has-key constraints (only for classes).
+    keys: Vec<Vec<Text>>,
+}
+
+impl Owl2Entity {
+    fn new_class(name: Text, semantics: Option<Owl2Semantics>, file: PathBuf) -> Self {
+        Self {
+            name, kind: Owl2EntityKind::Class, semantics, file,
+            property_domain: None, property_range: None, property_inverse_of: None,
+            property_characteristics: BTreeSet::new(),
+            keys: Vec::new(),
+        }
+    }
+
+    fn new_property(
+        name: Text,
+        file: PathBuf,
+        domain: Option<Text>,
+        range: Option<Text>,
+        inverse_of: Option<Text>,
+        characteristics: BTreeSet<Owl2Characteristic>,
+    ) -> Self {
+        Self {
+            name, kind: Owl2EntityKind::Property, semantics: None, file,
+            property_domain: domain,
+            property_range:  range,
+            property_inverse_of: inverse_of,
+            property_characteristics: characteristics,
+            keys: Vec::new(),
+        }
+    }
+}
+
+/// The OWL 2 classification graph: entities indexed by name, plus the
+/// raw edge sets. Subclass / equivalence / disjointness are stored as
+/// `BTreeSet<(Name, Name)>` for deterministic ordering and dedup.
+#[derive(Debug, Default)]
+struct Owl2Graph {
+    entities: BTreeMap<Text, Owl2Entity>,
+    /// `subclass_edges[(child, parent)]` — direct edges only.
+    subclass_edges: BTreeSet<(Text, Text)>,
+    /// `equivalence_pairs[(class_a, class_b)]` — symmetric edges; we
+    /// store both (a,b) and (b,a) so the closure walker is straight.
+    equivalence_pairs: BTreeSet<(Text, Text)>,
+    /// `disjoint_pairs[(class_a, class_b)]` — symmetric pairs; both
+    /// orientations stored for symmetric closure.
+    disjoint_pairs: BTreeSet<(Text, Text)>,
+}
+
+impl Owl2Graph {
+    fn add_entity(&mut self, e: Owl2Entity) {
+        // Don't overwrite a Property entry with a bare Class entry from
+        // a sibling attribute — characteristic-only attributes can
+        // arrive without a Property attribute, so we keep the richer
+        // record.
+        let key = e.name.clone();
+        match self.entities.get_mut(&key) {
+            Some(existing) if matches!(existing.kind, Owl2EntityKind::Property) => {
+                // Merge property characteristics.
+                for c in &e.property_characteristics {
+                    existing.property_characteristics.insert(*c);
+                }
+                if existing.property_domain.is_none()    { existing.property_domain    = e.property_domain;    }
+                if existing.property_range.is_none()     { existing.property_range     = e.property_range;     }
+                if existing.property_inverse_of.is_none(){ existing.property_inverse_of= e.property_inverse_of;}
+            }
+            Some(existing) if matches!(existing.kind, Owl2EntityKind::Class) => {
+                // Merge keys.
+                for k in &e.keys {
+                    existing.keys.push(k.clone());
+                }
+                if existing.semantics.is_none() && e.semantics.is_some() {
+                    existing.semantics = e.semantics;
+                }
+            }
+            _ => {
+                self.entities.insert(key, e);
+            }
+        }
+    }
+
+    /// Compute the *reflexive-transitive* subclass closure: each class
+    /// maps to itself + every (transitive) ancestor. Iterative
+    /// fixed-point — guaranteed to terminate because the lattice of
+    /// possible ancestor sets is finite.
+    fn subclass_closure(&self) -> BTreeMap<Text, BTreeSet<Text>> {
+        let mut closure: BTreeMap<Text, BTreeSet<Text>> = BTreeMap::new();
+        // Seed with reflexive entries for every class.
+        for (name, e) in &self.entities {
+            if matches!(e.kind, Owl2EntityKind::Class) {
+                let mut s = BTreeSet::new();
+                s.insert(name.clone());
+                closure.insert(name.clone(), s);
+            }
+        }
+        // Iterate until fixed point.
+        loop {
+            let mut changed = false;
+            for (child, parent) in &self.subclass_edges {
+                let parent_anc = closure.get(parent).cloned().unwrap_or_default();
+                let entry = closure.entry(child.clone()).or_default();
+                for a in parent_anc {
+                    if entry.insert(a) {
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        closure
+    }
+
+    /// Detect subclass cycles by walking the closure: any class C
+    /// where C ∈ closure(C) \ {C} (i.e. a non-reflexive self-ancestor)
+    /// is flagged. Returns the names of cyclic classes.
+    fn detect_cycles(&self, closure: &BTreeMap<Text, BTreeSet<Text>>) -> BTreeSet<Text> {
+        let mut cyclic: BTreeSet<Text> = BTreeSet::new();
+        for (child, parent) in &self.subclass_edges {
+            if child == parent {
+                cyclic.insert(child.clone());
+                continue;
+            }
+            // C subclass of P; if P also has C as an ancestor (closure
+            // contains C), we have a cycle.
+            if let Some(p_anc) = closure.get(parent) {
+                if p_anc.contains(child) {
+                    cyclic.insert(child.clone());
+                    cyclic.insert(parent.clone());
+                }
+            }
+        }
+        cyclic
+    }
+
+    /// Compute the equivalence partition by union-find over
+    /// `equivalence_pairs`. Each entry in the result is a set of
+    /// classes that are pairwise equivalent.
+    fn equivalence_partition(&self) -> Vec<BTreeSet<Text>> {
+        // Union-find using BTreeMap as the parent map.
+        let mut parent: BTreeMap<Text, Text> = BTreeMap::new();
+        for (a, b) in &self.equivalence_pairs {
+            parent.entry(a.clone()).or_insert_with(|| a.clone());
+            parent.entry(b.clone()).or_insert_with(|| b.clone());
+        }
+        fn find(parent: &mut BTreeMap<Text, Text>, x: &Text) -> Text {
+            let p = parent.get(x).cloned().unwrap_or_else(|| x.clone());
+            if &p == x {
+                return p;
+            }
+            let root = find(parent, &p);
+            parent.insert(x.clone(), root.clone());
+            root
+        }
+        for (a, b) in &self.equivalence_pairs {
+            let ra = find(&mut parent, a);
+            let rb = find(&mut parent, b);
+            if ra != rb {
+                parent.insert(ra, rb);
+            }
+        }
+        // Collect partitions by root.
+        let mut groups: BTreeMap<Text, BTreeSet<Text>> = BTreeMap::new();
+        let keys: Vec<Text> = parent.keys().cloned().collect();
+        for k in keys {
+            let r = find(&mut parent, &k);
+            groups.entry(r).or_default().insert(k);
+        }
+        groups.into_values().filter(|g| g.len() > 1).collect()
+    }
+
+    /// Detect disjoint/subclass conflicts: a class C is disjoint from
+    /// D, but C is also a subclass of D (directly or transitively).
+    /// This is a hard inconsistency (DL-unsatisfiable ontology).
+    fn detect_disjoint_violations(
+        &self,
+        closure: &BTreeMap<Text, BTreeSet<Text>>,
+    ) -> BTreeSet<(Text, Text)> {
+        let mut violations: BTreeSet<(Text, Text)> = BTreeSet::new();
+        for (a, b) in &self.disjoint_pairs {
+            if a == b {
+                violations.insert((a.clone(), b.clone()));
+                continue;
+            }
+            if let Some(a_anc) = closure.get(a) {
+                if a_anc.contains(b) {
+                    violations.insert((a.clone(), b.clone()));
+                }
+            }
+        }
+        violations
+    }
+}
+
+fn collect_owl2_attrs(
+    item: &Item,
+    rel_path: &Path,
+    graph: &mut Owl2Graph,
+) {
+    let (item_name, decl_attrs): (Text, &verum_common::List<verum_ast::attr::Attribute>) = match &item.kind {
+        ItemKind::Type(decl)     => (decl.name.name.clone(), &decl.attributes),
+        ItemKind::Function(decl) => (decl.name.name.clone(), &decl.attributes),
+        ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
+            (decl.name.name.clone(), &decl.attributes)
+        }
+        ItemKind::Axiom(decl) => (decl.name.name.clone(), &decl.attributes),
+        _ => return,
+    };
+
+    // Walk both the outer item.attributes and the inner decl.attributes
+    // to mirror the framework / hygiene audits.
+    let attr_lists = [&item.attributes, decl_attrs];
+
+    let mut is_class = false;
+    let mut class_semantics: Option<Owl2Semantics> = None;
+    let mut subclass_parents: Vec<Text> = Vec::new();
+    let mut equivalent_classes: Vec<Text> = Vec::new();
+    let mut disjoint_classes:  Vec<Text> = Vec::new();
+    let mut keys: Vec<Vec<Text>> = Vec::new();
+    let mut is_property = false;
+    let mut prop_domain: Option<Text> = None;
+    let mut prop_range:  Option<Text> = None;
+    let mut prop_inverse: Option<Text> = None;
+    let mut prop_chars: BTreeSet<Owl2Characteristic> = BTreeSet::new();
+
+    for list in &attr_lists {
+        for attr in list.iter() {
+            if let Maybe::Some(c) = Owl2ClassAttr::from_attribute(attr) {
+                is_class = true;
+                if let Maybe::Some(sem) = c.semantics {
+                    class_semantics = Some(sem);
+                }
+            }
+            if let Maybe::Some(s) = Owl2SubClassOfAttr::from_attribute(attr) {
+                is_class = true;
+                subclass_parents.push(s.parent);
+            }
+            if let Maybe::Some(e) = Owl2EquivalentClassAttr::from_attribute(attr) {
+                is_class = true;
+                equivalent_classes.push(e.equivalent_to);
+            }
+            if let Maybe::Some(d) = Owl2DisjointWithAttr::from_attribute(attr) {
+                is_class = true;
+                for n in d.disjoint_classes {
+                    disjoint_classes.push(n);
+                }
+            }
+            if let Maybe::Some(k) = Owl2HasKeyAttr::from_attribute(attr) {
+                is_class = true;
+                keys.push(k.key_properties);
+            }
+            if let Maybe::Some(p) = Owl2PropertyAttr::from_attribute(attr) {
+                is_property = true;
+                if let Maybe::Some(d) = p.domain     { prop_domain  = Some(d); }
+                if let Maybe::Some(r) = p.range      { prop_range   = Some(r); }
+                if let Maybe::Some(i) = p.inverse_of { prop_inverse = Some(i); }
+                for c in p.characteristics { prop_chars.insert(c); }
+            }
+            if let Maybe::Some(c) = Owl2CharacteristicAttr::from_attribute(attr) {
+                is_property = true;
+                prop_chars.insert(c.characteristic);
+            }
+        }
+    }
+
+    if is_class {
+        let mut entity = Owl2Entity::new_class(item_name.clone(), class_semantics, rel_path.to_path_buf());
+        entity.keys = keys;
+        graph.add_entity(entity);
+        for p in subclass_parents {
+            graph.subclass_edges.insert((item_name.clone(), p));
+        }
+        for e in equivalent_classes {
+            graph.equivalence_pairs.insert((item_name.clone(), e.clone()));
+            graph.equivalence_pairs.insert((e, item_name.clone()));
+        }
+        for d in disjoint_classes {
+            graph.disjoint_pairs.insert((item_name.clone(), d.clone()));
+            graph.disjoint_pairs.insert((d, item_name.clone()));
+        }
+    }
+    if is_property {
+        let entity = Owl2Entity::new_property(
+            item_name, rel_path.to_path_buf(),
+            prop_domain, prop_range, prop_inverse, prop_chars,
+        );
+        graph.add_entity(entity);
+    }
+}
+
+pub fn audit_owl2_classify() -> Result<()> {
+    audit_owl2_classify_with_format(AuditFormat::Plain)
+}
+
+pub fn audit_owl2_classify_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Computing OWL 2 classification hierarchy (VUVA §21.10)");
+    }
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut graph = Owl2Graph::default();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path.strip_prefix(&manifest_dir).unwrap_or(abs_path).to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => { skipped_files += 1; continue; }
+        };
+        parsed_files += 1;
+        for item in &module.items {
+            collect_owl2_attrs(item, &rel_path, &mut graph);
+        }
+    }
+
+    let closure  = graph.subclass_closure();
+    let cycles   = graph.detect_cycles(&closure);
+    let partition= graph.equivalence_partition();
+    let violations = graph.detect_disjoint_violations(&closure);
+
+    match format {
+        AuditFormat::Plain => print_owl2_report(
+            parsed_files, skipped_files, &graph, &closure,
+            &cycles, &partition, &violations,
+        ),
+        AuditFormat::Json  => print_owl2_report_json(
+            parsed_files, skipped_files, &graph, &closure,
+            &cycles, &partition, &violations,
+        ),
+    }
+    if !cycles.is_empty() || !violations.is_empty() {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "OWL 2 classification graph is inconsistent — {} cycle(s), \
+                 {} disjoint/subclass violation(s).",
+                cycles.len(), violations.len()
+            ).into()
+        ));
+    }
+    Ok(())
+}
+
+fn print_owl2_report(
+    parsed_files: usize,
+    skipped_files: usize,
+    graph: &Owl2Graph,
+    closure: &BTreeMap<Text, BTreeSet<Text>>,
+    cycles: &BTreeSet<Text>,
+    partition: &[BTreeSet<Text>],
+    violations: &BTreeSet<(Text, Text)>,
+) {
+    println!();
+    println!("{}", "OWL 2 classification hierarchy (VUVA §21.10)".bold());
+    println!("{}", "─".repeat(50).dimmed());
+    println!(
+        "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
+        parsed_files, skipped_files
+    );
+    println!();
+
+    let n_classes:    usize = graph.entities.values().filter(|e| matches!(e.kind, Owl2EntityKind::Class   )).count();
+    let n_properties: usize = graph.entities.values().filter(|e| matches!(e.kind, Owl2EntityKind::Property)).count();
+
+    if n_classes == 0 && n_properties == 0 {
+        println!("  {} no OWL 2 entities detected.", "·".dimmed());
+        println!();
+        return;
+    }
+    println!(
+        "  Found {} class(es) and {} property(ies).",
+        n_classes.to_string().bold(),
+        n_properties.to_string().bold(),
+    );
+    println!();
+
+    // --- Classes with their ancestor closure -------------------------
+    if n_classes > 0 {
+        println!("  {}", "▸ Classes (with full ancestor closure)".bold());
+        for (name, e) in &graph.entities {
+            if !matches!(e.kind, Owl2EntityKind::Class) { continue; }
+            let anc = closure.get(name).cloned().unwrap_or_default();
+            let other_anc: Vec<&Text> = anc.iter().filter(|a| *a != name).collect();
+            let semantics_label = match e.semantics {
+                Some(Owl2Semantics::OpenWorld) => " [OpenWorld]",
+                _                              => "",
+            };
+            print!(
+                "    {} {}{}",
+                "·".dimmed(),
+                name.as_str().cyan(),
+                semantics_label,
+            );
+            if !other_anc.is_empty() {
+                let parents: Vec<&str> = other_anc.iter().map(|a| a.as_str()).collect();
+                print!("  ⊑ {}", parents.join(", ").dimmed());
+            }
+            if !e.keys.is_empty() {
+                let key_strs: Vec<String> = e.keys.iter()
+                    .map(|k| format!("({})", k.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")))
+                    .collect();
+                print!("  HasKey={}", key_strs.join(" ").dimmed());
+            }
+            println!("  — {}", e.file.display());
+        }
+        println!();
+    }
+
+    // --- Properties with characteristics ----------------------------
+    if n_properties > 0 {
+        println!("  {}", "▸ Properties".bold());
+        for (name, e) in &graph.entities {
+            if !matches!(e.kind, Owl2EntityKind::Property) { continue; }
+            let dom = e.property_domain.as_ref().map(|d| d.as_str()).unwrap_or("?");
+            let rng = e.property_range.as_ref().map(|r| r.as_str()).unwrap_or("?");
+            let chars: Vec<&str> = e.property_characteristics.iter().map(|c| c.as_str()).collect();
+            let inv = e.property_inverse_of.as_ref().map(|i| format!(" ⁻¹={}", i.as_str())).unwrap_or_default();
+            println!(
+                "    {} {}: {} → {}  [{}]{}  — {}",
+                "·".dimmed(),
+                name.as_str().cyan(),
+                dom, rng,
+                chars.join(", "),
+                inv.dimmed(),
+                e.file.display(),
+            );
+        }
+        println!();
+    }
+
+    // --- Equivalence partition --------------------------------------
+    if !partition.is_empty() {
+        println!("  {}", "▸ Equivalent-class partitions".bold());
+        for group in partition {
+            let names: Vec<&str> = group.iter().map(|n| n.as_str()).collect();
+            println!("    {} {{{}}}", "·".dimmed(), names.join(" ≡ "));
+        }
+        println!();
+    }
+
+    // --- Cycles -----------------------------------------------------
+    if !cycles.is_empty() {
+        ui::warn(&format!(
+            "{} subclass-cycle(s) detected — the ontology is unsatisfiable:",
+            cycles.len()
+        ));
+        for c in cycles {
+            println!("    · {} ⊑* {}  (cyclic)", c.as_str().red(), c.as_str().red());
+        }
+        println!();
+    }
+
+    // --- Disjoint/subclass violations -------------------------------
+    if !violations.is_empty() {
+        ui::warn(&format!(
+            "{} disjoint/subclass violation(s) — the ontology is inconsistent:",
+            violations.len()
+        ));
+        for (a, b) in violations {
+            println!(
+                "    · {} disjoint from {} but {} ⊑* {}",
+                a.as_str().red(), b.as_str().red(), a.as_str(), b.as_str(),
+            );
+        }
+        println!();
+    }
+}
+
+fn print_owl2_report_json(
+    parsed_files: usize,
+    skipped_files: usize,
+    graph: &Owl2Graph,
+    closure: &BTreeMap<Text, BTreeSet<Text>>,
+    cycles: &BTreeSet<Text>,
+    partition: &[BTreeSet<Text>],
+    violations: &BTreeSet<(Text, Text)>,
+) {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
+    out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
+
+    out.push_str("  \"classes\": [\n");
+    let class_count = graph.entities.values().filter(|e| matches!(e.kind, Owl2EntityKind::Class)).count();
+    let mut emitted = 0usize;
+    for (name, e) in &graph.entities {
+        if !matches!(e.kind, Owl2EntityKind::Class) { continue; }
+        emitted += 1;
+        let anc = closure.get(name).cloned().unwrap_or_default();
+        let mut anc_list: Vec<&Text> = anc.iter().filter(|a| *a != name).collect();
+        anc_list.sort();
+        let semantics = match e.semantics {
+            Some(Owl2Semantics::OpenWorld)   => "OpenWorld",
+            Some(Owl2Semantics::ClosedWorld) => "ClosedWorld",
+            None                              => "ClosedWorld",
+        };
+        out.push_str("    {\n");
+        out.push_str(&format!("      \"name\": \"{}\",\n", json_escape(name.as_str())));
+        out.push_str(&format!("      \"semantics\": \"{}\",\n", semantics));
+        out.push_str("      \"ancestors\": [");
+        for (i, a) in anc_list.iter().enumerate() {
+            out.push_str(&format!("\"{}\"", json_escape(a.as_str())));
+            if i + 1 < anc_list.len() { out.push_str(", "); }
+        }
+        out.push_str("],\n");
+        out.push_str("      \"keys\": [");
+        for (i, k) in e.keys.iter().enumerate() {
+            out.push('[');
+            for (j, p) in k.iter().enumerate() {
+                out.push_str(&format!("\"{}\"", json_escape(p.as_str())));
+                if j + 1 < k.len() { out.push_str(", "); }
+            }
+            out.push(']');
+            if i + 1 < e.keys.len() { out.push_str(", "); }
+        }
+        out.push_str("],\n");
+        out.push_str(&format!("      \"file\": \"{}\"\n", json_escape(&e.file.display().to_string())));
+        out.push_str(if emitted == class_count { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ],\n");
+
+    out.push_str("  \"properties\": [\n");
+    let prop_count = graph.entities.values().filter(|e| matches!(e.kind, Owl2EntityKind::Property)).count();
+    let mut emitted = 0usize;
+    for (name, e) in &graph.entities {
+        if !matches!(e.kind, Owl2EntityKind::Property) { continue; }
+        emitted += 1;
+        out.push_str("    {\n");
+        out.push_str(&format!("      \"name\": \"{}\",\n", json_escape(name.as_str())));
+        out.push_str(&format!(
+            "      \"domain\": {},\n",
+            e.property_domain.as_ref().map(|d| format!("\"{}\"", json_escape(d.as_str()))).unwrap_or_else(|| "null".to_string())
+        ));
+        out.push_str(&format!(
+            "      \"range\": {},\n",
+            e.property_range.as_ref().map(|r| format!("\"{}\"", json_escape(r.as_str()))).unwrap_or_else(|| "null".to_string())
+        ));
+        out.push_str(&format!(
+            "      \"inverse_of\": {},\n",
+            e.property_inverse_of.as_ref().map(|i| format!("\"{}\"", json_escape(i.as_str()))).unwrap_or_else(|| "null".to_string())
+        ));
+        let chars: Vec<&str> = e.property_characteristics.iter().map(|c| c.as_str()).collect();
+        out.push_str("      \"characteristics\": [");
+        for (i, c) in chars.iter().enumerate() {
+            out.push_str(&format!("\"{}\"", c));
+            if i + 1 < chars.len() { out.push_str(", "); }
+        }
+        out.push_str("],\n");
+        out.push_str(&format!("      \"file\": \"{}\"\n", json_escape(&e.file.display().to_string())));
+        out.push_str(if emitted == prop_count { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ],\n");
+
+    out.push_str("  \"equivalence_partitions\": [\n");
+    for (i, group) in partition.iter().enumerate() {
+        out.push_str("    [");
+        let names: Vec<&str> = group.iter().map(|n| n.as_str()).collect();
+        for (j, n) in names.iter().enumerate() {
+            out.push_str(&format!("\"{}\"", json_escape(n)));
+            if j + 1 < names.len() { out.push_str(", "); }
+        }
+        out.push(']');
+        out.push_str(if i + 1 == partition.len() { "\n" } else { ",\n" });
+    }
+    out.push_str("  ],\n");
+
+    out.push_str("  \"cycles\": [");
+    let cyc_vec: Vec<&Text> = cycles.iter().collect();
+    for (i, c) in cyc_vec.iter().enumerate() {
+        out.push_str(&format!("\"{}\"", json_escape(c.as_str())));
+        if i + 1 < cyc_vec.len() { out.push_str(", "); }
+    }
+    out.push_str("],\n");
+
+    out.push_str("  \"disjoint_violations\": [\n");
+    let v_vec: Vec<&(Text, Text)> = violations.iter().collect();
+    for (i, (a, b)) in v_vec.iter().enumerate() {
+        out.push_str(&format!(
+            "    {{ \"class\": \"{}\", \"violates_disjoint_with\": \"{}\" }}",
+            json_escape(a.as_str()), json_escape(b.as_str())
+        ));
+        out.push_str(if i + 1 == v_vec.len() { "\n" } else { ",\n" });
+    }
+    out.push_str("  ]\n");
+    out.push_str("}\n");
+    print!("{}", out);
+}

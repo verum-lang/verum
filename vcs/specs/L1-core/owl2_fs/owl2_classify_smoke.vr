@@ -1,0 +1,57 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: owl2, owl2_classify, audit, vuva, phase-6, f5
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §21.10 Phase 6 F5 — verum audit --owl2-classify smoke.
+//
+// Type-checks a small ontology mixing class hierarchy, equivalence,
+// disjointness, has-key, and property characteristics. The CLI smoke
+// (graph-aware audit, cycle detection, disjoint/subclass violation
+// detection) is exercised end-to-end against a synthetic project; this
+// VCS test only asserts the @owl2_* attribute family parses on real
+// declarations.
+
+@owl2_class
+public type Animal is { name: Text }
+
+@owl2_class
+@owl2_subclass_of(Animal)
+public type Mammal is { name: Text }
+
+@owl2_class
+@owl2_subclass_of(Mammal)
+public type Person is { name: Text }
+
+@owl2_class
+@owl2_disjoint_with([Mineral, Vegetable])
+public type Mammal2 is { name: Text }
+
+@owl2_class
+public type Mineral is { name: Text }
+
+@owl2_class
+public type Vegetable is { name: Text }
+
+@owl2_class
+@owl2_equivalent_class(HumanBeing)
+public type Person2 is { name: Text }
+
+@owl2_class
+public type HumanBeing is { name: Text }
+
+@owl2_class
+@owl2_has_key(ssn)
+public type Citizen is { ssn: Text }
+
+@owl2_property(domain = Person, range = Person, characteristic = [Symmetric, Transitive])
+public fn knows(a: Person, b: Person) -> Bool { true }
+
+@owl2_characteristic("Functional")
+public fn ssn_of(p: Citizen) -> Text { "" }
+
+fn main() {
+    print("owl2 classify smoke ok");
+}
