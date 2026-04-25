@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: aes, fips197, kat, encrypt, decrypt, roundtrip
+// @timeout: 5000
+//
+// FIPS 197 Appendix C — known-answer test source for AES-128 and AES-256
+// single-block encrypt + decrypt. Verifies the new
+// `aes128_decrypt_block` / `aes256_decrypt_block` paths against the
+// canonical NIST vectors AND verifies decrypt(encrypt(plain)) == plain
+// for every key length.
+//
+// Currently typecheck-pass only — the stdlib-cache codegen bug (#143)
+// blocks running this end-to-end via `verum run --interp`. Once that
+// lifts, the @test directive should be promoted to `run` with
+// `@expected-stdout: aes-block-kat-ok` and `@expected-exit: 0`.
+
+mount core.*;
+mount core.security.cipher.aes.{
+    aes128_encrypt_block, aes128_decrypt_block,
+    aes256_encrypt_block, aes256_decrypt_block,
+    RoundKeys128, RoundKeys256, AesKey128, AesKey256,
+};
+
+fn main() -> Int {
+    // ----- AES-128 KAT (FIPS 197 Appendix C.1) -----
+    let key128: AesKey128 = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    ];
+    let plaintext: [Byte; 16] = [
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+    ];
+    let expected_ct128: [Byte; 16] = [
+        0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04, 0x30,
+        0xd8, 0xcd, 0xb7, 0x80, 0x70, 0xb4, 0xc5, 0x5a,
+    ];
+
+    let rk128 = RoundKeys128.expand(&key128);
+
+    // Encrypt
+    let mut block128 = plaintext;
+    aes128_encrypt_block(&rk128, &mut block128);
+    let mut i = 0;
+    while i < 16 {
+        assert(block128[i] == expected_ct128[i]);
+        i = i + 1;
+    }
+
+    // Decrypt — must recover plaintext
+    aes128_decrypt_block(&rk128, &mut block128);
+    i = 0;
+    while i < 16 {
+        assert(block128[i] == plaintext[i]);
+        i = i + 1;
+    }
+
+    // ----- AES-256 KAT (FIPS 197 Appendix C.3) -----
+    let key256: AesKey256 = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+    ];
+    let expected_ct256: [Byte; 16] = [
+        0x8e, 0xa2, 0xb7, 0xca, 0x51, 0x67, 0x45, 0xbf,
+        0xea, 0xfc, 0x49, 0x90, 0x4b, 0x49, 0x60, 0x89,
+    ];
+
+    let rk256 = RoundKeys256.expand(&key256);
+
+    let mut block256 = plaintext;
+    aes256_encrypt_block(&rk256, &mut block256);
+    i = 0;
+    while i < 16 {
+        assert(block256[i] == expected_ct256[i]);
+        i = i + 1;
+    }
+
+    aes256_decrypt_block(&rk256, &mut block256);
+    i = 0;
+    while i < 16 {
+        assert(block256[i] == plaintext[i]);
+        i = i + 1;
+    }
+
+    // ----- All-zero key/plaintext roundtrip (boundary case) -----
+    let zero_key: AesKey128 = [0; 16];
+    let zero_plain: [Byte; 16] = [0; 16];
+    let rk_zero = RoundKeys128.expand(&zero_key);
+    let mut zb = zero_plain;
+    aes128_encrypt_block(&rk_zero, &mut zb);
+    aes128_decrypt_block(&rk_zero, &mut zb);
+    i = 0;
+    while i < 16 {
+        assert(zb[i] == 0);
+        i = i + 1;
+    }
+
+    print("aes-block-kat-ok");
+    0
+}

@@ -408,3 +408,230 @@ public fn aes256_encrypt_block(rk: &RoundKeys256, block: &mut [Byte; 16]) {
     ];
     sub_shift_final(block, &last);
 }
+
+// =============================================================================
+// Inverse cipher — FIPS 197 §5.3
+// =============================================================================
+//
+// The inverse cipher reverses the encrypt pipeline. We use the
+// straightforward §5.3 form (InvShiftRows → InvSubBytes →
+// AddRoundKey → InvMixColumns per round, traversing round keys in
+// reverse) rather than the equivalent §5.3.5 inverse cipher, because
+// the §5.3 form keeps the original key schedule reusable for both
+// directions — the encrypt/decrypt code share the SAME RoundKeys128 /
+// RoundKeys256 expansion.
+//
+// `@cfg(feature = "crypto-accel")` substitutes the bodies below with
+// AES-NI `aesdec` / `aesdeclast` (Intel) or `aesd` / `aesimc` (ARMv8
+// Crypto Extensions) — both natively constant-time and ~10 GiB/s.
+
+// The inverse S-box (FIPS 197 §5.3.2 Figure 14). Each byte b satisfies
+// INV_SBOX[SBOX[b]] = b.
+const INV_SBOX: [Byte; 256] = [
+    0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E, 0x81, 0xF3, 0xD7, 0xFB,
+    0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87, 0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB,
+    0x54, 0x7B, 0x94, 0x32, 0xA6, 0xC2, 0x23, 0x3D, 0xEE, 0x4C, 0x95, 0x0B, 0x42, 0xFA, 0xC3, 0x4E,
+    0x08, 0x2E, 0xA1, 0x66, 0x28, 0xD9, 0x24, 0xB2, 0x76, 0x5B, 0xA2, 0x49, 0x6D, 0x8B, 0xD1, 0x25,
+    0x72, 0xF8, 0xF6, 0x64, 0x86, 0x68, 0x98, 0x16, 0xD4, 0xA4, 0x5C, 0xCC, 0x5D, 0x65, 0xB6, 0x92,
+    0x6C, 0x70, 0x48, 0x50, 0xFD, 0xED, 0xB9, 0xDA, 0x5E, 0x15, 0x46, 0x57, 0xA7, 0x8D, 0x9D, 0x84,
+    0x90, 0xD8, 0xAB, 0x00, 0x8C, 0xBC, 0xD3, 0x0A, 0xF7, 0xE4, 0x58, 0x05, 0xB8, 0xB3, 0x45, 0x06,
+    0xD0, 0x2C, 0x1E, 0x8F, 0xCA, 0x3F, 0x0F, 0x02, 0xC1, 0xAF, 0xBD, 0x03, 0x01, 0x13, 0x8A, 0x6B,
+    0x3A, 0x91, 0x11, 0x41, 0x4F, 0x67, 0xDC, 0xEA, 0x97, 0xF2, 0xCF, 0xCE, 0xF0, 0xB4, 0xE6, 0x73,
+    0x96, 0xAC, 0x74, 0x22, 0xE7, 0xAD, 0x35, 0x85, 0xE2, 0xF9, 0x37, 0xE8, 0x1C, 0x75, 0xDF, 0x6E,
+    0x47, 0xF1, 0x1A, 0x71, 0x1D, 0x29, 0xC5, 0x89, 0x6F, 0xB7, 0x62, 0x0E, 0xAA, 0x18, 0xBE, 0x1B,
+    0xFC, 0x56, 0x3E, 0x4B, 0xC6, 0xD2, 0x79, 0x20, 0x9A, 0xDB, 0xC0, 0xFE, 0x78, 0xCD, 0x5A, 0xF4,
+    0x1F, 0xDD, 0xA8, 0x33, 0x88, 0x07, 0xC7, 0x31, 0xB1, 0x12, 0x10, 0x59, 0x27, 0x80, 0xEC, 0x5F,
+    0x60, 0x51, 0x7F, 0xA9, 0x19, 0xB5, 0x4A, 0x0D, 0x2D, 0xE5, 0x7A, 0x9F, 0x93, 0xC9, 0x9C, 0xEF,
+    0xA0, 0xE0, 0x3B, 0x4D, 0xAE, 0x2A, 0xF5, 0xB0, 0xC8, 0xEB, 0xBB, 0x3C, 0x83, 0x53, 0x99, 0x61,
+    0x17, 0x2B, 0x04, 0x7E, 0xBA, 0x77, 0xD6, 0x26, 0xE1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0C, 0x7D,
+];
+
+@inline
+fn inv_sub_byte(b: Byte) -> Byte { INV_SBOX[b as Int] }
+
+// GF(2^8) multipliers for InvMixColumns. Each one composes xtime —
+// the compiler folds these aggressively at AOT (LLVM constant-folds
+// the bit-and / shift / xor chain into a single 4-cycle sequence).
+@inline
+fn mul_2(b: Byte) -> Byte { xtime(b) }
+
+@inline
+fn mul_4(b: Byte) -> Byte { xtime(xtime(b)) }
+
+@inline
+fn mul_8(b: Byte) -> Byte { xtime(xtime(xtime(b))) }
+
+@inline
+fn mul_09(b: Byte) -> Byte { mul_8(b) ^ b }
+
+@inline
+fn mul_0b(b: Byte) -> Byte { mul_8(b) ^ mul_2(b) ^ b }
+
+@inline
+fn mul_0d(b: Byte) -> Byte { mul_8(b) ^ mul_4(b) ^ b }
+
+@inline
+fn mul_0e(b: Byte) -> Byte { mul_8(b) ^ mul_4(b) ^ mul_2(b) }
+
+/// InvShiftRows + InvSubBytes + AddRoundKey + InvMixColumns, one round.
+/// Inverse of `sub_shift_mix_round`.
+@inline
+fn inv_sub_shift_unmix_round(state: &mut [Byte; 16], rk: &[UInt32; 4]) {
+    // InvShiftRows reads from the shifted-back positions (right-rotation).
+    // Combined with InvSubBytes via INV_SBOX in a single pass.
+    let r00 = inv_sub_byte(state[ 0]);
+    let r01 = inv_sub_byte(state[13]);
+    let r02 = inv_sub_byte(state[10]);
+    let r03 = inv_sub_byte(state[ 7]);
+    let r10 = inv_sub_byte(state[ 4]);
+    let r11 = inv_sub_byte(state[ 1]);
+    let r12 = inv_sub_byte(state[14]);
+    let r13 = inv_sub_byte(state[11]);
+    let r20 = inv_sub_byte(state[ 8]);
+    let r21 = inv_sub_byte(state[ 5]);
+    let r22 = inv_sub_byte(state[ 2]);
+    let r23 = inv_sub_byte(state[15]);
+    let r30 = inv_sub_byte(state[12]);
+    let r31 = inv_sub_byte(state[ 9]);
+    let r32 = inv_sub_byte(state[ 6]);
+    let r33 = inv_sub_byte(state[ 3]);
+
+    // AddRoundKey, then InvMixColumns. Per FIPS 197 §5.3 strict order.
+    let a00 = r00 ^ (((rk[0] >> 24) & 0xFF) as Byte);
+    let a01 = r01 ^ (((rk[0] >> 16) & 0xFF) as Byte);
+    let a02 = r02 ^ (((rk[0] >>  8) & 0xFF) as Byte);
+    let a03 = r03 ^ ((rk[0] & 0xFF) as Byte);
+
+    let a10 = r10 ^ (((rk[1] >> 24) & 0xFF) as Byte);
+    let a11 = r11 ^ (((rk[1] >> 16) & 0xFF) as Byte);
+    let a12 = r12 ^ (((rk[1] >>  8) & 0xFF) as Byte);
+    let a13 = r13 ^ ((rk[1] & 0xFF) as Byte);
+
+    let a20 = r20 ^ (((rk[2] >> 24) & 0xFF) as Byte);
+    let a21 = r21 ^ (((rk[2] >> 16) & 0xFF) as Byte);
+    let a22 = r22 ^ (((rk[2] >>  8) & 0xFF) as Byte);
+    let a23 = r23 ^ ((rk[2] & 0xFF) as Byte);
+
+    let a30 = r30 ^ (((rk[3] >> 24) & 0xFF) as Byte);
+    let a31 = r31 ^ (((rk[3] >> 16) & 0xFF) as Byte);
+    let a32 = r32 ^ (((rk[3] >>  8) & 0xFF) as Byte);
+    let a33 = r33 ^ ((rk[3] & 0xFF) as Byte);
+
+    // InvMixColumns per FIPS 197 §5.3.3:
+    //   s'_c = (0E · s0c) ⊕ (0B · s1c) ⊕ (0D · s2c) ⊕ (09 · s3c)
+    //          (matrix shifts cyclically for rows 1, 2, 3)
+    state[ 0] = mul_0e(a00) ^ mul_0b(a01) ^ mul_0d(a02) ^ mul_09(a03);
+    state[ 1] = mul_09(a00) ^ mul_0e(a01) ^ mul_0b(a02) ^ mul_0d(a03);
+    state[ 2] = mul_0d(a00) ^ mul_09(a01) ^ mul_0e(a02) ^ mul_0b(a03);
+    state[ 3] = mul_0b(a00) ^ mul_0d(a01) ^ mul_09(a02) ^ mul_0e(a03);
+
+    state[ 4] = mul_0e(a10) ^ mul_0b(a11) ^ mul_0d(a12) ^ mul_09(a13);
+    state[ 5] = mul_09(a10) ^ mul_0e(a11) ^ mul_0b(a12) ^ mul_0d(a13);
+    state[ 6] = mul_0d(a10) ^ mul_09(a11) ^ mul_0e(a12) ^ mul_0b(a13);
+    state[ 7] = mul_0b(a10) ^ mul_0d(a11) ^ mul_09(a12) ^ mul_0e(a13);
+
+    state[ 8] = mul_0e(a20) ^ mul_0b(a21) ^ mul_0d(a22) ^ mul_09(a23);
+    state[ 9] = mul_09(a20) ^ mul_0e(a21) ^ mul_0b(a22) ^ mul_0d(a23);
+    state[10] = mul_0d(a20) ^ mul_09(a21) ^ mul_0e(a22) ^ mul_0b(a23);
+    state[11] = mul_0b(a20) ^ mul_0d(a21) ^ mul_09(a22) ^ mul_0e(a23);
+
+    state[12] = mul_0e(a30) ^ mul_0b(a31) ^ mul_0d(a32) ^ mul_09(a33);
+    state[13] = mul_09(a30) ^ mul_0e(a31) ^ mul_0b(a32) ^ mul_0d(a33);
+    state[14] = mul_0d(a30) ^ mul_09(a31) ^ mul_0e(a32) ^ mul_0b(a33);
+    state[15] = mul_0b(a30) ^ mul_0d(a31) ^ mul_09(a32) ^ mul_0e(a33);
+}
+
+/// Final inverse round — InvShiftRows + InvSubBytes + AddRoundKey
+/// (no InvMixColumns). FIPS 197 §5.3.
+@inline
+fn inv_sub_shift_final(state: &mut [Byte; 16], rk: &[UInt32; 4]) {
+    let r00 = inv_sub_byte(state[ 0]);
+    let r01 = inv_sub_byte(state[13]);
+    let r02 = inv_sub_byte(state[10]);
+    let r03 = inv_sub_byte(state[ 7]);
+    let r10 = inv_sub_byte(state[ 4]);
+    let r11 = inv_sub_byte(state[ 1]);
+    let r12 = inv_sub_byte(state[14]);
+    let r13 = inv_sub_byte(state[11]);
+    let r20 = inv_sub_byte(state[ 8]);
+    let r21 = inv_sub_byte(state[ 5]);
+    let r22 = inv_sub_byte(state[ 2]);
+    let r23 = inv_sub_byte(state[15]);
+    let r30 = inv_sub_byte(state[12]);
+    let r31 = inv_sub_byte(state[ 9]);
+    let r32 = inv_sub_byte(state[ 6]);
+    let r33 = inv_sub_byte(state[ 3]);
+
+    state[ 0] = r00 ^ (((rk[0] >> 24) & 0xFF) as Byte);
+    state[ 1] = r01 ^ (((rk[0] >> 16) & 0xFF) as Byte);
+    state[ 2] = r02 ^ (((rk[0] >>  8) & 0xFF) as Byte);
+    state[ 3] = r03 ^ ((rk[0] & 0xFF) as Byte);
+
+    state[ 4] = r10 ^ (((rk[1] >> 24) & 0xFF) as Byte);
+    state[ 5] = r11 ^ (((rk[1] >> 16) & 0xFF) as Byte);
+    state[ 6] = r12 ^ (((rk[1] >>  8) & 0xFF) as Byte);
+    state[ 7] = r13 ^ ((rk[1] & 0xFF) as Byte);
+
+    state[ 8] = r20 ^ (((rk[2] >> 24) & 0xFF) as Byte);
+    state[ 9] = r21 ^ (((rk[2] >> 16) & 0xFF) as Byte);
+    state[10] = r22 ^ (((rk[2] >>  8) & 0xFF) as Byte);
+    state[11] = r23 ^ ((rk[2] & 0xFF) as Byte);
+
+    state[12] = r30 ^ (((rk[3] >> 24) & 0xFF) as Byte);
+    state[13] = r31 ^ (((rk[3] >> 16) & 0xFF) as Byte);
+    state[14] = r32 ^ (((rk[3] >>  8) & 0xFF) as Byte);
+    state[15] = r33 ^ ((rk[3] & 0xFF) as Byte);
+}
+
+/// Single-block AES-128 decrypt.
+///
+/// Inverse of `aes128_encrypt_block` — uses the SAME round-key
+/// schedule, traversed in reverse round order. Constant-time
+/// discipline: same as the encrypt path, table-lookup susceptible on
+/// shared hardware unless `@cfg(feature = "crypto-accel")` swaps in
+/// AES-NI / ARMv8 hardware primitives.
+public fn aes128_decrypt_block(rk: &RoundKeys128, block: &mut [Byte; 16]) {
+    // Initial AddRoundKey with the LAST round key (round Nr).
+    let r_last: [UInt32; 4] = [
+        rk.w[AES128_NR * 4 + 0], rk.w[AES128_NR * 4 + 1],
+        rk.w[AES128_NR * 4 + 2], rk.w[AES128_NR * 4 + 3],
+    ];
+    add_round_key(block, &r_last);
+
+    // Rounds Nr-1 down to 1: InvShiftRows + InvSubBytes + AddRoundKey + InvMixColumns.
+    let mut round = AES128_NR - 1;
+    while round >= 1 {
+        let rki: [UInt32; 4] = [
+            rk.w[round * 4 + 0], rk.w[round * 4 + 1],
+            rk.w[round * 4 + 2], rk.w[round * 4 + 3],
+        ];
+        inv_sub_shift_unmix_round(block, &rki);
+        round = round - 1;
+    }
+
+    // Final round (round 0): InvShiftRows + InvSubBytes + AddRoundKey (no InvMixColumns).
+    let r_first: [UInt32; 4] = [rk.w[0], rk.w[1], rk.w[2], rk.w[3]];
+    inv_sub_shift_final(block, &r_first);
+}
+
+/// Single-block AES-256 decrypt.
+public fn aes256_decrypt_block(rk: &RoundKeys256, block: &mut [Byte; 16]) {
+    let r_last: [UInt32; 4] = [
+        rk.w[AES256_NR * 4 + 0], rk.w[AES256_NR * 4 + 1],
+        rk.w[AES256_NR * 4 + 2], rk.w[AES256_NR * 4 + 3],
+    ];
+    add_round_key(block, &r_last);
+
+    let mut round = AES256_NR - 1;
+    while round >= 1 {
+        let rki: [UInt32; 4] = [
+            rk.w[round * 4 + 0], rk.w[round * 4 + 1],
+            rk.w[round * 4 + 2], rk.w[round * 4 + 3],
+        ];
+        inv_sub_shift_unmix_round(block, &rki);
+        round = round - 1;
+    }
+
+    let r_first: [UInt32; 4] = [rk.w[0], rk.w[1], rk.w[2], rk.w[3]];
+    inv_sub_shift_final(block, &r_first);
+}
