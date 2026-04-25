@@ -7,7 +7,7 @@
 
 mount core.database.sqlite.native.string_agg_fn.agg.{
     State, empty,
-    Operand, OpNull, OpText,
+    AggOperand, OpNull, OpText,
     step,
     AggResult, RNull, RText,
     finalize, result_is_null, result_text, has_any_row,

@@ -8,7 +8,7 @@
 mount core.database.sqlite.native.glob_pattern_api.pattern.{
     Token, TLiteral, TAny, TOne, TClassOpen, TClassClose, TClassNot,
     token_kind_name,
-    Operator, OpLike, OpGlob,
+    GlobOperator, OpLike, OpGlob,
     is_case_sensitive, wildcard_one, wildcard_any, supports_char_class,
     ReductionVerdict, RvFullScan, RvPrefixMatch, RvExactLiteral,
     classify_reduction, verdict_name, allows_index_range,

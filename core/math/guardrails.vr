@@ -201,14 +201,14 @@ public type Guardrail is protocol {
 // =============================================================================
 
 // Simple regex pattern wrapper
-public type Pattern is {
+public type GuardrailPattern is {
     name: Text,
     regex_str: Text,
 };
 
-implement Pattern {
+implement GuardrailPattern {
     public fn new(name: Text, regex_str: Text) -> Self {
-        Pattern { name, regex_str }
+        GuardrailPattern { name, regex_str }
     }
 
     // Find all matches in text
@@ -228,7 +228,7 @@ implement Pattern {
 // SSNs, and credit card numbers.
 public type PIIFilter is {
     // Patterns to match (name, regex)
-    patterns: List<Pattern>,
+    patterns: List<GuardrailPattern>,
     // Replacement text for redacted content
     replacement: Text,
 };
@@ -238,23 +238,23 @@ implement PIIFilter {
     public fn default() -> Self {
         PIIFilter {
             patterns: [
-                Pattern.new("email".to_text(), "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}".to_text()),
-                Pattern.new("phone".to_text(), "\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b".to_text()),
-                Pattern.new("ssn".to_text(), "\\b\\d{3}-\\d{2}-\\d{4}\\b".to_text()),
-                Pattern.new("credit_card".to_text(), "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b".to_text()),
+                GuardrailPattern.new("email".to_text(), "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}".to_text()),
+                GuardrailPattern.new("phone".to_text(), "\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b".to_text()),
+                GuardrailPattern.new("ssn".to_text(), "\\b\\d{3}-\\d{2}-\\d{4}\\b".to_text()),
+                GuardrailPattern.new("credit_card".to_text(), "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b".to_text()),
             ].to_list(),
             replacement: "[REDACTED]".to_text(),
         }
     }
 
     // Create filter with custom patterns
-    public fn with_patterns(patterns: List<Pattern>, replacement: Text) -> Self {
+    public fn with_patterns(patterns: List<GuardrailPattern>, replacement: Text) -> Self {
         PIIFilter { patterns, replacement }
     }
 
     // Add a custom pattern
     public fn add_pattern(&mut self, name: Text, regex_str: Text) {
-        self.patterns.push(Pattern.new(name, regex_str));
+        self.patterns.push(GuardrailPattern.new(name, regex_str));
     }
 
     // Redact PII from text
@@ -837,7 +837,7 @@ fn log_info(message: Text) {
 }
 
 // =============================================================================
-// Builder Pattern
+// Builder GuardrailPattern
 // =============================================================================
 
 // Guardrail chain builder for fluent API

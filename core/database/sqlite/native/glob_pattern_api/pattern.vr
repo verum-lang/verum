@@ -25,33 +25,33 @@ public fn token_kind_name(t: &Token) -> Text {
 }
 
 // LIKE vs GLOB classification.  Same operator surface, different defaults.
-public type Operator is
+public type GlobOperator is
     | OpLike
     | OpGlob
     ;
 
-public fn is_case_sensitive(op: &Operator) -> Bool {
+public fn is_case_sensitive(op: &GlobOperator) -> Bool {
     match op {
         OpLike => false,    // LIKE is ASCII-fold by default (PRAGMA changes it)
         OpGlob => true,     // GLOB is always byte-exact
     }
 }
 
-public fn wildcard_one(op: &Operator) -> Int {
+public fn wildcard_one(op: &GlobOperator) -> Int {
     match op {
         OpLike => 0x5F,    // '_'
         OpGlob => 0x3F,    // '?'
     }
 }
 
-public fn wildcard_any(op: &Operator) -> Int {
+public fn wildcard_any(op: &GlobOperator) -> Int {
     match op {
         OpLike => 0x25,    // '%'
         OpGlob => 0x2A,    // '*'
     }
 }
 
-public fn supports_char_class(op: &Operator) -> Bool {
+public fn supports_char_class(op: &GlobOperator) -> Bool {
     match op {
         OpLike => false,
         OpGlob => true,
@@ -66,7 +66,7 @@ public type ReductionVerdict is
     | RvExactLiteral
     ;
 
-public fn classify_reduction(pattern: Text, op: &Operator) -> ReductionVerdict {
+public fn classify_reduction(pattern: Text, op: &GlobOperator) -> ReductionVerdict {
     let bs = pattern.as_bytes();
     let n = bs.len();
     if n == 0 { return RvExactLiteral; }
