@@ -6933,44 +6933,74 @@ if func_name == "__file_read_to_string_raw"
             // intrinsic call may pass fewer args than the canonical
             // signature — pad with defaults for missing trailing args.
             //
-            // Previously this site used args.count to derive the
-            // function signature, which made the runtime function
-            // shape vary with each call site. When
-            // emit_verum_networking_functions later tried to emit the
-            // helper body against `func.get_nth_param(canonical_idx)`,
-            // get_nth_param returned None, propagating up as
-            // "missing param N" (#105). Pinning to the canonical
-            // signature here removes that signature drift.
-            let (c_name, canonical_arity, default_padding): (&str, usize, &[i64]) = match func_name {
-                "__tcp_connect_raw" => ("verum_tcp_connect", 2, &[]),
-                "__tcp_listen_raw"  => ("verum_tcp_listen", 2, &[10]), // default backlog=10
-                "__tcp_accept_raw"  => ("verum_tcp_accept", 1, &[]),
-                "__tcp_send_raw"    => ("verum_tcp_send_text", 2, &[]),
-                "__tcp_recv_raw"    => ("verum_tcp_recv_text", 1, &[]),
-                "__tcp_close_raw"   => ("verum_tcp_close", 1, &[]),
-                "__udp_bind_raw"    => ("verum_udp_bind", 1, &[]),
-                "__udp_send_raw"    => ("verum_udp_send_text", 3, &[]),
-                "__udp_recv_raw"    => ("verum_udp_recv_text", 2, &[]),
-                "__udp_close_raw"   => ("verum_udp_close", 1, &[]),
+            // Param types must ALSO match the runtime helper canonical
+            // form (some take pointer args for hosts, others take i64
+            // for fd / port). Previously this site declared every
+            // param as i64, causing emit_verum_tcp_connect's
+            // `func.get_nth_param(0).into_pointer_value()` to panic
+            // (since the existing function had i64 there). Use the
+            // canonical type vector below — paths producing pointer
+            // args (host strings) get ptr_type slots; everything else
+            // is i64.
+            //
+            // 'P' = pointer (host string), 'I' = i64 (fd, port, len, ...).
+            // The string encodes the canonical parameter shape.
+            let (c_name, canonical_shape, default_padding): (&str, &str, &[i64]) = match func_name {
+                "__tcp_connect_raw" => ("verum_tcp_connect", "PI", &[]),    // host_ptr, port
+                "__tcp_listen_raw"  => ("verum_tcp_listen", "II", &[10]),   // port, backlog
+                "__tcp_accept_raw"  => ("verum_tcp_accept", "I", &[]),       // fd
+                "__tcp_send_raw"    => ("verum_tcp_send_text", "II", &[]),   // fd, text_handle
+                "__tcp_recv_raw"    => ("verum_tcp_recv_text", "I", &[]),    // fd
+                "__tcp_close_raw"   => ("verum_tcp_close", "I", &[]),        // fd
+                "__udp_bind_raw"    => ("verum_udp_bind", "I", &[]),         // port
+                "__udp_send_raw"    => ("verum_udp_send_text", "IIPI", &[]), // fd, text, host_ptr, port
+                "__udp_recv_raw"    => ("verum_udp_recv_text", "II", &[]),   // fd, max_len
+                "__udp_close_raw"   => ("verum_udp_close", "I", &[]),        // fd
                 _ => unreachable!(),
             };
-            let mut call_args: Vec<BasicMetadataValueEnum> = Vec::with_capacity(canonical_arity);
+            let canonical_arity = canonical_shape.len();
+            let ptr_ty = ctx.types().ptr_type();
             // Materialise user args, then pad with defaults to reach
-            // the canonical arity.
+            // canonical arity. Each slot gets its canonical-shape type.
+            let mut call_args: Vec<BasicMetadataValueEnum> = Vec::with_capacity(canonical_arity);
             let n_user = args.count as usize;
             for i in 0..n_user.min(canonical_arity) {
-                let v = ctx.get_register(args.start.0 + i as u16)?;
-                call_args.push(v.into());
+                let raw = ctx.get_register(args.start.0 + i as u16)?;
+                let want_ptr = canonical_shape.as_bytes()[i] == b'P';
+                let coerced: BasicValueEnum = if want_ptr {
+                    // Coerce Int → Ptr where the canonical slot is ptr.
+                    match raw {
+                        BasicValueEnum::PointerValue(p) => p.into(),
+                        BasicValueEnum::IntValue(v) => {
+                            ctx.builder().build_int_to_ptr(v, ptr_ty, "raw_ptr_arg")
+                                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                                .into()
+                        }
+                        other => other,
+                    }
+                } else {
+                    // Coerce Ptr → Int where the canonical slot is i64.
+                    as_i64(ctx, raw, "raw_i64_arg")?.into()
+                };
+                call_args.push(coerced.into());
             }
-            // Defaults fill any trailing canonical slots beyond what
-            // the user supplied.
+            // Defaults fill trailing canonical slots beyond what the
+            // user supplied. Only int slots have meaningful defaults
+            // here — ptr slots default to const_null since the caller
+            // has no host string to provide.
             let supplied = call_args.len();
             for j in 0..(canonical_arity - supplied) {
-                let dv = default_padding.get(j).copied().unwrap_or(0);
-                call_args.push(i64_type.const_int(dv as u64, true).into());
+                let slot_idx = supplied + j;
+                let want_ptr = canonical_shape.as_bytes()[slot_idx] == b'P';
+                if want_ptr {
+                    call_args.push(ptr_ty.const_null().into());
+                } else {
+                    let dv = default_padding.get(j).copied().unwrap_or(0);
+                    call_args.push(i64_type.const_int(dv as u64, true).into());
+                }
             }
-            let param_types: Vec<BasicMetadataTypeEnum> = (0..canonical_arity)
-                .map(|_| i64_type.into())
+            let param_types: Vec<BasicMetadataTypeEnum> = canonical_shape.bytes()
+                .map(|b| if b == b'P' { ptr_ty.into() } else { i64_type.into() })
                 .collect();
             let c_fn = module.get_function(c_name).unwrap_or_else(|| {
                 let fn_type = i64_type.fn_type(&param_types, false);

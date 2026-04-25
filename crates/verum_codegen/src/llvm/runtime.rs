@@ -6551,8 +6551,33 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
                 let b = self.context.create_builder();
                 b.position_at_end(entry);
-                let host = func.get_nth_param(0).or_internal("missing param 0")?.into_pointer_value();
-                let port = func.get_nth_param(1).or_internal("missing param 1")?.into_int_value();
+                // Defensive: a previously-declared `verum_tcp_connect`
+                // (e.g. from the legacy raw-intrinsic mapping) may have
+                // declared host as i64 rather than ptr. The canonical
+                // signature here is (ptr, i64) — coerce any IntValue
+                // via int_to_ptr so emit succeeds regardless of the
+                // declarer order. Same pattern as verum_file_delete
+                // (commit 06e0a307).
+                let host_raw = func.get_nth_param(0).or_internal("missing param 0")?;
+                let host = match host_raw {
+                    verum_llvm::values::BasicValueEnum::PointerValue(p) => p,
+                    verum_llvm::values::BasicValueEnum::IntValue(i) => {
+                        b.build_int_to_ptr(i, ptr_type, "host_ptr").or_llvm_err()?
+                    }
+                    _ => return Err(LlvmLoweringError::internal(
+                        "verum_tcp_connect: param 0 has unexpected variant",
+                    )),
+                };
+                let port_raw = func.get_nth_param(1).or_internal("missing param 1")?;
+                let port = match port_raw {
+                    verum_llvm::values::BasicValueEnum::IntValue(i) => i,
+                    verum_llvm::values::BasicValueEnum::PointerValue(p) => {
+                        b.build_ptr_to_int(p, i64_type, "port_i64").or_llvm_err()?
+                    }
+                    _ => return Err(LlvmLoweringError::internal(
+                        "verum_tcp_connect: param 1 has unexpected variant",
+                    )),
+                };
                 let is_null = b.build_is_null(host, "n").or_llvm_err()?;
                 b.build_conditional_branch(is_null, null_bb, resolve_bb).or_llvm_err()?;
 
