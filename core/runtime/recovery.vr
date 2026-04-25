@@ -54,7 +54,7 @@ public type RetryConfig is {
     max_attempts: Int,
 
     /// Backoff strategy between retries
-    backoff: BackoffStrategy,
+    backoff: RecoveryBackoffStrategy,
 
     /// Jitter configuration
     jitter: JitterConfig,
@@ -182,7 +182,7 @@ where E: Display
 // =============================================================================
 
 /// Backoff strategy for retry delays
-public type BackoffStrategy is
+public type RecoveryBackoffStrategy is
     /// Fixed delay between retries
     | Fixed { delay_ms: UInt64 }
     /// Linearly increasing delay
@@ -192,7 +192,7 @@ public type BackoffStrategy is
     /// No delay (immediate retry)
     | None;
 
-implement BackoffStrategy {
+implement RecoveryBackoffStrategy {
     /// Calculate delay for given attempt number
     ///
     /// ## Performance
@@ -227,7 +227,7 @@ implement BackoffStrategy {
 
     /// Create exponential backoff with sensible defaults
     public fn exponential(base_ms: UInt64, max_ms: UInt64) -> Self {
-        BackoffStrategy.Exponential {
+        RecoveryBackoffStrategy.Exponential {
             base_ms,
             max_ms,
             multiplier: 2,
@@ -391,7 +391,7 @@ implement RecoveryStrategy {
     public fn retry(max_attempts: Int) -> Self {
         RecoveryStrategy.Retry(RetryConfig {
             max_attempts: max_attempts,
-            backoff: BackoffStrategy.Exponential {
+            backoff: RecoveryBackoffStrategy.Exponential {
                 base_ms: 100,
                 max_ms: 5000,
                 multiplier: 2,
@@ -824,17 +824,17 @@ implement Eq for CircuitState {
 
 // --- Clone ---
 
-implement Clone for BackoffStrategy {
-    fn clone(&self) -> BackoffStrategy {
+implement Clone for RecoveryBackoffStrategy {
+    fn clone(&self) -> RecoveryBackoffStrategy {
         match self {
-            Fixed { delay_ms } => BackoffStrategy.Fixed { delay_ms: delay_ms },
-            Linear { base_ms, increment_ms, max_ms } => BackoffStrategy.Linear {
+            Fixed { delay_ms } => RecoveryBackoffStrategy.Fixed { delay_ms: delay_ms },
+            Linear { base_ms, increment_ms, max_ms } => RecoveryBackoffStrategy.Linear {
                 base_ms: base_ms, increment_ms: increment_ms, max_ms: max_ms,
             },
-            Exponential { base_ms, max_ms, multiplier } => BackoffStrategy.Exponential {
+            Exponential { base_ms, max_ms, multiplier } => RecoveryBackoffStrategy.Exponential {
                 base_ms: base_ms, max_ms: max_ms, multiplier: multiplier,
             },
-            None => BackoffStrategy.None,
+            None => RecoveryBackoffStrategy.None,
         }
     }
 }
@@ -922,13 +922,13 @@ implement Debug for CircuitState {
     }
 }
 
-implement Debug for BackoffStrategy {
+implement Debug for RecoveryBackoffStrategy {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            Fixed { delay_ms } => f.write_str(f"BackoffStrategy.Fixed {{ delay_ms: {delay_ms} }}"),
-            Linear { base_ms, increment_ms, max_ms } => f.write_str(f"BackoffStrategy.Linear {{ base_ms: {base_ms}, increment_ms: {increment_ms}, max_ms: {max_ms} }}"),
-            Exponential { base_ms, max_ms, multiplier } => f.write_str(f"BackoffStrategy.Exponential {{ base_ms: {base_ms}, max_ms: {max_ms}, multiplier: {multiplier} }}"),
-            None => f.write_str("BackoffStrategy.None"),
+            Fixed { delay_ms } => f.write_str(f"RecoveryBackoffStrategy.Fixed {{ delay_ms: {delay_ms} }}"),
+            Linear { base_ms, increment_ms, max_ms } => f.write_str(f"RecoveryBackoffStrategy.Linear {{ base_ms: {base_ms}, increment_ms: {increment_ms}, max_ms: {max_ms} }}"),
+            Exponential { base_ms, max_ms, multiplier } => f.write_str(f"RecoveryBackoffStrategy.Exponential {{ base_ms: {base_ms}, max_ms: {max_ms}, multiplier: {multiplier} }}"),
+            None => f.write_str("RecoveryBackoffStrategy.None"),
         }
     }
 }

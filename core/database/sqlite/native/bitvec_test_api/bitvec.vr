@@ -1,7 +1,7 @@
 // =============================================================================
 // bitvec_test_api/bitvec.vr — sparse bitmap
 // =============================================================================
-// Spec: SQLite test-control BitVec harness.
+// Spec: SQLite test-control PagerBitmap harness.
 // =============================================================================
 
 module core.database.sqlite.native.bitvec_test_api.bitvec;
@@ -10,14 +10,14 @@ mount core.*;
 mount base.{Bool};
 mount collections.List;
 
-public type BitVec is {
+public type PagerBitmap is {
     bits: List<u8>,
     /// Total bit capacity (always a multiple of 8).
     capacity_bits: Int,
     population: Int,
 }
 
-public fn new_bitvec(capacity_bits: Int) -> BitVec {
+public fn new_bitvec(capacity_bits: Int) -> PagerBitmap {
     let byte_count = (capacity_bits + 7) / 8;
     let mut bytes: List<u8> = List.new();
     let mut i: Int = 0;
@@ -25,14 +25,14 @@ public fn new_bitvec(capacity_bits: Int) -> BitVec {
         bytes.push(0 as u8);
         i = i + 1;
     }
-    BitVec {
+    PagerBitmap {
         bits: bytes,
         capacity_bits: byte_count * 8,
         population: 0,
     }
 }
 
-public fn get(v: &BitVec, index: Int) -> Bool {
+public fn get(v: &PagerBitmap, index: Int) -> Bool {
     if index < 0 || index >= v.capacity_bits { return false; }
     let byte_index = index / 8;
     let bit_index = index - (byte_index * 8);
@@ -41,7 +41,7 @@ public fn get(v: &BitVec, index: Int) -> Bool {
     (b & mask) != (0 as u8)
 }
 
-public fn set(v: &mut BitVec, index: Int) -> Bool {
+public fn set(v: &mut PagerBitmap, index: Int) -> Bool {
     if index < 0 || index >= v.capacity_bits { return false; }
     if get(v, index) { return false; }
     let byte_index = index / 8;
@@ -54,7 +54,7 @@ public fn set(v: &mut BitVec, index: Int) -> Bool {
     true
 }
 
-public fn clear(v: &mut BitVec, index: Int) -> Bool {
+public fn clear(v: &mut PagerBitmap, index: Int) -> Bool {
     if index < 0 || index >= v.capacity_bits { return false; }
     if !get(v, index) { return false; }
     let byte_index = index / 8;
@@ -67,7 +67,7 @@ public fn clear(v: &mut BitVec, index: Int) -> Bool {
     true
 }
 
-public fn reset(v: &mut BitVec) {
+public fn reset(v: &mut PagerBitmap) {
     let mut i: Int = 0;
     while i < v.bits.len() {
         let slot = v.bits.get_mut(i);

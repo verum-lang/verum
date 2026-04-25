@@ -153,7 +153,7 @@ public mount .recovery.{
     RetryConfig,
     CircuitBreaker,
     CircuitState,
-    BackoffStrategy,
+    RecoveryBackoffStrategy,
     RecoveryStrategy,
 };
 

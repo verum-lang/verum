@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.bitvec_test_api.bitvec.{
-    BitVec,
+    PagerBitmap,
     new_bitvec, get, set, clear, reset,
 };
 mount core.database.sqlite.native.bitvec_test_api.harness.{

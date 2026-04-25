@@ -21,7 +21,7 @@ mount core.sys.{FileDesc, OSError};
 // =============================================================================
 
 /// Color depth support level.
-public type ColorProfile is
+public type ColorSupportLevel is
     | NoColor       // No color support (dumb terminal, CI)
     | Base16        // 16 ANSI colors
     | Ansi256       // 256-color palette
@@ -43,7 +43,7 @@ public type MouseProtocol is
 /// Detected terminal capabilities.
 /// Filled by detect_capabilities() from env vars and terminal queries.
 public type TermCapabilities is {
-    color_profile: ColorProfile,
+    color_profile: ColorSupportLevel,
     unicode_support: UnicodeSupport,
     mouse_protocol: MouseProtocol,
     has_alternate_screen: Bool,
@@ -93,18 +93,18 @@ public fn detect_capabilities(fd: FileDesc) -> TermCapabilities {
 
     // Color profile detection
     let color_profile = if no_color.is_some() {
-        ColorProfile.NoColor
+        ColorSupportLevel.NoColor
     } else if colorterm == "truecolor" || colorterm == "24bit" {
-        ColorProfile.TrueColor
+        ColorSupportLevel.TrueColor
     } else if term.contains("256color") {
-        ColorProfile.Ansi256
+        ColorSupportLevel.Ansi256
     } else if term == "dumb" || term == "" {
-        ColorProfile.NoColor
+        ColorSupportLevel.NoColor
     } else {
         // Check known terminal programs for truecolor
         match term_program {
-            Some(ref prog) if is_truecolor_terminal(prog) => ColorProfile.TrueColor,
-            _ => ColorProfile.Base16,
+            Some(ref prog) if is_truecolor_terminal(prog) => ColorSupportLevel.TrueColor,
+            _ => ColorSupportLevel.Base16,
         }
     };
 

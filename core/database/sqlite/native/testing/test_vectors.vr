@@ -198,7 +198,7 @@ public fn wal_checksum_vectors() -> List<WalChecksumVector> {
 }
 
 // -----------------------------------------------------------------------------
-// BtreeCellVector — E.4 b-tree cell sentinel vectors
+// BtreeCellTestSample — E.4 b-tree cell sentinel vectors
 // -----------------------------------------------------------------------------
 //
 // SQLite b-tree cells come in 4 flavours; we provide one minimal
@@ -207,38 +207,38 @@ public fn wal_checksum_vectors() -> List<WalChecksumVector> {
 // recognises.
 // =============================================================================
 
-public type BtreeCellVector is {
+public type BtreeCellTestSample is {
     label: Text,
     page_type: Byte,
     cell_bytes: List<Byte>,
     rowid: Int64,
 };
 
-public fn btree_cell_vectors() -> List<BtreeCellVector> {
-    let mut out: List<BtreeCellVector> = List.new();
+public fn btree_cell_vectors() -> List<BtreeCellTestSample> {
+    let mut out: List<BtreeCellTestSample> = List.new();
     // Table-leaf (page_type=13), payload-len=1, rowid=42, payload="*" (=0x2A)
-    out.push(BtreeCellVector {
+    out.push(BtreeCellTestSample {
         label: "table_leaf_42".clone(),
         page_type: 0x0D as Byte,
         cell_bytes: b([0x01, 0x2A, 0x2A]),  // payload_len=1, rowid=42, byte
         rowid: 42 as Int64,
     });
     // Table-interior (page_type=5), child-page=7, key=99
-    out.push(BtreeCellVector {
+    out.push(BtreeCellTestSample {
         label: "table_interior_99".clone(),
         page_type: 0x05 as Byte,
         cell_bytes: b([0x00, 0x00, 0x00, 0x07, 0x63]),  // 4-byte child-page + varint(99)
         rowid: 99 as Int64,
     });
     // Index-leaf (page_type=10): payload-len=2, payload="ab"
-    out.push(BtreeCellVector {
+    out.push(BtreeCellTestSample {
         label: "index_leaf_ab".clone(),
         page_type: 0x0A as Byte,
         cell_bytes: b([0x02, 0x61, 0x62]),
         rowid: 0 as Int64,    // index-leaf doesn't carry rowid
     });
     // Index-interior (page_type=2): child-page=10, payload-len=1, payload="z"
-    out.push(BtreeCellVector {
+    out.push(BtreeCellTestSample {
         label: "index_interior_z".clone(),
         page_type: 0x02 as Byte,
         cell_bytes: b([0x00, 0x00, 0x00, 0x0A, 0x01, 0x7A]),
