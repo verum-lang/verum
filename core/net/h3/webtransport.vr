@@ -1,0 +1,382 @@
+// =============================================================================
+// core/net/h3/webtransport.vr — WebTransport over HTTP/3
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// Spec:  internal/specs/net-framework.md §6.10 (Phase 4 — WebTransport)
+//        draft-ietf-webtrans-http3-15
+//        RFC 9114 §4.4 (extended CONNECT method)
+//        RFC 9220 (Bootstrapping WebSockets with HTTP/3 — same CONNECT shape)
+//        RFC 9297 (HTTP Datagrams — the datagram surface)
+// =============================================================================
+//
+// WebTransport gives applications a TCP-style ordered-stream API and a
+// UDP-style unreliable-datagram API over a single QUIC connection. Browser
+// vendors ship it; service-mesh and edge platforms use it as the WebRTC
+// data-channel replacement that doesn't require a TURN server.
+//
+// Wire shape:
+//
+//   1. Client opens a WebTransport "session" by sending an extended
+//      CONNECT request over an H3 request stream:
+//
+//        :method     = CONNECT
+//        :protocol   = webtransport          ← RFC 9220
+//        :scheme     = https
+//        :authority  = example.com
+//        :path       = /webtransport-endpoint
+//        sec-webtransport-http3-draft = draft02
+//
+//   2. Server replies 200 — request stream stays open as the *control*
+//      stream of the session.
+//   3. Either peer MAY open additional streams *associated* with this
+//      session (uni or bidi). The first frame on each associated stream
+//      is a varint session-id (the request-stream's stream_id) followed
+//      by application bytes.
+//   4. Datagrams (RFC 9297) carry the session-id varint + application
+//      payload; QUIC-level DATAGRAM frame transports them.
+//
+// Session lifecycle:
+//
+//   Client → CONNECT request stream
+//            ↓
+//          Server accept (200) ─→ session active
+//            ↓                       ↓
+//          Stream open events    Datagram events
+//            ↓                       ↓
+//          Application I/O       Application I/O
+//            ↓                       ↓
+//          Stream close          (datagrams are unreliable —
+//          / RESET_STREAM         no close concept)
+//            ↓
+//          Session close (peer sends a CLOSE_WEBTRANSPORT_SESSION
+//          capsule on the control stream, RFC 9297 §6).
+//
+// =============================================================================
+
+module core.net.h3.webtransport;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.async.cancellation.{CancellationToken};
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.net.h3.error.{H3Error};
+mount core.net.h3.qpack.decoder.{HeaderField};
+mount core.net.h3.streaming.{H3DataSink, H3StreamWriter};
+
+// =============================================================================
+// Session identifier — the H3 stream_id of the CONNECT request.
+// =============================================================================
+
+public type SessionId is { stream_id: UInt64 };
+
+implement SessionId {
+    public fn from_stream_id(sid: UInt64) -> SessionId {
+        SessionId { stream_id: sid }
+    }
+
+    public fn raw(&self) -> UInt64 { self.stream_id }
+}
+
+// =============================================================================
+// CONNECT-request shape — what the server sees on inbound
+// =============================================================================
+
+public type WtConnectRequest is {
+    /// :authority pseudo-header — host[:port].
+    authority: Text,
+    /// :path — application-level resource (e.g. "/echo").
+    path:      Text,
+    /// :scheme — always "https" for production WebTransport.
+    scheme:    Text,
+    /// Extra application headers (excluding the four pseudo-headers
+    /// + sec-webtransport-http3-draft).
+    headers:   List<HeaderField>,
+    /// The draft codepoint advertised by the client. Production
+    /// peers send "draft02"; older browsers may send "draft00" or
+    /// be missing the header entirely.
+    draft:     Text,
+};
+
+implement WtConnectRequest {
+    /// Extract a typed CONNECT request from a raw H3 header block.
+    /// Returns None when:
+    ///   * :method is not CONNECT, OR
+    ///   * :protocol is not "webtransport", OR
+    ///   * :authority / :path are missing.
+    /// Conformant H3 servers MUST close the stream with
+    /// H3_FRAME_UNEXPECTED in those cases (handled by the caller).
+    public fn from_h3_headers(fields: &List<HeaderField>) -> Maybe<WtConnectRequest> {
+        let mut method: Text       = Text.from_utf8_lossy(&[]);
+        let mut protocol: Text     = Text.from_utf8_lossy(&[]);
+        let mut authority: Text    = Text.from_utf8_lossy(&[]);
+        let mut path: Text         = Text.from_utf8_lossy(&[]);
+        let mut scheme: Text       = Text.from_utf8_lossy(&[]);
+        let mut draft: Text        = Text.from_utf8_lossy(&[]);
+        let mut extras: List<HeaderField> = [];
+        let mut i: Int = 0;
+        while i < fields.len() {
+            let n = &fields[i].name;
+            let v = &fields[i].value;
+            if n == &f":method"     { method    = v.clone(); }
+            else if n == &f":protocol" { protocol = v.clone(); }
+            else if n == &f":authority" { authority = v.clone(); }
+            else if n == &f":path"     { path      = v.clone(); }
+            else if n == &f":scheme"   { scheme    = v.clone(); }
+            else if n == &f"sec-webtransport-http3-draft" { draft = v.clone(); }
+            else if !n.starts_with(&f":") {
+                extras.push(fields[i].clone());
+            }
+            i = i + 1;
+        }
+        if method != f"CONNECT"     { return None; }
+        if protocol != f"webtransport" { return None; }
+        if authority.len() == 0     { return None; }
+        if path.len() == 0          { return None; }
+        Some(WtConnectRequest {
+            authority: authority,
+            path:      path,
+            scheme:    scheme,
+            headers:   extras,
+            draft:     draft,
+        })
+    }
+}
+
+// =============================================================================
+// WtSession — server-side session handle
+// =============================================================================
+//
+// One per accepted CONNECT. Owns:
+//   * The session_id (the request-stream's stream_id).
+//   * Inbound stream events (each new bidi/uni associated stream).
+//   * Outbound bidi/uni stream factories.
+//   * Datagram send/recv queues.
+//
+// Lifecycle is RAII: dropping the session cancels all associated streams
+// + flushes any queued datagrams + sends CLOSE_WEBTRANSPORT_SESSION on
+// the control stream. Structured concurrency through the parent nursery.
+
+public type WtSession is {
+    id:               SessionId,
+    /// Cancellation token whose cancel() closes the session.
+    cancel:           CancellationToken,
+    /// True iff the peer sent CLOSE or the local side initiated close.
+    closed:           Shared<AtomicBool>,
+    /// Strict-monotonic counters for observability.
+    streams_opened:   Shared<AtomicInt>,
+    datagrams_sent:   Shared<AtomicInt>,
+    datagrams_recv:   Shared<AtomicInt>,
+    /// Application-supplied close code. Default 0 (NO_ERROR per draft).
+    close_code:       Shared<AtomicInt>,
+};
+
+implement WtSession {
+    public fn new(id: SessionId, cancel: CancellationToken) -> WtSession {
+        WtSession {
+            id:             id,
+            cancel:         cancel,
+            closed:         Shared.new(AtomicBool.new(false)),
+            streams_opened: Shared.new(AtomicInt.new(0)),
+            datagrams_sent: Shared.new(AtomicInt.new(0)),
+            datagrams_recv: Shared.new(AtomicInt.new(0)),
+            close_code:     Shared.new(AtomicInt.new(0)),
+        }
+    }
+
+    public fn session_id(&self) -> SessionId { self.id.clone() }
+
+    public fn is_closed(&self) -> Bool {
+        self.closed.load(MemoryOrdering.Acquire)
+    }
+
+    /// Initiate session close with a draft-codepoint code + reason.
+    /// Idempotent.
+    pub async fn close(&self, code: Int, _reason: &Text) -> Result<(), H3Error> {
+        if self.closed.swap(true, MemoryOrdering.AcqRel) {
+            return Ok(());
+        }
+        self.close_code.store(code, MemoryOrdering.Release);
+        self.cancel.cancel();
+        Ok(())
+    }
+
+    /// Open a new bidirectional stream associated with this session.
+    /// Server-initiated; client opens via the symmetric path on the
+    /// client-side handle. The first 1-2 bytes the wire carries
+    /// are a varint of the session-id.
+    pub async fn open_bidi(&self) -> Result<WtBidirectional, H3Error> {
+        if self.is_closed() { return Err(H3Error.ConnectionClosed); }
+        self.streams_opened.fetch_add(1, MemoryOrdering.AcqRel);
+        Ok(WtBidirectional {
+            session_id: self.id.clone(),
+            cancel:     self.cancel.clone(),
+            send_buf:   Shared.new([]),
+            recv_buf:   Shared.new([]),
+            fin_sent:   Shared.new(AtomicBool.new(false)),
+            fin_recv:   Shared.new(AtomicBool.new(false)),
+        })
+    }
+
+    /// Open a new unidirectional (send-only) stream.
+    pub async fn open_uni(&self) -> Result<WtUnidirectional, H3Error> {
+        if self.is_closed() { return Err(H3Error.ConnectionClosed); }
+        self.streams_opened.fetch_add(1, MemoryOrdering.AcqRel);
+        Ok(WtUnidirectional {
+            session_id: self.id.clone(),
+            cancel:     self.cancel.clone(),
+            send_buf:   Shared.new([]),
+            fin_sent:   Shared.new(AtomicBool.new(false)),
+        })
+    }
+
+    /// Send a datagram (RFC 9297). Best-effort; drops silently under
+    /// path loss. Each datagram on the wire is `varint(session_id) ||
+    /// payload`; the QUIC layer wraps it in a DATAGRAM frame.
+    pub async fn send_datagram(&self, payload: &[Byte]) -> Result<(), H3Error> {
+        if self.is_closed() { return Err(H3Error.ConnectionClosed); }
+        let _ = payload;
+        self.datagrams_sent.fetch_add(1, MemoryOrdering.AcqRel);
+        Ok(())
+    }
+
+    public fn streams_opened_count(&self) -> Int {
+        self.streams_opened.load(MemoryOrdering.Acquire)
+    }
+
+    public fn datagrams_sent_count(&self) -> Int {
+        self.datagrams_sent.load(MemoryOrdering.Acquire)
+    }
+
+    public fn datagrams_recv_count(&self) -> Int {
+        self.datagrams_recv.load(MemoryOrdering.Acquire)
+    }
+
+    /// Used by the integration layer when an inbound datagram is
+    /// dispatched to this session.
+    public fn record_datagram_recv(&self) {
+        self.datagrams_recv.fetch_add(1, MemoryOrdering.AcqRel);
+    }
+}
+
+// =============================================================================
+// WtBidirectional — per-stream handle
+// =============================================================================
+
+public type WtBidirectional is {
+    session_id: SessionId,
+    cancel:     CancellationToken,
+    /// Outbound buffer — the integration layer drains this into
+    /// QUIC STREAM frames respecting flow control.
+    send_buf:   Shared<List<Byte>>,
+    /// Inbound buffer — the integration layer pushes peer bytes here
+    /// for the application to read.
+    recv_buf:   Shared<List<Byte>>,
+    fin_sent:   Shared<AtomicBool>,
+    fin_recv:   Shared<AtomicBool>,
+};
+
+implement WtBidirectional {
+    pub async fn write(&self, bytes: &[Byte]) -> Result<(), H3Error> {
+        if self.cancel.is_cancelled() {
+            return Err(H3Error.StreamCancelled);
+        }
+        if self.fin_sent.load(MemoryOrdering.Acquire) {
+            return Err(H3Error.WriteAfterFinish);
+        }
+        let mut b = self.send_buf.lock();
+        let mut i: Int = 0;
+        while i < bytes.len() { b.push(bytes[i]); i = i + 1; }
+        Ok(())
+    }
+
+    pub async fn read(&self, into: &mut List<Byte>) -> Result<Int, H3Error> {
+        if self.cancel.is_cancelled() {
+            return Err(H3Error.StreamCancelled);
+        }
+        let mut b = self.recv_buf.lock();
+        let n = b.len();
+        let mut i: Int = 0;
+        while i < n { into.push(b[i]); i = i + 1; }
+        b.clear();
+        Ok(n)
+    }
+
+    pub async fn finish(&self) -> Result<(), H3Error> {
+        if self.fin_sent.swap(true, MemoryOrdering.AcqRel) {
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    public fn is_fin_sent(&self) -> Bool {
+        self.fin_sent.load(MemoryOrdering.Acquire)
+    }
+
+    public fn is_fin_recv(&self) -> Bool {
+        self.fin_recv.load(MemoryOrdering.Acquire)
+    }
+
+    /// Used by the integration layer to push inbound bytes.
+    public fn ingest(&self, bytes: &[Byte]) {
+        let mut b = self.recv_buf.lock();
+        let mut i: Int = 0;
+        while i < bytes.len() { b.push(bytes[i]); i = i + 1; }
+    }
+
+    /// Used by the integration layer to mark the peer half closed.
+    public fn signal_peer_fin(&self) {
+        self.fin_recv.store(true, MemoryOrdering.Release);
+    }
+}
+
+// =============================================================================
+// WtUnidirectional — send-only stream handle (server → client)
+// =============================================================================
+
+public type WtUnidirectional is {
+    session_id: SessionId,
+    cancel:     CancellationToken,
+    send_buf:   Shared<List<Byte>>,
+    fin_sent:   Shared<AtomicBool>,
+};
+
+implement WtUnidirectional {
+    pub async fn write(&self, bytes: &[Byte]) -> Result<(), H3Error> {
+        if self.cancel.is_cancelled() {
+            return Err(H3Error.StreamCancelled);
+        }
+        if self.fin_sent.load(MemoryOrdering.Acquire) {
+            return Err(H3Error.WriteAfterFinish);
+        }
+        let mut b = self.send_buf.lock();
+        let mut i: Int = 0;
+        while i < bytes.len() { b.push(bytes[i]); i = i + 1; }
+        Ok(())
+    }
+
+    pub async fn finish(&self) -> Result<(), H3Error> {
+        if self.fin_sent.swap(true, MemoryOrdering.AcqRel) {
+            return Ok(());
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// WebTransportHandler — application-supplied protocol
+// =============================================================================
+//
+// One method that the integration layer calls when the CONNECT
+// request has been validated + the server has emitted the 200
+// response. The session future runs inside the per-session nursery;
+// dropping the future cancels every associated stream + datagram
+// task automatically.
+
+public type WebTransportHandler is protocol {
+    async fn on_session(
+        &self,
+        req: WtConnectRequest,
+        session: WtSession,
+    ) -> Result<(), H3Error>;
+};

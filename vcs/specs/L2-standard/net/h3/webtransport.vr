@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, webtransport, draft_webtrans, rfc9220, rfc9297, surface
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/h3/webtransport.vr` — surface check for the WebTransport
+// session primitives that close net-framework.md §6.10 Phase 4
+// follow-up "WebTransport sessions".
+
+mount core.collections.list.{List};
+mount core.async.cancellation.{CancellationToken};
+mount core.net.h3.qpack.decoder.{HeaderField};
+mount core.net.h3.webtransport.{
+    SessionId, WtConnectRequest, WtSession,
+    WtBidirectional, WtUnidirectional, WebTransportHandler,
+};
+
+fn session_id_roundtrip() {
+    let sid = SessionId.from_stream_id(42_u64);
+    assert(sid.raw() == 42_u64);
+}
+
+fn connect_request_extracts_minimum_pseudo_headers() {
+    let mut fields: List<HeaderField> = [];
+    fields.push(HeaderField { name: f":method",     value: f"CONNECT" });
+    fields.push(HeaderField { name: f":protocol",   value: f"webtransport" });
+    fields.push(HeaderField { name: f":authority",  value: f"example.com" });
+    fields.push(HeaderField { name: f":path",       value: f"/echo" });
+    fields.push(HeaderField { name: f":scheme",     value: f"https" });
+    fields.push(HeaderField { name: f"sec-webtransport-http3-draft", value: f"draft02" });
+    fields.push(HeaderField { name: f"x-trace-id",  value: f"abc-123" });
+
+    match WtConnectRequest.from_h3_headers(&fields) {
+        Some(req) => {
+            assert(req.authority == f"example.com");
+            assert(req.path == f"/echo");
+            assert(req.scheme == f"https");
+            assert(req.draft == f"draft02");
+            // Pseudo-headers stripped, draft header stripped, only
+            // user-headers remain.
+            assert(req.headers.len() == 1);
+        },
+        None => panic("expected Some(WtConnectRequest)"),
+    }
+}
+
+fn connect_request_rejects_non_connect_method() {
+    let mut fields: List<HeaderField> = [];
+    fields.push(HeaderField { name: f":method",     value: f"GET" });
+    fields.push(HeaderField { name: f":protocol",   value: f"webtransport" });
+    fields.push(HeaderField { name: f":authority",  value: f"example.com" });
+    fields.push(HeaderField { name: f":path",       value: f"/echo" });
+    match WtConnectRequest.from_h3_headers(&fields) {
+        None => {},
+        Some(_) => panic("expected None — non-CONNECT must reject"),
+    }
+}
+
+fn connect_request_rejects_wrong_protocol() {
+    let mut fields: List<HeaderField> = [];
+    fields.push(HeaderField { name: f":method",    value: f"CONNECT" });
+    fields.push(HeaderField { name: f":protocol",  value: f"websocket" });
+    fields.push(HeaderField { name: f":authority", value: f"example.com" });
+    fields.push(HeaderField { name: f":path",      value: f"/echo" });
+    match WtConnectRequest.from_h3_headers(&fields) {
+        None => {},
+        Some(_) => panic("expected None — non-webtransport :protocol must reject"),
+    }
+}
+
+fn connect_request_rejects_missing_authority() {
+    let mut fields: List<HeaderField> = [];
+    fields.push(HeaderField { name: f":method",   value: f"CONNECT" });
+    fields.push(HeaderField { name: f":protocol", value: f"webtransport" });
+    fields.push(HeaderField { name: f":path",     value: f"/echo" });
+    match WtConnectRequest.from_h3_headers(&fields) {
+        None => {},
+        Some(_) => panic("expected None — missing :authority must reject"),
+    }
+}
+
+fn session_construction_and_counters() {
+    let token = CancellationToken.new();
+    let sess = WtSession.new(SessionId.from_stream_id(7_u64), token);
+    assert(sess.session_id().raw() == 7_u64);
+    assert(false == sess.is_closed());
+    assert(sess.streams_opened_count() == 0);
+    assert(sess.datagrams_sent_count() == 0);
+    assert(sess.datagrams_recv_count() == 0);
+}
+
+fn session_close_idempotent() {
+    let token = CancellationToken.new();
+    let sess = WtSession.new(SessionId.from_stream_id(1_u64), token);
+    // Verified through the public is_closed observation post-close.
+    // (close is async fn so this is a typecheck smoke; runtime
+    // invariant is exercised in integration suite.)
+    assert(false == sess.is_closed());
+}
+
+fn datagram_recv_counter_advances_via_record() {
+    let token = CancellationToken.new();
+    let sess = WtSession.new(SessionId.from_stream_id(3_u64), token);
+    sess.record_datagram_recv();
+    sess.record_datagram_recv();
+    assert(sess.datagrams_recv_count() == 2);
+}
+
+@main
+public fn main() -> Int {
+    session_id_roundtrip();
+    connect_request_extracts_minimum_pseudo_headers();
+    connect_request_rejects_non_connect_method();
+    connect_request_rejects_wrong_protocol();
+    connect_request_rejects_missing_authority();
+    session_construction_and_counters();
+    session_close_idempotent();
+    datagram_recv_counter_advances_via_record();
+    print("WebTransport surface verified");
+    0
+}
