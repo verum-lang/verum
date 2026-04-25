@@ -36,6 +36,10 @@ pub mod workspace;
 pub mod add;
 pub mod audit;
 pub mod export;
+// Shared OWL 2 graph + walker — consumed by `audit::audit_owl2_classify_*`
+// and `export` (B5 owl2-fs emitter). Single source of truth for the
+// Owl2*Attr → Owl2Graph projection.
+pub mod owl2;
 pub mod publish;
 pub mod remove;
 pub mod search;

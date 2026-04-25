@@ -51,6 +51,15 @@ pub enum ExportFormat {
     /// (`$= ? $.`), mirroring the admitted-proof semantics of the
     /// Coq / Lean / Dedukti targets.
     Metamath,
+    /// OWL 2 Functional Syntax — emits a Pellet/HermiT/Protégé-
+    /// compatible `.ofn` file from the project's `@owl2_*` attribute
+    /// markers (VUVA §21.8 Phase 3 B5). Walks the same `Owl2Graph`
+    /// shared with `audit --owl2-classify` and emits Declaration /
+    /// SubClassOf / EquivalentClasses / DisjointClasses / HasKey /
+    /// ObjectPropertyDomain / ObjectPropertyRange / per-characteristic
+    /// flag axioms / InverseObjectProperties. BTreeMap-sorted output
+    /// for byte-deterministic round-trip.
+    Owl2Fs,
 }
 
 impl ExportFormat {
@@ -62,10 +71,11 @@ impl ExportFormat {
             "lean" | "lean4" => Ok(Self::Lean),
             "agda" => Ok(Self::Agda),
             "metamath" | "mm" => Ok(Self::Metamath),
+            "owl2-fs" | "owl2_fs" | "ofn" => Ok(Self::Owl2Fs),
             other => Err(CliError::InvalidArgument(
                 format!(
                     "unknown export format: `{}` (expected `dedukti`, \
-                     `coq`, `lean`, `agda`, or `metamath`)",
+                     `coq`, `lean`, `agda`, `metamath`, or `owl2-fs`)",
                     other
                 )
                 .into(),
@@ -81,6 +91,7 @@ impl ExportFormat {
             Self::Lean => "lean",
             Self::Agda => "agda",
             Self::Metamath => "metamath",
+            Self::Owl2Fs => "owl2-fs",
         }
     }
 
@@ -92,6 +103,7 @@ impl ExportFormat {
             Self::Lean => "lean",
             Self::Agda => "agda",
             Self::Metamath => "mm",
+            Self::Owl2Fs => "ofn",
         }
     }
 }
@@ -132,6 +144,7 @@ pub fn run(options: ExportOptions) -> Result<()> {
     }
 
     let mut declarations = Vec::new();
+    let mut owl2_graph = crate::commands::owl2::Owl2Graph::default();
     let mut skipped_files = 0usize;
 
     for abs_path in &vr_files {
@@ -151,8 +164,14 @@ pub fn run(options: ExportOptions) -> Result<()> {
             if let Some(decl) = collect_declaration(item, &rel_path) {
                 declarations.push(decl);
             }
+            // The Owl2Fs target consumes the same parse pass — single
+            // walk, two collectors. Other targets can ignore the
+            // resulting graph.
+            crate::commands::owl2::collect_owl2_attrs(item, &rel_path, &mut owl2_graph);
         }
     }
+
+    let manifest_name = read_manifest_name(&manifest_dir);
 
     let body = match options.format {
         ExportFormat::Dedukti => emit_dedukti(&declarations),
@@ -160,6 +179,7 @@ pub fn run(options: ExportOptions) -> Result<()> {
         ExportFormat::Lean => emit_lean(&declarations),
         ExportFormat::Agda => emit_agda(&declarations),
         ExportFormat::Metamath => emit_metamath(&declarations),
+        ExportFormat::Owl2Fs => emit_owl2_fs(&owl2_graph, &manifest_name),
     };
 
     let output_path = match options.output {
@@ -866,6 +886,212 @@ fn print_summary(
     println!("      statements + framework citations — proofs are admitted.");
 }
 
+// -----------------------------------------------------------------------------
+// OWL 2 Functional Syntax emitter (VUVA §21.8 Phase 3 B5)
+// -----------------------------------------------------------------------------
+//
+// Walks the Owl2Graph populated during the project parse and emits
+// W3C-compliant OWL 2 Functional Syntax (`.ofn`). Output is byte-
+// deterministic — every collection that contributes to the body is
+// already a BTreeMap or BTreeSet from `commands::owl2`, so iteration
+// order is alphabetical and the same project produces the same bytes
+// across runs and platforms.
+//
+// W3C OWL 2 FS Recommendation (Second Edition, 11 December 2012):
+//   https://www.w3.org/TR/owl2-syntax/
+//
+// Output sections, in order:
+//   Prefix(:=<base>#)
+//   Ontology(<base>
+//     Declaration(Class(:Name))      — one per class
+//     Declaration(ObjectProperty(:Name))  — one per property
+//     SubClassOf(:Sub :Sup)          — per direct subclass edge
+//     EquivalentClasses(:A :B :C)    — per equivalence partition (≥2)
+//     DisjointClasses(:A :B)         — per disjointness pair
+//     HasKey(:Class () (:p1 :p2))    — per @owl2_has_key
+//     ObjectPropertyDomain(:p :C)
+//     ObjectPropertyRange(:p :C)
+//     <Char>ObjectProperty(:p)        — per characteristic flag
+//     InverseObjectProperties(:p :q) — per @owl2_property(inverse_of)
+//   )
+
+/// Read the project's `[package].name` from `Verum.toml` to derive a
+/// default ontology IRI. Falls back to `verum-export` when the manifest
+/// is unreadable.
+fn read_manifest_name(manifest_dir: &Path) -> String {
+    let path = manifest_dir.join("Verum.toml");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return "verum-export".to_string(),
+    };
+    // Lightweight key-extraction; we don't pull a TOML parser just for this.
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("name") {
+            let after_eq = rest.trim_start().strip_prefix('=').unwrap_or("").trim();
+            let unquoted = after_eq.trim_matches('"').trim_matches('\'');
+            if !unquoted.is_empty() {
+                return unquoted.to_string();
+            }
+        }
+    }
+    "verum-export".to_string()
+}
+
+/// Render an OWL 2 IRI fragment for a local name, using the project's
+/// default `:` prefix. Names containing characters outside the OWL 2
+/// FS local-name production are wrapped in `<…>` (full IRI form).
+fn owl2_local(name: &str) -> String {
+    let safe = name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if safe {
+        format!(":{}", name)
+    } else {
+        format!("<#{}>", name)
+    }
+}
+
+/// Map a Verum `Owl2Characteristic` to its OWL 2 FS axiom name per
+/// Shkotin 2019 Table 6 / W3C OWL 2 FS §9.2.
+fn characteristic_axiom_name(c: verum_ast::attr::Owl2Characteristic) -> &'static str {
+    use verum_ast::attr::Owl2Characteristic::*;
+    match c {
+        Transitive        => "TransitiveObjectProperty",
+        Symmetric         => "SymmetricObjectProperty",
+        Asymmetric        => "AsymmetricObjectProperty",
+        Reflexive         => "ReflexiveObjectProperty",
+        Irreflexive       => "IrreflexiveObjectProperty",
+        Functional        => "FunctionalObjectProperty",
+        InverseFunctional => "InverseFunctionalObjectProperty",
+    }
+}
+
+fn emit_owl2_fs(graph: &crate::commands::owl2::Owl2Graph, manifest_name: &str) -> String {
+    use crate::commands::owl2::Owl2EntityKind;
+
+    let mut out = String::new();
+    out.push_str("# Exported by `verum export --to owl2-fs` (VUVA §21.8 / B5).\n");
+    out.push_str("# OWL 2 Functional-Style Syntax — round-trips through Pellet, HermiT,\n");
+    out.push_str("# Protégé, FaCT++, ELK, Konclude. BTreeMap-sorted output for byte-\n");
+    out.push_str("# deterministic CI diffs.\n\n");
+
+    let base_iri = format!("http://verum-lang.org/ontology/{}", manifest_name);
+    out.push_str(&format!("Prefix(:=<{}#>)\n", base_iri));
+    out.push_str("Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\n");
+    out.push_str("Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\n");
+    out.push_str("Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n");
+    out.push_str("Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n\n");
+    out.push_str(&format!("Ontology(<{}>\n", base_iri));
+
+    // Section 1 — Declarations (Class + ObjectProperty), alphabetical.
+    for (name, e) in &graph.entities {
+        match e.kind {
+            Owl2EntityKind::Class => {
+                out.push_str(&format!(
+                    "  Declaration(Class({}))\n",
+                    owl2_local(name.as_str())
+                ));
+            }
+            Owl2EntityKind::Property => {
+                out.push_str(&format!(
+                    "  Declaration(ObjectProperty({}))\n",
+                    owl2_local(name.as_str())
+                ));
+            }
+        }
+    }
+    if !graph.entities.is_empty() { out.push('\n'); }
+
+    // Section 2 — Class hierarchy: SubClassOf edges, alphabetical
+    // by (child, parent).
+    for (child, parent) in &graph.subclass_edges {
+        out.push_str(&format!(
+            "  SubClassOf({} {})\n",
+            owl2_local(child.as_str()),
+            owl2_local(parent.as_str()),
+        ));
+    }
+    if !graph.subclass_edges.is_empty() { out.push('\n'); }
+
+    // Section 3 — EquivalentClasses, one axiom per partition (≥ 2
+    // classes). Equivalence pairs in graph are symmetrised; we use the
+    // partition projection for clean OWL 2 FS output.
+    for partition in graph.equivalence_partition() {
+        if partition.len() < 2 { continue; }
+        let mut group: Vec<String> = partition.iter().map(|n| owl2_local(n.as_str())).collect();
+        group.sort();
+        out.push_str(&format!(
+            "  EquivalentClasses({})\n",
+            group.join(" "),
+        ));
+    }
+
+    // Section 4 — DisjointClasses, one axiom per disjoint pair. We
+    // de-symmetrise: only emit (a, b) with a < b lexicographically.
+    let mut disjoint_seen: std::collections::BTreeSet<(Text, Text)> = std::collections::BTreeSet::new();
+    for (a, b) in &graph.disjoint_pairs {
+        if a >= b { continue; }
+        if !disjoint_seen.insert((a.clone(), b.clone())) { continue; }
+        out.push_str(&format!(
+            "  DisjointClasses({} {})\n",
+            owl2_local(a.as_str()),
+            owl2_local(b.as_str()),
+        ));
+    }
+
+    // Section 5 — HasKey for every class with a key constraint. OWL 2 FS
+    // splits keys into ObjectProperty and DataProperty parenthesised
+    // groups; V1 emits all key properties as ObjectProperty (the most
+    // common case); V2 will route DataProperty-typed keys correctly.
+    for (name, e) in &graph.entities {
+        if !matches!(e.kind, Owl2EntityKind::Class) { continue; }
+        for key in &e.keys {
+            let props: Vec<String> = key.iter().map(|p| owl2_local(p.as_str())).collect();
+            out.push_str(&format!(
+                "  HasKey({} ({}) ())\n",
+                owl2_local(name.as_str()),
+                props.join(" "),
+            ));
+        }
+    }
+
+    // Section 6 — Property domain / range / characteristics / inverse.
+    for (name, e) in &graph.entities {
+        if !matches!(e.kind, Owl2EntityKind::Property) { continue; }
+        let prop_iri = owl2_local(name.as_str());
+        if let Some(d) = &e.property_domain {
+            out.push_str(&format!(
+                "  ObjectPropertyDomain({} {})\n",
+                prop_iri,
+                owl2_local(d.as_str()),
+            ));
+        }
+        if let Some(r) = &e.property_range {
+            out.push_str(&format!(
+                "  ObjectPropertyRange({} {})\n",
+                prop_iri,
+                owl2_local(r.as_str()),
+            ));
+        }
+        for c in &e.property_characteristics {
+            out.push_str(&format!(
+                "  {}({})\n",
+                characteristic_axiom_name(*c),
+                prop_iri,
+            ));
+        }
+        if let Some(inv) = &e.property_inverse_of {
+            out.push_str(&format!(
+                "  InverseObjectProperties({} {})\n",
+                prop_iri,
+                owl2_local(inv.as_str()),
+            ));
+        }
+    }
+
+    out.push_str(")\n");
+    out
+}
+
 #[cfg(test)]
 mod format_tests {
     use super::*;
@@ -886,7 +1112,7 @@ mod format_tests {
     }
 
     #[test]
-    fn all_five_formats_parse_from_canonical_names() {
+    fn all_six_formats_parse_from_canonical_names() {
         assert_eq!(ExportFormat::parse("dedukti").unwrap(), ExportFormat::Dedukti);
         assert_eq!(ExportFormat::parse("coq").unwrap(), ExportFormat::Coq);
         assert_eq!(ExportFormat::parse("lean").unwrap(), ExportFormat::Lean);
@@ -895,10 +1121,13 @@ mod format_tests {
             ExportFormat::parse("metamath").unwrap(),
             ExportFormat::Metamath
         );
+        assert_eq!(ExportFormat::parse("owl2-fs").unwrap(), ExportFormat::Owl2Fs);
+        assert_eq!(ExportFormat::parse("owl2_fs").unwrap(), ExportFormat::Owl2Fs);
+        assert_eq!(ExportFormat::parse("ofn").unwrap(),     ExportFormat::Owl2Fs);
     }
 
     #[test]
-    fn unknown_format_error_message_lists_all_five() {
+    fn unknown_format_error_message_lists_all_six() {
         let err = ExportFormat::parse("isabelle").unwrap_err();
         let msg = format!("{}", err);
         assert!(msg.contains("dedukti"));
@@ -906,6 +1135,81 @@ mod format_tests {
         assert!(msg.contains("lean"));
         assert!(msg.contains("agda"));
         assert!(msg.contains("metamath"));
+        assert!(msg.contains("owl2-fs"));
+    }
+
+    #[test]
+    fn owl2_fs_extension_and_canonical_name() {
+        assert_eq!(ExportFormat::Owl2Fs.extension(), "ofn");
+        assert_eq!(ExportFormat::Owl2Fs.as_str(),    "owl2-fs");
+    }
+
+    #[test]
+    fn owl2_fs_emitter_produces_ontology_header_and_declarations() {
+        use crate::commands::owl2::{Owl2Entity, Owl2Graph};
+        let mut graph = Owl2Graph::default();
+        graph.add_entity(Owl2Entity::new_class(
+            Text::from("Animal"), None, PathBuf::from("src/lib.vr"),
+        ));
+        graph.add_entity(Owl2Entity::new_class(
+            Text::from("Mammal"), None, PathBuf::from("src/lib.vr"),
+        ));
+        graph.subclass_edges.insert((Text::from("Mammal"), Text::from("Animal")));
+
+        let out = emit_owl2_fs(&graph, "test-pkg");
+        // Mandatory header per W3C OWL 2 FS Recommendation.
+        assert!(out.contains("Prefix(:=<http://verum-lang.org/ontology/test-pkg#>)"));
+        assert!(out.contains("Ontology(<http://verum-lang.org/ontology/test-pkg>"));
+        assert!(out.contains("Declaration(Class(:Animal))"));
+        assert!(out.contains("Declaration(Class(:Mammal))"));
+        assert!(out.contains("SubClassOf(:Mammal :Animal)"));
+        // Provenance comment
+        assert!(out.contains("`verum export --to owl2-fs`"));
+    }
+
+    #[test]
+    fn owl2_fs_emitter_handles_property_with_characteristics() {
+        use crate::commands::owl2::{Owl2Entity, Owl2Graph};
+        use std::collections::BTreeSet;
+        use verum_ast::attr::Owl2Characteristic;
+        let mut graph = Owl2Graph::default();
+        let mut chars: BTreeSet<Owl2Characteristic> = BTreeSet::new();
+        chars.insert(Owl2Characteristic::Symmetric);
+        chars.insert(Owl2Characteristic::Transitive);
+        graph.add_entity(Owl2Entity::new_property(
+            Text::from("knows"),
+            PathBuf::from("src/lib.vr"),
+            Some(Text::from("Person")),
+            Some(Text::from("Person")),
+            Some(Text::from("knownBy")),
+            chars,
+        ));
+
+        let out = emit_owl2_fs(&graph, "test-pkg");
+        assert!(out.contains("Declaration(ObjectProperty(:knows))"));
+        assert!(out.contains("ObjectPropertyDomain(:knows :Person)"));
+        assert!(out.contains("ObjectPropertyRange(:knows :Person)"));
+        assert!(out.contains("SymmetricObjectProperty(:knows)"));
+        assert!(out.contains("TransitiveObjectProperty(:knows)"));
+        assert!(out.contains("InverseObjectProperties(:knows :knownBy)"));
+    }
+
+    #[test]
+    fn owl2_fs_emitter_deterministic_disjoint_pair_dedup() {
+        use crate::commands::owl2::{Owl2Entity, Owl2Graph};
+        let mut graph = Owl2Graph::default();
+        graph.add_entity(Owl2Entity::new_class(Text::from("Pizza"),    None, PathBuf::new()));
+        graph.add_entity(Owl2Entity::new_class(Text::from("IceCream"), None, PathBuf::new()));
+        // Symmetrised pair — both orientations stored, but emitter
+        // emits exactly one DisjointClasses axiom.
+        graph.disjoint_pairs.insert((Text::from("Pizza"),    Text::from("IceCream")));
+        graph.disjoint_pairs.insert((Text::from("IceCream"), Text::from("Pizza")));
+
+        let out = emit_owl2_fs(&graph, "test-pkg");
+        let count = out.matches("DisjointClasses(").count();
+        assert_eq!(count, 1, "symmetric pair must emit exactly one axiom");
+        // Lex-min order in the emitted axiom.
+        assert!(out.contains("DisjointClasses(:IceCream :Pizza)"));
     }
 
     #[test]
