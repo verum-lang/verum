@@ -41,6 +41,11 @@ pub enum ExportFormat {
     Dedukti,
     Coq,
     Lean,
+    /// Agda — statement-only `postulate` scaffold in `.agda` format.
+    /// Each Verum declaration emits as a single-entry postulate block
+    /// so per-declaration framework citations stay attached. Mirrors
+    /// the admitted-proof semantics of Coq / Lean / Dedukti / Metamath.
+    Agda,
     /// Metamath — statement-only axiom scaffold in `.mm` format.
     /// Proof bodies are left as proof-step placeholders
     /// (`$= ? $.`), mirroring the admitted-proof semantics of the
@@ -55,11 +60,12 @@ impl ExportFormat {
             "dedukti" | "dk" => Ok(Self::Dedukti),
             "coq" | "v" => Ok(Self::Coq),
             "lean" | "lean4" => Ok(Self::Lean),
+            "agda" => Ok(Self::Agda),
             "metamath" | "mm" => Ok(Self::Metamath),
             other => Err(CliError::InvalidArgument(
                 format!(
                     "unknown export format: `{}` (expected `dedukti`, \
-                     `coq`, `lean`, or `metamath`)",
+                     `coq`, `lean`, `agda`, or `metamath`)",
                     other
                 )
                 .into(),
@@ -73,6 +79,7 @@ impl ExportFormat {
             Self::Dedukti => "dedukti",
             Self::Coq => "coq",
             Self::Lean => "lean",
+            Self::Agda => "agda",
             Self::Metamath => "metamath",
         }
     }
@@ -83,6 +90,7 @@ impl ExportFormat {
             Self::Dedukti => "dk",
             Self::Coq => "v",
             Self::Lean => "lean",
+            Self::Agda => "agda",
             Self::Metamath => "mm",
         }
     }
@@ -150,6 +158,7 @@ pub fn run(options: ExportOptions) -> Result<()> {
         ExportFormat::Dedukti => emit_dedukti(&declarations),
         ExportFormat::Coq => emit_coq(&declarations),
         ExportFormat::Lean => emit_lean(&declarations),
+        ExportFormat::Agda => emit_agda(&declarations),
         ExportFormat::Metamath => emit_metamath(&declarations),
     };
 
@@ -286,6 +295,7 @@ struct LineageImport {
     coq: Option<&'static str>,
     dedukti: Option<&'static str>,
     metamath: Option<&'static str>,
+    agda: Option<&'static str>,
 }
 
 /// Curated map from Verum framework lineage slug → target-ecosystem
@@ -301,6 +311,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
             coq: None,
             dedukti: None,
             metamath: None,
+            agda: None,
         },
     ),
     (
@@ -310,6 +321,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
             coq: Some("Require Import Category.Category.CategoryTheory."),
             dedukti: None,
             metamath: None,
+            agda: Some("open import Categories.Category"),
         },
     ),
     (
@@ -319,6 +331,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
             coq: None,
             dedukti: None,
             metamath: None,
+            agda: None,
         },
     ),
     (
@@ -328,6 +341,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
             coq: Some("Require Import Category.Theory.Category."),
             dedukti: None,
             metamath: None,
+            agda: Some("open import Categories.Category"),
         },
     ),
     (
@@ -337,6 +351,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
             coq: None,
             dedukti: None,
             metamath: None,
+            agda: None,
         },
     ),
     (
@@ -346,6 +361,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
             coq: None,
             dedukti: None,
             metamath: None,
+            agda: None,
         },
     ),
     (
@@ -355,6 +371,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
             coq: Some("Require Import HoTT.Univalence."),
             dedukti: None,
             metamath: None,
+            agda: Some("open import Cubical.Foundations.Univalence"),
         },
     ),
 ];
@@ -668,6 +685,106 @@ fn emit_lean(decls: &[Declaration]) -> String {
 }
 
 // -----------------------------------------------------------------------------
+// Agda emitter
+// -----------------------------------------------------------------------------
+
+/// Mangle a Verum identifier into an Agda-safe one. Agda accepts most
+/// Unicode in identifiers, but mixed dashes and dots in pathnames are
+/// not legal — Verum stdlib names already fit, so the MVP is a pass-
+/// through that callers can tighten later.
+fn agda_mangle(name: &Text) -> String {
+    name.as_str().to_string()
+}
+
+/// Emit an Agda (.agda) certificate.
+///
+/// Each declaration becomes a single-entry `postulate` block:
+///
+///   -- theorem — lurie_htt — Lurie 2009 :: src/foo.vr
+///   postulate
+///     yoneda_full : Set
+///
+/// The postulate-per-decl shape (rather than one big block) keeps each
+/// declaration's framework citation directly above its statement, which
+/// matches the per-decl comment placement of the Coq / Lean / Dedukti
+/// emitters and makes per-declaration grep / diff tractable. Agda
+/// accepts arbitrarily many `postulate` blocks per module.
+///
+/// As with the other backends, statements are opaque (`: Set`) at the
+/// MVP level. Type-preserving export through verum_kernel lands when
+/// per-backend SMT proof-replay is wired in.
+fn emit_agda(decls: &[Declaration]) -> String {
+    let mut out = String::new();
+    out.push_str("-- Exported by `verum export --to agda`.\n");
+    out.push_str("-- Statements only — proofs are postulated. Full proof-term replay\n");
+    out.push_str("-- through verum_kernel lands with per-backend SMT reconstruction.\n\n");
+    out.push_str("module Verum.Export where\n\n");
+
+    // VUVA §8.5 framework-lineage → Agda-library mapping. Unknown
+    // lineages fall through with a comment so reviewers see the gap.
+    let lineages = distinct_lineages(decls);
+    if !lineages.is_empty() {
+        let mut import_lines: Vec<&'static str> = Vec::new();
+        let mut unmapped: Vec<&str> = Vec::new();
+        for l in &lineages {
+            match lineage_import(l.as_str()).and_then(|li| li.agda) {
+                Some(stanza) if !import_lines.contains(&stanza) => {
+                    import_lines.push(stanza)
+                }
+                Some(_) => {}
+                None => unmapped.push(l.as_str()),
+            }
+        }
+        for line in &import_lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+        if !import_lines.is_empty() {
+            out.push('\n');
+        }
+        for u in &unmapped {
+            out.push_str(&format!(
+                "-- note: framework lineage `{u}` has no Agda-library \
+                 mapping yet; emitted as opaque postulate.\n"
+            ));
+        }
+        if !unmapped.is_empty() {
+            out.push('\n');
+        }
+    }
+
+    let by_framework = group_by_framework(decls);
+    for (framework_key, group) in &by_framework {
+        if let Some(fw) = framework_key {
+            out.push_str(&format!(
+                "-- ==== framework: {} ====\n",
+                fw.as_str()
+            ));
+        } else {
+            out.push_str("-- ==== no framework attribution ====\n");
+        }
+        for d in group {
+            if let Maybe::Some(fw) = &d.framework {
+                out.push_str(&format!(
+                    "-- {} — {} — {} :: {}\n",
+                    d.kind,
+                    fw.name.as_str(),
+                    fw.citation.as_str(),
+                    d.source.display(),
+                ));
+            }
+            // axiom and theorem both render as a postulate block:
+            // proofs are admitted at the MVP level so the rendering
+            // is uniform. The `kind` is preserved in the comment line
+            // above the postulate so reviewers see the original intent.
+            out.push_str("postulate\n");
+            out.push_str(&format!("  {} : Set\n\n", agda_mangle(&d.name)));
+        }
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
 // Summary + helpers
 // -----------------------------------------------------------------------------
 
@@ -769,10 +886,11 @@ mod format_tests {
     }
 
     #[test]
-    fn all_four_formats_parse_from_canonical_names() {
+    fn all_five_formats_parse_from_canonical_names() {
         assert_eq!(ExportFormat::parse("dedukti").unwrap(), ExportFormat::Dedukti);
         assert_eq!(ExportFormat::parse("coq").unwrap(), ExportFormat::Coq);
         assert_eq!(ExportFormat::parse("lean").unwrap(), ExportFormat::Lean);
+        assert_eq!(ExportFormat::parse("agda").unwrap(), ExportFormat::Agda);
         assert_eq!(
             ExportFormat::parse("metamath").unwrap(),
             ExportFormat::Metamath
@@ -780,13 +898,38 @@ mod format_tests {
     }
 
     #[test]
-    fn unknown_format_error_message_lists_all_four() {
+    fn unknown_format_error_message_lists_all_five() {
         let err = ExportFormat::parse("isabelle").unwrap_err();
         let msg = format!("{}", err);
         assert!(msg.contains("dedukti"));
         assert!(msg.contains("coq"));
         assert!(msg.contains("lean"));
+        assert!(msg.contains("agda"));
         assert!(msg.contains("metamath"));
+    }
+
+    #[test]
+    fn agda_extension_and_canonical_name() {
+        assert_eq!(ExportFormat::Agda.extension(), "agda");
+        assert_eq!(ExportFormat::Agda.as_str(), "agda");
+    }
+
+    #[test]
+    fn agda_emitter_produces_module_header_and_postulate() {
+        let decls = vec![Declaration {
+            kind: "theorem",
+            name: Text::from("yoneda_full"),
+            source: PathBuf::from("src/lib.vr"),
+            framework: Maybe::None,
+        }];
+        let out = emit_agda(&decls);
+        // Agda module declaration is mandatory for `agda --type-check`.
+        assert!(out.contains("module Verum.Export where"));
+        // Each declaration must appear as a postulate of type Set.
+        assert!(out.contains("postulate"));
+        assert!(out.contains("yoneda_full : Set"));
+        // The `verum export --to agda` provenance comment must ride along.
+        assert!(out.contains("`verum export --to agda`"));
     }
 
     #[test]
