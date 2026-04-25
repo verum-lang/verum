@@ -3186,14 +3186,30 @@ impl<'s> CompilationPipeline<'s> {
         let new_errors = final_error_count - initial_error_count;
         let new_warnings = final_warning_count - initial_warning_count;
 
+        // user_errors counts only errors from project files, not from
+        // stdlib. Stdlib errors are tracked SEPARATELY in
+        // `self.stdlib_errors` (a Vec local to the pipeline) and
+        // intentionally never enter the session's diagnostic pool —
+        // see `phase0_stdlib::run_phase0_stdlib_for_module` and the
+        // `phases/phase0_stdlib.rs` paths that push to
+        // `self.stdlib_errors` without calling `emit_diagnostic`.
+        //
+        // So `final_error_count - initial_error_count` already counts
+        // ONLY user-file errors (the session sees just those). The
+        // previous hardcoded `user_errors: 0` was a bug that silently
+        // swallowed every user diagnostic: `check.rs:66` reads
+        // `result.user_errors` to gate diagnostic display, so even
+        // when `result.errors > 0`, the detailed error text never
+        // reached the terminal because user_errors was 0.
+        let user_errors = new_errors;
+
         // Create result
-        // user_errors counts only errors from project files, not stdlib
         let result = CheckResult {
             files_checked: project_files.len(),
             types_inferred: total_types_inferred,
             warnings: new_warnings,
             errors: new_errors,
-            user_errors: 0, // Stdlib errors should not fail user project check
+            user_errors,
             elapsed,
         };
 
@@ -3784,6 +3800,28 @@ impl<'s> CompilationPipeline<'s> {
                     // since they share the same project context.
                     let export_table = Self::extract_all_exports(&module, module_id, &module_path);
                     module_info.exports = export_table;
+
+                    // VUVA #145 / MOD-MED-1 — validate `module foo;`
+                    // headers against the filesystem. Emits warnings
+                    // for dangling forward-decls
+                    // (E_MODULE_HEADER_FORWARD_DECL_NO_SOURCE) and
+                    // inline-vs-filesystem overlaps
+                    // (E_MODULE_INLINE_FILESYSTEM_OVERLAP) so users
+                    // see header inconsistencies without breaking
+                    // the build.
+                    let header_warnings =
+                        verum_modules::loader::validate_module_headers_against_filesystem(
+                            file_path,
+                            &module,
+                        );
+                    for warning in &header_warnings {
+                        let diag = verum_diagnostics::DiagnosticBuilder::warning()
+                            .code(warning.code())
+                            .message(warning.message())
+                            .build();
+                        self.session.emit_diagnostic(diag);
+                    }
+                    module_info.header_warnings = header_warnings;
 
                     module_registry.write().register(module_info);
                     self.register_inline_modules(&module, &module_path, file_id);
@@ -11106,28 +11144,48 @@ impl<'s> CompilationPipeline<'s> {
                     // Walk progressive prefixes so a mount whose full path
                     // is `core.x.y.z.{...}` matches the leaf module or any
                     // ancestor that happens to be indexed directly.
+                    //
+                    // Each prefix is tried as-is and again under a `core.`
+                    // prefix so short stdlib paths like `mount base.memory`
+                    // resolve against `core.base.memory` in `self.modules`.
+                    // Without the second form, the closure walks only
+                    // `base.memory` and `base`, neither of which is keyed
+                    // in self.modules — base.memory's stdlib body never
+                    // reaches codegen and every body that mounts a
+                    // function from it compiles to `[lenient] SKIP …
+                    // undefined function: <name>` (#163).
                     let segs: Vec<&str> = full_path.split('.').collect();
-                    for cut in (1..=segs.len()).rev() {
-                        let candidate = segs[..cut].join(".");
-                        if seen_paths.contains(&candidate) {
-                            continue;
+                    let try_candidate = |this: &Self,
+                                         candidate: &str,
+                                         seen_paths: &mut std::collections::HashSet<String>,
+                                         imported: &mut Vec<Module>| {
+                        if seen_paths.contains(candidate) {
+                            return;
                         }
                         if !is_linux
                             && (candidate.contains("sys.linux")
                                 || candidate.contains("sys/linux"))
                         {
-                            continue;
+                            return;
                         }
                         if !is_macos
                             && (candidate.contains("sys.darwin")
                                 || candidate.contains("sys/darwin"))
                         {
-                            continue;
+                            return;
                         }
-                        let key = Text::from(candidate.as_str());
-                        if let Some(module_rc) = self.modules.get(&key) {
-                            seen_paths.insert(candidate.clone());
+                        let key = Text::from(candidate);
+                        if let Some(module_rc) = this.modules.get(&key) {
+                            seen_paths.insert(candidate.to_string());
                             imported.push((**module_rc).clone());
+                        }
+                    };
+                    for cut in (1..=segs.len()).rev() {
+                        let candidate = segs[..cut].join(".");
+                        try_candidate(self, &candidate, &mut seen_paths, &mut imported);
+                        if !candidate.starts_with("core.") {
+                            let prefixed = format!("core.{}", candidate);
+                            try_candidate(self, &prefixed, &mut seen_paths, &mut imported);
                         }
                     }
                 }
