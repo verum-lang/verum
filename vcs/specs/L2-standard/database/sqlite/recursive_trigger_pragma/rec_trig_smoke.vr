@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.recursive_trigger_pragma.gate.{
-    Mode, MoOff, MoOn,
+    RecursiveTriggerMode, MoOff, MoOn,
     default_mode, from_pragma_value, to_pragma_value,
     mode_name, cascades, allows_fire, as_flag, from_flag,
 };

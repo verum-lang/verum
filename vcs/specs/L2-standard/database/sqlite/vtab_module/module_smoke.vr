@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.vtab_module.method_set.{
-    MethodSet,
+    VtabModuleMethodSet,
     minimal_read_only_set, is_viable, missing_required,
     supports_write, supports_transactions, supports_savepoints,
     is_eponymous,

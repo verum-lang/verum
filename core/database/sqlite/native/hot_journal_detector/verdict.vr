@@ -1,4 +1,4 @@
-// Verdict — the decision the reader must take.
+// HotJournalVerdict — the decision the reader must take.
 
 module core.database.sqlite.native.hot_journal_detector.verdict;
 
@@ -7,7 +7,7 @@ mount core.database.sqlite.native.hot_journal_detector.signal.{
 };
 mount base.{Bool, Text};
 
-public type Verdict is
+public type HotJournalVerdict is
     | VdNoJournal        // journal missing — proceed normally
     | VdStaleEmpty       // empty journal — unlink + proceed
     | VdOwnedByWriter    // someone holds EXCLUSIVE → they own the replay
@@ -15,7 +15,7 @@ public type Verdict is
     | VdHot              // must replay before reading
     ;
 
-public fn verdict_name(v: &Verdict) -> Text {
+public fn verdict_name(v: &HotJournalVerdict) -> Text {
     match v {
         VdNoJournal     => "no_journal".clone(),
         VdStaleEmpty    => "stale_empty".clone(),
@@ -25,11 +25,11 @@ public fn verdict_name(v: &Verdict) -> Text {
     }
 }
 
-public fn requires_replay(v: &Verdict) -> Bool {
+public fn requires_replay(v: &HotJournalVerdict) -> Bool {
     match v { VdHot => true, _ => false }
 }
 
-public fn safe_to_read_directly(v: &Verdict) -> Bool {
+public fn safe_to_read_directly(v: &HotJournalVerdict) -> Bool {
     match v {
         VdNoJournal     => true,
         VdStaleEmpty    => true,
@@ -38,7 +38,7 @@ public fn safe_to_read_directly(v: &Verdict) -> Bool {
     }
 }
 
-public fn classify(s: &Signal) -> Verdict {
+public fn classify(s: &Signal) -> HotJournalVerdict {
     if is_absent(s)   { return VdNoJournal; }
     if is_empty(s)    { return VdStaleEmpty; }
     if has_owner(s)   { return VdOwnedByWriter; }

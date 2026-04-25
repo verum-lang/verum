@@ -11,7 +11,7 @@ mount core.database.sqlite.native.vfs_xrandomness_api.method.{
     source_name, well_known_source_count,
     Quality, QHigh, QMedium, QLow, QMockOnly,
     quality_for, quality_name, is_production_acceptable,
-    Outcome, OkBytes, ErrShortRead, ErrUnavailable,
+    RandomnessOutcome, OkBytes, ErrShortRead, ErrUnavailable,
     outcome_name, is_ok, bytes_actually_filled,
     is_valid_request_size,
 };

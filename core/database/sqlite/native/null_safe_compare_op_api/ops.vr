@@ -4,12 +4,12 @@ module core.database.sqlite.native.null_safe_compare_op_api.ops;
 
 mount base.{Bool, Int64, Text};
 
-public type Op is
+public type NullSafeCompareOp is
     | OpDistinctFrom        // X IS DISTINCT FROM Y
     | OpNotDistinctFrom     // X IS NOT DISTINCT FROM Y
     ;
 
-public fn op_name(o: &Op) -> Text {
+public fn op_name(o: &NullSafeCompareOp) -> Text {
     match o {
         OpDistinctFrom    => "is_distinct_from".clone(),
         OpNotDistinctFrom => "is_not_distinct_from".clone(),
@@ -40,7 +40,7 @@ public fn null_safe_equal(x: &Value, y: &Value) -> Bool {
     }
 }
 
-public fn evaluate(op: &Op, x: &Value, y: &Value) -> Int {
+public fn evaluate(op: &NullSafeCompareOp, x: &Value, y: &Value) -> Int {
     let eq = null_safe_equal(x, y);
     match op {
         OpDistinctFrom    => if eq { 0 } else { 1 },
@@ -49,11 +49,11 @@ public fn evaluate(op: &Op, x: &Value, y: &Value) -> Int {
 }
 
 // Equivalence with the IS / IS NOT operators (added pre-3.39).
-public fn equivalent_to_is(op: &Op) -> Bool {
+public fn equivalent_to_is(op: &NullSafeCompareOp) -> Bool {
     match op { OpNotDistinctFrom => true, _ => false }
 }
 
-public fn equivalent_to_is_not(op: &Op) -> Bool {
+public fn equivalent_to_is_not(op: &NullSafeCompareOp) -> Bool {
     match op { OpDistinctFrom => true, _ => false }
 }
 
@@ -76,7 +76,7 @@ public fn class_name(c: &ResultClass) -> Text {
 
 // Sargability — these operators ARE index-friendly when one operand is a
 // literal column reference (unlike `=` which propagates NULL).
-public fn is_sargable(_op: &Op) -> Bool { true }
+public fn is_sargable(_op: &NullSafeCompareOp) -> Bool { true }
 
 // Standardised arity.
 public fn well_known_arity() -> Int { 2 }

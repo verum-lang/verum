@@ -59,14 +59,14 @@ public fn is_production_acceptable(q: &Quality) -> Bool {
     match q { QHigh => true, QMedium => true, _ => false }
 }
 
-// Outcome of one xRandomness call.
-public type Outcome is
+// RandomnessOutcome of one xRandomness call.
+public type RandomnessOutcome is
     | OkBytes(Int)         // exactly N bytes filled
     | ErrShortRead(Int)    // got fewer than requested
     | ErrUnavailable        // entropy source unavailable
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &RandomnessOutcome) -> Text {
     match o {
         OkBytes(_)       => "ok".clone(),
         ErrShortRead(_)  => "short_read".clone(),
@@ -74,11 +74,11 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn is_ok(o: &Outcome) -> Bool {
+public fn is_ok(o: &RandomnessOutcome) -> Bool {
     match o { OkBytes(_) => true, _ => false }
 }
 
-public fn bytes_actually_filled(o: &Outcome) -> Int {
+public fn bytes_actually_filled(o: &RandomnessOutcome) -> Int {
     match o {
         OkBytes(n)      => n.clone(),
         ErrShortRead(n) => n.clone(),

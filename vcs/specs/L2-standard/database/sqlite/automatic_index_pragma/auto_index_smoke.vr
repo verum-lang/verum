@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.automatic_index_pragma.gate.{
-    Mode, AiOn, AiOff,
+    AutomaticIndexMode, AiOn, AiOff,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     allows_auto_index,
     AutoIndexDecision, DUseExisting, DBuildAuto, DLinearScan,

@@ -28,7 +28,7 @@ public fn has_schema(s: &DropViewSpec) -> Bool {
     s.schema.len() > 0
 }
 
-public type Outcome is
+public type DropViewOutcome is
     | OoDropped              // view removed + schema cookie bumped
     | OoNoSuchViewIgnored    // IF EXISTS and no matching view → silent ok
     | OoNoSuchView           // no view + no IF EXISTS → SQLITE_ERROR
@@ -36,7 +36,7 @@ public type Outcome is
     | OoProtectedName        // sqlite_* reserved names
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &DropViewOutcome) -> Text {
     match o {
         OoDropped             => "dropped".clone(),
         OoNoSuchViewIgnored   => "no_such_view_ignored".clone(),
@@ -46,7 +46,7 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn is_success(o: &Outcome) -> Bool {
+public fn is_success(o: &DropViewOutcome) -> Bool {
     match o {
         OoDropped           => true,
         OoNoSuchViewIgnored => true,
@@ -54,13 +54,13 @@ public fn is_success(o: &Outcome) -> Bool {
     }
 }
 
-public fn is_error(o: &Outcome) -> Bool { !is_success(o) }
+public fn is_error(o: &DropViewOutcome) -> Bool { !is_success(o) }
 
 // Decide the outcome given what the resolver found.
 //   found       — an object with that name exists
 //   is_view     — the found object is a view (vs table/index/trigger)
 //   protected   — name starts with "sqlite_"
-public fn classify(s: &DropViewSpec, found: Bool, is_view: Bool, protected: Bool) -> Outcome {
+public fn classify(s: &DropViewSpec, found: Bool, is_view: Bool, protected: Bool) -> DropViewOutcome {
     if protected { return OoProtectedName; }
     if !found {
         if s.if_exists { return OoNoSuchViewIgnored; }

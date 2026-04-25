@@ -47,16 +47,16 @@ public fn is_well_known(s: &DeclSugar) -> Bool {
     match s { DsCustom(_) => false, _ => true }
 }
 
-// Outcome of sqlite3_column_decltype — NULL when the column is an
+// DecltypeOutcome of sqlite3_column_decltype — NULL when the column is an
 // expression (no source column), or when the build lacks
 // ENABLE_COLUMN_METADATA.
-public type Outcome is
+public type DecltypeOutcome is
     | OkDecl(Text)
     | OkNullExpression
     | OkNullDisabled
     ;
 
-public fn outcome_label(o: &Outcome) -> Text {
+public fn outcome_label(o: &DecltypeOutcome) -> Text {
     match o {
         OkDecl(_)         => "decl".clone(),
         OkNullExpression  => "expression".clone(),
@@ -64,11 +64,11 @@ public fn outcome_label(o: &Outcome) -> Text {
     }
 }
 
-public fn returned_text(o: &Outcome) -> Bool {
+public fn returned_text(o: &DecltypeOutcome) -> Bool {
     match o { OkDecl(_) => true, _ => false }
 }
 
-public fn decl_text(o: &Outcome) -> Text {
+public fn decl_text(o: &DecltypeOutcome) -> Text {
     match o {
         OkDecl(t)          => t.clone(),
         _                   => "".clone(),

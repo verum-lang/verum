@@ -42,7 +42,7 @@ public fn source_zeroed() -> SourceFeatures {
     }
 }
 
-public type Verdict is
+public type PushdownFilterVerdict is
     | VdPushdown          // safe to push
     | VdCannotPushOuterRef // predicate mentions outer columns — not pushable
     | VdCannotPushAggregate
@@ -52,7 +52,7 @@ public type Verdict is
     | VdCannotPushNonDeterministic
     ;
 
-public fn verdict_name(v: &Verdict) -> Text {
+public fn verdict_name(v: &PushdownFilterVerdict) -> Text {
     match v {
         VdPushdown                    => "push".clone(),
         VdCannotPushOuterRef          => "cannot_outer_ref".clone(),
@@ -64,11 +64,11 @@ public fn verdict_name(v: &Verdict) -> Text {
     }
 }
 
-public fn is_success(v: &Verdict) -> Bool {
+public fn is_success(v: &PushdownFilterVerdict) -> Bool {
     match v { VdPushdown => true, _ => false }
 }
 
-public fn classify(t: &PushTarget, pf: &PredicateFeatures, sf: &SourceFeatures) -> Verdict {
+public fn classify(t: &PushTarget, pf: &PredicateFeatures, sf: &SourceFeatures) -> PushdownFilterVerdict {
     if pf.references_outer { return VdCannotPushOuterRef; }
     if !pf.is_deterministic { return VdCannotPushNonDeterministic; }
     if pf.has_aggregate { return VdCannotPushAggregate; }

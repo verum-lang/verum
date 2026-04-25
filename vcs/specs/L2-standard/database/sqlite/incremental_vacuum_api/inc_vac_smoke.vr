@@ -8,7 +8,7 @@
 mount core.database.sqlite.native.incremental_vacuum_api.step.{
     Request, RqAll, RqAtMost,
     from_arg, target_page_count,
-    Outcome, OkReclaimed, ErrModeNotIncremental, ErrInTransaction, ErrCorrupt,
+    IncrementalVacuumOutcome, OkReclaimed, ErrModeNotIncremental, ErrInTransaction, ErrCorrupt,
     outcome_name, is_ok, pages_reclaimed,
     pre_check,
 };

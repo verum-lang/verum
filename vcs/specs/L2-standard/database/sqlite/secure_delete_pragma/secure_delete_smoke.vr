@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.secure_delete_pragma.gate.{
-    Mode, SdOff, SdOn, SdFast,
+    SecureDeleteMode, SdOff, SdOn, SdFast,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     zeros_freed_pages, zeros_immediately, zeros_only_in_freelist,
     increases_write_amp,

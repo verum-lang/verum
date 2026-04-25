@@ -8,22 +8,22 @@ module core.database.sqlite.native.case_sensitive_like_pragma.pragma_;
 
 mount base.{Bool, Text};
 
-public type Mode is
+public type CaseSensitiveLikeMode is
     | InsensitiveAscii   // default — a == A, z == Z (ASCII only)
     | CaseSensitive      // byte-exact match
     ;
 
-public fn default_mode() -> Mode { InsensitiveAscii }
+public fn default_mode() -> CaseSensitiveLikeMode { InsensitiveAscii }
 
-public fn from_pragma_value(n: Int) -> Mode {
+public fn from_pragma_value(n: Int) -> CaseSensitiveLikeMode {
     if n == 0 { InsensitiveAscii } else { CaseSensitive }
 }
 
-public fn to_pragma_value(m: &Mode) -> Int {
+public fn to_pragma_value(m: &CaseSensitiveLikeMode) -> Int {
     match m { InsensitiveAscii => 0, CaseSensitive => 1 }
 }
 
-public fn mode_name(m: &Mode) -> Text {
+public fn mode_name(m: &CaseSensitiveLikeMode) -> Text {
     match m {
         InsensitiveAscii => "off".clone(),
         CaseSensitive    => "on".clone(),
@@ -31,7 +31,7 @@ public fn mode_name(m: &Mode) -> Text {
 }
 
 // Folding rule applied per-byte when comparing literal-vs-pattern.
-public fn folds_ascii(m: &Mode) -> Bool {
+public fn folds_ascii(m: &CaseSensitiveLikeMode) -> Bool {
     match m {
         InsensitiveAscii => true,
         CaseSensitive    => false,
@@ -39,13 +39,13 @@ public fn folds_ascii(m: &Mode) -> Bool {
 }
 
 // Apply the fold to a single ASCII byte.
-public fn fold_byte(m: &Mode, b: Int) -> Int {
+public fn fold_byte(m: &CaseSensitiveLikeMode, b: Int) -> Int {
     if !folds_ascii(m) { return b; }
     if b >= 0x41 && b <= 0x5A { return b + 0x20; }
     b
 }
 
 // Equal-under-mode predicate for two ASCII bytes.
-public fn bytes_equal(m: &Mode, a: Int, b: Int) -> Bool {
+public fn bytes_equal(m: &CaseSensitiveLikeMode, a: Int, b: Int) -> Bool {
     fold_byte(m, a) == fold_byte(m, b)
 }

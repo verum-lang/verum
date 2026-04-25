@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.mem_methods.vtable.{
-    MethodSet, default_method_set, is_viable, missing_methods,
+    MemMethodSet, default_method_set, is_viable, missing_methods,
 };
 mount core.database.sqlite.native.mem_methods.stats.{
     MemMethodStats, new_stats,

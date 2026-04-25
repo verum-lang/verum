@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.null_safe_compare_op_api.ops.{
-    Op, OpDistinctFrom, OpNotDistinctFrom, op_name,
+    NullSafeCompareOp, OpDistinctFrom, OpNotDistinctFrom, op_name,
     Value, VNull, VInt, VText, null_safe_equal, evaluate,
     equivalent_to_is, equivalent_to_is_not,
     ResultClass, RcEqual, RcDifferent, classify_result, class_name,

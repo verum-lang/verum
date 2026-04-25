@@ -10,7 +10,7 @@ mount core.database.sqlite.native.snapshot_get_open_api.snap.{
     CmpResult, CmLess, CmEqual, CmGreater, CmIncomparable,
     compare, cmp_to_int,
     Op, OpGet, OpOpen, OpFree, OpCmp, OpRecover, op_name,
-    Outcome, OkSnapshot, ErrNotWal, ErrNoTxn, ErrInUse, ErrCheckpointMoved,
+    SnapshotOpenOutcome, OkSnapshot, ErrNotWal, ErrNoTxn, ErrInUse, ErrCheckpointMoved,
     outcome_name, is_ok,
 };
 mount base.{Bool, Int64};

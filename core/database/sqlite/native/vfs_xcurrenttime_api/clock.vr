@@ -4,19 +4,19 @@ module core.database.sqlite.native.vfs_xcurrenttime_api.clock;
 
 mount base.{Bool, Int64, Text};
 
-public type Method is
+public type VfsCurrentTimeMethod is
     | MFloatJulian       // xCurrentTime — deprecated double Julian
     | MInt64Millis       // xCurrentTimeInt64 — Int64 ms since unix epoch
     ;
 
-public fn method_name(m: &Method) -> Text {
+public fn method_name(m: &VfsCurrentTimeMethod) -> Text {
     match m {
         MFloatJulian => "xCurrentTime".clone(),
         MInt64Millis => "xCurrentTimeInt64".clone(),
     }
 }
 
-public fn is_deprecated(m: &Method) -> Bool {
+public fn is_deprecated(m: &VfsCurrentTimeMethod) -> Bool {
     match m { MFloatJulian => true, _ => false }
 }
 
@@ -44,24 +44,24 @@ public fn julian_x10000_to_millis(jd_x10000: Int64) -> Int64 {
     (delta * ms_per_day()) / (10_000 as Int64)
 }
 
-// Outcome.
-public type Outcome is
+// VfsCurrentTimeOutcome.
+public type VfsCurrentTimeOutcome is
     | OkTime(Int64)        // ms-since-epoch, normalised
     | ErrUnavailable       // OS clock not readable (extremely rare)
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &VfsCurrentTimeOutcome) -> Text {
     match o {
         OkTime(_)      => "ok".clone(),
         ErrUnavailable => "unavailable".clone(),
     }
 }
 
-public fn is_ok(o: &Outcome) -> Bool {
+public fn is_ok(o: &VfsCurrentTimeOutcome) -> Bool {
     match o { OkTime(_) => true, _ => false }
 }
 
-public fn millis_value(o: &Outcome) -> Int64 {
+public fn millis_value(o: &VfsCurrentTimeOutcome) -> Int64 {
     match o {
         OkTime(t)      => t.clone(),
         ErrUnavailable => 0 as Int64,
@@ -75,7 +75,7 @@ public type Resolution is
     | RsMicros        // future-proof; SQLite doesn't ship this yet
     ;
 
-public fn resolution_for(m: &Method) -> Resolution {
+public fn resolution_for(m: &VfsCurrentTimeMethod) -> Resolution {
     match m {
         MFloatJulian => RsSeconds,
         MInt64Millis => RsMillis,

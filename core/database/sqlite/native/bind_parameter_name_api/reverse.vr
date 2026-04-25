@@ -7,13 +7,13 @@ mount core.collections.list.{List};
 
 public type BindNameSlot is { index: Int, name: Text };
 
-public type Outcome is
+public type BindNameOutcome is
     | OkName(Text)
     | OkNullAnonymous          // anonymous `?` — engine returns NULL
     | OkNullOutOfRange         // idx <= 0 or > param count
     ;
 
-public fn outcome_name_label(o: &Outcome) -> Text {
+public fn outcome_name_label(o: &BindNameOutcome) -> Text {
     match o {
         OkName(_)            => "name".clone(),
         OkNullAnonymous      => "anonymous".clone(),
@@ -21,11 +21,11 @@ public fn outcome_name_label(o: &Outcome) -> Text {
     }
 }
 
-public fn returned_text(o: &Outcome) -> Bool {
+public fn returned_text(o: &BindNameOutcome) -> Bool {
     match o { OkName(_) => true, _ => false }
 }
 
-public fn name_text(o: &Outcome) -> Text {
+public fn name_text(o: &BindNameOutcome) -> Text {
     match o {
         OkName(t)         => t.clone(),
         _                  => "".clone(),
@@ -34,7 +34,7 @@ public fn name_text(o: &Outcome) -> Text {
 
 // Reverse lookup.  BindNameSlot list is the same shape as in
 // `bind_parameter_index_api`.  An anonymous slot is encoded with name = "".
-public fn name_for(idx: Int, slots: &List<BindNameSlot>) -> Outcome {
+public fn name_for(idx: Int, slots: &List<BindNameSlot>) -> BindNameOutcome {
     let n = slots.len() as Int;
     if idx < 1 || idx > n { return OkNullOutOfRange; }
     let s = slots.get(idx - 1);

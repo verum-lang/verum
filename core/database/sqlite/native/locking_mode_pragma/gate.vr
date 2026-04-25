@@ -4,31 +4,31 @@ module core.database.sqlite.native.locking_mode_pragma.gate;
 
 mount base.{Bool, Text};
 
-public type Mode is
+public type LockingPragmaMode is
     | LmNormal       // default
     | LmExclusive
     ;
 
-public fn default_mode() -> Mode { LmNormal }
+public fn default_mode() -> LockingPragmaMode { LmNormal }
 
-public fn from_text(t: Text) -> Mode {
+public fn from_text(t: Text) -> LockingPragmaMode {
     if t == "exclusive".clone() { return LmExclusive; }
     LmNormal
 }
 
-public fn mode_name(m: &Mode) -> Text {
+public fn mode_name(m: &LockingPragmaMode) -> Text {
     match m {
         LmNormal    => "normal".clone(),
         LmExclusive => "exclusive".clone(),
     }
 }
 
-public fn retains_locks_across_txns(m: &Mode) -> Bool {
+public fn retains_locks_across_txns(m: &LockingPragmaMode) -> Bool {
     match m { LmExclusive => true, _ => false }
 }
 
 // Whether WAL mode can skip writing the -shm file.
-public fn allows_walwithout_shm(m: &Mode) -> Bool {
+public fn allows_walwithout_shm(m: &LockingPragmaMode) -> Bool {
     retains_locks_across_txns(m)
 }
 
@@ -40,7 +40,7 @@ public type SwitchEffect is
     | SeLazy
     ;
 
-public fn effect_of_switch(prev: &Mode, next: &Mode) -> SwitchEffect {
+public fn effect_of_switch(prev: &LockingPragmaMode, next: &LockingPragmaMode) -> SwitchEffect {
     match prev {
         LmExclusive => match next {
             LmExclusive => SeImmediate,    // no-op

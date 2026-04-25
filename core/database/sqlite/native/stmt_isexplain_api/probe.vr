@@ -4,19 +4,19 @@ module core.database.sqlite.native.stmt_isexplain_api.probe;
 
 mount base.{Bool, Text};
 
-public type Mode is
+public type StmtIsexplainMode is
     | MNotExplain          // 0
     | MExplain             // 1 — EXPLAIN <stmt>
     | MQueryPlan           // 2 — EXPLAIN QUERY PLAN <stmt>
     ;
 
-public fn from_code(n: Int) -> Mode {
+public fn from_code(n: Int) -> StmtIsexplainMode {
     if n <= 0 { return MNotExplain; }
     if n == 1 { return MExplain; }
     MQueryPlan
 }
 
-public fn to_code(m: &Mode) -> Int {
+public fn to_code(m: &StmtIsexplainMode) -> Int {
     match m {
         MNotExplain => 0,
         MExplain    => 1,
@@ -24,7 +24,7 @@ public fn to_code(m: &Mode) -> Int {
     }
 }
 
-public fn mode_name(m: &Mode) -> Text {
+public fn mode_name(m: &StmtIsexplainMode) -> Text {
     match m {
         MNotExplain => "not_explain".clone(),
         MExplain    => "explain".clone(),
@@ -33,20 +33,20 @@ public fn mode_name(m: &Mode) -> Text {
 }
 
 // Predicate helpers.
-public fn is_explain(m: &Mode) -> Bool {
+public fn is_explain(m: &StmtIsexplainMode) -> Bool {
     match m { MNotExplain => false, _ => true }
 }
 
-public fn is_opcode_dump(m: &Mode) -> Bool {
+public fn is_opcode_dump(m: &StmtIsexplainMode) -> Bool {
     match m { MExplain => true, _ => false }
 }
 
-public fn is_query_plan(m: &Mode) -> Bool {
+public fn is_query_plan(m: &StmtIsexplainMode) -> Bool {
     match m { MQueryPlan => true, _ => false }
 }
 
 // Number of result columns each mode emits.  EXPLAIN: 8 cols; EQP: 4 cols.
-public fn result_column_count(m: &Mode) -> Int {
+public fn result_column_count(m: &StmtIsexplainMode) -> Int {
     match m {
         MNotExplain => 0,    // depends on the underlying SELECT — not fixed
         MExplain    => 8,
@@ -55,7 +55,7 @@ public fn result_column_count(m: &Mode) -> Int {
 }
 
 // Header strings for the shell .header on output.
-public fn first_column_name(m: &Mode) -> Text {
+public fn first_column_name(m: &StmtIsexplainMode) -> Text {
     match m {
         MNotExplain => "".clone(),
         MExplain    => "addr".clone(),

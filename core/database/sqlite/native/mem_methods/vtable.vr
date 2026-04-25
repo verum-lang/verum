@@ -23,7 +23,7 @@ module core.database.sqlite.native.mem_methods.vtable;
 mount core.*;
 mount base.{Bool, Text};
 
-public type MethodSet is {
+public type MemMethodSet is {
     has_malloc: Bool,
     has_free: Bool,
     has_realloc: Bool,
@@ -34,8 +34,8 @@ public type MethodSet is {
     app_data: Int64,
 }
 
-public fn default_method_set() -> MethodSet {
-    MethodSet {
+public fn default_method_set() -> MemMethodSet {
+    MemMethodSet {
         has_malloc:   true,
         has_free:     true,
         has_realloc:  true,
@@ -49,11 +49,11 @@ public fn default_method_set() -> MethodSet {
 
 /// Minimum viable vtable: malloc + free + realloc + size + roundup.
 /// SQLite rejects the registration if any of these is missing.
-public fn is_viable(m: &MethodSet) -> Bool {
+public fn is_viable(m: &MemMethodSet) -> Bool {
     m.has_malloc && m.has_free && m.has_realloc && m.has_size && m.has_roundup
 }
 
-public fn missing_methods(m: &MethodSet) -> Text {
+public fn missing_methods(m: &MemMethodSet) -> Text {
     if !m.has_malloc  { return "xMalloc".clone(); }
     if !m.has_free    { return "xFree".clone(); }
     if !m.has_realloc { return "xRealloc".clone(); }

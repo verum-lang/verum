@@ -4,13 +4,13 @@ module core.database.sqlite.native.db_filename_api.lookup;
 
 mount base.{Bool, Text};
 
-public type Outcome is
+public type DbFilenameOutcome is
     | OkPath(Text)        // file-backed schema with non-empty path
     | OkInMemory          // ":memory:" or empty path (TEMP w/ no file)
     | OkUnknownSchema     // schema name didn't match any attached db
     ;
 
-public fn outcome_name(o: &Outcome) -> Text {
+public fn outcome_name(o: &DbFilenameOutcome) -> Text {
     match o {
         OkPath(_)        => "path".clone(),
         OkInMemory       => "in_memory".clone(),
@@ -18,11 +18,11 @@ public fn outcome_name(o: &Outcome) -> Text {
     }
 }
 
-public fn returns_non_null(o: &Outcome) -> Bool {
+public fn returns_non_null(o: &DbFilenameOutcome) -> Bool {
     match o { OkUnknownSchema => false, _ => true }
 }
 
-public fn path_text(o: &Outcome) -> Text {
+public fn path_text(o: &DbFilenameOutcome) -> Text {
     match o {
         OkPath(p)        => p.clone(),
         OkInMemory       => "".clone(),

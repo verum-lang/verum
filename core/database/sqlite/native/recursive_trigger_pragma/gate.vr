@@ -8,33 +8,33 @@ module core.database.sqlite.native.recursive_trigger_pragma.gate;
 
 mount base.{Bool, Text};
 
-public type Mode is
+public type RecursiveTriggerMode is
     | MoOff
     | MoOn
     ;
 
-public fn default_mode() -> Mode { MoOff }
+public fn default_mode() -> RecursiveTriggerMode { MoOff }
 
-public fn from_pragma_value(n: Int) -> Mode {
+public fn from_pragma_value(n: Int) -> RecursiveTriggerMode {
     if n == 0 { MoOff } else { MoOn }
 }
 
-public fn to_pragma_value(m: &Mode) -> Int {
+public fn to_pragma_value(m: &RecursiveTriggerMode) -> Int {
     match m { MoOff => 0, MoOn => 1 }
 }
 
-public fn mode_name(m: &Mode) -> Text {
+public fn mode_name(m: &RecursiveTriggerMode) -> Text {
     match m { MoOff => "off".clone(), MoOn => "on".clone() }
 }
 
-public fn cascades(m: &Mode) -> Bool {
+public fn cascades(m: &RecursiveTriggerMode) -> Bool {
     match m { MoOff => false, MoOn => true }
 }
 
 // Decide whether a new trigger may fire when we are already inside `depth`
 // trigger bodies.  Off-mode forbids any nesting; on-mode forbids recursion
 // only after exceeding the configured limit (handled separately).
-public fn allows_fire(m: &Mode, current_depth: Int) -> Bool {
+public fn allows_fire(m: &RecursiveTriggerMode, current_depth: Int) -> Bool {
     match m {
         MoOff => current_depth == 0,
         MoOn  => true,
@@ -43,8 +43,8 @@ public fn allows_fire(m: &Mode, current_depth: Int) -> Bool {
 
 // Boolean view used by stmt-prep (matches `recursive_triggers` field of
 // db config flags).
-public fn as_flag(m: &Mode) -> Bool { cascades(m) }
+public fn as_flag(m: &RecursiveTriggerMode) -> Bool { cascades(m) }
 
-public fn from_flag(b: Bool) -> Mode {
+public fn from_flag(b: Bool) -> RecursiveTriggerMode {
     if b { MoOn } else { MoOff }
 }

@@ -9,7 +9,7 @@ module core.database.sqlite.native.pcache_methods.vtable;
 mount core.*;
 mount base.{Bool, Text};
 
-public type MethodSet is {
+public type PcacheMethodSet is {
     has_init: Bool,
     has_shutdown: Bool,
     has_create: Bool,
@@ -24,8 +24,8 @@ public type MethodSet is {
     app_data: Int64,
 }
 
-public fn default_method_set() -> MethodSet {
-    MethodSet {
+public fn default_method_set() -> PcacheMethodSet {
+    PcacheMethodSet {
         has_init:      true,
         has_shutdown:  true,
         has_create:    true,
@@ -43,7 +43,7 @@ public fn default_method_set() -> MethodSet {
 
 /// Minimum viable vtable: xCreate + xCachesize + xPagecount +
 /// xFetch + xUnpin + xTruncate + xDestroy are mandatory.
-public fn is_viable(m: &MethodSet) -> Bool {
+public fn is_viable(m: &PcacheMethodSet) -> Bool {
     m.has_create
         && m.has_cachesize
         && m.has_pagecount
@@ -53,7 +53,7 @@ public fn is_viable(m: &MethodSet) -> Bool {
         && m.has_destroy
 }
 
-public fn missing(m: &MethodSet) -> Text {
+public fn missing(m: &PcacheMethodSet) -> Text {
     if !m.has_create    { return "xCreate".clone(); }
     if !m.has_cachesize { return "xCachesize".clone(); }
     if !m.has_pagecount { return "xPagecount".clone(); }

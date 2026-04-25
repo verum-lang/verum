@@ -28,7 +28,7 @@ public fn zeroed() -> InnerFeatures {
     }
 }
 
-public type Verdict is
+public type ExprDecorrelationVerdict is
     | VdAlreadyUncorrelated   // FROM-subquery — no work needed
     | VdSkipNotCorrelated     // inner never references outer — no need to decorrelate
     | VdDecorrelate           // decorrelate succeeded — will become semi-join / anti-semi
@@ -38,7 +38,7 @@ public type Verdict is
     | VdSkipScalarUnsafe      // scalar position but inner may produce > 1 row
     ;
 
-public fn verdict_name(v: &Verdict) -> Text {
+public fn verdict_name(v: &ExprDecorrelationVerdict) -> Text {
     match v {
         VdAlreadyUncorrelated  => "already_uncorrelated".clone(),
         VdSkipNotCorrelated    => "skip_not_correlated".clone(),
@@ -50,11 +50,11 @@ public fn verdict_name(v: &Verdict) -> Text {
     }
 }
 
-public fn is_success(v: &Verdict) -> Bool {
+public fn is_success(v: &ExprDecorrelationVerdict) -> Bool {
     match v { VdDecorrelate => true, _ => false }
 }
 
-public fn classify(p: &SubqueryPosition, f: &InnerFeatures) -> Verdict {
+public fn classify(p: &SubqueryPosition, f: &InnerFeatures) -> ExprDecorrelationVerdict {
     if is_already_uncorrelated(p) { return VdAlreadyUncorrelated; }
     if !f.inner_correlates_to_outer { return VdSkipNotCorrelated; }
     if f.has_aggregate { return VdSkipAggregate; }

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.foreign_keys_pragma.gate.{
-    Mode, FkOff, FkOn,
+    ForeignKeysPragmaMode, FkOff, FkOn,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     enforces,
     SetOutcome, SoApplied, SoIgnoredInsideTxn,
