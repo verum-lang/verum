@@ -391,7 +391,7 @@ implement Describable for ThreadError {
 // =============================================================================
 
 /// A captured stack frame.
-public type StackFrame is {
+public type ThreadStackFrame is {
     /// Instruction pointer (return address)
     ip: UInt64,
     /// Symbol name (if available)
@@ -404,10 +404,10 @@ public type StackFrame is {
     column: Maybe<Int>,
 };
 
-implement StackFrame {
+implement ThreadStackFrame {
     /// Create a stack frame from just an instruction pointer.
-    public fn from_ip(ip: UInt64) -> StackFrame {
-        StackFrame {
+    public fn from_ip(ip: UInt64) -> ThreadStackFrame {
+        ThreadStackFrame {
             ip: ip,
             symbol: None,
             file: None,
@@ -417,7 +417,7 @@ implement StackFrame {
     }
 }
 
-implement Debug for StackFrame {
+implement Debug for ThreadStackFrame {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(f"  at 0x{self.ip:016x}")?;
         if let Some(sym) = &self.symbol {
@@ -437,7 +437,7 @@ implement Debug for StackFrame {
     }
 }
 
-implement Display for StackFrame {
+implement Display for ThreadStackFrame {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         self.fmt_debug(f)
     }
@@ -456,7 +456,7 @@ implement Display for StackFrame {
 /// }
 /// ```
 public type StackTrace is {
-    frames: List<StackFrame>,
+    frames: List<ThreadStackFrame>,
 };
 
 implement StackTrace {
@@ -486,7 +486,7 @@ implement StackTrace {
                 break;
             }
 
-            frames.push(StackFrame.from_ip(return_addr));
+            frames.push(ThreadStackFrame.from_ip(return_addr));
 
             // Next frame pointer is at *frame_ptr
             frame_ptr = unsafe { *(frame_ptr as *const *const Byte) };
@@ -502,7 +502,7 @@ implement StackTrace {
     }
 
     /// Get the frames in this stack trace.
-    public fn frames(&self) -> &List<StackFrame> {
+    public fn frames(&self) -> &List<ThreadStackFrame> {
         &self.frames
     }
 

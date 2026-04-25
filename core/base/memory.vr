@@ -989,21 +989,26 @@ public fn zero<T>(ptr: &mut T, count: Int) {
 }
 
 /// Swap two values in place.
+///
+/// Lowers to the typed `@intrinsic("swap", a, b)` so both operands stay
+/// in managed-reference form throughout — the codegen does not need to
+/// fabricate a raw `&unsafe T` from a `&mut T`, which would mis-cast a
+/// boxed value to a pointer and surface at runtime as
+/// `Expected pointer, got Some(N)`.  Mirrors `core.intrinsics.memory::swap`
+/// so the two definitions are functionally equivalent under the
+/// stdlib-loading first-wins gate (#163 history).
+@inline(always)
 public fn swap<T>(a: &mut T, b: &mut T) {
-    unsafe {
-        let tmp = ptr_read(a as &unsafe T);
-        ptr_write(a as &unsafe T, ptr_read(b as &unsafe T));
-        ptr_write(b as &unsafe T, tmp);
-    }
+    @intrinsic("swap", a, b)
 }
 
 /// Replace a value, returning the old one.
+///
+/// Lowers to the typed `@intrinsic("replace", dest, src)` for the same
+/// reason as `swap` above.
+@inline(always)
 public fn replace<T>(dest: &mut T, src: T) -> T {
-    unsafe {
-        let old = ptr_read(dest as &unsafe T);
-        ptr_write(dest as &unsafe T, src);
-        old
-    }
+    @intrinsic("replace", dest, src)
 }
 
 /// Take a value, leaving the default in its place.

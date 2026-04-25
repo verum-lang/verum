@@ -96,7 +96,7 @@ public fn panic_impl(message: Text, file: Text, line: Int, column: Int) -> Never
 // =============================================================================
 
 /// Source location information for panic origin
-public type SourceLocation is {
+public type IntrinsicSourceLocation is {
     file: Text,
     line: Int,
     column: Int,
@@ -106,7 +106,7 @@ public type SourceLocation is {
 /// Panic information structure
 public type PanicInfo is {
     message: Text,
-    location: Maybe<SourceLocation>,
+    location: Maybe<IntrinsicSourceLocation>,
 };
 
 /// Execute a closure and catch any panics

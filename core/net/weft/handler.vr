@@ -259,18 +259,25 @@ public fn query_int(
 }
 
 /// Raw body bytes extractor.
-public type Bytes is { inner: List<Byte> };
+///
+/// Renamed from the historic `Bytes` to `BodyBytes` to avoid simple-name
+/// collision with `core.base::Bytes` (alias for `List<Byte>`).  The
+/// codegen variant table is keyed by simple type name, so two stdlib
+/// types named `Bytes` first-wins each other and one's methods drop
+/// out — see task #160 in the developer log.  The `Body<Format>`
+/// pattern matches the sibling `BodyText` extractor below.
+public type BodyBytes is { inner: List<Byte> };
 
-implement Bytes {
+implement BodyBytes {
     public fn into_inner(self) -> List<Byte> { self.inner }
     public fn as_slice(&self) -> &[Byte] { &self.inner }
     public fn len(&self) -> Int { self.inner.len() }
 }
 
-implement FromRequest for Bytes {
+implement FromRequest for BodyBytes {
     type Rejection = ExtractRejection;
-    async fn from_request(req: &mut WeftRequest) -> Result<Bytes, ExtractRejection> {
-        Ok(Bytes { inner: req.body.clone() })
+    async fn from_request(req: &mut WeftRequest) -> Result<BodyBytes, ExtractRejection> {
+        Ok(BodyBytes { inner: req.body.clone() })
     }
 }
 

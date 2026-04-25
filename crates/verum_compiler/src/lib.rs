@@ -176,6 +176,11 @@ pub mod literal_parsers;
 pub mod literal_registry;
 pub mod options;
 pub mod pipeline;
+// Centralised hardcoded-stdlib-name registry for the unifier.
+// Temporary scaffold pending #101 protocol-based discovery — keeping
+// the architectural violation in one identifiable file rather than
+// scattered through pipeline.rs Pass 5.5.
+pub mod stdlib_coercion_registry;
 pub mod profile_cmd;
 pub mod repl;
 pub mod session;

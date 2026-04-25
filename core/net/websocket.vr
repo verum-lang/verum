@@ -264,7 +264,7 @@ public fn encode(frame: &Frame, mask_key: Maybe<[UInt8; 4]>, out: &mut List<Byte
 // Decoding (resumable)
 // =============================================================================
 
-public type DecodeError is
+public type WebSocketDecodeError is
     | IncompleteFrame
     | InvalidOpcode(UInt8)
     | ControlFrameFragmented
@@ -274,16 +274,16 @@ public type DecodeError is
     | ExpectedMasked
     | UnexpectedlyMasked;
 
-public type DecodeResult is
+public type WebSocketDecodeResult is
     | Decoded { frame: Frame, consumed: Int }
     | NeedMore
-    | Err(DecodeError);
+    | Err(WebSocketDecodeError);
 
 /// Decode one frame from `buf`. `expect_masked` is true on the server
 /// (client must mask) and false on the client (server must not mask).
 /// `max_payload` caps the payload size for DoS protection.
-public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> DecodeResult {
-    if buf.len() < 2 { return DecodeResult.NeedMore; }
+public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> WebSocketDecodeResult {
+    if buf.len() < 2 { return WebSocketDecodeResult.NeedMore; }
     let b0 = buf[0];
     let b1 = buf[1];
 
@@ -297,16 +297,16 @@ public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> DecodeR
     if rsv1 || rsv2 || rsv3 {
         // RSV bits are reserved for extensions (permessage-deflate uses RSV1);
         // current impl rejects all RSV bits.
-        return DecodeResult.Err(DecodeError.ReservedBitsSet);
+        return WebSocketDecodeResult.Err(WebSocketDecodeError.ReservedBitsSet);
     }
 
     if opcode.is_control() && !fin {
-        return DecodeResult.Err(DecodeError.ControlFrameFragmented);
+        return WebSocketDecodeResult.Err(WebSocketDecodeError.ControlFrameFragmented);
     }
 
     let masked = (b1 & 0x80) != 0;
-    if expect_masked && !masked { return DecodeResult.Err(DecodeError.ExpectedMasked); }
-    if !expect_masked && masked { return DecodeResult.Err(DecodeError.UnexpectedlyMasked); }
+    if expect_masked && !masked { return WebSocketDecodeResult.Err(WebSocketDecodeError.ExpectedMasked); }
+    if !expect_masked && masked { return WebSocketDecodeResult.Err(WebSocketDecodeError.UnexpectedlyMasked); }
 
     let short_len = (b1 & 0x7F) as Int;
     let mut pos = 2;
@@ -314,11 +314,11 @@ public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> DecodeR
     if short_len < 126 {
         payload_len = short_len;
     } else if short_len == 126 {
-        if buf.len() < pos + 2 { return DecodeResult.NeedMore; }
+        if buf.len() < pos + 2 { return WebSocketDecodeResult.NeedMore; }
         payload_len = ((buf[pos] as Int) << 8) | (buf[pos + 1] as Int);
         pos = pos + 2;
     } else {
-        if buf.len() < pos + 8 { return DecodeResult.NeedMore; }
+        if buf.len() < pos + 8 { return WebSocketDecodeResult.NeedMore; }
         let mut v: UInt64 = 0;
         let mut i = 0;
         while i < 8 {
@@ -326,27 +326,27 @@ public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> DecodeR
             i = i + 1;
         }
         if v > (9223372036854775807 as UInt64) {
-            return DecodeResult.Err(DecodeError.PayloadTooLong { limit: max_payload });
+            return WebSocketDecodeResult.Err(WebSocketDecodeError.PayloadTooLong { limit: max_payload });
         }
         payload_len = v as Int;
         pos = pos + 8;
     }
     if payload_len > max_payload {
-        return DecodeResult.Err(DecodeError.PayloadTooLong { limit: max_payload });
+        return WebSocketDecodeResult.Err(WebSocketDecodeError.PayloadTooLong { limit: max_payload });
     }
     if opcode.is_control() && payload_len > 125 {
-        return DecodeResult.Err(DecodeError.ControlFramePayloadTooLong);
+        return WebSocketDecodeResult.Err(WebSocketDecodeError.ControlFramePayloadTooLong);
     }
 
     let mut mask_key: [UInt8; 4] = [0; 4];
     if masked {
-        if buf.len() < pos + 4 { return DecodeResult.NeedMore; }
+        if buf.len() < pos + 4 { return WebSocketDecodeResult.NeedMore; }
         let mut i = 0;
         while i < 4 { mask_key[i] = buf[pos + i] as UInt8; i = i + 1; }
         pos = pos + 4;
     }
 
-    if buf.len() < pos + payload_len { return DecodeResult.NeedMore; }
+    if buf.len() < pos + payload_len { return WebSocketDecodeResult.NeedMore; }
     let mut payload = List.with_capacity(payload_len);
     let mut i = 0;
     while i < payload_len {
@@ -365,7 +365,7 @@ public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> DecodeR
         opcode: opcode,
         payload: payload,
     };
-    DecodeResult.Decoded { frame: frame, consumed: pos + payload_len }
+    WebSocketDecodeResult.Decoded { frame: frame, consumed: pos + payload_len }
 }
 
 // =============================================================================
