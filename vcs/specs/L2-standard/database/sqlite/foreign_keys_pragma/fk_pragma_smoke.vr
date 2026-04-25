@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, foreign_keys_pragma, foreign-keys
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.foreign_keys_pragma.gate.{
+    Mode, FkOff, FkOn,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    enforces,
+    SetOutcome, SoApplied, SoIgnoredInsideTxn,
+    try_apply, outcome_name, was_applied, invalidates_prepared_stmts,
+};
+mount base.{Bool};
+
+fn test_default_is_off() {
+    match default_mode() { FkOff => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { FkOff => {}, _ => assert(false) }
+    match from_pragma_value(1) { FkOn  => {}, _ => assert(false) }
+    match from_pragma_value(7) { FkOn  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&FkOn),  1);
+    assert_eq(to_pragma_value(&FkOff), 0);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&FkOff) == "off".clone());
+    assert(mode_name(&FkOn)  == "on".clone());
+}
+
+fn test_enforces_predicate() {
+    assert(!enforces(&FkOff));
+    assert(enforces(&FkOn));
+}
+
+fn test_try_apply_outside_txn() {
+    match try_apply(false) { SoApplied => {}, _ => assert(false) }
+}
+
+fn test_try_apply_inside_txn() {
+    match try_apply(true) { SoIgnoredInsideTxn => {}, _ => assert(false) }
+}
+
+fn test_outcome_names_and_apply_flag() {
+    assert(outcome_name(&SoApplied)          == "applied".clone());
+    assert(outcome_name(&SoIgnoredInsideTxn) == "ignored_inside_txn".clone());
+    assert(was_applied(&SoApplied));
+    assert(!was_applied(&SoIgnoredInsideTxn));
+}
+
+fn test_invalidates_prepared_stmts() {
+    assert(invalidates_prepared_stmts(&SoApplied));
+    assert(!invalidates_prepared_stmts(&SoIgnoredInsideTxn));
+}
+
+fn main() {
+    test_default_is_off();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_enforces_predicate();
+    test_try_apply_outside_txn();
+    test_try_apply_inside_txn();
+    test_outcome_names_and_apply_flag();
+    test_invalidates_prepared_stmts();
+}

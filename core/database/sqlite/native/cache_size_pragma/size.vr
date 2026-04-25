@@ -1,0 +1,75 @@
+// PRAGMA cache_size sizing helper.
+
+module core.database.sqlite.native.cache_size_pragma.size;
+
+mount base.{Bool, Int64, Text};
+
+public type CacheSize is
+    | CsPages(Int64)        // explicit page count (>= 0)
+    | CsKibibytes(Int64)    // KiB target; engine derives pages
+    | CsDefault             // engine picks -2000 (≈ 2 MiB)
+    ;
+
+public fn default_signed_value() -> Int64 { -2000 as Int64 }
+
+public fn default_byte_target() -> Int64 {
+    // -2000 KiB = 2,048,000 bytes (engine uses 1024-byte KiB).
+    2_048_000 as Int64
+}
+
+public fn from_pragma_value(n: Int64) -> CacheSize {
+    if n == (0 as Int64) { return CsDefault; }
+    if n > (0 as Int64)  { return CsPages(n); }
+    // negative value → KiB; flip sign.
+    let neg = n;
+    let zero = 0 as Int64;
+    let kib = zero - neg;
+    CsKibibytes(kib)
+}
+
+public fn to_pragma_value(c: &CacheSize) -> Int64 {
+    match c {
+        CsDefault          => default_signed_value(),
+        CsPages(n)         => n.clone(),
+        CsKibibytes(k)     => {
+            let zero = 0 as Int64;
+            zero - k.clone()
+        },
+    }
+}
+
+public fn kind_name(c: &CacheSize) -> Text {
+    match c {
+        CsDefault       => "default".clone(),
+        CsPages(_)      => "pages".clone(),
+        CsKibibytes(_)  => "kib".clone(),
+    }
+}
+
+// Resolve effective page count given the database page size (bytes).
+public fn effective_pages(c: &CacheSize, page_size_bytes: Int64) -> Int64 {
+    match c {
+        CsDefault       => {
+            // -2000 KiB
+            let bytes = default_byte_target();
+            (bytes + page_size_bytes - (1 as Int64)) / page_size_bytes
+        },
+        CsPages(n)      => n.clone(),
+        CsKibibytes(k)  => {
+            let bytes = k.clone() * (1024 as Int64);
+            (bytes + page_size_bytes - (1 as Int64)) / page_size_bytes
+        },
+    }
+}
+
+public fn is_default(c: &CacheSize) -> Bool {
+    match c { CsDefault => true, _ => false }
+}
+
+public fn is_explicit_pages(c: &CacheSize) -> Bool {
+    match c { CsPages(_) => true, _ => false }
+}
+
+public fn is_byte_target(c: &CacheSize) -> Bool {
+    match c { CsKibibytes(_) => true, _ => false }
+}

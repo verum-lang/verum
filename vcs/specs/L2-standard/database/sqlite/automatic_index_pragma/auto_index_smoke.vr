@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, automatic_index_pragma, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.automatic_index_pragma.gate.{
+    Mode, AiOn, AiOff,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    allows_auto_index,
+    Decision, DUseExisting, DBuildAuto, DLinearScan,
+    decide, decision_name, would_warn,
+};
+mount base.{Bool};
+
+fn test_default_is_on() {
+    match default_mode() { AiOn => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { AiOff => {}, _ => assert(false) }
+    match from_pragma_value(1) { AiOn  => {}, _ => assert(false) }
+    match from_pragma_value(7) { AiOn  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&AiOn),  1);
+    assert_eq(to_pragma_value(&AiOff), 0);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&AiOn)  == "on".clone());
+    assert(mode_name(&AiOff) == "off".clone());
+}
+
+fn test_allows_auto_index() {
+    assert(allows_auto_index(&AiOn));
+    assert(!allows_auto_index(&AiOff));
+}
+
+fn test_decide_picks_existing() {
+    match decide(&AiOn, true, true)  { DUseExisting => {}, _ => assert(false) }
+    match decide(&AiOff, true, true) { DUseExisting => {}, _ => assert(false) }
+}
+
+fn test_decide_falls_back_when_unselective() {
+    match decide(&AiOn, false, false) { DLinearScan => {}, _ => assert(false) }
+}
+
+fn test_decide_off_means_scan() {
+    match decide(&AiOff, false, true) { DLinearScan => {}, _ => assert(false) }
+}
+
+fn test_decide_on_builds_auto() {
+    match decide(&AiOn, false, true) { DBuildAuto => {}, _ => assert(false) }
+}
+
+fn test_decision_names_and_warn_flag() {
+    assert(decision_name(&DUseExisting) == "use_existing".clone());
+    assert(decision_name(&DBuildAuto)   == "build_auto".clone());
+    assert(decision_name(&DLinearScan)  == "linear_scan".clone());
+    assert(would_warn(&DBuildAuto));
+    assert(!would_warn(&DUseExisting));
+    assert(!would_warn(&DLinearScan));
+}
+
+fn main() {
+    test_default_is_on();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_allows_auto_index();
+    test_decide_picks_existing();
+    test_decide_falls_back_when_unselective();
+    test_decide_off_means_scan();
+    test_decide_on_builds_auto();
+    test_decision_names_and_warn_flag();
+}

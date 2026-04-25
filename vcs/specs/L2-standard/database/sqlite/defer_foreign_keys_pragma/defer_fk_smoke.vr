@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, defer_foreign_keys_pragma, foreign-keys
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.defer_foreign_keys_pragma.gate.{
+    Mode, DfOff, DfOn,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    CheckTime, CtImmediate, CtAtCommit,
+    check_time_for, check_name, is_deferred, after_txn_end,
+};
+mount base.{Bool};
+
+fn test_default_is_off() {
+    match default_mode() { DfOff => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { DfOff => {}, _ => assert(false) }
+    match from_pragma_value(1) { DfOn  => {}, _ => assert(false) }
+    match from_pragma_value(7) { DfOn  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&DfOff), 0);
+    assert_eq(to_pragma_value(&DfOn),  1);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&DfOff) == "off".clone());
+    assert(mode_name(&DfOn)  == "on".clone());
+}
+
+fn test_check_time_no_enforcement() {
+    // FK enforcement off → immediate (effectively no checks).
+    match check_time_for(false, &DfOn, true) { CtImmediate => {}, _ => assert(false) }
+}
+
+fn test_constraint_explicitly_deferred() {
+    // Even with pragma off, constraint with DEFERRED clause defers.
+    match check_time_for(true, &DfOff, true) { CtAtCommit => {}, _ => assert(false) }
+}
+
+fn test_pragma_defers_all_otherwise_immediate() {
+    match check_time_for(true, &DfOn, false)  { CtAtCommit  => {}, _ => assert(false) }
+    match check_time_for(true, &DfOff, false) { CtImmediate => {}, _ => assert(false) }
+}
+
+fn test_check_names_and_deferred_predicate() {
+    assert(check_name(&CtImmediate) == "immediate".clone());
+    assert(check_name(&CtAtCommit)  == "at_commit".clone());
+    assert(is_deferred(&CtAtCommit));
+    assert(!is_deferred(&CtImmediate));
+}
+
+fn test_after_txn_end_resets_to_off() {
+    match after_txn_end(&DfOn)  { DfOff => {}, _ => assert(false) }
+    match after_txn_end(&DfOff) { DfOff => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_default_is_off();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_check_time_no_enforcement();
+    test_constraint_explicitly_deferred();
+    test_pragma_defers_all_otherwise_immediate();
+    test_check_names_and_deferred_predicate();
+    test_after_txn_end_resets_to_off();
+}

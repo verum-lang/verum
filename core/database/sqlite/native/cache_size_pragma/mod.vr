@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/cache_size_pragma/mod.vr
+// =============================================================================
+// PRAGMA cache_size — number of pages held in the per-connection page cache.
+// Two encodings on the same pragma:
+//   * positive N  → exactly N pages
+//   * negative N  → -N kibibytes; engine computes pages from page_size
+//   * zero        → revert to default (-2000 ≈ 2 MiB)
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.cache_size_pragma;
+
+public module size;

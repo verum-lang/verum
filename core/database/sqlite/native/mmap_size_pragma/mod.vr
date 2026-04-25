@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/mmap_size_pragma/mod.vr
+// =============================================================================
+// PRAGMA mmap_size — number of bytes the engine may memory-map per database
+// file.  0 disables mmap entirely.  Default: SQLITE_DEFAULT_MMAP_SIZE (often
+// 0 on most platforms; ~256 MB on others).  Hard cap: SQLITE_MAX_MMAP_SIZE.
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.mmap_size_pragma;
+
+public module size;

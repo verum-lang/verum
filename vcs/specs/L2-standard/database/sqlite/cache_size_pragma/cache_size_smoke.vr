@@ -1,0 +1,77 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, cache_size_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.cache_size_pragma.size.{
+    CacheSize, CsPages, CsKibibytes, CsDefault,
+    default_signed_value, default_byte_target,
+    from_pragma_value, to_pragma_value, kind_name,
+    effective_pages, is_default, is_explicit_pages, is_byte_target,
+};
+mount base.{Bool, Int64};
+
+fn test_default_constants() {
+    assert_eq(default_signed_value(), -2000 as Int64);
+    assert_eq(default_byte_target(), 2_048_000 as Int64);
+}
+
+fn test_from_pragma_value_branches() {
+    match from_pragma_value(0 as Int64) { CsDefault => {}, _ => assert(false) }
+    match from_pragma_value(500 as Int64) {
+        CsPages(n) => assert_eq(n, 500 as Int64),
+        _ => assert(false),
+    }
+    match from_pragma_value(-2000 as Int64) {
+        CsKibibytes(k) => assert_eq(k, 2000 as Int64),
+        _ => assert(false),
+    }
+}
+
+fn test_to_pragma_value_round_trip() {
+    assert_eq(to_pragma_value(&CsDefault),                   -2000 as Int64);
+    assert_eq(to_pragma_value(&CsPages(500 as Int64)),         500 as Int64);
+    assert_eq(to_pragma_value(&CsKibibytes(2000 as Int64)), -2000 as Int64);
+}
+
+fn test_kind_names() {
+    assert(kind_name(&CsDefault)                  == "default".clone());
+    assert(kind_name(&CsPages(1 as Int64))         == "pages".clone());
+    assert(kind_name(&CsKibibytes(1 as Int64))     == "kib".clone());
+}
+
+fn test_effective_pages_default() {
+    // 2_048_000 / 4096 = 500 pages
+    assert_eq(effective_pages(&CsDefault, 4096 as Int64), 500 as Int64);
+}
+
+fn test_effective_pages_explicit() {
+    assert_eq(effective_pages(&CsPages(123 as Int64), 4096 as Int64), 123 as Int64);
+}
+
+fn test_effective_pages_kib() {
+    // 100 KiB = 102_400 bytes; / 4096 = 25 pages
+    assert_eq(effective_pages(&CsKibibytes(100 as Int64), 4096 as Int64), 25 as Int64);
+}
+
+fn test_kind_predicates() {
+    assert(is_default(&CsDefault));
+    assert(!is_default(&CsPages(1 as Int64)));
+    assert(is_explicit_pages(&CsPages(1 as Int64)));
+    assert(!is_explicit_pages(&CsDefault));
+    assert(is_byte_target(&CsKibibytes(1 as Int64)));
+    assert(!is_byte_target(&CsPages(1 as Int64)));
+}
+
+fn main() {
+    test_default_constants();
+    test_from_pragma_value_branches();
+    test_to_pragma_value_round_trip();
+    test_kind_names();
+    test_effective_pages_default();
+    test_effective_pages_explicit();
+    test_effective_pages_kib();
+    test_kind_predicates();
+}

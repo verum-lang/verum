@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, temp_store_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.temp_store_pragma.store.{
+    Store, TsDefault, TsFile, TsMemory,
+    compile_default, from_pragma_value, to_pragma_value,
+    store_name, effective, is_in_memory, allocates_disk_file,
+};
+mount base.{Bool};
+
+fn test_compile_default_is_memory() {
+    match compile_default() { TsMemory => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { TsDefault => {}, _ => assert(false) }
+    match from_pragma_value(1) { TsFile    => {}, _ => assert(false) }
+    match from_pragma_value(2) { TsMemory  => {}, _ => assert(false) }
+    match from_pragma_value(7) { TsMemory  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&TsDefault), 0);
+    assert_eq(to_pragma_value(&TsFile),    1);
+    assert_eq(to_pragma_value(&TsMemory),  2);
+}
+
+fn test_store_names() {
+    assert(store_name(&TsDefault) == "default".clone());
+    assert(store_name(&TsFile)    == "file".clone());
+    assert(store_name(&TsMemory)  == "memory".clone());
+}
+
+fn test_effective_resolves_default() {
+    match effective(&TsDefault) { TsMemory => {}, _ => assert(false) }
+    match effective(&TsFile)    { TsFile   => {}, _ => assert(false) }
+    match effective(&TsMemory)  { TsMemory => {}, _ => assert(false) }
+}
+
+fn test_in_memory_predicate() {
+    assert(is_in_memory(&TsDefault));
+    assert(is_in_memory(&TsMemory));
+    assert(!is_in_memory(&TsFile));
+}
+
+fn test_allocates_disk_file() {
+    assert(allocates_disk_file(&TsFile));
+    assert(!allocates_disk_file(&TsDefault));
+    assert(!allocates_disk_file(&TsMemory));
+}
+
+fn main() {
+    test_compile_default_is_memory();
+    test_pragma_round_trip();
+    test_store_names();
+    test_effective_resolves_default();
+    test_in_memory_predicate();
+    test_allocates_disk_file();
+}

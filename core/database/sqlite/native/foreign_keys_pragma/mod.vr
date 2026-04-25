@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/foreign_keys_pragma/mod.vr
+// =============================================================================
+// PRAGMA foreign_keys — turns FK enforcement on or off for the connection.
+// Default OFF for backwards compatibility (tables retain their FK clauses
+// as syntax, but constraints are not checked unless this is ON).
+// Cannot be changed inside an open transaction.
+// Spec §11.6 / §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.foreign_keys_pragma;
+
+public module gate;

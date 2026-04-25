@@ -1,0 +1,55 @@
+// PRAGMA automatic_index handler.
+
+module core.database.sqlite.native.automatic_index_pragma.gate;
+
+mount base.{Bool, Text};
+
+public type Mode is
+    | AiOn       // 1 — default; planner may build transient indices
+    | AiOff      // 0 — forbid auto-indices
+    ;
+
+public fn default_mode() -> Mode { AiOn }
+
+public fn from_pragma_value(n: Int) -> Mode {
+    if n == 0 { AiOff } else { AiOn }
+}
+
+public fn to_pragma_value(m: &Mode) -> Int {
+    match m { AiOn => 1, AiOff => 0 }
+}
+
+public fn mode_name(m: &Mode) -> Text {
+    match m { AiOn => "on".clone(), AiOff => "off".clone() }
+}
+
+public fn allows_auto_index(m: &Mode) -> Bool {
+    match m { AiOn => true, AiOff => false }
+}
+
+// Decision passed to the planner per join sub-plan.
+public type Decision is
+    | DUseExisting       // an existing index covers the lookup
+    | DBuildAuto         // no index covers; planner wants to build one
+    | DLinearScan        // mode forbids auto-index; nested-loop scan
+    ;
+
+public fn decide(m: &Mode, has_existing_index: Bool, predicate_is_selective: Bool) -> Decision {
+    if has_existing_index { return DUseExisting; }
+    if !predicate_is_selective { return DLinearScan; }
+    if !allows_auto_index(m) { return DLinearScan; }
+    DBuildAuto
+}
+
+public fn decision_name(d: &Decision) -> Text {
+    match d {
+        DUseExisting => "use_existing".clone(),
+        DBuildAuto   => "build_auto".clone(),
+        DLinearScan  => "linear_scan".clone(),
+    }
+}
+
+public fn would_warn(d: &Decision) -> Bool {
+    // SQLite logs an "automatic index" warning for DBuildAuto decisions.
+    match d { DBuildAuto => true, _ => false }
+}

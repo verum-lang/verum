@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/synchronous_pragma/mod.vr
+// =============================================================================
+// PRAGMA synchronous — fsync() aggressiveness.  4 levels:
+//   0 OFF      — never call fsync (database may corrupt on power loss)
+//   1 NORMAL   — fsync on critical writes (rollback default in WAL)
+//   2 FULL     — fsync after every commit (default in legacy modes)
+//   3 EXTRA    — like FULL, plus fsync the directory after rename
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.synchronous_pragma;
+
+public module level;

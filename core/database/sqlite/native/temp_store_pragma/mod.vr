@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/temp_store_pragma/mod.vr
+// =============================================================================
+// PRAGMA temp_store — selects the backing store for TEMP tables, indices, and
+// triggers.  0 = compile-time default (SQLITE_TEMP_STORE), 1 = file-backed,
+// 2 = memory-backed.  Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.temp_store_pragma;
+
+public module store;

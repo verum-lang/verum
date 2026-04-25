@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/defer_foreign_keys_pragma/mod.vr
+// =============================================================================
+// PRAGMA defer_foreign_keys — when ON, all FK constraints behave as DEFERRED
+// (i.e. checked at COMMIT instead of after each row).  Auto-resets to OFF at
+// the end of every transaction.  No effect when foreign_keys=OFF.
+// Spec §11.6 / §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.defer_foreign_keys_pragma;
+
+public module gate;

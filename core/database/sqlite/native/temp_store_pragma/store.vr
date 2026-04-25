@@ -1,0 +1,61 @@
+// PRAGMA temp_store handler.
+
+module core.database.sqlite.native.temp_store_pragma.store;
+
+mount base.{Bool, Text};
+
+public type Store is
+    | TsDefault    // 0 — compile-time default (SQLITE_TEMP_STORE)
+    | TsFile       // 1 — temp tables go in temp file
+    | TsMemory     // 2 — temp tables in RAM only
+    ;
+
+// SQLITE_TEMP_STORE compile-time default.  We model the build-time default as
+// "memory" here — matching the most common Linux build — but the engine reads
+// it from a constant.
+public fn compile_default() -> Store { TsMemory }
+
+public fn from_pragma_value(n: Int) -> Store {
+    if n <= 0 { return TsDefault; }
+    if n == 1 { return TsFile; }
+    TsMemory
+}
+
+public fn to_pragma_value(s: &Store) -> Int {
+    match s {
+        TsDefault => 0,
+        TsFile    => 1,
+        TsMemory  => 2,
+    }
+}
+
+public fn store_name(s: &Store) -> Text {
+    match s {
+        TsDefault => "default".clone(),
+        TsFile    => "file".clone(),
+        TsMemory  => "memory".clone(),
+    }
+}
+
+// Resolve `TsDefault` to the real backing store using the compile-time default.
+public fn effective(s: &Store) -> Store {
+    match s {
+        TsDefault => compile_default(),
+        TsFile    => TsFile,
+        TsMemory  => TsMemory,
+    }
+}
+
+public fn is_in_memory(s: &Store) -> Bool {
+    match effective(s) {
+        TsMemory => true,
+        _ => false,
+    }
+}
+
+public fn allocates_disk_file(s: &Store) -> Bool {
+    match effective(s) {
+        TsFile => true,
+        _ => false,
+    }
+}

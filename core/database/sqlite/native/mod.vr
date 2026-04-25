@@ -780,3 +780,19 @@ public module snapshot_get_open_api;
 public module lookaside_two_size_api;
 // - dbpage_writeguard_api: dbpage write-guard rules (page-1 / journal / size mismatch)
 public module dbpage_writeguard_api;
+// - temp_store_pragma: PRAGMA temp_store DEFAULT/FILE/MEMORY backing-store selector
+public module temp_store_pragma;
+// - synchronous_pragma: PRAGMA synchronous OFF/NORMAL/FULL/EXTRA + WAL-vs-rollback risk
+public module synchronous_pragma;
+// - secure_delete_pragma: PRAGMA secure_delete OFF/ON/FAST zero-fill modes
+public module secure_delete_pragma;
+// - cache_size_pragma: PRAGMA cache_size pages-vs-KiB encoding (-2000 default)
+public module cache_size_pragma;
+// - mmap_size_pragma: PRAGMA mmap_size byte target + hard-cap clamp + page count
+public module mmap_size_pragma;
+// - automatic_index_pragma: PRAGMA automatic_index gate + planner decision (use/build/scan)
+public module automatic_index_pragma;
+// - foreign_keys_pragma: PRAGMA foreign_keys OFF default + in-txn-ignored apply outcome
+public module foreign_keys_pragma;
+// - defer_foreign_keys_pragma: PRAGMA defer_foreign_keys (Immediate/AtCommit) + auto-reset
+public module defer_foreign_keys_pragma;

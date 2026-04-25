@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, synchronous_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.synchronous_pragma.level.{
+    Level, SyOff, SyNormal, SyFull, SyExtra,
+    default_legacy, default_wal,
+    from_pragma_value, to_pragma_value, level_name,
+    calls_fsync, fsync_every_commit, fsync_directory,
+    Risk, RkPossibleCorruption, RkSafeWalOnly, RkSafeAcid,
+    risk_in_wal, risk_in_rollback,
+};
+mount base.{Bool};
+
+fn test_defaults() {
+    match default_legacy() { SyFull   => {}, _ => assert(false) }
+    match default_wal()    { SyNormal => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { SyOff    => {}, _ => assert(false) }
+    match from_pragma_value(1) { SyNormal => {}, _ => assert(false) }
+    match from_pragma_value(2) { SyFull   => {}, _ => assert(false) }
+    match from_pragma_value(3) { SyExtra  => {}, _ => assert(false) }
+    match from_pragma_value(7) { SyExtra  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&SyOff),    0);
+    assert_eq(to_pragma_value(&SyNormal), 1);
+    assert_eq(to_pragma_value(&SyFull),   2);
+    assert_eq(to_pragma_value(&SyExtra),  3);
+}
+
+fn test_level_names() {
+    assert(level_name(&SyOff)    == "off".clone());
+    assert(level_name(&SyNormal) == "normal".clone());
+    assert(level_name(&SyFull)   == "full".clone());
+    assert(level_name(&SyExtra)  == "extra".clone());
+}
+
+fn test_calls_fsync() {
+    assert(!calls_fsync(&SyOff));
+    assert(calls_fsync(&SyNormal));
+    assert(calls_fsync(&SyFull));
+    assert(calls_fsync(&SyExtra));
+}
+
+fn test_fsync_every_commit() {
+    assert(!fsync_every_commit(&SyOff));
+    assert(!fsync_every_commit(&SyNormal));
+    assert(fsync_every_commit(&SyFull));
+    assert(fsync_every_commit(&SyExtra));
+}
+
+fn test_fsync_directory_extra_only() {
+    assert(!fsync_directory(&SyOff));
+    assert(!fsync_directory(&SyNormal));
+    assert(!fsync_directory(&SyFull));
+    assert(fsync_directory(&SyExtra));
+}
+
+fn test_risk_in_wal() {
+    match risk_in_wal(&SyOff)    { RkPossibleCorruption => {}, _ => assert(false) }
+    match risk_in_wal(&SyNormal) { RkSafeAcid           => {}, _ => assert(false) }
+    match risk_in_wal(&SyFull)   { RkSafeAcid           => {}, _ => assert(false) }
+    match risk_in_wal(&SyExtra)  { RkSafeAcid           => {}, _ => assert(false) }
+}
+
+fn test_risk_in_rollback() {
+    match risk_in_rollback(&SyOff)    { RkPossibleCorruption => {}, _ => assert(false) }
+    match risk_in_rollback(&SyNormal) { RkSafeWalOnly        => {}, _ => assert(false) }
+    match risk_in_rollback(&SyFull)   { RkSafeAcid           => {}, _ => assert(false) }
+    match risk_in_rollback(&SyExtra)  { RkSafeAcid           => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_defaults();
+    test_pragma_round_trip();
+    test_level_names();
+    test_calls_fsync();
+    test_fsync_every_commit();
+    test_fsync_directory_extra_only();
+    test_risk_in_wal();
+    test_risk_in_rollback();
+}

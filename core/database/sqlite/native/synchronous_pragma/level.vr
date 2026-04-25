@@ -1,0 +1,87 @@
+// PRAGMA synchronous level.
+
+module core.database.sqlite.native.synchronous_pragma.level;
+
+mount base.{Bool, Text};
+
+public type Level is
+    | SyOff      // 0
+    | SyNormal   // 1
+    | SyFull     // 2
+    | SyExtra    // 3
+    ;
+
+// Default for non-WAL journal modes.
+public fn default_legacy() -> Level { SyFull }
+
+// Default for WAL journal mode (introduced 3.6.x).
+public fn default_wal() -> Level { SyNormal }
+
+public fn from_pragma_value(n: Int) -> Level {
+    if n <= 0 { return SyOff; }
+    if n == 1 { return SyNormal; }
+    if n == 2 { return SyFull; }
+    SyExtra
+}
+
+public fn to_pragma_value(l: &Level) -> Int {
+    match l {
+        SyOff    => 0,
+        SyNormal => 1,
+        SyFull   => 2,
+        SyExtra  => 3,
+    }
+}
+
+public fn level_name(l: &Level) -> Text {
+    match l {
+        SyOff    => "off".clone(),
+        SyNormal => "normal".clone(),
+        SyFull   => "full".clone(),
+        SyExtra  => "extra".clone(),
+    }
+}
+
+// Whether the engine fsyncs at all.
+public fn calls_fsync(l: &Level) -> Bool {
+    match l { SyOff => false, _ => true }
+}
+
+// Whether every COMMIT forces a sync (FULL/EXTRA do, NORMAL is opportunistic).
+public fn fsync_every_commit(l: &Level) -> Bool {
+    match l {
+        SyFull  => true,
+        SyExtra => true,
+        _ => false,
+    }
+}
+
+// Whether directory metadata is also synced (EXTRA only).
+public fn fsync_directory(l: &Level) -> Bool {
+    match l { SyExtra => true, _ => false }
+}
+
+// Risk classification — used by docs/integrity tooling.
+public type Risk is
+    | RkPossibleCorruption     // OFF
+    | RkSafeWalOnly             // NORMAL on rollback journal
+    | RkSafeAcid                // NORMAL on WAL, FULL/EXTRA always
+    ;
+
+public fn risk_in_wal(l: &Level) -> Risk {
+    match l {
+        SyOff    => RkPossibleCorruption,
+        SyNormal => RkSafeAcid,
+        SyFull   => RkSafeAcid,
+        SyExtra  => RkSafeAcid,
+    }
+}
+
+public fn risk_in_rollback(l: &Level) -> Risk {
+    match l {
+        SyOff    => RkPossibleCorruption,
+        SyNormal => RkSafeWalOnly,
+        SyFull   => RkSafeAcid,
+        SyExtra  => RkSafeAcid,
+    }
+}

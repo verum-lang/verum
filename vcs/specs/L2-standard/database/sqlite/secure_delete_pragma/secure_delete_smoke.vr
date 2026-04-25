@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, secure_delete_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.secure_delete_pragma.gate.{
+    Mode, SdOff, SdOn, SdFast,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    zeros_freed_pages, zeros_immediately, zeros_only_in_freelist,
+    increases_write_amp,
+};
+mount base.{Bool};
+
+fn test_default_is_off() {
+    match default_mode() { SdOff => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { SdOff  => {}, _ => assert(false) }
+    match from_pragma_value(1) { SdOn   => {}, _ => assert(false) }
+    match from_pragma_value(2) { SdFast => {}, _ => assert(false) }
+    match from_pragma_value(7) { SdFast => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&SdOff),  0);
+    assert_eq(to_pragma_value(&SdOn),   1);
+    assert_eq(to_pragma_value(&SdFast), 2);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&SdOff)  == "off".clone());
+    assert(mode_name(&SdOn)   == "on".clone());
+    assert(mode_name(&SdFast) == "fast".clone());
+}
+
+fn test_zeros_predicates() {
+    assert(!zeros_freed_pages(&SdOff));
+    assert(zeros_freed_pages(&SdOn));
+    assert(zeros_freed_pages(&SdFast));
+
+    assert(!zeros_immediately(&SdOff));
+    assert(zeros_immediately(&SdOn));
+    assert(!zeros_immediately(&SdFast));
+
+    assert(!zeros_only_in_freelist(&SdOff));
+    assert(!zeros_only_in_freelist(&SdOn));
+    assert(zeros_only_in_freelist(&SdFast));
+}
+
+fn test_write_amp_classification() {
+    assert(!increases_write_amp(&SdOff));
+    assert(increases_write_amp(&SdOn));
+    assert(increases_write_amp(&SdFast));
+}
+
+fn main() {
+    test_default_is_off();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_zeros_predicates();
+    test_write_amp_classification();
+}

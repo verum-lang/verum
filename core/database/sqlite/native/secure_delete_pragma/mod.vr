@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/secure_delete_pragma/mod.vr
+// =============================================================================
+// PRAGMA secure_delete — overwrites freed storage with zeros so deleted data
+// can't be recovered with a hex-editor.  3 levels: OFF (default), ON,
+// FAST (3.31+, only zeros while still in the freelist).
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.secure_delete_pragma;
+
+public module gate;

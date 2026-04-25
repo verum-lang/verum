@@ -1,0 +1,63 @@
+// PRAGMA mmap_size handler.
+
+module core.database.sqlite.native.mmap_size_pragma.size;
+
+mount base.{Bool, Int64, Text};
+
+// Compile-time defaults.
+public fn default_value() -> Int64 { 0 as Int64 }
+
+// Hard upper bound; SQLite's SQLITE_MAX_MMAP_SIZE is platform-specific but
+// the universally safe ceiling is ~2 TiB (2^41).  We model 1 TiB.
+public fn hard_max_value() -> Int64 {
+    (1024 as Int64) * (1024 as Int64) * (1024 as Int64) * (1024 as Int64)
+}
+
+public type Setting is {
+    bytes: Int64,
+};
+
+public fn new(bytes: Int64) -> Setting {
+    let mut b = bytes;
+    let zero = 0 as Int64;
+    if b < zero { b = zero; }
+    let cap = hard_max_value();
+    if b > cap { b = cap; }
+    Setting { bytes: b }
+}
+
+public fn default_setting() -> Setting {
+    new(default_value())
+}
+
+public fn from_pragma_value(n: Int64) -> Setting {
+    new(n)
+}
+
+public fn to_pragma_value(s: &Setting) -> Int64 { s.bytes }
+
+public fn is_disabled(s: &Setting) -> Bool {
+    s.bytes == (0 as Int64)
+}
+
+public fn is_unbounded(s: &Setting) -> Bool {
+    s.bytes >= hard_max_value()
+}
+
+public fn mode_name(s: &Setting) -> Text {
+    if is_disabled(s) { return "disabled".clone(); }
+    if is_unbounded(s) { return "unbounded".clone(); }
+    "bounded".clone()
+}
+
+// Number of pages that can be mmapped, given a page size.
+public fn pages_mappable(s: &Setting, page_size: Int64) -> Int64 {
+    if is_disabled(s) { return 0 as Int64; }
+    if page_size <= (0 as Int64) { return 0 as Int64; }
+    s.bytes / page_size
+}
+
+// Reduce to the smaller of two settings.
+public fn min_with(a: Setting, b: Setting) -> Setting {
+    if a.bytes < b.bytes { a } else { b }
+}
