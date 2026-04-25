@@ -1,0 +1,54 @@
+name: TechEmpower R23
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  smoke:
+    name: TechEmpower scenario smokes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Verum toolchain
+        run: |
+          # Same toolchain step as the rest of CI.
+          cargo build --release -p vtest
+      - name: Run smoke against every scenario
+        run: |
+          ./vcs/benchmarks/techempower/scripts/local_smoke.sh
+
+  loadgen:
+    name: TechEmpower R23 wrk2 load-gen
+    runs-on: ubuntu-latest
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install wrk2 + jq + bc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wrk jq bc
+      - name: Build the rig binaries
+        run: |
+          cargo build --release -p vtest
+      - name: Run load-gen for every scenario
+        run: |
+          cd vcs/benchmarks/techempower
+          # Each scenario is started in the background, hit with wrk2,
+          # then torn down. Real CI would use systemd-run / cgroups so
+          # the load-gen and the SUT don't fight over CPU; on the
+          # ubuntu-latest runner we just sequence them.
+          for scenario in plaintext json db_query db_queries fortunes db_updates; do
+            ./scripts/run_loadgen.sh "$scenario" 30s
+          done
+      - name: Enforce acceptance gates
+        run: |
+          ./vcs/benchmarks/techempower/scripts/check_acceptance_gates.sh
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: techempower-results
+          path: vcs/benchmarks/techempower/*.results.json

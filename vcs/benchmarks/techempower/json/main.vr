@@ -1,0 +1,59 @@
+// =============================================================================
+// TechEmpower R23 — JSON serialisation
+// =============================================================================
+// Spec:  https://www.techempower.com/benchmarks/#section=data-r22&hw=ph&test=json
+// Goal:  RPS on a tiny serialised JSON document.
+//
+// Service contract:
+//   GET /json  → 200 OK, body {"message":"Hello, World!"}
+//
+// Headers:
+//   Content-Type: application/json
+//   Server: verum-weft
+//
+// What this exercises:
+//   * Hot-path JSON serialisation (one allocation per request).
+//   * Response Content-Type wiring.
+// =============================================================================
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.http.{Headers, Method, Response, StatusCode, Version};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.error.{WeftError};
+
+pub async fn handle_json(_req: WeftRequest) -> Result<Response, WeftError> {
+    let mut h = Headers.new();
+    h.append(f"content-type", f"application/json");
+    h.append(f"server",       f"verum-weft");
+    // Hand-encoded {"message":"Hello, World!"} — production rig
+    // would use core.encoding.json.serialise but the canonical
+    // TechEmpower JSON is a fixed string so this is exact.
+    let body: List<Byte> = f"{\"message\":\"Hello, World!\"}".into_bytes();
+    Ok(Response {
+        status:  StatusCode { code: 200 },
+        version: Version.Http11,
+        headers: h,
+        body:    body,
+    })
+}
+
+@main
+pub async fn main() -> Int {
+    let req = WeftRequest {
+        method: Method.Get, path: f"/json",
+        raw_query: None, headers: Headers.new(), body: [],
+        path_params: core.collections.map.Map.new(),
+        peer_addr: None,
+    };
+    match handle_json(req).await {
+        Ok(r) => {
+            assert(r.status.code() == 200);
+            // {"message":"Hello, World!"} — 27 bytes.
+            assert(r.body.len() == 27);
+        },
+        Err(_) => panic("handler must not error"),
+    }
+    print("techempower json smoke ok");
+    0
+}

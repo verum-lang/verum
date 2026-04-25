@@ -1,0 +1,69 @@
+// =============================================================================
+// TechEmpower R23 — Plaintext scenario
+// =============================================================================
+// Spec:  https://www.techempower.com/benchmarks/#section=data-r22&hw=ph&test=plaintext
+// Goal:  Maximum RPS on a 16-byte text/plain body. Ceiling number.
+//
+// Service contract:
+//   GET /plaintext  → 200 OK, body "Hello, World!"
+//
+// Headers per the spec:
+//   Content-Type: text/plain
+//   Server: verum-weft
+//
+// What this exercises in our stack:
+//   * weft router + handler dispatch (no body parsing).
+//   * Response builder zero-copy path (static body).
+//   * HTTP/1.1 keep-alive throughput.
+//
+// =============================================================================
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.http.{Headers, Method, Response, StatusCode, Version};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.error.{WeftError};
+
+const PLAINTEXT_BODY: &[Byte] =
+    &[0x48_u8, 0x65_u8, 0x6C_u8, 0x6C_u8, 0x6F_u8, 0x2C_u8, 0x20_u8,
+      0x57_u8, 0x6F_u8, 0x72_u8, 0x6C_u8, 0x64_u8, 0x21_u8];
+
+pub async fn handle_plaintext(_req: WeftRequest) -> Result<Response, WeftError> {
+    let mut h = Headers.new();
+    h.append(f"content-type", f"text/plain");
+    h.append(f"server",       f"verum-weft");
+    let mut body: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < PLAINTEXT_BODY.len() {
+        body.push(PLAINTEXT_BODY[i]);
+        i = i + 1;
+    }
+    Ok(Response {
+        status:  StatusCode { code: 200 },
+        version: Version.Http11,
+        headers: h,
+        body:    body,
+    })
+}
+
+@main
+pub async fn main() -> Int {
+    // The actual server bootstrapping lives in scripts/local_smoke.sh
+    // which `verum run`s the plaintext binary against a wrk2 driver.
+    // Here we just verify the handler shape compiles + smokes.
+    let req = WeftRequest {
+        method: Method.Get, path: f"/plaintext",
+        raw_query: None, headers: Headers.new(), body: [],
+        path_params: core.collections.map.Map.new(),
+        peer_addr: None,
+    };
+    match handle_plaintext(req).await {
+        Ok(r) => {
+            assert(r.status.code() == 200);
+            assert(r.body.len() == 13);
+        },
+        Err(_) => panic("handler must not error"),
+    }
+    print("techempower plaintext smoke ok");
+    0
+}

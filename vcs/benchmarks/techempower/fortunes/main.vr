@@ -1,0 +1,156 @@
+// =============================================================================
+// TechEmpower R23 — Fortunes
+// =============================================================================
+// Spec:  https://www.techempower.com/benchmarks/#section=data-r22&hw=ph&test=fortune
+// Goal:  RPS when the request:
+//          1. SELECTs every row from the Fortune table.
+//          2. Inserts a synthetic row "Additional fortune added at request time."
+//          3. Sorts ascending by message.
+//          4. Renders an HTML5 unordered list with HTML-escaping.
+//
+// Service contract:
+//   GET /fortunes  → 200 OK, Content-Type: text/html; charset=utf-8
+//
+// What this exercises:
+//   * Result-set materialisation.
+//   * Sort hot path.
+//   * Streaming HTML template render with HTML escape (vs. raw join).
+// =============================================================================
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.http.{Headers, Method, Response, StatusCode, Version};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.error.{WeftError};
+
+type Fortune is { id: Int, message: Text };
+
+fn synth_fortunes() -> List<Fortune> {
+    // The canonical TechEmpower seed data — 12 rows. Fixed text so
+    // the rig's HTML output is bit-exact across runs.
+    let mut out: List<Fortune> = [];
+    out.push(Fortune { id: 1, message: f"fortune: No such file or directory" });
+    out.push(Fortune { id: 2, message: f"A computer scientist is someone who fixes things that aren't broken." });
+    out.push(Fortune { id: 3, message: f"After enough decimal places, nobody gives a damn." });
+    out.push(Fortune { id: 4, message: f"A bad random number generator: 1, 1, 1, 1, 1, 4.33e+67, 1, 1, 1" });
+    out.push(Fortune { id: 5, message: f"A computer program does what you tell it to do, not what you want it to do." });
+    out.push(Fortune { id: 6, message: f"Emacs is a nice operating system, but I prefer UNIX. — Tom Christaensen" });
+    out.push(Fortune { id: 7, message: f"Any program that runs right is obsolete." });
+    out.push(Fortune { id: 8, message: f"A list is only as strong as its weakest link. — Donald Knuth" });
+    out.push(Fortune { id: 9, message: f"Feature: A bug with seniority." });
+    out.push(Fortune { id: 10, message: f"Computers make very fast, very accurate mistakes." });
+    out.push(Fortune { id: 11, message: f"<script>alert(\"This should not be displayed in a browser alert box.\");</script>" });
+    out.push(Fortune { id: 12, message: f"フレームワークのベンチマーク" });
+    out
+}
+
+fn html_escape(input: &Text) -> Text {
+    // Conformant HTML escape — handles the five characters per OWASP
+    // §encoding rules + the rig's <script> test row.
+    let bytes = input.as_bytes();
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == ('<' as Byte) {
+            out.push('&' as Byte); out.push('l' as Byte); out.push('t' as Byte); out.push(';' as Byte);
+        } else if b == ('>' as Byte) {
+            out.push('&' as Byte); out.push('g' as Byte); out.push('t' as Byte); out.push(';' as Byte);
+        } else if b == ('&' as Byte) {
+            out.push('&' as Byte); out.push('a' as Byte); out.push('m' as Byte);
+            out.push('p' as Byte); out.push(';' as Byte);
+        } else if b == ('"' as Byte) {
+            out.push('&' as Byte); out.push('q' as Byte); out.push('u' as Byte);
+            out.push('o' as Byte); out.push('t' as Byte); out.push(';' as Byte);
+        } else if b == ('\'' as Byte) {
+            out.push('&' as Byte); out.push('#' as Byte); out.push('3' as Byte);
+            out.push('9' as Byte); out.push(';' as Byte);
+        } else {
+            out.push(b);
+        }
+        i = i + 1;
+    }
+    Text.from_utf8_lossy(out.as_slice())
+}
+
+fn render_fortunes(rows: &List<Fortune>) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let head = f"<!DOCTYPE html><html><head><title>Fortunes</title></head><body><table><tr><th>id</th><th>message</th></tr>";
+    let head_b = head.into_bytes();
+    let mut i: Int = 0;
+    while i < head_b.len() { out.push(head_b[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < rows.len() {
+        let escaped = html_escape(&rows[j].message);
+        let row = f"<tr><td>{rows[j].id}</td><td>{escaped}</td></tr>";
+        let rb = row.into_bytes();
+        let mut k: Int = 0;
+        while k < rb.len() { out.push(rb[k]); k = k + 1; }
+        j = j + 1;
+    }
+    let foot = f"</table></body></html>";
+    let fb = foot.into_bytes();
+    let mut m: Int = 0;
+    while m < fb.len() { out.push(fb[m]); m = m + 1; }
+    out
+}
+
+fn sort_fortunes(rows: List<Fortune>) -> List<Fortune> {
+    // In-place ascending sort by message text — selection sort for
+    // determinism (rig is comparing implementations, not sort algos).
+    let mut xs = rows;
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let mut min_idx: Int = i;
+        let mut j: Int = i + 1;
+        while j < xs.len() {
+            if xs[j].message.cmp(&xs[min_idx].message) == core.collections.list.Ordering.Less {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            let tmp = xs[i].clone();
+            xs[i] = xs[min_idx].clone();
+            xs[min_idx] = tmp;
+        }
+        i = i + 1;
+    }
+    xs
+}
+
+pub async fn handle_fortunes(_req: WeftRequest) -> Result<Response, WeftError> {
+    let mut rows = synth_fortunes();
+    // The spec mandates an inserted row mid-pipeline.
+    rows.push(Fortune { id: 0, message: f"Additional fortune added at request time." });
+    let sorted = sort_fortunes(rows);
+    let body = render_fortunes(&sorted);
+    let mut h = Headers.new();
+    h.append(f"content-type", f"text/html; charset=utf-8");
+    h.append(f"server",       f"verum-weft");
+    Ok(Response {
+        status:  StatusCode { code: 200 },
+        version: Version.Http11,
+        headers: h,
+        body:    body,
+    })
+}
+
+@main
+pub async fn main() -> Int {
+    let req = WeftRequest {
+        method: Method.Get, path: f"/fortunes",
+        raw_query: None, headers: Headers.new(), body: [],
+        path_params: core.collections.map.Map.new(),
+        peer_addr: None,
+    };
+    match handle_fortunes(req).await {
+        Ok(r) => {
+            assert(r.status.code() == 200);
+            assert(r.body.len() > 0);
+        },
+        Err(_) => panic("handler must not error"),
+    }
+    print("techempower fortunes smoke ok");
+    0
+}

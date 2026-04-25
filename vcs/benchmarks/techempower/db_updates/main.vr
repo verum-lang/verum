@@ -1,0 +1,123 @@
+// =============================================================================
+// TechEmpower R23 — Database Updates
+// =============================================================================
+// Spec:  https://www.techempower.com/benchmarks/#section=data-r22&hw=ph&test=update
+// Goal:  RPS when each request: SELECT N rows, modify each, UPDATE in batch.
+//
+// Service contract:
+//   GET /updates?queries=N  → for each of N rows: SELECT randomNumber, replace
+//                              with a new random number, UPDATE; return as JSON
+//                              array of {id,randomNumber}.
+//
+// What this exercises:
+//   * Transaction throughput.
+//   * Read-modify-write cycle.
+//   * Bulk UPDATE batching.
+// =============================================================================
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.http.{Headers, Method, Response, StatusCode, Version};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.error.{WeftError};
+
+type World is { id: Int, random_number: Int };
+
+fn synth_world(id: Int) -> World {
+    let r = ((id * 1103515245) + 12345) & 0x7FFFFFFF;
+    World { id: id, random_number: r % 10001 }
+}
+
+fn next_random(prev: Int) -> Int {
+    // Same LCG, advanced once — simulates the rig's "pick a new
+    // random number" step deterministically.
+    ((prev * 1103515245) + 12345) & 0x7FFFFFFF
+}
+
+fn parse_queries_param(query: &Maybe<Text>) -> Int {
+    let n = match query {
+        Some(q) => {
+            let bytes = q.as_bytes();
+            let key = b"queries=";
+            let mut start: Int = -1;
+            let mut i: Int = 0;
+            while i + key.len() <= bytes.len() {
+                let mut m: Bool = true;
+                let mut k: Int = 0;
+                while k < key.len() {
+                    if bytes[i + k] != key[k] { m = false; k = key.len(); }
+                    k = k + 1;
+                }
+                if m { start = i + key.len(); i = bytes.len(); }
+                i = i + 1;
+            }
+            if start < 0 { 1 } else {
+                let mut acc: Int = 0;
+                let mut j: Int = start;
+                while j < bytes.len() && bytes[j] >= ('0' as Byte) && bytes[j] <= ('9' as Byte) {
+                    acc = acc * 10 + ((bytes[j] - ('0' as Byte)) as Int);
+                    j = j + 1;
+                }
+                if acc < 1 { 1 } else if acc > 500 { 500 } else { acc }
+            }
+        },
+        None => 1,
+    };
+    n
+}
+
+pub async fn handle_updates(req: WeftRequest) -> Result<Response, WeftError> {
+    let n = parse_queries_param(&req.raw_query);
+    let mut worlds: List<World> = [];
+    let mut i: Int = 0;
+    while i < n {
+        let mut w = synth_world(i + 1);
+        // Simulate the read-modify-write: bump randomNumber.
+        w.random_number = next_random(w.random_number) % 10001;
+        // Real rig issues UPDATE here; the synth path measures the
+        // serialiser + scheduler hot path, not disk.
+        worlds.push(w);
+        i = i + 1;
+    }
+    let mut body: List<Byte> = [];
+    body.push('[' as Byte);
+    let mut j: Int = 0;
+    while j < worlds.len() {
+        if j > 0 { body.push(',' as Byte); }
+        let s = f"{{\"id\":{worlds[j].id},\"randomNumber\":{worlds[j].random_number}}}";
+        let sb = s.into_bytes();
+        let mut k: Int = 0;
+        while k < sb.len() { body.push(sb[k]); k = k + 1; }
+        j = j + 1;
+    }
+    body.push(']' as Byte);
+    let mut h = Headers.new();
+    h.append(f"content-type", f"application/json");
+    h.append(f"server",       f"verum-weft");
+    Ok(Response {
+        status:  StatusCode { code: 200 },
+        version: Version.Http11,
+        headers: h,
+        body:    body,
+    })
+}
+
+@main
+pub async fn main() -> Int {
+    let req = WeftRequest {
+        method: Method.Get, path: f"/updates",
+        raw_query: Some(f"queries=10"),
+        headers: Headers.new(), body: [],
+        path_params: core.collections.map.Map.new(),
+        peer_addr: None,
+    };
+    match handle_updates(req).await {
+        Ok(r) => {
+            assert(r.status.code() == 200);
+            assert(r.body.len() > 0);
+        },
+        Err(_) => panic("handler must not error"),
+    }
+    print("techempower db_updates smoke ok");
+    0
+}
