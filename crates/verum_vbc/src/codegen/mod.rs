@@ -3325,7 +3325,20 @@ impl VbcCodegen {
                 // For protocol impls, inherent methods take priority.
                 // If "AppConfig.new" already exists from inherent impl,
                 // don't let protocol impl's methods overwrite it.
+                //
+                // Save the previous flag value so we can restore it after the
+                // impl. Without this save/restore, the unconditional `= false`
+                // at the end of this branch corrupts pipeline-set state — e.g.
+                // pipeline.rs's `set_prefer_existing_functions(true)` for the
+                // imported-stdlib loop gets overwritten the moment any imported
+                // module contains a protocol impl, after which the next
+                // ItemKind::Type registration (e.g. RecoveryStrategy) runs in
+                // user-mode, triggers cross-type collision detection, and
+                // unregisters bare `None`. That breaks every other stdlib
+                // body that legitimately uses the simple `Maybe.None` alias
+                // (BTreeMap, Receiver.poll, all Stream adapters, etc.).
                 let is_protocol_impl = matches!(&impl_decl.kind, verum_ast::decl::ImplKind::Protocol { .. });
+                let prev_prefer_existing = self.ctx.prefer_existing_functions;
                 if is_protocol_impl {
                     self.ctx.prefer_existing_functions = true;
                 }
@@ -3461,9 +3474,12 @@ impl VbcCodegen {
                         }
                     }
 
-                // Reset prefer_existing_functions after protocol impl
+                // Restore prefer_existing_functions to its prior value
+                // (instead of unconditionally false) so caller-set context
+                // — pipeline.rs's stdlib-loading `true` — survives across
+                // impl-block boundaries.
                 if is_protocol_impl {
-                    self.ctx.prefer_existing_functions = false;
+                    self.ctx.prefer_existing_functions = prev_prefer_existing;
                 }
             }
             // Type declarations - register variant constructors for sum types
@@ -5718,7 +5734,31 @@ impl VbcCodegen {
                     );
                     self.ctx.register_function(qualified_name, info.clone());
 
-                    // 2. Handle simple name registration with collision detection
+                    // 2. Handle simple name registration with collision detection.
+                    //
+                    // First-wins semantics during stdlib loading
+                    // (`prefer_existing_functions = true`): if a built-in or
+                    // earlier-loaded stdlib type already owns the simple
+                    // name (e.g. `Maybe.None`), do NOT remove it when a
+                    // later stdlib type (e.g. `RecoveryStrategy`,
+                    // `BackoffStrategy`, `JitterConfig`) declares its own
+                    // `None` variant. The later type still gets its
+                    // qualified `<Type>.None` registration (line 5719) —
+                    // call sites that need it can use the qualified form.
+                    //
+                    // Without this gate, every stdlib type that declares
+                    // `| None` (or any other commonly-named variant) would
+                    // wipe the bare `None` alias, breaking every other
+                    // stdlib body that legitimately uses `Maybe.None` via
+                    // the simple name (BTreeMap, Receiver.poll, every
+                    // Stream adapter, etc.) — the lenient-skip
+                    // "undefined variable: None" cluster.
+                    //
+                    // In user-mode (`prefer_existing_functions = false`)
+                    // the original collision-removal stays: a user-defined
+                    // `type Foo is None | ...` wins the simple name over
+                    // the stdlib's `Maybe.None` (per the architectural
+                    // rule in `verum_types/src/CLAUDE.md`).
                     if !self.variant_collisions.contains(&variant_name) {
                         // Check if simple name is already registered
                         if let Some(existing) = self.ctx.lookup_function(&variant_name) {
@@ -5726,12 +5766,23 @@ impl VbcCodegen {
                                 // Same type re-registering the same variant — allow overwrite
                                 self.ctx.unregister_function(&variant_name);
                                 self.ctx.register_function(variant_name.clone(), info);
+                            } else if self.ctx.prefer_existing_functions {
+                                // Stdlib loading: keep first-registered simple name.
+                                // Qualified `<Type>.<Variant>` was already registered
+                                // above; downstream code can disambiguate via that.
+                                tracing::debug!(
+                                    "[variant] first-wins KEEP simple {} for {} (existing parent={:?}, new type={})",
+                                    variant_name,
+                                    existing.parent_type_name.as_deref().unwrap_or("<builtin>"),
+                                    existing.parent_type_name,
+                                    type_name,
+                                );
                             } else {
-                                // Collision detected: another type already defines this variant name
-                                // Remove the existing simple name and mark as collision
+                                // User-mode collision: another type already defines this variant name.
+                                // Remove the existing simple name and mark as collision so neither
+                                // type can use the bare form — both must qualify.
                                 self.ctx.unregister_function(&variant_name);
                                 self.variant_collisions.insert(variant_name.clone());
-                                // Now both types must use qualified names (Type::Variant)
                             }
                         } else {
                             // No collision - register simple name too for convenience

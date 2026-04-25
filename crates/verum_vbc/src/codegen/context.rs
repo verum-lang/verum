@@ -1543,19 +1543,41 @@ impl CodegenContext {
     }
 
     /// Registers a function for lookup.
+    ///
+    /// Two collision strategies:
+    ///   * different arity → stored under `name#arity` so
+    ///     `lookup_function_with_arity` can pick the right one at the
+    ///     call site (e.g. FFI `write(fd, buf, n)` and high-level
+    ///     `write(path, contents)`).
+    ///   * same arity → in `prefer_existing_functions` mode keep the
+    ///     existing entry; otherwise overwrite (user-mode wins).
+    ///
+    /// The arity-suffix branch must run in BOTH modes — without it, in
+    /// stdlib-loading mode the second registration is dropped on the
+    /// floor, so the caller-site `lookup_function_with_arity` can't find
+    /// the alternative arity and resolves the wrong function. That was
+    /// the root of the `wrong number of arguments for write: expected 2,
+    /// found 3` cluster, where the FFI 3-arity `write` was silently
+    /// dropped in favour of the 2-arity `core/io/fs.vr` shim, breaking
+    /// every `safe_write` / `safe_pread` / `safe_send` wrapper that
+    /// genuinely needs the FFI.
     pub fn register_function(&mut self, name: String, info: FunctionInfo) {
+        if let Some(existing) = self.functions.get(&name)
+            && existing.param_count != info.param_count
+        {
+            let alt_key = format!("{}#{}", name, info.param_count);
+            // Same alternative-arity precedence as the simple name:
+            // first-wins under prefer_existing, last-wins otherwise.
+            if self.prefer_existing_functions {
+                self.functions.entry(alt_key).or_insert(info);
+            } else {
+                self.functions.insert(alt_key, info);
+            }
+            return;
+        }
         if self.prefer_existing_functions {
             self.functions.entry(name).or_insert(info);
         } else {
-            // Store alternative arities for arity-based disambiguation.
-            // When a user function collides with a stdlib method of different arity,
-            // we keep both so the call site can pick the right one.
-            if let Some(existing) = self.functions.get(&name)
-                && existing.param_count != info.param_count {
-                    let alt_key = format!("{}#{}", name, info.param_count);
-                    self.functions.insert(alt_key, info);
-                    return;
-                }
             self.functions.insert(name, info);
         }
     }
