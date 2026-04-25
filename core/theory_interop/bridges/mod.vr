@@ -14,6 +14,7 @@
 //
 // V1 catalogue (this commit):
 //   owl2_to_htt        — owl2_fs → lurie_htt (24 markers, VUVA C7b)
+//   oc_dc_bridge       — Articulation ↔ Enactment round-trip (Theorem 16.10)
 //
 // V2 additions (tracked in VUVA §16.6 F6):
 //   owl2_to_baez_dolan      — n-categorical embedding
@@ -23,3 +24,4 @@
 // =============================================================================
 
 public mount core.theory_interop.bridges.owl2_to_htt;
+public mount core.theory_interop.bridges.oc_dc_bridge;

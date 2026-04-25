@@ -1,0 +1,127 @@
+// =============================================================================
+// oc_dc_bridge — articulation/enactment round-trip property (VFE-F10 / 16.10)
+// =============================================================================
+//
+// Round-trip bridge between the OC (Articulation) and DC (Enactment)
+// 2-categories. The two are Morita-dual (per
+// `core.math.frameworks.diakrisis::articulation_enactment_morita_duality`),
+// and the duality witness — `(α, ε(α))` — is already exposed by
+// `core.action.enactments::is_adjoint`. This bridge wires the
+// *algorithmic* round-trip property:
+//
+//     canonicalize(inverse(translate(α))) ≡_syn canonicalize(α)
+//
+// where:
+//   • `translate : Articulation → Enactment` lifts an articulation to its
+//     canonical enactment image (one direction of the M ⊣ A biadjunction);
+//   • `inverse : Enactment → Articulation` recovers an articulation from
+//     an enactment via the alpha-adjoint;
+//   • `canonicalize : Articulation → Articulation` produces the
+//     gauge-canonical representative through (1) congruence-closure
+//     normalisation, (2) idempotent-complete Morita closure, (3)
+//     lex-minimal selection in the gauge orbit.
+//
+// CRITICAL implementation note: canonicalize must NOT use Knuth-Bendix
+// completion (does not always terminate); the canonical algorithm is
+// the Nieuwenhuis-Oliveras congruence closure followed by an
+// idempotent-complete Morita pass and lex-min selection. This is
+// decidable for finitely-axiomatised articulations in single-exponential
+// time; semi-decidable (Σ_1) for recursively-axiomatised ones; NOT
+// universally decidable (word-problem reduction blocks it).
+//
+// V0 (this file) ships SIGNATURES + axiom-form theorems with `ensures
+// true` placeholders and citation. V1 will replace the body of
+// `canonicalize` with the full Nieuwenhuis-Oliveras + Morita +
+// lex-min pipeline and tighten the `ensures` clauses to operational
+// equalities.
+// =============================================================================
+
+mount core.action.articulation.{Articulation};
+mount core.action.enactments.{Enactment, alpha_of, epsilon, is_adjoint};
+
+// =============================================================================
+// Bridge functions — α ↔ ε round-trip
+// =============================================================================
+
+/// `translate(α)` = the canonical enactment image of an articulation.
+/// V0 form: routes through `core.action.enactments::epsilon` which
+/// already realises the syntactic-self enactment. V1 will tighten the
+/// definition to use the full M ⊣ A biadjunction unit.
+public fn translate<A: Articulation>(alpha: A) -> Enactment {
+    epsilon(alpha)
+}
+
+/// `inverse(ε)` = the articulation underlying an enactment, recovered
+/// through the alpha-adjoint. V0 form: routes through
+/// `core.action.enactments::alpha_of`. V1 will use the full counit.
+public fn inverse<E: Enactment>(e: E) -> Articulation {
+    alpha_of(e)
+}
+
+/// `canonicalize(α)` = gauge-canonical representative of an
+/// articulation under the canonical Morita-equivalence.
+///
+/// V0 form: identity (returns α unchanged), so the round-trip property
+/// reduces to checking `inverse(translate(α)) == α` modulo the
+/// existing `is_adjoint` witness. V1 will swap in the full
+/// Nieuwenhuis-Oliveras + idempotent-complete Morita + lex-minimal
+/// pipeline.
+public fn canonicalize<A: Articulation>(alpha: A) -> A {
+    alpha
+}
+
+// =============================================================================
+// Round-trip property — Theorem 16.10
+// =============================================================================
+
+/// For finitely-axiomatised articulations, the round-trip composition
+/// `canonicalize ∘ inverse ∘ translate` recovers the gauge-canonical
+/// representative of the source articulation. Decidable in
+/// single-exponential time.
+///
+/// V0 form: trusted-boundary axiom asserting the round-trip identity
+/// modulo the existing `is_adjoint` witness. V1 will replace with an
+/// operational ensures clause once `canonicalize` and the kernel
+/// rule `K-Round-Trip` are wired.
+@framework(diakrisis, "Theorem 16.10 (round-trip property; decidable for finitely-axiomatised α)")
+public axiom round_trip_property<A: Articulation>(alpha: A) -> Bool
+    ensures is_adjoint(alpha.clone(), translate(alpha));
+
+/// Decidability of gauge equivalence on finitely-axiomatised
+/// articulations: there is an algorithm running in O(2^O(|α_1|+|α_2|))
+/// that decides whether α_1 and α_2 are gauge-equivalent.
+///
+/// Operational form: trusted-boundary marker that downstream
+/// `verum audit --gauge` invocations can rely on for finitely-
+/// axiomatised inputs. V1 wires the actual decision procedure.
+@framework(diakrisis, "Theorem 16.5 (gauge decidability for finitely-axiomatised α)")
+public axiom gauge_decidability_finite<A: Articulation>(alpha_1: A, alpha_2: A) -> Bool
+    ensures true;
+
+/// Universal undecidability lower bound: there is NO algorithm that
+/// decides gauge-equivalence for arbitrary recursively-axiomatised
+/// articulations. The bound is established by reducing the word
+/// problem in finitely-presented groups to gauge-equivalence
+/// (Novikov-Boone undecidability of the word problem for groups).
+///
+/// Operational consequence: the `verum audit --gauge` CLI must
+/// distinguish three verdicts — `Decidable` (input is finitely-
+/// axiomatised), `SemiDecidable` (input is recursively-axiomatised
+/// but not finite), `Undecidable` (cannot be made into a finite
+/// presentation). The user-facing error message must be honest about
+/// the undecidability.
+@framework(diakrisis, "Theorem 16.7 (gauge undecidable in general; word-problem reduction)")
+public axiom gauge_undecidable_general() -> Bool
+    ensures true;
+
+// =============================================================================
+// Trusted-boundary auxiliary — semi-decidability for recursively-axiomatised α
+// =============================================================================
+
+/// Σ_1 semi-decidability for recursively-axiomatised articulations:
+/// there is a Turing machine that halts and outputs `true` whenever
+/// α_1 and α_2 are gauge-equivalent, but may diverge when they are
+/// not. This is the best general result short of full decidability.
+@framework(diakrisis, "Theorem 16.6 (Σ_1 semi-decidability for recursively-axiomatised α)")
+public axiom gauge_semi_decidability_recursive<A: Articulation>(alpha_1: A, alpha_2: A) -> Bool
+    ensures true;
