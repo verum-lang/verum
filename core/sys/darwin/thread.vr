@@ -1,7 +1,7 @@
 module sys.darwin.thread;
 
 // =============================================================================
-// sys/darwin/thread.vr - macOS Thread Creation and Synchronization
+// sys/darwin/thread.vr - macOS DarwinThread Creation and Synchronization
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/darwin/libsystem, sys/darwin/tls
@@ -13,8 +13,8 @@ module sys.darwin.thread;
 // going through the pthread API in libSystem.B.dylib.
 //
 // Features:
-// - Thread creation with automatic TLS initialization
-// - Mutex (pthread_mutex)
+// - DarwinThread creation with automatic TLS initialization
+// - DarwinMutex (pthread_mutex)
 // - Condition variable (pthread_cond)
 // - Spin lock (atomic-based for low-contention scenarios)
 //
@@ -30,7 +30,7 @@ mount core.intrinsics.{
 };
 mount super.libsystem.{
     PthreadT, PthreadAttr, PthreadMutex, PthreadMutexAttr,
-    PthreadCond, PthreadCondAttr, Timespec,
+    PthreadCond, PthreadCondAttr, DarwinTimespec,
     pthread_self, pthread_create, pthread_join, pthread_detach, pthread_exit,
     pthread_mutex_init, pthread_mutex_destroy, pthread_mutex_lock,
     pthread_mutex_trylock, pthread_mutex_unlock,
@@ -46,8 +46,8 @@ mount super.tls.{create_thread_tls, cleanup_thread_tls};
 // Error Type
 // =============================================================================
 
-/// Thread operation error
-public type ThreadError is
+/// DarwinThread operation error
+public type DarwinThreadError is
     | CreateFailed { code: Int }
     | JoinFailed { code: Int }
     | DetachFailed { code: Int }
@@ -60,7 +60,7 @@ public type ThreadError is
     | AlreadyDetached
     ;
 
-implement ThreadError {
+implement DarwinThreadError {
     public fn message(&self) -> Text {
         match self {
             CreateFailed { code } => f"Failed to create thread (code={code})",
@@ -71,32 +71,32 @@ implement ThreadError {
             CondInitFailed { code } => f"Failed to initialize condvar (code={code})",
             CondWaitFailed { code } => f"Failed to wait on condvar (code={code})",
             TlsInitFailed => "Failed to initialize TLS for new thread",
-            AlreadyJoined => "Thread has already been joined",
-            AlreadyDetached => "Thread has already been detached",
+            AlreadyJoined => "DarwinThread has already been joined",
+            AlreadyDetached => "DarwinThread has already been detached",
         }
     }
 }
 
 // =============================================================================
-// Thread Type
+// DarwinThread Type
 // =============================================================================
 
-/// Thread handle
-public type Thread is {
+/// DarwinThread handle
+public type DarwinThread is {
     /// pthread handle
     handle: PthreadT,
-    /// Thread ID (cached)
+    /// DarwinThread ID (cached)
     tid: UInt64,
     /// Whether thread has been joined/detached
     finished: Bool,
 };
 
-/// Thread function type
-public type ThreadFn is fn(&unsafe Byte) -> &unsafe Byte;
+/// DarwinThread function type
+public type DarwinThreadFn is fn(&unsafe Byte) -> &unsafe Byte;
 
-/// Thread entry wrapper data
+/// DarwinThread entry wrapper data
 type ThreadEntryData is {
-    func: ThreadFn,
+    func: DarwinThreadFn,
     arg: &unsafe Byte,
 };
 
@@ -122,11 +122,11 @@ fn thread_entry(data: &unsafe Byte) -> &unsafe Byte {
     result
 }
 
-implement Thread {
+implement DarwinThread {
     /// Spawn a new thread.
     ///
     /// The thread function will be called with TLS already initialized.
-    public fn spawn(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
+    public fn spawn(func: DarwinThreadFn, arg: &unsafe Byte) -> Result<DarwinThread, DarwinThreadError> {
         // Allocate entry data (leaked - thread will use it)
         // In a real implementation, this would use proper allocation
         let entry_data = ThreadEntryData {
@@ -154,7 +154,7 @@ implement Thread {
         let mut tid: UInt64 = 0;
         unsafe { pthread_threadid_np(handle, &mut tid) };
 
-        Ok(Thread {
+        Ok(DarwinThread {
             handle: handle,
             tid: tid,
             finished: false,
@@ -162,7 +162,7 @@ implement Thread {
     }
 
     /// Wait for thread to finish and get its return value.
-    public fn join(&mut self) -> Result<&unsafe Byte, ThreadError> {
+    public fn join(&mut self) -> Result<&unsafe Byte, DarwinThreadError> {
         if self.finished {
             return Err(AlreadyJoined);
         }
@@ -179,7 +179,7 @@ implement Thread {
     }
 
     /// Detach thread (will be cleaned up automatically when done).
-    public fn detach(&mut self) -> Result<(), ThreadError> {
+    public fn detach(&mut self) -> Result<(), DarwinThreadError> {
         if self.finished {
             return Err(AlreadyDetached);
         }
@@ -218,24 +218,24 @@ public fn current_tid() -> UInt64 {
 }
 
 /// Convenience function to spawn a thread.
-public fn spawn(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
-    Thread.spawn(func, arg)
+public fn spawn(func: DarwinThreadFn, arg: &unsafe Byte) -> Result<DarwinThread, DarwinThreadError> {
+    DarwinThread.spawn(func, arg)
 }
 
 // =============================================================================
-// Mutex
+// DarwinMutex
 // =============================================================================
 
-/// Mutex (mutual exclusion lock)
-public type Mutex is {
+/// DarwinMutex (mutual exclusion lock)
+public type DarwinMutex is {
     inner: PthreadMutex,
     initialized: Bool,
 };
 
-implement Mutex {
+implement DarwinMutex {
     /// Create a new mutex.
-    public fn new() -> Result<Mutex, ThreadError> {
-        let mut mutex = Mutex {
+    public fn new() -> Result<DarwinMutex, DarwinThreadError> {
+        let mut mutex = DarwinMutex {
             inner: PthreadMutex { _opaque: [0; 8] },
             initialized: false,
         };
@@ -252,7 +252,7 @@ implement Mutex {
     }
 
     /// Lock the mutex (blocking).
-    public fn lock(&mut self) -> Result<(), ThreadError> {
+    public fn lock(&mut self) -> Result<(), DarwinThreadError> {
         let result = unsafe { pthread_mutex_lock(&mut self.inner) };
         if result != 0 {
             Err(MutexLockFailed { code: result })
@@ -275,7 +275,7 @@ implement Mutex {
     }
 
     /// Execute a function while holding the lock.
-    public fn with_lock<T>(&mut self, f: fn() -> T) -> Result<T, ThreadError> {
+    public fn with_lock<T>(&mut self, f: fn() -> T) -> Result<T, DarwinThreadError> {
         self.lock()?;
         let result = f();
         self.unlock();
@@ -283,7 +283,7 @@ implement Mutex {
     }
 }
 
-implement Drop for Mutex {
+implement Drop for DarwinMutex {
     fn drop(&mut self) {
         if self.initialized {
             unsafe { pthread_mutex_destroy(&mut self.inner) };
@@ -297,15 +297,15 @@ implement Drop for Mutex {
 // =============================================================================
 
 /// Condition variable for thread synchronization
-public type Condvar is {
+public type DarwinCondvar is {
     inner: PthreadCond,
     initialized: Bool,
 };
 
-implement Condvar {
+implement DarwinCondvar {
     /// Create a new condition variable.
-    public fn new() -> Result<Condvar, ThreadError> {
-        let mut cond = Condvar {
+    public fn new() -> Result<DarwinCondvar, DarwinThreadError> {
+        let mut cond = DarwinCondvar {
             inner: PthreadCond { _opaque: [0; 6] },
             initialized: false,
         };
@@ -325,7 +325,7 @@ implement Condvar {
     ///
     /// The mutex must be locked before calling. It will be unlocked
     /// while waiting and re-locked before returning.
-    public fn wait(&mut self, mutex: &mut Mutex) -> Result<(), ThreadError> {
+    public fn wait(&mut self, mutex: &mut DarwinMutex) -> Result<(), DarwinThreadError> {
         let result = unsafe { pthread_cond_wait(&mut self.inner, &mut mutex.inner) };
         if result != 0 {
             Err(CondWaitFailed { code: result })
@@ -337,9 +337,9 @@ implement Condvar {
     /// Wait on the condition variable with timeout.
     ///
     /// Returns Ok(true) if signaled, Ok(false) if timed out.
-    public fn wait_timeout(&mut self, mutex: &mut Mutex, timeout_ms: Int) -> Result<Bool, ThreadError> {
+    public fn wait_timeout(&mut self, mutex: &mut DarwinMutex, timeout_ms: Int) -> Result<Bool, DarwinThreadError> {
         // Calculate absolute timeout
-        let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+        let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
         unsafe { super.libsystem.clock_gettime(0, &mut ts) };  // CLOCK_REALTIME
         ts.tv_sec += timeout_ms / 1000;
         ts.tv_nsec += (timeout_ms % 1000) * 1_000_000;
@@ -370,7 +370,7 @@ implement Condvar {
     }
 }
 
-implement Drop for Condvar {
+implement Drop for DarwinCondvar {
     fn drop(&mut self) {
         if self.initialized {
             unsafe { pthread_cond_destroy(&mut self.inner) };
@@ -428,11 +428,11 @@ implement SpinLock {
 }
 
 // =============================================================================
-// Once (one-time initialization)
+// DarwinOnce (one-time initialization)
 // =============================================================================
 
 /// One-time initialization primitive
-public type Once is {
+public type DarwinOnce is {
     state: UInt32,  // 0 = not run, 1 = running, 2 = complete
     mutex: PthreadMutex,
 };
@@ -441,10 +441,10 @@ public const ONCE_INIT: UInt32 = 0;
 public const ONCE_RUNNING: UInt32 = 1;
 public const ONCE_COMPLETE: UInt32 = 2;
 
-implement Once {
-    /// Create a new Once.
-    public fn new() -> Once {
-        Once {
+implement DarwinOnce {
+    /// Create a new DarwinOnce.
+    public fn new() -> DarwinOnce {
+        DarwinOnce {
             state: ONCE_INIT,
             mutex: PthreadMutex { _opaque: [0; 8] },
         }
@@ -567,7 +567,7 @@ public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
 }
 
 // =============================================================================
-// Futex-based Mutex (same algorithm as Linux, using ulock)
+// Futex-based DarwinMutex (same algorithm as Linux, using ulock)
 // =============================================================================
 
 /// Futex-based mutex (sleeps on contention via __ulock).

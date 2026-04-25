@@ -1,7 +1,7 @@
 module sys.linux.thread;
 
 // =============================================================================
-// sys/linux/thread.vr - Linux Thread Creation and Synchronization
+// sys/linux/thread.vr - Linux LinuxThread Creation and Synchronization
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/linux/syscall, sys/linux/tls
@@ -11,11 +11,11 @@ module sys.linux.thread;
 // This module provides thread creation via clone/clone3 and comprehensive
 // futex operations for synchronization primitives.
 //
-// Thread creation flow:
+// LinuxThread creation flow:
 // 1. Allocate stack (mmap or from pool)
 // 2. Initialize TLS block (create_thread_tls)
 // 3. clone3() with CLONE_SETTLS to create thread
-// 4. Thread starts at entry function
+// 4. LinuxThread starts at entry function
 //
 // Futex provides building blocks for:
 // - Mutexes (futex_wait/wake)
@@ -37,7 +37,7 @@ mount sys.linux.syscall.{
     SYS_CLONE, SYS_CLONE3, SYS_FUTEX, SYS_GETTID,
     SYS_MMAP, SYS_MUNMAP, SYS_MPROTECT,
 };
-mount sys.linux.tls.{ThreadControlBlock, create_thread_tls, cleanup_thread_tls};
+mount sys.linux.tls.{LinuxThreadControlBlock, create_thread_tls, cleanup_thread_tls};
 
 // =============================================================================
 // Clone Flags
@@ -121,23 +121,23 @@ public type Clone3Args is {
 };
 
 // =============================================================================
-// Thread Types
+// LinuxThread Types
 // =============================================================================
 
-/// Thread handle.
-public type Thread is {
+/// LinuxThread handle.
+public type LinuxThread is {
     tid: Int,
     stack_base: &unsafe Byte,
     stack_size: USize,
-    tls: &unsafe ThreadControlBlock,
+    tls: &unsafe LinuxThreadControlBlock,
     joined: Bool,
 };
 
-/// Thread entry function type
-public type ThreadFn is fn(&unsafe Byte) -> Int;
+/// LinuxThread entry function type
+public type LinuxThreadFn is fn(&unsafe Byte) -> Int;
 
-/// Thread spawn error
-public type ThreadError is
+/// LinuxThread spawn error
+public type LinuxThreadError is
     | StackAllocationFailed { code: Int }
     | TlsAllocationFailed { code: Int }
     | CloneFailed { code: Int }
@@ -151,19 +151,19 @@ public const DEFAULT_STACK_SIZE: USize = 2 * 1024 * 1024;
 public const STACK_GUARD_SIZE: USize = 4096;
 
 // =============================================================================
-// Thread Creation
+// LinuxThread Creation
 // =============================================================================
 
 /// Spawn a new thread.
 ///
 /// # Arguments
-/// * `entry` - Thread entry function
+/// * `entry` - LinuxThread entry function
 /// * `arg` - Argument passed to entry function
 /// * `stack_size` - Stack size (0 = default 2MB)
 ///
 /// # Returns
-/// Thread handle on success, error on failure.
-public fn spawn(entry: ThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result<Thread, ThreadError> {
+/// LinuxThread handle on success, error on failure.
+public fn spawn(entry: LinuxThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result<LinuxThread, LinuxThreadError> {
     let actual_stack_size = if stack_size == 0 { DEFAULT_STACK_SIZE } else { stack_size };
 
     // Allocate stack with guard page
@@ -181,7 +181,7 @@ public fn spawn(entry: ThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result
     };
 
     if stack_base < 0 && stack_base > -4096 {
-        return Err(ThreadError.StackAllocationFailed { code: -stack_base as Int });
+        return Err(LinuxThreadError.StackAllocationFailed { code: -stack_base as Int });
     }
 
     // Make guard page inaccessible
@@ -197,7 +197,7 @@ public fn spawn(entry: ThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result
 
     if guard_result < 0 {
         unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
-        return Err(ThreadError.StackAllocationFailed { code: -guard_result as Int });
+        return Err(LinuxThreadError.StackAllocationFailed { code: -guard_result as Int });
     }
 
     // Stack grows down, so top is at base + total_size
@@ -208,7 +208,7 @@ public fn spawn(entry: ThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result
         Ok(tls) => tls,
         Err(e) => {
             unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
-            return Err(ThreadError.TlsAllocationFailed { code: 0 });
+            return Err(LinuxThreadError.TlsAllocationFailed { code: 0 });
         }
     };
 
@@ -259,11 +259,11 @@ public fn spawn(entry: ThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result
         if clone_result < 0 {
             cleanup_thread_tls();
             unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
-            return Err(ThreadError.CloneFailed { code: -clone_result as Int });
+            return Err(LinuxThreadError.CloneFailed { code: -clone_result as Int });
         }
     }
 
-    Ok(Thread {
+    Ok(LinuxThread {
         tid: if result >= 0 { result } else { parent_tid },
         stack_base: stack_base as &unsafe Byte,
         stack_size: total_size,
@@ -273,7 +273,7 @@ public fn spawn(entry: ThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result
 }
 
 /// Set up thread stack with entry point.
-fn setup_thread_stack(stack_top: &unsafe Byte, entry: ThreadFn, arg: &unsafe Byte) -> &unsafe Byte {
+fn setup_thread_stack(stack_top: &unsafe Byte, entry: LinuxThreadFn, arg: &unsafe Byte) -> &unsafe Byte {
     // x86_64 ABI: Stack must be 16-byte aligned before call
     let stack = (stack_top as USize - 16) & !15;
 
@@ -287,9 +287,9 @@ fn clone_fallback(
     flags: Int,
     stack: &unsafe Byte,
     parent_tid: &mut Int,
-    tls: &unsafe ThreadControlBlock,
+    tls: &unsafe LinuxThreadControlBlock,
     child_tid: &mut Int,
-    entry: ThreadFn,
+    entry: LinuxThreadFn,
     arg: &unsafe Byte
 ) -> Int {
     unsafe {
@@ -305,11 +305,11 @@ fn clone_fallback(
     }
 }
 
-implement Thread {
+implement LinuxThread {
     /// Wait for thread to exit and get exit code.
-    public fn join(&mut self) -> Result<Int, ThreadError> {
+    public fn join(&mut self) -> Result<Int, LinuxThreadError> {
         if self.joined {
-            return Err(ThreadError.AlreadyJoined);
+            return Err(LinuxThreadError.AlreadyJoined);
         }
 
         // Use futex to wait for thread exit
@@ -327,7 +327,7 @@ implement Thread {
             match result {
                 Ok(_) => continue,
                 Err(OSError { code }) if code == EAGAIN => continue,
-                Err(e) => return Err(ThreadError.CloneFailed { code: e.code }),
+                Err(e) => return Err(LinuxThreadError.CloneFailed { code: e.code }),
             }
         }
 
@@ -623,13 +623,13 @@ implement SpinLock {
 }
 
 /// Futex-based mutex (sleeps on contention).
-public type Mutex is {
+public type LinuxMutex is {
     state: UInt32,  // 0 = unlocked, 1 = locked, 2 = locked with waiters
 };
 
-implement Mutex {
-    public fn new() -> Mutex {
-        Mutex { state: 0 }
+implement LinuxMutex {
+    public fn new() -> LinuxMutex {
+        LinuxMutex { state: 0 }
     }
 
     public fn lock(&mut self) {
@@ -668,23 +668,23 @@ implement Mutex {
 }
 
 /// Condition variable.
-public type Condvar is {
+public type LinuxCondvar is {
     seq: UInt32,  // Sequence counter for spurious wakeup detection
 };
 
-implement Condvar {
-    public fn new() -> Condvar {
-        Condvar { seq: 0 }
+implement LinuxCondvar {
+    public fn new() -> LinuxCondvar {
+        LinuxCondvar { seq: 0 }
     }
 
-    public fn wait(&mut self, mutex: &mut Mutex) {
+    public fn wait(&mut self, mutex: &mut LinuxMutex) {
         let seq = self.seq;
         mutex.unlock();
         let _ = futex_wait(&self.seq as &Int, seq as Int, None);
         mutex.lock();
     }
 
-    public fn wait_timeout(&mut self, mutex: &mut Mutex, timeout_ns: UInt64) -> Bool {
+    public fn wait_timeout(&mut self, mutex: &mut LinuxMutex, timeout_ns: UInt64) -> Bool {
         let seq = self.seq;
         mutex.unlock();
         let result = futex_wait(&self.seq as &Int, seq as Int, Some(timeout_ns));

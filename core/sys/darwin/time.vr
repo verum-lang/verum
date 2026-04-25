@@ -25,7 +25,7 @@ module sys.darwin.time;
 mount sys.common.OSError;
 mount super.libsystem.{
     mach_absolute_time, mach_timebase_info, MachTimebaseInfo,
-    clock_gettime, nanosleep, Timespec,
+    clock_gettime, nanosleep, DarwinTimespec,
     CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW,
     CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
     errno,
@@ -97,7 +97,7 @@ fn nanos_to_mach(nanos: UInt64) -> UInt64 {
 // Time Structures
 // =============================================================================
 
-// Note: Timespec and Timeval are imported from libsystem
+// Note: DarwinTimespec and DarwinTimeval are imported from libsystem
 
 /// Duration type (nanoseconds)
 public type Duration is (UInt64);
@@ -148,9 +148,9 @@ implement Duration {
         (self.0 % 1_000_000_000) as UInt32
     }
 
-    /// Convert to Timespec.
-    public fn to_timespec(&self) -> Timespec {
-        Timespec {
+    /// Convert to DarwinTimespec.
+    public fn to_timespec(&self) -> DarwinTimespec {
+        DarwinTimespec {
             tv_sec: (self.0 / 1_000_000_000) as Int64,
             tv_nsec: (self.0 % 1_000_000_000) as Int64,
         }
@@ -261,35 +261,35 @@ public fn monotonic_millis() -> UInt64 {
 ///
 /// Uses CLOCK_MONOTONIC_RAW which is not adjusted by NTP.
 public fn monotonic_raw_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
     unsafe { clock_gettime(CLOCK_MONOTONIC_RAW, &mut ts) };
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
 
 /// Get real time (wall clock) in nanoseconds since Unix epoch.
 public fn realtime_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
     unsafe { clock_gettime(CLOCK_REALTIME, &mut ts) };
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
 
 /// Get real time in seconds since Unix epoch.
 public fn unix_timestamp() -> Int64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
     unsafe { clock_gettime(CLOCK_REALTIME, &mut ts) };
     ts.tv_sec
 }
 
 /// Get current thread's CPU time in nanoseconds.
 public fn thread_cputime_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
     unsafe { clock_gettime(CLOCK_THREAD_CPUTIME_ID, &mut ts) };
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
 
 /// Get current process's CPU time in nanoseconds.
 public fn process_cputime_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
     unsafe { clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &mut ts) };
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
@@ -307,7 +307,7 @@ public fn process_cputime_nanos() -> UInt64 {
 /// Remaining time if interrupted, None if completed.
 public fn sleep(duration: Duration) -> Maybe<Duration> {
     let req = duration.to_timespec();
-    let mut rem = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut rem = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
 
     let result = unsafe { nanosleep(&req, &mut rem) };
 
@@ -363,17 +363,17 @@ public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
 
 /// Simple stopwatch for timing code sections.
 /// Uses VBC's monotonic_nanos() for compatibility with the interpreter.
-public type Stopwatch is {
+public type DarwinStopwatch is {
     start: UInt64,      // Nanoseconds timestamp
     running: Bool,
     accumulated: UInt64,  // Accumulated nanoseconds
 };
 
-implement Stopwatch {
+implement DarwinStopwatch {
     /// Create and start a new stopwatch.
-    public fn new() -> Stopwatch {
+    public fn new() -> DarwinStopwatch {
         let now = monotonic_nanos();
-        Stopwatch {
+        DarwinStopwatch {
             start: now,
             running: true,
             accumulated: 0,
@@ -381,8 +381,8 @@ implement Stopwatch {
     }
 
     /// Create and immediately start a stopwatch.
-    public fn started() -> Stopwatch {
-        let mut sw = Stopwatch.new();
+    public fn started() -> DarwinStopwatch {
+        let mut sw = DarwinStopwatch.new();
         sw.start();
         sw
     }
@@ -455,13 +455,13 @@ implement Stopwatch {
 ///
 /// Uses Mach absolute time which is the fastest monotonic
 /// time source on macOS (typically just a register read).
-public type PerfCounter is (UInt64);
+public type DarwinPerfCounter is (UInt64);
 
-implement PerfCounter {
+implement DarwinPerfCounter {
     /// Read the current performance counter.
     @inline
-    public fn now() -> PerfCounter {
-        PerfCounter(unsafe { mach_absolute_time() })
+    public fn now() -> DarwinPerfCounter {
+        DarwinPerfCounter(unsafe { mach_absolute_time() })
     }
 
     /// Get elapsed time since this counter reading.
@@ -479,13 +479,13 @@ implement PerfCounter {
 
     /// Difference between two counter readings.
     @inline
-    public fn diff(&self, earlier: &PerfCounter) -> Duration {
+    public fn diff(&self, earlier: &DarwinPerfCounter) -> Duration {
         Duration(mach_to_nanos(self.0 - earlier.0))
     }
 
     /// Get elapsed time since an earlier counter reading.
     @inline
-    public fn elapsed_since(&self, earlier: PerfCounter) -> Duration {
+    public fn elapsed_since(&self, earlier: DarwinPerfCounter) -> Duration {
         Duration(mach_to_nanos(self.0 - earlier.0))
     }
 
@@ -502,38 +502,38 @@ implement PerfCounter {
 
 /// A deadline timer for timeout management.
 /// Uses VBC-compatible monotonic_nanos() for consistency with interpreter.
-public type DeadlineTimer is {
+public type DarwinDeadlineTimer is {
     deadline: UInt64,  // Nanoseconds timestamp
     has_deadline: Bool,
 };
 
-implement DeadlineTimer {
+implement DarwinDeadlineTimer {
     /// Create a timer with no deadline (infinite timeout).
-    public fn none() -> DeadlineTimer {
-        DeadlineTimer {
+    public fn none() -> DarwinDeadlineTimer {
+        DarwinDeadlineTimer {
             deadline: 0,
             has_deadline: false,
         }
     }
 
     /// Create a timer that expires after a duration.
-    public fn after(duration: Duration) -> DeadlineTimer {
+    public fn after(duration: Duration) -> DarwinDeadlineTimer {
         let now = monotonic_nanos();
-        DeadlineTimer {
+        DarwinDeadlineTimer {
             deadline: now + duration.0,
             has_deadline: true,
         }
     }
 
     /// Create a timer that expires after a duration (alias for `after`).
-    public fn from_duration(duration: Duration) -> DeadlineTimer {
-        DeadlineTimer.after(duration)
+    public fn from_duration(duration: Duration) -> DarwinDeadlineTimer {
+        DarwinDeadlineTimer.after(duration)
     }
 
     /// Create a timer that expires at a specific instant.
-    public fn at(instant: Instant) -> DeadlineTimer {
+    public fn at(instant: Instant) -> DarwinDeadlineTimer {
         // Note: Instant uses mach_absolute_time internally, so convert to nanos
-        DeadlineTimer {
+        DarwinDeadlineTimer {
             deadline: mach_to_nanos(instant.0),
             has_deadline: true,
         }

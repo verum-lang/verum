@@ -18,7 +18,7 @@ module sys.linux.time;
 // - CLOCK_MONOTONIC: Time since boot (not affected by NTP)
 // - CLOCK_REALTIME: Wall-clock time (affected by NTP)
 // - CLOCK_BOOTTIME: Like monotonic but includes suspend time
-// - CLOCK_THREAD_CPUTIME_ID: Thread CPU time
+// - CLOCK_THREAD_CPUTIME_ID: LinuxThread CPU time
 //
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
@@ -75,16 +75,16 @@ public const CLOCK_TAI: Int = 11;
 // Time Structures
 // =============================================================================
 
-/// Timespec structure (used by clock_gettime, clock_nanosleep)
+/// LinuxTimeTimespec structure (used by clock_gettime, clock_nanosleep)
 @repr(C)
-public type Timespec is {
+public type LinuxTimeTimespec is {
     tv_sec: Int64,   // Seconds
     tv_nsec: Int64,  // Nanoseconds (0-999999999)
 };
 
-/// Timeval structure (used by gettimeofday, select)
+/// LinuxTimeTimeval structure (used by gettimeofday, select)
 @repr(C)
-public type Timeval is {
+public type LinuxTimeTimeval is {
     tv_sec: Int64,   // Seconds
     tv_usec: Int64,  // Microseconds (0-999999)
 };
@@ -138,9 +138,9 @@ implement Duration {
         (self.0 % 1_000_000_000) as UInt32
     }
 
-    /// Convert to Timespec.
-    public fn to_timespec(&self) -> Timespec {
-        Timespec {
+    /// Convert to LinuxTimeTimespec.
+    public fn to_timespec(&self) -> LinuxTimeTimespec {
+        LinuxTimeTimespec {
             tv_sec: (self.0 / 1_000_000_000) as Int64,
             tv_nsec: (self.0 % 1_000_000_000) as Int64,
         }
@@ -187,7 +187,7 @@ implement Instant {
 /// # Arguments
 /// * `clock_id` - Clock to query (CLOCK_* constant)
 /// * `ts` - Output timespec
-public fn clock_gettime(clock_id: Int, ts: &mut Timespec) -> Result<(), OSError> {
+public fn clock_gettime(clock_id: Int, ts: &mut LinuxTimeTimespec) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_CLOCK_GETTIME,
@@ -209,7 +209,7 @@ public fn clock_gettime(clock_id: Int, ts: &mut Timespec) -> Result<(), OSError>
 /// This is the primary time source for performance measurement
 /// and timeouts. It is not affected by system time changes.
 public fn monotonic_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
     let _ = clock_gettime(CLOCK_MONOTONIC, &mut ts);
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
@@ -228,7 +228,7 @@ public fn monotonic_millis() -> UInt64 {
 ///
 /// Like monotonic_nanos but not adjusted by NTP.
 public fn monotonic_raw_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
     let _ = clock_gettime(CLOCK_MONOTONIC_RAW, &mut ts);
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
@@ -237,42 +237,42 @@ public fn monotonic_raw_nanos() -> UInt64 {
 ///
 /// Faster but lower resolution (~1ms).
 public fn monotonic_coarse_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
     let _ = clock_gettime(CLOCK_MONOTONIC_COARSE, &mut ts);
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
 
 /// Get real time (wall clock) in nanoseconds since Unix epoch.
 public fn realtime_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
     let _ = clock_gettime(CLOCK_REALTIME, &mut ts);
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
 
 /// Get real time in seconds since Unix epoch.
 public fn unix_timestamp() -> Int64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
     let _ = clock_gettime(CLOCK_REALTIME, &mut ts);
     ts.tv_sec
 }
 
 /// Get boot time in nanoseconds (includes suspend time).
 public fn boottime_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
     let _ = clock_gettime(CLOCK_BOOTTIME, &mut ts);
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
 
 /// Get current thread's CPU time in nanoseconds.
 public fn thread_cputime_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
     let _ = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &mut ts);
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
 
 /// Get current process's CPU time in nanoseconds.
 public fn process_cputime_nanos() -> UInt64 {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
     let _ = clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &mut ts);
     (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
 }
@@ -293,7 +293,7 @@ public const TIMER_ABSTIME: Int = 1;
 /// Remaining time if interrupted, None if completed.
 public fn sleep(duration: Duration) -> Maybe<Duration> {
     let req = duration.to_timespec();
-    let mut rem = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut rem = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
 
     let result = unsafe {
         syscall_raw(
@@ -321,8 +321,8 @@ public fn sleep(duration: Duration) -> Maybe<Duration> {
 public fn clock_nanosleep(
     clock_id: Int,
     flags: Int,
-    req: &Timespec,
-    rem: Maybe<&mut Timespec>
+    req: &LinuxTimeTimespec,
+    rem: Maybe<&mut LinuxTimeTimespec>
 ) -> Result<(), OSError> {
     let rem_ptr = match rem {
         Some(r) => r as Int,
@@ -351,7 +351,7 @@ public fn clock_nanosleep(
 ///
 /// More precise than relative sleep for periodic wakeups.
 public fn sleep_until(deadline_nanos: UInt64) -> Result<(), OSError> {
-    let req = Timespec {
+    let req = LinuxTimeTimespec {
         tv_sec: (deadline_nanos / 1_000_000_000) as Int64,
         tv_nsec: (deadline_nanos % 1_000_000_000) as Int64,
     };
@@ -424,15 +424,15 @@ public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
 }
 
 /// Simple stopwatch for timing code sections.
-public type Stopwatch is {
+public type LinuxStopwatch is {
     start: UInt64,
     running: Bool,
     accumulated: UInt64,
 };
 
-implement Stopwatch {
-    public fn new() -> Stopwatch {
-        Stopwatch {
+implement LinuxStopwatch {
+    public fn new() -> LinuxStopwatch {
+        LinuxStopwatch {
             start: 0,
             running: false,
             accumulated: 0,

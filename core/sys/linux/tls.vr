@@ -1,14 +1,14 @@
 module sys.linux.tls;
 
 // =============================================================================
-// sys/linux/tls.vr - Thread-Local Storage Bootstrap for Linux x86_64
+// sys/linux/tls.vr - LinuxThread-Local Storage Bootstrap for Linux x86_64
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/linux/syscall
 // Platform: Linux x86_64
 // =============================================================================
 //
-// This module provides TLS (Thread-Local Storage) bootstrap functionality
+// This module provides TLS (LinuxThread-Local Storage) bootstrap functionality
 // required for @thread_local variables, particularly critical for the
 // per-thread allocator in std.mem.LocalHeap.
 //
@@ -61,10 +61,10 @@ public const TLS_CTX_OFFSET: Int = 0;
 public const STACK_GUARD_MAGIC: USize = 0xDEAD_BEEF_CAFE_BABE;
 
 // =============================================================================
-// Thread Control Block (TCB)
+// LinuxThread Control Block (TCB)
 // =============================================================================
 
-/// Thread Control Block - stored at %fs:0
+/// LinuxThread Control Block - stored at %fs:0
 ///
 /// This structure must be at the address pointed to by %fs.
 /// The first field (self_ptr) must point to itself for ABI compatibility.
@@ -80,10 +80,10 @@ public const STACK_GUARD_MAGIC: USize = 0xDEAD_BEEF_CAFE_BABE;
 /// %fs:40  -> context_slots (for V-LLSI context system)
 /// %fs:48  -> user_data
 /// ```
-public type ThreadControlBlock is {
+public type LinuxThreadControlBlock is {
     /// Self-pointer (required by x86_64 TLS ABI, must be at offset 0)
     /// This enables __tls_get_addr to work correctly.
-    self_ptr: &unsafe ThreadControlBlock,
+    self_ptr: &unsafe LinuxThreadControlBlock,
 
     /// Stack canary for stack smashing detection
     stack_guard: USize,
@@ -102,7 +102,7 @@ public type ThreadControlBlock is {
 
     /// Context slots for V-LLSI context system (256 slots)
     /// See docs/architecture/new-arch-spec.md Appendix F
-    context_slots: &unsafe ContextSlots,
+    context_slots: &unsafe LinuxContextSlots,
 
     /// User-defined data pointer
     user_data: &unsafe Byte,
@@ -116,12 +116,12 @@ public const MAX_CONTEXT_SLOTS: Int = 256;
 /// Maximum depth of the context stack for hierarchical contexts
 public const CONTEXT_STACK_DEPTH: Int = 8;
 
-public type ContextSlots is {
+public type LinuxContextSlots is {
     /// Slot values (indexed by slot ID 0-255)
     slots: [&unsafe Byte; 256],
 
     /// Parent context for hierarchical lookup
-    parent: Maybe<&ContextSlots>,
+    parent: Maybe<&LinuxContextSlots>,
 
     /// Bitmask of active slots (4 x 64-bit = 256 bits)
     active: [UInt64; 4],
@@ -160,8 +160,8 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), TlsError> {
     let aligned_tls_size = (tls_size + TLS_ALIGN - 1) & !(TLS_ALIGN - 1);
 
     // Calculate total size: TCB + TLS data + context slots
-    let tcb_size = ThreadControlBlock.size;
-    let ctx_size = ContextSlots.size;
+    let tcb_size = LinuxThreadControlBlock.size;
+    let ctx_size = LinuxContextSlots.size;
     let total_size = tcb_size + aligned_tls_size + ctx_size;
 
     // Allocate memory via mmap (anonymous, private)
@@ -189,8 +189,8 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), TlsError> {
     //           ^--- %fs points here
 
     let tls_data_ptr = base;
-    let tcb_ptr = unsafe { base.offset(aligned_tls_size as Int) } as &unsafe ThreadControlBlock;
-    let ctx_ptr = unsafe { base.offset((aligned_tls_size + tcb_size) as Int) } as &unsafe ContextSlots;
+    let tcb_ptr = unsafe { base.offset(aligned_tls_size as Int) } as &unsafe LinuxThreadControlBlock;
+    let ctx_ptr = unsafe { base.offset((aligned_tls_size + tcb_size) as Int) } as &unsafe LinuxContextSlots;
 
     // Initialize context slots
     unsafe {
@@ -237,7 +237,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), TlsError> {
 /// Create TLS block for a new thread (called before clone).
 ///
 /// Returns a pointer suitable for CLONE_SETTLS argument.
-public fn create_thread_tls(stack_size: USize) -> Result<&unsafe ThreadControlBlock, TlsError> {
+public fn create_thread_tls(stack_size: USize) -> Result<&unsafe LinuxThreadControlBlock, TlsError> {
     init_thread_tls_with_size(DEFAULT_TLS_SIZE)?;
     get_current_tcb()
 }
@@ -251,9 +251,9 @@ public fn create_thread_tls(stack_size: USize) -> Result<&unsafe ThreadControlBl
 /// # Safety
 /// TLS must be initialized via init_main_thread_tls() first.
 @inline
-public fn get_current_tcb() -> Result<&unsafe ThreadControlBlock, TlsError> {
+public fn get_current_tcb() -> Result<&unsafe LinuxThreadControlBlock, TlsError> {
     // Read TCB pointer from fs:[0] using TLS intrinsic
-    let tcb: &unsafe ThreadControlBlock = tls_read_ptr(0);
+    let tcb: &unsafe LinuxThreadControlBlock = tls_read_ptr(0);
     Ok(tcb)
 }
 
@@ -261,18 +261,18 @@ public fn get_current_tcb() -> Result<&unsafe ThreadControlBlock, TlsError> {
 ///
 /// Used by the V-LLSI context system for provide/using.
 @inline
-public fn get_context_slots() -> &ContextSlots {
+public fn get_context_slots() -> &LinuxContextSlots {
     // Read context slots pointer from fs:[40] using TLS intrinsic
-    // Offset 40 = offsetof(ThreadControlBlock, context_slots)
-    let slots: &ContextSlots = tls_read_ptr(40);
+    // Offset 40 = offsetof(LinuxThreadControlBlock, context_slots)
+    let slots: &LinuxContextSlots = tls_read_ptr(40);
     slots
 }
 
 /// Set the current thread's context slots.
 @inline
-public fn set_context_slots(slots: &ContextSlots) {
+public fn set_context_slots(slots: &LinuxContextSlots) {
     // Write context slots pointer to fs:[40] using TLS intrinsic
-    // Offset 40 = offsetof(ThreadControlBlock, context_slots)
+    // Offset 40 = offsetof(LinuxThreadControlBlock, context_slots)
     tls_write_ptr(40, slots);
 }
 
@@ -280,7 +280,7 @@ public fn set_context_slots(slots: &ContextSlots) {
 @inline
 public fn get_errno() -> Int {
     // Read errno from fs:[20] using TLS intrinsic
-    // Offset 20 = offsetof(ThreadControlBlock, errno)
+    // Offset 20 = offsetof(LinuxThreadControlBlock, errno)
     let errno: Int32 = tls_read_i32(20);
     errno as Int
 }
@@ -289,7 +289,7 @@ public fn get_errno() -> Int {
 @inline
 public fn set_errno(value: Int) {
     // Write errno to fs:[20] using TLS intrinsic
-    // Offset 20 = offsetof(ThreadControlBlock, errno)
+    // Offset 20 = offsetof(LinuxThreadControlBlock, errno)
     tls_write_i32(20, value as Int32);
 }
 
@@ -297,7 +297,7 @@ public fn set_errno(value: Int) {
 @inline
 public fn get_tid_fast() -> Int {
     // Read tid from fs:[16] using TLS intrinsic
-    // Offset 16 = offsetof(ThreadControlBlock, tid)
+    // Offset 16 = offsetof(LinuxThreadControlBlock, tid)
     let tid: Int32 = tls_read_i32(16);
     tid as Int
 }
@@ -306,7 +306,7 @@ public fn get_tid_fast() -> Int {
 @inline
 public fn check_stack_guard() -> Bool {
     // Read stack guard from fs:[8] using TLS intrinsic
-    // Offset 8 = offsetof(ThreadControlBlock, stack_guard)
+    // Offset 8 = offsetof(LinuxThreadControlBlock, stack_guard)
     let guard: USize = tls_read_usize(8);
     guard == STACK_GUARD_MAGIC
 }
@@ -334,7 +334,7 @@ public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
     }
 }
 
-fn ctx_get_from(slots: &ContextSlots, slot: UInt8) -> Maybe<&unsafe Byte> {
+fn ctx_get_from(slots: &LinuxContextSlots, slot: UInt8) -> Maybe<&unsafe Byte> {
     let word = slot / 64;
     let bit = slot % 64;
 
@@ -359,7 +359,7 @@ public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> {
 /// Set a value in a context slot.
 @inline
 public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
-    let slots = get_context_slots() as &mut ContextSlots;
+    let slots = get_context_slots() as &mut LinuxContextSlots;
     let word = slot / 64;
     let bit = slot % 64;
 
@@ -370,7 +370,7 @@ public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
 /// Clear a context slot.
 @inline
 public fn ctx_clear(slot: UInt8) {
-    let slots = get_context_slots() as &mut ContextSlots;
+    let slots = get_context_slots() as &mut LinuxContextSlots;
     let word = slot / 64;
     let bit = slot % 64;
 
@@ -379,8 +379,8 @@ public fn ctx_clear(slot: UInt8) {
 }
 
 /// Create a child context frame (for provide blocks).
-public fn ctx_push(parent: &ContextSlots) -> ContextSlots {
-    ContextSlots {
+public fn ctx_push(parent: &LinuxContextSlots) -> LinuxContextSlots {
+    LinuxContextSlots {
         slots: [null_ptr(); 256],
         parent: Some(parent),
         active: [0, 0, 0, 0],
@@ -396,7 +396,7 @@ public fn ctx_pop() {
 }
 
 // =============================================================================
-// Thread Cleanup
+// LinuxThread Cleanup
 // =============================================================================
 
 /// Clean up TLS for the current thread.
@@ -405,7 +405,7 @@ public fn ctx_pop() {
 public fn cleanup_thread_tls() {
     match get_current_tcb() {
         Ok(tcb) => {
-            let total_size = tcb.tls_size + ThreadControlBlock.size + ContextSlots.size;
+            let total_size = tcb.tls_size + LinuxThreadControlBlock.size + LinuxContextSlots.size;
             let base = unsafe { (tcb as &unsafe Byte).offset(-(tcb.tls_size as Int)) };
 
             // Clear fs register before freeing memory
