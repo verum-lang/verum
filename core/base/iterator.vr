@@ -1143,6 +1143,139 @@ implement FusedIterator for RangeInclusive<ISize> {}
 implement FusedIterator for RangeInclusive<USize> {}
 
 // =============================================================================
+// Clone Implementations for Iterator Adapters
+// =============================================================================
+//
+// Iterator adapters are pure record wrappers — they delegate to their
+// inner iterator + closure / state.  Cloning an adapter is therefore
+// well-defined when both the inner iterator and any captured fields
+// are themselves Clone, and the resulting clone iterates from the same
+// position as the original.
+//
+// Without these implementations any code path that captures an
+// adapter into a closure / `Maybe` / record field and later needs a
+// fresh copy hits the runtime "method 'X.clone' not found on value"
+// panic.  Historical example: the L7 SQLite facade tripped this on
+// `FilterMapIter` while compiling stdlib bytecode through the
+// supervisor / pager actor wiring (task #143 / #151).
+//
+// Coverage matches the forward-declared adapter set in this module.
+// `CycleIter` already declares `I: Clone` on its forward-declaration
+// (see top of this file) — its element-clone semantics are encoded
+// at the type level, so it's omitted from this block.
+
+/// `MappedIter` clones field-wise: inner iterator + map closure.
+implement<I: Clone, F: Clone> Clone for MappedIter<I, F> {
+    fn clone(&self) -> MappedIter<I, F> {
+        MappedIter { iter: self.iter.clone(), f: self.f.clone() }
+    }
+}
+
+/// `FilterIter` clones field-wise: inner iterator + predicate.
+implement<I: Clone, P: Clone> Clone for FilterIter<I, P> {
+    fn clone(&self) -> FilterIter<I, P> {
+        FilterIter { iter: self.iter.clone(), predicate: self.predicate.clone() }
+    }
+}
+
+/// `FilterMapIter` clones field-wise: inner iterator + map-with-skip closure.
+implement<I: Clone, F: Clone> Clone for FilterMapIter<I, F> {
+    fn clone(&self) -> FilterMapIter<I, F> {
+        FilterMapIter { iter: self.iter.clone(), f: self.f.clone() }
+    }
+}
+
+/// `FlatMapIter` requires `U: Clone` because the partially-consumed
+/// `current` sub-iterator is part of the observable state.
+implement<I: Clone, U: Clone, F: Clone> Clone for FlatMapIter<I, U, F> {
+    fn clone(&self) -> FlatMapIter<I, U, F> {
+        FlatMapIter {
+            iter: self.iter.clone(),
+            f: self.f.clone(),
+            current: self.current.clone(),
+        }
+    }
+}
+
+/// `TakeIter` clones the remaining counter atomically.
+implement<I: Clone> Clone for TakeIter<I> {
+    fn clone(&self) -> TakeIter<I> {
+        TakeIter { iter: self.iter.clone(), remaining: self.remaining }
+    }
+}
+
+/// `SkipIter` clones the remaining-skip counter.
+implement<I: Clone> Clone for SkipIter<I> {
+    fn clone(&self) -> SkipIter<I> {
+        SkipIter { iter: self.iter.clone(), remaining: self.remaining }
+    }
+}
+
+/// `TakeWhileIter` clones inner + predicate + done flag.
+implement<I: Clone, P: Clone> Clone for TakeWhileIter<I, P> {
+    fn clone(&self) -> TakeWhileIter<I, P> {
+        TakeWhileIter {
+            iter: self.iter.clone(),
+            predicate: self.predicate.clone(),
+            done: self.done,
+        }
+    }
+}
+
+/// `SkipWhileIter` clones inner + predicate + done flag.
+implement<I: Clone, P: Clone> Clone for SkipWhileIter<I, P> {
+    fn clone(&self) -> SkipWhileIter<I, P> {
+        SkipWhileIter {
+            iter: self.iter.clone(),
+            predicate: self.predicate.clone(),
+            done: self.done,
+        }
+    }
+}
+
+/// `ChainIter` requires `A: Clone` for the buffered first iterator.
+implement<A: Clone, B: Clone> Clone for ChainIter<A, B> {
+    fn clone(&self) -> ChainIter<A, B> {
+        ChainIter { first: self.first.clone(), second: self.second.clone() }
+    }
+}
+
+/// `ZipIter` clones both halves.
+implement<A: Clone, B: Clone> Clone for ZipIter<A, B> {
+    fn clone(&self) -> ZipIter<A, B> {
+        ZipIter { a: self.a.clone(), b: self.b.clone() }
+    }
+}
+
+/// `EnumerateIter` clones the index counter.
+implement<I: Clone> Clone for EnumerateIter<I> {
+    fn clone(&self) -> EnumerateIter<I> {
+        EnumerateIter { iter: self.iter.clone(), index: self.index }
+    }
+}
+
+/// `StepByIter` clones the step + first-emit flag.
+implement<I: Clone> Clone for StepByIter<I> {
+    fn clone(&self) -> StepByIter<I> {
+        StepByIter { iter: self.iter.clone(), step: self.step, first: self.first }
+    }
+}
+
+/// `InspectIter` clones inner + side-effect closure.
+implement<I: Clone, F: Clone> Clone for InspectIter<I, F> {
+    fn clone(&self) -> InspectIter<I, F> {
+        InspectIter { iter: self.iter.clone(), f: self.f.clone() }
+    }
+}
+
+/// `FuseIter` clones the optional inner iterator.
+implement<I: Clone> Clone for FuseIter<I> {
+    fn clone(&self) -> FuseIter<I> {
+        FuseIter { iter: self.iter.clone() }
+    }
+}
+
+// =============================================================================
 // ExactSizeIterator Implementations for Adapters
 // =============================================================================
 
