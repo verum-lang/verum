@@ -1,0 +1,69 @@
+// =============================================================================
+// core.action.articulation — Articulation type, OC-side counterpart of Enactment
+// =============================================================================
+//
+// VUVA §11.3 — every Articulation α has a canonical Enactment ε(α);
+// every Enactment carries the Articulation it enacts.  Together they
+// witness the adjunction α ⊣ ε that brides core.math.frameworks
+// (object-centric, OC) and core.action (dependency-centric, DC).
+//
+// Articulation is the *syntactic* projection of CoreTerm::FrameworkAxiom
+// — a framework name + citation pair — so it can be carried at runtime
+// by any Verum value without dragging a kernel-term dependency into the
+// stdlib.  When the kernel produces an axiom, it surfaces as
+// `Articulation { framework, citation, lineage }`; when user code
+// constructs one directly, the lineage records the primitive name.
+//
+// The neutral Actic articulation (`raw_actic_articulation`) is used by
+// any Enactment that was lifted from a bare ε-primitive without an
+// originating framework axiom.  Identity, composition, and gauge
+// canonicalisation all preserve it, so `alpha_of(primitive_enact(p))`
+// is always well-defined and total.
+// =============================================================================
+
+@derive(Clone)
+public type Articulation is {
+    framework: Text,
+    citation:  Text,
+    lineage:   Text,
+};
+
+public fn articulation_new(framework: Text, citation: Text, lineage: Text) -> Articulation {
+    Articulation {
+        framework: framework,
+        citation:  citation,
+        lineage:   lineage,
+    }
+}
+
+/// Neutral Actic articulation — used by enactments lifted directly from
+/// ε-primitives, before any framework axiom has been attached.
+public fn raw_actic_articulation() -> Articulation {
+    Articulation {
+        framework: "actic.raw",
+        citation:  "Diakrisis Actic §1 (canonical primitive)",
+        lineage:   "actic.raw",
+    }
+}
+
+public fn primitive_articulation(p: Primitive) -> Articulation {
+    Articulation {
+        framework: "actic.raw",
+        citation:  "Diakrisis Actic §1 (canonical primitive)",
+        lineage:   primitive_as_text(p),
+    }
+}
+
+public fn articulation_eq(a: Articulation, b: Articulation) -> Bool {
+    a.framework.eq(b.framework)
+      && a.citation.eq(b.citation)
+      && a.lineage.eq(b.lineage)
+}
+
+public fn articulation_as_text(a: Articulation) -> Text {
+    a.framework.clone().concat(":").concat(a.lineage.clone())
+}
+
+public fn is_raw_actic(a: Articulation) -> Bool {
+    a.framework.eq("actic.raw")
+}

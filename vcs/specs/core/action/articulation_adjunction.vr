@@ -1,0 +1,69 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: action, actic, epsilon, adjunction, articulation, dual-stdlib
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §11.3 Phase 5 E2 — α ⊣ ε adjunction smoke test.
+//
+// Each Articulation α auto-induces a syntactic self-enactment ε(α)
+// via Diakrisis 108.T; the inverse `alpha_of` extracts the underlying
+// articulation from any enactment.  The two compose to the identity
+// on Articulations: alpha_of(epsilon(α)) ≡ α — verified here by the
+// `is_adjoint` predicate.
+
+mount core.action.primitives;
+mount core.action.articulation;
+mount core.action.enactments;
+mount core.action.gauge;
+mount core.action.verify;
+
+fn main() {
+    // --- raw Actic articulation, the neutral element ----------------
+    let raw: Articulation = raw_actic_articulation();
+    assert(is_raw_actic(raw.clone()));
+    assert(raw.framework == "actic.raw");
+
+    // --- primitive lifted into an Enactment carries its articulation
+    let e_prove: Enactment = primitive_enact(EpsilonProve);
+    let lineage: Articulation = alpha_of(e_prove.clone());
+    assert(lineage.framework == "actic.raw");
+    assert(lineage.lineage == "ε_prove");
+
+    // --- α ⊣ ε: epsilon(α) ; alpha_of = id_Articulation -------------
+    let alpha: Articulation = articulation_new(
+        "lurie_htt",
+        "Lurie 2009 — HTT 6.2.2.7",
+        "yoneda_embedding_fully_faithful",
+    );
+    let e_alpha: Enactment = epsilon(alpha.clone());
+    assert(is_adjoint(alpha.clone(), e_alpha.clone()));
+    assert(articulation_eq(alpha.clone(), alpha_of(e_alpha.clone())));
+
+    // --- composition with raw absorbs into the articulated side -----
+    let raw_step: Enactment = primitive_enact(EpsilonObserve);
+    let mixed:    Enactment = compose(raw_step.clone(), e_alpha.clone());
+    assert(articulation_eq(alpha.clone(), alpha_of(mixed)));
+
+    // --- composition of two distinct non-raw articulations falls
+    //     back to the raw Actic neutral (gauge-mismatch flag) -------
+    let beta: Articulation = articulation_new(
+        "schreiber_dcct",
+        "Schreiber arXiv:1310.7930",
+        "cohesive_pi_disc_gamma_codisc",
+    );
+    let e_beta:  Enactment = epsilon(beta.clone());
+    let clashed: Enactment = compose(e_alpha.clone(), e_beta.clone());
+    assert(is_raw_actic(alpha_of(clashed)));
+
+    // --- canonicalise preserves the articulation -------------------
+    let canon: Enactment = canonicalise(e_alpha.clone());
+    assert(is_adjoint(alpha.clone(), canon));
+
+    // --- activation modality is articulation-stable ----------------
+    let lifted: Enactment = activation(e_alpha.clone());
+    assert(is_adjoint(alpha.clone(), lifted));
+
+    print("α ⊣ ε adjunction ok");
+}

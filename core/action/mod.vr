@@ -26,6 +26,7 @@
 // =============================================================================
 
 public mount core.action.primitives;
+public mount core.action.articulation;
 public mount core.action.enactments;
 public mount core.action.gauge;
 public mount core.action.verify;

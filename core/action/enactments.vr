@@ -1,29 +1,39 @@
 // =============================================================================
-// core.action.enactments — composition, activation modality A
+// core.action.enactments — composition, activation modality A, α ⊣ ε
+// =============================================================================
+//
+// Each Enactment carries the Articulation it enacts (VUVA §11.3).  The
+// adjunction α ⊣ ε is realised by the pair `epsilon : Articulation →
+// Enactment` and `alpha_of : Enactment → Articulation`; for any
+// articulation α we have `alpha_of(epsilon(α)) ≡ α`, witnessed by
+// `is_adjoint(α, epsilon(α))`.
 // =============================================================================
 
 @derive(Clone)
 public type Enactment is {
-    name: Text,
-    steps: List<Primitive>,
+    name:            Text,
+    steps:           List<Primitive>,
     activation_rank: Int,
+    articulation:    Articulation,
 };
 
 public fn primitive_enact(e: Primitive) -> Enactment {
     let mut steps: List<Primitive> = List.new();
     steps.push(e);
     Enactment {
-        name: primitive_as_text(e),
-        steps: steps,
+        name:            primitive_as_text(e),
+        steps:           steps,
         activation_rank: 0,
+        articulation:    primitive_articulation(e),
     }
 }
 
 public fn identity_enact() -> Enactment {
     Enactment {
-        name: "id_ε",
-        steps: List.new(),
+        name:            "id_ε",
+        steps:           List.new(),
         activation_rank: 0,
+        articulation:    raw_actic_articulation(),
     }
 }
 
@@ -39,18 +49,33 @@ public fn compose(a: Enactment, b: Enactment) -> Enactment {
     } else {
         b.activation_rank
     };
+    // Composition keeps a's articulation when both are raw; if either
+    // side carries a non-raw articulation, that one wins (Actic absorbs
+    // into the articulated side).  When both are non-raw and distinct,
+    // the result becomes raw to flag the gauge mismatch.
+    let articulation: Articulation = if is_raw_actic(a.articulation.clone()) {
+        b.articulation.clone()
+    } else if is_raw_actic(b.articulation.clone()) {
+        a.articulation.clone()
+    } else if articulation_eq(a.articulation.clone(), b.articulation.clone()) {
+        a.articulation.clone()
+    } else {
+        raw_actic_articulation()
+    };
     Enactment {
-        name: a.name.concat(" ∘ ").concat(b.name.clone()),
-        steps: joined,
+        name:            a.name.concat(" ∘ ").concat(b.name.clone()),
+        steps:           joined,
         activation_rank: rank,
+        articulation:    articulation,
     }
 }
 
 public fn activation(e: Enactment) -> Enactment {
     Enactment {
-        name: e.name,
-        steps: e.steps,
+        name:            e.name,
+        steps:           e.steps,
         activation_rank: e.activation_rank + 1,
+        articulation:    e.articulation,
     }
 }
 
@@ -59,9 +84,10 @@ public fn activation_iterate(e: Enactment, k: Int) -> Enactment {
         return e.clone();
     }
     Enactment {
-        name: e.name.clone(),
-        steps: e.steps.clone(),
+        name:            e.name.clone(),
+        steps:           e.steps.clone(),
         activation_rank: e.activation_rank + k,
+        articulation:    e.articulation.clone(),
     }
 }
 
@@ -69,4 +95,30 @@ public let AUTOPOIETIC_THRESHOLD: Int = 64;
 
 public fn is_autopoietic(e: Enactment) -> Bool {
     e.activation_rank >= AUTOPOIETIC_THRESHOLD
+}
+
+// -----------------------------------------------------------------------------
+// α ⊣ ε adjunction (VUVA §11.3)
+// -----------------------------------------------------------------------------
+
+/// `epsilon(α) = (F, Syn(F), id, id)` — syntactic self-enactment of an
+/// articulation (Diakrisis 108.T auto-induced).
+public fn epsilon(alpha: Articulation) -> Enactment {
+    Enactment {
+        name:            "ε(".concat(articulation_as_text(alpha.clone())).concat(")"),
+        steps:           List.new(),
+        activation_rank: 0,
+        articulation:    alpha,
+    }
+}
+
+/// `alpha_of(e) = e.articulation` — left adjoint to `epsilon`.
+public fn alpha_of(e: Enactment) -> Articulation {
+    e.articulation
+}
+
+/// Witness for the unit / counit of α ⊣ ε:
+///   `is_adjoint(α, e)` ⇔ `alpha_of(e) ≡ α`.
+public fn is_adjoint(alpha: Articulation, e: Enactment) -> Bool {
+    articulation_eq(alpha, alpha_of(e))
 }

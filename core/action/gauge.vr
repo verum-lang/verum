@@ -32,13 +32,22 @@ fn matches_observe(p: &Primitive) -> Bool {
 
 public fn canonicalise(e: Enactment) -> Enactment {
     if e.steps.is_empty() {
-        return identity_enact();
+        // Identity collapses into the canonical Actic identity but
+        // preserves the originating articulation so α ⊣ ε is stable
+        // across canonicalisation.
+        return Enactment {
+            name:            "id_ε",
+            steps:           List.new(),
+            activation_rank: 0,
+            articulation:    e.articulation,
+        };
     }
     let sorted: List<Primitive> = sort_observational_runs(e.steps.clone());
     Enactment {
-        name: "ε_canonical",
-        steps: sorted,
+        name:            "ε_canonical",
+        steps:           sorted,
         activation_rank: e.activation_rank,
+        articulation:    e.articulation,
     }
 }
 
