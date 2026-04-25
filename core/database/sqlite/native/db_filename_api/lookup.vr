@@ -1,0 +1,58 @@
+// sqlite3_db_filename — schema → filename lookup.
+
+module core.database.sqlite.native.db_filename_api.lookup;
+
+mount base.{Bool, Text};
+
+public type Outcome is
+    | OkPath(Text)        // file-backed schema with non-empty path
+    | OkInMemory          // ":memory:" or empty path (TEMP w/ no file)
+    | OkUnknownSchema     // schema name didn't match any attached db
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkPath(_)        => "path".clone(),
+        OkInMemory       => "in_memory".clone(),
+        OkUnknownSchema  => "unknown_schema".clone(),
+    }
+}
+
+public fn returns_non_null(o: &Outcome) -> Bool {
+    match o { OkUnknownSchema => false, _ => true }
+}
+
+public fn path_text(o: &Outcome) -> Text {
+    match o {
+        OkPath(p)        => p.clone(),
+        OkInMemory       => "".clone(),
+        OkUnknownSchema  => "".clone(),
+    }
+}
+
+// "main" / "temp" / attached schema names are well-known; anything else is
+// unknown.  We model only main + temp explicitly.
+public type SchemaKind is
+    | SkMain
+    | SkTemp
+    | SkAttached
+    ;
+
+public fn schema_kind_for(name: Text) -> SchemaKind {
+    if name == "main".clone() { return SkMain; }
+    if name == "temp".clone() { return SkTemp; }
+    SkAttached
+}
+
+public fn schema_kind_name(k: &SchemaKind) -> Text {
+    match k {
+        SkMain     => "main".clone(),
+        SkTemp     => "temp".clone(),
+        SkAttached => "attached".clone(),
+    }
+}
+
+// Whether the schema name is reserved / case-insensitively recognised.
+public fn is_reserved_name(name: Text) -> Bool {
+    name == "main".clone() || name == "temp".clone()
+}

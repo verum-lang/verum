@@ -1,0 +1,90 @@
+// sqlite3_db_readonly — readonly probe.
+
+module core.database.sqlite.native.db_readonly_api.check;
+
+mount base.{Bool, Text};
+
+public type Result is
+    | RWritable          // 0
+    | RReadonly          // 1
+    | RUnknownSchema     // -1
+    ;
+
+public fn to_code(r: &Result) -> Int {
+    match r {
+        RWritable       =>  0,
+        RReadonly       =>  1,
+        RUnknownSchema  => -1,
+    }
+}
+
+public fn from_code(n: Int) -> Result {
+    if n < 0  { return RUnknownSchema; }
+    if n == 0 { return RWritable; }
+    RReadonly
+}
+
+public fn result_name(r: &Result) -> Text {
+    match r {
+        RWritable       => "writable".clone(),
+        RReadonly       => "readonly".clone(),
+        RUnknownSchema  => "unknown_schema".clone(),
+    }
+}
+
+public fn is_readonly(r: &Result) -> Bool {
+    match r { RReadonly => true, _ => false }
+}
+
+// Inputs that determine the result.
+public type Inputs is {
+    schema_known: Bool,
+    opened_readonly: Bool,
+    file_mode_writable: Bool,
+    query_only_on: Bool,
+};
+
+public fn writable_inputs() -> Inputs {
+    Inputs {
+        schema_known: true,
+        opened_readonly: false,
+        file_mode_writable: true,
+        query_only_on: false,
+    }
+}
+
+public fn check(i: &Inputs) -> Result {
+    if !i.schema_known       { return RUnknownSchema; }
+    if i.opened_readonly     { return RReadonly; }
+    if !i.file_mode_writable { return RReadonly; }
+    if i.query_only_on       { return RReadonly; }
+    RWritable
+}
+
+// Reason taxonomy — used by introspection tools to explain why something
+// is read-only.
+public type Reason is
+    | RnNotReadonly
+    | RnOpenedReadonly
+    | RnFsPermissions
+    | RnQueryOnlyPragma
+    | RnSchemaUnknown
+    ;
+
+public fn reason_for(i: &Inputs) -> Reason {
+    if !i.schema_known       { return RnSchemaUnknown; }
+    if i.opened_readonly     { return RnOpenedReadonly; }
+    if !i.file_mode_writable { return RnFsPermissions; }
+    if i.query_only_on       { return RnQueryOnlyPragma; }
+    RnNotReadonly
+}
+
+public fn reason_name(r: &Reason) -> Text {
+    match r {
+        RnNotReadonly      => "writable".clone(),
+        RnOpenedReadonly   => "opened_readonly".clone(),
+        RnFsPermissions    => "fs_permissions".clone(),
+        RnQueryOnlyPragma  => "query_only_pragma".clone(),
+        RnSchemaUnknown    => "schema_unknown".clone(),
+    }
+}

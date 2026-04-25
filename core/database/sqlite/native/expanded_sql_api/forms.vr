@@ -1,0 +1,80 @@
+// sqlite3_sql / _expanded_sql / _normalized_sql — three views.
+
+module core.database.sqlite.native.expanded_sql_api.forms;
+
+mount base.{Bool, Text};
+
+public type Form is
+    | FOriginal       // sqlite3_sql      — never NULL
+    | FExpanded       // sqlite3_expanded_sql — may be NULL on OOM
+    | FNormalized     // sqlite3_normalized_sql — NULL if not built with NORMALIZE
+    ;
+
+public fn form_name(f: &Form) -> Text {
+    match f {
+        FOriginal   => "original".clone(),
+        FExpanded   => "expanded".clone(),
+        FNormalized => "normalized".clone(),
+    }
+}
+
+public fn may_return_null(f: &Form) -> Bool {
+    match f { FOriginal => false, _ => true }
+}
+
+// Memory-management contract for the returned pointer.
+public type Lifetime is
+    | LtInternalOwned     // sqlite3_sql / sqlite3_normalized_sql — must NOT be freed
+    | LtCallerFrees       // sqlite3_expanded_sql — caller calls sqlite3_free
+    ;
+
+public fn lifetime_for(f: &Form) -> Lifetime {
+    match f {
+        FOriginal   => LtInternalOwned,
+        FExpanded   => LtCallerFrees,
+        FNormalized => LtInternalOwned,
+    }
+}
+
+public fn lifetime_name(l: &Lifetime) -> Text {
+    match l {
+        LtInternalOwned => "internal_owned".clone(),
+        LtCallerFrees   => "caller_frees".clone(),
+    }
+}
+
+public fn caller_frees(l: &Lifetime) -> Bool {
+    match l { LtCallerFrees => true, _ => false }
+}
+
+// Build-time gate for normalized form.
+public fn requires_compile_flag(f: &Form) -> Bool {
+    match f { FNormalized => true, _ => false }
+}
+
+// Outcome on a stmt that has bound parameters but the build lacks
+// SQLITE_ENABLE_NORMALIZE — sqlite3_normalized_sql returns NULL.
+public type Availability is
+    | AvOk
+    | AvNullOom
+    | AvNullDisabled       // build flag missing
+    ;
+
+public fn availability_name(a: &Availability) -> Text {
+    match a {
+        AvOk          => "ok".clone(),
+        AvNullOom     => "null_oom".clone(),
+        AvNullDisabled => "null_disabled".clone(),
+    }
+}
+
+public fn returned_non_null(a: &Availability) -> Bool {
+    match a { AvOk => true, _ => false }
+}
+
+// Decide availability for a normalized-sql call.
+public fn classify_normalized(build_has_normalize: Bool, oom: Bool) -> Availability {
+    if !build_has_normalize { return AvNullDisabled; }
+    if oom                  { return AvNullOom; }
+    AvOk
+}

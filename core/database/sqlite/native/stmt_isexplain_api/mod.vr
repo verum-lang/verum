@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_isexplain_api/mod.vr
+// =============================================================================
+// sqlite3_stmt_isexplain(stmt) — returns
+//   0  not an EXPLAIN
+//   1  EXPLAIN — emits VDBE-opcode rows
+//   2  EXPLAIN QUERY PLAN — emits planner tree rows
+// Useful for the shell to format output differently for diagnostic statements.
+// Spec App E.S.
+// =============================================================================
+
+module core.database.sqlite.native.stmt_isexplain_api;
+
+public module probe;

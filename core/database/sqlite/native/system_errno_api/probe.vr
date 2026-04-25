@@ -1,0 +1,97 @@
+// sqlite3_system_errno — OS-level errno carrier.
+
+module core.database.sqlite.native.system_errno_api.probe;
+
+mount base.{Bool, Text};
+
+public type Reading is
+    | RNone               // 0 — no captured errno
+    | RPosix(Int)         // POSIX errno
+    | RWindowsHr(Int)     // Windows GetLastError code
+    ;
+
+public fn reading_name(r: &Reading) -> Text {
+    match r {
+        RNone        => "none".clone(),
+        RPosix(_)    => "posix".clone(),
+        RWindowsHr(_) => "windows".clone(),
+    }
+}
+
+public fn errno_value(r: &Reading) -> Int {
+    match r {
+        RNone         => 0,
+        RPosix(n)     => n.clone(),
+        RWindowsHr(n) => n.clone(),
+    }
+}
+
+public fn has_value(r: &Reading) -> Bool {
+    match r { RNone => false, _ => true }
+}
+
+// Common POSIX errno classes — used by integrators to map back to user-friendly
+// messages when SQLITE_IOERR fires.
+public type PosixClass is
+    | PcEnoent       // 2  — file not found
+    | PcEacces       // 13 — permission denied
+    | PcEnospc       // 28 — disk full
+    | PcEio          // 5  — generic I/O error
+    | PcEbusy        // 16 — resource busy
+    | PcEnomem       // 12 — out of memory
+    | PcEother
+    ;
+
+public fn classify_posix(errno: Int) -> PosixClass {
+    if errno == 2  { return PcEnoent; }
+    if errno == 13 { return PcEacces; }
+    if errno == 28 { return PcEnospc; }
+    if errno == 5  { return PcEio; }
+    if errno == 16 { return PcEbusy; }
+    if errno == 12 { return PcEnomem; }
+    PcEother
+}
+
+public fn class_name(c: &PosixClass) -> Text {
+    match c {
+        PcEnoent  => "enoent".clone(),
+        PcEacces  => "eacces".clone(),
+        PcEnospc  => "enospc".clone(),
+        PcEio     => "eio".clone(),
+        PcEbusy   => "ebusy".clone(),
+        PcEnomem  => "enomem".clone(),
+        PcEother  => "other".clone(),
+    }
+}
+
+public fn is_disk_full(c: &PosixClass) -> Bool {
+    match c { PcEnospc => true, _ => false }
+}
+
+public fn is_permission_denied(c: &PosixClass) -> Bool {
+    match c { PcEacces => true, _ => false }
+}
+
+// Map Windows error codes to a coarse class — only a few are surfaced.
+public type WindowsClass is
+    | WcFileNotFound      // 2
+    | WcAccessDenied      // 5
+    | WcDiskFull          // 112
+    | WcOther
+    ;
+
+public fn classify_windows(code: Int) -> WindowsClass {
+    if code == 2   { return WcFileNotFound; }
+    if code == 5   { return WcAccessDenied; }
+    if code == 112 { return WcDiskFull; }
+    WcOther
+}
+
+public fn windows_class_name(w: &WindowsClass) -> Text {
+    match w {
+        WcFileNotFound  => "file_not_found".clone(),
+        WcAccessDenied  => "access_denied".clone(),
+        WcDiskFull      => "disk_full".clone(),
+        WcOther         => "other".clone(),
+    }
+}

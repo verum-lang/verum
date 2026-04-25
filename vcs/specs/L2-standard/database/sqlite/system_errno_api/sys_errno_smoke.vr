@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, system_errno_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.system_errno_api.probe.{
+    Reading, RNone, RPosix, RWindowsHr,
+    reading_name, errno_value, has_value,
+    PosixClass, PcEnoent, PcEacces, PcEnospc, PcEio, PcEbusy, PcEnomem, PcEother,
+    classify_posix, class_name, is_disk_full, is_permission_denied,
+    WindowsClass, WcFileNotFound, WcAccessDenied, WcDiskFull, WcOther,
+    classify_windows, windows_class_name,
+};
+mount base.{Bool};
+
+fn test_reading_names() {
+    assert(reading_name(&RNone)        == "none".clone());
+    assert(reading_name(&RPosix(2))    == "posix".clone());
+    assert(reading_name(&RWindowsHr(5)) == "windows".clone());
+}
+
+fn test_errno_value() {
+    assert_eq(errno_value(&RNone),       0);
+    assert_eq(errno_value(&RPosix(28)), 28);
+    assert_eq(errno_value(&RWindowsHr(5)), 5);
+}
+
+fn test_has_value_predicate() {
+    assert(!has_value(&RNone));
+    assert(has_value(&RPosix(2)));
+    assert(has_value(&RWindowsHr(5)));
+}
+
+fn test_classify_posix_known() {
+    match classify_posix(2)  { PcEnoent => {}, _ => assert(false) }
+    match classify_posix(13) { PcEacces => {}, _ => assert(false) }
+    match classify_posix(28) { PcEnospc => {}, _ => assert(false) }
+    match classify_posix(5)  { PcEio    => {}, _ => assert(false) }
+    match classify_posix(16) { PcEbusy  => {}, _ => assert(false) }
+    match classify_posix(12) { PcEnomem => {}, _ => assert(false) }
+}
+
+fn test_classify_posix_unknown() {
+    match classify_posix(99)   { PcEother => {}, _ => assert(false) }
+    match classify_posix(0)    { PcEother => {}, _ => assert(false) }
+    match classify_posix(1000) { PcEother => {}, _ => assert(false) }
+}
+
+fn test_class_names() {
+    assert(class_name(&PcEnoent)  == "enoent".clone());
+    assert(class_name(&PcEacces)  == "eacces".clone());
+    assert(class_name(&PcEnospc)  == "enospc".clone());
+    assert(class_name(&PcEio)     == "eio".clone());
+    assert(class_name(&PcEbusy)   == "ebusy".clone());
+    assert(class_name(&PcEnomem)  == "enomem".clone());
+    assert(class_name(&PcEother)  == "other".clone());
+}
+
+fn test_disk_full_and_permission() {
+    assert(is_disk_full(&PcEnospc));
+    assert(!is_disk_full(&PcEio));
+    assert(is_permission_denied(&PcEacces));
+    assert(!is_permission_denied(&PcEnospc));
+}
+
+fn test_classify_windows() {
+    match classify_windows(2)   { WcFileNotFound => {}, _ => assert(false) }
+    match classify_windows(5)   { WcAccessDenied => {}, _ => assert(false) }
+    match classify_windows(112) { WcDiskFull     => {}, _ => assert(false) }
+    match classify_windows(99)  { WcOther        => {}, _ => assert(false) }
+}
+
+fn test_windows_class_names() {
+    assert(windows_class_name(&WcFileNotFound) == "file_not_found".clone());
+    assert(windows_class_name(&WcAccessDenied) == "access_denied".clone());
+    assert(windows_class_name(&WcDiskFull)     == "disk_full".clone());
+    assert(windows_class_name(&WcOther)        == "other".clone());
+}
+
+fn main() {
+    test_reading_names();
+    test_errno_value();
+    test_has_value_predicate();
+    test_classify_posix_known();
+    test_classify_posix_unknown();
+    test_class_names();
+    test_disk_full_and_permission();
+    test_classify_windows();
+    test_windows_class_names();
+}

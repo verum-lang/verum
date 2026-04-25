@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/expanded_sql_api/mod.vr
+// =============================================================================
+// sqlite3_sql / sqlite3_expanded_sql / sqlite3_normalized_sql — three views
+// of a prepared statement's SQL text.
+//   sql            — the original text passed to sqlite3_prepare_v2()
+//   expanded_sql   — bound parameters substituted (?  → '5', etc.) (3.14+)
+//   normalized_sql — literals replaced with `?` (3.27+ when SQLITE_ENABLE_NORMALIZE)
+// Spec App E.S.
+// =============================================================================
+
+module core.database.sqlite.native.expanded_sql_api;
+
+public module forms;

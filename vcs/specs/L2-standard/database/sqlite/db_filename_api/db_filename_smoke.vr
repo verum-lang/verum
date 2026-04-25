@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, db_filename_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.db_filename_api.lookup.{
+    Outcome, OkPath, OkInMemory, OkUnknownSchema,
+    outcome_name, returns_non_null, path_text,
+    SchemaKind, SkMain, SkTemp, SkAttached,
+    schema_kind_for, schema_kind_name, is_reserved_name,
+};
+mount base.{Bool};
+
+fn test_outcome_names() {
+    assert(outcome_name(&OkPath("foo.db".clone())) == "path".clone());
+    assert(outcome_name(&OkInMemory)               == "in_memory".clone());
+    assert(outcome_name(&OkUnknownSchema)          == "unknown_schema".clone());
+}
+
+fn test_returns_non_null() {
+    assert(returns_non_null(&OkPath("foo.db".clone())));
+    assert(returns_non_null(&OkInMemory));
+    assert(!returns_non_null(&OkUnknownSchema));
+}
+
+fn test_path_text() {
+    assert(path_text(&OkPath("foo.db".clone())) == "foo.db".clone());
+    assert(path_text(&OkInMemory)               == "".clone());
+    assert(path_text(&OkUnknownSchema)          == "".clone());
+}
+
+fn test_schema_kind_for_reserved() {
+    match schema_kind_for("main".clone()) { SkMain => {}, _ => assert(false) }
+    match schema_kind_for("temp".clone()) { SkTemp => {}, _ => assert(false) }
+}
+
+fn test_schema_kind_for_attached() {
+    match schema_kind_for("aux".clone())  { SkAttached => {}, _ => assert(false) }
+    match schema_kind_for("user".clone()) { SkAttached => {}, _ => assert(false) }
+}
+
+fn test_schema_kind_names() {
+    assert(schema_kind_name(&SkMain)     == "main".clone());
+    assert(schema_kind_name(&SkTemp)     == "temp".clone());
+    assert(schema_kind_name(&SkAttached) == "attached".clone());
+}
+
+fn test_is_reserved_name() {
+    assert(is_reserved_name("main".clone()));
+    assert(is_reserved_name("temp".clone()));
+    assert(!is_reserved_name("aux".clone()));
+    assert(!is_reserved_name("".clone()));
+}
+
+fn main() {
+    test_outcome_names();
+    test_returns_non_null();
+    test_path_text();
+    test_schema_kind_for_reserved();
+    test_schema_kind_for_attached();
+    test_schema_kind_names();
+    test_is_reserved_name();
+}

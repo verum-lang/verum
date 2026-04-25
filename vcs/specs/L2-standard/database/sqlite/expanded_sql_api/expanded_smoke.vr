@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, expanded_sql_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.expanded_sql_api.forms.{
+    Form, FOriginal, FExpanded, FNormalized, form_name,
+    may_return_null,
+    Lifetime, LtInternalOwned, LtCallerFrees,
+    lifetime_for, lifetime_name, caller_frees,
+    requires_compile_flag,
+    Availability, AvOk, AvNullOom, AvNullDisabled,
+    availability_name, returned_non_null, classify_normalized,
+};
+mount base.{Bool};
+
+fn test_form_names() {
+    assert(form_name(&FOriginal)   == "original".clone());
+    assert(form_name(&FExpanded)   == "expanded".clone());
+    assert(form_name(&FNormalized) == "normalized".clone());
+}
+
+fn test_may_return_null() {
+    assert(!may_return_null(&FOriginal));
+    assert(may_return_null(&FExpanded));
+    assert(may_return_null(&FNormalized));
+}
+
+fn test_lifetime_dispatch() {
+    match lifetime_for(&FOriginal)   { LtInternalOwned => {}, _ => assert(false) }
+    match lifetime_for(&FExpanded)   { LtCallerFrees   => {}, _ => assert(false) }
+    match lifetime_for(&FNormalized) { LtInternalOwned => {}, _ => assert(false) }
+}
+
+fn test_lifetime_names_and_caller_frees() {
+    assert(lifetime_name(&LtInternalOwned) == "internal_owned".clone());
+    assert(lifetime_name(&LtCallerFrees)   == "caller_frees".clone());
+    assert(caller_frees(&LtCallerFrees));
+    assert(!caller_frees(&LtInternalOwned));
+}
+
+fn test_requires_compile_flag() {
+    assert(!requires_compile_flag(&FOriginal));
+    assert(!requires_compile_flag(&FExpanded));
+    assert(requires_compile_flag(&FNormalized));
+}
+
+fn test_classify_normalized_disabled() {
+    match classify_normalized(false, false) { AvNullDisabled => {}, _ => assert(false) }
+    match classify_normalized(false, true)  { AvNullDisabled => {}, _ => assert(false) }
+}
+
+fn test_classify_normalized_oom() {
+    match classify_normalized(true, true) { AvNullOom => {}, _ => assert(false) }
+}
+
+fn test_classify_normalized_ok() {
+    match classify_normalized(true, false) { AvOk => {}, _ => assert(false) }
+}
+
+fn test_availability_names_and_predicate() {
+    assert(availability_name(&AvOk)          == "ok".clone());
+    assert(availability_name(&AvNullOom)     == "null_oom".clone());
+    assert(availability_name(&AvNullDisabled) == "null_disabled".clone());
+    assert(returned_non_null(&AvOk));
+    assert(!returned_non_null(&AvNullOom));
+    assert(!returned_non_null(&AvNullDisabled));
+}
+
+fn main() {
+    test_form_names();
+    test_may_return_null();
+    test_lifetime_dispatch();
+    test_lifetime_names_and_caller_frees();
+    test_requires_compile_flag();
+    test_classify_normalized_disabled();
+    test_classify_normalized_oom();
+    test_classify_normalized_ok();
+    test_availability_names_and_predicate();
+}

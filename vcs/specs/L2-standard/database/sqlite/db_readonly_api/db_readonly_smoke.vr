@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, db_readonly_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.db_readonly_api.check.{
+    Result, RWritable, RReadonly, RUnknownSchema,
+    to_code, from_code, result_name, is_readonly,
+    Inputs, writable_inputs, check,
+    Reason, RnNotReadonly, RnOpenedReadonly, RnFsPermissions,
+    RnQueryOnlyPragma, RnSchemaUnknown,
+    reason_for, reason_name,
+};
+mount base.{Bool};
+
+fn test_to_code_round_trip() {
+    assert_eq(to_code(&RWritable),       0);
+    assert_eq(to_code(&RReadonly),       1);
+    assert_eq(to_code(&RUnknownSchema), -1);
+}
+
+fn test_from_code_branches() {
+    match from_code(0)  { RWritable      => {}, _ => assert(false) }
+    match from_code(1)  { RReadonly      => {}, _ => assert(false) }
+    match from_code(7)  { RReadonly      => {}, _ => assert(false) }
+    match from_code(-1) { RUnknownSchema => {}, _ => assert(false) }
+    match from_code(-9) { RUnknownSchema => {}, _ => assert(false) }
+}
+
+fn test_result_names() {
+    assert(result_name(&RWritable)      == "writable".clone());
+    assert(result_name(&RReadonly)      == "readonly".clone());
+    assert(result_name(&RUnknownSchema) == "unknown_schema".clone());
+}
+
+fn test_is_readonly() {
+    assert(is_readonly(&RReadonly));
+    assert(!is_readonly(&RWritable));
+    assert(!is_readonly(&RUnknownSchema));
+}
+
+fn test_default_inputs_writable() {
+    let i = writable_inputs();
+    match check(&i) { RWritable => {}, _ => assert(false) }
+    match reason_for(&i) { RnNotReadonly => {}, _ => assert(false) }
+}
+
+fn test_unknown_schema() {
+    let mut i = writable_inputs();
+    i.schema_known = false;
+    match check(&i) { RUnknownSchema => {}, _ => assert(false) }
+    match reason_for(&i) { RnSchemaUnknown => {}, _ => assert(false) }
+}
+
+fn test_opened_readonly() {
+    let mut i = writable_inputs();
+    i.opened_readonly = true;
+    match check(&i) { RReadonly => {}, _ => assert(false) }
+    match reason_for(&i) { RnOpenedReadonly => {}, _ => assert(false) }
+}
+
+fn test_fs_permissions() {
+    let mut i = writable_inputs();
+    i.file_mode_writable = false;
+    match check(&i) { RReadonly => {}, _ => assert(false) }
+    match reason_for(&i) { RnFsPermissions => {}, _ => assert(false) }
+}
+
+fn test_query_only_pragma() {
+    let mut i = writable_inputs();
+    i.query_only_on = true;
+    match check(&i) { RReadonly => {}, _ => assert(false) }
+    match reason_for(&i) { RnQueryOnlyPragma => {}, _ => assert(false) }
+}
+
+fn test_reason_names() {
+    assert(reason_name(&RnNotReadonly)     == "writable".clone());
+    assert(reason_name(&RnOpenedReadonly)  == "opened_readonly".clone());
+    assert(reason_name(&RnFsPermissions)   == "fs_permissions".clone());
+    assert(reason_name(&RnQueryOnlyPragma) == "query_only_pragma".clone());
+    assert(reason_name(&RnSchemaUnknown)   == "schema_unknown".clone());
+}
+
+fn main() {
+    test_to_code_round_trip();
+    test_from_code_branches();
+    test_result_names();
+    test_is_readonly();
+    test_default_inputs_writable();
+    test_unknown_schema();
+    test_opened_readonly();
+    test_fs_permissions();
+    test_query_only_pragma();
+    test_reason_names();
+}

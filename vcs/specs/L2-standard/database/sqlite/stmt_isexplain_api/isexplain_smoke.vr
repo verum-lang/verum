@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stmt_isexplain_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stmt_isexplain_api.probe.{
+    Mode, MNotExplain, MExplain, MQueryPlan,
+    from_code, to_code, mode_name,
+    is_explain, is_opcode_dump, is_query_plan,
+    result_column_count, first_column_name,
+};
+mount base.{Bool};
+
+fn test_from_code_branches() {
+    match from_code(0)  { MNotExplain => {}, _ => assert(false) }
+    match from_code(-1) { MNotExplain => {}, _ => assert(false) }
+    match from_code(1)  { MExplain    => {}, _ => assert(false) }
+    match from_code(2)  { MQueryPlan  => {}, _ => assert(false) }
+    match from_code(7)  { MQueryPlan  => {}, _ => assert(false) }
+}
+
+fn test_to_code_round_trip() {
+    assert_eq(to_code(&MNotExplain), 0);
+    assert_eq(to_code(&MExplain),    1);
+    assert_eq(to_code(&MQueryPlan),  2);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&MNotExplain) == "not_explain".clone());
+    assert(mode_name(&MExplain)    == "explain".clone());
+    assert(mode_name(&MQueryPlan)  == "query_plan".clone());
+}
+
+fn test_is_explain_predicates() {
+    assert(!is_explain(&MNotExplain));
+    assert(is_explain(&MExplain));
+    assert(is_explain(&MQueryPlan));
+    assert(is_opcode_dump(&MExplain));
+    assert(!is_opcode_dump(&MQueryPlan));
+    assert(is_query_plan(&MQueryPlan));
+    assert(!is_query_plan(&MExplain));
+}
+
+fn test_result_column_count() {
+    assert_eq(result_column_count(&MNotExplain), 0);
+    assert_eq(result_column_count(&MExplain),    8);
+    assert_eq(result_column_count(&MQueryPlan),  4);
+}
+
+fn test_first_column_name() {
+    assert(first_column_name(&MNotExplain) == "".clone());
+    assert(first_column_name(&MExplain)    == "addr".clone());
+    assert(first_column_name(&MQueryPlan)  == "id".clone());
+}
+
+fn main() {
+    test_from_code_branches();
+    test_to_code_round_trip();
+    test_mode_names();
+    test_is_explain_predicates();
+    test_result_column_count();
+    test_first_column_name();
+}

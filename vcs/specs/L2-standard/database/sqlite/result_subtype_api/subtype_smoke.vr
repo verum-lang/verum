@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, result_subtype_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.result_subtype_api.subtype.{
+    Subtype, StNone, StJson, StJsonb, StCustom,
+    json_byte, jsonb_byte,
+    from_byte, to_byte, subtype_name,
+    is_set, is_json_family, is_valid_byte,
+    Annotation, AnPlain, AnNoChange,
+    annotation_name, is_no_change,
+};
+mount base.{Bool};
+
+fn test_byte_constants() {
+    assert_eq(json_byte(),  0x4A);
+    assert_eq(jsonb_byte(), 0x42);
+}
+
+fn test_from_byte_known() {
+    match from_byte(0)    { StNone  => {}, _ => assert(false) }
+    match from_byte(0x4A) { StJson  => {}, _ => assert(false) }
+    match from_byte(0x42) { StJsonb => {}, _ => assert(false) }
+}
+
+fn test_from_byte_custom() {
+    match from_byte(0x10) {
+        StCustom(b) => assert_eq(b, 0x10),
+        _ => assert(false),
+    }
+    match from_byte(0xFF) {
+        StCustom(b) => assert_eq(b, 0xFF),
+        _ => assert(false),
+    }
+}
+
+fn test_to_byte_round_trip() {
+    assert_eq(to_byte(&StNone),      0);
+    assert_eq(to_byte(&StJson),      0x4A);
+    assert_eq(to_byte(&StJsonb),     0x42);
+    assert_eq(to_byte(&StCustom(0x33)), 0x33);
+}
+
+fn test_subtype_names() {
+    assert(subtype_name(&StNone)        == "none".clone());
+    assert(subtype_name(&StJson)        == "json".clone());
+    assert(subtype_name(&StJsonb)       == "jsonb".clone());
+    assert(subtype_name(&StCustom(0x10)) == "custom".clone());
+}
+
+fn test_is_set_predicate() {
+    assert(!is_set(&StNone));
+    assert(is_set(&StJson));
+    assert(is_set(&StJsonb));
+    assert(is_set(&StCustom(0x10)));
+}
+
+fn test_is_json_family() {
+    assert(is_json_family(&StJson));
+    assert(is_json_family(&StJsonb));
+    assert(!is_json_family(&StCustom(0x10)));
+    assert(!is_json_family(&StNone));
+}
+
+fn test_is_valid_byte() {
+    assert(is_valid_byte(0));
+    assert(is_valid_byte(255));
+    assert(!is_valid_byte(-1));
+    assert(!is_valid_byte(256));
+    assert(!is_valid_byte(1000));
+}
+
+fn test_annotation_names_and_predicate() {
+    assert(annotation_name(&AnPlain)    == "plain".clone());
+    assert(annotation_name(&AnNoChange) == "no_change".clone());
+    assert(is_no_change(&AnNoChange));
+    assert(!is_no_change(&AnPlain));
+}
+
+fn main() {
+    test_byte_constants();
+    test_from_byte_known();
+    test_from_byte_custom();
+    test_to_byte_round_trip();
+    test_subtype_names();
+    test_is_set_predicate();
+    test_is_json_family();
+    test_is_valid_byte();
+    test_annotation_names_and_predicate();
+}

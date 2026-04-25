@@ -876,3 +876,19 @@ public module compile_options_pragma;
 public module progress_handler_api;
 // - vtab_nochange_api: ColumnState (ExplicitNew/Null/Unchanged) + xUpdate WriteAction
 public module vtab_nochange_api;
+// - db_filename_api: sqlite3_db_filename schema → path lookup + 3-outcome
+public module db_filename_api;
+// - db_readonly_api: sqlite3_db_readonly + 4-reason taxonomy + Inputs check
+public module db_readonly_api;
+// - expanded_sql_api: sqlite3_sql / _expanded_sql / _normalized_sql + Lifetime
+public module expanded_sql_api;
+// - stmt_busy_api: stmt phase machine (Fresh/Running/Finished/Finalized) + transitions
+public module stmt_busy_api;
+// - stmt_isexplain_api: 0/1/2 mode (NotExplain/Explain/QueryPlan) + col-count
+public module stmt_isexplain_api;
+// - vtab_in_first_next_api: 3.38+ IN-list streaming iter (Fresh/AtRow/Exhausted)
+public module vtab_in_first_next_api;
+// - system_errno_api: sqlite3_system_errno + 6-class POSIX + 3-class Windows
+public module system_errno_api;
+// - result_subtype_api: 3.9+ value-subtype byte + json/jsonb tags + AnNoChange (3.45+)
+public module result_subtype_api;

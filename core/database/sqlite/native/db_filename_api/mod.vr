@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/db_filename_api/mod.vr
+// =============================================================================
+// sqlite3_db_filename(db, schema_name) — returns the on-disk filename of the
+// schema (or "" for in-memory / temp).  Returns NULL when schema is unknown.
+// Spec App E.D.
+// =============================================================================
+
+module core.database.sqlite.native.db_filename_api;
+
+public module lookup;

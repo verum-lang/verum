@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/system_errno_api/mod.vr
+// =============================================================================
+// sqlite3_system_errno(db) — returns the underlying OS errno (POSIX) or
+// GetLastError() value (Windows) for the most recent SQLITE_IOERR.  Zero if
+// no errno was captured.  Spec App E.S.
+// =============================================================================
+
+module core.database.sqlite.native.system_errno_api;
+
+public module probe;

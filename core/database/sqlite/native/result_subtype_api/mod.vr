@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/result_subtype_api/mod.vr
+// =============================================================================
+// sqlite3_result_subtype / sqlite3_value_subtype — added 3.9.  Lets a
+// user-defined function annotate its return value with a 1-byte "sub-type"
+// flag (0..255) that propagates to readers.  Used by JSON1 to mark a TEXT
+// result as JSON.  Spec App E.R.
+// =============================================================================
+
+module core.database.sqlite.native.result_subtype_api;
+
+public module subtype;

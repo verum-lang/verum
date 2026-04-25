@@ -1,0 +1,125 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_in_first_next_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_in_first_next_api.iter.{
+    Position, PFresh, PAtRow, PExhausted, position_name,
+    Outcome, OkRow, OkDone, OkErrNotInList,
+    outcome_name, returned_row,
+    StepResult, first_call, next_call, current_value,
+    is_streaming_beneficial,
+};
+mount base.{Bool, Int64};
+mount core.collections.list.{List};
+
+fn test_position_names() {
+    assert(position_name(&PFresh)     == "fresh".clone());
+    assert(position_name(&PAtRow(0))  == "at_row".clone());
+    assert(position_name(&PExhausted) == "exhausted".clone());
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&OkRow)         == "row".clone());
+    assert(outcome_name(&OkDone)        == "done".clone());
+    assert(outcome_name(&OkErrNotInList) == "err_not_in_list".clone());
+}
+
+fn test_returned_row_predicate() {
+    assert(returned_row(&OkRow));
+    assert(!returned_row(&OkDone));
+    assert(!returned_row(&OkErrNotInList));
+}
+
+fn test_first_call_not_in_list() {
+    let vals: List<Int64> = List.new();
+    let r = first_call(&vals, false);
+    match r.outcome { OkErrNotInList => {}, _ => assert(false) }
+}
+
+fn test_first_call_empty_list_done() {
+    let vals: List<Int64> = List.new();
+    let r = first_call(&vals, true);
+    match r.outcome { OkDone => {}, _ => assert(false) }
+    match r.pos     { PExhausted => {}, _ => assert(false) }
+}
+
+fn test_first_call_non_empty_returns_first_row() {
+    let mut vals = List.new();
+    vals.push(10 as Int64);
+    vals.push(20 as Int64);
+    let r = first_call(&vals, true);
+    match r.outcome { OkRow => {}, _ => assert(false) }
+    match r.pos {
+        PAtRow(i) => assert_eq(i, 0),
+        _ => assert(false),
+    }
+}
+
+fn test_next_call_advances() {
+    let mut vals = List.new();
+    vals.push(10 as Int64);
+    vals.push(20 as Int64);
+    vals.push(30 as Int64);
+    let r1 = first_call(&vals, true);
+    let r2 = next_call(&r1.pos, &vals);
+    match r2.pos {
+        PAtRow(i) => assert_eq(i, 1),
+        _ => assert(false),
+    }
+    let r3 = next_call(&r2.pos, &vals);
+    match r3.pos {
+        PAtRow(i) => assert_eq(i, 2),
+        _ => assert(false),
+    }
+}
+
+fn test_next_call_exhausts() {
+    let mut vals = List.new();
+    vals.push(10 as Int64);
+    let r1 = first_call(&vals, true);
+    let r2 = next_call(&r1.pos, &vals);
+    match r2.outcome { OkDone => {}, _ => assert(false) }
+    match r2.pos     { PExhausted => {}, _ => assert(false) }
+}
+
+fn test_next_call_from_fresh_or_exhausted() {
+    let mut vals = List.new();
+    vals.push(10 as Int64);
+    let r = next_call(&PFresh, &vals);
+    match r.outcome { OkErrNotInList => {}, _ => assert(false) }
+    let r2 = next_call(&PExhausted, &vals);
+    match r2.outcome { OkDone => {}, _ => assert(false) }
+}
+
+fn test_current_value() {
+    let mut vals = List.new();
+    vals.push(10 as Int64);
+    vals.push(20 as Int64);
+    assert_eq(current_value(&PAtRow(0), &vals), 10 as Int64);
+    assert_eq(current_value(&PAtRow(1), &vals), 20 as Int64);
+    assert_eq(current_value(&PFresh, &vals),     0 as Int64);
+}
+
+fn test_is_streaming_beneficial() {
+    assert(!is_streaming_beneficial(0));
+    assert(!is_streaming_beneficial(15));
+    assert(is_streaming_beneficial(16));
+    assert(is_streaming_beneficial(1000));
+}
+
+fn main() {
+    test_position_names();
+    test_outcome_names();
+    test_returned_row_predicate();
+    test_first_call_not_in_list();
+    test_first_call_empty_list_done();
+    test_first_call_non_empty_returns_first_row();
+    test_next_call_advances();
+    test_next_call_exhausts();
+    test_next_call_from_fresh_or_exhausted();
+    test_current_value();
+    test_is_streaming_beneficial();
+}

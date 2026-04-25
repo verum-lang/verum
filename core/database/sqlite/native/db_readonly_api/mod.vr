@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/db_readonly_api/mod.vr
+// =============================================================================
+// sqlite3_db_readonly(db, schema) — returns 1 if the schema is read-only,
+// 0 if writable, -1 if the schema name is unknown.  Read-only conditions:
+// file opened with SQLITE_OPEN_READONLY, file mode lacks write permission,
+// PRAGMA query_only=ON.  Spec App E.D.
+// =============================================================================
+
+module core.database.sqlite.native.db_readonly_api;
+
+public module check;

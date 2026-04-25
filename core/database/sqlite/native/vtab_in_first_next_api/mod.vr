@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_in_first_next_api/mod.vr
+// =============================================================================
+// sqlite3_vtab_in_first / sqlite3_vtab_in_next — added 3.38.  Lets a vtab
+// xFilter() iterate the right-hand side of an `IN` constraint one at a time
+// instead of receiving the whole set.  Saves memory for large IN lists.
+// Spec App E.V.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_in_first_next_api;
+
+public module iter;

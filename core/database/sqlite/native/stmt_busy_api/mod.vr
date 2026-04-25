@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_busy_api/mod.vr
+// =============================================================================
+// sqlite3_stmt_busy(stmt) — returns 1 iff the stmt has been stepped past the
+// first row but not yet reset / finalised (a row is buffered).  Used by the
+// shell to decide whether to display "[busy]" warnings.  Spec App E.S.
+// =============================================================================
+
+module core.database.sqlite.native.stmt_busy_api;
+
+public module state;

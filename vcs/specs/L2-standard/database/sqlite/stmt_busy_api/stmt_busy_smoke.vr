@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stmt_busy_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stmt_busy_api.state.{
+    Phase, PhFresh, PhRunning, PhFinished, PhFinalized, phase_name,
+    is_busy, busy_bool,
+    Event, EStep, EReset, EFinalize, event_name,
+    next_phase,
+    CallCheck, CcAllowed, CcMisuseFinalized,
+    check_call, check_name,
+};
+mount base.{Bool};
+
+fn test_phase_names() {
+    assert(phase_name(&PhFresh)     == "fresh".clone());
+    assert(phase_name(&PhRunning)   == "running".clone());
+    assert(phase_name(&PhFinished)  == "finished".clone());
+    assert(phase_name(&PhFinalized) == "finalized".clone());
+}
+
+fn test_is_busy_only_in_running() {
+    assert_eq(is_busy(&PhFresh),     0);
+    assert_eq(is_busy(&PhRunning),   1);
+    assert_eq(is_busy(&PhFinished),  0);
+    assert_eq(is_busy(&PhFinalized), 0);
+    assert(busy_bool(&PhRunning));
+    assert(!busy_bool(&PhFresh));
+}
+
+fn test_event_names() {
+    assert(event_name(&EStep)     == "step".clone());
+    assert(event_name(&EReset)    == "reset".clone());
+    assert(event_name(&EFinalize) == "finalize".clone());
+}
+
+fn test_next_phase_step_with_row() {
+    match next_phase(&PhFresh,    &EStep, true)  { PhRunning => {}, _ => assert(false) }
+    match next_phase(&PhRunning,  &EStep, true)  { PhRunning => {}, _ => assert(false) }
+}
+
+fn test_next_phase_step_done() {
+    match next_phase(&PhFresh,    &EStep, false) { PhFinished => {}, _ => assert(false) }
+    match next_phase(&PhRunning,  &EStep, false) { PhFinished => {}, _ => assert(false) }
+}
+
+fn test_next_phase_reset() {
+    match next_phase(&PhRunning,  &EReset, false) { PhFresh => {}, _ => assert(false) }
+    match next_phase(&PhFinished, &EReset, false) { PhFresh => {}, _ => assert(false) }
+}
+
+fn test_next_phase_finalize_terminal() {
+    match next_phase(&PhFresh,    &EFinalize, false) { PhFinalized => {}, _ => assert(false) }
+    match next_phase(&PhFinalized, &EReset,    false) { PhFinalized => {}, _ => assert(false) }
+    match next_phase(&PhFinalized, &EStep,     true)  { PhFinalized => {}, _ => assert(false) }
+}
+
+fn test_call_check_ok() {
+    match check_call(&PhFresh,   &EStep)     { CcAllowed => {}, _ => assert(false) }
+    match check_call(&PhRunning, &EReset)    { CcAllowed => {}, _ => assert(false) }
+    match check_call(&PhFinalized, &EFinalize) { CcAllowed => {}, _ => assert(false) }
+}
+
+fn test_call_check_misuse_after_finalize() {
+    match check_call(&PhFinalized, &EStep)  { CcMisuseFinalized => {}, _ => assert(false) }
+    match check_call(&PhFinalized, &EReset) { CcMisuseFinalized => {}, _ => assert(false) }
+}
+
+fn test_check_names() {
+    assert(check_name(&CcAllowed)         == "allowed".clone());
+    assert(check_name(&CcMisuseFinalized) == "misuse_finalized".clone());
+}
+
+fn main() {
+    test_phase_names();
+    test_is_busy_only_in_running();
+    test_event_names();
+    test_next_phase_step_with_row();
+    test_next_phase_step_done();
+    test_next_phase_reset();
+    test_next_phase_finalize_terminal();
+    test_call_check_ok();
+    test_call_check_misuse_after_finalize();
+    test_check_names();
+}

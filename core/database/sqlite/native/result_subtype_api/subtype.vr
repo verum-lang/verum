@@ -1,0 +1,74 @@
+// sqlite3_result_subtype / _value_subtype — 1-byte subtype carrier.
+
+module core.database.sqlite.native.result_subtype_api.subtype;
+
+mount base.{Bool, Text};
+
+// The byte may carry either a well-known tag (currently only JSON) or any
+// caller-defined byte.  We represent both.
+public type Subtype is
+    | StNone            // 0 — no subtype
+    | StJson            // 'J' (0x4A) — JSON text
+    | StJsonb           // 'B' (0x42) — JSONB
+    | StCustom(Int)     // any other byte
+    ;
+
+public fn json_byte() -> Int  { 0x4A }
+public fn jsonb_byte() -> Int { 0x42 }
+
+public fn from_byte(b: Int) -> Subtype {
+    if b == 0           { return StNone; }
+    if b == json_byte() { return StJson; }
+    if b == jsonb_byte() { return StJsonb; }
+    StCustom(b & 0xFF)
+}
+
+public fn to_byte(s: &Subtype) -> Int {
+    match s {
+        StNone     => 0,
+        StJson     => json_byte(),
+        StJsonb    => jsonb_byte(),
+        StCustom(b) => b.clone() & 0xFF,
+    }
+}
+
+public fn subtype_name(s: &Subtype) -> Text {
+    match s {
+        StNone      => "none".clone(),
+        StJson      => "json".clone(),
+        StJsonb     => "jsonb".clone(),
+        StCustom(_) => "custom".clone(),
+    }
+}
+
+public fn is_set(s: &Subtype) -> Bool {
+    match s { StNone => false, _ => true }
+}
+
+public fn is_json_family(s: &Subtype) -> Bool {
+    match s { StJson => true, StJsonb => true, _ => false }
+}
+
+// Validity bound — the subtype byte must fit in a u8.
+public fn is_valid_byte(b: Int) -> Bool {
+    b >= 0 && b <= 255
+}
+
+// SUBTYPE_NOCHANGE flag — added 3.45 — set on results that the engine should
+// treat as "unchanged" for vtab no-change detection.  Modelled here as a
+// boolean flag carried alongside Subtype.
+public type Annotation is
+    | AnPlain
+    | AnNoChange
+    ;
+
+public fn annotation_name(a: &Annotation) -> Text {
+    match a {
+        AnPlain     => "plain".clone(),
+        AnNoChange  => "no_change".clone(),
+    }
+}
+
+public fn is_no_change(a: &Annotation) -> Bool {
+    match a { AnNoChange => true, _ => false }
+}
