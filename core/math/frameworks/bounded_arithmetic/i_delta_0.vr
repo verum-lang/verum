@@ -1,0 +1,37 @@
+// =============================================================================
+// IΔ_0 — bounded-arithmetic system at the full-bounded stratum (ν^weak = ω-1)
+// =============================================================================
+
+/// IΔ_0 — Buss-Krajicek's first-order theory of bounded arithmetic
+/// with induction restricted to bounded-quantifier-only formulas
+/// (Δ_0). The largest weak-stratum system; sits *immediately below*
+/// the discrete jump to full arithmetic at ν = ω. ν^weak = ω-1.
+///
+/// Provably total functions of IΔ_0 strictly extend the polynomial
+/// hierarchy (depending on whether IΔ_0 + Ω_1 / IΔ_0 + EXP) but
+/// remain inside the weak stratum: no L_Abs-realisation crosses into
+/// IΔ_0.
+@framework(bounded_arithmetic_i_delta_0, "IΔ_0 (Buss-Krajicek): full bounded-Δ_0 induction")
+public axiom i_delta_0_provability() -> Bool ensures true;
+
+/// Discrete jump at the weak/full boundary: ν^weak ≤ ω-1 inside
+/// IΔ_0, but any extension that admits unbounded quantification
+/// jumps to ν = ω. The jump is sharp; there is no intermediate value
+/// (Theorem 137.T discrete-jump lemma).
+@framework(bounded_arithmetic_i_delta_0, "IΔ_0/full discrete jump: ν^weak = ω-1 → ν = ω")
+public axiom weak_full_discrete_jump() -> Bool ensures true;
+
+// =============================================================================
+// Weak-AFN-T result — L_Abs is empty in the weak stratum (Theorem 137.T)
+// =============================================================================
+
+/// The weak-AFN-T result: NO L_Abs-realisation of the canonical-
+/// primitive 13-axiom system lives inside any of V_0, V_1, S^1_2,
+/// V_NP, V_PH, or IΔ_0. The bounded Cantor diagonal (Buss 1986 §6.5)
+/// rules out a candidate construction at every weak stratum.
+///
+/// Operational consequence: `@verify(complexity_typed)` is sound —
+/// bounded-arithmetic verification is rigorously weaker than full-
+/// arithmetic verification, with the boundary witnessed at ν = ω.
+@framework(bounded_arithmetic_i_delta_0, "Theorem 137.T (L_Abs_weak = ∅; weak-AFN-T)")
+public axiom weak_afn_t_l_abs_empty() -> Bool ensures true;

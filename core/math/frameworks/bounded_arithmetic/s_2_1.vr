@@ -1,0 +1,21 @@
+// =============================================================================
+// S^1_2 — Buss's bounded-arithmetic system at the P-time stratum
+// =============================================================================
+
+/// S^1_2 — Buss's first-order theory whose provably total Σ^b_1
+/// functions are exactly the polynomial-time computable functions.
+/// Polynomial induction (PIND) over Σ^b_1-formulas; bounded
+/// quantification with sharp bounds. ν^weak = 2.
+///
+/// S^1_2 is *equivalent* in expressive power to Cook-Nguyen's V_1 but
+/// uses different syntax (smash function `#` for polynomial bounds,
+/// PIND instead of NIA). Verum exposes both as parallel packages so
+/// users familiar with either tradition can cite directly.
+@framework(bounded_arithmetic_s_2_1, "S^1_2 (Buss 1986 §6): P-time via PIND")
+public axiom s_2_1_provability_p_time() -> Bool ensures true;
+
+/// Bounded Cantor-style diagonal argument internal to S^1_2 (Buss
+/// 1986 §6.5): no L_Abs-realisation lives in the weak stratum,
+/// supporting the L_Abs_weak == empty conclusion of Theorem 137.T.
+@framework(bounded_arithmetic_s_2_1, "S^1_2 §6.5 bounded Cantor diagonal")
+public axiom s_2_1_bounded_cantor_diagonal() -> Bool ensures true;

@@ -1,0 +1,17 @@
+// =============================================================================
+// V_0 — bounded-arithmetic system at the LOGSPACE stratum (ν^weak = 0)
+// =============================================================================
+
+/// V_0 — Cook-Reckhow's two-sorted second-order theory whose provably
+/// total functions are exactly the LOGSPACE-computable functions.
+/// Bounded comprehension over Σ^B_0-formulas; induction restricted to
+/// the same class. ν^weak = 0.
+@framework(bounded_arithmetic_v_0, "V_0 (Cook-Reckhow 1979 / Cook-Nguyen 2010 §V): LOGSPACE")
+public axiom v_0_provability_logspace() -> Bool ensures true;
+
+/// Conservative-extension marker: V_0 is conservative over the
+/// quantifier-free fragment of bounded arithmetic restricted to
+/// Σ^B_0-formulas. Used by the complexity-typed verification strategy
+/// to discharge V_0 obligations without escalating to a richer system.
+@framework(bounded_arithmetic_v_0, "V_0 conservative over Σ^B_0 fragment")
+public axiom v_0_conservative_over_sigma_b_0() -> Bool ensures true;

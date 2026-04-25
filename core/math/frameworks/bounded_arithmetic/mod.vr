@@ -1,0 +1,37 @@
+// =============================================================================
+// core.math.frameworks.bounded_arithmetic — weak-stratum framework packages
+// =============================================================================
+//
+// Six bounded-arithmetic systems shipped as separate framework
+// packages, organised by their complexity-class correspondence:
+//
+//     ν^weak | System    | Complexity class | Reference theory
+//     ─────────────────────────────────────────────────────────────
+//        0   | V_0        | LOGSPACE         | Cook-Reckhow 1979
+//        1   | V_1        | P                | Cook-Nguyen 2010
+//        2   | S_2_1      | P                | Buss 1986
+//        3   | V_NP       | NP               | Cook-Nguyen 2010
+//        4   | V_PH       | Polynomial Hier  | Cook-Nguyen 2010
+//      ω-1   | I_Delta_0  | full bounded     | Buss-Krajicek
+//
+// At the boundary `I_Delta_0 → full arithmetic` there is a discrete
+// jump in ν^weak: rank ω-1 on the weak side becomes rank ω on the full
+// side (per Theorem 137.T discrete-jump lemma). Verification at any
+// of these strata is *strictly weaker* than full-arithmetic
+// verification: the @verify(complexity_typed) strategy (deferred to
+// VFE-8 V1) is sound exactly because no L_Abs-realisation crosses the
+// boundary.
+//
+// Each system file declares the framework + its proof obligations as
+// trusted-boundary axioms; downstream code uses
+// `@framework(bounded_arithmetic_<system>, "<citation>")` to record the
+// dependency. CLI `verum audit --framework-axioms` flags the
+// complexity class.
+// =============================================================================
+
+public mount core.math.frameworks.bounded_arithmetic.v_0;
+public mount core.math.frameworks.bounded_arithmetic.v_1;
+public mount core.math.frameworks.bounded_arithmetic.s_2_1;
+public mount core.math.frameworks.bounded_arithmetic.v_np;
+public mount core.math.frameworks.bounded_arithmetic.v_ph;
+public mount core.math.frameworks.bounded_arithmetic.i_delta_0;

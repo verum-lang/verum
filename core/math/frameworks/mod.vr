@@ -98,3 +98,12 @@ public mount core.math.frameworks.diakrisis_biadjunction;
 public mount core.math.frameworks.diakrisis_stack_model;
 public mount core.math.frameworks.diakrisis_extensions;
 public mount core.math.frameworks.diakrisis_acts;
+
+// Weak-stratum coordinate-point frameworks — bounded-arithmetic systems
+// (V_0 / V_1 / S^1_2 / V_NP / V_PH / IΔ_0) at the ν^weak ∈ [0, ω-1]
+// stratum. Each has ν^weak < ω (strictly below the full-arithmetic
+// stratum); the discrete jump at the weak/full boundary is the
+// content of Theorem 137.T. Used by VFE-8 @verify(complexity_typed)
+// strategy for polynomial-time verification of bounded-arithmetic
+// programs.
+public mount core.math.frameworks.bounded_arithmetic;

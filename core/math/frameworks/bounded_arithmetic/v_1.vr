@@ -1,0 +1,16 @@
+// =============================================================================
+// V_1 — bounded-arithmetic system at the P-time stratum (ν^weak = 1)
+// =============================================================================
+
+/// V_1 — Cook-Nguyen's two-sorted theory whose provably total functions
+/// are exactly the polynomial-time computable functions. Bounded
+/// comprehension over Σ^B_1-formulas; induction restricted to the
+/// same class. ν^weak = 1.
+@framework(bounded_arithmetic_v_1, "V_1 (Cook-Nguyen 2010 §V): P-time")
+public axiom v_1_provability_p_time() -> Bool ensures true;
+
+/// V_1 is the natural target for cryptographic / real-time
+/// verification: every theorem provable in V_1 has a P-time witness
+/// extraction.
+@framework(bounded_arithmetic_v_1, "V_1 witness extraction is P-time")
+public axiom v_1_witness_extraction_polynomial() -> Bool ensures true;

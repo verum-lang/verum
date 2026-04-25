@@ -1,0 +1,18 @@
+// =============================================================================
+// V_PH — bounded-arithmetic system at the polynomial-hierarchy stratum (ν^weak = 4)
+// =============================================================================
+
+/// V_PH — Cook-Nguyen's theory whose provably total functions span
+/// the entire polynomial hierarchy PH = ⋃_k Σ^p_k. Bounded
+/// comprehension over Σ^B_∞-formulas of arbitrary alternation depth;
+/// the natural target for verification of polynomial-hierarchy-typed
+/// programs. ν^weak = 4.
+@framework(bounded_arithmetic_v_ph, "V_PH (Cook-Nguyen 2010 §V): polynomial hierarchy")
+public axiom v_ph_provability_polynomial_hierarchy() -> Bool ensures true;
+
+/// V_PH is the *richest* bounded-arithmetic stratum that remains
+/// strictly weaker than full IΔ_0 + EXP. Every increase in
+/// quantifier-alternation depth corresponds to a level of the
+/// polynomial hierarchy.
+@framework(bounded_arithmetic_v_ph, "V_PH alternation depth tracks PH level")
+public axiom v_ph_alternation_tracks_ph() -> Bool ensures true;
