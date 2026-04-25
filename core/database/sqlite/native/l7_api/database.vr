@@ -99,9 +99,33 @@ public fn open_memory_db(mode: ConnectionMode) -> Result<Database, DbError> {
     }
 }
 
-public fn open_readonly() -> Result<Database, DbError> { open_memory_db(CmRead) }
-public fn open_readwrite() -> Result<Database, DbError> { open_memory_db(CmWrite) }
-public fn open_admin() -> Result<Database, DbError> { open_memory_db(CmAdmin) }
+// Each open_<mode> inlines the open_memory_db body directly.  An earlier
+// shape that delegated through open_memory_db (`{ open_memory_db(CmX) }`
+// or `{ let r = open_memory_db(CmX); return r; }`) produced a deterministic
+// `Null pointer dereference` panic at the call site once VBC codegen was
+// stabilised (task #152).  Inlining sidesteps the broken wrapper-call path
+// without losing any expressiveness — the bodies are tiny and the duplicate
+// match is the only price.
+public fn open_readonly() -> Result<Database, DbError> {
+    match open_memory(CmRead) {
+        Ok(c)  => Ok(Database { conn: c }),
+        Err(e) => Err(db_error_from_conn(e)),
+    }
+}
+
+public fn open_readwrite() -> Result<Database, DbError> {
+    match open_memory(CmWrite) {
+        Ok(c)  => Ok(Database { conn: c }),
+        Err(e) => Err(db_error_from_conn(e)),
+    }
+}
+
+public fn open_admin() -> Result<Database, DbError> {
+    match open_memory(CmAdmin) {
+        Ok(c)  => Ok(Database { conn: c }),
+        Err(e) => Err(db_error_from_conn(e)),
+    }
+}
 
 implement Database {
     public fn mode(&self) -> ConnectionMode { self.conn.mode() }
