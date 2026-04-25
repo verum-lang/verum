@@ -6,14 +6,14 @@
 // @tier: 0
 // @tags: async, executor, runtime, config, sleep, timeout, builder
 // @description: Tests for RuntimeConfig, AsyncRuntime, RuntimeBuilder,
-//               Sleep, ExecutorTimeoutError, Timeout, ExecutionEnv types,
+//               Sleep, ExecutorTimeoutError, Timeout, AsyncExecutionEnv types,
 //               builder patterns, and configuration presets
 // =============================================================================
 
 mount core.async.executor.{
     RuntimeConfig, AsyncRuntime, RuntimeBuilder,
     Sleep, ExecutorTimeoutError, Timeout,
-    ExecutionEnv,
+    AsyncExecutionEnv,
     sleep_ms, sleep_secs,
     block_on,
     timeout,
@@ -290,19 +290,19 @@ fn test_runtime_with_config() {
 }
 
 // =============================================================================
-// Section 10: ExecutionEnv
+// Section 10: AsyncExecutionEnv
 // =============================================================================
 
 @test
 fn test_execution_env_construction() {
-    let env = ExecutionEnv { id: 1, parent_id: None };
+    let env = AsyncExecutionEnv { id: 1, parent_id: None };
     assert_eq(env.id, 1);
     assert(env.parent_id is None);
 }
 
 @test
 fn test_execution_env_with_parent() {
-    let env = ExecutionEnv { id: 2, parent_id: Some(1) };
+    let env = AsyncExecutionEnv { id: 2, parent_id: Some(1) };
     assert_eq(env.id, 2);
     match env.parent_id {
         Some(pid) => assert_eq(pid, 1),
@@ -791,21 +791,21 @@ fn test_timeout_result_bool_ok() {
 }
 
 // =============================================================================
-// Section 24: ExecutionEnv Extended Patterns
+// Section 24: AsyncExecutionEnv Extended Patterns
 // =============================================================================
 
 @test
 fn test_execution_env_root() {
-    let env = ExecutionEnv { id: 0, parent_id: None };
+    let env = AsyncExecutionEnv { id: 0, parent_id: None };
     assert_eq(env.id, 0);
     assert(env.parent_id is None);
 }
 
 @test
 fn test_execution_env_chain() {
-    let root = ExecutionEnv { id: 1, parent_id: None };
-    let child = ExecutionEnv { id: 2, parent_id: Some(root.id) };
-    let grandchild = ExecutionEnv { id: 3, parent_id: Some(child.id) };
+    let root = AsyncExecutionEnv { id: 1, parent_id: None };
+    let child = AsyncExecutionEnv { id: 2, parent_id: Some(root.id) };
+    let grandchild = AsyncExecutionEnv { id: 3, parent_id: Some(child.id) };
 
     assert_eq(root.id, 1);
     assert_eq(child.id, 2);
@@ -823,7 +823,7 @@ fn test_execution_env_chain() {
 
 @test
 fn test_execution_env_large_id() {
-    let env = ExecutionEnv { id: 999_999, parent_id: Some(999_998) };
+    let env = AsyncExecutionEnv { id: 999_999, parent_id: Some(999_998) };
     assert_eq(env.id, 999_999);
     match env.parent_id {
         Some(pid) => assert_eq(pid, 999_998),

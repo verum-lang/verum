@@ -5,18 +5,18 @@
 // @level: L1
 // @tier: 0
 // @tags: runtime, env, execution, tier, concurrency, isolation, cbgr, restart
-// @description: Comprehensive tests for ExecutionTier, IsolationLevel,
-//               CpuAffinity, TaskId, RestartStrategy, RestartPolicy,
+// @description: Comprehensive tests for ExecutionTier, EnvIsolationLevel,
+//               CpuAffinity, TaskId, RuntimeRestartStrategy, RuntimeRestartPolicy,
 //               EnvFlags, ParallelismConfig, GenTracker, and related types.
 // =============================================================================
 
 mount core.runtime.env.{
     ExecutionTier,
-    IsolationLevel,
+    EnvIsolationLevel,
     CpuAffinity,
     TaskId,
-    RestartStrategy,
-    RestartPolicy,
+    RuntimeRestartStrategy,
+    RuntimeRestartPolicy,
     EnvFlags,
     ParallelismConfig,
     GenTracker,
@@ -152,49 +152,49 @@ fn test_tier_unchecked_not_requires_epoch() {
 }
 
 // =============================================================================
-// Section 5: IsolationLevel Variants
+// Section 5: EnvIsolationLevel Variants
 // =============================================================================
 
 @test
 fn test_isolation_shared() {
-    let level: IsolationLevel = IsolationLevel.Shared;
-    assert(level is IsolationLevel.Shared);
+    let level: EnvIsolationLevel = EnvIsolationLevel.Shared;
+    assert(level is EnvIsolationLevel.Shared);
 }
 
 @test
 fn test_isolation_send_only() {
-    let level: IsolationLevel = IsolationLevel.SendOnly;
-    assert(level is IsolationLevel.SendOnly);
+    let level: EnvIsolationLevel = EnvIsolationLevel.SendOnly;
+    assert(level is EnvIsolationLevel.SendOnly);
 }
 
 @test
 fn test_isolation_full() {
-    let level: IsolationLevel = IsolationLevel.Full;
-    assert(level is IsolationLevel.Full);
+    let level: EnvIsolationLevel = EnvIsolationLevel.Full;
+    assert(level is EnvIsolationLevel.Full);
 }
 
 @test
 fn test_isolation_match_shared() {
-    let level = IsolationLevel.Shared;
-    assert(level is IsolationLevel.Shared);
-    assert(!(level is IsolationLevel.SendOnly));
-    assert(!(level is IsolationLevel.Full));
+    let level = EnvIsolationLevel.Shared;
+    assert(level is EnvIsolationLevel.Shared);
+    assert(!(level is EnvIsolationLevel.SendOnly));
+    assert(!(level is EnvIsolationLevel.Full));
 }
 
 @test
 fn test_isolation_match_send_only() {
-    let level = IsolationLevel.SendOnly;
-    assert(level is IsolationLevel.SendOnly);
-    assert(!(level is IsolationLevel.Shared));
-    assert(!(level is IsolationLevel.Full));
+    let level = EnvIsolationLevel.SendOnly;
+    assert(level is EnvIsolationLevel.SendOnly);
+    assert(!(level is EnvIsolationLevel.Shared));
+    assert(!(level is EnvIsolationLevel.Full));
 }
 
 @test
 fn test_isolation_match_full() {
-    let level = IsolationLevel.Full;
-    assert(level is IsolationLevel.Full);
-    assert(!(level is IsolationLevel.Shared));
-    assert(!(level is IsolationLevel.SendOnly));
+    let level = EnvIsolationLevel.Full;
+    assert(level is EnvIsolationLevel.Full);
+    assert(!(level is EnvIsolationLevel.Shared));
+    assert(!(level is EnvIsolationLevel.SendOnly));
 }
 
 // =============================================================================
@@ -278,59 +278,59 @@ fn test_task_id_fields() {
 }
 
 // =============================================================================
-// Section 8: RestartStrategy Variants
+// Section 8: RuntimeRestartStrategy Variants
 // =============================================================================
 
 @test
 fn test_restart_strategy_permanent() {
-    let s: RestartStrategy = RestartStrategy.Permanent;
-    assert(s is RestartStrategy.Permanent);
+    let s: RuntimeRestartStrategy = RuntimeRestartStrategy.Permanent;
+    assert(s is RuntimeRestartStrategy.Permanent);
 }
 
 @test
 fn test_restart_strategy_transient() {
-    let s: RestartStrategy = RestartStrategy.Transient;
-    assert(s is RestartStrategy.Transient);
+    let s: RuntimeRestartStrategy = RuntimeRestartStrategy.Transient;
+    assert(s is RuntimeRestartStrategy.Transient);
 }
 
 @test
 fn test_restart_strategy_temporary() {
-    let s: RestartStrategy = RestartStrategy.Temporary;
-    assert(s is RestartStrategy.Temporary);
+    let s: RuntimeRestartStrategy = RuntimeRestartStrategy.Temporary;
+    assert(s is RuntimeRestartStrategy.Temporary);
 }
 
 @test
 fn test_restart_strategy_match_permanent() {
-    let s = RestartStrategy.Permanent;
-    assert(s is RestartStrategy.Permanent);
-    assert(!(s is RestartStrategy.Transient));
-    assert(!(s is RestartStrategy.Temporary));
+    let s = RuntimeRestartStrategy.Permanent;
+    assert(s is RuntimeRestartStrategy.Permanent);
+    assert(!(s is RuntimeRestartStrategy.Transient));
+    assert(!(s is RuntimeRestartStrategy.Temporary));
 }
 
 @test
 fn test_restart_strategy_match_transient() {
-    let s = RestartStrategy.Transient;
-    assert(s is RestartStrategy.Transient);
-    assert(!(s is RestartStrategy.Permanent));
-    assert(!(s is RestartStrategy.Temporary));
+    let s = RuntimeRestartStrategy.Transient;
+    assert(s is RuntimeRestartStrategy.Transient);
+    assert(!(s is RuntimeRestartStrategy.Permanent));
+    assert(!(s is RuntimeRestartStrategy.Temporary));
 }
 
 @test
 fn test_restart_strategy_match_temporary() {
-    let s = RestartStrategy.Temporary;
-    assert(s is RestartStrategy.Temporary);
-    assert(!(s is RestartStrategy.Permanent));
-    assert(!(s is RestartStrategy.Transient));
+    let s = RuntimeRestartStrategy.Temporary;
+    assert(s is RuntimeRestartStrategy.Temporary);
+    assert(!(s is RuntimeRestartStrategy.Permanent));
+    assert(!(s is RuntimeRestartStrategy.Transient));
 }
 
 // =============================================================================
-// Section 9: RestartPolicy Construction
+// Section 9: RuntimeRestartPolicy Construction
 // =============================================================================
 
 @test
 fn test_restart_policy_permanent() {
-    let policy = RestartPolicy {
-        strategy: RestartStrategy.Permanent,
+    let policy = RuntimeRestartPolicy {
+        strategy: RuntimeRestartStrategy.Permanent,
         max_restarts: 5,
         time_window_secs: 60,
     };
@@ -340,8 +340,8 @@ fn test_restart_policy_permanent() {
 
 @test
 fn test_restart_policy_transient() {
-    let policy = RestartPolicy {
-        strategy: RestartStrategy.Transient,
+    let policy = RuntimeRestartPolicy {
+        strategy: RuntimeRestartStrategy.Transient,
         max_restarts: 3,
         time_window_secs: 30,
     };
@@ -351,8 +351,8 @@ fn test_restart_policy_transient() {
 
 @test
 fn test_restart_policy_temporary() {
-    let policy = RestartPolicy {
-        strategy: RestartStrategy.Temporary,
+    let policy = RuntimeRestartPolicy {
+        strategy: RuntimeRestartStrategy.Temporary,
         max_restarts: 0,
         time_window_secs: 0,
     };
@@ -362,20 +362,20 @@ fn test_restart_policy_temporary() {
 
 @test
 fn test_restart_policy_strategy_field() {
-    let policy = RestartPolicy {
-        strategy: RestartStrategy.Permanent,
+    let policy = RuntimeRestartPolicy {
+        strategy: RuntimeRestartStrategy.Permanent,
         max_restarts: 10,
         time_window_secs: 120,
     };
-    assert(policy.strategy is RestartStrategy.Permanent);
+    assert(policy.strategy is RuntimeRestartStrategy.Permanent);
     assert_eq(policy.max_restarts, 10);
     assert_eq(policy.time_window_secs, 120);
 }
 
 @test
 fn test_restart_policy_high_limits() {
-    let policy = RestartPolicy {
-        strategy: RestartStrategy.Permanent,
+    let policy = RuntimeRestartPolicy {
+        strategy: RuntimeRestartStrategy.Permanent,
         max_restarts: 1000,
         time_window_secs: 3600,
     };
@@ -566,23 +566,23 @@ fn test_inline_retry_policy_fields() {
 }
 
 // =============================================================================
-// Section 15: RestartPolicy with Maybe
+// Section 15: RuntimeRestartPolicy with Maybe
 // =============================================================================
 
 @test
 fn test_restart_policy_optional_some() {
-    let policy = RestartPolicy {
-        strategy: RestartStrategy.Permanent,
+    let policy = RuntimeRestartPolicy {
+        strategy: RuntimeRestartStrategy.Permanent,
         max_restarts: 5,
         time_window_secs: 60,
     };
-    let opt: Maybe<RestartPolicy> = Some(policy);
+    let opt: Maybe<RuntimeRestartPolicy> = Some(policy);
     assert(opt.is_some());
 }
 
 @test
 fn test_restart_policy_optional_none() {
-    let opt: Maybe<RestartPolicy> = None;
+    let opt: Maybe<RuntimeRestartPolicy> = None;
     assert(opt.is_none());
 }
 
@@ -780,24 +780,24 @@ fn test_parallelism_config_single_core_explicit() {
 }
 
 // =============================================================================
-// Section 22: RestartPolicy Edge Cases
+// Section 22: RuntimeRestartPolicy Edge Cases
 // =============================================================================
 
 @test
 fn test_restart_policy_zero_restarts_permanent() {
-    let policy = RestartPolicy {
-        strategy: RestartStrategy.Permanent,
+    let policy = RuntimeRestartPolicy {
+        strategy: RuntimeRestartStrategy.Permanent,
         max_restarts: 0,
         time_window_secs: 0,
     };
-    assert(policy.strategy is RestartStrategy.Permanent);
+    assert(policy.strategy is RuntimeRestartStrategy.Permanent);
     assert_eq(policy.max_restarts, 0);
 }
 
 @test
 fn test_restart_policy_very_large_values() {
-    let policy = RestartPolicy {
-        strategy: RestartStrategy.Transient,
+    let policy = RuntimeRestartPolicy {
+        strategy: RuntimeRestartStrategy.Transient,
         max_restarts: 65535,
         time_window_secs: 86400,
     };
@@ -830,18 +830,18 @@ fn test_tier_match_all_variants() {
 }
 
 // =============================================================================
-// Section 24: IsolationLevel in Context
+// Section 24: EnvIsolationLevel in Context
 // =============================================================================
 
 @test
 fn test_isolation_level_in_parallelism() {
-    // IsolationLevel can be used alongside ParallelismConfig
-    let isolation = IsolationLevel.Full;
+    // EnvIsolationLevel can be used alongside ParallelismConfig
+    let isolation = EnvIsolationLevel.Full;
     let parallelism = ParallelismConfig {
         worker_count: 4,
         affinity: CpuAffinity.Auto,
     };
-    assert(isolation is IsolationLevel.Full);
+    assert(isolation is EnvIsolationLevel.Full);
     assert_eq(parallelism.worker_count, 4);
 }
 

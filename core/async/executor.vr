@@ -1311,24 +1311,24 @@ const RUNTIME_WAKER_VTABLE: RawWakerVTable = RawWakerVTable {
 };
 
 // =============================================================================
-// ExecutionEnv Integration (Native Context System)
+// AsyncExecutionEnv Integration (Native Context System)
 // =============================================================================
 
-/// ExecutionEnv represents the runtime execution environment.
+/// AsyncExecutionEnv represents the runtime execution environment.
 /// Now implemented via native TLS context slots instead of FFI.
-public type ExecutionEnv is {
+public type AsyncExecutionEnv is {
     /// Environment ID
     id: Int,
     /// Parent environment
     parent_id: Maybe<Int>,
 };
 
-/// Get the current ExecutionEnv.
+/// Get the current AsyncExecutionEnv.
 ///
 /// Returns None if no environment is set (unlikely in normal operation).
-public fn current_env() -> Maybe<&ExecutionEnv> {
+public fn current_env() -> Maybe<&AsyncExecutionEnv> {
     match ctx_get(SLOT_RUNTIME) {
-        Some(ptr) => Some(unsafe { &*(ptr as &ExecutionEnv) }),
+        Some(ptr) => Some(unsafe { &*(ptr as &AsyncExecutionEnv) }),
         None => None,
     }
 }

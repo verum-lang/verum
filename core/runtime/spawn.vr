@@ -71,9 +71,9 @@ mount async.{Future, Task, JoinHandle};
 
 mount super.env.{
     ExecutionEnv,
-    IsolationLevel,
+    EnvIsolationLevel,
     RestartStrategy,
-    RestartPolicy,
+    RuntimeRestartPolicy,
 };
 mount super.recovery.{
     RuntimeRecoveryStrategy,
@@ -247,10 +247,10 @@ public type SupervisorSpawnConfig is {
     recovery: Maybe<RuntimeRecoveryStrategy>,
 
     /// Override parent restart policy
-    restart: Maybe<RestartPolicy>,
+    restart: Maybe<RuntimeRestartPolicy>,
 
     /// Override parent isolation level
-    isolation: Maybe<IsolationLevel>,
+    isolation: Maybe<EnvIsolationLevel>,
 
     /// Task priority hint
     priority: PriorityLevel,
@@ -328,7 +328,7 @@ implement SupervisorSpawnConfig {
     /// ## Performance
     /// - 0ns (inline struct copy)
     @inline
-    public fn with_restart(mut self, policy: RestartPolicy) -> Self {
+    public fn with_restart(mut self, policy: RuntimeRestartPolicy) -> Self {
         self.restart = Some(policy);
         self
     }
@@ -338,7 +338,7 @@ implement SupervisorSpawnConfig {
     /// ## Performance
     /// - 0ns (inline enum assignment)
     @inline
-    public fn with_isolation(mut self, isolation: IsolationLevel) -> Self {
+    public fn with_isolation(mut self, isolation: EnvIsolationLevel) -> Self {
         self.isolation = Some(isolation);
         self
     }
@@ -424,7 +424,7 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline)
     @inline
     public fn with_restart_limits(mut self, max_restarts: Int, time_window_secs: UInt64) -> Self {
-        self.restart = Some(RestartPolicy {
+        self.restart = Some(RuntimeRestartPolicy {
             strategy: RestartStrategy.Permanent,
             max_restarts: max_restarts,
             time_window_secs: time_window_secs,
@@ -636,7 +636,7 @@ implement SpawnConfigBuilder {
     /// Set as permanent worker (always restart)
     @inline
     public fn permanent(mut self) -> Self {
-        self.config.restart = Some(RestartPolicy {
+        self.config.restart = Some(RuntimeRestartPolicy {
             strategy: RestartStrategy.Permanent,
             max_restarts: 10,
             time_window_secs: 60,
@@ -647,7 +647,7 @@ implement SpawnConfigBuilder {
     /// Set as transient task (restart on failure only)
     @inline
     public fn transient(mut self) -> Self {
-        self.config.restart = Some(RestartPolicy {
+        self.config.restart = Some(RuntimeRestartPolicy {
             strategy: RestartStrategy.Transient,
             max_restarts: 5,
             time_window_secs: 60,
@@ -658,7 +658,7 @@ implement SpawnConfigBuilder {
     /// Set as temporary task (never restart)
     @inline
     public fn temporary(mut self) -> Self {
-        self.config.restart = Some(RestartPolicy {
+        self.config.restart = Some(RuntimeRestartPolicy {
             strategy: RestartStrategy.Temporary,
             max_restarts: 0,
             time_window_secs: 0,
@@ -704,14 +704,14 @@ implement SpawnConfigBuilder {
     /// Set full isolation (copy-on-write semantics)
     @inline
     public fn isolated(mut self) -> Self {
-        self.config.isolation = Some(IsolationLevel.Full);
+        self.config.isolation = Some(EnvIsolationLevel.Full);
         self
     }
 
     /// Set send-only isolation
     @inline
     public fn send_only(mut self) -> Self {
-        self.config.isolation = Some(IsolationLevel.SendOnly);
+        self.config.isolation = Some(EnvIsolationLevel.SendOnly);
         self
     }
 
@@ -991,7 +991,7 @@ where type
     F: Future<T> + Send,
     T: Send,
 {
-    spawn_with(future, SupervisorSpawnConfig.new().with_isolation(IsolationLevel.Full))
+    spawn_with(future, SupervisorSpawnConfig.new().with_isolation(EnvIsolationLevel.Full))
 }
 
 // =============================================================================
