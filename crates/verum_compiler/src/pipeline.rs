@@ -10947,6 +10947,12 @@ impl<'s> CompilationPipeline<'s> {
             // NOTE: Only include modules needed for sync primitives (mutex/condvar/channel).
             // Time/IO modules use FFI declarations that produce invalid LLVM IR — deferred.
             "core.sys.common",
+            "core.sys.raw",            // FFI intrinsic surface (`@intrinsic("time_*_nanos")`,
+                                       // etc.) used by `core.sys.time_ops` and other
+                                       // platform-agnostic clock wrappers. Without this
+                                       // the closure misses it via `super.raw.*` mounts
+                                       // and Instant.now / sleep_ms compile to lenient
+                                       // SKIPs (see #163 super.* resolution gap).
             "core.sys.darwin.libsystem",
             "core.sys.darwin.thread",
             // Platform TLS / context-slot providers. `core/sys/common.vr`'s

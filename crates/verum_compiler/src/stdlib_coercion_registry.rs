@@ -217,18 +217,16 @@ fn impl_target_head_name(ty: &verum_ast::ty::Type) -> Option<String> {
 ///
 /// Public so `pipeline.rs` Pass 5.5 can call it with the loaded
 /// stdlib + user modules.
-pub fn scan_protocol_implementations<I, M>(
+pub fn scan_protocol_implementations<'a, I>(
     unifier: &mut verum_types::unify::Unifier,
     ast_modules: I,
 ) -> usize
 where
-    I: IntoIterator<Item = M>,
-    M: AsRef<verum_ast::Module>,
+    I: IntoIterator<Item = &'a verum_ast::Module>,
 {
     use verum_ast::{ItemKind, decl::ImplKind};
     let mut registered = 0usize;
     for module in ast_modules {
-        let module = module.as_ref();
         for item in module.items.iter() {
             let ItemKind::Impl(impl_decl) = &item.kind else { continue };
             let ImplKind::Protocol { protocol, for_type, .. } = &impl_decl.kind else { continue };
