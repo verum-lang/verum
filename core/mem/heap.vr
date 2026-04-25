@@ -104,7 +104,7 @@ static mut ENCODE_KEY2: UInt64 = 0xA5A5A5A5A5A5A5A5;
 /// Page header for slab allocation.
 /// Uses 3-level free list for efficient cross-thread deallocation.
 @repr(C, align(64))
-public type PageHeader is {
+public type HeapPageHeader is {
     // =========================================================================
     // Core Identity (16 bytes)
     // =========================================================================
@@ -148,10 +148,10 @@ public type PageHeader is {
     // =========================================================================
 
     /// Next page in queue
-    next: &unsafe PageHeader,
+    next: &unsafe HeapPageHeader,
 
     /// Previous page in queue
-    prev: &unsafe PageHeader,
+    prev: &unsafe HeapPageHeader,
 
     /// Parent segment
     segment: &MemSegment,
@@ -183,7 +183,7 @@ public type PageHeader is {
     _pad2: [UInt64; 2],
 };
 
-implement PageHeader {
+implement HeapPageHeader {
     /// Initialize a page header for a given size class
     public fn init(
         &mut self,
@@ -213,8 +213,8 @@ implement PageHeader {
         self.local_free = 0;
         self.xthread_free = 0;
 
-        self.next = 0 as &unsafe PageHeader;
-        self.prev = 0 as &unsafe PageHeader;
+        self.next = 0 as &unsafe HeapPageHeader;
+        self.prev = 0 as &unsafe HeapPageHeader;
         self.segment = segment;
         self.slice_index = slice_index as UInt32;
         self.slice_count = slices as UInt32;
@@ -442,9 +442,9 @@ implement PageHeader {
 /// Doubly-linked list of pages for a size class
 public type PageQueue is {
     /// First page (non-full)
-    first: &unsafe PageHeader,
+    first: &unsafe HeapPageHeader,
     /// Last page (for FIFO ordering)
-    last: &unsafe PageHeader,
+    last: &unsafe HeapPageHeader,
     /// Block size for this queue
     block_size: UInt32,
     /// Number of pages in queue
@@ -456,8 +456,8 @@ implement PageQueue {
     @inline
     public fn empty() -> PageQueue {
         PageQueue {
-            first: 0 as &unsafe PageHeader,
-            last: 0 as &unsafe PageHeader,
+            first: 0 as &unsafe HeapPageHeader,
+            last: 0 as &unsafe HeapPageHeader,
             block_size: 0,
             count: 0,
         }
@@ -470,59 +470,59 @@ implement PageQueue {
     }
 
     /// Push a page to the front (for recently used pages)
-    public fn push_front(&mut self, page: &mut PageHeader) {
-        page.prev = 0 as &unsafe PageHeader;
+    public fn push_front(&mut self, page: &mut HeapPageHeader) {
+        page.prev = 0 as &unsafe HeapPageHeader;
         page.next = self.first;
 
         if (self.first as Int) != 0 {
-            unsafe { (self.first as &mut PageHeader).prev = page as &unsafe PageHeader; }
+            unsafe { (self.first as &mut HeapPageHeader).prev = page as &unsafe HeapPageHeader; }
         } else {
-            self.last = page as &unsafe PageHeader;
+            self.last = page as &unsafe HeapPageHeader;
         }
 
-        self.first = page as &unsafe PageHeader;
+        self.first = page as &unsafe HeapPageHeader;
         self.count = self.count + 1;
     }
 
     /// Push a page to the back
-    public fn push_back(&mut self, page: &mut PageHeader) {
-        page.next = 0 as &unsafe PageHeader;
+    public fn push_back(&mut self, page: &mut HeapPageHeader) {
+        page.next = 0 as &unsafe HeapPageHeader;
         page.prev = self.last;
 
         if (self.last as Int) != 0 {
-            unsafe { (self.last as &mut PageHeader).next = page as &unsafe PageHeader; }
+            unsafe { (self.last as &mut HeapPageHeader).next = page as &unsafe HeapPageHeader; }
         } else {
-            self.first = page as &unsafe PageHeader;
+            self.first = page as &unsafe HeapPageHeader;
         }
 
-        self.last = page as &unsafe PageHeader;
+        self.last = page as &unsafe HeapPageHeader;
         self.count = self.count + 1;
     }
 
     /// Remove a page from the queue
-    public fn remove(&mut self, page: &mut PageHeader) {
+    public fn remove(&mut self, page: &mut HeapPageHeader) {
         if (page.prev as Int) != 0 {
-            unsafe { (page.prev as &mut PageHeader).next = page.next; }
+            unsafe { (page.prev as &mut HeapPageHeader).next = page.next; }
         } else {
             self.first = page.next;
         }
 
         if (page.next as Int) != 0 {
-            unsafe { (page.next as &mut PageHeader).prev = page.prev; }
+            unsafe { (page.next as &mut HeapPageHeader).prev = page.prev; }
         } else {
             self.last = page.prev;
         }
 
-        page.prev = 0 as &unsafe PageHeader;
-        page.next = 0 as &unsafe PageHeader;
+        page.prev = 0 as &unsafe HeapPageHeader;
+        page.next = 0 as &unsafe HeapPageHeader;
         self.count = self.count - 1;
     }
 
     /// Get first page (for allocation)
     @inline
-    public fn peek(&self) -> Maybe<&mut PageHeader> {
+    public fn peek(&self) -> Maybe<&mut HeapPageHeader> {
         if (self.first as Int) != 0 {
-            Some(self.first as &mut PageHeader)
+            Some(self.first as &mut HeapPageHeader)
         } else {
             None
         }
@@ -588,7 +588,7 @@ public type LocalHeap is {
 
     /// Direct page lookup for small sizes (word count → page)
     /// Enables O(1) allocation for sizes ≤ 1024 bytes
-    pages_direct: [&unsafe PageHeader; 129],
+    pages_direct: [&unsafe HeapPageHeader; 129],
 
     // =========================================================================
     // Page Queues (75 queues × 24 bytes = 1800 bytes)
@@ -625,7 +625,7 @@ implement LocalHeap {
     public fn new(thread_id: UInt64) -> LocalHeap {
         let mut heap = LocalHeap {
             thread_id: thread_id,
-            pages_direct: [0 as &unsafe PageHeader; 129],
+            pages_direct: [0 as &unsafe HeapPageHeader; 129],
             pages: [PageQueue.empty(); 75],
             segments: 0 as &unsafe MemSegment,
             thread_delayed_free: 0,
@@ -651,7 +651,7 @@ implement LocalHeap {
         if wsize < DIRECT_LOOKUP_SIZE {
             let page_ptr = self.pages_direct[wsize];
             if (page_ptr as Int) != 0 {
-                let page = page_ptr as &mut PageHeader;
+                let page = page_ptr as &mut HeapPageHeader;
 
                 // Try to allocate from this page
                 if let Some(block) = page.alloc_block() {
@@ -719,7 +719,7 @@ implement LocalHeap {
     }
 
     /// Find a page with free blocks or create a new one
-    fn find_or_create_page(&mut self, bin: Int) -> Result<&mut PageHeader, HeapError> {
+    fn find_or_create_page(&mut self, bin: Int) -> Result<&mut HeapPageHeader, HeapError> {
         let pq = &mut self.pages[bin];
 
         // Check existing pages
@@ -734,14 +734,14 @@ implement LocalHeap {
     }
 
     /// Create a new page for a size class
-    fn create_page(&mut self, bin: Int) -> Result<&mut PageHeader, HeapError> {
+    fn create_page(&mut self, bin: Int) -> Result<&mut HeapPageHeader, HeapError> {
         let slices_needed = slices_for_bin(bin);
 
         // Find or create a segment with enough space
         let (segment, slice_index) = self.find_segment_space(slices_needed)?;
 
         // Get page pointer (page header is at slice start)
-        let page_ptr = segment.slice_ptr(slice_index) as &mut PageHeader;
+        let page_ptr = segment.slice_ptr(slice_index) as &mut HeapPageHeader;
 
         // Initialize page
         page_ptr.init(segment, slice_index, bin);
@@ -758,7 +758,7 @@ implement LocalHeap {
     }
 
     /// Update pages_direct array for a bin
-    fn update_direct_lookup(&mut self, bin: Int, page: &mut PageHeader) {
+    fn update_direct_lookup(&mut self, bin: Int, page: &mut HeapPageHeader) {
         if bin >= BIN_COUNT {
             return;
         }
@@ -775,7 +775,7 @@ implement LocalHeap {
         // Update all word sizes that map to this bin
         for wsize in min_wsize..=max_wsize {
             if wsize < DIRECT_LOOKUP_SIZE {
-                self.pages_direct[wsize] = page as &unsafe PageHeader;
+                self.pages_direct[wsize] = page as &unsafe HeapPageHeader;
             }
         }
     }
@@ -810,7 +810,7 @@ implement LocalHeap {
     }
 
     /// Move a full page to the full queue
-    fn move_to_full_queue(&mut self, page: &mut PageHeader) {
+    fn move_to_full_queue(&mut self, page: &mut HeapPageHeader) {
         let bin = page.bin as Int;
 
         // Remove from current queue
@@ -825,7 +825,7 @@ implement LocalHeap {
     }
 
     /// Clear direct lookup if it points to this page
-    fn clear_direct_lookup_if_matches(&mut self, bin: Int, page: &PageHeader) {
+    fn clear_direct_lookup_if_matches(&mut self, bin: Int, page: &HeapPageHeader) {
         if bin >= BIN_COUNT {
             return;
         }
@@ -838,9 +838,9 @@ implement LocalHeap {
                 if (self.pages_direct[wsize] as Int) == (page as Int) {
                     // Find another page for this size
                     if let Some(other) = self.pages[bin].peek() {
-                        self.pages_direct[wsize] = other as &unsafe PageHeader;
+                        self.pages_direct[wsize] = other as &unsafe HeapPageHeader;
                     } else {
-                        self.pages_direct[wsize] = 0 as &unsafe PageHeader;
+                        self.pages_direct[wsize] = 0 as &unsafe HeapPageHeader;
                     }
                 }
             }
@@ -897,7 +897,7 @@ implement LocalHeap {
     /// Free local (same thread)
     fn free_local(&mut self, ptr: &unsafe Byte, segment: &MemSegment) -> Result<(), HeapError> {
         let slice_idx = segment.slice_index(ptr);
-        let page = segment.slice_ptr(slice_idx) as &mut PageHeader;
+        let page = segment.slice_ptr(slice_idx) as &mut HeapPageHeader;
 
         // Verify it's a valid page
         if page.bin as Int >= QUEUE_COUNT {
@@ -931,7 +931,7 @@ implement LocalHeap {
     /// Cross-thread free
     fn free_xthread(&mut self, ptr: &unsafe Byte, segment: &MemSegment) -> Result<(), HeapError> {
         let slice_idx = segment.slice_index(ptr);
-        let page = segment.slice_ptr(slice_idx) as &mut PageHeader;
+        let page = segment.slice_ptr(slice_idx) as &mut HeapPageHeader;
 
         // Free via atomic xthread list
         page.free_block_xthread(ptr);
@@ -943,7 +943,7 @@ implement LocalHeap {
     }
 
     /// Move page from full queue back to size class queue
-    fn move_from_full_queue(&mut self, page: &mut PageHeader) {
+    fn move_from_full_queue(&mut self, page: &mut HeapPageHeader) {
         // Remove from full queue
         self.pages[BIN_FULL].remove(page);
         page.flags = page.flags & !PAGE_FLAG_IN_FULL_QUEUE;
@@ -957,7 +957,7 @@ implement LocalHeap {
     }
 
     /// Release an empty page
-    fn release_page(&mut self, page: &mut PageHeader) {
+    fn release_page(&mut self, page: &mut HeapPageHeader) {
         let bin = page.bin as Int;
 
         // Remove from queue
@@ -1019,7 +1019,7 @@ implement LocalHeap {
         // (Pages with live blocks will be added to appropriate queues)
         for i in 1..SLICES_PER_SEGMENT {
             if segment.slices[i].is_span_start() {
-                let page = segment.slice_ptr(i) as &mut PageHeader;
+                let page = segment.slice_ptr(i) as &mut HeapPageHeader;
 
                 // Collect any cross-thread frees
                 page.collect_xthread_frees();
@@ -1047,7 +1047,7 @@ implement LocalHeap {
             let mut page_ptr = pq.first;
 
             while (page_ptr as Int) != 0 {
-                let page = page_ptr as &mut PageHeader;
+                let page = page_ptr as &mut HeapPageHeader;
                 page.collect_xthread_frees();
                 page_ptr = page.next;
             }
@@ -1239,7 +1239,7 @@ public fn heap_alloc(size: Int) -> Result<(&unsafe Byte, UInt32, UInt16), HeapEr
     // Get CBGR info
     let segment = ptr_to_segment(ptr);
     let slice_idx = segment.slice_index(ptr);
-    let page = segment.slice_ptr(slice_idx) as &PageHeader;
+    let page = segment.slice_ptr(slice_idx) as &HeapPageHeader;
     let block_idx = page.block_index(ptr);
 
     let generation = page.slot_generation(block_idx);
@@ -1261,7 +1261,7 @@ public fn heap_alloc_zeroed(size: Int) -> Result<(&unsafe Byte, UInt32, UInt16),
     // Get CBGR info
     let segment = ptr_to_segment(ptr);
     let slice_idx = segment.slice_index(ptr);
-    let page = segment.slice_ptr(slice_idx) as &PageHeader;
+    let page = segment.slice_ptr(slice_idx) as &HeapPageHeader;
     let block_idx = page.block_index(ptr);
 
     let generation = page.slot_generation(block_idx);
@@ -1295,7 +1295,7 @@ public fn heap_free_validated(
     // Validate generation and epoch
     let segment = ptr_to_segment(ptr);
     let slice_idx = segment.slice_index(ptr);
-    let page = segment.slice_ptr(slice_idx) as &PageHeader;
+    let page = segment.slice_ptr(slice_idx) as &HeapPageHeader;
     let block_idx = page.block_index(ptr);
 
     let current_gen = page.slot_generation(block_idx);

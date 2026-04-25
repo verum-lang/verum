@@ -75,13 +75,13 @@ extern {
     fn ftruncate(fd: Int, length: Int) -> Int;
 
     /// Get file status
-    fn fstat(fd: Int, buf: &unsafe Stat) -> Int;
+    fn fstat(fd: Int, buf: &unsafe DarwinStat) -> Int;
 
     /// Get file status (path)
-    fn stat(path: &Byte, buf: &unsafe Stat) -> Int;
+    fn stat(path: &Byte, buf: &unsafe DarwinStat) -> Int;
 
     /// Get file status (symlink)
-    fn lstat(path: &Byte, buf: &unsafe Stat) -> Int;
+    fn lstat(path: &Byte, buf: &unsafe DarwinStat) -> Int;
 
     /// Scatter read
     fn readv(fd: Int, iov: &IOVec, iovcnt: Int) -> Int;
@@ -607,7 +607,7 @@ public type KEvent64 is {
 };
 
 /// stat structure
-public type Stat is {
+public type DarwinStat is {
     st_dev: Int32,
     st_ino: UInt64,
     st_mode: UInt16,
@@ -1232,8 +1232,8 @@ public fn safe_lseek(fd: FileDesc, offset: Int, whence: Int) -> Result<Int, OSEr
 }
 
 /// Get file status (safe wrapper)
-public fn safe_fstat(fd: FileDesc, stat_buf: &mut Stat) -> Result<(), OSError> {
-    let result = unsafe { fstat(fd.0, stat_buf as &unsafe Stat) };
+public fn safe_fstat(fd: FileDesc, stat_buf: &mut DarwinStat) -> Result<(), OSError> {
+    let result = unsafe { fstat(fd.0, stat_buf as &unsafe DarwinStat) };
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
@@ -1294,13 +1294,13 @@ public fn safe_dup(fd: FileDesc) -> Result<FileDesc, OSError> {
 // =============================================================================
 
 /// Get file status by path (follows symlinks)
-public fn safe_stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
+public fn safe_stat(path: &[Byte], stat_buf: &mut DarwinStat) -> Result<(), OSError> {
     let mut path_buf = [0_u8; 4096];
     let len = path.len().min(4095);
     path_buf[..len].copy_from_slice(&path[..len]);
     path_buf[len] = 0;
 
-    let result = unsafe { stat(path_buf.as_ptr() as &Byte, stat_buf as &unsafe Stat) };
+    let result = unsafe { stat(path_buf.as_ptr() as &Byte, stat_buf as &unsafe DarwinStat) };
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
@@ -1310,13 +1310,13 @@ public fn safe_stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
 }
 
 /// Get file status by path (doesn't follow symlinks)
-public fn safe_lstat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
+public fn safe_lstat(path: &[Byte], stat_buf: &mut DarwinStat) -> Result<(), OSError> {
     let mut path_buf = [0_u8; 4096];
     let len = path.len().min(4095);
     path_buf[..len].copy_from_slice(&path[..len]);
     path_buf[len] = 0;
 
-    let result = unsafe { lstat(path_buf.as_ptr() as &Byte, stat_buf as &unsafe Stat) };
+    let result = unsafe { lstat(path_buf.as_ptr() as &Byte, stat_buf as &unsafe DarwinStat) };
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })

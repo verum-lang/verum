@@ -19,7 +19,7 @@ module core.net.h3.qpack.static_table;
 mount core.*;
 mount core.collections.List;
 
-public type StaticEntry is {
+public type QpackStaticEntry is {
     name:  Text,
     value: Text,
 };
@@ -28,7 +28,7 @@ public const STATIC_TABLE_SIZE: Int = 99;
 
 /// Look up a static-table entry by its index. Returns None for
 /// indices outside [0, 98].
-public fn get(index: Int) -> Maybe<StaticEntry> {
+public fn get(index: Int) -> Maybe<QpackStaticEntry> {
     if index < 0 || index >= STATIC_TABLE_SIZE { return None; }
     Some(entry(index))
 }
@@ -71,12 +71,12 @@ fn text_eq(a: &Text, b: &Text) -> Bool {
 // Indexed access via `entry(n)` rather than a pre-allocated List so
 // module initialisation stays lazy. Benchmark measurements show
 // lookup overhead here is <20ns on hot-path (vs 15ns on a
-// pre-materialised List<StaticEntry>) — well below the parse /
+// pre-materialised List<QpackStaticEntry>) — well below the parse /
 // HPACK Huffman decode cost and off the critical HTTP hot path.
 //
 // =============================================================================
 
-fn entry(i: Int) -> StaticEntry {
+fn entry(i: Int) -> QpackStaticEntry {
     match i {
         // Authority / pseudo-headers
          0 => e(":authority", ""),
@@ -187,6 +187,6 @@ fn entry(i: Int) -> StaticEntry {
     }
 }
 
-fn e(n: &str, v: &str) -> StaticEntry {
-    StaticEntry { name: Text.from_str(n), value: Text.from_str(v) }
+fn e(n: &str, v: &str) -> QpackStaticEntry {
+    QpackStaticEntry { name: Text.from_str(n), value: Text.from_str(v) }
 }

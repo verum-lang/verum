@@ -23,7 +23,7 @@
 // before the body runs, and substitutes the snapshot values into
 // the postcondition for evaluation.
 //
-// ## Frame property
+// ## ContractsFrame property
 //
 // A function's *frame* is the set of locations it may modify.
 // A clean contract:
@@ -107,19 +107,19 @@ public fn postcondition_with_post(p: Postcondition, loc: Text) -> Postcondition 
 }
 
 /// A function's frame: the locations it may modify.
-public type Frame is { modifies: List<Text> };
+public type ContractsFrame is { modifies: List<Text> };
 
-public fn frame_empty() -> Frame {
-    Frame { modifies: [] }
+public fn frame_empty() -> ContractsFrame {
+    ContractsFrame { modifies: [] }
 }
 
-public fn frame_with(f: Frame, loc: Text) -> Frame {
+public fn frame_with(f: ContractsFrame, loc: Text) -> ContractsFrame {
     let mut m = f.modifies;
     m.push(loc);
-    Frame { modifies: m }
+    ContractsFrame { modifies: m }
 }
 
-public fn frame_contains(f: Frame, loc: Text) -> Bool {
+public fn frame_contains(f: ContractsFrame, loc: Text) -> Bool {
     let mut i: Int = 0;
     while i < f.modifies.len() {
         if f.modifies[i] == loc {
@@ -131,7 +131,7 @@ public fn frame_contains(f: Frame, loc: Text) -> Bool {
 }
 
 // =============================================================================
-// 3. Frame analysis
+// 3. ContractsFrame analysis
 // =============================================================================
 
 /// Result of frame-property analysis.
@@ -146,7 +146,7 @@ public type FrameAnalysis is {
 
 /// Compute snapshot obligations + soundness warnings from a
 /// postcondition and its declared frame.
-public fn compute_frame_obligations(p: Postcondition, f: Frame) -> FrameAnalysis {
+public fn compute_frame_obligations(p: Postcondition, f: ContractsFrame) -> FrameAnalysis {
     let mut to_snap: List<Text> = [];
     let mut i: Int = 0;
     while i < p.old_refs.len() {

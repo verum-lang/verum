@@ -180,17 +180,17 @@ fn noop_drop(_data: &unsafe Byte) {}
 ///
 /// The current task will be re-queued and other tasks get a chance to run.
 /// This is the intrinsic backing `yield_now()`.
-public type YieldNow is {
+public type IntrinsicsYieldNow is {
     yielded: Bool,
 };
 
-implement YieldNow {
-    public fn new() -> YieldNow {
-        YieldNow { yielded: false }
+implement IntrinsicsYieldNow {
+    public fn new() -> IntrinsicsYieldNow {
+        IntrinsicsYieldNow { yielded: false }
     }
 }
 
-implement Future for YieldNow {
+implement Future for IntrinsicsYieldNow {
     type Output = ();
 
     fn poll(&mut self, cx: &mut Context) -> Poll<()> {
@@ -205,6 +205,6 @@ implement Future for YieldNow {
 }
 
 /// Yield execution to other tasks once, then resume.
-public fn yield_now() -> YieldNow {
-    YieldNow.new()
+public fn yield_now() -> IntrinsicsYieldNow {
+    IntrinsicsYieldNow.new()
 }

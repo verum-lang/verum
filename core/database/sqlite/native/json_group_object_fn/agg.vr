@@ -9,7 +9,7 @@ public type Key is
     | KNullErr           // NULL key — SQLITE_ERROR at step time
     ;
 
-public type Value is
+public type JsonObjAggValue is
     | VNull
     | VInt(Int64)
     | VText(Text)
@@ -22,7 +22,7 @@ public type StepCheck is
     | ErrBlobValue
     ;
 
-public fn check_step(k: &Key, v: &Value) -> StepCheck {
+public fn check_step(k: &Key, v: &JsonObjAggValue) -> StepCheck {
     match k {
         KNullErr  => return ErrNullKey,
         KText(_)  => {},
@@ -45,17 +45,17 @@ public fn is_ok(c: &StepCheck) -> Bool {
     match c { OkPair => true, _ => false }
 }
 
-public type State is {
+public type JsonObjAggState is {
     pair_count: Int,
     saw_null_key: Bool,
     saw_blob_value: Bool,
 };
 
-public fn empty_state() -> State {
-    State { pair_count: 0, saw_null_key: false, saw_blob_value: false }
+public fn empty_state() -> JsonObjAggState {
+    JsonObjAggState { pair_count: 0, saw_null_key: false, saw_blob_value: false }
 }
 
-public fn step(mut s: State, k: &Key, v: &Value) -> State {
+public fn step(mut s: JsonObjAggState, k: &Key, v: &JsonObjAggValue) -> JsonObjAggState {
     match check_step(k, v) {
         OkPair       => { s.pair_count = s.pair_count + 1; },
         ErrNullKey   => { s.saw_null_key = true; },
@@ -69,7 +69,7 @@ public type JsonGroupObjectResult is
     | RJsonError
     ;
 
-public fn finalize(s: &State) -> JsonGroupObjectResult {
+public fn finalize(s: &JsonObjAggState) -> JsonGroupObjectResult {
     if s.saw_null_key || s.saw_blob_value { return RJsonError; }
     RJsonObject(s.pair_count)
 }

@@ -21,7 +21,7 @@ mount core.database.sqlite.native.schema_version_api.counters.{
     HeaderCounters, fresh_counters,
 };
 
-public type SetOutcome is
+public type SchemaVersionSetOutcome is
       SoOk
     | SoReadOnly;
 
@@ -53,13 +53,13 @@ implement VersionEngine {
         self.counters.schema_version
     }
 
-    pub fn set_user_version(&mut self, v: Int) -> SetOutcome {
+    pub fn set_user_version(&mut self, v: Int) -> SchemaVersionSetOutcome {
         if self.readonly { return SoReadOnly; }
         self.counters.user_version = v;
         SoOk
     }
 
-    pub fn set_application_id(&mut self, id: Int) -> SetOutcome {
+    pub fn set_application_id(&mut self, id: Int) -> SchemaVersionSetOutcome {
         if self.readonly { return SoReadOnly; }
         self.counters.application_id = id;
         SoOk

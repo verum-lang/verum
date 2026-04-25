@@ -904,7 +904,7 @@ context ClusterContext {
 // =============================================================================
 
 // Supervision strategy for actor failures
-public type SupervisionStrategy is
+public type DistributedSupervisionStrategy is
     // Restart failed actor with fresh state
     | Restart
     // Propagate failure to parent supervisor
@@ -933,7 +933,7 @@ public type SupervisionDecision is
 
 // Supervision context for fault-tolerant distributed training
 context Supervision {
-    fn strategy() -> SupervisionStrategy;
+    fn strategy() -> DistributedSupervisionStrategy;
     fn on_failure(failure: &MeshFailure) -> SupervisionDecision;
     fn max_restarts() -> USize;
     fn restart_window() -> Duration;
@@ -941,13 +941,13 @@ context Supervision {
 
 // Default supervision implementation
 public type DefaultSupervision is {
-    strategy: SupervisionStrategy,
+    strategy: DistributedSupervisionStrategy,
     max_restarts: USize,
     restart_window: Duration,
 };
 
 implement DefaultSupervision {
-    public fn new(strategy: SupervisionStrategy) -> Self {
+    public fn new(strategy: DistributedSupervisionStrategy) -> Self {
         DefaultSupervision {
             strategy,
             max_restarts: 3,

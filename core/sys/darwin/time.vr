@@ -99,28 +99,28 @@ fn nanos_to_mach(nanos: UInt64) -> UInt64 {
 
 // Note: DarwinTimespec and DarwinTimeval are imported from libsystem
 
-/// Duration type (nanoseconds)
-public type Duration is (UInt64);
+/// DarwinDuration type (nanoseconds)
+public type DarwinDuration is (UInt64);
 
-implement Duration {
+implement DarwinDuration {
     /// Create duration from nanoseconds.
-    public fn from_nanos(nanos: UInt64) -> Duration {
-        Duration(nanos)
+    public fn from_nanos(nanos: UInt64) -> DarwinDuration {
+        DarwinDuration(nanos)
     }
 
     /// Create duration from microseconds.
-    public fn from_micros(micros: UInt64) -> Duration {
-        Duration(micros * 1_000)
+    public fn from_micros(micros: UInt64) -> DarwinDuration {
+        DarwinDuration(micros * 1_000)
     }
 
     /// Create duration from milliseconds.
-    public fn from_millis(millis: UInt64) -> Duration {
-        Duration(millis * 1_000_000)
+    public fn from_millis(millis: UInt64) -> DarwinDuration {
+        DarwinDuration(millis * 1_000_000)
     }
 
     /// Create duration from seconds.
-    public fn from_secs(secs: UInt64) -> Duration {
-        Duration(secs * 1_000_000_000)
+    public fn from_secs(secs: UInt64) -> DarwinDuration {
+        DarwinDuration(secs * 1_000_000_000)
     }
 
     /// Get duration as nanoseconds.
@@ -157,21 +157,21 @@ implement Duration {
     }
 
     /// Add two durations.
-    public fn add(&self, other: Duration) -> Duration {
-        Duration(self.0 + other.0)
+    public fn add(&self, other: DarwinDuration) -> DarwinDuration {
+        DarwinDuration(self.0 + other.0)
     }
 
     /// Subtract duration (saturating at zero).
-    public fn saturating_sub(&self, other: Duration) -> Duration {
+    public fn saturating_sub(&self, other: DarwinDuration) -> DarwinDuration {
         if self.0 > other.0 {
-            Duration(self.0 - other.0)
+            DarwinDuration(self.0 - other.0)
         } else {
-            Duration(0)
+            DarwinDuration(0)
         }
     }
 
     /// Zero duration constant.
-    public const ZERO: Duration = Duration(0);
+    public const ZERO: DarwinDuration = DarwinDuration(0);
 
     /// Check if this duration is zero.
     public fn is_zero(&self) -> Bool {
@@ -179,47 +179,47 @@ implement Duration {
     }
 }
 
-/// Instant type (monotonic time point using Mach absolute time)
-public type Instant is (UInt64);  // Mach absolute time units
+/// DarwinInstant type (monotonic time point using Mach absolute time)
+public type DarwinInstant is (UInt64);  // Mach absolute time units
 
-implement Instant {
+implement DarwinInstant {
     /// Get the current instant (monotonic time).
     ///
     /// Uses mach_absolute_time for highest precision.
-    public fn now() -> Instant {
-        Instant(unsafe { mach_absolute_time() })
+    public fn now() -> DarwinInstant {
+        DarwinInstant(unsafe { mach_absolute_time() })
     }
 
-    /// Duration elapsed since this instant.
-    public fn elapsed(&self) -> Duration {
+    /// DarwinDuration elapsed since this instant.
+    public fn elapsed(&self) -> DarwinDuration {
         let now = unsafe { mach_absolute_time() };
         let diff = now - self.0;
-        Duration(mach_to_nanos(diff))
+        DarwinDuration(mach_to_nanos(diff))
     }
 
-    /// Duration between two instants.
-    public fn duration_since(&self, earlier: &Instant) -> Duration {
+    /// DarwinDuration between two instants.
+    public fn duration_since(&self, earlier: &DarwinInstant) -> DarwinDuration {
         let diff = self.0 - earlier.0;
-        Duration(mach_to_nanos(diff))
+        DarwinDuration(mach_to_nanos(diff))
     }
 
     /// Add duration to instant.
-    public fn add(&self, duration: Duration) -> Instant {
-        Instant(self.0 + nanos_to_mach(duration.0))
+    public fn add(&self, duration: DarwinDuration) -> DarwinInstant {
+        DarwinInstant(self.0 + nanos_to_mach(duration.0))
     }
 
     /// Subtract duration from instant.
-    public fn sub(&self, duration: Duration) -> Instant {
-        Instant(self.0 - nanos_to_mach(duration.0))
+    public fn sub(&self, duration: DarwinDuration) -> DarwinInstant {
+        DarwinInstant(self.0 - nanos_to_mach(duration.0))
     }
 
     /// Check if this instant is before another.
-    public fn is_before(&self, other: &Instant) -> Bool {
+    public fn is_before(&self, other: &DarwinInstant) -> Bool {
         self.0 < other.0
     }
 
     /// Check if this instant is after another.
-    public fn is_after(&self, other: &Instant) -> Bool {
+    public fn is_after(&self, other: &DarwinInstant) -> Bool {
         self.0 > other.0
     }
 
@@ -229,8 +229,8 @@ implement Instant {
     }
 
     /// Create instant from raw Mach absolute time.
-    public fn from_raw(raw: UInt64) -> Instant {
-        Instant(raw)
+    public fn from_raw(raw: UInt64) -> DarwinInstant {
+        DarwinInstant(raw)
     }
 }
 
@@ -305,7 +305,7 @@ public fn process_cputime_nanos() -> UInt64 {
 ///
 /// # Returns
 /// Remaining time if interrupted, None if completed.
-public fn sleep(duration: Duration) -> Maybe<Duration> {
+public fn sleep(duration: DarwinDuration) -> Maybe<DarwinDuration> {
     let req = duration.to_timespec();
     let mut rem = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
 
@@ -314,18 +314,18 @@ public fn sleep(duration: Duration) -> Maybe<Duration> {
     if result == 0 {
         None
     } else {
-        Some(Duration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
+        Some(DarwinDuration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
     }
 }
 
 /// Sleep for milliseconds.
 public fn sleep_ms(ms: UInt64) {
-    let _ = sleep(Duration.from_millis(ms));
+    let _ = sleep(DarwinDuration.from_millis(ms));
 }
 
 /// Sleep for microseconds.
 public fn sleep_us(us: UInt64) {
-    let _ = sleep(Duration.from_micros(us));
+    let _ = sleep(DarwinDuration.from_micros(us));
 }
 
 /// Sleep until a specific Mach absolute time deadline.
@@ -339,11 +339,11 @@ public fn sleep_until_mach(deadline: UInt64) {
     }
 
     let remaining_nanos = mach_to_nanos(deadline - now);
-    let _ = sleep(Duration(remaining_nanos));
+    let _ = sleep(DarwinDuration(remaining_nanos));
 }
 
 /// Sleep until a specific instant.
-public fn sleep_until(deadline: Instant) {
+public fn sleep_until(deadline: DarwinInstant) {
     sleep_until_mach(deadline.0);
 }
 
@@ -354,8 +354,8 @@ public fn sleep_until(deadline: Instant) {
 /// Measure elapsed time for a closure.
 ///
 /// Returns (result, duration).
-public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
-    let start = Instant.now();
+public fn time_it<T>(f: fn() -> T) -> (T, DarwinDuration) {
+    let start = DarwinInstant.now();
     let result = f();
     let elapsed = start.elapsed();
     (result, elapsed)
@@ -417,15 +417,15 @@ implement DarwinStopwatch {
         self.start();
     }
 
-    /// Get elapsed time as Duration.
-    public fn elapsed(&self) -> Duration {
+    /// Get elapsed time as DarwinDuration.
+    public fn elapsed(&self) -> DarwinDuration {
         let total_nanos = if self.running {
             let now = monotonic_nanos();
             self.accumulated + (now - self.start)
         } else {
             self.accumulated
         };
-        Duration(total_nanos)
+        DarwinDuration(total_nanos)
     }
 
     /// Check if the stopwatch is currently running.
@@ -436,7 +436,7 @@ implement DarwinStopwatch {
     /// Get a lap time (elapsed since last lap or start).
     ///
     /// Does not reset the stopwatch.
-    public fn lap(&mut self) -> Duration {
+    public fn lap(&mut self) -> DarwinDuration {
         let elapsed = self.elapsed();
         // Reset accumulated but keep running
         if self.running {
@@ -466,9 +466,9 @@ implement DarwinPerfCounter {
 
     /// Get elapsed time since this counter reading.
     @inline
-    public fn elapsed(&self) -> Duration {
+    public fn elapsed(&self) -> DarwinDuration {
         let now = unsafe { mach_absolute_time() };
-        Duration(mach_to_nanos(now - self.0))
+        DarwinDuration(mach_to_nanos(now - self.0))
     }
 
     /// Get elapsed ticks (raw Mach time units).
@@ -479,14 +479,14 @@ implement DarwinPerfCounter {
 
     /// Difference between two counter readings.
     @inline
-    public fn diff(&self, earlier: &DarwinPerfCounter) -> Duration {
-        Duration(mach_to_nanos(self.0 - earlier.0))
+    public fn diff(&self, earlier: &DarwinPerfCounter) -> DarwinDuration {
+        DarwinDuration(mach_to_nanos(self.0 - earlier.0))
     }
 
     /// Get elapsed time since an earlier counter reading.
     @inline
-    public fn elapsed_since(&self, earlier: DarwinPerfCounter) -> Duration {
-        Duration(mach_to_nanos(self.0 - earlier.0))
+    public fn elapsed_since(&self, earlier: DarwinPerfCounter) -> DarwinDuration {
+        DarwinDuration(mach_to_nanos(self.0 - earlier.0))
     }
 
     /// Get the counter value as nanoseconds.
@@ -517,7 +517,7 @@ implement DarwinDeadlineTimer {
     }
 
     /// Create a timer that expires after a duration.
-    public fn after(duration: Duration) -> DarwinDeadlineTimer {
+    public fn after(duration: DarwinDuration) -> DarwinDeadlineTimer {
         let now = monotonic_nanos();
         DarwinDeadlineTimer {
             deadline: now + duration.0,
@@ -526,13 +526,13 @@ implement DarwinDeadlineTimer {
     }
 
     /// Create a timer that expires after a duration (alias for `after`).
-    public fn from_duration(duration: Duration) -> DarwinDeadlineTimer {
+    public fn from_duration(duration: DarwinDuration) -> DarwinDeadlineTimer {
         DarwinDeadlineTimer.after(duration)
     }
 
     /// Create a timer that expires at a specific instant.
-    public fn at(instant: Instant) -> DarwinDeadlineTimer {
-        // Note: Instant uses mach_absolute_time internally, so convert to nanos
+    public fn at(instant: DarwinInstant) -> DarwinDeadlineTimer {
+        // Note: DarwinInstant uses mach_absolute_time internally, so convert to nanos
         DarwinDeadlineTimer {
             deadline: mach_to_nanos(instant.0),
             has_deadline: true,
@@ -550,17 +550,17 @@ implement DarwinDeadlineTimer {
 
     /// Get remaining time until deadline.
     ///
-    /// Returns Duration(0) if no deadline or deadline has passed.
-    public fn remaining(&self) -> Duration {
+    /// Returns DarwinDuration(0) if no deadline or deadline has passed.
+    public fn remaining(&self) -> DarwinDuration {
         if !self.has_deadline {
-            return Duration(0);
+            return DarwinDuration(0);
         }
 
         let now = monotonic_nanos();
         if now >= self.deadline {
-            Duration(0)
+            DarwinDuration(0)
         } else {
-            Duration(self.deadline - now)
+            DarwinDuration(self.deadline - now)
         }
     }
 
@@ -569,10 +569,10 @@ implement DarwinDeadlineTimer {
         self.has_deadline
     }
 
-    /// Get the deadline as an Instant.
-    public fn deadline(&self) -> Maybe<Instant> {
+    /// Get the deadline as an DarwinInstant.
+    public fn deadline(&self) -> Maybe<DarwinInstant> {
         if self.has_deadline {
-            Some(Instant(self.deadline))
+            Some(DarwinInstant(self.deadline))
         } else {
             None
         }

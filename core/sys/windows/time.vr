@@ -1,7 +1,7 @@
 module sys.windows.time;
 
 // =============================================================================
-// sys/windows/time.vr - Windows Time and Duration Utilities
+// sys/windows/time.vr - Windows Time and WindowsDuration Utilities
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/windows/kernel32
@@ -9,8 +9,8 @@ module sys.windows.time;
 // =============================================================================
 //
 // This module provides time-related types and functions for Windows:
-// - Duration: Represents a span of time
-// - Instant: Represents a point in monotonic time
+// - WindowsDuration: Represents a span of time
+// - WindowsInstant: Represents a point in monotonic time
 // - High-precision timing using QueryPerformanceCounter
 // - System time access
 //
@@ -58,46 +58,46 @@ public const FILETIME_UNITS_PER_SEC: UInt64 = 10_000_000;
 public const WINDOWS_EPOCH_OFFSET: UInt64 = 116444736000000000;
 
 // =============================================================================
-// Duration Type
+// WindowsDuration Type
 // =============================================================================
 
-/// Duration type (nanoseconds)
-public type Duration is (UInt64);
+/// WindowsDuration type (nanoseconds)
+public type WindowsDuration is (UInt64);
 
-implement Duration {
+implement WindowsDuration {
     /// Create duration from nanoseconds.
     @inline
-    public fn from_nanos(nanos: UInt64) -> Duration {
-        Duration(nanos)
+    public fn from_nanos(nanos: UInt64) -> WindowsDuration {
+        WindowsDuration(nanos)
     }
 
     /// Create duration from microseconds.
     @inline
-    public fn from_micros(micros: UInt64) -> Duration {
-        Duration(micros * NANOS_PER_MICRO)
+    public fn from_micros(micros: UInt64) -> WindowsDuration {
+        WindowsDuration(micros * NANOS_PER_MICRO)
     }
 
     /// Create duration from milliseconds.
     @inline
-    public fn from_millis(millis: UInt64) -> Duration {
-        Duration(millis * NANOS_PER_MILLI)
+    public fn from_millis(millis: UInt64) -> WindowsDuration {
+        WindowsDuration(millis * NANOS_PER_MILLI)
     }
 
     /// Create duration from seconds.
     @inline
-    public fn from_secs(secs: UInt64) -> Duration {
-        Duration(secs * NANOS_PER_SEC)
+    public fn from_secs(secs: UInt64) -> WindowsDuration {
+        WindowsDuration(secs * NANOS_PER_SEC)
     }
 
     /// Create duration from seconds (floating point).
-    public fn from_secs_f64(secs: Float64) -> Duration {
-        Duration((secs * NANOS_PER_SEC as Float64) as UInt64)
+    public fn from_secs_f64(secs: Float64) -> WindowsDuration {
+        WindowsDuration((secs * NANOS_PER_SEC as Float64) as UInt64)
     }
 
     /// Zero duration.
     @inline
-    public fn zero() -> Duration {
-        Duration(0)
+    public fn zero() -> WindowsDuration {
+        WindowsDuration(0)
     }
 
     /// Get total nanoseconds.
@@ -150,39 +150,39 @@ implement Duration {
 
     /// Add two durations.
     @inline
-    public fn add(&self, other: Duration) -> Duration {
-        Duration(self.0 + other.0)
+    public fn add(&self, other: WindowsDuration) -> WindowsDuration {
+        WindowsDuration(self.0 + other.0)
     }
 
     /// Subtract durations (saturating at zero).
     @inline
-    public fn sub(&self, other: Duration) -> Duration {
+    public fn sub(&self, other: WindowsDuration) -> WindowsDuration {
         if self.0 > other.0 {
-            Duration(self.0 - other.0)
+            WindowsDuration(self.0 - other.0)
         } else {
-            Duration(0)
+            WindowsDuration(0)
         }
     }
 
     /// Multiply duration by a factor.
     @inline
-    public fn mul(&self, factor: UInt64) -> Duration {
-        Duration(self.0 * factor)
+    public fn mul(&self, factor: UInt64) -> WindowsDuration {
+        WindowsDuration(self.0 * factor)
     }
 
     /// Divide duration by a factor.
     @inline
-    public fn div(&self, divisor: UInt64) -> Duration {
-        Duration(self.0 / divisor)
+    public fn div(&self, divisor: UInt64) -> WindowsDuration {
+        WindowsDuration(self.0 / divisor)
     }
 }
 
 // =============================================================================
-// Instant Type (using QueryPerformanceCounter)
+// WindowsInstant Type (using QueryPerformanceCounter)
 // =============================================================================
 
-/// Instant type (monotonic time point using performance counter)
-public type Instant is (UInt64);  // Performance counter ticks
+/// WindowsInstant type (monotonic time point using performance counter)
+public type WindowsInstant is (UInt64);  // Performance counter ticks
 
 /// Cached performance frequency (initialized on first use)
 static mut PERF_FREQUENCY: UInt64 = 0;
@@ -201,25 +201,25 @@ fn get_frequency() -> UInt64 {
     }
 }
 
-implement Instant {
+implement WindowsInstant {
     /// Get the current instant (monotonic time).
     @inline
-    public fn now() -> Instant {
+    public fn now() -> WindowsInstant {
         let mut counter = LargeInteger(0);
         QueryPerformanceCounter(&mut counter);
-        Instant(counter.0 as UInt64)
+        WindowsInstant(counter.0 as UInt64)
     }
 
     /// Get elapsed time since this instant.
     @inline
-    public fn elapsed(&self) -> Duration {
-        let now = Instant.now();
+    public fn elapsed(&self) -> WindowsDuration {
+        let now = WindowsInstant.now();
         self.duration_since(now)
     }
 
     /// Get duration from this instant to another.
     @inline
-    public fn duration_since(&self, later: Instant) -> Duration {
+    public fn duration_since(&self, later: WindowsInstant) -> WindowsDuration {
         let freq = get_frequency();
         let ticks = if later.0 > self.0 {
             later.0 - self.0
@@ -231,33 +231,33 @@ implement Instant {
         // ticks * 1_000_000_000 / freq
         // Use 128-bit math to avoid overflow
         let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
-        Duration(nanos)
+        WindowsDuration(nanos)
     }
 
     /// Check if this instant is before another.
     @inline
-    public fn is_before(&self, other: Instant) -> Bool {
+    public fn is_before(&self, other: WindowsInstant) -> Bool {
         self.0 < other.0
     }
 
     /// Add a duration to this instant.
     @inline
-    public fn add(&self, duration: Duration) -> Instant {
+    public fn add(&self, duration: WindowsDuration) -> WindowsInstant {
         let freq = get_frequency();
         // Convert nanoseconds to ticks
         let ticks = (duration.0 as UInt128 * freq as UInt128 / NANOS_PER_SEC as UInt128) as UInt64;
-        Instant(self.0 + ticks)
+        WindowsInstant(self.0 + ticks)
     }
 
     /// Subtract a duration from this instant.
     @inline
-    public fn sub(&self, duration: Duration) -> Instant {
+    public fn sub(&self, duration: WindowsDuration) -> WindowsInstant {
         let freq = get_frequency();
         let ticks = (duration.0 as UInt128 * freq as UInt128 / NANOS_PER_SEC as UInt128) as UInt64;
         if self.0 > ticks {
-            Instant(self.0 - ticks)
+            WindowsInstant(self.0 - ticks)
         } else {
-            Instant(0)
+            WindowsInstant(0)
         }
     }
 }
@@ -352,7 +352,7 @@ public fn local_time() -> WindowsSystemTime {
 // =============================================================================
 
 /// Sleep for the specified duration.
-public fn sleep(duration: Duration) {
+public fn sleep(duration: WindowsDuration) {
     let millis = duration.as_millis();
     if millis > 0 {
         Sleep(millis as UInt32);
@@ -375,8 +375,8 @@ public fn sleep_us(us: UInt64) {
         Sleep((us / 1000) as UInt32);
     } else if us > 0 {
         // Busy-wait for sub-millisecond precision
-        let start = Instant.now();
-        let target = Duration.from_micros(us);
+        let start = WindowsInstant.now();
+        let target = WindowsDuration.from_micros(us);
         while start.elapsed().as_micros() < us {
             spin_hint();
         }
@@ -384,8 +384,8 @@ public fn sleep_us(us: UInt64) {
 }
 
 /// Sleep until a specific instant.
-public fn sleep_until(deadline: Instant) {
-    let now = Instant.now();
+public fn sleep_until(deadline: WindowsInstant) {
+    let now = WindowsInstant.now();
     if deadline.0 > now.0 {
         let duration = now.duration_since(deadline);
         sleep(duration);
@@ -399,8 +399,8 @@ public fn sleep_until(deadline: Instant) {
 /// Measure elapsed time for a closure.
 ///
 /// Returns (result, duration).
-public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
-    let start = Instant.now();
+public fn time_it<T>(f: fn() -> T) -> (T, WindowsDuration) {
+    let start = WindowsInstant.now();
     let result = f();
     let elapsed = start.elapsed();
     (result, elapsed)
@@ -464,8 +464,8 @@ implement WindowsStopwatch {
         self.start();
     }
 
-    /// Get elapsed time as Duration.
-    public fn elapsed(&self) -> Duration {
+    /// Get elapsed time as WindowsDuration.
+    public fn elapsed(&self) -> WindowsDuration {
         let freq = get_frequency();
         let total_ticks = if self.running {
             let mut counter = LargeInteger(0);
@@ -476,7 +476,7 @@ implement WindowsStopwatch {
             self.accumulated
         };
         let nanos = (total_ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
-        Duration(nanos)
+        WindowsDuration(nanos)
     }
 
     /// Check if the stopwatch is currently running.
@@ -487,7 +487,7 @@ implement WindowsStopwatch {
     /// Get a lap time (elapsed since last lap or start).
     ///
     /// Does not reset the stopwatch.
-    public fn lap(&mut self) -> Duration {
+    public fn lap(&mut self) -> WindowsDuration {
         let elapsed = self.elapsed();
         // Reset accumulated but keep running
         if self.running {
@@ -521,14 +521,14 @@ implement WindowsPerfCounter {
 
     /// Get elapsed time since this counter reading.
     @inline
-    public fn elapsed(&self) -> Duration {
+    public fn elapsed(&self) -> WindowsDuration {
         let mut counter = LargeInteger(0);
         QueryPerformanceCounter(&mut counter);
         let now = counter.0 as UInt64;
         let freq = get_frequency();
         let ticks = now - self.0;
         let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
-        Duration(nanos)
+        WindowsDuration(nanos)
     }
 
     /// Get elapsed ticks (raw performance counter units).
@@ -541,11 +541,11 @@ implement WindowsPerfCounter {
 
     /// Difference between two counter readings.
     @inline
-    public fn diff(&self, earlier: &WindowsPerfCounter) -> Duration {
+    public fn diff(&self, earlier: &WindowsPerfCounter) -> WindowsDuration {
         let freq = get_frequency();
         let ticks = self.0 - earlier.0;
         let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
-        Duration(nanos)
+        WindowsDuration(nanos)
     }
 }
 
@@ -569,8 +569,8 @@ implement WindowsDeadlineTimer {
     }
 
     /// Create a timer that expires after a duration.
-    public fn after(duration: Duration) -> WindowsDeadlineTimer {
-        let now = Instant.now();
+    public fn after(duration: WindowsDuration) -> WindowsDeadlineTimer {
+        let now = WindowsInstant.now();
         let deadline_instant = now.add(duration);
         WindowsDeadlineTimer {
             deadline: deadline_instant.0,
@@ -579,7 +579,7 @@ implement WindowsDeadlineTimer {
     }
 
     /// Create a timer that expires at a specific instant.
-    public fn at(instant: Instant) -> WindowsDeadlineTimer {
+    public fn at(instant: WindowsInstant) -> WindowsDeadlineTimer {
         WindowsDeadlineTimer {
             deadline: instant.0,
             has_deadline: true,
@@ -591,26 +591,26 @@ implement WindowsDeadlineTimer {
         if !self.has_deadline {
             false
         } else {
-            Instant.now().0 >= self.deadline
+            WindowsInstant.now().0 >= self.deadline
         }
     }
 
     /// Get remaining time until deadline.
     ///
     /// Returns None if no deadline or deadline has passed.
-    public fn remaining(&self) -> Maybe<Duration> {
+    public fn remaining(&self) -> Maybe<WindowsDuration> {
         if !self.has_deadline {
             return None;
         }
 
-        let now = Instant.now();
+        let now = WindowsInstant.now();
         if now.0 >= self.deadline {
             None
         } else {
             let freq = get_frequency();
             let ticks = self.deadline - now.0;
             let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
-            Some(Duration(nanos))
+            Some(WindowsDuration(nanos))
         }
     }
 
@@ -619,10 +619,10 @@ implement WindowsDeadlineTimer {
         self.has_deadline
     }
 
-    /// Get the deadline as an Instant.
-    public fn deadline(&self) -> Maybe<Instant> {
+    /// Get the deadline as an WindowsInstant.
+    public fn deadline(&self) -> Maybe<WindowsInstant> {
         if self.has_deadline {
-            Some(Instant(self.deadline))
+            Some(WindowsInstant(self.deadline))
         } else {
             None
         }

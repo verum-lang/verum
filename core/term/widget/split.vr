@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (Widgets)
 //
-// `Split` computes two pane rectangles separated by an interactive divider.
+// `TermSplit` computes two pane rectangles separated by an interactive divider.
 // The divider can be dragged with the mouse or resized via keyboard shortcuts.
 // The widget itself only renders the divider — callers render their own
 // widgets into the two computed pane rectangles. This keeps the API
@@ -12,7 +12,7 @@
 //
 // Typical usage:
 //
-//     let split = Split.horizontal().ratio(0.3).min_first(10);
+//     let split = TermSplit.horizontal().ratio(0.3).min_first(10);
 //     let (left, div, right) = split.layout(area, &state);
 //     split.render_divider(div, buf, &mut state);
 //     sidebar.render(left, buf);
@@ -44,10 +44,10 @@ public type SplitSize is
     | Fixed(Int);    // exact cell count for the first pane
 
 // =============================================================================
-// Split — the widget (pure config)
+// TermSplit — the widget (pure config)
 // =============================================================================
 
-public type Split is {
+public type TermSplit is {
     orientation: SplitOrientation,
     divider_style: Style,
     dragging_style: Style,
@@ -57,10 +57,10 @@ public type Split is {
     min_second: Int,
 };
 
-implement Split {
+implement TermSplit {
     /// Horizontal split — first pane on the left, divider is vertical.
-    public fn horizontal() -> Split {
-        Split {
+    public fn horizontal() -> TermSplit {
+        TermSplit {
             orientation: SplitOrientation.Horizontal,
             divider_style: Style.new().fg(Color.DarkGrey),
             dragging_style: Style.new().fg(Color.Cyan),
@@ -72,16 +72,16 @@ implement Split {
     }
 
     /// Vertical split — first pane on top, divider is horizontal.
-    public fn vertical() -> Split {
-        Split { orientation: SplitOrientation.Vertical, ..Split.horizontal() }
+    public fn vertical() -> TermSplit {
+        TermSplit { orientation: SplitOrientation.Vertical, ..TermSplit.horizontal() }
     }
 
-    public fn divider_style(self, s: Style) -> Split { Split { divider_style: s, ..self } }
-    public fn dragging_style(self, s: Style) -> Split { Split { dragging_style: s, ..self } }
-    public fn show_divider(self, on: Bool) -> Split { Split { show_divider: on, ..self } }
-    public fn divider_width(self, w: Int) -> Split { Split { divider_width: w.max(0), ..self } }
-    public fn min_first(self, n: Int) -> Split { Split { min_first: n.max(0), ..self } }
-    public fn min_second(self, n: Int) -> Split { Split { min_second: n.max(0), ..self } }
+    public fn divider_style(self, s: Style) -> TermSplit { TermSplit { divider_style: s, ..self } }
+    public fn dragging_style(self, s: Style) -> TermSplit { TermSplit { dragging_style: s, ..self } }
+    public fn show_divider(self, on: Bool) -> TermSplit { TermSplit { show_divider: on, ..self } }
+    public fn divider_width(self, w: Int) -> TermSplit { TermSplit { divider_width: w.max(0), ..self } }
+    public fn min_first(self, n: Int) -> TermSplit { TermSplit { min_first: n.max(0), ..self } }
+    public fn min_second(self, n: Int) -> TermSplit { TermSplit { min_second: n.max(0), ..self } }
 
     /// Compute the first-pane, divider, and second-pane rectangles.
     public fn layout(&self, area: Rect, state: &SplitState) -> (Rect, Rect, Rect) {
@@ -191,7 +191,7 @@ implement SplitState {
     /// Returns `true` iff the key was handled.
     public fn handle_resize_key(
         &mut self,
-        split: &Split,
+        split: &TermSplit,
         area: Rect,
         ke: KeyEvent,
         step: Int,
@@ -226,7 +226,7 @@ implement SplitState {
     /// skip pane routing).
     public fn handle_mouse(
         &mut self,
-        split: &Split,
+        split: &TermSplit,
         area: Rect,
         me: MouseEvent,
     ) -> Bool {

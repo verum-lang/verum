@@ -4,18 +4,18 @@ module core.database.sqlite.native.incremental_vacuum_api.step;
 
 mount base.{Bool, Int64, Text};
 
-public type Request is
+public type IncrementalVacuumRequest is
     | RqAll                  // PRAGMA incremental_vacuum   (no arg or N<=0)
     | RqAtMost(Int64)         // PRAGMA incremental_vacuum(N)
     ;
 
-public fn from_arg(n: Int64) -> Request {
+public fn from_arg(n: Int64) -> IncrementalVacuumRequest {
     let zero = 0 as Int64;
     if n <= zero { return RqAll; }
     RqAtMost(n)
 }
 
-public fn target_page_count(r: &Request, freelist_total: Int64) -> Int64 {
+public fn target_page_count(r: &IncrementalVacuumRequest, freelist_total: Int64) -> Int64 {
     match r {
         RqAll        => freelist_total,
         RqAtMost(n)  => {

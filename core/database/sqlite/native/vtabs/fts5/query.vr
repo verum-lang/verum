@@ -47,11 +47,11 @@ public type MatchExpr is
 // Parser — lightweight recursive-descent
 // -----------------------------------------------------------------------------
 
-public type ParseError is
+public type Fts5VtabParseError is
       PeUnexpectedEnd
     | PeUnexpectedToken(Text);
 
-public type ParseState is {
+public type Fts5VtabParseState is {
     tokens: List<Text>,
     pos: Int,
 };
@@ -104,14 +104,14 @@ public fn tokenise_query(q: &Text) -> List<Text> {
     out
 }
 
-public fn parse(q: &Text) -> base.Result<MatchExpr, ParseError> {
-    let mut st = ParseState { tokens: tokenise_query(q), pos: 0 };
+public fn parse(q: &Text) -> base.Result<MatchExpr, Fts5VtabParseError> {
+    let mut st = Fts5VtabParseState { tokens: tokenise_query(q), pos: 0 };
     if st.tokens.len() == 0 { return base.Err(PeUnexpectedEnd); }
     let r = parse_or(&mut st);
     r
 }
 
-fn parse_or(st: &mut ParseState) -> base.Result<MatchExpr, ParseError> {
+fn parse_or(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabParseError> {
     let mut lhs = match parse_and(st) {
         base.Ok(x)  => x,
         base.Err(e) => { return base.Err(e); }
@@ -127,7 +127,7 @@ fn parse_or(st: &mut ParseState) -> base.Result<MatchExpr, ParseError> {
     base.Ok(lhs)
 }
 
-fn parse_and(st: &mut ParseState) -> base.Result<MatchExpr, ParseError> {
+fn parse_and(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabParseError> {
     let mut lhs = match parse_atom(st) {
         base.Ok(x)  => x,
         base.Err(e) => { return base.Err(e); }
@@ -167,7 +167,7 @@ fn parse_and(st: &mut ParseState) -> base.Result<MatchExpr, ParseError> {
     base.Ok(lhs)
 }
 
-fn parse_atom(st: &mut ParseState) -> base.Result<MatchExpr, ParseError> {
+fn parse_atom(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabParseError> {
     if st.pos >= st.tokens.len() { return base.Err(PeUnexpectedEnd); }
     let t = st.tokens[st.pos].clone();
     // NOT prefix

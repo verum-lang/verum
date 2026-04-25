@@ -495,18 +495,18 @@ implement Drop for WindowsCondvar {
 }
 
 // =============================================================================
-// SpinLock
+// WindowsSpinLock
 // =============================================================================
 
 /// Spin lock for very short critical sections
-public type SpinLock is {
+public type WindowsSpinLock is {
     locked: UInt32,  // 0 = unlocked, 1 = locked
 };
 
-implement SpinLock {
+implement WindowsSpinLock {
     /// Create a new spin lock.
-    public fn new() -> SpinLock {
-        SpinLock { locked: 0 }
+    public fn new() -> WindowsSpinLock {
+        WindowsSpinLock { locked: 0 }
     }
 
     /// Acquire the spin lock (busy-wait).

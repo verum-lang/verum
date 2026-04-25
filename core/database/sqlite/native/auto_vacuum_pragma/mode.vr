@@ -48,22 +48,22 @@ public fn supports_incremental_pragma(m: &AutoVacuumPragma) -> Bool {
 
 // Outcome of trying to change auto_vacuum.  In SQLite, the change is honoured
 // only on a freshly-created (empty) database; otherwise it's silently ignored.
-public type SetOutcome is
+public type AutoVacuumSetOutcome is
     | SoApplied
     | SoIgnoredNotEmpty
     ;
 
-public fn try_apply(db_has_tables: Bool) -> SetOutcome {
+public fn try_apply(db_has_tables: Bool) -> AutoVacuumSetOutcome {
     if db_has_tables { SoIgnoredNotEmpty } else { SoApplied }
 }
 
-public fn outcome_name(o: &SetOutcome) -> Text {
+public fn outcome_name(o: &AutoVacuumSetOutcome) -> Text {
     match o {
         SoApplied         => "applied".clone(),
         SoIgnoredNotEmpty => "ignored_not_empty".clone(),
     }
 }
 
-public fn was_applied(o: &SetOutcome) -> Bool {
+public fn was_applied(o: &AutoVacuumSetOutcome) -> Bool {
     match o { SoApplied => true, _ => false }
 }

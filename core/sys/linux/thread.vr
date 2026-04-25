@@ -592,13 +592,13 @@ fn atomic_swap_u32(ptr: *mut UInt32, new_val: UInt32, ordering: UInt8) -> UInt32
 }
 
 /// Simple spinlock (for short critical sections).
-public type SpinLock is {
+public type LinuxSpinLock is {
     state: UInt32,  // 0 = unlocked, 1 = locked
 };
 
-implement SpinLock {
-    public fn new() -> SpinLock {
-        SpinLock { state: 0 }
+implement LinuxSpinLock {
+    public fn new() -> LinuxSpinLock {
+        LinuxSpinLock { state: 0 }
     }
 
     public fn lock(&mut self) {

@@ -10,7 +10,7 @@
 //
 // Covers:
 // - Opening handshake (client + server) — Sec-WebSocket-Accept derivation
-// - Frame format (FIN/RSV/opcode + MASK/length/masking-key/payload)
+// - WsFrame format (FIN/RSV/opcode + MASK/length/masking-key/payload)
 // - Fragmentation (continuation frames)
 // - Close codes per §7.4
 // - Ping/pong control frames
@@ -41,7 +41,7 @@
 //
 // MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" (RFC 6455 §4.2.2).
 //
-// # Frame format (§5.2)
+// # WsFrame format (§5.2)
 //
 // ```
 //  0                   1                   2                   3
@@ -146,10 +146,10 @@ implement CloseCode {
 }
 
 // =============================================================================
-// Frame — parsed wire representation
+// WsFrame — parsed wire representation
 // =============================================================================
 
-public type Frame is {
+public type WsFrame is {
     fin: Bool,
     rsv1: Bool,
     rsv2: Bool,
@@ -158,22 +158,22 @@ public type Frame is {
     payload: List<Byte>,
 }
 
-implement Frame {
-    public fn text(payload: List<Byte>) -> Frame {
-        Frame {
+implement WsFrame {
+    public fn text(payload: List<Byte>) -> WsFrame {
+        WsFrame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: WsOpcode.Textual, payload: payload,
         }
     }
 
-    public fn binary(payload: List<Byte>) -> Frame {
-        Frame {
+    public fn binary(payload: List<Byte>) -> WsFrame {
+        WsFrame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: WsOpcode.Binary, payload: payload,
         }
     }
 
-    public fn close(code: CloseCode, reason: &Text) -> Frame {
+    public fn close(code: CloseCode, reason: &Text) -> WsFrame {
         let mut payload = List.with_capacity(2 + reason.len());
         payload.push(((code.code() >> 8) & 0xFF) as Byte);
         payload.push((code.code() & 0xFF) as Byte);
@@ -183,21 +183,21 @@ implement Frame {
             payload.push(reason_bytes[i]);
             i = i + 1;
         }
-        Frame {
+        WsFrame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: WsOpcode.Close, payload: payload,
         }
     }
 
-    public fn ping(payload: List<Byte>) -> Frame {
-        Frame {
+    public fn ping(payload: List<Byte>) -> WsFrame {
+        WsFrame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: WsOpcode.Ping, payload: payload,
         }
     }
 
-    public fn pong(payload: List<Byte>) -> Frame {
-        Frame {
+    public fn pong(payload: List<Byte>) -> WsFrame {
+        WsFrame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: WsOpcode.Pong, payload: payload,
         }
@@ -211,7 +211,7 @@ implement Frame {
 /// Encode a frame to bytes. `mask_key` Some(4 bytes) sets MASK=1 and
 /// XORs the payload per RFC 6455 §5.3; None (server side) leaves it
 /// unmasked per the server-never-masks rule.
-public fn encode(frame: &Frame, mask_key: Maybe<[UInt8; 4]>, out: &mut List<Byte>) {
+public fn encode(frame: &WsFrame, mask_key: Maybe<[UInt8; 4]>, out: &mut List<Byte>) {
     let b0: UInt8 =
         (if frame.fin { 0x80 } else { 0 }) |
         (if frame.rsv1 { 0x40 } else { 0 }) |
@@ -275,7 +275,7 @@ public type WebSocketDecodeError is
     | UnexpectedlyMasked;
 
 public type WebSocketDecodeResult is
-    | Decoded { frame: Frame, consumed: Int }
+    | Decoded { frame: WsFrame, consumed: Int }
     | NeedMore
     | Err(WebSocketDecodeError);
 
@@ -359,7 +359,7 @@ public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> WebSock
         i = i + 1;
     }
 
-    let frame = Frame {
+    let frame = WsFrame {
         fin: fin,
         rsv1: rsv1, rsv2: rsv2, rsv3: rsv3,
         opcode: opcode,

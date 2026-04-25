@@ -89,28 +89,28 @@ public type LinuxTimeTimeval is {
     tv_usec: Int64,  // Microseconds (0-999999)
 };
 
-/// Duration type (nanoseconds)
-public type Duration is (UInt64);
+/// LinuxDuration type (nanoseconds)
+public type LinuxDuration is (UInt64);
 
-implement Duration {
+implement LinuxDuration {
     /// Create duration from nanoseconds.
-    public fn from_nanos(nanos: UInt64) -> Duration {
-        Duration(nanos)
+    public fn from_nanos(nanos: UInt64) -> LinuxDuration {
+        LinuxDuration(nanos)
     }
 
     /// Create duration from microseconds.
-    public fn from_micros(micros: UInt64) -> Duration {
-        Duration(micros * 1_000)
+    public fn from_micros(micros: UInt64) -> LinuxDuration {
+        LinuxDuration(micros * 1_000)
     }
 
     /// Create duration from milliseconds.
-    public fn from_millis(millis: UInt64) -> Duration {
-        Duration(millis * 1_000_000)
+    public fn from_millis(millis: UInt64) -> LinuxDuration {
+        LinuxDuration(millis * 1_000_000)
     }
 
     /// Create duration from seconds.
-    public fn from_secs(secs: UInt64) -> Duration {
-        Duration(secs * 1_000_000_000)
+    public fn from_secs(secs: UInt64) -> LinuxDuration {
+        LinuxDuration(secs * 1_000_000_000)
     }
 
     /// Get duration as nanoseconds.
@@ -147,34 +147,34 @@ implement Duration {
     }
 }
 
-/// Instant type (monotonic time point)
-public type Instant is (UInt64);  // Nanoseconds since boot
+/// LinuxInstant type (monotonic time point)
+public type LinuxInstant is (UInt64);  // Nanoseconds since boot
 
-implement Instant {
+implement LinuxInstant {
     /// Get the current instant (monotonic time).
-    public fn now() -> Instant {
-        Instant(monotonic_nanos())
+    public fn now() -> LinuxInstant {
+        LinuxInstant(monotonic_nanos())
     }
 
-    /// Duration elapsed since this instant.
-    public fn elapsed(&self) -> Duration {
+    /// LinuxDuration elapsed since this instant.
+    public fn elapsed(&self) -> LinuxDuration {
         let now = monotonic_nanos();
-        Duration(now - self.0)
+        LinuxDuration(now - self.0)
     }
 
-    /// Duration between two instants.
-    public fn duration_since(&self, earlier: &Instant) -> Duration {
-        Duration(self.0 - earlier.0)
+    /// LinuxDuration between two instants.
+    public fn duration_since(&self, earlier: &LinuxInstant) -> LinuxDuration {
+        LinuxDuration(self.0 - earlier.0)
     }
 
     /// Add duration to instant.
-    public fn add(&self, duration: Duration) -> Instant {
-        Instant(self.0 + duration.0)
+    public fn add(&self, duration: LinuxDuration) -> LinuxInstant {
+        LinuxInstant(self.0 + duration.0)
     }
 
     /// Subtract duration from instant.
-    public fn sub(&self, duration: Duration) -> Instant {
-        Instant(self.0 - duration.0)
+    public fn sub(&self, duration: LinuxDuration) -> LinuxInstant {
+        LinuxInstant(self.0 - duration.0)
     }
 }
 
@@ -291,7 +291,7 @@ public const TIMER_ABSTIME: Int = 1;
 ///
 /// # Returns
 /// Remaining time if interrupted, None if completed.
-public fn sleep(duration: Duration) -> Maybe<Duration> {
+public fn sleep(duration: LinuxDuration) -> Maybe<LinuxDuration> {
     let req = duration.to_timespec();
     let mut rem = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
 
@@ -307,7 +307,7 @@ public fn sleep(duration: Duration) -> Maybe<Duration> {
     if result == 0 {
         None
     } else {
-        Some(Duration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
+        Some(LinuxDuration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
     }
 }
 
@@ -361,12 +361,12 @@ public fn sleep_until(deadline_nanos: UInt64) -> Result<(), OSError> {
 
 /// Sleep for milliseconds.
 public fn sleep_ms(ms: UInt64) {
-    let _ = sleep(Duration.from_millis(ms));
+    let _ = sleep(LinuxDuration.from_millis(ms));
 }
 
 /// Sleep for microseconds.
 public fn sleep_us(us: UInt64) {
-    let _ = sleep(Duration.from_micros(us));
+    let _ = sleep(LinuxDuration.from_micros(us));
 }
 
 // =============================================================================
@@ -416,8 +416,8 @@ public fn rdtsc_serialized() -> UInt64 {
 /// Measure elapsed time for a closure.
 ///
 /// Returns (result, duration in nanoseconds).
-public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
-    let start = Instant.now();
+public fn time_it<T>(f: fn() -> T) -> (T, LinuxDuration) {
+    let start = LinuxInstant.now();
     let result = f();
     let elapsed = start.elapsed();
     (result, elapsed)
@@ -464,12 +464,12 @@ implement LinuxStopwatch {
         self.start();
     }
 
-    public fn elapsed(&self) -> Duration {
+    public fn elapsed(&self) -> LinuxDuration {
         let current = if self.running {
             monotonic_nanos() - self.start + self.accumulated
         } else {
             self.accumulated
         };
-        Duration(current)
+        LinuxDuration(current)
     }
 }

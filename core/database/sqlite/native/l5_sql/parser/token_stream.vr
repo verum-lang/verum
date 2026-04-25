@@ -11,7 +11,7 @@ module core.database.sqlite.native.l5_sql.parser.token_stream;
 // lock-step: peek / advance / expect / expect_keyword / accept_*.
 //
 // Error construction is centralised so every parser emits the same
-// `ParseError` shape for the diagnostic layer to render.
+// `SqlParseError` shape for the diagnostic layer to render.
 // =============================================================================
 
 mount core.*;
@@ -25,13 +25,13 @@ mount core.database.sqlite.native.l5_sql.lexer.{
 // Error type
 // -----------------------------------------------------------------------------
 
-public type ParseError is {
+public type SqlParseError is {
     message: Text,
     position: Int,
 };
 
-public fn parse_error(msg: Text, position: Int) -> ParseError {
-    ParseError { message: msg, position: position }
+public fn parse_error(msg: Text, position: Int) -> SqlParseError {
+    SqlParseError { message: msg, position: position }
 }
 
 // -----------------------------------------------------------------------------
@@ -99,8 +99,8 @@ implement SqlTokenStream {
         false
     }
 
-    /// Consume a specific keyword or raise a ParseError.
-    public fn expect_keyword(&mut self, kw: SqlKeyword) -> Result<(), ParseError> {
+    /// Consume a specific keyword or raise a SqlParseError.
+    public fn expect_keyword(&mut self, kw: SqlKeyword) -> Result<(), SqlParseError> {
         if self.accept_keyword(kw) { return Ok(()); }
         Err(parse_error("expected keyword".clone(), self.pos))
     }
@@ -121,7 +121,7 @@ implement SqlTokenStream {
         false
     }
 
-    public fn expect_punct(&mut self, p: Punct) -> Result<(), ParseError> {
+    public fn expect_punct(&mut self, p: Punct) -> Result<(), SqlParseError> {
         if self.accept_punct(p) { return Ok(()); }
         Err(parse_error("expected punct".clone(), self.pos))
     }
@@ -142,7 +142,7 @@ implement SqlTokenStream {
     }
 
     /// Expect an identifier. Returns the identifier text on success.
-    public fn expect_ident(&mut self) -> Result<Text, ParseError> {
+    public fn expect_ident(&mut self) -> Result<Text, SqlParseError> {
         match self.peek() {
             TIdent(s) => {
                 let _ = self.advance();

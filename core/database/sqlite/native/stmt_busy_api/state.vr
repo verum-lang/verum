@@ -31,13 +31,13 @@ public fn busy_bool(p: &StmtBusyPhase) -> Bool {
 }
 
 // Transition table.
-public type Event is
+public type StmtBusyEvent is
     | EStep              // sqlite3_step
     | EReset             // sqlite3_reset
     | EFinalize          // sqlite3_finalize
     ;
 
-public fn event_name(e: &Event) -> Text {
+public fn event_name(e: &StmtBusyEvent) -> Text {
     match e {
         EStep     => "step".clone(),
         EReset    => "reset".clone(),
@@ -45,7 +45,7 @@ public fn event_name(e: &Event) -> Text {
     }
 }
 
-public fn next_phase(p: &StmtBusyPhase, e: &Event, last_step_returned_row: Bool) -> StmtBusyPhase {
+public fn next_phase(p: &StmtBusyPhase, e: &StmtBusyEvent, last_step_returned_row: Bool) -> StmtBusyPhase {
     match p {
         PhFinalized => PhFinalized,         // terminal
         _ => match e {
@@ -62,7 +62,7 @@ public type CallCheck is
     | CcMisuseFinalized
     ;
 
-public fn check_call(p: &StmtBusyPhase, e: &Event) -> CallCheck {
+public fn check_call(p: &StmtBusyPhase, e: &StmtBusyEvent) -> CallCheck {
     match p {
         PhFinalized => match e { EFinalize => CcAllowed, _ => CcMisuseFinalized },
         _ => CcAllowed,

@@ -74,7 +74,7 @@ public type SysTlsError is
     ;
 
 /// Alias for convenience
-public type TlsError is SysTlsError;
+public type DarwinTlsError is SysTlsError;
 
 implement SysTlsError {
     public fn message(&self) -> Text {

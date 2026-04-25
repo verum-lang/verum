@@ -39,7 +39,7 @@ public fn is_allowed(o: &DbpageWriteguardOutcome) -> Bool {
     match o { Allow => true, _ => false }
 }
 
-public type Request is {
+public type DbpageWriteguardRequest is {
     pgno: Int64,
     page_size: Int,
     buffer_size: Int,
@@ -59,8 +59,8 @@ public fn new_request(
     db_pages: Int64,
     is_journal_or_wal_page: Bool,
     defensive_mode: Bool,
-) -> Request {
-    Request {
+) -> DbpageWriteguardRequest {
+    DbpageWriteguardRequest {
         pgno: pgno,
         page_size: page_size,
         buffer_size: buffer_size,
@@ -72,7 +72,7 @@ public fn new_request(
     }
 }
 
-public fn check(r: &Request) -> DbpageWriteguardOutcome {
+public fn check(r: &DbpageWriteguardRequest) -> DbpageWriteguardOutcome {
     if !r.in_write_txn          { return DenyNoTxn; }
     if r.schema_readonly        { return DenySchemaReadonly; }
     if r.is_journal_or_wal_page { return DenyJournalPage; }

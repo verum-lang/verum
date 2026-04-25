@@ -57,7 +57,7 @@ mount .cancellation.{CancellationToken, CancellationError};
 // =============================================================================
 
 /// Error returned when sending to a closed broadcast channel.
-public type SendError<T> is {
+public type BroadcastSendError<T> is {
     value: T,
 };
 
@@ -180,19 +180,19 @@ implement<T> BroadcastSender<T> {
     /// Broadcast `value` to all currently-subscribed receivers.
     ///
     /// Returns `Ok(n)` where `n` is the number of active receivers that
-    /// will see this value, or `Err(SendError)` if no receivers are active.
+    /// will see this value, or `Err(BroadcastSendError)` if no receivers are active.
     ///
     /// If a receiver is slow enough that the write wraps past its read_pos,
     /// the `LagPolicy` determines what happens (default: receiver observes
     /// `BroadcastRecvError.Lagged(skipped)` on its next recv).
-    public fn send(&self, value: T) -> Result<Int, SendError<T>> {
+    public fn send(&self, value: T) -> Result<Int, BroadcastSendError<T>> {
         if self.inner.closed.load(MemoryOrdering.Acquire) {
-            return Err(SendError { value: value });
+            return Err(BroadcastSendError { value: value });
         }
 
         let active = self.inner.receiver_count.load(MemoryOrdering.Acquire);
         if active == 0 {
-            return Err(SendError { value: value });
+            return Err(BroadcastSendError { value: value });
         }
 
         let capacity = self.inner.capacity;

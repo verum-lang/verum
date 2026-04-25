@@ -79,41 +79,41 @@ public type TimeSpec is {
     tv_nsec: Int64,
 };
 
-/// Duration in nanoseconds (always non-negative by UInt64)
-public type Duration is (UInt64);
+/// EngineDuration in nanoseconds (always non-negative by UInt64)
+public type EngineDuration is (UInt64);
 
 /// Non-zero duration for timeout operations
-public type NonZeroDuration is Duration where |d| d.0 > 0;
+public type NonZeroDuration is EngineDuration where |d| d.0 > 0;
 
 /// Maximum duration for practical timeout operations (1 year in nanoseconds)
 public const MAX_PRACTICAL_DURATION: UInt64 = 365 * 24 * 60 * 60 * 1_000_000_000;
 
-implement Duration {
-    public const ZERO: Duration = Duration(0 as UInt64);
-    public const MAX: Duration = Duration(UInt64.MAX);
+implement EngineDuration {
+    public const ZERO: EngineDuration = EngineDuration(0 as UInt64);
+    public const MAX: EngineDuration = EngineDuration(UInt64.MAX);
 
     /// Create duration from nanoseconds (zero-copy, compile-time constant capable)
     @inline
-    public pure fn from_nanos(ns: UInt64) -> Duration {
-        Duration(ns)
+    public pure fn from_nanos(ns: UInt64) -> EngineDuration {
+        EngineDuration(ns)
     }
 
     /// Create duration from microseconds
     @inline
-    public pure fn from_micros(us: UInt64) -> Duration {
-        Duration(us * (1_000 as UInt64))
+    public pure fn from_micros(us: UInt64) -> EngineDuration {
+        EngineDuration(us * (1_000 as UInt64))
     }
 
     /// Create duration from milliseconds
     @inline
-    public pure fn from_millis(ms: UInt64) -> Duration {
-        Duration(ms * (1_000_000 as UInt64))
+    public pure fn from_millis(ms: UInt64) -> EngineDuration {
+        EngineDuration(ms * (1_000_000 as UInt64))
     }
 
     /// Create duration from seconds
     @inline
-    public pure fn from_secs(s: UInt64) -> Duration {
-        Duration(s * (1_000_000_000 as UInt64))
+    public pure fn from_secs(s: UInt64) -> EngineDuration {
+        EngineDuration(s * (1_000_000_000 as UInt64))
     }
 
     /// Get duration as nanoseconds
@@ -142,23 +142,23 @@ implement Duration {
 
     /// Saturating addition (caps at MAX instead of overflowing)
     @inline
-    public pure fn saturating_add(&self, other: Duration) -> Duration {
+    public pure fn saturating_add(&self, other: EngineDuration) -> EngineDuration {
         // Use intermediate variables to ensure correct method resolution
         let a: UInt64 = self.0;
         let b: UInt64 = other.0;
         match a.checked_add(b) {
-            Some(result) => Duration(result),
-            None => Duration(UInt64.MAX),
+            Some(result) => EngineDuration(result),
+            None => EngineDuration(UInt64.MAX),
         }
     }
 
     /// Saturating subtraction (floors at ZERO instead of underflowing)
     @inline
-    public pure fn saturating_sub(&self, other: Duration) -> Duration {
+    public pure fn saturating_sub(&self, other: EngineDuration) -> EngineDuration {
         if self.0 >= other.0 {
-            Duration(self.0 - other.0)
+            EngineDuration(self.0 - other.0)
         } else {
-            Duration(0 as UInt64)
+            EngineDuration(0 as UInt64)
         }
     }
 
@@ -661,7 +661,7 @@ public type IOEngine is protocol {
         &mut self,
         results: &mut [CompletionResult],
         min_complete: UInt32,
-        timeout: Maybe<Duration>,
+        timeout: Maybe<EngineDuration>,
     ) -> Result<Int{>= 0}, EngineIoError>;
 
     /// Poll for completions without blocking.
@@ -669,7 +669,7 @@ public type IOEngine is protocol {
     /// Equivalent to wait() with min_complete=0 and timeout=0.
     /// Returns immediately with any available completions.
     fn poll(&mut self, results: &mut [CompletionResult]) -> Result<Int{>= 0}, EngineIoError> {
-        self.wait(results, 0, Some(Duration.ZERO))
+        self.wait(results, 0, Some(EngineDuration.ZERO))
     }
 
     /// Wake up a blocked wait() from another thread.

@@ -20,17 +20,17 @@ public fn op_name(o: &NullOp) -> Text {
     }
 }
 
-public type Value is
+public type NullOpValue is
     | VNull
     | VInt(Int64)
     ;
 
-public fn is_null_value(v: &Value) -> Bool {
+public fn is_null_value(v: &NullOpValue) -> Bool {
     match v { VNull => true, _ => false }
 }
 
 // IS NULL / IS NOT NULL apply to a single operand; returns 1 / 0 (never NULL).
-public fn eval_unary(op: &NullOp, x: &Value) -> Int {
+public fn eval_unary(op: &NullOp, x: &NullOpValue) -> Int {
     let isnull = is_null_value(x);
     match op {
         OpIsNull    => if isnull { 1 } else { 0 },
@@ -41,7 +41,7 @@ public fn eval_unary(op: &NullOp, x: &Value) -> Int {
 }
 
 // IS / IS NOT compare two operands; never NULL.
-public fn eval_binary(op: &NullOp, x: &Value, y: &Value) -> Int {
+public fn eval_binary(op: &NullOp, x: &NullOpValue, y: &NullOpValue) -> Int {
     let xn = is_null_value(x);
     let yn = is_null_value(y);
     let equal = match x {
