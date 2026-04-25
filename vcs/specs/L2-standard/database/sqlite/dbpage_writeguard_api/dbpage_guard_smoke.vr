@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, dbpage_writeguard_api, dbpage
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.dbpage_writeguard_api.guard.{
+    Outcome, Allow, DenyNoTxn, DenySchemaReadonly, DenyPgnoOutOfRange,
+    DenyBufferSizeMismatch, DenyDefensivePage1, DenyJournalPage,
+    outcome_name, is_allowed, is_hard_error,
+    Request, new_request, check, well_known_outcome_count,
+};
+mount base.{Bool, Int64};
+
+fn ok_request() -> Request {
+    new_request(
+        2 as Int64,        // pgno
+        4096,               // page_size
+        4096,               // buffer_size
+        true,               // in_write_txn
+        false,              // schema_readonly
+        100 as Int64,      // db_pages
+        false,              // is_journal_or_wal_page
+        false,              // defensive_mode
+    )
+}
+
+fn test_well_known_outcome_count() {
+    assert_eq(well_known_outcome_count(), 7);
+}
+
+fn test_allow_path() {
+    let r = ok_request();
+    match check(&r) { Allow => {}, _ => assert(false) }
+    assert(is_allowed(&Allow));
+}
+
+fn test_no_txn() {
+    let mut r = ok_request();
+    r.in_write_txn = false;
+    match check(&r) { DenyNoTxn => {}, _ => assert(false) }
+}
+
+fn test_schema_readonly() {
+    let mut r = ok_request();
+    r.schema_readonly = true;
+    match check(&r) { DenySchemaReadonly => {}, _ => assert(false) }
+}
+
+fn test_journal_or_wal_page() {
+    let mut r = ok_request();
+    r.is_journal_or_wal_page = true;
+    match check(&r) { DenyJournalPage => {}, _ => assert(false) }
+}
+
+fn test_pgno_out_of_range() {
+    let mut r = ok_request();
+    r.pgno = 0 as Int64;
+    match check(&r) { DenyPgnoOutOfRange => {}, _ => assert(false) }
+    let mut r2 = ok_request();
+    r2.pgno = 999 as Int64;
+    match check(&r2) { DenyPgnoOutOfRange => {}, _ => assert(false) }
+}
+
+fn test_buffer_size_mismatch() {
+    let mut r = ok_request();
+    r.buffer_size = 1024;
+    match check(&r) { DenyBufferSizeMismatch => {}, _ => assert(false) }
+}
+
+fn test_defensive_page1() {
+    let mut r = ok_request();
+    r.pgno = 1 as Int64;
+    r.defensive_mode = true;
+    match check(&r) { DenyDefensivePage1 => {}, _ => assert(false) }
+    // Same write allowed when defensive mode is off.
+    r.defensive_mode = false;
+    match check(&r) { Allow => {}, _ => assert(false) }
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&Allow)                  == "allow".clone());
+    assert(outcome_name(&DenyNoTxn)              == "deny_no_txn".clone());
+    assert(outcome_name(&DenySchemaReadonly)     == "deny_schema_readonly".clone());
+    assert(outcome_name(&DenyPgnoOutOfRange)     == "deny_pgno_out_of_range".clone());
+    assert(outcome_name(&DenyBufferSizeMismatch) == "deny_buffer_size_mismatch".clone());
+    assert(outcome_name(&DenyDefensivePage1)     == "deny_defensive_page1".clone());
+    assert(outcome_name(&DenyJournalPage)        == "deny_journal_page".clone());
+}
+
+fn test_hard_error_classification() {
+    assert(!is_hard_error(&Allow));
+    assert(is_hard_error(&DenyNoTxn));
+    assert(is_hard_error(&DenySchemaReadonly));
+    assert(is_hard_error(&DenyPgnoOutOfRange));
+    assert(is_hard_error(&DenyBufferSizeMismatch));
+    assert(is_hard_error(&DenyDefensivePage1));
+    assert(is_hard_error(&DenyJournalPage));
+}
+
+fn main() {
+    test_well_known_outcome_count();
+    test_allow_path();
+    test_no_txn();
+    test_schema_readonly();
+    test_journal_or_wal_page();
+    test_pgno_out_of_range();
+    test_buffer_size_mismatch();
+    test_defensive_page1();
+    test_outcome_names();
+    test_hard_error_classification();
+}

@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/case_sensitive_like_pragma/mod.vr
+// =============================================================================
+// PRAGMA case_sensitive_like — switches the LIKE operator's ASCII case-folding
+// on or off.  Default: OFF (LIKE is case-insensitive on ASCII).
+// Spec §15.4 — pragmas.
+// =============================================================================
+
+module core.database.sqlite.native.case_sensitive_like_pragma;
+
+public module pragma_;

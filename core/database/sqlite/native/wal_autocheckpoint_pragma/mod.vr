@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/wal_autocheckpoint_pragma/mod.vr
+// =============================================================================
+// PRAGMA wal_autocheckpoint — frame-count threshold that triggers an automatic
+// PASSIVE checkpoint on commit.
+// Spec §18.4 — wal_autocheckpoint.
+//
+// Default: 1000 frames. 0 disables auto-checkpointing.
+// =============================================================================
+
+module core.database.sqlite.native.wal_autocheckpoint_pragma;
+
+public module setting;

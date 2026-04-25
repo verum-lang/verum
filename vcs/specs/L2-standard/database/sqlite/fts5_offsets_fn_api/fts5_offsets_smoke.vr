@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fts5_offsets_fn_api, fts5
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.fts5_offsets_fn_api.aux.{
+    MatchHit, OffsetsResult,
+    new_hit, is_well_formed,
+    empty_result, append_hit, hit_count, is_empty,
+    render_hit, token_count, well_formed_result,
+};
+mount base.{Bool, Int64};
+
+fn test_new_hit_well_formed() {
+    let h = new_hit(0, 1, 4 as Int64, 5 as Int64);
+    assert(is_well_formed(&h));
+    assert_eq(h.column, 0);
+    assert_eq(h.term, 1);
+    assert_eq(h.byte_offset, 4 as Int64);
+    assert_eq(h.byte_size, 5 as Int64);
+}
+
+fn test_well_formed_rejects_bad_inputs() {
+    assert(!is_well_formed(&new_hit(-1, 0, 0 as Int64, 1 as Int64)));
+    assert(!is_well_formed(&new_hit(0, -1, 0 as Int64, 1 as Int64)));
+    assert(!is_well_formed(&new_hit(0, 0, -1 as Int64, 1 as Int64)));
+    assert(!is_well_formed(&new_hit(0, 0, 0 as Int64, 0 as Int64)));
+}
+
+fn test_empty_result() {
+    let r = empty_result();
+    assert(is_empty(&r));
+    assert_eq(hit_count(&r), 0);
+    assert_eq(token_count(&r), 0);
+}
+
+fn test_append_hit_grows() {
+    let mut r = empty_result();
+    r = append_hit(r, new_hit(0, 0, 0 as Int64, 3 as Int64));
+    r = append_hit(r, new_hit(1, 2, 8 as Int64, 4 as Int64));
+    assert_eq(hit_count(&r), 2);
+    assert_eq(token_count(&r), 8);   // 4 ints per hit
+    assert(!is_empty(&r));
+    assert(well_formed_result(&r));
+}
+
+fn test_render_hit_format() {
+    let h = new_hit(0, 1, 4 as Int64, 5 as Int64);
+    let s = render_hit(&h);
+    assert(s == "0 1 4 5".clone());
+}
+
+fn test_render_hit_zero_offset() {
+    let h = new_hit(0, 0, 0 as Int64, 1 as Int64);
+    let s = render_hit(&h);
+    assert(s == "0 0 0 1".clone());
+}
+
+fn test_well_formed_result_detects_bad_hit() {
+    let mut r = empty_result();
+    r = append_hit(r, new_hit(0, 0, 0 as Int64, 0 as Int64));
+    assert(!well_formed_result(&r));
+}
+
+fn main() {
+    test_new_hit_well_formed();
+    test_well_formed_rejects_bad_inputs();
+    test_empty_result();
+    test_append_hit_grows();
+    test_render_hit_format();
+    test_render_hit_zero_offset();
+    test_well_formed_result_detects_bad_hit();
+}

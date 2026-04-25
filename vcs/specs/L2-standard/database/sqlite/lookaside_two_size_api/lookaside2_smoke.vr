@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, lookaside_two_size_api, allocator
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.lookaside_two_size_api.pool.{
+    Config, default_config, is_well_formed, total_bytes, slot_count,
+    SlotKind, SkSmall, SkLarge, SkHeapFallback,
+    pick_slot, slot_name, uses_lookaside,
+    Stats, empty_stats, record_hit, record_miss_full, record_miss_size,
+    high_water_used,
+};
+mount base.{Bool, Int64};
+
+fn test_default_config_well_formed() {
+    let c = default_config();
+    assert(is_well_formed(&c));
+    assert_eq(c.sz_small, 128);
+    assert_eq(c.n_small, 500);
+    assert_eq(c.sz_large, 1024);
+    assert_eq(c.n_large, 100);
+}
+
+fn test_total_bytes() {
+    let c = default_config();
+    let want = (128 as Int64) * (500 as Int64) + (1024 as Int64) * (100 as Int64);
+    assert_eq(total_bytes(&c), want);
+}
+
+fn test_slot_count() {
+    let c = default_config();
+    assert_eq(slot_count(&c), 600);
+}
+
+fn test_well_formed_rejects_invalid() {
+    let c = Config { sz_small: 0, n_small: 1, sz_large: 1024, n_large: 0 };
+    assert(!is_well_formed(&c));
+    let c2 = Config { sz_small: 64, n_small: 1, sz_large: 32, n_large: 0 };
+    assert(!is_well_formed(&c2));
+}
+
+fn test_pick_slot_routing() {
+    let c = default_config();
+    match pick_slot(&c, 16)   { SkSmall        => {}, _ => assert(false) }
+    match pick_slot(&c, 128)  { SkSmall        => {}, _ => assert(false) }
+    match pick_slot(&c, 256)  { SkLarge        => {}, _ => assert(false) }
+    match pick_slot(&c, 1024) { SkLarge        => {}, _ => assert(false) }
+    match pick_slot(&c, 4096) { SkHeapFallback => {}, _ => assert(false) }
+}
+
+fn test_slot_names_and_uses_lookaside() {
+    assert(slot_name(&SkSmall)        == "small".clone());
+    assert(slot_name(&SkLarge)        == "large".clone());
+    assert(slot_name(&SkHeapFallback) == "heap".clone());
+    assert(uses_lookaside(&SkSmall));
+    assert(uses_lookaside(&SkLarge));
+    assert(!uses_lookaside(&SkHeapFallback));
+}
+
+fn test_empty_stats() {
+    let s = empty_stats();
+    assert_eq(s.used_small, 0);
+    assert_eq(s.used_large, 0);
+    assert_eq(s.hit, 0 as Int64);
+    assert_eq(s.miss_size, 0 as Int64);
+    assert_eq(s.miss_full, 0 as Int64);
+}
+
+fn test_record_hit_increments_per_kind() {
+    let mut s = empty_stats();
+    s = record_hit(s, &SkSmall);
+    s = record_hit(s, &SkSmall);
+    s = record_hit(s, &SkLarge);
+    assert_eq(s.used_small, 2);
+    assert_eq(s.used_large, 1);
+    assert_eq(s.hit, 3 as Int64);
+    assert_eq(high_water_used(&s), 3);
+}
+
+fn test_record_misses() {
+    let mut s = empty_stats();
+    s = record_miss_full(s);
+    s = record_miss_size(s);
+    s = record_miss_size(s);
+    assert_eq(s.miss_full, 1 as Int64);
+    assert_eq(s.miss_size, 2 as Int64);
+}
+
+fn main() {
+    test_default_config_well_formed();
+    test_total_bytes();
+    test_slot_count();
+    test_well_formed_rejects_invalid();
+    test_pick_slot_routing();
+    test_slot_names_and_uses_lookaside();
+    test_empty_stats();
+    test_record_hit_increments_per_kind();
+    test_record_misses();
+}

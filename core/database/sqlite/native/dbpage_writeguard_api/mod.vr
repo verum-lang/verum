@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/dbpage_writeguard_api/mod.vr
+// =============================================================================
+// dbpage virtual table — write-guard rules for direct page modification.
+// Writes via dbpage are extremely dangerous; the engine validates each write
+// against a small set of guards before letting it touch the b-tree.
+// Spec §16.3.6 — dbpage extension.
+// =============================================================================
+
+module core.database.sqlite.native.dbpage_writeguard_api;
+
+public module guard;

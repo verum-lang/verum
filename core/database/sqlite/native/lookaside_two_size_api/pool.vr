@@ -1,0 +1,108 @@
+// SQLITE_CONFIG_LOOKASIDE2 — split-size lookaside per-connection pool.
+//
+// Each connection has two pools:
+//   * small slots (size = sz_small bytes)  — used for AST nodes, small lookups
+//   * large slots (size = sz_large bytes)  — used for VDBE programs, sorters
+// A request larger than sz_large bypasses lookaside entirely (heap malloc).
+
+module core.database.sqlite.native.lookaside_two_size_api.pool;
+
+mount base.{Bool, Int64, Text};
+
+public type Config is {
+    sz_small: Int,         // bytes per small slot
+    n_small:  Int,         // number of small slots
+    sz_large: Int,         // bytes per large slot (>= sz_small)
+    n_large:  Int,         // number of large slots
+};
+
+public fn default_config() -> Config {
+    // Defaults match SQLite's compile-time numbers (sz_small=128, n_small=500).
+    Config { sz_small: 128, n_small: 500, sz_large: 1024, n_large: 100 }
+}
+
+public fn is_well_formed(c: &Config) -> Bool {
+    if c.sz_small <= 0 { return false; }
+    if c.n_small  <= 0 { return false; }
+    if c.sz_large < c.sz_small { return false; }
+    if c.n_large  < 0 { return false; }
+    true
+}
+
+public fn total_bytes(c: &Config) -> Int64 {
+    let s = (c.sz_small as Int64) * (c.n_small as Int64);
+    let l = (c.sz_large as Int64) * (c.n_large as Int64);
+    s + l
+}
+
+public fn slot_count(c: &Config) -> Int {
+    c.n_small + c.n_large
+}
+
+public type SlotKind is
+    | SkSmall
+    | SkLarge
+    | SkHeapFallback     // request too large; allocator falls back to malloc
+    ;
+
+public fn pick_slot(c: &Config, request_bytes: Int) -> SlotKind {
+    if request_bytes <= c.sz_small { return SkSmall; }
+    if request_bytes <= c.sz_large { return SkLarge; }
+    SkHeapFallback
+}
+
+public fn slot_name(k: &SlotKind) -> Text {
+    match k {
+        SkSmall        => "small".clone(),
+        SkLarge        => "large".clone(),
+        SkHeapFallback => "heap".clone(),
+    }
+}
+
+public fn uses_lookaside(k: &SlotKind) -> Bool {
+    match k {
+        SkSmall        => true,
+        SkLarge        => true,
+        SkHeapFallback => false,
+    }
+}
+
+// Live counters (DBSTATUS_LOOKASIDE_USED, _HIT, _MISS_SIZE, _MISS_FULL).
+public type Stats is {
+    used_small: Int,
+    used_large: Int,
+    hit:        Int64,
+    miss_size:  Int64,    // request didn't fit any slot
+    miss_full:  Int64,    // slot kind was full
+};
+
+public fn empty_stats() -> Stats {
+    Stats {
+        used_small: 0, used_large: 0,
+        hit: 0 as Int64, miss_size: 0 as Int64, miss_full: 0 as Int64,
+    }
+}
+
+public fn record_hit(mut s: Stats, k: &SlotKind) -> Stats {
+    s.hit = s.hit + (1 as Int64);
+    match k {
+        SkSmall => { s.used_small = s.used_small + 1; },
+        SkLarge => { s.used_large = s.used_large + 1; },
+        _ => {},
+    }
+    s
+}
+
+public fn record_miss_full(mut s: Stats) -> Stats {
+    s.miss_full = s.miss_full + (1 as Int64);
+    s
+}
+
+public fn record_miss_size(mut s: Stats) -> Stats {
+    s.miss_size = s.miss_size + (1 as Int64);
+    s
+}
+
+public fn high_water_used(s: &Stats) -> Int {
+    s.used_small + s.used_large
+}

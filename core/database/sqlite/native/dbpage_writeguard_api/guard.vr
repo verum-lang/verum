@@ -1,0 +1,101 @@
+// dbpage write-guard rules.
+//
+// dbpage(pgno, schema) lets a SELECT pull raw page bytes; an UPDATE writes
+// raw bytes back.  These bytes bypass the b-tree, so the engine enforces:
+//   * the connection holds an open write-txn
+//   * the schema is the writable database (not "temp" by default)
+//   * the page number is in the legal range
+//   * the buffer length matches the page size exactly
+//   * no page-1 overwrite when SQLITE_DBCONFIG_DEFENSIVE is on
+//   * no journal/WAL pages are modifiable directly
+
+module core.database.sqlite.native.dbpage_writeguard_api.guard;
+
+mount base.{Bool, Int64, Text};
+
+public type Outcome is
+    | Allow
+    | DenyNoTxn
+    | DenySchemaReadonly
+    | DenyPgnoOutOfRange
+    | DenyBufferSizeMismatch
+    | DenyDefensivePage1
+    | DenyJournalPage
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        Allow                  => "allow".clone(),
+        DenyNoTxn              => "deny_no_txn".clone(),
+        DenySchemaReadonly     => "deny_schema_readonly".clone(),
+        DenyPgnoOutOfRange     => "deny_pgno_out_of_range".clone(),
+        DenyBufferSizeMismatch => "deny_buffer_size_mismatch".clone(),
+        DenyDefensivePage1     => "deny_defensive_page1".clone(),
+        DenyJournalPage        => "deny_journal_page".clone(),
+    }
+}
+
+public fn is_allowed(o: &Outcome) -> Bool {
+    match o { Allow => true, _ => false }
+}
+
+public type Request is {
+    pgno: Int64,
+    page_size: Int,
+    buffer_size: Int,
+    in_write_txn: Bool,
+    schema_readonly: Bool,
+    db_pages: Int64,
+    is_journal_or_wal_page: Bool,
+    defensive_mode: Bool,
+};
+
+public fn new_request(
+    pgno: Int64,
+    page_size: Int,
+    buffer_size: Int,
+    in_write_txn: Bool,
+    schema_readonly: Bool,
+    db_pages: Int64,
+    is_journal_or_wal_page: Bool,
+    defensive_mode: Bool,
+) -> Request {
+    Request {
+        pgno: pgno,
+        page_size: page_size,
+        buffer_size: buffer_size,
+        in_write_txn: in_write_txn,
+        schema_readonly: schema_readonly,
+        db_pages: db_pages,
+        is_journal_or_wal_page: is_journal_or_wal_page,
+        defensive_mode: defensive_mode,
+    }
+}
+
+public fn check(r: &Request) -> Outcome {
+    if !r.in_write_txn          { return DenyNoTxn; }
+    if r.schema_readonly        { return DenySchemaReadonly; }
+    if r.is_journal_or_wal_page { return DenyJournalPage; }
+    if r.pgno <= (0 as Int64)    { return DenyPgnoOutOfRange; }
+    if r.pgno > r.db_pages       { return DenyPgnoOutOfRange; }
+    if r.buffer_size != r.page_size { return DenyBufferSizeMismatch; }
+    if r.defensive_mode && r.pgno == (1 as Int64) { return DenyDefensivePage1; }
+    Allow
+}
+
+// Severity: hard-failures must propagate as SQLITE_ERROR; soft failures
+// may turn into SQLITE_CONSTRAINT depending on context.
+public fn is_hard_error(o: &Outcome) -> Bool {
+    match o {
+        Allow                  => false,
+        DenyNoTxn              => true,
+        DenySchemaReadonly     => true,
+        DenyJournalPage        => true,
+        DenyPgnoOutOfRange     => true,
+        DenyBufferSizeMismatch => true,
+        DenyDefensivePage1     => true,
+    }
+}
+
+// Number of well-known guard failure modes (for taxonomy tests).
+public fn well_known_outcome_count() -> Int { 7 }

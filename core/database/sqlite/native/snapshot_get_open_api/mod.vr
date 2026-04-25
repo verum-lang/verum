@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/snapshot_get_open_api/mod.vr
+// =============================================================================
+// sqlite3_snapshot_get / _open / _free / _cmp / _recover.  Captures a snapshot
+// of the database state for a WAL-mode read transaction.  Spec App.E.S.
+// =============================================================================
+
+module core.database.sqlite.native.snapshot_get_open_api;
+
+public module snap;

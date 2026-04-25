@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/recursive_trigger_pragma/mod.vr
+// =============================================================================
+// PRAGMA recursive_triggers — controls whether triggers may fire other triggers
+// (or themselves).  Default: OFF (legacy SQLite behaviour).  Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.recursive_trigger_pragma;
+
+public module gate;

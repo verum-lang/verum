@@ -1,0 +1,56 @@
+// wal_autocheckpoint setting.
+
+module core.database.sqlite.native.wal_autocheckpoint_pragma.setting;
+
+mount base.{Bool, Int64, Text};
+
+public fn default_threshold() -> Int { 1000 }
+
+public type Setting is {
+    threshold: Int,        // 0 = disabled
+    frames_seen: Int64,    // counted since last checkpoint
+};
+
+public fn new(threshold: Int) -> Setting {
+    let clipped = if threshold < 0 { 0 } else { threshold };
+    Setting { threshold: clipped, frames_seen: 0 as Int64 }
+}
+
+public fn default_setting() -> Setting {
+    new(default_threshold())
+}
+
+public fn is_enabled(s: &Setting) -> Bool {
+    s.threshold > 0
+}
+
+public fn record_frame(mut s: Setting) -> Setting {
+    s.frames_seen = s.frames_seen + (1 as Int64);
+    s
+}
+
+public fn record_commit(mut s: Setting, frames_in_commit: Int64) -> Setting {
+    s.frames_seen = s.frames_seen + frames_in_commit;
+    s
+}
+
+public fn should_checkpoint(s: &Setting) -> Bool {
+    if !is_enabled(s) { return false; }
+    s.frames_seen >= (s.threshold as Int64)
+}
+
+public fn reset_after_checkpoint(mut s: Setting) -> Setting {
+    s.frames_seen = 0 as Int64;
+    s
+}
+
+public fn frames_until_checkpoint(s: &Setting) -> Int64 {
+    if !is_enabled(s) { return -1 as Int64; }
+    let limit = s.threshold as Int64;
+    if s.frames_seen >= limit { return 0 as Int64; }
+    limit - s.frames_seen
+}
+
+public fn mode_name(s: &Setting) -> Text {
+    if !is_enabled(s) { "disabled".clone() } else { "enabled".clone() }
+}

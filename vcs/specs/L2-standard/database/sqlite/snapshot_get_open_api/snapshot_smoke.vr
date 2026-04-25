@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, snapshot_get_open_api, snapshot
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.snapshot_get_open_api.snap.{
+    Snapshot, new, schema_name, equal,
+    CmpResult, CmLess, CmEqual, CmGreater, CmIncomparable,
+    compare, cmp_to_int,
+    Op, OpGet, OpOpen, OpFree, OpCmp, OpRecover, op_name,
+    Outcome, OkSnapshot, ErrNotWal, ErrNoTxn, ErrInUse, ErrCheckpointMoved,
+    outcome_name, is_ok,
+};
+mount base.{Bool, Int64};
+
+fn test_new_and_schema() {
+    let s = new("main".clone(), 100 as Int64, 0xAA as Int64, 0xBB as Int64);
+    assert(schema_name(&s) == "main".clone());
+    assert_eq(s.end_frame, 100 as Int64);
+}
+
+fn test_equal_snapshots() {
+    let a = new("main".clone(), 100 as Int64, 1 as Int64, 2 as Int64);
+    let b = new("main".clone(), 100 as Int64, 1 as Int64, 2 as Int64);
+    let c = new("main".clone(), 200 as Int64, 1 as Int64, 2 as Int64);
+    assert(equal(&a, &b));
+    assert(!equal(&a, &c));
+}
+
+fn test_compare_same_salt() {
+    let a = new("main".clone(), 100 as Int64, 7 as Int64, 8 as Int64);
+    let b = new("main".clone(), 200 as Int64, 7 as Int64, 8 as Int64);
+    let c = new("main".clone(), 100 as Int64, 7 as Int64, 8 as Int64);
+    match compare(&a, &b) { CmLess    => {}, _ => assert(false) }
+    match compare(&b, &a) { CmGreater => {}, _ => assert(false) }
+    match compare(&a, &c) { CmEqual   => {}, _ => assert(false) }
+}
+
+fn test_compare_incomparable_on_salt_or_schema() {
+    let a = new("main".clone(), 100 as Int64, 7 as Int64, 8 as Int64);
+    let other_salt = new("main".clone(), 100 as Int64, 9 as Int64, 8 as Int64);
+    let other_db   = new("aux".clone(),  100 as Int64, 7 as Int64, 8 as Int64);
+    match compare(&a, &other_salt) { CmIncomparable => {}, _ => assert(false) }
+    match compare(&a, &other_db)   { CmIncomparable => {}, _ => assert(false) }
+}
+
+fn test_cmp_to_int() {
+    assert_eq(cmp_to_int(&CmLess),         -1);
+    assert_eq(cmp_to_int(&CmEqual),         0);
+    assert_eq(cmp_to_int(&CmGreater),       1);
+    assert_eq(cmp_to_int(&CmIncomparable), -2);
+}
+
+fn test_op_names() {
+    assert(op_name(&OpGet)     == "snapshot_get".clone());
+    assert(op_name(&OpOpen)    == "snapshot_open".clone());
+    assert(op_name(&OpFree)    == "snapshot_free".clone());
+    assert(op_name(&OpCmp)     == "snapshot_cmp".clone());
+    assert(op_name(&OpRecover) == "snapshot_recover".clone());
+}
+
+fn test_outcomes() {
+    assert(is_ok(&OkSnapshot));
+    assert(!is_ok(&ErrNotWal));
+    assert(!is_ok(&ErrNoTxn));
+    assert(!is_ok(&ErrInUse));
+    assert(!is_ok(&ErrCheckpointMoved));
+    assert(outcome_name(&OkSnapshot) == "ok".clone());
+}
+
+fn main() {
+    test_new_and_schema();
+    test_equal_snapshots();
+    test_compare_same_salt();
+    test_compare_incomparable_on_salt_or_schema();
+    test_cmp_to_int();
+    test_op_names();
+    test_outcomes();
+}

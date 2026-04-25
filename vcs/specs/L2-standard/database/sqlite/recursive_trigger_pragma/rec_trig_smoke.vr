@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, recursive_trigger_pragma, triggers
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.recursive_trigger_pragma.gate.{
+    Mode, MoOff, MoOn,
+    default_mode, from_pragma_value, to_pragma_value,
+    mode_name, cascades, allows_fire, as_flag, from_flag,
+};
+mount base.{Bool};
+
+fn test_default_is_off() {
+    match default_mode() { MoOff => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { MoOff => {}, _ => assert(false) }
+    match from_pragma_value(1) { MoOn  => {}, _ => assert(false) }
+    match from_pragma_value(7) { MoOn  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&MoOff), 0);
+    assert_eq(to_pragma_value(&MoOn),  1);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&MoOff) == "off".clone());
+    assert(mode_name(&MoOn)  == "on".clone());
+}
+
+fn test_cascades_predicate() {
+    assert(!cascades(&MoOff));
+    assert(cascades(&MoOn));
+}
+
+fn test_allows_fire_off_mode_top_level_only() {
+    assert(allows_fire(&MoOff, 0));
+    assert(!allows_fire(&MoOff, 1));
+    assert(!allows_fire(&MoOff, 5));
+}
+
+fn test_allows_fire_on_mode_unrestricted() {
+    assert(allows_fire(&MoOn, 0));
+    assert(allows_fire(&MoOn, 5));
+    assert(allows_fire(&MoOn, 999));
+}
+
+fn test_flag_round_trip() {
+    assert(!as_flag(&MoOff));
+    assert(as_flag(&MoOn));
+    match from_flag(false) { MoOff => {}, _ => assert(false) }
+    match from_flag(true)  { MoOn  => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_default_is_off();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_cascades_predicate();
+    test_allows_fire_off_mode_top_level_only();
+    test_allows_fire_on_mode_unrestricted();
+    test_flag_round_trip();
+}

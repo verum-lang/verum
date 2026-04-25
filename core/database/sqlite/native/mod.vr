@@ -764,3 +764,19 @@ public module xshm_barrier_doc;
 public module stat4_sample_blob;
 // - trigger_recursion_limit: SQLITE_LIMIT_TRIGGER_DEPTH 1000 default + would_exceed gate
 public module trigger_recursion_limit;
+// - journal_size_limit_api: PRAGMA journal_size_limit (LmUnlimited/LmTruncate/LmCap)
+public module journal_size_limit_api;
+// - wal_autocheckpoint_pragma: PRAGMA wal_autocheckpoint frame counter + threshold
+public module wal_autocheckpoint_pragma;
+// - recursive_trigger_pragma: PRAGMA recursive_triggers (default OFF)
+public module recursive_trigger_pragma;
+// - case_sensitive_like_pragma: PRAGMA case_sensitive_like ASCII fold gate
+public module case_sensitive_like_pragma;
+// - fts5_offsets_fn_api: FTS5 offsets() (col / term / byte-off / byte-size) builder
+public module fts5_offsets_fn_api;
+// - snapshot_get_open_api: sqlite3_snapshot_get/_open/_free/_cmp/_recover taxonomy
+public module snapshot_get_open_api;
+// - lookaside_two_size_api: SQLITE_CONFIG_LOOKASIDE2 split-slot pool (small + large)
+public module lookaside_two_size_api;
+// - dbpage_writeguard_api: dbpage write-guard rules (page-1 / journal / size mismatch)
+public module dbpage_writeguard_api;

@@ -1,0 +1,105 @@
+// FTS5 offsets() result builder.
+//
+// Output format (per match): "<col> <term> <byte-off> <byte-size>".
+// Multiple matches are space-joined.  Empty matches return "".
+
+module core.database.sqlite.native.fts5_offsets_fn_api.aux;
+
+mount base.{Bool, Int64, Text};
+mount core.collections.list.{List};
+
+public type MatchHit is {
+    column: Int,        // 0-based column index
+    term: Int,          // 0-based query-term index
+    byte_offset: Int64, // byte offset within column text
+    byte_size: Int64,   // byte length of match
+};
+
+public fn new_hit(col: Int, term: Int, off: Int64, size: Int64) -> MatchHit {
+    MatchHit { column: col, term: term, byte_offset: off, byte_size: size }
+}
+
+public fn is_well_formed(h: &MatchHit) -> Bool {
+    if h.column < 0 { return false; }
+    if h.term < 0 { return false; }
+    if h.byte_offset < (0 as Int64) { return false; }
+    if h.byte_size <= (0 as Int64) { return false; }
+    true
+}
+
+public type OffsetsResult is {
+    hits: List<MatchHit>,
+};
+
+public fn empty_result() -> OffsetsResult {
+    OffsetsResult { hits: List.new() }
+}
+
+public fn append_hit(mut r: OffsetsResult, h: MatchHit) -> OffsetsResult {
+    r.hits.push(h);
+    r
+}
+
+public fn hit_count(r: &OffsetsResult) -> Int {
+    r.hits.len() as Int
+}
+
+public fn is_empty(r: &OffsetsResult) -> Bool {
+    r.hits.len() == 0
+}
+
+// Render one hit in the "col term off size" form, space-separated.
+public fn render_hit(h: &MatchHit) -> Text {
+    let mut s = Text.new();
+    s = s.append(int_to_text(h.column));
+    s = s.append(" ".clone());
+    s = s.append(int_to_text(h.term));
+    s = s.append(" ".clone());
+    s = s.append(i64_to_text(h.byte_offset));
+    s = s.append(" ".clone());
+    s = s.append(i64_to_text(h.byte_size));
+    s
+}
+
+fn int_to_text(n: Int) -> Text {
+    let n64 = n as Int64;
+    i64_to_text(n64)
+}
+
+fn i64_to_text(n: Int64) -> Text {
+    // Positive-only; matches FTS5 (column/term/off/size are all non-negative).
+    if n == (0 as Int64) { return "0".clone(); }
+    let mut digits = List.new();
+    let mut x = n;
+    let zero = 0 as Int64;
+    let ten = 10 as Int64;
+    while x > zero {
+        let d = (x % ten) as Int;
+        digits.push(d);
+        x = x / ten;
+    }
+    let mut out = Text.new();
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 {
+        let d = digits.get(i as Int);
+        out = out.append_byte((0x30 + d) as Int);
+        i = i - 1;
+    }
+    out
+}
+
+// Number of items the SQL `offsets()` call would emit (4 ints per hit).
+public fn token_count(r: &OffsetsResult) -> Int {
+    (r.hits.len() as Int) * 4
+}
+
+// Each hit contributes column + term + off + size.
+public fn well_formed_result(r: &OffsetsResult) -> Bool {
+    let mut i = 0;
+    let n = r.hits.len() as Int;
+    while i < n {
+        if !is_well_formed(&r.hits.get(i)) { return false; }
+        i = i + 1;
+    }
+    true
+}

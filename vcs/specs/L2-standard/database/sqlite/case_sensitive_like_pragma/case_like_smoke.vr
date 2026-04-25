@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, case_sensitive_like_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.case_sensitive_like_pragma.pragma_.{
+    Mode, InsensitiveAscii, CaseSensitive,
+    default_mode, from_pragma_value, to_pragma_value,
+    mode_name, folds_ascii, fold_byte, bytes_equal,
+};
+mount base.{Bool};
+
+fn test_default_is_insensitive() {
+    match default_mode() { InsensitiveAscii => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { InsensitiveAscii => {}, _ => assert(false) }
+    match from_pragma_value(1) { CaseSensitive    => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&InsensitiveAscii), 0);
+    assert_eq(to_pragma_value(&CaseSensitive),    1);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&InsensitiveAscii) == "off".clone());
+    assert(mode_name(&CaseSensitive)    == "on".clone());
+}
+
+fn test_folds_ascii_predicate() {
+    assert(folds_ascii(&InsensitiveAscii));
+    assert(!folds_ascii(&CaseSensitive));
+}
+
+fn test_fold_byte_uppercase_to_lower() {
+    // 'A' = 0x41 -> 'a' = 0x61
+    assert_eq(fold_byte(&InsensitiveAscii, 0x41), 0x61);
+    assert_eq(fold_byte(&InsensitiveAscii, 0x5A), 0x7A);
+    // Non-uppercase passes through.
+    assert_eq(fold_byte(&InsensitiveAscii, 0x61), 0x61);
+    assert_eq(fold_byte(&InsensitiveAscii, 0x40), 0x40);
+}
+
+fn test_fold_byte_case_sensitive_passthrough() {
+    assert_eq(fold_byte(&CaseSensitive, 0x41), 0x41);
+    assert_eq(fold_byte(&CaseSensitive, 0x61), 0x61);
+}
+
+fn test_bytes_equal_under_modes() {
+    // 'A' vs 'a' equal under insensitive mode.
+    assert(bytes_equal(&InsensitiveAscii, 0x41, 0x61));
+    // Same bytes never equal under case-sensitive mode.
+    assert(!bytes_equal(&CaseSensitive, 0x41, 0x61));
+    // Identical bytes always equal.
+    assert(bytes_equal(&CaseSensitive, 0x61, 0x61));
+}
+
+fn main() {
+    test_default_is_insensitive();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_folds_ascii_predicate();
+    test_fold_byte_uppercase_to_lower();
+    test_fold_byte_case_sensitive_passthrough();
+    test_bytes_equal_under_modes();
+}

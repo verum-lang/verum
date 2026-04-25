@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, wal_autocheckpoint_pragma, wal
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.wal_autocheckpoint_pragma.setting.{
+    Setting, default_threshold, default_setting, new,
+    is_enabled, record_frame, record_commit,
+    should_checkpoint, reset_after_checkpoint,
+    frames_until_checkpoint, mode_name,
+};
+mount base.{Bool, Int64};
+
+fn test_default_threshold() {
+    assert_eq(default_threshold(), 1000);
+}
+
+fn test_default_setting_state() {
+    let s = default_setting();
+    assert_eq(s.threshold, 1000);
+    assert_eq(s.frames_seen, 0 as Int64);
+    assert(is_enabled(&s));
+}
+
+fn test_new_clamps_negative() {
+    let s = new(-5);
+    assert_eq(s.threshold, 0);
+    assert(!is_enabled(&s));
+}
+
+fn test_record_frame_increments() {
+    let mut s = new(10);
+    s = record_frame(s);
+    s = record_frame(s);
+    s = record_frame(s);
+    assert_eq(s.frames_seen, 3 as Int64);
+}
+
+fn test_record_commit_adds_batch() {
+    let mut s = new(20);
+    s = record_commit(s, 5 as Int64);
+    s = record_commit(s, 7 as Int64);
+    assert_eq(s.frames_seen, 12 as Int64);
+}
+
+fn test_should_checkpoint_at_threshold() {
+    let mut s = new(3);
+    assert(!should_checkpoint(&s));
+    s = record_commit(s, 3 as Int64);
+    assert(should_checkpoint(&s));
+}
+
+fn test_should_checkpoint_disabled() {
+    let mut s = new(0);
+    s = record_commit(s, 100 as Int64);
+    assert(!should_checkpoint(&s));
+}
+
+fn test_reset_after_checkpoint() {
+    let mut s = new(3);
+    s = record_commit(s, 5 as Int64);
+    s = reset_after_checkpoint(s);
+    assert_eq(s.frames_seen, 0 as Int64);
+}
+
+fn test_frames_until_checkpoint() {
+    let mut s = new(10);
+    assert_eq(frames_until_checkpoint(&s), 10 as Int64);
+    s = record_commit(s, 4 as Int64);
+    assert_eq(frames_until_checkpoint(&s), 6 as Int64);
+    s = record_commit(s, 6 as Int64);
+    assert_eq(frames_until_checkpoint(&s), 0 as Int64);
+}
+
+fn test_frames_until_when_disabled() {
+    let s = new(0);
+    assert_eq(frames_until_checkpoint(&s), -1 as Int64);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&new(0))   == "disabled".clone());
+    assert(mode_name(&new(100)) == "enabled".clone());
+}
+
+fn main() {
+    test_default_threshold();
+    test_default_setting_state();
+    test_new_clamps_negative();
+    test_record_frame_increments();
+    test_record_commit_adds_batch();
+    test_should_checkpoint_at_threshold();
+    test_should_checkpoint_disabled();
+    test_reset_after_checkpoint();
+    test_frames_until_checkpoint();
+    test_frames_until_when_disabled();
+    test_mode_names();
+}

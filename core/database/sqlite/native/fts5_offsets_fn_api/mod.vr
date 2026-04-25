@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/fts5_offsets_fn_api/mod.vr
+// =============================================================================
+// FTS5 offsets() auxiliary function — for each match, returns a quadruple
+// (column, term, byte-offset, byte-size) interleaved into one whitespace-
+// separated TEXT result.  Spec §16.2.4 — fts5 aux functions.
+// =============================================================================
+
+module core.database.sqlite.native.fts5_offsets_fn_api;
+
+public module aux;

@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/journal_size_limit_api/mod.vr
+// =============================================================================
+// PRAGMA journal_size_limit — caps the persistent rollback-journal size
+// after a transaction commits.
+// Spec §18.4 — journal_size_limit.
+//
+// Values:
+//   -1   no limit (default)
+//    0   truncate to zero after every commit
+//    N>0 keep up to N bytes
+// =============================================================================
+
+module core.database.sqlite.native.journal_size_limit_api;
+
+public module limit;

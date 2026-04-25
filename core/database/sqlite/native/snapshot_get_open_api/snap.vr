@@ -1,0 +1,97 @@
+// sqlite3_snapshot_* opaque-handle taxonomy.
+
+module core.database.sqlite.native.snapshot_get_open_api.snap;
+
+mount base.{Bool, Int64, Text};
+
+// Opaque snapshot handle.  In the C library this is `sqlite3_snapshot*`;
+// here we represent the on-disk identifier (mxFrame + saltBytes).
+public type Snapshot is {
+    schema: Text,         // "main", "temp", or attached-db name
+    end_frame: Int64,     // largest WAL frame visible
+    salt1: Int64,         // -wal-header salt-1 (commit-id check)
+    salt2: Int64,         // -wal-header salt-2 (commit-id check)
+};
+
+public fn new(schema: Text, end_frame: Int64, salt1: Int64, salt2: Int64) -> Snapshot {
+    Snapshot { schema: schema, end_frame: end_frame, salt1: salt1, salt2: salt2 }
+}
+
+public fn schema_name(s: &Snapshot) -> Text { s.schema.clone() }
+
+public fn equal(a: &Snapshot, b: &Snapshot) -> Bool {
+    a.schema == b.schema
+        && a.end_frame == b.end_frame
+        && a.salt1 == b.salt1
+        && a.salt2 == b.salt2
+}
+
+// Result of sqlite3_snapshot_cmp(a, b):
+//   negative if a < b, zero if equal, positive if a > b.
+// Two snapshots are comparable only when their salts match (same commit-id);
+// otherwise the call returns SQLITE_ERROR.
+public type CmpResult is
+    | CmLess
+    | CmEqual
+    | CmGreater
+    | CmIncomparable     // different DB / different commit-id
+    ;
+
+public fn compare(a: &Snapshot, b: &Snapshot) -> CmpResult {
+    if a.schema != b.schema { return CmIncomparable; }
+    if a.salt1 != b.salt1 || a.salt2 != b.salt2 { return CmIncomparable; }
+    if a.end_frame < b.end_frame { return CmLess; }
+    if a.end_frame > b.end_frame { return CmGreater; }
+    CmEqual
+}
+
+public fn cmp_to_int(r: &CmpResult) -> Int {
+    match r {
+        CmLess         => -1,
+        CmEqual        =>  0,
+        CmGreater      =>  1,
+        CmIncomparable =>  -2,    // sentinel; SQLITE_ERROR in C surface
+    }
+}
+
+// API operations.
+public type Op is
+    | OpGet
+    | OpOpen
+    | OpFree
+    | OpCmp
+    | OpRecover
+    ;
+
+public fn op_name(o: &Op) -> Text {
+    match o {
+        OpGet     => "snapshot_get".clone(),
+        OpOpen    => "snapshot_open".clone(),
+        OpFree    => "snapshot_free".clone(),
+        OpCmp     => "snapshot_cmp".clone(),
+        OpRecover => "snapshot_recover".clone(),
+    }
+}
+
+// Outcome of sqlite3_snapshot_get / _open.
+public type Outcome is
+    | OkSnapshot
+    | ErrNotWal           // snapshot APIs require WAL mode
+    | ErrNoTxn            // _open requires an active read txn
+    | ErrInUse            // another writer holds an exclusive lock
+    | ErrCheckpointMoved  // requested snapshot was checkpointed away
+    ;
+
+public fn outcome_name(o: &Outcome) -> Text {
+    match o {
+        OkSnapshot          => "ok".clone(),
+        ErrNotWal           => "err_not_wal".clone(),
+        ErrNoTxn            => "err_no_txn".clone(),
+        ErrInUse            => "err_in_use".clone(),
+        ErrCheckpointMoved  => "err_checkpoint_moved".clone(),
+    }
+}
+
+public fn is_ok(o: &Outcome) -> Bool {
+    match o { OkSnapshot => true, _ => false }
+}

@@ -1,0 +1,74 @@
+// PRAGMA journal_size_limit handler.
+
+module core.database.sqlite.native.journal_size_limit_api.limit;
+
+mount base.{Bool, Int64, Text};
+
+public type LimitMode is
+    | LmUnlimited        // -1
+    | LmTruncate         //  0
+    | LmCap(Int64)       //  > 0
+    ;
+
+public fn mode_name(m: &LimitMode) -> Text {
+    match m {
+        LmUnlimited  => "unlimited".clone(),
+        LmTruncate   => "truncate".clone(),
+        LmCap(_)     => "cap".clone(),
+    }
+}
+
+public fn from_pragma_value(n: Int64) -> LimitMode {
+    if n < (0 as Int64) { return LmUnlimited; }
+    if n == (0 as Int64) { return LmTruncate; }
+    LmCap(n)
+}
+
+public fn to_pragma_value(m: &LimitMode) -> Int64 {
+    match m {
+        LmUnlimited => -1 as Int64,
+        LmTruncate  =>  0 as Int64,
+        LmCap(n)    => n.clone(),
+    }
+}
+
+public fn truncates_after_commit(m: &LimitMode) -> Bool {
+    match m { LmTruncate => true, _ => false }
+}
+
+public fn has_cap(m: &LimitMode) -> Bool {
+    match m { LmCap(_) => true, _ => false }
+}
+
+public fn allows(m: &LimitMode, current_bytes: Int64) -> Bool {
+    match m {
+        LmUnlimited => true,
+        LmTruncate  => current_bytes == (0 as Int64),
+        LmCap(cap)  => current_bytes <= cap.clone(),
+    }
+}
+
+// On commit, decide if we need to truncate / shrink.
+public type PostCommitAction is
+    | PcKeepAsIs
+    | PcTruncateToZero
+    | PcShrinkToCap
+    ;
+
+public fn post_commit_action(m: &LimitMode, current_bytes: Int64) -> PostCommitAction {
+    match m {
+        LmUnlimited => PcKeepAsIs,
+        LmTruncate  => PcTruncateToZero,
+        LmCap(cap)  => if current_bytes > cap.clone() { PcShrinkToCap } else { PcKeepAsIs },
+    }
+}
+
+public fn action_name(a: &PostCommitAction) -> Text {
+    match a {
+        PcKeepAsIs       => "keep".clone(),
+        PcTruncateToZero => "truncate".clone(),
+        PcShrinkToCap    => "shrink".clone(),
+    }
+}
+
+public fn default_value() -> Int64 { -1 as Int64 }
