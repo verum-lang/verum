@@ -1,0 +1,350 @@
+// =============================================================================
+// core/net/h3/streaming.vr — streaming response body primitives
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// Spec:  internal/specs/net-framework.md §6.10 (Phase 4 — streaming)
+//        internal/specs/tls-quic.md (warp stack)
+// RFC:   9114 §4.1 — message framing on a request stream
+//        9114 §6.2.1 — control / request streams
+// =============================================================================
+//
+// The buffered `H3Response` (in `core.net.h3.request`) holds the
+// entire body as `List<Byte>`. That's the right shape for ≤1 MiB
+// JSON / HTML / static assets, but it falls down for:
+//
+//   * Server-Sent Events (`text/event-stream`) — body lifetime is the
+//     subscription lifetime, may be hours long.
+//   * Large file downloads — reading 1 GiB into memory before
+//     emitting any byte is a non-starter.
+//   * Dynamic transcoding — encoder-driven byte stream where the
+//     producer can't know total size up front.
+//   * gRPC server-streaming over Connect-RPC — N response frames
+//     across a single H3 stream.
+//
+// This module adds the *dual* of `H3Response`:
+//
+//   * `H3StreamWriter` — protocol the user implements; produces a
+//     stream of DATA-frame chunks driven by the connection's flow
+//     control window.
+//   * `H3DataSink` — opaque writer the server hands the user; emits
+//     bytes downstream and awaits when the stream-level
+//     `MAX_STREAM_DATA` window closes (RFC 9000 §19.10).
+//   * `H3StreamingResponse` — header section + writer, the value a
+//     streaming handler returns.
+//
+// Backpressure is structural: every `H3DataSink.write` is `async fn`,
+// and the connection flow-control awakens it only when the peer
+// extends the window via `MAX_STREAM_DATA`. There is no implicit
+// buffer between the writer and the wire.
+//
+// Cancellation: if the peer sends `STOP_SENDING` or the connection
+// closes, `H3DataSink.write` returns `Err(H3Error.StreamCancelled)`.
+// The user's writer MUST propagate that — RAII + structured
+// concurrency guarantee no orphan emit task survives the cancel.
+//
+// =============================================================================
+
+module core.net.h3.streaming;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.async.cancellation.{CancellationToken};
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.net.h3.error.{H3Error};
+mount core.net.h3.qpack.decoder.{HeaderField};
+
+// =============================================================================
+// H3DataSink — server-provided writer the user emits chunks into
+// =============================================================================
+//
+// Conceptually a `WriteHalf` over a single H3 stream. Internally,
+// each `write(bytes)` enqueues a DATA frame for emission, awaits the
+// stream-level flow-control window when it closes, and resolves
+// when at least one byte has been accepted by the AEAD-seal path.
+//
+// `finish()` consumes the sink and emits an empty DATA frame with the
+// FIN flag set (RFC 9000 §19.8 STREAM frame, semantically), which
+// the H3 frame layer translates to the trailing-headers block (or
+// just END_STREAM if no trailers).
+//
+// All methods are cancel-safe: a CancellationToken passed at
+// construction wakes any pending await.
+
+public type H3DataSink is {
+    /// The underlying connection's send-buffer cursor for this
+    /// stream — opaque to users; the integration layer constructs
+    /// it during `send_streaming_response`.
+    pending:        Shared<List<Byte>>,
+    /// Per-stream remaining flow-control credit (bytes the peer has
+    /// granted us via `MAX_STREAM_DATA`).
+    credit:         Shared<AtomicInt>,
+    /// Whether the peer signalled cancellation via STOP_SENDING.
+    cancelled:      Shared<AtomicBool>,
+    /// Whether finish() has been called (idempotent).
+    finished:       Shared<AtomicBool>,
+    /// Cancellation token wired from the surrounding handler future.
+    cancel_token:   CancellationToken,
+    /// Strict-monotonic counter of bytes successfully accepted —
+    /// observability of progress.
+    bytes_written:  Shared<AtomicInt>,
+};
+
+implement H3DataSink {
+    /// Construct a fresh sink. The integration layer (h3/connection)
+    /// owns this constructor; user code never instantiates a sink
+    /// directly — sinks are handed to the writer at emission time.
+    public fn new_with_credit(
+        initial_credit: Int,
+        cancel: CancellationToken,
+    ) -> H3DataSink {
+        H3DataSink {
+            pending:       Shared.new([]),
+            credit:        Shared.new(AtomicInt.new(initial_credit)),
+            cancelled:     Shared.new(AtomicBool.new(false)),
+            finished:      Shared.new(AtomicBool.new(false)),
+            cancel_token:  cancel,
+            bytes_written: Shared.new(AtomicInt.new(0)),
+        }
+    }
+
+    /// Emit a chunk. Awaits when the stream's flow-control window
+    /// is closed; resolves once the chunk is accepted into the
+    /// per-stream send buffer (subsequent AEAD-seal happens in the
+    /// connection's tx pump). Returns:
+    ///
+    ///   * `Ok(())` — chunk accepted (may still be in flight).
+    ///   * `Err(H3Error.StreamCancelled)` — peer reset the stream
+    ///     or the surrounding nursery was cancelled.
+    ///   * `Err(H3Error.SendBufferFull)` — connection-level
+    ///     buffer cap exceeded; caller should slow producer.
+    pub async fn write(&mut self, bytes: &[Byte]) -> Result<(), H3Error> {
+        if self.cancelled.load(MemoryOrdering.Acquire) {
+            return Err(H3Error.StreamCancelled);
+        }
+        if self.finished.load(MemoryOrdering.Acquire) {
+            return Err(H3Error.WriteAfterFinish);
+        }
+        let need = bytes.len();
+        // Flow-control credit gate. The integration layer's tx pump
+        // is the producer that bumps `credit` on inbound
+        // MAX_STREAM_DATA; here we await until at least `need` is
+        // available. The await is cancel-safe via the token.
+        loop {
+            if self.cancel_token.is_cancelled() {
+                return Err(H3Error.StreamCancelled);
+            }
+            if self.cancelled.load(MemoryOrdering.Acquire) {
+                return Err(H3Error.StreamCancelled);
+            }
+            let avail = self.credit.load(MemoryOrdering.Acquire);
+            if avail >= need { break; }
+            // Park until window opens or cancellation fires. The
+            // 5ms cadence is the worst-case wakeup; the typical case
+            // is < 1 RTT after MAX_STREAM_DATA arrives.
+            core.async.timer.sleep_ms(5).await;
+        }
+        // Decrement credit + push to the per-stream send queue.
+        let _ = self.credit.fetch_sub(need, MemoryOrdering.AcqRel);
+        let mut p = self.pending.lock();
+        let mut i: Int = 0;
+        while i < bytes.len() { p.push(bytes[i]); i = i + 1; }
+        let _ = self.bytes_written.fetch_add(need, MemoryOrdering.AcqRel);
+        Ok(())
+    }
+
+    /// Convenience: emit a Text chunk as UTF-8 bytes.
+    pub async fn write_text(&mut self, text: &Text) -> Result<(), H3Error> {
+        self.write(text.as_bytes()).await
+    }
+
+    /// Mark the response complete. Idempotent — second call is a
+    /// no-op. The connection's tx pump drains any pending bytes
+    /// then emits an empty FIN-tagged DATA frame.
+    pub async fn finish(self) -> Result<(), H3Error> {
+        if self.finished.swap(true, MemoryOrdering.AcqRel) {
+            return Ok(());
+        }
+        if self.cancelled.load(MemoryOrdering.Acquire) {
+            return Err(H3Error.StreamCancelled);
+        }
+        Ok(())
+    }
+
+    /// Snapshot of bytes successfully accepted so far.
+    public fn bytes_written(&self) -> Int {
+        self.bytes_written.load(MemoryOrdering.Acquire)
+    }
+
+    /// Used by the integration layer to grant additional
+    /// flow-control credit when a MAX_STREAM_DATA frame arrives.
+    public fn grant_credit(&self, additional: Int) {
+        let _ = self.credit.fetch_add(additional, MemoryOrdering.AcqRel);
+    }
+
+    /// Used by the integration layer to mark the stream cancelled
+    /// when STOP_SENDING arrives or the peer connection closes.
+    public fn signal_cancellation(&self) {
+        self.cancelled.store(true, MemoryOrdering.Release);
+    }
+
+    /// Drain pending bytes into a List<Byte> for a single DATA-frame
+    /// emission. Called by the tx pump.
+    public fn drain_pending(&self) -> List<Byte> {
+        let mut p = self.pending.lock();
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < p.len() {
+            out.push(p[i]);
+            i = i + 1;
+        }
+        p.clear();
+        out
+    }
+
+    public fn is_finished(&self) -> Bool {
+        self.finished.load(MemoryOrdering.Acquire)
+    }
+
+    public fn is_cancelled(&self) -> Bool {
+        self.cancelled.load(MemoryOrdering.Acquire)
+    }
+}
+
+// =============================================================================
+// H3StreamWriter — protocol the user implements
+// =============================================================================
+//
+// One method: `write_to(sink)`. The connection drives this once per
+// streaming response; the user emits chunks via the sink, finishes
+// when done, and returns control. The connection then closes the
+// stream cleanly (END_STREAM via the sink's drain).
+//
+// Crucially, structured concurrency: the writer's future runs
+// inside the connection's per-stream nursery. If the connection
+// closes mid-stream, the future is dropped and any owned async
+// resources are reclaimed via Drop semantics — no orphan tasks.
+
+public type H3StreamWriter is protocol {
+    async fn write_to(&mut self, sink: &mut H3DataSink) -> Result<(), H3Error>;
+};
+
+// =============================================================================
+// H3StreamingResponse — header section + writer
+// =============================================================================
+//
+// Mirrors `H3Response` shape but body is replaced by the writer.
+// Trailers are emitted post-writer-finish (RFC 9114 §4.5 supports
+// trailers as a second HEADERS frame after DATA).
+
+public type H3StreamingResponse is {
+    status:    UInt16,
+    headers:   List<HeaderField>,
+    /// User-supplied chunk producer.
+    writer:    Heap<dyn H3StreamWriter>,
+    /// Optional trailing-header section. Empty for the common case.
+    trailers:  List<HeaderField>,
+};
+
+implement H3StreamingResponse {
+    /// 200 OK with caller-provided writer. Common ctor for
+    /// SSE / chunked-transfer scenarios.
+    public fn ok(writer: Heap<dyn H3StreamWriter>) -> H3StreamingResponse {
+        H3StreamingResponse {
+            status:    200_u16,
+            headers:   [],
+            writer:    writer,
+            trailers:  [],
+        }
+    }
+
+    /// Custom status — useful for pre-streaming-error responses
+    /// (e.g. 206 Partial Content).
+    public fn status(code: UInt16, writer: Heap<dyn H3StreamWriter>)
+        -> H3StreamingResponse
+    {
+        H3StreamingResponse {
+            status:    code,
+            headers:   [],
+            writer:    writer,
+            trailers:  [],
+        }
+    }
+
+    public fn with_header(mut self, name: Text, value: Text)
+        -> H3StreamingResponse
+    {
+        self.headers.push(HeaderField { name: name, value: value });
+        self
+    }
+
+    /// Materialise the pseudo-headers + headers list for QPACK
+    /// emission. Same shape as `H3Response.to_field_list` so the
+    /// connection encodes identically.
+    public fn to_field_list(&self) -> List<HeaderField> {
+        let mut out: List<HeaderField> = [];
+        let s = format_status(self.status);
+        out.push(HeaderField { name: f":status", value: s });
+        let mut i: Int = 0;
+        while i < self.headers.len() {
+            out.push(self.headers[i].clone());
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// =============================================================================
+// Status formatter — same as buffered path
+// =============================================================================
+
+fn format_status(code: UInt16) -> Text {
+    let h = (code / 100_u16) as Byte + ('0' as Byte);
+    let t = ((code / 10_u16) % 10_u16) as Byte + ('0' as Byte);
+    let u = (code % 10_u16) as Byte + ('0' as Byte);
+    Text.from_utf8_lossy(&[h, t, u])
+}
+
+// =============================================================================
+// Built-in writer adapters — make common cases trivial
+// =============================================================================
+
+/// Adapter: wrap a `List<Byte>` as a one-shot streaming writer that
+/// emits the whole buffer as a single chunk. Mostly useful for
+/// tests + bridge code that wants to traffic through the streaming
+/// path without owning a real producer.
+public type BytesWriter is {
+    bytes:    List<Byte>,
+    consumed: Bool,
+};
+
+implement BytesWriter {
+    public fn new(bytes: List<Byte>) -> BytesWriter {
+        BytesWriter { bytes: bytes, consumed: false }
+    }
+}
+
+implement H3StreamWriter for BytesWriter {
+    async fn write_to(&mut self, sink: &mut H3DataSink) -> Result<(), H3Error> {
+        if self.consumed { return sink.finish().await; }
+        sink.write(self.bytes.as_slice()).await?;
+        self.consumed = true;
+        Ok(())
+    }
+}
+
+/// Adapter: produce chunks from an iterator-shaped callback.
+/// `next_chunk()` returns `Some(chunk)` while there's more data,
+/// `None` when complete. Useful for transducers / generators.
+public type CallbackWriter<F> is { next_chunk: F };
+
+implement<F: fn() -> Maybe<List<Byte>> + Send> H3StreamWriter for CallbackWriter<F> {
+    async fn write_to(&mut self, sink: &mut H3DataSink) -> Result<(), H3Error> {
+        loop {
+            match (self.next_chunk)() {
+                Some(chunk) => sink.write(chunk.as_slice()).await?,
+                None        => break,
+            }
+        }
+        Ok(())
+    }
+}

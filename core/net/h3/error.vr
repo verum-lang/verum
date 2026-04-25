@@ -51,4 +51,16 @@ public type H3Error is
     | UnexpectedFrame { on_stream_kind: Text, frame_type: UInt64 }
     | MissingSettings
     | SettingsRepeat
-    | ConnectionClosed;
+    | ConnectionClosed
+    /// Streaming-body error — peer sent STOP_SENDING or the
+    /// surrounding nursery was cancelled mid-stream. Writers MUST
+    /// propagate; the connection is responsible for emitting the
+    /// RESET_STREAM that cleans up the half-state.
+    | StreamCancelled
+    /// Streaming-body error — caller invoked write() after finish().
+    /// Indicates a state-machine bug in the user's writer; not
+    /// recoverable without restarting the stream.
+    | WriteAfterFinish
+    /// Streaming-body error — connection-level outbound buffer
+    /// exceeded its bound. Caller should slow producer.
+    | SendBufferFull;

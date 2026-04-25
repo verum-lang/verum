@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, streaming, sse, backpressure, surface, rfc9114
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/h3/streaming.vr` — surface check for the streaming-body
+// primitives that close net-framework.md §6.10 Phase 4 follow-up
+// "Полное стриминг-тело".
+//
+// Validates:
+//
+//   1. H3DataSink ctor + grant_credit + signal_cancellation +
+//      drain_pending shape.
+//   2. H3StreamingResponse builders + with_header chain.
+//   3. BytesWriter adapter implements H3StreamWriter.
+//   4. CallbackWriter adapter implements H3StreamWriter.
+//   5. to_field_list emits :status as the first pseudo-header.
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.async.cancellation.{CancellationToken};
+mount core.net.h3.streaming.{
+    H3DataSink, H3StreamWriter, H3StreamingResponse,
+    BytesWriter, CallbackWriter,
+};
+
+fn sink_construction_and_credit() {
+    let token = CancellationToken.new();
+    let sink = H3DataSink.new_with_credit(4_096, token);
+    assert(sink.bytes_written() == 0);
+    assert(false == sink.is_finished());
+    assert(false == sink.is_cancelled());
+}
+
+fn sink_grant_credit_increases_window() {
+    let token = CancellationToken.new();
+    let sink = H3DataSink.new_with_credit(0, token);
+    sink.grant_credit(8_192);
+    // No public read of credit — the side-effect is observable via
+    // a successful subsequent write at runtime; here we just verify
+    // the call shape compiles.
+}
+
+fn sink_cancellation_is_observable() {
+    let token = CancellationToken.new();
+    let sink = H3DataSink.new_with_credit(1_024, token);
+    sink.signal_cancellation();
+    assert(sink.is_cancelled());
+}
+
+fn streaming_response_ok_status_200() {
+    let writer = Heap(BytesWriter.new([0x48_u8, 0x49_u8])); // "HI"
+    let resp = H3StreamingResponse.ok(writer);
+    assert(resp.status == 200_u16);
+    assert(resp.headers.len() == 0);
+    assert(resp.trailers.len() == 0);
+}
+
+fn streaming_response_custom_status() {
+    let writer = Heap(BytesWriter.new([]));
+    let resp = H3StreamingResponse.status(206_u16, writer);
+    assert(resp.status == 206_u16);
+}
+
+fn streaming_response_with_header_chain() {
+    let writer = Heap(BytesWriter.new([]));
+    let resp = H3StreamingResponse.ok(writer)
+        .with_header(f"content-type",  f"text/event-stream")
+        .with_header(f"cache-control", f"no-cache");
+    assert(resp.headers.len() == 2);
+}
+
+fn streaming_response_field_list_starts_with_status() {
+    let writer = Heap(BytesWriter.new([]));
+    let resp = H3StreamingResponse.ok(writer);
+    let fields = resp.to_field_list();
+    assert(fields.len() == 1);
+    assert(fields[0].name == f":status");
+    assert(fields[0].value == f"200");
+}
+
+fn callback_writer_constructs() {
+    // Just verify the type composes — runtime drive happens through
+    // the connection emit path which isn't typecheck-reachable.
+    let cb = CallbackWriter {
+        next_chunk: || -> Maybe<List<Byte>> { None },
+    };
+    let _writer: Heap<dyn H3StreamWriter> = Heap(cb);
+}
+
+@main
+public fn main() -> Int {
+    sink_construction_and_credit();
+    sink_grant_credit_increases_window();
+    sink_cancellation_is_observable();
+    streaming_response_ok_status_200();
+    streaming_response_custom_status();
+    streaming_response_with_header_chain();
+    streaming_response_field_list_starts_with_status();
+    callback_writer_constructs();
+    print("H3 streaming primitives surface verified");
+    0
+}
