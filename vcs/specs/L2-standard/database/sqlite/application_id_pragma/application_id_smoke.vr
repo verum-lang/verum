@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, application_id_pragma, header
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.application_id_pragma.field.{
+    AppIdBytes,
+    header_offset, field_width, default_value,
+    from_pragma_value, to_pragma_value,
+    to_bytes_be, from_bytes_be,
+    is_unset, ascii_magic_text, looks_printable_ascii,
+};
+mount base.{Bool};
+
+fn test_constants() {
+    assert_eq(header_offset(), 68);
+    assert_eq(field_width(), 4);
+    assert_eq(default_value(), 0);
+}
+
+fn test_pragma_round_trip() {
+    assert_eq(from_pragma_value(0x12345678), 0x12345678);
+    assert_eq(to_pragma_value(0x12345678),   0x12345678);
+}
+
+fn test_byte_round_trip() {
+    let v = 0x53514c69;   // "SQLi"
+    let bs = to_bytes_be(v);
+    assert_eq(bs.b3, 0x53);
+    assert_eq(bs.b2, 0x51);
+    assert_eq(bs.b1, 0x4c);
+    assert_eq(bs.b0, 0x69);
+    assert_eq(from_bytes_be(&bs), v);
+}
+
+fn test_zero_byte_decoding() {
+    let bs = to_bytes_be(0);
+    assert_eq(bs.b3, 0);
+    assert_eq(bs.b2, 0);
+    assert_eq(bs.b1, 0);
+    assert_eq(bs.b0, 0);
+    assert_eq(from_bytes_be(&bs), 0);
+}
+
+fn test_is_unset() {
+    assert(is_unset(0));
+    assert(!is_unset(1));
+}
+
+fn test_ascii_magic_text() {
+    let s = ascii_magic_text(0x53514c69);
+    assert(s == "SQLi".clone());
+}
+
+fn test_looks_printable_ascii() {
+    assert(looks_printable_ascii(0x53514c69));   // "SQLi"
+    assert(!looks_printable_ascii(0x000000FF));  // contains \0
+    assert(!looks_printable_ascii(0x7F000000));  // 0x7F is DEL
+}
+
+fn main() {
+    test_constants();
+    test_pragma_round_trip();
+    test_byte_round_trip();
+    test_zero_byte_decoding();
+    test_is_unset();
+    test_ascii_magic_text();
+    test_looks_printable_ascii();
+}

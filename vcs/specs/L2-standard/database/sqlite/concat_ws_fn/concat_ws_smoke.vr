@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, concat_ws_fn, sql-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.concat_ws_fn.fn_.{
+    Operand, OpNull, OpText,
+    null_operand, text_operand, is_null,
+    Result, RNull, RText,
+    result_is_null, result_text, evaluate,
+    ArityClass, AcInvalid, AcSeparatorOnly, AcVariadic,
+    classify_arity, arity_name, count_non_null,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_null_separator_yields_null() {
+    let mut args = List.new();
+    args.push(text_operand("a".clone()));
+    args.push(text_operand("b".clone()));
+    let r = evaluate(&null_operand(), &args);
+    assert(result_is_null(&r));
+}
+
+fn test_basic_concat() {
+    let mut args = List.new();
+    args.push(text_operand("a".clone()));
+    args.push(text_operand("b".clone()));
+    args.push(text_operand("c".clone()));
+    let r = evaluate(&text_operand(",".clone()), &args);
+    assert(!result_is_null(&r));
+    assert(result_text(&r) == "a,b,c".clone());
+}
+
+fn test_skips_null_operands() {
+    let mut args = List.new();
+    args.push(text_operand("a".clone()));
+    args.push(null_operand());
+    args.push(text_operand("c".clone()));
+    let r = evaluate(&text_operand("-".clone()), &args);
+    assert(result_text(&r) == "a-c".clone());
+}
+
+fn test_all_null_operands_returns_empty() {
+    let mut args = List.new();
+    args.push(null_operand());
+    args.push(null_operand());
+    let r = evaluate(&text_operand(",".clone()), &args);
+    assert(!result_is_null(&r));
+    assert(result_text(&r) == "".clone());
+}
+
+fn test_empty_args_returns_empty() {
+    let args: List<Operand> = List.new();
+    let r = evaluate(&text_operand(",".clone()), &args);
+    assert(!result_is_null(&r));
+    assert(result_text(&r) == "".clone());
+}
+
+fn test_arity_classification() {
+    match classify_arity(0) { AcInvalid       => {}, _ => assert(false) }
+    match classify_arity(1) { AcSeparatorOnly => {}, _ => assert(false) }
+    match classify_arity(2) { AcVariadic      => {}, _ => assert(false) }
+    match classify_arity(5) { AcVariadic      => {}, _ => assert(false) }
+}
+
+fn test_arity_names() {
+    assert(arity_name(&AcInvalid)       == "invalid".clone());
+    assert(arity_name(&AcSeparatorOnly) == "separator_only".clone());
+    assert(arity_name(&AcVariadic)      == "variadic".clone());
+}
+
+fn test_count_non_null() {
+    let mut args = List.new();
+    args.push(text_operand("x".clone()));
+    args.push(null_operand());
+    args.push(text_operand("y".clone()));
+    args.push(null_operand());
+    assert_eq(count_non_null(&args), 2);
+}
+
+fn test_is_null_predicate() {
+    assert(is_null(&null_operand()));
+    assert(!is_null(&text_operand("x".clone())));
+}
+
+fn main() {
+    test_null_separator_yields_null();
+    test_basic_concat();
+    test_skips_null_operands();
+    test_all_null_operands_returns_empty();
+    test_empty_args_returns_empty();
+    test_arity_classification();
+    test_arity_names();
+    test_count_non_null();
+    test_is_null_predicate();
+}

@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, legacy_file_format_pragma, header
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.legacy_file_format_pragma.gate.{
+    Mode, FfModern, FfLegacy,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    write_format_for, read_format_min_for, read_format_max_for,
+    supports_descending_index, is_deprecated,
+};
+mount base.{Bool};
+
+fn test_default_is_modern() {
+    match default_mode() { FfModern => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { FfModern => {}, _ => assert(false) }
+    match from_pragma_value(1) { FfLegacy => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&FfModern), 0);
+    assert_eq(to_pragma_value(&FfLegacy), 1);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&FfModern) == "modern".clone());
+    assert(mode_name(&FfLegacy) == "legacy".clone());
+}
+
+fn test_write_format_for_modes() {
+    assert_eq(write_format_for(&FfModern), 4);
+    assert_eq(write_format_for(&FfLegacy), 1);
+}
+
+fn test_read_format_bounds() {
+    assert_eq(read_format_min_for(&FfModern), 1);
+    assert_eq(read_format_max_for(&FfModern), 4);
+    assert_eq(read_format_min_for(&FfLegacy), 1);
+    assert_eq(read_format_max_for(&FfLegacy), 4);
+}
+
+fn test_descending_index_support() {
+    assert(supports_descending_index(&FfModern));
+    assert(!supports_descending_index(&FfLegacy));
+}
+
+fn test_deprecated_flag() {
+    assert(is_deprecated(&FfModern));
+    assert(is_deprecated(&FfLegacy));
+}
+
+fn main() {
+    test_default_is_modern();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_write_format_for_modes();
+    test_read_format_bounds();
+    test_descending_index_support();
+    test_deprecated_flag();
+}

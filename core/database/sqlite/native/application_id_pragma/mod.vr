@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/application_id_pragma/mod.vr
+// =============================================================================
+// PRAGMA application_id — 32-bit integer at byte 68 of the database header.
+// Application authors register a 4-byte magic with the SQLite project
+// (https://sqlite.org/src/finfo) so file(1) can identify their files.
+// Spec §1.3.
+// =============================================================================
+
+module core.database.sqlite.native.application_id_pragma;
+
+public module field;

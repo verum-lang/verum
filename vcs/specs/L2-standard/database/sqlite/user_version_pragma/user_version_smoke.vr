@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, user_version_pragma, header
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.user_version_pragma.field.{
+    header_offset, field_width, default_value,
+    from_pragma_value, to_pragma_value, is_unset,
+    Compatibility, CmExact, CmNewer, CmOlder,
+    compare, compat_name, matches,
+    MigrationDecision, MdProceed, MdUpgradeRequired, MdRefuseTooNew,
+    decide, decision_name,
+};
+mount base.{Bool};
+
+fn test_constants() {
+    assert_eq(header_offset(), 60);
+    assert_eq(field_width(), 4);
+    assert_eq(default_value(), 0);
+}
+
+fn test_pragma_round_trip() {
+    assert_eq(from_pragma_value(42), 42);
+    assert_eq(to_pragma_value(42), 42);
+}
+
+fn test_is_unset() {
+    assert(is_unset(0));
+    assert(!is_unset(1));
+}
+
+fn test_compare_branches() {
+    match compare(7, 7) { CmExact => {}, _ => assert(false) }
+    match compare(8, 7) { CmNewer => {}, _ => assert(false) }
+    match compare(6, 7) { CmOlder => {}, _ => assert(false) }
+}
+
+fn test_compat_names_and_matches() {
+    assert(compat_name(&CmExact) == "exact".clone());
+    assert(compat_name(&CmNewer) == "newer".clone());
+    assert(compat_name(&CmOlder) == "older".clone());
+    assert(matches(&CmExact));
+    assert(!matches(&CmNewer));
+    assert(!matches(&CmOlder));
+}
+
+fn test_decide_proceed_on_exact() {
+    match decide(7, 7, false) { MdProceed => {}, _ => assert(false) }
+}
+
+fn test_decide_upgrade_on_older() {
+    match decide(5, 7, false) { MdUpgradeRequired => {}, _ => assert(false) }
+    match decide(5, 7, true)  { MdUpgradeRequired => {}, _ => assert(false) }
+}
+
+fn test_decide_refuse_or_proceed_on_newer() {
+    match decide(8, 7, false) { MdRefuseTooNew => {}, _ => assert(false) }
+    match decide(8, 7, true)  { MdProceed      => {}, _ => assert(false) }
+}
+
+fn test_decision_names() {
+    assert(decision_name(&MdProceed)         == "proceed".clone());
+    assert(decision_name(&MdUpgradeRequired) == "upgrade".clone());
+    assert(decision_name(&MdRefuseTooNew)    == "refuse".clone());
+}
+
+fn main() {
+    test_constants();
+    test_pragma_round_trip();
+    test_is_unset();
+    test_compare_branches();
+    test_compat_names_and_matches();
+    test_decide_proceed_on_exact();
+    test_decide_upgrade_on_older();
+    test_decide_refuse_or_proceed_on_newer();
+    test_decision_names();
+}

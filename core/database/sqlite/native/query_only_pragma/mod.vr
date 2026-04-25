@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/query_only_pragma/mod.vr
+// =============================================================================
+// PRAGMA query_only — when ON, all attempted writes return SQLITE_READONLY.
+// SELECTs and read-only PRAGMAs are still allowed.  Default OFF.
+// Spec §15.4.
+// =============================================================================
+
+module core.database.sqlite.native.query_only_pragma;
+
+public module gate;

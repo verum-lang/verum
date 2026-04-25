@@ -1,0 +1,56 @@
+// PRAGMA cell_size_check handler.
+
+module core.database.sqlite.native.cell_size_check_pragma.gate;
+
+mount base.{Bool, Text};
+
+public type Mode is
+    | CcOff      // default
+    | CcOn       // verify on every page load
+    ;
+
+public fn default_mode() -> Mode { CcOff }
+
+public fn from_pragma_value(n: Int) -> Mode {
+    if n == 0 { CcOff } else { CcOn }
+}
+
+public fn to_pragma_value(m: &Mode) -> Int {
+    match m { CcOff => 0, CcOn => 1 }
+}
+
+public fn mode_name(m: &Mode) -> Text {
+    match m { CcOff => "off".clone(), CcOn => "on".clone() }
+}
+
+public fn validates_on_load(m: &Mode) -> Bool {
+    match m { CcOff => false, CcOn => true }
+}
+
+// Outcome of the per-page validation routine.
+public type CheckResult is
+    | CrSkipped              // mode off; engine doesn't run the check
+    | CrWellFormed
+    | CrCorrupt              // SQLITE_CORRUPT
+    ;
+
+public fn validate(m: &Mode, all_cells_well_formed: Bool) -> CheckResult {
+    if !validates_on_load(m) { return CrSkipped; }
+    if all_cells_well_formed { return CrWellFormed; }
+    CrCorrupt
+}
+
+public fn result_name(r: &CheckResult) -> Text {
+    match r {
+        CrSkipped     => "skipped".clone(),
+        CrWellFormed  => "well_formed".clone(),
+        CrCorrupt     => "corrupt".clone(),
+    }
+}
+
+public fn is_corrupt(r: &CheckResult) -> Bool {
+    match r { CrCorrupt => true, _ => false }
+}
+
+// SQLITE_CORRUPT base result code.
+public fn corrupt_code() -> Int { 11 }

@@ -1,0 +1,72 @@
+// string_agg(X, separator) — aggregate accumulator.
+//
+// Step rules:
+//   * NULL X is skipped
+//   * separator from the first non-NULL row "wins" — engine remembers it
+//   * result is NULL only when no rows were aggregated
+
+module core.database.sqlite.native.string_agg_fn.agg;
+
+mount base.{Bool, Text, Maybe};
+
+public type State is {
+    have_value: Bool,
+    out: Text,
+    sep: Text,
+    has_sep: Bool,
+};
+
+public fn empty() -> State {
+    State { have_value: false, out: Text.new(), sep: Text.new(), has_sep: false }
+}
+
+public type Operand is
+    | OpNull
+    | OpText(Text)
+    ;
+
+public fn step(mut s: State, value: &Operand, sep: &Operand) -> State {
+    // NULL value skipped entirely.
+    let v = match value {
+        OpNull    => return s,
+        OpText(t) => t.clone(),
+    };
+    // First non-NULL row's separator wins (and NULL sep counted as "").
+    if !s.has_sep {
+        s.sep = match sep {
+            OpText(t) => t.clone(),
+            OpNull    => "".clone(),
+        };
+        s.has_sep = true;
+    }
+    if s.have_value {
+        s.out = s.out.append(s.sep.clone());
+    }
+    s.out = s.out.append(v);
+    s.have_value = true;
+    s
+}
+
+public type Result is
+    | RNull
+    | RText(Text)
+    ;
+
+public fn finalize(s: &State) -> Result {
+    if !s.have_value { return RNull; }
+    RText(s.out.clone())
+}
+
+public fn result_is_null(r: &Result) -> Bool {
+    match r { RNull => true, _ => false }
+}
+
+public fn result_text(r: &Result) -> Text {
+    match r {
+        RText(t) => t.clone(),
+        RNull    => "".clone(),
+    }
+}
+
+public fn has_any_row(s: &State) -> Bool { s.have_value }
+

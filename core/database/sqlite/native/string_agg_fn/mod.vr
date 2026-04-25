@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/string_agg_fn/mod.vr
+// =============================================================================
+// string_agg(X, separator) — SQL standard aggregate that concatenates non-NULL
+// X values, separating each pair with separator.  Equivalent to group_concat
+// but with reversed argument order.  Both forms supported since 3.44.
+// Spec §15.5 — aggregate functions.
+// =============================================================================
+
+module core.database.sqlite.native.string_agg_fn;
+
+public module agg;

@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, string_agg_fn, sql-aggregates
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.string_agg_fn.agg.{
+    State, empty,
+    Operand, OpNull, OpText,
+    step,
+    Result, RNull, RText,
+    finalize, result_is_null, result_text, has_any_row,
+};
+mount base.{Bool};
+
+fn test_empty_state_finalizes_null() {
+    let s = empty();
+    let r = finalize(&s);
+    assert(result_is_null(&r));
+    assert(!has_any_row(&s));
+}
+
+fn test_single_value_no_separator_appended() {
+    let mut s = empty();
+    s = step(s, &OpText("hello".clone()), &OpText(",".clone()));
+    let r = finalize(&s);
+    assert(!result_is_null(&r));
+    assert(result_text(&r) == "hello".clone());
+    assert(has_any_row(&s));
+}
+
+fn test_two_values_joined_by_separator() {
+    let mut s = empty();
+    s = step(s, &OpText("a".clone()), &OpText(",".clone()));
+    s = step(s, &OpText("b".clone()), &OpText(",".clone()));
+    let r = finalize(&s);
+    assert(result_text(&r) == "a,b".clone());
+}
+
+fn test_null_value_skipped_entirely() {
+    let mut s = empty();
+    s = step(s, &OpText("a".clone()), &OpText(",".clone()));
+    s = step(s, &OpNull,             &OpText(",".clone()));
+    s = step(s, &OpText("c".clone()), &OpText(",".clone()));
+    let r = finalize(&s);
+    assert(result_text(&r) == "a,c".clone());
+}
+
+fn test_all_null_finalizes_null() {
+    let mut s = empty();
+    s = step(s, &OpNull, &OpText(",".clone()));
+    s = step(s, &OpNull, &OpText(",".clone()));
+    let r = finalize(&s);
+    assert(result_is_null(&r));
+}
+
+fn test_first_row_separator_wins() {
+    let mut s = empty();
+    s = step(s, &OpText("a".clone()), &OpText("-".clone()));
+    s = step(s, &OpText("b".clone()), &OpText(",".clone()));   // ignored
+    s = step(s, &OpText("c".clone()), &OpText(";".clone()));   // ignored
+    let r = finalize(&s);
+    assert(result_text(&r) == "a-b-c".clone());
+}
+
+fn test_null_separator_treated_as_empty() {
+    let mut s = empty();
+    s = step(s, &OpText("a".clone()), &OpNull);
+    s = step(s, &OpText("b".clone()), &OpText(",".clone()));
+    let r = finalize(&s);
+    assert(result_text(&r) == "ab".clone());
+}
+
+fn main() {
+    test_empty_state_finalizes_null();
+    test_single_value_no_separator_appended();
+    test_two_values_joined_by_separator();
+    test_null_value_skipped_entirely();
+    test_all_null_finalizes_null();
+    test_first_row_separator_wins();
+    test_null_separator_treated_as_empty();
+}

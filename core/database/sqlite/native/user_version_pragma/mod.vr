@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/user_version_pragma/mod.vr
+// =============================================================================
+// PRAGMA user_version — 32-bit signed integer at byte 60 of the database
+// header, available to applications for their own use (typically schema
+// versioning).  Distinct from sqlite_schema.schema_cookie / data_version.
+// Spec §1.3.
+// =============================================================================
+
+module core.database.sqlite.native.user_version_pragma;
+
+public module field;

@@ -1,0 +1,55 @@
+// PRAGMA application_id — 32-bit header field at offset 68.
+
+module core.database.sqlite.native.application_id_pragma.field;
+
+mount base.{Bool, Text};
+
+// Header offset (in bytes) where the application_id is stored.
+public fn header_offset() -> Int { 68 }
+
+// Width of the field in bytes.
+public fn field_width() -> Int { 4 }
+
+public fn default_value() -> Int { 0 }
+
+public fn from_pragma_value(n: Int) -> Int { n }
+public fn to_pragma_value(v: Int) -> Int { v }
+
+// Big-endian byte projections (offset 68..72 in the header).
+public type AppIdBytes is { b3: Int, b2: Int, b1: Int, b0: Int };
+
+public fn to_bytes_be(v: Int) -> AppIdBytes {
+    AppIdBytes {
+        b3: (v >> 24) & 0xFF,
+        b2: (v >> 16) & 0xFF,
+        b1: (v >>  8) & 0xFF,
+        b0:  v        & 0xFF,
+    }
+}
+
+public fn from_bytes_be(b: &AppIdBytes) -> Int {
+    (b.b3 << 24) | (b.b2 << 16) | (b.b1 << 8) | b.b0
+}
+
+public fn is_unset(v: Int) -> Bool { v == 0 }
+
+// Convention: vendors often use ASCII-printable 4-byte magics, e.g. 0x53514c69
+// = "SQLi".  Render the raw bytes as text.
+public fn ascii_magic_text(v: Int) -> Text {
+    let bs = to_bytes_be(v);
+    let mut s = Text.new();
+    s = s.append_byte(bs.b3);
+    s = s.append_byte(bs.b2);
+    s = s.append_byte(bs.b1);
+    s = s.append_byte(bs.b0);
+    s
+}
+
+public fn looks_printable_ascii(v: Int) -> Bool {
+    let bs = to_bytes_be(v);
+    is_print(bs.b3) && is_print(bs.b2) && is_print(bs.b1) && is_print(bs.b0)
+}
+
+fn is_print(b: Int) -> Bool {
+    b >= 0x20 && b <= 0x7E
+}

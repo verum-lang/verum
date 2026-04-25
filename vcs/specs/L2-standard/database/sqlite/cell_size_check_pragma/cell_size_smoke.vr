@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, cell_size_check_pragma, integrity
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.cell_size_check_pragma.gate.{
+    Mode, CcOff, CcOn,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    validates_on_load,
+    CheckResult, CrSkipped, CrWellFormed, CrCorrupt,
+    validate, result_name, is_corrupt, corrupt_code,
+};
+mount base.{Bool};
+
+fn test_default_is_off() {
+    match default_mode() { CcOff => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { CcOff => {}, _ => assert(false) }
+    match from_pragma_value(1) { CcOn  => {}, _ => assert(false) }
+    match from_pragma_value(7) { CcOn  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&CcOff), 0);
+    assert_eq(to_pragma_value(&CcOn),  1);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&CcOff) == "off".clone());
+    assert(mode_name(&CcOn)  == "on".clone());
+}
+
+fn test_validates_predicate() {
+    assert(!validates_on_load(&CcOff));
+    assert(validates_on_load(&CcOn));
+}
+
+fn test_validate_skipped_when_off() {
+    match validate(&CcOff, true)  { CrSkipped => {}, _ => assert(false) }
+    match validate(&CcOff, false) { CrSkipped => {}, _ => assert(false) }
+}
+
+fn test_validate_when_on() {
+    match validate(&CcOn, true)  { CrWellFormed => {}, _ => assert(false) }
+    match validate(&CcOn, false) { CrCorrupt    => {}, _ => assert(false) }
+}
+
+fn test_result_names_and_corrupt_predicate() {
+    assert(result_name(&CrSkipped)    == "skipped".clone());
+    assert(result_name(&CrWellFormed) == "well_formed".clone());
+    assert(result_name(&CrCorrupt)    == "corrupt".clone());
+    assert(is_corrupt(&CrCorrupt));
+    assert(!is_corrupt(&CrWellFormed));
+    assert(!is_corrupt(&CrSkipped));
+}
+
+fn test_corrupt_code_constant() {
+    assert_eq(corrupt_code(), 11);
+}
+
+fn main() {
+    test_default_is_off();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_validates_predicate();
+    test_validate_skipped_when_off();
+    test_validate_when_on();
+    test_result_names_and_corrupt_predicate();
+    test_corrupt_code_constant();
+}

@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, legacy_alter_table_pragma, alter-table
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.legacy_alter_table_pragma.gate.{
+    Mode, LaModern, LaLegacy,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    rewrites_dependent_objects,
+    RenameBehavior, RbUpdateAllReferences, RbNameOnly,
+    behavior, behavior_name, legacy_warning,
+};
+mount base.{Bool};
+
+fn test_default_is_modern() {
+    match default_mode() { LaModern => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { LaModern => {}, _ => assert(false) }
+    match from_pragma_value(1) { LaLegacy => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&LaModern), 0);
+    assert_eq(to_pragma_value(&LaLegacy), 1);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&LaModern) == "modern".clone());
+    assert(mode_name(&LaLegacy) == "legacy".clone());
+}
+
+fn test_rewrites_dependent_objects() {
+    assert(rewrites_dependent_objects(&LaModern));
+    assert(!rewrites_dependent_objects(&LaLegacy));
+}
+
+fn test_behavior_dispatch() {
+    match behavior(&LaModern) { RbUpdateAllReferences => {}, _ => assert(false) }
+    match behavior(&LaLegacy) { RbNameOnly             => {}, _ => assert(false) }
+}
+
+fn test_behavior_names() {
+    assert(behavior_name(&RbUpdateAllReferences) == "update_refs".clone());
+    assert(behavior_name(&RbNameOnly)             == "name_only".clone());
+}
+
+fn test_legacy_warning_only_in_legacy() {
+    assert(!legacy_warning(&LaModern));
+    assert(legacy_warning(&LaLegacy));
+}
+
+fn main() {
+    test_default_is_modern();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_rewrites_dependent_objects();
+    test_behavior_dispatch();
+    test_behavior_names();
+    test_legacy_warning_only_in_legacy();
+}

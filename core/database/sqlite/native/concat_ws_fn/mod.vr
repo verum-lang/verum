@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/concat_ws_fn/mod.vr
+// =============================================================================
+// concat_ws(separator, X1, X2, ...) — variadic SQL string-concat with separator
+// (3.45+).  NULL separator → NULL result; NULL operands skipped.  Empty after
+// skip-nulls returns "".  Spec §15.5 (built-in scalar functions).
+// =============================================================================
+
+module core.database.sqlite.native.concat_ws_fn;
+
+public module fn_;

@@ -1,0 +1,102 @@
+// concat_ws(sep, X1, X2, ...) — variadic concat with separator (3.45+).
+//
+// Result rules:
+//   * sep is NULL                       -> result is NULL
+//   * all operands NULL                 -> result is "" (empty Text)
+//   * otherwise NULLs in operands skipped, remaining joined by sep
+
+module core.database.sqlite.native.concat_ws_fn.fn_;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+// Tagged operand — Verum doesn't have NULL natively, so we model it.
+public type Operand is
+    | OpNull
+    | OpText(Text)
+    ;
+
+public fn null_operand() -> Operand { OpNull }
+public fn text_operand(t: Text) -> Operand { OpText(t) }
+
+public fn is_null(o: &Operand) -> Bool {
+    match o { OpNull => true, _ => false }
+}
+
+// Result also can be NULL (when separator is NULL).
+public type Result is
+    | RNull
+    | RText(Text)
+    ;
+
+public fn result_is_null(r: &Result) -> Bool {
+    match r { RNull => true, _ => false }
+}
+
+public fn result_text(r: &Result) -> Text {
+    match r {
+        RText(t) => t.clone(),
+        RNull    => "".clone(),
+    }
+}
+
+// Compute concat_ws(sep, args...).
+public fn evaluate(sep: &Operand, args: &List<Operand>) -> Result {
+    match sep {
+        OpNull => return RNull,
+        OpText(_) => {},
+    }
+    let s = match sep {
+        OpText(t) => t.clone(),
+        OpNull    => "".clone(),     // unreachable due to early-return above
+    };
+    let n = args.len() as Int;
+    let mut out = Text.new();
+    let mut i = 0;
+    let mut wrote = false;
+    while i < n {
+        let arg = args.get(i);
+        match &arg {
+            OpNull => {},
+            OpText(t) => {
+                if wrote { out = out.append(s.clone()); }
+                out = out.append(t.clone());
+                wrote = true;
+            },
+        }
+        i = i + 1;
+    }
+    RText(out)
+}
+
+// Argument-count classification.
+public type ArityClass is
+    | AcInvalid          // < 1 (no separator)
+    | AcSeparatorOnly    // exactly 1 (no operands; result "")
+    | AcVariadic         // 2..N
+    ;
+
+public fn classify_arity(n_args: Int) -> ArityClass {
+    if n_args < 1 { return AcInvalid; }
+    if n_args == 1 { return AcSeparatorOnly; }
+    AcVariadic
+}
+
+public fn arity_name(a: &ArityClass) -> Text {
+    match a {
+        AcInvalid       => "invalid".clone(),
+        AcSeparatorOnly => "separator_only".clone(),
+        AcVariadic      => "variadic".clone(),
+    }
+}
+
+public fn count_non_null(args: &List<Operand>) -> Int {
+    let mut i = 0;
+    let mut c = 0;
+    let n = args.len() as Int;
+    while i < n {
+        if !is_null(&args.get(i)) { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}

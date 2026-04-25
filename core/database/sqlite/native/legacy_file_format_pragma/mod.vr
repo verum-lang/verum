@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/legacy_file_format_pragma/mod.vr
+// =============================================================================
+// PRAGMA legacy_file_format — controls whether new databases are written in
+// the format-1 (3.0.0+) or format-4 (3.3.0+) on-disk layout.  format-4
+// supports descending indexes; format-1 is the universal-compat baseline.
+// SQLite 3.35+ deprecated this pragma but still honours it.  Spec §3.0.
+// =============================================================================
+
+module core.database.sqlite.native.legacy_file_format_pragma;
+
+public module gate;

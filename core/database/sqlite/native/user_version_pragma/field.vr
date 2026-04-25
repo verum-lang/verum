@@ -1,0 +1,66 @@
+// PRAGMA user_version — 32-bit signed header field at offset 60.
+
+module core.database.sqlite.native.user_version_pragma.field;
+
+mount base.{Bool, Text};
+
+// Header offset where the user_version is stored.
+public fn header_offset() -> Int { 60 }
+
+public fn field_width() -> Int { 4 }
+
+public fn default_value() -> Int { 0 }
+
+public fn from_pragma_value(n: Int) -> Int { n }
+public fn to_pragma_value(v: Int) -> Int { v }
+
+public fn is_unset(v: Int) -> Bool { v == 0 }
+
+// Common case: monotonic schema-version counter.
+public type Compatibility is
+    | CmExact
+    | CmNewer        // value > expected
+    | CmOlder        // value < expected
+    ;
+
+public fn compare(actual: Int, expected: Int) -> Compatibility {
+    if actual == expected { return CmExact; }
+    if actual > expected  { return CmNewer; }
+    CmOlder
+}
+
+public fn compat_name(c: &Compatibility) -> Text {
+    match c {
+        CmExact => "exact".clone(),
+        CmNewer => "newer".clone(),
+        CmOlder => "older".clone(),
+    }
+}
+
+public fn matches(c: &Compatibility) -> Bool {
+    match c { CmExact => true, _ => false }
+}
+
+// Migration policy decision per actual-vs-expected.
+public type MigrationDecision is
+    | MdProceed              // exact or upgrade-needed; carry on
+    | MdUpgradeRequired      // older than required; run migration
+    | MdRefuseTooNew         // newer than this build supports
+    ;
+
+public fn decide(actual: Int, expected: Int, allow_newer: Bool) -> MigrationDecision {
+    let cmp = compare(actual, expected);
+    match cmp {
+        CmExact => MdProceed,
+        CmOlder => MdUpgradeRequired,
+        CmNewer => if allow_newer { MdProceed } else { MdRefuseTooNew },
+    }
+}
+
+public fn decision_name(d: &MigrationDecision) -> Text {
+    match d {
+        MdProceed         => "proceed".clone(),
+        MdUpgradeRequired => "upgrade".clone(),
+        MdRefuseTooNew    => "refuse".clone(),
+    }
+}

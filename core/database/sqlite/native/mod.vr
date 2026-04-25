@@ -796,3 +796,19 @@ public module automatic_index_pragma;
 public module foreign_keys_pragma;
 // - defer_foreign_keys_pragma: PRAGMA defer_foreign_keys (Immediate/AtCommit) + auto-reset
 public module defer_foreign_keys_pragma;
+// - query_only_pragma: PRAGMA query_only (forbids writes; SQLITE_READONLY)
+public module query_only_pragma;
+// - cell_size_check_pragma: PRAGMA cell_size_check (validate b-tree cells on load)
+public module cell_size_check_pragma;
+// - legacy_alter_table_pragma: PRAGMA legacy_alter_table (modern vs name-only rename)
+public module legacy_alter_table_pragma;
+// - legacy_file_format_pragma: PRAGMA legacy_file_format (format-1 vs format-4 layout)
+public module legacy_file_format_pragma;
+// - application_id_pragma: PRAGMA application_id (32-bit header field at offset 68)
+public module application_id_pragma;
+// - user_version_pragma: PRAGMA user_version (32-bit header field at offset 60 + migration)
+public module user_version_pragma;
+// - concat_ws_fn: concat_ws(sep, X1, ...) (NULL sep -> NULL; NULL operands skipped)
+public module concat_ws_fn;
+// - string_agg_fn: string_agg(X, sep) aggregate (skip-NULL + first-row-sep-wins)
+public module string_agg_fn;

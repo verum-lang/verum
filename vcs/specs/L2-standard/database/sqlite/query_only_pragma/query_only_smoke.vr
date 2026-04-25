@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, query_only_pragma, pragmas
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.query_only_pragma.gate.{
+    Mode, QoOff, QoOn,
+    default_mode, from_pragma_value, to_pragma_value, mode_name,
+    forbids_writes,
+    WriteCheck, WcAllow, WcReadOnlyError,
+    check_write, check_name, allows, readonly_code,
+};
+mount base.{Bool};
+
+fn test_default_is_off() {
+    match default_mode() { QoOff => {}, _ => assert(false) }
+}
+
+fn test_pragma_round_trip() {
+    match from_pragma_value(0) { QoOff => {}, _ => assert(false) }
+    match from_pragma_value(1) { QoOn  => {}, _ => assert(false) }
+    match from_pragma_value(7) { QoOn  => {}, _ => assert(false) }
+    assert_eq(to_pragma_value(&QoOff), 0);
+    assert_eq(to_pragma_value(&QoOn),  1);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&QoOff) == "off".clone());
+    assert(mode_name(&QoOn)  == "on".clone());
+}
+
+fn test_forbids_writes() {
+    assert(!forbids_writes(&QoOff));
+    assert(forbids_writes(&QoOn));
+}
+
+fn test_check_write_routing() {
+    match check_write(&QoOff) { WcAllow         => {}, _ => assert(false) }
+    match check_write(&QoOn)  { WcReadOnlyError => {}, _ => assert(false) }
+}
+
+fn test_check_names_and_allows() {
+    assert(check_name(&WcAllow)         == "allow".clone());
+    assert(check_name(&WcReadOnlyError) == "readonly_error".clone());
+    assert(allows(&WcAllow));
+    assert(!allows(&WcReadOnlyError));
+}
+
+fn test_readonly_code_constant() {
+    assert_eq(readonly_code(), 8);
+}
+
+fn main() {
+    test_default_is_off();
+    test_pragma_round_trip();
+    test_mode_names();
+    test_forbids_writes();
+    test_check_write_routing();
+    test_check_names_and_allows();
+    test_readonly_code_constant();
+}
