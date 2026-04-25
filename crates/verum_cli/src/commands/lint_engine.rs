@@ -378,6 +378,191 @@ pub fn attrs_contain(attrs: &[Attribute], name: &str) -> bool {
     attrs.iter().any(|a| a.name.as_str() == name)
 }
 
+// ===================================================================
+// In-source suppression: @allow / @deny / @warn(rule, reason = "...")
+// ===================================================================
+//
+// Verum-idiomatic call-site control over lint severity. Three
+// attribute names — `@allow`, `@deny`, `@warn` — accept a string-
+// literal rule name plus an optional `reason = "..."` named arg.
+//
+//     @allow("unused-import", reason = "re-export for derive")
+//     @deny("todo-in-code")
+//     @warn("deprecated-syntax")
+//
+// Why string literals: kebab-case rule names (`unused-import`,
+// `cbgr-hotspot`) cannot parse as Verum identifiers — `unused-import`
+// would parse as `unused - import` (subtraction). Strings are also
+// what `[lint.severity]` keys look like, keeping the in-source
+// surface and the manifest surface in lockstep.
+//
+// ===================================================================
+
+/// What an in-source attribute does to the severity of a rule
+/// inside its enclosing item's span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuppressAction {
+    /// Drop the diagnostic entirely (`@allow`).
+    Allow,
+    /// Promote to error (`@deny`).
+    Deny,
+    /// Force severity warn (`@warn`).
+    Warn,
+}
+
+/// A single suppression scope — extracted from one attribute, scoped
+/// to one item's source span.
+#[derive(Debug, Clone)]
+pub struct SuppressionScope {
+    pub rule: String,
+    pub action: SuppressAction,
+    pub reason: Option<String>,
+    /// 1-based inclusive line range covered by this suppression.
+    pub line_start: usize,
+    pub line_end: usize,
+}
+
+/// Walk every item in `module` and collect every `@allow / @deny /
+/// @warn` attribute on it, scoped to that item's source span. Module-
+/// level attributes (in `module.attributes`) cover the whole file.
+pub fn collect_suppressions(module: &Module, source: &str) -> Vec<SuppressionScope> {
+    let mut out = Vec::new();
+
+    // Module-level attributes apply to every line of the file.
+    let last_line = source.lines().count().max(1);
+    extract_from_attrs(&module.attributes, 1, last_line, &mut out);
+
+    // Item-level attributes apply to the item's span.
+    for item in &module.items {
+        let attrs = item_attributes(item);
+        if attrs.is_empty() {
+            continue;
+        }
+        let (start_line, _) = span_to_line_col(source, item.span.start);
+        let (mut end_line, _) = span_to_line_col(source, item.span.end);
+        if end_line < start_line {
+            end_line = start_line;
+        }
+        extract_from_attrs(attrs, start_line, end_line, &mut out);
+    }
+
+    out
+}
+
+/// Apply suppressions to a list of issues. Allow → drop, Deny →
+/// raise to Error, Warn → demote/promote to Warning.
+///
+/// An issue is matched to a suppression iff the issue's `line` is
+/// inside the suppression's [line_start, line_end] inclusive range
+/// AND the suppression's `rule` matches the issue's rule name.
+///
+/// Multiple matching suppressions: most-specific (smallest line span)
+/// wins.
+pub fn apply_suppressions(
+    mut issues: Vec<LintIssue>,
+    scopes: &[SuppressionScope],
+) -> Vec<LintIssue> {
+    issues.retain_mut(|issue| {
+        // Pick the smallest-spanning matching suppression.
+        let mut best: Option<&SuppressionScope> = None;
+        for s in scopes {
+            if s.rule != issue.rule {
+                continue;
+            }
+            if issue.line < s.line_start || issue.line > s.line_end {
+                continue;
+            }
+            let s_size = s.line_end - s.line_start;
+            best = match best {
+                None => Some(s),
+                Some(prev) if prev.line_end - prev.line_start > s_size => Some(s),
+                Some(prev) => Some(prev),
+            };
+        }
+        if let Some(s) = best {
+            match s.action {
+                SuppressAction::Allow => return false, // drop the issue
+                SuppressAction::Deny => issue.level = LintLevel::Error,
+                SuppressAction::Warn => issue.level = LintLevel::Warning,
+            }
+        }
+        true
+    });
+    issues
+}
+
+fn extract_from_attrs(
+    attrs: &[Attribute],
+    line_start: usize,
+    line_end: usize,
+    out: &mut Vec<SuppressionScope>,
+) {
+    use verum_ast::{ExprKind, LiteralKind};
+    for a in attrs {
+        let action = match a.name.as_str() {
+            "allow" => SuppressAction::Allow,
+            "deny" => SuppressAction::Deny,
+            "warn" => SuppressAction::Warn,
+            _ => continue,
+        };
+        let args = match &a.args {
+            verum_common::Maybe::Some(args) => args,
+            _ => continue,
+        };
+        let mut rule_name: Option<String> = None;
+        let mut reason: Option<String> = None;
+        for e in args.iter() {
+            match &e.kind {
+                ExprKind::Literal(lit) => {
+                    if let LiteralKind::Text(s) = &lit.kind {
+                        // StringLit::Display wraps in quotes; we need
+                        // the unquoted content so the rule name
+                        // matches `[lint.severity]` keys exactly.
+                        if rule_name.is_none() {
+                            rule_name = Some(s.as_str().to_string());
+                        }
+                    }
+                }
+                ExprKind::NamedArg { name, value } => {
+                    if name.as_str() == "reason" {
+                        if let ExprKind::Literal(lit) = &value.kind {
+                            if let LiteralKind::Text(s) = &lit.kind {
+                                reason = Some(s.as_str().to_string());
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(rule) = rule_name {
+            out.push(SuppressionScope {
+                rule,
+                action,
+                reason,
+                line_start,
+                line_end,
+            });
+        }
+    }
+}
+
+fn item_attributes(item: &verum_ast::Item) -> &[Attribute] {
+    use verum_ast::ItemKind::*;
+    match &item.kind {
+        Function(f) => f.attributes.as_slice(),
+        Type(t) => t.attributes.as_slice(),
+        Theorem(t) | Lemma(t) | Corollary(t) => t.attributes.as_slice(),
+        Axiom(a) => a.attributes.as_slice(),
+        // Other item kinds (Mount, Const, Static, Protocol, Module,
+        // Pattern, ExternBlock, …) don't carry attribute lists in the
+        // current AST. `@allow`/`@deny`/`@warn` placed on them is
+        // silently ignored — same as on a comment. Add support here
+        // when the corresponding decl gains an `attributes` field.
+        _ => &[],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

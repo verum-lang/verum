@@ -2134,6 +2134,21 @@ fn lint_file(path: &Path) -> Result<List<LintIssue>> {
             for issue in super::lint_engine::run(&ctx) {
                 issues.push(issue);
             }
+
+            // In-source suppression: collect every @allow / @deny /
+            // @warn(rule, reason = "...") attribute on every item, scope
+            // it to the item's source-line span, and apply it to ALL
+            // diagnostics from this file (text-scan + AST). Most-
+            // specific (smallest line range) wins on overlap.
+            let scopes =
+                super::lint_engine::collect_suppressions(&module, &content);
+            if !scopes.is_empty() {
+                let collected: Vec<_> = std::mem::take(&mut issues).into_iter().collect();
+                let suppressed = super::lint_engine::apply_suppressions(collected, &scopes);
+                for i in suppressed {
+                    issues.push(i);
+                }
+            }
         }
     }
 
