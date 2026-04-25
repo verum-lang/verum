@@ -608,6 +608,127 @@ pub fn m_depth(term: &CoreTerm) -> usize {
     }
 }
 
+// =============================================================================
+// VFE-7 V0 — K-Refine-omega ordinal modal-depth
+// =============================================================================
+
+/// Ordinal-valued modal-depth for the K-Refine-omega kernel rule
+/// (Theorem 136.T transfinite stratification).
+///
+/// Encoding: Cantor-normal-form prefix below ε_0, mirroring the
+/// stdlib `core.theory_interop.coord::Ordinal` shape (single source
+/// of truth between kernel and stdlib). The kernel keeps its own
+/// definition because it cannot depend on stdlib at the trust
+/// boundary.
+///
+///   `OrdinalDepth { omega_coeff: 0, finite_offset: n }`  encodes  `n`
+///   `OrdinalDepth { omega_coeff: 1, finite_offset: 0 }`  encodes  `ω`
+///   `OrdinalDepth { omega_coeff: 1, finite_offset: k }`  encodes  `ω + k`
+///   `OrdinalDepth { omega_coeff: n, finite_offset: k }`  encodes  `ω·n + k`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrdinalDepth {
+    /// ω-coefficient (0 ⇒ pure finite; 1 ⇒ ω; ≥ 2 ⇒ ω·n).
+    pub omega_coeff: u32,
+    /// Finite additive remainder.
+    pub finite_offset: u32,
+}
+
+impl OrdinalDepth {
+    /// Pure-finite depth — encoding of a usize.
+    pub const fn finite(n: u32) -> Self {
+        Self { omega_coeff: 0, finite_offset: n }
+    }
+
+    /// `ω`.
+    pub const fn omega() -> Self {
+        Self { omega_coeff: 1, finite_offset: 0 }
+    }
+
+    /// Lex ordering: `(omega_coeff, finite_offset)` lex.
+    pub fn lt(&self, other: &Self) -> bool {
+        if self.omega_coeff < other.omega_coeff { return true; }
+        if self.omega_coeff > other.omega_coeff { return false; }
+        self.finite_offset < other.finite_offset
+    }
+
+    /// `+ 1` — adds one to the finite component (always well-defined
+    /// because we only ever ascend in the finite remainder until V1
+    /// extends to limit-ordinal arithmetic).
+    pub fn succ(&self) -> Self {
+        Self {
+            omega_coeff: self.omega_coeff,
+            finite_offset: self.finite_offset.saturating_add(1),
+        }
+    }
+
+    /// Render as canonical Unicode text.
+    pub fn render(&self) -> String {
+        if self.omega_coeff == 0 {
+            return self.finite_offset.to_string();
+        }
+        let head = if self.omega_coeff == 1 {
+            String::from("ω")
+        } else {
+            format!("ω·{}", self.omega_coeff)
+        };
+        if self.finite_offset == 0 {
+            head
+        } else {
+            format!("{}+{}", head, self.finite_offset)
+        }
+    }
+}
+
+/// VFE-7 V0 — `K-Refine-omega` modal-depth function `md^ω`.
+///
+/// V0 ships a *skeleton* implementation: every term is treated as
+/// having finite modal depth (same value as `m_depth`), wrapped in
+/// an ordinal-valued result. This preserves bit-identical behaviour
+/// with the existing K-Refine rule for all currently-shippable
+/// programs.
+///
+/// V1 will extend the computation to recognise modal operators
+/// (□φ, ◇φ, ⋀_{i<κ} P_i) and compute their ordinal modal-depth via
+/// well-founded ordinal recursion per Lemma 136.L0. After V1 the
+/// rule blocks every modal-paradox witness up to depth κ_2.
+pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
+    OrdinalDepth::finite(m_depth(term) as u32)
+}
+
+/// VFE-7 V0 — `K-Refine-omega` rule entry point.
+///
+/// Verifies the transfinite-stratification invariant
+///
+/// ```text
+///     md^ω(P) < md^ω(A) + 1
+/// ```
+///
+/// for a refinement type `{x : A | P(x)}`. V0 calls `m_depth_omega`
+/// (skeleton) and applies the lex-ordinal `lt` test; V1 will route
+/// modal operators through the full md^ω computation.
+///
+/// Returns `Ok(())` when the invariant holds, otherwise
+/// `KernelError::ModalDepthExceeded` with both ranks rendered as
+/// canonical Unicode text.
+pub fn check_refine_omega(
+    binder: &Text,
+    base: &CoreTerm,
+    predicate: &CoreTerm,
+) -> Result<(), KernelError> {
+    let base_rank = m_depth_omega(base);
+    let pred_rank = m_depth_omega(predicate);
+    let upper = base_rank.succ();
+    if pred_rank.lt(&upper) {
+        Ok(())
+    } else {
+        Err(KernelError::ModalDepthExceeded {
+            binder: binder.clone(),
+            base_rank: Text::from(base_rank.render()),
+            pred_rank: Text::from(pred_rank.render()),
+        })
+    }
+}
+
 /// Auxiliary `m_depth` over [`UniverseLevel`] — extracted so the main
 /// walker stays flat. Mirrors the `Universe` arm's cases.
 fn m_depth_level(level: &UniverseLevel) -> usize {
