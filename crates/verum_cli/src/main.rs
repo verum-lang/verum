@@ -431,6 +431,15 @@ enum Commands {
         /// `RAYON_NUM_THREADS` if set.
         #[clap(long, value_name = "N")]
         threads: Option<usize>,
+        /// Bypass the per-file digest cache. Forces every file to
+        /// re-lint on this run; useful when you suspect the cache
+        /// is stale or you want a clean reproduction of CI output.
+        #[clap(long)]
+        no_cache: bool,
+        /// Wipe the lint cache (`target/lint-cache/`) and exit
+        /// without running any rules.
+        #[clap(long)]
+        clean_cache: bool,
 
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
@@ -1464,9 +1473,14 @@ fn run_command(cli: Cli) -> Result<()> {
             since,
             severity,
             threads,
+            no_cache,
+            clean_cache,
             feature_overrides,
         } => {
             feature_overrides::install(feature_overrides);
+            if clean_cache {
+                return commands::lint::clean_cache();
+            }
             if list_rules {
                 return commands::lint::list_rules();
             }
@@ -1475,6 +1489,15 @@ fn run_command(cli: Cli) -> Result<()> {
             }
             if validate_config {
                 return commands::lint::validate_config();
+            }
+            if no_cache {
+                // SAFETY: env mutation occurs before any worker
+                // thread is spawned by the lint pipeline, so no
+                // other thread can be reading the environment in
+                // parallel.
+                unsafe {
+                    std::env::set_var("VERUM_LINT_NO_CACHE", "1");
+                }
             }
             let fmt = commands::lint::LintOutputFormat::parse(format.as_str())?;
             // Profile selection: explicit --profile flag wins over the
