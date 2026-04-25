@@ -1,0 +1,59 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, native, l1_pager, l0_vfs, end-to-end
+// @timeout: 30000
+// @expected-exit: 0
+//
+// L0 + L1 round-trip: open in-memory pager, write a 4096-byte page
+// of 0xAB, read it back, assert byte-exact.  This is the deepest
+// end-to-end path the VBC interpreter can drive today (L6 facade
+// hits a stdlib-cache compilation bug — see task #143).
+//
+// Spec: sqlite-native.md §6 (L0 VFS) + §7 (L1 Pager).
+
+mount core.database.sqlite.native.l1_pager.{
+    Pager, PageFrame, pager_open_memory, pager_read, pager_write,
+};
+mount collections.List;
+mount base.{Result, Ok, Err};
+
+fn main() {
+    print("step 1: pager_open_memory");
+    let mut pager: Pager = match pager_open_memory() {
+        Ok(p)  => p,
+        Err(_) => { panic("pager_open_memory failed"); return; }
+    };
+
+    print("step 2: build a 4096-byte page of 0xAB");
+    let mut data: List<Byte> = List.new();
+    let mut i = 0;
+    while i < 4096 {
+        data.push(0xAB as Byte);
+        i = i + 1;
+    }
+    let frame = PageFrame { page_no: 1, data: data, dirty: true };
+
+    print("step 3: pager_write(page=1)");
+    match pager_write(&mut pager, &frame) {
+        Ok(_)  => {},
+        Err(_) => { panic("pager_write failed"); return; }
+    };
+
+    print("step 4: pager_read(page=1)");
+    let read_frame = match pager_read(&mut pager, 1) {
+        Ok(f)  => f,
+        Err(_) => { panic("pager_read failed"); return; }
+    };
+
+    print("step 5: assert byte-exact");
+    assert_eq(read_frame.page_no, 1);
+    assert_eq(read_frame.data.len(), 4096);
+    let mut k = 0;
+    while k < 4096 {
+        assert_eq(read_frame.data[k], 0xAB as Byte);
+        k = k + 1;
+    }
+
+    print("L0+L1 round-trip ok");
+}
