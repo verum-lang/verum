@@ -39,6 +39,7 @@ module sys.io_engine;
 // =============================================================================
 
 mount sys.common.{OSError, FileDesc, IOVec};
+mount core.base.coercion.{IntCoercible};
 
 // =============================================================================
 // Core Types with Refinement Constraints
@@ -46,6 +47,10 @@ mount sys.common.{OSError, FileDesc, IOVec};
 
 /// Valid port number (0-65535, with 0 being ephemeral)
 public type Port is UInt16;
+
+// IntCoercible: Port is a UInt16 alias — coerce with Int in arithmetic
+// / comparison contexts (e.g. `port == 0`, `port + 1`).
+implement IntCoercible for Port {}
 
 /// Valid port for explicit binding (non-zero)
 public type BoundPort is Port{> 0};

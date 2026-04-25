@@ -1,4 +1,5 @@
 module sys.darwin.libsystem;
+mount core.base.coercion.{IntCoercible};
 
 // =============================================================================
 // sys/darwin/libsystem.vr - macOS libSystem.B.dylib FFI bindings
@@ -561,6 +562,10 @@ public type PthreadCondAttr is {
 
 /// Mach port type
 public type MachPort is (UInt32);
+
+// IntCoercible: MachPort wraps UInt32 — coerce with Int in
+// arithmetic / comparison contexts.
+implement IntCoercible for MachPort {}
 
 /// timespec structure
 public type Timespec is {

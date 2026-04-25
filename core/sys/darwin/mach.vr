@@ -1,4 +1,5 @@
 module sys.darwin.mach;
+mount core.base.coercion.{IntCoercible};
 
 // =============================================================================
 // sys/darwin/mach.vr - Mach kernel interface for macOS
@@ -317,8 +318,14 @@ public type KernReturn is (Int);
 /// VM address type
 public type VmAddress is (Int);
 
+// IntCoercible: VmAddress / VmSize wrap Int — coerce in arithmetic /
+// comparison contexts (`addr + offset`, `size > 4096`).
+implement IntCoercible for VmAddress {}
+
 /// VM size type
 public type VmSize is (Int);
+
+implement IntCoercible for VmSize {}
 
 /// VM protection type
 public type VmProt is (Int);

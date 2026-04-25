@@ -1,5 +1,7 @@
 module sys.common;
 
+mount core.base.coercion.{IntCoercible};
+
 // =============================================================================
 // common.vr - Common low-level system types
 // =============================================================================
@@ -89,6 +91,10 @@ implement Eq for OSError {
 /// On Unix: int (fd >= 0 valid, -1 invalid)
 /// On Windows: HANDLE (pointer-sized)
 public type FileDesc is (Int);
+
+// IntCoercible: FileDesc is `(Int)` newtype; coerce with Int in
+// comparison contexts (`fd >= 0`, `fd == STDIN`).
+implement IntCoercible for FileDesc {}
 
 implement FileDesc {
     /// Invalid file descriptor constant.
