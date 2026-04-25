@@ -3151,6 +3151,20 @@ pub fn lower_instruction<'ctx>(
         }
 
         // ====================================================================
+        // CubicalExtended: cubical-type-theory primitives (CCHM rules).
+        //
+        // The runtime semantics live in `verum_cubical` (a thin C-ABI
+        // shim around `verum_types::cubical`). At AOT we emit a direct
+        // call into the appropriate `verum_cubical_<op>` extern; the
+        // optimiser is free to fold trivial reductions (`refl`,
+        // `transport(refl, x)`, `hcomp(φ, const, base) → base`) when
+        // the arguments resolve to known cubical normal forms.
+        // ====================================================================
+        Instruction::CubicalExtended { sub_op, dst, args } => {
+            lower_cubical_extended(ctx, *sub_op, *dst, args)
+        }
+
+        // ====================================================================
         // Unsigned Comparison
         // ====================================================================
         Instruction::CmpU { sub_op, dst, a, b } => {
@@ -14160,6 +14174,120 @@ fn lower_log_extended<'ctx>(
             Ok(())
         }
     }
+}
+
+/// Lower CubicalExtended (0xDE) instruction to LLVM IR.
+///
+/// Routes the cubical-type-theory primitive to the corresponding
+/// `verum_cubical_<op>` runtime extern. The runtime is a thin C-ABI
+/// shim around `verum_types::cubical` that performs the CCHM
+/// reduction. Two ops are folded inline:
+///
+///   * `IntervalI0` / `IntervalI1` — load the constant interval
+///     endpoint (0 / 1 stored as i64 sentinel — the runtime reads
+///     them with the same encoding).
+///   * `PathRefl(x)` — at AOT, refl is structurally just λi. x;
+///     a future optimisation pass can elide the runtime call when
+///     downstream consumers only `PathApp` it. For now we delegate
+///     to the runtime so the resulting Path carrier is well-formed
+///     for any consumer (including Transport/Hcomp folding).
+///
+/// Future improvements (#81 follow-up):
+///   * Constant-fold `Transport(refl, x) → x` when the type-path
+///     argument is known statically.
+///   * Constant-fold `Hcomp(φ, const_walls, base) → base`.
+///   * Inline `IntervalMeet/Join/Rev` as bit-and / bit-or / xor-1
+///     when interval values are Booleans, matching the runtime's
+///     semantics for the Bool model of I.
+///
+/// All other sub-ops route through `verum_cubical_<op>`. The runtime
+/// signature is uniform: each takes the args by i64 (Value bits)
+/// and returns an i64 path/equiv/value handle. Variadic args are
+/// passed as a packed pointer for the few ops that take >3 args
+/// (currently only Hcomp at 4 args).
+fn lower_cubical_extended<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    sub_op: u8,
+    dst: verum_vbc::instruction::Reg,
+    args: &[verum_vbc::instruction::Reg],
+) -> Result<()> {
+    let module = ctx.get_module();
+    let i64_ty = ctx.types().i64_type();
+
+    // Inline-fold trivial ops first.
+    match sub_op {
+        // PathRefl 0x00, PathLambda 0x01, PathApp 0x02, PathSym 0x03,
+        // PathTrans 0x04, PathAp 0x05, Transport 0x10, Hcomp 0x11,
+        // IntervalMeet 0x22, IntervalJoin 0x23, IntervalRev 0x24,
+        // Ua 0x30, UaInv 0x31, EquivFwd 0x32, EquivBwd 0x33 — runtime
+        // 0x20 IntervalI0 — constant 0 sentinel for interval start
+        0x20 => {
+            ctx.set_register(dst.0, i64_ty.const_zero().into());
+            return Ok(());
+        }
+        // 0x21 IntervalI1 — constant 1 sentinel for interval end
+        0x21 => {
+            ctx.set_register(dst.0, i64_ty.const_int(1, false).into());
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    // Map sub-op → runtime function name + expected arity.
+    // Arity is informational; we always pass the args we have.
+    let (fn_name, arity): (&str, usize) = match sub_op {
+        0x00 => ("verum_cubical_path_refl",   1),
+        0x01 => ("verum_cubical_path_lambda", 1),
+        0x02 => ("verum_cubical_path_app",    2),
+        0x03 => ("verum_cubical_path_sym",    1),
+        0x04 => ("verum_cubical_path_trans",  2),
+        0x05 => ("verum_cubical_path_ap",     2),
+        0x10 => ("verum_cubical_transport",   2),
+        0x11 => ("verum_cubical_hcomp",       3),
+        0x22 => ("verum_cubical_interval_meet", 2),
+        0x23 => ("verum_cubical_interval_join", 2),
+        0x24 => ("verum_cubical_interval_rev",  1),
+        0x30 => ("verum_cubical_ua",          1),
+        0x31 => ("verum_cubical_ua_inv",      1),
+        0x32 => ("verum_cubical_equiv_fwd",   2),
+        0x33 => ("verum_cubical_equiv_bwd",   2),
+        _ => {
+            ctx.emit_unimplemented_sub_op("CubicalExtended", sub_op);
+            return Ok(());
+        }
+    };
+    let _ = arity; // currently advisory only
+
+    // Materialise each arg as i64 (the runtime sees Value-encoded bits).
+    let mut arg_vals: Vec<verum_llvm::values::BasicMetadataValueEnum<'ctx>> =
+        Vec::with_capacity(args.len());
+    for (i, reg) in args.iter().enumerate() {
+        let raw = ctx.get_register(reg.0)?;
+        let v = as_i64(ctx, raw, &format!("cub_arg{i}"))?;
+        arg_vals.push(v.into());
+    }
+
+    // Build the function type: takes args.len() i64 args, returns i64.
+    let param_tys: Vec<verum_llvm::types::BasicMetadataTypeEnum<'ctx>> =
+        std::iter::repeat(i64_ty.into()).take(args.len()).collect();
+    let fn_ty = i64_ty.fn_type(&param_tys, false);
+
+    let cubical_fn = module
+        .get_function(fn_name)
+        .unwrap_or_else(|| module.add_function(fn_name, fn_ty, None));
+
+    let call_site = ctx
+        .builder()
+        .build_call(cubical_fn, &arg_vals, "cubical_call")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+    if let Some(ret) = call_site.try_as_basic_value().basic() {
+        ctx.set_register(dst.0, ret);
+    } else {
+        ctx.set_register(dst.0, i64_ty.const_zero().into());
+    }
+
+    Ok(())
 }
 
 // ========================================================================
