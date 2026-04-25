@@ -291,6 +291,15 @@ pub struct ModuleRegistry {
     modules: Map<ModuleId, Shared<ModuleInfo>>,
     /// Canonical (cog-name-stripped) module path → ID mapping.
     path_to_id: Map<Text, ModuleId>,
+    /// Path-alias map: when a user writes `mount X.Y.Z` and the
+    /// registry has no module under that exact path, the alias map
+    /// is consulted to translate the path to its canonical form.
+    /// Populated by the loader / pipeline at load time so the
+    /// type-resolver doesn't have to re-derive aliases on every
+    /// lookup. MOD-CRIT-1 — closes the loader/resolver path-dedup
+    /// incoherence by funnelling every path-alias decision through
+    /// one map.
+    path_aliases: Map<Text, Text>,
     /// Next module ID to allocate
     next_id: Shared<std::sync::atomic::AtomicU32>,
     /// Name of the primary cog under compilation. When set, module
@@ -306,9 +315,35 @@ impl ModuleRegistry {
         Self {
             modules: Map::new(),
             path_to_id: Map::new(),
+            path_aliases: Map::new(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(0)),
             cog_name: None,
         }
+    }
+
+    /// Register a path-alias: when callers do `get_by_path_aliased(alias)`
+    /// the registry first probes the canonical path-to-id map, then
+    /// rewrites via this alias map and probes again. The pipeline /
+    /// loader installs the standard set of aliases (`std.foo` →
+    /// `core.foo`, semantic shorthand like `core.memory` →
+    /// `core.base.memory`, platform-specific `core.thread` resolution)
+    /// once at startup so the type-resolver does not re-derive aliases
+    /// per call.
+    ///
+    /// MOD-CRIT-1: this is the funnel point that closes the loader/
+    /// resolver path-dedup incoherence — every alias decision lives in
+    /// one map, owned by the registry, queried by every consumer
+    /// (loader for resolution, type-resolver for import lookup, CLI
+    /// audits for path normalisation).
+    pub fn register_path_alias(&mut self, alias: impl Into<Text>, canonical: impl Into<Text>) {
+        self.path_aliases.insert(alias.into(), canonical.into());
+    }
+
+    /// Read-only access to the alias table. Useful for diagnostics
+    /// (e.g. `verum audit --module-aliases`) and for downstream
+    /// tooling that needs to render the alias chain.
+    pub fn path_aliases(&self) -> &Map<Text, Text> {
+        &self.path_aliases
     }
 
     /// Set the primary cog name (for path canonicalisation on
@@ -420,6 +455,32 @@ impl ModuleRegistry {
         }
     }
 
+    /// Alias-aware variant of [`Self::get_by_path`]. Probes the direct
+    /// canonical path first; on miss, consults the registered
+    /// path_aliases map and probes the canonical translation.
+    ///
+    /// MOD-CRIT-1: the type-resolver's `get_module_with_path_aliases`
+    /// (infer.rs) used to host a hardcoded alias table, creating two
+    /// independent canonical-path maps (loader's `module_path_to_id`
+    /// + resolver's hardcoded aliases). With this method, both
+    /// subsystems route through one alias map — installed by the
+    /// pipeline at startup, queried by every consumer.
+    pub fn get_by_path_aliased(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
+        // 1. Direct lookup with canonical-key normalisation.
+        if let Maybe::Some(m) = self.get_by_path(path) {
+            return Maybe::Some(m);
+        }
+        // 2. Alias map. Two-level lookup (alias → canonical → ModuleInfo)
+        //    rather than recursive — alias chains are forbidden by
+        //    convention so we never need more than one hop.
+        if let Some(canonical) = self.path_aliases.get(&Text::from(path)) {
+            if let Maybe::Some(m) = self.get_by_path(canonical.as_str()) {
+                return Maybe::Some(m);
+            }
+        }
+        Maybe::None
+    }
+
     /// Get all modules
     pub fn all_modules(&self) -> impl Iterator<Item = (&ModuleId, &Shared<ModuleInfo>)> {
         self.modules.iter()
@@ -517,6 +578,7 @@ impl ModuleRegistry {
         Self {
             modules: self.modules.clone(),
             path_to_id: self.path_to_id.clone(),
+            path_aliases: self.path_aliases.clone(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(max_id + 1)),
             cog_name: self.cog_name.clone(),
         }

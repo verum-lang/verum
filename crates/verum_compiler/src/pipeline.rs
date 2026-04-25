@@ -153,6 +153,56 @@ pub fn get_cached_stdlib_registry() -> Option<ModuleRegistry> {
 
 /// Clear all process-level global caches to reclaim memory.
 ///
+/// Install the canonical set of module-path aliases into the registry.
+///
+/// MOD-CRIT-1 (audit): without this, the type-resolver hosted a
+/// hardcoded alias table at `crates/verum_types/src/infer.rs::
+/// get_module_with_path_aliases`, creating an INDEPENDENT canonical-
+/// path map that could drift from the loader's `module_path_to_id`.
+/// All alias decisions now flow through `ModuleRegistry::path_aliases`
+/// — a single source of truth owned by the registry.
+///
+/// The set installed here mirrors the prior hardcoded table: legacy
+/// `std.*` → `core.*` aliases, semantic shorthand (`core.memory` →
+/// `core.base.memory`), platform-specific resolution (`core.thread`
+/// → `core.sys.{darwin,linux,windows}.thread`), and channel-vs-mpsc
+/// dispatch.
+///
+/// User code can register additional aliases via
+/// `ModuleRegistry::register_path_alias(...)` for project-local
+/// overrides; the registry probes user aliases AFTER the canonical
+/// path so this baseline cannot accidentally shadow user choices.
+fn install_canonical_module_aliases(registry: &mut ModuleRegistry) {
+    // Semantic shorthand aliases — let user code address well-known
+    // modules under intuitive short names without having to memorise
+    // their exact submodule path.
+    registry.register_path_alias("core.memory",  "core.base.memory");
+    registry.register_path_alias("core.maybe",   "core.base.maybe");
+    registry.register_path_alias("core.result",  "core.base.result");
+    registry.register_path_alias("core.process", "core.io.process");
+    registry.register_path_alias("core.string",  "core.text.text");
+    registry.register_path_alias("core.text",    "core.text.text");
+    registry.register_path_alias("core.list",    "core.collections.list");
+    registry.register_path_alias("core.map",     "core.collections.map");
+    registry.register_path_alias("core.set",     "core.collections.set");
+    // Channel module alias (tests use core.sync.mpsc but it's
+    // core.async.channel under the canonical layout).
+    registry.register_path_alias("core.sync.mpsc", "core.async.channel");
+    // Platform-dependent thread module: resolve to host platform.
+    let platform_thread: Option<&str> = if cfg!(target_os = "macos") {
+        Some("core.sys.darwin.thread")
+    } else if cfg!(target_os = "linux") {
+        Some("core.sys.linux.thread")
+    } else if cfg!(target_os = "windows") {
+        Some("core.sys.windows.thread")
+    } else {
+        None
+    };
+    if let Some(canonical) = platform_thread {
+        registry.register_path_alias("core.thread", canonical);
+    }
+}
+
 /// Call this between test batches or when memory pressure is high.
 /// The caches will be lazily re-populated on the next compilation.
 pub fn clear_global_caches() {
@@ -801,7 +851,17 @@ impl<'s> CompilationPipeline<'s> {
         );
         // Registry also canonicalises by "core" so its dedupe logic
         // matches the lazy resolver's key.
-        session.module_registry().write().set_cog_name("core");
+        {
+            let registry_handle = session.module_registry();
+            let mut reg = registry_handle.write();
+            reg.set_cog_name("core");
+            // MOD-CRIT-1: install the standard module-path aliases once
+            // at startup so the type-resolver does not re-derive them
+            // per-call. This is the single funnel point for all alias
+            // decisions (loader + resolver + audit CLI all go through
+            // ModuleRegistry::get_by_path_aliased).
+            install_canonical_module_aliases(&mut reg);
+        }
         Self {
             session,
             meta_registry: MetaRegistry::new(),
@@ -870,7 +930,15 @@ impl<'s> CompilationPipeline<'s> {
         // Without this both forms live as distinct entries and
         // ExportTable raises spurious "Conflicting export" warnings.
         module_loader.set_cog_name("core");
-        session.module_registry().write().set_cog_name("core");
+        {
+            let registry_handle = session.module_registry();
+            let mut reg = registry_handle.write();
+            reg.set_cog_name("core");
+            // MOD-CRIT-1: same alias-install as the user-pipeline path
+            // (line ~804). Stdlib bootstrap also benefits from the
+            // shared alias map.
+            install_canonical_module_aliases(&mut reg);
+        }
         let resolver = StdlibModuleResolver::new(&config.stdlib_path);
         // Create a shared lazy resolver for on-demand module loading.
         // For stdlib bootstrap, uses the stdlib path as the root.
