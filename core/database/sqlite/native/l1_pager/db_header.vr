@@ -85,9 +85,9 @@ public fn file_format_from_u8(b: Byte) -> Result<FileFormat, Text> {
     }
 }
 
-public type TextEncoding is Utf8 | Utf16Le | Utf16Be;
+public type DbHeaderTextEncoding is Utf8 | Utf16Le | Utf16Be;
 
-public fn encoding_to_u32(e: TextEncoding) -> UInt32 {
+public fn encoding_to_u32(e: DbHeaderTextEncoding) -> UInt32 {
     match e {
         Utf8    => DB_ENCODING_UTF8,
         Utf16Le => DB_ENCODING_UTF16_LE,
@@ -95,7 +95,7 @@ public fn encoding_to_u32(e: TextEncoding) -> UInt32 {
     }
 }
 
-public fn encoding_from_u32(v: UInt32) -> Result<TextEncoding, Text> {
+public fn encoding_from_u32(v: UInt32) -> Result<DbHeaderTextEncoding, Text> {
     if v == DB_ENCODING_UTF8 {
         Ok(Utf8)
     } else if v == DB_ENCODING_UTF16_LE {
@@ -122,7 +122,7 @@ public type DatabaseHeader is {
     schema_format: UInt32,       // 1..4; 4 = STRICT tables
     default_cache_size: UInt32,
     largest_root_btree_page: UInt32,
-    text_encoding: TextEncoding,
+    text_encoding: DbHeaderTextEncoding,
     user_version: UInt32,
     incremental_vacuum: UInt32,
     application_id: UInt32,

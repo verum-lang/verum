@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.btree_balance_strategy.strategy.{
-    Strategy, BsNoBalance, BsQuick, BsDeeper, BsNonroot,
+    BtreeBalanceStrategy, BsNoBalance, BsQuick, BsDeeper, BsNonroot,
     strategy_name, changes_page_count, changes_tree_height, touches_siblings,
     classify, max_sibling_page_count,
 };

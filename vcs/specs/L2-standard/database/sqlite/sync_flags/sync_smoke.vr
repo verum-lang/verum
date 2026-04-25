@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.sync_flags.{
-    SyncMode, SmNormal, SmFull,
+    FsyncMode, SmNormal, SmFull,
     SyncFlagsPragma,
     SQLITE_SYNC_NORMAL, SQLITE_SYNC_FULL, SQLITE_SYNC_DATAONLY,
     mode_numeric, mode_name, is_full, new_flags, flags_numeric, from_numeric,

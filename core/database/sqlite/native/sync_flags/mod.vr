@@ -21,25 +21,25 @@ public const SQLITE_SYNC_NORMAL: Int   = 0x00002;
 public const SQLITE_SYNC_FULL: Int     = 0x00003;
 public const SQLITE_SYNC_DATAONLY: Int = 0x00010;
 
-public type SyncMode is
+public type FsyncMode is
       SmNormal
     | SmFull;
 
-public fn mode_numeric(m: &SyncMode) -> Int {
+public fn mode_numeric(m: &FsyncMode) -> Int {
     match m {
         SmNormal => SQLITE_SYNC_NORMAL,
         SmFull   => SQLITE_SYNC_FULL,
     }
 }
 
-public fn mode_name(m: &SyncMode) -> Text {
+public fn mode_name(m: &FsyncMode) -> Text {
     match m {
         SmNormal => "NORMAL".clone(),
         SmFull   => "FULL".clone(),
     }
 }
 
-public fn is_full(m: &SyncMode) -> Bool {
+public fn is_full(m: &FsyncMode) -> Bool {
     match m {
         SmFull => true,
         _ => false,
@@ -47,11 +47,11 @@ public fn is_full(m: &SyncMode) -> Bool {
 }
 
 public type SyncFlagsPragma is {
-    mode: SyncMode,
+    mode: FsyncMode,
     data_only: Bool,
 }
 
-public fn new_flags(mode: SyncMode, data_only: Bool) -> SyncFlagsPragma {
+public fn new_flags(mode: FsyncMode, data_only: Bool) -> SyncFlagsPragma {
     SyncFlagsPragma { mode: mode, data_only: data_only }
 }
 

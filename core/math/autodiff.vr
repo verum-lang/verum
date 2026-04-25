@@ -983,7 +983,7 @@ context AutodiffContext {
 public type NodeId is (USize);
 
 // Unique identifier for tensors
-public type TensorId is (USize);
+public type AutodiffTensorId is (USize);
 
 // Operation type enumeration
 public type OpType is
@@ -1030,8 +1030,8 @@ public type JVPRule is (U64);
 public type GraphNode is {
     id: NodeId,
     op: OpType,
-    inputs: List<TensorId>,
-    output: TensorId,
+    inputs: List<AutodiffTensorId>,
+    output: AutodiffTensorId,
     vjp_rule: Maybe<VJPRule>,
     jvp_rule: Maybe<JVPRule>,
 };
@@ -1040,20 +1040,20 @@ public type GraphNode is {
 public type GraphEdge is {
     from: NodeId,
     to: NodeId,
-    tensor_id: TensorId,
+    tensor_id: AutodiffTensorId,
 };
 
 // Checkpoint data for a node
 public type CheckpointData is {
     recompute_from: NodeId,
-    saved_inputs: List<TensorId>,
+    saved_inputs: List<AutodiffTensorId>,
 };
 
 // Memory usage tracker
 public type MemoryTracker is {
     current_usage: USize,
     peak_usage: USize,
-    tensor_sizes: Map<TensorId, USize>,
+    tensor_sizes: Map<AutodiffTensorId, USize>,
 };
 
 implement MemoryTracker {
@@ -1069,13 +1069,13 @@ implement MemoryTracker {
         self.current_usage
     }
 
-    fn record_allocation(&mut self, tensor_id: TensorId, size: USize) {
+    fn record_allocation(&mut self, tensor_id: AutodiffTensorId, size: USize) {
         self.tensor_sizes.insert(tensor_id, size);
         self.current_usage += size;
         self.peak_usage = self.peak_usage.max(self.current_usage);
     }
 
-    fn record_deallocation(&mut self, tensor_id: TensorId) {
+    fn record_deallocation(&mut self, tensor_id: AutodiffTensorId) {
         // Use contains_key + remove to avoid pattern-matching on
         // the return type (which may be USize in lenient single-file
         // mode instead of Maybe<USize>).
@@ -1105,7 +1105,7 @@ implement ComputeGraph {
     }
 
     // Record an operation in the graph
-    fn record_op(&mut self, op: OpType, inputs: &[TensorId], output: TensorId) {
+    fn record_op(&mut self, op: OpType, inputs: &[AutodiffTensorId], output: AutodiffTensorId) {
         let node_id = NodeId(self.nodes.len());
         let node = GraphNode {
             id: node_id,
@@ -1128,7 +1128,7 @@ implement ComputeGraph {
     }
 
     // Find node that produces a tensor
-    fn find_producing_node(&self, tensor_id: TensorId) -> NodeId {
+    fn find_producing_node(&self, tensor_id: AutodiffTensorId) -> NodeId {
         for node in &self.nodes {
             if node.output == tensor_id {
                 return node.id;
@@ -1348,7 +1348,7 @@ public context GradientTape {
 // An autodiff computation is a DAG of tensor operations — exactly a
 // labelled directed acyclic graph where nodes are GraphNode operations
 // and edges are GraphEdge tensor-valued data-flow arrows. Exposing it
-// through `core.math.graph.Edge<NodeId, TensorId>` lets the full graph
+// through `core.math.graph.Edge<NodeId, AutodiffTensorId>` lets the full graph
 // algorithm library (bfs, dfs, reachable, topological_sort) apply
 // directly. Topological sort of the autodiff graph IS the forward
 // evaluation order; reverse-topological sort is the backprop order.
@@ -1356,7 +1356,7 @@ public context GradientTape {
 /// Convert one autodiff GraphEdge to the canonical graph edge shape.
 /// The tensor flowing on the edge becomes the edge label, so graph
 /// algorithms can inspect the data-flow structure.
-public fn autodiff_edge_to_graph_edge(e: GraphEdge) -> core.math.graph.Edge<NodeId, TensorId> {
+public fn autodiff_edge_to_graph_edge(e: GraphEdge) -> core.math.graph.Edge<NodeId, AutodiffTensorId> {
     core.math.graph.Edge {
         src: e.from,
         tgt: e.to,
@@ -1368,8 +1368,8 @@ public fn autodiff_edge_to_graph_edge(e: GraphEdge) -> core.math.graph.Edge<Node
 /// input to `topological_sort` from `core.math.graph`.
 public fn autodiff_edges_as_graph(
     edges: &List<GraphEdge>,
-) -> List<core.math.graph.Edge<NodeId, TensorId>> {
-    let mut out: List<core.math.graph.Edge<NodeId, TensorId>> = [];
+) -> List<core.math.graph.Edge<NodeId, AutodiffTensorId>> {
+    let mut out: List<core.math.graph.Edge<NodeId, AutodiffTensorId>> = [];
     let mut i: Int = 0;
     while i < edges.len() {
         out.push(core.math.graph.Edge {
