@@ -1,0 +1,28 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: modules, header-validation, forward-decl, vuva-mod-med-1
+// @description: VUVA #145 / MOD-MED-1 — module header validation.
+//
+// `module foo;` (forward-decl form) at the top of a file is supposed
+// to be loaded from `<dir>/foo.vr` or `<dir>/foo/mod.vr`. When neither
+// candidate exists, the compiler used to silently accept the
+// declaration; users frequently expected Rust-style "this file IS
+// module foo" semantics and got dangling decls instead.
+//
+// This file declares a forward-decl `module nonexistent_helper;`
+// but does NOT create the corresponding source file. The compiler
+// must emit a `E_MODULE_HEADER_FORWARD_DECL_NO_SOURCE` warning
+// pointing at this line. The build still succeeds — it's a soft
+// failure that signals "your dotted path won't resolve at use sites".
+//
+// We use typecheck-pass (not typecheck-fail) because the header
+// validation is non-blocking; the warning is the diagnostic, not the
+// failure. A separate runner test could verify the warning code is
+// emitted; this VCS file pins the "no-error" half.
+
+module nonexistent_helper;
+
+fn main() {
+    print("dangling-forward-decl");
+}

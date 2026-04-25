@@ -1944,37 +1944,19 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         // Pass 5.5: Register stdlib types with the unifier for coercion support.
-        // Rather than hardcoding type names in Unifier::new(), we register them
-        // here based on which modules are loaded — keeping the unifier stdlib-agnostic.
-        {
-            let unifier = type_checker.unifier_mut();
-            // Tensor family types (implement TensorLike)
-            for name in ["DynTensor", "Tensor", "Vector", "Cotangent", "Tangent"] {
-                unifier.register_tensor_family_type(verum_common::Text::from(name));
-            }
-            // Indexable collection types
-            for name in ["Range", "Slice"] {
-                unifier.register_indexable_type(verum_common::Text::from(name));
-            }
-            // Range-like types
-            unifier.register_range_like_type(verum_common::Text::from("Range"));
-            // Sized numeric types from stdlib (beyond language primitives)
-            for name in ["Duration", "Instant", "Epoch"] {
-                unifier.register_sized_numeric_type(verum_common::Text::from(name));
-            }
-            // Int-coercible stdlib types
-            for name in [
-                "Port", "FileDesc", "MachPort", "VmAddress", "VmSize",
-                "Timespec", "TimeSpec", "ClockId",
-                "MemProt", "MapFlags", "Sockaddr", "Path", "PathBuf",
-                "GPUBuffer", "DeviceRegistry", "ProcessGroup",
-                "Duration", "Instant", "Epoch",
-                "DynTensor", "Tensor", "Vector",
-                "List", "Range", "Slice", "Maybe", "Lazy", "Once",
-            ] {
-                unifier.register_int_coercible_type(verum_common::Text::from(name));
-            }
-        }
+        // Per the architectural rule in `verum_types/src/CLAUDE.md`
+        // ("NEVER hardcode stdlib/core type knowledge in the
+        // compiler"), the hardcoded scaffolding is contained in the
+        // dedicated `stdlib_coercion_registry` module so the violation
+        // lives in one identifiable spot. The follow-up task (#101)
+        // replaces that registry with a protocol-walking pass that
+        // scans loaded modules for `implement IntCoercible / TensorLike
+        // / Indexable / RangeLike for X` blocks. The call site here
+        // stays the same once the body of `register_stdlib_coercions`
+        // gets swapped over.
+        crate::stdlib_coercion_registry::register_stdlib_coercions(
+            type_checker.unifier_mut(),
+        );
 
         // Pass 6: Validate imports
         // Now that all types, functions, and protocols are registered,
@@ -5597,6 +5579,27 @@ impl<'s> CompilationPipeline<'s> {
             filtered_count,
             parse_time.as_millis()
         );
+
+        // VUVA #145 / MOD-MED-1 — validate module headers against
+        // the filesystem. Surfaces dangling forward declarations
+        // (`module foo;` with no source file) and inline-vs-
+        // filesystem overlaps (`module foo { … }` alongside an
+        // existing `foo/` directory). Non-blocking warnings — the
+        // user fixes the dangling decl and re-runs.
+        if let Some(ref file_path) = source.path {
+            let warnings =
+                verum_modules::loader::validate_module_headers_against_filesystem(
+                    file_path,
+                    &module,
+                );
+            for warning in warnings {
+                let diag = DiagnosticBuilder::warning()
+                    .code(warning.code())
+                    .message(warning.message())
+                    .build();
+                self.session.emit_diagnostic(diag);
+            }
+        }
 
         // Record parsing metrics
         self.session.record_phase_metrics("Parsing", parse_time, 0);

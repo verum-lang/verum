@@ -20,6 +20,225 @@ use verum_common::{List, Map, Maybe, Shared, Text};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
+/// VUVA #145 / MOD-MED-1 — header-validation diagnostic.
+///
+/// Two distinct soft-failure modes are surfaced as warnings (build
+/// continues, but the user sees a heads-up so they can fix the
+/// dangling decl):
+///
+/// 1. `ForwardDeclNoSource` — `module foo;` (no body) at the top
+///    level of a file references a submodule `foo` that has no
+///    source file. The forward-decl is structurally valid (Rule 2 /
+///    Rule 4 lookup will retry) but if the user expected Rust-style
+///    "this file IS module foo" semantics, they're getting silent
+///    failure instead.
+///
+/// 2. `InlineFilesystemOverlap` — `module foo { … }` (inline body)
+///    at the top level of a file alongside an existing `<dir>/foo/`
+///    directory. The inline `foo` would shadow filesystem-derived
+///    `foo` submodules; the user almost certainly didn't intend
+///    that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModuleHeaderWarning {
+    /// `module foo;` references a submodule with no source file.
+    ForwardDeclNoSource {
+        /// The .vr file that contained the forward declaration.
+        file: PathBuf,
+        /// Name of the forward-declared submodule.
+        submodule_name: Text,
+        /// Filesystem candidates the loader inspected.
+        candidates: List<PathBuf>,
+        /// Span of the `module foo;` declaration in `file`.
+        span: verum_ast::span::Span,
+    },
+    /// `module foo { … }` declared inline, but a filesystem `foo/`
+    /// directory exists alongside the containing file.
+    InlineFilesystemOverlap {
+        /// The .vr file that contained the inline declaration.
+        file: PathBuf,
+        /// Name of the inline submodule.
+        submodule_name: Text,
+        /// The conflicting directory on disk.
+        conflicting_dir: PathBuf,
+        /// Span of the `module foo { … }` declaration in `file`.
+        span: verum_ast::span::Span,
+    },
+}
+
+impl ModuleHeaderWarning {
+    /// Stable error code for diagnostic emission.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ModuleHeaderWarning::ForwardDeclNoSource { .. } => {
+                "E_MODULE_HEADER_FORWARD_DECL_NO_SOURCE"
+            }
+            ModuleHeaderWarning::InlineFilesystemOverlap { .. } => {
+                "E_MODULE_INLINE_FILESYSTEM_OVERLAP"
+            }
+        }
+    }
+
+    /// Human-readable message.
+    pub fn message(&self) -> String {
+        match self {
+            ModuleHeaderWarning::ForwardDeclNoSource {
+                file,
+                submodule_name,
+                candidates,
+                ..
+            } => {
+                let candidate_paths = candidates
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "module '{}' is forward-declared in '{}' but no source file exists \
+                     (looked at: {}). \
+                     If you meant 'this file IS module {}', remove the forward declaration; \
+                     otherwise create the source file.",
+                    submodule_name.as_str(),
+                    file.display(),
+                    candidate_paths,
+                    submodule_name.as_str(),
+                )
+            }
+            ModuleHeaderWarning::InlineFilesystemOverlap {
+                file,
+                submodule_name,
+                conflicting_dir,
+                ..
+            } => format!(
+                "inline 'module {} {{ … }}' in '{}' shadows the existing \
+                 filesystem directory '{}'. The inline body wins for path \
+                 resolution; sibling files under '{}' will be hidden.",
+                submodule_name.as_str(),
+                file.display(),
+                conflicting_dir.display(),
+                conflicting_dir.display(),
+            ),
+        }
+    }
+
+    /// Span for diagnostic location.
+    pub fn span(&self) -> verum_ast::span::Span {
+        match self {
+            ModuleHeaderWarning::ForwardDeclNoSource { span, .. } => *span,
+            ModuleHeaderWarning::InlineFilesystemOverlap { span, .. } => *span,
+        }
+    }
+}
+
+/// VUVA #145 / MOD-MED-1 — validate module-decl headers in a parsed
+/// AST against the filesystem. Returns one warning per header
+/// inconsistency found; an empty Vec means the file is clean.
+///
+/// This is a pure function so it can be unit-tested independently;
+/// the loader calls it at parse time and the pipeline drains the
+/// list as diagnostics.
+pub fn validate_module_headers_against_filesystem(
+    file_path: &Path,
+    ast: &AstModule,
+) -> Vec<ModuleHeaderWarning> {
+    let mut warnings = Vec::new();
+
+    // Determine the directory siblings of `file_path`. Submodules
+    // live either as `<dir>/<name>.vr` or `<dir>/<name>/mod.vr`.
+    // For `lib.vr` / `main.vr` (root files) the sibling dir is the
+    // file's parent. For `foo/mod.vr` the sibling dir is the parent
+    // of `mod.vr`. For `foo.vr` the sibling dir is the directory of
+    // `foo.vr` plus a `<file_stem>/` subtree (a foo.vr can have a
+    // foo/ adjacent directory holding `foo.bar.vr` etc.).
+    let parent_dir = match file_path.parent() {
+        Some(p) => p.to_path_buf(),
+        None => return warnings,
+    };
+    // The "secondary" sibling dir is `<parent>/<file_stem>` —
+    // applies to non-mod files only.
+    let file_stem = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let is_mod_file = file_stem == "mod";
+    let secondary_dir: Option<PathBuf> = if is_mod_file || file_stem.is_empty() {
+        None
+    } else {
+        Some(parent_dir.join(file_stem))
+    };
+
+    for item in ast.items.iter() {
+        if let verum_ast::ItemKind::Module(module_decl) = &item.kind {
+            let submodule_name: Text =
+                Text::from(module_decl.name.name.as_str());
+            let span = module_decl.span;
+
+            match &module_decl.items {
+                Maybe::None => {
+                    // Forward decl. Check that at least one of the
+                    // expected source files exists.
+                    let mut candidates: List<PathBuf> = List::new();
+                    let primary_file =
+                        parent_dir.join(format!("{}.vr", submodule_name.as_str()));
+                    let primary_mod = parent_dir
+                        .join(submodule_name.as_str())
+                        .join("mod.vr");
+                    candidates.push(primary_file.clone());
+                    candidates.push(primary_mod.clone());
+                    if let Some(sec) = &secondary_dir {
+                        let secondary_file =
+                            sec.join(format!("{}.vr", submodule_name.as_str()));
+                        let secondary_mod = sec
+                            .join(submodule_name.as_str())
+                            .join("mod.vr");
+                        candidates.push(secondary_file);
+                        candidates.push(secondary_mod);
+                    }
+                    let any_exists = candidates.iter().any(|p| p.exists());
+                    if !any_exists {
+                        warnings.push(ModuleHeaderWarning::ForwardDeclNoSource {
+                            file: file_path.to_path_buf(),
+                            submodule_name,
+                            candidates,
+                            span,
+                        });
+                    }
+                }
+                Maybe::Some(_) => {
+                    // Inline body. Check whether a filesystem
+                    // directory of the same name exists adjacent to
+                    // the file — that's the overlap case.
+                    let primary_dir =
+                        parent_dir.join(submodule_name.as_str());
+                    let secondary_dir_opt = secondary_dir
+                        .as_ref()
+                        .map(|s| s.join(submodule_name.as_str()));
+                    let overlapping = if primary_dir.exists() && primary_dir.is_dir() {
+                        Some(primary_dir)
+                    } else if let Some(sec) = secondary_dir_opt {
+                        if sec.exists() && sec.is_dir() {
+                            Some(sec)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(conflicting_dir) = overlapping {
+                        warnings.push(ModuleHeaderWarning::InlineFilesystemOverlap {
+                            file: file_path.to_path_buf(),
+                            submodule_name,
+                            conflicting_dir,
+                            span,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    warnings
+}
+
 /// Source information for a loaded module.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleSource {
@@ -597,13 +816,24 @@ impl ModuleLoader {
         // priority so explicit imports can shadow prelude items.
         self.inject_prelude(&mut ast)?;
 
-        Ok(ModuleInfo::new(
+        // VUVA #145 / MOD-MED-1 — validate top-level `module foo;` /
+        // `module foo { … }` declarations against the filesystem.
+        // Warnings are non-blocking: the pipeline drains them and
+        // emits diagnostics so the user sees dangling forward-decls
+        // and inline-vs-filesystem overlaps without breaking the
+        // build.
+        let header_warnings =
+            validate_module_headers_against_filesystem(&source.file_path, &ast);
+
+        let mut info = ModuleInfo::new(
             module_id,
             module_path,
             ast,
             source.file_id,
             source.source.clone(),
-        ))
+        );
+        info.header_warnings = header_warnings;
+        Ok(info)
     }
 
     /// Filter module items based on @cfg attributes.
