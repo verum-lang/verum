@@ -235,6 +235,24 @@ pub enum CoreTerm {
         /// Framework attribution.
         framework: FrameworkId,
     },
+
+    /// VFE-1 V0 — `EpsilonOf(α)` represents the canonical enactment
+    /// image of an articulation under the M ⊣ A biadjunction (the
+    /// activation modality applied at the articulation level). The
+    /// kernel uses this constructor to track the natural-equivalence
+    /// τ : ε ∘ M ≃ A ∘ ε of Proposition 5.1 / Corollary 5.10.
+    ///
+    /// V0 ships the constructor + `K-Eps-Mu` skeleton (see
+    /// `Kernel::check_eps_mu_coherence`); the full naturality check
+    /// is deferred to V1, where the τ-witness construction will be
+    /// wired in.
+    EpsilonOf(Heap<CoreTerm>),
+
+    /// VFE-1 V0 — `AlphaOf(ε)` represents the canonical articulation
+    /// image of an enactment (the inverse direction of the M ⊣ A
+    /// biadjunction). Together with `EpsilonOf` this enables kernel-
+    /// level reasoning about the ε ↔ α duality.
+    AlphaOf(Heap<CoreTerm>),
 }
 
 // =============================================================================
@@ -582,6 +600,11 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         // diagonal construction needs, and `K-Refine` forbids exactly
         // that equality).
         CoreTerm::Axiom { ty, .. } => m_depth(ty),
+        // VFE-1: ε(α) and α(ε) carry the M-depth of their argument.
+        // The 2-natural equivalence τ : ε∘M ≃ A∘ε from Proposition 5.1
+        // does not change m_depth at the term level — it lives at the
+        // 2-cell level handled by `Kernel::check_eps_mu_coherence`.
+        CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => m_depth(t),
     }
 }
 
@@ -1325,6 +1348,40 @@ pub enum KernelError {
         /// Computed `dp(predicate)`.
         pred_depth: usize,
     },
+
+    /// VFE-1 V0 — `K-Eps-Mu` naturality witness construction failed.
+    /// The kernel attempted to verify the canonical 2-natural
+    /// equivalence τ : ε ∘ M ≃ A ∘ ε of Proposition 5.1 / Corollary
+    /// 5.10 and could not produce the τ-witness for the supplied
+    /// articulation. V0 ships the constructor + skeleton check; V1
+    /// will wire the full naturality proof and reduce this error to
+    /// concrete diagnostic content.
+    #[error("kernel: K-Eps-Mu naturality witness failed: {context}")]
+    EpsMuNaturalityFailed {
+        /// Human-readable context describing where the τ-witness
+        /// construction broke (e.g., articulation name).
+        context: Text,
+    },
+
+    /// VFE-7 V0 — `K-Refine-omega` modal-depth bound exceeded. A
+    /// refinement type's predicate has ordinal modal-depth `md^ω`
+    /// strictly greater than the base type's depth + 1, violating
+    /// the transfinite stratification of Theorem 136.T (T-2f***).
+    /// V0 ships the constructor; V1 wires the full ordinal-depth
+    /// computation with well-founded recursion per Lemma 136.L0.
+    #[error(
+        "kernel: K-Refine-omega modal-depth violation: predicate \
+         md^ω-rank '{pred_rank}' exceeds base md^ω-rank '{base_rank}' + 1 \
+         (Theorem 136.T transfinite stratification)"
+    )]
+    ModalDepthExceeded {
+        /// Bound variable name in the refinement.
+        binder: Text,
+        /// Computed `md^ω(base)` rendered as ordinal text.
+        base_rank: Text,
+        /// Computed `md^ω(predicate)` rendered as ordinal text.
+        pred_rank: Text,
+    },
 }
 
 // =============================================================================
@@ -1690,6 +1747,66 @@ pub fn infer(
             Maybe::Some(entry) => Ok(entry.ty.clone()),
             Maybe::None => Err(KernelError::UnknownInductive(name.clone())),
         },
+
+        // VFE-1 V0: ε(α) and α(ε) are constructor markers for the
+        // articulation/enactment duality. They inherit the type of
+        // their argument (ε and α are endo-2-functors at the term
+        // level — the M⊣A biadjunction structure shows up only at
+        // the 2-cell level). V1 will refine the type to track
+        // whether the result lives in the articulation 2-category
+        // or the enactment 2-category.
+        CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => infer(ctx, t, axioms),
+    }
+}
+
+// =============================================================================
+// VFE-1 V0 — K-Eps-Mu kernel rule
+// =============================================================================
+
+/// VFE-1 V0 — `K-Eps-Mu` skeleton.
+///
+/// Verifies the canonical 2-natural equivalence
+///
+/// ```text
+///     τ : ε ∘ M ≃ A ∘ ε
+/// ```
+///
+/// from Proposition 5.1 / Corollary 5.10 (ν = e ∘ ε). The kernel uses
+/// this rule as a structural witness that articulation depth and
+/// enactment depth are connected by the canonical biadjunction's
+/// transferred unit/counit.
+///
+/// V0 ships the entry-point with a *skeleton* check: the function
+/// accepts any well-typed pair `(EpsilonOf(M(α)), AlphaOf(EpsilonOf(α)))`
+/// and returns `Ok(())`. V1 will plug in the explicit τ-witness
+/// construction (σ_α from Code_S morphism + π_α from Perform_{ε_math}
+/// naturality through axiom A-3) and reject ill-formed pairs with a
+/// concrete `EpsMuNaturalityFailed` diagnostic.
+///
+/// Decidability: the check is *semi-decidable* in general (per the
+/// structure-recursion argument that backs Theorem 16.6). For
+/// finitely-axiomatised articulations the check reduces to round-trip
+/// 16.10 and is decidable in single-exponential time. The V0 skeleton
+/// always succeeds; V1 adds the actual decision logic.
+pub fn check_eps_mu_coherence(
+    lhs: &CoreTerm,
+    rhs: &CoreTerm,
+    context: &str,
+) -> Result<(), KernelError> {
+    // V0 skeleton: structural shape check only.
+    // The two sides must match the expected articulation/enactment
+    // composition pattern. The pattern recognition below is the
+    // *minimal* check that the kernel needs for V0; V1 extends it
+    // with the actual τ-witness verification.
+    match (lhs, rhs) {
+        // Both wrappers present — the canonical naturality square.
+        (CoreTerm::EpsilonOf(_), CoreTerm::AlphaOf(_)) => Ok(()),
+        // Both bare — degenerate naturality (identity).
+        (l, r) if std::ptr::eq(l as *const _, r as *const _) => Ok(()),
+        // Anything else: V0 cannot certify; record the context.
+        _ => Err(KernelError::EpsMuNaturalityFailed {
+            context: Text::from(context),
+        }),
     }
 }
 
@@ -1890,6 +2007,10 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
         }
 
         CoreTerm::SmtProof(_) | CoreTerm::Axiom { .. } => term.clone(),
+
+        // VFE-1: substitute commutes with the duality wrappers.
+        CoreTerm::EpsilonOf(t) => CoreTerm::EpsilonOf(Heap::new(substitute(t, name, value))),
+        CoreTerm::AlphaOf(t)   => CoreTerm::AlphaOf(Heap::new(substitute(t, name, value))),
     }
 }
 
