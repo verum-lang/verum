@@ -161,6 +161,26 @@ pub enum ModuleError {
         span: Option<Span>,
     },
 
+    /// Two filesystem rules both produce a file for the same module path.
+    /// Concrete trigger: a project has BOTH `src/foo.vr` (Rule 2 — file
+    /// form) AND `src/foo/mod.vr` (Rule 4 — directory form); the loader's
+    /// candidate-search returns both, but the module system can only
+    /// admit one. Without this diagnostic the loader picks the
+    /// first-found candidate and silently drops every declaration in
+    /// the loser — the user sees `unbound variable` errors at use-sites
+    /// that look like the module wasn't loaded at all.
+    ///
+    /// Inline-module-block collisions (a file with `module foo { ... }`
+    /// inside it AND a sibling file `src/foo.vr` for the same path)
+    /// surface through the same variant; the message lists every
+    /// existing source so the user knows which to delete.
+    PathCollision {
+        path: ModulePath,
+        winning_path: std::path::PathBuf,
+        losing_paths: List<std::path::PathBuf>,
+        span: Option<Span>,
+    },
+
     /// Invalid module path
     InvalidPath {
         path: Text,
@@ -220,6 +240,7 @@ impl ModuleError {
             ModuleError::PrivateAccess { span, .. } => *span,
             ModuleError::VisibilityViolation { span, .. } => *span,
             ModuleError::ConflictingModule { span, .. } => *span,
+            ModuleError::PathCollision { span, .. } => *span,
             ModuleError::InvalidPath { span, .. } => *span,
             ModuleError::IoError { span, .. } => *span,
             ModuleError::ParseError { span, .. } => *span,
@@ -357,6 +378,7 @@ impl ModuleError {
             ModuleError::PrivateAccess { span: s, .. } => *s = Some(span),
             ModuleError::VisibilityViolation { span: s, .. } => *s = Some(span),
             ModuleError::ConflictingModule { span: s, .. } => *s = Some(span),
+            ModuleError::PathCollision { span: s, .. } => *s = Some(span),
             ModuleError::InvalidPath { span: s, .. } => *s = Some(span),
             ModuleError::IoError { span: s, .. } => *s = Some(span),
             ModuleError::ParseError { span: s, .. } => *s = Some(span),
@@ -491,6 +513,25 @@ impl fmt::Display for ModuleError {
                     f,
                     "Module '{}' conflicts with existing module {}",
                     path, existing_id
+                )
+            }
+            ModuleError::PathCollision {
+                path, winning_path, losing_paths, ..
+            } => {
+                write!(
+                    f,
+                    "module path collision: '{}' resolves to multiple files on disk:\n  using:    {}",
+                    path, winning_path.display(),
+                )?;
+                for p in losing_paths.iter() {
+                    write!(f, "\n  ignoring: {}", p.display())?;
+                }
+                write!(
+                    f,
+                    "\n  hint: pick exactly one of the file form (`<name>.vr`) \
+                     or the directory form (`<name>/mod.vr`); having both makes \
+                     declarations in the loser invisible at use sites and is \
+                     classified as `E_MODULE_PATH_COLLISION` per VUVA §15.5",
                 )
             }
             ModuleError::InvalidPath { path, reason, .. } => {

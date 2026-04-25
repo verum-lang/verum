@@ -321,17 +321,8 @@ impl ModuleLoader {
         }
 
         let candidates = self.find_module_file(module_path)?;
-
-        for candidate in &candidates {
-            if candidate.exists() {
-                return self.load_file(candidate);
-            }
-        }
-
-        Err(ModuleError::module_not_found(
-            module_path.clone(),
-            candidates,
-        ))
+        Self::resolve_unique_candidate(module_path, &candidates)
+            .and_then(|p| self.load_file(&p))
     }
 
     /// Load a module from a specific root directory (used for cross-cog resolution).
@@ -341,17 +332,46 @@ impl ModuleLoader {
         module_path: &ModulePath,
     ) -> ModuleResult<ModuleSource> {
         let candidates = self.find_module_file_in_root(root, module_path)?;
+        Self::resolve_unique_candidate(module_path, &candidates)
+            .and_then(|p| self.load_file(&p))
+    }
 
-        for candidate in &candidates {
-            if candidate.exists() {
-                return self.load_file(candidate);
+    /// Walk every candidate path and return the unique one that exists,
+    /// or surface `E_MODULE_PATH_COLLISION` when more than one exists.
+    ///
+    /// Concrete failure mode this prevents: project ships BOTH
+    /// `src/foo.vr` (Rule 2 — file form) AND `src/foo/mod.vr` (Rule 4 —
+    /// directory form). Without this check the loader silently picks
+    /// the first-found candidate; the user sees `unbound variable`
+    /// errors at use-sites pointing into the loser, with no hint that
+    /// two declarations of the same module exist.
+    fn resolve_unique_candidate(
+        module_path: &ModulePath,
+        candidates: &List<PathBuf>,
+    ) -> ModuleResult<PathBuf> {
+        let existing: Vec<PathBuf> = candidates
+            .iter()
+            .filter(|p| p.exists())
+            .cloned()
+            .collect();
+        match existing.len() {
+            0 => Err(ModuleError::module_not_found(
+                module_path.clone(),
+                candidates.clone(),
+            )),
+            1 => Ok(existing.into_iter().next().unwrap()),
+            _ => {
+                let mut iter = existing.into_iter();
+                let winning_path = iter.next().unwrap();
+                let losing_paths: List<PathBuf> = iter.collect();
+                Err(ModuleError::PathCollision {
+                    path: module_path.clone(),
+                    winning_path,
+                    losing_paths,
+                    span: None,
+                })
             }
         }
-
-        Err(ModuleError::module_not_found(
-            module_path.clone(),
-            candidates,
-        ))
     }
 
     /// Find module file candidates in a specific root directory.

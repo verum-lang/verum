@@ -2594,6 +2594,14 @@ impl<'s> CompilationPipeline<'s> {
 
         // 2. Load all source files
         let mut sources = Map::new();
+        // E_MODULE_PATH_COLLISION detector: track which file produced each
+        // module path. Two filesystem rules (file-form `foo.vr` vs
+        // directory-form `foo/mod.vr`) can both reach the same module
+        // path; the silent-overwrite at `sources.insert(...)` would let
+        // the second file win without warning, leaving the first file's
+        // declarations unreachable.
+        let mut path_to_source: std::collections::BTreeMap<String, PathBuf> =
+            std::collections::BTreeMap::new();
 
         for file_path in &project_files {
             debug!("Loading module: {}", file_path.display());
@@ -2618,6 +2626,23 @@ impl<'s> CompilationPipeline<'s> {
                 // Root mod.vr -> empty string (root module)
                 module_path_str = String::new();
             }
+
+            if let Some(prev) = path_to_source.get(&module_path_str) {
+                eprintln!(
+                    "error<E_MODULE_PATH_COLLISION>: module path '{}' resolves to two source files",
+                    if module_path_str.is_empty() { "<root>" } else { module_path_str.as_str() },
+                );
+                eprintln!("  using:    {}", prev.display());
+                eprintln!("  ignoring: {}", file_path.display());
+                eprintln!(
+                    "  hint: pick exactly one of the file form (`<name>.vr`) \
+                     or the directory form (`<name>/mod.vr`); having both makes \
+                     declarations in the loser invisible at use sites and is \
+                     classified as `E_MODULE_PATH_COLLISION` per VUVA §15.5"
+                );
+                continue;
+            }
+            path_to_source.insert(module_path_str.clone(), file_path.clone());
 
             sources.insert(Text::from(module_path_str), Text::from(source_text));
         }
@@ -3597,6 +3622,16 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Loading {} project module(s)", project_files.len());
 
+        // Track which module_path_str each filesystem source produced so a
+        // subsequent collision (two files mapping to the same module path —
+        // typically `foo.vr` Rule 2 vs `foo/mod.vr` Rule 4) can surface as a
+        // hard diagnostic instead of silently skipping the second loader. The
+        // first source wins; the loser's declarations would otherwise be
+        // unreachable through any `mount` and the user sees `unbound
+        // variable` errors at use sites with no hint about the cause.
+        let mut module_path_to_source: std::collections::BTreeMap<String, PathBuf> =
+            std::collections::BTreeMap::new();
+
         // Parse and register each project module
         for file_path in &project_files {
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
@@ -3622,6 +3657,30 @@ impl<'s> CompilationPipeline<'s> {
                 }
                 Text::from(parts.join("."))
             };
+
+            // Detect E_MODULE_PATH_COLLISION: two files reach the same
+            // dotted module path. The most-common shape is `foo.vr` (Rule 2,
+            // file form) AND `foo/mod.vr` (Rule 4, directory form) both
+            // declaring module `<project>.foo`.  Surface this as a hard
+            // diagnostic with both sources cited, and skip the loser so the
+            // rest of the project can keep building (the user gets a
+            // clear actionable message instead of silent loss).
+            if let Some(prev_source) = module_path_to_source.get(module_path_str.as_str()) {
+                eprintln!(
+                    "error<E_MODULE_PATH_COLLISION>: module path '{}' resolves to two source files",
+                    module_path_str.as_str(),
+                );
+                eprintln!("  using:    {}", prev_source.display());
+                eprintln!("  ignoring: {}", file_path.display());
+                eprintln!(
+                    "  hint: pick exactly one of the file form (`<name>.vr`) \
+                     or the directory form (`<name>/mod.vr`); having both makes \
+                     declarations in the loser invisible at use sites and is \
+                     classified as `E_MODULE_PATH_COLLISION` per VUVA §15.5"
+                );
+                continue;
+            }
+            module_path_to_source.insert(module_path_str.as_str().to_string(), file_path.clone());
 
             if self.modules.contains_key(&module_path_str) {
                 continue;
