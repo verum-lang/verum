@@ -1326,17 +1326,17 @@ public fn trivial_enriched() -> TrivialEnriched {
 }
 
 // =============================================================================
-// 2.21. MaximalSieve / DiscreteTopology — concrete ∞-topos data
+// 2.21. ToposExampleMaximalSieve / DiscreteTopology — concrete ∞-topos data
 // =============================================================================
 
 /// The **maximal sieve** on an ∞-category: contains every morphism.
 /// Trivially closed under precomposition. Concrete acid test for the
 /// `Sieve<C>` protocol.
-public type MaximalSieve is {
+public type ToposExampleMaximalSieve is {
     marker: Int,
 };
 
-implement Sieve<IntegerPathCategory> for MaximalSieve {
+implement Sieve<IntegerPathCategory> for ToposExampleMaximalSieve {
     fn contains(f: &Int) -> Bool {
         true
     }
@@ -1389,8 +1389,8 @@ implement Site<IntegerPathCategory> for TrivialSite {
 }
 
 /// Smart constructor for the maximal sieve.
-public fn maximal_sieve() -> MaximalSieve {
-    MaximalSieve { marker: 0 }
+public fn maximal_sieve() -> ToposExampleMaximalSieve {
+    ToposExampleMaximalSieve { marker: 0 }
 }
 
 /// Smart constructor for the discrete topology.

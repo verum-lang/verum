@@ -27,15 +27,15 @@ mount core.database.sqlite.native.fts5.segment.{
 mount core.database.sqlite.native.fts5.index.{InvertedIndex};
 
 // -----------------------------------------------------------------------------
-// MergeAction
+// Fts5MergeAction
 // -----------------------------------------------------------------------------
 
-public type MergeAction is
+public type Fts5MergeAction is
       MaIdle
     | MaCompactLevel(SegmentLevel)
     | MaFlushBuffer;
 
-public fn action_kind_name(a: &MergeAction) -> Text {
+public fn action_kind_name(a: &Fts5MergeAction) -> Text {
     match a {
         MaIdle                 => "idle".clone(),
         MaCompactLevel(_)      => "compact".clone(),
@@ -59,7 +59,7 @@ public fn default_policy() -> MergePolicy {
 }
 
 /// Return the next compaction action based on current index state.
-public fn decide(policy: &MergePolicy, idx: &InvertedIndex) -> MergeAction {
+public fn decide(policy: &MergePolicy, idx: &InvertedIndex) -> Fts5MergeAction {
     if idx.buffer_size() >= policy.flush_threshold {
         return MaFlushBuffer;
     }

@@ -19,17 +19,17 @@ mount base.{Text, Bool, Maybe};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// SpanKind
+// ObservabilitySpanKind
 // -----------------------------------------------------------------------------
 
-public type SpanKind is
+public type ObservabilitySpanKind is
       SkInternal       // pure-internal step (parser, planner, codegen)
     | SkClient         // outbound to external service
     | SkServer         // serving an inbound request
     | SkProducer       // emitting onto a queue / WAL
     | SkConsumer;      // pulling from a queue / WAL
 
-public fn span_kind_name(k: &SpanKind) -> Text {
+public fn span_kind_name(k: &ObservabilitySpanKind) -> Text {
     match k {
         SkInternal => "internal".clone(),
         SkClient   => "client".clone(),
@@ -40,12 +40,12 @@ public fn span_kind_name(k: &SpanKind) -> Text {
 }
 
 // -----------------------------------------------------------------------------
-// SpanStatus
+// ObservabilitySpanStatus
 // -----------------------------------------------------------------------------
 
-public type SpanStatus is SsUnset | SsOk | SsError(Text);
+public type ObservabilitySpanStatus is SsUnset | SsOk | SsError(Text);
 
-public fn span_status_name(s: &SpanStatus) -> Text {
+public fn span_status_name(s: &ObservabilitySpanStatus) -> Text {
     match s {
         SsUnset    => "unset".clone(),
         SsOk       => "ok".clone(),
@@ -110,16 +110,16 @@ public fn attr_int(key: Text, value: Int64) -> SpanAttribute {
 
 public type TracingSpan is {
     name: Text,
-    kind: SpanKind,
+    kind: ObservabilitySpanKind,
     span_id: Int64,
     parent_span_id: Int64,
     started_ns: Int64,
     ended_ns: Int64,
-    status: SpanStatus,
+    status: ObservabilitySpanStatus,
     attributes: List<SpanAttribute>,
 }
 
-public fn span_start(name: Text, kind: SpanKind, ctx: &TraceCtx, span_id: Int64, now_ns: Int64) -> TracingSpan {
+public fn span_start(name: Text, kind: ObservabilitySpanKind, ctx: &TraceCtx, span_id: Int64, now_ns: Int64) -> TracingSpan {
     TracingSpan {
         name: name,
         kind: kind,
@@ -205,7 +205,7 @@ fn clone_span(s: &TracingSpan) -> TracingSpan {
     }
 }
 
-fn clone_kind(k: &SpanKind) -> SpanKind {
+fn clone_kind(k: &ObservabilitySpanKind) -> ObservabilitySpanKind {
     match k {
         SkInternal => SkInternal,
         SkClient   => SkClient,
@@ -215,7 +215,7 @@ fn clone_kind(k: &SpanKind) -> SpanKind {
     }
 }
 
-fn clone_status(s: &SpanStatus) -> SpanStatus {
+fn clone_status(s: &ObservabilitySpanStatus) -> ObservabilitySpanStatus {
     match s {
         SsUnset    => SsUnset,
         SsOk       => SsOk,

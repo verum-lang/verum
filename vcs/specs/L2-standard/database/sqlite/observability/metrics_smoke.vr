@@ -24,8 +24,8 @@ mount core.database.sqlite.native.observability.registry.{
     MetricRegistry, registry_new, register_defaults,
 };
 mount core.database.sqlite.native.observability.span.{
-    SpanKind, SkInternal, SkClient, SkServer,
-    SpanStatus, SsUnset, SsOk, SsError,
+    ObservabilitySpanKind, SkInternal, SkClient, SkServer,
+    ObservabilitySpanStatus, SsUnset, SsOk, SsError,
     span_kind_name, span_status_name,
     TraceCtx, trace_ctx_root, trace_ctx_child,
     AttrValue, AvText, AvInt,

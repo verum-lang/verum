@@ -56,16 +56,16 @@ public fn contains_star(c: &ReturningClause) -> Bool {
 
 // Per §17.2.3, RETURNING on a DELETE always observes the pre-image; on
 // INSERT/UPDATE it observes the post-image.
-public type SnapshotView is
+public type ReturningSnapshotView is
     | SvPreImage          // for DELETE
     | SvPostImage         // for INSERT and UPDATE
     ;
 
-public fn snapshot_for_op(is_delete: Bool) -> SnapshotView {
+public fn snapshot_for_op(is_delete: Bool) -> ReturningSnapshotView {
     if is_delete { SvPreImage } else { SvPostImage }
 }
 
-public fn snapshot_name(s: &SnapshotView) -> Text {
+public fn snapshot_name(s: &ReturningSnapshotView) -> Text {
     match s {
         SvPreImage  => "pre_image".clone(),
         SvPostImage => "post_image".clone(),

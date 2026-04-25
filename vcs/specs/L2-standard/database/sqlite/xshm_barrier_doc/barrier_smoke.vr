@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.xshm_barrier_doc.memory_order.{
-    MemoryOrder, MoRelaxed, MoAcquire, MoRelease, MoAcqRel, MoSeqCst,
+    XshmMemoryOrder, MoRelaxed, MoAcquire, MoRelease, MoAcqRel, MoSeqCst,
     order_name,
     xshmbarrier_required_order, is_strong_enough_for_xshmbarrier,
     provides_acquire, provides_release,

@@ -37,7 +37,7 @@ mount core.database.sqlite.native.fts5.segment.{
     Segment, SegmentLevel, L0, L1, L2, level_index,
 };
 mount core.database.sqlite.native.fts5.merger.{
-    MergeAction, MaIdle, MaCompactLevel, MaFlushBuffer,
+    Fts5MergeAction, MaIdle, MaCompactLevel, MaFlushBuffer,
     MergePolicy, default_policy, decide, promote,
 };
 mount core.database.sqlite.native.fts5.query.ast.{

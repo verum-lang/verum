@@ -10,7 +10,7 @@ mount core.database.sqlite.native.returning_clause_shape.output.{
     item_kind, is_star, has_alias,
     ReturningClause,
     empty_clause, push, len, is_empty, contains_star,
-    SnapshotView, SvPreImage, SvPostImage,
+    ReturningSnapshotView, SvPreImage, SvPostImage,
     snapshot_for_op, snapshot_name,
 };
 mount base.{Bool};
