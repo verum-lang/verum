@@ -213,6 +213,12 @@ const LINT_RULES: &[LintRule] = &[
         description: "Refinement bound has no inhabitants (e.g. `it > 100 && it < 50`)",
         category: LintCategory::Verification,
     },
+    LintRule {
+        name: "naming-convention",
+        level: LintLevel::Warning,
+        description: "Identifier doesn't match the project's [lint.naming] convention",
+        category: LintCategory::Style,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
@@ -418,30 +424,49 @@ fn is_verum_file(path: &Path) -> bool {
 /// level = "error"
 /// exclude = ["tests/", "benches/"]
 /// ```
-struct LintConfig {
+pub struct LintConfig {
     /// `extends = "minimal" | "recommended" | "strict" | "relaxed"`.
     /// Applied before all other config. None = no preset (= legacy behaviour;
     /// rule levels come from `LINT_RULES.<rule>.level`).
-    extends: Option<String>,
+    pub extends: Option<String>,
     /// Rules that are completely disabled (no output)
-    disabled: HashSet<String>,
+    pub disabled: HashSet<String>,
     /// Rules promoted to error level
-    denied: HashSet<String>,
+    pub denied: HashSet<String>,
     /// Rules demoted to allow (suppressed)
-    allowed: HashSet<String>,
+    pub allowed: HashSet<String>,
     /// Rules explicitly set to warning level
-    warned: HashSet<String>,
+    pub warned: HashSet<String>,
     /// Per-rule severity map from `[lint.severity]` — most precise
     /// per-rule control. Wins over the disabled/denied/allowed/warned
     /// lists when both reference the same rule.
-    severity_map: HashMap<String, LintLevel>,
+    pub severity_map: HashMap<String, LintLevel>,
+    /// Per-rule typed configuration tables from `[lint.rules.<name>]`.
+    /// Stored as raw `toml::Value` — each rule deserialises its own
+    /// config struct via `cfg.rule_config::<T>("rule-name")`.
+    pub rules: HashMap<String, toml::Value>,
     /// Custom pattern-based lint rules
-    custom_rules: Vec<CustomLintRule>,
+    pub custom_rules: Vec<CustomLintRule>,
+}
+
+impl LintConfig {
+    /// Typed accessor for a rule's `[lint.rules.<name>]` block.
+    /// Returns `None` if the block is absent; an `Err`-shaped Result
+    /// would force every call site to unwrap-or-default for what is
+    /// genuinely "user didn't set this — use defaults" — `None` keeps
+    /// rule code clean.
+    ///
+    /// Each rule documents its own `T` shape in
+    /// `crates/verum_cli/src/commands/lint_engine.rs`.
+    pub fn rule_config<T: serde::de::DeserializeOwned>(&self, rule: &str) -> Option<T> {
+        let v = self.rules.get(rule)?.clone();
+        T::deserialize(v).ok()
+    }
 }
 
 /// A user-defined pattern-based lint rule from [lint.custom].
 #[derive(Debug, Clone)]
-struct CustomLintRule {
+pub struct CustomLintRule {
     /// Rule name (used in diagnostics and disable/deny)
     name: String,
     /// Text pattern to search for (substring match)
@@ -467,6 +492,7 @@ impl Default for LintConfig {
             allowed: HashSet::new(),
             warned: HashSet::new(),
             severity_map: HashMap::new(),
+            rules: HashMap::new(),
             custom_rules: Vec::new(),
         }
     }
@@ -688,6 +714,26 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
         if let Some(v) = lint.get(*key) {
             config.warned.extend(extract_list(v));
         }
+    }
+
+    // [lint.rules.<name>] — per-rule typed configuration tables.
+    // Each rule's block is stored raw as a `toml::Value`; rule code
+    // deserialises its own typed config via `LintConfig::rule_config`.
+    if let Some(Value::Table(rules)) = lint.get("rules") {
+        for (rule_name, val) in rules {
+            // Wrap non-tables (rare) so the rule can still attempt
+            // to deserialize a unit/empty config. In practice every
+            // documented rule expects a Table.
+            config.rules.insert(rule_name.clone(), val.clone());
+        }
+    }
+
+    // [lint.naming] — naming-convention enforcement (Phase B.3).
+    // Stored under the synthetic rule key "naming-convention" so it
+    // travels through the same `cfg.rule_config::<NamingConfig>` path
+    // as every other rule.
+    if let Some(naming) = lint.get("naming") {
+        config.rules.insert("naming-convention".to_string(), naming.clone());
     }
 
     // [lint.severity] — per-rule severity map
@@ -2126,10 +2172,12 @@ fn lint_file(path: &Path) -> Result<List<LintIssue>> {
         let lexer = Lexer::new(&content, fid);
         let parser = VerumParser::new();
         if let Ok(module) = parser.parse_module(lexer, fid) {
+            let cfg = load_full_lint_config();
             let ctx = super::lint_engine::LintCtx {
                 file: path,
                 source: &content,
                 module: &module,
+                config: Some(&cfg),
             };
             for issue in super::lint_engine::run(&ctx) {
                 issues.push(issue);

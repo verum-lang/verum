@@ -40,7 +40,7 @@ use verum_ast::{
     Type, TypeKind,
 };
 
-use super::lint::{LintCategory, LintIssue, LintLevel};
+use super::lint::{LintCategory, LintConfig, LintIssue, LintLevel};
 
 // ===================================================================
 // Public surface
@@ -56,6 +56,11 @@ pub struct LintCtx<'a> {
     pub file: &'a Path,
     pub source: &'a str,
     pub module: &'a Module,
+    /// Resolved config for this run. Passes that need thresholds,
+    /// exemptions, or feature toggles read them via
+    /// `cfg.rule_config::<T>("rule-name")`. None when the run is
+    /// invoked without a project config (single-file mode).
+    pub config: Option<&'a LintConfig>,
 }
 
 /// A lint pass — Verum's equivalent of rustc's `LateLintPass` /
@@ -92,6 +97,7 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
     static PASSES: &[&(dyn LintPass + Sync + 'static)] = &[
         &RedundantRefinementPass,
         &EmptyRefinementBoundPass,
+        &NamingConventionPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
@@ -379,6 +385,241 @@ pub fn attrs_contain(attrs: &[Attribute], name: &str) -> bool {
 }
 
 // ===================================================================
+// Pass: naming-convention
+// ===================================================================
+//
+// Per-construct casing enforcement, configured via `[lint.naming]`:
+//
+//     [lint.naming]
+//     fn        = "snake_case"
+//     type      = "PascalCase"
+//     const     = "SCREAMING_SNAKE_CASE"
+//     variant   = "PascalCase"
+//
+//     [lint.naming.exempt]
+//     fn   = ["__init", "drop_impl"]
+//     type = ["I32", "F64"]
+//
+// Fires per declaration whose identifier doesn't match the
+// corresponding convention. Convention names are validated at
+// config-load time — typos surface at `verum lint --validate-config`.
+// Defaults match Verum's documented style guide
+// (`docs/guides/style-guide.md`).
+//
+// ===================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+struct NamingConfig {
+    #[serde(rename = "fn")]
+    fn_case: String,
+    #[serde(rename = "type")]
+    type_case: String,
+    #[serde(rename = "const")]
+    const_case: String,
+    variant: String,
+    field: String,
+    module: String,
+    generic: String,
+    exempt: NamingExempt,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct NamingExempt {
+    #[serde(rename = "fn")]
+    fn_names: Vec<String>,
+    #[serde(rename = "type")]
+    type_names: Vec<String>,
+    #[serde(rename = "const")]
+    const_names: Vec<String>,
+    variant: Vec<String>,
+    field: Vec<String>,
+    module: Vec<String>,
+    generic: Vec<String>,
+}
+
+impl Default for NamingConfig {
+    fn default() -> Self {
+        Self {
+            fn_case: "snake_case".into(),
+            type_case: "PascalCase".into(),
+            const_case: "SCREAMING_SNAKE_CASE".into(),
+            variant: "PascalCase".into(),
+            field: "snake_case".into(),
+            module: "snake_case".into(),
+            generic: "PascalCase".into(),
+            exempt: NamingExempt::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Casing {
+    SnakeCase,
+    KebabCase,
+    PascalCase,
+    CamelCase,
+    ScreamingSnakeCase,
+    Lowercase,
+    Uppercase,
+}
+
+impl Casing {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "snake_case" => Some(Self::SnakeCase),
+            "kebab-case" => Some(Self::KebabCase),
+            "PascalCase" => Some(Self::PascalCase),
+            "camelCase" => Some(Self::CamelCase),
+            "SCREAMING_SNAKE_CASE" => Some(Self::ScreamingSnakeCase),
+            "lowercase" => Some(Self::Lowercase),
+            "UPPERCASE" => Some(Self::Uppercase),
+            _ => None,
+        }
+    }
+
+    fn matches(self, ident: &str) -> bool {
+        if ident.is_empty() {
+            return true;
+        }
+        match self {
+            Self::SnakeCase => ident
+                .chars()
+                .all(|c| c == '_' || c.is_ascii_lowercase() || c.is_ascii_digit()),
+            Self::KebabCase => ident
+                .chars()
+                .all(|c| c == '-' || c.is_ascii_lowercase() || c.is_ascii_digit()),
+            Self::PascalCase => {
+                let first = ident.chars().next().unwrap();
+                first.is_ascii_uppercase()
+                    && ident.chars().all(|c| c.is_ascii_alphanumeric())
+            }
+            Self::CamelCase => {
+                let first = ident.chars().next().unwrap();
+                first.is_ascii_lowercase()
+                    && ident.chars().all(|c| c.is_ascii_alphanumeric())
+            }
+            Self::ScreamingSnakeCase => ident
+                .chars()
+                .all(|c| c == '_' || c.is_ascii_uppercase() || c.is_ascii_digit()),
+            Self::Lowercase => ident.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+            Self::Uppercase => ident.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::SnakeCase => "snake_case",
+            Self::KebabCase => "kebab-case",
+            Self::PascalCase => "PascalCase",
+            Self::CamelCase => "camelCase",
+            Self::ScreamingSnakeCase => "SCREAMING_SNAKE_CASE",
+            Self::Lowercase => "lowercase",
+            Self::Uppercase => "UPPERCASE",
+        }
+    }
+}
+
+struct NamingConventionPass;
+
+impl LintPass for NamingConventionPass {
+    fn name(&self) -> &'static str { "naming-convention" }
+    fn description(&self) -> &'static str {
+        "Identifier doesn't match the project's [lint.naming] convention"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        // Read config; fall back to defaults if absent.
+        let cfg: NamingConfig = ctx
+            .config
+            .and_then(|c| c.rule_config::<NamingConfig>("naming-convention"))
+            .unwrap_or_default();
+
+        let fn_casing = Casing::parse(&cfg.fn_case).unwrap_or(Casing::SnakeCase);
+        let type_casing = Casing::parse(&cfg.type_case).unwrap_or(Casing::PascalCase);
+        let const_casing = Casing::parse(&cfg.const_case).unwrap_or(Casing::ScreamingSnakeCase);
+
+        let mut issues = Vec::new();
+
+        for item in &ctx.module.items {
+            match &item.kind {
+                ItemKind::Function(f) => {
+                    let name = f.name.as_str();
+                    if cfg.exempt.fn_names.iter().any(|x| x == name) {
+                        continue;
+                    }
+                    if !fn_casing.matches(name) {
+                        let (line, col) = span_to_line_col(ctx.source, item.span.start);
+                        issues.push(LintIssue {
+                            rule: "naming-convention",
+                            level: LintLevel::Warning,
+                            file: ctx.file.to_path_buf(),
+                            line,
+                            column: col,
+                            message: format!(
+                                "fn `{}` doesn't match {} convention",
+                                name, fn_casing.description()
+                            ),
+                            suggestion: None,
+                            fixable: false,
+                        });
+                    }
+                }
+                ItemKind::Type(t) => {
+                    let name = t.name.as_str();
+                    if cfg.exempt.type_names.iter().any(|x| x == name) {
+                        continue;
+                    }
+                    if !type_casing.matches(name) {
+                        let (line, col) = span_to_line_col(ctx.source, item.span.start);
+                        issues.push(LintIssue {
+                            rule: "naming-convention",
+                            level: LintLevel::Warning,
+                            file: ctx.file.to_path_buf(),
+                            line,
+                            column: col,
+                            message: format!(
+                                "type `{}` doesn't match {} convention",
+                                name, type_casing.description()
+                            ),
+                            suggestion: None,
+                            fixable: false,
+                        });
+                    }
+                }
+                ItemKind::Const(c) => {
+                    let name = c.name.as_str();
+                    if cfg.exempt.const_names.iter().any(|x| x == name) {
+                        continue;
+                    }
+                    if !const_casing.matches(name) {
+                        let (line, col) = span_to_line_col(ctx.source, item.span.start);
+                        issues.push(LintIssue {
+                            rule: "naming-convention",
+                            level: LintLevel::Warning,
+                            file: ctx.file.to_path_buf(),
+                            line,
+                            column: col,
+                            message: format!(
+                                "const `{}` doesn't match {} convention",
+                                name, const_casing.description()
+                            ),
+                            suggestion: None,
+                            fixable: false,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        issues
+    }
+}
+
+// ===================================================================
 // In-source suppression: @allow / @deny / @warn(rule, reason = "...")
 // ===================================================================
 //
@@ -581,7 +822,7 @@ mod tests {
         let src = "type Always is Int{ true };\n";
         let module = parse_module(src);
         let path = std::path::PathBuf::from("test.vr");
-        let ctx = LintCtx { file: &path, source: src, module: &module };
+        let ctx = LintCtx { file: &path, source: src, module: &module, config: None };
         let issues = RedundantRefinementPass.check(&ctx);
         assert_eq!(issues.len(), 1, "expected one issue, got {:?}", issues);
         assert_eq!(issues[0].rule, "redundant-refinement");
@@ -592,7 +833,7 @@ mod tests {
         let src = "type Pos is Int{ it > 0 };\n";
         let module = parse_module(src);
         let path = std::path::PathBuf::from("test.vr");
-        let ctx = LintCtx { file: &path, source: src, module: &module };
+        let ctx = LintCtx { file: &path, source: src, module: &module, config: None };
         assert!(RedundantRefinementPass.check(&ctx).is_empty());
     }
 
@@ -601,7 +842,7 @@ mod tests {
         let src = "type Empty is Int{ it > 100 && it < 50 };\n";
         let module = parse_module(src);
         let path = std::path::PathBuf::from("test.vr");
-        let ctx = LintCtx { file: &path, source: src, module: &module };
+        let ctx = LintCtx { file: &path, source: src, module: &module, config: None };
         let issues = EmptyRefinementBoundPass.check(&ctx);
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].rule, "empty-refinement-bound");
