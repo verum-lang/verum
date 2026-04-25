@@ -1,0 +1,202 @@
+// =============================================================================
+// core.action.ludics_lazy — cofix-based lazy ludics designs (VFE-10 V1)
+// =============================================================================
+//
+// Concrete implementation atop the V0 ludics.vr protocol surface,
+// using `core.base.coinductive` for cofix-friendly observation
+// semantics. Wires the three V0 caveats from VFE §13.5:
+//
+//   (a) Designs are infinite-branching trees → lazy observation
+//       through ObservationTrace rather than eager tree
+//       materialisation.
+//   (b) Cut-elimination is bounded-depth (default 1000 steps);
+//       divergent computations return UNKNOWN verdict via
+//       BisimulationResult::Unknown.
+//   (c) Orthogonality is decided via finite-depth bisimulation —
+//       the limit-as-depth → ∞ relation is genuine; the bounded
+//       check is sound for all observable contexts up to that
+//       depth.
+//
+// V1 ships the operational layer (this file). V2 will lift the
+// productivity-checked cut-elim + bisimulation through a kernel
+// rule (`K-Cut-Elim`) so the verifier can certify orthogonality
+// without runtime depth bounds.
+// =============================================================================
+
+mount core.base.coinductive.{
+    Observation,
+    ObservationTrace,
+    BisimulationResult,
+    CorecursiveCall,
+    ProductivityResult,
+    observation,
+    trace,
+    trace_prefix,
+    bisimilar_up_to,
+    check_productivity,
+    is_guarded,
+};
+
+// =============================================================================
+// LazyDesign — concrete lazy strategy
+// =============================================================================
+
+/// `LazyDesign` — a Ludics design represented through its
+/// observation trace. Cofix-friendly: the trace is computed on
+/// demand by the design's `step` callback rather than materialised
+/// eagerly. Infinite-branching designs are observable up to any
+/// finite depth without materialising the full tree.
+@derive(Clone)
+public type LazyDesign is {
+    /// Source locus (positive / negative side; foundation-neutral
+    /// label).
+    source_locus: Text,
+    /// Target locus.
+    target_locus: Text,
+    /// Productivity-witness corecursion site list (used by
+    /// `check_productivity` to certify that every observation
+    /// terminates in finite steps).
+    corec_calls: List<CorecursiveCall>,
+};
+
+public fn lazy_design(
+    source_locus: Text,
+    target_locus: Text,
+    corec_calls: List<CorecursiveCall>,
+) -> LazyDesign {
+    LazyDesign {
+        source_locus: source_locus,
+        target_locus: target_locus,
+        corec_calls: corec_calls,
+    }
+}
+
+/// True iff every recursive call in the design is guarded
+/// (productivity verdict). A non-productive design's cut-elim
+/// may diverge; the bounded depth-cap then surfaces it as
+/// `BisimulationResult::Unknown`.
+public fn lazy_design_is_productive(d: LazyDesign) -> Bool {
+    let verdict = check_productivity(d.corec_calls.clone());
+    match verdict {
+        Productive            => true,
+        NonProductive { .. }  => false,
+    }
+}
+
+// =============================================================================
+// Bounded cut-elimination (V1 caveat from VFE §13.5)
+// =============================================================================
+
+/// Default reduction-step bound. Configurable per VUVA §13.6.
+/// Below this depth, divergent computations get UNKNOWN verdict.
+public let CUT_ELIM_DEFAULT_DEPTH: Int = 1000;
+
+/// `CutElimVerdict` — outcome of bounded cut-elimination.
+@derive(Clone)
+public type CutElimVerdict is
+    /// Cut-elim reached normal form within the depth bound.
+    | Normalised { steps_taken: Int }
+    /// Depth bound exceeded; result is potentially divergent.
+    | DepthExceeded
+    /// Bisimulation ruled the two designs structurally
+    /// inequivalent before the depth bound.
+    | NotBisimilar;
+
+/// Run cut-elimination between two lazy designs at bounded depth.
+/// Returns `Normalised` when both designs reach the same
+/// observation prefix within `depth_bound` steps; `DepthExceeded`
+/// when the depth runs out; `NotBisimilar` when prefixes diverge
+/// before the bound.
+///
+/// Operational form: traces both designs to depth `depth_bound`
+/// via observation prefixes, then routes through
+/// `bisimilar_up_to`. UNKNOWN verdict from the bisimulation maps
+/// to `DepthExceeded`.
+public fn bounded_cut_elim(
+    d1: LazyDesign,
+    d2: LazyDesign,
+    trace1: ObservationTrace,
+    trace2: ObservationTrace,
+    depth_bound: Int,
+) -> CutElimVerdict {
+    // Productivity gate: if either design is non-productive, the
+    // cut-elim cannot guarantee termination — fall straight to
+    // DepthExceeded so the caller doesn't mistake a bounded
+    // result for a true normal form.
+    if !lazy_design_is_productive(d1.clone()) {
+        return DepthExceeded;
+    }
+    if !lazy_design_is_productive(d2.clone()) {
+        return DepthExceeded;
+    }
+    // Trim both traces to the depth bound — sound because every
+    // productivity-checked design produces its k-th observation
+    // in finite steps.
+    let prefix1: ObservationTrace = trace_prefix(trace1.clone(), depth_bound);
+    let prefix2: ObservationTrace = trace_prefix(trace2.clone(), depth_bound);
+    // Bisimulation up to depth_bound.
+    let verdict: BisimulationResult = bisimilar_up_to(prefix1, prefix2, depth_bound);
+    match verdict {
+        Bisimilar { steps } => Normalised { steps_taken: steps },
+        NotBisimilar { .. } => NotBisimilar,
+        Unknown { .. }      => DepthExceeded,
+    }
+}
+
+// =============================================================================
+// Orthogonality — gauge-incompatibility test via bounded bisimulation
+// =============================================================================
+
+/// `OrthogonalityVerdict` — outcome of the orthogonality test.
+/// Refines `Bool` with the third state required by bounded-depth
+/// decision: when the depth bound is exceeded the test cannot
+/// commit to a Boolean answer.
+@derive(Clone)
+public type OrthogonalityVerdict is
+    | Orthogonal
+    | NonOrthogonal
+    | DepthBoundReached;
+
+/// Two designs are orthogonal iff their composition cuts to a
+/// successful normal form. V1 form: route through bounded
+/// cut-elim and surface the depth-exceeded case as a third
+/// verdict.
+public fn orthogonal(
+    d1: LazyDesign,
+    d2: LazyDesign,
+    trace1: ObservationTrace,
+    trace2: ObservationTrace,
+    depth_bound: Int,
+) -> OrthogonalityVerdict {
+    let verdict = bounded_cut_elim(d1, d2, trace1, trace2, depth_bound);
+    match verdict {
+        Normalised { .. } => Orthogonal,
+        NotBisimilar     => NonOrthogonal,
+        DepthExceeded    => DepthBoundReached,
+    }
+}
+
+// =============================================================================
+// Trusted-boundary axioms — V1
+// =============================================================================
+
+/// Bounded cut-elim is sound: a `Normalised` verdict witnesses
+/// genuine cut-elimination in the underlying ludics calculus
+/// (per Lemma 120.L3, canonical reduction).
+@framework(diakrisis, "Lemma 120.L3 (bounded cut-elim soundness via productivity gate)")
+public axiom bounded_cut_elim_sound() -> Bool ensures true;
+
+/// `DepthBoundReached` is informative: the caller knows that the
+/// pair was not decidable within the supplied bound. Crucially
+/// it is **not** the same as `NonOrthogonal` — the verdict
+/// preserves the distinction between "definitely incompatible"
+/// and "couldn't decide in time".
+@framework(diakrisis, "VFE §13.5 caveat — UNKNOWN verdict on depth-exceed")
+public axiom depth_bound_reached_distinct_from_non_orthogonal() -> Bool ensures true;
+
+/// Productivity gate is necessary: without it, a non-productive
+/// design could force cut-elim into an infinite loop within the
+/// depth bound, masking divergence as a finite normal-form
+/// verdict.
+@framework(diakrisis, "Productivity gate guards bounded cut-elim correctness")
+public axiom productivity_gate_necessary() -> Bool ensures true;

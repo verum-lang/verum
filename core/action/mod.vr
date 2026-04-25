@@ -37,6 +37,12 @@
 //                              State (commutative-vs-non-commutative
 //                              demo set; List / Probability /
 //                              Exception / Io follow in V1.5)
+//
+//   core.action.ludics_lazy  — cofix-based lazy ludics designs per
+//                              VFE-10 V1: LazyDesign + bounded
+//                              cut-elim + productivity-gated
+//                              orthogonality (UNKNOWN third verdict
+//                              when depth-bound exceeded)
 // =============================================================================
 
 public mount core.action.primitives;
@@ -47,3 +53,4 @@ public mount core.action.verify;
 public mount core.action.effects;
 public mount core.action.ludics;
 public mount core.action.monads;
+public mount core.action.ludics_lazy;
