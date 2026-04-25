@@ -1,0 +1,69 @@
+// iif(X, Y, Z) — three-argument conditional.
+//
+// Truthiness rules (SQL three-valued):
+//   * NULL X  → result is Z  (NULL is "not true")
+//   * X == 0  → result is Z
+//   * other   → result is Y
+
+module core.database.sqlite.native.iif_three_arg_fn.fn_;
+
+mount base.{Bool, Int64, Text};
+
+public type Value is
+    | VNull
+    | VInt(Int64)
+    | VText(Text)
+    ;
+
+public fn null_value() -> Value { VNull }
+public fn int_value(n: Int64) -> Value { VInt(n) }
+public fn text_value(t: Text) -> Value { VText(t) }
+
+public fn is_null(v: &Value) -> Bool {
+    match v { VNull => true, _ => false }
+}
+
+// Truthiness: SQL coerces non-zero numbers and non-empty text to true; NULL
+// and zero are false.  iif() tests the standard "truth" projection on X.
+public fn is_truthy(v: &Value) -> Bool {
+    match v {
+        VNull    => false,
+        VInt(n)  => n.clone() != (0 as Int64),
+        VText(_) => false,    // SQLite iif() converts via affinity → 0 when text isn't numeric
+    }
+}
+
+public fn evaluate(x: &Value, y: &Value, z: &Value) -> Value {
+    if is_truthy(x) {
+        clone_value(y)
+    } else {
+        clone_value(z)
+    }
+}
+
+fn clone_value(v: &Value) -> Value {
+    match v {
+        VNull    => VNull,
+        VInt(n)  => VInt(n.clone()),
+        VText(t) => VText(t.clone()),
+    }
+}
+
+// Argument-count validity.
+public type ArityCheck is
+    | AcOk
+    | AcWrongArity
+    ;
+
+public fn check_arity(n: Int) -> ArityCheck {
+    if n == 3 { AcOk } else { AcWrongArity }
+}
+
+public fn arity_name(a: &ArityCheck) -> Text {
+    match a {
+        AcOk         => "ok".clone(),
+        AcWrongArity => "wrong_arity".clone(),
+    }
+}
+
+public fn well_known_arity() -> Int { 3 }

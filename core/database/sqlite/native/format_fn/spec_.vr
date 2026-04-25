@@ -1,0 +1,140 @@
+// format() / printf() conversion specifier taxonomy.
+
+module core.database.sqlite.native.format_fn.spec_;
+
+mount base.{Bool, Text};
+
+public type Specifier is
+    | SpD       // %d / %i
+    | SpU       // %u
+    | SpX       // %x / %X (lowercase / uppercase hex)
+    | SpO       // %o (octal)
+    | SpF       // %f
+    | SpE       // %e
+    | SpG       // %g
+    | SpS       // %s
+    | SpQ       // %q (SQL-quoted)
+    | SpQQ      // %Q (SQL-quoted + NULL → "NULL")
+    | SpW       // %w (identifier, double-quote-escaped)
+    | SpZ       // %z (consumed alloc)
+    | SpPercent // %%
+    | SpUnknown // anything else
+    ;
+
+public fn from_letter(c: Int) -> Specifier {
+    if c == 0x64 || c == 0x69 { return SpD; }    // 'd' / 'i'
+    if c == 0x75 { return SpU; }
+    if c == 0x78 || c == 0x58 { return SpX; }     // 'x' / 'X'
+    if c == 0x6F { return SpO; }                  // 'o'
+    if c == 0x66 { return SpF; }
+    if c == 0x65 { return SpE; }
+    if c == 0x67 { return SpG; }
+    if c == 0x73 { return SpS; }
+    if c == 0x71 { return SpQ; }
+    if c == 0x51 { return SpQQ; }
+    if c == 0x77 { return SpW; }
+    if c == 0x7A { return SpZ; }
+    if c == 0x25 { return SpPercent; }
+    SpUnknown
+}
+
+public fn spec_name(s: &Specifier) -> Text {
+    match s {
+        SpD       => "d".clone(),
+        SpU       => "u".clone(),
+        SpX       => "x".clone(),
+        SpO       => "o".clone(),
+        SpF       => "f".clone(),
+        SpE       => "e".clone(),
+        SpG       => "g".clone(),
+        SpS       => "s".clone(),
+        SpQ       => "q".clone(),
+        SpQQ      => "Q".clone(),
+        SpW       => "w".clone(),
+        SpZ       => "z".clone(),
+        SpPercent => "%".clone(),
+        SpUnknown => "unknown".clone(),
+    }
+}
+
+public fn consumes_argument(s: &Specifier) -> Bool {
+    match s {
+        SpPercent => false,
+        SpUnknown => false,
+        _ => true,
+    }
+}
+
+public type ArgKind is
+    | AkInt
+    | AkFloat
+    | AkText
+    | AkPointer
+    | AkNone
+    ;
+
+public fn expected_arg_kind(s: &Specifier) -> ArgKind {
+    match s {
+        SpD => AkInt,
+        SpU => AkInt,
+        SpX => AkInt,
+        SpO => AkInt,
+        SpF => AkFloat,
+        SpE => AkFloat,
+        SpG => AkFloat,
+        SpS => AkText,
+        SpQ => AkText,
+        SpQQ => AkText,
+        SpW => AkText,
+        SpZ => AkPointer,
+        SpPercent => AkNone,
+        SpUnknown => AkNone,
+    }
+}
+
+public fn quotes_for_sql(s: &Specifier) -> Bool {
+    match s { SpQ => true, SpQQ => true, _ => false }
+}
+
+public fn handles_null_explicitly(s: &Specifier) -> Bool {
+    match s { SpQQ => true, _ => false }
+}
+
+// Quick parser: count specifier-letters in a format string (excluding %%).
+public fn count_arg_specifiers(fmt: &Text) -> Int {
+    let bs = fmt.as_bytes();
+    let n = bs.len();
+    let mut count = 0;
+    let mut i: Int = 0;
+    while i < n {
+        let c = bs[i] as Int;
+        if c == 0x25 {     // '%'
+            i = i + 1;
+            if i >= n { break; }
+            // Skip flags / width digits naively.
+            let mut j = i;
+            while j < n {
+                let cj = bs[j] as Int;
+                let is_digit = cj >= 0x30 && cj <= 0x39;
+                let is_flag  = cj == 0x2D || cj == 0x2B || cj == 0x20
+                            || cj == 0x23 || cj == 0x2E;
+                if is_digit || is_flag {
+                    j = j + 1;
+                } else {
+                    break;
+                }
+            }
+            if j < n {
+                let letter = bs[j] as Int;
+                let s = from_letter(letter);
+                if consumes_argument(&s) { count = count + 1; }
+                i = j + 1;
+            } else {
+                i = j;
+            }
+        } else {
+            i = i + 1;
+        }
+    }
+    count
+}

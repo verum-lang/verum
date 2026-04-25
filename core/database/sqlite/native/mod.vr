@@ -812,3 +812,19 @@ public module user_version_pragma;
 public module concat_ws_fn;
 // - string_agg_fn: string_agg(X, sep) aggregate (skip-NULL + first-row-sep-wins)
 public module string_agg_fn;
+// - txn_state_api: sqlite3_txn_state (None/Read/Write + connection-state upgrade fold)
+public module txn_state_api;
+// - error_offset_api: sqlite3_error_offset (At(n) / NoOffset + window_around)
+public module error_offset_api;
+// - total_changes64_api: sqlite3_changes64 + sqlite3_total_changes64 (3.37+) saturating-32
+public module total_changes64_api;
+// - unixepoch_fn: unixepoch() (3.38+) + 17-kind ModifierKind taxonomy
+public module unixepoch_fn;
+// - iif_three_arg_fn: iif(X, Y, Z) ternary (NULL/0 → Z; truthy → Y)
+public module iif_three_arg_fn;
+// - format_fn: format()/printf() conversion specifiers (12-kind + parser)
+public module format_fn;
+// - octet_length_fn: octet_length(X) (3.43+) + serial-type byte projection
+public module octet_length_fn;
+// - error_str_api: sqlite3_errstr(rc) primary-code lookup table (29 entries + ROW/DONE)
+public module error_str_api;

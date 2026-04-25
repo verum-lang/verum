@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/txn_state_api/mod.vr
+// =============================================================================
+// sqlite3_txn_state(db, schema) — query the transaction state of a particular
+// schema (or the whole connection if NULL).  Returns:
+//   -1  SQLITE_TXN_NONE     no txn open
+//    0  SQLITE_TXN_NONE     (legacy alias)
+//    1  SQLITE_TXN_READ     read-only txn
+//    2  SQLITE_TXN_WRITE    read/write txn
+// (Modern values: 0=none, 1=read, 2=write.)  Added 3.34.0.  Spec App E.T.
+// =============================================================================
+
+module core.database.sqlite.native.txn_state_api;
+
+public module state;

@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, error_offset_api, diagnostics
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.error_offset_api.offset.{
+    unavailable,
+    ErrorOffset, NoOffset, At,
+    from_code, to_code, is_known, offset_value,
+    Validity, VValid, VOutOfRange, VUnknown,
+    validate, validity_name,
+    Window, window_around, window_size,
+};
+mount base.{Bool};
+
+fn test_unavailable_constant() {
+    assert_eq(unavailable(), -1);
+}
+
+fn test_from_code_branches() {
+    match from_code(-1) { NoOffset => {}, _ => assert(false) }
+    match from_code(0)  { At(n)    => assert_eq(n, 0), _ => assert(false) }
+    match from_code(42) { At(n)    => assert_eq(n, 42), _ => assert(false) }
+}
+
+fn test_to_code_round_trip() {
+    assert_eq(to_code(&NoOffset), -1);
+    assert_eq(to_code(&At(7)),      7);
+}
+
+fn test_is_known_predicate() {
+    assert(is_known(&At(3)));
+    assert(!is_known(&NoOffset));
+}
+
+fn test_offset_value() {
+    assert_eq(offset_value(&At(12)), 12);
+    assert_eq(offset_value(&NoOffset), -1);
+}
+
+fn test_validate_branches() {
+    match validate(&NoOffset, 100) { VUnknown    => {}, _ => assert(false) }
+    match validate(&At(50), 100)   { VValid      => {}, _ => assert(false) }
+    match validate(&At(0), 100)    { VValid      => {}, _ => assert(false) }
+    match validate(&At(100), 100)  { VValid      => {}, _ => assert(false) }
+    match validate(&At(101), 100)  { VOutOfRange => {}, _ => assert(false) }
+}
+
+fn test_validity_names() {
+    assert(validity_name(&VValid)      == "valid".clone());
+    assert(validity_name(&VOutOfRange) == "out_of_range".clone());
+    assert(validity_name(&VUnknown)    == "unknown".clone());
+}
+
+fn test_window_around_clips_to_bounds() {
+    let w = window_around(50, 10, 100);
+    assert_eq(w.lo, 40);
+    assert_eq(w.hi, 60);
+    assert_eq(window_size(&w), 20);
+}
+
+fn test_window_clamps_low_edge() {
+    let w = window_around(2, 10, 100);
+    assert_eq(w.lo, 0);
+    assert_eq(w.hi, 12);
+}
+
+fn test_window_clamps_high_edge() {
+    let w = window_around(95, 10, 100);
+    assert_eq(w.lo, 85);
+    assert_eq(w.hi, 100);
+}
+
+fn main() {
+    test_unavailable_constant();
+    test_from_code_branches();
+    test_to_code_round_trip();
+    test_is_known_predicate();
+    test_offset_value();
+    test_validate_branches();
+    test_validity_names();
+    test_window_around_clips_to_bounds();
+    test_window_clamps_low_edge();
+    test_window_clamps_high_edge();
+}

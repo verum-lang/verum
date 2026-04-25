@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, octet_length_fn, sql-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.octet_length_fn.fn_.{
+    ValueKind, VkNull, VkInt, VkFloat, VkText, VkBlob,
+    Result, RNull, RBytes,
+    result_is_null, result_bytes,
+    integer_serial_width, evaluate,
+    length_minus_octet_length_text, arity_is_well_known,
+};
+mount base.{Bool, Int64};
+
+fn test_arity() {
+    assert(arity_is_well_known(1));
+    assert(!arity_is_well_known(0));
+    assert(!arity_is_well_known(2));
+}
+
+fn test_evaluate_null() {
+    let r = evaluate(&VkNull);
+    assert(result_is_null(&r));
+}
+
+fn test_evaluate_float_is_8() {
+    let r = evaluate(&VkFloat);
+    assert_eq(result_bytes(&r), 8);
+}
+
+fn test_evaluate_text_passthrough() {
+    let r = evaluate(&VkText(42));
+    assert_eq(result_bytes(&r), 42);
+}
+
+fn test_evaluate_blob_passthrough() {
+    let r = evaluate(&VkBlob(1024));
+    assert_eq(result_bytes(&r), 1024);
+}
+
+fn test_integer_serial_widths() {
+    assert_eq(integer_serial_width(0 as Int64), 0);
+    assert_eq(integer_serial_width(1 as Int64), 1);
+    assert_eq(integer_serial_width(127 as Int64), 1);
+    assert_eq(integer_serial_width(128 as Int64), 2);
+    assert_eq(integer_serial_width(32767 as Int64), 2);
+    assert_eq(integer_serial_width(32768 as Int64), 3);
+    assert_eq(integer_serial_width(8388607 as Int64), 3);
+    assert_eq(integer_serial_width(8388608 as Int64), 4);
+    assert_eq(integer_serial_width(2147483647 as Int64), 4);
+    assert_eq(integer_serial_width(2147483648 as Int64), 6);
+    assert_eq(integer_serial_width(140737488355327 as Int64), 6);
+    assert_eq(integer_serial_width(140737488355328 as Int64), 8);
+}
+
+fn test_negative_integer_widths_match() {
+    // Same magnitude → same width whether positive or negative.
+    assert_eq(integer_serial_width(-1 as Int64),    1);
+    assert_eq(integer_serial_width(-127 as Int64),  1);
+    assert_eq(integer_serial_width(-32767 as Int64), 2);
+}
+
+fn test_evaluate_int_dispatches_to_serial_width() {
+    let r = evaluate(&VkInt(0 as Int64));
+    assert_eq(result_bytes(&r), 0);
+    let r2 = evaluate(&VkInt(1_000_000 as Int64));
+    assert_eq(result_bytes(&r2), 4);
+}
+
+fn test_length_vs_octet_length_text() {
+    // ASCII string: byte_count == char_count, diff = 0
+    assert_eq(length_minus_octet_length_text(5, 5), 0);
+    // 3-byte UTF-8 char like 'é' encoded: 6 bytes for 3 chars (Latin-1 UTF-8)
+    assert_eq(length_minus_octet_length_text(6, 3), 3);
+}
+
+fn main() {
+    test_arity();
+    test_evaluate_null();
+    test_evaluate_float_is_8();
+    test_evaluate_text_passthrough();
+    test_evaluate_blob_passthrough();
+    test_integer_serial_widths();
+    test_negative_integer_widths_match();
+    test_evaluate_int_dispatches_to_serial_width();
+    test_length_vs_octet_length_text();
+}

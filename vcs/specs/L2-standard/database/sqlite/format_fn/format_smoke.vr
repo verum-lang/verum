@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, format_fn, sql-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.format_fn.spec_.{
+    Specifier, SpD, SpU, SpF, SpE, SpG, SpS, SpQ, SpQQ, SpW, SpZ,
+    SpPercent, SpUnknown,
+    from_letter, spec_name, consumes_argument,
+    ArgKind, AkInt, AkFloat, AkText, AkPointer, AkNone,
+    expected_arg_kind, quotes_for_sql, handles_null_explicitly,
+    count_arg_specifiers,
+};
+mount base.{Bool};
+
+fn test_from_letter_routing() {
+    match from_letter(0x64) { SpD       => {}, _ => assert(false) }   // 'd'
+    match from_letter(0x69) { SpD       => {}, _ => assert(false) }   // 'i'
+    match from_letter(0x75) { SpU       => {}, _ => assert(false) }   // 'u'
+    match from_letter(0x66) { SpF       => {}, _ => assert(false) }   // 'f'
+    match from_letter(0x73) { SpS       => {}, _ => assert(false) }   // 's'
+    match from_letter(0x71) { SpQ       => {}, _ => assert(false) }   // 'q'
+    match from_letter(0x51) { SpQQ      => {}, _ => assert(false) }   // 'Q'
+    match from_letter(0x77) { SpW       => {}, _ => assert(false) }   // 'w'
+    match from_letter(0x7A) { SpZ       => {}, _ => assert(false) }   // 'z'
+    match from_letter(0x25) { SpPercent => {}, _ => assert(false) }   // '%'
+    match from_letter(0x6B) { SpUnknown => {}, _ => assert(false) }   // 'k'
+}
+
+fn test_spec_names() {
+    assert(spec_name(&SpD)       == "d".clone());
+    assert(spec_name(&SpQQ)      == "Q".clone());
+    assert(spec_name(&SpPercent) == "%".clone());
+    assert(spec_name(&SpUnknown) == "unknown".clone());
+}
+
+fn test_consumes_argument() {
+    assert(consumes_argument(&SpD));
+    assert(consumes_argument(&SpS));
+    assert(consumes_argument(&SpZ));
+    assert(!consumes_argument(&SpPercent));
+    assert(!consumes_argument(&SpUnknown));
+}
+
+fn test_expected_arg_kind() {
+    match expected_arg_kind(&SpD)       { AkInt     => {}, _ => assert(false) }
+    match expected_arg_kind(&SpF)       { AkFloat   => {}, _ => assert(false) }
+    match expected_arg_kind(&SpS)       { AkText    => {}, _ => assert(false) }
+    match expected_arg_kind(&SpZ)       { AkPointer => {}, _ => assert(false) }
+    match expected_arg_kind(&SpPercent) { AkNone    => {}, _ => assert(false) }
+}
+
+fn test_quotes_for_sql_predicate() {
+    assert(quotes_for_sql(&SpQ));
+    assert(quotes_for_sql(&SpQQ));
+    assert(!quotes_for_sql(&SpS));
+    assert(!quotes_for_sql(&SpW));
+}
+
+fn test_handles_null_explicitly_only_QQ() {
+    assert(handles_null_explicitly(&SpQQ));
+    assert(!handles_null_explicitly(&SpQ));
+    assert(!handles_null_explicitly(&SpS));
+}
+
+fn test_count_arg_specifiers_basic() {
+    assert_eq(count_arg_specifiers(&"hello".clone()), 0);
+    assert_eq(count_arg_specifiers(&"%d".clone()), 1);
+    assert_eq(count_arg_specifiers(&"%d %s".clone()), 2);
+    assert_eq(count_arg_specifiers(&"x=%d, y=%d".clone()), 2);
+}
+
+fn test_count_arg_specifiers_skips_percent_percent() {
+    // %% is a literal percent, doesn't consume an argument.
+    assert_eq(count_arg_specifiers(&"100%%".clone()), 0);
+    assert_eq(count_arg_specifiers(&"%d%%".clone()), 1);
+}
+
+fn test_count_arg_specifiers_skips_flags_and_widths() {
+    assert_eq(count_arg_specifiers(&"%-10d".clone()), 1);
+    assert_eq(count_arg_specifiers(&"%+5.2f".clone()), 1);
+    assert_eq(count_arg_specifiers(&"%05d %#x".clone()), 2);
+}
+
+fn main() {
+    test_from_letter_routing();
+    test_spec_names();
+    test_consumes_argument();
+    test_expected_arg_kind();
+    test_quotes_for_sql_predicate();
+    test_handles_null_explicitly_only_QQ();
+    test_count_arg_specifiers_basic();
+    test_count_arg_specifiers_skips_percent_percent();
+    test_count_arg_specifiers_skips_flags_and_widths();
+}

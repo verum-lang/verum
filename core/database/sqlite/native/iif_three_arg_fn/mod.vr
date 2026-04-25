@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/iif_three_arg_fn/mod.vr
+// =============================================================================
+// iif(X, Y, Z) — three-arg conditional, equivalent to "CASE WHEN X THEN Y
+// ELSE Z END".  Added in 3.32.0.  X is interpreted as "true" iff non-zero
+// and not-NULL.  Spec §15.5.
+// =============================================================================
+
+module core.database.sqlite.native.iif_three_arg_fn;
+
+public module fn_;

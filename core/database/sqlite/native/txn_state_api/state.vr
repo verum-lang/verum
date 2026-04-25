@@ -1,0 +1,68 @@
+// sqlite3_txn_state — schema-level transaction state query.
+
+module core.database.sqlite.native.txn_state_api.state;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type TxnState is
+    | StNone        // 0 — no txn
+    | StRead        // 1 — read-only txn
+    | StWrite       // 2 — read/write txn
+    ;
+
+public fn from_code(n: Int) -> TxnState {
+    if n <= 0 { return StNone; }
+    if n == 1 { return StRead; }
+    StWrite
+}
+
+public fn to_code(s: &TxnState) -> Int {
+    match s {
+        StNone  => 0,
+        StRead  => 1,
+        StWrite => 2,
+    }
+}
+
+public fn state_name(s: &TxnState) -> Text {
+    match s {
+        StNone  => "none".clone(),
+        StRead  => "read".clone(),
+        StWrite => "write".clone(),
+    }
+}
+
+public fn is_active(s: &TxnState) -> Bool {
+    match s { StNone => false, _ => true }
+}
+
+public fn allows_writes(s: &TxnState) -> Bool {
+    match s { StWrite => true, _ => false }
+}
+
+// Order: write > read > none — used to summarise multiple schemas.
+public fn upgrade(a: TxnState, b: TxnState) -> TxnState {
+    let ac = to_code(&a);
+    let bc = to_code(&b);
+    if ac >= bc { a } else { b }
+}
+
+// Common entry: state when called with NULL schema (whole connection).
+// In that case, SQLite returns the highest state across all attached
+// schemas, which we model with `upgrade`.
+public fn connection_state(states: &List<TxnState>) -> TxnState {
+    let mut acc = StNone;
+    let n = states.len() as Int;
+    let mut i = 0;
+    while i < n {
+        acc = upgrade(acc, states.get(i));
+        i = i + 1;
+    }
+    acc
+}
+
+// Validity check on the value handed back to applications.
+public fn is_well_known_code(n: Int) -> Bool {
+    n == 0 || n == 1 || n == 2
+}

@@ -1,0 +1,76 @@
+// sqlite3_error_offset — byte offset within failing SQL text.
+
+module core.database.sqlite.native.error_offset_api.offset;
+
+mount base.{Bool, Int64, Text};
+
+// Sentinel for "no offset available".
+public fn unavailable() -> Int { -1 }
+
+public type ErrorOffset is
+    | NoOffset
+    | At(Int)         // 0-based byte offset into the SQL text
+    ;
+
+public fn from_code(n: Int) -> ErrorOffset {
+    if n < 0 { return NoOffset; }
+    At(n)
+}
+
+public fn to_code(o: &ErrorOffset) -> Int {
+    match o {
+        NoOffset => unavailable(),
+        At(n)    => n.clone(),
+    }
+}
+
+public fn is_known(o: &ErrorOffset) -> Bool {
+    match o { NoOffset => false, _ => true }
+}
+
+public fn offset_value(o: &ErrorOffset) -> Int {
+    match o {
+        At(n)    => n.clone(),
+        NoOffset => -1,
+    }
+}
+
+// Validate the offset against a SQL text length.
+public type Validity is
+    | VValid
+    | VOutOfRange
+    | VUnknown
+    ;
+
+public fn validate(o: &ErrorOffset, sql_len: Int) -> Validity {
+    match o {
+        NoOffset => VUnknown,
+        At(n)    => {
+            if n.clone() < 0 || n.clone() > sql_len { VOutOfRange } else { VValid }
+        },
+    }
+}
+
+public fn validity_name(v: &Validity) -> Text {
+    match v {
+        VValid      => "valid".clone(),
+        VOutOfRange => "out_of_range".clone(),
+        VUnknown    => "unknown".clone(),
+    }
+}
+
+// Compute the inclusive lo/hi byte range of a "snippet window" centred on
+// `off` with the given radius, clipped to [0, sql_len].  Callers slice the
+// SQL text themselves (Verum stdlib doesn't surface a substring helper here).
+public type Window is { lo: Int, hi: Int };
+
+public fn window_around(off: Int, radius: Int, sql_len: Int) -> Window {
+    let mut lo = off - radius;
+    let mut hi = off + radius;
+    if lo < 0 { lo = 0; }
+    if hi > sql_len { hi = sql_len; }
+    if hi < lo { hi = lo; }
+    Window { lo: lo, hi: hi }
+}
+
+public fn window_size(w: &Window) -> Int { w.hi - w.lo }

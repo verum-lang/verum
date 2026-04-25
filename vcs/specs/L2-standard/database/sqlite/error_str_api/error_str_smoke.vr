@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, error_str_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.error_str_api.table.{
+    ok, err, internal, perm, abort, busy, locked, nomem, readonly,
+    interrupt, ioerr, corrupt, notfound, full, cantopen, protocol,
+    empty, schema, toobig, constraint, mismatch, misuse, nolfs, auth,
+    format, range, notadb, notice, warning, row, done,
+    errstr, is_known_primary, primary_count,
+};
+mount base.{Bool};
+
+fn test_primary_codes_are_distinct_and_sequential() {
+    assert_eq(ok(),        0);
+    assert_eq(err(),       1);
+    assert_eq(internal(),  2);
+    assert_eq(busy(),      5);
+    assert_eq(readonly(),  8);
+    assert_eq(corrupt(),  11);
+    assert_eq(toobig(),   18);
+    assert_eq(constraint(), 19);
+    assert_eq(notice(),   27);
+    assert_eq(warning(),  28);
+}
+
+fn test_iterator_codes() {
+    assert_eq(row(),  100);
+    assert_eq(done(), 101);
+}
+
+fn test_errstr_for_zero_says_not_an_error() {
+    assert(errstr(0) == "not an error".clone());
+}
+
+fn test_errstr_for_busy() {
+    assert(errstr(5) == "database is locked".clone());
+}
+
+fn test_errstr_for_corrupt() {
+    assert(errstr(11) == "database disk image is malformed".clone());
+}
+
+fn test_errstr_folds_extended_codes() {
+    // SQLITE_IOERR_READ = (10 | (1<<8)) = 0x010A — engine folds to primary 10.
+    assert(errstr(0x010A) == "disk I/O error".clone());
+    // SQLITE_BUSY_RECOVERY = (5 | (1<<8)) = 0x0105
+    assert(errstr(0x0105) == "database is locked".clone());
+}
+
+fn test_errstr_for_iterator_codes() {
+    assert(errstr(100) == "another row available".clone());
+    assert(errstr(101) == "no more rows available".clone());
+}
+
+fn test_errstr_for_unknown_code() {
+    assert(errstr(999999) == "unknown error".clone());
+}
+
+fn test_is_known_primary() {
+    assert(is_known_primary(0));
+    assert(is_known_primary(11));
+    assert(is_known_primary(28));
+    assert(is_known_primary(100));
+    assert(is_known_primary(101));
+    assert(!is_known_primary(29));
+    assert(!is_known_primary(99));
+}
+
+fn test_primary_count() {
+    assert_eq(primary_count(), 29);
+}
+
+fn main() {
+    test_primary_codes_are_distinct_and_sequential();
+    test_iterator_codes();
+    test_errstr_for_zero_says_not_an_error();
+    test_errstr_for_busy();
+    test_errstr_for_corrupt();
+    test_errstr_folds_extended_codes();
+    test_errstr_for_iterator_codes();
+    test_errstr_for_unknown_code();
+    test_is_known_primary();
+    test_primary_count();
+}

@@ -1,0 +1,98 @@
+// sqlite3_changes64 / sqlite3_total_changes64 — 64-bit row-change counters.
+
+module core.database.sqlite.native.total_changes64_api.counters;
+
+mount base.{Bool, Int64, Text};
+mount core.collections.list.{List};
+
+// Per-connection counters.  `last_stmt` resets each statement; `total`
+// accumulates over the connection's lifetime.
+public type Counters is {
+    last_stmt: Int64,
+    total: Int64,
+};
+
+public fn empty() -> Counters {
+    Counters { last_stmt: 0 as Int64, total: 0 as Int64 }
+}
+
+// Record the row count from one DML statement.  `last_stmt` becomes that
+// count; `total` adds it to the accumulator.
+public fn record_stmt(mut c: Counters, rows: Int64) -> Counters {
+    c.last_stmt = rows;
+    c.total = c.total + rows;
+    c
+}
+
+// Reset only the per-statement counter (between executions of the same stmt).
+public fn reset_stmt(mut c: Counters) -> Counters {
+    c.last_stmt = 0 as Int64;
+    c
+}
+
+public fn changes64(c: &Counters) -> Int64 { c.last_stmt }
+public fn total_changes64(c: &Counters) -> Int64 { c.total }
+
+// 32-bit narrowing.  Saturates to Int32 max if the 64-bit value overflows.
+public fn changes32_saturating(c: &Counters) -> Int {
+    let v = c.last_stmt;
+    let max32 = 2147483647 as Int64;
+    if v >= max32 { return 2147483647; }
+    v as Int
+}
+
+public fn total_changes32_saturating(c: &Counters) -> Int {
+    let v = c.total;
+    let max32 = 2147483647 as Int64;
+    if v >= max32 { return 2147483647; }
+    v as Int
+}
+
+// Whether the 32-bit values would have lost information.
+public fn last_stmt_overflows_32(c: &Counters) -> Bool {
+    c.last_stmt > (2147483647 as Int64)
+}
+
+public fn total_overflows_32(c: &Counters) -> Bool {
+    c.total > (2147483647 as Int64)
+}
+
+// Snapshot diff: difference between two consecutive `total` reads.
+public fn diff_total(prev: &Counters, now: &Counters) -> Int64 {
+    now.total - prev.total
+}
+
+public fn snapshot_text(c: &Counters) -> Text {
+    let mut s = Text.new();
+    s = s.append("changes=".clone());
+    s = s.append(int64_decimal(c.last_stmt));
+    s = s.append(" total=".clone());
+    s = s.append(int64_decimal(c.total));
+    s
+}
+
+fn int64_decimal(n: Int64) -> Text {
+    if n == (0 as Int64) { return "0".clone(); }
+    let zero = 0 as Int64;
+    let ten = 10 as Int64;
+    let mut x = n;
+    let mut sign = false;
+    if x < zero {
+        sign = true;
+        x = zero - x;
+    }
+    let mut digits: List<Int> = List.new();
+    while x > zero {
+        digits.push((x % ten) as Int);
+        x = x / ten;
+    }
+    let mut out = Text.new();
+    if sign { out = out.append("-".clone()); }
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 {
+        let d = digits.get(i as Int);
+        out = out.append_byte(0x30 + d);
+        i = i - 1;
+    }
+    out
+}

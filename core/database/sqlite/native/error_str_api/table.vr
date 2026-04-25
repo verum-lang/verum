@@ -1,0 +1,85 @@
+// sqlite3_errstr(rc) lookup table — primary result codes only.
+
+module core.database.sqlite.native.error_str_api.table;
+
+mount base.{Bool, Text};
+
+// SQLite primary result codes (rc & 0xFF).
+public fn ok() -> Int          { 0 }
+public fn err() -> Int         { 1 }
+public fn internal() -> Int    { 2 }
+public fn perm() -> Int        { 3 }
+public fn abort() -> Int       { 4 }
+public fn busy() -> Int        { 5 }
+public fn locked() -> Int      { 6 }
+public fn nomem() -> Int       { 7 }
+public fn readonly() -> Int    { 8 }
+public fn interrupt() -> Int   { 9 }
+public fn ioerr() -> Int       { 10 }
+public fn corrupt() -> Int     { 11 }
+public fn notfound() -> Int    { 12 }
+public fn full() -> Int        { 13 }
+public fn cantopen() -> Int    { 14 }
+public fn protocol() -> Int    { 15 }
+public fn empty() -> Int       { 16 }
+public fn schema() -> Int      { 17 }
+public fn toobig() -> Int      { 18 }
+public fn constraint() -> Int  { 19 }
+public fn mismatch() -> Int    { 20 }
+public fn misuse() -> Int      { 21 }
+public fn nolfs() -> Int       { 22 }
+public fn auth() -> Int        { 23 }
+public fn format() -> Int      { 24 }
+public fn range() -> Int       { 25 }
+public fn notadb() -> Int      { 26 }
+public fn notice() -> Int      { 27 }
+public fn warning() -> Int     { 28 }
+public fn row() -> Int         { 100 }
+public fn done() -> Int        { 101 }
+
+// Lookup the English message for a primary code.
+// Extended codes (e.g. SQLITE_IOERR_READ = 0x010A) get folded to their
+// primary by the engine before reaching errstr.
+public fn errstr(rc: Int) -> Text {
+    let primary = rc & 0xFF;
+    if rc == row()  { return "another row available".clone(); }
+    if rc == done() { return "no more rows available".clone(); }
+    if primary == ok()         { return "not an error".clone(); }
+    if primary == err()        { return "SQL logic error".clone(); }
+    if primary == internal()   { return "internal logic error".clone(); }
+    if primary == perm()       { return "access permission denied".clone(); }
+    if primary == abort()      { return "query aborted".clone(); }
+    if primary == busy()       { return "database is locked".clone(); }
+    if primary == locked()     { return "database table is locked".clone(); }
+    if primary == nomem()      { return "out of memory".clone(); }
+    if primary == readonly()   { return "attempt to write a readonly database".clone(); }
+    if primary == interrupt()  { return "interrupted".clone(); }
+    if primary == ioerr()      { return "disk I/O error".clone(); }
+    if primary == corrupt()    { return "database disk image is malformed".clone(); }
+    if primary == notfound()   { return "unknown operation".clone(); }
+    if primary == full()       { return "database or disk is full".clone(); }
+    if primary == cantopen()   { return "unable to open database file".clone(); }
+    if primary == protocol()   { return "locking protocol".clone(); }
+    if primary == empty()      { return "table contains no data".clone(); }
+    if primary == schema()     { return "database schema has changed".clone(); }
+    if primary == toobig()     { return "string or blob too big".clone(); }
+    if primary == constraint() { return "constraint failed".clone(); }
+    if primary == mismatch()   { return "datatype mismatch".clone(); }
+    if primary == misuse()     { return "bad parameter or other API misuse".clone(); }
+    if primary == nolfs()      { return "large file support is disabled".clone(); }
+    if primary == auth()       { return "authorization denied".clone(); }
+    if primary == format()     { return "auxiliary database format error".clone(); }
+    if primary == range()      { return "column index out of range".clone(); }
+    if primary == notadb()     { return "file is not a database".clone(); }
+    if primary == notice()     { return "notification message".clone(); }
+    if primary == warning()    { return "warning message".clone(); }
+    "unknown error".clone()
+}
+
+public fn is_known_primary(rc: Int) -> Bool {
+    let primary = rc & 0xFF;
+    if rc == row() || rc == done() { return true; }
+    primary >= 0 && primary <= 28
+}
+
+public fn primary_count() -> Int { 29 }   // 0..28 inclusive

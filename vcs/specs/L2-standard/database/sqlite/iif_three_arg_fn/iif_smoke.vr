@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, iif_three_arg_fn, sql-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.iif_three_arg_fn.fn_.{
+    Value, VNull, VInt, VText,
+    null_value, int_value, text_value, is_null,
+    is_truthy, evaluate,
+    ArityCheck, AcOk, AcWrongArity,
+    check_arity, arity_name, well_known_arity,
+};
+mount base.{Bool, Int64};
+
+fn test_well_known_arity() {
+    assert_eq(well_known_arity(), 3);
+}
+
+fn test_check_arity_branches() {
+    match check_arity(3) { AcOk         => {}, _ => assert(false) }
+    match check_arity(2) { AcWrongArity => {}, _ => assert(false) }
+    match check_arity(4) { AcWrongArity => {}, _ => assert(false) }
+    match check_arity(0) { AcWrongArity => {}, _ => assert(false) }
+}
+
+fn test_arity_names() {
+    assert(arity_name(&AcOk)         == "ok".clone());
+    assert(arity_name(&AcWrongArity) == "wrong_arity".clone());
+}
+
+fn test_is_null_predicate() {
+    assert(is_null(&null_value()));
+    assert(!is_null(&int_value(0 as Int64)));
+    assert(!is_null(&text_value("".clone())));
+}
+
+fn test_is_truthy_rules() {
+    assert(!is_truthy(&null_value()));
+    assert(!is_truthy(&int_value(0 as Int64)));
+    assert(is_truthy(&int_value(1 as Int64)));
+    assert(is_truthy(&int_value(-1 as Int64)));
+    // SQLite iif() applies numeric affinity; non-numeric text → false.
+    assert(!is_truthy(&text_value("hello".clone())));
+}
+
+fn test_evaluate_picks_y_when_truthy() {
+    let r = evaluate(&int_value(7 as Int64), &int_value(100 as Int64), &int_value(200 as Int64));
+    match r {
+        VInt(n) => assert_eq(n, 100 as Int64),
+        _ => assert(false),
+    }
+}
+
+fn test_evaluate_picks_z_when_zero() {
+    let r = evaluate(&int_value(0 as Int64), &int_value(100 as Int64), &int_value(200 as Int64));
+    match r {
+        VInt(n) => assert_eq(n, 200 as Int64),
+        _ => assert(false),
+    }
+}
+
+fn test_evaluate_picks_z_when_null() {
+    let r = evaluate(&null_value(), &text_value("y".clone()), &text_value("z".clone()));
+    match r {
+        VText(t) => assert(t == "z".clone()),
+        _ => assert(false),
+    }
+}
+
+fn main() {
+    test_well_known_arity();
+    test_check_arity_branches();
+    test_arity_names();
+    test_is_null_predicate();
+    test_is_truthy_rules();
+    test_evaluate_picks_y_when_truthy();
+    test_evaluate_picks_z_when_zero();
+    test_evaluate_picks_z_when_null();
+}

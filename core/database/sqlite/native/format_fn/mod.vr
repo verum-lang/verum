@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/format_fn/mod.vr
+// =============================================================================
+// format(FORMAT, X1, X2, ...) — synonymous with printf() (3.38.0+).  printf()
+// remains an alias for backwards compatibility.  Spec §15.5.
+//
+// Conversion specifiers (subset, full grammar in printf_api):
+//   %d %i  signed integer
+//   %u     unsigned integer
+//   %f     float
+//   %e %g  scientific / general float
+//   %s     string
+//   %q     quoted string (SQL-safe single quotes)
+//   %Q     quoted+NULL-aware
+//   %w     SQL identifier (double-quoted, escapes embedded ")
+//   %z     malloced string (consumes alloc)
+//   %%     literal '%'
+// =============================================================================
+
+module core.database.sqlite.native.format_fn;
+
+public module spec_;

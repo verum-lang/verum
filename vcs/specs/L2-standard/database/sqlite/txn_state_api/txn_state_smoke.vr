@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, txn_state_api, transactions
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.txn_state_api.state.{
+    TxnState, StNone, StRead, StWrite,
+    from_code, to_code, state_name,
+    is_active, allows_writes,
+    upgrade, connection_state, is_well_known_code,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_from_code_branches() {
+    match from_code(-1) { StNone  => {}, _ => assert(false) }
+    match from_code(0)  { StNone  => {}, _ => assert(false) }
+    match from_code(1)  { StRead  => {}, _ => assert(false) }
+    match from_code(2)  { StWrite => {}, _ => assert(false) }
+    match from_code(7)  { StWrite => {}, _ => assert(false) }
+}
+
+fn test_to_code() {
+    assert_eq(to_code(&StNone),  0);
+    assert_eq(to_code(&StRead),  1);
+    assert_eq(to_code(&StWrite), 2);
+}
+
+fn test_state_names() {
+    assert(state_name(&StNone)  == "none".clone());
+    assert(state_name(&StRead)  == "read".clone());
+    assert(state_name(&StWrite) == "write".clone());
+}
+
+fn test_is_active_and_allows_writes() {
+    assert(!is_active(&StNone));
+    assert(is_active(&StRead));
+    assert(is_active(&StWrite));
+    assert(!allows_writes(&StNone));
+    assert(!allows_writes(&StRead));
+    assert(allows_writes(&StWrite));
+}
+
+fn test_upgrade_takes_max() {
+    match upgrade(StNone, StRead)  { StRead  => {}, _ => assert(false) }
+    match upgrade(StRead, StWrite) { StWrite => {}, _ => assert(false) }
+    match upgrade(StWrite, StRead) { StWrite => {}, _ => assert(false) }
+    match upgrade(StNone, StNone)  { StNone  => {}, _ => assert(false) }
+}
+
+fn test_connection_state_aggregates() {
+    let mut states = List.new();
+    states.push(StRead);
+    states.push(StNone);
+    states.push(StWrite);
+    states.push(StRead);
+    match connection_state(&states) { StWrite => {}, _ => assert(false) }
+}
+
+fn test_connection_state_empty_is_none() {
+    let states: List<TxnState> = List.new();
+    match connection_state(&states) { StNone => {}, _ => assert(false) }
+}
+
+fn test_well_known_code_predicate() {
+    assert(is_well_known_code(0));
+    assert(is_well_known_code(1));
+    assert(is_well_known_code(2));
+    assert(!is_well_known_code(3));
+    assert(!is_well_known_code(-1));
+}
+
+fn main() {
+    test_from_code_branches();
+    test_to_code();
+    test_state_names();
+    test_is_active_and_allows_writes();
+    test_upgrade_takes_max();
+    test_connection_state_aggregates();
+    test_connection_state_empty_is_none();
+    test_well_known_code_predicate();
+}

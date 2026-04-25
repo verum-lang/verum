@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/total_changes64_api/mod.vr
+// =============================================================================
+// sqlite3_changes64 / sqlite3_total_changes64 — 64-bit successors to the
+// 32-bit change counters.  Required when row counts may exceed 2^31.
+// Added 3.37.0.  Spec App E.C.
+// =============================================================================
+
+module core.database.sqlite.native.total_changes64_api;
+
+public module counters;

@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, total_changes64_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.total_changes64_api.counters.{
+    Counters, empty,
+    record_stmt, reset_stmt,
+    changes64, total_changes64,
+    changes32_saturating, total_changes32_saturating,
+    last_stmt_overflows_32, total_overflows_32,
+    diff_total, snapshot_text,
+};
+mount base.{Bool, Int64};
+
+fn test_empty_counters() {
+    let c = empty();
+    assert_eq(changes64(&c), 0 as Int64);
+    assert_eq(total_changes64(&c), 0 as Int64);
+}
+
+fn test_record_stmt_updates_both() {
+    let mut c = empty();
+    c = record_stmt(c, 5 as Int64);
+    assert_eq(changes64(&c),       5 as Int64);
+    assert_eq(total_changes64(&c), 5 as Int64);
+    c = record_stmt(c, 7 as Int64);
+    assert_eq(changes64(&c),        7 as Int64);   // last only
+    assert_eq(total_changes64(&c), 12 as Int64);   // accumulator
+}
+
+fn test_reset_stmt_keeps_total() {
+    let mut c = empty();
+    c = record_stmt(c, 4 as Int64);
+    c = reset_stmt(c);
+    assert_eq(changes64(&c),       0 as Int64);
+    assert_eq(total_changes64(&c), 4 as Int64);
+}
+
+fn test_saturating_32_below_max() {
+    let mut c = empty();
+    c = record_stmt(c, 1000 as Int64);
+    assert_eq(changes32_saturating(&c), 1000);
+    assert_eq(total_changes32_saturating(&c), 1000);
+    assert(!last_stmt_overflows_32(&c));
+    assert(!total_overflows_32(&c));
+}
+
+fn test_saturating_32_at_overflow() {
+    let mut c = empty();
+    let big = 5_000_000_000 as Int64;
+    c = record_stmt(c, big);
+    assert_eq(changes32_saturating(&c),       2147483647);
+    assert_eq(total_changes32_saturating(&c), 2147483647);
+    assert(last_stmt_overflows_32(&c));
+    assert(total_overflows_32(&c));
+}
+
+fn test_diff_total() {
+    let mut prev = empty();
+    prev = record_stmt(prev, 10 as Int64);
+    let mut now = prev;
+    now = record_stmt(now, 25 as Int64);
+    assert_eq(diff_total(&prev, &now), 25 as Int64);
+}
+
+fn test_snapshot_text_format() {
+    let mut c = empty();
+    c = record_stmt(c, 7 as Int64);
+    c = record_stmt(c, 3 as Int64);
+    let s = snapshot_text(&c);
+    assert(s == "changes=3 total=10".clone());
+}
+
+fn main() {
+    test_empty_counters();
+    test_record_stmt_updates_both();
+    test_reset_stmt_keeps_total();
+    test_saturating_32_below_max();
+    test_saturating_32_at_overflow();
+    test_diff_total();
+    test_snapshot_text_format();
+}

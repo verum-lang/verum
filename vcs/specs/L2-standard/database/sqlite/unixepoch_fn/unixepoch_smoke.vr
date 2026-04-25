@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, unixepoch_fn, sql-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.unixepoch_fn.fn_.{
+    TimeValue, TvNow, TvIso, TvJulian, TvUnixSeconds, TvInvalid,
+    parse,
+    Result, RNull, REpoch,
+    result_is_null, result_seconds, evaluate,
+    ModifierKind,
+    MkOffsetSeconds, MkOffsetMinutes, MkOffsetHours, MkOffsetDays,
+    MkOffsetMonths, MkOffsetYears,
+    MkStartOfDay, MkStartOfMonth, MkStartOfYear,
+    MkWeekdayN, MkUtc, MkLocaltime, MkAuto, MkSubsec,
+    MkJulianday, MkUnixepoch, MkUnknown,
+    classify_modifier, modifier_name,
+    is_zone_modifier, is_format_modifier,
+};
+mount base.{Bool, Int64};
+
+fn test_parse_now() {
+    match parse("now".clone()) { TvNow => {}, _ => assert(false) }
+}
+
+fn test_parse_other_falls_to_iso() {
+    match parse("2024-01-01".clone()) { TvIso(_) => {}, _ => assert(false) }
+}
+
+fn test_evaluate_invalid() {
+    let r = evaluate(&TvInvalid, 0 as Int64);
+    assert(result_is_null(&r));
+}
+
+fn test_evaluate_now_uses_clock() {
+    let r = evaluate(&TvNow, 1_700_000_000 as Int64);
+    assert(!result_is_null(&r));
+    assert_eq(result_seconds(&r), 1_700_000_000 as Int64);
+}
+
+fn test_evaluate_unix_seconds_round_trip() {
+    let r = evaluate(&TvUnixSeconds(42 as Int64), 0 as Int64);
+    assert_eq(result_seconds(&r), 42 as Int64);
+}
+
+fn test_evaluate_julian_offset_zero() {
+    let r = evaluate(&TvJulian(2440588 as Int64), 0 as Int64);
+    assert_eq(result_seconds(&r), 0 as Int64);
+}
+
+fn test_evaluate_julian_one_day_after_epoch() {
+    let r = evaluate(&TvJulian(2440589 as Int64), 0 as Int64);
+    assert_eq(result_seconds(&r), 86400 as Int64);
+}
+
+fn test_evaluate_iso_returns_null() {
+    let r = evaluate(&TvIso("2024-06-01".clone()), 0 as Int64);
+    assert(result_is_null(&r));
+}
+
+fn test_classify_zone_modifiers() {
+    match classify_modifier("utc".clone())       { MkUtc       => {}, _ => assert(false) }
+    match classify_modifier("localtime".clone()) { MkLocaltime => {}, _ => assert(false) }
+    assert(is_zone_modifier(&MkUtc));
+    assert(is_zone_modifier(&MkLocaltime));
+    assert(!is_zone_modifier(&MkAuto));
+}
+
+fn test_classify_format_modifiers() {
+    match classify_modifier("auto".clone())      { MkAuto      => {}, _ => assert(false) }
+    match classify_modifier("subsec".clone())    { MkSubsec    => {}, _ => assert(false) }
+    match classify_modifier("julianday".clone()) { MkJulianday => {}, _ => assert(false) }
+    match classify_modifier("unixepoch".clone()) { MkUnixepoch => {}, _ => assert(false) }
+    assert(is_format_modifier(&MkAuto));
+    assert(is_format_modifier(&MkUnixepoch));
+    assert(!is_format_modifier(&MkUtc));
+}
+
+fn test_classify_start_of_modifiers() {
+    match classify_modifier("start of day".clone())   { MkStartOfDay   => {}, _ => assert(false) }
+    match classify_modifier("start of month".clone()) { MkStartOfMonth => {}, _ => assert(false) }
+    match classify_modifier("start of year".clone())  { MkStartOfYear  => {}, _ => assert(false) }
+}
+
+fn test_classify_unknown_falls_through() {
+    match classify_modifier("xyzzy".clone()) { MkUnknown => {}, _ => assert(false) }
+}
+
+fn test_modifier_names() {
+    assert(modifier_name(&MkUtc)         == "utc".clone());
+    assert(modifier_name(&MkUnixepoch)   == "unixepoch".clone());
+    assert(modifier_name(&MkStartOfDay)  == "start_of_day".clone());
+    assert(modifier_name(&MkOffsetDays)  == "offset_days".clone());
+    assert(modifier_name(&MkUnknown)     == "unknown".clone());
+}
+
+fn main() {
+    test_parse_now();
+    test_parse_other_falls_to_iso();
+    test_evaluate_invalid();
+    test_evaluate_now_uses_clock();
+    test_evaluate_unix_seconds_round_trip();
+    test_evaluate_julian_offset_zero();
+    test_evaluate_julian_one_day_after_epoch();
+    test_evaluate_iso_returns_null();
+    test_classify_zone_modifiers();
+    test_classify_format_modifiers();
+    test_classify_start_of_modifiers();
+    test_classify_unknown_falls_through();
+    test_modifier_names();
+}

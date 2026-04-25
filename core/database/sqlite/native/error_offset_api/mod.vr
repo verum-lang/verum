@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/error_offset_api/mod.vr
+// =============================================================================
+// sqlite3_error_offset(db) — byte offset of the error within the SQL text
+// of the failing prepare/exec, or -1 when not available.  Added 3.38.0.
+// Pairs with sqlite3_errmsg / sqlite3_extended_errcode for diagnostics.
+// =============================================================================
+
+module core.database.sqlite.native.error_offset_api;
+
+public module offset;
