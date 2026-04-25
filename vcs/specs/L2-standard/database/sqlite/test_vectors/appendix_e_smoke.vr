@@ -21,7 +21,7 @@ mount core.database.sqlite.native.test_vectors.record_encoding.{
     count as record_count,
 };
 mount core.database.sqlite.native.test_vectors.wal_checksum.{
-    TestVectorsWalChecksum, appendix_e3,
+    WalChecksumTestVector, appendix_e3,
     count as wal_count,
 };
 mount core.database.sqlite.native.test_vectors.btree_cell.{

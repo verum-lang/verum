@@ -20,12 +20,12 @@ public fn empty() -> State {
     State { have_value: false, out: Text.new(), sep: Text.new(), has_sep: false }
 }
 
-public type AggOperand is
+public type StringAggOperand is
     | OpNull
     | OpText(Text)
     ;
 
-public fn step(mut s: State, value: &AggOperand, sep: &AggOperand) -> State {
+public fn step(mut s: State, value: &StringAggOperand, sep: &StringAggOperand) -> State {
     // NULL value skipped entirely.
     let v = match value {
         OpNull    => return s,

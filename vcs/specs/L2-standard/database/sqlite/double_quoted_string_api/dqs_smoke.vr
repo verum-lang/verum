@@ -12,7 +12,7 @@ mount core.database.sqlite.native.double_quoted_string_api.context.{
     StmtKind, SkDml, SkDdl, SkPragma, stmt_kind_name,
 };
 mount core.database.sqlite.native.double_quoted_string_api.resolver.{
-    DqsResolution, RsIdentifier, RsStringLiteralLegacy, RsError,
+    DoubleQuotedResolution, RsIdentifier, RsStringLiteralLegacy, RsError,
     resolution_name, is_legacy_fallback, is_error,
     resolve,
 };

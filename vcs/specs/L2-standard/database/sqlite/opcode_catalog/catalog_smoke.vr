@@ -29,7 +29,7 @@ mount core.database.sqlite.native.opcode_catalog.effects.{
     pure_effects, branch_effects, pager_writer, cursor_reader, yield_effects,
 };
 mount core.database.sqlite.native.opcode_catalog.error_codes.{
-    OpcodePrimaryCode,
+    OpcodeErrorCode,
     EcOk, EcError, EcBusy, EcLocked, EcConstraint, EcCorrupt, EcRow, EcDone,
     primary_wire, primary_name, primary_to_dberror,
     DbError, DbeOk, DbeBusy, DbeLocked,

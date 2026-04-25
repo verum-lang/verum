@@ -4,21 +4,21 @@ module core.database.sqlite.native.auto_vacuum_pragma.mode;
 
 mount base.{Bool, Text};
 
-public type AutoVacuumPragmaMode is
+public type AutoVacuumPragma is
     | AvNone           // 0 — default
     | AvFull           // 1 — reclaim at every commit
     | AvIncremental    // 2 — pointer-map kept; reclaim via PRAGMA
     ;
 
-public fn default_mode() -> AutoVacuumPragmaMode { AvNone }
+public fn default_mode() -> AutoVacuumPragma { AvNone }
 
-public fn from_pragma_value(n: Int) -> AutoVacuumPragmaMode {
+public fn from_pragma_value(n: Int) -> AutoVacuumPragma {
     if n <= 0 { return AvNone; }
     if n == 1 { return AvFull; }
     AvIncremental
 }
 
-public fn to_pragma_value(m: &AutoVacuumPragmaMode) -> Int {
+public fn to_pragma_value(m: &AutoVacuumPragma) -> Int {
     match m {
         AvNone        => 0,
         AvFull        => 1,
@@ -26,7 +26,7 @@ public fn to_pragma_value(m: &AutoVacuumPragmaMode) -> Int {
     }
 }
 
-public fn mode_name(m: &AutoVacuumPragmaMode) -> Text {
+public fn mode_name(m: &AutoVacuumPragma) -> Text {
     match m {
         AvNone        => "none".clone(),
         AvFull        => "full".clone(),
@@ -34,15 +34,15 @@ public fn mode_name(m: &AutoVacuumPragmaMode) -> Text {
     }
 }
 
-public fn maintains_pointer_map(m: &AutoVacuumPragmaMode) -> Bool {
+public fn maintains_pointer_map(m: &AutoVacuumPragma) -> Bool {
     match m { AvNone => false, _ => true }
 }
 
-public fn reclaims_at_commit(m: &AutoVacuumPragmaMode) -> Bool {
+public fn reclaims_at_commit(m: &AutoVacuumPragma) -> Bool {
     match m { AvFull => true, _ => false }
 }
 
-public fn supports_incremental_pragma(m: &AutoVacuumPragmaMode) -> Bool {
+public fn supports_incremental_pragma(m: &AutoVacuumPragma) -> Bool {
     match m { AvIncremental => true, _ => false }
 }
 

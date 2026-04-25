@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.auto_vacuum_pragma.mode.{
-    AutoVacuumPragmaMode, AvNone, AvFull, AvIncremental,
+    AutoVacuumPragma, AvNone, AvFull, AvIncremental,
     default_mode, from_pragma_value, to_pragma_value, mode_name,
     maintains_pointer_map, reclaims_at_commit, supports_incremental_pragma,
     SetOutcome, SoApplied, SoIgnoredNotEmpty,

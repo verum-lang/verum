@@ -8,13 +8,13 @@ mount core.database.sqlite.native.double_quoted_string_api.context.{
 };
 mount base.{Bool, Text};
 
-public type DqsResolution is
+public type DoubleQuotedResolution is
     | RsIdentifier             // "name" is an identifier (expected form)
     | RsStringLiteralLegacy    // "name" is treated as string literal (legacy DQS)
     | RsError                  // rejected — identifier unresolved, DQS disabled
     ;
 
-public fn resolution_name(r: &DqsResolution) -> Text {
+public fn resolution_name(r: &DoubleQuotedResolution) -> Text {
     match r {
         RsIdentifier           => "identifier".clone(),
         RsStringLiteralLegacy  => "string_literal_legacy".clone(),
@@ -22,11 +22,11 @@ public fn resolution_name(r: &DqsResolution) -> Text {
     }
 }
 
-public fn is_legacy_fallback(r: &DqsResolution) -> Bool {
+public fn is_legacy_fallback(r: &DoubleQuotedResolution) -> Bool {
     match r { RsStringLiteralLegacy => true, _ => false }
 }
 
-public fn is_error(r: &DqsResolution) -> Bool {
+public fn is_error(r: &DoubleQuotedResolution) -> Bool {
     match r { RsError => true, _ => false }
 }
 
@@ -38,7 +38,7 @@ public fn resolve(
     cfg: &DqsConfig,
     kind: &StmtKind,
     identifier_in_scope: Bool,
-) -> DqsResolution {
+) -> DoubleQuotedResolution {
     if identifier_in_scope { return RsIdentifier; }
     let allowed = match kind {
         SkDml    => dml_enabled(cfg),
