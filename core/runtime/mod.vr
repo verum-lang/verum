@@ -79,7 +79,7 @@ public module recovery;
 /// Supervision tree with restart policies
 public module supervisor;
 
-/// SpawnConfig for spawn_with functionality
+/// SupervisorSpawnConfig for spawn_with functionality
 public module spawn;
 
 // Runtime intrinsics are now consolidated in core/intrinsics.vr
@@ -169,7 +169,7 @@ public mount .supervisor.{
 
 // Spawn configuration
 public mount .spawn.{
-    SpawnConfig,
+    SupervisorSpawnConfig,
     SpawnConfigBuilder,
     PriorityLevel,
 };

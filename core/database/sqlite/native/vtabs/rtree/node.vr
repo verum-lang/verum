@@ -5,7 +5,7 @@
 //
 // `LeafEntry`  — (rowid, bbox)
 // `InternalEntry` — (child_node_id, bbox covering all child entries)
-// `Node`       — sum type with leaf / internal payloads
+// `RTreeNode`       — sum type with leaf / internal payloads
 //
 // Each node has a fixed capacity (16 entries by default — same as
 // SQLite's `RTREE_MAXCELLS`); when an insert would exceed it, the
@@ -30,10 +30,10 @@ public type LeafEntry is { rowid: Int64, bbox: BBox };
 public type InternalEntry is { child_node_id: Int, bbox: BBox };
 
 // -----------------------------------------------------------------------------
-// Node
+// RTreeNode
 // -----------------------------------------------------------------------------
 
-public type Node is
+public type RTreeNode is
       Leaf(LeafContent)
     | Internal(InternalContent);
 
@@ -49,7 +49,7 @@ public type InternalContent is {
     entries: List<InternalEntry>,
 };
 
-public fn leaf_new(node_id: Int) -> Node {
+public fn leaf_new(node_id: Int) -> RTreeNode {
     Leaf(LeafContent {
         node_id: node_id,
         parent: None,
@@ -57,7 +57,7 @@ public fn leaf_new(node_id: Int) -> Node {
     })
 }
 
-public fn internal_new(node_id: Int) -> Node {
+public fn internal_new(node_id: Int) -> RTreeNode {
     Internal(InternalContent {
         node_id: node_id,
         parent: None,
@@ -69,26 +69,26 @@ public fn internal_new(node_id: Int) -> Node {
 // Common queries
 // -----------------------------------------------------------------------------
 
-public fn node_id(n: &Node) -> Int {
+public fn node_id(n: &RTreeNode) -> Int {
     match n {
         Leaf(c)     => c.node_id,
         Internal(c) => c.node_id,
     }
 }
 
-public fn node_entry_count(n: &Node) -> Int {
+public fn node_entry_count(n: &RTreeNode) -> Int {
     match n {
         Leaf(c)     => c.entries.len(),
         Internal(c) => c.entries.len(),
     }
 }
 
-public fn node_is_full(n: &Node) -> base.Bool {
+public fn node_is_full(n: &RTreeNode) -> base.Bool {
     node_entry_count(n) >= RTREE_MAX_CELLS
 }
 
 /// MBB covering every entry in the node.
-public fn node_mbb(n: &Node) -> Maybe<BBox> {
+public fn node_mbb(n: &RTreeNode) -> Maybe<BBox> {
     match n {
         Leaf(c) => leaf_mbb(c),
         Internal(c) => internal_mbb(c),

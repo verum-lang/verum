@@ -8,7 +8,7 @@
 // # Architecture
 //
 // - Data Parallelism: DataParallel, DDP (Distributed Data Parallel)
-// - Model Parallelism: Tensor Parallelism, Pipeline Parallelism
+// - Model Parallelism: DistributedTensor Parallelism, Pipeline Parallelism
 // - Memory Optimization: FSDP (Fully Sharded Data Parallel)
 // - Collective Operations: All-reduce, All-gather, Reduce-scatter, etc.
 // - Actor Mesh: Monarch-inspired distributed computing abstraction
@@ -252,7 +252,7 @@ implement<M: Module<In, Out>, In, Out> DataParallel<M> {
     }
 }
 
-implement<M: Module<In, Out>, In: Tensor, Out: Tensor> Module<In, Out> for DataParallel<M> {
+implement<M: Module<In, Out>, In: DistributedTensor, Out: DistributedTensor> Module<In, Out> for DataParallel<M> {
     fn forward(&self, input: In) -> Out {
         if self.device_ids.len() == 1 {
             return self.model.forward(input);
@@ -348,7 +348,7 @@ fn bucket_gradients(
 }
 
 // =============================================================================
-// Tensor Parallelism
+// DistributedTensor Parallelism
 // =============================================================================
 
 // Column-parallel linear layer
@@ -633,7 +633,7 @@ implement<M: Module<In, Out>, In, Out> PipelineParallel<M> {
 }
 
 // Compute backward pass for a module
-fn backward<M: Module<In, Out>, In, Out: Tensor>(m: &M, grad_output: &Out) -> In {
+fn backward<M: Module<In, Out>, In, Out: DistributedTensor>(m: &M, grad_output: &Out) -> In {
     @vbc(MODULE_BACKWARD, m, grad_output)
 }
 
@@ -971,7 +971,7 @@ public type RdmaRef<T> is {
     generation: U64,  // For CBGR validation
 };
 
-implement<T: Tensor> RdmaRef<T> {
+implement<T: DistributedTensor> RdmaRef<T> {
     // Create RDMA reference to local tensor
     public fn from_local(t: &T, actor_id: ActorId) -> Self {
         @vbc(RDMA_CREATE_REF, t, actor_id)
@@ -995,17 +995,17 @@ implement<T: Tensor> RdmaRef<T> {
 
 // RDMA context for zero-copy operations
 context RdmaContext {
-    fn get_ref<T: Tensor>(actor_id: ActorId, t: &T) -> RdmaRef<T>;
-    fn prefetch<T: Tensor>(refs: &[RdmaRef<T>]);
+    fn get_ref<T: DistributedTensor>(actor_id: ActorId, t: &T) -> RdmaRef<T>;
+    fn prefetch<T: DistributedTensor>(refs: &[RdmaRef<T>]);
     fn wait_all();
 }
 
 // =============================================================================
-// Tensor Protocol for Generic Operations
+// DistributedTensor Protocol for Generic Operations
 // =============================================================================
 
-// Tensor protocol for operations that work across tensor types
-public type Tensor is protocol {
+// DistributedTensor protocol for operations that work across tensor types
+public type DistributedTensor is protocol {
     fn shape(&self) -> List<USize>;
     fn numel(&self) -> USize;
     fn clone(&self) -> Self;

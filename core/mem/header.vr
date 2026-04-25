@@ -152,21 +152,21 @@ implement AllocationFlags {
 /// alignment on most architectures.
 
 /// Error type for reference validation failures.
-public type ValidationError is
+public type MemValidationError is
     | GenerationMismatch { expected: UInt32, actual: UInt32 }
     | EpochMismatch { expected: UInt16, actual: UInt16 };
 
-implement ValidationError {
-    public fn generation_mismatch(expected: UInt32, actual: UInt32) -> ValidationError {
-        ValidationError.GenerationMismatch { expected: expected, actual: actual }
+implement MemValidationError {
+    public fn generation_mismatch(expected: UInt32, actual: UInt32) -> MemValidationError {
+        MemValidationError.GenerationMismatch { expected: expected, actual: actual }
     }
 
-    public fn epoch_mismatch(expected: UInt16, actual: UInt16) -> ValidationError {
-        ValidationError.EpochMismatch { expected: expected, actual: actual }
+    public fn epoch_mismatch(expected: UInt16, actual: UInt16) -> MemValidationError {
+        MemValidationError.EpochMismatch { expected: expected, actual: actual }
     }
 }
 
-implement Debug for ValidationError {
+implement Debug for MemValidationError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             GenerationMismatch { expected, actual } =>
@@ -177,7 +177,7 @@ implement Debug for ValidationError {
     }
 }
 
-implement Display for ValidationError {
+implement Display for MemValidationError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             GenerationMismatch { expected, actual } =>
@@ -387,13 +387,13 @@ implement AllocationHeader {
     /// Validate that a reference's generation/epoch match this header.
     /// Returns Ok(()) if valid, Err with validation error if not.
     @inline
-    public fn validate_reference(&self, expected_gen: UInt32, expected_epoch: UInt16) -> Result<(), ValidationError> {
+    public fn validate_reference(&self, expected_gen: UInt32, expected_epoch: UInt16) -> Result<(), MemValidationError> {
         let actual_gen = self.load_generation();
         let actual_epoch = self.load_epoch();
         if expected_gen != actual_gen {
-            Result.Err(ValidationError.generation_mismatch(expected_gen, actual_gen))
+            Result.Err(MemValidationError.generation_mismatch(expected_gen, actual_gen))
         } else if expected_epoch != actual_epoch {
-            Result.Err(ValidationError.epoch_mismatch(expected_epoch, actual_epoch))
+            Result.Err(MemValidationError.epoch_mismatch(expected_epoch, actual_epoch))
         } else {
             Result.Ok(())
         }
@@ -402,12 +402,12 @@ implement AllocationHeader {
     /// Fast validation using combined atomic load.
     /// Returns Ok(()) if valid, Err with validation error if not.
     @inline
-    public unsafe fn validate_reference_fast(&self, expected_gen: UInt32, expected_epoch: UInt16) -> Result<(), ValidationError> {
+    public unsafe fn validate_reference_fast(&self, expected_gen: UInt32, expected_epoch: UInt16) -> Result<(), MemValidationError> {
         let (actual_gen, actual_epoch) = self.load_generation_epoch_combined();
         if expected_gen != actual_gen {
-            Result.Err(ValidationError.generation_mismatch(expected_gen, actual_gen))
+            Result.Err(MemValidationError.generation_mismatch(expected_gen, actual_gen))
         } else if expected_epoch != actual_epoch {
-            Result.Err(ValidationError.epoch_mismatch(expected_epoch, actual_epoch))
+            Result.Err(MemValidationError.epoch_mismatch(expected_epoch, actual_epoch))
         } else {
             Result.Ok(())
         }

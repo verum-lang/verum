@@ -23,12 +23,12 @@ public fn may_return_null(f: &SqlForm) -> Bool {
 }
 
 // Memory-management contract for the returned pointer.
-public type Lifetime is
+public type SqlExpandedLifetime is
     | LtInternalOwned     // sqlite3_sql / sqlite3_normalized_sql — must NOT be freed
     | LtCallerFrees       // sqlite3_expanded_sql — caller calls sqlite3_free
     ;
 
-public fn lifetime_for(f: &SqlForm) -> Lifetime {
+public fn lifetime_for(f: &SqlForm) -> SqlExpandedLifetime {
     match f {
         FOriginal   => LtInternalOwned,
         FExpanded   => LtCallerFrees,
@@ -36,14 +36,14 @@ public fn lifetime_for(f: &SqlForm) -> Lifetime {
     }
 }
 
-public fn lifetime_name(l: &Lifetime) -> Text {
+public fn lifetime_name(l: &SqlExpandedLifetime) -> Text {
     match l {
         LtInternalOwned => "internal_owned".clone(),
         LtCallerFrees   => "caller_frees".clone(),
     }
 }
 
-public fn caller_frees(l: &Lifetime) -> Bool {
+public fn caller_frees(l: &SqlExpandedLifetime) -> Bool {
     match l { LtCallerFrees => true, _ => false }
 }
 

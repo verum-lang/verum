@@ -76,13 +76,13 @@ mount super.random.RandomKey;
 
 // Default tensor type for simple API
 // Uses Float (F64) for maximum precision in prototyping
-public type Tensor is DynTensor<Float>;
+public type SimpleTensor is DynTensor<Float>;
 
 // Alias for 32-bit tensor (ML training)
 public type Tensor32 is DynTensor<Float32>;
 
 // =============================================================================
-// Tensor Creation (No Generics Required)
+// SimpleTensor Creation (No Generics Required)
 // =============================================================================
 
 // Create a tensor filled with zeros
@@ -91,29 +91,29 @@ public type Tensor32 is DynTensor<Float32>;
 // ```verum
 // let x = zeros(&[3, 4]);  // 3x4 Float tensor
 // ```
-public fn zeros(shape: &[USize]) -> Tensor {
+public fn zeros(shape: &[USize]) -> SimpleTensor {
     tensor_zeros(shape)
 }
 
 // Create a tensor filled with ones
-public fn ones(shape: &[USize]) -> Tensor {
+public fn ones(shape: &[USize]) -> SimpleTensor {
     tensor_ones(shape)
 }
 
 // Create a tensor filled with a constant value
-public fn full(shape: &[USize], value: Float) -> Tensor {
+public fn full(shape: &[USize], value: Float) -> SimpleTensor {
     tensor_full(shape, value)
 }
 
 // Create a tensor with random normal values (mean=0, std=1)
 //
 // Uses default Random context (seeded from thread-local RNG)
-public fn randn(shape: &[USize]) -> Tensor using [Random] {
+public fn randn(shape: &[USize]) -> SimpleTensor using [Random] {
     tensor_randn(shape)
 }
 
 // Create a tensor with uniform random values in [0, 1)
-public fn rand(shape: &[USize]) -> Tensor using [Random] {
+public fn rand(shape: &[USize]) -> SimpleTensor using [Random] {
     tensor_rand(shape)
 }
 
@@ -123,7 +123,7 @@ public fn rand(shape: &[USize]) -> Tensor using [Random] {
 // ```verum
 // let x = arange(0, 10, 1);  // [0, 1, 2, ..., 9]
 // ```
-public fn arange(start: Float, end: Float, step: Float) -> Tensor {
+public fn arange(start: Float, end: Float, step: Float) -> SimpleTensor {
     tensor_arange(start, end, step)
 }
 
@@ -133,12 +133,12 @@ public fn arange(start: Float, end: Float, step: Float) -> Tensor {
 // ```verum
 // let x = linspace(0.0, 1.0, 11);  // [0.0, 0.1, ..., 1.0]
 // ```
-public fn linspace(start: Float, end: Float, n: USize) -> Tensor {
+public fn linspace(start: Float, end: Float, n: USize) -> SimpleTensor {
     tensor_linspace(start, end, n)
 }
 
 // Create an identity matrix
-public fn eye(n: USize) -> Tensor {
+public fn eye(n: USize) -> SimpleTensor {
     tensor_eye(n)
 }
 
@@ -148,7 +148,7 @@ public fn eye(n: USize) -> Tensor {
 // ```verum
 // let x = tensor(&[1.0, 2.0, 3.0]);
 // ```
-public fn tensor(values: &[Float]) -> Tensor {
+public fn tensor(values: &[Float]) -> SimpleTensor {
     let shape = [values.len()];
     tensor_from_list(values, &shape)
 }
@@ -163,12 +163,12 @@ public fn tensor(values: &[Float]) -> Tensor {
 // ```verum
 // let c = matmul(&a, &b);  // [M, K] @ [K, N] -> [M, N]
 // ```
-public fn matmul(a: &Tensor, b: &Tensor) -> Tensor {
+public fn matmul(a: &SimpleTensor, b: &SimpleTensor) -> SimpleTensor {
     tensor_matmul(a, b)
 }
 
 // Transpose the last two dimensions
-public fn transpose(a: &Tensor) -> Tensor {
+public fn transpose(a: &SimpleTensor) -> SimpleTensor {
     tensor_transpose(a)
 }
 
@@ -178,7 +178,7 @@ public fn transpose(a: &Tensor) -> Tensor {
 // ```verum
 // let y = reshape(&x, &[2, -1]);  // Auto-infer second dim
 // ```
-public fn reshape(a: &Tensor, shape: &[ISize]) -> Tensor {
+public fn reshape(a: &SimpleTensor, shape: &[ISize]) -> SimpleTensor {
     // Convert shape with possible -1 to actual sizes
     let numel = a.numel();
     let mut new_shape = List.new();
@@ -205,22 +205,22 @@ public fn reshape(a: &Tensor, shape: &[ISize]) -> Tensor {
 }
 
 // Remove dimensions of size 1
-public fn squeeze(a: &Tensor) -> Tensor {
+public fn squeeze(a: &SimpleTensor) -> SimpleTensor {
     tensor_squeeze(a)
 }
 
 // Add a dimension of size 1 at the specified position
-public fn unsqueeze(a: &Tensor, dim: ISize) -> Tensor {
+public fn unsqueeze(a: &SimpleTensor, dim: ISize) -> SimpleTensor {
     tensor_unsqueeze(a, dim)
 }
 
 // Concatenate tensors along a dimension
-public fn cat(tensors: &[&Tensor], dim: ISize) -> Tensor {
+public fn cat(tensors: &[&SimpleTensor], dim: ISize) -> SimpleTensor {
     tensor_cat(tensors, dim)
 }
 
 // Stack tensors along a new dimension
-public fn stack(tensors: &[&Tensor], dim: ISize) -> Tensor {
+public fn stack(tensors: &[&SimpleTensor], dim: ISize) -> SimpleTensor {
     super.tensor.stack(tensors, dim)
 }
 
@@ -235,32 +235,32 @@ public fn stack(tensors: &[&Tensor], dim: ISize) -> Tensor {
 // let total = sum(&x);           // Sum all elements
 // let row_sums = sum_dim(&x, 1); // Sum along axis 1
 // ```
-public fn sum(a: &Tensor) -> Float {
+public fn sum(a: &SimpleTensor) -> Float {
     tensor_sum(a).item()
 }
 
 // Sum along a specific dimension
-public fn sum_dim(a: &Tensor, dim: ISize) -> Tensor {
+public fn sum_dim(a: &SimpleTensor, dim: ISize) -> SimpleTensor {
     tensor_sum(a).sum_axis(dim)
 }
 
 // Mean of all elements
-public fn mean(a: &Tensor) -> Float {
+public fn mean(a: &SimpleTensor) -> Float {
     tensor_mean(a).item()
 }
 
 // Mean along a specific dimension
-public fn mean_dim(a: &Tensor, dim: ISize) -> Tensor {
+public fn mean_dim(a: &SimpleTensor, dim: ISize) -> SimpleTensor {
     tensor_mean(a).mean_axis(dim)
 }
 
 // Maximum value
-public fn max(a: &Tensor) -> Float {
+public fn max(a: &SimpleTensor) -> Float {
     tensor_max(a).item()
 }
 
 // Minimum value
-public fn min(a: &Tensor) -> Float {
+public fn min(a: &SimpleTensor) -> Float {
     tensor_min(a).item()
 }
 
@@ -274,12 +274,12 @@ public fn min(a: &Tensor) -> Float {
 // ```verum
 // let probs = softmax(&logits);
 // ```
-public fn softmax(a: &Tensor) -> Tensor {
+public fn softmax(a: &SimpleTensor) -> SimpleTensor {
     tensor_softmax(a, -1)
 }
 
 // Softmax along a specific dimension
-public fn softmax_dim(a: &Tensor, dim: ISize) -> Tensor {
+public fn softmax_dim(a: &SimpleTensor, dim: ISize) -> SimpleTensor {
     tensor_softmax(a, dim)
 }
 
@@ -298,7 +298,7 @@ public fn softmax_dim(a: &Tensor, dim: ISize) -> Tensor {
 // ]);
 // train(&mut model, &train_loader, 10);
 // ```
-public fn train<M: Module<Tensor, Tensor>>(
+public fn train<M: Module<SimpleTensor, SimpleTensor>>(
     model: &mut M,
     data: &DataLoader,
     epochs: USize,
@@ -331,7 +331,7 @@ public fn train<M: Module<Tensor, Tensor>>(
 }
 
 // Evaluate model accuracy
-public fn evaluate<M: Module<Tensor, Tensor>>(
+public fn evaluate<M: Module<SimpleTensor, SimpleTensor>>(
     model: &M,
     data: &DataLoader,
 ) -> Float
@@ -405,7 +405,7 @@ public fn device() -> Device {
 }
 
 // Move tensor to the best available device
-public fn to_device(a: &Tensor) -> Tensor {
+public fn to_device(a: &SimpleTensor) -> SimpleTensor {
     a.to(default_device())
 }
 
@@ -414,7 +414,7 @@ public fn to_device(a: &Tensor) -> Tensor {
 // =============================================================================
 
 // Batch type for data loading
-public type Batch is { input: Tensor, target: Tensor };
+public type Batch is { input: SimpleTensor, target: SimpleTensor };
 
 // Protocol for data loaders in simple training
 public type DataLoader is protocol {
@@ -442,12 +442,12 @@ public type Module<In, Out> is protocol {
 // ]);
 // ```
 public type Sequential is {
-    layers: List<Heap<Module<Tensor, Tensor>>>,
+    layers: List<Heap<Module<SimpleTensor, SimpleTensor>>>,
 };
 
 implement Sequential {
     // Create sequential from list of layers
-    public fn from<M: Module<Tensor, Tensor>>(layers: &[M]) -> Self {
+    public fn from<M: Module<SimpleTensor, SimpleTensor>>(layers: &[M]) -> Self {
         let mut layer_list = List.new();
         for lyr in layers {
             layer_list.push(Heap.new(lyr));
@@ -456,8 +456,8 @@ implement Sequential {
     }
 }
 
-implement Module<Tensor, Tensor> for Sequential {
-    fn forward(&self, mut x: Tensor) -> Tensor {
+implement Module<SimpleTensor, SimpleTensor> for Sequential {
+    fn forward(&self, mut x: SimpleTensor) -> SimpleTensor {
         for lyr in &self.layers {
             x = lyr.forward(x);
         }
@@ -474,9 +474,9 @@ implement Module<Tensor, Tensor> for Sequential {
 // # Example
 // ```verum
 // let x = randn(&[3, 4]);
-// info(&x);  // Tensor[3, 4] dtype=F64 device=CPU mean=0.12 std=0.98
+// info(&x);  // SimpleTensor[3, 4] dtype=F64 device=CPU mean=0.12 std=0.98
 // ```
-public fn info(a: &Tensor) {
+public fn info(a: &SimpleTensor) {
     let shape_str = a.shape().iter()
         .map(|d| d.to_string())
         .join(", ");
@@ -484,7 +484,7 @@ public fn info(a: &Tensor) {
     let mean_val = mean(a);
     let std_val = sqrt(mean(&sub(&mul(a, a), &full(a.shape(), mean_val * mean_val))));
 
-    print(f"Tensor[{shape_str}] dtype={a.dtype()} device={a.device()} mean={mean_val:.4} std={std_val:.4}");
+    print(f"SimpleTensor[{shape_str}] dtype={a.dtype()} device={a.device()} mean={mean_val:.4} std={std_val:.4}");
 }
 
 // =============================================================================

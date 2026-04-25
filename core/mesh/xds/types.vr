@@ -1,5 +1,5 @@
 // =============================================================================
-// mesh/xds/types.vr — xDS v3 canonical TypeUrls + Node + config
+// mesh/xds/types.vr — xDS v3 canonical TypeUrls + XdsNode + config
 // =============================================================================
 
 module core.mesh.xds.types;
@@ -64,10 +64,10 @@ implement ResourceName {
 }
 
 // =============================================================================
-// Node identity (sent in every DiscoveryRequest)
+// XdsNode identity (sent in every DiscoveryRequest)
 // =============================================================================
 
-public type Node is {
+public type XdsNode is {
     id: Text,
     cluster: Text,
     locality_region: Maybe<Text>,
@@ -78,9 +78,9 @@ public type Node is {
     metadata_json: Text,
 }
 
-implement Node {
-    public fn new(id: Text, cluster: Text) -> Node {
-        Node {
+implement XdsNode {
+    public fn new(id: Text, cluster: Text) -> XdsNode {
+        XdsNode {
             id: id,
             cluster: cluster,
             locality_region: None,
@@ -97,20 +97,20 @@ implement Node {
         region: Text,
         zone: Text,
         subzone: Maybe<Text>,
-    ) -> Node {
+    ) -> XdsNode {
         self.locality_region = Some(region);
         self.locality_zone = Some(zone);
         self.locality_subzone = subzone;
         self
     }
 
-    public fn with_user_agent(mut self, name: Text, version: Text) -> Node {
+    public fn with_user_agent(mut self, name: Text, version: Text) -> XdsNode {
         self.user_agent_name = name;
         self.user_agent_version = version;
         self
     }
 
-    public fn with_metadata_json(mut self, json: Text) -> Node {
+    public fn with_metadata_json(mut self, json: Text) -> XdsNode {
         self.metadata_json = json; self
     }
 }
@@ -129,7 +129,7 @@ public type AdsAuth is
 
 public type AdsConfig is {
     address: Text,                       // e.g. "istiod.istio-system:15010"
-    node: Node,
+    node: XdsNode,
     auth: AdsAuth,
     /// Use DeltaAggregatedResources stream instead of legacy ADS.
     use_delta: Bool,
@@ -140,7 +140,7 @@ public type AdsConfig is {
 }
 
 implement AdsConfig {
-    public fn new(address: Text, node: Node) -> AdsConfig {
+    public fn new(address: Text, node: XdsNode) -> AdsConfig {
         AdsConfig {
             address: address,
             node: node,

@@ -1,16 +1,16 @@
 // =============================================================================
-// spawn_test.vr - Comprehensive tests for SpawnConfig and task spawning
+// spawn_test.vr - Comprehensive tests for SupervisorSpawnConfig and task spawning
 // =============================================================================
 // @test: typecheck-pass
 // @level: L1
 // @tier: 0
 // @tags: runtime, spawn, priority, config, core
-// @description: Tests for SpawnConfig builder pattern, PriorityLevel, and spawn utilities
+// @description: Tests for SupervisorSpawnConfig builder pattern, PriorityLevel, and spawn utilities
 //
 // Coverage:
 // - PriorityLevel variants and conversion
 // - InlineContextStorage operations
-// - SpawnConfig construction and builder pattern
+// - SupervisorSpawnConfig construction and builder pattern
 // - SpawnConfigBuilder validation
 // - Configuration application to environment
 // =============================================================================
@@ -19,7 +19,7 @@ module specs.core.runtime.spawn_test;
 
 mount core.runtime.spawn.{
     PriorityLevel,
-    SpawnConfig,
+    SupervisorSpawnConfig,
     SpawnConfigBuilder,
     InlineContextStorage,
     // Convenience spawn functions (existence verification)
@@ -132,12 +132,12 @@ fn test_priority_level_ordering() {
 }
 
 // =============================================================================
-// Section 2: SpawnConfig Construction Tests
+// Section 2: SupervisorSpawnConfig Construction Tests
 // =============================================================================
 
 @test
 fn test_spawn_config_new() {
-    let config = SpawnConfig.new();
+    let config = SupervisorSpawnConfig.new();
 
     // Default values
     assert(config.name.is_none());
@@ -148,97 +148,97 @@ fn test_spawn_config_new() {
     assert(config.deadline_ns == 0);  // 0 = no deadline
     assert_eq(config.priority, PriorityLevel.Normal);
 
-    print("SpawnConfig.new() test passed");
+    print("SupervisorSpawnConfig.new() test passed");
 }
 
 @test
 fn test_spawn_config_default() {
-    let config = SpawnConfig.default();
+    let config = SupervisorSpawnConfig.default();
 
     // Same as new()
     assert(config.name.is_none());
     assert_eq(config.priority, PriorityLevel.Normal);
 
-    print("SpawnConfig.default() test passed");
+    print("SupervisorSpawnConfig.default() test passed");
 }
 
 // =============================================================================
-// Section 3: SpawnConfig Builder Methods Tests
+// Section 3: SupervisorSpawnConfig Builder Methods Tests
 // =============================================================================
 
 @test
 fn test_spawn_config_with_name() {
-    let config = SpawnConfig.new().with_name("my-task");
+    let config = SupervisorSpawnConfig.new().with_name("my-task");
 
     match config.name {
         Maybe.Some(name) => assert_eq(name, "my-task"),
         Maybe.None => panic("Expected name to be set"),
     }
 
-    print("SpawnConfig.with_name() test passed");
+    print("SupervisorSpawnConfig.with_name() test passed");
 }
 
 @test
 fn test_spawn_config_with_priority() {
-    let config = SpawnConfig.new().with_priority(PriorityLevel.High);
+    let config = SupervisorSpawnConfig.new().with_priority(PriorityLevel.High);
 
     assert(config.priority is PriorityLevel.High);
     assert_eq(config.priority.to_u8(), 192);
 
-    print("SpawnConfig.with_priority() test passed");
+    print("SupervisorSpawnConfig.with_priority() test passed");
 }
 
 @test
 fn test_spawn_config_with_isolation() {
-    let shared = SpawnConfig.new().with_isolation(IsolationLevel.Shared);
+    let shared = SupervisorSpawnConfig.new().with_isolation(IsolationLevel.Shared);
     assert(shared.isolation == Maybe.Some(IsolationLevel.Shared));
 
-    let send_only = SpawnConfig.new().with_isolation(IsolationLevel.SendOnly);
+    let send_only = SupervisorSpawnConfig.new().with_isolation(IsolationLevel.SendOnly);
     assert(send_only.isolation == Maybe.Some(IsolationLevel.SendOnly));
 
-    let full = SpawnConfig.new().with_isolation(IsolationLevel.Full);
+    let full = SupervisorSpawnConfig.new().with_isolation(IsolationLevel.Full);
     assert(full.isolation == Maybe.Some(IsolationLevel.Full));
 
-    print("SpawnConfig.with_isolation() test passed");
+    print("SupervisorSpawnConfig.with_isolation() test passed");
 }
 
 @test
 fn test_spawn_config_with_timeout_ms() {
-    let config = SpawnConfig.new().with_timeout_ms(5000 as UInt64);
+    let config = SupervisorSpawnConfig.new().with_timeout_ms(5000 as UInt64);
 
     // Timeout should be converted to deadline in nanoseconds (> 0 means set)
     assert(config.deadline_ns > 0);
 
-    print("SpawnConfig.with_timeout_ms() test passed");
+    print("SupervisorSpawnConfig.with_timeout_ms() test passed");
 }
 
 @test
 fn test_spawn_config_with_deadline_ns() {
     let deadline: UInt64 = 1000000000;  // 1 second in nanoseconds
-    let config = SpawnConfig.new().with_deadline_ns(deadline);
+    let config = SupervisorSpawnConfig.new().with_deadline_ns(deadline);
 
     assert_eq(config.deadline_ns, deadline);
 
-    print("SpawnConfig.with_deadline_ns() test passed");
+    print("SupervisorSpawnConfig.with_deadline_ns() test passed");
 }
 
 @test
 fn test_spawn_config_with_stack_size() {
-    let config = SpawnConfig.new().with_stack_size(65536);  // 64KB
+    let config = SupervisorSpawnConfig.new().with_stack_size(65536);  // 64KB
 
     // stack_size is Int (0 = default), so we just compare directly
     assert_eq(config.stack_size, 65536);
 
-    print("SpawnConfig.with_stack_size() test passed");
+    print("SupervisorSpawnConfig.with_stack_size() test passed");
 }
 
 // =============================================================================
-// Section 4: SpawnConfig Chaining Tests
+// Section 4: SupervisorSpawnConfig Chaining Tests
 // =============================================================================
 
 @test
 fn test_spawn_config_builder_chain() {
-    let config = SpawnConfig.new()
+    let config = SupervisorSpawnConfig.new()
         .with_name("worker-1")
         .with_priority(PriorityLevel.High)
         .with_isolation(IsolationLevel.Full)
@@ -252,12 +252,12 @@ fn test_spawn_config_builder_chain() {
     assert(config.deadline_ns > 0);  // 0 = no deadline, > 0 = set
     assert_eq(config.stack_size, 32768);  // stack_size is Int
 
-    print("SpawnConfig builder chain test passed");
+    print("SupervisorSpawnConfig builder chain test passed");
 }
 
 @test
 fn test_spawn_config_clone() {
-    let original = SpawnConfig.new()
+    let original = SupervisorSpawnConfig.new()
         .with_name("original")
         .with_priority(PriorityLevel.Critical);
 
@@ -267,7 +267,7 @@ fn test_spawn_config_clone() {
     assert_eq(cloned.name, original.name);
     assert_eq(cloned.priority.to_u8(), original.priority.to_u8());
 
-    print("SpawnConfig clone test passed");
+    print("SupervisorSpawnConfig clone test passed");
 }
 
 // =============================================================================
@@ -287,7 +287,7 @@ fn test_spawn_config_builder_new() {
 
 @test
 fn test_spawn_config_builder_from_config() {
-    let base = SpawnConfig.new().with_priority(PriorityLevel.High);
+    let base = SupervisorSpawnConfig.new().with_priority(PriorityLevel.High);
     let builder = SpawnConfigBuilder.from_config(base);
 
     let config = builder.build_unchecked();
@@ -363,22 +363,22 @@ fn test_spawn_config_builder_send_only() {
 
 @test
 fn test_spawn_config_with_simple_retry() {
-    let config = SpawnConfig.new()
+    let config = SupervisorSpawnConfig.new()
         .with_simple_retry(3, 1000);  // 3 retries, 1 second delay
 
     assert(config.recovery.is_some());
 
-    print("SpawnConfig.with_simple_retry() test passed");
+    print("SupervisorSpawnConfig.with_simple_retry() test passed");
 }
 
 @test
 fn test_spawn_config_with_exponential_retry() {
-    let config = SpawnConfig.new()
+    let config = SupervisorSpawnConfig.new()
         .with_exponential_retry(5 as UInt16, 100 as UInt32, 10000 as UInt32, 0.1 as Float32);  // 5 retries, 100ms base, 10s max, 10% jitter
 
     assert(config.recovery.is_some());
 
-    print("SpawnConfig.with_exponential_retry() test passed");
+    print("SupervisorSpawnConfig.with_exponential_retry() test passed");
 }
 
 @test
@@ -411,12 +411,12 @@ fn test_spawn_config_builder_with_circuit_breaker_default() {
 
 @test
 fn test_spawn_config_with_restart_limits() {
-    let config = SpawnConfig.new()
+    let config = SupervisorSpawnConfig.new()
         .with_restart_limits(5, 60000);  // 5 restarts in 60 seconds
 
     // Restart limits should be stored
 
-    print("SpawnConfig.with_restart_limits() test passed");
+    print("SupervisorSpawnConfig.with_restart_limits() test passed");
 }
 
 // =============================================================================
@@ -425,69 +425,69 @@ fn test_spawn_config_with_restart_limits() {
 
 @test
 fn test_spawn_config_empty_name() {
-    let config = SpawnConfig.new().with_name("");
+    let config = SupervisorSpawnConfig.new().with_name("");
 
     // Empty name should be allowed (or rejected depending on design)
     assert_eq(config.name, Maybe.Some(""));
 
-    print("SpawnConfig empty name test passed");
+    print("SupervisorSpawnConfig empty name test passed");
 }
 
 @test
 fn test_spawn_config_zero_timeout() {
-    let config = SpawnConfig.new().with_timeout_ms(0 as UInt64);
+    let config = SupervisorSpawnConfig.new().with_timeout_ms(0 as UInt64);
 
     // Zero timeout sets deadline to current time (immediate deadline)
     assert(config.deadline_ns > 0);
 
-    print("SpawnConfig zero timeout test passed");
+    print("SupervisorSpawnConfig zero timeout test passed");
 }
 
 @test
 fn test_spawn_config_zero_stack_size() {
-    let config = SpawnConfig.new().with_stack_size(0);
+    let config = SupervisorSpawnConfig.new().with_stack_size(0);
 
     // Zero stack size means use default (stack_size is Int, 0 = default)
     assert_eq(config.stack_size, 0);
 
-    print("SpawnConfig zero stack size test passed");
+    print("SupervisorSpawnConfig zero stack size test passed");
 }
 
 @test
 fn test_spawn_config_large_timeout() {
     // Very large timeout (1 day in ms)
     let one_day_ms: UInt64 = (24 as UInt64) * 60 * 60 * 1000;
-    let config = SpawnConfig.new().with_timeout_ms(one_day_ms);
+    let config = SupervisorSpawnConfig.new().with_timeout_ms(one_day_ms);
 
     assert(config.deadline_ns > 0);
 
-    print("SpawnConfig large timeout test passed");
+    print("SupervisorSpawnConfig large timeout test passed");
 }
 
 @test
 fn test_spawn_config_override_priority() {
     // Setting priority multiple times should use the last value
-    let config = SpawnConfig.new()
+    let config = SupervisorSpawnConfig.new()
         .with_priority(PriorityLevel.Low)
         .with_priority(PriorityLevel.High)
         .with_priority(PriorityLevel.Critical);
 
     assert(config.priority is PriorityLevel.Critical);
 
-    print("SpawnConfig override priority test passed");
+    print("SupervisorSpawnConfig override priority test passed");
 }
 
 @test
 fn test_spawn_config_override_name() {
     // Setting name multiple times should use the last value
-    let config = SpawnConfig.new()
+    let config = SupervisorSpawnConfig.new()
         .with_name("first")
         .with_name("second")
         .with_name("third");
 
     assert_eq(config.name, Maybe.Some("third"));
 
-    print("SpawnConfig override name test passed");
+    print("SupervisorSpawnConfig override name test passed");
 }
 
 // =============================================================================
@@ -654,12 +654,12 @@ fn test_builder_temporary_sets_restart_policy() {
 }
 
 // =============================================================================
-// Section 12: SpawnConfig Additional Builder Methods
+// Section 12: SupervisorSpawnConfig Additional Builder Methods
 // =============================================================================
 
 @test
 fn test_spawn_config_with_restart_limits_fields() {
-    let config = SpawnConfig.new()
+    let config = SupervisorSpawnConfig.new()
         .with_restart_limits(5, 60000 as UInt64);
 
     assert(config.restart.is_some());
@@ -671,31 +671,31 @@ fn test_spawn_config_with_restart_limits_fields() {
 
 @test
 fn test_spawn_config_default_deadline() {
-    let config = SpawnConfig.new();
+    let config = SupervisorSpawnConfig.new();
     assert_eq(config.deadline_ns, 0 as UInt64);
 }
 
 @test
 fn test_spawn_config_default_stack_size() {
-    let config = SpawnConfig.new();
+    let config = SupervisorSpawnConfig.new();
     assert_eq(config.stack_size, 0);
 }
 
 @test
 fn test_spawn_config_default_circuit_breaker() {
-    let config = SpawnConfig.new();
+    let config = SupervisorSpawnConfig.new();
     assert(config.circuit_breaker.is_none());
 }
 
 @test
 fn test_spawn_config_default_retry() {
-    let config = SpawnConfig.new();
+    let config = SupervisorSpawnConfig.new();
     assert(config.retry.is_none());
 }
 
 @test
 fn test_spawn_config_default_child_spec() {
-    let config = SpawnConfig.new();
+    let config = SupervisorSpawnConfig.new();
     assert(config.child_spec.is_none());
 }
 
