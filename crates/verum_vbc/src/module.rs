@@ -338,6 +338,23 @@ impl VbcModule {
         self.functions.get_mut(id.0 as usize)
     }
 
+    /// Finds a function by qualified name (e.g., "Result.unwrap"). Used by
+    /// the runtime dispatcher to defer to user-compiled methods when a
+    /// qualified call site has a real implementation, rather than falling
+    /// through to the primitive-variant fallback that can't distinguish
+    /// `Result.Err.unwrap()` from `Maybe.Some.unwrap()`. Returns the
+    /// FunctionId for chaining or None if no function with that name
+    /// exists in this module.
+    pub fn find_function_by_name(&self, name: &str) -> Option<FunctionId> {
+        for (idx, desc) in self.functions.iter().enumerate() {
+            if let Some(fname) = self.get_string(desc.name)
+                && fname == name {
+                    return Some(FunctionId(idx as u32));
+                }
+        }
+        None
+    }
+
     /// Adds a constant to the pool.
     pub fn add_constant(&mut self, constant: Constant) -> ConstId {
         let id = ConstId(self.constants.len() as u32);

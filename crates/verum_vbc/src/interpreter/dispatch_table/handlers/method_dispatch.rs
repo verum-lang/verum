@@ -301,8 +301,30 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             return Ok(DispatchResult::Continue);
         }
 
-    // Try variant methods (unwrap, is_ok, is_err, etc.) on heap-allocated variants
-    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil()
+    // Try variant methods (unwrap, is_ok, is_err, etc.) on heap-allocated variants.
+    //
+    // The primitive variant dispatch CANNOT distinguish `Maybe.Some(v)` from
+    // `Result.Err(v)` from raw runtime data — both share `(tag>=1, fc=1,
+    // type_id == 0x8000+tag)` after `MakeVariant` (see comment block in
+    // `dispatch_variant_method`'s `unwrap` arm). The historic resolution was
+    // to silently return the payload on `Result.Err.unwrap()` rather than
+    // panic — convenient for `Maybe.Some.unwrap()` but a CRITICAL silent
+    // failure for `Result.Err.unwrap()` which masked an entire class of
+    // downstream bugs (parse(...).unwrap() chains producing malformed
+    // values that bubbled up as seemingly-unrelated panics — see #79).
+    //
+    // Fix: when the codegen emitted a *qualified* method name like
+    // `Result.unwrap` AND the user-compiled function exists for that
+    // qualified name, skip the primitive fallback so the compiled
+    // `match self { Ok(v) => v, Err(e) => panic(...) }` body actually
+    // runs. The bare-name route ("unwrap" without a type prefix —
+    // typically generic-parameter dispatch) keeps the historic
+    // behaviour for back-compatibility with code that doesn't have
+    // type information at codegen time.
+    let prefer_user_compiled = method_name != bare_method_name
+        && state.module.find_function_by_name(&method_name).is_some();
+    if !prefer_user_compiled
+        && dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil()
         && let Some(result) = dispatch_variant_method(state, dispatch_receiver, &bare_method_name, &args)? {
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
