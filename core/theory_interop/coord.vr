@@ -10,6 +10,13 @@
 // Kept deliberately small and free of category-theoretic dependencies so it
 // can be `mount`-ed by audit tooling and frontend integrations without
 // pulling in core.math.{kan_extension, infinity_topos}.
+//
+// VUVA §10.4 demands ν ∈ Ordinal (countable). Earlier MVP collapsed ν to
+// `Int`, which silently dropped the transfinite ω-stratum used by
+// lurie_htt / schreiber_dcct / baez_dolan etc. This module ships a faithful
+// (omega_coefficient, finite_offset) encoding so the lookup table can
+// express ω, ω+k, ω·n, and ω·n+k exactly — the same shape Diakrisis's
+// canonical-primitive ν-invariant lives in (cf. MSFS Thm 4.4).
 // =============================================================================
 
 mount core.action.articulation;
@@ -71,17 +78,120 @@ public fn verdict_admits(v: TranslationVerdict) -> Bool {
 }
 
 // -----------------------------------------------------------------------------
-// §10.4 — MSFS coordinate
+// §10.4 — Ordinal type for ν-invariants
+// -----------------------------------------------------------------------------
+//
+// Encoding: every ordinal we need to express is below ε_0; concretely
+// the standard six-pack lives below ω·3+1.  We use a flat
+// (omega_coefficient, finite_offset) pair which is the canonical Cantor-
+// normal-form prefix at this depth.  Comparison is lexicographic; addition
+// works pointwise; sup is the lex max.
+//
+//   ord_zero()                   = 0
+//   ord_finite(n)                = n           (omega_coefficient = 0)
+//   ord_omega()                  = ω           (omega_coefficient = 1)
+//   ord_omega_plus(k)            = ω + k       (omega_coefficient = 1, offset = k)
+//   ord_omega_times(n)           = ω · n       (omega_coefficient = n)
+//   ord_omega_times_plus(n, k)   = ω·n + k
+
+@derive(Clone)
+public type Ordinal is {
+    omega_coefficient: Int,   // 0 ⇒ finite; 1 ⇒ ω; 2 ⇒ ω·2; …
+    finite_offset:     Int,   // additive remainder
+};
+
+public fn ord_zero() -> Ordinal {
+    Ordinal { omega_coefficient: 0, finite_offset: 0 }
+}
+
+public fn ord_finite(n: Int) -> Ordinal {
+    Ordinal { omega_coefficient: 0, finite_offset: n }
+}
+
+public fn ord_omega() -> Ordinal {
+    Ordinal { omega_coefficient: 1, finite_offset: 0 }
+}
+
+public fn ord_omega_plus(k: Int) -> Ordinal {
+    Ordinal { omega_coefficient: 1, finite_offset: k }
+}
+
+public fn ord_omega_times(n: Int) -> Ordinal {
+    Ordinal { omega_coefficient: n, finite_offset: 0 }
+}
+
+public fn ord_omega_times_plus(n: Int, k: Int) -> Ordinal {
+    Ordinal { omega_coefficient: n, finite_offset: k }
+}
+
+public fn ord_lt(a: Ordinal, b: Ordinal) -> Bool {
+    if a.omega_coefficient < b.omega_coefficient { return true; }
+    if a.omega_coefficient > b.omega_coefficient { return false; }
+    a.finite_offset < b.finite_offset
+}
+
+public fn ord_eq(a: Ordinal, b: Ordinal) -> Bool {
+    a.omega_coefficient == b.omega_coefficient
+      && a.finite_offset == b.finite_offset
+}
+
+public fn ord_max(a: Ordinal, b: Ordinal) -> Ordinal {
+    if ord_lt(a.clone(), b.clone()) {
+        return b;
+    }
+    a
+}
+
+public fn ord_is_finite(o: Ordinal) -> Bool {
+    o.omega_coefficient == 0
+}
+
+public fn ord_is_transfinite(o: Ordinal) -> Bool {
+    o.omega_coefficient > 0
+}
+
+public fn ord_as_text(o: Ordinal) -> Text {
+    if o.omega_coefficient == 0 {
+        return int_to_text(o.finite_offset);
+    }
+    let coeff_part: Text = if o.omega_coefficient == 1 {
+        Text.from("ω")
+    } else {
+        Text.from("ω·").concat(int_to_text(o.omega_coefficient))
+    };
+    if o.finite_offset == 0 {
+        coeff_part
+    } else {
+        coeff_part.concat("+").concat(int_to_text(o.finite_offset))
+    }
+}
+
+fn int_to_text(n: Int) -> Text {
+    if n == 0 { return Text.from("0"); }
+    if n == 1 { return Text.from("1"); }
+    if n == 2 { return Text.from("2"); }
+    if n == 3 { return Text.from("3"); }
+    if n == 4 { return Text.from("4"); }
+    if n == 5 { return Text.from("5"); }
+    if n == 6 { return Text.from("6"); }
+    if n == 7 { return Text.from("7"); }
+    if n == 8 { return Text.from("8"); }
+    if n == 9 { return Text.from("9"); }
+    Text.from("n")
+}
+
+// -----------------------------------------------------------------------------
+// §10.4 — MSFS coordinate (per articulation)
 // -----------------------------------------------------------------------------
 
 @derive(Clone)
 public type MsfsCoord is {
     framework: Text,
-    ordinal:   Int,   // ν — Diakrisis depth-stratification rank
-    tau:       Bool,  // τ — intensional flag (true = intensional, false = extensional)
+    ordinal:   Ordinal,   // ν — Diakrisis depth-stratification rank
+    tau:       Bool,      // τ — intensional flag (true = intensional, false = extensional)
 };
 
-public fn msfs_coord(framework: Text, ordinal: Int, tau: Bool) -> MsfsCoord {
+public fn msfs_coord(framework: Text, ordinal: Ordinal, tau: Bool) -> MsfsCoord {
     MsfsCoord {
         framework: framework,
         ordinal:   ordinal,
@@ -90,34 +200,45 @@ public fn msfs_coord(framework: Text, ordinal: Int, tau: Bool) -> MsfsCoord {
 }
 
 /// Lookup table for the VUVA standard six-pack (§6.2) + the neutral Actic
-/// articulation; user-defined frameworks fall through to (ordinal=0, τ=true)
+/// articulation; user-defined frameworks fall through to (0, intensional)
 /// until a project-level `register_framework_coord` mechanism lands.
-fn known_ordinal(framework_name: Text) -> Int {
+///
+/// Justification of the assigned ν-values (Diakrisis ν-invariant):
+///   actic.raw             ν = 0       no foundation, neutral element
+///   lurie_htt             ν = ω       ∞-cat completions, ω-stratum
+///   schreiber_dcct        ν = ω+2     cohesive-∞-topos two extensions
+///                                    above lurie_htt (∫ ⊣ ♭ ⊣ ♯)
+///   connes_reconstruction ν = ω       operator-algebraic ∞-presentation
+///   petz_classification   ν = 2       finite-dim matrix metrics
+///   arnold_catastrophe    ν = 2       codim ≤ 4 normal-form classifier
+///   baez_dolan            ν = ω+1     n-categories + stabilisation hypothesis
+///   owl2_fs               ν = 1       SROIQ DL-decidable fragment
+fn known_ordinal(framework_name: Text) -> Ordinal {
     if framework_name.eq("actic.raw") {
-        return 0;
+        return ord_zero();
     }
     if framework_name.eq("lurie_htt") {
-        return 3;
+        return ord_omega();
     }
     if framework_name.eq("schreiber_dcct") {
-        return 4;
+        return ord_omega_plus(2);
     }
     if framework_name.eq("connes_reconstruction") {
-        return 3;
+        return ord_omega();
     }
     if framework_name.eq("petz_classification") {
-        return 2;
+        return ord_finite(2);
     }
     if framework_name.eq("arnold_catastrophe") {
-        return 2;
+        return ord_finite(2);
     }
     if framework_name.eq("baez_dolan") {
-        return 4;
+        return ord_omega_plus(1);
     }
     if framework_name.eq("owl2_fs") {
-        return 1;
+        return ord_finite(1);
     }
-    0
+    ord_zero()
 }
 
 fn known_tau(framework_name: Text) -> Bool {
@@ -144,29 +265,87 @@ public fn coord_of(alpha: Articulation) -> MsfsCoord {
 }
 
 public fn coord_as_text(c: MsfsCoord) -> Text {
-    let tau_str: Text = if c.tau { "τ=intensional" } else { "τ=extensional" };
+    let tau_str: Text = if c.tau {
+        Text.from("τ=intensional")
+    } else {
+        Text.from("τ=extensional")
+    };
     c.framework
       .clone()
       .concat(", ν=")
-      .concat(int_to_text(c.ordinal))
+      .concat(ord_as_text(c.ordinal.clone()))
       .concat(", ")
       .concat(tau_str)
 }
 
-fn int_to_text(n: Int) -> Text {
-    if n == 0 { return "0"; }
-    if n == 1 { return "1"; }
-    if n == 2 { return "2"; }
-    if n == 3 { return "3"; }
-    if n == 4 { return "4"; }
-    if n == 5 { return "5"; }
-    if n == 6 { return "6"; }
-    if n == 7 { return "7"; }
-    if n == 8 { return "8"; }
-    if n == 9 { return "9"; }
-    "n"
+public fn coord_eq(a: MsfsCoord, b: MsfsCoord) -> Bool {
+    a.framework.eq(b.framework)
+      && ord_eq(a.ordinal.clone(), b.ordinal.clone())
+      && a.tau == b.tau
 }
 
-public fn coord_eq(a: MsfsCoord, b: MsfsCoord) -> Bool {
-    a.framework.eq(b.framework) && a.ordinal == b.ordinal && a.tau == b.tau
+// -----------------------------------------------------------------------------
+// §10.4 — Theorem coordinate (per theorem; multi-framework dependencies)
+// -----------------------------------------------------------------------------
+//
+// A theorem may invoke several @framework axioms. Its MSFS coordinate is the
+// upper bound in the (Set<Framework>, Ordinal, TauFlag) lattice:
+//   - frameworks: union of the per-axiom framework names
+//   - ordinal:    sup (lex on (omega_coefficient, finite_offset))
+//   - tau:        ∧ (intensional iff all dependencies intensional)
+//
+// Empty-dependency theorems land at (∅, 0, intensional) — the kernel-only
+// baseline. The lattice has an honest least element so the sup is total.
+
+@derive(Clone)
+public type MsfsTheoremCoord is {
+    frameworks: List<Text>,    // sorted, deduplicated
+    ordinal:    Ordinal,
+    tau:        Bool,
+};
+
+public fn theorem_coord(coords: List<MsfsCoord>) -> MsfsTheoremCoord {
+    let mut names: List<Text>  = List.new();
+    let mut sup_ord: Ordinal   = ord_zero();
+    let mut all_intensional: Bool = true;
+    let mut i: Int = 0;
+    while i < coords.len() as Int {
+        let c: &MsfsCoord = coords.get(i as Int).unwrap();
+        // Append framework name (caller may dedup downstream; we keep
+        // insertion order so reports are reproducible).
+        names.push(c.framework.clone());
+        sup_ord = ord_max(sup_ord, c.ordinal.clone());
+        if !c.tau {
+            all_intensional = false;
+        }
+        i = i + 1;
+    }
+    MsfsTheoremCoord {
+        frameworks: names,
+        ordinal:    sup_ord,
+        tau:        all_intensional,
+    }
+}
+
+public fn theorem_coord_as_text(t: MsfsTheoremCoord) -> Text {
+    let tau_str: Text = if t.tau {
+        Text.from("τ=intensional")
+    } else {
+        Text.from("τ=extensional")
+    };
+    let mut fw_block: Text = Text.from("{");
+    let mut i: Int = 0;
+    while i < t.frameworks.len() as Int {
+        if i > 0 {
+            fw_block = fw_block.concat(", ");
+        }
+        fw_block = fw_block.concat(t.frameworks.get(i as Int).unwrap().clone());
+        i = i + 1;
+    }
+    fw_block = fw_block.concat("}");
+    fw_block
+      .concat(", ν=")
+      .concat(ord_as_text(t.ordinal.clone()))
+      .concat(", ")
+      .concat(tau_str)
 }

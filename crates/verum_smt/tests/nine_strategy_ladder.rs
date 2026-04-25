@@ -120,34 +120,42 @@ fn at_least_enforces_monotone_lift() {
 
 #[test]
 fn nu_ordinals_match_vuva_table() {
+    // VUVA §12 — strict-monotone ν-ladder: every strategy gets a
+    // distinct ordinal so `0 < 1 < 2 < ω < ω+1 < ω·2 < ω·2+1 <
+    // ω·2+2 < ω·3+1` holds in the formal sense.
     assert_eq!(VerifyStrategy::Runtime.nu_ordinal(), NuOrdinal::Zero);
 
-    assert_eq!(VerifyStrategy::Static.nu_ordinal(), NuOrdinal::FiniteBelowOmega);
-    assert_eq!(VerifyStrategy::Fast.nu_ordinal(), NuOrdinal::FiniteBelowOmega);
+    assert_eq!(VerifyStrategy::Static.nu_ordinal(), NuOrdinal::FiniteOne);
+    assert_eq!(VerifyStrategy::Fast.nu_ordinal(),   NuOrdinal::FiniteTwo);
 
     assert_eq!(VerifyStrategy::Formal.nu_ordinal(), NuOrdinal::Omega);
-    assert_eq!(VerifyStrategy::Proof.nu_ordinal(), NuOrdinal::Omega);
+    assert_eq!(VerifyStrategy::Proof.nu_ordinal(),  NuOrdinal::OmegaPlusOne);
 
-    assert_eq!(VerifyStrategy::Thorough.nu_ordinal(), NuOrdinal::OmegaTwice);
-    assert_eq!(VerifyStrategy::Reliable.nu_ordinal(), NuOrdinal::OmegaTwice);
-    assert_eq!(VerifyStrategy::Certified.nu_ordinal(), NuOrdinal::OmegaTwice);
+    assert_eq!(VerifyStrategy::Thorough.nu_ordinal(),  NuOrdinal::OmegaTwice);
+    assert_eq!(VerifyStrategy::Reliable.nu_ordinal(),  NuOrdinal::OmegaTwicePlusOne);
+    assert_eq!(VerifyStrategy::Certified.nu_ordinal(), NuOrdinal::OmegaTwicePlusTwo);
 
     assert_eq!(VerifyStrategy::Synthesize.nu_ordinal(), NuOrdinal::OmegaThricePlusOne);
 }
 
 #[test]
 fn nu_ordinal_rank_strictly_increases_with_strategy_rank() {
-    // The ordinal coarsens groups (Static/Fast share, Formal/Proof share,
-    // Thorough/Reliable/Certified share), but never decreases.
-    let mut last_nu = 0u8;
+    // VUVA §2.3 strict-monotone claim: every step on the ladder
+    // bumps the ν-rank by exactly one (no plateaus).
+    let mut last_nu: Option<u8> = None;
     for s in VerifyStrategy::LADDER.iter() {
         let nu = s.nu_ordinal().rank();
-        assert!(
-            nu >= last_nu,
-            "ν-rank decreased at {s:?}: {nu} < {last_nu}"
-        );
-        last_nu = nu;
+        if let Some(prev) = last_nu {
+            assert!(
+                nu > prev,
+                "ν-rank did not strictly increase at {s:?}: {nu} ≤ {prev}"
+            );
+        }
+        last_nu = Some(nu);
     }
+    // Final rank should be 8 (Synthesize) — nine distinct strata
+    // mapped to ranks 0..=8.
+    assert_eq!(last_nu, Some(8));
 }
 
 // -----------------------------------------------------------------------------

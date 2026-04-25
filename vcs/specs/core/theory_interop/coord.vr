@@ -1,15 +1,17 @@
 // @test: unit
 // @tier: 0
 // @level: L1
-// @tags: theory_interop, coord, msfs, obstruction, verdict, vuva
+// @tags: theory_interop, coord, msfs, obstruction, verdict, vuva, ordinal
 // @timeout: 5000
 // @expect: pass
 //
 // VUVA §10.2 + §10.4 Phase 5 E4 — translation verdict + MSFS coordinate.
 //
 // Exercises the §10.2 obstruction-thresholding rules (Morita / Strong /
-// Moderate / Weak / Untranslatable) and the §10.4 MSFS coord projection
-// over the standard six-pack frameworks plus the neutral Actic articulation.
+// Moderate / Weak / Untranslatable), the §10.4 MSFS coord projection
+// over the standard six-pack frameworks plus the neutral Actic
+// articulation, the structured Ordinal type used for the ν-coordinate,
+// and the multi-framework `theorem_coord` upper-bound projection.
 
 mount core.action.articulation;
 mount core.theory_interop.coord;
@@ -49,7 +51,6 @@ fn main() {
         _              => panic("1.0 must be Untranslatable"),
     }
 
-    // verdict_admits is the Untranslatable-only-rejection predicate.
     assert(verdict_admits(verdict_of(0.0)));
     assert(verdict_admits(verdict_of(0.10)));
     assert(verdict_admits(verdict_of(0.50)));
@@ -57,7 +58,20 @@ fn main() {
     assert(verdict_as_text(Morita) == "morita");
     assert(verdict_as_text(Untranslatable) == "untranslatable");
 
-    // --- §10.4 MSFS coordinate ------------------------------------
+    // --- Ordinal type: comparisons + sup --------------------------
+    assert(ord_eq(ord_zero(), ord_finite(0)));
+    assert(ord_lt(ord_finite(2), ord_omega()));
+    assert(ord_lt(ord_omega(), ord_omega_plus(1)));
+    assert(ord_lt(ord_omega_plus(5), ord_omega_times(2)));
+    assert(ord_lt(ord_omega_times(2), ord_omega_times_plus(2, 1)));
+    assert(!ord_lt(ord_omega(), ord_finite(99)));      // ω > any finite
+    assert(ord_eq(ord_max(ord_omega(), ord_finite(99)), ord_omega()));
+    assert(ord_is_finite(ord_finite(7)));
+    assert(ord_is_transfinite(ord_omega()));
+    assert(ord_as_text(ord_zero()) == "0");
+    assert(ord_as_text(ord_omega()) == "ω");
+
+    // --- §10.4 MSFS coordinate per articulation -------------------
     let lurie: Articulation = articulation_new(
         "lurie_htt",
         "Lurie 2009",
@@ -65,8 +79,17 @@ fn main() {
     );
     let lurie_c: MsfsCoord = coord_of(lurie);
     assert(lurie_c.framework == "lurie_htt");
-    assert(lurie_c.ordinal == 3);
-    assert(lurie_c.tau);                  // intensional
+    assert(ord_eq(lurie_c.ordinal.clone(), ord_omega()));   // ν = ω
+    assert(lurie_c.tau);                                     // intensional
+
+    let dcct: Articulation = articulation_new(
+        "schreiber_dcct",
+        "Schreiber arXiv:1310.7930",
+        "cohesive_modalities",
+    );
+    let dcct_c: MsfsCoord = coord_of(dcct);
+    assert(ord_eq(dcct_c.ordinal.clone(), ord_omega_plus(2)));  // ν = ω+2
+    assert(dcct_c.tau);
 
     let connes: Articulation = articulation_new(
         "connes_reconstruction",
@@ -74,31 +97,55 @@ fn main() {
         "spectral_triple",
     );
     let connes_c: MsfsCoord = coord_of(connes);
-    assert(connes_c.ordinal == 3);
-    assert(!connes_c.tau);                // extensional (operator-algebraic)
+    assert(ord_eq(connes_c.ordinal.clone(), ord_omega()));   // ν = ω
+    assert(!connes_c.tau);                                    // extensional
 
     let raw_c: MsfsCoord = coord_of(raw_actic_articulation());
     assert(raw_c.framework == "actic.raw");
-    assert(raw_c.ordinal == 0);
+    assert(ord_eq(raw_c.ordinal.clone(), ord_zero()));
     assert(!raw_c.tau);
 
-    // unknown frameworks fall through to (0, intensional)
     let custom: Articulation = articulation_new(
         "user_lab.local",
         "internal report",
         "exp_lemma_47",
     );
     let custom_c: MsfsCoord = coord_of(custom);
-    assert(custom_c.ordinal == 0);
+    assert(ord_eq(custom_c.ordinal.clone(), ord_zero()));    // unknown ⇒ 0
     assert(custom_c.tau);
 
-    // coord_eq is reflexive
     let lurie2: Articulation = articulation_new(
         "lurie_htt",
         "Lurie 2009",
         "infinity_topos",
     );
     assert(coord_eq(coord_of(lurie2.clone()), coord_of(lurie2)));
+
+    // --- §10.4 theorem_coord — multi-framework upper bound -------
+    let mut coords: List<MsfsCoord> = List.new();
+    coords.push(coord_of(articulation_new(
+        "lurie_htt", "Lurie 2009", "infinity_topos",
+    )));
+    coords.push(coord_of(articulation_new(
+        "schreiber_dcct", "Schreiber 2013", "shape_modality",
+    )));
+    coords.push(coord_of(articulation_new(
+        "petz_classification", "Petz 1996", "monotone_metric",
+    )));
+    let agg: MsfsTheoremCoord = theorem_coord(coords);
+    // sup over { ω, ω+2, 2 } = ω+2
+    assert(ord_eq(agg.ordinal.clone(), ord_omega_plus(2)));
+    // tau is conjunctive: petz_classification is extensional ⇒ false
+    assert(!agg.tau);
+    // three frameworks recorded in insertion order
+    assert(agg.frameworks.len() == 3);
+
+    // empty-dependency theorem ⇒ (∅, 0, intensional)
+    let empty_coords: List<MsfsCoord> = List.new();
+    let empty_agg: MsfsTheoremCoord = theorem_coord(empty_coords);
+    assert(ord_eq(empty_agg.ordinal.clone(), ord_zero()));
+    assert(empty_agg.tau);
+    assert(empty_agg.frameworks.len() == 0);
 
     print("theory_interop.coord ok");
 }

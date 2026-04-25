@@ -122,3 +122,70 @@ public fn alpha_of(e: Enactment) -> Articulation {
 public fn is_adjoint(alpha: Articulation, e: Enactment) -> Bool {
     articulation_eq(alpha, alpha_of(e))
 }
+
+// -----------------------------------------------------------------------------
+// Canonical Diakrisis-spelling aliases (12-actic/09-verum-stdlib-sketch.md)
+// -----------------------------------------------------------------------------
+//
+// The Diakrisis Verum-stdlib sketch (`12-actic/09-verum-stdlib-sketch.md` §2)
+// prescribes the following names; we ship them as direct aliases of the
+// existing operations so user code can be written against either Diakrisis-
+// canonical names or Verum-historic ones. Comparison `enact_par` is new
+// (Diakrisis prescribes it as parallel composition `A || B`).
+
+/// Sequential composition: `A then B`.  Alias of `compose`.
+public fn enact_then(a: Enactment, b: Enactment) -> Enactment {
+    compose(a, b)
+}
+
+/// Parallel composition: `A || B`.  Both enactments contribute their
+/// step-lists; activation rank is the maximum of both; articulations
+/// follow the same absorption rule as `compose`.
+///
+/// At this stdlib layer parallelism is *structural* — there is no
+/// process-calculus-style interleaving — so `enact_par` is currently
+/// observationally identical to `compose`.  The two are kept as separate
+/// public surface so future refinements (true CCS-style parallelism with
+/// a different gauge canonicalisation) can specialise `enact_par` without
+/// breaking call sites that already chose semantic intent.
+public fn enact_par(a: Enactment, b: Enactment) -> Enactment {
+    let merged: Enactment = compose(a.clone(), b.clone());
+    Enactment {
+        name:            a.name.clone().concat(" ∥ ").concat(b.name),
+        steps:           merged.steps,
+        activation_rank: merged.activation_rank,
+        articulation:    merged.articulation,
+    }
+}
+
+/// A-modality activation.  Alias of `activation`.
+public fn activate(e: Enactment) -> Enactment {
+    activation(e)
+}
+
+/// Transfinite-bounded activation by a finite step count.  Alias of
+/// `activation_iterate`. The Diakrisis sketch types `n: Ordinal`; we
+/// currently restrict to a finite Int so the kernel can decide
+/// termination at compile time. Transfinite n requires an Ordinal
+/// argument and is tracked as a follow-up to the §10.4 Ordinal-type
+/// promotion.
+public fn activate_n(e: Enactment, n: Int) -> Enactment {
+    activation_iterate(e, n)
+}
+
+/// Autopoietic closure: the A^{ω²} fixed-point operation. For an
+/// enactment past the autopoietic threshold (`is_autopoietic(e) == true`)
+/// returns `canonicalise(e)` — the gauge-canonical representative which
+/// witnesses the fixed-point.  Below the threshold returns `e` unchanged
+/// so the operation is a closure on the autopoietic sub-class without
+/// silently coercing partial enactments.
+///
+/// This pairs with the Diakrisis sketch's `verify_autopoiesis` (which
+/// lives at the @verify-decorator layer); the closure operation is
+/// *the operational* counterpart.
+public fn autopoiesis(e: Enactment) -> Enactment {
+    if is_autopoietic(e.clone()) {
+        return canonicalise(e);
+    }
+    e
+}

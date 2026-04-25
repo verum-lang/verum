@@ -84,12 +84,12 @@ pub enum VerifyStrategy {
 
     /// `@verify(static)` — conservative static analysis (CBGR,
     /// dataflow, constant folding, bounds simplification).
-    /// No SMT. ν < ω (finite step count).
+    /// No SMT. ν = 1.
     Static,
 
     /// `@verify(fast)` — single-solver SMT with bounded timeout
     /// (default 100ms). UNKNOWN → conservative accept (warning).
-    /// ν < ω.
+    /// ν = 2.
     Fast,
 
     /// `@verify(formal)` — portfolio SMT (Z3 + CVC5) with 5s timeout.
@@ -98,23 +98,23 @@ pub enum VerifyStrategy {
 
     /// `@verify(proof)` — user supplies a `proof { … }` tactic
     /// block; kernel rechecks. Unbounded user time but mechanically
-    /// checked. ν = ω.
+    /// checked. ν = ω + 1 (dominates SMT, admits induction).
     Proof,
 
     /// `@verify(thorough)` — `formal` plus mandatory `decreases`,
     /// `invariant`, `frame` specifications. ≈2× formal cost.
-    /// ν = ω·2.
+    /// ν = ω · 2.
     Thorough,
 
     /// `@verify(reliable)` — `thorough` plus Z3 AND CVC5 must both
     /// return UNSAT. Any disagreement → UNKNOWN. ≈2× thorough.
-    /// ν = ω·2.
+    /// ν = ω · 2 + 1.
     Reliable,
 
     /// `@verify(certified)` — `reliable` plus certificate
     /// materialisation, kernel re-check, multi-format export.
     /// Any recheck failure → compile error. ≈3× thorough.
-    /// ν = ω·2.
+    /// ν = ω · 2 + 2.
     Certified,
 
     /// `@verify(synthesize)` — inverse proof search across
@@ -124,20 +124,30 @@ pub enum VerifyStrategy {
 }
 
 /// The Diakrisis ν-invariant ordinal assigned to a verification
-/// strategy (VUVA §12 Table). Ordinals encoded as a compact enum
-/// rather than a full ordinal calculus — the strata coarsely match
-/// the first three transfinite levels of ω.
+/// strategy (VUVA §12 Table). Each strategy gets a *distinct* ordinal
+/// so the monotone ladder `0 < 1 < 2 < ω < ω+1 < ω·2 < ω·2+1 <
+/// ω·2+2 < ω·3+1` is strictly ordered (VUVA §2.3 strict-monotonicity
+/// claim). Earlier coarse buckets (`FiniteBelowOmega`, `OmegaTwice`)
+/// are gone; pattern-match exhaustively against the nine variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NuOrdinal {
     /// ν = 0 — runtime-only.
     Zero,
-    /// ν < ω — finite-step compile-time check.
-    FiniteBelowOmega,
-    /// ν = ω — first transfinite stratum; full SMT or kernel proof.
+    /// ν = 1 — `static`: dataflow / CBGR / constant folding.
+    FiniteOne,
+    /// ν = 2 — `fast`: bounded single-solver SMT.
+    FiniteTwo,
+    /// ν = ω — `formal`: portfolio SMT.
     Omega,
-    /// ν = ω·2 — multi-strategy / cross-solver / certificate-backed.
+    /// ν = ω + 1 — `proof`: user tactic; dominates SMT, admits induction.
+    OmegaPlusOne,
+    /// ν = ω · 2 — `thorough`: invariant / frame / termination obligations.
     OmegaTwice,
-    /// ν ≤ ω·3+1 — inverse search across 𝔐.
+    /// ν = ω · 2 + 1 — `reliable`: cross-solver agreement.
+    OmegaTwicePlusOne,
+    /// ν = ω · 2 + 2 — `certified`: certificate materialisation + recheck + export.
+    OmegaTwicePlusTwo,
+    /// ν ≤ ω · 3 + 1 — `synthesize`: inverse search across 𝔐 (orthogonal).
     OmegaThricePlusOne,
 }
 
@@ -146,25 +156,33 @@ impl NuOrdinal {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Zero => "0",
-            Self::FiniteBelowOmega => "<ω",
+            Self::FiniteOne => "1",
+            Self::FiniteTwo => "2",
             Self::Omega => "ω",
+            Self::OmegaPlusOne => "ω+1",
             Self::OmegaTwice => "ω·2",
+            Self::OmegaTwicePlusOne => "ω·2+1",
+            Self::OmegaTwicePlusTwo => "ω·2+2",
             Self::OmegaThricePlusOne => "≤ω·3+1",
         }
     }
 
-    /// Total order on the ladder — mirrors the monotone-lift
-    /// semantics of VUVA §2.3. `Synthesize` is treated as distinct
-    /// but comparable via its `≤ω·3+1` upper bound for ordering
-    /// purposes; callers that care about the orthogonality should
-    /// use [`VerifyStrategy::is_synthesis`] explicitly.
+    /// Strict total order on the ladder — mirrors the strict-monotone
+    /// semantics of VUVA §2.3. The `≤` in `≤ω·3+1` means `synthesize`
+    /// has an upper bound but its exact ν depends on the synthesised
+    /// witness's strategy; callers that care about the orthogonality
+    /// should use [`VerifyStrategy::is_synthesis`] explicitly.
     pub fn rank(&self) -> u8 {
         match self {
             Self::Zero => 0,
-            Self::FiniteBelowOmega => 1,
-            Self::Omega => 2,
-            Self::OmegaTwice => 3,
-            Self::OmegaThricePlusOne => 4,
+            Self::FiniteOne => 1,
+            Self::FiniteTwo => 2,
+            Self::Omega => 3,
+            Self::OmegaPlusOne => 4,
+            Self::OmegaTwice => 5,
+            Self::OmegaTwicePlusOne => 6,
+            Self::OmegaTwicePlusTwo => 7,
+            Self::OmegaThricePlusOne => 8,
         }
     }
 }
@@ -230,12 +248,17 @@ impl VerifyStrategy {
     }
 
     /// Diakrisis ν-invariant ordinal for this strategy (VUVA §12 table).
+    /// Strictly monotone in `<` — every strategy gets a distinct ordinal.
     pub fn nu_ordinal(&self) -> NuOrdinal {
         match self {
-            Self::Runtime => NuOrdinal::Zero,
-            Self::Static | Self::Fast => NuOrdinal::FiniteBelowOmega,
-            Self::Formal | Self::Proof => NuOrdinal::Omega,
-            Self::Thorough | Self::Reliable | Self::Certified => NuOrdinal::OmegaTwice,
+            Self::Runtime    => NuOrdinal::Zero,
+            Self::Static     => NuOrdinal::FiniteOne,
+            Self::Fast       => NuOrdinal::FiniteTwo,
+            Self::Formal     => NuOrdinal::Omega,
+            Self::Proof      => NuOrdinal::OmegaPlusOne,
+            Self::Thorough   => NuOrdinal::OmegaTwice,
+            Self::Reliable   => NuOrdinal::OmegaTwicePlusOne,
+            Self::Certified  => NuOrdinal::OmegaTwicePlusTwo,
             Self::Synthesize => NuOrdinal::OmegaThricePlusOne,
         }
     }
