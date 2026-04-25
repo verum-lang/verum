@@ -128,4 +128,12 @@ public type Interpretation is protocol {
     /// `⟦CE₁⟧^I ∩ ⟦CE₂⟧^I = ∅`: disjoint class extensions under I
     /// (§5.3 DisjointClasses, binary core).
     fn class_disjoint<C: ClassExpression>(self, a: C, b: C) -> Bool;
+
+    /// `⟦OPE₁⟧^I = (⟦OPE₂⟧^I)⁻¹`: OPE₁ is the inverse relation of
+    /// OPE₂ under I (W3C §3.1 ObjectInverseOf). Equivalently:
+    /// (a^I, b^I) ∈ ⟦OPE₁⟧^I  iff  (b^I, a^I) ∈ ⟦OPE₂⟧^I
+    /// for all individuals a, b.
+    fn object_property_inverse<P: ObjectPropertyExpression>(
+        self, ope1: P, ope2: P,
+    ) -> Bool;
 };

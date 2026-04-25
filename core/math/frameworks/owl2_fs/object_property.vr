@@ -5,14 +5,28 @@
 // §2.2.1 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 1 operator.
 // Shkotin 2019 Table 1 gives the HOL definition of `ObjectInverseOf`.
 //
-// V1: skeleton @framework axiom shipping the *trusted boundary* — the
-// citation marker that `verum audit --framework-axioms --by-lineage
-// owl2_fs` enumerates.  V2 will replace the placeholder body with the
-// HOL-definition body verbatim from the Shkotin Table 1 row.
+// V2 status (#134, 2026-04-25): the single object-property-expression
+// operator now carries the verbatim §3.1 inverse-relation body.
 // =============================================================================
 
-/// `ObjectInverseOf(OPE)` — the inverse of an object property
-/// expression.  Domain and range are swapped relative to OPE.
+mount core.math.frameworks.owl2_fs.types.{
+    ObjectPropertyExpression,
+    Interpretation,
+};
+
+/// `ObjectInverseOf(OPE₂)` (W3C OWL 2 DS §3.1, "ObjectInverseOf"):
+/// returns the OPE whose interpretation is the inverse relation of
+/// OPE₂'s interpretation under I.
+/// ⟦ObjectInverseOf(OPE₂)⟧^I = (⟦OPE₂⟧^I)⁻¹.
+///
+/// Operationally: (a^I, b^I) ∈ ⟦ObjectInverseOf(OPE₂)⟧^I
+///                iff
+///                (b^I, a^I) ∈ ⟦OPE₂⟧^I
+/// for all individuals a, b.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.1 Table 1: ObjectInverseOf")
-public axiom ObjectInverseOf() -> Bool
-    ensures true;
+public axiom ObjectInverseOf<I: Interpretation, P: ObjectPropertyExpression>(
+    interp: I,
+    inverse: P,
+    base:    P,
+) -> Bool
+    ensures interp.object_property_inverse(inverse, base);
