@@ -1,7 +1,7 @@
 module sys.windows.thread;
 
 // =============================================================================
-// sys/windows/thread.vr - Windows Thread Creation and Synchronization
+// sys/windows/thread.vr - Windows WindowsThread Creation and Synchronization
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/windows/kernel32, sys/windows/tls
@@ -13,11 +13,11 @@ module sys.windows.thread;
 // kernel synchronization objects for primitives.
 //
 // Features:
-// - Thread creation with automatic TLS initialization
-// - Mutex (CRITICAL_SECTION equivalent via Mutant)
+// - WindowsThread creation with automatic TLS initialization
+// - WindowsMutex (CRITICAL_SECTION equivalent via Mutant)
 // - Condition variable (via Event objects)
 // - Spin lock (atomic-based for low-contention scenarios)
-// - Once (one-time initialization)
+// - WindowsOnce (one-time initialization)
 //
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
@@ -66,8 +66,8 @@ mount super.tls.{create_thread_tls, cleanup_thread_tls};
 // Error Type
 // =============================================================================
 
-/// Thread operation error
-public type ThreadError is
+/// WindowsThread operation error
+public type WindowsThreadError is
     | CreateFailed { code: UInt32 }
     | JoinFailed { code: UInt32 }
     | SuspendFailed { code: UInt32 }
@@ -81,7 +81,7 @@ public type ThreadError is
     | AlreadyDetached
     ;
 
-implement ThreadError {
+implement WindowsThreadError {
     public fn message(&self) -> Text {
         match self {
             CreateFailed { code } => f"Failed to create thread (code={code})",
@@ -93,44 +93,44 @@ implement ThreadError {
             CondInitFailed { code } => f"Failed to initialize condvar (code={code})",
             CondWaitFailed { code } => f"Failed to wait on condvar (code={code})",
             TlsInitFailed => "Failed to initialize TLS for new thread",
-            AlreadyJoined => "Thread has already been joined",
-            AlreadyDetached => "Thread has already been detached",
+            AlreadyJoined => "WindowsThread has already been joined",
+            AlreadyDetached => "WindowsThread has already been detached",
         }
     }
 }
 
 // =============================================================================
-// Thread Type
+// WindowsThread Type
 // =============================================================================
 
-/// Thread handle
-public type Thread is {
+/// WindowsThread handle
+public type WindowsThread is {
     /// Windows thread handle
     handle: Handle,
-    /// Thread ID
+    /// WindowsThread ID
     tid: UInt32,
     /// Whether thread has been joined/detached
     finished: Bool,
 };
 
-/// Thread function type
-public type ThreadFn is fn(&unsafe Byte) -> &unsafe Byte;
+/// WindowsThread function type
+public type WindowsThreadFn is fn(&unsafe Byte) -> &unsafe Byte;
 
-/// Thread function type alias
-public type ThreadFunc is ThreadFn;
+/// WindowsThread function type alias
+public type ThreadFunc is WindowsThreadFn;
 
-/// Thread identifier type
-public type ThreadId is (UInt32);
+/// WindowsThread identifier type
+public type WindowsThreadId is (UInt32);
 
-/// Thread handle type
+/// WindowsThread handle type
 public type ThreadHandle is (Handle);
 
 /// Default thread stack size (1MB)
 public const DEFAULT_THREAD_STACK_SIZE: USize = 1048576;
 
-/// Thread entry wrapper data
+/// WindowsThread entry wrapper data
 type ThreadEntryData is {
-    func: ThreadFn,
+    func: WindowsThreadFn,
     arg: &unsafe Byte,
 };
 
@@ -157,11 +157,11 @@ fn thread_entry(data: &unsafe Byte) -> UInt32 {
     0
 }
 
-implement Thread {
+implement WindowsThread {
     /// Spawn a new thread.
     ///
     /// The thread function will be called with TLS already initialized.
-    public fn spawn(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
+    public fn spawn(func: WindowsThreadFn, arg: &unsafe Byte) -> Result<WindowsThread, WindowsThreadError> {
         // Allocate entry data
         // Note: In a real implementation, this would use proper allocation
         let entry_data = ThreadEntryData {
@@ -185,7 +185,7 @@ implement Thread {
             return Err(CreateFailed { code: GetLastError() });
         }
 
-        Ok(Thread {
+        Ok(WindowsThread {
             handle: handle,
             tid: tid,
             finished: false,
@@ -193,7 +193,7 @@ implement Thread {
     }
 
     /// Spawn a suspended thread.
-    public fn spawn_suspended(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
+    public fn spawn_suspended(func: WindowsThreadFn, arg: &unsafe Byte) -> Result<WindowsThread, WindowsThreadError> {
         let entry_data = ThreadEntryData {
             func: func,
             arg: arg,
@@ -215,7 +215,7 @@ implement Thread {
             return Err(CreateFailed { code: GetLastError() });
         }
 
-        Ok(Thread {
+        Ok(WindowsThread {
             handle: handle,
             tid: tid,
             finished: false,
@@ -223,7 +223,7 @@ implement Thread {
     }
 
     /// Wait for thread to finish.
-    public fn join(&mut self) -> Result<(), ThreadError> {
+    public fn join(&mut self) -> Result<(), WindowsThreadError> {
         if self.finished {
             return Err(AlreadyJoined);
         }
@@ -242,7 +242,7 @@ implement Thread {
     /// Wait for thread with timeout (milliseconds).
     ///
     /// Returns Ok(true) if thread finished, Ok(false) if timed out.
-    public fn join_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, ThreadError> {
+    public fn join_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         if self.finished {
             return Ok(true);
         }
@@ -263,7 +263,7 @@ implement Thread {
     }
 
     /// Detach thread (will be cleaned up automatically when done).
-    public fn detach(&mut self) -> Result<(), ThreadError> {
+    public fn detach(&mut self) -> Result<(), WindowsThreadError> {
         if self.finished {
             return Err(AlreadyDetached);
         }
@@ -284,7 +284,7 @@ implement Thread {
     }
 
     /// Suspend the thread.
-    public fn suspend(&self) -> Result<UInt32, ThreadError> {
+    public fn suspend(&self) -> Result<UInt32, WindowsThreadError> {
         let count = SuspendThread(self.handle);
         if count == 0xFFFFFFFF {
             Err(SuspendFailed { code: GetLastError() })
@@ -294,7 +294,7 @@ implement Thread {
     }
 
     /// Resume the thread.
-    public fn resume(&self) -> Result<UInt32, ThreadError> {
+    public fn resume(&self) -> Result<UInt32, WindowsThreadError> {
         let count = ResumeThread(self.handle);
         if count == 0xFFFFFFFF {
             Err(ResumeFailed { code: GetLastError() })
@@ -315,8 +315,8 @@ public fn current_thread_id() -> UInt32 {
 }
 
 /// Convenience function to spawn a thread.
-public fn spawn(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
-    Thread.spawn(func, arg)
+public fn spawn(func: WindowsThreadFn, arg: &unsafe Byte) -> Result<WindowsThread, WindowsThreadError> {
+    WindowsThread.spawn(func, arg)
 }
 
 /// Yield execution to another thread.
@@ -325,18 +325,18 @@ public fn yield_now() {
 }
 
 // =============================================================================
-// Mutex
+// WindowsMutex
 // =============================================================================
 
-/// Mutex (mutual exclusion lock) using Windows Mutant object
-public type Mutex is {
+/// WindowsMutex (mutual exclusion lock) using Windows Mutant object
+public type WindowsMutex is {
     handle: Handle,
     initialized: Bool,
 };
 
-implement Mutex {
+implement WindowsMutex {
     /// Create a new mutex.
-    public fn new() -> Result<Mutex, ThreadError> {
+    public fn new() -> Result<WindowsMutex, WindowsThreadError> {
         let handle = CreateMutexW(
             &SecurityAttributes.default(),
             false,  // Not initially owned
@@ -347,14 +347,14 @@ implement Mutex {
             return Err(MutexInitFailed { code: GetLastError() });
         }
 
-        Ok(Mutex {
+        Ok(WindowsMutex {
             handle: handle,
             initialized: true,
         })
     }
 
     /// Lock the mutex (blocking).
-    public fn lock(&mut self) -> Result<(), ThreadError> {
+    public fn lock(&mut self) -> Result<(), WindowsThreadError> {
         let result = WaitForSingleObject(self.handle, INFINITE);
 
         match result {
@@ -378,7 +378,7 @@ implement Mutex {
     }
 
     /// Execute a function while holding the lock.
-    public fn with_lock<T>(&mut self, f: fn() -> T) -> Result<T, ThreadError> {
+    public fn with_lock<T>(&mut self, f: fn() -> T) -> Result<T, WindowsThreadError> {
         self.lock()?;
         let result = f();
         self.unlock();
@@ -386,7 +386,7 @@ implement Mutex {
     }
 }
 
-implement Drop for Mutex {
+implement Drop for WindowsMutex {
     fn drop(&mut self) {
         if self.initialized {
             CloseHandle(self.handle);
@@ -400,15 +400,15 @@ implement Drop for Mutex {
 // =============================================================================
 
 /// Condition variable for thread synchronization using Events
-public type Condvar is {
+public type WindowsCondvar is {
     event: Handle,
     initialized: Bool,
     waiters: Int,
 };
 
-implement Condvar {
+implement WindowsCondvar {
     /// Create a new condition variable.
-    public fn new() -> Result<Condvar, ThreadError> {
+    public fn new() -> Result<WindowsCondvar, WindowsThreadError> {
         let event = CreateEventW(
             &SecurityAttributes.default(),
             false,  // Auto-reset event
@@ -420,7 +420,7 @@ implement Condvar {
             return Err(CondInitFailed { code: GetLastError() });
         }
 
-        Ok(Condvar {
+        Ok(WindowsCondvar {
             event: event,
             initialized: true,
             waiters: 0,
@@ -431,7 +431,7 @@ implement Condvar {
     ///
     /// The mutex must be locked before calling. It will be unlocked
     /// while waiting and re-locked before returning.
-    public fn wait(&mut self, mutex: &mut Mutex) -> Result<(), ThreadError> {
+    public fn wait(&mut self, mutex: &mut WindowsMutex) -> Result<(), WindowsThreadError> {
         self.waiters += 1;
         mutex.unlock();
 
@@ -450,7 +450,7 @@ implement Condvar {
     /// Wait on the condition variable with timeout.
     ///
     /// Returns Ok(true) if signaled, Ok(false) if timed out.
-    public fn wait_timeout(&mut self, mutex: &mut Mutex, timeout_ms: UInt32) -> Result<Bool, ThreadError> {
+    public fn wait_timeout(&mut self, mutex: &mut WindowsMutex, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         self.waiters += 1;
         mutex.unlock();
 
@@ -485,7 +485,7 @@ implement Condvar {
     }
 }
 
-implement Drop for Condvar {
+implement Drop for WindowsCondvar {
     fn drop(&mut self) {
         if self.initialized {
             CloseHandle(self.event);
@@ -543,11 +543,11 @@ implement SpinLock {
 }
 
 // =============================================================================
-// Once (one-time initialization)
+// WindowsOnce (one-time initialization)
 // =============================================================================
 
 /// One-time initialization primitive
-public type Once is {
+public type WindowsOnce is {
     state: UInt32,  // 0 = not run, 1 = running, 2 = complete
     event: Handle,  // Event for waiting threads
     initialized: Bool,
@@ -557,10 +557,10 @@ public const ONCE_INIT: UInt32 = 0;
 public const ONCE_RUNNING: UInt32 = 1;
 public const ONCE_COMPLETE: UInt32 = 2;
 
-implement Once {
-    /// Create a new Once.
-    public fn new() -> Once {
-        Once {
+implement WindowsOnce {
+    /// Create a new WindowsOnce.
+    public fn new() -> WindowsOnce {
+        WindowsOnce {
             state: ONCE_INIT,
             event: Handle.NULL,
             initialized: false,
@@ -631,7 +631,7 @@ public type Win32Semaphore is {
 
 implement Win32Semaphore {
     /// Create a new semaphore with initial and maximum count.
-    public fn new(initial: Int32, maximum: Int32) -> Result<Win32Semaphore, ThreadError> {
+    public fn new(initial: Int32, maximum: Int32) -> Result<Win32Semaphore, WindowsThreadError> {
         let handle = CreateSemaphoreW(
             &SecurityAttributes.default(),
             initial,
@@ -650,7 +650,7 @@ implement Win32Semaphore {
     }
 
     /// Wait (acquire) the semaphore.
-    public fn wait(&mut self) -> Result<(), ThreadError> {
+    public fn wait(&mut self) -> Result<(), WindowsThreadError> {
         let result = WaitForSingleObject(self.handle, INFINITE);
         if result == WAIT_FAILED {
             Err(MutexLockFailed { code: GetLastError() })
@@ -662,7 +662,7 @@ implement Win32Semaphore {
     /// Try to wait with timeout.
     ///
     /// Returns Ok(true) if acquired, Ok(false) if timed out.
-    public fn wait_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, ThreadError> {
+    public fn wait_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         let result = WaitForSingleObject(self.handle, timeout_ms);
         match result {
             0 => Ok(true),      // WAIT_OBJECT_0
@@ -672,7 +672,7 @@ implement Win32Semaphore {
     }
 
     /// Signal (release) the semaphore.
-    public fn signal(&mut self) -> Result<Int32, ThreadError> {
+    public fn signal(&mut self) -> Result<Int32, WindowsThreadError> {
         let mut previous: Int32 = 0;
         if ReleaseSemaphore(self.handle, 1, &mut previous) {
             Ok(previous)
@@ -682,7 +682,7 @@ implement Win32Semaphore {
     }
 
     /// Signal with count.
-    public fn signal_many(&mut self, count: Int32) -> Result<Int32, ThreadError> {
+    public fn signal_many(&mut self, count: Int32) -> Result<Int32, WindowsThreadError> {
         let mut previous: Int32 = 0;
         if ReleaseSemaphore(self.handle, count, &mut previous) {
             Ok(previous)

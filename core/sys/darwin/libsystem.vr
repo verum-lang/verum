@@ -175,7 +175,7 @@ extern {
         nchanges: Int,
         eventlist: &unsafe KEvent,
         nevents: Int,
-        timeout: &Timespec,
+        timeout: &DarwinTimespec,
     ) -> Int;
 
     /// kevent64 (extended)
@@ -186,7 +186,7 @@ extern {
         eventlist: &unsafe KEvent64,
         nevents: Int,
         flags: USize,
-        timeout: &Timespec,
+        timeout: &DarwinTimespec,
     ) -> Int;
 
     // =========================================================================
@@ -241,7 +241,7 @@ extern {
     public fn pthread_cond_timedwait(
         cond: &mut PthreadCond,
         mutex: &mut PthreadMutex,
-        abstime: &Timespec,
+        abstime: &DarwinTimespec,
     ) -> Int;
 
     /// Signal condition variable
@@ -289,13 +289,13 @@ extern {
     // =========================================================================
 
     /// Get time of day
-    public fn gettimeofday(tv: &mut Timeval, tz: &unsafe Byte) -> Int;
+    public fn gettimeofday(tv: &mut DarwinTimeval, tz: &unsafe Byte) -> Int;
 
     /// Get clock time (POSIX)
-    public fn clock_gettime(clk_id: Int, tp: &mut Timespec) -> Int;
+    public fn clock_gettime(clk_id: Int, tp: &mut DarwinTimespec) -> Int;
 
     /// Sleep (nanoseconds)
-    public fn nanosleep(rqtp: &Timespec, rmtp: &mut Timespec) -> Int;
+    public fn nanosleep(rqtp: &DarwinTimespec, rmtp: &mut DarwinTimespec) -> Int;
 
     /// Get monotonic time (mach)
     public fn mach_absolute_time() -> UInt64;
@@ -568,13 +568,13 @@ public type MachPort is (UInt32);
 implement IntCoercible for MachPort {}
 
 /// timespec structure
-public type Timespec is {
+public type DarwinTimespec is {
     tv_sec: Int,
     tv_nsec: Int,
 };
 
 /// timeval structure
-public type Timeval is {
+public type DarwinTimeval is {
     tv_sec: Int,
     tv_usec: Int,
 };
@@ -615,10 +615,10 @@ public type Stat is {
     st_uid: UInt32,
     st_gid: UInt32,
     st_rdev: Int32,
-    st_atime: Timespec,
-    st_mtime: Timespec,
-    st_ctime: Timespec,
-    st_birthtime: Timespec,
+    st_atime: DarwinTimespec,
+    st_mtime: DarwinTimespec,
+    st_ctime: DarwinTimespec,
+    st_birthtime: DarwinTimespec,
     st_size: Int64,
     st_blocks: Int64,
     st_blksize: Int32,
@@ -634,7 +634,7 @@ public type Sockaddr is {
 };
 
 /// sockaddr_in (IPv4)
-public type SockaddrIn is {
+public type DarwinSockaddrIn is {
     sin_len: UInt8,
     sin_family: UInt8,
     sin_port: UInt16,
@@ -643,7 +643,7 @@ public type SockaddrIn is {
 };
 
 /// sockaddr_in6 (IPv6)
-public type SockaddrIn6 is {
+public type DarwinSockaddrIn6 is {
     sin6_len: UInt8,
     sin6_family: UInt8,
     sin6_port: UInt16,
@@ -1154,8 +1154,8 @@ public fn safe_kqueue() -> Result<FileDesc, OSError> {
 
 /// Sleep for duration
 public fn safe_nanosleep(seconds: Int, nanoseconds: Int) -> Result<(), OSError> {
-    let req = Timespec { tv_sec: seconds, tv_nsec: nanoseconds };
-    let mut rem = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let req = DarwinTimespec { tv_sec: seconds, tv_nsec: nanoseconds };
+    let mut rem = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
     let result = unsafe { nanosleep(&req, &mut rem) };
     if result < 0 {
         let err = errno();
@@ -1192,8 +1192,8 @@ public fn monotonic_millis() -> UInt64 {
 }
 
 /// Get clock time
-public fn safe_clock_gettime(clock_id: Int) -> Result<Timespec, OSError> {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+public fn safe_clock_gettime(clock_id: Int) -> Result<DarwinTimespec, OSError> {
+    let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
     let result = unsafe { clock_gettime(clock_id, &mut ts) };
     if result < 0 {
         let err = errno();
@@ -1901,7 +1901,7 @@ public fn safe_set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSErr
 
 /// struct ip_mreq for multicast membership
 @repr(C)
-public type IpMreq is {
+public type DarwinIpMreq is {
     imr_multiaddr: UInt32,   // Multicast group address (network byte order)
     imr_interface: UInt32,   // Interface address (network byte order), 0 = default
 };
@@ -1911,7 +1911,7 @@ public type IpMreq is {
 /// multiaddr: multicast group address (network byte order)
 /// interface: local interface address (network byte order), 0 = default
 public fn safe_join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    let mreq = IpMreq {
+    let mreq = DarwinIpMreq {
         imr_multiaddr: multiaddr,
         imr_interface: interface,
     };
@@ -1921,7 +1921,7 @@ public fn safe_join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UIn
 
 /// Leave an IPv4 multicast group
 public fn safe_leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    let mreq = IpMreq {
+    let mreq = DarwinIpMreq {
         imr_multiaddr: multiaddr,
         imr_interface: interface,
     };

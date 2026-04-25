@@ -20,7 +20,7 @@ module sys.windows.time;
 mount core.intrinsics.platform.{spin_hint};
 mount super.ntdll.{LargeInteger};
 mount super.kernel32.{
-    SystemTime,
+    WindowsSystemTime,
     QueryPerformanceCounter,
     QueryPerformanceFrequency,
     GetTickCount64,
@@ -315,9 +315,9 @@ public fn unix_timestamp() -> UInt64 {
     realtime_nanos() / NANOS_PER_SEC
 }
 
-/// Get system time as SystemTime structure.
-public fn system_time() -> SystemTime {
-    let mut st = SystemTime {
+/// Get system time as WindowsSystemTime structure.
+public fn system_time() -> WindowsSystemTime {
+    let mut st = WindowsSystemTime {
         year: 0,
         month: 0,
         day_of_week: 0,
@@ -331,9 +331,9 @@ public fn system_time() -> SystemTime {
     st
 }
 
-/// Get local time as SystemTime structure.
-public fn local_time() -> SystemTime {
-    let mut st = SystemTime {
+/// Get local time as WindowsSystemTime structure.
+public fn local_time() -> WindowsSystemTime {
+    let mut st = WindowsSystemTime {
         year: 0,
         month: 0,
         day_of_week: 0,
@@ -407,16 +407,16 @@ public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
 }
 
 /// Simple stopwatch for timing code sections.
-public type Stopwatch is {
+public type WindowsStopwatch is {
     start: UInt64,      // Performance counter ticks
     running: Bool,
     accumulated: UInt64,  // Accumulated ticks
 };
 
-implement Stopwatch {
+implement WindowsStopwatch {
     /// Create a new stopped stopwatch.
-    public fn new() -> Stopwatch {
-        Stopwatch {
+    public fn new() -> WindowsStopwatch {
+        WindowsStopwatch {
             start: 0,
             running: false,
             accumulated: 0,
@@ -424,8 +424,8 @@ implement Stopwatch {
     }
 
     /// Create and immediately start a stopwatch.
-    public fn started() -> Stopwatch {
-        let mut sw = Stopwatch.new();
+    public fn started() -> WindowsStopwatch {
+        let mut sw = WindowsStopwatch.new();
         sw.start();
         sw
     }
@@ -508,15 +508,15 @@ implement Stopwatch {
 ///
 /// Uses QueryPerformanceCounter which is the fastest monotonic
 /// time source on Windows.
-public type PerfCounter is (UInt64);
+public type WindowsPerfCounter is (UInt64);
 
-implement PerfCounter {
+implement WindowsPerfCounter {
     /// Read the current performance counter.
     @inline
-    public fn now() -> PerfCounter {
+    public fn now() -> WindowsPerfCounter {
         let mut counter = LargeInteger(0);
         QueryPerformanceCounter(&mut counter);
-        PerfCounter(counter.0 as UInt64)
+        WindowsPerfCounter(counter.0 as UInt64)
     }
 
     /// Get elapsed time since this counter reading.
@@ -541,7 +541,7 @@ implement PerfCounter {
 
     /// Difference between two counter readings.
     @inline
-    public fn diff(&self, earlier: &PerfCounter) -> Duration {
+    public fn diff(&self, earlier: &WindowsPerfCounter) -> Duration {
         let freq = get_frequency();
         let ticks = self.0 - earlier.0;
         let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
@@ -554,33 +554,33 @@ implement PerfCounter {
 // =============================================================================
 
 /// A deadline timer for timeout management.
-public type DeadlineTimer is {
+public type WindowsDeadlineTimer is {
     deadline: UInt64,  // Performance counter ticks
     has_deadline: Bool,
 };
 
-implement DeadlineTimer {
+implement WindowsDeadlineTimer {
     /// Create a timer with no deadline (infinite timeout).
-    public fn none() -> DeadlineTimer {
-        DeadlineTimer {
+    public fn none() -> WindowsDeadlineTimer {
+        WindowsDeadlineTimer {
             deadline: 0,
             has_deadline: false,
         }
     }
 
     /// Create a timer that expires after a duration.
-    public fn after(duration: Duration) -> DeadlineTimer {
+    public fn after(duration: Duration) -> WindowsDeadlineTimer {
         let now = Instant.now();
         let deadline_instant = now.add(duration);
-        DeadlineTimer {
+        WindowsDeadlineTimer {
             deadline: deadline_instant.0,
             has_deadline: true,
         }
     }
 
     /// Create a timer that expires at a specific instant.
-    public fn at(instant: Instant) -> DeadlineTimer {
-        DeadlineTimer {
+    public fn at(instant: Instant) -> WindowsDeadlineTimer {
+        WindowsDeadlineTimer {
             deadline: instant.0,
             has_deadline: true,
         }

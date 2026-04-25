@@ -213,9 +213,9 @@ public const TIOCSWINSZ: Int = 0x5414;
 // Types
 // =============================================================================
 
-/// Timespec structure for nanosleep, clock_gettime, etc.
+/// LinuxTimespec structure for nanosleep, clock_gettime, etc.
 @repr(C)
-public type Timespec is {
+public type LinuxTimespec is {
     tv_sec: Int64,
     tv_nsec: Int64,
 };
@@ -390,9 +390,9 @@ public fn nanosleep(seconds: Int, nanoseconds: Int) -> Result<(Int, Int), OSErro
     }
 }
 
-/// POSIX-style nanosleep accepting a Timespec struct reference.
+/// POSIX-style nanosleep accepting a LinuxTimespec struct reference.
 /// The second parameter (remainder) is optional - pass null to ignore.
-public fn nanosleep_ts(req: &Timespec, rem: Maybe<&mut Timespec>) -> Result<(), OSError> {
+public fn nanosleep_ts(req: &LinuxTimespec, rem: Maybe<&mut LinuxTimespec>) -> Result<(), OSError> {
     let result = nanosleep(req.tv_sec, req.tv_nsec);
     match result {
         Ok((rem_sec, rem_nsec)) => {
@@ -506,7 +506,7 @@ public const CLOCK_MONOTONIC_RAW: Int = 4;
 public const CLOCK_BOOTTIME: Int = 7;
 
 /// Get time from a clock source.
-public fn clock_gettime(clock_id: Int, ts: &mut Timespec) -> Result<(), OSError> {
+public fn clock_gettime(clock_id: Int, ts: &mut LinuxTimespec) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(SYS_CLOCK_GETTIME, clock_id, ts as Int, 0, 0, 0, 0)
     };
@@ -1031,17 +1031,17 @@ public const O_NONBLOCK: Int = 0o4000;
 
 /// sockaddr_in structure for IPv4.
 @repr(C)
-public type SockaddrIn is {
+public type LinuxSockaddrIn is {
     sin_family: UInt16,
     sin_port: UInt16,           // Network byte order (big-endian)
     sin_addr: UInt32,           // Network byte order
     sin_zero: [UInt8; 8],
 };
 
-implement SockaddrIn {
+implement LinuxSockaddrIn {
     /// Create a new IPv4 socket address.
-    public fn new(addr: UInt32, port: UInt16) -> SockaddrIn {
-        SockaddrIn {
+    public fn new(addr: UInt32, port: UInt16) -> LinuxSockaddrIn {
+        LinuxSockaddrIn {
             sin_family: AF_INET as UInt16,
             sin_port: port.to_be(),      // Convert to network byte order
             sin_addr: addr.to_be(),
@@ -1050,15 +1050,15 @@ implement SockaddrIn {
     }
 
     /// Create from octets and port.
-    public fn from_octets(a: UInt8, b: UInt8, c: UInt8, d: UInt8, port: UInt16) -> SockaddrIn {
+    public fn from_octets(a: UInt8, b: UInt8, c: UInt8, d: UInt8, port: UInt16) -> LinuxSockaddrIn {
         let addr = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
-        SockaddrIn.new(addr, port)
+        LinuxSockaddrIn.new(addr, port)
     }
 }
 
 /// sockaddr_in6 structure for IPv6.
 @repr(C)
-public type SockaddrIn6 is {
+public type LinuxSockaddrIn6 is {
     sin6_family: UInt16,
     sin6_port: UInt16,
     sin6_flowinfo: UInt32,
@@ -1093,7 +1093,7 @@ public fn connect(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(),
 }
 
 /// Connect to an IPv4 address.
-public fn connect_v4(fd: FileDesc, addr: &SockaddrIn) -> Result<(), OSError> {
+public fn connect_v4(fd: FileDesc, addr: &LinuxSockaddrIn) -> Result<(), OSError> {
     connect(fd, addr as &unsafe Byte, 16)  // sizeof(sockaddr_in) = 16
 }
 
@@ -1111,7 +1111,7 @@ public fn bind(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(), OS
 }
 
 /// Bind to an IPv4 address.
-public fn bind_v4(fd: FileDesc, addr: &SockaddrIn) -> Result<(), OSError> {
+public fn bind_v4(fd: FileDesc, addr: &LinuxSockaddrIn) -> Result<(), OSError> {
     bind(fd, addr as &unsafe Byte, 16)
 }
 
@@ -1480,7 +1480,7 @@ public fn set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
 
 /// struct ip_mreq for multicast membership.
 @repr(C)
-public type IpMreq is {
+public type LinuxIpMreq is {
     imr_multiaddr: UInt32,   // Multicast group address (network byte order)
     imr_interface: UInt32,   // Interface address (network byte order), 0 = default
 };
@@ -1490,7 +1490,7 @@ public type IpMreq is {
 /// multiaddr: multicast group address (4 bytes, network byte order)
 /// interface: local interface address (4 bytes, network byte order), 0 = default
 public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    let mreq = IpMreq {
+    let mreq = LinuxIpMreq {
         imr_multiaddr: multiaddr,
         imr_interface: interface,
     };
@@ -1500,7 +1500,7 @@ public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) 
 
 /// Leave an IPv4 multicast group.
 public fn leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    let mreq = IpMreq {
+    let mreq = LinuxIpMreq {
         imr_multiaddr: multiaddr,
         imr_interface: interface,
     };

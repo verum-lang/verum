@@ -1,7 +1,7 @@
 module sys.windows.tls;
 
 // =============================================================================
-// sys/windows/tls.vr - Windows Thread-Local Storage and Context System
+// sys/windows/tls.vr - Windows WindowsThread-Local Storage and Context System
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/windows/kernel32, sys/common
@@ -13,7 +13,7 @@ module sys.windows.tls;
 //
 // The context system provides:
 // - Fixed-size context slot array for O(1) lookup
-// - Thread-safe context propagation
+// - WindowsThread-safe context propagation
 // - Stack-based context scoping (push/pop)
 //
 // Spec: docs/architecture/new-arch-spec.md Section 5.4, Appendix F.3.2.3
@@ -42,7 +42,7 @@ public const MAX_CONTEXT_SLOTS: Int = 256;
 /// Size of the context stack per slot
 public const CONTEXT_STACK_DEPTH: Int = 8;
 
-/// Thread Control Block magic number for validation
+/// WindowsThread Control Block magic number for validation
 public const TCB_MAGIC: UInt64 = 0x5645_5255_4D5F_5443;  // "VERUM_TC" in ASCII
 
 /// Default stack size for threads (1MB)
@@ -87,11 +87,11 @@ implement TlsError {
 }
 
 // =============================================================================
-// Thread Control Block
+// WindowsThread Control Block
 // =============================================================================
 
 /// Per-slot context entry with stack support
-public type ContextEntry is {
+public type WindowsContextEntry is {
     /// Current context value (opaque pointer)
     value: &unsafe Byte,
     /// Stack for nested contexts
@@ -101,27 +101,27 @@ public type ContextEntry is {
 };
 
 /// Context slots array
-public type ContextSlots is {
+public type WindowsContextSlots is {
     /// Context entries indexed by slot
-    slots: [ContextEntry; 256],  // MAX_CONTEXT_SLOTS
+    slots: [WindowsContextEntry; 256],  // MAX_CONTEXT_SLOTS
 };
 
-/// Thread Control Block (TCB)
+/// WindowsThread Control Block (TCB)
 ///
 /// This structure is allocated per-thread and contains all thread-local
 /// state needed by the V-LLSI runtime.
-public type ThreadControlBlock is {
+public type WindowsThreadControlBlock is {
     /// Magic number for validation (TCB_MAGIC)
     magic: UInt64,
 
-    /// Thread ID (cached for fast access)
+    /// WindowsThread ID (cached for fast access)
     tid: UInt32,
 
     /// Process ID (cached)
     pid: UInt32,
 
     /// Context slots for dependency injection
-    context_slots: ContextSlots,
+    context_slots: WindowsContextSlots,
 
     /// Last error value for this thread
     last_error: UInt32,
@@ -168,7 +168,7 @@ public fn init_tls_index() -> Result<(), TlsError> {
 /// Initialize TLS for the main thread.
 ///
 /// Must be called once at program startup before any context operations.
-public fn init_main_thread_tls() -> Result<&mut ThreadControlBlock, TlsError> {
+public fn init_main_thread_tls() -> Result<&mut WindowsThreadControlBlock, TlsError> {
     // Ensure TLS index is allocated
     init_tls_index()?;
 
@@ -186,12 +186,12 @@ public fn init_main_thread_tls() -> Result<&mut ThreadControlBlock, TlsError> {
 ///
 /// Called automatically for threads created via spawn, or manually
 /// for threads created by other means.
-public fn create_thread_tls() -> Result<&mut ThreadControlBlock, TlsError> {
+public fn create_thread_tls() -> Result<&mut WindowsThreadControlBlock, TlsError> {
     // Ensure TLS index exists
     init_tls_index()?;
 
     // Allocate TCB with guard page
-    let tcb_size = ThreadControlBlock.size;
+    let tcb_size = WindowsThreadControlBlock.size;
     let total_size = GUARD_PAGE_SIZE + tcb_size;
 
     // Allocate memory (guard page + TCB)
@@ -221,7 +221,7 @@ public fn create_thread_tls() -> Result<&mut ThreadControlBlock, TlsError> {
     }
 
     // TCB is after the guard page
-    let tcb_addr = (base as Int + GUARD_PAGE_SIZE) as &mut ThreadControlBlock;
+    let tcb_addr = (base as Int + GUARD_PAGE_SIZE) as &mut WindowsThreadControlBlock;
     let tcb = tcb_addr;
 
     // Initialize TCB
@@ -234,7 +234,7 @@ public fn create_thread_tls() -> Result<&mut ThreadControlBlock, TlsError> {
 
     // Initialize all context slots
     for i in 0..MAX_CONTEXT_SLOTS {
-        tcb.context_slots.slots[i] = ContextEntry {
+        tcb.context_slots.slots[i] = WindowsContextEntry {
             value: 0 as &unsafe Byte,
             stack: [0 as &unsafe Byte; 8],
             depth: 0,
@@ -280,19 +280,19 @@ public fn cleanup_thread_tls() -> Result<(), TlsError> {
 // =============================================================================
 
 /// Get raw TCB pointer (may be null)
-fn get_current_tcb_raw() -> &mut ThreadControlBlock {
+fn get_current_tcb_raw() -> &mut WindowsThreadControlBlock {
     unsafe {
         if !TLS_INDEX_INITIALIZED {
-            return 0 as &mut ThreadControlBlock;
+            return 0 as &mut WindowsThreadControlBlock;
         }
-        TlsGetValue(TLS_INDEX) as &mut ThreadControlBlock
+        TlsGetValue(TLS_INDEX) as &mut WindowsThreadControlBlock
     }
 }
 
 /// Get the current thread's TCB.
 ///
 /// Returns None if TLS is not initialized for this thread.
-public fn get_current_tcb() -> Maybe<&mut ThreadControlBlock> {
+public fn get_current_tcb() -> Maybe<&mut WindowsThreadControlBlock> {
     let tcb = get_current_tcb_raw();
     if tcb as Int == 0 {
         None
@@ -304,7 +304,7 @@ public fn get_current_tcb() -> Maybe<&mut ThreadControlBlock> {
 }
 
 /// Get context slots for the current thread.
-public fn get_context_slots() -> Maybe<&mut ContextSlots> {
+public fn get_context_slots() -> Maybe<&mut WindowsContextSlots> {
     match get_current_tcb() {
         Some(tcb) => Some(&mut tcb.context_slots),
         None => None,
@@ -312,7 +312,7 @@ public fn get_context_slots() -> Maybe<&mut ContextSlots> {
 }
 
 /// Set context slots for the current thread.
-public fn set_context_slots(slots: ContextSlots) -> Result<(), TlsError> {
+public fn set_context_slots(slots: WindowsContextSlots) -> Result<(), TlsError> {
     match get_current_tcb() {
         Some(tcb) => {
             tcb.context_slots = slots;

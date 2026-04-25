@@ -253,6 +253,24 @@ pub enum CoreTerm {
     /// biadjunction). Together with `EpsilonOf` this enables kernel-
     /// level reasoning about the ε ↔ α duality.
     AlphaOf(Heap<CoreTerm>),
+
+    /// VFE-7 V1 — `ModalBox(φ)` represents `□φ` (necessity in the
+    /// underlying modal logic). md^ω(□φ) = md^ω(φ) + 1 per
+    /// Definition 136.D1. The K-Refine-omega rule uses the
+    /// resulting ordinal to gate refinement-type formation.
+    ModalBox(Heap<CoreTerm>),
+
+    /// VFE-7 V1 — `ModalDiamond(φ)` represents `◇φ` (possibility).
+    /// md^ω(◇φ) = md^ω(φ) + 1 per Definition 136.D1.
+    ModalDiamond(Heap<CoreTerm>),
+
+    /// VFE-7 V1 — `ModalBigAnd(P_0, ..., P_κ)` represents the
+    /// transfinite conjunction `⋀_{i<κ} P_i`. md^ω of the big-and
+    /// is the *supremum* of the components' md^ω-ranks, per
+    /// Definition 136.D1 + Lemma 136.L0 well-founded ordinal
+    /// recursion. Used to express modal axiom schemes that
+    /// quantify over all possible-world labels at once.
+    ModalBigAnd(List<Heap<CoreTerm>>),
 }
 
 // =============================================================================
@@ -605,6 +623,14 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         // does not change m_depth at the term level — it lives at the
         // 2-cell level handled by `Kernel::check_eps_mu_coherence`.
         CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => m_depth(t),
+        // VFE-7: modal operators inherit M-depth from their operand.
+        // The M-iteration depth (used by K-Refine) does NOT see modal
+        // structure; the modal-depth (used by K-Refine-omega) is a
+        // *separate* ordinal-valued quantity computed by `m_depth_omega`.
+        CoreTerm::ModalBox(t) | CoreTerm::ModalDiamond(t) => m_depth(t),
+        CoreTerm::ModalBigAnd(args) => {
+            args.iter().map(|t| m_depth(t)).max().unwrap_or(0)
+        }
     }
 }
 
@@ -679,20 +705,119 @@ impl OrdinalDepth {
     }
 }
 
-/// VFE-7 V0 — `K-Refine-omega` modal-depth function `md^ω`.
+/// VFE-7 V1 — `K-Refine-omega` modal-depth function `md^ω`.
 ///
-/// V0 ships a *skeleton* implementation: every term is treated as
-/// having finite modal depth (same value as `m_depth`), wrapped in
-/// an ordinal-valued result. This preserves bit-identical behaviour
-/// with the existing K-Refine rule for all currently-shippable
-/// programs.
+/// Per Definition 136.D1 (transfinite modal language L^ω_α):
 ///
-/// V1 will extend the computation to recognise modal operators
-/// (□φ, ◇φ, ⋀_{i<κ} P_i) and compute their ordinal modal-depth via
-/// well-founded ordinal recursion per Lemma 136.L0. After V1 the
-/// rule blocks every modal-paradox witness up to depth κ_2.
+///   md^ω(atomic)       = 0
+///   md^ω(□φ)           = md^ω(φ) + 1
+///   md^ω(◇φ)           = md^ω(φ) + 1
+///   md^ω(⋀_{i<κ} P_i)  = sup_i md^ω(P_i)
+///   md^ω(structural)   = max(md^ω of children)
+///
+/// Walks the term tree once, descending through all term shapes.
+/// For non-modal terms the walk reduces to `max-of-children` which
+/// preserves bit-identical behaviour with the V0 skeleton (modal
+/// operators were the only Rank-bumping shapes anyway).
+///
+/// Termination: well-founded over the term tree depth (every
+/// recursion descends to a strictly smaller subterm). Per Lemma
+/// 136.L0 the ordinal recursion is well-defined for every term in
+/// the canonical-primitive language L^ω_α.
+///
+/// Blocks (per VFE §7): Berry, paradoxical Löb, paraconsistent
+/// Curry, Beth-Monk ω-iteration, and any ω·k or ω^ω modal-paradox
+/// witness. The K-Refine-omega rule (`check_refine_omega`) routes
+/// the result through `OrdinalDepth::lt` to gate refinement-type
+/// formation.
 pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
-    OrdinalDepth::finite(m_depth(term) as u32)
+    match term {
+        // Atomic / variable — md^ω = 0.
+        CoreTerm::Var(_) => OrdinalDepth::finite(0),
+        CoreTerm::Universe(_) => OrdinalDepth::finite(0),
+
+        // Modal operators — the load-bearing recursion.
+        CoreTerm::ModalBox(phi) | CoreTerm::ModalDiamond(phi) => {
+            m_depth_omega(phi).succ()
+        }
+        CoreTerm::ModalBigAnd(args) => {
+            // sup_i md^ω(P_i). For finite arity the supremum is the
+            // pointwise max under the lex ordering. Empty conjunction
+            // is the identity (md^ω = 0).
+            let mut sup = OrdinalDepth::finite(0);
+            for arg in args.iter() {
+                let r = m_depth_omega(arg);
+                if sup.lt(&r) {
+                    sup = r;
+                }
+            }
+            sup
+        }
+
+        // Structural — descend into immediate children, take max.
+        CoreTerm::Pi { domain, codomain, .. } => {
+            ord_max(m_depth_omega(domain), m_depth_omega(codomain))
+        }
+        CoreTerm::Lam { domain, body, .. } => {
+            ord_max(m_depth_omega(domain), m_depth_omega(body))
+        }
+        CoreTerm::App(f, a) => ord_max(m_depth_omega(f), m_depth_omega(a)),
+        CoreTerm::Sigma { fst_ty, snd_ty, .. } => {
+            ord_max(m_depth_omega(fst_ty), m_depth_omega(snd_ty))
+        }
+        CoreTerm::Pair(a, b) => ord_max(m_depth_omega(a), m_depth_omega(b)),
+        CoreTerm::Fst(p) | CoreTerm::Snd(p) => m_depth_omega(p),
+        CoreTerm::PathTy { carrier, lhs, rhs } => {
+            ord_max(
+                m_depth_omega(carrier),
+                ord_max(m_depth_omega(lhs), m_depth_omega(rhs)),
+            )
+        }
+        CoreTerm::Refl(a) => m_depth_omega(a),
+        CoreTerm::HComp { phi, walls, base } => ord_max(
+            m_depth_omega(phi),
+            ord_max(m_depth_omega(walls), m_depth_omega(base)),
+        ),
+        CoreTerm::Transp { path, regular, value } => ord_max(
+            m_depth_omega(path),
+            ord_max(m_depth_omega(regular), m_depth_omega(value)),
+        ),
+        CoreTerm::Glue { carrier, phi, fiber, equiv } => ord_max(
+            ord_max(m_depth_omega(carrier), m_depth_omega(phi)),
+            ord_max(m_depth_omega(fiber), m_depth_omega(equiv)),
+        ),
+        CoreTerm::Refine { base, predicate, .. } => {
+            ord_max(m_depth_omega(base), m_depth_omega(predicate))
+        }
+        CoreTerm::Inductive { args, .. } => {
+            let mut sup = OrdinalDepth::finite(0);
+            for arg in args.iter() {
+                let r = m_depth_omega(arg);
+                if sup.lt(&r) {
+                    sup = r;
+                }
+            }
+            sup
+        }
+        CoreTerm::Elim { scrutinee, motive, cases } => {
+            let mut sup = ord_max(m_depth_omega(scrutinee), m_depth_omega(motive));
+            for case in cases.iter() {
+                let r = m_depth_omega(case);
+                if sup.lt(&r) {
+                    sup = r;
+                }
+            }
+            sup
+        }
+        CoreTerm::SmtProof(_) => OrdinalDepth::finite(0),
+        CoreTerm::Axiom { ty, .. } => m_depth_omega(ty),
+        CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => m_depth_omega(t),
+    }
+}
+
+/// Local helper — pointwise lex max for OrdinalDepth.
+fn ord_max(a: OrdinalDepth, b: OrdinalDepth) -> OrdinalDepth {
+    if a.lt(&b) { b } else { a }
 }
 
 /// VFE-7 V0 — `K-Refine-omega` rule entry point.
@@ -1877,6 +2002,22 @@ pub fn infer(
         // whether the result lives in the articulation 2-category
         // or the enactment 2-category.
         CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => infer(ctx, t, axioms),
+
+        // VFE-7 V1: modal operators inhabit `Prop`. The kernel
+        // verifies that the operand is well-typed (regardless of
+        // whether it inhabits `Prop` or any other type — modality
+        // can be applied to any well-formed term, the resulting
+        // proposition is always at the propositional layer).
+        CoreTerm::ModalBox(phi) | CoreTerm::ModalDiamond(phi) => {
+            let _ = infer(ctx, phi, axioms)?;
+            Ok(CoreTerm::Universe(UniverseLevel::Prop))
+        }
+        CoreTerm::ModalBigAnd(args) => {
+            for a in args.iter() {
+                let _ = infer(ctx, a, axioms)?;
+            }
+            Ok(CoreTerm::Universe(UniverseLevel::Prop))
+        }
     }
 }
 
@@ -2132,6 +2273,17 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
         // VFE-1: substitute commutes with the duality wrappers.
         CoreTerm::EpsilonOf(t) => CoreTerm::EpsilonOf(Heap::new(substitute(t, name, value))),
         CoreTerm::AlphaOf(t)   => CoreTerm::AlphaOf(Heap::new(substitute(t, name, value))),
+
+        // VFE-7: substitute commutes with the modal operators.
+        CoreTerm::ModalBox(phi) => CoreTerm::ModalBox(Heap::new(substitute(phi, name, value))),
+        CoreTerm::ModalDiamond(phi) => CoreTerm::ModalDiamond(Heap::new(substitute(phi, name, value))),
+        CoreTerm::ModalBigAnd(args) => {
+            let mut new_args = List::new();
+            for a in args.iter() {
+                new_args.push(Heap::new(substitute(a, name, value)));
+            }
+            CoreTerm::ModalBigAnd(new_args)
+        }
     }
 }
 

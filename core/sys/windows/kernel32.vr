@@ -483,7 +483,7 @@ public type OverlappedEntry is {
 };
 
 // =============================================================================
-// Process and Thread
+// Process and WindowsThread
 // =============================================================================
 
 /// Get current process handle
@@ -865,7 +865,7 @@ public fn LeaveCriticalSection(critical_section: &unsafe Byte);
 public fn DeleteCriticalSection(critical_section: &unsafe Byte);
 
 // =============================================================================
-// Thread-Local Storage
+// WindowsThread-Local Storage
 // =============================================================================
 
 /// Allocate a TLS index
@@ -908,7 +908,7 @@ public fn QueryPerformanceCounter(performance_count: &mut LargeInteger) -> Bool;
 public fn QueryPerformanceFrequency(frequency: &mut LargeInteger) -> Bool;
 
 /// System time structure
-public type SystemTime is {
+public type WindowsSystemTime is {
     year: UInt16,
     month: UInt16,
     day_of_week: UInt16,
@@ -921,11 +921,11 @@ public type SystemTime is {
 
 /// Get system time (UTC)
 @extern("kernel32.dll")
-public fn GetSystemTime(system_time: &mut SystemTime);
+public fn GetSystemTime(system_time: &mut WindowsSystemTime);
 
 /// Get local time
 @extern("kernel32.dll")
-public fn GetLocalTime(local_time: &mut SystemTime);
+public fn GetLocalTime(local_time: &mut WindowsSystemTime);
 
 /// Get system time as file time
 @extern("kernel32.dll")
@@ -960,7 +960,7 @@ public fn ReadConsoleW(
 ) -> Bool;
 
 // =============================================================================
-// Thread Creation Flags
+// WindowsThread Creation Flags
 // =============================================================================
 
 public const CREATE_SUSPENDED: UInt32 = 0x00000004;

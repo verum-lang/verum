@@ -15,7 +15,7 @@ module sys.windows.winsock2;
 //    across Linux and Windows via @cfg(any(target_os = "linux", target_os = "windows"))
 //
 // Architecture:
-// - WSA initialization is handled lazily via Once guard on first socket call
+// - WSA initialization is handled lazily via WindowsOnce guard on first socket call
 // - All wrappers return Result<T, OSError> matching the Linux syscall interface
 // - Socket handles are wrapped as FileDesc for cross-platform compatibility
 // - closesocket() is mapped to close(), ioctlsocket() to set_nonblocking(), etc.
@@ -102,7 +102,7 @@ type WSADATA is {
 };
 
 /// Socket address (IPv4) — binary compatible with struct sockaddr_in
-public type SockaddrIn is {
+public type WindowsSockaddrIn is {
     family: UInt16,   // AF_INET
     port: UInt16,     // Network byte order
     addr: UInt32,     // Network byte order
@@ -110,7 +110,7 @@ public type SockaddrIn is {
 };
 
 /// Socket address (IPv6) — binary compatible with struct sockaddr_in6
-public type SockaddrIn6 is {
+public type WindowsSockaddrIn6 is {
     family: UInt16,
     port: UInt16,
     flowinfo: UInt32,
@@ -183,14 +183,14 @@ fn ws2_ioctlsocket(s: UInt64, cmd: UInt32, argp: &mut UInt32) -> Int;
 fn ws2_select(nfds: Int, readfds: &unsafe Byte, writefds: &unsafe Byte, exceptfds: &unsafe Byte, timeout: &unsafe Byte) -> Int;
 
 // =============================================================================
-// WSA Initialization (Once-guarded)
+// WSA Initialization (WindowsOnce-guarded)
 // =============================================================================
 
 /// WSA initialization state: 0=not started, 1=in progress, 2=done
 static wsa_state: AtomicInt = AtomicInt.new(0);
 
 /// Initialize Winsock2 subsystem. Called automatically on first socket operation.
-/// Thread-safe via atomic CAS — only the first caller performs initialization.
+/// WindowsThread-safe via atomic CAS — only the first caller performs initialization.
 fn wsa_ensure_init() {
     // Fast path: already initialized
     if wsa_state.load(MemoryOrdering.Acquire) == 2 {
