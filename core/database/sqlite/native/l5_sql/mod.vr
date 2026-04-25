@@ -32,7 +32,7 @@ public module codegen;
 public module compile;
 
 public mount .lexer.{
-    Token, Keyword, Operator, Punct, VariableKind, LexError, LexerState,
+    Token, SqlKeyword, Operator, Punct, VariableKind, LexError, LexerState,
     lex, lookup_keyword,
 };
 

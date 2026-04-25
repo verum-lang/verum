@@ -27,7 +27,7 @@ mount core.database.sqlite.native.lockfile.state.{
     state_rank, state_name,
 };
 mount core.database.sqlite.native.lockfile.region.{
-    LockRegion, pending_region, reserved_region, shared_region_full,
+    SqliteLockRegion, pending_region, reserved_region, shared_region_full,
 };
 
 // -----------------------------------------------------------------------------
@@ -35,10 +35,10 @@ mount core.database.sqlite.native.lockfile.region.{
 // -----------------------------------------------------------------------------
 
 public type LockOp is
-      LoAcquireExclusive(LockRegion)
-    | LoAcquireShared(LockRegion)
-    | LoRelease(LockRegion)
-    | LoUpgradeShared(LockRegion);
+      LoAcquireExclusive(SqliteLockRegion)
+    | LoAcquireShared(SqliteLockRegion)
+    | LoRelease(SqliteLockRegion)
+    | LoUpgradeShared(SqliteLockRegion);
 
 public fn op_kind_name(o: &LockOp) -> Text {
     match o {

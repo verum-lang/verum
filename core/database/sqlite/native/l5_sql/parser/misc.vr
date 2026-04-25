@@ -27,7 +27,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{
-    Token, Keyword, Operator, Punct,
+    Token, SqlKeyword, Operator, Punct,
 };
 mount core.database.sqlite.native.l5_sql.ast.{
     SqlStatement, Expr, TableRef,
@@ -106,7 +106,7 @@ public fn parse_begin(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErro
     // Optional transaction mode: DEFERRED / IMMEDIATE / EXCLUSIVE.
     let _ = ts.accept_keyword(KwDeferred);
     let _ = ts.accept_keyword(KwImmediate);
-    // EXCLUSIVE isn't in our Keyword set; accept as ident.
+    // EXCLUSIVE isn't in our SqlKeyword set; accept as ident.
     match ts.peek() {
         TIdent(s) => {
             let lower = fold_text_ascii(&s);

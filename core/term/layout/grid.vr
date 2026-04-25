@@ -1,7 +1,7 @@
 // =============================================================================
-// layout/grid.vr - CSS Grid Layout for Terminals
+// layout/grid.vr - CSS Grid TermLayout for Terminals
 // =============================================================================
-// Layer: 4 (Layout Engine)
+// Layer: 4 (TermLayout Engine)
 // Dependencies: rect.vr
 // =============================================================================
 //
@@ -80,7 +80,7 @@ implement GridLayout {
     }
 
     // =========================================================================
-    // Layout Computation
+    // TermLayout Computation
     // =========================================================================
 
     /// Compute the grid layout, returning a 2D list of Rects.

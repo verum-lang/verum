@@ -88,20 +88,20 @@ implement DType {
 }
 
 // =============================================================================
-// Shape and Layout
+// Shape and TensorLayout
 // =============================================================================
 
 // Memory layout for tensor storage
-public type Layout is
+public type TensorLayout is
     | RowMajor        // C-style contiguous (default)
     | ColumnMajor     // Fortran-style
     | Strided(List<ISize>);  // Custom strides
 
-implement Layout {
+implement TensorLayout {
     // Compute strides for given shape
     public fn compute_strides(&self, shape: &[USize]) -> List<ISize> {
         match self {
-            Layout.RowMajor => {
+            TensorLayout.RowMajor => {
                 let n = shape.len();
                 let mut strides = List.with_capacity(n);
                 let mut stride: ISize = 1;
@@ -111,7 +111,7 @@ implement Layout {
                 }
                 strides
             }
-            Layout.ColumnMajor => {
+            TensorLayout.ColumnMajor => {
                 let n = shape.len();
                 let mut strides = List.with_capacity(n);
                 let mut stride: ISize = 1;
@@ -121,7 +121,7 @@ implement Layout {
                 }
                 strides
             }
-            Layout.Strided(s) => s.clone(),
+            TensorLayout.Strided(s) => s.clone(),
         }
     }
 }
@@ -168,7 +168,7 @@ implement TensorHandle {
     fn allocate(dtype: DType, shape: &[USize], device: Device) -> Self {
         let numel: USize = shape.iter().product();
         let size = numel * dtype.size_bytes();
-        let layout = Layout.RowMajor;
+        let layout = TensorLayout.RowMajor;
         let strides = layout.compute_strides(shape);
 
         TensorHandle {
@@ -193,7 +193,7 @@ implement TensorHandle {
 
     // Check if contiguous (row-major)
     fn is_contiguous(&self) -> Bool {
-        let expected = Layout.RowMajor.compute_strides(&self.shape);
+        let expected = TensorLayout.RowMajor.compute_strides(&self.shape);
         self.strides == expected
     }
 }
@@ -494,7 +494,7 @@ implement<T: Numeric> TensorView<T> {
 
     // Check if contiguous
     public fn is_contiguous(&self) -> Bool {
-        let expected = Layout.RowMajor.compute_strides(&self.shape);
+        let expected = TensorLayout.RowMajor.compute_strides(&self.shape);
         self.strides == expected
     }
 

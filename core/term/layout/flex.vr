@@ -155,7 +155,7 @@ implement FlexLayout {
     }
 
     /// Compute flex layout positions and sizes for child items.
-    /// Implements CSS Flexbox Level 1, Section 9: Flex Layout Algorithm.
+    /// Implements CSS Flexbox Level 1, Section 9: Flex TermLayout Algorithm.
     ///
     /// Steps:
     ///   1. Determine available main/cross sizes

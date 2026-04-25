@@ -1,5 +1,5 @@
 // =============================================================================
-// constraint.vr - LayoutConstraint types and Layout solver
+// constraint.vr - LayoutConstraint types and TermLayout solver
 // =============================================================================
 // LayoutConstraint-based layout splitting for terminal areas. Supports exact lengths,
 // min/max bounds, percentages, ratios, and weighted fill. The solver uses a
@@ -32,9 +32,9 @@ public type Flex is
     | SpaceBetween   // Equal space between items
     | SpaceAround;   // Equal space around items
 
-/// Layout solver: splits a Rect into sub-areas based on constraints.
+/// TermLayout solver: splits a Rect into sub-areas based on constraints.
 /// Supports builder-pattern configuration.
-public type Layout is {
+public type TermLayout is {
     direction: Direction,
     constraints: List<LayoutConstraint>,
     margin: Margin,
@@ -42,10 +42,10 @@ public type Layout is {
     spacing: Int,
 };
 
-implement Layout {
+implement TermLayout {
     /// Create a horizontal layout (splits width into columns).
-    public fn horizontal() -> Layout {
-        Layout {
+    public fn horizontal() -> TermLayout {
+        TermLayout {
             direction: Direction.Horizontal,
             constraints: List.new(),
             margin: Margin.uniform(0),
@@ -55,8 +55,8 @@ implement Layout {
     }
 
     /// Create a vertical layout (splits height into rows).
-    public fn vertical() -> Layout {
-        Layout {
+    public fn vertical() -> TermLayout {
+        TermLayout {
             direction: Direction.Vertical,
             constraints: List.new(),
             margin: Margin.uniform(0),
@@ -66,23 +66,23 @@ implement Layout {
     }
 
     /// Set the constraints for this layout.
-    public fn constraints(self, constraints: List<LayoutConstraint>) -> Layout {
-        Layout { constraints: constraints, ..self }
+    public fn constraints(self, constraints: List<LayoutConstraint>) -> TermLayout {
+        TermLayout { constraints: constraints, ..self }
     }
 
     /// Set the margin around the layout area.
-    public fn margin(self, margin: Margin) -> Layout {
-        Layout { margin: margin, ..self }
+    public fn margin(self, margin: Margin) -> TermLayout {
+        TermLayout { margin: margin, ..self }
     }
 
     /// Set the flex distribution mode.
-    public fn flex(self, flex: Flex) -> Layout {
-        Layout { flex: flex, ..self }
+    public fn flex(self, flex: Flex) -> TermLayout {
+        TermLayout { flex: flex, ..self }
     }
 
     /// Set spacing between items (in cells).
-    public fn spacing(self, spacing: Int) -> Layout {
-        Layout { spacing: spacing, ..self }
+    public fn spacing(self, spacing: Int) -> TermLayout {
+        TermLayout { spacing: spacing, ..self }
     }
 
     /// Split the given area into sub-areas according to constraints.

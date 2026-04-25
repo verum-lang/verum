@@ -118,7 +118,7 @@ public fn scan_byte(s: &mut ScanState, bytes: &List<u8>, i: Int) {
         // whitespace — leave has_content / last_was_semicolon alone
         return;
     }
-    // Keyword recognition at the *end* of a word — inexpensive overall
+    // SqlKeyword recognition at the *end* of a word — inexpensive overall
     // and precise enough for completeness.
     if window_matches(bytes, i, &kw_create())  { s.saw_create  = true; }
     if window_matches(bytes, i, &kw_trigger()) { s.saw_trigger = true; }

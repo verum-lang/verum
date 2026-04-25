@@ -1,5 +1,5 @@
 // =============================================================================
-// layout/mod.vr - Layer 4: Layout Engine
+// layout/mod.vr - Layer 4: TermLayout Engine
 // =============================================================================
 // Constraint-based and flexbox layout for terminal UIs. Provides Rect
 // (rectangular area), Constraint solver (greedy 5-pass algorithm), and
@@ -20,7 +20,7 @@ public module responsive;
 
 // Re-exports
 public mount .rect.{Rect, Margin, Position};
-public mount .constraint.{Constraint, Direction, Flex, Layout};
+public mount .constraint.{Constraint, Direction, Flex, TermLayout};
 public mount .flex.{FlexLayout, FlexDirection, FlexWrap, JustifyContent, AlignItems, AlignContent, FlexItem, FlexBasis};
 public mount .shortcuts.{header_body_footer, sidebar_main, centered, equal_columns, equal_rows, percentage_split, percentage_rows};
 public mount .grid.{GridLayout, GridTrack};

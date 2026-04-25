@@ -20,8 +20,8 @@ mount core.runtime.env.{
     EnvFlags,
     ParallelismConfig,
     GenTracker,
-    InlineCircuitBreaker,
-    InlineRetryPolicy,
+    EnvInlineCircuitBreaker,
+    EnvInlineRetryPolicy,
     MemoryContext,
     CapabilityContext,
     RecoveryContext,
@@ -524,12 +524,12 @@ fn test_tier_unchecked_nothing() {
 }
 
 // =============================================================================
-// Section 13: InlineCircuitBreaker Default
+// Section 13: EnvInlineCircuitBreaker Default
 // =============================================================================
 
 @test
 fn test_inline_circuit_breaker_default() {
-    let cb = InlineCircuitBreaker.default();
+    let cb = EnvInlineCircuitBreaker.default();
     assert_eq(cb.state, 0);  // Closed
     assert_eq(cb.failure_count, 0);
     assert_eq(cb.success_count, 0);
@@ -537,7 +537,7 @@ fn test_inline_circuit_breaker_default() {
 
 @test
 fn test_inline_circuit_breaker_fields() {
-    let cb = InlineCircuitBreaker.default();
+    let cb = EnvInlineCircuitBreaker.default();
     assert_eq(cb.name_len, 0);
     assert_eq(cb.failure_threshold, 0);
     assert_eq(cb.required_successes, 0);
@@ -545,12 +545,12 @@ fn test_inline_circuit_breaker_fields() {
 }
 
 // =============================================================================
-// Section 14: InlineRetryPolicy Default
+// Section 14: EnvInlineRetryPolicy Default
 // =============================================================================
 
 @test
 fn test_inline_retry_policy_default() {
-    let rp = InlineRetryPolicy.default();
+    let rp = EnvInlineRetryPolicy.default();
     assert_eq(rp.max_attempts, 0);
     assert_eq(rp.current_attempt, 0);
     assert_eq(rp.backoff_strategy, 0);
@@ -558,7 +558,7 @@ fn test_inline_retry_policy_default() {
 
 @test
 fn test_inline_retry_policy_fields() {
-    let rp = InlineRetryPolicy.default();
+    let rp = EnvInlineRetryPolicy.default();
     assert_eq(rp.type_id_hash, 0);
     assert_eq(rp.backoff_base_ms, 0);
     assert_eq(rp.backoff_max_ms, 0);
@@ -675,12 +675,12 @@ fn test_task_id_child_has_parent_id() {
 }
 
 // =============================================================================
-// Section 18: InlineCircuitBreaker Extended Tests
+// Section 18: EnvInlineCircuitBreaker Extended Tests
 // =============================================================================
 
 @test
 fn test_inline_circuit_breaker_all_fields_zero() {
-    let cb = InlineCircuitBreaker.default();
+    let cb = EnvInlineCircuitBreaker.default();
     assert_eq(cb.state, 0);
     assert_eq(cb.failure_count, 0);
     assert_eq(cb.success_count, 0);
@@ -693,18 +693,18 @@ fn test_inline_circuit_breaker_all_fields_zero() {
 
 @test
 fn test_inline_circuit_breaker_name_array() {
-    let cb = InlineCircuitBreaker.default();
+    let cb = EnvInlineCircuitBreaker.default();
     // name should be a fixed array of 24 bytes
     assert_eq(cb.name.len(), 24);
 }
 
 // =============================================================================
-// Section 19: InlineRetryPolicy Extended Tests
+// Section 19: EnvInlineRetryPolicy Extended Tests
 // =============================================================================
 
 @test
 fn test_inline_retry_policy_all_fields() {
-    let rp = InlineRetryPolicy.default();
+    let rp = EnvInlineRetryPolicy.default();
     assert_eq(rp.max_attempts, 0);
     assert_eq(rp.current_attempt, 0);
     assert_eq(rp.backoff_strategy, 0);
