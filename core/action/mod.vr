@@ -31,6 +31,12 @@
 //   core.action.ludics       — Ludics designs as Perf(α_linear) per
 //                              Theorem 120.T: Locus / Design / Dessein
 //                              + cut-elimination + orthogonality
+//
+//   core.action.monads       — concrete strong-monad implementations
+//                              per VFE-9 V1: Pure, Reader, Writer,
+//                              State (commutative-vs-non-commutative
+//                              demo set; List / Probability /
+//                              Exception / Io follow in V1.5)
 // =============================================================================
 
 public mount core.action.primitives;
@@ -40,3 +46,4 @@ public mount core.action.gauge;
 public mount core.action.verify;
 public mount core.action.effects;
 public mount core.action.ludics;
+public mount core.action.monads;

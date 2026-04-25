@@ -1,0 +1,89 @@
+// =============================================================================
+// core.action.monads.reader — environment-reading monad
+// =============================================================================
+//
+// `Reader<R, A>` — read-only access to an environment of type `R`.
+// The Kleisli shape is `R -> A`: a Reader-effectful computation is
+// a function from the environment to its result.
+//
+// Commutative — order of independent reads of the same environment
+// doesn't matter (Plotkin-Power 2002 Ex 2.4). ε-coordinate ω.
+// Composes safely under @verify(coherent_concurrent) without
+// synchronisation per Corollary 17.C2.
+// =============================================================================
+
+/// Reader<R, A> = R -> A. The Kleisli embedding of the environment-
+/// reading effect. Wrapped as a record so we can attach `Clone`
+/// without imposing it on the function value directly.
+@derive(Clone)
+public type Reader<R, A> is {
+    run: fn(R) -> A,
+};
+
+/// `pure : A -> Reader<R, A>` — return a constant value regardless
+/// of environment.
+public fn reader_unit<R, A>(a: A) -> Reader<R, A> {
+    Reader { run: |_r: R| -> A { a.clone() } }
+}
+
+/// `ask : Reader<R, R>` — read the current environment.
+public fn reader_ask<R>() -> Reader<R, R> {
+    Reader { run: |r: R| -> R { r } }
+}
+
+/// `bind : Reader<R, A> -> (A -> Reader<R, B>) -> Reader<R, B>`
+public fn reader_bind<R, A, B>(
+    m: Reader<R, A>,
+    f: fn(A) -> Reader<R, B>,
+) -> Reader<R, B> {
+    Reader {
+        run: |r: R| -> B {
+            let a: A = (m.run.clone())(r.clone());
+            let inner: Reader<R, B> = f(a);
+            (inner.run)(r)
+        },
+    }
+}
+
+/// `strength : A -> Reader<R, B> -> Reader<R, (A, B)>` — tensor a
+/// pure value alongside the Reader-effectful one.
+public fn reader_strength<R, A, B>(a: A, mb: Reader<R, B>) -> Reader<R, (A, B)> {
+    Reader {
+        run: |r: R| -> (A, B) {
+            let b: B = (mb.run.clone())(r);
+            (a.clone(), b)
+        },
+    }
+}
+
+/// Run a Reader against a concrete environment, producing the
+/// result.
+public fn reader_run<R, A>(m: Reader<R, A>, env: R) -> A {
+    (m.run)(env)
+}
+
+/// `local : (R -> R) -> Reader<R, A> -> Reader<R, A>` — modify the
+/// environment for a sub-computation. Standard Reader-monad
+/// combinator (Wadler 1990).
+public fn reader_local<R, A>(modify: fn(R) -> R, m: Reader<R, A>) -> Reader<R, A> {
+    Reader {
+        run: |r: R| -> A { (m.run.clone())(modify(r)) },
+    }
+}
+
+// =============================================================================
+// Monad laws (V1 trusted-boundary axioms)
+// =============================================================================
+
+@framework(diakrisis, "Theorem 17.T1 (Reader left-identity monad law)")
+public axiom reader_left_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (Reader right-identity monad law)")
+public axiom reader_right_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (Reader associativity monad law)")
+public axiom reader_associativity() -> Bool ensures true;
+
+/// Reader is commutative: independent reads compose in any order.
+@framework(diakrisis, "Corollary 17.C2 (Reader tensor-commutativity)")
+public axiom reader_commutativity() -> Bool ensures true;
