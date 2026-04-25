@@ -1,0 +1,28 @@
+// =============================================================================
+// core.math.foundations — meta-classifier-relative foundation packages
+// =============================================================================
+//
+// Companion to `core.math.frameworks.*`. Where `frameworks` exposes
+// trusted-axiom packages cited from external mathematical literature
+// (Lurie HTT, Schreiber DCCT, Connes-Chamseddine, Petz, Arnold,
+// Baez-Dolan, OWL 2 FS, Diakrisis), `foundations` exposes the
+// *meta-classifier-relative* layer:
+//
+//   • `self_recognition` — VUVA Phase 5 architectural theorems:
+//                          Verum's own kernel rules (K-Refine /
+//                          K-Adj-Unit / K-Adj-Counit / K-Pos / K-Norm
+//                          / K-FwAx) re-stated as @theorem and
+//                          cross-validated against the Diakrisis
+//                          corpus citation. The deepest test of
+//                          foundation-neutral hosting: Verum's
+//                          verification stack proves the architectural
+//                          invariants that justify itself.
+//
+// Future entries (per VFE conveyor):
+//   • metaclassification — already lives at `core.math.frameworks.diakrisis`
+//   • biadjunction       — already at `core.math.frameworks.diakrisis_biadjunction`
+//   • stack_model_axioms — already at `core.math.frameworks.diakrisis_stack_model`
+//   • universe_ascent    — pending (#171 K-Universe-Ascent V1)
+// =============================================================================
+
+public mount core.math.foundations.self_recognition;

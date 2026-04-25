@@ -1,0 +1,195 @@
+// =============================================================================
+// core.math.foundations.self_recognition — Verum proves its own architecture
+// =============================================================================
+//
+// VUVA Phase 5: "Full MSFS self-recognition". Per VUVA §16.5 + VFE §12
+// reconciliation table, this is the *precondition* for every VFE
+// extension. The Verum corpus formalises and verifies its own
+// architectural theorems through Verum's own verification stack:
+// the seven kernel rules (K-Refine, K-Univ, K-Pos, K-Norm, K-FwAx,
+// K-Adj-Unit, K-Adj-Counit) become @theorem declarations cross-validated
+// against `core.math.frameworks.diakrisis_*` corpus content.
+//
+// V0 (this commit) ships theorem declarations with `ensures true`
+// placeholders + the framework annotation pinning the spec-side
+// citation. V1 will replace each `ensures true` with the operational
+// predicate that captures the rule's actual content; V2 will add
+// `@verify(certified)` wiring with full SMT certificate
+// materialisation + kernel re-check.
+//
+// The self-recognition discipline:
+//   • Every kernel rule cited from VUVA §2.4–§2.6 / §4.4 / §7.3 has
+//     a corresponding @theorem here.
+//   • The @framework(diakrisis, ...) annotation links it to the
+//     corpus theorem that is the rule's *external* foundation
+//     (Yanofsky / Berardi / 108.T / etc.).
+//   • Cross-validation: `verum audit --self-recognition` (CLI
+//     extension tracked under VFE §0.0) walks both surfaces and
+//     reports drift.
+//
+// This is the *deepest* test of Verum-as-foundation-neutral-host:
+// not only can Verum verify external mathematical content, it can
+// verify the architectural theorems that justify its own kernel.
+// =============================================================================
+
+mount core.action.articulation.{Articulation, articulation_eq};
+mount core.action.enactments.{Enactment, alpha_of, epsilon, is_adjoint};
+
+// =============================================================================
+// K-Refine — VUVA §2.4 / §4.4 — Diakrisis T-2f* depth-stratification
+// =============================================================================
+
+/// VUVA §4.4 K-Refine kernel rule (Diakrisis T-2f*):
+///
+///     Γ ⊢ A : Type_n         Γ, x:A ⊢ P : Prop        dp(P) < dp(A) + 1
+///     ─────────────────────────────────────────────────────────────────── (K-Refine)
+///     Γ ⊢ { x:A | P } : Type_n
+///
+/// The single load-bearing Diakrisis rule in the kernel. Per Yanofsky
+/// 2003: every self-referential paradox in cartesian-closed setting
+/// reduces to a weakly point-surjective α : Y → T^Y with dp(α) =
+/// dp(T^Y); K-Refine forbids exactly that equality. Russell, Cantor,
+/// Burali-Forti, Tarski, Lawvere, Girard, Gödel-type diagonals, Löb,
+/// Grelling-Nelson, and Curry are all blocked at comprehension time.
+///
+/// Self-recognition form: this theorem postulates that the K-Refine
+/// rule's depth-strict comprehension is admissible — i.e. selecting
+/// `{x:A | P(x)}` is well-defined whenever `dp(P) < dp(A) + 1`.
+@framework(diakrisis, "Theorem T-2f* / Yanofsky 2003 — K-Refine kernel rule")
+public axiom k_refine_depth_strict_comprehension() -> Bool
+    ensures true;
+
+// =============================================================================
+// K-Univ — universe consistency
+// =============================================================================
+
+/// Universe-consistency rule: `Type(n) : Type(n+1)` for every
+/// universe level n; Prop is at level 0. Stratifies the universe
+/// hierarchy to block Girard's paradox.
+@framework(diakrisis, "K-Univ kernel rule (universe consistency)")
+public axiom k_univ_predicative_hierarchy() -> Bool
+    ensures true;
+
+// =============================================================================
+// K-Pos — strict positivity (Berardi 1998)
+// =============================================================================
+
+/// Strict-positivity rule for inductive type declarations. An
+/// inductive `T` is well-formed only if every recursive occurrence
+/// of `T` in any constructor's argument types appears strictly
+/// positively (NOT to the left of a function arrow).
+///
+/// Per Berardi 1998: admitting non-positive recursion in a setting
+/// with even minimal impredicativity yields a derivation of `False`.
+/// The kernel therefore rejects every constructor with `T` in a
+/// negative position.
+///
+/// Self-recognition form: this theorem postulates that the strict-
+/// positivity discipline blocks Berardi-shaped paradox witnesses.
+@framework(diakrisis, "K-Pos kernel rule (Berardi 1998 strict positivity)")
+public axiom k_pos_strict_positivity_blocks_berardi() -> Bool
+    ensures true;
+
+// =============================================================================
+// K-Norm — strong normalisation
+// =============================================================================
+
+/// Strong-normalisation invariant: every well-typed CoreTerm reduces
+/// to a normal form in finite steps (no infinite reduction sequence).
+/// Proved for the CCHM fragment + Prop-only framework axioms by
+/// Huber 2019.
+///
+/// Self-recognition form: this theorem postulates that the kernel's
+/// reduction strategy preserves SN under the K-FwAx side-condition
+/// (`body : Prop` for every framework axiom).
+@framework(diakrisis, "K-Norm kernel invariant (Huber 2019 + K-FwAx side-condition)")
+public axiom k_norm_strong_normalisation_under_prop_axioms() -> Bool
+    ensures true;
+
+// =============================================================================
+// K-FwAx — framework-axiom admission (Prop-only side-condition)
+// =============================================================================
+
+/// Framework-axiom admission rule: `@framework(name, citation)`
+/// declarations are admitted by the kernel only when the body is
+/// of type `Prop`. Bodies in higher universes (e.g. `Nat → Nat`)
+/// would let users postulate arbitrary computable functions and
+/// break strong normalisation.
+///
+/// The kernel rejects non-Prop bodies with `E_FW_AXIOM_NOT_PROP`.
+@framework(diakrisis, "K-FwAx kernel rule (Prop-only side-condition for framework axioms)")
+public axiom k_fwax_prop_only_admission() -> Bool
+    ensures true;
+
+// =============================================================================
+// K-Adj-Unit — α ⊣ ε unit identity
+// =============================================================================
+
+/// VUVA §11.3 K-Adj-Unit:
+///
+///     Γ ⊢ α : Articulation
+///     ────────────────────────────────────── (K-Adj-Unit)
+///     Γ ⊢ alpha_of(epsilon(α)) ≡ α
+///
+/// For every articulation α, the kernel emits a definitional
+/// equality `alpha_of(epsilon(α)) = α` after canonicalisation.
+/// This is the unit of the α ⊣ ε adjunction (Diakrisis 108.T core).
+///
+/// Self-recognition form: postulates that for any articulation α,
+/// the round-trip `α → ε(α) → alpha_of(ε(α))` recovers the original
+/// articulation under articulation equality.
+@framework(diakrisis, "K-Adj-Unit kernel rule (Diakrisis 108.T unit identity)")
+public axiom k_adj_unit_identity<A: Articulation>(alpha: A) -> Bool
+    ensures articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
+
+// =============================================================================
+// K-Adj-Counit — α ⊣ ε counit identity
+// =============================================================================
+
+/// VUVA §11.3 K-Adj-Counit:
+///
+///     Γ ⊢ e : Enactment
+///     ──────────────────────────────────────────────────────────── (K-Adj-Counit)
+///     Γ ⊢ epsilon(alpha_of(e)).gauge ≡ e.gauge
+///
+/// For every enactment e, the kernel certifies that the round-trip
+/// `e → alpha_of(e) → epsilon(alpha_of(e))` recovers e up to gauge
+/// equivalence (the canonical equivalence relation on enactments
+/// induced by `core.action.gauge::gauge_equivalent`).
+///
+/// Self-recognition form: postulates that the round-trip identity
+/// recovers `e` modulo gauge.
+@framework(diakrisis, "K-Adj-Counit kernel rule (Diakrisis 108.T counit identity)")
+public axiom k_adj_counit_identity<E: Enactment>(e: E) -> Bool
+    ensures is_adjoint(alpha_of(e.clone()), e);
+
+// =============================================================================
+// Verification-ladder ν-monotonicity
+// =============================================================================
+
+/// The 13-strategy verification ladder is strictly ν-monotone:
+///
+///   runtime (0) < static (1) < fast (2) < complexity_typed (n<ω) <
+///   formal (ω) < proof (ω+1) < thorough (ω·2) < reliable (ω·2+1) <
+///   certified (ω·2+2) < coherent_static (ω·2+3) <
+///   coherent_runtime (ω·2+4) < coherent (ω·2+5) <
+///   synthesize (≤ω·3+1)
+///
+/// Self-recognition form: postulates that for every strategy pair
+/// (s_i, s_{i+1}) in the ladder, `nu(s_i) < nu(s_{i+1})` strictly.
+@framework(diakrisis, "Verification-ladder strict ν-monotonicity (VUVA §12)")
+public axiom ladder_nu_strict_monotonicity() -> Bool
+    ensures true;
+
+// =============================================================================
+// Articulation hygiene — VUVA §13 NO-19
+// =============================================================================
+
+/// Articulation-hygiene table (VUVA §13.2): for every (Φ, κ, t)
+/// articulation factorisation, the kernel certifies the hygiene
+/// invariant per NO-19 (no-overlap rule between articulation
+/// scopes). This is the "structural cleanliness" rule that prevents
+/// gauge-confusion across articulation boundaries.
+@framework(diakrisis, "Articulation hygiene NO-19 (VUVA §13)")
+public axiom articulation_hygiene_no_overlap() -> Bool
+    ensures true;
