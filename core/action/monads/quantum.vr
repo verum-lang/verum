@@ -1,0 +1,118 @@
+// =============================================================================
+// core.action.monads.quantum — α_quantum effect class (VFE §18.4)
+// =============================================================================
+//
+// `Quantum<A>` — the quantum-state-and-measurement monad realising
+// the α_quantum effect class per Abramsky-Coecke 2004 (symmetric
+// monoidal closed category + †-compact structure).
+//
+// Quantum is **commutative** under tensor product (parallel
+// preparation of independent qubit registers) but NON-commutative
+// under sequential composition that includes measurement (the act
+// of measuring collapses the wavefunction). The conditional
+// commutativity is recorded via two distinct axioms:
+//
+//   • `quantum_tensor_commutativity` — true for pre-measurement
+//     parallel composition.
+//   • `quantum_sequential_non_commutativity` — measurement
+//     instances DO NOT commute (the post-measurement state
+//     depends on measurement-order).
+//
+// ε-coordinate: ω for pre-measurement quantum operations
+// (preparation, gates, tensor); ω + 1 for measurement-inclusive
+// programs (where the act of measurement breaks pure-state
+// commutativity).
+//
+// V0 (this file) ships protocol-level surface + Diakrisis-corpus
+// citations. V1 will:
+//   1. Wire Hilbert-space-vector representation (complex amplitudes
+//      indexed by computational basis states).
+//   2. Add canonical gates (Hadamard, Pauli-X/Y/Z, CNOT, Toffoli).
+//   3. Add measurement primitives (computational basis, arbitrary
+//      observable).
+//   4. Demonstrate Grover search correctness via @verify(coherent).
+// =============================================================================
+
+/// `Quantum<A>` — V0 protocol surface for the quantum-state monad.
+/// Concrete representation deferred to V1; the V0 type is opaque
+/// so users can pattern-match on the protocol via the canonical
+/// strong-monad operations (`pure / bind / strength`).
+@derive(Clone)
+public type Quantum<A> is {
+    /// V0 placeholder — V1 will replace with `Vec<Complex>` indexed
+    /// by computational-basis states (or a sparse alternative for
+    /// large register sizes).
+    state_tag: Text,
+    /// V0 carrier — wraps the result type so the monad shape is
+    /// well-typed at the AST level. V1 will integrate proper
+    /// Hilbert-space semantics.
+    value: A,
+};
+
+/// `pure : A -> Quantum<A>` — embed a classical value as a quantum
+/// state with no superposition (a basis state with amplitude 1).
+public fn quantum_unit<A>(a: A) -> Quantum<A> {
+    Quantum {
+        state_tag: Text.from("pure"),
+        value: a,
+    }
+}
+
+/// `bind : Quantum<A> -> (A -> Quantum<B>) -> Quantum<B>` —
+/// sequence two quantum operations. V0 form preserves the result
+/// type-tag; V1 will route through proper unitary composition or
+/// CPTP-map composition depending on whether measurements are
+/// involved.
+public fn quantum_bind<A, B>(
+    m: Quantum<A>,
+    f: fn(A) -> Quantum<B>,
+) -> Quantum<B> {
+    f(m.value)
+}
+
+/// `strength : A -> Quantum<B> -> Quantum<(A, B)>` — tensor a
+/// classical value alongside a quantum-effectful one.
+public fn quantum_strength<A, B>(a: A, mb: Quantum<B>) -> Quantum<(A, B)> {
+    Quantum {
+        state_tag: mb.state_tag,
+        value: (a, mb.value),
+    }
+}
+
+// =============================================================================
+// Trusted-boundary axioms — V1 placeholders
+// =============================================================================
+
+@framework(diakrisis, "Theorem 17.T1 (Quantum left-identity monad law)")
+public axiom quantum_left_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (Quantum right-identity monad law)")
+public axiom quantum_right_identity() -> Bool ensures true;
+
+@framework(diakrisis, "Theorem 17.T1 (Quantum associativity monad law)")
+public axiom quantum_associativity() -> Bool ensures true;
+
+/// Pre-measurement quantum operations commute under tensor product
+/// (parallel preparation of independent qubit registers).
+@framework(diakrisis, "Corollary 17.C2 (Quantum tensor-commutativity, pre-measurement)")
+public axiom quantum_tensor_commutativity() -> Bool ensures true;
+
+/// Measurement instances DO NOT commute sequentially — the act of
+/// measurement collapses the wavefunction, so post-measurement
+/// state depends on measurement-order.
+@framework(diakrisis, "Quantum sequential measurement NON-commutativity")
+public axiom quantum_sequential_non_commutativity() -> Bool ensures true;
+
+/// †-compact structure (Abramsky-Coecke 2004): every quantum
+/// process has a canonical adjoint. This is the categorical
+/// substrate that makes quantum information theory category-
+/// theoretically clean.
+@framework(diakrisis, "Abramsky-Coecke 2004 (†-compact structure of α_quantum)")
+public axiom quantum_dagger_compact_structure() -> Bool ensures true;
+
+/// CPTP-map factorisation: every quantum process factors as a
+/// completely-positive trace-preserving map. Per Theorem 114.T
+/// (`core.math.frameworks.diakrisis_acts::performance_morphisms_are_cptp`),
+/// performance morphisms in α_quantum coincide with CPTP maps.
+@framework(diakrisis, "Theorem 114.T link (CPTP factorisation in α_quantum)")
+public axiom quantum_cptp_factorisation() -> Bool ensures true;
