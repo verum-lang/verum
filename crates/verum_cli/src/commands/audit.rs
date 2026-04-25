@@ -1220,6 +1220,11 @@ fn print_epsilon_report(
             "ε_math, ε_compute, ε_observe, ε_prove, ε_decide, ε_translate, ε_construct, ε_classify"
                 .dimmed()
         );
+        println!(
+            "  ordinal coords:   {}",
+            "0, 1, 2, …, ω, ω+k, ω·n, ω·n+k, ω², Ω (also ASCII: omega, omega_squared, …)"
+                .dimmed()
+        );
         println!();
     }
 }

@@ -5022,6 +5022,103 @@ impl EnactAttr {
         }
     }
 
+    /// Validate an ε-coordinate string of *ordinal* shape (the second
+    /// canonical form for `@enact(epsilon = "...")`, complementing the
+    /// 8 primitive names handled by `canonicalise_primitive`).
+    ///
+    /// Accepted ordinal-coordinate shapes (foundation-neutral, in
+    /// Cantor-normal-form prefix below ε_0):
+    ///
+    ///   • Pure finite      "0", "1", "2", …
+    ///   • Pure ω           "ω" or "omega"
+    ///   • ω-plus-finite    "ω+k", "ω + k", "omega+k", "omega + k"
+    ///   • ω·n              "ω·n", "ω*n", "omega*n"
+    ///   • ω·n+k            "ω·n+k", "omega*n+k", optional spaces
+    ///   • ω² / ω^2         "ω²", "ω^2", "omega_squared", "omega^2"
+    ///   • Ω                "Ω" or "Omega"
+    ///
+    /// White-space within the string is collapsed during validation.
+    /// Returns the canonical (Unicode-spelled) form on success.
+    pub fn canonicalise_ordinal(raw: &str) -> Option<String> {
+        let trimmed: String = raw
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        if trimmed.is_empty() {
+            return None;
+        }
+        // Atomic shapes
+        match trimmed.as_str() {
+            "ω" | "omega"                       => return Some("ω".to_string()),
+            "Ω" | "Omega"                       => return Some("Ω".to_string()),
+            "ω²" | "ω^2" | "omega^2"
+                | "omega_squared" | "ω_squared" => return Some("ω²".to_string()),
+            _ => {}
+        }
+        // Pure finite digit sequence
+        if trimmed.chars().all(|c| c.is_ascii_digit()) {
+            return Some(trimmed);
+        }
+        // ω+k or ω·n+k, with ASCII fallbacks
+        let normalised = trimmed
+            .replace("omega", "ω")
+            .replace('*', "·");
+        // Strip a leading "ω" then look for the optional "·n" and "+k"
+        let rest = normalised.strip_prefix('ω')?;
+        // Case: rest is empty (handled above as pure ω)
+        if rest.is_empty() {
+            return Some("ω".to_string());
+        }
+        // Case: starts with "·" — coefficient
+        let (coeff, after_coeff) = if let Some(after) = rest.strip_prefix('·') {
+            // Pull a digit prefix
+            let coeff_end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+            if coeff_end == 0 {
+                return None;
+            }
+            let coeff_text = &after[..coeff_end];
+            (coeff_text.to_string(), &after[coeff_end..])
+        } else {
+            (String::new(), rest)
+        };
+        // Case: optional "+k" tail
+        let (offset, leftover) = if let Some(after_plus) = after_coeff.strip_prefix('+') {
+            let off_end = after_plus
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(after_plus.len());
+            if off_end == 0 {
+                return None;
+            }
+            (after_plus[..off_end].to_string(), &after_plus[off_end..])
+        } else {
+            (String::new(), after_coeff)
+        };
+        if !leftover.is_empty() {
+            return None;
+        }
+        let mut canonical = String::from("ω");
+        if !coeff.is_empty() {
+            canonical.push('·');
+            canonical.push_str(&coeff);
+        }
+        if !offset.is_empty() {
+            canonical.push('+');
+            canonical.push_str(&offset);
+        }
+        Some(canonical)
+    }
+
+    /// Combined validation entry point — accepts both primitive names
+    /// (`canonicalise_primitive`) and ordinal coordinates
+    /// (`canonicalise_ordinal`). Returns the canonical form (always a
+    /// fresh `String` for uniformity) or `None` on rejection.
+    pub fn canonicalise(raw: &str) -> Option<String> {
+        if let Some(p) = Self::canonicalise_primitive(raw) {
+            return Some(p.to_string());
+        }
+        Self::canonicalise_ordinal(raw)
+    }
+
     /// Try to extract an `EnactAttr` from a generic `Attribute`.
     ///
     /// Returns `None` when the attribute name is not `"enact"` or the
@@ -5089,7 +5186,7 @@ impl EnactAttr {
         };
         let canonical = raw_opt
             .as_ref()
-            .and_then(|s| Self::canonicalise_primitive(s.as_str()))
+            .and_then(|s| Self::canonicalise(s.as_str()))
             .map(Text::from);
         match canonical {
             Some(c) => Maybe::Some(EnactAttr::new(c, attr.span)),
