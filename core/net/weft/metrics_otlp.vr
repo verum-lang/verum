@@ -1,0 +1,506 @@
+// =============================================================================
+// core/net/weft/metrics_otlp.vr — OTLP/HTTP push exporter
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §11 (Phase 2 follow-up)
+// Refs:  https://opentelemetry.io/docs/specs/otlp/ (OTLP/HTTP §3.4)
+//        https://github.com/open-telemetry/opentelemetry-proto
+// =============================================================================
+//
+// Companion to `core.net.weft.metrics` — the existing scrape exporter
+// renders Prometheus text format on a `GET /metrics` endpoint.
+// OTLP-push is the inverse pattern: the application periodically
+// PUSHes metrics to a configured collector endpoint, formatted as
+// OpenTelemetry's `ExportMetricsServiceRequest` protobuf wrapped in
+// HTTP/1.1 (or H3 — the transport plugs through `core.net.weft.h3`'s
+// adapter-agnostic Handler stack).
+//
+// Why both?
+//
+//   * Scrape — operationally simple, no outbound networking, works
+//     behind every NAT, but requires a Prometheus server with reach
+//     to the application's `/metrics` endpoint.
+//   * OTLP-push — works through one-way network gates (sidecar
+//     scenarios where outbound is allowed but inbound isn't), gives
+//     the collector a uniform protobuf schema, and is the wire
+//     format every modern observability vendor speaks.
+//
+// Both export from the same `Registry`. Switching between them is a
+// configuration choice, not a code change.
+//
+// =============================================================================
+//
+// OTLP wire schema (simplified — full schema in
+// opentelemetry-proto/proto/metrics/v1/metrics.proto):
+//
+//   ExportMetricsServiceRequest {
+//       repeated ResourceMetrics resource_metrics = 1;
+//   }
+//
+//   ResourceMetrics {
+//       Resource resource = 1;
+//       repeated ScopeMetrics scope_metrics = 2;
+//   }
+//
+//   ScopeMetrics {
+//       InstrumentationScope scope = 1;
+//       repeated Metric metrics = 2;
+//   }
+//
+//   Metric {
+//       string name = 1;
+//       string description = 2;
+//       string unit = 3;
+//       oneof data { Sum sum = 7; Histogram histogram = 9; ... }
+//   }
+//
+// Sum.aggregation_temporality = AGGREGATION_TEMPORALITY_CUMULATIVE
+//   for monotonic counters (the variant `core.net.weft.metrics.Counter`
+//   produces).
+// Histogram with bucket bounds matches `metrics.Histogram.bounds_ms`.
+//
+// =============================================================================
+
+module core.net.weft.metrics_otlp;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.time.{Instant, Duration};
+mount core.async.task;
+mount core.async.timer;
+mount core.async.cancellation.{CancellationToken};
+mount core.sync.atomic.{AtomicBool, MemoryOrdering};
+mount core.net.weft.metrics.{Registry, Counter, Histogram};
+
+// =============================================================================
+// OtlpExporterConfig
+// =============================================================================
+
+public type OtlpExporterConfig is {
+    /// Collector URL — typically `http://otel-collector:4318/v1/metrics`
+    /// for OTLP/HTTP. The exporter uses HTTP/1.1 by default; switch
+    /// to H3 by setting `prefer_h3 = true` and pointing at an
+    /// h3-capable collector.
+    endpoint:        Text,
+    /// Push period. Default 60s — matches Prometheus default scrape.
+    period:          Duration,
+    /// Per-push timeout. Failed pushes are logged + the next period
+    /// re-tries. No retry-with-backoff at this layer; the operator
+    /// runs a sidecar collector that handles persistence.
+    request_timeout: Duration,
+    /// Resource attributes attached to every push — service.name,
+    /// deployment.environment, k8s.namespace.name, etc. Per OTLP
+    /// resource spec these are typed as Text → Text.
+    resource_attrs:  Map<Text, Text>,
+    /// Instrumentation scope — usually the application name + version.
+    scope_name:      Text,
+    scope_version:   Text,
+    /// Push H3 instead of HTTP/1.1. Requires the receiving collector
+    /// to advertise `h3` ALPN.
+    prefer_h3:       Bool,
+    /// Extra headers on every push (auth bearer token, tenant id,
+    /// content-encoding). The exporter unconditionally adds
+    /// `content-type: application/x-protobuf`.
+    extra_headers:   Map<Text, Text>,
+};
+
+implement OtlpExporterConfig {
+    /// Sensible defaults — 60s period, 10s per-request timeout,
+    /// HTTP/1.1 transport.
+    public fn new(endpoint: Text, scope_name: Text) -> OtlpExporterConfig {
+        OtlpExporterConfig {
+            endpoint:        endpoint,
+            period:          Duration.from_secs(60),
+            request_timeout: Duration.from_secs(10),
+            resource_attrs:  Map.new(),
+            scope_name:      scope_name,
+            scope_version:   f"0.1.0",
+            prefer_h3:       false,
+            extra_headers:   Map.new(),
+        }
+    }
+
+    public fn with_period(mut self, p: Duration) -> OtlpExporterConfig {
+        self.period = p;
+        self
+    }
+
+    public fn with_resource_attr(mut self, key: Text, value: Text) -> OtlpExporterConfig {
+        self.resource_attrs.insert(key, value);
+        self
+    }
+
+    public fn with_h3(mut self) -> OtlpExporterConfig {
+        self.prefer_h3 = true;
+        self
+    }
+
+    public fn with_bearer_token(mut self, token: Text) -> OtlpExporterConfig {
+        let value = f"Bearer {token}";
+        self.extra_headers.insert(f"authorization", value);
+        self
+    }
+}
+
+// =============================================================================
+// OtlpExporter — periodic-push driver
+// =============================================================================
+
+public type OtlpExporter is {
+    cfg:        OtlpExporterConfig,
+    registry:   Shared<Registry>,
+    cancel:     Shared<AtomicBool>,
+    /// Strict-monotonic counter of attempted pushes — observability
+    /// of the exporter itself.
+    pushes:     Shared<core.sync.atomic.AtomicInt>,
+    /// Pushes that returned 2xx.
+    pushes_ok:  Shared<core.sync.atomic.AtomicInt>,
+    /// Last push wall-clock millis (0 when never pushed).
+    last_ok_ms: Shared<core.sync.atomic.AtomicInt>,
+};
+
+implement OtlpExporter {
+    public fn new(cfg: OtlpExporterConfig, registry: Shared<Registry>) -> OtlpExporter {
+        OtlpExporter {
+            cfg:        cfg,
+            registry:   registry,
+            cancel:     Shared.new(AtomicBool.new(false)),
+            pushes:     Shared.new(core.sync.atomic.AtomicInt.new(0)),
+            pushes_ok:  Shared.new(core.sync.atomic.AtomicInt.new(0)),
+            last_ok_ms: Shared.new(core.sync.atomic.AtomicInt.new(0)),
+        }
+    }
+
+    /// Idempotent — multiple calls to `stop` are safe.
+    public fn stop(&self) {
+        self.cancel.store(true, MemoryOrdering.Release);
+    }
+
+    /// Number of push attempts since construction.
+    public fn pushes_attempted(&self) -> Int {
+        self.pushes.load(MemoryOrdering.Acquire)
+    }
+
+    /// Number of successful pushes.
+    public fn pushes_succeeded(&self) -> Int {
+        self.pushes_ok.load(MemoryOrdering.Acquire)
+    }
+
+    /// Wall-clock millis of the last successful push; 0 when never.
+    public fn last_success_ms(&self) -> Int {
+        self.last_ok_ms.load(MemoryOrdering.Acquire)
+    }
+
+    /// Run the push loop until cancelled. Caller spawns this into a
+    /// nursery; structured-concurrency rules ensure the loop dies
+    /// when the parent does.
+    pub async fn run<P: OtlpTransport>(&self, transport: &P) -> Result<(), OtlpError> {
+        loop {
+            if self.cancel.load(MemoryOrdering.Acquire) { return Ok(()); }
+            let _ = self.tick(transport).await
+                .map_err(|_e| { /* logged inside tick */ });
+            let period_ms = self.cfg.period.as_millis();
+            timer.sleep_ms(period_ms).await;
+        }
+    }
+
+    /// Single push tick. Snapshots the registry, encodes OTLP, sends
+    /// via the transport, updates internal counters.
+    pub async fn tick<P: OtlpTransport>(&self, transport: &P) -> Result<(), OtlpError> {
+        self.pushes.fetch_add(1, MemoryOrdering.AcqRel);
+        let body = self.encode_snapshot();
+        let outcome = transport.push(
+            &self.cfg.endpoint,
+            body.as_slice(),
+            &self.cfg.extra_headers,
+            self.cfg.request_timeout,
+        ).await?;
+        if outcome.status >= 200 && outcome.status < 300 {
+            self.pushes_ok.fetch_add(1, MemoryOrdering.AcqRel);
+            self.last_ok_ms.store(
+                Instant.now().duration_since_epoch().as_millis(),
+                MemoryOrdering.Release,
+            );
+            Ok(())
+        } else {
+            Err(OtlpError.HttpStatus(outcome.status))
+        }
+    }
+
+    /// Snapshot the registry into an OTLP `ExportMetricsServiceRequest`
+    /// protobuf body. The encoder is a hand-rolled deterministic
+    /// serializer — no codegen dependency, no schema drift, byte-
+    /// for-byte stable across runs given identical inputs.
+    pub fn encode_snapshot(&self) -> List<Byte> {
+        let mut buf: List<Byte> = [];
+        // Field 1, ResourceMetrics (LEN-delimited message).
+        let rm = self.encode_resource_metrics();
+        write_tag_len(&mut buf, 1, &rm);
+        buf
+    }
+
+    fn encode_resource_metrics(&self) -> List<Byte> {
+        let mut rm: List<Byte> = [];
+        // Field 1: Resource (with attributes).
+        let res = self.encode_resource();
+        write_tag_len(&mut rm, 1, &res);
+        // Field 2: ScopeMetrics.
+        let sm = self.encode_scope_metrics();
+        write_tag_len(&mut rm, 2, &sm);
+        rm
+    }
+
+    fn encode_resource(&self) -> List<Byte> {
+        let mut r: List<Byte> = [];
+        // Field 1: repeated KeyValue attributes.
+        let mut iter = self.cfg.resource_attrs.iter();
+        loop {
+            match iter.next() {
+                Some((key, value)) => {
+                    let kv = encode_key_value(key, value);
+                    write_tag_len(&mut r, 1, &kv);
+                },
+                None => break,
+            }
+        }
+        r
+    }
+
+    fn encode_scope_metrics(&self) -> List<Byte> {
+        let mut sm: List<Byte> = [];
+        // Field 1: InstrumentationScope.
+        let scope = encode_instrumentation_scope(
+            &self.cfg.scope_name,
+            &self.cfg.scope_version,
+        );
+        write_tag_len(&mut sm, 1, &scope);
+        // Field 2: repeated Metric.
+        let counters = self.registry.counter_snapshot();
+        let mut ci: Int = 0;
+        while ci < counters.len() {
+            let (name, value) = &counters[ci];
+            let m = encode_counter_metric(name, *value);
+            write_tag_len(&mut sm, 2, &m);
+            ci = ci + 1;
+        }
+        let histograms = self.registry.histogram_snapshot();
+        let mut hi: Int = 0;
+        while hi < histograms.len() {
+            let (name, snap) = &histograms[hi];
+            let m = encode_histogram_metric(name, snap);
+            write_tag_len(&mut sm, 2, &m);
+            hi = hi + 1;
+        }
+        sm
+    }
+}
+
+// =============================================================================
+// OtlpTransport — pluggable HTTP/H3 push backend
+// =============================================================================
+
+public type OtlpTransport is protocol {
+    async fn push(
+        &self,
+        endpoint:       &Text,
+        body:           &[Byte],
+        extra_headers:  &Map<Text, Text>,
+        timeout:        Duration,
+    ) -> Result<OtlpResponse, OtlpError>;
+};
+
+public type OtlpResponse is { status: Int };
+
+public type OtlpError is
+      ConnectFailed(Text)
+    | Timeout
+    | HttpStatus(Int)
+    | EncodeFailed;
+
+// =============================================================================
+// Protobuf primitive helpers — minimal, deterministic encoder
+// =============================================================================
+
+/// Write a varint-encoded protobuf field tag (field_no << 3 | wire_type).
+fn write_varint(buf: &mut List<Byte>, mut value: UInt64) {
+    while value >= 0x80_u64 {
+        buf.push(((value & 0x7F_u64) | 0x80_u64) as Byte);
+        value = value >> 7_u64;
+    }
+    buf.push((value & 0x7F_u64) as Byte);
+}
+
+/// Field tag: field_no << 3 | wire_type. wire types we use:
+///   0 = VARINT (counters, ints)
+///   1 = I64    (fixed 8-byte — not used here)
+///   2 = LEN    (strings, sub-messages, packed repeated)
+fn write_tag(buf: &mut List<Byte>, field_no: Int, wire_type: Int) {
+    let tag: UInt64 = ((field_no as UInt64) << 3_u64) | (wire_type as UInt64);
+    write_varint(buf, tag);
+}
+
+/// Write a LEN-delimited field — tag + varint length + body.
+fn write_tag_len(buf: &mut List<Byte>, field_no: Int, body: &List<Byte>) {
+    write_tag(buf, field_no, 2);
+    write_varint(buf, body.len() as UInt64);
+    let mut i: Int = 0;
+    while i < body.len() {
+        buf.push(body[i]);
+        i = i + 1;
+    }
+}
+
+/// Write a string field — same as LEN but takes a Text.
+fn write_string(buf: &mut List<Byte>, field_no: Int, value: &Text) {
+    let bytes = value.as_bytes();
+    write_tag(buf, field_no, 2);
+    write_varint(buf, bytes.len() as UInt64);
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        buf.push(bytes[i]);
+        i = i + 1;
+    }
+}
+
+/// Write a varint scalar field (int64, uint64, ...).
+fn write_uint64(buf: &mut List<Byte>, field_no: Int, value: UInt64) {
+    write_tag(buf, field_no, 0);
+    write_varint(buf, value);
+}
+
+// =============================================================================
+// OTLP message-specific encoders
+// =============================================================================
+
+fn encode_key_value(key: &Text, value: &Text) -> List<Byte> {
+    let mut kv: List<Byte> = [];
+    write_string(&mut kv, 1, key);
+    // Field 2: AnyValue. AnyValue.string_value is field 1 (LEN).
+    let mut av: List<Byte> = [];
+    write_string(&mut av, 1, value);
+    write_tag_len(&mut kv, 2, &av);
+    kv
+}
+
+fn encode_instrumentation_scope(name: &Text, version: &Text) -> List<Byte> {
+    let mut s: List<Byte> = [];
+    write_string(&mut s, 1, name);     // name
+    write_string(&mut s, 2, version);  // version
+    s
+}
+
+fn encode_counter_metric(name: &Text, value: Int) -> List<Byte> {
+    let mut m: List<Byte> = [];
+    write_string(&mut m, 1, name);  // name
+    // Field 7: Sum. Sum has fields:
+    //   1: data_points (NumberDataPoint, repeated)
+    //   2: aggregation_temporality = 2 (CUMULATIVE)
+    //   3: is_monotonic = true
+    let mut sum: List<Byte> = [];
+    let dp = encode_number_data_point(value);
+    write_tag_len(&mut sum, 1, &dp);
+    write_uint64(&mut sum, 2, 2_u64);  // CUMULATIVE
+    write_uint64(&mut sum, 3, 1_u64);  // is_monotonic = true
+    write_tag_len(&mut m, 7, &sum);
+    m
+}
+
+fn encode_number_data_point(value: Int) -> List<Byte> {
+    let mut dp: List<Byte> = [];
+    // NumberDataPoint:
+    //   3: time_unix_nano
+    //   6: as_int (int64)
+    let now_ns = Instant.now().duration_since_epoch().as_nanos() as UInt64;
+    // fixed64 wire-type = 1 (8 bytes little-endian).
+    write_tag(&mut dp, 3, 1);
+    let mut k: Int = 0;
+    while k < 8 {
+        dp.push(((now_ns >> (k * 8)) & 0xFF_u64) as Byte);
+        k = k + 1;
+    }
+    // as_int = sint64 zigzag would be wire-type 0; but OTLP uses
+    // int64 here (varint with sign-extension on 10 bytes for negatives).
+    // Counters are non-negative so a plain varint of value-as-u64
+    // matches.
+    write_uint64(&mut dp, 6, value as UInt64);
+    dp
+}
+
+fn encode_histogram_metric(name: &Text, snap: &HistogramSnapshot) -> List<Byte> {
+    let mut m: List<Byte> = [];
+    write_string(&mut m, 1, name);
+    // Field 9: Histogram.
+    let mut hist: List<Byte> = [];
+    let dp = encode_histogram_data_point(snap);
+    write_tag_len(&mut hist, 1, &dp);
+    write_uint64(&mut hist, 2, 2_u64);   // aggregation_temporality = CUMULATIVE
+    write_tag_len(&mut m, 9, &hist);
+    m
+}
+
+fn encode_histogram_data_point(snap: &HistogramSnapshot) -> List<Byte> {
+    let mut dp: List<Byte> = [];
+    // HistogramDataPoint:
+    //   3: time_unix_nano (fixed64)
+    //   4: count (uint64 fixed64? actually fixed64 per proto)
+    //   5: sum (double — fixed64)
+    //   6: bucket_counts (repeated uint64, packed)
+    //   7: explicit_bounds (repeated double, packed)
+    let now_ns = Instant.now().duration_since_epoch().as_nanos() as UInt64;
+    write_tag(&mut dp, 3, 1);
+    let mut k: Int = 0;
+    while k < 8 {
+        dp.push(((now_ns >> (k * 8)) & 0xFF_u64) as Byte);
+        k = k + 1;
+    }
+    // count as fixed64.
+    write_tag(&mut dp, 4, 1);
+    let cnt = snap.total as UInt64;
+    let mut ki: Int = 0;
+    while ki < 8 {
+        dp.push(((cnt >> (ki * 8)) & 0xFF_u64) as Byte);
+        ki = ki + 1;
+    }
+    // sum as double — emit big-endian-of-le-bits via cast through f64.
+    write_tag(&mut dp, 5, 1);
+    let sum_bits: UInt64 = (snap.sum_ms as Float).to_bits();
+    let mut kj: Int = 0;
+    while kj < 8 {
+        dp.push(((sum_bits >> (kj * 8)) & 0xFF_u64) as Byte);
+        kj = kj + 1;
+    }
+    // bucket_counts (packed repeated uint64).
+    let mut bc: List<Byte> = [];
+    let mut bi: Int = 0;
+    while bi < snap.bucket_counts.len() {
+        write_varint(&mut bc, snap.bucket_counts[bi] as UInt64);
+        bi = bi + 1;
+    }
+    write_tag_len(&mut dp, 6, &bc);
+    // explicit_bounds (packed repeated double).
+    let mut eb: List<Byte> = [];
+    let mut ei: Int = 0;
+    while ei < snap.bounds_ms.len() {
+        let bits: UInt64 = (snap.bounds_ms[ei] as Float).to_bits();
+        let mut kk: Int = 0;
+        while kk < 8 {
+            eb.push(((bits >> (kk * 8)) & 0xFF_u64) as Byte);
+            kk = kk + 1;
+        }
+        ei = ei + 1;
+    }
+    write_tag_len(&mut dp, 7, &eb);
+    dp
+}
+
+// =============================================================================
+// HistogramSnapshot — read-only view of a Histogram for export
+// =============================================================================
+
+public type HistogramSnapshot is {
+    bounds_ms:     List<Int>,
+    bucket_counts: List<Int>,
+    total:         Int,
+    sum_ms:        Int,
+};

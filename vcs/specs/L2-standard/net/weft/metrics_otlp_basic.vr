@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: weft, metrics, otlp, observability, surface
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/weft/metrics_otlp.vr` — surface check for the
+// OTLP/HTTP push exporter that closes net-framework.md §11
+// Phase 2 follow-up "Metrics OTLP-push exporter".
+
+mount core.*;
+mount core.collections.map.{Map};
+mount core.time.{Duration};
+mount core.net.weft.metrics.{Registry};
+mount core.net.weft.metrics_otlp.{
+    OtlpExporterConfig, OtlpExporter, OtlpResponse, OtlpError,
+};
+
+fn config_default_constructible() {
+    let _cfg = OtlpExporterConfig.new(
+        f"http://otel-collector:4318/v1/metrics",
+        f"my-service",
+    );
+}
+
+fn config_builder_chains() {
+    let cfg = OtlpExporterConfig.new(f"http://col:4318/v1/metrics", f"app")
+        .with_period(Duration.from_secs(15))
+        .with_resource_attr(f"service.name", f"app")
+        .with_resource_attr(f"deployment.environment", f"production")
+        .with_h3()
+        .with_bearer_token(f"abc123");
+    assert(cfg.prefer_h3 == true);
+    assert(cfg.period.as_secs() == 15);
+    assert(cfg.resource_attrs.len() == 2);
+    assert(cfg.extra_headers.len() == 1);
+}
+
+fn exporter_initial_counters() {
+    let cfg = OtlpExporterConfig.new(f"http://col:4318/v1/metrics", f"app");
+    let registry = Shared.new(Registry.new());
+    let exporter = OtlpExporter.new(cfg, registry);
+    assert(exporter.pushes_attempted() == 0);
+    assert(exporter.pushes_succeeded() == 0);
+    assert(exporter.last_success_ms() == 0);
+}
+
+fn exporter_stop_idempotent() {
+    let cfg = OtlpExporterConfig.new(f"http://col:4318/v1/metrics", f"app");
+    let registry = Shared.new(Registry.new());
+    let exporter = OtlpExporter.new(cfg, registry);
+    exporter.stop();
+    exporter.stop();    // second stop is no-op
+}
+
+fn encode_snapshot_emits_bytes() {
+    // Even an empty registry produces a valid (empty-ish) OTLP body
+    // — the resource_metrics field with default resource + empty
+    // scope_metrics is always present.
+    let cfg = OtlpExporterConfig.new(f"http://col:4318/v1/metrics", f"app");
+    let registry = Shared.new(Registry.new());
+    let exporter = OtlpExporter.new(cfg, registry);
+    let body = exporter.encode_snapshot();
+    // Sanity bound — at minimum the outer ResourceMetrics tag plus
+    // its length prefix must be present.
+    assert(body.len() >= 2);
+}
+
+@main
+public fn main() -> Int {
+    config_default_constructible();
+    config_builder_chains();
+    exporter_initial_counters();
+    exporter_stop_idempotent();
+    encode_snapshot_emits_bytes();
+    print("OTLP-push exporter surface verified");
+    0
+}

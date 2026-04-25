@@ -1,0 +1,145 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: weft, zero_rtt, replay, security, rfc8446_8, rfc9114_10_9
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/weft/zero_rtt_gate.vr` — surface check for the 0-RTT
+// replay-defence admission gate that closes net-framework.md
+// §6.10 / §6.11 Phase 4 follow-up "0-RTT replay-defence".
+//
+// Validates:
+//
+//   1. Non-0-RTT requests pass any policy unchanged.
+//   2. SafeMethodsOnly admits GET/HEAD/OPTIONS, rejects POST.
+//   3. IdempotentMethodsOnly admits GET/PUT/DELETE/HEAD/OPTIONS,
+//      rejects POST/PATCH.
+//   4. IdempotencyKeyed admits POST iff the configured header is
+//      present.
+//   5. RejectAll rejects everything that arrived via 0-RTT.
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.net.http.{Headers, Method};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.zero_rtt_gate.{
+    ZeroRttPolicy, ZeroRttGateLayer, was_via_0rtt,
+};
+
+fn make_request(method: Method, via_0rtt: Bool, idempo_key: Maybe<Text>) -> WeftRequest {
+    let mut h = Headers.new();
+    if via_0rtt {
+        h.append(f"x-weft-via-0rtt", f"1");
+    }
+    match idempo_key {
+        Some(k) => h.append(f"idempotency-key", k),
+        None    => {},
+    }
+    WeftRequest {
+        method:      method,
+        path:        f"/api",
+        raw_query:   None,
+        headers:     h,
+        body:        [],
+        path_params: Map.new(),
+        peer_addr:   None,
+    }
+}
+
+fn marker_detected_when_present() {
+    let req = make_request(Method.Get, true, None);
+    assert(was_via_0rtt(&req));
+}
+
+fn marker_absent_means_no_0rtt() {
+    let req = make_request(Method.Post, false, None);
+    assert(false == was_via_0rtt(&req));
+}
+
+fn safe_methods_admits_get() {
+    let policy = ZeroRttPolicy.SafeMethodsOnly;
+    let req = make_request(Method.Get, true, None);
+    assert(policy.admits(&req));
+}
+
+fn safe_methods_admits_head() {
+    let policy = ZeroRttPolicy.SafeMethodsOnly;
+    let req = make_request(Method.Head, true, None);
+    assert(policy.admits(&req));
+}
+
+fn safe_methods_rejects_post() {
+    let policy = ZeroRttPolicy.SafeMethodsOnly;
+    let req = make_request(Method.Post, true, None);
+    assert(false == policy.admits(&req));
+}
+
+fn idempotent_methods_admits_put() {
+    let policy = ZeroRttPolicy.IdempotentMethodsOnly;
+    let req = make_request(Method.Put, true, None);
+    assert(policy.admits(&req));
+}
+
+fn idempotent_methods_rejects_patch() {
+    let policy = ZeroRttPolicy.IdempotentMethodsOnly;
+    let req = make_request(Method.Patch, true, None);
+    assert(false == policy.admits(&req));
+}
+
+fn keyed_admits_post_with_header() {
+    let policy = ZeroRttPolicy.IdempotencyKeyed {
+        header_name: f"idempotency-key",
+    };
+    let req = make_request(Method.Post, true, Some(f"abc-123"));
+    assert(policy.admits(&req));
+}
+
+fn keyed_rejects_post_without_header() {
+    let policy = ZeroRttPolicy.IdempotencyKeyed {
+        header_name: f"idempotency-key",
+    };
+    let req = make_request(Method.Post, true, None);
+    assert(false == policy.admits(&req));
+}
+
+fn reject_all_rejects_get_too() {
+    let policy = ZeroRttPolicy.RejectAll;
+    let req = make_request(Method.Get, true, None);
+    assert(false == policy.admits(&req));
+}
+
+fn layer_default_constructible() {
+    let _layer = ZeroRttGateLayer.new();
+}
+
+fn layer_custom_policy_constructible() {
+    let _layer = ZeroRttGateLayer.with_policy(
+        ZeroRttPolicy.IdempotentMethodsOnly
+    );
+}
+
+fn layer_custom_status_chains() {
+    let layer = ZeroRttGateLayer.new().with_reject_status(503_u16);
+    assert(layer.reject_status == 503_u16);
+}
+
+@main
+public fn main() -> Int {
+    marker_detected_when_present();
+    marker_absent_means_no_0rtt();
+    safe_methods_admits_get();
+    safe_methods_admits_head();
+    safe_methods_rejects_post();
+    idempotent_methods_admits_put();
+    idempotent_methods_rejects_patch();
+    keyed_admits_post_with_header();
+    keyed_rejects_post_without_header();
+    reject_all_rejects_get_too();
+    layer_default_constructible();
+    layer_custom_policy_constructible();
+    layer_custom_status_chains();
+    print("0-RTT replay-defence gate verified");
+    0
+}

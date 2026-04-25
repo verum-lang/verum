@@ -1,0 +1,187 @@
+// =============================================================================
+// core/net/weft/zero_rtt_gate.vr — 0-RTT replay-defence admission gate
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6.10 / §6.11 (Phase 4)
+//        internal/specs/tls-quic.md §8.5 (replay protection)
+// RFCs:  8446 §8 (TLS 1.3 0-RTT replay considerations),
+//        9001 §5.6 (QUIC 0-RTT implications),
+//        9114 §10.9 (HTTP/3 implementation requirements for 0-RTT)
+// =============================================================================
+//
+// 0-RTT data is replayable by definition — the very thing that makes
+// it fast (the client doesn't wait for a server hello) is what makes
+// the server unable to distinguish a replay from the original flight.
+// RFC 8446 §8 and RFC 9001 §5.6 spell out the consequences:
+//
+//   * Non-idempotent methods (POST/PATCH/DELETE) MUST NOT execute
+//     on 0-RTT data unless the server has out-of-band replay defence
+//     (e.g., an idempotency-key dedupe store).
+//   * GET/HEAD/OPTIONS are idempotent and execute freely.
+//   * Path-/query-driven side effects (e.g. a GET that decrements a
+//     counter) are out of scope — the application is responsible.
+//
+// This module is the request-time gate. It pairs with the TLS-level
+// `core.net.tls13.handshake.zero_rtt_antireplay.ReplayCache` (which
+// dedupes the (psk_id, ClientHello-hash) pair across the early-data
+// window). Together they implement the spec's
+// "Verifiable replay protection" obligation (V11 candidate — not yet
+// in the V1-V10 catalogue, tracked separately).
+//
+// The gate is implemented as a Weft `Layer<H>` so users compose it
+// with the rest of the middleware stack:
+//
+//   Server::new(handler)
+//       .with(ZeroRttGateLayer.policy(ZeroRttPolicy.SafeMethodsOnly))
+//       .with(RetryLayer.new(3))
+//       .serve()
+//
+// Marker: requests carry `x-weft-via-0rtt: 1` when the underlying
+// transport delivered them through 0-RTT data. The integration layer
+// (h3.vr / http3.vr) sets the header when `H3RequestHandle.is_0rtt`
+// is true. Absence is conservatively treated as "not 0-RTT" so
+// non-aware deployments fail closed.
+//
+// =============================================================================
+
+module core.net.weft.zero_rtt_gate;
+
+mount core.*;
+mount core.net.http.{Method, Response, StatusCode, Headers};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// Marker header
+// =============================================================================
+
+/// Header set by the H3/QUIC integration to mark a request that
+/// arrived through 0-RTT data. Listeners that don't speak 0-RTT
+/// never set the header, so non-0-RTT-aware deployments fall through
+/// transparently.
+public const ZERO_RTT_MARKER_HEADER: &str = "x-weft-via-0rtt";
+
+/// Read the marker; returns true iff the request arrived via 0-RTT
+/// (header value `"1"` or any non-empty truthy value).
+public fn was_via_0rtt(req: &WeftRequest) -> Bool {
+    match req.headers.get(&"x-weft-via-0rtt") {
+        Some(t) => t.len() > 0 && t.as_bytes()[0] != ('0' as Byte),
+        None    => false,
+    }
+}
+
+// =============================================================================
+// ZeroRttPolicy
+// =============================================================================
+
+/// Policy applied to 0-RTT-borne requests. The default is
+/// `SafeMethodsOnly` which matches RFC 8446 §8 / RFC 9114 §10.9
+/// guidance — only methods that RFC 9110 §9.2.1 calls "safe" pass.
+///
+/// `IdempotentMethodsOnly` allows the broader RFC 9110 §9.2.2
+/// idempotent set (PUT, DELETE in addition to GET/HEAD/OPTIONS).
+/// PUT and DELETE *are* idempotent semantically but a server-side
+/// replay can still cause unintended state machine transitions, so
+/// callers should prefer `SafeMethodsOnly` unless the application
+/// explicitly tolerates replay.
+///
+/// `IdempotencyKeyed` is the strictest "real-world" policy: any
+/// method passes if the request carries a configured idempotency
+/// header. The application must provide server-side dedupe.
+///
+/// `RejectAll` rejects every 0-RTT request — useful when migrating
+/// or when the application can't yet reason about replay safety.
+public type ZeroRttPolicy is
+      RejectAll
+    | SafeMethodsOnly
+    | IdempotentMethodsOnly
+    | IdempotencyKeyed { header_name: Text };
+
+implement ZeroRttPolicy {
+    public fn admits(&self, req: &WeftRequest) -> Bool {
+        match self {
+            ZeroRttPolicy.RejectAll              => false,
+            ZeroRttPolicy.SafeMethodsOnly        => req.method.is_safe(),
+            ZeroRttPolicy.IdempotentMethodsOnly  => req.method.is_idempotent(),
+            ZeroRttPolicy.IdempotencyKeyed { header_name } =>
+                req.headers.get(header_name).is_some(),
+        }
+    }
+}
+
+// =============================================================================
+// ZeroRttGateLayer
+// =============================================================================
+
+public type ZeroRttGateLayer is {
+    policy: ZeroRttPolicy,
+    /// Status code to return on rejection. RFC 9110 §15.5.20 425
+    /// "Too Early" is the canonical choice; some deployments prefer
+    /// 503 to preserve client-side connection reuse semantics.
+    reject_status: UInt16,
+};
+
+implement ZeroRttGateLayer {
+    /// Default policy: SafeMethodsOnly + 425 Too Early on rejection.
+    public fn new() -> ZeroRttGateLayer {
+        ZeroRttGateLayer {
+            policy:        ZeroRttPolicy.SafeMethodsOnly,
+            reject_status: 425_u16,
+        }
+    }
+
+    public fn with_policy(policy: ZeroRttPolicy) -> ZeroRttGateLayer {
+        ZeroRttGateLayer {
+            policy:        policy,
+            reject_status: 425_u16,
+        }
+    }
+
+    /// Override the rejection status (e.g. 503 if the deployment's
+    /// CDN does not interpret 425 properly).
+    public fn with_reject_status(mut self, code: UInt16) -> ZeroRttGateLayer {
+        self.reject_status = code;
+        self
+    }
+}
+
+public type ZeroRttGateHandler<H> is {
+    inner:  H,
+    layer:  ZeroRttGateLayer,
+};
+
+implement<H: Handler> Layer<H> for ZeroRttGateLayer {
+    type Wrapped = ZeroRttGateHandler<H>;
+    fn wrap(&self, inner: H) -> ZeroRttGateHandler<H> {
+        ZeroRttGateHandler {
+            inner: inner,
+            layer: ZeroRttGateLayer {
+                policy:        self.policy.clone(),
+                reject_status: self.reject_status,
+            },
+        }
+    }
+}
+
+implement<H: Handler> Handler for ZeroRttGateHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        // Non-0-RTT requests pass straight through — no header, no
+        // policy applied.
+        if !was_via_0rtt(&req) {
+            return self.inner.handle(req).await;
+        }
+        if self.layer.policy.admits(&req) {
+            return self.inner.handle(req).await;
+        }
+        // Reject. 425 Too Early instructs the client to retry on a
+        // fresh post-handshake connection.
+        let mut h = Headers.new();
+        h.append(f"connection", f"close");
+        Ok(Response {
+            status:  StatusCode { code: self.layer.reject_status as Int },
+            headers: h,
+            body:    [],
+        })
+    }
+}

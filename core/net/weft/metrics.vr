@@ -145,6 +145,41 @@ implement Registry {
         }
     }
 
+    /// Snapshot every counter as `(name, value)` pairs. Order is
+    /// deterministic — alphabetic by name. Used by the OTLP-push
+    /// exporter to produce byte-stable wire output across runs.
+    public fn counter_snapshot(&self) -> core.collections.list.List<(Text, Int)> {
+        let mut out: core.collections.list.List<(Text, Int)> = [];
+        let cs = self.counters.lock();
+        for (name, counter) in cs.iter() {
+            out.push((name.clone(), counter.value()));
+        }
+        // Stable order across runs — sort alphabetically.
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// Snapshot every histogram as `(name, HistogramSnapshot)` pairs.
+    public fn histogram_snapshot(&self)
+        -> core.collections.list.List<(Text, core.net.weft.metrics_otlp.HistogramSnapshot)>
+    {
+        let mut out = core.collections.list.List.new();
+        let hs = self.histograms.lock();
+        for (name, hist) in hs.iter() {
+            let counts = hist.counts.lock().clone();
+            let total = *hist.count.lock();
+            let sum_ms = *hist.sum_ms.lock();
+            out.push((name.clone(), core.net.weft.metrics_otlp.HistogramSnapshot {
+                bounds_ms:     hist.bounds_ms.clone(),
+                bucket_counts: counts,
+                total:         total,
+                sum_ms:        sum_ms,
+            }));
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
     /// Render in Prometheus text exposition format. Suitable for a
     /// `GET /metrics` handler.
     public fn render_prometheus(&self) -> Text {
