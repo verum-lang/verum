@@ -140,6 +140,12 @@ pub mod context;
 // CoreTerm-level walker so any path that bypasses one still hits the
 // other).
 pub mod positivity;
+// VUVA #146 / MOD-MED-2 — glob import provenance discipline. Tags
+// every glob-imported name with its `ImportOrigin` (Stdlib /
+// External / Project) so glob-vs-glob conflicts resolve via a total
+// ordering rather than source-text position. Project always beats
+// stdlib; explicit imports win over both.
+pub mod import_origin;
 pub mod context_check;
 pub mod context_resolution; // Context group resolution for type checking
 pub mod contract_integration; // Phase 3a → Phase 4 contract integration

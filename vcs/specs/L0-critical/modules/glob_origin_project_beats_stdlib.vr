@@ -1,0 +1,30 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: modules, glob, import-origin, shadowing, vuva-mod-med-2
+// @description: VUVA #146 / MOD-MED-2 — glob-vs-glob origin discipline.
+//
+// When two glob mounts both export a name, the legacy behaviour was
+// "second-encountered wins" — source-text-position-dependent and
+// observably non-deterministic across `mount` reorders. The fix
+// tags every glob-imported name with its `ImportOrigin` (Stdlib /
+// External / Project) and resolves conflicts via a total ordering:
+//
+//   Project > External > Stdlib
+//
+// Same-origin ties go to the first registrant for determinism.
+//
+// This test is the lightweight smoke: a single-file project that
+// declares a local type and uses it. Without the arbiter, an
+// inadvertent stdlib-glob clash on a short name (e.g. `Tree` later
+// added to core/) would silently swap the user's type for the
+// stdlib's. With the arbiter, the project type always wins; the
+// user gets a `W_STDLIB_SHADOW` warning if they actually evicted
+// a stdlib entry, but the build succeeds with their definition
+// active.
+
+type LocalTree<T> is Leaf(T) | Branch { left: Heap<LocalTree<T>>, right: Heap<LocalTree<T>> };
+
+fn main() {
+    print("project-wins");
+}

@@ -369,6 +369,20 @@ pub struct TypeChecker {
     /// success so a Berardi-shaped declaration tucked inside an
     /// imported module still aborts the build.
     pub(crate) deferred_soundness_errors: Vec<TypeError>,
+    /// VUVA #146 / MOD-MED-2 — provenance side-table for glob-imported
+    /// names. Maps each name registered by a glob mount to its
+    /// `ImportProvenance { origin, module_path }`. Consulted at every
+    /// glob-registration site to decide whether the incoming glob
+    /// should overwrite an existing entry: the rule is
+    /// `Project > External > Stdlib`, ties go to the first registrant.
+    /// Explicit imports bypass this map entirely.
+    pub(crate) glob_import_provenance:
+        std::collections::HashMap<verum_common::Text, crate::import_origin::ImportProvenance>,
+    /// VUVA #146 / MOD-MED-2 — name of the user's current cog used by
+    /// `ImportOrigin::classify` to distinguish project paths from
+    /// stdlib/external. Empty string means classification falls back
+    /// to "External" for non-stdlib paths.
+    pub(crate) current_cog_name: verum_common::Text,
     /// Whether dependent-type features (Pi, Sigma, dependent match)
     /// are enabled. Controlled by `[types] dependent` in verum.toml.
     dependent_enabled: bool,
@@ -999,6 +1013,8 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
+            glob_import_provenance: std::collections::HashMap::new(),
+            current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -1181,6 +1197,8 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
+            glob_import_provenance: std::collections::HashMap::new(),
+            current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -1739,7 +1757,13 @@ impl TypeChecker {
     /// unconditionally — which silently permits orphan impls in user
     /// code. Pipelines must call this early (before register_impl).
     pub fn set_current_cog(&mut self, cog_name: impl Into<verum_common::Text>) {
-        self.protocol_checker.write().set_current_crate(cog_name.into());
+        let name: verum_common::Text = cog_name.into();
+        // Two consumers: (1) ProtocolChecker uses this for orphan-rule
+        // discipline; (2) `ImportOrigin::classify` uses this to tell
+        // project paths apart from stdlib/external during glob
+        // shadow arbitration (#146 / MOD-MED-2).
+        self.current_cog_name = name.clone();
+        self.protocol_checker.write().set_current_crate(name);
     }
 
     /// Create a new type checker with a shared module registry
@@ -1758,6 +1782,8 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
+            glob_import_provenance: std::collections::HashMap::new(),
+            current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -1871,6 +1897,8 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
+            glob_import_provenance: std::collections::HashMap::new(),
+            current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -1985,6 +2013,8 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
+            glob_import_provenance: std::collections::HashMap::new(),
+            current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -7512,6 +7542,68 @@ impl TypeChecker {
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Path resolution in imports
     pub fn set_current_module_path(&mut self, path: impl Into<Text>) {
         self.current_module_path = path.into();
+    }
+
+    /// VUVA #146 / MOD-MED-2 — set the user's cog name so
+    /// `ImportOrigin::classify` can distinguish project-owned modules
+    /// from stdlib/external during glob shadow arbitration. Should be
+    /// called once at the start of `phase_type_check` from the manifest.
+    pub fn set_current_cog_name(&mut self, name: impl Into<Text>) {
+        self.current_cog_name = name.into();
+    }
+
+    /// VUVA #146 / MOD-MED-2 — central glob-shadow arbiter. Decides
+    /// whether the incoming glob (provenance `incoming`) is allowed
+    /// to register / overwrite the entry currently held under `name`
+    /// in the env. Returns `true` to allow registration, `false` to
+    /// keep the existing entry (the caller MUST then skip the
+    /// overwrite to preserve determinism).
+    ///
+    /// Side effects: emits `W_STDLIB_SHADOW` diagnostic when a
+    /// project glob successfully evicts a stdlib glob — the user
+    /// gets a heads-up that their type-decl shadowed a stdlib
+    /// constructor with the same short name, which is a common
+    /// foot-gun.
+    ///
+    /// Bookkeeping: on allowed registration the helper updates
+    /// `glob_import_provenance[name]` with the incoming provenance.
+    pub(crate) fn glob_shadow_arbiter(
+        &mut self,
+        name: &str,
+        incoming: crate::import_origin::ImportProvenance,
+    ) -> bool {
+        use verum_diagnostics::DiagnosticBuilder;
+        let key: Text = verum_common::Text::from(name);
+        if let Some(existing) = self.glob_import_provenance.get(&key).cloned() {
+            if !crate::import_origin::ImportProvenance::allows_overwrite(
+                &existing, &incoming,
+            ) {
+                // The incoming entry would lose the conflict — keep
+                // the existing one. No env mutation, no warning.
+                return false;
+            }
+            // Overwrite is allowed. Emit a stdlib-shadow warning
+            // when a project / external glob is evicting a stdlib
+            // entry — the user usually wants to know about that.
+            if existing.origin == crate::import_origin::ImportOrigin::Stdlib
+                && incoming.origin != crate::import_origin::ImportOrigin::Stdlib
+            {
+                let diag = DiagnosticBuilder::warning()
+                    .code("W_STDLIB_SHADOW")
+                    .message(format!(
+                        "{} mount '{}' shadows stdlib name '{}' (was: {} '{}')",
+                        incoming.origin.label(),
+                        incoming.module_path.as_str(),
+                        name,
+                        existing.origin.label(),
+                        existing.module_path.as_str(),
+                    ))
+                    .build();
+                self.diagnostics.push(diag);
+            }
+        }
+        self.glob_import_provenance.insert(key, incoming);
+        true
     }
 
     /// Register a type definition in the current module's scope, ALONGSIDE the
@@ -29119,6 +29211,31 @@ impl TypeChecker {
         // to prevent name collisions (e.g., atomic Ordering overwriting comparison Ordering).
         if import_span.is_none() && self.explicit_imports.contains(register_name) {
             return Ok(());
+        }
+
+        // VUVA #146 / MOD-MED-2 — glob origin discipline. For
+        // glob/internal imports (`import_span.is_none()`), classify
+        // the source module against the user's cog name and consult
+        // `glob_shadow_arbiter` to decide whether the incoming entry
+        // is allowed to overwrite an existing glob registration.
+        // Project beats external beats stdlib; same-origin ties
+        // preserve the first registrant for determinism. Explicit
+        // imports skip this layer entirely (the gate above already
+        // returned for the case where explicit was overridden by a
+        // glob; here we handle the inverse — glob arriving on top of
+        // a prior glob).
+        if import_span.is_none() {
+            let incoming_origin = crate::import_origin::ImportOrigin::classify(
+                module_path.as_str(),
+                self.current_cog_name.as_str(),
+            );
+            let incoming = crate::import_origin::ImportProvenance::new(
+                incoming_origin,
+                module_path.clone(),
+            );
+            if !self.glob_shadow_arbiter(register_name, incoming) {
+                return Ok(());
+            }
         }
 
         // VUVA #144 cycle guard: nested explicit imports (`mount A.{Item}`)
