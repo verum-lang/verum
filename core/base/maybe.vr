@@ -8,6 +8,7 @@
 // Import types from other core modules
 
 module core.base.maybe;
+mount core.base.coercion.{IntCoercible};
 mount core.ordering.{Ordering, Less, Equal, Greater};
 mount core.result.{Result, Ok, Err};
 mount core.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
@@ -20,6 +21,11 @@ mount core.iterator.Iterator;
 /// Optional value: either None (absent) or Some(value).
 /// The fundamental way to represent the possible absence of a value.
 public type Maybe<T> is None | Some(T);
+
+// IntCoercible: `Maybe<USize>` from indexing operations participates
+// in Int ↔ Generic coercion. Treating Maybe<T> uniformly here mirrors
+// the hardcoded list entry so the coercion works regardless of T.
+implement<T> IntCoercible for Maybe<T> {}
 
 implement<T> Maybe<T> {
     // =========================================================================

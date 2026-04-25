@@ -15,6 +15,7 @@
 /// Named MappedIter to avoid collision with collections/map.vr MapIter.
 
 module core.base.iterator;
+mount core.base.coercion.{IntCoercible, Indexable, RangeLike};
 public type MappedIter<I, F> is { iter: I, f: F };
 
 /// Filter iterator adapter (forward declaration).
@@ -2422,8 +2423,19 @@ implement<A: Iterator, B: Iterator> IntoIterator for ZipLongestIter<A, B> {
 /// Generic over element type T which must support ordering and increment.
 public type Range<T> is { current: T, end: T };
 
+// Range/RangeInclusive — IntCoercible (slice notation `a[i..j]` produces
+// Int-bearing handles), Indexable (`range[i]` enumeration), RangeLike
+// (start/end interval shape unifies with `(Maybe<USize>, Maybe<USize>)`
+// from slicing).
+implement<T> IntCoercible for Range<T> {}
+implement<T> Indexable for Range<T> {}
+implement<T> RangeLike for Range<T> {}
+
 /// Inclusive range iterator [start, end].
 public type RangeInclusive<T> is { current: T, end: T, done: Bool };
+
+implement<T> IntCoercible for RangeInclusive<T> {}
+implement<T> RangeLike for RangeInclusive<T> {}
 
 /// Create a range iterator [start, end).
 public fn range(start: Int, end: Int) -> Range<Int> {

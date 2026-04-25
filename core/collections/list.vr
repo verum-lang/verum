@@ -20,6 +20,7 @@
 
 module core.collections.list;
 mount core.*;
+mount core.base.coercion.{IntCoercible, Indexable};
 
 // Shadow MemoryOrdering conflict: explicitly re-bind Ordering to comparison ordering
 type Ordering is Less | Equal | Greater;
@@ -51,6 +52,11 @@ public type List<T> is {
     // Allocated capacity
     cap: Int,
 };
+
+// IntCoercible: `list.len() == 0` and similar contexts unify Int ↔
+// List<USize> via the index-coercion path. Indexable: `list[i: Int]`.
+implement<T> IntCoercible for List<T> {}
+implement<T> Indexable for List<T> {}
 
 implement<T> List<T> {
     // =========================================================================
