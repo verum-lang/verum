@@ -1331,8 +1331,11 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             buf.push(((port >> 8) & 0xFF) as Byte);
             buf.push((port & 0xFF) as Byte);
 
-            // sin_addr: network byte order (already in correct format)
-            let (a, b, c, d) = v4.addr.octets();
+            // sin_addr: network byte order (already in correct format).
+            // The field name on SocketAddrV4 is `ip`, not `addr` — the
+            // typechecker accepts the wrong name silently (#75) and the
+            // mismatch surfaces at runtime as NullPointer.
+            let (a, b, c, d) = v4.ip.octets();
             buf.push(a);
             buf.push(b);
             buf.push(c);
@@ -1365,11 +1368,18 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             // sin6_flowinfo (4 bytes, usually 0)
             buf.push(0); buf.push(0); buf.push(0); buf.push(0);
 
-            // sin6_addr (16 bytes)
-            let ip_bytes = v6.addr;
-            for i in 0..16 {
-                buf.push(ip_bytes[i]);
-            }
+            // sin6_addr (16 bytes). Ipv6Addr stores the address as
+            // eight 16-bit segments; serialize each segment as two
+            // big-endian bytes. Field is `ip`, not `addr`.
+            let (s0, s1, s2, s3, s4, s5, s6, s7) = v6.ip.segments();
+            buf.push(((s0 >> 8) & 0xFF) as Byte); buf.push((s0 & 0xFF) as Byte);
+            buf.push(((s1 >> 8) & 0xFF) as Byte); buf.push((s1 & 0xFF) as Byte);
+            buf.push(((s2 >> 8) & 0xFF) as Byte); buf.push((s2 & 0xFF) as Byte);
+            buf.push(((s3 >> 8) & 0xFF) as Byte); buf.push((s3 & 0xFF) as Byte);
+            buf.push(((s4 >> 8) & 0xFF) as Byte); buf.push((s4 & 0xFF) as Byte);
+            buf.push(((s5 >> 8) & 0xFF) as Byte); buf.push((s5 & 0xFF) as Byte);
+            buf.push(((s6 >> 8) & 0xFF) as Byte); buf.push((s6 & 0xFF) as Byte);
+            buf.push(((s7 >> 8) & 0xFF) as Byte); buf.push((s7 & 0xFF) as Byte);
 
             // sin6_scope_id (4 bytes)
             let scope = v6.scope_id;
