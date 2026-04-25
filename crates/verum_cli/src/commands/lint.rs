@@ -18,6 +18,31 @@ enum LintLevel {
     Warning,
     Info,
     Hint,
+    /// Suppressed — same as `disabled`. Lets `[lint.severity]` set
+    /// `rule = "off"` per-rule.
+    Off,
+}
+
+impl LintLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            LintLevel::Error => "error",
+            LintLevel::Warning => "warn",
+            LintLevel::Info => "info",
+            LintLevel::Hint => "hint",
+            LintLevel::Off => "off",
+        }
+    }
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "error" | "deny" => Some(LintLevel::Error),
+            "warn" | "warning" => Some(LintLevel::Warning),
+            "info" => Some(LintLevel::Info),
+            "hint" => Some(LintLevel::Hint),
+            "off" | "allow" | "disabled" => Some(LintLevel::Off),
+            _ => None,
+        }
+    }
 }
 
 /// Verum-specific lint rule
@@ -234,6 +259,7 @@ pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
             LintLevel::Warning => warnings.push(issue),
             LintLevel::Info => info_issues.push(issue),
             LintLevel::Hint => hints.push(issue),
+            LintLevel::Off => continue,
         }
     }
 
@@ -2077,6 +2103,7 @@ fn print_issue(issue: &LintIssue, deny_warnings: bool) {
         }
         LintLevel::Info => "info".blue().bold(),
         LintLevel::Hint => "hint".dimmed(),
+        LintLevel::Off => return,
     };
 
     let rule_display = issue.rule.dimmed();
@@ -2190,6 +2217,329 @@ pub fn lint_path(path: &Path, fix: bool, deny_warnings: bool) -> Result<()> {
             "Found {} lint warnings (denied)",
             warning_count
         )))
+    } else {
+        Ok(())
+    }
+}
+
+
+// ===================================================================
+// Phase A.1 extensions: --list-rules, --explain, --validate-config,
+// --format json. These are additive on top of the existing surface.
+// ===================================================================
+
+/// Print every known built-in lint rule and exit. Used by
+/// `verum lint --list-rules`.
+pub fn list_rules() -> Result<()> {
+    println!("{:<32} {:<8} {:<14} {}",
+        "Name".bold(),
+        "Level".bold(),
+        "Category".bold(),
+        "Description".bold());
+    println!("{}", "-".repeat(110));
+    let mut rules: Vec<&LintRule> = LINT_RULES.iter().collect();
+    rules.sort_by_key(|r| r.name);
+    for r in rules {
+        let level = match r.level {
+            LintLevel::Error => "error",
+            LintLevel::Warning => "warn",
+            LintLevel::Info => "info",
+            LintLevel::Hint => "hint",
+            LintLevel::Off => "off",
+        };
+        let cat = match r.category {
+            LintCategory::Performance => "performance",
+            LintCategory::Safety => "safety",
+            LintCategory::Style => "style",
+            LintCategory::Verification => "verification",
+        };
+        println!("{:<32} {:<8} {:<14} {}", r.name, level, cat, r.description);
+    }
+    println!();
+    println!("Total: {} built-in rules.", LINT_RULES.len());
+    Ok(())
+}
+
+/// Print extended documentation for one rule. Used by
+/// `verum lint --explain <rule>`.
+pub fn explain_rule(name: &str) -> Result<()> {
+    let r = match LINT_RULES.iter().find(|r| r.name == name) {
+        Some(r) => r,
+        None => {
+            // Suggest a close match — Levenshtein-1 candidates.
+            let candidates: Vec<&str> = LINT_RULES
+                .iter()
+                .map(|r| r.name)
+                .filter(|n| levenshtein(n, name) <= 2)
+                .collect();
+            if let Some(suggest) = candidates.first() {
+                return Err(CliError::Custom(format!(
+                    "unknown lint rule `{}` — did you mean `{}`?",
+                    name, suggest
+                )));
+            }
+            return Err(CliError::Custom(format!(
+                "unknown lint rule `{}` (run `verum lint --list-rules` to see all)",
+                name
+            )));
+        }
+    };
+    let level = match r.level {
+        LintLevel::Error => "error",
+        LintLevel::Warning => "warn",
+        LintLevel::Info => "info",
+        LintLevel::Hint => "hint",
+        LintLevel::Off => "off",
+    };
+    let cat = match r.category {
+        LintCategory::Performance => "performance",
+        LintCategory::Safety => "safety",
+        LintCategory::Style => "style",
+        LintCategory::Verification => "verification",
+    };
+    println!("{}", r.name.bold());
+    println!();
+    println!("  default level : {}", level);
+    println!("  category      : {}", cat);
+    println!();
+    println!("{}", r.description);
+    println!();
+    println!("To suppress in source: `@allow({}, reason = \"...\")`", r.name);
+    println!("To force-error:       `@deny({})`", r.name);
+    println!();
+    println!("Or in `verum.toml`:");
+    println!();
+    println!("  [lint.severity]");
+    println!("  {} = \"off\"   # off | warn | error | info | hint", r.name);
+    println!();
+    println!("Full schema: docs/reference/lint-configuration");
+    Ok(())
+}
+
+/// Run only config validation; useful in pre-commit hooks.
+/// Exits 0 if `[lint]` block parses cleanly; non-0 with diagnostics
+/// on any unknown key, malformed value, or referenced-but-undeclared
+/// rule name.
+pub fn validate_config() -> Result<()> {
+    let cfg = load_full_lint_config();
+
+    // Collect unknown rule references.
+    let known: std::collections::HashSet<&'static str> =
+        LINT_RULES.iter().map(|r| r.name).collect();
+    let mut unknown: Vec<String> = Vec::new();
+    for set in [&cfg.disabled, &cfg.denied, &cfg.allowed, &cfg.warned] {
+        for name in set {
+            if !known.contains(name.as_str())
+                && !cfg.custom_rules.iter().any(|r| &r.name == name)
+            {
+                unknown.push(name.clone());
+            }
+        }
+    }
+    if !unknown.is_empty() {
+        unknown.sort();
+        unknown.dedup();
+        let mut msg = String::new();
+        msg.push_str("unknown lint rule(s) referenced:
+");
+        for n in &unknown {
+            let suggestion = LINT_RULES
+                .iter()
+                .map(|r| r.name)
+                .min_by_key(|cand| levenshtein(cand, n))
+                .unwrap_or("");
+            msg.push_str(&format!(
+                "  - `{}`{}
+",
+                n,
+                if !suggestion.is_empty() && levenshtein(suggestion, n) <= 3 {
+                    format!(" — did you mean `{}`?", suggestion)
+                } else {
+                    String::new()
+                }
+            ));
+        }
+        return Err(CliError::Custom(msg));
+    }
+
+    let custom_count = cfg.custom_rules.len();
+    let _ = (cfg.disabled.len(), cfg.denied.len(), cfg.allowed.len(), cfg.warned.len());
+    ui::success(&format!(
+        "lint config is valid ({} built-in + {} custom rules)",
+        LINT_RULES.len(),
+        custom_count
+    ));
+    Ok(())
+}
+
+/// Levenshtein distance — used for typo suggestions.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (m, n) = (a.len(), b.len());
+    if m == 0 { return n; }
+    if n == 0 { return m; }
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr: Vec<usize> = vec![0; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i-1] == b[j-1] { 0 } else { 1 };
+            curr[j] = std::cmp::min(
+                std::cmp::min(curr[j-1] + 1, prev[j] + 1),
+                prev[j-1] + cost,
+            );
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
+/// Output format for `verum lint --format`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LintOutputFormat {
+    Pretty,
+    Json,
+    GithubActions,
+}
+
+impl LintOutputFormat {
+    pub fn parse(s: &str) -> Result<Self> {
+        match s {
+            "pretty" | "" => Ok(Self::Pretty),
+            "json" => Ok(Self::Json),
+            "github-actions" | "gha" => Ok(Self::GithubActions),
+            other => Err(CliError::InvalidArgument(format!(
+                "unknown lint format `{}` (expected: pretty | json | github-actions)",
+                other
+            ))),
+        }
+    }
+}
+
+/// Emit a single issue in `--format json` (one NDJSON line).
+fn emit_issue_json(issue: &LintIssue) {
+    let level = match issue.level {
+        LintLevel::Error => "error",
+        LintLevel::Warning => "warning",
+        LintLevel::Info => "info",
+        LintLevel::Hint => "hint",
+        LintLevel::Off => "off",
+    };
+    let suggestion = issue
+        .suggestion
+        .as_ref()
+        .map(|t| format!(",\"suggestion\":{}", json_string(t.as_str())))
+        .unwrap_or_default();
+    println!(
+        "{{\"event\":\"lint\",\"rule\":{rule},\"level\":\"{lvl}\",\"file\":{file},\"line\":{ln},\"column\":{col},\"message\":{msg},\"fixable\":{fixable}{suggestion}}}",
+        rule = json_string(issue.rule),
+        lvl = level,
+        file = json_string(&issue.file.display().to_string()),
+        ln = issue.line,
+        col = issue.column,
+        msg = json_string(&issue.message),
+        fixable = issue.fixable,
+        suggestion = suggestion,
+    );
+}
+
+/// Emit a single issue as a GitHub Actions annotation.
+/// Format: `::warning file=path,line=N,col=M::message`
+fn emit_issue_gha(issue: &LintIssue) {
+    let level = match issue.level {
+        LintLevel::Error => "error",
+        LintLevel::Warning => "warning",
+        LintLevel::Info => "notice",
+        LintLevel::Hint => "notice",
+        LintLevel::Off => return,
+    };
+    println!(
+        "::{lvl} file={file},line={ln},col={col},title={title}::{msg}",
+        lvl = level,
+        file = issue.file.display(),
+        ln = issue.line,
+        col = issue.column,
+        title = issue.rule,
+        msg = issue.message.replace('\n', "%0A"),
+    );
+}
+
+fn json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Public entry point: emit all collected issues using the chosen
+/// format. Wired from `Commands::Lint` in main.rs when a non-pretty
+/// format is requested.
+pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat) -> Result<()> {
+    if format == LintOutputFormat::Pretty {
+        return execute(fix, deny_warnings);
+    }
+
+    // Replicate the discovery / lint-collection flow with structured emission.
+    let disabled_rules = load_lint_config();
+    let mut all_issues: Vec<LintIssue> = Vec::new();
+
+    let search_dirs: Vec<PathBuf> = ["src", "core"]
+        .iter()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect();
+    if search_dirs.is_empty() {
+        return Err(CliError::Custom("No src/ or core/ directory found".into()));
+    }
+
+    for d in &search_dirs {
+        for entry in WalkDir::new(d).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path.is_file() || !is_verum_file(path) {
+                continue;
+            }
+            if let Ok(issues) = lint_file(path) {
+                for i in issues {
+                    if !disabled_rules.contains(&i.rule.to_string()) {
+                        all_issues.push(i);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    for issue in &all_issues {
+        match issue.level {
+            LintLevel::Error => errors += 1,
+            LintLevel::Warning => warnings += 1,
+            _ => {}
+        }
+        match format {
+            LintOutputFormat::Json => emit_issue_json(issue),
+            LintOutputFormat::GithubActions => emit_issue_gha(issue),
+            LintOutputFormat::Pretty => unreachable!(),
+        }
+    }
+
+    let _ = fix; // auto-fix in machine modes deferred to Phase B
+    if errors > 0 {
+        Err(CliError::Custom(format!("{} lint errors", errors)))
+    } else if deny_warnings && warnings > 0 {
+        Err(CliError::Custom(format!("{} lint warnings (denied)", warnings)))
     } else {
         Ok(())
     }

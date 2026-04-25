@@ -392,12 +392,28 @@ enum Commands {
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Run linter
+    /// Static analysis suite — see [Reference → Lint configuration]
+    /// for the full schema in verum.toml.
     Lint {
+        /// Apply auto-fixes where available; honours [lint.policy].auto_fix.
         #[clap(long)]
         fix: bool,
+        /// Treat warnings as errors (CI gate).
         #[clap(long)]
         deny_warnings: bool,
+        /// Print every known built-in lint rule and exit.
+        #[clap(long)]
+        list_rules: bool,
+        /// Print extended documentation for one rule and exit.
+        #[clap(long, value_name = "RULE")]
+        explain: Option<Text>,
+        /// Run only config-validator; exits 0 / non-zero. Useful in pre-commit hooks.
+        #[clap(long)]
+        validate_config: bool,
+        /// Output format: pretty (default) | json | github-actions.
+        #[clap(long, value_name = "FMT", default_value = "pretty")]
+        format: Text,
+
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
@@ -1419,9 +1435,27 @@ fn run_command(cli: Cli) -> Result<()> {
             feature_overrides::install(feature_overrides);
             commands::fmt::execute(check, verbose)
         }
-        Commands::Lint { fix, deny_warnings, feature_overrides } => {
+        Commands::Lint {
+            fix,
+            deny_warnings,
+            list_rules,
+            explain,
+            validate_config,
+            format,
+            feature_overrides,
+        } => {
             feature_overrides::install(feature_overrides);
-            commands::lint::execute(fix, deny_warnings)
+            if list_rules {
+                return commands::lint::list_rules();
+            }
+            if let Some(rule) = explain {
+                return commands::lint::explain_rule(rule.as_str());
+            }
+            if validate_config {
+                return commands::lint::validate_config();
+            }
+            let fmt = commands::lint::LintOutputFormat::parse(format.as_str())?;
+            commands::lint::run_with_format(fix, deny_warnings, fmt)
         }
         Commands::Doc {
             open,
