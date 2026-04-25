@@ -1,0 +1,27 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: positivity, kernel-soundness, k-pos, vuva-c2, baseline
+// @description: Strict-positivity baseline — positive recursion admitted.
+//
+// The K-Pos walker MUST admit every well-formed inductive: peano
+// naturals, generic linked lists, binary trees, and codomain-only
+// arrows. Any false-positive on these baselines would break the
+// stdlib (List, Maybe, Tree, Result and their dependents).
+//
+// Pairs with `strict_positivity_berardi_rejected.vr` to pin both
+// directions of the K-Pos rule.
+
+type Nat is Zero | Succ(Heap<Nat>);
+
+type MyList<T> is Nil | Cons(T, Heap<MyList<T>>);
+
+type Tree<T> is Leaf(T) | Branch { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+// Codomain-only arrows are STRICTLY POSITIVE — only the
+// argument side is forbidden from mentioning the recursive type.
+type Callback is Make(fn(Int) -> Callback);
+
+fn main() {
+    print("ok");
+}

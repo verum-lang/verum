@@ -363,6 +363,12 @@ pub struct TypeChecker {
     generator_context: Maybe<GeneratorContext>,
     /// Collected diagnostics (warnings, notes, etc.)
     pub(crate) diagnostics: List<Diagnostic>,
+    /// Errors of `is_soundness_critical()` kind that surfaced inside
+    /// helpers whose Rust signature is `()` (e.g. cross-module type
+    /// pre-passes). Drained by `phase_type_check` before declaring
+    /// success so a Berardi-shaped declaration tucked inside an
+    /// imported module still aborts the build.
+    pub(crate) deferred_soundness_errors: Vec<TypeError>,
     /// Whether dependent-type features (Pi, Sigma, dependent match)
     /// are enabled. Controlled by `[types] dependent` in verum.toml.
     dependent_enabled: bool,
@@ -992,6 +998,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            deferred_soundness_errors: Vec::new(),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -1173,6 +1180,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            deferred_soundness_errors: Vec::new(),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -1749,6 +1757,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            deferred_soundness_errors: Vec::new(),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -1861,6 +1870,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            deferred_soundness_errors: Vec::new(),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -1974,6 +1984,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            deferred_soundness_errors: Vec::new(),
             dependent_enabled: true,
             higher_kinded_enabled: true,
             universe_poly_enabled: false,
@@ -3458,7 +3469,17 @@ impl TypeChecker {
             }
             if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                 if let Err(e) = self.register_type_declaration(type_decl) {
-                    // Log but don't fail - some types may have forward references
+                    // Soundness-critical errors (positivity, etc.) MUST
+                    // abort the build — masking them with `tracing::debug!`
+                    // is precisely the gap that lets `verum build` ship
+                    // a Berardi-shaped type as a working binary.
+                    // Recoverable errors (forward-ref / cross-module
+                    // resolution) keep their original log-and-continue
+                    // semantics so genuine forward declarations resolve
+                    // on the second pass.
+                    if e.is_soundness_critical() {
+                        return Err(e);
+                    }
                     tracing::debug!(
                         "Initial type registration for '{}' failed (may be resolved later): {}",
                         type_decl.name.name.as_str(),
@@ -3573,7 +3594,29 @@ impl TypeChecker {
 
         // Phase 3: Verify transitive negative context constraints
         // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
-        self.verify_all_negative_contexts()
+        self.verify_all_negative_contexts()?;
+
+        // Phase 4: Drain deferred soundness-critical errors. These were
+        // stashed by helpers whose Rust signature is `()` — typically
+        // cross-module pre-passes that import stdlib types. A
+        // positivity violation in any of those declarations would
+        // otherwise be silently lost; surface them here so the build
+        // aborts before reaching codegen.
+        if let Some(e) = self.deferred_soundness_errors.pop() {
+            // Surface remaining deferred errors as additional
+            // diagnostics so the user sees ALL violations, not only
+            // the first.
+            let mut tail: Vec<TypeError> = std::mem::take(
+                &mut self.deferred_soundness_errors,
+            );
+            for extra in tail.drain(..) {
+                let diag = extra.to_diagnostic();
+                self.diagnostics.push(diag);
+            }
+            return Err(e);
+        }
+
+        Ok(())
     }
 
     /// Pre-register a module and all nested modules (public interface).
@@ -27882,6 +27925,9 @@ impl TypeChecker {
             for item in items.iter() {
                 if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                     if let Err(e) = self.register_type_declaration(type_decl) {
+                        if e.is_soundness_critical() {
+                            return Err(e);
+                        }
                         tracing::debug!(
                             "Type registration in module '{}' failed: {}",
                             module_name,
@@ -28280,6 +28326,9 @@ impl TypeChecker {
                             // populates the variant-constructor entries in the
                             // env keyed by the unqualified variant name.
                             if let Err(e) = self.register_type_declaration(type_decl) {
+                                if e.is_soundness_critical() {
+                                    return Err(e);
+                                }
                                 tracing::debug!(
                                     "Failed to register parent type '{}' for variant '{}': {}",
                                     type_decl.name.name.as_str(),
@@ -28304,6 +28353,9 @@ impl TypeChecker {
                     ItemKind::Type(type_decl) if type_decl.name.name.as_str() == item_name => {
                         // Register type
                         if let Err(e) = self.register_type_declaration(type_decl) {
+                            if e.is_soundness_critical() {
+                                return Err(e);
+                            }
                             tracing::debug!("Failed to register imported type '{}': {}", item_name, e);
                         }
                         // Also import the type's `implement` blocks so that
@@ -29316,6 +29368,9 @@ impl TypeChecker {
                                 self.in_explicit_import_registration = false;
                             }
                             if let Err(e) = reg_result {
+                                if e.is_soundness_critical() {
+                                    return Err(e);
+                                }
                                 // Log the error but don't fail - some imports may have issues
                                 // #[cfg(debug_assertions)]
                                 // eprintln!(
@@ -29689,6 +29744,9 @@ impl TypeChecker {
                                 registry,
                             ) {
                                 if let Err(e) = self.register_type_declaration(&type_decl) {
+                                    if e.is_soundness_critical() {
+                                        return Err(e);
+                                    }
                                     tracing::warn!(
                                         "Failed to register imported context type '{}' from module '{}': {}",
                                         item_name,
@@ -29784,6 +29842,9 @@ impl TypeChecker {
 
                     // Register the type declaration
                     if let Err(e) = self.register_type_declaration(&type_decl) {
+                        if e.is_soundness_critical() {
+                            return Err(e);
+                        }
                         tracing::warn!(
                             "Failed to register imported type '{}' from module '{}': {}",
                             item_name,
@@ -29935,8 +29996,14 @@ impl TypeChecker {
                                     registry,
                                 )
                             {
-                                // Try registering as a type
-                                let _ = self.register_type_declaration(&type_decl);
+                                // Try registering as a type. Soundness-critical
+                                // errors (positivity) must still abort even
+                                // through this fallback path.
+                                if let Err(e) = self.register_type_declaration(&type_decl) {
+                                    if e.is_soundness_critical() {
+                                        return Err(e);
+                                    }
+                                }
                                 found = true;
                             }
                         }
@@ -30070,6 +30137,9 @@ impl TypeChecker {
                                     }
                                     // Register the type
                                     if let Err(e) = self.register_type_declaration(&type_decl) {
+                                        if e.is_soundness_critical() {
+                                            return Err(e);
+                                        }
                                         tracing::debug!("Failed to register type '{}': {:?}", item_name, e);
                                     }
                                     return Ok(());
@@ -30382,6 +30452,21 @@ impl TypeChecker {
 
                 // Register the type declaration - this handles variants, records, aliases, etc.
                 if let Err(e) = self.register_type_declaration(type_decl) {
+                    if e.is_soundness_critical() {
+                        // This entry point returns `()` so we can't
+                        // propagate up. Stash the error on the checker
+                        // — `phase_type_check` drains stashed errors
+                        // before declaring success, so the build still
+                        // fails. tracing::error! gives a cold-print
+                        // backup if the stash gets lost.
+                        tracing::error!(
+                            "Soundness-critical error registering '{}' from cross-module import: {}",
+                            type_decl.name.name.as_str(),
+                            e
+                        );
+                        self.deferred_soundness_errors.push(e);
+                        continue;
+                    }
                     tracing::debug!(
                         "Failed to register type '{}' from module during context protocol import: {}",
                         type_decl.name.name.as_str(),
@@ -47188,9 +47273,18 @@ impl TypeChecker {
                         type_name.as_str(),
                         &user_ctors,
                     ) {
-                        return Err(TypeError::Other(verum_common::Text::from(
-                            violation.to_string(),
-                        )));
+                        return Err(TypeError::PositivityViolation {
+                            type_name: verum_common::Text::from(
+                                violation.type_name.as_str(),
+                            ),
+                            constructor: verum_common::Text::from(
+                                violation.constructor.as_str(),
+                            ),
+                            position: verum_common::Text::from(
+                                violation.position.as_str(),
+                            ),
+                            span: type_decl.span,
+                        });
                     }
                 }
 
@@ -48819,6 +48913,49 @@ impl TypeChecker {
                     if self.type_contains_affine(payload_type) {
                         self.affine_tracker.register_affine_type(type_name.clone());
                         break;
+                    }
+                }
+
+                // VUVA #151 / C2-WIRE V2 — strict-positivity check on
+                // the resolved variant body. This second site exists
+                // because `resolve_type_definition` is reached by the
+                // `verum build` two-pass type-resolution loop (see
+                // `phase_type_check` Pass 1b) and does NOT funnel
+                // through `register_type_declaration_inner`. Without
+                // this guard, Berardi-shaped declarations slipped past
+                // V1 (`verum check`-only) wiring and produced working
+                // binaries.
+                {
+                    let mut user_ctors: List<crate::ty::InductiveConstructor> =
+                        List::new();
+                    for (vname, vtype) in variant_map.iter() {
+                        let args: List<Box<Type>> = match vtype {
+                            Type::Unit => List::new(),
+                            other => List::from_iter(vec![Box::new(other.clone())]),
+                        };
+                        user_ctors.push(crate::ty::InductiveConstructor {
+                            name: vname.clone(),
+                            type_params: List::new(),
+                            args,
+                            return_type: Box::new(Type::Unit),
+                        });
+                    }
+                    if let Err(violation) = crate::positivity::check_user_inductive(
+                        type_name.as_str(),
+                        &user_ctors,
+                    ) {
+                        return Err(crate::TypeError::PositivityViolation {
+                            type_name: verum_common::Text::from(
+                                violation.type_name.as_str(),
+                            ),
+                            constructor: verum_common::Text::from(
+                                violation.constructor.as_str(),
+                            ),
+                            position: verum_common::Text::from(
+                                violation.position.as_str(),
+                            ),
+                            span: type_decl.span,
+                        });
                     }
                 }
 

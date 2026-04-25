@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: positivity, kernel-soundness, berardi, k-pos, vuva-c2
+// @expected-error: E370
+// @description: Strict-positivity check (K-Pos kernel rule).
+//
+// Coquand & Paulin 1990 / Berardi 1998: an inductive type whose
+// constructor mentions itself in a *negative* position (left of an
+// arrow) lets the user encode a paradox and derive `False`. The
+// kernel must reject every such declaration.
+//
+// VUVA #150 / C2-WIRE V1+V2 wires the AST-level walker into BOTH
+// `register_type_declaration_inner` (the `verum check` path) AND
+// `resolve_type_definition` (the `verum build` path) so a Berardi
+// witness is rejected regardless of which CLI command the user
+// invokes.
+//
+// This test pins the contract: the canonical witness
+// `type Bad is Wrap(fn(Bad) -> Bool);` must produce E370
+// "positivity violation in type 'Bad' constructor 'Wrap': …
+//  left of an arrow / negative position".
+
+type Bad is Wrap(fn(Bad) -> Bool);
+
+fn main() {
+    print("unreachable");
+}

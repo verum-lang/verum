@@ -1790,6 +1790,21 @@ pub enum TypeError {
     #[error("{0}")]
     Other(Text),
 
+    /// E370: Strict-positivity violation (K-Pos kernel rule).
+    ///
+    /// The named inductive type's constructor mentions itself in a
+    /// negative position (e.g. `fn(Self) -> _` domain). Such a
+    /// declaration would let the user encode Berardi-shaped paradoxes
+    /// and break logical consistency. Non-recoverable: a subsequent
+    /// retry pass cannot rescue this — the violation is structural.
+    #[error("E370: positivity violation in type '{type_name}' constructor '{constructor}': {position}")]
+    PositivityViolation {
+        type_name: Text,
+        constructor: Text,
+        position: Text,
+        span: verum_ast::span::Span,
+    },
+
     #[error("{msg}")]
     OtherWithCode { code: Text, msg: Text },
 
@@ -1915,7 +1930,17 @@ impl TypeError {
             AsmOutputNotLvalue { span } => *span,
             RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
             OtherWithCodeSpanned { span, .. } => *span,
+            PositivityViolation { span, .. } => *span,
         }
+    }
+
+    /// Returns true for errors whose violation is structural and
+    /// non-recoverable: subsequent retry passes / fallback paths
+    /// must NOT silently swallow them. Used by the type-checker's
+    /// item-registration phase to ensure soundness errors abort
+    /// the build rather than getting masked by `tracing::debug!`.
+    pub fn is_soundness_critical(&self) -> bool {
+        matches!(self, TypeError::PositivityViolation { .. })
     }
 
     /// Convert to diagnostic for error reporting with span information
@@ -2910,6 +2935,19 @@ impl TypeError {
             }
 
             RecursionLimit(msg) => DiagnosticBuilder::error().message(format!("recursion limit exceeded: {}", msg)).build(),
+
+            PositivityViolation { type_name, constructor, position, span } => {
+                let mut builder = DiagnosticBuilder::error()
+                    .code("E370")
+                    .message(format!(
+                        "positivity violation in type '{}' constructor '{}': {}",
+                        type_name, constructor, position
+                    ));
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder.build()
+            }
 
             Other(msg) => DiagnosticBuilder::error().message(msg.as_str()).build(),
 
