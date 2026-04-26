@@ -134,20 +134,34 @@ fn global_type_table_clean_for_maybe() {
 /// `core/base/result.vr` is mounted transitively by a substantial
 /// portion of the async-runtime stdlib graph, so compiling it
 /// surfaces a much wider type table than `maybe.vr` or `list.vr`.
-/// As of #170 wire-up this fixture exposes 13 cross-module hygiene
-/// findings (down from 14 after a same-PR follow-up that added
-/// `Channel`/`Deque`/`Tuple`/`Array` to the well-known type-name map
-/// and routed user TypeId allocation through `alloc_user_type_id` to
-/// skip the reserved 256..1024 ranges).  Remaining findings are
-/// platform-cfg type-name redeclarations (`StackAllocator`,
-/// `TaskHandle`, `CpuContext`, …) that the stdlib audit (#181) will
-/// remediate.
+/// As of #170 wire-up this fixture exposes 10 cross-module hygiene
+/// findings (down from 14 across three follow-ups in the same PR:
+///
+///   1. Added `Channel`/`Deque`/`Tuple`/`Array` to the well-known
+///      type-name map (14 → 15, briefly worse — exposed a separate
+///      collision class).
+///   2. Routed user TypeId allocation through `alloc_user_type_id`
+///      so the auto-allocator skips the reserved 256..260 and
+///      512..1024 ranges (15 → 13).
+///   3. Honoured per-item `@cfg` gates on `mount` declarations
+///      inside `resolve_mounts_recursive`, so platform-/runtime-
+///      gated modules (`sys.embedded`, `sys.no_runtime`, etc.) no
+///      longer pull their type declarations into builds for the
+///      wrong target (13 → 10).
+///
+/// Remaining findings are platform-cfg type-name redeclarations
+/// across linux/darwin/windows variants of the same logical type
+/// (`PlatformIOEngine`, `Task`, `RingBuffer`, …) — the
+/// non-matching platforms still leak through because their @cfg
+/// gates live on the `module` declaration in `sys/mod.vr` rather
+/// than on the target source files themselves.  Remediation is
+/// tracked under #181 (stdlib production audit).
 ///
 /// This test is a *ratchet*: the count must not rise, and must
 /// match exactly when it falls (so any improvement gets pinned).
 /// When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to lock
 /// in the gain.
-const RESULT_ISSUE_BASELINE: usize = 13;
+const RESULT_ISSUE_BASELINE: usize = 10;
 
 #[test]
 fn global_type_table_baseline_for_result() {
