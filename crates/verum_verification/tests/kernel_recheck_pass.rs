@@ -123,10 +123,12 @@ fn module_with(functions: Vec<FunctionDecl>) -> Module {
 
 #[test]
 fn default_pipeline_includes_kernel_recheck() {
-    // The default pipeline now runs 4 passes
-    // (LevelInferencePass, KernelRecheckPass, BoundaryDetectionPass,
-    // TransitionRecommendationPass). Per-pass results are returned
-    // by `run_all`.
+    // The default pipeline now runs 5 passes:
+    //   [0] LevelInferencePass
+    //   [1] KernelRecheckPass
+    //   [2] HygieneRecheckPass        (#190)
+    //   [3] BoundaryDetectionPass
+    //   [4] TransitionRecommendationPass
     let module = module_with(vec![make_function(
         "id",
         vec![Type::int(span())],
@@ -135,7 +137,7 @@ fn default_pipeline_includes_kernel_recheck() {
     let mut pipeline = VerificationPipeline::default_pipeline();
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
-    assert_eq!(results.len(), 4, "default pipeline should have 4 passes");
+    assert_eq!(results.len(), 5, "default pipeline should have 5 passes");
 }
 
 #[test]
@@ -269,7 +271,7 @@ fn pipeline_fail_fast_halts_subsequent_passes_on_kernel_failure() {
 
 #[test]
 fn pipeline_runs_all_passes_when_module_clean() {
-    // Sanity: a clean module exercises the full 4-pass pipeline
+    // Sanity: a clean module exercises the full 5-pass pipeline
     // (no fail-fast trigger).
     let module = module_with(vec![make_function(
         "clean",
@@ -279,7 +281,7 @@ fn pipeline_runs_all_passes_when_module_clean() {
     let mut pipeline = VerificationPipeline::default_pipeline();
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
-    assert_eq!(results.len(), 4, "clean module runs all 4 passes");
+    assert_eq!(results.len(), 5, "clean module runs all 5 passes");
     for r in results.iter() {
         assert!(r.success, "every pass should succeed on a clean module");
     }

@@ -633,6 +633,13 @@ impl VerificationPipeline {
         // failures are formation errors that should short-circuit
         // the rest of the pipeline (#187 V0).
         pipeline.add_pass(Box::new(KernelRecheckPass::new()));
+        // HygieneRecheckPass (#190) — framework-author discipline
+        // (R1 brand-prefix names, R2 ε-coordinate canonicalisable,
+        // R3 meta-classifier uniqueness). R1/R2 are Warnings;
+        // R3 is Error and triggers fail-fast. Runs after
+        // KernelRecheckPass so kernel formation failures take
+        // precedence in the diagnostic stream.
+        pipeline.add_pass(Box::new(crate::framework_hygiene::HygieneRecheckPass::new()));
         pipeline.add_pass(Box::new(BoundaryDetectionPass::new()));
         pipeline.add_pass(Box::new(TransitionRecommendationPass::new(
             TransitionStrategy::Balanced,

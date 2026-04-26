@@ -76,6 +76,7 @@ pub mod contract;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
+pub mod framework_hygiene;
 pub mod integration;
 pub mod kernel_recheck;
 pub mod level;
@@ -204,6 +205,11 @@ pub use hoare_logic::{
     generate_vc as hoare_generate_vc,
     // Public API functions
     wp as hoare_wp,
+};
+pub use framework_hygiene::{
+    HygieneDiagnostic, HygieneRecheckPass, HygieneSeverity, epsilon_is_canonicalisable,
+    name_has_brand_prefix, validate_epsilon_canonicalisable, validate_foundation_neutral_name,
+    validate_meta_classifier_uniqueness,
 };
 pub use integration::{
     CodegenIntegration, HeapCounterexample, HoareVerificationResult, HoareZ3Verifier,
