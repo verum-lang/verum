@@ -71,7 +71,7 @@ implement<T> RwLock<T> {
                 // Try to increment reader count
                 if self.state.compare_exchange(state, state + 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
                     let guard = RwLockReadGuard { rwlock: self };
-                    if self.poisoned.load(MemoryOrdering.Relaxed) {
+                    if self.poisoned.load(MemoryOrdering.Acquire) {
                         return Err(PoisonError.new(guard));
                     }
                     return Ok(guard);
@@ -89,7 +89,7 @@ implement<T> RwLock<T> {
         if state >= 0 {
             if self.state.compare_exchange(state, state + 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
                 let guard = RwLockReadGuard { rwlock: self };
-                if self.poisoned.load(MemoryOrdering.Relaxed) {
+                if self.poisoned.load(MemoryOrdering.Acquire) {
                     return Err(TryLockError.Poisoned(PoisonError.new(guard)));
                 }
                 return Ok(guard);
@@ -106,7 +106,7 @@ implement<T> RwLock<T> {
             if state == 0 {
                 if self.state.compare_exchange(0, WRITE_LOCKED, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
                     let guard = RwLockWriteGuard { rwlock: self };
-                    if self.poisoned.load(MemoryOrdering.Relaxed) {
+                    if self.poisoned.load(MemoryOrdering.Acquire) {
                         return Err(PoisonError.new(guard));
                     }
                     return Ok(guard);
@@ -122,7 +122,7 @@ implement<T> RwLock<T> {
     public fn try_write(&self) -> TryLockResult<RwLockWriteGuard<T>> {
         if self.state.compare_exchange(0, WRITE_LOCKED, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
             let guard = RwLockWriteGuard { rwlock: self };
-            if self.poisoned.load(MemoryOrdering.Relaxed) {
+            if self.poisoned.load(MemoryOrdering.Acquire) {
                 return Err(TryLockError.Poisoned(PoisonError.new(guard)));
             }
             return Ok(guard);
@@ -130,19 +130,36 @@ implement<T> RwLock<T> {
         Err(TryLockError.WouldBlock)
     }
 
-    // Check if poisoned.
+    /// Check if rwlock is poisoned (previous holder marked it as poisoned).
+    ///
+    /// See `Mutex::is_poisoned` for notes on poisoning semantics — Verum
+    /// does not yet expose a "currently unwinding" predicate, so the
+    /// poison flag is only set when callers explicitly invoke `poison()`.
     public fn is_poisoned(&self) -> Bool {
-        self.poisoned.load(MemoryOrdering.Relaxed)
+        self.poisoned.load(MemoryOrdering.Acquire)
     }
 
-    // Clear poison.
+    /// Mark this rwlock as poisoned.
+    ///
+    /// Subsequent acquirers will receive `Err(PoisonError)` until
+    /// `clear_poison()` is invoked. Intended for callers that detect
+    /// inconsistent state while holding a guard and want to flag
+    /// recovery for later acquirers.
+    public fn poison(&self) {
+        self.poisoned.store(true, MemoryOrdering.Release);
+    }
+
+    /// Clear poison state.
+    ///
+    /// Caller is responsible for ensuring the protected data is in a
+    /// valid state before clearing.
     public fn clear_poison(&self) {
-        self.poisoned.store(false, MemoryOrdering.Relaxed);
+        self.poisoned.store(false, MemoryOrdering.Release);
     }
 
     // Get mutable reference without locking.
     public fn get_mut(&mut self) -> LockResult<&mut T> {
-        if self.poisoned.load(MemoryOrdering.Relaxed) {
+        if self.poisoned.load(MemoryOrdering.Acquire) {
             Err(PoisonError.new(&mut self.data))
         } else {
             Ok(&mut self.data)
@@ -151,7 +168,7 @@ implement<T> RwLock<T> {
 
     // Consume && return inner value.
     public fn into_inner(self) -> LockResult<T> {
-        if self.poisoned.load(MemoryOrdering.Relaxed) {
+        if self.poisoned.load(MemoryOrdering.Acquire) {
             Err(PoisonError.new(self.data))
         } else {
             Ok(self.data)

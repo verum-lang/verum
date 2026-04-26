@@ -52,7 +52,7 @@ implement<T> Mutex<T> {
             mutex: self,
         };
 
-        if self.poisoned.load(MemoryOrdering.Relaxed) {
+        if self.poisoned.load(MemoryOrdering.Acquire) {
             Err(PoisonError.new(guard))
         } else {
             Ok(guard)
@@ -67,7 +67,7 @@ implement<T> Mutex<T> {
                 mutex: self,
             };
 
-            if self.poisoned.load(MemoryOrdering.Relaxed) {
+            if self.poisoned.load(MemoryOrdering.Acquire) {
                 Err(TryLockError.Poisoned(PoisonError.new(guard)))
             } else {
                 Ok(guard)
@@ -77,20 +77,52 @@ implement<T> Mutex<T> {
         }
     }
 
-    // Check if mutex is poisoned (previous holder panicked).
+    /// Check if mutex is poisoned (previous holder marked it as poisoned).
+    ///
+    /// # Note on poisoning semantics
+    ///
+    /// Verum does NOT yet expose a "currently unwinding a panic" predicate
+    /// at the language level (the Rust `std::thread::panicking()` analogue),
+    /// so `MutexGuard::drop` cannot poison the mutex automatically when
+    /// dropped during a panic. As a result, the poison flag is only set
+    /// when callers explicitly invoke `poison()` before raising — typically
+    /// right before a `panic(...)` site that observes inconsistent state
+    /// while holding the guard. This API is therefore advisory: a mutex
+    /// reports `is_poisoned() == true` only if some thread previously
+    /// called `poison()` on it.
     public fn is_poisoned(&self) -> Bool {
-        self.poisoned.load(MemoryOrdering.Relaxed)
+        self.poisoned.load(MemoryOrdering.Acquire)
     }
 
-    // Clear poison state.
+    /// Mark this mutex as poisoned.
+    ///
+    /// Subsequent `lock()` and `try_lock()` calls will return
+    /// `Err(PoisonError)` until `clear_poison()` is invoked. Intended for
+    /// callers that detect inconsistent state while holding the guard
+    /// and want to flag recovery for later acquirers — call `poison()`
+    /// immediately before the `panic(...)` (or before propagating an
+    /// unrecoverable error up the stack), so the next acquirer sees the
+    /// poison flag.
+    ///
+    /// Uses Release ordering so the poison flag write is visible to the
+    /// next acquirer through the lock's release-acquire pair.
+    public fn poison(&self) {
+        self.poisoned.store(true, MemoryOrdering.Release);
+    }
+
+    /// Clear poison state.
+    ///
+    /// Subsequent acquirers will not see this mutex as poisoned. Caller
+    /// is responsible for ensuring the protected data is in a valid state
+    /// before clearing.
     public fn clear_poison(&self) {
-        self.poisoned.store(false, MemoryOrdering.Relaxed);
+        self.poisoned.store(false, MemoryOrdering.Release);
     }
 
     // Get mutable reference without locking.
     // SAFETY: Caller must ensure exclusive access.
     public fn get_mut(&mut self) -> LockResult<&mut T> {
-        if self.poisoned.load(MemoryOrdering.Relaxed) {
+        if self.poisoned.load(MemoryOrdering.Acquire) {
             Err(PoisonError.new(&mut self.data))
         } else {
             Ok(&mut self.data)
@@ -99,7 +131,7 @@ implement<T> Mutex<T> {
 
     // Consume mutex && return inner value.
     public fn into_inner(self) -> LockResult<T> {
-        if self.poisoned.load(MemoryOrdering.Relaxed) {
+        if self.poisoned.load(MemoryOrdering.Acquire) {
             Err(PoisonError.new(self.data))
         } else {
             Ok(self.data)
