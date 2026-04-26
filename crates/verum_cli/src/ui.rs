@@ -156,9 +156,14 @@ fn shown_verbose() -> bool {
 /// ```
 ///
 /// The verb is right-aligned to 12 characters, green bold. Message in default color.
+///
+/// Tooling output (status/success/warn/step/info) always goes to stderr, matching
+/// Cargo. This keeps the program's stdout clean for `verum run` so downstream
+/// consumers (test runners, shell pipes, etc.) get only what the program actually
+/// emitted, not the wrapper's progress lines.
 pub fn status(verb: &str, message: &str) {
     if shown_by_default() {
-        println!("{:>12} {}", verb.green().bold(), message);
+        eprintln!("{:>12} {}", verb.green().bold(), message);
     }
 }
 
@@ -166,7 +171,7 @@ pub fn status(verb: &str, message: &str) {
 /// Displays as a Cargo-style status with the verb "Finished".
 pub fn success(msg: &str) {
     if shown_by_default() {
-        println!("{:>12} {}", "Finished".green().bold(), msg);
+        eprintln!("{:>12} {}", "Finished".green().bold(), msg);
     }
 }
 
@@ -178,7 +183,7 @@ pub fn error(msg: &str) {
 /// Warning message — shown unless quiet.
 pub fn warn(msg: &str) {
     if shown_by_default() {
-        println!("{}{} {}", "warning".yellow().bold(), ":".bold(), msg);
+        eprintln!("{}{} {}", "warning".yellow().bold(), ":".bold(), msg);
     }
 }
 
@@ -186,14 +191,14 @@ pub fn warn(msg: &str) {
 /// Displays as a right-aligned arrow for phase progression.
 pub fn step(msg: &str) {
     if shown_by_default() {
-        println!("{:>12} {}", "-->".cyan().bold(), msg);
+        eprintln!("{:>12} {}", "-->".cyan().bold(), msg);
     }
 }
 
 /// Info message — verbose only.
 pub fn info(msg: &str) {
     if shown_verbose() {
-        println!("{:>12} {}", "info".blue().bold(), msg);
+        eprintln!("{:>12} {}", "info".blue().bold(), msg);
     }
 }
 
@@ -202,7 +207,7 @@ pub fn debug(msg: &str) {
     #[cfg(debug_assertions)]
     {
         if shown_verbose() {
-            println!("{:>12} {}", "debug".cyan(), msg);
+            eprintln!("{:>12} {}", "debug".cyan(), msg);
         }
     }
     #[cfg(not(debug_assertions))]
@@ -214,7 +219,7 @@ pub fn debug(msg: &str) {
 /// Note — shown by default, dimmed. For supplementary information.
 pub fn note(msg: &str) {
     if shown_by_default() {
-        println!("{:>12} {}", "note".dimmed().bold(), msg.dimmed());
+        eprintln!("{:>12} {}", "note".dimmed().bold(), msg.dimmed());
     }
 }
 
