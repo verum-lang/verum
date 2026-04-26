@@ -269,3 +269,33 @@ fn stdlib_loading_emits_no_lenient_skips_runtime_retry() {
         skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
     );
 }
+
+/// Text-formatting subgraph coverage: pulls in core/text/format
+/// (the printf-style formatter renamed to `TextFormatter` during
+/// #162), the format protocol surface (LowerHex / UpperHex / Binary
+/// / Octal / LowerExp / UpperExp), the `FormatSpec` / `FormatError`
+/// types, plus the foundational base/protocols::Formatter
+/// (Display/Debug) which is the canonical sibling kept under the
+/// disambiguation.  Catches regressions in any of the format-related
+/// module entries that share their type registrations with
+/// core/text/format.vr or core/base/protocols.vr.
+#[test]
+#[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
+fn stdlib_loading_emits_no_lenient_skips_text_format() {
+    let root = workspace_root();
+    let target = root.join("vcs/specs/core/text/format_traits_test.vr");
+    if !target.is_file() {
+        return;
+    }
+
+    let (code, skips) = collect_lenient_skips(&target);
+    assert!(
+        skips.is_empty(),
+        "text/format smoke triggered {} lenient `SKIP` warning(s) during \
+         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
+        skips.len(),
+        code,
+        FAILURE_HINT,
+        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+    );
+}
