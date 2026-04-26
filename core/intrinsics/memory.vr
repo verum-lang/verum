@@ -32,16 +32,53 @@ mount core.intrinsics.type_info.{size_of};
 // SECTION 1: Bulk Memory Operations
 // =============================================================================
 
-/// Copy memory (may overlap, like memmove)
+/// Copy `count` bytes from `src` to `dst`, with overlapping ranges handled
+/// safely (semantically equivalent to libc `memmove`).
+///
+/// # Safety
+/// * Both `src` and `dst` must reference valid memory of at least `count`
+///   bytes. The intrinsic does not bounds-check.
+/// * `src` and `dst` MAY alias (overlap is well-defined for `memmove`).
+/// * `count == 0` is a no-op even if either pointer is dangling — but
+///   since `&mut Byte` is non-null in Verum, this is rarely relevant.
+/// * No type-aware copy: the bytes are moved verbatim. Caller is
+///   responsible for any drop/init invariants on typed values.
 public fn memmove(dst: &mut Byte, src: &Byte, count: USize) { @intrinsic("memmove", dst, src, count) }
 
-/// Copy memory (must not overlap, like memcpy)
+/// Copy `count` bytes from `src` to `dst`. The ranges MUST NOT overlap
+/// (semantically equivalent to libc `memcpy`).
+///
+/// # Safety
+/// * Both `src` and `dst` must reference valid memory of at least `count`
+///   bytes.
+/// * `src` and `dst` ranges MUST NOT overlap. If they might, use
+///   `memmove`. Overlapping ranges produce unspecified output (LLVM
+///   `memcpy` is undefined behaviour on overlap).
+/// * Caller is responsible for drop/init invariants on typed values.
 public fn memcpy(dst: &mut Byte, src: &Byte, count: USize) { @intrinsic("memcpy", dst, src, count) }
 
-/// Fill memory with byte
+/// Fill `count` bytes at `dst` with `val`.
+///
+/// # Safety
+/// * `dst` must reference valid memory of at least `count` bytes.
+/// * Writing arbitrary bytes through a typed reference may violate
+///   invariants — e.g. zeroing a `&mut Bool` produces a defined `false`,
+///   but zeroing a `&mut NonNullPtr<T>` produces a UB-causing null.
 public fn memset(dst: &mut Byte, val: Byte, count: USize) { @intrinsic("memset", dst, val, count) }
 
-/// Compare memory regions
+/// Compare `count` bytes at `a` and `b` lexicographically.
+///
+/// Returns 0 if equal, negative if `a < b`, positive if `a > b`.
+///
+/// # Safety
+/// * Both `a` and `b` must reference valid memory of at least `count`
+///   bytes.
+///
+/// # Note on timing
+/// * `memcmp` may short-circuit on first difference and is therefore
+///   NOT timing-safe. For comparing secret material (MAC tags, password
+///   hashes), use `core.security.util.constant_time.constant_time_eq`
+///   instead.
 public fn memcmp(a: &Byte, b: &Byte, count: USize) -> Int { @intrinsic("memcmp", a, b, count) }
 
 // =============================================================================
@@ -72,33 +109,83 @@ public fn transmute<S, D>(value: S) -> D { @intrinsic("transmute", value) }
 // SECTION 3: Pointer Operations
 // =============================================================================
 
-/// Read value from pointer (potentially unaligned)
+/// Read a `T`-sized value from `ptr` by bitwise copy. Does NOT run any
+/// destructor on the source.
+///
+/// # Safety
+/// * `ptr` must be non-null and point to a valid initialised `T`.
+/// * `ptr` must be aligned to `T.alignment`. For potentially-unaligned
+///   reads, use `ptr_read_unaligned`.
+/// * The pointee must remain valid for the lifetime of the returned `T`
+///   if `T` carries references / pointers / file descriptors / etc.
+/// * After this call, both the original location and the returned value
+///   are considered to "own" the bits — caller is responsible for not
+///   double-dropping (typically via `forget` on the source).
 public unsafe fn ptr_read<T>(ptr: *const T) -> T { @intrinsic("ptr_read", ptr) }
 
-/// Read value from pointer (unaligned OK)
+/// Read a `T`-sized value from `ptr` without alignment requirement.
+/// Slower on architectures where unaligned access traps; use only when
+/// alignment can't be statically guaranteed (e.g. parsing wire formats).
+///
+/// # Safety
+/// Same as `ptr_read` but `ptr` may be unaligned.
 public unsafe fn ptr_read_unaligned<T>(ptr: *const T) -> T { @intrinsic("ptr_read_unaligned", ptr) }
 
-/// Read value from pointer (volatile, not optimized away)
+/// Read a `T`-sized value from `ptr` with volatile semantics — the
+/// compiler MUST emit the load and MUST NOT optimize it away or coalesce
+/// it with adjacent reads. Used for memory-mapped I/O registers.
+///
+/// # Safety
+/// Same as `ptr_read` plus: the pointee may be modified by hardware /
+/// other threads concurrently with this read; caller's data race is on
+/// them, not the language.
 public unsafe fn ptr_read_volatile<T>(ptr: *const T) -> T { @intrinsic("ptr_read_volatile", ptr) }
 
-/// Write value to pointer
+/// Write `value` to `ptr` by bitwise copy. Does NOT run the destructor
+/// of any prior occupant of `*ptr` — caller MUST ensure the destination
+/// holds either uninitialised memory or a value whose drop has already
+/// run, otherwise the prior value's resources leak.
+///
+/// # Safety
+/// * `ptr` must be non-null, aligned to `T.alignment`, and point to
+///   memory the caller is allowed to mutate.
+/// * Caller is responsible for the prior-occupant drop discipline above.
 public unsafe fn ptr_write<T>(ptr: *mut T, value: T) { @intrinsic("ptr_write", ptr, value) }
 
-/// Write value to pointer (unaligned OK)
+/// Write `value` to `ptr` without alignment requirement.
+/// # Safety
+/// Same as `ptr_write` but `ptr` may be unaligned.
 public unsafe fn ptr_write_unaligned<T>(ptr: *mut T, value: T) { @intrinsic("ptr_write_unaligned", ptr, value) }
 
-/// Write value to pointer (volatile, not optimized away)
+/// Write `value` to `ptr` with volatile semantics — compiler MUST emit
+/// the store and MUST NOT optimize it away. Used for memory-mapped I/O.
+/// # Safety
+/// Same as `ptr_write`.
 public unsafe fn ptr_write_volatile<T>(ptr: *mut T, value: T) { @intrinsic("ptr_write_volatile", ptr, value) }
 
-/// Write bytes to uninitialized memory
+/// Write `count * T.size` copies of byte `val` to `ptr`, treating the
+/// pointee as a flat byte buffer.
+///
+/// # Safety
+/// * `ptr` must reference at least `count * T.size` bytes of writable
+///   memory.
+/// * If `T` has any non-trivial drop or invariants, callers should
+///   prefer typed initialisation. This intrinsic is for raw-buffer
+///   patterns (zeroing fresh allocations, fill-pattern marker bytes).
 public unsafe fn ptr_write_bytes<T>(ptr: *mut T, val: Byte, count: USize) {
     @intrinsic("memset", ptr, val, count * T.size)
 }
 
-/// Offset pointer by count elements
+/// Add `count * T.size` to the byte address of `ptr` (signed offset).
+///
+/// # Safety
+/// * The resulting pointer must point INTO or one-past-the-end of the
+///   same allocation as `ptr`. Crossing allocation boundaries is UB
+///   even if the resulting address happens to be valid memory.
+/// * The byte-offset `count * T.size` must not overflow `isize`.
 public unsafe fn ptr_offset<T>(ptr: *const T, count: ISize) -> *const T { @intrinsic("ptr_offset", ptr, count) }
 
-/// Offset mutable pointer by count elements
+/// Mutable variant of `ptr_offset`. Same safety contract.
 public unsafe fn ptr_offset_mut<T>(ptr: *mut T, count: ISize) -> *mut T { @intrinsic("ptr_offset_mut", ptr, count) }
 
 /// Add unsigned offset to pointer
