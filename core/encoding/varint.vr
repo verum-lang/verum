@@ -245,8 +245,19 @@ public fn quic_encoded_len(value: UInt64) -> Int {
 ///
 /// Precondition: `value <= QUIC_VARINT_MAX` (2^62 - 1). Values above the
 /// 62-bit ceiling panic — callers should validate at protocol boundaries
-/// (e.g. reject malformed transport parameters before encode).
+/// (e.g. reject malformed transport parameters before encode). For a
+/// fallible counterpart that returns Err instead of panicking, see
+/// `quic_try_encode_into`.
 public fn quic_encode_into(out: &mut List<Byte>, value: UInt64) -> Int {
+    if value > QUIC_VARINT_MAX {
+        // Without this check, the 8-byte path would OR `0xC0` into bits
+        // 56..63 of the truncated value-as-Byte: bits 62..63 of `value`
+        // would be silently overwritten by the length prefix, producing
+        // a varint that decodes to a DIFFERENT value than `value`. This
+        // is the worst-of-both: not an error, not a faithful encode.
+        // Since the doc contracts "panic", honour it.
+        panic(f"quic_encode_into: value {value} exceeds QUIC_VARINT_MAX (2^62 - 1)");
+    }
     if value < 64_u64 {
         out.push(value as Byte);
         1
@@ -279,6 +290,27 @@ public fn quic_encode(value: UInt64) -> List<Byte> {
     let mut out: List<Byte> = [];
     quic_encode_into(&mut out, value);
     out
+}
+
+/// Fallible counterpart to `quic_encode_into`.
+///
+/// Returns `Err(VarintError { kind: Overflow, ... })` instead of
+/// panicking when `value > QUIC_VARINT_MAX`. Use at protocol-message
+/// boundaries that take untrusted sizes (e.g. transport parameter
+/// values pulled from a peer's wire form) where you want to reject
+/// rather than crash.
+public fn quic_try_encode_into(
+    out: &mut List<Byte>,
+    value: UInt64,
+) -> Result<Int, VarintError> {
+    if value > QUIC_VARINT_MAX {
+        return Err(VarintError {
+            kind: Overflow,
+            position: out.len(),
+            message: "value exceeds QUIC_VARINT_MAX (2^62 - 1)",
+        });
+    }
+    Ok(quic_encode_into(out, value))
 }
 
 /// Decode the QUIC varint at `buf[start]`. Returns the decoded value and
