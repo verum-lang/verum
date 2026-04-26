@@ -88,6 +88,19 @@ const MAX_HEADER_LINE: Int = 16384;
 const MAX_HEADERS_TOTAL: Int = 64 * 1024;
 const MAX_HEADER_COUNT: Int = 128;
 
+// Default Content-Length cap (32 MiB). Without this, a peer sending
+// `Content-Length: 4294967294` (just under UInt32.MAX) would have
+// the parser accept the value, and any caller pre-allocating a body
+// buffer based on body_len() would request ~4 GiB — trivial DoS.
+//
+// 32 MiB matches nginx-default `client_max_body_size` ballpark and
+// is appropriate for general API request bodies. Applications that
+// need larger uploads (file servers, multimedia pipelines) should
+// implement their own framing layer ABOVE the parser and stream the
+// body rather than buffer it whole. Applications that want a stricter
+// cap should reject at the framework layer based on `body_len()`.
+const MAX_CONTENT_LENGTH: Int = 32 * 1024 * 1024;
+
 // =============================================================================
 // Parse errors
 // =============================================================================
@@ -105,6 +118,7 @@ public type HttpParseError is
     | InvalidChunkSize(Text)
     | InvalidTrailer(Text)
     | InvalidContentLength(Text)
+    | ContentLengthTooLarge { length: Int, limit: Int }
     | ConflictingContentLength
     | IncompleteFrame;
 
@@ -478,9 +492,21 @@ implement HttpParser {
                     .ok_or(HttpParseError.InvalidContentLength(
                         Text.from_utf8_lossy(val)
                     ))?;
+                let n_int = n as Int;
+                // Reject oversized Content-Length BEFORE any allocation
+                // downstream. Without this cap, a peer sending values up
+                // to UInt32.MAX (~4 GiB) could DoS a server that buffers
+                // bodies based on Content-Length. Applications that need
+                // larger bodies should stream rather than buffer.
+                if n_int > MAX_CONTENT_LENGTH {
+                    return Err(HttpParseError.ContentLengthTooLarge {
+                        length: n_int,
+                        limit: MAX_CONTENT_LENGTH,
+                    });
+                }
                 match content_length {
-                    Some(prev) if prev != n as Int => return Err(HttpParseError.ConflictingContentLength),
-                    _ => content_length = Some(n as Int),
+                    Some(prev) if prev != n_int => return Err(HttpParseError.ConflictingContentLength),
+                    _ => content_length = Some(n_int),
                 }
             }
         }
