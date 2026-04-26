@@ -9,7 +9,10 @@
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use verum_smt::tactics::{FormulaGoalAnalyzer, TacticExecutor, auto_select_tactic};
+use verum_smt::tactics::{
+    FormulaGoalAnalyzer, TacticCache, TacticExecutor, auto_select_tactic,
+    auto_select_tactic_cached,
+};
 use z3::{
     Goal, Solver,
     ast::{BV, Bool, Int},
@@ -305,6 +308,129 @@ fn bench_characteristic_detection(c: &mut Criterion) {
     group.finish();
 }
 
+// ==================== Tactic Cache Speedup Benchmarks (#103) ====================
+//
+// Compares the cost of repeated tactic selection on the same
+// formula with and without [`TacticCache`]. The cache hit path
+// computes a blake3 digest over the formula's S-expression and
+// rebuilds the combinator tree from cached characteristics —
+// skipping the nine Z3 probes that dominate the uncached path.
+//
+// Expected order-of-magnitude: cached lookup is dominated by
+// `Bool::to_string` + blake3, both single-microsecond on the
+// formulas used here. Uncached `auto_select_tactic` runs the full
+// nine-probe sweep (~50–200us depending on formula size).
+fn bench_cache_speedup(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cache_speedup");
+    group.sample_size(100);
+
+    // ===== Linear-arithmetic formula (representative of refinement
+    //       VCs that dominate Verum verification load) =====
+    let a = Int::new_const("a");
+    let b_var = Int::new_const("b");
+    let five = Int::from_i64(5);
+    let sum = Int::add(&[&a, &b_var]);
+    let lia_formula = sum.gt(&five);
+
+    // Uncached baseline.
+    {
+        let mut analyzer = FormulaGoalAnalyzer::new();
+        group.bench_function("lia_uncached", |bencher| {
+            bencher.iter(|| auto_select_tactic(black_box(&mut analyzer), black_box(&lia_formula)))
+        });
+    }
+
+    // Cached, hot path (cache populated on first iter, every
+    // subsequent iter is a cache hit).
+    {
+        let cache = TacticCache::new();
+        let mut analyzer = FormulaGoalAnalyzer::new();
+        // Prime the cache so the bench measures hit-path cost.
+        let _ = auto_select_tactic_cached(&cache, &mut analyzer, &lia_formula);
+        group.bench_function("lia_cached_hot", |bencher| {
+            bencher.iter(|| {
+                auto_select_tactic_cached(
+                    black_box(&cache),
+                    black_box(&mut analyzer),
+                    black_box(&lia_formula),
+                )
+            })
+        });
+    }
+
+    // ===== Bit-vector formula =====
+    let bv_x = BV::new_const("bvx", 32);
+    let bv_y = BV::new_const("bvy", 32);
+    let bv_formula = bv_x.bvult(&bv_y);
+
+    {
+        let mut analyzer = FormulaGoalAnalyzer::new();
+        group.bench_function("bv_uncached", |bencher| {
+            bencher.iter(|| auto_select_tactic(black_box(&mut analyzer), black_box(&bv_formula)))
+        });
+    }
+
+    {
+        let cache = TacticCache::new();
+        let mut analyzer = FormulaGoalAnalyzer::new();
+        let _ = auto_select_tactic_cached(&cache, &mut analyzer, &bv_formula);
+        group.bench_function("bv_cached_hot", |bencher| {
+            bencher.iter(|| {
+                auto_select_tactic_cached(
+                    black_box(&cache),
+                    black_box(&mut analyzer),
+                    black_box(&bv_formula),
+                )
+            })
+        });
+    }
+
+    // ===== Realistic mixed workload: 16 distinct formula shapes
+    //       cycled in round-robin. Approximates the steady-state
+    //       behaviour of a verification pass that revisits a small
+    //       set of formula templates many times. =====
+    let workload: Vec<Bool> = (0..16)
+        .map(|i| {
+            let v = Int::new_const(format!("v{}", i));
+            v.gt(&Int::from_i64((i * 7) as i64))
+        })
+        .collect();
+
+    {
+        let mut analyzer = FormulaGoalAnalyzer::new();
+        group.bench_function("mixed_uncached", |bencher| {
+            bencher.iter(|| {
+                for f in &workload {
+                    auto_select_tactic(black_box(&mut analyzer), black_box(f));
+                }
+            })
+        });
+    }
+
+    {
+        let cache = TacticCache::new();
+        let mut analyzer = FormulaGoalAnalyzer::new();
+        // Prime each shape so the bench measures pure hit-path
+        // cost (n cache hits per iter).
+        for f in &workload {
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, f);
+        }
+        group.bench_function("mixed_cached_hot", |bencher| {
+            bencher.iter(|| {
+                for f in &workload {
+                    auto_select_tactic_cached(
+                        black_box(&cache),
+                        black_box(&mut analyzer),
+                        black_box(f),
+                    );
+                }
+            })
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_analysis_overhead,
@@ -312,6 +438,7 @@ criterion_group!(
     bench_speedup_comparison,
     bench_scaling,
     bench_characteristic_detection,
+    bench_cache_speedup,
 );
 
 criterion_main!(benches);

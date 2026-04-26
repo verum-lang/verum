@@ -35,7 +35,10 @@ use crate::advanced_model::{
 };
 use crate::goal_analysis::{GoalAnalyzer, SatResult as GoalSatResult};
 use crate::option_to_maybe;
-use crate::tactics::{FormulaGoalAnalyzer, TacticCombinator, auto_select_tactic_for_goal};
+use crate::tactics::{
+    FormulaGoalAnalyzer, TacticCombinator, auto_select_tactic_cached_for_goal,
+    global_tactic_cache,
+};
 
 // ==================== Core Types ====================
 
@@ -248,13 +251,17 @@ impl<'ctx> Z3Solver<'ctx> {
         self.tactic = Maybe::Some(tactic);
     }
 
-    /// Auto-select tactic for a specific goal
+    /// Auto-select tactic for a specific goal.
     ///
     /// Uses the FormulaGoalAnalyzer to determine optimal tactics for the given goal.
     /// Returns a TacticCombinator that can be composed with other tactics.
+    ///
+    /// Routes through the process-wide [`global_tactic_cache`] (#103)
+    /// so repeated obligations within a verification session skip
+    /// the nine Z3 probes.
     pub fn auto_select_tactic_for(&self, goal: &Goal) -> TacticCombinator {
         let analyzer = FormulaGoalAnalyzer::new();
-        auto_select_tactic_for_goal(&analyzer, goal)
+        auto_select_tactic_cached_for_goal(global_tactic_cache(), &analyzer, goal)
     }
 
     /// Analyze problem and select best tactic
