@@ -11310,14 +11310,26 @@ impl<'s> CompilationPipeline<'s> {
                         MountTreeKind::Nested { prefix, .. } => prefix,
                     };
                     // Extract the dotted form of the mount path,
-                    // preserving `super` segments so resolve_super_path
-                    // can process them.  `PathSegment::Super` is a
-                    // distinct AST variant from `PathSegment::Name` —
-                    // filtering it out before resolution was the bug
+                    // preserving the special leading-segment variants
+                    // (`super`, leading `.` for relative-to-parent)
+                    // so resolve_super_path can process them.
+                    //
+                    // PathSegment::Super and PathSegment::Relative are
+                    // distinct AST variants from PathSegment::Name —
+                    // filtering them to None at extraction was the bug
                     // that #163's super.* fix nominally addressed but
-                    // did not yet exercise (the resolver received a
-                    // pre-stripped path with `super` already gone).
-                    // See #164.
+                    // did not yet exercise.  After this commit,
+                    // `mount super.X` arrives as "super.X" and
+                    // `mount .X` arrives as "super.X" too (a leading
+                    // `.` denotes "sibling of current module" in the
+                    // stdlib's mount grammar — semantically a
+                    // one-level super walk).  Both then flow through
+                    // resolve_super_path uniformly.
+                    //
+                    // PathSegment::SelfValue / PathSegment::Cog don't
+                    // appear in stdlib mount paths today; they're left
+                    // in the catch-all `_ => None` arm so adding a new
+                    // form deliberately requires extending this match.
                     let raw_path: String = path
                         .segments
                         .iter()
@@ -11325,7 +11337,8 @@ impl<'s> CompilationPipeline<'s> {
                             verum_ast::ty::PathSegment::Name(ident) => {
                                 Some(ident.name.as_str().to_string())
                             }
-                            verum_ast::ty::PathSegment::Super => {
+                            verum_ast::ty::PathSegment::Super
+                            | verum_ast::ty::PathSegment::Relative => {
                                 Some("super".to_string())
                             }
                             _ => None,
