@@ -588,9 +588,11 @@ mod tests {
         let pool = MemoryPool::new(DeviceId::CPU);
         let backend = CpuBackend::new();
 
-        // Allocate
+        // Allocate — `NonNull` already guarantees non-null at the
+        // type level, so checking `.is_null()` after `.unwrap()` is
+        // tautological (clippy `useless_ptr_null_checks`).  The
+        // unwrap above already enforces "allocation succeeded".
         let ptr = pool.allocate(1024, &backend).unwrap();
-        assert!(!ptr.as_ptr().is_null());
 
         // Return to pool
         pool.deallocate(ptr, 1024);
