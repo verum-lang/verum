@@ -387,6 +387,200 @@ pub fn definitional_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
     a_norm == b_norm
 }
 
+/// V8 (#223) — δ-reduction-aware normaliser. Unfolds transparent
+/// **definitions** (registered with non-None `body` per
+/// [`crate::AxiomRegistry::register_definition`]) before
+/// β-normalising.
+///
+/// Behaviour vs [`normalize`]:
+///   • Opaque postulates (`body = None`) are LEFT as-is —
+///     `Axiom { name: "..." }` references stay neutral. This is
+///     correct: a postulate is, by design, not reducible.
+///   • Transparent definitions (`body = Some(_)`) are UNFOLDED —
+///     `Axiom { name: "Id", ... }` where `Id := λx. x` becomes
+///     `λx. x` and continues normalising.
+///   • Every other CoreTerm constructor delegates to the same
+///     β-rules as [`normalize`].
+///
+/// Step limit ([`NORMALIZE_STEP_LIMIT`]) shared with [`normalize`];
+/// δ-unfolds count against the same budget as β-reductions.
+pub fn normalize_with_axioms(
+    term: &CoreTerm,
+    axioms: &crate::AxiomRegistry,
+) -> CoreTerm {
+    let mut budget = NORMALIZE_STEP_LIMIT;
+    normalize_with_axioms_budget(term, axioms, &mut budget)
+}
+
+fn normalize_with_axioms_budget(
+    term: &CoreTerm,
+    axioms: &crate::AxiomRegistry,
+    budget: &mut u32,
+) -> CoreTerm {
+    if *budget == 0 {
+        return term.clone();
+    }
+    *budget -= 1;
+    match term {
+        CoreTerm::Var(_) | CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => term.clone(),
+
+        // V8 (#223) — δ-reduction: unfold transparent
+        // definitions in place. Opaque postulates remain
+        // neutral.
+        CoreTerm::Axiom { name, ty, framework } => {
+            match axioms.get(name.as_str()) {
+                verum_common::Maybe::Some(entry) => match &entry.body {
+                    Some(body) => normalize_with_axioms_budget(body, axioms, budget),
+                    None => CoreTerm::Axiom {
+                        name: name.clone(),
+                        ty: Heap::new(normalize_with_axioms_budget(ty, axioms, budget)),
+                        framework: framework.clone(),
+                    },
+                },
+                verum_common::Maybe::None => CoreTerm::Axiom {
+                    name: name.clone(),
+                    ty: Heap::new(normalize_with_axioms_budget(ty, axioms, budget)),
+                    framework: framework.clone(),
+                },
+            }
+        }
+
+        // β-redex at the head + recursive descent — same shape
+        // as `normalize_with_budget` but every recursive call
+        // threads the axiom registry.
+        CoreTerm::App(f, arg) => {
+            let f_norm = normalize_with_axioms_budget(f, axioms, budget);
+            match f_norm {
+                CoreTerm::Lam { binder, body, .. } => {
+                    let arg_norm = normalize_with_axioms_budget(arg, axioms, budget);
+                    let beta = substitute(&body, binder.as_str(), &arg_norm);
+                    normalize_with_axioms_budget(&beta, axioms, budget)
+                }
+                neutral => {
+                    let arg_norm = normalize_with_axioms_budget(arg, axioms, budget);
+                    CoreTerm::App(Heap::new(neutral), Heap::new(arg_norm))
+                }
+            }
+        }
+
+        CoreTerm::Pi { binder, domain, codomain } => CoreTerm::Pi {
+            binder: binder.clone(),
+            domain: Heap::new(normalize_with_axioms_budget(domain, axioms, budget)),
+            codomain: Heap::new(normalize_with_axioms_budget(codomain, axioms, budget)),
+        },
+        CoreTerm::Lam { binder, domain, body } => CoreTerm::Lam {
+            binder: binder.clone(),
+            domain: Heap::new(normalize_with_axioms_budget(domain, axioms, budget)),
+            body: Heap::new(normalize_with_axioms_budget(body, axioms, budget)),
+        },
+        CoreTerm::Sigma { binder, fst_ty, snd_ty } => CoreTerm::Sigma {
+            binder: binder.clone(),
+            fst_ty: Heap::new(normalize_with_axioms_budget(fst_ty, axioms, budget)),
+            snd_ty: Heap::new(normalize_with_axioms_budget(snd_ty, axioms, budget)),
+        },
+        CoreTerm::Pair(a, b) => CoreTerm::Pair(
+            Heap::new(normalize_with_axioms_budget(a, axioms, budget)),
+            Heap::new(normalize_with_axioms_budget(b, axioms, budget)),
+        ),
+        CoreTerm::Fst(p) => {
+            let p_norm = normalize_with_axioms_budget(p, axioms, budget);
+            match p_norm {
+                CoreTerm::Pair(a, _) => normalize_with_axioms_budget(&a, axioms, budget),
+                neutral => CoreTerm::Fst(Heap::new(neutral)),
+            }
+        }
+        CoreTerm::Snd(p) => {
+            let p_norm = normalize_with_axioms_budget(p, axioms, budget);
+            match p_norm {
+                CoreTerm::Pair(_, b) => normalize_with_axioms_budget(&b, axioms, budget),
+                neutral => CoreTerm::Snd(Heap::new(neutral)),
+            }
+        }
+        CoreTerm::PathTy { carrier, lhs, rhs } => CoreTerm::PathTy {
+            carrier: Heap::new(normalize_with_axioms_budget(carrier, axioms, budget)),
+            lhs: Heap::new(normalize_with_axioms_budget(lhs, axioms, budget)),
+            rhs: Heap::new(normalize_with_axioms_budget(rhs, axioms, budget)),
+        },
+        CoreTerm::Refl(x) => {
+            CoreTerm::Refl(Heap::new(normalize_with_axioms_budget(x, axioms, budget)))
+        }
+        CoreTerm::HComp { phi, walls, base } => CoreTerm::HComp {
+            phi: Heap::new(normalize_with_axioms_budget(phi, axioms, budget)),
+            walls: Heap::new(normalize_with_axioms_budget(walls, axioms, budget)),
+            base: Heap::new(normalize_with_axioms_budget(base, axioms, budget)),
+        },
+        CoreTerm::Transp { path, regular, value } => CoreTerm::Transp {
+            path: Heap::new(normalize_with_axioms_budget(path, axioms, budget)),
+            regular: Heap::new(normalize_with_axioms_budget(regular, axioms, budget)),
+            value: Heap::new(normalize_with_axioms_budget(value, axioms, budget)),
+        },
+        CoreTerm::Glue { carrier, phi, fiber, equiv } => CoreTerm::Glue {
+            carrier: Heap::new(normalize_with_axioms_budget(carrier, axioms, budget)),
+            phi: Heap::new(normalize_with_axioms_budget(phi, axioms, budget)),
+            fiber: Heap::new(normalize_with_axioms_budget(fiber, axioms, budget)),
+            equiv: Heap::new(normalize_with_axioms_budget(equiv, axioms, budget)),
+        },
+        CoreTerm::Refine { base, binder, predicate } => CoreTerm::Refine {
+            base: Heap::new(normalize_with_axioms_budget(base, axioms, budget)),
+            binder: binder.clone(),
+            predicate: Heap::new(normalize_with_axioms_budget(predicate, axioms, budget)),
+        },
+        CoreTerm::Inductive { path, args } => {
+            let mut new_args: List<CoreTerm> = List::new();
+            for a in args.iter() {
+                new_args.push(normalize_with_axioms_budget(a, axioms, budget));
+            }
+            CoreTerm::Inductive { path: path.clone(), args: new_args }
+        }
+        CoreTerm::Elim { scrutinee, motive, cases } => {
+            let mut new_cases: List<CoreTerm> = List::new();
+            for c in cases.iter() {
+                new_cases.push(normalize_with_axioms_budget(c, axioms, budget));
+            }
+            CoreTerm::Elim {
+                scrutinee: Heap::new(normalize_with_axioms_budget(scrutinee, axioms, budget)),
+                motive: Heap::new(normalize_with_axioms_budget(motive, axioms, budget)),
+                cases: new_cases,
+            }
+        }
+        CoreTerm::EpsilonOf(t) => {
+            CoreTerm::EpsilonOf(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
+        }
+        CoreTerm::AlphaOf(t) => {
+            CoreTerm::AlphaOf(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
+        }
+        CoreTerm::ModalBox(t) => {
+            CoreTerm::ModalBox(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
+        }
+        CoreTerm::ModalDiamond(t) => {
+            CoreTerm::ModalDiamond(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
+        }
+        CoreTerm::ModalBigAnd(args) => {
+            let mut new_args: List<Heap<CoreTerm>> = List::new();
+            for a in args.iter() {
+                new_args.push(Heap::new(normalize_with_axioms_budget(a, axioms, budget)));
+            }
+            CoreTerm::ModalBigAnd(new_args)
+        }
+    }
+}
+
+/// V8 (#223) — δ-reduction-aware definitional equality.
+///
+/// Normalises both sides via [`normalize_with_axioms`] (β + δ)
+/// and compares structurally. Two terms compare equal iff they
+/// have the same βδ-normal form against the supplied axiom
+/// registry.
+pub fn definitional_eq_with_axioms(
+    a: &CoreTerm,
+    b: &CoreTerm,
+    axioms: &crate::AxiomRegistry,
+) -> bool {
+    let a_norm = normalize_with_axioms(a, axioms);
+    let b_norm = normalize_with_axioms(b, axioms);
+    a_norm == b_norm
+}
+
 /// V8 — collect the **free variable set** of a [`CoreTerm`].
 ///
 /// A variable `Var(name)` is *free* in a term iff no enclosing
