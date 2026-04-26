@@ -93,8 +93,6 @@ public fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
 /// Timing-safe three-way comparison — returns `-1`, `0`, `+1` like
 /// strcmp but without timing leak. Useful for MPI / big-integer compare
 /// in crypto primitives.
-///
-/// Not yet implemented — declared for future HACL*/OpenSSL backend use.
 @verify(constant_time)
 public fn constant_time_compare(a: &[Byte], b: &[Byte]) -> Int {
     if a.len() != b.len() {
@@ -106,14 +104,25 @@ public fn constant_time_compare(a: &[Byte], b: &[Byte]) -> Int {
         while i < a.len() {
             let ai = a[i] as Int;
             let bi = b[i] as Int;
-            // Select sign based on bytes ai/bi only, no early break.
             let d = ai - bi;
-            // Keep only the first-ever-non-zero diff via bitwise mask.
-            // (diff == 0) -> d wins; else diff wins.
-            let mask: Int = if diff == 0 { -1 } else { 0 };
-            diff = diff | (d & mask);
+            // Branchless "first-ever-non-zero diff wins":
+            //   zero_mask is -1 (all bits set) iff diff == 0, else 0.
+            //   This is the standard ct_is_zero idiom: `(x | -x) >> 63`
+            //   has bit-63 (sign) set iff x != 0; complementing gives
+            //   the desired mask. Holds for x == Int.MIN too because
+            //   -Int.MIN wraps to Int.MIN whose sign bit is also set.
+            //
+            // The previous implementation used `if diff == 0`, a
+            // data-dependent branch on the accumulator that leaked
+            // timing about which byte first differed — defeating the
+            // entire purpose of @verify(constant_time).
+            let nonzero_mask: Int = (diff | (0 - diff)) >> 63;
+            let zero_mask: Int = !nonzero_mask;
+            diff = diff | (d & zero_mask);
             i = i + 1;
         }
+        // Final 3-way classify branches on `diff`, which is the
+        // function's RETURN value (public output) — not a timing leak.
         if diff < 0 { -1 } else if diff > 0 { 1 } else { 0 }
     }
 }
