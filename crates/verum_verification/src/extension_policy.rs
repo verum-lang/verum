@@ -18,7 +18,7 @@
 //! flipping any production-pass default. Each VFE-aware pass
 //! (currently `KernelRecheckPass`) gains a builder
 //! (`with_extension_policy`) that drives gating from a configured
-//! `VfePolicy`. The default policy stays `AllRulesActive` so the
+//! `ExtensionPolicy`. The default policy stays `AllRulesActive` so the
 //! existing test corpus (which doesn't carry
 //! `@require_extension`) continues to pass; flipping the default
 //! to `OptInOnly` is a follow-up bump on the rollout calendar
@@ -47,7 +47,7 @@ use verum_common::{Maybe, Text};
 /// the V8 default and matches the pre-V8 always-on behaviour so
 /// no existing tests regress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VfePolicy {
+pub enum ExtensionPolicy {
     /// Year 0–2: VFE rules are off unless the scope explicitly
     /// `@require_extension(vfe_N)`.
     OptInOnly,
@@ -65,15 +65,15 @@ pub enum VfePolicy {
     AllRulesActive,
 }
 
-impl VfePolicy {
+impl ExtensionPolicy {
     /// Decide whether the named extension is active in a scope
     /// whose [`EnabledExtensions`] view is `set`.
     pub fn is_active(self, set: &EnabledExtensions, ext: &str) -> bool {
         match self {
-            VfePolicy::AllRulesActive => true,
-            VfePolicy::Mandatory => true,
-            VfePolicy::OptInOnly => set.requires(ext),
-            VfePolicy::OptOutOnly => !set.disables(ext),
+            ExtensionPolicy::AllRulesActive => true,
+            ExtensionPolicy::Mandatory => true,
+            ExtensionPolicy::OptInOnly => set.requires(ext),
+            ExtensionPolicy::OptOutOnly => !set.disables(ext),
         }
     }
 }
@@ -290,35 +290,35 @@ mod tests {
     #[test]
     fn policy_all_rules_active_always_on() {
         let s = EnabledExtensions::empty();
-        assert!(VfePolicy::AllRulesActive.is_active(&s, "vfe_7"));
+        assert!(ExtensionPolicy::AllRulesActive.is_active(&s, "vfe_7"));
     }
 
     #[test]
     fn policy_opt_in_only_off_without_require() {
         let s = EnabledExtensions::empty();
-        assert!(!VfePolicy::OptInOnly.is_active(&s, "vfe_7"));
+        assert!(!ExtensionPolicy::OptInOnly.is_active(&s, "vfe_7"));
     }
 
     #[test]
     fn policy_opt_in_only_on_with_require() {
         let attrs = attr_list(vec![make_attr("require_extension", "vfe_7")]);
         let s = EnabledExtensions::from_attributes(&attrs);
-        assert!(VfePolicy::OptInOnly.is_active(&s, "vfe_7"));
-        assert!(!VfePolicy::OptInOnly.is_active(&s, "vfe_1"));
+        assert!(ExtensionPolicy::OptInOnly.is_active(&s, "vfe_7"));
+        assert!(!ExtensionPolicy::OptInOnly.is_active(&s, "vfe_1"));
     }
 
     #[test]
     fn policy_opt_out_only_on_by_default() {
         let s = EnabledExtensions::empty();
-        assert!(VfePolicy::OptOutOnly.is_active(&s, "vfe_3"));
+        assert!(ExtensionPolicy::OptOutOnly.is_active(&s, "vfe_3"));
     }
 
     #[test]
     fn policy_opt_out_only_off_when_disabled() {
         let attrs = attr_list(vec![make_attr("disable_extension", "vfe_3")]);
         let s = EnabledExtensions::from_attributes(&attrs);
-        assert!(!VfePolicy::OptOutOnly.is_active(&s, "vfe_3"));
-        assert!(VfePolicy::OptOutOnly.is_active(&s, "vfe_1"));
+        assert!(!ExtensionPolicy::OptOutOnly.is_active(&s, "vfe_3"));
+        assert!(ExtensionPolicy::OptOutOnly.is_active(&s, "vfe_1"));
     }
 
     #[test]
@@ -326,7 +326,7 @@ mod tests {
         let attrs = attr_list(vec![make_attr("disable_extension", "vfe_3")]);
         let s = EnabledExtensions::from_attributes(&attrs);
         // Mandatory ignores @disable_extension.
-        assert!(VfePolicy::Mandatory.is_active(&s, "vfe_3"));
+        assert!(ExtensionPolicy::Mandatory.is_active(&s, "vfe_3"));
     }
 
     #[test]

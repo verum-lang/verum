@@ -45,10 +45,10 @@ pub struct KernelRecheckPass {
     /// Per-function rejection counts (recorded for diagnostics).
     rejections: List<Text>,
     /// V8 (#211, B12) — VFE governance policy. Default is
-    /// [`VfePolicy::AllRulesActive`], matching the pre-V8
+    /// [`ExtensionPolicy::AllRulesActive`], matching the pre-V8
     /// always-on behaviour. The opt-in / opt-out tiers are
     /// configurable via [`Self::with_policy`].
-    policy: crate::vfe_gate::VfePolicy,
+    policy: crate::extension_policy::ExtensionPolicy,
 }
 
 impl KernelRecheckPass {
@@ -56,7 +56,7 @@ impl KernelRecheckPass {
     pub fn new() -> Self {
         Self {
             rejections: List::new(),
-            policy: crate::vfe_gate::VfePolicy::AllRulesActive,
+            policy: crate::extension_policy::ExtensionPolicy::AllRulesActive,
         }
     }
 
@@ -67,14 +67,14 @@ impl KernelRecheckPass {
     /// is a no-op for that scope (returns success without
     /// running the kernel-recheck walker). Pre-V8 always ran;
     /// V8 default still always runs (`AllRulesActive`).
-    pub fn with_policy(mut self, policy: crate::vfe_gate::VfePolicy) -> Self {
+    pub fn with_policy(mut self, policy: crate::extension_policy::ExtensionPolicy) -> Self {
         self.policy = policy;
         self
     }
 
     /// V8 (#211, B12) — read-only accessor for the configured
     /// VFE governance policy.
-    pub fn policy(&self) -> crate::vfe_gate::VfePolicy {
+    pub fn policy(&self) -> crate::extension_policy::ExtensionPolicy {
         self.policy
     }
 
@@ -207,7 +207,7 @@ impl VerificationPass for KernelRecheckPass {
         // The default policy (`AllRulesActive`) always returns
         // true, so existing test corpora continue to run the
         // walker as before.
-        let extensions = crate::vfe_gate::EnabledExtensions::from_module(module);
+        let extensions = crate::extension_policy::EnabledExtensions::from_module(module);
         let vfe_7_active = self.policy.is_active(&extensions, "vfe_7");
 
         let level = ctx.current_level();

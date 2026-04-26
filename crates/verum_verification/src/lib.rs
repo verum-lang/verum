@@ -94,7 +94,7 @@ pub mod tactic_heuristics;
 pub mod tensor_shapes;
 pub mod transition;
 pub mod vcgen;
-pub mod vfe_gate;
+pub mod extension_policy;
 
 // Re-export main types
 pub use boundary::{
