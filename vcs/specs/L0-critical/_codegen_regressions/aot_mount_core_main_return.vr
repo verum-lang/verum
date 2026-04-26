@@ -1,0 +1,31 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: codegen, aot, mount-core, main-return-propagation
+// @expected-exit: 7
+// @description: AOT mount-core main() return propagation regression.
+//
+// 2026-04-26 #106: `mount core.*; fn main() -> Int { 7 }` returned
+// exit=0 instead of 7. Root cause: Phase 2 body lowering deduped by
+// raw VBC name only, skipping ALL but the LAST occurrence per name.
+// User's 0-arity `main` collided with stdlib's 2-arity
+// `darwin_entry::main(argc, argv)` (in core/sys/init.vr) because the
+// blanket "main" → "verum_main" rename hits both. The arity-collision
+// path then emits two different LLVM functions (unsuffixed
+// `verum_main` and `verum_main__arity2`), but the dedupe — keyed on
+// name alone — saw count=2 and dropped one body. With user's main
+// first in iteration order, the unsuffixed `verum_main` was left
+// bodyless → Phase 3.6 safety net stubbed it as `return 0`.
+//
+// Fix (672dd8e4) — dedupe key is now (raw_name, arity). Different
+// arities map to different LLVM functions and must not be deduped.
+//
+// This test pins the contract: a user-level main returning a literal
+// constant under `mount core.*` must propagate that value through to
+// the process exit code.
+
+mount core.*;
+
+fn main() -> Int {
+    7
+}
