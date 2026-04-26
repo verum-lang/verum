@@ -72,6 +72,52 @@ pub struct RegisteredInductive {
     pub params: List<Text>,
     /// Constructors of this inductive.
     pub constructors: List<ConstructorSig>,
+    /// V8 (#215) — universe level this inductive inhabits. Defaults
+    /// to `Concrete(0)` (`Type(0)`) for set-level inductives via
+    /// the [`Default`] impl that doesn't require this field; the
+    /// `register_with_universe` entry point lets HoTT-level
+    /// declarations record `Concrete(2)` (univalent universes
+    /// containing `Glue`-typed terms) or higher. Pre-V8 the
+    /// `infer` arm hardcoded `Universe(Concrete(0))` regardless of
+    /// the declared level — silently demoting universal-polymorphic
+    /// types to set-level. The Inductive-typing rule now consults
+    /// this field via `universe_for(path)` from [`InductiveRegistry`].
+    #[serde(default = "default_universe_level")]
+    pub universe: crate::UniverseLevel,
+}
+
+fn default_universe_level() -> crate::UniverseLevel {
+    crate::UniverseLevel::Concrete(0)
+}
+
+impl RegisteredInductive {
+    /// V8 (#215) — construct a `RegisteredInductive` at the
+    /// default `Type(0)` universe level (set-level inductives).
+    /// The test corpus + stdlib bring-up registrations use this
+    /// path; HoTT-level declarations should call
+    /// [`Self::with_universe`] to record `Concrete(2)` (univalent
+    /// universes containing `Glue`-typed terms) or higher.
+    pub fn new(
+        name: Text,
+        params: List<Text>,
+        constructors: List<ConstructorSig>,
+    ) -> Self {
+        Self {
+            name,
+            params,
+            constructors,
+            universe: default_universe_level(),
+        }
+    }
+
+    /// V8 (#215) — set the universe level the inductive inhabits.
+    /// Builder-style; returns `self`. Used by the elaborator to
+    /// record HoTT-level (`Concrete(1)+`) or universe-polymorphic
+    /// declarations whose carriers can't be demoted to `Type(0)`.
+    pub fn with_universe(mut self, universe: crate::UniverseLevel) -> Self {
+        self.universe = universe;
+        self
+    }
 }
 
 /// Registry of strict-positivity-validated inductive declarations.
@@ -127,6 +173,26 @@ impl InductiveRegistry {
     /// Enumerate every registered inductive.
     pub fn all(&self) -> &List<RegisteredInductive> {
         &self.entries
+    }
+
+    /// V8 (#215) — look up the universe level for a registered
+    /// inductive by qualified path. Returns the registered level
+    /// when present, `None` when the name isn't in the registry.
+    ///
+    /// Used by `infer`'s `Inductive` arm to honour the spec's
+    /// declared universe instead of the pre-V8 hardcoded
+    /// `Concrete(0)` fallback. Path matching is by full string
+    /// equality on `name` — qualified paths (e.g.
+    /// `"core.collections.list.List"`) and bare names (e.g.
+    /// `"Nat"`) are both supported, the registrar's choice of key
+    /// determines lookup behaviour.
+    pub fn universe_for(&self, path: &str) -> Option<&crate::UniverseLevel> {
+        for e in self.entries.iter() {
+            if e.name.as_str() == path {
+                return Some(&e.universe);
+            }
+        }
+        None
     }
 }
 

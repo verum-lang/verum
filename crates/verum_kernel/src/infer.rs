@@ -63,10 +63,45 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 /// in follow-up commits (Z3 proof format first, then CVC5, E,
 /// Vampire). That is the last piece needed to put every SMT backend
 /// **outside** the TCB.
+/// V8 (#215) — type-inference variant that consults a supplied
+/// [`crate::InductiveRegistry`] when typing
+/// [`CoreTerm::Inductive`] heads. Returns the registered
+/// universe level for the named inductive instead of the
+/// pre-V8 hardcoded `Universe(Concrete(0))` fallback.
+///
+/// The original [`infer`] is preserved as a backwards-compat
+/// shim that delegates here with an empty registry — pre-V8
+/// callers see exactly the same behaviour because empty-registry
+/// lookups fall back to `Concrete(0)`.
+pub fn infer_with_inductives(
+    ctx: &Context,
+    term: &CoreTerm,
+    axioms: &AxiomRegistry,
+    inductives: &crate::InductiveRegistry,
+) -> Result<CoreTerm, KernelError> {
+    infer_inner(ctx, term, axioms, Some(inductives))
+}
+
 pub fn infer(
     ctx: &Context,
     term: &CoreTerm,
     axioms: &AxiomRegistry,
+) -> Result<CoreTerm, KernelError> {
+    infer_inner(ctx, term, axioms, None)
+}
+
+/// V8 (#215) — internal type-inference body parametrised on an
+/// optional [`crate::InductiveRegistry`]. When `inductives` is
+/// `Some(_)`, the [`CoreTerm::Inductive`] arm consults the
+/// registry's `universe_for(path)` and returns the registered
+/// universe level. When `None` (the default for callers using
+/// the legacy [`infer`] shim), the arm falls back to
+/// `Universe(Concrete(0))` — preserving pre-V8 behaviour.
+fn infer_inner(
+    ctx: &Context,
+    term: &CoreTerm,
+    axioms: &AxiomRegistry,
+    inductives: Option<&crate::InductiveRegistry>,
 ) -> Result<CoreTerm, KernelError> {
     match term {
         CoreTerm::Var(name) => match ctx.lookup(name.as_str()) {
@@ -102,10 +137,10 @@ pub fn infer(
         // Pi-formation: dom and codom (under extended ctx) must both
         // inhabit some universe. Result lives in the max of the two.
         CoreTerm::Pi { binder, domain, codomain } => {
-            let dom_ty = infer(ctx, domain, axioms)?;
+            let dom_ty = infer_inner(ctx,domain, axioms, inductives)?;
             let dom_level = universe_level(&dom_ty)?;
             let extended = ctx.extend(binder.clone(), (**domain).clone());
-            let codom_ty = infer(&extended, codomain, axioms)?;
+            let codom_ty = infer_inner(&extended,codomain, axioms, inductives)?;
             let codom_level = universe_level(&codom_ty)?;
             Ok(CoreTerm::Universe(UniverseLevel::Max(
                 Heap::new(dom_level),
@@ -116,9 +151,9 @@ pub fn infer(
         // Lam-introduction: under ctx extended with binder, body has
         // type B; result is Pi (binder:domain) B.
         CoreTerm::Lam { binder, domain, body } => {
-            let _ = infer(ctx, domain, axioms)?;
+            let _ = infer_inner(ctx,domain, axioms, inductives)?;
             let extended = ctx.extend(binder.clone(), (**domain).clone());
-            let body_ty = infer(&extended, body, axioms)?;
+            let body_ty = infer_inner(&extended,body, axioms, inductives)?;
             Ok(CoreTerm::Pi {
                 binder: binder.clone(),
                 domain: domain.clone(),
@@ -128,10 +163,10 @@ pub fn infer(
 
         // App-elimination: f : Pi (x:A) B,  a : A  ⇒  f a : B[x := a].
         CoreTerm::App(f, arg) => {
-            let f_ty = infer(ctx, f, axioms)?;
+            let f_ty = infer_inner(ctx,f, axioms, inductives)?;
             match f_ty {
                 CoreTerm::Pi { binder, domain, codomain } => {
-                    let arg_ty = infer(ctx, arg, axioms)?;
+                    let arg_ty = infer_inner(ctx,arg, axioms, inductives)?;
                     if !structural_eq(&arg_ty, &domain) {
                         return Err(KernelError::TypeMismatch {
                             expected: shape_of(&domain),
@@ -148,10 +183,10 @@ pub fn infer(
         // binder) must each live in some universe. The Σ-type lives in
         // the max of the two, mirroring the Π-formation rule.
         CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
-            let fst_univ = infer(ctx, fst_ty, axioms)?;
+            let fst_univ = infer_inner(ctx,fst_ty, axioms, inductives)?;
             let fst_level = universe_level(&fst_univ)?;
             let extended = ctx.extend(binder.clone(), (**fst_ty).clone());
-            let snd_univ = infer(&extended, snd_ty, axioms)?;
+            let snd_univ = infer_inner(&extended,snd_ty, axioms, inductives)?;
             let snd_level = universe_level(&snd_univ)?;
             Ok(CoreTerm::Universe(UniverseLevel::Max(
                 Heap::new(fst_level),
@@ -171,8 +206,8 @@ pub fn infer(
         // bidirectional elaboration.  Until then we keep the simpler
         // rule here and tag the restriction.
         CoreTerm::Pair(fst, snd) => {
-            let fst_ty = infer(ctx, fst, axioms)?;
-            let snd_ty = infer(ctx, snd, axioms)?;
+            let fst_ty = infer_inner(ctx,fst, axioms, inductives)?;
+            let snd_ty = infer_inner(ctx,snd, axioms, inductives)?;
             Ok(CoreTerm::Sigma {
                 binder: Text::from("_"),
                 fst_ty: Heap::new(fst_ty),
@@ -181,7 +216,7 @@ pub fn infer(
         }
 
         CoreTerm::Fst(pair) => {
-            let pair_ty = infer(ctx, pair, axioms)?;
+            let pair_ty = infer_inner(ctx,pair, axioms, inductives)?;
             match pair_ty {
                 CoreTerm::Sigma { fst_ty, .. } => Ok((*fst_ty).clone()),
                 other => Err(KernelError::NotAPair(shape_of(&other))),
@@ -189,7 +224,7 @@ pub fn infer(
         }
 
         CoreTerm::Snd(pair) => {
-            let pair_ty = infer(ctx, pair, axioms)?;
+            let pair_ty = infer_inner(ctx,pair, axioms, inductives)?;
             match pair_ty {
                 CoreTerm::Sigma { binder, snd_ty, .. } => {
                     // snd : snd_ty[binder := fst(pair)]
@@ -204,16 +239,16 @@ pub fn infer(
         // (i.e. inhabits some universe) and lhs, rhs both check at A.
         // Result lives in A's universe, same as carrier.
         CoreTerm::PathTy { carrier, lhs, rhs } => {
-            let carrier_univ = infer(ctx, carrier, axioms)?;
+            let carrier_univ = infer_inner(ctx,carrier, axioms, inductives)?;
             let carrier_level = universe_level(&carrier_univ)?;
-            let lhs_ty = infer(ctx, lhs, axioms)?;
+            let lhs_ty = infer_inner(ctx,lhs, axioms, inductives)?;
             if !structural_eq(&lhs_ty, carrier) {
                 return Err(KernelError::TypeMismatch {
                     expected: shape_of(carrier),
                     actual: shape_of(&lhs_ty),
                 });
             }
-            let rhs_ty = infer(ctx, rhs, axioms)?;
+            let rhs_ty = infer_inner(ctx,rhs, axioms, inductives)?;
             if !structural_eq(&rhs_ty, carrier) {
                 return Err(KernelError::TypeMismatch {
                     expected: shape_of(carrier),
@@ -225,7 +260,7 @@ pub fn infer(
 
         // Reflexivity: refl(x) : Path<A>(x, x) where x : A.
         CoreTerm::Refl(x) => {
-            let x_ty = infer(ctx, x, axioms)?;
+            let x_ty = infer_inner(ctx,x, axioms, inductives)?;
             Ok(CoreTerm::PathTy {
                 carrier: Heap::new(x_ty),
                 lhs: x.clone(),
@@ -249,9 +284,9 @@ pub fn infer(
         // `KernelError` rather than being swallowed, so a spurious
         // composition cannot sneak into the TCB.
         CoreTerm::HComp { phi, walls, base } => {
-            let _ = infer(ctx, phi, axioms)?;
-            let _ = infer(ctx, walls, axioms)?;
-            infer(ctx, base, axioms)
+            let _ = infer_inner(ctx,phi, axioms, inductives)?;
+            let _ = infer_inner(ctx,walls, axioms, inductives)?;
+            infer_inner(ctx, base, axioms, inductives)
         }
 
         // Transp: `transp(p, r, t)` where `p : Path<Type>(A, B)`,
@@ -271,11 +306,11 @@ pub fn infer(
         // bring-up. The full cubical pass will tighten this to a
         // hard error.
         CoreTerm::Transp { path, regular, value } => {
-            let path_ty = infer(ctx, path, axioms)?;
-            let _ = infer(ctx, regular, axioms)?;
+            let path_ty = infer_inner(ctx,path, axioms, inductives)?;
+            let _ = infer_inner(ctx,regular, axioms, inductives)?;
             match path_ty {
                 CoreTerm::PathTy { rhs, .. } => Ok((*rhs).clone()),
-                _ => infer(ctx, value, axioms),
+                _ => infer_inner(ctx, value, axioms, inductives),
             }
         }
 
@@ -296,11 +331,11 @@ pub fn infer(
         // assembled from well-typed pieces and is a type at the
         // right universe level.
         CoreTerm::Glue { carrier, phi, fiber, equiv } => {
-            let carrier_univ = infer(ctx, carrier, axioms)?;
+            let carrier_univ = infer_inner(ctx,carrier, axioms, inductives)?;
             let carrier_level = universe_level(&carrier_univ)?;
-            let _ = infer(ctx, phi, axioms)?;
-            let _ = infer(ctx, fiber, axioms)?;
-            let _ = infer(ctx, equiv, axioms)?;
+            let _ = infer_inner(ctx,phi, axioms, inductives)?;
+            let _ = infer_inner(ctx,fiber, axioms, inductives)?;
+            let _ = infer_inner(ctx,equiv, axioms, inductives)?;
             Ok(CoreTerm::Universe(carrier_level))
         }
 
@@ -317,7 +352,7 @@ pub fn infer(
         // of the predicate so a depth-violating term is rejected early
         // with a precise diagnostic.
         CoreTerm::Refine { base, binder, predicate } => {
-            let base_univ = infer(ctx, base, axioms)?;
+            let base_univ = infer_inner(ctx,base, axioms, inductives)?;
             let base_level = universe_level(&base_univ)?;
 
             // K-Refine depth check — the single load-bearing Diakrisis
@@ -337,7 +372,7 @@ pub fn infer(
             // we don't yet enforce its type is Bool because Bool is a
             // primitive Inductive that lands via the stdlib bridge, so
             // for bring-up we only require the predicate be well-typed.
-            let _ = infer(&extended, predicate, axioms)?;
+            let _ = infer_inner(&extended,predicate, axioms, inductives)?;
             Ok(CoreTerm::Universe(base_level))
         }
 
@@ -345,7 +380,26 @@ pub fn infer(
         // was declared in. Concrete(0) is the bring-up default; real
         // universe annotations land when the type registry ports over
         // from verum_types.
-        CoreTerm::Inductive { .. } => Ok(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+        // V8 (#215) — consult the supplied InductiveRegistry for
+        // the declared universe level. When no registry is
+        // available (callers using the legacy `infer` shim) or
+        // the path isn't registered, fall back to
+        // `Concrete(0)` — the pre-V8 hardcoded default. This way
+        // existing tests (which don't populate an inductive
+        // registry) see exactly the same result, while new
+        // callers (verification driver, gradual-verification
+        // pipeline) propagate honest universe levels through the
+        // typing judgment.
+        CoreTerm::Inductive { path, .. } => {
+            let level = match inductives {
+                Some(reg) => match reg.universe_for(path.as_str()) {
+                    Some(l) => l.clone(),
+                    None => UniverseLevel::Concrete(0),
+                },
+                None => UniverseLevel::Concrete(0),
+            };
+            Ok(CoreTerm::Universe(level))
+        }
 
         // Elim: an induction-principle application
         // `elim e motive cases`. The result inhabits `motive` applied
@@ -377,10 +431,10 @@ pub fn infer(
         // exhaustiveness + typing remains the dedicated Elim-rule
         // pass's job.
         CoreTerm::Elim { scrutinee, motive, .. } => {
-            let motive_ty = infer(ctx, motive, axioms)?;
+            let motive_ty = infer_inner(ctx,motive, axioms, inductives)?;
             match motive_ty {
                 CoreTerm::Pi { domain, .. } => {
-                    let scrut_ty = infer(ctx, scrutinee, axioms)?;
+                    let scrut_ty = infer_inner(ctx,scrutinee, axioms, inductives)?;
                     if !structural_eq(&scrut_ty, &domain) {
                         return Err(KernelError::TypeMismatch {
                             expected: shape_of(&domain),
@@ -426,7 +480,9 @@ pub fn infer(
         // the 2-cell level). V1 will refine the type to track
         // whether the result lives in the articulation 2-category
         // or the enactment 2-category.
-        CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => infer(ctx, t, axioms),
+        CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => {
+            infer_inner(ctx, t, axioms, inductives)
+        }
 
         // VFE-7 V1: modal operators inhabit `Prop`. The kernel
         // verifies that the operand is well-typed (regardless of
@@ -434,12 +490,12 @@ pub fn infer(
         // can be applied to any well-formed term, the resulting
         // proposition is always at the propositional layer).
         CoreTerm::ModalBox(phi) | CoreTerm::ModalDiamond(phi) => {
-            let _ = infer(ctx, phi, axioms)?;
+            let _ = infer_inner(ctx,phi, axioms, inductives)?;
             Ok(CoreTerm::Universe(UniverseLevel::Prop))
         }
         CoreTerm::ModalBigAnd(args) => {
             for a in args.iter() {
-                let _ = infer(ctx, a, axioms)?;
+                let _ = infer_inner(ctx,a, axioms, inductives)?;
             }
             Ok(CoreTerm::Universe(UniverseLevel::Prop))
         }
