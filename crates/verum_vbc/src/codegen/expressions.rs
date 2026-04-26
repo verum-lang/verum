@@ -10837,6 +10837,52 @@ impl VbcCodegen {
                 fn_name, field, base_desc);
         }
 
+        // #110 — static method reference as HOF arg.
+        //
+        // When `base` is a Type name (Path resolving to a type, possibly via
+        // alias) and `.field` names a static method on that type, the
+        // expression should produce a callable closure value, not a struct
+        // field deref. Without this guard, the compile_expr(base) below
+        // emits LoadNil for the type name, then the GetF fall-through reads
+        // `[null + interned_field_id*8]` — SEGV at huge offsets like
+        // 0x85F0/0x85F8 because intern_field_name returns a globally-
+        // monotonic ID for unrecognized field names.
+        //
+        // Try to resolve `Type.method` (with type-alias chasing) to a
+        // FunctionInfo; if it's a real function, emit NewClosure. Falls
+        // through to GetF only when the lookup fails — preserving the
+        // existing behaviour for actual struct-field access.
+        if let ExprKind::Path(ref path) = base.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ref base_ident) = path.segments[0]
+        {
+            let base_name = base_ident.name.to_string();
+            // Resolve type alias (IoError → StreamError) so `IoError.from_os`
+            // finds `StreamError.from_os` in the function table.
+            let resolved_base = self.resolve_type_alias(&base_name);
+            let qualified_dot = format!("{}.{}", resolved_base, field);
+            let qualified_alias = format!("{}.{}", base_name, field);
+            let func_info = self.ctx.lookup_function(&qualified_dot)
+                .or_else(|| self.ctx.lookup_function(&qualified_alias))
+                .cloned();
+            if let Some(info) = func_info {
+                // Skip variant constructors (already handled elsewhere) and
+                // compile-time constants (handled by intrinsic_name path).
+                if info.variant_tag.is_none()
+                    && info.intrinsic_name.as_ref()
+                        .map_or(true, |n| !n.starts_with("__const_"))
+                {
+                    let dest = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::NewClosure {
+                        dst: dest,
+                        func_id: info.id.0,
+                        captures: vec![],
+                    });
+                    return Ok(Some(dest));
+                }
+            }
+        }
+
         let base_reg = self
             .compile_expr(base)?
             .ok_or_else(|| CodegenError::internal("field base has no value"))?;
