@@ -29,7 +29,17 @@ implement Counter {
 
     /// Add `v`. Panics if `v < 0` (counters are monotonic per Prometheus
     /// spec). Callers that need decrement semantics use UpDownCounter.
+    ///
+    /// Silently ignores `NaN` and infinite inputs: a single
+    /// `Counter.add(NaN)` would otherwise contaminate the value
+    /// permanently (NaN absorbs every subsequent fetch_add) and any
+    /// `inf` input would saturate the counter, both of which violate
+    /// the Prometheus monotonic-counter contract. Sound floor is
+    /// "drop the bad sample" — exporters never emit corrupted values.
     public fn add(&self, v: Float) {
+        if v.is_nan() || v.is_infinite() {
+            return;
+        }
         if v < 0.0 {
             panic("Counter.add: negative delta");
         }
@@ -54,11 +64,20 @@ implement UpDownCounter {
         UpDownCounter { value: AtomicF64.new(0.0) }
     }
 
+    /// Add `v`. NaN / infinite inputs are silently dropped — see
+    /// `Counter.add` for rationale.
     public fn add(&self, v: Float) {
+        if v.is_nan() || v.is_infinite() {
+            return;
+        }
         let _ = self.value.fetch_add(v, MemoryOrdering.Relaxed);
     }
 
+    /// Subtract `v`. NaN / infinite inputs are silently dropped.
     public fn sub(&self, v: Float) {
+        if v.is_nan() || v.is_infinite() {
+            return;
+        }
         let _ = self.value.fetch_sub(v, MemoryOrdering.Relaxed);
     }
 
@@ -83,7 +102,12 @@ implement Gauge {
         Gauge { value: AtomicF64.new(0.0) }
     }
 
+    /// Set the gauge to `v`. NaN / infinite inputs are silently
+    /// dropped — see `Counter.add` for rationale.
     public fn set(&self, v: Float) {
+        if v.is_nan() || v.is_infinite() {
+            return;
+        }
         self.value.store(v, MemoryOrdering.Relaxed);
     }
 
@@ -91,10 +115,16 @@ implement Gauge {
     public fn dec(&self) { self.sub(1.0); }
 
     public fn add(&self, v: Float) {
+        if v.is_nan() || v.is_infinite() {
+            return;
+        }
         let _ = self.value.fetch_add(v, MemoryOrdering.Relaxed);
     }
 
     public fn sub(&self, v: Float) {
+        if v.is_nan() || v.is_infinite() {
+            return;
+        }
         let _ = self.value.fetch_sub(v, MemoryOrdering.Relaxed);
     }
 
