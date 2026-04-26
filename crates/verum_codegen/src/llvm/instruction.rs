@@ -15776,13 +15776,32 @@ fn build_unary_intrinsic_with_poison<'ctx>(
 
 /// Helper: coerce a value to f64, converting from int if needed.
 fn as_f64<'ctx>(ctx: &FunctionContext<'_, 'ctx>, val: BasicValueEnum<'ctx>, name: &str) -> Result<verum_llvm::values::FloatValue<'ctx>> {
+    let f64_ty = ctx.types().f64_type();
     match val {
         BasicValueEnum::FloatValue(f) => Ok(f),
         BasicValueEnum::IntValue(i) => {
             // In alloca mode, floats are bitcast to i64 for uniform storage.
             // Bitcast back to f64 to recover the original IEEE 754 bits.
-            let f64_ty = ctx.types().f64_type();
             let bitcast = ctx.builder().build_bit_cast(i, f64_ty, name)
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            Ok(bitcast.into_float_value())
+        }
+        BasicValueEnum::PointerValue(p) => {
+            // Defensive coercion: when an upstream variant-payload
+            // extraction or heap-tagged value flows into a float op,
+            // the register holds a Pointer rather than the expected
+            // Float/Int. Convert via ptr_to_int → bitcast to recover
+            // the original bits — same pattern as the SliceGet /
+            // SliceSubslice fixes (#105). This unblocks ~50 stdlib
+            // math functions (float_to_int, expm1, log1p, fabs,
+            // minnum, maxnum, copysign, hypot, asin, sinh, etc.) that
+            // were being skipped during AOT lowering because their
+            // float-conversion arguments arrived as Pointer registers.
+            let i64_ty = ctx.types().i64_type();
+            let as_int = ctx.builder()
+                .build_ptr_to_int(p, i64_ty, &format!("{}_p2i", name))
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let bitcast = ctx.builder().build_bit_cast(as_int, f64_ty, name)
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             Ok(bitcast.into_float_value())
         }
