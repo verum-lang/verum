@@ -48,7 +48,7 @@ fn bench_analysis_overhead(c: &mut Criterion) {
     let bv_y = BV::new_const("bv_y", 32);
     let bv_sum = bv_x.bvadd(&bv_y);
     let bv_mask = BV::from_i64(0xFF, 32);
-    let bv_formula = bv_sum.bvand(&bv_mask)._eq(&bv_mask);
+    let bv_formula = bv_sum.bvand(&bv_mask).eq(&bv_mask);
 
     group.bench_function("analyze_bitvector", |b| {
         b.iter(|| analyzer.analyze(black_box(&bv_formula)))
