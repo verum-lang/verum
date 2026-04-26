@@ -189,6 +189,24 @@ fn handle_command(command: &str, state: &mut ReplState) -> Result<bool> {
                 show_ast(&expr, state);
             }
         }
+        ":load" | ":l" => {
+            if parts.len() != 2 {
+                ui::error("Usage: :load <path/to/file.vr>");
+            } else {
+                load_file(parts[1], state);
+            }
+        }
+        ":time" | ":t" => {
+            if parts.len() < 2 {
+                ui::error("Usage: :time <expression>");
+            } else {
+                let expr: String = parts.iter().skip(1).cloned().collect::<Vec<_>>().join(" ");
+                let start = std::time::Instant::now();
+                process_input(&expr, state);
+                let elapsed = start.elapsed();
+                ui::info(&format!("elapsed: {:.3?}", elapsed));
+            }
+        }
         _ => {
             ui::error(&format!("Unknown command: {}", cmd));
             ui::info("Type :help for available commands");
@@ -205,6 +223,8 @@ fn print_help() {
     println!("  {}        Show this help", ":help, :h".cyan());
     println!("  {}       Clear screen", ":clear".cyan());
     println!("  {} <expr>     Show AST of expression", ":ast".cyan());
+    println!("  {} <path>     Load a .vr file into the session", ":load, :l".cyan());
+    println!("  {} <expr>     Time evaluation of an expression", ":time, :t".cyan());
     println!("  {}    Show all bindings", ":bindings".cyan());
     println!("  {}     Show command history", ":history".cyan());
     println!("  {}      Show accumulated session source", ":source".cyan());
@@ -420,6 +440,32 @@ fn compile_module(source: &str) -> std::result::Result<verum_vbc::VbcModule, Str
     codegen
         .compile_module(&module)
         .map_err(|e| format!("codegen error: {:?}", e))
+}
+
+fn load_file(path: &str, state: &mut ReplState) {
+    // Read the file as raw bytes, decode UTF-8, then feed each
+    // top-level fragment through process_input so the file's
+    // contents flow through the same lex/parse/type-check path
+    // as interactively-typed lines. This means any error
+    // diagnostic emitted by process_input identifies the
+    // failing line within the file.
+    let contents = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            ui::error(&format!("Failed to read {}: {}", path, e));
+            return;
+        }
+    };
+    if contents.is_empty() {
+        ui::info(&format!("{}: file is empty", path));
+        return;
+    }
+    // Submit the entire contents as one input. The existing
+    // process_input handles multi-statement strings via the
+    // top-level item parser; what doesn't fit a single
+    // session-level form falls through to per-line evaluation.
+    process_input(&contents, state);
+    ui::success(&format!("Loaded {}", path));
 }
 
 fn show_ast(expr: &str, state: &ReplState) {
