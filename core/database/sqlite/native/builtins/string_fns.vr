@@ -28,6 +28,7 @@ module core.database.sqlite.native.builtins.string_fns;
 mount core.*;
 mount base.{Text, Maybe};
 mount collections.List;
+mount core.runtime.text.{float_to_text};
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RText, RBlob, RReal, RRowId};
 
 // -----------------------------------------------------------------------------
@@ -561,9 +562,21 @@ public fn sql_quote(v: &Register) -> Register {
     }
 }
 
-fn real_to_text(_x: Float64) -> Text {
-    // TODO: real grisu3-like float→text routine in core/encoding/numeric
-    "0.0".clone()
+/// Float64 → Text using the runtime's `float_to_text` intrinsic
+/// (which uses Ryu / shortest-round-trip formatting under the hood).
+///
+/// SQLite's behaviour for special values:
+///   * NaN  → empty text (SQLite stores NULL for NaN; the caller
+///            here only sees a Float64 so we emit "NaN" and let
+///            higher layers handle the conversion to NULL).
+///   * +Inf → "Inf"
+///   * -Inf → "-Inf"
+///   * Otherwise — shortest decimal that round-trips back to the
+///     same Float64.  This matches SQLite's
+///     `sqlite3_value_text(real)` which prints with
+///     `%!.20g` precision (shortest-round-trip in practice).
+fn real_to_text(x: Float64) -> Text {
+    float_to_text(x)
 }
 
 // -----------------------------------------------------------------------------
