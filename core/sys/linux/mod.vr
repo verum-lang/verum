@@ -138,8 +138,8 @@ public mount .errno.{
 public mount .tls.{
     // Types
     ThreadControlBlock,
-    ContextSlots,
-    TlsError,
+    RawContextSlots,
+    ThreadLocalError,
 
     // Initialization
     init_main_thread_tls,

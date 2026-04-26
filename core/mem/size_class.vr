@@ -200,21 +200,33 @@ public fn size_to_bin(size: Int) -> Int {
     size_to_bin_large(wsize)
 }
 
-/// Calculate bin for large sizes (> 1024 bytes)
-/// Uses bit manipulation for O(1) calculation
+/// Calculate bin for large sizes (wsize > 128, i.e. > 1024 bytes).
+/// Uses bit manipulation for O(1) calculation.
+///
+/// Canonical mimalloc-style algorithm adapted to Verum's
+/// 0-indexed `SIZE_CLASSES` table starting at 8 bytes:
+///
+///   w = wsize - 1                       // align to power-of-2 boundaries
+///   b = bsr(w)                          // top set-bit position
+///   sub = (w >> (b - 2)) & 0x03         // 2 bits after top → sub-bin
+///   bin = (b << 2) + sub - 4            // 4 sub-bins per power of 2
+///
+/// Earlier revisions used `((b - 3) << 2) + sub` over `wsize`
+/// (no `wsize - 1` alignment). That formula was off by 8 across
+/// the entire range — e.g. `wsize=129` (1032 bytes) returned
+/// bin 16 (320 bytes!) when the correct bin is 24 (1280 bytes).
+/// Every allocation > 1024 bytes was getting an undersized bin,
+/// which in production allocator paths could let writes overrun
+/// the bin slot into the next block.  No test exercised the
+/// large path so the bug went unnoticed.
 fn size_to_bin_large(wsize: Int) -> Int {
-    // Find highest bit position
-    let b = 63 - clz_u64(wsize as UInt64) as Int;
+    // Subtract 1 so wsize=129 (just over the lookup-table top
+    // of 1024 bytes) correctly maps into the next bin family.
+    let w = wsize - 1;
+    let b = 63 - clz_u64(w as UInt64) as Int;
+    let sub_bin = (w >> (b - 2)) & 0x03;
+    let bin = (b << 2) + sub_bin - 4;
 
-    // Calculate bin using top 2 bits after highest
-    // This gives 4 sub-bins per power of 2 (12.5% spacing)
-    let shifted = wsize >> (b - 2);
-    let sub_bin = shifted & 0x03;
-
-    // Base bin for this power of 2, plus sub-bin offset
-    let bin = ((b - 3) << 2) + sub_bin;
-
-    // Clamp to valid range
     if bin >= BIN_HUGE {
         BIN_HUGE
     } else {
@@ -473,6 +485,45 @@ fn test_size_to_bin_medium() {
     assert_eq(size_to_bin(100), 9);   // → 96 byte bin
     assert_eq(size_to_bin(200), 13);  // → 192 byte bin
     assert_eq(size_to_bin(1000), 23); // → 1024 byte bin
+}
+
+/// Pin the previously-untested large-size-bin path — the
+/// `size_to_bin_large` formula was silently off by ~8 across
+/// the entire range until the canonical mimalloc-style
+/// `(b << 2) + sub - 4` rewrite (#100). Each fixture probes
+/// a power-of-two boundary AND a sub-bin point so any future
+/// regression in the bit-arithmetic surfaces immediately.
+@test
+fn test_size_to_bin_large() {
+    // Boundary: just past the lookup-table top (wsize=128 →
+    // bin 23, wsize=129 → bin 24).
+    assert_eq(size_to_bin(1025), 24);  // 1280 byte bin
+    assert_eq(size_to_bin(1280), 24);
+    assert_eq(size_to_bin(1281), 25);  // → 1536 byte bin
+    assert_eq(size_to_bin(1536), 25);
+    assert_eq(size_to_bin(1793), 27);  // → 2048 byte bin
+    assert_eq(size_to_bin(2048), 27);
+
+    // Power-of-2 boundaries — top-bit transitions.
+    assert_eq(size_to_bin(2049), 28);  // → 2560 byte bin
+    assert_eq(size_to_bin(4096), 31);  // → 4096 byte bin
+    assert_eq(size_to_bin(4097), 32);  // → 5120 byte bin
+    assert_eq(size_to_bin(8192), 35);  // → 8192 byte bin (small/medium boundary)
+    assert_eq(size_to_bin(65536), 47); // → 64K bin (medium/large boundary)
+
+    // Top of the regular range.
+    assert_eq(size_to_bin(SIZE_CLASSES[72]), 72); // exactly 5 MiB
+}
+
+/// Round-trip property: for every bin index, `size_to_bin(bin_to_size(b)) == b`.
+@test
+fn test_size_to_bin_round_trip() {
+    let mut bin: Int = 8;  // skip the lookup-table range; tests above cover 0..=23
+    while bin < BIN_COUNT {
+        let size = bin_to_size(bin);
+        assert_eq(size_to_bin(size), bin);
+        bin = bin + 1;
+    }
 }
 
 @test

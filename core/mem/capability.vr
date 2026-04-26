@@ -176,21 +176,37 @@ public fn can_execute(flags: UInt16) -> Bool {
 }
 
 /// Delegate capabilities to a sub-reference.
-/// Returns None if delegation is not allowed or requested caps exceed available.
+///
+/// Returns `None` if delegation is not allowed or the
+/// requested capability set exceeds what the parent holds.
+/// Otherwise returns `Some(requested)`: the caller's request
+/// is the authoritative description of what the sub-reference
+/// should hold, and `has_all_capabilities` above already
+/// proved the parent dominates the request.
+///
+/// Earlier revisions wrote the return value as
+///   `Some(requested & !CAP_DELEGATE | (requested & CAP_DELEGATE))`
+/// — algebraically equivalent to `Some(requested)` because
+/// `(x & !K) | (x & K) == x & (!K | K) == x`. The obfuscated
+/// form looked like it was filtering the Delegate bit but
+/// did nothing of the sort, hiding the actual semantics from
+/// soundness review and making the function harder to audit.
+/// If a future change wants to strip Delegate from the
+/// sub-reference by default, add an explicit
+/// `requested & !CAP_DELEGATE` mask here with a doc note.
 public fn delegate_capability(parent_caps: UInt16, requested: UInt16) -> Maybe<UInt16> {
-    // Must have Delegate capability
+    // Must have Delegate capability to create sub-references.
     if !can_delegate(parent_caps) {
         return None;
     }
 
-    // Can only delegate capabilities that parent has
+    // Can only delegate capabilities that parent already has —
+    // monotonic attenuation: sub-refs can only lose, never gain.
     if !has_all_capabilities(parent_caps, requested) {
         return None;
     }
 
-    // New reference does not inherit Delegate by default
-    // unless explicitly requested
-    Some(requested & !CAP_DELEGATE | (requested & CAP_DELEGATE))
+    Some(requested)
 }
 
 /// Revoke capabilities from a reference.
