@@ -31,7 +31,7 @@ public type Provider<T> is {
     cached: Maybe<T>,
 };
 
-implement Provider<T> {
+implement<T: Clone> Provider<T> {
     /// Create a new provider with the given factory function.
     public fn new(factory: fn() -> T) -> Self {
         Provider { factory: factory, cached: None }
@@ -43,14 +43,52 @@ implement Provider<T> {
     }
 
     /// Get the provided value, invoking the factory on first access.
+    ///
+    /// Subsequent calls return a clone of the cached value — the cache
+    /// is preserved so the factory is invoked exactly once. Requires
+    /// `T: Clone` because the caller takes ownership of an instance
+    /// while the cached copy must remain in `self.cached` for future
+    /// calls.
+    ///
+    /// The previous implementation had two soundness bugs that this
+    /// rewrite closes:
+    ///
+    ///   1. `match self.cached { Some(ref value) => value, ... }`
+    ///      bound `value: &T` via the `ref` pattern but the function
+    ///      signature returned `T` — a type mismatch the typechecker
+    ///      should reject.
+    ///   2. The `None` arm did `self.cached = Some(value); value` —
+    ///      `value` was MOVED into the Some(...) on the previous
+    ///      line; the bare `value` at the tail is a use-after-move
+    ///      for any non-Copy `T`.
+    ///
+    /// Callers needing reference-back without clone should use the
+    /// new `get_ref` accessor below.
     public fn get(&mut self) -> T {
-        match self.cached {
-            Some(ref value) => value,
-            None => {
-                let value = (self.factory)();
-                self.cached = Some(value);
-                value
-            }
+        if self.cached.is_none() {
+            self.cached = Some((self.factory)());
+        }
+        match &self.cached {
+            Some(value) => value.clone(),
+            None => unreachable(),
+        }
+    }
+
+    /// Get a reference to the provided value without cloning. Invokes
+    /// the factory on first access and caches the result; subsequent
+    /// calls return a reference into the cache.
+    ///
+    /// Useful for `T` that is expensive to clone (large config blobs,
+    /// connection pools) or non-Clone (database handles). The
+    /// reference's lifetime is tied to `&mut self` — callers can hold
+    /// it only while no other call mutates the provider.
+    public fn get_ref(&mut self) -> &T {
+        if self.cached.is_none() {
+            self.cached = Some((self.factory)());
+        }
+        match &self.cached {
+            Some(value) => value,
+            None => unreachable(),
         }
     }
 
