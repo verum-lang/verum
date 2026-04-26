@@ -1588,6 +1588,13 @@ impl LintPass for ArchitectureViolationPass {
 struct CbgrBudgetsConfig {
     default_check_ns: u64,
     modules: std::collections::HashMap<String, CbgrModuleBudget>,
+    /// Optional path to a profile file produced by
+    /// `verum bench --emit-cbgr-profile`. When set, the per-module
+    /// `max_check_ns` budget is checked against the *measured*
+    /// `deref_ns_p99` from the profile rather than the static 15 ns
+    /// fallback. Missing or unparseable file → static fallback +
+    /// stderr warning.
+    measurements: Option<String>,
 }
 
 impl Default for CbgrBudgetsConfig {
@@ -1595,6 +1602,7 @@ impl Default for CbgrBudgetsConfig {
         Self {
             default_check_ns: 15, // matches CBGR spec: ~15ns per managed deref
             modules: std::collections::HashMap::new(),
+            measurements: None,
         }
     }
 }
@@ -1606,9 +1614,68 @@ struct CbgrModuleBudget {
 }
 
 /// Cost of one managed-tier CBGR reference deref, per the CBGR spec
-/// (`docs/detailed/26-cbgr-implementation.md`). This is the static
-/// estimate; profile-driven enforcement is Stage 3.
+/// (`docs/detailed/26-cbgr-implementation.md`). The static fallback
+/// — used when no profile-measurement file is available.
 const CBGR_MANAGED_DEREF_NS: u64 = 15;
+
+/// On-disk profile produced by `verum bench --emit-cbgr-profile`.
+/// Maps each module path to its measured per-deref cost. Loaded by
+/// the CBGR-budget pass when the manifest references it via
+/// `[lint.cbgr_budgets].measurements = "<path>"`.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CbgrProfile {
+    schema_version: u32,
+    modules: std::collections::HashMap<String, ModuleProfile>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ModuleProfile {
+    /// p99 measured deref cost in nanoseconds. Higher = slower.
+    deref_ns_p99: u64,
+}
+
+/// Look up the profile-measured deref cost for `module_path`. Most-
+/// specific exact match wins; otherwise prefix match (with `.` boundary).
+/// Returns `None` if the profile isn't loaded or the module isn't in it.
+fn measured_deref_ns(profile: Option<&CbgrProfile>, module_path: &str) -> Option<u64> {
+    let profile = profile?;
+    if profile.schema_version != 1 {
+        return None;
+    }
+    if let Some(m) = profile.modules.get(module_path) {
+        return Some(m.deref_ns_p99);
+    }
+    // Prefix match — most-specific wins.
+    let mut best: Option<(&str, &ModuleProfile)> = None;
+    for (key, m) in &profile.modules {
+        if module_path.starts_with(key)
+            && module_path.len() > key.len()
+            && module_path.as_bytes()[key.len()] == b'.'
+            && best.map(|(b, _)| key.len() > b.len()).unwrap_or(true)
+        {
+            best = Some((key, m));
+        }
+    }
+    best.map(|(_, m)| m.deref_ns_p99)
+}
+
+/// Load the CBGR profile from `path`. Returns `None` (with a
+/// stderr warning) on any read / parse failure — the static
+/// fallback path takes over silently.
+fn load_cbgr_profile(path: &str) -> Option<CbgrProfile> {
+    let raw = std::fs::read(path).ok()?;
+    match serde_json::from_slice::<CbgrProfile>(&raw) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!(
+                "warning: lint.cbgr_budgets.measurements at {} could not be parsed: {}; falling back to static enforcement",
+                path, e
+            );
+            None
+        }
+    }
+}
 
 struct CbgrBudgetExceededPass;
 
@@ -1647,10 +1714,15 @@ impl LintPass for CbgrBudgetExceededPass {
             .map(|(_, b)| b.max_check_ns)
             .unwrap_or(cfg.default_check_ns);
 
-        // Static estimate: every managed deref costs at least
-        // CBGR_MANAGED_DEREF_NS. If the budget is below that, every
-        // managed ref violates the budget.
-        if budget >= CBGR_MANAGED_DEREF_NS {
+        // Cost source: if the manifest points at a profile file
+        // and the profile has a measurement for this module, use
+        // that. Otherwise fall back to the static CBGR estimate.
+        let profile = cfg.measurements.as_deref().and_then(load_cbgr_profile);
+        let measured_cost = measured_deref_ns(profile.as_ref(), &module_path);
+        let actual_cost = measured_cost.unwrap_or(CBGR_MANAGED_DEREF_NS);
+
+        // Pass when the budget already covers the cost.
+        if budget >= actual_cost {
             return Vec::new();
         }
 
