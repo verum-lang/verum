@@ -849,34 +849,8 @@ public type ToSocketAddrs is protocol {
 implement ToSocketAddrs for SocketAddr {
     type Iter = List<SocketAddr>;
     fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
-        // Reconstruct the variant from the borrowed `&self` rather than
-        // deref-and-push (`v.push(*self)`). The naive form fails under
-        // AOT today: `*self` of a sum-type reference lowers to a single
-        // 8-byte load (`ldr x8, [x8]`) instead of a full struct copy,
-        // so the list element ends up holding only the object header
-        // word — subsequent `is_ipv4()` / variant-tag reads on the
-        // iterated element SEGV at offset 0/0x18 of a malformed value.
-        // Bisected 2026-04-26 (#76): every adjacent path (constructor,
-        // direct `is_ipv4`, manual list-build+iterate, free-function
-        // body-mirror) PASSES; only the trait body's `*self` corrupts.
-        // Pattern-match instead — variant constructors copy the inner
-        // payload through their own well-typed code path. Once #76
-        // lands a proper deref-of-sum-type lowering this can revert
-        // to the simpler `v.push(*self)` form.
         let mut v: List<SocketAddr> = [];
-        match self {
-            V4(addr_v4) => {
-                let (a, b, c, d) = addr_v4.ip.octets;
-                let ip = Ipv4Addr.new(a, b, c, d);
-                v.push(SocketAddr.new_v4(ip, addr_v4.port));
-            }
-            V6(addr_v6) => {
-                let (a, b, c, d, e, f, g, h) = addr_v6.ip.segments;
-                let ip = Ipv6Addr.new(a, b, c, d, e, f, g, h);
-                v.push(SocketAddr.V6(SocketAddrV6.new(
-                    ip, addr_v6.port, addr_v6.flowinfo, addr_v6.scope_id)));
-            }
-        }
+        v.push(*self);
         Ok(v)
     }
 }
