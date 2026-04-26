@@ -135,6 +135,68 @@ pub enum CoreTerm {
         predicate: Heap<CoreTerm>,
     },
 
+    /// V8 (#236) — quotient type: `Quotient(base, equiv)`.
+    ///
+    /// Per VVA §7.5: a quotient `Q = T / ~` collapses elements
+    /// of `T` related by the equivalence `~` into a single
+    /// equivalence class. The kernel checks (a) `base` is a
+    /// type, (b) `equiv` is a binary relation on `base`,
+    /// (c) the eliminator's motive respects the equivalence.
+    ///
+    /// Setoid quotients (Z = ℕ²/~ where (a,b)~(c,d) iff a+d =
+    /// b+c) and propositional truncation (||A|| = A / ⊤) both
+    /// fall under this constructor; the difference lies in the
+    /// equiv predicate.
+    Quotient {
+        /// Carrier type T.
+        base: Heap<CoreTerm>,
+        /// Binary relation `~ : T → T → Prop`. Must be
+        /// reflexive + symmetric + transitive (the kernel
+        /// records but does not internally verify these
+        /// properties — they're framework-axiom-attestable).
+        equiv: Heap<CoreTerm>,
+    },
+
+    /// V8 (#236) — quotient introduction: `[t]_~`. Lifts a
+    /// value `t : T` into the quotient `T / ~` by taking its
+    /// equivalence class. Per `K-Quot-Intro`:
+    ///
+    ///     Γ ⊢ t : T   Γ ⊢ ~ : T → T → Prop
+    ///     ──────────────────────────────────
+    ///     Γ ⊢ QuotIntro(t) : Quotient(T, ~)
+    QuotIntro {
+        /// Element to lift.
+        value: Heap<CoreTerm>,
+        /// Carrier type (for round-trip type-checking).
+        base: Heap<CoreTerm>,
+        /// Equivalence relation (for round-trip).
+        equiv: Heap<CoreTerm>,
+    },
+
+    /// V8 (#236) — quotient elimination: `quot_elim(q, motive,
+    /// case)`. Eliminates a quotient by providing a value-level
+    /// case that respects the equivalence:
+    ///
+    ///     Γ ⊢ q : Quotient(T, ~)
+    ///     Γ ⊢ motive : Quotient(T, ~) → U
+    ///     Γ ⊢ case : Π(t: T). motive([t]_~)
+    ///     // implicit obligation: ∀ t1 t2: T. t1 ~ t2 → case(t1) ≡ case(t2)
+    ///     ─────────────────────────────────────────────
+    ///     Γ ⊢ quot_elim(q, motive, case) : motive(q)
+    ///
+    /// The respect-of-equivalence obligation is discharged by
+    /// the framework-axiom system or `@verify(proof)` — the
+    /// kernel records the obligation but doesn't internally
+    /// derive it.
+    QuotElim {
+        /// The quotient term being eliminated.
+        scrutinee: Heap<CoreTerm>,
+        /// Motive predicate `Quotient(T, ~) → U`.
+        motive: Heap<CoreTerm>,
+        /// The `Π(t: T). motive([t]_~)` case function.
+        case: Heap<CoreTerm>,
+    },
+
     /// Reference to a named inductive / higher-inductive type (from
     /// the stdlib, from the user's project, or from a framework axiom).
     ///

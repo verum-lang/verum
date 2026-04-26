@@ -1023,7 +1023,7 @@ public type Interval is
 
 Higher cells (2-cells, 3-cells) extend `path_endpoints` with nested path expressions — a minimal grammar addition (to be specified alongside the `K-Cell` kernel rule), not a new top-level construct.
 
-### 7.5 Quotient types
+### 7.5 Quotient types **[100% — V8 #236]**
 
 Grammar: `type_def` with `type_expr` on the RHS invoking `Quotient<_, _>` from `core.math.quotient`. **No new keyword.**
 
@@ -1036,6 +1036,18 @@ public type QuotInt is Quotient<(Int, Int), eq_pair>;
 ```
 
 `Quotient<A, R>` is a stdlib-defined type with `QuotIntro` and `QuotElim` CoreTerm constructors at the kernel layer; surface syntax stays within `type ... is` grammar.
+
+**Kernel rules** (`crates/verum_kernel/src/infer.rs`, `support.rs`, `proof_tree.rs`):
+
+* **K-Quot-Form** — `Γ ⊢ A : Type_i,  Γ ⊢ R : A → A → Type` ⊢ `Quotient(A, R) : Type_i`. Quotient inhabits the same universe as its base.
+* **K-Quot-Intro** — `Γ ⊢ t : A` ⊢ `[t]_R : Quotient(A, R)` (typed in kernel as `QuotIntro { value, base, equiv }`).
+* **K-Quot-Elim** — `Γ ⊢ q : Quotient(A, R),  Γ ⊢ motive : Quotient(A, R) → Type,  Γ ⊢ case : (a : A) → motive([a]_R)` ⊢ `quot_elim(q, motive, case) : motive(q)`. The respect-of-equivalence side condition is V2 (frameworks attest reflexivity / symmetry / transitivity / `case` invariance via axioms).
+
+**β-rule** — `quot_elim([t]_R, motive, case) ↦ case(t)` (in `normalize_with_budget` and `normalize_with_axioms_budget`; structural reductions for sub-terms otherwise).
+
+**Proof-tree** — `KernelRule::KQuotForm | KQuotIntro | KQuotElim` with `record_inference` arms; ε / depth pass `m_depth` and `m_depth_omega` cover all three constructors via `ord_max` over components.
+
+**Coverage**: `crates/verum_kernel/tests/k_quotient.rs` (10 integration tests) — Quot-Form admits, universe-base lifts to Type_(i+1), ill-typed base rejected, Quot-Intro typed at base, value-at-wrong-base rejected, Quot-Elim typed as `motive(scrutinee)`, non-Quotient scrutinee rejected, β-rule normalises, `definitional_eq` recognises β, setoid-Z (ℕ × ℕ / ~) construction typechecks.
 
 ### 7.6 Quantitative / linear types
 

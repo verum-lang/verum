@@ -713,6 +713,10 @@ pub enum KernelRule {
     KRefineOmega,
     KRefineIntro,
     KRefineErase,
+    // §7.5 Quotient types (V8 #236)
+    KQuotForm,
+    KQuotIntro,
+    KQuotElim,
     // §4.4a.4 Inductive
     KInductive,
     KPos,
@@ -749,6 +753,9 @@ impl KernelRule {
             KernelRule::KTransp => "K-Transp",
             KernelRule::KGlue => "K-Glue",
             KernelRule::KRefine => "K-Refine",
+            KernelRule::KQuotForm => "K-Quot-Form",
+            KernelRule::KQuotIntro => "K-Quot-Intro",
+            KernelRule::KQuotElim => "K-Quot-Elim",
             KernelRule::KRefineOmega => "K-Refine-omega",
             KernelRule::KRefineIntro => "K-Refine-Intro",
             KernelRule::KRefineErase => "K-Refine-Erase",
@@ -1090,6 +1097,39 @@ fn inference_rule_and_premises(
                 premises.push(p);
             }
             KernelRule::KRefine
+        }
+        CoreTerm::Quotient { base, equiv } => {
+            if let Some(p) = record_inference(ctx, base, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, equiv, axioms) {
+                premises.push(p);
+            }
+            KernelRule::KQuotForm
+        }
+        CoreTerm::QuotIntro { value, base, equiv } => {
+            if let Some(p) = record_inference(ctx, value, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, base, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, equiv, axioms) {
+                premises.push(p);
+            }
+            KernelRule::KQuotIntro
+        }
+        CoreTerm::QuotElim { scrutinee, motive, case } => {
+            if let Some(p) = record_inference(ctx, scrutinee, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, motive, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, case, axioms) {
+                premises.push(p);
+            }
+            KernelRule::KQuotElim
         }
         CoreTerm::Inductive { args, .. } => {
             for a in args.iter() {

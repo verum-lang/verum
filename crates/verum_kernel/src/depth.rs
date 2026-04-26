@@ -128,6 +128,15 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         CoreTerm::ModalBigAnd(args) => {
             args.iter().map(|t| m_depth(t)).max().unwrap_or(0)
         }
+        // V8 (#236) — quotient types: max over base + equiv
+        // (the constructor's structural depth).
+        CoreTerm::Quotient { base, equiv } => m_depth(base).max(m_depth(equiv)),
+        CoreTerm::QuotIntro { value, base, equiv } => {
+            m_depth(value).max(m_depth(base)).max(m_depth(equiv))
+        }
+        CoreTerm::QuotElim { scrutinee, motive, case } => {
+            m_depth(scrutinee).max(m_depth(motive)).max(m_depth(case))
+        }
     }
 }
 
@@ -325,6 +334,18 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
         CoreTerm::Refine { base, predicate, .. } => {
             ord_max(m_depth_omega(base), m_depth_omega(predicate))
         }
+        // V8 (#236) — quotient types under modal-depth ordinal.
+        CoreTerm::Quotient { base, equiv } => {
+            ord_max(m_depth_omega(base), m_depth_omega(equiv))
+        }
+        CoreTerm::QuotIntro { value, base, equiv } => ord_max(
+            m_depth_omega(value),
+            ord_max(m_depth_omega(base), m_depth_omega(equiv)),
+        ),
+        CoreTerm::QuotElim { scrutinee, motive, case } => ord_max(
+            m_depth_omega(scrutinee),
+            ord_max(m_depth_omega(motive), m_depth_omega(case)),
+        ),
         CoreTerm::Inductive { args, .. } => {
             let mut sup = OrdinalDepth::finite(0);
             for arg in args.iter() {
