@@ -415,6 +415,22 @@ impl VerificationPass for HygieneRecheckPass {
                 meta_classifier_candidates.push(corpus.clone());
             }
         }
+
+        // R4 (#197 V0) — framework-compatibility audit. Walk every
+        // (distinct) corpus appearing in @framework annotations
+        // through the well-known incompatibility matrix. Each
+        // match surfaces an Error-severity diagnostic; the
+        // pipeline fail-fast contract halts the build (a known-
+        // inconsistent axiom bundle derives False, breaking every
+        // downstream theorem).
+        let all_corpora: Vec<Text> = framework_corpus_axiom_count
+            .keys()
+            .cloned()
+            .collect();
+        let conflicts = crate::framework_compat::audit_framework_set(&all_corpora);
+        for d in conflicts {
+            self.diagnostics.push(d);
+        }
         if let Some(d) = validate_meta_classifier_uniqueness(&meta_classifier_candidates) {
             self.diagnostics.push(d);
         }

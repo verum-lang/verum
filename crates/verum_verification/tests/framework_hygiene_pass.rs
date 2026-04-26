@@ -319,6 +319,58 @@ fn r3_fires_on_impl_methods_constituting_two_corpora() {
 }
 
 #[test]
+fn r4_uip_plus_univalence_rejected_via_hygiene_pass() {
+    // V0 framework-conflicts wiring (#197): an axiom in the
+    // `uip` corpus and another in `univalence` — the audit
+    // surfaces R4 with literature citation. R4 is Error severity;
+    // the pass returns success == false (fail-fast in the
+    // pipeline).
+    let uip_axiom = axiom_with_attrs("uip_axiom", vec![framework_attr("uip")]);
+    let ua_axiom = axiom_with_attrs(
+        "univalence_axiom",
+        vec![framework_attr("univalence")],
+    );
+    let module = module_with(vec![
+        ItemKind::Axiom(uip_axiom),
+        ItemKind::Axiom(ua_axiom),
+    ]);
+    let mut pass = HygieneRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success, "uip ⊥ univalence must fail-fast");
+    let r4_count = pass
+        .diagnostics()
+        .iter()
+        .filter(|d| d.rule == "R4")
+        .count();
+    assert_eq!(r4_count, 1);
+    let r4 = pass.diagnostics().iter().find(|d| d.rule == "R4").unwrap();
+    assert_eq!(r4.severity, HygieneSeverity::Error);
+    assert!(r4.message.as_str().contains("uip"));
+    assert!(r4.message.as_str().contains("univalence"));
+    assert!(r4.message.as_str().contains("HoTT Book"));
+}
+
+#[test]
+fn r4_compatible_corpora_pass_clean() {
+    // Compatible pair (lurie_htt + schreiber_dcct) — no R4
+    // diagnostic should fire.
+    let htt = axiom_with_attrs("y", vec![framework_attr("lurie_htt")]);
+    let dcct = axiom_with_attrs("z", vec![framework_attr("schreiber_dcct")]);
+    let module = module_with(vec![ItemKind::Axiom(htt), ItemKind::Axiom(dcct)]);
+    let mut pass = HygieneRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(result.success);
+    let r4_count = pass
+        .diagnostics()
+        .iter()
+        .filter(|d| d.rule == "R4")
+        .count();
+    assert_eq!(r4_count, 0);
+}
+
+#[test]
 fn r3_threshold_lowered_to_two_fires_with_two_axioms_each() {
     // V3 (#203): with threshold=2, two corpora each shipping
     // exactly 2 axioms qualify as meta-classifier candidates ⇒ R3.
