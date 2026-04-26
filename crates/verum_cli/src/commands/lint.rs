@@ -54,6 +54,66 @@ struct LintRule {
     category: LintCategory,
 }
 
+/// Status of a lint rule in the catalogue.
+///
+/// `Active` is the default — most rules don't appear in
+/// `DEPRECATED_RULES` and are treated as Active. Rules slated for
+/// removal flip to `Deprecated { since, replacement }`; references
+/// to them in `[lint.severity]` / `@allow` / CLI flags emit
+/// `meta::deprecated-rule` warnings naming the replacement so the
+/// user knows where to migrate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LintRuleStatus {
+    Active,
+    Deprecated {
+        /// Version the deprecation took effect, e.g. "0.7.0".
+        since: &'static str,
+        /// Replacement rule name, when one exists. `None` for
+        /// rules slated for removal without a successor.
+        replacement: Option<&'static str>,
+    },
+}
+
+/// Side-map of deprecated rules. New deprecations land here; the
+/// main `LINT_RULES` table is unchanged. Both lookups happen
+/// together at validate / explain / list time.
+const DEPRECATED_RULES: &[(&'static str, LintRuleStatus)] = &[
+    // Empty today — populated as renames land. Example:
+    // ("missing-error-context", LintRuleStatus::Deprecated {
+    //     since: "0.7.0",
+    //     replacement: Some("error-context-required"),
+    // }),
+];
+
+/// Status lookup. Defaults to `Active` for any rule not in
+/// `DEPRECATED_RULES`.
+pub fn rule_status(name: &str) -> LintRuleStatus {
+    DEPRECATED_RULES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, s)| *s)
+        .unwrap_or(LintRuleStatus::Active)
+}
+
+/// True when a rule is on the deprecation path.
+pub fn is_deprecated(name: &str) -> bool {
+    matches!(rule_status(name), LintRuleStatus::Deprecated { .. })
+}
+
+/// Format a one-line deprecation notice for inclusion in CLI
+/// output (`--list-rules`, validate-config error messages).
+pub fn deprecation_notice(name: &str) -> Option<String> {
+    match rule_status(name) {
+        LintRuleStatus::Active => None,
+        LintRuleStatus::Deprecated { since, replacement } => Some(match replacement {
+            Some(repl) => format!(
+                "deprecated since {since} — use `{repl}` instead",
+            ),
+            None => format!("deprecated since {since} — slated for removal"),
+        }),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintCategory {
     Performance,
@@ -3539,10 +3599,26 @@ pub fn list_rules() -> Result<()> {
             LintCategory::Style => "style",
             LintCategory::Verification => "verification",
         };
-        println!("{:<32} {:<8} {:<14} {}", r.name, level, cat, r.description);
+        let suffix = match deprecation_notice(r.name) {
+            Some(n) => format!(" [DEPRECATED — {n}]"),
+            None => String::new(),
+        };
+        println!(
+            "{:<32} {:<8} {:<14} {}{}",
+            r.name, level, cat, r.description, suffix
+        );
     }
     println!();
-    println!("Total: {} built-in rules.", LINT_RULES.len());
+    let dep_count = DEPRECATED_RULES.len();
+    println!(
+        "Total: {} built-in rules{}.",
+        LINT_RULES.len(),
+        if dep_count > 0 {
+            format!(" ({dep_count} deprecated)")
+        } else {
+            String::new()
+        }
+    );
     Ok(())
 }
 
