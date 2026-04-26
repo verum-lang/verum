@@ -58,6 +58,7 @@ pub mod cbgr_hints;
 pub mod code_actions;
 pub mod completion;
 pub mod debouncer;
+pub mod cli_format;
 pub mod diagnostics;
 pub mod lint_diagnostics;
 pub mod document;

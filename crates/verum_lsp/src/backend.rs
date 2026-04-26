@@ -171,6 +171,17 @@ impl Backend {
         }
     }
 
+    /// Resolve the active formatter settings from the shared LSP
+    /// config. Used by the `textDocument/formatting` handler to
+    /// route through `verum fmt --stdin`.
+    fn fmt_settings(&self) -> crate::cli_format::FmtSettings {
+        let cfg = self.config.snapshot();
+        crate::cli_format::FmtSettings {
+            enabled: cfg.fmt_enabled,
+            binary: cfg.fmt_binary.clone(),
+        }
+    }
+
 }
 
 #[tower_lsp::async_trait]
@@ -703,6 +714,31 @@ impl LanguageServer for Backend {
 
         tracing::debug!("Format document requested: {}", uri);
 
+        // The CLI binary is the canonical formatter. Pipe the
+        // buffer through `verum fmt --stdin` so the editor and
+        // `verum fmt` produce byte-identical output — no drift
+        // between formatters. On any subprocess failure the in-LSP
+        // formatter takes over as a fallback so the save flow never
+        // breaks.
+        let original = self
+            .documents
+            .with_document(&uri, |doc| doc.text.clone());
+        if let Some(text) = original {
+            let settings = self.fmt_settings();
+            let filename = uri.to_file_path().ok().map(|p| p.display().to_string());
+            if let Some(formatted) =
+                crate::cli_format::format_via_cli(&text, &settings, filename.as_deref()).await
+            {
+                let edits = crate::cli_format::diff_to_text_edits(&text, &formatted);
+                if edits.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(edits.into_iter().collect()));
+            }
+        }
+
+        // Fallback: in-LSP formatter for cases where the binary is
+        // unavailable (e.g. tests, sandboxes without PATH).
         let edits = self
             .documents
             .with_document(&uri, |doc| formatting::format_document(&doc.text))
