@@ -929,6 +929,18 @@ enum Commands {
         #[clap(long)]
         framework_conflicts: bool,
 
+        /// V8 (#231) — accessibility audit (VVA §A.Z.5 item 4):
+        /// walk every `@enact(...)` / EpsilonOf marker in the
+        /// project, cross-reference against `@accessibility(λ)`
+        /// annotations (per Diakrisis Axi-4 λ-accessibility
+        /// premise), and surface any unannotated EpsilonOf site.
+        /// Exit non-zero when at least one missing annotation is
+        /// found (CI gate). This closes the Axi-4 defect from
+        /// VVA §A.Z.1 by making the framework-author's
+        /// accessibility certification a checkable invariant.
+        #[clap(long)]
+        accessibility: bool,
+
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
@@ -2183,6 +2195,7 @@ fn run_command(cli: Cli) -> Result<()> {
             hygiene,
             owl2_classify,
             framework_conflicts,
+            accessibility,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -2212,6 +2225,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_owl2_classify_with_format(output_format)
             } else if framework_conflicts {
                 commands::audit::audit_framework_conflicts_with_format(output_format)
+            } else if accessibility {
+                commands::audit::audit_accessibility_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,

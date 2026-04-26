@@ -2577,15 +2577,15 @@ speculation:
    covering clean / single / max-of-multi / JSON-schema-v1 /
    no-markers paths. **100%**.
 
-4. **Accessibility typed attribute** ✓ — V8 #228 shipped:
+4. **Accessibility typed attribute** ✓ — V8 #228 + #231 shipped:
    `verum_ast::attr::AccessibilityAttr` accepting `omega`,
-   `omega_<n>`, `omega+<n>`, finite-cardinal tokens.
-   `from_attribute` parser handles both Path-form and
-   Text-literal-form arguments + Int literal. 16 round-trip
-   tests covering canonicalisation / parse / display /
-   reject paths. Audit walker (`verum audit --accessibility`)
-   surfacing unannotated EpsilonOf sites is V2 (separate
-   CLI task). **75%**.
+   `omega_<n>`, `omega+<n>`, finite-cardinal tokens (16
+   round-trip tests). V2 CLI walker `verum audit --accessibility`
+   shipped (#231): walks every `@enact` marker, cross-
+   references `@accessibility(λ)` annotations, surfaces
+   uncovered sites with non-zero exit (CI gate). 5
+   integration tests covering clean / covered / missing /
+   mixed / JSON-schema-v1 paths. **100%**.
 
 5. **Eps-invariant ↔ md-omega bridge** ✓ — V8 #229 shipped:
    `EpsInvariant` enum (Zero / Finite / Omega / OmegaPlus /
@@ -2603,9 +2603,9 @@ speculation:
 ### A.Z.5 aggregate completion (V8 measured, no speculation)
 
   * Roadmap items shipped: **5 of 7** (items 1, 2, 3, 4, 5 ✓ shipped at the percentages above; items 6–7 externally blocked).
-  * Per-item completion: 100% + 70% + 100% + 75% + 100% + 0% + 0% = **445% of 700%**.
-  * Aggregate roadmap completion: **64%** (445 / 700).
-  * Tractable-non-blocked subset (items 1–5): **89%** (445 / 500).
+  * Per-item completion: 100% + 70% + 100% + **100%** + 100% + 0% + 0% = **470% of 700%**.
+  * Aggregate roadmap completion: **67%** (470 / 700).
+  * Tractable-non-blocked subset (items 1–5): **94%** (470 / 500).
   * Externally-blocked subset (items 6–7): cannot ship until preprint + tool integrations.
 
 ### A.Z code-side refactor status (#225 stages)

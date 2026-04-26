@@ -805,6 +805,283 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
     Ok(())
 }
 
+/// V8 (#231) — `verum audit --accessibility` (VVA §A.Z.5 item 4).
+///
+/// Walks every `@enact(...)` marker (and EpsilonOf-tagged
+/// declaration) in the project, cross-references against
+/// `@accessibility(λ)` annotations on the same item, and
+/// surfaces every site that lacks an accessibility certificate.
+///
+/// Per Diakrisis Axi-4: M (the metaisation 2-functor) must be
+/// λ-accessible for transfinite iterations to exist (Theorem
+/// 10.T5 — `Fix(M) ≠ ∅`). The kernel cannot internally prove
+/// accessibility — that's a meta-categorical claim — so
+/// framework authors record the certified bound via
+/// `@accessibility(λ)` on each `@enact` marker. This audit is
+/// the CI gate: missing annotations → non-zero exit.
+///
+/// Plain output: per-item table with (kind, name, file,
+/// has-accessibility, λ-if-any). JSON: schema_version=1 with
+/// items array.
+pub fn audit_accessibility_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Auditing @enact ↔ @accessibility coverage");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut rows: Vec<AccessibilityRow> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        for item in &module.items {
+            let (kind_label, item_name, decl_attrs): (
+                &'static str,
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                ItemKind::Theorem(decl) => {
+                    ("theorem", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Lemma(decl) => {
+                    ("lemma", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Corollary(decl) => {
+                    ("corollary", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Axiom(decl) => {
+                    ("axiom", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Function(func) => {
+                    ("fn", func.name.name.clone(), &func.attributes)
+                }
+                _ => continue,
+            };
+            // Item participates in the audit iff it carries any
+            // @enact marker. Items without @enact are skipped
+            // entirely — they don't reference EpsilonOf and
+            // don't need an accessibility certificate.
+            let has_enact = item_attrs_have_named(&item.attributes, "enact")
+                || item_attrs_have_named(decl_attrs, "enact");
+            if !has_enact {
+                continue;
+            }
+            let acc_lambda =
+                find_accessibility_lambda(&item.attributes, decl_attrs);
+            rows.push(AccessibilityRow {
+                file: rel_path.clone(),
+                item_kind: kind_label,
+                item_name,
+                accessibility: acc_lambda,
+            });
+        }
+    }
+
+    // Sort for deterministic CI-friendly output.
+    rows.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.item_name.as_str().cmp(b.item_name.as_str()))
+    });
+    let missing: Vec<&AccessibilityRow> =
+        rows.iter().filter(|r| r.accessibility.is_none()).collect();
+
+    match format {
+        AuditFormat::Plain => {
+            print_accessibility_report(parsed_files, skipped_files, &rows);
+        }
+        AuditFormat::Json => {
+            print_accessibility_report_json(parsed_files, skipped_files, &rows);
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "{} @enact marker(s) without @accessibility(λ) — see report above",
+                missing.len()
+            )
+            .into(),
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct AccessibilityRow {
+    file: PathBuf,
+    item_kind: &'static str,
+    item_name: Text,
+    /// `Some(λ)` when the item carries `@accessibility(λ)`,
+    /// `None` otherwise.
+    accessibility: Option<Text>,
+}
+
+fn item_attrs_have_named(
+    attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    name: &str,
+) -> bool {
+    attrs.iter().any(|a| a.name.as_str() == name)
+}
+
+fn find_accessibility_lambda(
+    item_attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    decl_attrs: &verum_common::List<verum_ast::attr::Attribute>,
+) -> Option<Text> {
+    use verum_ast::attr::AccessibilityAttr;
+    use verum_common::Maybe;
+    for attrs in [item_attrs, decl_attrs] {
+        for a in attrs.iter() {
+            if let Maybe::Some(parsed) = AccessibilityAttr::from_attribute(a) {
+                return Some(parsed.lambda);
+            }
+        }
+    }
+    None
+}
+
+fn print_accessibility_report(
+    parsed_files: usize,
+    skipped_files: usize,
+    rows: &[AccessibilityRow],
+) {
+    println!();
+    println!("{}", "@enact ↔ @accessibility(λ) coverage".bold());
+    println!("{}", "─".repeat(50).dimmed());
+    println!(
+        "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
+        parsed_files, skipped_files
+    );
+    println!();
+
+    if rows.is_empty() {
+        println!("  {} no @enact markers found.", "·".dimmed());
+        println!(
+            "  {} the corpus declares no AC ↔ OC bridge sites;",
+            "·".dimmed()
+        );
+        println!("    no Axi-4 accessibility certification is required.");
+        println!();
+        return;
+    }
+
+    let missing: Vec<&AccessibilityRow> =
+        rows.iter().filter(|r| r.accessibility.is_none()).collect();
+    let covered: Vec<&AccessibilityRow> =
+        rows.iter().filter(|r| r.accessibility.is_some()).collect();
+
+    println!(
+        "  {} {} of {} @enact site(s) carry an @accessibility(λ) certificate.",
+        if missing.is_empty() { "✓".green() } else { "·".yellow() },
+        covered.len(),
+        rows.len()
+    );
+    println!();
+
+    if !covered.is_empty() {
+        println!("  Annotated:");
+        for r in &covered {
+            println!(
+                "    {} {} {}  —  λ = {}  ({})",
+                "✓".green(),
+                r.item_kind,
+                r.item_name.as_str().cyan(),
+                r.accessibility
+                    .as_ref()
+                    .map(|t| t.as_str())
+                    .unwrap_or("?"),
+                r.file.display()
+            );
+        }
+        println!();
+    }
+
+    if !missing.is_empty() {
+        println!("  {} Missing @accessibility(λ):", "✗".red().bold());
+        for r in &missing {
+            println!(
+                "    {} {} {}  —  no @accessibility annotation  ({})",
+                "✗".red(),
+                r.item_kind,
+                r.item_name.as_str().cyan(),
+                r.file.display()
+            );
+        }
+        println!();
+        ui::warn(&format!(
+            "{} @enact marker(s) lack @accessibility(λ). Each is a Diakrisis Axi-4 \
+             accessibility-certificate gap. Add `@accessibility(omega)` (or higher) \
+             to certify the framework-author bound, then re-run `verum audit --accessibility`.",
+            missing.len()
+        ));
+        println!();
+    }
+}
+
+fn print_accessibility_report_json(
+    parsed_files: usize,
+    skipped_files: usize,
+    rows: &[AccessibilityRow],
+) {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
+    out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
+    let total = rows.len();
+    let missing = rows.iter().filter(|r| r.accessibility.is_none()).count();
+    out.push_str(&format!("  \"total_enact_sites\": {},\n", total));
+    out.push_str(&format!("  \"missing_accessibility\": {},\n", missing));
+    out.push_str("  \"items\": [\n");
+    for (i, r) in rows.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"file\": \"{}\",\n",
+            r.file.display().to_string().replace('"', "\\\"")
+        ));
+        out.push_str(&format!("      \"item_kind\": \"{}\",\n", r.item_kind));
+        out.push_str(&format!(
+            "      \"item_name\": \"{}\",\n",
+            r.item_name.as_str().replace('"', "\\\"")
+        ));
+        match &r.accessibility {
+            Some(lambda) => {
+                out.push_str(&format!(
+                    "      \"accessibility\": \"{}\"\n",
+                    lambda.as_str().replace('"', "\\\"")
+                ));
+            }
+            None => {
+                out.push_str("      \"accessibility\": null\n");
+            }
+        }
+        out.push_str(if i + 1 == total { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ]\n");
+    out.push_str("}");
+    println!("{}", out);
+}
+
 /// Enumerate the 18 primitive inference rules implemented by
 /// `verum_kernel`, corresponding to the rule table in
 /// `docs/verification/trusted-kernel.md`.
