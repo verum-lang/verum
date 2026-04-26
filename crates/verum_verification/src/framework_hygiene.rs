@@ -266,18 +266,52 @@ fn item_name_and_attrs<'a>(
 // =============================================================================
 
 /// First-class verification pass that runs framework-hygiene rules
-/// R1+R2+R3 on every module. Inserted into `default_pipeline`
+/// R1+R2+R3 on every module. Inserted into the default pipeline
 /// after `KernelRecheckPass`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HygieneRecheckPass {
     diagnostics: Vec<HygieneDiagnostic>,
+    /// R3 threshold — minimum @framework-annotated declaration
+    /// count for a corpus to qualify as a meta-classifier
+    /// candidate. Default 5 (matches the structural signature
+    /// from `core/meta/framework_hygiene.vr`); configurable per
+    /// corpus per #203 (e.g., owl2_fs ships 64 axioms vs custom
+    /// user packages with 2-3).
+    meta_classifier_threshold: usize,
+}
+
+/// Default R3 threshold per VUVA §13 / `framework_hygiene.vr`.
+pub const DEFAULT_META_CLASSIFIER_THRESHOLD: usize = 5;
+
+impl Default for HygieneRecheckPass {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HygieneRecheckPass {
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
+            meta_classifier_threshold: DEFAULT_META_CLASSIFIER_THRESHOLD,
         }
+    }
+
+    /// Construct with a custom R3 meta-classifier threshold.
+    /// Used by per-corpus configurations where the default 5
+    /// is too low (lurie_htt ships hundreds of axioms) or too
+    /// high (custom user packages with 2-3 axioms might still
+    /// want strict R3 enforcement).
+    pub fn with_meta_classifier_threshold(threshold: usize) -> Self {
+        Self {
+            diagnostics: Vec::new(),
+            meta_classifier_threshold: threshold,
+        }
+    }
+
+    /// The R3 threshold currently configured.
+    pub fn meta_classifier_threshold(&self) -> usize {
+        self.meta_classifier_threshold
     }
 
     /// All diagnostics (Warning + Error) accumulated by the most
@@ -373,10 +407,11 @@ impl VerificationPass for HygieneRecheckPass {
 
         // R3 — count meta-classifier candidates per VUVA §10.4.1.
         // A corpus qualifies as a meta-classifier candidate when
-        // it ships ≥ 5 framework-annotated declarations (the
-        // structural signature from framework_hygiene.vr).
+        // it ships ≥ `meta_classifier_threshold` framework-
+        // annotated declarations (default 5, configurable per
+        // corpus per #203).
         for (corpus, count) in framework_corpus_axiom_count.iter() {
-            if *count >= 5 {
+            if *count >= self.meta_classifier_threshold {
                 meta_classifier_candidates.push(corpus.clone());
             }
         }
@@ -477,5 +512,22 @@ mod tests {
         assert_eq!(HygieneSeverity::Info.as_str(), "info");
         assert_eq!(HygieneSeverity::Warning.as_str(), "warning");
         assert_eq!(HygieneSeverity::Error.as_str(), "error");
+    }
+
+    #[test]
+    fn default_meta_classifier_threshold_is_five() {
+        assert_eq!(DEFAULT_META_CLASSIFIER_THRESHOLD, 5);
+    }
+
+    #[test]
+    fn pass_uses_default_threshold_unless_overridden() {
+        let p = HygieneRecheckPass::new();
+        assert_eq!(p.meta_classifier_threshold(), DEFAULT_META_CLASSIFIER_THRESHOLD);
+    }
+
+    #[test]
+    fn pass_with_custom_threshold_records_choice() {
+        let p = HygieneRecheckPass::with_meta_classifier_threshold(10);
+        assert_eq!(p.meta_classifier_threshold(), 10);
     }
 }

@@ -207,9 +207,9 @@ pub use hoare_logic::{
     wp as hoare_wp,
 };
 pub use framework_hygiene::{
-    HygieneDiagnostic, HygieneRecheckPass, HygieneSeverity, epsilon_is_canonicalisable,
-    name_has_brand_prefix, validate_epsilon_canonicalisable, validate_foundation_neutral_name,
-    validate_meta_classifier_uniqueness,
+    DEFAULT_META_CLASSIFIER_THRESHOLD, HygieneDiagnostic, HygieneRecheckPass, HygieneSeverity,
+    epsilon_is_canonicalisable, name_has_brand_prefix, validate_epsilon_canonicalisable,
+    validate_foundation_neutral_name, validate_meta_classifier_uniqueness,
 };
 pub use integration::{
     CodegenIntegration, HeapCounterexample, HoareVerificationResult, HoareZ3Verifier,
