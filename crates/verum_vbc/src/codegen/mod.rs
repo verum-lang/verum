@@ -920,6 +920,10 @@ impl VbcCodegen {
                 m.insert("Option".to_string(), TypeId::MAYBE);
                 m.insert("Result".to_string(), TypeId::RESULT);
                 m.insert("Range".to_string(), TypeId::RANGE);
+                m.insert("Array".to_string(), TypeId::ARRAY);
+                m.insert("Tuple".to_string(), TypeId::TUPLE);
+                m.insert("Deque".to_string(), TypeId::DEQUE);
+                m.insert("Channel".to_string(), TypeId::CHANNEL);
                 // Pointer/wrapper types
                 m.insert("Heap".to_string(), TypeId::PTR);
                 m.insert("Shared".to_string(), TypeId::PTR);
@@ -1093,8 +1097,7 @@ impl VbcCodegen {
             if let ItemKind::Context(ctx_decl) = &item.kind {
                 let ctx_name = ctx_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&ctx_name) {
-                    let type_id = crate::types::TypeId(crate::types::TypeId::FIRST_USER + self.next_type_id);
-                    self.next_type_id += 1;
+                    let type_id = self.alloc_user_type_id();
                     self.type_name_to_id.insert(ctx_name.clone(), type_id);
 
                     // Create TypeDescriptor with method names as variants
@@ -2757,6 +2760,46 @@ impl VbcCodegen {
         reported
     }
 
+    /// Allocate a fresh user-defined `TypeId` that doesn't collide
+    /// with the reserved well-known ranges.
+    ///
+    /// Reserved ranges (see `crate::types::TypeId` constants):
+    ///   * 0..16        primitives + aliases
+    ///   * 256..260     meta system (TokenStream / Token / Kind / Span)
+    ///   * 512..1024    semantic collections + dependent-type packaging
+    ///                  (LIST, MAP, …, PI, SIGMA, WITNESS)
+    ///
+    /// Without this guard, a stdlib build whose user-type count
+    /// exceeds 240 wraps `next_type_id` into the meta range, then
+    /// past 252 wraps into the semantic range — and stdlib types
+    /// silently collide with reserved IDs.  #170's global
+    /// consistency check surfaced this on `result.vr` where
+    /// `OneshotInner` and `Channel` both ended up at TypeId(523).
+    ///
+    /// The function bumps `next_type_id` past every reserved range
+    /// it encounters before returning.  Idempotent in the sense
+    /// that calling it `n` times produces `n` distinct IDs.
+    fn alloc_user_type_id(&mut self) -> crate::types::TypeId {
+        use crate::types::TypeId;
+        loop {
+            let candidate = TypeId::FIRST_USER + self.next_type_id;
+            // Meta-system range: 256..260 (TOKEN_STREAM..SPAN).  If we
+            // landed inside, skip to 260.
+            if (256..260).contains(&candidate) {
+                self.next_type_id = 260 - TypeId::FIRST_USER;
+                continue;
+            }
+            // Semantic-collection + dependent-type range: 512..1024.
+            // Skip past it on first encounter.
+            if (TypeId::FIRST_SEMANTIC..=TypeId::LAST_SEMANTIC).contains(&candidate) {
+                self.next_type_id = (TypeId::LAST_SEMANTIC + 1) - TypeId::FIRST_USER;
+                continue;
+            }
+            self.next_type_id += 1;
+            return TypeId(candidate);
+        }
+    }
+
     /// Cross-module type-table consistency check (#170).
     ///
     /// Runs after all imported modules have been processed and the
@@ -3026,8 +3069,7 @@ impl VbcCodegen {
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&type_name) {
-                    let type_id = crate::types::TypeId(crate::types::TypeId::FIRST_USER + self.next_type_id);
-                    self.next_type_id += 1;
+                    let type_id = self.alloc_user_type_id();
                     self.type_name_to_id.insert(type_name, type_id);
                 }
             }
@@ -3104,8 +3146,7 @@ impl VbcCodegen {
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&type_name) {
-                    let type_id = crate::types::TypeId(crate::types::TypeId::FIRST_USER + self.next_type_id);
-                    self.next_type_id += 1;
+                    let type_id = self.alloc_user_type_id();
                     self.type_name_to_id.insert(type_name, type_id);
                 }
             }
@@ -3160,8 +3201,7 @@ impl VbcCodegen {
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&type_name) {
-                    let type_id = crate::types::TypeId(crate::types::TypeId::FIRST_USER + self.next_type_id);
-                    self.next_type_id += 1;
+                    let type_id = self.alloc_user_type_id();
                     self.type_name_to_id.insert(type_name, type_id);
                 }
             }
@@ -3211,8 +3251,7 @@ impl VbcCodegen {
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&type_name) {
-                    let type_id = crate::types::TypeId(crate::types::TypeId::FIRST_USER + self.next_type_id);
-                    self.next_type_id += 1;
+                    let type_id = self.alloc_user_type_id();
                     self.type_name_to_id.insert(type_name, type_id);
                 }
             }
@@ -6264,8 +6303,7 @@ impl VbcCodegen {
                 let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
                     existing
                 } else {
-                    let tid = crate::types::TypeId(crate::types::TypeId::FIRST_USER + self.next_type_id);
-                    self.next_type_id += 1;
+                    let tid = self.alloc_user_type_id();
                     self.type_name_to_id.insert(type_name.clone(), tid);
                     tid
                 };
@@ -6382,8 +6420,7 @@ impl VbcCodegen {
                 let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
                     existing
                 } else {
-                    let tid = crate::types::TypeId(crate::types::TypeId::FIRST_USER + self.next_type_id);
-                    self.next_type_id += 1;
+                    let tid = self.alloc_user_type_id();
                     self.type_name_to_id.insert(type_name.clone(), tid);
                     tid
                 };
@@ -8957,6 +8994,46 @@ mod tests {
         // But the name-vs-id check is silent because both names are
         // claimed against the same id.
         assert_eq!(report.duplicate_names_with_different_ids.len(), 0);
+    }
+
+    /// `alloc_user_type_id` must skip reserved ranges (#170).
+    /// Drives the allocator past 256..260 (meta range) and
+    /// 512..1024 (semantic-collection + dependent-type range) and
+    /// asserts that no allocated id lands inside.
+    #[test]
+    fn test_alloc_user_type_id_skips_reserved_ranges() {
+        use crate::types::TypeId;
+        let mut codegen = VbcCodegen::new();
+        // Reset next_type_id so we start from 0 and walk past every
+        // reserved range deterministically.
+        codegen.next_type_id = 0;
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1100 {
+            let id = codegen.alloc_user_type_id();
+            assert!(
+                id.0 >= TypeId::FIRST_USER,
+                "allocated id {} below FIRST_USER ({})", id.0, TypeId::FIRST_USER,
+            );
+            assert!(
+                !(256..260).contains(&id.0),
+                "allocated id {} inside meta-system range 256..260", id.0,
+            );
+            assert!(
+                !(TypeId::FIRST_SEMANTIC..=TypeId::LAST_SEMANTIC).contains(&id.0),
+                "allocated id {} inside semantic-collection range {}..={}",
+                id.0, TypeId::FIRST_SEMANTIC, TypeId::LAST_SEMANTIC,
+            );
+            assert!(
+                seen.insert(id.0),
+                "duplicate id {} returned from alloc_user_type_id", id.0,
+            );
+        }
+        // After 1100 allocations starting from id 16, we should have
+        // walked past the 4-id meta range (256..260) and the
+        // 512-id semantic range (512..=1023).  Last allocated id
+        // should therefore be FIRST_USER + 1100 + 4 + 512 - 1 =
+        // 16 + 1100 + 516 - 1 = 1631 (off-by-one tolerated; the
+        // strict check above is enough).
     }
 
     /// Synthetic-table smoke (#170): a sum type with a tag gap
