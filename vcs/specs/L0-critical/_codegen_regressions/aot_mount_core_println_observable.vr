@@ -1,0 +1,32 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: codegen, aot, mount-core, libc-allowlist, side-effects
+// @expected-stdout: hi
+// @expected-exit: 0
+// @description: AOT mount-core println side-effect visibility regression.
+//
+// 2026-04-26 #106: `println("hi")` under `mount core.*` produced no
+// observable output despite normal exit. Root cause: the Phase 3.6
+// bodyless-decl safety net in `crates/verum_codegen/src/llvm/vbc_lowering.rs`
+// was stubbing libc symbols absent from `is_libc_extern`. LLVM
+// optimization patterns sometimes lower trailing-newline writes to
+// `puts(s)`, but `puts` was missing from the allow-list. The stub
+// `mov w0, #0; ret` masquerades as "0 chars written, success" — the
+// caller sees Ok(0) and discards the result, output is silently
+// dropped.
+//
+// Fix (1d3f89f0) — added puts/putchar/perror/putc/getc/getchar to
+// `is_libc_extern`. These remain undefined LLVM declarations so dyld
+// resolves them to the real libc implementations at link/load time.
+//
+// This test pins the contract: side effects of println must surface
+// to stdout in AOT mount-core programs.
+
+mount core.*;
+mount core.io.stdio.{println};
+
+fn main() -> Int {
+    println("hi");
+    0
+}
