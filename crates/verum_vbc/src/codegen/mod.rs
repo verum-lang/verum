@@ -2173,13 +2173,47 @@ impl VbcCodegen {
     /// would be processed even when compiling for macOS, causing function registration
     /// conflicts.
     pub(crate) fn should_compile_item(&self, item: &Item) -> bool {
-        // Fast path: no attributes on item
-        if item.attributes.is_empty() {
-            return true;
+        // Check `Item.attributes` (the outer attribute list — populated
+        // by the parser when no inner decl carries attributes, e.g.
+        // for `mount` and `module` items).
+        if !item.attributes.is_empty()
+            && !self.cfg_evaluator.should_include(&item.attributes)
+        {
+            return false;
         }
 
-        // Use CfgEvaluator.should_include which handles @cfg parsing
-        self.cfg_evaluator.should_include(&item.attributes)
+        // Critical fix (#170 / #181): the `verum_fast_parser` puts the
+        // attributes for `type X` / `implement` / `function` declarations
+        // on the *inner* decl (`TypeDecl.attributes`, `ImplDecl.attributes`,
+        // `Function.attributes`), leaving `Item.attributes` empty.  So
+        // `Item.attributes`-only checking silently bypasses @cfg gates
+        // for every type declaration in the stdlib — `@cfg(target_arch
+        // = "x86_64") public type ExceptionFrame is { … };` reaches
+        // codegen even on aarch64 hosts, surfacing as duplicate-id
+        // findings in #170's global type-table consistency check.
+        //
+        // Walk the inner decl's attributes when present.
+        match &item.kind {
+            ItemKind::Type(type_decl) => {
+                if !type_decl.attributes.is_empty()
+                    && !self.cfg_evaluator.should_include(&type_decl.attributes)
+                {
+                    return false;
+                }
+            }
+            ItemKind::Function(func) => {
+                if !func.attributes.is_empty()
+                    && !self.cfg_evaluator.should_include(&func.attributes)
+                {
+                    return false;
+                }
+            }
+            // ImplDecl carries its attributes in `Item.attributes`, not
+            // an inner field — already covered by the outer check above.
+            _ => {}
+        }
+
+        true
     }
 
     /// Extracts the intrinsic name from function attributes.
