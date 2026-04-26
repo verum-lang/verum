@@ -137,3 +137,109 @@ public fn is_weakenable(f: LinForm) -> Bool {
         _ => false,
     }
 }
+
+// =============================================================================
+// 4. Negation-normal form (NNF) — push every Dual to the leaves
+// =============================================================================
+
+/// One-step duality: compute `(f)^⊥` by the standard de Morgan /
+/// involutivity rewrites for full classical linear logic. The
+/// returned form is structurally one level denser than `f` (the
+/// surrounding `Dual` consumed); recursive callers will continue
+/// pushing duals through the children if needed.
+///
+/// ```text
+///     (A ⊗ B)^⊥  ↦  A^⊥ ⅋ B^⊥
+///     (A ⅋ B)^⊥  ↦  A^⊥ ⊗ B^⊥
+///     (A & B)^⊥  ↦  A^⊥ ⊕ B^⊥
+///     (A ⊕ B)^⊥  ↦  A^⊥ & B^⊥
+///     (!A)^⊥     ↦  ?(A^⊥)
+///     (?A)^⊥     ↦  !(A^⊥)
+///     1^⊥        ↦  ⊥
+///     ⊥^⊥        ↦  1
+///     ⊤^⊥        ↦  0
+///     0^⊥        ↦  ⊤
+///     (A^⊥)^⊥    ↦  A         (involutivity)
+///     atom^⊥     ↦  Dual(atom) (atom dual stays as a leaf)
+/// ```
+fn lin_negate(f: LinForm) -> LinForm {
+    match f {
+        LinForm.Atom { name } => LinForm.Dual { inner: Heap(LinForm.Atom { name }) },
+        LinForm.MTensor { left, right } =>
+            lin_par(lin_negate(*left), lin_negate(*right)),
+        LinForm.Par { left, right } =>
+            lin_tensor(lin_negate(*left), lin_negate(*right)),
+        LinForm.With { left, right } =>
+            lin_plus(lin_negate(*left), lin_negate(*right)),
+        LinForm.Plus { left, right } =>
+            lin_with(lin_negate(*left), lin_negate(*right)),
+        LinForm.OfCourse { inner } => lin_why_not(lin_negate(*inner)),
+        LinForm.WhyNot { inner } => lin_of_course(lin_negate(*inner)),
+        LinForm.One => LinForm.Bottom,
+        LinForm.Bottom => LinForm.One,
+        LinForm.Top => LinForm.Zero,
+        LinForm.Zero => LinForm.Top,
+        // Dual of Dual collapses by involutivity — but we then
+        // *recursively normalise* the inner form so the result is
+        // in NNF (in case the inner had its own duals to push).
+        LinForm.Dual { inner } => lin_to_nnf(*inner),
+    }
+}
+
+/// Negation-normal form: every `Dual` constructor in the result
+/// wraps an atomic leaf only; all other connectives appear with
+/// positive (non-dualised) arguments. Idempotent — `lin_to_nnf`
+/// applied to an already-NNF formula returns it unchanged.
+///
+/// This is the standard preprocessing step for sequent-calculus
+/// search and proof-net construction in linear logic.
+public fn lin_to_nnf(f: LinForm) -> LinForm {
+    match f {
+        LinForm.Atom { name } => LinForm.Atom { name },
+        LinForm.MTensor { left, right } =>
+            lin_tensor(lin_to_nnf(*left), lin_to_nnf(*right)),
+        LinForm.Par { left, right } =>
+            lin_par(lin_to_nnf(*left), lin_to_nnf(*right)),
+        LinForm.With { left, right } =>
+            lin_with(lin_to_nnf(*left), lin_to_nnf(*right)),
+        LinForm.Plus { left, right } =>
+            lin_plus(lin_to_nnf(*left), lin_to_nnf(*right)),
+        LinForm.OfCourse { inner } => lin_of_course(lin_to_nnf(*inner)),
+        LinForm.WhyNot { inner } => lin_why_not(lin_to_nnf(*inner)),
+        LinForm.One => LinForm.One,
+        LinForm.Bottom => LinForm.Bottom,
+        LinForm.Top => LinForm.Top,
+        LinForm.Zero => LinForm.Zero,
+        // Push the dual through the inner form — `lin_negate`
+        // handles every connective and recurses via `lin_to_nnf`
+        // for nested duals (involutivity).
+        LinForm.Dual { inner } => lin_negate(*inner),
+    }
+}
+
+/// True iff every `Dual` constructor in `f` wraps an `Atom`.
+/// Used by tests and as a postcondition for `lin_to_nnf` —
+/// `lin_is_nnf(lin_to_nnf(g))` should hold for every input `g`.
+public fn lin_is_nnf(f: LinForm) -> Bool {
+    match f {
+        LinForm.Atom { name: _ } => true,
+        LinForm.Dual { inner } => match *inner {
+            LinForm.Atom { name: _ } => true,
+            _ => false,
+        },
+        LinForm.MTensor { left, right } =>
+            lin_is_nnf(*left) && lin_is_nnf(*right),
+        LinForm.Par { left, right } =>
+            lin_is_nnf(*left) && lin_is_nnf(*right),
+        LinForm.With { left, right } =>
+            lin_is_nnf(*left) && lin_is_nnf(*right),
+        LinForm.Plus { left, right } =>
+            lin_is_nnf(*left) && lin_is_nnf(*right),
+        LinForm.OfCourse { inner } => lin_is_nnf(*inner),
+        LinForm.WhyNot { inner } => lin_is_nnf(*inner),
+        LinForm.One => true,
+        LinForm.Bottom => true,
+        LinForm.Top => true,
+        LinForm.Zero => true,
+    }
+}

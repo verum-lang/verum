@@ -5346,6 +5346,143 @@ impl std::fmt::Display for ExtensionRequirementAttr {
 }
 
 // =============================================================================
+// @accessibility(λ) — Diakrisis Axi-4 accessibility marker (VVA §A.Z.5 item 4)
+// =============================================================================
+
+/// V8 (#228) — `@accessibility(λ)` typed attribute.
+///
+/// Closes Diakrisis Axi-4's λ-accessibility premise per VVA
+/// §A.Z.1 defect inventory. The kernel cannot internally
+/// prove that the metaisation 2-functor M is λ-accessible
+/// (κ-presentable-preserving for some regular cardinal λ) —
+/// that's a meta-categorical claim. Framework authors record
+/// the certified bound via this attribute; downstream tools
+/// (`verum audit --accessibility`) cross-reference against
+/// the framework axiom registry.
+///
+/// Surface forms:
+///   * `@accessibility(omega)` — λ = ω (countable accessibility,
+///     Adamek-Rosicky standard).
+///   * `@accessibility(omega_1)` — first uncountable.
+///   * `@accessibility("omega+1")` — string literal for any
+///     ordinal expression the parser admits.
+///   * `@accessibility(0)` — finite presentability (admits
+///     trivial λ-accessible structures).
+///
+/// `lambda` carries the accessibility-cardinal expression as
+/// a canonical Text token. The kernel does NOT validate
+/// ordinal arithmetic here — that lives in the audit pass +
+/// framework-axiom registry; the AST attribute records the
+/// claim verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AccessibilityAttr {
+    /// Canonical ordinal token (e.g. `"omega"`, `"omega_1"`,
+    /// `"omega+1"`, `"0"`).
+    pub lambda: Text,
+    pub span: Span,
+}
+
+impl AccessibilityAttr {
+    pub fn new(lambda: Text, span: Span) -> Self {
+        Self { lambda, span }
+    }
+
+    /// Validate an accessibility ordinal token. Accepts:
+    ///   * `omega`, `omega_<digits>` (subscripted ordinal).
+    ///   * `omega+<digits>` / `omega_<digits>+<digits>` (sums).
+    ///   * Pure digits (finite cardinals).
+    /// Returns the canonical lowercase form on success;
+    /// `None` for malformed input.
+    pub fn canonicalise_lambda(raw: &str) -> Option<String> {
+        let lowered = raw.to_ascii_lowercase();
+        // Pure-digits → finite cardinal.
+        if lowered.chars().all(|c| c.is_ascii_digit()) && !lowered.is_empty() {
+            return Some(lowered);
+        }
+        // omega-prefixed: omega, omega_<digits>, omega+<digits>,
+        // omega_<digits>+<digits>.
+        if lowered == "omega" {
+            return Some(lowered);
+        }
+        if let Some(rest) = lowered.strip_prefix("omega_") {
+            // Either pure digits, or digits + "+digits".
+            let parts: Vec<&str> = rest.split('+').collect();
+            if parts.len() <= 2
+                && parts
+                    .iter()
+                    .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+            {
+                return Some(format!("omega_{}", rest));
+            }
+            return None;
+        }
+        if let Some(rest) = lowered.strip_prefix("omega+") {
+            if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+                return Some(format!("omega+{}", rest));
+            }
+            return None;
+        }
+        None
+    }
+
+    /// Extract from a generic Attribute. Accepts both forms:
+    ///
+    ///   @accessibility(omega)
+    ///   @accessibility("omega+1")
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if attr.name.as_str() != "accessibility" {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None => return Maybe::None,
+        };
+        if args.len() != 1 {
+            return Maybe::None;
+        }
+        use crate::expr::{Expr, ExprKind};
+        let raw_opt: Option<String> = match args.get(0) {
+            Some(Expr { kind: ExprKind::Path(p), .. }) => p
+                .segments
+                .last()
+                .and_then(|seg| match seg {
+                    crate::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    _ => None,
+                }),
+            Some(Expr { kind: ExprKind::Literal(lit), .. }) => match &lit.kind {
+                crate::literal::LiteralKind::Text(crate::literal::StringLit::Regular(s))
+                | crate::literal::LiteralKind::Text(crate::literal::StringLit::MultiLine(s)) => {
+                    Some(s.as_str().to_string())
+                }
+                crate::literal::LiteralKind::Int(int_lit) => Some(format!("{}", int_lit.value)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let canonical = raw_opt
+            .as_ref()
+            .and_then(|s| Self::canonicalise_lambda(s.as_str()))
+            .map(Text::from);
+        match canonical {
+            Some(c) => Maybe::Some(Self::new(c, attr.span)),
+            None => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for AccessibilityAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for AccessibilityAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@accessibility({})", self.lambda)
+    }
+}
+
+// =============================================================================
 // OWL 2 ATTRIBUTION FAMILY (VVA §21.6 Phase 3 C8 V1)
 //
 // Vocabulary-preserving typed attributes for the OWL 2 Direct Semantics

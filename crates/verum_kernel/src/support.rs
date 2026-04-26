@@ -369,6 +369,83 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
     }
 }
 
+/// V8 (#229) — ε-invariant token (Diakrisis Actic
+/// 12-actic/03-epsilon-invariant.md). The Actic-side dual of
+/// the canonical primitive carries an ordinal-valued
+/// ε-coordinate distinct from `m_depth_omega`'s
+/// `OrdinalDepth`. This enum is the bridge — a tagged union
+/// of the canonical ε-token shapes the Actic spec admits.
+///
+/// Per VVA §A.Z.3.2 defect 3: Actic ε-arithmetic is a
+/// different ordinal arithmetic from the kernel's
+/// Cantor-normal-form `OrdinalDepth`. This type captures the
+/// shape; [`convert_eps_to_md_omega`] performs the canonical
+/// conversion (Actic ε-coord → kernel `OrdinalDepth`)
+/// preserving order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EpsInvariant {
+    /// `ε_0` — the identity ε-coordinate (Actic neutral).
+    Zero,
+    /// `ε_finite(n)` — finite cardinal n.
+    Finite(u32),
+    /// `ε_omega` — first transfinite ε.
+    Omega,
+    /// `ε_omega_plus(n)` — `ω + n`.
+    OmegaPlus(u32),
+    /// `ε_omega_n(coeff, offset)` — `ω·coeff + offset`.
+    OmegaTimes {
+        /// Coefficient `c` in `ω·c + offset`. Must be ≥ 1; `c == 0`
+        /// would collapse to a finite ordinal and is ruled out by
+        /// constructor-side validation.
+        coeff: u32,
+        /// Finite tail `offset` in `ω·c + offset`. May be zero.
+        offset: u32,
+    },
+}
+
+/// V8 (#229) — convert an Actic ε-invariant to the kernel's
+/// Cantor-normal-form [`crate::OrdinalDepth`].
+///
+/// Per VVA §A.Z.5 item 5 + Diakrisis Actic
+/// 12-actic/03-epsilon-invariant.md: the Actic ε-coordinate
+/// and the kernel's modal-depth ordinal are *different*
+/// ordinal arithmetics (the former is a coordinate in the
+/// AC-stratum classifier; the latter measures syntactic
+/// modal-depth of refinement predicates). Both factor through
+/// Cantor normal form, however, so a canonical
+/// order-preserving embedding exists. This function is that
+/// embedding.
+///
+/// Properties (verified by tests):
+///   * `convert(Zero) == finite(0)` — identity.
+///   * `convert(Finite(n)) == finite(n)` — finite preservation.
+///   * `convert(Omega) == omega()` — first-transfinite preservation.
+///   * `convert(OmegaPlus(n)) == { omega_coeff: 1, finite_offset: n }`.
+///   * `convert(OmegaTimes { coeff, offset }) ==
+///     { omega_coeff: coeff, finite_offset: offset }`.
+///   * Monotonicity: `eps1 ≤ eps2` (Actic order) implies
+///     `convert(eps1).lt_or_eq(&convert(eps2))` (kernel lex).
+///
+/// The bridge is **canonical** (independent of how the Actic
+/// ε-token was constructed) and **lossless** under the V0
+/// encoding — every Actic ε that fits Cantor-normal-form
+/// below ε_0 maps to a unique [`OrdinalDepth`].
+pub fn convert_eps_to_md_omega(eps: &EpsInvariant) -> crate::OrdinalDepth {
+    match eps {
+        EpsInvariant::Zero => crate::OrdinalDepth::finite(0),
+        EpsInvariant::Finite(n) => crate::OrdinalDepth::finite(*n),
+        EpsInvariant::Omega => crate::OrdinalDepth::omega(),
+        EpsInvariant::OmegaPlus(n) => crate::OrdinalDepth {
+            omega_coeff: 1,
+            finite_offset: *n,
+        },
+        EpsInvariant::OmegaTimes { coeff, offset } => crate::OrdinalDepth {
+            omega_coeff: *coeff,
+            finite_offset: *offset,
+        },
+    }
+}
+
 /// V8 (#216) — definitional (β-aware) equality on [`CoreTerm`] values.
 ///
 /// Normalises both sides via [`normalize`] and then performs

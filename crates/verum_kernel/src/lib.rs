@@ -134,9 +134,10 @@ pub use universe_ascent::{UniverseTier, check_universe_ascent};
 /// calls one or more of them.
 pub mod support;
 pub use support::{
-    NORMALIZE_STEP_LIMIT, definitional_eq, definitional_eq_with_axioms, free_vars,
-    normalize, normalize_with_axioms, replay_smt_cert,
-    replay_smt_cert_with_obligation, shape_of, structural_eq, substitute,
+    EpsInvariant, NORMALIZE_STEP_LIMIT, convert_eps_to_md_omega, definitional_eq,
+    definitional_eq_with_axioms, free_vars, normalize, normalize_with_axioms,
+    replay_smt_cert, replay_smt_cert_with_obligation, shape_of, structural_eq,
+    substitute,
 };
 
 /// Axiom registry + AST loader — split per #198. Hosts
