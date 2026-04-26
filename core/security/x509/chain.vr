@@ -55,11 +55,31 @@ mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount core.security.sig.rsa.{RsaPublicKey as RsaVerifyKey, RsaHash, verify_pkcs1_v15_prehashed, verify_pss_prehashed};
 
 // =============================================================================
+// Hostile-chain safety cap
+// =============================================================================
+
+/// Maximum number of certificates allowed in a chain submitted to
+/// `validate_chain`. Without this cap a peer could present a
+/// thousands-long chain and force us to perform expensive signature
+/// verifications until the issuer search times out — a CPU-DoS
+/// vector well-documented in TLS implementations.
+///
+/// 16 is well above any well-formed real-world chain (typical:
+/// EE + 1-3 intermediates + root = 4 certs; long-tail edge cases
+/// peak at 5-7). Browsers cap around 10; we pick 16 for headroom.
+///
+/// RFC 5280 §6 says implementations SHOULD support paths up to a
+/// certain depth without specifying a number — but the protocol
+/// has no theoretical upper bound, so applications must impose one.
+public const MAX_CHAIN_LENGTH: Int = 16;
+
+// =============================================================================
 // Errors
 // =============================================================================
 
 public type ChainError is
       EmptyChain
+    | ChainTooLong { length: Int, limit: Int }
     | UnknownIssuer                // no root in TrustStore matches the chain top
     | IssuerSubjectMismatch(Int)   // cert index — issuer doesn't match parent.subject
     | NotYetValid(Int)
@@ -113,6 +133,16 @@ public fn validate_chain(
 ) -> Result<VerifiedChain, ChainError> {
     if chain.len() == 0 {
         return Err(ChainError.EmptyChain);
+    }
+    // Reject pathologically long chains BEFORE running per-cert
+    // signature verification (each verify is ~ms-scale crypto). A
+    // peer presenting a 10000-cert chain would otherwise burn many
+    // CPU-seconds before failing on UnknownIssuer or budget exhaustion.
+    if chain.len() > MAX_CHAIN_LENGTH {
+        return Err(ChainError.ChainTooLong {
+            length: chain.len(),
+            limit: MAX_CHAIN_LENGTH,
+        });
     }
 
     // Find anchoring root: the last cert's issuer must match a root in
