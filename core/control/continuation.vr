@@ -307,3 +307,78 @@ public fn cc_normalise(t: CcTerm, gas: Int) -> (CcTerm, Int) {
     }
     (current, steps)
 }
+
+// =============================================================================
+// 7. α-equivalence
+// =============================================================================
+
+/// One entry of an α-renaming context: at the time the binder was
+/// introduced, the depth was `index`. Variable lookup in the
+/// matching context reduces to a "de Bruijn level" comparison.
+type CcAlphaEntry is { name: Text, index: Int };
+
+fn cc_alpha_lookup(ctx: List<CcAlphaEntry>, name: Text) -> Int {
+    let mut i: Int = 0;
+    while i < ctx.len() as Int {
+        let e: CcAlphaEntry = (*ctx.get(i as Int).unwrap()).clone();
+        if e.name == name {
+            return e.index;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+/// α-equivalence on continuation-calculus terms: two terms are
+/// equal up to consistent renaming of bound variables (Lam, Shift).
+/// Free variables must agree by name; bound variables are compared
+/// by binding-depth as in [`cbpv_alpha_eq`].
+public fn cc_alpha_eq(a: CcTerm, b: CcTerm) -> Bool {
+    let ctx_a: List<CcAlphaEntry> = List.new();
+    let ctx_b: List<CcAlphaEntry> = List.new();
+    cc_alpha_eq_ctx(a, b, ctx_a, ctx_b, 0)
+}
+
+fn cc_alpha_eq_ctx(
+    a: CcTerm,
+    b: CcTerm,
+    ctx_a: List<CcAlphaEntry>,
+    ctx_b: List<CcAlphaEntry>,
+    depth: Int,
+) -> Bool {
+    match (a, b) {
+        (CcTerm.Const { payload: pa }, CcTerm.Const { payload: pb }) => pa == pb,
+        (CcTerm.Var { name: na }, CcTerm.Var { name: nb }) => {
+            let ia = cc_alpha_lookup(ctx_a, na.clone());
+            let ib = cc_alpha_lookup(ctx_b, nb.clone());
+            if ia == -1 && ib == -1 {
+                na == nb
+            } else {
+                ia == ib
+            }
+        },
+        (CcTerm.Lam { param: pa, body: ba },
+         CcTerm.Lam { param: pb, body: bb }) => {
+            let mut ca: List<CcAlphaEntry> = ctx_a;
+            let mut cb: List<CcAlphaEntry> = ctx_b;
+            ca.push(CcAlphaEntry { name: pa, index: depth });
+            cb.push(CcAlphaEntry { name: pb, index: depth });
+            cc_alpha_eq_ctx(*ba, *bb, ca, cb, depth + 1)
+        },
+        (CcTerm.App { func: fa, arg: aa },
+         CcTerm.App { func: fb, arg: ab }) =>
+            cc_alpha_eq_ctx(*fa, *fb, ctx_a.clone(), ctx_b.clone(), depth)
+                && cc_alpha_eq_ctx(*aa, *ab, ctx_a, ctx_b, depth),
+        (CcTerm.Reset { inner: ia }, CcTerm.Reset { inner: ib }) =>
+            cc_alpha_eq_ctx(*ia, *ib, ctx_a, ctx_b, depth),
+        (CcTerm.Shift { binder: bna, body: ba },
+         CcTerm.Shift { binder: bnb, body: bb }) => {
+            let mut ca: List<CcAlphaEntry> = ctx_a;
+            let mut cb: List<CcAlphaEntry> = ctx_b;
+            ca.push(CcAlphaEntry { name: bna, index: depth });
+            cb.push(CcAlphaEntry { name: bnb, index: depth });
+            cc_alpha_eq_ctx(*ba, *bb, ca, cb, depth + 1)
+        },
+        _ => false,
+    }
+}
