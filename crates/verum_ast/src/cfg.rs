@@ -1086,6 +1086,45 @@ mod tests {
         assert_eq!(display, "all(unix, target_arch = \"x86_64\")");
     }
 
+    /// `should_include_with_failures` must:
+    ///   1. Return `(true, [])` for items with no `@cfg` attributes.
+    ///   2. Return `(true, [&attr])` for a `@cfg(...)` whose
+    ///      predicate failed to parse — fail-OPEN include but the
+    ///      failed attribute is reported back to the caller.
+    ///   3. Return `(false, [])` when a parseable predicate evaluates
+    ///      to false.
+    /// Pins the contract that observability isn't compromised by
+    /// the fail-open include semantic.
+    #[test]
+    fn test_should_include_with_failures_reports_unparseable() {
+        use crate::attr::Attribute;
+
+        let evaluator = CfgEvaluator::with_config(TargetConfig::linux_x86_64());
+
+        // (1) No attrs → include=true, no failures.
+        let (incl, fails) = evaluator.should_include_with_failures(&[]);
+        assert!(incl);
+        assert_eq!(fails.len(), 0);
+
+        // (2) `@cfg` with empty args is malformed — args.first() is
+        // None so parse_cfg_predicate isn't even called; the cfg is
+        // treated as unparseable.  Item still includes, but the
+        // failure is reported back.
+        let bad_cfg = Attribute::simple(Text::from("cfg"), dummy_span());
+        let attrs = vec![bad_cfg];
+        let (incl, fails) = evaluator.should_include_with_failures(&attrs);
+        assert!(
+            incl,
+            "fail-open semantic: malformed @cfg includes the item",
+        );
+        assert_eq!(
+            fails.len(),
+            1,
+            "the failed attribute MUST be returned so callers can warn",
+        );
+        assert_eq!(fails[0].name.as_str(), "cfg");
+    }
+
     #[test]
     fn test_custom_cfg() {
         let mut config = TargetConfig::host();
