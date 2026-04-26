@@ -371,11 +371,22 @@ fn apply_modifier(jd: Float64, m: &Text) -> Maybe<Float64> {
 
 fn push_pad(out: &mut Text, n: Int, width: Int) {
     let mut digits: List<Byte> = List.new();
-    let mut x: Int = if n < 0 { -n } else { n };
-    if x == 0 { digits.push(48 as Byte); }
-    while x > 0 {
-        digits.push(((x % 10) + 48) as Byte);
-        x = x / 10;
+    // Two's-complement magnitude via UInt64 — `-Int.MIN` would
+    // overflow back to Int.MIN with the naïve negate; while
+    // calendar fields (year/month/day) realistically never hit
+    // Int.MIN, the helper is generic enough that defensive
+    // handling is cheap insurance against future callers.
+    // Same family as panic.vr / Formatter.write_int /
+    // sqlite/string_fns.int_to_text fixes.
+    let mut mag: UInt64 = if n < 0 {
+        (((!n) as UInt64) + (1 as UInt64))
+    } else {
+        n as UInt64
+    };
+    if mag == (0 as UInt64) { digits.push(48 as Byte); }
+    while mag > (0 as UInt64) {
+        digits.push(((mag % (10 as UInt64)) + (48 as UInt64)) as Byte);
+        mag = mag / (10 as UInt64);
     }
     let mut i: Int = digits.len();
     while i < width { out.push_byte(48 as Byte); i = i + 1; }

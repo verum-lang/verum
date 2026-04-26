@@ -494,14 +494,28 @@ fn append_text(dst: &mut Text, s: &Text) {
 
 fn int_to_text(x: Int64) -> Text {
     if x == (0 as Int64) { return "0".clone(); }
-    let mut n: Int64 = x;
+    // Two's-complement negate of `Int64.MIN` overflows back to
+    // `Int64.MIN`, so the naïve `if n < 0 { n = -n }` followed by
+    // `while n > 0` would silently produce "-" with no digits for
+    // `Int64.MIN` (= -9223372036854775808). Same family as the
+    // panic.vr / Formatter.write_int Int.MIN bugs (b274ab8b /
+    // 985336e3). Work in unsigned magnitude (`UInt64`) so every
+    // `Int64`'s absolute value is exactly representable.
     let mut neg: Bool = false;
-    if n < (0 as Int64) { neg = true; n = -n; }
+    let mut mag: UInt64 = if x < (0 as Int64) {
+        neg = true;
+        // `(~x as UInt64) + 1` is the two's-complement magnitude;
+        // exact for every Int64 including Int64.MIN (whose
+        // magnitude 2^63 fits in UInt64).
+        (((!x) as UInt64) + (1 as UInt64))
+    } else {
+        x as UInt64
+    };
     let mut digits: List<Byte> = List.new();
-    while n > (0 as Int64) {
-        let d: Byte = ((n as Int) % 10) as Byte;
+    while mag > (0 as UInt64) {
+        let d: Byte = (mag % (10 as UInt64)) as Byte;
         digits.push(d + (48 as Byte));
-        n = n / (10 as Int64);
+        mag = mag / (10 as UInt64);
     }
     let mut out = Text.new();
     if neg { out.push_byte(45 as Byte); }

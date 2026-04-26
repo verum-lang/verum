@@ -243,10 +243,19 @@ fn append_text(dst: &mut Text, s: &Text) {
 fn append_int(dst: &mut Text, n: Int) {
     if n == 0 { dst.push_byte(48 as Byte); return; }
     let mut digits: List<Byte> = List.new();
-    let mut x: Int = if n < 0 { -n } else { n };
-    while x > 0 {
-        digits.push(((x % 10) + 48) as Byte);
-        x = x / 10;
+    // Two's-complement magnitude via UInt64 — the naïve negate
+    // overflows for `Int.MIN` and silently produces "-" with no
+    // digits.  CSV export of a column holding `Int.MIN` should
+    // emit a parseable representation, not a stub. Same family
+    // as panic.vr / Formatter.write_int / sqlite/string_fns.
+    let mut mag: UInt64 = if n < 0 {
+        (((!n) as UInt64) + (1 as UInt64))
+    } else {
+        n as UInt64
+    };
+    while mag > (0 as UInt64) {
+        digits.push(((mag % (10 as UInt64)) + (48 as UInt64)) as Byte);
+        mag = mag / (10 as UInt64);
     }
     if n < 0 { dst.push_byte(45 as Byte); }
     let mut i: Int = digits.len() - 1;
