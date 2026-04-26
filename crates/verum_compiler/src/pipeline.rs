@@ -14479,9 +14479,19 @@ int main(int argc, char** argv) {
             }
 
             for item in &stdlib_mod.items {
-                // Skip items gated by @cfg that don't match the current platform
+                // Skip items gated by @cfg that don't match the current platform.
                 if !cfg_eval.should_include(&item.attributes) {
                     continue;
+                }
+                // Critical fix mirroring `verum_vbc::should_compile_item`:
+                // the parser puts `@cfg` on `Function.attributes` (inner
+                // decl), not on `Item.attributes`.  The outer-only check
+                // above silently bypasses every function-level @cfg gate.
+                // Walk the inner FunctionDecl's attributes too.
+                if let verum_ast::ItemKind::Function(func) = &item.kind {
+                    if !cfg_eval.should_include(&func.attributes) {
+                        continue;
+                    }
                 }
 
                 // Only check functions (not impls - they need separate setup)
