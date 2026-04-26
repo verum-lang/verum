@@ -610,14 +610,14 @@ implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
 /// }
 /// ```
 public async fn yield_now() {
-    YieldNow { yielded: false }.await
+    SelectYieldNow { yielded: false }.await
 }
 
-type YieldNow is {
+type SelectYieldNow is {
     yielded: Bool,
 };
 
-implement Future for YieldNow {
+implement Future for SelectYieldNow {
     type Output = ();
 
     fn poll(&mut self, cx: &mut Context) -> Poll<()> {

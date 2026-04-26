@@ -155,7 +155,7 @@ type WaiterEntry is {
 };
 
 // A sync callback's registered entry.
-type CallbackEntry is {
+type CancellationCallback is {
     id: RegistrationId,
     callback: fn(),
 };
@@ -177,7 +177,7 @@ public type CancellationFlag is {
     state: AtomicInt,
     reason: Mutex<Maybe<CancelReason>>,
     waiters: Mutex<List<WaiterEntry>>,
-    callbacks: Mutex<List<CallbackEntry>>,
+    callbacks: Mutex<List<CancellationCallback>>,
     children: Mutex<List<Weak<CancellationFlag>>>,
     next_id: AtomicInt,
 };
@@ -314,7 +314,7 @@ implement CancellationFlag {
             cb();
             return 0;
         }
-        cg.push(CallbackEntry { id: id, callback: cb });
+        cg.push(CancellationCallback { id: id, callback: cb });
         id
     }
 
