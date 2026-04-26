@@ -283,6 +283,52 @@ impl AxiomRegistry {
 /// Scan a parsed Verum module and register every axiom that carries a
 /// `@framework(identifier, "citation")` attribute.
 ///
+/// V8 backwards-compat shape: delegates to
+/// [`load_framework_axioms_with_regime`] with
+/// [`SubsingletonRegime::LegacyUnchecked`] — preserves pre-V8
+/// loader behaviour exactly. Production callers should use
+/// [`load_framework_axioms_strict`] (which selects
+/// `ClosedPropositionOnly` and surfaces V8 #217/#220 violations
+/// in the report) or [`load_framework_axioms_with_regime`] for
+/// regime control.
+pub fn load_framework_axioms(
+    module: &verum_ast::Module,
+    registry: &mut AxiomRegistry,
+) -> LoadAxiomsReport {
+    load_framework_axioms_with_regime(
+        module,
+        registry,
+        SubsingletonRegime::LegacyUnchecked,
+    )
+}
+
+/// V8 (#222) — load framework axioms under the strict
+/// closed-proposition regime, surfacing V8 #217 (subsingleton)
+/// and V8 #220 (body-is-Prop) violations as report rows
+/// rather than aborting on the first failure.
+///
+/// This is the production loader entry point: every framework
+/// axiom that lands via `@framework(corpus, "citation")` is
+/// admission-checked against the full §4.4 K-FwAx soundness gate.
+/// Existing closed-Prop axioms continue to register; open-body
+/// axioms (`axiom yoneda<C>(F: C, G: C). …` style) are surfaced in
+/// the new `subsingleton_violations` field for the elaborator
+/// to either (a) re-load under [`SubsingletonRegime::UipPermitted`]
+/// when the module imports `core.math.frameworks.uip`, or (b)
+/// fail the build with a precise diagnostic.
+pub fn load_framework_axioms_strict(
+    module: &verum_ast::Module,
+    registry: &mut AxiomRegistry,
+) -> LoadAxiomsReport {
+    load_framework_axioms_with_regime(
+        module,
+        registry,
+        SubsingletonRegime::ClosedPropositionOnly,
+    )
+}
+
+/// V8 (#222) — regime-explicit framework-axiom loader.
+///
 /// This closes the architectural loop for trusted-boundary declarations:
 ///
 ///   1. Source `.vr` file declares `@framework(lurie_htt, "HTT 6.2.2.7")
@@ -291,20 +337,30 @@ impl AxiomRegistry {
 ///      the attribute in either `Item.attributes` or its
 ///      `AxiomDecl.attributes` list.
 ///   3. This loader extracts each `FrameworkAttr` and inserts a
-///      `RegisteredAxiom` into the `AxiomRegistry`.
+///      `RegisteredAxiom` into the `AxiomRegistry` under the
+///      supplied [`SubsingletonRegime`].
 ///   4. Any subsequent `infer` call on a `CoreTerm::Axiom { name, .. }`
 ///      that names one of the loaded axioms succeeds against the
 ///      registered type.
 ///
-/// Two errors can surface:
+/// Errors that can surface in the report (none of which abort
+/// the loader — every module is fully scanned so the report can
+/// aggregate):
 ///
-/// - [`KernelError::DuplicateAxiom`] — two axioms with the same name
-///   carried a `@framework(...)` marker.
-/// - [`LoadAxiomsReport::malformed`] — a `@framework(...)` attribute
-///   was syntactically parsed but had the wrong argument shape
-///   (non-identifier first arg, non-string second arg, wrong arg
-///   count). This is surfaced in the report rather than aborting,
-///   so callers can aggregate all malformations before exiting.
+/// - [`LoadAxiomsReport::registered`] — admitted axioms.
+/// - [`LoadAxiomsReport::duplicates`] — axioms with names already
+///   in the registry.
+/// - [`LoadAxiomsReport::malformed`] — `@framework(...)` attributes
+///   with wrong argument shape, or registration errors not
+///   covered by the named buckets.
+/// - [`LoadAxiomsReport::subsingleton_violations`] (V8 #222) —
+///   axioms rejected by the V8 #217 subsingleton check (closed-
+///   proposition route required free-vars empty).
+/// - [`LoadAxiomsReport::not_prop_violations`] (V8 #222) — axioms
+///   rejected by the V8 #220 body-is-Prop check.
+/// - [`LoadAxiomsReport::uip_shape_violations`] (V8 #222) — axioms
+///   whose body matches the precise UIP-shape (rejected even
+///   under LegacyUnchecked).
 ///
 /// The axiom type stored in the registry is a placeholder
 /// (`CoreTerm::Universe(Concrete(0))`) at this bring-up stage — the
@@ -312,9 +368,10 @@ impl AxiomRegistry {
 /// declared type when it calls into the kernel. The registry's
 /// purpose here is TCB *attribution* (what framework, what citation),
 /// not type storage.
-pub fn load_framework_axioms(
+pub fn load_framework_axioms_with_regime(
     module: &verum_ast::Module,
     registry: &mut AxiomRegistry,
+    regime: SubsingletonRegime,
 ) -> LoadAxiomsReport {
     use verum_ast::attr::FrameworkAttr;
     use verum_ast::decl::ItemKind;
@@ -361,15 +418,28 @@ pub fn load_framework_axioms(
             // Placeholder type at bring-up — the elaborator supplies
             // the real declared type when it submits the proof term.
             let placeholder_ty = CoreTerm::Universe(UniverseLevel::Concrete(0));
-            match registry.register(name.clone(), placeholder_ty, framework) {
+            match registry.register_with_regime(
+                name.clone(),
+                placeholder_ty,
+                framework,
+                regime,
+            ) {
                 Ok(()) => report.registered.push(name),
                 Err(KernelError::DuplicateAxiom(n)) => {
                     report.duplicates.push(n);
                 }
+                Err(KernelError::AxiomNotSubsingleton { name: n, .. }) => {
+                    report.subsingleton_violations.push(n);
+                }
+                Err(KernelError::AxiomBodyNotProp { name: n, .. }) => {
+                    report.not_prop_violations.push(n);
+                }
+                Err(KernelError::UipForbidden(n)) => {
+                    report.uip_shape_violations.push(n);
+                }
                 Err(_) => {
-                    // Register only returns DuplicateAxiom today;
-                    // other error branches are defensive for when the
-                    // register API grows.
+                    // Defensive bucket for register_with_regime
+                    // error variants we don't yet name.
                     report.malformed.push(name);
                 }
             }
@@ -391,11 +461,36 @@ pub struct LoadAxiomsReport {
     /// malformed argument shape (wrong arg count, non-identifier
     /// first arg, non-string second arg).
     pub malformed: List<Text>,
+    /// V8 (#222) — axioms rejected by the K-FwAx subsingleton
+    /// check (V8 #217). Body had free type-variables under the
+    /// closed-proposition regime.
+    pub subsingleton_violations: List<Text>,
+    /// V8 (#222) — axioms rejected by the K-FwAx body-is-Prop
+    /// check (V8 #220). Body wasn't a type at any universe.
+    pub not_prop_violations: List<Text>,
+    /// V8 (#222) — axioms rejected by the syntactic UIP-shape
+    /// gate. UIP is incompatible with univalence per
+    /// `framework_compat::audit_framework_set` and rejected at
+    /// every regime including LegacyUnchecked.
+    pub uip_shape_violations: List<Text>,
 }
 
 impl LoadAxiomsReport {
     /// Did the load complete with no errors at all?
     pub fn is_clean(&self) -> bool {
-        self.duplicates.is_empty() && self.malformed.is_empty()
+        self.duplicates.is_empty()
+            && self.malformed.is_empty()
+            && self.subsingleton_violations.is_empty()
+            && self.not_prop_violations.is_empty()
+            && self.uip_shape_violations.is_empty()
+    }
+
+    /// V8 (#222) — total count of soundness-gate violations
+    /// (subsingleton + body-is-Prop + UIP-shape). Useful for CI
+    /// scripts that want a single "n violations found" summary.
+    pub fn soundness_violation_count(&self) -> usize {
+        self.subsingleton_violations.len()
+            + self.not_prop_violations.len()
+            + self.uip_shape_violations.len()
     }
 }
