@@ -165,7 +165,7 @@ fn global_type_table_clean_for_maybe() {
 /// match exactly when it falls (so any improvement gets pinned).
 /// When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to lock
 /// in the gain.
-const RESULT_ISSUE_BASELINE: usize = 7;
+const RESULT_ISSUE_BASELINE: usize = 6;
 
 #[test]
 fn global_type_table_baseline_for_result() {

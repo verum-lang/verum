@@ -95,7 +95,7 @@ const SLOT_LOGGER: UInt8 = 11;
 const DEFAULT_POLL_BUDGET: Int = 256;
 
 /// Configuration for the async runtime.
-public type RuntimeConfig is {
+public type AsyncRuntimeConfig is {
     /// Maximum number of tasks that can be spawned
     max_tasks: Int,
     /// Enable work-stealing scheduler (multi-threaded)
@@ -112,10 +112,10 @@ public type RuntimeConfig is {
     poll_budget: Int,
 };
 
-implement RuntimeConfig {
+implement AsyncRuntimeConfig {
     /// Create default configuration optimized for general use.
-    public fn default() -> RuntimeConfig {
-        RuntimeConfig {
+    public fn default() -> AsyncRuntimeConfig {
+        AsyncRuntimeConfig {
             max_tasks: 10000,
             enable_work_stealing: true,
             task_stack_size: 1024 * 1024,  // 1MB default
@@ -127,8 +127,8 @@ implement RuntimeConfig {
     }
 
     /// Create configuration for CPU-bound workloads.
-    public fn cpu_bound() -> RuntimeConfig {
-        RuntimeConfig {
+    public fn cpu_bound() -> AsyncRuntimeConfig {
+        AsyncRuntimeConfig {
             max_tasks: 1000,
             enable_work_stealing: true,
             task_stack_size: 512 * 1024,  // 512KB
@@ -140,8 +140,8 @@ implement RuntimeConfig {
     }
 
     /// Create configuration for I/O-bound workloads.
-    public fn io_bound() -> RuntimeConfig {
-        RuntimeConfig {
+    public fn io_bound() -> AsyncRuntimeConfig {
+        AsyncRuntimeConfig {
             max_tasks: 100000,
             enable_work_stealing: true,
             task_stack_size: 256 * 1024,  // 256KB
@@ -153,33 +153,33 @@ implement RuntimeConfig {
     }
 
     /// Set maximum tasks.
-    public fn max_tasks(mut self, n: Int) -> RuntimeConfig {
+    public fn max_tasks(mut self, n: Int) -> AsyncRuntimeConfig {
         self.max_tasks = n;
         self
     }
 
     /// Set task stack size.
-    public fn task_stack_size(mut self, size: Int) -> RuntimeConfig {
+    public fn task_stack_size(mut self, size: Int) -> AsyncRuntimeConfig {
         self.task_stack_size = size;
         self
     }
 
     /// Enable || disable work stealing.
-    public fn work_stealing(mut self, enabled: Bool) -> RuntimeConfig {
+    public fn work_stealing(mut self, enabled: Bool) -> AsyncRuntimeConfig {
         self.enable_work_stealing = enabled;
         self
     }
 
     /// Set the per-tick poll budget.
-    public fn poll_budget(mut self, budget: Int) -> RuntimeConfig {
+    public fn poll_budget(mut self, budget: Int) -> AsyncRuntimeConfig {
         self.poll_budget = budget;
         self
     }
 }
 
-implement Default for RuntimeConfig {
-    fn default() -> RuntimeConfig {
-        RuntimeConfig.default()
+implement Default for AsyncRuntimeConfig {
+    fn default() -> AsyncRuntimeConfig {
+        AsyncRuntimeConfig.default()
     }
 }
 
@@ -238,7 +238,7 @@ implement<F: Future> TaskState<F> {
 /// });
 /// ```
 public type AsyncRuntime is {
-    config: RuntimeConfig,
+    config: AsyncRuntimeConfig,
     /// Number of active tasks
     task_count: AtomicInt,
     /// Is runtime running
@@ -283,11 +283,11 @@ type TaskEntry is {
 implement AsyncRuntime {
     /// Create new runtime with default configuration.
     public fn new() -> AsyncRuntime {
-        AsyncRuntime.with_config(RuntimeConfig.default())
+        AsyncRuntime.with_config(AsyncRuntimeConfig.default())
     }
 
     /// Create runtime with custom configuration.
-    public fn with_config(config: RuntimeConfig) -> AsyncRuntime {
+    public fn with_config(config: AsyncRuntimeConfig) -> AsyncRuntime {
         AsyncRuntime {
             config: config,
             task_count: AtomicInt.new(0),
@@ -870,14 +870,14 @@ public fn block_on<F: Future>(future: F) -> F.Output {
 
 /// Builder for creating a AsyncRuntime with custom configuration.
 public type RuntimeBuilder is {
-    config: RuntimeConfig,
+    config: AsyncRuntimeConfig,
 };
 
 implement RuntimeBuilder {
     /// Create new builder with default config.
     public fn new() -> RuntimeBuilder {
         RuntimeBuilder {
-            config: RuntimeConfig.default(),
+            config: AsyncRuntimeConfig.default(),
         }
     }
 
