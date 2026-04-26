@@ -290,6 +290,32 @@ fn compile_stdlib_file(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Helper that compiles a stdlib file with mount resolution.
+///
+/// Use this for files that bring cross-module symbols in via `mount`
+/// declarations — `compile_module_with_mounts` parses each mount source
+/// from `core_root` and registers its declarations before the main
+/// module is compiled.  Files that don't use `mount` should prefer the
+/// cheaper `compile_stdlib_file` helper.
+#[allow(dead_code)]
+fn compile_stdlib_file_with_mounts(path: &str, core_root: &str) -> Result<(), String> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+
+    let mut parser = Parser::new(&source);
+    let module = parser.parse_module()
+        .map_err(|e| format!("Parse error in {}: {:?}", path, e))?;
+
+    let config = CodegenConfig::new(path).with_validation();
+    let mut codegen = VbcCodegen::with_config(config);
+
+    codegen
+        .compile_module_with_mounts(&module, path, core_root)
+        .map_err(|e| format!("Codegen error in {}: {}", path, e))?;
+
+    Ok(())
+}
+
 /// Tests compilation of core/base/maybe.vr
 #[test]
 fn test_compile_stdlib_maybe() {
@@ -877,11 +903,19 @@ fn test_compile_stdlib_net_tcp() {
 }
 
 /// Tests compilation of core/net/udp.vr
+///
+/// Uses `compile_stdlib_file_with_mounts` because `udp.vr` brings
+/// platform-specific safe socket wrappers (`safe_set_ip_tos`,
+/// `safe_join_multicast_v4`, etc.) in via `mount sys.<os>.net.{ … }`.
+/// Without mount resolution, those references are undefined and
+/// codegen fails — a test-harness gap, not a real codegen bug.
 #[test]
 fn test_compile_stdlib_net_udp() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/net/udp.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile net/udp.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile net/udp.vr");
     }
 }
 
