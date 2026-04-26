@@ -1752,18 +1752,162 @@ Receipts are content-addressed; CI compares against a committed baseline.
 
 ## 17. Open Design Questions
 
-1. **Framework-axiom lineage normalisation.** What is the canonical slug format? Proposal: snake-case lineage (`lurie_htt`, `schreiber_dcct`). Alternatives: full author+year, DOI-based. Decision deferred to Task A3.
-2. **`Axi-8` status (M-5w*: non-Yoneda-representable α_𝖬).** Diakrisis 02-axiomatics `Axi-8` requires that the metaisation articulation `α_𝖬` is **not** Yoneda-representable. In the canonical Cat-model `ι(𝖬)` *is* Yoneda-representable, so Axi-8 fails there; Diakrisis frames this as an open question on whether non-LP (locally-presentable) models satisfying Axi-8 exist. VUVA defers: the kernel does NOT enforce Axi-8 today; if Diakrisis (or downstream foundational work) lands a consistent model satisfying it, a future VUVA revision adds the enforcement as an opt-in `@framework(diakrisis_axi8, …)` package rather than a kernel rule, so users can choose the foundational stance per project.
-3. **Quantitative / linear types default.** Ship as opt-in (`@1 x: T`) vs opt-out (default ω is current). Proposal: opt-in via attribute; default remains ω.
-4. **Impredicative Prop.** Ship Coq-style impredicative Prop, or require framework axiom (`core.math.frameworks.impredicative_prop`)? Proposal: latter, for soundness with HITs + classical axiom + univalence.
-5. **Certificate format schema versioning.** Lean evolves fast; export needs target-version pinning. Proposal: `verum export --to lean --target-version 4.4.0`.
-6. **`synthesize` strategy termination.** No bound, no proved termination. Proposal: run with wall-clock cap + hint database; surface best-effort partial proofs in a `@partial` theorem.
-7. **OC/DC duality proof.** The auto-induced ε(α) assumes 108.T. The proof of 108.T sits in the Diakrisis preprint (forthcoming). Production compile should gate `@enact` on the Diakrisis release.
-8. **Kernel LOC budget.** Target 5 000 LOC. Current `verum_kernel` is ~4 000 LOC (per `crates/verum_kernel/src/`). Adding `K-Refine` + framework-axiom + SMT-certificate nodes may push over; VUVA budget allows up to 6 500 LOC with mandatory audit.
-9. **`verum_types` vs kernel re-check split.** Today, `verum_types::refinement` does refinement checking outside the kernel. Long-term, kernel should own the final recheck; `verum_types` hosts elaboration. Task track: `kernel-ownership-migration`.
-10. **Cubical computational univalence.** CCHM provides it, but performance on large universes is a concern. Pragmatic path: lazy `Glue` evaluation + memoisation.
-11. **Pattern-match coverage checker** for dependent types: requires higher-order unification. Proposal: extend existing `verum_types::exhaustiveness` with dependent-index analysis.
-12. **Tactic DSL hygiene.** Quote/unquote macro hygiene: freshness of binders, scope capture. Proposal: α-renaming on every splice; runtime cost acceptable.
+V8 (#219) status update — six of the original twelve questions
+are closed (decisions ratified into the spec); six remain genuinely
+open and are restated more sharply for future decision.
+
+### 17.A Closed by V8 (decisions ratified)
+
+1. **[CLOSED — V8] Framework-axiom lineage normalisation.** The
+   canonical slug format is **snake-case lineage** (`lurie_htt`,
+   `schreiber_dcct`, `connes_reconstruction`, etc.); see §6.2 for
+   the live Standard catalogue. DOI-based and author+year forms
+   are NOT accepted for the slug — those go in the `citation`
+   field. Implementation: `core/math/frameworks/registry.vr`
+   uses snake-case throughout. Any new submission to the
+   Verum-Foundation-Marketplace (per VFE §18.7) must follow this
+   convention.
+
+2. **[OPEN] `Axi-8` status (M-5w*: non-Yoneda-representable α_𝖬).**
+   Restated for V8: Diakrisis 02-axiomatics `Axi-8` requires that
+   the metaisation articulation `α_𝖬` is **not**
+   Yoneda-representable. In the canonical Cat-model `ι(𝖬)` *is*
+   Yoneda-representable, so Axi-8 fails there; Diakrisis frames
+   this as an open question on whether non-LP (locally-
+   presentable) models satisfying Axi-8 exist. VUVA defers: the
+   kernel does NOT enforce Axi-8 today; if Diakrisis (or
+   downstream foundational work) lands a consistent model
+   satisfying it, a future VUVA revision adds the enforcement as
+   an opt-in `@framework(diakrisis_axi8, …)` package rather than
+   a kernel rule, so users can choose the foundational stance
+   per project. **Decision criterion**: model-existence proof
+   landing in the Diakrisis preprint will trigger this question's
+   closure; until then, the framework-axiom path is the sound
+   stance.
+
+3. **[CLOSED — V8] Quantitative / linear types default.** Default
+   is **ω (unrestricted)**; opt-in via `@quantity(0)` /
+   `@quantity(1)` / `@quantity(omega)` attributes (or aliases
+   `linear`, `erased`, `unrestricted`). Per Task C5 V1
+   (`crates/verum_ast/src/attr/typed.rs::QuantityAttr`); existing
+   non-annotated functions compile unchanged. The linearity-
+   tracking enforcement pass (V2) is staged separately under
+   `verum_types`.
+
+4. **[OPEN] Impredicative Prop.** Restated: ship Coq-style
+   impredicative Prop, or require the explicit
+   `core.math.frameworks.impredicative_prop` framework axiom?
+   **Decision criterion**: settle once a soundness proof lands
+   for the impredicative-Prop + HITs + classical-LEM +
+   univalence combination on the cubical fragment. Current V8
+   stance: framework-axiom route is preferred (avoids the
+   Coquand-paradox triangle in §4.4 K-FwAx and the
+   uip⊥univalence conflict in `framework_compat`).
+
+5. **[CLOSED — V8] Certificate format schema versioning.**
+   Resolved: `verum export --to <target> --target-version
+   <semver>` is the canonical CLI shape, where `<target>`
+   ∈ {`lean`, `coq`, `agda`, `dedukti`, `metamath`} and
+   `<semver>` is the target proof-assistant version (e.g.
+   `--target-version 4.4.0` for Lean 4). Schema version of the
+   internal `SmtCertificate` envelope is pinned to
+   `CERTIFICATE_SCHEMA_VERSION` in
+   `crates/verum_kernel/src/cert.rs`; bumps go through task
+   #90's cross-tool replay matrix.
+
+6. **[OPEN] `synthesize` strategy termination.** Restated: the
+   `@verify(synthesize)` strategy currently has no termination
+   bound. **Decision criterion**: pick between (a)
+   wall-clock-capped + hint-database + `@partial` partial-proof
+   surface (proposal); (b) bounded-iterations counter only;
+   (c) cooperative-cancel via `verum_smt`'s existing
+   resource-bound infrastructure. Each has trade-offs around
+   IDE responsiveness vs proof-search depth; benchmark
+   needed before deciding.
+
+7. **[OPEN] OC/DC duality proof.** Restated: the auto-induced
+   ε(α) construction in `core.action.*` assumes Diakrisis
+   Theorem 108.T. The proof of 108.T sits in the Diakrisis
+   preprint (forthcoming). **Decision criterion**: production
+   compile should gate `@enact` on the Diakrisis preprint
+   release; until then, the kernel rejects `@enact`-using
+   modules whose `@require_extension(vfe_oc_dc)` is set
+   (default = unset = no `@enact`). Track preprint release
+   alongside `internal/holon/internal/diakrisis/docs`.
+
+8. **[CLOSED — V8] Kernel LOC budget.** Pinned to **6 500 LOC
+   maximum** (was "5 000 target with audit"; current
+   `verum_kernel` is ~4 700 LOC post-V8 module split per
+   `crates/verum_kernel/src/`). The full §4.4a taxonomy
+   accounting (29 rules) fits within this budget. Audit gate:
+   any commit that pushes the kernel past 6 500 LOC requires
+   an explicit "+kernel-loc-budget" tag in the commit message
+   and a follow-up review. Module split (#198: errors.rs /
+   inductive.rs / depth.rs / eps_mu.rs / universe_ascent.rs /
+   support.rs / axiom.rs / infer.rs / term.rs / cert.rs /
+   ctx.rs) means individual files stay auditable.
+
+9. **[CLOSED — V8] `verum_types` vs kernel re-check split.**
+   Decision: kernel **owns the final recheck** via
+   `KernelRecheckPass` + `verify_full` (already shipped);
+   `verum_types::refinement` is the elaboration layer that
+   prepares CoreTerms for the kernel to validate. Migration
+   is complete for refinement types; remaining elaboration
+   surfaces (Pi/Sigma binding contexts, generic parameter
+   elaboration, default values) stay in `verum_types`
+   permanently — they are not soundness-critical and don't
+   need the kernel to validate them. Closes
+   `task:kernel-ownership-migration`.
+
+10. **[OPEN] Cubical computational univalence.** Restated: CCHM
+    provides computational univalence, but performance on large
+    universes is a concern. **Decision criterion**: benchmark-
+    first — measure `Glue`-evaluation cost on a representative
+    HoTT corpus (e.g., `core.math.frameworks.lurie_htt` proofs)
+    before deciding between (a) lazy `Glue` evaluation +
+    memoisation (proposal); (b) eager evaluation with cube
+    interning; (c) hybrid (lazy at top level, eager under
+    refinement). The benchmark itself is pre-decision work.
+
+11. **[OPEN] Pattern-match coverage checker for dependent types.**
+    Restated: requires higher-order unification (HOU) for index-
+    dependent patterns. **Decision criterion**: extend existing
+    `verum_types::exhaustiveness` with dependent-index analysis
+    (proposal) — but the implementation strategy depends on
+    whether we use full HOU (Miller-pattern fragment is
+    decidable; full HOU is undecidable) or restricted
+    higher-order matching. Pick the strategy alongside the V2
+    K-Elim per-case typing pass (§4.4a.4).
+
+12. **[CLOSED — V8] Tactic DSL hygiene.** Resolved: **α-renaming
+    on every splice**. Hygiene cost is acceptable in profiling
+    (`verum_verification::tactic_evaluation` already implements
+    α-renaming-on-splice as the default behaviour). Quote/
+    unquote splices generate fresh binder names from a per-
+    splice counter to guarantee no scope capture. Closes the
+    open question; the ratified design ships in
+    `crates/verum_verification/src/tactic_evaluation.rs`.
+
+### 17.B Status summary
+
+| Q# | Status | Resolution / decision criterion |
+|---|---|---|
+| 1 | CLOSED | Snake-case lineage |
+| 2 | OPEN | Awaiting Diakrisis Axi-8 model existence proof |
+| 3 | CLOSED | Default ω; opt-in via `@quantity(...)` |
+| 4 | OPEN | Awaiting impredicative-Prop + univalence soundness proof |
+| 5 | CLOSED | `--target-version <semver>` CLI shape |
+| 6 | OPEN | Pick wall-clock vs counter vs cooperative-cancel |
+| 7 | OPEN | Awaiting Diakrisis 108.T preprint |
+| 8 | CLOSED | 6 500 LOC budget |
+| 9 | CLOSED | Kernel owns final recheck; verum_types is elaboration |
+| 10 | OPEN | Benchmark-first |
+| 11 | OPEN | Pick HOU strategy alongside V2 K-Elim |
+| 12 | CLOSED | α-rename on every splice |
+
+Six closed (#1, #3, #5, #8, #9, #12), six open (#2, #4, #6, #7,
+#10, #11). The open six all have explicit decision criteria
+attached so future progress is observable.
 
 ---
 
