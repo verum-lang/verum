@@ -858,3 +858,51 @@ fn b7_kernel_recheck_remains_soundness_critical() {
     let pass = KernelRecheckPass::new();
     assert_eq!(pass.classification(), PassClassification::SoundnessCritical);
 }
+
+// =============================================================================
+// V8 (#218) — pipeline-level kernel-policy threading
+// =============================================================================
+
+#[test]
+fn task_218_static_pipeline_with_opt_in_policy_skips_modal_overshoot() {
+    // OptInOnly + no @require_extension(vfe_7) → KernelRecheckPass
+    // skips the walker; pipeline reports success on a module that
+    // would otherwise reject (modal overshoot).
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let module = module_with(vec![make_function(
+        "g",
+        vec![refined_int(boxed)],
+        Maybe::Some(Type::int(span())),
+    )]);
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline_with_kernel_policy(
+        VfePolicy::OptInOnly,
+    );
+    let mut ctx = VerificationContext::new();
+    let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
+    // OptInOnly + no annotation → no rejection → all 5 passes run.
+    assert_eq!(results.len(), 5, "all passes run when VFE-7 inactive");
+    let kernel = results.get(1).expect("KernelRecheck row");
+    assert!(kernel.success, "kernel recheck succeeds (skipped) under OptInOnly");
+}
+
+#[test]
+fn task_218_static_pipeline_default_uses_all_rules_active() {
+    // Default constructor preserves pre-V8 behaviour. A modal-
+    // overshoot module is still rejected without
+    // @require_extension(vfe_7) because the default policy is
+    // VfePolicy::AllRulesActive.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let module = module_with(vec![make_function(
+        "g",
+        vec![refined_int(boxed)],
+        Maybe::Some(Type::int(span())),
+    )]);
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline();
+    let mut ctx = VerificationContext::new();
+    let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
+    // Default mode + AllRulesActive → fails on KernelRecheck → halts.
+    assert_eq!(results.len(), 2);
+    assert!(!results.get(1).unwrap().success);
+}

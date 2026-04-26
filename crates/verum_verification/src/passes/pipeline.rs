@@ -154,7 +154,42 @@ impl VerificationPipeline {
     /// composition is the right default for AOT/build paths that
     /// want kernel + hygiene + transition advice without paying
     /// the SMT round-trip cost.
+    ///
+    /// V8 backwards-compat shape: defaults the kernel-recheck
+    /// VFE policy to [`crate::vfe_gate::VfePolicy::AllRulesActive`]
+    /// (the pre-V8 always-on rule set). Callers wanting Year 0–2
+    /// `OptInOnly` semantics from `verification-architecture.md`
+    /// §4.4 + VFE §0.0 governance should use
+    /// [`Self::static_analysis_pipeline_with_kernel_policy`].
     pub fn static_analysis_pipeline() -> Self {
+        Self::static_analysis_pipeline_with_kernel_policy(
+            crate::vfe_gate::VfePolicy::AllRulesActive,
+        )
+    }
+
+    /// V8 (#218) — static-analysis pipeline with explicit
+    /// kernel-recheck VFE governance policy.
+    ///
+    /// `kernel_policy` is propagated to the [`KernelRecheckPass`]
+    /// via its [`KernelRecheckPass::with_policy`] builder, so
+    /// VFE-gated rules (currently `vfe_7` =
+    /// `K-Refine-omega`) only fire when the policy admits them
+    /// for the surrounding scope.
+    ///
+    /// Per VFE §0.0 rollout calendar:
+    ///   * **Year 0–2** — `VfePolicy::OptInOnly` (modules must
+    ///     `@require_extension(vfe_N)` to engage VFE rules).
+    ///   * **Year 2–4** — `VfePolicy::OptOutOnly` (rules
+    ///     default-on; opt out via `@disable_extension(vfe_N)`).
+    ///   * **Year 4+** — `VfePolicy::Mandatory` (no opt-out).
+    ///
+    /// V8 default remains `AllRulesActive` to avoid regressions
+    /// in the existing test corpus + stdlib bring-up; the
+    /// production CLI should select `OptInOnly` once the project
+    /// manifest config surface lands (tracked under follow-up).
+    pub fn static_analysis_pipeline_with_kernel_policy(
+        kernel_policy: crate::vfe_gate::VfePolicy,
+    ) -> Self {
         let mut pipeline = Self::new();
 
         pipeline.add_pass(Box::new(LevelInferencePass::new(
@@ -165,7 +200,9 @@ impl VerificationPipeline {
         // detection / transition recommendation — kernel-rule
         // failures are formation errors that should short-circuit
         // the rest of the pipeline (#187 V0).
-        pipeline.add_pass(Box::new(KernelRecheckPass::new()));
+        pipeline.add_pass(Box::new(
+            KernelRecheckPass::new().with_policy(kernel_policy),
+        ));
         // HygieneRecheckPass (#190) — framework-author discipline
         // (R1 brand-prefix names, R2 ε-coordinate canonicalisable,
         // R3 meta-classifier uniqueness). R1/R2 are Warnings;
@@ -204,6 +241,19 @@ impl VerificationPipeline {
     /// types subjected to Z3 portfolio dispatch.
     pub fn full_verification_pipeline() -> Self {
         let mut pipeline = Self::static_analysis_pipeline();
+        pipeline.add_pass(Box::new(SmtVerificationPass::new()));
+        pipeline
+    }
+
+    /// V8 (#218) — full-verification pipeline with explicit
+    /// kernel-recheck VFE governance policy. Equivalent to
+    /// [`Self::static_analysis_pipeline_with_kernel_policy`] +
+    /// [`SmtVerificationPass`] terminator.
+    pub fn full_verification_pipeline_with_kernel_policy(
+        kernel_policy: crate::vfe_gate::VfePolicy,
+    ) -> Self {
+        let mut pipeline =
+            Self::static_analysis_pipeline_with_kernel_policy(kernel_policy);
         pipeline.add_pass(Box::new(SmtVerificationPass::new()));
         pipeline
     }
