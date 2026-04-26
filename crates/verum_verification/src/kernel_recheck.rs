@@ -629,6 +629,26 @@ pub fn lift_types_type_to_core(ty: &TypesType) -> CoreTerm {
             return_type,
             ..
         } => {
+            // V3 + V8 (#204) — fold params + return_type into an
+            // App chain. The `..` deliberately discards
+            // `contexts: Option<ContextExpr>` and
+            // `properties: Option<PropertySet>` from the lift:
+            //   • ContextExpr::Concrete wraps ContextRequirement
+            //     which is `Set<ContextRef>`; ContextRef is just
+            //     (name: Text, type_id: TypeId) — no inline Type
+            //     to recurse into. The TypeId is an indirection
+            //     into the type registry; following it would
+            //     require ambient registry access the structural
+            //     lifter doesn't (and shouldn't) have.
+            //   • PropertySet is `Set<ComputationalProperty>` —
+            //     a flat enum (Pure / IO / Async / Fallible /
+            //     Mutates) with no inline Type fields.
+            // Refinements arriving via these channels surface
+            // via the type_id back-references, which are walked
+            // by other compiler phases (typecheck, contract-
+            // verification) operating with full registry access.
+            // The K-rule preamble is correct to leave them
+            // unwalked here.
             let mut acc = lift_types_type_to_core(return_type);
             for p in params.iter() {
                 acc = CoreTerm::App(
