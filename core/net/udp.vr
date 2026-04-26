@@ -90,11 +90,18 @@ mount sys.linux.syscall.{
 
 @cfg(target_os = "windows")
 mount sys.windows.winsock2.{
-    // POSIX-compatible wrappers from winsock2.vr
-    socket, bind, connect, close,
-    send, recv, sendto, recvfrom,
+    // POSIX-compatible wrappers — renamed `winsock_*` to avoid libc
+    // symbol collision (see #107). Aliased back here for shared code.
+    winsock_socket as socket,
+    winsock_bind as bind,
+    winsock_connect as connect,
+    winsock_close as close,
+    winsock_send as send,
+    winsock_recv as recv,
+    winsock_sendto as sendto,
+    winsock_recvfrom as recvfrom,
     // Socket options
-    setsockopt_int, getsockopt, getsockname,
+    setsockopt_int, getsockopt, winsock_getsockname as getsockname,
     set_nonblocking, set_reuseaddr, set_broadcast,
     set_send_buffer_size, set_recv_buffer_size,
     set_socket_timeout,
