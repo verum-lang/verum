@@ -359,13 +359,38 @@ pub fn lift_types_type_to_core(ty: &TypesType) -> CoreTerm {
 /// operator support is wired so K-Refine-omega correctly rejects
 /// over-stratified predicates (the canonical V1 use case).
 ///
+/// V3 extension (#190): composite-expression coverage. Previously
+/// `Binary` / `Unary` / `Call` / `If` / `Match` / `Block` /
+/// `Literal` collapsed to opaque `Var("<unsupported-expr>")`
+/// placeholders (rank 0 to `m_depth_omega`), which silently
+/// accepted modal-typed predicates nested inside arithmetic /
+/// boolean / control-flow expressions. The lifter now recurses
+/// through these shapes, encoding component composition as
+/// `CoreTerm::App(left, right)` so `m_depth_omega` correctly
+/// computes `max` over the operands.
+///
 /// Coverage:
 ///
 ///   • `ExprKind::Path` → `CoreTerm::Var("<last-segment>")`.
-///   • Method-call shape `x.box()` / `x.diamond()` → `ModalBox(x)`
-///     / `ModalDiamond(x)` so user-side modal predicates lift to
-///     the kernel's modal constructors. (V2 will add a richer
-///     surface syntax for modalities.)
+///   • `ExprKind::Paren(e)` → recurse on `e`.
+///   • Method-call shape `x.box()` / `x.diamond()` /
+///     `x.necessarily()` / `x.possibly()` → `ModalBox(x)` /
+///     `ModalDiamond(x)`. Other methods → `App(receiver, args...)`
+///     so the K-rule sees the receiver's modal structure.
+///   • `ExprKind::Binary { left, _, right }` → `App(left, right)`
+///     (operator is irrelevant to `m_depth_omega`; the rank is the
+///     max of the operand ranks).
+///   • `ExprKind::Unary { _, expr }` → recurse on `expr` (unary
+///     operators don't add structural depth).
+///   • `ExprKind::Call { func, args }` → fold args into a
+///     left-associated `App` chain rooted at the callee.
+///   • `ExprKind::If { _, then_branch, else_branch }` → `App(lift(then),
+///     lift(else))` so the rule sees the max-rank branch.
+///   • `ExprKind::Match { _, arms }` → fold all arm bodies into
+///     an `App` chain (max rank across arms).
+///   • `ExprKind::Block(b)` → lift the trailing expression if any,
+///     else `Var("<empty-block>")`.
+///   • `ExprKind::Literal(_)` → `Var("<lit>")` (atomic, rank 0).
 ///   • Everything else → `Var("<unsupported-expr>")` placeholder.
 pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
     match &expr.kind {
@@ -382,17 +407,94 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
         }
         ExprKind::Paren(inner) => lift_expr_to_core(inner),
         ExprKind::MethodCall {
-            receiver, method, ..
+            receiver, method, args, ..
         } => {
             let inner = lift_expr_to_core(receiver);
             match method.name.as_str() {
                 "box" | "necessarily" => CoreTerm::ModalBox(Heap::new(inner)),
                 "diamond" | "possibly" => CoreTerm::ModalDiamond(Heap::new(inner)),
-                _ => CoreTerm::Var(Text::from("<method-call>")),
+                _ => {
+                    // Other methods: fold args into an App chain
+                    // anchored on the receiver. This preserves the
+                    // receiver's modal structure under the K-rule.
+                    let mut acc = inner;
+                    for arg in args.iter() {
+                        acc = CoreTerm::App(
+                            Heap::new(acc),
+                            Heap::new(lift_expr_to_core(arg)),
+                        );
+                    }
+                    acc
+                }
             }
         }
+        ExprKind::Binary { left, right, .. } => {
+            // BinOp is structurally an App over its operands;
+            // m_depth_omega(App(l, r)) = max(rank(l), rank(r)).
+            // The operator itself is irrelevant — modal depth
+            // is a structural property of the syntax tree.
+            CoreTerm::App(
+                Heap::new(lift_expr_to_core(left)),
+                Heap::new(lift_expr_to_core(right)),
+            )
+        }
+        ExprKind::Unary { expr: inner, .. } => lift_expr_to_core(inner),
+        ExprKind::Call { func, args, .. } => {
+            // Left-associated App chain: lift(func)(arg0)(arg1)...
+            let mut acc = lift_expr_to_core(func);
+            for arg in args.iter() {
+                acc = CoreTerm::App(
+                    Heap::new(acc),
+                    Heap::new(lift_expr_to_core(arg)),
+                );
+            }
+            acc
+        }
+        ExprKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let then_core = lift_block_tail_to_core(then_branch);
+            let else_core = match else_branch {
+                verum_common::Maybe::Some(e) => lift_expr_to_core(e),
+                verum_common::Maybe::None => CoreTerm::Var(Text::from("<unit>")),
+            };
+            CoreTerm::App(Heap::new(then_core), Heap::new(else_core))
+        }
+        ExprKind::Match { arms, .. } => {
+            // Fold arm bodies into an App chain so the K-rule
+            // sees the max-rank arm.
+            let mut iter = arms.iter();
+            let first_body = match iter.next() {
+                Some(arm) => lift_match_arm_body_to_core(arm),
+                None => return CoreTerm::Var(Text::from("<empty-match>")),
+            };
+            let mut acc = first_body;
+            for arm in iter {
+                acc = CoreTerm::App(
+                    Heap::new(acc),
+                    Heap::new(lift_match_arm_body_to_core(arm)),
+                );
+            }
+            acc
+        }
+        ExprKind::Block(b) => lift_block_tail_to_core(b),
+        ExprKind::Literal(_) => CoreTerm::Var(Text::from("<lit>")),
         _ => CoreTerm::Var(Text::from("<unsupported-expr>")),
     }
+}
+
+fn lift_block_tail_to_core(b: &verum_ast::expr::Block) -> CoreTerm {
+    match &b.expr {
+        verum_common::Maybe::Some(e) => lift_expr_to_core(e),
+        verum_common::Maybe::None => CoreTerm::Var(Text::from("<empty-block>")),
+    }
+}
+
+fn lift_match_arm_body_to_core(arm: &verum_ast::pattern::MatchArm) -> CoreTerm {
+    // MatchArm.body is a Heap<Expr> (typically a Block).
+    lift_expr_to_core(&arm.body)
 }
 
 // =============================================================================
@@ -664,6 +766,232 @@ mod tests {
             }
             other => panic!("expected RefineOmega, got {:?}", other),
         }
+    }
+
+    // ---- V3 lifter extension: composite expression shapes (#190) ----
+
+    use verum_ast::expr::{BinOp, Block, IfCondition, UnOp};
+    use verum_ast::literal::{IntLit, Literal, LiteralKind};
+
+    fn binary_expr(left: Expr, op: BinOp, right: Expr) -> Expr {
+        Expr::new(
+            ExprKind::Binary {
+                left: Heap::new(left),
+                op,
+                right: Heap::new(right),
+            },
+            span(),
+        )
+    }
+
+    fn int_literal(n: i128) -> Expr {
+        let lit = Literal {
+            kind: LiteralKind::Int(IntLit {
+                value: n,
+                suffix: None,
+            }),
+            span: span(),
+        };
+        Expr::new(ExprKind::Literal(lit), span())
+    }
+
+    fn unary_expr(op: UnOp, e: Expr) -> Expr {
+        Expr::new(
+            ExprKind::Unary {
+                op,
+                expr: Heap::new(e),
+            },
+            span(),
+        )
+    }
+
+    fn call_expr(func: Expr, args: Vec<Expr>) -> Expr {
+        let mut a: List<Expr> = List::new();
+        for x in args {
+            a.push(x);
+        }
+        Expr::new(
+            ExprKind::Call {
+                func: Heap::new(func),
+                args: a,
+                type_args: List::new(),
+            },
+            span(),
+        )
+    }
+
+    fn block_with_tail(tail: Expr) -> Block {
+        Block::new(
+            List::new(),
+            verum_common::Maybe::Some(Heap::new(tail)),
+            span(),
+        )
+    }
+
+    fn if_expr(then_tail: Expr, else_tail: Option<Expr>) -> Expr {
+        use smallvec::smallvec;
+        use verum_ast::expr::ConditionKind;
+        let cond = path_expr("cond");
+        let if_cond = IfCondition {
+            conditions: smallvec![ConditionKind::Expr(cond)],
+            span: span(),
+        };
+        Expr::new(
+            ExprKind::If {
+                condition: Heap::new(if_cond),
+                then_branch: block_with_tail(then_tail),
+                else_branch: match else_tail {
+                    Some(e) => verum_common::Maybe::Some(Heap::new(e)),
+                    None => verum_common::Maybe::None,
+                },
+            },
+            span(),
+        )
+    }
+
+    fn box_call(receiver: Expr) -> Expr {
+        method_call_expr(receiver, "box")
+    }
+
+    #[test]
+    fn lift_expr_binary_uses_max_of_operand_ranks() {
+        // BinOp(p.box(), q) — left has md^ω = 1, right has 0;
+        // App(left, right) ranks at max = 1.
+        let lifted = super::lift_expr_to_core(&binary_expr(
+            box_call(path_expr("p")),
+            BinOp::And,
+            path_expr("q"),
+        ));
+        match lifted {
+            CoreTerm::App(_, _) => {}
+            other => panic!("expected App, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lift_expr_literal_to_atomic_var() {
+        let lifted = super::lift_expr_to_core(&int_literal(42));
+        match lifted {
+            CoreTerm::Var(name) => assert_eq!(name.as_str(), "<lit>"),
+            other => panic!("expected Var(<lit>), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lift_expr_unary_recurses_without_extra_node() {
+        let lifted = super::lift_expr_to_core(&unary_expr(UnOp::Not, path_expr("p")));
+        match lifted {
+            CoreTerm::Var(name) => assert_eq!(name.as_str(), "p"),
+            other => panic!("expected Var(p), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lift_expr_call_folds_args_into_app_chain() {
+        // f(a, b) → App(App(f, a), b)
+        let lifted = super::lift_expr_to_core(&call_expr(
+            path_expr("f"),
+            vec![path_expr("a"), path_expr("b")],
+        ));
+        match lifted {
+            CoreTerm::App(outer_left, _outer_right) => match outer_left.as_ref() {
+                CoreTerm::App(_, _) => {}
+                other => panic!("expected nested App, got {:?}", other),
+            },
+            other => panic!("expected App, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lift_expr_if_takes_max_of_branches() {
+        // if cond { p.box() } else { q } — then has md^ω = 1, else has 0;
+        // App(then, else) ranks at max = 1.
+        let lifted = super::lift_expr_to_core(&if_expr(
+            box_call(path_expr("p")),
+            Some(path_expr("q")),
+        ));
+        match lifted {
+            CoreTerm::App(_, _) => {}
+            other => panic!("expected App, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn refine_omega_from_ast_rejects_modal_inside_binary() {
+        // V3: `Int{ p.box().box() && q }` — modal nested in BinOp.
+        // Predicate ranks at 2, base at 0; 2 < 0+1 = 1 ⇒ reject.
+        // Pre-V3 this would have been opaque rank 0 → silently
+        // accepted.
+        let bad = binary_expr(
+            box_call(box_call(path_expr("p"))),
+            BinOp::And,
+            path_expr("q"),
+        );
+        let predicate = verum_ast::ty::RefinementPredicate {
+            expr: bad,
+            binding: verum_common::Maybe::None,
+            span: span(),
+        };
+        let base = AstType::int(span());
+        let err = KernelRecheck::refine_omega_from_ast(&base, &predicate)
+            .expect_err("V3 must catch modal nested inside BinOp");
+        match err {
+            KernelRecheckError::RefineOmega { .. } => {}
+            other => panic!("expected RefineOmega, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn refine_omega_from_ast_rejects_modal_inside_if_branch() {
+        // V3: `Int{ if cond { p.box().box() } else { q } }`.
+        // Then-branch has rank 2; else-branch has rank 0.
+        // App(then, else) ranks at max(2, 0) = 2.
+        // 2 < 0+1 = 1 ⇒ reject.
+        let bad = if_expr(box_call(box_call(path_expr("p"))), Some(path_expr("q")));
+        let predicate = verum_ast::ty::RefinementPredicate {
+            expr: bad,
+            binding: verum_common::Maybe::None,
+            span: span(),
+        };
+        let base = AstType::int(span());
+        assert!(
+            KernelRecheck::refine_omega_from_ast(&base, &predicate).is_err(),
+            "modal in if-branch must reject under V3"
+        );
+    }
+
+    #[test]
+    fn refine_omega_from_ast_rejects_modal_inside_call_args() {
+        // V3: `Int{ f(p.box().box()) }` — modal inside Call arg.
+        // Predicate ranks at 2.
+        let bad = call_expr(path_expr("f"), vec![box_call(box_call(path_expr("p")))]);
+        let predicate = verum_ast::ty::RefinementPredicate {
+            expr: bad,
+            binding: verum_common::Maybe::None,
+            span: span(),
+        };
+        let base = AstType::int(span());
+        assert!(
+            KernelRecheck::refine_omega_from_ast(&base, &predicate).is_err(),
+            "modal in Call arg must reject under V3"
+        );
+    }
+
+    #[test]
+    fn refine_omega_from_ast_atomic_binary_still_accepted() {
+        // V3 must NOT regress on atomic BinOp predicates like
+        // `Int{x > 0}` — both operands rank 0, App ranks 0.
+        let pred = binary_expr(path_expr("x"), BinOp::Gt, int_literal(0));
+        let predicate = verum_ast::ty::RefinementPredicate {
+            expr: pred,
+            binding: verum_common::Maybe::None,
+            span: span(),
+        };
+        let base = AstType::int(span());
+        assert!(
+            KernelRecheck::refine_omega_from_ast(&base, &predicate).is_ok(),
+            "atomic binary predicate must still pass"
+        );
     }
 
     #[test]
