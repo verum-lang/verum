@@ -16,6 +16,32 @@ mount core.metrics.instrument.{Counter, UpDownCounter, Gauge};
 mount core.metrics.histogram.{Histogram, HistogramBuckets};
 
 // =============================================================================
+// Cardinality safety cap
+// =============================================================================
+//
+// Each MetricFamily holds an `entries: List<MetricEntry>` that grows
+// every time `resolve_*` is called with a previously-unseen label set.
+// Without an upper bound this is a classic Prometheus footgun: a
+// caller plugging peer-controlled values (user IDs from request
+// headers, URL paths, query strings) into a label creates a new
+// entry per unique value, leaking unbounded memory.
+//
+// 4096 distinct label sets per metric is well above the typical
+// well-formed cardinality (hundreds at most) yet finite enough to
+// prevent runaway growth. The cap is per-family — a global cap
+// would require cross-family coordination via a shared counter.
+//
+// Once exceeded, `resolve_*` skips the push and returns a freshly
+// created instrument that is NOT linked into the registry. That
+// instrument's increments are observable via `value()` to its
+// caller but will not appear in `snapshot_entries` — so exporters
+// won't emit cardinality-explosion data. The caller's hot path
+// continues to function (no panic) which matters for the common
+// case where the cap is hit by a misbehaving peer rather than a
+// bug in the application.
+public const MAX_LABEL_CARDINALITY_PER_FAMILY: Int = 4096;
+
+// =============================================================================
 // Metric kind tag
 // =============================================================================
 
@@ -103,13 +129,19 @@ implement MetricFamily {
             i = i + 1;
         }
         let c = Shared.new(Counter.new());
-        entries.push(MetricEntry {
-            labels: labels.clone(),
-            counter: Some(c.clone()),
-            up_down: None,
-            gauge: None,
-            histogram: None,
-        });
+        if entries.len() < MAX_LABEL_CARDINALITY_PER_FAMILY {
+            entries.push(MetricEntry {
+                labels: labels.clone(),
+                counter: Some(c.clone()),
+                up_down: None,
+                gauge: None,
+                histogram: None,
+            });
+        }
+        // Else: cardinality cap hit. Returned instrument is NOT
+        // linked into the family — caller's increments are local-
+        // only, exporters won't see them. Prevents OOM from
+        // peer-controlled label values.
         c
     }
 
@@ -127,13 +159,15 @@ implement MetricFamily {
             i = i + 1;
         }
         let c = Shared.new(UpDownCounter.new());
-        entries.push(MetricEntry {
-            labels: labels.clone(),
-            counter: None,
-            up_down: Some(c.clone()),
-            gauge: None,
-            histogram: None,
-        });
+        if entries.len() < MAX_LABEL_CARDINALITY_PER_FAMILY {
+            entries.push(MetricEntry {
+                labels: labels.clone(),
+                counter: None,
+                up_down: Some(c.clone()),
+                gauge: None,
+                histogram: None,
+            });
+        }
         c
     }
 
@@ -151,13 +185,15 @@ implement MetricFamily {
             i = i + 1;
         }
         let c = Shared.new(Gauge.new());
-        entries.push(MetricEntry {
-            labels: labels.clone(),
-            counter: None,
-            up_down: None,
-            gauge: Some(c.clone()),
-            histogram: None,
-        });
+        if entries.len() < MAX_LABEL_CARDINALITY_PER_FAMILY {
+            entries.push(MetricEntry {
+                labels: labels.clone(),
+                counter: None,
+                up_down: None,
+                gauge: Some(c.clone()),
+                histogram: None,
+            });
+        }
         c
     }
 
@@ -175,13 +211,15 @@ implement MetricFamily {
             i = i + 1;
         }
         let h = Shared.new(Histogram.new(self.buckets.clone()));
-        entries.push(MetricEntry {
-            labels: labels.clone(),
-            counter: None,
-            up_down: None,
-            gauge: None,
-            histogram: Some(h.clone()),
-        });
+        if entries.len() < MAX_LABEL_CARDINALITY_PER_FAMILY {
+            entries.push(MetricEntry {
+                labels: labels.clone(),
+                counter: None,
+                up_down: None,
+                gauge: None,
+                histogram: Some(h.clone()),
+            });
+        }
         h
     }
 }
