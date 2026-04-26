@@ -155,22 +155,48 @@ public type Hasher is protocol {
 };
 
 /// Default FxHash-based hasher for performance.
+///
+/// Implements the canonical FxHash algorithm
+/// (`rotate_left(5)` ⊕ byte) ⊗ SEED), the same construction
+/// used by `rustc`'s internal `rustc-hash` crate. FxHash is
+/// designed for fast hashing of small keys, not for adversarial
+/// input — it's NOT cryptographically strong and NOT
+/// HashDoS-resistant. Code that hashes attacker-controlled keys
+/// (network input, protocol IDs, etc.) should use a keyed
+/// hasher seeded with per-process randomness; this default is
+/// for compiler-internal / trusted-input use.
 public type DefaultHasher is {
     state: Int,
 };
 
 implement DefaultHasher {
     public fn new() -> DefaultHasher {
+        // Canonical FxHash starts at 0 — the first byte
+        // contributes via the XOR step before any multiply, so
+        // the initial multiplication isn't a no-op.
         DefaultHasher { state: 0 }
     }
 }
 
 implement Hasher for DefaultHasher {
     fn write(&mut self, bytes: &[Byte]) {
-        // FxHash algorithm for fast hashing
+        // Canonical FxHash 64-bit step:
+        //   state := (state.rotate_left(5) ^ byte) * SEED
+        //
+        // The earlier implementation reversed the order
+        // (`state := state * SEED; state ^= byte`), which
+        // matches the function name "FxHash" only loosely:
+        //   * the most-recent byte never participated in the
+        //     multiplication (its bits got XOR'd in but never
+        //     diffused);
+        //   * the rotate-left avalanche step was missing,
+        //     weakening distribution further.
+        // Using the canonical step gives the avalanche
+        // properties the name implies.
         for byte in bytes {
-            self.state = self.state.wrapping_mul(0x517cc1b727220a95);
-            self.state = self.state ^ (*byte as Int);
+            let rotated = self.state.rotate_left(5);
+            let mixed = rotated ^ (*byte as Int);
+            self.state = mixed.wrapping_mul(0x517cc1b727220a95);
         }
     }
 
@@ -302,6 +328,20 @@ public type Into<T> is protocol {
     fn into(self) -> T;
 };
 
+// Reflexive From: every type converts From itself.  Without
+// this, `let y: T = x.into()` for `x: T` fails to compile —
+// the `Into` blanket below requires a `From<T>` instance, and
+// the same-type case has no provider.  This impl makes
+// `.into()` chains uniformly applicable, including the trivial
+// identity case that callers naturally hit when threading
+// values through generic code that may or may not need
+// conversion.
+implement<T> From<T> for T {
+    fn from(value: T) -> T {
+        value
+    }
+}
+
 // Blanket implementation: Into<T> from From<Self>
 implement<T, U: From<T>> Into<U> for T {
     fn into(self) -> U {
@@ -369,24 +409,36 @@ implement Formatter {
     }
 
     /// Write an integer as its decimal representation.
+    ///
+    /// Correctly handles `Int.MIN`: `-Int.MIN` overflows back to
+    /// `Int.MIN` in two's-complement, so the naïve negate-and-
+    /// loop pattern silently produced "-" with no digits for the
+    /// most-negative value (same family as the panic.vr
+    /// `write_int_stderr` bug fixed in b274ab8b). We work in
+    /// unsigned magnitude (`UInt64`) so every `Int`'s absolute
+    /// value is representable.
     public fn write_int(&mut self, n: Int) -> Result<(), FormatError> {
         if n == 0 {
             return self.write_str("0");
         }
 
-        let mut num = n;
-        if num < 0 {
+        let mut mag: UInt64 = if n < 0 {
             self.write_char('-')?;
-            num = -num;
-        }
+            // Two's-complement magnitude: `(~n as UInt64) + 1`
+            // is exact for every `Int` (Int.MIN's magnitude
+            // 2^63 fits in UInt64).
+            (((!n) as UInt64) + (1 as UInt64))
+        } else {
+            n as UInt64
+        };
 
-        // Build digits in reverse
+        // Build digits in reverse (max 20 for 64-bit unsigned).
         let mut buf: [Byte; 20] = [0; 20];
-        let mut i = 19;
+        let mut i: Int = 19;
 
-        while num > 0 {
-            buf[i] = ('0' as Byte) + ((num % 10) as Byte);
-            num = num / 10;
+        while mag > (0 as UInt64) {
+            buf[i] = ('0' as Byte) + ((mag % (10 as UInt64)) as Byte);
+            mag = mag / (10 as UInt64);
             i = i - 1;
         }
 
