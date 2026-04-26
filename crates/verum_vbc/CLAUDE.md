@@ -174,19 +174,19 @@ fallible variants; new callers should prefer the fallible surface.
 
 ## Test Coverage
 
-- 900+ unit tests in the crate
+- 908 unit tests in the crate (all passing as of #177 close-out)
 - 25 intrinsics test files in `vcs/specs/stdlib/sys/intrinsics/`
 - 6 context system tests in `vcs/specs/L2-standard/contexts/runtime/`
 
-### Known Test Failures (Pre-existing)
-
-| Test | Issue |
-|------|-------|
-| `cbgr_heap::test_cbgr_heap_alloc` | Generation tracking |
-| `cbgr_heap::test_cbgr_heap_generation` | Generation mismatch |
-| `shape::test_constraint_verification` | Constraint count |
-| `value::test_generator_roundtrip` | Generator tag |
-| `value::test_generator_value_large_id` | Generator tag |
+The "Known Test Failures (Pre-existing)" section that previously
+lived here listed five tests (`cbgr_heap::test_cbgr_heap_alloc`,
+`cbgr_heap::test_cbgr_heap_generation`, `shape::test_constraint_verification`,
+`value::test_generator_roundtrip`, `value::test_generator_value_large_id`)
+as known failures.  All five have since been fixed and the section
+has been removed; `cargo test -p verum_vbc` produces zero failures.
+The CI gate is now: any unit-test failure in this crate blocks the
+PR.  No new "known failure" should be documented here without an
+explicit tracking task and a deadline.
 
 ## Performance Targets
 
