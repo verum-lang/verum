@@ -29,7 +29,7 @@ use verum_ast::decl::TheoremDecl;
 use verum_common::span::Span;
 use verum_smt::{
     Context as SmtContext, ContextConfig, Translator, VerificationError,
-    VerifyMode, verification_cache::VerificationCache, verify_refinement,
+    verification_cache::VerificationCache,
     proof_search::ProofSearchEngine,
 };
 

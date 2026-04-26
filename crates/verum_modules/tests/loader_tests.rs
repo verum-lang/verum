@@ -84,7 +84,12 @@ fn test_path_collision_file_form_vs_directory_form() {
     }
 }
 
+/// `E_MODULE` in the test name preserves the link to the
+/// diagnostic-code family (`E_MODULE_PATH_COLLISION` /
+/// `E_MODULE_NOT_FOUND`).  `#[allow(non_snake_case)]` documents the
+/// intentional deviation from the snake_case convention.
 #[test]
+#[allow(non_snake_case)]
 fn test_path_collision_diagnostic_carries_E_MODULE_code() {
     // MOD-MED-4 / MOD-MED-5: every ModuleError variant must carry
     // its stable E_MODULE_* code, regardless of how it was
@@ -104,7 +109,9 @@ fn test_path_collision_diagnostic_carries_E_MODULE_code() {
     assert!(docs.starts_with("https://docs.verum-lang.org/errors/"));
 }
 
+/// See sibling test for the `non_snake_case` rationale.
 #[test]
+#[allow(non_snake_case)]
 fn test_module_not_found_carries_E_MODULE_code() {
     // Sibling test to verify E_MODULE_NOT_FOUND code wiring.
     let temp_dir = TempDir::new().unwrap();
