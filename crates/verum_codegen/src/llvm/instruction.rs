@@ -2208,11 +2208,39 @@ pub fn lower_instruction<'ctx>(
 
             let is_inline = ctx.is_inline_struct_register(ref_reg.0);
 
-            if is_inline {
-                // Inline struct pointer (from offset() into array): the address IS the
-                // struct base — no indirection needed. Just pass through.
+            // Heap-allocated value-types (records, sum types, lists, maps, etc.)
+            // are stored as pointers in registers — the register holds a heap-ptr
+            // that semantically *is* the value. `*ref` of such a register must
+            // pass through the pointer, NOT issue an i64 load — the standard
+            // "load 8 bytes through this pointer" path would only copy the
+            // object header, leaving the variant-tag/payload bytes behind.
+            // Without this, e.g. `*self` of `&SocketAddr` (a 40-byte sum type)
+            // captures only the first 8 bytes of the heap struct; downstream
+            // `is_ipv4()` reads the variant tag at offset 0x18 of malformed data
+            // → SEGV. Closes #76 for the deref site. Trust the value-as-pointer
+            // tracking the rest of the codegen sets up via `mark_struct_register`
+            // / `set_obj_register_type` / `is_list/map/...` helpers.
+            let is_value_type_ptr = ctx.is_struct_register(ref_reg.0)
+                || ctx.is_list_register(ref_reg.0)
+                || ctx.is_map_register(ref_reg.0)
+                || ctx.is_set_register(ref_reg.0)
+                || ctx.is_deque_register(ref_reg.0)
+                || ctx.is_btreemap_register(ref_reg.0)
+                || ctx.is_btreeset_register(ref_reg.0)
+                || ctx.is_binaryheap_register(ref_reg.0)
+                || ctx.is_chan_register(ref_reg.0)
+                || ctx.is_text_register(ref_reg.0)
+                || ctx.is_string_register(ref_reg.0)
+                || ctx.get_obj_register_type(ref_reg.0).is_some();
+
+            if is_inline || is_value_type_ptr {
+                // Inline struct pointer (from offset() into array) OR a
+                // heap-allocated value type: the value-in-register IS the
+                // pointer to the underlying object. Pass through unchanged.
                 ctx.set_register(dst.0, val);
-                ctx.mark_inline_struct_register(dst.0);
+                if is_inline {
+                    ctx.mark_inline_struct_register(dst.0);
+                }
                 // Propagate element stride and obj type through Deref
                 let stride = ctx.get_element_stride(ref_reg.0);
                 if stride != 8 {
