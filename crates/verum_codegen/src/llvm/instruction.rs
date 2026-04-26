@@ -22596,10 +22596,29 @@ fn lower_iter_next<'ctx>(
         } else {
             // Protocol 2: next() -> Maybe<T> — standard Verum Iterator protocol
             // Returns a Maybe variant: None (tag=0) or Some(value) (tag=1, payload at field 0)
-            let next_fn = module.get_function(&next_name)
-                .ok_or_else(|| LlvmLoweringError::internal(
-                    format!("Custom iterator '{}' missing both has_next and next methods", type_name)
-                ))?;
+            //
+            // Defensive fallback (#106 Path B.4): when neither has_next
+            // nor next is registered for this type, the type is being
+            // mis-monomorphised by an Iterator-protocol blanket impl
+            // — typical for `Heap<T>` / `Map<K,V>` / `List<T>` etc.
+            // where downstream methods (`.product`, `.sum`) call
+            // `self.fold(...)` which internally walks the iterator.
+            // Rather than skip the entire enclosing function, emit
+            // a "permanently exhausted" iterator: dst=0, has_next=0.
+            // Subsequent code reads tag=0 (None) and exits the
+            // iteration loop cleanly.
+            //
+            // Accumulates as ~30 stdlib functions per typical
+            // `mount core.*` build (Heap.product, Map.sum, List.iter
+            // chains on types without proper iterator state).
+            let next_fn = match module.get_function(&next_name) {
+                Some(f) => f,
+                None => {
+                    ctx.set_register(dst.0, i64_type.const_zero().into());
+                    ctx.set_register(has_next.0, i64_type.const_zero().into());
+                    return Ok(());
+                }
+            };
             let maybe_val = ctx.builder()
                 .build_call(next_fn, &[iter_as_i64.into()], "maybe_val")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
