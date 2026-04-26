@@ -77,6 +77,23 @@ pub struct RegisteredAxiom {
     pub ty: CoreTerm,
     /// Framework attribution.
     pub framework: FrameworkId,
+    /// V8 (#223) — definitional content (transparent body).
+    ///
+    /// `None` (the V8 default) marks the entry as an **opaque
+    /// postulate**: a true axiom whose only kernel-visible
+    /// content is its declared type. δ-reduction
+    /// ([`crate::support::normalize_with_axioms`]) leaves
+    /// references to opaque postulates unchanged.
+    ///
+    /// `Some(body)` marks the entry as a **transparent
+    /// definition**: a name bound to an explicit term that
+    /// δ-reduction unfolds. Used by elaborator-emitted
+    /// `def name : ty := body` declarations.
+    ///
+    /// `#[serde(default)]` keeps pre-V8 on-disk certificates
+    /// (without the field) deserialisable as opaque postulates.
+    #[serde(default)]
+    pub body: Option<CoreTerm>,
 }
 
 impl AxiomRegistry {
@@ -256,7 +273,46 @@ impl AxiomRegistry {
             SubsingletonRegime::UipPermitted
             | SubsingletonRegime::LegacyUnchecked => {}
         }
-        self.entries.push(RegisteredAxiom { name, ty, framework });
+        self.entries.push(RegisteredAxiom { name, ty, framework, body: None });
+        Ok(())
+    }
+
+    /// V8 (#223) — register a transparent **definition**: a name
+    /// bound to an explicit body that δ-reduction will unfold.
+    ///
+    /// Equivalent to `register_with_regime(LegacyUnchecked)` but
+    /// stores the body for later use by
+    /// [`crate::support::normalize_with_axioms`]. Definitions
+    /// don't go through the K-FwAx subsingleton/Prop checks
+    /// because they're not postulates — they're closed
+    /// elaborator-emitted let-bindings whose well-formedness was
+    /// already validated by the type-checker that produced the
+    /// body.
+    ///
+    /// Side-condition: `body` should be a closed term that
+    /// inhabits `ty`. The kernel doesn't re-check this here
+    /// (the elaborator's responsibility); the trusted gate is
+    /// the LCF `verify_full(body, ty)` call the elaborator
+    /// performs before invoking `register_definition`.
+    pub fn register_definition(
+        &mut self,
+        name: Text,
+        body: CoreTerm,
+        ty: CoreTerm,
+        framework: FrameworkId,
+    ) -> Result<(), KernelError> {
+        if self.entries.iter().any(|e| e.name == name) {
+            return Err(KernelError::DuplicateAxiom(name));
+        }
+        if crate::inductive::is_uip_shape(&ty) {
+            return Err(KernelError::UipForbidden(name));
+        }
+        self.entries.push(RegisteredAxiom {
+            name,
+            ty,
+            framework,
+            body: Some(body),
+        });
         Ok(())
     }
 
