@@ -47,10 +47,8 @@ use verum_protocol_types::cbgr_predicates::{
 use verum_common::ToText;
 
 use z3::ast::{BV, Bool};
-use z3::{Context, FuncDecl, SatResult, Solver, Sort, Symbol};
+use z3::{FuncDecl, SatResult, Solver, Sort, Symbol};
 
-use crate::context::Context as VerumContext;
-use crate::translate::Translator;
 
 // ==================== Core Types ====================
 // Verification result types are imported from verum_protocol_types to avoid circular dependency
@@ -85,66 +83,19 @@ pub enum GenerationPredicate {
 
 /// Encodes CBGR predicates to Z3
 ///
-/// Fields are initialized with Z3 function declarations/sorts that will be used
-/// as the CBGR-SMT encoding is fully wired up. Suppress dead_code warnings for
-/// the entire struct since these are reserved Z3 declarations.
-#[allow(dead_code)]
+/// Z3 0.19+ uses thread-local context resolution. The other Z3 declarations
+/// (generation/epoch/valid/same_alloc and the reference bitvector sort) are
+/// constructed inline by the `encode_*` methods rather than retained as
+/// fields, since they are cheap to rebuild and avoid lifetime entanglement.
 pub struct CBGRPredicateEncoder {
-    /// Z3 context
-    context: Context,
-    /// Verum SMT context
-    verum_ctx: VerumContext,
-    /// Reference sort (bitvector representing ptr + generation)
-    ref_sort: Sort,
-    /// Generation predicate: ref -> u64
-    generation_pred: FuncDecl,
-    /// Epoch predicate: ref -> u16
-    epoch_pred: FuncDecl,
-    /// Valid predicate: ref -> bool
-    valid_pred: FuncDecl,
-    /// Same allocation predicate: ref × ref -> bool
-    same_alloc_pred: FuncDecl,
-    /// Global generation counter (for soundness)
+    /// Global generation counter (monotonically increasing) — retained
+    /// because it is a function symbol shared across multiple encodings.
     global_generation: FuncDecl,
 }
 
 impl CBGRPredicateEncoder {
     /// Create a new CBGR predicate encoder
     pub fn new() -> Self {
-        let context = Context::thread_local();
-        let verum_ctx = VerumContext::new();
-
-        // Reference is a 128-bit bitvector (64-bit ptr + 64-bit generation)
-        let ref_sort = Sort::bitvector(128);
-
-        // Create generation(ref) -> BV<64> predicate
-        let generation_pred = FuncDecl::new(
-            Symbol::String("generation".to_string()),
-            &[&ref_sort],
-            &Sort::bitvector(64),
-        );
-
-        // Create epoch(ref) -> BV<16> predicate
-        let epoch_pred = FuncDecl::new(
-            Symbol::String("epoch".to_string()),
-            &[&ref_sort],
-            &Sort::bitvector(16),
-        );
-
-        // Create valid(ref) -> Bool predicate
-        let valid_pred = FuncDecl::new(
-            Symbol::String("valid".to_string()),
-            &[&ref_sort],
-            &Sort::bool(),
-        );
-
-        // Create same_allocation(ref, ref) -> Bool predicate
-        let same_alloc_pred = FuncDecl::new(
-            Symbol::String("same_allocation".to_string()),
-            &[&ref_sort, &ref_sort],
-            &Sort::bool(),
-        );
-
         // Global generation counter (monotonically increasing)
         let global_generation = FuncDecl::new(
             Symbol::String("global_gen".to_string()),
@@ -152,16 +103,7 @@ impl CBGRPredicateEncoder {
             &Sort::bitvector(64),
         );
 
-        Self {
-            context,
-            verum_ctx,
-            ref_sort,
-            generation_pred,
-            epoch_pred,
-            valid_pred,
-            same_alloc_pred,
-            global_generation,
-        }
+        Self { global_generation }
     }
 
     /// Encode generation extraction
@@ -734,20 +676,16 @@ fn parse_comparison(s: &str) -> Option<(CompareOp, &str)> {
 // ==================== Integration with Refinement Verification ====================
 
 /// Extend refinement verifier with CBGR predicates
-#[allow(dead_code)] // Fields reserved for full CBGR-aware refinement verification
 pub struct CBGRAwareRefinementVerifier {
     /// CBGR encoder
     encoder: CBGRPredicateEncoder,
-    /// Standard translator
-    translator: Translator<'static>,
 }
 
 impl CBGRAwareRefinementVerifier {
     /// Create a new CBGR-aware refinement verifier
-    pub fn new(context: &'static VerumContext) -> Self {
+    pub fn new() -> Self {
         Self {
             encoder: CBGRPredicateEncoder::new(),
-            translator: Translator::new(context),
         }
     }
 

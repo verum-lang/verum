@@ -134,13 +134,13 @@ fn test_memory_spaces() {
 
 #[test]
 fn test_race_detector_creation() {
-    let detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+    let detector = RaceDetector::new();
     assert_eq!(detector.get_races().len(), 0);
 }
 
 #[test]
 fn test_no_race_same_thread() {
-    let mut detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+    let mut detector = RaceDetector::new();
 
     let thread = ThreadId::new(0, 0, 0);
     let block = BlockId::new(0, 0, 0);
@@ -174,7 +174,7 @@ fn test_no_race_same_thread() {
 
 #[test]
 fn test_no_race_two_reads() {
-    let mut detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+    let mut detector = RaceDetector::new();
 
     let thread1 = ThreadId::new(0, 0, 0);
     let thread2 = ThreadId::new(1, 0, 0);
@@ -209,7 +209,7 @@ fn test_no_race_two_reads() {
 
 #[test]
 fn test_no_race_different_memory_spaces() {
-    let mut detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+    let mut detector = RaceDetector::new();
 
     let thread1 = ThreadId::new(0, 0, 0);
     let thread2 = ThreadId::new(1, 0, 0);
@@ -247,7 +247,7 @@ fn test_no_race_different_memory_spaces() {
 
 #[test]
 fn test_race_write_write() {
-    let mut detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+    let mut detector = RaceDetector::new();
 
     let thread1 = ThreadId::new(0, 0, 0);
     let thread2 = ThreadId::new(1, 0, 0);
@@ -285,7 +285,7 @@ fn test_race_write_write() {
 
 #[test]
 fn test_race_read_write() {
-    let mut detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+    let mut detector = RaceDetector::new();
 
     let thread1 = ThreadId::new(0, 0, 0);
     let thread2 = ThreadId::new(1, 0, 0);
@@ -323,7 +323,7 @@ fn test_race_read_write() {
 
 #[test]
 fn test_find_all_races() {
-    let mut detector = RaceDetector::new((1, 1, 1), (4, 1, 1));
+    let mut detector = RaceDetector::new();
 
     let block = BlockId::new(0, 0, 0);
 
@@ -363,7 +363,7 @@ fn test_find_all_races() {
 
 #[test]
 fn test_barrier_synchronization() {
-    let mut detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+    let mut detector = RaceDetector::new();
 
     let block = BlockId::new(0, 0, 0);
     let thread1 = ThreadId::new(0, 0, 0);
@@ -531,7 +531,7 @@ fn test_vector_addition_no_race() {
     // 3. Use array theory to model memory properly
 
     // Reduced test with single thread to verify basic functionality
-    let mut detector = RaceDetector::new((1, 1, 1), (1, 1, 1));
+    let mut detector = RaceDetector::new();
     let block = BlockId::new(0, 0, 0);
     let thread = ThreadId::new(0, 0, 0);
 
@@ -567,7 +567,7 @@ fn test_shared_memory_reduction() {
     // NOTE: Similar to vector addition, this test detects false positives with symbolic addresses.
     // We simplify to test the barrier mechanism with a smaller example.
 
-    let mut detector = RaceDetector::new((1, 1, 1), (2, 1, 1));
+    let mut detector = RaceDetector::new();
     let block = BlockId::new(0, 0, 0);
 
     // Phase 1: Each thread writes to its own shared memory location
@@ -633,7 +633,7 @@ fn test_shared_memory_reduction() {
 
 #[test]
 fn test_race_statistics() {
-    let mut detector = RaceDetector::new((1, 1, 1), (8, 1, 1));
+    let mut detector = RaceDetector::new();
     let block = BlockId::new(0, 0, 0);
 
     // Create some conflicting accesses

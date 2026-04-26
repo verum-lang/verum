@@ -477,10 +477,6 @@ pub struct DependentTypeBackend {
     /// Custom SMT theories for dependent types
     theories: Map<Text, CustomTheory>,
 
-    /// Proof term cache for performance
-    #[allow(dead_code)] // Reserved for proof caching optimization
-    proof_cache: Map<Text, ProofTerm>,
-
     /// Maximum quantifier depth
     max_quantifier_depth: usize,
 }
@@ -490,7 +486,6 @@ impl DependentTypeBackend {
     pub fn new() -> Self {
         Self {
             theories: Map::new(),
-            proof_cache: Map::new(),
             max_quantifier_depth: 3, // Reasonable default
         }
     }
@@ -2190,9 +2185,6 @@ pub enum ProofStructure {
 /// Automated proof search uses strategies: assumption, reflexivity, intro, split, apply,
 /// with hints database for priority-based lemma application.
 pub struct QuantifierHandler {
-    /// Maximum instantiation depth
-    #[allow(dead_code)] // Used for depth-limited instantiation
-    max_depth: usize,
     /// Trigger patterns for E-matching
     patterns: Map<Text, List<TriggerPattern>>,
 }
@@ -2201,7 +2193,6 @@ impl QuantifierHandler {
     /// Create a new quantifier handler
     pub fn new() -> Self {
         Self {
-            max_depth: 5,
             patterns: Map::new(),
         }
     }
