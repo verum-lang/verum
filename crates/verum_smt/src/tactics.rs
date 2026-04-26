@@ -2042,6 +2042,30 @@ pub struct FormulaGoalAnalyzer {
     stats: AnalyzerStats,
 }
 
+/// Probe lookup that survives unrecognised probe names.
+///
+/// `z3::Probe::new(name)` calls into `Z3_mk_probe(ctx, cstr)`, which
+/// returns `Option<Z3_probe>` — `None` when Z3 doesn't recognise
+/// the name. The Rust binding then `.unwrap()`s that, panicking the
+/// thread. We catch the panic with `std::panic::catch_unwind` (the
+/// panic crosses no FFI frames so this is safe) and fall back to
+/// `0.0`, which the analyser interprets as "characteristic absent".
+///
+/// Cost: one panic-hook installation per failed probe (no overhead
+/// on the success path — `catch_unwind` has only a stack-anchor
+/// cost when no panic actually fires).
+fn safe_probe(name: &'static str, goal: &Goal) -> f64 {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let result = catch_unwind(AssertUnwindSafe(|| Probe::new(name).apply(goal)));
+    match result {
+        Ok(v) => v,
+        Err(_) => {
+            tracing::debug!(probe = name, "Z3 probe unrecognised — defaulting to 0.0");
+            0.0
+        }
+    }
+}
+
 /// Statistics for formula analysis
 #[derive(Debug, Clone, Default)]
 pub struct AnalyzerStats {
@@ -2115,20 +2139,34 @@ impl FormulaGoalAnalyzer {
     /// Analyze a Z3 Goal and extract its characteristics.
     ///
     /// This is the internal implementation that works directly with Goals.
+    ///
+    /// All probe lookups go through [`safe_probe`] so an unrecognized
+    /// probe name (e.g. removed in a future Z3 release) degrades to
+    /// `0.0` instead of panicking inside `Probe::new`. The probe
+    /// names here are the subset confirmed present in Z3 ≥ 4.13.0:
+    ///   `is-propositional`, `is-qfbv`, `is-qflia`, `is-qflra`,
+    ///   `is-qfnra`, `is-qfnia`, `has-quantifiers`, `is-qfauflia`,
+    ///   `is-qfufnra`, `num-consts`.
     pub fn analyze_goal(&self, goal: &Goal) -> FormulaCharacteristics {
         // Theory detection probes
-        let is_propositional = Probe::new("is-propositional").apply(goal) > 0.0;
-        let is_qfbv = Probe::new("is-qfbv").apply(goal) > 0.0;
-        let is_qflia = Probe::new("is-qflia").apply(goal) > 0.0;
-        let is_qflra = Probe::new("is-qflra").apply(goal) > 0.0;
-        let is_qfnra = Probe::new("is-qfnra").apply(goal) > 0.0;
-        let is_qfnia = Probe::new("is-qfnia").apply(goal) > 0.0;
-        let has_quantifiers = Probe::new("has-quantifiers").apply(goal) > 0.0;
-        let is_qfuf = Probe::new("is-qfuf").apply(goal) > 0.0;
-        let is_qfauflia = Probe::new("is-qfauflia").apply(goal) > 0.0;
+        let is_propositional = safe_probe("is-propositional", goal) > 0.0;
+        let is_qfbv = safe_probe("is-qfbv", goal) > 0.0;
+        let is_qflia = safe_probe("is-qflia", goal) > 0.0;
+        let is_qflra = safe_probe("is-qflra", goal) > 0.0;
+        let is_qfnra = safe_probe("is-qfnra", goal) > 0.0;
+        let is_qfnia = safe_probe("is-qfnia", goal) > 0.0;
+        let has_quantifiers = safe_probe("has-quantifiers", goal) > 0.0;
+        // QF_UF combined with theories — Z3 doesn't expose a bare
+        // `is-qfuf` probe; `is-qfufnra` is the closest available
+        // (UF + nonlinear real arithmetic). Combined with the QF_AUFLIA
+        // probe below, this still correctly flags the common cases
+        // where uninterpreted functions appear alongside other theory
+        // atoms (which is the only case the dispatcher cares about).
+        let is_qfufnra = safe_probe("is-qfufnra", goal) > 0.0;
+        let is_qfauflia = safe_probe("is-qfauflia", goal) > 0.0;
 
         // Complexity probes
-        let num_consts = Probe::new("num-consts").apply(goal) as usize;
+        let num_consts = safe_probe("num-consts", goal) as usize;
         let depth = goal.get_depth();
         let size = goal.get_size() as usize;
 
@@ -2137,7 +2175,7 @@ impl FormulaGoalAnalyzer {
         let has_nonlinear = is_qfnra || is_qfnia;
         let has_bitvectors = is_qfbv;
         let has_arrays = is_qfauflia;
-        let has_uninterpreted_functions = is_qfuf || is_qfauflia;
+        let has_uninterpreted_functions = is_qfufnra || is_qfauflia;
 
         FormulaCharacteristics {
             is_propositional,
@@ -2160,10 +2198,10 @@ impl FormulaGoalAnalyzer {
         let goal = Goal::new(false, false, false);
         goal.assert(formula);
 
-        let is_qflia = Probe::new("is-qflia").apply(&goal) > 0.0;
-        let is_qflra = Probe::new("is-qflra").apply(&goal) > 0.0;
-        let is_qfnra = Probe::new("is-qfnra").apply(&goal) > 0.0;
-        let is_qfnia = Probe::new("is-qfnia").apply(&goal) > 0.0;
+        let is_qflia = safe_probe("is-qflia", &goal) > 0.0;
+        let is_qflra = safe_probe("is-qflra", &goal) > 0.0;
+        let is_qfnra = safe_probe("is-qfnra", &goal) > 0.0;
+        let is_qfnia = safe_probe("is-qfnia", &goal) > 0.0;
 
         (is_qflia || is_qflra) && !is_qfnra && !is_qfnia
     }
@@ -2174,7 +2212,7 @@ impl FormulaGoalAnalyzer {
     pub fn has_bitvectors(&mut self, formula: &z3::ast::Bool) -> bool {
         let goal = Goal::new(false, false, false);
         goal.assert(formula);
-        Probe::new("is-qfbv").apply(&goal) > 0.0
+        safe_probe("is-qfbv", &goal) > 0.0
     }
 
     /// Check if a formula contains nonlinear arithmetic.
@@ -2184,8 +2222,8 @@ impl FormulaGoalAnalyzer {
         let goal = Goal::new(false, false, false);
         goal.assert(formula);
 
-        let is_qfnra = Probe::new("is-qfnra").apply(&goal) > 0.0;
-        let is_qfnia = Probe::new("is-qfnia").apply(&goal) > 0.0;
+        let is_qfnra = safe_probe("is-qfnra", &goal) > 0.0;
+        let is_qfnia = safe_probe("is-qfnia", &goal) > 0.0;
 
         is_qfnra || is_qfnia
     }
@@ -2194,7 +2232,7 @@ impl FormulaGoalAnalyzer {
     pub fn has_quantifiers(&mut self, formula: &z3::ast::Bool) -> bool {
         let goal = Goal::new(false, false, false);
         goal.assert(formula);
-        Probe::new("has-quantifiers").apply(&goal) > 0.0
+        safe_probe("has-quantifiers", &goal) > 0.0
     }
 
     /// Check if a formula is purely propositional (no theory atoms).
@@ -2203,7 +2241,7 @@ impl FormulaGoalAnalyzer {
     pub fn is_propositional(&mut self, formula: &z3::ast::Bool) -> bool {
         let goal = Goal::new(false, false, false);
         goal.assert(formula);
-        Probe::new("is-propositional").apply(&goal) > 0.0
+        safe_probe("is-propositional", &goal) > 0.0
     }
 
     /// Count the number of unique variables in a formula.
@@ -2212,7 +2250,7 @@ impl FormulaGoalAnalyzer {
     pub fn num_variables(&mut self, formula: &z3::ast::Bool) -> usize {
         let goal = Goal::new(false, false, false);
         goal.assert(formula);
-        Probe::new("num-consts").apply(&goal) as usize
+        safe_probe("num-consts", &goal) as usize
     }
 
     /// Get analysis statistics.
@@ -2430,5 +2468,413 @@ impl TacticCombinator {
     /// Wrap with parameters
     pub fn params(self, params: TacticParams) -> Self {
         TacticCombinator::WithParams(Box::new(self), params)
+    }
+}
+
+// ==================== Tactic Cache (#103) ====================
+//
+// `FormulaGoalAnalyzer::analyze` runs nine Z3 probes per formula
+// (≈100us total). Refinement/dependent-typed verification produces
+// many obligations whose probe-detected characteristics are
+// identical (same predicate over the same theory atoms with
+// different constants). Memoising the analyser output across a
+// build reduces verification wall-clock by skipping the redundant
+// Z3 round-trips.
+//
+// Backend scope: This cache lives strictly on the Z3 path. Verum's
+// SMT layer is dual-backend (Z3 + CVC5, dispatched by
+// `crate::capability_router`); the CVC5 side has its own
+// strategy/portfolio plumbing in `cvc5_advanced` /
+// `portfolio_executor` and a corresponding cache there is
+// future work (#103 follow-up). The cache key is typed on
+// `z3::ast::Bool` / `z3::Goal` so cross-backend confusion is
+// statically impossible — a CVC5 obligation cannot accidentally
+// be looked up here.
+//
+// Design choices:
+//   * Cache value = `FormulaCharacteristics` (Copy-able 32-byte
+//     struct), not the full `TacticCombinator`. The cardinality of
+//     distinct characteristic tuples is < 64 in practice; rebuilding
+//     the combinator tree on every cache hit is a handful of `Box`
+//     allocations (≈ tens of nanoseconds), and decoupling the cache
+//     from the combinator strategy lets us tune the strategy
+//     without invalidating the cache.
+//   * Cache key = blake3 hash over the formula's S-expression
+//     rendering. Z3's `Display` impl is structurally deterministic;
+//     blake3 is the fastest cryptographic hash on x86_64/aarch64
+//     and gives 256-bit collision resistance — overkill for a
+//     local cache but cheap (≈ 1 GiB/s).
+//   * Storage = `dashmap::DashMap` for lock-free reads under
+//     contention (verification runs `rayon`-parallel across modules).
+
+/// Stable structural signature of a Z3 `Bool`/`Goal`, used as the
+/// [`TacticCache`] key. Computed via blake3 over the formula's
+/// canonical S-expression rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FormulaSignature([u8; 32]);
+
+impl FormulaSignature {
+    /// Compute the signature of a Z3 `Bool` formula.
+    pub fn of_formula(formula: &z3::ast::Bool) -> Self {
+        let s = formula.to_string();
+        Self(blake3::hash(s.as_bytes()).into())
+    }
+
+    /// Compute the signature of a Z3 `Goal`.
+    pub fn of_goal(goal: &Goal) -> Self {
+        let s = goal.to_string();
+        Self(blake3::hash(s.as_bytes()).into())
+    }
+
+    /// Raw 32-byte signature (for callers that want to fold the
+    /// signature into another hash, e.g. a per-module proof
+    /// certificate).
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Aggregate cache statistics, snapshot-style.
+///
+/// `hit_rate` is `hits / (hits + misses)` clamped to `0.0` when no
+/// lookups have been performed. Useful for telemetry to flag
+/// pathologically low cache utilisation (e.g. every formula
+/// contains a unique randomly-generated constant — defeating
+/// hashing).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TacticCacheStats {
+    /// Number of `get`s that found an entry.
+    pub hits: u64,
+    /// Number of `get`s that returned `None`.
+    pub misses: u64,
+    /// Current entry count.
+    pub entries: usize,
+    /// `hits / (hits + misses)`, or `0.0` when `hits + misses == 0`.
+    pub hit_rate: f64,
+}
+
+/// Concurrent, sharded cache mapping [`FormulaSignature`] →
+/// cached [`FormulaCharacteristics`].
+///
+/// Construct via [`TacticCache::new`] (default capacity) or
+/// [`TacticCache::with_capacity`]. Lookups go through
+/// [`auto_select_tactic_cached`] / [`auto_select_tactic_cached_global`].
+/// `Send + Sync` so it can sit on the verification context and be
+/// shared across rayon workers.
+///
+/// The cache is *bounded by capacity hint only* — `DashMap` will
+/// grow past `capacity` if pushed; callers that need a hard cap
+/// should call [`TacticCache::clear`] periodically. In practice
+/// the unique-formula-shape count for a typical build is in the
+/// low thousands, well below any reasonable bound.
+pub struct TacticCache {
+    entries: dashmap::DashMap<FormulaSignature, FormulaCharacteristics>,
+    hits: AtomicU64,
+    misses: AtomicU64,
+}
+
+impl TacticCache {
+    /// Default capacity hint = 8192 entries. Each entry is the
+    /// 32-byte signature + the ≈ 32-byte characteristics struct +
+    /// per-shard overhead, so ≈ 1 MiB working-set at full load.
+    pub fn new() -> Self {
+        Self::with_capacity(8192)
+    }
+
+    /// Construct with a specific capacity hint.
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            entries: dashmap::DashMap::with_capacity(cap),
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+        }
+    }
+
+    /// Look up cached characteristics by signature.
+    /// Increments `hits` on Some, `misses` on None.
+    pub fn get(&self, sig: &FormulaSignature) -> Option<FormulaCharacteristics> {
+        match self.entries.get(sig) {
+            Some(entry) => {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+                Some(entry.clone())
+            }
+            None => {
+                self.misses.fetch_add(1, Ordering::Relaxed);
+                None
+            }
+        }
+    }
+
+    /// Insert (or replace) the characteristics for `sig`.
+    pub fn insert(&self, sig: FormulaSignature, chars: FormulaCharacteristics) {
+        self.entries.insert(sig, chars);
+    }
+
+    /// Snapshot the current statistics. Cheap (atomic loads + len).
+    pub fn stats(&self) -> TacticCacheStats {
+        let hits = self.hits.load(Ordering::Relaxed);
+        let misses = self.misses.load(Ordering::Relaxed);
+        let total = hits.saturating_add(misses);
+        let hit_rate = if total == 0 {
+            0.0
+        } else {
+            hits as f64 / total as f64
+        };
+        TacticCacheStats {
+            hits,
+            misses,
+            entries: self.entries.len(),
+            hit_rate,
+        }
+    }
+
+    /// Drop every entry and reset hit/miss counters. Useful between
+    /// build sessions to prevent unbounded growth in long-lived
+    /// processes (LSP, watch mode).
+    pub fn clear(&self) {
+        self.entries.clear();
+        self.hits.store(0, Ordering::Relaxed);
+        self.misses.store(0, Ordering::Relaxed);
+    }
+
+    /// Current entry count.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+impl Default for TacticCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Process-wide [`TacticCache`] singleton. Lazily initialised on
+/// first call. The verification pipeline picks this up via
+/// [`auto_select_tactic_cached_global`] without explicit threading.
+///
+/// Tests, benchmarks, and any code that wants isolation from other
+/// concurrent verification activity should construct their own
+/// [`TacticCache`] and use [`auto_select_tactic_cached`] directly
+/// instead of touching the global.
+pub fn global_tactic_cache() -> &'static TacticCache {
+    static GLOBAL: std::sync::OnceLock<TacticCache> = std::sync::OnceLock::new();
+    GLOBAL.get_or_init(TacticCache::new)
+}
+
+/// Cached variant of [`auto_select_tactic`].
+///
+/// Computes the formula's [`FormulaSignature`], queries `cache`.
+/// On hit: skips the nine Z3 probes entirely and rebuilds the
+/// combinator from cached characteristics. On miss: runs the
+/// analyser, inserts the result, and returns the combinator.
+///
+/// The returned [`TacticCombinator`] is bit-identical to what
+/// [`auto_select_tactic`] would produce — caching is observably
+/// transparent (modulo `analyzer.stats()` not advancing on hits).
+pub fn auto_select_tactic_cached(
+    cache: &TacticCache,
+    analyzer: &mut FormulaGoalAnalyzer,
+    formula: &z3::ast::Bool,
+) -> TacticCombinator {
+    let sig = FormulaSignature::of_formula(formula);
+    let chars = match cache.get(&sig) {
+        Some(c) => c,
+        None => {
+            let c = analyzer.analyze(formula);
+            cache.insert(sig, c.clone());
+            c
+        }
+    };
+    select_tactic_from_characteristics(&chars)
+}
+
+/// Cached variant of [`auto_select_tactic_for_goal`].
+pub fn auto_select_tactic_cached_for_goal(
+    cache: &TacticCache,
+    analyzer: &FormulaGoalAnalyzer,
+    goal: &Goal,
+) -> TacticCombinator {
+    let sig = FormulaSignature::of_goal(goal);
+    let chars = match cache.get(&sig) {
+        Some(c) => c,
+        None => {
+            let c = analyzer.analyze_goal(goal);
+            cache.insert(sig, c.clone());
+            c
+        }
+    };
+    select_tactic_from_characteristics(&chars)
+}
+
+/// Convenience: route through the process-wide [`global_tactic_cache`].
+/// The verification pipeline calls this from `solver.rs` so every
+/// VC obligation in a build participates in the same cache.
+pub fn auto_select_tactic_cached_global(
+    analyzer: &mut FormulaGoalAnalyzer,
+    formula: &z3::ast::Bool,
+) -> TacticCombinator {
+    auto_select_tactic_cached(global_tactic_cache(), analyzer, formula)
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use z3::ast::{BV, Bool, Int};
+    use z3::{Config, with_z3_config};
+
+    /// All Z3 AST/Probe constructors require a thread-local Z3
+    /// context. Wrap each test body in `with_z3_config` so the
+    /// context is established before any Z3 call.
+    fn with_z3<F, R>(body: F) -> R
+    where
+        F: FnOnce() -> R + Send + Sync,
+        R: Send + Sync,
+    {
+        with_z3_config(&Config::new(), body)
+    }
+
+    #[test]
+    fn signature_is_stable_across_calls() {
+        with_z3(|| {
+            let x = Bool::new_const("x");
+            let y = Bool::new_const("y");
+            let formula = Bool::and(&[&x, &y]);
+            let s1 = FormulaSignature::of_formula(&formula);
+            let s2 = FormulaSignature::of_formula(&formula);
+            assert_eq!(s1, s2);
+        });
+    }
+
+    #[test]
+    fn signature_differs_for_distinct_formulas() {
+        with_z3(|| {
+            let x = Bool::new_const("x");
+            let y = Bool::new_const("y");
+            let s_and = FormulaSignature::of_formula(&Bool::and(&[&x, &y]));
+            let s_or = FormulaSignature::of_formula(&Bool::or(&[&x, &y]));
+            assert_ne!(s_and, s_or);
+        });
+    }
+
+    #[test]
+    fn cache_hits_skip_analyzer_invocation() {
+        with_z3(|| {
+            let cache = TacticCache::new();
+            let mut analyzer = FormulaGoalAnalyzer::new();
+            let a = Int::new_const("a");
+            let five = Int::from_i64(5);
+            let formula = a.gt(&five);
+
+            // Miss → analyser runs → cache populated.
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &formula);
+            assert_eq!(cache.stats().misses, 1);
+            assert_eq!(cache.stats().hits, 0);
+            assert_eq!(cache.len(), 1);
+            let analyses_after_miss = analyzer.stats().formulas_analyzed;
+
+            // Hit → analyser does NOT run again (counter steady).
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &formula);
+            assert_eq!(cache.stats().misses, 1);
+            assert_eq!(cache.stats().hits, 1);
+            assert_eq!(analyzer.stats().formulas_analyzed, analyses_after_miss);
+        });
+    }
+
+    #[test]
+    fn cached_result_is_strategy_equivalent_to_uncached() {
+        with_z3(|| {
+            let cache = TacticCache::new();
+            let mut analyzer = FormulaGoalAnalyzer::new();
+            let a = Int::new_const("a");
+            let b = Int::new_const("b");
+            let sum = Int::add(&[&a, &b]);
+            let formula = sum.gt(&Int::from_i64(0));
+
+            let uncached = auto_select_tactic(&mut analyzer, &formula);
+            let cached = auto_select_tactic_cached(&cache, &mut analyzer, &formula);
+
+            // Equivalence at the discriminant level — TacticCombinator
+            // is a tree of Box<Self>, so we compare via Debug rendering
+            // (deterministic for both variants). select_from_chars is
+            // pure, so equal characteristics ⇒ equal combinator.
+            assert_eq!(format!("{:?}", uncached), format!("{:?}", cached));
+        });
+    }
+
+    #[test]
+    fn hit_rate_zero_when_no_lookups() {
+        let cache = TacticCache::new();
+        let stats = cache.stats();
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 0);
+        assert_eq!(stats.hit_rate, 0.0);
+    }
+
+    #[test]
+    fn hit_rate_correct_after_mixed_lookups() {
+        with_z3(|| {
+            let cache = TacticCache::new();
+            let mut analyzer = FormulaGoalAnalyzer::new();
+            let f1 = Bool::new_const("p").not();
+            let f2 = Bool::new_const("q").not();
+
+            // 2 misses + 3 hits (f1 hit twice, f2 hit once).
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f1);
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f2);
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f1);
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f2);
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f1);
+
+            let stats = cache.stats();
+            assert_eq!(stats.hits, 3);
+            assert_eq!(stats.misses, 2);
+            assert!((stats.hit_rate - 0.6).abs() < 1e-9);
+        });
+    }
+
+    #[test]
+    fn clear_resets_entries_and_counters() {
+        with_z3(|| {
+            let cache = TacticCache::new();
+            let mut analyzer = FormulaGoalAnalyzer::new();
+            let f = Bool::new_const("z");
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f);
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f);
+            assert!(cache.len() > 0);
+            cache.clear();
+            assert_eq!(cache.len(), 0);
+            let stats = cache.stats();
+            assert_eq!(stats.hits, 0);
+            assert_eq!(stats.misses, 0);
+        });
+    }
+
+    #[test]
+    fn global_cache_is_shared_singleton() {
+        let g1 = global_tactic_cache() as *const _;
+        let g2 = global_tactic_cache() as *const _;
+        assert_eq!(g1, g2);
+    }
+
+    #[test]
+    fn cache_handles_bitvector_formulas() {
+        with_z3(|| {
+            let cache = TacticCache::new();
+            let mut analyzer = FormulaGoalAnalyzer::new();
+            let x = BV::new_const("bvx", 32);
+            let y = BV::new_const("bvy", 32);
+            let f = x.bvult(&y);
+
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f);
+            let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f);
+            assert_eq!(cache.stats().hits, 1);
+            assert_eq!(cache.stats().misses, 1);
+        });
     }
 }

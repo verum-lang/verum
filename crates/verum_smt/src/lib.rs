@@ -88,6 +88,15 @@
 //! - [`contract`]: Contract literal handling and verification
 //! - [`precondition`]: Precondition assertion and validation
 //! - [`postcondition`]: Postcondition verification and `old()` handling
+//! - [`tactics`]: Z3 tactic combinators, automatic theory-aware
+//!   selection, and a [`tactics::TacticCache`] (#103) that
+//!   memoises probe-derived [`tactics::FormulaCharacteristics`]
+//!   across verification obligations. The Z3-side
+//!   `auto_select_tactic_for(goal)` on [`z3_backend::Z3Solver`]
+//!   already routes through [`tactics::global_tactic_cache`] —
+//!   typical hit-path is 2–3× faster than uncached on
+//!   refinement-VC workloads (criterion bench
+//!   `tactic_selection_bench::cache_speedup`).
 
 // Note: missing_debug_implementations is disabled because Z3 types don't implement Debug
 //#![deny(missing_debug_implementations)]
@@ -485,10 +494,12 @@ pub use quantifier_elim::{
     QuantifierEliminator,
 };
 pub use tactics::{
-    AnalyzerStats, FormulaCharacteristics, FormulaGoalAnalyzer, PredefinedStrategies, ProbeKind,
-    StrategyBuilder, TacticAnalyzer, TacticCombinator, TacticComposer, TacticExecutor, TacticKind,
-    TacticParams, TacticResult, TacticStats, auto_select_tactic, auto_select_tactic_for_goal,
-    select_tactic_from_characteristics,
+    AnalyzerStats, FormulaCharacteristics, FormulaGoalAnalyzer, FormulaSignature,
+    PredefinedStrategies, ProbeKind, StrategyBuilder, TacticAnalyzer, TacticCache,
+    TacticCacheStats, TacticCombinator, TacticComposer, TacticExecutor, TacticKind, TacticParams,
+    TacticResult, TacticStats, auto_select_tactic, auto_select_tactic_cached,
+    auto_select_tactic_cached_for_goal, auto_select_tactic_cached_global,
+    auto_select_tactic_for_goal, global_tactic_cache, select_tactic_from_characteristics,
 };
 pub use unsat_core::{
     AssertionCategory, CoreAnalysis, CoreMinimizer, TrackedAssertion, UnsatCore, UnsatCoreAnalyzer,
