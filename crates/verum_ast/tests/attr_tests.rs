@@ -1171,3 +1171,200 @@ fn quantity_attr_display_round_trip() {
     let q = QuantityAttr::new(Quantity::Many, Span::default());
     assert_eq!(format!("{}", q), "@quantity(omega)");
 }
+
+// =============================================================================
+// V8 (#228) — @accessibility(λ) typed attribute (VVA §A.Z.5 item 4)
+// =============================================================================
+
+mod accessibility_tests {
+    use super::*;
+    use verum_ast::attr::AccessibilityAttr;
+    use verum_ast::expr::ExprKind;
+    use verum_ast::literal::{Literal, LiteralKind, StringLit};
+    use verum_ast::ty::PathSegment;
+
+    fn make_path_arg(name: &str) -> verum_ast::expr::Expr {
+        let mut segs: List<PathSegment> = List::new();
+        segs.push(PathSegment::Name(verum_ast::Ident {
+            name: Text::from(name),
+            span: Span::default(),
+        }));
+        verum_ast::expr::Expr::new(
+            ExprKind::Path(verum_ast::ty::Path::new(segs, Span::default())),
+            Span::default(),
+        )
+    }
+
+    fn make_text_arg(s: &str) -> verum_ast::expr::Expr {
+        verum_ast::expr::Expr::new(
+            ExprKind::Literal(Literal {
+                kind: LiteralKind::Text(StringLit::Regular(Text::from(s))),
+                span: Span::default(),
+            }),
+            Span::default(),
+        )
+    }
+
+    fn make_int_arg(n: i64) -> verum_ast::expr::Expr {
+        verum_ast::expr::Expr::new(
+            ExprKind::Literal(Literal::int(n as i128, Span::default())),
+            Span::default(),
+        )
+    }
+
+    fn build_attr(args: Vec<verum_ast::expr::Expr>) -> Attribute {
+        let mut arg_list: List<verum_ast::expr::Expr> = List::new();
+        for a in args {
+            arg_list.push(a);
+        }
+        Attribute {
+            name: Text::from("accessibility"),
+            args: Maybe::Some(arg_list),
+            span: Span::default(),
+        }
+    }
+
+    #[test]
+    fn canonicalise_omega() {
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("omega").as_deref(),
+            Some("omega"),
+        );
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("OMEGA").as_deref(),
+            Some("omega"),
+        );
+    }
+
+    #[test]
+    fn canonicalise_subscripted_omega() {
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("omega_1").as_deref(),
+            Some("omega_1"),
+        );
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("omega_42").as_deref(),
+            Some("omega_42"),
+        );
+    }
+
+    #[test]
+    fn canonicalise_omega_plus_n() {
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("omega+1").as_deref(),
+            Some("omega+1"),
+        );
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("omega+5").as_deref(),
+            Some("omega+5"),
+        );
+    }
+
+    #[test]
+    fn canonicalise_subscripted_omega_plus_n() {
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("omega_1+1").as_deref(),
+            Some("omega_1+1"),
+        );
+    }
+
+    #[test]
+    fn canonicalise_finite_cardinal() {
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("0").as_deref(),
+            Some("0"),
+        );
+        assert_eq!(
+            AccessibilityAttr::canonicalise_lambda("42").as_deref(),
+            Some("42"),
+        );
+    }
+
+    #[test]
+    fn canonicalise_garbage_rejected() {
+        assert!(AccessibilityAttr::canonicalise_lambda("not_an_ordinal").is_none());
+        assert!(AccessibilityAttr::canonicalise_lambda("omega+").is_none());
+        assert!(AccessibilityAttr::canonicalise_lambda("omega_").is_none());
+        assert!(AccessibilityAttr::canonicalise_lambda("").is_none());
+    }
+
+    #[test]
+    fn from_attribute_path_form_omega() {
+        let attr = build_attr(vec![make_path_arg("omega")]);
+        match AccessibilityAttr::from_attribute(&attr) {
+            Maybe::Some(a) => assert_eq!(a.lambda.as_str(), "omega"),
+            Maybe::None => panic!("expected Some"),
+        }
+    }
+
+    #[test]
+    fn from_attribute_text_form_omega_plus_one() {
+        let attr = build_attr(vec![make_text_arg("omega+1")]);
+        match AccessibilityAttr::from_attribute(&attr) {
+            Maybe::Some(a) => assert_eq!(a.lambda.as_str(), "omega+1"),
+            Maybe::None => panic!("expected Some"),
+        }
+    }
+
+    #[test]
+    fn from_attribute_int_form_finite() {
+        let attr = build_attr(vec![make_int_arg(42)]);
+        match AccessibilityAttr::from_attribute(&attr) {
+            Maybe::Some(a) => assert_eq!(a.lambda.as_str(), "42"),
+            Maybe::None => panic!("expected Some"),
+        }
+    }
+
+    #[test]
+    fn from_attribute_wrong_name_rejected() {
+        let mut arg_list: List<verum_ast::expr::Expr> = List::new();
+        arg_list.push(make_path_arg("omega"));
+        let attr = Attribute {
+            name: Text::from("accessibility_typo"),
+            args: Maybe::Some(arg_list),
+            span: Span::default(),
+        };
+        assert!(matches!(AccessibilityAttr::from_attribute(&attr), Maybe::None));
+    }
+
+    #[test]
+    fn from_attribute_no_args_rejected() {
+        let attr = Attribute {
+            name: Text::from("accessibility"),
+            args: Maybe::Some(List::new()),
+            span: Span::default(),
+        };
+        assert!(matches!(AccessibilityAttr::from_attribute(&attr), Maybe::None));
+    }
+
+    #[test]
+    fn from_attribute_two_args_rejected() {
+        let attr = build_attr(vec![make_path_arg("omega"), make_path_arg("extra")]);
+        assert!(matches!(AccessibilityAttr::from_attribute(&attr), Maybe::None));
+    }
+
+    #[test]
+    fn from_attribute_garbage_path_rejected() {
+        let attr = build_attr(vec![make_path_arg("not_an_ordinal")]);
+        assert!(matches!(AccessibilityAttr::from_attribute(&attr), Maybe::None));
+    }
+
+    #[test]
+    fn display_round_trip_path_form() {
+        let attr = AccessibilityAttr::new(Text::from("omega"), Span::default());
+        assert_eq!(format!("{}", attr), "@accessibility(omega)");
+    }
+
+    #[test]
+    fn display_round_trip_subscripted() {
+        let attr = AccessibilityAttr::new(Text::from("omega_1"), Span::default());
+        assert_eq!(format!("{}", attr), "@accessibility(omega_1)");
+    }
+
+    #[test]
+    fn spanned_returns_attribute_span() {
+        let span = Span::default();
+        let attr = AccessibilityAttr::new(Text::from("omega"), span);
+        assert_eq!(Spanned::span(&attr), span);
+    }
+}

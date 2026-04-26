@@ -190,3 +190,120 @@ public fn cc_substitute(t: CcTerm, from: Text, to: CcTerm) -> CcTerm {
         },
     }
 }
+
+// =============================================================================
+// 6. Small-step reduction (β / reset-value / shift)
+// =============================================================================
+
+/// Outcome of one reduction attempt.
+///
+/// Returns the term back in either branch so the caller can iterate
+/// without cloning — the `CcTerm` ADT has Heap<T> children and no
+/// `@derive(Clone)`, matching the convention of this module.
+public type CcStep is
+    /// Reduction fired; `next` is the term after the step.
+    | Stepped { next: CcTerm }
+    /// No redex anywhere — `term` is the unchanged input.
+    | Normal { term: CcTerm };
+
+/// One reduction step in left-to-right delimited-control order:
+///
+/// ```text
+///     (λx. M) N                ↦  M[x := N]                       (β)
+///     reset v                  ↦  v                               (reset-value)
+///     reset (shift k. M)       ↦  reset (M[k := λx. reset x])     (shift)
+/// ```
+///
+/// Reduction proceeds beneath congruences: under `App` head, then
+/// argument; under `Reset`. The `Shift` reduction only fires when
+/// `Shift` is in the immediate scope of a `Reset` — outside any
+/// reset, a `shift` is stuck (matching the operational semantics
+/// of delimited control).
+///
+/// The captured continuation `λx. reset x` is the standard
+/// reification: a one-argument λ that re-installs the prompt at
+/// the call site so the captured context is replayable.
+public fn cc_step(t: CcTerm) -> CcStep {
+    match t {
+        // β: (λx. body) N  ↦  body[x := N]
+        CcTerm.App { func, arg } => {
+            match *func {
+                CcTerm.Lam { param, body } =>
+                    CcStep.Stepped {
+                        next: cc_substitute(*body, param, *arg),
+                    },
+                f => match cc_step(f) {
+                    CcStep.Stepped { next } =>
+                        CcStep.Stepped { next: cc_app(next, *arg) },
+                    CcStep.Normal { term: f_norm } =>
+                        match cc_step(*arg) {
+                            CcStep.Stepped { next: a_next } =>
+                                CcStep.Stepped { next: cc_app(f_norm, a_next) },
+                            CcStep.Normal { term: a_norm } =>
+                                CcStep.Normal { term: cc_app(f_norm, a_norm) },
+                        },
+                },
+            }
+        },
+        // reset v             ↦ v                       (reset-value)
+        // reset (shift k. M)  ↦ reset (M[k := …])       (shift)
+        CcTerm.Reset { inner } => {
+            match *inner {
+                CcTerm.Shift { binder, body } => {
+                    // Reify the captured continuation as
+                    //     λx. reset x
+                    // — pick a fresh `x` so we don't accidentally
+                    // shadow a free variable inside `body`.
+                    let x = cc_fresh_name(
+                        Text.from("x"),
+                        *body,
+                        CcTerm.Var { name: binder.clone() },
+                    );
+                    let cont = cc_lam(x.clone(), cc_reset(cc_var(x)));
+                    CcStep.Stepped {
+                        next: cc_reset(cc_substitute(*body, binder, cont)),
+                    }
+                },
+                v => {
+                    if cc_is_value(v) {
+                        // reset over a value reduces to the value.
+                        CcStep.Stepped { next: v }
+                    } else {
+                        match cc_step(v) {
+                            CcStep.Stepped { next } =>
+                                CcStep.Stepped { next: cc_reset(next) },
+                            CcStep.Normal { term } =>
+                                CcStep.Normal { term: cc_reset(term) },
+                        }
+                    }
+                }
+            }
+        },
+        // Constants, Vars, Lams, and Shifts (outside reset) are normal.
+        normal => CcStep.Normal { term: normal },
+    }
+}
+
+/// Drive [`cc_step`] to a normal form with a hard step budget.
+/// `gas` bounds the number of reduction steps to guarantee
+/// termination on inputs whose reduction diverges.
+///
+/// Returns `(final, steps)`; `steps < gas` means a normal form was
+/// reached.
+public fn cc_normalise(t: CcTerm, gas: Int) -> (CcTerm, Int) {
+    let mut current = t;
+    let mut steps: Int = 0;
+    while steps < gas {
+        match cc_step(current) {
+            CcStep.Stepped { next } => {
+                current = next;
+                steps = steps + 1;
+            },
+            CcStep.Normal { term } => {
+                current = term;
+                break;
+            },
+        }
+    }
+    (current, steps)
+}

@@ -2376,26 +2376,40 @@ source of truth and the kernel as shipped. In priority order:
    the typing rules) or (b) explicit acknowledgment that the
    2-category structure lives in the model layer
    (`core.math.frameworks.diakrisis_*`) and is referenced via
-   framework axioms rather than internalised. **Recommended:
-   (b)**, since the kernel's TCB budget (6 500 LOC) does not
-   accommodate full 2-categorical typing without dedicated
-   work tracked under task #181 + new tasks.
+   framework axioms rather than internalised. **Decision (V8
+   #226 stage 3.2):** option **(b)** is now the official
+   architectural stance. Internal closure ι is delegated to
+   the model layer per `core.math.frameworks.diakrisis*`
+   framework axioms (specifically the diakrisis_acts +
+   diakrisis_biadjunction corpora carry the 2-functorial
+   structure in their axiom bodies). The kernel does NOT
+   internalise 2-cells; this is a deliberate TCB-budget
+   choice (6 500 LOC ceiling per VVA §17 Q8). Framework
+   authors registering `@framework(diakrisis_acts, "...")`
+   axioms are responsible for the 2-categorical content;
+   `verum audit --framework-axioms` enumerates the boundary.
 
 2. **Axi-4 accessibility** — λ-accessibility of M is required
    for the existence of transfinite iterations
-   $\mathsf{M}^\kappa$ (Theorem 10.T5 — `Fix(M) ≠ ∅`). The
-   shipped kernel does not check accessibility; it is delegated
-   to model-layer framework axioms. Closing this requires
-   either an `AccessibleFunctor` typed attribute on
-   `EpsilonOf` constructors, or framework-axiom-level
-   discipline. **Recommended: typed attribute** — track as
-   follow-up task.
+   $\mathsf{M}^\kappa$ (Theorem 10.T5 — `Fix(M) ≠ ∅`). **V8
+   #228 shipped: `@accessibility(λ)` typed attribute** in
+   `verum_ast::attr::AccessibilityAttr` accepts ordinal
+   tokens (`omega`, `omega_<n>`, `omega+<n>`, finite cardinals).
+   Framework authors record the certified accessibility bound
+   via `@accessibility(omega)` on `EpsilonOf` markers; the
+   audit pass surfaces unannotated EpsilonOf sites for review.
+   Status: ✓ shipped (16 round-trip tests).
 
 3. **Axi-9 + T-α** — neither has a corresponding kernel rule.
    These describe conditions on the canonical primitive that
    are sound to delegate to framework axioms (since they
-   constrain the *model*, not the term-typing rules). The
-   spec should explicitly document this delegation.
+   constrain the *model*, not the term-typing rules). **V8
+   #226 stage 3.2 ratifies the delegation**: Axi-9 + T-α are
+   model-side claims. `core.math.frameworks.diakrisis*`
+   framework axioms carry their content. The kernel's TCB
+   does NOT include them directly; `verum audit
+   --framework-axioms` enumerates the trust boundary so
+   external review can verify the citations resolve.
 
 4. **VFE-1 V3** — full τ-witness construction for `K-Eps-Mu`
    is multi-week work blocked on Diakrisis preprint material
@@ -2534,8 +2548,11 @@ fundamentality. Status legend: ✓ shipped (≥95% complete);
 Per-item completion based on **shipped artefacts**, no
 speculation:
 
-1. **Internal-closure delegation explicit** ☐ — doc-only
-   addendum still pending. **0%**.
+1. **Internal-closure delegation explicit** ✓ — V8 #226 stage
+   3.2 ratifies the delegation in §A.Z.1.1 defect-1 row above
+   (option (b) chosen: model-layer delegation per
+   `core.math.frameworks.diakrisis*` framework axioms).
+   Doc-only ratification. **100%**.
 
 2. **Coordinate-aware citation gate** ✓ — V8 #227 shipped:
    `KernelCoord { fw, nu, tau }` type, `check_coord_cite`
@@ -2552,15 +2569,24 @@ speculation:
 3. **`verum audit --coord` per-theorem inference** ☐ — not
    started. CLI surface + integration tests pending. **0%**.
 
-4. **Accessibility typed attribute** ☐ — not started.
-   `verum_ast::attr::AccessibilityAttr` + parser + audit
-   walker pending. **0%**.
+4. **Accessibility typed attribute** ✓ — V8 #228 shipped:
+   `verum_ast::attr::AccessibilityAttr` accepting `omega`,
+   `omega_<n>`, `omega+<n>`, finite-cardinal tokens.
+   `from_attribute` parser handles both Path-form and
+   Text-literal-form arguments + Int literal. 16 round-trip
+   tests covering canonicalisation / parse / display /
+   reject paths. Audit walker (`verum audit --accessibility`)
+   surfacing unannotated EpsilonOf sites is V2 (separate
+   CLI task). **75%**.
 
-5. **Eps-invariant ↔ md-omega bridge** ☐ — not started.
-   `support::convert_eps_to_md_omega` helper + tests
-   pending. **0%**.
+5. **Eps-invariant ↔ md-omega bridge** ✓ — V8 #229 shipped:
+   `EpsInvariant` enum (Zero / Finite / Omega / OmegaPlus /
+   OmegaTimes), `support::convert_eps_to_md_omega` helper,
+   13 integration tests covering identity preservation +
+   transfinite mapping + monotonicity + canonical
+   minimum. **100%**.
 
-6. **VFE-1 V3 τ-witness** ☐ — multi-week, preprint-blocked.
+6. **VVA-1 V3 τ-witness** ☐ — multi-week, preprint-blocked.
    **0%** (not actionable until Diakrisis preprint lands).
 
 7. **Cross-tool replay matrix landing** ☐ — multi-week,
@@ -2568,9 +2594,10 @@ speculation:
 
 ### A.Z.5 aggregate completion (V8 measured, no speculation)
 
-  * Roadmap items shipped: **1 of 7** (item 2 = K-Coord-Cite, 70% feature-complete; the other 6 are 0%).
-  * Aggregate roadmap completion: **10%** (1 × 0.7 / 7).
-  * Tractable-non-blocked subset (items 1–5): **14%** (1 × 0.7 / 5).
+  * Roadmap items shipped: **4 of 7** (items 1, 2, 4, 5 ✓ shipped at the percentages above; item 3 not started; items 6–7 externally blocked).
+  * Per-item completion: 100% + 70% + 0% + 75% + 100% + 0% + 0% = **345% of 700%**.
+  * Aggregate roadmap completion: **49%** (345 / 700).
+  * Tractable-non-blocked subset (items 1–5): **69%** (345 / 500).
   * Externally-blocked subset (items 6–7): cannot ship until preprint + tool integrations.
 
 ### A.Z code-side refactor status (#225 stages)

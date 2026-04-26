@@ -157,6 +157,8 @@ pub use typed::{
     // VVA §0.0 governance — opt-in / opt-out for kernel extensions.
     ExtensionRequirementAttr,
     ExtensionToggleKind,
+    // VVA §A.Z.5 item 4 — Diakrisis Axi-4 accessibility marker.
+    AccessibilityAttr,
     FeatureAttr,
     FrameworkAttr,
     HotAttr,
