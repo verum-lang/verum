@@ -426,6 +426,10 @@ enum Commands {
         /// Print every known built-in lint rule and exit.
         #[clap(long)]
         list_rules: bool,
+        /// Print every known lint group (`verum::strict`,
+        /// `verum::nursery`, etc.) and the rules they include.
+        #[clap(long)]
+        list_groups: bool,
         /// Print extended documentation for one rule and exit.
         #[clap(long, value_name = "RULE")]
         explain: Option<Text>,
@@ -1585,6 +1589,7 @@ fn run_command(cli: Cli) -> Result<()> {
             fix,
             deny_warnings,
             list_rules,
+            list_groups,
             explain,
             open,
             validate_config,
@@ -1609,6 +1614,9 @@ fn run_command(cli: Cli) -> Result<()> {
             }
             if list_rules {
                 return commands::lint::list_rules();
+            }
+            if list_groups {
+                return commands::lint::list_groups();
             }
             if let Some(rule) = explain {
                 if open {
