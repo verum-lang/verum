@@ -97,28 +97,33 @@ unsafe impl Sync for CallbackContext {}
 /// addresses. The libffi closure holds raw pointers to `context` and `cif`,
 /// so these must never be moved. `Pin` enforces this at the type level,
 /// preventing accidental moves even when the HashMap reallocates its entries.
+/// LiveCallback owns the resources backing an FFI callback.  Several
+/// fields exist solely to extend the lifetime of memory that the
+/// libffi closure (holding raw pointers) references — they're
+/// "alive-by-Drop": removing one would dangle the closure's pointers.
+/// The `_`-prefixed names mark them as side-effectful holdings rather
+/// than directly-readable state, which keeps the dead_code lint happy
+/// without `#[allow]` and signals intent at every reference site.
 struct LiveCallback {
     /// Pinned context (stable address for userdata - libffi closure holds a raw pointer).
     context: Pin<Box<CallbackContext>>,
     /// Code pointer for C calls (raw pointer to executable memory).
     code_ptr: *const (),
-    /// The libffi CIF - must outlive the closure.
-    /// SAFETY: Must be pinned to ensure stable address after ffi_prep_closure_loc.
-    /// The closure holds a pointer to this CIF, so it must not move.
-    #[allow(dead_code)]
-    cif: Pin<Box<Cif>>,
-    /// Raw closure memory - must be kept alive.
-    #[allow(dead_code)]
-    closure_mem: Box<ClosureMemory>,
+    /// The libffi CIF — must outlive the closure (SAFETY: pinned so its
+    /// address is stable after `ffi_prep_closure_loc`; the closure
+    /// holds a raw pointer to this CIF).  Read by Drop only.
+    _cif: Pin<Box<Cif>>,
+    /// Raw closure memory — must be kept alive.  Read by Drop only.
+    _closure_mem: Box<ClosureMemory>,
 }
 
 /// Memory storage for closure - keeps libffi closure data alive.
 struct ClosureMemory {
     /// Raw closure pointer from libffi low-level API.
     closure_ptr: *mut libffi::raw::ffi_closure,
-    /// Code pointer.
-    #[allow(dead_code)]
-    code_ptr: *mut c_void,
+    /// Code pointer — held alive for the lifetime of the closure;
+    /// libffi may reference it during invocations.
+    _code_ptr: *mut c_void,
 }
 
 impl Drop for ClosureMemory {
@@ -267,7 +272,7 @@ impl TrampolineRegistry {
         // Store closure memory for cleanup
         let closure_mem = Box::new(ClosureMemory {
             closure_ptr,
-            code_ptr,
+            _code_ptr: code_ptr,
         });
 
         let code_ptr_value = code_ptr as usize;
@@ -277,8 +282,8 @@ impl TrampolineRegistry {
             LiveCallback {
                 context,
                 code_ptr: code_ptr as *const (),
-                cif,
-                closure_mem,
+                _cif: cif,
+                _closure_mem: closure_mem,
             },
         );
         self.code_ptr_to_id.insert(code_ptr_value, id);
