@@ -202,6 +202,12 @@ public mount .memory.{
     // Slice utilities
     slice_from_raw_parts,
     slice_from_raw_parts_mut,
+    // Allocator primitives — typed-OOM pattern (#65, #68).
+    // Used by collections (List/Map/Set) for the try_with_capacity
+    // family that returns Result<_, AllocError> instead of panicking.
+    try_alloc,
+    try_alloc_zeroed,
+    try_realloc,
 };
 
 // Re-export AllocError for try_new error handling

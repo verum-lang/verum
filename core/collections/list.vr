@@ -21,6 +21,13 @@
 module core.collections.list;
 mount core.*;
 mount core.base.coercion.{IntCoercible, Indexable};
+// Allocator primitives for typed-OOM (#65, #68).  `mount core.*`
+// alone doesn't surface these because the glob expansion currently
+// doesn't chase through the `public mount` re-export chain in
+// `core/base/mod.vr` for unqualified function references.  Direct
+// mount keeps `try_alloc` / `try_realloc` resolvable in
+// `try_with_capacity` and friends.
+mount core.base.memory.{try_alloc, try_realloc};
 
 // Shadow MemoryOrdering conflict: explicitly re-bind Ordering to comparison ordering
 type Ordering is Less | Equal | Greater;
