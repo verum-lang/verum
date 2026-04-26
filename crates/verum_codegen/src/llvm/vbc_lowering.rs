@@ -663,15 +663,50 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // Patch up partially-emitted function: add unreachable terminators
                     // to any blocks missing them. Without this, GlobalDCE can't remove
                     // the function if it's referenced, causing module verification failure.
+                    //
+                    // Phase-A fallback (#106): if `lower_vbc_function` failed
+                    // BEFORE emitting any block (e.g. early validation fail),
+                    // the function is left as a bodyless declaration — callers
+                    // resolve to a null function-pointer at link/load time
+                    // and SIGSEGV during dyld static-init. Append a single
+                    // entry block that returns the type's zero value so
+                    // callers get a "skipped" sentinel instead of a null
+                    // deref. This preserves graceful degradation: the program
+                    // sees a default value when reaching skipped code, far
+                    // safer than crashing during process startup.
                     if let Some(llvm_fn) = self.module.get_function(func_name) {
                         let builder = self.context.create_builder();
-                        let mut bb = llvm_fn.get_first_basic_block();
-                        while let Some(block) = bb {
-                            if block.get_terminator().is_none() {
-                                builder.position_at_end(block);
-                                let _ = builder.build_unreachable();
+                        if llvm_fn.get_first_basic_block().is_none() {
+                            // Bodyless declaration — synthesise a default-return entry.
+                            let entry = self.context.append_basic_block(llvm_fn, "skipped_entry");
+                            builder.position_at_end(entry);
+                            // Return the zero value of the function's return type.
+                            let ret_ty_opt = llvm_fn.get_type().get_return_type();
+                            match ret_ty_opt {
+                                Some(verum_llvm::types::BasicTypeEnum::IntType(it)) => {
+                                    let _ = builder.build_return(Some(&it.const_zero()));
+                                }
+                                Some(verum_llvm::types::BasicTypeEnum::FloatType(ft)) => {
+                                    let _ = builder.build_return(Some(&ft.const_zero()));
+                                }
+                                Some(verum_llvm::types::BasicTypeEnum::PointerType(pt)) => {
+                                    let _ = builder.build_return(Some(&pt.const_null()));
+                                }
+                                Some(_) | None => {
+                                    // Void or aggregate return — `ret void` or
+                                    // unreachable as last resort.
+                                    let _ = builder.build_return(None);
+                                }
                             }
-                            bb = block.get_next_basic_block();
+                        } else {
+                            let mut bb = llvm_fn.get_first_basic_block();
+                            while let Some(block) = bb {
+                                if block.get_terminator().is_none() {
+                                    builder.position_at_end(block);
+                                    let _ = builder.build_unreachable();
+                                }
+                                bb = block.get_next_basic_block();
+                            }
                         }
                     }
                     continue;
