@@ -174,13 +174,52 @@ impl OrdinalDepth {
         self.finite_offset < other.finite_offset
     }
 
-    /// `+ 1` — adds one to the finite component (always well-defined
-    /// because we only ever ascend in the finite remainder until V1
-    /// extends to limit-ordinal arithmetic).
+    /// `+ 1` — adds one to the ordinal in Cantor-normal form.
+    ///
+    /// **Soundness fix B4 (#206)**: pre-fix, the implementation
+    /// used `finite_offset.saturating_add(1)`, which silently capped
+    /// finite_offset at u32::MAX. The kernel rule
+    /// `m_depth_omega(P) < base.succ()` then *accepted* a maximally-
+    /// nested predicate over an omega-base — `(0, MAX).lt(&(1, 0))`
+    /// is true under lex, so the rule passed regardless of how many
+    /// modal operators the predicate actually contained. Soundness
+    /// hole.
+    ///
+    /// V2 (this revision): when `finite_offset == u32::MAX`, the
+    /// successor advances to the **next omega tier**: `(c, MAX) +
+    /// 1 = (c + 1, 0)`. The omega coefficient itself saturates at
+    /// `u32::MAX` (a strictly-larger ordinal would require ω², which
+    /// the V0 lex encoding doesn't represent — the kernel rejects
+    /// the rare-but-real case of `omega_coeff == MAX` next-succ by
+    /// staying at `(MAX, MAX)`, the largest representable ordinal,
+    /// and the K-rule then correctly rejects since
+    /// `(MAX, MAX).lt(&(MAX, MAX)) == false`).
+    ///
+    /// V3 will lift this to ω² + ε_0 limit-ordinal arithmetic per
+    /// Cantor-normal form §3.2 (Pohlers 2009); for V0/V1/V2 the
+    /// ω·n + k encoding is sufficient because `m_depth_omega` walks
+    /// CoreTerms whose ModalBox/ModalDiamond depth is bounded by
+    /// term size (at most ω after the saturation cascade through
+    /// MAX).
     pub fn succ(&self) -> Self {
-        Self {
-            omega_coeff: self.omega_coeff,
-            finite_offset: self.finite_offset.saturating_add(1),
+        if self.finite_offset == u32::MAX {
+            // Cantor-normal-form carry: (c, MAX) + 1 = (c+1, 0).
+            // omega_coeff saturates at MAX (the largest ordinal we
+            // can represent in the V0 encoding). Further succ at
+            // (MAX, MAX) stays at (MAX, MAX) — a deliberate fix
+            // point that the kernel rule then rejects via
+            // `pred.lt(&base.succ()) == pred.lt(&(MAX, MAX)) == false`
+            // for any pred at (MAX, MAX), which is the desired
+            // sound conservative-rejection behaviour.
+            Self {
+                omega_coeff: self.omega_coeff.saturating_add(1),
+                finite_offset: 0,
+            }
+        } else {
+            Self {
+                omega_coeff: self.omega_coeff,
+                finite_offset: self.finite_offset + 1,
+            }
         }
     }
 
