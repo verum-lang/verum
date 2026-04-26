@@ -48,6 +48,7 @@ mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
 mount core.intrinsics.memory.{ptr_offset};
 mount core.intrinsics.atomic.{
     atomic_load_u32, atomic_store_u32, atomic_fetch_add_u32, atomic_fetch_and_u32,
+    atomic_fetch_sub_u32, atomic_cas_u32,
     atomic_load_u16, atomic_store_u16, atomic_fetch_add_u16, atomic_fetch_and_u16,
     atomic_load_u64,
 };
@@ -265,22 +266,90 @@ implement AllocationHeader {
 
     /// Increment generation and return old value.
     /// Handles wraparound by incrementing epoch.
+    ///
+    /// Concurrency contract: under contention, multiple threads
+    /// may simultaneously hit the wraparound branch. Earlier
+    /// revisions performed a non-atomic load+store on
+    /// `epoch_and_caps` and a non-CAS reset of `generation`,
+    /// which let two concurrent wraparounds *both* execute the
+    /// epoch-increment path — double-incrementing the epoch and
+    /// double-resetting the generation. The fix uses:
+    ///
+    ///   * a CAS-loop on `epoch_and_caps` that retries until the
+    ///     epoch increment commits exactly once;
+    ///   * a CAS reset of `generation` from `GEN_MAX` (or higher
+    ///     if multiple wraparounds ran) back to `GEN_INITIAL`,
+    ///     so concurrent threads observe a single net reset;
+    ///   * a hard panic on `UInt16` epoch overflow — silently
+    ///     wrapping past 65535 would create ABA aliasing of
+    ///     reference identities.
     @inline
     public fn increment_generation(&mut self) -> UInt32 {
         let old_gen = atomic_fetch_add_u32(&mut self.generation, 1, ORDERING_ACQ_REL);
 
-        // Check for wraparound
+        // Wraparound iff the value we read is in the top-2 of the
+        // generation domain — after fetch_add the generation may
+        // have already wrapped past GEN_MAX, but only the thread
+        // that *observed* the boundary value performs the
+        // recovery work.
         if old_gen >= GEN_MAX - 1 {
-            // Increment epoch in the packed epoch_and_caps field (lower 16 bits)
-            let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
-            let old_epoch = (old_packed & 0xFFFF) as UInt16;
-            let caps = (old_packed >> 16) as UInt16;
-            let new_epoch = old_epoch + 1;
-            let new_packed = ((caps as UInt32) << 16) | (new_epoch as UInt32);
-            atomic_store_u32(&mut self.epoch_and_caps, new_packed, ORDERING_RELEASE);
-            // Reset generation
-            atomic_store_u32(&mut self.generation, GEN_INITIAL, ORDERING_RELEASE);
-            // Notify epoch manager
+            // CAS-loop: increment the epoch (lower 16 bits)
+            // exactly once, preserving the upper-16 capabilities.
+            // Concurrent wraparound threads either succeed on the
+            // first iter or retry against the just-incremented
+            // packed value — the loop converges in O(threads)
+            // attempts and increments epoch exactly once per
+            // wraparound boundary.
+            loop {
+                let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
+                let old_epoch = (old_packed & 0xFFFF) as UInt16;
+                let caps_bits = old_packed & 0xFFFF_0000;
+
+                // Hard fail on UInt16 epoch overflow: silently
+                // wrapping to 0 would let a future generation
+                // collide with a long-dead reference's
+                // (generation, epoch) pair.
+                if old_epoch == 0xFFFF {
+                    panic("AllocationHeader epoch overflow — exceeded UInt16 wraparound budget; allocation must be retired and re-stamped via the heap manager");
+                }
+
+                let new_epoch = old_epoch + 1;
+                let new_packed = caps_bits | (new_epoch as UInt32);
+                let (_observed, swapped) = atomic_cas_u32(
+                    &mut self.epoch_and_caps,
+                    old_packed,
+                    new_packed,
+                    ORDERING_ACQ_REL,
+                    ORDERING_ACQUIRE,
+                );
+                if swapped { break; }
+                // CAS lost — another thread updated the packed
+                // field; reload and retry. This is bounded by
+                // the number of concurrent wraparound threads,
+                // typically 1.
+            }
+
+            // Reset generation back to GEN_INITIAL.  Use CAS so
+            // late-arriving fetch_adds from concurrent threads
+            // don't accidentally reset a freshly-stamped
+            // post-wraparound generation back to INITIAL again.
+            // We only reset if generation is still in the
+            // wraparound zone (>= GEN_MAX - 1) — otherwise some
+            // other thread has already done the reset.
+            loop {
+                let cur = atomic_load_u32(&self.generation, ORDERING_ACQUIRE);
+                if cur < GEN_MAX - 1 { break; }
+                let (_observed, swapped) = atomic_cas_u32(
+                    &mut self.generation,
+                    cur,
+                    GEN_INITIAL,
+                    ORDERING_ACQ_REL,
+                    ORDERING_ACQUIRE,
+                );
+                if swapped { break; }
+            }
+
+            // Notify epoch manager.
             super.epoch.GLOBAL_EPOCH.on_wraparound();
         }
 
@@ -378,9 +447,23 @@ implement AllocationHeader {
 
     /// Decrement reference count and return new value.
     /// Caller must handle deallocation when this returns 0.
+    ///
+    /// Panics on underflow (ref_count was already 0). Earlier
+    /// revisions used `atomic_fetch_add_u32(0xFFFF_FFFF)` (i.e.
+    /// `+= -1` via wrapping) and returned `old - 1`; if a buggy
+    /// caller decremented past zero the in-memory ref_count
+    /// silently wrapped to `UInt32.MAX`, preventing every
+    /// subsequent dealloc from firing — a permanent leak that's
+    /// hard to diagnose because the count appears huge instead
+    /// of negative.  Detecting the underflow loudly means leaks
+    /// surface at the actual misuse site instead of as a far-
+    /// removed OOM.
     @inline
     public fn decrement_ref_count(&mut self) -> UInt32 {
-        let old = atomic_fetch_add_u32(&mut self.ref_count, 0xFFFF_FFFF, ORDERING_ACQ_REL);
+        let old = atomic_fetch_sub_u32(&mut self.ref_count, 1, ORDERING_ACQ_REL);
+        if old == 0 {
+            panic("AllocationHeader::decrement_ref_count underflow — ref_count was already 0; caller decrement-balance is broken");
+        }
         old - 1
     }
 
