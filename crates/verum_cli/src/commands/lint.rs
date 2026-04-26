@@ -4245,6 +4245,206 @@ fn emit_tap(issues: &[LintIssue]) {
 /// `run_with_format`. Always falls through to the per-format emitter
 /// `run_with_format` for json/github-actions, or the existing
 /// `execute` for pretty (with the new layers wired in).
+/// CLI entry: `verum lint --new-only-since GIT_REF`. Reports only
+/// issues present in HEAD but absent from REF. Workflow:
+///
+/// 1. Lint HEAD (the working tree) → set A.
+/// 2. `git worktree add` REF in a temp dir.
+/// 3. Lint that worktree → set B.
+/// 4. Report A − B (matched by `(rule, file, line, message_hash)`).
+/// 5. Clean up the worktree.
+///
+/// Worktree-based so the user's index / staging area is never
+/// disturbed and a concurrent edit on the live tree can't change
+/// the result mid-run.
+pub fn run_new_only_since(
+    _fix: bool,
+    deny_warnings: bool,
+    format: LintOutputFormat,
+    profile: Option<String>,
+    severity_min: Option<LintLevel>,
+    git_ref: String,
+) -> Result<()> {
+    use std::process::Command as PCommand;
+
+    // Step 1: lint HEAD. We don't go through run_extended because we
+    // want the issue list back, not exit-on-issue.
+    let head_issues = collect_issues_for_current_tree(&profile, severity_min)?;
+
+    // Step 2: spawn a worktree at REF.
+    let tmp = tempfile::tempdir()
+        .map_err(|e| CliError::Custom(format!("create worktree tempdir: {e}")))?;
+    let worktree_path = tmp.path().join("verum-new-only");
+    let out = PCommand::new("git")
+        .args([
+            "worktree",
+            "add",
+            "--detach",
+            worktree_path.to_string_lossy().as_ref(),
+            &git_ref,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_err(|e| CliError::Custom(format!("git worktree add: {e}")))?;
+    if !out.status.success() {
+        return Err(CliError::Custom(format!(
+            "git worktree add {} {} failed",
+            worktree_path.display(),
+            git_ref
+        )));
+    }
+
+    // Step 3: lint the worktree. We invoke the binary as a subprocess
+    // so the thread pool / cache state of the current process is not
+    // disturbed. Using the JSON format gives us a stable parser hook.
+    let ref_issues = collect_issues_at(&worktree_path)?;
+
+    // Step 4: clean the worktree before computing the diff (so a
+    // diff-time panic doesn't leak the worktree).
+    let _ = PCommand::new("git")
+        .args(["worktree", "remove", "--force", worktree_path.to_string_lossy().as_ref()])
+        .status();
+
+    // Step 5: compute A − B keyed on (rule, file, line, message_hash).
+    let baseline_keys: std::collections::HashSet<(String, PathBuf, usize, String)> = ref_issues
+        .iter()
+        .map(|i| {
+            (
+                i.rule.to_string(),
+                i.file.clone(),
+                i.line,
+                blake3::hash(i.message.as_bytes()).to_hex().to_string(),
+            )
+        })
+        .collect();
+    let new_only: Vec<LintIssue> = head_issues
+        .into_iter()
+        .filter(|i| {
+            let k = (
+                i.rule.to_string(),
+                i.file.clone(),
+                i.line,
+                blake3::hash(i.message.as_bytes()).to_hex().to_string(),
+            );
+            !baseline_keys.contains(&k)
+        })
+        .collect();
+
+    emit_issues(&new_only, format)?;
+
+    let errors = new_only.iter().filter(|i| i.level == LintLevel::Error).count();
+    let warnings = new_only
+        .iter()
+        .filter(|i| i.level == LintLevel::Warning)
+        .count();
+    if errors > 0 {
+        return Err(CliError::Custom(format!(
+            "{errors} new lint errors since {git_ref}"
+        )));
+    }
+    if deny_warnings && warnings > 0 {
+        return Err(CliError::Custom(format!(
+            "{warnings} new lint warnings since {git_ref} (denied)"
+        )));
+    }
+    Ok(())
+}
+
+/// Lint the current working tree and return the (level-resolved,
+/// per-file-override-applied) issue stream. Used by
+/// `run_new_only_since`'s set-A phase.
+fn collect_issues_for_current_tree(
+    profile: &Option<String>,
+    severity_min: Option<LintLevel>,
+) -> Result<Vec<LintIssue>> {
+    let mut cfg = load_full_lint_config();
+    if let Some(name) = profile {
+        apply_profile(&mut cfg, name)?;
+    }
+    let search_dirs: Vec<PathBuf> = ["src", "core"]
+        .iter()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect();
+    if search_dirs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (raw_issues, _) = lint_paths_parallel(&search_dirs, &cfg);
+    let mut all_issues: Vec<LintIssue> = raw_issues
+        .into_iter()
+        .filter_map(|mut i| {
+            let lvl = cfg.effective_level_for_file(i.rule, &i.file, i.level)?;
+            if let Some(min) = severity_min {
+                if !meets_severity(lvl, min) {
+                    return None;
+                }
+            }
+            i.level = lvl;
+            Some(i)
+        })
+        .collect();
+    all_issues.sort_by(|a, b| issue_sort_key(a).cmp(&issue_sort_key(b)));
+    Ok(all_issues)
+}
+
+/// Lint a tree at `path` by spawning the binary as a subprocess —
+/// avoids leaking thread-pool / cache state into the parent
+/// process and lets us reuse the stable `--format json` schema.
+fn collect_issues_at(path: &Path) -> Result<Vec<LintIssue>> {
+    use std::process::Command as PCommand;
+    let exe = std::env::current_exe()
+        .map_err(|e| CliError::Custom(format!("current_exe: {e}")))?;
+    let out = PCommand::new(&exe)
+        .args(["lint", "--no-cache", "--format", "json"])
+        .current_dir(path)
+        .output()
+        .map_err(|e| CliError::Custom(format!("subprocess lint: {e}")))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut issues = Vec::new();
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // Parse a minimal subset of the schema_version: 1 record.
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let rule_str = v.get("rule").and_then(|x| x.as_str()).unwrap_or_default();
+        let level_str = v.get("level").and_then(|x| x.as_str()).unwrap_or_default();
+        let file_str = v.get("file").and_then(|x| x.as_str()).unwrap_or_default();
+        let line_n = v.get("line").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+        let col = v.get("column").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+        let message = v
+            .get("message")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let level = match level_str {
+            "error" => LintLevel::Error,
+            "warning" | "warn" => LintLevel::Warning,
+            "info" => LintLevel::Info,
+            "hint" => LintLevel::Hint,
+            _ => LintLevel::Warning,
+        };
+        // Rule name needs &'static str; leak the small set we
+        // observe (bounded by rule cardinality).
+        let rule_static: &'static str = Box::leak(rule_str.to_string().into_boxed_str());
+        issues.push(LintIssue {
+            rule: rule_static,
+            level,
+            file: PathBuf::from(file_str),
+            line: line_n,
+            column: col,
+            message,
+            suggestion: None,
+            fixable: false,
+        });
+    }
+    Ok(issues)
+}
+
 /// CLI entry: `verum lint --watch`. Lints once, then enters a debounced
 /// file-watch loop that re-lints on every `.vr` change. Uses the same
 /// per-file cache as one-shot runs, so untouched files cost ~nothing
