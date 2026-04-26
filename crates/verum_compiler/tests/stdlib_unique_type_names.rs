@@ -79,15 +79,43 @@ struct CfgConstraint {
     conservative: bool,
 }
 
+/// Keys whose different values prove mutual exclusion at build time.
+/// These are the cfg axes that pick exactly one value per build:
+///
+///   target_os             — linux / macos / windows / …
+///   target_arch           — x86_64 / aarch64 / …
+///   target_family         — unix / windows / wasm / …
+///   target_endian         — little / big
+///   target_pointer_width  — 16 / 32 / 64
+///   runtime               — full / single_thread / no_async / no_heap /
+///                           embedded / none — at most one is selected
+///                           per `runtime` build profile
+///
+/// Keys NOT in this list (notably `feature` and `debug_assertions`)
+/// are additive or independent: two cfgs with `feature = "A"` and
+/// `feature = "B"` can both be active when the build enables both
+/// features, so different values there do NOT imply mutual exclusion.
+const EXCLUSIVE_CFG_KEYS: &[&str] = &[
+    "target_os",
+    "target_arch",
+    "target_family",
+    "target_endian",
+    "target_pointer_width",
+    "runtime",
+];
+
 impl CfgConstraint {
     /// True iff `self` and `other` cannot both be active in the same
-    /// build — they share at least one key with different exclusive
+    /// build — they share at least one *exclusive* key with different
     /// values, and neither is conservative.
     fn mutually_exclusive(&self, other: &Self) -> bool {
         if self.conservative || other.conservative {
             return false;
         }
         for (k, v) in &self.constraints {
+            if !EXCLUSIVE_CFG_KEYS.contains(&k.as_str()) {
+                continue;
+            }
             for (k2, v2) in &other.constraints {
                 if k == k2 && v != v2 {
                     return true;
@@ -358,4 +386,167 @@ fn workspace_root() -> PathBuf {
         "workspace root with Cargo.lock and {ROOT}/ not found from {}",
         crate_dir.display()
     );
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests — pin the parse / overlap contracts so future stdlib code that
+// introduces a new @cfg form is caught here rather than silently disabling
+// the @cfg-aware skip.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod cfg_parsing_tests {
+    use super::*;
+
+    fn cfg(s: &str) -> CfgConstraint {
+        parse_cfg_attr(s)
+    }
+
+    #[test]
+    fn empty_constraint_is_always_active() {
+        let c = CfgConstraint::default();
+        assert!(c.constraints.is_empty());
+        assert!(!c.conservative);
+        // Two empty constraints overlap (always-active vs always-active).
+        assert!(!c.mutually_exclusive(&CfgConstraint::default()));
+    }
+
+    #[test]
+    fn parses_simple_target_os() {
+        let c = cfg(r#"@cfg(target_os = "linux")"#);
+        assert!(!c.conservative, "simple target_os should not be conservative");
+        assert_eq!(c.constraints, vec![("target_os".to_string(), "linux".to_string())]);
+    }
+
+    #[test]
+    fn parses_simple_target_arch() {
+        let c = cfg(r#"@cfg(target_arch = "x86_64")"#);
+        assert!(!c.conservative);
+        assert_eq!(c.constraints, vec![("target_arch".to_string(), "x86_64".to_string())]);
+    }
+
+    #[test]
+    fn parses_all_conjunction() {
+        let c = cfg(r#"@cfg(all(runtime = "full", target_os = "linux"))"#);
+        assert!(!c.conservative, "all(...) should be decomposed precisely");
+        assert_eq!(
+            c.constraints,
+            vec![
+                ("runtime".to_string(), "full".to_string()),
+                ("target_os".to_string(), "linux".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn any_disjunction_is_conservative() {
+        let c = cfg(r#"@cfg(any(target_os = "linux", target_os = "windows"))"#);
+        // any(...) doesn't decompose to a single conjunction; the parser
+        // refuses to model it precisely and falls back to conservative
+        // (always-active) treatment.
+        assert!(c.conservative, "any(...) must be conservative");
+    }
+
+    #[test]
+    fn bare_predicate_is_conservative() {
+        // `unix` is a target_family predicate — not modelled as a
+        // key=value pair, so we treat it conservatively.
+        let c = cfg(r#"@cfg(unix)"#);
+        assert!(c.conservative);
+    }
+
+    #[test]
+    fn malformed_input_is_conservative() {
+        // Missing leading @cfg(...) form — fall back to conservative.
+        let c = cfg(r#"target_os = "linux""#);
+        assert!(c.conservative);
+    }
+
+    // ---- mutually_exclusive contract ---------------------------------
+
+    #[test]
+    fn target_os_linux_excludes_target_os_macos() {
+        let a = cfg(r#"@cfg(target_os = "linux")"#);
+        let b = cfg(r#"@cfg(target_os = "macos")"#);
+        assert!(a.mutually_exclusive(&b));
+        assert!(b.mutually_exclusive(&a));
+    }
+
+    #[test]
+    fn target_arch_x86_64_excludes_target_arch_aarch64() {
+        let a = cfg(r#"@cfg(target_arch = "x86_64")"#);
+        let b = cfg(r#"@cfg(target_arch = "aarch64")"#);
+        assert!(a.mutually_exclusive(&b));
+    }
+
+    #[test]
+    fn runtime_full_excludes_runtime_embedded() {
+        let a = cfg(r#"@cfg(runtime = "full")"#);
+        let b = cfg(r#"@cfg(runtime = "embedded")"#);
+        assert!(a.mutually_exclusive(&b));
+    }
+
+    #[test]
+    fn same_target_os_is_not_mutually_exclusive() {
+        let a = cfg(r#"@cfg(target_os = "linux")"#);
+        let b = cfg(r#"@cfg(target_os = "linux")"#);
+        assert!(!a.mutually_exclusive(&b));
+    }
+
+    #[test]
+    fn empty_overlaps_anything() {
+        let a = CfgConstraint::default();
+        let b = cfg(r#"@cfg(target_os = "linux")"#);
+        assert!(!a.mutually_exclusive(&b));
+        assert!(!b.mutually_exclusive(&a));
+    }
+
+    #[test]
+    fn conservative_overlaps_anything() {
+        let a = cfg(r#"@cfg(unix)"#);
+        let b = cfg(r#"@cfg(target_os = "linux")"#);
+        assert!(!a.mutually_exclusive(&b));
+        assert!(!b.mutually_exclusive(&a));
+    }
+
+    #[test]
+    fn feature_gates_are_additive_not_exclusive() {
+        // Different `feature` values do NOT imply mutual exclusion —
+        // both features can be enabled simultaneously in the same
+        // build.  Treating them as mutex would be unsound: if both
+        // declarations land in the same build, they DO collide and
+        // the test should flag it.
+        let a = cfg(r#"@cfg(feature = "crypto-ring")"#);
+        let b = cfg(r#"@cfg(feature = "crypto-openssl")"#);
+        assert!(!a.mutually_exclusive(&b));
+    }
+
+    #[test]
+    fn debug_assertions_is_not_an_exclusive_axis() {
+        // `debug_assertions` is a build-mode predicate, not part of
+        // the exclusive-keys list; treating differing values as
+        // mutually exclusive would over-approximate (and the parser
+        // can't distinguish the bare-predicate form anyway).
+        let a = cfg(r#"@cfg(debug_assertions = "true")"#);
+        let b = cfg(r#"@cfg(debug_assertions = "false")"#);
+        assert!(!a.mutually_exclusive(&b));
+    }
+
+    #[test]
+    fn cross_axis_constraints_dont_exclude() {
+        // target_os = "linux" and target_arch = "x86_64" overlap
+        // (linux+x86_64 is a real build target).
+        let a = cfg(r#"@cfg(target_os = "linux")"#);
+        let b = cfg(r#"@cfg(target_arch = "x86_64")"#);
+        assert!(!a.mutually_exclusive(&b));
+    }
+
+    #[test]
+    fn conjunction_excludes_when_any_exclusive_axis_disagrees() {
+        // (full,linux) vs (full,macos) — same runtime, different
+        // target_os → mutually exclusive.
+        let a = cfg(r#"@cfg(all(runtime = "full", target_os = "linux"))"#);
+        let b = cfg(r#"@cfg(all(runtime = "full", target_os = "macos"))"#);
+        assert!(a.mutually_exclusive(&b));
+    }
 }
