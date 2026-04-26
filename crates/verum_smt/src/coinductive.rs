@@ -338,12 +338,6 @@ pub struct CoinductiveChecker {
 /// Function definition for name resolution
 #[derive(Debug, Clone)]
 struct FunctionDef {
-    /// Function name
-    #[allow(dead_code)] // Used for function lookup
-    name: Text,
-    /// Return type (if coinductive)
-    #[allow(dead_code)] // Used for type checking
-    return_type: Option<Text>,
     /// Whether this function is corecursive
     is_corecursive: bool,
 }
@@ -378,20 +372,8 @@ impl CoinductiveChecker {
     }
 
     /// Register a function definition for name resolution
-    pub fn register_function(
-        &mut self,
-        name: Text,
-        return_type: Option<Text>,
-        is_corecursive: bool,
-    ) {
-        self.function_defs.insert(
-            name.clone(),
-            FunctionDef {
-                name,
-                return_type,
-                is_corecursive,
-            },
-        );
+    pub fn register_function(&mut self, name: Text, is_corecursive: bool) {
+        self.function_defs.insert(name, FunctionDef { is_corecursive });
     }
 
     /// Get the type registry
@@ -1951,9 +1933,6 @@ impl Default for ObservationEquivalence {
 
 /// Verifies that stream transformations preserve observational equivalence
 pub struct StreamFusionVerifier {
-    /// The coinductive checker
-    #[allow(dead_code)] // Used for coinductive verification of streams
-    checker: CoinductiveChecker,
     /// Registered fusion rules
     fusion_rules: List<FusionRule>,
 }
@@ -2013,7 +1992,6 @@ impl StreamFusionVerifier {
     /// Create a new stream fusion verifier
     pub fn new() -> Self {
         let mut verifier = Self {
-            checker: CoinductiveChecker::new(),
             fusion_rules: List::new(),
         };
 
@@ -2460,7 +2438,7 @@ mod tests {
         let mut checker = CoinductiveChecker::new();
 
         // Register the stream definition
-        checker.register_function("ones".to_text(), Some("Stream".to_text()), true);
+        checker.register_function("ones".to_text(), true);
 
         // ones = { head = 1, tail = ones }
         let stream_def = StreamDef::new(
@@ -2480,7 +2458,7 @@ mod tests {
         let mut checker = CoinductiveChecker::new();
 
         // Register stream functions
-        checker.register_function("map_stream".to_text(), Some("Stream".to_text()), true);
+        checker.register_function("map_stream".to_text(), true);
 
         // map_stream(f, s) = { head = f(s.head), tail = map_stream(f, s.tail) }
         // Simplified: head = f(x), tail = map_stream(f, s)
@@ -2502,7 +2480,7 @@ mod tests {
         let mut checker = CoinductiveChecker::new();
 
         // Register a non-productive stream definition
-        checker.register_function("bad_stream".to_text(), Some("Stream".to_text()), true);
+        checker.register_function("bad_stream".to_text(), true);
 
         // bad_stream = { head = bad_stream.head, tail = bad_stream.tail }
         // This is NOT productive because head references itself
