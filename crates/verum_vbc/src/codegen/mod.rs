@@ -2424,6 +2424,32 @@ impl VbcCodegen {
                          will panic with `FunctionNotFound`",
                         fname, e
                     );
+                    if let Some(undef) = e.undefined_function_name() {
+                        let undef_owned = undef.to_string();
+                        let near: Vec<String> = self
+                            .ctx
+                            .functions
+                            .keys()
+                            .filter(|k| {
+                                k.ends_with(&format!(".{}", undef_owned))
+                                    || k.ends_with(&format!("::{}", undef_owned))
+                                    || k.as_str() == undef_owned.as_str()
+                            })
+                            .take(8)
+                            .cloned()
+                            .collect();
+                        if !near.is_empty() {
+                            tracing::warn!(
+                                "[lenient]   near-matches for '{}' in ctx.functions: {:?}",
+                                undef_owned, near
+                            );
+                        } else {
+                            tracing::warn!(
+                                "[lenient]   no near-matches for '{}' in ctx.functions ({} entries total)",
+                                undef_owned, self.ctx.functions.len()
+                            );
+                        }
+                    }
                     tracing::debug!("[lenient] SKIP top-level fn {}: {}", fname, e);
                 }
                 // Compile nested functions even if parent failed
