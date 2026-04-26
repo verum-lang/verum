@@ -445,3 +445,141 @@ fn impl_methods_without_framework_unaffected() {
     assert!(result.success);
     assert_eq!(pass.diagnostics().len(), 0);
 }
+
+// =============================================================================
+// V8 (#209, B8) — designated meta-classifier corpus exemption
+// =============================================================================
+
+#[test]
+fn b8_designated_meta_classifier_alone_does_not_fire_r3() {
+    // diakrisis is the designated meta-classifier and ships
+    // 5 axioms. Only one (other) corpus is present and it ships
+    // 1 axiom. Without designation: no R3 (only one >= 5
+    // candidate). With designation: still no R3 (designated
+    // is exempt; non-designated is < 5). Sanity check that the
+    // exemption doesn't accidentally over-fire.
+    let mut items: Vec<ItemKind> = Vec::new();
+    for i in 0..5 {
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("d_{}", i),
+            vec![framework_attr("diakrisis")],
+        )));
+    }
+    items.push(ItemKind::Axiom(axiom_with_attrs(
+        "a_one",
+        vec![framework_attr("actic")],
+    )));
+    let module = module_with(items);
+    let mut pass = HygieneRecheckPass::new()
+        .with_designated_meta_classifier(Text::from("diakrisis"));
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(result.success, "designated alone reaching threshold is OK");
+    let r3_count = pass
+        .diagnostics()
+        .iter()
+        .filter(|d| d.rule == "R3")
+        .count();
+    assert_eq!(r3_count, 0);
+}
+
+#[test]
+fn b8_designated_corpus_filtered_out_two_others_at_threshold_fires() {
+    // Three corpora each at threshold (5). Designate one as the
+    // meta-classifier. Pre-V8: 3 candidates → R3 fires. V8: 2
+    // remaining non-designated candidates → R3 still fires (>= 2).
+    // Post-fix correctness: the diagnostic message lists ONLY
+    // the two violators, not the legitimate designated corpus.
+    let mut items: Vec<ItemKind> = Vec::new();
+    for i in 0..5 {
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("d_{}", i),
+            vec![framework_attr("diakrisis")],
+        )));
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("a_{}", i),
+            vec![framework_attr("actic")],
+        )));
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("u_{}", i),
+            vec![framework_attr("uhm")],
+        )));
+    }
+    let module = module_with(items);
+    let mut pass = HygieneRecheckPass::new()
+        .with_designated_meta_classifier(Text::from("diakrisis"));
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success, "two non-designated corpora at threshold must fire R3");
+    let r3_diags: Vec<_> = pass
+        .diagnostics()
+        .iter()
+        .filter(|d| d.rule == "R3")
+        .collect();
+    assert_eq!(r3_diags.len(), 1);
+    let msg = r3_diags[0].message.as_str();
+    assert!(msg.contains("actic"), "violators must be listed: {}", msg);
+    assert!(msg.contains("uhm"), "violators must be listed: {}", msg);
+    assert!(
+        !msg.contains("diakrisis"),
+        "designated corpus must not appear in violator list: {}",
+        msg,
+    );
+}
+
+#[test]
+fn b8_designated_corpus_filtered_other_alone_at_threshold_quiet() {
+    // Designated diakrisis at threshold + actic at threshold.
+    // Pre-V8: 2 candidates → R3 fires. V8: filter removes
+    // diakrisis → 1 candidate left → R3 quiet.
+    //
+    // This is the exact bug B8 closes: when the designated
+    // corpus is the *only* one cohabiting with one other corpus
+    // that also crosses threshold, the original |>= 2| rule
+    // would falsely fire even though the second corpus is the
+    // only one structurally claiming the role contended for
+    // by uniqueness.
+    let mut items: Vec<ItemKind> = Vec::new();
+    for i in 0..5 {
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("d_{}", i),
+            vec![framework_attr("diakrisis")],
+        )));
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("a_{}", i),
+            vec![framework_attr("actic")],
+        )));
+    }
+    let module = module_with(items);
+    let mut pass = HygieneRecheckPass::new()
+        .with_designated_meta_classifier(Text::from("diakrisis"));
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(
+        result.success,
+        "with diakrisis designated, one other corpus at threshold is allowed",
+    );
+}
+
+#[test]
+fn b8_no_designation_falls_back_to_pre_v8_behaviour() {
+    // No designation set → pre-V8 rule applies: any 2 corpora
+    // crossing threshold fire R3. Backwards-compat sanity check.
+    let mut items: Vec<ItemKind> = Vec::new();
+    for i in 0..5 {
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("d_{}", i),
+            vec![framework_attr("diakrisis")],
+        )));
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("a_{}", i),
+            vec![framework_attr("actic")],
+        )));
+    }
+    let module = module_with(items);
+    let mut pass = HygieneRecheckPass::new();
+    assert!(pass.designated_meta_classifier().is_none());
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success, "no designation → original |>= 2| rule applies");
+}

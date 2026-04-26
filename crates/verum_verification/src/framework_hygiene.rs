@@ -278,6 +278,20 @@ pub struct HygieneRecheckPass {
     /// corpus per #203 (e.g., owl2_fs ships 64 axioms vs custom
     /// user packages with 2-3).
     meta_classifier_threshold: usize,
+    /// V8 (#209, B8) — designated meta-classifier corpus, exempt
+    /// from R3 threshold counting. VUVA §10.4.1 mandates exactly
+    /// one corpus play the meta-classifier role; the designation
+    /// is a project-level configuration item, not derived from
+    /// axiom count alone. Pre-V8 the designated corpus was
+    /// itself counted as a candidate and could falsely participate
+    /// in the "multiple meta-classifier frameworks detected" R3
+    /// error message, even though it's the legitimate one. The
+    /// fix: filter the designated corpus out of the candidate
+    /// list before applying the |candidates| >= 2 violation rule.
+    /// `None` means no corpus is officially designated — falls
+    /// back to pre-V8 behaviour (R3 fires on any |candidates|
+    /// >= 2).
+    designated_meta_classifier: Option<Text>,
 }
 
 /// Default R3 threshold per VUVA §13 / `framework_hygiene.vr`.
@@ -294,6 +308,7 @@ impl HygieneRecheckPass {
         Self {
             diagnostics: Vec::new(),
             meta_classifier_threshold: DEFAULT_META_CLASSIFIER_THRESHOLD,
+            designated_meta_classifier: None,
         }
     }
 
@@ -306,12 +321,30 @@ impl HygieneRecheckPass {
         Self {
             diagnostics: Vec::new(),
             meta_classifier_threshold: threshold,
+            designated_meta_classifier: None,
         }
+    }
+
+    /// V8 (#209, B8) — set the designated meta-classifier corpus.
+    /// That corpus is exempt from R3 threshold counting per VUVA
+    /// §10.4.1: the designated corpus is *expected* to ship many
+    /// foundational axioms; only undesignated corpora reaching
+    /// the threshold count as candidates for the violation.
+    pub fn with_designated_meta_classifier(mut self, corpus: Text) -> Self {
+        self.designated_meta_classifier = Some(corpus);
+        self
     }
 
     /// The R3 threshold currently configured.
     pub fn meta_classifier_threshold(&self) -> usize {
         self.meta_classifier_threshold
+    }
+
+    /// V8 (#209, B8) — name of the designated meta-classifier
+    /// corpus, if any. Returns `None` when no designation is
+    /// set (pre-V8 fallback behaviour).
+    pub fn designated_meta_classifier(&self) -> Option<&Text> {
+        self.designated_meta_classifier.as_ref()
     }
 
     /// All diagnostics (Warning + Error) accumulated by the most
@@ -410,10 +443,23 @@ impl VerificationPass for HygieneRecheckPass {
         // it ships ≥ `meta_classifier_threshold` framework-
         // annotated declarations (default 5, configurable per
         // corpus per #203).
+        //
+        // V8 (#209, B8) — the designated meta-classifier corpus
+        // is exempt from this counting. VUVA §10.4.1 names the
+        // designated corpus as the legitimate occupant of the
+        // meta-classifier role; treating it as a "candidate"
+        // would let R3 fire against the corpus that's allowed
+        // to ship many axioms by design.
         for (corpus, count) in framework_corpus_axiom_count.iter() {
-            if *count >= self.meta_classifier_threshold {
-                meta_classifier_candidates.push(corpus.clone());
+            if *count < self.meta_classifier_threshold {
+                continue;
             }
+            if let Some(designated) = &self.designated_meta_classifier {
+                if corpus.as_str() == designated.as_str() {
+                    continue;
+                }
+            }
+            meta_classifier_candidates.push(corpus.clone());
         }
 
         // R4 (#197 V0) — framework-compatibility audit. Walk every
