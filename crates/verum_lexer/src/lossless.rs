@@ -13,6 +13,22 @@ use crate::token::{Token, TokenKind};
 use verum_ast::span::{FileId, Span};
 use verum_common::List;
 
+/// If `source` begins with a POSIX shebang (`#!...\n`), build the corresponding
+/// shebang [`TriviaItem`]. Returns `None` otherwise. The trivia text includes
+/// `#!`, the body of the line, and the trailing newline (if any).
+pub(crate) fn detect_shebang(source: &str, file_id: FileId) -> Option<TriviaItem> {
+    let bytes = source.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'#' || bytes[1] != b'!' {
+        return None;
+    }
+    let end = bytes.iter().position(|&b| b == b'\n').map_or(bytes.len(), |i| i + 1);
+    Some(TriviaItem {
+        kind: TriviaKind::Shebang,
+        text: source[..end].to_string(),
+        span: Span::new(0, end as u32, file_id),
+    })
+}
+
 /// Trivia attached to a token.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Trivia {
@@ -73,6 +89,9 @@ pub enum TriviaKind {
     DocComment,
     /// Inner doc comment: `//! ...`
     InnerDocComment,
+    // Shebang line at file start (`#!...`). Always exactly one, at byte offset 0.
+    // Used by script-mode dispatch in `verum run`.
+    Shebang,
 }
 
 /// A token with attached trivia for lossless parsing.
@@ -139,16 +158,22 @@ pub struct LosslessLexer<'source> {
     file_id: FileId,
     pos: usize,
     eof_reached: bool,
+    /// Pending shebang trivia, attached to the leading trivia of the first
+    /// real token. `None` once consumed (or if no shebang was present).
+    pending_shebang: Option<TriviaItem>,
 }
 
 impl<'source> LosslessLexer<'source> {
     /// Create a new lossless lexer.
     pub fn new(source: &'source str, file_id: FileId) -> Self {
+        let pending_shebang = detect_shebang(source, file_id);
+        let pos = pending_shebang.as_ref().map_or(0, |t| t.text.len());
         Self {
             source,
             file_id,
-            pos: 0,
+            pos,
             eof_reached: false,
+            pending_shebang,
         }
     }
 
@@ -334,7 +359,12 @@ impl<'source> LosslessLexer<'source> {
     /// Tokenize the entire input into rich tokens.
     pub fn tokenize(mut self) -> List<RichToken> {
         let mut tokens = List::new();
+        // Seed pending trivia with a stripped shebang, if any. It will attach
+        // to the leading trivia of the first emitted token.
         let mut pending_trivia = Trivia::new();
+        if let Some(shebang) = self.pending_shebang.take() {
+            pending_trivia.push(shebang);
+        }
 
         loop {
             // Scan leading trivia

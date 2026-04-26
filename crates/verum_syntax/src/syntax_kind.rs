@@ -811,6 +811,12 @@ pub enum SyntaxKind {
     /// FFI block
     FFI_BLOCK = 603,
 
+    // === Script trivia (605) ===
+    /// Shebang line `#!...\n` at the start of a script file. Emitted at most
+    /// once per source file (always at byte offset 0). Used by script-mode
+    /// dispatch to recognize executable `.vr` scripts.
+    SHEBANG = 605,
+
     // Ensure we have a known maximum
     #[doc(hidden)]
     __LAST = 999,
