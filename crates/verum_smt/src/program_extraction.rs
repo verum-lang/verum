@@ -443,10 +443,6 @@ impl ExtractedWitness {
 /// Extracts executable programs from constructive proofs.
 /// Implements the Curry-Howard correspondence between proofs and programs.
 pub struct ProgramExtractor {
-    /// Extraction configuration
-    #[allow(dead_code)] // Reserved for extraction configuration
-    config: ExtractionConfig,
-
     /// Statistics
     stats: ExtractionStats,
 }
@@ -455,15 +451,6 @@ impl ProgramExtractor {
     /// Create a new program extractor
     pub fn new() -> Self {
         Self {
-            config: ExtractionConfig::new(),
-            stats: ExtractionStats::default(),
-        }
-    }
-
-    /// Create extractor with custom configuration
-    pub fn with_config(config: ExtractionConfig) -> Self {
-        Self {
-            config,
             stats: ExtractionStats::default(),
         }
     }
@@ -787,31 +774,6 @@ impl ProgramExtractor {
         }
     }
 
-    /// Extract match arms from proof cases
-    #[allow(dead_code)] // Part of proof extraction API
-    fn extract_match_arms_from_cases(
-        &self,
-        cases: &List<(Expr, Heap<ProofTerm>)>,
-    ) -> Maybe<List<verum_ast::MatchArm>> {
-        let mut match_arms = List::new();
-
-        for (pattern_expr, proof_term) in cases {
-            // Try to convert expression to pattern
-            let pattern = self.expr_to_pattern(pattern_expr)?;
-            let body_expr = self.proof_term_to_expr(proof_term)?;
-
-            match_arms.push(verum_ast::MatchArm {
-                pattern,
-                guard: Maybe::None,
-                body: Heap::new(body_expr),
-                with_clause: Maybe::None,
-                attributes: List::new(),
-                span: Span::default(),
-            });
-        }
-
-        Maybe::Some(match_arms)
-    }
 
     /// Convert expression to pattern
     ///
@@ -1082,44 +1044,7 @@ impl ProgramExtractor {
         }
     }
 
-    /// Create pattern from text
-    #[allow(dead_code)] // Part of proof extraction API
-    fn create_pattern(&self, name: &Text) -> Maybe<Pattern> {
-        // Simple identifier pattern
-        Maybe::Some(Pattern::new(
-            PatternKind::Ident {
-                by_ref: false,
-                mutable: false,
-                name: verum_ast::ty::Ident {
-                    name: name.as_str().to_string().into(),
-                    span: Span::default(),
-                },
-                subpattern: Maybe::None,
-            },
-            Span::default(),
-        ))
-    }
 
-    /// Create function parameter
-    #[allow(dead_code)] // Part of proof extraction API
-    fn create_param(&self, name: Text) -> verum_ast::decl::FunctionParam {
-        verum_ast::decl::FunctionParam {
-            kind: verum_ast::decl::FunctionParamKind::Regular {
-                pattern: Pattern::ident(
-                    verum_ast::ty::Ident {
-                        name: name.as_str().to_string().into(),
-                        span: Span::default(),
-                    },
-                    false, // not mutable
-                    Span::default(),
-                ),
-                ty: self.unknown_type(),
-                default_value: Maybe::None,
-            },
-            attributes: List::new(),
-            span: Span::default(),
-        }
-    }
 
     /// Infer parameter type from proof context
     ///
@@ -1537,15 +1462,6 @@ impl ProgramExtractor {
         }
     }
 
-    /// Extract property expression from proof
-    #[allow(dead_code)] // Part of proof extraction API
-    fn extract_property_from_proof(&self, proof: &ProofTerm) -> Maybe<Expr> {
-        match proof {
-            ProofTerm::Axiom { formula, .. } => Maybe::Some(formula.clone()),
-            ProofTerm::Lemma { conclusion, .. } => Maybe::Some(conclusion.clone()),
-            _ => Maybe::None,
-        }
-    }
 
     /// Build recursive function from induction proof
     ///
@@ -1761,14 +1677,6 @@ impl ProgramExtractor {
         })
     }
 
-    /// Create true literal
-    #[allow(dead_code)] // Part of proof extraction API
-    fn true_expr(&self) -> Expr {
-        Expr::literal(Literal {
-            kind: LiteralKind::Bool(true),
-            span: Span::default(),
-        })
-    }
 
     /// Get Nat type
     fn nat_type(&self) -> Type {
@@ -1781,17 +1689,6 @@ impl ProgramExtractor {
         }
     }
 
-    /// Get unknown/inferred type
-    #[allow(dead_code)] // Part of proof extraction API
-    fn unknown_type(&self) -> Type {
-        Type {
-            kind: TypeKind::Path(verum_ast::Path::single(verum_ast::ty::Ident {
-                name: "_".to_string().into(),
-                span: Span::default(),
-            })),
-            span: Span::default(),
-        }
-    }
 
     /// Get extraction statistics
     pub fn stats(&self) -> &ExtractionStats {
