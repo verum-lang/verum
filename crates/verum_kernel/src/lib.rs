@@ -2062,36 +2062,45 @@ pub fn infer(
 /// transferred unit/counit.
 ///
 /// V0 shipped a permissive skeleton that accepted any pair
-/// `(EpsilonOf(_), AlphaOf(_))`. V1 (this revision) tightens the shape
-/// check so it rejects obvious naturality-square violations *before*
-/// the full τ-witness construction lands:
+/// `(EpsilonOf(_), AlphaOf(_))`. V1 tightened the shape check; V2
+/// (this revision) adds the **modal-depth preservation
+/// pre-condition** for non-identity M:
 ///
 ///   • `(EpsilonOf(M_α), AlphaOf(EpsilonOf(α)))` is the canonical
 ///     naturality-square shape per Proposition 5.1 / Corollary 5.10.
-///     V1 enforces that the inner of `AlphaOf` MUST be an `EpsilonOf`
-///     constructor and that its inner term matches structurally with
-///     a sub-term reachable from `M_α` (V1 uses the simplest sufficient
-///     witness: `M_α == α` modulo `CoreTerm::PartialEq`, which
-///     covers identity-functor and degenerate cases).
+///     The inner of `AlphaOf` MUST be an `EpsilonOf` constructor.
 ///
-///   • `(t, t)` (referentially or structurally equal) is the
-///     degenerate identity-naturality square — always accepted.
+///   • `(t, t)` (structurally equal) is the degenerate identity-
+///     naturality square — always accepted.
+///
+///   • For the M = id sub-case (`m_alpha == α_rhs` structurally),
+///     accept directly: identity-functor naturality commutes
+///     trivially.
+///
+///   • For the non-identity-M case (`m_alpha != α_rhs`), V2 checks
+///     a **necessary condition** for the τ-witness to exist: the
+///     natural-equivalence τ : ε ∘ M ≃ A ∘ ε is an (∞,1)-
+///     categorical equivalence, hence depth-preserving. So
+///     `m_depth_omega(M_α) ≠ m_depth_omega(α)` ⇒ no τ-witness can
+///     possibly exist ⇒ reject. When depths agree, V2 still
+///     conservatively accepts — the depth check is a *necessary*
+///     condition, not a sufficient one. Sufficient witness
+///     construction (σ_α / π_α) is the V3 work tracked under #181.
 ///
 ///   • Any other pair (including `(EpsilonOf(_), AlphaOf(t))` where
 ///     `t` is not itself an `EpsilonOf`) is rejected with
-///     `EpsMuNaturalityFailed`. This is strictly more rigorous than
-///     V0 and catches the most common malformed-pair errors before
-///     V2 (full τ-witness) lands.
+///     `EpsMuNaturalityFailed`.
 ///
-/// **What V1 does *not* yet check** (deferred to V2 — tracked under
-/// the multi-week K-Eps-Mu naturality witness work item):
+/// **What V2 does *not* yet check** (still V3 / #181 work):
 ///
 ///   • The explicit τ-witness construction (σ_α from Code_S morphism
 ///     + π_α from Perform_{ε_math} naturality through axiom A-3).
-///   • Reasoning about the action of `M` on non-trivial articulations:
-///     V1 only certifies the identity-functor diagonal case; non-trivial
-///     `M(α)` shapes still pass through the conservative
-///     `EpsilonOf(_)` arm without inner-α matching.
+///   • V2's depth-equality is necessary but not sufficient: two
+///     terms can share modal depth without admitting a τ-witness
+///     (the witness construction may fail for type-theoretic
+///     reasons orthogonal to depth). V3 will add the σ_α/π_α
+///     construction; V2 just rules out the obvious depth-mismatch
+///     impossibility.
 ///
 /// Decidability: the check is *semi-decidable* in general (per the
 /// structure-recursion argument that backs Theorem 16.6). For
@@ -2119,17 +2128,27 @@ pub fn check_eps_mu_coherence(
                     // V1 sufficient witness: identity-functor case
                     // (`M = id` ⇒ `M_α = α`). When `m_alpha == α_rhs`
                     // structurally, the naturality square commutes
-                    // trivially. Non-identity `M` is conservative:
-                    // accepted with a TODO note for V2.
+                    // trivially.
                     if m_alpha.as_ref() == alpha_rhs.as_ref() {
                         Ok(())
                     } else {
-                        // Conservative-accept until V2 wires the full
-                        // τ-witness. This preserves the V0 acceptance
-                        // semantics for non-identity M while V1's
-                        // shape-check still rejects the obvious
-                        // malformed-pair case below.
-                        Ok(())
+                        // V2 increment: modal-depth preservation
+                        // pre-condition for non-identity M. The
+                        // canonical natural-equivalence
+                        // τ : ε ∘ M ≃ A ∘ ε is depth-preserving;
+                        // a depth mismatch precludes any τ-witness,
+                        // so reject. Depth match ⇒ V2 still
+                        // conservatively accepts pending the V3
+                        // (#181) full τ-witness construction.
+                        let lhs_rank = m_depth_omega(m_alpha.as_ref());
+                        let rhs_rank = m_depth_omega(alpha_rhs.as_ref());
+                        if lhs_rank == rhs_rank {
+                            Ok(())
+                        } else {
+                            Err(KernelError::EpsMuNaturalityFailed {
+                                context: Text::from(context),
+                            })
+                        }
                     }
                 }
                 _ => Err(KernelError::EpsMuNaturalityFailed {
