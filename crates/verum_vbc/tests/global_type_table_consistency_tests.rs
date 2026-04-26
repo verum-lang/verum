@@ -134,8 +134,8 @@ fn global_type_table_clean_for_maybe() {
 /// `core/base/result.vr` is mounted transitively by a substantial
 /// portion of the async-runtime stdlib graph, so compiling it
 /// surfaces a much wider type table than `maybe.vr` or `list.vr`.
-/// As of #170 wire-up this fixture exposes 7 cross-module hygiene
-/// findings (down from 14 across four follow-ups in the same PR:
+/// As of #170/#187 close-out this fixture exposes 1 cross-module
+/// hygiene finding (down from 14 across multiple follow-ups):
 ///
 ///   1. Added `Channel`/`Deque`/`Tuple`/`Array` to the well-known
 ///      type-name map (14 → 15, briefly worse — exposed a separate
@@ -144,28 +144,37 @@ fn global_type_table_clean_for_maybe() {
 ///      so the auto-allocator skips the reserved 256..260 and
 ///      512..1024 ranges (15 → 13).
 ///   3. Honoured per-item `@cfg` gates on `mount` declarations
-///      inside `resolve_mounts_recursive`, so platform-/runtime-
-///      gated modules (`sys.embedded`, `sys.no_runtime`, etc.) no
-///      longer pull their type declarations into builds for the
-///      wrong target (13 → 10).
-///   4. Walked `TypeDecl.attributes` (and `Function.attributes`)
-///      from `should_compile_item` — the parser places type-decl
-///      `@cfg` attributes on the inner `TypeDecl`, not on `Item`,
-///      so checking only `Item.attributes` silently bypassed @cfg
-///      gates on every type declaration in the stdlib (10 → 7).
+///      inside `resolve_mounts_recursive` (13 → 10).
+///   4. Walked `TypeDecl.attributes` from `should_compile_item` —
+///      the parser places type-decl `@cfg` attributes on the inner
+///      `TypeDecl`, not on `Item` (10 → 7).
+///   5. Renamed `RuntimeConfig` → `AsyncRuntimeConfig` in
+///      `core/async/executor.vr` (the protocol vs record collision
+///      with `core/runtime/config.vr`) (7 → 6).
+///   6. Renamed `Task`/`TaskHandle` → `RuntimeTask`/`RuntimeTaskHandle`
+///      in `core/runtime/config.vr` (the internal vs public
+///      collision with `core/async/{task,nursery}.vr`) (6 → 4).
+///   7. Renamed internal `AtomicBool` → `RuntimeAtomicBool` in
+///      `core/runtime/config.vr` (the internal AtomicU32-backed
+///      version vs the public `core/sync/atomic.vr` version) (4 → 3).
+///   8. Renamed internal `YieldNow` → `SelectYieldNow` in
+///      `core/async/select.vr`; renamed internal `CallbackEntry` →
+///      `CancellationCallback` in `core/async/cancellation.vr`
+///      (3 → 1).
 ///
-/// Remaining findings are mostly platform-cfg type-name
-/// redeclarations across linux/darwin/windows variants of the same
-/// logical type (`Task`, `TaskHandle`, `YieldNow`, …) — these are
-/// in different files mounted unconditionally, not inside the same
-/// file with cfg gates.  Remediation tracked under #181 (stdlib
-/// production audit) and #187.
+/// The remaining finding is the `Heap` / `Shared` pair both
+/// pointing at `TypeId::PTR (14)` — INTENTIONAL alias case where
+/// two type names are deliberately bound to the same id.  Fixing
+/// this would require changing the well-known TypeId architecture
+/// to allow multi-name aliases without distinct descriptors;
+/// out of scope for #187.  See #167 (TypeId / opcode-space
+/// extension).
 ///
 /// This test is a *ratchet*: the count must not rise, and must
 /// match exactly when it falls (so any improvement gets pinned).
 /// When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to lock
 /// in the gain.
-const RESULT_ISSUE_BASELINE: usize = 6;
+const RESULT_ISSUE_BASELINE: usize = 1;
 
 #[test]
 fn global_type_table_baseline_for_result() {

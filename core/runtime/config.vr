@@ -118,7 +118,7 @@ implement Display for RuntimeInitError {
 /// ## Associated Types
 ///
 /// - `Allocator`: Memory allocation strategy
-/// - `Executor`: Task scheduling strategy (async runtimes only)
+/// - `Executor`: RuntimeTask scheduling strategy (async runtimes only)
 /// - `IoDriver`: I/O completion strategy
 ///
 /// ## Implementation Contract
@@ -184,7 +184,7 @@ public type AsyncExecutor is protocol {
     fn spawn<T: Send>(
         &self,
         future: Future<T>,
-    ) -> TaskHandle<T>;
+    ) -> RuntimeTaskHandle<T>;
 
     /// Block current thread on a future
     fn block_on<T>(&self, future: Future<T>) -> T;
@@ -201,7 +201,7 @@ public type NoopExecutor is ();
 
 implement AsyncExecutor for NoopExecutor {
     @cfg(feature = "async")
-    fn spawn<T: Send>(&self, future: Future<T>) -> TaskHandle<T> {
+    fn spawn<T: Send>(&self, future: Future<T>) -> RuntimeTaskHandle<T> {
         panic("spawn() called on sync runtime - use @cfg(feature = async) to gate async code")
     }
 
@@ -341,7 +341,7 @@ implement RuntimeIoDriver for NoopDriver {
 /// - Full CBGR memory safety
 ///
 /// Performance:
-/// - Task spawn: ~150ns
+/// - RuntimeTask spawn: ~150ns
 /// - Context switch: ~50ns
 /// - I/O submission: ~100ns
 @cfg(runtime = "full")
@@ -428,7 +428,7 @@ implement RuntimeConfig for FullRuntime {
 /// - CBGR with simplified threading model
 ///
 /// Performance:
-/// - Task spawn: ~100ns (no work-stealing)
+/// - RuntimeTask spawn: ~100ns (no work-stealing)
 /// - Context switch: ~30ns (no thread sync)
 @cfg(runtime = "single_thread")
 public type SingleThreadRuntime is {
@@ -689,7 +689,7 @@ public type WorkStealingExecutor is {
     io_driver: &dyn RuntimeIoDriver,
 
     /// Shutdown flag
-    shutdown_flag: AtomicBool,
+    shutdown_flag: RuntimeAtomicBool,
 
     /// Active task count
     active_tasks: AtomicU64,
@@ -706,7 +706,7 @@ implement WorkStealingExecutor {
             workers: workers,
             global_queue: &global_queue,
             io_driver: io_driver,
-            shutdown_flag: AtomicBool.new(false),
+            shutdown_flag: RuntimeAtomicBool.new(false),
             active_tasks: AtomicU64.new(0),
         })
     }
@@ -715,11 +715,11 @@ implement WorkStealingExecutor {
 @cfg(runtime = "full")
 implement AsyncExecutor for WorkStealingExecutor {
     @cfg(feature = "async")
-    fn spawn<T: Send>(&self, future: Future<T>) -> TaskHandle<T> {
+    fn spawn<T: Send>(&self, future: Future<T>) -> RuntimeTaskHandle<T> {
         self.active_tasks.fetch_add(1, MemoryOrdering.SeqCst);
 
         // Get current worker or use global queue
-        let task = Task.new(future);
+        let task = RuntimeTask.new(future);
 
         executor_spawn(self, task)
     }
@@ -758,10 +758,10 @@ public type SingleThreadExecutor is {
 @cfg(runtime = "single_thread")
 implement AsyncExecutor for SingleThreadExecutor {
     @cfg(feature = "async")
-    fn spawn<T: Send>(&self, future: Future<T>) -> TaskHandle<T> {
-        let task = Task.new(future);
+    fn spawn<T: Send>(&self, future: Future<T>) -> RuntimeTaskHandle<T> {
+        let task = RuntimeTask.new(future);
         self.task_queue.push(task);
-        TaskHandle.new(task)
+        RuntimeTaskHandle.new(task)
     }
 
     fn block_on<T>(&self, future: Future<T>) -> T {
@@ -820,7 +820,7 @@ public type RuntimeConfigThreadPool is {
     job_queue: &JobQueue,
 
     /// Shutdown flag
-    shutdown: AtomicBool,
+    shutdown: RuntimeAtomicBool,
 };
 
 @cfg(runtime = "no_async")
@@ -832,7 +832,7 @@ implement RuntimeConfigThreadPool {
         Ok(Self {
             workers,
             job_queue,
-            shutdown: AtomicBool.new(false),
+            shutdown: RuntimeAtomicBool.new(false),
         })
     }
 
@@ -863,7 +863,7 @@ type Worker is {
     /// OS thread handle (pthread_t on Unix, HANDLE on Windows)
     thread_handle: Int,
     /// Per-worker local task deque (LIFO push, FIFO steal)
-    local_deque: &Deque<Task>,
+    local_deque: &Deque<RuntimeTask>,
     /// Reference to the shared global queue
     global_queue: &TaskQueue,
     /// Worker index (0..N-1)
@@ -893,7 +893,7 @@ implement Worker {
 /// Capacity: 4096 tasks (power-of-two for efficient masking).
 type TaskQueue is {
     /// Ring buffer storage
-    buffer: &[Task],
+    buffer: &[RuntimeTask],
     /// Capacity (always power of two)
     capacity: Int,
     /// Atomic head index (consumer side)
@@ -906,20 +906,20 @@ implement TaskQueue {
     fn new() -> TaskQueue {
         let cap = 4096;
         TaskQueue {
-            buffer: alloc_array<Task>(cap),
+            buffer: alloc_array<RuntimeTask>(cap),
             capacity: cap,
             head: AtomicU64.new(0),
             tail: AtomicU64.new(0),
         }
     }
 
-    fn push(&self, task: Task) {
+    fn push(&self, task: RuntimeTask) {
         let tail = self.tail.fetch_add(1, MemoryOrdering.AcqRel) as Int;
         let idx = tail % self.capacity;
         self.buffer[idx] = task;
     }
 
-    fn pop(&self) -> Maybe<Task> {
+    fn pop(&self) -> Maybe<RuntimeTask> {
         let head = self.head.load(MemoryOrdering.Acquire) as Int;
         let tail = self.tail.load(MemoryOrdering.Acquire) as Int;
         if head >= tail {
@@ -940,20 +940,20 @@ implement TaskQueue {
 /// Async task wrapper.
 ///
 /// Encapsulates a future with its execution state and waker.
-type Task is {
+type RuntimeTask is {
     /// Pointer to the boxed future (type-erased)
     future_ptr: Int,
-    /// Task state: 0=Pending, 1=Running, 2=Complete, 3=Cancelled
+    /// RuntimeTask state: 0=Pending, 1=Running, 2=Complete, 3=Cancelled
     state: AtomicU32,
     /// Waker function pointer for rescheduling
     waker_fn: Int,
-    /// Task priority (lower = higher priority)
+    /// RuntimeTask priority (lower = higher priority)
     priority: UInt16,
 };
 
-implement Task {
-    fn new<T>(future: Future<T>) -> Task {
-        Task {
+implement RuntimeTask {
+    fn new<T>(future: Future<T>) -> RuntimeTask {
+        RuntimeTask {
             future_ptr: future as Int,
             state: AtomicU32.new(0),
             waker_fn: 0,
@@ -965,18 +965,18 @@ implement Task {
 /// Handle to a spawned async task, used to await the result.
 ///
 /// Generic over T — the return type of the future.
-type TaskHandle<T> is {
+type RuntimeTaskHandle<T> is {
     /// Pointer to the task's result slot
     result_ptr: Int,
     /// Atomic completion flag
-    completed: AtomicBool,
+    completed: RuntimeAtomicBool,
 };
 
-implement<T> TaskHandle<T> {
-    fn new(task: Task) -> TaskHandle<T> {
-        TaskHandle {
+implement<T> RuntimeTaskHandle<T> {
+    fn new(task: RuntimeTask) -> RuntimeTaskHandle<T> {
+        RuntimeTaskHandle {
             result_ptr: task.future_ptr,
-            completed: AtomicBool.new(false),
+            completed: RuntimeAtomicBool.new(false),
         }
     }
 }
@@ -1065,13 +1065,13 @@ type PollFd is {
 /// Atomic boolean flag.
 ///
 /// Backed by an atomic 32-bit integer (0=false, 1=true).
-type AtomicBool is {
+type RuntimeAtomicBool is {
     value: AtomicU32,
 };
 
-implement AtomicBool {
-    fn new(initial: Bool) -> AtomicBool {
-        AtomicBool { value: AtomicU32.new(if initial { 1 } else { 0 }) }
+implement RuntimeAtomicBool {
+    fn new(initial: Bool) -> RuntimeAtomicBool {
+        RuntimeAtomicBool { value: AtomicU32.new(if initial { 1 } else { 0 }) }
     }
 
     fn load(&self, ordering: Ordering) -> Bool {
