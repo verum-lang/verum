@@ -11022,17 +11022,13 @@ impl<'s> CompilationPipeline<'s> {
             // NOTE: Only include modules needed for sync primitives (mutex/condvar/channel).
             // Time/IO modules use FFI declarations that produce invalid LLVM IR — deferred.
             "core.sys.common",
-            "core.sys.raw",            // FFI intrinsic surface (`@intrinsic("time_*_nanos")`,
-                                       // etc.) referenced by `sleep_secs` / `wall_clock_ms`
-                                       // bodies in `core.sys.time_ops`.  Time_ops itself
-                                       // is reachable via the closure walker (channel.vr
-                                       // mounts `sys.time_ops.{...}`), and its
-                                       // `mount super.raw.*` would resolve to core.sys.raw
-                                       // through resolve_super_path (#163).  Whether this
-                                       // works end-to-end without the explicit ALWAYS_INCLUDE
-                                       // entry is tracked in #164 — the cross-process
-                                       // experiment is blocked by an unrelated build
-                                       // breakage in verum_verification.
+            // NOTE: core.sys.raw used to be hardcoded here as a workaround
+            // for the closure walker's inability to resolve `super.*`
+            // mount paths.  With #163's resolve_super_path landing AND
+            // #164's PathSegment::Super extraction fix, `mount super.raw.*`
+            // from core.sys.time_ops now resolves correctly to core.sys.raw
+            // and the transitive-closure pass pulls it in automatically.
+            // Removed unconditionally; lenient-skip baselines pass.
             "core.sys.darwin.libsystem",
             "core.sys.darwin.thread",
             // Platform TLS / context-slot providers. `core/sys/common.vr`'s
@@ -11313,12 +11309,24 @@ impl<'s> CompilationPipeline<'s> {
                         MountTreeKind::Glob(p) => p,
                         MountTreeKind::Nested { prefix, .. } => prefix,
                     };
+                    // Extract the dotted form of the mount path,
+                    // preserving `super` segments so resolve_super_path
+                    // can process them.  `PathSegment::Super` is a
+                    // distinct AST variant from `PathSegment::Name` —
+                    // filtering it out before resolution was the bug
+                    // that #163's super.* fix nominally addressed but
+                    // did not yet exercise (the resolver received a
+                    // pre-stripped path with `super` already gone).
+                    // See #164.
                     let raw_path: String = path
                         .segments
                         .iter()
                         .filter_map(|seg| match seg {
                             verum_ast::ty::PathSegment::Name(ident) => {
                                 Some(ident.name.as_str().to_string())
+                            }
+                            verum_ast::ty::PathSegment::Super => {
+                                Some("super".to_string())
                             }
                             _ => None,
                         })
