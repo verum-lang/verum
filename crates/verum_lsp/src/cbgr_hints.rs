@@ -782,24 +782,6 @@ fn classify_by_enclosing_bracket(bytes: &[u8], start: usize) -> RefContext {
     RefContext::ValueExpression
 }
 
-/// Convert Verum position to LSP position
-#[allow(dead_code)] // Reserved for future CBGR hint positioning
-fn verum_pos_to_lsp(line: u32, col: u32) -> Position {
-    Position {
-        line,
-        character: col,
-    }
-}
-
-/// Convert Verum range to LSP range
-#[allow(dead_code)] // Reserved for future CBGR hint positioning
-fn verum_range_to_lsp(start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> Range {
-    Range {
-        start: verum_pos_to_lsp(start_line, start_col),
-        end: verum_pos_to_lsp(end_line, end_col),
-    }
-}
-
 // =============================================================================
 // Tests
 // =============================================================================
@@ -807,6 +789,20 @@ fn verum_range_to_lsp(start_line: u32, start_col: u32, end_line: u32, end_col: u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn verum_pos_to_lsp(line: u32, col: u32) -> Position {
+        Position {
+            line,
+            character: col,
+        }
+    }
+
+    fn verum_range_to_lsp(start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> Range {
+        Range {
+            start: verum_pos_to_lsp(start_line, start_col),
+            end: verum_pos_to_lsp(end_line, end_col),
+        }
+    }
 
     #[test]
     fn test_hint_provider_creation() {

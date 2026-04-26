@@ -713,13 +713,6 @@ impl ContextValidationPhase {
                         .help("Remove duplicate 'provide' statement")
                         .add_note("Each context can only be provided once per scope");
                 }
-                ContextErrorKind::TypeMismatch => {
-                    diag_builder = diag_builder
-                        .help("Ensure the provided value implements the context interface")
-                        .add_note(
-                            "The type of the provided value must match the context declaration",
-                        );
-                }
                 ContextErrorKind::ExcludedContextViolation => {
                     diag_builder = diag_builder
                         .help(format!(
@@ -728,13 +721,6 @@ impl ContextValidationPhase {
                         ))
                         .add_note(
                             "This context is explicitly excluded via `using [!Context]` - it cannot be used in the function body",
-                        );
-                }
-                ContextErrorKind::ConflictingRequirements => {
-                    diag_builder = diag_builder
-                        .help("Remove either the positive or negative constraint")
-                        .add_note(
-                            "A context cannot be both required and excluded in the same function signature",
                         );
                 }
                 ContextErrorKind::TransitiveExcludedContextViolation => {
@@ -944,9 +930,6 @@ enum ContextErrorKind {
     UndeclaredContext,
     /// Context accessed before being provided
     UnprovidedContext,
-    /// Context type mismatch (provided value doesn't implement context interface)
-    #[allow(dead_code)] // Reserved for future type checking integration
-    TypeMismatch,
     /// Duplicate context provision
     DuplicateProvision,
     /// Context is explicitly excluded via negative constraint (`!Context`)
@@ -955,9 +938,6 @@ enum ContextErrorKind {
     /// Transitive violation: calling a function that requires an excluded context.
     /// E.g., `fn pure() using [!Database] { helper() }` where `helper` uses `[Database]`.
     TransitiveExcludedContextViolation,
-    /// Same context both required and excluded (conflict)
-    #[allow(dead_code)]  // Reserved for future conflict detection
-    ConflictingRequirements,
 }
 
 impl ContextUsageValidator {

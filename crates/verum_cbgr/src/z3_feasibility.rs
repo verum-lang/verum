@@ -53,7 +53,7 @@
 use crate::analysis::{PathCondition, PathPredicate};
 use verum_common::{Map, Maybe};
 use z3::ast::Bool;
-use z3::{Context, SatResult, Solver};
+use z3::{SatResult, Solver};
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -140,15 +140,11 @@ impl CacheStats {
 /// - Memory: ~40 bytes per cache entry
 #[derive(Debug)]
 pub struct Z3FeasibilityChecker {
-    /// Z3 context (shared across all solver instances)
-    #[allow(dead_code)]
-    context: Context,
     /// Cache mapping predicate hash to feasibility result
     cache: Map<u64, CacheEntry>,
     /// Maximum cache size before LRU eviction
     max_cache_size: usize,
-    /// Timeout for Z3 solver (milliseconds)
-    #[allow(dead_code)]
+    /// Timeout for Z3 solver (milliseconds), applied via Params on each Solver
     timeout_ms: u64,
     /// Cache performance statistics
     stats: CacheStats,
@@ -188,9 +184,7 @@ impl Z3FeasibilityChecker {
     /// ```
     #[must_use]
     pub fn with_config(max_cache_size: usize, timeout_ms: u64) -> Self {
-        // Z3 uses thread-local context, just get it
         Self {
-            context: Context::thread_local(),
             cache: Map::new(),
             max_cache_size,
             timeout_ms,
@@ -315,8 +309,11 @@ impl Z3FeasibilityChecker {
             }
         };
 
-        // Create solver and check
+        // Create solver and check (with configured timeout)
         let solver = Solver::new();
+        let mut params = z3::Params::new();
+        params.set_u32("timeout", self.timeout_ms as u32);
+        solver.set_params(&params);
         solver.assert(&z3_predicate);
 
         match solver.check() {

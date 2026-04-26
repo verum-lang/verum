@@ -37,6 +37,12 @@ fn main() {
     // Example 5: Matrix with compile-time dimensions
     // Matrix<T, Rows: meta usize, Cols: meta usize>
     example_matrix_type();
+
+    // Compile-time safety benefits showcase
+    example_compile_time_safety();
+
+    // Meta vs const generics comparison
+    example_meta_vs_const();
 }
 
 fn example_simple_meta_param() {
@@ -133,7 +139,6 @@ fn example_matrix_type() {
 
 // Additional examples showing meta parameter benefits
 
-#[allow(dead_code)]
 fn example_compile_time_safety() {
     println!("=== Compile-time Safety Benefits ===\n");
 
@@ -153,7 +158,6 @@ fn example_compile_time_safety() {
     println!();
 }
 
-#[allow(dead_code)]
 fn example_meta_vs_const() {
     println!("=== Meta vs Const Generics ===\n");
 

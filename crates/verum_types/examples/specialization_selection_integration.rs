@@ -42,6 +42,18 @@ fn main() {
     println!("-------------------------------");
     example_performance_metrics();
     println!();
+
+    // Example 5: TypeChecker integration walk-through
+    println!("Example 5: TypeChecker Integration");
+    println!("-----------------------------------");
+    example_type_checker_integration();
+    println!();
+
+    // Example 6: Coherence checking
+    println!("Example 6: Coherence Checking");
+    println!("------------------------------");
+    example_coherence_checking();
+    println!();
 }
 
 /// Example 1: Basic specialization selection
@@ -225,7 +237,6 @@ fn example_performance_metrics() {
 ///
 /// This demonstrates how the SpecializationSelector would be used within
 /// the TypeChecker during method resolution.
-#[allow(dead_code)]
 fn example_type_checker_integration() {
     // This is conceptual - shows how it integrates
 
@@ -272,7 +283,6 @@ fn example_type_checker_integration() {
 }
 
 /// Example 6: Coherence checking
-#[allow(dead_code)]
 fn example_coherence_checking() {
     println!("Coherence Checking:");
     println!();
