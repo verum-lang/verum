@@ -188,13 +188,17 @@ implement Text {
     }
 
     /// Create text with a given capacity.
+    ///
+    /// Panics on allocation failure with a message that carries the
+    /// requested-bytes count. For a fallible counterpart see
+    /// `try_with_capacity`.
     public fn with_capacity(cap: Int) -> Text {
         if cap <= 0 {
             Text.new()
         } else {
             let ptr = unsafe { alloc(cap + 1, 1) };  // +1 for null terminator
             if is_null(ptr) {
-                panic("Out of memory");
+                panic(f"Text.with_capacity: allocator returned null for {cap + 1} bytes");
             }
             Text {
                 ptr: ptr,
@@ -202,6 +206,27 @@ implement Text {
                 cap: cap,
             }
         }
+    }
+
+    /// Fallible counterpart to `with_capacity`.
+    ///
+    /// Returns `Err(AllocError)` on allocation failure rather than
+    /// panicking. Routes through `try_alloc` so all allocator-side
+    /// errors (OutOfMemory, InvalidSize, InvalidAlignment, etc.)
+    /// propagate as typed variants.
+    public fn try_with_capacity(cap: Int) -> Result<Text, AllocError> {
+        if cap <= 0 {
+            return Ok(Text.new());
+        }
+        let raw = try_alloc(cap + 1, 1)?;
+        if is_null(raw) {
+            return Err(AllocError::OutOfMemory { requested: cap + 1 });
+        }
+        Ok(Text {
+            ptr: raw,
+            len: 0,
+            cap: cap,
+        })
     }
 
     /// Create text from a byte slice (must be valid UTF-8).
@@ -224,7 +249,7 @@ implement Text {
         }
         let ptr = alloc(len + 1, 1);  // +1 for null terminator
         if is_null(ptr) {
-            panic("Out of memory");
+            panic(f"Text.from_utf8_unchecked: allocator returned null for {len + 1} bytes");
         }
         memcpy(ptr, bytes.as_ptr(), len);
         // Null-terminate via `memset` (single-byte write): `ptr_write<Byte>`
@@ -311,12 +336,24 @@ implement Text {
     // =========================================================================
 
     /// Get character at byte index.
+    ///
+    /// Returns `None` if the byte index is out of range OR points
+    /// into the middle of a multi-byte UTF-8 sequence (continuation
+    /// byte). Without the boundary check, `char_at(1)` on `"é"`
+    /// (bytes `[0xC3, 0xA9]`) would decode a UTF-8 continuation byte
+    /// in isolation, yielding a garbage Char. Callers that want to
+    /// iterate every code point should use `chars()` instead.
     public fn char_at(&self, byte_idx: Int) -> Maybe<Char> {
         let bytes = self.as_bytes();
         if byte_idx < 0 || byte_idx >= bytes.len() {
             return None;
         }
-        // Decode UTF-8 character
+        // Reject continuation bytes (10xxxxxx). A leading byte of a
+        // multi-byte sequence (110x..., 1110..., 11110...) or an
+        // ASCII byte (0xxx...) IS a valid char boundary.
+        if !is_utf8_char_boundary(bytes[byte_idx]) {
+            return None;
+        }
         Some(intrinsic_utf8_decode_char(bytes, byte_idx))
     }
 
@@ -656,6 +693,9 @@ implement Text {
     }
 
     /// Grow storage to fit at least one more byte.
+    ///
+    /// Panics on allocation failure. For a fallible counterpart see
+    /// `try_grow`.
     fn grow(&mut self) {
         let new_cap = if self.cap == 0 {
             16  // Initial allocation
@@ -664,7 +704,7 @@ implement Text {
         };
         let new_ptr = unsafe { alloc(new_cap + 1, 1) };  // +1 for null terminator
         if is_null(new_ptr) {
-            panic("Out of memory");
+            panic(f"Text.grow: allocator returned null for {new_cap + 1} bytes (old_cap={self.cap})");
         }
         if self.len > 0 && !is_null(self.ptr) {
             unsafe {
