@@ -141,10 +141,19 @@ fn push(dst: &mut Text, s: &Text) {
 fn push_int(dst: &mut Text, n: Int) {
     if n == 0 { dst.push_byte(48 as Byte); return; }
     let mut digits: List<Byte> = List.new();
-    let mut x: Int = if n < 0 { -n } else { n };
-    while x > 0 {
-        digits.push(((x % 10) as Byte) + (48 as Byte));
-        x = x / 10;
+    // UInt64 magnitude — exact for every Int including Int.MIN.
+    // (Naïve `if n < 0 { -n }` overflows back to Int.MIN; the
+    // `while x > 0` loop then skips entirely, silently emitting
+    // "-" with no digits. Same bug-class as the canonical
+    // core/text/format::int_to_string fix.)
+    let mut mag: UInt64 = if n < 0 {
+        (((!n) as UInt64) + (1 as UInt64))
+    } else {
+        n as UInt64
+    };
+    while mag > (0 as UInt64) {
+        digits.push(((mag % (10 as UInt64)) as Byte) + (48 as Byte));
+        mag = mag / (10 as UInt64);
     }
     if n < 0 { dst.push_byte(45 as Byte); }
     let mut i: Int = digits.len() - 1;

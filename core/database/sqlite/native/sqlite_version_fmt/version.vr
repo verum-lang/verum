@@ -28,15 +28,19 @@ public fn from_libversion_number(n: Int64) -> SqliteVersion {
     new(major, minor, patch)
 }
 
-// Emit small non-negative integer as Text.
+// Emit integer as Text.  UInt64 magnitude — Int.MIN-safe.
 fn int_to_text(n: Int) -> Text {
     if n == 0 { return "0".clone(); }
-    let mut v: Int = if n < 0 { -n } else { n };
+    let mut mag: UInt64 = if n < 0 {
+        (((!n) as UInt64) + (1 as UInt64))
+    } else {
+        n as UInt64
+    };
     let mut digits = "".clone();
-    while v > 0 {
-        let d = (v % 10) as u8;
+    while mag > (0 as UInt64) {
+        let d = (mag % (10 as UInt64)) as u8;
         digits.push_byte((d + 0x30 as u8) as u8);
-        v = v / 10;
+        mag = mag / (10 as UInt64);
     }
     let bs = digits.as_bytes();
     let mut out = "".clone();

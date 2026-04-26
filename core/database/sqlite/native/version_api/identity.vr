@@ -37,18 +37,25 @@ public fn version_text(v: &LibVersion) -> Text {
     out
 }
 
-fn push_int(dst: &mut Text, mut n: Int) {
-    if n < 0 { dst.push_byte(0x2D as u8); n = 0 - n; }
+fn push_int(dst: &mut Text, n: Int) {
     if n == 0 { dst.push_byte(0x30 as u8); return; }
-    let mut digits: Int = 0;
-    let mut x: Int = n;
-    while x > 0 { digits = digits + 1; x = x / 10; }
-    let mut buf: Int = 1;
-    let mut d: Int = 1;
-    while d < digits { buf = buf * 10; d = d + 1; }
-    while buf > 0 {
-        let c = (n / buf) - ((n / (buf * 10)) * 10);
-        dst.push_byte((0x30 + c) as u8);
-        buf = buf / 10;
+    if n < 0 { dst.push_byte(0x2D as u8); }
+    // UInt64 magnitude — Int.MIN-safe.  The previous version
+    // used `n = 0 - n` which overflows for Int.MIN, then did
+    // iterative-position division on the still-negative value
+    // producing garbage.  Rewritten to the canonical
+    // build-digits-then-emit pattern; share the structure with
+    // every other Int formatter in core/.
+    let mut mag: UInt64 = if n < 0 {
+        (((!n) as UInt64) + (1 as UInt64))
+    } else {
+        n as UInt64
+    };
+    let mut digits: List<Byte> = List.new();
+    while mag > (0 as UInt64) {
+        digits.push(((mag % (10 as UInt64)) + (0x30 as UInt64)) as u8);
+        mag = mag / (10 as UInt64);
     }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
 }
