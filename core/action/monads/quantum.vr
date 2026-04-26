@@ -1,5 +1,5 @@
 // =============================================================================
-// core.action.monads.quantum — α_quantum effect class (VFE §18.4)
+// core.action.monads.quantum — α_quantum effect class (VVA §18.4)
 // =============================================================================
 //
 // `Quantum<A>` — the quantum-state-and-measurement monad realising

@@ -1,5 +1,5 @@
 // =============================================================================
-// core.theory_interop.congruence_closure — Nieuwenhuis-Oliveras (VFE-2 V1)
+// core.theory_interop.congruence_closure — Nieuwenhuis-Oliveras (VVA-2 V1)
 // =============================================================================
 //
 // Algorithmic core of the canonicalize pipeline shipped at
@@ -16,7 +16,7 @@
 //   • Knuth-Bendix completion is **NOT** used: it does not always
 //     terminate even for strongly-typed first-order axiom sets.
 //     Verum's pipeline rejects the KB approach explicitly per
-//     VFE §2.2 and routes through Nieuwenhuis-Oliveras.
+//     VVA §2.2 and routes through Nieuwenhuis-Oliveras.
 //
 //   • Subsumption-detection (the second-order step) is built on top
 //     of the closure via the standard "find all merges" callback.

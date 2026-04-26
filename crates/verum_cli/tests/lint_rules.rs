@@ -487,3 +487,155 @@ fn issue_line_and_column_are_one_indexed() {
     assert!(issue.line >= 1, "line should be 1-indexed");
     assert!(issue.column >= 1, "column should be 1-indexed");
 }
+
+// ============================================================
+// Lex-mask false-positive contract — every text-scan rule has
+// to ignore matches that lie inside string literals or
+// comments. These tests pin that contract so a future regression
+// (e.g. someone reverting back to raw `info.lines` scans) shows
+// up at PR time.
+// ============================================================
+
+#[test]
+fn deprecated_syntax_silent_on_token_inside_string_literal() {
+    // `Box::new` appears as program code on line 2 (genuine
+    // Rust-ism) and as string data on line 3 (must NOT fire).
+    let src = "fn main() {\n    let _x = Box::new(5);\n    let msg = \"explain Box::new()\";\n}\n";
+    let issues = run(src);
+    let firings: Vec<usize> = issues
+        .iter()
+        .filter(|i| i.rule == "deprecated-syntax" && i.message.contains("Box::new"))
+        .map(|i| i.line)
+        .collect();
+    assert!(
+        firings.contains(&2),
+        "deprecated-syntax should fire on line 2 (real code), got: {firings:?}"
+    );
+    assert!(
+        !firings.contains(&3),
+        "deprecated-syntax must NOT fire on line 3 (string literal), got: {firings:?}"
+    );
+}
+
+#[test]
+fn deprecated_syntax_silent_on_token_inside_block_comment() {
+    let src = "fn main() {\n    /* historical: panic!(\"old\") was here */\n    let _ = 1;\n}\n";
+    silent("deprecated-syntax", src);
+}
+
+#[test]
+fn deprecated_syntax_silent_on_token_inside_line_comment() {
+    let src = "fn main() {\n    // we used to call panic!()\n    let _ = 1;\n}\n";
+    silent("deprecated-syntax", src);
+}
+
+#[test]
+fn todo_in_code_silent_on_string_literal_marker() {
+    // The TODO appears in a string, never in a comment — must be silent.
+    let src = "fn main() { let s = \"TODO: literal data\"; let _ = s; }\n";
+    silent("todo-in-code", src);
+}
+
+#[test]
+fn todo_in_code_fires_on_inline_trailing_comment() {
+    let src = "fn main() {\n    let _ = 1; // TODO: implement\n}\n";
+    fires("todo-in-code", src);
+}
+
+#[test]
+fn unbounded_channel_silent_on_string_literal_match() {
+    // Channel.new() inside a string is data, not a call — must be silent.
+    let src = "fn main() { let doc = \"call Channel.new() to start\"; let _ = doc; }\n";
+    silent("unbounded-channel", src);
+}
+
+#[test]
+fn missing_timeout_silent_on_match_inside_string() {
+    // `.recv()` substring lives inside a doc-string — silent.
+    let src = "fn main() { let s = \"call .recv() without timeout\"; let _ = s; }\n";
+    silent("missing-timeout", src);
+}
+
+#[test]
+fn raw_string_contents_are_inert() {
+    // r#"…"# enclosing Rust-ism keywords must not fire any rule.
+    let src = "fn main() { let s = r#\"struct Foo { x: Vec<i32> }\"#; let _ = s; }\n";
+    silent("deprecated-syntax", src);
+}
+
+#[test]
+fn nested_block_comment_with_keyword_is_inert() {
+    // Nested /* /* */ */ comment containing struct keyword.
+    let src = "fn main() {\n    /* outer /* struct Foo */ */\n    let _ = 1;\n}\n";
+    silent("deprecated-syntax", src);
+}
+
+#[test]
+fn unused_import_silent_when_name_appears_only_in_string() {
+    let src = "mount foo.{Bar};\nfn main() { let s = \"Bar is here\"; let _ = s; }\n";
+    fires("unused-import", src);
+}
+
+#[test]
+fn unused_import_silent_when_name_used_in_code() {
+    let src = "mount foo.{Bar};\nfn main() { let b: Bar = Bar(); let _ = b; }\n";
+    silent("unused-import", src);
+}
+
+#[test]
+fn unnecessary_heap_silent_on_string_literal_match() {
+    let src = "fn main() { let s = \"Heap(5)\"; let _ = s; }\n";
+    silent("unnecessary-heap", src);
+}
+
+#[test]
+fn cbgr_hotspot_skips_string_loop_marker() {
+    // `for ` inside a string is not a real loop. Without the mask,
+    // the rule's brace counter would derail.
+    let src = "fn main() { let s = \"for x in []\"; let _ = s; }\n";
+    silent("cbgr-hotspot", src);
+}
+
+#[test]
+fn missing_error_context_silent_when_question_in_string() {
+    let src = "fn main() { let s = \"value? maybe\"; let _ = s; }\n";
+    silent("missing-error-context", src);
+}
+
+// ============================================================
+// parse-error meta-rule — broken files emit a structured
+// diagnostic so the user knows the AST half was skipped.
+// ============================================================
+
+#[test]
+fn parse_error_fires_on_unbalanced_braces() {
+    // Truncated function body — fast parser surfaces a missing
+    // closing brace.
+    let src = "fn main() { let x = 1; \n";
+    fires("parse-error", src);
+}
+
+#[test]
+fn parse_error_silent_on_well_formed_file() {
+    let src = "fn main() {\n    let _ = 1;\n}\n";
+    silent("parse-error", src);
+}
+
+#[test]
+fn lint_does_not_panic_on_multibyte_chars_in_comments() {
+    // Em-dash, French quotes, CJK, math symbols — every char is
+    // multi-byte UTF-8 in a comment span. Earlier the masked-view
+    // builder preserved continuation bytes verbatim while blanking
+    // their leaders, producing invalid UTF-8 and panicking.
+    let src = "fn main() {\n    // unicode — «test» 中文 ∀x. x\n    let _ = 1;\n}\n";
+    let issues = run(src);
+    // No assertion on rule firing; the contract is "doesn't panic".
+    let _ = issues;
+}
+
+#[test]
+fn lint_does_not_panic_on_multibyte_chars_in_strings() {
+    let src = "fn main() { let s = \"em-dash — and ∀\"; let _ = s; }\n";
+    let issues = run(src);
+    let _ = issues;
+}

@@ -36,6 +36,9 @@ fn make_fixture(name: &str) -> PathBuf {
 #[test]
 fn watch_responds_to_file_change() {
     let dir = make_fixture("watch_smoke");
+    // The watch banners go through `ui::step` → stderr (Cargo
+    // convention). Lint diagnostics go to stdout. We need both, so
+    // we pipe each stream and tee the lines into one channel.
     let mut child = Command::new(binary())
         .args(["lint", "--watch", "--threads", "2"])
         .current_dir(&dir)
@@ -45,19 +48,25 @@ fn watch_responds_to_file_change() {
         .expect("spawn verum lint --watch");
 
     let stdout = child.stdout.take().expect("piped stdout");
-    let reader = BufReader::new(stdout);
+    let stderr = child.stderr.take().expect("piped stderr");
 
-    // Channel for stdout lines.
     let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let tx_err = tx.clone();
     std::thread::spawn(move || {
-        for line in reader.lines().map_while(|r| r.ok()) {
+        for line in BufReader::new(stdout).lines().map_while(|r| r.ok()) {
             let _ = tx.send(line);
+        }
+    });
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(|r| r.ok()) {
+            let _ = tx_err.send(line);
         }
     });
 
     // Wait until we see the "Watching for changes" banner — that
-    // signals the initial scan has finished.
-    let deadline = Instant::now() + Duration::from_secs(15);
+    // signals the initial scan has finished and the watcher is set
+    // up. Allow 30s — initial scan compiles a fresh fixture.
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut saw_initial = false;
     while Instant::now() < deadline && !saw_initial {
         if let Ok(line) = rx.recv_timeout(Duration::from_millis(500)) {
@@ -71,19 +80,19 @@ fn watch_responds_to_file_change() {
         "watcher should print 'Watching for changes' after initial scan"
     );
 
-    // Modify the file. Wait briefly so notify reliably picks up
-    // the write event on macOS (which uses FSEvents under the hood).
-    std::thread::sleep(Duration::from_millis(200));
+    // Modify the file. The 500ms wait gives the FS-events backend
+    // (FSEvents on macOS, inotify on Linux) time to register before
+    // we touch the file — these backends drop pre-registration writes.
+    std::thread::sleep(Duration::from_millis(500));
     std::fs::write(
         dir.join("src").join("main.vr"),
         "fn main() {\n    let x = Box::new(5);\n}\n",
     )
     .expect("rewrite fixture");
 
-    // Watch for the next "change detected" banner. Allow up to 5s
-    // for debounce (300ms) + lint (~milliseconds) + some FS-event
-    // latency.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Watch for the next "change detected" banner. 10s budget for
+    // debounce (300ms) + relint (compile cost) + FSEvents latency.
+    let deadline = Instant::now() + Duration::from_secs(10);
     let mut saw_rerun = false;
     while Instant::now() < deadline && !saw_rerun {
         if let Ok(line) = rx.recv_timeout(Duration::from_millis(500)) {

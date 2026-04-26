@@ -10,7 +10,7 @@
 //! # Why this is its own pass
 //!
 //! Kernel rules are the trusted base of the verification ladder
-//! (VUVA §§9.2, 12.4). Routing them through a dedicated pass gives
+//! (VVA §§9.2, 12.4). Routing them through a dedicated pass gives
 //! three structural advantages:
 //!
 //!   1. *Defense-in-depth* — `SmtVerificationPass::verify_function`
@@ -44,7 +44,7 @@ use super::{VerificationError, VerificationPass, VerificationResult};
 pub struct KernelRecheckPass {
     /// Per-function rejection counts (recorded for diagnostics).
     rejections: List<Text>,
-    /// V8 (#211, B12) — VFE governance policy. Default is
+    /// V8 (#211, B12) — VVA governance policy. Default is
     /// [`ExtensionPolicy::AllRulesActive`], matching the pre-V8
     /// always-on behaviour. The opt-in / opt-out tiers are
     /// configurable via [`Self::with_policy`].
@@ -60,9 +60,9 @@ impl KernelRecheckPass {
         }
     }
 
-    /// V8 (#211, B12) — configure the VFE governance policy
+    /// V8 (#211, B12) — configure the VVA governance policy
     /// applied during this pass. The pass currently only gates
-    /// VFE-7 (`vfe_7` = K-Refine-omega). When the policy reports
+    /// VVA-7 (`vfe_7` = K-Refine-omega). When the policy reports
     /// `vfe_7` as inactive for the surrounding scope, this pass
     /// is a no-op for that scope (returns success without
     /// running the kernel-recheck walker). Pre-V8 always ran;
@@ -73,7 +73,7 @@ impl KernelRecheckPass {
     }
 
     /// V8 (#211, B12) — read-only accessor for the configured
-    /// VFE governance policy.
+    /// VVA governance policy.
     pub fn policy(&self) -> crate::extension_policy::ExtensionPolicy {
         self.policy
     }
@@ -201,7 +201,7 @@ impl VerificationPass for KernelRecheckPass {
 
         // V8 (#211, B12) — read the module's `@require_extension`
         // / `@disable_extension` set, then ask the configured
-        // policy whether VFE-7 (K-Refine-omega) is active. When
+        // policy whether VVA-7 (K-Refine-omega) is active. When
         // inactive, we skip the recheck walker entirely — no
         // outcomes accumulated, no rejection list populated.
         // The default policy (`AllRulesActive`) always returns

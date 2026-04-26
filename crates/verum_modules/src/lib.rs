@@ -200,7 +200,7 @@ pub struct ModuleInfo {
     /// Child modules inherit parent profile restrictions but can be more restrictive.
     /// Research is most permissive, Application is most restrictive (default).
     pub profile: ModuleProfile,
-    /// VUVA #145 / MOD-MED-1 — header-validation warnings produced
+    /// VVA #145 / MOD-MED-1 — header-validation warnings produced
     /// at parse time. Carries dangling forward-decls and
     /// inline-vs-filesystem overlaps. Drained by the pipeline at
     /// load time and emitted as diagnostics; never blocks module

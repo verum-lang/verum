@@ -84,10 +84,10 @@ public mount core.math.frameworks.baez_dolan;
 public mount core.math.frameworks.owl2_fs;
 
 // Meta-classifier package (L5+ canonical-primitive metaclassification)
-// — defines the (Framework, ν, τ) coordinate space of VUVA §10.4 in
+// — defines the (Framework, ν, τ) coordinate space of VVA §10.4 in
 // which the six coordinate-point frameworks above live. See
 // `core.math.frameworks.diakrisis` for the five foundational axioms
-// and VUVA §10.4.1 for the architectural relationship.
+// and VVA §10.4.1 for the architectural relationship.
 public mount core.math.frameworks.diakrisis;
 
 // Meta-classifier extension packages — carry further structural
@@ -103,15 +103,15 @@ public mount core.math.frameworks.diakrisis_acts;
 // (V_0 / V_1 / S^1_2 / V_NP / V_PH / IΔ_0) at the ν^weak ∈ [0, ω-1]
 // stratum. Each has ν^weak < ω (strictly below the full-arithmetic
 // stratum); the discrete jump at the weak/full boundary is the
-// content of Theorem 137.T. Used by VFE-8 @verify(complexity_typed)
+// content of Theorem 137.T. Used by VVA-8 @verify(complexity_typed)
 // strategy for polynomial-time verification of bounded-arithmetic
 // programs.
 public mount core.math.frameworks.bounded_arithmetic;
 
-// VFE §18.7 — foundation-marketplace runtime registry. Self-describing
+// VVA §18.7 — foundation-marketplace runtime registry. Self-describing
 // catalogue of every framework with its (Fw, ν, τ) coordinate +
 // classification tier (Standard / VerifiedExtension / Experimental).
-// Exposes registry_meta_classifier_unique invariant (per VUVA §10.4.1)
+// Exposes registry_meta_classifier_unique invariant (per VVA §10.4.1)
 // + sample population for the canonical Standard six-pack + meta-
 // classifier + bounded-arithmetic family. CLI wiring (`verum
 // frameworks list / show / validate`) is V1 work.

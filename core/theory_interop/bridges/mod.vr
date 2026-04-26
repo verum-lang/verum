@@ -8,15 +8,15 @@
 // of every operator from the source framework in the target framework.
 //
 // Bridges enable downstream `core.theory_interop.translate(source,
-// target, partial_map)` invocations (VUVA §10.2 / §21.7) to compose
+// target, partial_map)` invocations (VVA §10.2 / §21.7) to compose
 // chains of @framework_translate axioms without re-deriving the
 // pointwise mapping from scratch.
 //
 // V1 catalogue (this commit):
-//   owl2_to_htt        — owl2_fs → lurie_htt (24 markers, VUVA C7b)
+//   owl2_to_htt        — owl2_fs → lurie_htt (24 markers, VVA C7b)
 //   oc_dc_bridge       — Articulation ↔ Enactment round-trip (Theorem 16.10)
 //
-// V2 additions (tracked in VUVA §16.6 F6):
+// V2 additions (tracked in VVA §16.6 F6):
 //   owl2_to_baez_dolan      — n-categorical embedding
 //   owl2_to_schreiber_dcct  — cohesive ∞-topos embedding
 //   owl2_to_connes          — operator-algebraic embedding

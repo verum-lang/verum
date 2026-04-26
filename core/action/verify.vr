@@ -1,5 +1,5 @@
 // =============================================================================
-// core.action.verify — ε-audit, gauge-consistency (VUVA §11.2, §11.4)
+// core.action.verify — ε-audit, gauge-consistency (VVA §11.2, §11.4)
 // =============================================================================
 
 public type AuditVerdict is

@@ -178,7 +178,7 @@ pub enum CoreTerm {
         framework: FrameworkId,
     },
 
-    /// VFE-1 V0 — `EpsilonOf(α)` represents the canonical enactment
+    /// VVA-1 V0 — `EpsilonOf(α)` represents the canonical enactment
     /// image of an articulation under the M ⊣ A biadjunction (the
     /// activation modality applied at the articulation level). The
     /// kernel uses this constructor to track the natural-equivalence
@@ -190,23 +190,23 @@ pub enum CoreTerm {
     /// wired in.
     EpsilonOf(Heap<CoreTerm>),
 
-    /// VFE-1 V0 — `AlphaOf(ε)` represents the canonical articulation
+    /// VVA-1 V0 — `AlphaOf(ε)` represents the canonical articulation
     /// image of an enactment (the inverse direction of the M ⊣ A
     /// biadjunction). Together with `EpsilonOf` this enables kernel-
     /// level reasoning about the ε ↔ α duality.
     AlphaOf(Heap<CoreTerm>),
 
-    /// VFE-7 V1 — `ModalBox(φ)` represents `□φ` (necessity in the
+    /// VVA-7 V1 — `ModalBox(φ)` represents `□φ` (necessity in the
     /// underlying modal logic). md^ω(□φ) = md^ω(φ) + 1 per
     /// Definition 136.D1. The K-Refine-omega rule uses the
     /// resulting ordinal to gate refinement-type formation.
     ModalBox(Heap<CoreTerm>),
 
-    /// VFE-7 V1 — `ModalDiamond(φ)` represents `◇φ` (possibility).
+    /// VVA-7 V1 — `ModalDiamond(φ)` represents `◇φ` (possibility).
     /// md^ω(◇φ) = md^ω(φ) + 1 per Definition 136.D1.
     ModalDiamond(Heap<CoreTerm>),
 
-    /// VFE-7 V1 — `ModalBigAnd(P_0, ..., P_κ)` represents the
+    /// VVA-7 V1 — `ModalBigAnd(P_0, ..., P_κ)` represents the
     /// transfinite conjunction `⋀_{i<κ} P_i`. md^ω of the big-and
     /// is the *supremum* of the components' md^ω-ranks, per
     /// Definition 136.D1 + Lemma 136.L0 well-founded ordinal

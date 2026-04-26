@@ -73,7 +73,7 @@ fn assert_parses_decl(source: &str) {
 
 #[test]
 fn test_sigma_type_simple_positive_int() {
-    // Per VUVA §5 the sigma surface form parses to `TypeKind::Refined`
+    // Per VVA §5 the sigma surface form parses to `TypeKind::Refined`
     // with `predicate.binding = Some(name)`.
     let ty = parse_type("x: Int where x > 0").unwrap();
     match ty.kind {
@@ -337,7 +337,7 @@ fn test_sigma_type_shows_explicit_binding() {
 
 #[test]
 fn test_all_three_styles_parse_to_refined() {
-    // Per VUVA §5 the three refinement forms collapse onto `TypeKind::Refined`.
+    // Per VVA §5 the three refinement forms collapse onto `TypeKind::Refined`.
     let inline = parse_type("Int{> 0}").unwrap();
     let lambda = parse_type("Int where |x| x > 0").unwrap();
     let sigma = parse_type("x: Int where x > 0").unwrap();

@@ -1,6 +1,6 @@
-//! K-Pos strict-positivity check integration tests (VUVA §7.3).
+//! K-Pos strict-positivity check integration tests (VVA §7.3).
 //!
-//! Per VUVA §7.3: an inductive type `T` is well-formed only when every
+//! Per VVA §7.3: an inductive type `T` is well-formed only when every
 //! recursive occurrence of `T` in any constructor's argument types
 //! appears strictly positively. Berardi 1998 establishes that
 //! admitting non-positive recursion in a system with even minimal

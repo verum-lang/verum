@@ -1,12 +1,12 @@
 // =============================================================================
-// core.action — the Actic dual to core.math (VUVA §11.2)
+// core.action — the Actic dual to core.math (VVA §11.2)
 // =============================================================================
 //
 // DC-side stdlib (dependency-centric enactments) — mirror of core.math
 // on the object-centric side. Per Diakrisis 108.T (AC/OC Morita-duality),
 // every articulation has a canonical enactment. This module exposes
 // the DC layer as a first-class stdlib, the headline differentiator of
-// Verum per VUVA §2.6.
+// Verum per VVA §2.6.
 //
 // Sub-packages:
 //
@@ -33,13 +33,13 @@
 //                              + cut-elimination + orthogonality
 //
 //   core.action.monads       — concrete strong-monad implementations
-//                              per VFE-9 V1: Pure, Reader, Writer,
+//                              per VVA-9 V1: Pure, Reader, Writer,
 //                              State (commutative-vs-non-commutative
 //                              demo set; List / Probability /
 //                              Exception / Io follow in V1.5)
 //
 //   core.action.ludics_lazy  — cofix-based lazy ludics designs per
-//                              VFE-10 V1: LazyDesign + bounded
+//                              VVA-10 V1: LazyDesign + bounded
 //                              cut-elim + productivity-gated
 //                              orthogonality (UNKNOWN third verdict
 //                              when depth-bound exceeded)

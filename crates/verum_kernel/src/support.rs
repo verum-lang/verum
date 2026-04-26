@@ -156,11 +156,11 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
 
         CoreTerm::SmtProof(_) | CoreTerm::Axiom { .. } => term.clone(),
 
-        // VFE-1: substitute commutes with the duality wrappers.
+        // VVA-1: substitute commutes with the duality wrappers.
         CoreTerm::EpsilonOf(t) => CoreTerm::EpsilonOf(Heap::new(substitute(t, name, value))),
         CoreTerm::AlphaOf(t)   => CoreTerm::AlphaOf(Heap::new(substitute(t, name, value))),
 
-        // VFE-7: substitute commutes with the modal operators.
+        // VVA-7: substitute commutes with the modal operators.
         CoreTerm::ModalBox(phi) => CoreTerm::ModalBox(Heap::new(substitute(phi, name, value))),
         CoreTerm::ModalDiamond(phi) => CoreTerm::ModalDiamond(Heap::new(substitute(phi, name, value))),
         CoreTerm::ModalBigAnd(args) => {

@@ -1125,7 +1125,7 @@ pub enum VerificationMode {
     /// @verify(fast) — bounded SMT, ν=2, ≤100 ms.
     Fast,
     /// @verify(complexity_typed) — bounded-arithmetic verification
-    /// (VFE-8). Polynomial-time; CI budget ≤30 s. ν<ω.
+    /// (VVA-8). Polynomial-time; CI budget ≤30 s. ν<ω.
     ComplexityTyped,
     /// @verify(formal) — full SMT portfolio, ν=ω, ≤5 s.
     Formal,
@@ -1138,12 +1138,12 @@ pub enum VerificationMode {
     /// @verify(certified) — certificate re-check, ν=ω·2+2.
     Certified,
     /// @verify(coherent_static) — α-cert + symbolic ε-claim
-    /// (VFE-6 weak). Polynomial; ≤60 s. ν=ω·2+3.
+    /// (VVA-6 weak). Polynomial; ≤60 s. ν=ω·2+3.
     CoherentStatic,
     /// @verify(coherent_runtime) — α-cert + runtime ε-monitor
-    /// (VFE-6 hybrid). Trace-bounded; ≤5 min. ν=ω·2+4.
+    /// (VVA-6 hybrid). Trace-bounded; ≤5 min. ν=ω·2+4.
     CoherentRuntime,
-    /// @verify(coherent) — α/ε bidirectional check (VFE-6 strict).
+    /// @verify(coherent) — α/ε bidirectional check (VVA-6 strict).
     /// Single-exponential; ≤30 min. ν=ω·2+5.
     Coherent,
     /// @verify(synthesize) — inverse proof search, ν≤ω·3+1.
@@ -4950,7 +4950,7 @@ impl std::fmt::Display for FrameworkAttr {
 }
 
 // =============================================================================
-// ENACTMENT ATTRIBUTION (VUVA §11.4)
+// ENACTMENT ATTRIBUTION (VVA §11.4)
 //
 // `@enact(epsilon = "ε_prove")` tags a function / theorem / lemma / axiom
 // declaration with a Diakrisis primitive act on the Actic (DC) side of
@@ -4961,7 +4961,7 @@ impl std::fmt::Display for FrameworkAttr {
 //
 // The seven canonical primitives — ε_math, ε_compute, ε_observe,
 // ε_prove, ε_decide, ε_translate, ε_construct — are defined in
-// `core.action.primitives` and documented in VUVA §11.2. User-defined
+// `core.action.primitives` and documented in VVA §11.2. User-defined
 // ε-contracts (composites under `core.action.enactments`) are not
 // supported by this attribute in Phase 5 E3; they are tracked through
 // the per-function enactment inferred from the body.
@@ -4979,7 +4979,7 @@ impl std::fmt::Display for FrameworkAttr {
 
 /// Typed form of `@enact(epsilon = "<primitive>")`.
 ///
-/// The primitive is one of the seven Diakrisis ε-tags (VUVA §11.2).
+/// The primitive is one of the seven Diakrisis ε-tags (VVA §11.2).
 /// Unicode (`ε_prove`) and ASCII (`epsilon_prove`) spellings are both
 /// accepted at parse time; the typed form stores the canonical Unicode
 /// string so `verum audit --epsilon` renders deterministically.
@@ -5208,15 +5208,15 @@ impl std::fmt::Display for EnactAttr {
 }
 
 // =============================================================================
-// @require_extension / @disable_extension — VFE §0.0 governance gate
+// @require_extension / @disable_extension — VVA §0.0 governance gate
 // =============================================================================
 
-/// VFE §0.0 governance — `@require_extension(vfe_N)` opts a module /
-/// declaration into a specific VFE extension's kernel rules /
+/// VVA §0.0 governance — `@require_extension(vfe_N)` opts a module /
+/// declaration into a specific VVA extension's kernel rules /
 /// strategies / typed attributes. Without this annotation the kernel
-/// runs in VUVA-baseline mode for the affected scope.
+/// runs in VVA-baseline mode for the affected scope.
 ///
-/// Per the VFE rollout policy:
+/// Per the VVA rollout policy:
 ///   • Year 0–2: opt-in only (`@require_extension(vfe_N)`).
 ///   • Year 2–4: extensions become default; opt-out via
 ///                `@disable_extension(vfe_N)`.
@@ -5346,12 +5346,12 @@ impl std::fmt::Display for ExtensionRequirementAttr {
 }
 
 // =============================================================================
-// OWL 2 ATTRIBUTION FAMILY (VUVA §21.6 Phase 3 C8 V1)
+// OWL 2 ATTRIBUTION FAMILY (VVA §21.6 Phase 3 C8 V1)
 //
 // Vocabulary-preserving typed attributes for the OWL 2 Direct Semantics
 // surface. Each attribute installs (1) a `CoreTerm::FrameworkAxiom`
 // reference into `core.math.frameworks.owl2_fs.*`, (2) a `@verify(...)`
-// obligation per VUVA §21.3 Table, and (3) a round-trip marker consumed
+// obligation per VVA §21.3 Table, and (3) a round-trip marker consumed
 // by `verum export --to owl2-fs` (B5, deferred).
 //
 // V1 ships four attributes covering the most common OWL 2 surface forms;
@@ -5374,7 +5374,7 @@ impl std::fmt::Display for ExtensionRequirementAttr {
 
 /// Open-world / closed-world semantics flag.  OWL 2 DS is normally
 /// open-world; Verum's typed refinement system is closed-world.
-/// VUVA §21.4 picks CWA as the default and admits OWA only when
+/// VVA §21.4 picks CWA as the default and admits OWA only when
 /// the user explicitly opts in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Owl2Semantics {
@@ -5407,10 +5407,10 @@ impl Owl2Semantics {
 
 /// `@owl2_class` — marks a Verum type as an OWL 2 Class. Optional
 /// `semantics = "OpenWorld" | "ClosedWorld"` argument selects the
-/// semantic regime per VUVA §21.4.
+/// semantic regime per VVA §21.4.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Owl2ClassAttr {
-    /// Optional semantics qualifier; default is ClosedWorld per VUVA §21.4.
+    /// Optional semantics qualifier; default is ClosedWorld per VVA §21.4.
     pub semantics: Maybe<Owl2Semantics>,
     pub span: Span,
 }
@@ -5572,7 +5572,7 @@ impl Spanned for Owl2DisjointWithAttr {
 }
 
 /// One of the seven OWL 2 object-property characteristics from
-/// Shkotin 2019 Table 6 / VUVA §21.6.
+/// Shkotin 2019 Table 6 / VVA §21.6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Owl2Characteristic {
     Transitive,
@@ -5722,7 +5722,7 @@ fn parse_class_name_arg(arg: &crate::expr::Expr) -> Option<Text> {
 // =============================================================================
 //
 // V1+ extension covering the three remaining attributes from the
-// VUVA §21.6 catalogue:
+// VVA §21.6 catalogue:
 //
 //   @owl2_property(domain = ..., range = ...,
 //                  characteristic = [...], inverse_of = ...)
@@ -5815,7 +5815,7 @@ impl Owl2PropertyAttr {
             // Unknown / malformed key — reject the whole attribute.
             return Maybe::None;
         }
-        // Domain and range are MANDATORY per VUVA §21.6 grammar — the
+        // Domain and range are MANDATORY per VVA §21.6 grammar — the
         // attribute is meaningless without them.
         match (&domain, &range) {
             (Maybe::Some(_), Maybe::Some(_)) => Maybe::Some(Self::new(
@@ -5878,7 +5878,7 @@ impl Spanned for Owl2EquivalentClassAttr {
 ///
 /// The NAMED restriction means this constraint applies only to
 /// `NamedIndividual`s, not anonymous individuals — a deliberate OWL 2
-/// design decision per Shkotin §2.3.5; VUVA §21.3 routes HasKey
+/// design decision per Shkotin §2.3.5; VVA §21.3 routes HasKey
 /// obligations to `@verify(proof)` because the DL reasoner case
 /// requires a user-supplied tactic.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6018,7 +6018,7 @@ fn parse_named_characteristic_list_arg(
 }
 
 // =============================================================================
-// QUANTITATIVE TYPE THEORY (Atkey QTT — VUVA §7.6 Phase 3 C5 V1)
+// QUANTITATIVE TYPE THEORY (Atkey QTT — VVA §7.6 Phase 3 C5 V1)
 // =============================================================================
 //
 // Atkey 2018 / McBride 2016 QTT: every binder carries a **quantity**
@@ -6036,7 +6036,7 @@ fn parse_named_characteristic_list_arg(
 //            number of times including zero. This is the standard
 //            functional-programming default.
 //
-// VUVA §7.6 chooses ω as the kernel default — without an explicit
+// VVA §7.6 chooses ω as the kernel default — without an explicit
 // quantity annotation a binder is unrestricted. The opt-in form is
 // `@quantity(0)` / `@quantity(1)` / `@quantity(omega)` per the
 // existing attribute grammar; bare-form `@0` / `@1` / `@ω` is a
@@ -6056,14 +6056,14 @@ fn parse_named_characteristic_list_arg(
 // shipped now; full elaboration of Inductive eliminators continues).
 
 /// Atkey QTT quantity. Default at parse sites without an annotation
-/// is `Many` per VUVA §7.6 (existing code stays unchanged).
+/// is `Many` per VVA §7.6 (existing code stays unchanged).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Quantity {
     /// `@quantity(0)` — erased (compile-time only).
     Zero,
     /// `@quantity(1)` — linear (use exactly once).
     One,
-    /// `@quantity(omega)` — unrestricted (the default; VUVA §7.6).
+    /// `@quantity(omega)` — unrestricted (the default; VVA §7.6).
     Many,
 }
 

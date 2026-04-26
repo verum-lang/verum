@@ -369,7 +369,7 @@ impl ContractVerificationPhase {
                 VS::Certified => stats.functions_strategy_certified += 1,
                 VS::Synthesize => stats.functions_strategy_synthesize += 1,
                 // Newer VerifyStrategy variants added by parallel
-                // VFE/ordinal work (ComplexityTyped, CoherentStatic,
+                // VVA/ordinal work (ComplexityTyped, CoherentStatic,
                 // CoherentRuntime, Coherent, Zero, FiniteOne/Two/Three,
                 // Omega, OmegaPlusOne, OmegaTwice, ...) — count under
                 // Formal until per-strategy metrics are wired through.

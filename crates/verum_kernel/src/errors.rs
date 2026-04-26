@@ -54,7 +54,7 @@ pub enum KernelError {
     #[error("duplicate axiom registration: {0}")]
     DuplicateAxiom(Text),
 
-    /// An inductive declaration violates strict positivity (VUVA §7.3
+    /// An inductive declaration violates strict positivity (VVA §7.3
     /// `K-Pos` rule). The recursive occurrence of the type's own name
     /// inside a constructor's argument appears in a *negative*
     /// position (left of an arrow) — admitting such a definition is
@@ -147,7 +147,7 @@ pub enum KernelError {
 
     /// A refinement type `{x : base | P(x)}` violates Diakrisis T-2f*
     /// depth-stratification: `dp(P) >= dp(base) + 1`. This is the
-    /// Yanofsky paradox-immunity rule imported by VUVA §2.4 as
+    /// Yanofsky paradox-immunity rule imported by VVA §2.4 as
     /// `K-Refine` — comprehension is admissible only when the
     /// predicate's M-iteration depth is strictly less than the
     /// comprehended object's depth.
@@ -171,7 +171,7 @@ pub enum KernelError {
         pred_depth: usize,
     },
 
-    /// VFE-1 V0 — `K-Eps-Mu` naturality witness construction failed.
+    /// VVA-1 V0 — `K-Eps-Mu` naturality witness construction failed.
     /// The kernel attempted to verify the canonical 2-natural
     /// equivalence τ : ε ∘ M ≃ A ∘ ε of Proposition 5.1 / Corollary
     /// 5.10 and could not produce the τ-witness for the supplied
@@ -185,7 +185,7 @@ pub enum KernelError {
         context: Text,
     },
 
-    /// VFE-7 V0 — `K-Refine-omega` modal-depth bound exceeded. A
+    /// VVA-7 V0 — `K-Refine-omega` modal-depth bound exceeded. A
     /// refinement type's predicate has ordinal modal-depth `md^ω`
     /// strictly greater than the base type's depth + 1, violating
     /// the transfinite stratification of Theorem 136.T (T-2f***).
@@ -205,7 +205,7 @@ pub enum KernelError {
         pred_rank: Text,
     },
 
-    /// VFE-3 V1 — `K-Universe-Ascent` rule rejected an invalid
+    /// VVA-3 V1 — `K-Universe-Ascent` rule rejected an invalid
     /// universe transition. Meta-classifier application
     /// `M_stack(α)` must ascend universe levels in the canonical
     /// κ-tower per Theorem 131.T: Truncated → Truncated (Cat-id),
@@ -226,6 +226,40 @@ pub enum KernelError {
         from_tier: Text,
         /// Target universe tier rendered as canonical text.
         to_tier: Text,
+    },
+
+    /// V8 (#227) — `K-Coord-Cite` rule rejected a theorem
+    /// citing an axiom whose `(Fw, ν, τ)` coordinate sits at a
+    /// strictly higher ν tier.
+    ///
+    /// Per VVA §A.Z.5 item 2: a theorem at coordinate
+    /// (Fw, ν, τ) may cite an axiom at coordinate (Fw', ν', τ')
+    /// only when ν' ≤ ν (lex on [`crate::OrdinalDepth`]). Higher-
+    /// tier citations are rejected unless the calling module
+    /// imports the κ-tier-jump extension via
+    /// `@require_extension(vfe_3)` (VVA-3 K-Universe-Ascent).
+    ///
+    /// The diagnostic carries both framework slugs + rendered
+    /// ordinal-depth strings so the user can navigate the
+    /// `(Fw, ν)` mismatch precisely.
+    #[error(
+        "kernel: K-Coord-Cite violation: theorem at \
+         ('{theorem_fw}', ν={theorem_nu}) cites axiom \
+         '{axiom_name}' at ('{axiom_fw}', ν={axiom_nu}) — \
+         axiom's ν exceeds theorem's ν. Use \
+         @require_extension(vfe_3) for κ-tier-jump."
+    )]
+    CoordViolation {
+        /// Name of the cited axiom (registry key).
+        axiom_name: Text,
+        /// Framework of the citing theorem.
+        theorem_fw: Text,
+        /// Rendered ν of the citing theorem.
+        theorem_nu: Text,
+        /// Framework of the cited axiom.
+        axiom_fw: Text,
+        /// Rendered ν of the cited axiom.
+        axiom_nu: Text,
     },
 
     /// V8 — `K-FwAx` body-is-Prop premise violated.

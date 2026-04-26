@@ -39,7 +39,7 @@ fn kernel_rule_v_stage_reflects_v8_promotions() {
     // V0 baseline rules.
     assert_eq!(KernelRule::KVar.v_stage(), "V0");
     assert_eq!(KernelRule::KLamIntro.v_stage(), "V0");
-    // VFE-tagged rules.
+    // VVA-tagged rules.
     assert_eq!(KernelRule::KEpsMu.v_stage(), "V2");
     assert_eq!(KernelRule::KUniverseAscent.v_stage(), "V1");
 }

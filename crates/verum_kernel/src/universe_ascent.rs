@@ -1,4 +1,4 @@
-//! VFE-3 K-Universe-Ascent kernel rule + UniverseTier — split per #198.
+//! VVA-3 K-Universe-Ascent kernel rule + UniverseTier — split per #198.
 //!
 //! Verifies that meta-classifier applications `M_stack(α)` ascend
 //! Grothendieck-universe levels per the canonical κ-tower of
@@ -65,7 +65,7 @@ impl UniverseTier {
     }
 }
 
-/// VFE-3 V1 — `K-Universe-Ascent` kernel rule.
+/// VVA-3 V1 — `K-Universe-Ascent` kernel rule.
 ///
 /// Verifies that a meta-classifier application `M_stack(α)`
 /// correctly ascends the universe level by exactly one step:

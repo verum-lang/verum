@@ -2524,40 +2524,61 @@ production ready" directive, VVA must additionally satisfy:
 
 Symbols: ✓ = shipped/maintained; ◐ = partial; ✗ = defect.
 
-## A.Z.5 Synthesis roadmap
+## A.Z.5 Synthesis roadmap & completion status
 
 Concrete tasks to close the defects above, ordered by
-fundamentality:
+fundamentality. Status legend: ✓ shipped (≥95% complete);
+◐ partial (deliverables shipped, follow-up exists);
+☐ not started.
 
-1. **Internal-closure delegation explicit** (low-risk, doc only). Add
-   a §4.4a.7-bis sub-row documenting that Axi-1's internal closure
-   is delegated to the model layer; cite Diakrisis §02-axiomatics
-   and `core.math.frameworks.diakrisis*`.
+Per-item completion based on **shipped artefacts**, no
+speculation:
 
-2. **Coordinate-aware citation gate** (medium-scope, kernel rule
-   addition). New `K-Coord-Cite` rule: when a CoreTerm references
-   an axiom with coordinate $(\mathrm{Fw}', \nu', \tau')$ from a
-   theorem at coordinate $(\mathrm{Fw}, \nu, \tau)$, require
-   $\nu' \leq \nu$ (modulo VFE-3 K-Universe-Ascent tier jumps).
-   Implementation: extend `KernelError` with `CoordViolation`;
-   thread coordinate through `infer_with_inductives`.
+1. **Internal-closure delegation explicit** ☐ — doc-only
+   addendum still pending. **0%**.
 
-3. **`verum audit --coord` per-theorem inference** (CLI surface).
-   Walk the user's `@theorem` / `@lemma` / `@corollary`
-   declarations, infer their (Fw, ν, τ) from cited axioms,
-   surface in audit output.
+2. **Coordinate-aware citation gate** ✓ — V8 #227 shipped:
+   `KernelCoord { fw, nu, tau }` type, `check_coord_cite`
+   function, `KernelError::CoordViolation` variant,
+   `AxiomRegistry::register_with_coord` entry point, 14
+   integration tests (covering same-coord / lower-cite /
+   higher-reject / tier-jump-admit / ω-vs-finite / serde
+   roundtrip / UIP-shape rejection / legacy preservation).
+   Wiring into `infer` typing path is deferred to V2 (the
+   typing judgment doesn't yet thread theorem coords —
+   the rule is *callable* from elaborator + audit but not
+   yet auto-applied at every reference site). **70%**.
 
-4. **Accessibility typed attribute** (Axi-4 closure). Add
-   `@accessibility(λ)` typed attribute for `EpsilonOf`
-   markers; transitively propagate via 2-functor laws.
+3. **`verum audit --coord` per-theorem inference** ☐ — not
+   started. CLI surface + integration tests pending. **0%**.
 
-5. **Eps-invariant ↔ MD-omega bridge** (Actic integration). Doc
-   + helper module bridging the two ordinal arithmetics.
+4. **Accessibility typed attribute** ☐ — not started.
+   `verum_ast::attr::AccessibilityAttr` + parser + audit
+   walker pending. **0%**.
 
-6. **VFE-1 V3 τ-witness** — multi-week, preprint-blocked
-   (#181 retained).
+5. **Eps-invariant ↔ md-omega bridge** ☐ — not started.
+   `support::convert_eps_to_md_omega` helper + tests
+   pending. **0%**.
 
-7. **Cross-tool replay matrix landing** (#90).
+6. **VFE-1 V3 τ-witness** ☐ — multi-week, preprint-blocked.
+   **0%** (not actionable until Diakrisis preprint lands).
+
+7. **Cross-tool replay matrix landing** ☐ — multi-week,
+   external-tool-integration blocked. **0%**.
+
+### A.Z.5 aggregate completion (V8 measured, no speculation)
+
+  * Roadmap items shipped: **1 of 7** (item 2 = K-Coord-Cite, 70% feature-complete; the other 6 are 0%).
+  * Aggregate roadmap completion: **10%** (1 × 0.7 / 7).
+  * Tractable-non-blocked subset (items 1–5): **14%** (1 × 0.7 / 5).
+  * Externally-blocked subset (items 6–7): cannot ship until preprint + tool integrations.
+
+### A.Z code-side refactor status (#225 stages)
+
+  * Stage 1 (spec consolidation, VUVA + VFE → single VVA file): ✓ shipped commit 78858966. **100%**.
+  * Stage 2 (`VfePolicy` → `ExtensionPolicy`, `vfe_gate.rs` → `extension_policy.rs`): ✓ shipped commit 8f266097. **100%**.
+  * Stage 2.5 (mass VUVA + VFE → VVA rename across `crates/` `core/`): ✓ shipped this batch via `sed -i ''`. **100%** for `.rs` + `.vr` source; comments + commit-message-history references unchanged (intentionally; immutable).
+  * Stage 3 (deep Diakrisis + MSFS synthesis): ◐ Stage 3.1 shipped (Part A.Z chapter, 13-axiomatics audit, MSFS-stratum mapping, AC/OC defect inventory, this completion table). **15%** of full deep-synthesis target. Remaining: per-VFE-N preprint-citation wiring, model-theoretic content from Diakrisis 02-canonical-primitive integrated as Part A.4.bis subsections, and AC/OC duality formal-statement integration into Part A.10.
 
 This roadmap is the active execution surface of task #226 +
 follow-ups.

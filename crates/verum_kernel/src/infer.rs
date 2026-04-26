@@ -362,7 +362,7 @@ fn infer_inner(
         // predicate must check under the extended ctx (bound to Bool at
         // full-rule closure; shape-level at bring-up).
         //
-        // K-Refine (VUVA §2.4 / §4.4 / Diakrisis T-2f*): the predicate's
+        // K-Refine (VVA §2.4 / §4.4 / Diakrisis T-2f*): the predicate's
         // M-iteration depth MUST be strictly less than base's depth + 1.
         // Per Yanofsky 2003 this closes every self-referential paradox
         // schema in a cartesian-closed setting by blocking the exact
@@ -492,7 +492,7 @@ fn infer_inner(
             Maybe::None => Err(KernelError::UnknownInductive(name.clone())),
         },
 
-        // VFE-1 V0: ε(α) and α(ε) are constructor markers for the
+        // VVA-1 V0: ε(α) and α(ε) are constructor markers for the
         // articulation/enactment duality. They inherit the type of
         // their argument (ε and α are endo-2-functors at the term
         // level — the M⊣A biadjunction structure shows up only at
@@ -503,7 +503,7 @@ fn infer_inner(
             infer_inner(ctx, t, axioms, inductives)
         }
 
-        // VFE-7 V1: modal operators inhabit `Prop`. The kernel
+        // VVA-7 V1: modal operators inhabit `Prop`. The kernel
         // verifies that the operand is well-typed (regardless of
         // whether it inhabits `Prop` or any other type — modality
         // can be applied to any well-formed term, the resulting

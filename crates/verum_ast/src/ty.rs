@@ -376,7 +376,7 @@ pub enum TypeKind {
     },
 
     /// Refinement type — canonical node for all three surface forms
-    /// (VUVA spec §5 collapses the three forms into a single AST shape):
+    /// (VVA spec §5 collapses the three forms into a single AST shape):
     ///
     /// - Rule 1 (Inline): `T{pred}` with implicit `it` — `predicate.binding = None`.
     /// - Rule 2 (Lambda where): `T where |x| pred(x)` — `predicate.binding = Some(x)`.

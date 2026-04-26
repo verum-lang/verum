@@ -5,7 +5,7 @@
 // §2.3.5 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 1 axiom.
 // HasKey is the NAMED-restricted relational uniqueness constraint —
 // it applies *only* to NamedIndividuals, not to anonymous ones.
-// VUVA §21.3 Table maps HasKey-with-NAMED to `@verify(proof)` because
+// VVA §21.3 Table maps HasKey-with-NAMED to `@verify(proof)` because
 // the DL reasoner case requires user-supplied tactic per Shkotin §2.3.5.
 //
 // V2 status (#134, 2026-04-25): verbatim W3C OWL 2 DS §5.8 body.
@@ -25,7 +25,7 @@ mount core.math.frameworks.owl2_fs.types.{
 /// Anonymous individuals are EXCLUDED from this constraint —
 /// HasKey applies under the NAMED restriction only (per Shkotin
 /// §2.3.5 and the W3C §5.8 explicit "named individuals" clause).
-/// VUVA §21.3 routes HasKey-with-NAMED to `@verify(proof)` because
+/// VVA §21.3 routes HasKey-with-NAMED to `@verify(proof)` because
 /// the DL-reasoner case requires user-supplied tactic.
 ///
 /// V2 ships the binary-key core (one OPE + one DPE);  n-ary key

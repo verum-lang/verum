@@ -2,7 +2,7 @@
 // core.action.enactments — composition, activation modality A, α ⊣ ε
 // =============================================================================
 //
-// Each Enactment carries the Articulation it enacts (VUVA §11.3).  The
+// Each Enactment carries the Articulation it enacts (VVA §11.3).  The
 // adjunction α ⊣ ε is realised by the pair `epsilon : Articulation →
 // Enactment` and `alpha_of : Enactment → Articulation`; for any
 // articulation α we have `alpha_of(epsilon(α)) ≡ α`, witnessed by
@@ -98,7 +98,7 @@ public fn is_autopoietic(e: Enactment) -> Bool {
 }
 
 // -----------------------------------------------------------------------------
-// α ⊣ ε adjunction (VUVA §11.3)
+// α ⊣ ε adjunction (VVA §11.3)
 // -----------------------------------------------------------------------------
 
 /// `epsilon(α) = (F, Syn(F), id, id)` — syntactic self-enactment of an

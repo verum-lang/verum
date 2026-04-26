@@ -3017,7 +3017,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Check if this is a sigma-form refinement followed by comma -
         // indicates sigma-bindings (e.g. `type SizedVec is n: Int, data: [Int; n];`).
-        // Post VUVA §5 canonicalisation, the sigma surface form parses as
+        // Post VVA §5 canonicalisation, the sigma surface form parses as
         // `TypeKind::Refined` with `predicate.binding = Some(name)`; we detect
         // that shape here.
         let looks_like_sigma_binding = matches!(
@@ -7170,7 +7170,7 @@ impl<'a> RecursiveParser<'a> {
             }
             // Refined types (all three surface forms: `T{p}`, `T where p`,
             // `n: T where p`) fall through to the `Refined` arm above; the
-            // dedicated Sigma arm is gone after VUVA §5 collapse.
+            // dedicated Sigma arm is gone after VVA §5 collapse.
             _ => Err(ParseError::invalid_syntax(
                 "expected path or refined type in type bound",
                 ty.span,

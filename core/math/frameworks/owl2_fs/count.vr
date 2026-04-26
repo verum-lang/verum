@@ -1,5 +1,5 @@
 // =============================================================================
-// owl2_fs.count — count_o quantifier-of-quantity primitive (VUVA §21.5 / C9 V1)
+// owl2_fs.count — count_o quantifier-of-quantity primitive (VVA §21.5 / C9 V1)
 // =============================================================================
 //
 // Shkotin 2019 introduces a quantifier of quantity `#y:o P(y)` that
@@ -46,7 +46,7 @@ public let E_OWL2_UNBOUNDED_COUNT: Text = "E_OWL2_UNBOUNDED_COUNT";
 ///
 /// The fold is the constructive image of Shkotin's `#y:o P(y)`:
 /// when the OWL 2 universe is presented as an explicit list of
-/// individuals (the closed-domain assumption per VUVA §21.4), the
+/// individuals (the closed-domain assumption per VVA §21.4), the
 /// count is decidable in linear time.
 public fn count_o<I: Individual>(
     domain: List<I>,

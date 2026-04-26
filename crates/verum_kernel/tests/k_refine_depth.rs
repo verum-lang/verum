@@ -1,4 +1,4 @@
-//! K-Refine depth-check integration tests (VUVA §2.4 / §4.4).
+//! K-Refine depth-check integration tests (VVA §2.4 / §4.4).
 //!
 //! Diakrisis axiom T-2f* ported to the Verum kernel: a refinement type
 //! `{ x : base | P(x) }` is well-formed only when the predicate's
@@ -82,7 +82,7 @@ fn m_depth_of_inductive_is_one_plus_args() {
 #[test]
 fn m_depth_of_axiom_is_same_as_its_type() {
     // Axiom nodes are *terms* (proof witnesses), not meta-statements.
-    // Per VUVA §4.3 + kernel m_depth, dp(Axiom { ty }) = dp(ty) so
+    // Per VVA §4.3 + kernel m_depth, dp(Axiom { ty }) = dp(ty) so
     // a witness sits at the same M-stratum as its asserted type.
     // The "+1 for framework axioms" is reserved for the declaration-
     // time path (AxiomRegistry::register), not the invocation site.

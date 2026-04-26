@@ -66,11 +66,11 @@ module core.theory_interop;
 // Theory-interop core — theory loading, translation, coherence
 public module core;
 
-// VUVA §10.2 obstruction verdict + §10.4 MSFS coordinate
+// VVA §10.2 obstruction verdict + §10.4 MSFS coordinate
 public module coord;
 
-// VUVA §21.7 canonical cross-framework bridges (owl2_fs → lurie_htt
-// shipped today; VUVA §16.6 F6 catalogue is the V2 destination).
+// VVA §21.7 canonical cross-framework bridges (owl2_fs → lurie_htt
+// shipped today; VVA §16.6 F6 catalogue is the V2 destination).
 public module bridges;
 
 // JSON-RPC wire protocol for external tooling
@@ -95,7 +95,7 @@ public mount .core.{
     AuditResult, audit_theory, audit_meta,
 };
 
-// VUVA §10.2 obstruction verdict + §10.4 MSFS coordinate
+// VVA §10.2 obstruction verdict + §10.4 MSFS coordinate
 public mount .coord.{
     TranslationVerdict, verdict_of, verdict_as_text, verdict_admits,
     MsfsCoord, msfs_coord, coord_of, coord_as_text, coord_eq,

@@ -523,7 +523,7 @@ impl<'a> RecursiveParser<'a> {
     /// Three equivalent refinement forms: inline `T{pred}`, declarative `T where pred`,
     /// and sigma `n: T where f(n)`. The sigma form binds a name visible in the predicate.
     ///
-    /// Per VUVA §5 the three forms share a single AST node: this emits
+    /// Per VVA §5 the three forms share a single AST node: this emits
     /// `TypeKind::Refined` with the binder carried as `predicate.binding`.
     pub fn parse_sigma_type(&mut self) -> ParseResult<Type> {
         let start_pos = self.stream.position();
@@ -547,7 +547,7 @@ impl<'a> RecursiveParser<'a> {
         // Valid: `inner: (n: Int, data: [Int])` - nested sigma wrapped in parens
         // Invalid: `Item: Display: Clone` - chained colons without parens
         //
-        // Post-canonicalisation (VUVA §5): the sigma surface form lowers to
+        // Post-canonicalisation (VVA §5): the sigma surface form lowers to
         // `TypeKind::Refined` with `predicate.binding = Some(name)`, so the
         // chain-of-colons detector looks for a refined node whose binding is
         // a `Some` — that means the inner was itself a sigma binding.

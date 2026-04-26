@@ -20,7 +20,7 @@
 // Syntax: name: Type where predicate
 // Example: x: Int where x > 0
 //
-// Per VUVA §5 the three surface forms (inline `T{pred}`, lambda-where
+// Per VVA §5 the three surface forms (inline `T{pred}`, lambda-where
 // `T where |x| p(x)`, and sigma `x: T where p(x)`) all parse to
 // `TypeKind::Refined`. The sigma surface form is distinguished by an
 // explicit binder on the predicate — `predicate.binding = Some(name)`.
@@ -340,7 +340,7 @@ fn test_sigma_type_shows_explicit_binding() {
 
 #[test]
 fn test_all_three_styles_parse_to_refined() {
-    // Per VUVA §5 the three refinement forms collapse onto `TypeKind::Refined`.
+    // Per VVA §5 the three refinement forms collapse onto `TypeKind::Refined`.
     // The sigma form is distinguished by an explicit binder on the predicate;
     // inline and lambda forms do not carry an explicit sigma-style binder
     // (lambda uses its own closure-style binder internally).

@@ -154,7 +154,7 @@ pub use typed::{
     DeadlockDetectionAttr,
     DifferentiableAttr,
     EnactAttr,
-    // VFE §0.0 governance — opt-in / opt-out for kernel extensions.
+    // VVA §0.0 governance — opt-in / opt-out for kernel extensions.
     ExtensionRequirementAttr,
     ExtensionToggleKind,
     FeatureAttr,

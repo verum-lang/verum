@@ -135,12 +135,12 @@ pub mod core_pipeline; // Dependency-ordered stdlib compilation (Stdlib bootstra
 pub mod capability; // Capability attenuation for contexts (Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0)
 pub mod const_eval;
 pub mod context;
-// VUVA #150 — strict-positivity check for user-declared inductive types
+// VVA #150 — strict-positivity check for user-declared inductive types
 // (AST-level, runs before kernel elaboration; mirrors verum_kernel's
 // CoreTerm-level walker so any path that bypasses one still hits the
 // other).
 pub mod positivity;
-// VUVA #146 / MOD-MED-2 — glob import provenance discipline. Tags
+// VVA #146 / MOD-MED-2 — glob import provenance discipline. Tags
 // every glob-imported name with its `ImportOrigin` (Stdlib /
 // External / Project) so glob-vs-glob conflicts resolve via a total
 // ordering rather than source-text position. Project always beats

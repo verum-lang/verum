@@ -17,7 +17,7 @@
 //
 // `count_o` (Shkotin's # quantifier-of-quantity) is shipped here as
 // the smallest ergonomic site rather than as a one-axiom file.  See
-// VUVA §21.5 — V1 ships the signature, V2 wires CVC5 Finite Model
+// VVA §21.5 — V1 ships the signature, V2 wires CVC5 Finite Model
 // Finding and the `E_OWL2_UNBOUNDED_COUNT` diagnostic.
 // =============================================================================
 
@@ -38,7 +38,7 @@ public type Literal is protocol {
     fn lexical_form(self) -> Text;
 };
 
-/// VUVA §21.5 — quantifier of quantity.  `count_o(pred)` is the
+/// VVA §21.5 — quantifier of quantity.  `count_o(pred)` is the
 /// number of `Individual`s satisfying `pred`.  Returns `Int >= 0`
 /// at runtime.  When the domain is not finite, the V2 SMT dispatch
 /// returns `E_OWL2_UNBOUNDED_COUNT`.  V1 ships the axiom with a

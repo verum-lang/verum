@@ -167,3 +167,61 @@ fn fix_redundant_refinement_strips_trivial_predicate() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ============================================================
+// FixEdit unification — every fixable rule should produce the
+// same byte-level result whether applied via `--fix` (on-disk) or
+// via the `fix.edits` consumer applying structured edits to the
+// source. The contract: read fixture, snapshot pre-fix JSON
+// `fix.edits`, run --fix, assert the on-disk content matches what
+// applying those edits in-process would have produced.
+// ============================================================
+
+#[test]
+fn structured_edits_match_disk_fix_for_deprecated_syntax_impl() {
+    let (dir, file) = make_fixture(
+        "edits_match_impl",
+        "main.vr",
+        "impl Foo { fn bar() {} }\n",
+    );
+    let pre = std::fs::read_to_string(&file).expect("read pre");
+    let json = lint_json(&dir);
+    let edits_present = json.contains("\"fix\":{\"edits\"");
+    assert!(
+        edits_present,
+        "deprecated-syntax `impl` should emit fix.edits, got:\n{json}"
+    );
+
+    lint_fix(&dir);
+    let post = std::fs::read_to_string(&file).expect("read post");
+    assert_ne!(pre, post, "--fix should rewrite content");
+    assert!(
+        post.starts_with("implement"),
+        "post-fix line should start with `implement`, got:\n{post}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn structured_edits_handle_multiple_issues_per_line() {
+    // Two `impl ` keywords on different lines plus a `Vec<` —
+    // exercises the FixEdit reverse-application path. The
+    // structured fixer should produce non-overlapping edits and
+    // apply them all in one pass.
+    let (dir, file) = make_fixture(
+        "edits_multi",
+        "main.vr",
+        "impl A {}\nimpl B {}\nlet xs: Vec<Int> = List [];\n",
+    );
+    lint_fix(&dir);
+    let content = std::fs::read_to_string(&file).expect("read");
+    assert!(
+        content.contains("implement A") && content.contains("implement B"),
+        "both impls should be replaced, got:\n{content}"
+    );
+    assert!(
+        content.contains("List<Int>"),
+        "Vec<Int> should be List<Int>, got:\n{content}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

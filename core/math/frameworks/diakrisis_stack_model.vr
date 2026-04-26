@@ -52,7 +52,7 @@ public axiom stack_model_realisability<A: Articulation>(alpha: A) -> Bool
 ///
 /// Verum exposure: each `@framework(...)` declaration whose articulation
 /// lives at universe level κ_1 has its M-image at κ_2; the kernel rule
-/// `K-Universe-Ascent` (deferred to VFE-3 V1) will check this at
+/// `K-Universe-Ascent` (deferred to VVA-3 V1) will check this at
 /// elaboration time.
 @framework(diakrisis, "Theorem 131.L1 (universe ascent of M-stack: κ_1 → κ_2)")
 public axiom universe_ascent_meta_classifier<A: Articulation>(alpha: A) -> Bool

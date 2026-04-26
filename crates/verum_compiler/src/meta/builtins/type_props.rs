@@ -302,7 +302,7 @@ pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
             }
         }
 
-        // Refinement types (VUVA §5 canonical) have same size as base
+        // Refinement types (VVA §5 canonical) have same size as base
         TypeKind::Refined { base, .. } => compute_type_size(&base.kind),
 
         // Bounded types have same size as base
@@ -423,7 +423,7 @@ pub fn compute_type_alignment(ty: &TypeKind) -> Result<u64, MetaError> {
             }
         },
 
-        // Refinement types (VUVA §5 canonical)
+        // Refinement types (VVA §5 canonical)
         TypeKind::Refined { base, .. } => compute_type_alignment(&base.kind),
 
         // Bounded types
@@ -526,7 +526,7 @@ pub fn compute_type_min(ty: &TypeKind) -> Result<ConstValue, MetaError> {
             }
         }
 
-        // Refined types (VUVA §5 canonical) delegate to base
+        // Refined types (VVA §5 canonical) delegate to base
         TypeKind::Refined { base, .. } => compute_type_min(&base.kind),
         TypeKind::Bounded { base, .. } => compute_type_min(&base.kind),
         TypeKind::CapabilityRestricted { base, .. } => compute_type_min(&base.kind),
@@ -579,7 +579,7 @@ pub fn compute_type_max(ty: &TypeKind) -> Result<ConstValue, MetaError> {
             }
         }
 
-        // Refined types (VUVA §5 canonical) delegate to base
+        // Refined types (VVA §5 canonical) delegate to base
         TypeKind::Refined { base, .. } => compute_type_max(&base.kind),
         TypeKind::Bounded { base, .. } => compute_type_max(&base.kind),
         TypeKind::CapabilityRestricted { base, .. } => compute_type_max(&base.kind),

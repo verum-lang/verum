@@ -20,7 +20,7 @@ use verum_common::{List, Map, Maybe, Shared, Text};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
-/// VUVA #145 / MOD-MED-1 — header-validation diagnostic.
+/// VVA #145 / MOD-MED-1 — header-validation diagnostic.
 ///
 /// Two distinct soft-failure modes are surfaced as warnings (build
 /// continues, but the user sees a heads-up so they can fix the
@@ -129,7 +129,7 @@ impl ModuleHeaderWarning {
     }
 }
 
-/// VUVA #145 / MOD-MED-1 — validate module-decl headers in a parsed
+/// VVA #145 / MOD-MED-1 — validate module-decl headers in a parsed
 /// AST against the filesystem. Returns one warning per header
 /// inconsistency found; an empty Vec means the file is clean.
 ///
@@ -816,7 +816,7 @@ impl ModuleLoader {
         // priority so explicit imports can shadow prelude items.
         self.inject_prelude(&mut ast)?;
 
-        // VUVA #145 / MOD-MED-1 — validate top-level `module foo;` /
+        // VVA #145 / MOD-MED-1 — validate top-level `module foo;` /
         // `module foo { … }` declarations against the filesystem.
         // Warnings are non-blocking: the pipeline drains them and
         // emits diagnostics so the user sees dangling forward-decls

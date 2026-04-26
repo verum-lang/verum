@@ -1,4 +1,4 @@
-//! K-Universe-Ascent integration tests (VFE-3 V1, Theorem 131.T).
+//! K-Universe-Ascent integration tests (VVA-3 V1, Theorem 131.T).
 //!
 //! The κ-tower kernel rule from `core.math.frameworks.diakrisis_stack_model`
 //! lifted to the kernel layer. Per Theorem 134.T (tight 2-inacc bound),

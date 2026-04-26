@@ -1,14 +1,14 @@
-//! Nine-strategy `@verify(...)` ladder semantics (VUVA §2.3, §12).
+//! Nine-strategy `@verify(...)` ladder semantics (VVA §2.3, §12).
 //!
-//! Verifies that every strategy listed in VUVA parses to a distinct
+//! Verifies that every strategy listed in VVA parses to a distinct
 //! `VerifyStrategy` variant, is ranked in monotone-lift order, carries
-//! the Diakrisis ν-invariant ordinal from the VUVA table, and dispatches
+//! the Diakrisis ν-invariant ordinal from the VVA table, and dispatches
 //! through the expected backend surface.
 
 use verum_smt::verify_strategy::{NuOrdinal, VerifyStrategy};
 
 // -----------------------------------------------------------------------------
-// Parsing — every VUVA-named strategy must map to a distinct variant
+// Parsing — every VVA-named strategy must map to a distinct variant
 // -----------------------------------------------------------------------------
 
 #[test]
@@ -46,8 +46,8 @@ fn legacy_aliases_still_parse() {
 
 #[test]
 fn proof_and_reliable_are_no_longer_aliases() {
-    // Pre-VUVA these parsed as Formal / Thorough respectively.
-    // Post-VUVA they are distinct variants.
+    // Pre-VVA these parsed as Formal / Thorough respectively.
+    // Post-VVA they are distinct variants.
     assert_eq!(
         VerifyStrategy::from_attribute_value("proof"),
         Some(VerifyStrategy::Proof)
@@ -70,11 +70,11 @@ fn proof_and_reliable_are_no_longer_aliases() {
 fn unknown_strategy_returns_none() {
     assert_eq!(VerifyStrategy::from_attribute_value(""), None);
     assert_eq!(VerifyStrategy::from_attribute_value("sound-and-complete"), None);
-    assert_eq!(VerifyStrategy::from_attribute_value("auto"), None); // not in VUVA ladder
+    assert_eq!(VerifyStrategy::from_attribute_value("auto"), None); // not in VVA ladder
 }
 
 // -----------------------------------------------------------------------------
-// Monotone-lift — strictly ascending rank per VUVA §2.3
+// Monotone-lift — strictly ascending rank per VVA §2.3
 // -----------------------------------------------------------------------------
 
 #[test]
@@ -115,12 +115,12 @@ fn at_least_enforces_monotone_lift() {
 }
 
 // -----------------------------------------------------------------------------
-// Diakrisis ν-invariant — VUVA §12 table
+// Diakrisis ν-invariant — VVA §12 table
 // -----------------------------------------------------------------------------
 
 #[test]
 fn nu_ordinals_match_vuva_table() {
-    // VUVA §12 — strict-monotone ν-ladder: every strategy gets a
+    // VVA §12 — strict-monotone ν-ladder: every strategy gets a
     // distinct ordinal so `0 < 1 < 2 < ω < ω+1 < ω·2 < ω·2+1 <
     // ω·2+2 < ω·3+1` holds in the formal sense.
     assert_eq!(VerifyStrategy::Runtime.nu_ordinal(), NuOrdinal::Zero);
@@ -140,7 +140,7 @@ fn nu_ordinals_match_vuva_table() {
 
 #[test]
 fn nu_ordinal_rank_strictly_increases_with_strategy_rank() {
-    // VUVA §2.3 strict-monotone claim: every step on the ladder
+    // VVA §2.3 strict-monotone claim: every step on the ladder
     // bumps the ν-rank by exactly one (no plateaus).
     let mut last_nu: Option<u8> = None;
     for s in VerifyStrategy::LADDER.iter() {
@@ -154,7 +154,7 @@ fn nu_ordinal_rank_strictly_increases_with_strategy_rank() {
         last_nu = Some(nu);
     }
     // Final rank should be 12 (Synthesize) — thirteen distinct
-    // strata mapped to ranks 0..=12 after the VFE-6 V1 + VFE-8 V0
+    // strata mapped to ranks 0..=12 after the VVA-6 V1 + VVA-8 V0
     // ladder extension (added ComplexityTyped, CoherentStatic,
     // CoherentRuntime, Coherent).
     assert_eq!(last_nu, Some(12));

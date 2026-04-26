@@ -990,7 +990,7 @@ impl FfiBoundaryValidator {
                 )
                 .build()),
 
-            // Refinement types (VUVA §5 canonical: inline, lambda-where, and
+            // Refinement types (VVA §5 canonical: inline, lambda-where, and
             // sigma surface forms all live here) need base type validation
             TypeKind::Refined { base, predicate: _ } => {
                 // Refinement is compile-time only, validate base type
@@ -1318,7 +1318,7 @@ impl Marshaller {
                 idx, param_name.name
             )),
 
-            // Refined types (VUVA §5 canonical: all three surface forms):
+            // Refined types (VVA §5 canonical: all three surface forms):
             // strip refinement, marshal base type
             TypeKind::Refined { base, predicate: _ } => {
                 self.generate_param_conversion(param_name, base, idx)
@@ -1432,7 +1432,7 @@ impl Marshaller {
                 Ok("    // Function pointer: direct return\n    Ok(result)\n".to_string())
             }
 
-            // Refined types (VUVA §5 canonical: all three surface forms):
+            // Refined types (VVA §5 canonical: all three surface forms):
             // marshal base type, trust postcondition
             TypeKind::Refined { base, predicate: _ } => {
                 self.generate_return_conversion(base)

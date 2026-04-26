@@ -25,31 +25,82 @@ module core.intrinsics.arithmetic;
 // SECTION 1: Basic Arithmetic
 // =============================================================================
 
-/// Integer/float addition
+/// Integer/float addition.
+///
+/// # Panics
+/// On signed-integer T, panics if `a + b` overflows the
+/// representable range. Use `checked_add` / `wrapping_add` /
+/// `saturating_add` / `add_overflow` to handle overflow
+/// explicitly. Float addition follows IEEE 754 semantics — no
+/// panic; out-of-range results become `±inf`.
 public fn add<T>(a: T, b: T) -> T { @intrinsic("add", a, b) }
 
-/// Integer/float subtraction
+/// Integer/float subtraction.
+///
+/// # Panics
+/// On signed-integer T, panics if `a - b` underflows the
+/// representable range. Use `checked_sub` / `wrapping_sub` /
+/// `saturating_sub` / `sub_overflow` for explicit handling.
+/// Float follows IEEE 754.
 public fn sub<T>(a: T, b: T) -> T { @intrinsic("sub", a, b) }
 
-/// Integer/float multiplication
+/// Integer/float multiplication.
+///
+/// # Panics
+/// On signed-integer T, panics on overflow. Float follows IEEE 754
+/// (saturates to `±inf`).
 public fn mul<T>(a: T, b: T) -> T { @intrinsic("mul", a, b) }
 
-/// Integer/float division
+/// Integer/float division.
+///
+/// # Panics
+/// * Integer T: panics if `b == 0` (division by zero).
+/// * Signed-integer T: panics on `T::MIN / -1` (the only signed
+///   division that overflows; the mathematical result `|T::MIN|`
+///   is unrepresentable).
+/// * Float T: follows IEEE 754 — `x / 0.0 = ±inf`, `0.0 / 0.0 = NaN`.
+///
+/// Use `checked_div` to recover from divisor-zero / overflow without
+/// panicking.
 public fn div<T>(a: T, b: T) -> T { @intrinsic("div", a, b) }
 
-/// Integer remainder
+/// Integer remainder (modulo).
+///
+/// # Panics
+/// * Integer T: panics if `b == 0`.
+/// * Signed-integer T: panics on `T::MIN % -1` for the same reason
+///   as `div` — the trapping operand pair.
+///
+/// Use `checked_rem` to recover without panicking.
 public fn rem<T>(a: T, b: T) -> T { @intrinsic("rem", a, b) }
 
-/// Negation
+/// Arithmetic negation (`-x`).
+///
+/// # Panics
+/// On signed-integer T, panics on `T::MIN` because the
+/// mathematical result `|T::MIN|` is not representable in two's
+/// complement. Float negation flips the sign bit and never panics.
+///
+/// Use `checked_neg` to recover from the `T::MIN` case.
 public fn neg<T>(x: T) -> T { @intrinsic("neg", x) }
 
-/// Absolute value (signed types)
+/// Absolute value.
+///
+/// # Panics
+/// On signed-integer T, panics on `T::MIN` (same overflow as
+/// `neg`). Float `abs(NaN) = NaN`, `abs(±inf) = +inf`.
+///
+/// For the safe form on integers, prefer `checked_neg` followed by
+/// a sign-aware compare, or use `saturating_abs` (clamps `T::MIN`
+/// to `T::MAX`).
 public fn abs<T>(x: T) -> T { @intrinsic("abs", x) }
 
-/// Absolute value (signed types) - alias for abs
+/// Absolute value (signed types) — alias for [`abs`]. Identical
+/// panic behaviour: panics on `T::MIN` for signed-integer T.
 public fn abs_signed<T>(x: T) -> T { @intrinsic("abs", x) }
 
-/// Signum (-1, 0, or 1)
+/// Signum: returns -1, 0, or 1 matching the sign of `x`.
+/// Total: never panics. For float NaN, returns NaN.
 public fn signum<T>(x: T) -> T { @intrinsic("signum", x) }
 
 // =============================================================================
@@ -137,10 +188,19 @@ public fn wrapping_sub<T>(a: T, b: T) -> T { @intrinsic("wrapping_sub", a, b) }
 /// Wrapping multiplication
 public fn wrapping_mul<T>(a: T, b: T) -> T { @intrinsic("wrapping_mul", a, b) }
 
-/// Wrapping division (panics on division by zero, wraps MIN / -1)
+/// Wrapping division.
+///
+/// # Panics
+/// Panics if `b == 0`. Unlike non-wrapping `div`, the trapping
+/// signed pair `T::MIN / -1` does NOT panic — it wraps to
+/// `T::MIN` (matching modular semantics).
 public fn wrapping_div<T>(a: T, b: T) -> T { @intrinsic("wrapping_div", a, b) }
 
-/// Wrapping remainder
+/// Wrapping remainder.
+///
+/// # Panics
+/// Panics if `b == 0`. The trapping pair `T::MIN % -1` wraps to
+/// `0` instead of panicking.
 public fn wrapping_rem<T>(a: T, b: T) -> T { @intrinsic("wrapping_rem", a, b) }
 
 /// Wrapping negation

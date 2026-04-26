@@ -72,7 +72,10 @@ fn theorem_with_generic_proof_by_auto_no_semi_at_eof() {
     assert!(r.is_ok(), "generic theorem without trailing `;` at EOF should parse");
 }
 
+/// `REPRO` suffix preserves the link to the bug-reproduction history.
+/// `#[allow(non_snake_case)]` documents the intentional deviation.
 #[test]
+#[allow(non_snake_case)]
 fn theorem_with_generic_proof_by_auto_semi_at_eof_REPRO() {
     let source = "theorem foo<T>() proof by auto;";
     let r = try_parse(source);

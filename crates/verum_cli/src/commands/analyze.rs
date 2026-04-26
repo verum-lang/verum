@@ -1056,7 +1056,7 @@ fn extract_param_name(param: &verum_ast::decl::FunctionParam) -> &str {
 fn has_refinement(ty: &verum_ast::Type) -> bool {
     use verum_ast::ty::TypeKind;
     match &ty.kind {
-        // VUVA §5 canonical: Refined covers all three refinement surface forms.
+        // VVA §5 canonical: Refined covers all three refinement surface forms.
         TypeKind::Refined { .. } => true,
         TypeKind::Function {
             params,
@@ -1078,7 +1078,7 @@ fn format_type_refinement(ty: &verum_ast::Type) -> Text {
     use verum_ast::ty::TypeKind;
     match &ty.kind {
         TypeKind::Refined { base, predicate } => {
-            // VUVA §5: the sigma form lives on Refined with a Some binder.
+            // VVA §5: the sigma form lives on Refined with a Some binder.
             match &predicate.binding {
                 verum_common::Maybe::Some(binder) => {
                     format!("{}: {}{{...}}", binder.name, format_type_name(base)).into()
@@ -1118,7 +1118,7 @@ fn format_type_name(ty: &verum_ast::Type) -> String {
 fn is_likely_provable(ty: &verum_ast::Type) -> bool {
     use verum_ast::ty::TypeKind;
     match &ty.kind {
-        // VUVA §5 canonical: Refined covers all three refinement surface forms.
+        // VVA §5 canonical: Refined covers all three refinement surface forms.
         TypeKind::Refined { base, .. } => {
             // Simple base types with linear predicates are usually provable
             matches!(

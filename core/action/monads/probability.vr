@@ -1,5 +1,5 @@
 // =============================================================================
-// core.action.monads.probability — Giry-style probability monad (VFE §18.5)
+// core.action.monads.probability — Giry-style probability monad (VVA §18.5)
 // =============================================================================
 //
 // `Probability<A>` — finite-support discrete probability distribution
@@ -14,7 +14,7 @@
 // @verify(coherent_concurrent) without synchronisation per
 // Corollary 17.C2.
 //
-// VFE §18.5 Tier-A: probabilistic coherence — Probability is the
+// VVA §18.5 Tier-A: probabilistic coherence — Probability is the
 // canonical commutative monad for probabilistic verification (verified
 // machine learning, randomised algorithms, probabilistic protocols).
 // The Giry monad lifts to measurable spaces in V1.5 (continuous

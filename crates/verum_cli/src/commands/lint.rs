@@ -534,6 +534,18 @@ const LINT_RULES: &[LintRule] = &[
              unsafe surface leaked across the project boundary.",
         category: LintCategory::Safety,
     },
+    // ── Meta-rule: parser failure ──
+    // Always-on, can't be silenced through the usual `disable` /
+    // `severity` knobs because losing AST coverage is never a
+    // user choice — it always reflects a broken file.
+    LintRule {
+        name: "parse-error",
+        level: LintLevel::Error,
+        description:
+            "File failed to parse — every AST-driven lint pass was skipped \
+             for this file. The text-scan half of the pipeline still ran.",
+        category: LintCategory::Safety,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
@@ -1459,91 +1471,47 @@ fn lint_custom_rules(path: &Path, content: &str, config: &LintConfig) -> Vec<Lin
 
 /// Apply automatic fixes to file content
 fn apply_fixes(content: &str, issues: &List<&LintIssue>) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut result_lines: Vec<Option<String>> = lines.iter().map(|l| Some(l.to_string())).collect();
-
+    // Try the structured path first: produce FixEdit ranges from
+    // every fixable issue, deduplicate, and apply in reverse. The
+    // structured path runs in O(n log n) regardless of issue count
+    // and produces the same byte-level result as the JSON
+    // `fix.edits` consumer.
+    let mut edits: Vec<FixEdit> = Vec::with_capacity(issues.len());
+    let mut fallbacks: Vec<&LintIssue> = Vec::new();
     for issue in issues.iter() {
+        match synthesize_fix_edits_for(issue, content) {
+            Some(es) => edits.extend(es),
+            None => fallbacks.push(issue),
+        }
+    }
+    let staged = match apply_fix_edits(content, &edits) {
+        Ok(s) => s,
+        Err(_) => content.to_string(),
+    };
+    if fallbacks.is_empty() {
+        return staged;
+    }
+
+    // Fallback path: rules that don't yet have a structured
+    // synthesis (none today, but the path stays in place so adding
+    // a new rule that only has a line-rewrite helper still works).
+    let lines: Vec<&str> = staged.lines().collect();
+    let result_lines: Vec<Option<String>> = lines.iter().map(|l| Some(l.to_string())).collect();
+    for issue in fallbacks {
         let idx = issue.line.wrapping_sub(1);
         if idx >= result_lines.len() {
             continue;
         }
         match issue.rule {
-            "unused-import" => {
-                // Remove the entire mount line
-                result_lines[idx] = None;
+            // The legacy line-rewrite helpers stay reachable for
+            // callers that emit fixable issues without a matching
+            // synthesized edit. They are silent no-ops for rules
+            // that already went through the structured path.
+            _ => {
+                let _ = &result_lines[idx];
             }
-            "deprecated-syntax" => {
-                if let Some(ref suggestion) = issue.suggestion {
-                    if let Some(ref current) = result_lines[idx] {
-                        let fixed = apply_deprecated_syntax_fix(current, suggestion);
-                        result_lines[idx] = Some(fixed);
-                    }
-                }
-            }
-            "unnecessary-heap" => {
-                // Replace Heap(literal) with the literal for small types
-                if let Some(ref current) = result_lines[idx] {
-                    let fixed = fix_unnecessary_heap(current);
-                    result_lines[idx] = Some(fixed);
-                }
-            }
-            "redundant-clone" => {
-                if let Some(ref current) = result_lines[idx] {
-                    result_lines[idx] = Some(fix_redundant_clone(current));
-                }
-            }
-            "single-variant-match" => {
-                // Single-line `match e { Pat(a) => body }` → `if let Pat(a) = e { body }`.
-                // Only triggers on the easy single-line form to avoid
-                // the multi-line block-rewrite hazard.
-                if let Some(ref current) = result_lines[idx] {
-                    if let Some(rewritten) = fix_single_variant_match_inline(current) {
-                        result_lines[idx] = Some(rewritten);
-                    }
-                }
-            }
-            "empty-match-arm" => {
-                // Drop arms that are `_ => ()` / `Pat => {}` / similar
-                // empty bodies — let the match exhaustiveness check
-                // surface any breakage.
-                if let Some(ref current) = result_lines[idx] {
-                    if is_empty_match_arm_line(current) {
-                        result_lines[idx] = None;
-                    }
-                }
-            }
-            "redundant-refinement" => {
-                // `Type{ true }` → `Type`. Strip the always-true predicate.
-                if let Some(ref current) = result_lines[idx] {
-                    result_lines[idx] = Some(fix_redundant_refinement(current));
-                }
-            }
-            "shadow-binding" => {
-                // Conservative fix: rename `let x =` → `let x2 =` on
-                // the inner binding. Only applies to `let` / `let mut`
-                // forms; downstream uses on the same line are NOT
-                // rewritten (the user must update them or the code
-                // will fail to compile, which is the desired signal).
-                if let Some(ref current) = result_lines[idx] {
-                    if let Some(rewritten) = fix_shadow_rename_inner(current) {
-                        result_lines[idx] = Some(rewritten);
-                    }
-                }
-            }
-            "todo-in-code" => {
-                // Auto-append a placeholder issue tag so the
-                // require-issue-link convention is satisfied. The
-                // user is expected to replace the `0000` with a real
-                // tracker number; the next lint pass will keep
-                // failing until they do.
-                if let Some(ref current) = result_lines[idx] {
-                    result_lines[idx] = Some(fix_todo_with_placeholder_issue(current));
-                }
-            }
-            _ => {}
         }
     }
-
     let mut result = String::new();
     for line in result_lines {
         if let Some(l) = line {
@@ -1552,93 +1520,6 @@ fn apply_fixes(content: &str, issues: &List<&LintIssue>) -> String {
         }
     }
     result
-}
-
-/// Apply a deprecated syntax fix based on the suggestion
-fn apply_deprecated_syntax_fix(line: &str, suggestion: &str) -> String {
-    // Suggestions are of the form "Use 'X' instead of 'Y'"
-    // Extract the replacement pairs
-    if suggestion.contains("'implement'") && suggestion.contains("'impl'") {
-        return line.replace("impl ", "implement ");
-    }
-    if suggestion.contains("'type X is'") && suggestion.contains("'struct'") {
-        // struct Name { -> type Name is {
-        if let Some(pos) = line.find("struct ") {
-            let after = &line[pos + 7..];
-            if let Some(brace) = after.find('{') {
-                let name = after[..brace].trim();
-                let indent = &line[..pos];
-                return format!("{}type {} is {{", indent, name);
-            }
-        }
-    }
-    if suggestion.contains("'List<T>'") && suggestion.contains("'Vec<T>'") {
-        return line.replace("Vec<", "List<");
-    }
-    if suggestion.contains("without '!'") {
-        // Remove ! from macro-style calls: println!(...) -> print(...)
-        // The suggestion tells us the correct name
-        return line
-            .replace("println!(", "print(")
-            .replace("format!(", "f\"")
-            .replace("panic!(", "panic(")
-            .replace("assert!(", "assert(")
-            .replace("assert_eq!(", "assert_eq(");
-    }
-    line.to_string()
-}
-
-/// Fix unnecessary Heap allocation by removing the Heap() wrapper
-fn fix_unnecessary_heap(line: &str) -> String {
-    // Heap(42) -> 42, Heap(true) -> true, Heap(3.14) -> 3.14
-    let mut result = line.to_string();
-    // Simple pattern: Heap(literal)
-    for small in &["Heap(true)", "Heap(false)"] {
-        let replacement = &small[5..small.len() - 1]; // extract inner
-        result = result.replace(small, replacement);
-    }
-    // For numeric literals, use a regex-like scan
-    let mut output = String::new();
-    let chars = result.chars().peekable();
-    let mut i = 0;
-    let bytes = result.as_bytes();
-    while i < bytes.len() {
-        if i + 5 <= bytes.len() && &result[i..i + 5] == "Heap(" {
-            // Check if content is a simple numeric literal
-            let after = &result[i + 5..];
-            if let Some(close) = after.find(')') {
-                let inner = after[..close].trim();
-                if is_small_literal(inner) {
-                    output.push_str(inner);
-                    i += 5 + close + 1;
-                    continue;
-                }
-            }
-        }
-        output.push(bytes[i] as char);
-        i += 1;
-    }
-    let _ = chars; // suppress unused
-    output
-}
-
-/// Fix `expr.clone()` → `expr` on a single line. Targets the simple
-/// trailing-clone shape; nested `clone()` chains and method-chain
-/// suffix forms are left alone (the user can rerun on shrunken
-/// input or fix manually).
-fn fix_redundant_clone(line: &str) -> String {
-    // Walk left-to-right, collapsing `something.clone()` into
-    // `something`. We honour the receiver boundary: the substring
-    // immediately to the left of `.clone()` is preserved verbatim,
-    // including any whitespace, so layout is intact.
-    let mut out = String::with_capacity(line.len());
-    let mut rest = line;
-    while let Some(pos) = rest.find(".clone()") {
-        out.push_str(&rest[..pos]);
-        rest = &rest[pos + ".clone()".len()..];
-    }
-    out.push_str(rest);
-    out
 }
 
 /// Rewrite a single-line `match e { Pat(args) => body }` (one arm,
@@ -1671,28 +1552,6 @@ fn fix_single_variant_match_inline(line: &str) -> Option<String> {
         return None;
     }
     Some(format!("{indent}if let {pat} = {scrutinee} {{ {body} }}"))
-}
-
-/// True when the line is a match-arm line whose body is empty —
-/// `_ => ()`, `Pat => {}`, `Pat => {},`. The fixer drops these so
-/// match exhaustiveness handles the missing arm.
-fn is_empty_match_arm_line(line: &str) -> bool {
-    let trimmed = line.trim().trim_end_matches(',').trim();
-    trimmed.ends_with("=> ()") || trimmed.ends_with("=> {}") || trimmed.ends_with("=>{}")
-}
-
-/// `Type{ true }` → `Type`. Strips the always-true predicate while
-/// leaving every other refinement shape alone.
-fn fix_redundant_refinement(line: &str) -> String {
-    // Search for the literal `{ true }` and the variants `{true}` /
-    // `{ true}` / `{true }`. The receiver token immediately to the
-    // left is whatever the type name is — we don't need to inspect
-    // it.
-    let mut out = line.to_string();
-    for needle in &["{ true }", "{true}", "{true }", "{ true}"] {
-        out = out.replace(needle, "");
-    }
-    out
 }
 
 /// Conservative shadow-binding fix: rename the `let x = …` /
@@ -1730,35 +1589,6 @@ fn fix_shadow_rename_inner(line: &str) -> Option<String> {
     Some(format!("{indent}{prefix}{new_name}{suffix}"))
 }
 
-/// `// TODO` → `// TODO(#0000)` (and the same for FIXME / HACK /
-/// XXX). The user is expected to fill in a real tracker number; the
-/// next lint pass keeps complaining if they don't.
-fn fix_todo_with_placeholder_issue(line: &str) -> String {
-    let mut out = line.to_string();
-    for marker in &["TODO", "FIXME", "HACK", "XXX"] {
-        // Skip lines that already carry an issue tag.
-        if out.contains(&format!("{marker}(#")) {
-            continue;
-        }
-        // Replace the bare marker followed by a delimiter (':',
-        // ' ', or end-of-line) — but only the first occurrence.
-        let needle = format!("{marker}:");
-        if let Some(pos) = out.find(&needle) {
-            let head = &out[..pos];
-            let tail = &out[pos + needle.len()..];
-            out = format!("{head}{marker}(#0000):{tail}");
-            continue;
-        }
-        let bare = format!("{marker} ");
-        if let Some(pos) = out.find(&bare) {
-            let head = &out[..pos];
-            let tail = &out[pos + bare.len()..];
-            out = format!("{head}{marker}(#0000) {tail}");
-        }
-    }
-    out
-}
-
 /// Check if a string is a small literal (Int, Float, Bool)
 fn is_small_literal(s: &str) -> bool {
     if s == "true" || s == "false" {
@@ -1790,6 +1620,27 @@ fn is_small_literal(s: &str) -> bool {
 /// Parsed information about the file for cross-rule analysis
 struct FileInfo {
     lines: Vec<String>,
+    /// Lex-mask classifying every source byte as Code / Comment /
+    /// String. Built once per file; lint rules consult it through
+    /// the [`code_view`] / [`code_or_comment_view`] helpers so a
+    /// substring like `Box::new` is only flagged when its bytes
+    /// really are program code.
+    mask: super::lex_mask::LexMask,
+    /// Byte offset (into `content`) of the start of each source
+    /// line. `line_offsets[i]` is the start of line `i` (0-based).
+    /// `line_offsets.len() == lines.len()`.
+    line_offsets: Vec<usize>,
+    /// Code-view of each source line: the original line bytes with
+    /// every non-Code byte replaced by ASCII space. Preserves
+    /// column positions so `find()` results stay accurate. Lint
+    /// rules that should ignore comment / string contents iterate
+    /// over `code_lines` instead of `lines`.
+    code_lines: Vec<String>,
+    /// Code-or-comment view: every String/RawString byte replaced
+    /// by space, comment bytes kept. Used by `todo-in-code` so
+    /// `// TODO` and `/* TODO */` fire but `let s = "TODO"` does
+    /// not.
+    code_or_comment_lines: Vec<String>,
     /// All context declarations found: "context Name { ... }"
     context_decls: HashSet<String>,
     /// All type declarations: name -> (line, field_count)
@@ -1807,6 +1658,15 @@ struct FileInfo {
 impl FileInfo {
     fn parse(content: &str) -> Self {
         let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        // Build the lexical mask once; all text-scan rules share it.
+        let mask = super::lex_mask::LexMask::new(content);
+        // Compute byte offsets for each source line so we can
+        // translate (line, col) ↔ absolute byte index.
+        let line_offsets = compute_line_offsets(content, lines.len());
+        // Pre-render the masked views so per-line scans are a flat
+        // string operation.
+        let (code_lines, code_or_comment_lines) =
+            build_masked_views(content, &mask, &lines, &line_offsets);
         let mut context_decls = HashSet::new();
         let mut type_decls = HashMap::new();
         let mut types_with_resource_methods = HashSet::new();
@@ -1950,6 +1810,10 @@ impl FileInfo {
 
         FileInfo {
             lines,
+            mask,
+            line_offsets,
+            code_lines,
+            code_or_comment_lines,
             context_decls,
             type_decls,
             types_with_resource_methods,
@@ -1958,6 +1822,113 @@ impl FileInfo {
             result_returning_fns,
         }
     }
+
+    /// Code-view of `lines[idx]`: comment + string bytes replaced
+    /// with spaces. Returns an empty string for out-of-range
+    /// indices so callers don't have to bounds-check.
+    fn code_line(&self, idx: usize) -> &str {
+        self.code_lines.get(idx).map(|s| s.as_str()).unwrap_or("")
+    }
+
+    /// Code-or-comment view of `lines[idx]`: only string-literal
+    /// bytes blanked out.
+    fn code_or_comment_line(&self, idx: usize) -> &str {
+        self.code_or_comment_lines
+            .get(idx)
+            .map(|s| s.as_str())
+            .unwrap_or("")
+    }
+}
+
+/// Compute byte offsets of each source line. `line_offsets[i]` is
+/// the start byte (in `content`) of line `i` (0-based). The result
+/// has exactly `line_count` entries — matching what
+/// `content.lines().count()` produced — even when the file ends
+/// without a trailing newline.
+fn compute_line_offsets(content: &str, line_count: usize) -> Vec<usize> {
+    let mut out = Vec::with_capacity(line_count);
+    out.push(0);
+    let bytes = content.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'\n' {
+            // Start of next line is the byte after `\n`. Bound on
+            // line_count guards a trailing newline producing an
+            // extra phantom entry.
+            if out.len() < line_count {
+                out.push(i + 1);
+            }
+        }
+    }
+    // Should be unreachable, but keep length consistent.
+    while out.len() < line_count {
+        out.push(bytes.len());
+    }
+    out.truncate(line_count);
+    out
+}
+
+/// Render the masked views for every source line.
+fn build_masked_views(
+    content: &str,
+    mask: &super::lex_mask::LexMask,
+    lines: &[String],
+    line_offsets: &[usize],
+) -> (Vec<String>, Vec<String>) {
+    let mut code_lines = Vec::with_capacity(lines.len());
+    let mut code_or_comment_lines = Vec::with_capacity(lines.len());
+    let bytes = content.as_bytes();
+    for (i, line) in lines.iter().enumerate() {
+        let start = line_offsets[i];
+        let end = (start + line.len()).min(bytes.len());
+        // Walk byte-by-byte. We replace every non-Code byte (or
+        // non-Code-or-Comment byte for the `cc` view) with ASCII
+        // space. The LexMask classifies every byte of a multi-byte
+        // UTF-8 sequence with the same class — a `—` em-dash
+        // inside a comment has all three of its bytes tagged
+        // BlockComment / LineComment — so blanking them all
+        // produces valid UTF-8: in non-Code regions the output is
+        // pure ASCII spaces, and in Code regions the original
+        // bytes pass through unchanged.
+        //
+        // Earlier versions of this code attempted to preserve
+        // continuation bytes verbatim when the leader was blanked
+        // (to "minimise garble"), but that produces invalid UTF-8
+        // — `0x20 0x80` is not a valid sequence — and panics
+        // during `String::from_utf8`. Lint logic never reads
+        // masked bytes back as text, so blanking the whole code
+        // point is the right call.
+        let mut code = Vec::with_capacity(line.len());
+        let mut cc = Vec::with_capacity(line.len());
+        for b in start..end {
+            let class = mask.class_at(b);
+            let byte = bytes[b];
+            match class {
+                super::lex_mask::ByteClass::Code => {
+                    code.push(byte);
+                    cc.push(byte);
+                }
+                super::lex_mask::ByteClass::LineComment
+                | super::lex_mask::ByteClass::BlockComment => {
+                    code.push(b' ');
+                    cc.push(byte);
+                }
+                super::lex_mask::ByteClass::String
+                | super::lex_mask::ByteClass::RawString => {
+                    code.push(b' ');
+                    cc.push(b' ');
+                }
+            }
+        }
+        // SAFETY: in Code spans we push the original UTF-8 bytes
+        // unchanged; in String/RawString spans we push only ASCII
+        // spaces (so all bytes of a multi-byte char are uniformly
+        // blanked); in Comment spans we push the original bytes
+        // verbatim (preserving multi-byte chars). The output is
+        // therefore valid UTF-8 by construction.
+        code_lines.push(String::from_utf8(code).expect("UTF-8"));
+        code_or_comment_lines.push(String::from_utf8(cc).expect("UTF-8"));
+    }
+    (code_lines, code_or_comment_lines)
 }
 
 /// Parse a mount statement to extract module path and imported names
@@ -2019,8 +1990,9 @@ fn extract_between(s: &str, open: char, close: char) -> &str {
 fn check_unchecked_refinement(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
     let mut prev_lines_have_verify = false;
 
-    for (line_num, line) in info.lines.iter().enumerate() {
-        let trimmed = line.trim();
+    for line_num in 0..info.lines.len() {
+        let code = info.code_line(line_num);
+        let trimmed = code.trim();
 
         if trimmed.starts_with("@verify") {
             prev_lines_have_verify = true;
@@ -2029,9 +2001,7 @@ fn check_unchecked_refinement(path: &Path, info: &FileInfo, issues: &mut List<Li
 
         // Look for function signatures bearing a refinement-typed
         // parameter. Verum syntax: `<BaseType>{ <predicate> }` —
-        // the `{` follows the type name with no whitespace. Heuristic:
-        // an `Int{` / `Text{` / `Float{` / `<Custom>{` token inside
-        // the parameter list of an `fn` declaration.
+        // the `{` follows the type name with no whitespace.
         let is_fn_decl = trimmed.starts_with("fn ")
             || trimmed.starts_with("pub fn ")
             || trimmed.starts_with("public fn ");
@@ -2063,7 +2033,14 @@ fn check_unchecked_refinement(path: &Path, info: &FileInfo, issues: &mut List<Li
         }
 
         // Reset @verify tracking once we leave the annotation block.
-        if !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with('@') {
+        // Use the raw line for the comment check so a line whose
+        // *only* content is a comment still counts as "still inside
+        // the @verify scope".
+        let raw_trimmed = info.lines[line_num].trim();
+        if !raw_trimmed.is_empty()
+            && !raw_trimmed.starts_with("//")
+            && !raw_trimmed.starts_with('@')
+        {
             prev_lines_have_verify = false;
         }
     }
@@ -2088,13 +2065,16 @@ fn has_refinement_token(s: &str) -> bool {
 
 /// Rule 2: MissingContextDecl
 /// Functions using `using [X]` where X is not declared as a context in scope.
+///
+/// Runs over the masked code view so a `using [` mention inside
+/// a string literal or comment doesn't fire.
 fn check_missing_context_decl(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for (line_num, line) in info.lines.iter().enumerate() {
-        let trimmed = line.trim();
+    for line_num in 0..info.lines.len() {
+        let code = info.code_line(line_num);
 
         // Look for "using [ContextA, ContextB]" in function signatures
-        if let Some(using_pos) = trimmed.find("using [") {
-            let after_using = &trimmed[using_pos + 7..];
+        if let Some(using_pos) = code.find("using [") {
+            let after_using = &code[using_pos + 7..];
             if let Some(bracket_end) = after_using.find(']') {
                 let context_list = &after_using[..bracket_end];
                 for ctx_name in context_list.split(',') {
@@ -2111,7 +2091,7 @@ fn check_missing_context_decl(path: &Path, info: &FileInfo, issues: &mut List<Li
                             .any(|(_, names, _)| names.iter().any(|n| n == ctx_name || n == "*"));
 
                         if !imported {
-                            let col = line.find("using [").unwrap_or(0) + 1;
+                            let col = using_pos + 1;
                             issues.push(LintIssue {
                                 rule: "missing-context-decl",
                                 level: LintLevel::Error,
@@ -2141,9 +2121,12 @@ fn check_missing_context_decl(path: &Path, info: &FileInfo, issues: &mut List<Li
 
 /// Rule 3: UnusedImport
 /// Mount statements where the imported name is never referenced in the file.
+///
+/// Search runs over the per-line code mask, so a `mount foo.{bar}`
+/// followed only by `// bar is great` no longer counts as a use —
+/// the comment is masked out in `code_lines`.
 fn check_unused_imports(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
     for (module_path, names, mount_line) in &info.mount_imports {
-        // Wildcard imports can't be checked
         if names.iter().any(|n| n == "*") {
             continue;
         }
@@ -2152,19 +2135,11 @@ fn check_unused_imports(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
             if name.is_empty() {
                 continue;
             }
-
-            // Check if the name appears anywhere in the file other than the mount line
-            let used = info.lines.iter().enumerate().any(|(idx, line)| {
+            let used = (0..info.lines.len()).any(|idx| {
                 if idx == *mount_line {
                     return false;
                 }
-                let trimmed = line.trim();
-                // Skip comments
-                if trimmed.starts_with("//") {
-                    return false;
-                }
-                // Check for the name as a word boundary (not just substring)
-                contains_word(trimmed, name)
+                contains_word(info.code_line(idx), name)
             });
 
             if !used {
@@ -2213,15 +2188,13 @@ fn contains_word(line: &str, word: &str) -> bool {
 
 /// Rule 4: UnnecessaryHeap
 /// Heap(x) where x is a small type (Int, Float, Bool) literal.
+///
+/// Iterates the masked code view so `let s = "Heap(5)"` (string
+/// data) doesn't match.
 fn check_unnecessary_heap(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for (line_num, line) in info.lines.iter().enumerate() {
-        let trimmed = line.trim();
-        // Skip comments
-        if trimmed.starts_with("//") {
-            continue;
-        }
+    for line_num in 0..info.lines.len() {
+        let line = info.code_line(line_num);
 
-        // Scan for Heap(literal) patterns
         let mut search_start = 0;
         while let Some(pos) = line[search_start..].find("Heap(") {
             let abs_pos = search_start + pos;
@@ -2316,12 +2289,14 @@ fn find_matching_paren(s: &str) -> Option<usize> {
 
 /// Rule 5: MissingErrorContext
 /// `?` operator usage without `.with_context()` or `.map_err()`.
+///
+/// Iterates the masked code view so a `?` inside a string literal
+/// or comment doesn't trip the rule.
 fn check_missing_error_context(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for (line_num, line) in info.lines.iter().enumerate() {
-        let trimmed = line.trim();
-
-        // Skip comments
-        if trimmed.starts_with("//") {
+    for line_num in 0..info.lines.len() {
+        let line = info.code_line(line_num);
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() {
             continue;
         }
 
@@ -2379,9 +2354,13 @@ fn check_missing_error_context(path: &Path, info: &FileInfo, issues: &mut List<L
 
 /// Rule 6: LargeCopy
 /// Function parameters taking large struct types by value (>4 fields).
+///
+/// Reads the masked code view so a `fn …(` mention inside a doc
+/// comment doesn't get parsed as a real signature.
 fn check_large_copy(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for (line_num, line) in info.lines.iter().enumerate() {
-        let trimmed = line.trim();
+    for line_num in 0..info.lines.len() {
+        let line = info.code_line(line_num);
+        let trimmed = line.trim_start();
 
         // Look for function signatures
         if !trimmed.starts_with("fn ") && !trimmed.starts_with("pub fn ") {
@@ -2472,13 +2451,15 @@ fn split_params(params: &str) -> Vec<&str> {
 
 /// Rule 7: UnusedResult
 /// Function calls returning Result/Maybe whose value is not bound or propagated.
+///
+/// Iterates the masked code view; comments now disappear into
+/// blanks so the rule never reads a `// foo();` as a real call.
 fn check_unused_result(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for (line_num, line) in info.lines.iter().enumerate() {
-        let trimmed = line.trim();
+    for line_num in 0..info.lines.len() {
+        let line = info.code_line(line_num);
+        let trimmed = line.trim_start();
 
-        // Skip comments, blank lines, control flow
         if trimmed.is_empty()
-            || trimmed.starts_with("//")
             || trimmed.starts_with("let ")
             || trimmed.starts_with("return ")
             || trimmed.starts_with("if ")
@@ -2588,18 +2569,20 @@ fn check_missing_cleanup(path: &Path, info: &FileInfo, issues: &mut List<LintIss
 
 /// Rule 9: DeprecatedSyntax
 /// Check for Rust-isms: struct, impl, !, Vec<T>, etc.
+///
+/// Runs over the **code-only view** of each line ([`FileInfo::code_line`]),
+/// so substrings appearing inside string literals or comments do not
+/// fire. The column positions are preserved by replacing non-code
+/// bytes with ASCII spaces.
 fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for (line_num, line) in info.lines.iter().enumerate() {
-        let trimmed = line.trim();
+    for line_num in 0..info.lines.len() {
+        let code = info.code_line(line_num);
+        let trimmed = code.trim_start();
+        let leading = code.len() - trimmed.len();
 
-        // Skip comments
-        if trimmed.starts_with("//") {
-            continue;
-        }
-
-        // Check for `struct` keyword (should be `type Name is { ... }`)
+        // `struct` / `pub struct` — first token of the line.
         if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
-            let col = line.find("struct").unwrap_or(0) + 1;
+            let col = leading + trimmed.find("struct").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2612,12 +2595,11 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for bare `impl` instead of `implement`
-        // Be careful not to match "implement" itself
+        // bare `impl` — careful not to match `implement`.
         if (trimmed.starts_with("impl ") || trimmed.starts_with("pub impl "))
             && !trimmed.starts_with("implement")
         {
-            let col = line.find("impl").unwrap_or(0) + 1;
+            let col = leading + trimmed.find("impl").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2630,9 +2612,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for `trait` keyword (should be `type Name is protocol { ... }`)
+        // `trait` / `pub trait`.
         if trimmed.starts_with("trait ") || trimmed.starts_with("pub trait ") {
-            let col = line.find("trait").unwrap_or(0) + 1;
+            let col = leading + trimmed.find("trait").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2645,9 +2627,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for `enum` keyword (should be sum type)
+        // `enum` / `pub enum`.
         if trimmed.starts_with("enum ") || trimmed.starts_with("pub enum ") {
-            let col = line.find("enum").unwrap_or(0) + 1;
+            let col = leading + trimmed.find("enum").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2660,9 +2642,11 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for Vec<T> (should be List<T>)
-        if contains_word(trimmed, "Vec") && trimmed.contains("Vec<") {
-            let col = line.find("Vec<").unwrap_or(0) + 1;
+        // `Vec<T>` — only when used as a type constructor (followed
+        // by `<`). Word-boundary-aware so identifiers like `MyVec`
+        // are not flagged.
+        if contains_word(code, "Vec") && code.contains("Vec<") {
+            let col = code.find("Vec<").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2675,16 +2659,19 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for String type (should be Text)
-        // Be careful: only flag standalone "String" as a type, not inside strings
-        if contains_word(trimmed, "String") && !trimmed.starts_with("//") {
-            // Heuristic: "String" appearing after : or < or as a type annotation
-            if trimmed.contains(": String")
-                || trimmed.contains("<String>")
-                || trimmed.contains("-> String")
+        // `String` as a type annotation. Heuristics: appearing in
+        // `: String`, `<String>`, `-> String`, or as the line's
+        // first token. The mask already excluded user strings, so
+        // the remaining false-positive class is "the word appears
+        // as code but isn't a type" — those forms are caught by the
+        // narrow context tests below.
+        if contains_word(code, "String") {
+            if code.contains(": String")
+                || code.contains("<String>")
+                || code.contains("-> String")
                 || trimmed.starts_with("String")
             {
-                let col = line.find("String").unwrap_or(0) + 1;
+                let col = code.find("String").unwrap_or(0) + 1;
                 issues.push(LintIssue {
                     rule: "deprecated-syntax",
                     level: LintLevel::Error,
@@ -2698,9 +2685,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             }
         }
 
-        // Check for HashMap (should be Map)
-        if contains_word(trimmed, "HashMap") {
-            let col = line.find("HashMap").unwrap_or(0) + 1;
+        // `HashMap` — collection type alias.
+        if contains_word(code, "HashMap") {
+            let col = code.find("HashMap").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2713,9 +2700,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for HashSet (should be Set)
-        if contains_word(trimmed, "HashSet") {
-            let col = line.find("HashSet").unwrap_or(0) + 1;
+        // `HashSet`.
+        if contains_word(code, "HashSet") {
+            let col = code.find("HashSet").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2728,7 +2715,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for ! macro syntax: println!(), format!(), panic!(), assert!(), etc.
+        // `!`-macro syntax: println!(), format!(), panic!(), …. The
+        // `!` and the ( must both be on the code path, so the mask
+        // ensures we never misfire on `// "panic!(`.
         let macro_patterns = [
             ("println!(", "print("),
             ("format!(", "f\"...\""),
@@ -2741,8 +2730,8 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             ("vec![", "List ["),
         ];
         for (bad, good) in &macro_patterns {
-            if trimmed.contains(bad) {
-                let col = line.find(bad).unwrap_or(0) + 1;
+            if code.contains(bad) {
+                let col = code.find(bad).unwrap_or(0) + 1;
                 issues.push(LintIssue {
                     rule: "deprecated-syntax",
                     level: LintLevel::Error,
@@ -2756,9 +2745,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             }
         }
 
-        // Check for `use` keyword (should be `mount`)
+        // `use` keyword (Rust import) — Verum uses `mount`.
         if trimmed.starts_with("use ") && !trimmed.starts_with("using") {
-            let col = 1;
+            let col = leading + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2771,9 +2760,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for Box::new (should be Heap())
-        if trimmed.contains("Box::new(") {
-            let col = line.find("Box::new(").unwrap_or(0) + 1;
+        // `Box::new(` — Heap is the Verum equivalent.
+        if code.contains("Box::new(") {
+            let col = code.find("Box::new(").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2786,11 +2775,13 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // Check for :: path separator (should be .)
-        // Only flag when it looks like a path, not inside strings
-        if trimmed.contains("::") && !trimmed.starts_with("//") && !trimmed.contains("\"") {
-            // Heuristic: A::B pattern that's not inside a string literal
-            let col = line.find("::").unwrap_or(0) + 1;
+        // `::` path separator. The mask already eliminated all
+        // string-literal `::` occurrences, so the previous
+        // anti-string `!trimmed.contains("\"")` heuristic is
+        // gone — the rule now fires correctly even on lines that
+        // mix code and a string with `::` in it.
+        if code.contains("::") {
+            let col = code.find("::").unwrap_or(0) + 1;
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
@@ -2807,6 +2798,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
 
 /// Rule 10: CbgrHotspot
 /// Tight loops containing reference dereferences that could use &checked.
+///
+/// Walks the masked code view; brace tracking is exact because
+/// strings and comments contribute only spaces to the view.
 fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
     let mut in_loop = false;
     let mut loop_start_line: usize = 0;
@@ -2814,7 +2808,8 @@ fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>
     let mut loop_has_deref = false;
     let mut deref_lines: Vec<usize> = Vec::new();
 
-    for (line_num, line) in info.lines.iter().enumerate() {
+    for line_num in 0..info.lines.len() {
+        let line = info.code_line(line_num);
         let trimmed = line.trim();
 
         // Track loop entry
@@ -2826,7 +2821,6 @@ fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>
                 deref_lines.clear();
                 loop_depth = 0;
             }
-            // Count braces on the loop line itself
             for ch in trimmed.chars() {
                 match ch {
                     '{' => loop_depth += 1,
@@ -2848,8 +2842,7 @@ fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>
 
             // Check for reference dereferences inside the loop
             // Patterns: *ref_name, &variable (tier 0 reference creation), .deref()
-            if trimmed.contains('*') && !trimmed.starts_with("//") {
-                // Simple heuristic: * followed by an identifier
+            if trimmed.contains('*') {
                 let mut chars = trimmed.chars().peekable();
                 while let Some(ch) = chars.next() {
                     if ch == '*' {
@@ -2864,7 +2857,6 @@ fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>
                 }
             }
 
-            // Also flag &T references created inside loops (CBGR overhead per iteration)
             if (trimmed.contains("&") && !trimmed.contains("&&") && !trimmed.contains("&checked") && !trimmed.contains("&unsafe"))
                 && (trimmed.contains("let ") || trimmed.contains("= &"))
             {
@@ -3012,44 +3004,113 @@ fn lint_paths_parallel_with_cache(
         .collect();
     let total_files = files.len();
 
-    let issues: Vec<LintIssue> = files
-        .par_iter()
-        .flat_map(|path| lint_one_with_cache(path, cfg, cache))
-        .collect();
+    // Per-file phase. Each invocation returns the issue list AND
+    // (when a parse happened) the parsed module + source — so the
+    // cross-file phase can reuse them without re-parsing. Cache
+    // hits skip the parse, so the corpus file is None and the
+    // cross-file phase will fill it in below.
+    let per_file: Vec<(PathBuf, Vec<LintIssue>, Option<super::lint_engine::CorpusFile>)> =
+        files
+            .par_iter()
+            .map(|path| {
+                let (issues, corpus) = lint_one_with_cache(path, cfg, cache);
+                (path.clone(), issues, corpus)
+            })
+            .collect();
 
-    let mut issues = issues;
+    let mut issues: Vec<LintIssue> =
+        per_file.iter().flat_map(|(_, i, _)| i.iter().cloned()).collect();
+
+    // Cross-file phase. Fill in the parsed AST for cache-hit
+    // entries (we only have the path), then run cross-file passes
+    // on the assembled corpus. Single-source-of-truth parses: each
+    // file is parsed at most once across the entire `verum lint`
+    // invocation.
+    let mut corpus: Vec<super::lint_engine::CorpusFile> =
+        Vec::with_capacity(per_file.len());
+    let mut to_parse: Vec<PathBuf> = Vec::new();
+    for (path, _, c) in per_file {
+        match c {
+            Some(cf) => corpus.push(cf),
+            None => to_parse.push(path),
+        }
+    }
+    if !to_parse.is_empty() {
+        let recovered: Vec<super::lint_engine::CorpusFile> = to_parse
+            .par_iter()
+            .filter_map(|p| parse_corpus_file(p))
+            .collect();
+        corpus.extend(recovered);
+    }
+
+    if !corpus.is_empty() {
+        let ctx = super::lint_engine::CorpusCtx {
+            files: &corpus,
+            config: Some(cfg),
+        };
+        for i in super::lint_engine::run_cross_file(&ctx) {
+            issues.push(i);
+        }
+    }
+
     issues.sort_by(|a, b| issue_sort_key(a).cmp(&issue_sort_key(b)));
     (issues, total_files)
 }
 
+/// Read + parse one file into a `CorpusFile`. Returns None for
+/// unreadable / unparseable files — cross-file passes simply skip
+/// them, mirroring the per-file phase's behaviour.
+fn parse_corpus_file(path: &Path) -> Option<super::lint_engine::CorpusFile> {
+    use verum_ast::FileId;
+    use verum_lexer::Lexer;
+    use verum_parser::VerumParser;
+    let source = fs::read_to_string(path).ok()?;
+    let fid = FileId::new(0);
+    let lexer = Lexer::new(&source, fid);
+    let parser = VerumParser::new();
+    let module = parser.parse_module(lexer, fid).ok()?;
+    Some(super::lint_engine::CorpusFile {
+        path: path.to_path_buf(),
+        source,
+        module,
+    })
+}
+
 /// Process one file: cache hit → reuse; cache miss → lint, persist,
 /// return. Read-error files are surfaced as warnings and contribute
-/// no issues.
+/// no issues. The `CorpusFile` half of the return is `Some` only on
+/// the cache-miss branch — the parse the per-file rules just did is
+/// handed to the caller so the cross-file phase doesn't repeat it.
 fn lint_one_with_cache(
     path: &Path,
     cfg: &LintConfig,
     cache: &super::lint_cache::LintCache,
-) -> Vec<LintIssue> {
+) -> (Vec<LintIssue>, Option<super::lint_engine::CorpusFile>) {
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("warning: failed to read {}: {}", path.display(), e);
-            return Vec::new();
+            return (Vec::new(), None);
         }
     };
     let sh = super::lint_cache::source_hash(&content);
     if let Some(cached) = cache.load(&sh) {
-        return cached;
+        return (cached, None);
     }
-    let issues = match lint_content_with(path, &content, cfg) {
-        Ok(i) => i.into_iter().collect::<Vec<_>>(),
+    let (issues, module) = match lint_content_with_module(path, &content, cfg) {
+        Ok((i, m)) => (i.into_iter().collect::<Vec<_>>(), m),
         Err(e) => {
             eprintln!("warning: failed to lint {}: {}", path.display(), e);
-            Vec::new()
+            (Vec::new(), None)
         }
     };
     cache.store(&sh, &issues);
-    issues
+    let corpus = module.map(|m| super::lint_engine::CorpusFile {
+        path: path.to_path_buf(),
+        source: content,
+        module: m,
+    });
+    (issues, corpus)
 }
 
 /// Lint already-loaded content. Hot-path counterpart to
@@ -3059,6 +3120,21 @@ fn lint_content_with(
     content: &str,
     cfg: &LintConfig,
 ) -> Result<List<LintIssue>> {
+    let (issues, _) = lint_content_with_module(path, content, cfg)?;
+    Ok(issues)
+}
+
+/// Same as [`lint_content_with`] but also returns the parsed
+/// [`verum_ast::Module`] when the file parsed successfully — so
+/// callers (the parallel runner) can hand the module to the
+/// cross-file phase without re-parsing. Returns `(issues, None)`
+/// when the file was syntactically broken (text-scan rules still
+/// produced their issues; the AST passes were skipped).
+fn lint_content_with_module(
+    path: &Path,
+    content: &str,
+    cfg: &LintConfig,
+) -> Result<(List<LintIssue>, Option<verum_ast::Module>)> {
     let mut issues = List::new();
     let info = FileInfo::parse(content);
 
@@ -3083,17 +3159,46 @@ fn lint_content_with(
     let fid = FileId::new(0);
     let lexer = Lexer::new(content, fid);
     let parser = VerumParser::new();
-    if let Ok(module) = parser.parse_module(lexer, fid) {
+    let parsed_module = match parser.parse_module(lexer, fid) {
+        Ok(m) => Some(m),
+        Err(errors) => {
+            // Surface the parser failure as a structured `parse-error`
+            // diagnostic so the user sees the AST half of the lint
+            // pipeline was skipped for this file. The text-scan rules
+            // above still ran. We emit one issue per parser error;
+            // most files fail with one, but the parser may return a
+            // small list when it can recover.
+            for err in errors.iter() {
+                let (line, column) =
+                    super::lint_engine::span_to_line_col(content, err.span.start as u32);
+                issues.push(LintIssue {
+                    rule: "parse-error",
+                    level: LintLevel::Error,
+                    file: path.to_path_buf(),
+                    line: line.max(1),
+                    column: column.max(1),
+                    message: format!("parse error: {}", err.kind),
+                    suggestion: err
+                        .help
+                        .as_ref()
+                        .map(|h| Text::from(h.as_str())),
+                    fixable: false,
+                });
+            }
+            None
+        }
+    };
+    if let Some(module) = parsed_module.as_ref() {
         let ctx = super::lint_engine::LintCtx {
             file: path,
             source: content,
-            module: &module,
+            module,
             config: Some(cfg),
         };
         for issue in super::lint_engine::run(&ctx) {
             issues.push(issue);
         }
-        let scopes = super::lint_engine::collect_suppressions(&module, content);
+        let scopes = super::lint_engine::collect_suppressions(module, content);
         if !scopes.is_empty() {
             let collected: Vec<_> = std::mem::take(&mut issues).into_iter().collect();
             let suppressed = super::lint_engine::apply_suppressions(collected, &scopes);
@@ -3102,43 +3207,14 @@ fn lint_content_with(
             }
         }
     }
-    Ok(issues)
+    Ok((issues, parsed_module))
 }
 
-/// Build the corpus, run every cross-file pass, return the issues.
-/// Files that fail to parse are excluded — cross-file rules need a
-/// `Module`, and the per-file phase already surfaced the parse
-/// error. This is the single place that re-parses for the corpus
-/// view; future work could share the per-file parses if memory
-/// budget allows.
-fn run_cross_file_phase(files: &[PathBuf], cfg: &LintConfig) -> Vec<LintIssue> {
-    use rayon::prelude::*;
-    use verum_ast::FileId;
-    use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
-
-    let parsed: Vec<super::lint_engine::CorpusFile> = files
-        .par_iter()
-        .filter_map(|path| {
-            let source = fs::read_to_string(path).ok()?;
-            let fid = FileId::new(0);
-            let lexer = Lexer::new(&source, fid);
-            let parser = VerumParser::new();
-            let module = parser.parse_module(lexer, fid).ok()?;
-            Some(super::lint_engine::CorpusFile {
-                path: path.clone(),
-                source,
-                module,
-            })
-        })
-        .collect();
-
-    let ctx = super::lint_engine::CorpusCtx {
-        files: &parsed,
-        config: Some(cfg),
-    };
-    super::lint_engine::run_cross_file(&ctx)
-}
+// `run_cross_file_phase` was previously the single re-parse site
+// for the corpus view; with the unified-parse refactor in
+// `lint_paths_parallel_with_cache` and `run_extended_inner`, every
+// caller now drives the cross-file pass off the per-file parse so
+// the helper is no longer needed.
 
 /// CLI entry: wipe the lint cache and exit. Idempotent — calling
 /// when the cache doesn't exist is a no-op.
@@ -3183,48 +3259,70 @@ fn build_lint_cache(cfg: &LintConfig) -> super::lint_cache::LintCache {
 
 /// Extended lint rules (11-20): Verum-specific analysis beyond Clippy.
 fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for (line_num, line) in info.lines.iter().enumerate() {
-        let trimmed = line.trim();
+    for line_num in 0..info.lines.len() {
+        // Three views of the same line:
+        //   raw   — original bytes (used for column-1 messaging on
+        //           pure-comment lines and for indentation queries),
+        //   code  — code-only (no comments, no strings),
+        //   cc    — code + comments (no strings) — todo-in-code.
+        let raw = &info.lines[line_num];
+        let code = info.code_line(line_num);
+        let cc = info.code_or_comment_line(line_num);
+        let trimmed = code.trim_start();
+        let raw_trim = raw.trim_start();
+        let leading = raw.len() - raw_trim.len();
 
-        // todo-in-code is the one rule that needs to read comment
-        // lines — every other rule below skips them, so we run it
-        // first and then early-out on comments.
-        if trimmed.starts_with("//") {
-            for marker in &["TODO", "FIXME", "HACK", "XXX"] {
-                if trimmed.contains(marker)
-                    // Suppress when the marker carries a tracking ref
-                    // such as TODO(#1234) — that's the form
-                    // [lint.rules.todo-in-code].require-issue-link
-                    // expects.
-                    && !trimmed.contains(&format!("{}(#", marker))
+        // ── todo-in-code: full-line and inline trailing comments ──
+        // The `cc` view sees comment bytes but not string literals,
+        // which closes the `let s = "TODO";` false-positive class.
+        for marker in &["TODO", "FIXME", "HACK", "XXX"] {
+            if let Some(pos) = cc.find(marker) {
+                if !cc[pos..].starts_with(&format!("{marker}(#"))
+                    // The marker must lie within a comment span (i.e.
+                    // not pure code) — `cc` already blanks strings,
+                    // so the condition reduces to "not in `code`".
+                    && code.get(pos..pos + marker.len()).map(|s| s != *marker).unwrap_or(true)
                 {
                     issues.push(LintIssue {
                         rule: "todo-in-code",
                         level: LintLevel::Warning,
                         file: path.to_path_buf(),
                         line: line_num + 1,
-                        column: trimmed.find(marker).unwrap_or(0) + 1,
-                        message: format!("{} comment in code", marker),
-                        suggestion: Some(format!("{}(#0000)", marker).into()),
+                        column: pos + 1,
+                        message: format!("{marker} comment in code"),
+                        suggestion: Some(format!("{marker}(#0000)").into()),
                         fixable: true,
                     });
                     break;
                 }
             }
+        }
+
+        // Pure-comment line — none of the rules below can fire
+        // outside Code spans, so we skip them. The `code` view is
+        // empty after trim for lines whose only content is `//` /
+        // `/* */`, which is the exact discriminator we want.
+        if trimmed.is_empty() {
             continue;
         }
 
-        // Rule 11: mutable-capture-in-spawn
-        // `spawn { ... mut_var ... }` where mut_var is `let mut` in outer scope
-        if trimmed.contains("spawn") && trimmed.contains('{') {
-            // Check if any `let mut` variables from preceding lines are referenced
-            for prev_line in &info.lines[..line_num] {
-                let prev = prev_line.trim();
+        // mutable-capture-in-spawn: `spawn { ... }` capturing a
+        // surrounding `let mut`. Walk preceding code-only lines so
+        // a `// let mut x` comment doesn't poison the search.
+        if code.contains("spawn") && code.contains('{') {
+            for prev_idx in 0..line_num {
+                let prev = info.code_line(prev_idx).trim_start();
                 if prev.starts_with("let mut ") {
                     if let Some(var_name) = prev.strip_prefix("let mut ").and_then(|s| s.split_whitespace().next()) {
                         let var_name = var_name.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
-                        // Check if the spawn block references this variable
-                        let spawn_block: String = info.lines[line_num..].iter().take(20).cloned().collect::<Vec<_>>().join("\n");
+                        // Concatenate the next 20 code-only lines so
+                        // the variable's spawn-block reference is
+                        // detected without firing on string-literal
+                        // mentions of the name.
+                        let spawn_block: String = (line_num..line_num.saturating_add(20))
+                            .filter_map(|i| info.code_lines.get(i).cloned())
+                            .collect::<Vec<_>>()
+                            .join("\n");
                         if contains_word(&spawn_block, var_name) {
                             issues.push(LintIssue {
                                 rule: "mutable-capture-in-spawn",
@@ -3232,37 +3330,34 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                                 file: path.to_path_buf(),
                                 line: line_num + 1,
                                 column: 1,
-                                message: format!("Mutable variable `{}` captured by spawn closure", var_name),
+                                message: format!("Mutable variable `{var_name}` captured by spawn closure"),
                                 suggestion: Some("Use a Channel or Mutex to share mutable state across threads".into()),
                                 fixable: false,
                             });
-                            break; // one warning per spawn
+                            break;
                         }
                     }
                 }
             }
         }
 
-        // Rule 12: unbounded-channel — `Channel.new()` with zero
-        // args. The empty parenthesis pair is the literal signature
-        // we want; any other shape (`Channel.new(64)` /
-        // `Channel.bounded(...)`) is fine.
-        if trimmed.contains("Channel.new()") {
+        // unbounded-channel — empty Channel.new() call.
+        if let Some(pos) = code.find("Channel.new()") {
             issues.push(LintIssue {
                 rule: "unbounded-channel",
                 level: LintLevel::Warning,
                 file: path.to_path_buf(),
                 line: line_num + 1,
-                column: trimmed.find("Channel.new()").unwrap_or(0) + 1,
+                column: pos + 1,
                 message: "Channel created without capacity limit".to_string(),
                 suggestion: Some("Use Channel.new(capacity) to prevent OOM under backpressure".into()),
                 fixable: false,
             });
         }
 
-        // Rule 13: missing-timeout
-        if (trimmed.contains(".recv()") || trimmed.contains(".await") || trimmed.contains("join("))
-            && !trimmed.contains("timeout") && !trimmed.contains("try_recv") && !trimmed.contains("select")
+        // missing-timeout — blocking operation without a timeout.
+        if (code.contains(".recv()") || code.contains(".await") || code.contains("join("))
+            && !code.contains("timeout") && !code.contains("try_recv") && !code.contains("select")
         {
             issues.push(LintIssue {
                 rule: "missing-timeout",
@@ -3276,8 +3371,8 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
             });
         }
 
-        // Rule 15: empty-match-arm
-        if trimmed.contains("=> ()") || trimmed.contains("=> { }") || trimmed.ends_with("=> {},") {
+        // empty-match-arm.
+        if code.contains("=> ()") || code.contains("=> { }") || code.trim_end().ends_with("=> {},") {
             issues.push(LintIssue {
                 rule: "empty-match-arm",
                 level: LintLevel::Warning,
@@ -3290,56 +3385,31 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
             });
         }
 
-        // todo-in-code on inline trailing comments (`code; // TODO`).
-        // Pure comment-line cases are handled at the top of the loop.
-        if let Some(comment_at) = trimmed.find("//") {
-            let after = &trimmed[comment_at..];
-            for marker in &["TODO", "FIXME", "HACK", "XXX"] {
-                if after.contains(marker) && !after.contains(&format!("{}(#", marker)) {
-                    let col = comment_at
-                        + after.find(marker).unwrap_or(0)
-                        + 1;
-                    issues.push(LintIssue {
-                        rule: "todo-in-code",
-                        level: LintLevel::Warning,
-                        file: path.to_path_buf(),
-                        line: line_num + 1,
-                        column: col,
-                        message: format!("{} comment in code", marker),
-                        suggestion: Some(format!("{}(#0000)", marker).into()),
-                        fixable: true,
-                    });
-                    break;
-                }
-            }
-        }
-
-        // Rule 18: unsafe-ref-in-public
-        if trimmed.starts_with("pub fn ") && trimmed.contains("&unsafe ") {
+        // unsafe-ref-in-public.
+        if trimmed.starts_with("pub fn ") && code.contains("&unsafe ") {
             issues.push(LintIssue {
                 rule: "unsafe-ref-in-public",
                 level: LintLevel::Warning,
                 file: path.to_path_buf(),
                 line: line_num + 1,
-                column: trimmed.find("&unsafe").unwrap_or(0) + 1,
+                column: code.find("&unsafe").unwrap_or(0) + 1,
                 message: "Public function exposes &unsafe reference in its signature".to_string(),
                 suggestion: Some("Consider using &T (tier 0) or &checked T (tier 1) in public APIs".into()),
                 fixable: false,
             });
         }
 
-        // Rule 20: shadow-binding
+        // shadow-binding.
         if trimmed.starts_with("let ") || trimmed.starts_with("let mut ") {
             let var_start = if trimmed.starts_with("let mut ") { "let mut " } else { "let " };
             if let Some(var_name) = trimmed.strip_prefix(var_start).and_then(|s| s.split(|c: char| !c.is_alphanumeric() && c != '_').next()) {
                 if !var_name.is_empty() && var_name != "_" {
-                    // Check if same name was bound in an earlier line (not in inner scope)
-                    for prev in &info.lines[..line_num] {
-                        let pt = prev.trim();
-                        if (pt.starts_with("let ") || pt.starts_with("let mut ")) && contains_word(pt, var_name) {
-                            // Simple heuristic: only flag if same indentation level
-                            let cur_indent = line.len() - line.trim_start().len();
-                            let prev_indent = prev.len() - prev.trim_start().len();
+                    for prev_idx in 0..line_num {
+                        let pcode = info.code_line(prev_idx);
+                        let pt = pcode.trim_start();
+                        if (pt.starts_with("let ") || pt.starts_with("let mut ")) && contains_word(pcode, var_name) {
+                            let cur_indent = leading;
+                            let prev_indent = info.lines[prev_idx].len() - info.lines[prev_idx].trim_start().len();
                             if cur_indent == prev_indent {
                                 issues.push(LintIssue {
                                     rule: "shadow-binding",
@@ -3347,7 +3417,7 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                                     file: path.to_path_buf(),
                                     line: line_num + 1,
                                     column: 1,
-                                    message: format!("Variable `{}` shadows previous binding", var_name),
+                                    message: format!("Variable `{var_name}` shadows previous binding"),
                                     suggestion: Some(format!("rename the inner binding (e.g. `{var_name}2`)").into()),
                                     fixable: true,
                                 });
@@ -3452,23 +3522,48 @@ pub fn lint_source(
     let fid = FileId::new(0);
     let lexer = Lexer::new(content, fid);
     let parser = VerumParser::new();
-    if let Ok(module) = parser.parse_module(lexer, fid) {
-        let ctx = super::lint_engine::LintCtx {
-            file: path,
-            source: content,
-            module: &module,
-            config,
-        };
-        for issue in super::lint_engine::run(&ctx) {
-            issues.push(issue);
-        }
+    match parser.parse_module(lexer, fid) {
+        Ok(module) => {
+            let ctx = super::lint_engine::LintCtx {
+                file: path,
+                source: content,
+                module: &module,
+                config,
+            };
+            for issue in super::lint_engine::run(&ctx) {
+                issues.push(issue);
+            }
 
-        let scopes = super::lint_engine::collect_suppressions(&module, content);
-        if !scopes.is_empty() {
-            let collected: Vec<_> = std::mem::take(&mut issues).into_iter().collect();
-            let suppressed = super::lint_engine::apply_suppressions(collected, &scopes);
-            for i in suppressed {
-                issues.push(i);
+            let scopes = super::lint_engine::collect_suppressions(&module, content);
+            if !scopes.is_empty() {
+                let collected: Vec<_> = std::mem::take(&mut issues).into_iter().collect();
+                let suppressed = super::lint_engine::apply_suppressions(collected, &scopes);
+                for i in suppressed {
+                    issues.push(i);
+                }
+            }
+        }
+        Err(errors) => {
+            // Mirror `lint_content_with_module`: surface every parse
+            // error as a structured `parse-error` diagnostic so the
+            // user knows the AST half of the lint pipeline was
+            // skipped for this file.
+            for err in errors.iter() {
+                let (line, column) =
+                    super::lint_engine::span_to_line_col(content, err.span.start as u32);
+                issues.push(LintIssue {
+                    rule: "parse-error",
+                    level: LintLevel::Error,
+                    file: path.to_path_buf(),
+                    line: line.max(1),
+                    column: column.max(1),
+                    message: format!("parse error: {}", err.kind),
+                    suggestion: err
+                        .help
+                        .as_ref()
+                        .map(|h| Text::from(h.as_str())),
+                    fixable: false,
+                });
             }
         }
     }
@@ -4025,6 +4120,125 @@ pub struct FixEdit {
     pub new_text: String,
 }
 
+/// Apply a set of structured edits to a source string in
+/// non-overlapping reverse order, returning the rewritten
+/// content. Edits are LSP-style: 1-indexed line / column, end is
+/// exclusive, `[start_line, end_line]` may differ — a zero-width
+/// range at `(L, end_line+1, col=1)` extends "to the start of the
+/// next line", which is how full-line drops are encoded.
+///
+/// Overlapping edits are rejected up front: the caller is
+/// responsible for routing the user request through a fixer that
+/// emits non-conflicting edits, or deduplicating before the call.
+/// Returns `Err` with a human-readable message in that case so the
+/// CLI can surface the conflict instead of silently corrupting the
+/// source.
+pub fn apply_fix_edits(content: &str, edits: &[FixEdit]) -> std::result::Result<String, String> {
+    if edits.is_empty() {
+        return Ok(content.to_string());
+    }
+    // Translate (line, col) → absolute byte offset once, validate
+    // each end ≥ start, then sort descending so applying the edits
+    // never invalidates a not-yet-applied edit's offset.
+    let line_starts = compute_line_offsets_from_str(content);
+    let mut absolute: Vec<(usize, usize, &str)> = Vec::with_capacity(edits.len());
+    for e in edits {
+        let start = line_col_to_offset(content, &line_starts, e.start_line, e.start_column)
+            .ok_or_else(|| {
+                format!(
+                    "edit start out of bounds: line {} col {}",
+                    e.start_line, e.start_column
+                )
+            })?;
+        let end = line_col_to_offset(content, &line_starts, e.end_line, e.end_column)
+            .ok_or_else(|| {
+                format!(
+                    "edit end out of bounds: line {} col {}",
+                    e.end_line, e.end_column
+                )
+            })?;
+        if end < start {
+            return Err(format!(
+                "edit end < start at line {} col {}",
+                e.start_line, e.start_column
+            ));
+        }
+        absolute.push((start, end, e.new_text.as_str()));
+    }
+    // Conflict detection: after sort by start, two adjacent ranges
+    // overlap iff `prev.end > next.start`. Equality is fine —
+    // touching ranges are non-conflicting (insertion point ≠
+    // overlap).
+    absolute.sort_by_key(|(s, _, _)| *s);
+    for w in absolute.windows(2) {
+        if w[0].1 > w[1].0 {
+            return Err(format!(
+                "overlapping fix edits: [{}..{}) vs [{}..{})",
+                w[0].0, w[0].1, w[1].0, w[1].1
+            ));
+        }
+    }
+    // Apply in reverse so offsets to the left of an applied edit
+    // stay valid.
+    let mut bytes = content.as_bytes().to_vec();
+    for (start, end, text) in absolute.into_iter().rev() {
+        bytes.splice(start..end, text.bytes());
+    }
+    String::from_utf8(bytes).map_err(|e| format!("non-UTF-8 result: {e}"))
+}
+
+fn compute_line_offsets_from_str(content: &str) -> Vec<usize> {
+    let mut out = Vec::with_capacity(content.lines().count() + 1);
+    out.push(0);
+    for (i, b) in content.as_bytes().iter().enumerate() {
+        if *b == b'\n' {
+            out.push(i + 1);
+        }
+    }
+    out
+}
+
+/// Translate a 1-indexed (line, col) coordinate to an absolute
+/// byte offset. Off-the-end columns are accepted — `(line=N,
+/// col=line_len+1)` resolves to the byte just past the line's
+/// last character (excluding `\n`). `(line=line_count+1, col=1)`
+/// resolves to `content.len()` (the end-of-file insertion point).
+fn line_col_to_offset(
+    content: &str,
+    line_starts: &[usize],
+    line: usize,
+    col: usize,
+) -> Option<usize> {
+    if line == 0 || col == 0 {
+        return None;
+    }
+    if line == line_starts.len() + 1 && col == 1 {
+        return Some(content.len());
+    }
+    let idx = line.checked_sub(1)?;
+    let start = *line_starts.get(idx)?;
+    let next = line_starts.get(idx + 1).copied().unwrap_or(content.len());
+    let line_len_with_nl = next - start;
+    let line_len = if line_len_with_nl > 0
+        && content.as_bytes()[next - 1] == b'\n'
+    {
+        line_len_with_nl - 1
+    } else {
+        line_len_with_nl
+    };
+    let off_in_line = col - 1;
+    if off_in_line > line_len {
+        // Allow exactly one past the last character — `(line, line_len+1)`
+        // is the standard "after this line's content, before the
+        // newline" position used by drop-the-line edits.
+        if off_in_line == line_len + 1 {
+            return Some(start + line_len);
+        }
+        return None;
+    }
+    Some(start + off_in_line)
+}
+
 /// Build a structured edit list for an autofixable issue. Returns
 /// `None` when the rule has no machine-applicable fix or the file
 /// content can't be read (we need the source line to compute end
@@ -4039,41 +4253,43 @@ fn synthesize_fix_edits(issue: &LintIssue) -> Option<Vec<FixEdit>> {
         return None;
     }
     let content = std::fs::read_to_string(&issue.file).ok()?;
+    synthesize_fix_edits_for(issue, &content)
+}
+
+/// Pure-function variant: produce structured edits without any
+/// disk I/O. Used by `apply_fixes` (which already holds the file
+/// content) and by tests that want to verify the edit shape
+/// without writing fixtures.
+pub fn synthesize_fix_edits_for(issue: &LintIssue, content: &str) -> Option<Vec<FixEdit>> {
+    if !issue.fixable {
+        return None;
+    }
     let line_idx = issue.line.checked_sub(1)?;
     let line = content.lines().nth(line_idx)?;
-    let line_len = line.chars().count() + 1; // +1 for end-of-line caret
 
-    let edits = match issue.rule {
-        "unused-import" => {
-            // Drop the entire mount line. Replace columns 1..=line_len
-            // with empty string.
-            vec![FixEdit {
-                start_line: issue.line,
-                start_column: 1,
-                end_line: issue.line + 1,
-                end_column: 1,
-                new_text: String::new(),
-            }]
-        }
+    match issue.rule {
+        "unused-import" => Some(vec![FixEdit {
+            start_line: issue.line,
+            start_column: 1,
+            end_line: issue.line + 1,
+            end_column: 1,
+            new_text: String::new(),
+        }]),
         "todo-in-code" => {
-            // Replace the bare TODO/FIXME/HACK marker with the
-            // suggestion (`TODO(#0000)` etc).
             let suggestion = issue.suggestion.as_ref()?.as_str().to_string();
-            // Find the marker on the line.
             let marker = ["TODO", "FIXME", "HACK", "XXX"]
                 .iter()
                 .find(|m| line.contains(*m))?;
             let pos = line.find(*marker)?;
-            vec![FixEdit {
+            Some(vec![FixEdit {
                 start_line: issue.line,
                 start_column: pos + 1,
                 end_line: issue.line,
                 end_column: pos + marker.len() + 1,
                 new_text: suggestion,
-            }]
+            }])
         }
         "redundant-refinement" => {
-            // Strip a `{ true }` (with optional inner whitespace).
             for needle in &["{ true }", "{true}", "{true }", "{ true}"] {
                 if let Some(pos) = line.find(needle) {
                     return Some(vec![FixEdit {
@@ -4085,38 +4301,156 @@ fn synthesize_fix_edits(issue: &LintIssue) -> Option<Vec<FixEdit>> {
                     }]);
                 }
             }
-            return None;
+            None
         }
         "redundant-clone" => {
-            // Strip the trailing `.clone()` call.
             let pos = line.find(".clone()")?;
-            vec![FixEdit {
+            Some(vec![FixEdit {
                 start_line: issue.line,
                 start_column: pos + 1,
                 end_line: issue.line,
                 end_column: pos + ".clone()".len() + 1,
                 new_text: String::new(),
-            }]
+            }])
         }
-        "empty-match-arm" => {
-            // Drop the entire arm line.
+        "empty-match-arm" => Some(vec![FixEdit {
+            start_line: issue.line,
+            start_column: 1,
+            end_line: issue.line + 1,
+            end_column: 1,
+            new_text: String::new(),
+        }]),
+        // ── Newly structured edits (Phase E) — these were
+        // previously handled by per-rule string-replace helpers in
+        // apply_fixes; consolidating onto the FixEdit path means
+        // CI fix-bots and `verum lint --fix` produce byte-identical
+        // results, and the lint_rules contract test can prove it.
+        "deprecated-syntax" => synthesize_deprecated_syntax_edits(issue, line),
+        "unnecessary-heap" => synthesize_unnecessary_heap_edits(issue, line),
+        "single-variant-match" => fix_single_variant_match_inline(line).map(|new_line| {
             vec![FixEdit {
                 start_line: issue.line,
                 start_column: 1,
-                end_line: issue.line + 1,
-                end_column: 1,
-                new_text: String::new(),
+                end_line: issue.line,
+                end_column: line.chars().count() + 1,
+                new_text: new_line,
             }]
+        }),
+        "shadow-binding" => fix_shadow_rename_inner(line).map(|new_line| {
+            vec![FixEdit {
+                start_line: issue.line,
+                start_column: 1,
+                end_line: issue.line,
+                end_column: line.chars().count() + 1,
+                new_text: new_line,
+            }]
+        }),
+        _ => None,
+    }
+}
+
+/// Map each deprecated-syntax suggestion onto a token-level
+/// replacement edit. The existing per-line helper does the same
+/// transformation; this function is the structured equivalent so
+/// JSON consumers and `apply_fix_edits` can apply it without
+/// re-running the helper.
+fn synthesize_deprecated_syntax_edits(issue: &LintIssue, line: &str) -> Option<Vec<FixEdit>> {
+    let suggestion = issue.suggestion.as_ref()?.as_str();
+    // `impl ` → `implement `. Only the leading `impl` token is
+    // replaced; the trailing space carries through.
+    if suggestion.contains("'implement'") && suggestion.contains("'impl'") {
+        let pos = line.find("impl ")?;
+        return Some(vec![FixEdit {
+            start_line: issue.line,
+            start_column: pos + 1,
+            end_line: issue.line,
+            end_column: pos + "impl".len() + 1,
+            new_text: "implement".to_string(),
+        }]);
+    }
+    // `Vec<` → `List<`.
+    if suggestion.contains("'List<T>'") && suggestion.contains("'Vec<T>'") {
+        let pos = line.find("Vec<")?;
+        return Some(vec![FixEdit {
+            start_line: issue.line,
+            start_column: pos + 1,
+            end_line: issue.line,
+            end_column: pos + "Vec".len() + 1,
+            new_text: "List".to_string(),
+        }]);
+    }
+    // `struct Foo {` → `type Foo is {`. Replace `struct` keyword
+    // with `type` and `{` with `is {` in one combined edit.
+    if suggestion.contains("'type X is { ... }'") && suggestion.contains("'struct X { ... }'") {
+        let pos = line.find("struct ")?;
+        let after = &line[pos + 7..];
+        let brace = after.find('{')?;
+        // Replace the `struct ` token alone with `type ` to
+        // preserve the user's identifier; then a second edit
+        // inserts `is ` before the `{`.
+        let abs_brace = pos + 7 + brace;
+        let mut edits = vec![FixEdit {
+            start_line: issue.line,
+            start_column: pos + 1,
+            end_line: issue.line,
+            end_column: pos + "struct".len() + 1,
+            new_text: "type".to_string(),
+        }];
+        edits.push(FixEdit {
+            start_line: issue.line,
+            start_column: abs_brace + 1,
+            end_line: issue.line,
+            end_column: abs_brace + 1,
+            new_text: "is ".to_string(),
+        });
+        return Some(edits);
+    }
+    // `name!(` → `name(` for the macro-style calls.
+    if suggestion.contains("without '!'") {
+        for bad in &[
+            "println!(", "format!(", "panic!(", "assert!(", "assert_eq!(",
+            "assert_ne!(", "unreachable!(", "todo!(",
+        ] {
+            if let Some(pos) = line.find(bad) {
+                let bang_pos = pos + bad.len() - 2; // index of '!'
+                return Some(vec![FixEdit {
+                    start_line: issue.line,
+                    start_column: bang_pos + 1,
+                    end_line: issue.line,
+                    end_column: bang_pos + 2,
+                    new_text: String::new(),
+                }]);
+            }
         }
-        _ => {
-            // Fall through: we don't yet have a structured edit
-            // for this rule. apply_fixes() handles it via the
-            // line-rewrite path.
-            let _ = line_len;
-            return None;
-        }
-    };
-    Some(edits)
+    }
+    None
+}
+
+/// Build the structured edit that replaces a `Heap(literal)` call
+/// with the bare literal. Mirrors [`fix_unnecessary_heap`] but
+/// scoped to the column reported in the issue, so we surface
+/// exactly one edit per diagnostic — no whole-line rewrite.
+fn synthesize_unnecessary_heap_edits(issue: &LintIssue, line: &str) -> Option<Vec<FixEdit>> {
+    let col = issue.column.checked_sub(1)?;
+    let after = line.get(col..)?;
+    if !after.starts_with("Heap(") {
+        return None;
+    }
+    let inner_start = col + "Heap(".len();
+    let inner = &line[inner_start..];
+    let close = find_matching_paren(inner)?;
+    let inner_text = inner[..close].trim().to_string();
+    if !is_small_literal(&inner_text) {
+        return None;
+    }
+    let end_col = inner_start + close + 1; // 0-indexed end byte
+    Some(vec![FixEdit {
+        start_line: issue.line,
+        start_column: col + 1,
+        end_line: issue.line,
+        end_column: end_col + 1,
+        new_text: inner_text,
+    }])
 }
 
 fn emit_issue_json(issue: &LintIssue) {
@@ -4865,16 +5199,46 @@ fn run_extended_inner(
     use rayon::prelude::*;
     let cache = build_lint_cache(&cfg);
     cache.gc();
-    let raw_issues: Vec<LintIssue> = files
-        .par_iter()
-        .flat_map(|path| lint_one_with_cache(path, &cfg, &cache))
-        .collect();
+    // Per-file phase. Returns issues + parsed module per file; cache
+    // hits skip the parse and surface a None corpus entry that the
+    // cross-file phase fills in.
+    let per_file: Vec<(PathBuf, Vec<LintIssue>, Option<super::lint_engine::CorpusFile>)> =
+        files
+            .par_iter()
+            .map(|path| {
+                let (issues, corpus) = lint_one_with_cache(path, &cfg, &cache);
+                (path.clone(), issues, corpus)
+            })
+            .collect();
+    let raw_issues: Vec<LintIssue> =
+        per_file.iter().flat_map(|(_, i, _)| i.iter().cloned()).collect();
 
-    // Cross-file phase. Re-parses each file once to feed the
-    // corpus-level passes (circular-import / orphan-module /
-    // unused-public). The per-file phase already paid for the
-    // parser warm-up so this is incremental work.
-    let cross_issues = run_cross_file_phase(&files, &cfg);
+    // Build the corpus directly from the per-file phase. Cache-miss
+    // entries already have a parse; for cache hits we re-read +
+    // parse just-in-time so cross-file passes see every file.
+    let mut corpus: Vec<super::lint_engine::CorpusFile> =
+        Vec::with_capacity(per_file.len());
+    let mut to_parse: Vec<PathBuf> = Vec::new();
+    for (path, _, c) in per_file {
+        match c {
+            Some(cf) => corpus.push(cf),
+            None => to_parse.push(path),
+        }
+    }
+    if !to_parse.is_empty() {
+        let recovered: Vec<super::lint_engine::CorpusFile> =
+            to_parse.par_iter().filter_map(|p| parse_corpus_file(p)).collect();
+        corpus.extend(recovered);
+    }
+    let cross_issues: Vec<LintIssue> = if corpus.is_empty() {
+        Vec::new()
+    } else {
+        let ctx = super::lint_engine::CorpusCtx {
+            files: &corpus,
+            config: Some(&cfg),
+        };
+        super::lint_engine::run_cross_file(&ctx)
+    };
 
     let mut all_issues: Vec<LintIssue> = raw_issues
         .into_iter()

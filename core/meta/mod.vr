@@ -279,7 +279,7 @@ public mount .token.TokenTree;
 // Re-exports: Span & Location
 // =============================================================================
 
-// VFE-Quality — meta-programming layer for framework-axiom hygiene.
+// VVA-Quality — meta-programming layer for framework-axiom hygiene.
 // Compile-time discipline that enforces foundation-neutral naming
 // (R1) + ε-coordinate canonicalisability (R2) + meta-classifier
 // uniqueness (R3) over `@framework(name, citation)` and

@@ -1,10 +1,10 @@
 // =============================================================================
-// core.action.ludics_lazy — cofix-based lazy ludics designs (VFE-10 V1)
+// core.action.ludics_lazy — cofix-based lazy ludics designs (VVA-10 V1)
 // =============================================================================
 //
 // Concrete implementation atop the V0 ludics.vr protocol surface,
 // using `core.base.coinductive` for cofix-friendly observation
-// semantics. Wires the three V0 caveats from VFE §13.5:
+// semantics. Wires the three V0 caveats from VVA §13.5:
 //
 //   (a) Designs are infinite-branching trees → lazy observation
 //       through ObservationTrace rather than eager tree
@@ -84,10 +84,10 @@ public fn lazy_design_is_productive(d: LazyDesign) -> Bool {
 }
 
 // =============================================================================
-// Bounded cut-elimination (V1 caveat from VFE §13.5)
+// Bounded cut-elimination (V1 caveat from VVA §13.5)
 // =============================================================================
 
-/// Default reduction-step bound. Configurable per VUVA §13.6.
+/// Default reduction-step bound. Configurable per VVA §13.6.
 /// Below this depth, divergent computations get UNKNOWN verdict.
 public let CUT_ELIM_DEFAULT_DEPTH: Int = 1000;
 
@@ -191,7 +191,7 @@ public axiom bounded_cut_elim_sound() -> Bool ensures true;
 /// it is **not** the same as `NonOrthogonal` — the verdict
 /// preserves the distinction between "definitely incompatible"
 /// and "couldn't decide in time".
-@framework(diakrisis, "VFE §13.5 caveat — UNKNOWN verdict on depth-exceed")
+@framework(diakrisis, "VVA §13.5 caveat — UNKNOWN verdict on depth-exceed")
 public axiom depth_bound_reached_distinct_from_non_orthogonal() -> Bool ensures true;
 
 /// Productivity gate is necessary: without it, a non-productive

@@ -1,6 +1,6 @@
 //! K-Eps-Mu V1 shape-check tests.
 //!
-//! VFE-1 V1 (incremental): tightens `check_eps_mu_coherence` from
+//! VVA-1 V1 (incremental): tightens `check_eps_mu_coherence` from
 //! V0's permissive `(EpsilonOf(_), AlphaOf(_))` accept-anything
 //! skeleton to a structural shape check that:
 //!

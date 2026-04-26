@@ -2,13 +2,13 @@
 // core.math.frameworks.registry — runtime catalogue of @framework declarations
 // =============================================================================
 //
-// VFE §18.7 — Verum-as-foundation-marketplace skeleton. Long-horizon
-// (5+ year) architectural vision per VFE §18.8 Tier C; this V0 ships
+// VVA §18.7 — Verum-as-foundation-marketplace skeleton. Long-horizon
+// (5+ year) architectural vision per VVA §18.8 Tier C; this V0 ships
 // the *runtime registry data structure* that the CLI surface
 // (`verum frameworks list / show / validate`) will plug into. The
 // CLI wiring is V1 work; this V0 is the schema + sample population.
 //
-// Architectural rationale (per VFE §18.7):
+// Architectural rationale (per VVA §18.7):
 //
 //     Verum-Foundation-Marketplace:
 //     ├── Standard frameworks (built-in)
@@ -22,7 +22,7 @@
 //
 // Each framework — standard, verified, experimental — gets a single
 // `FrameworkRecord` here. The (ν, τ) coordinates are read from the
-// canonical-coordinate prescriptive table (per VUVA §10.4.1: the
+// canonical-coordinate prescriptive table (per VVA §10.4.1: the
 // meta-classifier `core.math.frameworks.diakrisis` defines the
 // coordinate space, the other frameworks are points in it).
 //
@@ -74,7 +74,7 @@ public type FrameworkRecord is {
     /// True iff this framework plays the meta-classifier role (defines
     /// the coordinate space rather than living in it). At most one
     /// framework with `is_meta_classifier == true` per registry per
-    /// VUVA §10.4.1.
+    /// VVA §10.4.1.
     is_meta_classifier: Bool,
 };
 
@@ -129,7 +129,7 @@ public fn registry_count_meta_classifiers(r: FrameworkRegistry) -> Int {
 }
 
 /// Validation: there must be at most one meta-classifier framework
-/// per registry per VUVA §10.4.1. Returns `true` iff the invariant
+/// per registry per VVA §10.4.1. Returns `true` iff the invariant
 /// holds; the CLI wraps this in `verum frameworks validate`.
 public fn registry_meta_classifier_unique(r: FrameworkRegistry) -> Bool {
     registry_count_meta_classifiers(r) <= 1
@@ -148,7 +148,7 @@ public fn registry_meta_classifier_unique(r: FrameworkRegistry) -> Bool {
 /// in ν-ascending order so audit reports read top-down naturally.
 public fn populate_canonical_standard(r: &mut FrameworkRegistry) {
     // Meta-classifier — defines the coordinate space (no own coord).
-    // We use ord_zero as a sentinel here per VUVA §10.4.1 ("category
+    // We use ord_zero as a sentinel here per VVA §10.4.1 ("category
     // mistake to ask for coord(meta-classifier)"); CLI surfaces this
     // as "—" rather than the literal "0" for the meta-classifier row.
     registry_register(r, framework_record_new(
@@ -219,7 +219,7 @@ public fn populate_canonical_standard(r: &mut FrameworkRegistry) {
 }
 
 /// Populate the registry with the bounded-arithmetic family
-/// (VFE-8 V0). All entries are VerifiedExtension, all live below
+/// (VVA-8 V0). All entries are VerifiedExtension, all live below
 /// ν = ω at strictly distinct ν^weak coordinates.
 public fn populate_bounded_arithmetic_family(r: &mut FrameworkRegistry) {
     registry_register(r, framework_record_new(
@@ -275,11 +275,11 @@ public fn populate_bounded_arithmetic_family(r: &mut FrameworkRegistry) {
 /// bounded-arithmetic family. CLI surface (`verum frameworks list /
 /// show / validate`) is V1 work tracked under the marketplace task
 /// follow-up.
-@framework(diakrisis, "VFE §18.7 (foundation marketplace V0 skeleton)")
+@framework(diakrisis, "VVA §18.7 (foundation marketplace V0 skeleton)")
 public axiom marketplace_skeleton_v0_complete() -> Bool ensures true;
 
-/// Meta-classifier uniqueness invariant per VUVA §10.4.1: at most
+/// Meta-classifier uniqueness invariant per VVA §10.4.1: at most
 /// one framework with `is_meta_classifier == true` per registry.
 /// `registry_meta_classifier_unique` decides this in linear time.
-@framework(diakrisis, "VUVA §10.4.1 (meta-classifier uniqueness invariant)")
+@framework(diakrisis, "VVA §10.4.1 (meta-classifier uniqueness invariant)")
 public axiom registry_meta_classifier_uniqueness_decidable() -> Bool ensures true;

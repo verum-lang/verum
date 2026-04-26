@@ -53,7 +53,7 @@ pub enum ExportFormat {
     Metamath,
     /// OWL 2 Functional Syntax — emits a Pellet/HermiT/Protégé-
     /// compatible `.ofn` file from the project's `@owl2_*` attribute
-    /// markers (VUVA §21.8 Phase 3 B5). Walks the same `Owl2Graph`
+    /// markers (VVA §21.8 Phase 3 B5). Walks the same `Owl2Graph`
     /// shared with `audit --owl2-classify` and emits Declaration /
     /// SubClassOf / EquivalentClasses / DisjointClasses / HasKey /
     /// ObjectPropertyDomain / ObjectPropertyRange / per-characteristic
@@ -292,7 +292,7 @@ fn first_framework(attrs: &List<verum_ast::attr::Attribute>) -> Maybe<FrameworkA
 }
 
 // -----------------------------------------------------------------------------
-// Framework-lineage → target-library mapping (VUVA §8.5)
+// Framework-lineage → target-library mapping (VVA §8.5)
 //
 // When a `@framework(<lineage>, "...")` marker has a known mapping in a
 // target ecosystem, the exporter emits the corresponding `import` /
@@ -303,7 +303,7 @@ fn first_framework(attrs: &List<verum_ast::attr::Attribute>) -> Maybe<FrameworkA
 // missing hook.
 //
 // The table is intentionally small and curated — stdlib "standard
-// six-pack" per VUVA §6.2 plus a handful of widely-cited foundations.
+// six-pack" per VVA §6.2 plus a handful of widely-cited foundations.
 // User-authored packages extend this by shipping a `@lineage_map`
 // attribute on their `@framework` declarations (Phase 3 work).
 // -----------------------------------------------------------------------------
@@ -508,7 +508,7 @@ fn emit_coq(decls: &[Declaration]) -> String {
     out.push_str("(* Statements only — proofs are admitted. Full proof-term replay *)\n");
     out.push_str("(* through verum_kernel lands with per-backend SMT reconstruction. *)\n\n");
 
-    // VUVA §8.5 framework-lineage → Coq-library mapping.
+    // VVA §8.5 framework-lineage → Coq-library mapping.
     emit_coq_imports(decls, &mut out);
 
     let by_framework = group_by_framework(decls);
@@ -634,7 +634,7 @@ fn emit_lean(decls: &[Declaration]) -> String {
     out.push_str("-- Statements only — proofs are `sorry`. Full proof-term replay\n");
     out.push_str("-- through verum_kernel lands with per-backend SMT reconstruction.\n\n");
 
-    // VUVA §8.5: emit `import` stanzas for known framework-lineage
+    // VVA §8.5: emit `import` stanzas for known framework-lineage
     // mappings so the file is ready to check against Mathlib without
     // manual editing. Unmapped lineages fall through with a comment.
     let lineages = distinct_lineages(decls);
@@ -740,7 +740,7 @@ fn emit_agda(decls: &[Declaration]) -> String {
     out.push_str("-- through verum_kernel lands with per-backend SMT reconstruction.\n\n");
     out.push_str("module Verum.Export where\n\n");
 
-    // VUVA §8.5 framework-lineage → Agda-library mapping. Unknown
+    // VVA §8.5 framework-lineage → Agda-library mapping. Unknown
     // lineages fall through with a comment so reviewers see the gap.
     let lineages = distinct_lineages(decls);
     if !lineages.is_empty() {
@@ -887,7 +887,7 @@ fn print_summary(
 }
 
 // -----------------------------------------------------------------------------
-// OWL 2 Functional Syntax emitter (VUVA §21.8 Phase 3 B5)
+// OWL 2 Functional Syntax emitter (VVA §21.8 Phase 3 B5)
 // -----------------------------------------------------------------------------
 //
 // Walks the Owl2Graph populated during the project parse and emits
@@ -969,7 +969,7 @@ fn emit_owl2_fs(graph: &crate::commands::owl2::Owl2Graph, manifest_name: &str) -
     use crate::commands::owl2::Owl2EntityKind;
 
     let mut out = String::new();
-    out.push_str("# Exported by `verum export --to owl2-fs` (VUVA §21.8 / B5).\n");
+    out.push_str("# Exported by `verum export --to owl2-fs` (VVA §21.8 / B5).\n");
     out.push_str("# OWL 2 Functional-Style Syntax — round-trips through Pellet, HermiT,\n");
     out.push_str("# Protégé, FaCT++, ELK, Konclude. BTreeMap-sorted output for byte-\n");
     out.push_str("# deterministic CI diffs.\n\n");

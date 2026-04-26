@@ -8,7 +8,7 @@
 // Baez-Dolan, OWL 2 FS, Diakrisis), `foundations` exposes the
 // *meta-classifier-relative* layer:
 //
-//   • `self_recognition` — VUVA Phase 5 architectural theorems:
+//   • `self_recognition` — VVA Phase 5 architectural theorems:
 //                          Verum's own kernel rules (K-Refine /
 //                          K-Adj-Unit / K-Adj-Counit / K-Pos / K-Norm
 //                          / K-FwAx) re-stated as @theorem and
@@ -18,7 +18,7 @@
 //                          verification stack proves the architectural
 //                          invariants that justify itself.
 //
-// Future entries (per VFE conveyor):
+// Future entries (per VVA conveyor):
 //   • metaclassification — already lives at `core.math.frameworks.diakrisis`
 //   • biadjunction       — already at `core.math.frameworks.diakrisis_biadjunction`
 //   • stack_model_axioms — already at `core.math.frameworks.diakrisis_stack_model`
