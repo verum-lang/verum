@@ -952,11 +952,12 @@ implement TcpListener {
     fn bind_addr_with_backlog(addr: &SocketAddr, backlog: Int) -> Result<TcpListener, IoError> {
         let domain = if addr.is_ipv4() { AF_INET } else { AF_INET6 };
 
-        // Create socket. Inline match instead of `.map_err(IoError.from_os)?`
-        // because the HOF + `?` codegen has an unresolved-function-pointer bug
-        // under AOT (#110) — the static method `IoError.from_os` is loaded as
-        // an Int via LoadI(func_id), then Result-tag extraction reads from
-        // `[null + func_id*8]` and SEGVs. Direct call form bypasses HOF.
+        // Workaround for #110 (still open after NewClosure fix): under AOT,
+        // `.map_err(IoError.from_os)?` SEGVs reading [NULL + ~0x85f0]. The
+        // codegen path differs from the static-method-HOF case I expected
+        // to find — NewClosure replacement at the qualified-fn ref sites
+        // didn't resolve it, so the bug is in a deeper code path. Inline
+        // match form bypasses the broken HOF lowering entirely.
         @cfg(any(target_os = "linux", target_os = "windows"))
         let fd = match socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0) {
             Ok(f) => f,
