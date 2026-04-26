@@ -193,7 +193,12 @@ public type Try is protocol {
 ///     fn from_residual(residual: Result<Never, InnerError>) -> Result<T, OuterError> {
 ///         match residual {
 ///             Err(e) => Err(OuterError.from(e)),
-///             Ok(_) => unreachable(),
+///             // `Never` is genuinely uninhabited (alias to `!`),
+///             // so the `Ok(_)` arm is provably dead at every
+///             // call site. Use the UB-hint variant so the
+///             // optimiser elides the tag test on the
+///             // `?`-propagation hot path.
+///             Ok(_) => unsafe { unreachable_unchecked() },
 ///         }
 ///     }
 /// }
@@ -207,15 +212,26 @@ public type FromResidual<R> is protocol {
 // Never type (bottom type)
 // =============================================================================
 
-/// The never type - a type with no values.
+/// The never type — a type with no values (the "bottom" type).
 ///
-/// Used in residual types to indicate "this branch is impossible".
-/// For example, `Maybe<Never>` can only be `None` (since `Some(Never)` is impossible).
-/// Similarly, `Result<Never, E>` can only be `Err(e)`.
-public type Never is {};
-
-// Note: Never is uninhabited - you cannot create a value of type Never.
-// This is enforced by having no constructors.
+/// Used in residual types to indicate "this branch is
+/// impossible". For example, `Maybe<Never>` can only be `None`
+/// (since `Some(Never)` would require constructing a value of
+/// `Never`, which is impossible). Similarly, `Result<Never, E>`
+/// can only be `Err(e)`.
+///
+/// Implementation: this is a transparent alias to the
+/// compiler's built-in `!` (bang) type, which is genuinely
+/// uninhabited at the type-system level. Earlier revisions
+/// declared `Never` as `type Never is {};` — a unit-record with
+/// exactly one inhabitant (`Never {}`) — which silently broke
+/// the uninhabitedness contract that downstream `unsafe
+/// unreachable_unchecked` arms in `Maybe::from_residual` /
+/// `Result::from_residual` rely on. The alias to `!` restores
+/// the invariant: there is no syntax (safe or unsafe) that
+/// produces a value of `!`, so the residual `Some(_)` /
+/// `Ok(_)` arms are provably dead at every call site.
+public type Never is !;
 
 // =============================================================================
 // Residual Protocol (optional, for advanced use)
