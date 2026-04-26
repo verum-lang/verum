@@ -59,6 +59,7 @@ pub mod code_actions;
 pub mod completion;
 pub mod debouncer;
 pub mod diagnostics;
+pub mod lint_diagnostics;
 pub mod document;
 pub mod exhaustiveness; // Exhaustiveness checking integration
 pub mod document_cache;

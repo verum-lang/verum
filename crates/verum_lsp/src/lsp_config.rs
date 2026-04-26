@@ -108,6 +108,16 @@ pub struct LspConfig {
     // ── Verification cost feedback ───────────────────────────────────────
     pub verification_show_cost_warnings: bool,
     pub verification_slow_threshold: Duration,
+
+    // ── Lint integration ────────────────────────────────────────────────
+    /// Whether `verum lint` runs on diagnostic publication. Default
+    /// is `true`; flip via `verum.lint.enabled = false` in the
+    /// editor settings.
+    pub lint_enabled: bool,
+    /// Optional `--profile NAME` override forwarded to the linter.
+    pub lint_profile: Option<String>,
+    /// Path to the `verum` binary. `None` resolves to PATH lookup.
+    pub lint_binary: Option<std::path::PathBuf>,
 }
 
 impl Default for LspConfig {
@@ -130,6 +140,10 @@ impl Default for LspConfig {
 
             verification_show_cost_warnings: true,
             verification_slow_threshold: Duration::from_millis(5_000),
+
+            lint_enabled: true,
+            lint_profile: None,
+            lint_binary: None,
         }
     }
 }
@@ -197,6 +211,32 @@ impl LspConfig {
             .and_then(|v| v.as_u64())
         {
             self.verification_slow_threshold = Duration::from_millis(v);
+        }
+
+        // Lint integration knobs. Both `lint.<key>` (preferred) and
+        // the flat `lint<Key>` form are accepted so older clients
+        // don't need to migrate.
+        let lint_section = opts.get("lint");
+        if let Some(v) = lint_section
+            .and_then(|s| s.get("enabled"))
+            .and_then(|v| v.as_bool())
+            .or_else(|| opts.get("lintEnabled").and_then(|v| v.as_bool()))
+        {
+            self.lint_enabled = v;
+        }
+        if let Some(v) = lint_section
+            .and_then(|s| s.get("profile"))
+            .and_then(|v| v.as_str())
+            .or_else(|| opts.get("lintProfile").and_then(|v| v.as_str()))
+        {
+            self.lint_profile = Some(v.to_string());
+        }
+        if let Some(v) = lint_section
+            .and_then(|s| s.get("binary"))
+            .and_then(|v| v.as_str())
+            .or_else(|| opts.get("lintBinary").and_then(|v| v.as_str()))
+        {
+            self.lint_binary = Some(std::path::PathBuf::from(v));
         }
     }
 }
