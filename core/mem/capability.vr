@@ -255,3 +255,47 @@ public fn validate_write(flags: UInt16) -> Bool {
 public fn validate_execute(flags: UInt16) -> Bool {
     has_capability(flags, CAP_EXECUTE)
 }
+
+// =============================================================================
+// epoch + capabilities packing (shared by ThinRef / FatRef)
+// =============================================================================
+//
+// Both reference types pack a (UInt16 epoch, UInt16 capabilities)
+// pair into a single UInt32 field with capabilities in the upper
+// 16 bits and epoch in the lower 16. Centralising the pack/unpack
+// pair here ensures the seven prior call sites (3 in thin_ref +
+// 4 in fat_ref) cannot drift out of sync if the field layout
+// ever changes.
+//
+// The earlier inline form `(caps as UInt32) * 65536 | (epoch as
+// UInt32)` was replaced because:
+//   * `* 65536` is mathematically equivalent to `<< 16` for
+//     unsigned values, but some Verum arithmetic backends route
+//     `*` through overflow-checked multiplication. (No actual
+//     trigger here — `caps` is UInt16, max 0xFFFF, so
+//     `caps * 0x10000` ≤ 0xFFFF0000 < UInt32.MAX — but the
+//     shift form makes the bit-manipulation intent explicit and
+//     reliably compiles to a single shift instruction.)
+//   * Centralising eliminates the duplication and the audit
+//     surface (a single canonical site to verify).
+
+/// Pack `(epoch, capabilities)` into the canonical 32-bit
+/// `epoch_and_caps` field used by ThinRef / FatRef.
+@inline
+public fn pack_epoch_caps(epoch: UInt16, capabilities: UInt16) -> UInt32 {
+    ((capabilities as UInt32) << 16) | (epoch as UInt32)
+}
+
+/// Unpack the epoch (lower 16 bits) from a packed
+/// `epoch_and_caps` field.
+@inline
+public fn unpack_epoch(epoch_and_caps: UInt32) -> UInt16 {
+    (epoch_and_caps & 0xFFFF) as UInt16
+}
+
+/// Unpack the capabilities (upper 16 bits) from a packed
+/// `epoch_and_caps` field.
+@inline
+public fn unpack_caps(epoch_and_caps: UInt32) -> UInt16 {
+    (epoch_and_caps >> 16) as UInt16
+}

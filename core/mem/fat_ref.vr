@@ -44,6 +44,7 @@ mount super.header.{AllocationHeader, HEADER_SIZE, GEN_UNALLOCATED};
 mount super.capability.{
     CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE,
     has_capability, validate_read, validate_write,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
 };
 mount super.hazard.{HazardGuard, acquire_hazard};
 mount super.epoch.{GLOBAL_EPOCH};
@@ -115,12 +116,10 @@ implement<T> FatRef<T> {
         length: Int,
         offset_from_base: UInt32,
     ) -> FatRef<T> {
-        let epoch_and_caps = (capabilities as UInt32) * 65536 | (epoch as UInt32);
-
         FatRef {
             ptr: ptr,
             generation: generation,
-            epoch_and_caps: epoch_and_caps,
+            epoch_and_caps: pack_epoch_caps(epoch, capabilities),
             metadata: length,
             offset_from_base: offset_from_base,
             reserved: 0,
@@ -142,12 +141,10 @@ implement<T> FatRef<T> {
         capabilities: UInt16,
         vtable: Int,
     ) -> FatRef<T> {
-        let epoch_and_caps = (capabilities as UInt32) * 65536 | (epoch as UInt32);
-
         FatRef {
             ptr: ptr,
             generation: generation,
-            epoch_and_caps: epoch_and_caps,
+            epoch_and_caps: pack_epoch_caps(epoch, capabilities),
             metadata: vtable,  // vtable pointer stored as metadata
             offset_from_base: 0,
             reserved: 0,
@@ -212,13 +209,13 @@ implement<T> FatRef<T> {
     /// Get epoch counter (unpacked from epoch_and_caps).
     @inline
     public fn epoch(&self) -> UInt16 {
-        (self.epoch_and_caps & 0xFFFF) as UInt16
+        unpack_epoch(self.epoch_and_caps)
     }
 
     /// Get capabilities (unpacked from epoch_and_caps).
     @inline
     public fn capabilities(&self) -> UInt16 {
-        (self.epoch_and_caps >> 16) as UInt16
+        unpack_caps(self.epoch_and_caps)
     }
 
     /// Get metadata (length for slices, vtable for dyn traits).
@@ -552,7 +549,7 @@ implement<T> FatRef<T> {
         FatRef {
             ptr: self.ptr,
             generation: self.generation,
-            epoch_and_caps: (new_caps as UInt32) * 65536 | (self.epoch() as UInt32),
+            epoch_and_caps: pack_epoch_caps(self.epoch(), new_caps),
             metadata: self.metadata,
             offset_from_base: self.offset_from_base,
             reserved: self.reserved,
@@ -566,7 +563,7 @@ implement<T> FatRef<T> {
         FatRef {
             ptr: self.ptr,
             generation: self.generation,
-            epoch_and_caps: (new_caps as UInt32) * 65536 | (self.epoch() as UInt32),
+            epoch_and_caps: pack_epoch_caps(self.epoch(), new_caps),
             metadata: self.metadata,
             offset_from_base: self.offset_from_base,
             reserved: self.reserved,

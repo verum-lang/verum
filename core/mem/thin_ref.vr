@@ -42,6 +42,7 @@ mount super.header.{AllocationHeader, HEADER_SIZE, GEN_UNALLOCATED};
 mount super.capability.{
     CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE,
     has_capability, validate_read, validate_write,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
 };
 mount super.hazard.{HazardGuard, acquire_hazard};
 mount super.epoch.{GLOBAL_EPOCH};
@@ -82,31 +83,6 @@ public type ThinRef<T> is {
     /// Packed epoch (bits 0-15) and capabilities (bits 16-31).
     epoch_and_caps: UInt32,
 };
-
-/// Pack `(epoch: UInt16, capabilities: UInt16)` into a single
-/// 32-bit field with capabilities in the upper 16 bits and
-/// epoch in the lower 16. Inverse of [`unpack_epoch`] /
-/// [`unpack_caps`].
-///
-/// Earlier revisions inlined this as `(caps as UInt32) * 65536`
-/// at three sites (constructor + as_readonly + attenuate);
-/// extracted to a single helper because:
-///
-///   * `* 65536` is mathematically equivalent to `<< 16` for
-///     unsigned values BUT some Verum arithmetic backends
-///     route `*` through overflow-checked multiplication
-///     (would never trigger here since `caps` is UInt16, max
-///     0xFFFF, so `caps * 0x10000` ≤ 0xFFFF0000 < UInt32.MAX).
-///     Using `<< 16` makes the bit-manipulation intent
-///     explicit and bypasses any potential mul-overhead on
-///     older CPUs.
-///   * Centralising the pack/unpack pair makes it impossible
-///     for the three sites to drift out of sync if the field
-///     layout ever changes.
-@inline
-fn pack_epoch_caps(epoch: UInt16, capabilities: UInt16) -> UInt32 {
-    ((capabilities as UInt32) << 16) | (epoch as UInt32)
-}
 
 implement<T> ThinRef<T> {
     // =========================================================================
@@ -190,13 +166,13 @@ implement<T> ThinRef<T> {
     /// Get epoch counter (unpacked from epoch_and_caps).
     @inline
     public fn epoch(&self) -> UInt16 {
-        (self.epoch_and_caps & 0xFFFF) as UInt16
+        unpack_epoch(self.epoch_and_caps)
     }
 
     /// Get capabilities (unpacked from epoch_and_caps).
     @inline
     public fn capabilities(&self) -> UInt16 {
-        (self.epoch_and_caps >> 16) as UInt16
+        unpack_caps(self.epoch_and_caps)
     }
 
     /// Check if reference has a specific capability.
