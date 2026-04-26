@@ -38,7 +38,6 @@ use z3::{
     SatResult, Solver,
     ast::{Ast, Bool},
 };
-use z3_sys::*;
 
 use verum_common::{List, Maybe, Set, Text};
 
@@ -226,14 +225,6 @@ pub struct InterpolationEngine {
     config: InterpolationConfig,
 }
 
-// SAFETY: Helper functions for z3-sys FFI
-#[allow(dead_code)] // Used internally for low-level Z3 operations
-unsafe fn get_z3_ast<T: Ast>(ast: &T) -> Z3_ast {
-    // Extract raw Z3_ast pointer from z3.rs Ast
-    // SAFETY: z3.rs Ast types wrap a Z3_ast pointer
-    unsafe { std::mem::transmute_copy(&ast) }
-}
-
 impl InterpolationEngine {
     /// Create new interpolation engine
     pub fn new(config: InterpolationConfig) -> Self {
@@ -324,67 +315,6 @@ impl InterpolationEngine {
     /// - Nested let-bindings
     pub fn collect_variables(&self, formula: &Bool) -> Set<Text> {
         crate::variable_extraction::collect_variables_from_bool(formula)
-    }
-
-    /// Extract variable names from an SMT-LIB2 format string (fallback method)
-    ///
-    /// Used as a fallback when AST traversal encounters issues.
-    /// Parses the string representation of a Z3 formula to find
-    /// uninterpreted constants (variables).
-    #[allow(dead_code)]
-    fn extract_variables_from_smt_string(&self, s: &str, variables: &mut Set<Text>) {
-        // Variable names in SMT-LIB2 are typically:
-        // - Alphanumeric identifiers starting with a letter
-        // - Quoted symbols |like this|
-        // - Not keywords or operators
-
-        // Known Z3 operators and keywords to skip
-        let keywords: std::collections::HashSet<&str> = [
-            "and", "or", "not", "xor", "implies", "ite", "true", "false", "+", "-", "*", "/",
-            "div", "mod", "rem", "=", "<", ">", "<=", ">=", "let", "forall", "exists", "Int",
-            "Bool", "Real", "BitVec", "Array", "select", "store", "concat", "extract", "bvand",
-            "bvor", "bvnot",
-        ]
-        .into_iter()
-        .collect();
-
-        // Simple tokenizer: split by whitespace and parentheses
-        for token in s.split(|c: char| c.is_whitespace() || c == '(' || c == ')') {
-            let token = token.trim();
-            if token.is_empty() {
-                continue;
-            }
-
-            // Skip if it's a keyword
-            if keywords.contains(token) {
-                continue;
-            }
-
-            // Skip if it's a number
-            if token.parse::<i64>().is_ok() {
-                continue;
-            }
-
-            // Skip if it starts with a digit (likely a number)
-            if token.chars().next().is_some_and(|c| c.is_numeric()) {
-                continue;
-            }
-
-            // Skip quoted symbols for now (start with |)
-            if token.starts_with('|') {
-                continue;
-            }
-
-            // This looks like a variable name
-            if token
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
-            {
-                if !token.is_empty() {
-                    variables.insert(Text::from(token));
-                }
-            }
-        }
     }
 
     /// McMillan's interpolation algorithm (resolution-proof based)
