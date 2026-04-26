@@ -924,7 +924,18 @@ public const VM_FLAGS_RANDOM_ADDR: Int = 0x0008;
 
 /// Get the last error number
 public fn errno() -> Int {
-    unsafe { *__error() }
+    // libc errno is C `int` (32-bit) but Verum's deref reads 64 bits.
+    // The four bytes adjacent to the thread-local errno slot are
+    // unrelated TLS data, which leak into the upper half. Mask to
+    // 32 bits and sign-extend so callers see a clean small integer.
+    // See #108 — generic AOT extern-call sign-extension.
+    let raw = unsafe { *__error() };
+    let lo32 = raw & 0xFFFFFFFF;
+    if (lo32 & 0x80000000) != 0 {
+        lo32 - 0x100000000
+    } else {
+        lo32
+    }
 }
 
 /// Set the error number
