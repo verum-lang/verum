@@ -871,6 +871,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     | "printf" | "fprintf" | "snprintf" | "vprintf" | "vsnprintf"
                     | "puts" | "fputs" | "fputc" | "putchar" | "fwrite" | "fread"
                     | "perror" | "putc" | "getc" | "getchar"
+                    // errno access (Darwin/Linux/BSD use different names)
+                    | "__error" | "__errno_location" | "_errno"
                     // time/clock
                     | "clock_gettime" | "nanosleep" | "gettimeofday"
                     | "time" | "mach_absolute_time"
