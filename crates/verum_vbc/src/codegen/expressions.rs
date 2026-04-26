@@ -12332,12 +12332,43 @@ impl VbcCodegen {
                     None
                 }
             }
-            // Function call: look up return type
-            ExprKind::Call { func, .. } => {
+            // Function call OR variant constructor: look up the
+            // return type. Variant constructors are critical for
+            // method-dispatch receiver-narrowing — without this arm,
+            // `Err(99).unwrap()` falls through to bare-name dispatch
+            // and the wrong `unwrap` impl wins (multiple stdlib
+            // types declare `fn unwrap(self)`). The kernel-level
+            // story is in #79; the codegen-level fix is here.
+            ExprKind::Call { func, args, .. } => {
                 if let ExprKind::Path(path) = &func.kind {
                     let func_name = format!("{}", path);
-                    self.ctx.lookup_function(&func_name)
-                        .and_then(|info| info.return_type_name.clone())
+                    // (1) Direct lookup. If the registered entry is a
+                    //     variant constructor (`variant_tag.is_some()`),
+                    //     prefer the `parent_type_name` over the
+                    //     possibly-unset `return_type_name`. The parent
+                    //     type is what carries the methods (`Result`
+                    //     declares `unwrap`, not the `Err` constructor).
+                    if let Some(info) = self.ctx.lookup_function(&func_name) {
+                        if info.variant_tag.is_some() {
+                            if let Some(parent) = &info.parent_type_name {
+                                return Some(parent.clone());
+                            }
+                        }
+                        if let Some(rt) = &info.return_type_name {
+                            return Some(rt.clone());
+                        }
+                    }
+                    // (2) Disambiguating fallback for variants: when the
+                    //     call is `Err(99)` and `Err` is shared by
+                    //     several types (e.g. user-defined + stdlib),
+                    //     `find_variant_parent_type_by_args` resolves
+                    //     uniquely by name + arity.
+                    if let Some(parent) = self.ctx
+                        .find_variant_parent_type_by_args(&func_name, args.len())
+                    {
+                        return Some(parent);
+                    }
+                    None
                 }
                 else {
                     None

@@ -275,6 +275,16 @@ impl PrettyPrinter {
     // ==================== FUNCTIONS ====================
 
     fn format_function(&mut self, func: &FunctionDecl) {
+        // Function-level attributes — `@verify(...)`, `@derive(...)`,
+        // `@cap(...)`, etc. live on FunctionDecl rather than the
+        // surrounding Item, so we have to emit them here. Each
+        // attribute lands on its own line above the signature, the
+        // canonical Verum style.
+        for attr in &func.attributes {
+            self.format_attribute(attr);
+            self.newline();
+        }
+
         // Visibility
         self.format_visibility(&func.visibility);
 
