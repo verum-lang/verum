@@ -1076,7 +1076,8 @@ implement EpollDriver {
         }
 
         // Create eventfd for wake notifications
-        let wake_fd = unsafe { syscall_raw(SYS_EVENTFD, 0, 0, 0, 0, 0, 0) };
+        // eventfd2(initval=0, flags=0); portable on both x86_64 and aarch64.
+        let wake_fd = unsafe { syscall_raw(SYS_EVENTFD2, 0, 0, 0, 0, 0, 0) };
         if wake_fd < 0 {
             unsafe { syscall_raw(SYS_CLOSE, epfd, 0, 0, 0, 0, 0) };
             return Err(LinuxIoDriverError.EpollFailed { code: -wake_fd as Int });

@@ -5,7 +5,7 @@ module sys.linux;
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/common
-// Platform: Linux x86_64
+// Platform: Linux (x86_64, aarch64)
 // =============================================================================
 @cfg(target_os = "linux")
 //
@@ -29,6 +29,11 @@ module sys.linux;
 // =============================================================================
 // Module Declarations
 // =============================================================================
+
+/// Architecture-specific syscall numbers (x86_64, aarch64). Internal support
+/// module: `syscall` re-exports the subset used by the public API, so callers
+/// normally import from `sys.linux.syscall` instead of touching this directly.
+public module arch;
 
 /// Raw syscall intrinsic and basic wrappers
 public module syscall;
@@ -89,13 +94,13 @@ public mount .syscall.{
     futex_wait,
     futex_wake,
 
-    // Syscall numbers (for advanced use)
+    // Syscall numbers (for advanced use). Portable across x86_64/aarch64.
     SYS_READ, SYS_WRITE, SYS_CLOSE,
     SYS_MMAP, SYS_MUNMAP, SYS_MPROTECT,
     SYS_CLONE, SYS_CLONE3,
     SYS_FUTEX,
     SYS_IO_URING_SETUP, SYS_IO_URING_ENTER, SYS_IO_URING_REGISTER,
-    SYS_EPOLL_CREATE1, SYS_EPOLL_CTL, SYS_EPOLL_WAIT,
+    SYS_EPOLL_CREATE1, SYS_EPOLL_CTL, SYS_EPOLL_PWAIT,
 
     // Terminal ioctl
     ioctl,

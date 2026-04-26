@@ -22,7 +22,7 @@
 // - Memory operations with immediate cleanup
 // - Timeout-bounded blocking operations
 //
-// Platform: Linux x86_64
+// Platform: Linux (x86_64, aarch64)
 // =============================================================================
 
 @cfg(target_os = "linux")
@@ -40,7 +40,7 @@ mount core.sys.linux.{
     SYS_CLONE, SYS_CLONE3,
     SYS_FUTEX,
     SYS_IO_URING_SETUP, SYS_IO_URING_ENTER, SYS_IO_URING_REGISTER,
-    SYS_EPOLL_CREATE1, SYS_EPOLL_CTL, SYS_EPOLL_WAIT,
+    SYS_EPOLL_CREATE1, SYS_EPOLL_CTL, SYS_EPOLL_PWAIT,
 };
 
 mount core.sys.linux.{
@@ -74,23 +74,35 @@ fn test_syscall_constants() {
     assert(SYS_CLONE >= 0);
     assert(SYS_FUTEX >= 0);
 
-    // Common x86_64 syscall numbers
-    assert(SYS_READ == 0);
-    assert(SYS_WRITE == 1);
-    assert(SYS_CLOSE == 3);
-    assert(SYS_MMAP == 9);
-    assert(SYS_MUNMAP == 11);
-    assert(SYS_MPROTECT == 10);
+    // Architecture-specific syscall number expectations.
+    @cfg(target_arch = "x86_64") {
+        // x86_64 Linux syscall table (arch/x86/entry/syscalls/syscall_64.tbl)
+        assert(SYS_READ == 0);
+        assert(SYS_WRITE == 1);
+        assert(SYS_CLOSE == 3);
+        assert(SYS_MMAP == 9);
+        assert(SYS_MPROTECT == 10);
+        assert(SYS_MUNMAP == 11);
+    }
+    @cfg(target_arch = "aarch64") {
+        // aarch64 Linux uses the asm-generic unified table.
+        assert(SYS_READ == 63);
+        assert(SYS_WRITE == 64);
+        assert(SYS_CLOSE == 57);
+        assert(SYS_MMAP == 222);
+        assert(SYS_MPROTECT == 226);
+        assert(SYS_MUNMAP == 215);
+    }
 
-    // io_uring syscalls (Linux 5.1+)
-    assert(SYS_IO_URING_SETUP >= 0);
-    assert(SYS_IO_URING_ENTER >= 0);
-    assert(SYS_IO_URING_REGISTER >= 0);
+    // io_uring syscalls (Linux 5.1+) — aligned across x86_64 and aarch64
+    assert(SYS_IO_URING_SETUP == 425);
+    assert(SYS_IO_URING_ENTER == 426);
+    assert(SYS_IO_URING_REGISTER == 427);
 
-    // epoll syscalls
+    // epoll syscalls — portable variants exist on both architectures
     assert(SYS_EPOLL_CREATE1 >= 0);
     assert(SYS_EPOLL_CTL >= 0);
-    assert(SYS_EPOLL_WAIT >= 0);
+    assert(SYS_EPOLL_PWAIT >= 0);
 
     print("Syscall constants tests passed");
 }
