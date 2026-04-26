@@ -167,7 +167,7 @@ The crate ships two unit-test surfaces, gated by the `codegen` feature:
 | Command | Tests | Status |
 |---------|-------|--------|
 | `cargo test -p verum_vbc --lib` (default features) | 908 | all passing |
-| `cargo test -p verum_vbc --lib --features codegen` | 1546 | 1542 passing, 4 pre-existing failures |
+| `cargo test -p verum_vbc --lib --features codegen` | 1546 | 1545 passing, 1 pre-existing failure |
 
 The default surface covers bytecode IR, interpreter, value model, intrinsic
 dispatch, monomorphization, and serialization.  The `--features codegen` surface
@@ -177,17 +177,23 @@ adds the AST-to-VBC code-generation pipeline (gated because it pulls in
 External fixtures: 25 intrinsics test files in `vcs/specs/stdlib/sys/intrinsics/`
 and 6 context system tests in `vcs/specs/L2-standard/contexts/runtime/`.
 
-### Known failures under `--features codegen`
+### Known failure under `--features codegen`
 
-Four `codegen::test_params::test_compile_stdlib_*` fixtures
-(`async_nursery`, `async_executor`, `math_linalg`, `net_udp`) currently
-fail with `unsupported expression: standalone super/crate/relative`.
-The root cause is the `super.<module>.<fn>()` call form in stdlib
-sources where a single-segment `Super`/`Cog`/`Relative` reaches
-`compile_path_simple` instead of the multi-segment
-`compile_qualified_path` branch.  Tracking task: see `#178` (module
-path semantic alignment).  These are NOT regressions of this session's
-work — they pre-date #168 / #166 close-out.
+One `codegen::test_params::test_compile_stdlib_net_udp` fixture
+currently fails with `undefined function: safe_set_ip_tos` — the
+test harness uses the simple `compile_module()` API which doesn't
+resolve `mount` declarations, and `udp.vr` brings `safe_set_ip_tos`
+in via a platform-gated mount block.  This is NOT a codegen bug —
+it's a test-harness gap that needs a switch to
+`compile_module_with_mounts` with a `core_root` argument.
+
+Three previously-failing `test_compile_stdlib_*` fixtures
+(`async_nursery`, `async_executor`, `math_linalg`) were fixed by
+commit d27ba1e2 — the underlying bug was that
+`try_flatten_module_path_resolved` strips the rooted `super`/`cog`/`.`
+prefix when it succeeds, and downstream branches checked
+`parts[0] == "super"` to detect rooted paths after the prefix was
+already gone.  See #178 for the fix.
 
 The earlier "Known Test Failures (Pre-existing)" section that listed
 five `cbgr_heap` / `shape` / `value` failures has been removed; all
