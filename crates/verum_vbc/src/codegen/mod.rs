@@ -1120,7 +1120,7 @@ impl VbcCodegen {
                             fields: smallvec::SmallVec::new(),
                         });
                     }
-                    self.types.push(type_desc);
+                    self.push_type_dedupe(type_desc);
                 }
             }
         }
@@ -2958,6 +2958,29 @@ impl VbcCodegen {
             }
         }
         reported
+    }
+
+    /// Push a `TypeDescriptor` into `self.types`, skipping when an
+    /// existing descriptor already claims the same `TypeId`.
+    ///
+    /// Used at type-registration sites where the well-known TypeId
+    /// map (e.g. `Heap`/`Shared` both bound to `TypeId::PTR = 14`)
+    /// produces multiple `TypeDescriptor` instances at the same id.
+    /// First-wins semantics: keep the first registration, drop the
+    /// rest.  Function-table registrations are independent and not
+    /// affected by this dedupe.
+    ///
+    /// Safe because the runtime dispatches by `TypeId`, not by
+    /// descriptor identity — two descriptors at the same id are
+    /// observationally indistinguishable from one descriptor at
+    /// that id (modulo whichever variants/fields the first one
+    /// happened to register, which is the existing well-known
+    /// alias semantic).
+    fn push_type_dedupe(&mut self, ty: crate::types::TypeDescriptor) {
+        if self.types.iter().any(|t| t.id == ty.id) {
+            return;
+        }
+        self.types.push(ty);
     }
 
     /// Allocate a fresh user-defined `TypeId` that doesn't collide
@@ -6671,7 +6694,7 @@ impl VbcCodegen {
                     });
                 }
 
-                self.types.push(type_desc);
+                self.push_type_dedupe(type_desc);
 
                 let id = FunctionId(u32::MAX / 2);
 
@@ -6799,7 +6822,7 @@ impl VbcCodegen {
                     }
                 }
 
-                self.types.push(type_desc);
+                self.push_type_dedupe(type_desc);
             }
 
             // Type aliases: register mapping from alias name to base type
