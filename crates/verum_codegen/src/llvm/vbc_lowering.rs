@@ -596,14 +596,26 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // name collisions where multiple VBC functions map to the same LLVM
         // function (e.g., stdlib and user both define `execute_with_retry`).
         // The LAST body wins (user code overrides stdlib).
-        let mut lowered_llvm_fns: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        //
+        // Dedupe key is (raw_name, arity). Different-arity overloads of the
+        // same name (e.g. user `fn main()` 0-arity and stdlib
+        // `darwin_entry::main(argc, argv)` 2-arity) map to DIFFERENT LLVM
+        // functions (the second collides on declare and gets a `__arity{n}`
+        // suffix at vbc_lowering.rs ~1200). Deduping by name only would
+        // skip user's main when stdlib's same-named overload comes second
+        // in iteration order, leaving the 0-arity LLVM function bodyless
+        // and the Phase 3.6 safety net stubs it with `return 0` — masking
+        // the user's program logic. Bisect 2026-04-26: `mount core.*; fn main() -> Int { 7 }`
+        // returned exit=0 instead of 7 due to this.
+        let mut lowered_llvm_fns: std::collections::HashMap<(String, usize), usize> = std::collections::HashMap::new();
 
-        // First pass: collect names that have multiple bodies (collisions)
-        let mut body_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        // First pass: collect (name, arity) pairs that have multiple bodies.
+        let mut body_count: std::collections::HashMap<(String, usize), usize> = std::collections::HashMap::new();
         for func_desc in &vbc_module.functions {
             if func_desc.instructions.is_some() {
                 let name = vbc_module.strings.get(func_desc.name).unwrap_or("");
-                *body_count.entry(name.to_string()).or_default() += 1;
+                let key = (name.to_string(), func_desc.params.len());
+                *body_count.entry(key).or_default() += 1;
             }
         }
 
@@ -625,13 +637,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     }
                 }
 
-                // For name collisions with same arity (e.g., stdlib and user both
-                // define `parallel_map<T,U>`), only lower the LAST occurrence (user code).
-                // Skip ALL earlier occurrences (stdlib modules). User functions come
-                // last in the merged VBC module.
-                if let Some(&count) = body_count.get(func_name) {
+                // For name+arity collisions (e.g., stdlib and user both
+                // define `parallel_map<T,U>` with the same arity), only
+                // lower the LAST occurrence (user code overrides stdlib).
+                let dedupe_key = (func_name.to_string(), func_desc.params.len());
+                if let Some(&count) = body_count.get(&dedupe_key) {
                     if count > 1 {
-                        let seen = lowered_llvm_fns.entry(func_name.to_string()).or_insert(0);
+                        let seen = lowered_llvm_fns.entry(dedupe_key).or_insert(0);
                         *seen += 1;
                         if *seen < count {
                             // Not the last occurrence — skip it
