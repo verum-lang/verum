@@ -391,6 +391,43 @@ fn extract_function_name(signature: &str) -> Text {
         .into()
 }
 
+/// Escape user-controlled text for safe interpolation into HTML
+/// content. Replaces the OWASP-defined essential set: `&`, `<`, `>`,
+/// `"`, `'`. Without this, doc comments containing `<script>...`
+/// inject JavaScript into the generated HTML — an XSS vector that
+/// fires whenever a hostile dependency is documented or someone
+/// serves `target/doc/` over HTTP for team consumption.
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#x27;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Escape a string for safe use as an HTML id / attribute value.
+/// Stricter than escape_html: replaces every non-ASCII-alphanumeric
+/// with `_` so a function named `foo<T, U>` doesn't generate a
+/// `<h2 id="foo<T, U>"...` that breaks anchor resolution.
+fn escape_html_id(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
 /// Generate HTML documentation for a file
 fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
     let mut html = Text::new();
@@ -399,21 +436,25 @@ fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
     html.push_str("<html>\n");
     html.push_str("<head>\n");
     html.push_str("  <meta charset=\"utf-8\">\n");
-    html.push_str(&format!("  <title>{}</title>\n", path.display()));
+    html.push_str(&format!("  <title>{}</title>\n", escape_html(&path.display().to_string())));
     html.push_str("  <link rel=\"stylesheet\" href=\"../styles.css\">\n");
     html.push_str("</head>\n");
     html.push_str("<body>\n");
 
-    html.push_str(&format!("<h1>Module: {}</h1>\n", path.display()));
+    html.push_str(&format!("<h1>Module: {}</h1>\n", escape_html(&path.display().to_string())));
 
     for func in functions {
         html.push_str("<div class=\"function-doc\">\n");
 
         // Function signature
-        html.push_str(&format!("<h2 id=\"{}\">{}</h2>\n", func.name, func.name));
+        html.push_str(&format!(
+            "<h2 id=\"{}\">{}</h2>\n",
+            escape_html_id(func.name.as_str()),
+            escape_html(func.name.as_str())
+        ));
         html.push_str(&format!(
             "<pre class=\"signature\">{}</pre>\n",
-            func.signature
+            escape_html(func.signature.as_str())
         ));
 
         // Verification badge
@@ -424,12 +465,12 @@ fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
         };
         html.push_str(&format!(
             "<span class=\"badge {}\">{}</span>\n",
-            badge_class, func.verification_status
+            badge_class, escape_html(func.verification_status.as_str())
         ));
 
         // Description
         if !func.description.is_empty() {
-            html.push_str(&format!("<p>{}</p>\n", func.description));
+            html.push_str(&format!("<p>{}</p>\n", escape_html(func.description.as_str())));
         }
 
         // Cost information
@@ -438,21 +479,21 @@ fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
         if let Some(ref cbgr) = func.cbgr_cost {
             html.push_str(&format!(
                 "<div class=\"cost-item\"><strong>CBGR Cost:</strong> {}</div>\n",
-                cbgr
+                escape_html(cbgr.as_str())
             ));
         }
 
         if let Some(ref time) = func.time_complexity {
             html.push_str(&format!(
                 "<div class=\"cost-item\"><strong>Time Complexity:</strong> {}</div>\n",
-                time
+                escape_html(time.as_str())
             ));
         }
 
         if let Some(ref space) = func.space_complexity {
             html.push_str(&format!(
                 "<div class=\"cost-item\"><strong>Space Complexity:</strong> {}</div>\n",
-                space
+                escape_html(space.as_str())
             ));
         }
 
@@ -464,7 +505,7 @@ fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
             html.push_str("<h4>Performance Characteristics</h4>\n");
             html.push_str("<ul>\n");
             for note in &func.performance_notes {
-                html.push_str(&format!("<li>{}</li>\n", note));
+                html.push_str(&format!("<li>{}</li>\n", escape_html(note.as_str())));
             }
             html.push_str("</ul>\n");
             html.push_str("</div>\n");
@@ -475,7 +516,7 @@ fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
             html.push_str("<div class=\"examples\">\n");
             html.push_str("<h4>Examples</h4>\n");
             for example in &func.examples {
-                html.push_str(&format!("<pre>{}</pre>\n", example));
+                html.push_str(&format!("<pre>{}</pre>\n", escape_html(example.as_str())));
             }
             html.push_str("</div>\n");
         }
@@ -504,7 +545,7 @@ fn generate_index(
     html.push_str("  <meta charset=\"utf-8\">\n");
     html.push_str(&format!(
         "  <title>{} - Documentation</title>\n",
-        metadata.title
+        escape_html(metadata.title.as_str())
     ));
     html.push_str("  <link rel=\"stylesheet\" href=\"styles.css\">\n");
     html.push_str("</head>\n");
@@ -512,11 +553,12 @@ fn generate_index(
 
     html.push_str(&format!(
         "<h1>{} v{}</h1>\n",
-        metadata.title, metadata.version
+        escape_html(metadata.title.as_str()),
+        escape_html(metadata.version.as_str())
     ));
 
     if let Some(ref desc) = metadata.description {
-        html.push_str(&format!("<p class=\"description\">{}</p>\n", desc));
+        html.push_str(&format!("<p class=\"description\">{}</p>\n", escape_html(desc.as_str())));
     }
 
     html.push_str("<div class=\"stats\">\n");
