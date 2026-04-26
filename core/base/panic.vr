@@ -11,42 +11,24 @@
 
 module panic;
 
-// Import intrinsics as functions
-mount core.intrinsics.{spin_hint, unreachable, catch_unwind};
+// Import intrinsics. `unreachable` is renamed to avoid shadowing
+// our own user-facing `unreachable(msg)` defined below — the
+// intrinsic is the LLVM `unreachable` UB-hint, distinct from the
+// panicking diagnostic surface.
+mount core.intrinsics.{spin_hint, unreachable as intrinsic_unreachable, catch_unwind};
 
 // =============================================================================
-// File Descriptor Constants (local definition to avoid sys.common dependency)
+// I/O and Process Exit
 // =============================================================================
-
-/// Standard error file descriptor
-const STDERR: Int = 2;
-
-// =============================================================================
-// Platform-Specific FFI Declarations (local to avoid sys dependencies)
-// =============================================================================
-
-@cfg(target_os = "macos")
-@ffi("libSystem.B.dylib")
-extern {
-    /// Write to file descriptor (C library write)
-    fn write(fd: Int, buf: &Byte, nbyte: Int) -> Int;
-
-    /// Exit process (POSIX _exit - no stdio flush, avoids name collision with Verum exit())
-    fn _exit(status: Int) -> !;
-}
-
-@cfg(target_os = "windows")
-@ffi("kernel32.dll")
-extern {
-    /// Get standard handle
-    fn GetStdHandle(std_handle: UInt32) -> &Byte;
-
-    /// Write to file
-    fn WriteFile(handle: &Byte, buf: &Byte, len: UInt32, written: &mut UInt32, overlapped: &Byte) -> Int;
-
-    /// Exit process
-    fn ExitProcess(exit_code: UInt32) -> !;
-}
+//
+// `write_stderr` and `exit_process` are resolved through the
+// platform_ir layer of `verum_codegen`: the AOT path emits these
+// as wrappers over libc `write(2, ...)` / `_exit(...)` (POSIX) or
+// kernel32 `WriteFile` / `ExitProcess` (Windows). The interpreter
+// path resolves `verum.io.write_stderr` / `verum.process.exit`
+// through `intrinsics::registry`. No platform-specific extern
+// declarations are needed in this file — the platform shims live
+// at the codegen layer where they belong.
 
 // =============================================================================
 // Panic Functions
@@ -92,26 +74,37 @@ fn panic_impl(msg: Text, file: Text, line: Int, column: Int) -> ! {
 fn write_stderr(s: &Text);
 
 /// Write an integer to stderr.
+///
+/// Correctly handles `Int.MIN`: `-Int.MIN` overflows back to
+/// `Int.MIN` in two's-complement, so the naïve `let num = -n; while
+/// num > 0 { ... }` silently produces an empty digit run for the
+/// most-negative value. We work in unsigned magnitude (`UInt64`)
+/// so the absolute value of every `Int` is representable.
 fn write_int_stderr(n: Int) {
     if n == 0 {
         write_stderr("0");
         return;
     }
 
-    let mut num = if n < 0 {
+    let mut mag: UInt64 = if n < 0 {
         write_stderr("-");
-        -n
+        // Cast through bit-pattern: for negative `n`, the two's-
+        // complement magnitude is `(~n as UInt64) + 1`. This
+        // representation is exact for every Int including Int.MIN
+        // (whose magnitude 2^63 doesn't fit in Int but does in
+        // UInt64).
+        (((!n) as UInt64) + (1 as UInt64))
     } else {
-        n
+        n as UInt64
     };
 
-    // Convert to digits (max 20 digits for 64-bit)
+    // Convert to digits (max 20 digits for 64-bit unsigned).
     let mut buf: [Byte; 20] = [0; 20];
-    let mut i = 19;
+    let mut i: Int = 19;
 
-    while num > 0 {
-        buf[i] = ('0' as Byte) + ((num % 10) as Byte);
-        num = num / 10;
+    while mag > (0 as UInt64) {
+        buf[i] = ('0' as Byte) + ((mag % (10 as UInt64)) as Byte);
+        mag = mag / (10 as UInt64);
         i = i - 1;
     }
 
@@ -203,11 +196,20 @@ public fn assert_err<T: Debug, E>(result: Result<T, E>, msg: Text = "assertion f
     }
 }
 
-/// Assert that two floats are equal to within `tolerance`.
-/// Use this instead of `assert_eq` for any Float comparison — direct
-/// equality on IEEE 754 is almost never what you want when the values
-/// came from arithmetic.
+/// Assert that two floats are equal to within an absolute
+/// `tolerance`. Use this instead of `assert_eq` for any Float
+/// comparison — direct equality on IEEE 754 is almost never what
+/// you want when the values came from arithmetic.
+///
+/// NaN handling: any NaN operand fails the assertion. The naïve
+/// `if (left - right) > tolerance` silently passes when either
+/// operand is NaN, because every comparison against NaN is false —
+/// that masks real bugs. We treat NaN as a hard failure.
 public fn assert_approx_eq(left: Float, right: Float, tolerance: Float = 1e-9, msg: Text = "assertion failed: floats not within tolerance") {
+    if left != left || right != right {
+        // NaN check: `x != x` is true iff x is NaN per IEEE 754.
+        panic(msg);
+    }
     let diff = if left > right { left - right } else { right - left };
     if diff > tolerance {
         panic(msg);
@@ -298,16 +300,29 @@ public fn unreachable(msg: Text = "entered unreachable code") -> ! {
     panic(msg)
 }
 
-/// Marks code as unreachable in a safe manner.
-/// In debug builds, panics. In release builds, undefined behavior hint.
+/// Marks code as unreachable.
+/// In debug builds, panics with the given message so the violation
+/// is observable. In release builds, lowers to the LLVM
+/// `unreachable` UB-hint instruction so the optimiser can prune
+/// the path entirely — the contract is that the caller has proven
+/// the code is genuinely unreachable; reaching it is undefined
+/// behaviour.
+///
+/// This is `unsafe` because reaching the release branch produces
+/// UB; only mark code with `unreachable_unchecked` when an external
+/// invariant rules out the case (e.g. a refinement-typed switch
+/// whose verifier-confirmed exhaustive arms are already handled).
 @cfg(debug)
-public fn unreachable_unchecked(msg: Text = "entered unreachable code") -> ! {
+public unsafe fn unreachable_unchecked(msg: Text = "entered unreachable code") -> ! {
     panic(msg)
 }
 
 @cfg(not(debug))
-public fn unreachable_unchecked(_msg: Text = "") -> ! {
-    unreachable()
+public unsafe fn unreachable_unchecked(_msg: Text = "") -> ! {
+    // True UB-hint via the renamed intrinsic import (line 15).
+    // The local `unreachable(msg)` defined above is the safe
+    // panicking version; this branch deliberately bypasses it.
+    intrinsic_unreachable()
 }
 
 /// Marks code as unimplemented.
@@ -406,7 +421,11 @@ implement Debug for PanicInfo {
 /// Type for panic hook functions.
 public type PanicHook is fn(&PanicInfo);
 
-/// Default panic hook that prints to stderr.
+/// Default panic hook that prints to stderr in the same format
+/// as `panic_impl`: `panic: <msg> at <file>:<line>:<column>\n`.
+/// The `column` was historically dropped here, leaving `at
+/// file:line` — inconsistent with the panic-site format and
+/// confusing when a single line carries multiple expressions.
 public fn default_panic_hook(info: &PanicInfo) {
     debug_print(&"panic: ");
     debug_print(&info.message);
@@ -417,6 +436,9 @@ public fn default_panic_hook(info: &PanicInfo) {
             debug_print(&":");
             let line_str = f"{loc.line}";
             debug_print(&line_str);
+            debug_print(&":");
+            let column_str = f"{loc.column}";
+            debug_print(&column_str);
         }
         None => {}
     }
@@ -437,9 +459,18 @@ public fn catch_unwind<T, F: fn() -> T>(f: F) -> Result<T, PanicInfo> {
     @vbc(CATCH_UNWIND, f)
 }
 
-/// Resume an unwinding panic.
+/// Resume an unwinding panic, preserving its full provenance.
+///
+/// Forwards the original `(message, file, line, column)` so the
+/// resumed panic appears at the original site rather than at the
+/// `resume_unwind` call. Without this, panic chains across a
+/// `catch_unwind` / `resume_unwind` pair lose location and a
+/// sub-program's failure point becomes harder to bisect.
 public fn resume_unwind(panic_info: PanicInfo) -> ! {
-    panic(panic_info.message)
+    match panic_info.location {
+        Some(loc) => panic_at(panic_info.message, loc.file, loc.line, loc.column),
+        None => panic(panic_info.message),
+    }
 }
 
 // =============================================================================
