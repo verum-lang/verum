@@ -4038,6 +4038,9 @@ fn is_relevant_event(ev: &notify::Event) -> bool {
         })
 }
 
+/// Backwards-compatible entry — callers that don't pass a
+/// warning budget still work. Forwards to the full version with
+/// `max_warnings = None`.
 pub fn run_extended(
     fix: bool,
     deny_warnings: bool,
@@ -4045,6 +4048,22 @@ pub fn run_extended(
     profile: Option<String>,
     since: Option<String>,
     severity_min: Option<LintLevel>,
+) -> Result<()> {
+    run_extended_full(fix, deny_warnings, format, profile, since, severity_min, None)
+}
+
+/// Full extended runner with the `--max-warnings N` budget.
+/// `max_warnings = None` means no cap; `Some(0)` is equivalent to
+/// `--deny-warnings` (any warning fails the run); `Some(N>0)` lets
+/// up to N warnings through before failing.
+pub fn run_extended_full(
+    fix: bool,
+    deny_warnings: bool,
+    format: LintOutputFormat,
+    profile: Option<String>,
+    since: Option<String>,
+    severity_min: Option<LintLevel>,
+    max_warnings: Option<usize>,
 ) -> Result<()> {
     let mut cfg = load_full_lint_config();
     if let Some(name) = &profile {
@@ -4157,12 +4176,25 @@ pub fn run_extended(
     }
 
     if errors > 0 {
-        Err(CliError::Custom(format!("{} lint errors", errors)))
-    } else if deny_warnings && warnings > 0 {
-        Err(CliError::Custom(format!("{} lint warnings (denied)", warnings)))
-    } else {
-        Ok(())
+        return Err(CliError::Custom(format!("{} lint errors", errors)));
     }
+    // --max-warnings N supersedes --deny-warnings when both are
+    // present (N=0 is exactly --deny-warnings semantics, so the
+    // user gets identical behaviour either way).
+    if let Some(budget) = max_warnings {
+        if warnings > budget {
+            return Err(CliError::Custom(format!(
+                "{} warnings exceeds budget of {} (--max-warnings)",
+                warnings, budget
+            )));
+        }
+    } else if deny_warnings && warnings > 0 {
+        return Err(CliError::Custom(format!(
+            "{} lint warnings (denied)",
+            warnings
+        )));
+    }
+    Ok(())
 }
 
 /// Apply auto-fixes to disk for every `fixable` issue in `issues`.
