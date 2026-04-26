@@ -430,6 +430,29 @@ pub struct CodegenConfig {
     /// - No async runtime
     /// - Static CBGR only
     pub is_embedded: bool,
+
+    /// Whether `compile_module_items_lenient` should promote bug-class
+    /// skips (`SkipClass::BugClass` — undefined function, arity mismatch,
+    /// type regression, etc.) to hard compilation errors.
+    ///
+    /// `false` (default): every per-item failure surfaces as a warn-level
+    /// `[lenient] SKIP` trace and the function/method is omitted from the
+    /// emitted bytecode.  Runtime calls panic with `FunctionNotFound`.
+    /// This is the dev-loop default — it lets partial / forward-referenced
+    /// stdlib state still build.
+    ///
+    /// `true` (opt-in via `with_strict_codegen`): bug-class failures are
+    /// converted into a hard `CodegenError` returned from
+    /// `compile_module_items_lenient`, halting the build at the first
+    /// such failure.  `Irreducible` failures (FFI prototype, unimplemented
+    /// language feature) continue to skip silently — these represent the
+    /// documented Tier-0 contract, not bugs.
+    ///
+    /// Intended for CI and release builds where any bug-class skip is a
+    /// regression that must block the merge.  Tracked under #166
+    /// (eliminate the lenient-SKIP class) — once full-stdlib bug-class
+    /// counts hit zero (#176) this flag will flip to `true` by default.
+    pub strict_codegen: bool,
 }
 
 impl Default for CodegenConfig {
@@ -445,6 +468,9 @@ impl Default for CodegenConfig {
             is_interpretable: true,
             is_systems_profile: false,
             is_embedded: false,
+            // Default: lenient — partial/forward-referenced stdlib still builds.
+            // CI/release flips this on via with_strict_codegen.
+            strict_codegen: false,
         }
     }
 }
@@ -569,6 +595,23 @@ impl CodegenConfig {
     /// instead. This method is provided for fine-grained control.
     pub fn with_interpretable(mut self, interpretable: bool) -> Self {
         self.is_interpretable = interpretable;
+        self
+    }
+
+    /// Promotes `BugClass` lenient skips to hard codegen errors.
+    ///
+    /// In strict mode `compile_module_items_lenient` returns a
+    /// `CodegenError` on the first item that fails with a `BugClass`
+    /// error (undefined function, arity mismatch, type regression,
+    /// codegen resource exhaustion, parser/lowering bug).  `Irreducible`
+    /// errors (interpreter limitation — FFI prototype, unimplemented
+    /// feature) continue to skip silently because they represent the
+    /// documented Tier-0 contract.
+    ///
+    /// Intended for CI / release builds.  See the `strict_codegen` field
+    /// docstring for the broader rationale.
+    pub fn with_strict_codegen(mut self) -> Self {
+        self.strict_codegen = true;
         self
     }
 }
@@ -2394,20 +2437,38 @@ impl VbcCodegen {
         if let Some(name) = Self::extract_source_module_name(module) {
             self.ctx.current_source_module = Some(name);
         }
+        let mut first_strict_err: Option<CodegenError> = None;
         for item in module.items.iter() {
             if self.should_compile_item(item) {
-                // Use lenient item compilation that skips individual functions that fail
-                self.compile_item_lenient(item);
+                // Use lenient item compilation that skips individual functions
+                // that fail.  In strict_codegen mode, the helper returns the
+                // first `BugClass` error encountered so we can halt the build
+                // at the call site instead of papering over a real defect.
+                if let Err(e) = self.compile_item_lenient(item) {
+                    if first_strict_err.is_none() {
+                        first_strict_err = Some(e);
+                    }
+                }
             }
         }
         self.ctx.current_source_module = prev;
-        Ok(())
+        match first_strict_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     /// Compiles an item with lenient error handling - skips individual functions that fail.
     /// This is used for imported stdlib modules where some functions may reference
     /// FFI/external symbols not available in VBC interpreter.
-    fn compile_item_lenient(&mut self, item: &Item) {
+    ///
+    /// Returns `Err(CodegenError)` *only* when `config.strict_codegen` is
+    /// `true` AND the per-item failure classifies as `SkipClass::BugClass`.
+    /// All other failures (irreducible, or any failure in non-strict mode)
+    /// surface as warn-level traces and the function returns `Ok(())` —
+    /// the documented Tier-0 contract.
+    fn compile_item_lenient(&mut self, item: &Item) -> CodegenResult<()> {
+        let mut first_strict_err: Option<CodegenError> = None;
         match &item.kind {
             ItemKind::Function(func) => {
                 self.ctx.generic_type_params.clear();
@@ -2452,6 +2513,9 @@ impl VbcCodegen {
                         }
                     }
                     tracing::debug!("[lenient] SKIP top-level fn {}: {}", fname, e);
+                    if self.config.strict_codegen && class == SkipClass::BugClass && first_strict_err.is_none() {
+                        first_strict_err = Some(e);
+                    }
                 }
                 // Compile nested functions even if parent failed
                 if let verum_common::Maybe::Some(ref body) = func.body {
@@ -2549,6 +2613,9 @@ impl VbcCodegen {
                                 }
                             }
                             tracing::debug!("[lenient] SKIP {}.{}: {}", ty, fname, e);
+                            if self.config.strict_codegen && class == SkipClass::BugClass && first_strict_err.is_none() {
+                                first_strict_err = Some(e);
+                            }
                         }
 
                         // Compile nested functions even if parent failed
@@ -2564,6 +2631,10 @@ impl VbcCodegen {
                 let _ = self.compile_pattern_as_function(pat_decl);
             }
             _ => {}
+        }
+        match first_strict_err {
+            Some(e) => Err(e),
+            None => Ok(()),
         }
     }
 
@@ -8529,5 +8600,26 @@ mod tests {
             .with_optimization_level(10); // Should be clamped to 3
 
         assert_eq!(config.optimization_level, 3);
+    }
+
+    /// Default config is lenient — partial / forward-referenced stdlib
+    /// state still builds.  `with_strict_codegen()` opts in to promoting
+    /// bug-class skips to hard errors.  Tracked under #166.
+    #[test]
+    fn test_strict_codegen_default_lenient() {
+        let config = CodegenConfig::new("test");
+        assert!(
+            !config.strict_codegen,
+            "default codegen mode must stay lenient — CI/release opts in via with_strict_codegen()",
+        );
+    }
+
+    #[test]
+    fn test_strict_codegen_opt_in() {
+        let config = CodegenConfig::new("test").with_strict_codegen();
+        assert!(
+            config.strict_codegen,
+            "with_strict_codegen() must flip the flag on so CI / release builds reject any bug-class skip",
+        );
     }
 }
