@@ -545,20 +545,63 @@ axiom yoneda_full<C: SmallCategory>(F: C -> Set, G: C -> Set)
 
 Stored as `CoreTerm::FrameworkAxiom { name, citation, body, metadata }`. The axiom cannot be proved inside Verum; it can only be *invoked*. Invocation is recorded in the CoreTerm of every consumer.
 
-### 6.2 The standard six-pack
+### 6.2 The Standard catalogue
 
-Ships in `core.math.frameworks`:
+Closes B15 (#213). Pre-V8 the spec listed a "six-pack" of six
+frameworks; the actual stdlib catalogue at `core/math/frameworks/`
++ `core/math/frameworks/registry.vr::populate_canonical_standard`
+ships nine **Standard** frameworks, plus a **VerifiedExtension**
+family (`bounded_arithmetic_*`, the four diakrisis sub-corpora) and
+the **Experimental** tier — fourteen frameworks visible at module
+level today, with more expected from VFE-N rule additions.
 
-| Package | Lineage | Representative axioms |
+**Standard catalogue** (per `populate_canonical_standard`,
+ordered by canonical (ν, τ) coordinate per VUVA §10.4.1):
+
+| Package | Coord (ν) | Lineage | Representative axioms |
+|---|---|---|---|
+| `diakrisis` | — (meta-classifier) | Diakrisis L5+ canonical-primitive metaclassification | (Fw, ν, τ) coordinate space; defines the space, occupies no point |
+| `actic.raw` | 0 | Neutral Actic articulation | base of the canonical primitive |
+| `petz_classification` | 2 | Petz D. 1986. *Quasi-entropies.* | f-divergence characterisation, monotone metrics on matrix spaces |
+| `arnold_catastrophe` | 2 | Arnold V. I. 1985. *Singularities of Differentiable Maps III.* | catastrophe normal forms (codim ≤ 4), critical-value theory |
+| `owl2_fs` | 1 | W3C 2012. *OWL 2 Direct Semantics.* | SROIQ DL-decidable fragment (64 axioms across 9 sub-modules; see Task C7) |
+| `lurie_htt` | ω | Lurie J. 2009. *Higher Topos Theory.* | straightening / unstraightening, coherent diagrams, ∞-Kan extension formula |
+| `connes_reconstruction` | ω | Connes-Chamseddine 2008 (NCG 1994). | spectral-triple reconstruction, KO-dimension |
+| `baez_dolan` | ω+1 | Baez J., Dolan J. 1995. *Higher-Dimensional Algebra.* | stabilisation hypothesis, n-categorical inf |
+| `schreiber_dcct` | ω+2 | Schreiber U. 2013. *Differential Cohomology in a Cohesive ∞-Topos.* | shape ∫, flat ♭, sharp ♯, cohesion axioms |
+
+**VerifiedExtension family** — bounded arithmetic
+(per `populate_bounded_arithmetic_family`):
+
+| Package | Class | Lineage |
 |---|---|---|
-| `lurie_htt` | Lurie J. 2009. *Higher Topos Theory.* | straightening / unstraightening, coherent diagrams, ∞-Kan extension formula |
-| `schreiber_dcct` | Schreiber U. 2013. *Differential Cohomology in a Cohesive ∞-Topos.* | shape ∫, flat ♭, sharp ♯, cohesion axioms |
-| `connes_reconstruction` | Connes A. 1994. *Noncommutative Geometry.* | spectral-triple reconstruction, KO-dimension |
-| `petz_classification` | Petz D. 1986. *Quasi-entropies.* | f-divergence characterisation |
-| `arnold_mather` | Arnold–Mather. *Dynamical Systems III.* | critical-value theory |
-| `baez_dolan` | Baez J., Dolan J. 1995. *Higher-Dimensional Algebra.* | stabilisation, hypothesis H |
+| `bounded_arithmetic_v_0` | LOGSPACE | Cook-Reckhow |
+| `bounded_arithmetic_v_1` | P (witness-axiom) | Cook-Nguyen |
+| `bounded_arithmetic_s_2_1` | P (PIND) | Buss |
+| `bounded_arithmetic_v_np` | NP-search | Cook-Nguyen |
+| `bounded_arithmetic_v_ph` | polynomial hierarchy | Cook-Nguyen |
 
-36 axioms in total. User-authored packages extend this.
+**VerifiedExtension family** — diakrisis sub-corpora
+(per `core/math/frameworks/diakrisis_*.vr`):
+
+| Package | Role |
+|---|---|
+| `diakrisis_acts` | meta-classifier act language |
+| `diakrisis_biadjunction` | (Fw ⊣ Eff) bicategorical adjunction |
+| `diakrisis_extensions` | closure-extension theorems |
+| `diakrisis_stack_model` | (∞,2)-stack model (Theorem 131.T) |
+
+User-authored packages extend the catalogue. The `verum frameworks
+list` CLI (V1, tracked via VFE §18.7 Verum-Foundation-Marketplace)
+queries `core/math/frameworks/registry.vr` at runtime; entries
+are deterministically ordered for CI diff review.
+
+> **Naming history.** The pre-VFE spec referred to a "standard
+> six-pack" with `arnold_mather` as a member. The shipped corpus is
+> named `arnold_catastrophe` (registry stable as of B15 close), and
+> the catalogue grew well beyond six. Citations for legacy
+> `arnold_mather` references in ADRs and old papers should resolve
+> to `arnold_catastrophe`.
 
 ### 6.3 Audit
 
@@ -1366,7 +1409,7 @@ Receipts are content-addressed; CI compares against a committed baseline.
 - **Task C3**: HITs with eliminator auto-gen.
 - **Task C4**: Quotient types.
 - **Task C5** (V1 ✓ shipped — surface; V2 enforcement deferred): Quantitative annotations per Atkey QTT (Atkey 2018 / McBride 2016). `crates/verum_ast/src/attr/typed.rs` ships `Quantity { Zero, One, Many }` enum + `QuantityAttr` typed attribute. Surface forms: `@quantity(0)` / `@quantity(1)` / `@quantity(omega)` (or aliases `linear`, `erased`, `unrestricted`, etc.). Attributes attach to function parameters; the parser already accepts `@<ident>(args)` on parameter positions, so no grammar change is needed for V1. Default quantity remains ω (unrestricted) — every existing function compiles unchanged. Nine round-trip tests at `crates/verum_ast/tests/attr_tests.rs::quantity_*` cover Int / Path / String literal forms + every reject path. The linearity-tracking pass that raises `E_LINEAR_DOUBLE_USE` / `E_LINEAR_NEVER_USED` / `E_ERASED_AT_RUNTIME` lives in `verum_types` (V2 deferred — V1 ships the *declaration discipline* so user code can opt in without yet being enforced; the same staging used by C2 V1 for inductive eliminator typing).
-- **Task C6**: Framework axioms: ship the standard six-pack (`lurie_htt`, `schreiber_dcct`, `connes_reconstruction`, `petz_classification`, `arnold_mather`, `baez_dolan`).
+- **Task C6** (✓ shipped — see B15 close in §6.2): Framework axioms — `core/math/frameworks/` ships nine Standard packages (`diakrisis`, `actic.raw`, `petz_classification`, `arnold_catastrophe`, `owl2_fs`, `lurie_htt`, `connes_reconstruction`, `baez_dolan`, `schreiber_dcct`) plus the bounded-arithmetic VerifiedExtension family and four diakrisis sub-corpora. The pre-VFE "standard six-pack" naming is retained only as historical reference; the live catalogue is enumerated in `core/math/frameworks/registry.vr::populate_canonical_standard` and surfaced via `verum frameworks list` (V1 tracked via VFE §18.7). Note that `arnold_mather` was renamed to `arnold_catastrophe` to match the shipped registry entry.
 - **Task C7** (V1 ✓ shipped): `core.math.frameworks.owl2_fs` package — 64 trusted-boundary `@framework(owl2_fs, ...)` axioms in nine sub-modules (object_property / data_range / class_expr / class_axiom / object_property_axiom / data_property_axiom / datatype_definition / key / assertion) + types.vr (Individual / Literal sorts + count_o quantifier-of-quantity). V1 ships axiom *signatures* with `ensures true;` placeholder bodies; V2 will replace each placeholder with the verbatim Shkotin Table-row HOL definition so SMT dispatch via CVC5 FMF can decide encoded obligations. `verum audit --framework-axioms --by-lineage owl2_fs` enumerates the OWL 2 footprint of any corpus; `verum audit --coord` projects owl2_fs theorems to ν=1, τ=intensional.
 - **Task C7b** (V1 ✓ shipped — 24/30 markers): Canonical bridge `owl2_fs → lurie_htt` at `core/theory_interop/bridges/owl2_to_htt.vr`. 24 trusted-boundary `@framework(owl2_fs, "Bridge owl2_fs → lurie_htt: <op> → <HTT image>")` axioms structured in 4 tiers: class-level (5), object-property (6), characteristic flags (7), class-expression constructors (4) — covering Class→Presheaf, SubClassOf→Monomorphism, EquivalentClasses→Isomorphism, DisjointClasses→InitialPullback, ObjectProperty→Functor, HasKey→RepresentablePresheaf, the 7 characteristic flags as functor properties, ObjectIntersectionOf→Limit, ObjectUnionOf→Colimit, ObjectSomeValuesFrom→∃-image, ObjectAllValuesFrom→Π-right-adjoint. The remaining ~6 markers (ObjectHasValue, ObjectComplementOf, secondary flags) are V2 — they require deeper PSh-internal-language details and are tracked alongside the typed `@framework_translate` attribute. Aggregator at `core/theory_interop/bridges/mod.vr`. VCS smoke at `vcs/specs/L1-core/owl2_fs/owl2_to_htt_bridge_smoke.vr`.
 - **Task C8** (V1 ✓ shipped): `OwlAttr` family in `verum_ast::attr::typed` — full §21.6 coverage with seven typed attributes (`Owl2ClassAttr`, `Owl2SubClassOfAttr`, `Owl2DisjointWithAttr`, `Owl2CharacteristicAttr`, `Owl2PropertyAttr`, `Owl2EquivalentClassAttr`, `Owl2HasKeyAttr`) plus the `Owl2Semantics` (OpenWorld / ClosedWorld) and `Owl2Characteristic` (7-element flag enum) accessory types. Each attribute parser (a) accepts every legal surface shape per §21.6 (named-arg colon / equals; bracketed list / positional list; class identifier or string literal); (b) rejects unknown enum variants and named-arg keys instead of silently dropping them — typos surface as parse errors. Fifteen round-trip tests in `crates/verum_ast/tests/attr_tests.rs` exercise every attribute and every reject-path.
@@ -1423,7 +1466,7 @@ VUVA is considered delivered when:
 
 1. Every existing `.vr` file in `core/` and `vcs/specs/` compiles under `@verify(static)` with zero changes.
 2. `grammar/verum.ebnf` parses all three refinement forms and the grammar tests pass.
-3. `@framework(…)` is accepted and the six-pack ships.
+3. `@framework(…)` is accepted and the Standard catalogue ships (per §6.2: nine Standard frameworks + VerifiedExtension families).
 4. `verum audit --framework-axioms` lists used axioms for the entire stdlib.
 5. `verum audit --coord` produces a `(Fw, ν, τ)` tuple per user theorem.
 6. All nine `@verify(…)` strategies are dispatched through `verum_smt` or `verum_kernel`.
