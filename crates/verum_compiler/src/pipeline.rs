@@ -6724,6 +6724,39 @@ impl<'s> CompilationPipeline<'s> {
             let verify_start = Instant::now();
             let timeout_ms = self.session.options().smt_timeout_secs * 1000;
 
+            // K-rule preamble (#187): walk the function's refinement
+            // types and run the kernel rules (currently
+            // K-Refine-omega) BEFORE invoking SMT. K-rule failures
+            // are hard formation errors per the trusted-base
+            // contract; short-circuiting saves the SMT round and
+            // surfaces a sharper diagnostic. This is the
+            // user-facing wiring of KernelRecheck — every `verum
+            // build` / `verum verify` invocation now re-checks
+            // refinement-type formation against the trusted kernel
+            // before any SMT proof is attempted.
+            let kernel_outcomes =
+                verum_verification::KernelRecheck::recheck_function(func);
+            let mut kernel_failure: Option<(verum_common::Text, String)> = None;
+            for (label, outcome) in kernel_outcomes.iter() {
+                if let Err(err) = outcome {
+                    kernel_failure = Some((label.clone(), format!("{}", err)));
+                    break;
+                }
+            }
+            if let Some((label, msg)) = kernel_failure {
+                num_failed += 1;
+                let diag = verum_diagnostics::DiagnosticBuilder::error()
+                    .message(format!(
+                        "kernel-recheck failed for '{}': {} — {}",
+                        func.name.name.as_str(),
+                        label.as_str(),
+                        msg,
+                    ))
+                    .build();
+                self.session.emit_diagnostic(diag);
+                continue;
+            }
+
             // Perform actual SMT-based refinement verification
             let verification_result = self.verify_function_refinements(func, timeout_ms);
 
