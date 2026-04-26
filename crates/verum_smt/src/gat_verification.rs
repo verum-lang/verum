@@ -37,10 +37,8 @@ use verum_protocol_types::protocol_base::ProtocolBound;
 use verum_common::ToText;
 
 use z3::ast::{Bool, Dynamic, Int, forall_const};
-use z3::{Context, FuncDecl, Pattern, SatResult, Solver, Sort, Symbol};
+use z3::{FuncDecl, Pattern, SatResult, Solver, Sort, Symbol};
 
-use crate::context::Context as VerumContext;
-use crate::translate::Translator;
 
 // ==================== Protocol Table for Type Checking ====================
 
@@ -2139,36 +2137,6 @@ impl GATVerifier {
         }
     }
 
-    /// Generate counterexample for constraint violation
-    ///
-    /// Uses Z3 model to extract a concrete type that violates the constraint.
-    #[allow(dead_code)] // Part of verification diagnostics API
-    fn generate_counterexample(
-        &self,
-        solver: &Solver,
-        param: &Text,
-        constraint: &Text,
-    ) -> GATCounterexample {
-        // Try to get a model
-        if let Some(model) = solver.get_model() {
-            // Extract type variable value from model
-            let violating_type = format!("{:?}", model).into();
-
-            GATCounterexample {
-                param: param.clone(),
-                violating_type,
-                violated_constraint: constraint.clone(),
-                explanation: "Extracted from Z3 model".to_text(),
-            }
-        } else {
-            GATCounterexample {
-                param: param.clone(),
-                violating_type: "Unknown".to_text(),
-                violated_constraint: constraint.clone(),
-                explanation: "No model available".to_text(),
-            }
-        }
-    }
 
     /// Clear verification cache
     pub fn clear_cache(&mut self) {
