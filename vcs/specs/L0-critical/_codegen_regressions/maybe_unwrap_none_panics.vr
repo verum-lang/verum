@@ -1,0 +1,24 @@
+// @test: run-interpreter-panic
+// @level: L0
+// @tier: 0
+// @tags: codegen, method-dispatch, receiver-narrowing, vuva-153
+// @expected-panic: called `unwrap` on a None value
+// @description: Method-dispatch receiver-type narrowing — Maybe sibling.
+//
+// Companion fixture to result_unwrap_err_receiver_narrow.vr.  Pins
+// that `Maybe<T>::None.unwrap()` panics — i.e. the receiver-type
+// narrowing in `compile_method_call` correctly distinguishes
+// Maybe.unwrap (panics on None — fc == 0) from Result.unwrap
+// (panics on Err — tag != 0) and from any historic generic-T
+// unwrap path.
+//
+// Without the narrowing, the dispatcher picks whichever candidate
+// was registered first by name+arity and may return the inner
+// payload silently; this test fails CI when that regression
+// re-surfaces.
+
+fn main() {
+    let m: Maybe<Int> = None;
+    let v = m.unwrap();           // must panic with the message below
+    print(f"unreachable v = {v}");
+}
