@@ -172,6 +172,119 @@ impl VerificationPass for LevelInferencePass {
     }
 }
 
+// =============================================================================
+// KernelRecheckPass — first-class verification pipeline pass (#187)
+// =============================================================================
+
+/// Kernel-rule recheck pass — invokes the trusted-base K-rules from
+/// `verum_kernel` on every function in the module. Currently runs
+/// `K-Refine-omega` over every refinement type appearing in
+/// parameter / return positions; future revisions will add
+/// `K-Universe-Ascent` (meta-classifier application sites) and
+/// `K-Eps-Mu` (the `@verify(coherent)` α/ε bidirectional check).
+///
+/// # Why this is its own pass
+///
+/// Kernel rules are the trusted base of the verification ladder
+/// (VUVA §§9.2, 12.4). Routing them through a dedicated pass gives
+/// three structural advantages:
+///
+///   1. *Defense-in-depth* — `SmtVerificationPass::verify_function`
+///      *also* runs the recheck preamble; with `KernelRecheckPass`
+///      in the default pipeline the K-rules fire even when SMT is
+///      disabled, so a non-SMT build still sees kernel-level
+///      formation errors.
+///   2. *Fail-fast* — K-rule violations are hard formation errors
+///      (`m_depth_omega(P) ≥ m_depth_omega(A) + 1` cannot be
+///      recovered by any SMT proof). Running the K-pass first and
+///      short-circuiting on failure saves the SMT round.
+///   3. *Diagnostic separation* — the `KernelRecheckResult` is its
+///      own pipeline-result row, not a confusing co-tenant of the
+///      SMT result.
+#[derive(Debug)]
+pub struct KernelRecheckPass {
+    /// Per-function rejection counts (recorded for diagnostics).
+    rejections: List<Text>,
+}
+
+impl KernelRecheckPass {
+    /// Create a new kernel-recheck pass.
+    pub fn new() -> Self {
+        Self {
+            rejections: List::new(),
+        }
+    }
+
+    /// The K-rule rejection labels accumulated by the most recent
+    /// `run`. Empty list when the module is K-rule clean.
+    pub fn rejections(&self) -> &List<Text> {
+        &self.rejections
+    }
+}
+
+impl Default for KernelRecheckPass {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VerificationPass for KernelRecheckPass {
+    fn run(
+        &mut self,
+        module: &Module,
+        ctx: &mut VerificationContext,
+    ) -> Result<VerificationResult, VerificationError> {
+        let start = Instant::now();
+        let mut costs: List<VerificationCost> = List::new();
+        self.rejections = List::new();
+
+        for item in &module.items {
+            if let ItemKind::Function(func) = &item.kind {
+                let func_start = Instant::now();
+                // Use current level as a label only — kernel-recheck
+                // is level-agnostic (the K-rules apply at every
+                // verification level, including Runtime).
+                let level = ctx.current_level();
+                let outcomes = KernelRecheck::recheck_function(func);
+                let total = outcomes.len();
+                let mut failures = 0usize;
+                for (label, outcome) in outcomes.iter() {
+                    if outcome.is_err() {
+                        failures += 1;
+                        self.rejections.push(label.clone());
+                    }
+                }
+                costs.push(VerificationCost::new(
+                    Text::from(func.name.as_str()),
+                    level,
+                    func_start.elapsed(),
+                    0,                  // smt_queries: kernel-recheck never calls SMT
+                    failures == 0,      // success
+                    false,              // timed_out: kernel walks are linear
+                    total,              // problem_size: number of K-rule sites
+                ));
+            }
+        }
+
+        let success = self.rejections.is_empty();
+        let result = if success {
+            VerificationResult::success(VerificationLevel::Runtime, start.elapsed(), costs)
+        } else {
+            // K-rule rejection is a hard error per the trusted-base
+            // contract — the build cannot proceed past this.
+            let mut r = VerificationResult::failure(VerificationLevel::Runtime, start.elapsed());
+            r.costs = costs;
+            r.functions_verified = r.costs.len();
+            r
+        };
+        Ok(result)
+    }
+
+    fn name(&self) -> &str {
+        "kernel_recheck"
+    }
+}
+
 /// Boundary detection pass using call graph analysis
 ///
 /// This pass performs full call graph analysis to detect verification
@@ -474,7 +587,20 @@ impl VerificationPipeline {
         self.passes.push(pass);
     }
 
-    /// Run all passes
+    /// Run all passes, fail-fast on the first pass that returns
+    /// `result.success == false`.
+    ///
+    /// Fail-fast is the correct contract because verification
+    /// passes form a *strict ordering* — a downstream pass
+    /// (BoundaryDetection, TransitionRecommendation, SMT) presumes
+    /// that upstream invariants (kernel-rule formation, level
+    /// coherence) hold. Running them on a module that has already
+    /// failed an upstream check is at best wasted work; at worst
+    /// it surfaces noise diagnostics that mask the root cause.
+    ///
+    /// The failed pass's result IS pushed into the returned list so
+    /// callers can read the diagnostic; only *subsequent* passes
+    /// are skipped.
     pub fn run_all(
         &mut self,
         module: &Module,
@@ -484,7 +610,11 @@ impl VerificationPipeline {
 
         for pass in &mut self.passes {
             let result = pass.run(module, ctx)?;
+            let halt = !result.success;
             results.push(result);
+            if halt {
+                break;
+            }
         }
 
         Ok(results)
@@ -497,6 +627,12 @@ impl VerificationPipeline {
         pipeline.add_pass(Box::new(LevelInferencePass::new(
             VerificationLevel::Runtime,
         )));
+        // KernelRecheckPass runs *after* level inference (which
+        // sets per-function scopes) but *before* boundary
+        // detection / transition recommendation — kernel-rule
+        // failures are formation errors that should short-circuit
+        // the rest of the pipeline (#187 V0).
+        pipeline.add_pass(Box::new(KernelRecheckPass::new()));
         pipeline.add_pass(Box::new(BoundaryDetectionPass::new()));
         pipeline.add_pass(Box::new(TransitionRecommendationPass::new(
             TransitionStrategy::Balanced,
@@ -525,6 +661,7 @@ impl std::fmt::Debug for VerificationPipeline {
 // =============================================================================
 
 use crate::integration::HoareZ3Verifier;
+use crate::kernel_recheck::KernelRecheck;
 use crate::vcgen::{VCGenerator, VerificationCondition};
 use verum_smt::context::Context as SmtContext;
 
@@ -689,6 +826,52 @@ impl SmtVerificationPass {
             };
         }
 
+        // V3 (#186) — kernel-recheck preamble. Walk every
+        // refinement type appearing in the function's parameters /
+        // return type and run K-Refine-omega before SMT. A failed
+        // K-rule surfaces as an Invalid VC with the kernel
+        // diagnostic in the description; this is strictly *cheaper*
+        // than SMT (linear in term size, no solver call) and a
+        // K-rule failure is a hard formation error that no SMT
+        // proof can recover, so it's correct to short-circuit
+        // before VC generation.
+        let kernel_outcomes = KernelRecheck::recheck_function(func);
+        let mut preamble_results: List<VCVerificationResult> = List::new();
+        let mut preamble_failures = 0usize;
+        for (label, outcome) in kernel_outcomes.iter() {
+            match outcome {
+                Ok(()) => {
+                    preamble_results.push(VCVerificationResult {
+                        description: label.clone(),
+                        status: VCStatus::Valid,
+                        counterexample: None,
+                        time_ms: 0,
+                    });
+                }
+                Err(err) => {
+                    preamble_failures += 1;
+                    preamble_results.push(VCVerificationResult {
+                        description: label.clone(),
+                        status: VCStatus::Invalid,
+                        counterexample: Some(Text::from(format!("{}", err))),
+                        time_ms: 0,
+                    });
+                }
+            }
+        }
+        if preamble_failures > 0 {
+            // K-rule rejection is a hard error — skip SMT entirely.
+            return SmtVerificationResult {
+                function_name: func_name,
+                vc_count: preamble_results.len(),
+                proven_count: 0,
+                failed_count: preamble_failures,
+                unknown_count: 0,
+                vc_results: preamble_results,
+                time_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+
         // Generate verification conditions
         let mut vc_gen = VCGenerator::new();
         let vcs = vc_gen.generate_vcs(func);
@@ -750,6 +933,7 @@ impl SmtVerificationPass {
             time_ms: start.elapsed().as_millis() as u64,
         }
     }
+
 }
 
 impl Default for SmtVerificationPass {
