@@ -145,7 +145,25 @@ fn v2_non_identity_with_mismatched_depths_rejected() {
         .expect_err("V2 must reject depth-mismatched non-identity pair");
     match err {
         KernelError::EpsMuNaturalityFailed { context } => {
-            assert_eq!(context.as_str(), "v2_depth_mismatch");
+            // V2.5: context now embeds the depth-mismatch values
+            // for post-mortem readability. Substring-match so the
+            // assertion stays robust if the message wording shifts.
+            let s = context.as_str();
+            assert!(
+                s.contains("v2_depth_mismatch"),
+                "context should preserve caller tag: {}",
+                s,
+            );
+            assert!(
+                s.contains("md^ω(M_α)=2"),
+                "context should surface lhs depth: {}",
+                s,
+            );
+            assert!(
+                s.contains("md^ω(α)=0"),
+                "context should surface rhs depth: {}",
+                s,
+            );
         }
         other => panic!("expected EpsMuNaturalityFailed, got {:?}", other),
     }

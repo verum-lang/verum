@@ -105,8 +105,19 @@ pub fn check_eps_mu_coherence(
                         if lhs_rank == rhs_rank {
                             Ok(())
                         } else {
+                            // V2.5 — embed the depth mismatch in the
+                            // diagnostic context so callers can post-
+                            // mortem the rejection without re-running
+                            // m_depth_omega themselves. The pair
+                            // shape "(<lhs>, <rhs>)" is stable so
+                            // CI / IDE output can grep for it.
                             Err(KernelError::EpsMuNaturalityFailed {
-                                context: Text::from(context),
+                                context: Text::from(format!(
+                                    "{}: depth mismatch md^ω(M_α)={} vs md^ω(α)={}",
+                                    context,
+                                    lhs_rank.render(),
+                                    rhs_rank.render(),
+                                )),
                             })
                         }
                     }
