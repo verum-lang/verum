@@ -107,3 +107,75 @@ fn deeply_nested_identity_accepted_via_partial_eq() {
     let rhs = epsilon_of(inner);
     assert!(check_eps_mu_coherence(&lhs, &rhs, "nested_identity").is_ok());
 }
+
+// ============================================================================
+// V2 increment: modal-depth preservation pre-condition (#189)
+//
+// The natural-equivalence τ : ε ∘ M ≃ A ∘ ε is depth-preserving;
+// for non-identity M, m_depth_omega(M_α) must equal m_depth_omega(α)
+// or no τ-witness can possibly exist. V2 rejects such depth-
+// mismatched pairs (V1 conservatively accepted them).
+// ============================================================================
+
+fn modal_box(t: CoreTerm) -> CoreTerm {
+    CoreTerm::ModalBox(Heap::new(t))
+}
+
+#[test]
+fn v2_non_identity_with_matching_depths_still_accepted() {
+    // M_α = Box(α') with rank 1; α = Box(α) with rank 1.
+    // Both have md^ω = 1 ⇒ depth precondition holds ⇒ V2 accepts
+    // (V3 / #181 will sharpen with the actual τ-witness check).
+    let lhs = epsilon_of(modal_box(var("α_prime")));
+    let rhs = alpha_of(epsilon_of(modal_box(var("α"))));
+    assert!(
+        check_eps_mu_coherence(&lhs, &rhs, "v2_matching_depth").is_ok(),
+        "depth-matched non-identity M must still pass (V2 conservative-accept)"
+    );
+}
+
+#[test]
+fn v2_non_identity_with_mismatched_depths_rejected() {
+    // M_α = Box(Box(α)) with rank 2; α = α with rank 0.
+    // Depth mismatch ⇒ no τ-witness possible ⇒ V2 rejects.
+    // V1 would have conservatively accepted.
+    let lhs = epsilon_of(modal_box(modal_box(var("α"))));
+    let rhs = alpha_of(epsilon_of(var("α")));
+    let err = check_eps_mu_coherence(&lhs, &rhs, "v2_depth_mismatch")
+        .expect_err("V2 must reject depth-mismatched non-identity pair");
+    match err {
+        KernelError::EpsMuNaturalityFailed { context } => {
+            assert_eq!(context.as_str(), "v2_depth_mismatch");
+        }
+        other => panic!("expected EpsMuNaturalityFailed, got {:?}", other),
+    }
+}
+
+#[test]
+fn v2_identity_case_unaffected_by_depth_check() {
+    // M = id ⇒ M_α == α ⇒ identity-functor arm fires before
+    // the depth check. Even if depths happened to be unusual,
+    // structural equality short-circuits.
+    let alpha = modal_box(modal_box(var("α")));
+    let lhs = epsilon_of(alpha.clone());
+    let rhs = alpha_of(epsilon_of(alpha));
+    assert!(check_eps_mu_coherence(&lhs, &rhs, "v2_identity").is_ok());
+}
+
+#[test]
+fn v2_depth_check_uses_omega_aware_ranks() {
+    // Both sides reach into ω-rank territory (Box(Box(...)) ranks
+    // are finite, but the depth comparison is total over the
+    // OrdinalDepth lattice — pure-finite k1 == pure-finite k2
+    // iff k1 == k2.
+    let m_alpha = modal_box(modal_box(modal_box(var("M_α"))));
+    let alpha   = modal_box(modal_box(modal_box(var("α"))));
+    // Same rank (3), different inner Var names ⇒ structurally
+    // unequal but depth-matched ⇒ V2 accepts.
+    let lhs = epsilon_of(m_alpha);
+    let rhs = alpha_of(epsilon_of(alpha));
+    assert!(
+        check_eps_mu_coherence(&lhs, &rhs, "v2_omega_rank_match").is_ok(),
+        "same finite rank should pass V2"
+    );
+}
