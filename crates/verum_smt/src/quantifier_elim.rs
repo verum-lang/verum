@@ -47,7 +47,6 @@
 //! Based on: Z3 qe/qe.h and experiments/z3.rs
 
 use std::fmt;
-use std::sync::Arc;
 #[allow(unused_imports)]
 use std::time::{Duration, Instant};
 
@@ -968,10 +967,10 @@ pub enum InvariantSynthesisMethod {
 // ==================== Quantifier Eliminator ====================
 
 /// Main quantifier eliminator struct
+///
+/// Z3 0.19+ resolves Context via thread-local storage at tactic-construction
+/// time, so this struct holds only configuration and per-call statistics.
 pub struct QuantifierEliminator {
-    /// Z3 context
-    #[allow(dead_code)] // Reserved for direct Z3 operations
-    context: Arc<Context>,
     /// Configuration
     config: QEConfig,
     /// Statistics
@@ -984,13 +983,12 @@ pub struct QuantifierEliminator {
 
 impl QuantifierEliminator {
     /// Create a new quantifier eliminator
-    pub fn new(context: Arc<Context>) -> Self {
+    pub fn new() -> Self {
         let qe_tactic = Tactic::new("qe");
         let qe_lite_tactic = Tactic::new("qe-light");
         let simplify_tactic = Tactic::new("simplify");
 
         Self {
-            context,
             config: QEConfig::default(),
             stats: QEStats::default(),
             qe_tactic,
@@ -1000,8 +998,8 @@ impl QuantifierEliminator {
     }
 
     /// Create with custom configuration
-    pub fn with_config(context: Arc<Context>, config: QEConfig) -> Self {
-        let mut eliminator = Self::new(context);
+    pub fn with_config(config: QEConfig) -> Self {
+        let mut eliminator = Self::new();
         eliminator.config = config;
         eliminator
     }
@@ -1056,6 +1054,16 @@ impl QuantifierEliminator {
         // Try Skolemization if enabled (fast approximation)
         if self.config.use_skolemization
             && let Ok(result) = self.qe_skolem(formula, vars)
+        {
+            let elapsed = start.elapsed().as_millis() as u64;
+            self.stats.record_qe(elapsed, vars.len(), false);
+            return Ok(result);
+        }
+
+        // Try SAT-preprocessed QE if enabled (often faster on Boolean-heavy
+        // formulas because SAT propagation simplifies before quantifier work)
+        if self.config.use_qe_sat
+            && let Ok(result) = self.qe_sat(formula, vars)
         {
             let elapsed = start.elapsed().as_millis() as u64;
             self.stats.record_qe(elapsed, vars.len(), false);
@@ -1362,7 +1370,6 @@ impl QuantifierEliminator {
     }
 
     /// QE-SAT: SAT-based quantifier elimination
-    #[allow(dead_code)] // Part of QE strategy API
     fn qe_sat(&self, formula: &Bool, vars: &[&str]) -> Result<QEResult, Text> {
         let start = Instant::now();
 

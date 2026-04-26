@@ -36,8 +36,6 @@ use verum_common::ToText;
 use z3::ast::{Bool, Dynamic};
 use z3::{Context, FuncDecl, SatResult, Solver, Sort, Symbol};
 
-use crate::context::Context as VerumContext;
-
 // ==================== Core Types ====================
 
 /// Protocol verification result
@@ -96,13 +94,10 @@ pub struct ProtocolStats {
 // ==================== Protocol Encoder ====================
 
 /// Encodes protocol constraints to Z3
+///
+/// Z3 0.19+ uses thread-local contexts, so no explicit `Context` is held —
+/// sorts created here bind to the current thread's context at construction.
 pub struct ProtocolEncoder {
-    /// Z3 context
-    #[allow(dead_code)] // Reserved for direct Z3 operations
-    context: Context,
-    /// Verum SMT context
-    #[allow(dead_code)] // Reserved for extended encoding operations
-    verum_ctx: VerumContext,
     /// Type sort for SMT
     type_sort: Sort,
     /// Protocol sort for SMT
@@ -120,9 +115,6 @@ pub struct ProtocolEncoder {
 impl ProtocolEncoder {
     /// Create a new protocol encoder
     pub fn new() -> Self {
-        let context = Context::thread_local();
-        let verum_ctx = VerumContext::new();
-
         // Create sorts
         let type_sort = Sort::uninterpreted(Symbol::String("Type".to_string()));
         let protocol_sort = Sort::uninterpreted(Symbol::String("Protocol".to_string()));
@@ -135,8 +127,6 @@ impl ProtocolEncoder {
         );
 
         Self {
-            context,
-            verum_ctx,
             type_sort,
             protocol_sort,
             implements_pred,

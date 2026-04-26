@@ -69,7 +69,7 @@ fn assert_formulas_equivalent(_ctx: &Context, f1: &Bool, f2: &Bool) -> bool {
 #[test]
 fn test_qe_eliminator_creation() {
     let ctx = create_context();
-    let eliminator = QuantifierEliminator::new(ctx);
+    let eliminator = QuantifierEliminator::new();
 
     let stats = eliminator.stats();
     assert_eq!(stats.qe_calls, 0);
@@ -89,14 +89,14 @@ fn test_qe_eliminator_with_config() {
         simplify_level: 1,
     };
 
-    let eliminator = QuantifierEliminator::with_config(ctx, config.clone());
+    let eliminator = QuantifierEliminator::with_config(config.clone());
     assert_eq!(eliminator.stats().qe_calls, 0);
 }
 
 #[test]
 fn test_eliminate_existential_simple() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // ∃x. (x > 0 ∧ y = x + 1)  =>  y > 1
     let x = Int::new_const("x");
@@ -126,7 +126,7 @@ fn test_eliminate_existential_simple() {
 #[test]
 fn test_eliminate_existential_linear_arithmetic() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // ∃x. (x ≥ 0 ∧ y = 2x + 3)  =>  y ≥ 3 ∧ y is odd
     let x = Int::new_const("x");
@@ -152,7 +152,7 @@ fn test_eliminate_existential_linear_arithmetic() {
 #[test]
 fn test_eliminate_multiple_variables() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // ∃x,y. (x > 0 ∧ y > 0 ∧ z = x + y)  =>  z > 0
     let x = Int::new_const("x");
@@ -180,7 +180,7 @@ fn test_eliminate_multiple_variables() {
 #[test]
 fn test_eliminate_universal() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // ∀x. (x > 0 ⇒ x + y > y)
     let x = Int::new_const("x");
@@ -201,7 +201,7 @@ fn test_eliminate_universal() {
 #[test]
 fn test_project_model_to_vars() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // Create a satisfiable formula
     let x = Int::new_const("x");
@@ -231,7 +231,7 @@ fn test_project_model_to_vars() {
 #[test]
 fn test_project_model_empty_vars() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let formula = x._eq(Int::from_i64(5));
@@ -254,7 +254,7 @@ fn test_project_model_empty_vars() {
 #[test]
 fn test_simplify_with_qe() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // Complex formula that can be simplified
     let x = Int::new_const("x");
@@ -273,7 +273,7 @@ fn test_simplify_with_qe() {
 #[test]
 fn test_simplify_tautology() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // x = x (tautology)
     let x = Int::new_const("x");
@@ -295,7 +295,7 @@ fn test_simplify_tautology() {
 #[test]
 fn test_synthesize_loop_invariant_simple() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // Loop: while (i < n) { i = i + 1; }
     // Precondition: i = 0 ∧ n > 0
@@ -333,7 +333,7 @@ fn test_synthesize_loop_invariant_simple() {
 #[test]
 fn test_synthesize_precondition() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // Function: output = input + 1
     // Postcondition: output > 0
@@ -359,7 +359,7 @@ fn test_synthesize_precondition() {
 #[test]
 fn test_synthesize_postcondition() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // Function: output = input * 2
     // Precondition: input > 0
@@ -385,7 +385,7 @@ fn test_synthesize_postcondition() {
 #[test]
 fn test_interpolant_to_invariant() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // Interpolant: x > 0 ∧ temp > 0
     // After eliminating temp: should preserve the constraint on x
@@ -426,7 +426,7 @@ fn test_interpolant_to_invariant() {
 #[test]
 fn test_eliminate_variables() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let y = Int::new_const("y");
@@ -446,7 +446,7 @@ fn test_eliminate_variables() {
 #[test]
 fn test_find_eliminable_vars() {
     let ctx = create_context();
-    let eliminator = QuantifierEliminator::new(ctx.clone());
+    let eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let y = Int::new_const("y");
@@ -464,7 +464,7 @@ fn test_find_eliminable_vars() {
 #[test]
 fn test_preserve_semantics() {
     let ctx = create_context();
-    let eliminator = QuantifierEliminator::new(ctx.clone());
+    let eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let y = Int::new_const("y");
@@ -489,7 +489,7 @@ fn test_preserve_semantics() {
 #[test]
 fn test_qe_statistics_tracking() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let y = Int::new_const("y");
@@ -511,7 +511,7 @@ fn test_qe_statistics_tracking() {
 #[test]
 fn test_reset_statistics() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let formula = x.gt(Int::from_i64(0));
@@ -529,7 +529,7 @@ fn test_reset_statistics() {
 #[test]
 fn test_eliminate_no_variables() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let formula = x.gt(Int::from_i64(0));
@@ -543,7 +543,7 @@ fn test_eliminate_no_variables() {
 #[test]
 fn test_eliminate_nonexistent_variable() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let formula = x.gt(Int::from_i64(0));
@@ -558,7 +558,7 @@ fn test_eliminate_nonexistent_variable() {
 #[test]
 fn test_qe_with_unsatisfiable_formula() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let formula = Bool::and(&[&x.gt(Int::from_i64(5)), &x.lt(Int::from_i64(3))]);
@@ -585,7 +585,7 @@ fn test_qe_lite_fast_path() {
         use_model_projection: false,
         ..Default::default()
     };
-    let mut eliminator = QuantifierEliminator::with_config(ctx.clone(), config);
+    let mut eliminator = QuantifierEliminator::with_config(config);
 
     let x = Int::new_const("x");
     let y = Int::new_const("y");
@@ -608,7 +608,7 @@ fn test_qe_lite_fast_path() {
 #[test]
 fn test_multiple_qe_methods() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     let x = Int::new_const("x");
     let y = Int::new_const("y");
@@ -636,7 +636,7 @@ fn test_multiple_qe_methods() {
 #[test]
 fn test_qe_integration_refinement_types() {
     let ctx = create_context();
-    let mut eliminator = QuantifierEliminator::new(ctx.clone());
+    let mut eliminator = QuantifierEliminator::new();
 
     // Simulate refinement type verification
     // type Positive = Int{> 0}
@@ -692,7 +692,7 @@ fn test_qe_config_options() {
     ];
 
     for config in configs {
-        let mut eliminator = QuantifierEliminator::with_config(ctx.clone(), config);
+        let mut eliminator = QuantifierEliminator::with_config(config);
 
         let x = Int::new_const("x");
         let y = Int::new_const("y");
