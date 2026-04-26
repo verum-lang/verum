@@ -48,6 +48,7 @@ mount super.segment.{
     MemSegment, SegmentError, SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
     segment_alloc, segment_free, segment_abandon, ptr_to_segment,
     SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE,
+    SEGMENT_NORMAL, SEGMENT_HUGE,
 };
 mount super.size_class.{
     BIN_COUNT, BIN_HUGE, BIN_FULL, QUEUE_COUNT,
@@ -848,13 +849,23 @@ implement LocalHeap {
     }
 
     /// Allocate huge object (dedicated segment)
+    ///
+    /// Marks the segment with `SEGMENT_HUGE` so the
+    /// corresponding `free()` path can dispatch to the
+    /// huge-free branch (which releases the entire segment)
+    /// rather than treating slice 1 as a `HeapPageHeader` —
+    /// the latter would silently corrupt the user data when
+    /// page metadata is read out of arbitrary user bytes.
+    /// Earlier revisions had the `kind` setter commented out,
+    /// which was the root cause of the missing-huge-free
+    /// dispatch defect.
     fn alloc_huge(&mut self, size: Int) -> Result<&unsafe Byte, HeapError> {
         // For huge allocations, we need direct mmap
         // The segment system handles this via segment_alloc
         let segment = segment_alloc(self.thread_id)?;
 
-        // Mark as huge segment
-        // segment.kind = SEGMENT_HUGE;
+        // Mark as huge segment so free() dispatches correctly.
+        segment.kind = SEGMENT_HUGE;
 
         // Add to segment list
         segment.next = self.segments;
@@ -872,9 +883,91 @@ implement LocalHeap {
         Ok(ptr)
     }
 
+    /// Free a huge allocation (releases the entire segment).
+    ///
+    /// Counterpart to `alloc_huge` — the entire dedicated
+    /// segment goes back to the OS via `segment_free`. The
+    /// huge allocation occupies the segment's data slices
+    /// past the header; freeing the segment frees them all
+    /// at once.
+    fn free_huge(&mut self, segment: &mut MemSegment) -> Result<(), HeapError> {
+        // Unlink from this heap's segment list.
+        // Note: a more efficient implementation would maintain
+        // a doubly-linked segment list; for now we walk the
+        // singly-linked list. Huge segments are rare so the
+        // O(N) unlink is acceptable.
+        let mut prev: &unsafe mut MemSegment = 0 as &unsafe mut MemSegment;
+        let mut cur = self.segments as &unsafe mut MemSegment;
+        while (cur as Int) != 0 {
+            if (cur as Int) == (segment as Int) {
+                if (prev as Int) == 0 {
+                    self.segments = unsafe { (*cur).next };
+                } else {
+                    unsafe { (*prev).next = (*cur).next; }
+                }
+                break;
+            }
+            prev = cur;
+            cur = unsafe { (*cur).next as &unsafe mut MemSegment };
+        }
+        if (cur as Int) == 0 {
+            return Err(HeapError.InvalidPointer);
+        }
+
+        // Huge segments occupy a full SEGMENT_SIZE
+        // (32 MiB) backing region; the user data is some
+        // subset of that bounded by the original allocation
+        // size. We attribute the full segment size to
+        // bytes_freed because that's the actual memory the OS
+        // reclaims via munmap — matches the alloc-side
+        // accounting where bytes_allocated tracks the user
+        // size (smaller). The asymmetry surfaces in
+        // stat-reading as a slight overstatement of freed
+        // bytes for huge allocations, which is the honest
+        // reflection of the dedicated-segment model.
+        let bytes = SEGMENT_SIZE as UInt64;
+        segment_free(segment);
+
+        self.stats.dealloc_count = self.stats.dealloc_count + 1;
+        self.stats.bytes_freed = self.stats.bytes_freed + bytes;
+        self.stats.live_count = self.stats.live_count - 1;
+        // Decrement live_bytes by the user-side size (which
+        // we tracked at alloc time) — but we don't have it
+        // here. Use saturating_sub to avoid underflow when the
+        // alloc-side bytes_allocated and free-side bytes_freed
+        // differ by their inherent attribution asymmetry.
+        if self.stats.live_bytes >= bytes {
+            self.stats.live_bytes = self.stats.live_bytes - bytes;
+        } else {
+            self.stats.live_bytes = 0;
+        }
+        self.stats.segments_owned = self.stats.segments_owned - 1;
+
+        Ok(())
+    }
+
     /// Free a pointer (determines thread ownership automatically)
+    ///
+    /// Huge allocations get a separate fast path: their segment
+    /// is dedicated to a single allocation, so `free` releases
+    /// the entire segment back to the OS via `free_huge`. The
+    /// earlier implementation skipped this dispatch and fell
+    /// through into `free_local`, which cast slice 1 (the user
+    /// data!) as a `HeapPageHeader` — silently corrupting the
+    /// user data when page metadata was read out of arbitrary
+    /// user bytes. The `is_huge` check here closes that hole.
+    /// (Closing it required `alloc_huge` to actually set
+    /// `segment.kind = SEGMENT_HUGE`, which was previously
+    /// commented out — both fixes ship together.)
     public fn free(&mut self, ptr: &unsafe Byte) -> Result<(), HeapError> {
         let segment = ptr_to_segment(ptr);
+
+        // Huge segments fast-path: single-allocation segment,
+        // release the whole thing.
+        if segment.kind == SEGMENT_HUGE {
+            return self.free_huge(segment as &mut MemSegment);
+        }
+
         let owner_tid = atomic_load_u64(&segment.thread_id, ORDERING_ACQUIRE);
 
         if owner_tid == self.thread_id {
@@ -929,15 +1022,40 @@ implement LocalHeap {
     }
 
     /// Cross-thread free
+    ///
+    /// Telemetry contract (mimalloc convention): per-heap stats
+    /// are attributed to the thread that PERFORMS the operation,
+    /// not the thread that originally allocated. So `dealloc_count`
+    /// and `bytes_freed` increment on the freeing thread (this
+    /// `self`) — not on the owning thread. Owning-thread
+    /// `live_count` / `live_bytes` are NOT decremented from
+    /// here because we'd be writing to a different heap's stats
+    /// without proper synchronisation; the owning thread's
+    /// `live_*` counters drift upward from cross-thread frees
+    /// and operators must compare against `alloc_count -
+    /// dealloc_count` aggregated across heaps for the true
+    /// picture.
+    ///
+    /// Earlier revisions only updated `dealloc_count` here,
+    /// leaving `bytes_freed` silently zero for every cross-
+    /// thread free — making the per-heap "freed bytes" counter
+    /// systematically under-report by the size of every cross-
+    /// thread free. Adding `bytes_freed` restores the
+    /// dealloc-count↔bytes-freed symmetry that the same-thread
+    /// path already maintains.
     fn free_xthread(&mut self, ptr: &unsafe Byte, segment: &MemSegment) -> Result<(), HeapError> {
         let slice_idx = segment.slice_index(ptr);
         let page = segment.slice_ptr(slice_idx) as &mut HeapPageHeader;
 
+        let block_size = page.block_size as UInt64;
+
         // Free via atomic xthread list
         page.free_block_xthread(ptr);
 
-        // Update local stats (approximate)
+        // Update freeing-thread stats — see contract doc above
+        // for why owning-thread live_* counters are not touched.
         self.stats.dealloc_count = self.stats.dealloc_count + 1;
+        self.stats.bytes_freed = self.stats.bytes_freed + block_size;
 
         Ok(())
     }
