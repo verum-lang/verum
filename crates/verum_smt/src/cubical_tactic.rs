@@ -82,9 +82,9 @@ enum CubicalNorm {
     Endpoint(IEndpoint),
 
     /// A dimension variable bound by a `PathLambda`. Produced internally
-    /// during `subst` / path-lambda β-reduction; never constructed from
-    /// user-facing `Expr` terms (only in tests to exercise reduction).
-    #[allow(dead_code)]
+    /// during `subst` / path-lambda β-reduction; only used by the test
+    /// suite that exercises reduction directly.
+    #[cfg(test)]
     Dim(Text),
 
     /// `refl(x)` — constant path at `x`.
@@ -139,11 +139,16 @@ enum CubicalNorm {
 impl CubicalNorm {
     /// Substitute dimension variable `dim` with `endpoint` throughout.
     fn subst(&self, dim: &str, endpoint: IEndpoint) -> CubicalNorm {
+        // `dim` is only meaningful when the AST contains `Dim(_)` nodes, which
+        // happens exclusively in tests (the variant is `#[cfg(test)]`).
+        #[cfg(not(test))]
+        let _ = (dim, endpoint);
         match self {
+            #[cfg(test)]
             CubicalNorm::Dim(d) if d.as_str() == dim => CubicalNorm::Endpoint(endpoint),
-            CubicalNorm::Dim(_)
-            | CubicalNorm::Atom(_)
-            | CubicalNorm::Endpoint(_) => self.clone(),
+            #[cfg(test)]
+            CubicalNorm::Dim(_) => self.clone(),
+            CubicalNorm::Atom(_) | CubicalNorm::Endpoint(_) => self.clone(),
 
             CubicalNorm::PathLambda { dim: d, body } if d.as_str() == dim => {
                 // Shadowed — do not substitute inside

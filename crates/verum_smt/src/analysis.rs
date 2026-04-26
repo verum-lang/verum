@@ -618,12 +618,8 @@ impl RealSequence {
 /// Provides verification of fundamental analysis theorems using Z3's
 /// non-linear real arithmetic (NRA) theory.
 pub struct AnalysisVerifier {
-    /// Z3 context reference
+    /// Complete ordered field (typically reals) used for theorem statements
     field: CompleteOrderedField,
-
-    /// Cache of verified theorems
-    #[allow(dead_code)] // Reserved for theorem caching
-    theorem_cache: Map<Text, Heap<ProofTerm>>,
 }
 
 impl AnalysisVerifier {
@@ -631,7 +627,6 @@ impl AnalysisVerifier {
     pub fn new() -> Self {
         Self {
             field: CompleteOrderedField::reals(),
-            theorem_cache: Map::new(),
         }
     }
 

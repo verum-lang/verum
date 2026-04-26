@@ -1547,15 +1547,13 @@ pub fn validate_solution(
 
 /// Builder for inductive datatypes with refinements
 pub struct InductiveDatatypeBuilder {
-    #[allow(dead_code)] // Will be used for extended datatype operations
-    ctx: Context,
     engine: FixedPointEngine,
 }
 
 impl InductiveDatatypeBuilder {
     pub fn new(ctx: Context) -> Result<Self, Text> {
-        let engine = FixedPointEngine::new(ctx.clone())?;
-        Ok(Self { ctx, engine })
+        let engine = FixedPointEngine::new(ctx)?;
+        Ok(Self { engine })
     }
 
     /// Define list datatype with size predicate

@@ -38,10 +38,10 @@
 //! // assert_eq!(result.len(), 2); // Result is [2, 4]
 //! ```
 
-use crate::context::Context;
-use crate::translate::Translator;
 use crate::z3_backend::{AdvancedResult, Z3Solver};
 use verum_ast::{Expr, ExprKind, LiteralKind};
+use crate::context::Context;
+use crate::translate::Translator;
 use verum_common::{Heap, List, Map, Maybe, Text};
 use verum_common::ToText;
 use z3::ast::{Bool, Dynamic, Int};
@@ -51,9 +51,9 @@ use z3::ast::{Bool, Dynamic, Int};
 /// This verifier uses Z3's SMT solver to verify tensor shape constraints
 /// at compile time, enabling safe zero-overhead tensor operations.
 pub struct TensorShapeVerifier {
-    /// Z3 context for SMT solving
-    #[allow(dead_code)] // Reserved for direct Z3 operations
-    context: Heap<Context>,
+    /// Z3 context kept alive so the translator's borrow stays valid
+    /// (Translator<'static> via Heap-pinned context address).
+    _context: Heap<Context>,
     /// Translator for converting Verum AST to Z3
     translator: Heap<Translator<'static>>,
     /// Cache of verified tensor shapes for performance
@@ -65,14 +65,15 @@ pub struct TensorShapeVerifier {
 impl TensorShapeVerifier {
     /// Create a new tensor shape verifier
     pub fn new() -> Self {
-        // SAFETY: Context is leaked to get 'static lifetime for simplicity
-        // In production, use proper lifetime management
+        // SAFETY: Context is Heap-pinned so the &Context address is stable
+        // for the lifetime of the verifier; the static lifetime on Translator
+        // models that the borrow lives as long as Self.
         let context = Heap::new(Context::new());
         let context_ref = unsafe { &*(&*context as *const Context) };
         let translator = Heap::new(Translator::new(context_ref));
 
         Self {
-            context,
+            _context: context,
             translator,
             shape_cache: Map::new(),
             stats: VerificationStats::default(),

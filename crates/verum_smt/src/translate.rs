@@ -4046,15 +4046,6 @@ impl PatternExtractor {
         self.visit_expr(body);
     }
 
-    /// Check if an expression references any bound variable
-    #[allow(dead_code)] // Part of pattern extraction API - used in quantifier trigger generation
-    fn references_bound_vars(&self, expr: &Expr) -> bool {
-        self.collect_bound_var_refs(expr)
-            .iter()
-            .next()
-            .is_some()
-    }
-
     /// Collect all bound variable references in an expression
     fn collect_bound_var_refs(&self, expr: &Expr) -> List<Text> {
         let mut refs = List::new();

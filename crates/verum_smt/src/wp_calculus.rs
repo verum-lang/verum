@@ -73,11 +73,7 @@ pub enum WpError {
 /// This engine translates Verum statements into Z3 constraints using
 /// Dijkstra's weakest precondition calculus.
 pub struct WpEngine<'ctx> {
-    /// Z3 context
-    #[allow(dead_code)] // Reserved for direct Z3 operations
-    context: &'ctx Context,
-
-    /// Translator for expressions
+    /// Translator for expressions (carries the 'ctx lifetime)
     translator: Translator<'ctx>,
 
     /// Function contracts for call summarization
@@ -100,7 +96,6 @@ impl<'ctx> WpEngine<'ctx> {
     /// Create a new WP engine
     pub fn new(context: &'ctx Context) -> Self {
         Self {
-            context,
             translator: Translator::new(context),
             function_contracts: Map::new(),
             state_versions: HashMap::new(),

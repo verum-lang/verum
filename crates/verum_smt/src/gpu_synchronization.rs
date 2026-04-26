@@ -550,25 +550,6 @@ impl SyncVerifier {
         }
     }
 
-    /// Encode that an atomic operation can complete (public wrapper)
-    #[allow(dead_code)] // Part of deadlock detection API
-    fn encode_atomic_can_complete(&self, atomic: &AtomicOperation) -> Bool {
-        // Find the index of this atomic
-        let idx = self.atomics.iter().position(|a| {
-            a.thread == atomic.thread
-                && a.block == atomic.block
-                && a.program_point == atomic.program_point
-        });
-
-        if let Some(idx) = idx {
-            let graph = self.build_atomic_dependency_graph();
-            self.encode_atomic_can_complete_internal(atomic, idx, &graph)
-        } else {
-            // Unknown atomic: conservatively assume it can complete
-            Bool::from_bool(true)
-        }
-    }
-
     /// Verify deadlock freedom for all atomic operations
     ///
     /// Returns true if no deadlock is possible, false otherwise
