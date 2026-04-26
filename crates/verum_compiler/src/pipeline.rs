@@ -6676,6 +6676,44 @@ impl<'s> CompilationPipeline<'s> {
         let mut cost_tracker = CostTracker::new();
         let _smt_ctx = SmtContext::new();
 
+        // Framework-hygiene preamble (#190): R1+R2+R3 discipline
+        // for @framework / @enact annotations. Runs once per module
+        // before the per-function refinement loop. R1/R2 produce
+        // Warnings (recorded but non-blocking); R3 produces an
+        // Error and short-circuits the verify phase.
+        {
+            let mut hygiene_pass = verum_verification::HygieneRecheckPass::new();
+            let mut ctx = verum_verification::VerificationContext::new();
+            use verum_verification::VerificationPass;
+            let _ = hygiene_pass.run(module, &mut ctx);
+            for d in hygiene_pass.diagnostics() {
+                let builder = match d.severity {
+                    verum_verification::HygieneSeverity::Error =>
+                        verum_diagnostics::DiagnosticBuilder::error(),
+                    verum_verification::HygieneSeverity::Warning =>
+                        verum_diagnostics::DiagnosticBuilder::warning(),
+                    verum_verification::HygieneSeverity::Info =>
+                        verum_diagnostics::DiagnosticBuilder::warning(),
+                };
+                let diag = builder
+                    .message(format!(
+                        "framework-hygiene {}: {}",
+                        d.rule,
+                        d.message.as_str()
+                    ))
+                    .build();
+                self.session.emit_diagnostic(diag);
+            }
+            if hygiene_pass.error_count() > 0 {
+                debug!(
+                    "Framework-hygiene errored ({} R3 violations); \
+                     skipping refinement verification",
+                    hygiene_pass.error_count()
+                );
+                return Ok(());
+            }
+        }
+
         // Extract functions that need verification (those with refinement types)
         let functions_to_verify: List<_> = module
             .items
