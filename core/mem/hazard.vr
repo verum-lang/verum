@@ -323,17 +323,37 @@ implement ThreadHazardRecord {
     }
 
     /// Release a hazard pointer.
+    ///
+    /// LIFO contract: `next_slot` is only decremented when the
+    /// released slot is the top of the stack
+    /// (`slot + 1 == next_slot`). Out-of-order release leaves
+    /// the slot logically allocated until the topmost guard
+    /// also releases — at which point the gap collapses
+    /// upward. Concrete consequence: holding two guards and
+    /// dropping them out of acquisition order leaks one slot
+    /// for the duration the older guard is held.
+    ///
+    /// Mitigation: the `try_deref` usage pattern that drives
+    /// every production hazard acquisition is stack-disciplined
+    /// (guard is the LAST live binding in its scope), so the
+    /// LIFO invariant holds at every reachable call site.
+    /// Callers that hold multiple guards and need out-of-order
+    /// release should structure them as nested scopes instead.
     fn release(&mut self, slot: Int) {
         match self.record {
             Some(record) => {
-                // Clear the slot
+                // Clear the slot — pointer goes to 0 so a
+                // concurrent scanner sees the slot as inactive.
                 atomic_store_ptr(
                     &mut record.hazards[slot] as *mut *const Byte,
                     0 as *const Byte,
                     ORDERING_RELEASE
                 );
 
-                // Allow slot reuse (LIFO for cache locality)
+                // LIFO slot reuse — only collapse if this is
+                // the top of the stack. Non-top releases are
+                // benign (just temporarily under-utilise the
+                // slot pool until the LIFO chain catches up).
                 if slot + 1 == self.next_slot {
                     self.next_slot = slot;
                 }
