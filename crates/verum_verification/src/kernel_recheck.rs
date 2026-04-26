@@ -205,6 +205,20 @@ impl KernelRecheck {
                 }
             }
         }
+        // V8 (#210, B9) — descend into requires / ensures clauses.
+        // Pre/postcondition expressions can mention refinement
+        // types via `where` clauses or named refinements; pre-V8
+        // these escaped the kernel-recheck. The contract-style
+        // expressions are walked the same way as let-binding
+        // initializers via walk_ast_expr_for_recheck — refinement-
+        // type formation inside `requires x: Int{p.box().box()}`
+        // surfaces with K-Refine-omega rejection.
+        for req in func.requires.iter() {
+            walk_ast_expr_for_recheck(req, &func.name.name, &mut out);
+        }
+        for ens in func.ensures.iter() {
+            walk_ast_expr_for_recheck(ens, &func.name.name, &mut out);
+        }
         out
     }
 
@@ -225,6 +239,19 @@ impl KernelRecheck {
             },
             &mut out,
         );
+        // V8 (#210, B9) — walk theorem requires/ensures as well.
+        // Theorems carry the same pre/post contract surface as
+        // functions; same refinement-type leak applies pre-V8.
+        for req in theorem.requires.iter() {
+            walk_ast_expr_for_recheck(req, &theorem.name.name, &mut out);
+        }
+        for ens in theorem.ensures.iter() {
+            walk_ast_expr_for_recheck(ens, &theorem.name.name, &mut out);
+        }
+        // Walk the proof body if present — TheoremDecl.proof is a
+        // Maybe<ProofBody> not a FunctionBody, so we keep the walk
+        // narrow at the V8 surface and defer richer ProofBody
+        // descent to a dedicated proof-recheck pass.
         out
     }
 
@@ -245,6 +272,15 @@ impl KernelRecheck {
             },
             &mut out,
         );
+        // V8 (#210, B9): the axiom's `proposition` field carries
+        // the assumed claim. While the proposition isn't a
+        // refinement-bearing type itself, it CAN reference
+        // refinement-typed sub-terms via path expressions that
+        // resolve to typedefs whose body is a Refined CoreTerm.
+        // Walking the proposition via the body-expr walker
+        // surfaces refinement-type formation inside the
+        // proposition's structure.
+        walk_ast_expr_for_recheck(&axiom.proposition, &axiom.name.name, &mut out);
         out
     }
 
