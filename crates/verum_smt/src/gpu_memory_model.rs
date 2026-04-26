@@ -25,10 +25,10 @@
 
 use z3::{
     Solver,
-    ast::{Array, Bool, Dynamic, Int},
+    ast::{Array, Bool, Int},
 };
 
-use verum_common::{List, Map, Maybe, Text};
+use verum_common::{List, Maybe, Text};
 use verum_common::ToText;
 
 // ==================== Core Types ====================
@@ -109,22 +109,10 @@ impl MemorySpace {
 ///
 /// Encodes the hierarchical memory system of GPUs using Z3 arrays.
 /// Each memory space is modeled as a separate array theory.
+///
+/// Note: Z3 arrays are returned directly from `create_*_memory` and are owned
+/// by the caller; this struct only retains dimensional + access-tracking state.
 pub struct GpuMemoryModel {
-    /// Global memory: ThreadID × Address → Value
-    /// Shared across all thread blocks in the grid
-    #[allow(dead_code)] // Used for global memory access encoding
-    global_memory: Map<Text, Dynamic>,
-
-    /// Shared memory: BlockID × Address → Value
-    /// Shared within a thread block, separate per block
-    #[allow(dead_code)] // Used for shared memory access encoding
-    shared_memory: Map<Text, Dynamic>,
-
-    /// Local memory: ThreadID × Address → Value
-    /// Thread-private, separate per thread
-    #[allow(dead_code)] // Used for local memory access encoding
-    local_memory: Map<Text, Dynamic>,
-
     /// Grid dimensions (blocks in grid)
     grid_dim: (u32, u32, u32),
 
@@ -146,9 +134,6 @@ impl GpuMemoryModel {
     /// - `block_dim`: (x, y, z) dimensions of each block (threads per block)
     pub fn new(grid_dim: (u32, u32, u32), block_dim: (u32, u32, u32)) -> Self {
         Self {
-            global_memory: Map::new(),
-            shared_memory: Map::new(),
-            local_memory: Map::new(),
             grid_dim,
             block_dim,
             address_constraints: List::new(),
