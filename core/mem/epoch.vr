@@ -90,6 +90,23 @@ type RevocationCallbackEntry is {
     callback: RevocationCallback,
 };
 
+// Both callback entries are trivially clonable — `id: Int` is
+// Copy and the callback field is a function-pointer (also Copy).
+// Explicit impls are required because List<T>::clone() in
+// `notify_callbacks` / `on_revocation` snapshot-iteration
+// (added to break the reentrant-deadlock bug) needs T: Clone.
+implement Clone for CallbackEntry {
+    fn clone(&self) -> CallbackEntry {
+        CallbackEntry { id: self.id, callback: self.callback }
+    }
+}
+
+implement Clone for RevocationCallbackEntry {
+    fn clone(&self) -> RevocationCallbackEntry {
+        RevocationCallbackEntry { id: self.id, callback: self.callback }
+    }
+}
+
 // =============================================================================
 // Epoch Manager
 // =============================================================================
@@ -243,15 +260,38 @@ implement EpochManager {
     }
 
     /// Notify all registered epoch callbacks.
+    ///
+    /// Snapshots the callback list under the spinlock, drops the
+    /// lock, THEN invokes the callbacks. Earlier revisions
+    /// iterated `&self.callbacks` directly under the lock — a
+    /// reentrancy deadlock waiting to happen: any callback that
+    /// tried to `register_callback` / `unregister_callback`
+    /// (e.g. self-deregistration, a very common pattern when a
+    /// subsystem shuts down on epoch change) would re-attempt
+    /// the same exclusive spinlock and busy-loop forever
+    /// because the original frame still holds it.
+    ///
+    /// Snapshot-then-iterate also bounds the lock-hold time to
+    /// O(N callbacks) heap clones rather than O(N callbacks ×
+    /// callback-body-runtime), letting concurrent
+    /// register/unregister make progress while callbacks run.
     fn notify_callbacks(&mut self, new_epoch: UInt64) {
-        // Acquire spinlock for iteration
+        // Snapshot under lock — clone the entries into a local
+        // List that survives lock release.
         self.lock_callbacks_shared();
+        let snapshot: List<CallbackEntry> = self.callbacks.clone();
+        self.unlock_callbacks_shared();
 
-        for entry in &self.callbacks {
+        // Fire callbacks with the lock RELEASED. A callback that
+        // re-enters register_callback / unregister_callback now
+        // takes the lock cleanly.  A registration fired during
+        // iteration won't be observed by THIS notification (it
+        // wasn't in the snapshot), but it will be observed by the
+        // NEXT epoch event — the typical contract for snapshot
+        // iteration.
+        for entry in &snapshot {
             (entry.callback)(new_epoch);
         }
-
-        self.unlock_callbacks_shared();
     }
 
     // =========================================================================
@@ -311,13 +351,21 @@ implement EpochManager {
         new_gen: UInt32,
         epoch: UInt16,
     ) {
+        // Same snapshot-then-iterate pattern as
+        // `notify_callbacks` — see that function's doc for
+        // rationale (reentrant-deadlock prevention + bounded
+        // lock-hold time).  Revocation callbacks are even more
+        // likely to self-deregister than epoch callbacks
+        // because tracking-style callbacks typically log the
+        // event and then disarm themselves once their
+        // observation window closes.
         self.lock_revocation_shared();
+        let snapshot: List<RevocationCallbackEntry> = self.revocation_callbacks.clone();
+        self.unlock_revocation_shared();
 
-        for entry in &self.revocation_callbacks {
+        for entry in &snapshot {
             (entry.callback)(ptr, old_gen, new_gen, epoch);
         }
-
-        self.unlock_revocation_shared();
     }
 
     // =========================================================================
