@@ -202,3 +202,36 @@ fn stdlib_loading_emits_no_lenient_skips_l1_pager() {
         skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
     );
 }
+
+/// Top-of-stack coverage: an L4 VDBE program-builder smoke pulls in
+/// the entire SQLite native stack from L0 (VFS) through L3 (btree)
+/// and L4 (VDBE interpreter + opcode catalogue + register file).
+/// Specifically exercises the post-#162 renamed types in the L4
+/// surface — `Opcode` (l4_vdbe canonical), `Register` (l4_vdbe
+/// canonical), `StepResult` (l4_vdbe canonical), `VdbeFrame`
+/// (vdbe_subprogram_api), `Affinity` (l2_record canonical), plus the
+/// transitively-pulled status / opcode_catalog / l3_btree types —
+/// catching regressions in any L0..L4 module that reaches stdlib
+/// codegen via the `simple_select_program` test path.
+#[test]
+#[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
+fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
+    let root = workspace_root();
+    let target = root.join(
+        "vcs/specs/L2-standard/database/sqlite/l4_vdbe/simple_select_program.vr",
+    );
+    if !target.is_file() {
+        return;
+    }
+
+    let (code, skips) = collect_lenient_skips(&target);
+    assert!(
+        skips.is_empty(),
+        "L4 VDBE smoke triggered {} lenient `SKIP` warning(s) during \
+         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
+        skips.len(),
+        code,
+        FAILURE_HINT,
+        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+    );
+}
