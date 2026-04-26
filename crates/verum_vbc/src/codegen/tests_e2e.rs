@@ -50,6 +50,16 @@ fn compile_module(module: &Module) -> Result<VbcModule, String> {
 ///
 /// This function takes the compiled VbcModule and prepares it for execution
 /// by encoding the instructions into bytecode.
+///
+/// **Test infrastructure**: held for the future expansion of these
+/// `tests_e2e` fixtures from parse-only checks (`assert_parses`) to
+/// full execution checks (`assert_int_result` / `assert_float_result`
+/// / etc.).  All seven helpers form a chain
+/// (`assert_*_result` → `compile_and_run` → `prepare_executable` /
+/// `execute_main`); deleting any one breaks the chain for the future
+/// upgrade.  `#[allow(dead_code)]` documents the intent without
+/// silencing the rest of the warning system.
+#[allow(dead_code)]
 fn prepare_executable(compiled: VbcModule) -> Arc<VbcModule> {
     // The compiled module already has the instructions stored.
     // We need to encode them to bytecode for the interpreter.
@@ -63,6 +73,7 @@ fn prepare_executable(compiled: VbcModule) -> Arc<VbcModule> {
 }
 
 /// Executes the main function in a VBC module and returns the result.
+#[allow(dead_code)]
 fn execute_main(module: Arc<VbcModule>) -> InterpreterResult<Value> {
     let mut interp = Interpreter::new(module);
     interp.run_main()
@@ -71,6 +82,7 @@ fn execute_main(module: Arc<VbcModule>) -> InterpreterResult<Value> {
 /// Parses, compiles, and executes Verum source code, returning the result value.
 ///
 /// This is the main helper for e2e tests. Returns the execution result or an error.
+#[allow(dead_code)]
 fn compile_and_run(source: &str) -> Result<Value, String> {
     // Step 1: Parse
     let module = parse_source(source)?;
@@ -86,6 +98,7 @@ fn compile_and_run(source: &str) -> Result<Value, String> {
 }
 
 /// Helper to assert that a source compiles and returns an integer value.
+#[allow(dead_code)]
 fn assert_int_result(source: &str, expected: i64) {
     match compile_and_run(source) {
         Ok(result) => {
@@ -105,6 +118,7 @@ fn assert_int_result(source: &str, expected: i64) {
 }
 
 /// Helper to assert that a source compiles and returns a float value.
+#[allow(dead_code)]
 fn assert_float_result(source: &str, expected: f64, tolerance: f64) {
     match compile_and_run(source) {
         Ok(result) => {
@@ -130,6 +144,7 @@ fn assert_float_result(source: &str, expected: f64, tolerance: f64) {
 }
 
 /// Helper to assert that a source compiles and returns a boolean value.
+#[allow(dead_code)]
 fn assert_bool_result(source: &str, expected: bool) {
     match compile_and_run(source) {
         Ok(result) => {
@@ -149,6 +164,7 @@ fn assert_bool_result(source: &str, expected: bool) {
 }
 
 /// Helper to assert that a source compiles and returns unit.
+#[allow(dead_code)]
 fn assert_unit_result(source: &str) {
     match compile_and_run(source) {
         Ok(result) => {
