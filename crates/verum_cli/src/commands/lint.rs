@@ -3593,6 +3593,12 @@ fn levenshtein(a: &str, b: &str) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintOutputFormat {
     Pretty,
+    /// Span-underlined human output. The shape of `rustc` /
+    /// `clippy` / `ruff`: rule code in brackets, file with `--> `,
+    /// the offending source line, a caret underline at the column,
+    /// and the help suggestion. Designed for human readers; CI
+    /// logs survive ANSI stripping.
+    Human,
     Json,
     GithubActions,
     Sarif,
@@ -3603,12 +3609,13 @@ impl LintOutputFormat {
     pub fn parse(s: &str) -> Result<Self> {
         match s {
             "pretty" | "" => Ok(Self::Pretty),
+            "human" => Ok(Self::Human),
             "json" => Ok(Self::Json),
             "github-actions" | "gha" => Ok(Self::GithubActions),
             "sarif" => Ok(Self::Sarif),
             "tap" => Ok(Self::Tap),
             other => Err(CliError::InvalidArgument(format!(
-                "unknown lint format `{}` (expected: pretty | json | github-actions | sarif | tap)",
+                "unknown lint format `{}` (expected: pretty | human | json | github-actions | sarif | tap)",
                 other
             ))),
         }
@@ -3761,6 +3768,15 @@ fn emit_issues(issues: &[LintIssue], format: LintOutputFormat) -> Result<()> {
         LintOutputFormat::Pretty => {
             for i in issues {
                 print_issue(i, false);
+            }
+        }
+        LintOutputFormat::Human => {
+            // Span-underlined output. The renderer caches source
+            // file reads so a corpus with N issues across M files
+            // touches each file exactly once.
+            let mut sources = super::lint_human::SourceMap::new();
+            for i in issues {
+                print!("{}", super::lint_human::render_issue(i, &mut sources));
             }
         }
         LintOutputFormat::Json => {

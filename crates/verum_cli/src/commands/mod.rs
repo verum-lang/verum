@@ -15,6 +15,7 @@ pub mod init;
 pub mod lint;
 pub mod lint_cache;
 pub mod lint_engine;
+pub mod lint_human;
 pub mod lsp;
 pub mod new;
 pub mod playbook;
