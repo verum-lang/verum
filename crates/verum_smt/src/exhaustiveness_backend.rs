@@ -118,7 +118,6 @@ impl SmtGuardVerifier {
             // Literals
             ExprKind::Literal(lit) => match &lit.kind {
                 LiteralKind::Int(int_lit) => Some(SmtFormula::Int(int_lit.value)),
-                LiteralKind::Float(float_lit) => Some(SmtFormula::Float(float_lit.value)),
                 LiteralKind::Bool(b) => Some(SmtFormula::Bool(*b)),
                 _ => None,
             },
@@ -264,16 +263,7 @@ impl SmtGuardVerifier {
                 let refs: Vec<_> = z3_formulas.iter().collect();
                 Some(Bool::or(&refs))
             }
-            SmtFormula::And(formulas) => {
-                let z3_formulas: Option<Vec<_>> = formulas
-                    .iter()
-                    .map(|f| self.formula_to_z3(f, scrutinee_ty))
-                    .collect();
-                let z3_formulas = z3_formulas?;
-                let refs: Vec<_> = z3_formulas.iter().collect();
-                Some(Bool::and(&refs))
-            }
-            SmtFormula::Neg(_) | SmtFormula::Float(_) => None,
+            SmtFormula::Neg(_) => None,
         }
     }
 
@@ -481,7 +471,6 @@ impl GuardVerifier for SmtGuardVerifier {
 enum SmtFormula {
     Bool(bool),
     Int(i128),
-    Float(f64),
     Var(Text),
     Binary {
         op: SmtOp,
@@ -491,7 +480,6 @@ enum SmtFormula {
     Not(Box<SmtFormula>),
     Neg(Box<SmtFormula>),
     Or(List<SmtFormula>),
-    And(List<SmtFormula>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

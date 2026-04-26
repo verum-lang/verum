@@ -36,11 +36,11 @@ fn test_basic_interpolation() {
     // Partition A: x > 0
     let x = Int::new_const("x");
     let a_formula = x.gt(Int::from_i64(0));
-    engine.add_partition("A", &[a_formula]);
+    engine.add_partition(&[a_formula]);
 
     // Partition B: x < 0
     let b_formula = x.lt(Int::from_i64(0));
-    engine.add_partition("B", &[b_formula]);
+    engine.add_partition(&[b_formula]);
 
     // Compute interpolants
     let result = engine.compute_interpolants();
@@ -74,11 +74,11 @@ fn test_interpolation_sat_returns_none() {
 
     // Partition A: x > 0
     let a_formula = x.gt(Int::from_i64(0));
-    engine.add_partition("A", &[a_formula]);
+    engine.add_partition(&[a_formula]);
 
     // Partition B: x > -10 (compatible with A)
     let b_formula = x.gt(Int::from_i64(-10));
-    engine.add_partition("B", &[b_formula]);
+    engine.add_partition(&[b_formula]);
 
     // Compute interpolants
     let result = engine.compute_interpolants();
@@ -103,13 +103,13 @@ fn test_interpolation_three_partitions() {
     let x = Int::new_const("x");
 
     // Partition A: x = 1
-    engine.add_partition("A", &[x._eq(Int::from_i64(1))]);
+    engine.add_partition(&[x._eq(Int::from_i64(1))]);
 
     // Partition B: x = 2
-    engine.add_partition("B", &[x._eq(Int::from_i64(2))]);
+    engine.add_partition(&[x._eq(Int::from_i64(2))]);
 
     // Partition C: x = 3
-    engine.add_partition("C", &[x._eq(Int::from_i64(3))]);
+    engine.add_partition(&[x._eq(Int::from_i64(3))]);
 
     // Compute interpolants
     let result = engine.compute_interpolants();
@@ -142,11 +142,11 @@ fn test_interpolation_boolean_formulas() {
 
     // Partition A: p ∧ q
     let a_formula = Bool::and(&[&p, &q]);
-    engine.add_partition("A", &[a_formula]);
+    engine.add_partition(&[a_formula]);
 
     // Partition B: ¬p ∨ ¬q
     let b_formula = Bool::or(&[&p.not(), &q.not()]);
-    engine.add_partition("B", &[b_formula]);
+    engine.add_partition(&[b_formula]);
 
     // Compute interpolants
     let result = engine.compute_interpolants();
@@ -176,12 +176,12 @@ fn test_interpolation_arithmetic_relations() {
     // Partition A: x + y = 10
     let sum = Int::add(&[&x, &y]);
     let a_formula = sum._eq(Int::from_i64(10));
-    engine.add_partition("A", &[a_formula]);
+    engine.add_partition(&[a_formula]);
 
     // Partition B: x + y = 20
     let sum2 = Int::add(&[&x, &y]);
     let b_formula = sum2._eq(Int::from_i64(20));
-    engine.add_partition("B", &[b_formula]);
+    engine.add_partition(&[b_formula]);
 
     // Compute interpolants
     let result = engine.compute_interpolants();
@@ -212,7 +212,7 @@ fn test_interpolation_single_partition() {
     let mut engine = InterpolationEngine::new();
 
     let x = Int::new_const("x");
-    engine.add_partition("A", &[x._eq(Int::from_i64(5))]);
+    engine.add_partition(&[x._eq(Int::from_i64(5))]);
 
     let result = engine.compute_interpolants();
     assert!(result.is_none(), "Should return None for single partition");

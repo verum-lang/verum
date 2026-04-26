@@ -18,7 +18,7 @@
 //! QF_NRA) is automatic based on formula structure.
 //! Performance: SMT overhead <15ns per check (CBGR), <100ms type inference (10K LOC)
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use z3::{
@@ -91,18 +91,12 @@ impl Default for Z3Config {
 pub struct Z3ContextManager {
     /// Configuration
     config: Z3Config,
-    /// Global statistics
-    #[allow(dead_code)] // Reserved for statistics tracking API
-    stats: Arc<RwLock<GlobalStats>>,
 }
 
 impl Z3ContextManager {
     /// Create a new Z3 context manager with the given configuration.
     pub fn new(config: Z3Config) -> Self {
-        Self {
-            config,
-            stats: Arc::new(RwLock::new(GlobalStats::default())),
-        }
+        Self { config }
     }
 
     /// Get the primary context (thread-local)
@@ -362,7 +356,6 @@ impl<'ctx> Z3Solver<'ctx> {
         self.solver.push();
         self.assertion_stack.push(AssertionFrame {
             num_assertions: self.named_assertions.len(),
-            timestamp: Instant::now(),
         });
     }
 
@@ -1137,9 +1130,8 @@ impl InterpolationEngine {
     }
 
     /// Add a partition for interpolation
-    pub fn add_partition(&mut self, name: &str, formulas: &[Bool]) {
+    pub fn add_partition(&mut self, formulas: &[Bool]) {
         self.partitions.push(Partition {
-            name: name.to_text(),
             formulas: formulas.to_vec().into(),
         });
 
@@ -1473,8 +1465,6 @@ impl Default for InterpolationEngine {
 
 #[derive(Clone)]
 struct Partition {
-    #[allow(dead_code)] // Used for partition identification in interpolation
-    name: Text,
     formulas: List<Bool>,
 }
 
@@ -1708,17 +1698,6 @@ impl<'ctx> Default for ArraySolver<'ctx> {
 // ==================== Statistics ====================
 
 #[derive(Default, Debug, Clone)]
-pub struct GlobalStats {
-    pub total_contexts_created: usize,
-    pub total_problems_solved: usize,
-    pub sat_count: usize,
-    pub unsat_count: usize,
-    pub unknown_count: usize,
-    pub total_solving_time_ms: u64,
-    pub parallel_wins: Map<Text, usize>,
-}
-
-#[derive(Default, Debug, Clone)]
 pub struct SolverStats {
     pub total_checks: usize,
     pub total_time_ms: u64,
@@ -1740,8 +1719,6 @@ impl SolverStats {
 #[derive(Debug)]
 struct AssertionFrame {
     pub num_assertions: usize,
-    #[allow(dead_code)] // Reserved for frame timing analysis
-    pub timestamp: Instant,
 }
 
 // ==================== Model Extraction ====================
