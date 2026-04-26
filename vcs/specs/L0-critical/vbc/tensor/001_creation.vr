@@ -4,7 +4,7 @@
 // @tags: vbc, tensor, creation, new, full, rand, arange
 // @timeout: 5000
 // @expect: pass
-// @skip-disabled: Tensor const generic syntax and named arguments now supported by parser
+// @skip-disabled: References tensor constructors not yet on DynTensor (Tensor.new, .from, .from_slice, .arange, .linspace, .rand, .identity, .eye, .diag — 25+ unbound — need stdlib implementation, not just parser support)
 //
 // Test: TENSOR_NEW, TENSOR_FULL, TENSOR_FROM_SLICE, TENSOR_ARANGE, TENSOR_LINSPACE, TENSOR_RAND
 // Verifies tensor creation operations
