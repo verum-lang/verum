@@ -118,9 +118,40 @@ const FAILURE_HINT: &str =
        was bypassed under `prefer_existing_functions`.  See \
        `register_function` in `codegen/context.rs` (#161).";
 
+/// Run vtest on `spec` and assert it emits zero `[lenient] SKIP`
+/// warnings during stdlib loading.  `scenario` names the fixture in
+/// the failure message so a CI diff identifies which spec regressed.
+///
+/// If the spec file is missing the assertion is skipped silently —
+/// vcs/ specs are optional in some workspace layouts and this test
+/// must not block builds where the fixture isn't present.  The
+/// `expect_present` flag (set by the SQLite-VFS fixture which is
+/// load-bearing) overrides that and panics on a missing fixture.
+fn assert_no_lenient_skips(scenario: &str, spec: &std::path::Path, expect_present: bool) {
+    if !spec.is_file() {
+        if expect_present {
+            panic!("expected {} smoke at {} but it is missing", scenario, spec.display());
+        }
+        return;
+    }
+    let (code, skips) = collect_lenient_skips(spec);
+    assert!(
+        skips.is_empty(),
+        "{} smoke triggered {} lenient `SKIP` warning(s) during stdlib \
+         loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
+        scenario,
+        skips.len(),
+        code,
+        FAILURE_HINT,
+        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+    );
+}
+
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_minimal() {
+    // Minimal fixture is created on the fly so the test is
+    // self-contained — no spec file dependency outside this crate.
     let root = workspace_root();
     let dir = root.join("vcs/specs/L0-critical/_codegen_regressions");
     std::fs::create_dir_all(&dir).expect("create fixture dir");
@@ -150,26 +181,10 @@ fn stdlib_loading_emits_no_lenient_skips_minimal() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_sqlite() {
-    let root = workspace_root();
-    let target = root.join(
+    let target = workspace_root().join(
         "vcs/specs/L2-standard/database/sqlite/l0_vfs/memdb_open_write_read.vr",
     );
-    assert!(
-        target.is_file(),
-        "expected SQLite VFS smoke at {} but it is missing",
-        target.display()
-    );
-
-    let (code, skips) = collect_lenient_skips(&target);
-    assert!(
-        skips.is_empty(),
-        "SQLite-VFS smoke triggered {} lenient `SKIP` warning(s) during \
-         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
-        skips.len(),
-        code,
-        FAILURE_HINT,
-        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
-    );
+    assert_no_lenient_skips("SQLite-VFS", &target, /* expect_present */ true);
 }
 
 /// Even-wider coverage: the L1 pager round-trip pulls in sys.time_ops
@@ -181,26 +196,10 @@ fn stdlib_loading_emits_no_lenient_skips_sqlite() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_l1_pager() {
-    let root = workspace_root();
-    let target = root.join(
+    let target = workspace_root().join(
         "vcs/specs/L2-standard/database/sqlite/l1_pager/page_roundtrip.vr",
     );
-    if !target.is_file() {
-        // Spec is optional in some workspace layouts; skip silently
-        // rather than fail when the fixture is unavailable.
-        return;
-    }
-
-    let (code, skips) = collect_lenient_skips(&target);
-    assert!(
-        skips.is_empty(),
-        "L1 pager smoke triggered {} lenient `SKIP` warning(s) during \
-         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
-        skips.len(),
-        code,
-        FAILURE_HINT,
-        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
-    );
+    assert_no_lenient_skips("L1-pager", &target, false);
 }
 
 /// Top-of-stack coverage: an L4 VDBE program-builder smoke pulls in
@@ -216,24 +215,10 @@ fn stdlib_loading_emits_no_lenient_skips_l1_pager() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
-    let root = workspace_root();
-    let target = root.join(
+    let target = workspace_root().join(
         "vcs/specs/L2-standard/database/sqlite/l4_vdbe/simple_select_program.vr",
     );
-    if !target.is_file() {
-        return;
-    }
-
-    let (code, skips) = collect_lenient_skips(&target);
-    assert!(
-        skips.is_empty(),
-        "L4 VDBE smoke triggered {} lenient `SKIP` warning(s) during \
-         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
-        skips.len(),
-        code,
-        FAILURE_HINT,
-        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
-    );
+    assert_no_lenient_skips("L4-VDBE", &target, false);
 }
 
 /// Cross-domain coverage: runtime/recovery + retry primitives.  This
@@ -252,22 +237,8 @@ fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_runtime_retry() {
-    let root = workspace_root();
-    let target = root.join("vcs/specs/core/runtime/retry_minimal_test.vr");
-    if !target.is_file() {
-        return;
-    }
-
-    let (code, skips) = collect_lenient_skips(&target);
-    assert!(
-        skips.is_empty(),
-        "runtime/retry smoke triggered {} lenient `SKIP` warning(s) during \
-         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
-        skips.len(),
-        code,
-        FAILURE_HINT,
-        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
-    );
+    let target = workspace_root().join("vcs/specs/core/runtime/retry_minimal_test.vr");
+    assert_no_lenient_skips("runtime/retry", &target, false);
 }
 
 /// Text-formatting subgraph coverage: pulls in core/text/format
@@ -282,22 +253,8 @@ fn stdlib_loading_emits_no_lenient_skips_runtime_retry() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_text_format() {
-    let root = workspace_root();
-    let target = root.join("vcs/specs/core/text/format_traits_test.vr");
-    if !target.is_file() {
-        return;
-    }
-
-    let (code, skips) = collect_lenient_skips(&target);
-    assert!(
-        skips.is_empty(),
-        "text/format smoke triggered {} lenient `SKIP` warning(s) during \
-         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
-        skips.len(),
-        code,
-        FAILURE_HINT,
-        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
-    );
+    let target = workspace_root().join("vcs/specs/core/text/format_traits_test.vr");
+    assert_no_lenient_skips("text/format", &target, false);
 }
 
 /// I/O protocols subgraph coverage: pulls in core/io/protocols
@@ -314,20 +271,6 @@ fn stdlib_loading_emits_no_lenient_skips_text_format() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_io_protocols() {
-    let root = workspace_root();
-    let target = root.join("vcs/specs/core/io/protocols_test.vr");
-    if !target.is_file() {
-        return;
-    }
-
-    let (code, skips) = collect_lenient_skips(&target);
-    assert!(
-        skips.is_empty(),
-        "io/protocols smoke triggered {} lenient `SKIP` warning(s) during \
-         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
-        skips.len(),
-        code,
-        FAILURE_HINT,
-        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
-    );
+    let target = workspace_root().join("vcs/specs/core/io/protocols_test.vr");
+    assert_no_lenient_skips("io/protocols", &target, false);
 }
