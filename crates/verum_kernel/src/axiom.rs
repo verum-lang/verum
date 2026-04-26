@@ -21,6 +21,42 @@ use verum_common::{List, Maybe, Text};
 
 use crate::{CoreTerm, FrameworkId, KernelError, UniverseLevel};
 
+/// V8 (#217) — subsingleton-check regime for `K-FwAx` admission.
+///
+/// Per `verification-architecture.md` §4.4 and §4.5, a framework
+/// axiom's body must be a *subsingleton* (proof-irrelevant: at
+/// most one inhabitant up to definitional equality) for subject
+/// reduction to hold. The spec offers two acceptance routes; this
+/// enum encodes the caller's choice.
+///
+/// The kernel does not infer the regime from the term — it's a
+/// caller-level decision tied to the surrounding module's
+/// `@import` set (e.g., `core.math.frameworks.uip` enables the
+/// UIP route). The elaborator passes the appropriate regime
+/// after walking the module's imports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SubsingletonRegime {
+    /// Closed-proposition route only. Accept the axiom iff its
+    /// body has no free variables. Strictest mode; matches the
+    /// default soundness contract.
+    ClosedPropositionOnly,
+    /// UIP-permitted route. Accept the axiom iff its body is
+    /// closed OR the calling module explicitly imports
+    /// `core.math.frameworks.uip` (the elaborator caller signals
+    /// this by selecting `UipPermitted` here). Mixing UIP with
+    /// `core.math.frameworks.univalence` is rejected separately
+    /// by `framework_compat::audit_framework_set`.
+    UipPermitted,
+    /// V8 backwards-compat regime. Skips the subsingleton check
+    /// entirely — preserves pre-V8 register() semantics so the
+    /// existing test corpus + stdlib-bring-up axiom registrations
+    /// continue to pass without migration. New code SHOULD use
+    /// one of the strict regimes above; this variant exists so
+    /// the migration can be staged across the workspace rather
+    /// than landing as a single breaking change.
+    LegacyUnchecked,
+}
+
 /// A thread-local, opt-in registry of trusted axioms.
 ///
 /// Every [`register`](Self::register) call extends the TCB; every
@@ -73,17 +109,95 @@ impl AxiomRegistry {
     /// is the common pitfall.
     ///
     /// Corresponds to rule 10 in `docs/verification/trusted-kernel.md`.
+    ///
+    /// V8 backwards-compat shim: this entry point delegates to
+    /// [`Self::register_with_regime`] with
+    /// [`SubsingletonRegime::LegacyUnchecked`], skipping the
+    /// closed-proposition check. New callers SHOULD use
+    /// [`Self::register_subsingleton`] (closed-only) or
+    /// [`Self::register_with_regime`] (regime-explicit) so the
+    /// `K-FwAx` subsingleton requirement from
+    /// `verification-architecture.md` §4.4 is enforced.
     pub fn register(
         &mut self,
         name: Text,
         ty: CoreTerm,
         framework: FrameworkId,
     ) -> Result<(), KernelError> {
+        self.register_with_regime(name, ty, framework, SubsingletonRegime::LegacyUnchecked)
+    }
+
+    /// V8 (#217) — register an axiom with the strict
+    /// closed-proposition subsingleton check enforced.
+    ///
+    /// Equivalent to
+    /// `register_with_regime(..., SubsingletonRegime::ClosedPropositionOnly)`.
+    /// Rejects with [`KernelError::AxiomNotSubsingleton`] when the
+    /// axiom body has any free variables; admits otherwise (modulo
+    /// the existing UIP-shape + duplicate-name gates).
+    pub fn register_subsingleton(
+        &mut self,
+        name: Text,
+        ty: CoreTerm,
+        framework: FrameworkId,
+    ) -> Result<(), KernelError> {
+        self.register_with_regime(
+            name,
+            ty,
+            framework,
+            SubsingletonRegime::ClosedPropositionOnly,
+        )
+    }
+
+    /// V8 (#217) — register an axiom under an explicit
+    /// [`SubsingletonRegime`].
+    ///
+    /// Implements the full `K-FwAx` admission gate from
+    /// `verification-architecture.md` §4.4 with three layered
+    /// checks (in order):
+    ///
+    ///   1. Duplicate-name rejection (`KernelError::DuplicateAxiom`).
+    ///   2. UIP-shape syntactic rejection (`KernelError::UipForbidden`)
+    ///      — the original pre-V8 gate, preserved.
+    ///   3. Subsingleton check (NEW in V8) — body must satisfy the
+    ///      closed-proposition condition unless the regime is
+    ///      [`SubsingletonRegime::UipPermitted`] or
+    ///      [`SubsingletonRegime::LegacyUnchecked`].
+    ///
+    /// On any rejection the entries list is unchanged (no half-
+    /// committed registration).
+    pub fn register_with_regime(
+        &mut self,
+        name: Text,
+        ty: CoreTerm,
+        framework: FrameworkId,
+        regime: SubsingletonRegime,
+    ) -> Result<(), KernelError> {
         if self.entries.iter().any(|e| e.name == name) {
             return Err(KernelError::DuplicateAxiom(name));
         }
         if crate::inductive::is_uip_shape(&ty) {
             return Err(KernelError::UipForbidden(name));
+        }
+        // V8 (#217) subsingleton check. Skip under
+        // LegacyUnchecked + UipPermitted regimes (the latter
+        // delegates the inhabitation-uniqueness obligation to
+        // the imported UIP framework axiom).
+        match regime {
+            SubsingletonRegime::ClosedPropositionOnly => {
+                let free = crate::support::free_vars(&ty);
+                if !free.is_empty() {
+                    let rendered: Vec<&str> =
+                        free.iter().map(|t| t.as_str()).collect();
+                    return Err(KernelError::AxiomNotSubsingleton {
+                        name,
+                        free_vars_count: free.len(),
+                        free_vars_rendered: Text::from(rendered.join(", ")),
+                    });
+                }
+            }
+            SubsingletonRegime::UipPermitted
+            | SubsingletonRegime::LegacyUnchecked => {}
         }
         self.entries.push(RegisteredAxiom { name, ty, framework });
         Ok(())

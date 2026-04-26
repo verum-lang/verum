@@ -183,6 +183,141 @@ pub fn structural_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
     a == b
 }
 
+/// V8 — collect the **free variable set** of a [`CoreTerm`].
+///
+/// A variable `Var(name)` is *free* in a term iff no enclosing
+/// binder (`Pi`, `Lam`, `Sigma`, `Refine`) introduces a binding
+/// for `name`. The walker descends through every sub-term while
+/// maintaining a binder-stack; on encountering a `Var`, it checks
+/// whether `name` is in the stack — if not, it's free.
+///
+/// Returned set is a [`std::collections::BTreeSet`] for
+/// deterministic iteration (the caller often renders the set
+/// into a diagnostic message; sorted output keeps test golden
+/// values stable across hash-DOS-randomised builds).
+///
+/// Used by [`crate::axiom::AxiomRegistry::register_subsingleton`]
+/// to enforce the `K-FwAx` closed-proposition route per
+/// `verification-architecture.md` §4.4.
+pub fn free_vars(term: &CoreTerm) -> std::collections::BTreeSet<Text> {
+    let mut out = std::collections::BTreeSet::new();
+    let mut bound: Vec<Text> = Vec::new();
+    free_vars_rec(term, &mut bound, &mut out);
+    out
+}
+
+fn free_vars_rec(
+    term: &CoreTerm,
+    bound: &mut Vec<Text>,
+    out: &mut std::collections::BTreeSet<Text>,
+) {
+    match term {
+        CoreTerm::Var(n) => {
+            if !bound.iter().any(|b| b == n) {
+                out.insert(n.clone());
+            }
+        }
+        CoreTerm::Universe(_) => {}
+        CoreTerm::Pi { binder, domain, codomain } => {
+            free_vars_rec(domain, bound, out);
+            bound.push(binder.clone());
+            free_vars_rec(codomain, bound, out);
+            bound.pop();
+        }
+        CoreTerm::Lam { binder, domain, body } => {
+            free_vars_rec(domain, bound, out);
+            bound.push(binder.clone());
+            free_vars_rec(body, bound, out);
+            bound.pop();
+        }
+        CoreTerm::App(f, a) => {
+            free_vars_rec(f, bound, out);
+            free_vars_rec(a, bound, out);
+        }
+        CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            free_vars_rec(fst_ty, bound, out);
+            bound.push(binder.clone());
+            free_vars_rec(snd_ty, bound, out);
+            bound.pop();
+        }
+        CoreTerm::Pair(a, b) => {
+            free_vars_rec(a, bound, out);
+            free_vars_rec(b, bound, out);
+        }
+        CoreTerm::Fst(p) | CoreTerm::Snd(p) => {
+            free_vars_rec(p, bound, out);
+        }
+        CoreTerm::PathTy { carrier, lhs, rhs } => {
+            free_vars_rec(carrier, bound, out);
+            free_vars_rec(lhs, bound, out);
+            free_vars_rec(rhs, bound, out);
+        }
+        CoreTerm::Refl(x) => free_vars_rec(x, bound, out),
+        CoreTerm::HComp { phi, walls, base } => {
+            free_vars_rec(phi, bound, out);
+            free_vars_rec(walls, bound, out);
+            free_vars_rec(base, bound, out);
+        }
+        CoreTerm::Transp { path, regular, value } => {
+            free_vars_rec(path, bound, out);
+            free_vars_rec(regular, bound, out);
+            free_vars_rec(value, bound, out);
+        }
+        CoreTerm::Glue { carrier, phi, fiber, equiv } => {
+            free_vars_rec(carrier, bound, out);
+            free_vars_rec(phi, bound, out);
+            free_vars_rec(fiber, bound, out);
+            free_vars_rec(equiv, bound, out);
+        }
+        CoreTerm::Refine { base, binder, predicate } => {
+            free_vars_rec(base, bound, out);
+            bound.push(binder.clone());
+            free_vars_rec(predicate, bound, out);
+            bound.pop();
+        }
+        CoreTerm::Inductive { args, .. } => {
+            // The `path` is a global qualified name (e.g.
+            // "core.collections.list.List"); not a free
+            // variable, by construction. Generic arguments
+            // contain their own free-var trees.
+            for a in args.iter() {
+                free_vars_rec(a, bound, out);
+            }
+        }
+        CoreTerm::Elim { scrutinee, motive, cases } => {
+            free_vars_rec(scrutinee, bound, out);
+            free_vars_rec(motive, bound, out);
+            for c in cases.iter() {
+                free_vars_rec(c, bound, out);
+            }
+        }
+        CoreTerm::SmtProof(_) => {
+            // Certificates carry only opaque trace bytes + hash
+            // strings — no syntactic variables to collect.
+        }
+        CoreTerm::Axiom { ty, .. } => {
+            // The axiom's name is a global identifier (registry
+            // key); not a free variable. Its claimed type is
+            // already closed by definition (a registered axiom
+            // is a closed term), but we still descend
+            // defensively in case the ty CoreTerm carries
+            // generic arguments.
+            free_vars_rec(ty, bound, out);
+        }
+        CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => {
+            free_vars_rec(t, bound, out);
+        }
+        CoreTerm::ModalBox(t) | CoreTerm::ModalDiamond(t) => {
+            free_vars_rec(t, bound, out);
+        }
+        CoreTerm::ModalBigAnd(args) => {
+            for a in args.iter() {
+                free_vars_rec(a, bound, out);
+            }
+        }
+    }
+}
+
 /// Replay an [`SmtCertificate`] into a [`CoreTerm`] witness.
 ///
 /// This is the routine that puts Z3 / CVC5 / E / Vampire / Alt-Ergo
