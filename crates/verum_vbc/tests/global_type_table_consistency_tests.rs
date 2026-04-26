@@ -211,6 +211,34 @@ fn global_type_table_clean_for_list() {
     assert_type_table_clean("collections/list.vr");
 }
 
+/// `core/collections/map.vr` exercises the typed-OOM resize +
+/// hash-table layout paths.  Different mount-closure shape than
+/// list.vr (pulls in hashing infrastructure).  Pinned clean to
+/// catch regressions that would surface only on map-flavoured
+/// type-table paths.
+#[test]
+fn global_type_table_clean_for_map() {
+    assert_type_table_clean("collections/map.vr");
+}
+
+/// `core/text/text.vr` exercises the UTF-8 + intrinsic-heavy stdlib
+/// surface.  Different mount closure than the collection fixtures
+/// (pulls in `core.intrinsics.runtime.text`).  Pinned clean to
+/// catch regressions in the intrinsics-bridge paths.
+#[test]
+fn global_type_table_clean_for_text() {
+    assert_type_table_clean("text/text.vr");
+}
+
+/// `core/sync/atomic.vr` declares the canonical public `AtomicBool`
+/// (#187 close-out renamed the runtime-internal collider to
+/// `RuntimeAtomicBool`).  Pinned clean to catch any future re-
+/// introduction of a colliding `AtomicBool` declaration.
+#[test]
+fn global_type_table_clean_for_sync_atomic() {
+    assert_type_table_clean("sync/atomic.vr");
+}
+
 // === Synthetic regression repros ======================================
 
 /// Diagnostic print of orphan MakeVariant count for visibility.
