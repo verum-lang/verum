@@ -30,6 +30,84 @@
 module core.proof.reflection;
 
 // =============================================================================
+// 0. SMT-LIB identifier validation
+// =============================================================================
+//
+// `to_smtlib_axiom` and `to_smtlib_decl` substitute the function name
+// and parameter names directly into the emitted S-expression. If a
+// caller-supplied identifier contains parentheses, semicolons, the
+// quoted-symbol delimiter `|`, or whitespace, the result is either
+// malformed (best case: SMT solver rejects on parse) or, worse,
+// a smuggled-in clause that the solver silently accepts — at which
+// point the reflected axiom embeds attacker-controlled assertions
+// into every downstream proof.
+//
+// Refinement reflection is SOUNDNESS-CRITICAL: a wrong axiom poisons
+// every later verification. Pre-validate at the construction site so
+// rendering is provably safe for the value range that reaches the
+// renderer.
+//
+// SMT-LIB v2.6 simple-symbol grammar:
+//
+//     simple_symbol_first  ::= letter | "~" | "!" | "@" | "$" | "%"
+//                            | "^" | "&" | "*" | "_" | "+" | "="
+//                            | "<" | ">" | "." | "?" | "/" | "-"
+//     simple_symbol_rest   ::= simple_symbol_first | digit
+//
+// We accept this grammar literally; quoted-symbol form (|foo bar|)
+// is intentionally rejected because we do not need it for reflected
+// function names, and accepting it would re-open the injection
+// surface (a nested `|` could close the quote prematurely).
+
+@inline
+fn is_smt_id_first_char(b: Byte) -> Bool {
+    let c = b as Int;
+    // Letters (lower / upper)
+    if c >= 0x61 && c <= 0x7A { return true; }   // a-z
+    if c >= 0x41 && c <= 0x5A { return true; }   // A-Z
+    // Allowed punctuation per SMT-LIB v2.6.
+    c == 0x7E    // ~
+        || c == 0x21    // !
+        || c == 0x40    // @
+        || c == 0x24    // $
+        || c == 0x25    // %
+        || c == 0x5E    // ^
+        || c == 0x26    // &
+        || c == 0x2A    // *
+        || c == 0x5F    // _
+        || c == 0x2B    // +
+        || c == 0x3D    // =
+        || c == 0x3C    // <
+        || c == 0x3E    // >
+        || c == 0x2E    // .
+        || c == 0x3F    // ?
+        || c == 0x2F    // /
+        || c == 0x2D    // -
+}
+
+@inline
+fn is_smt_id_rest_char(b: Byte) -> Bool {
+    let c = b as Int;
+    if c >= 0x30 && c <= 0x39 { return true; }   // 0-9
+    is_smt_id_first_char(b)
+}
+
+/// Verifies that `s` is a syntactically valid SMT-LIB v2.6 simple
+/// symbol. Reject empty strings, leading digits, and any byte not
+/// matching the grammar above.
+public fn is_smtlib_simple_symbol(s: &Text) -> Bool {
+    let bytes = s.as_bytes();
+    if bytes.len() == 0 { return false; }
+    if !is_smt_id_first_char(bytes[0]) { return false; }
+    let mut i: Int = 1;
+    while i < bytes.len() {
+        if !is_smt_id_rest_char(bytes[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
 // 1. A reflected function definition
 // =============================================================================
 
@@ -62,6 +140,17 @@ public fn reflected_fn(
     if parameters.len() != parameter_sorts.len() {
         panic(f"reflected_fn(`{name}`): parameters.len()={parameters.len()} != parameter_sorts.len()={parameter_sorts.len()}; lists must align position-for-position");
     }
+    if !is_smtlib_simple_symbol(&name) {
+        panic(f"reflected_fn: function name `{name}` is not a valid SMT-LIB simple symbol; rejecting to prevent SMT injection into proof axioms");
+    }
+    let mut idx: Int = 0;
+    while idx < parameters.len() {
+        let p = &parameters[idx];
+        if !is_smtlib_simple_symbol(p) {
+            panic(f"reflected_fn(`{name}`): parameter[{idx}]=`{p}` is not a valid SMT-LIB simple symbol; rejecting to prevent SMT injection");
+        }
+        idx = idx + 1;
+    }
     ReflectedFunction {
         name,
         parameters,
@@ -85,6 +174,16 @@ public fn try_reflected_fn(
 ) -> Maybe<ReflectedFunction> {
     if parameters.len() != parameter_sorts.len() {
         return None;
+    }
+    if !is_smtlib_simple_symbol(&name) {
+        return None;
+    }
+    let mut idx: Int = 0;
+    while idx < parameters.len() {
+        if !is_smtlib_simple_symbol(&parameters[idx]) {
+            return None;
+        }
+        idx = idx + 1;
     }
     Some(ReflectedFunction {
         name,
