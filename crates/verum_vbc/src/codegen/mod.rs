@@ -6208,26 +6208,6 @@ impl VbcCodegen {
         }
     }
 
-    /// Maps a parameter to a C type for FFI.
-    #[allow(dead_code)]
-    fn verum_type_to_ctype_from_param(&self, param: &verum_ast::decl::FunctionParam) -> CType {
-        use verum_ast::decl::FunctionParamKind;
-        match &param.kind {
-            FunctionParamKind::Regular { ty, .. } => self.verum_type_to_ctype(&verum_common::Maybe::Some(ty.clone())),
-            // Self parameters become pointers in FFI
-            FunctionParamKind::SelfValue
-            | FunctionParamKind::SelfValueMut
-            | FunctionParamKind::SelfRef
-            | FunctionParamKind::SelfRefMut
-            | FunctionParamKind::SelfOwn
-            | FunctionParamKind::SelfOwnMut
-            | FunctionParamKind::SelfRefChecked
-            | FunctionParamKind::SelfRefCheckedMut
-            | FunctionParamKind::SelfRefUnsafe
-            | FunctionParamKind::SelfRefUnsafeMut => crate::module::CType::Ptr,
-        }
-    }
-
     /// Emit context transform wrapping at function entry.
     ///
     /// For each context declared with transforms (e.g., `using [Database.transactional()]`):
@@ -7624,57 +7604,6 @@ impl VbcCodegen {
         }
     }
 
-    /// Converts an AST TypeKind to a VBC TypeRef for function descriptors.
-    ///
-    /// This enables proper parameter count matching during method dispatch.
-    #[allow(dead_code)]
-    fn type_kind_to_type_ref(&self, type_kind: &verum_ast::ty::TypeKind) -> TypeRef {
-        use verum_ast::ty::TypeKind;
-        match type_kind {
-            TypeKind::Int => TypeRef::Concrete(TypeId::INT),
-            TypeKind::Float => TypeRef::Concrete(TypeId::FLOAT),
-            TypeKind::Bool => TypeRef::Concrete(TypeId::BOOL),
-            TypeKind::Text => TypeRef::Concrete(TypeId::TEXT),
-            TypeKind::Unit => TypeRef::Concrete(TypeId::UNIT),
-            TypeKind::Never => TypeRef::Concrete(TypeId::NEVER),
-            // Function/closure types are pointers in LLVM
-            TypeKind::Function { .. } | TypeKind::Rank2Function { .. } => {
-                TypeRef::Concrete(TypeId::PTR)
-            }
-            // Reference types are pointers
-            TypeKind::Reference { .. } | TypeKind::CheckedReference { .. }
-            | TypeKind::UnsafeReference { .. } | TypeKind::Pointer { .. } => {
-                TypeRef::Concrete(TypeId::PTR)
-            }
-            // Generic types: List<T>, Map<K,V>, Set<T> etc.
-            TypeKind::Generic { base, args } => {
-                if let TypeKind::Path(path) = &base.kind
-                    && let Some(name) = path.segments.first() {
-                        let name_str = match name {
-                            verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                            _ => "",
-                        };
-                        // Look up via consolidated type registry (covers List, Map, Set,
-                        // Maybe, Result, Range, and user-defined generic types)
-                        let base_id = self.get_well_known_type_id(name_str);
-                        if let Some(base_type_id) = base_id {
-                            let type_args: Vec<TypeRef> = args.iter().map(|arg| {
-                                match arg {
-                                    verum_ast::ty::GenericArg::Type(ty) => self.ast_type_to_type_ref(ty),
-                                    _ => TypeRef::Concrete(TypeId::PTR),
-                                }
-                            }).collect();
-                            return TypeRef::Instantiated { base: base_type_id, args: type_args };
-                        }
-                    }
-                TypeRef::Concrete(TypeId::PTR)
-            }
-            // For named/path types and other complex types, use PTR as a safe default.
-            // This ensures LLVM generates pointer-compatible code for heap-allocated objects,
-            // closures, and user-defined types.
-            _ => TypeRef::Concrete(TypeId::PTR),
-        }
-    }
 
     /// Converts a VBC TypeRef to a simple type name for method dispatch prefixing.
     ///
@@ -7834,115 +7763,6 @@ impl VbcCodegen {
         Ok(())
     }
 
-    /// Legacy: compiles nested function bodies from a block (pre-capture).
-    #[allow(dead_code)]
-    fn _compile_nested_functions_from_block_old(&mut self, block: &Block) -> CodegenResult<()> {
-        for stmt in block.stmts.iter() {
-            if let StmtKind::Item(item) = &stmt.kind
-                && let ItemKind::Function(func) = &item.kind {
-                    // Check if the nested function captures variables from
-                    // the enclosing scope. If so, it must be compiled as a
-                    // closure (with free-variable analysis and capture
-                    // registers). Otherwise compile as a standalone function.
-                    let has_captures = if let verum_common::Maybe::Some(ref body) = func.body {
-                        let param_names: Vec<String> = func.params.iter()
-                            .filter_map(|p| {
-                                if let verum_ast::decl::FunctionParamKind::Regular { pattern, .. } = &p.kind
-                                    && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                                        return Some(name.name.to_string());
-                                    }
-                                None
-                            })
-                            .collect();
-                        let body_expr = match body {
-                            FunctionBody::Block(blk) => {
-                                blk.expr.as_ref().map(|e| e.as_ref())
-                            }
-                            FunctionBody::Expr(e) => Some(e),
-                        };
-                        if let Some(expr) = body_expr {
-                            let free = self.analyze_free_variables(expr, &param_names);
-                            free.iter().any(|v| self.ctx.lookup_var(v).is_some())
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    };
-
-                    if has_captures {
-                        // Nested function captures outer variables.
-                        // Convert to a closure: extract params from the
-                        // FunctionDecl, build ClosureParam equivalents,
-                        // and route through the closure compilation path
-                        // that handles free-variable capture.
-                        tracing::debug!(
-                            "Nested function '{}' captures outer variables — compiling as closure",
-                            func.name.name
-                        );
-
-                        if let verum_common::Maybe::Some(ref body) = func.body {
-                            // Build closure params from function params.
-                            let closure_params: verum_common::List<verum_ast::expr::ClosureParam> =
-                                func.params.iter().filter_map(|p| {
-                                    if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
-                                        Some(verum_ast::expr::ClosureParam {
-                                            pattern: pattern.clone(),
-                                            ty: verum_common::Maybe::Some(ty.clone()),
-                                            span: p.span,
-                                        })
-                                    } else {
-                                        None
-                                    }
-                                }).collect();
-
-                            // Get the body expression. For block bodies,
-                            // wrap in an ExprKind::Block.
-                            let body_expr = match body {
-                                FunctionBody::Block(blk) => {
-                                    verum_ast::Expr::new(
-                                        verum_ast::ExprKind::Block(blk.clone()),
-                                        func.span,
-                                    )
-                                }
-                                FunctionBody::Expr(e) => e.clone(),
-                            };
-
-                            let return_type: Option<&verum_ast::ty::Type> =
-                                match &func.return_type {
-                                    verum_common::Maybe::Some(ty) => Some(ty),
-                                    verum_common::Maybe::None => None,
-                                };
-
-                            // Compile as closure (reuses the full capture machinery).
-                            if let Some(closure_reg) = self.compile_closure(
-                                &closure_params,
-                                &body_expr,
-                                return_type,
-                            )? {
-                                // Bind the function name to the closure register
-                                // so that calls like `add(x)` resolve to the closure.
-                                let fn_name = func.name.name.to_string();
-                                let name_reg = self.ctx.define_var(&fn_name, false);
-                                self.ctx.emit(crate::instruction::Instruction::Mov {
-                                    dst: name_reg,
-                                    src: closure_reg,
-                                });
-                            }
-                        }
-                    } else {
-                        // No captures — compile as standalone function.
-                        self.compile_function(func, None)?;
-                    }
-
-                    // Recursively compile any functions nested inside this one
-                    if let verum_common::Maybe::Some(ref body) = func.body {
-                        self.compile_nested_functions(body)?;
-                    }
-                }
-        }
-        Ok(())
-    }
 
     /// Compiles a function declaration.
     ///
