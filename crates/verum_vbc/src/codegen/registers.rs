@@ -87,14 +87,6 @@ pub enum RegisterKind {
 /// Marker for scope boundaries.
 #[derive(Debug, Clone)]
 struct ScopeMarker {
-    /// Variable count at scope entry.
-    /// Used for debugging and future register reclamation.
-    #[allow(dead_code)]
-    var_count: usize,
-    /// Register high-water at scope entry.
-    /// Used for debugging and future register reclamation.
-    #[allow(dead_code)]
-    reg_high: u16,
     /// Variables defined in this scope.
     scope_vars: Vec<String>,
     /// Shadowed variables that need to be restored on scope exit.
@@ -115,8 +107,6 @@ impl RegisterAllocator {
             next_reg: 0,
             variables: HashMap::new(),
             scope_stack: vec![ScopeMarker {
-                var_count: 0,
-                reg_high: 0,
                 scope_vars: Vec::new(),
                 shadowed_vars: Vec::new(),
             }],
@@ -269,8 +259,6 @@ impl RegisterAllocator {
     /// Any shadowed variables will be restored to their previous bindings.
     pub fn enter_scope(&mut self) {
         self.scope_stack.push(ScopeMarker {
-            var_count: self.variables.len(),
-            reg_high: self.next_reg,
             scope_vars: Vec::new(),
             shadowed_vars: Vec::new(),
         });
@@ -424,8 +412,6 @@ impl RegisterAllocator {
         self.variables.clear();
         self.scope_stack.clear();
         self.scope_stack.push(ScopeMarker {
-            var_count: 0,
-            reg_high: 0,
             scope_vars: Vec::new(),
             shadowed_vars: Vec::new(),
         });
