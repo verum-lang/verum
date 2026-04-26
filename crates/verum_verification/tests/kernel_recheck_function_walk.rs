@@ -449,3 +449,137 @@ fn recheck_function_walks_through_explicit_binder() {
         rendered,
     );
 }
+
+// =============================================================================
+// V8 (#210, B9) — requires/ensures clauses must be walked
+// =============================================================================
+
+fn make_function_with_contract(
+    name: &str,
+    requires: Vec<verum_ast::expr::Expr>,
+    ensures: Vec<verum_ast::expr::Expr>,
+) -> FunctionDecl {
+    let mut req_list: List<verum_ast::expr::Expr> = List::new();
+    for e in requires {
+        req_list.push(e);
+    }
+    let mut ens_list: List<verum_ast::expr::Expr> = List::new();
+    for e in ensures {
+        ens_list.push(e);
+    }
+    FunctionDecl {
+        visibility: Visibility::Private,
+        is_async: false,
+        is_meta: false,
+        stage_level: 0,
+        is_pure: false,
+        is_generator: false,
+        is_cofix: false,
+        is_unsafe: false,
+        is_transparent: false,
+        is_variadic: false,
+        extern_abi: Maybe::None,
+        name: ident(name),
+        generics: List::new(),
+        params: List::new(),
+        return_type: Maybe::Some(Type::int(span())),
+        throws_clause: Maybe::None,
+        std_attr: Maybe::None,
+        contexts: List::new(),
+        generic_where_clause: Maybe::None,
+        meta_where_clause: Maybe::None,
+        requires: req_list,
+        ensures: ens_list,
+        attributes: List::new(),
+        body: Maybe::None,
+        span: span(),
+    }
+}
+
+#[test]
+fn b9_requires_clause_with_modal_overshoot_let_binding_rejected() {
+    // `fn f() requires { let x: Int{p.box().box()} = ...; x > 0 }` —
+    // V8 walks the requires clause; let-binding refinement is
+    // surfaced and K-Refine-omega rejects.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let let_stmt = let_stmt_with_type("x", refined_int(boxed, Maybe::None));
+    let req_block_expr = verum_ast::expr::Expr::new(
+        verum_ast::expr::ExprKind::Block(block_with_stmts(vec![let_stmt])),
+        span(),
+    );
+    let func = make_function_with_contract("f", vec![req_block_expr], vec![]);
+    let outcomes = KernelRecheck::recheck_function(&func);
+    assert_eq!(outcomes.len(), 1, "refinement in requires-clause must be walked");
+    let (_, outcome) = outcomes.get(0).unwrap();
+    assert!(outcome.is_err(), "modal overshoot in requires must reject");
+}
+
+#[test]
+fn b9_ensures_clause_with_modal_overshoot_let_binding_rejected() {
+    // Same but in ensures — V8 walks both clauses identically.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let let_stmt = let_stmt_with_type("x", refined_int(boxed, Maybe::None));
+    let ens_block_expr = verum_ast::expr::Expr::new(
+        verum_ast::expr::ExprKind::Block(block_with_stmts(vec![let_stmt])),
+        span(),
+    );
+    let func = make_function_with_contract("g", vec![], vec![ens_block_expr]);
+    let outcomes = KernelRecheck::recheck_function(&func);
+    assert_eq!(outcomes.len(), 1, "refinement in ensures-clause must be walked");
+    let (_, outcome) = outcomes.get(0).unwrap();
+    assert!(outcome.is_err(), "modal overshoot in ensures must reject");
+}
+
+#[test]
+fn b9_simple_boolean_requires_clause_no_outcomes() {
+    // `fn h() requires (x > 0)` — leaf expression, no refinement
+    // type inside; walker is a no-op (zero false positives).
+    let cond = path_expr("x");
+    let func = make_function_with_contract("h", vec![cond], vec![]);
+    let outcomes = KernelRecheck::recheck_function(&func);
+    assert_eq!(outcomes.len(), 0, "leaf bool requires emits no outcomes");
+}
+
+#[test]
+fn b9_well_formed_let_in_ensures_clause_accepted() {
+    // `fn k() ensures { let x: Int{p} = ...; ... }` — well-formed
+    // refinement (md^ω = 0 < 0+1 = 1). Walker surfaces an Ok.
+    let p = path_expr("p");
+    let let_stmt = let_stmt_with_type("x", refined_int(p, Maybe::None));
+    let ens_block_expr = verum_ast::expr::Expr::new(
+        verum_ast::expr::ExprKind::Block(block_with_stmts(vec![let_stmt])),
+        span(),
+    );
+    let func = make_function_with_contract("k", vec![], vec![ens_block_expr]);
+    let outcomes = KernelRecheck::recheck_function(&func);
+    assert_eq!(outcomes.len(), 1);
+    let (_, outcome) = outcomes.get(0).unwrap();
+    assert!(outcome.is_ok(), "well-formed ensures-let refinement accepted");
+}
+
+#[test]
+fn b9_both_requires_and_ensures_walked_independently() {
+    // Both clauses carry a let-binding refinement; V8 must surface
+    // both — order is requires then ensures (per recheck_function
+    // walker order).
+    let p = path_expr("p");
+    let q = path_expr("q");
+    let req_let = let_stmt_with_type("x", refined_int(p, Maybe::None));
+    let req_expr = verum_ast::expr::Expr::new(
+        verum_ast::expr::ExprKind::Block(block_with_stmts(vec![req_let])),
+        span(),
+    );
+    let ens_let = let_stmt_with_type("y", refined_int(q, Maybe::None));
+    let ens_expr = verum_ast::expr::Expr::new(
+        verum_ast::expr::ExprKind::Block(block_with_stmts(vec![ens_let])),
+        span(),
+    );
+    let func = make_function_with_contract("m", vec![req_expr], vec![ens_expr]);
+    let outcomes = KernelRecheck::recheck_function(&func);
+    assert_eq!(outcomes.len(), 2, "both contract clauses must be walked");
+    for (_, outcome) in outcomes.iter() {
+        assert!(outcome.is_ok(), "well-formed contract refinements accepted");
+    }
+}
