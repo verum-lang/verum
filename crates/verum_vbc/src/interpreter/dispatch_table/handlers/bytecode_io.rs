@@ -42,8 +42,6 @@ pub(super) fn read_i8(state: &mut InterpreterState) -> InterpreterResult<i8> {
 }
 
 /// Reads a 16-bit unsigned integer from bytecode (little-endian).
-/// Reserved for opcodes that need 16-bit immediate values.
-#[allow(dead_code)]
 #[inline(always)]
 pub(super) fn read_u16(state: &mut InterpreterState) -> InterpreterResult<u16> {
     let b0 = read_u8(state)? as u16;
@@ -52,8 +50,6 @@ pub(super) fn read_u16(state: &mut InterpreterState) -> InterpreterResult<u16> {
 }
 
 /// Reads a 32-bit unsigned integer from bytecode (little-endian).
-/// Reserved for opcodes that need 32-bit immediate values.
-#[allow(dead_code)]
 #[inline(always)]
 pub(super) fn read_u32(state: &mut InterpreterState) -> InterpreterResult<u32> {
     let b0 = read_u8(state)? as u32;
