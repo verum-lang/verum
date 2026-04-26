@@ -2323,6 +2323,247 @@ Legacy specs remain as descriptive context; VUVA is the single source of truth f
 
 ---
 
+# Part A.Z — Foundational Synthesis & Architectural Audit (V8 #226)
+
+> **Purpose.** This chapter integrates the Diakrisis canonical-
+> primitive axiomatic stack (`internal/holon/internal/diakrisis/docs/`)
+> and the Verum-MSFS preprint
+> (`internal/holon/internal/math-msfs/paper-en/paper.tex`) directly
+> into the architectural specification. Every kernel rule shipped
+> in §4.4a is cross-referenced to its source-material justification;
+> every gap between source material and shipped code is flagged
+> as a defect with a concrete closure path.
+>
+> **Why this chapter exists.** Per the user vision (V8 #226) Verum
+> must embody **machine verification in the broadest sense** —
+> high-performance, fault-tolerant, reliable systems built on
+> the most rigorous foundational mathematics available. That is
+> only achievable when the spec, the source material, and the
+> implementation form a single coherent triangle. This chapter
+> is the audit that surfaces every break in that triangle.
+
+## A.Z.1 The 13-axiomatic source of truth
+
+**Source**: Diakrisis `02-canonical-primitive/02-axiomatics.md`
+defines the 13 formal conditions that anchor the entire
+canonical-primitive theory:
+
+| Axiom | Statement (Russian original; informal English gloss) | Kernel rule(s) | Status |
+|---|---|---|---|
+| **Axi-0** | $\mathrm{Ob}(\langle\!\langle \cdot \rangle\!\rangle) \neq \emptyset$ — at least one articulation exists | (none — non-emptiness is a model-side existence claim, not a kernel typing rule) | **Implicit** |
+| **Axi-1** | $\langle\!\langle \cdot \rangle\!\rangle$ is a locally-small 2-category with internal closure $\iota: \mathrm{End}(\langle\!\langle \cdot \rangle\!\rangle) \hookrightarrow \langle\!\langle \cdot \rangle\!\rangle$ | (none directly; the 2-category structure is *meta*-level; CoreTerm encodes *terms*, not 2-cells) | **Defect — V3+ work** |
+| **Axi-2** | $\mathsf{M}: \langle\!\langle \cdot \rangle\!\rangle \to \langle\!\langle \cdot \rangle\!\rangle$ is a 2-functor | `K-EpsilonOf`, `K-AlphaOf`, `K-Eps-Mu` (V0/V1/V2) | **Partial** — V3 τ-witness pending Diakrisis preprint |
+| **Axi-3** | $\alpha_{\mathrm{math}} \in \mathrm{Ob}(\langle\!\langle \cdot \rangle\!\rangle)$ — distinguished `α_math` exists | `core.math.frameworks.actic.raw` (registry entry; no specific kernel rule) | **Implicit (registry-side)** |
+| **Axi-4** | $\rho(\alpha) := \mathrm{ev}_{\alpha_{\mathrm{math}}}(\alpha) = [\alpha_{\mathrm{math}}, \alpha] \in \mathrm{End}(\langle\!\langle \cdot \rangle\!\rangle)$ — ρ via internal hom; M is λ-accessible | (none — accessibility is a meta-categorical property; not yet wired) | **Defect — V3+ work** |
+| **Axi-5** | $\exists \alpha, \beta: \rho(\alpha) \not\simeq \rho(\beta)$ — ρ-non-triviality | (none directly — non-triviality is a model-side claim) | **Implicit** |
+| **Axi-6** | $\rho \circ \mathsf{M} \not\simeq \rho$ in general — ρ and M not commutative | (component of `K-Eps-Mu` V2 depth-mismatch rejection) | **Partial** — captured via depth-mismatch rejection |
+| **Axi-7** (M-5w) | $\exists \alpha_{\mathsf{M}}: \forall \beta. \rho(\alpha_{\mathsf{M}})[\rho(\beta)] \simeq \rho(\mathsf{M}(\beta))$ — self-articulability | `K-Eps-Mu` identity-functor case (V1) | **Partial** — V3 needs full naturality |
+| **Axi-8** (M-5w*) | $\neg \exists \alpha: \rho(\alpha_{\mathsf{M}})(-) \simeq \mathrm{Hom}(-, \alpha)$ — α_M not Yoneda-representable | (Theorem 131.T — `K-Universe-Ascent` enables ascent into κ_2-tier) | **Wired in stack model** (V1) |
+| **Axi-9** | (full statement: see source §Axi-9) | (none yet) | **Defect — V3+ work** |
+| **T-α** | (5-axis absoluteness — MSFS §6) | (none yet) | **Defect — V3+ work** |
+| **T-2f*** | $\mathrm{dp}(P) < \mathrm{dp}(A) + 1$ — Yanofsky paradox-immunity | `K-Refine` | **Shipped V0** |
+| **T-2f\*\*** | (modal stratification 130.T — strengthens T-2f*) | `K-Refine-omega` (VFE-7) | **Shipped V0/V1** |
+
+### A.Z.1.1 Defect inventory
+
+The "Defect" rows above identify gaps between the axiomatic
+source of truth and the kernel as shipped. In priority order:
+
+1. **Axi-1 — internal closure ι** is unrepresented in CoreTerm.
+   The kernel models terms, not 2-cells; the 2-category
+   structure is meta-level. Closing this requires either (a) a
+   `TwoCell` constructor in CoreTerm (large-scope rewrite of
+   the typing rules) or (b) explicit acknowledgment that the
+   2-category structure lives in the model layer
+   (`core.math.frameworks.diakrisis_*`) and is referenced via
+   framework axioms rather than internalised. **Recommended:
+   (b)**, since the kernel's TCB budget (6 500 LOC) does not
+   accommodate full 2-categorical typing without dedicated
+   work tracked under task #181 + new tasks.
+
+2. **Axi-4 accessibility** — λ-accessibility of M is required
+   for the existence of transfinite iterations
+   $\mathsf{M}^\kappa$ (Theorem 10.T5 — `Fix(M) ≠ ∅`). The
+   shipped kernel does not check accessibility; it is delegated
+   to model-layer framework axioms. Closing this requires
+   either an `AccessibleFunctor` typed attribute on
+   `EpsilonOf` constructors, or framework-axiom-level
+   discipline. **Recommended: typed attribute** — track as
+   follow-up task.
+
+3. **Axi-9 + T-α** — neither has a corresponding kernel rule.
+   These describe conditions on the canonical primitive that
+   are sound to delegate to framework axioms (since they
+   constrain the *model*, not the term-typing rules). The
+   spec should explicitly document this delegation.
+
+4. **VFE-1 V3** — full τ-witness construction for `K-Eps-Mu`
+   is multi-week work blocked on Diakrisis preprint material
+   (§17 Open Question 7 OC/DC duality is the same dependency
+   class). Tracked as task #181.
+
+## A.Z.2 The MSFS stratified hierarchy
+
+**Source**: `internal/holon/internal/math-msfs/paper-en/paper.tex`
+§2 ("Stratified Hierarchy of the Moduli Space"). The paper
+partitions the moduli space $\mathfrak{M}$ into three formal
+strata with categorically distinct meta-operations:
+
+| Stratum | Members | Meta-operation | Verum kernel mapping |
+|---|---|---|---|
+| $\mathcal{L}_{\mathrm{Fnd}}$ | Foundations: ZFC, ZFC + LC, ETCS, MLTT, CIC, HoTT, NCG, ... | none above (no horizontal classification at this layer) | `core.math.frameworks.*` Standard catalogue (per §6.2) |
+| $\mathcal{L}_{\mathrm{Cls}}$ | Classifiers: meta-frameworks classifying $\mathcal{L}_{\mathrm{Fnd}}$ | $\mathrm{Cls}$ — horizontal stabilisation: $\mathrm{Cls}(\mathcal{L}_{\mathrm{Cls}}) \simeq_2 \mathcal{L}_{\mathrm{Cls}}$ | `core.math.frameworks.diakrisis` (meta-classifier) |
+| $\mathcal{L}_{\mathrm{Abs}}$ | (Empty by AFN-T — the maximally generative stratum forbidden by the no-go theorem) | $\mathrm{Gen}$ — vertical step | (Empty; Verum delegates to AFN-T proof) |
+
+The MSFS paper proves:
+
+  * **Theorem 1 (AFN-T)** — $\mathcal{L}_{\mathrm{Abs}} = \emptyset$. No
+    maximally-generative foundation exists.
+  * **Theorem (Meta-Stab)** — $\mathrm{Cls}(\mathcal{L}_{\mathrm{Cls}}) \simeq_2 \mathcal{L}_{\mathrm{Cls}}$
+    (horizontal stabilisation at the theory level).
+  * **Theorem (Meta-Cat)** — categoricity of
+    $\mathrm{Meta}_{\mathrm{Cls}}^{\top}$ up to $(\infty,\infty)$-equivalence
+    when non-empty.
+  * **AC/OC Morita Duality + Dual Boundary Lemma** — the
+    Diakrisis-side dual to AFN-T (Theorem 109.T — Dual-AFN-T).
+
+### A.Z.2.1 Coordinate system: $(\mathrm{Fw}, \nu, \tau)$
+
+Per MSFS §3 "Indexing Scheme" + Diakrisis 09-applications/02-canonical-nu-table.md,
+every theorem is locatable by a triple:
+
+  * $\mathrm{Fw}$ — the framework slug (snake-case lineage
+    name; per §6.2 Standard catalogue).
+  * $\nu$ — the canonical depth coordinate (ordinal — finite
+    for set-level foundations, $\omega$ for HoTT-level,
+    $\omega+1$ for stabilisation-tier, $\omega+2$ for cohesive,
+    etc.; full table per
+    `core/math/frameworks/registry.vr::populate_canonical_standard`).
+  * $\tau$ — the trust tier (`true` = canonical,
+    well-validated; `false` = under construction or
+    not-yet-validated).
+
+Verum's kernel encoding: `MsfsCoord { fw: Text, nu: Ordinal,
+tau: Bool }` per `core.theory_interop.coord` module.
+
+### A.Z.2.2 Defects in the (Fw, ν, τ) integration
+
+1. **No kernel-rule consults the coordinate**. The shipped
+   kernel rules (29 in §4.4a) typecheck terms without
+   reference to their (Fw, ν, τ) coordinate. The intended
+   discipline is that a theorem in framework Fw at depth ν
+   should not freely reference a theorem at depth ν' > ν.
+   **Recommended: cross-framework citation gate** — a new
+   kernel rule that verifies the cited axiom's $\nu$ is
+   $\leq$ the user's current $\nu$, modulo the K-Universe-Ascent
+   tier-jumps in VFE-3.
+
+2. **Coordinate inference**. Today the coordinate is read from
+   the framework registry; user-declared theorems do not
+   automatically get a $(\mathrm{Fw}, \nu, \tau)$ assignment.
+   `verum audit --coord` (Task A2 from §16.1) should compute
+   and surface the coordinate per theorem.
+
+## A.Z.3 The AC/OC duality (Theorem 108.T)
+
+**Source**: Diakrisis 12-actic. The dual of the canonical
+primitive is the **Actic** structure — a categorical dual of
+articulation with its own ordinal arithmetic ($\varepsilon$-invariants).
+Theorem 108.T establishes the AC ↔ OC Morita equivalence
+between articulation-side (canonical primitive) and
+enactment-side (Actic) structures.
+
+### A.Z.3.1 Mapping to Verum
+
+  * `core.math.*` — articulation side (Outcome-Concerns / OC).
+  * `core.action.*` — enactment side (Dynamic-Concerns / DC).
+  * `@enact` annotation — the bridge attribute, witnessed by
+    auto-induced ε(α) per articulation per VFE-1 V3.
+  * `verum audit --epsilon` — surfaces the ε-coordinate of
+    every `@enact`-annotated declaration.
+
+### A.Z.3.2 Defects
+
+1. **108.T proof not yet kernel-citable**. The OC/DC duality
+   proof lives in the Diakrisis preprint (forthcoming per §17
+   Q7); production compilation should gate `@enact` on the
+   preprint release. Until then `core.action.*` modules are
+   STAGED, not production-ready.
+
+2. **Dual-AFN-T (109.T) absent from kernel-side check**. The
+   actic-side no-go theorem mirrors AFN-T but has no kernel
+   rule. Recommended: framework-axiom delegation; same
+   strategy as Axi-9.
+
+3. **Actic ε-invariant ordinals are decoupled from
+   `OrdinalDepth`**. The kernel's `OrdinalDepth { omega_coeff,
+   finite_offset }` Cantor-normal-form encoding is used by
+   `m_depth_omega` for K-Refine-omega, but the Actic
+   ε-coordinate is a *different* ordinal arithmetic (per
+   Diakrisis 12-actic/03-epsilon-invariant.md). Recommended:
+   document the relationship explicitly + define a
+   `convert_eps_to_md_omega` bridge function.
+
+## A.Z.4 Production-readiness criteria
+
+Building on §5 unified success criteria + the user's "100%
+production ready" directive, VVA must additionally satisfy:
+
+| Criterion | Current | Target |
+|---|---|---|
+| Every shipped kernel rule has formal premise + V-stage tag | ✓ V8 #214 (29 rules in §4.4a) | ✓ Maintained |
+| Every shipped kernel rule has implementation cross-ref | ✓ V8 #214 (file:fn) | ✓ Maintained |
+| Every framework axiom passes K-FwAx soundness gate | ◐ (V8 #217 + #220 shipped; loader migration #222 done; production callers using strict regime) | Production CLI defaults `register_subsingleton` |
+| Every Diakrisis axiom mapped to kernel rule OR framework axiom | ◐ (this chapter §A.Z.1; defects flagged) | Closure of Axi-1, Axi-4, Axi-9, T-α delegations |
+| (Fw, ν, τ) coordinate per theorem | ◐ (registry populated; per-theorem inference pending) | `verum audit --coord` default-on |
+| AC/OC duality wired | ◐ (`core.action.*` skeleton; 108.T preprint blocker) | `@enact` ungated post-preprint |
+| Cross-tool replay matrix | ◐ (#90 tracked) | Lean + Coq + Agda day-one round-trip |
+| Kernel TCB ≤ 6 500 LOC | ✓ (~4 700 LOC post-V8) | ✓ Maintained with audit gate |
+| 100% test coverage of every kernel rule | ✓ V8 (254 kernel tests) | ✓ Maintained on every new rule |
+| Zero `unsafe` in kernel | ✓ | ✓ Maintained |
+
+Symbols: ✓ = shipped/maintained; ◐ = partial; ✗ = defect.
+
+## A.Z.5 Synthesis roadmap
+
+Concrete tasks to close the defects above, ordered by
+fundamentality:
+
+1. **Internal-closure delegation explicit** (low-risk, doc only). Add
+   a §4.4a.7-bis sub-row documenting that Axi-1's internal closure
+   is delegated to the model layer; cite Diakrisis §02-axiomatics
+   and `core.math.frameworks.diakrisis*`.
+
+2. **Coordinate-aware citation gate** (medium-scope, kernel rule
+   addition). New `K-Coord-Cite` rule: when a CoreTerm references
+   an axiom with coordinate $(\mathrm{Fw}', \nu', \tau')$ from a
+   theorem at coordinate $(\mathrm{Fw}, \nu, \tau)$, require
+   $\nu' \leq \nu$ (modulo VFE-3 K-Universe-Ascent tier jumps).
+   Implementation: extend `KernelError` with `CoordViolation`;
+   thread coordinate through `infer_with_inductives`.
+
+3. **`verum audit --coord` per-theorem inference** (CLI surface).
+   Walk the user's `@theorem` / `@lemma` / `@corollary`
+   declarations, infer their (Fw, ν, τ) from cited axioms,
+   surface in audit output.
+
+4. **Accessibility typed attribute** (Axi-4 closure). Add
+   `@accessibility(λ)` typed attribute for `EpsilonOf`
+   markers; transitively propagate via 2-functor laws.
+
+5. **Eps-invariant ↔ MD-omega bridge** (Actic integration). Doc
+   + helper module bridging the two ordinal arithmetics.
+
+6. **VFE-1 V3 τ-witness** — multi-week, preprint-blocked
+   (#181 retained).
+
+7. **Cross-tool replay matrix landing** (#90).
+
+This roadmap is the active execution surface of task #226 +
+follow-ups.
+
+---
+
 # Part B — Extensions (Diakrisis-preprint-gated extensions, opt-in via `@require_extension`)
 
 > Each Part B section is opt-in via `@require_extension(<name>)` per
