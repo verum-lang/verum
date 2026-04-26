@@ -618,7 +618,6 @@ fn test_pgo_hot_inline_multiplier() {
 
 #[test]
 fn test_cross_compile_config() {
-    #[allow(dead_code)]
     struct CrossCompileConfig {
         enabled: bool,
         target_triple: Option<String>,
@@ -648,6 +647,18 @@ fn test_cross_compile_config() {
     fn validate(config: &CrossCompileConfig) -> Result<(), &'static str> {
         if config.enabled && config.target_triple.is_none() {
             return Err("Cross-compilation enabled but target_triple not specified");
+        }
+        // Sysroot and linker are optional — host defaults are used when
+        // either is None — but if explicitly set they must be non-empty.
+        if let Some(sr) = &config.sysroot {
+            if sr.as_os_str().is_empty() {
+                return Err("Cross-compilation sysroot is empty");
+            }
+        }
+        if let Some(ln) = &config.linker {
+            if ln.as_os_str().is_empty() {
+                return Err("Cross-compilation linker is empty");
+            }
         }
         Ok(())
     }
@@ -685,7 +696,6 @@ fn test_linking_strategies() {
 
 #[test]
 fn test_vectorization_strategies() {
-    #[allow(dead_code)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum VectorizationStrategy {
         None,
@@ -700,10 +710,12 @@ fn test_vectorization_strategies() {
     // Full = all auto-vectorization with hints
 
     let debug_strategy = VectorizationStrategy::None;
+    let basic_strategy = VectorizationStrategy::Basic;
     let release_strategy = VectorizationStrategy::Aggressive;
     let max_strategy = VectorizationStrategy::Full;
 
-    assert_ne!(debug_strategy, release_strategy);
+    assert_ne!(debug_strategy, basic_strategy);
+    assert_ne!(basic_strategy, release_strategy);
     assert_ne!(release_strategy, max_strategy);
 }
 
