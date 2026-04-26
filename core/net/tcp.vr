@@ -81,16 +81,33 @@ mount sys.linux.syscall.{
 
 @cfg(target_os = "windows")
 mount sys.windows.winsock2.{
-    // POSIX-compatible wrappers from winsock2.vr
-    socket, connect, bind, listen, accept, accept4,
-    send, recv, sendto, recvfrom,
-    shutdown, getsockname, getpeername,
+    // POSIX-compatible wrappers from winsock2.vr — renamed with
+    // `winsock_` prefix to avoid colliding with libc's symbols on
+    // platforms whose stdlib still emits this module's bodies (the
+    // module-level @cfg gating is currently leaky — see #107). Alias
+    // back to the unprefixed names so cross-platform call sites stay
+    // identical.
+    winsock_socket as socket,
+    winsock_connect as connect,
+    winsock_bind as bind,
+    winsock_listen as listen,
+    winsock_accept as accept,
+    winsock_accept4 as accept4,
+    winsock_send as send,
+    winsock_recv as recv,
+    winsock_sendto as sendto,
+    winsock_recvfrom as recvfrom,
+    winsock_shutdown as shutdown,
+    winsock_getsockname as getsockname,
+    winsock_getpeername as getpeername,
     // Socket options
     setsockopt_int, getsockopt_error,
     set_nonblocking, set_reuseaddr, set_reuseport,
     set_tcp_nodelay, set_keepalive, set_socket_timeout,
     // File operations
-    read, write, close,
+    winsock_read as read,
+    winsock_write as write,
+    winsock_close as close,
     // Types
     FileDesc, SockaddrIn, OSError,
     // Constants
