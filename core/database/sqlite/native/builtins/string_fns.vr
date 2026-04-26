@@ -132,8 +132,13 @@ public fn substr(v: &Register, start: &Register, length_opt: &Register) -> Regis
 }
 
 // -----------------------------------------------------------------------------
-// TRIM / LTRIM / RTRIM (whitespace only — SQLite supports custom set, TODO)
+// TRIM / LTRIM / RTRIM
 // -----------------------------------------------------------------------------
+// 1-arg form: ASCII whitespace (space / tab / CR / LF) on the requested ends.
+// 2-arg form: arbitrary character SET — `TRIM('xyhelloy', 'xy') = "hello"`.
+// Per SQLite spec, the trim-set is byte-oriented (matches SQLite's
+// `sqlite3TrimFunc` implementation); multi-byte chars are matched
+// byte-by-byte.
 
 public fn trim(v: &Register) -> Register {
     match v {
@@ -159,6 +164,47 @@ public fn rtrim(v: &Register) -> Register {
     }
 }
 
+/// 2-arg `TRIM(s, chars)` — strip any byte in `chars` (a SET, not a
+/// substring) from both ends.  Returns `NULL` when either argument
+/// is `NULL` or non-text.  Empty `chars` is a no-op.
+public fn trim2(v: &Register, chars: &Register) -> Register {
+    match v {
+        RText(s) => match chars {
+            RText(c) => RText(trim_with_chars(s, c, true, true)),
+            RNull    => RNull,
+            _        => RNull,
+        },
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+/// 2-arg `LTRIM(s, chars)` — set-trim leading bytes only.
+public fn ltrim2(v: &Register, chars: &Register) -> Register {
+    match v {
+        RText(s) => match chars {
+            RText(c) => RText(trim_with_chars(s, c, true, false)),
+            RNull    => RNull,
+            _        => RNull,
+        },
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+/// 2-arg `RTRIM(s, chars)` — set-trim trailing bytes only.
+public fn rtrim2(v: &Register, chars: &Register) -> Register {
+    match v {
+        RText(s) => match chars {
+            RText(c) => RText(trim_with_chars(s, c, false, true)),
+            RNull    => RNull,
+            _        => RNull,
+        },
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
 fn trim_ascii(s: &Text, left: Bool, right: Bool) -> Text {
     let bs = s.as_bytes();
     let mut start: Int = 0;
@@ -173,6 +219,33 @@ fn trim_ascii(s: &Text, left: Bool, right: Bool) -> Text {
     let mut i: Int = start;
     while i < end { out.push_byte(bs[i]); i = i + 1; }
     out
+}
+
+fn trim_with_chars(s: &Text, chars: &Text, left: Bool, right: Bool) -> Text {
+    let cb = chars.as_bytes();
+    if cb.len() == 0 { return s.clone(); }
+    let bs = s.as_bytes();
+    let mut start: Int = 0;
+    let mut end: Int = bs.len();
+    if left {
+        while start < end && byte_in_set(bs[start], cb) { start = start + 1; }
+    }
+    if right {
+        while end > start && byte_in_set(bs[end - 1], cb) { end = end - 1; }
+    }
+    let mut out = Text.new();
+    let mut i: Int = start;
+    while i < end { out.push_byte(bs[i]); i = i + 1; }
+    out
+}
+
+fn byte_in_set(b: Byte, set: &List<Byte>) -> Bool {
+    let mut i: Int = 0;
+    while i < set.len() {
+        if set[i] == b { return true; }
+        i = i + 1;
+    }
+    false
 }
 
 fn is_ws(b: Byte) -> Bool {

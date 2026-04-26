@@ -868,9 +868,23 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                     }
                 }
                 14 => {
-                    // TRIM(s) — ASCII whitespace (space/tab/CR/LF).
+                    // TRIM(s) / TRIM(s, chars) — ASCII whitespace by
+                    // default; otherwise trim any byte in `chars`
+                    // (treated as a SET) from both ends.
                     if n_args < 1 {
                         RNull
+                    } else if n_args >= 2 {
+                        let s_v = state.regs.get(first_arg_reg);
+                        let c_v = state.regs.get(first_arg_reg + 1);
+                        match s_v {
+                            RText(ref s) => match c_v {
+                                RText(ref c) => RText(trim_with_chars(s, c, true, true)),
+                                RNull => RNull,
+                                _ => RNull,
+                            },
+                            RNull => RNull,
+                            _ => RNull,
+                        }
                     } else {
                         match state.regs.get(first_arg_reg) {
                             RText(ref s) => RText(trim_ascii(s, true, true)),
@@ -880,9 +894,21 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                     }
                 }
                 15 => {
-                    // LTRIM(s) — leading whitespace only.
+                    // LTRIM(s) / LTRIM(s, chars) — leading-only.
                     if n_args < 1 {
                         RNull
+                    } else if n_args >= 2 {
+                        let s_v = state.regs.get(first_arg_reg);
+                        let c_v = state.regs.get(first_arg_reg + 1);
+                        match s_v {
+                            RText(ref s) => match c_v {
+                                RText(ref c) => RText(trim_with_chars(s, c, true, false)),
+                                RNull => RNull,
+                                _ => RNull,
+                            },
+                            RNull => RNull,
+                            _ => RNull,
+                        }
                     } else {
                         match state.regs.get(first_arg_reg) {
                             RText(ref s) => RText(trim_ascii(s, true, false)),
@@ -892,9 +918,21 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                     }
                 }
                 16 => {
-                    // RTRIM(s) — trailing whitespace only.
+                    // RTRIM(s) / RTRIM(s, chars) — trailing-only.
                     if n_args < 1 {
                         RNull
+                    } else if n_args >= 2 {
+                        let s_v = state.regs.get(first_arg_reg);
+                        let c_v = state.regs.get(first_arg_reg + 1);
+                        match s_v {
+                            RText(ref s) => match c_v {
+                                RText(ref c) => RText(trim_with_chars(s, c, false, true)),
+                                RNull => RNull,
+                                _ => RNull,
+                            },
+                            RNull => RNull,
+                            _ => RNull,
+                        }
                     } else {
                         match state.regs.get(first_arg_reg) {
                             RText(ref s) => RText(trim_ascii(s, false, true)),
@@ -1269,6 +1307,48 @@ fn trim_ascii(s: &Text, left: Bool, right: Bool) -> Text {
     let mut k: Int = i;
     while k < j { out.push_byte(bs[k]); k = k + 1; }
     out
+}
+
+/// SQL TRIM(s, chars) / LTRIM(s, chars) / RTRIM(s, chars) — trim
+/// any characters in `chars` (treated as a SET, not a substring) from
+/// the requested ends of `s`.
+///
+/// Per SQL spec: `TRIM('xyhelloy', 'xy')` returns `"hello"` because
+/// the SET {x, y} is stripped from both ends.  Empty `chars` is a
+/// no-op (matches SQLite behaviour).
+///
+/// ASCII-only — multi-byte chars in `chars` are matched byte-by-byte,
+/// which is correct for ASCII trim sets and matches SQLite's behaviour
+/// (SQLite's `TRIM` is byte-oriented, not codepoint-oriented).
+fn trim_with_chars(s: &Text, chars: &Text, left: Bool, right: Bool) -> Text {
+    let cb = chars.as_bytes();
+    if cb.len() == 0 { return s.clone(); }
+    let bs = s.as_bytes();
+    let n = bs.len();
+    let mut i: Int = 0;
+    if left {
+        while i < n && byte_in_set(bs[i], cb) { i = i + 1; }
+    }
+    let mut j: Int = n;
+    if right {
+        while j > i && byte_in_set(bs[j - 1], cb) { j = j - 1; }
+    }
+    let mut out = Text.new();
+    let mut k: Int = i;
+    while k < j { out.push_byte(bs[k]); k = k + 1; }
+    out
+}
+
+/// Linear search through the trim-char set.  At typical SQL trim
+/// set sizes (≤ 16 chars) this beats a HashSet by avoiding the
+/// hash + allocation cost.
+fn byte_in_set(b: Byte, set: &List<Byte>) -> Bool {
+    let mut i: Int = 0;
+    while i < set.len() {
+        if set[i] == b { return true; }
+        i = i + 1;
+    }
+    false
 }
 
 fn bytes_equal_at(h: &List<Byte>, at: Int, n: &List<Byte>) -> Bool {
