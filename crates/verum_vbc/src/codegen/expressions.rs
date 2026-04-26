@@ -325,16 +325,9 @@ fn is_primitive_type(name: &str) -> bool {
 /// This is detected during FFI call argument analysis to enable proper array marshalling.
 /// VBC arrays store NaN-boxed Values, but FFI expects raw C data, so we need to marshal.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields reserved for future FFI array marshalling implementation
 struct FfiArrayRefInfo {
     /// The argument index in the FFI call
     arg_idx: u8,
-    /// The variable name holding the array
-    array_var_name: String,
-    /// The index expression (usually literal 0)
-    index_is_zero: bool,
-    /// Whether this is a mutable reference (&mut arr[idx])
-    is_mutable: bool,
 }
 
 /// Tracks a function callback argument for FFI calls.
@@ -369,36 +362,20 @@ impl VbcCodegen {
     /// but FFI expects raw C data. When detected, we marshal the array to a temporary buffer.
     fn detect_array_element_ref(arg: &Expr) -> Option<FfiArrayRefInfo> {
         // Check for &arr[idx] or &mut arr[idx] pattern
-        let (is_mutable, inner) = match &arg.kind {
-            ExprKind::Unary { op: UnOp::Ref, expr: inner } => (false, inner),
-            ExprKind::Unary { op: UnOp::RefMut, expr: inner } => (true, inner),
+        let inner = match &arg.kind {
+            ExprKind::Unary { op: UnOp::Ref | UnOp::RefMut, expr: inner } => inner,
             _ => return None,
         };
 
-        // Check if inner is an index expression arr[idx]
-        if let ExprKind::Index { expr: base, index } = &inner.kind {
-            // Check if base is a simple variable path
-            if let ExprKind::Path(path) = &base.kind
+        // Check if inner is an index expression arr[idx] with a simple variable base
+        if let ExprKind::Index { expr: base, .. } = &inner.kind
+            && let ExprKind::Path(path) = &base.kind
                 && path.segments.len() == 1
-                    && let PathSegment::Name(ident) = &path.segments[0] {
-                        // Check if index is zero (literal 0)
-                        let index_is_zero = if let ExprKind::Literal(lit) = &index.kind {
-                            if let LiteralKind::Int(int_lit) = &lit.kind {
-                                int_lit.value == 0
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
-
-                        return Some(FfiArrayRefInfo {
-                            arg_idx: 0, // Will be set by caller
-                            array_var_name: ident.name.to_string(),
-                            index_is_zero,
-                            is_mutable,
-                        });
-                    }
+                    && matches!(path.segments[0], PathSegment::Name(_))
+        {
+            return Some(FfiArrayRefInfo {
+                arg_idx: 0, // Will be set by caller
+            });
         }
 
         None
@@ -2772,27 +2749,6 @@ impl VbcCodegen {
 
         self.ctx.free_temp(inner_reg);
         Ok(Some(dest))
-    }
-
-    /// Checks if an expression is a float type (heuristic based on literals).
-    ///
-    /// This is used when type information is not available at codegen time.
-    /// It checks for:
-    /// - Float literals directly
-    /// - Unary expressions on float operands
-    /// - Paths to variables (defaults to int since we can't know)
-    #[allow(dead_code)] // Reserved for future type-aware compilation passes
-    fn expr_is_float(expr: &Expr) -> bool {
-        match &expr.kind {
-            ExprKind::Literal(lit) => matches!(lit.kind, LiteralKind::Float(_)),
-            ExprKind::Unary { expr: inner, .. } => Self::expr_is_float(inner),
-            ExprKind::Binary { left, right, .. } => {
-                // If either operand is float, treat as float
-                Self::expr_is_float(left) || Self::expr_is_float(right)
-            }
-            // For paths (variables), default to int - type system should ensure correctness
-            _ => false,
-        }
     }
 
     // ==================== Function Calls ====================
@@ -6016,7 +5972,7 @@ impl VbcCodegen {
         } else {
             method.name.to_string()
         };
-        // VUVA #153 — receiver-narrowing safety net. The giant match
+        // VVA #153 — receiver-narrowing safety net. The giant match
         // above tries to extract the receiver type from a closed list
         // of expression shapes (Path / Call / MethodCall / Field /
         // Literal / Unary / Paren). When none match we fall through
@@ -6761,34 +6717,6 @@ impl VbcCodegen {
 
         Ok(Some(result))
     }
-
-    /// Compiles an if-let expression (legacy single-pattern form).
-    ///
-    /// This is now handled by compile_if() which supports the full chain syntax.
-    /// Kept for backward compatibility with call sites that use the old signature.
-    #[allow(dead_code)]
-    fn compile_if_let(
-        &mut self,
-        pattern: &verum_ast::Pattern,
-        expr: &Expr,
-        then_branch: &Block,
-        else_branch: Option<&Expr>,
-    ) -> CodegenResult<Option<Reg>> {
-        // Delegate to the unified compile_if with a single-element condition chain
-        use verum_ast::IfCondition;
-        use smallvec::smallvec;
-
-        let condition = IfCondition {
-            conditions: smallvec![ConditionKind::Let {
-                pattern: pattern.clone(),
-                value: expr.clone(),
-            }],
-            span: pattern.span,
-        };
-
-        self.compile_if(&condition, then_branch, else_branch)
-    }
-
     /// Compiles return expression.
     fn compile_return(&mut self, value: Option<&Expr>) -> CodegenResult<Option<Reg>> {
         if !self.ctx.in_function {
@@ -13169,139 +13097,6 @@ impl VbcCodegen {
         analyzer.free_vars()
     }
 
-    /// Compiles a closure body as a separate function.
-    ///
-    /// The function takes captured variables as the first parameters,
-    /// followed by the user-specified closure parameters.
-    #[allow(dead_code)] // Reserved for future closure compilation improvements
-    fn compile_closure_body(
-        &mut self,
-        captures: &[String],
-        params: &[String],
-        body: &Expr,
-    ) -> CodegenResult<u32> {
-        // Generate unique name for closure function
-        let closure_name = format!(
-            "{}$closure${}",
-            self.ctx.current_function.as_deref().unwrap_or("anon"),
-            self.closure_counter
-        );
-        self.closure_counter += 1;
-
-        // Build combined parameter list: captures + user params
-        // All closure parameters are immutable by default (captures cannot be mutated in place)
-        let mut all_params: Vec<(String, bool)> = Vec::with_capacity(captures.len() + params.len());
-        for cap in captures {
-            all_params.push((cap.clone(), false));
-        }
-        for param in params {
-            all_params.push((param.clone(), false));
-        }
-
-        // Allocate function ID
-        let func_id = self.next_func_id;
-        self.next_func_id = self.next_func_id.saturating_add(1);
-
-        // Extract just the names for registration
-        let param_names: Vec<String> = all_params.iter().map(|(n, _)| n.clone()).collect();
-
-        // Register the closure function
-        let info = super::FunctionInfo {
-            id: crate::module::FunctionId(func_id),
-            param_count: param_names.len(),
-            param_names,
-            param_type_names: vec![],
-            is_async: false,
-            is_generator: false, // Closures are not generators
-            contexts: Vec::new(),
-            return_type: None,
-            yield_type: None,
-            intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
-            return_type_name: None, // Closure return types are inferred
-            return_type_inner: None,
-        };
-        self.ctx.register_function(closure_name.clone(), info);
-
-        // Save current function context (critical: includes all state that begin_function clears)
-        let saved_function = self.ctx.current_function.clone();
-        let saved_instructions = std::mem::take(&mut self.ctx.instructions);
-        let saved_registers = self.ctx.registers.snapshot();
-        let saved_in_function = self.ctx.in_function;
-        let saved_return_type = self.ctx.return_type.clone();
-        // Save labels and loop context - begin_function() clears these but they must be
-        // restored so the outer function's loops/jumps continue to work after closure compilation.
-        let saved_closure_ctx = self.ctx.save_closure_context();
-
-        // Begin closure function compilation
-        self.ctx.begin_function(&closure_name, &all_params, None);
-
-        // Mark captured variables (they are the first parameters)
-        for (i, cap_name) in captures.iter().enumerate() {
-            // Update the variable's register kind to Captured
-            if let Some(info) = self.ctx.lookup_var_mut(cap_name) {
-                info.kind = super::RegisterKind::Captured;
-            }
-            let _ = i; // Used for potential future optimization
-        }
-
-        // Compile the body expression
-        let result = self.compile_expr(body)?;
-
-        // Emit return
-        if let Some(reg) = result {
-            self.ctx.emit(Instruction::Ret { value: reg });
-        } else {
-            self.ctx.emit(Instruction::RetV);
-        }
-
-        // End function compilation
-        let (closure_instructions, register_count) = self.ctx.end_function();
-
-        // Restore parent function context (critical: includes all saved state)
-        self.ctx.current_function = saved_function;
-        self.ctx.instructions = saved_instructions;
-        self.ctx.registers.restore_reg(&saved_registers);
-        self.ctx.in_function = saved_in_function;
-        self.ctx.return_type = saved_return_type;
-        // Restore labels and loop context
-        self.ctx.restore_closure_context(saved_closure_ctx);
-
-        // Create VBC function descriptor
-        let name_id = crate::types::StringId(self.intern_string(&closure_name));
-        let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
-        descriptor.id = crate::module::FunctionId(func_id);
-        descriptor.register_count = register_count;
-        descriptor.locals_count = all_params.len() as u16;
-
-        // Populate params for LLVM AOT lowering: [env_ptr, user_arg0, user_arg1, ...]
-        // The env_ptr carries captured variables; user args follow.
-        let env_name_id = crate::types::StringId(self.intern_string("__closure_env"));
-        descriptor.params.push(crate::module::ParamDescriptor {
-            name: env_name_id,
-            type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::PTR),
-            is_mut: false,
-            default: None,
-        });
-        for param in params {
-            let pname_id = crate::types::StringId(self.intern_string(param));
-            descriptor.params.push(crate::module::ParamDescriptor {
-                name: pname_id,
-                type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
-                is_mut: false,
-                default: None,
-            });
-        }
-        // Store capture count in max_stack for LLVM prologue generation
-        descriptor.max_stack = captures.len() as u16;
-        // Closures return values as i64 (not void)
-        descriptor.return_type = crate::types::TypeRef::Concrete(crate::types::TypeId::INT);
-
-        let vbc_func = crate::module::VbcFunction::new(descriptor, closure_instructions);
-        self.functions.push(vbc_func);
-
-        Ok(func_id)
-    }
-
     /// Compiles a closure body with support for complex parameter patterns.
     ///
     /// The function takes captured variables as the first parameters,
@@ -13559,44 +13354,6 @@ impl VbcCodegen {
         self.ctx.tier_context.get_tier(expr_id)
     }
 
-    /// Verifies tier decision is valid and logs any anomalies.
-    ///
-    /// Phase 5.3: Tier decision verification ensures that:
-    /// 1. Tier 1 refs have escape analysis backing
-    /// 2. Tier 2 refs are inside unsafe blocks or explicit
-    /// 3. No silent fallbacks to Tier 0 without reason
-    ///
-    /// Returns the verified tier (possibly downgraded for safety).
-    #[allow(dead_code)]
-    fn verify_tier_decision(&mut self, _expr: &Expr, tier: CbgrTier, is_explicit: bool) -> CbgrTier {
-        // Use tier context's has_decisions() to check if analysis was performed
-        let has_analysis = self.ctx.tier_context.has_decisions();
-
-        match tier {
-            CbgrTier::Tier1 => {
-                if !has_analysis && !is_explicit {
-                    // Tier 1 without escape analysis backing - suspicious
-                    // This could indicate a bug in tier propagation
-                    // For now, fall back to Tier 0 for safety
-                    self.ctx.stats.tier_fallbacks += 1;
-                    CbgrTier::Tier0
-                } else {
-                    tier
-                }
-            }
-            CbgrTier::Tier2 => {
-                if !self.ctx.tier_context.in_unsafe && !is_explicit {
-                    // Tier 2 outside unsafe block without explicit &unsafe
-                    // This is a potential safety issue - fall back to Tier 0
-                    self.ctx.stats.tier_fallbacks += 1;
-                    CbgrTier::Tier0
-                } else {
-                    tier
-                }
-            }
-            CbgrTier::Tier0 => tier, // Default tier is always valid
-        }
-    }
 
     /// Promote a register-resident value to a non-recyclable slot before
     /// emitting a CBGR reference to it.
@@ -13753,87 +13510,6 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::Deref { dst, ref_reg });
             }
         }
-    }
-
-    /// Emits capability check for a reference.
-    ///
-    /// Phase 5.5: Capability checks ensure the reference has the required
-    /// permissions (read, write, execute) before access.
-    ///
-    /// # Capability Checking Points
-    ///
-    /// Capabilities are checked at these points in code generation:
-    /// - **Read**: Before any dereference operation
-    /// - **Write**: Before mutable dereference or store operations
-    /// - **ReadWrite**: Before operations that both read and write
-    /// - **Execute**: Before function pointer calls via references
-    ///
-    /// # Implementation Status
-    ///
-    /// Currently, capability checking is implemented through two mechanisms:
-    ///
-    /// 1. **Compile-time (Type System)**: The Verum type system tracks reference
-    ///    mutability (`&T` vs `&mut T`) and prevents invalid access patterns.
-    ///    This is the primary enforcement mechanism.
-    ///
-    /// 2. **Runtime (CBGR Validation)**: The ChkRef instruction validates
-    ///    reference liveness, which implicitly includes capability information
-    ///    encoded in the reference metadata.
-    ///
-    /// A dedicated ChkCap instruction will be added in a future opcode
-    /// reorganization to provide explicit capability validation separate
-    /// from liveness checking.
-    ///
-    /// # Statistics
-    ///
-    /// This method records capability check requests for analysis and
-    /// optimization purposes.
-    ///
-    /// CBGR capability checking: validates that a reference has the required permission
-    /// (Read, Write, Execute, or combination) before access. Currently records requests
-    /// for analysis; runtime validation occurs via ChkRef which encodes capabilities
-    /// in the reference metadata.
-    #[allow(dead_code)]
-    fn emit_capability_check(
-        &mut self,
-        _ref_reg: Reg,
-        capability: crate::types::ReferenceCapability,
-    ) {
-        // Record the capability check for statistics
-        self.ctx.stats.capability_checks += 1;
-
-        // Log capability requirement for future ChkCap implementation
-        // When ChkCap opcode is added, emit:
-        // self.ctx.emit(Instruction::ChkCap { ref_reg, cap_flags: capability.to_flags() });
-        //
-        // Currently, capability enforcement relies on:
-        // 1. Type system: &T vs &mut T distinction
-        // 2. CBGR metadata: Capability bits in reference header
-        // 3. ChkRef validation: Checks reference validity
-
-        let _ = capability; // Capability is tracked in stats but not yet emitted
-    }
-
-    /// Helper to emit capability check for dereference operations.
-    ///
-    /// Automatically determines the required capability based on mutability
-    /// and emits the appropriate check (currently tracked in stats only).
-    #[allow(dead_code)]
-    fn emit_deref_capability_check(&mut self, ref_reg: Reg, is_mut: bool) {
-        let cap = crate::types::ReferenceCapability::for_deref(is_mut);
-        self.emit_capability_check(ref_reg, cap);
-    }
-
-    /// Helper to emit capability check for store operations.
-    #[allow(dead_code)]
-    fn emit_store_capability_check(&mut self, ref_reg: Reg) {
-        self.emit_capability_check(ref_reg, crate::types::ReferenceCapability::for_store());
-    }
-
-    /// Helper to emit capability check for function pointer calls.
-    #[allow(dead_code)]
-    fn emit_call_capability_check(&mut self, ref_reg: Reg) {
-        self.emit_capability_check(ref_reg, crate::types::ReferenceCapability::for_call());
     }
 
     // ==================== Pipeline ====================
