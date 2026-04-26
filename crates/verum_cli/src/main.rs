@@ -521,6 +521,14 @@ enum Commands {
         clear: bool,
     },
 
+    /// Manage git hooks for the current project. The `install`
+    /// subcommand wires `verum lint --since HEAD --severity error`
+    /// + `verum fmt --check` into `.git/hooks/pre-commit`. Each
+    /// generated hook carries a header marker so `uninstall` only
+    /// touches files we wrote.
+    #[clap(subcommand)]
+    Hooks(HooksCommands),
+
     /// Manage dependencies
     #[clap(subcommand)]
     Deps(DepsCommands),
@@ -1001,6 +1009,25 @@ enum ConfigCommands {
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
+}
+
+/// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum HooksCommands {
+    /// Install `.git/hooks/pre-commit` running `verum lint --since
+    /// HEAD --severity error` and `verum fmt --check`.
+    Install {
+        /// Overwrite an existing hook even if it isn't
+        /// verum-managed. Without this flag, install refuses to
+        /// clobber a hand-authored or third-party hook.
+        #[clap(long)]
+        force: bool,
+    },
+    /// Remove the verum-managed pre-commit hook. Refuses to remove
+    /// hooks that don't carry our header marker.
+    Uninstall,
+    /// Report whether the hook is installed and whether we manage it.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -1641,6 +1668,11 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Clean { all } => commands::clean::execute(all),
         Commands::Diagnose(cmd) => commands::diagnose::execute(cmd),
         Commands::Watch { command, clear } => commands::watch::execute(command.as_str(), clear),
+        Commands::Hooks(cmd) => match cmd {
+            HooksCommands::Install { force } => commands::hooks::install(force),
+            HooksCommands::Uninstall => commands::hooks::uninstall(),
+            HooksCommands::Status => commands::hooks::status(),
+        },
         Commands::Deps(deps_cmd) => match deps_cmd {
             DepsCommands::Add {
                 name,

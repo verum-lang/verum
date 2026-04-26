@@ -11,6 +11,7 @@ pub mod doc;
 pub mod explain;
 pub mod file;
 pub mod fmt;
+pub mod hooks;
 pub mod init;
 pub mod lint;
 pub mod lint_cache;
