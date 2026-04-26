@@ -77,20 +77,21 @@ implement StreamError {
         self.message.as_ref()
     }
 
-    // Create from OS error code.
+    /// Create from OS error code.
+    ///
+    /// Cross-platform: errno values differ between Linux and macOS in
+    /// numerically-overlapping ways (e.g. Linux EAGAIN=11 collides
+    /// with macOS EDEADLK=11; Linux EXFULL=54 collides with macOS
+    /// ECONNRESET=54). A single unified match table would silently
+    /// mis-classify codes on at least one platform — so the mapping
+    /// is dispatched per platform via @cfg.
+    ///
+    /// POSIX-stable codes (ENOENT=2, EACCES=13, EEXIST=17, EPIPE=32,
+    /// EINTR=4, EINVAL=22, ENOMEM=12) match identically on Linux and
+    /// macOS and are handled in the platform-specific tables below.
+    /// Codes we do not recognize fall through to `Other`.
     public fn from_raw_os_error(code: Int) -> StreamError {
-        let kind = match code {
-            2 => NotFound,           // ENOENT
-            13 => PermissionDenied,  // EACCES
-            17 => AlreadyExists,     // EEXIST
-            11 => WouldBlock,        // EAGAIN
-            32 => BrokenPipe,        // EPIPE
-            110 => TimedOut,         // ETIMEDOUT
-            111 => ConnectionRefused, // ECONNREFUSED
-            104 => ConnectionReset,   // ECONNRESET
-            _ => Other,
-        };
-        StreamError.new(kind)
+        StreamError.new(io_error_kind_from_os_code(code))
     }
 
     // Create from errno (alias for from_raw_os_error).
@@ -111,6 +112,92 @@ implement StreamError {
             kind: IoErrorKind.Other,
             message: Some(msg),
         }
+    }
+}
+
+// Platform-specific errno → IoErrorKind dispatcher.
+//
+// SOUNDNESS: Linux and macOS errno values overlap in non-trivial ways.
+// Examples of collisions where the same number means different things:
+//   *  11: Linux EAGAIN ↔ macOS EDEADLK
+//   *  35: Linux EDEADLK ↔ macOS EAGAIN/EWOULDBLOCK
+//   *  48: Linux ELNRNG ↔ macOS EADDRINUSE
+//   *  49: Linux EUNATCH ↔ macOS EADDRNOTAVAIL
+//   *  53: Linux EBADR ↔ macOS ECONNABORTED
+//   *  54: Linux EXFULL ↔ macOS ECONNRESET
+//   *  57: Linux EBADSLT ↔ macOS ENOTCONN
+//   *  60: Linux ENOSTR ↔ macOS ETIMEDOUT
+//   *  61: Linux ENODATA ↔ macOS ECONNREFUSED
+//   *  98: Linux EADDRINUSE ↔ macOS ENOSR
+//   *  99: Linux EADDRNOTAVAIL ↔ macOS ENOSTR
+//   * 103: Linux ECONNABORTED ↔ macOS ENOPOLICY
+//   * 104: Linux ECONNRESET ↔ macOS ENOTRECOVERABLE
+//
+// Therefore the mapping must NOT be a single shared table — that would
+// mis-classify on at least one platform. Each platform owns its own
+// dispatcher selected at compile time via @cfg. POSIX-stable codes
+// (ENOENT=2, EACCES=13, EEXIST=17, EPIPE=32, EINTR=4, EINVAL=22,
+// ENOMEM=12) appear in both tables with identical mappings.
+@cfg(target_os = "linux")
+fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
+    match code {
+        2 => NotFound,             // ENOENT
+        13 => PermissionDenied,    // EACCES
+        17 => AlreadyExists,       // EEXIST
+        32 => BrokenPipe,          // EPIPE
+        4 => Interrupted,          // EINTR
+        22 => InvalidInput,        // EINVAL
+        12 => OutOfMemory,         // ENOMEM
+        11 => WouldBlock,          // EAGAIN / EWOULDBLOCK
+        110 => TimedOut,           // ETIMEDOUT
+        111 => ConnectionRefused,  // ECONNREFUSED
+        104 => ConnectionReset,    // ECONNRESET
+        103 => ConnectionAborted,  // ECONNABORTED
+        98 => AddrInUse,           // EADDRINUSE
+        99 => AddrNotAvailable,    // EADDRNOTAVAIL
+        107 => NotConnected,       // ENOTCONN
+        _ => Other,
+    }
+}
+
+@cfg(target_os = "macos")
+fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
+    match code {
+        2 => NotFound,             // ENOENT
+        13 => PermissionDenied,    // EACCES
+        17 => AlreadyExists,       // EEXIST
+        32 => BrokenPipe,          // EPIPE
+        4 => Interrupted,          // EINTR
+        22 => InvalidInput,        // EINVAL
+        12 => OutOfMemory,         // ENOMEM
+        35 => WouldBlock,          // EAGAIN / EWOULDBLOCK
+        60 => TimedOut,            // ETIMEDOUT
+        61 => ConnectionRefused,   // ECONNREFUSED
+        54 => ConnectionReset,     // ECONNRESET
+        53 => ConnectionAborted,   // ECONNABORTED
+        48 => AddrInUse,           // EADDRINUSE
+        49 => AddrNotAvailable,    // EADDRNOTAVAIL
+        57 => NotConnected,        // ENOTCONN
+        _ => Other,
+    }
+}
+
+@cfg(target_os = "windows")
+fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
+    // Windows uses GetLastError values rather than POSIX errno; the
+    // primary winsock-side mapping lives in core/sys/windows/io.vr.
+    // This handles the small set of errno-style codes that surface
+    // through ucrt's POSIX shim (e.g. _open / _read return errno
+    // values via _doserrno → errno translation).
+    match code {
+        2 => NotFound,             // ENOENT
+        13 => PermissionDenied,    // EACCES
+        17 => AlreadyExists,       // EEXIST
+        32 => BrokenPipe,          // EPIPE
+        4 => Interrupted,          // EINTR
+        22 => InvalidInput,        // EINVAL
+        12 => OutOfMemory,         // ENOMEM
+        _ => Other,
     }
 }
 
