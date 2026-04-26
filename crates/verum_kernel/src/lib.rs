@@ -90,6 +90,7 @@ use verum_common::{Heap, List, Maybe, Text};
 pub const VUVA_VERSION: &str = "2.6.0";
 
 pub mod proof_tree;
+pub use proof_tree::{KernelProofNode, KernelRule, record_inference};
 
 /// Kernel error type — split into its own module per #198 for
 /// auditability of the trusted-base diagnostic surface. Re-exported
