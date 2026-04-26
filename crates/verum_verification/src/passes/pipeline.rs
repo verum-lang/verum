@@ -24,13 +24,61 @@ use crate::level::VerificationLevel;
 use crate::transition::TransitionStrategy;
 
 use super::{
-    BoundaryDetectionPass, KernelRecheckPass, LevelInferencePass, SmtVerificationPass,
-    TransitionRecommendationPass, VerificationError, VerificationPass, VerificationResult,
+    BoundaryDetectionPass, KernelRecheckPass, LevelInferencePass, PassClassification,
+    SmtVerificationPass, TransitionRecommendationPass, VerificationError, VerificationPass,
+    VerificationResult,
 };
+
+/// V8 (#208, B7) — pipeline-level halt policy.
+///
+/// Mediates between the two valid contracts that the V0 pipeline
+/// could not separate:
+///
+///   * **Default** — halt on `SoundnessCritical` failure; continue
+///     through `Informational` failures. This is the new V8 default
+///     and matches the practical separation between formation
+///     errors (which downstream passes depend on) and advisory
+///     diagnostics (which don't).
+///   * **StrictFailFast** — halt on *any* failure regardless of
+///     classification. Equivalent to pre-V8 behaviour. Useful for
+///     CI gates that want a single first-failure stop.
+///   * **Aggregate** — never halt. Run every pass, accumulate every
+///     diagnostic. Useful for IDE / batch-report workflows where
+///     surfacing all errors at once is more valuable than the
+///     short-circuit speedup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PipelineMode {
+    /// V8 default — halt only on SoundnessCritical pass failure.
+    Default,
+    /// Pre-V8 — halt on any pass failure (regardless of class).
+    StrictFailFast,
+    /// Never halt — accumulate every diagnostic.
+    Aggregate,
+}
+
+impl PipelineMode {
+    /// Decide whether a pass result should halt the pipeline.
+    pub fn should_halt(self, classification: PassClassification, success: bool) -> bool {
+        if success {
+            return false;
+        }
+        match self {
+            PipelineMode::Default => {
+                classification == PassClassification::SoundnessCritical
+            }
+            PipelineMode::StrictFailFast => true,
+            PipelineMode::Aggregate => false,
+        }
+    }
+}
 
 /// Verification pipeline combining all passes.
 pub struct VerificationPipeline {
     passes: List<Box<dyn VerificationPass>>,
+    /// V8 (#208, B7) — halt policy. Default
+    /// [`PipelineMode::Default`] gates fail-fast on
+    /// SoundnessCritical class only.
+    mode: PipelineMode,
 }
 
 impl VerificationPipeline {
@@ -38,7 +86,22 @@ impl VerificationPipeline {
     pub fn new() -> Self {
         Self {
             passes: List::new(),
+            mode: PipelineMode::Default,
         }
+    }
+
+    /// V8 (#208, B7) — configure the halt policy. Builder-style;
+    /// returns `self` so call-sites read naturally:
+    /// `VerificationPipeline::full_verification_pipeline().with_mode(PipelineMode::Aggregate)`.
+    pub fn with_mode(mut self, mode: PipelineMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// V8 (#208, B7) — read-only accessor for the configured halt
+    /// policy.
+    pub fn mode(&self) -> PipelineMode {
+        self.mode
     }
 
     /// Add a pass to the pipeline.
@@ -46,20 +109,18 @@ impl VerificationPipeline {
         self.passes.push(pass);
     }
 
-    /// Run all passes, fail-fast on the first pass that returns
-    /// `result.success == false`.
+    /// Run all passes, halting per the configured
+    /// [`PipelineMode`].
     ///
-    /// Fail-fast is the correct contract because verification
-    /// passes form a *strict ordering* — a downstream pass
-    /// (BoundaryDetection, TransitionRecommendation, SMT) presumes
-    /// that upstream invariants (kernel-rule formation, level
-    /// coherence) hold. Running them on a module that has already
-    /// failed an upstream check is at best wasted work; at worst
-    /// it surfaces noise diagnostics that mask the root cause.
+    /// Halt semantics by mode (V8, B7):
+    ///   * `Default` (V8 default) — halt on `SoundnessCritical`
+    ///     pass failure; continue through `Informational` ones.
+    ///   * `StrictFailFast` (pre-V8) — halt on any pass failure.
+    ///   * `Aggregate` — never halt; collect every diagnostic.
     ///
     /// The failed pass's result IS pushed into the returned list so
-    /// callers can read the diagnostic; only *subsequent* passes
-    /// are skipped.
+    /// callers can read the diagnostic; only the *subsequent*
+    /// passes are skipped (or run, depending on mode).
     pub fn run_all(
         &mut self,
         module: &Module,
@@ -68,8 +129,9 @@ impl VerificationPipeline {
         let mut results = List::new();
 
         for pass in &mut self.passes {
+            let classification = pass.classification();
             let result = pass.run(module, ctx)?;
-            let halt = !result.success;
+            let halt = self.mode.should_halt(classification, result.success);
             results.push(result);
             if halt {
                 break;

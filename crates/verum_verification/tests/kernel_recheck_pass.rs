@@ -736,3 +736,125 @@ fn b12_policy_accessor_returns_configured_policy() {
     let pass2 = KernelRecheckPass::new();
     assert_eq!(pass2.policy(), VfePolicy::AllRulesActive);
 }
+
+// =============================================================================
+// V8 (#208, B7) — pipeline halt-policy modes
+// =============================================================================
+
+use verum_verification::{PassClassification, PipelineMode};
+
+#[test]
+fn b7_default_mode_halts_on_kernel_recheck_failure() {
+    // V8 default mode preserves the practical fail-fast contract
+    // for SoundnessCritical passes: KernelRecheck rejection still
+    // halts BoundaryDetection + TransitionRecommendation.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let module = module_with(vec![make_function(
+        "halts",
+        vec![refined_int(boxed)],
+        Maybe::Some(Type::int(span())),
+    )]);
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline();
+    assert_eq!(pipeline.mode(), PipelineMode::Default);
+    let mut ctx = VerificationContext::new();
+    let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
+    assert_eq!(
+        results.len(),
+        2,
+        "Default mode halts on SoundnessCritical (KernelRecheck) failure"
+    );
+}
+
+#[test]
+fn b7_aggregate_mode_runs_all_passes_despite_failure() {
+    // Aggregate mode never halts: every diagnostic is collected,
+    // even when KernelRecheck rejects.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let module = module_with(vec![make_function(
+        "halts",
+        vec![refined_int(boxed)],
+        Maybe::Some(Type::int(span())),
+    )]);
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline()
+        .with_mode(PipelineMode::Aggregate);
+    let mut ctx = VerificationContext::new();
+    let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
+    assert_eq!(
+        results.len(),
+        5,
+        "Aggregate mode runs all 5 passes regardless of failure"
+    );
+    // KernelRecheck (index 1) STILL has success == false; the
+    // mode change just doesn't halt the pipeline.
+    assert!(!results.get(1).unwrap().success);
+}
+
+#[test]
+fn b7_strict_fail_fast_mode_matches_pre_v8_behaviour() {
+    // StrictFailFast halts on any pass failure regardless of
+    // classification. Verifies pre-V8 behaviour is still
+    // available for callers that want it.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let module = module_with(vec![make_function(
+        "halts",
+        vec![refined_int(boxed)],
+        Maybe::Some(Type::int(span())),
+    )]);
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline()
+        .with_mode(PipelineMode::StrictFailFast);
+    let mut ctx = VerificationContext::new();
+    let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
+    assert_eq!(results.len(), 2, "StrictFailFast halts on first failure");
+}
+
+#[test]
+fn b7_should_halt_table_matches_specification() {
+    // White-box test of the halt-decision matrix.
+    use PassClassification::{Informational, SoundnessCritical};
+    use PipelineMode::{Aggregate, Default, StrictFailFast};
+
+    // Success: never halts (any mode, any class).
+    for mode in [Default, StrictFailFast, Aggregate] {
+        for class in [SoundnessCritical, Informational] {
+            assert!(
+                !mode.should_halt(class, true),
+                "success must never halt; mode={:?} class={:?}",
+                mode,
+                class,
+            );
+        }
+    }
+
+    // Failure: matrix per spec.
+    assert!(Default.should_halt(SoundnessCritical, false));
+    assert!(!Default.should_halt(Informational, false));
+    assert!(StrictFailFast.should_halt(SoundnessCritical, false));
+    assert!(StrictFailFast.should_halt(Informational, false));
+    assert!(!Aggregate.should_halt(SoundnessCritical, false));
+    assert!(!Aggregate.should_halt(Informational, false));
+}
+
+#[test]
+fn b7_boundary_detection_marked_informational() {
+    // Direct trait-method check: the two advisory passes
+    // override classification() to Informational so they don't
+    // gate Default-mode pipeline halt decisions.
+    let bd = verum_verification::passes::boundary_detection::BoundaryDetectionPass::new();
+    assert_eq!(bd.classification(), PassClassification::Informational);
+    let tr =
+        verum_verification::passes::transition_recommendation::TransitionRecommendationPass::new(
+            verum_verification::transition::TransitionStrategy::Balanced,
+        );
+    assert_eq!(tr.classification(), PassClassification::Informational);
+}
+
+#[test]
+fn b7_kernel_recheck_remains_soundness_critical() {
+    // KernelRecheck is the canonical SoundnessCritical pass —
+    // its failure invalidates every downstream invariant.
+    let pass = KernelRecheckPass::new();
+    assert_eq!(pass.classification(), PassClassification::SoundnessCritical);
+}
