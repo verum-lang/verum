@@ -179,14 +179,15 @@ impl KernelRecheck {
         func: &FunctionDecl,
     ) -> List<(Text, Result<(), KernelRecheckError>)> {
         let mut out: List<(Text, Result<(), KernelRecheckError>)> = List::new();
-        for param in func.params.iter() {
-            if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &param.kind {
-                walk_ast_type_for_recheck(ty, &func.name.name, "param", &mut out);
-            }
-        }
-        if let Maybe::Some(ret_ty) = &func.return_type {
-            walk_ast_type_for_recheck(ret_ty, &func.name.name, "return", &mut out);
-        }
+        recheck_signature_into(
+            &func.name.name,
+            func.params.iter(),
+            match &func.return_type {
+                Maybe::Some(t) => Some(t),
+                Maybe::None => None,
+            },
+            &mut out,
+        );
         // V4 (#191) — descend into the function body to surface
         // refinements declared in `let x: Int{...} = ...` bindings
         // and inside nested control-flow blocks. Real Verum code
@@ -204,6 +205,46 @@ impl KernelRecheck {
                 }
             }
         }
+        out
+    }
+
+    /// V6 (#200) — recheck a theorem / lemma / corollary
+    /// declaration. Same FunctionParam-shaped signature as
+    /// `recheck_function`; refinement types in params or return
+    /// type are walked through K-Refine-omega.
+    pub fn recheck_theorem(
+        theorem: &verum_ast::decl::TheoremDecl,
+    ) -> List<(Text, Result<(), KernelRecheckError>)> {
+        let mut out: List<(Text, Result<(), KernelRecheckError>)> = List::new();
+        recheck_signature_into(
+            &theorem.name.name,
+            theorem.params.iter(),
+            match &theorem.return_type {
+                Maybe::Some(t) => Some(t),
+                Maybe::None => None,
+            },
+            &mut out,
+        );
+        out
+    }
+
+    /// V6 (#200) — recheck an axiom declaration. Axioms can
+    /// carry refinement types in their parameter list and return
+    /// type (e.g., `axiom positive_succ(n: Nat{> 0}) -> Nat{> n}`);
+    /// these previously escaped K-rule checking entirely.
+    pub fn recheck_axiom(
+        axiom: &verum_ast::decl::AxiomDecl,
+    ) -> List<(Text, Result<(), KernelRecheckError>)> {
+        let mut out: List<(Text, Result<(), KernelRecheckError>)> = List::new();
+        recheck_signature_into(
+            &axiom.name.name,
+            axiom.params.iter(),
+            match &axiom.return_type {
+                Maybe::Some(t) => Some(t),
+                Maybe::None => None,
+            },
+            &mut out,
+        );
         out
     }
 
@@ -289,6 +330,32 @@ fn walk_ast_type_for_recheck(
             walk_ast_type_for_recheck(base, function_name, context_kind, out);
         }
         _ => {}
+    }
+}
+
+// =============================================================================
+// V6 — shared signature walker (function / theorem / axiom share the shape)
+// =============================================================================
+
+/// Walk the parameters and return type of a declaration, surfacing
+/// every refinement type to K-Refine-omega. Used by recheck_function,
+/// recheck_theorem, recheck_axiom — the three decls that share the
+/// `FunctionParam` + `Maybe<Type>` signature shape.
+fn recheck_signature_into<'a, I>(
+    decl_name: &Text,
+    params: I,
+    return_type: Option<&AstType>,
+    out: &mut List<(Text, Result<(), KernelRecheckError>)>,
+) where
+    I: Iterator<Item = &'a verum_ast::decl::FunctionParam>,
+{
+    for param in params {
+        if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &param.kind {
+            walk_ast_type_for_recheck(ty, decl_name, "param", out);
+        }
+    }
+    if let Some(ret_ty) = return_type {
+        walk_ast_type_for_recheck(ret_ty, decl_name, "return", out);
     }
 }
 

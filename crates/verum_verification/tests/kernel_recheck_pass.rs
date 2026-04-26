@@ -423,6 +423,168 @@ fn kernel_recheck_pass_walks_top_level_and_impl_methods_together() {
     assert!(pass.rejections().get(0).unwrap().as_str().contains("im_bad"));
 }
 
+// =============================================================================
+// V6 (#200) — descend into Module + Theorem/Lemma/Corollary/Axiom items
+// =============================================================================
+
+fn axiom_decl(name: &str, params: Vec<Type>, return_type: Maybe<Type>) -> verum_ast::decl::AxiomDecl {
+    let mut p_list: List<verum_ast::decl::FunctionParam> = List::new();
+    for ty in params {
+        p_list.push(regular_param(ty));
+    }
+    verum_ast::decl::AxiomDecl {
+        visibility: Visibility::Public,
+        name: ident(name),
+        generics: List::new(),
+        params: p_list,
+        return_type,
+        proposition: Heap::new(verum_ast::expr::Expr::new(
+            verum_ast::expr::ExprKind::Path(verum_ast::ty::Path::single(ident("true"))),
+            span(),
+        )),
+        generic_where_clause: Maybe::None,
+        meta_where_clause: Maybe::None,
+        attributes: List::new(),
+        span: span(),
+    }
+}
+
+fn theorem_decl(name: &str, params: Vec<Type>, return_type: Maybe<Type>) -> verum_ast::decl::TheoremDecl {
+    let mut p_list: List<verum_ast::decl::FunctionParam> = List::new();
+    for ty in params {
+        p_list.push(regular_param(ty));
+    }
+    verum_ast::decl::TheoremDecl {
+        visibility: Visibility::Public,
+        name: ident(name),
+        generics: List::new(),
+        params: p_list,
+        return_type,
+        requires: List::new(),
+        ensures: List::new(),
+        proposition: Heap::new(verum_ast::expr::Expr::new(
+            verum_ast::expr::ExprKind::Path(verum_ast::ty::Path::single(ident("true"))),
+            span(),
+        )),
+        generic_where_clause: Maybe::None,
+        meta_where_clause: Maybe::None,
+        proof: Maybe::None,
+        attributes: List::new(),
+        span: span(),
+    }
+}
+
+#[test]
+fn kernel_recheck_pass_walks_axiom_signatures() {
+    // axiom positive_overshoot(x: Int{p.box().box()}) -> Int
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let bad = refined_int(boxed);
+    let axiom = axiom_decl("positive_overshoot", vec![bad], Maybe::Some(Type::int(span())));
+    let mut module = module_with(vec![]);
+    module.items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Axiom(axiom),
+        span(),
+    ));
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success, "axiom modal overshoot must reject under V6");
+    assert_eq!(pass.rejections().len(), 1);
+    assert!(pass.rejections().get(0).unwrap().as_str().contains("positive_overshoot"));
+}
+
+#[test]
+fn kernel_recheck_pass_walks_theorem_signatures() {
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let bad = refined_int(boxed);
+    let thm = theorem_decl("plus_comm_modal", vec![bad], Maybe::Some(Type::int(span())));
+    let mut module = module_with(vec![]);
+    module.items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Theorem(thm),
+        span(),
+    ));
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success, "theorem modal overshoot must reject under V6");
+    assert!(pass.rejections().get(0).unwrap().as_str().contains("plus_comm_modal"));
+}
+
+#[test]
+fn kernel_recheck_pass_walks_lemma_via_theorem_decl() {
+    // Lemma uses TheoremDecl too (per ItemKind::Lemma(TheoremDecl)).
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let bad = refined_int(boxed);
+    let lemma = theorem_decl("helper_modal", vec![bad], Maybe::Some(Type::int(span())));
+    let mut module = module_with(vec![]);
+    module.items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Lemma(lemma),
+        span(),
+    ));
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success);
+    assert!(pass.rejections().get(0).unwrap().as_str().contains("helper_modal"));
+}
+
+#[test]
+fn kernel_recheck_pass_clean_axiom_passes() {
+    // Well-formed axiom with atomic refinement should pass.
+    let pred = path_expr("p");
+    let good = refined_int(pred);
+    let axiom = axiom_decl("safe_axiom", vec![good], Maybe::Some(Type::int(span())));
+    let mut module = module_with(vec![]);
+    module.items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Axiom(axiom),
+        span(),
+    ));
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(result.success);
+    assert_eq!(pass.rejections().len(), 0);
+    // The axiom did produce a cost entry (V6 records every walked decl).
+    assert!(result.costs.iter().any(|c| c.problem_size == 1));
+}
+
+#[test]
+fn kernel_recheck_pass_descends_into_nested_module_items() {
+    // Module containing one bad function — V6 must descend
+    // through ItemKind::Module and recheck the nested axiom/fn.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let bad = refined_int(boxed);
+    let bad_fn = make_function("nested_bad", vec![bad], Maybe::Some(Type::int(span())));
+    let mut nested_items: List<verum_ast::Item> = List::new();
+    nested_items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Function(bad_fn),
+        span(),
+    ));
+    let module_decl = verum_ast::decl::ModuleDecl {
+        visibility: Visibility::Public,
+        name: ident("inner"),
+        items: Maybe::Some(nested_items),
+        profile: Maybe::None,
+        features: Maybe::None,
+        contexts: List::new(),
+        span: span(),
+    };
+    let mut module = module_with(vec![]);
+    module.items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Module(module_decl),
+        span(),
+    ));
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success, "nested-module bad fn must be caught by V6");
+    assert!(pass.rejections().get(0).unwrap().as_str().contains("nested_bad"));
+}
+
 #[test]
 fn default_pipeline_kernel_recheck_result_visible() {
     // The KernelRecheckPass result is the second entry in the

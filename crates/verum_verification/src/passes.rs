@@ -233,6 +233,73 @@ impl KernelRecheckPass {
     ) {
         let func_start = Instant::now();
         let outcomes = KernelRecheck::recheck_function(func);
+        self.record_outcomes(&func.name.name, outcomes, level, func_start, costs);
+    }
+
+    /// V6 (#200) — dispatch K-rule recheck for a single ItemKind.
+    /// Walks Function (V0/V4), Impl-block methods (V5), Theorem /
+    /// Lemma / Corollary / Axiom signatures (V6), and Module
+    /// nested items (V6). Other ItemKind variants are no-ops —
+    /// they don't carry refinement types in syntactic positions
+    /// the kernel-recheck cares about.
+    fn recheck_one_item(
+        &mut self,
+        kind: &verum_ast::decl::ItemKind,
+        level: VerificationLevel,
+        costs: &mut List<VerificationCost>,
+    ) {
+        use verum_ast::decl::ItemKind as IK;
+        match kind {
+            IK::Function(func) => {
+                self.recheck_one_function(func, level, costs);
+            }
+            IK::Impl(impl_decl) => {
+                for impl_item in impl_decl.items.iter() {
+                    if let verum_ast::decl::ImplItemKind::Function(func) =
+                        &impl_item.kind
+                    {
+                        self.recheck_one_function(func, level, costs);
+                    }
+                }
+            }
+            IK::Theorem(d) | IK::Lemma(d) | IK::Corollary(d) => {
+                let started = Instant::now();
+                let outcomes = KernelRecheck::recheck_theorem(d);
+                self.record_outcomes(&d.name.name, outcomes, level, started, costs);
+            }
+            IK::Axiom(a) => {
+                let started = Instant::now();
+                let outcomes = KernelRecheck::recheck_axiom(a);
+                self.record_outcomes(&a.name.name, outcomes, level, started, costs);
+            }
+            IK::Module(m) => {
+                if let verum_common::Maybe::Some(items) = &m.items {
+                    for nested in items.iter() {
+                        self.recheck_one_item(&nested.kind, level, costs);
+                    }
+                }
+            }
+            // Other variants (Const / Static / Mount / Meta /
+            // Predicate / Context / ContextGroup / Layer /
+            // FFIBoundary / Tactic / View / ExternBlock /
+            // Pattern / Protocol) don't carry FunctionParam-shaped
+            // signatures or composite types in syntactic positions
+            // KernelRecheck visits today. If they later do, add
+            // dedicated arms here.
+            _ => {}
+        }
+    }
+
+    /// Common bookkeeping: record per-decl K-rule outcomes into
+    /// `costs` and accumulate failure labels into `self.rejections`.
+    fn record_outcomes(
+        &mut self,
+        decl_name: &Text,
+        outcomes: List<(Text, Result<(), crate::kernel_recheck::KernelRecheckError>)>,
+        level: VerificationLevel,
+        started: Instant,
+        costs: &mut List<VerificationCost>,
+    ) {
         let total = outcomes.len();
         let mut failures = 0usize;
         for (label, outcome) in outcomes.iter() {
@@ -242,13 +309,13 @@ impl KernelRecheckPass {
             }
         }
         costs.push(VerificationCost::new(
-            Text::from(func.name.as_str()),
+            decl_name.clone(),
             level,
-            func_start.elapsed(),
-            0,                  // smt_queries: kernel-recheck never calls SMT
-            failures == 0,      // success
-            false,              // timed_out: kernel walks are linear
-            total,              // problem_size: number of K-rule sites
+            started.elapsed(),
+            0,
+            failures == 0,
+            false,
+            total,
         ));
     }
 }
@@ -271,27 +338,7 @@ impl VerificationPass for KernelRecheckPass {
 
         let level = ctx.current_level();
         for item in &module.items {
-            match &item.kind {
-                ItemKind::Function(func) => {
-                    self.recheck_one_function(func, level, &mut costs);
-                }
-                // V5 (#192) — descend into impl blocks. Methods
-                // declared inside `implement Name { ... }` /
-                // `implement Trait for T { ... }` were previously
-                // invisible to KernelRecheckPass; refinement types
-                // in impl-method signatures or bodies escaped the
-                // kernel-recheck.
-                ItemKind::Impl(impl_decl) => {
-                    for impl_item in impl_decl.items.iter() {
-                        if let verum_ast::decl::ImplItemKind::Function(func) =
-                            &impl_item.kind
-                        {
-                            self.recheck_one_function(func, level, &mut costs);
-                        }
-                    }
-                }
-                _ => {}
-            }
+            self.recheck_one_item(&item.kind, level, &mut costs);
         }
 
         let success = self.rejections.is_empty();
