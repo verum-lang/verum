@@ -333,11 +333,29 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Create with preallocated capacity.
+    //
+    // Panics on allocation failure. For a fallible counterpart see
+    // `try_with_capacity`.
     public fn with_capacity(capacity: Int) -> Map<K, V> {
         let cap = capacity.next_power_of_two().max(INITIAL_CAPACITY);
         let mut map = Map.new();
         map.resize(cap);
         map
+    }
+
+    /// Fallible counterpart to `with_capacity`.
+    ///
+    /// Returns `Err(AllocError::OutOfMemory)` instead of panicking
+    /// when the allocator cannot satisfy the request. Use at trust
+    /// boundaries (FFI, untrusted-size config, large allocations
+    /// where OOM is recoverable).
+    public fn try_with_capacity(capacity: Int) -> Result<Map<K, V>, AllocError> {
+        let cap = capacity.next_power_of_two().max(INITIAL_CAPACITY);
+        let mut map = Map.new();
+        match map.try_resize(cap) {
+            Ok(()) => Ok(map),
+            Err(e) => Err(e),
+        }
     }
 
     /// Create a Map from a list of key-value pairs.
@@ -589,10 +607,24 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     // Insert key-value pair.
     // Returns old value if key was present.
+    //
+    // Panics on allocation failure (when growth is required). For a
+    // fallible counterpart see `try_insert`.
     public fn insert(&mut self, key: K, value: V) -> Maybe<V> {
         self.ensure_capacity();
         let hash = self.make_hash_val(key);
         self.insert_internal(key, value, hash)
+    }
+
+    /// Fallible counterpart to `insert`.
+    ///
+    /// Returns `Err(AllocError::OutOfMemory)` if the table needs to
+    /// grow and the allocator cannot satisfy the request. On Ok the
+    /// inner `Maybe<V>` is the previous value for `key` (if any).
+    public fn try_insert(&mut self, key: K, value: V) -> Result<Maybe<V>, AllocError> {
+        self.try_ensure_capacity()?;
+        let hash = self.make_hash_val(key);
+        Ok(self.insert_internal(key, value, hash))
     }
 
     /// Get an entry for in-place manipulation.
@@ -782,6 +814,9 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Reserves capacity for at least `additional` more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
+    ///
+    /// Panics on allocation failure. For a fallible counterpart see
+    /// `try_reserve`.
     public fn reserve(&mut self, additional: Int) {
         let needed = self.len + additional;
         // Account for load factor: need capacity such that
@@ -795,6 +830,24 @@ implement<K: Hash + Eq, V> Map<K, V> {
             }
             self.resize(new_cap);
         }
+    }
+
+    /// Fallible counterpart to `reserve`.
+    ///
+    /// Returns `Err(AllocError::OutOfMemory)` instead of panicking
+    /// when the allocator cannot satisfy the request. The map is
+    /// unchanged on failure.
+    public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
+        let needed = self.len + additional;
+        let min_cap = (needed * LOAD_FACTOR_DEN) / LOAD_FACTOR_NUM + 1;
+        if min_cap > self.cap {
+            let mut new_cap = if self.cap == 0 { INITIAL_CAPACITY } else { self.cap };
+            while new_cap < min_cap {
+                new_cap = new_cap * 2;
+            }
+            return self.try_resize(new_cap);
+        }
+        Ok(())
     }
 
     /// Shrinks the capacity as much as possible while maintaining the load factor.
@@ -1658,6 +1711,9 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Ensure capacity for insertion.
+    //
+    // Panics on allocation failure. For a fallible counterpart see
+    // `try_ensure_capacity`.
     fn ensure_capacity(&mut self) {
         if self.cap == 0 {
             self.resize(INITIAL_CAPACITY);
@@ -1674,6 +1730,26 @@ implement<K: Hash + Eq, V> Map<K, V> {
             };
             self.resize(new_cap);
         }
+    }
+
+    // Internal: fallible counterpart to `ensure_capacity`. Returns
+    // Err(AllocError::OutOfMemory) on alloc failure rather than
+    // panicking. Used by every try_<op> method that may grow.
+    fn try_ensure_capacity(&mut self) -> Result<Unit, AllocError> {
+        if self.cap == 0 {
+            return self.try_resize(INITIAL_CAPACITY);
+        }
+
+        let threshold = (self.cap * LOAD_FACTOR_NUM) / LOAD_FACTOR_DEN;
+        if self.len + self.tombstones >= threshold {
+            let new_cap = if self.len * 2 > self.cap {
+                self.cap * 2
+            } else {
+                self.cap
+            };
+            return self.try_resize(new_cap);
+        }
+        Ok(())
     }
 
     // Insert with known hash.
@@ -1729,21 +1805,49 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Resize hash table.
+    //
+    // Panics with descriptive message on allocation failure. For a
+    // fallible counterpart that returns Err(AllocError::OutOfMemory)
+    // instead of panicking, see `try_resize`.
     fn resize(&mut self, new_cap: Int) {
+        let size = new_cap * SLOT_SIZE;
+        let new_entries = unsafe {
+            alloc_zeroed(size, SLOT_ALIGN) as &unsafe Slot<K, V>
+        };
+        if new_entries.is_null() {
+            panic(f"Map.resize: allocator returned null for {size} bytes (new_cap={new_cap}, old_cap={self.cap})");
+        }
+        self.swap_in_table(new_entries, new_cap);
+    }
+
+    // Internal: fallible counterpart to `resize`. Returns
+    // Err(AllocError::OutOfMemory) on alloc failure rather than
+    // panicking. Load-bearing primitive for every try_<op> method.
+    fn try_resize(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
+        let size = new_cap * SLOT_SIZE;
+        let new_entries = unsafe {
+            alloc_zeroed(size, SLOT_ALIGN) as &unsafe Slot<K, V>
+        };
+        if new_entries.is_null() {
+            return Err(AllocError::OutOfMemory { requested: size });
+        }
+        self.swap_in_table(new_entries, new_cap);
+        Ok(())
+    }
+
+    // Internal: install `new_entries` as the live table, rehashing the
+    // current contents into it and deallocating the old table. Caller
+    // must guarantee `new_entries` is a non-null pointer to a zeroed
+    // buffer of `new_cap * SLOT_SIZE` bytes aligned to SLOT_ALIGN.
+    fn swap_in_table(&mut self, new_entries: &unsafe Slot<K, V>, new_cap: Int) {
         let old_entries = self.entries;
         let old_cap = self.cap;
 
-        // Allocate new table
-        let size = new_cap * SLOT_SIZE;
-        let align = 8;
-        self.entries = unsafe {
-            alloc_zeroed(size, align) as &unsafe Slot<K, V>
-        };
+        self.entries = new_entries;
         self.cap = new_cap;
         self.len = 0;
         self.tombstones = 0;
 
-        // Rehash old entries
         if old_cap > 0 {
             for i in range(0, old_cap) {
                 let entry = unsafe { &*old_entries.offset(i) };
@@ -1754,7 +1858,6 @@ implement<K: Hash + Eq, V> Map<K, V> {
                 }
             }
 
-            // Free old table
             unsafe {
                 dealloc(
                     old_entries as &unsafe Byte,

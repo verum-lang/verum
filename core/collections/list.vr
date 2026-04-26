@@ -72,7 +72,11 @@ implement<T> List<T> {
         }
     }
 
-    // Create list with preallocated capacity.
+    // Create list with preallocated capacity. Panics on OOM with
+    // the requested byte count attached so post-mortems can
+    // correlate the failure to a specific size. Use
+    // `try_with_capacity` on production paths that must degrade
+    // gracefully rather than crash.
     public fn with_capacity(capacity: Int) -> List<T> {
         if capacity == 0 {
             return List.new();
@@ -82,11 +86,41 @@ implement<T> List<T> {
             alloc(capacity * T.size, T.alignment) as &unsafe T
         };
 
+        if ptr.is_null() {
+            panic(f"List::with_capacity({capacity}) failed: requested {capacity * T.size} bytes");
+        }
+
         List {
             ptr: ptr,
             len: 0,
             cap: capacity,
         }
+    }
+
+    // Fallible counterpart to `with_capacity`. Returns
+    // `Err(AllocError::OutOfMemory)` instead of panicking when the
+    // allocator can't satisfy the request — for daemons / services
+    // that need to degrade rather than crash.
+    public fn try_with_capacity(capacity: Int) -> Result<List<T>, AllocError> {
+        if capacity == 0 {
+            return Ok(List.new());
+        }
+
+        let ptr = unsafe {
+            alloc(capacity * T.size, T.alignment) as &unsafe T
+        };
+
+        if ptr.is_null() {
+            return Err(AllocError::OutOfMemory {
+                requested: capacity * T.size,
+            });
+        }
+
+        Ok(List {
+            ptr: ptr,
+            len: 0,
+            cap: capacity,
+        })
     }
 
     // Create list from slice.
@@ -234,7 +268,8 @@ implement<T> List<T> {
     // Modification
     // =========================================================================
 
-    // Push element to end.
+    // Push element to end. Panics on OOM — use `try_push` when
+    // the operation must be recoverable.
     public fn push(&mut self, value: T) {
         if self.len == self.cap {
             self.grow();
@@ -243,6 +278,21 @@ implement<T> List<T> {
             ptr_write(self.ptr.offset(self.len), value);
         }
         self.len = self.len + 1;
+    }
+
+    // Fallible counterpart to push. Returns
+    // `Err(AllocError::OutOfMemory)` on growth failure — never
+    // mutates `self` in that case (the buffer pointer / len / cap
+    // are untouched if try_grow returns Err).
+    public fn try_push(&mut self, value: T) -> Result<Unit, AllocError> {
+        if self.len == self.cap {
+            try { self.try_grow()? };
+        }
+        unsafe {
+            ptr_write(self.ptr.offset(self.len), value);
+        }
+        self.len = self.len + 1;
+        Ok(())
     }
 
     // Pop element from end.
@@ -397,6 +447,7 @@ implement<T> List<T> {
     // =========================================================================
 
     // Reserve space for at least additional more elements.
+    // Panics on OOM — use `try_reserve` to handle the failure.
     public fn reserve(&mut self, additional: Int) {
         let required = self.len + additional;
         if required > self.cap {
@@ -404,12 +455,32 @@ implement<T> List<T> {
         }
     }
 
-    // Reserve exact capacity.
+    // Fallible counterpart to reserve. Returns
+    // `Err(AllocError::OutOfMemory)` if the underlying allocator
+    // can't grow the buffer; never partially expands.
+    public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
+        let required = self.len + additional;
+        if required > self.cap {
+            try { self.try_resize_buffer(required)? };
+        }
+        Ok(())
+    }
+
+    // Reserve exact capacity. Panics on OOM.
     public fn reserve_exact(&mut self, additional: Int) {
         let required = self.len + additional;
         if required > self.cap {
             self.resize_buffer(required);
         }
+    }
+
+    // Fallible counterpart to reserve_exact.
+    public fn try_reserve_exact(&mut self, additional: Int) -> Result<Unit, AllocError> {
+        let required = self.len + additional;
+        if required > self.cap {
+            try { self.try_resize_buffer(required)? };
+        }
+        Ok(())
     }
 
     // Shrink capacity to fit current length.
@@ -443,25 +514,75 @@ implement<T> List<T> {
         self.resize_buffer(new_cap);
     }
 
-    // Resize internal buffer.
+    // Fallible counterpart to grow. The load-bearing primitive for
+    // every `try_*` method on `List` — propagates OOM as
+    // `Err(AllocError::OutOfMemory)` instead of crashing.
+    fn try_grow(&mut self) -> Result<Unit, AllocError> {
+        let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
+        self.try_resize_buffer(new_cap)
+    }
+
+    // Resize internal buffer. Panics on OOM with the requested
+    // byte count attached. SOUNDNESS: previously this silently
+    // assigned NULL to `self.ptr` on alloc/realloc failure,
+    // turning the next `push` into a write-to-NULL segfault. The
+    // explicit null check + panic surfaces the failure at its
+    // origin rather than the deref site.
     fn resize_buffer(&mut self, new_cap: Int) {
         let new_size = new_cap * T.size;
         let align = T.alignment;
 
-        unsafe {
+        let new_ptr = unsafe {
             if self.cap == 0 {
-                self.ptr = alloc(new_size, align) as &unsafe T;
+                alloc(new_size, align) as &unsafe T
             } else {
                 let old_size = self.cap * T.size;
-                self.ptr = realloc(
+                realloc(
                     self.ptr as &unsafe Byte,
                     old_size,
                     new_size,
                     align,
-                ) as &unsafe T;
+                ) as &unsafe T
             }
+        };
+
+        if new_ptr.is_null() {
+            panic(f"List buffer resize failed: requested {new_size} bytes (capacity {new_cap})");
         }
+
+        self.ptr = new_ptr;
         self.cap = new_cap;
+    }
+
+    // Fallible counterpart to resize_buffer. Returns
+    // `Err(AllocError::OutOfMemory)` instead of panicking. Leaves
+    // `self.ptr` / `self.cap` unchanged on failure so the caller
+    // can retry with a smaller new_cap or surface the error.
+    fn try_resize_buffer(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
+        let new_size = new_cap * T.size;
+        let align = T.alignment;
+
+        let new_ptr = unsafe {
+            if self.cap == 0 {
+                alloc(new_size, align) as &unsafe T
+            } else {
+                let old_size = self.cap * T.size;
+                realloc(
+                    self.ptr as &unsafe Byte,
+                    old_size,
+                    new_size,
+                    align,
+                ) as &unsafe T
+            }
+        };
+
+        if new_ptr.is_null() {
+            return Err(AllocError::OutOfMemory { requested: new_size });
+        }
+
+        self.ptr = new_ptr;
+        self.cap = new_cap;
+        Ok(())
     }
 
     // Free internal buffer.
