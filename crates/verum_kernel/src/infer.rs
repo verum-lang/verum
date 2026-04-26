@@ -162,12 +162,21 @@ fn infer_inner(
         }
 
         // App-elimination: f : Pi (x:A) B,  a : A  ⇒  f a : B[x := a].
+        //
+        // V8 (#221) — domain-against-arg-type comparison uses
+        // `definitional_eq` (β-aware) instead of `structural_eq`
+        // (byte-identity). Pre-V8 a Π whose domain has a β-redex
+        // (e.g., `(λT:Type. T) Nat ≡_β Nat`) and an arg typed at
+        // `Nat` would FALSELY REJECT — the domain's redex never got
+        // reduced before the equality check. Mirrors the V8 #216
+        // PathTy fix; same monotone strengthening (only widens
+        // acceptance, never weakens).
         CoreTerm::App(f, arg) => {
             let f_ty = infer_inner(ctx,f, axioms, inductives)?;
             match f_ty {
                 CoreTerm::Pi { binder, domain, codomain } => {
                     let arg_ty = infer_inner(ctx,arg, axioms, inductives)?;
-                    if !structural_eq(&arg_ty, &domain) {
+                    if !crate::support::definitional_eq(&arg_ty, &domain) {
                         return Err(KernelError::TypeMismatch {
                             expected: shape_of(&domain),
                             actual: shape_of(&arg_ty),

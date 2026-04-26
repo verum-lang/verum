@@ -278,6 +278,71 @@ fn v8_pathty_accepts_beta_equivalent_carrier() {
     );
 }
 
+// =============================================================================
+// V8 (#221) — App-rule β-aware domain match
+// =============================================================================
+
+#[test]
+fn b221_app_accepts_beta_equivalent_domain() {
+    // Pre-V8 the App rule used structural_eq for the domain
+    // match. A Π whose domain has a β-redex (e.g., (λT. T) Nat
+    // ≡_β Nat) would falsely reject any arg typed at Nat.
+    //
+    // V8 lifts to definitional_eq → both sides normalised before
+    // comparison → application admitted.
+    let (ctx, mut reg) = empty();
+    let n = refl_axiom_at_nat(&mut reg, "n_app_beta");
+    // f : Π(_: (λT:Type. T) Nat). Nat
+    //   = (λu: Nat. u : Nat → Nat) wrapped via Lam over the
+    //     β-redex domain.
+    let beta_dom = CoreTerm::App(
+        Heap::new(CoreTerm::Lam {
+            binder: Text::from("T"),
+            domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            body: Heap::new(CoreTerm::Var(Text::from("T"))),
+        }),
+        Heap::new(nat_ind()),
+    );
+    let f = CoreTerm::Lam {
+        binder: Text::from("u"),
+        domain: Heap::new(beta_dom),
+        body: Heap::new(CoreTerm::Var(Text::from("u"))),
+    };
+    let app = CoreTerm::App(Heap::new(f), Heap::new(n));
+    let res = infer(&ctx, &app, &reg);
+    assert!(
+        res.is_ok(),
+        "V8 β-aware App admits β-equivalent domain: {:?}",
+        res,
+    );
+}
+
+#[test]
+fn b221_app_rejects_truly_different_domain() {
+    // Sanity: if the domain truly differs (carrier = Bool, arg
+    // type = Nat), the App rule still rejects — definitional_eq
+    // is monotone-strengthening, not unsound.
+    let (ctx, mut reg) = empty();
+    let n = refl_axiom_at_nat(&mut reg, "n_app_mismatch");
+    let bool_ind = CoreTerm::Inductive {
+        path: Text::from("Bool"),
+        args: List::new(),
+    };
+    // f : Bool → Bool — but we apply with a Nat-typed arg.
+    let f = CoreTerm::Lam {
+        binder: Text::from("b"),
+        domain: Heap::new(bool_ind),
+        body: Heap::new(CoreTerm::Var(Text::from("b"))),
+    };
+    let app = CoreTerm::App(Heap::new(f), Heap::new(n));
+    let res = infer(&ctx, &app, &reg);
+    assert!(
+        matches!(res, Err(KernelError::TypeMismatch { .. })),
+        "type-mismatched App must reject: {:?}",
+        res,
+    );
+}
+
 #[test]
 fn pathty_rejects_endpoint_at_different_type() {
     // PathTy<Nat>(zero, true_value) — true_value is at Bool, not
