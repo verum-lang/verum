@@ -19,7 +19,7 @@
 // side (per Theorem 137.T discrete-jump lemma). Verification at any
 // of these strata is *strictly weaker* than full-arithmetic
 // verification: the @verify(complexity_typed) strategy (deferred to
-// VFE-8 V1) is sound exactly because no L_Abs-realisation crosses the
+// VVA-8 V1) is sound exactly because no L_Abs-realisation crosses the
 // boundary.
 //
 // Each system file declares the framework + its proof obligations as

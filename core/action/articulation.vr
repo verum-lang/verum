@@ -2,7 +2,7 @@
 // core.action.articulation — Articulation type, OC-side counterpart of Enactment
 // =============================================================================
 //
-// VUVA §11.3 — every Articulation α has a canonical Enactment ε(α);
+// VVA §11.3 — every Articulation α has a canonical Enactment ε(α);
 // every Enactment carries the Articulation it enacts.  Together they
 // witness the adjunction α ⊣ ε that brides core.math.frameworks
 // (object-centric, OC) and core.action (dependency-centric, DC).

@@ -1,4 +1,4 @@
-//! Kernel-rule recheck pass — VFE-1/VFE-3/VFE-7 V0 wiring.
+//! Kernel-rule recheck pass — VVA-1/VVA-3/VVA-7 V0 wiring.
 //!
 //! This module bridges `verum_kernel`'s trusted-base K-rules
 //! (`check_eps_mu_coherence`, `check_universe_ascent`,
@@ -11,7 +11,7 @@
 //!
 //! Before this module landed, `verum_kernel` had **zero** downstream
 //! Rust dependents — the K-rules were tested in isolation but never
-//! invoked from any compiler phase. Per the VUVA architecture
+//! invoked from any compiler phase. Per the VVA architecture
 //! (§§9.2, 12.4) the kernel is the trusted base of the verification
 //! ladder; without it being invoked, the `@verify(certified)` /
 //! `@verify(coherent*)` strategies would silently degrade to

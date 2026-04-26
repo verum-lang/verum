@@ -858,7 +858,7 @@ fn format_type_simple(ty: &verum_ast::Type) -> String {
         verum_ast::TypeKind::Refined { base, predicate } => {
             let base_str = format_type_simple(base);
             let pred_str = format_refinement_predicate(&predicate.expr);
-            // Post VUVA §5, the sigma surface form (`x: T where P(x)`) lives
+            // Post VVA §5, the sigma surface form (`x: T where P(x)`) lives
             // here too — distinguished by an explicit binder on the predicate.
             match &predicate.binding {
                 verum_common::Maybe::Some(binder) => {

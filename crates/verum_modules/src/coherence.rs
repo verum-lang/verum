@@ -1460,7 +1460,7 @@ fn type_kind_to_string(kind: &verum_ast::TypeKind) -> Text {
         )),
 
         TypeKind::Refined { base, predicate } => {
-            // Refinement types carry all three surface forms (VUVA §5):
+            // Refinement types carry all three surface forms (VVA §5):
             // inline `T{pred}`, declarative `T where p`, and sigma
             // `x: T where p(x)`. Render the sigma form when the
             // predicate carries an explicit binder.

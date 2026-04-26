@@ -2,8 +2,8 @@
 // core.math.foundations.self_recognition — Verum proves its own architecture
 // =============================================================================
 //
-// VUVA Phase 5: "Full MSFS self-recognition". Per VUVA §16.5 + VFE §12
-// reconciliation table, this is the *precondition* for every VFE
+// VVA Phase 5: "Full MSFS self-recognition". Per VVA §16.5 + VVA §12
+// reconciliation table, this is the *precondition* for every VVA
 // extension. The Verum corpus formalises and verifies its own
 // architectural theorems through Verum's own verification stack:
 // the seven kernel rules (K-Refine, K-Univ, K-Pos, K-Norm, K-FwAx,
@@ -18,13 +18,13 @@
 // materialisation + kernel re-check.
 //
 // The self-recognition discipline:
-//   • Every kernel rule cited from VUVA §2.4–§2.6 / §4.4 / §7.3 has
+//   • Every kernel rule cited from VVA §2.4–§2.6 / §4.4 / §7.3 has
 //     a corresponding @theorem here.
 //   • The @framework(diakrisis, ...) annotation links it to the
 //     corpus theorem that is the rule's *external* foundation
 //     (Yanofsky / Berardi / 108.T / etc.).
 //   • Cross-validation: `verum audit --self-recognition` (CLI
-//     extension tracked under VFE §0.0) walks both surfaces and
+//     extension tracked under VVA §0.0) walks both surfaces and
 //     reports drift.
 //
 // This is the *deepest* test of Verum-as-foundation-neutral-host:
@@ -36,10 +36,10 @@ mount core.action.articulation.{Articulation, articulation_eq};
 mount core.action.enactments.{Enactment, alpha_of, epsilon, is_adjoint};
 
 // =============================================================================
-// K-Refine — VUVA §2.4 / §4.4 — Diakrisis T-2f* depth-stratification
+// K-Refine — VVA §2.4 / §4.4 — Diakrisis T-2f* depth-stratification
 // =============================================================================
 
-/// VUVA §4.4 K-Refine kernel rule (Diakrisis T-2f*):
+/// VVA §4.4 K-Refine kernel rule (Diakrisis T-2f*):
 ///
 ///     Γ ⊢ A : Type_n         Γ, x:A ⊢ P : Prop        dp(P) < dp(A) + 1
 ///     ─────────────────────────────────────────────────────────────────── (K-Refine)
@@ -125,7 +125,7 @@ public axiom k_fwax_prop_only_admission() -> Bool
 // K-Adj-Unit — α ⊣ ε unit identity
 // =============================================================================
 
-/// VUVA §11.3 K-Adj-Unit:
+/// VVA §11.3 K-Adj-Unit:
 ///
 ///     Γ ⊢ α : Articulation
 ///     ────────────────────────────────────── (K-Adj-Unit)
@@ -146,7 +146,7 @@ public axiom k_adj_unit_identity<A: Articulation>(alpha: A) -> Bool
 // K-Adj-Counit — α ⊣ ε counit identity
 // =============================================================================
 
-/// VUVA §11.3 K-Adj-Counit:
+/// VVA §11.3 K-Adj-Counit:
 ///
 ///     Γ ⊢ e : Enactment
 ///     ──────────────────────────────────────────────────────────── (K-Adj-Counit)
@@ -177,19 +177,19 @@ public axiom k_adj_counit_identity<E: Enactment>(e: E) -> Bool
 ///
 /// Self-recognition form: postulates that for every strategy pair
 /// (s_i, s_{i+1}) in the ladder, `nu(s_i) < nu(s_{i+1})` strictly.
-@framework(diakrisis, "Verification-ladder strict ν-monotonicity (VUVA §12)")
+@framework(diakrisis, "Verification-ladder strict ν-monotonicity (VVA §12)")
 public axiom ladder_nu_strict_monotonicity() -> Bool
     ensures true;
 
 // =============================================================================
-// Articulation hygiene — VUVA §13 NO-19
+// Articulation hygiene — VVA §13 NO-19
 // =============================================================================
 
-/// Articulation-hygiene table (VUVA §13.2): for every (Φ, κ, t)
+/// Articulation-hygiene table (VVA §13.2): for every (Φ, κ, t)
 /// articulation factorisation, the kernel certifies the hygiene
 /// invariant per NO-19 (no-overlap rule between articulation
 /// scopes). This is the "structural cleanliness" rule that prevents
 /// gauge-confusion across articulation boundaries.
-@framework(diakrisis, "Articulation hygiene NO-19 (VUVA §13)")
+@framework(diakrisis, "Articulation hygiene NO-19 (VVA §13)")
 public axiom articulation_hygiene_no_overlap() -> Bool
     ensures true;

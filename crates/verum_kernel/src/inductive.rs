@@ -12,7 +12,7 @@
 //! A failure surfaces as `KernelError::PositivityViolation` with a
 //! human-readable position string for diagnostic copy.
 //!
-//! VUVA spec §7.3 (`K-Pos`): for every constructor `C(t1, ..., tn) -> T`
+//! VVA spec §7.3 (`K-Pos`): for every constructor `C(t1, ..., tn) -> T`
 //! of an inductive type `T`, every recursive occurrence of `T` in any
 //! `ti` must appear strictly positively.
 //!
@@ -260,7 +260,7 @@ fn name_appears_in(target: &str, ty: &CoreTerm) -> bool {
     }
 }
 
-/// The strict-positivity walker for VUVA §7.3 `K-Pos`. Returns Ok iff
+/// The strict-positivity walker for VVA §7.3 `K-Pos`. Returns Ok iff
 /// the type name `target` appears only strictly positively in `ty`.
 ///
 /// The discipline:

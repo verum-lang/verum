@@ -21,7 +21,7 @@
 //!     AST-layer parser already rejects malformed `@enact(epsilon
 //!     = ...)` strings; R2 catches strings that slipped through
 //!     a refactor.
-//!   * **R3** (meta-classifier uniqueness) — Error. Per VUVA
+//!   * **R3** (meta-classifier uniqueness) — Error. Per VVA
 //!     §10.4.1 only one framework may play the meta-classifier
 //!     role per module-tree; a violation is a coordinate-system
 //!     conflict that the build cannot recover from.
@@ -172,7 +172,7 @@ pub fn validate_meta_classifier_uniqueness(
         rule: "R3",
         severity: HygieneSeverity::Error,
         message: Text::from(format!(
-            "multiple meta-classifier frameworks detected: {}. Per VUVA §10.4.1 only one \
+            "multiple meta-classifier frameworks detected: {}. Per VVA §10.4.1 only one \
              framework may play the meta-classifier role at a time; the others must be \
              coordinate-point frameworks.",
             names.join(", ")
@@ -279,7 +279,7 @@ pub struct HygieneRecheckPass {
     /// user packages with 2-3).
     meta_classifier_threshold: usize,
     /// V8 (#209, B8) — designated meta-classifier corpus, exempt
-    /// from R3 threshold counting. VUVA §10.4.1 mandates exactly
+    /// from R3 threshold counting. VVA §10.4.1 mandates exactly
     /// one corpus play the meta-classifier role; the designation
     /// is a project-level configuration item, not derived from
     /// axiom count alone. Pre-V8 the designated corpus was
@@ -294,7 +294,7 @@ pub struct HygieneRecheckPass {
     designated_meta_classifier: Option<Text>,
 }
 
-/// Default R3 threshold per VUVA §13 / `framework_hygiene.vr`.
+/// Default R3 threshold per VVA §13 / `framework_hygiene.vr`.
 pub const DEFAULT_META_CLASSIFIER_THRESHOLD: usize = 5;
 
 impl Default for HygieneRecheckPass {
@@ -326,7 +326,7 @@ impl HygieneRecheckPass {
     }
 
     /// V8 (#209, B8) — set the designated meta-classifier corpus.
-    /// That corpus is exempt from R3 threshold counting per VUVA
+    /// That corpus is exempt from R3 threshold counting per VVA
     /// §10.4.1: the designated corpus is *expected* to ship many
     /// foundational axioms; only undesignated corpora reaching
     /// the threshold count as candidates for the violation.
@@ -438,14 +438,14 @@ impl VerificationPass for HygieneRecheckPass {
             }
         }
 
-        // R3 — count meta-classifier candidates per VUVA §10.4.1.
+        // R3 — count meta-classifier candidates per VVA §10.4.1.
         // A corpus qualifies as a meta-classifier candidate when
         // it ships ≥ `meta_classifier_threshold` framework-
         // annotated declarations (default 5, configurable per
         // corpus per #203).
         //
         // V8 (#209, B8) — the designated meta-classifier corpus
-        // is exempt from this counting. VUVA §10.4.1 names the
+        // is exempt from this counting. VVA §10.4.1 names the
         // designated corpus as the legitimate occupant of the
         // meta-classifier role; treating it as a "candidate"
         // would let R3 fire against the corpus that's allowed

@@ -732,7 +732,7 @@ fn test_framework_attr_display_roundtrip() {
 }
 
 // ============================================================================
-// OWL 2 ATTRIBUTION FAMILY — VUVA §21.6 Phase 3 C8
+// OWL 2 ATTRIBUTION FAMILY — VVA §21.6 Phase 3 C8
 // ============================================================================
 //
 // Round-trip tests for every Owl2*Attr from typed.rs. Builds a generic
@@ -1069,7 +1069,7 @@ fn owl2_attrs_reject_wrong_attribute_name() {
 }
 
 // ============================================================================
-// QUANTITATIVE TYPE THEORY (Atkey QTT) — VUVA §7.6 Phase 3 C5 V1
+// QUANTITATIVE TYPE THEORY (Atkey QTT) — VVA §7.6 Phase 3 C5 V1
 // ============================================================================
 //
 // Round-trip tests for QuantityAttr. The attribute accepts five

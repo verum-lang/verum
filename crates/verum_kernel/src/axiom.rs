@@ -77,6 +77,18 @@ pub struct RegisteredAxiom {
     pub ty: CoreTerm,
     /// Framework attribution.
     pub framework: FrameworkId,
+    /// V8 (#227) — `(Fw, ν, τ)` coordinate per VVA §A.Z.2 +
+    /// Diakrisis 09-applications/02-canonical-nu-table.md. Used
+    /// by the K-Coord-Cite rule to gate cross-framework
+    /// citations. `None` (the V8 default) marks the axiom as
+    /// coordinate-unannotated — the K-Coord-Cite rule treats
+    /// such axioms as always-citable (preserves backwards
+    /// compat for axioms registered before V8 #227).
+    ///
+    /// `#[serde(default)]` keeps pre-V8 on-disk certificates
+    /// without the field deserialisable.
+    #[serde(default)]
+    pub coord: Option<crate::KernelCoord>,
     /// V8 (#223) — definitional content (transparent body).
     ///
     /// `None` (the V8 default) marks the entry as an **opaque
@@ -273,7 +285,50 @@ impl AxiomRegistry {
             SubsingletonRegime::UipPermitted
             | SubsingletonRegime::LegacyUnchecked => {}
         }
-        self.entries.push(RegisteredAxiom { name, ty, framework, body: None });
+        self.entries.push(RegisteredAxiom {
+            name,
+            ty,
+            framework,
+            coord: None,
+            body: None,
+        });
+        Ok(())
+    }
+
+    /// V8 (#227) — register a postulate **with** an explicit
+    /// `(Fw, ν, τ)` coordinate. Routed through
+    /// [`Self::register_with_regime`] under
+    /// [`SubsingletonRegime::ClosedPropositionOnly`] (the strict
+    /// production gate); after admission the entry's `coord`
+    /// field is populated for use by the K-Coord-Cite rule.
+    ///
+    /// Errors propagate from `register_with_regime` (duplicate
+    /// name, UIP shape, subsingleton, body-is-Prop). On
+    /// successful admission the registry is updated atomically.
+    pub fn register_with_coord(
+        &mut self,
+        name: Text,
+        ty: CoreTerm,
+        framework: FrameworkId,
+        coord: crate::KernelCoord,
+    ) -> Result<(), KernelError> {
+        // Reuse the strict admission gate so all soundness
+        // checks fire before we commit.
+        self.register_with_regime(
+            name.clone(),
+            ty,
+            framework,
+            SubsingletonRegime::ClosedPropositionOnly,
+        )?;
+        // Find the just-pushed entry (last) and attach the
+        // coord. The entries list is append-only via
+        // `register_with_regime`; the just-admitted axiom is
+        // therefore the tail.
+        if let Some(entry) = self.entries.iter_mut().rev().next() {
+            if entry.name == name {
+                entry.coord = Some(coord);
+            }
+        }
         Ok(())
     }
 
@@ -311,6 +366,7 @@ impl AxiomRegistry {
             name,
             ty,
             framework,
+            coord: None,
             body: Some(body),
         });
         Ok(())

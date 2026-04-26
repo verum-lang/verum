@@ -943,7 +943,7 @@ fn test_parse_type_generic_with_refinement() {
 
 #[test]
 fn test_parse_type_sigma() {
-    // Per VUVA §5 the sigma surface form parses to `TypeKind::Refined`
+    // Per VVA §5 the sigma surface form parses to `TypeKind::Refined`
     // with `predicate.binding = Some(name)`.
     let ty = parse_type("x: Int where x > 0");
     match ty.kind {

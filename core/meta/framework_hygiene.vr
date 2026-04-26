@@ -2,7 +2,7 @@
 // core.meta.framework_hygiene — compile-time discipline for @framework + @enact
 // =============================================================================
 //
-// VFE-Quality meta-programming layer. Uses Verum's compile-time meta
+// VVA-Quality meta-programming layer. Uses Verum's compile-time meta
 // infrastructure (`core.meta.attribute` + `core.meta.span`) to enforce
 // architectural cleanliness on the `@framework(name, citation)` and
 // `@enact(epsilon = "...")` declarations that ship across
@@ -41,7 +41,7 @@
 //     play the meta-classifier role per module-tree. The
 //     meta-classifier is identified structurally: it ships ≥ 5
 //     foundational axioms describing the (Fw, ν, τ) coordinate
-//     system. Per VUVA §10.4.1 architectural relationship, two
+//     system. Per VVA §10.4.1 architectural relationship, two
 //     meta-classifiers in one corpus would create a coordinate-system
 //     conflict.
 //
@@ -51,7 +51,7 @@
 //   • R6 — universe-level annotation matches stack_model expectation
 //
 // V2 will surface the @meta fns as `@meta fn` declarations once the
-// meta-execution surface lands per VUVA §11.5; this V0 ships them as
+// meta-execution surface lands per VVA §11.5; this V0 ships them as
 // regular stdlib helpers callable from tactic scripts.
 // =============================================================================
 
@@ -223,7 +223,7 @@ public fn validate_meta_classifier_uniqueness(
         }
         i = i + 1;
     }
-    msg = msg.concat(". Per VUVA §10.4.1 only one framework may play ")
+    msg = msg.concat(". Per VVA §10.4.1 only one framework may play ")
             .concat("the meta-classifier role at a time; the others must ")
             .concat("be coordinate-point frameworks.");
     Maybe.Some(hygiene_diagnostic(

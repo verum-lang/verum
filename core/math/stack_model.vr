@@ -1,5 +1,5 @@
 // =============================================================================
-// core.math.stack_model — (∞,2)-stack semantics + κ-universe tower (VFE-3)
+// core.math.stack_model — (∞,2)-stack semantics + κ-universe tower (VVA-3)
 // =============================================================================
 //
 // Operational realisation of the (∞,2)-stack model that underlies the
@@ -29,7 +29,7 @@
 //   • Trusted-boundary axioms for the four key 131.T sub-results +
 //     the truncation theorem.
 //
-// LOC budget: 3000 LOC stdlib total per VFE-3 V0 plan; ~200 LOC
+// LOC budget: 3000 LOC stdlib total per VVA-3 V0 plan; ~200 LOC
 // kernel rule (`K-Universe-Ascent`) deferred to V1 once kernel work
 // schedules.
 // =============================================================================

@@ -121,7 +121,7 @@ impl VerificationLevel {
             // pipeline — they collapse to the `Proof` level. The fine-grained
             // dispatch happens downstream via `VerifyStrategy`.
             "fast" | "quick" | "rapid" => Some(VerificationLevel::Proof),
-            // VFE-8 V0 — bounded-arithmetic verification still runs a
+            // VVA-8 V0 — bounded-arithmetic verification still runs a
             // proof-style discharge; routing happens via `VerifyStrategy`.
             "complexity_typed" | "complexity-typed" | "complexitytyped" => {
                 Some(VerificationLevel::Proof)
@@ -130,7 +130,7 @@ impl VerificationLevel {
             "certified" | "cross_validate" | "cross-validate" | "crossvalidate" => {
                 Some(VerificationLevel::Proof)
             }
-            // VFE-6 V1 — the three coherent variants always discharge
+            // VVA-6 V1 — the three coherent variants always discharge
             // through the proof pipeline. `coherent_runtime` additionally
             // emits a runtime ε-monitor; that emission decision is taken
             // by `VerifyStrategy::requires_runtime_epsilon_monitor` at the

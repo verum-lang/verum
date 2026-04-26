@@ -54,11 +54,11 @@ struct Cli {
     #[clap(short, long, global = true)]
     verbose: bool,
 
-    /// Print the VUVA (Verum Unified Verification Architecture)
-    /// version stamp and exit. Closes B14 (#212): VFE §0.0
+    /// Print the VVA (Verum Unified Verification Architecture)
+    /// version stamp and exit. Closes B14 (#212): VVA §0.0
     /// governance promised this surface but it was unobservable
-    /// pre-fix. The kernel constant `verum_kernel::VUVA_VERSION`
-    /// is the single source of truth — bump on every VFE-N
+    /// pre-fix. The kernel constant `verum_kernel::VVA_VERSION`
+    /// is the single source of truth — bump on every VVA-N
     /// kernel-rule acceptance.
     #[clap(long = "vuva-version")]
     vuva_version: bool,
@@ -887,19 +887,19 @@ enum Commands {
         /// Enumerate the ε-distribution (Actic / DC coordinate) of the
         /// corpus — the dual of `--framework-axioms`. Prints every
         /// `@enact(epsilon = "...")` marker grouped by ε-primitive
-        /// (VUVA §11.4). Exits non-zero if any malformed marker is
+        /// (VVA §11.4). Exits non-zero if any malformed marker is
         /// found (unknown primitive or missing `epsilon = ...` arg).
         #[clap(long)]
         epsilon: bool,
 
         /// Project the @framework markers to their MSFS coordinate
-        /// (Framework, ν, τ) per VUVA §10.4. Reads the same source as
+        /// (Framework, ν, τ) per VVA §10.4. Reads the same source as
         /// `--framework-axioms` and additionally annotates each
         /// framework with its Diakrisis ν-rank and intensional flag.
         #[clap(long)]
         coord: bool,
 
-        /// Articulation Hygiene audit (VUVA §13.3, F3): walk every type
+        /// Articulation Hygiene audit (VVA §13.3, F3): walk every type
         /// and function declaration, classify each self-referential
         /// surface form per the §13.2 hygiene table, and report the
         /// (Φ, κ, t) factorisation for each. Detects inductive,
@@ -908,7 +908,7 @@ enum Commands {
         #[clap(long)]
         hygiene: bool,
 
-        /// OWL 2 classification hierarchy audit (VUVA §21.10, F5):
+        /// OWL 2 classification hierarchy audit (VVA §21.10, F5):
         /// walk every Owl2*Attr in the project, build the
         /// classification graph (subclass closure + equivalence
         /// partition + disjointness pairs + property characteristics
@@ -1226,9 +1226,9 @@ fn main_inner() {
     // version stamp and exit cleanly without dispatching a
     // subcommand. Tooling integrations (CI, certificate emitters,
     // cross-tool replay matrix) read this single line as their
-    // VUVA-version source of truth.
+    // VVA-version source of truth.
     if cli.vuva_version {
-        println!("{}", verum_kernel::VUVA_VERSION);
+        println!("{}", verum_kernel::VVA_VERSION);
         process::exit(0);
     }
 

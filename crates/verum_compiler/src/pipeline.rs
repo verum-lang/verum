@@ -2716,7 +2716,7 @@ impl<'s> CompilationPipeline<'s> {
                     "  hint: pick exactly one of the file form (`<name>.vr`) \
                      or the directory form (`<name>/mod.vr`); having both makes \
                      declarations in the loser invisible at use sites and is \
-                     classified as `E_MODULE_PATH_COLLISION` per VUVA §15.5"
+                     classified as `E_MODULE_PATH_COLLISION` per VVA §15.5"
                 );
                 continue;
             }
@@ -2796,7 +2796,7 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
 
-                    // VUVA #155 — header validation at every
+                    // VVA #155 — header validation at every
                     // user-source parse_module site. The
                     // virtual_path is a PathBuf reflecting the
                     // logical source path; pass it through to the
@@ -3789,7 +3789,7 @@ impl<'s> CompilationPipeline<'s> {
                     "  hint: pick exactly one of the file form (`<name>.vr`) \
                      or the directory form (`<name>/mod.vr`); having both makes \
                      declarations in the loser invisible at use sites and is \
-                     classified as `E_MODULE_PATH_COLLISION` per VUVA §15.5"
+                     classified as `E_MODULE_PATH_COLLISION` per VVA §15.5"
                 );
                 continue;
             }
@@ -3830,7 +3830,7 @@ impl<'s> CompilationPipeline<'s> {
                     let export_table = Self::extract_all_exports(&module, module_id, &module_path);
                     module_info.exports = export_table;
 
-                    // VUVA #145 / MOD-MED-1 — validate `module foo;`
+                    // VVA #145 / MOD-MED-1 — validate `module foo;`
                     // headers against the filesystem. Emits warnings
                     // for dangling forward-decls
                     // (E_MODULE_HEADER_FORWARD_DECL_NO_SOURCE) and
@@ -4184,7 +4184,7 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // VUVA #155 — header validation at the parse_and_register
+        // VVA #155 — header validation at the parse_and_register
         // user-source path. Surfaces dangling forward-decls and
         // inline-vs-filesystem overlaps for files that don't go
         // through phase_parse (e.g. multi-source registration in
@@ -4644,7 +4644,7 @@ impl<'s> CompilationPipeline<'s> {
                         | "term"
                         | "net"
                         | "meta" | "cognitive"
-                        // VUVA §11.2 Actic-dual stdlib (Phase 5 E1).
+                        // VVA §11.2 Actic-dual stdlib (Phase 5 E1).
                         | "action"
                     );
                     let (resolved_path, base_dir) = if is_stdlib_import {
@@ -4760,7 +4760,7 @@ impl<'s> CompilationPipeline<'s> {
                             let cfg_evaluator = self.session.cfg_evaluator();
                             imported_module.items = cfg_evaluator.filter_items(&imported_module.items);
 
-                            // VUVA #155 — header validation at the
+                            // VVA #155 — header validation at the
                             // import-on-demand parse path. The
                             // imported module's filesystem path is
                             // `candidate`; pass it to the validator
@@ -5666,7 +5666,7 @@ impl<'s> CompilationPipeline<'s> {
             parse_time.as_millis()
         );
 
-        // VUVA #145 / MOD-MED-1 — validate module headers against
+        // VVA #145 / MOD-MED-1 — validate module headers against
         // the filesystem. Surfaces dangling forward declarations
         // (`module foo;` with no source file) and inline-vs-
         // filesystem overlaps (`module foo { … }` alongside an
@@ -8555,7 +8555,7 @@ impl<'s> CompilationPipeline<'s> {
             }
             TypeKind::Refined { base, predicate } => {
                 let base_text = self.type_to_text(base);
-                // Post VUVA §5 the sigma surface form lives here too (binder
+                // Post VVA §5 the sigma surface form lives here too (binder
                 // carried by the predicate); render it distinctly when bound.
                 match &predicate.binding {
                     verum_common::Maybe::Some(binder) => {

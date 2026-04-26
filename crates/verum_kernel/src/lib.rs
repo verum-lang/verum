@@ -65,19 +65,19 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use verum_common::{Heap, List, Maybe, Text};
 
-/// Verum Unified Verification Architecture (VUVA) version stamp.
+/// Verum Unified Verification Architecture (VVA) version stamp.
 ///
-/// Closes B14 (#212). VFE §0.0 governance promises *"Каждое VFE-N
-/// принятие — minor version bump VUVA"*; without a constant in code,
+/// Closes B14 (#212). VVA §0.0 governance promises *"Каждое VVA-N
+/// принятие — minor version bump VVA"*; without a constant in code,
 /// the version policy was unobservable. Tooling (CLI, certificate
 /// emitters, cross-tool replay matrix per task #90) keys behaviour
 /// on this constant.
 ///
-/// **Bump policy** (per VFE §0.0 versioning):
+/// **Bump policy** (per VVA §0.0 versioning):
 ///
 ///   * Major bump (`X` → `X+1`): backwards-incompatible changes to
 ///     [`CoreTerm`], [`KernelError`], or any `pub` kernel surface.
-///   * Minor bump (`X.Y` → `X.Y+1`): VFE-N kernel-rule acceptance,
+///   * Minor bump (`X.Y` → `X.Y+1`): VVA-N kernel-rule acceptance,
 ///     or any new optional `@require_extension` gating.
 ///   * Patch bump (`X.Y.Z` → `X.Y.Z+1`): bug fixes, soundness
 ///     tightening (e.g., the B4 saturation fix in commit 3b15c185),
@@ -87,7 +87,7 @@ use verum_common::{Heap, List, Maybe, Text};
 /// K-Universe-Ascent rule + V0/V1 K-Refine-omega rule shipped
 /// alongside the V1-V8 module split (#198) and B-series soundness
 /// fixes. Bump on every kernel-rule addition.
-pub const VUVA_VERSION: &str = "2.6.0";
+pub const VVA_VERSION: &str = "2.6.0";
 
 pub mod proof_tree;
 pub use proof_tree::{KernelProofNode, KernelRule, record_inference};
@@ -117,12 +117,12 @@ pub use inductive::{
 pub mod depth;
 pub use depth::{OrdinalDepth, check_refine_omega, m_depth, m_depth_omega};
 
-/// VFE-1 K-Eps-Mu kernel rule — split per #198. Hosts
+/// VVA-1 K-Eps-Mu kernel rule — split per #198. Hosts
 /// `check_eps_mu_coherence` with V0/V1/V2 staging.
 pub mod eps_mu;
 pub use eps_mu::check_eps_mu_coherence;
 
-/// VFE-3 K-Universe-Ascent kernel rule + UniverseTier — split per
+/// VVA-3 K-Universe-Ascent kernel rule + UniverseTier — split per
 /// #198. Hosts `UniverseTier` enum + `check_universe_ascent`.
 pub mod universe_ascent;
 pub use universe_ascent::{UniverseTier, check_universe_ascent};
@@ -170,5 +170,5 @@ pub use cert::{CERTIFICATE_SCHEMA_VERSION, SmtCertificate};
 /// Typing context + framework-axiom attribution — `Context` +
 /// `FrameworkId`. Split per #198 V7.
 pub mod ctx;
-pub use ctx::{Context, FrameworkId};
+pub use ctx::{Context, FrameworkId, KernelCoord, check_coord_cite};
 

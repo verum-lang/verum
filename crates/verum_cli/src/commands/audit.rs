@@ -658,7 +658,7 @@ pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
 ///
 /// Exits non-zero if any incompatible pair is found — the project's
 /// axiom bundle would derive False, breaking every theorem (per
-/// VUVA §4.5 and the framework-compat module's V0 catalogue).
+/// VVA §4.5 and the framework-compat module's V0 catalogue).
 ///
 /// V0 (this revision) reads conflicts from the static Rust matrix
 /// shipped at `crates/verum_verification/src/framework_compat.rs`.
@@ -1145,7 +1145,7 @@ fn print_framework_report(
 }
 
 // =============================================================================
-// ε-audit — `verum audit --epsilon` (VUVA §11.4 Phase 5 E3)
+// ε-audit — `verum audit --epsilon` (VVA §11.4 Phase 5 E3)
 //
 // Mirrors the `--framework-axioms` audit but for the DC (Actic) side of
 // the OC/DC duality. Enumerates every `@enact(epsilon = "...")` marker
@@ -1153,14 +1153,14 @@ fn print_framework_report(
 // ε-primitive, so a reviewer sees the DC coordinate of the corpus
 // parallel to the OC coordinate produced by `--framework-axioms`.
 //
-// Per VUVA §11.2 + §21 (OWL 2 ecosystem), the eight canonical primitives are
+// Per VVA §11.2 + §21 (OWL 2 ecosystem), the eight canonical primitives are
 //   ε_math, ε_compute, ε_observe, ε_prove,
 //   ε_decide, ε_translate, ε_construct, ε_classify
 // — see `core.action.primitives.Primitive`. Only these eight are
 // recognised. Unknown strings land in the `malformed` bucket with a
 // diagnostic suggesting the expected primitive set. ε_classify is the
 // catalogue extension for ontology classification / subsumption /
-// instance-check obligations introduced by VUVA §21 (OWL 2 V1).
+// instance-check obligations introduced by VVA §21 (OWL 2 V1).
 // =============================================================================
 
 /// One `@enact(...)` usage collected from the project AST.
@@ -1450,11 +1450,11 @@ fn print_epsilon_report_json(
 }
 
 // =============================================================================
-// MSFS-coord audit — `verum audit --coord` (VUVA §10.4 Phase 5 E4)
+// MSFS-coord audit — `verum audit --coord` (VVA §10.4 Phase 5 E4)
 //
 // Walks the same `@framework(name, "citation")` markers that `--framework-
 // axioms` enumerates, and projects each unique framework to its MSFS
-// coordinate (Framework, ν, τ) per VUVA §10.4. The (ν, τ) lookup mirrors
+// coordinate (Framework, ν, τ) per VVA §10.4. The (ν, τ) lookup mirrors
 // `core.theory_interop.coord::coord_of` for the standard six-pack — when
 // they drift, this is the canonical source for the CLI surface.
 // =============================================================================
@@ -1766,7 +1766,7 @@ fn print_coord_report_json(
 }
 
 // =============================================================================
-// Articulation Hygiene audit — `verum audit --hygiene` (VUVA §13.3, F3)
+// Articulation Hygiene audit — `verum audit --hygiene` (VVA §13.3, F3)
 //
 // Walks every type / function declaration in the project and classifies each
 // "self-X" surface form per the §13.2 hygiene table:
@@ -1962,7 +1962,7 @@ pub fn audit_hygiene() -> Result<()> {
 
 pub fn audit_hygiene_with_format(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Walking Articulation Hygiene factorisations (VUVA §13.2)");
+        ui::step("Walking Articulation Hygiene factorisations (VVA §13.2)");
     }
     let manifest_dir = Manifest::find_manifest_dir()?;
     let vr_files = discover_vr_files(&manifest_dir);
@@ -2016,7 +2016,7 @@ fn print_hygiene_report(
     entries: &[HygieneEntry],
 ) {
     println!();
-    println!("{}", "Articulation Hygiene factorisations (VUVA §13.2)".bold());
+    println!("{}", "Articulation Hygiene factorisations (VVA §13.2)".bold());
     println!("{}", "─".repeat(50).dimmed());
     println!(
         "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
@@ -2099,7 +2099,7 @@ fn print_hygiene_report_json(
 }
 
 // =============================================================================
-// OWL 2 classification audit — `verum audit --owl2-classify` (VUVA §21.10, F5)
+// OWL 2 classification audit — `verum audit --owl2-classify` (VVA §21.10, F5)
 //
 // Walks every Owl2*Attr in the project, builds the OWL 2 classification
 // graph (subclass edges, equivalence partitions, disjointness pairs,
@@ -2141,7 +2141,7 @@ pub fn audit_owl2_classify() -> Result<()> {
 
 pub fn audit_owl2_classify_with_format(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Computing OWL 2 classification hierarchy (VUVA §21.10)");
+        ui::step("Computing OWL 2 classification hierarchy (VVA §21.10)");
     }
     let manifest_dir = Manifest::find_manifest_dir()?;
     let vr_files = discover_vr_files(&manifest_dir);
@@ -2203,7 +2203,7 @@ fn print_owl2_report(
     violations: &BTreeSet<(Text, Text)>,
 ) {
     println!();
-    println!("{}", "OWL 2 classification hierarchy (VUVA §21.10)".bold());
+    println!("{}", "OWL 2 classification hierarchy (VVA §21.10)".bold());
     println!("{}", "─".repeat(50).dimmed());
     println!(
         "  Parsed {} .vr file(s), skipped {} unparseable file(s).",

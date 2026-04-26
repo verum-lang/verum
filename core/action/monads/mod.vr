@@ -1,5 +1,5 @@
 // =============================================================================
-// core.action.monads — concrete strong-monad implementations (VFE-9 V1)
+// core.action.monads — concrete strong-monad implementations (VVA-9 V1)
 // =============================================================================
 //
 // Concrete data-type-and-impl pairs for each effect declared in
@@ -15,7 +15,7 @@
 //     that compose under @verify(coherent_concurrent) per Theorem 17.C2;
 //   • the canonical non-commutative monad (`State`) that DOES NOT
 //     compose under coherent-concurrent without explicit
-//     synchronisation — used by VUVA §11.2 to demonstrate the gate.
+//     synchronisation — used by VVA §11.2 to demonstrate the gate.
 //
 // V1.5 will add `List`, `Probability`, `Exception`, `Io`. V2 will add
 // monad-laws verification through `@verify(formal)` instead of the
@@ -24,7 +24,7 @@
 // Each monad ships:
 //   - data type with the canonical Kleisli shape;
 //   - `pure` / `bind` / `strength` standalone functions
-//     (protocol-implementation form pending VUVA §11.5 protocol-impl
+//     (protocol-implementation form pending VVA §11.5 protocol-impl
 //     syntax landing for parameterised types);
 //   - three monad-law axioms (left identity / right identity /
 //     associativity).
@@ -34,6 +34,6 @@ public mount core.action.monads.pure;
 public mount core.action.monads.reader;
 public mount core.action.monads.writer;
 public mount core.action.monads.state;
-// VFE-Tier-A V0 — probabilistic + quantum effect classes.
+// VVA-Tier-A V0 — probabilistic + quantum effect classes.
 public mount core.action.monads.probability;
 public mount core.action.monads.quantum;

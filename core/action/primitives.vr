@@ -8,7 +8,7 @@
 // instance-check obligations that don't fit cleanly into the original
 // seven primitives).
 //
-// VUVA §21.3 routes every OWL 2 reasoning task through `@verify(...)` —
+// VVA §21.3 routes every OWL 2 reasoning task through `@verify(...)` —
 // `ε_classify` lets the @enact attribute carry the Actic dual coordinate
 // for the function performing that reasoning. Functions decorated with
 // `@enact(epsilon = "ε_classify")` are recognised by `verum audit
@@ -82,7 +82,7 @@ public fn is_translation(e: Primitive) -> Bool {
 /// True iff the primitive is an *ontology-classification* act —
 /// subsumption, instance check, classification hierarchy walk. The
 /// Diakrisis Actic catalogue extension that pairs with the OWL 2
-/// V1 ecosystem (VUVA §21).
+/// V1 ecosystem (VVA §21).
 public fn is_classification(e: Primitive) -> Bool {
     match e {
         EpsilonClassify => true,

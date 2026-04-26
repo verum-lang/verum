@@ -37,7 +37,7 @@ mount core.action.enactments.{Enactment};
 ///
 /// Operational form: every well-formed term has a finite or small-
 /// transfinite modal-depth bound, ensuring the K-Refine-omega kernel
-/// rule (deferred to VFE-7 V1) terminates on all input.
+/// rule (deferred to VVA-7 V1) terminates on all input.
 @framework(diakrisis, "Theorem 136.T (T-2f*** transfinite modal stratification)")
 public axiom transfinite_modal_stratification() -> Bool
     ensures true;
@@ -54,7 +54,7 @@ public axiom transfinite_modal_stratification() -> Bool
 /// ordinal `ω` on the full-arithmetic side).
 ///
 /// Operational consequence: `@verify(complexity_typed)` (deferred to
-/// VFE-8 V1) is sound — bounded-arithmetic verification is rigorously
+/// VVA-8 V1) is sound — bounded-arithmetic verification is rigorously
 /// weaker than full-arithmetic verification, with the boundary
 /// witnessed at ν = ω.
 @framework(diakrisis, "Theorem 137.T (weak-AFN-T: bounded-arithmetic stratum is sterile)")
@@ -89,7 +89,7 @@ public axiom epsilon_invariant_infinity_infinity() -> Bool
 /// ω²-iteration in the effective topos with σ/π-morphism pair
 /// satisfying the AFA-analogue bisimulation (Aczel-Capretta).
 ///
-/// Operational form: `verify_autopoiesis(e)` (deferred to VFE-5 V1)
+/// Operational form: `verify_autopoiesis(e)` (deferred to VVA-5 V1)
 /// can be discharged for any concrete enactment `e` whose activation
 /// rank meets the autopoietic threshold, by exhibiting the witness.
 /// V1 ships the witness construction; this V0 axiom records its

@@ -29,7 +29,7 @@
 //   (b) Cut-elimination should be bounded-depth (default 1000 steps)
 //       to give predictable termination; divergent computations
 //       return UNKNOWN verdicts. Bound is configurable per
-//       VUVA §13.6 (Ludics caveat).
+//       VVA §13.6 (Ludics caveat).
 //
 // Memory budget: ≤ 100 MB for typical proofs; UHM-scale corpora (223
 // theorems) may need optimization tracked separately.

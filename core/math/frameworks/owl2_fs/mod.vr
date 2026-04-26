@@ -1,5 +1,5 @@
 // =============================================================================
-// owl2_fs — OWL 2 Functional-Style Syntax framework axiom package (VUVA §21)
+// owl2_fs — OWL 2 Functional-Style Syntax framework axiom package (VVA §21)
 // =============================================================================
 //
 // Verum's trusted boundary for OWL 2 Direct Semantics.  Encodes the
@@ -38,15 +38,15 @@
 //   - `verum audit --coord` projects owl2_fs to ν=1 (DL-decidable);
 //   - `verum audit --framework-axioms` enumerates the OWL 2
 //     dependency footprint of any corpus;
-//   - downstream `OwlAttr` family (VUVA C8) can reference axioms
+//   - downstream `OwlAttr` family (VVA C8) can reference axioms
 //     by name without waiting on body completion;
-//   - cross-framework bridges (VUVA C7b, F6) can be authored
+//   - cross-framework bridges (VVA C7b, F6) can be authored
 //     against the named operators.
 //
-// V2 ships HOL bodies + SMT routing per VUVA §21.5.
+// V2 ships HOL bodies + SMT routing per VVA §21.5.
 //
 // References:
-//   - VUVA spec §21       — `docs/architecture/verification-architecture.md`
+//   - VVA spec §21       — `docs/architecture/verification-architecture.md`
 //   - Shkotin 2019        — `internal/OWL2.DS2HOL.pdf`
 //   - W3C OWL 2 DS Rec    — https://www.w3.org/TR/owl2-semantics/
 //   - W3C OWL 2 FS Rec    — https://www.w3.org/TR/owl2-syntax/

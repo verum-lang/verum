@@ -349,7 +349,7 @@ impl SmtBackendSwitcher {
                 self.solve(assertions)
             }
             VerifyStrategy::ComplexityTyped => {
-                // ComplexityTyped (VFE-8 V0): bounded-arithmetic obligations
+                // ComplexityTyped (VVA-8 V0): bounded-arithmetic obligations
                 // are routed through the capability system; the chosen
                 // backend filters by the V_0 / V_1 / S^1_2 / V_NP / V_PH /
                 // IΔ_0 stratum that the user pinned at the pragma layer.
@@ -384,7 +384,7 @@ impl SmtBackendSwitcher {
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::CoherentStatic => {
-                // CoherentStatic (VFE-6 V1 weak): α-side discharged
+                // CoherentStatic (VVA-6 V1 weak): α-side discharged
                 // through the certified pipeline (cross-validation +
                 // certificate); ε-side is the symbolic ε-claim attached
                 // at @enact and is checked statically without an extra
@@ -393,7 +393,7 @@ impl SmtBackendSwitcher {
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::CoherentRuntime => {
-                // CoherentRuntime (VFE-6 V1 hybrid): α-side is the same
+                // CoherentRuntime (VVA-6 V1 hybrid): α-side is the same
                 // certified path as CoherentStatic; the ε-side is wired
                 // to a runtime monitor (`core.action.coherence_monitor`)
                 // so no additional compile-time SMT round is needed for
@@ -403,7 +403,7 @@ impl SmtBackendSwitcher {
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::Coherent => {
-                // Coherent (VFE-6 V1 strict): bidirectional α/ε check.
+                // Coherent (VVA-6 V1 strict): bidirectional α/ε check.
                 // Both axes are discharged at compile time, both
                 // certificates are kernel-rechecked. Portfolio mode
                 // because the ε-side benefits from race semantics

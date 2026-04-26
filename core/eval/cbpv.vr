@@ -131,3 +131,232 @@ public fn cbpv_is_canonical(t: CbpvTerm) -> Bool {
         _ => false,
     }
 }
+
+// =============================================================================
+// 4. Free-variable analysis
+// =============================================================================
+
+/// Does `name` occur as a FREE variable in `t` — not bound by an
+/// enclosing `Lam param` or `SeqTo binder`? Required by capture-
+/// avoiding substitution to decide when α-renaming is necessary.
+public fn cbpv_occurs_free(t: CbpvTerm, name: Text) -> Bool {
+    match t {
+        CbpvTerm.Var { name: n } => n == name,
+        CbpvTerm.Lam { param, body } => {
+            if param == name {
+                false
+            } else {
+                cbpv_occurs_free(*body, name)
+            }
+        },
+        CbpvTerm.Thunk { inner } => cbpv_occurs_free(*inner, name),
+        CbpvTerm.Return { value } => cbpv_occurs_free(*value, name),
+        CbpvTerm.SeqTo { producer, binder, body } => {
+            if cbpv_occurs_free(*producer, name) {
+                true
+            } else if binder == name {
+                false
+            } else {
+                cbpv_occurs_free(*body, name)
+            }
+        },
+        CbpvTerm.Force { value } => cbpv_occurs_free(*value, name),
+        CbpvTerm.App { func, arg } =>
+            cbpv_occurs_free(*func, name) || cbpv_occurs_free(*arg, name),
+    }
+}
+
+/// Generate a fresh variable name based on `base` that does not
+/// occur free in `t1` or `t2`. Same convention as
+/// `core.control.continuation.cc_fresh_name`: appends `'`
+/// repeatedly. The function terminates because both inputs have
+/// finite free-variable sets.
+fn cbpv_fresh_name(base: Text, t1: CbpvTerm, t2: CbpvTerm) -> Text {
+    let mut name = base;
+    while cbpv_occurs_free(t1, name) || cbpv_occurs_free(t2, name) {
+        name = name + "'";
+    }
+    name
+}
+
+// =============================================================================
+// 5. Capture-avoiding substitution
+// =============================================================================
+
+/// Substitute `from` with `to` everywhere `from` appears free in
+/// `t`. Capture-avoiding: when descending under a binder
+/// (`Lam.param`, `SeqTo.binder`) that would capture a free variable
+/// of `to`, the binder is α-renamed to a fresh name first. This
+/// matches the convention established by
+/// `core.control.continuation.cc_substitute`.
+public fn cbpv_substitute(t: CbpvTerm, from: Text, to: CbpvTerm) -> CbpvTerm {
+    match t {
+        CbpvTerm.Var { name } => {
+            if name == from { to } else { CbpvTerm.Var { name } }
+        },
+        CbpvTerm.Lam { param, body } => {
+            if param == from {
+                // `from` is shadowed under this binder.
+                CbpvTerm.Lam { param, body }
+            } else if cbpv_occurs_free(to, param) {
+                let fresh = cbpv_fresh_name(param, *body, to);
+                let renamed = cbpv_substitute(*body, param, cbpv_var(fresh));
+                cbpv_lam(fresh, cbpv_substitute(renamed, from, to))
+            } else {
+                cbpv_lam(param, cbpv_substitute(*body, from, to))
+            }
+        },
+        CbpvTerm.Thunk { inner } =>
+            cbpv_thunk(cbpv_substitute(*inner, from, to)),
+        CbpvTerm.Return { value } =>
+            cbpv_return(cbpv_substitute(*value, from, to)),
+        CbpvTerm.SeqTo { producer, binder, body } => {
+            let new_producer = cbpv_substitute(*producer, from, to);
+            if binder == from {
+                // `from` is shadowed inside the body.
+                CbpvTerm.SeqTo {
+                    producer: Heap(new_producer),
+                    binder,
+                    body,
+                }
+            } else if cbpv_occurs_free(to, binder) {
+                let fresh = cbpv_fresh_name(binder, *body, to);
+                let renamed = cbpv_substitute(*body, binder, cbpv_var(fresh));
+                cbpv_seq_to(new_producer, fresh, cbpv_substitute(renamed, from, to))
+            } else {
+                cbpv_seq_to(new_producer, binder, cbpv_substitute(*body, from, to))
+            }
+        },
+        CbpvTerm.Force { value } =>
+            cbpv_force(cbpv_substitute(*value, from, to)),
+        CbpvTerm.App { func, arg } =>
+            cbpv_app(
+                cbpv_substitute(*func, from, to),
+                cbpv_substitute(*arg, from, to),
+            ),
+    }
+}
+
+// =============================================================================
+// 6. Small-step reduction
+// =============================================================================
+
+/// Outcome of one reduction attempt. The two variants always
+/// return the term back so the caller can keep iterating without
+/// having to clone the input — `CbpvTerm` is an ADT whose Heap<T>
+/// children make Clone non-trivial, and threading ownership is
+/// the established convention in this module.
+public type CbpvStep is
+    /// Reduction fired; `next` is the term after the step.
+    | Stepped { next: CbpvTerm }
+    /// No redex anywhere. `term` is the unchanged input — normal form.
+    | Normal { term: CbpvTerm };
+
+/// One small-step reduction in left-to-right call-by-push-value
+/// evaluation order:
+///
+/// ```text
+///     force (thunk C)        ↦ C                   (force-thunk)
+///     return V to x. C       ↦ C[x := V]           (sequence-bind)
+///     (λx. C) V              ↦ C[x := V]           (β)
+/// ```
+///
+/// Reduction looks beneath congruences (under `force`, under the
+/// producer side of `SeqTo`, under `App` operands) so the
+/// reduction is a confluent rewrite system on closed terms — not
+/// just a top-level rewrite.
+public fn cbpv_step(t: CbpvTerm) -> CbpvStep {
+    match t {
+        // force (thunk C)  ↦  C
+        CbpvTerm.Force { value } => {
+            match *value {
+                CbpvTerm.Thunk { inner } => CbpvStep.Stepped { next: *inner },
+                v => match cbpv_step(v) {
+                    CbpvStep.Stepped { next } =>
+                        CbpvStep.Stepped { next: cbpv_force(next) },
+                    CbpvStep.Normal { term } =>
+                        CbpvStep.Normal { term: cbpv_force(term) },
+                },
+            }
+        },
+        // return V to x. C  ↦  C[x := V]
+        CbpvTerm.SeqTo { producer, binder, body } => {
+            match *producer {
+                CbpvTerm.Return { value } =>
+                    CbpvStep.Stepped {
+                        next: cbpv_substitute(*body, binder, *value),
+                    },
+                p => match cbpv_step(p) {
+                    CbpvStep.Stepped { next } =>
+                        CbpvStep.Stepped {
+                            next: cbpv_seq_to(next, binder, *body),
+                        },
+                    CbpvStep.Normal { term } =>
+                        CbpvStep.Normal {
+                            term: cbpv_seq_to(term, binder, *body),
+                        },
+                },
+            }
+        },
+        // (λx. body) V  ↦  body[x := V]
+        CbpvTerm.App { func, arg } => {
+            match *func {
+                CbpvTerm.Lam { param, body } =>
+                    CbpvStep.Stepped {
+                        next: cbpv_substitute(*body, param, *arg),
+                    },
+                f => match cbpv_step(f) {
+                    CbpvStep.Stepped { next } =>
+                        CbpvStep.Stepped { next: cbpv_app(next, *arg) },
+                    CbpvStep.Normal { term: f_norm } =>
+                        match cbpv_step(*arg) {
+                            CbpvStep.Stepped { next: a_next } =>
+                                CbpvStep.Stepped {
+                                    next: cbpv_app(f_norm, a_next),
+                                },
+                            CbpvStep.Normal { term: a_norm } =>
+                                CbpvStep.Normal {
+                                    term: cbpv_app(f_norm, a_norm),
+                                },
+                        },
+                },
+            }
+        },
+        CbpvTerm.Return { value } => match cbpv_step(*value) {
+            CbpvStep.Stepped { next } =>
+                CbpvStep.Stepped { next: cbpv_return(next) },
+            CbpvStep.Normal { term } =>
+                CbpvStep.Normal { term: cbpv_return(term) },
+        },
+        // Values + variables are normal forms in their syntactic
+        // position.
+        normal => CbpvStep.Normal { term: normal },
+    }
+}
+
+/// Drive [`cbpv_step`] to a fixed point with a hard step budget.
+/// `gas` bounds the number of steps to guarantee termination on
+/// inputs with non-terminating reduction (e.g. the CBPV
+/// ω = thunk (force x) trick).
+///
+/// Returns `(final, steps)` where `steps` is the number of
+/// reduction steps actually fired. `steps < gas` means a normal
+/// form was reached; `steps == gas` means the budget was
+/// exhausted and `final` is partially reduced.
+public fn cbpv_normalise(t: CbpvTerm, gas: Int) -> (CbpvTerm, Int) {
+    let mut current = t;
+    let mut steps: Int = 0;
+    while steps < gas {
+        match cbpv_step(current) {
+            CbpvStep.Stepped { next } => {
+                current = next;
+                steps = steps + 1;
+            },
+            CbpvStep.Normal { term } => {
+                current = term;
+                break;
+            },
+        }
+    }
+    (current, steps)
+}

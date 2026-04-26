@@ -720,7 +720,7 @@ pub enum KernelRule {
     // §4.4a.5 SMT + Axiom
     KSmt,
     KFwAx,
-    // §4.4a.6 Diakrisis VFE
+    // §4.4a.6 Diakrisis VVA
     KEpsMu,
     KUniverseAscent,
     KEpsilonOf,

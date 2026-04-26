@@ -13,6 +13,7 @@ pub mod file;
 pub mod fmt;
 pub mod hooks;
 pub mod init;
+pub mod lex_mask;
 pub mod lint;
 pub mod lint_baseline;
 pub mod lint_cache;

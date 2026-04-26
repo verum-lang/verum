@@ -175,7 +175,7 @@ public axiom goldilocks_activity_range() -> Bool ensures true;
 ///     Design ≃ Perf(α_linear),
 ///     Desseins ≃ 2-cells in >>·<<.
 ///
-/// Operational content lives in `core.action.ludics` (VFE-10); this
+/// Operational content lives in `core.action.ludics` (VVA-10); this
 /// axiom records the catalogue boundary for trusted-boundary audit.
 @framework(diakrisis, "Theorem 120.T (Design ≃ Perf(α_linear); see core.action.ludics)")
 public axiom ludics_performance_equivalence_catalogue() -> Bool ensures true;
@@ -189,7 +189,7 @@ public axiom ludics_performance_equivalence_catalogue() -> Bool ensures true;
 ///
 ///     ⟦φ⟧_BHK = ε(α_φ).
 ///
-/// Operational content lives in `core.proof.bhk` (VFE-5); this axiom
+/// Operational content lives in `core.proof.bhk` (VVA-5); this axiom
 /// records the catalogue boundary.
 @framework(diakrisis, "Theorem 121.T (⟦φ⟧_BHK = ε(α_φ); see core.proof.bhk)")
 public axiom bhk_eq_epsilon_semantics_catalogue() -> Bool ensures true;

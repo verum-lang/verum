@@ -2085,7 +2085,7 @@ impl ToTokens for Type {
             }
 
             TypeKind::Refined { base, predicate } => {
-                // Post VUVA §5 the sigma surface form lives on Refined with
+                // Post VVA §5 the sigma surface form lives on Refined with
                 // `predicate.binding = Some(name)` — emit the sigma form when
                 // the binder is present, the inline `T{pred}` form otherwise.
                 match &predicate.binding {

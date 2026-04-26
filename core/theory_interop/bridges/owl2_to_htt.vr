@@ -1,5 +1,5 @@
 // =============================================================================
-// owl2_to_htt — canonical bridge owl2_fs → lurie_htt (VUVA §21.7 / C7b)
+// owl2_to_htt — canonical bridge owl2_fs → lurie_htt (VVA §21.7 / C7b)
 // =============================================================================
 //
 // Phase 3b extension: every OWL 2 Direct-Semantics operator from the

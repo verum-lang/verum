@@ -1,17 +1,17 @@
 // =============================================================================
-// core.theory_interop.coord — VUVA §10.2 obstruction verdict + §10.4 MSFS coord
+// core.theory_interop.coord — VVA §10.2 obstruction verdict + §10.4 MSFS coord
 // =============================================================================
 //
 // Lightweight, stdlib-grade companion to core.theory_interop.core: turns the
 // numeric obstruction Obs(F) returned by Kan-extension translation into the
-// VUVA §10.2 verdict enum, and projects an Articulation to its MSFS
+// VVA §10.2 verdict enum, and projects an Articulation to its MSFS
 // coordinate (framework, ν, τ) per §10.4.
 //
 // Kept deliberately small and free of category-theoretic dependencies so it
 // can be `mount`-ed by audit tooling and frontend integrations without
 // pulling in core.math.{kan_extension, infinity_topos}.
 //
-// VUVA §10.4 demands ν ∈ Ordinal (countable). Earlier MVP collapsed ν to
+// VVA §10.4 demands ν ∈ Ordinal (countable). Earlier MVP collapsed ν to
 // `Int`, which silently dropped the transfinite ω-stratum used by
 // lurie_htt / schreiber_dcct / baez_dolan etc. This module ships a faithful
 // (omega_coefficient, finite_offset) encoding so the lookup table can
@@ -199,7 +199,7 @@ public fn msfs_coord(framework: Text, ordinal: Ordinal, tau: Bool) -> MsfsCoord 
     }
 }
 
-/// Lookup table for the VUVA standard six-pack (§6.2) + the neutral Actic
+/// Lookup table for the VVA standard six-pack (§6.2) + the neutral Actic
 /// articulation; user-defined frameworks fall through to (0, intensional)
 /// until a project-level `register_framework_coord` mechanism lands.
 ///
@@ -254,7 +254,7 @@ fn known_tau(framework_name: Text) -> Bool {
     true
 }
 
-/// MSFS coordinate of an articulation (VUVA §10.4):
+/// MSFS coordinate of an articulation (VVA §10.4):
 ///   coord(α) = (α.framework, ν(α), τ(intensional(α)))
 public fn coord_of(alpha: Articulation) -> MsfsCoord {
     MsfsCoord {
