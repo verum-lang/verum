@@ -307,8 +307,14 @@ extern {
     // Sockets
     // =========================================================================
 
-    /// Create socket
-    fn socket(domain: Int, socket_type: Int, protocol: Int) -> Int;
+    /// Create socket. Returns C `int` (32-bit) — declared as `Int32`
+    /// rather than `Int` so the AOT extern-call lowering picks the
+    /// i32 return-type at the LLVM IR level. With `Int` (=i64) the
+    /// AArch64 call site reads x0 as 64-bit and inherits whatever
+    /// libSystem's epilogue left in the upper 32 bits — typically
+    /// garbage that flips a small positive fd into a "negative" i64
+    /// and trips the `< 0` error path. Tracked under #108.
+    fn socket(domain: Int, socket_type: Int, protocol: Int) -> Int32;
 
     /// Bind socket
     fn bind(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int;
@@ -1623,13 +1629,8 @@ public fn safe_socket(domain: Int, sock_type: Int, protocol: Int) -> Result<File
     // wrongly trip the `< 0` error path. Manually sign-extend via bit
     // ops since `as Int32 as Int` doesn't reach AOT codegen as a
     // sign-extension (#108).
-    let raw = unsafe { socket(domain, sock_type, protocol) };
-    let lo32 = raw & 0xFFFFFFFF;
-    let result = if (lo32 & 0x80000000) != 0 {
-        lo32 - 0x100000000
-    } else {
-        lo32
-    };
+    let raw_i32: Int32 = unsafe { socket(domain, sock_type, protocol) };
+    let result = raw_i32 as Int;
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
