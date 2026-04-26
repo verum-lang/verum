@@ -243,3 +243,94 @@ public fn lin_is_nnf(f: LinForm) -> Bool {
         LinForm.Zero => true,
     }
 }
+
+// =============================================================================
+// 5. Structural equality + size
+// =============================================================================
+
+/// Structural equality on linear-logic formulas.
+///
+/// LinForm has no binders, so this is a pure recursive walk over
+/// the constructor tree. Two formulas compare equal iff every
+/// constructor matches and the leaf atoms / units are identical.
+///
+/// Note: this is *syntactic* equality. Two formulas may be
+/// equivalent under the linear-logic proof theory yet differ
+/// here (e.g. `A ⊗ (B ⊗ C)` vs `(A ⊗ B) ⊗ C`). For semantic
+/// equivalence pass through `lin_to_nnf` first and rely on the
+/// canonical shape produced there.
+public fn lin_eq(a: LinForm, b: LinForm) -> Bool {
+    match (a, b) {
+        (LinForm.Atom { name: na }, LinForm.Atom { name: nb }) => na == nb,
+        (LinForm.MTensor { left: la, right: ra },
+         LinForm.MTensor { left: lb, right: rb }) =>
+            lin_eq(*la, *lb) && lin_eq(*ra, *rb),
+        (LinForm.Par { left: la, right: ra },
+         LinForm.Par { left: lb, right: rb }) =>
+            lin_eq(*la, *lb) && lin_eq(*ra, *rb),
+        (LinForm.With { left: la, right: ra },
+         LinForm.With { left: lb, right: rb }) =>
+            lin_eq(*la, *lb) && lin_eq(*ra, *rb),
+        (LinForm.Plus { left: la, right: ra },
+         LinForm.Plus { left: lb, right: rb }) =>
+            lin_eq(*la, *lb) && lin_eq(*ra, *rb),
+        (LinForm.OfCourse { inner: ia }, LinForm.OfCourse { inner: ib }) =>
+            lin_eq(*ia, *ib),
+        (LinForm.WhyNot { inner: ia }, LinForm.WhyNot { inner: ib }) =>
+            lin_eq(*ia, *ib),
+        (LinForm.Dual { inner: ia }, LinForm.Dual { inner: ib }) =>
+            lin_eq(*ia, *ib),
+        (LinForm.One, LinForm.One) => true,
+        (LinForm.Bottom, LinForm.Bottom) => true,
+        (LinForm.Top, LinForm.Top) => true,
+        (LinForm.Zero, LinForm.Zero) => true,
+        _ => false,
+    }
+}
+
+/// Size of a formula: count of non-leaf connectives. Each binary
+/// connective (⊗, ⅋, &, ⊕) contributes 1; each unary modality
+/// (!, ?, _^⊥) contributes 1; atoms and units contribute 0.
+///
+/// Used as a termination metric for proof-search heuristics and as
+/// a complexity bound for proof-net construction (the number of
+/// internal nodes is bounded by the size of the formula tree).
+public fn lin_size(f: LinForm) -> Int {
+    match f {
+        LinForm.Atom { name: _ } => 0,
+        LinForm.One => 0,
+        LinForm.Bottom => 0,
+        LinForm.Top => 0,
+        LinForm.Zero => 0,
+        LinForm.MTensor { left, right } => 1 + lin_size(*left) + lin_size(*right),
+        LinForm.Par { left, right } => 1 + lin_size(*left) + lin_size(*right),
+        LinForm.With { left, right } => 1 + lin_size(*left) + lin_size(*right),
+        LinForm.Plus { left, right } => 1 + lin_size(*left) + lin_size(*right),
+        LinForm.OfCourse { inner } => 1 + lin_size(*inner),
+        LinForm.WhyNot { inner } => 1 + lin_size(*inner),
+        LinForm.Dual { inner } => 1 + lin_size(*inner),
+    }
+}
+
+/// Atomic count: number of `Atom` leaves in the formula. Useful
+/// alongside `lin_size` for proof-search bookkeeping.
+public fn lin_atom_count(f: LinForm) -> Int {
+    match f {
+        LinForm.Atom { name: _ } => 1,
+        LinForm.One => 0,
+        LinForm.Bottom => 0,
+        LinForm.Top => 0,
+        LinForm.Zero => 0,
+        LinForm.MTensor { left, right } =>
+            lin_atom_count(*left) + lin_atom_count(*right),
+        LinForm.Par { left, right } =>
+            lin_atom_count(*left) + lin_atom_count(*right),
+        LinForm.With { left, right } =>
+            lin_atom_count(*left) + lin_atom_count(*right),
+        LinForm.Plus { left, right } =>
+            lin_atom_count(*left) + lin_atom_count(*right),
+        LinForm.OfCourse { inner } => lin_atom_count(*inner),
+        LinForm.WhyNot { inner } => lin_atom_count(*inner),
+        LinForm.Dual { inner } => lin_atom_count(*inner),
+    }
+}

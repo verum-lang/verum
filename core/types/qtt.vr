@@ -43,6 +43,11 @@ public fn allows(q: Quantity, uses: Int{>= 0}) -> Bool {
 }
 
 /// Additive composition (sequential composition).
+///
+/// `add_quantity(p, q)` is the cumulative count when one binding
+/// is used `p` times and then `q` times — the natural pattern for
+/// `let`-sequencing. Identity is `Zero`; absorbing element is
+/// `Many`.
 public fn add_quantity(a: Quantity, b: Quantity) -> Quantity {
     match (a, b) {
         (Quantity.Zero, q) => q,
@@ -56,6 +61,91 @@ public fn add_quantity(a: Quantity, b: Quantity) -> Quantity {
             Quantity.AtMost { n: n + 1 },
         (Quantity.AtMost { n }, Quantity.One) =>
             Quantity.AtMost { n: n + 1 },
+    }
+}
+
+/// Multiplicative composition (scaling under a binder).
+///
+/// When a parameter `x: A` is used `outer` times in the function's
+/// body, and `A` itself was bound with quantity `inner`, the
+/// effective usage of `A` from the call site is `outer × inner`.
+///
+/// Identity is `One`. Absorbing element is `Zero`. `Many × q`
+/// saturates to `Many` (positive q); `Many × Zero == Zero` because
+/// "infinite uses of an erased value" is still erased.
+///
+/// ```text
+///     One  × q     = q                           (identity)
+///     q    × One   = q                           (identity)
+///     Zero × q     = Zero                        (absorbing)
+///     q    × Zero  = Zero                        (absorbing)
+///     Many × Many  = Many
+///     Many × AtMost(_)   = Many
+///     AtMost(_) × Many   = Many
+///     AtMost(a) × AtMost(b) = AtMost(a · b)
+/// ```
+public fn mul_quantity(a: Quantity, b: Quantity) -> Quantity {
+    match (a, b) {
+        (Quantity.Zero, _) => Quantity.Zero,
+        (_, Quantity.Zero) => Quantity.Zero,
+        (Quantity.One, q) => q,
+        (q, Quantity.One) => q,
+        (Quantity.Many, _) => Quantity.Many,
+        (_, Quantity.Many) => Quantity.Many,
+        (Quantity.AtMost { n: na }, Quantity.AtMost { n: nb }) =>
+            Quantity.AtMost { n: na * nb },
+    }
+}
+
+/// Most-permissive quantity. Convenient for inference initial
+/// state ("this binding can be anywhere from never to many times")
+/// and for default annotations.
+public fn top_quantity() -> Quantity {
+    Quantity.Many
+}
+
+/// Least-permissive non-vacuous quantity — `Zero` is "may not
+/// appear at runtime". Useful as an `add_quantity` identity.
+public fn bottom_quantity() -> Quantity {
+    Quantity.Zero
+}
+
+/// Subquantity ordering: `is_sub(a, b)` is true iff every usage
+/// pattern allowed by `a` is also allowed by `b`. The lattice is:
+///
+/// ```text
+///     Zero  ≤  One  ≤  AtMost(n)  ≤  Many
+///                         ⌣
+///                  (AtMost(n) ≤ AtMost(m) when n ≤ m)
+/// ```
+///
+/// Used by inference to decide when to promote a binding's
+/// declared quantity to a more permissive one (e.g. coercing a
+/// `One` argument into a `Many` parameter is sound, the other way
+/// is not).
+public fn is_sub(a: Quantity, b: Quantity) -> Bool {
+    match (a, b) {
+        (Quantity.Zero, _) => true,
+        (_, Quantity.Many) => true,
+        (Quantity.Many, _) => false,
+        (Quantity.One, Quantity.Zero) => false,
+        (Quantity.One, Quantity.One) => true,
+        (Quantity.One, Quantity.AtMost { n }) => n >= 1,
+        (Quantity.AtMost { n: _ }, Quantity.Zero) => false,
+        (Quantity.AtMost { n: _ }, Quantity.One) => false,
+        (Quantity.AtMost { n: na }, Quantity.AtMost { n: nb }) => na <= nb,
+    }
+}
+
+/// Equality on quantities — the partial-order's antisymmetry
+/// witness. `quantity_eq(a, b)` iff `is_sub(a, b) && is_sub(b, a)`.
+public fn quantity_eq(a: Quantity, b: Quantity) -> Bool {
+    match (a, b) {
+        (Quantity.Zero, Quantity.Zero) => true,
+        (Quantity.One, Quantity.One) => true,
+        (Quantity.Many, Quantity.Many) => true,
+        (Quantity.AtMost { n: na }, Quantity.AtMost { n: nb }) => na == nb,
+        _ => false,
     }
 }
 

@@ -1499,6 +1499,20 @@ impl CliOrdinal {
             format!("{}+{}", coeff, self.finite_offset)
         }
     }
+
+    /// V8 (#230) — lex ordering on (omega_coeff, finite_offset).
+    /// Mirrors `verum_kernel::OrdinalDepth::lt` exactly so the
+    /// CLI side produces identical results to the kernel for any
+    /// shared ordinal pair.
+    fn lt(&self, other: &Self) -> bool {
+        if self.omega_coeff < other.omega_coeff {
+            return true;
+        }
+        if self.omega_coeff > other.omega_coeff {
+            return false;
+        }
+        self.finite_offset < other.finite_offset
+    }
 }
 
 /// (ν, τ) lookup for the standard six-pack + neutral Actic. Mirrors
@@ -1676,6 +1690,40 @@ fn print_coord_report(
         println!();
     }
 
+    // V8 (#230) — per-theorem inferred-coordinate section.
+    // For each theorem/lemma/corollary, the inferred (Fw, ν, τ)
+    // is the **max-of-cited-coords**: the lex-maximum over all
+    // framework-coordinates cited via @framework annotations on
+    // the item.
+    let per_theorem = invert_to_per_theorem(by_framework);
+    if !per_theorem.is_empty() {
+        println!();
+        println!(
+            "  {} Per-theorem inferred coordinates (max of cited frameworks):",
+            "▸".green().bold()
+        );
+        println!();
+        for entry in &per_theorem {
+            println!(
+                "    {} {} {}  →  ({}, ν={}, {}τ)  [{} cit{}]  {}",
+                "·".dimmed(),
+                entry.item_kind,
+                entry.item_name.as_str().cyan(),
+                entry.inferred_fw.as_str().bold(),
+                entry.inferred_nu.render(),
+                if entry.inferred_tau {
+                    "intensional-"
+                } else {
+                    "extensional-"
+                },
+                entry.frameworks_cited.len(),
+                if entry.frameworks_cited.len() == 1 { "" } else { "s" },
+                entry.file.display()
+            );
+        }
+        println!();
+    }
+
     if !malformed.is_empty() {
         ui::warn(&format!(
             "{} malformed @framework(...) marker(s) skipped from coord report.",
@@ -1683,6 +1731,84 @@ fn print_coord_report(
         ));
         println!();
     }
+}
+
+/// V8 (#230) — invert the per-framework view to a per-theorem
+/// view, computing the max-of-cited-coords inference for each
+/// theorem/lemma/corollary/axiom.
+///
+/// Per VVA §A.Z.2.2 defect 2: every theorem in the project
+/// gets a (Fw, ν, τ) coordinate inferred from the maximum
+/// (lex on OrdinalDepth) of the framework coordinates cited
+/// via @framework markers on that item. Returns a sorted
+/// list (by item_name) of inferred coordinates.
+fn invert_to_per_theorem(
+    by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
+) -> Vec<PerTheoremCoord> {
+    use std::collections::BTreeMap as Map;
+    // Group cited frameworks by (file, item_name, item_kind).
+    let mut per_theorem: Map<(PathBuf, Text, &'static str), Vec<Text>> = Map::new();
+    for (fw_name, uses) in by_framework {
+        for u in uses {
+            let key = (u.file.clone(), u.item_name.clone(), u.item_kind);
+            per_theorem
+                .entry(key)
+                .or_insert_with(Vec::new)
+                .push(fw_name.clone());
+        }
+    }
+    let mut result: Vec<PerTheoremCoord> = per_theorem
+        .into_iter()
+        .map(|((file, item_name, item_kind), frameworks_cited)| {
+            // Compute max-of-cited-coords. Fw with maximum ν
+            // wins; ties broken by lex on framework name.
+            let mut best: Option<(Text, CliOrdinal, bool)> = None;
+            for fw in &frameworks_cited {
+                let (ord, tau) = msfs_lookup(fw.as_str());
+                match &best {
+                    Some((_, best_ord, _)) => {
+                        // Lex: ord > best_ord OR equal and fw < best name.
+                        if best_ord.lt(&ord) {
+                            best = Some((fw.clone(), ord, tau));
+                        }
+                    }
+                    None => {
+                        best = Some((fw.clone(), ord, tau));
+                    }
+                }
+            }
+            let (inferred_fw, inferred_nu, inferred_tau) = best.unwrap();
+            PerTheoremCoord {
+                file,
+                item_name,
+                item_kind,
+                inferred_fw,
+                inferred_nu,
+                inferred_tau,
+                frameworks_cited,
+            }
+        })
+        .collect();
+    // Stable sort: by file then item_name for deterministic
+    // CI-friendly output.
+    result.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.item_name.as_str().cmp(b.item_name.as_str()))
+    });
+    result
+}
+
+/// V8 (#230) — per-theorem inferred coordinate row.
+#[derive(Debug, Clone)]
+struct PerTheoremCoord {
+    file: PathBuf,
+    item_name: Text,
+    item_kind: &'static str,
+    inferred_fw: Text,
+    inferred_nu: CliOrdinal,
+    inferred_tau: bool,
+    frameworks_cited: Vec<Text>,
 }
 
 fn print_coord_report_json(

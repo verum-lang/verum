@@ -52,3 +52,178 @@ public type KindUnifyResult is
     | KindError { reason: Text };
 
 public type KindBinding is { name: Text, kind: Kind };
+
+// =============================================================================
+// 2. Substitution
+// =============================================================================
+
+/// Look up a binding for `var_name` in `bindings`. Linear scan is
+/// fine — practical kind substitutions rarely exceed a handful of
+/// entries, and unification proceeds in dependency order.
+fn lookup_binding(bindings: List<KindBinding>, var_name: Text) -> Maybe<Kind> {
+    let mut i: Int = 0;
+    while i < bindings.len() as Int {
+        let b: KindBinding = (*bindings.get(i as Int).unwrap()).clone();
+        if b.name == var_name {
+            return Some(b.kind);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+/// Apply a substitution to a kind, recursively.
+///
+/// `kind_apply([α↦Type, β↦α], KArrow(α, β))` walks the structure,
+/// rewriting every `KVar` whose name has a binding. Idempotent
+/// once the substitution itself is in normal form.
+public fn kind_apply(bindings: List<KindBinding>, k: Kind) -> Kind {
+    match k {
+        Kind.KType => Kind.KType,
+        Kind.KConstraint => Kind.KConstraint,
+        Kind.KVar { name } => match lookup_binding(bindings, name.clone()) {
+            Some(replacement) => replacement,
+            None => Kind.KVar { name },
+        },
+        Kind.KArrow { domain, codomain } =>
+            k_arrow(
+                kind_apply(bindings.clone(), *domain),
+                kind_apply(bindings, *codomain),
+            ),
+    }
+}
+
+/// Compose two substitutions: `s2 ∘ s1` means "apply s1, then s2".
+/// Returns a substitution `s` such that `kind_apply(s, k) ==
+/// kind_apply(s2, kind_apply(s1, k))` for every k.
+fn kind_compose(
+    s1: List<KindBinding>,
+    s2: List<KindBinding>,
+) -> List<KindBinding> {
+    let mut out: List<KindBinding> = List.new();
+    // Apply s2 to every range value of s1, then keep the binding.
+    let mut i: Int = 0;
+    while i < s1.len() as Int {
+        let b: KindBinding = (*s1.get(i as Int).unwrap()).clone();
+        out.push(KindBinding {
+            name: b.name,
+            kind: kind_apply(s2.clone(), b.kind),
+        });
+        i = i + 1;
+    }
+    // Add bindings from s2 that don't already appear (post-application
+    // s1 wins on shared keys, matching the "apply s1 first" semantics).
+    let mut j: Int = 0;
+    while j < s2.len() as Int {
+        let b2: KindBinding = (*s2.get(j as Int).unwrap()).clone();
+        match lookup_binding(out.clone(), b2.name.clone()) {
+            Some(_) => {},
+            None => { out.push(b2); },
+        }
+        j = j + 1;
+    }
+    out
+}
+
+// =============================================================================
+// 3. Unification
+// =============================================================================
+
+/// Robinson-style first-order unification on kinds. Returns the
+/// most-general substitution that makes `a` and `b` syntactically
+/// identical, or `KindError` on a structural mismatch / occurs-
+/// check failure.
+///
+/// ```text
+///     KType ~ KType                  ↦ ok, ∅
+///     KConstraint ~ KConstraint      ↦ ok, ∅
+///     KArrow(d1, c1) ~ KArrow(d2, c2)
+///                                    ↦ unify(d1, d2) then
+///                                      unify(s(c1), s(c2)) ∘ s
+///     KVar(α) ~ k  (where k is not KVar α)
+///                                    ↦ if α ∈ FV(k) then occurs-check fail
+///                                       else { α ↦ k }
+///     k ~ KVar(α)                    ↦ symmetric to the above
+///     otherwise                      ↦ structural mismatch
+/// ```
+public fn kind_unify(a: Kind, b: Kind) -> KindUnifyResult {
+    match (a, b) {
+        (Kind.KType, Kind.KType) =>
+            KindUnifyResult.KindOk { bindings: List.new() },
+        (Kind.KConstraint, Kind.KConstraint) =>
+            KindUnifyResult.KindOk { bindings: List.new() },
+        (Kind.KArrow { domain: d1, codomain: c1 },
+         Kind.KArrow { domain: d2, codomain: c2 }) => {
+            match kind_unify(*d1, *d2) {
+                KindUnifyResult.KindError { reason } =>
+                    KindUnifyResult.KindError { reason },
+                KindUnifyResult.KindOk { bindings: s1 } => {
+                    let c1_sub = kind_apply(s1.clone(), *c1);
+                    let c2_sub = kind_apply(s1.clone(), *c2);
+                    match kind_unify(c1_sub, c2_sub) {
+                        KindUnifyResult.KindError { reason } =>
+                            KindUnifyResult.KindError { reason },
+                        KindUnifyResult.KindOk { bindings: s2 } =>
+                            KindUnifyResult.KindOk {
+                                bindings: kind_compose(s1, s2),
+                            },
+                    }
+                },
+            }
+        },
+        (Kind.KVar { name: a_name }, Kind.KVar { name: b_name }) => {
+            if a_name == b_name {
+                KindUnifyResult.KindOk { bindings: List.new() }
+            } else {
+                let mut bindings: List<KindBinding> = List.new();
+                bindings.push(KindBinding {
+                    name: a_name,
+                    kind: Kind.KVar { name: b_name },
+                });
+                KindUnifyResult.KindOk { bindings }
+            }
+        },
+        (Kind.KVar { name }, k) => bind_var(name, k),
+        (k, Kind.KVar { name }) => bind_var(name, k),
+        (lhs, rhs) =>
+            KindUnifyResult.KindError {
+                reason: Text.from("kind mismatch")
+                    + Text.from(": ")
+                    + kind_show(lhs)
+                    + Text.from(" ~ ")
+                    + kind_show(rhs),
+            },
+    }
+}
+
+/// Bind `var_name ↦ k` after the occurs-check. Refuses self-
+/// referential cycles (the classical infinite-type symptom).
+fn bind_var(var_name: Text, k: Kind) -> KindUnifyResult {
+    if kind_occurs(k.clone(), var_name.clone()) {
+        return KindUnifyResult.KindError {
+            reason: Text.from("occurs check: ")
+                + var_name
+                + Text.from(" ∈ ")
+                + kind_show(k),
+        };
+    }
+    let mut bindings: List<KindBinding> = List.new();
+    bindings.push(KindBinding { name: var_name, kind: k });
+    KindUnifyResult.KindOk { bindings }
+}
+
+/// Render a kind for diagnostic output. No assumption that this
+/// is round-trippable through a parser — it's debug-shaped.
+fn kind_show(k: Kind) -> Text {
+    match k {
+        Kind.KType => Text.from("Type"),
+        Kind.KConstraint => Text.from("Constraint"),
+        Kind.KVar { name } => name,
+        Kind.KArrow { domain, codomain } =>
+            Text.from("(")
+                + kind_show(*domain)
+                + Text.from(" → ")
+                + kind_show(*codomain)
+                + Text.from(")"),
+    }
+}

@@ -2566,8 +2566,16 @@ speculation:
    the rule is *callable* from elaborator + audit but not
    yet auto-applied at every reference site). **70%**.
 
-3. **`verum audit --coord` per-theorem inference** ☐ — not
-   started. CLI surface + integration tests pending. **0%**.
+3. **`verum audit --coord` per-theorem inference** ✓ — V8
+   #230 shipped: `invert_to_per_theorem` collector +
+   `PerTheoremCoord` row + per-theorem section appended to
+   both Plain + JSON formatters of `audit_coord_with_format`.
+   Max-of-cited-coords inference (lex on CliOrdinal) handles
+   single-framework and multi-framework theorems uniformly.
+   5 integration tests in
+   `crates/verum_cli/tests/audit_coord_per_theorem.rs`
+   covering clean / single / max-of-multi / JSON-schema-v1 /
+   no-markers paths. **100%**.
 
 4. **Accessibility typed attribute** ✓ — V8 #228 shipped:
    `verum_ast::attr::AccessibilityAttr` accepting `omega`,
@@ -2594,10 +2602,10 @@ speculation:
 
 ### A.Z.5 aggregate completion (V8 measured, no speculation)
 
-  * Roadmap items shipped: **4 of 7** (items 1, 2, 4, 5 ✓ shipped at the percentages above; item 3 not started; items 6–7 externally blocked).
-  * Per-item completion: 100% + 70% + 0% + 75% + 100% + 0% + 0% = **345% of 700%**.
-  * Aggregate roadmap completion: **49%** (345 / 700).
-  * Tractable-non-blocked subset (items 1–5): **69%** (345 / 500).
+  * Roadmap items shipped: **5 of 7** (items 1, 2, 3, 4, 5 ✓ shipped at the percentages above; items 6–7 externally blocked).
+  * Per-item completion: 100% + 70% + 100% + 75% + 100% + 0% + 0% = **445% of 700%**.
+  * Aggregate roadmap completion: **64%** (445 / 700).
+  * Tractable-non-blocked subset (items 1–5): **89%** (445 / 500).
   * Externally-blocked subset (items 6–7): cannot ship until preprint + tool integrations.
 
 ### A.Z code-side refactor status (#225 stages)

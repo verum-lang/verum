@@ -360,3 +360,91 @@ public fn cbpv_normalise(t: CbpvTerm, gas: Int) -> (CbpvTerm, Int) {
     }
     (current, steps)
 }
+
+// =============================================================================
+// 7. α-equivalence
+// =============================================================================
+
+/// One side of an α-renaming map: at the i-th lookup the binder
+/// `name` was renamed to `index` (a de Bruijn-like depth marker).
+type AlphaEntry is { name: Text, index: Int };
+
+/// Look up the de-Bruijn index for `name` in the current
+/// renaming context. Returns -1 if the variable is free.
+fn alpha_lookup(ctx: List<AlphaEntry>, name: Text) -> Int {
+    let mut i: Int = 0;
+    while i < ctx.len() as Int {
+        let e: AlphaEntry = (*ctx.get(i as Int).unwrap()).clone();
+        if e.name == name {
+            return e.index;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+/// α-equivalence: two terms are equal up to consistent renaming
+/// of bound variables. Free variables must match by name; bound
+/// variables are compared by binding depth ("de Bruijn level").
+///
+/// Implementation: walk both terms in lock-step, threading two
+/// renaming contexts. At each binder we push (binder_name,
+/// current_depth) onto each side; comparing variables looks up
+/// each side's current depth and checks they match (both refer to
+/// the same binder structurally).
+public fn cbpv_alpha_eq(a: CbpvTerm, b: CbpvTerm) -> Bool {
+    let ctx_a: List<AlphaEntry> = List.new();
+    let ctx_b: List<AlphaEntry> = List.new();
+    cbpv_alpha_eq_ctx(a, b, ctx_a, ctx_b, 0)
+}
+
+fn cbpv_alpha_eq_ctx(
+    a: CbpvTerm,
+    b: CbpvTerm,
+    ctx_a: List<AlphaEntry>,
+    ctx_b: List<AlphaEntry>,
+    depth: Int,
+) -> Bool {
+    match (a, b) {
+        (CbpvTerm.Var { name: na }, CbpvTerm.Var { name: nb }) => {
+            let ia = alpha_lookup(ctx_a, na.clone());
+            let ib = alpha_lookup(ctx_b, nb.clone());
+            if ia == -1 && ib == -1 {
+                // Both free — must match by name.
+                na == nb
+            } else {
+                ia == ib
+            }
+        },
+        (CbpvTerm.Lam { param: pa, body: ba },
+         CbpvTerm.Lam { param: pb, body: bb }) => {
+            let mut ca: List<AlphaEntry> = ctx_a;
+            let mut cb: List<AlphaEntry> = ctx_b;
+            ca.push(AlphaEntry { name: pa, index: depth });
+            cb.push(AlphaEntry { name: pb, index: depth });
+            cbpv_alpha_eq_ctx(*ba, *bb, ca, cb, depth + 1)
+        },
+        (CbpvTerm.Thunk { inner: ia }, CbpvTerm.Thunk { inner: ib }) =>
+            cbpv_alpha_eq_ctx(*ia, *ib, ctx_a, ctx_b, depth),
+        (CbpvTerm.Return { value: va }, CbpvTerm.Return { value: vb }) =>
+            cbpv_alpha_eq_ctx(*va, *vb, ctx_a, ctx_b, depth),
+        (CbpvTerm.SeqTo { producer: pa, binder: bna, body: ba },
+         CbpvTerm.SeqTo { producer: pb, binder: bnb, body: bb }) => {
+            if !cbpv_alpha_eq_ctx(*pa, *pb, ctx_a.clone(), ctx_b.clone(), depth) {
+                return false;
+            }
+            let mut ca: List<AlphaEntry> = ctx_a;
+            let mut cb: List<AlphaEntry> = ctx_b;
+            ca.push(AlphaEntry { name: bna, index: depth });
+            cb.push(AlphaEntry { name: bnb, index: depth });
+            cbpv_alpha_eq_ctx(*ba, *bb, ca, cb, depth + 1)
+        },
+        (CbpvTerm.Force { value: va }, CbpvTerm.Force { value: vb }) =>
+            cbpv_alpha_eq_ctx(*va, *vb, ctx_a, ctx_b, depth),
+        (CbpvTerm.App { func: fa, arg: aa },
+         CbpvTerm.App { func: fb, arg: ab }) =>
+            cbpv_alpha_eq_ctx(*fa, *fb, ctx_a.clone(), ctx_b.clone(), depth)
+                && cbpv_alpha_eq_ctx(*aa, *ab, ctx_a, ctx_b, depth),
+        _ => false,
+    }
+}
