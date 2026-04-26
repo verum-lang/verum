@@ -62,7 +62,7 @@ fn registry_smtlib_block_parses_through_z3_solver() {
     let three = z3::ast::Int::from_i64(3);
     let five = z3::ast::Int::from_i64(5);
     let sum = z3::ast::Int::add(&[&two, &three]);
-    let eq = sum._eq(&five);
+    let eq = sum.eq(&five);
     solver.assert(&eq);
     let _ = ctx; // silence unused
 
