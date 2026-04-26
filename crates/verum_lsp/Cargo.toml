@@ -53,6 +53,7 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 criterion = { workspace = true }
+tempfile = "3.14"
 # Testing tokio: use workspace definition plus test utilities
 tokio = { workspace = true, features = ["test-util"] }
 

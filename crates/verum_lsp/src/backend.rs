@@ -125,16 +125,49 @@ impl Backend {
         result
     }
 
-    /// Publish diagnostics for a document
+    /// Publish diagnostics for a document. Two streams converge
+    /// here:
+    ///
+    /// 1. **Compiler diagnostics** — type-checker, parser, SMT
+    ///    refinement violations. These are computed per-edit
+    ///    incrementally inside `DocumentStore`.
+    /// 2. **Lint diagnostics** — the static-analysis suite from
+    ///    `verum lint`. These run via subprocess against the
+    ///    project's `verum.toml` so the same config and output
+    ///    schema as CI / pre-commit drives the editor experience.
+    ///
+    /// Both streams are merged into one `publish_diagnostics`
+    /// notification so the editor sees them as a unified
+    /// problems-pane entry per file. Lint failures never block the
+    /// compiler stream — if the lint subprocess errors, we publish
+    /// only the compiler diagnostics.
     async fn publish_diagnostics(&self, uri: Url) {
         let verum_diagnostics = self.documents.get_diagnostics(&uri);
 
         if let Some(text) = self.documents.get_text(&uri) {
-            let lsp_diagnostics = diagnostics::convert_diagnostics(verum_diagnostics, &text, &uri);
+            let mut lsp_diagnostics =
+                diagnostics::convert_diagnostics(verum_diagnostics, &text, &uri);
+
+            let lint_settings = self.lint_settings();
+            if lint_settings.enabled {
+                let lint_diagnostics =
+                    crate::lint_diagnostics::lint_diagnostics(&uri, &lint_settings).await;
+                lsp_diagnostics.extend(lint_diagnostics);
+            }
 
             self.client
                 .publish_diagnostics(uri, lsp_diagnostics, None)
                 .await;
+        }
+    }
+
+    /// Resolve the active lint settings from the shared LSP config.
+    fn lint_settings(&self) -> crate::lint_diagnostics::LintSettings {
+        let cfg = self.config.snapshot();
+        crate::lint_diagnostics::LintSettings {
+            enabled: cfg.lint_enabled,
+            profile: cfg.lint_profile.clone(),
+            binary: cfg.lint_binary.clone(),
         }
     }
 
