@@ -18,6 +18,33 @@ use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 use walkdir::WalkDir;
 
+/// Behaviour when the parser cannot turn a source file into an AST.
+///
+/// - **Fallback** (default): silently apply whitespace normalisation
+///   and import sorting; print a warning naming the file. Backwards-
+///   compatible with pre-policy behaviour.
+/// - **Skip**: leave the file untouched; print a warning. Exit 0.
+/// - **Error**: leave the file untouched; print an error with the
+///   parse diagnostic. Exit non-zero (the rest of the corpus is
+///   still processed first, so one bad file doesn't hide others).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnParseError {
+    Fallback,
+    Skip,
+    Error,
+}
+
+impl OnParseError {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "fallback" => Some(Self::Fallback),
+            "skip" => Some(Self::Skip),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
+
 /// Verum formatter configuration.
 #[derive(Debug, Clone)]
 pub struct FormatterConfig {
@@ -35,6 +62,8 @@ pub struct FormatterConfig {
     pub normalize_blanks: bool,
     /// Ensure trailing newline.
     pub trailing_newline: bool,
+    /// Behaviour when a file fails to parse — see [OnParseError].
+    pub on_parse_error: OnParseError,
 }
 
 impl Default for FormatterConfig {
@@ -47,6 +76,7 @@ impl Default for FormatterConfig {
             sort_imports: true,
             normalize_blanks: true,
             trailing_newline: true,
+            on_parse_error: OnParseError::Fallback,
         }
     }
 }
@@ -80,24 +110,32 @@ fn load_config() -> FormatterConfig {
 fn parse_config(content: &str) -> FormatterConfig {
     let mut config = FormatterConfig::default();
     let mut in_fmt_section = false;
+    let mut in_policy_section = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('[') {
             in_fmt_section = trimmed == "[fmt]" || trimmed == "[format]";
+            in_policy_section =
+                trimmed == "[fmt.policy]" || trimmed == "[format.policy]";
             continue;
         }
-        if !in_fmt_section { continue; }
+        if !in_fmt_section && !in_policy_section { continue; }
 
         if let Some((key, value)) = trimmed.split_once('=') {
             let key = key.trim();
-            let value = value.trim();
+            let value = value.trim().trim_matches('"');
             match key {
                 "max_width" => { if let Ok(v) = value.parse() { config.max_width = v; } }
                 "indent_size" => { if let Ok(v) = value.parse() { config.indent_size = v; } }
                 "use_spaces" => { config.use_spaces = value == "true"; }
                 "trailing_comma" => { config.trailing_comma = value == "true"; }
                 "sort_imports" => { config.sort_imports = value == "true"; }
+                "on_parse_error" if in_policy_section => {
+                    if let Some(p) = OnParseError::parse(value) {
+                        config.on_parse_error = p;
+                    }
+                }
                 _ => {}
             }
         }
@@ -105,15 +143,31 @@ fn parse_config(content: &str) -> FormatterConfig {
     config
 }
 
-/// Main entry point for `verum fmt`.
+/// Main entry point for `verum fmt`. Uses the parse-error policy
+/// from `[fmt.policy].on_parse_error` in the manifest, defaulting
+/// to `Fallback`.
 pub fn execute(check: bool, verbose: bool) -> Result<()> {
+    execute_with_policy(check, verbose, None)
+}
+
+/// Like `execute` but with an explicit parse-error policy override
+/// (the `--on-parse-error` CLI flag). When `policy` is `Some`, it
+/// wins over the manifest setting for this run only.
+pub fn execute_with_policy(
+    check: bool,
+    verbose: bool,
+    policy: Option<OnParseError>,
+) -> Result<()> {
     if check {
         ui::step("Checking formatting");
     } else {
         ui::step("Formatting source files");
     }
 
-    let config = load_config();
+    let mut config = load_config();
+    if let Some(p) = policy {
+        config.on_parse_error = p;
+    }
     let total_files;
     let mut formatted_files = 0;
     let mut changed_files = List::new();
@@ -248,16 +302,38 @@ fn is_verum_file(path: &Path) -> bool {
 fn format_file(path: &Path, config: &FormatterConfig, check: bool, verbose: bool) -> Result<FormatResult> {
     let content = fs::read_to_string(path)?;
 
-    // Try AST-based formatting first
+    // Try AST-based formatting first. On failure, the
+    // `on_parse_error` policy decides what to do:
+    //   - Fallback (default): silently fall through to whitespace
+    //     normalisation + import sorting. Print a stderr warning so
+    //     the user knows the AST formatter wasn't used.
+    //   - Skip: leave the file untouched, exit 0 from this call.
+    //   - Error: leave the file untouched, return Err. The caller
+    //     accumulates errors and propagates them via exit code.
     let formatted = match try_ast_format(&content, config) {
         Some(f) => f,
-        None => {
-            // Fallback: whitespace normalization + import sorting
-            if verbose {
-                ui::debug(&format!("Parse failed, using fallback: {}", path.display()));
+        None => match config.on_parse_error {
+            OnParseError::Fallback => {
+                ui::warn(&format!(
+                    "parse failed on {}; emitting whitespace-normalised form. \
+                     Set `[fmt.policy].on_parse_error = \"error\"` to fail the run instead.",
+                    path.display()
+                ));
+                normalize_and_sort(&content, config)
             }
-            normalize_and_sort(&content, config)
-        }
+            OnParseError::Skip => {
+                if verbose {
+                    ui::warn(&format!("parse failed on {}; skipping", path.display()));
+                }
+                return Ok(FormatResult::Unchanged);
+            }
+            OnParseError::Error => {
+                return Err(CliError::Custom(format!(
+                    "parse failed on {}: refusing to format under [fmt.policy].on_parse_error = \"error\"",
+                    path.display()
+                )));
+            }
+        },
     };
 
     if content == formatted.as_str() {
