@@ -315,11 +315,14 @@ pub fn run_with_tier(
                         })?;
 
                     if !status.success() {
+                        // Propagate the child program's exit code so this
+                        // wrapper is transparent to callers (test runners,
+                        // shells using $?). Treating any non-zero as a
+                        // wrapper error masked the user's exit value with
+                        // a constant 1, which broke vtest's @expected-exit
+                        // contract.
                         let exit_code = status.code().unwrap_or(-1);
-                        return Err(CliError::RuntimeError(format!(
-                            "Program exited with code: {}",
-                            exit_code
-                        )));
+                        std::process::exit(exit_code);
                     }
                 }
                 Err(aot_err) => {

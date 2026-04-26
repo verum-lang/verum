@@ -2,6 +2,7 @@
 // @level: L0
 // @tier: 2
 // @tags: codegen, aot, mount-core, main-return-propagation
+// @timeout: 360000
 // @expected-exit: 7
 // @description: AOT mount-core main() return propagation regression.
 //
