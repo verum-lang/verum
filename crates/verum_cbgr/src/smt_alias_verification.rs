@@ -46,7 +46,7 @@ use crate::analysis::{AliasRelation, AliasSets, RefId};
 use crate::z3_feasibility::CacheStats;
 use verum_common::{List, Map, Maybe, Text};
 use z3::ast::BV;
-use z3::{Config, Context, SatResult, Solver};
+use z3::{SatResult, Solver};
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -278,9 +278,6 @@ impl SmtAliasResult {
 struct SmtAliasCacheEntry {
     result: SmtAliasResult,
     last_access: Instant,
-    /// Query time in microseconds (stored for future performance metrics)
-    #[allow(dead_code)]
-    query_time_us: u64,
 }
 
 /// SMT alias verification cache
@@ -329,7 +326,7 @@ impl SmtAliasCache {
     }
 
     /// Insert query result into cache
-    pub fn insert(&mut self, hash: u64, result: SmtAliasResult, query_time_us: u64) {
+    pub fn insert(&mut self, hash: u64, result: SmtAliasResult) {
         // Evict LRU if needed
         if self.cache.len() >= self.max_size {
             self.evict_lru();
@@ -340,7 +337,6 @@ impl SmtAliasCache {
             SmtAliasCacheEntry {
                 result,
                 last_access: Instant::now(),
-                query_time_us,
             },
         );
     }
@@ -405,13 +401,9 @@ impl Default for SmtAliasCache {
 /// assert!(result.is_no_alias());
 /// ```
 pub struct SmtAliasVerifier {
-    /// Z3 context (shared across queries)
-    #[allow(dead_code)]
-    context: Context,
     /// Query result cache
     cache: SmtAliasCache,
-    /// Timeout for Z3 solver (milliseconds)
-    #[allow(dead_code)]
+    /// Timeout for Z3 solver (milliseconds), applied to each Solver via Params
     timeout_ms: u64,
     /// Pointer bit width (64 for 64-bit systems)
     pointer_bits: u32,
@@ -433,11 +425,7 @@ impl SmtAliasVerifier {
     /// Create new SMT alias verifier with custom configuration
     #[must_use]
     pub fn with_config(timeout_ms: u64, pointer_bits: u32) -> Self {
-        let mut cfg = Config::new();
-        cfg.set_timeout_msec(timeout_ms);
-
         Self {
-            context: Context::thread_local(),
             cache: SmtAliasCache::new(),
             timeout_ms,
             pointer_bits,
@@ -477,12 +465,10 @@ impl SmtAliasVerifier {
         }
 
         // Cache miss - perform SMT query
-        let start = Instant::now();
         let result = self.verify_no_alias_uncached(constraint1, constraint2);
-        let elapsed_us = start.elapsed().as_micros() as u64;
 
         // Cache result
-        self.cache.insert(hash, result, elapsed_us);
+        self.cache.insert(hash, result);
 
         result
     }
@@ -517,6 +503,9 @@ impl SmtAliasVerifier {
 
         // Encode constraints and check with Z3
         let solver = Solver::new();
+        let mut params = z3::Params::new();
+        params.set_u32("timeout", self.timeout_ms as u32);
+        solver.set_params(&params);
 
         let ptr1 = match self.encode_pointer_constraint(constraint1) {
             Maybe::Some(p) => p,
@@ -817,7 +806,7 @@ mod tests {
         assert_eq!(cache.get(12345), Maybe::None);
         assert_eq!(cache.stats().misses, 1);
 
-        cache.insert(12345, SmtAliasResult::NoAlias, 100);
+        cache.insert(12345, SmtAliasResult::NoAlias);
         assert_eq!(cache.get(12345), Maybe::Some(SmtAliasResult::NoAlias));
         assert_eq!(cache.stats().hits, 1);
     }

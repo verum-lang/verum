@@ -172,7 +172,7 @@ fn test_cache_hit_and_miss() {
     assert_eq!(cache.stats().hits, 0);
 
     // Insert
-    cache.insert(12345, SmtAliasResult::NoAlias, 100);
+    cache.insert(12345, SmtAliasResult::NoAlias);
 
     // Second access: hit
     assert_eq!(
@@ -188,11 +188,11 @@ fn test_cache_eviction() {
     let mut cache = SmtAliasCache::with_size(2);
 
     // Fill cache
-    cache.insert(1, SmtAliasResult::NoAlias, 50);
-    cache.insert(2, SmtAliasResult::MayAlias, 60);
+    cache.insert(1, SmtAliasResult::NoAlias);
+    cache.insert(2, SmtAliasResult::MayAlias);
 
     // This should trigger eviction
-    cache.insert(3, SmtAliasResult::NoAlias, 70);
+    cache.insert(3, SmtAliasResult::NoAlias);
 
     assert_eq!(cache.stats().evictions, 1);
 }
@@ -201,8 +201,8 @@ fn test_cache_eviction() {
 fn test_cache_clear() {
     let mut cache = SmtAliasCache::new();
 
-    cache.insert(1, SmtAliasResult::NoAlias, 50);
-    cache.insert(2, SmtAliasResult::MayAlias, 60);
+    cache.insert(1, SmtAliasResult::NoAlias);
+    cache.insert(2, SmtAliasResult::MayAlias);
 
     assert_eq!(cache.stats().misses, 0); // Inserts don't count as misses
 
