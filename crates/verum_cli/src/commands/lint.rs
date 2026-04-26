@@ -371,6 +371,47 @@ const LINT_RULES: &[LintRule] = &[
              Heuristic — opt-in via [lint.rules.unused-public].enabled = true.",
         category: LintCategory::Style,
     },
+    LintRule {
+        name: "unused-private",
+        level: LintLevel::Hint,
+        description:
+            "Non-public symbol with no callers in its own file — \
+             dead code that the type-checker doesn't catch because the \
+             visibility is technically fine.",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "dead-module",
+        level: LintLevel::Hint,
+        description:
+            "File not reachable from any entry point (main.vr / lib.vr / mod.vr) \
+             along the mount graph.",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "inconsistent-public-doc",
+        level: LintLevel::Hint,
+        description:
+            "Module exports K public symbols, M of them documented; fires \
+             when 0 < M < K. Opt-in via [lint.rules.inconsistent-public-doc].enabled.",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "mount-cycle-via-stdlib",
+        level: LintLevel::Warning,
+        description:
+            "Module graph contains a back-edge through a stdlib path — \
+             cycle hidden by re-export. Refactor to break the round trip.",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "pub-exports-unsafe",
+        level: LintLevel::Warning,
+        description:
+            "Public symbol's signature mentions `&unsafe` or `unsafe fn` — \
+             unsafe surface leaked across the project boundary.",
+        category: LintCategory::Safety,
+    },
 ];
 
 pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
