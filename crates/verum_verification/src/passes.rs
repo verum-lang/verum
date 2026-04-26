@@ -695,8 +695,20 @@ impl VerificationPipeline {
         Ok(results)
     }
 
-    /// Create a default pipeline with standard passes
-    pub fn default_pipeline() -> Self {
+    /// Create the **static-analysis** pipeline: 5 lightweight
+    /// passes (level inference + kernel-recheck + hygiene-recheck +
+    /// boundary detection + transition recommendation). Does **not**
+    /// include `SmtVerificationPass` — SMT is a heavy dependency
+    /// and not always available; callers that want the full
+    /// pipeline should use [`Self::full_verification_pipeline`].
+    ///
+    /// Renamed from `default_pipeline` (#202): the original name
+    /// was misleading because users reasonably expected "default
+    /// verification" to include SMT discharge. The 5-pass
+    /// composition is the right default for AOT/build paths that
+    /// want kernel + hygiene + transition advice without paying
+    /// the SMT round-trip cost.
+    pub fn static_analysis_pipeline() -> Self {
         let mut pipeline = Self::new();
 
         pipeline.add_pass(Box::new(LevelInferencePass::new(
@@ -722,11 +734,41 @@ impl VerificationPipeline {
 
         pipeline
     }
+
+    /// Backwards-compat alias for [`Self::static_analysis_pipeline`].
+    /// New callers should use the explicit name to make the
+    /// SMT-absence intentional. This alias will be removed in a
+    /// future major version.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use static_analysis_pipeline() — this name was misleading because \
+                no SMT pass is included. See task #202 for the rationale."
+    )]
+    pub fn default_pipeline() -> Self {
+        Self::static_analysis_pipeline()
+    }
+
+    /// Create the **full-verification** pipeline: static-analysis
+    /// passes + `SmtVerificationPass` for actual SMT discharge of
+    /// refinement obligations. Fail-fast applies (#187 contract):
+    /// any pass returning `success == false` halts the rest.
+    ///
+    /// SMT verification is the default-on terminal pass; modules
+    /// passing the static-analysis chain have their refinement
+    /// types subjected to Z3 portfolio dispatch.
+    pub fn full_verification_pipeline() -> Self {
+        let mut pipeline = Self::static_analysis_pipeline();
+        pipeline.add_pass(Box::new(SmtVerificationPass::new()));
+        pipeline
+    }
 }
 
 impl Default for VerificationPipeline {
     fn default() -> Self {
-        Self::default_pipeline()
+        // Default = static-analysis pipeline (no SMT). The full
+        // verification path with SMT discharge is opt-in via
+        // [`Self::full_verification_pipeline`] — see #202.
+        Self::static_analysis_pipeline()
     }
 }
 

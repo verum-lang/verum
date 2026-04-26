@@ -319,6 +319,69 @@ fn r3_fires_on_impl_methods_constituting_two_corpora() {
 }
 
 #[test]
+fn r3_threshold_lowered_to_two_fires_with_two_axioms_each() {
+    // V3 (#203): with threshold=2, two corpora each shipping
+    // exactly 2 axioms qualify as meta-classifier candidates ⇒ R3.
+    // With default threshold=5, both would NOT qualify and pass.
+    let mut items: Vec<ItemKind> = Vec::new();
+    for i in 0..2 {
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("d_{}", i),
+            vec![framework_attr("diakrisis")],
+        )));
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("a_{}", i),
+            vec![framework_attr("actic")],
+        )));
+    }
+    let module = module_with(items);
+
+    // First: default threshold (5) — neither corpus qualifies.
+    let mut default_pass = HygieneRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let res_default = default_pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(res_default.success, "with default threshold (5), neither corpus qualifies");
+
+    // Second: lowered threshold (2) — BOTH corpora qualify ⇒ R3 fires.
+    let mut strict_pass = HygieneRecheckPass::with_meta_classifier_threshold(2);
+    let mut ctx2 = VerificationContext::new();
+    let res_strict = strict_pass.run(&module, &mut ctx2).expect("pass runs");
+    assert!(!res_strict.success, "with lowered threshold (2), R3 must fire");
+    assert_eq!(strict_pass.error_count(), 1);
+}
+
+#[test]
+fn r3_threshold_raised_above_qualifying_count_silences_alert() {
+    // V3 (#203): owl2_fs ships ~64 axioms; raising threshold
+    // above any single corpus's count silences R3 in modules
+    // that intentionally have multiple large frameworks.
+    let mut items: Vec<ItemKind> = Vec::new();
+    for i in 0..6 {
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("d_{}", i),
+            vec![framework_attr("diakrisis")],
+        )));
+        items.push(ItemKind::Axiom(axiom_with_attrs(
+            &format!("a_{}", i),
+            vec![framework_attr("actic")],
+        )));
+    }
+    let module = module_with(items);
+
+    // Default threshold (5) ⇒ both qualify (6 each) ⇒ R3 fires.
+    let mut default_pass = HygieneRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let res_default = default_pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!res_default.success);
+
+    // Threshold raised to 100 ⇒ neither qualifies ⇒ pass.
+    let mut high_pass = HygieneRecheckPass::with_meta_classifier_threshold(100);
+    let mut ctx2 = VerificationContext::new();
+    let res_high = high_pass.run(&module, &mut ctx2).expect("pass runs");
+    assert!(res_high.success, "raising threshold above corpus size silences R3");
+}
+
+#[test]
 fn impl_methods_without_framework_unaffected() {
     // No @framework on impl methods ⇒ no hygiene check fires.
     let m1 = make_function_with_attrs("plain_method", vec![]);
