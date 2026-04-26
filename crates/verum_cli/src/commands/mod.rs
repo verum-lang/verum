@@ -14,6 +14,7 @@ pub mod fmt;
 pub mod hooks;
 pub mod init;
 pub mod lint;
+pub mod lint_baseline;
 pub mod lint_cache;
 pub mod lint_engine;
 pub mod lint_human;

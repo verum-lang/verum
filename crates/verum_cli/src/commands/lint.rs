@@ -4139,6 +4139,76 @@ pub fn run_extended(
     run_extended_full(fix, deny_warnings, format, profile, since, severity_min, None)
 }
 
+/// Resolved baseline mode for one run.
+///
+/// The CLI surface has three knobs (`--baseline FILE`, `--no-baseline`,
+/// `--write-baseline`) that combine into one of these states.
+pub enum BaselineMode {
+    /// No baseline applied. Either `--no-baseline` was set, or
+    /// none of the baseline flags were used and no default
+    /// baseline file exists.
+    Disabled,
+    /// Read suppressions from PATH; live issues that match a
+    /// baseline entry are silenced.
+    Read(PathBuf),
+    /// Snapshot this run's issue set to PATH and exit 0 regardless
+    /// of issue count.
+    Write(PathBuf),
+}
+
+impl BaselineMode {
+    /// Resolve the three CLI flags into a single mode.
+    /// Precedence: `--write-baseline` wins over `--baseline FILE`,
+    /// which wins over the default-path lookup. `--no-baseline`
+    /// disables read-mode (write-mode still works).
+    pub fn from_flags(
+        baseline: Option<String>,
+        no_baseline: bool,
+        write_baseline: bool,
+    ) -> Self {
+        let path = match &baseline {
+            Some(p) => PathBuf::from(p),
+            None => super::lint_baseline::default_path(),
+        };
+        if write_baseline {
+            return BaselineMode::Write(path);
+        }
+        if no_baseline {
+            return BaselineMode::Disabled;
+        }
+        if baseline.is_some() || path.exists() {
+            BaselineMode::Read(path)
+        } else {
+            BaselineMode::Disabled
+        }
+    }
+}
+
+/// Full extended runner with the `--max-warnings N` budget +
+/// baseline. Forwards from older entry points with the new
+/// argument defaulted to `Disabled`.
+pub fn run_extended_full_with_baseline(
+    fix: bool,
+    deny_warnings: bool,
+    format: LintOutputFormat,
+    profile: Option<String>,
+    since: Option<String>,
+    severity_min: Option<LintLevel>,
+    max_warnings: Option<usize>,
+    baseline: BaselineMode,
+) -> Result<()> {
+    run_extended_inner(
+        fix,
+        deny_warnings,
+        format,
+        profile,
+        since,
+        severity_min,
+        max_warnings,
+        baseline,
+    )
+}
+
 /// Full extended runner with the `--max-warnings N` budget.
 /// `max_warnings = None` means no cap; `Some(0)` is equivalent to
 /// `--deny-warnings` (any warning fails the run); `Some(N>0)` lets
@@ -4151,6 +4221,28 @@ pub fn run_extended_full(
     since: Option<String>,
     severity_min: Option<LintLevel>,
     max_warnings: Option<usize>,
+) -> Result<()> {
+    run_extended_inner(
+        fix,
+        deny_warnings,
+        format,
+        profile,
+        since,
+        severity_min,
+        max_warnings,
+        BaselineMode::Disabled,
+    )
+}
+
+fn run_extended_inner(
+    fix: bool,
+    deny_warnings: bool,
+    format: LintOutputFormat,
+    profile: Option<String>,
+    since: Option<String>,
+    severity_min: Option<LintLevel>,
+    max_warnings: Option<usize>,
+    baseline_mode: BaselineMode,
 ) -> Result<()> {
     let mut cfg = load_full_lint_config();
     if let Some(name) = &profile {
@@ -4226,6 +4318,46 @@ pub fn run_extended_full(
         })
         .collect();
     all_issues.sort_by(|a, b| issue_sort_key(a).cmp(&issue_sort_key(b)));
+
+    // --write-baseline path. Snapshot the current set and exit 0,
+    // regardless of how many issues there are. Output is suppressed
+    // beyond a one-line success because the user is asking us to
+    // record state, not report it.
+    if let BaselineMode::Write(ref path) = baseline_mode {
+        super::lint_baseline::Baseline::write(path, &all_issues)
+            .map_err(|e| CliError::Custom(format!("write baseline {}: {}", path.display(), e)))?;
+        ui::success(&format!(
+            "wrote baseline ({} issues) → {}",
+            all_issues.len(),
+            path.display()
+        ));
+        return Ok(());
+    }
+
+    // --baseline FILE / default-path lookup. Filter out issues that
+    // match a baseline entry. Track suppressed count so the user
+    // sees the savings.
+    if let BaselineMode::Read(ref path) = baseline_mode {
+        if let Some(baseline) = super::lint_baseline::Baseline::load(path) {
+            let before = all_issues.len();
+            all_issues.retain(|i| !baseline.suppresses(i));
+            let suppressed = before - all_issues.len();
+            if suppressed > 0 {
+                ui::note(&format!(
+                    "{} issues suppressed by baseline ({})",
+                    suppressed,
+                    path.display()
+                ));
+            }
+        } else if path.exists() {
+            // The file exists but failed to parse — alert the user
+            // rather than silently dropping the suppression set.
+            ui::warn(&format!(
+                "baseline at {} could not be loaded; running without suppressions",
+                path.display()
+            ));
+        }
+    }
 
     let mut errors = 0usize;
     let mut warnings = 0usize;
