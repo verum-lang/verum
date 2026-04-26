@@ -187,6 +187,23 @@ impl KernelRecheck {
         if let Maybe::Some(ret_ty) = &func.return_type {
             walk_ast_type_for_recheck(ret_ty, &func.name.name, "return", &mut out);
         }
+        // V4 (#191) — descend into the function body to surface
+        // refinements declared in `let x: Int{...} = ...` bindings
+        // and inside nested control-flow blocks. Real Verum code
+        // (vcs/specs/L1-core/refinement/verification/array_indexing.vr)
+        // uses local-binding refinements that previously escaped
+        // the kernel-recheck because the walker only saw the
+        // function signature.
+        if let verum_common::Maybe::Some(body) = &func.body {
+            match body {
+                verum_ast::decl::FunctionBody::Block(b) => {
+                    walk_ast_block_for_recheck(b, &func.name.name, &mut out);
+                }
+                verum_ast::decl::FunctionBody::Expr(e) => {
+                    walk_ast_expr_for_recheck(e, &func.name.name, &mut out);
+                }
+            }
+        }
         out
     }
 
@@ -271,6 +288,104 @@ fn walk_ast_type_for_recheck(
         TypeKind::Bounded { base, .. } => {
             walk_ast_type_for_recheck(base, function_name, context_kind, out);
         }
+        _ => {}
+    }
+}
+
+// =============================================================================
+// V4 — function-body walker for let-binding refinements (#191)
+// =============================================================================
+
+/// Walk an AST [`Block`] for refinement-type-bearing constructs in
+/// statements + the trailing tail expression. Currently surfaces
+/// refinements in `let` / `let-else` type annotations and
+/// recursively descends into nested control-flow expressions.
+pub(crate) fn walk_ast_block_for_recheck(
+    block: &verum_ast::expr::Block,
+    function_name: &Text,
+    out: &mut List<(Text, Result<(), KernelRecheckError>)>,
+) {
+    for stmt in block.stmts.iter() {
+        match &stmt.kind {
+            verum_ast::stmt::StmtKind::Let { ty, value, .. } => {
+                if let verum_common::Maybe::Some(t) = ty {
+                    walk_ast_type_for_recheck(t, function_name, "let", out);
+                }
+                if let verum_common::Maybe::Some(v) = value {
+                    walk_ast_expr_for_recheck(v, function_name, out);
+                }
+            }
+            verum_ast::stmt::StmtKind::LetElse {
+                ty,
+                value,
+                else_block,
+                ..
+            } => {
+                if let verum_common::Maybe::Some(t) = ty {
+                    walk_ast_type_for_recheck(t, function_name, "let-else", out);
+                }
+                walk_ast_expr_for_recheck(value, function_name, out);
+                walk_ast_block_for_recheck(else_block, function_name, out);
+            }
+            verum_ast::stmt::StmtKind::Expr { expr, .. } => {
+                walk_ast_expr_for_recheck(expr, function_name, out);
+            }
+            verum_ast::stmt::StmtKind::Defer(e)
+            | verum_ast::stmt::StmtKind::Errdefer(e) => {
+                walk_ast_expr_for_recheck(e, function_name, out);
+            }
+            // Item declarations inside blocks (nested fns, types)
+            // are handled by the module-level pipeline pass — we
+            // don't recurse here to avoid double-checking.
+            _ => {}
+        }
+    }
+    if let verum_common::Maybe::Some(tail) = &block.expr {
+        walk_ast_expr_for_recheck(tail, function_name, out);
+    }
+}
+
+/// Walk an AST [`Expr`] for nested control-flow that may carry
+/// further block-scoped refinement types. Most expression shapes
+/// don't carry refinements — only block-shaped constructs (If /
+/// Match arms / Loop / While / For) need recursion.
+pub(crate) fn walk_ast_expr_for_recheck(
+    expr: &Expr,
+    function_name: &Text,
+    out: &mut List<(Text, Result<(), KernelRecheckError>)>,
+) {
+    match &expr.kind {
+        ExprKind::Block(b) => walk_ast_block_for_recheck(b, function_name, out),
+        ExprKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            walk_ast_block_for_recheck(then_branch, function_name, out);
+            if let verum_common::Maybe::Some(e) = else_branch {
+                walk_ast_expr_for_recheck(e, function_name, out);
+            }
+        }
+        ExprKind::Match { arms, .. } => {
+            for arm in arms.iter() {
+                walk_ast_expr_for_recheck(&arm.body, function_name, out);
+            }
+        }
+        ExprKind::Loop { body, .. } => {
+            walk_ast_block_for_recheck(body, function_name, out);
+        }
+        ExprKind::While { body, .. } => {
+            walk_ast_block_for_recheck(body, function_name, out);
+        }
+        ExprKind::For { body, .. } => {
+            walk_ast_block_for_recheck(body, function_name, out);
+        }
+        ExprKind::Paren(inner) => {
+            walk_ast_expr_for_recheck(inner, function_name, out)
+        }
+        // Other shapes (Path / Literal / Binary / Unary / Call /
+        // MethodCall / etc.) don't introduce new bindings or
+        // blocks — leaf for the body walker.
         _ => {}
     }
 }
