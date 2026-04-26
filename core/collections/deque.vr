@@ -31,6 +31,9 @@
 module core.collections.deque;
 mount core.*;
 mount core.base.ordering.{Ordering};
+// Allocator primitives for typed-OOM (#65, #68).  See list.vr for
+// rationale on the explicit mount.
+mount core.base.memory.{try_alloc, try_realloc};
 
 // =============================================================================
 // Deque<T>
