@@ -42,7 +42,7 @@ extern {
     public fn open(path: &Byte, oflag: Int, mode: Int) -> Int;
 
     /// Close file descriptor
-    public fn close(fd: Int) -> Int;
+    public fn close(fd: Int) -> Int32;
 
     /// Read at offset (does not change file position)
     fn pread(fd: Int, buf: &unsafe Byte, nbyte: Int, offset: Int) -> Int;
@@ -317,16 +317,16 @@ extern {
     fn socket(domain: Int, socket_type: Int, protocol: Int) -> Int32;
 
     /// Bind socket
-    fn bind(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int;
+    fn bind(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int32;
 
     /// Listen on socket
-    fn listen(sockfd: Int, backlog: Int) -> Int;
+    fn listen(sockfd: Int, backlog: Int) -> Int32;
 
     /// Accept connection
-    fn accept(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int;
+    fn accept(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int32;
 
     /// Connect socket
-    fn connect(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int;
+    fn connect(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int32;
 
     /// Send data
     fn send(sockfd: Int, buf: &Byte, len: Int, flags: Int) -> Int;
@@ -356,19 +356,19 @@ extern {
     ) -> Int;
 
     /// Get socket option
-    fn getsockopt(sockfd: Int, level: Int, optname: Int, optval: &unsafe Byte, optlen: &mut Int) -> Int;
+    fn getsockopt(sockfd: Int, level: Int, optname: Int, optval: &unsafe Byte, optlen: &mut Int) -> Int32;
 
     /// Set socket option
-    fn setsockopt(sockfd: Int, level: Int, optname: Int, optval: &Byte, optlen: Int) -> Int;
+    fn setsockopt(sockfd: Int, level: Int, optname: Int, optval: &Byte, optlen: Int) -> Int32;
 
     /// Shutdown socket
-    fn shutdown(sockfd: Int, how: Int) -> Int;
+    fn shutdown(sockfd: Int, how: Int) -> Int32;
 
     /// Get socket name (local address)
-    fn getsockname(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int;
+    fn getsockname(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int32;
 
     /// Get peer name (remote address)
-    fn getpeername(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int;
+    fn getpeername(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int32;
 
     // =========================================================================
     // Directory Operations
@@ -1670,7 +1670,8 @@ public fn safe_accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
     } else {
-        Ok(FileDesc(result))
+        // accept returns C int (now declared Int32); FileDesc wraps Int.
+        Ok(FileDesc(result as Int))
     }
 }
 
