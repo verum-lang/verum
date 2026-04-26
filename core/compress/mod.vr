@@ -164,6 +164,19 @@ public fn encode(algo: Algorithm, input: &[Byte], level: Int, out: &mut List<Byt
 public fn decode(algo: Algorithm, input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
     -> Result<Int, CompressError>
 {
+    // Validate max_output_bytes at the dispatch site BEFORE any
+    // intrinsic call. Without this guard a caller passing 0 or
+    // negative could trigger ambiguous backend behaviour:
+    //   * Some C zlib bindings interpret 0 as "no limit", silently
+    //     defeating the zip-bomb defence.
+    //   * Negative values are at best a wraparound trap and at worst
+    //     an unsafe cast through to a size_t parameter.
+    // Reject explicitly so the contract is enforced uniformly across
+    // every backend.
+    if max_output_bytes <= 0 {
+        return Err(CompressError.OutputTooLarge { limit: max_output_bytes });
+    }
+
     match algo {
         Gzip    => mod_gzip.Gzip.decode(input, max_output_bytes, out),
         Deflate => mod_gzip.Deflate.decode(input, max_output_bytes, out),
