@@ -481,3 +481,50 @@ pub fn format_string(source: &str) -> Result<Text> {
         None => Ok(normalize_and_sort(source, &config)),
     }
 }
+
+/// Read source from stdin, format it, write to stdout. The
+/// canonical editor format-on-save protocol — every modern formatter
+/// (rustfmt --emit stdout, gofmt, prettier --stdin-filepath, ruff
+/// format -) implements this so an LSP / editor extension can pipe
+/// the buffer through without a temp-file dance.
+///
+/// `filename_hint` is used for diagnostics and future
+/// project-config resolution; the file at that path is NOT read.
+pub fn execute_stdin(filename_hint: Option<String>) -> Result<()> {
+    use std::io::{Read, Write};
+
+    let mut source = String::new();
+    std::io::stdin()
+        .read_to_string(&mut source)
+        .map_err(|e| CliError::Custom(format!("read stdin: {e}")))?;
+
+    let config = load_config();
+    let formatted: Text = match try_ast_format(&source, &config) {
+        Some(t) => t,
+        None => {
+            // Parse failed — surface a stderr warning so the editor
+            // can show it without polluting the formatted-output
+            // pipe to stdout. We still emit the whitespace-fallback
+            // form to stdout so the editor's "save" doesn't leave
+            // the buffer empty.
+            let hint = filename_hint
+                .as_deref()
+                .map(|p| format!(" ({})", p))
+                .unwrap_or_default();
+            eprintln!(
+                "warning: parse failed{hint}; emitting whitespace-normalised form"
+            );
+            normalize_and_sort(&source, &config)
+        }
+    };
+
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    handle
+        .write_all(formatted.as_str().as_bytes())
+        .map_err(|e| CliError::Custom(format!("write stdout: {e}")))?;
+    handle
+        .flush()
+        .map_err(|e| CliError::Custom(format!("flush stdout: {e}")))?;
+    Ok(())
+}

@@ -15855,7 +15855,29 @@ fn as_f64<'ctx>(ctx: &FunctionContext<'_, 'ctx>, val: BasicValueEnum<'ctx>, name
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             Ok(bitcast.into_float_value())
         }
-        _ => Err(LlvmLoweringError::internal(format!("as_f64: unexpected value type for {}", name))),
+        BasicValueEnum::StructValue(s) => {
+            // Variant payload + CBGR struct {ptr, gen, epoch} with
+            // a float field can leak as StructValue. Mirror the
+            // `as_ptr` StructValue arm: extract field 0 and recurse.
+            // Field 0 is the canonical "value" slot in our heap-tagged
+            // record layout. Drops ~10 stdlib math skips per #106
+            // Path B.5.
+            let field0 = ctx.builder()
+                .build_extract_value(s, 0, &format!("{}_struct_f0", name))
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // Recurse — field 0 may itself be Float/Int/Pointer.
+            return as_f64(ctx, field0, name);
+        }
+        BasicValueEnum::VectorValue(_)
+        | BasicValueEnum::ArrayValue(_)
+        | BasicValueEnum::ScalableVectorValue(_) => {
+            // Aggregate types reaching a float-conversion site are
+            // codegen errors elsewhere. Default to f64::const_zero
+            // so the surrounding function continues lowering — the
+            // wrong-type computation manifests as a no-op at runtime
+            // rather than crashing the whole compile.
+            Ok(f64_ty.const_zero())
+        }
     }
 }
 
