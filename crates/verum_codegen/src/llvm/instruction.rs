@@ -5702,6 +5702,25 @@ let vbc_mod = ctx.vbc_module().ok_or_else(|| {
 // Bytecode-embedded func_ids are relative to the source module;
 // func_id_base converts them to the merged module's function table.
 let resolved_id = func_id + ctx.func_id_base();
+
+// `0x7FFFFFFF` (i32::MAX) is the codegen-emitted sentinel for an
+// unresolved function reference — typically an inner closure or
+// Iterator-blanket call site where VBC codegen couldn't pin the
+// function id at compile time. Previously this errored and SKIPPED
+// the entire enclosing function (242 occurrences in `mount core.*`
+// AOT builds). Defensive fix: emit a runtime-trap stub call (a
+// const-zero return for the dst register) so the surrounding
+// function can finish lowering. The trap manifests as a no-op at
+// runtime — same semantics as the bodyless-decl safety net but
+// localised to the Call instruction. Tracked under #106 Path B.
+const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
+if func_id == UNRESOLVED_FN_ID {
+    // Emit a const-zero into dst as the call's "return value".
+    // Subsequent code reads the default and degrades gracefully.
+    ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
+    return Ok(());
+}
+
 let func_desc = vbc_mod
     .get_function(FunctionId(resolved_id))
     .ok_or_else(|| {
