@@ -686,6 +686,29 @@ fn infer_inner_with_coord(
             }
             Ok(CoreTerm::Universe(UniverseLevel::Prop))
         }
+
+        // V8 (#241) — cohesive modalities ∫ ⊣ ♭ ⊣ ♯ are
+        // **type-level endofunctors**. For a type `A : Type_i`,
+        // each of `∫A`, `♭A`, `♯A` is itself a type at the same
+        // universe level — the modality records the cohesive
+        // modal structure without bumping the universe. The
+        // operand must be in some universe (Type_i / Prop); the
+        // kernel reports `KernelError::TypeMismatch` otherwise.
+        //
+        // The triple-adjunction laws ∫ ⊣ ♭ ⊣ ♯ are framework
+        // axioms (`schreiber_dcct`); the kernel admits the type
+        // formers unconditionally, leaving the algebraic content
+        // to the framework system.
+        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
+            let operand_ty = infer_inner(ctx, t, axioms, inductives)?;
+            match &operand_ty {
+                CoreTerm::Universe(level) => Ok(CoreTerm::Universe(level.clone())),
+                _ => Err(KernelError::TypeMismatch {
+                    expected: CoreType::Universe(UniverseLevel::Concrete(0)),
+                    actual: shape_of(&operand_ty),
+                }),
+            }
+        }
     }
 }
 

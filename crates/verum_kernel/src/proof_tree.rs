@@ -732,6 +732,12 @@ pub enum KernelRule {
     KModalBox,
     KModalDiamond,
     KModalBigAnd,
+    /// V8 (#241) — cohesive shape modality `∫A` (Schreiber DCCT).
+    KShape,
+    /// V8 (#241) — cohesive flat modality `♭A` (Schreiber DCCT).
+    KFlat,
+    /// V8 (#241) — cohesive sharp modality `♯A` (Schreiber DCCT).
+    KSharp,
 }
 
 impl KernelRule {
@@ -771,6 +777,9 @@ impl KernelRule {
             KernelRule::KModalBox => "K-ModalBox",
             KernelRule::KModalDiamond => "K-ModalDiamond",
             KernelRule::KModalBigAnd => "K-ModalBigAnd",
+            KernelRule::KShape => "K-Shape",
+            KernelRule::KFlat => "K-Flat",
+            KernelRule::KSharp => "K-Sharp",
         }
     }
 
@@ -1192,6 +1201,25 @@ fn inference_rule_and_premises(
                 }
             }
             KernelRule::KModalBigAnd
+        }
+        // V8 (#241) — cohesive modalities ∫ ⊣ ♭ ⊣ ♯.
+        CoreTerm::Shape(t) => {
+            if let Some(p) = record_inference(ctx, t, axioms) {
+                premises.push(p);
+            }
+            KernelRule::KShape
+        }
+        CoreTerm::Flat(t) => {
+            if let Some(p) = record_inference(ctx, t, axioms) {
+                premises.push(p);
+            }
+            KernelRule::KFlat
+        }
+        CoreTerm::Sharp(t) => {
+            if let Some(p) = record_inference(ctx, t, axioms) {
+                premises.push(p);
+            }
+            KernelRule::KSharp
         }
     };
     (rule, premises)
