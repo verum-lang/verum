@@ -42,7 +42,6 @@
 //! );
 //! ```
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use z3::ast::{Ast, Bool, Dynamic, Int, Real};
@@ -463,10 +462,6 @@ pub struct PatternGenerator {
 
     /// Statistics tracking
     stats: PatternStats,
-
-    /// Cache of generated patterns
-    #[allow(dead_code)] // Will be used for pattern caching optimization
-    pattern_cache: HashMap<Text, List<Pattern>>,
 }
 
 impl PatternGenerator {
@@ -475,7 +470,6 @@ impl PatternGenerator {
         Self {
             config,
             stats: PatternStats::default(),
-            pattern_cache: HashMap::new(),
         }
     }
 
@@ -1090,18 +1084,6 @@ struct PatternTermCollector {
 
     /// Current expression depth (for tracking nested patterns)
     current_depth: usize,
-
-    /// Function argument information: maps function name to list of (arg_name, sort)
-    #[allow(dead_code)] // Will be used for multi-argument pattern generation
-    function_arg_info: Map<Text, List<(Text, Sort)>>,
-
-    /// Right-hand side variable names for binary operations
-    #[allow(dead_code)] // Will be used for binary operator pattern generation
-    binary_op_rhs: Map<Text, List<Text>>,
-
-    /// Variable names used as index expressions
-    #[allow(dead_code)] // Will be used for array access pattern generation
-    index_variable_names: List<Text>,
 }
 
 impl PatternTermCollector {
@@ -1114,23 +1096,9 @@ impl PatternTermCollector {
             field_accesses: Set::new(),
             has_index_access: false,
             current_depth: 0,
-            function_arg_info: Map::new(),
-            binary_op_rhs: Map::new(),
-            index_variable_names: List::new(),
         }
     }
 
-    /// Extract variable name from an expression if it's a simple path
-    #[allow(dead_code)] // Part of pattern extraction API
-    fn extract_var_name(&self, expr: &Expr) -> Maybe<Text> {
-        match &expr.kind {
-            ExprKind::Path(path) => {
-                path.as_ident().map(|ident| Text::from(ident.name.as_str()))
-            }
-            ExprKind::Paren(inner) => self.extract_var_name(inner),
-            _ => Maybe::None,
-        }
-    }
 
     /// Collect pattern terms from an expression
     fn collect(&mut self, expr: &Expr) {
