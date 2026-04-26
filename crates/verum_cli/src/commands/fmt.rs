@@ -114,7 +114,7 @@ pub fn execute(check: bool, verbose: bool) -> Result<()> {
     }
 
     let config = load_config();
-    let mut total_files = 0;
+    let total_files;
     let mut formatted_files = 0;
     let mut changed_files = List::new();
     let mut error_files = List::new();
@@ -130,34 +130,63 @@ pub fn execute(check: bool, verbose: bool) -> Result<()> {
         return Err(CliError::Custom("No src/ or core/ directory found".into()));
     }
 
-    for search_dir in &search_dirs {
-        for entry in WalkDir::new(search_dir)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if path.is_file() && is_verum_file(path) {
-                total_files += 1;
+    // Discover every Verum file across the search roots first, then
+    // process them in parallel via rayon. Each file is independent:
+    // the formatter is pure on (path, content, config), and the only
+    // shared state is the result aggregator. Output is sorted into
+    // a deterministic order before reporting so 1-thread and 8-thread
+    // runs produce byte-identical reports.
+    use rayon::prelude::*;
+    let files: Vec<PathBuf> = search_dirs
+        .iter()
+        .flat_map(|d| {
+            WalkDir::new(d)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .map(|e| e.into_path())
+                .filter(|p| p.is_file() && is_verum_file(p))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    total_files = files.len();
 
-                match format_file(path, &config, check, verbose) {
-                    Ok(FormatResult::Unchanged) => {}
-                    Ok(FormatResult::Changed { diff }) => {
-                        formatted_files += 1;
-                        changed_files.push(path.to_path_buf());
-                        if verbose {
-                            if let Some(d) = &diff {
-                                println!("{}", d);
-                            }
-                            ui::info(&format!("Formatted: {}", path.display()));
-                        }
+    enum FmtOutcome {
+        Unchanged,
+        Changed { diff: Option<String> },
+        Failed(String),
+    }
+    let mut results: Vec<(PathBuf, FmtOutcome)> = files
+        .par_iter()
+        .map(|path| {
+            let outcome = match format_file(path, &config, check, verbose) {
+                Ok(FormatResult::Unchanged) => FmtOutcome::Unchanged,
+                Ok(FormatResult::Changed { diff }) => FmtOutcome::Changed { diff },
+                Err(e) => FmtOutcome::Failed(e.to_string()),
+            };
+            (path.clone(), outcome)
+        })
+        .collect();
+    // Deterministic order regardless of thread interleaving.
+    results.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (path, outcome) in results {
+        match outcome {
+            FmtOutcome::Unchanged => {}
+            FmtOutcome::Changed { diff } => {
+                formatted_files += 1;
+                changed_files.push(path.clone());
+                if verbose {
+                    if let Some(d) = &diff {
+                        println!("{}", d);
                     }
-                    Err(e) => {
-                        error_files.push((path.to_path_buf(), e.to_string()));
-                        if verbose {
-                            ui::error(&format!("Failed: {}: {}", path.display(), e));
-                        }
-                    }
+                    ui::info(&format!("Formatted: {}", path.display()));
+                }
+            }
+            FmtOutcome::Failed(e) => {
+                error_files.push((path.clone(), e.clone()));
+                if verbose {
+                    ui::error(&format!("Failed: {}: {}", path.display(), e));
                 }
             }
         }
