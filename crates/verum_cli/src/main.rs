@@ -462,6 +462,12 @@ enum Commands {
         /// without running any rules.
         #[clap(long)]
         clean_cache: bool,
+        /// Fail the run when more than N warnings are emitted (after
+        /// severity_map / per-file overrides / --severity / baseline
+        /// filtering). `0` is equivalent to `--deny-warnings`. Errors
+        /// always fail the run regardless of N.
+        #[clap(long, value_name = "N")]
+        max_warnings: Option<usize>,
         /// Watch the project for changes and re-lint affected files.
         /// The first run lints everything; subsequent runs use the
         /// per-file cache so untouched files cost ~nothing. Press
@@ -1542,6 +1548,7 @@ fn run_command(cli: Cli) -> Result<()> {
             threads,
             no_cache,
             clean_cache,
+            max_warnings,
             watch,
             watch_clear,
             feature_overrides,
@@ -1610,13 +1617,14 @@ fn run_command(cli: Cli) -> Result<()> {
                     watch_clear,
                 )
             } else {
-                commands::lint::run_extended(
+                commands::lint::run_extended_full(
                     fix,
                     deny_warnings,
                     fmt,
                     profile_name,
                     since_ref,
                     severity_filter,
+                    max_warnings,
                 )
             }
         }
