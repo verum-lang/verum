@@ -648,6 +648,164 @@ pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
     Ok(())
 }
 
+/// Entry point for `verum audit --framework-conflicts [--format FORMAT]`.
+///
+/// Walks every `@framework(corpus, ...)` marker in the project,
+/// collects the distinct corpus identifiers, and audits them
+/// against the well-known incompatibility matrix
+/// (`verum_verification::KNOWN_INCOMPATIBLE_PAIRS`). Each match
+/// prints the conflict reason + literature citation.
+///
+/// Exits non-zero if any incompatible pair is found — the project's
+/// axiom bundle would derive False, breaking every theorem (per
+/// VUVA §4.5 and the framework-compat module's V0 catalogue).
+///
+/// V0 (this revision) reads conflicts from the static Rust matrix
+/// shipped at `crates/verum_verification/src/framework_compat.rs`.
+/// V1 (#205) will add per-package declarative conflicts so the
+/// matrix doesn't have to be updated centrally for every new
+/// framework package.
+pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Auditing framework-package compatibility");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    // Collect distinct corpora from every @framework(corpus, "...")
+    // marker in the project. We reuse the framework-axioms walker
+    // here (its by_framework BTreeMap key IS the corpus name).
+    let mut by_framework: BTreeMap<Text, Vec<FrameworkUsage>> = BTreeMap::new();
+    let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        for item in &module.items {
+            let (kind_label, item_name, decl_attrs): (
+                &'static str,
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                ItemKind::Theorem(decl) => {
+                    ("theorem", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Lemma(decl) => {
+                    ("lemma", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Corollary(decl) => {
+                    ("corollary", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Axiom(decl) => {
+                    ("axiom", decl.name.name.clone(), &decl.attributes)
+                }
+                _ => continue,
+            };
+            collect_framework_markers_from(
+                &item.attributes,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_framework,
+                &mut malformed,
+            );
+            collect_framework_markers_from(
+                decl_attrs,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_framework,
+                &mut malformed,
+            );
+        }
+    }
+
+    let corpora: Vec<Text> = by_framework.keys().cloned().collect();
+    let conflicts = verum_verification::audit_framework_set(&corpora);
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Framework-compatibility audit");
+            println!("─────────────────────────────────────────");
+            println!("Files parsed:        {}", parsed_files);
+            println!("Files skipped:       {}", skipped_files);
+            println!("Distinct corpora:    {}", corpora.len());
+            for corpus in &corpora {
+                println!("  • {}", corpus.as_str());
+            }
+            println!();
+            if conflicts.is_empty() {
+                println!(
+                    "✓ No incompatible-pair conflicts found among {} corpora.",
+                    corpora.len()
+                );
+            } else {
+                println!("Conflicts: {}", conflicts.len());
+                for d in &conflicts {
+                    println!("  ✗ {}", d.message.as_str());
+                }
+            }
+        }
+        AuditFormat::Json => {
+            let corpora_json: Vec<String> = corpora
+                .iter()
+                .map(|c| format!("\"{}\"", c.as_str().replace('"', "\\\"")))
+                .collect();
+            let conflicts_json: Vec<String> = conflicts
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{{\"rule\":\"{}\",\"severity\":\"{}\",\"message\":\"{}\"}}",
+                        d.rule,
+                        d.severity.as_str(),
+                        d.message.as_str().replace('"', "\\\"")
+                    )
+                })
+                .collect();
+            println!(
+                "{{\"schema_version\":1,\"parsed\":{},\"skipped\":{},\
+                 \"corpora\":[{}],\"conflicts\":[{}]}}",
+                parsed_files,
+                skipped_files,
+                corpora_json.join(","),
+                conflicts_json.join(",")
+            );
+        }
+    }
+
+    if !conflicts.is_empty() {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "{} framework-compatibility conflict(s) — see report above",
+                conflicts.len()
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Enumerate the 18 primitive inference rules implemented by
 /// `verum_kernel`, corresponding to the rule table in
 /// `docs/verification/trusted-kernel.md`.
