@@ -102,17 +102,17 @@ fn rose_tree_under_named_inductive_is_strictly_positive() {
 fn registry_admits_well_formed_inductive() {
     // Register Nat: Zero | Succ(Nat).
     let mut reg = InductiveRegistry::new();
-    let result = reg.register(RegisteredInductive {
-        name: Text::from("Nat"),
-        params: List::new(),
-        constructors: List::from_iter(vec![
+    let result = reg.register(RegisteredInductive::new(
+        Text::from("Nat"),
+        List::new(),
+        List::from_iter(vec![
             ConstructorSig { name: Text::from("Zero"), arg_types: List::new() },
             ConstructorSig {
                 name: Text::from("Succ"),
                 arg_types: List::from_iter(vec![ind("Nat")]),
             },
         ]),
-    });
+    ));
     assert!(result.is_ok());
     assert!(matches!(reg.get("Nat"), verum_common::Maybe::Some(_)));
 }
@@ -178,14 +178,14 @@ fn registry_rejects_non_positive_declaration() {
     // Try to register the Berardi witness; the kernel must refuse.
     let mut reg = InductiveRegistry::new();
     let bad_arrow = pi(ind("Bad"), CoreTerm::Var(Text::from("A")));
-    let result = reg.register(RegisteredInductive {
-        name: Text::from("Bad"),
-        params: List::new(),
-        constructors: List::from_iter(vec![ConstructorSig {
+    let result = reg.register(RegisteredInductive::new(
+        Text::from("Bad"),
+        List::new(),
+        List::from_iter(vec![ConstructorSig {
             name: Text::from("Wrap"),
             arg_types: List::from_iter(vec![bad_arrow]),
         }]),
-    });
+    ));
     match result {
         Err(KernelError::PositivityViolation { type_name, constructor, .. }) => {
             assert_eq!(type_name.as_str(), "Bad");
@@ -200,14 +200,14 @@ fn registry_rejects_non_positive_declaration() {
 #[test]
 fn registry_rejects_duplicate_inductive_name() {
     let mut reg = InductiveRegistry::new();
-    let nat = RegisteredInductive {
-        name: Text::from("Nat"),
-        params: List::new(),
-        constructors: List::from_iter(vec![ConstructorSig {
+    let nat = RegisteredInductive::new(
+        Text::from("Nat"),
+        List::new(),
+        List::from_iter(vec![ConstructorSig {
             name: Text::from("Zero"),
             arg_types: List::new(),
         }]),
-    };
+    );
     reg.register(nat.clone()).expect("first registration must succeed");
     match reg.register(nat) {
         Err(KernelError::DuplicateInductive(name)) => assert_eq!(name.as_str(), "Nat"),

@@ -151,7 +151,7 @@ pub use axiom::{
 /// `infer` function plus the `check` / `verify` / `verify_full`
 /// shells callers use to gate proof admission.
 pub mod infer;
-pub use infer::{check, infer, verify, verify_full};
+pub use infer::{check, infer, infer_with_inductives, verify, verify_full};
 
 /// Core syntactic surface — `CoreTerm`, `CoreType`, `UniverseLevel`.
 /// Split per #198 V7. The explicit calculus the kernel checks; every
