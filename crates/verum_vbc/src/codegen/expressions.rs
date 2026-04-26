@@ -4877,8 +4877,15 @@ impl VbcCodegen {
             // `super.darwin.tls.ctx_get(slot)` inside
             // `core/sys/common.vr::ctx_get` into infinite self-recursion.
             // Matches the guard in `compile_call`.
-            let is_qualified_module_path = !parts.is_empty()
-                && (parts[0] == "super" || parts[0] == "cog" || parts[0] == ".");
+            //
+            // Inspect the *raw* (pre-resolution) flatten via
+            // `path_was_rooted_module_path` — `try_flatten_module_path_resolved`
+            // strips the rooted prefix when it can translate it to an
+            // absolute path, so checking `parts[0]` after resolution
+            // would falsely report `false` for paths that started with
+            // `super`/`cog`/`.` and let the simple-name fallback fire
+            // on a name that resolves to the wrong module.
+            let is_qualified_module_path = self.path_was_rooted_module_path(receiver);
             if !is_qualified_module_path {
                 if let Some(func_info) = self.ctx.lookup_function(&method.name).cloned()
                     && func_info.param_count == args.len() {
@@ -10317,6 +10324,27 @@ impl VbcCodegen {
         }
     }
 
+    /// Returns `true` if `expr` flattens to a module path that started
+    /// with a rooted prefix (`super`, `cog`, or `.`).  Use this in
+    /// preference to inspecting `parts[0]` after
+    /// `try_flatten_module_path_resolved`, because the *resolved*
+    /// variant strips the rooted prefix when resolution succeeds — so
+    /// `super.super.sys.X` becomes `["core","sys","X"]` and `parts[0]
+    /// == "super"` would falsely report `false`, sending the codegen
+    /// down the "compile receiver as a value" path which then bottoms
+    /// out at `compile_simple_path` with the original `PathSegment::Super`
+    /// and emits "standalone super/crate/relative".
+    ///
+    /// Hot path: only called from field-access / call-site fallback
+    /// branches, so the extra raw flatten is unmeasurable noise.
+    pub(super) fn path_was_rooted_module_path(&self, expr: &Expr) -> bool {
+        self.try_flatten_module_path(expr)
+            .as_ref()
+            .and_then(|raw| raw.first().map(String::as_str))
+            .map(|first| first == "super" || first == "cog" || first == ".")
+            .unwrap_or(false)
+    }
+
     /// Resolve a path head that starts with `super`, `cog`, or `.` to the
     /// absolute module path it denotes, using the *current* module name as
     /// reference. Returns `Some(absolute_parts)` when the path was rooted
@@ -10496,10 +10524,20 @@ impl VbcCodegen {
                         args: crate::instruction::RegRange::new(Reg(0), 0),
                     });
                 } else {
-                    // Regular function reference
-                    self.ctx.emit(Instruction::LoadI {
+                    // Regular function reference — emit NewClosure with zero
+                    // captures. This produces a proper closure value that
+                    // CallClosure / map_err / fold can dispatch on. Previously
+                    // we emitted `LoadI { value: func_info.id.0 as i64 }`,
+                    // which left an Int in the destination register; the AOT
+                    // lowering of a subsequent Result-tag extraction then
+                    // treated the Int as a pointer base, computing
+                    // `[null + func_id*8]` and SEGVing (#110). NewClosure
+                    // matches the simple-name path at line ~1072 so HOFs
+                    // like `.map_err(IoError.from_os)` work uniformly.
+                    self.ctx.emit(Instruction::NewClosure {
                         dst: dest,
-                        value: func_info.id.0 as i64,
+                        func_id: func_info.id.0,
+                        captures: vec![],
                     });
                 }
                 return Ok(Some(dest));
@@ -10526,9 +10564,14 @@ impl VbcCodegen {
                         args: crate::instruction::RegRange::new(Reg(0), 0),
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI {
+                    // #110 — Verum-style qualified HOF reference. Emit a
+                    // closure value rather than the raw func_id Int so the
+                    // AOT lowering treats it as a callable, not a pointer
+                    // base for `[null + func_id*8]` reads.
+                    self.ctx.emit(Instruction::NewClosure {
                         dst: dest,
-                        value: func_info.id.0 as i64,
+                        func_id: func_info.id.0,
+                        captures: vec![],
                     });
                 }
                 return Ok(Some(dest));
@@ -10547,8 +10590,14 @@ impl VbcCodegen {
             // recursion. Emit the same nil stub the later branch already
             // produces — the real symbol resolution happens after all
             // platform modules have been registered.
-            let is_qualified_module_path =
-                parts[0] == "super" || parts[0] == "cog" || parts[0] == ".";
+            //
+            // Inspect the *raw* (pre-resolution) flatten via
+            // `path_was_rooted_module_path` — `try_flatten_module_path_resolved`
+            // strips the rooted prefix when it can translate it to an
+            // absolute path, so `parts[0]` after resolution is the
+            // first translated segment ("core", "sys", …) and the
+            // intent-to-be-rooted information is lost.
+            let is_qualified_module_path = self.path_was_rooted_module_path(base);
 
             if !is_qualified_module_path {
                 // Try just the last segment (function name) as a simple function lookup.
@@ -10573,9 +10622,12 @@ impl VbcCodegen {
                             args: crate::instruction::RegRange::new(Reg(0), 0),
                         });
                     } else {
-                        self.ctx.emit(Instruction::LoadI {
+                        // Function-reference HOF case (#110). See NewClosure
+                        // comment at the qualified-rust branch above.
+                        self.ctx.emit(Instruction::NewClosure {
                             dst: dest,
-                            value: func_info.id.0 as i64,
+                            func_id: func_info.id.0,
+                            captures: vec![],
                         });
                     }
                     return Ok(Some(dest));
@@ -10733,10 +10785,11 @@ impl VbcCodegen {
                                     args: crate::instruction::RegRange::new(Reg(0), 0),
                                 });
                             } else {
-                                // Function reference
-                                self.ctx.emit(Instruction::LoadI {
+                                // #110 — type-alias-resolved HOF reference.
+                                self.ctx.emit(Instruction::NewClosure {
                                     dst: dest,
-                                    value: func_info.id.0 as i64,
+                                    func_id: func_info.id.0,
+                                    captures: vec![],
                                 });
                             }
                             return Ok(Some(dest));
@@ -10757,9 +10810,11 @@ impl VbcCodegen {
                                     args: crate::instruction::RegRange::new(Reg(0), 0),
                                 });
                             } else {
-                                self.ctx.emit(Instruction::LoadI {
+                                // #110 — simple-name HOF reference.
+                                self.ctx.emit(Instruction::NewClosure {
                                     dst: dest,
-                                    value: func_info.id.0 as i64,
+                                    func_id: func_info.id.0,
+                                    captures: vec![],
                                 });
                             }
                             return Ok(Some(dest));
