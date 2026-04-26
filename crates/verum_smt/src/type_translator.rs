@@ -71,8 +71,6 @@ use verum_types::ty::{
 use z3::ast::{Ast, Bool, Dynamic, Int};
 use z3::{DatatypeBuilder, FuncDecl, Sort, Symbol};
 
-use crate::context::Context;
-
 /// Error during type translation to Z3
 #[derive(Debug, Clone)]
 pub enum TypeTranslationError {
@@ -91,8 +89,11 @@ pub enum TypeTranslationError {
 /// Translator for verum_types::Type to Z3
 ///
 /// Handles dependent types, inductive types, and formal proof terms.
-pub struct TypeTranslator<'ctx> {
-    context: &'ctx Context,
+///
+/// Z3 0.19+ stores Context in thread-local storage, so no explicit context
+/// reference is held — sorts are bound to the current thread's context at
+/// creation time.
+pub struct TypeTranslator {
     /// Cache of translated types (type string -> Z3 sort)
     type_cache: Map<Text, Sort>,
     /// Inductive datatype sorts
@@ -103,11 +104,10 @@ pub struct TypeTranslator<'ctx> {
     quantity_map: Map<Text, Quantity>,
 }
 
-impl<'ctx> TypeTranslator<'ctx> {
+impl TypeTranslator {
     /// Create a new type translator
-    pub fn new(context: &'ctx Context) -> Self {
+    pub fn new() -> Self {
         Self {
-            context,
             type_cache: Map::new(),
             inductive_sorts: Map::new(),
             universe_sorts: Map::new(),
@@ -867,8 +867,7 @@ mod tests {
 
     #[test]
     fn test_basic_type_translation() {
-        let ctx = Context::new();
-        let mut translator = TypeTranslator::new(&ctx);
+        let mut translator = TypeTranslator::new();
 
         // Test primitive types
         assert!(translator.translate_type_to_sort(&Type::Int).is_ok());
@@ -878,8 +877,7 @@ mod tests {
 
     #[test]
     fn test_dependent_types() {
-        let ctx = Context::new();
-        let mut translator = TypeTranslator::new(&ctx);
+        let mut translator = TypeTranslator::new();
 
         // Test Pi type
         let pi_type = Type::Pi {
@@ -895,8 +893,7 @@ mod tests {
 
     #[test]
     fn test_quantity_tracking() {
-        let ctx = Context::new();
-        let mut translator = TypeTranslator::new(&ctx);
+        let mut translator = TypeTranslator::new();
 
         let quantified = Type::Quantified {
             inner: Box::new(Type::Int),
@@ -916,8 +913,7 @@ mod tests {
     /// variants (Unknown), a cubical variant (Interval), and a record.
     #[test]
     fn test_cycle_break_variants() {
-        let ctx = Context::new();
-        let mut translator = TypeTranslator::new(&ctx);
+        let mut translator = TypeTranslator::new();
 
         // Generic like List<Int>
         let list_int = Type::Generic {
