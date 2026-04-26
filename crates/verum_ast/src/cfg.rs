@@ -537,21 +537,59 @@ impl CfgEvaluator {
     ///
     /// Returns `true` if all @cfg attributes on the item evaluate to true,
     /// or if the item has no @cfg attributes.
+    ///
+    /// **Fail-open on parse failure**: when an `@cfg(...)` predicate
+    /// is structurally malformed (e.g. `@cfg(...)` with no args, or
+    /// `@cfg(some_macro_invocation())` instead of an identifier /
+    /// key-value / `all`/`any`/`not` form), the attribute is silently
+    /// ignored and the item is included.  This is intentional for
+    /// forward-compatibility with future cfg dialect extensions, but
+    /// callers that want to surface the failure should use
+    /// [`Self::should_include_with_failures`] which returns the list
+    /// of unparseable predicates alongside the include decision.
     pub fn should_include(&self, attrs: &[crate::attr::Attribute]) -> bool {
+        let (include, _) = self.should_include_with_failures(attrs);
+        include
+    }
+
+    /// Same as [`should_include`] but additionally returns the list
+    /// of `@cfg` attributes whose predicate failed to parse.  An
+    /// empty `Vec` means every cfg attribute on the item parsed
+    /// cleanly.  Non-empty means at least one cfg was silently
+    /// ignored — callers (lints, diagnostics, strict-mode CI gates)
+    /// can choose to surface this as a warn or error.
+    ///
+    /// Architectural note: the include decision still falls through
+    /// on parse failure (fail-open) for forward-compatibility.  This
+    /// method just hands the failures back instead of swallowing
+    /// them so observability isn't compromised.
+    pub fn should_include_with_failures<'a>(
+        &self,
+        attrs: &'a [crate::attr::Attribute],
+    ) -> (bool, Vec<&'a crate::attr::Attribute>) {
+        let mut failures: Vec<&'a crate::attr::Attribute> = Vec::new();
         for attr in attrs {
             if attr.name.as_str() == "cfg" {
-                if let Maybe::Some(args) = &attr.args {
-                    if let Some(first_arg) = args.first() {
-                        if let Maybe::Some(predicate) = parse_cfg_predicate(first_arg) {
-                            if !self.evaluate(&predicate) {
-                                return false;
-                            }
+                let parsed = match &attr.args {
+                    Maybe::Some(args) => match args.first() {
+                        Some(first_arg) => parse_cfg_predicate(first_arg),
+                        None => Maybe::None,
+                    },
+                    Maybe::None => Maybe::None,
+                };
+                match parsed {
+                    Maybe::Some(predicate) => {
+                        if !self.evaluate(&predicate) {
+                            return (false, failures);
                         }
+                    }
+                    Maybe::None => {
+                        failures.push(attr);
                     }
                 }
             }
         }
-        true
+        (true, failures)
     }
 
     /// Filter a list of declarations, keeping only those that pass cfg checks.

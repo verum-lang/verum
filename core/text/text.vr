@@ -25,6 +25,10 @@
 module core.text.text;
 mount core.*;
 
+// Allocator primitives for typed-OOM (#65, #68).  See list.vr for
+// rationale on the explicit mount.
+mount core.base.memory.{try_alloc, try_realloc};
+
 // Import intrinsics as functions
 mount core.intrinsics.runtime.text.{
     text_from_static, utf8_decode_char as intrinsic_utf8_decode_char,

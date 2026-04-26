@@ -24,6 +24,10 @@
 
 module core.collections.map;
 mount core.*;
+// Allocator primitives for typed-OOM (#65, #68).  See list.vr for
+// rationale — `mount core.*` doesn't surface these via the re-export
+// chain in `core/base/mod.vr` for unqualified function references.
+mount core.base.memory.{try_alloc, try_alloc_zeroed, try_realloc};
 
 // =============================================================================
 // Constants

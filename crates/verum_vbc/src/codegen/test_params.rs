@@ -350,11 +350,19 @@ fn test_compile_stdlib_iterator() {
 }
 
 /// Tests compilation of core/collections/list.vr
+///
+/// Uses `compile_stdlib_file_with_mounts` because `list.vr` brings
+/// the typed-OOM allocator primitives (`try_alloc` / `try_realloc`)
+/// in via `mount core.base.memory.{ … }`.  Without mount resolution
+/// those references are undefined — a test-harness gap, not a real
+/// codegen bug.
 #[test]
 fn test_compile_stdlib_list() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/list.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile list.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile list.vr");
     } else {
         println!("Skipping test: {} not found", path);
     }
@@ -388,29 +396,45 @@ fn test_compile_stdlib_primitives() {
 }
 
 /// Tests compilation of core/text/text.vr
+///
+/// Uses `compile_stdlib_file_with_mounts` (same rationale as
+/// `test_compile_stdlib_list`).
 #[test]
 fn test_compile_stdlib_text() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/text/text.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile text.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile text.vr");
     }
 }
 
 /// Tests compilation of core/collections/map.vr
+///
+/// Uses `compile_stdlib_file_with_mounts` for the same reason as
+/// `test_compile_stdlib_list`: `map.vr` mounts `try_alloc` /
+/// `try_realloc` from `core.base.memory`.
 #[test]
 fn test_compile_stdlib_map() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/map.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile map.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile map.vr");
     }
 }
 
 /// Tests compilation of core/collections/set.vr
+///
+/// Uses `compile_stdlib_file_with_mounts` (same rationale as
+/// `test_compile_stdlib_list`).
 #[test]
 fn test_compile_stdlib_set() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/set.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile set.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile set.vr");
     }
 }
 
@@ -496,11 +520,16 @@ fn test_compile_stdlib_memory() {
 }
 
 /// Tests compilation of core/collections/deque.vr
+///
+/// Uses `compile_stdlib_file_with_mounts` (same rationale as
+/// `test_compile_stdlib_list`).
 #[test]
 fn test_compile_stdlib_deque() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/deque.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile deque.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile deque.vr");
     }
 }
 
