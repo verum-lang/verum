@@ -63,37 +63,55 @@ const STDERR_FD: Int = 2;
 
 /// Convert an integer to decimal string representation.
 /// Returns the number of bytes written to the buffer.
+///
+/// Correctly handles `Int.MIN` (= -9223372036854775808): the
+/// previous `let val = if negative { -value }` pattern silently
+/// overflowed back to `Int.MIN` in two's-complement and the
+/// `while val > 0` loop skipped — producing "-" with no digits.
+/// This site is THE canonical integer formatter for the entire
+/// stdlib (used by `Formatter::write_int_decimal`,
+/// `panic_fmt`, every `Display for Int` / `Debug for Int`
+/// path), so the fix here cascades broadly.
+///
+/// Magnitude is accumulated in `UInt64` so every `Int`'s
+/// absolute value is exactly representable.
 @inline
 fn int_to_string(value: Int, buf: &mut [Byte]) -> Int {
     if buf.len() == 0 {
         return 0;
     }
 
-    // Handle zero case
     if value == 0 {
         buf[0] = '0' as Byte;
         return 1;
     }
 
     let negative = value < 0;
-    let mut val = if negative { -value } else { value };
+    // Two's-complement magnitude: `(~value as UInt64) + 1` is
+    // exact for every Int including Int.MIN (whose magnitude
+    // 2^63 fits in UInt64 but not in Int).
+    let mut mag: UInt64 = if negative {
+        (((!value) as UInt64) + (1 as UInt64))
+    } else {
+        value as UInt64
+    };
 
-    // Write digits in reverse order
+    // Write digits in reverse order.
     let mut pos = 0;
-    while val > 0 && pos < buf.len() {
-        let digit = (val % 10) as Byte;
+    while mag > (0 as UInt64) && pos < buf.len() {
+        let digit = (mag % (10 as UInt64)) as Byte;
         buf[pos] = '0' as Byte + digit;
-        val = val / 10;
+        mag = mag / (10 as UInt64);
         pos = pos + 1;
     }
 
-    // Add sign if negative
+    // Add sign if negative.
     if negative && pos < buf.len() {
         buf[pos] = '-' as Byte;
         pos = pos + 1;
     }
 
-    // Reverse the buffer in place
+    // Reverse the buffer in place.
     let mut i = 0;
     let mut j = pos - 1;
     while i < j {
@@ -528,11 +546,20 @@ implement TextFormatter {
     }
 
     // Format integer in specified base.
+    //
+    // Correctly handles `Int.MIN`: magnitude is accumulated in
+    // `UInt64` (same idiom as `int_to_string` above) so the
+    // previous `if negative { -n }` overflow no longer silently
+    // emits "-" with no digits.
+    //
+    // Replaces the old `Text → List<Char> → Text` reverse-and-
+    // collect chain (~4× allocations + ~3× memcpy) with a
+    // 64-byte stack buffer + single `Text::push_str` of the
+    // assembled digit slice.
     fn write_int_base(&mut self, n: Int, base: Int, uppercase: Bool) -> Result<(), FormatError> {
         let negative = n < 0;
-        let mut val = if negative { -n } else { n };
 
-        if val == 0 {
+        if n == 0 {
             return self.write_str("0");
         }
 
@@ -542,18 +569,26 @@ implement TextFormatter {
             "0123456789abcdef"
         };
 
-        let mut buf = Text.new();
-        while val > 0 {
-            let digit = (val % base) as Int;
-            buf.push(digits.nth_char(digit).unwrap());
-            val = val / base;
-        }
+        // Two's-complement magnitude in unsigned 64-bit; exact
+        // for every Int including Int.MIN.
+        let mut mag: UInt64 = if negative {
+            (((!n) as UInt64) + (1 as UInt64))
+        } else {
+            n as UInt64
+        };
+        let base_u: UInt64 = base as UInt64;
 
-        // Reverse
-        let mut res = Text.new();
-        for ch in buf.chars().collect<List<_>>().into_iter().rev() {
-            res.push(ch);
+        // Worst case: base=2 over 64-bit unsigned ⇒ 64 digits.
+        let mut buf: [Byte; 64] = [0; 64];
+        let mut i: Int = 63;
+        while mag > (0 as UInt64) {
+            let digit = (mag % base_u) as Int;
+            buf[i] = digits.nth_char(digit).unwrap() as Byte;
+            mag = mag / base_u;
+            i = i - 1;
         }
+        let start = i + 1;
+        let res = Text.from_utf8_unchecked(&buf[start..64]);
 
         // Add prefix for alternate form
         let prefix = if self.spec.alternate {
@@ -1161,6 +1196,72 @@ fn float_to_exp(value: Float, precision: Int, uppercase: Bool) -> Text {
         }
         result
     }
+}
+
+// =============================================================================
+// Canonical integer-to-text conversion (#100, task #16)
+// =============================================================================
+//
+// These two functions are the canonical entry-points for any
+// caller that needs a `Text` from an `Int` (decimal or
+// arbitrary radix). They route through `int_to_string` (the
+// `Int.MIN`-safe `UInt64`-magnitude implementation) and the
+// `format_radix_signed` style backend, eliminating the
+// per-file `int_to_text` / `append_int` / `push_pad` /
+// `int_to_decimal` helpers scattered across `core/database`,
+// `core/database/sqlite`, `core/base/primitives` etc. Each of
+// those previously carried its own copy of the negate-and-loop
+// idiom, which silently produced "-" with no digits for
+// `Int.MIN` (the `-Int.MIN ⇒ Int.MIN` two's-complement
+// asymmetry — see commits b274ab8b / 985336e3 / 35066491 /
+// f17f34ca for the per-site fixes).
+//
+// New code should use these helpers directly; the per-file
+// copies in stdlib subgraphs will be migrated to call into
+// them as task #16 follow-up.
+
+/// Format `n` as a decimal `Text` (sign-prefixed for
+/// negatives). Handles every `Int` including `Int.MIN`.
+public fn int_to_text(n: Int) -> Text {
+    let mut buf: [Byte; 20] = [0; 20];
+    let len = int_to_string(n, &mut buf);
+    Text.from_utf8_unchecked(&buf[..len])
+}
+
+/// Format `n` in the given `radix` (2..=36) as `Text`, math
+/// convention for negatives (`-magnitude`, not two's-complement
+/// bits). Lowercase digits.
+public fn int_to_text_radix(n: Int, radix: Int) -> Text {
+    if radix < 2 || radix > 36 {
+        return "".clone();
+    }
+    if n == 0 { return "0".clone(); }
+
+    let digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+    let negative = n < 0;
+    let mut mag: UInt64 = if negative {
+        (((!n) as UInt64) + (1 as UInt64))
+    } else {
+        n as UInt64
+    };
+    let radix_u: UInt64 = radix as UInt64;
+
+    // Worst case: radix 2 over 64-bit unsigned ⇒ 64 digits.
+    let mut buf: [Byte; 64] = [0; 64];
+    let mut i: Int = 63;
+    while mag > (0 as UInt64) {
+        let digit = (mag % radix_u) as Int;
+        buf[i] = digits.nth_char(digit).unwrap() as Byte;
+        mag = mag / radix_u;
+        i = i - 1;
+    }
+
+    let mut out = Text.new();
+    if negative { out.push('-'); }
+    let start = i + 1;
+    let digit_str = Text.from_utf8_unchecked(&buf[start..64]);
+    out.push_str(&digit_str);
+    out
 }
 
 // =============================================================================
