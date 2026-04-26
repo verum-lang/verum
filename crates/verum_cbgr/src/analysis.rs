@@ -9374,12 +9374,7 @@ impl VerificationResult {
 
 /// SMT encoding of a reference
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used for SMT constraint generation
 struct SmtReference {
-    /// Reference ID
-    id: RefId,
-    /// SMT variable name
-    name: Text,
     /// Whether reference escapes (SMT boolean variable)
     escapes_var: Text,
 }
@@ -9387,8 +9382,6 @@ struct SmtReference {
 impl SmtReference {
     fn new(id: RefId) -> Self {
         Self {
-            id,
-            name: Text::from(format!("ref_{}", id.0)),
             escapes_var: Text::from(format!("escapes_{}", id.0)),
         }
     }
@@ -9447,8 +9440,7 @@ impl SmtEncoding {
 /// 6. If SAT, counterexample found (unsound)
 #[derive(Debug)]
 pub struct FormalVerifier {
-    /// Z3 feasibility checker (reserved for full SMT-based escape verification)
-    #[allow(dead_code)]
+    /// Z3 feasibility checker (used in `verify_soundness` for SMT-backed escape verification)
     z3_checker: Z3FeasibilityChecker,
     /// SMT encoding
     encoding: SmtEncoding,
