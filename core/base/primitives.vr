@@ -1416,8 +1416,20 @@ implement Byte {
     }
 
     /// Check if ASCII whitespace.
+    ///
+    /// Matches the canonical "ASCII whitespace" set defined by
+    /// the WHATWG Infra spec and used by Rust's
+    /// `u8::is_ascii_whitespace`: SPACE (0x20), HORIZONTAL TAB
+    /// (0x09), LINE FEED (0x0A), FORM FEED (0x0C), CARRIAGE
+    /// RETURN (0x0D). The previous implementation omitted FORM
+    /// FEED, silently disagreeing with every other language's
+    /// ASCII-whitespace classifier (and with the Verum
+    /// `Char::is_whitespace` Unicode-aware classifier, which
+    /// does include FF via the broader Unicode whitespace
+    /// table) — the resulting inconsistency was a subtle
+    /// foot-gun for parsers operating on byte streams.
     public fn is_ascii_whitespace(self) -> Bool {
-        self == 32 || self == 9 || self == 10 || self == 13
+        self == 32 || self == 9 || self == 10 || self == 12 || self == 13
     }
 
     /// Convert to uppercase (ASCII).
