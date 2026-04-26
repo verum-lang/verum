@@ -51,7 +51,7 @@ use verum_types::ty::Type as TypesType;
 /// preserves enough provenance to thread the original
 /// [`KernelError`] back to the verification ladder so the diagnostic
 /// emitter can show *which* K-rule failed and on *what* obligation.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum KernelRecheckError {
     /// `K-Refine-omega` rejected the refinement-type formation.
     #[error("kernel-recheck: K-Refine-omega failed for binder '{binder}': {source}")]
@@ -401,14 +401,104 @@ pub(crate) fn walk_ast_block_for_recheck(
             | verum_ast::stmt::StmtKind::Errdefer(e) => {
                 walk_ast_expr_for_recheck(e, function_name, out);
             }
-            // Item declarations inside blocks (nested fns, types)
-            // are handled by the module-level pipeline pass — we
-            // don't recurse here to avoid double-checking.
+            // V7 (#201) — Item declarations inside fn bodies
+            // (nested fns, types, theorems, axioms). The module-
+            // level pipeline pass walks ONLY top-level items, so
+            // pre-V7 these escaped the kernel-recheck entirely.
+            // V7 recurses through the nested item's signature so
+            // refinements in its params/return-type are caught.
+            verum_ast::stmt::StmtKind::Item(item) => {
+                walk_ast_nested_item_for_recheck(&item.kind, function_name, out);
+            }
             _ => {}
         }
     }
     if let verum_common::Maybe::Some(tail) = &block.expr {
         walk_ast_expr_for_recheck(tail, function_name, out);
+    }
+}
+
+/// V7 (#201) — walk a nested ItemKind that appeared as a Stmt
+/// inside a function body. The module-level KernelRecheckPass
+/// only walks TOP-level items; nested fns / types / theorems /
+/// axioms inside `fn outer() { fn inner(...) ... }` would otherwise
+/// escape kernel-recheck. This walker mirrors the V6
+/// recheck_one_item dispatcher but for body-nested items: instead
+/// of producing per-decl cost records, it folds outcomes into the
+/// caller's `out` list under the parent function's label so the
+/// diagnostic surface stays anchored on the visible scope.
+fn walk_ast_nested_item_for_recheck(
+    kind: &verum_ast::decl::ItemKind,
+    parent_function_name: &Text,
+    out: &mut List<(Text, Result<(), KernelRecheckError>)>,
+) {
+    use verum_ast::decl::ItemKind as IK;
+    match kind {
+        IK::Function(f) => {
+            // Recheck the nested function's signature + body
+            // recursively — refinements at any depth are caught.
+            let inner = KernelRecheck::recheck_function(f);
+            for (label, outcome) in inner.iter() {
+                let nested_label = Text::from(format!(
+                    "{} → nested {}",
+                    parent_function_name.as_str(),
+                    label.as_str(),
+                ));
+                out.push((nested_label, outcome.clone()));
+            }
+        }
+        IK::Theorem(d) | IK::Lemma(d) | IK::Corollary(d) => {
+            let inner = KernelRecheck::recheck_theorem(d);
+            for (label, outcome) in inner.iter() {
+                let nested_label = Text::from(format!(
+                    "{} → nested {}",
+                    parent_function_name.as_str(),
+                    label.as_str(),
+                ));
+                out.push((nested_label, outcome.clone()));
+            }
+        }
+        IK::Axiom(a) => {
+            let inner = KernelRecheck::recheck_axiom(a);
+            for (label, outcome) in inner.iter() {
+                let nested_label = Text::from(format!(
+                    "{} → nested {}",
+                    parent_function_name.as_str(),
+                    label.as_str(),
+                ));
+                out.push((nested_label, outcome.clone()));
+            }
+        }
+        IK::Module(m) => {
+            // Recurse into the nested module's items.
+            if let verum_common::Maybe::Some(items) = &m.items {
+                for nested in items.iter() {
+                    walk_ast_nested_item_for_recheck(
+                        &nested.kind,
+                        parent_function_name,
+                        out,
+                    );
+                }
+            }
+        }
+        IK::Impl(impl_decl) => {
+            for impl_item in impl_decl.items.iter() {
+                if let verum_ast::decl::ImplItemKind::Function(f) = &impl_item.kind {
+                    let inner = KernelRecheck::recheck_function(f);
+                    for (label, outcome) in inner.iter() {
+                        let nested_label = Text::from(format!(
+                            "{} → nested {}",
+                            parent_function_name.as_str(),
+                            label.as_str(),
+                        ));
+                        out.push((nested_label, outcome.clone()));
+                    }
+                }
+            }
+        }
+        // Other ItemKind variants don't carry refinement-bearing
+        // signatures the kernel-recheck currently observes.
+        _ => {}
     }
 }
 

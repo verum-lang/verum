@@ -360,6 +360,52 @@ fn recheck_function_walks_into_nested_if_body() {
 }
 
 #[test]
+fn recheck_function_walks_into_nested_fn_inside_body() {
+    // V7 (#201): `fn outer() { fn inner(x: Int{p.box().box()}) -> Int { ... } }`
+    // The inner fn is declared as a Stmt::Item inside outer's body.
+    // Pre-V7 the body walker hit the "_" arm and skipped Item;
+    // V7 recurses into walk_ast_nested_item_for_recheck.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let bad = refined_int(boxed, Maybe::None);
+    let inner_fn = make_function("inner", vec![bad], Maybe::Some(Type::int(span())));
+    // Build a Stmt::Item wrapping the inner fn.
+    let inner_item = verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Function(inner_fn),
+        span(),
+    );
+    let inner_stmt = verum_ast::stmt::Stmt::item(inner_item);
+    let outer_body = verum_ast::decl::FunctionBody::Block(block_with_stmts(vec![inner_stmt]));
+    let outer = make_function_with_body("outer", vec![], Maybe::None, outer_body);
+    let outcomes = KernelRecheck::recheck_function(&outer);
+    assert_eq!(outcomes.len(), 1, "nested fn refinement must be visible");
+    let (label, outcome) = outcomes.get(0).unwrap();
+    assert!(label.as_str().contains("outer"), "label rooted on outer: {}", label.as_str());
+    assert!(label.as_str().contains("nested"), "label marked nested: {}", label.as_str());
+    assert!(label.as_str().contains("inner"), "label mentions inner: {}", label.as_str());
+    assert!(outcome.is_err(), "modal overshoot in nested fn must reject");
+}
+
+#[test]
+fn recheck_function_walks_into_clean_nested_fn() {
+    // Sanity: well-formed nested fn passes — V7 doesn't over-reject.
+    let pred = path_expr("p");
+    let good = refined_int(pred, Maybe::None);
+    let inner_fn = make_function("inner", vec![good], Maybe::Some(Type::int(span())));
+    let inner_item = verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Function(inner_fn),
+        span(),
+    );
+    let inner_stmt = verum_ast::stmt::Stmt::item(inner_item);
+    let outer_body = verum_ast::decl::FunctionBody::Block(block_with_stmts(vec![inner_stmt]));
+    let outer = make_function_with_body("outer", vec![], Maybe::None, outer_body);
+    let outcomes = KernelRecheck::recheck_function(&outer);
+    assert_eq!(outcomes.len(), 1);
+    let (_, outcome) = outcomes.get(0).unwrap();
+    assert!(outcome.is_ok());
+}
+
+#[test]
 fn recheck_function_with_no_body_unchanged() {
     // Backwards-compat: a function with no body (extern decl,
     // protocol stub) walks the signature only — V4 is a strict
