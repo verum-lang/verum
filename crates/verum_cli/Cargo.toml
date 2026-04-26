@@ -114,6 +114,10 @@ criterion = { workspace = true }
 name = "lint_throughput"
 harness = false
 
+[[bench]]
+name = "fmt_throughput"
+harness = false
+
 [features]
 # All capability features are ON by default. `cargo install --path crates/verum_cli`
 # must produce a fully-featured binary — no opt-in for verification, distributed
