@@ -115,6 +115,10 @@ harness = false
 name = "production_targets"
 harness = false
 
+[[bench]]
+name = "dispatch_microbench"
+harness = false
+
 # Layout-invariant verifier integration tests need the `codegen` feature
 # because they construct synthetic `TypeDescriptor` values via the
 # codegen surface and call `VbcCodegen::verify_type_layout_invariants`.
