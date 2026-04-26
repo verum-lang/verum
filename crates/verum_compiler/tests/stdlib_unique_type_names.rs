@@ -172,7 +172,7 @@ fn stdlib_public_type_names_are_unique() {
     );
 
     let mut definitions: BTreeMap<String, Vec<Site>> = BTreeMap::new();
-    walk_dir(&root, &root, &mut definitions);
+    walk_dir(&root, &root, &CfgConstraint::default(), &mut definitions);
 
     let mut violations: Vec<String> = Vec::new();
     for (name, sites) in &definitions {
@@ -233,13 +233,32 @@ fn stdlib_public_type_names_are_unique() {
 }
 
 /// Walk a directory recursively, collecting `public type Name is …`
-/// declarations.  Skips test-helper paths under `vcs/`, generated
-/// `target/` directories, and anything under `.git/`.
+/// declarations.
+///
+/// `inherited_cfg` is the @cfg constraint accumulated from ancestor
+/// `mod.vr` files via the `@cfg(...) public module <child>;` pattern.
+/// Every type discovered in this directory (and all descendants)
+/// inherits that constraint, conjoined with any per-declaration
+/// @cfg attribute.
+///
+/// The mod.vr-based child-cfg lookup is what lets the ratchet
+/// recognise that types in `core/sys/linux/*.vr` and
+/// `core/sys/darwin/*.vr` cannot collide — `core/sys/mod.vr`
+/// declares `@cfg(target_os = "linux") public module linux;` and the
+/// matching macos/windows variants, so child-dir paths inherit
+/// mutually-exclusive cfgs.
 fn walk_dir(
     repo_core_root: &Path,
     dir: &Path,
+    inherited_cfg: &CfgConstraint,
     sink: &mut BTreeMap<String, Vec<Site>>,
 ) {
+    // Parse this dir's `mod.vr` once for the `@cfg(...) public module
+    // <name>;` map applied to children.  Re-open per dir is cheap
+    // (one mod.vr per dir, parsing is a single pass over text lines).
+    let child_cfg_map: BTreeMap<String, CfgConstraint> =
+        parse_module_cfg_gates(&dir.join("mod.vr"));
+
     let read = match fs::read_dir(dir) {
         Ok(r) => r,
         Err(_) => return,
@@ -249,11 +268,96 @@ fn walk_dir(
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            walk_dir(repo_core_root, &path, sink);
+            // Resolve the child dir's inherited cfg: combine the
+            // ancestor inheritance with whatever this dir's mod.vr
+            // says about the child name.
+            let child_name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            let child_inherited = match child_cfg_map.get(&child_name) {
+                Some(child_cfg) => merge_cfg(inherited_cfg, child_cfg),
+                None => inherited_cfg.clone(),
+            };
+            walk_dir(repo_core_root, &path, &child_inherited, sink);
         } else if path.extension().and_then(|s| s.to_str()) == Some("vr") {
-            scan_file(repo_core_root, &path, sink);
+            scan_file(repo_core_root, &path, inherited_cfg, sink);
         }
     }
+}
+
+/// Conjoin two CfgConstraints.  If either is `conservative` the
+/// result is conservative (the parser couldn't model one of them
+/// precisely; stay safe).  Otherwise concatenate the constraint
+/// lists — duplicate (key, value) pairs collapse into one entry but
+/// don't change semantics, since the overlap check looks for
+/// matching keys with non-equal values.
+fn merge_cfg(a: &CfgConstraint, b: &CfgConstraint) -> CfgConstraint {
+    if a.conservative || b.conservative {
+        return CfgConstraint { constraints: vec![], conservative: true };
+    }
+    let mut out = a.clone();
+    for (k, v) in &b.constraints {
+        if !out.constraints.iter().any(|(k2, v2)| k == k2 && v == v2) {
+            out.constraints.push((k.clone(), v.clone()));
+        }
+    }
+    out
+}
+
+/// Scan a `mod.vr` file for `@cfg(...) public module <name>;`
+/// declarations and return a map from child-module name to the cfg
+/// that gates it.  Children declared without @cfg are absent from
+/// the map (caller treats them as inheriting the parent's cfg
+/// unchanged).
+///
+/// Heuristic-only — same lenient-formatting policy as scan_file.
+fn parse_module_cfg_gates(mod_file: &Path) -> BTreeMap<String, CfgConstraint> {
+    let mut out = BTreeMap::new();
+    let contents = match fs::read_to_string(mod_file) {
+        Ok(s) => s,
+        Err(_) => return out,
+    };
+    let mut pending_cfg: Option<CfgConstraint> = None;
+    for line in contents.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("@cfg(") {
+            pending_cfg = Some(parse_cfg_attr(trimmed));
+            continue;
+        }
+        if trimmed.starts_with('@') {
+            continue;
+        }
+        // `public module <name>;` declaration — possibly with leading
+        // visibility variants we don't care to model, so be lenient.
+        let module_kw = if let Some(rest) = trimmed.strip_prefix("public module ") {
+            Some(rest)
+        } else if let Some(rest) = trimmed.strip_prefix("module ") {
+            // pub-less module declarations also count for cfg gating.
+            Some(rest)
+        } else {
+            None
+        };
+        if let Some(rest) = module_kw {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                if let Some(cfg) = pending_cfg.take() {
+                    out.insert(name, cfg);
+                }
+            }
+            continue;
+        }
+        // Non-attribute non-module line: drop pending cfg so it
+        // doesn't leak past unrelated code.
+        if !trimmed.is_empty() && !trimmed.starts_with("//") {
+            pending_cfg = None;
+        }
+    }
+    out
 }
 
 /// Scan a single `.vr` file for `public type Name is …` declarations.
@@ -272,6 +376,7 @@ fn walk_dir(
 fn scan_file(
     repo_core_root: &Path,
     file: &Path,
+    inherited_cfg: &CfgConstraint,
     sink: &mut BTreeMap<String, Vec<Site>>,
 ) {
     let contents = match fs::read_to_string(file) {
@@ -347,11 +452,18 @@ fn scan_file(
         if rest.starts_with("protocol") {
             continue;
         }
+        // Combine the inherited cfg from ancestor `mod.vr` gating
+        // with the per-decl @cfg attribute.  Both apply: a type
+        // gated by `@cfg(target_arch = "x86_64")` inside a module
+        // gated by `@cfg(target_os = "linux")` is active only on
+        // linux+x86_64.
+        let combined =
+            merge_cfg(inherited_cfg, &std::mem::take(&mut pending_cfg));
         sink.entry(name.to_string()).or_default().push((
             module_path.clone(),
             file.to_path_buf(),
             lineno + 1,
-            std::mem::take(&mut pending_cfg),
+            combined,
         ));
     }
 }
@@ -548,5 +660,160 @@ mod cfg_parsing_tests {
         let a = cfg(r#"@cfg(all(runtime = "full", target_os = "linux"))"#);
         let b = cfg(r#"@cfg(all(runtime = "full", target_os = "macos"))"#);
         assert!(a.mutually_exclusive(&b));
+    }
+
+    // ---- merge_cfg contract ------------------------------------------
+
+    #[test]
+    fn merge_combines_disjoint_constraints() {
+        // target_os from parent + target_arch from child → conjunction.
+        let parent = cfg(r#"@cfg(target_os = "linux")"#);
+        let child = cfg(r#"@cfg(target_arch = "x86_64")"#);
+        let merged = merge_cfg(&parent, &child);
+        assert!(!merged.conservative);
+        assert!(merged
+            .constraints
+            .contains(&("target_os".to_string(), "linux".to_string())));
+        assert!(merged
+            .constraints
+            .contains(&("target_arch".to_string(), "x86_64".to_string())));
+    }
+
+    #[test]
+    fn merge_with_conservative_is_conservative() {
+        let parent = cfg(r#"@cfg(target_os = "linux")"#);
+        let conserv = cfg(r#"@cfg(unix)"#);
+        assert!(merge_cfg(&parent, &conserv).conservative);
+        assert!(merge_cfg(&conserv, &parent).conservative);
+    }
+
+    #[test]
+    fn merge_dedups_identical_constraints() {
+        let a = cfg(r#"@cfg(target_os = "linux")"#);
+        let b = cfg(r#"@cfg(target_os = "linux")"#);
+        let merged = merge_cfg(&a, &b);
+        assert_eq!(merged.constraints.len(), 1);
+    }
+
+    #[test]
+    fn linux_module_excludes_macos_module_after_merge() {
+        // Module-level pattern: linux/foo.vr inherits target_os=linux
+        // from sys/mod.vr; darwin/foo.vr inherits target_os=macos.
+        // After merging with empty per-decl cfg, the inherited
+        // constraints alone prove mutual exclusion.
+        let linux = merge_cfg(
+            &cfg(r#"@cfg(target_os = "linux")"#),
+            &CfgConstraint::default(),
+        );
+        let macos = merge_cfg(
+            &cfg(r#"@cfg(target_os = "macos")"#),
+            &CfgConstraint::default(),
+        );
+        assert!(linux.mutually_exclusive(&macos));
+    }
+}
+
+#[cfg(test)]
+mod parse_module_cfg_gates_tests {
+    use super::*;
+
+    fn write_temp(contents: &str) -> PathBuf {
+        // Use a deterministic, per-test path under target/ to avoid
+        // touching anything outside the workspace.
+        let dir = std::env::temp_dir().join("verum_stdlib_unique_type_names_tests");
+        let _ = fs::create_dir_all(&dir);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = dir.join(format!("mod_{}.vr", nanos));
+        fs::write(&path, contents).expect("write fixture");
+        path
+    }
+
+    #[test]
+    fn parses_cfg_gated_public_module() {
+        let path = write_temp(
+            r#"@cfg(target_os = "linux")
+public module linux;
+"#,
+        );
+        let map = parse_module_cfg_gates(&path);
+        let _ = fs::remove_file(&path);
+        let cfg = map.get("linux").expect("linux entry");
+        assert!(!cfg.conservative);
+        assert_eq!(
+            cfg.constraints,
+            vec![("target_os".to_string(), "linux".to_string())]
+        );
+    }
+
+    #[test]
+    fn parses_multiple_cfg_gated_modules() {
+        let path = write_temp(
+            r#"@cfg(target_os = "linux")
+public module linux;
+
+@cfg(target_os = "macos")
+public module darwin;
+
+@cfg(target_os = "windows")
+public module windows;
+"#,
+        );
+        let map = parse_module_cfg_gates(&path);
+        let _ = fs::remove_file(&path);
+        assert_eq!(map.len(), 3);
+        assert_eq!(
+            map["linux"].constraints,
+            vec![("target_os".to_string(), "linux".to_string())]
+        );
+        assert_eq!(
+            map["darwin"].constraints,
+            vec![("target_os".to_string(), "macos".to_string())]
+        );
+        assert_eq!(
+            map["windows"].constraints,
+            vec![("target_os".to_string(), "windows".to_string())]
+        );
+    }
+
+    #[test]
+    fn ungated_module_declarations_are_absent_from_map() {
+        // Modules declared without @cfg shouldn't appear — caller
+        // treats them as inheriting parent cfg unchanged.
+        let path = write_temp(
+            r#"public module common;
+public module init;
+public module raw;
+"#,
+        );
+        let map = parse_module_cfg_gates(&path);
+        let _ = fs::remove_file(&path);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn missing_mod_vr_returns_empty_map() {
+        let map = parse_module_cfg_gates(Path::new("/nonexistent/mod.vr"));
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn intervening_non_attribute_resets_pending_cfg() {
+        // `@cfg(...)` followed by an unrelated statement should
+        // discard the cfg, not attach it to a later module decl.
+        let path = write_temp(
+            r#"@cfg(target_os = "linux")
+const FOO: Int = 1;
+public module sys;
+"#,
+        );
+        let map = parse_module_cfg_gates(&path);
+        let _ = fs::remove_file(&path);
+        assert!(
+            !map.contains_key("sys"),
+            "cfg should not leak past intervening const decl",
+        );
     }
 }
