@@ -201,6 +201,15 @@ fn global_type_table_clean_for_list() {
 
 // === Synthetic regression repros ======================================
 
+/// Diagnostic print of orphan MakeVariant count for visibility.
+/// Always passes; informational only.
+#[test]
+fn orphan_make_variants_dump_for_result() {
+    let codegen = compile_stdlib_subgraph("base/result.vr");
+    let orphans = codegen.find_orphan_make_variants();
+    eprintln!("[#188 dump] base/result.vr — {} orphan MakeVariant(s)", orphans.len());
+}
+
 /// Print the current findings on result.vr — useful for diagnostic
 /// runs (`cargo test -p verum_vbc --features codegen
 /// global_type_table_dump_for_result -- --nocapture`).  Always
