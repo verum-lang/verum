@@ -3963,6 +3963,12 @@ impl LintOutputFormat {
 /// - `schema_version`: integer; bump = breaking change.
 /// - `rule`, `level`, `file`, `line`, `column`, `message`, `fixable`.
 /// - `suggestion`: present only when `fixable` is true.
+/// - `fix.edits`: present only when the rule has a structured
+///   replacement available (LSP-style TextEdit ranges). Each edit
+///   is `{start_line, start_column, end_line, end_column, new_text}`.
+///   Lines / columns are 1-indexed (matching the `line` / `column`
+///   fields). Adding this field is non-breaking — consumers that
+///   only know schema_version: 1 ignore unknown keys.
 pub fn format_issue_json(issue: &LintIssue) -> String {
     let level = match issue.level {
         LintLevel::Error => "error",
@@ -3976,8 +3982,27 @@ pub fn format_issue_json(issue: &LintIssue) -> String {
         .as_ref()
         .map(|t| format!(",\"suggestion\":{}", json_string(t.as_str())))
         .unwrap_or_default();
+    let fix = synthesize_fix_edits(issue)
+        .map(|edits| {
+            let mut s = String::from(",\"fix\":{\"edits\":[");
+            let mut first = true;
+            for e in edits {
+                if !first {
+                    s.push(',');
+                }
+                first = false;
+                s.push_str(&format!(
+                    "{{\"start_line\":{},\"start_column\":{},\"end_line\":{},\"end_column\":{},\"new_text\":{}}}",
+                    e.start_line, e.start_column, e.end_line, e.end_column,
+                    json_string(&e.new_text)
+                ));
+            }
+            s.push_str("]}");
+            s
+        })
+        .unwrap_or_default();
     format!(
-        "{{\"event\":\"lint\",\"schema_version\":1,\"rule\":{rule},\"level\":\"{lvl}\",\"file\":{file},\"line\":{ln},\"column\":{col},\"message\":{msg},\"fixable\":{fixable}{suggestion}}}",
+        "{{\"event\":\"lint\",\"schema_version\":1,\"rule\":{rule},\"level\":\"{lvl}\",\"file\":{file},\"line\":{ln},\"column\":{col},\"message\":{msg},\"fixable\":{fixable}{suggestion}{fix}}}",
         rule = json_string(issue.rule),
         lvl = level,
         file = json_string(&issue.file.display().to_string()),
@@ -3986,7 +4011,112 @@ pub fn format_issue_json(issue: &LintIssue) -> String {
         msg = json_string(&issue.message),
         fixable = issue.fixable,
         suggestion = suggestion,
+        fix = fix,
     )
+}
+
+/// One LSP-style edit (1-indexed, inclusive start / exclusive end).
+#[derive(Debug, Clone)]
+pub struct FixEdit {
+    pub start_line: usize,
+    pub start_column: usize,
+    pub end_line: usize,
+    pub end_column: usize,
+    pub new_text: String,
+}
+
+/// Build a structured edit list for an autofixable issue. Returns
+/// `None` when the rule has no machine-applicable fix or the file
+/// content can't be read (we need the source line to compute end
+/// offsets). The structure mirrors LSP's TextEdit so a CI fix-bot
+/// can apply edits directly without re-parsing.
+///
+/// Today's fixes are line-based — most edits have
+/// `start_line == end_line`. The structured shape leaves room for
+/// future multi-line replacements without breaking the schema.
+fn synthesize_fix_edits(issue: &LintIssue) -> Option<Vec<FixEdit>> {
+    if !issue.fixable {
+        return None;
+    }
+    let content = std::fs::read_to_string(&issue.file).ok()?;
+    let line_idx = issue.line.checked_sub(1)?;
+    let line = content.lines().nth(line_idx)?;
+    let line_len = line.chars().count() + 1; // +1 for end-of-line caret
+
+    let edits = match issue.rule {
+        "unused-import" => {
+            // Drop the entire mount line. Replace columns 1..=line_len
+            // with empty string.
+            vec![FixEdit {
+                start_line: issue.line,
+                start_column: 1,
+                end_line: issue.line + 1,
+                end_column: 1,
+                new_text: String::new(),
+            }]
+        }
+        "todo-in-code" => {
+            // Replace the bare TODO/FIXME/HACK marker with the
+            // suggestion (`TODO(#0000)` etc).
+            let suggestion = issue.suggestion.as_ref()?.as_str().to_string();
+            // Find the marker on the line.
+            let marker = ["TODO", "FIXME", "HACK", "XXX"]
+                .iter()
+                .find(|m| line.contains(*m))?;
+            let pos = line.find(*marker)?;
+            vec![FixEdit {
+                start_line: issue.line,
+                start_column: pos + 1,
+                end_line: issue.line,
+                end_column: pos + marker.len() + 1,
+                new_text: suggestion,
+            }]
+        }
+        "redundant-refinement" => {
+            // Strip a `{ true }` (with optional inner whitespace).
+            for needle in &["{ true }", "{true}", "{true }", "{ true}"] {
+                if let Some(pos) = line.find(needle) {
+                    return Some(vec![FixEdit {
+                        start_line: issue.line,
+                        start_column: pos + 1,
+                        end_line: issue.line,
+                        end_column: pos + needle.len() + 1,
+                        new_text: String::new(),
+                    }]);
+                }
+            }
+            return None;
+        }
+        "redundant-clone" => {
+            // Strip the trailing `.clone()` call.
+            let pos = line.find(".clone()")?;
+            vec![FixEdit {
+                start_line: issue.line,
+                start_column: pos + 1,
+                end_line: issue.line,
+                end_column: pos + ".clone()".len() + 1,
+                new_text: String::new(),
+            }]
+        }
+        "empty-match-arm" => {
+            // Drop the entire arm line.
+            vec![FixEdit {
+                start_line: issue.line,
+                start_column: 1,
+                end_line: issue.line + 1,
+                end_column: 1,
+                new_text: String::new(),
+            }]
+        }
+        _ => {
+            // Fall through: we don't yet have a structured edit
+            // for this rule. apply_fixes() handles it via the
+            // line-rewrite path.
+            let _ = line_len;
+            return None;
+        }
+    };
+    Some(edits)
 }
 
 fn emit_issue_json(issue: &LintIssue) {
