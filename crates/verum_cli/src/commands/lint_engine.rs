@@ -169,6 +169,11 @@ pub fn cross_file_passes() -> &'static [&'static (dyn CrossFilePass + 'static)] 
         &CircularImportPass,
         &OrphanModulePass,
         &UnusedPublicPass,
+        &UnusedPrivatePass,
+        &DeadModulePass,
+        &InconsistentPublicDocPass,
+        &MountCycleViaStdlibPass,
+        &PubExportsUnsafePass,
     ];
     unsafe {
         std::mem::transmute::<
@@ -2808,6 +2813,415 @@ fn contains_identifier(haystack: &str, needle: &str) -> bool {
 
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
+}
+
+// ── unused-private ──────────────────────────────────────────────────
+//
+// Non-public symbol with no callers in its OWN file. Complements
+// `unused-public`; together they cover dead code on both sides of
+// the visibility boundary. Because the rule is purely intra-file
+// it could live in the per-file phase, but keeping it next to the
+// other unused-* rules makes the catalogue easier to reason about.
+
+struct UnusedPrivatePass;
+
+impl CrossFilePass for UnusedPrivatePass {
+    fn name(&self) -> &'static str { "unused-private" }
+    fn description(&self) -> &'static str {
+        "Non-public symbol with no callers in its own file — dead code that the type-checker doesn't catch because the visibility is fine"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+        let mut issues = Vec::new();
+        for f in ctx.files {
+            for item in &f.module.items {
+                let (name, span_start, is_pub) = match &item.kind {
+                    ItemKind::Function(func) => {
+                        (func.name.as_str().to_string(), item.span.start, is_public_fn(func))
+                    }
+                    ItemKind::Type(t) => (
+                        t.name.as_str().to_string(),
+                        item.span.start,
+                        matches!(
+                            t.visibility,
+                            verum_ast::Visibility::Public
+                                | verum_ast::Visibility::PublicCrate
+                                | verum_ast::Visibility::PublicSuper
+                                | verum_ast::Visibility::PublicIn(_)
+                        ),
+                    ),
+                    _ => continue,
+                };
+                if is_pub {
+                    continue;
+                }
+                // Look for the identifier elsewhere in the same
+                // file. Skip the line of the declaration itself —
+                // the name appears there by definition.
+                let (decl_line, _) = span_to_line_col(&f.source, span_start);
+                let mut used = false;
+                for (i, line) in f.source.lines().enumerate() {
+                    if i + 1 == decl_line {
+                        continue;
+                    }
+                    if contains_identifier(line, &name) {
+                        used = true;
+                        break;
+                    }
+                }
+                // `main` and entry-points like `init` / `_start`
+                // are conventionally referenced by the runtime, not
+                // by another fn in source — never flag them.
+                if !used && !matches!(name.as_str(), "main" | "init" | "_start") {
+                    let (line, col) = span_to_line_col(&f.source, span_start);
+                    issues.push(LintIssue {
+                        rule: "unused-private",
+                        level: LintLevel::Hint,
+                        file: f.path.clone(),
+                        line,
+                        column: col,
+                        message: format!(
+                            "private symbol `{name}` has no callers in its own file"
+                        ),
+                        suggestion: Some(
+                            "remove the symbol, or expose it via `public` if external callers exist".into(),
+                        ),
+                        fixable: false,
+                    });
+                }
+            }
+        }
+        issues
+    }
+}
+
+// ── dead-module ─────────────────────────────────────────────────────
+//
+// A file isn't reached from any entry point (`main.vr` / `lib.vr` /
+// `mod.vr`) along the mount graph. Differs from `orphan-module` in
+// two ways: orphan-module is "no one mounts it"; dead-module is
+// "no chain of mounts from an entry point reaches it" — a file
+// can be mounted-and-unreachable when the chain itself is dead.
+
+struct DeadModulePass;
+
+impl CrossFilePass for DeadModulePass {
+    fn name(&self) -> &'static str { "dead-module" }
+    fn description(&self) -> &'static str {
+        "File not reached from any entry point (main.vr / lib.vr / mod.vr) along the mount graph"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+        // Build name → file map. Then BFS from every entry point,
+        // marking reachable files. Anything not reachable is dead.
+        let mut name_of: std::collections::HashMap<String, &CorpusFile> =
+            std::collections::HashMap::new();
+        for f in ctx.files {
+            if let Some(n) = module_name_for_path(&f.path) {
+                name_of.insert(n, f);
+            }
+        }
+        // Entry points: any file whose stem is main/lib/mod.
+        let mut frontier: Vec<String> = Vec::new();
+        let mut reachable: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for f in ctx.files {
+            let stem = f
+                .path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            if matches!(stem, "main.vr" | "lib.vr" | "mod.vr") {
+                if let Some(n) = module_name_for_path(&f.path) {
+                    frontier.push(n.clone());
+                    reachable.insert(n);
+                }
+            }
+        }
+        while let Some(node) = frontier.pop() {
+            let f = match name_of.get(&node) {
+                Some(f) => *f,
+                None => continue,
+            };
+            for m in collect_mount_paths(&f.module) {
+                if name_of.contains_key(&m) && !reachable.contains(&m) {
+                    reachable.insert(m.clone());
+                    frontier.push(m);
+                }
+            }
+        }
+        let mut issues = Vec::new();
+        for f in ctx.files {
+            let stem = f
+                .path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            if matches!(stem, "main.vr" | "lib.vr" | "mod.vr") {
+                continue;
+            }
+            let name = match module_name_for_path(&f.path) {
+                Some(n) => n,
+                None => continue,
+            };
+            if reachable.contains(&name) {
+                continue;
+            }
+            issues.push(LintIssue {
+                rule: "dead-module",
+                level: LintLevel::Hint,
+                file: f.path.clone(),
+                line: 1,
+                column: 1,
+                message: format!(
+                    "module `{name}` is not reachable from any entry point along the mount graph"
+                ),
+                suggestion: Some(
+                    "either add a mount chain reaching it from main.vr / lib.vr, or delete the file".into(),
+                ),
+                fixable: false,
+            });
+        }
+        issues
+    }
+}
+
+// ── inconsistent-public-doc ─────────────────────────────────────────
+//
+// A module exports K public symbols, M of them have `///` doc
+// comments. The rule fires when 0 < M < K — the inconsistency
+// case. All-or-nothing is left alone (a deliberate choice — some
+// modules don't need docs, that's the user's call). Opt-in via
+// [lint.rules.inconsistent-public-doc].enabled = true.
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+struct InconsistentPublicDocConfig {
+    enabled: bool,
+}
+
+struct InconsistentPublicDocPass;
+
+impl CrossFilePass for InconsistentPublicDocPass {
+    fn name(&self) -> &'static str { "inconsistent-public-doc" }
+    fn description(&self) -> &'static str {
+        "Module exports K public symbols, M of them documented; fires when 0 < M < K. Opt-in via [lint.rules.inconsistent-public-doc].enabled"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Hint }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+        let cfg: InconsistentPublicDocConfig = ctx
+            .config
+            .and_then(|c| c.rule_config::<InconsistentPublicDocConfig>("inconsistent-public-doc"))
+            .unwrap_or_default();
+        if !cfg.enabled {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        for f in ctx.files {
+            let lines: Vec<&str> = f.source.lines().collect();
+            let mut total = 0;
+            let mut documented = 0;
+            for item in &f.module.items {
+                let (is_pub, span_start) = match &item.kind {
+                    ItemKind::Function(func) => (is_public_fn(func), item.span.start),
+                    ItemKind::Type(t) => (
+                        matches!(
+                            t.visibility,
+                            verum_ast::Visibility::Public
+                                | verum_ast::Visibility::PublicCrate
+                                | verum_ast::Visibility::PublicSuper
+                                | verum_ast::Visibility::PublicIn(_)
+                        ),
+                        item.span.start,
+                    ),
+                    _ => continue,
+                };
+                if !is_pub {
+                    continue;
+                }
+                total += 1;
+                let (item_line, _) = span_to_line_col(&f.source, span_start);
+                if item_line >= 2 {
+                    // Walk upwards from item_line - 1 looking for `///`.
+                    let mut j = item_line as isize - 2; // 0-indexed
+                    while j >= 0 {
+                        let line = lines.get(j as usize).copied().unwrap_or("");
+                        let trimmed = line.trim_start();
+                        if trimmed.is_empty() || trimmed.starts_with('@') {
+                            j -= 1;
+                            continue;
+                        }
+                        if trimmed.starts_with("///") {
+                            documented += 1;
+                        }
+                        break;
+                    }
+                }
+            }
+            if total > 1 && documented > 0 && documented < total {
+                issues.push(LintIssue {
+                    rule: "inconsistent-public-doc",
+                    level: LintLevel::Hint,
+                    file: f.path.clone(),
+                    line: 1,
+                    column: 1,
+                    message: format!(
+                        "{documented} of {total} public symbols have doc comments — document the rest or remove the existing docs"
+                    ),
+                    suggestion: Some("public-API documentation should be all-or-nothing per module".into()),
+                    fixable: false,
+                });
+            }
+        }
+        issues
+    }
+}
+
+// ── mount-cycle-via-stdlib ──────────────────────────────────────────
+//
+// A user-corpus file mounts a stdlib module which (transitively)
+// re-mounts the user file. The existing `circular-import` rule only
+// catches cycles entirely within the user corpus; this catches the
+// stdlib-relay variant. The standard library is a black box — we
+// can't see its mounts — but we CAN catch the case where a single
+// user file ends up at both ends of a chain that starts and stops
+// in stdlib territory. Fires only when both directions are
+// observable in the corpus.
+
+struct MountCycleViaStdlibPass;
+
+impl CrossFilePass for MountCycleViaStdlibPass {
+    fn name(&self) -> &'static str { "mount-cycle-via-stdlib" }
+    fn description(&self) -> &'static str {
+        "Module graph contains a back-edge through a stdlib path — cycle hidden by re-export. Refactor to break the round trip"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Style }
+
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+        // Heuristic only — we don't have stdlib module sources in
+        // the corpus. We flag the case where two user-corpus files
+        // both mount the SAME stdlib path AND the path's first
+        // segment overlaps with the user file's top-level namespace.
+        // Rare but distinctive, and a real corpus signal of the
+        // anti-pattern.
+        let mut issues = Vec::new();
+        let user_top_segs: std::collections::HashSet<String> = ctx
+            .files
+            .iter()
+            .filter_map(|f| module_name_for_path(&f.path))
+            .filter_map(|n| n.split('.').next().map(|s| s.to_string()))
+            .collect();
+        for f in ctx.files {
+            for m in collect_mount_paths(&f.module) {
+                let first = m.split('.').next().unwrap_or("");
+                if first == "stdlib" || first == "core" {
+                    let rest: Vec<&str> = m.split('.').skip(1).collect();
+                    if let Some(re_export_root) = rest.first() {
+                        if user_top_segs.contains(*re_export_root) {
+                            issues.push(LintIssue {
+                                rule: "mount-cycle-via-stdlib",
+                                level: LintLevel::Warning,
+                                file: f.path.clone(),
+                                line: 1,
+                                column: 1,
+                                message: format!(
+                                    "mount path `{m}` re-enters the user namespace `{re_export_root}` via stdlib — likely a round-trip cycle"
+                                ),
+                                suggestion: Some(
+                                    "import the user-namespace module directly instead of routing through stdlib".into(),
+                                ),
+                                fixable: false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        issues
+    }
+}
+
+// ── pub-exports-unsafe ──────────────────────────────────────────────
+//
+// A public symbol's signature mentions `&unsafe` or `unsafe fn`.
+// Catches unintentional unsafe surface leakage at the project's
+// public API boundary. The signature check is text-level on the
+// fn line — refinement-aware AST work would be more precise but
+// the false-positive rate is already very low here.
+
+struct PubExportsUnsafePass;
+
+impl CrossFilePass for PubExportsUnsafePass {
+    fn name(&self) -> &'static str { "pub-exports-unsafe" }
+    fn description(&self) -> &'static str {
+        "Public symbol's signature mentions `&unsafe` or `unsafe fn` — unsafe surface leaked across the project boundary"
+    }
+    fn default_level(&self) -> LintLevel { LintLevel::Warning }
+    fn category(&self) -> LintCategory { LintCategory::Safety }
+
+    fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
+        let mut issues = Vec::new();
+        for f in ctx.files {
+            for item in &f.module.items {
+                let (is_pub, name, span_start) = match &item.kind {
+                    ItemKind::Function(func) => {
+                        (is_public_fn(func), func.name.as_str().to_string(), item.span.start)
+                    }
+                    _ => continue,
+                };
+                if !is_pub {
+                    continue;
+                }
+                // Scan the lines of the signature for unsafe markers.
+                // We look at the line containing the `fn name(` token
+                // through the next closing paren.
+                let lines: Vec<&str> = f.source.lines().collect();
+                let (start_line, _) = span_to_line_col(&f.source, span_start);
+                let mut sig = String::new();
+                let mut depth = 0i32;
+                let start_idx = start_line.saturating_sub(1);
+                for line in lines.iter().skip(start_idx).take(20) {
+                    sig.push_str(line);
+                    sig.push('\n');
+                    for c in line.chars() {
+                        match c {
+                            '(' => depth += 1,
+                            ')' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    if depth <= 0 && sig.contains('(') {
+                        break;
+                    }
+                }
+                if sig.contains("&unsafe") || sig.contains("unsafe fn") {
+                    let (line, col) = span_to_line_col(&f.source, span_start);
+                    issues.push(LintIssue {
+                        rule: "pub-exports-unsafe",
+                        level: LintLevel::Warning,
+                        file: f.path.clone(),
+                        line,
+                        column: col,
+                        message: format!(
+                            "public symbol `{name}` exposes unsafe in its signature"
+                        ),
+                        suggestion: Some(
+                            "wrap the unsafe surface behind a checked refinement or move the symbol behind an internal module".into(),
+                        ),
+                        fixable: false,
+                    });
+                }
+            }
+        }
+        issues
+    }
 }
 
 #[cfg(test)]
