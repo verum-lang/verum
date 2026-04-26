@@ -134,8 +134,8 @@ fn global_type_table_clean_for_maybe() {
 /// `core/base/result.vr` is mounted transitively by a substantial
 /// portion of the async-runtime stdlib graph, so compiling it
 /// surfaces a much wider type table than `maybe.vr` or `list.vr`.
-/// As of #170 wire-up this fixture exposes 10 cross-module hygiene
-/// findings (down from 14 across three follow-ups in the same PR:
+/// As of #170 wire-up this fixture exposes 7 cross-module hygiene
+/// findings (down from 14 across four follow-ups in the same PR:
 ///
 ///   1. Added `Channel`/`Deque`/`Tuple`/`Array` to the well-known
 ///      type-name map (14 → 15, briefly worse — exposed a separate
@@ -148,20 +148,24 @@ fn global_type_table_clean_for_maybe() {
 ///      gated modules (`sys.embedded`, `sys.no_runtime`, etc.) no
 ///      longer pull their type declarations into builds for the
 ///      wrong target (13 → 10).
+///   4. Walked `TypeDecl.attributes` (and `Function.attributes`)
+///      from `should_compile_item` — the parser places type-decl
+///      `@cfg` attributes on the inner `TypeDecl`, not on `Item`,
+///      so checking only `Item.attributes` silently bypassed @cfg
+///      gates on every type declaration in the stdlib (10 → 7).
 ///
-/// Remaining findings are platform-cfg type-name redeclarations
-/// across linux/darwin/windows variants of the same logical type
-/// (`PlatformIOEngine`, `Task`, `RingBuffer`, …) — the
-/// non-matching platforms still leak through because their @cfg
-/// gates live on the `module` declaration in `sys/mod.vr` rather
-/// than on the target source files themselves.  Remediation is
-/// tracked under #181 (stdlib production audit).
+/// Remaining findings are mostly platform-cfg type-name
+/// redeclarations across linux/darwin/windows variants of the same
+/// logical type (`Task`, `TaskHandle`, `YieldNow`, …) — these are
+/// in different files mounted unconditionally, not inside the same
+/// file with cfg gates.  Remediation tracked under #181 (stdlib
+/// production audit) and #187.
 ///
 /// This test is a *ratchet*: the count must not rise, and must
 /// match exactly when it falls (so any improvement gets pinned).
 /// When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to lock
 /// in the gain.
-const RESULT_ISSUE_BASELINE: usize = 10;
+const RESULT_ISSUE_BASELINE: usize = 7;
 
 #[test]
 fn global_type_table_baseline_for_result() {
@@ -180,8 +184,9 @@ fn global_type_table_baseline_for_result() {
         panic!(
             "type-table issue count for `base/result.vr` IMPROVED: {} < baseline {}.\n\
              Lower RESULT_ISSUE_BASELINE in this file to pin the new value, \
-             so the gain can't silently regress.",
+             so the gain can't silently regress.\n\n{}",
             count, RESULT_ISSUE_BASELINE,
+            format_report_failure("base/result.vr (improved — refresh baseline)", &report),
         );
     }
 }
@@ -195,6 +200,40 @@ fn global_type_table_clean_for_list() {
 }
 
 // === Synthetic regression repros ======================================
+
+/// Print the current findings on result.vr — useful for diagnostic
+/// runs (`cargo test -p verum_vbc --features codegen
+/// global_type_table_dump_for_result -- --nocapture`).  Always
+/// passes; the assertion is purely informational.
+#[test]
+fn global_type_table_dump_for_result() {
+    let codegen = compile_stdlib_subgraph("base/result.vr");
+    let report = codegen.verify_global_type_table_consistency();
+    eprintln!(
+        "[#170 dump] base/result.vr — {} cross-module hygiene finding(s)",
+        report.issue_count(),
+    );
+    for d in &report.duplicate_ids {
+        eprintln!(
+            "[#170 dump]   duplicate TypeId({}) shared by {:?}",
+            d.type_id, d.descriptor_names,
+        );
+    }
+    for d in &report.duplicate_names_with_different_ids {
+        eprintln!(
+            "[#170 dump]   name `{}` declared with conflicting TypeIds: {:?}",
+            d.name, d.type_ids,
+        );
+    }
+    for a in &report.variant_tag_anomalies {
+        eprintln!(
+            "[#170 dump]   variant tags non-dense in `{}` (TypeId({})): \
+             expected {} variants, max tag {}, duplicates {:?}, missing {:?}",
+            a.type_name, a.type_id, a.expected_count,
+            a.max_tag_seen, a.duplicate_tags, a.missing_tags,
+        );
+    }
+}
 
 /// Sanity check: an empty codegen has a clean health report.  Pins
 /// the "no false positives on a fresh codegen" baseline — important
