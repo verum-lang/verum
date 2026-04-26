@@ -431,8 +431,6 @@ impl ProofCache {
 #[derive(Debug, Clone)]
 struct CachedResult {
     result: VerificationResult,
-    #[allow(dead_code)] // Reserved for cache expiration
-    timestamp: Instant,
 }
 
 /// Verification statistics
@@ -535,7 +533,6 @@ impl StaticVerifier {
                 hash,
                 CachedResult {
                     result: result.clone(),
-                    timestamp: Instant::now(),
                 },
             );
         }

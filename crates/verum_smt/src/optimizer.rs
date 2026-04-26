@@ -482,9 +482,6 @@ pub struct MaxSATResult {
 pub struct ParetoOptimizer {
     /// Base optimizer
     optimizer: Z3Optimizer,
-    /// Pareto solutions found
-    #[allow(dead_code)] // Accumulates solutions during optimization
-    solutions: List<ParetoSolution>,
 }
 
 impl ParetoOptimizer {
@@ -496,7 +493,6 @@ impl ParetoOptimizer {
         };
         Self {
             optimizer: Z3Optimizer::new(config),
-            solutions: List::new(),
         }
     }
 

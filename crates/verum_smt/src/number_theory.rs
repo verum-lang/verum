@@ -27,7 +27,6 @@
 use verum_ast::{Expr, ExprKind, Literal, LiteralKind, span::Span};
 use verum_common::{List, Map, Text};
 
-use crate::context::Context;
 use crate::proof_term_unified::ProofTerm;
 
 use z3::ast::Int;
@@ -485,18 +484,15 @@ pub fn mobius_function(n: i64) -> NTResult<i64> {
 // ==================== Formal Theorem Verification ====================
 
 /// Number theory theorem verifier with Z3 integration
-pub struct NumberTheoryVerifier {
-    /// Z3 context
-    #[allow(dead_code)] // Reserved for direct Z3 operations
-    ctx: Context,
-}
+///
+/// Z3 0.19+ resolves Context via thread-local; this verifier holds no
+/// long-lived state and constructs Solver instances per query.
+pub struct NumberTheoryVerifier;
 
 impl NumberTheoryVerifier {
     /// Create a new number theory verifier
     pub fn new() -> Self {
-        Self {
-            ctx: Context::new(),
-        }
+        Self
     }
 
     /// Verify Fermat's Little Theorem: a^(p-1) ≡ 1 (mod p) for prime p, gcd(a,p) = 1

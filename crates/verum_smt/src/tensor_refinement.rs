@@ -24,7 +24,6 @@
 //! ```
 
 use crate::context::Context;
-use crate::refinement::RefinementVerifier;
 use crate::tensor_shapes::{ShapeError, TensorShapeVerifier};
 use crate::translate::{TensorSort, Translator};
 use verum_ast::{Expr, Type, TypeKind};
@@ -36,9 +35,6 @@ use verum_common::{Heap, List, Text};
 /// providing a unified interface for verifying both value constraints
 /// and shape constraints on tensors.
 pub struct TensorRefinementVerifier {
-    /// Underlying refinement verifier for value constraints
-    #[allow(dead_code)] // Reserved for unified constraint verification
-    refinement_verifier: Heap<RefinementVerifier>,
     /// Tensor shape verifier for dimension constraints
     shape_verifier: Heap<TensorShapeVerifier>,
     /// Z3 context for constraint solving
@@ -49,11 +45,9 @@ impl TensorRefinementVerifier {
     /// Create a new tensor refinement verifier
     pub fn new() -> Self {
         let context = Heap::new(Context::new());
-        let refinement_verifier = Heap::new(RefinementVerifier::new());
         let shape_verifier = Heap::new(TensorShapeVerifier::new());
 
         Self {
-            refinement_verifier,
             shape_verifier,
             context,
         }
