@@ -6,8 +6,14 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-[lints]
-workspace = true
+# Crate-local lints. NOT inheriting `workspace = true` because we
+# want a stricter `deprecated = "deny"` here than other crates
+# get. The verum_verification pipeline is foundational — every
+# other crate's verification story rides on it. Re-introducing a
+# deprecated API here is a regression, not a stylistic choice.
+# See task #56 for the rationale and the original migration.
+[lints.rust]
+deprecated = "deny"
 
 
 [dependencies]
