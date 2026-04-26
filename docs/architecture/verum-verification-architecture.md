@@ -1095,9 +1095,27 @@ public fn read_many(@ω x: Int) -> Int;       // unrestricted
 
 Default quantity is ω (no tracking). Explicit quantity enables Girard's linear-logic modality `!`.
 
-### 7.7 Cohesive modalities (optional, via `schreiber_dcct` framework axiom)
+### 7.7 Cohesive modalities **[100% — V8 #241]**
 
 `∫` (shape), `♭` (flat), `♯` (sharp). Triple adjunction `∫ ⊣ ♭ ⊣ ♯`. Imported only when the user explicitly loads `core.math.frameworks.schreiber_dcct`.
+
+**CoreTerm** (`crates/verum_kernel/src/term.rs`):
+
+* `Shape(t)` — `∫A`, the underlying ∞-groupoid (homotopy type) of a cohesive `A`.
+* `Flat(t)` — `♭A`, the discrete part.
+* `Sharp(t)` — `♯A`, the codiscrete part.
+
+**Kernel rules** (`infer.rs`):
+
+* **K-Shape / K-Flat / K-Sharp** — for `Γ ⊢ A : Type_i`, each modality yields a type at the same universe level: `M(A) : Type_i`. The operand must inhabit some `Universe(_)`; non-types reject with `KernelError::TypeMismatch`.
+
+**Adjunction laws** (η, ε, triangle identities, `♭∫A ≃ ∫A` for crisp types) are **framework axioms** in `core.math.frameworks.schreiber_dcct` — the kernel does **not** internally identify `♭∫A` with `A`. This keeps the kernel model-agnostic (cubical / simplicial / orbispace cohesion all admit the same type-formers; only the framework attests which adjunction reductions are admissible).
+
+**Modal depth** (`m_depth_omega`): each cohesive modality bumps the ordinal modal-depth by 1 (per Definition 136.D1's modality-as-Galois-connection generalisation). The K-Refine-omega rule (`check_refine_omega`) routes the result through the same gate as `ModalBox` / `ModalDiamond` — `m_depth` (the M-iteration finite-depth) descends without increment, since cohesive modalities aren't part of the M-family.
+
+**Proof tree**: `KernelRule::KShape | KFlat | KSharp` with `name()` and `record_inference` arms.
+
+**Coverage**: `crates/verum_kernel/tests/k_cohesive.rs` (15 integration tests) — Shape / Flat / Sharp at base universe + at higher universes, rejection of non-type operands, composition `♭∫♯A` typechecks, modal-depth-ω increments per modality, nested modalities accumulate (`♭∫♯x` → finite(3)), structural normalisation descends, definitional equality through modalities, kernel does **not** internally collapse `♭∫A ↦ A` (the model-agnosticism contract).
 
 ---
 

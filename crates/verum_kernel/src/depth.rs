@@ -128,6 +128,12 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         CoreTerm::ModalBigAnd(args) => {
             args.iter().map(|t| m_depth(t)).max().unwrap_or(0)
         }
+        // V8 (#241) — cohesive modalities are not in the M-iteration
+        // family; m_depth descends without modal increment, leaving
+        // ordinal-modal-depth tracking to `m_depth_omega`.
+        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
+            m_depth(t)
+        }
         // V8 (#236) — quotient types: max over base + equiv
         // (the constructor's structural depth).
         CoreTerm::Quotient { base, equiv } => m_depth(base).max(m_depth(equiv)),
@@ -369,6 +375,14 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
         CoreTerm::SmtProof(_) => OrdinalDepth::finite(0),
         CoreTerm::Axiom { ty, .. } => m_depth_omega(ty),
         CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => m_depth_omega(t),
+        // V8 (#241) — cohesive modalities. ∫ ⊣ ♭ ⊣ ♯ are bona-fide
+        // modalities; each application bumps the ordinal modal-depth
+        // by 1 (per Definition 136.D1's modality-as-Galois-connection
+        // generalisation). The K-Refine-omega rule routes the result
+        // through the same gate as ModalBox / ModalDiamond.
+        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
+            m_depth_omega(t).succ()
+        }
     }
 }
 

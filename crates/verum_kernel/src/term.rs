@@ -275,6 +275,49 @@ pub enum CoreTerm {
     /// recursion. Used to express modal axiom schemes that
     /// quantify over all possible-world labels at once.
     ModalBigAnd(List<Heap<CoreTerm>>),
+
+    /// V8 (#241) — **shape modality `∫A`** (Schreiber DCCT, cohesive
+    /// HoTT). The leftmost of the cohesive triple-adjunction
+    /// `∫ ⊣ ♭ ⊣ ♯`. Computes the underlying ∞-groupoid (homotopy
+    /// type) of a cohesive type, forgetting the geometric / modal
+    /// structure and keeping only the homotopy data.
+    ///
+    /// Per VVA §7.7 the kernel admits the type former unconditionally
+    /// (the cubical-set semantics interprets it via localisation at
+    /// the discrete-type subuniverse); the **adjunction laws** (unit
+    /// `η : A → ♭∫A`, counit `ε : ∫♭A → A`, triangle identities) are
+    /// recorded as framework axioms in `core.math.frameworks.schreiber_dcct`
+    /// and only become visible when that framework is loaded.
+    ///
+    /// Reference: Schreiber U. 2013. *Differential Cohomology in a
+    /// Cohesive ∞-Topos.* §3.4 (cohesive modalities).
+    Shape(Heap<CoreTerm>),
+
+    /// V8 (#241) — **flat modality `♭A`** (Schreiber DCCT). The
+    /// middle of the cohesive triple-adjunction `∫ ⊣ ♭ ⊣ ♯`.
+    /// Singles out the **discrete** (constant) part of a cohesive
+    /// type — the points whose cohesive structure is "trivially
+    /// connected." Plays the role of the necessity modality for
+    /// crispness in cohesive HoTT.
+    ///
+    /// `♭A` is itself a (discrete) cohesive type, hence the kernel
+    /// records it at the same universe level as `A`. Adjunction
+    /// laws are framework-axiomatic per `schreiber_dcct`.
+    ///
+    /// Reference: Shulman M. 2018. *Brouwer's fixed-point theorem
+    /// in real-cohesive homotopy type theory.* §3.
+    Flat(Heap<CoreTerm>),
+
+    /// V8 (#241) — **sharp modality `♯A`** (Schreiber DCCT). The
+    /// rightmost of the cohesive triple-adjunction `∫ ⊣ ♭ ⊣ ♯`.
+    /// Singles out the **codiscrete** (totally cohesive) part of
+    /// a type — the points whose underlying homotopy type is
+    /// `∫A` packaged with a maximal cohesive structure. Dual to
+    /// `♭A` under the adjunction.
+    ///
+    /// Reference: Schreiber U. 2013. *Differential Cohomology in a
+    /// Cohesive ∞-Topos.* §3.4.
+    Sharp(Heap<CoreTerm>),
 }
 
 /// A structural view of a type used by [`crate::check`] diagnostics.

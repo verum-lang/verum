@@ -188,6 +188,10 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             }
             CoreTerm::ModalBigAnd(new_args)
         }
+        // V8 (#241) — cohesive modalities ∫ ⊣ ♭ ⊣ ♯ commute with substitute.
+        CoreTerm::Shape(t) => CoreTerm::Shape(Heap::new(substitute(t, name, value))),
+        CoreTerm::Flat(t) => CoreTerm::Flat(Heap::new(substitute(t, name, value))),
+        CoreTerm::Sharp(t) => CoreTerm::Sharp(Heap::new(substitute(t, name, value))),
     }
 }
 
@@ -412,6 +416,20 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
                 new_args.push(Heap::new(normalize_with_budget(a, budget)));
             }
             CoreTerm::ModalBigAnd(new_args)
+        }
+        // V8 (#241) — cohesive modalities normalise structurally.
+        // Triple-adjunction reductions ∫ ⊣ ♭ ⊣ ♯ are framework
+        // axioms (`schreiber_dcct`); the kernel does not β-reduce
+        // ♭∫A → A or similar — those laws live at the framework
+        // layer where the user attests them.
+        CoreTerm::Shape(t) => {
+            CoreTerm::Shape(Heap::new(normalize_with_budget(t, budget)))
+        }
+        CoreTerm::Flat(t) => {
+            CoreTerm::Flat(Heap::new(normalize_with_budget(t, budget)))
+        }
+        CoreTerm::Sharp(t) => {
+            CoreTerm::Sharp(Heap::new(normalize_with_budget(t, budget)))
         }
     }
 }
@@ -712,6 +730,17 @@ fn normalize_with_axioms_budget(
             }
             CoreTerm::ModalBigAnd(new_args)
         }
+        // V8 (#241) — cohesive modalities — see normalize_with_budget
+        // for the framework-axiom rationale.
+        CoreTerm::Shape(t) => {
+            CoreTerm::Shape(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
+        }
+        CoreTerm::Flat(t) => {
+            CoreTerm::Flat(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
+        }
+        CoreTerm::Sharp(t) => {
+            CoreTerm::Sharp(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
+        }
     }
 }
 
@@ -878,6 +907,10 @@ fn free_vars_rec(
             for a in args.iter() {
                 free_vars_rec(a, bound, out);
             }
+        }
+        // V8 (#241) — cohesive modalities descend.
+        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
+            free_vars_rec(t, bound, out);
         }
     }
 }
