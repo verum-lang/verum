@@ -1609,10 +1609,16 @@ public fn safe_socket(domain: Int, sock_type: Int, protocol: Int) -> Result<File
     // currently sign-extend the i32 return to i64 — upper 32 bits of
     // x0 contain garbage from libSystem's epilogue. A successful fd
     // (small positive int) can read back as a large negative i64 and
-    // wrongly trip the `< 0` error path. Truncate-then-extend through
-    // Int32 to sign-extend cleanly.
+    // wrongly trip the `< 0` error path. Manually sign-extend via bit
+    // ops since `as Int32 as Int` doesn't reach AOT codegen as a
+    // sign-extension (#108).
     let raw = unsafe { socket(domain, sock_type, protocol) };
-    let result = (raw as Int32) as Int;
+    let lo32 = raw & 0xFFFFFFFF;
+    let result = if (lo32 & 0x80000000) != 0 {
+        lo32 - 0x100000000
+    } else {
+        lo32
+    };
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
