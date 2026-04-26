@@ -15,6 +15,10 @@ public type ProtobufError is
     | InvalidWireType(UInt8)
     /// Length-delimited field claims a length larger than the buffer.
     | InvalidLength { declared: Int, available: Int }
+    /// Length-delimited field's declared length exceeds the per-field
+    /// safety cap MAX_LENGTH_DELIM. Defends against hostile peers
+    /// sending a varint length up to 2^64 - 1 to trigger OOM.
+    | LengthTooLarge { declared: Int, limit: Int }
     /// UTF-8 validation failed on a `string` field.
     | InvalidUtf8
     /// Field number out of range — fields must be 1..=2^29-1.

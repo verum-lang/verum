@@ -8,6 +8,22 @@ mount core.*;
 mount core.protobuf.error.{ProtobufError, DecodeResult};
 
 // =============================================================================
+// Hostile-input safety caps
+// =============================================================================
+
+/// Per-field maximum on length-delimited fields (string / bytes /
+/// embedded-message). Without this cap a peer can send a varint
+/// length up to 2^64 - 1 and trigger gigabyte-scale allocations on
+/// `read_string` / `read_bytes` / `read_message`. 32 MiB matches the
+/// HTTP Content-Length cap from #77 and Google's reference protoc
+/// default ballpark.
+///
+/// Applications that legitimately need larger fields should split
+/// payloads into multiple messages or use streaming APIs above the
+/// wire layer.
+public const MAX_LENGTH_DELIM: Int = 32 * 1024 * 1024;
+
+// =============================================================================
 // WireType
 // =============================================================================
 
@@ -274,16 +290,50 @@ implement ProtobufCursor {
 
     /// Read a length-delimited slice. Returns (start, len) offsets into
     /// the buffer (no copy).
+    ///
+    /// Defends against hostile inputs in three layers:
+    ///
+    ///  1. Reject `len` values where the cast UInt64 → Int produced
+    ///     a negative number — that means the wire varint encoded
+    ///     a value > Int.MAX (2^63 - 1), which can never fit in a
+    ///     practical buffer regardless.
+    ///  2. Reject `len > MAX_LENGTH_DELIM` so callers (`read_string`,
+    ///     `read_bytes`, `read_message`) cannot pre-allocate gigabyte-
+    ///     scale buffers from a single malicious varint.
+    ///  3. Use overflow-checked addition for `pos + len` so a peer
+    ///     can't underflow `self.pos + len > self.buf.len()` via
+    ///     i64 wraparound and subsequently corrupt the read cursor.
     public fn read_length_delim_view(&mut self) -> Result<(Int, Int), ProtobufError> {
-        let len = self.read_varint()? as Int;
-        if self.pos + len > self.buf.len() {
+        let len_u64 = self.read_varint()?;
+        // Layer 1: reject sign-overflow on the UInt64 → Int cast.
+        if len_u64 > (Int.MAX as UInt64) {
+            return Err(ProtobufError.LengthTooLarge {
+                declared: -1,            // unrepresentable in Int
+                limit: MAX_LENGTH_DELIM,
+            });
+        }
+        let len = len_u64 as Int;
+        // Layer 2: enforce per-field cap.
+        if len > MAX_LENGTH_DELIM {
+            return Err(ProtobufError.LengthTooLarge {
+                declared: len,
+                limit: MAX_LENGTH_DELIM,
+            });
+        }
+        // Layer 3: overflow-checked pos + len. Both operands are
+        // non-negative Ints and len is bounded by MAX_LENGTH_DELIM,
+        // so this cannot overflow in practice — but the explicit
+        // check documents the invariant and survives future cap
+        // increases.
+        let end = self.pos + len;
+        if end < self.pos || end > self.buf.len() {
             return Err(ProtobufError.InvalidLength {
                 declared: len,
                 available: self.buf.len() - self.pos,
             });
         }
         let start = self.pos;
-        self.pos = self.pos + len;
+        self.pos = end;
         Ok((start, len))
     }
 
