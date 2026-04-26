@@ -1955,7 +1955,7 @@ VVA is considered delivered when:
 3. `@framework(…)` is accepted and the Standard catalogue ships (per §6.2: nine Standard frameworks + VerifiedExtension families).
 4. `verum audit --framework-axioms` lists used axioms for the entire stdlib.
 5. `verum audit --coord` produces a `(Fw, ν, τ)` tuple per user theorem.
-6. All nine `@verify(…)` strategies are dispatched through `verum_smt` or `verum_kernel`.
+6. ✓ All nine `@verify(…)` strategies are dispatched through `verum_smt` or `verum_kernel`. Per V8 #233: 13-variant ladder in `crates/verum_smt/src/verify_strategy.rs::VerifyStrategy` (9 §12-base + ComplexityTyped from VVA-8 + 3 coherent variants from VVA-6); per-strategy dispatch in `crates/verum_smt/src/backend_switcher.rs` covers Runtime/Static/Proof (non-SMT, kernel-rechecked) + Fast/ComplexityTyped/Formal (capability routing) + Thorough (portfolio) + Reliable/Certified (cross-validate) + Coherent* (cross-validate w/ runtime monitor variants) + Synthesize (SyGuS path). 39+15 = 54 integration tests across `nine_strategy_ladder.rs`, `capability_routing_integration.rs`, and `strategy_dispatch_contract.rs` (V8 #233 — explicit per-strategy contract row coverage with §12-aliases + LADDER monotonicity + Synthesize-orthogonality invariants). **100%**.
 7. Certificate export to Lean 4 + Dedukti round-trips at least the `plus_comm` / `append_assoc` / `list_length_map` sample proofs.
 8. `core.action.*` module set exists with `ε` auto-induction per articulation.
 9. `@enact` compiles and `verum audit --epsilon` is callable.

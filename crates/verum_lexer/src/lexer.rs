@@ -53,17 +53,50 @@ pub struct Lexer<'source> {
     eof_reached: bool,
     /// Last error span (preserved for parser use)
     last_error_span: Option<Span>,
+    /// Byte offset added to all logos spans. Non-zero when a shebang line was
+    /// stripped from the input before being passed to logos. Lets `verum run`
+    /// detect script files while keeping diagnostics pointing at original
+    /// byte positions.
+    shebang_offset: u32,
+    /// The original shebang text, including the leading `#!` and trailing
+    /// newline (if any). `None` if the source had no shebang.
+    shebang_text: Option<&'source str>,
 }
 
 impl<'source> Lexer<'source> {
     /// Create a new lexer for the given source code.
+    ///
+    /// If the source begins with a POSIX shebang (`#!...\n`), the first line
+    /// is consumed as trivia: it is not tokenised, but the byte offsets of
+    /// every emitted token are kept in the original source's coordinate
+    /// system. Use [`Lexer::had_shebang`] / [`Lexer::shebang_text`] to inspect
+    /// the stripped line.
     pub fn new(source: &'source str, file_id: FileId) -> Self {
+        let (body, shebang_text) = strip_shebang(source);
+        let offset = (source.len() - body.len()) as u32;
         Self {
-            inner: TokenKind::lexer(source),
+            inner: TokenKind::lexer(body),
             file_id,
             eof_reached: false,
             last_error_span: None,
+            shebang_offset: offset,
+            shebang_text,
         }
+    }
+
+    /// `true` when the source started with a `#!` shebang line.
+    pub fn had_shebang(&self) -> bool {
+        self.shebang_text.is_some()
+    }
+
+    /// The shebang text (including `#!` and trailing newline, if present).
+    pub fn shebang_text(&self) -> Option<&'source str> {
+        self.shebang_text
+    }
+
+    /// Byte offset of the first non-shebang character in the original source.
+    pub fn shebang_offset(&self) -> u32 {
+        self.shebang_offset
     }
 
     /// Get the span of the last lexer error (if any).
@@ -79,16 +112,20 @@ impl<'source> Lexer<'source> {
         let span = clone.span();
         Some(Token::new(
             kind,
-            Span::new(span.start as u32, span.end as u32, self.file_id),
+            Span::new(
+                span.start as u32 + self.shebang_offset,
+                span.end as u32 + self.shebang_offset,
+                self.file_id,
+            ),
         ))
     }
 
-    /// Get the current position in the source.
+    /// Get the current position in the source (in original source coordinates).
     pub fn position(&self) -> u32 {
-        self.inner.span().start as u32
+        self.inner.span().start as u32 + self.shebang_offset
     }
 
-    /// Get the remaining source text.
+    /// Get the remaining source text (after any stripped shebang).
     pub fn remaining(&self) -> &'source str {
         self.inner.remainder()
     }
@@ -113,7 +150,11 @@ impl<'source> Lexer<'source> {
     /// Get the current span.
     fn current_span(&self) -> Span {
         let span = self.inner.span();
-        Span::new(span.start as u32, span.end as u32, self.file_id)
+        Span::new(
+            span.start as u32 + self.shebang_offset,
+            span.end as u32 + self.shebang_offset,
+            self.file_id,
+        )
     }
 
     /// Convert a logos lexer result into our token type.
@@ -163,7 +204,7 @@ impl<'source> Iterator for Lexer<'source> {
             None => {
                 // Reached end of input, return EOF token once
                 self.eof_reached = true;
-                let pos = self.inner.span().end as u32;
+                let pos = self.inner.span().end as u32 + self.shebang_offset;
                 Some(Ok(Token::new(
                     TokenKind::Eof,
                     Span::new(pos, pos, self.file_id),
@@ -171,6 +212,34 @@ impl<'source> Iterator for Lexer<'source> {
             }
         }
     }
+}
+
+/// Detect a POSIX shebang (`#!...\n`) at the start of `source` and split it
+/// from the body. Returns `(body, shebang)`. The shebang slice (when present)
+/// includes the trailing newline if any. CRLF line endings are honoured: a
+/// shebang ended by `\r\n` is included in full.
+///
+/// A shebang must begin at byte 0; bytes elsewhere are not affected. If the
+/// file consists of only a shebang with no trailing newline, the entire input
+/// is treated as the shebang and the body is empty.
+pub fn strip_shebang(source: &str) -> (&str, Option<&str>) {
+    let bytes = source.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'#' || bytes[1] != b'!' {
+        return (source, None);
+    }
+    // Find first \n. The shebang slice is everything up to and including it.
+    match memchr_newline(bytes) {
+        Some(nl_pos) => {
+            let split = nl_pos + 1;
+            (&source[split..], Some(&source[..split]))
+        }
+        None => ("", Some(source)),
+    }
+}
+
+#[inline]
+fn memchr_newline(bytes: &[u8]) -> Option<usize> {
+    bytes.iter().position(|&b| b == b'\n')
 }
 
 /// A stateful lexer that can look ahead multiple tokens.

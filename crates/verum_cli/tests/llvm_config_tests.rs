@@ -304,7 +304,6 @@ fn test_relocation_modes() {
 
 #[test]
 fn test_code_models() {
-    #[allow(dead_code)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum CodeModel {
         Default,
@@ -329,6 +328,12 @@ fn test_code_models() {
     // Kernel for kernel-mode code
     let kernel = CodeModel::Kernel;
     assert_ne!(kernel, CodeModel::Default);
+
+    // Medium for medium-sized code (between Small and Large)
+    let medium = CodeModel::Medium;
+    assert_ne!(medium, CodeModel::Default);
+    assert_ne!(medium, CodeModel::Small);
+    assert_ne!(medium, CodeModel::Large);
 }
 
 // ============================================================================
@@ -533,7 +538,6 @@ fn test_pgo_modes() {
 
 #[test]
 fn test_pgo_config_validation() {
-    #[allow(dead_code)]
     struct PgoConfig {
         enabled: bool,
         mode: &'static str,
@@ -547,6 +551,9 @@ fn test_pgo_config_validation() {
         }
         if config.hot_inline_multiplier <= 0.0 {
             return Err("Hot inline multiplier must be > 0".into());
+        }
+        if config.enabled && config.profile_dir.as_os_str().is_empty() {
+            return Err("PGO enabled but profile_dir is empty".into());
         }
         Ok(())
     }
