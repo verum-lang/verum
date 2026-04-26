@@ -118,6 +118,17 @@ pub struct LspConfig {
     pub lint_profile: Option<String>,
     /// Path to the `verum` binary. `None` resolves to PATH lookup.
     pub lint_binary: Option<std::path::PathBuf>,
+
+    // ── Format integration ──────────────────────────────────────────────
+    /// Whether `verum fmt` is the source of truth for
+    /// `textDocument/formatting`. Default is `true`; flip to
+    /// `false` to fall back to the in-LSP formatter.
+    pub fmt_enabled: bool,
+    /// Path to the `verum` binary used for formatting. `None`
+    /// resolves to PATH lookup; a separate setting from
+    /// `lint_binary` lets one editor experiment with a custom
+    /// formatter while keeping the canonical linter.
+    pub fmt_binary: Option<std::path::PathBuf>,
 }
 
 impl Default for LspConfig {
@@ -144,6 +155,9 @@ impl Default for LspConfig {
             lint_enabled: true,
             lint_profile: None,
             lint_binary: None,
+
+            fmt_enabled: true,
+            fmt_binary: None,
         }
     }
 }
@@ -237,6 +251,25 @@ impl LspConfig {
             .or_else(|| opts.get("lintBinary").and_then(|v| v.as_str()))
         {
             self.lint_binary = Some(std::path::PathBuf::from(v));
+        }
+
+        // Format integration knobs — same pattern, separate
+        // namespace so the user can flip the formatter independently
+        // of the linter.
+        let fmt_section = opts.get("fmt").or_else(|| opts.get("format"));
+        if let Some(v) = fmt_section
+            .and_then(|s| s.get("enabled"))
+            .and_then(|v| v.as_bool())
+            .or_else(|| opts.get("fmtEnabled").and_then(|v| v.as_bool()))
+        {
+            self.fmt_enabled = v;
+        }
+        if let Some(v) = fmt_section
+            .and_then(|s| s.get("binary"))
+            .and_then(|v| v.as_str())
+            .or_else(|| opts.get("fmtBinary").and_then(|v| v.as_str()))
+        {
+            self.fmt_binary = Some(std::path::PathBuf::from(v));
         }
     }
 }
