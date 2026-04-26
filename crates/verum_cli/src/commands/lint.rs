@@ -62,6 +62,68 @@ pub enum LintCategory {
     Verification,
 }
 
+/// Lint groups — opt-in rule families exposed via
+/// `extends = "verum::<name>"` in the manifest.
+///
+/// Group membership is computed from the LintRules table on the
+/// fly so adding a rule to a group doesn't require a table-wide
+/// edit. The deliberate trade-off is that groups become slightly
+/// less explicit — the recipe for membership is in `lint_groups()`,
+/// not the rule definition.
+pub fn lint_groups() -> Vec<(&'static str, Vec<&'static str>)> {
+    let mut out: Vec<(&'static str, Vec<&'static str>)> = Vec::new();
+
+    // verum::correctness — the can't-disable layer. Errors only.
+    // What you'd ship in `extends = "minimal"` if you wanted the
+    // bare minimum that still catches actual bugs.
+    let correctness: Vec<&'static str> = LINT_RULES
+        .iter()
+        .filter(|r| matches!(r.level, LintLevel::Error))
+        .map(|r| r.name)
+        .collect();
+    out.push(("verum::correctness", correctness));
+
+    // verum::strict — everything safety + verification + errors,
+    // promoted to error severity in the preset.
+    let strict: Vec<&'static str> = LINT_RULES
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.category,
+                LintCategory::Safety | LintCategory::Verification
+            ) || matches!(r.level, LintLevel::Error)
+        })
+        .map(|r| r.name)
+        .collect();
+    out.push(("verum::strict", strict));
+
+    // verum::pedantic — every hint-level rule. Useful for
+    // refactor-the-codebase sessions when you want to see every
+    // suggestion the linter can offer.
+    let pedantic: Vec<&'static str> = LINT_RULES
+        .iter()
+        .filter(|r| matches!(r.level, LintLevel::Hint))
+        .map(|r| r.name)
+        .collect();
+    out.push(("verum::pedantic", pedantic));
+
+    // verum::nursery — explicitly-listed experimental rules. Off
+    // by default in every other preset; opt-in via this group.
+    let nursery: Vec<&'static str> = vec![
+        "inconsistent-public-doc",
+        "unused-public",
+        "mount-cycle-via-stdlib",
+    ];
+    out.push(("verum::nursery", nursery));
+
+    // verum::deprecated — placeholder for the rule deprecation
+    // framework (#54). Empty today; populated as rules are
+    // deprecated.
+    out.push(("verum::deprecated", Vec::new()));
+
+    out
+}
+
 /// Lint issue found in code
 #[derive(Debug, Clone)]
 pub struct LintIssue {
@@ -987,6 +1049,28 @@ pub fn apply_profile(config: &mut LintConfig, name: &str) -> Result<()> {
 /// fill in defaults for every rule; explicit `[lint.severity]`
 /// entries from user config take precedence and are preserved.
 fn apply_preset(config: &mut LintConfig, name: &str) {
+    // `verum::<group>` form opts every rule in the group into the
+    // severity_map at the rule's default level. Combined with a
+    // base preset (`extends = "recommended"`), this enables a
+    // family of nursery / pedantic / correctness rules without
+    // changing the per-rule defaults.
+    if let Some(group_name) = name.strip_prefix("verum::") {
+        if let Some((_, members)) = lint_groups()
+            .into_iter()
+            .find(|(n, _)| *n == name || n.strip_prefix("verum::") == Some(group_name))
+        {
+            for rule_name in members {
+                if config.severity_map.contains_key(rule_name) {
+                    continue;
+                }
+                if let Some(rule) = LINT_RULES.iter().find(|r| r.name == rule_name) {
+                    config.severity_map.insert(rule_name.to_string(), rule.level);
+                }
+            }
+        }
+        return;
+    }
+
     let preset = match name {
         "minimal" => LintPreset::Minimal,
         "recommended" => LintPreset::Recommended,
@@ -3462,6 +3546,36 @@ pub fn list_rules() -> Result<()> {
     Ok(())
 }
 
+/// `verum lint --list-groups` — print every lint group + its
+/// member rules. Use as a discovery tool before adding
+/// `extends = "verum::<group>"` to verum.toml.
+pub fn list_groups() -> Result<()> {
+    println!("{:<24} {}", "Group".bold(), "Members".bold());
+    println!("{}", "-".repeat(80));
+    for (group, members) in lint_groups() {
+        if members.is_empty() {
+            println!(
+                "{:<24} {}",
+                group,
+                "(empty — populated as rules join the group)".dimmed()
+            );
+            continue;
+        }
+        // First member on the group line; subsequent members
+        // wrapped under the same column.
+        let mut iter = members.iter();
+        if let Some(first) = iter.next() {
+            println!("{:<24} {}", group, first);
+        }
+        for m in iter {
+            println!("{:<24} {}", "", m);
+        }
+        println!();
+    }
+    println!("Use `extends = \"verum::<group>\"` in verum.toml to opt in.");
+    Ok(())
+}
+
 /// Print extended documentation for one rule. Used by
 /// `verum lint --explain <rule>`.
 /// `verum lint --explain RULE --open` — opens the rule's online
@@ -3613,17 +3727,29 @@ pub fn validate_config() -> Result<()> {
     let cfg = load_full_lint_config();
     let mut errors: Vec<String> = Vec::new();
 
-    // 1. extends preset must be a known name.
+    // 1. extends preset must be a known name OR a `verum::<group>`
+    //    handle. Both surfaces share the same load-time pipeline.
     if let Some(p) = &cfg.extends {
-        if !matches!(p.as_str(), "minimal" | "recommended" | "strict" | "relaxed") {
-            let known_presets = ["minimal", "recommended", "strict", "relaxed"];
-            let suggest = known_presets
+        let is_preset =
+            matches!(p.as_str(), "minimal" | "recommended" | "strict" | "relaxed");
+        let is_known_group = lint_groups().iter().any(|(name, _)| name == p);
+        if !is_preset && !is_known_group {
+            // Build did-you-mean over both surfaces so a typo on
+            // either side gets a useful suggestion.
+            let mut candidates: Vec<&str> = vec![
+                "minimal", "recommended", "strict", "relaxed",
+            ];
+            for (name, _) in lint_groups() {
+                candidates.push(name);
+            }
+            let suggest = candidates
                 .iter()
                 .min_by_key(|cand| levenshtein(cand, p))
                 .copied()
                 .unwrap_or("recommended");
             errors.push(format!(
-                "unknown preset `extends = \"{}\"` — did you mean `\"{}\"`? (valid: minimal | recommended | strict | relaxed)",
+                "unknown preset `extends = \"{}\"` — did you mean `\"{}\"`? \
+                 (valid: minimal | recommended | strict | relaxed | verum::<group>)",
                 p, suggest
             ));
         }
