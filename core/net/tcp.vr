@@ -952,14 +952,22 @@ implement TcpListener {
     fn bind_addr_with_backlog(addr: &SocketAddr, backlog: Int) -> Result<TcpListener, IoError> {
         let domain = if addr.is_ipv4() { AF_INET } else { AF_INET6 };
 
-        // Create socket - use statement-level @cfg to ensure fd is in function scope
+        // Create socket. Inline match instead of `.map_err(IoError.from_os)?`
+        // because the HOF + `?` codegen has an unresolved-function-pointer bug
+        // under AOT (#110) — the static method `IoError.from_os` is loaded as
+        // an Int via LoadI(func_id), then Result-tag extraction reads from
+        // `[null + func_id*8]` and SEGVs. Direct call form bypasses HOF.
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let fd = socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0)
-            .map_err(IoError.from_os)?;
+        let fd = match socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0) {
+            Ok(f) => f,
+            Err(e) => return Err(IoError.from_os(e)),
+        };
 
         @cfg(target_os = "macos")
-        let fd = sys_socket(domain, SOCK_STREAM, 0)
-            .map_err(IoError.from_os)?;
+        let fd = match sys_socket(domain, SOCK_STREAM, 0) {
+            Ok(f) => f,
+            Err(e) => return Err(IoError.from_os(e)),
+        };
 
         // Set SO_REUSEADDR for quick restart
         @cfg(any(target_os = "linux", target_os = "windows"))
