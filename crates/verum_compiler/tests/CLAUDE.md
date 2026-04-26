@@ -19,12 +19,17 @@ module-level documentation.
 
 | File | Class | What it pins |
 |---|---|---|
-| `stdlib_unique_type_names.rs` | type-name collision (cfg-aware) | Every public stdlib type has a unique simple name *for any single build configuration*.  `@cfg(target_os/target_arch/runtime)` mutually-exclusive variants are correctly admitted.  Contains 17 cfg parser/overlap unit tests + 1 integration test. |
+| `stdlib_unique_type_names.rs` | type-name collision (cfg-aware) | Every public stdlib type has a unique simple name *for any single build configuration*. Honors `@cfg(target_os/target_arch/runtime)` per-decl AND module-level (`@cfg(...) public module X;` in parent's `mod.vr`).  Contains 17 cfg parser/overlap unit tests + 9 module-cfg unit tests + 1 integration test. |
 | `stdlib_lenient_skip_baseline.rs` | silent codegen-skip | Seven fixtures across four stdlib subgraphs (SQLite L0..L4, async runtime, text formatting, I/O protocols) assert zero `[lenient] SKIP` warnings during stdlib loading.  Catches missing-function / undefined-variant / arity-mismatch regressions. |
 | `stdlib_simple_variant_alias_preservation.rs` | simple-name alias loss | The bare `None` / `Some` / `Ok` / `Err` aliases stay registered after stdlib loading even when other stdlib types declare colliding variant names.  Pins the `prefer_existing_functions` save/restore guard. |
 | `stdlib_arity_disambiguation.rs` | overload-by-arity loss | FFI builtins that share a simple name with a higher-level wrapper of different arity (`write` 2-arg vs 3-arg, `pread`, `send`, …) keep BOTH `name#arity` registrations.  Pins the arity-suffix branch of `register_function`. |
-| `vbc_codegen_determinism.rs` | non-deterministic codegen | Two-process invariant: same input + same hasher seed → byte-identical VBC bytecode.  Catches HashMap-iteration-order leaks. |
-| `sqlite_native_naming_hygiene.rs` | SQLite catalogue conventions | Domain-specific naming patterns under `core/database/sqlite/native/`. |
+| `vbc_codegen_determinism.rs` | non-deterministic codegen | Two-process invariant: same input compiles to byte-identical VBC bytecode across separate process invocations.  Catches HashMap-iteration-order leaks that produce the symptom matrix `method not found / null deref / division by zero / field index OOB` (each from runtime resolving a function-id / variant-tag / field-offset assigned to a *different* symbol in the producing run). |
+| `sqlite_native_naming_hygiene.rs` | stdlib-protocol shadow | Walks `core/database/sqlite/native/` and fails when a `.vr` file declares `public type X is …` for any reserved stdlib name (e.g. `Result`, with the RNull/RText catalogue once silently shadowing `Result<T,E>::{Ok, Err}`).  The reserved set is small — names that carry critical stdlib-protocol meaning, where shadowing produces "Unknown variant constructor 'Ok'" failures far from the redeclaration site. |
+
+Closure-walker mount-resolution is verified by 9 inline
+`resolve_super_path_tests` in `crates/verum_compiler/src/pipeline.rs`
+(unit tests for the `super.*` and `.X` path-resolution helper added
+under #163/#164).
 
 ## Shared support
 
