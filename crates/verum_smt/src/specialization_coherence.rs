@@ -178,9 +178,6 @@ pub struct SpecializationStats {
 
 /// Verifies specialization coherence using CHC solving
 pub struct SpecializationVerifier {
-    /// Z3 context
-    #[allow(dead_code)] // Reserved for direct Z3 operations
-    context: Context,
     /// Fixedpoint engine for CHC solving
     fixedpoint: FixedPointEngine,
     /// Implementation database
@@ -197,8 +194,7 @@ pub struct SpecializationVerifier {
 impl SpecializationVerifier {
     /// Create a new specialization verifier
     pub fn new() -> Result<Self, Text> {
-        let context = Context::thread_local();
-        let fixedpoint = FixedPointEngine::new(context.clone())?;
+        let fixedpoint = FixedPointEngine::new(Context::thread_local())?;
 
         // Create a default path for the lattice
         let default_protocol = Path::single(verum_ast::ty::Ident {
@@ -207,7 +203,6 @@ impl SpecializationVerifier {
         });
 
         Ok(Self {
-            context,
             fixedpoint,
             implementations: List::new(),
             lattice: SpecializationLattice::new(default_protocol),
@@ -1197,18 +1192,6 @@ impl SpecializationVerifier {
     }
 
     /// Check if a type implements a protocol (by Path)
-    ///
-    /// Uses the protocol checker from protocol_smt module for full verification:
-    /// 1. Check registered implementations for direct matches
-    /// 2. Check superprotocol relationships for inherited implementations
-    /// 3. Handle generic type instantiation with variance
-    /// 4. Consider where clause satisfaction
-    #[allow(dead_code)] // Part of protocol checking API
-    fn type_implements_protocol(&self, ty: &Type, protocol: &Path) -> bool {
-        let protocol_name = protocol.as_ident().map(|i| i.as_str()).unwrap_or("");
-        self.type_implements_protocol_by_name(ty, protocol_name)
-    }
-
     /// Check if a type implements a protocol (by name string)
     ///
     /// Full implementation using the protocol checker:
@@ -1504,13 +1487,6 @@ impl SpecializationVerifier {
         // For now, return false as a conservative default
         // Full implementation would traverse the protocol hierarchy graph
         false
-    }
-
-    /// Check if two types match exactly (not considering generics)
-    #[allow(dead_code)] // Part of type matching API
-    fn types_match_exactly(&self, ty1: &Type, ty2: &Type) -> bool {
-        // Simple structural equality for concrete types
-        format!("{:?}", ty1) == format!("{:?}", ty2)
     }
 
     /// Check mutual exclusion between implementations with negative bounds

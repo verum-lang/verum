@@ -228,12 +228,7 @@ pub struct WorkerStats {
 #[derive(Debug, Clone)]
 enum WorkerMessage {
     /// New lemma discovered (as SMT-LIB string)
-    Lemma {
-        #[allow(dead_code)] // Used for lemma provenance tracking
-        worker_id: usize,
-        lemma: Text,
-        quality: f64,
-    },
+    Lemma { lemma: Text, quality: f64 },
     /// Solution found
     Solution(ParallelResult),
     /// Worker failed
@@ -242,20 +237,6 @@ enum WorkerMessage {
     Stats(WorkerStats),
     /// Progress report
     Progress { worker_id: usize, conflicts: usize },
-}
-
-/// Control messages to workers
-#[allow(dead_code)] // Will be used for worker coordination in parallel solving
-#[derive(Debug, Clone)]
-enum ControlMessage {
-    /// Add lemma (as SMT-LIB string)
-    AddLemma(Text),
-    /// Terminate
-    Terminate,
-    /// Request statistics
-    GetStats,
-    /// Adjust resource limits
-    SetResourceLimit { memory_mb: usize, time_ms: u64 },
 }
 
 // ==================== Parallel Solver ====================
@@ -452,10 +433,9 @@ impl ParallelSolver {
         // Parse and assert (simplified - would need full parsing)
         // For now, generate trivial cubes
         let mut cubes = List::new();
-        for i in 0..cubes_to_generate {
+        for _ in 0..cubes_to_generate {
             cubes.push(Cube {
                 literals: List::new(),
-                score: 1.0 / (i as f64 + 1.0),
             });
         }
 
@@ -799,11 +779,7 @@ impl Worker {
                         let lemma = Text::from(format!("lemma_{}", self.local_stats.conflicts));
                         let quality = 1.0 / (self.local_stats.conflicts as f64 + 1.0);
 
-                        let _ = tx.send(WorkerMessage::Lemma {
-                            worker_id: self.id,
-                            lemma,
-                            quality,
-                        });
+                        let _ = tx.send(WorkerMessage::Lemma { lemma, quality });
 
                         self.local_stats.lemmas_learned += 1;
                     }
@@ -979,8 +955,6 @@ impl Default for CubeAndConquerSolver {
 #[derive(Debug, Clone)]
 struct Cube {
     pub literals: List<Text>, // SMT-LIB string representations
-    #[allow(dead_code)] // Used for cube scoring in search heuristics
-    pub score: f64,
 }
 
 // ==================== Portfolio Solving ====================
