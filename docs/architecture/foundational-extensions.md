@@ -282,6 +282,32 @@ VUVA §2.5 уже включает `K-Adj-Unit` / `K-Adj-Counit` как kernel r
 - Functorial-accessibility check: $O(|\alpha|^3)$ через κ-фильтрованный colimit preservation.
 - Полная τ-naturality: $O(|\alpha|^4)$ для 2-функториальности.
 
+### 1.7 Implementation status (V0/V1/V2 honest disclaimer)
+
+VFE-1 ships in three increments. Each is а **strict tightening** of the previous; none are silent demotions of an earlier soundness claim.
+
+**V0 (shipped)** — `check_eps_mu_coherence` accepts any structurally well-formed pair `(EpsilonOf(_), AlphaOf(_))`. Permissive skeleton; the kernel records the rule's existence so other passes can reference its diagnostic surface. Not a soundness claim about τ-witness.
+
+**V1 (shipped)** — *shape-check tightening*. Enforces:
+  • `lhs == rhs` (structural identity) ⇒ accept (degenerate naturality).
+  • Canonical shape `(EpsilonOf(M_α), AlphaOf(EpsilonOf(α)))` requires `AlphaOf`'s inner term to itself be an `EpsilonOf` constructor; malformed inners are rejected.
+  • Identity-functor sub-case `M = id` ⇒ `M_α == α` structurally ⇒ accept.
+  • Anything else (including non-canonical lhs/rhs shapes) ⇒ reject with `EpsMuNaturalityFailed`.
+
+**V2 (shipped, см. commit `b152d3fa`)** — *modal-depth preservation pre-condition*. For non-identity M (`M_α ≠ α` structurally), V2 adds `m_depth_omega(M_α) == m_depth_omega(α)` as a NECESSARY (but not sufficient) condition: the canonical natural-equivalence $\tau : \varepsilon \circ \mathsf{M} \simeq \mathsf{A} \circ \varepsilon$ is depth-preserving (an $(\infty, 1)$-categorical equivalence), so a depth mismatch precludes any τ-witness. Soundness:
+  • Depth mismatch ⇒ reject is **correct** (no τ-witness can exist).
+  • Depth match ⇒ V2 still conservatively **accepts** (the check is necessary, not sufficient).
+
+**Architectural caveat.** V2's depth check applies `m_depth_omega` to the inner `α`-shaped term, NOT to a hypothetical metaisation `M(α)` evaluated structurally. The CoreTerm calculus does not (yet) have a `MetaApp(M, t)` constructor whose depth is `dp(t) + 1` — `EpsilonOf` and `AlphaOf` are atomic wrappers per VUVA §4.3. Consequently, two terms encoded with the same surface shape but with M's action on different sides have indistinguishable `m_depth_omega` ranks. **The V2 check, while sound, has VACUOUS preconditions for the canonical-shape case** (both sides are atomic-rank-0 if their inner Vars are atomic). Discharge: V3's full σ_α / π_α witness construction (#181) will introduce explicit M-tracking (likely as a new `MetaApp(M, t)` CoreTerm constructor with `dp(MetaApp) = dp(t) + 1`), making V2's depth check materially constraining. Until V3, V2's depth-mismatch rejection covers only modal-operator-overshoot cases (where one side is wrapped in `ModalBox`/`ModalDiamond` and the other is not) — a strict tightening over V1 but not the full sufficient witness check.
+
+**V3 (deferred — multi-week, tracked under #181)** — explicit τ-witness construction:
+  • σ_α from `Code_S` morphism (Smoryński 1985 §1, see [/12-actic/04-ac-oc-duality §5.2 Lemma 5.5](https://...)).
+  • π_α from `Perform_{ε_math}` naturality through axiom A-3 (see Lemma 5.6).
+  • Reasoning about M's action on non-trivial articulations.
+  • Integration with the kernel's structure-recursion judgement (Theorem 16.6 semi-decidability).
+
+V3 will replace V2's necessary-condition with the actual sufficient witness check; V2's diagnostic codes carry over without breaking the `EpsMuNaturalityFailed` surface.
+
 ---
 
 ## 2. VFE-2 — Round-trip 108.T algorithm
