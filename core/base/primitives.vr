@@ -830,12 +830,18 @@ implement Float {
         self.is_finite() && self.abs() >= Float.min_positive()
     }
 
-    /// Check if positive (true for +0.0, false for -0.0 and NaN).
+    /// Check if strictly positive (`self > 0.0`).
+    /// Returns `false` for `+0.0`, `-0.0`, and `NaN`. Use
+    /// [`is_sign_positive`] for sign-bit semantics that
+    /// distinguish `+0.0` from `-0.0`.
     public fn is_positive(self) -> Bool {
         self > 0.0
     }
 
-    /// Check if negative (false for +0.0, true for -0.0, false for NaN).
+    /// Check if strictly negative (`self < 0.0`).
+    /// Returns `false` for `+0.0`, `-0.0`, and `NaN`. Use
+    /// [`is_sign_negative`] for sign-bit semantics that
+    /// distinguish `+0.0` from `-0.0`.
     public fn is_negative(self) -> Bool {
         self < 0.0
     }
@@ -864,9 +870,26 @@ implement Float {
         else { 0.0 }
     }
 
-    /// Absolute value.
+    /// Absolute value, IEEE 754-conforming.
+    ///
+    /// Critically: `abs(-0.0) == +0.0` (IEEE 754 mandates the
+    /// sign bit be cleared), `abs(NaN) == NaN`, `abs(±Inf) ==
+    /// +Inf`. The previous `if self < 0.0 { -self } else { self }`
+    /// returned `self` unchanged for `-0.0` (because `-0.0 < 0.0`
+    /// is false in IEEE 754 — the comparison treats `-0.0 == +0.0`),
+    /// silently leaking the sign bit and breaking
+    /// `(-0.0).abs().is_sign_positive()` (which should be true
+    /// per spec but returned false).
+    ///
+    /// Implementation clears the sign bit directly via the
+    /// bit-pattern round-trip — this is the standard
+    /// IEEE 754 `fabs` behaviour and matches what every other
+    /// language's stdlib `abs` returns for the zero/NaN edge
+    /// cases.
     public fn abs(self) -> Float {
-        if self < 0.0 { -self } else { self }
+        let bits: UInt64 = f64_to_bits(self);
+        let mask: UInt64 = 0x7FFFFFFFFFFFFFFF as UInt64; // clear sign bit
+        f64_from_bits(bits & mask)
     }
 
     /// Convert to integer (truncates toward zero).
