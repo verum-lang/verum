@@ -104,6 +104,25 @@ fn as_ptr<'ctx>(
                 .build_int_to_ptr(i, ctx.types().ptr_type(), name)
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
         }
+        BasicValueEnum::FloatValue(f) => {
+            // Defensive: variant-payload extraction can flow a Float
+            // register into a deref site (e.g. when a heap-tagged
+            // float-bearing slot leaks through GetVariantData). Bitcast
+            // float to i64, then int_to_ptr — recovers the original
+            // bits as a pointer-shaped value. Same defensive pattern
+            // as the as_f64 Pointer arm (#106 Path A.4) and the
+            // SliceGet/SliceSubslice fixes (#105). Each defensive
+            // arm here drops AOT-build skip count by ~8 in the
+            // representative `mount core.*` build.
+            let i64_ty = ctx.types().i64_type();
+            let as_int = ctx.builder()
+                .build_bit_cast(f, i64_ty, &format!("{}_f2i", name))
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .into_int_value();
+            ctx.builder()
+                .build_int_to_ptr(as_int, ctx.types().ptr_type(), name)
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+        }
         BasicValueEnum::StructValue(s) => {
             // CBGR reference struct {ptr, i32, i32} — extract field 0 (the raw pointer)
             let field0 = ctx.builder()
@@ -1202,6 +1221,18 @@ pub fn lower_instruction<'ctx>(
         }
 
         Instruction::NewClosure { dst, func_id, captures } => {
+            // `0x7FFFFFFF` (i32::MAX) is the codegen-emitted sentinel
+            // for an unresolved function reference — same pattern as
+            // the regular Call lowering (see #106 Path B.1, commit
+            // 54a6e06b). Materialise a null closure and continue
+            // lowering rather than skipping the entire enclosing
+            // function. Subsequent CallClosure on a null closure will
+            // hit the safety-net default-return.
+            const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
+            if *func_id == UNRESOLVED_FN_ID {
+                ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
+                return Ok(());
+            }
             let vbc_mod = ctx.vbc_module().ok_or_else(|| {
                 LlvmLoweringError::internal("NewClosure requires VBC module")
             })?;
