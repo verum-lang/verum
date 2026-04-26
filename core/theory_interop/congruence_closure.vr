@@ -50,6 +50,7 @@
 // =============================================================================
 
 mount core.collections.union_find.{UnionFindInt};
+mount core.collections.map.{Map};
 
 // =============================================================================
 // Term ADT
@@ -87,6 +88,23 @@ public fn term_new(id: Int, symbol: Text, args: List<Int>) -> Term {
 
 public fn term_is_constant(t: Term) -> Bool {
     t.arity == 0
+}
+
+/// Explicit Clone impl. The `@derive(Clone)` annotation on the
+/// type definition is *intent*; the dispatch table needs a
+/// concrete `Term.clone` entry that user-side `t.clone()` calls
+/// can resolve to (the derive-only path leaves the entry off the
+/// stdlib codegen cache, surfacing as a runtime
+/// `method 'Term.clone' not found` panic at the first call site).
+implement Clone for Term {
+    fn clone(&self) -> Term {
+        Term {
+            id: self.id,
+            symbol: self.symbol.clone(),
+            args: self.args.clone(),
+            arity: self.arity,
+        }
+    }
 }
 
 /// Two terms are *syntactically* equal when their (symbol, args)
@@ -127,6 +145,12 @@ public fn equation_new(lhs: Int, rhs: Int) -> Equation {
     Equation { lhs: lhs, rhs: rhs }
 }
 
+implement Clone for Equation {
+    fn clone(&self) -> Equation {
+        Equation { lhs: self.lhs, rhs: self.rhs }
+    }
+}
+
 /// An input set of equations together with the term registry that
 /// defines the IDs.
 @derive(Clone)
@@ -141,6 +165,15 @@ public fn equation_set_new(terms: List<Term>, equations: List<Equation>) -> Equa
     EquationSet {
         terms: terms,
         equations: equations,
+    }
+}
+
+implement Clone for EquationSet {
+    fn clone(&self) -> EquationSet {
+        EquationSet {
+            terms: self.terms.clone(),
+            equations: self.equations.clone(),
+        }
     }
 }
 
@@ -171,47 +204,60 @@ public fn closure_representative(c: &mut CongruenceClosure, t_id: Int) -> Int {
 // Closure procedure
 // =============================================================================
 
-/// One pass of the congruence iteration. For every distinct pair of
-/// terms `f(a₁..aₙ)` and `f(b₁..bₙ)` whose arguments are pairwise
-/// equal modulo the current union-find, merge their classes.
-/// Returns `true` iff any new merge happened.
-fn one_congruence_pass(eqs: &EquationSet, uf: &mut UnionFindInt) -> Bool {
+/// Encode a term's *current* signature under the running union-find
+/// as `"symbol|c0,c1,..."` where `c_i = uf.find(arg_i)`. Two non-
+/// constant terms with identical signatures must be merged by
+/// the congruence axiom: same symbol applied to args in the same
+/// classes ⇒ same class.
+///
+/// Cost: O(arity · log n) per call (amortised); the dominant work
+/// is `Text.from_int` on each argument's class id. This is the
+/// V1.5 replacement for V1's pairwise-args scan, which cost O(arity)
+/// per pair *and* O(n²) pairs per round.
+fn term_signature(t: &Term, uf: &mut UnionFindInt) -> Text {
+    let mut sig: Text = t.symbol.clone();
+    sig.push_str(&Text.from("|"));
+    let mut k: Int = 0;
+    while k < t.arity {
+        let arg_id: Int = *t.args.get(k as Int).unwrap();
+        let canonical: Int = uf.find(arg_id);
+        if k > 0 {
+            sig.push_str(&Text.from(","));
+        }
+        sig.push_str(&Text.from_int(canonical));
+        k = k + 1;
+    }
+    sig
+}
+
+/// V1.5 round — signature-table walk. Build a fresh
+/// `Map<Text, Int>` keyed by the current term-signatures; on every
+/// signature-collision merge the colliding terms' classes. Returns
+/// `true` iff any new merge happened.
+///
+/// Cost: O(n · α(n) · arity_avg) per round — each of n terms is
+/// signed (O(arity · log n)) and probed once into the map. This is
+/// strictly better than V1's O(n² · α) per-round pairwise scan.
+fn one_congruence_round(eqs: &EquationSet, uf: &mut UnionFindInt) -> Bool {
+    let mut sig_table: Map<Text, Int> = Map.new();
     let mut any_merge: Bool = false;
     let n: Int = eqs.terms.len() as Int;
     let mut i: Int = 0;
     while i < n {
-        let ti: Term = (*eqs.terms.get(i as Int).unwrap()).clone();
-        if term_is_constant(ti.clone()) {
-            i = i + 1;
-            continue;
-        }
-        let mut j: Int = i + 1;
-        while j < n {
-            let tj: Term = (*eqs.terms.get(j as Int).unwrap()).clone();
-            // Skip if classes are already merged or arities/symbols differ.
-            if uf.same_set(ti.id, tj.id)
-               || !ti.symbol.eq(tj.symbol.clone())
-               || ti.arity != tj.arity {
-                j = j + 1;
-                continue;
+        let t: Term = (*eqs.terms.get(i as Int).unwrap()).clone();
+        if !term_is_constant(t.clone()) {
+            let sig: Text = term_signature(&t, &mut uf);
+            match sig_table.get_optional(sig.clone()) {
+                Some(existing_id) => {
+                    if !uf.same_set(t.id, existing_id) {
+                        uf.union(t.id, existing_id);
+                        any_merge = true;
+                    }
+                },
+                None => {
+                    sig_table.insert(sig, t.id);
+                },
             }
-            // Pairwise-equal arguments under the current closure?
-            let mut all_args_eq: Bool = true;
-            let mut k: Int = 0;
-            while k < ti.arity {
-                let ak: Int = *ti.args.get(k as Int).unwrap();
-                let bk: Int = *tj.args.get(k as Int).unwrap();
-                if !uf.same_set(ak, bk) {
-                    all_args_eq = false;
-                    break;
-                }
-                k = k + 1;
-            }
-            if all_args_eq {
-                uf.union(ti.id, tj.id);
-                any_merge = true;
-            }
-            j = j + 1;
         }
         i = i + 1;
     }
@@ -221,18 +267,25 @@ fn one_congruence_pass(eqs: &EquationSet, uf: &mut UnionFindInt) -> Bool {
 /// Run the Nieuwenhuis-Oliveras congruence-closure procedure to
 /// fixed point on the input equation set.
 ///
-/// The procedure:
+/// The procedure (V1.5 — signature-table replacement of V1's
+/// pairwise scan):
 ///   1. Seed the union-find with the input equations.
-///   2. Repeatedly run `one_congruence_pass` until no more merges
-///      happen.
+///   2. Repeatedly run `one_congruence_round` (signature-keyed walk
+///      over all non-constant terms; collisions merge classes)
+///      until no more merges happen.
 ///   3. Return the final union-find + iteration count.
 ///
-/// Termination: the iteration reduces the number of equivalence
-/// classes; the term universe is finite, so the iteration converges
-/// in at most O(|terms|) passes. Each pass is O(|terms|² α) via the
-/// pairwise scan; the total cost is O(|terms|³ α) which is the
-/// standard textbook bound for the simple algorithm. Faster
-/// algorithms (Downey-Sethi-Tarjan) are tracked under V1.5.
+/// Termination: the iteration strictly reduces the number of
+/// equivalence classes; the term universe is finite, so the
+/// iteration converges in at most O(|terms|) rounds.
+///
+/// Asymptotic cost: O(|terms|² · α(|terms|) · arity_avg · log|terms|)
+/// in the worst case (O(|terms|) rounds × O(|terms| · α · arity · log)
+/// per round). V1 was O(|terms|³ · α) — V1.5 saves a factor of
+/// |terms| / log|terms|. The Downey-Sethi-Tarjan use-list version,
+/// which would replace the per-round full re-scan with incremental
+/// re-signing of only the dependents of the just-merged classes, is
+/// V2 work tracked under the same task.
 public fn congruence_close(eqs: EquationSet) -> CongruenceClosure {
     let n: Int = eqs.terms.len() as Int;
     let mut uf: UnionFindInt = UnionFindInt.new(n as Int);
@@ -249,7 +302,7 @@ public fn congruence_close(eqs: EquationSet) -> CongruenceClosure {
     let mut iterations: Int = 0;
     let mut changed: Bool = true;
     while changed {
-        changed = one_congruence_pass(&eqs, &mut uf);
+        changed = one_congruence_round(&eqs, &mut uf);
         iterations = iterations + 1;
     }
 
