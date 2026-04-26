@@ -70,21 +70,50 @@ const FAILURE_HINT: &str =
        was bypassed under `prefer_existing_functions`.  See \
        `register_function` in `codegen/context.rs` (#161).";
 
+/// Vcs-presence policy.  Two modes:
+///
+///   * Workspace has `vcs/specs/` — every fixture this test points at
+///     MUST exist; a missing one panics with a clear message so the
+///     spec moving / being deleted doesn't silently delete coverage.
+///   * Workspace lacks `vcs/specs/` (e.g. shallow checkout, embedded
+///     deployment) — every vcs-pointing test skips with a one-line
+///     `eprintln!` notice; CI logs make the whole-suite skip explicit
+///     instead of test-by-test silence.
+///
+/// The decision is per-call (no module-level statics) so the tests
+/// stay parallel-safe.
+fn vcs_specs_present() -> bool {
+    workspace_root().join("vcs/specs").is_dir()
+}
+
 /// Run vtest on `spec` and assert it emits zero `[lenient] SKIP`
 /// warnings during stdlib loading.  `scenario` names the fixture in
 /// the failure message so a CI diff identifies which spec regressed.
 ///
-/// If the spec file is missing the assertion is skipped silently —
-/// vcs/ specs are optional in some workspace layouts and this test
-/// must not block builds where the fixture isn't present.  The
-/// `expect_present` flag (set by the SQLite-VFS fixture which is
-/// load-bearing) overrides that and panics on a missing fixture.
-fn assert_no_lenient_skips(scenario: &str, spec: &std::path::Path, expect_present: bool) {
-    if !spec.is_file() {
-        if expect_present {
-            panic!("expected {} smoke at {} but it is missing", scenario, spec.display());
-        }
+/// Behaviour on missing fixtures:
+///
+///   * If `vcs/specs/` is absent altogether — emit a one-line notice
+///     and skip silently (legitimate environment lacks the corpus).
+///   * If `vcs/specs/` is present but the specific fixture isn't —
+///     panic.  A spec being deleted or moved without updating the
+///     test must surface immediately, not silently erase coverage.
+fn assert_no_lenient_skips(scenario: &str, spec: &std::path::Path) {
+    if !vcs_specs_present() {
+        eprintln!(
+            "[stdlib_lenient_skip_baseline] vcs/specs/ absent — skipping {} smoke",
+            scenario,
+        );
         return;
+    }
+    if !spec.is_file() {
+        panic!(
+            "expected {} fixture at {} but it is missing.  vcs/specs/ \
+             exists in this workspace, so the spec must be present too — \
+             a moved or deleted spec without a corresponding test update \
+             silently erases coverage; that is what this panic prevents.",
+            scenario,
+            spec.display(),
+        );
     }
     let (code, skips) = collect_lenient_skips(spec);
     assert!(
@@ -136,7 +165,7 @@ fn stdlib_loading_emits_no_lenient_skips_sqlite() {
     let target = workspace_root().join(
         "vcs/specs/L2-standard/database/sqlite/l0_vfs/memdb_open_write_read.vr",
     );
-    assert_no_lenient_skips("SQLite-VFS", &target, /* expect_present */ true);
+    assert_no_lenient_skips("SQLite-VFS", &target);
 }
 
 /// Even-wider coverage: the L1 pager round-trip pulls in sys.time_ops
@@ -151,7 +180,7 @@ fn stdlib_loading_emits_no_lenient_skips_l1_pager() {
     let target = workspace_root().join(
         "vcs/specs/L2-standard/database/sqlite/l1_pager/page_roundtrip.vr",
     );
-    assert_no_lenient_skips("L1-pager", &target, false);
+    assert_no_lenient_skips("L1-pager", &target);
 }
 
 /// Top-of-stack coverage: an L4 VDBE program-builder smoke pulls in
@@ -170,7 +199,7 @@ fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
     let target = workspace_root().join(
         "vcs/specs/L2-standard/database/sqlite/l4_vdbe/simple_select_program.vr",
     );
-    assert_no_lenient_skips("L4-VDBE", &target, false);
+    assert_no_lenient_skips("L4-VDBE", &target);
 }
 
 /// Cross-domain coverage: runtime/recovery + retry primitives.  This
@@ -190,7 +219,7 @@ fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_runtime_retry() {
     let target = workspace_root().join("vcs/specs/core/runtime/retry_minimal_test.vr");
-    assert_no_lenient_skips("runtime/retry", &target, false);
+    assert_no_lenient_skips("runtime/retry", &target);
 }
 
 /// Text-formatting subgraph coverage: pulls in core/text/format
@@ -206,7 +235,7 @@ fn stdlib_loading_emits_no_lenient_skips_runtime_retry() {
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_text_format() {
     let target = workspace_root().join("vcs/specs/core/text/format_traits_test.vr");
-    assert_no_lenient_skips("text/format", &target, false);
+    assert_no_lenient_skips("text/format", &target);
 }
 
 /// I/O protocols subgraph coverage: pulls in core/io/protocols
@@ -224,5 +253,5 @@ fn stdlib_loading_emits_no_lenient_skips_text_format() {
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_io_protocols() {
     let target = workspace_root().join("vcs/specs/core/io/protocols_test.vr");
-    assert_no_lenient_skips("io/protocols", &target, false);
+    assert_no_lenient_skips("io/protocols", &target);
 }
