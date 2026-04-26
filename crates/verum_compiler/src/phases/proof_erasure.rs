@@ -141,15 +141,10 @@ pub fn erase_proofs(modules: List<Module>) -> (List<Module>, ProofErasureStats) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_ast::span::Span;
     use verum_ast::FileId;
 
     fn dummy_file_id() -> FileId {
         FileId::new(0)
-    }
-
-    fn dummy_span() -> Span {
-        Span::new(0, 0, dummy_file_id())
     }
 
     fn parse_module(source: &str) -> Module {
