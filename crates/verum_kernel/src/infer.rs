@@ -238,18 +238,28 @@ fn infer_inner(
         // Path-formation: Path<A>(lhs, rhs) is a type when A is a type
         // (i.e. inhabits some universe) and lhs, rhs both check at A.
         // Result lives in A's universe, same as carrier.
+        //
+        // V8 (#216) — endpoint-against-carrier comparison uses
+        // `definitional_eq` (β-aware) instead of `structural_eq`
+        // (byte-identity). Pre-V8 a path with carrier = `App(Lam,
+        // Nat)` (β-equal to `Nat`) and endpoints typed at `Nat`
+        // would be FALSELY REJECTED — the elaborator's β-redex
+        // never got reduced before the equality check. The new
+        // normalize() reduces both sides to β-normal form before
+        // comparing, so the typing rule is complete on the
+        // SN fragment.
         CoreTerm::PathTy { carrier, lhs, rhs } => {
             let carrier_univ = infer_inner(ctx,carrier, axioms, inductives)?;
             let carrier_level = universe_level(&carrier_univ)?;
             let lhs_ty = infer_inner(ctx,lhs, axioms, inductives)?;
-            if !structural_eq(&lhs_ty, carrier) {
+            if !crate::support::definitional_eq(&lhs_ty, carrier) {
                 return Err(KernelError::TypeMismatch {
                     expected: shape_of(carrier),
                     actual: shape_of(&lhs_ty),
                 });
             }
             let rhs_ty = infer_inner(ctx,rhs, axioms, inductives)?;
-            if !structural_eq(&rhs_ty, carrier) {
+            if !crate::support::definitional_eq(&rhs_ty, carrier) {
                 return Err(KernelError::TypeMismatch {
                     expected: shape_of(carrier),
                     actual: shape_of(&rhs_ty),
