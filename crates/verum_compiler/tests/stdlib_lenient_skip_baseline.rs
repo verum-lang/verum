@@ -299,3 +299,35 @@ fn stdlib_loading_emits_no_lenient_skips_text_format() {
         skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
     );
 }
+
+/// I/O protocols subgraph coverage: pulls in core/io/protocols
+/// (the foundational `Read` / `Write` / `Seek` traits + StreamError
+/// + IoErrorKind taxonomy + the renamed `EmptyReader` from #162's
+/// Empty<T> disambiguation), plus core/io/path (canonical `Path`
+/// after net/quic/path → QuicPath rename and math/hott → HottPath
+/// rename), and the ByteRepeat / Sink utility readers/writers.
+///
+/// Sits alongside the runtime/retry and text/format fixtures as
+/// independent non-SQLite stdlib subgraph coverage — a regression
+/// in any io.* module that affects type-table population fails
+/// here without depending on SQLite codegen at all.
+#[test]
+#[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
+fn stdlib_loading_emits_no_lenient_skips_io_protocols() {
+    let root = workspace_root();
+    let target = root.join("vcs/specs/core/io/protocols_test.vr");
+    if !target.is_file() {
+        return;
+    }
+
+    let (code, skips) = collect_lenient_skips(&target);
+    assert!(
+        skips.is_empty(),
+        "io/protocols smoke triggered {} lenient `SKIP` warning(s) during \
+         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
+        skips.len(),
+        code,
+        FAILURE_HINT,
+        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+    );
+}
