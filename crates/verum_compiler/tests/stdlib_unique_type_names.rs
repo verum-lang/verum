@@ -29,12 +29,32 @@
 //! lost had its variants invisible to every body that referenced them
 //! by simple name, including bodies inside its own module.
 //!
-//! Resolution: the two non-canonical types were renamed to
-//! `FcntlLockKind` (sys/common) and `FileLockKind` (sys/locking).  This
-//! test pins the policy: any future stdlib type whose simple name
-//! collides with another existing stdlib type must pick a different
-//! name (prefix-disambiguated by domain — see e.g. `LkNone`, `FxNone`,
-//! `EpNone`, `AvNone`).
+//! History. This test was originally a *ratchet* — it carried a
+//! `BASELINE_DUPLICATES` array of known-bad type names from before the
+//! invariant was enforced and only flagged NEW duplicates while letting
+//! known ones shrink over time.  Task #162 (closed) drove the baseline
+//! from 315 entries down to zero across roughly 165 disambiguation
+//! commits.  With every public stdlib type now uniquely named, the
+//! ratchet plumbing is dead weight; this test is now a plain hard
+//! invariant: any duplicate, old or new, fails.
+//!
+//! When this test fails. Pick a domain-prefixed disambiguated name
+//! following the existing stdlib convention:
+//!
+//!   * Catalogue scope: `<CatalogueName><Type>` —
+//!     `BtreeBalanceStrategy`, `JournalTransitionMode`, `SqlOnConflict`.
+//!   * Layer pair (FFI vs runtime): `Raw<Type>` for the FFI-side —
+//!     `RawJoinHandleOpaque`, `RawExecutorHandle`.
+//!   * Platform-conditional: `Linux<Type>` / `Darwin<Type>` /
+//!     `Windows<Type>` for the @cfg(target_os = …) variants.
+//!   * Architecture-conditional: `Aarch64<Type>` / `X86<Type>`
+//!     for @cfg(target_arch = …) variants.
+//!   * Prefer the broader-scope or foundational module as canonical
+//!     (e.g. `core.metrics.instrument::Counter` > sqlite-internal
+//!     observability counter).
+//!
+//! Update every importer along with the rename — vcs/ smokes that
+//! mounted from the renamed site need their import path adjusted too.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -42,31 +62,8 @@ use std::path::{Path, PathBuf};
 
 const ROOT: &str = "core";
 
-/// Ratchet baseline: a snapshot of the *unique* type names that
-/// currently appear in two or more stdlib modules.  The codegen
-/// variant-constructor table is keyed by simple type name, so every
-/// duplicate is a latent collision — the second declaration's variants
-/// either silently lose to first-wins or get clobbered, depending on
-/// which mode `register_type_constructors` runs in.
-///
-/// **Policy.** This list MAY shrink (rename a duplicate to a unique
-/// disambiguated name) but it MUST NOT grow.  Every NEW `public type X`
-/// added to `core/` must pick a name that doesn't already appear
-/// anywhere else under `core/`.  See task #160 in the developer log
-/// for the underlying class of bugs (silent variant skip, surfaces as
-/// runtime `method 'X.Y' not found on value`).
-///
-/// **How to remove an entry.** Pick a domain-prefixed disambiguated
-/// name following the existing stdlib convention (`LkNone` / `FxNone`
-/// / `AvNone` / `EpNone` / `FmNone` for sqlite catalogue variants;
-/// `FcntlLockKind` / `FileLockKind` / `VfsLockKind` for the LockKind
-/// triplet).  Update every site that imports the old name. Then drop
-/// the entry from this baseline and run the test to confirm the
-/// duplicate is gone.
-const BASELINE_DUPLICATES: &[&str] = &[];
-
 #[test]
-fn stdlib_public_type_names_ratchet() {
+fn stdlib_public_type_names_are_unique() {
     let root = workspace_root().join(ROOT);
     assert!(
         root.is_dir(),
@@ -78,65 +75,38 @@ fn stdlib_public_type_names_ratchet() {
     let mut definitions: BTreeMap<String, Vec<(String, PathBuf, usize)>> = BTreeMap::new();
     walk_dir(&root, &root, &mut definitions);
 
-    let baseline: std::collections::HashSet<&str> =
-        BASELINE_DUPLICATES.iter().copied().collect();
-    let mut current_duplicates: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
-
-    let mut new_violations: Vec<String> = Vec::new();
+    let mut violations: Vec<String> = Vec::new();
     for (name, sites) in &definitions {
         if sites.len() < 2 {
             continue;
         }
-        current_duplicates.insert(name.clone());
-        if baseline.contains(name.as_str()) {
-            continue;
-        }
         let mut entry = format!(
-            "NEW duplicate: type `{}` is declared in {} stdlib modules:\n",
+            "duplicate: type `{}` is declared in {} stdlib modules:\n",
             name,
             sites.len()
         );
         for (modpath, file, line) in sites {
             entry.push_str(&format!("    - {} ({}:{})\n", modpath, file.display(), line));
         }
-        new_violations.push(entry);
+        violations.push(entry);
     }
 
-    if !new_violations.is_empty() {
+    if !violations.is_empty() {
         panic!(
-            "{} new duplicated public type name(s) introduced.  Each \
-             public stdlib type must have a unique simple name across \
-             all of `core/`, because the VBC variant-constructor table \
-             is keyed by simple name.  Two `public type Foo is …` \
-             declarations collide and the second's variants are silently \
-             skipped, surfacing later as runtime \
-             `method 'X.Y' not found on value` panics.\n\n\
+            "{} duplicated public type name(s) in stdlib.  Each public \
+             stdlib type must have a unique simple name across all of \
+             `core/`, because the VBC variant-constructor table is keyed \
+             by simple name.  Two `public type Foo is …` declarations \
+             collide and the second's variants are silently skipped, \
+             surfacing later as runtime `method 'X.Y' not found on value` \
+             panics.\n\n\
              Pick a domain-prefixed disambiguated name following the \
-             existing stdlib convention (e.g. `FcntlLockKind`, \
-             `FileLockKind`, `LkNone`, `FxNone`).\n\n\
+             existing stdlib convention — see this file's module-level \
+             docs for the catalogue / layer-pair / platform / arch \
+             conventions and how to choose which site stays canonical.\n\n\
              {}",
-            new_violations.len(),
-            new_violations.join("\n"),
-        );
-    }
-
-    // Stale-baseline check: catch entries listed in BASELINE_DUPLICATES
-    // that are no longer duplicates.  Forces the baseline to shrink as
-    // renames happen instead of silently tracking dead names.
-    let stale: Vec<&&str> = BASELINE_DUPLICATES
-        .iter()
-        .filter(|n| !current_duplicates.contains(**n))
-        .collect();
-    if !stale.is_empty() {
-        let names: Vec<String> = stale.iter().map(|s| (**s).to_string()).collect();
-        panic!(
-            "{} entries in `BASELINE_DUPLICATES` are no longer duplicated \
-             and must be removed from the baseline:\n  {}\n\nRemove them \
-             from the array in `crates/verum_compiler/tests/\
-             stdlib_unique_type_names.rs` so the ratchet shrinks.",
-            names.len(),
-            names.join("\n  "),
+            violations.len(),
+            violations.join("\n"),
         );
     }
 }
