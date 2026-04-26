@@ -289,3 +289,182 @@ fn pre_v8_axiom_serde_lacks_coord_field() {
     assert!(entry.coord.is_none());
     assert!(entry.body.is_none());
 }
+
+// =============================================================================
+// V8 (#232) — infer_with_full_context auto-applies K-Coord-Cite
+// =============================================================================
+
+mod v2_typing_judgment_integration {
+    use super::*;
+    use verum_common::{Heap, List};
+    use verum_kernel::{
+        Context, CoreTerm, InductiveRegistry, infer, infer_with_full_context,
+    };
+
+    fn unit_ty() -> CoreTerm {
+        CoreTerm::Inductive {
+            path: Text::from("Unit"),
+            args: List::new(),
+        }
+    }
+
+    /// Helper: register an axiom with a coord, return a CoreTerm
+    /// Axiom node referring to it.
+    fn register_and_ref(
+        reg: &mut AxiomRegistry,
+        name: &str,
+        ty: CoreTerm,
+        coord: KernelCoord,
+    ) -> CoreTerm {
+        reg.register_with_coord(
+            Text::from(name),
+            ty.clone(),
+            FrameworkId {
+                framework: coord.fw.clone(),
+                citation: Text::from("test"),
+            },
+            coord.clone(),
+        )
+        .expect("register with coord");
+        CoreTerm::Axiom {
+            name: Text::from(name),
+            ty: Heap::new(ty),
+            framework: FrameworkId {
+                framework: coord.fw.clone(),
+                citation: Text::from("test"),
+            },
+        }
+    }
+
+    #[test]
+    fn infer_at_higher_coord_cites_lower_axiom_admits() {
+        // Theorem at ν=ω (lurie_htt) cites axiom at ν=2 (petz).
+        let mut reg = AxiomRegistry::new();
+        let axiom = register_and_ref(
+            &mut reg,
+            "petz_axiom",
+            unit_ty(),
+            KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2)),
+        );
+        let theorem_coord =
+            KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega());
+        let inductives = InductiveRegistry::new();
+        let res = infer_with_full_context(
+            &Context::new(),
+            &axiom,
+            &reg,
+            &inductives,
+            &theorem_coord,
+            false,
+        );
+        assert!(
+            res.is_ok(),
+            "lower-cite must admit: {:?}",
+            res,
+        );
+    }
+
+    #[test]
+    fn infer_at_lower_coord_cites_higher_axiom_rejects() {
+        // Theorem at ν=2 (petz) tries to cite axiom at ν=ω
+        // (lurie_htt) — must reject via CoordViolation.
+        let mut reg = AxiomRegistry::new();
+        let axiom = register_and_ref(
+            &mut reg,
+            "lurie_axiom",
+            unit_ty(),
+            KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega()),
+        );
+        let theorem_coord =
+            KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
+        let inductives = InductiveRegistry::new();
+        let res = infer_with_full_context(
+            &Context::new(),
+            &axiom,
+            &reg,
+            &inductives,
+            &theorem_coord,
+            false,
+        );
+        assert!(matches!(res, Err(KernelError::CoordViolation { .. })));
+    }
+
+    #[test]
+    fn infer_with_tier_jump_admits_higher_cite() {
+        // Same as above but with allow_tier_jump=true (VVA-3
+        // K-Universe-Ascent escape).
+        let mut reg = AxiomRegistry::new();
+        let axiom = register_and_ref(
+            &mut reg,
+            "lurie_axiom_jumped",
+            unit_ty(),
+            KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega()),
+        );
+        let theorem_coord =
+            KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
+        let inductives = InductiveRegistry::new();
+        let res = infer_with_full_context(
+            &Context::new(),
+            &axiom,
+            &reg,
+            &inductives,
+            &theorem_coord,
+            true,
+        );
+        assert!(res.is_ok(), "tier-jump must admit higher-cite: {:?}", res);
+    }
+
+    #[test]
+    fn infer_with_unannotated_axiom_passes_silently() {
+        // Axiom registered WITHOUT coord. Theorem with coord
+        // tries to cite it — rule must SILENTLY PASS (graceful
+        // degradation, preserves pre-V8 behaviour for legacy
+        // axioms).
+        let mut reg = AxiomRegistry::new();
+        reg.register(
+            Text::from("legacy_axiom"),
+            unit_ty(),
+            FrameworkId {
+                framework: Text::from("test"),
+                citation: Text::from("test"),
+            },
+        )
+        .expect("legacy register");
+        let term = CoreTerm::Axiom {
+            name: Text::from("legacy_axiom"),
+            ty: Heap::new(unit_ty()),
+            framework: FrameworkId {
+                framework: Text::from("test"),
+                citation: Text::from("test"),
+            },
+        };
+        let theorem_coord =
+            KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
+        let inductives = InductiveRegistry::new();
+        let res = infer_with_full_context(
+            &Context::new(),
+            &term,
+            &reg,
+            &inductives,
+            &theorem_coord,
+            false,
+        );
+        assert!(res.is_ok(), "unannotated axiom must pass: {:?}", res);
+    }
+
+    #[test]
+    fn legacy_infer_disables_rule() {
+        // Same shape as the rejection case above, but called via
+        // legacy `infer` shim (no coord) — rule must be disabled.
+        let mut reg = AxiomRegistry::new();
+        let axiom = register_and_ref(
+            &mut reg,
+            "lurie_axiom_legacy",
+            unit_ty(),
+            KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega()),
+        );
+        let res = infer(&Context::new(), &axiom, &reg);
+        // legacy infer doesn't fire the rule — admits.
+        assert!(res.is_ok(), "legacy infer must not fire rule: {:?}", res);
+    }
+}
