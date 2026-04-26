@@ -211,3 +211,62 @@ fn global_type_table_clean_for_fresh_codegen() {
     );
     assert_eq!(report.issue_count(), 0);
 }
+
+// === Orphan MakeVariant ratchet (#188) =================================
+
+/// Ratchet test for `find_orphan_make_variants`.
+///
+/// At a single-module-with-mounts granularity most "orphans" are
+/// legitimate — they reference variants whose declaring module
+/// wasn't fully transitively loaded by the test harness.  But the
+/// COUNT itself is a useful regression signal: if a codegen change
+/// introduces NEW orphans (instructions that the runtime can't
+/// resolve), the count rises and this ratchet trips.
+///
+/// When a fix lands that resolves orphans (better mount transitive
+/// closure, MakeVariantTyped from #167 Phase 3, etc.), lower
+/// `RESULT_ORPHAN_BASELINE` to lock the gain.
+const RESULT_ORPHAN_BASELINE: usize = 280;
+
+#[test]
+fn orphan_make_variants_baseline_for_result() {
+    let codegen = compile_stdlib_subgraph("base/result.vr");
+    let orphans = codegen.find_orphan_make_variants();
+    let count = orphans.len();
+    if count > RESULT_ORPHAN_BASELINE {
+        // Print up to 16 orphans for diagnostic so the regressing
+        // codegen path is identifiable from a CI log.
+        let mut sample = String::new();
+        for o in orphans.iter().take(16) {
+            sample.push_str(&format!(
+                "  - MakeVariant {{ tag: {}, field_count: {} }} in `{}`\n",
+                o.tag, o.field_count, o.function_name,
+            ));
+        }
+        if orphans.len() > 16 {
+            sample.push_str(&format!(
+                "  ... and {} more\n",
+                orphans.len() - 16,
+            ));
+        }
+        panic!(
+            "orphan MakeVariant count for `base/result.vr` regressed: {} > baseline {}\n\n\
+             First {} orphans:\n{}\n\
+             A regression here means a codegen change introduced \
+             `MakeVariant` instructions that the global type table \
+             can't resolve.  See #170 / #188 / #167 Phase 3.",
+            count,
+            RESULT_ORPHAN_BASELINE,
+            16.min(orphans.len()),
+            sample,
+        );
+    }
+    if count < RESULT_ORPHAN_BASELINE {
+        panic!(
+            "orphan MakeVariant count for `base/result.vr` IMPROVED: {} < baseline {}.\n\
+             Lower RESULT_ORPHAN_BASELINE in this file to pin the new value, \
+             so the gain can't silently regress.",
+            count, RESULT_ORPHAN_BASELINE,
+        );
+    }
+}
