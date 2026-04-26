@@ -607,14 +607,33 @@ impl CfgEvaluator {
     pub fn filter_items(&self, items: &List<crate::decl::Item>) -> List<crate::decl::Item> {
         items
             .iter()
-            .filter(|item| self.should_include(&item.attributes))
+            .filter(|item| self.should_include_item(item))
             .cloned()
             .collect()
     }
 
     /// Check if an individual Item should be included based on its @cfg attributes.
+    ///
+    /// Walks BOTH the outer `Item.attributes` list AND any inner-decl
+    /// attribute list that the parser may have populated instead of
+    /// the outer one.  Per `verum_fast_parser/src/decl.rs`, type /
+    /// function declarations carry their `@cfg` attributes on the
+    /// *inner* `TypeDecl.attributes` / `FunctionDecl.attributes`
+    /// field, leaving `Item.attributes` empty.  An outer-only check
+    /// silently bypasses every type-level / function-level @cfg gate
+    /// in the stdlib — see #170 / #181 for the audit history.
     pub fn should_include_item(&self, item: &crate::decl::Item) -> bool {
-        self.should_include(&item.attributes)
+        // Outer-Item.attributes — covers `mount`, `module`, `impl`,
+        // `const`, `static` (no inner attribute storage on those).
+        if !self.should_include(&item.attributes) {
+            return false;
+        }
+        // Inner-decl attributes for the kinds that store them there.
+        match &item.kind {
+            crate::decl::ItemKind::Type(td) => self.should_include(&td.attributes),
+            crate::decl::ItemKind::Function(f) => self.should_include(&f.attributes),
+            _ => true,
+        }
     }
 }
 
@@ -1123,6 +1142,86 @@ mod tests {
             "the failed attribute MUST be returned so callers can warn",
         );
         assert_eq!(fails[0].name.as_str(), "cfg");
+    }
+
+    /// Pin the contract that `should_include_item` walks BOTH the
+    /// outer `Item.attributes` AND the inner-decl attributes for
+    /// type / function declarations.  Without this walk, the parser's
+    /// inner-decl attribute placement (per `verum_fast_parser`) would
+    /// silently bypass every type-level @cfg gate in the stdlib.
+    /// See #170 / #181 audit history.
+    #[test]
+    fn test_should_include_item_walks_inner_typedecl_attrs() {
+        use crate::attr::Attribute;
+        use crate::decl::{Item, ItemKind, TypeDecl, TypeDeclBody, Visibility};
+        use crate::expr::{Expr, ExprKind, BinOp};
+        use crate::literal::{Literal, LiteralKind};
+        use crate::ty::{Ident, Path, PathSegment};
+
+        let evaluator = CfgEvaluator::with_config(TargetConfig::linux_x86_64());
+
+        // Build `target_os = "windows"` — false on linux host.
+        let key_path = Path::new(
+            vec![PathSegment::Name(Ident::new(
+                Text::from("target_os"),
+                dummy_span(),
+            ))]
+            .into_iter()
+            .collect(),
+            dummy_span(),
+        );
+        let key_expr = Expr::new(ExprKind::Path(key_path), dummy_span());
+        let val_expr = Expr::new(
+            ExprKind::Literal(Literal::new(
+                LiteralKind::Text(crate::literal::StringLit::Regular(Text::from(
+                    "windows",
+                ))),
+                dummy_span(),
+            )),
+            dummy_span(),
+        );
+        let bin = Expr::new(
+            ExprKind::Binary {
+                left: Box::new(key_expr),
+                op: BinOp::Assign,
+                right: Box::new(val_expr),
+            },
+            dummy_span(),
+        );
+        let cfg_attr = Attribute::new(
+            Text::from("cfg"),
+            Maybe::Some(vec![bin].into_iter().collect()),
+            dummy_span(),
+        );
+
+        // Build a type item where the @cfg lives on the *inner*
+        // TypeDecl, not on the outer Item — mimicking the parser's
+        // actual attribute placement.
+        let type_decl = TypeDecl {
+            visibility: Visibility::Public,
+            name: Ident::new(Text::from("WindowsOnlyType"), dummy_span()),
+            generics: List::new(),
+            attributes: vec![cfg_attr].into_iter().collect(),
+            body: TypeDeclBody::Record(List::new()),
+            resource_modifier: Maybe::None,
+            generic_where_clause: Maybe::None,
+            meta_where_clause: Maybe::None,
+            span: dummy_span(),
+        };
+        let item = Item::new(ItemKind::Type(type_decl), dummy_span());
+
+        // `Item.attributes` is empty (parser put cfg on inner TypeDecl).
+        // Outer-only check would falsely include this on linux; the
+        // upgraded check walks the inner TypeDecl.attributes and
+        // correctly returns false.
+        assert!(item.attributes.is_empty());
+        assert!(
+            !evaluator.should_include_item(&item),
+            "should_include_item must walk inner TypeDecl.attributes — \
+             a `@cfg(target_os = \"windows\")` on the type's inner \
+             attribute list must EXCLUDE the item on linux even \
+             when Item.attributes is empty",
+        );
     }
 
     #[test]
