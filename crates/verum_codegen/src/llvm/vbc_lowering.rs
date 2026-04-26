@@ -804,6 +804,70 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             if trace { eprintln!("[aot-runtime-stage] all_done"); }
         }
 
+        // Phase 3.6 (#106 Path A.2): final-pass safety net — for any
+        // function that's STILL bodyless after all the runtime-helper
+        // emit phases, synthesise a default-return entry block. This
+        // catches functions that:
+        //
+        //   * Were declared by Call sites that never matched a
+        //     recognised runtime helper (so no emit_*_functions phase
+        //     wrote a body).
+        //   * Were declared as "extern" by user code intending to link
+        //     against a C library that isn't actually wired in this
+        //     build configuration.
+        //   * Were skipped during VBC lowering AFTER any other phase
+        //     could observe them.
+        //
+        // Without this pass, dyld resolves the bodyless declarations
+        // to a null function pointer at process startup; static
+        // initializers (e.g. `static NEVER_FLAG: ... = ...` at
+        // cancellation.vr:475) trigger SIGSEGV before main() runs.
+        // The default-return fallback degrades the call chain
+        // gracefully — process boots, downstream code sees a default
+        // value where it expected real init.
+        //
+        // Tracked under #106. Once Path B / C land (fix the underlying
+        // skipping causes / wrap static initializers in Lazy<T>) this
+        // safety net should rarely fire; until then it's the
+        // difference between "process boots" and "SIGSEGV at dyld".
+        {
+            let mut patched = 0usize;
+            let mut func = self.module.get_first_function();
+            while let Some(f) = func {
+                let next = f.get_next_function();
+                if f.get_first_basic_block().is_none() {
+                    let entry = self.context.append_basic_block(f, "skipped_entry");
+                    let builder = self.context.create_builder();
+                    builder.position_at_end(entry);
+                    let ret_ty_opt = f.get_type().get_return_type();
+                    let _ = match ret_ty_opt {
+                        Some(verum_llvm::types::BasicTypeEnum::IntType(it)) => {
+                            builder.build_return(Some(&it.const_zero()))
+                        }
+                        Some(verum_llvm::types::BasicTypeEnum::FloatType(ft)) => {
+                            builder.build_return(Some(&ft.const_zero()))
+                        }
+                        Some(verum_llvm::types::BasicTypeEnum::PointerType(pt)) => {
+                            builder.build_return(Some(&pt.const_null()))
+                        }
+                        Some(_) => {
+                            // Aggregate / vector / scalable-vector return —
+                            // emit unreachable. dyld-init rarely traverses
+                            // such paths, and forging a default for an
+                            // unknown aggregate is risky.
+                            builder.build_unreachable()
+                        }
+                        None => builder.build_return(None),
+                    };
+                    patched += 1;
+                }
+                func = next;
+            }
+            if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() && patched > 0 {
+                eprintln!("[aot-runtime-stage] bodyless-decl safety net patched {} functions", patched);
+            }
+        }
+
         // Phase 3.7: Set internal linkage on all defined functions except verum_main.
         // Must be done AFTER remove_invalid_functions — Internal declarations
         // without bodies are invalid LLVM IR. Only verum_main needs External
