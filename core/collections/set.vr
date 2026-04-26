@@ -52,8 +52,22 @@ implement<T: Hash + Eq> Set<T> {
     }
 
     // Create with pre-allocated capacity.
+    //
+    // Panics on allocation failure. For a fallible counterpart see
+    // `try_with_capacity`.
     public fn with_capacity(capacity: Int) -> Set<T> {
         Set { inner: Map.with_capacity(capacity) }
+    }
+
+    /// Fallible counterpart to `with_capacity`.
+    ///
+    /// Returns `Err(AllocError::OutOfMemory)` instead of panicking
+    /// when the allocator cannot satisfy the request.
+    public fn try_with_capacity(capacity: Int) -> Result<Set<T>, AllocError> {
+        match Map.try_with_capacity(capacity) {
+            Ok(inner) => Ok(Set { inner: inner }),
+            Err(e) => Err(e),
+        }
     }
 
     // Number of elements.
@@ -78,8 +92,24 @@ implement<T: Hash + Eq> Set<T> {
 
     // Insert value into set.
     // Returns true if value was not already present.
+    //
+    // Panics on allocation failure (when growth is required). For a
+    // fallible counterpart see `try_insert`.
     public fn insert(&mut self, value: T) -> Bool {
         self.inner.insert(value, ()).is_none()
+    }
+
+    /// Fallible counterpart to `insert`.
+    ///
+    /// Returns `Err(AllocError::OutOfMemory)` if the underlying
+    /// table needs to grow and the allocator cannot satisfy the
+    /// request. On Ok the inner `Bool` is `true` iff the value was
+    /// not already present.
+    public fn try_insert(&mut self, value: T) -> Result<Bool, AllocError> {
+        match self.inner.try_insert(value, ()) {
+            Ok(prev) => Ok(prev.is_none()),
+            Err(e) => Err(e),
+        }
     }
 
     // Remove value from set.
@@ -102,8 +132,20 @@ implement<T: Hash + Eq> Set<T> {
     }
 
     /// Reserves capacity for at least `additional` more elements.
+    ///
+    /// Panics on allocation failure. For a fallible counterpart see
+    /// `try_reserve`.
     public fn reserve(&mut self, additional: Int) {
         self.inner.reserve(additional);
+    }
+
+    /// Fallible counterpart to `reserve`.
+    ///
+    /// Returns `Err(AllocError::OutOfMemory)` instead of panicking
+    /// when the allocator cannot satisfy the request. The set is
+    /// unchanged on failure.
+    public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
+        self.inner.try_reserve(additional)
     }
 
     /// Shrinks the capacity as much as possible.
