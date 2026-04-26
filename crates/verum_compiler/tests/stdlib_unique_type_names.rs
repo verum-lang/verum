@@ -62,6 +62,78 @@ use std::path::{Path, PathBuf};
 
 const ROOT: &str = "core";
 
+/// A simplified `@cfg(...)` constraint, just enough to detect when two
+/// declarations of the same simple name are mutually exclusive at
+/// codegen time and therefore cannot collide.
+///
+/// Modelled as a conjunction of `key = value` constraints (e.g.
+/// `target_os = "linux"`).  An empty constraint set means "always
+/// active" (no `@cfg` annotation, or one we cannot model).  When the
+/// `conservative` flag is set the cfg uses constructs the parser
+/// cannot decompose precisely (e.g. `any(...)`, bare predicates like
+/// `unix`); to stay sound the test then treats the declaration as
+/// always active.
+#[derive(Clone, Debug, Default)]
+struct CfgConstraint {
+    constraints: Vec<(String, String)>,
+    conservative: bool,
+}
+
+impl CfgConstraint {
+    /// True iff `self` and `other` cannot both be active in the same
+    /// build — they share at least one key with different exclusive
+    /// values, and neither is conservative.
+    fn mutually_exclusive(&self, other: &Self) -> bool {
+        if self.conservative || other.conservative {
+            return false;
+        }
+        for (k, v) in &self.constraints {
+            for (k2, v2) in &other.constraints {
+                if k == k2 && v != v2 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+/// Parse an `@cfg(...)` line into a `CfgConstraint`.  Recognises:
+///   - `@cfg(K = "V")`            — single key=value
+///   - `@cfg(all(K1 = "V1", K2 = "V2", ...))` — conjunction
+///   - anything else → conservative (treat as always-active)
+fn parse_cfg_attr(attr_line: &str) -> CfgConstraint {
+    let trimmed = attr_line.trim();
+    let inner = match trimmed.strip_prefix("@cfg(").and_then(|s| s.strip_suffix(")")) {
+        Some(s) => s.trim(),
+        None => return CfgConstraint { constraints: vec![], conservative: true },
+    };
+    // Strip optional `all(...)` wrapper.
+    let body = inner.strip_prefix("all(").and_then(|s| s.strip_suffix(")")).unwrap_or(inner);
+    let mut out = CfgConstraint::default();
+    for part in body.split(',') {
+        let part = part.trim();
+        if let Some(eq) = part.find('=') {
+            let key = part[..eq].trim().to_string();
+            let val_with_quotes = part[eq + 1..].trim();
+            let val = val_with_quotes.trim_matches('"').to_string();
+            // Refuse to model nested any(...) or unmatched quotes.
+            if key.contains('(') || val.contains('(') {
+                return CfgConstraint { constraints: vec![], conservative: true };
+            }
+            out.constraints.push((key, val));
+        } else {
+            // Bare predicate like `unix` — conservative.
+            return CfgConstraint { constraints: vec![], conservative: true };
+        }
+    }
+    out
+}
+
+/// Each declaration site, augmented with its `@cfg` constraint so the
+/// uniqueness check can treat mutually-exclusive sites as non-colliding.
+type Site = (String, PathBuf, usize, CfgConstraint);
+
 #[test]
 fn stdlib_public_type_names_are_unique() {
     let root = workspace_root().join(ROOT);
@@ -71,8 +143,7 @@ fn stdlib_public_type_names_are_unique() {
         root.display()
     );
 
-    // name -> List<(module-path, file-path, line)>
-    let mut definitions: BTreeMap<String, Vec<(String, PathBuf, usize)>> = BTreeMap::new();
+    let mut definitions: BTreeMap<String, Vec<Site>> = BTreeMap::new();
     walk_dir(&root, &root, &mut definitions);
 
     let mut violations: Vec<String> = Vec::new();
@@ -80,12 +151,27 @@ fn stdlib_public_type_names_are_unique() {
         if sites.len() < 2 {
             continue;
         }
+        // Two sites collide only if their cfgs overlap (i.e. are not
+        // mutually exclusive).  Build the colliding subset.
+        let colliding: Vec<&Site> = sites
+            .iter()
+            .enumerate()
+            .filter(|(i, s)| {
+                sites.iter().enumerate().any(|(j, t)| {
+                    *i != j && !s.3.mutually_exclusive(&t.3)
+                })
+            })
+            .map(|(_, s)| s)
+            .collect();
+        if colliding.len() < 2 {
+            continue;
+        }
         let mut entry = format!(
-            "duplicate: type `{}` is declared in {} stdlib modules:\n",
+            "duplicate: type `{}` is declared in {} co-active stdlib modules:\n",
             name,
-            sites.len()
+            colliding.len()
         );
-        for (modpath, file, line) in sites {
+        for (modpath, file, line, _cfg) in &colliding {
             entry.push_str(&format!("    - {} ({}:{})\n", modpath, file.display(), line));
         }
         violations.push(entry);
@@ -95,15 +181,22 @@ fn stdlib_public_type_names_are_unique() {
         panic!(
             "{} duplicated public type name(s) in stdlib.  Each public \
              stdlib type must have a unique simple name across all of \
-             `core/`, because the VBC variant-constructor table is keyed \
-             by simple name.  Two `public type Foo is …` declarations \
-             collide and the second's variants are silently skipped, \
-             surfacing later as runtime `method 'X.Y' not found on value` \
-             panics.\n\n\
-             Pick a domain-prefixed disambiguated name following the \
-             existing stdlib convention — see this file's module-level \
-             docs for the catalogue / layer-pair / platform / arch \
-             conventions and how to choose which site stays canonical.\n\n\
+             `core/` for any single build configuration, because the VBC \
+             variant-constructor table is keyed by simple name.  Two \
+             `public type Foo is …` declarations that are co-active in \
+             the same build collide and the second's variants are \
+             silently skipped, surfacing later as runtime \
+             `method 'X.Y' not found on value` panics.\n\n\
+             The test recognises mutually-exclusive `@cfg(...)` \
+             attributes (e.g. target_os, target_arch, runtime tier) and \
+             does NOT flag declarations that cannot both be active in \
+             the same build.  When you genuinely need parallel \
+             implementations across cfg variants, place each behind its \
+             own `@cfg(...)` and reuse the same simple name.\n\n\
+             For unconditional collisions: pick a domain-prefixed \
+             disambiguated name following the existing stdlib \
+             convention — see this file's module-level docs for the \
+             catalogue / layer-pair / platform / arch conventions.\n\n\
              {}",
             violations.len(),
             violations.join("\n"),
@@ -117,7 +210,7 @@ fn stdlib_public_type_names_are_unique() {
 fn walk_dir(
     repo_core_root: &Path,
     dir: &Path,
-    sink: &mut BTreeMap<String, Vec<(String, PathBuf, usize)>>,
+    sink: &mut BTreeMap<String, Vec<Site>>,
 ) {
     let read = match fs::read_dir(dir) {
         Ok(r) => r,
@@ -136,25 +229,49 @@ fn walk_dir(
 }
 
 /// Scan a single `.vr` file for `public type Name is …` declarations.
-/// Records each match under its simple name in `sink`.
+/// Records each match under its simple name + `@cfg` constraint in
+/// `sink`.
 ///
 /// Heuristic-only — the test is intentionally lenient about formatting
 /// (whitespace, generics, body kind).  Excludes `protocol` types since
 /// they cannot collide via the variant-constructor mechanism (no
 /// constructors).
+///
+/// `@cfg(...)` attributes immediately preceding a type declaration
+/// (with `@repr(...)` / `@align(...)` / etc. allowed in between) are
+/// captured and attached to the site, so the uniqueness check can
+/// treat mutually-exclusive cfg variants as non-colliding.
 fn scan_file(
     repo_core_root: &Path,
     file: &Path,
-    sink: &mut BTreeMap<String, Vec<(String, PathBuf, usize)>>,
+    sink: &mut BTreeMap<String, Vec<Site>>,
 ) {
     let contents = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => return,
     };
     let module_path = file_to_module_path(repo_core_root, file);
+    let mut pending_cfg = CfgConstraint::default();
     for (lineno, line) in contents.lines().enumerate() {
         let trimmed = line.trim_start();
+        // Attribute lines preceding a declaration: capture @cfg, ignore
+        // other attributes, reset the captured cfg on a blank line or
+        // any non-attribute statement that isn't a type/fn/etc.
+        if trimmed.starts_with("@cfg(") {
+            pending_cfg = parse_cfg_attr(trimmed);
+            continue;
+        }
+        if trimmed.starts_with('@') {
+            // Other attribute (e.g. @repr, @align, @derive) — keep the
+            // pending @cfg in scope for the type that follows.
+            continue;
+        }
         if !trimmed.starts_with("public type ") {
+            // Non-attribute, non-type-declaration line resets the
+            // pending cfg so it doesn't leak past unrelated code.
+            if !trimmed.is_empty() && !trimmed.starts_with("//") {
+                pending_cfg = CfgConstraint::default();
+            }
             continue;
         }
         let after_kw = &trimmed["public type ".len()..];
@@ -206,6 +323,7 @@ fn scan_file(
             module_path.clone(),
             file.to_path_buf(),
             lineno + 1,
+            std::mem::take(&mut pending_cfg),
         ));
     }
 }
