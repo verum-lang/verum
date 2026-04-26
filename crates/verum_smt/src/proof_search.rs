@@ -2080,9 +2080,6 @@ impl ProofTactic {
 struct SimpleConstructor {
     /// Constructor name (e.g., "Zero", "Succ", "Nil", "Cons")
     name: Text,
-    /// Number of arguments
-    #[allow(dead_code)] // Used for pattern generation
-    arity: usize,
     /// Indices of recursive arguments (e.g., for Succ(Nat), this is [0])
     recursive_args: List<usize>,
 }
@@ -2140,22 +2137,6 @@ impl GoalFingerprint {
     }
 }
 
-/// Search state for backtracking
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Used for proof search backtracking
-struct SearchState {
-    /// Current proof goal
-    goal: ProofGoal,
-    /// Remaining tactics to try
-    remaining_tactics: List<ProofTactic>,
-    /// Depth at this state
-    depth: usize,
-    /// Parent state index (for backtracking)
-    parent: Maybe<usize>,
-    /// Applied tactic (if any)
-    applied_tactic: Maybe<ProofTactic>,
-}
-
 /// Automated proof search engine with backtracking
 ///
 /// Uses hints, tactics, and decision procedures to automatically
@@ -2190,9 +2171,6 @@ pub struct ProofSearchEngine {
 
     /// Current search depth
     current_depth: usize,
-
-    /// Backtrack stack for proof search
-    backtrack_stack: List<SearchState>,
 
     /// Track incomplete proofs (goals accepted via Sorry tactic)
     /// Each entry contains the goal description and source location
@@ -2253,7 +2231,6 @@ impl ProofSearchEngine {
             stats: SearchStats::default(),
             visited: std::collections::HashSet::new(),
             current_depth: 0,
-            backtrack_stack: List::new(),
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             callee_signatures: std::collections::HashMap::new(),
@@ -2271,7 +2248,6 @@ impl ProofSearchEngine {
             stats: SearchStats::default(),
             visited: std::collections::HashSet::new(),
             current_depth: 0,
-            backtrack_stack: List::new(),
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             callee_signatures: std::collections::HashMap::new(),
@@ -2377,7 +2353,6 @@ impl ProofSearchEngine {
     fn reset_search_state(&mut self) {
         self.visited.clear();
         self.current_depth = 0;
-        self.backtrack_stack.clear();
     }
 
     /// Check if goal has been visited (cycle detection)
@@ -3531,12 +3506,10 @@ impl ProofSearchEngine {
                 // Natural numbers: Zero | Succ(Nat)
                 constructors.push(SimpleConstructor {
                     name: "Zero".into(),
-                    arity: 0,
                     recursive_args: List::new(),
                 });
                 constructors.push(SimpleConstructor {
                     name: "Succ".into(),
-                    arity: 1,
                     recursive_args: List::from_iter(vec![0]), // Argument 0 is recursive
                 });
             }
@@ -3545,12 +3518,10 @@ impl ProofSearchEngine {
                 // Lists: Nil | Cons(T, List<T>)
                 constructors.push(SimpleConstructor {
                     name: "Nil".into(),
-                    arity: 0,
                     recursive_args: List::new(),
                 });
                 constructors.push(SimpleConstructor {
                     name: "Cons".into(),
-                    arity: 2,
                     recursive_args: List::from_iter(vec![1]), // Argument 1 (tail) is recursive
                 });
             }
@@ -3559,12 +3530,10 @@ impl ProofSearchEngine {
                 // Binary trees: Leaf | Node(Tree, T, Tree)
                 constructors.push(SimpleConstructor {
                     name: "Leaf".into(),
-                    arity: 0,
                     recursive_args: List::new(),
                 });
                 constructors.push(SimpleConstructor {
                     name: "Node".into(),
-                    arity: 3,
                     recursive_args: List::from_iter(vec![0, 2]), // Left and right subtrees
                 });
             }
@@ -3573,12 +3542,10 @@ impl ProofSearchEngine {
                 // Booleans: True | False
                 constructors.push(SimpleConstructor {
                     name: "True".into(),
-                    arity: 0,
                     recursive_args: List::new(),
                 });
                 constructors.push(SimpleConstructor {
                     name: "False".into(),
-                    arity: 0,
                     recursive_args: List::new(),
                 });
             }
