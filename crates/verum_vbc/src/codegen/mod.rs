@@ -2833,6 +2833,59 @@ impl VbcCodegen {
         Self::compute_type_table_health(&self.types, &self.ctx.strings)
     }
 
+    /// Scan every emitted function body for `MakeVariant` instructions
+    /// whose `(tag, field_count)` doesn't match any variant in the
+    /// unified type table.  At the per-module level this is a warn
+    /// (cross-module variants live in other modules' descriptors); at
+    /// the global level it's a real bug — every `MakeVariant` should
+    /// resolve once all modules have been registered.
+    pub fn find_orphan_make_variants(&self) -> Vec<OrphanMakeVariant> {
+        use crate::instruction::Instruction;
+        use crate::types::VariantKind;
+        // Build the set of valid (tag, field_count) combos across all
+        // declared types.  HashSet for O(1) membership.
+        let mut valid: std::collections::HashSet<(u32, u32)> =
+            std::collections::HashSet::new();
+        for ty in &self.types {
+            for v in &ty.variants {
+                let count = match v.kind {
+                    VariantKind::Unit => 0u32,
+                    VariantKind::Tuple => v.arity as u32,
+                    VariantKind::Record => v.fields.len() as u32,
+                };
+                valid.insert((v.tag, count));
+            }
+        }
+        // Empty type table → can't compare; bail.  The per-module
+        // verifier handles the empty case identically.
+        if valid.is_empty() {
+            return Vec::new();
+        }
+        let mut orphans = Vec::new();
+        for f in &self.functions {
+            for ins in &f.instructions {
+                if let Instruction::MakeVariant { dst: _, tag, field_count } = ins {
+                    if !valid.contains(&(*tag, *field_count)) {
+                        let fname = self
+                            .ctx
+                            .strings
+                            .get(f.descriptor.name.0 as usize)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                format!("<FunctionId({})>", f.descriptor.id.0)
+                            });
+                        orphans.push(OrphanMakeVariant {
+                            function_name: fname,
+                            tag: *tag,
+                            field_count: *field_count,
+                        });
+                    }
+                }
+            }
+        }
+        orphans
+    }
+
     /// Pure helper that builds the health report from a slice of
     /// `TypeDescriptor`s and the matching string table.  Pulled out
     /// so unit tests can construct synthetic tables without going
@@ -8749,6 +8802,14 @@ impl VbcCodegen {
 /// Cross-module type-table health (#170).  Returned by
 /// [`VbcCodegen::verify_global_type_table_consistency`].  See that
 /// method's docstring for the bug classes each field tracks.
+///
+/// Note: `MakeVariant`-level orphan detection is intentionally NOT
+/// part of this report.  At a single-module-with-mounts granularity
+/// the cross-module-variant case dominates — most "orphans" are
+/// legitimate references to variants whose declaring module wasn't
+/// fully loaded.  Use [`VbcCodegen::find_orphan_make_variants`] for
+/// the diagnostic; treat its output as informational unless you
+/// know every transitively-referenced module is in the table.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TypeTableHealthReport {
     /// Multiple `TypeDescriptor`s share a single `TypeId.0`.  A real
@@ -8833,6 +8894,19 @@ pub struct DuplicateNameDifferentId {
     /// All distinct TypeIds claimed under this name (length ≥ 2,
     /// sorted ascending so test assertions are stable).
     pub type_ids: Vec<u32>,
+}
+
+/// Single instance of "MakeVariant references a variant that no
+/// declared TypeDescriptor carries".  Global pass equivalent of
+/// the per-module #146 Phase 2 warn-level check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrphanMakeVariant {
+    /// Function whose body emits the orphan instruction.
+    pub function_name: String,
+    /// `tag` operand of the `MakeVariant` instruction.
+    pub tag: u32,
+    /// `field_count` operand of the `MakeVariant` instruction.
+    pub field_count: u32,
 }
 
 /// Single instance of "variant tags within a sum are non-dense".
