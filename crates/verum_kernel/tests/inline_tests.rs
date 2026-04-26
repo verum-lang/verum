@@ -166,6 +166,71 @@ fn smt_replay_rejects_missing_obligation_hash() {
     assert!(matches!(err, KernelError::MissingObligationHash));
 }
 
+/// V8 — `replay_smt_cert_with_obligation` rejects certificates
+/// whose `obligation_hash` doesn't match the caller-supplied
+/// expected hash. Closes the doc/code mismatch where pre-V8
+/// `replay_smt_cert` claimed (in its docstring) to perform this
+/// comparison but actually only checked non-emptiness.
+#[test]
+fn smt_replay_with_obligation_rejects_mismatched_hash() {
+    use verum_kernel::replay_smt_cert_with_obligation;
+    let mut trace = List::new();
+    trace.push(0x03);
+    let cert = SmtCertificate::new(
+        Text::from("z3"),
+        Text::from("4.13.0"),
+        trace,
+        Text::from("sha256:cafebabe"),
+    );
+    let ctx = Context::new();
+    let err = replay_smt_cert_with_obligation(&ctx, &cert, "sha256:deadbeef")
+        .expect_err("hash mismatch must reject");
+    match err {
+        KernelError::ObligationHashMismatch { expected, actual } => {
+            assert_eq!(expected.as_str(), "sha256:deadbeef");
+            assert_eq!(actual.as_str(), "sha256:cafebabe");
+        }
+        other => panic!("expected ObligationHashMismatch, got {:?}", other),
+    }
+}
+
+#[test]
+fn smt_replay_with_obligation_accepts_matched_hash() {
+    use verum_kernel::replay_smt_cert_with_obligation;
+    let mut trace = List::new();
+    trace.push(0x03);
+    let cert = SmtCertificate::new(
+        Text::from("z3"),
+        Text::from("4.13.0"),
+        trace,
+        Text::from("sha256:abc123"),
+    );
+    let ctx = Context::new();
+    let witness = replay_smt_cert_with_obligation(&ctx, &cert, "sha256:abc123")
+        .expect("matched hash must succeed");
+    // Witness shape unchanged from the non-comparison primitive.
+    assert!(matches!(witness, CoreTerm::Axiom { .. }));
+}
+
+/// V8 — sanity: the original `replay_smt_cert` is still callable
+/// without an expected hash for kernel-internal consumers (e.g.,
+/// the `infer` arm for `SmtProof` doesn't yet have the goal at
+/// type-inference time).
+#[test]
+fn smt_replay_no_obligation_still_callable() {
+    let mut trace = List::new();
+    trace.push(0x03);
+    let cert = SmtCertificate::new(
+        Text::from("z3"),
+        Text::from("4.13.0"),
+        trace,
+        Text::from("sha256:foo"),
+    );
+    let ctx = Context::new();
+    let witness = replay_smt_cert(&ctx, &cert).expect("non-comparison path must work");
+    assert!(matches!(witness, CoreTerm::Axiom { .. }));
+}
+
 #[test]
 fn smt_replay_refl_tag_produces_axiom_witness() {
     let mut trace = List::new();

@@ -209,10 +209,19 @@ pub fn structural_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
 /// weaker than a full LCF-style step-by-step proof reconstruction —
 /// a malicious backend could still forge an agreement tag — but it
 /// gives the kernel a well-defined *entry point* for more rigorous
-/// replay as the SMT layer starts emitting richer traces. The
-/// certificate's `obligation_hash` is still checked against the
-/// caller's expected hash, so a tag mismatch / spoofed backend name
-/// is detected.
+/// replay as the SMT layer starts emitting richer traces.
+///
+/// **Obligation-hash semantics (V8, doc/code reconciliation).**
+/// This function checks that `cert.obligation_hash` is non-empty
+/// (rejecting with [`KernelError::MissingObligationHash`] on
+/// failure) and embeds the hash into the witness's `Axiom` name.
+/// It does NOT compare the hash against any caller-supplied
+/// expected hash — the pre-V8 doc claim of such a comparison was
+/// false. Callers that have an expected hash (e.g., proving a
+/// specific goal whose obligation hash was just computed) MUST
+/// use [`replay_smt_cert_with_obligation`] instead, which
+/// threads the expected hash through and rejects on mismatch via
+/// [`KernelError::ObligationHashMismatch`].
 ///
 /// Future phases (one per backend): parse Z3's `(proof …)` tree
 /// format, CVC5's `ALETHE` format, reconstruct each rule's witness
@@ -279,4 +288,35 @@ pub fn replay_smt_cert(
         ty: Heap::new(axiom_ty),
         framework,
     })
+}
+
+/// V8 — replay an SMT certificate **and** verify its
+/// `obligation_hash` matches the supplied `expected_hash`.
+///
+/// This is the soundness-correct path for any caller that has a
+/// concrete goal in hand (e.g., the gradual-verification driver
+/// computing the expected obligation hash from the goal AST and
+/// then matching certificates against it). It composes the
+/// non-comparison primitive [`replay_smt_cert`] with the explicit
+/// hash equality check the V0 doc *claimed* but didn't perform.
+///
+/// Behaviour:
+///   1. Hash equality is checked **before** replay so a mismatched
+///      certificate doesn't waste backend-table dispatch work.
+///   2. On success, the witness term returned by
+///      [`replay_smt_cert`] is unchanged — the comparison adds no
+///      new failure mode beyond the new
+///      [`KernelError::ObligationHashMismatch`] variant.
+pub fn replay_smt_cert_with_obligation(
+    ctx: &Context,
+    cert: &SmtCertificate,
+    expected_hash: &str,
+) -> Result<CoreTerm, KernelError> {
+    if cert.obligation_hash.as_str() != expected_hash {
+        return Err(KernelError::ObligationHashMismatch {
+            expected: Text::from(expected_hash),
+            actual: cert.obligation_hash.clone(),
+        });
+    }
+    replay_smt_cert(ctx, cert)
 }

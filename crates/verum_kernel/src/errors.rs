@@ -228,6 +228,39 @@ pub enum KernelError {
         to_tier: Text,
     },
 
+    /// V8 — SmtProof obligation-hash mismatch. The certificate's
+    /// declared `obligation_hash` does not equal the
+    /// caller-supplied expected hash, so the certificate cannot be
+    /// admitted as a proof of the caller's goal.
+    ///
+    /// Pre-V8 the kernel only checked that `obligation_hash` was
+    /// non-empty (per `MissingObligationHash`); the doc comment on
+    /// `replay_smt_cert` claimed "still checked against the
+    /// caller's expected hash" but no such check existed. This
+    /// allowed a certificate proving `X` to be re-used as a proof
+    /// of `Y` if the user wrote `SmtProof(cert_for_X)` in a goal-Y
+    /// context — soundness-fatal under the trust contract that
+    /// puts the SMT backend OUTSIDE the TCB.
+    ///
+    /// V8 ships [`crate::support::replay_smt_cert_with_obligation`]
+    /// which threads the expected hash through the replay and
+    /// emits this variant on mismatch. The original
+    /// [`crate::support::replay_smt_cert`] is preserved for kernel-
+    /// internal callers that don't yet have the expected hash
+    /// (e.g., the `infer` arm for `SmtProof` doesn't have a goal
+    /// at type-inference time — the comparison happens at
+    /// `verify_full`-style entry points instead).
+    #[error(
+        "kernel: SMT certificate obligation_hash mismatch — \
+         expected '{expected}', certificate carries '{actual}'"
+    )]
+    ObligationHashMismatch {
+        /// Hash the caller asserted the certificate must match.
+        expected: Text,
+        /// Hash actually present on the certificate.
+        actual: Text,
+    },
+
     /// V8 (#207, B1) — `K-Univ` universe-level overflow. The kernel's
     /// finite universe levels are encoded as `u32`; a request to
     /// type `Universe(Concrete(u32::MAX))` cannot honestly produce
