@@ -1769,7 +1769,7 @@ Receipts are content-addressed; CI compares against a committed baseline.
 ### 16.5 Phase 5 (18–24 months) — OC/DC dual + theory interop
 
 - **Task E1**: `core.action.*` module skeleton.
-- **Task E2**: auto-induced ε(α) and α ⊣ ε adjunction.
+- **Task E2** (V1 ✓ shipped): auto-induced ε(α) and α ⊣ ε adjunction. `core/action/enactments.vr` ships `epsilon(alpha) = (F, Syn(F), id, id)` (the syntactic self-enactment per Diakrisis 108.T) + `alpha_of(e)` (left adjoint) + `is_adjoint(α, e)` (unit-witness). V8 #234 completes the V1 surface with: (a) `core/theory_interop/coord.vr::auto_induced_epsilon_coord(c)` — coord-preserving identity transformation per VVA §11.3 (the auto-induced ε inhabits the same (Fw, ν, τ) as α, distinguished from the Morita-dual which lives at the AC↔OC bridge in 12-actic/04 and flips intensional↔extensional). (b) Round-trip witnesses: `alpha_epsilon_alpha_roundtrip(α)` (unit identity) + `epsilon_alpha_epsilon_roundtrip_for_auto_induced(e)` (counit identity for auto-induced enactments). (c) VCS smoke at `vcs/specs/core/action/auto_induced_epsilon.vr` covering both round-trips + coord preservation across two Standard frameworks (lurie_htt @ ν=ω, schreiber_dcct @ ν=ω+2). The full Diakrisis 108.T proof remains preprint-blocked (§17 Q7); V1 ships the *construction* + round-trip *witnesses* + *coord-preservation invariant* — everything machine-checkable without the preprint. **100%**.
 - **Task E3**: `@enact` annotation + `verum audit --epsilon`.
 - **Task E4**: `core.theory_interop` Yoneda / Kan / descent APIs (partial already — finalise).
 

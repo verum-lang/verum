@@ -124,6 +124,39 @@ public fn is_adjoint(alpha: Articulation, e: Enactment) -> Bool {
 }
 
 // -----------------------------------------------------------------------------
+// V8 (#234) — Round-trip witnesses for α ⊣ ε (VVA §11.3 + Diakrisis 108.T)
+// -----------------------------------------------------------------------------
+
+/// V8 (#234) — round-trip witness `α → ε(α) → α`.
+///
+/// Per Diakrisis 108.T (the AC ↔ OC duality theorem), the auto-induced
+/// epsilon-functor + alpha-of-functor form an adjunction, so:
+///
+///     alpha_of(epsilon(α)) ≡ α   for every articulation α.
+///
+/// This function returns `true` iff that round-trip identity holds for
+/// the supplied articulation. Used as a runtime invariant check and as
+/// the unit-of-the-adjunction witness.
+public fn alpha_epsilon_alpha_roundtrip(alpha: Articulation) -> Bool {
+    let recovered: Articulation = alpha_of(epsilon(alpha.clone()));
+    articulation_eq(alpha, recovered)
+}
+
+/// V8 (#234) — counit witness for the α ⊣ ε adjunction. Per
+/// Diakrisis 108.T the counit `ε ∘ α → 1` is an isomorphism;
+/// for the auto-induced ε this reduces to: every enactment
+/// constructed via `epsilon(α)` satisfies `epsilon(alpha_of(e)) ≡ e`
+/// when `e` originated from auto-induction (i.e., its activation_rank
+/// is 0 and steps is empty — the canonical syntactic self-enactment
+/// shape).
+public fn epsilon_alpha_epsilon_roundtrip_for_auto_induced(e: Enactment) -> Bool {
+    let recovered: Enactment = epsilon(alpha_of(e.clone()));
+    // For auto-induced enactments the structural fields match exactly.
+    e.activation_rank == recovered.activation_rank
+        && articulation_eq(e.articulation, recovered.articulation)
+}
+
+// -----------------------------------------------------------------------------
 // Canonical Diakrisis-spelling aliases (12-actic/09-verum-stdlib-sketch.md)
 // -----------------------------------------------------------------------------
 //

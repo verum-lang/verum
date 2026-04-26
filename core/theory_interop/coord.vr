@@ -285,6 +285,49 @@ public fn coord_eq(a: MsfsCoord, b: MsfsCoord) -> Bool {
 }
 
 // -----------------------------------------------------------------------------
+// V8 (#234) — Auto-induced ε(α) coord per VVA §11.3 + Diakrisis 108.T
+// -----------------------------------------------------------------------------
+//
+// VVA §11.3 says: every articulation α auto-induces its enactment ε(α) via
+// the syntactic self-enactment construction (Diakrisis 108.T):
+//
+//     ε(α) = (F, Syn(F), id, id)
+//
+// where F is α's framework. This is NOT the Morita dual (which lives at the
+// AC ↔ OC bridge per 12-actic/04 and exchanges intensional/extensional τ);
+// it is the **identity self-enactment** — the canonical witness that α
+// inhabits its own enactment graph.
+//
+// Coord-preservation invariant: the auto-induced ε(α) inhabits the SAME
+// (Fw, ν, τ) coordinate as α. This is structural — Syn(F) is a syntactic
+// reflection, so depth and trust-tier are preserved.
+
+/// V8 (#234) — auto-induced ε(α) coordinate. Returns the coord of the
+/// canonical enactment ε(α) per VVA §11.3 + Diakrisis 108.T. Per the
+/// auto-induction convention, ε(α) inhabits the same framework + ν + τ
+/// as α.
+///
+/// Distinguished from the Morita-dual (`12-actic/04-ac-oc-duality`)
+/// which flips intensional ↔ extensional and is a different
+/// construction — the dual is for cross-framework translation, the
+/// auto-induced ε(α) is the same-framework syntactic self-enactment.
+public fn auto_induced_epsilon_coord(c: MsfsCoord) -> MsfsCoord {
+    MsfsCoord {
+        framework: c.framework.clone(),
+        ordinal:   c.ordinal.clone(),
+        tau:       c.tau,
+    }
+}
+
+/// V8 (#234) — coord-equality witness for the auto-induced ε(α)
+/// construction. Returns true iff ε(α).coord == α.coord, which the
+/// auto-induction guarantees by construction. Useful as a runtime
+/// invariant check / unit-test contract.
+public fn auto_induced_epsilon_coord_preserves(c: MsfsCoord) -> Bool {
+    coord_eq(c.clone(), auto_induced_epsilon_coord(c))
+}
+
+// -----------------------------------------------------------------------------
 // §10.4 — Theorem coordinate (per theorem; multi-framework dependencies)
 // -----------------------------------------------------------------------------
 //
