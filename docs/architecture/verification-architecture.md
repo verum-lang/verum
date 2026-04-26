@@ -129,6 +129,15 @@ The rule presented here is **identical** to §4.4's K-Refine — the formal calc
 
 The rule transplants Diakrisis T-2f* (quoted verbatim): *"selection of α_P by a predicate P is admissible iff all occurrences of M, ⊏_• in P have strictly smaller depth than α_P."* Yanofsky 2003 establishes that every self-referential paradox in a cartesian-closed context reduces to a weakly point-surjective α: Y → T^Y with dp(α) = dp(T^Y); `K-Refine` forbids exactly that equality. Consequence: Russell, Cantor, Burali-Forti, Tarski, Lawvere, Girard, Gödel-type diagonals, Löb, Grelling–Nelson, and Curry are all blocked at comprehension time without per-paradox tricks.
 
+**Soundness scope of Yanofsky-immunity (V1 / V2 staging).** The Yanofsky claim above is *complete* only when the surface-level Articulation Hygiene discipline (§13) is *enforced*. Diakrisis 105.T's universal paradox-immunity result is over the M-iteration depth function, which is automated through 𝖬-compositions; surface forms that bypass the M-iteration discipline (raw `self`, undeclared recursion, mutable cycles) can in principle re-introduce diagonal arguments not visible at the CoreTerm level. Verum currently ships:
+
+  • **V1 hygiene reporter** (shipped, see §13.3) — `verum audit --hygiene` walks the AST and surfaces every recognised self-referential surface form per the §13.2 hygiene table. **Advisory only**: violations don't break the build.
+  • **V2 hygiene enforcement** (deferred — task #196) — `verum check --hygiene src/` will additionally walk raw `self` occurrences inside function bodies and the `Self::Item` / `&mut self` factorisations from §13.2; violations become `E_HYGIENE_UNFACTORED_SELF` errors.
+
+Until V2 ships, the Yanofsky-immunity claim is **partial**: K-Refine alone catches every paradox-form that gets compiled to a `Refined` CoreTerm shape, which covers all five named families (Russell, Cantor, Burali-Forti, Tarski, Lawvere) and every Yanofsky-reducible variant constructed via comprehension. Paradox-forms that bypass comprehension by exploiting raw `self` / undeclared recursion / mutable-cycle constructs are caught only when V2 hygiene enforcement lands.
+
+This V1/V2 staging is intentional — V1 lets existing code compile unchanged while we measure surface-coverage breadth; V2 promotes the diagnostics to errors once the hygiene table is exhaustively validated against real-world stdlib + user code. The kernel-level claim ("no Yanofsky-reducible paradox passes K-Refine") is unconditional and shipped; the surface-level claim ("no Verum source program can express a Yanofsky-reducible paradox") is staged.
+
 This is the single rule that distinguishes Verum's kernel from a plain CCHM + refinements engine.
 
 ### 2.5 Certificate-based trust (LCF pattern)
@@ -358,6 +367,17 @@ The `SmtCertificate` clause uses `dp(w)` only after `K-SmtRecheck` has succeeded
   Γ ⊢ Refined(A, x, P) : Type_n
 ```
 
+**Precedence vs K-Refine-omega.** VFE-7 introduces a strictly stronger version `K-Refine-omega` that uses ordinal-valued depth `m_depth_omega` (per Definition 136.D1) instead of finite `dp`. The two rules **coexist** as follows:
+
+  • `K-Refine` is the *baseline* rule the kernel always enforces. Finite-depth fragments (no `ModalBox` / `ModalDiamond` / `ModalBigAnd` / `EpsilonOf` / `AlphaOf` constructors in `P`) are equivalent under both rules: `dp` and `m_depth_omega` agree on the M-iteration-free fragment.
+  • `K-Refine-omega` is *opt-in* via `@require_extension(vfe_7)` annotation (per VFE governance §0.0). When enabled, it **replaces** `K-Refine` for the annotated module — every refinement-type formation uses ordinal depth.
+  • Without the extension, refinement-type formation that would pass `K-Refine` but fail `K-Refine-omega` (e.g., a `ModalBox`-wrapped predicate over an atomic base) is *accepted* by the baseline kernel because finite `dp` collapses modal wrappers to depth 0.
+  • With the extension, the same code is *rejected* — `m_depth_omega(ModalBox(P)) = m_depth_omega(P).succ()`, so `ModalBox(P)` over an atomic base violates the strict inequality.
+
+**Direction**: tighter rules can only be stricter, never looser. A module passing `K-Refine-omega` (with the extension) automatically passes `K-Refine` (without). The reverse direction is not guaranteed — that is the whole point of the strictness gradient.
+
+**Implementation cross-reference**: kernel `m_depth` (line 574 of `crates/verum_kernel/src/lib.rs`) implements baseline `dp`; `m_depth_omega` (line 733+) implements ordinal-valued depth. `KernelRecheckPass` currently invokes `m_depth_omega` unconditionally via `check_refine_omega`; the precedence model above is the **target** state once `@require_extension(vfe_7)` is enforced at the elaborator level. Until then, every module is implicitly opted into the stricter check, which is sound (over-approximation of the user's intent) but slightly more conservative than the spec promises for non-extension modules.
+
 **K-RefineIntro**:
 
 ```
@@ -384,6 +404,13 @@ The `SmtCertificate` clause uses `dp(w)` only after `K-SmtRecheck` has succeeded
 
 **Soundness side-condition.** The kernel admits `FrameworkAxiom(name, citation, body)` only when `body : Prop` (i.e. the axiom asserts a proposition, not a non-trivial inhabitant of a `Type_n`). This is non-negotiable: a framework axiom of type `Nat → Nat` would let a user postulate an arbitrary computable function and break strong normalisation; restricting bodies to `Prop` keeps the postulate at the propositional layer where SN is preserved by the standard "axioms-stuck" reduction strategy (a `FrameworkAxiom` term is a kernel-irreducible normal form and cannot fire β/ι/cube reductions inside a Prop-eliminator). The `K-FwAx` rule's premise `body : Prop` makes this condition syntactic — the kernel rejects an axiom whose body is not a proposition with `E_FW_AXIOM_NOT_PROP`.
 
+**Subsingleton (proof-irrelevance) requirement.** `body : Prop` alone is **not sufficient** for subject reduction: a framework axiom whose body has *two distinct extensional inhabitants* breaks equality reasoning — the axiom term is a normal form yet has multiple distinct values, so equality between two instances of the axiom is undecidable. The kernel additionally requires `body` to be a **subsingleton** (proof-irrelevant): `∀ p q : body. p ≡ q` must hold definitionally. Two acceptance criteria:
+
+  1. **Closed-proposition route** (statically checkable): `body` mentions no free type variables. Closed propositions in `Prop` are forced unique by the framework lineage's intended interpretation (every model in the framework's R-S sees the same set of inhabitants). The kernel checks this by walking `body` for unbound type-vars; if none, the axiom is admitted.
+  2. **UIP route** (axiom of uniqueness of identity proofs): `body` mentions free type-vars but the framework explicitly imports `core.math.frameworks.uip` and the elaborator records the import; the kernel then admits the axiom under the UIP regime. Mixing UIP with `core.math.frameworks.univalence` is rejected by the framework-conflict checker (#197).
+
+A non-subsingleton axiom (e.g., `axiom choice<T>: ∀(s: NonEmpty<T>). T` with two distinct inhabitants depending on which element of `s` is selected) is rejected with `E_FW_AXIOM_NOT_SUBSINGLETON`. Acceptable form: `axiom choice<T>: ∀(s: NonEmpty<T>). exists (t: T). t ∈ s` — the existential-only form is propositional + subsingleton-by-construction.
+
 **K-SmtRecheck** (certificate verification):
 
 ```
@@ -397,8 +424,8 @@ The `SmtCertificate` clause uses `dp(w)` only after `K-SmtRecheck` has succeeded
 
 | Property | Status | Evidence / side-conditions |
 |---|---|---|
-| Subject reduction | Expected | Inherits from CCHM (Cohen–Coquand–Huber–Mörtberg 2018); refinement + K-Refine are admissible because `Refined` reduces only through `RefineErase` which discards proof content. |
-| Strong normalisation | Expected for the CCHM fragment + Prop-only framework axioms | Huber 2019. Side-condition: every `FrameworkAxiom(_, _, body)` must satisfy `body : Prop` (enforced by `K-FwAx`); a non-Prop axiom (`unsafe_cast: ∀A B. A→B`) would break SN. |
+| Subject reduction | Expected, conditional on K-FwAx subsingleton requirement | Inherits from CCHM (Cohen–Coquand–Huber–Mörtberg 2018); refinement + K-Refine are admissible because `Refined` reduces only through `RefineErase` which discards proof content. **K-FwAx side-condition**: `body` must be subsingleton (closed proposition or UIP-regime); a non-subsingleton axiom term is a normal form with multiple distinct extensional values, breaking SR. Enforced by `E_FW_AXIOM_NOT_SUBSINGLETON`. |
+| Strong normalisation | Expected for the CCHM fragment + Prop-subsingleton framework axioms | Huber 2019. Side-condition: every `FrameworkAxiom(_, _, body)` must satisfy `body : Prop` AND `body` is subsingleton (enforced by `K-FwAx`); a non-Prop axiom (`unsafe_cast: ∀A B. A→B`) breaks SN, a non-subsingleton Prop-axiom breaks SR. |
 | Canonicity | For **closed** terms of canonical type-formers (Π, Σ, Path, Inductive, HIT) in the CCHM fragment | Huber 2019 closed-term canonicity. Open terms with refinement subtypes are *not* canonical (`Refined(A, x, P)` of an open term may have no canonical form until its predicate is discharged). |
 | Decidability of type-checking | Yes for the ETT-free fragment + intensional equality | Refinement subtype-checking is decidable iff the underlying predicate satisfies the discharge strategy (e.g. `@verify(static)` ⇒ decidable; `@verify(proof)` ⇒ user-supplied). |
 | Parametricity | Optional, via a `@parametric` framework axiom | Not kernel-level. |
