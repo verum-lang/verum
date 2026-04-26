@@ -48,17 +48,64 @@ implement Span {
 }
 
 // =============================================================================
+// URI safety check
+// =============================================================================
+
+/// Returns true iff `uri` is safe to emit inside an OSC 8 hyperlink
+/// payload. The OSC 8 sequence is terminated by ST (`\e\\`) or BEL
+/// (`\007`); a URI containing either character would close the
+/// hyperlink early and let subsequent bytes be interpreted as
+/// terminal escapes.
+///
+/// Rejects ALL control characters (bytes < 0x20 and DEL = 0x7F).
+/// Specifically:
+///   * `\007` BEL — primary OSC terminator. Closes the hyperlink.
+///   * `\e` (0x1B) ESC — leads to ST `\e\\` and any other escape.
+///     Could change window title, set scrolling region, alter colors.
+///   * `\n` LF, `\r` CR — break renderer state, can inject lines.
+///   * Other C0 control chars — terminal-defined, generally unsafe.
+///
+/// Per RFC 3986 §2, valid URI characters are a subset of printable
+/// ASCII plus percent-encoded octets, so any control character in
+/// a URI is malformed input that we should reject before emit.
+public fn is_safe_uri_for_osc(uri: &Text) -> Bool {
+    let bytes = uri.as_bytes();
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        let b = bytes[i] as Int;
+        // C0 controls (0x00..0x1F) and DEL (0x7F) all rejected.
+        if b < 0x20 || b == 0x7F {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
 // Writing Hyperlinks
 // =============================================================================
 
 /// Write text with a hyperlink to the output writer.
 /// Opens the link with OSC 8 ; params ; uri ST, writes the visible text,
 /// then closes with OSC 8 ;; ST.
+///
+/// Returns `Err(IoError.InvalidInput(...))` if `uri` contains a
+/// control character that would close the OSC sequence early — see
+/// `is_safe_uri_for_osc` for the threat model. Without this check a
+/// caller-controlled URI could inject arbitrary escape sequences
+/// into the terminal (window-title spoofing, screen clear, color
+/// reset, fake-prompt confusion).
 public fn write_hyperlink(
     writer: &mut (dyn EscapeWriter),
     uri: &Text,
     text: &Text,
 ) -> IoResult<()> {
+    if !is_safe_uri_for_osc(uri) {
+        return Err(IoError.InvalidInput {
+            reason: "hyperlink URI contains control character; refusing to emit OSC 8 escape (would let URI close the sequence early and inject terminal commands)".into(),
+        });
+    }
     writer.write_osc(8, &f";{uri}").map_err(|e| IoError.Other(e.to_string()))?;
     let _ = writer.write(text.as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;
     writer.write_osc(8, ";").map_err(|e| IoError.Other(e.to_string()))
