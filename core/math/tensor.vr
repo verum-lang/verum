@@ -329,6 +329,57 @@ implement<T: Numeric> DynTensor<T> {
         DynTensor { data, shape: x.shape.clone() }
     }
 
+    // Create range tensor [start, end) with step.
+    public fn arange(start: T, end: T, step: T) -> DynTensor<T>
+        using [ComputeDevice]
+    {
+        @vbc(TENSOR_ARANGE, start, end, step, ComputeDevice.device())
+    }
+
+    // Create linearly spaced tensor of `num` values from start to end.
+    public fn linspace(start: T, end: T, num: USize) -> DynTensor<T>
+        using [ComputeDevice]
+    {
+        @vbc(TENSOR_LINSPACE, start, end, num, ComputeDevice.device())
+    }
+
+    // Create n×n identity matrix.
+    public fn eye(n: USize) -> DynTensor<T>
+        using [ComputeDevice]
+    {
+        @vbc(TENSOR_EYE, n, ComputeDevice.device())
+    }
+
+    // Create n×n identity matrix (alias for eye).
+    public fn identity(n: USize) -> DynTensor<T>
+        using [ComputeDevice]
+    {
+        @vbc(TENSOR_EYE, n, ComputeDevice.device())
+    }
+
+    // Create tensor from a flat data slice with the given shape.
+    public fn from_slice(data: &[T], shape: &[USize]) -> DynTensor<T>
+        using [ComputeDevice]
+    {
+        let expected_numel: USize = shape.iter().product();
+        assert(data.len() == expected_numel, "data length must match shape");
+        @vbc(TENSOR_FROM_DATA, data, shape, ComputeDevice.device())
+    }
+
+    // Create random tensor from U[0, 1).
+    public fn rand(shape: &[USize]) -> DynTensor<T>
+        using [Random, ComputeDevice]
+    {
+        @vbc(TENSOR_RAND, shape, Random.int(2147483647), ComputeDevice.device())
+    }
+
+    // Create random tensor from N(0, 1).
+    public fn randn(shape: &[USize]) -> DynTensor<T>
+        using [Random, ComputeDevice]
+    {
+        @vbc(TENSOR_RANDN, shape, Random.int(2147483647), ComputeDevice.device())
+    }
+
     // Create tensor with the same shape as another, filled with ones.
     public fn ones_like(x: &DynTensor<T>) -> DynTensor<T> {
         let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
@@ -348,6 +399,11 @@ implement<T: Numeric> DynTensor<T> {
 
     // Number of dimensions
     public fn rank(&self) -> USize {
+        self.shape.len()
+    }
+
+    // Number of dimensions (alias for rank — PyTorch / NumPy idiom).
+    public fn ndim(&self) -> USize {
         self.shape.len()
     }
 

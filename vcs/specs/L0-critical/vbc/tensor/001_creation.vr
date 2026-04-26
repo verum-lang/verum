@@ -4,7 +4,7 @@
 // @tags: vbc, tensor, creation, new, full, rand, arange
 // @timeout: 5000
 // @expect: pass
-// @skip-disabled: References tensor constructors not yet on DynTensor (Tensor.new, .from, .from_slice, .arange, .linspace, .rand, .identity, .eye, .diag — 25+ unbound — need stdlib implementation, not just parser support)
+// @skip-disabled: Needs Tensor<T, Shape> const-generic typechecker support (#90), Tensor.from for nested literals, multi-dim indexing t[[i, j]]. Static-method shims for arange/linspace/eye/identity/from_slice/rand/randn/ndim landed 2026-04-26 — re-enable once #90 + multi-dim indexing land.
 //
 // Test: TENSOR_NEW, TENSOR_FULL, TENSOR_FROM_SLICE, TENSOR_ARANGE, TENSOR_LINSPACE, TENSOR_RAND
 // Verifies tensor creation operations
