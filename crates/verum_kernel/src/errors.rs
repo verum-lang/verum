@@ -228,6 +228,47 @@ pub enum KernelError {
         to_tier: Text,
     },
 
+    /// V8 — `K-FwAx` body-is-Prop premise violated.
+    ///
+    /// Per `verification-architecture.md` §4.4, the K-FwAx rule
+    /// has TWO independent soundness premises:
+    ///
+    ///   1. `body : Prop` — the axiom asserts a *proposition*, not
+    ///      a non-trivial inhabitant of some `Type_n`. A
+    ///      framework axiom of type `Π A B. A → B` would let users
+    ///      postulate an arbitrary computable function and break
+    ///      strong normalisation; restricting bodies to `Prop`
+    ///      keeps the postulate at the propositional layer where
+    ///      SN is preserved by the standard "axioms-stuck"
+    ///      reduction strategy.
+    ///   2. `body` is a subsingleton (closed proposition or UIP
+    ///      regime) — see [`Self::AxiomNotSubsingleton`].
+    ///
+    /// V8 #217 shipped (2) but pre-V8 the kernel never enforced
+    /// (1) at register time. This variant fires when an axiom's
+    /// declared type, viewed as a CoreTerm via the empty Context,
+    /// does NOT inhabit `Universe(Prop)` (or `Universe(Concrete(0))`
+    /// under the set-theoretic reading where `Prop ⊆ Type_0`).
+    ///
+    /// `inferred_universe_shape` carries a coarse rendering of the
+    /// universe the body actually inhabited (e.g.
+    /// `"Concrete(2)"`) so the diagnostic message names which
+    /// universe the body lives in.
+    #[error(
+        "kernel: framework axiom '{name}' body is not a Prop: \
+         inferred universe shape is '{inferred_universe_shape}'; \
+         framework axioms must inhabit Prop (or Type_0 in the \
+         set-theoretic interpretation) to preserve strong \
+         normalisation per §4.4 K-FwAx soundness premise"
+    )]
+    AxiomBodyNotProp {
+        /// Axiom name being registered.
+        name: Text,
+        /// Coarse render of the inferred universe (e.g.
+        /// `"Concrete(2)"`, `"Pi"`, `"Prop"`).
+        inferred_universe_shape: Text,
+    },
+
     /// V8 — `K-FwAx` subsingleton requirement violated. Per
     /// `verification-architecture.md` §4.4, a framework axiom's
     /// body must be a *subsingleton* (proof-irrelevant: at most

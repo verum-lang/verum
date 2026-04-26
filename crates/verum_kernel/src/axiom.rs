@@ -153,16 +153,21 @@ impl AxiomRegistry {
     /// [`SubsingletonRegime`].
     ///
     /// Implements the full `K-FwAx` admission gate from
-    /// `verification-architecture.md` §4.4 with three layered
+    /// `verification-architecture.md` §4.4 with four layered
     /// checks (in order):
     ///
     ///   1. Duplicate-name rejection (`KernelError::DuplicateAxiom`).
     ///   2. UIP-shape syntactic rejection (`KernelError::UipForbidden`)
     ///      — the original pre-V8 gate, preserved.
-    ///   3. Subsingleton check (NEW in V8) — body must satisfy the
+    ///   3. Subsingleton check (V8 #217) — body must satisfy the
     ///      closed-proposition condition unless the regime is
     ///      [`SubsingletonRegime::UipPermitted`] or
     ///      [`SubsingletonRegime::LegacyUnchecked`].
+    ///   4. Body-is-Prop check (V8 #220) — body must inhabit a
+    ///      universe (i.e., body itself is a type, not a non-type
+    ///      term like an integer literal). Skipped under
+    ///      `UipPermitted` (free-vars + needs Γ to type-check) and
+    ///      `LegacyUnchecked` regimes.
     ///
     /// On any rejection the entries list is unchanged (no half-
     /// committed registration).
@@ -179,10 +184,24 @@ impl AxiomRegistry {
         if crate::inductive::is_uip_shape(&ty) {
             return Err(KernelError::UipForbidden(name));
         }
-        // V8 (#217) subsingleton check. Skip under
-        // LegacyUnchecked + UipPermitted regimes (the latter
-        // delegates the inhabitation-uniqueness obligation to
-        // the imported UIP framework axiom).
+        // V8 (#217) subsingleton check + V8 (#220) body-is-Prop
+        // check. Both apply only under
+        // [`SubsingletonRegime::ClosedPropositionOnly`]:
+        //
+        //   • Subsingleton: body has no free variables (Year 0–2
+        //     strict Verum stance per §4.4 K-FwAx sub-bullet 1).
+        //   • Body-is-Prop: body inhabits Universe(Prop) or
+        //     Universe(Concrete(_)) under the set-theoretic
+        //     reading where Prop ⊆ Type_0. Strictly, the spec
+        //     wants Prop only; pragmatically the kernel admits
+        //     concrete-type axioms (e.g., `tt: Unit`) because
+        //     concrete inductives ARE propositions in the
+        //     set-theoretic interpretation.
+        //
+        // UipPermitted regime delegates the inhabitation-
+        // uniqueness obligation to the imported UIP framework
+        // axiom; LegacyUnchecked is the V8 backwards-compat
+        // shim that skips both checks.
         match regime {
             SubsingletonRegime::ClosedPropositionOnly => {
                 let free = crate::support::free_vars(&ty);
@@ -194,6 +213,44 @@ impl AxiomRegistry {
                         free_vars_count: free.len(),
                         free_vars_rendered: Text::from(rendered.join(", ")),
                     });
+                }
+                // V8 (#220) body-is-Prop check. The body is
+                // closed (free_vars empty), so we can type-check
+                // it under empty Γ + empty axiom registry. The
+                // result must inhabit a universe — anything else
+                // means the body isn't a type and the axiom is
+                // category-mistaken.
+                let inferred = crate::infer::infer(
+                    &crate::Context::new(),
+                    &ty,
+                    &AxiomRegistry::new(),
+                );
+                match inferred {
+                    Ok(crate::CoreTerm::Universe(_)) => {
+                        // Pass — body is a type at some universe.
+                    }
+                    Ok(other_term) => {
+                        return Err(KernelError::AxiomBodyNotProp {
+                            name,
+                            inferred_universe_shape: Text::from(format!(
+                                "{:?}",
+                                crate::support::shape_of(&other_term)
+                            )),
+                        });
+                    }
+                    Err(_) => {
+                        // The body is closed but type-inference
+                        // failed — likely an ill-formed term
+                        // (e.g., references an unregistered
+                        // inductive). Reject as not-Prop with
+                        // a render of the term shape.
+                        return Err(KernelError::AxiomBodyNotProp {
+                            name,
+                            inferred_universe_shape: Text::from(
+                                "infer-failed",
+                            ),
+                        });
+                    }
                 }
             }
             SubsingletonRegime::UipPermitted

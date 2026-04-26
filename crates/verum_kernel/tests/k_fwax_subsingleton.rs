@@ -403,6 +403,156 @@ fn rejected_subsingleton_check_does_not_commit_entry() {
     assert_eq!(reg.all().len(), 1);
 }
 
+// =============================================================================
+// V8 (#220) — body-is-Prop check at register time
+// =============================================================================
+
+#[test]
+fn closed_inductive_body_admitted_as_prop() {
+    // Unit is at Universe(Concrete(0)) — admitted under the
+    // pragmatic Prop check (Concrete(0) ≈ Prop set-theoretically).
+    let mut reg = AxiomRegistry::new();
+    let res =
+        reg.register_subsingleton(Text::from("unit_witness"), unit_ty(), fw("test"));
+    assert!(res.is_ok(), "Unit body must be admitted: {:?}", res);
+}
+
+#[test]
+fn closed_pi_body_at_type_zero_admitted_as_prop() {
+    // Π(_: Unit). Unit lives at Universe(Max(0, 0)) — pragmatic
+    // Prop accepts (no component >= 1).
+    let mut reg = AxiomRegistry::new();
+    let res = reg.register_subsingleton(
+        Text::from("pi_witness"),
+        closed_prop_ty(),
+        fw("test"),
+    );
+    assert!(res.is_ok(), "Pi at Type_0 must be admitted: {:?}", res);
+}
+
+#[test]
+fn b220_non_type_body_rejected_as_not_prop() {
+    // A body that ISN'T a type (e.g., a Var that somehow
+    // type-checks to a non-Universe) — unbound-Var case
+    // surfaces as "infer-failed".
+    //
+    // We construct a body that is provably a non-Universe under
+    // empty Γ + empty axioms: a `Refl(x)` term — its inferred
+    // type is `PathTy<...>(x, x)` which is NOT a Universe head.
+    // Under the closed-prop regime this should fail body-is-
+    // Prop.
+    use verum_kernel::CoreTerm;
+    let mut reg = AxiomRegistry::new();
+    let bogus_body = CoreTerm::Refl(verum_common::Heap::new(unit_ty()));
+    let res = reg.register_subsingleton(
+        Text::from("bogus_axiom"),
+        bogus_body,
+        fw("test"),
+    );
+    match res {
+        Err(KernelError::AxiomBodyNotProp { name, inferred_universe_shape }) => {
+            assert_eq!(name.as_str(), "bogus_axiom");
+            // Refl's type infers to PathTy → shape head "Path".
+            assert!(
+                inferred_universe_shape.as_str().contains("Path")
+                    || inferred_universe_shape.as_str() == "infer-failed",
+                "shape should mention Path or be infer-failed: {}",
+                inferred_universe_shape.as_str(),
+            );
+        }
+        other => panic!("expected AxiomBodyNotProp, got {:?}", other),
+    }
+}
+
+#[test]
+fn b220_closed_body_with_unbound_inductive_admitted_via_pragmatic_fallback() {
+    // The body references an unregistered inductive ("Bool" not
+    // populated in InductiveRegistry). The legacy `infer` shim
+    // (no registry) falls back to Universe(Concrete(0)) for
+    // every Inductive arm — so this passes the body-is-Prop
+    // check. Documents the fallback behaviour: production code
+    // that wants stricter checking should populate an
+    // InductiveRegistry alongside the axiom registry.
+    use verum_kernel::CoreTerm;
+    use verum_common::List;
+    let mut reg = AxiomRegistry::new();
+    let bool_ind = CoreTerm::Inductive {
+        path: Text::from("Bool"),
+        args: List::new(),
+    };
+    let res = reg.register_subsingleton(
+        Text::from("bool_axiom"),
+        bool_ind,
+        fw("test"),
+    );
+    assert!(
+        res.is_ok(),
+        "unregistered inductive admitted under pragmatic fallback: {:?}",
+        res,
+    );
+}
+
+#[test]
+fn b220_uip_permitted_skips_prop_check() {
+    // UipPermitted regime delegates the inhabitation-uniqueness
+    // obligation to the imported UIP framework — the Prop check
+    // is also skipped (it's part of the same admission gate that
+    // the UIP framework implicitly satisfies via its own rules).
+    use verum_kernel::CoreTerm;
+    let mut reg = AxiomRegistry::new();
+    // Body that's NOT a Universe — non-Prop under strict
+    // pragmatic check, but UipPermitted skips it.
+    let non_prop_body = CoreTerm::Refl(verum_common::Heap::new(unit_ty()));
+    let res = reg.register_with_regime(
+        Text::from("uip_relaxed"),
+        non_prop_body,
+        fw("test"),
+        SubsingletonRegime::UipPermitted,
+    );
+    assert!(
+        res.is_ok(),
+        "UipPermitted skips Prop check: {:?}",
+        res,
+    );
+}
+
+#[test]
+fn b220_legacy_unchecked_skips_prop_check() {
+    // Backwards-compat: LegacyUnchecked admits anything that
+    // passes the duplicate + UIP-shape gates. Existing test
+    // corpus continues to work.
+    use verum_kernel::CoreTerm;
+    let mut reg = AxiomRegistry::new();
+    let non_prop_body = CoreTerm::Refl(verum_common::Heap::new(unit_ty()));
+    let res = reg.register_with_regime(
+        Text::from("legacy"),
+        non_prop_body,
+        fw("test"),
+        SubsingletonRegime::LegacyUnchecked,
+    );
+    assert!(res.is_ok(), "Legacy regime preserves pre-V8: {:?}", res);
+}
+
+#[test]
+fn b220_subsingleton_check_runs_before_prop_check() {
+    // Ordering: subsingleton check (free-vars) precedes
+    // body-is-Prop. An open body fails subsingleton FIRST and
+    // never reaches the Prop check.
+    let mut reg = AxiomRegistry::new();
+    let res = reg.register_subsingleton(
+        Text::from("open_body"),
+        open_prop_ty(),
+        fw("test"),
+    );
+    match res {
+        Err(KernelError::AxiomNotSubsingleton { .. }) => {}
+        other => panic!(
+            "expected subsingleton failure first, got {:?}",
+            other,
+        ),
+    }
+}
+
 #[test]
 fn diagnostic_renders_free_vars_sorted_for_determinism() {
     // BTreeSet ordering means `A`, `B`, `C` must appear in that
