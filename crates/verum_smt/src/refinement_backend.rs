@@ -33,7 +33,7 @@ use verum_ast::span::Span;
 use verum_common::{Map, Text};
 
 use verum_types::refinement::{
-    CounterExample, RefinementError, SmtBackend, SmtResult, VerificationResult,
+    RefinementError, SmtBackend, SmtResult, VerificationResult,
 };
 
 // Import SubsumptionChecker + shared stats struct from this crate
