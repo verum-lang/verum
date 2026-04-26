@@ -41,7 +41,7 @@
 //! the AxiomRegistry call site can use them).
 
 use serde::{Deserialize, Serialize};
-use verum_common::{List, Maybe, Text};
+use verum_common::{Heap, List, Maybe, Text};
 
 use crate::{CoreTerm, KernelError};
 
@@ -58,6 +58,43 @@ pub struct ConstructorSig {
     pub arg_types: List<CoreTerm>,
 }
 
+/// V8 (#237) — one **path constructor** of a higher inductive type.
+///
+/// Per VVA §7.4 a HIT extends an ordinary inductive with cells whose
+/// boundary is a path between two values of the type itself; the path
+/// constructor's body is the kernel-internal record of that cell.
+///
+/// V1 supports **0-cells (point constructors)** via [`ConstructorSig`]
+/// and **1-cells (path constructors)** via this struct. 2-cells / higher
+/// cells are V2 — they require nested-path syntax that is yet to land in
+/// `path_endpoints` (`grammar/verum.ebnf` is currently 1-cells only).
+///
+/// The endpoint expressions `lhs` / `rhs` are arbitrary [`CoreTerm`]s
+/// over the surrounding inductive — typically references to point
+/// constructors (e.g. `Var("Base")` for S¹'s `loop : Base ↝ Base`),
+/// possibly applied to recursive arguments (e.g. for the suspension
+/// HIT's `merid : Σ X ↝ Σ X` where the recursor at `lhs` is computed
+/// by recursion over the argument). V1 emits the eliminator's branch
+/// type structurally as `PathTy(motive_at_lhs, recursor_at_lhs,
+/// recursor_at_rhs)` per §7.4 + §17.2 Task C3; recursor application
+/// at non-nullary endpoints is a V2 elaboration extension (the kernel
+/// records the structural type, the user supplies the computational
+/// content via the framework axiom system).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PathCtorSig {
+    /// Path constructor name (must be unique across **all** ctors of
+    /// the surrounding HIT — point + path — since both share the
+    /// constructor namespace).
+    pub name: Text,
+    /// Left-hand endpoint expression. Typically `Var(point_ctor_name)`
+    /// for nullary ctors; for higher-arity endpoints the kernel
+    /// records the term as-is (V1 — its computational content is
+    /// resolved by elaboration / framework axioms).
+    pub lhs: CoreTerm,
+    /// Right-hand endpoint expression.
+    pub rhs: CoreTerm,
+}
+
 /// One registered inductive declaration. The kernel uses this as the
 /// authoritative description of an inductive's surface (used by
 /// positivity checking, eliminator typing, and `verum audit
@@ -72,6 +109,12 @@ pub struct RegisteredInductive {
     pub params: List<Text>,
     /// Constructors of this inductive.
     pub constructors: List<ConstructorSig>,
+    /// V8 (#237) — path constructors (1-cells) for higher inductive
+    /// types. Empty for ordinary inductives. Defaults via serde so
+    /// pre-V8 deserialised registries retain old-shape ordinary
+    /// inductives without explicit migration.
+    #[serde(default)]
+    pub path_constructors: List<PathCtorSig>,
     /// V8 (#215) — universe level this inductive inhabits. Defaults
     /// to `Concrete(0)` (`Type(0)`) for set-level inductives via
     /// the [`Default`] impl that doesn't require this field; the
@@ -106,6 +149,7 @@ impl RegisteredInductive {
             name,
             params,
             constructors,
+            path_constructors: List::new(),
             universe: default_universe_level(),
         }
     }
@@ -116,6 +160,15 @@ impl RegisteredInductive {
     /// declarations whose carriers can't be demoted to `Type(0)`.
     pub fn with_universe(mut self, universe: crate::UniverseLevel) -> Self {
         self.universe = universe;
+        self
+    }
+
+    /// V8 (#237) — append a path constructor (1-cell) to the
+    /// declaration. Builder-style; returns `self`. The kernel
+    /// validates path-constructor uniqueness against point and
+    /// other path constructors at registry-`register` time.
+    pub fn with_path_constructor(mut self, sig: PathCtorSig) -> Self {
+        self.path_constructors.push(sig);
         self
     }
 }
@@ -155,6 +208,36 @@ impl InductiveRegistry {
                     &PositivityCtx::root(ctor.name.as_str(), i),
                 )?;
             }
+        }
+        // V8 (#237) — path-constructor namespace check: path ctor
+        // names must be distinct from point ctor names AND from each
+        // other (the recursor binds case_<name> uniformly across
+        // both kinds — collisions would shadow).
+        for path in decl.path_constructors.iter() {
+            if decl.constructors.iter().any(|c| c.name == path.name) {
+                return Err(KernelError::DuplicateInductive(Text::from(
+                    format!(
+                        "path ctor '{}' collides with point ctor of the same name in '{}'",
+                        path.name.as_str(),
+                        decl.name.as_str(),
+                    )
+                    .as_str(),
+                )));
+            }
+        }
+        let mut seen_path_names: List<Text> = List::new();
+        for path in decl.path_constructors.iter() {
+            if seen_path_names.iter().any(|n| n == &path.name) {
+                return Err(KernelError::DuplicateInductive(Text::from(
+                    format!(
+                        "duplicate path ctor '{}' in '{}'",
+                        path.name.as_str(),
+                        decl.name.as_str(),
+                    )
+                    .as_str(),
+                )));
+            }
+            seen_path_names.push(path.name.clone());
         }
         self.entries.push(decl);
         Ok(())
@@ -427,4 +510,183 @@ fn is_path_over(ty: &CoreTerm, carrier_name: &str) -> bool {
         ty,
         CoreTerm::PathTy { carrier, .. } if is_var_named(carrier.as_ref(), carrier_name)
     )
+}
+
+// =============================================================================
+// V8 (#237) — eliminator auto-generation for inductive + higher inductive types
+// =============================================================================
+
+/// V8 (#237) — derive the **dependent eliminator type** for an
+/// inductive (with optional path constructors).
+///
+/// Per VVA §7.4 + Task C3 (`docs/architecture/...verum-verification-architecture.md
+/// #17.2`) the kernel auto-generates the eliminator's type signature
+/// from the registered declaration. The shape is:
+///
+/// ```text
+/// elim_T : Π (motive : T → Type_u) .
+///          Π (case_C₁ : Π (a₁:A₁)…(aₙ:Aₙ) . motive(C₁(a₁,…,aₙ))) .   -- one per point ctor
+///          ⋮
+///          Π (case_P : PathTy(motive(P.lhs),
+///                             ↻(P.lhs), ↻(P.rhs))) .                 -- one per path ctor
+///          ⋮
+///          Π (x : T) . motive(x)
+/// ```
+///
+/// where `↻(e)` denotes the **recursor's image** at endpoint `e`.
+/// V1 emits `↻(e) = e` for non-trivial endpoints — the kernel
+/// records the **structural** type signature; recursor coherence
+/// (so that `↻(P.lhs)` actually reduces to the right case-application
+/// chain) is V2 work tied to the `Elim` β-rule rollout. The point of
+/// V1 is that the eliminator **typechecks at the right shape** so
+/// frameworks (HoTT, cubical) can attest the computational content
+/// via axioms or `@verify` proofs without the kernel committing to a
+/// premature reduction strategy.
+///
+/// # Examples
+///
+/// * Ordinary `Bool` → `Π(motive: Bool → Type). Π(case_True: motive(True)).
+///   Π(case_False: motive(False)). Π(x: Bool). motive(x)`.
+/// * S¹ HIT (point `Base`, path `Loop : Base..Base`) →
+///   `Π(motive). Π(case_Base: motive(Base)).
+///    Π(case_Loop: PathTy(motive(Base), Base, Base)). Π(x: S¹). motive(x)`.
+/// * Interval HIT (`Zero`, `One`, `Seg : Zero..One`) →
+///   `Π(motive). Π(case_Zero). Π(case_One).
+///    Π(case_Seg: PathTy(motive(Zero), Zero, One)). Π(x). motive(x)`.
+///
+/// # V1 limitations (tracked for V2)
+///
+/// * Recursor-image at non-nullary endpoints is emitted as the raw
+///   endpoint expression — V2 will resolve to the right case-app chain.
+/// * Path-over (the dependent path needed when `motive(lhs) ≠
+///   motive(rhs)` definitionally) is approximated by `PathTy` over
+///   `motive(lhs)`; the framework system attests homogeneity for V1.
+/// * Higher cells (2-cells +) are not yet representable — needs the
+///   nested `path_endpoints` grammar extension.
+pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
+    let parent_ind = CoreTerm::Inductive {
+        path: decl.name.clone(),
+        args: List::from_iter(
+            decl.params
+                .iter()
+                .map(|p| CoreTerm::Var(p.clone()))
+                .collect::<Vec<_>>(),
+        ),
+    };
+
+    // The motive lives in `parent_ind → Universe(decl.universe)`.
+    // We reuse `decl.universe` so the eliminator stays at the right
+    // universe level for HoTT-level (Concrete(2)) declarations.
+    let motive_universe = CoreTerm::Universe(decl.universe.clone());
+    let motive_var = CoreTerm::Var(Text::from("motive"));
+
+    // Innermost: Π (x : T) . motive(x).
+    let scrut_var = CoreTerm::Var(Text::from("x"));
+    let scrut_image =
+        CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(scrut_var));
+    let mut acc = CoreTerm::Pi {
+        binder: Text::from("x"),
+        domain: Heap::new(parent_ind.clone()),
+        codomain: Heap::new(scrut_image),
+    };
+
+    // Path-constructor branches (right-to-left so they end up in
+    // declaration order in the outer Pi-chain).
+    for path in iter_rev(&decl.path_constructors) {
+        let carrier =
+            CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(path.lhs.clone()));
+        let lhs_image = recursor_image_at_endpoint(&path.lhs);
+        let rhs_image = recursor_image_at_endpoint(&path.rhs);
+        let branch_ty = CoreTerm::PathTy {
+            carrier: Heap::new(carrier),
+            lhs: Heap::new(lhs_image),
+            rhs: Heap::new(rhs_image),
+        };
+        acc = CoreTerm::Pi {
+            binder: Text::from(format!("case_{}", path.name.as_str()).as_str()),
+            domain: Heap::new(branch_ty),
+            codomain: Heap::new(acc),
+        };
+    }
+
+    // Point-constructor branches.
+    for ctor in iter_rev(&decl.constructors) {
+        let case_ty = point_constructor_case_type(&motive_var, &ctor);
+        acc = CoreTerm::Pi {
+            binder: Text::from(format!("case_{}", ctor.name.as_str()).as_str()),
+            domain: Heap::new(case_ty),
+            codomain: Heap::new(acc),
+        };
+    }
+
+    // Outermost: Π (motive : T → Type_u) . ...
+    let motive_ty = CoreTerm::Pi {
+        binder: Text::from("_"),
+        domain: Heap::new(parent_ind),
+        codomain: Heap::new(motive_universe),
+    };
+    CoreTerm::Pi {
+        binder: Text::from("motive"),
+        domain: Heap::new(motive_ty),
+        codomain: Heap::new(acc),
+    }
+}
+
+/// V8 (#237) — derive the case-branch type for a point constructor.
+///
+/// For ctor `C(a₁:A₁, …, aₙ:Aₙ) : T`, the eliminator's case branch is:
+///
+///     Π (a₁ : A₁) … (aₙ : Aₙ) . motive(C(a₁, …, aₙ))
+///
+/// Nullary ctors collapse to `motive(C)` (no Π binders).
+pub fn point_constructor_case_type(
+    motive_var: &CoreTerm,
+    ctor: &ConstructorSig,
+) -> CoreTerm {
+    // Build the constructor application: App_chain(Var(C), a₁, …, aₙ).
+    let mut ctor_app = CoreTerm::Var(ctor.name.clone());
+    for (i, _arg_ty) in ctor.arg_types.iter().enumerate() {
+        let arg_name = Text::from(format!("a{}", i).as_str());
+        ctor_app = CoreTerm::App(
+            Heap::new(ctor_app),
+            Heap::new(CoreTerm::Var(arg_name)),
+        );
+    }
+    // Goal: motive(C(a₁,…,aₙ)).
+    let mut acc = CoreTerm::App(
+        Heap::new(motive_var.clone()),
+        Heap::new(ctor_app),
+    );
+    // Wrap in Π binders, right-to-left.
+    let arg_count = ctor.arg_types.iter().count();
+    for (rev_i, arg_ty) in ctor.arg_types.iter().rev().enumerate() {
+        let i = arg_count - 1 - rev_i;
+        let arg_name = Text::from(format!("a{}", i).as_str());
+        acc = CoreTerm::Pi {
+            binder: arg_name,
+            domain: Heap::new(arg_ty.clone()),
+            codomain: Heap::new(acc),
+        };
+    }
+    acc
+}
+
+/// V8 (#237) — recursor's image at a path-constructor endpoint.
+///
+/// V1: emit the endpoint expression as-is. The kernel records the
+/// structural shape; the elaborator / framework axiom system supplies
+/// the computational content (the actual case-app chain that the
+/// recursor produces at this endpoint). V2 will resolve nullary
+/// endpoints to `Var("case_<ctor_name>")` and recurse on App-chains.
+fn recursor_image_at_endpoint(endpoint: &CoreTerm) -> CoreTerm {
+    endpoint.clone()
+}
+
+/// Reverse-iterator helper for `verum_common::List` (which doesn't
+/// expose a built-in DoubleEndedIterator). Used by `eliminator_type`
+/// to build right-to-left Π-chains.
+fn iter_rev<T: Clone>(list: &List<T>) -> impl Iterator<Item = T> {
+    let mut buf: Vec<T> = list.iter().cloned().collect();
+    buf.reverse();
+    buf.into_iter()
 }

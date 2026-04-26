@@ -106,8 +106,9 @@ pub use errors::KernelError;
 /// UIP-shape detection helpers used by AxiomRegistry.
 pub mod inductive;
 pub use inductive::{
-    ConstructorSig, InductiveRegistry, PositivityCtx, RegisteredInductive,
-    check_strict_positivity,
+    ConstructorSig, InductiveRegistry, PathCtorSig, PositivityCtx,
+    RegisteredInductive, check_strict_positivity, eliminator_type,
+    point_constructor_case_type,
 };
 
 /// Depth functions for kernel rules — split per #198. Hosts

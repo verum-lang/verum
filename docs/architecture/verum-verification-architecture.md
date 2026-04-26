@@ -1004,7 +1004,7 @@ public type Vec<A: Type, n: Nat> is
 
 Strict positivity enforced by kernel rule `K-Pos` — this is a kernel check, not a grammar change. Mutual inductive blocks use the existing `mutual { … }` grammar (to be verified against `verum.ebnf`; add if missing).
 
-### 7.4 Higher inductive types
+### 7.4 Higher inductive types **[60% — V8 #237 (1-cells + eliminator auto-gen); V2 = β-rule, dependent path-over, higher cells]**
 
 Grammar: existing `type_def` + `variant` with `path_endpoints = '=' , expression , '..' , expression` (`grammar/verum.ebnf:532`). **No `hit` keyword.**
 
@@ -1022,6 +1022,40 @@ public type Interval is
 ```
 
 Higher cells (2-cells, 3-cells) extend `path_endpoints` with nested path expressions — a minimal grammar addition (to be specified alongside the `K-Cell` kernel rule), not a new top-level construct.
+
+#### 7.4.1 Eliminator auto-generation (V8 #237)
+
+`verum_kernel::inductive::eliminator_type(decl) -> CoreTerm` derives the **dependent eliminator's type signature** from a registered declaration. For an HIT with point constructors `C₁, …, Cₙ` and path constructors `P₁, …, Pₘ` the auto-gen shape is:
+
+```text
+elim_T : Π (motive : T → Type_u) .
+         Π (case_C₁ : Π (a₁:A₁)…(aₖ:Aₖ) . motive(C₁(a₁,…,aₖ))) .
+         ⋮
+         Π (case_Pⱼ : PathTy(motive(Pⱼ.lhs),
+                             ↻(Pⱼ.lhs), ↻(Pⱼ.rhs))) .
+         ⋮
+         Π (x : T) . motive(x)
+```
+
+`↻(e)` is the recursor's image at endpoint `e`. V1 emits `↻(e) = e`; V2 will resolve nullary endpoints to `case_<ctor>` and recurse on App-chains for higher-arity endpoints. Path-over (the dependent path needed when `motive(lhs) ≠ motive(rhs)` definitionally) is approximated by `PathTy` over `motive(lhs)` for V1; the framework system attests homogeneity.
+
+**Kernel surface** (`crates/verum_kernel/src/inductive.rs`):
+
+* `PathCtorSig { name, lhs, rhs }` — one path constructor (1-cell).
+* `RegisteredInductive::path_constructors: List<PathCtorSig>` — serde-default empty for back-compat with pre-V8 ordinary inductives.
+* `RegisteredInductive::with_path_constructor(sig) -> Self` — builder.
+* `eliminator_type(decl) -> CoreTerm` — top-level eliminator type derivation.
+* `point_constructor_case_type(motive, ctor) -> CoreTerm` — per-ctor case-branch helper, exposed for elaborator reuse.
+
+**Validation** at `InductiveRegistry::register` time: path-ctor names must not collide with any point ctor name on the same inductive AND must be unique among themselves; both surface as `KernelError::DuplicateInductive` with diagnostic detail.
+
+**Coverage**: `crates/verum_kernel/tests/k_hit_eliminator.rs` (10 integration tests) — Bool / Nat ordinary recursor shape, S¹ / Interval HIT recursor shape, namespace-collision rejection, duplicate-path-ctor rejection, back-compat (no path ctors), nullary + binary point-ctor case typing, declared-universe propagation.
+
+**V2 scope (tracked):**
+* Path-constructor β-rule wiring through `Elim`.
+* Recursor-image resolution at non-nullary endpoints.
+* True dependent path-over (`PathOver(motive, p, x, y)` instead of homogeneous `PathTy`).
+* 2-cells and higher-arity cell constructors via nested `path_endpoints` grammar.
 
 ### 7.5 Quotient types **[100% — V8 #236]**
 
