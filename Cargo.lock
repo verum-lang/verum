@@ -5102,6 +5102,7 @@ dependencies = [
  "verum_toolchain",
  "verum_types",
  "verum_vbc",
+ "verum_verification",
  "walkdir",
 ]
 

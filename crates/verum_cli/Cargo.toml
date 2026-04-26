@@ -79,6 +79,7 @@ verum_types = { workspace = true }
 verum_codegen = { workspace = true }
 verum_cbgr = { workspace = true }
 verum_smt = { workspace = true }
+verum_verification = { workspace = true }
 verum_lexer = { workspace = true }
 verum_ast = { workspace = true }
 verum_common = { workspace = true }

@@ -909,6 +909,17 @@ enum Commands {
         #[clap(long)]
         owl2_classify: bool,
 
+        /// Framework-compatibility audit (#197 V0): walk every
+        /// `@framework(corpus, ...)` marker in the project, collect
+        /// the distinct corpus identifiers, and check the well-known
+        /// incompatibility matrix (uip ⊥ univalence, anti_classical
+        /// ⊥ classical_lem, etc.). Each match prints the conflict
+        /// reason + literature citation. Exits non-zero if any
+        /// incompatible pair is found — the project's axiom bundle
+        /// would derive False, breaking every theorem.
+        #[clap(long)]
+        framework_conflicts: bool,
+
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
@@ -2141,6 +2152,7 @@ fn run_command(cli: Cli) -> Result<()> {
             coord,
             hygiene,
             owl2_classify,
+            framework_conflicts,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -2168,6 +2180,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_hygiene_with_format(output_format)
             } else if owl2_classify {
                 commands::audit::audit_owl2_classify_with_format(output_format)
+            } else if framework_conflicts {
+                commands::audit::audit_framework_conflicts_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,
