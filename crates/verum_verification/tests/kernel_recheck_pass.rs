@@ -287,6 +287,142 @@ fn pipeline_runs_all_passes_when_module_clean() {
     }
 }
 
+// =============================================================================
+// V5 (#192) — KernelRecheckPass descends into impl-block methods
+// =============================================================================
+
+fn impl_item_with_function(func: FunctionDecl) -> verum_ast::decl::ImplItem {
+    verum_ast::decl::ImplItem {
+        attributes: List::new(),
+        visibility: Visibility::Private,
+        kind: verum_ast::decl::ImplItemKind::Function(func),
+        span: span(),
+    }
+}
+
+fn impl_block(for_type: Type, items: Vec<verum_ast::decl::ImplItem>) -> verum_ast::decl::ImplDecl {
+    let mut item_list: List<verum_ast::decl::ImplItem> = List::new();
+    for it in items {
+        item_list.push(it);
+    }
+    verum_ast::decl::ImplDecl {
+        is_unsafe: false,
+        generics: List::new(),
+        kind: verum_ast::decl::ImplKind::Inherent(for_type),
+        generic_where_clause: Maybe::None,
+        meta_where_clause: Maybe::None,
+        specialize_attr: Maybe::None,
+        items: item_list,
+        span: span(),
+    }
+}
+
+#[test]
+fn kernel_recheck_pass_descends_into_impl_block_methods() {
+    // implement Foo {
+    //     fn impl_method(x: Int{p.box().box()}) -> Int { ... }
+    // }
+    // Modal-overshoot in an impl-method param must be caught.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let bad_refined = refined_int(boxed);
+    let bad_method = make_function(
+        "impl_method",
+        vec![bad_refined],
+        Maybe::Some(Type::int(span())),
+    );
+    let impl_decl = impl_block(
+        Type::int(span()),
+        vec![impl_item_with_function(bad_method)],
+    );
+    let module = module_with(vec![]);
+    // Manually splice in the Impl item (module_with helper is
+    // built around make_function-produced Functions).
+    let mut module = module;
+    module.items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Impl(impl_decl),
+        span(),
+    ));
+
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(
+        !result.success,
+        "modal overshoot in impl-method must reject"
+    );
+    assert_eq!(pass.rejections().len(), 1);
+    let rejection = pass.rejections().get(0).unwrap();
+    assert!(
+        rejection.as_str().contains("impl_method"),
+        "rejection should mention 'impl_method': {}",
+        rejection.as_str()
+    );
+}
+
+#[test]
+fn kernel_recheck_pass_clean_impl_block_passes() {
+    let pred = path_expr("p");
+    let good_refined = refined_int(pred);
+    let good_method = make_function(
+        "impl_method",
+        vec![good_refined],
+        Maybe::Some(Type::int(span())),
+    );
+    let impl_decl = impl_block(
+        Type::int(span()),
+        vec![impl_item_with_function(good_method)],
+    );
+    let mut module = module_with(vec![]);
+    module.items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Impl(impl_decl),
+        span(),
+    ));
+
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(result.success);
+    assert_eq!(pass.rejections().len(), 0);
+}
+
+#[test]
+fn kernel_recheck_pass_walks_top_level_and_impl_methods_together() {
+    // Mix: top-level fn (clean) + impl block with a bad method.
+    let top = make_function(
+        "top",
+        vec![Type::int(span())],
+        Maybe::Some(Type::int(span())),
+    );
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let bad_refined = refined_int(boxed);
+    let bad_method = make_function(
+        "im_bad",
+        vec![bad_refined],
+        Maybe::Some(Type::int(span())),
+    );
+    let impl_decl = impl_block(
+        Type::int(span()),
+        vec![impl_item_with_function(bad_method)],
+    );
+    let mut module = module_with(vec![top]);
+    module.items.push(verum_ast::Item::new(
+        verum_ast::decl::ItemKind::Impl(impl_decl),
+        span(),
+    ));
+
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success);
+    // 2 cost entries: top-level fn + impl method.
+    assert_eq!(result.costs.len(), 2);
+    // Only the impl method was rejected.
+    assert_eq!(pass.rejections().len(), 1);
+    assert!(pass.rejections().get(0).unwrap().as_str().contains("im_bad"));
+}
+
 #[test]
 fn default_pipeline_kernel_recheck_result_visible() {
     // The KernelRecheckPass result is the second entry in the

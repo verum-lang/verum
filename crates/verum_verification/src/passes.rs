@@ -220,6 +220,37 @@ impl KernelRecheckPass {
     pub fn rejections(&self) -> &List<Text> {
         &self.rejections
     }
+
+    /// Run the K-rules on a single function and append its
+    /// per-call cost record to `costs`. Used by both the
+    /// top-level Function arm and the V5 (#192) impl-method
+    /// recursion.
+    fn recheck_one_function(
+        &mut self,
+        func: &FunctionDecl,
+        level: VerificationLevel,
+        costs: &mut List<VerificationCost>,
+    ) {
+        let func_start = Instant::now();
+        let outcomes = KernelRecheck::recheck_function(func);
+        let total = outcomes.len();
+        let mut failures = 0usize;
+        for (label, outcome) in outcomes.iter() {
+            if outcome.is_err() {
+                failures += 1;
+                self.rejections.push(label.clone());
+            }
+        }
+        costs.push(VerificationCost::new(
+            Text::from(func.name.as_str()),
+            level,
+            func_start.elapsed(),
+            0,                  // smt_queries: kernel-recheck never calls SMT
+            failures == 0,      // success
+            false,              // timed_out: kernel walks are linear
+            total,              // problem_size: number of K-rule sites
+        ));
+    }
 }
 
 impl Default for KernelRecheckPass {
@@ -238,31 +269,28 @@ impl VerificationPass for KernelRecheckPass {
         let mut costs: List<VerificationCost> = List::new();
         self.rejections = List::new();
 
+        let level = ctx.current_level();
         for item in &module.items {
-            if let ItemKind::Function(func) = &item.kind {
-                let func_start = Instant::now();
-                // Use current level as a label only — kernel-recheck
-                // is level-agnostic (the K-rules apply at every
-                // verification level, including Runtime).
-                let level = ctx.current_level();
-                let outcomes = KernelRecheck::recheck_function(func);
-                let total = outcomes.len();
-                let mut failures = 0usize;
-                for (label, outcome) in outcomes.iter() {
-                    if outcome.is_err() {
-                        failures += 1;
-                        self.rejections.push(label.clone());
+            match &item.kind {
+                ItemKind::Function(func) => {
+                    self.recheck_one_function(func, level, &mut costs);
+                }
+                // V5 (#192) — descend into impl blocks. Methods
+                // declared inside `implement Name { ... }` /
+                // `implement Trait for T { ... }` were previously
+                // invisible to KernelRecheckPass; refinement types
+                // in impl-method signatures or bodies escaped the
+                // kernel-recheck.
+                ItemKind::Impl(impl_decl) => {
+                    for impl_item in impl_decl.items.iter() {
+                        if let verum_ast::decl::ImplItemKind::Function(func) =
+                            &impl_item.kind
+                        {
+                            self.recheck_one_function(func, level, &mut costs);
+                        }
                     }
                 }
-                costs.push(VerificationCost::new(
-                    Text::from(func.name.as_str()),
-                    level,
-                    func_start.elapsed(),
-                    0,                  // smt_queries: kernel-recheck never calls SMT
-                    failures == 0,      // success
-                    false,              // timed_out: kernel walks are linear
-                    total,              // problem_size: number of K-rule sites
-                ));
+                _ => {}
             }
         }
 
