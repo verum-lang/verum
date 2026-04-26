@@ -238,7 +238,7 @@ impl SmtGuardVerifier {
 
     /// Translate our SMT formula to Z3 AST
     fn formula_to_z3(&self, formula: &SmtFormula, scrutinee_ty: &Type) -> Option<z3::ast::Bool> {
-        use z3::ast::{Ast, Bool};
+        use z3::ast::Bool;
 
         match formula {
             SmtFormula::Bool(b) => Some(Bool::from_bool(*b)),
@@ -285,7 +285,7 @@ impl SmtGuardVerifier {
         right: &SmtFormula,
         scrutinee_ty: &Type,
     ) -> Option<z3::ast::Bool> {
-        use z3::ast::{Ast, Bool, Int};
+        use z3::ast::{Bool, Int};
 
         fn to_int(f: &SmtFormula) -> Option<Int> {
             match f {

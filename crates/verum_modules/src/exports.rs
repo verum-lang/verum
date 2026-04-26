@@ -1008,7 +1008,7 @@ fn resolve_glob_reexports_one_pass(
     use verum_ast::decl::Visibility as AstVisibility;
     use verum_common::Maybe;
 
-    let mut total_resolved = 0;
+    let total_resolved = 0;
 
     // First, collect all glob re-exports we need to resolve
     // (module_id, source_path_str)
