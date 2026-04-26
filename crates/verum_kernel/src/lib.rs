@@ -144,7 +144,8 @@ pub use support::{
 pub mod axiom;
 pub use axiom::{
     AxiomRegistry, LoadAxiomsReport, RegisteredAxiom, SubsingletonRegime,
-    load_framework_axioms,
+    load_framework_axioms, load_framework_axioms_strict,
+    load_framework_axioms_with_regime,
 };
 
 /// Kernel typing judgment — split per #198. Hosts the core LCF

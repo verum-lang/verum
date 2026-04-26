@@ -1371,3 +1371,95 @@ fn single_pi_over_path_is_not_uip() {
     );
     assert!(result.is_ok(), "partial shape must not trigger UIP guard");
 }
+
+// =============================================================================
+// V8 (#222) — strict loader: load_framework_axioms_strict +
+// load_framework_axioms_with_regime
+// =============================================================================
+
+#[test]
+fn b222_strict_loader_admits_clean_axiom() {
+    // The placeholder body the loader uses is
+    // Universe(Concrete(0)) — a closed type at Type_0. Both
+    // V8 #217 (subsingleton) and V8 #220 (body-is-Prop) admit
+    // it under ClosedPropositionOnly regime.
+    let module = module_with_axiom(
+        "lurie_htt",
+        "HTT 6.2.2.7",
+        "strict_witness",
+    );
+    let mut reg = AxiomRegistry::new();
+    let report = load_framework_axioms_strict(&module, &mut reg);
+    assert!(
+        report.is_clean(),
+        "strict loader admits placeholder-bodied axiom: {:?}",
+        report,
+    );
+    assert_eq!(report.registered.len(), 1);
+    assert_eq!(report.soundness_violation_count(), 0);
+}
+
+#[test]
+fn b222_strict_loader_report_has_v8_buckets() {
+    // Default LoadAxiomsReport must expose the new V8 #222
+    // buckets — even when empty.
+    let report = LoadAxiomsReport::default();
+    assert!(report.subsingleton_violations.is_empty());
+    assert!(report.not_prop_violations.is_empty());
+    assert!(report.uip_shape_violations.is_empty());
+    assert_eq!(report.soundness_violation_count(), 0);
+    assert!(report.is_clean());
+}
+
+#[test]
+fn b222_legacy_loader_preserves_pre_v8_behaviour() {
+    // load_framework_axioms() with no regime argument should
+    // delegate to LegacyUnchecked — preserving pre-V8 behaviour
+    // exactly so the existing test corpus + stdlib bring-up
+    // registrations don't break.
+    let module = module_with_axiom(
+        "lurie_htt",
+        "HTT 6.2.2.7",
+        "legacy_witness",
+    );
+    let mut reg = AxiomRegistry::new();
+    let report = load_framework_axioms(&module, &mut reg);
+    assert!(report.is_clean());
+    assert_eq!(report.registered.len(), 1);
+}
+
+#[test]
+fn b222_with_regime_uip_permitted_loader_admits() {
+    // UipPermitted regime skips both subsingleton + body-is-Prop
+    // checks (delegated to the imported UIP framework axiom).
+    let module = module_with_axiom(
+        "test_uip_corpus",
+        "UIP-test",
+        "uip_perm_witness",
+    );
+    let mut reg = AxiomRegistry::new();
+    let report = load_framework_axioms_with_regime(
+        &module,
+        &mut reg,
+        SubsingletonRegime::UipPermitted,
+    );
+    assert!(report.is_clean());
+    assert_eq!(report.registered.len(), 1);
+}
+
+#[test]
+fn b222_strict_loader_aggregates_multiple_modules() {
+    // Two modules each with one axiom — strict loader admits
+    // both, report's `registered` field accumulates across
+    // calls (callers preserve the same registry).
+    let m1 = module_with_axiom("c1", "cite1", "axiom_a");
+    let m2 = module_with_axiom("c2", "cite2", "axiom_b");
+    let mut reg = AxiomRegistry::new();
+    let r1 = load_framework_axioms_strict(&m1, &mut reg);
+    let r2 = load_framework_axioms_strict(&m2, &mut reg);
+    assert!(r1.is_clean());
+    assert!(r2.is_clean());
+    assert_eq!(r1.registered.len(), 1);
+    assert_eq!(r2.registered.len(), 1);
+    assert_eq!(reg.all().len(), 2);
+}
