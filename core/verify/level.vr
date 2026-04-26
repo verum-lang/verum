@@ -61,8 +61,8 @@ fn requires_smt(level: VerificationLevel) -> Bool {
 // of `Static == fallback | Proof == no-fallback`.
 fn allows_runtime_fallback(level: VerificationLevel) -> Bool {
     match level {
-        VerificationLevel::Runtime => true,
-        VerificationLevel::Static => true,
-        VerificationLevel::Proof => false,
+        VerificationLevel.Runtime => true,
+        VerificationLevel.Static => true,
+        VerificationLevel.Proof => false,
     }
 }
