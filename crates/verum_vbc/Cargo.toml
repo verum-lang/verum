@@ -121,3 +121,12 @@ harness = false
 [[test]]
 name = "layout_invariant_verifier_tests"
 required-features = ["codegen"]
+
+# Cross-module type-table consistency tests (#170) compile real stdlib
+# `.vr` files via `compile_module_with_mounts` and assert the unified
+# type table satisfies the global hygiene invariants.  Needs the
+# `codegen` feature for the same reason as the layout verifier above
+# (and additionally needs `verum_parser` to parse the stdlib sources).
+[[test]]
+name = "global_type_table_consistency_tests"
+required-features = ["codegen"]
