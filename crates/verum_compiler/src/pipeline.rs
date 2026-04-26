@@ -10960,6 +10960,10 @@ impl<'s> CompilationPipeline<'s> {
         use verum_ast::ItemKind;
 
         let mut imported = Vec::new();
+        // `imported_paths[i]` is the dotted module path for `imported[i]`
+        // — kept parallel so the transitive-mount-closure pass below can
+        // resolve `super.*` paths against the source module's own path.
+        let mut imported_paths: Vec<String> = Vec::new();
         let mut seen_paths = std::collections::HashSet::new();
 
         // Auto-include essential stdlib modules that provide runtime foundations.
@@ -10981,11 +10985,17 @@ impl<'s> CompilationPipeline<'s> {
             // Time/IO modules use FFI declarations that produce invalid LLVM IR — deferred.
             "core.sys.common",
             "core.sys.raw",            // FFI intrinsic surface (`@intrinsic("time_*_nanos")`,
-                                       // etc.) used by `core.sys.time_ops` and other
-                                       // platform-agnostic clock wrappers. Without this
-                                       // the closure misses it via `super.raw.*` mounts
-                                       // and Instant.now / sleep_ms compile to lenient
-                                       // SKIPs (see #163 super.* resolution gap).
+                                       // etc.) referenced by `sleep_secs` / `wall_clock_ms`
+                                       // bodies in `core.sys.time_ops`.  These functions
+                                       // get registered for codegen even when no user
+                                       // module explicitly mounts time_ops, because they
+                                       // reach the imported set via a transitive path
+                                       // that doesn't go through time_ops's own
+                                       // `mount super.raw.*` — so the closure walker's
+                                       // super.* resolution (added in #163) doesn't
+                                       // suffice on its own here.  See
+                                       // resolve_super_path tests + walker docs for
+                                       // the cases the super.* fix DOES handle.
             "core.sys.darwin.libsystem",
             "core.sys.darwin.thread",
             // Platform TLS / context-slot providers. `core/sys/common.vr`'s
@@ -11091,6 +11101,7 @@ impl<'s> CompilationPipeline<'s> {
             }
             if is_always && !is_excluded && !seen_paths.contains(&path_str) {
                 seen_paths.insert(path_str.clone());
+                imported_paths.push(path_str.clone());
                 imported.push((**module_rc).clone());
             }
         }
@@ -11183,6 +11194,7 @@ impl<'s> CompilationPipeline<'s> {
                             break;
                         }
                         seen_paths.insert(candidate.clone());
+                        imported_paths.push(candidate.clone());
                         imported.push((**module_rc).clone());
 
                         // Also include submodules that may contain the actual implementations.
@@ -11205,7 +11217,8 @@ impl<'s> CompilationPipeline<'s> {
                                     continue;
                                 }
                                 if !seen_paths.contains(&subpath) {
-                                    seen_paths.insert(subpath);
+                                    seen_paths.insert(subpath.clone());
+                                    imported_paths.push(subpath);
                                     imported.push((**submodule).clone());
                                 }
                             }
@@ -11245,8 +11258,16 @@ impl<'s> CompilationPipeline<'s> {
         // untouched (it is a separate AOT-runtime concern).
         loop {
             let before_len = imported.len();
-            let pending_modules: Vec<Module> = imported.clone();
-            for src_mod in &pending_modules {
+            // Snapshot the (path, module) pairs we'll iterate over.  We
+            // need both halves: the module body to walk its `mount`
+            // statements, and its dotted path to anchor `super.*`
+            // resolution.
+            let pending: Vec<(String, Module)> = imported_paths
+                .iter()
+                .zip(imported.iter())
+                .map(|(p, m)| (p.clone(), m.clone()))
+                .collect();
+            for (src_path, src_mod) in &pending {
                 for item in src_mod.items.iter() {
                     let ItemKind::Mount(mount_decl) = &item.kind else { continue };
                     use verum_ast::MountTreeKind;
@@ -11255,7 +11276,7 @@ impl<'s> CompilationPipeline<'s> {
                         MountTreeKind::Glob(p) => p,
                         MountTreeKind::Nested { prefix, .. } => prefix,
                     };
-                    let full_path: String = path
+                    let raw_path: String = path
                         .segments
                         .iter()
                         .filter_map(|seg| match seg {
@@ -11266,9 +11287,19 @@ impl<'s> CompilationPipeline<'s> {
                         })
                         .collect::<Vec<String>>()
                         .join(".");
-                    if full_path.is_empty() {
+                    if raw_path.is_empty() {
                         continue;
                     }
+                    // Resolve `super.*` paths against the source module's
+                    // own dotted path BEFORE the prefix walk.  Without
+                    // this, `mount super.raw.foo` from `core.sys.time_ops`
+                    // would walk `super.raw.foo`, `super.raw`, `super` —
+                    // none of which are keys in `self.modules`, so the
+                    // referenced module never reaches codegen and bodies
+                    // mounting functions from it compile to
+                    // `[lenient] SKIP … undefined function` (#163).
+                    let full_path =
+                        Self::resolve_super_path(src_path, &raw_path);
                     // Walk progressive prefixes so a mount whose full path
                     // is `core.x.y.z.{...}` matches the leaf module or any
                     // ancestor that happens to be indexed directly.
@@ -11286,7 +11317,8 @@ impl<'s> CompilationPipeline<'s> {
                     let try_candidate = |this: &Self,
                                          candidate: &str,
                                          seen_paths: &mut std::collections::HashSet<String>,
-                                         imported: &mut Vec<Module>| {
+                                         imported: &mut Vec<Module>,
+                                         imported_paths: &mut Vec<String>| {
                         if seen_paths.contains(candidate) {
                             return;
                         }
@@ -11305,15 +11337,28 @@ impl<'s> CompilationPipeline<'s> {
                         let key = Text::from(candidate);
                         if let Some(module_rc) = this.modules.get(&key) {
                             seen_paths.insert(candidate.to_string());
+                            imported_paths.push(candidate.to_string());
                             imported.push((**module_rc).clone());
                         }
                     };
                     for cut in (1..=segs.len()).rev() {
                         let candidate = segs[..cut].join(".");
-                        try_candidate(self, &candidate, &mut seen_paths, &mut imported);
+                        try_candidate(
+                            self,
+                            &candidate,
+                            &mut seen_paths,
+                            &mut imported,
+                            &mut imported_paths,
+                        );
                         if !candidate.starts_with("core.") {
                             let prefixed = format!("core.{}", candidate);
-                            try_candidate(self, &prefixed, &mut seen_paths, &mut imported);
+                            try_candidate(
+                                self,
+                                &prefixed,
+                                &mut seen_paths,
+                                &mut imported,
+                                &mut imported_paths,
+                            );
                         }
                     }
                 }
@@ -11324,6 +11369,58 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         imported
+    }
+
+    /// Resolve `super.*` segments at the start of a `mount` path
+    /// against the source module's own dotted path.  Each leading
+    /// `super` strips one trailing component from the source path; the
+    /// remaining mount segments are appended.  Mounts that don't begin
+    /// with `super` are returned unchanged (the path is already
+    /// anchored at the stdlib root or at an absolute prefix the
+    /// progressive-prefix walk handles).
+    ///
+    /// Examples (src = `core.sys.time_ops`):
+    ///   `super.raw.foo`        → `core.sys.raw.foo`
+    ///   `super.super.collections.List` → `core.collections.List` (drops 2)
+    ///   `core.foo.bar`         → `core.foo.bar` (unchanged)
+    ///   `super` (alone)        → `core.sys` (just the parent path)
+    ///
+    /// If the mount path requests more `super` levels than the source
+    /// has components, the original path is returned (the progressive-
+    /// prefix walk will then fail to match anything, which is the
+    /// correct behaviour for a malformed input).
+    fn resolve_super_path(src_path: &str, mount_path: &str) -> String {
+        let mut mount_segs: Vec<&str> = mount_path.split('.').collect();
+        let mut super_count = 0;
+        while mount_segs.first().is_some_and(|&s| s == "super") {
+            super_count += 1;
+            mount_segs.remove(0);
+        }
+        if super_count == 0 {
+            return mount_path.to_string();
+        }
+        let src_segs: Vec<&str> = src_path.split('.').collect();
+        // `super` walks one step *up* — it must leave at least one
+        // remaining component (the parent module) for the result to
+        // anchor against an existing stdlib path.  super_count ==
+        // src_segs.len() walks exactly to the root and yields an empty
+        // parent; super_count > src_segs.len() walks past the root.
+        // Both cases are malformed inputs — return the original mount
+        // path so the progressive-prefix walk tries the literal string
+        // (and fails to match anything, which is the correct answer
+        // for an out-of-range super).
+        if super_count >= src_segs.len() {
+            return mount_path.to_string();
+        }
+        let parent_len = src_segs.len() - super_count;
+        let parent = &src_segs[..parent_len];
+        if mount_segs.is_empty() {
+            return parent.join(".");
+        }
+        let mut out = parent.join(".");
+        out.push('.');
+        out.push_str(&mount_segs.join("."));
+        out
     }
 
     /// Retain stdlib modules that contain compilable function bodies.
@@ -15570,4 +15667,90 @@ impl<'a> verum_ast::visitor::Visitor for MacroExpander<'a> {
 pub fn reset_test_isolation() {
     verum_vbc::reset_global_value_tables();
     verum_types::exhaustiveness::clear_global_cache();
+}
+
+// ---------------------------------------------------------------------------
+// Inline tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod resolve_super_path_tests {
+    use super::CompilationPipeline;
+
+    fn resolve(src: &str, mount: &str) -> String {
+        // resolve_super_path is an associated fn — call it via the type.
+        CompilationPipeline::resolve_super_path(src, mount)
+    }
+
+    #[test]
+    fn no_super_returns_path_unchanged() {
+        assert_eq!(resolve("core.sys.time_ops", "core.foo.bar"), "core.foo.bar");
+    }
+
+    #[test]
+    fn no_super_short_path_unchanged() {
+        assert_eq!(resolve("core.sys.time_ops", "base.memory"), "base.memory");
+    }
+
+    #[test]
+    fn single_super_resolves_to_sibling() {
+        // The motivating case for #163: core.sys.time_ops mounts
+        // super.raw → core.sys.raw.
+        assert_eq!(resolve("core.sys.time_ops", "super.raw"), "core.sys.raw");
+    }
+
+    #[test]
+    fn single_super_with_subpath_resolves_through_sibling() {
+        assert_eq!(
+            resolve("core.sys.time_ops", "super.raw.foo"),
+            "core.sys.raw.foo",
+        );
+    }
+
+    #[test]
+    fn double_super_drops_two_components() {
+        assert_eq!(
+            resolve("core.sys.time_ops", "super.super.collections.List"),
+            "core.collections.List",
+        );
+    }
+
+    #[test]
+    fn lone_super_yields_parent_path() {
+        // `mount super` (no subpath) refers to the parent module
+        // itself — uncommon but legal grammar.
+        assert_eq!(resolve("core.sys.time_ops", "super"), "core.sys");
+    }
+
+    #[test]
+    fn super_at_root_returns_input_unchanged() {
+        // `super` from a top-level `core` module would walk past the
+        // root.  We don't try to invent a sentinel — return the path
+        // as-is so the progressive-prefix walk fails to match (correct
+        // behaviour for malformed input).
+        assert_eq!(resolve("core", "super.foo"), "super.foo");
+    }
+
+    #[test]
+    fn excessive_super_returns_input_unchanged() {
+        // 4-super-deep from `core.sys.time_ops` (3 components) walks
+        // past the root.
+        assert_eq!(
+            resolve("core.sys.time_ops", "super.super.super.super.x"),
+            "super.super.super.super.x",
+        );
+    }
+
+    #[test]
+    fn exactly_root_super_returns_input_unchanged() {
+        // 3-super-deep from `core.sys.time_ops` (3 components) walks
+        // exactly to the root and yields an empty parent — also
+        // malformed; treat as out-of-range.  Returning "x" verbatim
+        // would let it match unrelated top-level modules in the
+        // progressive-prefix walk, which is wrong.
+        assert_eq!(
+            resolve("core.sys.time_ops", "super.super.super.x"),
+            "super.super.super.x",
+        );
+    }
 }
