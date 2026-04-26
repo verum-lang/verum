@@ -3187,6 +3187,27 @@ impl VbcCodegen {
         self.register_stdlib_intrinsics();
         self.register_runtime_io_functions();
 
+        // #107 — module-level @cfg gating. If the AST module carries
+        // attributes (e.g., `module.attributes` populated by the parser
+        // from a file-scope `@cfg(target_os = "windows")` placed before
+        // the first item), evaluate them once. If they don't match the
+        // active build cfg, return an empty VbcModule — every item in
+        // this file is implicitly conditional on the module-level cfg.
+        //
+        // This complements the per-item check at `should_compile_item`
+        // for cases where the @cfg appears at file scope (above the
+        // module's first item) rather than on individual declarations.
+        // Without this, on macOS the entire `core/sys/windows/winsock2.vr`
+        // compiles its `public fn` bodies, emitting `_socket`/`_bind`/...
+        // symbols that shadow libSystem's BSD socket API and SIGABRT
+        // when called via the wrappers from `core/net/tcp.vr`.
+        if !module.attributes.is_empty()
+            && !self.cfg_evaluator.should_include(&module.attributes)
+        {
+            // Module gated out — produce an empty VbcModule.
+            return self.build_module();
+        }
+
         // Pass 1: Collect protocol definitions first (for default method inheritance)
         // This ensures protocols with default methods are registered before impl blocks
         // that implement them are processed. Without this, protocol default methods
