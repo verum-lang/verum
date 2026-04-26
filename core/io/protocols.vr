@@ -15,6 +15,7 @@
 
 module core.io.protocols;
 mount core.*;
+mount core.sys.common.{OSError};
 
 // =============================================================================
 // I/O Error
@@ -95,6 +96,13 @@ implement StreamError {
     // Create from errno (alias for from_raw_os_error).
     public fn from_errno(errno: Int) -> StreamError {
         StreamError.from_raw_os_error(errno)
+    }
+
+    // Create from a libc OSError. Used by net stack wrappers as
+    // `socket(...).map_err(IoError.from_os)?`. Works on the alias
+    // `IoError = StreamError`, so callers reach this via either name.
+    public fn from_os(err: OSError) -> StreamError {
+        StreamError.from_raw_os_error(err.code)
     }
 
     // Create an "Other" error with message (convenience constructor).
