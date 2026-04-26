@@ -8614,26 +8614,6 @@ impl VbcCodegen {
             .map(|s| s.as_str())
     }
 
-    /// Extracts a type name from an AST Type node, preserving generic parameters.
-    /// Returns the full type name (e.g., "Point", "Int", "List<Token>").
-    /// Return the base (un-parameterised) type name of an AST type annotation,
-    /// suitable as a disambiguation hint for bare-variant resolution.
-    ///
-    /// Examples:
-    ///   `Maybe<Int>`       → `Some("Maybe")`
-    ///   `Result<T, E>`     → `Some("Result")`
-    ///   `&VfsErrorKind`    → `Some("VfsErrorKind")`
-    ///   `(Int, Int)`       → `None` (tuple — no parent enum)
-    ///   `Int`              → `Some("Int")` (primitive — safe, won't collide with variants)
-    pub(crate) fn type_name_base_for_annotation(ty: &verum_ast::ty::Type) -> Option<String> {
-        let name = Self::extract_type_name_from_ast(ty);
-        let base = name.split('<').next()?.trim();
-        if base.is_empty() {
-            return None;
-        }
-        Some(base.to_string())
-    }
-
     /// Generic parameters are preserved so that element types can be extracted
     /// later via `extract_element_type` (e.g., "List<Token>" → "Token").
     fn extract_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
