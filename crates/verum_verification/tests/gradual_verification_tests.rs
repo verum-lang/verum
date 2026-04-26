@@ -563,7 +563,7 @@ fn test_verification_pipeline() {
     };
 
     // Create and run the verification pipeline
-    let mut pipeline = VerificationPipeline::default_pipeline();
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline();
     let mut ctx = VerificationContext::new();
 
     // Run all verification passes on the module
