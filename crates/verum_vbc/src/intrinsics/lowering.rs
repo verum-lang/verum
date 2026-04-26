@@ -3513,27 +3513,6 @@ impl IntrinsicLowering {
         }
     }
 
-    /// Lower math call to library function (deprecated - use LLVM intrinsics instead).
-    #[allow(dead_code)]
-    fn lower_math_call(
-        &mut self,
-        func_name: &str,
-        operands: &[usize],
-        result_type: MlirType,
-    ) -> Option<usize> {
-        self.emit(MlirOp {
-            name: "llvm.call".to_string(),
-            attrs: vec![
-                MlirAttr {
-                    name: "callee".to_string(),
-                    value: MlirAttrValue::String(func_name.to_string()),
-                },
-            ],
-            result_types: vec![result_type],
-            operands: operands.to_vec(),
-            region: None,
-        })
-    }
 
     /// Lower to LLVM intrinsic (no libc dependency).
     /// LLVM will either inline the implementation or use hardware instructions.
@@ -3552,73 +3531,6 @@ impl IntrinsicLowering {
         })
     }
 
-    /// Lower unary math operation (reserved for GPU targets using MLIR math dialect).
-    #[allow(dead_code)]
-    fn lower_math_unary(
-        &mut self,
-        op_name: &str,
-        operands: &[usize],
-        result_type: MlirType,
-    ) -> Option<usize> {
-        self.emit(MlirOp {
-            name: op_name.to_string(),
-            attrs: vec![],
-            result_types: vec![result_type],
-            operands: operands.to_vec(),
-            region: None,
-        })
-    }
-
-    /// Lower binary math operation (reserved for GPU targets using MLIR math dialect).
-    #[allow(dead_code)]
-    fn lower_math_binary(
-        &mut self,
-        op_name: &str,
-        operands: &[usize],
-        result_type: MlirType,
-    ) -> Option<usize> {
-        self.emit(MlirOp {
-            name: op_name.to_string(),
-            attrs: vec![],
-            result_types: vec![result_type],
-            operands: operands.to_vec(),
-            region: None,
-        })
-    }
-
-    /// Lower ternary math operation (reserved for GPU targets using MLIR math dialect).
-    #[allow(dead_code)]
-    fn lower_math_ternary(
-        &mut self,
-        op_name: &str,
-        operands: &[usize],
-        result_type: MlirType,
-    ) -> Option<usize> {
-        self.emit(MlirOp {
-            name: op_name.to_string(),
-            attrs: vec![],
-            result_types: vec![result_type],
-            operands: operands.to_vec(),
-            region: None,
-        })
-    }
-
-    /// Lower char operation to library call (DEPRECATED - use inline ASCII ops).
-    #[allow(dead_code)]
-    fn lower_char_call(&mut self, func_name: &str, operands: &[usize]) -> Option<usize> {
-        self.emit(MlirOp {
-            name: "llvm.call".to_string(),
-            attrs: vec![
-                MlirAttr {
-                    name: "callee".to_string(),
-                    value: MlirAttrValue::String(func_name.to_string()),
-                },
-            ],
-            result_types: vec![MlirType::I32],
-            operands: operands.to_vec(),
-            region: None,
-        })
-    }
 
     // ============================================================================
     // NO LIBC: Inline ASCII character operations
