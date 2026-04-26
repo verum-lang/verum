@@ -881,6 +881,12 @@ fn glue_rejects_non_universe_carrier() {
 }
 
 /// `elim e motive cases : motive e` — shape-level Elim rule.
+///
+/// V1 (#207-adjacent, this file's commit): Elim now requires
+/// motive's TYPE be a Π and scrutinee's type to match the Π's
+/// domain. Result remains the syntactic `App(motive, scrutinee)`
+/// (β-reduction is downstream's job; returning the codomain would
+/// give the type's TYPE — i.e., a universe — instead).
 #[test]
 fn elim_types_to_motive_applied_to_scrutinee() {
     let mut reg = AxiomRegistry::new();
@@ -904,6 +910,51 @@ fn elim_types_to_motive_applied_to_scrutinee() {
         }
         _ => panic!("expected App (motive scrutinee)"),
     }
+}
+
+/// V1 — Elim with a non-Π-typed motive must reject. Pre-V1 the
+/// kernel happily returned `App(42, scrutinee)` syntactically.
+#[test]
+fn elim_rejects_non_function_motive() {
+    let mut reg = AxiomRegistry::new();
+    let tt = tt_axiom(&mut reg);
+    // Non-function motive: a bare `tt` (type Unit, not a Π).
+    let bad_motive = tt.clone();
+    let e = CoreTerm::Elim {
+        scrutinee: Heap::new(tt),
+        motive: Heap::new(bad_motive),
+        cases: List::new(),
+    };
+    let res = infer(&Context::new(), &e, &reg);
+    assert!(matches!(
+        res,
+        Err(verum_kernel::KernelError::NotAFunction(_))
+    ));
+}
+
+/// V1 — Elim where the scrutinee's type doesn't match the
+/// motive's domain must reject. Pre-V1 silently accepted.
+#[test]
+fn elim_rejects_scrutinee_domain_mismatch() {
+    use verum_kernel::{CoreTerm, UniverseLevel};
+    let mut reg = AxiomRegistry::new();
+    let tt = tt_axiom(&mut reg);
+    // motive : Type(0) → Type(0) — but scrutinee is `tt : Unit`.
+    let motive = CoreTerm::Lam {
+        binder: Text::from("X"),
+        domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+        body: Heap::new(CoreTerm::Var(Text::from("X"))),
+    };
+    let e = CoreTerm::Elim {
+        scrutinee: Heap::new(tt),
+        motive: Heap::new(motive),
+        cases: List::new(),
+    };
+    let res = infer(&Context::new(), &e, &reg);
+    assert!(matches!(
+        res,
+        Err(verum_kernel::KernelError::TypeMismatch { .. })
+    ));
 }
 
 /// `Path<Unit>(tt, someBool)` — endpoint type mismatch — rejected.
