@@ -5,3 +5,112 @@
 
 *No recent activity*
 </claude-mem-context>
+
+# Stdlib hygiene guardrails
+
+Six integration test files in this directory pin different invariants of
+the stdlib loading + codegen pipeline.  Each guards a specific *class of
+silent regression* — the kind where a failure produces a far-removed
+runtime panic rather than a compile-time error.  The class names below
+are referenced from commit messages and from each test file's
+module-level documentation.
+
+## Test files
+
+| File | Class | What it pins |
+|---|---|---|
+| `stdlib_unique_type_names.rs` | type-name collision (cfg-aware) | Every public stdlib type has a unique simple name *for any single build configuration*.  `@cfg(target_os/target_arch/runtime)` mutually-exclusive variants are correctly admitted.  Contains 17 cfg parser/overlap unit tests + 1 integration test. |
+| `stdlib_lenient_skip_baseline.rs` | silent codegen-skip | Seven fixtures across four stdlib subgraphs (SQLite L0..L4, async runtime, text formatting, I/O protocols) assert zero `[lenient] SKIP` warnings during stdlib loading.  Catches missing-function / undefined-variant / arity-mismatch regressions. |
+| `stdlib_simple_variant_alias_preservation.rs` | simple-name alias loss | The bare `None` / `Some` / `Ok` / `Err` aliases stay registered after stdlib loading even when other stdlib types declare colliding variant names.  Pins the `prefer_existing_functions` save/restore guard. |
+| `stdlib_arity_disambiguation.rs` | overload-by-arity loss | FFI builtins that share a simple name with a higher-level wrapper of different arity (`write` 2-arg vs 3-arg, `pread`, `send`, …) keep BOTH `name#arity` registrations.  Pins the arity-suffix branch of `register_function`. |
+| `vbc_codegen_determinism.rs` | non-deterministic codegen | Two-process invariant: same input + same hasher seed → byte-identical VBC bytecode.  Catches HashMap-iteration-order leaks. |
+| `sqlite_native_naming_hygiene.rs` | SQLite catalogue conventions | Domain-specific naming patterns under `core/database/sqlite/native/`. |
+
+## Shared support
+
+`stdlib_support/mod.rs` provides shared helpers used by the three
+vtest-driven tests (locating the workspace root, locating the built
+`vtest` binary, capturing subprocess stdout/stderr).  Each test file
+opts in with `mod stdlib_support;`.
+
+## Vtest-driven tests are `#[ignore]` by default
+
+The three tests that drive a `vtest` subprocess
+(`stdlib_lenient_skip_baseline`, `stdlib_simple_variant_alias_preservation`,
+`stdlib_arity_disambiguation`) are gated with
+`#[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]`.
+
+They require a built `vtest` binary to run.  Local invocation:
+
+```sh
+cargo build -p vtest --release
+cargo test -p verum_compiler --test stdlib_lenient_skip_baseline -- --ignored
+```
+
+CI is expected to build vtest before running these.  The `#[ignore]`
+gate prevents `cargo test` from failing in environments without vtest
+(e.g. `cargo check` smoke runs).
+
+The `stdlib_unique_type_names` test does NOT depend on vtest — it scans
+`core/` source files directly — and runs by default.
+
+## Vcs-presence policy
+
+The lenient-skip baseline tests have a workspace-level vcs-presence
+policy:
+
+  * `vcs/specs/` exists  → every fixture MUST exist; missing one panics.
+  * `vcs/specs/` absent  → every vcs-pointing fixture skips with a
+    one-line `eprintln!` notice.
+
+This prevents the silent-coverage-erasure failure mode where a spec
+gets moved or deleted and the test stays green.  See
+`stdlib_lenient_skip_baseline.rs`'s `vcs_specs_present()` helper.
+
+## Why these tests exist (history)
+
+Every test pins a class of bug that surfaced as a far-removed runtime
+panic in the past:
+
+  * **Type-name collisions** (#160, #162) — three modules each declared
+    `public type LockKind`; whichever loaded second had its variants
+    silently skipped.  The ratchet baseline went from 315 entries in
+    `BASELINE_DUPLICATES` to 0; the test was then simplified to a hard
+    invariant + made @cfg-aware.
+
+  * **Silent codegen-skip** (#158, #159, #161) — three sub-classes
+    (cross-type variant collision, missing function, arity mismatch)
+    all surface as `[lenient] SKIP …` warnings on stderr.  The
+    baseline test pins zero such warnings on a fixed set of fixtures.
+
+  * **Simple `None` alias loss** (#158) — processing a stdlib type
+    whose variant set includes `None` (RecoveryStrategy, BackoffStrategy,
+    LockKind, …) would unregister the bare `None` alias if a
+    save/restore guard was missing.  Single-fixture test pins it.
+
+  * **Arity-suffix loss** (#161) — `register_function`'s short-circuit
+    in `prefer_existing_functions` mode discarded multi-arity simple
+    names.  Single-fixture test pins it.
+
+  * **Closure-walker `super.*` resolution** (#163) — the transitive
+    mount-closure pass treated `super` as a literal segment and missed
+    sibling modules.  `resolve_super_path` was added to
+    `pipeline.rs::collect_imported_stdlib_modules`; its 9 unit tests
+    live inline in `pipeline.rs::resolve_super_path_tests`.
+
+## Adding a new fixture
+
+For a new lenient-skip baseline fixture:
+
+```rust
+#[test]
+#[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
+fn stdlib_loading_emits_no_lenient_skips_NEW_NAME() {
+    let target = workspace_root().join("vcs/specs/.../path/to.vr");
+    assert_no_lenient_skips("scenario-name", &target);
+}
+```
+
+The `assert_no_lenient_skips` helper handles vcs-presence policy +
+collection + assertion + failure formatting.  No more boilerplate
+required.
