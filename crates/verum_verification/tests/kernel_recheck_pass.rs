@@ -122,8 +122,8 @@ fn module_with(functions: Vec<FunctionDecl>) -> Module {
 }
 
 #[test]
-fn default_pipeline_includes_kernel_recheck() {
-    // The default pipeline now runs 5 passes:
+fn static_analysis_pipeline_includes_kernel_recheck() {
+    // The static-analysis pipeline now runs 5 passes:
     //   [0] LevelInferencePass
     //   [1] KernelRecheckPass
     //   [2] HygieneRecheckPass        (#190)
@@ -134,7 +134,7 @@ fn default_pipeline_includes_kernel_recheck() {
         vec![Type::int(span())],
         Maybe::Some(Type::int(span())),
     )]);
-    let mut pipeline = VerificationPipeline::default_pipeline();
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline();
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
     assert_eq!(results.len(), 5, "default pipeline should have 5 passes");
@@ -250,7 +250,7 @@ fn pipeline_fail_fast_halts_subsequent_passes_on_kernel_failure() {
         vec![refined],
         Maybe::Some(Type::int(span())),
     )]);
-    let mut pipeline = VerificationPipeline::default_pipeline();
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline();
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
     assert_eq!(
@@ -278,7 +278,7 @@ fn pipeline_runs_all_passes_when_module_clean() {
         vec![Type::int(span())],
         Maybe::Some(Type::int(span())),
     )]);
-    let mut pipeline = VerificationPipeline::default_pipeline();
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline();
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
     assert_eq!(results.len(), 5, "clean module runs all 5 passes");
@@ -586,7 +586,7 @@ fn kernel_recheck_pass_descends_into_nested_module_items() {
 }
 
 #[test]
-fn default_pipeline_kernel_recheck_result_visible() {
+fn static_analysis_pipeline_kernel_recheck_result_visible() {
     // The KernelRecheckPass result is the second entry in the
     // run_all output. On modal overshoot the second result is
     // a failure with non-empty costs.
@@ -598,7 +598,7 @@ fn default_pipeline_kernel_recheck_result_visible() {
         vec![refined],
         Maybe::Some(Type::int(span())),
     )]);
-    let mut pipeline = VerificationPipeline::default_pipeline();
+    let mut pipeline = VerificationPipeline::static_analysis_pipeline();
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
     // [0]=LevelInference, [1]=KernelRecheck, [2]=BoundaryDetection, [3]=TransitionRecommendation
