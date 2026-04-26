@@ -162,19 +162,41 @@ fallible variants; new callers should prefer the fallible surface.
 
 ## Test Coverage
 
-- 908 unit tests in the crate (all passing as of #177 close-out)
-- 25 intrinsics test files in `vcs/specs/stdlib/sys/intrinsics/`
-- 6 context system tests in `vcs/specs/L2-standard/contexts/runtime/`
+The crate ships two unit-test surfaces, gated by the `codegen` feature:
 
-The "Known Test Failures (Pre-existing)" section that previously
-lived here listed five tests (`cbgr_heap::test_cbgr_heap_alloc`,
-`cbgr_heap::test_cbgr_heap_generation`, `shape::test_constraint_verification`,
-`value::test_generator_roundtrip`, `value::test_generator_value_large_id`)
-as known failures.  All five have since been fixed and the section
-has been removed; `cargo test -p verum_vbc` produces zero failures.
-The CI gate is now: any unit-test failure in this crate blocks the
-PR.  No new "known failure" should be documented here without an
-explicit tracking task and a deadline.
+| Command | Tests | Status |
+|---------|-------|--------|
+| `cargo test -p verum_vbc --lib` (default features) | 908 | all passing |
+| `cargo test -p verum_vbc --lib --features codegen` | 1546 | 1542 passing, 4 pre-existing failures |
+
+The default surface covers bytecode IR, interpreter, value model, intrinsic
+dispatch, monomorphization, and serialization.  The `--features codegen` surface
+adds the AST-to-VBC code-generation pipeline (gated because it pulls in
+`verum_ast` / `verum_lexer` / `verum_parser` as optional deps).
+
+External fixtures: 25 intrinsics test files in `vcs/specs/stdlib/sys/intrinsics/`
+and 6 context system tests in `vcs/specs/L2-standard/contexts/runtime/`.
+
+### Known failures under `--features codegen`
+
+Four `codegen::test_params::test_compile_stdlib_*` fixtures
+(`async_nursery`, `async_executor`, `math_linalg`, `net_udp`) currently
+fail with `unsupported expression: standalone super/crate/relative`.
+The root cause is the `super.<module>.<fn>()` call form in stdlib
+sources where a single-segment `Super`/`Cog`/`Relative` reaches
+`compile_path_simple` instead of the multi-segment
+`compile_qualified_path` branch.  Tracking task: see `#178` (module
+path semantic alignment).  These are NOT regressions of this session's
+work — they pre-date #168 / #166 close-out.
+
+The earlier "Known Test Failures (Pre-existing)" section that listed
+five `cbgr_heap` / `shape` / `value` failures has been removed; all
+five were fixed before #177 close-out.
+
+The CI gate is: any default-feature unit-test failure blocks the PR;
+the four `--features codegen` failures above block once `#178` is
+resolved.  No new "known failure" should be documented here without
+an explicit tracking task.
 
 ## Performance Targets
 
