@@ -349,13 +349,48 @@ pub fn infer(
 
         // Elim: an induction-principle application
         // `elim e motive cases`. The result inhabits `motive` applied
-        // to the scrutinee. At bring-up we infer the motive and apply
-        // it syntactically to the scrutinee, leaving the per-case
-        // well-formedness check for the dedicated Elim-rule pass.
+        // to the scrutinee.
+        //
+        // V0 (bring-up — pre-V8): only inferred motive's type, then
+        // returned `App(motive, scrutinee)` syntactically without
+        // verifying motive was a function or that scrutinee fit its
+        // domain. Soundness-leaky: an Elim with motive `42` (Int) or
+        // a motive whose domain is `Bool` and a scrutinee of type
+        // `Int` would return a malformed result that the App rule
+        // surfaced only on later use.
+        //
+        // V1 (this revision) — adopt the same *well-formedness*
+        // check the App rule does:
+        //
+        //   1. motive's TYPE must be a Π (motive is a function from
+        //      some domain to some universe).
+        //   2. scrutinee's type must structurally match the Π's
+        //      domain.
+        //
+        // The *result type* is still the syntactic application
+        // `motive scrutinee` — semantically motive(scrutinee), with
+        // β-reduction left to downstream definitional equality.
+        // Returning the codomain[binder := scrutinee] would be the
+        // type's TYPE (i.e., universe), not the type itself; the
+        // App-typing rule on this returned term will compute
+        // codomain[binder := scrutinee] when required. Per-case
+        // exhaustiveness + typing remains the dedicated Elim-rule
+        // pass's job.
         CoreTerm::Elim { scrutinee, motive, .. } => {
-            let _motive_ty = infer(ctx, motive, axioms)?;
-            // Result = motive applied to scrutinee.
-            Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
+            let motive_ty = infer(ctx, motive, axioms)?;
+            match motive_ty {
+                CoreTerm::Pi { domain, .. } => {
+                    let scrut_ty = infer(ctx, scrutinee, axioms)?;
+                    if !structural_eq(&scrut_ty, &domain) {
+                        return Err(KernelError::TypeMismatch {
+                            expected: shape_of(&domain),
+                            actual: shape_of(&scrut_ty),
+                        });
+                    }
+                    Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
+                }
+                other => Err(KernelError::NotAFunction(shape_of(&other))),
+            }
         }
 
         // An `SmtProof` node is replayed via `replay_smt_cert` at type
