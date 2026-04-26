@@ -11,16 +11,12 @@
 
 #![cfg(test)]
 
-use std::sync::Arc;
-
 use verum_ast::{FileId, Module};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
 use crate::codegen::{CodegenConfig, VbcCodegen};
-use crate::interpreter::{Interpreter, InterpreterResult};
 use crate::module::VbcModule;
-use crate::value::Value;
 
 // ============================================================================
 // Helper Functions for E2E Testing
@@ -44,136 +40,6 @@ fn compile_module(module: &Module) -> Result<VbcModule, String> {
     let mut codegen = VbcCodegen::with_config(config);
 
     codegen.compile_module(module).map_err(|e| format!("{}", e))
-}
-
-/// Creates an executable VBC module from the compiled module.
-///
-/// This function takes the compiled VbcModule and prepares it for execution
-/// by encoding the instructions into bytecode.
-///
-/// **Test infrastructure**: held for the future expansion of these
-/// `tests_e2e` fixtures from parse-only checks (`assert_parses`) to
-/// full execution checks (`assert_int_result` / `assert_float_result`
-/// / etc.).  All seven helpers form a chain
-/// (`assert_*_result` → `compile_and_run` → `prepare_executable` /
-/// `execute_main`); deleting any one breaks the chain for the future
-/// upgrade.  `#[allow(dead_code)]` documents the intent without
-/// silencing the rest of the warning system.
-#[allow(dead_code)]
-fn prepare_executable(compiled: VbcModule) -> Arc<VbcModule> {
-    // The compiled module already has the instructions stored.
-    // We need to encode them to bytecode for the interpreter.
-    //
-    // Note: The VbcCodegen currently stores instructions in functions,
-    // but for execution we need them encoded in the bytecode section.
-    // Since the codegen doesn't yet populate bytecode directly,
-    // we'll use the module as-is and rely on tests that work with
-    // instruction-level execution.
-    Arc::new(compiled)
-}
-
-/// Executes the main function in a VBC module and returns the result.
-#[allow(dead_code)]
-fn execute_main(module: Arc<VbcModule>) -> InterpreterResult<Value> {
-    let mut interp = Interpreter::new(module);
-    interp.run_main()
-}
-
-/// Parses, compiles, and executes Verum source code, returning the result value.
-///
-/// This is the main helper for e2e tests. Returns the execution result or an error.
-#[allow(dead_code)]
-fn compile_and_run(source: &str) -> Result<Value, String> {
-    // Step 1: Parse
-    let module = parse_source(source)?;
-
-    // Step 2: Compile
-    let vbc_module = compile_module(&module)?;
-
-    // Step 3: Prepare for execution
-    let executable = prepare_executable(vbc_module);
-
-    // Step 4: Execute
-    execute_main(executable).map_err(|e| format!("Execution error: {}", e))
-}
-
-/// Helper to assert that a source compiles and returns an integer value.
-#[allow(dead_code)]
-fn assert_int_result(source: &str, expected: i64) {
-    match compile_and_run(source) {
-        Ok(result) => {
-            match result.try_as_i64() {
-                Some(actual) => {
-                    assert_eq!(actual, expected, "Expected {}, got {}", expected, actual);
-                }
-                None => {
-                    panic!("Expected Int({}), got {:?}", expected, result);
-                }
-            }
-        }
-        Err(e) => {
-            panic!("Compilation/execution failed:\n{}\n\nSource:\n{}", e, source);
-        }
-    }
-}
-
-/// Helper to assert that a source compiles and returns a float value.
-#[allow(dead_code)]
-fn assert_float_result(source: &str, expected: f64, tolerance: f64) {
-    match compile_and_run(source) {
-        Ok(result) => {
-            match result.try_as_f64() {
-                Some(actual) => {
-                    assert!(
-                        (actual - expected).abs() < tolerance,
-                        "Expected {} (tolerance {}), got {}",
-                        expected,
-                        tolerance,
-                        actual
-                    );
-                }
-                None => {
-                    panic!("Expected Float({}), got {:?}", expected, result);
-                }
-            }
-        }
-        Err(e) => {
-            panic!("Compilation/execution failed:\n{}\n\nSource:\n{}", e, source);
-        }
-    }
-}
-
-/// Helper to assert that a source compiles and returns a boolean value.
-#[allow(dead_code)]
-fn assert_bool_result(source: &str, expected: bool) {
-    match compile_and_run(source) {
-        Ok(result) => {
-            match result.try_as_bool() {
-                Some(actual) => {
-                    assert_eq!(actual, expected, "Expected {}, got {}", expected, actual);
-                }
-                None => {
-                    panic!("Expected Bool({}), got {:?}", expected, result);
-                }
-            }
-        }
-        Err(e) => {
-            panic!("Compilation/execution failed:\n{}\n\nSource:\n{}", e, source);
-        }
-    }
-}
-
-/// Helper to assert that a source compiles and returns unit.
-#[allow(dead_code)]
-fn assert_unit_result(source: &str) {
-    match compile_and_run(source) {
-        Ok(result) => {
-            assert!(result.is_unit(), "Expected Unit, got {:?}", result);
-        }
-        Err(e) => {
-            panic!("Compilation/execution failed:\n{}\n\nSource:\n{}", e, source);
-        }
-    }
 }
 
 /// Helper to assert that parsing a source succeeds.
