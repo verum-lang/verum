@@ -2176,10 +2176,14 @@ impl VbcCodegen {
         // Check `Item.attributes` (the outer attribute list — populated
         // by the parser when no inner decl carries attributes, e.g.
         // for `mount` and `module` items).
-        if !item.attributes.is_empty()
-            && !self.cfg_evaluator.should_include(&item.attributes)
-        {
-            return false;
+        if !item.attributes.is_empty() {
+            let (include, failures) = self
+                .cfg_evaluator
+                .should_include_with_failures(&item.attributes);
+            self.warn_cfg_parse_failures(&failures, item, "Item");
+            if !include {
+                return false;
+            }
         }
 
         // Critical fix (#170 / #181): the `verum_fast_parser` puts the
@@ -2195,17 +2199,25 @@ impl VbcCodegen {
         // Walk the inner decl's attributes when present.
         match &item.kind {
             ItemKind::Type(type_decl) => {
-                if !type_decl.attributes.is_empty()
-                    && !self.cfg_evaluator.should_include(&type_decl.attributes)
-                {
-                    return false;
+                if !type_decl.attributes.is_empty() {
+                    let (include, failures) = self
+                        .cfg_evaluator
+                        .should_include_with_failures(&type_decl.attributes);
+                    self.warn_cfg_parse_failures(&failures, item, "TypeDecl");
+                    if !include {
+                        return false;
+                    }
                 }
             }
             ItemKind::Function(func) => {
-                if !func.attributes.is_empty()
-                    && !self.cfg_evaluator.should_include(&func.attributes)
-                {
-                    return false;
+                if !func.attributes.is_empty() {
+                    let (include, failures) = self
+                        .cfg_evaluator
+                        .should_include_with_failures(&func.attributes);
+                    self.warn_cfg_parse_failures(&failures, item, "Function");
+                    if !include {
+                        return false;
+                    }
                 }
             }
             // ImplDecl carries its attributes in `Item.attributes`, not
@@ -2214,6 +2226,48 @@ impl VbcCodegen {
         }
 
         true
+    }
+
+    /// Emits a `tracing::warn!` for each `@cfg` attribute whose
+    /// predicate failed to parse cleanly.  These attributes are
+    /// silently ignored by `cfg_evaluator.should_include` (fail-open
+    /// for forward-compatibility — see `crates/verum_ast/src/cfg.rs`),
+    /// so without this surface they go unnoticed: a typo in
+    /// `@cfg(target_oss = "linux")` (note the double-s) compiles
+    /// cleanly on every platform because the predicate is
+    /// unparseable, returns `true` by fall-through, and the item is
+    /// included unconditionally.
+    ///
+    /// `site` identifies whether the attribute lives on the `Item`
+    /// itself or on the inner decl (`TypeDecl` / `Function`) — useful
+    /// for the developer to locate the failure source.
+    fn warn_cfg_parse_failures(
+        &self,
+        failures: &[&verum_ast::attr::Attribute],
+        item: &Item,
+        site: &str,
+    ) {
+        if failures.is_empty() {
+            return;
+        }
+        let item_name = match &item.kind {
+            ItemKind::Type(td) => td.name.name.to_string(),
+            ItemKind::Function(f) => f.name.name.to_string(),
+            ItemKind::Impl(_) => "<impl block>".to_string(),
+            ItemKind::Mount(_) => "<mount>".to_string(),
+            ItemKind::Module(md) => md.name.name.to_string(),
+            _ => "<item>".to_string(),
+        };
+        for attr in failures {
+            tracing::warn!(
+                "[cfg] @{}(...) attribute on {site} `{}` could not be parsed; \
+                 the item is included by fall-through (fail-open).  Check the \
+                 predicate syntax: identifier (`unix`), key-value \
+                 (`target_os = \"linux\"`), or `all`/`any`/`not` combinator.",
+                attr.name.as_str(),
+                item_name,
+            );
+        }
     }
 
     /// Extracts the intrinsic name from function attributes.
