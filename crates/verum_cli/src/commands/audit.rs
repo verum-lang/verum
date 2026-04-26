@@ -508,7 +508,6 @@ use std::path::{Path, PathBuf};
 
 use verum_ast::attr::FrameworkAttr;
 use verum_ast::decl::ItemKind;
-use verum_ast::Item;
 use verum_common::Maybe;
 use verum_compiler::pipeline::CompilationPipeline;
 use verum_compiler::session::Session;
@@ -2258,7 +2257,7 @@ fn print_hygiene_report_json(
 use std::collections::BTreeSet;
 use verum_ast::attr::Owl2Semantics;
 use crate::commands::owl2::{
-    collect_owl2_attrs, Owl2Entity, Owl2EntityKind, Owl2Graph,
+    collect_owl2_attrs, Owl2EntityKind, Owl2Graph,
 };
 
 pub fn audit_owl2_classify() -> Result<()> {

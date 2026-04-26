@@ -60,8 +60,8 @@ struct Cli {
     /// pre-fix. The kernel constant `verum_kernel::VVA_VERSION`
     /// is the single source of truth — bump on every VVA-N
     /// kernel-rule acceptance.
-    #[clap(long = "vuva-version")]
-    vuva_version: bool,
+    #[clap(long = "vva-version")]
+    vva_version: bool,
 
     #[clap(short, long, global = true)]
     quiet: bool,
@@ -1222,12 +1222,12 @@ fn main() {
 fn main_inner() {
     let cli = Cli::parse();
 
-    // B14 (#212): --vuva-version short-circuit. Print the kernel
+    // B14 (#212): --vva-version short-circuit. Print the kernel
     // version stamp and exit cleanly without dispatching a
     // subcommand. Tooling integrations (CI, certificate emitters,
     // cross-tool replay matrix) read this single line as their
     // VVA-version source of truth.
-    if cli.vuva_version {
+    if cli.vva_version {
         println!("{}", verum_kernel::VVA_VERSION);
         process::exit(0);
     }
@@ -1321,14 +1321,14 @@ fn resolve_path(path: Option<&Text>) -> Result<PathTarget> {
 }
 
 fn run_command(cli: Cli) -> Result<()> {
-    // After --vuva-version short-circuit in main_inner, command is
+    // After --vva-version short-circuit in main_inner, command is
     // required. Anything reaching here without one is a clap mis-
     // configuration; surface it as a user error rather than panic.
     let command = match cli.command {
         Some(c) => c,
         None => {
             return Err(CliError::InvalidArgument(
-                "no subcommand given (run with --help or --vuva-version)".into(),
+                "no subcommand given (run with --help or --vva-version)".into(),
             ));
         }
     };

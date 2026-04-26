@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §11.3 Phase 5 E2 — α ⊣ ε adjunction smoke test.
+// VVA §11.3 Phase 5 E2 — α ⊣ ε adjunction smoke test.
 //
 // Each Articulation α auto-induces a syntactic self-enactment ε(α)
 // via Diakrisis 108.T; the inverse `alpha_of` extracts the underlying

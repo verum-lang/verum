@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: modules, header-validation, forward-decl, vuva-mod-med-1
-// @description: VUVA #145 / MOD-MED-1 — module header validation.
+// @description: VVA #145 / MOD-MED-1 — module header validation.
 //
 // `module foo;` (forward-decl form) at the top of a file is supposed
 // to be loaded from `<dir>/foo.vr` or `<dir>/foo/mod.vr`. When neither

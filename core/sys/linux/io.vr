@@ -5,7 +5,7 @@ module sys.linux.io;
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/linux/syscall, sys/common
-// Platform: Linux x86_64
+// Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
 // This module provides completion-based I/O for Linux using:
@@ -34,7 +34,7 @@ mount sys.linux.syscall.{
     syscall_raw,
     SYS_IO_URING_SETUP, SYS_IO_URING_ENTER, SYS_IO_URING_REGISTER,
     SYS_EPOLL_CREATE1, SYS_EPOLL_CTL, SYS_EPOLL_PWAIT,
-    SYS_MMAP, SYS_MUNMAP, SYS_CLOSE, SYS_EVENTFD, SYS_READ, SYS_WRITE,
+    SYS_MMAP, SYS_MUNMAP, SYS_CLOSE, SYS_EVENTFD2, SYS_READ, SYS_WRITE,
     read, write,
 };
 mount sys.linux.errno.{EAGAIN, EINTR, ENOSYS};
@@ -337,7 +337,8 @@ implement IoUringDriver {
         }
 
         // Create eventfd for wake notifications
-        let wake_fd = unsafe { syscall_raw(SYS_EVENTFD, 0, 0, 0, 0, 0, 0) };
+        // eventfd2(initval=0, flags=0); portable on both x86_64 and aarch64.
+        let wake_fd = unsafe { syscall_raw(SYS_EVENTFD2, 0, 0, 0, 0, 0, 0) };
         if wake_fd < 0 {
             // Clean up and return error
             unsafe {

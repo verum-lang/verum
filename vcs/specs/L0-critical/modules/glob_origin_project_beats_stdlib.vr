@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: modules, glob, import-origin, shadowing, vuva-mod-med-2
-// @description: VUVA #146 / MOD-MED-2 — glob-vs-glob origin discipline.
+// @description: VVA #146 / MOD-MED-2 — glob-vs-glob origin discipline.
 //
 // When two glob mounts both export a name, the legacy behaviour was
 // "second-encountered wins" — source-text-position-dependent and

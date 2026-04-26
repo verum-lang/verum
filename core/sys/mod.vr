@@ -11,7 +11,8 @@ module sys;
 // V-LLSI (Verum Low-Level System Interface) bootstrap kernel.
 //
 // Platform-specific implementations:
-// - linux/  - Linux x86_64 direct syscalls
+// - linux/  - Linux direct syscalls (x86_64 + aarch64; see linux/arch.vr
+//             for per-architecture syscall numbers)
 // - darwin/ - macOS libSystem.B.dylib FFI (stable API)
 // - windows/- Windows kernel32/ntdll bindings (IAT imports)
 //

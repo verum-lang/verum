@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §21.8 Phase 3 B5 — verum export --to owl2-fs smoke.
+// VVA §21.8 Phase 3 B5 — verum export --to owl2-fs smoke.
 //
 // Exercises every Owl2*Attr that the OWL 2 Functional-Syntax emitter
 // consumes, ensuring the source declarations type-check. The CLI smoke

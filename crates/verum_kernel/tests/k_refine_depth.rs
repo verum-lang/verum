@@ -43,7 +43,7 @@ fn axiom(name: &str, ty: CoreTerm) -> CoreTerm {
         name: Text::from(name),
         ty: Heap::new(ty),
         framework: FrameworkId {
-            framework: Text::from("vuva_test"),
+            framework: Text::from("vva_test"),
             citation: Text::from("cite"),
         },
     }

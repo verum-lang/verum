@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §10.2 + §10.4 Phase 5 E4 — translation verdict + MSFS coordinate.
+// VVA §10.2 + §10.4 Phase 5 E4 — translation verdict + MSFS coordinate.
 //
 // Exercises the §10.2 obstruction-thresholding rules (Morita / Strong /
 // Moderate / Weak / Untranslatable), the §10.4 MSFS coord projection

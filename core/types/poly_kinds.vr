@@ -227,3 +227,93 @@ fn kind_show(k: Kind) -> Text {
                 + Text.from(")"),
     }
 }
+
+// =============================================================================
+// 4. Convenience helpers
+// =============================================================================
+
+/// True iff every leaf of the kind is a constant (KType /
+/// KConstraint), with no free `KVar` anywhere. A concrete kind is
+/// what unification eventually produces; non-concrete kinds carry
+/// inference unknowns.
+public fn is_concrete(k: Kind) -> Bool {
+    match k {
+        Kind.KType => true,
+        Kind.KConstraint => true,
+        Kind.KVar { name: _ } => false,
+        Kind.KArrow { domain, codomain } =>
+            is_concrete(*domain) && is_concrete(*codomain),
+    }
+}
+
+/// Arity of a kind: number of `KArrow` levels along the right
+/// spine. `Type` has arity 0; `Type → Type` has arity 1;
+/// `Type → Type → Type` has arity 2; etc.
+public fn kind_arity(k: Kind) -> Int {
+    match k {
+        Kind.KArrow { domain: _, codomain } => 1 + kind_arity(*codomain),
+        _ => 0,
+    }
+}
+
+/// Apply a kind to a list of argument kinds, walking the KArrow
+/// spine left-to-right. Each step requires the head's domain to
+/// unify with the next argument; on success the result is the
+/// codomain (under the unifying substitution).
+///
+/// Returns `KindOk { bindings: [] }` when `args` is empty (the
+/// kind is already the result), or `KindError` when the kind has
+/// fewer arrows than args (over-application) or when any pairwise
+/// unification fails.
+public fn apply_args(k: Kind, args: List<Kind>) -> KindUnifyResult {
+    let mut current = k;
+    let mut acc: List<KindBinding> = List.new();
+    let mut i: Int = 0;
+    while i < args.len() as Int {
+        let arg: Kind = (*args.get(i as Int).unwrap()).clone();
+        match current {
+            Kind.KArrow { domain, codomain } => {
+                match kind_unify(*domain, arg) {
+                    KindUnifyResult.KindError { reason } =>
+                        return KindUnifyResult.KindError { reason },
+                    KindUnifyResult.KindOk { bindings: s } => {
+                        acc = kind_compose(acc, s.clone());
+                        current = kind_apply(s, *codomain);
+                    },
+                }
+            },
+            other => {
+                let _ = other;
+                return KindUnifyResult.KindError {
+                    reason: Text.from(
+                        "kind over-application: extra arguments past the spine",
+                    ),
+                };
+            },
+        }
+        i = i + 1;
+    }
+    let _ = current;
+    KindUnifyResult.KindOk { bindings: acc }
+}
+
+/// Free type-variable set of a kind, returned as a list of names
+/// (no deduplication guarantee — call sites that need a set walk
+/// the list once).
+public fn free_vars(k: Kind) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    free_vars_into(k, &mut out);
+    out
+}
+
+fn free_vars_into(k: Kind, out: &mut List<Text>) {
+    match k {
+        Kind.KType => {},
+        Kind.KConstraint => {},
+        Kind.KVar { name } => out.push(name),
+        Kind.KArrow { domain, codomain } => {
+            free_vars_into(*domain, out);
+            free_vars_into(*codomain, out);
+        },
+    }
+}

@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §21.7 Phase 3 C7b — owl2_fs → lurie_htt canonical bridge smoke.
+// VVA §21.7 Phase 3 C7b — owl2_fs → lurie_htt canonical bridge smoke.
 //
 // Smoke test: mounts the 24 @framework(owl2_fs, ...) translation
 // markers and asserts they resolve at use-site. The actual category-

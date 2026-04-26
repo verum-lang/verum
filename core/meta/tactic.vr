@@ -130,9 +130,89 @@ public fn beta_cancel(t: MetaTerm) -> MetaTerm {
         MetaTerm.Splice { inner } => {
             match *inner {
                 MetaTerm.Quote { payload } => MetaTerm.Quote { payload },
-                _ => t,
+                other => MetaTerm.Splice { inner: Heap(other) },
             }
         },
-        _ => t,
+        other => other,
+    }
+}
+
+/// Drop the first half of a `Seq` when it has reached a value.
+/// The metalanguage's `;` is "discard the result of the first
+/// computation, return the second" — once the first is in normal
+/// form, the sequence reduces to the second.
+fn seq_eliminate(t: MetaTerm) -> MetaTerm {
+    match t {
+        MetaTerm.Seq { first, second } => {
+            if is_meta_value(*first) {
+                *second
+            } else {
+                MetaTerm.Seq { first, second }
+            }
+        },
+        other => other,
+    }
+}
+
+// =============================================================================
+// 5. Recursive normalisation
+// =============================================================================
+
+/// Recursively apply β-cancel and seq-elimination through every
+/// subterm. Idempotent. Doesn't perform Custom-elaborator or
+/// Reflect lookups — those depend on external state held by the
+/// analyzer core and are out of scope for this surface module.
+///
+/// Strategy: bottom-up — normalise children first, then apply the
+/// local rewrite at the current node. Continues to a fixed point
+/// at each node; the function as a whole reaches a fixed point in
+/// one pass because the algebra has no rule that re-introduces a
+/// reducible head.
+public fn meta_normalise(t: MetaTerm) -> MetaTerm {
+    match t {
+        MetaTerm.Quote { payload } => MetaTerm.Quote { payload },
+        MetaTerm.Const { payload } => MetaTerm.Const { payload },
+        MetaTerm.Reflect { goal_name } => MetaTerm.Reflect { goal_name },
+        MetaTerm.Splice { inner } => {
+            let inner_n = meta_normalise(*inner);
+            beta_cancel(MetaTerm.Splice { inner: Heap(inner_n) })
+        },
+        MetaTerm.Custom { name, arg } => {
+            let arg_n = meta_normalise(*arg);
+            MetaTerm.Custom { name, arg: Heap(arg_n) }
+        },
+        MetaTerm.Seq { first, second } => {
+            let first_n = meta_normalise(*first);
+            let second_n = meta_normalise(*second);
+            seq_eliminate(MetaTerm.Seq {
+                first: Heap(first_n),
+                second: Heap(second_n),
+            })
+        },
+    }
+}
+
+/// True iff `t` admits no further reduction inside this surface
+/// module. (External state — Custom-elaborator dispatch, Reflect
+/// caching — may still alter the term in the analyzer core.)
+public fn meta_is_normal(t: MetaTerm) -> Bool {
+    match t {
+        MetaTerm.Quote { payload: _ } => true,
+        MetaTerm.Const { payload: _ } => true,
+        MetaTerm.Reflect { goal_name: _ } => true,
+        MetaTerm.Custom { name: _, arg } => meta_is_normal(*arg),
+        MetaTerm.Splice { inner } => {
+            match *inner {
+                MetaTerm.Quote { payload: _ } => false,
+                other => meta_is_normal(other),
+            }
+        },
+        MetaTerm.Seq { first, second } => {
+            if is_meta_value(*first) {
+                false
+            } else {
+                meta_is_normal(*first) && meta_is_normal(*second)
+            }
+        },
     }
 }

@@ -63,7 +63,7 @@ mount sys.linux.syscall.{
     rename as sys_rename,
     symlink as sys_symlink,
     readlink as sys_readlink,
-    mount as sys_link,
+    link as sys_link,
     chmod as sys_chmod,
     getcwd as sys_getcwd,
     chdir as sys_chdir,

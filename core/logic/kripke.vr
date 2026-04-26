@@ -255,3 +255,169 @@ public fn evaluate(formula: ModalForm, f: KripkeFrame, v: Valuation, w: World) -
         },
     }
 }
+
+// =============================================================================
+// 5. Validity + semantic equivalence
+// =============================================================================
+
+/// True iff `formula` evaluates to `true` at every world of `f`
+/// under the valuation `v`. The standard "valid in frame" judgement.
+///
+/// Cost: O(|worlds| · evaluate_cost(formula)).
+public fn valid_in_frame(f: KripkeFrame, v: Valuation, formula: ModalForm) -> Bool {
+    let mut i: Int = 0;
+    while i < f.worlds.len() {
+        if !evaluate(formula.clone(), f.clone(), v.clone(), f.worlds[i].clone()) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// True iff `a` and `b` evaluate to the same truth value at every
+/// world of the frame under the valuation. Use this to check
+/// semantic equivalence over a fixed model — the syntactic
+/// equality of the two formulas is neither sufficient (different
+/// shapes can have the same semantics) nor necessary (the same
+/// formula always works).
+public fn semantically_equivalent(
+    f: KripkeFrame,
+    v: Valuation,
+    a: ModalForm,
+    b: ModalForm,
+) -> Bool {
+    let mut i: Int = 0;
+    while i < f.worlds.len() {
+        let w = f.worlds[i].clone();
+        if evaluate(a.clone(), f.clone(), v.clone(), w.clone())
+            != evaluate(b.clone(), f.clone(), v.clone(), w)
+        {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// 6. Frame-property predicates (axiom-system identification)
+// =============================================================================
+//
+// Modal-logic axioms each correspond to a structural property of
+// the accessibility relation. The classical correspondence:
+//
+//     T  (□p → p)            reflexive frames
+//     4  (□p → □□p)          transitive frames
+//     5  (◇p → □◇p)          euclidean frames
+//     B  (p → □◇p)           symmetric frames
+//     D  (□p → ◇p)           serial frames
+//
+// Identifying a frame's properties tells you which axiom system
+// it validates, which is the bridge from `evaluate` to formal
+// proof obligations.
+
+/// True iff every world has at least one accessible world
+/// (∀w. ∃w'. wRw'). The frame property behind axiom D.
+public fn is_serial(f: KripkeFrame) -> Bool {
+    let mut i: Int = 0;
+    while i < f.worlds.len() {
+        let w = f.worlds[i].clone();
+        let succs = accessible(f.clone(), w);
+        if succs.len() == 0 {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// True iff every world is accessible from itself (∀w. wRw).
+/// Frame property behind axiom T.
+public fn is_reflexive(f: KripkeFrame) -> Bool {
+    let mut i: Int = 0;
+    while i < f.worlds.len() {
+        let w = f.worlds[i].clone();
+        if !has_edge(f.clone(), w.clone(), w) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// True iff `wRv ∧ vRu ⇒ wRu` for all worlds. Frame property
+/// behind axiom 4.
+public fn is_transitive(f: KripkeFrame) -> Bool {
+    let mut i: Int = 0;
+    while i < f.edges.len() {
+        let e1 = f.edges[i].clone();
+        let mut j: Int = 0;
+        while j < f.edges.len() {
+            let e2 = f.edges[j].clone();
+            if e1.to.id == e2.from.id {
+                if !has_edge(f.clone(), e1.from.clone(), e2.to.clone()) {
+                    return false;
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// True iff `wRv ⇒ vRw` for all edges. Frame property behind
+/// axiom B.
+public fn is_symmetric(f: KripkeFrame) -> Bool {
+    let mut i: Int = 0;
+    while i < f.edges.len() {
+        let e = f.edges[i].clone();
+        if !has_edge(f.clone(), e.to.clone(), e.from.clone()) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// True iff `wRv ∧ wRu ⇒ vRu` for all triples. Frame property
+/// behind axiom 5 (euclidean).
+public fn is_euclidean(f: KripkeFrame) -> Bool {
+    let mut i: Int = 0;
+    while i < f.edges.len() {
+        let e1 = f.edges[i].clone();
+        let mut j: Int = 0;
+        while j < f.edges.len() {
+            let e2 = f.edges[j].clone();
+            if e1.from.id == e2.from.id {
+                if !has_edge(f.clone(), e1.to.clone(), e2.to.clone()) {
+                    return false;
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// Helper: does `f` contain an edge from `a` to `b`?
+fn has_edge(f: KripkeFrame, a: World, b: World) -> Bool {
+    let mut i: Int = 0;
+    while i < f.edges.len() {
+        if f.edges[i].from.id == a.id && f.edges[i].to.id == b.id {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+/// Convenience: a frame is an S5 model iff its accessibility
+/// relation is reflexive, transitive, AND symmetric (equivalently,
+/// reflexive AND euclidean — the classical equivalence). Useful
+/// for epistemic-logic readers ("knowledge as S5 modality").
+public fn is_s5(f: KripkeFrame) -> Bool {
+    is_reflexive(f.clone()) && is_transitive(f.clone()) && is_symmetric(f)
+}

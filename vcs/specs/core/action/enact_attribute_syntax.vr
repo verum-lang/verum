@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §11.2 Phase 5 E3 — @enact(epsilon …) attribute parses in both the
+// VVA §11.2 Phase 5 E3 — @enact(epsilon …) attribute parses in both the
 // colon- and equals-separated forms, plus the bare-positional fallback.
 // The canonicalisation (ASCII name → Unicode primitive) is exercised by the
 // `verum audit --epsilon` command; here we only assert that the attribute

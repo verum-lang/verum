@@ -15,10 +15,10 @@
 **Верификационные артефакты**:
 - MSFS preprint: `internal/math-msfs/paper-en/paper.tex` (1692 LOC LaTeX, 41 page PDF, 27 theorem-environments).
 - Diakrisis corpus: `internal/diakrisis/docs/` (142 теоремы, 13 аксиом, ~120 markdown files).
-- VVA specification: 4336 LOC, описывает kernel + ladder + dual stdlib + VFE extensions.
+- VVA specification: 4336 LOC, описывает kernel + ladder + dual stdlib + VVA extensions.
 
 **Verum capabilities** (по VVA):
-- `verum_kernel` (~5000 LOC, ≤6500 после VFE) с CoreTerm calculus.
+- `verum_kernel` (~5000 LOC, ≤6500 после VVA) с CoreTerm calculus.
 - Kernel rules (Part A §4.4 + §4.4a):
   - `K-Refine` (T-2f\* depth-stratified comprehension).
   - `K-Adj-Unit`, `K-Adj-Counit` (108.T equivalence ε ⊣ α).
@@ -71,8 +71,8 @@ verum-msfs-corpus/
 │   │   │   ├── diakrisis/               # Diakrisis-only extensions
 │   │   │   └── shared/                  # ZFC, HoTT, etc. baseline
 │   │   ├── categorical/                 # 2-cats, (∞,n)-cats support
-│   │   ├── stack_model/                 # VFE-3 stack semantics
-│   │   └── infinity_category/           # VFE-4 (∞,∞) support
+│   │   ├── stack_model/                 # VVA-3 stack semantics
+│   │   └── infinity_category/           # VVA-4 (∞,∞) support
 │   ├── theory_interop/
 │   │   ├── load_theory.vr              # Yoneda
 │   │   ├── translate.vr                # Kan extension
@@ -84,13 +84,13 @@ verum-msfs-corpus/
 │   │   ├── enactments.vr               # composition, activation
 │   │   ├── gauge.vr                    # canonicalize
 │   │   ├── verify.vr                   # ε-audit, coherence
-│   │   ├── ludics.vr                   # VFE-10
-│   │   └── effects.vr                  # VFE-9
+│   │   ├── ludics.vr                   # VVA-10
+│   │   └── effects.vr                  # VVA-9
 │   └── proof/
 │       ├── tactics.vr
 │       ├── smt.vr
 │       ├── certificate.vr
-│       └── bhk.vr                      # VFE-5 BHK proof-extraction
+│       └── bhk.vr                      # VVA-5 BHK proof-extraction
 ├── theorems/
 │   ├── msfs/
 │   │   ├── 01_introduction/            # Conventions, key symbols
@@ -1460,14 +1460,14 @@ public axiom axi_2_M_is_2_functor:
 public axiom T_2f_double_star<P: Predicate, α_P: Articulation>:
     selection of α_P by P admissible ⟺
         depth(P) < depth(α_P) ∧ md(P) < md(α_P)
-    @require_extension(VFE_7)  // K-Refine-omega kernel rule
+    @require_extension(VVA_7)  // K-Refine-omega kernel rule
 ;
 
 @framework(diakrisis_T_2f_triple_star, "Diakrisis T-2f*** transfinite modal stratification — Theorem 136.T")
 public axiom T_2f_triple_star<P: Predicate, α_P: Articulation>:
     selection of α_P by P admissible ⟺
         depth(P) < depth(α_P) ∧ md_omega(P) < md_omega(α_P)
-    @require_extension(VFE_7)
+    @require_extension(VVA_7)
 ;
 ```
 
@@ -1498,7 +1498,7 @@ public theorem theorem_10_T1_Cat_model_baseline:
 }
 
 @verify(certified)
-@require_extension(VFE_3)
+@require_extension(VVA_3)
 public theorem theorem_131_T_stack_model_satisfies_all_13_axioms:
     StackModel<κ_1, κ_2>: DiakrisisCanonicalPrimitive (full 13 axioms including Axi-8)
 {
@@ -1679,7 +1679,7 @@ public theorem diakrisis_102_T_meta_stabilization:
 
 ```verum
 @verify(certified)
-@require_extension(VFE_3)  // stack-model
+@require_extension(VVA_3)  // stack-model
 public theorem theorem_103_T_universal_articulation:
     ∀ S: RichS. ∃! α_S: Articulation in ⟪·⟫.
         Artic(F): F → ⟪·⟫ is_essentially_surjective_onto M_Fnd
@@ -1754,7 +1754,7 @@ public theorem theorem_129_T_initiality: ...;
 
 // 130.T — T-2f** for paradoxes outside Yanofsky (Berry, Löb, paraconsistent Curry)
 @verify(certified)
-@require_extension(VFE_7)
+@require_extension(VVA_7)
 public theorem theorem_130_T_T_2f_double_star: ...;
 
 // 131.T — Stack-model (already done in D.1)
@@ -1775,7 +1775,7 @@ public theorem theorem_134_T_2_inacc_tightness:
 
 // 135.T — Weak-stratum (closes MSFS Q5)
 @verify(certified)
-@require_extension(VFE_8)
+@require_extension(VVA_8)
 public theorem theorem_135_T_weak_stratum:
     L_Fnd_weak ⊋ ∅
     ∧ L_Fnd_weak is_separate_stratum_from L_Fnd
@@ -1867,7 +1867,7 @@ public theorem theorem_112_T_universal_actic_performance: ...;
 
 // 113.T — Autopoiesis as A-fixpoint
 @verify(certified)
-@require_extension(VFE_5)
+@require_extension(VVA_5)
 public theorem theorem_113_T_autopoiesis_A_fixpoint: ...;
 
 // 114.T — CPTP dual
@@ -1896,12 +1896,12 @@ public theorem theorem_119_T_goldilocks_zone: ...;
 
 // 120.T — Ludics Girard as Perf(α_linear)
 @verify(certified)
-@require_extension(VFE_10)
+@require_extension(VVA_10)
 public theorem theorem_120_T_ludics_as_perf_alpha_linear: ...;
 
 // 121.T — BHK-interpretation as ε-semantics
 @verify(certified)
-@require_extension(VFE_5)  // BHK proof-extraction
+@require_extension(VVA_5)  // BHK proof-extraction
 public theorem theorem_121_T_BHK_as_epsilon_semantics: ...;
 
 // 122.T — Aктика-Noesis double indexing
@@ -1912,9 +1912,9 @@ public theorem theorem_122_T_actic_noesis_double_indexing: ...;
 @verify(formal)
 public theorem theorem_123_T_composition_a_depth: ...;
 
-// 124.T — M ⊣ A biadjunction (CENTRAL for VFE-1)
+// 124.T — M ⊣ A biadjunction (CENTRAL for VVA-1)
 @verify(certified)
-@require_extension(VFE_1)
+@require_extension(VVA_1)
 public theorem theorem_124_T_M_dashv_A:
     biadjunction(M, A) in mixed 2-category via 108.T equivalence
 {
@@ -1946,7 +1946,7 @@ public theorem theorem_127_T_formal_logical_DC_closure: ...;
 ```verum
 // 136.T — T-2f*** transfinite modal stratification
 @verify(certified)
-@require_extension(VFE_7)
+@require_extension(VVA_7)
 public theorem theorem_136_T_T_2f_triple_star:
     T_2f_triple_star blocks transfinite_modal_paradoxes
         (Berry, paradoxical_Löb, paraconsistent_Curry, Beth_Monk_omega_iteration, ω·k_modal, ω^ω-modal)
@@ -1958,7 +1958,7 @@ public theorem theorem_136_T_T_2f_triple_star:
 
 // 137.T — Weak-AFN-T for L_Fnd_weak
 @verify(certified)
-@require_extension(VFE_8)
+@require_extension(VVA_8)
 public theorem theorem_137_T_weak_AFN_T:
     L_Abs_weak == ∅
     + 6_layer_nu_weak_stratification (AC^0 ⊂ LOGSPACE ⊂ P ⊂ NP ⊂ PH ⊂ I∆_0)
@@ -1970,10 +1970,10 @@ public theorem theorem_138_T_dual_kernel: ...;
 @verify(certified)
 public theorem theorem_139_T_dual_initiality: ...;
 @verify(certified)
-@require_extension(VFE_4)
+@require_extension(VVA_4)
 public theorem theorem_140_T_epsilon_invariant_on_infinity_infinity: ...;
 @verify(certified)
-@require_extension(VFE_5)
+@require_extension(VVA_5)
 public theorem theorem_141_T_constructive_autopoiesis: ...;
 
 // 142.T — Eastern traditions embedding
@@ -1995,7 +1995,7 @@ public theorem theorem_142_T_eastern_traditions: ...;
 @framework(operational_coherence_18T1)
 
 @verify(coherent)
-@require_extension(VFE_6)
+@require_extension(VVA_6)
 public theorem theorem_18_T1_operational_coherence:
     ∀ P: Program ∈ corpus. ∀ φ: Property.
         cert_alpha(P, φ) ⟺ cert_epsilon(P, φ_dual_via_108T)
@@ -2043,7 +2043,7 @@ public theorem UFH_85_T_universal_factorization:
     α_uhm ≃_gauge ∫_Γ α_D_hybrid_bang(Γ) over_7D_quantum
 {
     by Grothendieck_construction over D(C^7)
-        + verified_in_stack_model_(VFE_3)
+        + verified_in_stack_model_(VVA_3)
 }
 ```
 
@@ -2100,16 +2100,16 @@ verum audit --open-questions theorems/
 | Part A §12 Verification ladder | All stages | Strategy selection per theorem |
 | Part A.Z §2 MSFS hierarchy | Stage M.2 | Strata formalization |
 | Part A.Z §3 AC/OC duality | Stage M.10 + D.7 | Centerpiece |
-| Part B §1 VFE-1 K-Eps-Mu | Stage D.7 (124.T) | Required activation |
-| Part B §2 VFE-2 round-trip | Stage M.10 + D.7 (108.T) | Required activation |
-| Part B §3 VFE-3 stack-model | Stages D.1 (131.T) + D.5 (103.T) | Required activation |
-| Part B §4 VFE-4 (∞,∞) | Stage D.8 (140.T) | Required activation |
-| Part B §5 VFE-5 Eff layer | Stage D.7 (113.T, 121.T) + D.8 (141.T) | Required activation |
-| Part B §6 VFE-6 coherent | Stage D.9 corpus-wide | Required activation |
-| Part B §7 VFE-7 K-Refine-omega | Stage D.6 (130.T) + D.8 (136.T) | Required activation |
-| Part B §8 VFE-8 complexity-typed | Stage D.6 (135.T) + D.8 (137.T) | Required activation |
-| Part B §9 VFE-9 effects | Stage D.7 (Aктика effects) | Required activation |
-| Part B §10 VFE-10 Ludics | Stage D.7 (120.T) | Required activation |
+| Part B §1 VVA-1 K-Eps-Mu | Stage D.7 (124.T) | Required activation |
+| Part B §2 VVA-2 round-trip | Stage M.10 + D.7 (108.T) | Required activation |
+| Part B §3 VVA-3 stack-model | Stages D.1 (131.T) + D.5 (103.T) | Required activation |
+| Part B §4 VVA-4 (∞,∞) | Stage D.8 (140.T) | Required activation |
+| Part B §5 VVA-5 Eff layer | Stage D.7 (113.T, 121.T) + D.8 (141.T) | Required activation |
+| Part B §6 VVA-6 coherent | Stage D.9 corpus-wide | Required activation |
+| Part B §7 VVA-7 K-Refine-omega | Stage D.6 (130.T) + D.8 (136.T) | Required activation |
+| Part B §8 VVA-8 complexity-typed | Stage D.6 (135.T) + D.8 (137.T) | Required activation |
+| Part B §9 VVA-9 effects | Stage D.7 (Aктика effects) | Required activation |
+| Part B §10 VVA-10 Ludics | Stage D.7 (120.T) | Required activation |
 
 ---
 
