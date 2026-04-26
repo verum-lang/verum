@@ -410,7 +410,16 @@ theorem gauge_undecidable_general()
 
 ### 3.1 Текущее состояние
 
-VUVA §6.2 имеет 6-pack стандартных frameworks (`zfc`, `hott`, `mltt`, `cic`, `ncg`, `infinity_topos`). Кат-модель — единственная реализация. Axi-8 (нетривиальность $\alpha_\mathsf{M}$) **не реализуется** в Cat-модели.
+> **Историческая ссылка (B15, #213).** Ранние редакции VUVA
+> упоминали "6-pack стандартных frameworks" (`zfc`, `hott`,
+> `mltt`, `cic`, `ncg`, `infinity_topos`). Реальный каталог
+> `core/math/frameworks/` шипит существенно больше (см. VUVA §6.2,
+> приведённую к фактическому состоянию в B15-патче) — девять
+> Standard, VerifiedExtension-семейство `bounded_arithmetic_*`, и
+> четыре диакризисных под-корпуса. В частности `arnold_mather` был
+> переименован в `arnold_catastrophe` для соответствия registry.
+
+Кат-модель — единственная реализация. Axi-8 (нетривиальность $\alpha_\mathsf{M}$) **не реализуется** в Cat-модели.
 
 ### 3.2 Предложение
 
