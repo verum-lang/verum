@@ -2,6 +2,7 @@
 // @level: L0
 // @tier: 2
 // @tags: codegen, aot, mount-core, libc-allowlist, side-effects
+// @timeout: 360000
 // @expected-stdout: hi
 // @expected-exit: 0
 // @description: AOT mount-core println side-effect visibility regression.
