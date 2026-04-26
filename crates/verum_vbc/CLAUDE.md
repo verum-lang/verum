@@ -167,7 +167,7 @@ The crate ships two unit-test surfaces, gated by the `codegen` feature:
 | Command | Tests | Status |
 |---------|-------|--------|
 | `cargo test -p verum_vbc --lib` (default features) | 908 | all passing |
-| `cargo test -p verum_vbc --lib --features codegen` | 1546 | 1545 passing, 1 pre-existing failure |
+| `cargo test -p verum_vbc --lib --features codegen` | 1546 | all passing |
 
 The default surface covers bytecode IR, interpreter, value model, intrinsic
 dispatch, monomorphization, and serialization.  The `--features codegen` surface
@@ -177,32 +177,27 @@ adds the AST-to-VBC code-generation pipeline (gated because it pulls in
 External fixtures: 25 intrinsics test files in `vcs/specs/stdlib/sys/intrinsics/`
 and 6 context system tests in `vcs/specs/L2-standard/contexts/runtime/`.
 
-### Known failure under `--features codegen`
+### #178 close-out
 
-One `codegen::test_params::test_compile_stdlib_net_udp` fixture
-currently fails with `undefined function: safe_set_ip_tos` — the
-test harness uses the simple `compile_module()` API which doesn't
-resolve `mount` declarations, and `udp.vr` brings `safe_set_ip_tos`
-in via a platform-gated mount block.  This is NOT a codegen bug —
-it's a test-harness gap that needs a switch to
-`compile_module_with_mounts` with a `core_root` argument.
+The four `test_compile_stdlib_*` fixtures (`async_executor`,
+`async_nursery`, `math_linalg`, `net_udp`) all now pass.  Three were
+fixed by commit d27ba1e2 (`path_was_rooted_module_path` helper that
+preserves the was-rooted info that `try_flatten_module_path_resolved`
+otherwise strips); the fourth was fixed by commit 958e684e (switch
+the test harness to `compile_module_with_mounts` for files that bring
+cross-module symbols in via `mount`).
 
-Three previously-failing `test_compile_stdlib_*` fixtures
-(`async_nursery`, `async_executor`, `math_linalg`) were fixed by
-commit d27ba1e2 — the underlying bug was that
-`try_flatten_module_path_resolved` strips the rooted `super`/`cog`/`.`
-prefix when it succeeds, and downstream branches checked
-`parts[0] == "super"` to detect rooted paths after the prefix was
-already gone.  See #178 for the fix.
+The CI gate is: any unit-test failure in either default-feature or
+`--features codegen` surface blocks the PR.  No new "known failure"
+should be documented here without an explicit tracking task.
 
 The earlier "Known Test Failures (Pre-existing)" section that listed
 five `cbgr_heap` / `shape` / `value` failures has been removed; all
 five were fixed before #177 close-out.
 
-The CI gate is: any default-feature unit-test failure blocks the PR;
-the four `--features codegen` failures above block once `#178` is
-resolved.  No new "known failure" should be documented here without
-an explicit tracking task.
+The CI gate is: any unit-test failure in either default-feature or
+`--features codegen` surface blocks the PR.  No new "known failure"
+should be documented here without an explicit tracking task.
 
 ## Performance Targets
 
