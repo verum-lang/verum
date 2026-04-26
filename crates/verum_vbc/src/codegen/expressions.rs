@@ -7620,6 +7620,25 @@ impl VbcCodegen {
                             })
                         });
 
+                    // Guard: if the match scrutinee is a primitive Int, NEVER emit
+                    // a variant-tag check (`IsVar`). Even when the const_value lookup
+                    // fails (e.g. the constant isn't resolvable in this scope), the
+                    // IsVar codegen would treat the Int scrutinee as a sum-type
+                    // pointer and dereference it at offset 0x18 — SEGV at runtime.
+                    // For Int scrutinees, fall back to a literal-zero comparison
+                    // (which matches nothing) so the next arm runs. This is
+                    // strictly safer than emitting IsVar on a non-pointer value.
+                    // Tracked under #109.
+                    let scrutinee_is_int = self.ctx
+                        .match_scrutinee_type
+                        .as_deref()
+                        .map_or(false, |t| {
+                            let base = t.split('<').next().unwrap_or(t);
+                            matches!(base, "Int" | "Int64" | "Int32" | "Int16" | "Int8"
+                                | "UInt" | "UInt64" | "UInt32" | "UInt16" | "UInt8"
+                                | "Byte" | "Char" | "Bool")
+                        });
+
                     if let Some(const_val) = const_value {
                         // This is a constant pattern — emit value comparison
                         let const_reg = self.ctx.alloc_temp();
@@ -7678,6 +7697,25 @@ impl VbcCodegen {
                         .unwrap_or_else(|| {
                             variant_name.as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
                         });
+                    if scrutinee_is_int {
+                        // #109 guard: Int scrutinee + unresolved-constant arm.
+                        // Compare against zero (which won't match any non-zero
+                        // errno-style code) so dispatch falls through to the
+                        // next arm instead of dereferencing a primitive value
+                        // as a sum-type pointer.
+                        let zero_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI { dst: zero_reg, value: 0 });
+                        self.ctx.emit(Instruction::CmpI {
+                            op: CompareOp::Eq,
+                            dst: result,
+                            a: scrutinee,
+                            b: zero_reg,
+                        });
+                        self.ctx.free_temp(zero_reg);
+                        // Skip the tag-payload pattern walk below; nothing to bind.
+                        let _ = tag;
+                        return Ok(());
+                    }
                     self.ctx.emit(Instruction::IsVar {
                         dst: result,
                         value: scrutinee,
