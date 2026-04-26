@@ -451,6 +451,14 @@ enum Commands {
         /// `git diff --name-only <REF>...HEAD -- '*.vr'`.
         #[clap(long, value_name = "GIT_REF")]
         since: Option<Text>,
+        /// Report only NEW issues introduced since GIT_REF.
+        /// Differs from `--since`: --since lints changed FILES (and
+        /// reports every issue in them, including pre-existing).
+        /// --new-only-since lints HEAD and REF, then reports issues
+        /// present in HEAD but absent from REF. Mutually exclusive
+        /// with --since.
+        #[clap(long, value_name = "GIT_REF", conflicts_with = "since")]
+        new_only_since: Option<Text>,
         /// Filter to issues at this level or higher: error | warn | info | hint.
         #[clap(long, value_name = "LEVEL")]
         severity: Option<Text>,
@@ -1596,6 +1604,7 @@ fn run_command(cli: Cli) -> Result<()> {
             format,
             profile,
             since,
+            new_only_since,
             severity,
             threads,
             no_cache,
@@ -1667,6 +1676,16 @@ fn run_command(cli: Cli) -> Result<()> {
                     .build_global();
             }
 
+            if let Some(ref_name) = new_only_since {
+                return commands::lint::run_new_only_since(
+                    fix,
+                    deny_warnings,
+                    fmt,
+                    profile_name.clone(),
+                    severity_filter,
+                    ref_name.to_string(),
+                );
+            }
             if watch {
                 commands::lint::run_watch(
                     fix,
