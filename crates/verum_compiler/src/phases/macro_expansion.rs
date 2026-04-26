@@ -76,8 +76,7 @@ pub struct MacroExpansionPhase {
     meta_linter: MetaLinter,
     /// Registry for tagged literal handlers
     literal_registry: LiteralRegistry,
-    /// Meta execution context (reserved for user meta function execution)
-    #[allow(dead_code)]
+    /// Meta execution context (used for user meta function execution)
     meta_context: MetaContext,
     /// Current module path (for scoped lookup)
     current_module: Text,
@@ -215,28 +214,6 @@ impl MacroExpansionPhase {
     pub fn with_max_stage_level(mut self, level: u32) -> Self {
         self.max_stage_level = level;
         self
-    }
-
-    /// Execute a user-defined meta function
-    ///
-    /// This looks up the meta function in the registry and executes it
-    /// with the provided arguments.
-    #[allow(dead_code)] // Reserved for user-defined meta function execution
-    fn execute_meta_function(
-        &mut self,
-        module: &Text,
-        func_name: &Text,
-        args: List<ConstValue>,
-    ) -> Result<ConstValue, MetaError> {
-        // Look up the meta function
-        match self.meta_registry.get_user_meta_fn(module, func_name) {
-            Maybe::Some(meta_func) => {
-                // Execute the function
-                self.meta_context
-                    .execute_user_meta_fn(&meta_func, args.into_iter().collect())
-            }
-            Maybe::None => Err(MetaError::MetaFunctionNotFound(func_name.as_str().to_string().into())),
-        }
     }
 
     /// Expand macros in all modules
@@ -1181,68 +1158,6 @@ impl MacroExpansionPhase {
         // Re-enter literal processing so the resulting InterpolatedString
         // takes the same lowering path as `f"..."` source literals.
         Some(self.process_expr(&result))
-    }
-
-    /// DEPRECATED: Old format desugaring (kept for reference)
-    #[allow(dead_code)]
-    fn process_format_interpolation_desugar(
-        &mut self,
-        parts: &List<Text>,
-        exprs: &List<Expr>,
-        span: Span,
-    ) -> Result<Expr, Diagnostic> {
-        // Desugar to format!() call
-        // f"Hello {name}!" => format!("Hello {}!", name)
-
-        // Build format string with {} placeholders
-        let mut format_str = String::new();
-        for (i, part) in parts.iter().enumerate() {
-            format_str.push_str(part.as_str());
-            if i < exprs.len() {
-                format_str.push_str("{}");
-            }
-        }
-
-        // Generate call to format function
-        let format_path = verum_ast::ty::Path {
-            segments: smallvec::smallvec![verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(
-                "format",
-                span
-            ),)],
-            span,
-        };
-
-        let mut args = Vec::new();
-        // First arg: format string
-        args.push(Expr {
-            kind: ExprKind::Literal(Literal {
-                kind: LiteralKind::Text(StringLit::Regular(format_str.into())),
-                span,
-            }),
-            span,
-            ref_kind: None,
-            check_eliminated: false,
-        });
-        // Remaining args: interpolated expressions
-        for expr in exprs.iter() {
-            args.push(expr.clone());
-        }
-
-        Ok(Expr {
-            kind: ExprKind::Call {
-                func: Box::new(Expr {
-                    kind: ExprKind::Path(format_path),
-                    span,
-                    ref_kind: None,
-                    check_eliminated: false,
-                }),
-                type_args: List::new(),
-                args: args.into(),
-            },
-            span,
-            ref_kind: None,
-            check_eliminated: false,
-        })
     }
 
     /// Process SQL interpolation: sql"SELECT * WHERE id = {id}"
