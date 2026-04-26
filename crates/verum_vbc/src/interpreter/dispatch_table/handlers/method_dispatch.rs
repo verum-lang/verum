@@ -37,7 +37,6 @@ use super::super::{deep_value_eq, value_hash, value_eq, dispatch_loop_table_with
 
 // ── Iterator type constants ──
 const ITER_TYPE_LIST: i64 = 0;
-#[allow(dead_code)]
 const ITER_TYPE_MAP: i64 = 1;
 const ITER_TYPE_ARRAY: i64 = 2;
 const ITER_TYPE_RANGE: i64 = 3;
@@ -5390,7 +5389,6 @@ pub(crate) fn call_closure_sync(
 ///
 /// # Returns
 /// The function's return value.
-#[allow(dead_code)]
 pub(super) fn call_function_sync(
     state: &mut InterpreterState,
     func_id: FunctionId,
@@ -5419,46 +5417,6 @@ pub(super) fn call_function_sync(
 
     // Run nested dispatch loop — returns when the function returns
     dispatch_loop_table_with_entry_depth(state, entry_depth)
-}
-
-/// Execute a pending task from the task queue.
-///
-/// Takes the task's stored function/closure + args, runs it to completion,
-/// and stores the result back in the task queue. This is the core of the
-/// cooperative scheduler — tasks are deferred at Spawn and executed here.
-#[allow(dead_code)]
-pub(crate) fn execute_pending_task(state: &mut InterpreterState, task_id: TaskId) -> InterpreterResult<()> {
-    // Extract execution info from the task (marks it as Running)
-    let exec_info = state.tasks.take_task_exec_info(task_id);
-
-    if let Some((func_id, args, closure_val, saved_contexts)) = exec_info {
-        // Restore parent's context stack into the child task
-        if !saved_contexts.is_empty() {
-            for entry in &saved_contexts {
-                state.context_stack.provide(entry.ctx_type, entry.value, 0);
-            }
-        }
-
-        let result = if let Some(closure) = closure_val {
-            // Execute closure
-            call_closure_sync(state, closure, &args)
-        } else {
-            // Execute named function
-            call_function_sync(state, func_id, &args)
-        };
-
-        match result {
-            Ok(value) => {
-                state.tasks.complete(task_id, value);
-            }
-            Err(e) => {
-                state.tasks.fail(task_id);
-                return Err(e);
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// Allocate a new List from a Vec of Values, returning a pointer Value.
