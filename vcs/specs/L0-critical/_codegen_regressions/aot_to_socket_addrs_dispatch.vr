@@ -1,0 +1,67 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: codegen, aot, protocol-dispatch, receiver-narrowing
+// @timeout: 360000
+// @skip: blocked by #76 — protocol-method dispatch picks wrong impl under AOT
+// @expected-stdout: v4
+// @expected-exit: 0
+// @description: AOT protocol-method dispatch — SocketAddr.to_socket_addrs.
+//
+// 2026-04-26 #76 minimal repro: `addr.to_socket_addrs()` on a directly-
+// constructed `SocketAddr` corrupts the resulting list — subsequent
+// `is_ipv4()` SEGVs reading offset 0 of null. ALL of these adjacent
+// paths PASS under AOT:
+//
+//   1. `SocketAddr.new_v4(...)` constructor + direct `.is_ipv4()`
+//   2. `*addr` (deref of `&SocketAddr`)
+//   3. Manual list build: `let mut v: List<SocketAddr> = []; v.push(addr)`
+//      followed by `for sa in v { sa.is_ipv4() }`
+//   4. Free function `fn my_to_addrs(s: &SocketAddr) -> Result<...>`
+//      with body identical to the trait impl
+//
+// Only the trait protocol-method invocation `addr.to_socket_addrs()`
+// (which dispatches via VBC `CallM` → method-dispatch table) fails.
+// Same family as #79/#153 receiver-narrowing miss, but for protocol
+// methods rather than inherent unwrap.
+//
+// Inline workaround comment at core/net/addr.vr:844-848 acknowledges
+// the bug class: "the same call site emits 'field index 2 (offset
+// 16+8 = 24) exceeds object data size 8' panics through the SocketAddr
+// branch only." Aligning all `Iter` types to `List<SocketAddr>` was
+// the workaround attempt — insufficient.
+//
+// Controlling blocker for #59 (HTTP/1.1 server bring-up) and downstream
+// #61/#62 — `TcpListener.bind` cannot succeed because it routes through
+// `to_socket_addrs` then iterates the result.
+//
+// REMOVE @skip once the dispatcher in
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
+// (or `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`
+// receiver-narrowing path at lines ~6020-6051) correctly picks the
+// `implement ToSocketAddrs for SocketAddr` impl rather than falling
+// through to the `Text` impl.
+
+mount core.*;
+mount core.net.addr.{SocketAddr, Ipv4Addr, ToSocketAddrs};
+mount core.io.stdio.{println};
+
+fn main() -> Int {
+    let addr = SocketAddr.new_v4(Ipv4Addr.localhost(), 8080);
+    match addr.to_socket_addrs() {
+        Ok(addrs) => {
+            for sa in addrs {
+                if sa.is_ipv4() {
+                    println("v4");
+                } else {
+                    println("not v4");
+                }
+            }
+            0
+        }
+        Err(_) => {
+            println("err");
+            1
+        }
+    }
+}
