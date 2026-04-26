@@ -132,11 +132,32 @@ public fn divmod(a: Int, b: Int{!= 0}) -> (Int, Int) {
 // Number-Theoretic Operations
 // =============================================================================
 
+// Internal: absolute value with explicit Int.MIN handling.
+//
+// `if x < 0 { -x } else { x }` silently wraps for x == Int.MIN
+// (-2^63): -Int.MIN overflows back to Int.MIN. The whole gcd / lcm
+// family normalizes inputs via abs, so this wrap historically
+// produced wrong results (and non-terminating loops in the binary
+// gcd) for Int.MIN inputs. |Int.MIN| = 2^63 is genuinely
+// unrepresentable in Int64 — there's no honest answer except to
+// reject. Callers that need to handle Int.MIN gracefully should
+// use the `try_*` variants which return `Maybe::None`.
+@inline
+fn safe_abs_or_panic(x: Int, fn_name: &Text) -> Int {
+    if x == Int.MIN {
+        panic(f"{fn_name}: |Int.MIN| (= 2^63) is unrepresentable in Int64; use the try_* variant or pre-validate input");
+    }
+    if x < 0 { -x } else { x }
+}
+
 // Greatest common divisor using Euclidean algorithm
 // gcd(a, 0) = |a|, gcd(0, 0) = 0
+//
+// Panics if either input is `Int.MIN` (its absolute value is
+// unrepresentable). Use `try_gcd` for fallible failure handling.
 public fn gcd(a: Int, b: Int) -> Int{>= 0} {
-    let mut a = if a < 0 { -a } else { a };
-    let mut b = if b < 0 { -b } else { b };
+    let mut a = safe_abs_or_panic(a, "gcd");
+    let mut b = safe_abs_or_panic(b, "gcd");
 
     while b != 0 {
         let t = b;
@@ -146,13 +167,25 @@ public fn gcd(a: Int, b: Int) -> Int{>= 0} {
     a
 }
 
-// Binary GCD (Stein's algorithm) - more efficient for large integers
-public fn gcd_binary(a: Int, b: Int) -> Int{>= 0} {
-    if a == 0 { return if b < 0 { -b } else { b }; }
-    if b == 0 { return if a < 0 { -a } else { a }; }
+/// Fallible counterpart to `gcd`. Returns `None` if either input
+/// is `Int.MIN` (its absolute value is unrepresentable in Int64).
+public fn try_gcd(a: Int, b: Int) -> Maybe<Int> {
+    if a == Int.MIN || b == Int.MIN {
+        return None;
+    }
+    Some(gcd(a, b))
+}
 
-    let mut u = if a < 0 { -a } else { a };
-    let mut v = if b < 0 { -b } else { b };
+// Binary GCD (Stein's algorithm) - more efficient for large integers
+//
+// Panics if either input is `Int.MIN`. Use `try_gcd_binary` for
+// fallible failure handling.
+public fn gcd_binary(a: Int, b: Int) -> Int{>= 0} {
+    if a == 0 { return safe_abs_or_panic(b, "gcd_binary"); }
+    if b == 0 { return safe_abs_or_panic(a, "gcd_binary"); }
+
+    let mut u = safe_abs_or_panic(a, "gcd_binary");
+    let mut v = safe_abs_or_panic(b, "gcd_binary");
 
     // Remove common factors of 2
     let shift = super.bits.ctz(u as UInt64).min(super.bits.ctz(v as UInt64));
@@ -174,17 +207,37 @@ public fn gcd_binary(a: Int, b: Int) -> Int{>= 0} {
 
 // Least common multiple
 // lcm(a, b) = |a * b| / gcd(a, b)
+//
+// Panics if either input is `Int.MIN`. Use `try_lcm` for
+// fallible failure handling.
 public fn lcm(a: Int, b: Int) -> Int{>= 0} {
     if a == 0 || b == 0 { return 0; }
     let g = gcd(a, b);
-    let abs_a = if a < 0 { -a } else { a };
-    let abs_b = if b < 0 { -b } else { b };
+    let abs_a = safe_abs_or_panic(a, "lcm");
+    let abs_b = safe_abs_or_panic(b, "lcm");
     (abs_a / g) * abs_b  // Divide first to avoid overflow
+}
+
+/// Fallible counterpart to `lcm`. Returns `None` if either input
+/// is `Int.MIN`.
+public fn try_lcm(a: Int, b: Int) -> Maybe<Int> {
+    if a == Int.MIN || b == Int.MIN {
+        return None;
+    }
+    Some(lcm(a, b))
 }
 
 // Extended Euclidean algorithm
 // Returns (g, x, y) such that a*x + b*y = g = gcd(a, b)
+//
+// Panics if `a == Int.MIN` (its absolute value is needed for the
+// b == 0 fast path's normalization). Other Int.MIN handling
+// concerns are subsumed by the loop's arithmetic, but we conservatively
+// reject Int.MIN to align with `gcd` / `gcd_binary` / `lcm`.
 public fn gcd_extended(a: Int, b: Int) -> (Int, Int, Int) {
+    if a == Int.MIN || b == Int.MIN {
+        panic("gcd_extended: Int.MIN inputs are unsupported (|Int.MIN| unrepresentable); use try_gcd_extended");
+    }
     if b == 0 {
         return (if a < 0 { -a } else { a }, if a < 0 { -1 } else { 1 }, 0);
     }
@@ -220,10 +273,24 @@ public fn gcd_extended(a: Int, b: Int) -> (Int, Int, Int) {
     }
 }
 
+/// Fallible counterpart to `gcd_extended`. Returns `None` if either
+/// input is `Int.MIN`.
+public fn try_gcd_extended(a: Int, b: Int) -> Maybe<(Int, Int, Int)> {
+    if a == Int.MIN || b == Int.MIN {
+        return None;
+    }
+    Some(gcd_extended(a, b))
+}
+
 // Modular multiplicative inverse
 // Returns x such that (a * x) mod m = 1
-// Returns Maybe.None if gcd(a, m) != 1
+// Returns Maybe.None if gcd(a, m) != 1 OR if `a == Int.MIN`
+// (its absolute value is unrepresentable). The refinement `m: Int{> 0}`
+// already excludes `m == Int.MIN`.
 public fn mod_inverse(a: Int, m: Int{> 0}) -> Maybe<Int> {
+    if a == Int.MIN {
+        return Maybe.None;
+    }
     let (g, x, _) = gcd_extended(a, m);
     if g != 1 {
         Maybe.None
