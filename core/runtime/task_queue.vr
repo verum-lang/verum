@@ -147,7 +147,7 @@ implement<T> RingBuffer<T> {
         let ptr = os_alloc(layout.size(), layout.align()) as &unsafe mut T;
 
         if ptr.is_null() {
-            panic("Failed to allocate RingBuffer");
+            panic(f"RingBuffer.new: os_alloc returned null for {layout.size()} bytes (capacity={cap}, elem_size={Layout.new::<T>().size()})");
         }
 
         Self {
@@ -194,7 +194,7 @@ implement<T> RingBuffer<T> {
         let new_cap = next_power_of_two(new_capacity.max(self.capacity * 2));
 
         if new_cap > MAX_CAPACITY {
-            panic("RingBuffer capacity overflow");
+            panic(f"RingBuffer.grow: requested capacity {new_cap} exceeds MAX_CAPACITY {MAX_CAPACITY}");
         }
 
         let new_buffer = Self.new(new_cap);
@@ -247,7 +247,7 @@ implement<T: Send> DequeInner<T> {
         let indices = os_alloc(indices_layout.size(), indices_layout.align()) as &unsafe mut UInt64;
 
         if indices.is_null() {
-            panic("Failed to allocate DequeInner indices");
+            panic(f"DequeInner.new: os_alloc returned null for {indices_layout.size()} bytes (DequeInner indices, capacity={capacity})");
         }
 
         // Initialize to 0
@@ -834,7 +834,7 @@ implement<T: Send> BoundedQueue<T> {
         let slots = os_alloc(total_size, 64) as &unsafe mut QueueSlot<T>;
 
         if slots.is_null() {
-            panic("Failed to allocate BoundedQueue slots");
+            panic(f"BoundedQueue.new: os_alloc returned null for {total_size} bytes (capacity={cap}, slot_size={slot_size})");
         }
 
         // Initialize slots with sequence numbers
@@ -849,7 +849,7 @@ implement<T: Send> BoundedQueue<T> {
         // Allocate head/tail indices (cache-line separated)
         let indices = os_alloc(128, 64) as &unsafe mut UInt64;  // 2 cache lines
         if indices.is_null() {
-            panic("Failed to allocate BoundedQueue indices");
+            panic(f"BoundedQueue.new: os_alloc returned null for 128 bytes (head/tail indices, capacity={cap})");
         }
 
         unsafe {
