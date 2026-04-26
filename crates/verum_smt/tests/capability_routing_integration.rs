@@ -112,9 +112,10 @@ fn verify_strategy_rejects_solver_specific_names() {
     // z3/cvc5 in attribute values are no longer recognized.
     assert_eq!(VerifyStrategy::from_attribute_value("z3"), None);
     assert_eq!(VerifyStrategy::from_attribute_value("cvc5"), None);
-    // Semantic aliases still work.
+    // Semantic aliases still work. `reliable` is its own ladder rung
+    // since the VUVA §12 split (no longer a `Thorough` alias).
     assert_eq!(VerifyStrategy::from_attribute_value("fast"), Some(VerifyStrategy::Fast));
-    assert_eq!(VerifyStrategy::from_attribute_value("reliable"), Some(VerifyStrategy::Thorough));
+    assert_eq!(VerifyStrategy::from_attribute_value("reliable"), Some(VerifyStrategy::Reliable));
 }
 
 // ============================================================================

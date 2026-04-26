@@ -348,6 +348,15 @@ impl SmtBackendSwitcher {
                 self.current = BackendChoice::Capability;
                 self.solve(assertions)
             }
+            VerifyStrategy::ComplexityTyped => {
+                // ComplexityTyped (VFE-8 V0): bounded-arithmetic obligations
+                // are routed through the capability system; the chosen
+                // backend filters by the V_0 / V_1 / S^1_2 / V_NP / V_PH /
+                // IΔ_0 stratum that the user pinned at the pragma layer.
+                // UNKNOWN → conservative accept upstream.
+                self.current = BackendChoice::Capability;
+                self.solve(assertions)
+            }
             VerifyStrategy::Formal => {
                 // Default: route via the capability system. The compiler
                 // picks the best available technique for the goal's theory.
@@ -372,6 +381,34 @@ impl SmtBackendSwitcher {
                 // Certified: reliable + certificate materialisation +
                 // kernel recheck. Divergence is a hard error. Required
                 // for exportable proof certificates.
+                self.solve_cross_validate(assertions)
+            }
+            VerifyStrategy::CoherentStatic => {
+                // CoherentStatic (VFE-6 V1 weak): α-side discharged
+                // through the certified pipeline (cross-validation +
+                // certificate); ε-side is the symbolic ε-claim attached
+                // at @enact and is checked statically without an extra
+                // SMT round. Routes through cross-validation so the
+                // α-cert is materialised consistently with `Certified`.
+                self.solve_cross_validate(assertions)
+            }
+            VerifyStrategy::CoherentRuntime => {
+                // CoherentRuntime (VFE-6 V1 hybrid): α-side is the same
+                // certified path as CoherentStatic; the ε-side is wired
+                // to a runtime monitor (`core.action.coherence_monitor`)
+                // so no additional compile-time SMT round is needed for
+                // ε. The runtime emission happens upstream in the
+                // compiler wrapper (gated on
+                // `strategy.requires_runtime_epsilon_monitor()`).
+                self.solve_cross_validate(assertions)
+            }
+            VerifyStrategy::Coherent => {
+                // Coherent (VFE-6 V1 strict): bidirectional α/ε check.
+                // Both axes are discharged at compile time, both
+                // certificates are kernel-rechecked. Portfolio mode
+                // because the ε-side benefits from race semantics
+                // (the symbolic ε-obligation is often easier on CVC5).
+                self.current = BackendChoice::Portfolio;
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::Synthesize => {
