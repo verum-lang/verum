@@ -190,3 +190,143 @@ fn empty_module_passes_without_diagnostics() {
     assert!(result.success);
     assert_eq!(pass.diagnostics().len(), 0);
 }
+
+// =============================================================================
+// V2 (#193) — descend into impl-block methods
+// =============================================================================
+
+use verum_ast::Type;
+use verum_ast::decl::{
+    FunctionBody, FunctionDecl, FunctionParam, ImplDecl, ImplItem, ImplItemKind, ImplKind,
+};
+
+fn make_function_with_attrs(name: &str, attrs: Vec<Attribute>) -> FunctionDecl {
+    let mut a_list: List<Attribute> = List::new();
+    for a in attrs {
+        a_list.push(a);
+    }
+    FunctionDecl {
+        visibility: Visibility::Public,
+        is_async: false,
+        is_meta: false,
+        stage_level: 0,
+        is_pure: false,
+        is_generator: false,
+        is_cofix: false,
+        is_unsafe: false,
+        is_transparent: false,
+        is_variadic: false,
+        extern_abi: Maybe::None,
+        name: ident(name),
+        generics: List::new(),
+        params: List::<FunctionParam>::new(),
+        return_type: Maybe::None,
+        throws_clause: Maybe::None,
+        std_attr: Maybe::None,
+        contexts: List::new(),
+        generic_where_clause: Maybe::None,
+        meta_where_clause: Maybe::None,
+        requires: List::new(),
+        ensures: List::new(),
+        attributes: a_list,
+        body: Maybe::<FunctionBody>::None,
+        span: span(),
+    }
+}
+
+fn impl_block_with(items: Vec<ImplItem>) -> ImplDecl {
+    let mut item_list: List<ImplItem> = List::new();
+    for it in items {
+        item_list.push(it);
+    }
+    ImplDecl {
+        is_unsafe: false,
+        generics: List::new(),
+        kind: ImplKind::Inherent(Type::int(span())),
+        generic_where_clause: Maybe::None,
+        meta_where_clause: Maybe::None,
+        specialize_attr: Maybe::None,
+        items: item_list,
+        span: span(),
+    }
+}
+
+fn impl_function_item(func: FunctionDecl) -> ImplItem {
+    ImplItem {
+        attributes: List::new(),
+        visibility: Visibility::Public,
+        kind: ImplItemKind::Function(func),
+        span: span(),
+    }
+}
+
+#[test]
+fn r1_fires_on_impl_method_with_brand_prefix_name() {
+    // implement Foo {
+    //     @framework(diakrisis, "...") fn diakrisis_step() {}
+    // }
+    let bad_method = make_function_with_attrs(
+        "diakrisis_step",
+        vec![framework_attr("diakrisis")],
+    );
+    let impl_decl = impl_block_with(vec![impl_function_item(bad_method)]);
+    let module = module_with(vec![ItemKind::Impl(impl_decl)]);
+    let mut pass = HygieneRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    // R1 is Warning ⇒ pass still succeeds.
+    assert!(result.success);
+    let r1_count = pass
+        .diagnostics()
+        .iter()
+        .filter(|d| d.rule == "R1")
+        .count();
+    assert_eq!(r1_count, 1);
+    assert!(
+        pass.diagnostics()[0]
+            .message
+            .as_str()
+            .contains("diakrisis_step")
+    );
+}
+
+#[test]
+fn r3_fires_on_impl_methods_constituting_two_corpora() {
+    // Five impl-block functions per corpus, two corpora ⇒ R3.
+    let mut impl_items: Vec<ImplItem> = Vec::new();
+    for i in 0..5 {
+        impl_items.push(impl_function_item(make_function_with_attrs(
+            &format!("d_{}", i),
+            vec![framework_attr("diakrisis")],
+        )));
+        impl_items.push(impl_function_item(make_function_with_attrs(
+            &format!("a_{}", i),
+            vec![framework_attr("actic")],
+        )));
+    }
+    let impl_decl = impl_block_with(impl_items);
+    let module = module_with(vec![ItemKind::Impl(impl_decl)]);
+    let mut pass = HygieneRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success, "R3 must error on two impl-resident corpora");
+    let r3_count = pass
+        .diagnostics()
+        .iter()
+        .filter(|d| d.rule == "R3")
+        .count();
+    assert_eq!(r3_count, 1);
+}
+
+#[test]
+fn impl_methods_without_framework_unaffected() {
+    // No @framework on impl methods ⇒ no hygiene check fires.
+    let m1 = make_function_with_attrs("plain_method", vec![]);
+    let impl_decl = impl_block_with(vec![impl_function_item(m1)]);
+    let module = module_with(vec![ItemKind::Impl(impl_decl)]);
+    let mut pass = HygieneRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(result.success);
+    assert_eq!(pass.diagnostics().len(), 0);
+}

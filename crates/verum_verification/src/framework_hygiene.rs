@@ -294,6 +294,40 @@ impl HygieneRecheckPass {
             .filter(|d| d.severity == HygieneSeverity::Error)
             .count()
     }
+
+    /// Check one ItemKind for R1+R2 + accumulate its corpus into
+    /// the meta-classifier counter. Used by both the top-level
+    /// item walker and the V5 impl-block recursion.
+    fn check_one_item_kind(
+        &mut self,
+        kind: &ItemKind,
+        framework_corpus_axiom_count: &mut std::collections::HashMap<Text, usize>,
+    ) {
+        let (name, attrs) = match item_name_and_attrs(kind) {
+            Some(p) => p,
+            None => return,
+        };
+        let mut item_has_framework = false;
+        for attr in attrs.iter() {
+            if let Some(corpus) = framework_corpus(attr) {
+                item_has_framework = true;
+                *framework_corpus_axiom_count.entry(corpus).or_insert(0) += 1;
+            }
+            if let Some(epsilon) = enact_epsilon(attr) {
+                if let Some(d) = validate_epsilon_canonicalisable(epsilon.as_str()) {
+                    self.diagnostics.push(d);
+                }
+            }
+        }
+        // R1 fires only on items that *carry* a @framework
+        // annotation — the rule is about framework-author
+        // hygiene, not user-code hygiene.
+        if item_has_framework {
+            if let Some(d) = validate_foundation_neutral_name(name.as_str()) {
+                self.diagnostics.push(d);
+            }
+        }
+    }
 }
 
 impl VerificationPass for HygieneRecheckPass {
@@ -310,32 +344,30 @@ impl VerificationPass for HygieneRecheckPass {
             std::collections::HashMap::new();
 
         for item in &module.items {
-            let (name, attrs) = match item_name_and_attrs(&item.kind) {
-                Some(p) => p,
-                None => continue,
-            };
-            let mut item_has_framework = false;
-            let mut item_corpus: Option<Text> = None;
-            for attr in attrs.iter() {
-                if let Some(corpus) = framework_corpus(attr) {
-                    item_has_framework = true;
-                    item_corpus = Some(corpus.clone());
-                    *framework_corpus_axiom_count.entry(corpus).or_insert(0) += 1;
-                }
-                if let Some(epsilon) = enact_epsilon(attr) {
-                    if let Some(d) = validate_epsilon_canonicalisable(epsilon.as_str()) {
-                        self.diagnostics.push(d);
+            self.check_one_item_kind(
+                &item.kind,
+                &mut framework_corpus_axiom_count,
+            );
+            // V2 (#193) — descend into impl blocks. Methods inside
+            // `implement Foo { fn method(...) { ... } }` can carry
+            // @framework / @enact attributes; these were invisible
+            // to the V0 walker.
+            if let ItemKind::Impl(impl_decl) = &item.kind {
+                for impl_item in impl_decl.items.iter() {
+                    if let verum_ast::decl::ImplItemKind::Function(func) =
+                        &impl_item.kind
+                    {
+                        // Pretend the impl-item is a top-level
+                        // Function for the purposes of the
+                        // hygiene walker — we want the same
+                        // R1/R2/R3 treatment.
+                        let inner_kind = ItemKind::Function(func.clone());
+                        self.check_one_item_kind(
+                            &inner_kind,
+                            &mut framework_corpus_axiom_count,
+                        );
                     }
                 }
-            }
-            // R1 fires only on items that *carry* a @framework
-            // annotation — the rule is about framework-author
-            // hygiene, not user-code hygiene.
-            if item_has_framework {
-                if let Some(d) = validate_foundation_neutral_name(name.as_str()) {
-                    self.diagnostics.push(d);
-                }
-                let _ = item_corpus; // suppress unused-var warning for V0
             }
         }
 
