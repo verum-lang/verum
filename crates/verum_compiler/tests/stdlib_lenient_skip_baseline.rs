@@ -235,3 +235,37 @@ fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
         skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
     );
 }
+
+/// Cross-domain coverage: runtime/recovery + retry primitives.  This
+/// fixture pulls in a different stdlib slice from the SQLite-heavy
+/// fixtures above — async/spawn_config, runtime/recovery (the
+/// supervisor-tree-side counterpart to async/spawn_config), the
+/// `RecoveryBackoffStrategy` / `RuntimeRetryConfig` / `JitterConfig`
+/// / `RetryPredicate` types that landed renamed during #162 — plus
+/// the foundational base/result and core.* infrastructure that
+/// async-related modules transitively need.
+///
+/// Specifically guards against any regression that re-introduces a
+/// stdlib-loading SKIP in `core/runtime/recovery.vr`,
+/// `core/async/spawn_config.vr`, or any of the runtime/* siblings
+/// that share their type registrations with these modules.
+#[test]
+#[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
+fn stdlib_loading_emits_no_lenient_skips_runtime_retry() {
+    let root = workspace_root();
+    let target = root.join("vcs/specs/core/runtime/retry_minimal_test.vr");
+    if !target.is_file() {
+        return;
+    }
+
+    let (code, skips) = collect_lenient_skips(&target);
+    assert!(
+        skips.is_empty(),
+        "runtime/retry smoke triggered {} lenient `SKIP` warning(s) during \
+         stdlib loading (exit code: {:?}).\n\n{}\n\nFirst few warnings:\n{}",
+        skips.len(),
+        code,
+        FAILURE_HINT,
+        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+    );
+}
