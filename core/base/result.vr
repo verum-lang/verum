@@ -506,7 +506,11 @@ implement<T, E> FromResidual<Result<Never, E>> for Result<T, E> {
     fn from_residual(residual: Result<Never, E>) -> Result<T, E> {
         match residual {
             Err(e) => Err(e),
-            Ok(_) => unreachable(),
+            // `Result<Never, E>` cannot be `Ok(_)` because `Never`
+            // is uninhabited — this branch is provably dead at every
+            // call site. Use the UB-hint variant so LLVM elides the
+            // tag test entirely along the `?`-propagation hot path.
+            Ok(_) => unsafe { unreachable_unchecked() },
         }
     }
 }
@@ -517,7 +521,8 @@ where E: From<F> {
     fn from_residual(residual: Result<Never, F>) -> Result<T, E> {
         match residual {
             Err(f) => Err(E.from(f)),
-            Ok(_) => unreachable(),
+            // Same uninhabited-Never reasoning as above.
+            Ok(_) => unsafe { unreachable_unchecked() },
         }
     }
 }
@@ -586,6 +591,18 @@ implement<T, E> Result<T, E> {
         config: RetryOptions<E>
     ) -> Result<T, E>
     where E: Clone {
+        // Pre-condition: `max_attempts >= 1`. Calling with 0 (or
+        // a negative value) would skip the loop entirely and
+        // panic on the post-loop fallthrough — a poor failure
+        // mode for a misconfiguration the API can detect at
+        // entry. Assert so the contract violation surfaces with
+        // a precise message instead of "retry: no attempts made"
+        // miles below.
+        assert(
+            config.max_attempts >= 1,
+            "Result.retry_with_strategy: max_attempts must be >= 1",
+        );
+
         let mut attempt = 0;
         let mut last_error: Maybe<E> = None;
 
@@ -607,10 +624,14 @@ implement<T, E> Result<T, E> {
             }
         }
 
-        // Should not reach here, but handle edge case
+        // Provably dead given `max_attempts >= 1` (asserted
+        // above): the loop body always returns on the final
+        // iteration. Kept as a defensive fallback so any future
+        // refactor of the loop exit conditions still produces a
+        // sensible diagnostic instead of UB.
         match last_error {
             Some(e) => Err(e),
-            None => panic("retry: no attempts made"),
+            None => panic("retry: invariant violation — loop exited without returning"),
         }
     }
 
@@ -1639,7 +1660,12 @@ public fn transpose_maybe<T, E>(maybe: Maybe<Result<T, E>>) -> Result<Maybe<T>, 
 /// assert_eq(collect_results(results.iter()), Err("bad"));
 /// ```
 public fn collect_results<T, E, I: Iterator<Item = Result<T, E>>>(mut iter: I) -> Result<List<T>, E> {
-    let mut collected: List<T> = List.new();
+    // Pre-allocate using the iterator's size hint when available.
+    // For exact-size iterators (`(n, Some(n))`), this avoids the
+    // entire reallocation chain on the happy path. For loose
+    // hints, the lower bound is still a useful starting capacity.
+    let (lo, _hi) = iter.size_hint();
+    let mut collected: List<T> = List.with_capacity(lo);
     loop {
         match iter.next() {
             None => break,
@@ -1670,8 +1696,13 @@ public fn collect_results<T, E, I: Iterator<Item = Result<T, E>>>(mut iter: I) -
 /// assert_eq(errs, ["a", "b"]);
 /// ```
 public fn partition_results<T, E, I: Iterator<Item = Result<T, E>>>(mut iter: I) -> (List<T>, List<E>) {
-    let mut oks: List<T> = List.new();
-    let mut errs: List<E> = List.new();
+    // Pre-allocate by the iterator's lower-bound size hint. We
+    // can't predict the Ok/Err split, so we hint each list at
+    // the same conservative cap; even if the actual split is
+    // skewed, this still beats starting at zero capacity.
+    let (lo, _hi) = iter.size_hint();
+    let mut oks: List<T> = List.with_capacity(lo);
+    let mut errs: List<E> = List.with_capacity(lo);
     loop {
         match iter.next() {
             None => break,

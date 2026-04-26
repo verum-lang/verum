@@ -630,7 +630,12 @@ public fn flatten_maybe_maybe<T>(m: Maybe<Maybe<T>>) -> Maybe<T> {
 /// assert_eq(collect_maybe(items.iter()), None);
 /// ```
 public fn collect_maybe<T, I: Iterator<Item = Maybe<T>>>(mut iter: I) -> Maybe<List<T>> {
-    let mut collected: List<T> = List.new();
+    // Pre-allocate using the iterator's size hint. For exact-size
+    // iterators (`(n, Some(n))`) we get a single allocation on the
+    // happy path where every element is `Some`; loose hints still
+    // beat starting at zero capacity.
+    let (lo, _hi) = iter.size_hint();
+    let mut collected: List<T> = List.with_capacity(lo);
     loop {
         match iter.next() {
             None => break,
@@ -681,7 +686,13 @@ where T: Clone
 /// assert_eq(flatten_maybe_iter(items), [1, 2]);
 /// ```
 public fn flatten_maybe_iter<T, I: Iterator<Item = Maybe<T>>>(mut iter: I) -> List<T> {
-    let mut result: List<T> = List.new();
+    // Pre-allocate by the iterator's lower-bound size hint. The
+    // worst case here (every element `None`) wastes the hint
+    // capacity, but that's bounded by the iterator length and is
+    // strictly better than the alternative (per-Some realloc
+    // chain on the common case where Nones are rare).
+    let (lo, _hi) = iter.size_hint();
+    let mut result: List<T> = List.with_capacity(lo);
     loop {
         match iter.next() {
             None => break,
