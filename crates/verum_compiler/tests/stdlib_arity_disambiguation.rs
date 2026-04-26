@@ -35,8 +35,8 @@
 //! and asserts no `wrong number of arguments for write|pread|pwrite|
 //! send|recv|sendto|getsockopt` lenient warnings appear in stderr.
 
-use std::path::PathBuf;
-use std::process::Command;
+mod stdlib_support;
+use stdlib_support::{vtest_run_capture, workspace_root};
 
 const FIXTURE: &str = r#"// @test: run-interpreter
 // @tier: 0
@@ -60,49 +60,6 @@ const ARITY_SENSITIVE_NAMES: &[&str] = &[
     "getsockopt", "safe_getsockopt",
 ];
 
-fn workspace_root() -> PathBuf {
-    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for ancestor in crate_dir.ancestors() {
-        if ancestor.join("Cargo.lock").is_file() && ancestor.join("core").is_dir() {
-            return ancestor.to_path_buf();
-        }
-    }
-    panic!(
-        "workspace root with Cargo.lock and core/ not found from {}",
-        crate_dir.display()
-    );
-}
-
-fn locate_vtest(root: &std::path::Path) -> PathBuf {
-    let release = root.join("target/release/vtest");
-    if release.is_file() {
-        return release;
-    }
-    let debug = root.join("target/debug/vtest");
-    if debug.is_file() {
-        return debug;
-    }
-    panic!(
-        "vtest binary not found at target/release/vtest or target/debug/vtest \
-         under {}; run `cargo build -p vtest` first",
-        root.display()
-    );
-}
-
-fn run_fixture(fixture_path: &std::path::Path) -> (Option<i32>, String) {
-    let root = workspace_root();
-    let vtest = locate_vtest(&root);
-    let output = Command::new(&vtest)
-        .args(["run", fixture_path.to_str().unwrap()])
-        .current_dir(&root)
-        .output()
-        .expect("failed to run vtest");
-    (
-        output.status.code(),
-        String::from_utf8_lossy(&output.stderr).into_owned(),
-    )
-}
-
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_preserves_alternative_arities() {
@@ -112,9 +69,9 @@ fn stdlib_loading_preserves_alternative_arities() {
     let fixture = dir.join("arity_disambiguation_preserved.vr");
     std::fs::write(&fixture, FIXTURE).expect("write fixture");
 
-    let (code, stderr) = run_fixture(&fixture);
+    let out = vtest_run_capture(&fixture);
 
-    let arity_warnings: Vec<&str> = stderr
+    let arity_warnings: Vec<&str> = out.stderr
         .lines()
         .filter(|l| l.contains("[lenient]") && l.contains("wrong number of arguments"))
         .filter(|l| ARITY_SENSITIVE_NAMES.iter().any(|n| {
@@ -141,10 +98,10 @@ fn stdlib_loading_preserves_alternative_arities() {
     );
 
     assert_eq!(
-        code,
+        out.exit_code,
         Some(0),
         "fixture exited with non-zero; stderr:\n{}",
-        stderr,
+        out.stderr,
     );
 
     let _ = std::fs::remove_file(&fixture);
