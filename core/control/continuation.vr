@@ -96,11 +96,64 @@ public fn cc_is_value(t: CcTerm) -> Bool {
 }
 
 // =============================================================================
-// 4. Capture-avoiding substitution
+// 4. Free-variable analysis
 // =============================================================================
 
-/// Substitute `from` with `to` everywhere it appears free.
-/// Skips bound-variable shadowing (Lam param, Shift binder).
+/// Check whether `name` occurs as a FREE variable in `t` — that is,
+/// not bound by any enclosing `Lam` or `Shift` with the same name.
+/// Required by capture-avoiding substitution to decide when α-renaming
+/// is necessary.
+public fn cc_occurs_free(t: CcTerm, name: Text) -> Bool {
+    match t {
+        CcTerm.Const { payload: _ } => false,
+        CcTerm.Var { name: n } => n == name,
+        CcTerm.Lam { param, body } => {
+            if param == name {
+                false  // shadowed by inner binder
+            } else {
+                cc_occurs_free(*body, name)
+            }
+        },
+        CcTerm.App { func, arg } =>
+            cc_occurs_free(*func, name) || cc_occurs_free(*arg, name),
+        CcTerm.Reset { inner } => cc_occurs_free(*inner, name),
+        CcTerm.Shift { binder, body } => {
+            if binder == name {
+                false  // shadowed by inner binder
+            } else {
+                cc_occurs_free(*body, name)
+            }
+        },
+    }
+}
+
+/// Generate a fresh variable name based on `base` that does not
+/// occur free in `t1` or `t2`. Appends "'" repeatedly until a free
+/// name is found. Used during α-renaming inside `cc_substitute` to
+/// avoid capture.
+fn cc_fresh_name(base: Text, t1: CcTerm, t2: CcTerm) -> Text {
+    let mut name = base;
+    while cc_occurs_free(t1, name) || cc_occurs_free(t2, name) {
+        name = name + "'";
+    }
+    name
+}
+
+// =============================================================================
+// 5. Capture-avoiding substitution
+// =============================================================================
+
+/// Substitute `from` with `to` everywhere it appears free in `t`.
+///
+/// CAPTURE-AVOIDING: when descending under a binder `λparam. body` (or
+/// `shift param. body`), if `param` would capture a free variable in
+/// `to`, the binder is first α-renamed to a fresh name. Without this
+/// step, substituting `Var("y")` for `x` in `λy. x` would naively
+/// yield `λy. y` — the outer `y` capturing the substituted-in `y` —
+/// silently changing the meaning of the term. This was the bug in
+/// the previous implementation, which only handled the simpler case
+/// of shadowing (skipping substitution under a binder of the same
+/// name as `from`) but never α-renamed.
 public fn cc_substitute(t: CcTerm, from: Text, to: CcTerm) -> CcTerm {
     match t {
         CcTerm.Const { payload } => CcTerm.Const { payload },
@@ -109,7 +162,14 @@ public fn cc_substitute(t: CcTerm, from: Text, to: CcTerm) -> CcTerm {
         },
         CcTerm.Lam { param, body } => {
             if param == from {
+                // Shadowed: `from` cannot occur free under this binder.
                 CcTerm.Lam { param, body }
+            } else if cc_occurs_free(to, param) {
+                // Capture would occur: α-rename `param` to a fresh
+                // name before substituting under it.
+                let fresh = cc_fresh_name(param, *body, to);
+                let renamed_body = cc_substitute(*body, param, cc_var(fresh));
+                cc_lam(fresh, cc_substitute(renamed_body, from, to))
             } else {
                 cc_lam(param, cc_substitute(*body, from, to))
             }
@@ -120,6 +180,10 @@ public fn cc_substitute(t: CcTerm, from: Text, to: CcTerm) -> CcTerm {
         CcTerm.Shift { binder, body } => {
             if binder == from {
                 CcTerm.Shift { binder, body }
+            } else if cc_occurs_free(to, binder) {
+                let fresh = cc_fresh_name(binder, *body, to);
+                let renamed_body = cc_substitute(*body, binder, cc_var(fresh));
+                cc_shift(fresh, cc_substitute(renamed_body, from, to))
             } else {
                 cc_shift(binder, cc_substitute(*body, from, to))
             }
