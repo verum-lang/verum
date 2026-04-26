@@ -135,4 +135,13 @@ impl VerificationPass for BoundaryDetectionPass {
     fn name(&self) -> &str {
         "boundary_detection"
     }
+
+    /// V8 (#208, B7) — boundary detection is advisory: a "failure"
+    /// here means the boundary annotations are inconsistent, not
+    /// that the program is unsound. Mark as Informational so the
+    /// pipeline doesn't short-circuit subsequent passes when the
+    /// halt policy is `PipelineMode::Default`.
+    fn classification(&self) -> super::PassClassification {
+        super::PassClassification::Informational
+    }
 }

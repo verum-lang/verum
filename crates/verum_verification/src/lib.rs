@@ -288,10 +288,12 @@ pub use metrics::{
     nesting_from_cfg,
 };
 pub use passes::{
-    KernelRecheckPass, SmtVerificationPass, SmtVerificationResult, SmtVerificationStats,
-    TransitionRecommendation, TransitionRecommendationPass, VCStatus, VCVerificationResult,
-    VerificationError, VerificationPass, VerificationPipeline, VerificationResult,
+    KernelRecheckPass, PassClassification, SmtVerificationPass, SmtVerificationResult,
+    SmtVerificationStats, TransitionRecommendation, TransitionRecommendationPass, VCStatus,
+    VCVerificationResult, VerificationError, VerificationPass, VerificationPipeline,
+    VerificationResult,
 };
+pub use passes::pipeline::PipelineMode;
 pub use proof_validator::{
     CertificateFormat, HypothesisContext, ProofCertificateGenerator, ProofValidator,
     ValidationConfig, ValidationError, ValidationResult,

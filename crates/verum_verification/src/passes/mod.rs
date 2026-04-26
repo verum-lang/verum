@@ -104,6 +104,31 @@ impl VerificationResult {
     }
 }
 
+/// V8 (#208, B7) — pass classification for the
+/// fail-fast / aggregate decision.
+///
+/// The default classification is [`PassClassification::SoundnessCritical`]
+/// so unmodified passes preserve pre-V8 fail-fast semantics. Each
+/// pass implementer can opt into [`PassClassification::Informational`]
+/// to indicate "diagnostic-only — don't halt the pipeline if I
+/// fail". The pipeline composer reads this classification together
+/// with its [`crate::passes::pipeline::PipelineMode`] to decide
+/// whether to halt on failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PassClassification {
+    /// Halts the pipeline on failure when run under
+    /// `PipelineMode::Default`. Soundness-critical passes are those
+    /// whose failure invalidates the assumptions of every
+    /// downstream pass — kernel formation rules, refinement-
+    /// stratification rules, framework-conflict R3/R4 errors.
+    SoundnessCritical,
+    /// Never halts the pipeline. Diagnostic-only passes whose
+    /// failure-shape is informative but not soundness-fatal:
+    /// boundary detection (the boundary is wrong, not the
+    /// program), transition recommendation (advisory).
+    Informational,
+}
+
 /// Verification pass trait
 pub trait VerificationPass {
     /// Run the pass on a module
@@ -115,6 +140,15 @@ pub trait VerificationPass {
 
     /// Name of this pass
     fn name(&self) -> &str;
+
+    /// V8 (#208, B7) — pass classification. Default
+    /// `SoundnessCritical` to preserve pre-V8 fail-fast semantics
+    /// for unmodified passes; passes that want their failures to
+    /// be aggregated rather than halt the pipeline override to
+    /// [`PassClassification::Informational`].
+    fn classification(&self) -> PassClassification {
+        PassClassification::SoundnessCritical
+    }
 }
 
 // =============================================================================
