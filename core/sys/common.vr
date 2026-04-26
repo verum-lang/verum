@@ -46,15 +46,32 @@ implement OSError {
         self.code == 0
     }
 
-    /// Check if this is EAGAIN/EWOULDBLOCK.
+    /// Check if this is EAGAIN / EWOULDBLOCK.
+    ///
+    /// errno values for "would block" differ across platforms:
+    ///   * Linux:   EAGAIN = EWOULDBLOCK = 11
+    ///   * macOS:   EAGAIN = EWOULDBLOCK = 35
+    ///   * Windows: WSAEWOULDBLOCK = 10035 (winsock-side)
+    ///
+    /// Verum's `core/io/protocols.vr::from_raw_os_error` uses
+    /// platform-conditioned tables (#67) — this helper accepts ALL
+    /// known would-block codes since OSError is the cross-platform
+    /// shim type (the actual platform-conditional dispatch lives in
+    /// the per-platform errno module). Including all known values is
+    /// safe here because no other errno on any platform reuses 11,
+    /// 35, or 10035 for a different meaning.
     fn would_block(&self) -> Bool {
-        // EAGAIN = 11 on Linux, EWOULDBLOCK = 35 on macOS
-        self.code == 11 || self.code == 35
+        self.code == 11      // Linux EAGAIN/EWOULDBLOCK
+            || self.code == 35   // macOS EAGAIN/EWOULDBLOCK
+            || self.code == 10035 // Windows WSAEWOULDBLOCK
     }
 
     /// Check if this is EINTR (interrupted system call).
+    ///
+    /// EINTR is 4 on Linux / macOS / Windows POSIX shim — uniform
+    /// across the platforms Verum supports.
     fn interrupted(&self) -> Bool {
-        self.code == 4 // EINTR is 4 on most Unix systems
+        self.code == 4
     }
 }
 
