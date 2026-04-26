@@ -387,6 +387,21 @@ enum Commands {
         check: bool,
         #[clap(long)]
         verbose: bool,
+        /// Read source from stdin and write the formatted output to
+        /// stdout. The standard editor format-on-save plumbing
+        /// (rustfmt, gofmt, prettier, ruff format -). Mutually
+        /// exclusive with `--check`.
+        #[clap(long)]
+        stdin: bool,
+        /// Filename hint for stdin mode — used for diagnostics and
+        /// future config resolution. The file at this path is *not*
+        /// read.
+        #[clap(long, value_name = "PATH")]
+        stdin_filename: Option<Text>,
+        /// Worker thread count for the parallel file scanner. `0`
+        /// = sequential. Default uses `rayon::current_num_threads()`.
+        #[clap(long, value_name = "N")]
+        threads: Option<usize>,
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
@@ -1468,8 +1483,31 @@ fn run_command(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Commands::Fmt { check, verbose, feature_overrides } => {
+        Commands::Fmt {
+            check,
+            verbose,
+            stdin,
+            stdin_filename,
+            threads,
+            feature_overrides,
+        } => {
             feature_overrides::install(feature_overrides);
+            if stdin {
+                if check {
+                    return Err(CliError::InvalidArgument(
+                        "`--check` cannot be combined with `--stdin`; \
+                         pipe the buffer through and diff externally"
+                            .into(),
+                    ));
+                }
+                return commands::fmt::execute_stdin(stdin_filename.map(|t| t.to_string()));
+            }
+            if let Some(n) = threads {
+                let pool_threads = if n == 0 { 1 } else { n };
+                let _ = rayon::ThreadPoolBuilder::new()
+                    .num_threads(pool_threads)
+                    .build_global();
+            }
             commands::fmt::execute(check, verbose)
         }
         Commands::Lint {
