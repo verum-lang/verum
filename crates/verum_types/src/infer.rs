@@ -35867,39 +35867,86 @@ impl TypeChecker {
         // or when future extensions add `linear`/`affine` keywords.
         // In the common case (all params Omega), the check is a
         // no-op and exits immediately.
-        // QTT enforcement for meta parameters. Meta-parameter
-        // bindings carry Quantity::Zero (erased at runtime); if
-        // the function body uses them at a value position, the
-        // QTT checker flags the violation.
+        // V8 (#235, A.Z.5 §7.6) — Quantitative Type Theory (QTT)
+        // V2 enforcement. Walks the function's parameters + meta-
+        // generics, extracts each binding's declared `Quantity` from
+        // its `@quantity(...)` attribute (V1 surface from Task C5),
+        // walks the body, and validates observed usage against
+        // declared quantities per `qtt_usage::check_usage`.
+        //
+        // Quantity sources:
+        //   • Meta-parameter generics (`@meta` etc.) → `Quantity::Zero`
+        //     (erased at runtime by definition).
+        //   • Regular parameters → read `@quantity(...)` attribute
+        //     via `QuantityAttr::from_attribute`. Default is
+        //     `Quantity::Omega` (unrestricted) per VVA §7.6 — every
+        //     existing function compiles unchanged.
+        //
+        // Body coverage: walks BOTH block.stmts AND block.expr so
+        // mid-block uses contribute to the count, not just the tail.
         {
-            let has_meta = func.generics.iter().any(|g| {
-                matches!(g.kind, verum_ast::ty::GenericParamKind::Meta { .. })
-            });
-            if has_meta {
-                let mut qtt_decls = std::collections::HashMap::new();
-                for g in &func.generics {
-                    if let verum_ast::ty::GenericParamKind::Meta { name, .. } = &g.kind {
-                        qtt_decls.insert(name.name.clone(), crate::ty::Quantity::Zero);
+            // Register meta generics as Zero-quantity (erased).
+            let mut qtt_decls = std::collections::HashMap::new();
+            for g in &func.generics {
+                if let verum_ast::ty::GenericParamKind::Meta { name, .. } = &g.kind {
+                    qtt_decls.insert(name.name.clone(), crate::ty::Quantity::Zero);
+                }
+            }
+            // Register regular params, extracting @quantity(...) when
+            // present. Default Omega when absent.
+            for p in &func.params {
+                if let verum_ast::decl::FunctionParamKind::Regular {
+                    pattern, ..
+                } = &p.kind
+                {
+                    if let verum_ast::pattern::PatternKind::Ident { name, .. } =
+                        &pattern.kind
+                    {
+                        let quantity = extract_quantity_from_attrs(&p.attributes);
+                        qtt_decls.insert(name.name.clone(), quantity);
                     }
                 }
-                // Also register regular params as Omega.
-                for p in &func.params {
-                    if let verum_ast::decl::FunctionParamKind::Regular { pattern, .. } = &p.kind {
-                        if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
-                            qtt_decls.insert(name.name.clone(), crate::ty::Quantity::Omega);
-                        }
-                    }
-                }
+            }
+            // Run QTT validation only when there's something to check —
+            // either a meta-generic (Zero) or an explicit @quantity
+            // attribute. Pure-Omega parameter sets are no-ops.
+            let needs_check = qtt_decls
+                .values()
+                .any(|q| !matches!(q, crate::ty::Quantity::Omega));
+            if needs_check {
                 if let verum_common::Maybe::Some(body) = &func.body {
                     if let verum_ast::decl::FunctionBody::Block(block) = body {
+                        // V2: walk statements + tail expression to get
+                        // full body usage.
+                        let tracked: std::collections::HashSet<verum_common::Text> =
+                            qtt_decls.keys().cloned().collect();
+                        let mut usage = crate::qtt_usage::UsageMap::new();
+                        for stmt in block.stmts.iter() {
+                            // Walk every Stmt::Expr node + Let initialiser
+                            // for usage of tracked bindings.
+                            walk_stmt_for_qtt_usage(&tracked, stmt, &mut usage);
+                        }
                         if let verum_common::Maybe::Some(tail) = &block.expr {
-                            if let Err(violation) = self.check_function_qtt(&qtt_decls, tail) {
-                                tracing::warn!(
-                                    "QTT violation in function '{}': {}",
-                                    func.name.name.as_str(),
-                                    violation
-                                );
-                            }
+                            let tail_usage =
+                                crate::qtt_walker::walk_expr(&tracked, tail);
+                            usage = usage.merge_sequential(tail_usage);
+                        }
+                        if let Err(violation) =
+                            crate::qtt_usage::check_usage(&qtt_decls, &usage)
+                        {
+                            // V2: surface violations as warnings so
+                            // existing test corpus that hasn't migrated
+                            // doesn't break. Future minor bump can
+                            // promote to a hard error once all in-tree
+                            // code is annotated. The diagnostic is
+                            // structurally available; downstream
+                            // tooling (LSP / `verum verify` reports)
+                            // can already key off the `tracing` event.
+                            tracing::warn!(
+                                "QTT violation in function '{}': {}",
+                                func.name.name.as_str(),
+                                violation
+                            );
                         }
                     }
                 }
@@ -55540,6 +55587,92 @@ impl crate::kind_inference::KindInference for TypeChecker {
     }
 }
 
+// ==================== QTT V2 helpers (#235, A.Z.5 §7.6) ====================
+
+/// V8 (#235) — extract the declared QTT [`crate::ty::Quantity`]
+/// from a parameter's attribute list.
+///
+/// Reads the first `@quantity(...)` attribute via
+/// [`verum_ast::attr::QuantityAttr::from_attribute`] and maps the
+/// AST-side enum (`Zero / One / Many`) to the verum_types-side
+/// [`crate::ty::Quantity`] (`Zero / One / Omega / AtMost / Graded`).
+/// Returns `Quantity::Omega` (unrestricted) when no `@quantity`
+/// attribute is present — matches VVA §7.6 default.
+fn extract_quantity_from_attrs(
+    attrs: &verum_common::List<verum_ast::attr::Attribute>,
+) -> crate::ty::Quantity {
+    use verum_ast::attr::{Quantity as AstQty, QuantityAttr};
+    use verum_common::Maybe;
+    for a in attrs.iter() {
+        if let Maybe::Some(parsed) = QuantityAttr::from_attribute(a) {
+            return match parsed.quantity {
+                AstQty::Zero => crate::ty::Quantity::Zero,
+                AstQty::One => crate::ty::Quantity::One,
+                AstQty::Many => crate::ty::Quantity::Omega,
+            };
+        }
+    }
+    crate::ty::Quantity::Omega
+}
+
+/// V8 (#235) — walk a single statement node, accumulating QTT
+/// usage for tracked bindings into `usage`. Per QTT calculus,
+/// statements compose sequentially — each contributes
+/// `merge_sequential` to the running tally.
+///
+/// Recognised statement shapes:
+///   * `Stmt::Expr { expr, .. }` — recurse into expr.
+///   * `Stmt::Let { value, .. }` — recurse into the initialiser.
+///   * `Stmt::LetElse { value, else_block, .. }` — initialiser is
+///     sequential; else_block is taken as a branch (worst-case
+///     accumulated via merge_sequential since the LetElse else
+///     path runs only on pattern-mismatch — pessimistic).
+///   * `Stmt::Defer(expr)` / `Errdefer(expr)` — recurse.
+///   * Other Stmt variants (Item, etc.) — no value-usage, skip.
+fn walk_stmt_for_qtt_usage(
+    tracked: &std::collections::HashSet<verum_common::Text>,
+    stmt: &verum_ast::stmt::Stmt,
+    usage: &mut crate::qtt_usage::UsageMap,
+) {
+    use verum_ast::stmt::StmtKind;
+    match &stmt.kind {
+        StmtKind::Let { value, .. } => {
+            if let verum_common::Maybe::Some(v) = value {
+                let d = crate::qtt_walker::walk_expr(tracked, v);
+                let merged = std::mem::take(usage).merge_sequential(d);
+                *usage = merged;
+            }
+        }
+        StmtKind::LetElse { value, else_block, .. } => {
+            let value_usage = crate::qtt_walker::walk_expr(tracked, value);
+            let merged = std::mem::take(usage).merge_sequential(value_usage);
+            *usage = merged;
+            // else_block is a Block; walk its statements recursively.
+            for s in else_block.stmts.iter() {
+                walk_stmt_for_qtt_usage(tracked, s, usage);
+            }
+            if let verum_common::Maybe::Some(tail) = &else_block.expr {
+                let tail_usage = crate::qtt_walker::walk_expr(tracked, tail);
+                let merged = std::mem::take(usage).merge_sequential(tail_usage);
+                *usage = merged;
+            }
+        }
+        StmtKind::Expr { expr, .. } => {
+            let d = crate::qtt_walker::walk_expr(tracked, expr);
+            let merged = std::mem::take(usage).merge_sequential(d);
+            *usage = merged;
+        }
+        StmtKind::Defer(e) | StmtKind::Errdefer(e) => {
+            let d = crate::qtt_walker::walk_expr(tracked, e);
+            let merged = std::mem::take(usage).merge_sequential(d);
+            *usage = merged;
+        }
+        // Other statement kinds (Item declarations, etc.) don't
+        // produce variable references at this scope.
+        _ => {}
+    }
+}
+
 // ==================== Stack Safety Checks ====================
 // Spec: L0-critical/memory-safety/buffer_overflow/no_stack_overflow
 
@@ -55840,6 +55973,112 @@ fn resolve_primitive_method(recv_ty: &Type, method: &str, arg_count: usize) -> O
 // ---------------------------------------------------------------------------
 // Mount-cycle-detection regression tests (SIGBUS fix, 2026-04-24).
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod qtt_v2_enforcement_tests {
+    //! V8 (#235) — QTT V2 enforcement pass tests. Validates the
+    //! integration: `@quantity(0|1|omega)` attribute on a parameter
+    //! produces a `Quantity` declaration that drives `qtt_walker`-
+    //! based usage counting + `qtt_usage::check_usage` validation.
+    use super::extract_quantity_from_attrs;
+    use verum_ast::attr::{Attribute, Quantity as AstQty, QuantityAttr};
+    use verum_ast::expr::{Expr, ExprKind};
+    use verum_ast::span::Span;
+    use verum_common::{List, Maybe, Text};
+    use verum_ast::Ident;
+
+    fn span() -> Span { Span::default() }
+
+    fn quantity_attr(q: AstQty) -> Attribute {
+        let raw = QuantityAttr::new(q, span());
+        // Surface form: @quantity(<glyph>) — encoded as Path arg.
+        let mut segs: List<verum_ast::ty::PathSegment> = List::new();
+        segs.push(verum_ast::ty::PathSegment::Name(Ident {
+            name: Text::from(raw.quantity.surface_glyph()),
+            span: span(),
+        }));
+        let path = verum_ast::ty::Path::new(segs, span());
+        let mut args: List<Expr> = List::new();
+        args.push(Expr::new(ExprKind::Path(path), span()));
+        Attribute {
+            name: Text::from("quantity"),
+            args: Maybe::Some(args),
+            span: span(),
+        }
+    }
+
+    fn attr_list(qs: Vec<AstQty>) -> List<Attribute> {
+        let mut l: List<Attribute> = List::new();
+        for q in qs {
+            l.push(quantity_attr(q));
+        }
+        l
+    }
+
+    #[test]
+    fn empty_attrs_default_to_omega() {
+        let attrs: List<Attribute> = List::new();
+        assert_eq!(
+            extract_quantity_from_attrs(&attrs),
+            crate::ty::Quantity::Omega,
+        );
+    }
+
+    #[test]
+    fn quantity_zero_attr_extracts_zero() {
+        let attrs = attr_list(vec![AstQty::Zero]);
+        assert_eq!(
+            extract_quantity_from_attrs(&attrs),
+            crate::ty::Quantity::Zero,
+        );
+    }
+
+    #[test]
+    fn quantity_one_attr_extracts_linear() {
+        let attrs = attr_list(vec![AstQty::One]);
+        assert_eq!(
+            extract_quantity_from_attrs(&attrs),
+            crate::ty::Quantity::One,
+        );
+    }
+
+    #[test]
+    fn quantity_many_attr_extracts_omega() {
+        let attrs = attr_list(vec![AstQty::Many]);
+        assert_eq!(
+            extract_quantity_from_attrs(&attrs),
+            crate::ty::Quantity::Omega,
+        );
+    }
+
+    #[test]
+    fn first_quantity_attr_wins_over_extras() {
+        // Multiple @quantity attributes on the same param: the
+        // first one wins (deterministic ordering, no collision
+        // diagnostic — the parser tolerates duplicates because
+        // they're discoverable via the AST round-trip).
+        let attrs = attr_list(vec![AstQty::One, AstQty::Zero]);
+        assert_eq!(
+            extract_quantity_from_attrs(&attrs),
+            crate::ty::Quantity::One,
+        );
+    }
+
+    #[test]
+    fn unrelated_attr_does_not_affect_extraction() {
+        let mut l: List<Attribute> = List::new();
+        l.push(Attribute {
+            name: Text::from("inline"),
+            args: Maybe::None,
+            span: span(),
+        });
+        l.push(quantity_attr(AstQty::One));
+        assert_eq!(
+            extract_quantity_from_attrs(&l),
+            crate::ty::Quantity::One,
+        );
+    }
+}
 
 #[cfg(test)]
 mod mount_cycle_tests {
