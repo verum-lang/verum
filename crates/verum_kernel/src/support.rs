@@ -131,6 +131,24 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             }
         }
 
+        // V8 (#236) — quotient types: substitute commutes with
+        // the constructor (no binders introduced at this level;
+        // any binder lives inside `equiv` / `case` themselves).
+        CoreTerm::Quotient { base, equiv } => CoreTerm::Quotient {
+            base: Heap::new(substitute(base, name, value)),
+            equiv: Heap::new(substitute(equiv, name, value)),
+        },
+        CoreTerm::QuotIntro { value: v, base, equiv } => CoreTerm::QuotIntro {
+            value: Heap::new(substitute(v, name, value)),
+            base: Heap::new(substitute(base, name, value)),
+            equiv: Heap::new(substitute(equiv, name, value)),
+        },
+        CoreTerm::QuotElim { scrutinee, motive, case } => CoreTerm::QuotElim {
+            scrutinee: Heap::new(substitute(scrutinee, name, value)),
+            motive: Heap::new(substitute(motive, name, value)),
+            case: Heap::new(substitute(case, name, value)),
+        },
+
         CoreTerm::Inductive { path, args } => {
             let mut new_args = List::new();
             for a in args.iter() {
@@ -324,6 +342,35 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
             binder: binder.clone(),
             predicate: Heap::new(normalize_with_budget(predicate, budget)),
         },
+        // V8 (#236) — quotient types: normalize all components.
+        CoreTerm::Quotient { base, equiv } => CoreTerm::Quotient {
+            base: Heap::new(normalize_with_budget(base, budget)),
+            equiv: Heap::new(normalize_with_budget(equiv, budget)),
+        },
+        CoreTerm::QuotIntro { value, base, equiv } => CoreTerm::QuotIntro {
+            value: Heap::new(normalize_with_budget(value, budget)),
+            base: Heap::new(normalize_with_budget(base, budget)),
+            equiv: Heap::new(normalize_with_budget(equiv, budget)),
+        },
+        // V8 (#236) — quotient β-rule: when scrutinee is QuotIntro,
+        // collapse to `case applied to value`.
+        CoreTerm::QuotElim { scrutinee, motive, case } => {
+            let scrut_norm = normalize_with_budget(scrutinee, budget);
+            match &scrut_norm {
+                CoreTerm::QuotIntro { value, .. } => {
+                    // β-redex: quot_elim([t]_~, motive, case) → case(t)
+                    let case_norm = normalize_with_budget(case, budget);
+                    let v_norm = normalize_with_budget(value, budget);
+                    let app = CoreTerm::App(Heap::new(case_norm), Heap::new(v_norm));
+                    normalize_with_budget(&app, budget)
+                }
+                _ => CoreTerm::QuotElim {
+                    scrutinee: Heap::new(scrut_norm),
+                    motive: Heap::new(normalize_with_budget(motive, budget)),
+                    case: Heap::new(normalize_with_budget(case, budget)),
+                },
+            }
+        }
         CoreTerm::Inductive { path, args } => {
             let mut new_args: List<CoreTerm> = List::new();
             for a in args.iter() {
@@ -602,6 +649,32 @@ fn normalize_with_axioms_budget(
             binder: binder.clone(),
             predicate: Heap::new(normalize_with_axioms_budget(predicate, axioms, budget)),
         },
+        // V8 (#236) — quotient types under δ-aware normaliser.
+        CoreTerm::Quotient { base, equiv } => CoreTerm::Quotient {
+            base: Heap::new(normalize_with_axioms_budget(base, axioms, budget)),
+            equiv: Heap::new(normalize_with_axioms_budget(equiv, axioms, budget)),
+        },
+        CoreTerm::QuotIntro { value, base, equiv } => CoreTerm::QuotIntro {
+            value: Heap::new(normalize_with_axioms_budget(value, axioms, budget)),
+            base: Heap::new(normalize_with_axioms_budget(base, axioms, budget)),
+            equiv: Heap::new(normalize_with_axioms_budget(equiv, axioms, budget)),
+        },
+        CoreTerm::QuotElim { scrutinee, motive, case } => {
+            let scrut_norm = normalize_with_axioms_budget(scrutinee, axioms, budget);
+            match &scrut_norm {
+                CoreTerm::QuotIntro { value, .. } => {
+                    let case_norm = normalize_with_axioms_budget(case, axioms, budget);
+                    let v_norm = normalize_with_axioms_budget(value, axioms, budget);
+                    let app = CoreTerm::App(Heap::new(case_norm), Heap::new(v_norm));
+                    normalize_with_axioms_budget(&app, axioms, budget)
+                }
+                _ => CoreTerm::QuotElim {
+                    scrutinee: Heap::new(scrut_norm),
+                    motive: Heap::new(normalize_with_axioms_budget(motive, axioms, budget)),
+                    case: Heap::new(normalize_with_axioms_budget(case, axioms, budget)),
+                },
+            }
+        }
         CoreTerm::Inductive { path, args } => {
             let mut new_args: List<CoreTerm> = List::new();
             for a in args.iter() {
@@ -749,6 +822,22 @@ fn free_vars_rec(
             bound.push(binder.clone());
             free_vars_rec(predicate, bound, out);
             bound.pop();
+        }
+
+        // V8 (#236) — quotient types: no binder at this level.
+        CoreTerm::Quotient { base, equiv } => {
+            free_vars_rec(base, bound, out);
+            free_vars_rec(equiv, bound, out);
+        }
+        CoreTerm::QuotIntro { value, base, equiv } => {
+            free_vars_rec(value, bound, out);
+            free_vars_rec(base, bound, out);
+            free_vars_rec(equiv, bound, out);
+        }
+        CoreTerm::QuotElim { scrutinee, motive, case } => {
+            free_vars_rec(scrutinee, bound, out);
+            free_vars_rec(motive, bound, out);
+            free_vars_rec(case, bound, out);
         }
         CoreTerm::Inductive { args, .. } => {
             // The `path` is a global qualified name (e.g.

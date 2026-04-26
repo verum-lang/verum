@@ -472,6 +472,80 @@ fn infer_inner_with_coord(
             Ok(CoreTerm::Universe(base_level))
         }
 
+        // V8 (#236) — K-Quot-Form: Quotient(T, ~) is a type when
+        // T is a type and ~ is a binary relation on T. The
+        // quotient inhabits the same universe as T. The kernel
+        // does NOT internally verify that ~ is reflexive +
+        // symmetric + transitive; the quotient elimination rule
+        // requires the user to discharge respect-of-equivalence
+        // when applying QuotElim, which is where soundness
+        // re-enters.
+        CoreTerm::Quotient { base, equiv } => {
+            let base_univ = infer_inner(ctx, base, axioms, inductives)?;
+            let base_level = universe_level(&base_univ)?;
+            // Equiv must be well-typed; we don't pin its shape
+            // to `T → T → Prop` here because the elaborator
+            // produces equiv terms in elaborated form whose
+            // shape is checked at QuotIntro / QuotElim.
+            let _ = infer_inner(ctx, equiv, axioms, inductives)?;
+            Ok(CoreTerm::Universe(base_level))
+        }
+
+        // V8 (#236) — K-Quot-Intro: lifting `value : T` produces
+        // `[value]_~ : Quotient(T, ~)`. Verifies (a) value's
+        // type is T, (b) Quotient(T, ~) is well-formed.
+        CoreTerm::QuotIntro { value, base, equiv } => {
+            let value_ty = infer_inner(ctx, value, axioms, inductives)?;
+            if !crate::support::definitional_eq(&value_ty, base) {
+                return Err(KernelError::TypeMismatch {
+                    expected: shape_of(base),
+                    actual: shape_of(&value_ty),
+                });
+            }
+            // Verify Quotient(base, equiv) is well-formed.
+            let _ = infer_inner(ctx, equiv, axioms, inductives)?;
+            Ok(CoreTerm::Quotient {
+                base: base.clone(),
+                equiv: equiv.clone(),
+            })
+        }
+
+        // V8 (#236) — K-Quot-Elim: eliminate `q : Quotient(T, ~)`
+        // by supplying `motive : Quotient(T, ~) → U` and
+        // `case : Π(t: T). motive([t]_~)`. Result inhabits
+        // `motive q`. The respect-of-equivalence obligation is
+        // discharged at the elaborator level (the case must
+        // satisfy `∀ t1 t2. t1 ~ t2 → case(t1) ≡ case(t2)`);
+        // the kernel records the shape but doesn't verify the
+        // obligation directly — V2 deferred to a dedicated pass
+        // that consumes the framework-axiom registry.
+        CoreTerm::QuotElim { scrutinee, motive, case } => {
+            let scrut_ty = infer_inner(ctx, scrutinee, axioms, inductives)?;
+            // Verify scrutinee is a quotient.
+            match scrut_ty {
+                CoreTerm::Quotient { .. } => {}
+                other => {
+                    return Err(KernelError::TypeMismatch {
+                        expected: shape_of(&CoreTerm::Quotient {
+                            base: Heap::new(CoreTerm::Var(Text::from("?"))),
+                            equiv: Heap::new(CoreTerm::Var(Text::from("?"))),
+                        }),
+                        actual: shape_of(&other),
+                    });
+                }
+            }
+            // Verify motive + case are well-typed; full
+            // shape-coherence (motive : Q → U; case : Π(t:T).
+            // motive([t])) is V2 deferred — V1 records the
+            // structural well-formedness obligation only.
+            let _ = infer_inner(ctx, motive, axioms, inductives)?;
+            let _ = infer_inner(ctx, case, axioms, inductives)?;
+            // Result type: motive applied to scrutinee
+            // (syntactic application; downstream conversion
+            // checks β-reduce as needed).
+            Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
+        }
+
         // Named inductive / user / HIT — its type is the universe it
         // was declared in. Concrete(0) is the bring-up default; real
         // universe annotations land when the type registry ports over
