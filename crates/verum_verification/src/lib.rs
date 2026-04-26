@@ -76,6 +76,7 @@ pub mod contract;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
+pub mod framework_compat;
 pub mod framework_hygiene;
 pub mod integration;
 pub mod kernel_recheck;
@@ -205,6 +206,9 @@ pub use hoare_logic::{
     generate_vc as hoare_generate_vc,
     // Public API functions
     wp as hoare_wp,
+};
+pub use framework_compat::{
+    IncompatiblePair, KNOWN_INCOMPATIBLE_PAIRS, audit_framework_set,
 };
 pub use framework_hygiene::{
     DEFAULT_META_CLASSIFIER_THRESHOLD, HygieneDiagnostic, HygieneRecheckPass, HygieneSeverity,
