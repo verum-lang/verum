@@ -869,7 +869,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     | "write" | "read" | "open" | "close" | "fsync" | "fdatasync" | "ftruncate"
                     | "lseek" | "lseek64" | "pread" | "pwrite"
                     | "printf" | "fprintf" | "snprintf" | "vprintf" | "vsnprintf"
-                    | "fputs" | "fputc" | "fwrite" | "fread"
+                    | "puts" | "fputs" | "fputc" | "putchar" | "fwrite" | "fread"
+                    | "perror" | "putc" | "getc" | "getchar"
                     // time/clock
                     | "clock_gettime" | "nanosleep" | "gettimeofday"
                     | "time" | "mach_absolute_time"
