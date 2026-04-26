@@ -614,7 +614,7 @@ fn static_analysis_pipeline_kernel_recheck_result_visible() {
 // V8 (#211, B12) — VFE @require_extension governance gating
 // =============================================================================
 
-use verum_verification::vfe_gate::{EnabledExtensions, VfePolicy};
+use verum_verification::extension_policy::{EnabledExtensions, ExtensionPolicy};
 
 fn module_with_attrs(
     functions: Vec<FunctionDecl>,
@@ -681,7 +681,7 @@ fn b12_opt_in_policy_skips_module_without_require() {
         vec![refined_int(boxed)],
         Maybe::Some(Type::int(span())),
     )]);
-    let mut pass = KernelRecheckPass::new().with_policy(VfePolicy::OptInOnly);
+    let mut pass = KernelRecheckPass::new().with_policy(ExtensionPolicy::OptInOnly);
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     assert!(
@@ -705,7 +705,7 @@ fn b12_opt_in_policy_runs_when_module_requires_vfe_7() {
         )],
         vec![require_extension_attr("vfe_7")],
     );
-    let mut pass = KernelRecheckPass::new().with_policy(VfePolicy::OptInOnly);
+    let mut pass = KernelRecheckPass::new().with_policy(ExtensionPolicy::OptInOnly);
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     assert!(
@@ -731,10 +731,10 @@ fn b12_extension_set_reads_module_level_require() {
 #[test]
 fn b12_policy_accessor_returns_configured_policy() {
     // Sanity: the with_policy builder + policy() accessor agree.
-    let pass = KernelRecheckPass::new().with_policy(VfePolicy::OptInOnly);
-    assert_eq!(pass.policy(), VfePolicy::OptInOnly);
+    let pass = KernelRecheckPass::new().with_policy(ExtensionPolicy::OptInOnly);
+    assert_eq!(pass.policy(), ExtensionPolicy::OptInOnly);
     let pass2 = KernelRecheckPass::new();
-    assert_eq!(pass2.policy(), VfePolicy::AllRulesActive);
+    assert_eq!(pass2.policy(), ExtensionPolicy::AllRulesActive);
 }
 
 // =============================================================================
@@ -876,7 +876,7 @@ fn task_218_static_pipeline_with_opt_in_policy_skips_modal_overshoot() {
         Maybe::Some(Type::int(span())),
     )]);
     let mut pipeline = VerificationPipeline::static_analysis_pipeline_with_kernel_policy(
-        VfePolicy::OptInOnly,
+        ExtensionPolicy::OptInOnly,
     );
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
@@ -891,7 +891,7 @@ fn task_218_static_pipeline_default_uses_all_rules_active() {
     // Default constructor preserves pre-V8 behaviour. A modal-
     // overshoot module is still rejected without
     // @require_extension(vfe_7) because the default policy is
-    // VfePolicy::AllRulesActive.
+    // ExtensionPolicy::AllRulesActive.
     let p = path_expr("p");
     let boxed = method_call_expr(method_call_expr(p, "box"), "box");
     let module = module_with(vec![make_function(

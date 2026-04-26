@@ -156,14 +156,14 @@ impl VerificationPipeline {
     /// the SMT round-trip cost.
     ///
     /// V8 backwards-compat shape: defaults the kernel-recheck
-    /// VFE policy to [`crate::vfe_gate::VfePolicy::AllRulesActive`]
+    /// VFE policy to [`crate::extension_policy::ExtensionPolicy::AllRulesActive`]
     /// (the pre-V8 always-on rule set). Callers wanting Year 0–2
     /// `OptInOnly` semantics from `verification-architecture.md`
     /// §4.4 + VFE §0.0 governance should use
     /// [`Self::static_analysis_pipeline_with_kernel_policy`].
     pub fn static_analysis_pipeline() -> Self {
         Self::static_analysis_pipeline_with_kernel_policy(
-            crate::vfe_gate::VfePolicy::AllRulesActive,
+            crate::extension_policy::ExtensionPolicy::AllRulesActive,
         )
     }
 
@@ -177,18 +177,18 @@ impl VerificationPipeline {
     /// for the surrounding scope.
     ///
     /// Per VFE §0.0 rollout calendar:
-    ///   * **Year 0–2** — `VfePolicy::OptInOnly` (modules must
+    ///   * **Year 0–2** — `ExtensionPolicy::OptInOnly` (modules must
     ///     `@require_extension(vfe_N)` to engage VFE rules).
-    ///   * **Year 2–4** — `VfePolicy::OptOutOnly` (rules
+    ///   * **Year 2–4** — `ExtensionPolicy::OptOutOnly` (rules
     ///     default-on; opt out via `@disable_extension(vfe_N)`).
-    ///   * **Year 4+** — `VfePolicy::Mandatory` (no opt-out).
+    ///   * **Year 4+** — `ExtensionPolicy::Mandatory` (no opt-out).
     ///
     /// V8 default remains `AllRulesActive` to avoid regressions
     /// in the existing test corpus + stdlib bring-up; the
     /// production CLI should select `OptInOnly` once the project
     /// manifest config surface lands (tracked under follow-up).
     pub fn static_analysis_pipeline_with_kernel_policy(
-        kernel_policy: crate::vfe_gate::VfePolicy,
+        kernel_policy: crate::extension_policy::ExtensionPolicy,
     ) -> Self {
         let mut pipeline = Self::new();
 
@@ -250,7 +250,7 @@ impl VerificationPipeline {
     /// [`Self::static_analysis_pipeline_with_kernel_policy`] +
     /// [`SmtVerificationPass`] terminator.
     pub fn full_verification_pipeline_with_kernel_policy(
-        kernel_policy: crate::vfe_gate::VfePolicy,
+        kernel_policy: crate::extension_policy::ExtensionPolicy,
     ) -> Self {
         let mut pipeline =
             Self::static_analysis_pipeline_with_kernel_policy(kernel_policy);
