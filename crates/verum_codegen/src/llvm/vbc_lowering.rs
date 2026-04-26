@@ -831,11 +831,69 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // safety net should rarely fire; until then it's the
         // difference between "process boots" and "SIGSEGV at dyld".
         {
+            // Helper: should this bodyless declaration be left alone
+            // for the linker to resolve? True for libc/libsystem
+            // functions and well-known C-runtime symbols. Patching
+            // these with a default-return body BREAKS the C runtime —
+            // e.g. an `_exit` stub that returns instead of terminating
+            // turns the OOM-abort path inside `verum_checked_malloc`
+            // into a SIGTRAP at the trailing `unreachable` rather
+            // than a clean process termination. The previous version
+            // of this safety net patched everything indiscriminately;
+            // exit/abort/malloc were caught and broke their semantics.
+            //
+            // Conservative allow-list of libc symbols that MUST be
+            // resolved by ld at link time, not stubbed here.
+            fn is_libc_extern(name: &str) -> bool {
+                matches!(name,
+                    // process control
+                    "exit" | "_exit" | "_Exit" | "abort" | "_abort"
+                    // memory
+                    | "malloc" | "calloc" | "realloc" | "free"
+                    | "posix_memalign" | "aligned_alloc"
+                    | "memcpy" | "memmove" | "memset" | "memcmp"
+                    | "strlen" | "strcmp" | "strncmp" | "strchr" | "strcpy" | "strncpy" | "strcat"
+                    // I/O
+                    | "write" | "read" | "open" | "close" | "fsync" | "fdatasync" | "ftruncate"
+                    | "lseek" | "lseek64" | "pread" | "pwrite"
+                    | "printf" | "fprintf" | "snprintf" | "vprintf" | "vsnprintf"
+                    | "fputs" | "fputc" | "fwrite" | "fread"
+                    // time/clock
+                    | "clock_gettime" | "nanosleep" | "gettimeofday"
+                    | "time" | "mach_absolute_time"
+                    // sockets (libc)
+                    | "socket" | "bind" | "listen" | "accept" | "connect"
+                    | "send" | "recv" | "sendto" | "recvfrom" | "setsockopt"
+                    | "getaddrinfo" | "freeaddrinfo" | "inet_pton"
+                    // mmap family
+                    | "mmap" | "munmap" | "mprotect" | "madvise"
+                    // pthread
+                    | "pthread_create" | "pthread_join" | "pthread_mutex_init"
+                    | "pthread_mutex_lock" | "pthread_mutex_unlock"
+                    | "pthread_cond_init" | "pthread_cond_wait" | "pthread_cond_signal"
+                    | "pthread_self" | "pthread_setname_np"
+                    // file ops
+                    | "stat" | "fstat" | "lstat" | "access" | "unlink" | "rename"
+                    | "mkdir" | "rmdir" | "chdir" | "getcwd"
+                    // ObjC runtime
+                    | "objc_msgSend" | "objc_msgSendSuper" | "sel_registerName"
+                    | "objc_getClass" | "objc_lookUpClass"
+                )
+            }
+
             let mut patched = 0usize;
+            let mut skipped_libc = 0usize;
             let mut func = self.module.get_first_function();
             while let Some(f) = func {
                 let next = f.get_next_function();
                 if f.get_first_basic_block().is_none() {
+                    let name = f.get_name().to_string_lossy().to_string();
+                    if is_libc_extern(&name) {
+                        // Leave libc decls alone — linker resolves at link time.
+                        skipped_libc += 1;
+                        func = next;
+                        continue;
+                    }
                     let entry = self.context.append_basic_block(f, "skipped_entry");
                     let builder = self.context.create_builder();
                     builder.position_at_end(entry);
@@ -863,8 +921,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 }
                 func = next;
             }
-            if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() && patched > 0 {
-                eprintln!("[aot-runtime-stage] bodyless-decl safety net patched {} functions", patched);
+            if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() {
+                eprintln!(
+                    "[aot-runtime-stage] bodyless-decl safety net: patched {} (skipped {} libc externs)",
+                    patched, skipped_libc
+                );
             }
         }
 
