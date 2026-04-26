@@ -429,6 +429,10 @@ enum Commands {
         /// Print extended documentation for one rule and exit.
         #[clap(long, value_name = "RULE")]
         explain: Option<Text>,
+        /// Open the rule's online documentation page in the system
+        /// browser. Requires `--explain RULE`.
+        #[clap(long, requires = "explain")]
+        open: bool,
         /// Run only config-validator; exits 0 / non-zero. Useful in pre-commit hooks.
         #[clap(long)]
         validate_config: bool,
@@ -1567,6 +1571,7 @@ fn run_command(cli: Cli) -> Result<()> {
             deny_warnings,
             list_rules,
             explain,
+            open,
             validate_config,
             format,
             profile,
@@ -1588,6 +1593,9 @@ fn run_command(cli: Cli) -> Result<()> {
                 return commands::lint::list_rules();
             }
             if let Some(rule) = explain {
+                if open {
+                    return commands::lint::explain_rule_open(rule.as_str());
+                }
                 return commands::lint::explain_rule(rule.as_str());
             }
             if validate_config {

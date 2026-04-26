@@ -3423,6 +3423,93 @@ pub fn list_rules() -> Result<()> {
 
 /// Print extended documentation for one rule. Used by
 /// `verum lint --explain <rule>`.
+/// `verum lint --explain RULE --open` — opens the rule's online
+/// docs page in the system browser. Resolves to
+/// `https://verum-lang.dev/docs/reference/lint-rules#<rule>` and
+/// dispatches the platform-appropriate "open URL" command:
+///
+/// - macOS: `open <url>`
+/// - Linux: `xdg-open <url>`
+/// - Windows: `cmd /c start "" <url>`
+///
+/// Verifies the rule name first so unknown rules return a clean
+/// error rather than opening a 404 page.
+pub fn explain_rule_open(name: &str) -> Result<()> {
+    if !LINT_RULES.iter().any(|r| r.name == name) {
+        let candidates: Vec<&str> = LINT_RULES
+            .iter()
+            .map(|r| r.name)
+            .filter(|n| levenshtein(n, name) <= 2)
+            .collect();
+        if let Some(suggest) = candidates.first() {
+            return Err(CliError::Custom(format!(
+                "unknown lint rule `{}` — did you mean `{}`?",
+                name, suggest
+            )));
+        }
+        return Err(CliError::Custom(format!(
+            "unknown lint rule `{}` (run `verum lint --list-rules` to see all)",
+            name
+        )));
+    }
+    let url = format!(
+        "https://verum-lang.dev/docs/reference/lint-rules#{}",
+        name
+    );
+    // Test hatch: when VERUM_OPEN_DRY_RUN=1 is set we just print
+    // the URL instead of dispatching a real browser command. Lets
+    // CI assert the URL without spawning anything.
+    if std::env::var("VERUM_OPEN_DRY_RUN")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        println!("{}", url);
+        return Ok(());
+    }
+    open_url(&url).map_err(|e| {
+        CliError::Custom(format!(
+            "failed to open `{}`: {}. \
+             Open it manually if your environment has no browser.",
+            url, e
+        ))
+    })?;
+    ui::success(&format!("Opened {}", url));
+    Ok(())
+}
+
+/// Cross-platform "open this URL in the user's default app".
+/// Doesn't pull in a new crate — uses the platform-standard
+/// command. Returns Err on spawn failure or non-zero exit.
+fn open_url(url: &str) -> std::io::Result<()> {
+    use std::process::Command;
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut cmd = {
+        let mut c = Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "start", "", url]);
+        c
+    };
+    let status = cmd.status()?;
+    if !status.success() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("opener exited {}", status),
+        ));
+    }
+    Ok(())
+}
+
 pub fn explain_rule(name: &str) -> Result<()> {
     let r = match LINT_RULES.iter().find(|r| r.name == name) {
         Some(r) => r,
