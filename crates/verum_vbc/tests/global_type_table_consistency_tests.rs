@@ -134,18 +134,20 @@ fn global_type_table_clean_for_maybe() {
 /// `core/base/result.vr` is mounted transitively by a substantial
 /// portion of the async-runtime stdlib graph, so compiling it
 /// surfaces a much wider type table than `maybe.vr` or `list.vr`.
-/// As of #170 wire-up this fixture exposes 14 cross-module hygiene
-/// findings — see `#170-followups` task series for the remediation
-/// plan.  This test is therefore a *ratchet*: the count must not
-/// rise.  When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to
-/// pin the gain so it can't silently regress.
+/// As of #170 wire-up this fixture exposes 13 cross-module hygiene
+/// findings (down from 14 after a same-PR follow-up that added
+/// `Channel`/`Deque`/`Tuple`/`Array` to the well-known type-name map
+/// and routed user TypeId allocation through `alloc_user_type_id` to
+/// skip the reserved 256..1024 ranges).  Remaining findings are
+/// platform-cfg type-name redeclarations (`StackAllocator`,
+/// `TaskHandle`, `CpuContext`, …) that the stdlib audit (#181) will
+/// remediate.
 ///
-/// Why ratchet rather than hard-fail at zero?  The findings are
-/// pre-existing stdlib violations that this check exposed — fixing
-/// them is a separate effort tracked under #181 (stdlib production
-/// audit).  Blocking the merge of #170's check on those fixes
-/// would conflate two independent tasks.
-const RESULT_ISSUE_BASELINE: usize = 14;
+/// This test is a *ratchet*: the count must not rise, and must
+/// match exactly when it falls (so any improvement gets pinned).
+/// When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to lock
+/// in the gain.
+const RESULT_ISSUE_BASELINE: usize = 13;
 
 #[test]
 fn global_type_table_baseline_for_result() {
