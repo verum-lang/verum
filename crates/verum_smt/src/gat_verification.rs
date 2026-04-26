@@ -627,15 +627,6 @@ pub struct GATStats {
 /// 3. Quantified implications for protocol hierarchies
 /// 4. Pattern-guided instantiation for efficient verification
 pub struct GATVerifier {
-    /// Z3 context
-    #[allow(dead_code)] // Reserved for direct Z3 operations
-    context: Context,
-    /// Verum SMT context
-    #[allow(dead_code)] // Reserved for extended verification operations
-    verum_ctx: VerumContext,
-    /// Translator for Verum AST to Z3
-    #[allow(dead_code)] // Reserved for AST translation in extended verification
-    translator: Translator<'static>,
     /// Cache of verified GATs
     cache: Map<Text, GATVerificationResult>,
     /// Dependency graph for cycle detection
@@ -650,23 +641,15 @@ pub struct GATVerifier {
 }
 
 impl GATVerifier {
-    /// Create a new GAT verifier
+    /// Create a new GAT verifier.
+    ///
+    /// SMT-state setup (Z3 context, Verum context, AST translator) was
+    /// previously stored on this struct but never used; verification
+    /// methods that need an SMT backend allocate one locally.  When/if
+    /// extended verification operations require persistent SMT state,
+    /// add the fields back wired into actual call sites.
     pub fn new() -> Self {
-        let context = Context::thread_local();
-        let verum_ctx = VerumContext::new();
-
-        // SAFETY: The Verum context lives as long as the verifier
-        // and is not moved, so the static lifetime is safe in practice.
-        // This is a workaround for Rust's lifetime system.
-        let translator = unsafe {
-            let ctx_ref = &verum_ctx as *const VerumContext;
-            Translator::new(&*ctx_ref)
-        };
-
         Self {
-            context,
-            verum_ctx,
-            translator,
             cache: Map::new(),
             dependency_graph: Map::new(),
             protocol_table: ProtocolTable::new(),

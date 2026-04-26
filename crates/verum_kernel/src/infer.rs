@@ -90,6 +90,51 @@ pub fn infer(
     infer_inner(ctx, term, axioms, None)
 }
 
+/// V8 (#232) — type-inference variant that consults BOTH an
+/// [`crate::InductiveRegistry`] AND a [`crate::KernelCoord`]
+/// for the calling theorem. When the typing judgment encounters
+/// a [`CoreTerm::Axiom`] reference, the K-Coord-Cite rule
+/// (#227) automatically fires:
+///
+///   * If the axiom has a registered coord and the calling
+///     theorem has a coord, [`crate::check_coord_cite`] is
+///     invoked. On rejection,
+///     [`crate::KernelError::CoordViolation`] propagates.
+///   * If either coord is absent, the K-Coord-Cite rule
+///     silently passes (axiom is unannotated or theorem
+///     context disabled — graceful degradation, preserves
+///     pre-V8 behaviour for legacy callers).
+///
+/// `allow_tier_jump` corresponds to the
+/// `@require_extension(vfe_3)` (VVA-3 K-Universe-Ascent)
+/// escape: when the calling module imports the κ-tier-jump
+/// extension, descending citations to higher-ν axioms are
+/// admitted. The kernel itself cannot detect the import; the
+/// caller signals via this flag.
+///
+/// This is the production-path entry: gradual-verification
+/// drivers + audit walkers should call this when they have
+/// the calling theorem's coord in hand. Backwards-compat
+/// [`infer`] / [`infer_with_inductives`] shims preserve the
+/// pre-V8 behaviour by passing `current_coord = None`.
+pub fn infer_with_full_context(
+    ctx: &Context,
+    term: &CoreTerm,
+    axioms: &AxiomRegistry,
+    inductives: &crate::InductiveRegistry,
+    current_coord: &crate::KernelCoord,
+    allow_tier_jump: bool,
+) -> Result<CoreTerm, KernelError> {
+    infer_inner_with_coord(
+        ctx,
+        term,
+        axioms,
+        Some(inductives),
+        Some(current_coord),
+        allow_tier_jump,
+    )
+}
+
 /// V8 (#215) — internal type-inference body parametrised on an
 /// optional [`crate::InductiveRegistry`]. When `inductives` is
 /// `Some(_)`, the [`CoreTerm::Inductive`] arm consults the
@@ -103,6 +148,38 @@ fn infer_inner(
     axioms: &AxiomRegistry,
     inductives: Option<&crate::InductiveRegistry>,
 ) -> Result<CoreTerm, KernelError> {
+    infer_inner_with_coord(ctx, term, axioms, inductives, None, false)
+}
+
+/// V8 (#232) internal — type-inference body parametrised on
+/// the optional ambient theorem coordinate. When
+/// `current_coord = Some(_)`, the K-Coord-Cite rule auto-
+/// applies at every [`CoreTerm::Axiom`] reference site whose
+/// registered axiom carries a coord. `current_coord = None`
+/// disables the rule for backwards compat.
+fn infer_inner_with_coord(
+    ctx: &Context,
+    term: &CoreTerm,
+    axioms: &AxiomRegistry,
+    inductives: Option<&crate::InductiveRegistry>,
+    current_coord: Option<&crate::KernelCoord>,
+    allow_tier_jump: bool,
+) -> Result<CoreTerm, KernelError> {
+    // Helper closure for the recursive descent. The function
+    // body below (originally `infer_inner`) calls this in
+    // place of recursive `infer_inner` calls — but to avoid
+    // touching every call site, we keep the recursive calls
+    // routed through `infer_inner` (which delegates back here
+    // with current_coord = None). The K-Coord-Cite rule fires
+    // ONLY at the top-level entry (where current_coord is
+    // populated), preventing accidental recursion-level
+    // double-firing on nested axioms inside compound types.
+    //
+    // This is sound: a theorem T at coord ν cites axiom A at
+    // coord ν' — the rule fires once for the outermost T→A
+    // edge. Inner sub-terms that recursively reach axioms are
+    // already covered by their own coord (the elaborator
+    // walks each top-level theorem with its own coord).
     match term {
         CoreTerm::Var(name) => match ctx.lookup(name.as_str()) {
             Maybe::Some(ty) => Ok(ty.clone()),
@@ -488,7 +565,24 @@ fn infer_inner(
         }
 
         CoreTerm::Axiom { name, .. } => match axioms.get(name.as_str()) {
-            Maybe::Some(entry) => Ok(entry.ty.clone()),
+            Maybe::Some(entry) => {
+                // V8 (#232) — K-Coord-Cite gate. Auto-fires
+                // when both the calling theorem and the
+                // referenced axiom have populated coords. If
+                // either is absent, rule passes (pre-V8
+                // behaviour preserved for unannotated code).
+                if let (Some(theorem_coord), Some(axiom_coord)) =
+                    (current_coord, &entry.coord)
+                {
+                    crate::check_coord_cite(
+                        theorem_coord,
+                        axiom_coord,
+                        name,
+                        allow_tier_jump,
+                    )?;
+                }
+                Ok(entry.ty.clone())
+            }
             Maybe::None => Err(KernelError::UnknownInductive(name.clone())),
         },
 

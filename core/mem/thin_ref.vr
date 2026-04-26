@@ -83,6 +83,31 @@ public type ThinRef<T> is {
     epoch_and_caps: UInt32,
 };
 
+/// Pack `(epoch: UInt16, capabilities: UInt16)` into a single
+/// 32-bit field with capabilities in the upper 16 bits and
+/// epoch in the lower 16. Inverse of [`unpack_epoch`] /
+/// [`unpack_caps`].
+///
+/// Earlier revisions inlined this as `(caps as UInt32) * 65536`
+/// at three sites (constructor + as_readonly + attenuate);
+/// extracted to a single helper because:
+///
+///   * `* 65536` is mathematically equivalent to `<< 16` for
+///     unsigned values BUT some Verum arithmetic backends
+///     route `*` through overflow-checked multiplication
+///     (would never trigger here since `caps` is UInt16, max
+///     0xFFFF, so `caps * 0x10000` ≤ 0xFFFF0000 < UInt32.MAX).
+///     Using `<< 16` makes the bit-manipulation intent
+///     explicit and bypasses any potential mul-overhead on
+///     older CPUs.
+///   * Centralising the pack/unpack pair makes it impossible
+///     for the three sites to drift out of sync if the field
+///     layout ever changes.
+@inline
+fn pack_epoch_caps(epoch: UInt16, capabilities: UInt16) -> UInt32 {
+    ((capabilities as UInt32) << 16) | (epoch as UInt32)
+}
+
 implement<T> ThinRef<T> {
     // =========================================================================
     // Construction
@@ -103,12 +128,10 @@ implement<T> ThinRef<T> {
         epoch: UInt16,
         capabilities: UInt16,
     ) -> ThinRef<T> {
-        let epoch_and_caps = (capabilities as UInt32) * 65536 | (epoch as UInt32);
-
         ThinRef {
             ptr: ptr,
             generation: generation,
-            epoch_and_caps: epoch_and_caps,
+            epoch_and_caps: pack_epoch_caps(epoch, capabilities),
         }
     }
 
@@ -435,7 +458,7 @@ implement<T> ThinRef<T> {
         ThinRef {
             ptr: self.ptr,
             generation: self.generation,
-            epoch_and_caps: (new_caps as UInt32) * 65536 | (self.epoch() as UInt32),
+            epoch_and_caps: pack_epoch_caps(self.epoch(), new_caps),
         }
     }
 
@@ -446,7 +469,7 @@ implement<T> ThinRef<T> {
         ThinRef {
             ptr: self.ptr,
             generation: self.generation,
-            epoch_and_caps: (new_caps as UInt32) * 65536 | (self.epoch() as UInt32),
+            epoch_and_caps: pack_epoch_caps(self.epoch(), new_caps),
         }
     }
 

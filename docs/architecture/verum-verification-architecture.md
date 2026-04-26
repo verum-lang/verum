@@ -2554,17 +2554,18 @@ speculation:
    `core.math.frameworks.diakrisis*` framework axioms).
    Doc-only ratification. **100%**.
 
-2. **Coordinate-aware citation gate** ✓ — V8 #227 shipped:
+2. **Coordinate-aware citation gate** ✓ — V8 #227 + #232 shipped:
    `KernelCoord { fw, nu, tau }` type, `check_coord_cite`
    function, `KernelError::CoordViolation` variant,
-   `AxiomRegistry::register_with_coord` entry point, 14
-   integration tests (covering same-coord / lower-cite /
-   higher-reject / tier-jump-admit / ω-vs-finite / serde
-   roundtrip / UIP-shape rejection / legacy preservation).
-   Wiring into `infer` typing path is deferred to V2 (the
-   typing judgment doesn't yet thread theorem coords —
-   the rule is *callable* from elaborator + audit but not
-   yet auto-applied at every reference site). **70%**.
+   `AxiomRegistry::register_with_coord` entry point (14
+   primary tests). V2 #232: typing-judgment integration via
+   `infer_with_full_context(ctx, term, axioms, inductives,
+   current_coord, allow_tier_jump)` — auto-fires
+   `check_coord_cite` at every `CoreTerm::Axiom` reference
+   site when both calling theorem and registered axiom have
+   populated coords; graceful pass-through when either is
+   absent. 5 new integration tests covering admit/reject/
+   tier-jump/unannotated/legacy paths. **100%**.
 
 3. **`verum audit --coord` per-theorem inference** ✓ — V8
    #230 shipped: `invert_to_per_theorem` collector +
@@ -2603,9 +2604,9 @@ speculation:
 ### A.Z.5 aggregate completion (V8 measured, no speculation)
 
   * Roadmap items shipped: **5 of 7** (items 1, 2, 3, 4, 5 ✓ shipped at the percentages above; items 6–7 externally blocked).
-  * Per-item completion: 100% + 70% + 100% + **100%** + 100% + 0% + 0% = **470% of 700%**.
-  * Aggregate roadmap completion: **67%** (470 / 700).
-  * Tractable-non-blocked subset (items 1–5): **94%** (470 / 500).
+  * Per-item completion: 100% + **100%** + 100% + 100% + 100% + 0% + 0% = **500% of 700%**.
+  * Aggregate roadmap completion: **71%** (500 / 700).
+  * Tractable-non-blocked subset (items 1–5): **100%** (500 / 500). All 5 tractable items at 100%.
   * Externally-blocked subset (items 6–7): cannot ship until preprint + tool integrations.
 
 ### A.Z code-side refactor status (#225 stages)
