@@ -402,6 +402,13 @@ enum Commands {
         /// = sequential. Default uses `rayon::current_num_threads()`.
         #[clap(long, value_name = "N")]
         threads: Option<usize>,
+        /// Behaviour when a file fails to parse:
+        ///   - `fallback` (default): silently apply whitespace
+        ///     normalisation; warn.
+        ///   - `skip`: leave the file untouched; warn.
+        ///   - `error`: leave the file untouched; fail the run.
+        #[clap(long, value_name = "MODE")]
+        on_parse_error: Option<Text>,
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
@@ -1489,9 +1496,21 @@ fn run_command(cli: Cli) -> Result<()> {
             stdin,
             stdin_filename,
             threads,
+            on_parse_error,
             feature_overrides,
         } => {
             feature_overrides::install(feature_overrides);
+            let parse_policy = match on_parse_error {
+                Some(t) => Some(commands::fmt::OnParseError::parse(t.as_str()).ok_or_else(
+                    || {
+                        CliError::InvalidArgument(format!(
+                            "unknown --on-parse-error `{}` (expected: fallback | skip | error)",
+                            t
+                        ))
+                    },
+                )?),
+                None => None,
+            };
             if stdin {
                 if check {
                     return Err(CliError::InvalidArgument(
@@ -1508,7 +1527,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     .num_threads(pool_threads)
                     .build_global();
             }
-            commands::fmt::execute(check, verbose)
+            commands::fmt::execute_with_policy(check, verbose, parse_policy)
         }
         Commands::Lint {
             fix,
