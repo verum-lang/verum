@@ -77,6 +77,7 @@ pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
 pub mod integration;
+pub mod kernel_recheck;
 pub mod level;
 pub mod lock_ordering;
 pub mod math_structures;
@@ -209,6 +210,7 @@ pub use integration::{
     SepLogicVerificationResult, SeparationLogicZ3Verifier, SmtIntegration, TypeSystemIntegration,
     VarSort,
 };
+pub use kernel_recheck::{KernelRecheck, KernelRecheckError};
 pub use level::{
     ProofLevel, RuntimeLevel, StaticLevel, VerificationConfig, VerificationLevel, VerificationMode,
 };
@@ -275,9 +277,9 @@ pub use metrics::{
     nesting_from_cfg,
 };
 pub use passes::{
-    SmtVerificationPass, SmtVerificationResult, SmtVerificationStats, TransitionRecommendation,
-    TransitionRecommendationPass, VCStatus, VCVerificationResult, VerificationError,
-    VerificationPass, VerificationPipeline, VerificationResult,
+    KernelRecheckPass, SmtVerificationPass, SmtVerificationResult, SmtVerificationStats,
+    TransitionRecommendation, TransitionRecommendationPass, VCStatus, VCVerificationResult,
+    VerificationError, VerificationPass, VerificationPipeline, VerificationResult,
 };
 pub use proof_validator::{
     CertificateFormat, HypothesisContext, ProofCertificateGenerator, ProofValidator,

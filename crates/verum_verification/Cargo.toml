@@ -17,6 +17,7 @@ verum_types = { workspace = true }
 verum_smt = { workspace = true }
 verum_diagnostics = { workspace = true }
 verum_common = { workspace = true }
+verum_kernel = { workspace = true }
 
 # External dependencies
 thiserror = { workspace = true }
