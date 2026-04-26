@@ -2663,7 +2663,49 @@ impl VbcCodegen {
                     .collect();
 
                 for impl_item in impl_decl.items.iter() {
+                    // Honour `@cfg` gates on impl items.  ImplItem and
+                    // its inner FunctionDecl both carry attributes;
+                    // walk both so `@cfg(target_os = "linux") fn foo(…)`
+                    // inside a cross-platform `implement Bar { … }`
+                    // block is filtered correctly.
+                    if !impl_item.attributes.is_empty() {
+                        let (include, failures) = self
+                            .cfg_evaluator
+                            .should_include_with_failures(&impl_item.attributes);
+                        if !failures.is_empty() {
+                            for attr in &failures {
+                                tracing::warn!(
+                                    "[cfg] @{}(...) on impl item could not be \
+                                     parsed; the item is included by fall-through.",
+                                    attr.name.as_str(),
+                                );
+                            }
+                        }
+                        if !include {
+                            continue;
+                        }
+                    }
                     if let verum_ast::decl::ImplItemKind::Function(func) = &impl_item.kind {
+                        if !func.attributes.is_empty() {
+                            let (include, failures) = self
+                                .cfg_evaluator
+                                .should_include_with_failures(&func.attributes);
+                            if !failures.is_empty() {
+                                let fname = func.name.name.as_str();
+                                for attr in &failures {
+                                    tracing::warn!(
+                                        "[cfg] @{}(...) on impl-method `{}` \
+                                         could not be parsed; included by \
+                                         fall-through.",
+                                        attr.name.as_str(),
+                                        fname,
+                                    );
+                                }
+                            }
+                            if !include {
+                                continue;
+                            }
+                        }
                         self.ctx.generic_type_params.clear();
                         self.ctx.const_generic_params.clear();
                         for g in &impl_type_generics {
@@ -7694,7 +7736,25 @@ impl VbcCodegen {
                     .collect();
 
                 for impl_item in impl_decl.items.iter() {
+                    // Honour `@cfg` gates on impl items.  Same pattern
+                    // as `compile_item_lenient`'s impl loop — walk both
+                    // ImplItem.attributes and FunctionDecl.attributes
+                    // because the parser places attrs on the inner
+                    // decl when present.  Without this, an
+                    // `@cfg(target_os = "linux") fn …` inside a
+                    // cross-platform `implement Bar { … }` was
+                    // compiled on every host.
+                    if !impl_item.attributes.is_empty()
+                        && !self.cfg_evaluator.should_include(&impl_item.attributes)
+                    {
+                        continue;
+                    }
                     if let verum_ast::decl::ImplItemKind::Function(func) = &impl_item.kind {
+                        if !func.attributes.is_empty()
+                            && !self.cfg_evaluator.should_include(&func.attributes)
+                        {
+                            continue;
+                        }
                         // Set impl block generics before compiling function
                         // compile_function will add function's own generics to this
                         self.ctx.generic_type_params.clear();
