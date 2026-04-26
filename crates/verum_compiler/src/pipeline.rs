@@ -10986,16 +10986,15 @@ impl<'s> CompilationPipeline<'s> {
             "core.sys.common",
             "core.sys.raw",            // FFI intrinsic surface (`@intrinsic("time_*_nanos")`,
                                        // etc.) referenced by `sleep_secs` / `wall_clock_ms`
-                                       // bodies in `core.sys.time_ops`.  These functions
-                                       // get registered for codegen even when no user
-                                       // module explicitly mounts time_ops, because they
-                                       // reach the imported set via a transitive path
-                                       // that doesn't go through time_ops's own
-                                       // `mount super.raw.*` — so the closure walker's
-                                       // super.* resolution (added in #163) doesn't
-                                       // suffice on its own here.  See
-                                       // resolve_super_path tests + walker docs for
-                                       // the cases the super.* fix DOES handle.
+                                       // bodies in `core.sys.time_ops`.  Time_ops itself
+                                       // is reachable via the closure walker (channel.vr
+                                       // mounts `sys.time_ops.{...}`), and its
+                                       // `mount super.raw.*` would resolve to core.sys.raw
+                                       // through resolve_super_path (#163).  Whether this
+                                       // works end-to-end without the explicit ALWAYS_INCLUDE
+                                       // entry is tracked in #164 — the cross-process
+                                       // experiment is blocked by an unrelated build
+                                       // breakage in verum_verification.
             "core.sys.darwin.libsystem",
             "core.sys.darwin.thread",
             // Platform TLS / context-slot providers. `core/sys/common.vr`'s
