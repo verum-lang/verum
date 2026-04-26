@@ -8,7 +8,8 @@
 //! - Real-world file parsing
 //! - Specific construct parsing (expressions, types, declarations)
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use verum_ast::span::FileId;
 use verum_fast_parser::FastParser;
 use verum_lexer::Lexer;
