@@ -952,23 +952,14 @@ implement TcpListener {
     fn bind_addr_with_backlog(addr: &SocketAddr, backlog: Int) -> Result<TcpListener, IoError> {
         let domain = if addr.is_ipv4() { AF_INET } else { AF_INET6 };
 
-        // Workaround for #110 (still open after NewClosure fix): under AOT,
-        // `.map_err(IoError.from_os)?` SEGVs reading [NULL + ~0x85f0]. The
-        // codegen path differs from the static-method-HOF case I expected
-        // to find — NewClosure replacement at the qualified-fn ref sites
-        // didn't resolve it, so the bug is in a deeper code path. Inline
-        // match form bypasses the broken HOF lowering entirely.
+        // Create socket - use statement-level @cfg to ensure fd is in function scope
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let fd = match socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0) {
-            Ok(f) => f,
-            Err(e) => return Err(IoError.from_os(e)),
-        };
+        let fd = socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0)
+            .map_err(IoError.from_os)?;
 
         @cfg(target_os = "macos")
-        let fd = match sys_socket(domain, SOCK_STREAM, 0) {
-            Ok(f) => f,
-            Err(e) => return Err(IoError.from_os(e)),
-        };
+        let fd = sys_socket(domain, SOCK_STREAM, 0)
+            .map_err(IoError.from_os)?;
 
         // Set SO_REUSEADDR for quick restart
         @cfg(any(target_os = "linux", target_os = "windows"))
