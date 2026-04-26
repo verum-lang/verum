@@ -14,6 +14,7 @@ mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.sync.mutex.{Mutex};
+mount core.sync.atomic.{AtomicBool, MemoryOrdering};
 mount core.tracing.id.{TraceId, SpanId};
 mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
 mount core.tracing.attribute.{AttributeValue, AttributeSet};
@@ -158,6 +159,16 @@ public const SPAN_EVENT_LIMIT: Int = 128;
 public const SPAN_LINK_LIMIT: Int = 128;
 
 public type Span is {
+    /// Fast-path flag mirroring `inner.recording`. Lets every hot
+    /// mutator (set_attribute / add_event / add_link / set_status /
+    /// update_name) skip the mutex acquisition on a sampled-out span.
+    /// Set once at construction; immutable for the span's lifetime.
+    recording_flag: AtomicBool,
+    /// Fast-path flag mirroring `inner.end_time.is_some()`. Updated
+    /// once by `end()` / `end_at()`. Subsequent mutations short-circuit
+    /// without locking — the canonical "second-call no-op" semantics
+    /// of OTel spans, made cheap.
+    ended_flag: AtomicBool,
     inner: Shared<Mutex<SpanInner>>,
 };
 
@@ -182,7 +193,11 @@ implement Span {
     /// Construct a span handle from an already-initialised inner.
     /// Used by Tracer.start_span; instrumenters never call this directly.
     public fn from_inner(inner: SpanInner) -> Span {
+        let recording = inner.recording;
+        let ended = inner.end_time.is_some();
         Span {
+            recording_flag: AtomicBool.new(recording),
+            ended_flag: AtomicBool.new(ended),
             inner: Shared.new(Mutex.new(inner)),
         }
     }
@@ -205,7 +220,11 @@ implement Span {
             instrumentation_version: "".into(),
             recording: false,
         };
-        Span { inner: Shared.new(Mutex.new(inner)) }
+        Span {
+            recording_flag: AtomicBool.new(false),
+            ended_flag: AtomicBool.new(false),
+            inner: Shared.new(Mutex.new(inner)),
+        }
     }
 
     /// Get a copy of the SpanContext for propagation.
@@ -215,20 +234,34 @@ implement Span {
         inner.context.clone()
     }
 
+    /// Cheap fast-path: returns false iff the span is not recording
+    /// or has been ended, with no mutex acquisition. Hot mutators
+    /// gate on this to skip the lock entirely on no-op spans.
+    @inline
+    fn is_active(&self) -> Bool {
+        self.recording_flag.load(MemoryOrdering.Relaxed)
+            && !self.ended_flag.load(MemoryOrdering.Relaxed)
+    }
+
     public fn is_recording(&self) -> Bool {
-        let guard = (&*self.inner).lock().unwrap();
-        let inner: &SpanInner = &*guard;
-        inner.recording && inner.end_time.is_none()
+        // Atomic-only — no lock acquisition. Mirrors the doc semantics
+        // (recording AND not ended).
+        self.is_active()
     }
 
     public fn set_attribute(&self, key: Text, value: AttributeValue) {
+        if !self.is_active() { return; }
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
+        // Re-check under the lock: end() may have completed between the
+        // fast-path load and the lock acquisition, in which case the
+        // attribute would land in a span we promised to leave frozen.
         if !inner.recording || inner.end_time.is_some() { return; }
         inner.attributes.set(key, value);
     }
 
     public fn add_event(&self, name: Text, attributes: AttributeSet) {
+        if !self.is_active() { return; }
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
@@ -241,6 +274,7 @@ implement Span {
     }
 
     public fn add_link(&self, link: SpanLink) {
+        if !self.is_active() { return; }
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
@@ -249,6 +283,7 @@ implement Span {
     }
 
     public fn set_status(&self, new_status: SpanStatus) {
+        if !self.is_active() { return; }
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
@@ -267,6 +302,7 @@ implement Span {
     }
 
     public fn update_name(&self, name: Text) {
+        if !self.is_active() { return; }
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
@@ -277,6 +313,8 @@ implement Span {
     /// exception.type, exception.message, exception.stacktrace.
     /// (Convenience — matches OTel semantic conventions.)
     public fn record_exception(&self, type_name: &Text, message: &Text) {
+        // Skip the AttributeSet allocations entirely on a no-op span.
+        if !self.is_active() { return; }
         let mut attrs = AttributeSet.new();
         attrs.set("exception.type".into(), AttributeValue.Text(type_name.clone()));
         attrs.set("exception.message".into(), AttributeValue.Text(message.clone()));
@@ -287,20 +325,27 @@ implement Span {
     /// Returns the frozen SpanData (which processors consume).
     /// Idempotent — second call returns None.
     public fn end(&self) -> Maybe<SpanData> {
+        // Fast-path idempotency: if already ended, skip the lock.
+        if self.ended_flag.load(MemoryOrdering.Acquire) { return None; }
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if inner.end_time.is_some() { return None; }
         let now = Instant.now();
         inner.end_time = Some(now);
+        // Publish the ended state with Release so concurrent fast-path
+        // readers using Acquire see the freeze.
+        self.ended_flag.store(true, MemoryOrdering.Release);
         Some(freeze(inner, now))
     }
 
     /// End with an explicit timestamp (for replay / test scenarios).
     public fn end_at(&self, ts: Instant) -> Maybe<SpanData> {
+        if self.ended_flag.load(MemoryOrdering.Acquire) { return None; }
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if inner.end_time.is_some() { return None; }
         inner.end_time = Some(ts);
+        self.ended_flag.store(true, MemoryOrdering.Release);
         Some(freeze(inner, ts))
     }
 }
