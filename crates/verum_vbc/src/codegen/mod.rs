@@ -2757,6 +2757,145 @@ impl VbcCodegen {
         reported
     }
 
+    /// Cross-module type-table consistency check (#170).
+    ///
+    /// Runs after all imported modules have been processed and the
+    /// codegen's `self.types` represents the unified, whole-program
+    /// type table.  Reports the structural-hygiene classes that the
+    /// per-module verifier deliberately can't catch:
+    ///
+    ///   1. **Duplicate `TypeId`** — two `TypeDescriptor`s with the
+    ///      same numeric id but different declaration sites.  Caused
+    ///      by a name collision where the `type_name_to_id` insert
+    ///      guard (`if !contains_key`) silently merges the second
+    ///      type's declaration into the first's slot.
+    ///
+    ///   2. **Same name, different `TypeId`** — two descriptors
+    ///      sharing a name with distinct ids.  Indicates the codegen
+    ///      ran multiple type-allocation passes and the second pass
+    ///      didn't see the first pass's registration.
+    ///
+    ///   3. **Variant-tag gaps / duplicates within a sum** — already
+    ///      checked per-module by `verify_type_layout_invariants`,
+    ///      lifted here so a global pass catches the case where two
+    ///      modules separately declare overlapping subsets of the
+    ///      same logical sum's variants.
+    ///
+    /// Returns a structured `TypeTableHealthReport`; the caller
+    /// decides whether to `report.assert_clean()` (hard fail), warn
+    /// via tracing, or stash for downstream consumers (CI dashboards).
+    /// Distinct return shape from `verify_type_layout_invariants` so
+    /// the two checks compose without one masking the other.
+    pub fn verify_global_type_table_consistency(&self) -> TypeTableHealthReport {
+        Self::compute_type_table_health(&self.types, &self.ctx.strings)
+    }
+
+    /// Pure helper that builds the health report from a slice of
+    /// `TypeDescriptor`s and the matching string table.  Pulled out
+    /// so unit tests can construct synthetic tables without going
+    /// through the full codegen lifecycle.
+    fn compute_type_table_health(
+        types: &[crate::types::TypeDescriptor],
+        strings: &[String],
+    ) -> TypeTableHealthReport {
+        use std::collections::HashMap;
+        let resolve_name = |idx: u32| -> String {
+            strings.get(idx as usize).cloned().unwrap_or_else(|| format!("<id {}>", idx))
+        };
+
+        // Pass 1: bucket by TypeId. >1 in a bucket means duplicate ids.
+        let mut by_id: HashMap<u32, Vec<usize>> = HashMap::new();
+        for (i, ty) in types.iter().enumerate() {
+            by_id.entry(ty.id.0).or_default().push(i);
+        }
+        let mut duplicate_ids: Vec<DuplicateTypeId> = Vec::new();
+        for (id, idxs) in &by_id {
+            if idxs.len() > 1 {
+                let names: Vec<String> = idxs.iter()
+                    .map(|&i| resolve_name(types[i].name.0))
+                    .collect();
+                duplicate_ids.push(DuplicateTypeId {
+                    type_id: *id,
+                    descriptor_names: names,
+                });
+            }
+        }
+
+        // Pass 2: bucket by name. Two entries with the same name should
+        // share the same id (alias case); different ids = a real bug.
+        let mut by_name: HashMap<String, Vec<(u32, usize)>> = HashMap::new();
+        for (i, ty) in types.iter().enumerate() {
+            by_name.entry(resolve_name(ty.name.0)).or_default().push((ty.id.0, i));
+        }
+        let mut duplicate_names_with_different_ids: Vec<DuplicateNameDifferentId> = Vec::new();
+        for (name, slots) in &by_name {
+            if slots.len() > 1 {
+                let ids: std::collections::HashSet<u32> =
+                    slots.iter().map(|(id, _)| *id).collect();
+                if ids.len() > 1 {
+                    let mut sorted_ids: Vec<u32> = ids.into_iter().collect();
+                    sorted_ids.sort_unstable();
+                    duplicate_names_with_different_ids
+                        .push(DuplicateNameDifferentId {
+                            name: name.clone(),
+                            type_ids: sorted_ids,
+                        });
+                }
+            }
+        }
+
+        // Pass 3: variant-tag density.  Tags within a sum must be
+        // 0..variants.len() with no holes and no duplicates.  The
+        // per-module verifier already checks this; we re-check here
+        // because the per-module check skips empty `variants` arrays
+        // (records) but a sum that lost variants in cross-module
+        // dedupe still has the original arity stored elsewhere — we
+        // only flag when the slice is non-empty AND non-dense.
+        let mut variant_tag_anomalies: Vec<VariantTagAnomaly> = Vec::new();
+        for ty in types {
+            if ty.variants.is_empty() {
+                continue;
+            }
+            let mut seen: std::collections::HashSet<u32> =
+                std::collections::HashSet::new();
+            let mut max_tag: u32 = 0;
+            let mut duplicate_tags: Vec<u32> = Vec::new();
+            for v in &ty.variants {
+                if !seen.insert(v.tag) {
+                    duplicate_tags.push(v.tag);
+                }
+                if v.tag > max_tag {
+                    max_tag = v.tag;
+                }
+            }
+            let n = ty.variants.len() as u32;
+            // Gap detection: a dense [0..n) means seen.len() == n AND
+            // max_tag == n-1.  Anything else has gaps or out-of-range
+            // tags.
+            let dense = seen.len() as u32 == n
+                && (n == 0 || max_tag == n - 1);
+            if !dense || !duplicate_tags.is_empty() {
+                let missing: Vec<u32> = (0..n.max(max_tag + 1))
+                    .filter(|t| !seen.contains(t))
+                    .collect();
+                variant_tag_anomalies.push(VariantTagAnomaly {
+                    type_name: resolve_name(ty.name.0),
+                    type_id: ty.id.0,
+                    expected_count: n,
+                    max_tag_seen: max_tag,
+                    duplicate_tags,
+                    missing_tags: missing,
+                });
+            }
+        }
+
+        TypeTableHealthReport {
+            duplicate_ids,
+            duplicate_names_with_different_ids,
+            variant_tag_anomalies,
+        }
+    }
+
     /// Test-only: intern a string in the codegen's string table and
     /// return its index, for constructing synthetic TypeDescriptors in
     /// integration tests of `verify_type_layout_invariants`.
@@ -8570,6 +8709,113 @@ impl VbcCodegen {
     }
 }
 
+/// Cross-module type-table health (#170).  Returned by
+/// [`VbcCodegen::verify_global_type_table_consistency`].  See that
+/// method's docstring for the bug classes each field tracks.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TypeTableHealthReport {
+    /// Multiple `TypeDescriptor`s share a single `TypeId.0`.  A real
+    /// program never has this — TypeIds are supposed to be unique.
+    /// Caused by name-collision merge in `type_name_to_id`.
+    pub duplicate_ids: Vec<DuplicateTypeId>,
+    /// Multiple `TypeDescriptor`s share a name but report different
+    /// `TypeId.0` values.  Indicates the codegen ran multiple
+    /// type-allocation passes that didn't reuse the prior pass's
+    /// registration.
+    pub duplicate_names_with_different_ids: Vec<DuplicateNameDifferentId>,
+    /// A sum type's variant tags are not dense `0..variants.len()`
+    /// or contain duplicates.  Runtime variant dispatch indexes by
+    /// tag, so any gap or duplicate yields wrong-variant dispatch.
+    pub variant_tag_anomalies: Vec<VariantTagAnomaly>,
+}
+
+impl TypeTableHealthReport {
+    /// `true` when every category is empty.  Use this in a CI gate:
+    /// `assert!(codegen.verify_global_type_table_consistency().is_clean())`.
+    pub fn is_clean(&self) -> bool {
+        self.duplicate_ids.is_empty()
+            && self.duplicate_names_with_different_ids.is_empty()
+            && self.variant_tag_anomalies.is_empty()
+    }
+
+    /// Total number of issues across all categories.  Useful for a
+    /// "ratchet" baseline test that lets the count fall but never
+    /// rise.
+    pub fn issue_count(&self) -> usize {
+        self.duplicate_ids.len()
+            + self.duplicate_names_with_different_ids.len()
+            + self.variant_tag_anomalies.len()
+    }
+
+    /// Convert to a `CodegenError` when issues exist.  Bundles every
+    /// finding into a single `Internal` error so a strict-mode CI
+    /// build can use `?` propagation.
+    pub fn into_error(self) -> CodegenResult<()> {
+        if self.is_clean() {
+            return Ok(());
+        }
+        let mut msg = String::from("type-table consistency violations:\n");
+        for d in &self.duplicate_ids {
+            msg.push_str(&format!(
+                "  - duplicate TypeId({}) shared by {} descriptor(s): {:?}\n",
+                d.type_id, d.descriptor_names.len(), d.descriptor_names,
+            ));
+        }
+        for d in &self.duplicate_names_with_different_ids {
+            msg.push_str(&format!(
+                "  - name `{}` declared with {} different TypeIds: {:?}\n",
+                d.name, d.type_ids.len(), d.type_ids,
+            ));
+        }
+        for a in &self.variant_tag_anomalies {
+            msg.push_str(&format!(
+                "  - variant tags non-dense in `{}` (TypeId({})): expected {} \
+                 variants, max tag seen {}, duplicates {:?}, missing {:?}\n",
+                a.type_name, a.type_id, a.expected_count, a.max_tag_seen,
+                a.duplicate_tags, a.missing_tags,
+            ));
+        }
+        Err(CodegenError::internal(msg))
+    }
+}
+
+/// Single instance of "two TypeDescriptors share a TypeId".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuplicateTypeId {
+    /// The shared `TypeId.0` value.
+    pub type_id: u32,
+    /// Names of every descriptor that claims this id (length ≥ 2).
+    pub descriptor_names: Vec<String>,
+}
+
+/// Single instance of "same name, different TypeIds".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuplicateNameDifferentId {
+    /// The collided type name.
+    pub name: String,
+    /// All distinct TypeIds claimed under this name (length ≥ 2,
+    /// sorted ascending so test assertions are stable).
+    pub type_ids: Vec<u32>,
+}
+
+/// Single instance of "variant tags within a sum are non-dense".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantTagAnomaly {
+    /// Owning type's simple name.
+    pub type_name: String,
+    /// Owning type's `TypeId.0`.
+    pub type_id: u32,
+    /// Number of variants declared on the type.
+    pub expected_count: u32,
+    /// Largest tag value actually seen on any variant.
+    pub max_tag_seen: u32,
+    /// Tags that appeared on more than one variant.
+    pub duplicate_tags: Vec<u32>,
+    /// Tags expected from `0..expected_count.max(max_tag_seen+1)`
+    /// that no variant carries.
+    pub missing_tags: Vec<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8621,5 +8867,138 @@ mod tests {
             config.strict_codegen,
             "with_strict_codegen() must flip the flag on so CI / release builds reject any bug-class skip",
         );
+    }
+
+    /// Synthetic-table smoke (#170): an empty table is clean.
+    #[test]
+    fn test_global_type_table_clean_when_empty() {
+        let report = VbcCodegen::compute_type_table_health(&[], &[]);
+        assert!(report.is_clean(), "empty table must classify as clean");
+        assert_eq!(report.issue_count(), 0);
+        assert!(report.into_error().is_ok());
+    }
+
+    /// Synthetic-table smoke (#170): two TypeDescriptors with the
+    /// same `TypeId.0` must surface as a `DuplicateTypeId` finding —
+    /// this is the symptom of a type-name collision silently merging
+    /// into a single id slot.
+    #[test]
+    fn test_global_type_table_detects_duplicate_id() {
+        use crate::types::{TypeDescriptor, TypeId, StringId, TypeKind};
+        let strings = vec!["Foo".to_string(), "Bar".to_string()];
+        let mk = |name_idx: u32, id: u32| TypeDescriptor {
+            id: TypeId(id),
+            name: StringId(name_idx),
+            kind: TypeKind::Unit,
+            ..Default::default()
+        };
+        let types = vec![mk(0, 17), mk(1, 17)]; // Foo and Bar both claim id 17
+        let report = VbcCodegen::compute_type_table_health(&types, &strings);
+        assert!(!report.is_clean());
+        assert_eq!(report.duplicate_ids.len(), 1);
+        assert_eq!(report.duplicate_ids[0].type_id, 17);
+        let mut names = report.duplicate_ids[0].descriptor_names.clone();
+        names.sort();
+        assert_eq!(names, vec!["Bar", "Foo"]);
+        assert!(report.into_error().is_err());
+    }
+
+    /// Synthetic-table smoke (#170): same name, different TypeIds
+    /// surfaces as `DuplicateNameDifferentId`.  Distinct from the
+    /// duplicate-id case: here the *name* collides while the ids
+    /// disagree, indicating the codegen ran multiple type-allocation
+    /// passes that didn't share state.
+    #[test]
+    fn test_global_type_table_detects_same_name_different_ids() {
+        use crate::types::{TypeDescriptor, TypeId, StringId, TypeKind};
+        let strings = vec!["Counter".to_string(), "Counter".to_string()];
+        let mk = |name_idx: u32, id: u32| TypeDescriptor {
+            id: TypeId(id),
+            name: StringId(name_idx),
+            kind: TypeKind::Unit,
+            ..Default::default()
+        };
+        let types = vec![mk(0, 17), mk(1, 18)];
+        let report = VbcCodegen::compute_type_table_health(&types, &strings);
+        assert!(!report.is_clean());
+        assert_eq!(report.duplicate_names_with_different_ids.len(), 1);
+        let d = &report.duplicate_names_with_different_ids[0];
+        assert_eq!(d.name, "Counter");
+        assert_eq!(d.type_ids, vec![17, 18]);
+    }
+
+    /// Synthetic-table smoke (#170): two descriptors with different
+    /// names but pointing at the same TypeId are flagged as a
+    /// duplicate-id finding — aliases should be represented by a
+    /// SINGLE descriptor with multiple names in the string table,
+    /// not by two descriptors sharing an id.  The
+    /// duplicate-name-with-different-ids check stays silent because
+    /// neither name is itself ambiguous.
+    #[test]
+    fn test_global_type_table_two_descriptors_same_id_different_names_flagged() {
+        use crate::types::{TypeDescriptor, TypeId, StringId, TypeKind};
+        let strings = vec!["Int".to_string(), "i64".to_string()];
+        let mk = |name_idx: u32, id: u32| TypeDescriptor {
+            id: TypeId(id),
+            name: StringId(name_idx),
+            kind: TypeKind::Unit,
+            ..Default::default()
+        };
+        // Two names, but pointing at the *same* id — alias case.
+        let types = vec![mk(0, 0), mk(1, 0)];
+        let report = VbcCodegen::compute_type_table_health(&types, &strings);
+        // duplicate_ids fires (two descriptors share TypeId(0)) — that's
+        // technically a "duplicate" by the strict definition, so the
+        // report is NOT clean.  This is the intended behaviour: aliases
+        // should be represented by a single TypeDescriptor with multiple
+        // names in the string table, not two descriptors.
+        assert!(!report.is_clean());
+        assert_eq!(report.duplicate_ids.len(), 1);
+        // But the name-vs-id check is silent because both names are
+        // claimed against the same id.
+        assert_eq!(report.duplicate_names_with_different_ids.len(), 0);
+    }
+
+    /// Synthetic-table smoke (#170): a sum type with a tag gap
+    /// surfaces as a `VariantTagAnomaly`.  Runtime variant dispatch
+    /// indexes by tag, so any gap = wrong-variant dispatch.
+    #[test]
+    fn test_global_type_table_detects_variant_tag_gap() {
+        use crate::types::{
+            TypeDescriptor, TypeId, StringId, TypeKind,
+            VariantDescriptor, VariantKind,
+        };
+        use smallvec::smallvec;
+        let strings = vec![
+            "Color".to_string(),
+            "Red".to_string(),
+            "Green".to_string(),
+            "Blue".to_string(),
+        ];
+        // 3 variants with tags 0, 2, 5 — gaps at 1, 3, 4.
+        let mk_v = |name_idx: u32, tag: u32| VariantDescriptor {
+            name: StringId(name_idx),
+            tag,
+            payload: None,
+            kind: VariantKind::Unit,
+            arity: 0,
+            fields: smallvec![],
+        };
+        let ty = TypeDescriptor {
+            id: TypeId(17),
+            name: StringId(0),
+            kind: TypeKind::Sum,
+            variants: smallvec![mk_v(1, 0), mk_v(2, 2), mk_v(3, 5)],
+            ..Default::default()
+        };
+        let report = VbcCodegen::compute_type_table_health(&[ty], &strings);
+        assert!(!report.is_clean());
+        assert_eq!(report.variant_tag_anomalies.len(), 1);
+        let a = &report.variant_tag_anomalies[0];
+        assert_eq!(a.type_name, "Color");
+        assert_eq!(a.expected_count, 3);
+        assert_eq!(a.max_tag_seen, 5);
+        assert_eq!(a.missing_tags, vec![1, 3, 4]);
+        assert!(a.duplicate_tags.is_empty());
     }
 }
