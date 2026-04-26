@@ -49,10 +49,19 @@ QUICK START:
 )]
 struct Cli {
     #[clap(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 
     #[clap(short, long, global = true)]
     verbose: bool,
+
+    /// Print the VUVA (Verum Unified Verification Architecture)
+    /// version stamp and exit. Closes B14 (#212): VFE §0.0
+    /// governance promised this surface but it was unobservable
+    /// pre-fix. The kernel constant `verum_kernel::VUVA_VERSION`
+    /// is the single source of truth — bump on every VFE-N
+    /// kernel-rule acceptance.
+    #[clap(long = "vuva-version")]
+    vuva_version: bool,
 
     #[clap(short, long, global = true)]
     quiet: bool,
@@ -1213,6 +1222,16 @@ fn main() {
 fn main_inner() {
     let cli = Cli::parse();
 
+    // B14 (#212): --vuva-version short-circuit. Print the kernel
+    // version stamp and exit cleanly without dispatching a
+    // subcommand. Tooling integrations (CI, certificate emitters,
+    // cross-tool replay matrix) read this single line as their
+    // VUVA-version source of truth.
+    if cli.vuva_version {
+        println!("{}", verum_kernel::VUVA_VERSION);
+        process::exit(0);
+    }
+
     if let Err(e) = ui::init(cli.verbose, cli.quiet, cli.color.as_str()) {
         eprintln!("{} {}", "Error:".red().bold(), e);
         process::exit(1);
@@ -1302,7 +1321,18 @@ fn resolve_path(path: Option<&Text>) -> Result<PathTarget> {
 }
 
 fn run_command(cli: Cli) -> Result<()> {
-    match cli.command {
+    // After --vuva-version short-circuit in main_inner, command is
+    // required. Anything reaching here without one is a clap mis-
+    // configuration; surface it as a user error rather than panic.
+    let command = match cli.command {
+        Some(c) => c,
+        None => {
+            return Err(CliError::InvalidArgument(
+                "no subcommand given (run with --help or --vuva-version)".into(),
+            ));
+        }
+    };
+    match command {
         Commands::New {
             name,
             profile,

@@ -65,6 +65,30 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use verum_common::{Heap, List, Maybe, Text};
 
+/// Verum Unified Verification Architecture (VUVA) version stamp.
+///
+/// Closes B14 (#212). VFE §0.0 governance promises *"Каждое VFE-N
+/// принятие — minor version bump VUVA"*; without a constant in code,
+/// the version policy was unobservable. Tooling (CLI, certificate
+/// emitters, cross-tool replay matrix per task #90) keys behaviour
+/// on this constant.
+///
+/// **Bump policy** (per VFE §0.0 versioning):
+///
+///   * Major bump (`X` → `X+1`): backwards-incompatible changes to
+///     [`CoreTerm`], [`KernelError`], or any `pub` kernel surface.
+///   * Minor bump (`X.Y` → `X.Y+1`): VFE-N kernel-rule acceptance,
+///     or any new optional `@require_extension` gating.
+///   * Patch bump (`X.Y.Z` → `X.Y.Z+1`): bug fixes, soundness
+///     tightening (e.g., the B4 saturation fix in commit 3b15c185),
+///     refactoring without API change.
+///
+/// Current version reflects the V0/V1/V2 K-Eps-Mu rule + V1
+/// K-Universe-Ascent rule + V0/V1 K-Refine-omega rule shipped
+/// alongside the V1-V8 module split (#198) and B-series soundness
+/// fixes. Bump on every kernel-rule addition.
+pub const VUVA_VERSION: &str = "2.6.0";
+
 pub mod proof_tree;
 
 /// Kernel error type — split into its own module per #198 for
