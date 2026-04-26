@@ -5748,6 +5748,10 @@ const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
 if func_id == UNRESOLVED_FN_ID {
     // Emit a const-zero into dst as the call's "return value".
     // Subsequent code reads the default and degrades gracefully.
+    if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
+        let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
+        eprintln!("[aot-unresolved] in fn {} → const-zero dst", cur_fn);
+    }
     ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
     return Ok(());
 }
@@ -19405,6 +19409,14 @@ fn emit_ffi_error_protocol_check<'ctx>(
 }
 
 /// Store FFI return value with ownership tracking.
+///
+/// Integer returns narrower than 64 bits are sign-extended to i64 to match
+/// the VBC value model. Without this, a libc function declared to return
+/// C `int` (i32) leaves the upper 32 bits of x0 undefined on AArch64; if a
+/// caller reads the register as i64 a successful small positive return
+/// (e.g. an fd) can read back as a large negative i64 and trip `< 0`
+/// error checks. Tracked under #108. Floats are passed through unchanged
+/// — the caller widens via fpext if needed.
 fn store_ffi_return_value<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     call_site: &verum_llvm::values::CallSiteValue<'ctx>,
@@ -19412,7 +19424,24 @@ fn store_ffi_return_value<'ctx>(
     ret_reg: u16,
 ) {
     if let Some(ret_val) = call_site.try_as_basic_value().basic() {
-        ctx.set_register(ret_reg, ret_val);
+        // Sign-extend small integer returns to i64 so the upper bits of
+        // the register are well-defined. Match Verum's i64 value model.
+        let stored = if ret_val.is_int_value() {
+            let int_val = ret_val.into_int_value();
+            let bits = int_val.get_type().get_bit_width();
+            if bits < 64 {
+                let i64_ty = ctx.types().i64_type();
+                match ctx.builder().build_int_s_extend(int_val, i64_ty, "ffi_ret_sext") {
+                    Ok(extended) => BasicValueEnum::from(extended),
+                    Err(_) => ret_val, // fall back if builder rejected the extend
+                }
+            } else {
+                ret_val
+            }
+        } else {
+            ret_val
+        };
+        ctx.set_register(ret_reg, stored);
         if ffi_symbol.ownership == verum_vbc::module::FfiOwnership::TransferFrom {
             ctx.reg_types_mut().mark_owned_ffi(ret_reg);
         }
