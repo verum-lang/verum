@@ -70,36 +70,24 @@ The intrinsic registry (`intrinsics/registry.rs`) defines 150+ intrinsics with o
 | Strategy | Description | Interpreter Support |
 |----------|-------------|---------------------|
 | `DirectOpcode` | Single VBC opcode | Full |
-| `ArithExtendedOpcode` | 0xBD + sub-opcode | Full |
-| `InlineSequence` | Multi-instruction sequence | Full |
-| `LibraryCall` | External function call | **GAP** |
+| `OpcodeWithMode` / `OpcodeWithSize` | Opcode + parameter byte | Full |
+| `InlineSequence` / `InlineSequenceWithWidth` | Pre-defined VBC instruction sequence | Full |
 | `CompileTimeConstant` | Evaluated at compile time | Full |
+| `ArithExtendedOpcode` | 0xBD + sub-opcode | Full |
+| `MathExtendedOpcode` | 0x29 + sub-opcode (sqrt/sin/cos/etc.) | Full (~2ns dispatch) |
+| `WrappingOpcode` / `SaturatingOpcode` | Type-aware width+signed arithmetic | Full |
+| `TensorExtendedOpcode` / `TensorExtendedOpcodeWithMode` / `TensorExtExtendedOpcode` | 0xFF / 0xFC sub-opcode trees | Full |
+| `GpuExtendedOpcode` | 0xF8 + sub-opcode | Full |
 
-### LibraryCall Gap (Known Issue)
-
-The following intrinsics use `LibraryCall` strategy which emits a `Call` instruction with the function name as ID. The VBC interpreter's `handle_call` cannot resolve these external names:
-
-| Intrinsic | Library Function | Category |
-|-----------|------------------|----------|
-| `saturating_add_i128` | `verum_saturating_add` | Saturating |
-| `saturating_sub_i128` | `verum_saturating_sub` | Saturating |
-| `saturating_mul_i128` | `verum_saturating_mul` | Saturating |
-| `sqrt_f64` | `llvm.sqrt.f64` | Math |
-| `abort` | `abort` | Control |
-| `cbgr_advance_epoch` | `verum_cbgr_advance_epoch` | CBGR |
-| `num_cpus` | `verum_num_cpus` | Platform |
-| `tier_promote` | `verum_tier_promote` | Tier |
-| `get_tier` | `verum_get_tier` | Tier |
-| `future_poll_sync` | `verum_future_poll_sync` | Async |
-| `supervisor_set_parent` | `verum_supervisor_set_parent` | Runtime |
-| `exec_with_recovery` | `verum_exec_with_recovery` | Runtime |
-| `shared_registry_global` | `verum_shared_registry_global` | Runtime |
-| `middleware_chain_empty` | `verum_middleware_chain_empty` | Runtime |
-
-**Resolution Options:**
-1. Convert to `InlineSequence` strategy where possible
-2. Add interpreter handler for LibraryCall functions
-3. Add FFI bridge for external functions
+The previous `LibraryCall` strategy (string-keyed external function
+call that the interpreter could not resolve) has been removed — every
+intrinsic now uses one of the typed strategies above.  Historical
+mentions of "LibraryCall gap" in older docs / comments refer to a
+14-intrinsic backlog (saturating_add_i128, sqrt_f64, abort,
+cbgr_advance_epoch, num_cpus, tier_promote, get_tier,
+future_poll_sync, supervisor_set_parent, exec_with_recovery,
+shared_registry_global, middleware_chain_empty, plus parents) that
+was migrated to typed dispatch ahead of #168 close-out.
 
 ## Value Representation
 
