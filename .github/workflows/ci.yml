@@ -18,8 +18,9 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Job 1: compile + unit tests on Linux + macOS (aarch64 matches dev env).
-  # Blocks merge.
+  # Job 1: compile + unit tests on Linux (x86_64 + aarch64) and macOS.
+  # Linux-arm64 matters because aarch64 uses a different kernel syscall
+  # table from x86_64 — see sys/linux/arch.vr. Blocks merge.
   # ---------------------------------------------------------------------------
   unit:
     name: Unit tests (${{ matrix.os }})
@@ -27,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        os: [ubuntu-latest, buntu-24.04-arm, macos-14]
     steps:
       - uses: actions/checkout@v4
         with:

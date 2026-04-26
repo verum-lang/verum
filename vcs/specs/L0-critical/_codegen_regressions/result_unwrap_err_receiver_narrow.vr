@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: codegen, method-dispatch, receiver-narrowing, vuva-153
 // @expected-panic: called `unwrap` on an Err value
-// @description: VUVA #153 — method-dispatch receiver-type narrowing.
+// @description: VVA #153 — method-dispatch receiver-type narrowing.
 //
 // Multiple stdlib types declare `fn unwrap(self)` — Result.unwrap
 // (panics on Err), Maybe.unwrap (panics on None), Poll.unwrap
@@ -18,7 +18,7 @@
 // panic on Err — the call returned 99 and downstream code saw a
 // malformed value.
 //
-// VUVA #153 added a safety net: after the giant match, if the
+// VVA #153 added a safety net: after the giant match, if the
 // resulting `effective_method_name` is still bare (no `.` no `$`),
 // retry via `infer_expr_type_name(receiver)` — a generic
 // best-effort type-inference helper — and prefix as `Type.method`

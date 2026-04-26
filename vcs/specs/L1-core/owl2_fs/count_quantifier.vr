@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §21.5 Phase 3 C9 V1 — count_o quantifier-of-quantity.
+// VVA §21.5 Phase 3 C9 V1 — count_o quantifier-of-quantity.
 //
 // Smoke test: type-checks a closed-domain count_o invocation and
 // the unbounded variant's Maybe<Int>.  Runtime semantics (the

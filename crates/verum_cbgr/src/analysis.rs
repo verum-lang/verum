@@ -1143,9 +1143,6 @@ impl ClosureAnalysisResult {
 pub struct EscapeAnalyzer {
     /// Control flow graph
     cfg: ControlFlowGraph,
-    /// Legacy function call graph (retained for interprocedural analysis expansion)
-    #[allow(dead_code)]
-    legacy_call_graph: Map<FunctionId, Set<FunctionId>>,
     /// Thread-spawning functions
     thread_spawns: Set<FunctionId>,
     /// SSA representation (built lazily when needed)
@@ -1160,7 +1157,6 @@ impl EscapeAnalyzer {
     pub fn new(cfg: ControlFlowGraph) -> Self {
         Self {
             cfg,
-            legacy_call_graph: Map::new(),
             thread_spawns: Set::new(),
             ssa: None,
             current_function: Maybe::None,
@@ -1172,7 +1168,6 @@ impl EscapeAnalyzer {
     pub fn with_function(cfg: ControlFlowGraph, function_id: FunctionId) -> Self {
         Self {
             cfg,
-            legacy_call_graph: Map::new(),
             thread_spawns: Set::new(),
             ssa: None,
             current_function: Maybe::Some(function_id),
@@ -1936,7 +1931,6 @@ impl EscapeAnalyzer {
     pub fn with_ssa(cfg: ControlFlowGraph, ssa: crate::ssa::SsaFunction) -> Self {
         Self {
             cfg,
-            legacy_call_graph: Map::new(),
             thread_spawns: Set::new(),
             ssa: Some(ssa),
             current_function: Maybe::None,
@@ -6079,221 +6073,6 @@ impl crate::predicate_abstraction::PathAbstractionExt for EscapeAnalyzer {
         info
     }
 }
-
-// ==============================================================================
-// Points-To Analysis Extension for EscapeAnalyzer (Section 9.5)
-// ==============================================================================
-
-impl EscapeAnalyzer {
-    /// Compute points-to sets for all references in the CFG
-    ///
-    /// Uses Andersen-style points-to analysis to build a complete points-to graph
-    /// for all references in the function. This enables precise alias analysis and
-    /// heap escape detection.
-    ///
-    /// # Algorithm
-    /// 1. Generate points-to constraints from CFG
-    /// 2. Solve constraints iteratively to fixpoint
-    /// 3. Build points-to graph mapping variables to locations
-    /// 4. Return complete points-to analysis result
-    ///
-    /// # Performance
-    /// - Constraint generation: O(n) where n = instructions
-    /// - Fixpoint solving: O(n³) worst-case, O(n²) typical
-    /// - Total: O(n³) worst-case, O(n) to O(n²) typical
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let analyzer = EscapeAnalyzer::new(cfg);
-    /// let pts_result = analyzer.compute_points_to_sets();
-    ///
-    /// // Use points-to information for alias queries
-    /// let may_alias = pts_result.graph.may_alias(var1, var2);
-    /// ```
-    ///
-    /// Points-to analysis for CBGR alias refinement. Computes which memory
-    /// locations each reference may point to, enabling precise alias queries
-    /// (may_alias/must_alias) that improve escape analysis accuracy.
-    #[allow(dead_code)]
-    fn compute_points_to_sets(&self) -> crate::points_to_analysis::PointsToAnalysisResult {
-        crate::points_to_analysis::PointsToAnalyzerBuilder::new()
-            .with_cfg(&self.cfg)
-            .build()
-    }
-
-    /// Refine alias analysis using points-to information
-    ///
-    /// Enhances the existing alias analysis by incorporating precise points-to
-    /// information. This can distinguish must-alias from may-alias more accurately.
-    ///
-    /// # Algorithm
-    /// 1. Compute points-to sets for the reference
-    /// 2. Convert points-to graph to alias sets
-    /// 3. Merge with existing alias analysis
-    /// 4. Return refined alias sets
-    ///
-    /// # Performance
-    /// - O(n³) for initial points-to analysis
-    /// - O(1) for alias set conversion
-    /// - Total: O(n³) first call, O(1) cached
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let analyzer = EscapeAnalyzer::new(cfg);
-    /// let alias_sets = analyzer.refine_alias_with_points_to(ref_id);
-    ///
-    /// // Use refined alias information
-    /// if alias_sets.must_alias_with(version) {
-    ///     // Precise must-alias relationship
-    /// }
-    /// ```
-    ///
-    /// Refine alias analysis using points-to information. Merges points-to
-    /// based alias sets with SSA-based alias analysis for more precise
-    /// must-alias/may-alias relationships. Stronger alias info means fewer
-    /// false escapes and more CBGR promotions to &checked T.
-    #[allow(dead_code)]
-    fn refine_alias_with_points_to(&self, reference: RefId) -> Maybe<AliasSets> {
-        // First compute points-to sets
-        let pts_result = self.compute_points_to_sets();
-
-        // Convert to alias sets
-        let pts_alias_sets =
-            crate::points_to_analysis::points_to_graph_to_alias_sets(&pts_result.graph, reference);
-
-        // If we have SSA, merge with SSA-based alias analysis
-        if let Maybe::Some(mut pts_sets) = pts_alias_sets {
-            if self.ssa.is_some() {
-                let ssa_alias_sets = self.compute_aliases(reference);
-
-                // Merge: intersection for must-alias, union for may-alias
-                pts_sets
-                    .may_alias
-                    .extend(ssa_alias_sets.may_alias.iter().copied());
-
-                // If either is conservative, result is conservative
-                if ssa_alias_sets.conservative {
-                    pts_sets.mark_conservative_aliasing();
-                }
-            }
-
-            Maybe::Some(pts_sets)
-        } else {
-            // Fall back to existing alias analysis
-            if self.ssa.is_some() {
-                Maybe::Some(self.compute_aliases(reference))
-            } else {
-                Maybe::None
-            }
-        }
-    }
-
-    /// Check if reference points to heap using points-to analysis
-    ///
-    /// Uses precise points-to information to determine if a reference may
-    /// point to heap-allocated memory. This is more accurate than simple
-    /// escape analysis as it tracks actual pointer relationships.
-    ///
-    /// # Algorithm
-    /// 1. Compute points-to sets
-    /// 2. Get points-to set for the reference
-    /// 3. Check if any location in the set is heap-allocated
-    /// 4. Return true if heap escape is possible
-    ///
-    /// # Returns
-    /// - `true`: Reference may point to heap
-    /// - `false`: Reference definitely doesn't point to heap
-    ///
-    /// # Performance
-    /// - O(n³) for initial points-to analysis
-    /// - O(k) where k = points-to set size
-    /// - Total: O(n³) first call, O(k) cached
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let analyzer = EscapeAnalyzer::new(cfg);
-    ///
-    /// if analyzer.points_to_heap(ref_id) {
-    ///     // Reference may point to heap - cannot promote
-    /// } else {
-    ///     // Reference is stack-only - safe to promote
-    /// }
-    /// ```
-    ///
-    /// Check if a reference points to heap-allocated memory using points-to
-    /// analysis. If false, the reference is stack-only and safe to promote
-    /// to &checked T (zero-cost, no CBGR runtime check needed).
-    #[allow(dead_code)]
-    fn points_to_heap(&self, reference: RefId) -> bool {
-        // Compute points-to sets
-        let pts_result = self.compute_points_to_sets();
-
-        // Check if reference points to heap
-        crate::points_to_analysis::reference_points_to_heap(&pts_result.graph, reference)
-    }
-
-    /// Refine heap escape detection using points-to analysis
-    ///
-    /// Combines traditional escape analysis with points-to information to
-    /// provide more precise heap escape detection. This reduces false positives
-    /// by proving that some stores are stack-to-stack rather than stack-to-heap.
-    ///
-    /// # Algorithm
-    /// 1. Perform traditional escape analysis
-    /// 2. If result is `EscapesViaHeap`, refine using points-to
-    /// 3. Compute points-to sets to check actual heap pointers
-    /// 4. Downgrade to `DoesNotEscape` if provably stack-only
-    ///
-    /// # Returns
-    /// - Refined escape result (may be more precise than basic analysis)
-    ///
-    /// # Performance
-    /// - O(n³) for points-to analysis
-    /// - O(n) for traditional escape analysis
-    /// - Total: O(n³) worst-case
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let analyzer = EscapeAnalyzer::new(cfg);
-    /// let refined_result = analyzer.refine_escape_with_points_to(ref_id);
-    ///
-    /// match refined_result {
-    ///     EscapeResult::DoesNotEscape => {
-    ///         // Provably safe - promote to &checked
-    ///     }
-    ///     EscapeResult::EscapesViaHeap => {
-    ///         // Definitely escapes - keep as &T
-    ///     }
-    ///     _ => { /* Other escape patterns */ }
-    /// }
-    /// ```
-    ///
-    /// Refine heap escape detection by combining traditional escape analysis
-    /// with points-to information. If basic analysis reports EscapesViaHeap
-    /// but points-to proves the reference never reaches heap, downgrades to
-    /// DoesNotEscape. Reduces false positives from stack-to-stack stores
-    /// that look like stack-to-heap.
-    #[allow(dead_code)]
-    fn refine_escape_with_points_to(&self, reference: RefId) -> EscapeResult {
-        // First perform traditional escape analysis
-        let basic_result = self.analyze(reference);
-
-        // If not heap escape, return as-is
-        if !matches!(basic_result, EscapeResult::EscapesViaHeap) {
-            return basic_result;
-        }
-
-        // Use points-to analysis to refine heap escape
-        if !self.points_to_heap(reference) {
-            // Proved reference doesn't point to heap - downgrade to safe
-            return EscapeResult::DoesNotEscape;
-        }
-
-        // Confirmed heap escape
-        basic_result
-    }
-}
-
 // ============================================================================
 // Value Tracking Integration (Section 10)
 // ============================================================================
@@ -8405,9 +8184,6 @@ impl Default for EffectInfo {
 pub struct EffectAnalyzer {
     /// Effect information per function
     function_effects: Map<FunctionId, EffectInfo>,
-    /// Global effect cache (reserved for cross-function effect memoization)
-    #[allow(dead_code)]
-    effect_cache: Map<u64, Effect>,
     /// Functions known to spawn threads
     thread_spawns: Set<FunctionId>,
 }
@@ -8418,7 +8194,6 @@ impl EffectAnalyzer {
     pub fn new() -> Self {
         Self {
             function_effects: Map::new(),
-            effect_cache: Map::new(),
             thread_spawns: Set::new(),
         }
     }
@@ -9242,9 +9017,6 @@ impl CrossCrateInfo {
 /// 3. Using imported metadata to improve analysis precision
 #[derive(Debug)]
 pub struct CrossCrateAnalyzer {
-    /// Current crate name (reserved for qualified name resolution in cross-crate queries)
-    #[allow(dead_code)]
-    current_crate: Text,
     /// Imported escape information from dependencies
     external_crates: Map<Text, CrossCrateInfo>,
     /// Escape information for current crate (to be exported)
@@ -9256,7 +9028,6 @@ impl CrossCrateAnalyzer {
     #[must_use]
     pub fn new(crate_name: Text, crate_version: Text) -> Self {
         Self {
-            current_crate: crate_name.clone(),
             external_crates: Map::new(),
             current_crate_info: CrossCrateInfo::new(crate_name, crate_version),
         }
@@ -9544,9 +9315,8 @@ impl FunctionEscapeSummary {
         }
     }
 
-    fn add_parameter_result(&mut self, reference: RefId, escape_result: EscapeResult) {
+    fn add_parameter_result(&mut self, _reference: RefId, escape_result: EscapeResult) {
         self.parameters.push(ParameterEscapeResult {
-            reference,
             escapes: !escape_result.can_promote(),
             escape_result,
         });
@@ -9554,9 +9324,7 @@ impl FunctionEscapeSummary {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used for cross-crate metadata export
 struct ParameterEscapeResult {
-    reference: RefId,
     escapes: bool,
     escape_result: EscapeResult,
 }

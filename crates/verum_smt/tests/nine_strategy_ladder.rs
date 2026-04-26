@@ -119,7 +119,7 @@ fn at_least_enforces_monotone_lift() {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn nu_ordinals_match_vuva_table() {
+fn nu_ordinals_match_vva_table() {
     // VVA §12 — strict-monotone ν-ladder: every strategy gets a
     // distinct ordinal so `0 < 1 < 2 < ω < ω+1 < ω·2 < ω·2+1 <
     // ω·2+2 < ω·3+1` holds in the formal sense.

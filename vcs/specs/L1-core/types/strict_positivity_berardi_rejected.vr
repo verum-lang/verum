@@ -10,7 +10,7 @@
 // arrow) lets the user encode a paradox and derive `False`. The
 // kernel must reject every such declaration.
 //
-// VUVA #150 / C2-WIRE V1+V2 wires the AST-level walker into BOTH
+// VVA #150 / C2-WIRE V1+V2 wires the AST-level walker into BOTH
 // `register_type_declaration_inner` (the `verum check` path) AND
 // `resolve_type_definition` (the `verum build` path) so a Berardi
 // witness is rejected regardless of which CLI command the user

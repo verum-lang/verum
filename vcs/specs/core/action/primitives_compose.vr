@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §11.2 Phase 5 E1 — OC/DC dual stdlib smoke test.
+// VVA §11.2 Phase 5 E1 — OC/DC dual stdlib smoke test.
 // Exercises core.action.*: every primitive lifts to an Enactment,
 // composes sequentially, and canonicalises with deterministic gauge
 // normalisation.

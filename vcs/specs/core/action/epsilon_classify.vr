@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §11.2 + §21 — ε_classify primitive (Diakrisis Actic catalogue
+// VVA §11.2 + §21 — ε_classify primitive (Diakrisis Actic catalogue
 // extension for ontology-classification work). The new primitive
 // pairs with the OWL 2 V1 ecosystem (C7 + C8 + C9): a function decorated
 // `@enact(epsilon = "ε_classify")` is recognised by `verum audit

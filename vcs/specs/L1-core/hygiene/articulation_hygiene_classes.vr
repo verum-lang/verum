@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §13 Phase 6 F3 — Articulation Hygiene factorisation classes.
+// VVA §13 Phase 6 F3 — Articulation Hygiene factorisation classes.
 //
 // Smoke test: covers every §13.2 row that the `verum audit --hygiene`
 // reporter recognises today (V1 scope). The test only asserts the

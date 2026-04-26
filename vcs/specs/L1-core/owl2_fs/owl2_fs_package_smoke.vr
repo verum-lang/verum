@@ -5,7 +5,7 @@
 // @timeout: 8000
 // @expect: pass
 //
-// VUVA §21.5 Phase 3 C7 — owl2_fs framework axiom package skeleton.
+// VVA §21.5 Phase 3 C7 — owl2_fs framework axiom package skeleton.
 //
 // Smoke test: mounts the full Shkotin 2019 catalogue (10 tables, 64
 // trusted operators) and asserts that every named axiom resolves.

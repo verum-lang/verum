@@ -275,7 +275,11 @@ implement Thread {
     public fn yield_now() {
         @cfg(target_os = "linux")
         {
-            @syscall(24);  // sched_yield
+            // sched_yield. Syscall number differs per arch:
+            //   x86_64:  24
+            //   aarch64: 124
+            @cfg(target_arch = "x86_64")  { @syscall(24); }
+            @cfg(target_arch = "aarch64") { @syscall(124); }
         }
 
         @cfg(target_os = "macos")

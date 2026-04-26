@@ -154,3 +154,71 @@ fn suggestion_present_iff_fixable() {
         // doesn't have an autofix yet.
     }
 }
+
+// ============================================================
+// Streaming-path contract — `--format json` emits each file's
+// diagnostics as they finish. The schema is the same; the only
+// observable difference is the order isn't pre-sorted by file
+// (consumers sort post-hoc). We verify the contract by running
+// on a multi-file fixture and confirming every line still parses
+// as a schema-conforming object and no issue is emitted twice.
+// ============================================================
+
+fn make_multifile_fixture() -> TempDir {
+    let dir = tempfile::Builder::new()
+        .prefix("verum_lint_stream_")
+        .tempdir()
+        .expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("verum.toml"),
+        "[package]\nname = \"stream\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("manifest");
+    for i in 0..6 {
+        std::fs::write(
+            root.join("src").join(format!("a{i}.vr")),
+            format!(
+                "fn entry_{i}() {{ let _x = Box::new({i}); }}\n// TODO: clean\n"
+            ),
+        )
+        .expect("write fixture");
+    }
+    dir
+}
+
+#[test]
+fn streaming_json_emits_each_issue_once_and_well_formed() {
+    let dir = make_multifile_fixture();
+    let out = lint(&dir.path().to_path_buf());
+    let lines = parsed_lines(&out);
+    assert!(
+        lines.len() >= 6,
+        "expected at least one diagnostic per fixture file, got {} lines:\n{out}",
+        lines.len()
+    );
+    for v in &lines {
+        assert!(v.is_object(), "line is not an object: {v}");
+        assert_eq!(
+            v.get("schema_version").and_then(|x| x.as_u64()),
+            Some(EXPECTED_SCHEMA_VERSION)
+        );
+    }
+    // Stable issue identity: (rule, file, line, column).
+    let mut seen: std::collections::HashSet<(String, String, u64, u64)> =
+        std::collections::HashSet::new();
+    for v in &lines {
+        let key = (
+            v["rule"].as_str().unwrap_or("").to_string(),
+            v["file"].as_str().unwrap_or("").to_string(),
+            v["line"].as_u64().unwrap_or(0),
+            v["column"].as_u64().unwrap_or(0),
+        );
+        assert!(
+            seen.insert(key.clone()),
+            "issue emitted twice: {:?}\nfull stream:\n{out}",
+            key
+        );
+    }
+}

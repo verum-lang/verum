@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expect: pass
 //
-// VUVA §7.6 Phase 3 C5 V1 — Atkey Quantitative Type Theory annotations.
+// VVA §7.6 Phase 3 C5 V1 — Atkey Quantitative Type Theory annotations.
 //
 // Smoke test: type-checks every legal `@quantity(...)` shape on
 // function parameters. The actual linearity-tracking pass that

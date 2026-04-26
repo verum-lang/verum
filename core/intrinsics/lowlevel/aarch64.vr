@@ -348,6 +348,27 @@ public fn read_cntvct_el0() -> UInt64;
 @asm("mrs {0}, CNTFRQ_EL0")
 public fn read_cntfrq_el0() -> UInt64;
 
+/// Read the user-mode thread pointer register (TPIDR_EL0).
+///
+/// aarch64 Linux uses TPIDR_EL0 as the thread-pointer register that holds
+/// the TCB address for @thread_local resolution. Userspace can read it
+/// freely (it is software-owned from EL0).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, TPIDR_EL0")
+public fn read_tpidr_el0() -> UInt64;
+
+/// Write the user-mode thread pointer register (TPIDR_EL0).
+///
+/// Used by the Linux TLS bootstrap (sys/linux/tls.vr) as the aarch64
+/// equivalent of x86_64 `arch_prctl(ARCH_SET_FS, ptr)`. Unlike x86_64
+/// segment base manipulation, writing TPIDR_EL0 is permitted from EL0
+/// and does not require a syscall.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("msr TPIDR_EL0, {0}")
+public unsafe fn write_tpidr_el0(ptr: USize);
+
 // =============================================================================
 // MEMORY BARRIERS - @llvm_only
 // =============================================================================

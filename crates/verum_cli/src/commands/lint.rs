@@ -5199,17 +5199,81 @@ fn run_extended_inner(
     use rayon::prelude::*;
     let cache = build_lint_cache(&cfg);
     cache.gc();
+
+    // Streaming JSON path: emit per-file diagnostics to stdout as
+    // soon as each file finishes its per-file phase. The full
+    // `all_issues` Vec is still built (cross-file passes need the
+    // complete set, summary printing needs counts, baseline /
+    // --fix need the whole list) but the JSON consumer doesn't
+    // have to wait for the slowest file before seeing the first
+    // result. For 10K-file corpora this drops time-to-first-byte
+    // from "whole-corpus latency" to "single-file latency".
+    //
+    // Activates only when:
+    //   - format is Json (other formats need post-hoc structure
+    //     for summaries / annotations / SARIF runs / TAP plans),
+    //   - no baseline read (issues might be filtered later),
+    //   - no `--write-baseline` (snapshot needs the full set),
+    //   - no `--fix` (rewrites need to deduplicate per file).
+    // The streaming consumer must sort by (file, line, column)
+    // itself — it's documented in the JSON schema contract.
+    let streaming_eligible = matches!(format, LintOutputFormat::Json)
+        && matches!(baseline_mode, BaselineMode::Disabled)
+        && !fix;
+
     // Per-file phase. Returns issues + parsed module per file; cache
     // hits skip the parse and surface a None corpus entry that the
     // cross-file phase fills in.
     let per_file: Vec<(PathBuf, Vec<LintIssue>, Option<super::lint_engine::CorpusFile>)> =
-        files
-            .par_iter()
-            .map(|path| {
-                let (issues, corpus) = lint_one_with_cache(path, &cfg, &cache);
-                (path.clone(), issues, corpus)
-            })
-            .collect();
+        if streaming_eligible {
+            // Lock stdout once per file-completion: this is the only
+            // contention point and it's small (a single emit per
+            // issue). Severity filter is applied before emission so
+            // we don't print issues that the consumer would discard.
+            use std::io::Write;
+            let stdout = std::io::stdout();
+            files
+                .par_iter()
+                .map(|path| {
+                    let (mut issues, corpus) = lint_one_with_cache(path, &cfg, &cache);
+                    issues.retain_mut(|i| {
+                        match cfg.effective_level_for_file(i.rule, &i.file, i.level) {
+                            Some(lvl) => {
+                                if let Some(min) = severity_min {
+                                    if !meets_severity(lvl, min) {
+                                        return false;
+                                    }
+                                }
+                                i.level = lvl;
+                                true
+                            }
+                            None => false,
+                        }
+                    });
+                    if !issues.is_empty() {
+                        // One write per file rather than per issue —
+                        // amortises the lock cost.
+                        let mut buf = String::new();
+                        for issue in &issues {
+                            buf.push_str(&format_issue_json(issue));
+                            buf.push('\n');
+                        }
+                        let mut handle = stdout.lock();
+                        let _ = handle.write_all(buf.as_bytes());
+                        let _ = handle.flush();
+                    }
+                    (path.clone(), issues, corpus)
+                })
+                .collect()
+        } else {
+            files
+                .par_iter()
+                .map(|path| {
+                    let (issues, corpus) = lint_one_with_cache(path, &cfg, &cache);
+                    (path.clone(), issues, corpus)
+                })
+                .collect()
+        };
     let raw_issues: Vec<LintIssue> =
         per_file.iter().flat_map(|(_, i, _)| i.iter().cloned()).collect();
 
@@ -5237,7 +5301,42 @@ fn run_extended_inner(
             files: &corpus,
             config: Some(&cfg),
         };
-        super::lint_engine::run_cross_file(&ctx)
+        let raw_cross = super::lint_engine::run_cross_file(&ctx);
+        if streaming_eligible {
+            // Apply severity / per-file filtering once and emit
+            // immediately so the consumer sees cross-file findings
+            // in the same NDJSON stream. The accumulated Vec stays
+            // available for the exit-code counters below.
+            use std::io::Write;
+            let mut filtered: Vec<LintIssue> = Vec::with_capacity(raw_cross.len());
+            for mut i in raw_cross {
+                if let Some(lvl) =
+                    cfg.effective_level_for_file(i.rule, &i.file, i.level)
+                {
+                    if let Some(min) = severity_min {
+                        if !meets_severity(lvl, min) {
+                            continue;
+                        }
+                    }
+                    i.level = lvl;
+                    filtered.push(i);
+                }
+            }
+            if !filtered.is_empty() {
+                let mut buf = String::new();
+                for issue in &filtered {
+                    buf.push_str(&format_issue_json(issue));
+                    buf.push('\n');
+                }
+                let stdout = std::io::stdout();
+                let mut handle = stdout.lock();
+                let _ = handle.write_all(buf.as_bytes());
+                let _ = handle.flush();
+            }
+            filtered
+        } else {
+            raw_cross
+        }
     };
 
     let mut all_issues: Vec<LintIssue> = raw_issues
@@ -5305,7 +5404,12 @@ fn run_extended_inner(
             _ => {}
         }
     }
-    emit_issues(&all_issues, format)?;
+    // Streaming path already wrote the per-file + cross-file
+    // diagnostics to stdout as they were produced; the post-hoc
+    // emit would print them a second time. Skip it.
+    if !streaming_eligible {
+        emit_issues(&all_issues, format)?;
+    }
 
     if format == LintOutputFormat::Pretty {
         // Summary block consistent with execute()'s pretty output.
