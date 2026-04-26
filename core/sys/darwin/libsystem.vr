@@ -1604,7 +1604,15 @@ fn errno_to_message(code: Int) -> Text {
 
 /// Create a socket (safe wrapper)
 public fn safe_socket(domain: Int, sock_type: Int, protocol: Int) -> Result<FileDesc, OSError> {
-    let result = unsafe { socket(domain, sock_type, protocol) };
+    // libc `socket` returns C `int` (32-bit). The FFI extern declares
+    // it as Verum `Int` (64-bit), and AOT extern-call lowering doesn't
+    // currently sign-extend the i32 return to i64 — upper 32 bits of
+    // x0 contain garbage from libSystem's epilogue. A successful fd
+    // (small positive int) can read back as a large negative i64 and
+    // wrongly trip the `< 0` error path. Truncate-then-extend through
+    // Int32 to sign-extend cleanly.
+    let raw = unsafe { socket(domain, sock_type, protocol) };
+    let result = (raw as Int32) as Int;
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
