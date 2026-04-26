@@ -466,6 +466,21 @@ enum Commands {
         /// without running any rules.
         #[clap(long)]
         clean_cache: bool,
+        /// Read suppressions from FILE (default
+        /// `.verum/lint-baseline.json` if present). Issues that match
+        /// a baseline entry are silenced. Use to adopt strict rules
+        /// incrementally on legacy code.
+        #[clap(long, value_name = "FILE")]
+        baseline: Option<Text>,
+        /// Disable baseline lookup for this run, even if the
+        /// default `.verum/lint-baseline.json` exists.
+        #[clap(long)]
+        no_baseline: bool,
+        /// Snapshot the current run's issue set to FILE (or to the
+        /// default baseline path) and exit 0 even if there are
+        /// issues. Use to seed or refresh the baseline.
+        #[clap(long)]
+        write_baseline: bool,
         /// Fail the run when more than N warnings are emitted (after
         /// severity_map / per-file overrides / --severity / baseline
         /// filtering). `0` is equivalent to `--deny-warnings`. Errors
@@ -1580,6 +1595,9 @@ fn run_command(cli: Cli) -> Result<()> {
             threads,
             no_cache,
             clean_cache,
+            baseline,
+            no_baseline,
+            write_baseline,
             max_warnings,
             watch,
             watch_clear,
@@ -1652,7 +1670,12 @@ fn run_command(cli: Cli) -> Result<()> {
                     watch_clear,
                 )
             } else {
-                commands::lint::run_extended_full(
+                let baseline_opt = commands::lint::BaselineMode::from_flags(
+                    baseline.map(|t| t.to_string()),
+                    no_baseline,
+                    write_baseline,
+                );
+                commands::lint::run_extended_full_with_baseline(
                     fix,
                     deny_warnings,
                     fmt,
@@ -1660,6 +1683,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     since_ref,
                     severity_filter,
                     max_warnings,
+                    baseline_opt,
                 )
             }
         }
