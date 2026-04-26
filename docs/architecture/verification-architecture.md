@@ -420,6 +420,313 @@ A non-subsingleton axiom (e.g., `axiom choice<T>: ∀(s: NonEmpty<T>). T` with t
   Γ ⊢ SmtCertificate(query, backend, witness) : query
 ```
 
+The certificate's `obligation_hash` MUST be checked against the
+caller's expected hash via
+[`replay_smt_cert_with_obligation`](../../crates/verum_kernel/src/support.rs)
+before the witness is admitted; using the bare
+[`replay_smt_cert`](../../crates/verum_kernel/src/support.rs) (no
+hash comparison) is reserved for kernel-internal callers that
+construct the witness without yet knowing the goal. See V8
+commit 21aec4c3 closing the doc/code mismatch where the bare
+function's docstring claimed the comparison existed.
+
+### 4.4a Exhaustive kernel-rule taxonomy (V8, #214)
+
+Closes the "not exhaustive; key rules only" disclaimer above:
+this subsection enumerates **every** typing rule the trusted
+base implements today. Each entry gives the formal premise/
+conclusion, the V-stage maturity tag, implementation cross-
+reference (`crates/verum_kernel/src/<file>.rs::<symbol>`), and
+explicit side-conditions.
+
+V-stage taxonomy:
+
+  • **V0** — bring-up shape check. Only the syntactic
+    constructor is verified; deeper invariants are deferred.
+  • **V1** — conservative-correct rule with the documented
+    soundness gates wired but completeness possibly partial.
+  • **V2** — completeness-extended (β-aware, normalised,
+    or otherwise reduced before comparison).
+  • **V8** — V8 batch (this document's edit) — soundness
+    gaps from §4.5 metatheory dependencies + doc/code
+    reconciliation.
+
+#### 4.4a.1 Structural rules (CCHM core)
+
+```
+  (x : A) ∈ Γ
+  ─────────── (K-Var)              [V0]  infer.rs:Var arm
+  Γ ⊢ x : A
+```
+Lookup-by-name in the typing context; unbound names raise
+`KernelError::UnboundVariable`.
+
+```
+  Γ ⊢ Type_n : Type_{n+1}            (K-Univ)            [V8 — B1]
+  Γ ⊢ Prop : Type_0                                       infer.rs:Universe arm
+```
+Side-condition: `n < u32::MAX`. Overflow at `u32::MAX` raises
+`KernelError::UniverseLevelOverflow` (closes type-in-type
+saturation, see commit c667729d). `Prop` is at `Type_0`.
+
+```
+  Γ ⊢ A : Type_i        Γ, x:A ⊢ B : Type_j
+  ────────────────────────────────────────── (K-Pi-Form)  [V0]
+  Γ ⊢ Π (x:A). B : Type_max(i,j)                          infer.rs:Pi arm
+```
+
+```
+  Γ, x:A ⊢ t : B
+  ─────────────────────────────── (K-Lam-Intro)           [V0]
+  Γ ⊢ λ(x:A). t : Π (x:A). B                              infer.rs:Lam arm
+```
+
+```
+  Γ ⊢ f : Π(x:A). B        Γ ⊢ a : A
+  ──────────────────────────────────── (K-App-Elim)       [V0]
+  Γ ⊢ f a : B[x := a]                                     infer.rs:App arm
+```
+Domain match uses `structural_eq` today; lifting to
+`definitional_eq` is V2 work (separate task tracked under #216
+follow-ups).
+
+```
+  Γ ⊢ A : Type_i        Γ, x:A ⊢ B : Type_j
+  ────────────────────────────────────────── (K-Sigma-Form) [V0]
+  Γ ⊢ Σ (x:A). B : Type_max(i,j)                          infer.rs:Sigma arm
+```
+
+```
+  Γ ⊢ a : A        Γ ⊢ b : B
+  ──────────────────────────────  (K-Pair-Intro)          [V0 — non-dependent]
+  Γ ⊢ (a, b) : Σ (_:A). B                                 infer.rs:Pair arm
+```
+V0 emits a non-dependent Σ; full `Pair` typing under a
+declared dependent Σ is V1 work (requires bidirectional
+elaboration with an expected-type channel).
+
+```
+  Γ ⊢ p : Σ(x:A). B
+  ───────────────── (K-Fst-Elim)                          [V0]
+  Γ ⊢ fst p : A                                           infer.rs:Fst arm
+
+  Γ ⊢ p : Σ(x:A). B
+  ────────────────────── (K-Snd-Elim)                     [V0]
+  Γ ⊢ snd p : B[x := fst p]                               infer.rs:Snd arm
+```
+
+#### 4.4a.2 Cubical rules
+
+```
+  Γ ⊢ A : Type_i      Γ ⊢ a : A      Γ ⊢ b : A
+  ───────────────────────────────────────────── (K-PathTy-Form) [V8 — #216]
+  Γ ⊢ PathTy<A>(a, b) : Type_i                                  infer.rs:PathTy arm
+```
+Endpoint-against-carrier check uses
+[`definitional_eq`](../../crates/verum_kernel/src/support.rs)
+(β-normalises both sides before structural comparison) — closes
+the false-rejection of `App(Lam, _)` carriers per V8 commit
+1373bf49.
+
+```
+  Γ ⊢ x : A
+  ──────────────────────────  (K-Refl-Intro)              [V0]
+  Γ ⊢ refl(x) : PathTy<A>(x, x)                           infer.rs:Refl arm
+```
+
+```
+  Γ ⊢ φ : I        Γ ⊢ walls : (i : I) → A^[walls(φ)]      Γ ⊢ base : A
+  ──────────────────────────────────────────────────────────── (K-HComp) [V0 — partial]
+  Γ ⊢ hcomp(φ, walls, base) : A                                infer.rs:HComp arm
+```
+Side-condition: `phi`, `walls`, `base` each well-typed. Full
+cofibration calculus (interval subsumption, face-formula
+algebra) is dedicated cubical-pass V1 work.
+
+```
+  Γ ⊢ p : PathTy<Type>(A, B)        Γ ⊢ r : I        Γ ⊢ t : A
+  ────────────────────────────────────────────────────────────── (K-Transp) [V0 — partial]
+  Γ ⊢ transp(p, r, t) : B                                       infer.rs:Transp arm
+```
+When `p`'s type isn't `PathTy`, the rule conservatively returns
+`t`'s type (sound — the kernel returns a consistent type,
+downstream's App rule rejects on mismatch).
+
+```
+  Γ ⊢ A : Type_i      Γ ⊢ φ : I      Γ ⊢ T : (i:I) → Partial<φ, Type_i>      Γ ⊢ e : Equiv(T, A)^[φ]
+  ────────────────────────────────────────────────────────────────────────────── (K-Glue) [V0 — partial]
+  Γ ⊢ Glue<A>(φ, T, e) : Type_i                                                  infer.rs:Glue arm
+```
+Side-condition: every sub-term well-typed. Full equiv-coherence
++ univalence computation lands in dedicated cubical-pass V1.
+
+#### 4.4a.3 Refinement rules
+
+```
+  Γ ⊢ A : Type_n        Γ, x:A ⊢ P : Prop        dp(P) < dp(A) + 1
+  ─────────────────────────────────────────────────────────────── (K-Refine) [V0]
+  Γ ⊢ Refined(A, x, P) : Type_n                                    infer.rs:Refine arm
+```
+Yanofsky paradox-immunity gate via finite `dp` (T-2f*).
+`KernelError::DepthViolation` on failure.
+
+```
+  Γ ⊢ A : Type_n        Γ, x:A ⊢ P : Prop        m_depth_omega(P) < m_depth_omega(A).succ()
+  ──────────────────────────────────────────────────────────────────── (K-Refine-omega) [V8 — #218 wires]
+  Γ ⊢ Refined(A, x, P) : Type_n                                       depth.rs:check_refine_omega
+```
+VFE-7 transfinite stratification (T-2f***). Ordinal-valued
+`m_depth_omega`; supersedes `K-Refine` under
+`@require_extension(vfe_7)` (default `AllRulesActive` in V8 —
+the spec's Year 0–2 OptInOnly default lands once
+[task #218 wires policy through pipeline] (../../crates/verum_verification/src/passes/kernel_recheck.rs)).
+`KernelError::ModalDepthExceeded` on failure.
+
+```
+  Γ ⊢ a : A        Γ ⊢ proof : P[a/x]
+  ─────────────────────────────────────── (K-RefineIntro) [V0]
+  Γ ⊢ ⟨a | proof⟩ : Refined(A, x, P)
+```
+
+```
+  Γ ⊢ r : Refined(A, x, P)
+  ──────────────────────── (K-RefineErase) [V0]
+  Γ ⊢ r.value : A
+```
+
+#### 4.4a.4 Inductive rules
+
+```
+  registered("path") ∈ InductiveRegistry        registered("path").universe = U
+  ─────────────────────────────────────────────────────────────── (K-Inductive) [V8 — #215]
+  Γ ⊢ Inductive("path", args) : Universe(U)                       infer.rs:Inductive arm
+```
+V8 closes the hardcoded `Universe(Concrete(0))` demotion; HoTT-
+level inductives now report the registered universe through
+[`infer_with_inductives`](../../crates/verum_kernel/src/infer.rs)
+(legacy `infer` shim still falls back to `Concrete(0)` when no
+registry is supplied). Commit ca991d9e.
+
+```
+  ∀ ctor ∈ constructors. ∀ argTy ∈ ctor.arg_types. positive(target, argTy)
+  ─────────────────────────────────────────────────────────── (K-Pos) [V0]
+  registered(target, params, constructors)                     inductive.rs:check_strict_positivity
+```
+Strict-positivity check per VUVA §7.3. Berardi-shaped
+definitions (`type Bad = Wrap(Bad → A)`) rejected via
+`KernelError::PositivityViolation`.
+
+```
+  Γ ⊢ scrutinee : T        Γ ⊢ motive : T → Type
+  ──────────────────────────────────────────────── (K-Elim) [V8 — Elim V1]
+  Γ ⊢ elim(scrutinee, motive, cases) : motive scrutinee   infer.rs:Elim arm
+```
+V8 (commit 52896d42) tightens motive's TYPE to be a Π and
+verifies `scrutinee : domain(motive's Π)`. Per-case
+exhaustiveness + per-case typing is the dedicated Elim-rule
+pass's job (V2).
+
+#### 4.4a.5 SMT certificate + framework axioms
+
+```
+  Γ ⊢ query : Prop        witness = replay_smt_cert(cert)        kernel_recheck(witness) = Ok
+  ──────────────────────────────────────────────────────────── (K-Smt) [V0 + V8 hash gate]
+  Γ ⊢ SmtCertificate(cert) : query                              support.rs:replay_smt_cert
+```
+V8 introduces
+[`replay_smt_cert_with_obligation(cert, expected_hash)`](../../crates/verum_kernel/src/support.rs)
+as the soundness-correct entry point — verifies
+`cert.obligation_hash == expected_hash` before replay. The
+bare `replay_smt_cert` is kernel-internal (reserved for callers
+without the goal in hand; commit 21aec4c3 reconciles its
+docstring with the actual no-comparison behaviour).
+
+```
+  Γ ⊢ body : Prop        name ∈ FrameworkRegistry        citation ≠ ∅        is_subsingleton(body, regime)
+  ──────────────────────────────────────────────────────────────────────────────── (K-FwAx) [V8 — #217]
+  Γ ⊢ FrameworkAxiom(name, citation, body) : body                                  axiom.rs:register_with_regime
+```
+V8 (commit 020d5408) ships the `is_subsingleton` gate per the
+two-route discipline above (closed-proposition vs UIP). New
+`KernelError::AxiomNotSubsingleton` carries the offending
+free-var set for diagnostic post-mortem. Pre-V8 only the
+syntactic UIP shape was rejected (`KernelError::UipForbidden`);
+the wider class of non-subsingleton dependent axioms slipped
+through.
+
+#### 4.4a.6 Diakrisis VFE rules
+
+```
+  Γ ⊢ ε(α) ≃ A(ε(α))        depth-preserving for non-identity M
+  ────────────────────────────────────────────────────────── (K-Eps-Mu) [V0/V1/V2 — #181 V3]
+  Γ ⊢ EpsilonOf(α), AlphaOf(ε(α)) — coherent                  eps_mu.rs:check_eps_mu_coherence
+```
+VFE-1. V0/V1/V2 staged: V0 shape check, V1 identity-functor
+case, V2 depth-preservation pre-condition. Full τ-witness
+construction (σ_α / π_α) deferred to V3 (#181, multi-week).
+`KernelError::EpsMuNaturalityFailed` on failure (V2.5: depth-
+mismatch context now embeds rank values per commit 601a7c90).
+
+```
+  from_tier ⊆ canonical-step(to_tier)
+  ─────────────────────────────────── (K-Universe-Ascent) [V1 — VFE-3]
+  Γ ⊢ ascent(from_tier → to_tier) ok                       universe_ascent.rs:check_universe_ascent
+```
+Theorem 131.T κ-tower step. Valid steps:
+`Truncated → Truncated`, `κ_1 → κ_1`, `κ_1 → κ_2` (Lemma
+131.L1), `κ_2 → κ_2` (Lemma 131.L3 Drake-reflection closure).
+`KernelError::UniverseAscentInvalid` on tier inversion.
+
+```
+  Γ ⊢ t : T                                            Γ ⊢ t : T
+  ─────────────────────── (K-EpsilonOf)                ─────────────── (K-AlphaOf)
+  Γ ⊢ EpsilonOf(t) : T                                 Γ ⊢ AlphaOf(t) : T
+```
+V0: ε and α inherit the operand's type (the M ⊣ A biadjunction
+shows up only at the 2-cell level; type-level inheritance is
+sound). V1 will refine to track articulation/enactment 2-
+category membership.
+
+```
+  Γ ⊢ φ : T
+  ───────────────────────── (K-ModalBox)                [V1 — VFE-7]
+  Γ ⊢ ModalBox(φ) : Prop                                 infer.rs:ModalBox arm
+```
+□φ inhabits Prop (modality lifts to the propositional layer).
+`md^ω(□φ) = md^ω(φ).succ()` per Definition 136.D1.
+
+```
+  Γ ⊢ φ : T
+  ───────────────────────────── (K-ModalDiamond)        [V1 — VFE-7]
+  Γ ⊢ ModalDiamond(φ) : Prop                             infer.rs:ModalDiamond arm
+```
+Symmetric to K-ModalBox. `md^ω(◇φ) = md^ω(φ).succ()`.
+
+```
+  ∀ i. Γ ⊢ φ_i : T_i
+  ─────────────────────────────────────── (K-ModalBigAnd) [V1 — VFE-7]
+  Γ ⊢ ModalBigAnd(φ_0, ..., φ_κ) : Prop                    infer.rs:ModalBigAnd arm
+```
+Transfinite conjunction. `md^ω = sup_i (md^ω(φ_i))` per Lemma
+136.L0.
+
+#### 4.4a.7 Maturity audit
+
+| Rule family | Rules | V-stage range | Implementation crate |
+|---|---|---|---|
+| Structural (CCHM core) | 9 | V0 + V8 (Univ) | verum_kernel/src/infer.rs |
+| Cubical | 5 | V0 (partial: K-HComp / K-Transp / K-Glue need cubical-pass V1) + V8 (PathTy) | verum_kernel/src/infer.rs |
+| Refinement | 4 | V0 + V8 wire (K-Refine-omega) | verum_kernel/src/{infer,depth}.rs |
+| Inductive | 3 | V0 (K-Pos) + V8 (K-Inductive, K-Elim) | verum_kernel/src/{inductive,infer}.rs |
+| SMT + Axiom | 2 | V8 (both) | verum_kernel/src/{support,axiom}.rs |
+| Diakrisis VFE | 6 | V0 / V1 / V2 (K-Eps-Mu V3 = #181) | verum_kernel/src/{eps_mu,universe_ascent,infer}.rs |
+| **Total** | **29** | — | — |
+
+The 29-rule count makes the trusted base auditable: every rule
+has a formal premise, a maturity stage, an implementation
+pointer, and a documented side-condition. Future rule additions
+extend this table; V-stage promotions update the existing entry.
+
 ### 4.5 Metatheory status
 
 | Property | Status | Evidence / side-conditions |
