@@ -101,9 +101,12 @@ implement Instant {
 
     /// Get the elapsed time since this instant.
     ///
-    /// # Panics
-    /// Panics if the current time is somehow before this instant
-    /// (should never happen with monotonic time).
+    /// Returns the duration from `self` to `Instant.now()`. Saturates
+    /// at zero if the monotonic clock somehow appears to go backwards
+    /// (should never happen with a properly-functioning monotonic
+    /// clock — but on some platforms a thread can observe a small
+    /// inversion across CPU cores; saturating at zero is the safe
+    /// answer).
     ///
     /// # Example
     /// ```verum
@@ -113,7 +116,12 @@ implement Instant {
     /// ```
     public fn elapsed(&self) -> Duration {
         let now = Instant.now();
-        self.duration_since(now).unwrap_or(Duration.zero())
+        // BUG fix: previous implementation was `self.duration_since(now)`
+        // which computes `self - now` — always negative for a past
+        // instant — and `duration_since` returns None for negative,
+        // so `elapsed()` ALWAYS returned zero. The correct direction
+        // is `now - self`, i.e. `now.duration_since(*self)`.
+        now.duration_since(*self).unwrap_or(Duration.zero())
     }
 
     /// Get the duration from this instant to another.
