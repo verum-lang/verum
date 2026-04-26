@@ -44,6 +44,11 @@ use super::{VerificationError, VerificationPass, VerificationResult};
 pub struct KernelRecheckPass {
     /// Per-function rejection counts (recorded for diagnostics).
     rejections: List<Text>,
+    /// V8 (#211, B12) — VFE governance policy. Default is
+    /// [`VfePolicy::AllRulesActive`], matching the pre-V8
+    /// always-on behaviour. The opt-in / opt-out tiers are
+    /// configurable via [`Self::with_policy`].
+    policy: crate::vfe_gate::VfePolicy,
 }
 
 impl KernelRecheckPass {
@@ -51,7 +56,26 @@ impl KernelRecheckPass {
     pub fn new() -> Self {
         Self {
             rejections: List::new(),
+            policy: crate::vfe_gate::VfePolicy::AllRulesActive,
         }
+    }
+
+    /// V8 (#211, B12) — configure the VFE governance policy
+    /// applied during this pass. The pass currently only gates
+    /// VFE-7 (`vfe_7` = K-Refine-omega). When the policy reports
+    /// `vfe_7` as inactive for the surrounding scope, this pass
+    /// is a no-op for that scope (returns success without
+    /// running the kernel-recheck walker). Pre-V8 always ran;
+    /// V8 default still always runs (`AllRulesActive`).
+    pub fn with_policy(mut self, policy: crate::vfe_gate::VfePolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// V8 (#211, B12) — read-only accessor for the configured
+    /// VFE governance policy.
+    pub fn policy(&self) -> crate::vfe_gate::VfePolicy {
+        self.policy
     }
 
     /// The K-rule rejection labels accumulated by the most recent
@@ -175,9 +199,22 @@ impl VerificationPass for KernelRecheckPass {
         let mut costs: List<VerificationCost> = List::new();
         self.rejections = List::new();
 
+        // V8 (#211, B12) — read the module's `@require_extension`
+        // / `@disable_extension` set, then ask the configured
+        // policy whether VFE-7 (K-Refine-omega) is active. When
+        // inactive, we skip the recheck walker entirely — no
+        // outcomes accumulated, no rejection list populated.
+        // The default policy (`AllRulesActive`) always returns
+        // true, so existing test corpora continue to run the
+        // walker as before.
+        let extensions = crate::vfe_gate::EnabledExtensions::from_module(module);
+        let vfe_7_active = self.policy.is_active(&extensions, "vfe_7");
+
         let level = ctx.current_level();
-        for item in &module.items {
-            self.recheck_one_item(&item.kind, level, &mut costs);
+        if vfe_7_active {
+            for item in &module.items {
+                self.recheck_one_item(&item.kind, level, &mut costs);
+            }
         }
 
         let success = self.rejections.is_empty();

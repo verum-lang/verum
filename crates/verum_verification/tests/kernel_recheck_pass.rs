@@ -609,3 +609,130 @@ fn static_analysis_pipeline_kernel_recheck_result_visible() {
     );
     assert_eq!(kernel_result.costs.len(), 1, "one function in module");
 }
+
+// =============================================================================
+// V8 (#211, B12) — VFE @require_extension governance gating
+// =============================================================================
+
+use verum_verification::vfe_gate::{EnabledExtensions, VfePolicy};
+
+fn module_with_attrs(
+    functions: Vec<FunctionDecl>,
+    attrs: Vec<verum_ast::attr::Attribute>,
+) -> Module {
+    let mut items: List<Item> = List::new();
+    for f in functions {
+        items.push(Item::new(ItemKind::Function(f), span()));
+    }
+    let mut attr_list: List<verum_ast::attr::Attribute> = List::new();
+    for a in attrs {
+        attr_list.push(a);
+    }
+    Module {
+        items,
+        attributes: attr_list,
+        file_id: FileId::dummy(),
+        span: span(),
+    }
+}
+
+fn require_extension_attr(ext: &str) -> verum_ast::attr::Attribute {
+    let mut segs: List<verum_ast::ty::PathSegment> = List::new();
+    segs.push(verum_ast::ty::PathSegment::Name(ident(ext)));
+    let mut args: List<Expr> = List::new();
+    args.push(Expr::new(
+        ExprKind::Path(verum_ast::ty::Path::new(segs, span())),
+        span(),
+    ));
+    verum_ast::attr::Attribute {
+        name: Text::from("require_extension"),
+        args: Maybe::Some(args),
+        span: span(),
+    }
+}
+
+#[test]
+fn b12_default_policy_runs_all_rules_active() {
+    // V8 default policy = AllRulesActive — pre-V8 behaviour
+    // preserved. A modal-overshoot module without any
+    // @require_extension annotation is still rejected.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let module = module_with(vec![make_function(
+        "g",
+        vec![refined_int(boxed)],
+        Maybe::Some(Type::int(span())),
+    )]);
+    let mut pass = KernelRecheckPass::new();
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(!result.success, "default policy still runs the recheck");
+}
+
+#[test]
+fn b12_opt_in_policy_skips_module_without_require() {
+    // OptInOnly + no @require_extension(vfe_7) → walker skipped,
+    // result is success even for a modal-overshoot module. This
+    // proves the gate actually short-circuits the work.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let module = module_with(vec![make_function(
+        "g",
+        vec![refined_int(boxed)],
+        Maybe::Some(Type::int(span())),
+    )]);
+    let mut pass = KernelRecheckPass::new().with_policy(VfePolicy::OptInOnly);
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(
+        result.success,
+        "OptInOnly + no @require_extension → recheck skipped"
+    );
+    assert_eq!(pass.rejections().len(), 0);
+}
+
+#[test]
+fn b12_opt_in_policy_runs_when_module_requires_vfe_7() {
+    // OptInOnly + @require_extension(vfe_7) on the module → walker
+    // runs and rejects the modal-overshoot.
+    let p = path_expr("p");
+    let boxed = method_call_expr(method_call_expr(p, "box"), "box");
+    let module = module_with_attrs(
+        vec![make_function(
+            "g",
+            vec![refined_int(boxed)],
+            Maybe::Some(Type::int(span())),
+        )],
+        vec![require_extension_attr("vfe_7")],
+    );
+    let mut pass = KernelRecheckPass::new().with_policy(VfePolicy::OptInOnly);
+    let mut ctx = VerificationContext::new();
+    let result = pass.run(&module, &mut ctx).expect("pass runs");
+    assert!(
+        !result.success,
+        "OptInOnly + @require_extension(vfe_7) → recheck runs and rejects"
+    );
+}
+
+#[test]
+fn b12_extension_set_reads_module_level_require() {
+    // White-box test of EnabledExtensions::from_module — it must
+    // pick up the module-level @require_extension annotation.
+    let module = module_with_attrs(
+        vec![],
+        vec![require_extension_attr("vfe_7")],
+    );
+    let set = EnabledExtensions::from_module(&module);
+    assert!(set.requires("vfe_7"));
+    assert!(!set.requires("vfe_1"));
+    assert!(!set.disables("vfe_7"));
+}
+
+#[test]
+fn b12_policy_accessor_returns_configured_policy() {
+    // Sanity: the with_policy builder + policy() accessor agree.
+    let pass = KernelRecheckPass::new().with_policy(VfePolicy::OptInOnly);
+    assert_eq!(pass.policy(), VfePolicy::OptInOnly);
+    let pass2 = KernelRecheckPass::new();
+    assert_eq!(pass2.policy(), VfePolicy::AllRulesActive);
+}

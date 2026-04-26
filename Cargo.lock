@@ -5093,6 +5093,7 @@ dependencies = [
  "verum_diagnostics",
  "verum_error",
  "verum_interactive",
+ "verum_kernel",
  "verum_lexer",
  "verum_llvm",
  "verum_llvm_sys",
