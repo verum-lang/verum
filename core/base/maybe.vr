@@ -287,33 +287,48 @@ implement<T> Maybe<T> {
     }
 
     /// Insert a value, returning a mutable reference to it.
+    ///
+    /// **Drops the previous value if `self` was `Some`.** Callers
+    /// that want to read the old value first should use
+    /// [`replace`] (which returns the previous `Maybe<T>`)
+    /// instead.
     public fn insert(&mut self, value: T) -> &mut T {
         *self = Some(value);
         match self {
             Some(ref mut v) => v,
-            None => unreachable(),
+            // Provably dead: the line above just stored `Some`.
+            None => unsafe { unreachable_unchecked() },
         }
     }
 
     /// Get || insert a value.
+    ///
+    /// If `self` is already `Some`, returns the existing value
+    /// unchanged and the supplied `value` is dropped without
+    /// being read. If `self` is `None`, stores `Some(value)` and
+    /// returns a mutable reference to the newly-stored value.
     public fn get_or_insert(&mut self, value: T) -> &mut T {
         if self.is_none() {
             *self = Some(value);
         }
         match self {
             Some(ref mut v) => v,
-            None => unreachable(),
+            // Provably dead: `is_none()` was just shown false (or
+            // we just stored `Some` above).
+            None => unsafe { unreachable_unchecked() },
         }
     }
 
-    /// Get || insert with a function.
+    /// Get || insert with a function. The function is invoked only
+    /// when `self` is `None` (lazy initialisation).
     public fn get_or_insert_with<F: fn() -> T>(&mut self, f: F) -> &mut T {
         if self.is_none() {
             *self = Some(f());
         }
         match self {
             Some(ref mut v) => v,
-            None => unreachable(),
+            // Provably dead — same rationale as `get_or_insert`.
+            None => unsafe { unreachable_unchecked() },
         }
     }
 
@@ -333,8 +348,24 @@ implement<T> Maybe<T> {
     // Flattening
     // =========================================================================
 
-    /// Flatten nested Maybe<Maybe<U>> to Maybe<U>.
-    /// Only works when T is itself a Maybe<U> type.
+    /// Flatten nested `Maybe<Maybe<U>>` to `Maybe<U>`.
+    ///
+    /// Acts as monadic `join` when `T = Maybe<U>`: outer `None` and
+    /// `Some(None)` both collapse to `None`; `Some(Some(v))`
+    /// collapses to `Some(v)`.
+    ///
+    /// **Bound caveat**: Verum's type system can't express
+    /// `T = Maybe<U>` from within `implement<T> Maybe<T>`, so the
+    /// constraint is widened to `T: Default`. This is sound for
+    /// `T = Maybe<U>` because `Maybe::default() == None` — the
+    /// flatten semantics are exact. For any other `T: Default`,
+    /// this method instead behaves as `unwrap_or_default(self)`
+    /// (returns `T::default()` on `None`, the inner `T` on
+    /// `Some(t)`); use [`unwrap_or_default`] explicitly if that's
+    /// the intent so the call site reads honestly. Strict
+    /// `Maybe<Maybe<U>>` callers can also use the free function
+    /// [`flatten_maybe_maybe`] below for a constraint-tight
+    /// signature.
     public fn flatten(self) -> T
     where T: Default {
         match self {
@@ -535,7 +566,13 @@ implement<T> FromResidual<Maybe<Never>> for Maybe<T> {
     fn from_residual(residual: Maybe<Never>) -> Maybe<T> {
         match residual {
             None => None,
-            Some(_) => unreachable(),
+            // `Never` is uninhabited, so `Maybe<Never>` can only ever
+            // be `None`. The `Some(_)` arm is provably dead at every
+            // call site — we use the UB-hint variant so LLVM elides
+            // the branch entirely instead of paying the cost of an
+            // always-false test plus a panic prologue we will never
+            // reach.
+            Some(_) => unsafe { unreachable_unchecked() },
         }
     }
 }
@@ -550,6 +587,35 @@ implement<T, E> FromResidual<Result<Never, E>> for Maybe<T> {
 // =============================================================================
 // Collection Utilities for Maybe
 // =============================================================================
+
+/// Strictly-typed flatten for `Maybe<Maybe<T>>` → `Maybe<T>`.
+///
+/// Equivalent to [`Maybe::flatten`] when the receiver type is
+/// `Maybe<Maybe<T>>`, but with a tight signature that rejects
+/// non-nested calls at compile time. Useful when the call-site
+/// reader benefits from the unambiguous "this is monadic join"
+/// signal — `m.flatten()` on `Maybe<Int>` is a footgun that
+/// returns `Int` (acting as `unwrap_or_default`); the free
+/// function form can never confuse the two.
+///
+/// # Example
+///
+/// ```verum
+/// let outer: Maybe<Maybe<Int>> = Some(Some(7));
+/// assert_eq(flatten_maybe_maybe(outer), Some(7));
+///
+/// let inner_none: Maybe<Maybe<Int>> = Some(None);
+/// assert_eq(flatten_maybe_maybe(inner_none), None);
+///
+/// let outer_none: Maybe<Maybe<Int>> = None;
+/// assert_eq(flatten_maybe_maybe(outer_none), None);
+/// ```
+public fn flatten_maybe_maybe<T>(m: Maybe<Maybe<T>>) -> Maybe<T> {
+    match m {
+        Some(inner) => inner,
+        None => None,
+    }
+}
 
 /// Collects an iterator of Maybes into a Maybe of a List.
 /// Returns None if any element is None, or Some(List) if all are Some.
