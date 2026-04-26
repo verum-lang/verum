@@ -109,43 +109,16 @@ fn format_report_failure(
 }
 
 /// Asserts the unified type table built by compiling `rel_path`
-/// satisfies the global-consistency invariants — modulo the
-/// intentional `Heap` / `Shared` alias both bound to
-/// `TypeId::PTR (14)`.  That alias is by-design (both wrapper
-/// types share PTR-level dispatch); resolving it would require
-/// multi-name-per-descriptor support in the well-known TypeId
-/// map, tracked under #167.
+/// satisfies the global-consistency invariants.  Since
+/// `push_type_dedupe` now drops second-wins descriptors at the
+/// same id (handling the well-known PTR alias case),
+/// `report.is_clean()` is the correct strict check — no special-
+/// casing needed.
 fn assert_type_table_clean(rel_path: &str) {
     let codegen = compile_stdlib_subgraph(rel_path);
     let report = codegen.verify_global_type_table_consistency();
-
-    // Intentional aliases — anything that lands on TypeId(14) and
-    // claims one of the well-known PTR-alias names is expected.
-    let is_intentional_ptr_alias = |d: &verum_vbc::codegen::DuplicateTypeId| -> bool {
-        d.type_id == 14
-            && d.descriptor_names.iter().all(|n| {
-                matches!(n.as_str(), "Heap" | "Shared")
-            })
-    };
-    let real_dup_ids: Vec<_> = report
-        .duplicate_ids
-        .iter()
-        .filter(|d| !is_intentional_ptr_alias(d))
-        .cloned()
-        .collect();
-    if !real_dup_ids.is_empty()
-        || !report.duplicate_names_with_different_ids.is_empty()
-        || !report.variant_tag_anomalies.is_empty()
-    {
-        // Build a filtered report for the failure message.
-        let filtered = verum_vbc::codegen::TypeTableHealthReport {
-            duplicate_ids: real_dup_ids,
-            duplicate_names_with_different_ids: report
-                .duplicate_names_with_different_ids
-                .clone(),
-            variant_tag_anomalies: report.variant_tag_anomalies.clone(),
-        };
-        panic!("{}", format_report_failure(rel_path, &filtered));
+    if !report.is_clean() {
+        panic!("{}", format_report_failure(rel_path, &report));
     }
 }
 
@@ -164,8 +137,8 @@ fn global_type_table_clean_for_maybe() {
 /// `core/base/result.vr` is mounted transitively by a substantial
 /// portion of the async-runtime stdlib graph, so compiling it
 /// surfaces a much wider type table than `maybe.vr` or `list.vr`.
-/// As of #170/#187 close-out this fixture exposes 1 cross-module
-/// hygiene finding (down from 14 across multiple follow-ups):
+/// As of #170/#187 close-out this fixture exposes ZERO cross-module
+/// hygiene findings (down from 14 across multiple follow-ups):
 ///
 ///   1. Added `Channel`/`Deque`/`Tuple`/`Array` to the well-known
 ///      type-name map (14 → 15, briefly worse — exposed a separate
@@ -192,19 +165,19 @@ fn global_type_table_clean_for_maybe() {
 ///      `CancellationCallback` in `core/async/cancellation.vr`
 ///      (3 → 1).
 ///
-/// The remaining finding is the `Heap` / `Shared` pair both
-/// pointing at `TypeId::PTR (14)` — INTENTIONAL alias case where
-/// two type names are deliberately bound to the same id.  Fixing
-/// this would require changing the well-known TypeId architecture
-/// to allow multi-name aliases without distinct descriptors;
-/// out of scope for #187.  See #167 (TypeId / opcode-space
-/// extension).
+/// The previously-remaining `Heap` / `Shared` pair both pointing at
+/// `TypeId::PTR (14)` is now eliminated by `push_type_dedupe`:
+/// the second descriptor pushed at the same id is dropped (first-
+/// wins).  Function-table registrations for the dropped type's
+/// variants and methods still happen via independent code paths,
+/// so callers of either name resolve correctly through the same
+/// underlying TypeId.
 ///
 /// This test is a *ratchet*: the count must not rise, and must
 /// match exactly when it falls (so any improvement gets pinned).
 /// When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to lock
 /// in the gain.
-const RESULT_ISSUE_BASELINE: usize = 1;
+const RESULT_ISSUE_BASELINE: usize = 0;
 
 #[test]
 fn global_type_table_baseline_for_result() {
