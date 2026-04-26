@@ -2657,6 +2657,51 @@ impl VbcCodegen {
         // `field index N (offset M) exceeds object data size K` /
         // `Null pointer dereference` panics, far from the codegen site.
         self.verify_type_layout_invariants()?;
+        // Cross-module type-table consistency check (#170).  In strict
+        // mode (`config.strict_codegen = true`), any duplicate-id /
+        // same-name-different-id / variant-tag-anomaly finding fails
+        // the build with the bundled error.  In lenient mode (default),
+        // findings are emitted at warn-level so CI logs surface the
+        // regression without blocking dev iteration.
+        let report = self.verify_global_type_table_consistency();
+        if !report.is_clean() {
+            if self.config.strict_codegen {
+                report.into_error()?;
+                // Unreachable — into_error returns Err when not clean.
+                // The early-return path above keeps the type checker
+                // happy without unwrap().
+            } else {
+                tracing::warn!(
+                    "[type-table] {} cross-module consistency finding(s) — \
+                     run with `strict_codegen` to fail the build, or see \
+                     `verify_global_type_table_consistency` for the report \
+                     shape.  See #170 / #181 for the remediation plan.",
+                    report.issue_count(),
+                );
+                for d in &report.duplicate_ids {
+                    tracing::warn!(
+                        "[type-table]   duplicate TypeId({}) shared by {:?}",
+                        d.type_id, d.descriptor_names,
+                    );
+                }
+                for d in &report.duplicate_names_with_different_ids {
+                    tracing::warn!(
+                        "[type-table]   name `{}` declared with conflicting \
+                         TypeIds: {:?}",
+                        d.name, d.type_ids,
+                    );
+                }
+                for a in &report.variant_tag_anomalies {
+                    tracing::warn!(
+                        "[type-table]   variant tags non-dense in `{}` \
+                         (TypeId({})): expected {} variants, max tag {}, \
+                         duplicates {:?}, missing {:?}",
+                        a.type_name, a.type_id, a.expected_count,
+                        a.max_tag_seen, a.duplicate_tags, a.missing_tags,
+                    );
+                }
+            }
+        }
         self.build_module()
     }
 
