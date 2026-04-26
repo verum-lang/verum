@@ -242,7 +242,6 @@ pub struct FfiBoundaryPhase {
 
 /// Statistics for FFI boundary processing
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)] // Fields reserved for full FFI phase implementation
 struct FfiStats {
     /// Number of FFI boundaries processed
     boundaries_processed: usize,
@@ -250,8 +249,6 @@ struct FfiStats {
     functions_validated: usize,
     /// Number of wrappers generated
     wrappers_generated: usize,
-    /// Number of call sites validated
-    call_sites_validated: usize,
     /// Number of safety violations detected
     safety_violations: usize,
     /// Number of marshalling conversions generated
@@ -566,20 +563,21 @@ impl FfiBoundaryPhase {
          dependent_types, formal_proofs, linear_types"
     }
 
-    /// Process FFI boundaries in modules
+    /// Process FFI boundaries in modules.  Returns Ok(()) on success.
+    /// Statistics are tracked in `self.stats`; the per-function/per-
+    /// boundary result aggregates were vestigial (no caller read
+    /// them, only the side-effect stats updates were observed).
     fn process_boundaries(
         &mut self,
         boundaries: &[FFIBoundary],
-    ) -> Result<ProcessingResult, List<Diagnostic>> {
+    ) -> Result<(), List<Diagnostic>> {
         tracing::debug!("Processing {} FFI boundaries", boundaries.len());
 
-        let mut result = ProcessingResult::default();
         let mut diagnostics = Vec::new();
 
         for boundary in boundaries {
             match self.process_boundary(boundary) {
-                Ok(boundary_result) => {
-                    result.merge(boundary_result);
+                Ok(()) => {
                     self.stats.boundaries_processed += 1;
                 }
                 Err(diags) => {
@@ -592,22 +590,20 @@ impl FfiBoundaryPhase {
             return Err(List::from(diagnostics));
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Process a single FFI boundary
     fn process_boundary(
         &mut self,
         boundary: &FFIBoundary,
-    ) -> Result<BoundaryResult, Vec<Diagnostic>> {
-        let mut result = BoundaryResult::default();
+    ) -> Result<(), Vec<Diagnostic>> {
         let mut diagnostics = Vec::new();
 
         // Process each FFI function in the boundary
         for function in &boundary.functions {
             match self.process_ffi_function(function, boundary) {
-                Ok(func_result) => {
-                    result.functions.push(func_result);
+                Ok(()) => {
                     self.stats.functions_validated += 1;
                 }
                 Err(diags) => {
@@ -620,7 +616,7 @@ impl FfiBoundaryPhase {
             return Err(diagnostics);
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Process a single FFI function
@@ -628,7 +624,7 @@ impl FfiBoundaryPhase {
         &mut self,
         function: &FFIFunction,
         _boundary: &FFIBoundary,
-    ) -> Result<FunctionResult, Vec<Diagnostic>> {
+    ) -> Result<(), Vec<Diagnostic>> {
         let mut diagnostics = Vec::new();
 
         // 1. Validate boundary contract
@@ -642,31 +638,27 @@ impl FfiBoundaryPhase {
             diagnostics.extend(diags);
         }
 
-        // 3. Generate marshalling wrapper
-        let wrapper = match self
+        // 3. Generate marshalling wrapper.  Stats are accumulated;
+        // the wrapper itself isn't retained — externally-observable
+        // side effects are stats updates and emitted diagnostics.
+        match self
             .marshaller
             .generate_wrapper(function, &function.signature.calling_convention)
         {
             Ok(w) => {
                 self.stats.wrappers_generated += 1;
                 self.stats.conversions_generated += w.conversions.len();
-                Some(w)
             }
             Err(diags) => {
                 diagnostics.extend(diags);
-                None
             }
-        };
+        }
 
         if !diagnostics.is_empty() {
             return Err(diagnostics);
         }
 
-        Ok(FunctionResult {
-            function_name: function.name.name.as_str().to_string(),
-            wrapper: wrapper.unwrap(),
-            safety_checks: Vec::new(),
-        })
+        Ok(())
     }
 }
 
@@ -1163,10 +1155,7 @@ pub enum Direction {
 // ============================================================================
 
 /// Generates marshalling wrappers for FFI functions
-#[allow(dead_code)] // Fields reserved for advanced marshalling configuration
 pub struct Marshaller {
-    /// Marshalling rules
-    rules: MarshallingRules,
     /// Generation statistics
     stats: MarshallingStats,
 }
@@ -1174,7 +1163,6 @@ pub struct Marshaller {
 impl Marshaller {
     pub fn new() -> Self {
         Self {
-            rules: MarshallingRules::default(),
             stats: MarshallingStats::default(),
         }
     }
@@ -1557,58 +1545,6 @@ impl Marshaller {
         code
     }
 
-    /// Generate error handling code based on error protocol
-    #[allow(dead_code)] // Reserved for error protocol wrapper generation
-    fn generate_error_handling(
-        &self,
-        error_protocol: &ErrorProtocol,
-        _function_name: &str,
-    ) -> String {
-        match error_protocol {
-            ErrorProtocol::None => {
-                // No error handling needed
-                String::new()
-            }
-
-            ErrorProtocol::Errno => {
-                // Check errno after call
-                format!(
-                    "    // Check errno for errors\n    let errno = unsafe {{ *libc::__errno_location() }};\n    if errno != 0 {{\n        return Err(FFIError::Errno(errno));\n    }}\n"
-                )
-            }
-
-            ErrorProtocol::ReturnCode(_expr) => {
-                // Check return code against expected value
-                format!(
-                    "    // Check return code\n    if result != {} {{\n        return Err(FFIError::ReturnCode(result as i32));\n    }}\n",
-                    "/* success code */" // Would need to evaluate expr
-                )
-            }
-
-            ErrorProtocol::ReturnValue(_expr) => {
-                // Check if return value is sentinel (e.g., NULL)
-                format!(
-                    "    // Check return value\n    if result == {} {{\n        return Err(FFIError::Other(\"Sentinel value returned\".to_string()));\n    }}\n",
-                    "/* sentinel value */" // Would need to evaluate expr
-                )
-            }
-
-            ErrorProtocol::ReturnValueWithErrno(_expr) => {
-                // Check both return value and errno
-                format!(
-                    "    // Check return value and errno\n    if result == {} {{\n        let errno = unsafe {{ *libc::__errno_location() }};\n        return Err(FFIError::Errno(errno));\n    }}\n",
-                    "/* sentinel value */"
-                )
-            }
-
-            ErrorProtocol::Exception => {
-                // C++ exception handling (would need catch_unwind equivalent)
-                format!(
-                    "    // C++ exception handling\n    // Note: Requires linking with C++ runtime\n"
-                )
-            }
-        }
-    }
 
     /// Format type for Verum (high-level)
     fn format_type_verum(&self, ty: &Type) -> String {
@@ -1632,23 +1568,6 @@ impl Marshaller {
             _ => "/* unsupported type */".to_string(),
         }
     }
-
-    /// Format a type for code generation
-    #[allow(dead_code)] // Reserved for C type formatting in wrappers
-    fn format_type(&self, ty: &Type) -> String {
-        match &ty.kind {
-            TypeKind::Unit => "()".to_string(),
-            TypeKind::Bool => "bool".to_string(),
-            TypeKind::Int => "i32".to_string(),
-            TypeKind::Float => "f64".to_string(),
-            TypeKind::Char => "char".to_string(),
-            TypeKind::Pointer { mutable, inner } => {
-                let mutability = if *mutable { "mut " } else { "const " };
-                format!("*{}{}", mutability, self.format_type(inner))
-            }
-            _ => "/* unknown type */".to_string(),
-        }
-    }
 }
 
 impl Default for Marshaller {
@@ -1660,17 +1579,6 @@ impl Default for Marshaller {
 #[derive(Debug, Clone, Default)]
 struct MarshallingStats {
     wrappers_generated: usize,
-}
-
-#[derive(Debug, Clone)]
-struct MarshallingRules {
-    // Rules for specific type conversions
-}
-
-impl Default for MarshallingRules {
-    fn default() -> Self {
-        Self {}
-    }
 }
 
 /// Generated marshalling wrapper
@@ -1795,25 +1703,6 @@ struct SafetyStats {
     cbgr_violations: usize,
 }
 
-// ============================================================================
-// Result Types
-// ============================================================================
-
-#[derive(Debug, Clone, Default)]
-struct ProcessingResult {
-    boundaries: Vec<BoundaryResult>,
-}
-
-impl ProcessingResult {
-    fn merge(&mut self, other: BoundaryResult) {
-        self.boundaries.push(other);
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct BoundaryResult {
-    functions: Vec<FunctionResult>,
-}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Reserved for aggregated FFI processing results
