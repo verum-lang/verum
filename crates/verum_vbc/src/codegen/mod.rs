@@ -3371,6 +3371,16 @@ impl VbcCodegen {
         let mut to_parse: Vec<String> = Vec::new();
 
         for item in module.items.iter() {
+            // Honour the per-item @cfg gate.  A `mount` whose attribute
+            // doesn't match the current TargetConfig must not pull its
+            // file into the build, otherwise platform-cfg type
+            // declarations from the wrong target end up in the unified
+            // type table and the global type-table consistency check
+            // (#170) reports them as collisions with the matching
+            // platform's declarations.
+            if !self.should_compile_item(item) {
+                continue;
+            }
             if let ItemKind::Mount(mount_decl) = &item.kind {
                 let paths = Self::extract_mount_file_paths(&mount_decl.tree, &[]);
                 for module_path in paths {
