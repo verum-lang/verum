@@ -210,6 +210,68 @@ fn orphan_make_variants_dump_for_result() {
     eprintln!("[#188 dump] base/result.vr — {} orphan MakeVariant(s)", orphans.len());
 }
 
+// === Strict-codegen end-to-end test (#166) ============================
+
+/// Verify that `strict_codegen` mode actually halts the build when
+/// a bug-class skip would otherwise fire silently.  Uses a synthetic
+/// module declaring a function whose body references an undefined
+/// symbol — the lenient path warns and continues, the strict path
+/// returns `Err(CodegenError)` from the call.
+///
+/// This pins the contract that `with_strict_codegen()` isn't just
+/// a config flag with no observable effect.
+#[test]
+fn strict_codegen_halts_on_bug_class_skip() {
+    use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+
+    // Source that references an undefined function `nope_undefined_42`.
+    // Compiles cleanly under lenient mode (warn-level skip) and
+    // returns an error under strict mode.
+    let source = "fn caller() -> Int { nope_undefined_42() }";
+    let mut parser = verum_parser::Parser::new(source);
+    let module = parser
+        .parse_module()
+        .expect("parse should succeed; the body is the diagnostic");
+
+    // === Lenient (default): compile_module_items_lenient returns Ok
+    {
+        let mut codegen = VbcCodegen::with_config(
+            CodegenConfig::new("test_lenient").with_validation(),
+        );
+        codegen.collect_protocol_definitions(&module);
+        codegen
+            .collect_all_declarations(&module)
+            .expect("declarations should succeed");
+        let result = codegen.compile_module_items_lenient(&module);
+        assert!(
+            result.is_ok(),
+            "lenient mode should warn and continue, not fail: {:?}",
+            result.err(),
+        );
+    }
+
+    // === Strict: compile_module_items_lenient returns Err
+    {
+        let mut codegen = VbcCodegen::with_config(
+            CodegenConfig::new("test_strict")
+                .with_validation()
+                .with_strict_codegen(),
+        );
+        codegen.collect_protocol_definitions(&module);
+        codegen
+            .collect_all_declarations(&module)
+            .expect("declarations should succeed");
+        let result = codegen.compile_module_items_lenient(&module);
+        assert!(
+            result.is_err(),
+            "strict mode must fail-fast on bug-class skip — `caller` \
+             references an undefined function and that's the canonical \
+             bug-class signal.  Without this fail, `with_strict_codegen()` \
+             is a no-op flag.",
+        );
+    }
+}
+
 /// Print the current findings on result.vr — useful for diagnostic
 /// runs (`cargo test -p verum_vbc --features codegen
 /// global_type_table_dump_for_result -- --nocapture`).  Always
