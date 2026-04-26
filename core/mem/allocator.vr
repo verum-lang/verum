@@ -173,15 +173,20 @@ implement Layout {
     /// Create a layout from explicit size and alignment.
     ///
     /// ## Panics
-    /// Panics if alignment is not a power of 2. Prefer
-    /// [`try_from_size_align`] when the alignment value comes
-    /// from runtime input (e.g. the FFI boundary or a parsed
-    /// configuration); panicking on bad layout is appropriate
-    /// only when the caller can statically prove the precondition.
+    /// Panics if alignment is not a power of 2 OR if size is
+    /// negative. Prefer [`try_from_size_align`] when either value
+    /// comes from runtime input (FFI boundary, parsed configuration);
+    /// panicking on bad layout is appropriate only when the caller
+    /// can statically prove the precondition.
     public fn from_size_align(size: Int, align: Int) -> Layout {
-        // Verify alignment is power of 2
+        // Match try_from_size_align's contract: reject negative size
+        // up-front so an i64-wrapped value from a hostile caller can't
+        // produce a Layout that subsequently confuses the allocator.
+        if size < 0 {
+            panic(f"Layout.from_size_align: negative size {size}");
+        }
         if align <= 0 || (align & (align - 1)) != 0 {
-            panic("alignment must be a power of 2");
+            panic(f"Layout.from_size_align: alignment {align} must be a positive power of 2");
         }
         Layout { size_: size, align_: align }
     }
@@ -230,22 +235,87 @@ implement Layout {
     }
 
     /// Calculate layout for an array of n elements.
+    ///
+    /// ## Panics
+    /// Panics on `n < 0` and on `self.size_ * n` overflow. For
+    /// untrusted `n` (deserialized config, peer-supplied count) use
+    /// [`try_repeat`] which returns `Err(AllocError)` instead.
+    ///
+    /// Without these checks, a peer-controlled `n` of 2^60 against
+    /// a 16-byte element would compute `16 * 2^60 = 2^64`, overflow
+    /// Int (i64), wrap negative, and propagate a corrupt Layout to
+    /// the allocator — which then either panics on the negative size
+    /// (best case) or casts through to size_t and allocates an
+    /// enormous buffer (worst case).
     public fn repeat(&self, n: Int) -> Layout {
+        if n < 0 {
+            panic(f"Layout.repeat: negative count {n}");
+        }
+        if n > 0 && self.size_ > 0 && self.size_ > Int.MAX / n {
+            panic(f"Layout.repeat: size_ ({self.size_}) * n ({n}) overflows Int");
+        }
         Layout {
             size_: self.size_ * n,
             align_: self.align_,
         }
     }
 
+    /// Fallible counterpart to [`repeat`]. Returns
+    /// `Err(AllocError::InvalidSize)` for `n < 0` or for the
+    /// `size_ * n` overflow case. Use at trust boundaries.
+    public fn try_repeat(&self, n: Int) -> Result<Layout, AllocError> {
+        if n < 0 {
+            return Err(AllocError::InvalidSize { size: n });
+        }
+        if n > 0 && self.size_ > 0 && self.size_ > Int.MAX / n {
+            return Err(AllocError::InvalidSize { size: -1 });   // -1 sentinel: unrepresentable
+        }
+        Ok(Layout {
+            size_: self.size_ * n,
+            align_: self.align_,
+        })
+    }
+
     /// Extend this layout with another, returning combined layout.
     ///
     /// The second layout is placed after the first with proper padding.
+    ///
+    /// ## Panics
+    /// Panics if the padded size or final combined size would
+    /// overflow Int. For untrusted layouts, use [`try_extend`].
     public fn extend(&self, other: Layout) -> Layout {
-        let padded_size = align_up(self.size_, other.align_);
+        // align_up's `(value + align - 1)` can overflow when value
+        // is near Int.MAX. Reject pre-computation rather than letting
+        // the wrap silently produce a corrupt layout.
+        let align = other.align_;
+        if self.size_ > Int.MAX - (align - 1) {
+            panic(f"Layout.extend: padded size from {self.size_} aligned to {align} overflows Int");
+        }
+        let padded_size = align_up(self.size_, align);
+        if padded_size > Int.MAX - other.size_ {
+            panic(f"Layout.extend: combined size {padded_size} + {other.size_} overflows Int");
+        }
         Layout {
             size_: padded_size + other.size_,
             align_: if self.align_ > other.align_ { self.align_ } else { other.align_ },
         }
+    }
+
+    /// Fallible counterpart to [`extend`]. Returns
+    /// `Err(AllocError::InvalidSize)` on either overflow path.
+    public fn try_extend(&self, other: Layout) -> Result<Layout, AllocError> {
+        let align = other.align_;
+        if self.size_ > Int.MAX - (align - 1) {
+            return Err(AllocError::InvalidSize { size: -1 });
+        }
+        let padded_size = align_up(self.size_, align);
+        if padded_size > Int.MAX - other.size_ {
+            return Err(AllocError::InvalidSize { size: -1 });
+        }
+        Ok(Layout {
+            size_: padded_size + other.size_,
+            align_: if self.align_ > other.align_ { self.align_ } else { other.align_ },
+        })
     }
 
     /// Pad to alignment, returning layout with size adjusted.
