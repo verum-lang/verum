@@ -202,6 +202,83 @@ impl CodegenError {
             _ => None,
         }
     }
+
+    /// Classifies this error into a "lenient skip" category.
+    ///
+    /// Used by `compile_item_lenient` and the stdlib hygiene baseline tests
+    /// to distinguish:
+    ///
+    ///  * `BugClass` — error indicates a real codebase defect (an import
+    ///    gap, wrong arity, mismatched signature, missing trait impl).
+    ///    Surfacing path: warn-level trace today, hard error eventually
+    ///    (#166 close-out).
+    ///  * `Irreducible` — error indicates the Tier-0 interpreter genuinely
+    ///    cannot compile the construct (FFI prototype, GPU shader,
+    ///    not-yet-implemented language feature).  Surfacing path: debug
+    ///    trace; baseline tests already exclude these by fixture choice.
+    ///
+    /// The split is conservative: errors that *might* be either category
+    /// (notably `Internal`) classify as `BugClass` so they stay loud.
+    pub fn skip_class(&self) -> SkipClass {
+        match &self.kind {
+            // Genuine interpreter limitations — these fire when a function
+            // body references an LLVM intrinsic, an unimplemented expression
+            // kind, or a feature stubbed out in the codegen path.  The
+            // function is silently absent at runtime; users who call it
+            // get a `FunctionNotFound` panic which is the expected and
+            // documented contract.
+            CodegenErrorKind::UnsupportedExpr(_)
+            | CodegenErrorKind::UnsupportedPattern(_)
+            | CodegenErrorKind::NotImplemented(_) => SkipClass::Irreducible,
+
+            // Everything else is a real defect that should be fixed:
+            //   * UndefinedFunction / UndefinedVariable — import gap
+            //   * WrongArgumentCount / ArgumentTypeMismatch — caller / impl
+            //     drift
+            //   * TypeMismatch / TypeInference / InvalidTypeForOperation —
+            //     type system regression
+            //   * NonExhaustivePattern — coverage regression
+            //   * BreakOutsideLoop / ContinueOutsideLoop /
+            //     ReturnOutsideFunction — parser bug
+            //   * InvalidLiteral / InvalidBinaryOp / InvalidUnaryOp —
+            //     desugaring bug
+            //   * RegisterAllocationFailed / RegisterOverflow — codegen
+            //     resource exhaustion
+            //   * ImmutableAssignment / VariableAlreadyDefined / InvalidJumpTarget
+            //     — borrowck / lowering bug
+            //   * Internal — by definition a bug
+            _ => SkipClass::BugClass,
+        }
+    }
+}
+
+/// Classification used by lenient-skip diagnostics in
+/// `compile_item_lenient` to distinguish recoverable interpreter
+/// limitations from bug-class drops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipClass {
+    /// The error indicates a real defect (import gap, arity mismatch,
+    /// type-system regression, codegen resource exhaustion).  Currently
+    /// surfaced as a warn-level trace; #166 closes by promoting these to
+    /// hard errors.
+    BugClass,
+
+    /// The error indicates the Tier-0 interpreter cannot compile the
+    /// construct (FFI prototype, unimplemented language feature, GPU
+    /// kernel).  Skipping is the documented contract: callers get a
+    /// `FunctionNotFound` panic at runtime.
+    Irreducible,
+}
+
+impl SkipClass {
+    /// Short label used in trace messages.  Stable for grep/regex
+    /// scraping in CI logs.
+    pub fn label(self) -> &'static str {
+        match self {
+            SkipClass::BugClass => "bug-class",
+            SkipClass::Irreducible => "irreducible",
+        }
+    }
 }
 
 impl fmt::Display for CodegenError {
@@ -279,3 +356,79 @@ impl fmt::Display for CodegenErrorKind {
 }
 
 impl std::error::Error for CodegenError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Skip-class contract: bug-class causes (import gaps, arity drift,
+    /// type-system regressions) MUST classify as `BugClass` so they stay
+    /// loud — eventual #166 close-out promotes them to hard errors.
+    /// `Irreducible` is reserved for the genuinely-unsupported set
+    /// (FFI prototype, unimplemented language feature) where skipping
+    /// is the documented Tier-0 contract.
+    #[test]
+    fn skip_class_classifies_bug_class() {
+        let cases: Vec<CodegenErrorKind> = vec![
+            CodegenErrorKind::UndefinedFunction("foo".into()),
+            CodegenErrorKind::UndefinedVariable("x".into()),
+            CodegenErrorKind::WrongArgumentCount {
+                expected: 2,
+                found: 3,
+                function: "f".into(),
+            },
+            CodegenErrorKind::ArgumentTypeMismatch {
+                position: 0,
+                expected: "Int".into(),
+                found: "Text".into(),
+            },
+            CodegenErrorKind::TypeMismatch {
+                expected: "Int".into(),
+                found: "Text".into(),
+            },
+            CodegenErrorKind::TypeInference("ambiguous".into()),
+            CodegenErrorKind::NonExhaustivePattern("Maybe".into()),
+            CodegenErrorKind::Internal("ICE".into()),
+            CodegenErrorKind::RegisterOverflow {
+                needed: 999,
+                max: 256,
+            },
+            CodegenErrorKind::ImmutableAssignment("x".into()),
+            CodegenErrorKind::BreakOutsideLoop,
+            CodegenErrorKind::InvalidLiteral("0xFFFG".into()),
+        ];
+        for k in cases {
+            let err = CodegenError::new(k);
+            assert_eq!(
+                err.skip_class(),
+                SkipClass::BugClass,
+                "{} must classify as BugClass — these surface fixable defects",
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn skip_class_classifies_irreducible() {
+        let cases: Vec<CodegenErrorKind> = vec![
+            CodegenErrorKind::UnsupportedExpr("inline_asm".into()),
+            CodegenErrorKind::UnsupportedPattern("regex".into()),
+            CodegenErrorKind::NotImplemented("@gpu kernel".into()),
+        ];
+        for k in cases {
+            let err = CodegenError::new(k);
+            assert_eq!(
+                err.skip_class(),
+                SkipClass::Irreducible,
+                "{} must classify as Irreducible — Tier-0 cannot lower these",
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn skip_class_label_is_grep_stable() {
+        assert_eq!(SkipClass::BugClass.label(), "bug-class");
+        assert_eq!(SkipClass::Irreducible.label(), "irreducible");
+    }
+}

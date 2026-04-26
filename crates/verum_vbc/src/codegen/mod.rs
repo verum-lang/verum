@@ -100,7 +100,7 @@ pub struct BlanketImpl {
     /// These take priority over the derived protocol's default methods.
     pub explicit_methods: std::collections::HashSet<String>,
 }
-pub use error::{CodegenError, CodegenErrorKind, CodegenResult};
+pub use error::{CodegenError, CodegenErrorKind, CodegenResult, SkipClass};
 pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnapshot};
 
 use crate::types::CbgrTier;
@@ -2419,10 +2419,11 @@ impl VbcCodegen {
                     // found on value" only AFTER the warning fires, instead
                     // of being completely silent.
                     let fname = func.name.name.as_str();
+                    let class = e.skip_class();
                     tracing::warn!(
-                        "[lenient] SKIP top-level fn {}: {} — runtime calls \
+                        "[lenient] SKIP top-level fn {} ({}): {} — runtime calls \
                          will panic with `FunctionNotFound`",
-                        fname, e
+                        fname, class.label(), e
                     );
                     if let Some(undef) = e.undefined_function_name() {
                         let undef_owned = undef.to_string();
@@ -2507,13 +2508,14 @@ impl VbcCodegen {
                         if let Err(e) = self.compile_function(func, type_name.as_ref()) {
                             let fname = func.name.name.as_str();
                             let ty = type_name.as_deref().unwrap_or("?");
+                            let class = e.skip_class();
                             tracing::warn!(
-                                "[lenient] SKIP {}.{}: {} — runtime calls to \
+                                "[lenient] SKIP {}.{} ({}): {} — runtime calls to \
                                  this method will panic 'method '{}.{}' not found \
                                  on value'.  Add the missing dependency to the \
                                  caller's mount list or fix the cross-module \
                                  reference in {} stdlib.",
-                                ty, fname, e, ty, fname, ty
+                                ty, fname, class.label(), e, ty, fname, ty
                             );
                             // For debugging stdlib hygiene: dump near-matches
                             // from the ctx.functions table so the user can
