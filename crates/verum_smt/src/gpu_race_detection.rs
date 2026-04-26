@@ -59,28 +59,21 @@ pub struct RaceDetector {
     /// Detected race conditions
     races: List<RaceCondition>,
 
-    /// Block dimensions (threads per block)
-    #[allow(dead_code)] // Used for thread ID calculations
-    block_dim: (u32, u32, u32),
-
-    /// Grid dimensions (blocks in grid)
-    #[allow(dead_code)] // Used for block ID calculations
-    grid_dim: (u32, u32, u32),
-
     /// Statistics
     stats: RaceDetectionStats,
 }
 
 impl RaceDetector {
     /// Create a new race detector
-    pub fn new(grid_dim: (u32, u32, u32), block_dim: (u32, u32, u32)) -> Self {
+    ///
+    /// Race detection works from per-access thread/block tags rather than
+    /// re-deriving kernel geometry, so dimensions are not retained.
+    pub fn new() -> Self {
         Self {
             accesses: List::new(),
             happens_before: Map::new(),
             barriers: List::new(),
             races: List::new(),
-            block_dim,
-            grid_dim,
             stats: RaceDetectionStats::default(),
         }
     }
@@ -499,14 +492,14 @@ mod tests {
 
     #[test]
     fn test_race_detector_creation() {
-        let detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+        let detector = RaceDetector::new();
         assert_eq!(detector.accesses.len(), 0);
         assert_eq!(detector.races.len(), 0);
     }
 
     #[test]
     fn test_same_thread_no_race() {
-        let mut detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+        let mut detector = RaceDetector::new();
 
         let thread = ThreadId::new(0, 0, 0);
         let block = BlockId::new(0, 0, 0);
@@ -540,7 +533,7 @@ mod tests {
 
     #[test]
     fn test_two_reads_no_race() {
-        let mut detector = RaceDetector::new((1, 1, 1), (32, 1, 1));
+        let mut detector = RaceDetector::new();
 
         let thread1 = ThreadId::new(0, 0, 0);
         let thread2 = ThreadId::new(1, 0, 0);
