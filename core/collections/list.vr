@@ -106,9 +106,13 @@ implement<T> List<T> {
             return Ok(List.new());
         }
 
-        let ptr = unsafe {
-            alloc(capacity * T.size, T.alignment) as &unsafe T
-        };
+        // Route through try_alloc so allocator-side errors (OutOfMemory,
+        // InvalidSize, InvalidAlignment, MmapFailed, …) propagate as
+        // typed AllocError variants. The defensive null-check is
+        // retained as a belt-and-braces against an allocator that
+        // returns Ok with a null pointer.
+        let raw = try_alloc(capacity * T.size, T.alignment)?;
+        let ptr = raw as &unsafe T;
 
         if ptr.is_null() {
             return Err(AllocError::OutOfMemory {
@@ -555,26 +559,28 @@ implement<T> List<T> {
     }
 
     // Fallible counterpart to resize_buffer. Returns
-    // `Err(AllocError::OutOfMemory)` instead of panicking. Leaves
-    // `self.ptr` / `self.cap` unchanged on failure so the caller
-    // can retry with a smaller new_cap or surface the error.
+    // `Err(AllocError)` instead of panicking. Leaves `self.ptr` /
+    // `self.cap` unchanged on failure so the caller can retry with a
+    // smaller new_cap or surface the error.
     fn try_resize_buffer(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
         let new_size = new_cap * T.size;
         let align = T.alignment;
 
-        let new_ptr = unsafe {
-            if self.cap == 0 {
-                alloc(new_size, align) as &unsafe T
-            } else {
-                let old_size = self.cap * T.size;
-                realloc(
-                    self.ptr as &unsafe Byte,
-                    old_size,
-                    new_size,
-                    align,
-                ) as &unsafe T
-            }
+        // Route through try_alloc / try_realloc so allocator-side
+        // errors propagate as typed AllocError variants. The
+        // defensive null-check below is retained as belt-and-braces.
+        let new_raw = if self.cap == 0 {
+            try_alloc(new_size, align)?
+        } else {
+            let old_size = self.cap * T.size;
+            try_realloc(
+                self.ptr as &unsafe Byte,
+                old_size,
+                new_size,
+                align,
+            )?
         };
+        let new_ptr = new_raw as &unsafe T;
 
         if new_ptr.is_null() {
             return Err(AllocError::OutOfMemory { requested: new_size });

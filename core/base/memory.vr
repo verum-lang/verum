@@ -1442,6 +1442,11 @@ implement<T: Default> Default for Pin<T> {
 ///
 /// Returns a raw pointer to the allocated memory, or panics on failure.
 /// Use for collections that manage their own CBGR tracking.
+///
+/// For a fallible counterpart that returns `Err(AllocError)` instead of
+/// panicking, see `try_alloc`. Collections building atop this primitive
+/// should prefer `try_alloc` at trust boundaries (FFI, untrusted-size
+/// config, large allocations).
 public fn alloc(size: Int, align: Int) -> &unsafe Byte {
     match cbgr_alloc(size, align) {
         Ok((ptr, _, _)) => ptr,
@@ -1449,13 +1454,46 @@ public fn alloc(size: Int, align: Int) -> &unsafe Byte {
     }
 }
 
+/// Fallible counterpart to `alloc`.
+///
+/// Returns `Err(AllocError)` on allocation failure rather than
+/// panicking. The error variant carries enough detail
+/// (`AllocError::OutOfMemory { requested }`, `InvalidSize`,
+/// `InvalidAlignment`, etc.) for callers to distinguish recoverable
+/// from unrecoverable failures.
+///
+/// This is the load-bearing primitive for every `try_<op>` method in
+/// the collections layer. Without this, a `try_*` wrapper that calls
+/// `alloc()` would still panic in the failure path — only catching the
+/// narrow case where the allocator returned Ok with an unexpectedly
+/// null pointer.
+public fn try_alloc(size: Int, align: Int) -> Result<&unsafe Byte, AllocError> {
+    match cbgr_alloc(size, align) {
+        Ok((ptr, _, _)) => Ok(ptr),
+        Err(e) => Err(e),
+    }
+}
+
 /// Allocate zeroed memory with given size and alignment.
 ///
 /// Returns a raw pointer to the allocated memory, or panics on failure.
+///
+/// For a fallible counterpart see `try_alloc_zeroed`.
 public fn alloc_zeroed(size: Int, align: Int) -> &unsafe Byte {
     match cbgr_alloc_zeroed(size, align) {
         Ok((ptr, _, _)) => ptr,
         Err(e) => panic(f"alloc_zeroed failed: {e.message()}"),
+    }
+}
+
+/// Fallible counterpart to `alloc_zeroed`.
+///
+/// Returns `Err(AllocError)` on allocation failure rather than
+/// panicking. See `try_alloc` for rationale.
+public fn try_alloc_zeroed(size: Int, align: Int) -> Result<&unsafe Byte, AllocError> {
+    match cbgr_alloc_zeroed(size, align) {
+        Ok((ptr, _, _)) => Ok(ptr),
+        Err(e) => Err(e),
     }
 }
 
@@ -1477,6 +1515,8 @@ public fn dealloc(ptr: &unsafe Byte, _size: Int, _align: Int) {
 ///
 /// Returns a raw pointer to the new allocation.
 /// The old content is copied (up to min(old_size, new_size) bytes).
+///
+/// For a fallible counterpart see `try_realloc`.
 public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -> &unsafe Byte {
     if new_size == 0 {
         dealloc(ptr, old_size, align);
@@ -1498,6 +1538,53 @@ public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -
                 dealloc(ptr, old_size, align);
             }
             new_ptr
+        }
+    }
+}
+
+/// Fallible counterpart to `realloc`.
+///
+/// Returns `Err(AllocError)` on allocation failure rather than
+/// panicking. The original allocation at `ptr` is left UNTOUCHED on
+/// failure — the caller still owns it and is responsible for its
+/// eventual deallocation. This is the strong-guarantee semantics:
+/// either you get a new pointer and the old one has been freed, or
+/// you get an error and the old pointer is still valid.
+///
+/// `new_size == 0` is treated as deallocation: returns `Ok(null)` and
+/// frees the old buffer (matching the behaviour of `realloc`).
+public fn try_realloc(
+    ptr: &unsafe Byte,
+    old_size: Int,
+    new_size: Int,
+    align: Int,
+) -> Result<&unsafe Byte, AllocError> {
+    if new_size == 0 {
+        dealloc(ptr, old_size, align);
+        return Ok(null_ptr<Byte>());
+    }
+
+    // Try CBGR-aware realloc first — preserves generation tracking.
+    match cbgr_realloc(ptr, old_size, new_size, align) {
+        Ok((new_ptr, _, _)) => Ok(new_ptr),
+        Err(_) => {
+            // Fallback: alloc + copy + dealloc, but propagate the
+            // alloc error rather than panicking. On failure, the old
+            // buffer is left intact for the caller to free.
+            match cbgr_alloc(new_size, align) {
+                Ok((new_ptr_tuple, _, _)) => {
+                    let new_ptr = new_ptr_tuple;
+                    if !is_null(ptr) && old_size > 0 {
+                        let copy_size = if old_size < new_size { old_size } else { new_size };
+                        unsafe {
+                            intrinsic_memcpy(new_ptr as *mut Byte, ptr as *const Byte, copy_size);
+                        }
+                        dealloc(ptr, old_size, align);
+                    }
+                    Ok(new_ptr)
+                }
+                Err(e) => Err(e),
+            }
         }
     }
 }

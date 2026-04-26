@@ -1821,13 +1821,14 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Internal: fallible counterpart to `resize`. Returns
-    // Err(AllocError::OutOfMemory) on alloc failure rather than
-    // panicking. Load-bearing primitive for every try_<op> method.
+    // `Err(AllocError)` on alloc failure rather than panicking.
+    // Load-bearing primitive for every try_<op> method.
     fn try_resize(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
         let size = new_cap * SLOT_SIZE;
-        let new_entries = unsafe {
-            alloc_zeroed(size, SLOT_ALIGN) as &unsafe Slot<K, V>
-        };
+        // Route through try_alloc_zeroed so allocator-side errors
+        // propagate as typed AllocError variants.
+        let raw = try_alloc_zeroed(size, SLOT_ALIGN)?;
+        let new_entries = raw as &unsafe Slot<K, V>;
         if new_entries.is_null() {
             return Err(AllocError::OutOfMemory { requested: size });
         }

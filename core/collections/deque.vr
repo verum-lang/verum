@@ -1550,9 +1550,11 @@ implement<T> Deque<T> {
     // try_<op> method; the panicking `reallocate` simply panics
     // on the same failure mode.
     fn try_reallocate(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
-        let new_data = unsafe {
-            alloc(new_cap * T.size, T.alignment)
-        } as &unsafe T;
+        // Route through try_alloc so allocator-side errors propagate as
+        // typed AllocError variants. The defensive null-check below is
+        // retained as belt-and-braces.
+        let new_raw = try_alloc(new_cap * T.size, T.alignment)?;
+        let new_data = new_raw as &unsafe T;
 
         if new_data.is_null() {
             return Err(AllocError::OutOfMemory {
