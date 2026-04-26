@@ -2161,8 +2161,33 @@ impl VbcCodegen {
             return true;
         }
 
-        // Use CfgEvaluator.should_include which handles @cfg parsing
-        self.cfg_evaluator.should_include(&stmt.attributes)
+        // Use the failures-returning variant so silently-malformed
+        // `@cfg(...)` predicates surface as warns (parity with
+        // `should_compile_item`).  Statements don't carry a stable
+        // name, so the warn site identifies the function context
+        // via `current_function`.
+        let (include, failures) = self
+            .cfg_evaluator
+            .should_include_with_failures(&stmt.attributes);
+        if !failures.is_empty() {
+            let fn_name = self
+                .ctx
+                .current_function
+                .as_deref()
+                .unwrap_or("<unknown>");
+            for attr in &failures {
+                tracing::warn!(
+                    "[cfg] @{}(...) attribute on statement inside `{}` could \
+                     not be parsed; the statement is included by fall-through \
+                     (fail-open).  Check predicate syntax: identifier (`unix`), \
+                     key-value (`target_os = \"linux\"`), or \
+                     `all`/`any`/`not` combinator.",
+                    attr.name.as_str(),
+                    fn_name,
+                );
+            }
+        }
+        include
     }
 
     /// Check if an item should be compiled based on @cfg attributes.
