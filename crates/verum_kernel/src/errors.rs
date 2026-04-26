@@ -228,6 +228,53 @@ pub enum KernelError {
         to_tier: Text,
     },
 
+    /// V8 — `K-FwAx` subsingleton requirement violated. Per
+    /// `verification-architecture.md` §4.4, a framework axiom's
+    /// body must be a *subsingleton* (proof-irrelevant: at most
+    /// one inhabitant up to definitional equality) for subject
+    /// reduction to hold. Two acceptance routes:
+    ///
+    ///   1. **Closed-proposition route** — body mentions no free
+    ///      type-variables. Closed Props are forced unique by the
+    ///      framework lineage's intended interpretation.
+    ///   2. **UIP route** — body mentions free type-vars and the
+    ///      module explicitly imports
+    ///      `core.math.frameworks.uip`. (Mixing UIP with
+    ///      `core.math.frameworks.univalence` is rejected by
+    ///      `framework_compat::audit_framework_set`.)
+    ///
+    /// This variant fires when neither route admits the body —
+    /// the body has free vars AND the calling regime is
+    /// [`crate::SubsingletonRegime::ClosedPropositionOnly`]. The
+    /// `free_vars` field carries the offending names so the
+    /// diagnostic identifies precisely which symbols escape the
+    /// closed-proposition condition.
+    ///
+    /// Pre-V8 the kernel only checked the UIP-shape syntactically
+    /// (rejecting `Π A. ∀ a b p q. p = q` via `UipForbidden`).
+    /// That catches one specific paradox but admits a wide class
+    /// of non-subsingleton axioms (e.g.
+    /// `axiom choice<T>: ∀(s: NonEmpty<T>). T` whose witness depends
+    /// on which element of `s` was chosen — non-canonical).
+    /// V8 closes that gap by enforcing the full
+    /// closed-proposition condition.
+    #[error(
+        "kernel: framework axiom '{name}' is not subsingleton: \
+         body mentions {free_vars_count} free type-variable(s) \
+         ({free_vars_rendered}); admit either via the closed-proposition \
+         route (body must reference no unbound symbols) or via the \
+         UIP route (module must @import core.math.frameworks.uip)"
+    )]
+    AxiomNotSubsingleton {
+        /// Axiom name being registered.
+        name: Text,
+        /// Number of distinct free type-variables found.
+        free_vars_count: usize,
+        /// Comma-separated, sorted list of free-var names for the
+        /// diagnostic message.
+        free_vars_rendered: Text,
+    },
+
     /// V8 — SmtProof obligation-hash mismatch. The certificate's
     /// declared `obligation_hash` does not equal the
     /// caller-supplied expected hash, so the certificate cannot be

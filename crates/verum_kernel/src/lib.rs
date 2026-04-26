@@ -133,7 +133,8 @@ pub use universe_ascent::{UniverseTier, check_universe_ascent};
 /// calls one or more of them.
 pub mod support;
 pub use support::{
-    replay_smt_cert, replay_smt_cert_with_obligation, shape_of, structural_eq, substitute,
+    free_vars, replay_smt_cert, replay_smt_cert_with_obligation, shape_of, structural_eq,
+    substitute,
 };
 
 /// Axiom registry + AST loader — split per #198. Hosts
@@ -141,7 +142,10 @@ pub use support::{
 /// `load_framework_axioms`. UIP-shape axioms are syntactically
 /// rejected to preserve cubical-univalence soundness.
 pub mod axiom;
-pub use axiom::{AxiomRegistry, LoadAxiomsReport, RegisteredAxiom, load_framework_axioms};
+pub use axiom::{
+    AxiomRegistry, LoadAxiomsReport, RegisteredAxiom, SubsingletonRegime,
+    load_framework_axioms,
+};
 
 /// Kernel typing judgment — split per #198. Hosts the core LCF
 /// `infer` function plus the `check` / `verify` / `verify_full`
