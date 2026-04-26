@@ -45,6 +45,13 @@ public type ReflectedFunction is {
 };
 
 /// Build a reflected function record.
+///
+/// Panics if `parameters.len() != parameter_sorts.len()` — the two
+/// lists must align position-for-position so `to_smtlib_axiom` can
+/// emit `(x_i sort_i)` pairs. Without this guard a mismatched
+/// pair would produce an out-of-bounds index in the rendering
+/// loop, OR (worse) a silently-malformed SMT axiom that the
+/// solver might accept and feed into later proofs.
 public fn reflected_fn(
     name: Text,
     parameters: List<Text>,
@@ -52,6 +59,9 @@ public fn reflected_fn(
     return_sort: Text,
     parameter_sorts: List<Text>,
 ) -> ReflectedFunction {
+    if parameters.len() != parameter_sorts.len() {
+        panic(f"reflected_fn(`{name}`): parameters.len()={parameters.len()} != parameter_sorts.len()={parameter_sorts.len()}; lists must align position-for-position");
+    }
     ReflectedFunction {
         name,
         parameters,
@@ -59,6 +69,30 @@ public fn reflected_fn(
         return_sort,
         parameter_sorts,
     }
+}
+
+/// Fallible constructor for `ReflectedFunction`. Returns `None`
+/// when the parameter / parameter-sort list lengths disagree
+/// instead of panicking, for callers building reflections from
+/// untrusted input (e.g. external proof bundles, deserialized
+/// metadata).
+public fn try_reflected_fn(
+    name: Text,
+    parameters: List<Text>,
+    body_smtlib: Text,
+    return_sort: Text,
+    parameter_sorts: List<Text>,
+) -> Maybe<ReflectedFunction> {
+    if parameters.len() != parameter_sorts.len() {
+        return None;
+    }
+    Some(ReflectedFunction {
+        name,
+        parameters,
+        body_smtlib,
+        return_sort,
+        parameter_sorts,
+    })
 }
 
 // =============================================================================
