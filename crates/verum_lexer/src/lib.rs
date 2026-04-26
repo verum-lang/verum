@@ -71,7 +71,7 @@ pub mod lossless;
 pub mod token;
 
 pub use error::{LexResult, VerumError};
-pub use lexer::{Lexer, LookaheadLexer};
+pub use lexer::{Lexer, LookaheadLexer, strip_shebang};
 pub use lossless::{LosslessLexer, RichToken, Trivia, TriviaItem, TriviaKind};
 pub use token::{
     FloatLiteral, IntegerLiteral, InterpolatedStringLiteral, TaggedLiteralData,
@@ -159,5 +159,173 @@ fn test_requires_keyword() {
         TokenKind::Requires => {} // SUCCESS
         TokenKind::Ident(text) => panic!("FAIL: 'requires' tokenized as Ident({})", text),
         other => panic!("FAIL: 'requires' tokenized as {:?}", other),
+    }
+}
+
+#[cfg(test)]
+mod shebang_tests {
+    use super::*;
+    use verum_ast::FileId;
+
+    fn fid() -> FileId {
+        FileId::new(0)
+    }
+
+    // strip_shebang() unit tests --------------------------------------------------------------
+
+    #[test]
+    fn strip_shebang_no_shebang() {
+        let (body, sb) = strip_shebang("fn main() {}");
+        assert_eq!(body, "fn main() {}");
+        assert_eq!(sb, None);
+    }
+
+    #[test]
+    fn strip_shebang_simple_lf() {
+        let (body, sb) = strip_shebang("#!/usr/bin/env verum\nfn main() {}");
+        assert_eq!(body, "fn main() {}");
+        assert_eq!(sb, Some("#!/usr/bin/env verum\n"));
+    }
+
+    #[test]
+    fn strip_shebang_crlf() {
+        // CRLF: the \r remains as the last character of the shebang slice (before \n).
+        // Logos's whitespace skip rule swallows the \r at the start of body either way; the
+        // shebang slice keeps \r so that callers reconstructing the file losslessly are exact.
+        let (body, sb) = strip_shebang("#!/usr/bin/env verum\r\nfn main() {}");
+        assert_eq!(body, "fn main() {}");
+        assert_eq!(sb, Some("#!/usr/bin/env verum\r\n"));
+    }
+
+    #[test]
+    fn strip_shebang_only_shebang_no_newline() {
+        let (body, sb) = strip_shebang("#!/usr/bin/env verum");
+        assert_eq!(body, "");
+        assert_eq!(sb, Some("#!/usr/bin/env verum"));
+    }
+
+    #[test]
+    fn strip_shebang_empty() {
+        let (body, sb) = strip_shebang("");
+        assert_eq!(body, "");
+        assert_eq!(sb, None);
+    }
+
+    #[test]
+    fn strip_shebang_short_input() {
+        // Single '#' is not a shebang.
+        let (body, sb) = strip_shebang("#");
+        assert_eq!(body, "#");
+        assert_eq!(sb, None);
+    }
+
+    #[test]
+    fn strip_shebang_pound_no_bang() {
+        // '# something' is not a shebang.
+        let (body, sb) = strip_shebang("# not shebang\nfn main() {}");
+        assert_eq!(body, "# not shebang\nfn main() {}");
+        assert_eq!(sb, None);
+    }
+
+    #[test]
+    fn strip_shebang_unicode_in_shebang() {
+        // The shebang line may contain UTF-8 bytes. The split is on the first \n byte;
+        // because UTF-8 is self-synchronising, this never splits a multi-byte char.
+        let (body, sb) = strip_shebang("#!/usr/bin/env verum --флаг\nfn main() {}");
+        assert_eq!(body, "fn main() {}");
+        assert_eq!(sb, Some("#!/usr/bin/env verum --флаг\n"));
+    }
+
+    // Lexer integration -----------------------------------------------------------------------
+
+    #[test]
+    fn lexer_recognises_shebang() {
+        let src = "#!/usr/bin/env verum\nfn main() {}";
+        let lex = Lexer::new(src, fid());
+        assert!(lex.had_shebang());
+        assert_eq!(lex.shebang_text(), Some("#!/usr/bin/env verum\n"));
+        assert_eq!(lex.shebang_offset(), "#!/usr/bin/env verum\n".len() as u32);
+    }
+
+    #[test]
+    fn lexer_no_shebang_offset_zero() {
+        let src = "fn main() {}";
+        let lex = Lexer::new(src, fid());
+        assert!(!lex.had_shebang());
+        assert_eq!(lex.shebang_text(), None);
+        assert_eq!(lex.shebang_offset(), 0);
+    }
+
+    #[test]
+    fn lexer_token_spans_use_original_offsets() {
+        // After stripping `#!/usr/bin/env verum\n` (21 bytes), `fn` starts at byte 21
+        // in the original source. The first token's span MUST reflect that.
+        let src = "#!/usr/bin/env verum\nfn main() {}";
+        let lex = Lexer::new(src, fid());
+        let tokens: Vec<_> = lex.filter_map(|t| t.ok()).collect();
+        assert!(!tokens.is_empty());
+        let fn_tok = &tokens[0];
+        assert!(matches!(fn_tok.kind, TokenKind::Fn));
+        assert_eq!(fn_tok.span.start, 21);
+        assert_eq!(fn_tok.span.end, 23);
+    }
+
+    #[test]
+    fn lexer_shebang_stripped_does_not_emit_extra_tokens() {
+        // Without shebang.
+        let bare = Lexer::new("fn main() {}", fid()).filter_map(|t| t.ok()).count();
+        // With shebang.
+        let with_sb = Lexer::new("#!/usr/bin/env verum\nfn main() {}", fid())
+            .filter_map(|t| t.ok())
+            .count();
+        assert_eq!(bare, with_sb, "shebang must not change token count");
+    }
+
+    #[test]
+    fn lexer_eof_span_is_in_original_coordinates() {
+        // EOF span must point at the absolute end of the original source.
+        let src = "#!/usr/bin/env verum\nfn main() {}";
+        let lex = Lexer::new(src, fid());
+        let tokens: Vec<_> = lex.filter_map(|t| t.ok()).collect();
+        let eof = tokens.last().unwrap();
+        assert!(matches!(eof.kind, TokenKind::Eof));
+        assert_eq!(eof.span.start, src.len() as u32);
+        assert_eq!(eof.span.end, src.len() as u32);
+    }
+
+    // LosslessLexer integration ---------------------------------------------------------------
+
+    #[test]
+    fn lossless_emits_shebang_trivia_on_first_token() {
+        let src = "#!/usr/bin/env verum\nfn main() {}";
+        let tokens = LosslessLexer::new(src, fid()).tokenize();
+        // First non-EOF token is `fn`; its leading_trivia should contain a Shebang item.
+        let first = tokens
+            .iter()
+            .find(|t| matches!(t.token.kind, TokenKind::Fn))
+            .expect("fn token must be present");
+        let sb_item = first
+            .leading_trivia
+            .items
+            .iter()
+            .find(|t| matches!(t.kind, TriviaKind::Shebang))
+            .expect("shebang trivia must be attached to first token");
+        assert_eq!(sb_item.text, "#!/usr/bin/env verum\n");
+        assert_eq!(sb_item.span.start, 0);
+        assert_eq!(sb_item.span.end, 21);
+    }
+
+    #[test]
+    fn lossless_no_shebang_no_trivia_added() {
+        let src = "fn main() {}";
+        let tokens = LosslessLexer::new(src, fid()).tokenize();
+        for t in tokens.iter() {
+            for it in t.leading_trivia.items.iter() {
+                assert!(
+                    !matches!(it.kind, TriviaKind::Shebang),
+                    "no Shebang trivia must appear when source has none"
+                );
+            }
+        }
     }
 }

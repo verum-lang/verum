@@ -1,0 +1,52 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: action, epsilon, adjunction, auto-induced, coord, dual-stdlib
+// @timeout: 5000
+// @expect: pass
+//
+// V8 (#234) — VVA §11.3 Phase 5 E2 round-trip witnesses for the
+// auto-induced ε(α) construction.
+//
+// Per Diakrisis 108.T (AC ↔ OC duality theorem):
+//   • epsilon(α) constructs the syntactic self-enactment
+//     ε(α) = (F, Syn(F), id, id) at the same (Fw, ν, τ) coord as α.
+//   • alpha_of(ε(α)) ≡ α — the round-trip identity.
+//   • The auto-induced ε(α) preserves the coord (Fw, ν, τ) per
+//     `auto_induced_epsilon_coord` in core.theory_interop.coord.
+
+mount core.action.articulation;
+mount core.action.enactments;
+mount core.theory_interop.coord;
+
+fn main() {
+    // --- α ⊣ ε round-trip per #234 helper -------------------------
+    let alpha: Articulation = articulation_new(
+        "lurie_htt",
+        "Lurie 2009 — HTT 6.2.2.7",
+        "yoneda_embedding_fully_faithful",
+    );
+    assert(alpha_epsilon_alpha_roundtrip(alpha.clone()));
+
+    // --- counit: ε(α(e)) ≡ e for auto-induced e ------------------
+    let auto: Enactment = epsilon(alpha.clone());
+    assert(epsilon_alpha_epsilon_roundtrip_for_auto_induced(auto.clone()));
+
+    // --- coord auto-induction preserves (Fw, ν, τ) ---------------
+    let alpha_coord: MsfsCoord = coord_of(alpha.clone());
+    let eps_coord: MsfsCoord = auto_induced_epsilon_coord(alpha_coord.clone());
+    assert(coord_eq(alpha_coord.clone(), eps_coord));
+    assert(auto_induced_epsilon_coord_preserves(alpha_coord));
+
+    // --- second framework: schreiber_dcct at ν=ω+2 ---------------
+    let beta: Articulation = articulation_new(
+        "schreiber_dcct",
+        "Schreiber arXiv:1310.7930",
+        "cohesive_pi_disc_gamma_codisc",
+    );
+    assert(alpha_epsilon_alpha_roundtrip(beta.clone()));
+    let beta_coord: MsfsCoord = coord_of(beta);
+    assert(auto_induced_epsilon_coord_preserves(beta_coord));
+
+    print("auto-induced ε(α) round-trip ok");
+}

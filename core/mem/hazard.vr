@@ -277,15 +277,39 @@ implement ThreadHazardRecord {
     /// Acquire a hazard pointer for an address.
     ///
     /// Returns a guard that automatically releases when dropped.
+    ///
+    /// Slot exhaustion contract: the per-thread slot array is
+    /// fixed at `HAZARD_POINTERS_PER_THREAD` (currently 8). The
+    /// previous implementation guarded slot allocation with
+    /// `@debug_assert`, which is a no-op in release builds —
+    /// allocating a 9th hazard pointer would silently write
+    /// `record.hazards[8]` out-of-bounds, corrupting the next
+    /// field of the ThreadRecord (or whatever the allocator
+    /// laid adjacent to the array). Since hazard pointers are
+    /// the substrate every CBGR `try_deref` rests on, a silent
+    /// OOB write here propagates as far-removed runtime
+    /// corruption that's effectively impossible to bisect.
+    /// Promoted to a hard `panic` so production deployments
+    /// fail loudly at the actual exhaustion site.
+    ///
+    /// Release order contract: this acquire path uses the
+    /// per-thread slot array as a LIFO stack — `release()` only
+    /// reclaims the top slot. Out-of-order release (acquire A,
+    /// acquire B, release A while B is still alive) leaks slot
+    /// A until both are released. The doc on `release()`
+    /// elaborates; the typical `try_deref` usage is fully
+    /// stack-disciplined so the limitation rarely matters in
+    /// practice.
     fn acquire(&mut self, ptr: &unsafe Byte) -> HazardGuard {
         let record = self.get_record();
 
-        // Find available slot
+        // Find available slot.  Hard-panic on exhaustion — see
+        // the function-level doc for the rationale (silent OOB
+        // would corrupt the ThreadRecord's adjacent fields).
         let slot = self.next_slot;
-        @debug_assert(
-            slot < HAZARD_POINTERS_PER_THREAD,
-            "Hazard pointer slots exhausted (nested validation too deep)"
-        );
+        if slot >= HAZARD_POINTERS_PER_THREAD {
+            panic("Hazard pointer slots exhausted (nested validation > 8 deep) — increase HAZARD_POINTERS_PER_THREAD or reduce nested try_deref depth");
+        }
 
         // Store pointer with Release ordering (makes it visible to scanners)
         atomic_store_ptr(&mut record.hazards[slot] as *mut *const Byte, ptr as *const Byte, ORDERING_RELEASE);
