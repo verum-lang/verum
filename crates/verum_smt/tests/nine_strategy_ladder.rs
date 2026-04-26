@@ -153,9 +153,11 @@ fn nu_ordinal_rank_strictly_increases_with_strategy_rank() {
         }
         last_nu = Some(nu);
     }
-    // Final rank should be 8 (Synthesize) — nine distinct strata
-    // mapped to ranks 0..=8.
-    assert_eq!(last_nu, Some(8));
+    // Final rank should be 12 (Synthesize) — thirteen distinct
+    // strata mapped to ranks 0..=12 after the VFE-6 V1 + VFE-8 V0
+    // ladder extension (added ComplexityTyped, CoherentStatic,
+    // CoherentRuntime, Coherent).
+    assert_eq!(last_nu, Some(12));
 }
 
 // -----------------------------------------------------------------------------

@@ -92,6 +92,13 @@ pub enum VerifyStrategy {
     /// ν = 2.
     Fast,
 
+    /// `@verify(complexity_typed)` — bounded-arithmetic verification
+    /// (VFE-8 V0). Polynomial-time obligations discharged through the
+    /// V_0 / V_1 / S^1_2 / V_NP / V_PH / IΔ_0 stratum chosen at the
+    /// pragma level; CI budget ≤ 30 s; UNKNOWN → conservative accept.
+    /// ν = 3 (strictly between `Fast` and `Formal`).
+    ComplexityTyped,
+
     /// `@verify(formal)` — portfolio SMT (Z3 + CVC5) with 5s timeout.
     /// UNKNOWN from any solver → conservative accept. ν = ω.
     Formal,
@@ -117,6 +124,27 @@ pub enum VerifyStrategy {
     /// ν = ω · 2 + 2.
     Certified,
 
+    /// `@verify(coherent_static)` — α-cert + symbolic ε-claim
+    /// (VFE-6 V1 weak coherence). The α-articulation is verified
+    /// `certified`-style; the ε-coordinate side is discharged through
+    /// the symbolic ε-claim attached at `@enact(epsilon = ...)`. No
+    /// runtime monitor. Polynomial; CI budget ≤ 60 s. ν = ω · 2 + 3.
+    CoherentStatic,
+
+    /// `@verify(coherent_runtime)` — α-cert + runtime ε-monitor
+    /// (VFE-6 V1 hybrid coherence). The α-side is `certified`; the
+    /// ε-side is checked at runtime through the monitor wired by
+    /// `core.action.coherence_monitor`. Trace-bounded; CI budget
+    /// ≤ 5 min. ν = ω · 2 + 4.
+    CoherentRuntime,
+
+    /// `@verify(coherent)` — α/ε bidirectional check (VFE-6 V1
+    /// strict). Both the α-articulation and the ε-coordinate are
+    /// discharged at compile time; the kernel re-checks both
+    /// certificates. Single-exponential; CI budget ≤ 30 min.
+    /// ν = ω · 2 + 5.
+    Coherent,
+
     /// `@verify(synthesize)` — inverse proof search across
     /// 𝔐 to fill missing lemmas / auxiliary theorems.
     /// Orthogonal to the monotone ladder. ν ≤ ω·3+1.
@@ -137,6 +165,8 @@ pub enum NuOrdinal {
     FiniteOne,
     /// ν = 2 — `fast`: bounded single-solver SMT.
     FiniteTwo,
+    /// ν = 3 — `complexity_typed`: VFE-8 bounded-arithmetic.
+    FiniteThree,
     /// ν = ω — `formal`: portfolio SMT.
     Omega,
     /// ν = ω + 1 — `proof`: user tactic; dominates SMT, admits induction.
@@ -147,6 +177,12 @@ pub enum NuOrdinal {
     OmegaTwicePlusOne,
     /// ν = ω · 2 + 2 — `certified`: certificate materialisation + recheck + export.
     OmegaTwicePlusTwo,
+    /// ν = ω · 2 + 3 — `coherent_static`: VFE-6 weak (α-cert + symbolic ε-claim).
+    OmegaTwicePlusThree,
+    /// ν = ω · 2 + 4 — `coherent_runtime`: VFE-6 hybrid (α-cert + runtime ε-monitor).
+    OmegaTwicePlusFour,
+    /// ν = ω · 2 + 5 — `coherent`: VFE-6 strict (α/ε bidirectional check).
+    OmegaTwicePlusFive,
     /// ν ≤ ω · 3 + 1 — `synthesize`: inverse search across 𝔐 (orthogonal).
     OmegaThricePlusOne,
 }
@@ -158,11 +194,15 @@ impl NuOrdinal {
             Self::Zero => "0",
             Self::FiniteOne => "1",
             Self::FiniteTwo => "2",
+            Self::FiniteThree => "3",
             Self::Omega => "ω",
             Self::OmegaPlusOne => "ω+1",
             Self::OmegaTwice => "ω·2",
             Self::OmegaTwicePlusOne => "ω·2+1",
             Self::OmegaTwicePlusTwo => "ω·2+2",
+            Self::OmegaTwicePlusThree => "ω·2+3",
+            Self::OmegaTwicePlusFour => "ω·2+4",
+            Self::OmegaTwicePlusFive => "ω·2+5",
             Self::OmegaThricePlusOne => "≤ω·3+1",
         }
     }
@@ -177,12 +217,16 @@ impl NuOrdinal {
             Self::Zero => 0,
             Self::FiniteOne => 1,
             Self::FiniteTwo => 2,
-            Self::Omega => 3,
-            Self::OmegaPlusOne => 4,
-            Self::OmegaTwice => 5,
-            Self::OmegaTwicePlusOne => 6,
-            Self::OmegaTwicePlusTwo => 7,
-            Self::OmegaThricePlusOne => 8,
+            Self::FiniteThree => 3,
+            Self::Omega => 4,
+            Self::OmegaPlusOne => 5,
+            Self::OmegaTwice => 6,
+            Self::OmegaTwicePlusOne => 7,
+            Self::OmegaTwicePlusTwo => 8,
+            Self::OmegaTwicePlusThree => 9,
+            Self::OmegaTwicePlusFour => 10,
+            Self::OmegaTwicePlusFive => 11,
+            Self::OmegaThricePlusOne => 12,
         }
     }
 }
@@ -194,17 +238,26 @@ impl std::fmt::Display for NuOrdinal {
 }
 
 impl VerifyStrategy {
-    /// All nine strategies in monotone-lift order (`Synthesize` last,
-    /// orthogonal). Useful for diagnostics and iteration.
-    pub const LADDER: [VerifyStrategy; 9] = [
+    /// All thirteen strategies in monotone-lift order (`Synthesize`
+    /// last, orthogonal). Useful for diagnostics and iteration. Per
+    /// VFE-6 V1 + VFE-8 V0 the ladder grew from 9 → 13 entries with
+    /// `ComplexityTyped` (ν = 3) inserted between `Fast` and `Formal`,
+    /// and the three coherent variants (`CoherentStatic`,
+    /// `CoherentRuntime`, `Coherent`) inserted between `Certified`
+    /// and `Synthesize` at ν = ω·2+3, ω·2+4, ω·2+5.
+    pub const LADDER: [VerifyStrategy; 13] = [
         Self::Runtime,
         Self::Static,
         Self::Fast,
+        Self::ComplexityTyped,
         Self::Formal,
         Self::Proof,
         Self::Thorough,
         Self::Reliable,
         Self::Certified,
+        Self::CoherentStatic,
+        Self::CoherentRuntime,
+        Self::Coherent,
         Self::Synthesize,
     ];
 
@@ -220,6 +273,9 @@ impl VerifyStrategy {
             "runtime" => Some(Self::Runtime),
             "static" => Some(Self::Static),
             "fast" | "quick" | "rapid" => Some(Self::Fast),
+            "complexity_typed" | "complexity-typed" | "complexitytyped" => {
+                Some(Self::ComplexityTyped)
+            }
             "formal" => Some(Self::Formal),
             "proof" => Some(Self::Proof),
             "thorough" | "robust" => Some(Self::Thorough),
@@ -227,6 +283,13 @@ impl VerifyStrategy {
             "certified" | "cross_validate" | "cross-validate" | "crossvalidate" => {
                 Some(Self::Certified)
             }
+            "coherent_static" | "coherent-static" | "coherentstatic" => {
+                Some(Self::CoherentStatic)
+            }
+            "coherent_runtime" | "coherent-runtime" | "coherentruntime" => {
+                Some(Self::CoherentRuntime)
+            }
+            "coherent" => Some(Self::Coherent),
             "synthesize" | "synthesis" | "synth" => Some(Self::Synthesize),
             _ => None,
         }
@@ -238,11 +301,15 @@ impl VerifyStrategy {
             Self::Runtime => "runtime",
             Self::Static => "static",
             Self::Fast => "fast",
+            Self::ComplexityTyped => "complexity_typed",
             Self::Formal => "formal",
             Self::Proof => "proof",
             Self::Thorough => "thorough",
             Self::Reliable => "reliable",
             Self::Certified => "certified",
+            Self::CoherentStatic => "coherent_static",
+            Self::CoherentRuntime => "coherent_runtime",
+            Self::Coherent => "coherent",
             Self::Synthesize => "synthesize",
         }
     }
@@ -251,15 +318,19 @@ impl VerifyStrategy {
     /// Strictly monotone in `<` — every strategy gets a distinct ordinal.
     pub fn nu_ordinal(&self) -> NuOrdinal {
         match self {
-            Self::Runtime    => NuOrdinal::Zero,
-            Self::Static     => NuOrdinal::FiniteOne,
-            Self::Fast       => NuOrdinal::FiniteTwo,
-            Self::Formal     => NuOrdinal::Omega,
-            Self::Proof      => NuOrdinal::OmegaPlusOne,
-            Self::Thorough   => NuOrdinal::OmegaTwice,
-            Self::Reliable   => NuOrdinal::OmegaTwicePlusOne,
-            Self::Certified  => NuOrdinal::OmegaTwicePlusTwo,
-            Self::Synthesize => NuOrdinal::OmegaThricePlusOne,
+            Self::Runtime         => NuOrdinal::Zero,
+            Self::Static          => NuOrdinal::FiniteOne,
+            Self::Fast            => NuOrdinal::FiniteTwo,
+            Self::ComplexityTyped => NuOrdinal::FiniteThree,
+            Self::Formal          => NuOrdinal::Omega,
+            Self::Proof           => NuOrdinal::OmegaPlusOne,
+            Self::Thorough        => NuOrdinal::OmegaTwice,
+            Self::Reliable        => NuOrdinal::OmegaTwicePlusOne,
+            Self::Certified       => NuOrdinal::OmegaTwicePlusTwo,
+            Self::CoherentStatic  => NuOrdinal::OmegaTwicePlusThree,
+            Self::CoherentRuntime => NuOrdinal::OmegaTwicePlusFour,
+            Self::Coherent        => NuOrdinal::OmegaTwicePlusFive,
+            Self::Synthesize      => NuOrdinal::OmegaThricePlusOne,
         }
     }
 
@@ -276,12 +347,16 @@ impl VerifyStrategy {
             Self::Runtime => 0,
             Self::Static => 1,
             Self::Fast => 2,
-            Self::Formal => 3,
-            Self::Proof => 4,
-            Self::Thorough => 5,
-            Self::Reliable => 6,
-            Self::Certified => 7,
-            Self::Synthesize => 8,
+            Self::ComplexityTyped => 3,
+            Self::Formal => 4,
+            Self::Proof => 5,
+            Self::Thorough => 6,
+            Self::Reliable => 7,
+            Self::Certified => 8,
+            Self::CoherentStatic => 9,
+            Self::CoherentRuntime => 10,
+            Self::Coherent => 11,
+            Self::Synthesize => 12,
         }
     }
 
@@ -306,35 +381,86 @@ impl VerifyStrategy {
             Self::Proof => None,
             // Fast: capability routing + stricter timeouts.
             Self::Fast => Some(BackendChoice::Capability),
+            // ComplexityTyped: capability routing into the bounded-arithmetic
+            // backend stratum; UNKNOWN → conservative accept (warning).
+            Self::ComplexityTyped => Some(BackendChoice::Capability),
             // Formal: capability routing — portfolio picks best solver.
             Self::Formal => Some(BackendChoice::Capability),
             // Thorough / Reliable: portfolio mode.
             Self::Thorough | Self::Reliable => Some(BackendChoice::Portfolio),
             // Certified: capability router + cross-validation flag.
             Self::Certified => Some(BackendChoice::Capability),
+            // CoherentStatic: discharges α through the certified pipeline;
+            // ε is symbolic, no extra backend round.
+            Self::CoherentStatic => Some(BackendChoice::Capability),
+            // CoherentRuntime: same as CoherentStatic on the SMT side; ε
+            // monitor lives at runtime, off the SMT path.
+            Self::CoherentRuntime => Some(BackendChoice::Capability),
+            // Coherent: bidirectional α/ε check — portfolio because both
+            // axes need agreement.
+            Self::Coherent => Some(BackendChoice::Portfolio),
             // Synthesize: capability router — synthesis-capable backend.
             Self::Synthesize => Some(BackendChoice::Capability),
         }
     }
 
     /// True if the strategy requires cross-validation (both primary
-    /// and secondary solvers must agree). Applies to `Reliable` and
-    /// `Certified` — `Reliable` is the minimal cross-validation
-    /// level; `Certified` adds certificate export on top.
+    /// and secondary solvers must agree). Applies to `Reliable`,
+    /// `Certified` (cross-validation is part of the certified pipeline),
+    /// the three `Coherent*` variants (their α-side is `certified`-style),
+    /// and `Coherent` strict (which adds an ε-side cross-check).
     pub fn requires_cross_validation(&self) -> bool {
-        matches!(self, Self::Reliable | Self::Certified)
+        matches!(
+            self,
+            Self::Reliable
+                | Self::Certified
+                | Self::CoherentStatic
+                | Self::CoherentRuntime
+                | Self::Coherent
+        )
     }
 
     /// True if the strategy must produce a kernel-rechecked
-    /// certificate artifact (`@verify(certified)`).
+    /// certificate artifact. `Certified` produces the α-cert; the
+    /// `Coherent*` variants produce α + ε certificates per VFE-6 V1.
     pub fn requires_certificate(&self) -> bool {
-        matches!(self, Self::Certified)
+        matches!(
+            self,
+            Self::Certified
+                | Self::CoherentStatic
+                | Self::CoherentRuntime
+                | Self::Coherent
+        )
     }
 
     /// True if the strategy requires formal SMT infrastructure.
     /// `Runtime`, `Static`, `Proof` all bypass the SMT portfolio.
     pub fn requires_smt(&self) -> bool {
         !matches!(self, Self::Runtime | Self::Static | Self::Proof)
+    }
+
+    /// True if the strategy is one of the three VFE-6 V1 coherent
+    /// variants (α/ε bidirectional or α + symbolic ε / α + runtime ε).
+    pub fn is_coherent(&self) -> bool {
+        matches!(
+            self,
+            Self::CoherentStatic | Self::CoherentRuntime | Self::Coherent
+        )
+    }
+
+    /// True if the strategy emits a runtime ε-monitor in addition to
+    /// compile-time obligations. Applies only to `CoherentRuntime`
+    /// among the coherent family.
+    pub fn requires_runtime_epsilon_monitor(&self) -> bool {
+        matches!(self, Self::CoherentRuntime)
+    }
+
+    /// True if the strategy needs a complete compile-time discharge
+    /// of the ε-coordinate (no runtime monitor allowed). Applies to
+    /// `CoherentStatic` (symbolic ε-claim) and `Coherent` (bidirectional
+    /// check); `CoherentRuntime` defers ε to the monitor.
+    pub fn requires_static_epsilon(&self) -> bool {
+        matches!(self, Self::CoherentStatic | Self::Coherent)
     }
 
     /// True if the strategy is a synthesis problem rather than a
@@ -344,11 +470,17 @@ impl VerifyStrategy {
     }
 
     /// True if the strategy prefers thorough/robust verification
-    /// over speed.
+    /// over speed. The `Coherent*` family inherits thoroughness from
+    /// their `Certified`-style α-side discharge.
     pub fn prefers_thoroughness(&self) -> bool {
         matches!(
             self,
-            Self::Thorough | Self::Reliable | Self::Certified
+            Self::Thorough
+                | Self::Reliable
+                | Self::Certified
+                | Self::CoherentStatic
+                | Self::CoherentRuntime
+                | Self::Coherent
         )
     }
 
@@ -359,24 +491,36 @@ impl VerifyStrategy {
     }
 
     /// True when the strategy requires explicit frame / invariant /
-    /// decreases specifications on every obligation.
+    /// decreases specifications on every obligation. The `Coherent*`
+    /// family inherits this requirement from `Certified`.
     pub fn requires_explicit_specs(&self) -> bool {
         matches!(
             self,
-            Self::Thorough | Self::Reliable | Self::Certified
+            Self::Thorough
+                | Self::Reliable
+                | Self::Certified
+                | Self::CoherentStatic
+                | Self::CoherentRuntime
+                | Self::Coherent
         )
     }
 
-    /// Recommended timeout multiplier for this strategy.
+    /// Recommended timeout multiplier for this strategy. The base
+    /// is `Formal` at 1.0× (5 s). Bounded-arithmetic and the coherent
+    /// variants get longer budgets per VFE-6/VFE-8 V0.
     pub fn timeout_multiplier(&self) -> f64 {
         match self {
             Self::Runtime | Self::Static | Self::Proof => 0.0, // no SMT timeout
-            Self::Fast => 0.3,       // 30% of base (≤100ms)
-            Self::Formal => 1.0,     // base (5s)
-            Self::Thorough => 2.0,   // 2× formal
-            Self::Reliable => 3.0,   // two solvers, agreement required
-            Self::Certified => 3.0,  // reliable + cert materialisation
-            Self::Synthesize => 5.0, // synthesis is hard
+            Self::Fast => 0.3,             // 30% of base (≤100ms)
+            Self::ComplexityTyped => 6.0,  // VFE-8 CI budget ≤ 30 s
+            Self::Formal => 1.0,           // base (5 s)
+            Self::Thorough => 2.0,         // 2× formal
+            Self::Reliable => 3.0,         // two solvers, agreement required
+            Self::Certified => 3.0,        // reliable + cert materialisation
+            Self::CoherentStatic => 12.0,  // VFE-6 weak — CI budget ≤ 60 s
+            Self::CoherentRuntime => 60.0, // VFE-6 hybrid — CI budget ≤ 5 min
+            Self::Coherent => 360.0,       // VFE-6 strict — CI budget ≤ 30 min
+            Self::Synthesize => 5.0,       // synthesis is hard
         }
     }
 }
@@ -622,6 +766,121 @@ mod tests {
         assert!(VerifyStrategy::Certified.timeout_multiplier() < VerifyStrategy::Synthesize.timeout_multiplier());
         // Runtime/Static have no timeout.
         assert_eq!(VerifyStrategy::Runtime.timeout_multiplier(), 0.0);
+    }
+
+    // ========================================================================
+    // VFE-6 V1 — coherent strategy backend wiring
+    // ========================================================================
+
+    #[test]
+    fn parses_coherent_canonical_forms() {
+        assert_eq!(
+            VerifyStrategy::from_attribute_value("coherent_static"),
+            Some(VerifyStrategy::CoherentStatic)
+        );
+        assert_eq!(
+            VerifyStrategy::from_attribute_value("coherent_runtime"),
+            Some(VerifyStrategy::CoherentRuntime)
+        );
+        assert_eq!(
+            VerifyStrategy::from_attribute_value("coherent"),
+            Some(VerifyStrategy::Coherent)
+        );
+    }
+
+    #[test]
+    fn parses_coherent_aliases_and_case() {
+        assert_eq!(
+            VerifyStrategy::from_attribute_value("Coherent-Static"),
+            Some(VerifyStrategy::CoherentStatic)
+        );
+        assert_eq!(
+            VerifyStrategy::from_attribute_value("COHERENTRUNTIME"),
+            Some(VerifyStrategy::CoherentRuntime)
+        );
+    }
+
+    #[test]
+    fn parses_complexity_typed() {
+        assert_eq!(
+            VerifyStrategy::from_attribute_value("complexity_typed"),
+            Some(VerifyStrategy::ComplexityTyped)
+        );
+        assert_eq!(
+            VerifyStrategy::from_attribute_value("complexity-typed"),
+            Some(VerifyStrategy::ComplexityTyped)
+        );
+        assert_eq!(
+            VerifyStrategy::from_attribute_value("ComplexityTyped"),
+            Some(VerifyStrategy::ComplexityTyped)
+        );
+    }
+
+    #[test]
+    fn coherent_predicates() {
+        for s in [
+            VerifyStrategy::CoherentStatic,
+            VerifyStrategy::CoherentRuntime,
+            VerifyStrategy::Coherent,
+        ] {
+            assert!(s.is_coherent(), "is_coherent({:?})", s);
+            assert!(s.requires_smt(), "requires_smt({:?})", s);
+            assert!(s.requires_certificate(), "requires_certificate({:?})", s);
+            assert!(s.requires_cross_validation(), "requires_cross_validation({:?})", s);
+            assert!(s.requires_explicit_specs(), "requires_explicit_specs({:?})", s);
+            assert!(s.prefers_thoroughness(), "prefers_thoroughness({:?})", s);
+            assert!(!s.is_synthesis(), "is_synthesis({:?})", s);
+        }
+        // Runtime ε-monitor is exclusive to CoherentRuntime.
+        assert!(!VerifyStrategy::CoherentStatic.requires_runtime_epsilon_monitor());
+        assert!(VerifyStrategy::CoherentRuntime.requires_runtime_epsilon_monitor());
+        assert!(!VerifyStrategy::Coherent.requires_runtime_epsilon_monitor());
+        // Static-ε is required by CoherentStatic and Coherent (not Runtime).
+        assert!(VerifyStrategy::CoherentStatic.requires_static_epsilon());
+        assert!(!VerifyStrategy::CoherentRuntime.requires_static_epsilon());
+        assert!(VerifyStrategy::Coherent.requires_static_epsilon());
+    }
+
+    #[test]
+    fn nu_ordinals_strictly_monotone_through_ladder() {
+        // Per VFE-6 V1 + VFE-8 V0: the 13-strategy LADDER must keep its
+        // strict-monotone ν-invariant. For each adjacent pair, rank is
+        // strictly increasing.
+        let ranks: Vec<u8> =
+            VerifyStrategy::LADDER.iter().map(|s| s.nu_ordinal().rank()).collect();
+        for window in ranks.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "non-monotone ν-ordinal step: {} → {}",
+                window[0],
+                window[1]
+            );
+        }
+    }
+
+    #[test]
+    fn coherent_timeout_budgets_match_vfe_6_spec() {
+        // VFE-6 V1: weak ≤60 s, hybrid ≤5 min, strict ≤30 min.
+        // Base is `Formal` at 1.0× (5 s).
+        let base_seconds = 5.0;
+        let cs = VerifyStrategy::CoherentStatic.timeout_multiplier() * base_seconds;
+        let cr = VerifyStrategy::CoherentRuntime.timeout_multiplier() * base_seconds;
+        let cc = VerifyStrategy::Coherent.timeout_multiplier() * base_seconds;
+        assert!(cs <= 60.0, "CoherentStatic budget exceeds 60 s: {}", cs);
+        assert!(cr <= 5.0 * 60.0, "CoherentRuntime budget exceeds 5 min: {}", cr);
+        assert!(cc <= 30.0 * 60.0, "Coherent budget exceeds 30 min: {}", cc);
+        // Strict order weak < hybrid < strict.
+        assert!(cs < cr);
+        assert!(cr < cc);
+    }
+
+    #[test]
+    fn full_ladder_roundtrip_via_display() {
+        for strategy in VerifyStrategy::LADDER {
+            let s = strategy.as_str();
+            let parsed = VerifyStrategy::from_attribute_value(s).unwrap();
+            assert_eq!(parsed, strategy, "roundtrip failed for {:?}", strategy);
+        }
     }
 
     #[test]
