@@ -69,7 +69,7 @@ implement<T> Deque<T> {
         } as &unsafe T;
 
         if data.is_null() {
-            panic("Out of memory");
+            panic(f"Deque::with_capacity({capacity}) failed: requested {cap * T.size} bytes");
         }
 
         Deque {
@@ -134,7 +134,8 @@ implement<T> Deque<T> {
         self.wrap_index(self.head + idx)
     }
 
-    // Push element to back.
+    // Push element to back. Panics on OOM — use `try_push_back`
+    // when the operation must be recoverable.
     public fn push_back(&mut self, value: T) {
         if self.len == self.cap {
             self.grow();
@@ -147,7 +148,26 @@ implement<T> Deque<T> {
         self.len = self.len + 1;
     }
 
-    // Push element to front.
+    // Push element to back. Fallible counterpart to push_back —
+    // returns Err(AllocError::OutOfMemory) instead of panicking
+    // when the underlying grow() can't allocate. Use this on the
+    // production hot path of long-running services that must
+    // degrade gracefully rather than crash.
+    public fn try_push_back(&mut self, value: T) -> Result<Unit, AllocError> {
+        if self.len == self.cap {
+            try { self.try_grow()? };
+        }
+
+        let tail = self.physical_index(self.len);
+        unsafe {
+            ptr_write(self.data.offset(tail), value);
+        }
+        self.len = self.len + 1;
+        Ok(())
+    }
+
+    // Push element to front. Panics on OOM — use `try_push_front`
+    // when the operation must be recoverable.
     public fn push_front(&mut self, value: T) {
         if self.len == self.cap {
             self.grow();
@@ -159,6 +179,20 @@ implement<T> Deque<T> {
             ptr_write(self.data.offset(self.head), value);
         }
         self.len = self.len + 1;
+    }
+
+    // Push element to front. Fallible counterpart to push_front.
+    public fn try_push_front(&mut self, value: T) -> Result<Unit, AllocError> {
+        if self.len == self.cap {
+            try { self.try_grow()? };
+        }
+
+        self.head = self.wrap_index(self.head - 1 + self.cap);
+        unsafe {
+            ptr_write(self.data.offset(self.head), value);
+        }
+        self.len = self.len + 1;
+        Ok(())
     }
 
     // Pop element from back.
@@ -1442,14 +1476,23 @@ implement<T> Deque<T> {
         self.reallocate(new_cap);
     }
 
-    // Internal: reallocate to new capacity.
+    // Fallible counterpart to grow. Returns Err on alloc failure
+    // so the caller can degrade gracefully rather than crash.
+    fn try_grow(&mut self) -> Result<Unit, AllocError> {
+        let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
+        self.try_reallocate(new_cap)
+    }
+
+    // Internal: reallocate to new capacity. Panics on OOM with
+    // the requested byte count attached so post-mortems / crash
+    // reports can correlate the failure to a specific size.
     fn reallocate(&mut self, new_cap: Int) {
         let new_data = unsafe {
             alloc(new_cap * T.size, T.alignment)
         } as &unsafe T;
 
         if new_data.is_null() {
-            panic("Out of memory");
+            panic(f"Deque reallocation failed: requested {new_cap * T.size} bytes (capacity {new_cap})");
         }
 
         // Copy elements to new buffer (making contiguous)
@@ -1499,6 +1542,67 @@ implement<T> Deque<T> {
         self.data = new_data;
         self.head = 0;
         self.cap = new_cap;
+    }
+
+    // Internal: fallible reallocate to new capacity. Returns
+    // Err(AllocError::OutOfMemory) on alloc failure rather than
+    // panicking. This is the load-bearing primitive for every
+    // try_<op> method; the panicking `reallocate` simply panics
+    // on the same failure mode.
+    fn try_reallocate(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
+        let new_data = unsafe {
+            alloc(new_cap * T.size, T.alignment)
+        } as &unsafe T;
+
+        if new_data.is_null() {
+            return Err(AllocError::OutOfMemory {
+                requested: new_cap * T.size,
+            });
+        }
+
+        // Copy elements to new buffer (making contiguous).
+        if self.len > 0 {
+            let tail = self.wrap_index(self.head + self.len);
+            if self.head < tail {
+                unsafe {
+                    memmove(
+                        new_data as &unsafe Byte,
+                        self.data.offset(self.head) as &unsafe Byte,
+                        self.len * T.size
+                    );
+                }
+            } else {
+                let first_len = self.cap - self.head;
+                let second_len = tail;
+                unsafe {
+                    memmove(
+                        new_data as &unsafe Byte,
+                        self.data.offset(self.head) as &unsafe Byte,
+                        first_len * T.size
+                    );
+                    memmove(
+                        new_data.offset(first_len) as &unsafe Byte,
+                        self.data as &unsafe Byte,
+                        second_len * T.size
+                    );
+                }
+            }
+        }
+
+        if self.cap > 0 {
+            unsafe {
+                dealloc(
+                    self.data as &unsafe Byte,
+                    self.cap * T.size,
+                    T.alignment
+                );
+            }
+        }
+
+        self.data = new_data;
+        self.head = 0;
+        self.cap = new_cap;
+        Ok(())
     }
 
     // Internal: free buffer without copying.
