@@ -4,13 +4,18 @@ module sys.linux.syscall;
 // syscall.vr - Linux syscall interface
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: sys/common
-// Platform: Linux (x86_64)
+// Dependencies: sys/common, sys/linux/arch
+// Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
 // This module provides direct access to Linux system calls via the
-// SYSCALL_LINUX VBC opcode. It defines the syscall_raw intrinsic and
-// syscall number constants for x86_64 Linux.
+// SYSCALL_LINUX VBC opcode. It defines the syscall_raw wrapper and
+// portable safe wrappers around the kernel ABI. Architecture-specific
+// syscall numbers live in `sys.linux.arch` and are re-exported here.
+//
+// Wrappers that depend on x86_64-only legacy syscalls (open, stat, mkdir,
+// etc.) are gated with `@cfg(target_arch = "x86_64")`. Portable equivalents
+// (openat, newfstatat, mkdirat, ...) are available on both architectures.
 //
 // Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
@@ -20,6 +25,76 @@ public mount sys.common.{OSError, FileDesc, IOVec, MemProt, MapFlags};
 
 // Import syscall intrinsic from consolidated stdlib.intrinsics
 mount core.intrinsics.syscall6;
+
+// Architecture-specific syscall numbers. `sys.linux.arch` chooses the
+// right numeric value for x86_64 or aarch64 via @cfg(target_arch).
+public mount sys.linux.arch.{
+    // File I/O — both architectures
+    SYS_READ, SYS_WRITE, SYS_CLOSE, SYS_LSEEK,
+    SYS_PREAD64, SYS_PWRITE64, SYS_READV, SYS_WRITEV,
+    SYS_OPENAT, SYS_OPENAT2,
+    SYS_FSYNC, SYS_FDATASYNC, SYS_FTRUNCATE,
+    SYS_STATX, SYS_NEWFSTATAT,
+
+    // Portable *at variants
+    SYS_FACCESSAT, SYS_PPOLL, SYS_PIPE2, SYS_PSELECT6,
+    SYS_RENAMEAT, SYS_RENAMEAT2, SYS_MKDIRAT, SYS_UNLINKAT,
+    SYS_SYMLINKAT, SYS_READLINKAT, SYS_LINKAT,
+    SYS_FCHMODAT, SYS_FCHOWNAT, SYS_DUP3,
+    SYS_EPOLL_CREATE1, SYS_EPOLL_PWAIT, SYS_EPOLL_PWAIT2,
+    SYS_EVENTFD2, SYS_SIGNALFD4,
+
+    // Memory
+    SYS_MMAP, SYS_MPROTECT, SYS_MUNMAP, SYS_BRK,
+    SYS_MREMAP, SYS_MSYNC, SYS_MINCORE, SYS_MADVISE,
+    SYS_MEMFD_CREATE,
+
+    // ioctl
+    SYS_IOCTL,
+
+    // Process / thread identity
+    SYS_GETPID, SYS_GETPPID, SYS_GETTID,
+    SYS_GETUID, SYS_GETGID, SYS_GETEUID, SYS_GETEGID,
+    SYS_SETUID, SYS_SETGID,
+
+    // Process control
+    SYS_CLONE, SYS_CLONE3, SYS_EXECVE,
+    SYS_EXIT, SYS_EXIT_GROUP, SYS_WAIT4, SYS_KILL,
+
+    // File descriptors
+    SYS_DUP, SYS_FCNTL,
+
+    // Directory / path
+    SYS_GETDENTS64, SYS_GETCWD, SYS_CHDIR, SYS_FCHDIR,
+    SYS_FCHMOD, SYS_FCHOWN,
+
+    // Time
+    SYS_GETTIMEOFDAY, SYS_NANOSLEEP,
+    SYS_CLOCK_GETTIME, SYS_CLOCK_GETRES, SYS_CLOCK_NANOSLEEP,
+
+    // Sockets
+    SYS_SOCKET, SYS_CONNECT, SYS_ACCEPT, SYS_ACCEPT4,
+    SYS_SENDTO, SYS_RECVFROM, SYS_SENDMSG, SYS_RECVMSG,
+    SYS_SHUTDOWN, SYS_BIND, SYS_LISTEN,
+    SYS_GETSOCKNAME, SYS_GETPEERNAME, SYS_SOCKETPAIR,
+    SYS_SETSOCKOPT, SYS_GETSOCKOPT,
+
+    // Signals
+    SYS_RT_SIGACTION, SYS_RT_SIGPROCMASK, SYS_RT_SIGRETURN,
+    SYS_SIGALTSTACK,
+
+    // Futex
+    SYS_FUTEX, SYS_FUTEX_WAITV,
+
+    // io_uring (same on both arches)
+    SYS_IO_URING_SETUP, SYS_IO_URING_ENTER, SYS_IO_URING_REGISTER,
+
+    // Timerfd
+    SYS_TIMERFD_CREATE, SYS_TIMERFD_SETTIME, SYS_TIMERFD_GETTIME,
+
+    // Control / misc
+    SYS_PRCTL, SYS_GETRANDOM, SYS_SET_TID_ADDRESS, SYS_BPF,
+};
 
 // =============================================================================
 // Syscall Wrapper
@@ -55,153 +130,35 @@ public unsafe fn syscall_raw(
 }
 
 // =============================================================================
-// Syscall Numbers (x86_64 Linux)
+// Per-arch syscall numbers live in `sys.linux.arch` and are re-exported
+// above via `public mount sys.linux.arch.{...}`. The constants below are
+// either architecture-invariant (ioctl codes, EPOLL_CTL, FUTEX flags) or
+// x86_64-only legacy numbers kept for callers gated with
+// @cfg(target_arch = "x86_64").
 // =============================================================================
 
-// File operations
-public const SYS_READ: Int = 0;
-public const SYS_WRITE: Int = 1;
-public const SYS_OPEN: Int = 2;
-public const SYS_CLOSE: Int = 3;
-public const SYS_STAT: Int = 4;
-public const SYS_FSTAT: Int = 5;
-public const SYS_LSTAT: Int = 6;
-public const SYS_POLL: Int = 7;
-public const SYS_LSEEK: Int = 8;
-
-// Memory operations
-public const SYS_MMAP: Int = 9;
-public const SYS_MPROTECT: Int = 10;
-public const SYS_MUNMAP: Int = 11;
-public const SYS_BRK: Int = 12;
-public const SYS_MREMAP: Int = 25;
-public const SYS_MSYNC: Int = 26;
-public const SYS_MINCORE: Int = 27;
-public const SYS_MADVISE: Int = 28;
-
-// I/O operations
-public const SYS_IOCTL: Int = 16;
-public const SYS_PREAD64: Int = 17;
-public const SYS_PWRITE64: Int = 18;
-public const SYS_READV: Int = 19;
-public const SYS_WRITEV: Int = 20;
-public const SYS_ACCESS: Int = 21;
-public const SYS_PIPE: Int = 22;
-public const SYS_SELECT: Int = 23;
-
-// Process operations
-public const SYS_GETPID: Int = 39;
-public const SYS_FORK: Int = 57;
-public const SYS_VFORK: Int = 58;
-public const SYS_EXECVE: Int = 59;
-public const SYS_EXIT: Int = 60;
-public const SYS_WAIT4: Int = 61;
-public const SYS_KILL: Int = 62;
-public const SYS_CLONE: Int = 56;
-public const SYS_CLONE3: Int = 435;
-
-// Thread/process info
-public const SYS_GETUID: Int = 102;
-public const SYS_GETGID: Int = 104;
-public const SYS_SETUID: Int = 105;
-public const SYS_SETGID: Int = 106;
-public const SYS_GETEUID: Int = 107;
-public const SYS_GETEGID: Int = 108;
-public const SYS_GETPPID: Int = 110;
-public const SYS_GETTID: Int = 186;
-
-// File descriptor operations
-public const SYS_DUP: Int = 32;
-public const SYS_DUP2: Int = 33;
-public const SYS_DUP3: Int = 292;
-public const SYS_FCNTL: Int = 72;
-
-// Directory operations
-public const SYS_GETDENTS64: Int = 217;
-public const SYS_GETCWD: Int = 79;
-public const SYS_CHDIR: Int = 80;
-public const SYS_FCHDIR: Int = 81;
-public const SYS_RENAME: Int = 82;
-public const SYS_MKDIR: Int = 83;
-public const SYS_RMDIR: Int = 84;
-public const SYS_UNLINK: Int = 87;
-public const SYS_SYMLINK: Int = 88;
-public const SYS_READLINK: Int = 89;
-public const SYS_CHMOD: Int = 90;
-public const SYS_FCHMOD: Int = 91;
-public const SYS_CHOWN: Int = 92;
-public const SYS_FCHOWN: Int = 93;
-
-// Time operations
-public const SYS_GETTIMEOFDAY: Int = 96;
-public const SYS_NANOSLEEP: Int = 35;
-public const SYS_CLOCK_GETTIME: Int = 228;
-public const SYS_CLOCK_NANOSLEEP: Int = 230;
-
-// Socket operations
-public const SYS_SOCKET: Int = 41;
-public const SYS_CONNECT: Int = 42;
-public const SYS_ACCEPT: Int = 43;
-public const SYS_SENDTO: Int = 44;
-public const SYS_RECVFROM: Int = 45;
-public const SYS_SENDMSG: Int = 46;
-public const SYS_RECVMSG: Int = 47;
-public const SYS_SHUTDOWN: Int = 48;
-public const SYS_BIND: Int = 49;
-public const SYS_LISTEN: Int = 50;
-public const SYS_GETSOCKNAME: Int = 51;
-public const SYS_GETPEERNAME: Int = 52;
-public const SYS_SOCKETPAIR: Int = 53;
-public const SYS_SETSOCKOPT: Int = 54;
-public const SYS_GETSOCKOPT: Int = 55;
-public const SYS_ACCEPT4: Int = 288;
-
-// Epoll/event operations
-public const SYS_EPOLL_CREATE: Int = 213;
-public const SYS_EPOLL_CREATE1: Int = 291;
+// SYS_EPOLL_CTL — syscall number for epoll_ctl (differs across architectures).
+@cfg(target_arch = "x86_64")
 public const SYS_EPOLL_CTL: Int = 233;
-public const SYS_EPOLL_WAIT: Int = 232;
-public const SYS_EPOLL_PWAIT: Int = 281;
-public const SYS_EPOLL_PWAIT2: Int = 441;
+@cfg(target_arch = "aarch64")
+public const SYS_EPOLL_CTL: Int = 21;
 
-// Signal operations
-public const SYS_RT_SIGACTION: Int = 13;
-public const SYS_RT_SIGPROCMASK: Int = 14;
-public const SYS_RT_SIGRETURN: Int = 15;
-public const SYS_SIGALTSTACK: Int = 131;
+// x86_64-only legacy file syscalls. aarch64 must use the *at variants
+// exported above (openat with AT_FDCWD, newfstatat, mkdirat, unlinkat,
+// renameat, symlinkat, readlinkat, linkat, fchmodat, fchownat, faccessat,
+// ppoll, pipe2, pselect6, dup3, epoll_create1, eventfd2, signalfd4).
+@cfg(target_arch = "x86_64")
+public mount sys.linux.arch.{
+    SYS_OPEN, SYS_STAT, SYS_FSTAT, SYS_LSTAT, SYS_POLL, SYS_ACCESS,
+    SYS_PIPE, SYS_SELECT, SYS_DUP2, SYS_RENAME, SYS_MKDIR, SYS_RMDIR,
+    SYS_UNLINK, SYS_SYMLINK, SYS_READLINK, SYS_LINK, SYS_CHMOD, SYS_CHOWN,
+    SYS_EPOLL_CREATE, SYS_EPOLL_WAIT, SYS_EVENTFD, SYS_SIGNALFD,
+    SYS_FORK, SYS_VFORK,
+    // ARCH_PRCTL is x86-only (TLS via FS/GS base); aarch64 uses tpidr_el0.
+    SYS_ARCH_PRCTL,
+};
 
-// Futex operations
-public const SYS_FUTEX: Int = 202;
-public const SYS_FUTEX_WAITV: Int = 449;
-
-// io_uring operations
-public const SYS_IO_URING_SETUP: Int = 425;
-public const SYS_IO_URING_ENTER: Int = 426;
-public const SYS_IO_URING_REGISTER: Int = 427;
-
-// Misc
-public const SYS_EXIT_GROUP: Int = 231;
-public const SYS_PRCTL: Int = 157;
-public const SYS_ARCH_PRCTL: Int = 158;
-public const SYS_GETRANDOM: Int = 318;
-public const SYS_MEMFD_CREATE: Int = 319;
-public const SYS_OPENAT: Int = 257;
-public const SYS_OPENAT2: Int = 437;
-public const SYS_STATX: Int = 332;
-
-// Event and signaling
-public const SYS_EVENTFD: Int = 284;
-public const SYS_EVENTFD2: Int = 290;
-public const SYS_TIMERFD_CREATE: Int = 283;
-public const SYS_TIMERFD_SETTIME: Int = 286;
-public const SYS_TIMERFD_GETTIME: Int = 287;
-public const SYS_SIGNALFD: Int = 282;
-public const SYS_SIGNALFD4: Int = 289;
-
-// TLS
-public const SYS_SET_TID_ADDRESS: Int = 218;
-
-// Terminal ioctl constants
+// Terminal ioctl constants — arch-invariant.
 public const TCGETS: Int = 0x5401;
 public const TCSETS: Int = 0x5402;
 public const TCSETSW: Int = 0x5403;
@@ -213,9 +170,9 @@ public const TIOCSWINSZ: Int = 0x5414;
 // Types
 // =============================================================================
 
-/// LinuxTimespec structure for nanosleep, clock_gettime, etc.
+/// Timespec structure for nanosleep, clock_gettime, etc.
 @repr(C)
-public type LinuxTimespec is {
+public type Timespec is {
     tv_sec: Int64,
     tv_nsec: Int64,
 };
@@ -240,55 +197,6 @@ public fn read(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
 public fn write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
     let result = unsafe {
         syscall_raw(SYS_WRITE, fd.as_raw(), buf.as_ptr() as Int, buf.len(), 0, 0, 0)
-    };
-    if result < 0 {
-        Err(OSError.from_code(-result as Int))
-    } else {
-        Ok(result)
-    }
-}
-
-/// Read at explicit `offset` without moving the file cursor (POSIX `pread`).
-///
-/// Atomic with respect to concurrent `pread` / `pwrite` on the same `fd`,
-/// which is the contract `read + lseek` does NOT satisfy. Required by the
-/// SQLite VFS layer (sqlite-native.md Gap 3) and by any code that needs
-/// an explicit-offset read path — always prefer this over `read` + `lseek`.
-/// Partial reads at EOF return `Ok(n)` where `n < buf.len()`.
-public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSError> {
-    let result = unsafe {
-        syscall_raw(
-            SYS_PREAD64,
-            fd.as_raw(),
-            buf.as_ptr() as Int,
-            buf.len(),
-            offset,
-            0,
-            0,
-        )
-    };
-    if result < 0 {
-        Err(OSError.from_code(-result as Int))
-    } else {
-        Ok(result)
-    }
-}
-
-/// Write at explicit `offset` without moving the file cursor (POSIX `pwrite`).
-/// See `pread` for the atomicity contract. Partial writes return `Ok(n)`
-/// with `n < buf.len()` — callers must loop until the full buffer lands
-/// if they require all-or-nothing semantics.
-public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError> {
-    let result = unsafe {
-        syscall_raw(
-            SYS_PWRITE64,
-            fd.as_raw(),
-            buf.as_ptr() as Int,
-            buf.len(),
-            offset,
-            0,
-            0,
-        )
     };
     if result < 0 {
         Err(OSError.from_code(-result as Int))
@@ -390,9 +298,9 @@ public fn nanosleep(seconds: Int, nanoseconds: Int) -> Result<(Int, Int), OSErro
     }
 }
 
-/// POSIX-style nanosleep accepting a LinuxTimespec struct reference.
+/// POSIX-style nanosleep accepting a Timespec struct reference.
 /// The second parameter (remainder) is optional - pass null to ignore.
-public fn nanosleep_ts(req: &LinuxTimespec, rem: Maybe<&mut LinuxTimespec>) -> Result<(), OSError> {
+public fn nanosleep_ts(req: &Timespec, rem: Maybe<&mut Timespec>) -> Result<(), OSError> {
     let result = nanosleep(req.tv_sec, req.tv_nsec);
     match result {
         Ok((rem_sec, rem_nsec)) => {
@@ -506,7 +414,7 @@ public const CLOCK_MONOTONIC_RAW: Int = 4;
 public const CLOCK_BOOTTIME: Int = 7;
 
 /// Get time from a clock source.
-public fn clock_gettime(clock_id: Int, ts: &mut LinuxTimespec) -> Result<(), OSError> {
+public fn clock_gettime(clock_id: Int, ts: &mut Timespec) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(SYS_CLOCK_GETTIME, clock_id, ts as Int, 0, 0, 0, 0)
     };
@@ -537,9 +445,17 @@ public const SEEK_SET: Int = 0;  // From beginning
 public const SEEK_CUR: Int = 1;  // From current position
 public const SEEK_END: Int = 2;  // From end
 
-/// LinuxStat structure for fstat/stat.
+/// *at syscall dirfd values and flags. Same numeric values on all Linux arches.
+public const AT_FDCWD: Int = -100;           // Use current working directory
+public const AT_SYMLINK_NOFOLLOW: Int = 0x100;  // Don't follow symlinks
+public const AT_REMOVEDIR: Int = 0x200;      // unlinkat: remove directory
+public const AT_SYMLINK_FOLLOW: Int = 0x400; // linkat: follow symlink
+public const AT_EMPTY_PATH: Int = 0x1000;    // fstatat: operate on fd itself
+public const AT_NO_AUTOMOUNT: Int = 0x800;   // Don't trigger automount
+
+/// Stat structure for fstat/stat.
 @repr(C)
-public type LinuxStat is {
+public type Stat is {
     st_dev: UInt64,
     st_ino: UInt64,
     st_nlink: UInt64,
@@ -561,6 +477,9 @@ public type LinuxStat is {
 };
 
 /// Open a file.
+///
+/// Internally uses openat(AT_FDCWD, ...) which is portable across all
+/// Linux architectures. (aarch64 has no legacy `open` syscall.)
 public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
     // Ensure null-terminated path
     let mut path_buf = [0_u8; 4096];
@@ -569,7 +488,7 @@ public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError
     path_buf[len] = 0;
 
     let result = unsafe {
-        syscall_raw(SYS_OPEN, path_buf.as_ptr() as Int, flags, mode, 0, 0, 0)
+        syscall_raw(SYS_OPENAT, AT_FDCWD, path_buf.as_ptr() as Int, flags, mode, 0, 0)
     };
 
     if result < 0 {
@@ -612,9 +531,19 @@ public fn lseek(fd: FileDesc, offset: Int, whence: Int) -> Result<Int, OSError> 
 }
 
 /// Get file status.
-public fn fstat(fd: FileDesc, stat: &mut LinuxStat) -> Result<(), OSError> {
+public fn fstat(fd: FileDesc, stat: &mut Stat) -> Result<(), OSError> {
+    // newfstatat(fd, "", &stat, AT_EMPTY_PATH) is the portable equivalent
+    // of legacy fstat() and works on both x86_64 and aarch64.
+    let empty_path: [Byte; 1] = [0];
     let result = unsafe {
-        syscall_raw(SYS_FSTAT, fd.as_raw(), stat as Int, 0, 0, 0, 0)
+        syscall_raw(
+            SYS_NEWFSTATAT,
+            fd.as_raw(),
+            empty_path.as_ptr() as Int,
+            stat as Int,
+            AT_EMPTY_PATH,
+            0, 0
+        )
     };
 
     if result < 0 {
@@ -625,7 +554,9 @@ public fn fstat(fd: FileDesc, stat: &mut LinuxStat) -> Result<(), OSError> {
 }
 
 /// Get file status by path.
-public fn stat(path: &[Byte], stat_buf: &mut LinuxStat) -> Result<(), OSError> {
+///
+/// Uses the portable newfstatat(AT_FDCWD, ...) syscall.
+public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
     // Ensure null-terminated path
     let mut path_buf = [0_u8; 4096];
     let len = path.len().min(4095);
@@ -633,7 +564,14 @@ public fn stat(path: &[Byte], stat_buf: &mut LinuxStat) -> Result<(), OSError> {
     path_buf[len] = 0;
 
     let result = unsafe {
-        syscall_raw(SYS_STAT, path_buf.as_ptr() as Int, stat_buf as Int, 0, 0, 0, 0)
+        syscall_raw(
+            SYS_NEWFSTATAT,
+            AT_FDCWD,
+            path_buf.as_ptr() as Int,
+            stat_buf as Int,
+            0,
+            0, 0
+        )
     };
 
     if result < 0 {
@@ -644,7 +582,9 @@ public fn stat(path: &[Byte], stat_buf: &mut LinuxStat) -> Result<(), OSError> {
 }
 
 /// Get symbolic link status (doesn't follow symlinks).
-public fn lstat(path: &[Byte], stat_buf: &mut LinuxStat) -> Result<(), OSError> {
+///
+/// Uses newfstatat(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW) which is portable.
+public fn lstat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
     // Ensure null-terminated path
     let mut path_buf = [0_u8; 4096];
     let len = path.len().min(4095);
@@ -652,7 +592,14 @@ public fn lstat(path: &[Byte], stat_buf: &mut LinuxStat) -> Result<(), OSError> 
     path_buf[len] = 0;
 
     let result = unsafe {
-        syscall_raw(SYS_LSTAT, path_buf.as_ptr() as Int, stat_buf as Int, 0, 0, 0, 0)
+        syscall_raw(
+            SYS_NEWFSTATAT,
+            AT_FDCWD,
+            path_buf.as_ptr() as Int,
+            stat_buf as Int,
+            AT_SYMLINK_NOFOLLOW,
+            0, 0
+        )
     };
 
     if result < 0 {
@@ -663,9 +610,6 @@ public fn lstat(path: &[Byte], stat_buf: &mut LinuxStat) -> Result<(), OSError> 
 }
 
 /// Sync file to disk.
-public const SYS_FSYNC: Int = 74;
-public const SYS_FDATASYNC: Int = 75;
-
 public fn fsync(fd: FileDesc) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(SYS_FSYNC, fd.as_raw(), 0, 0, 0, 0, 0)
@@ -692,8 +636,6 @@ public fn fdatasync(fd: FileDesc) -> Result<(), OSError> {
 }
 
 /// Truncate a file to a specified length.
-public const SYS_FTRUNCATE: Int = 77;
-
 public fn ftruncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(SYS_FTRUNCATE, fd.as_raw(), length, 0, 0, 0, 0)
@@ -731,8 +673,9 @@ public fn mkdir(path: &[Byte], mode: Int) -> Result<(), OSError> {
     path_buf[..len].copy_from_slice(&path[..len]);
     path_buf[len] = 0;
 
+    // Portable: mkdirat(AT_FDCWD, path, mode) works on x86_64 and aarch64.
     let result = unsafe {
-        syscall_raw(SYS_MKDIR, path_buf.as_ptr() as Int, mode, 0, 0, 0, 0)
+        syscall_raw(SYS_MKDIRAT, AT_FDCWD, path_buf.as_ptr() as Int, mode, 0, 0, 0)
     };
 
     if result < 0 {
@@ -749,8 +692,9 @@ public fn rmdir(path: &[Byte]) -> Result<(), OSError> {
     path_buf[..len].copy_from_slice(&path[..len]);
     path_buf[len] = 0;
 
+    // Portable: unlinkat(AT_FDCWD, path, AT_REMOVEDIR).
     let result = unsafe {
-        syscall_raw(SYS_RMDIR, path_buf.as_ptr() as Int, 0, 0, 0, 0, 0)
+        syscall_raw(SYS_UNLINKAT, AT_FDCWD, path_buf.as_ptr() as Int, AT_REMOVEDIR, 0, 0, 0)
     };
 
     if result < 0 {
@@ -767,8 +711,9 @@ public fn unlink(path: &[Byte]) -> Result<(), OSError> {
     path_buf[..len].copy_from_slice(&path[..len]);
     path_buf[len] = 0;
 
+    // Portable: unlinkat(AT_FDCWD, path, 0).
     let result = unsafe {
-        syscall_raw(SYS_UNLINK, path_buf.as_ptr() as Int, 0, 0, 0, 0, 0)
+        syscall_raw(SYS_UNLINKAT, AT_FDCWD, path_buf.as_ptr() as Int, 0, 0, 0, 0)
     };
 
     if result < 0 {
@@ -790,8 +735,14 @@ public fn rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
     new_buf[..new_len].copy_from_slice(&newpath[..new_len]);
     new_buf[new_len] = 0;
 
+    // Portable: renameat(AT_FDCWD, old, AT_FDCWD, new).
     let result = unsafe {
-        syscall_raw(SYS_RENAME, old_buf.as_ptr() as Int, new_buf.as_ptr() as Int, 0, 0, 0, 0)
+        syscall_raw(
+            SYS_RENAMEAT,
+            AT_FDCWD, old_buf.as_ptr() as Int,
+            AT_FDCWD, new_buf.as_ptr() as Int,
+            0, 0
+        )
     };
 
     if result < 0 {
@@ -858,8 +809,15 @@ public fn symlink(target: &[Byte], linkpath: &[Byte]) -> Result<(), OSError> {
     link_buf[..link_len].copy_from_slice(&linkpath[..link_len]);
     link_buf[link_len] = 0;
 
+    // Portable: symlinkat(target, AT_FDCWD, linkpath).
     let result = unsafe {
-        syscall_raw(SYS_SYMLINK, target_buf.as_ptr() as Int, link_buf.as_ptr() as Int, 0, 0, 0, 0)
+        syscall_raw(
+            SYS_SYMLINKAT,
+            target_buf.as_ptr() as Int,
+            AT_FDCWD,
+            link_buf.as_ptr() as Int,
+            0, 0, 0
+        )
     };
 
     if result < 0 {
@@ -876,8 +834,16 @@ public fn readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError> {
     path_buf[..len].copy_from_slice(&path[..len]);
     path_buf[len] = 0;
 
+    // Portable: readlinkat(AT_FDCWD, path, buf, bufsize).
     let result = unsafe {
-        syscall_raw(SYS_READLINK, path_buf.as_ptr() as Int, buf.as_ptr() as Int, buf.len(), 0, 0, 0)
+        syscall_raw(
+            SYS_READLINKAT,
+            AT_FDCWD,
+            path_buf.as_ptr() as Int,
+            buf.as_ptr() as Int,
+            buf.len(),
+            0, 0
+        )
     };
 
     if result < 0 {
@@ -888,8 +854,9 @@ public fn readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError> {
 }
 
 /// Create a hard link.
-public const SYS_LINK: Int = 86;
-
+///
+/// Uses the portable linkat(AT_FDCWD, ...) underneath — works on both
+/// x86_64 and aarch64 (aarch64 has no legacy `link` syscall).
 public fn link(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
     let mut old_buf = [0_u8; 4096];
     let old_len = oldpath.len().min(4095);
@@ -901,8 +868,14 @@ public fn link(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
     new_buf[..new_len].copy_from_slice(&newpath[..new_len]);
     new_buf[new_len] = 0;
 
+    // Portable: linkat(AT_FDCWD, old, AT_FDCWD, new, 0).
     let result = unsafe {
-        syscall_raw(SYS_LINK, old_buf.as_ptr() as Int, new_buf.as_ptr() as Int, 0, 0, 0, 0)
+        syscall_raw(
+            SYS_LINKAT,
+            AT_FDCWD, old_buf.as_ptr() as Int,
+            AT_FDCWD, new_buf.as_ptr() as Int,
+            0, 0
+        )
     };
 
     if result < 0 {
@@ -919,8 +892,9 @@ public fn chmod(path: &[Byte], mode: Int) -> Result<(), OSError> {
     path_buf[..len].copy_from_slice(&path[..len]);
     path_buf[len] = 0;
 
+    // Portable: fchmodat(AT_FDCWD, path, mode, 0).
     let result = unsafe {
-        syscall_raw(SYS_CHMOD, path_buf.as_ptr() as Int, mode, 0, 0, 0, 0)
+        syscall_raw(SYS_FCHMODAT, AT_FDCWD, path_buf.as_ptr() as Int, mode, 0, 0, 0)
     };
 
     if result < 0 {
@@ -995,13 +969,6 @@ public const IP_MULTICAST_LOOP: Int = 34;
 public const IP_ADD_MEMBERSHIP: Int = 35;
 public const IP_DROP_MEMBERSHIP: Int = 36;
 
-/// IPv4 TOS / DSCP / ECN (RFC 3168). Outgoing ECN is stamped into
-/// the low 2 bits of the IPv4 ToS byte via setsockopt(IPPROTO_IP,
-/// IP_TOS). IP_RECVTOS asks the kernel to surface the incoming TOS
-/// value via recvmsg/cmsg(IP_TOS).
-public const IP_TOS: Int = 1;
-public const IP_RECVTOS: Int = 13;
-
 /// IPv6 multicast options (IPPROTO_IPV6 = 41).
 public const IPPROTO_IPV6: Int = 41;
 public const IPV6_MULTICAST_IF: Int = 17;
@@ -1009,10 +976,6 @@ public const IPV6_MULTICAST_HOPS: Int = 18;
 public const IPV6_MULTICAST_LOOP: Int = 19;
 public const IPV6_JOIN_GROUP: Int = 20;
 public const IPV6_LEAVE_GROUP: Int = 21;
-
-/// IPv6 Traffic Class (equivalent of IPv4 IP_TOS) — RFC 3542.
-public const IPV6_TCLASS: Int = 67;
-public const IPV6_RECVTCLASS: Int = 66;
 
 /// MSG flags for send/recv.
 public const MSG_PEEK: Int = 2;
@@ -1031,17 +994,17 @@ public const O_NONBLOCK: Int = 0o4000;
 
 /// sockaddr_in structure for IPv4.
 @repr(C)
-public type LinuxSockaddrIn is {
+public type SockaddrIn is {
     sin_family: UInt16,
     sin_port: UInt16,           // Network byte order (big-endian)
     sin_addr: UInt32,           // Network byte order
     sin_zero: [UInt8; 8],
 };
 
-implement LinuxSockaddrIn {
+implement SockaddrIn {
     /// Create a new IPv4 socket address.
-    public fn new(addr: UInt32, port: UInt16) -> LinuxSockaddrIn {
-        LinuxSockaddrIn {
+    public fn new(addr: UInt32, port: UInt16) -> SockaddrIn {
+        SockaddrIn {
             sin_family: AF_INET as UInt16,
             sin_port: port.to_be(),      // Convert to network byte order
             sin_addr: addr.to_be(),
@@ -1050,15 +1013,15 @@ implement LinuxSockaddrIn {
     }
 
     /// Create from octets and port.
-    public fn from_octets(a: UInt8, b: UInt8, c: UInt8, d: UInt8, port: UInt16) -> LinuxSockaddrIn {
+    public fn from_octets(a: UInt8, b: UInt8, c: UInt8, d: UInt8, port: UInt16) -> SockaddrIn {
         let addr = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
-        LinuxSockaddrIn.new(addr, port)
+        SockaddrIn.new(addr, port)
     }
 }
 
 /// sockaddr_in6 structure for IPv6.
 @repr(C)
-public type LinuxSockaddrIn6 is {
+public type SockaddrIn6 is {
     sin6_family: UInt16,
     sin6_port: UInt16,
     sin6_flowinfo: UInt32,
@@ -1093,7 +1056,7 @@ public fn connect(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(),
 }
 
 /// Connect to an IPv4 address.
-public fn connect_v4(fd: FileDesc, addr: &LinuxSockaddrIn) -> Result<(), OSError> {
+public fn connect_v4(fd: FileDesc, addr: &SockaddrIn) -> Result<(), OSError> {
     connect(fd, addr as &unsafe Byte, 16)  // sizeof(sockaddr_in) = 16
 }
 
@@ -1111,7 +1074,7 @@ public fn bind(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(), OS
 }
 
 /// Bind to an IPv4 address.
-public fn bind_v4(fd: FileDesc, addr: &LinuxSockaddrIn) -> Result<(), OSError> {
+public fn bind_v4(fd: FileDesc, addr: &SockaddrIn) -> Result<(), OSError> {
     bind(fd, addr as &unsafe Byte, 16)
 }
 
@@ -1393,32 +1356,6 @@ public fn set_reuseport(fd: FileDesc, reuse: Bool) -> Result<(), OSError> {
     setsockopt_int(fd, SOL_SOCKET, SO_REUSEPORT, if reuse { 1 } else { 0 })
 }
 
-/// Set the IPv4 TOS byte (RFC 3168) on every outbound datagram from
-/// this socket. QUIC uses this to stamp the ECN bits `ECT(0)` / `ECT(1)`
-/// in support of explicit congestion notification. Upper 6 bits are
-/// DSCP — caller-managed if they need QoS as well.
-public fn set_ip_tos(fd: FileDesc, tos: Int) -> Result<(), OSError> {
-    setsockopt_int(fd, IPPROTO_IP, IP_TOS, tos)
-}
-
-/// Enable IP_RECVTOS so incoming IPv4 datagrams surface their TOS
-/// byte via recvmsg cmsg. Required for inbound ECN processing.
-public fn set_ip_recvtos(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
-    setsockopt_int(fd, IPPROTO_IP, IP_RECVTOS, if enable { 1 } else { 0 })
-}
-
-/// Set the IPv6 Traffic Class (RFC 3542) — IPv6 analogue of IP_TOS
-/// used for ECN marking on AF_INET6 sockets.
-public fn set_ipv6_tclass(fd: FileDesc, tc: Int) -> Result<(), OSError> {
-    setsockopt_int(fd, IPPROTO_IPV6, IPV6_TCLASS, tc)
-}
-
-/// Enable IPV6_RECVTCLASS so the kernel delivers the IPv6 TClass byte
-/// alongside each datagram (via recvmsg cmsg).
-public fn set_ipv6_recvtclass(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
-    setsockopt_int(fd, IPPROTO_IPV6, IPV6_RECVTCLASS, if enable { 1 } else { 0 })
-}
-
 /// Set TCP_NODELAY option (disable Nagle's algorithm).
 public fn set_tcp_nodelay(fd: FileDesc, nodelay: Bool) -> Result<(), OSError> {
     setsockopt_int(fd, SOL_TCP, TCP_NODELAY, if nodelay { 1 } else { 0 })
@@ -1480,7 +1417,7 @@ public fn set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
 
 /// struct ip_mreq for multicast membership.
 @repr(C)
-public type LinuxIpMreq is {
+public type IpMreq is {
     imr_multiaddr: UInt32,   // Multicast group address (network byte order)
     imr_interface: UInt32,   // Interface address (network byte order), 0 = default
 };
@@ -1490,7 +1427,7 @@ public type LinuxIpMreq is {
 /// multiaddr: multicast group address (4 bytes, network byte order)
 /// interface: local interface address (4 bytes, network byte order), 0 = default
 public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    let mreq = LinuxIpMreq {
+    let mreq = IpMreq {
         imr_multiaddr: multiaddr,
         imr_interface: interface,
     };
@@ -1500,7 +1437,7 @@ public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) 
 
 /// Leave an IPv4 multicast group.
 public fn leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    let mreq = LinuxIpMreq {
+    let mreq = IpMreq {
         imr_multiaddr: multiaddr,
         imr_interface: interface,
     };

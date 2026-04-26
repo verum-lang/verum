@@ -5,7 +5,7 @@ module sys.linux.time;
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/linux/syscall
-// Platform: Linux x86_64
+// Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
 // This module provides high-resolution time operations using Linux syscalls:
@@ -404,8 +404,15 @@ public fn rdtscp() -> (UInt64, UInt32) {
 /// Use at start and end of timed region for accurate measurement.
 @inline
 public fn rdtsc_serialized() -> UInt64 {
-    // lfence serializes rdtsc on Intel (and AMD with appropriate MSR)
-    @asm("lfence");
+    // Serialize the timestamp read so prior loads/stores retire first.
+    //   x86_64:  lfence  — serializes subsequent RDTSC on Intel/AMD
+    //   aarch64: isb     — instruction-synchronization barrier
+    @cfg(target_arch = "x86_64") {
+        @asm("lfence");
+    }
+    @cfg(target_arch = "aarch64") {
+        @asm("isb");
+    }
     rdtsc()
 }
 

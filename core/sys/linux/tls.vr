@@ -1,25 +1,28 @@
 module sys.linux.tls;
 
 // =============================================================================
-// sys/linux/tls.vr - LinuxThread-Local Storage Bootstrap for Linux x86_64
+// sys/linux/tls.vr - Thread-Local Storage Bootstrap for Linux
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/linux/syscall
-// Platform: Linux x86_64
+// Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
-// This module provides TLS (LinuxThread-Local Storage) bootstrap functionality
+// This module provides TLS (Thread-Local Storage) bootstrap functionality
 // required for @thread_local variables, particularly critical for the
 // per-thread allocator in std.mem.LocalHeap.
-//
-// CRITICAL: Without TLS initialization, the %fs segment register is not
-// set, and any access to @thread_local variables will SIGSEGV.
 //
 // Bootstrap sequence:
 // 1. _start calls init_main_thread_tls() before any other code
 // 2. mmap allocates memory for TCB + TLS data segment
-// 3. arch_prctl(ARCH_SET_FS) sets %fs to point to TCB
-// 4. Now @thread_local variables work via %fs:[offset]
+// 3. The thread pointer register is set to the TCB address:
+//      - x86_64: arch_prctl(ARCH_SET_FS, tcb) — kernel writes %fs.base
+//      - aarch64: msr tpidr_el0, tcb — direct register write from EL0
+// 4. Now @thread_local variables work via %fs:[off] (x86_64) or
+//    [tpidr_el0, #off] (aarch64).
+//
+// CRITICAL: Without TLS initialization, the thread pointer is not set
+// and any access to @thread_local variables will SIGSEGV.
 //
 // For spawned threads, clone() with CLONE_SETTLS flag initializes TLS.
 //
@@ -29,9 +32,17 @@ module sys.linux.tls;
 mount core.memory.null_ptr;
 mount sys.common.{OSError, MemProt, MapFlags};
 mount sys.linux.syscall.{
-    syscall_raw, SYS_MMAP, SYS_MUNMAP, SYS_ARCH_PRCTL,
+    syscall_raw, SYS_MMAP, SYS_MUNMAP,
     SYS_GETTID, SYS_SET_TID_ADDRESS,
 };
+
+// ARCH_PRCTL is x86_64-only — gate the import so aarch64 build succeeds.
+@cfg(target_arch = "x86_64")
+mount sys.linux.syscall.SYS_ARCH_PRCTL;
+
+// aarch64 uses a direct register write for the thread pointer.
+@cfg(target_arch = "aarch64")
+mount core.intrinsics.lowlevel.aarch64.write_tpidr_el0 as set_tpidr_el0;
 
 // Import intrinsics as functions
 mount core.intrinsics.{
@@ -61,10 +72,10 @@ public const TLS_CTX_OFFSET: Int = 0;
 public const STACK_GUARD_MAGIC: USize = 0xDEAD_BEEF_CAFE_BABE;
 
 // =============================================================================
-// LinuxThread Control Block (TCB)
+// Thread Control Block (TCB)
 // =============================================================================
 
-/// LinuxThread Control Block - stored at %fs:0
+/// Thread Control Block - stored at %fs:0
 ///
 /// This structure must be at the address pointed to by %fs.
 /// The first field (self_ptr) must point to itself for ABI compatibility.
@@ -80,10 +91,10 @@ public const STACK_GUARD_MAGIC: USize = 0xDEAD_BEEF_CAFE_BABE;
 /// %fs:40  -> context_slots (for V-LLSI context system)
 /// %fs:48  -> user_data
 /// ```
-public type LinuxThreadControlBlock is {
+public type ThreadControlBlock is {
     /// Self-pointer (required by x86_64 TLS ABI, must be at offset 0)
     /// This enables __tls_get_addr to work correctly.
-    self_ptr: &unsafe LinuxThreadControlBlock,
+    self_ptr: &unsafe ThreadControlBlock,
 
     /// Stack canary for stack smashing detection
     stack_guard: USize,
@@ -102,7 +113,7 @@ public type LinuxThreadControlBlock is {
 
     /// Context slots for V-LLSI context system (256 slots)
     /// See docs/architecture/new-arch-spec.md Appendix F
-    context_slots: &unsafe LinuxContextSlots,
+    context_slots: &unsafe ContextSlots,
 
     /// User-defined data pointer
     user_data: &unsafe Byte,
@@ -116,19 +127,19 @@ public const MAX_CONTEXT_SLOTS: Int = 256;
 /// Maximum depth of the context stack for hierarchical contexts
 public const CONTEXT_STACK_DEPTH: Int = 8;
 
-public type LinuxContextSlots is {
+public type ContextSlots is {
     /// Slot values (indexed by slot ID 0-255)
     slots: [&unsafe Byte; 256],
 
     /// Parent context for hierarchical lookup
-    parent: Maybe<&LinuxContextSlots>,
+    parent: Maybe<&ContextSlots>,
 
     /// Bitmask of active slots (4 x 64-bit = 256 bits)
     active: [UInt64; 4],
 };
 
 /// TLS initialization error types
-public type LinuxTlsError is
+public type TlsError is
     | MmapFailed { code: Int }
     | ArchPrctlFailed { code: Int }
     | AlreadyInitialized
@@ -146,8 +157,8 @@ public type LinuxTlsError is
 ///
 /// # Returns
 /// * `Ok(())` - TLS initialized successfully
-/// * `Err(LinuxTlsError)` - Initialization failed
-public fn init_main_thread_tls() -> Result<(), LinuxTlsError> {
+/// * `Err(TlsError)` - Initialization failed
+public fn init_main_thread_tls() -> Result<(), TlsError> {
     init_thread_tls_with_size(DEFAULT_TLS_SIZE)
 }
 
@@ -155,13 +166,13 @@ public fn init_main_thread_tls() -> Result<(), LinuxTlsError> {
 ///
 /// # Arguments
 /// * `tls_size` - Size of TLS data segment (will be rounded up to alignment)
-public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), LinuxTlsError> {
+public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), TlsError> {
     // Round up to alignment
     let aligned_tls_size = (tls_size + TLS_ALIGN - 1) & !(TLS_ALIGN - 1);
 
     // Calculate total size: TCB + TLS data + context slots
-    let tcb_size = LinuxThreadControlBlock.size;
-    let ctx_size = LinuxContextSlots.size;
+    let tcb_size = ThreadControlBlock.size;
+    let ctx_size = ContextSlots.size;
     let total_size = tcb_size + aligned_tls_size + ctx_size;
 
     // Allocate memory via mmap (anonymous, private)
@@ -179,7 +190,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), LinuxTlsError
 
     // Check for mmap failure
     if mem < 0 && mem > -4096 {
-        return Err(LinuxTlsError.MmapFailed { code: -mem as Int });
+        return Err(TlsError.MmapFailed { code: -mem as Int });
     }
 
     let base = mem as &unsafe Byte;
@@ -189,8 +200,8 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), LinuxTlsError
     //           ^--- %fs points here
 
     let tls_data_ptr = base;
-    let tcb_ptr = unsafe { base.offset(aligned_tls_size as Int) } as &unsafe LinuxThreadControlBlock;
-    let ctx_ptr = unsafe { base.offset((aligned_tls_size + tcb_size) as Int) } as &unsafe LinuxContextSlots;
+    let tcb_ptr = unsafe { base.offset(aligned_tls_size as Int) } as &unsafe ThreadControlBlock;
+    let ctx_ptr = unsafe { base.offset((aligned_tls_size + tcb_size) as Int) } as &unsafe ContextSlots;
 
     // Initialize context slots
     unsafe {
@@ -211,15 +222,24 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), LinuxTlsError
         (*tcb_ptr).user_data = null_ptr();
     }
 
-    // Set %fs register to point to TCB via arch_prctl
-    let result = unsafe {
-        syscall_raw(SYS_ARCH_PRCTL, ARCH_SET_FS, tcb_ptr as Int, 0, 0, 0, 0)
-    };
+    // Set the thread pointer register so @thread_local variables resolve.
+    //
+    //   x86_64:  arch_prctl(ARCH_SET_FS, tcb)  — kernel updates MSR_FS_BASE
+    //   aarch64: msr tpidr_el0, tcb            — direct register write (EL0)
+    @cfg(target_arch = "x86_64") {
+        let result = unsafe {
+            syscall_raw(SYS_ARCH_PRCTL, ARCH_SET_FS, tcb_ptr as Int, 0, 0, 0, 0)
+        };
 
-    if result != 0 {
-        // Clean up allocated memory on failure
-        unsafe { syscall_raw(SYS_MUNMAP, mem, total_size as Int, 0, 0, 0, 0) };
-        return Err(LinuxTlsError.ArchPrctlFailed { code: -result as Int });
+        if result != 0 {
+            // Clean up allocated memory on failure
+            unsafe { syscall_raw(SYS_MUNMAP, mem, total_size as Int, 0, 0, 0, 0) };
+            return Err(TlsError.ArchPrctlFailed { code: -result as Int });
+        }
+    }
+    @cfg(target_arch = "aarch64") {
+        // User-mode write to TPIDR_EL0 is permitted on aarch64 Linux.
+        unsafe { set_tpidr_el0(tcb_ptr as USize); }
     }
 
     // Register clear_child_tid for robust futex support
@@ -237,7 +257,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), LinuxTlsError
 /// Create TLS block for a new thread (called before clone).
 ///
 /// Returns a pointer suitable for CLONE_SETTLS argument.
-public fn create_thread_tls(stack_size: USize) -> Result<&unsafe LinuxThreadControlBlock, LinuxTlsError> {
+public fn create_thread_tls(stack_size: USize) -> Result<&unsafe ThreadControlBlock, TlsError> {
     init_thread_tls_with_size(DEFAULT_TLS_SIZE)?;
     get_current_tcb()
 }
@@ -251,9 +271,9 @@ public fn create_thread_tls(stack_size: USize) -> Result<&unsafe LinuxThreadCont
 /// # Safety
 /// TLS must be initialized via init_main_thread_tls() first.
 @inline
-public fn get_current_tcb() -> Result<&unsafe LinuxThreadControlBlock, LinuxTlsError> {
+public fn get_current_tcb() -> Result<&unsafe ThreadControlBlock, TlsError> {
     // Read TCB pointer from fs:[0] using TLS intrinsic
-    let tcb: &unsafe LinuxThreadControlBlock = tls_read_ptr(0);
+    let tcb: &unsafe ThreadControlBlock = tls_read_ptr(0);
     Ok(tcb)
 }
 
@@ -261,18 +281,18 @@ public fn get_current_tcb() -> Result<&unsafe LinuxThreadControlBlock, LinuxTlsE
 ///
 /// Used by the V-LLSI context system for provide/using.
 @inline
-public fn get_context_slots() -> &LinuxContextSlots {
+public fn get_context_slots() -> &ContextSlots {
     // Read context slots pointer from fs:[40] using TLS intrinsic
-    // Offset 40 = offsetof(LinuxThreadControlBlock, context_slots)
-    let slots: &LinuxContextSlots = tls_read_ptr(40);
+    // Offset 40 = offsetof(ThreadControlBlock, context_slots)
+    let slots: &ContextSlots = tls_read_ptr(40);
     slots
 }
 
 /// Set the current thread's context slots.
 @inline
-public fn set_context_slots(slots: &LinuxContextSlots) {
+public fn set_context_slots(slots: &ContextSlots) {
     // Write context slots pointer to fs:[40] using TLS intrinsic
-    // Offset 40 = offsetof(LinuxThreadControlBlock, context_slots)
+    // Offset 40 = offsetof(ThreadControlBlock, context_slots)
     tls_write_ptr(40, slots);
 }
 
@@ -280,7 +300,7 @@ public fn set_context_slots(slots: &LinuxContextSlots) {
 @inline
 public fn get_errno() -> Int {
     // Read errno from fs:[20] using TLS intrinsic
-    // Offset 20 = offsetof(LinuxThreadControlBlock, errno)
+    // Offset 20 = offsetof(ThreadControlBlock, errno)
     let errno: Int32 = tls_read_i32(20);
     errno as Int
 }
@@ -289,7 +309,7 @@ public fn get_errno() -> Int {
 @inline
 public fn set_errno(value: Int) {
     // Write errno to fs:[20] using TLS intrinsic
-    // Offset 20 = offsetof(LinuxThreadControlBlock, errno)
+    // Offset 20 = offsetof(ThreadControlBlock, errno)
     tls_write_i32(20, value as Int32);
 }
 
@@ -297,7 +317,7 @@ public fn set_errno(value: Int) {
 @inline
 public fn get_tid_fast() -> Int {
     // Read tid from fs:[16] using TLS intrinsic
-    // Offset 16 = offsetof(LinuxThreadControlBlock, tid)
+    // Offset 16 = offsetof(ThreadControlBlock, tid)
     let tid: Int32 = tls_read_i32(16);
     tid as Int
 }
@@ -306,7 +326,7 @@ public fn get_tid_fast() -> Int {
 @inline
 public fn check_stack_guard() -> Bool {
     // Read stack guard from fs:[8] using TLS intrinsic
-    // Offset 8 = offsetof(LinuxThreadControlBlock, stack_guard)
+    // Offset 8 = offsetof(ThreadControlBlock, stack_guard)
     let guard: USize = tls_read_usize(8);
     guard == STACK_GUARD_MAGIC
 }
@@ -334,7 +354,7 @@ public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
     }
 }
 
-fn ctx_get_from(slots: &LinuxContextSlots, slot: UInt8) -> Maybe<&unsafe Byte> {
+fn ctx_get_from(slots: &ContextSlots, slot: UInt8) -> Maybe<&unsafe Byte> {
     let word = slot / 64;
     let bit = slot % 64;
 
@@ -359,7 +379,7 @@ public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> {
 /// Set a value in a context slot.
 @inline
 public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
-    let slots = get_context_slots() as &mut LinuxContextSlots;
+    let slots = get_context_slots() as &mut ContextSlots;
     let word = slot / 64;
     let bit = slot % 64;
 
@@ -370,7 +390,7 @@ public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
 /// Clear a context slot.
 @inline
 public fn ctx_clear(slot: UInt8) {
-    let slots = get_context_slots() as &mut LinuxContextSlots;
+    let slots = get_context_slots() as &mut ContextSlots;
     let word = slot / 64;
     let bit = slot % 64;
 
@@ -379,8 +399,8 @@ public fn ctx_clear(slot: UInt8) {
 }
 
 /// Create a child context frame (for provide blocks).
-public fn ctx_push(parent: &LinuxContextSlots) -> LinuxContextSlots {
-    LinuxContextSlots {
+public fn ctx_push(parent: &ContextSlots) -> ContextSlots {
+    ContextSlots {
         slots: [null_ptr(); 256],
         parent: Some(parent),
         active: [0, 0, 0, 0],
@@ -396,7 +416,7 @@ public fn ctx_pop() {
 }
 
 // =============================================================================
-// LinuxThread Cleanup
+// Thread Cleanup
 // =============================================================================
 
 /// Clean up TLS for the current thread.
@@ -405,12 +425,19 @@ public fn ctx_pop() {
 public fn cleanup_thread_tls() {
     match get_current_tcb() {
         Ok(tcb) => {
-            let total_size = tcb.tls_size + LinuxThreadControlBlock.size + LinuxContextSlots.size;
+            let total_size = tcb.tls_size + ThreadControlBlock.size + ContextSlots.size;
             let base = unsafe { (tcb as &unsafe Byte).offset(-(tcb.tls_size as Int)) };
 
-            // Clear fs register before freeing memory
+            // Clear thread-pointer register before freeing memory so any
+            // subsequent @thread_local access faults loudly instead of
+            // silently reading freed memory.
             unsafe {
-                syscall_raw(SYS_ARCH_PRCTL, ARCH_SET_FS, 0, 0, 0, 0, 0);
+                @cfg(target_arch = "x86_64") {
+                    syscall_raw(SYS_ARCH_PRCTL, ARCH_SET_FS, 0, 0, 0, 0, 0);
+                }
+                @cfg(target_arch = "aarch64") {
+                    set_tpidr_el0(0);
+                }
                 syscall_raw(SYS_MUNMAP, base as Int, total_size as Int, 0, 0, 0, 0);
             }
         }

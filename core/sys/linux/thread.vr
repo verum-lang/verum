@@ -5,7 +5,7 @@ module sys.linux.thread;
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/linux/syscall, sys/linux/tls
-// Platform: Linux x86_64
+// Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
 // This module provides thread creation via clone/clone3 and comprehensive
@@ -316,7 +316,7 @@ implement LinuxThread {
         // child_tid is cleared and futex woken on exit due to CLONE_CHILD_CLEARTID
         let tid_ptr = unsafe { &(*self.tls).tid };
         loop {
-            // Load tid atomically (tid is Int/64-bit on Linux x86_64)
+            // Load tid atomically (tid is Int/64-bit in the TCB on Linux)
             let tid = atomic_load_u64(tid_ptr as *const UInt64, ORDERING_ACQUIRE) as Int;
             if tid == 0 {
                 break;
@@ -607,8 +607,11 @@ implement LinuxSpinLock {
             if success {
                 break;
             }
-            // Spin with pause hint
-            @asm("pause");
+            // Spin-wait hint. Architecture-specific:
+            //   x86_64:  pause  — reduces memory-order violations
+            //   aarch64: yield  — hints SMT/CPU to hand off resources
+            @cfg(target_arch = "x86_64")  { @asm("pause"); }
+            @cfg(target_arch = "aarch64") { @asm("yield"); }
         }
     }
 

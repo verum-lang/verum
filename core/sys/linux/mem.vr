@@ -5,7 +5,7 @@ module sys.linux.mem;
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: sys/linux/syscall, sys/common
-// Platform: Linux x86_64
+// Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
 // This module provides comprehensive memory management operations beyond
@@ -453,7 +453,15 @@ public fn shrink_mapping(addr: &unsafe Byte, old_size: USize, new_size: USize) -
 // Page Size Utilities
 // =============================================================================
 
-/// Standard page size on x86_64
+/// Common page size on Linux. 4 KiB on x86_64 and on default aarch64
+/// kernels (Ubuntu, Debian, most distros). Some aarch64 kernels are built
+/// with 16 KiB or 64 KiB pages — when the actual runtime value matters
+/// (e.g. for mmap length alignment against the live kernel), query
+/// `sys.linux.auxv.page_size()` which reads AT_PAGESZ. This compile-time
+/// constant is safe for alignment math: because it is always a divisor
+/// of the real page size on supported configurations, aligning *up* to
+/// this value does not produce an over-aligned value that the kernel
+/// would reject.
 public const PAGE_SIZE: USize = 4096;
 
 /// Huge page size (2 MB)
