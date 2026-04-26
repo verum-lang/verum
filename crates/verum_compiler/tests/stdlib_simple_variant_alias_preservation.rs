@@ -35,8 +35,8 @@
 //! aliases.  Only protect variants from ALREADY-REGISTERED types in the
 //! environment, never via hardcoded name lists."
 
-use std::path::PathBuf;
-use std::process::Command;
+mod stdlib_support;
+use stdlib_support::{vtest_run_capture, workspace_root};
 
 const FIXTURE: &str = r#"// @test: run-interpreter
 // @tier: 0
@@ -54,50 +54,6 @@ fn main() {
 }
 "#;
 
-fn workspace_root() -> PathBuf {
-    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for ancestor in crate_dir.ancestors() {
-        if ancestor.join("Cargo.lock").is_file() && ancestor.join("core").is_dir() {
-            return ancestor.to_path_buf();
-        }
-    }
-    panic!(
-        "workspace root with Cargo.lock and core/ not found from {}",
-        crate_dir.display()
-    );
-}
-
-fn locate_vtest(root: &std::path::Path) -> PathBuf {
-    let release = root.join("target/release/vtest");
-    if release.is_file() {
-        return release;
-    }
-    let debug = root.join("target/debug/vtest");
-    if debug.is_file() {
-        return debug;
-    }
-    panic!(
-        "vtest binary not found at target/release/vtest or target/debug/vtest \
-         under {}; run `cargo build -p vtest` first",
-        root.display()
-    );
-}
-
-fn run_fixture(fixture_path: &std::path::Path) -> (Option<i32>, String, String) {
-    let root = workspace_root();
-    let vtest = locate_vtest(&root);
-    let output = Command::new(&vtest)
-        .args(["run", fixture_path.to_str().unwrap()])
-        .current_dir(&root)
-        .output()
-        .expect("failed to run vtest");
-    (
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout).into_owned(),
-        String::from_utf8_lossy(&output.stderr).into_owned(),
-    )
-}
-
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_preserves_simple_none_alias() {
@@ -107,19 +63,26 @@ fn stdlib_loading_preserves_simple_none_alias() {
     let fixture = dir.join("simple_none_alias_preserved.vr");
     std::fs::write(&fixture, FIXTURE).expect("write fixture");
 
-    let (code, _stdout, stderr) = run_fixture(&fixture);
+    let out = vtest_run_capture(&fixture);
 
-    // Cleanup — but only on success, so a failed run leaves the fixture
-    // in place for manual inspection.
-    let cleanup = |fixture: &std::path::Path, dir: &std::path::Path| {
-        let _ = std::fs::remove_file(fixture);
-        let _ = std::fs::remove_dir(dir);
-    };
-
-    let none_warnings: Vec<&str> = stderr
+    // Only inspect stderr here — the symptom is a body-compilation
+    // warning emitted by the stdlib-loading codegen subscriber, which
+    // routes to stderr in the fixture-style invocation (no pipe
+    // remapping).  vtest_run_capture preserves both streams; using
+    // `out.stderr` directly keeps this test scoped to the stderr
+    // channel where the diagnostic is known to land.
+    let none_warnings: Vec<&str> = out.stderr
         .lines()
         .filter(|l| l.contains("[lenient]") && l.contains("undefined variable: None"))
         .collect();
+
+    let pass = none_warnings.is_empty() && out.exit_code == Some(0);
+    if pass {
+        // Cleanup only on success — a failed run leaves the fixture
+        // in place for manual inspection.
+        let _ = std::fs::remove_file(&fixture);
+        let _ = std::fs::remove_dir(&dir);
+    }
 
     assert!(
         none_warnings.is_empty(),
@@ -144,11 +107,9 @@ fn stdlib_loading_preserves_simple_none_alias() {
     );
 
     assert_eq!(
-        code,
+        out.exit_code,
         Some(0),
         "fixture exited with non-zero; stderr:\n{}",
-        stderr,
+        out.stderr,
     );
-
-    cleanup(&fixture, &dir);
 }

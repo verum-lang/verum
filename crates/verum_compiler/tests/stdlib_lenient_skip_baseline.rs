@@ -26,8 +26,8 @@
 //!     `crates/verum_vbc/src/codegen/context.rs::register_function`
 //!     keeps both arities (#161).
 
-use std::path::PathBuf;
-use std::process::Command;
+mod stdlib_support;
+use stdlib_support::{vtest_run_capture, workspace_root};
 
 const FIXTURE: &str = r#"// @test: run-interpreter
 // @tier: 0
@@ -45,62 +45,14 @@ fn main() {
 }
 "#;
 
-fn workspace_root() -> PathBuf {
-    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for ancestor in crate_dir.ancestors() {
-        if ancestor.join("Cargo.lock").is_file() && ancestor.join("core").is_dir() {
-            return ancestor.to_path_buf();
-        }
-    }
-    panic!(
-        "workspace root with Cargo.lock and core/ not found from {}",
-        crate_dir.display()
-    );
-}
-
-fn locate_vtest(root: &std::path::Path) -> PathBuf {
-    let release = root.join("target/release/vtest");
-    if release.is_file() {
-        return release;
-    }
-    let debug = root.join("target/debug/vtest");
-    if debug.is_file() {
-        return debug;
-    }
-    panic!(
-        "vtest binary not found at target/release/vtest or target/debug/vtest \
-         under {}; run `cargo build -p vtest` first",
-        root.display()
-    );
-}
-
-/// Run vtest on `target_path` with `RUST_LOG=warn` and return any
-/// `[lenient] SKIP` warning lines.
-///
-/// vtest's tracing subscriber lands the lenient-skip warn-lines on
-/// **stdout** when stderr is a pipe (Command::output captures), even
-/// though `tracing_subscriber::fmt::layer()` defaults to stderr — the
-/// vtest test-executor relays subprocess output through stdout for
-/// per-test reporting.  We scan both streams to be robust against
-/// either routing path.
+/// Run vtest on `target_path` and return any `[lenient] SKIP`
+/// warning lines.  Thin wrapper over `vtest_run_capture`; kept here
+/// because the line-predicate is specific to this test file.
 fn collect_lenient_skips(target_path: &std::path::Path) -> (Option<i32>, Vec<String>) {
-    let root = workspace_root();
-    let vtest = locate_vtest(&root);
-    let output = Command::new(&vtest)
-        .args(["run", target_path.to_str().unwrap()])
-        .env("RUST_LOG", "warn")
-        .current_dir(&root)
-        .output()
-        .expect("failed to run vtest");
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let skips: Vec<String> = stderr
-        .lines()
-        .chain(stdout.lines())
-        .filter(|l| l.contains("[lenient]") && l.contains("SKIP"))
-        .map(|l| l.to_string())
-        .collect();
-    (output.status.code(), skips)
+    let out = vtest_run_capture(target_path);
+    let skips =
+        out.lines_matching(|l| l.contains("[lenient]") && l.contains("SKIP"));
+    (out.exit_code, skips)
 }
 
 const FAILURE_HINT: &str =
