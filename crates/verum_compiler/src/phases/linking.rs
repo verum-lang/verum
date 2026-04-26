@@ -672,16 +672,6 @@ pub struct FinalLinker {
     /// Symbol table for tracking external symbols
     symbol_table: SymbolTable,
 
-    /// Instantiated generic symbols for monomorphization deduplication
-    ///
-    /// During LTO, generic functions like `List<Int>::push` and `List<Text>::push`
-    /// may be instantiated multiple times across different modules. This set tracks
-    /// which generic instantiations have been processed to enable deduplication,
-    /// reducing binary size and improving linking performance.
-    ///
-    /// Used by the monomorphization deduplication pass during LTO.
-    #[allow(dead_code)] // Future: Generic monomorphization deduplication
-    instantiated_symbols: HashSet<String>,
 }
 
 impl FinalLinker {
@@ -693,7 +683,6 @@ impl FinalLinker {
             config,
             stats: LinkingStats::default(),
             symbol_table: SymbolTable::new(),
-            instantiated_symbols: HashSet::new(),
         }
     }
 
@@ -833,44 +822,6 @@ impl FinalLinker {
         }
 
         Ok(())
-    }
-
-    /// Link for JIT execution (internal AOT pipeline component)
-    ///
-    /// For JIT, we create an in-memory linkable module. The JIT engine will
-    /// handle final symbol resolution at runtime.
-    ///
-    /// Note: JIT is used internally for REPL/incremental compilation,
-    /// not as a separate execution tier.
-    #[allow(dead_code)]
-    fn link_for_jit(&mut self, object_files: &[ObjectFile]) -> Result<Binary> {
-        self.stats.object_files_linked = object_files.len();
-        self.stats.total_object_size = object_files.iter().map(|o| o.size).sum();
-
-        // Check if there are any object files with bitcode for LTO
-        let has_bitcode = object_files.iter().any(|o| o.has_bitcode);
-
-        if has_bitcode && self.config.lto != LTOConfig::None {
-            // Merge bitcode for optimizing JIT
-            let merged_bc = self.merge_bitcode(object_files)?;
-
-            // Link with stdlib bitcode if available
-            let combined_bc = self.link_stdlib_bitcode(&merged_bc)?;
-
-            // Generate a single object file for JIT
-            let native_obj = self.generate_native(&combined_bc)?;
-
-            // Create the JIT-ready binary
-            let output_path = self.config.output_path.clone();
-            std::fs::copy(&native_obj.path, &output_path)
-                .context("Failed to copy JIT object to output path")?;
-
-            Binary::from_path(output_path)
-        } else {
-            // No LTO - link object files directly
-            // For JIT, we create a combined object file that can be loaded
-            self.create_merged_object(object_files)
-        }
     }
 
     /// Create a static library (.a) from object files
