@@ -11151,6 +11151,16 @@ impl<'s> CompilationPipeline<'s> {
                 // directly, not just look up the parent `core.collections`.
                 let full_path = {
                     use verum_ast::MountTreeKind;
+                    // Same extraction policy as the closure-walker pass
+                    // below: preserve Super and Relative segments as the
+                    // literal "super" string so downstream resolution can
+                    // see them.  Filtering them silently was the bug
+                    // class fixed in #163/#164 — even if this site's
+                    // immediate downstream candidate-matching can't act
+                    // on a leading "super." (the user module's own path
+                    // isn't tracked here), preserving the segments
+                    // ensures a stale resolution shows up as an unmatched
+                    // path rather than a silently-corrupted one.
                     match &mount_decl.tree.kind {
                         MountTreeKind::Path(path) => {
                             path.segments
@@ -11158,6 +11168,9 @@ impl<'s> CompilationPipeline<'s> {
                                 .filter_map(|seg| match seg {
                                     verum_ast::ty::PathSegment::Name(ident) =>
                                         Some(ident.name.as_str().to_string()),
+                                    verum_ast::ty::PathSegment::Super
+                                    | verum_ast::ty::PathSegment::Relative =>
+                                        Some("super".to_string()),
                                     _ => None,
                                 })
                                 .collect::<Vec<String>>()
@@ -11596,10 +11609,20 @@ impl<'s> CompilationPipeline<'s> {
                     // is the one we need.
                     use verum_ast::MountTreeKind;
                     if let MountTreeKind::Path(path) = &mount_decl.tree.kind {
+                        // Same extraction policy as the other sites in
+                        // this file — preserve Super/Relative as
+                        // "super" so downstream consumers see the
+                        // structural prefix rather than a silently-
+                        // truncated path.  See the user-mount loop at
+                        // ~line 11158 and the closure walker at
+                        // ~line 11336 for the full bug-class context.
                         let full = path.segments.iter()
                             .filter_map(|seg| match seg {
                                 verum_ast::ty::PathSegment::Name(ident) =>
                                     Some(ident.name.as_str().to_string()),
+                                verum_ast::ty::PathSegment::Super
+                                | verum_ast::ty::PathSegment::Relative =>
+                                    Some("super".to_string()),
                                 _ => None,
                             })
                             .collect::<Vec<_>>()
