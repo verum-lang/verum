@@ -227,4 +227,32 @@ pub enum KernelError {
         /// Target universe tier rendered as canonical text.
         to_tier: Text,
     },
+
+    /// V8 (#207, B1) — `K-Univ` universe-level overflow. The kernel's
+    /// finite universe levels are encoded as `u32`; a request to
+    /// type `Universe(Concrete(u32::MAX))` cannot honestly produce
+    /// `Universe(Concrete(u32::MAX + 1))` and pre-V8
+    /// `saturating_add(1)` silently returned `u32::MAX` again,
+    /// producing the type-in-type rule `Universe(Concrete(u32::MAX))
+    /// : Universe(Concrete(u32::MAX))` — soundness-fatal.
+    ///
+    /// Fix mirrors the B4 OrdinalDepth saturation hole: detect the
+    /// overflow point and reject explicitly. Real Verum code uses
+    /// universe levels in single digits (typical max is 2 or 3),
+    /// so reaching `u32::MAX` in any honest workload is itself a
+    /// strong indicator of an elaborator bug.
+    ///
+    /// Spec: `verification-architecture.md` §6.1 K-Univ rule;
+    /// trusted-kernel.md rule 18 `Universe-Cumul` notes the
+    /// implicit predicative-hierarchy invariant violated here.
+    #[error(
+        "kernel: K-Univ universe-level overflow at Concrete({level}); \
+         cannot honestly produce successor (would silently saturate to \
+         the same level, yielding type-in-type)"
+    )]
+    UniverseLevelOverflow {
+        /// The level at which the overflow occurred (always
+        /// `u32::MAX` today; field kept open for future encodings).
+        level: u32,
+    },
 }

@@ -75,10 +75,23 @@ pub fn infer(
         },
 
         // Universe `Type(n)` inhabits `Type(n+1)`; `Prop` inhabits `Type(0)`.
+        //
+        // V8 (#207, B1) soundness fix: `saturating_add(1)` at u32::MAX
+        // silently returns u32::MAX, yielding the type-in-type rule
+        // `Universe(Concrete(MAX)) : Universe(Concrete(MAX))`. Detect
+        // the overflow point explicitly and reject with
+        // `KernelError::UniverseLevelOverflow`. Honest workloads
+        // never reach u32::MAX (real code uses single-digit levels),
+        // so reaching this branch is itself an elaborator-bug signal.
         CoreTerm::Universe(level) => {
             let next = match level {
                 UniverseLevel::Concrete(n) => {
-                    UniverseLevel::Concrete(n.saturating_add(1))
+                    if *n == u32::MAX {
+                        return Err(KernelError::UniverseLevelOverflow {
+                            level: *n,
+                        });
+                    }
+                    UniverseLevel::Concrete(*n + 1)
                 }
                 UniverseLevel::Prop => UniverseLevel::Concrete(0),
                 other => UniverseLevel::Succ(Heap::new(other.clone())),
