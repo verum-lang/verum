@@ -53,26 +53,38 @@ pub struct Lexer<'source> {
     eof_reached: bool,
     /// Last error span (preserved for parser use)
     last_error_span: Option<Span>,
-    /// Byte offset added to all logos spans. Non-zero when a shebang line was
-    /// stripped from the input before being passed to logos. Lets `verum run`
-    /// detect script files while keeping diagnostics pointing at original
-    /// byte positions.
+    /// Byte offset added to all logos spans. Non-zero when a UTF-8 BOM and/or
+    /// a shebang line was stripped from the input before being passed to logos.
+    /// Keeps diagnostics pointing at original-source byte positions.
     shebang_offset: u32,
     /// The original shebang text, including the leading `#!` and trailing
     /// newline (if any). `None` if the source had no shebang.
     shebang_text: Option<&'source str>,
+    /// `true` if the source began with a UTF-8 byte-order mark (`EF BB BF`).
+    /// The BOM is stripped before tokenisation; this flag preserves the fact
+    /// for downstream lossless reconstruction.
+    had_bom: bool,
 }
 
 impl<'source> Lexer<'source> {
     /// Create a new lexer for the given source code.
     ///
-    /// If the source begins with a POSIX shebang (`#!...\n`), the first line
-    /// is consumed as trivia: it is not tokenised, but the byte offsets of
-    /// every emitted token are kept in the original source's coordinate
-    /// system. Use [`Lexer::had_shebang`] / [`Lexer::shebang_text`] to inspect
-    /// the stripped line.
+    /// Two leading-trivia stages run before logos sees the input:
+    ///
+    /// 1. **UTF-8 BOM** (`EF BB BF`) is stripped if present. Cross-platform
+    ///    editors frequently prepend one and logos has no rule for it; left
+    ///    in place it would cause a lex error at byte 0 of every BOM-prefixed
+    ///    file.
+    /// 2. **POSIX shebang** (`#!...\n`) is stripped if present after any BOM.
+    ///    The shebang must begin at the first non-BOM byte.
+    ///
+    /// All emitted token spans add back the combined BOM+shebang prefix
+    /// length so diagnostics point at original-source byte positions. Use
+    /// [`Lexer::had_shebang`] / [`Lexer::shebang_text`] to inspect the
+    /// shebang and [`Lexer::had_bom`] to detect a stripped BOM.
     pub fn new(source: &'source str, file_id: FileId) -> Self {
-        let (body, shebang_text) = strip_shebang(source);
+        let (after_bom, had_bom) = strip_utf8_bom(source);
+        let (body, shebang_text) = strip_shebang(after_bom);
         let offset = (source.len() - body.len()) as u32;
         Self {
             inner: TokenKind::lexer(body),
@@ -81,6 +93,7 @@ impl<'source> Lexer<'source> {
             last_error_span: None,
             shebang_offset: offset,
             shebang_text,
+            had_bom,
         }
     }
 
@@ -92,6 +105,11 @@ impl<'source> Lexer<'source> {
     /// The shebang text (including `#!` and trailing newline, if present).
     pub fn shebang_text(&self) -> Option<&'source str> {
         self.shebang_text
+    }
+
+    /// `true` when the source started with a UTF-8 byte-order mark.
+    pub fn had_bom(&self) -> bool {
+        self.had_bom
     }
 
     /// Byte offset of the first non-shebang character in the original source.
@@ -222,6 +240,12 @@ impl<'source> Iterator for Lexer<'source> {
 /// A shebang must begin at byte 0; bytes elsewhere are not affected. If the
 /// file consists of only a shebang with no trailing newline, the entire input
 /// is treated as the shebang and the body is empty.
+///
+/// This function does NOT skip a UTF-8 BOM (`EF BB BF`). Sources from
+/// cross-platform editors frequently start with one, and a BOM at byte 0
+/// would shift the shebang to byte 3 — invisible to this check. The Lexer
+/// entry point strips the BOM first (see [`strip_utf8_bom`]) so the shebang
+/// detector here can stay byte-precise.
 pub fn strip_shebang(source: &str) -> (&str, Option<&str>) {
     let bytes = source.as_bytes();
     if bytes.len() < 2 || bytes[0] != b'#' || bytes[1] != b'!' {
@@ -234,6 +258,23 @@ pub fn strip_shebang(source: &str) -> (&str, Option<&str>) {
             (&source[split..], Some(&source[..split]))
         }
         None => ("", Some(source)),
+    }
+}
+
+/// UTF-8 byte-order mark (`EF BB BF`). Editors on Windows + cross-platform
+/// IDEs frequently prepend this to source files; [`Lexer::new`] strips it
+/// before tokenisation so logos sees a clean source slice and downstream
+/// spans are computed in original-source coordinates.
+pub const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+
+/// Strip an optional UTF-8 BOM prefix from `source`. Returns `(body, had_bom)`.
+/// Idempotent: a second call on already-stripped input is a no-op.
+#[inline]
+pub fn strip_utf8_bom(source: &str) -> (&str, bool) {
+    if source.as_bytes().starts_with(UTF8_BOM) {
+        (&source[UTF8_BOM.len()..], true)
+    } else {
+        (source, false)
     }
 }
 

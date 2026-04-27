@@ -71,7 +71,7 @@ pub mod lossless;
 pub mod token;
 
 pub use error::{LexResult, VerumError};
-pub use lexer::{Lexer, LookaheadLexer, strip_shebang};
+pub use lexer::{Lexer, LookaheadLexer, strip_shebang, strip_utf8_bom, UTF8_BOM};
 pub use lossless::{LosslessLexer, RichToken, Trivia, TriviaItem, TriviaKind};
 pub use token::{
     FloatLiteral, IntegerLiteral, InterpolatedStringLiteral, TaggedLiteralData,
@@ -234,6 +234,85 @@ mod shebang_tests {
         let (body, sb) = strip_shebang("#!/usr/bin/env verum --флаг\nfn main() {}");
         assert_eq!(body, "fn main() {}");
         assert_eq!(sb, Some("#!/usr/bin/env verum --флаг\n"));
+    }
+
+    // UTF-8 BOM handling ---------------------------------------------------------------------
+
+    #[test]
+    fn strip_utf8_bom_no_bom() {
+        let (body, had) = strip_utf8_bom("fn main() {}");
+        assert_eq!(body, "fn main() {}");
+        assert!(!had);
+    }
+
+    #[test]
+    fn strip_utf8_bom_with_bom() {
+        let src = "\u{FEFF}fn main() {}"; // U+FEFF is encoded as EF BB BF in UTF-8
+        let (body, had) = strip_utf8_bom(src);
+        assert_eq!(body, "fn main() {}");
+        assert!(had);
+    }
+
+    #[test]
+    fn strip_utf8_bom_idempotent() {
+        let src = "\u{FEFF}fn main() {}";
+        let (body, _) = strip_utf8_bom(src);
+        let (body2, had2) = strip_utf8_bom(body);
+        assert_eq!(body, body2, "idempotent on already-stripped input");
+        assert!(!had2);
+    }
+
+    #[test]
+    fn strip_utf8_bom_constant_matches_three_bytes() {
+        assert_eq!(UTF8_BOM, &[0xEF, 0xBB, 0xBF]);
+        assert_eq!(UTF8_BOM.len(), 3);
+        assert_eq!("\u{FEFF}".as_bytes(), UTF8_BOM);
+    }
+
+    #[test]
+    fn lexer_strips_bom_then_shebang() {
+        // Cross-platform editor wrote a BOM in front of an executable script.
+        // The lexer must strip BOTH the BOM and the shebang, place neither in
+        // the token stream, and still report `had_bom` + `had_shebang`.
+        let src = "\u{FEFF}#!/usr/bin/env verum\nfn main() {}";
+        let lex = Lexer::new(src, fid());
+        assert!(lex.had_bom());
+        assert!(lex.had_shebang());
+        assert_eq!(lex.shebang_text(), Some("#!/usr/bin/env verum\n"));
+        // Offset = BOM (3 bytes) + shebang (21 bytes) = 24.
+        assert_eq!(lex.shebang_offset(), 3 + "#!/usr/bin/env verum\n".len() as u32);
+    }
+
+    #[test]
+    fn lexer_strips_bom_no_shebang() {
+        let src = "\u{FEFF}fn main() {}";
+        let lex = Lexer::new(src, fid());
+        assert!(lex.had_bom());
+        assert!(!lex.had_shebang());
+        // First token should be `fn` at the post-BOM offset (3).
+        let first = lex.into_iter().filter_map(|t| t.ok()).next().unwrap();
+        assert!(matches!(first.kind, TokenKind::Fn));
+        assert_eq!(first.span.start, 3);
+        assert_eq!(first.span.end, 5);
+    }
+
+    #[test]
+    fn lexer_no_bom_no_shebang() {
+        let lex = Lexer::new("fn main() {}", fid());
+        assert!(!lex.had_bom());
+        assert!(!lex.had_shebang());
+        assert_eq!(lex.shebang_offset(), 0);
+    }
+
+    #[test]
+    fn strip_shebang_does_not_handle_bom_alone() {
+        // Contract: strip_shebang receives BOM-free input. A BOM-prefixed
+        // shebang fed directly to strip_shebang is not detected as a shebang.
+        // Lexer::new takes care of the BOM-strip pre-pass.
+        let src = "\u{FEFF}#!/usr/bin/env verum\nfn main() {}";
+        let (body, sb) = strip_shebang(src);
+        assert_eq!(sb, None, "strip_shebang must NOT see past a BOM");
+        assert_eq!(body, src);
     }
 
     // Lexer integration -----------------------------------------------------------------------
