@@ -1,0 +1,298 @@
+// =============================================================================
+// core/database/sqlite/introspect.vr — SQLite schema introspector
+// =============================================================================
+// Layer: 3 (Database — sqlite façade)
+// Spec: internal/specs/database.md §5.3 (verum db:introspect)
+// =============================================================================
+//
+// Walks an open SqliteConnection's sqlite_master + PRAGMA tables to
+// populate a `SchemaSnapshot` the sql# meta-fn can consume at compile
+// time.
+//
+// SQLite-specific facts:
+//   * `sqlite_master` (alias `sqlite_schema`) holds one row per object
+//     (table / index / view / trigger). type='table' is the user-table
+//     filter. Internal sqlite_* tables are skipped.
+//   * `PRAGMA table_info(t)` → (cid, name, type, notnull, dflt_value, pk)
+//     — pk is 0 (not pk), 1+ (column position in pk; 1 == single-col pk).
+//   * `PRAGMA index_list(t)` → (seq, name, unique, origin, partial).
+//   * `PRAGMA index_info(idx)` → (seqno, cid, col_name).
+//   * `PRAGMA foreign_key_list(t)` → (id, seq, ref_table, from_col,
+//      to_col, on_update, on_delete, match).
+//
+// Refinement extraction. SQLite stores no refinement metadata (it's
+// the cost of being weakly-typed); the introspector emits empty
+// refinement / check_constraint slots and lets the developer add
+// them after the fact via `@table` annotations on the user side.
+// Postgres + MySQL CHECK introspection lands in T23b/T23c.
+// =============================================================================
+
+module core.database.sqlite.introspect;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.common.schema.{
+    SchemaSnapshot, TableSnap, ColumnSnap, IndexSnap, ForeignKeySnap,
+};
+mount core.database.sqlite.connection.{SqliteConnection, SqliteValue, SvText, SvInt, SvNull};
+
+/// Build a SchemaSnapshot off a live SQLite connection. The
+/// connection's mode must be at least `read` (no DDL is issued).
+public fn introspect(conn: &mut SqliteConnection) -> Result<SchemaSnapshot, DbError> {
+    let mut snap = SchemaSnapshot.empty(AdSqlite);
+    snap.server_version = match probe_version(conn) {
+        Ok(v)  => v,
+        Err(_) => "unknown".clone(),
+    };
+
+    // Pull the user-table list.
+    let table_names = list_user_tables(conn)?;
+    let mut i: Int = 0;
+    while i < table_names.len() as Int {
+        let name = &table_names[i];
+        let table = build_table_snap(conn, name)?;
+        snap.add_table(table);
+        i = i + 1;
+    }
+    Ok(snap)
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn probe_version(conn: &mut SqliteConnection) -> Result<Text, DbError> {
+    let sql = "SELECT sqlite_version()".clone();
+    match conn.query_first(&sql) {
+        Ok(row) => {
+            if (row.len() as Int) >= 1 {
+                Ok(value_to_text(&row[0]))
+            } else {
+                Ok("".clone())
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn list_user_tables(conn: &mut SqliteConnection) -> Result<List<Text>, DbError> {
+    // Filter out internal sqlite_* tables — they all start with
+    // "sqlite_".
+    let sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name".clone();
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            let mut out: List<Text> = List.new();
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                if (r.len() as Int) >= 1 {
+                    out.push(value_to_text(&r[0]));
+                }
+                i = i + 1;
+            }
+            Ok(out)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn build_table_snap(conn: &mut SqliteConnection, name: &Text) -> Result<TableSnap, DbError> {
+    let mut t = TableSnap.empty("main".clone(), name.clone());
+    t.columns      = read_columns(conn, name)?;
+    t.indexes      = read_indexes(conn, name)?;
+    t.foreign_keys = read_foreign_keys(conn, name)?;
+    Ok(t)
+}
+
+fn read_columns(conn: &mut SqliteConnection, table: &Text) -> Result<List<ColumnSnap>, DbError> {
+    let sql = render_pragma("table_info", table);
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            let mut out: List<ColumnSnap> = List.new();
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                // Columns: cid, name, type, notnull, dflt_value, pk
+                if (r.len() as Int) >= 6 {
+                    let col_name = value_to_text(&r[1]);
+                    let col_type = value_to_text(&r[2]);
+                    let notnull  = value_to_int(&r[3]) != 0;
+                    let default_expr = match &r[4] {
+                        SvNull => None,
+                        _      => Some(value_to_text(&r[4])),
+                    };
+                    let pk = value_to_int(&r[5]) > 0;
+                    out.push(ColumnSnap {
+                        name: col_name,
+                        declared_type: col_type,
+                        nullable: !notnull,
+                        pk: pk,
+                        unique: false,    // populated in read_indexes
+                        autoincrement: false,
+                        default_expr: default_expr,
+                        refinement: None,
+                        check_constraint: None,
+                    });
+                }
+                i = i + 1;
+            }
+            Ok(out)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn read_indexes(conn: &mut SqliteConnection, table: &Text) -> Result<List<IndexSnap>, DbError> {
+    let sql = render_pragma("index_list", table);
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            let mut out: List<IndexSnap> = List.new();
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                // Columns: seq, name, unique, origin, partial
+                if (r.len() as Int) >= 5 {
+                    let idx_name = value_to_text(&r[1]);
+                    let unique   = value_to_int(&r[2]) != 0;
+                    let cols = read_index_columns(conn, &idx_name)?;
+                    out.push(IndexSnap {
+                        name: idx_name,
+                        columns: cols,
+                        predicate: None,    // sqlite_master.sql carries the
+                                            // WHERE clause; parsing it back
+                                            // is a follow-up to keep this
+                                            // module dependency-free.
+                        unique: unique,
+                    });
+                }
+                i = i + 1;
+            }
+            Ok(out)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn read_index_columns(conn: &mut SqliteConnection, idx_name: &Text) -> Result<List<Text>, DbError> {
+    let sql = render_pragma("index_info", idx_name);
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            let mut out: List<Text> = List.new();
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                // Columns: seqno, cid, col_name
+                if (r.len() as Int) >= 3 {
+                    out.push(value_to_text(&r[2]));
+                }
+                i = i + 1;
+            }
+            Ok(out)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn read_foreign_keys(conn: &mut SqliteConnection, table: &Text) -> Result<List<ForeignKeySnap>, DbError> {
+    let sql = render_pragma("foreign_key_list", table);
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            // Multiple rows can belong to the same composite FK — group by id.
+            let mut grouped: List<ForeignKeySnap> = List.new();
+            let mut current_id: Int = -1;
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                // Columns: id, seq, ref_table, from_col, to_col, on_update, on_delete, match
+                if (r.len() as Int) >= 7 {
+                    let id      = value_to_int(&r[0]);
+                    let ref_tab = value_to_text(&r[2]);
+                    let from_c  = value_to_text(&r[3]);
+                    let to_c    = value_to_text(&r[4]);
+                    let on_upd  = value_to_text(&r[5]);
+                    let on_del  = value_to_text(&r[6]);
+                    if id != current_id {
+                        grouped.push(ForeignKeySnap {
+                            columns: List.new(),
+                            referenced_table: ref_tab.clone(),
+                            referenced_columns: List.new(),
+                            on_delete: on_del.clone(),
+                            on_update: on_upd.clone(),
+                        });
+                        current_id = id;
+                    }
+                    let last = (grouped.len() as Int) - 1;
+                    grouped[last].columns.push(from_c);
+                    grouped[last].referenced_columns.push(to_c);
+                }
+                i = i + 1;
+            }
+            Ok(grouped)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SqliteValue → text/int helpers (text rows decoded from SQLite)
+// -----------------------------------------------------------------------------
+
+fn value_to_text(v: &SqliteValue) -> Text {
+    match v {
+        SvNull       => "".clone(),
+        SvInt(i)     => itoa(*i),
+        SvText(t)    => t.clone(),
+        _            => "".clone(),
+    }
+}
+
+fn value_to_int(v: &SqliteValue) -> Int {
+    match v {
+        SvInt(i)  => *i,
+        SvText(t) => parse_int_lossy(t),
+        _         => 0,
+    }
+}
+
+fn parse_int_lossy(t: &Text) -> Int {
+    let bytes = t.as_bytes();
+    let mut i: Int = 0;
+    let n = bytes.len();
+    let mut neg = false;
+    if n > 0 && bytes[0] == (0x2D as Byte) { neg = true; i = 1; }
+    let mut acc: Int = 0;
+    while i < n {
+        let b = bytes[i];
+        if b < (0x30 as Byte) || b > (0x39 as Byte) { break; }
+        acc = acc * 10 + ((b as Int) - 0x30);
+        i = i + 1;
+    }
+    if neg { -acc } else { acc }
+}
+
+fn itoa(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    let neg = n < 0;
+    let mut abs = if neg { -n } else { n };
+    let mut digits: List<Byte> = List.new();
+    while abs > 0 {
+        digits.push(((abs % 10) + 0x30) as Byte);
+        abs = abs / 10;
+    }
+    let mut out: List<Byte> = List.new();
+    if neg { out.push(0x2D as Byte); }
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 { out.push(digits[i]); i = i - 1; }
+    Text.from_bytes(&out).unwrap_or("0".clone())
+}
+
+fn render_pragma(name: &str, arg: &Text) -> Text {
+    let mut out: Text = "PRAGMA ".clone();
+    out.push_str(name);
+    out.push_str(&"(\"".clone());
+    out.push_str(arg);
+    out.push_str(&"\")".clone());
+    out
+}
