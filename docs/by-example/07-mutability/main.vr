@@ -1,0 +1,40 @@
+// docs/by-example/07-mutability/main.vr
+// Mutability + the three reference tiers (&T, &checked T, &unsafe T).
+
+type Counter is { value: Int };
+
+implement Counter {
+    public fn new() -> Counter {
+        Counter { value: 0 }
+    }
+
+    // `&mut self` — exclusive borrow; mutation allowed.
+    public fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+
+    // `&self` — shared borrow; read-only.
+    public fn current(&self) -> Int {
+        self.value
+    }
+
+    // `&checked self` — Tier 1 reference; same semantics as `&self`
+    // here but proven safe at compile time (zero CBGR overhead).
+    public fn current_checked(&checked self) -> Int {
+        self.value
+    }
+}
+
+fn main() {
+    // Immutable binding — `c.increment()` would fail to compile.
+    let counter = Counter.new();
+    print(f"counter.current() = {counter.current()}");
+
+    // Mutable binding — `c.increment()` is allowed.
+    let mut c = Counter.new();
+    c.increment();
+    c.increment();
+    c.increment();
+    print(f"after 3 increments: {c.current()}");
+    print(f"checked-tier read: {c.current_checked()}");
+}

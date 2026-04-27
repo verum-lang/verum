@@ -1,0 +1,46 @@
+// docs/by-example/08-protocols/main.vr
+// Protocols (Verum's name for trait/interface).
+
+// A protocol — declares a set of methods + an associated type.
+type Drawable is protocol {
+    fn draw(&self) -> Text;
+    fn area(&self) -> Float;
+};
+
+type Circle is { radius: Float };
+type Square is { side: Float };
+
+// Implement Drawable for Circle.
+implement Drawable for Circle {
+    fn draw(&self) -> Text {
+        f"Circle(r={self.radius})"
+    }
+    fn area(&self) -> Float {
+        3.14159 * self.radius * self.radius
+    }
+}
+
+// Implement Drawable for Square.
+implement Drawable for Square {
+    fn draw(&self) -> Text {
+        f"Square(side={self.side})"
+    }
+    fn area(&self) -> Float {
+        self.side * self.side
+    }
+}
+
+// A function that takes ANY Drawable.  `impl Drawable` is the
+// shorthand; `<S: Drawable>` is the explicit form.
+fn report<S: Drawable>(s: &S) {
+    print(f"  {s.draw()}  area = {s.area()}");
+}
+
+fn main() {
+    let c = Circle { radius: 2.0 };
+    let s = Square { side: 3.0 };
+
+    print("Drawable shapes:");
+    report(&c);
+    report(&s);
+}

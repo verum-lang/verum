@@ -17,6 +17,11 @@ isn't explained, look back at the earlier example.
 | 03  | pattern-match    | `match`, sum types (`is A \| B`), exhaustiveness           |
 | 04  | result-error     | `Result<T, E>`, `Maybe<T>`, `?` propagation, error types   |
 | 05  | collections      | `List<T>`, `Map<K,V>`, iteration, `for-in`, `mount` system |
+| 06  | functions        | block-body, expr-body, default params, Unit return         |
+| 07  | mutability       | `let mut`, `&self` / `&mut self`, reference tiers          |
+| 08  | protocols        | `protocol`, `implement P for T`, generic bounds            |
+| 09  | generics         | multi-param generics, `<K: Eq>` bounds, `Maybe<&V>`        |
+| 10  | mount-system     | braced / glob / aliased / single-symbol mounts             |
 
 ## Running an example
 
