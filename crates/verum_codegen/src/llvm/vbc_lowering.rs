@@ -3047,7 +3047,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         declare_fn!("free", ctx.void_type(), &[ptr_type.into()], false);
     }
 
-    #[allow(dead_code)]
     fn remove_invalid_functions(&mut self) {
         // Replace bodies of arity-collided functions with a single
         // `unreachable` instruction. These functions have mismatched
