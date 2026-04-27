@@ -1,0 +1,32 @@
+// docs/by-example/06-functions/main.vr
+// Function declarations: parameters, return types, default values,
+// expression-bodied functions.
+
+// Standard form: explicit return type + block body.
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Expression-bodied: no braces when body is a single expression.
+fn double(x: Int) -> Int = x * 2;
+
+// Default parameter values — caller may omit trailing args.
+fn greet(name: Text = "World", excited: Bool = false) -> Text {
+    let suffix = if excited { "!" } else { "." };
+    f"Hello, {name}{suffix}"
+}
+
+// Functions returning Unit (the empty tuple) need no explicit
+// return type.
+fn announce(msg: Text) {
+    print(f"[ANNOUNCE] {msg}");
+}
+
+fn main() {
+    print(f"add(2, 3) = {add(2, 3)}");
+    print(f"double(7) = {double(7)}");
+    print(greet());                     // both defaults
+    print(greet("Verum"));              // override first
+    print(greet("Verum", true));        // override both
+    announce("functions are first-class values");
+}

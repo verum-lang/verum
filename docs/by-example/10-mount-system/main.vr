@@ -1,0 +1,37 @@
+// docs/by-example/10-mount-system/main.vr
+// The mount system: explicit imports, qualified paths, aliases.
+
+// Bring three names from collections into scope.
+mount core.collections.{List, Map, Set};
+
+// Bring everything from text in.
+mount core.text.*;
+
+// Bring a single name with an alias to avoid a collision.
+mount core.io.println as outln;
+
+// Bring a single function — the most surgical form.
+mount core.time.duration.from_secs;
+
+fn main() {
+    // List + Map work because we mounted them.
+    let mut names: List<Text> = List.new();
+    names.push("alice".clone());
+    names.push("bob".clone());
+
+    // Use the aliased import.
+    outln("== mount-system demo ==");
+    outln(f"names = {names}");
+
+    // text.format is in scope because we did `mount core.text.*`.
+    let total = format("user count: {}", &[names.len()]);
+    outln(&total);
+
+    // Use a qualified path for a one-off — no need to mount.
+    let unique = core.collections.Set.from(names.clone());
+    outln(f"unique = {unique}");
+
+    // Function-level mount.
+    let timeout = from_secs(30);
+    outln(f"timeout = {timeout}");
+}

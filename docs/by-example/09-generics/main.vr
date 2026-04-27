@@ -1,0 +1,40 @@
+// docs/by-example/09-generics/main.vr
+// Generic types + multi-bound type parameters + lifetime-style borrows.
+
+// Generic record — works for any T.
+type Pair<A, B> is { first: A, second: B };
+
+implement<A, B> Pair<A, B> {
+    public fn new(a: A, b: B) -> Pair<A, B> {
+        Pair { first: a, second: b }
+    }
+}
+
+// Generic function with two type parameters + a protocol bound on K.
+fn lookup<K: Eq, V>(items: &List<Pair<K, V>>, key: &K) -> Maybe<&V> {
+    for item in items {
+        if &item.first == key {
+            return Some(&item.second);
+        }
+    }
+    None
+}
+
+fn main() {
+    let mut entries: List<Pair<Text, Int>> = List.new();
+    entries.push(Pair.new("alpha".clone(), 1));
+    entries.push(Pair.new("beta".clone(), 2));
+    entries.push(Pair.new("gamma".clone(), 3));
+
+    let key = "beta".clone();
+    match lookup(&entries, &key) {
+        Some(v) => print(f"lookup({key}) = {v}"),
+        None    => print(f"lookup({key}) = (not found)"),
+    }
+
+    let missing = "delta".clone();
+    match lookup(&entries, &missing) {
+        Some(v) => print(f"lookup({missing}) = {v}"),
+        None    => print(f"lookup({missing}) = (not found)"),
+    }
+}
