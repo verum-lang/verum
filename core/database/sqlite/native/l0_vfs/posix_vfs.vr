@@ -29,7 +29,7 @@ module core.database.sqlite.native.l0_vfs.posix_vfs;
 mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
-mount sys.common;
+mount sys.common.{FileDesc, OSError, pread, pwrite, full_fsync};
 mount sys.durability;
 
 @cfg(target_os = "linux")
@@ -58,7 +58,7 @@ public type PosixVfs is {};
 
 /// Real-file handle. Owns the `FileDesc` plus the lock state machine.
 public type PosixFile is {
-    fd: common.FileDesc,
+    fd: FileDesc,
     path: Text,
     locks: SqliteLockManager,
     closed: Bool,
@@ -117,7 +117,7 @@ fn to_c_path(path: &Text) -> List<Byte> {
     out
 }
 
-fn to_vfs_err(e: common.OSError) -> VfsError {
+fn to_vfs_err(e: OSError) -> VfsError {
     let kind = if e.would_block() {
         LockConflict
     } else if e.code == 2 {
@@ -141,32 +141,32 @@ fn to_vfs_err(e: common.OSError) -> VfsError {
 // across platforms.
 
 @cfg(target_os = "linux")
-fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<common.FileDesc, common.OSError> {
+fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
     platform_syscall.open(path, oflag, mode)
 }
 
 @cfg(target_os = "macos")
-fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<common.FileDesc, common.OSError> {
+fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
     platform_libsystem.safe_open(path, oflag, mode)
 }
 
 @cfg(target_os = "linux")
-fn sys_close(fd: common.FileDesc) -> Result<(), common.OSError> {
+fn sys_close(fd: FileDesc) -> Result<(), OSError> {
     platform_syscall.close(fd)
 }
 
 @cfg(target_os = "macos")
-fn sys_close(fd: common.FileDesc) -> Result<(), common.OSError> {
+fn sys_close(fd: FileDesc) -> Result<(), OSError> {
     platform_libsystem.safe_close(fd)
 }
 
 @cfg(target_os = "linux")
-fn sys_unlink(path: &[Byte]) -> Result<(), common.OSError> {
+fn sys_unlink(path: &[Byte]) -> Result<(), OSError> {
     platform_syscall.unlink(path)
 }
 
 @cfg(target_os = "macos")
-fn sys_unlink(path: &[Byte]) -> Result<(), common.OSError> {
+fn sys_unlink(path: &[Byte]) -> Result<(), OSError> {
     platform_libsystem.safe_unlink(path)
 }
 
@@ -175,7 +175,7 @@ fn sys_unlink(path: &[Byte]) -> Result<(), common.OSError> {
 // -----------------------------------------------------------------------------
 
 implement PosixFile {
-    public fn fd(&self) -> common.FileDesc { self.fd }
+    public fn fd(&self) -> FileDesc { self.fd }
     public fn path(&self) -> &Text { &self.path }
     public fn is_closed(&self) -> Bool { self.closed }
 }
@@ -189,7 +189,7 @@ implement SqliteFile for PosixFile {
         if self.closed {
             return Err(VfsError { kind: Closed, message: "read on closed file" });
         }
-        match common.pread(self.fd, buf, offset) {
+        match pread(self.fd, buf, offset) {
             Ok(n) => {
                 if n < buf.len() {
                     Err(VfsError { kind: ShortRead, message: "pread returned short" })
@@ -205,7 +205,7 @@ implement SqliteFile for PosixFile {
         if self.closed {
             return Err(VfsError { kind: Closed, message: "write on closed file" });
         }
-        match common.pwrite(self.fd, buf, offset) {
+        match pwrite(self.fd, buf, offset) {
             Ok(n) => {
                 if n < buf.len() {
                     Err(VfsError { kind: WriteFault, message: "pwrite returned short" })
