@@ -55,12 +55,9 @@ struct Cli {
     #[clap(short, long, global = true)]
     verbose: bool,
 
-    /// Print the VVA (Verum Unified Verification Architecture)
-    /// version stamp and exit. Closes B14 (#212): VVA §0.0
-    /// governance promised this surface but it was unobservable
-    /// pre-fix. The kernel constant `verum_kernel::VVA_VERSION`
-    /// is the single source of truth — bump on every VVA-N
-    /// kernel-rule acceptance.
+    /// Print the verification-architecture version stamp and exit.
+    /// The kernel constant `verum_kernel::VVA_VERSION` is the
+    /// single source of truth — bump on every kernel-rule acceptance.
     #[clap(long = "vva-version")]
     vva_version: bool,
 
@@ -563,6 +560,14 @@ enum Commands {
     #[clap(subcommand)]
     Cache(commands::cache::CacheCommands),
 
+    /// Run a health-check survey of the Verum installation. Verifies
+    /// the home directory is writable, surveys the script cache and
+    /// content store, parses any `verum.lock` in the cwd, and probes
+    /// the permission-grammar surface. `--json` emits NDJSON for
+    /// scripting; `--strict` exits non-zero on warnings as well as
+    /// failures.
+    Doctor(commands::doctor::DoctorArgs),
+
     /// Watch for changes and rebuild
     Watch {
         #[clap(default_value = "build")]
@@ -897,17 +902,17 @@ enum Commands {
         /// Enumerate the ε-distribution (Actic / DC coordinate) of the
         /// corpus — the dual of `--framework-axioms`. Prints every
         /// `@enact(epsilon = "...")` marker grouped by ε-primitive
-        /// (VVA §11.4). Exits non-zero if any malformed marker is
+        /// . Exits non-zero if any malformed marker is
         /// found (unknown primitive or missing `epsilon = ...` arg).
         #[clap(long)]
         epsilon: bool,
 
         /// Project the @framework markers to their MSFS coordinate
-        /// (Framework, ν, τ) per VVA §10.4. Reads the same source as
+        /// (Framework, ν, τ). Reads the same source as
         /// `--framework-axioms` and additionally annotates each
         /// framework with its Diakrisis ν-rank and intensional flag.
         ///
-        /// V8.1 (#222 follow-up): the per-theorem coord audit is
+        /// the per-theorem coord audit is
         /// **default-on** per `verification-architecture.md` §A.Z.4.
         /// Bare `verum audit` runs dependency-audit + coord-audit
         /// together; pass `--no-coord` to skip the coord pass.
@@ -916,33 +921,33 @@ enum Commands {
         #[clap(long)]
         coord: bool,
 
-        /// V8.1 (#222 follow-up): skip the per-theorem coord audit
+        /// skip the per-theorem coord audit
         /// that bare `verum audit` runs by default. Honoured only
         /// in the default (no-specific-audit-flag) dispatch path —
         /// other specific audit modes ignore it.
         #[clap(long)]
         no_coord: bool,
 
-        /// Articulation Hygiene audit (VVA §13.3, F3): walk every type
-        /// and function declaration, classify each self-referential
-        /// surface form per the §13.2 hygiene table, and report the
-        /// (Φ, κ, t) factorisation for each. Detects inductive,
-        /// coinductive, higher-inductive, newtype, @recursive, and
-        /// @corecursive surfaces.
+        /// Articulation Hygiene audit: walk every type and function
+        /// declaration, classify each self-referential surface form
+        /// against the hygiene table, and report the (Φ, κ, t)
+        /// factorisation for each. Detects inductive, coinductive,
+        /// higher-inductive, newtype, @recursive, and @corecursive
+        /// surfaces.
         #[clap(long)]
         hygiene: bool,
 
-        /// V2 (#196) — Articulation Hygiene strict enforcement
-        /// (VVA §13.3 V2): walk every top-level free function body
-        /// and reject raw `self` occurrences with
-        /// `E_HYGIENE_UNFACTORED_SELF`. Methods (functions with a
-        /// self-receiver param) are skipped — `self` is bound there.
-        /// Exits non-zero on any violation; safe to wire into CI.
+        /// Articulation Hygiene strict enforcement: walk every
+        /// top-level free function body and reject raw `self`
+        /// occurrences with `E_HYGIENE_UNFACTORED_SELF`. Methods
+        /// (functions with a self-receiver param) are skipped —
+        /// `self` is bound there. Exits non-zero on any violation;
+        /// safe to wire into CI.
         #[clap(long)]
         hygiene_strict: bool,
 
-        /// OWL 2 classification hierarchy audit (VVA §21.10, F5):
-        /// walk every Owl2*Attr in the project, build the
+        /// OWL 2 classification hierarchy audit: walk every
+        /// Owl2*Attr in the project, build the
         /// classification graph (subclass closure + equivalence
         /// partition + disjointness pairs + property characteristics
         /// + has-key constraints), detect cycles and disjoint /
@@ -962,14 +967,14 @@ enum Commands {
         #[clap(long)]
         framework_conflicts: bool,
 
-        /// V8 (#231) — accessibility audit (VVA §A.Z.5 item 4):
+        /// accessibility audit (item 4):
         /// walk every `@enact(...)` / EpsilonOf marker in the
         /// project, cross-reference against `@accessibility(λ)`
         /// annotations (per Diakrisis Axi-4 λ-accessibility
         /// premise), and surface any unannotated EpsilonOf site.
         /// Exit non-zero when at least one missing annotation is
         /// found (CI gate). This closes the Axi-4 defect from
-        /// VVA §A.Z.1 by making the framework-author's
+        /// by making the framework-author's
         /// accessibility certification a checkable invariant.
         #[clap(long)]
         accessibility: bool,
@@ -1003,8 +1008,7 @@ enum Commands {
         /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
-        /// V8.1 (#196 follow-up, §8.5 V2-foundation): emit a
-        /// per-declaration provenance JSON sidecar at
+        /// Emit a per-declaration provenance JSON sidecar at
         /// `<output>.provenance.json`. The sidecar lists every
         /// exported declaration with its kind / source-file /
         /// framework citation / discharge_strategy; downstream
@@ -1028,12 +1032,12 @@ enum Commands {
         /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
-        /// V8.1 (#196 follow-up): see `Export::with_provenance`.
+        /// See `Export::with_provenance`.
         #[clap(long)]
         with_provenance: bool,
     },
 
-    /// V8.1 (#196 follow-up, VVA §8.6 V2.1) — extract executable
+    /// extract executable
     /// programs from constructive proofs marked with `@extract` /
     /// `@extract_witness` / `@extract_contract`. Walks the project
     /// for marked declarations, dispatches to the program-extraction
@@ -1050,7 +1054,7 @@ enum Commands {
         output: Option<std::path::PathBuf>,
     },
 
-    /// V8.1 (#196 follow-up, Task B5) — import an external knowledge-
+    /// import an external knowledge-
     /// base format and emit a `.vr` file with the corresponding typed
     /// attributes. Currently supports OWL 2 Functional-Style Syntax
     /// (`--from owl2-fs`); round-trips with `verum export --to owl2-fs`.
@@ -1322,7 +1326,7 @@ fn main_inner() {
     // version stamp and exit cleanly without dispatching a
     // subcommand. Tooling integrations (CI, certificate emitters,
     // cross-tool replay matrix) read this single line as their
-    // VVA-version source of truth.
+    // verification-architecture version source of truth.
     if cli.vva_version {
         println!("{}", verum_kernel::VVA_VERSION);
         process::exit(0);
@@ -1864,6 +1868,7 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Clean { all } => commands::clean::execute(all),
         Commands::Diagnose(cmd) => commands::diagnose::execute(cmd),
         Commands::Cache(cmd) => commands::cache::execute(cmd),
+        Commands::Doctor(args) => commands::doctor::execute(args),
         Commands::Watch { command, clear } => commands::watch::execute(command.as_str(), clear),
         Commands::Hooks(cmd) => match cmd {
             HooksCommands::Install { force } => commands::hooks::install(force),
@@ -2326,8 +2331,8 @@ fn run_command(cli: Cli) -> Result<()> {
                     direct_only,
                 };
                 let dep_result = commands::audit::audit(options);
-                // V8.1 (#222 follow-up): per-theorem coord audit is
-                // default-on per VVA §A.Z.4. Skip with --no-coord.
+                // per-theorem coord audit is
+                // default-on. Skip with --no-coord.
                 if !no_coord {
                     let coord_result =
                         commands::audit::audit_coord_with_format(output_format);
