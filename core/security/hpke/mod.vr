@@ -142,7 +142,8 @@ implement SenderContext {
         }
         let nonce = compute_nonce(&self.base_nonce, self.seq);
         let aead = ChaCha20Poly1305.new(&self.key);
-        let mut ct: List<Byte> = [];
+        // Output is exactly pt.len() (ciphertext) + 16 (Poly1305 tag).
+        let mut ct: List<Byte> = List.with_capacity(pt.len() + 16);
         let mut tag: [Byte; 16] = [0_u8; 16];
         aead.encrypt(&nonce, aad, pt, &mut ct, &mut tag);
         let mut i: Int = 0;
@@ -176,7 +177,9 @@ implement ReceiverContext {
         while i < 16 { tag[i] = ct[body_len + i]; i = i + 1; }
         let nonce = compute_nonce(&self.base_nonce, self.seq);
         let aead = ChaCha20Poly1305.new(&self.key);
-        let mut pt: List<Byte> = [];
+        // Plaintext is exactly body_len bytes (ciphertext minus the
+        // 16-byte tag stripped above).
+        let mut pt: List<Byte> = List.with_capacity(body_len);
         aead.decrypt(&nonce, aad, body, &tag, &mut pt)
             .map_err(|_| HpkeError.AeadFailure)?;
         self.seq = self.seq + 1_u64;
@@ -260,7 +263,8 @@ fn kem_extract_and_expand(
     let kem_suite = kem_suite_id();
     let eae_prk = labeled_extract(&[], b"eae_prk", dh, kem_suite.as_slice())?;
 
-    let mut kem_context: List<Byte> = [];
+    // KEM context = pk_e || pk_r — exact size known.
+    let mut kem_context: List<Byte> = List.with_capacity(pk_e.len() + pk_r.len());
     let mut i: Int = 0;
     while i < pk_e.len() { kem_context.push(pk_e[i]); i = i + 1; }
     let mut j: Int = 0;
@@ -286,7 +290,8 @@ fn key_schedule_base(
     let psk_id_hash = labeled_extract(&[], b"psk_id_hash", &[], hpke_suite.as_slice())?;
     let info_hash   = labeled_extract(&[], b"info_hash",   info, hpke_suite.as_slice())?;
 
-    let mut ks_ctx: List<Byte> = [];
+    // KeySchedule ctx = mode_byte (1) || psk_id_hash || info_hash.
+    let mut ks_ctx: List<Byte> = List.with_capacity(1 + psk_id_hash.len() + info_hash.len());
     ks_ctx.push(HPKE_MODE_BASE);
     let mut i: Int = 0;
     while i < psk_id_hash.len() { ks_ctx.push(psk_id_hash[i]); i = i + 1; }
@@ -341,7 +346,9 @@ fn labeled_extract(
     ikm:      &[Byte],
     suite_id: &[Byte],
 ) -> Result<List<Byte>, HpkeError> {
-    let mut labeled_ikm: List<Byte> = [];
+    // labeled_ikm = "HPKE-v1" (7) || suite_id || label || ikm.
+    let mut labeled_ikm: List<Byte> =
+        List.with_capacity(7 + suite_id.len() + label.len() + ikm.len());
     push_bytes(&mut labeled_ikm, b"HPKE-v1");
     push_bytes(&mut labeled_ikm, suite_id);
     push_bytes(&mut labeled_ikm, label);
@@ -356,7 +363,9 @@ fn labeled_expand(
     length:   Int,
     suite_id: &[Byte],
 ) -> Result<List<Byte>, HpkeError> {
-    let mut labeled_info: List<Byte> = [];
+    // labeled_info = I2OSP(L, 2) || "HPKE-v1" (7) || suite_id || label || info.
+    let mut labeled_info: List<Byte> =
+        List.with_capacity(2 + 7 + suite_id.len() + label.len() + info.len());
     labeled_info.push(((length >> 8) & 0xFF) as Byte);
     labeled_info.push((length & 0xFF) as Byte);
     push_bytes(&mut labeled_info, b"HPKE-v1");
@@ -379,7 +388,8 @@ fn labeled_expand_hpke(
 
 /// KEM suite ID = "KEM" || I2OSP(kem_id, 2).
 fn kem_suite_id() -> List<Byte> {
-    let mut out: List<Byte> = [];
+    // Output: "KEM" (3) + 2 bytes = 5 bytes exactly.
+    let mut out: List<Byte> = List.with_capacity(5);
     push_bytes(&mut out, b"KEM");
     out.push(((HPKE_KEM_X25519_SHA256 >> 8) & 0xFF_u16) as Byte);
     out.push((HPKE_KEM_X25519_SHA256 & 0xFF_u16) as Byte);
@@ -388,7 +398,8 @@ fn kem_suite_id() -> List<Byte> {
 
 /// HPKE suite ID = "HPKE" || I2OSP(kem_id, 2) || I2OSP(kdf_id, 2) || I2OSP(aead_id, 2).
 fn hpke_suite_id() -> List<Byte> {
-    let mut out: List<Byte> = [];
+    // Output: "HPKE" (4) + 6 bytes = 10 bytes exactly.
+    let mut out: List<Byte> = List.with_capacity(10);
     push_bytes(&mut out, b"HPKE");
     out.push(((HPKE_KEM_X25519_SHA256 >> 8) & 0xFF_u16) as Byte);
     out.push((HPKE_KEM_X25519_SHA256 & 0xFF_u16) as Byte);
