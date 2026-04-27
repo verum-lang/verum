@@ -141,35 +141,58 @@ pub fn rewrite_argv_for_script_mode(argv: Vec<OsString>) -> Vec<OsString> {
 ///
 /// Conditions, AND-joined:
 /// - Not a flag (does not start with `-`).
-/// - Not a known subcommand name.
+/// - Not a known subcommand name (UTF-8 only — every Verum subcommand
+///   spells its name in ASCII, so a non-UTF-8 OsString cannot collide).
 /// - Names an existing file (regular file, accessible).
 /// - File has `.vr` extension OR begins with a `#!` shebang.
+///
+/// **Encoding contract:** flag detection and the file-existence /
+/// extension / shebang checks all operate on the raw `OsStr` so non-UTF-8
+/// paths (Windows legacy paths, macOS broken-encoding test fixtures,
+/// deliberate Unix paths with non-UTF-8 bytes) still trigger script-mode
+/// dispatch. Only the subcommand-name match requires UTF-8, and a
+/// non-UTF-8 string can't match an ASCII subcommand anyway, so we skip
+/// that arm when conversion fails.
 fn looks_like_script_invocation(arg: &OsString) -> bool {
-    let s = match arg.to_str() {
-        Some(s) => s,
-        None => return false,
-    };
-    if s.starts_with('-') {
+    // Flag check works on every encoding: `-` is a single ASCII byte and
+    // its byte representation is identical in WTF-8 / UTF-16 / Linux raw
+    // bytes at the start of an OsString.
+    if os_starts_with_dash(arg) {
         return false;
     }
-    if KNOWN_SUBCOMMANDS.binary_search(&s).is_ok() {
-        return false;
+
+    // Subcommand-name match. Only meaningful when the OsString is valid
+    // UTF-8; otherwise it cannot collide with an ASCII subcommand name.
+    if let Some(s) = arg.to_str() {
+        if KNOWN_SUBCOMMANDS.binary_search(&s).is_ok() {
+            return false;
+        }
     }
-    let path = Path::new(s);
+
+    // File checks operate directly on the OsStr — `Path::new` is
+    // encoding-agnostic.
+    let path = Path::new(arg);
     if !path.is_file() {
         return false;
     }
     let has_vr_ext = path
         .extension()
-        .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("vr"))
         .unwrap_or(false);
     if has_vr_ext {
         return true;
     }
-    // Even without a `.vr` extension, an executable file with a `#!verum`-ish
-    // shebang counts. We read at most 2 bytes — the shebang signature.
+    // Even without a `.vr` extension, a file whose first bytes are `#!`
+    // (after an optional UTF-8 BOM) counts as a Verum script.
     has_shebang(path)
+}
+
+/// True iff the OsString begins with the ASCII byte `-`. Encoding-agnostic
+/// because the WTF-8 / UTF-16 / Linux-bytes representations of `-` (U+002D)
+/// are all the single byte `0x2D` at the start of the string.
+#[inline]
+fn os_starts_with_dash(s: &OsString) -> bool {
+    s.as_encoded_bytes().first() == Some(&b'-')
 }
 
 /// Returns true iff the file begins with a `#!` shebang. A leading UTF-8
@@ -358,6 +381,55 @@ mod tests {
         assert_eq!(r.len(), 3);
         assert_eq!(r[1], OsString::from("run"));
         let _ = fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    // Filesystem-backed non-UTF-8 path: only Linux ext4/tmpfs accept
+    // non-UTF-8 bytes in filenames. APFS (macOS) and NTFS (Windows) reject
+    // them at create time. This test is gated to Linux so it runs in CI on
+    // the platforms where the scenario is reachable.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rewrite_for_non_utf8_path_with_vr_extension() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        let dir = std::env::temp_dir().join(format!(
+            "verum_script_nonutf8_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let mut name_bytes: Vec<u8> = b"bad-".to_vec();
+        name_bytes.push(0xFF);
+        name_bytes.extend_from_slice(b".vr");
+        let p = dir.join(std::ffi::OsString::from_vec(name_bytes));
+        fs::write(&p, "fn main() {}\n").unwrap();
+        let arg = std::ffi::OsString::from_vec(p.as_os_str().as_bytes().to_vec());
+        assert!(arg.to_str().is_none(), "fixture must be non-UTF-8");
+        let argv = vec![OsString::from("verum"), arg];
+        let r = rewrite_argv_for_script_mode(argv);
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[1], OsString::from("run"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn os_starts_with_dash_handles_unicode_and_ascii() {
+        // Pure unit test of the encoding-agnostic flag-leading check.
+        // No filesystem; runs everywhere. Pins the contract that Verum's
+        // script-mode dispatch does not falsely treat non-flag arguments
+        // as flags — including ones that begin with a non-ASCII letter.
+        assert!(super::os_starts_with_dash(&OsString::from("-h")));
+        assert!(super::os_starts_with_dash(&OsString::from("--release")));
+        assert!(super::os_starts_with_dash(&OsString::from("-")));
+        assert!(!super::os_starts_with_dash(&OsString::from("hello")));
+        assert!(!super::os_starts_with_dash(&OsString::from("файл.vr")));
+        assert!(!super::os_starts_with_dash(&OsString::from("")));
+        // A unicode dash (U+2013 EN DASH, ≠ U+002D HYPHEN-MINUS) must NOT
+        // be treated as a flag — the OS / shell never produces it from
+        // a `-flag` keystroke.
+        assert!(!super::os_starts_with_dash(&OsString::from("\u{2013}flag")));
     }
 
     #[test]
