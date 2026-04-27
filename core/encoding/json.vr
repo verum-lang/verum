@@ -338,7 +338,9 @@ fn parse_string_value(p: &mut Parser) -> Result<JsonValue, JsonError> {
 // length and the over-cap delta is bounded by 1.
 fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
     expect_byte(p, 0x22_u8, &"expected '\"'")?;
-    let mut buf = Text.new();
+    // Heuristic 32-byte starting capacity for typical JSON strings
+    // (field names, short values). Larger strings still grow log-many.
+    let mut buf = Text.with_capacity(32);
     loop {
         match peek(p) {
             None => return Err(mk_err(p, UnexpectedEof, &"unterminated string")),
@@ -525,7 +527,8 @@ fn is_digit(b: Maybe<Byte>) -> Bool {
 
 // Compact single-line output. Use this for wire formats / storage.
 public fn stringify(value: &JsonValue) -> Text {
-    let mut out = Text.new();
+    // Heuristic 64-byte starting capacity for typical small documents.
+    let mut out = Text.with_capacity(64);
     emit(value, &mut out);
     out
 }
@@ -533,7 +536,8 @@ public fn stringify(value: &JsonValue) -> Text {
 // Pretty-printed output with 2-space indentation. Use this for logs / files
 // meant to be read by humans.
 public fn stringify_pretty(value: &JsonValue) -> Text {
-    let mut out = Text.new();
+    // Pretty form is ~2-3× larger than compact; bump initial cap.
+    let mut out = Text.with_capacity(128);
     emit_pretty(value, &mut out, 0);
     out
 }
