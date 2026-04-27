@@ -282,7 +282,23 @@ public fn volatile_set<T>(dst: *mut T, val: T, count: USize) {
 }
 
 // =============================================================================
-// SECTION 7: Pointer Conversion
+// SECTION 7: Pointer-to-Reference Conversion
+// =============================================================================
+//
+// Earlier revisions of this file contained nine duplicate
+// declarations across Sections 7 + 8 — `ptr_read`, `ptr_write`,
+// `ptr_offset`, `ptr_offset_mut`, `drop_in_place`,
+// `slice_from_raw_parts`, `slice_from_raw_parts_mut`,
+// `slice_get_unchecked`, `slice_get_unchecked_mut` were each
+// declared a second time with slightly different parameter
+// names (`n` vs `count`) but the same `@intrinsic` name. The
+// duplicates collided at the @intrinsic resolution layer
+// (the lookup is by intrinsic-name, not by .vr-function-name)
+// and the second declarations were dead code at best — a
+// stub form.  Removed.  The unique-to-this-section helpers
+// below (`ptr_to_ref`, `ptr_to_mut_ref`, plus the
+// slice_subslice / slice_split_at family in the remaining
+// SECTION 8) are preserved.
 // =============================================================================
 
 /// Convert raw pointer to immutable reference
@@ -293,36 +309,9 @@ public unsafe fn ptr_to_ref<T>(ptr: *const T) -> &T { @intrinsic("ptr_to_ref", p
 /// Safety: Pointer must be valid, aligned, point to initialized data, and be unique.
 public unsafe fn ptr_to_mut_ref<T>(ptr: *mut T) -> &mut T { @intrinsic("ptr_to_mut_ref", ptr) }
 
-/// Read value from raw pointer
-public unsafe fn ptr_read<T>(ptr: *const T) -> T { @intrinsic("ptr_read", ptr) }
-
-/// Write value to raw pointer
-public unsafe fn ptr_write<T>(ptr: *mut T, val: T) { @intrinsic("ptr_write", ptr, val) }
-
-/// Offset a raw const pointer by n elements
-public unsafe fn ptr_offset<T>(ptr: *const T, n: Int) -> *const T { @intrinsic("ptr_offset", ptr, n) }
-
-/// Offset a raw mut pointer by n elements
-public unsafe fn ptr_offset_mut<T>(ptr: *mut T, n: Int) -> *mut T { @intrinsic("ptr_offset_mut", ptr, n) }
-
-/// Drop value in place
-public unsafe fn drop_in_place<T>(ptr: *mut T) { @intrinsic("drop_in_place", ptr) }
-
-/// Create a slice from raw parts
-public unsafe fn slice_from_raw_parts<T>(ptr: *const T, len: USize) -> &[T] { @intrinsic("slice_from_raw_parts", ptr, len) }
-
-/// Create a mutable slice from raw parts
-public unsafe fn slice_from_raw_parts_mut<T>(ptr: *mut T, len: USize) -> &mut [T] { @intrinsic("slice_from_raw_parts_mut", ptr, len) }
-
 // =============================================================================
-// SECTION 8: Slice Operations
+// SECTION 8: Slice Subslice / Split Operations
 // =============================================================================
-
-/// Get unchecked element from slice
-public unsafe fn slice_get_unchecked<T>(slice: &[T], index: USize) -> &T { @intrinsic("slice_get_unchecked", slice, index) }
-
-/// Get unchecked mutable element from slice
-public unsafe fn slice_get_unchecked_mut<T>(slice: &mut [T], index: USize) -> &mut T { @intrinsic("slice_get_unchecked_mut", slice, index) }
 
 /// Get subslice (start..end)
 public fn slice_subslice<T>(slice: &[T], start: USize, end: USize) -> &[T] { @intrinsic("slice_subslice", slice, start, end) }
