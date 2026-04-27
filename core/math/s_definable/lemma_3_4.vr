@@ -1,0 +1,107 @@
+// =============================================================================
+// MSFS — Lemma 3.4: S-definability lemma (CRITICAL)
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §3.4 — Lemma 3.4. This is THE
+// pivotal technical lemma of MSFS — it makes Theorem 5.1 (AFN-T
+// α-part) into a one-paragraph proof.
+//
+// Statement (paper):
+//
+//     Let S ∈ R-S and let X be a mathematical object. If X is
+//     formally S-definable — i.e. there exists a formula φ_X in
+//     some sub-theory F ⊆ S that presents X as an object of
+//     Syn(F) — then X ∈ S_S<S>.
+//
+// Proof outline (paper §3.4, four steps):
+//
+//   1. φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
+//   2. By (R2) and (R5a), Syn(F) is the Grothendieck construction
+//      over Mod(F). [Lurie HTT 5.1.4 / Lurie HA + (R5b)]
+//   3. Hence Syn(F) ∈ S_S_global<S> by closure under O1–O6 of
+//      Definition 3.3 — specifically O2 (Grothendieck) on the
+//      Mod(F) ∈ S_S_local input.
+//   4. Therefore X ∈ Ob(Syn(F)) ⊆ S_S_global<S> ⊆ S_S<S>.
+//
+// All four steps cite results from outside Verum (R-S structure,
+// HTT 5.1.4, the closure operations of Definition 3.3). At the
+// Verum framework layer the lemma lands as a single axiom that
+// downstream proofs cite — the *machine* check is that every
+// theorem citing Lemma 3.4 has its full framework footprint
+// recorded by `verum audit --framework-axioms`.
+//
+// Three flagship downstream consumers:
+//
+//   • Theorem 5.1 (AFN-T α-part)        — `theorems/msfs/05_afnt_alpha/`.
+//   • Theorem 6.1 (AFN-T β-part)        — `theorems/msfs/06_afnt_beta/`.
+//   • Theorem 7.1 (horizontal axis)     — `theorems/msfs/07_five_axis/`.
+//
+// Each cites Lemma 3.4 directly; the lemma's framework footprint
+// (msfs + lurie_htt + adamek_rosicky) propagates transitively.
+// =============================================================================
+
+module core.math.s_definable.lemma_3_4;
+
+mount core.math.strata.{MathObject};
+mount core.math.s_definable.class_s_s.{SSMembership};
+
+// =============================================================================
+// Carrier protocol — formal S-definability witness
+// =============================================================================
+
+/// Witness that a `MathObject` is *formally S-definable* — i.e.
+/// there exists a sub-theory F ⊆ S and a formula φ_X in F such
+/// that φ_X presents X as an object of Syn(F).
+///
+/// MSFS §3.4 introduces this notion as a precondition for Lemma
+/// 3.4. The protocol records the existence of (F, φ_X); the
+/// concrete formula and sub-theory are opaque at this layer.
+public type FormallySDefinable is protocol {
+    /// Witness that the object has a sub-theory F ⊆ S and a
+    /// formula φ_X presenting it.
+    fn has_phi_x_witness(self) -> Bool;
+
+    /// The categorical level n at which the presentation lives —
+    /// matches the ambient `n_S` of the Rich-S `S`.
+    fn level(self) -> Int;
+};
+
+// =============================================================================
+// Lemma 3.4
+// =============================================================================
+
+/// **MSFS Lemma 3.4 — S-definability**.
+///
+/// If `X` is formally S-definable then `X ∈ S_S<S>` (i.e. `X` is
+/// in the global S-definable class).
+///
+/// This axiom is the CRITICAL technical lemma of MSFS; it is the
+/// one piece of structural machinery that makes Theorem 5.1
+/// (AFN-T α-part) a one-paragraph proof. Every theorem in §§5–7
+/// + §§9–10 cites it transitively.
+///
+/// Proof in paper:
+///   1. φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
+///   2. By (R2) and (R5a), Syn(F) is Grothendieck construction
+///      over Mod(F).  [HTT 5.1.4]
+///   3. Hence Syn(F) ∈ S_S_global<S> by O2 (Grothendieck closure).
+///   4. Therefore X ∈ Ob(Syn(F)) ⊆ S_S_global<S> ⊆ S_S<S>.
+///
+/// All four steps are admitted at the framework layer — the
+/// citations propagate to `verum audit --framework-axioms`.
+@framework(msfs, "MSFS Lemma 3.4 — S-definability (CRITICAL: formally S-definable ⟹ X ∈ S_S<S>)")
+public axiom msfs_lemma_3_4_s_definability(
+    x: &FormallySDefinable,
+) -> &SSMembership
+    requires x.has_phi_x_witness();
+
+/// Operational corollary of Lemma 3.4 used by Theorem 5.1: the
+/// resulting `SSMembership` witness is in `S_S_global` (depth ≥ 1
+/// since it always traverses the Grothendieck construction step).
+@framework(msfs, "MSFS Lemma 3.4 (operational) — output lives in S_S_global")
+public axiom msfs_lemma_3_4_outputs_in_s_s_global(
+    x: &FormallySDefinable,
+    membership: &SSMembership,
+) -> Bool
+    requires x.has_phi_x_witness()
+    ensures  membership.is_in_s_s_global() && membership.closure_depth() >= 1;

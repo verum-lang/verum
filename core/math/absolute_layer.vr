@@ -1,0 +1,150 @@
+// =============================================================================
+// MSFS — Absolute Layer: (F_S), (Π_4), (Π_3-max), and L_Abs
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §4 — Definitions 4.1–4.4.
+//
+// `L_Abs` is the bottom (= empty) stratum of the moduli space 𝔐 of
+// formal systems. An object `X` inhabits `L_Abs` iff there exist a
+// Rich-metatheory `S` and ordinal `n` such that `X` simultaneously
+// satisfies *three* conditions:
+//
+//   • **(F_S)** — formally S-definable with an explicit sub-theory
+//     inclusion ι_F : F ↪ S, an induced model reduct ι_F^*, and a
+//     formula φ_X presenting X via Syn(F)[φ_X] ≃_(∞,n) X.
+//
+//   • **(Π_{4,S,n})** — irreducible: no (∞, n)-functor X → Y for any
+//     Y in S_S<S> is an equivalence onto its image.
+//
+//   • **(Π_{3-max,S,n})** — maximally generative: for every sub-theory
+//     F ∈ \cF there exists an (∞, n)-functor F → X that is an
+//     equivalence onto its image.
+//
+// MSFS Theorem 5.1 (AFN-T α-part) shows the conjunction (F_S) ∧
+// (Π_4) ∧ (Π_3-max) is internally inconsistent — `L_Abs == ∅`. This
+// module installs the three conditions as protocol-level predicates
+// plus the joint-membership axiom; the emptiness theorem itself
+// lands in `theorems/msfs/05_afnt_alpha/`.
+// =============================================================================
+
+module core.math.absolute_layer;
+
+mount core.math.strata.{MathObject};
+mount core.math.s_definable.lemma_3_4.{FormallySDefinable};
+
+// =============================================================================
+// Carrier protocols for the three conditions
+// =============================================================================
+
+/// Witness of MSFS Definition 4.1 — Condition `(F_S)`. The protocol
+/// records the *existence* of (a) a sub-theory inclusion ι_F : F ↪
+/// S, (b) the induced model reduct ι_F^* : Mod(S) → Mod(F), and (c)
+/// a formula φ_X in F presenting X as a Syn(F)-object.
+public type ConditionFS is protocol {
+    /// (F-1) — sub-theory inclusion ι_F : F ↪ S exists.
+    fn has_iota_F(self) -> Bool;
+
+    /// (F-2) — induced model reduct ι_F^* : Mod(S) → Mod(F) exists.
+    fn has_iota_F_star(self) -> Bool;
+
+    /// (F-3) — syntactic presentation φ_X with
+    /// `Syn(F)[φ_X] ≃_(∞,n) X` exists.
+    fn has_phi_X(self) -> Bool;
+
+    /// Bridge to formal-S-definability: Definition 4.1 strictly
+    /// implies the formal-S-definability hypothesis of Lemma 3.4.
+    fn formally_S_definable_witness(self) -> &FormallySDefinable;
+};
+
+/// Witness of MSFS Definition 4.2 — Condition `(Π_{4,S,n})`. The
+/// object `X` is *irreducible* in `S_S<S>`: no (∞, n)-functor
+/// `F : X → Y` with `Y ∈ S_S<S>` is an equivalence onto its image.
+public type ConditionPi4 is protocol {
+    /// Witness of irreducibility — no S_S-target-equivalence-onto-image.
+    fn is_irreducible_in_s_s(self) -> Bool;
+
+    /// The categorical level n at which the condition is asserted.
+    fn level(self) -> Int;
+};
+
+/// Witness of MSFS Definition 4.3 — Condition `(Π_{3-max,S,n})`. The
+/// object `X` is *maximally generative*: every sub-theory `F ∈ \cF`
+/// admits an (∞, n)-functor `F → X` that is an equivalence onto its
+/// image.
+public type ConditionPi3Max is protocol {
+    /// Witness of maximal generativity.
+    fn is_maximally_generative(self) -> Bool;
+
+    /// The categorical level n at which the condition is asserted.
+    fn level(self) -> Int;
+};
+
+/// Joint witness of all three L_Abs conditions for a fixed (S, n).
+public type LAbsCandidate is protocol {
+    fn cond_F_S(self) -> &ConditionFS;
+    fn cond_Pi_4(self) -> &ConditionPi4;
+    fn cond_Pi_3_max(self) -> &ConditionPi3Max;
+};
+
+// =============================================================================
+// Definitions 4.1–4.4
+// =============================================================================
+
+/// MSFS Definition 4.1 — Condition `(F_S)`. An object `X ∈ \cS_S<S>`
+/// satisfies `(F_S)` iff there exist a sub-theory `\iota_F : F ↪ S`
+/// with `F ∈ \cF`, the induced model reduct `\iota_F^* : Mod(S) →
+/// Mod(F)`, and a formula `φ_X` in `F` such that `Syn(F)[φ_X]`
+/// is `(∞, n)`-equivalent to `X`.
+@framework(msfs, "MSFS Definition 4.1 — Condition (F_S)")
+public axiom msfs_definition_4_1_f_s(witness: &ConditionFS) -> Bool
+    requires witness.has_iota_F() && witness.has_iota_F_star() && witness.has_phi_X()
+    ensures  witness.formally_S_definable_witness().has_phi_x_witness();
+
+/// MSFS Definition 4.2 — Condition `(Π_{4,S,n})`. The object is
+/// irreducible: no `(∞, n)`-functor `X → Y` for any
+/// `Y ∈ \cS_S<S>` is an equivalence onto its image.
+@framework(msfs, "MSFS Definition 4.2 — Condition (Π_4, S, n)")
+public axiom msfs_definition_4_2_pi_4(witness: &ConditionPi4) -> Bool
+    requires witness.level() >= -1
+    ensures  witness.is_irreducible_in_s_s();
+
+/// MSFS Definition 4.3 — Condition `(Π_{3-max,S,n})`. Every
+/// sub-theory `F ∈ \cF` admits an `(∞, n)`-functor `F → X`
+/// equivalent onto its image.
+@framework(msfs, "MSFS Definition 4.3 — Condition (Π_3-max, S, n)")
+public axiom msfs_definition_4_3_pi_3_max(witness: &ConditionPi3Max) -> Bool
+    requires witness.level() >= -1
+    ensures  witness.is_maximally_generative();
+
+/// MSFS Definition 4.4 — `L_Abs` membership. `X ∈ L_Abs` iff there
+/// exist `S ∈ \RS` and ordinal `n` such that `X` jointly satisfies
+/// `(F_S) ∧ (Π_{4,S,n}) ∧ (Π_{3-max,S,n})`.
+///
+/// Definitionally vacuous *until* Theorem 5.1 (AFN-T α-part) shows
+/// the joint conjunction is internally inconsistent. The framework
+/// axiom here records only the joint-membership requirement; the
+/// emptiness corollary `msfs_L_abs_empty` lives in
+/// `lib.math.strata` (cited from `theorems/msfs/05_afnt_alpha/`).
+@framework(msfs, "MSFS Definition 4.4 — L_Abs := { X : ∃(S, n). (F_S) ∧ (Π_4) ∧ (Π_3-max) }")
+public axiom msfs_definition_4_4_l_abs(candidate: &LAbsCandidate) -> Bool
+    ensures candidate.cond_F_S().has_iota_F()
+         && candidate.cond_F_S().has_iota_F_star()
+         && candidate.cond_F_S().has_phi_X()
+         && candidate.cond_Pi_4().is_irreducible_in_s_s()
+         && candidate.cond_Pi_3_max().is_maximally_generative();
+
+// =============================================================================
+// Bridge to Lemma 3.4
+// =============================================================================
+
+/// Operational bridge: (F_S) implies the hypothesis of Lemma 3.4
+/// (formal S-definability). This is the key inferential link
+/// driving Theorem 5.1's contradiction — the joint-membership
+/// witness of L_Abs immediately invokes Lemma 3.4 on its (F_S)
+/// component, placing X in S_S<S> and contradicting (Π_4).
+@framework(msfs, "MSFS §4 — (F_S) ⟹ formal S-definability (Lemma 3.4 hypothesis)")
+public axiom msfs_f_s_implies_formal_s_definable(
+    cond: &ConditionFS,
+) -> &FormallySDefinable
+    requires cond.has_phi_X()
+    ensures  true;

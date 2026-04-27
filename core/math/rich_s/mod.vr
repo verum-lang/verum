@@ -1,0 +1,61 @@
+// =============================================================================
+// lib.math.rich_s — Reasonable Rich-Metatheory (R-S) facade
+// =============================================================================
+//
+// Re-exports the three sub-modules:
+//
+//   • `conditions.vr` — RichS protocol + (R1)–(R5) carriers
+//                        + Proposition 3.2 summary axiom.
+//   • `examples.vr`   — 13 canonical R-S members (ZFC, NBG,
+//                        MLTT, CIC, HoTT, Cubical HoTT, linear+!,
+//                        Eff, Lurie ∞-topos, cohesive, NCG,
+//                        motivic).
+//   • `non_examples.vr` — 6 R-S violators (Proposition 3.2
+//                          independence witnesses).
+//
+// Downstream theorem files mount this single facade rather than
+// the three individual sub-modules.
+//
+// Source: A. Sereda, MSFS preprint, §3 — Reasonable Rich-S
+// metatheories.
+// =============================================================================
+
+module core.math.rich_s;
+
+mount core.math.rich_s.conditions.{
+    RobinsonQInterpretation,
+    ModelInU2,
+    GodelCoding,
+    AccessibilityWitness,
+    LambekScottAdjunction,
+    RichS,
+    msfs_rich_s_class_definition,
+    msfs_n_S_well_defined,
+    msfs_proposition_3_2_r_independence,
+};
+
+mount core.math.rich_s.examples.{
+    msfs_zfc_in_rich_s,
+    msfs_zfc_inacc_in_rich_s,
+    msfs_nbg_in_rich_s,
+    msfs_mltt_in_rich_s,
+    msfs_cic_in_rich_s,
+    msfs_hott_in_rich_s,
+    msfs_cubical_hott_in_rich_s,
+    msfs_linear_with_bang_in_rich_s,
+    msfs_eff_in_rich_s,
+    msfs_lurie_infinity_topos_internal_in_rich_s,
+    msfs_cohesive_infinity_topos_in_rich_s,
+    msfs_ncg_in_rich_s,
+    msfs_motivic_in_rich_s,
+};
+
+mount core.math.rich_s.non_examples.{
+    msfs_affine_no_bang_violates_r1,
+    msfs_z2_full_violates_r2,
+    msfs_inconsistent_violates_r3,
+    msfs_zfc_proper_class_inacc_violates_r3,
+    msfs_non_recursive_coding_violates_r4,
+    msfs_pa_non_standard_violates_r5,
+    msfs_proposition_3_2_witnesses_combined,
+};

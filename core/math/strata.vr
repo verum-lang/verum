@@ -1,0 +1,165 @@
+// =============================================================================
+// MSFS strata — L_Fnd / L_Cls / L_Cls_top / L_Abs
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §2 — Stratified Hierarchy
+// (Definition 2.1, Proposition 2.2, Proposition 2.3).
+//
+// MSFS organises the universe of mathematical foundations into four
+// nested strata:
+//
+//     L_Fnd  ⊋  L_Cls  ⊋  L_Cls_top  ⊋  L_Abs
+//      │          │          │             │
+//   (R1)–(R5) (M1)–(M5)  (Max-1)–(Max-4)  (F_S) ∧ (Π_4) ∧ (Π_3-max)
+//
+// Each inclusion is *proper* (Proposition 2.2 (iii)): the strict
+// nesting is witnessed by foundations occupying one stratum and not
+// the next. The bottom stratum L_Abs is *empty* — the "Absolute
+// Foundation No-Go Theorem" (AFN-T) Theorem 5.1.
+//
+// This module installs the four strata as a sum type plus the
+// proper-inclusion + emptiness axioms. Concrete membership
+// predicates ((R1)–(R5), (M1)–(M5), (Max-i), (F_S), (Π_4), (Π_3-max))
+// land in the dedicated rich_s / cls / absolute_layer modules; here
+// we expose only the *strata themselves* and the structural facts
+// MSFS §2 establishes.
+//
+// Carrier protocols:
+//
+//   • `MathObject` — abstract carrier for any mathematical object
+//     that could potentially inhabit one of the strata.
+//
+// All strata-membership facts beyond the structural ones live in
+// downstream modules. This file is the *organisational scaffold*
+// the rest of the corpus pivots on.
+// =============================================================================
+
+module core.math.strata;
+
+// =============================================================================
+// Carrier protocol
+// =============================================================================
+
+/// Abstract carrier for mathematical objects classified by MSFS.
+/// Foundations (ZFC, HoTT, MLTT, …), classifiers (∞-cosmoi,
+/// Univalent Foundations, cohesive ∞-topos, …), and any putative
+/// `L_Abs` candidates inhabit this protocol. The protocol itself
+/// exposes only a stable identification handle — concrete properties
+/// are projected through dedicated predicates per stratum.
+public type MathObject is protocol {
+    /// Stable text identifier — used by audit reports and
+    /// certificate exports to track provenance per object.
+    fn identifier(self) -> Text;
+};
+
+// =============================================================================
+// The four MSFS strata
+// =============================================================================
+
+/// MSFS Definition 2.1. The four formal strata of the moduli space
+/// `𝔐` of formal systems. Each variant tags an inhabitant of the
+/// corresponding stratum; the ladder is ordered by *strict*
+/// inclusion `L_Fnd ⊋ L_Cls ⊋ L_Cls_top ⊋ L_Abs`, with the bottom
+/// stratum being empty by AFN-T (Theorem 5.1).
+///
+/// The variants are intentionally light on parameters: the (R)/(M)
+/// /(Max)/(F_S, Π_4, Π_3-max) conditions are predicates over a
+/// `MathObject` carrier; this enum tags *which* stratum a given
+/// witness inhabits without dragging the predicate proofs onto the
+/// type. Downstream code constructs `Stratum` values via the
+/// constructor functions that *take* a proof of the corresponding
+/// membership predicate.
+public type Stratum is
+    /// L_Fnd — the bottom stratum: every Rich foundation satisfying
+    /// Definition 3.1 (R1)–(R5). Inhabitants: ZFC, HoTT, MLTT,
+    /// CIC, NCG, Eff, (∞,1)-topos, cohesive ∞-topos, etc.
+    | L_Fnd
+    /// L_Cls — classifiers satisfying (M1)–(M5). Inhabitants:
+    /// ∞-cosmoi (Riehl–Verity), Univalent Foundations (Voevodsky),
+    /// cohesive higher-topos framework (Schreiber). All classify
+    /// strict sub-stacks of `M_stack`; none classifies all of it.
+    | L_Cls
+    /// L_Cls_top — maximal classifiers (Max-1)..(Max-4). Conjectural
+    /// stratum: known classifiers fail Max-1 (full classification);
+    /// `L_Cls_top` ≠ ∅ iff *some* maximal classifier exists, which
+    /// is closed by Diakrisis 103.T (universal articulation).
+    | L_Cls_top
+    /// L_Abs — the absolute stratum: objects simultaneously
+    /// formally definable (F_S), non-reducible (Π_4), and maximally
+    /// generative (Π_3-max). MSFS Theorem 5.1 (AFN-T) proves
+    /// `L_Abs == ∅`.
+    | L_Abs;
+
+// =============================================================================
+// Structural axioms — Proposition 2.2
+// =============================================================================
+
+/// MSFS Proposition 2.2 (i) — every stratum is class-definable
+/// inside ZFC + 2-inacc. The axiom records this fact at the
+/// framework layer; concrete definability proofs (for each
+/// stratum's membership predicate) live downstream.
+@framework(msfs, "MSFS Proposition 2.2 (i) — strata class-definable in ZFC + 2-inacc")
+public axiom msfs_strata_class_definable() -> Bool
+    ensures true;
+
+/// MSFS Proposition 2.2 (iii) — `L_Fnd ⊋ L_Cls`. The inclusion is
+/// *strict*: there exist Rich foundations that are *not*
+/// classifiers (in particular, they fail (M3) accessibility). The
+/// witness recorded here is generic; concrete witnesses (e.g.
+/// AffineLogic + ! is in L_Fnd but not L_Cls) live in `rich_s.vr`.
+@framework(msfs, "MSFS Proposition 2.2 (iii) — L_Fnd ⊋ L_Cls (strict)")
+public axiom msfs_proper_inclusion_fnd_cls() -> Bool
+    ensures true;
+
+/// MSFS Proposition 2.2 (iii) — `L_Cls ⊋ L_Cls_top`. The strictness
+/// is witnessed by ∞-cosmoi: it satisfies (M1)–(M5) but fails
+/// Max-1 (its classification image is a strict sub-stack of
+/// `M_stack`).
+@framework(msfs, "MSFS Proposition 2.2 (iii) — L_Cls ⊋ L_Cls_top (∞-cosmoi witness)")
+public axiom msfs_proper_inclusion_cls_clsmax() -> Bool
+    ensures true;
+
+/// MSFS Proposition 2.2 (iii) — `L_Cls_top ⊋ L_Abs`. Strictly
+/// degenerate — `L_Cls_top` contains universal articulations
+/// (Diakrisis 103.T witness); `L_Abs == ∅` by AFN-T (Theorem 5.1).
+@framework(msfs, "MSFS Proposition 2.2 (iii) — L_Cls_top ⊋ L_Abs (vacuously by AFN-T)")
+public axiom msfs_proper_inclusion_clsmax_abs() -> Bool
+    ensures true;
+
+/// MSFS Proposition 2.2 (iv) — `L_Abs == ∅` is a *theorem* of MSFS
+/// (proven as Theorem 5.1 + Corollary 5.2). At the framework layer
+/// we admit it as the cumulative axiom; the actual proof lives in
+/// `theorems/msfs/05_afnt_alpha/`. This axiom must only be cited
+/// from theorems whose framework footprint already includes
+/// `msfs_theorem_5_1_afnt_alpha` or higher.
+@framework(msfs, "MSFS Proposition 2.2 (iv) — L_Abs is empty (AFN-T α-part, Theorem 5.1)")
+public axiom msfs_L_abs_empty() -> Bool
+    ensures true;
+
+// =============================================================================
+// Proposition 2.3 — Non-collapse of horizontal meta
+// =============================================================================
+
+/// MSFS Proposition 2.3 — the horizontal meta-classification map
+/// `Cls: L_Fnd → L_Cls` does *not* embed into `L_Fnd` itself. In
+/// other words: `Cls(L_Fnd)` lives strictly above `L_Fnd`; the
+/// classifier of foundations is *not* itself a foundation. This is
+/// the structural reason for the existence of a separate `L_Cls`
+/// stratum.
+///
+/// Operationally: any putative collapse `Cls(L_Fnd) → L_Fnd` would
+/// have to violate (R1)–(R5) of the target — `Cls(L_Fnd)` is a
+/// 2-category whose objects are foundations, and that data does
+/// not satisfy (R5) (categorical semantics).
+@framework(msfs, "MSFS Proposition 2.3 — Cls(L_Fnd) ⊄ L_Fnd (no horizontal collapse)")
+public axiom msfs_no_horizontal_collapse() -> Bool
+    ensures true;
+
+/// MSFS Proposition 2.3 (corollary) — `Cls(L_Fnd) ≠ L_Abs`. The
+/// classifier of foundations is also not an inhabitant of the
+/// empty stratum — a tautological consequence of `L_Abs == ∅`,
+/// recorded explicitly because §10 (AC/OC duality) cites it as a
+/// targeting fact for the dual side.
+@framework(msfs, "MSFS Proposition 2.3 (corollary) — Cls(L_Fnd) ≠ L_Abs")
+public axiom msfs_cls_not_in_l_abs() -> Bool
+    ensures true;

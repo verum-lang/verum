@@ -1,0 +1,130 @@
+// =============================================================================
+// MSFS — baseline metatheoretic framework
+// =============================================================================
+//
+// Source of truth: A. Sereda, "The Moduli Space of Formal Systems:
+// Classification, Stabilization, and a No-Go Theorem for Absolute
+// Foundations", Zenodo 19755781 (2026), MSFS §1 — Conventions and
+// Notation.
+//
+// This module installs the framework axioms that fix the ambient
+// metatheory in which every MSFS theorem is stated. They are *not*
+// proved here — they are the explicit declaration of what the rest of
+// the corpus inherits as foundational. Every downstream theorem
+// transitively cites this `msfs` lineage through `verum audit
+// --framework-axioms`.
+//
+// Three baseline declarations land here:
+//
+//   1. `msfs_baseline_zfc_2inacc` — Convention 1.1 (paper.tex):
+//      MSFS lives inside ZFC + 2 inaccessible cardinals
+//      κ_1 < κ_2, providing Grothendieck universes U_1 ⊂ U_2 large
+//      enough for the 2-categorical machinery used in §§3–10.
+//
+//   2. `msfs_grothendieck_universes` — the U_1 / U_2 typing facts
+//      (sub-universe inclusion + accessibility).
+//
+//   3. `msfs_categorical_machinery_baseline` — the bibliographic
+//      stack (Kelly 1982, Lurie HTT 2009, Lurie HA 2017,
+//      Riehl–Verity 2022, Adámek–Rosický 1994) is admitted as the
+//      categorical infrastructure layer over which Convention 1.2
+//      and §§3–10 build. Individual results are cited per-theorem
+//      via the `lurie_htt`, `riehl_verity`, etc. lineages already
+//      shipped in `core.math.frameworks.*`.
+//
+// Carrier protocols:
+//
+//   • `Universe` — abstract Grothendieck universe.
+//   • `InaccessibleCardinal` — large-cardinal witness inhabiting U_2.
+//
+// The carriers are *minimal* — they expose just enough structure for
+// downstream axioms to refer to U_1/U_2 by handle. Concrete encodings
+// (set-theoretic models) are out of scope: the corpus is foundation-
+// neutral past the metatheory layer.
+// =============================================================================
+
+module core.math.frameworks.msfs.baseline;
+
+// =============================================================================
+// Carrier protocols
+// =============================================================================
+
+/// A Grothendieck universe — a transitive set closed under the
+/// standard ZFC operations (pairing, powerset, union, replacement
+/// relative to the universe). MSFS Convention 1.1 fixes two
+/// universes U_1 ⊂ U_2; this protocol abstracts both.
+public type Universe is protocol {
+    /// Witness that the universe is inhabited (contains at least
+    /// the empty set).
+    fn is_nonempty(self) -> Bool;
+
+    /// Witness that the universe is closed under powerset — the
+    /// defining structural property of Grothendieck universes.
+    fn is_powerset_closed(self) -> Bool;
+};
+
+/// An inaccessible cardinal κ. ZFC + 2-inacc adds the existence of
+/// two such κ_1 < κ_2 to the metatheory. The protocol records the
+/// fact that κ generates a Grothendieck universe U(κ) in which it
+/// inhabits.
+public type InaccessibleCardinal is protocol {
+    /// The Grothendieck universe induced by this cardinal.
+    fn induced_universe(self) -> &Universe;
+
+    /// Inaccessibles are uncountable — distinguishes them from
+    /// ω (the first limit ordinal that fails to be inaccessible).
+    fn is_uncountable(self) -> Bool;
+};
+
+// =============================================================================
+// Convention 1.1 — ZFC + 2 inaccessibles
+// =============================================================================
+
+/// MSFS Convention 1.1. The ambient metatheory is ZFC augmented by
+/// the existence of two inaccessibles κ_1 < κ_2 generating
+/// Grothendieck universes U_1 ⊂ U_2. Every theorem in this corpus
+/// is stated *inside* this extension.
+///
+/// Operationally: this axiom is the consistency-strength upper bound
+/// of the entire MSFS corpus. `verum audit --coord` records its
+/// presence on every transitively-citing theorem.
+@framework(msfs, "MSFS Convention 1.1 (ZFC + 2-inacc; U_1 ⊂ U_2)")
+public axiom msfs_baseline_zfc_2inacc(
+    kappa_1: &InaccessibleCardinal,
+    kappa_2: &InaccessibleCardinal,
+) -> Bool
+    requires kappa_1.is_uncountable() && kappa_2.is_uncountable()
+    ensures  kappa_1.induced_universe().is_nonempty()
+          && kappa_2.induced_universe().is_nonempty()
+          && kappa_1.induced_universe().is_powerset_closed()
+          && kappa_2.induced_universe().is_powerset_closed();
+
+/// The κ_1 ⊂ κ_2 strict-inclusion fact is explicit because §10
+/// (AC/OC duality) and §6 (β-part transfinite limits) consume it.
+@framework(msfs, "MSFS Convention 1.1 (Grothendieck universes U_1 ⊂ U_2)")
+public axiom msfs_grothendieck_universes(
+    u_1: &Universe,
+    u_2: &Universe,
+) -> Bool
+    requires u_1.is_nonempty() && u_2.is_nonempty()
+    ensures  u_1.is_powerset_closed() && u_2.is_powerset_closed();
+
+// =============================================================================
+// Categorical-machinery bibliography
+// =============================================================================
+
+/// MSFS Convention 1.1 closes with: "Categorical framework follows
+/// Kelly 1982 (2-categories), Lurie HTT 2009 and HA 2017
+/// ((∞,1)-categories and higher algebra), Riehl–Verity 2022
+/// (∞-cosmoi), Adámek–Rosický 1994 (accessible functors)." This
+/// axiom installs the bibliographic stack as a single trusted
+/// admission. Individual lemmas are cited at use sites through the
+/// per-author `core.math.frameworks.*` packages already shipped
+/// (lurie_htt, riehl_verity, etc.).
+///
+/// This is *not* a proof obligation; it is the corpus-wide
+/// declaration that the cited works are admitted as authoritative
+/// for the categorical layer.
+@framework(msfs, "MSFS Convention 1.1 (categorical framework: Kelly / Lurie HTT+HA / Riehl–Verity / Adámek–Rosický)")
+public axiom msfs_categorical_machinery_baseline() -> Bool
+    ensures true;

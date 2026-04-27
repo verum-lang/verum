@@ -1,0 +1,158 @@
+// =============================================================================
+// MSFS — Class S_S of S-definable categorical structures
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §3 — Definition 3.3 (Class S_S
+// of S-definable categorical structures) and the inductive closure
+// operations O1–O6.
+//
+// `S_S` is the smallest class of categorical structures (objects
+// of (∞, n_S)-categories) that contains the *local data*
+//
+//     base = { (M, Y) : M ⊨ S, Y ∈ Ob(M) }
+//          ∪ { (Syn(S), X) : X ∈ Ob(Syn(S)) }
+//
+// and is closed under the six structural operations:
+//
+//     O1 — Kan extensions (Lan, Ran).
+//     O2 — Grothendieck constructions (∫ for fibrations, ∮ for
+//          op-fibrations).
+//     O3 — Limits and colimits (small).
+//     O4 — Slice / comma / opposite categories.
+//     O5 — Derived functors (in the Quillen sense).
+//     O6 — Symmetric monoidal tensor + internal hom.
+//
+// Two distinguished sub-classes:
+//
+//     `S_S_local` — the base class above (no closure applied).
+//     `S_S_global` = ⋃_{k < ω} S_S^(k) — the κ_1-accessible closure
+//                    obtained by iterating O1–O6 ω-many times.
+//
+// Both `S_S_local` and `S_S_global` are *κ_1-accessible* and live
+// inside U_2 (Adámek–Rosický 1.26 + (R5a)). This module installs
+// the class as a carrier protocol plus closure axioms; the central
+// theorem about it (Lemma 3.4 — S-definability) lives in
+// `lemma_3_4.vr`.
+// =============================================================================
+
+module core.math.s_definable.class_s_s;
+
+mount core.math.frameworks.msfs.key_symbols.{InfinityNCat};
+mount core.math.strata.{MathObject};
+
+// =============================================================================
+// Carrier protocol — membership in S_S
+// =============================================================================
+
+/// Witness that a `MathObject` belongs to the class S_S<S> for some
+/// Rich-S `S`. The protocol carries the structural classification:
+/// whether the witness comes from `S_S_local` (the base) or
+/// `S_S_global` (a closure step).
+public type SSMembership is protocol {
+    /// Witness that this object is in `S_S_local` — the base class
+    /// of pairs `(M, Y)` with `M ⊨ S` or `(Syn(S), X)` with
+    /// `X ∈ Ob(Syn(S))`.
+    fn is_in_s_s_local(self) -> Bool;
+
+    /// Witness that this object is in `S_S_global` — the
+    /// inductive closure of the base class under O1–O6.
+    fn is_in_s_s_global(self) -> Bool;
+
+    /// The closure depth `k < ω` at which the object first appears
+    /// in `S_S^(k)`. `0` means base; `1` means one application of
+    /// any O1–O6; etc. Used by the κ_1-accessibility argument
+    /// in §6 (β-part) for transfinite limits.
+    fn closure_depth(self) -> Int;
+};
+
+// =============================================================================
+// Definition 3.3 — class S_S
+// =============================================================================
+
+/// MSFS Definition 3.3 (base). The local class consists of
+/// pairs `(M, Y)` with `M ⊨ S, Y ∈ Ob(M)` and pairs `(Syn(S), X)`
+/// with `X ∈ Ob(Syn(S))`. This axiom records the existence of the
+/// base; concrete witness construction depends on the host
+/// theory's models which are out of scope here.
+@framework(msfs, "MSFS Definition 3.3 (base) — S_S^local := { (M, Y), (Syn(S), X) }")
+public axiom msfs_s_s_local_base() -> Bool
+    ensures true;
+
+/// MSFS Definition 3.3 (O1 — Kan extensions). The class S_S is
+/// closed under left and right Kan extensions: if `F ∈ S_S` and
+/// `G ∈ S_S` are functors of compatible shape, then `Lan_F G` and
+/// `Ran_F G` (when they exist) are in S_S. Cited from Lurie HTT
+/// §4.3 (existence and pointwise computation).
+@framework(msfs, "MSFS Definition 3.3 (O1) — S_S closed under Kan extensions")
+public axiom msfs_s_s_closed_under_kan_extensions() -> Bool
+    ensures true;
+
+/// MSFS Definition 3.3 (O2 — Grothendieck constructions). The
+/// class S_S is closed under taking Grothendieck constructions
+/// (∫ for fibrations, ∮ for op-fibrations) over diagrams in S_S.
+/// Cited from Lurie HTT §3.2 (straightening / unstraightening).
+@framework(msfs, "MSFS Definition 3.3 (O2) — S_S closed under Grothendieck constructions")
+public axiom msfs_s_s_closed_under_grothendieck() -> Bool
+    ensures true;
+
+/// MSFS Definition 3.3 (O3 — limits and colimits). The class S_S
+/// is closed under all small limits and colimits of diagrams in
+/// S_S. Cited from Riehl–Verity §6 + Adámek–Rosický 1.26
+/// (κ_1-accessibility preserved).
+@framework(msfs, "MSFS Definition 3.3 (O3) — S_S closed under small limits and colimits")
+public axiom msfs_s_s_closed_under_limits_colimits() -> Bool
+    ensures true;
+
+/// MSFS Definition 3.3 (O4 — slice / comma / opposite). The class
+/// S_S is closed under slice categories, comma categories, and
+/// taking opposites.
+@framework(msfs, "MSFS Definition 3.3 (O4) — S_S closed under slice / comma / opposite")
+public axiom msfs_s_s_closed_under_slice_comma_opposite() -> Bool
+    ensures true;
+
+/// MSFS Definition 3.3 (O5 — derived functors). The class S_S is
+/// closed under taking derived functors in the Quillen sense
+/// (left / right derived functors of Quillen adjunctions between
+/// objects of S_S).
+@framework(msfs, "MSFS Definition 3.3 (O5) — S_S closed under Quillen derived functors")
+public axiom msfs_s_s_closed_under_derived_functors() -> Bool
+    ensures true;
+
+/// MSFS Definition 3.3 (O6 — symmetric monoidal). The class S_S
+/// is closed under symmetric monoidal tensor and internal hom
+/// (when present in the input objects).
+@framework(msfs, "MSFS Definition 3.3 (O6) — S_S closed under symmetric monoidal tensor + internal hom")
+public axiom msfs_s_s_closed_under_monoidal() -> Bool
+    ensures true;
+
+// =============================================================================
+// Structural facts — κ_1-accessibility + U_2-smallness
+// =============================================================================
+
+/// MSFS §3 — `S_S_global<S>` is κ_1-accessible. This is the
+/// pivotal accessibility fact for §6 (β-part transfinite limits)
+/// and §3.4 (Lemma 3.4). Cited from Adámek–Rosický 1.26 +
+/// (R5a) of `S` ∈ R-S.
+@framework(msfs, "MSFS §3 — S_S_global<S> is κ_1-accessible (Adámek–Rosický 1.26 + R5a)")
+public axiom msfs_s_s_global_kappa_1_accessible() -> Bool
+    ensures true;
+
+/// MSFS §3 — `S_S_global<S>` is U_2-small. The class fits inside
+/// the second Grothendieck universe; required by Convention 1.1
+/// to keep the categorical machinery U_2-bounded.
+@framework(msfs, "MSFS §3 — S_S_global<S> is U_2-small")
+public axiom msfs_s_s_global_u_2_small() -> Bool
+    ensures true;
+
+/// MSFS §3 (closure containment). `S_S_local ⊆ S_S_global`.
+/// Trivial — every base element is in the closure at depth 0.
+@framework(msfs, "MSFS §3 — S_S_local ⊆ S_S_global (depth 0 base)")
+public axiom msfs_s_s_local_subset_global() -> Bool
+    ensures true;
+
+/// MSFS §3 (full class). `S_S = S_S_local ∪ S_S_global = S_S_global`.
+/// The full S-definable class equals its κ_1-accessible closure
+/// because the closure already contains the base.
+@framework(msfs, "MSFS §3 — S_S = S_S_global")
+public axiom msfs_s_s_equals_global() -> Bool
+    ensures true;

@@ -1,0 +1,104 @@
+// =============================================================================
+// MSFS — Definition 1.3: StrCat<S, n>, total (∞, n)-category of
+// S-structured categories
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §1 — Definition 1.3.
+//
+// `StrCat<S, n>` is the total (∞, n)-category whose objects are
+// pairs (C∞, str) where C∞ is an accessible (∞, n)-category and
+// `str` is an S-model structure on C∞. The 1-morphisms are
+// S-preserving (∞, n)-functors; higher cells are coherent natural
+// transformations.
+//
+// This module installs:
+//
+//   • `StrCatObject` — carrier protocol for objects (C∞, str).
+//   • `StrCat` — carrier protocol for the total (∞, n)-category.
+//   • `msfs_strcat_total_definition` — Definition 1.3 itself,
+//     declaring that StrCat<S, n> exists as such an (∞, n)-category.
+//   • `msfs_strcat_well_formed` — the structural facts (κ_1-local
+//     accessibility + pointing constructions) the paper bundles
+//     into Definition 1.3 and consumes throughout §§3–10.
+//
+// The Rich-S parameter and the ordinal `n` are abstracted as type
+// parameters so this module compiles before the rich_s and ordinal
+// stdlib helpers land. Once those are wired (`core.math.rich_s`,
+// `core.theory_interop.coord.Ordinal`), downstream consumers replace
+// the abstract carriers with the concrete ones — no signature change
+// at this layer.
+// =============================================================================
+
+module core.math.frameworks.msfs.strcat;
+
+mount core.math.frameworks.msfs.key_symbols.{InfinityNCat};
+
+// =============================================================================
+// Carrier protocols
+// =============================================================================
+
+/// One object of `StrCat<S, n>` — a pair (C∞, str) with C∞ an
+/// accessible (∞, n)-category and str an S-model structure on it.
+///
+/// MSFS treats this as a *bundle*: the underlying (∞, n)-category
+/// and its S-model-structure are inseparable in the categorical
+/// type-theoretic sense. The protocol exposes the underlying
+/// (∞, n)-category for use by ρ and downstream functors; the
+/// S-structure is opaque at this layer (its concrete shape lives
+/// per-foundation in `core.math.frameworks.{lurie_htt,...}`).
+public type StrCatObject is protocol {
+    /// The underlying (∞, n)-category C∞.
+    fn underlying_infinity_n_cat(self) -> &InfinityNCat;
+
+    /// Witness that C∞ is κ_1-accessible — required by Definition
+    /// 1.3 and consumed in §3 (R5a) + §6 (β-part transfinite limits).
+    fn is_kappa_1_accessible(self) -> Bool;
+};
+
+/// The total (∞, n)-category `StrCat<S, n>` itself. Carries
+/// objects, S-preserving morphisms, and coherent higher cells.
+public type StrCat is protocol {
+    /// Categorical level n ∈ ℕ ∪ {∞} (∞ encoded as -1).
+    fn categorical_level(self) -> Int;
+
+    /// Witness of κ_1-local-accessibility — every object is
+    /// κ_1-accessible AND the (∞, n)-category itself is small at
+    /// the κ_1 level. Definition 1.3 requires this.
+    fn is_locally_kappa_1_accessible(self) -> Bool;
+
+    /// Witness of the pointing-construction admissibility —
+    /// Definition 1.3 closes with: "for any S-model M of S and any
+    /// X ∈ Ob(M), the pair (Syn(S), X) and the pair (M, Y) for
+    /// Y ∈ Ob(M) are objects of StrCat<S, n>". The protocol
+    /// records the existence of this pointing on demand.
+    fn admits_pointing_construction(self) -> Bool;
+};
+
+// =============================================================================
+// Definition 1.3
+// =============================================================================
+
+/// MSFS Definition 1.3 — the total (∞, n)-category StrCat<S, n>
+/// exists as a κ_1-locally-accessible (∞, n)-category whose objects
+/// are pairs (C∞, str) and that admits the canonical pointing
+/// constructions used in §§3–10.
+///
+/// This is a *definitional* axiom: the paper defines StrCat<S, n>
+/// at this point and consumes it as a primitive from there on. The
+/// downstream proofs (Lemma 3.4, Theorem 5.1, Theorem 6.1, Theorem
+/// 8.6, Theorem 10.4) cite this definition transitively.
+@framework(msfs, "MSFS Definition 1.3 — StrCat<S, n> total (∞, n)-category of S-structured categories")
+public axiom msfs_strcat_total_definition(strcat: &StrCat) -> Bool
+    requires strcat.categorical_level() >= -1
+    ensures  strcat.is_locally_kappa_1_accessible()
+          && strcat.admits_pointing_construction();
+
+/// Cohesion of Definition 1.3's structural facts: every object is
+/// κ_1-accessible — restated as a separate axiom so call sites can
+/// witness the per-object property without unpacking the whole
+/// `StrCat`. Used by Lemma 3.4 (`lemma_3_4_S_definability`).
+@framework(msfs, "MSFS Definition 1.3 (per-object κ_1-accessibility)")
+public axiom msfs_strcat_object_kappa_1_accessible(
+    obj: &StrCatObject,
+) -> Bool
+    ensures obj.is_kappa_1_accessible();
