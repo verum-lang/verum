@@ -38,8 +38,14 @@ public type Void is ();  // unit stand-in; true Void requires uninhabited type s
 
 /// Absurdity elimination: from a proof of Void, derive anything.
 /// (ex falso quodlibet / principle of explosion)
+///
+/// Reaching this body means someone constructed an inhabitant of
+/// `Void` — currently a unit stand-in until proper uninhabited
+/// types ship. The descriptive message helps debug that semantic
+/// violation rather than silently surfacing as "entered unreachable
+/// code".
 public fn absurd<A>(v: Void) -> A {
-    unreachable()
+    unreachable("ex falso: reached `absurd` — Void was constructed (Void should be uninhabited by Curry-Howard)")
 }
 
 // =============================================================================
