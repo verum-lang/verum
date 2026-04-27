@@ -568,6 +568,30 @@ pub fn extract_lossy(source: &str) -> Option<Extracted> {
     extract(source).ok().flatten()
 }
 
+/// One-shot extract + validate.
+///
+/// Production callers (script-mode dispatch in `verum run`) want to fail
+/// fast on either a malformed block (invalid TOML, unterminated marker)
+/// OR a malformed value (bad semver req, unknown permission scope). This
+/// helper composes the two passes so a single `?` covers both.
+///
+/// Returns `Ok(None)` when the source has no frontmatter — that's not an
+/// error, it just means the script doesn't carry inline metadata.
+///
+/// Returns `Ok(Some(extracted))` when both extraction and schema
+/// validation succeeded.
+///
+/// Returns `Err(...)` on the first failure, whether structural or
+/// semantic. The error variants are user-actionable: each variant carries
+/// the offending value so the caller can render a precise diagnostic.
+pub fn extract_and_validate(source: &str) -> Result<Option<Extracted>, FrontmatterError> {
+    let Some(extracted) = extract(source)? else {
+        return Ok(None);
+    };
+    validate(&extracted.frontmatter)?;
+    Ok(Some(extracted))
+}
+
 fn is_open_marker(line: &str) -> bool {
     let s = line.trim_end_matches(['\r', '\n']);
     let s = strip_comment_prefix(s).unwrap_or(s);
@@ -975,6 +999,56 @@ print("hello");
         for s in &["", "1abc", "-abc", "_abc", "a b", "a.b", "Ünicode"] {
             assert!(!is_valid_cog_ident(s), "should reject {s:?}");
         }
+    }
+
+    // =========================================================================
+    // extract_and_validate (F21)
+    // =========================================================================
+
+    #[test]
+    fn extract_and_validate_none_for_no_block() {
+        let r = extract_and_validate("fn main() {}").expect("no error");
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn extract_and_validate_some_for_clean_block() {
+        let src = "// /// script\n// verum = \"0.6\"\n// ///\n";
+        let r = extract_and_validate(src).expect("no error");
+        let e = r.expect("frontmatter must be present");
+        assert_eq!(e.frontmatter.verum.as_deref(), Some("0.6"));
+    }
+
+    #[test]
+    fn extract_and_validate_propagates_extract_error() {
+        // Unterminated block — the extraction layer rejects this; the
+        // validation layer never runs.
+        let src = "// /// script\n// verum = \"0.6\"\n";
+        let err = extract_and_validate(src).expect_err("expected error");
+        assert!(matches!(err, FrontmatterError::UnterminatedBlock { .. }));
+    }
+
+    #[test]
+    fn extract_and_validate_propagates_validation_error() {
+        // Well-formed TOML but invalid permission scope — the validation
+        // layer must reject and the user sees a structured error.
+        let src = "// /// script\n// permissions = [\"impossible=x\"]\n// ///\n";
+        let err = extract_and_validate(src).expect_err("expected error");
+        match err {
+            FrontmatterError::InvalidPermissionScope { value, .. } => {
+                assert_eq!(value, "impossible=x");
+            }
+            other => panic!("expected InvalidPermissionScope, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_and_validate_validates_after_bom_and_shebang() {
+        // Stress-test: BOM + shebang + valid block — extract must succeed
+        // through both prefix layers AND validation must pass.
+        let src = "\u{FEFF}#!/usr/bin/env verum\n// /// script\n// verum = \">=0.6\"\n// ///\n";
+        let e = extract_and_validate(src).expect("no error").expect("frontmatter");
+        assert_eq!(e.frontmatter.verum.as_deref(), Some(">=0.6"));
     }
 
     #[test]
