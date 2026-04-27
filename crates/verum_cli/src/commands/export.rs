@@ -355,6 +355,26 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
         },
     ),
     (
+        // V8 (#238) — meta-classifier framework. The Diakrisis
+        // package fixes the canonical-primitive coordinate system
+        // (Articulation/Enactment Morita-duality, dual no-go,
+        // dual gauge-surjection kernel, dual-primitive initial-
+        // object). It does not have a single mainstream Coq /
+        // Agda / Lean / Dedukti / Metamath analogue: it's a
+        // metaclassification framework, not a theorem library.
+        // We emit citation comments only — downstream auditors
+        // recognise `diakrisis` as the meta-classifier and don't
+        // expect a target-library import.
+        "diakrisis",
+        LineageImport {
+            lean: None,
+            coq: None,
+            dedukti: None,
+            metamath: None,
+            agda: None,
+        },
+    ),
+    (
         "lurie_htt",
         LineageImport {
             lean: Some("import Mathlib.CategoryTheory.Category.Basic"),
@@ -362,6 +382,20 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
             dedukti: None,
             metamath: None,
             agda: Some("open import Categories.Category"),
+        },
+    ),
+    (
+        // V8 (#238) — OWL 2 Functional Syntax. Coq HOL-Light has
+        // an OWL 2 fragment via the Coq-DL workspace; Lean 4 has
+        // an experimental DescriptionLogic library; mainstream
+        // Agda / Dedukti / Metamath have no DL libraries.
+        "owl2_fs",
+        LineageImport {
+            lean: None,
+            coq: None,
+            dedukti: None,
+            metamath: None,
+            agda: None,
         },
     ),
     (
@@ -377,11 +411,13 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
     (
         "schreiber_dcct",
         LineageImport {
+            // V8 (#238) — added Coq HoTT modality + Agda cubical
+            // for the cohesive triple-adjunction ∫ ⊣ ♭ ⊣ ♯.
             lean: Some("import Mathlib.CategoryTheory.Sites.Sheaf"),
-            coq: None,
+            coq: Some("Require Import HoTT.Modalities.Modality."),
             dedukti: None,
             metamath: None,
-            agda: None,
+            agda: Some("open import Cubical.Modalities.Everything"),
         },
     ),
     (
@@ -1245,5 +1281,84 @@ mod format_tests {
         assert!(out.contains("$c wff |- $."));
         assert!(out.contains("$v x y z $."));
         assert!(out.contains("`verum export --to metamath`"));
+    }
+
+    // -------------------------------------------------------------
+    // V8 (#238) — lineage-import table contract.
+    //
+    // The LINEAGE_IMPORTS table is a curated map. The `lineage_import`
+    // lookup is `O(n)` linear-scan but n is fixed and small; the
+    // ordering invariant (alphabetical-by-slug) is what makes the
+    // export deterministic across runs. These tests pin both the
+    // membership of the entries we ship today AND the alphabetical
+    // ordering — any new entry MUST land in lex-sorted position.
+    // -------------------------------------------------------------
+
+    #[test]
+    fn lineage_import_table_is_alphabetically_sorted() {
+        // Iterate the static slice in declaration order and confirm
+        // each entry's slug is lex-greater than its predecessor.
+        let mut last: Option<&str> = None;
+        for (slug, _) in LINEAGE_IMPORTS {
+            if let Some(prev) = last {
+                assert!(
+                    *slug > prev,
+                    "LINEAGE_IMPORTS must be alphabetical: {prev} >= {slug}"
+                );
+            }
+            last = Some(slug);
+        }
+    }
+
+    #[test]
+    fn lineage_import_resolves_diakrisis_metaclassifier() {
+        // Diakrisis has no target-library mapping (it's the
+        // coordinate-system-defining framework, not a theorem
+        // library). The entry exists but every column is None —
+        // emitters should fall through to the "unmapped" comment
+        // path without panicking.
+        let li = lineage_import("diakrisis").expect("diakrisis must be in table");
+        assert!(li.coq.is_none());
+        assert!(li.lean.is_none());
+        assert!(li.agda.is_none());
+        assert!(li.dedukti.is_none());
+        assert!(li.metamath.is_none());
+    }
+
+    #[test]
+    fn lineage_import_owl2_fs_resolves_with_no_mappings() {
+        // OWL 2 FS doesn't have mainstream Coq/Lean/Agda/Dedukti/
+        // Metamath libraries — the entry exists for table-coverage
+        // completeness; emitters fall through.
+        let li = lineage_import("owl2_fs").expect("owl2_fs must be in table");
+        assert!(li.coq.is_none());
+        assert!(li.lean.is_none());
+        assert!(li.agda.is_none());
+    }
+
+    #[test]
+    fn lineage_import_schreiber_dcct_now_maps_coq_and_agda() {
+        // V8 (#238) — added Coq HoTT.Modalities.Modality + Agda
+        // Cubical.Modalities.Everything for the cohesive triple-
+        // adjunction ∫ ⊣ ♭ ⊣ ♯. Unmapped column comments must
+        // clear when any column populates.
+        let li = lineage_import("schreiber_dcct").expect("schreiber_dcct must be in table");
+        assert!(li.lean.is_some(), "schreiber_dcct.lean was already mapped");
+        assert!(
+            li.coq.is_some_and(|s| s.contains("HoTT.Modalities.Modality")),
+            "schreiber_dcct.coq must now reference HoTT.Modalities.Modality"
+        );
+        assert!(
+            li.agda.is_some_and(|s| s.contains("Cubical.Modalities")),
+            "schreiber_dcct.agda must now reference Cubical.Modalities"
+        );
+    }
+
+    #[test]
+    fn lineage_import_unknown_slug_returns_none() {
+        // Defensive: lookup of an unknown lineage must return None,
+        // not panic. Emitters rely on this for fall-through.
+        assert!(lineage_import("does_not_exist").is_none());
+        assert!(lineage_import("").is_none());
     }
 }
