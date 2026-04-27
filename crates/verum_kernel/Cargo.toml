@@ -22,6 +22,12 @@ verum_common = { workspace = true }
 verum_ast = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+# NormalizeCache (#42) — DashMap for sharded lock-free reads,
+# blake3 for stable structural-hash keys.  Same versions as the
+# verum_smt TacticCache (#103) / CvcStrategyCache (#6) infrastructure
+# so cache shape stays uniform across the verification stack.
+dashmap = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
