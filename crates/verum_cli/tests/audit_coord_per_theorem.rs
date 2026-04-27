@@ -1,7 +1,7 @@
 //! Integration tests for `verum audit --coord` per-theorem
-//! inference (V8 #230, A.Z.5 item 3).
+//! inference ().
 //!
-//! Per VVA §A.Z.2.2 defect 2 + §A.Z.5 item 3: the audit walks
+//! Per defect 2 + §A.Z.5 item 3: the audit walks
 //! every @theorem / @lemma / @corollary / @axiom in the project,
 //! infers the (Fw, ν, τ) coordinate from cited @framework(...)
 //! markers using max-of-cited-coords, and surfaces a per-theorem

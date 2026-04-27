@@ -1,4 +1,4 @@
-// Shared OWL 2 graph + walker (VVA §21).
+// Shared OWL 2 graph + walker .
 //
 // Consumed by:
 //   - `commands::audit::audit_owl2_classify_with_format` (F5) — graph
@@ -55,7 +55,7 @@ pub struct Owl2Entity {
     pub name: Text,
     pub kind: Owl2EntityKind,
     /// Open-world flag (only for classes). `None` ⇒ default ClosedWorld
-    /// per VVA §21.4.
+    ///.
     pub semantics: Option<Owl2Semantics>,
     /// Source file the entity was declared in.
     pub file: PathBuf,
