@@ -27,3 +27,18 @@ module core.database.postgres;
 public module wire;
 public module auth;
 public module error;
+public module config;
+public module connection;
+public module adapter;
+
+// Re-exports — keep the user-facing surface compact.
+public mount .config.{
+    PgConfig, PgTlsMode, PtmDisable, PtmVerifyFull,
+};
+public mount .connection.{
+    PgConnection, PgConnState, SimpleQueryResult,
+    PcsConnecting, PcsAuthenticating, PcsReady, PcsBusy, PcsClosed, PcsFailed,
+    connect,
+};
+public mount .adapter.PgAdapter;
+public mount .error.dberr_from_pg;

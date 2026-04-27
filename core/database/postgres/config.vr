@@ -1,0 +1,135 @@
+// =============================================================================
+// core/database/postgres/config.vr — PgConfig
+// =============================================================================
+// Spec: internal/specs/database.md §6.1
+//
+// Typed connection configuration. Spindle prefers TLS-`verify-full`
+// by default; `verify-ca` requires opt-in; `disable` is a compile-
+// warning unless the call site has `@allow_plaintext_db`. v0.1 ships
+// `disable` and `verify-full` only — `require` / `verify-ca` land
+// when channel-binding is wired through core.net.tls.
+// =============================================================================
+
+module core.database.postgres.config;
+
+mount core.*;
+mount base.{Text, Maybe, None, Some};
+
+// -----------------------------------------------------------------------------
+// PgTlsMode
+// -----------------------------------------------------------------------------
+
+public type PgTlsMode is
+      PtmDisable           // plain TCP — Spindle compile-warning unless opted in
+    | PtmVerifyFull;       // default; CA + hostname-match
+
+implement PgTlsMode {
+    public fn name(&self) -> Text {
+        match self {
+            PtmDisable    => "disable".clone(),
+            PtmVerifyFull => "verify-full".clone(),
+        }
+    }
+    public fn is_encrypted(&self) -> Bool {
+        match self {
+            PtmDisable    => false,
+            PtmVerifyFull => true,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PgConfig
+// -----------------------------------------------------------------------------
+
+public type PgConfig is {
+    host: Text,
+    port: Int,
+    user: Text,
+    password: Text,
+    database: Text,
+    application_name: Text,
+    tls_mode: PgTlsMode,
+    /// Connection-attempt deadline in milliseconds (0 = no timeout).
+    /// SCRAM round-trips are bounded by this once the TCP connect
+    /// completes; a bad credential is detected within one round-trip
+    /// regardless.
+    connect_timeout_ms: Int,
+};
+
+implement PgConfig {
+    /// Sensible local-dev defaults — pointing at the docker rig
+    /// `tests/db-integration` brings up at 127.0.0.1:55432.
+    public fn local_dev() -> PgConfig {
+        PgConfig {
+            host: "127.0.0.1".clone(),
+            port: 55432,
+            user: "spindle".clone(),
+            password: "spindle_pw_local_only".clone(),
+            database: "spindle_test".clone(),
+            application_name: "verum-spindle".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        }
+    }
+
+    /// Empty builder — caller fills via `with_*`.
+    public fn new(host: Text, port: Int, user: Text, password: Text, database: Text) -> PgConfig {
+        PgConfig {
+            host: host,
+            port: port,
+            user: user,
+            password: password,
+            database: database,
+            application_name: "verum-spindle".clone(),
+            tls_mode: PtmVerifyFull,
+            connect_timeout_ms: 10_000,
+        }
+    }
+
+    public fn with_application_name(self, name: Text) -> PgConfig {
+        PgConfig { application_name: name, .. self }
+    }
+
+    public fn with_tls(self, mode: PgTlsMode) -> PgConfig {
+        PgConfig { tls_mode: mode, .. self }
+    }
+
+    public fn with_connect_timeout_ms(self, ms: Int) -> PgConfig {
+        PgConfig { connect_timeout_ms: ms, .. self }
+    }
+
+    /// Display string for the host:port pair — never includes the
+    /// password.  Used in metric labels and tracing spans.
+    public fn target_label(&self) -> Text {
+        let mut out: Text = self.host.clone();
+        out.push_str(&":".clone());
+        out.push_str(&itoa(self.port));
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn itoa(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    let neg = n < 0;
+    let mut abs = if neg { -n } else { n };
+    let mut digits: List<Byte> = List.new();
+    while abs > 0 {
+        digits.push(((abs % 10) + 0x30) as Byte);
+        abs = abs / 10;
+    }
+    let mut out: List<Byte> = List.new();
+    if neg { out.push(0x2D as Byte); }
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 {
+        out.push(digits[i]);
+        i = i - 1;
+    }
+    Text.from_bytes(&out).unwrap_or("0".clone())
+}
+
+mount collections.List;

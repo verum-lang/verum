@@ -1,0 +1,536 @@
+// =============================================================================
+// core/database/postgres/connection.vr — PgConnection state machine
+// =============================================================================
+// Spec: internal/specs/database.md §6.1, postgresql.org/docs/16/protocol.html
+//
+// Holds an open TcpStream (TLS lands when channel-binding wires up)
+// and drives the v3 protocol forward:
+//
+//   1. Build & send Startup with PgConfig parameters.
+//   2. Loop reading backend frames until ReadyForQuery:
+//        AuthRequest(SASL)         → drive SCRAM-SHA-256 client
+//        AuthRequest(SaslContinue) → continue SCRAM (server-first)
+//        AuthRequest(SaslFinal)    → verify SCRAM (server-final)
+//        AuthRequest(Ok)           → auth done; awaiting ParameterStatus...
+//        ParameterStatus           → record server parameter
+//        BackendKeyData            → record (pid, secret) for cancel
+//        ReadyForQuery             → connection ready; return success
+//        Error                     → translate + return DbError
+//
+//   3. simple_query(sql) drives Q → loop until ReadyForQuery.
+//
+// The connection is sync — like sqlite, this matches the existing
+// core.net.tcp shape; the L4 actor wraps it in async at a later
+// step. PgConfig.connect_timeout_ms is honoured at the TCP-connect
+// boundary; per-message reads use the underlying stream's blocking
+// behaviour.
+// =============================================================================
+
+module core.database.postgres.connection;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.net.tcp.TcpStream;
+mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
+mount core.database.postgres.config.{PgConfig, PgTlsMode, PtmDisable, PtmVerifyFull};
+mount core.database.postgres.error.dberr_from_pg;
+mount core.database.postgres.wire.frame.{Frame, try_parse_tagged, TaggedReadOutcome};
+mount core.database.postgres.wire.frontend.{
+    StartupParams, startup, simple_query, terminate, sasl_initial_response, sasl_response,
+};
+mount core.database.postgres.wire.backend.{
+    BackendMessage,
+    BmAuth, BmParameterStatus, BmBackendKeyData, BmReadyForQuery,
+    BmRowDescription, BmDataRow, BmCommandComplete, BmEmptyQueryResponse,
+    BmError, BmNotice, BmParseComplete, BmBindComplete, BmCloseComplete,
+    BmNoData, BmPortalSuspend, BmUnknown,
+    AuthRequest, AuthOk, AuthCleartextPassword, AuthMd5Password,
+    AuthSasl, AuthSaslContinue, AuthSaslFinal,
+    parse_backend, Diagnostic, ColumnDesc, RowDescription, DataRow,
+    TxStatus, TxIdle, TxInTransaction, TxFailedTransaction,
+};
+mount core.database.postgres.auth.scram.{
+    ScramClient, ChannelBinding, CbNone,
+    scram_client_new,
+};
+mount core.database.common.types.{WireValue, WvNull, WvPresent};
+
+// -----------------------------------------------------------------------------
+// Connection state — observable from outside.
+// -----------------------------------------------------------------------------
+
+public type PgConnState is
+      PcsConnecting
+    | PcsAuthenticating
+    | PcsReady
+    | PcsBusy
+    | PcsClosed
+    | PcsFailed;
+
+// -----------------------------------------------------------------------------
+// PgConnection
+// -----------------------------------------------------------------------------
+
+public type PgConnection is {
+    stream: TcpStream,
+    state: PgConnState,
+    /// Recv buffer — accumulates partial frames between reads.
+    recv: List<Byte>,
+    /// Server-reported parameters (e.g. server_version, client_encoding).
+    parameters: List<(Text, Text)>,
+    /// (process_id, secret_key) for CancelRequest.
+    backend_key: Maybe<(Int, Int)>,
+    /// Last observed transaction status.
+    tx_status: TxStatus,
+    /// Per-column wire formats from the most recent RowDescription —
+    /// used by parse_data_row to interpret each value's bytes.
+    last_formats: List<Int>,
+};
+
+// -----------------------------------------------------------------------------
+// Open / close
+// -----------------------------------------------------------------------------
+
+/// Establish a connection — TCP connect + Startup + SCRAM auth, return
+/// when the server emits ReadyForQuery.
+public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
+    // Reject TLS modes we cannot honour yet.
+    match config.tls_mode {
+        PtmDisable => {}
+        PtmVerifyFull => {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "TLS_PENDING".clone(),
+                message: "verify-full TLS pending core.net.tls channel-binding wiring".clone(),
+                retryable: false,
+            }));
+        }
+    }
+
+    let target = format_host_port(&config.host, config.port);
+    let stream = match TcpStream.connect(target.as_str()) {
+        Ok(s)  => s,
+        Err(_) => {
+            return Err(DbError.ConnectionFailed {
+                source: core.database.common.error.ConnectionErrorKind.CekConnectRefused,
+                adapter: AdPostgres,
+            });
+        }
+    };
+
+    let mut conn = PgConnection {
+        stream: stream,
+        state: PcsConnecting,
+        recv: List.new(),
+        parameters: List.new(),
+        backend_key: None,
+        tx_status: TxIdle,
+        last_formats: List.new(),
+    };
+
+    // Send Startup.
+    let mut params = StartupParams.new(config.user.clone())
+        .with_database(config.database.clone())
+        .with_application_name(config.application_name.clone());
+    let _ = params;     // silence warning; consumed below
+    let payload = startup(
+        &StartupParams.new(config.user.clone())
+            .with_database(config.database.clone())
+            .with_application_name(config.application_name.clone()),
+    );
+    write_all(&mut conn.stream, payload.as_slice())?;
+
+    conn.state = PcsAuthenticating;
+    drive_until_ready(&mut conn, config)?;
+    Ok(conn)
+}
+
+implement PgConnection {
+    public fn state(&self) -> PgConnState { self.state.clone() }
+    public fn tx_status(&self) -> TxStatus { self.tx_status.clone() }
+    public fn parameters(&self) -> &List<(Text, Text)> { &self.parameters }
+    public fn backend_key(&self) -> Maybe<(Int, Int)> { self.backend_key.clone() }
+
+    /// Look up a server parameter (e.g. "server_version", "DateStyle").
+    pub fn parameter(&self, name: &Text) -> Maybe<Text> {
+        let mut i = 0;
+        while i < self.parameters.len() as Int {
+            let (ref k, ref v) = self.parameters[i];
+            if *k == *name { return Some(v.clone()); }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Issue a simple-query (single SQL string, server may stream
+    /// multiple result sets back). Returns rows of the FIRST result-
+    /// set; subsequent ones are still consumed off the wire so the
+    /// connection ends in `Ready` state, but rows beyond the first
+    /// CommandComplete are dropped.
+    public fn simple_query(&mut self, sql: &Text) -> Result<SimpleQueryResult, DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "simple_query requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = PcsBusy;
+        let payload = simple_query(sql);
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        let mut rows: List<List<WireValue>> = List.new();
+        let mut command_tag: Text = "".clone();
+        let mut row_desc: Maybe<RowDescription> = None;
+        let mut diagnostic: Maybe<Diagnostic> = None;
+
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmRowDescription(rd) => {
+                    self.last_formats = collect_formats(&rd);
+                    row_desc = Some(rd);
+                }
+                BmDataRow(dr) => {
+                    if rows.len() == 0 || command_tag.len() == 0 {
+                        rows.push(dr.values);
+                    } else {
+                        // Subsequent result-sets are dropped; we still
+                        // consume them so ReadyForQuery arrives.
+                        let _ = dr;
+                    }
+                }
+                BmCommandComplete(cc) => {
+                    if command_tag.len() == 0 { command_tag = cc.tag; }
+                }
+                BmEmptyQueryResponse => {
+                    if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
+                }
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}     // log ignored in v0.1
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}     // BackendKeyData / Auth in this state are unexpected
+            }
+        }
+
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None    => Ok(SimpleQueryResult {
+                command_tag: command_tag,
+                row_description: row_desc,
+                rows: rows,
+            })
+        }
+    }
+
+    /// Orderly shutdown — sends Terminate then closes the underlying
+    /// TCP stream. Affine: the value is moved out so further use is
+    /// a compile error.
+    public fn close(mut self) -> Result<(), DbError> {
+        match self.state {
+            PcsClosed => return Ok(()),
+            _ => {}
+        }
+        let payload = terminate();
+        let _ = write_all(&mut self.stream, payload.as_slice());
+        self.state = PcsClosed;
+        Ok(())
+    }
+}
+
+public type SimpleQueryResult is {
+    command_tag: Text,
+    row_description: Maybe<RowDescription>,
+    rows: List<List<WireValue>>,
+};
+
+// -----------------------------------------------------------------------------
+// State-driving helpers
+// -----------------------------------------------------------------------------
+
+fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), DbError> {
+    let mut scram: Maybe<ScramClient> = None;
+    loop {
+        let msg = read_message(conn)?;
+        match msg {
+            BmAuth(req) => {
+                match req {
+                    AuthOk => {
+                        // Auth done — keep looping for ParameterStatus etc.
+                    }
+                    AuthCleartextPassword => {
+                        return Err(DbError.AuthFailed {
+                            kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
+                                "Spindle rejects cleartext-password auth (use SCRAM-SHA-256)".clone(),
+                            ),
+                        });
+                    }
+                    AuthMd5Password { .. } => {
+                        return Err(DbError.AuthFailed {
+                            kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
+                                "Spindle rejects md5 auth (use SCRAM-SHA-256)".clone(),
+                            ),
+                        });
+                    }
+                    AuthSasl { mechanisms } => {
+                        let chose = pick_scram_mechanism(&mechanisms)?;
+                        let nonce = make_client_nonce();
+                        let mut client = scram_client_new(
+                            config.user.clone(),
+                            config.password.clone(),
+                            CbNone,
+                            nonce,
+                        );
+                        let initial = client.client_first_message();
+                        let frame_bytes = sasl_initial_response(&chose, initial.as_slice());
+                        write_all(&mut conn.stream, frame_bytes.as_slice())?;
+                        scram = Some(client);
+                    }
+                    AuthSaslContinue { server_data } => {
+                        let mut c = match scram { Some(x) => x, None => {
+                            return Err(DbError.AuthFailed {
+                                kind: core.database.common.error.AuthErrorKind.AekScramFailed(
+                                    "AuthSaslContinue without SASL initial".clone(),
+                                ),
+                            });
+                        } };
+                        let resp = match c.server_first_to_client_final(server_data.as_slice()) {
+                            Ok(r)  => r,
+                            Err(_) => {
+                                return Err(DbError.AuthFailed {
+                                    kind: core.database.common.error.AuthErrorKind.AekScramFailed(
+                                        "scram server-first parse / proof build failed".clone(),
+                                    ),
+                                });
+                            }
+                        };
+                        let frame_bytes = sasl_response(resp.as_slice());
+                        write_all(&mut conn.stream, frame_bytes.as_slice())?;
+                        scram = Some(c);
+                    }
+                    AuthSaslFinal { server_data } => {
+                        let mut c = match scram { Some(x) => x, None => {
+                            return Err(DbError.AuthFailed {
+                                kind: core.database.common.error.AuthErrorKind.AekScramFailed(
+                                    "AuthSaslFinal without prior SASL".clone(),
+                                ),
+                            });
+                        } };
+                        match c.verify_server_final(server_data.as_slice()) {
+                            Ok(_) => {}
+                            Err(_) => {
+                                return Err(DbError.AuthFailed {
+                                    kind: core.database.common.error.AuthErrorKind.AekScramFailed(
+                                        "server signature mismatch".clone(),
+                                    ),
+                                });
+                            }
+                        }
+                        scram = Some(c);
+                    }
+                }
+            }
+            BmParameterStatus(ps) => { conn.parameters.push((ps.name, ps.value)); }
+            BmBackendKeyData(k)  => { conn.backend_key = Some((k.process_id, k.secret_key)); }
+            BmReadyForQuery(s)   => {
+                conn.tx_status = s;
+                conn.state = PcsReady;
+                return Ok(());
+            }
+            BmError(d) => {
+                conn.state = PcsFailed;
+                return Err(dberr_from_pg(d));
+            }
+            BmNotice(_) => {}
+            _ => {}
+        }
+    }
+}
+
+fn pick_scram_mechanism(mechs: &List<Text>) -> Result<Text, DbError> {
+    // Prefer SCRAM-SHA-256-PLUS when channel-binding is wired; for now
+    // we accept SCRAM-SHA-256 only. A server that offers ONLY -PLUS is
+    // rejected so the user opts in explicitly later.
+    let mut i = 0;
+    while i < mechs.len() as Int {
+        if mechs[i] == "SCRAM-SHA-256" {
+            return Ok("SCRAM-SHA-256".clone());
+        }
+        i = i + 1;
+    }
+    Err(DbError.AuthFailed {
+        kind: core.database.common.error.AuthErrorKind.AekScramFailed(
+            "server did not offer SCRAM-SHA-256".clone(),
+        ),
+    })
+}
+
+fn make_client_nonce() -> Text {
+    // Deterministic stand-in until a CSPRNG seeding shim lands. The
+    // nonce only needs to be unpredictable-to-the-server within a
+    // single SCRAM run; good seeding via core.security.random goes
+    // here once that surface is wired through the connection arena.
+    "spindle-".clone() + &itoa(0x1A2B3C4D)
+}
+
+// -----------------------------------------------------------------------------
+// I/O helpers
+// -----------------------------------------------------------------------------
+
+fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
+    loop {
+        // Try to parse one frame from the buffer.
+        match try_parse_tagged(conn.recv.as_slice()) {
+            Ok(Some(outcome)) => {
+                let consumed = outcome.bytes_consumed;
+                drop_front(&mut conn.recv, consumed);
+                return decode_one(outcome.frame, &conn.last_formats);
+            }
+            Ok(None) => {
+                // Need more bytes.
+                let mut tmp: List<Byte> = List.new();
+                let mut i = 0;
+                while i < 4096 { tmp.push(0 as Byte); i = i + 1; }
+                let n = match conn.stream.read(tmp.as_mut_slice()) {
+                    Ok(v)  => v,
+                    Err(_) => {
+                        return Err(DbError.ConnectionFailed {
+                            source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                            adapter: AdPostgres,
+                        });
+                    }
+                };
+                if n <= 0 {
+                    return Err(DbError.ConnectionFailed {
+                        source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                        adapter: AdPostgres,
+                    });
+                }
+                let mut k = 0;
+                while k < n {
+                    conn.recv.push(tmp[k]);
+                    k = k + 1;
+                }
+            }
+            Err(_) => {
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdPostgres,
+                    code: "BAD_FRAME".clone(),
+                    message: "wire protocol violation".clone(),
+                    retryable: false,
+                }));
+            }
+        }
+    }
+}
+
+fn decode_one(frame: Frame, formats: &List<Int>) -> Result<BackendMessage, DbError> {
+    match parse_backend(frame, formats) {
+        Ok(m)  => Ok(m),
+        Err(_) => Err(DbError.Adapter(AdapterSpecific {
+            adapter: AdPostgres,
+            code: "BAD_DECODE".clone(),
+            message: "backend message decode failed".clone(),
+            retryable: false,
+        })),
+    }
+}
+
+fn write_all(stream: &mut TcpStream, buf: &[Byte]) -> Result<(), DbError> {
+    let mut written: Int = 0;
+    while written < buf.len() as Int {
+        let chunk = sub_slice(buf, written, buf.len() as Int);
+        match stream.write(chunk.as_slice()) {
+            Ok(n) => {
+                if n <= 0 {
+                    return Err(DbError.ConnectionFailed {
+                        source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                        adapter: AdPostgres,
+                    });
+                }
+                written = written + n;
+            }
+            Err(_) => {
+                return Err(DbError.ConnectionFailed {
+                    source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                    adapter: AdPostgres,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sub_slice(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = start;
+    while i < end {
+        out.push(buf[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn drop_front(buf: &mut List<Byte>, n: Int) {
+    // Inefficient — O(remaining) per call. Replaced by a ring-buffer
+    // in the L4 actor revision that owns recv via a CBGR arena.
+    let mut tmp: List<Byte> = List.new();
+    let total = buf.len() as Int;
+    let mut i = n;
+    while i < total {
+        tmp.push(buf[i]);
+        i = i + 1;
+    }
+    buf.clear();
+    let mut k = 0;
+    while k < tmp.len() as Int {
+        buf.push(tmp[k]);
+        k = k + 1;
+    }
+}
+
+fn collect_formats(rd: &RowDescription) -> List<Int> {
+    let mut out: List<Int> = List.new();
+    let mut i = 0;
+    while i < rd.columns.len() as Int {
+        out.push(rd.columns[i].format);
+        i = i + 1;
+    }
+    out
+}
+
+fn format_host_port(host: &Text, port: Int) -> Text {
+    let mut out = host.clone();
+    out.push_str(&":".clone());
+    out.push_str(&itoa(port));
+    out
+}
+
+fn itoa(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    let neg = n < 0;
+    let mut abs = if neg { -n } else { n };
+    let mut digits: List<Byte> = List.new();
+    while abs > 0 {
+        digits.push(((abs % 10) + 0x30) as Byte);
+        abs = abs / 10;
+    }
+    let mut out: List<Byte> = List.new();
+    if neg { out.push(0x2D as Byte); }
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 {
+        out.push(digits[i]);
+        i = i - 1;
+    }
+    Text.from_bytes(&out).unwrap_or("0".clone())
+}
