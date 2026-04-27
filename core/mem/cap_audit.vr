@@ -288,9 +288,6 @@ public fn record_revoke(
     capabilities: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !super.cap_audit_ring.is_enabled() {
-        return 0;
-    }
     let event = CapEvent.new(
         Revoke,
         ptr_id,
@@ -313,9 +310,6 @@ public fn record_attenuate(
     capabilities_after: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !super.cap_audit_ring.is_enabled() {
-        return 0;
-    }
     let event = CapEvent.new(
         Attenuate,
         ptr_id,
@@ -337,9 +331,6 @@ public fn record_ref_incr(
     capabilities: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !super.cap_audit_ring.is_enabled() {
-        return 0;
-    }
     let event = CapEvent.new(
         RefIncr,
         ptr_id,
@@ -360,9 +351,6 @@ public fn record_ref_decr(
     capabilities: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !super.cap_audit_ring.is_enabled() {
-        return 0;
-    }
     let event = CapEvent.new(
         RefDecr,
         ptr_id,
@@ -386,9 +374,6 @@ public fn record_gen_bump(
     capabilities: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !super.cap_audit_ring.is_enabled() {
-        return 0;
-    }
     let event = CapEvent.new(
         GenBump,
         ptr_id,
@@ -410,9 +395,6 @@ public fn record_epoch_advance(
     epoch_after: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !super.cap_audit_ring.is_enabled() {
-        return 0;
-    }
     let event = CapEvent.new(
         EpochAdvance,
         0,                   // ptr_id — global event

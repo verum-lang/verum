@@ -205,6 +205,20 @@ public static mut CAP_AUDIT_RING: [CapAuditSlot; 256] = [
 /// detect concurrent writers via the seqlock retry protocol and skip
 /// torn slots.
 public fn commit(event: CapEvent) -> UInt64 {
+    // Runtime gate: when audit is disabled, short-circuit before
+    // touching any ring state.  Cost is one relaxed-load + branch
+    // (~1-2 ns); the full commit body only runs when audit is on.
+    //
+    // Placing the gate inside `commit` rather than at each `record_*`
+    // call site centralises the predicate (callers don't need to
+    // know to check) and sidesteps the codegen lenient-SKIP gap on
+    // qualified `super.cap_audit_ring.is_enabled()` calls from
+    // sibling modules (#166).
+    let enabled_ptr = unsafe { &CAP_AUDIT_ENABLED as *const UInt8 };
+    if atomic_load_u8(enabled_ptr, ORDERING_RELAXED) == 0 {
+        return 0;
+    }
+
     let next_seq_ptr = unsafe { &CAP_AUDIT_NEXT_SEQ as *mut UInt64 };
     let seq = atomic_fetch_add_u64(next_seq_ptr, 1, ORDERING_ACQ_REL) + 1;
 
