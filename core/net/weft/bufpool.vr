@@ -34,13 +34,23 @@
 //     discipline (ThinRef generation check prevents re-reading old
 //     contents from a previously leased buffer).
 //
-// Kernel-side follow-up:
+// Kernel-side registration:
 //
-//   * Linux intrinsic `verum.io_uring.register_buffers(base, count, size)`
-//     TODO at the runtime layer. Once available, `BufferPool.new`
-//     performs the call; `BufferHandle.fd_offset()` yields the
-//     registered index for `IOSQE_BUFFER_SELECT`. No API change
-//     needed in this file.
+//   * On Linux, registration is performed against an existing
+//     `IoUringDriver` instance via `register_with_iouring(driver)`
+//     (cfg-gated to `target_os = "linux"`). The pool's slab is split
+//     into one `IOVec` per buffer slot; the kernel pins the pages and
+//     downstream prep_read_fixed / prep_write_fixed reference each
+//     buffer by its index (returned via `BufferHandle.fd_offset()`,
+//     which IS the `IOSQE_BUFFER_SELECT` handle).
+//
+//   * macOS / Windows do not have a kernel-level analogue so the
+//     method does not exist on those targets; `iouring_registered()`
+//     stays false.
+//
+//   * The previous no-argument stub was architecturally wrong:
+//     registration requires the same io_uring fd that the executor
+//     uses, not a free-standing syscall. Removed.
 //
 // =============================================================================
 
@@ -49,7 +59,12 @@ module core.net.weft.bufpool;
 mount core.*;
 mount core.collections.list.{List};
 mount core.sync.Mutex;
-mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
+mount core.base.memory.{ptr_offset};
+mount core.sys.common.{IOVec};
+
+@cfg(target_os = "linux")
+mount core.sys.linux.io.{IoUringDriver, LinuxIoDriverError};
 
 // =============================================================================
 // Configuration
@@ -114,9 +129,12 @@ type BufferPoolState is {
     acquires_total: AtomicInt,
     /// Acquire attempts that missed the pool (fell back to alloc).
     misses_total: AtomicInt,
-    /// True iff io_uring registration succeeded. On !linux or when
-    /// the intrinsic is missing, stays false.
-    iouring_registered: Bool,
+    /// True iff io_uring registration succeeded. Stays false on
+    /// macOS / Windows and on Linux until `register_with_iouring`
+    /// is called against a driver. AtomicBool — the value flips
+    /// post-construction when registration succeeds, and the pool is
+    /// `Shared` across reactor threads.
+    iouring_registered: AtomicBool,
 };
 
 // =============================================================================
@@ -141,10 +159,11 @@ implement BufferPool {
         let mut j: Int = 0;
         while j < config.count { free.push(j); j = j + 1; }
 
-        // Kernel-side registration hook. Phase-5 skeleton: actual
-        // intrinsic is follow-up work.
-        let registered = config.try_register_iouring && try_iouring_register();
-
+        // Kernel-side registration is performed post-construction
+        // via `register_with_iouring(driver)` once the runtime layer
+        // hands the pool an io_uring driver. `try_register_iouring`
+        // on the config is a hint for the runtime layer; this module
+        // no longer attempts a no-driver registration.
         BufferPool {
             state: Shared.new(BufferPoolState {
                 config: config.clone(),
@@ -152,7 +171,7 @@ implement BufferPool {
                 free_indices: Mutex.new(free),
                 acquires_total: AtomicInt.new(0),
                 misses_total: AtomicInt.new(0),
-                iouring_registered: registered,
+                iouring_registered: AtomicBool.new(false),
             }),
         }
     }
@@ -179,7 +198,25 @@ implement BufferPool {
     }
 
     public fn iouring_registered(&self) -> Bool {
-        self.state.iouring_registered
+        self.state.iouring_registered.load(MemoryOrdering.Acquire)
+    }
+
+    /// Build the IOVec[] view over the slab — one entry per buffer
+    /// slot. Kept public so non-Linux callers writing portable
+    /// readv/writev paths can leverage the registered layout without
+    /// depending on `IoUringDriver`.
+    public fn build_iovecs(&self) -> List<IOVec> {
+        let count = self.state.config.count;
+        let buf_size = self.state.config.buf_size;
+        let base: &unsafe Byte = self.state.slab.as_ptr();
+        let mut iovecs: List<IOVec> = List.with_capacity(count);
+        let mut i: Int = 0;
+        while i < count {
+            let entry_ptr = unsafe { ptr_offset(base, i * buf_size) };
+            iovecs.push(IOVec.from_raw_parts(entry_ptr, buf_size));
+            i = i + 1;
+        }
+        iovecs
     }
 
     public fn free_count(&self) -> Int {
@@ -258,13 +295,50 @@ implement Drop for BufferHandle {
 }
 
 // =============================================================================
-// Kernel-side registration — intrinsic hook
+// Kernel-side registration — io_uring REGISTER_BUFFERS
 // =============================================================================
 
-/// Attempt io_uring `REGISTER_BUFFERS`. Stub; real implementation
-/// binds `verum.io_uring.register_buffers(base_ptr, count, size)`.
-/// Returns false on any platform where the syscall isn't available.
-fn try_iouring_register() -> Bool {
-    // TODO(phase-5-followup): call intrinsic once runtime exposes it.
-    false
+implement BufferPool {
+    /// Register every slot in the pool with the supplied io_uring
+    /// driver via `IORING_REGISTER_BUFFERS`. After success, callers
+    /// may submit operations using `prep_read_fixed` /
+    /// `prep_write_fixed` referencing each handle's `fd_offset()`.
+    ///
+    /// Idempotent — if the pool is already registered, returns Ok(())
+    /// without re-issuing the syscall (the kernel rejects double
+    /// registration with -EBUSY otherwise).
+    ///
+    /// The pool's slab pointers are pinned by the kernel for the
+    /// registration's lifetime; releasing the pool without first
+    /// calling `unregister_iouring` leaves the kernel-side pin in
+    /// place until the io_uring fd is closed.
+    @cfg(target_os = "linux")
+    public fn register_with_iouring(
+        &self,
+        driver: &mut IoUringDriver,
+    ) -> Result<(), LinuxIoDriverError> {
+        if self.state.iouring_registered.load(MemoryOrdering.Acquire) {
+            return Ok(());
+        }
+        let iovecs = self.build_iovecs();
+        driver.register_buffers(iovecs.as_slice())?;
+        self.state.iouring_registered.store(true, MemoryOrdering.Release);
+        Ok(())
+    }
+
+    /// Release the kernel-side registration, allowing the pool to be
+    /// freed or re-registered against a different driver. No-op when
+    /// the pool isn't currently registered.
+    @cfg(target_os = "linux")
+    public fn unregister_iouring(
+        &self,
+        driver: &mut IoUringDriver,
+    ) -> Result<(), LinuxIoDriverError> {
+        if !self.state.iouring_registered.load(MemoryOrdering.Acquire) {
+            return Ok(());
+        }
+        driver.unregister_buffers()?;
+        self.state.iouring_registered.store(false, MemoryOrdering.Release);
+        Ok(())
+    }
 }

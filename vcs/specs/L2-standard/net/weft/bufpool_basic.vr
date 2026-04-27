@@ -6,10 +6,16 @@
 // @expect: pass
 
 // §4.2.1 / §6.17 — Registered buffer pool shape. Kernel-side
-// io_uring registration is a runtime-intrinsic follow-up; this
-// verifies the Verum-level API surface.
+// io_uring registration is exposed via `register_with_iouring(driver)`
+// on Linux; this file typechecks the Verum-level API surface and the
+// Linux-only registration entry points.
 
 mount core.net.weft.bufpool.{BufferPool, BufferPoolConfig, BufferHandle};
+mount core.collections.list.{List};
+mount core.sys.common.{IOVec};
+
+@cfg(target_os = "linux")
+mount core.sys.linux.io.{IoUringDriver, LinuxIoDriverError};
 
 fn typecheck_cfg() -> BufferPoolConfig {
     BufferPoolConfig.default()
@@ -34,6 +40,24 @@ fn typecheck_metrics(pool: &BufferPool) -> (Bool, Int, Int, Int) {
      pool.free_count(),
      pool.acquires_total(),
      pool.misses_total())
+}
+
+fn typecheck_iovecs(pool: &BufferPool) -> List<IOVec> {
+    pool.build_iovecs()
+}
+
+@cfg(target_os = "linux")
+fn typecheck_register(pool: &BufferPool, driver: &mut IoUringDriver)
+    -> Result<(), LinuxIoDriverError>
+{
+    pool.register_with_iouring(driver)
+}
+
+@cfg(target_os = "linux")
+fn typecheck_unregister(pool: &BufferPool, driver: &mut IoUringDriver)
+    -> Result<(), LinuxIoDriverError>
+{
+    pool.unregister_iouring(driver)
 }
 
 fn main() {
