@@ -70,3 +70,37 @@ fn enactment_eq(a: Enactment, b: Enactment) -> Bool {
     }
     true
 }
+
+// =============================================================================
+// §11.4 (#243) — gauge invariants + audit helpers
+//
+// Invariants surfaced as predicates so callers can `assert(...)` them
+// in tests without poking the internal canonical-form representation.
+// All three are stable contracts that downstream code (CLI audit,
+// IDE plugins, Noesis NP server) can depend on.
+// =============================================================================
+
+/// Number of steps in `e`'s canonical form. Used by the streaming
+/// coherence monitor + audit reporters to track how much
+/// observational redundancy a freshly-recorded enactment carries.
+public fn canonical_size(e: Enactment) -> Int {
+    canonicalise(e).steps.len() as Int
+}
+
+/// True iff `e` is already in canonical form (i.e. canonicalising it
+/// is the identity). Equivalent to `gauge_equivalent(e, e) ∧
+/// canonical_size(e) == e.steps.len()` but cheaper at one canonicalise
+/// step instead of two.
+public fn is_canonical(e: Enactment) -> Bool {
+    let canonicalised: Enactment = canonicalise(e.clone());
+    enactment_eq(canonicalised, e)
+}
+
+/// Idempotency witness — `canonicalise(canonicalise(e)) ≡
+/// canonicalise(e)`. Returned as a Bool so test harnesses can pin it
+/// without depending on the canonical-form's internal name field.
+public fn canonicalise_idempotent(e: Enactment) -> Bool {
+    let once: Enactment  = canonicalise(e);
+    let twice: Enactment = canonicalise(once.clone());
+    enactment_eq(once, twice)
+}
