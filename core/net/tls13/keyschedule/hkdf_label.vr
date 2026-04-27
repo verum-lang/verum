@@ -49,7 +49,11 @@ public type HkdfLabel is {
 /// `"tls13 " + label` fits in the opaque<7..255> constraint);
 /// `context` ≤ 255 bytes.
 public fn encode_hkdf_label(length: Int, label: &[Byte], context: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
+    // Output: 2 (uint16 length) + 1 (label-len) + 6 ("tls13 ") +
+    // label.len + 1 (ctx-len) + context.len. All sizes are bounded
+    // and known up front.
+    let cap = 2 + 1 + 6 + label.len() + 1 + context.len();
+    let mut out: List<Byte> = List.with_capacity(cap);
 
     // uint16 length
     out.push(((length >> 8) & 0xFF) as Byte);
@@ -97,7 +101,8 @@ public fn hkdf_expand_label(
     // Build the structured `info` blob.
     let info = encode_hkdf_label(length, label, context);
 
-    let mut out: List<Byte> = [];
+    // Output is exactly `length` bytes (HKDF-Expand contract).
+    let mut out: List<Byte> = List.with_capacity(length);
     match hash {
         HashKind.Sha256 => hkdf_expand_sha256(secret, info.as_slice(), length, &mut out)?,
         HashKind.Sha384 => hkdf_expand_sha384(secret, info.as_slice(), length, &mut out)?,
