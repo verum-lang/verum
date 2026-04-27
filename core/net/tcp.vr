@@ -1328,20 +1328,36 @@ const SOCKADDR_IN6_SIZE: Int = 28;
 ///
 /// Returns the bytes in native sockaddr_in/sockaddr_in6 format.
 /// Uses a fixed-size buffer to avoid heap allocation on hot path.
+///
+/// **Platform layout (task #5 fix)**: Linux/Windows use the
+/// POSIX `sockaddr_in` with a 2-byte `sa_family_t` at offset 0.
+/// BSD-derived systems (macOS, iOS, FreeBSD) prepend a 1-byte
+/// `sin_len` then the 1-byte `sin_family` — the older sockaddr
+/// layout that pre-dates the POSIX standardisation.  The kernel
+/// expects EXACTLY the platform's native layout; sending Linux
+/// bytes to macOS makes the kernel parse `sin_len=AF_INET=2`
+/// (truncates) and `sin_family=0=AF_UNSPEC`, so `bind` returns
+/// EINVAL/EAFNOSUPPORT.  Discovered while bisecting AOT
+/// `TcpListener.bind("127.0.0.1:0")` failures (task #5).
 fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
     match *addr {
         SocketAddr.V4(v4) => {
-            // struct sockaddr_in layout:
-            //   uint16_t sin_family   - address family (AF_INET)
-            //   uint16_t sin_port     - port in network byte order (big-endian)
-            //   uint32_t sin_addr     - IPv4 address in network byte order
-            //   char     sin_zero[8]  - padding to 16 bytes
             let mut buf = List.with_capacity(SOCKADDR_IN_SIZE);
 
-            // sin_family: AF_INET in native byte order
-            // On little-endian systems, AF_INET (2) is stored as [2, 0]
-            buf.push(AF_INET as Byte);
-            buf.push(0);
+            // sin_family / sin_len header, platform-specific.
+            @cfg(target_os = "macos")
+            {
+                // BSD: [sin_len=16, sin_family=AF_INET]
+                buf.push(SOCKADDR_IN_SIZE as Byte);
+                buf.push(AF_INET as Byte);
+            }
+            @cfg(any(target_os = "linux", target_os = "windows"))
+            {
+                // POSIX: sin_family is uint16_t in native byte order
+                // (little-endian on every supported target).
+                buf.push(AF_INET as Byte);
+                buf.push(0);
+            }
 
             // sin_port: network byte order (big-endian)
             let port = v4.port;
@@ -1365,17 +1381,20 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             buf
         }
         SocketAddr.V6(v6) => {
-            // struct sockaddr_in6 layout:
-            //   uint16_t sin6_family    - AF_INET6
-            //   uint16_t sin6_port      - port in network byte order
-            //   uint32_t sin6_flowinfo  - flow information
-            //   uint8_t  sin6_addr[16]  - IPv6 address
-            //   uint32_t sin6_scope_id  - scope ID
             let mut buf = List.with_capacity(SOCKADDR_IN6_SIZE);
 
-            // sin6_family
-            buf.push(AF_INET6 as Byte);
-            buf.push(0);
+            // sin6_family / sin6_len header, platform-specific
+            // (same Linux-vs-BSD divergence as the V4 path above).
+            @cfg(target_os = "macos")
+            {
+                buf.push(SOCKADDR_IN6_SIZE as Byte);
+                buf.push(AF_INET6 as Byte);
+            }
+            @cfg(any(target_os = "linux", target_os = "windows"))
+            {
+                buf.push(AF_INET6 as Byte);
+                buf.push(0);
+            }
 
             // sin6_port (big-endian)
             let port = v6.port;
