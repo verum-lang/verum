@@ -434,7 +434,7 @@ implement<T> List<T> {
                 self.len = self.len - 1;
                 tmp
             } else {
-                self.pop().unwrap()
+                self.pop().expect("List.swap_remove: pop returns Some — outer bounds-check guarantees self.len > 0 at this branch")
             }
         }
     }
@@ -1669,7 +1669,7 @@ implement<T> List<T> {
         let mut result: List<(T, U)> = List.with_capacity(min_len);
         for i in range(0, min_len) {
             let a: &T = unsafe { &*self.ptr.offset(i) };
-            let b: &U = other.get(i).unwrap();
+            let b: &U = other.get(i).expect("List.zip: i < min_len ≤ other.len() guaranteed by loop bound");
             result.push((a.clone(), b.clone()));
         }
         result
