@@ -167,12 +167,31 @@ implement<R: Read> BufRead for BufReader<R> {
         Ok(&self.buf[self.pos..self.filled])
     }
 
+    /// Advance the read cursor by `amt` bytes after a `fill_buf()`
+    /// observation.
+    ///
+    /// SOUNDNESS: previous revision did `if self.pos + amt > self.filled
+    /// { saturate } else { advance }`.  If a buggy caller passed
+    /// `amt < 0`, `self.pos + amt < self.pos < self.filled`, the
+    /// over-cap check failed, and the cursor was REWOUND silently.
+    /// Subsequent reads re-emitted already-consumed bytes (e.g. a
+    /// parser would re-tokenise the same input), corrupting the
+    /// stream's logical position.
+    ///
+    /// The fix:
+    ///   * `amt < 0`            — clamped to 0 (no-op; consume only
+    ///                            advances).
+    ///   * `amt > buffer_len()` — clamped to the available bytes
+    ///                            (caller wrote a stale `amt` after
+    ///                            another fill cycle); preserves the
+    ///                            previous saturating behaviour.
     fn consume(&mut self, amt: Int) {
-        self.pos = if self.pos + amt > self.filled {
-            self.filled
-        } else {
-            self.pos + amt
-        };
+        if amt <= 0 {
+            return;
+        }
+        let available = self.filled - self.pos;
+        let advance = if amt > available { available } else { amt };
+        self.pos = self.pos + advance;
     }
 }
 
