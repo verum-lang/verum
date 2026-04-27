@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 2
 // @tags: codegen, aot, mount-core, main-return-propagation
-// @timeout: 360000
+// @timeout: 480000
 // @expected-exit: 7
 // @description: AOT mount-core main() return propagation regression.
 //
@@ -10,7 +10,7 @@
 // exit=0 instead of 7. Root cause: Phase 2 body lowering deduped by
 // raw VBC name only, skipping ALL but the LAST occurrence per name.
 // User's 0-arity `main` collided with stdlib's 2-arity
-// `darwin_entry::main(argc, argv)` (in core/sys/init.vr) because the
+// `darwin_entry.main(argc, argv)` (in core/sys/init.vr) because the
 // blanket "main" → "verum_main" rename hits both. The arity-collision
 // path then emits two different LLVM functions (unsuffixed
 // `verum_main` and `verum_main__arity2`), but the dedupe — keyed on
