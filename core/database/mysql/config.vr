@@ -1,0 +1,106 @@
+// =============================================================================
+// core/database/mysql/config.vr — MysqlConfig
+// =============================================================================
+// Spec: internal/specs/database.md §6.3
+// =============================================================================
+
+module core.database.mysql.config;
+
+mount core.*;
+mount base.{Text, Maybe, None, Some};
+mount collections.List;
+
+public type MysqlTlsMode is
+      MtmDisable
+    | MtmRequired;
+
+implement MysqlTlsMode {
+    public fn name(&self) -> Text {
+        match self {
+            MtmDisable  => "disable".clone(),
+            MtmRequired => "required".clone(),
+        }
+    }
+    public fn is_encrypted(&self) -> Bool {
+        match self {
+            MtmDisable  => false,
+            MtmRequired => true,
+        }
+    }
+}
+
+public type MysqlConfig is {
+    host: Text,
+    port: Int,
+    user: Text,
+    password: Text,
+    database: Text,
+    /// MySQL character-set ID — 255 = utf8mb4_0900_ai_ci (the 8.0
+    /// default), 33 = utf8_general_ci (legacy 5.x default).
+    character_set: Int,
+    tls_mode: MysqlTlsMode,
+    connect_timeout_ms: Int,
+};
+
+implement MysqlConfig {
+    public fn local_dev() -> MysqlConfig {
+        MysqlConfig {
+            host: "127.0.0.1".clone(),
+            port: 53306,
+            user: "spindle".clone(),
+            password: "spindle_pw_local_only".clone(),
+            database: "spindle_test".clone(),
+            character_set: 255,
+            tls_mode: MtmDisable,
+            connect_timeout_ms: 10_000,
+        }
+    }
+
+    public fn new(host: Text, port: Int, user: Text, password: Text, database: Text) -> MysqlConfig {
+        MysqlConfig {
+            host: host,
+            port: port,
+            user: user,
+            password: password,
+            database: database,
+            character_set: 255,
+            tls_mode: MtmDisable,
+            connect_timeout_ms: 10_000,
+        }
+    }
+
+    public fn with_character_set(self, cs: Int) -> MysqlConfig {
+        MysqlConfig { character_set: cs, .. self }
+    }
+
+    public fn with_tls(self, mode: MysqlTlsMode) -> MysqlConfig {
+        MysqlConfig { tls_mode: mode, .. self }
+    }
+
+    public fn with_connect_timeout_ms(self, ms: Int) -> MysqlConfig {
+        MysqlConfig { connect_timeout_ms: ms, .. self }
+    }
+
+    public fn target_label(&self) -> Text {
+        let mut out = self.host.clone();
+        out.push_str(&":".clone());
+        out.push_str(&itoa(self.port));
+        out
+    }
+}
+
+fn itoa(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    let neg = n < 0;
+    let mut abs = if neg { -n } else { n };
+    let mut digits: List<Byte> = List.new();
+    while abs > 0 {
+        digits.push(((abs % 10) + 0x30) as Byte);
+        abs = abs / 10;
+    }
+    let mut out: List<Byte> = List.new();
+    if neg { out.push(0x2D as Byte); }
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 { out.push(digits[i]); i = i - 1; }
+    Text.from_bytes(&out).unwrap_or("0".clone())
+}
