@@ -305,10 +305,30 @@ implement GenerationalArena {
             return 0;
         }
 
-        // Align the current offset
+        // Reject negative / wraparound-prone sizes BEFORE any
+        // arithmetic.  An adversarial size = Int.MAX would wrap
+        // `aligned_offset + size` to a negative value, slipping
+        // past the `end > self.capacity` bounds check and
+        // returning a pointer past the buffer.  Same overflow
+        // class as the list.vr offset fix in #194.
+        if size < 0 {
+            return 0;
+        }
+
+        // Align the current offset.  `self.used + mask` could
+        // overflow if `self.used` is near Int.MAX.  In practice
+        // `self.used <= self.capacity`, and capacity is bounded
+        // by alloc-side checks; but defend explicitly so the
+        // bound is local-and-inspectable.
         let mask = ARENA_ALIGNMENT - 1;
-        let aligned_offset = (self.used + mask) & (!mask);
-        let end = aligned_offset + size;
+        let aligned_offset = match self.used.checked_add(mask) {
+            Some(v) => v & (!mask),
+            None    => return 0,
+        };
+        let end = match aligned_offset.checked_add(size) {
+            Some(v) => v,
+            None    => return 0,
+        };
 
         if end > self.capacity {
             // Try to grow if config allows
@@ -385,10 +405,30 @@ implement GenerationalArena {
             return 0;
         }
 
+        // Reject negative size / non-positive alignment up front.
+        // Same overflow class as `alloc`: a negative size can wrap
+        // `aligned_offset + size` and slip past the capacity check.
+        if size < 0 || alignment <= 0 {
+            return 0;
+        }
+
+        // Alignment must be a power of two (caller contract).
+        // Reject non-power-of-2 alignment so `align - 1` produces
+        // a valid mask.
+        if (alignment & (alignment - 1)) != 0 {
+            return 0;
+        }
+
         let align = if alignment < ARENA_ALIGNMENT { ARENA_ALIGNMENT } else { alignment };
         let mask = align - 1;
-        let aligned_offset = (self.used + mask) & (!mask);
-        let end = aligned_offset + size;
+        let aligned_offset = match self.used.checked_add(mask) {
+            Some(v) => v & (!mask),
+            None    => return 0,
+        };
+        let end = match aligned_offset.checked_add(size) {
+            Some(v) => v,
+            None    => return 0,
+        };
 
         if end > self.capacity {
             return 0;
