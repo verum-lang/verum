@@ -377,19 +377,22 @@ public fn theorem_coord_as_text(t: MsfsTheoremCoord) -> Text {
     } else {
         Text.from("τ=extensional")
     };
-    let mut fw_block: Text = Text.from("{");
+    // O(n) string-build via push_str (vs prior `fw_block = fw_block.concat(...)`
+    // re-assignment loop, which copied the full prefix on every step
+    // — quadratic).
+    let mut fw_block: Text = Text.with_capacity(64);
+    fw_block.push_str("{");
     let mut i: Int = 0;
     while i < t.frameworks.len() as Int {
         if i > 0 {
-            fw_block = fw_block.concat(", ");
+            fw_block.push_str(", ");
         }
-        fw_block = fw_block.concat(
+        fw_block.push_str(
             t.frameworks.get(i as Int)
-                .expect("frameworks block: i < t.frameworks.len() by while-condition")
-                .clone());
+                .expect("frameworks block: i < t.frameworks.len() by while-condition"));
         i = i + 1;
     }
-    fw_block = fw_block.concat("}");
+    fw_block.push_str("}");
     fw_block
       .concat(", ν=")
       .concat(ord_as_text(t.ordinal.clone()))
