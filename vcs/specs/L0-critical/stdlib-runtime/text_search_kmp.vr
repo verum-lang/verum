@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, text, find, split, count, kmp
+
+// Regression coverage for the KMP migration of contains/find/split/
+// count_matches in core/text/text.vr. Each was previously a nested
+// O(n·m) byte search; the rewrite delegates to kmp_failure_table +
+// kmp_find with a shared API contract. The KMP-divergent cases
+// ("aba" inside "ababab" — internal-prefix shifts) are the ones
+// most likely to expose subtle implementation bugs, so each helper
+// gets one.
+
+fn main() {
+    // contains -------------------------------------------------------
+    assert("hello world".contains("world"));
+    assert("hello world".contains("hello"));
+    assert("hello world".contains("o w"));
+    assert(!"hello world".contains("xyz"));
+    assert("anything".contains(""));            // empty needle is universal
+    assert(!"abc".contains("abcd"));             // longer than haystack
+    assert("ababab".contains("aba"));            // KMP-divergent
+    assert("abababab".contains("abab"));         // KMP-divergent
+
+    // find -----------------------------------------------------------
+    match "hello world".find("world") {
+        Some(idx) => assert(idx == 6),
+        None      => panic("expected Some(6)"),
+    }
+    match "hello world".find("zzz") {
+        Some(_) => panic("expected None"),
+        None    => {},
+    }
+    match "".find("x") {
+        Some(_) => panic("expected None"),
+        None    => {},
+    }
+    match "ababab".find("aba") {
+        Some(idx) => assert(idx == 0),
+        None      => panic("expected Some(0)"),
+    }
+    // Empty needle returns Some(0) per the documented contract.
+    match "anything".find("") {
+        Some(idx) => assert(idx == 0),
+        None      => panic("expected Some(0)"),
+    }
+
+    // split ----------------------------------------------------------
+    let parts = "a,b,c,d".split(",");
+    assert(parts.len() == 4);
+    assert(parts[0] == "a");
+    assert(parts[3] == "d");
+
+    let multi = "abXXdefXXghi".split("XX");
+    assert(multi.len() == 3);
+    assert(multi[0] == "ab");
+    assert(multi[1] == "def");
+    assert(multi[2] == "ghi");
+
+    // Empty separator returns the input unchanged (in a one-element list).
+    let zero = "hello".split("");
+    assert(zero.len() == 1);
+    assert(zero[0] == "hello");
+
+    // No separator anywhere: single-element list with full input.
+    let none = "abc".split("X");
+    assert(none.len() == 1);
+    assert(none[0] == "abc");
+
+    // Separator at start/end produces empty trailing/leading entries.
+    let edges = ",a,b,".split(",");
+    assert(edges.len() == 4);
+    assert(edges[0] == "");
+    assert(edges[3] == "");
+
+    // KMP-divergent separator: "abab" inside "ababXabab" → ["", "X", ""]
+    let kmp_split = "ababXabab".split("abab");
+    assert(kmp_split.len() == 3);
+    assert(kmp_split[0] == "");
+    assert(kmp_split[1] == "X");
+    assert(kmp_split[2] == "");
+
+    // count_matches --------------------------------------------------
+    assert("abcabcabc".count("abc") == 3);
+    assert("hello".count("xyz") == 0);
+    assert("aaaa".count("aa") == 2);   // non-overlapping
+    assert("aaaaa".count("aa") == 2);
+    assert("ababab".count("aba") == 1); // non-overlapping greedy
+    assert("abababab".count("abab") == 2);
+
+    // Empty pattern returns char_count + 1 (matches Rust convention).
+    assert("abc".count("") == 4);
+    // Pattern longer than haystack is 0.
+    assert("ab".count("abcd") == 0);
+}
