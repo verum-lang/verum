@@ -791,9 +791,13 @@ implement AsyncRuntime {
                         let mut i = 0;
                         while i < count {
                             let result = results[i];
-                            let task_id = result.user_data as Int;
-                            if task_id > 0 && task_id != WAKE_TOKEN as Int {
-                                self.wake_task(task_id);
+                            // Compare in UInt64 space — WAKE_TOKEN is
+                            // UInt64 0xFFFF_FFFF_FFFF_FFFF (2^64-1)
+                            // which doesn't representably cast to Int64.
+                            // Filter the sentinel before narrowing.
+                            let user_data = result.user_data;
+                            if user_data > 0_u64 && user_data != WAKE_TOKEN {
+                                self.wake_task(user_data as Int);
                             }
                             i = i + 1;
                         }
@@ -813,9 +817,13 @@ implement AsyncRuntime {
                         let mut i = 0;
                         while i < count {
                             let result = results[i];
-                            let task_id = result.user_data as Int;
-                            if task_id > 0 && task_id != WAKE_TOKEN as Int {
-                                self.wake_task(task_id);
+                            // Compare in UInt64 space — WAKE_TOKEN is
+                            // UInt64 0xFFFF_FFFF_FFFF_FFFF (2^64-1)
+                            // which doesn't representably cast to Int64.
+                            // Filter the sentinel before narrowing.
+                            let user_data = result.user_data;
+                            if user_data > 0_u64 && user_data != WAKE_TOKEN {
+                                self.wake_task(user_data as Int);
                             }
                             i = i + 1;
                         }
@@ -834,9 +842,13 @@ implement AsyncRuntime {
                         let mut i = 0;
                         while i < count {
                             let result = results[i];
-                            let task_id = result.user_data as Int;
-                            if task_id > 0 && task_id != WAKE_TOKEN as Int {
-                                self.wake_task(task_id);
+                            // Compare in UInt64 space — WAKE_TOKEN is
+                            // UInt64 0xFFFF_FFFF_FFFF_FFFF (2^64-1)
+                            // which doesn't representably cast to Int64.
+                            // Filter the sentinel before narrowing.
+                            let user_data = result.user_data;
+                            if user_data > 0_u64 && user_data != WAKE_TOKEN {
+                                self.wake_task(user_data as Int);
                             }
                             i = i + 1;
                         }
