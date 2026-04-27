@@ -20,7 +20,7 @@
 // =============================================================================
 
 module core.runtime.ctx_bridge;
-mount sys.common.{ctx_get, ctx_set};
+mount sys.common.{ctx_get, ctx_set, ctx_clear, CONTEXT_SLOT_COUNT};
 mount mem.raw_ops.{load_i64};
 
 // =============================================================================
@@ -28,22 +28,38 @@ mount mem.raw_ops.{load_i64};
 // =============================================================================
 
 /// Get a context value from the current execution environment by slot ID.
-/// Returns the context value as Int (pointer), or 0 if not set.
+/// Returns the context value as Int (pointer), or 0 if not set or slot is
+/// out of range.
 /// Called by AOT-compiled CtxGet instruction.
 public fn env_ctx_get(slot_id: Int) -> Int {
-    ctx_get(slot_id)
+    if slot_id < 0 || slot_id >= CONTEXT_SLOT_COUNT {
+        return 0;
+    }
+    match ctx_get(slot_id as UInt8) {
+        Some(ptr) => ptr as Int,
+        None => 0,
+    }
 }
 
 /// Set a context value in the current execution environment.
-/// Called by AOT-compiled CtxProvide instruction.
+/// Called by AOT-compiled CtxProvide instruction. Out-of-range slots
+/// are silently dropped — generated code is expected to honour the
+/// 0..CONTEXT_SLOT_COUNT contract; this guard is defence in depth.
 public fn env_ctx_set(slot_id: Int, value: Int) {
-    ctx_set(slot_id, value);
+    if slot_id < 0 || slot_id >= CONTEXT_SLOT_COUNT {
+        return;
+    }
+    let bytes_ptr = unsafe { value as &unsafe Byte };
+    ctx_set(slot_id as UInt8, bytes_ptr);
 }
 
 /// Remove a context value from the current execution environment.
 /// Called by AOT-compiled CtxEnd instruction.
 public fn env_ctx_end(slot_id: Int) {
-    ctx_set(slot_id, 0);
+    if slot_id < 0 || slot_id >= CONTEXT_SLOT_COUNT {
+        return;
+    }
+    ctx_clear(slot_id as UInt8);
 }
 
 // =============================================================================
@@ -54,9 +70,9 @@ public fn env_ctx_end(slot_id: Int) {
 /// Used by spawn to know how many slots to copy to the child.
 public fn env_active_slot_count() -> Int {
     let mut count = 0;
-    let mut i = 0;
-    while i < 256 {
-        if ctx_get(i) != 0 {
+    let mut i: Int = 0;
+    while i < CONTEXT_SLOT_COUNT {
+        if ctx_get(i as UInt8).is_some() {
             count = count + 1;
         }
         i = i + 1;
@@ -67,15 +83,30 @@ public fn env_active_slot_count() -> Int {
 /// Copy all active context slots from the current thread to a new thread.
 /// Called by the spawn trampoline after thread creation.
 /// Takes a packed array of (slot_id, value) pairs.
+///
+/// Defends against three classes of caller bug: negative count, integer
+/// overflow on the offset computation, and out-of-range slot_id payloads
+/// from a corrupted slots buffer.
 public fn env_install_parent_contexts(slots_ptr: Int, count: Int) {
-    let mut i = 0;
+    if count <= 0 || slots_ptr == 0 {
+        return;
+    }
+    // 16-byte stride per entry; reject counts that would overflow Int when
+    // computing the buffer's last byte offset (`(count - 1) * 16 + 8`).
+    if count > (Int.MAX - 8) / 16 {
+        return;
+    }
+    let mut i: Int = 0;
     while i < count {
         // Each entry is 16 bytes: [slot_id: i64, value: i64].
         // `load_i64` is the `@intrinsic("load_i64")` raw-pointer load
         // exported from `core/mem/raw_ops.vr`.
         let slot_id = load_i64(slots_ptr + i * 16);
         let value = load_i64(slots_ptr + i * 16 + 8);
-        ctx_set(slot_id, value);
+        if slot_id >= 0 && slot_id < CONTEXT_SLOT_COUNT {
+            let bytes_ptr = unsafe { value as &unsafe Byte };
+            ctx_set(slot_id as UInt8, bytes_ptr);
+        }
         i = i + 1;
     }
 }
