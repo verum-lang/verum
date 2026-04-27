@@ -34,6 +34,12 @@ redis-cache = ["redis", "tokio"]
 verum_ast = { workspace = true }
 verum_common = { workspace = true }
 verum_error = { workspace = true }
+# Cross-target proof-replay framework consumes
+# verum_kernel::SmtCertificate to lower
+# certificates into target-language tactic chains. verum_kernel
+# does not depend on verum_smt (kernel is the trusted base
+# below SMT machinery), so this edge is acyclic.
+verum_kernel = { workspace = true }
 # Edge flipped 2026-04-24: verum_types → verum_smt dropped; verum_smt now
 # depends on verum_types. Concrete SMT bridges (refinement_backend /
 # dependent_backend / exhaustiveness_backend) live here and implement the
@@ -76,6 +82,8 @@ criterion = { workspace = true }
 lazy_static = "1.5"
 ctor = "0.6.1"
 tokio = { workspace = true, features = ["macros", "rt"] }
+# tempdir scaffolding for FileSystemCertificateStore round-trip tests.
+tempfile = { workspace = true }
 
 [[bench]]
 name = "tactic_selection_bench"

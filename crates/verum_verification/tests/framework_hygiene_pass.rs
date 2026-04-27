@@ -447,7 +447,7 @@ fn impl_methods_without_framework_unaffected() {
 }
 
 // =============================================================================
-// V8 (#209, B8) — designated meta-classifier corpus exemption
+// designated meta-classifier corpus exemption
 // =============================================================================
 
 #[test]

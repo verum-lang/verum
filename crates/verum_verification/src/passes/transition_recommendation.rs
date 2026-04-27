@@ -176,7 +176,7 @@ impl VerificationPass for TransitionRecommendationPass {
         "transition_recommendation"
     }
 
-    /// V8 (#208, B7) — transition recommendations are advisory.
+    /// transition recommendations are advisory.
     /// A "failure" here means the recommender produced no output
     /// for some functions, which is informational, not unsound.
     fn classification(&self) -> super::PassClassification {

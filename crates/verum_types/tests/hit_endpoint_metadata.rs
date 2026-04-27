@@ -43,6 +43,7 @@ fn hit_variant_carries_endpoint_metadata_through_ast() {
         where_clause: Maybe::None,
         attributes: List::new(),
         path_endpoints: Maybe::Some((from, to)),
+        path_dim: 1,
         span: span(),
     };
 
@@ -71,6 +72,7 @@ fn ordinary_variant_has_no_endpoints() {
         where_clause: Maybe::None,
         attributes: List::new(),
         path_endpoints: Maybe::None,
+        path_dim: 1,
         span: span(),
     };
 

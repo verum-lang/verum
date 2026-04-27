@@ -1,9 +1,9 @@
-//! Per-strategy dispatch contract tests (V8 #233, §12 closure).
+//! Per-strategy dispatch contract tests (, §12 closure).
 //!
-//! VVA §12 specifies 9 base strategies (`runtime`, `static`,
+//! specifies 9 base strategies (`runtime`, `static`,
 //! `fast`, `formal`, `proof`, `thorough`, `reliable`,
 //! `certified`, `synthesize`) plus 4 extension strategies
-//! (`complexity_typed` from VVA-8, `coherent_*` from VVA-6) for
+//! (`complexity_typed` from Bounded-arithmetic, `coherent_*` from Coherent verification) for
 //! a 13-variant ladder. This test file verifies each variant's
 //! contract per the spec table:
 //!
@@ -182,7 +182,7 @@ fn ladder_nu_ordinals_strictly_monotone_excluding_synthesize() {
 
 #[test]
 fn nine_base_strategies_all_present_in_ladder() {
-    // Per VVA §12: 9 base strategies must be in LADDER.
+    // The nine base strategies must be present in LADDER.
     let nine_base = [
         VerifyStrategy::Runtime,
         VerifyStrategy::Static,

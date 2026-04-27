@@ -1304,7 +1304,9 @@ impl TacticEvaluator {
     /// let tactic = TacticDecl {
     ///     visibility: Visibility::Public,
     ///     name: Ident::new(Text::from("my_tactic"), Span::dummy()),
+    ///     generics: List::new(),
     ///     params: List::new(),
+    ///     generic_where_clause: verum_common::Maybe::None,
     ///     body: TacticBody::Simple(TacticExpr::Auto { with_hints: List::new() }),
     ///     attributes: List::new(),
     ///     span: Span::dummy(),

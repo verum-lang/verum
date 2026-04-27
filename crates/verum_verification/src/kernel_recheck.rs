@@ -1,4 +1,5 @@
-//! Kernel-rule recheck pass — VVA-1/VVA-3/VVA-7 V0 wiring.
+//! Kernel-rule recheck pass — naturality / categorical-coherence /
+//! modal-depth wiring.
 //!
 //! This module bridges `verum_kernel`'s trusted-base K-rules
 //! (`check_eps_mu_coherence`, `check_universe_ascent`,
@@ -188,7 +189,7 @@ impl KernelRecheck {
             },
             &mut out,
         );
-        // V4 (#191) — descend into the function body to surface
+        // descend into the function body to surface
         // refinements declared in `let x: Int{...} = ...` bindings
         // and inside nested control-flow blocks. Real Verum code
         // (vcs/specs/L1-core/refinement/verification/array_indexing.vr)
@@ -205,7 +206,7 @@ impl KernelRecheck {
                 }
             }
         }
-        // V8 (#210, B9) — descend into requires / ensures clauses.
+        // descend into requires / ensures clauses.
         // Pre/postcondition expressions can mention refinement
         // types via `where` clauses or named refinements; pre-V8
         // these escaped the kernel-recheck. The contract-style
@@ -222,7 +223,7 @@ impl KernelRecheck {
         out
     }
 
-    /// V6 (#200) — recheck a theorem / lemma / corollary
+    /// recheck a theorem / lemma / corollary
     /// declaration. Same FunctionParam-shaped signature as
     /// `recheck_function`; refinement types in params or return
     /// type are walked through K-Refine-omega.
@@ -239,7 +240,7 @@ impl KernelRecheck {
             },
             &mut out,
         );
-        // V8 (#210, B9) — walk theorem requires/ensures as well.
+        // walk theorem requires/ensures as well.
         // Theorems carry the same pre/post contract surface as
         // functions; same refinement-type leak applies pre-V8.
         for req in theorem.requires.iter() {
@@ -255,7 +256,7 @@ impl KernelRecheck {
         out
     }
 
-    /// V6 (#200) — recheck an axiom declaration. Axioms can
+    /// recheck an axiom declaration. Axioms can
     /// carry refinement types in their parameter list and return
     /// type (e.g., `axiom positive_succ(n: Nat{> 0}) -> Nat{> n}`);
     /// these previously escaped K-rule checking entirely.
@@ -272,7 +273,7 @@ impl KernelRecheck {
             },
             &mut out,
         );
-        // V8 (#210, B9): the axiom's `proposition` field carries
+        // : the axiom's `proposition` field carries
         // the assumed claim. While the proposition isn't a
         // refinement-bearing type itself, it CAN reference
         // refinement-typed sub-terms via path expressions that
@@ -396,7 +397,7 @@ fn recheck_signature_into<'a, I>(
 }
 
 // =============================================================================
-// V4 — function-body walker for let-binding refinements (#191)
+// V4 — function-body walker for let-binding refinements 
 // =============================================================================
 
 /// Walk an AST [`Block`] for refinement-type-bearing constructs in
@@ -437,7 +438,7 @@ pub(crate) fn walk_ast_block_for_recheck(
             | verum_ast::stmt::StmtKind::Errdefer(e) => {
                 walk_ast_expr_for_recheck(e, function_name, out);
             }
-            // V7 (#201) — Item declarations inside fn bodies
+            // Item declarations inside fn bodies
             // (nested fns, types, theorems, axioms). The module-
             // level pipeline pass walks ONLY top-level items, so
             // pre-V7 these escaped the kernel-recheck entirely.
@@ -454,7 +455,7 @@ pub(crate) fn walk_ast_block_for_recheck(
     }
 }
 
-/// V7 (#201) — walk a nested ItemKind that appeared as a Stmt
+/// walk a nested ItemKind that appeared as a Stmt
 /// inside a function body. The module-level KernelRecheckPass
 /// only walks TOP-level items; nested fns / types / theorems /
 /// axioms inside `fn outer() { fn inner(...) ... }` would otherwise
@@ -665,7 +666,7 @@ pub fn lift_types_type_to_core(ty: &TypesType) -> CoreTerm {
             return_type,
             ..
         } => {
-            // V3 + V8 (#204) — fold params + return_type into an
+            // V3 + fold params + return_type into an
             // App chain. The `..` deliberately discards
             // `contexts: Option<ContextExpr>` and
             // `properties: Option<PropertySet>` from the lift:
@@ -737,7 +738,7 @@ where
 /// operator support is wired so K-Refine-omega correctly rejects
 /// over-stratified predicates (the canonical V1 use case).
 ///
-/// V3 extension (#190): composite-expression coverage. Previously
+/// composite-expression coverage. Previously
 /// `Binary` / `Unary` / `Call` / `If` / `Match` / `Block` /
 /// `Literal` collapsed to opaque `Var("<unsupported-expr>")`
 /// placeholders (rank 0 to `m_depth_omega`), which silently
@@ -1146,7 +1147,7 @@ mod tests {
         }
     }
 
-    // ---- V3 lifter extension: composite expression shapes (#190) ----
+    // ---- V3 lifter extension: composite expression shapes  ----
 
     use verum_ast::expr::{BinOp, Block, IfCondition, UnOp};
     use verum_ast::literal::{IntLit, Literal, LiteralKind};

@@ -451,7 +451,7 @@ fn recheck_function_walks_through_explicit_binder() {
 }
 
 // =============================================================================
-// V8 (#210, B9) — requires/ensures clauses must be walked
+// requires/ensures clauses must be walked
 // =============================================================================
 
 fn make_function_with_contract(

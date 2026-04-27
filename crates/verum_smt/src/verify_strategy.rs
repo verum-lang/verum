@@ -67,7 +67,7 @@ use crate::backend_switcher::BackendChoice;
 /// When the Verum compiler migrates to a custom in-house solver, existing
 /// user annotations remain valid without modification. Only the internal
 /// dispatch logic in `BackendSwitcher` changes.
-/// The nine-strategy verification ladder (VVA §2.3, §12).
+/// The nine-strategy verification ladder.
 ///
 /// Each variant is SOUND; they differ in completeness and cost. The
 /// ordering forms a monotone lift: a function that passes
@@ -93,7 +93,7 @@ pub enum VerifyStrategy {
     Fast,
 
     /// `@verify(complexity_typed)` — bounded-arithmetic verification
-    /// (VVA-8 V0). Polynomial-time obligations discharged through the
+    /// (Bounded-arithmetic (V0)). Polynomial-time obligations discharged through the
     /// V_0 / V_1 / S^1_2 / V_NP / V_PH / IΔ_0 stratum chosen at the
     /// pragma level; CI budget ≤ 30 s; UNKNOWN → conservative accept.
     /// ν = 3 (strictly between `Fast` and `Formal`).
@@ -125,20 +125,20 @@ pub enum VerifyStrategy {
     Certified,
 
     /// `@verify(coherent_static)` — α-cert + symbolic ε-claim
-    /// (VVA-6 V1 weak coherence). The α-articulation is verified
+    /// (Coherent verification weak coherence). The α-articulation is verified
     /// `certified`-style; the ε-coordinate side is discharged through
     /// the symbolic ε-claim attached at `@enact(epsilon = ...)`. No
     /// runtime monitor. Polynomial; CI budget ≤ 60 s. ν = ω · 2 + 3.
     CoherentStatic,
 
     /// `@verify(coherent_runtime)` — α-cert + runtime ε-monitor
-    /// (VVA-6 V1 hybrid coherence). The α-side is `certified`; the
+    /// (Coherent verification hybrid coherence). The α-side is `certified`; the
     /// ε-side is checked at runtime through the monitor wired by
     /// `core.action.coherence_monitor`. Trace-bounded; CI budget
     /// ≤ 5 min. ν = ω · 2 + 4.
     CoherentRuntime,
 
-    /// `@verify(coherent)` — α/ε bidirectional check (VVA-6 V1
+    /// `@verify(coherent)` — α/ε bidirectional check (Coherent verification
     /// strict). Both the α-articulation and the ε-coordinate are
     /// discharged at compile time; the kernel re-checks both
     /// certificates. Single-exponential; CI budget ≤ 30 min.
@@ -152,9 +152,9 @@ pub enum VerifyStrategy {
 }
 
 /// The Diakrisis ν-invariant ordinal assigned to a verification
-/// strategy (VVA §12 Table). Each strategy gets a *distinct* ordinal
+/// strategy (Table). Each strategy gets a *distinct* ordinal
 /// so the monotone ladder `0 < 1 < 2 < ω < ω+1 < ω·2 < ω·2+1 <
-/// ω·2+2 < ω·3+1` is strictly ordered (VVA §2.3 strict-monotonicity
+/// ω·2+2 < ω·3+1` is strictly ordered (strict-monotonicity
 /// claim). Earlier coarse buckets (`FiniteBelowOmega`, `OmegaTwice`)
 /// are gone; pattern-match exhaustively against the nine variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,7 +165,7 @@ pub enum NuOrdinal {
     FiniteOne,
     /// ν = 2 — `fast`: bounded single-solver SMT.
     FiniteTwo,
-    /// ν = 3 — `complexity_typed`: VVA-8 bounded-arithmetic.
+    /// ν = 3 — `complexity_typed`: Bounded-arithmetic bounded-arithmetic.
     FiniteThree,
     /// ν = ω — `formal`: portfolio SMT.
     Omega,
@@ -177,11 +177,11 @@ pub enum NuOrdinal {
     OmegaTwicePlusOne,
     /// ν = ω · 2 + 2 — `certified`: certificate materialisation + recheck + export.
     OmegaTwicePlusTwo,
-    /// ν = ω · 2 + 3 — `coherent_static`: VVA-6 weak (α-cert + symbolic ε-claim).
+    /// ν = ω · 2 + 3 — `coherent_static`: Coherent verification weak (α-cert + symbolic ε-claim).
     OmegaTwicePlusThree,
-    /// ν = ω · 2 + 4 — `coherent_runtime`: VVA-6 hybrid (α-cert + runtime ε-monitor).
+    /// ν = ω · 2 + 4 — `coherent_runtime`: Coherent verification hybrid (α-cert + runtime ε-monitor).
     OmegaTwicePlusFour,
-    /// ν = ω · 2 + 5 — `coherent`: VVA-6 strict (α/ε bidirectional check).
+    /// ν = ω · 2 + 5 — `coherent`: Coherent verification strict (α/ε bidirectional check).
     OmegaTwicePlusFive,
     /// ν ≤ ω · 3 + 1 — `synthesize`: inverse search across 𝔐 (orthogonal).
     OmegaThricePlusOne,
@@ -208,7 +208,7 @@ impl NuOrdinal {
     }
 
     /// Strict total order on the ladder — mirrors the strict-monotone
-    /// semantics of VVA §2.3. The `≤` in `≤ω·3+1` means `synthesize`
+    /// semantics of The `≤` in `≤ω·3+1` means `synthesize`
     /// has an upper bound but its exact ν depends on the synthesised
     /// witness's strategy; callers that care about the orthogonality
     /// should use [`VerifyStrategy::is_synthesis`] explicitly.
@@ -240,7 +240,7 @@ impl std::fmt::Display for NuOrdinal {
 impl VerifyStrategy {
     /// All thirteen strategies in monotone-lift order (`Synthesize`
     /// last, orthogonal). Useful for diagnostics and iteration. Per
-    /// VVA-6 V1 + VVA-8 V0 the ladder grew from 9 → 13 entries with
+    /// Coherent verification + Bounded-arithmetic (V0) the ladder grew from 9 → 13 entries with
     /// `ComplexityTyped` (ν = 3) inserted between `Fast` and `Formal`,
     /// and the three coherent variants (`CoherentStatic`,
     /// `CoherentRuntime`, `Coherent`) inserted between `Certified`
@@ -267,7 +267,7 @@ impl VerifyStrategy {
     /// Legacy aliases (`quick`/`rapid`, `robust`, `cross_validate`,
     /// `synthesis`/`synth`) are preserved so existing `.vr` sources
     /// keep working; `proof` and `reliable` are now distinct from
-    /// `formal` and `thorough` respectively (VVA §12).
+    /// `formal` and `thorough` respectively .
     pub fn from_attribute_value(value: &str) -> Option<Self> {
         match value.to_lowercase().as_str() {
             "runtime" => Some(Self::Runtime),
@@ -314,7 +314,7 @@ impl VerifyStrategy {
         }
     }
 
-    /// Diakrisis ν-invariant ordinal for this strategy (VVA §12 table).
+    /// Diakrisis ν-invariant ordinal for this strategy (table).
     /// Strictly monotone in `<` — every strategy gets a distinct ordinal.
     pub fn nu_ordinal(&self) -> NuOrdinal {
         match self {
@@ -334,7 +334,7 @@ impl VerifyStrategy {
         }
     }
 
-    /// Monotone-lift rank on the verification ladder (VVA §2.3).
+    /// Monotone-lift rank on the verification ladder .
     /// Higher rank ⇒ stricter strategy. A function passing rank `k`
     /// MUST also pass every rank `< k` (the compiler enforces this
     /// by construction — any strategy implies all weaker ones).
@@ -422,7 +422,7 @@ impl VerifyStrategy {
 
     /// True if the strategy must produce a kernel-rechecked
     /// certificate artifact. `Certified` produces the α-cert; the
-    /// `Coherent*` variants produce α + ε certificates per VVA-6 V1.
+    /// `Coherent*` variants produce α + ε certificates per Coherent verification.
     pub fn requires_certificate(&self) -> bool {
         matches!(
             self,
@@ -439,7 +439,7 @@ impl VerifyStrategy {
         !matches!(self, Self::Runtime | Self::Static | Self::Proof)
     }
 
-    /// True if the strategy is one of the three VVA-6 V1 coherent
+    /// True if the strategy is one of the three Coherent verification coherent
     /// variants (α/ε bidirectional or α + symbolic ε / α + runtime ε).
     pub fn is_coherent(&self) -> bool {
         matches!(
@@ -507,21 +507,85 @@ impl VerifyStrategy {
 
     /// Recommended timeout multiplier for this strategy. The base
     /// is `Formal` at 1.0× (5 s). Bounded-arithmetic and the coherent
-    /// variants get longer budgets per VVA-6/VVA-8 V0.
+    /// variants get longer budgets per Coherent verification/Bounded-arithmetic (V0).
     pub fn timeout_multiplier(&self) -> f64 {
         match self {
             Self::Runtime | Self::Static | Self::Proof => 0.0, // no SMT timeout
             Self::Fast => 0.3,             // 30% of base (≤100ms)
-            Self::ComplexityTyped => 6.0,  // VVA-8 CI budget ≤ 30 s
+            Self::ComplexityTyped => 6.0,  // Bounded-arithmetic CI budget ≤ 30 s
             Self::Formal => 1.0,           // base (5 s)
             Self::Thorough => 2.0,         // 2× formal
             Self::Reliable => 3.0,         // two solvers, agreement required
             Self::Certified => 3.0,        // reliable + cert materialisation
-            Self::CoherentStatic => 12.0,  // VVA-6 weak — CI budget ≤ 60 s
-            Self::CoherentRuntime => 60.0, // VVA-6 hybrid — CI budget ≤ 5 min
-            Self::Coherent => 360.0,       // VVA-6 strict — CI budget ≤ 30 min
+            Self::CoherentStatic => 12.0,  // Coherent verification weak — CI budget ≤ 60 s
+            Self::CoherentRuntime => 60.0, // Coherent verification hybrid — CI budget ≤ 5 min
+            Self::Coherent => 360.0,       // Coherent verification strict — CI budget ≤ 30 min
             Self::Synthesize => 5.0,       // synthesis is hard
         }
+    }
+
+    /// timeout semantics
+    /// for this strategy. Three layers:
+    ///
+    /// * **WallClock (default)** — real elapsed time matching user
+    ///   expectations ("verify must complete in X seconds").
+    ///   Non-deterministic on CI under load; simple to reason about.
+    /// * **SolverResourceCounter** — solver-internal operation count
+    ///   (Z3: `rlimit`, CVC5: `--rlimit`). Deterministic across runs;
+    ///   harder to translate to user-facing budget. Selected when
+    ///   `VERUM_DETERMINISTIC_TIMEOUT=1` or `--deterministic-timeout`.
+    /// * **Cooperative** — signal-based abort. Always layered on
+    ///   top so partial results can be inspected post-mortem
+    ///   regardless of the primary semantics.
+    ///
+    /// `Runtime` / `Static` / `Proof` never time out (they don't
+    /// invoke an SMT solver) — return `TimeoutSemantics::None`.
+    pub fn timeout_semantics(&self) -> TimeoutSemantics {
+        if self.timeout_multiplier() <= 0.0 {
+            return TimeoutSemantics::None;
+        }
+        // Honour the deterministic-timeout opt-in.
+        let deterministic = std::env::var("VERUM_DETERMINISTIC_TIMEOUT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if deterministic {
+            TimeoutSemantics::SolverResourceCounter
+        } else {
+            TimeoutSemantics::WallClock
+        }
+    }
+}
+
+/// primary timeout
+/// semantics layer. `Cooperative` (signal-based abort) always
+/// rides on top of the chosen primary layer; this enum picks the
+/// primary layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutSemantics {
+    /// Strategy doesn't invoke an SMT solver; no timeout applies.
+    None,
+    /// Wall-clock elapsed time. Default. Non-deterministic on CI
+    /// under load but simple and matches user expectations.
+    WallClock,
+    /// Solver-internal resource counter (Z3 `rlimit` / CVC5
+    /// `--rlimit`). Deterministic across runs; opt-in via
+    /// `VERUM_DETERMINISTIC_TIMEOUT=1`.
+    SolverResourceCounter,
+}
+
+impl TimeoutSemantics {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::WallClock => "wall-clock",
+            Self::SolverResourceCounter => "solver-resource-counter",
+        }
+    }
+}
+
+impl std::fmt::Display for TimeoutSemantics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -650,9 +714,10 @@ mod tests {
 
     #[test]
     fn parses_aliases() {
-        // After VVA §12, `proof` and `reliable` are DISTINCT variants,
-        // not aliases of `formal` / `thorough`. Only legacy aliases
-        // (robust, cross_validate, quick/rapid, synthesis/synth) remain.
+        // `proof` and `reliable` are DISTINCT variants in the
+        // canonical ladder, not aliases of `formal` / `thorough`. Only
+        // legacy aliases (robust, cross_validate, quick/rapid,
+        // synthesis/synth) remain.
         assert_eq!(
             VerifyStrategy::from_attribute_value("proof"),
             Some(VerifyStrategy::Proof)
@@ -769,7 +834,7 @@ mod tests {
     }
 
     // ========================================================================
-    // VVA-6 V1 — coherent strategy backend wiring
+    // Coherent verification — coherent strategy backend wiring
     // ========================================================================
 
     #[test]
@@ -843,7 +908,7 @@ mod tests {
 
     #[test]
     fn nu_ordinals_strictly_monotone_through_ladder() {
-        // Per VVA-6 V1 + VVA-8 V0: the 13-strategy LADDER must keep its
+        // Per Coherent verification + Bounded-arithmetic (V0): the 13-strategy LADDER must keep its
         // strict-monotone ν-invariant. For each adjacent pair, rank is
         // strictly increasing.
         let ranks: Vec<u8> =
@@ -860,7 +925,7 @@ mod tests {
 
     #[test]
     fn coherent_timeout_budgets_match_vfe_6_spec() {
-        // VVA-6 V1: weak ≤60 s, hybrid ≤5 min, strict ≤30 min.
+        // Coherent verification: weak ≤60 s, hybrid ≤5 min, strict ≤30 min.
         // Base is `Formal` at 1.0× (5 s).
         let base_seconds = 5.0;
         let cs = VerifyStrategy::CoherentStatic.timeout_multiplier() * base_seconds;
@@ -1014,5 +1079,110 @@ mod tests {
     fn extract_from_empty_attributes() {
         let attrs: List<Attribute> = List::new();
         assert_eq!(extract_from_attributes(&attrs), None);
+    }
+
+    // timeout semantics tests.
+
+    #[test]
+    fn timeout_semantics_none_for_non_smt_strategies() {
+        assert_eq!(
+            VerifyStrategy::Runtime.timeout_semantics(),
+            TimeoutSemantics::None
+        );
+        assert_eq!(
+            VerifyStrategy::Static.timeout_semantics(),
+            TimeoutSemantics::None
+        );
+        assert_eq!(
+            VerifyStrategy::Proof.timeout_semantics(),
+            TimeoutSemantics::None
+        );
+    }
+
+    /// Combined test serialising env-state for both default
+    /// (wall-clock) and opt-in (solver-counter) paths. cargo test
+    /// runs tests in parallel by default; sharing
+    /// VERUM_DETERMINISTIC_TIMEOUT across two tests races on env
+    /// state. Combining keeps a single sequential walk over the
+    /// state machine.
+    #[test]
+    fn timeout_semantics_env_state_machine() {
+        let env_lock = TIMEOUT_ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("VERUM_DETERMINISTIC_TIMEOUT").ok();
+
+        // Phase 1: default wall-clock for all SMT-bearing strategies.
+        unsafe { std::env::remove_var("VERUM_DETERMINISTIC_TIMEOUT") };
+        for s in [
+            VerifyStrategy::Fast,
+            VerifyStrategy::ComplexityTyped,
+            VerifyStrategy::Formal,
+            VerifyStrategy::Thorough,
+            VerifyStrategy::Reliable,
+            VerifyStrategy::Certified,
+            VerifyStrategy::CoherentStatic,
+            VerifyStrategy::CoherentRuntime,
+            VerifyStrategy::Coherent,
+            VerifyStrategy::Synthesize,
+        ] {
+            assert_eq!(
+                s.timeout_semantics(),
+                TimeoutSemantics::WallClock,
+                "{s:?} default must be WallClock"
+            );
+        }
+
+        // Phase 2: opt-in via "1" / "true" / "TRUE".
+        for canonical in ["1", "true", "TRUE"] {
+            unsafe { std::env::set_var("VERUM_DETERMINISTIC_TIMEOUT", canonical) };
+            assert_eq!(
+                VerifyStrategy::Formal.timeout_semantics(),
+                TimeoutSemantics::SolverResourceCounter,
+                "env={canonical} must select SolverResourceCounter"
+            );
+        }
+
+        // Phase 3: non-canonical values stay wall-clock.
+        for non_canonical in ["0", "no", "false"] {
+            unsafe { std::env::set_var("VERUM_DETERMINISTIC_TIMEOUT", non_canonical) };
+            assert_eq!(
+                VerifyStrategy::Formal.timeout_semantics(),
+                TimeoutSemantics::WallClock,
+                "env={non_canonical} must keep WallClock"
+            );
+        }
+
+        // Phase 4: non-SMT strategies always None.
+        unsafe { std::env::set_var("VERUM_DETERMINISTIC_TIMEOUT", "1") };
+        assert_eq!(
+            VerifyStrategy::Runtime.timeout_semantics(),
+            TimeoutSemantics::None
+        );
+        assert_eq!(
+            VerifyStrategy::Static.timeout_semantics(),
+            TimeoutSemantics::None
+        );
+        assert_eq!(
+            VerifyStrategy::Proof.timeout_semantics(),
+            TimeoutSemantics::None
+        );
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("VERUM_DETERMINISTIC_TIMEOUT", v) },
+            None => unsafe { std::env::remove_var("VERUM_DETERMINISTIC_TIMEOUT") },
+        }
+        drop(env_lock);
+    }
+
+    use std::sync::Mutex;
+    static TIMEOUT_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn timeout_semantics_display_round_trip() {
+        assert_eq!(format!("{}", TimeoutSemantics::None), "none");
+        assert_eq!(format!("{}", TimeoutSemantics::WallClock), "wall-clock");
+        assert_eq!(
+            format!("{}", TimeoutSemantics::SolverResourceCounter),
+            "solver-resource-counter"
+        );
     }
 }

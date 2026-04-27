@@ -308,7 +308,7 @@ impl SpecializationVerifier {
                 }
                 self.extract_type_params_from_type(return_type, params);
             }
-            // Refinement types (VVA §5 canonical: all three forms collapse here)
+            // Refinement types (canonical: all three forms collapse here)
             TypeKind::Refined { base, .. } => {
                 self.extract_type_params_from_type(base, params);
             }
@@ -692,7 +692,7 @@ impl SpecializationVerifier {
             | TypeKind::VolatilePointer { inner, .. }
             | TypeKind::Ownership { inner, .. }
             | TypeKind::GenRef { inner } => self.is_generic_with_context(inner.as_ref(), impl_idx),
-            // Refinement types (VVA §5 canonical) - check base type
+            // Refinement types (canonical) - check base type
             TypeKind::Refined { base, .. } => self.is_generic_with_context(base.as_ref(), impl_idx),
             // Bounded types - check base type
             TypeKind::Bounded { base, .. } => self.is_generic_with_context(base.as_ref(), impl_idx),

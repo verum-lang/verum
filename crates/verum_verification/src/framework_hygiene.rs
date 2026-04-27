@@ -172,7 +172,7 @@ pub fn validate_meta_classifier_uniqueness(
         rule: "R3",
         severity: HygieneSeverity::Error,
         message: Text::from(format!(
-            "multiple meta-classifier frameworks detected: {}. Per VVA §10.4.1 only one \
+            "multiple meta-classifier frameworks detected: {}. Per only one \
              framework may play the meta-classifier role at a time; the others must be \
              coordinate-point frameworks.",
             names.join(", ")
@@ -275,11 +275,11 @@ pub struct HygieneRecheckPass {
     /// count for a corpus to qualify as a meta-classifier
     /// candidate. Default 5 (matches the structural signature
     /// from `core/meta/framework_hygiene.vr`); configurable per
-    /// corpus per #203 (e.g., owl2_fs ships 64 axioms vs custom
+    /// corpus (e.g., owl2_fs ships 64 axioms vs custom
     /// user packages with 2-3).
     meta_classifier_threshold: usize,
-    /// V8 (#209, B8) — designated meta-classifier corpus, exempt
-    /// from R3 threshold counting. VVA §10.4.1 mandates exactly
+    /// designated meta-classifier corpus, exempt
+    /// from R3 threshold counting. mandates exactly
     /// one corpus play the meta-classifier role; the designation
     /// is a project-level configuration item, not derived from
     /// axiom count alone. Pre-V8 the designated corpus was
@@ -294,7 +294,7 @@ pub struct HygieneRecheckPass {
     designated_meta_classifier: Option<Text>,
 }
 
-/// Default R3 threshold per VVA §13 / `framework_hygiene.vr`.
+/// Default R3 threshold / `framework_hygiene.vr`.
 pub const DEFAULT_META_CLASSIFIER_THRESHOLD: usize = 5;
 
 impl Default for HygieneRecheckPass {
@@ -325,7 +325,7 @@ impl HygieneRecheckPass {
         }
     }
 
-    /// V8 (#209, B8) — set the designated meta-classifier corpus.
+    /// set the designated meta-classifier corpus.
     /// That corpus is exempt from R3 threshold counting per VVA
     /// §10.4.1: the designated corpus is *expected* to ship many
     /// foundational axioms; only undesignated corpora reaching
@@ -340,7 +340,7 @@ impl HygieneRecheckPass {
         self.meta_classifier_threshold
     }
 
-    /// V8 (#209, B8) — name of the designated meta-classifier
+    /// name of the designated meta-classifier
     /// corpus, if any. Returns `None` when no designation is
     /// set (pre-V8 fallback behaviour).
     pub fn designated_meta_classifier(&self) -> Option<&Text> {
@@ -415,7 +415,7 @@ impl VerificationPass for HygieneRecheckPass {
                 &item.kind,
                 &mut framework_corpus_axiom_count,
             );
-            // V2 (#193) — descend into impl blocks. Methods inside
+            // descend into impl blocks. Methods inside
             // `implement Foo { fn method(...) { ... } }` can carry
             // @framework / @enact attributes; these were invisible
             // to the V0 walker.
@@ -438,14 +438,14 @@ impl VerificationPass for HygieneRecheckPass {
             }
         }
 
-        // R3 — count meta-classifier candidates per VVA §10.4.1.
+        // R3 — count meta-classifier candidates.
         // A corpus qualifies as a meta-classifier candidate when
         // it ships ≥ `meta_classifier_threshold` framework-
         // annotated declarations (default 5, configurable per
-        // corpus per #203).
+        // corpus ).
         //
-        // V8 (#209, B8) — the designated meta-classifier corpus
-        // is exempt from this counting. VVA §10.4.1 names the
+        // the designated meta-classifier corpus
+        // is exempt from this counting. names the
         // designated corpus as the legitimate occupant of the
         // meta-classifier role; treating it as a "candidate"
         // would let R3 fire against the corpus that's allowed
@@ -462,7 +462,7 @@ impl VerificationPass for HygieneRecheckPass {
             meta_classifier_candidates.push(corpus.clone());
         }
 
-        // R4 (#197 V0) — framework-compatibility audit. Walk every
+        // R4  — framework-compatibility audit. Walk every
         // (distinct) corpus appearing in @framework annotations
         // through the well-known incompatibility matrix. Each
         // match surfaces an Error-severity diagnostic; the

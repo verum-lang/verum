@@ -2077,7 +2077,7 @@ impl CodeGenerator {
                 )
             }
 
-            // Refinement types (VVA §5) carry all three surface forms.
+            // Refinement types  carry all three surface forms.
             // Render the sigma form (`x: T where P(x)`) when the predicate
             // carries an explicit binder; otherwise render the inline form.
             TypeKind::Refined { base, predicate } => {

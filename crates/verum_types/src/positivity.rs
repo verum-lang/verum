@@ -1,6 +1,6 @@
 //! Strict-positivity check for user-declared inductive types.
 //!
-//! VVA §7.3 K-Pos / Coquand & Paulin 1990: an inductive type `T` is
+//! K-Pos / Coquand & Paulin 1990: an inductive type `T` is
 //! well-formed only when every recursive occurrence of `T` in any
 //! constructor's argument types appears strictly positively. Berardi
 //! 1998 establishes that admitting non-positive recursion in a system
@@ -8,7 +8,7 @@
 //! the kernel therefore must reject every constructor whose argument
 //! type contains `T` to the LEFT of an arrow.
 //!
-//! VVA #150 (audit-derived task): C2 V1 shipped the kernel-side
+//! Audit-derived task: C2 V1 shipped the kernel-side
 //! `verum_kernel::InductiveRegistry::register` + `check_strict_
 //! positivity` walker, but they had ZERO call sites in the type-
 //! checker dispatch — user types `type Bad is Wrap(Bad -> A);`

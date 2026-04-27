@@ -29,7 +29,7 @@ use super::{
     VerificationResult,
 };
 
-/// V8 (#208, B7) — pipeline-level halt policy.
+/// pipeline-level halt policy.
 ///
 /// Mediates between the two valid contracts that the V0 pipeline
 /// could not separate:
@@ -75,7 +75,7 @@ impl PipelineMode {
 /// Verification pipeline combining all passes.
 pub struct VerificationPipeline {
     passes: List<Box<dyn VerificationPass>>,
-    /// V8 (#208, B7) — halt policy. Default
+    /// halt policy. Default
     /// [`PipelineMode::Default`] gates fail-fast on
     /// SoundnessCritical class only.
     mode: PipelineMode,
@@ -90,7 +90,7 @@ impl VerificationPipeline {
         }
     }
 
-    /// V8 (#208, B7) — configure the halt policy. Builder-style;
+    /// configure the halt policy. Builder-style;
     /// returns `self` so call-sites read naturally:
     /// `VerificationPipeline::full_verification_pipeline().with_mode(PipelineMode::Aggregate)`.
     pub fn with_mode(mut self, mode: PipelineMode) -> Self {
@@ -98,7 +98,7 @@ impl VerificationPipeline {
         self
     }
 
-    /// V8 (#208, B7) — read-only accessor for the configured halt
+    /// read-only accessor for the configured halt
     /// policy.
     pub fn mode(&self) -> PipelineMode {
         self.mode
@@ -148,7 +148,7 @@ impl VerificationPipeline {
     /// and not always available; callers that want the full
     /// pipeline should use [`Self::full_verification_pipeline`].
     ///
-    /// Renamed from `default_pipeline` (#202): the original name
+    /// Renamed from `default_pipeline`: the original name
     /// was misleading because users reasonably expected "default
     /// verification" to include SMT discharge. The 5-pass
     /// composition is the right default for AOT/build paths that
@@ -159,7 +159,7 @@ impl VerificationPipeline {
     /// VVA policy to [`crate::extension_policy::ExtensionPolicy::AllRulesActive`]
     /// (the pre-V8 always-on rule set). Callers wanting Year 0–2
     /// `OptInOnly` semantics from `verification-architecture.md`
-    /// §4.4 + VVA §0.0 governance should use
+    /// §4.4 + governance should use
     /// [`Self::static_analysis_pipeline_with_kernel_policy`].
     pub fn static_analysis_pipeline() -> Self {
         Self::static_analysis_pipeline_with_kernel_policy(
@@ -167,7 +167,7 @@ impl VerificationPipeline {
         )
     }
 
-    /// V8 (#218) — static-analysis pipeline with explicit
+    /// static-analysis pipeline with explicit
     /// kernel-recheck VVA governance policy.
     ///
     /// `kernel_policy` is propagated to the [`KernelRecheckPass`]
@@ -176,7 +176,7 @@ impl VerificationPipeline {
     /// `K-Refine-omega`) only fire when the policy admits them
     /// for the surrounding scope.
     ///
-    /// Per VVA §0.0 rollout calendar:
+    /// Per rollout calendar:
     ///   * **Year 0–2** — `ExtensionPolicy::OptInOnly` (modules must
     ///     `@require_extension(vfe_N)` to engage VVA rules).
     ///   * **Year 2–4** — `ExtensionPolicy::OptOutOnly` (rules
@@ -199,11 +199,11 @@ impl VerificationPipeline {
         // sets per-function scopes) but *before* boundary
         // detection / transition recommendation — kernel-rule
         // failures are formation errors that should short-circuit
-        // the rest of the pipeline (#187 V0).
+        // the rest of the pipeline .
         pipeline.add_pass(Box::new(
             KernelRecheckPass::new().with_policy(kernel_policy),
         ));
-        // HygieneRecheckPass (#190) — framework-author discipline
+        // HygieneRecheckPass  — framework-author discipline
         // (R1 brand-prefix names, R2 ε-coordinate canonicalisable,
         // R3 meta-classifier uniqueness). R1/R2 are Warnings;
         // R3 is Error and triggers fail-fast. Runs after
@@ -245,7 +245,7 @@ impl VerificationPipeline {
         pipeline
     }
 
-    /// V8 (#218) — full-verification pipeline with explicit
+    /// full-verification pipeline with explicit
     /// kernel-recheck VVA governance policy. Equivalent to
     /// [`Self::static_analysis_pipeline_with_kernel_policy`] +
     /// [`SmtVerificationPass`] terminator.

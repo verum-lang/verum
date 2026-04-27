@@ -104,7 +104,7 @@ impl VerificationResult {
     }
 }
 
-/// V8 (#208, B7) — pass classification for the
+/// pass classification for the
 /// fail-fast / aggregate decision.
 ///
 /// The default classification is [`PassClassification::SoundnessCritical`]
@@ -141,7 +141,7 @@ pub trait VerificationPass {
     /// Name of this pass
     fn name(&self) -> &str;
 
-    /// V8 (#208, B7) — pass classification. Default
+    /// pass classification. Default
     /// `SoundnessCritical` to preserve pre-V8 fail-fast semantics
     /// for unmodified passes; passes that want their failures to
     /// be aggregated rather than halt the pipeline override to
