@@ -994,7 +994,7 @@ public fn zero<T>(ptr: &mut T, count: Int) {
 /// in managed-reference form throughout — the codegen does not need to
 /// fabricate a raw `&unsafe T` from a `&mut T`, which would mis-cast a
 /// boxed value to a pointer and surface at runtime as
-/// `Expected pointer, got Some(N)`.  Mirrors `core.intrinsics.memory::swap`
+/// `Expected pointer, got Some(N)`.  Mirrors `core.intrinsics.memory.swap`
 /// so the two definitions are functionally equivalent under the
 /// stdlib-loading first-wins gate (#163 history).
 @inline(always)
@@ -1458,7 +1458,7 @@ public fn alloc(size: Int, align: Int) -> &unsafe Byte {
 ///
 /// Returns `Err(AllocError)` on allocation failure rather than
 /// panicking. The error variant carries enough detail
-/// (`AllocError::OutOfMemory { requested }`, `InvalidSize`,
+/// (`AllocError.OutOfMemory { requested }`, `InvalidSize`,
 /// `InvalidAlignment`, etc.) for callers to distinguish recoverable
 /// from unrecoverable failures.
 ///

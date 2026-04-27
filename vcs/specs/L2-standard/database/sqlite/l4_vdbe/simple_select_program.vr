@@ -13,12 +13,12 @@ mount core.database.sqlite.native.l4_vdbe.{VdbeProgram, Opcode, RegisterType};
 
 @main
 public async fn main() -> Result<(), Error> {
-    let prog: VdbeProgram<(Int64, Text)> = VdbeProgram::assemble(list![
-        Opcode::Init        { target: 1 },
-        Opcode::Integer     { val: 42, dest: 0 },
-        Opcode::String8     { s: "hello", dest: 1 },
-        Opcode::ResultRow   { start: 0, n: 2 },
-        Opcode::Halt        { errcode: 0, p2: 0, p4: empty() },
+    let prog: VdbeProgram<(Int64, Text)> = VdbeProgram.assemble(list![
+        Opcode.Init        { target: 1 },
+        Opcode.Integer     { val: 42, dest: 0 },
+        Opcode.String8     { s: "hello", dest: 1 },
+        Opcode.ResultRow   { start: 0, n: 2 },
+        Opcode.Halt        { errcode: 0, p2: 0, p4: empty() },
     ])?;
 
     let mut tx = mock_transaction();

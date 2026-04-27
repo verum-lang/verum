@@ -17,7 +17,7 @@ mount core.context.{provide};
 @main
 public async fn main() using [MockVfs] -> Result<(), Error> {
     // Open WAL-mode DB:
-    let conn = Connection::open("/virt/db").await?;
+    let conn = Connection.open("/virt/db").await?;
     conn.execute(sql#"PRAGMA journal_mode = WAL"#).await?;
     conn.execute(sql#"CREATE TABLE t (x INT)"#).await?;
 
@@ -26,16 +26,16 @@ public async fn main() using [MockVfs] -> Result<(), Error> {
     conn.execute(sql#"INSERT INTO t VALUES (2)"#).await?;
 
     // Inject crash after the next fsync:
-    MockVfs::inject_crash_after_fsync(1);
+    MockVfs.inject_crash_after_fsync(1);
 
     // Attempt third insert — commit will fsync and then crash.
     let result = conn.execute(sql#"INSERT INTO t VALUES (3)"#).await;
     assert!(result.is_err());
 
-    MockVfs::power_cycle();
+    MockVfs.power_cycle();
 
     // Reopen; recovery must reconcile committed frames.
-    let conn2 = Connection::open("/virt/db").await?;
+    let conn2 = Connection.open("/virt/db").await?;
     let rows: List<Int> = conn2
         .query(sql#"SELECT x FROM t ORDER BY x"#)
         .collect()

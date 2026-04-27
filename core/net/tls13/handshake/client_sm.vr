@@ -244,7 +244,7 @@ implement ClientSm {
     ///     else it MUST abort with unexpected_message.
     ///   * `Ignored` — KeyUpdate / unknown post-handshake messages
     ///     are decoded but handled elsewhere (KeyUpdate is driven
-    ///     by `keyschedule::rotate`, not this SM).
+    ///     by `keyschedule.rotate`, not this SM).
     ///
     /// Precondition: ClientSm is in `ConnectedSm`. Any other state
     /// is a protocol violation → returns UnexpectedMessage.

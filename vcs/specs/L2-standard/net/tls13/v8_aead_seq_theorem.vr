@@ -16,7 +16,7 @@
 mount core.*;
 
 theorem seq_increment_produces_successor(seq: UInt64)
-    requires seq < 18446744073709551614_u64   // leave one slot below u64::MAX
+    requires seq < 18446744073709551614_u64   // leave one slot below u64.MAX
     ensures  seq + 1_u64 > seq
     ensures  seq + 1_u64 == seq + 1_u64
 {
@@ -35,7 +35,7 @@ theorem seq_strictly_monotonic_over_n_steps(
 }
 
 theorem seq_overflow_detection(seq: UInt64)
-    requires seq == 18446744073709551615_u64   // u64::MAX
+    requires seq == 18446744073709551615_u64   // u64.MAX
     ensures  true   // caller must close connection before incrementing
 {
     proof by auto

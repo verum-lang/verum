@@ -633,7 +633,7 @@ fn parse_decimal_u32(bytes: &[Byte]) -> Maybe<UInt32> {
         if b < 0x30 || b > 0x39 { return None; }
         // Overflow check against UInt32 max.
         let digit = (b - 0x30) as UInt32;
-        let max_div10: UInt32 = 429496729;    // (u32::MAX - 9) / 10
+        let max_div10: UInt32 = 429496729;    // (u32.MAX - 9) / 10
         if n > max_div10 { return None; }
         n = n * 10 + digit;
         i = i + 1;

@@ -11,7 +11,7 @@
 //   (1) `ensures true` — literal true fast-path.
 //   (2) `n == 7 → n == 7` — span-insensitive hypothesis matching.
 //   (3) Arithmetic like `n * 6 == 42 under n == 7` — SMT fallback after
-//       structural tactics fail (requires BinOp::Imply translation).
+//       structural tactics fail (requires BinOp.Imply translation).
 
 @verify(formal)
 theorem trivially_true_literal()

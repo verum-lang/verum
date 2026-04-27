@@ -681,7 +681,7 @@ fn test_udp_ipv6_non_multicast() {
 
 @test
 fn test_udp_ipv6_link_local() {
-    // Link-local address fe80::1
+    // Link-local address fe80.1
     let addr = Ipv6Addr.new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
     assert(addr.is_link_local());
 }

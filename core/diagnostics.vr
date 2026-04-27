@@ -5,15 +5,15 @@
 // Dependencies: core.mem.diagnostics, core.async.diagnostics, core.base.panic
 // =============================================================================
 //
-// `core::diagnostics` is the single user-facing surface for read-only
+// `core.diagnostics` is the single user-facing surface for read-only
 // introspection of Verum runtime state.  It composes three layer-local
 // snapshot surfaces:
 //
-// - `core::mem::diagnostics`   — CBGR allocation introspection
+// - `core.mem.diagnostics`   — CBGR allocation introspection
 //                                 (HeaderView, header_view_of)
-// - `core::async::diagnostics` — async runtime task introspection
+// - `core.async.diagnostics` — async runtime task introspection
 //                                 (TaskInfo, TaskLifecycleState)
-// - `core::base::panic`        — panic-site identity (PanicInfo, Location)
+// - `core.base.panic`        — panic-site identity (PanicInfo, Location)
 //
 // Application code that needs a heterogeneous observability handle should
 // prefer `mount core.diagnostics.*;` over reaching into the layer-local
@@ -48,7 +48,7 @@
 // - `live_allocations` iterator over the global allocation index
 // - capability audit log (revoke / attenuate trace)
 // - tracing / metrics observability handle (composed with
-//   `core::tracing` and `core::metrics`)
+//   `core.tracing` and `core.metrics`)
 //
 // Spec: docs/architecture/observability.md (TODO)
 // =============================================================================
@@ -58,7 +58,7 @@ module core.diagnostics;
 mount core.{Maybe, Text};
 
 // =============================================================================
-// CBGR allocation introspection (re-exports from core::mem::diagnostics)
+// CBGR allocation introspection (re-exports from core.mem.diagnostics)
 // =============================================================================
 
 public mount core.mem.diagnostics.{
@@ -68,7 +68,7 @@ public mount core.mem.diagnostics.{
 };
 
 // =============================================================================
-// CBGR capability audit (re-exports from core::mem::cap_audit + ring)
+// CBGR capability audit (re-exports from core.mem.cap_audit + ring)
 // =============================================================================
 
 public mount core.mem.cap_audit.{
@@ -94,13 +94,13 @@ public mount core.mem.cap_audit_ring.{
 };
 
 // =============================================================================
-// Async runtime introspection (re-exports from core::async::diagnostics)
+// Async runtime introspection (re-exports from core.async.diagnostics)
 // =============================================================================
 
 public mount core.async.diagnostics.{TaskInfo, TaskLifecycleState};
 
 // =============================================================================
-// Panic identity (re-exports from core::base::panic)
+// Panic identity (re-exports from core.base.panic)
 // =============================================================================
 
 public mount core.base.panic.{PanicInfo, Location};
@@ -120,7 +120,7 @@ public mount core.base.panic.{PanicInfo, Location};
 ///   all three (info + task + header)
 ///
 /// `thread_name` is the OS thread label when one was set (e.g. by
-/// `std::thread::Builder::name`).  Empty when no name was supplied.
+/// `std.thread.Builder.name`).  Empty when no name was supplied.
 ///
 /// PanicReport is a strict pass-through of metadata — it does NOT
 /// capture the panic's continuation, the task's future, or any user
@@ -231,7 +231,7 @@ implement PanicReport {
     /// section is two-space indented so the dump composes as the body
     /// of a panic message.  Sections appear in the order
     /// (info, thread, task, header) — most specific context last,
-    /// matching the convention used by `core::base::panic`.
+    /// matching the convention used by `core.base.panic`.
     ///
     /// Single allocation per call; OOM-path callers should prefer the
     /// individual `format_panic_context` methods on each component

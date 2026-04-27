@@ -6,7 +6,7 @@
 // @expected-exit: 0
 //
 // Regression test for Issue #1 (root fix in crates/verum_vbc/src/codegen/
-// expressions.rs::push_field_type_context).
+// expressions.rs.push_field_type_context).
 //
 // Bare variant names (e.g. `Closed`, `None`) inside struct-literal field
 // values must be disambiguated against the field's declared type instead
@@ -49,7 +49,7 @@ implement Event {
 fn main() {
     // Two construction paths — one from method body (Fix #1 target),
     // one from top-level code (baseline sanity).
-    let e1 = Event::build_closed();
+    let e1 = Event.build_closed();
     let e2 = Event { door: Open, lock: Unlocked };
     // As long as both literals compile, the regression is covered. Runtime
     // shape of the tagged enum is tested elsewhere; here we only need the

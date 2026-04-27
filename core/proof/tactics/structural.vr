@@ -2,7 +2,7 @@
 // over inductive / variant types.
 //
 // These tactics consume the induction / recursion principles
-// auto-derived by `InductiveType::finalize` (task #74) — any
+// auto-derived by `InductiveType.finalize` (task #74) — any
 // inductive declared via `type T is A | B(...)` has its
 // induction principle available to these tactics.
 
@@ -14,7 +14,7 @@
 // hypothesis added to the local context.
 //
 // Requires: `x` has an inductive type registered in the
-// current scope (finalized via `InductiveType::finalize`).
+// current scope (finalized via `InductiveType.finalize`).
 // Fails with a useful diagnostic if the type has no
 // `induction_principle` attached (typically a bug — the
 // pipeline finalises every inductive type by default).

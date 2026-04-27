@@ -8,7 +8,7 @@
 /// Smoke tests for the T1-O tactic-DSL control-flow forms.
 ///
 /// Before the `proof_verification.rs` lowering rewrite, the four constructs
-/// below collapsed to `ProofTactic::Admit`, which silently "succeeded"
+/// below collapsed to `ProofTactic.Admit`, which silently "succeeded"
 /// without ever reaching the SMT backend. The tests below exercise each
 /// form against a goal that is ONLY discharged when the lowering
 /// actually runs the intended tactic; an `Admit`-style fallback would

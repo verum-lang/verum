@@ -7,7 +7,7 @@
 // Active pattern definitions for context
 pattern Even(n: Int) -> Bool = n % 2 == 0;
 pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
-pattern ParseInt(s: Text) -> Maybe<Int> = Int::parse(s);
+pattern ParseInt(s: Text) -> Maybe<Int> = Int.parse(s);
 pattern HeadTail(list: List<T>) -> Maybe<(T, List<T>)>;
 
 // =============================================================================

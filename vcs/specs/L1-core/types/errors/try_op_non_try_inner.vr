@@ -6,7 +6,7 @@
 
 /// The `?` operator must produce a clear error when applied to a value
 /// whose type does not implement Try (Result/Maybe/etc). Before the fix
-/// in `verum_types::infer::infer_try_operator`, a silent fallback wrapped
+/// in `verum_types.infer.infer_try_operator`, a silent fallback wrapped
 /// non-Try inner types in `Result<T, fresh>`, producing the confusing
 /// `E0203: cannot convert Result<Never, _> to Maybe<Never>` even for
 /// code that simply forgot that `?` needs a Try-implementing type.

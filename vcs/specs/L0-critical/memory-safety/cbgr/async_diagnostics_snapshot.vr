@@ -3,17 +3,17 @@
 // @level: L0
 // @tags: async, diagnostics, observability, snapshot, executor
 
-/// Regression test for `AsyncRuntime::snapshot_tasks()` (#202).
+/// Regression test for `AsyncRuntime.snapshot_tasks()` (#202).
 ///
 /// Pins the per-executor task introspection contract:
 ///
-///   AsyncRuntime::snapshot_tasks() -> List<TaskInfo>
+///   AsyncRuntime.snapshot_tasks() -> List<TaskInfo>
 ///
 /// Walks both the runtime's ready_queue (Running) and pending
 /// task_queue (Parked) under their respective locks, building a
 /// `List<TaskInfo>` snapshot that observers code against — the
-/// async-side analog of `mem::diagnostics::header_view_of()` for
-/// CBGR allocations and `mem::cap_audit_ring::recent()` for
+/// async-side analog of `mem.diagnostics.header_view_of()` for
+/// CBGR allocations and `mem.cap_audit_ring.recent()` for
 /// capability events.
 ///
 /// # Best-effort point-in-time semantics
@@ -38,14 +38,14 @@ fn main() {
     test_empty_runtime_snapshot();
     test_state_classification();
     test_format_stable_boundary();
-    print("AsyncRuntime::snapshot_tasks regression test passed.");
+    print("AsyncRuntime.snapshot_tasks regression test passed.");
 }
 
 /// Pins the snapshot_tasks signature.  Failure mode: the method
 /// is renamed, removed, or its signature changes (e.g. returning
 /// Iterator instead of List).
 fn test_snapshot_tasks_signature() {
-    assert(true, "AsyncRuntime::snapshot_tasks() -> List<TaskInfo>");
+    assert(true, "AsyncRuntime.snapshot_tasks() -> List<TaskInfo>");
 }
 
 /// Empty runtime: snapshot returns an empty list.  No panics from
@@ -66,8 +66,8 @@ fn test_state_classification() {
 }
 
 /// The umbrella re-export contract: `TaskInfo` is reachable via
-/// `core::diagnostics`, so observers don't couple to
-/// `core::async::diagnostics` internals.
+/// `core.diagnostics`, so observers don't couple to
+/// `core.async.diagnostics` internals.
 fn test_format_stable_boundary() {
     assert(true, "TaskInfo + TaskLifecycleState reachable via core.diagnostics umbrella");
 }

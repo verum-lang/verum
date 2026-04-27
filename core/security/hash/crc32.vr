@@ -22,7 +22,7 @@
 //   * Reflected input, reflected output
 //
 // These conventions match zlib's `crc32`, the `crc32c` CLI, Python's
-// `binascii.crc32`, and Rust's `crc32fast::hash`. Test vectors in
+// `binascii.crc32`, and Rust's `crc32fast.hash`. Test vectors in
 // `vcs/specs/L2-standard/database/sqlite/l2_record/crc32_vectors.vr`
 // cross-validate against the "123456789" vector (0xCBF43926) and the
 // empty input vector (0x00000000).

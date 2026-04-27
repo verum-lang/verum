@@ -15,7 +15,7 @@ mount core.collections.List;
 mount core.net.tls13.record.fragment.{HandshakeReassembler};
 
 fn empty_reassembler_yields_none() {
-    let mut r = HandshakeReassembler::new();
+    let mut r = HandshakeReassembler.new();
     assert(r.buffered() == 0);
     match r.take_next() {
         None => {},
@@ -24,7 +24,7 @@ fn empty_reassembler_yields_none() {
 }
 
 fn partial_header_does_not_produce_message() {
-    let mut r = HandshakeReassembler::new();
+    let mut r = HandshakeReassembler.new();
     // Only 3 header bytes — reassembler can't even read the length yet.
     let partial: List<Byte> = [0x01_u8, 0x00_u8, 0x00_u8];
     r.push(partial.as_slice());
@@ -36,7 +36,7 @@ fn partial_header_does_not_produce_message() {
 }
 
 fn complete_small_message_yields_whole_bytes() {
-    let mut r = HandshakeReassembler::new();
+    let mut r = HandshakeReassembler.new();
     // ClientHello header (1 byte type + 3-byte u24 length=3) + 3 body bytes.
     let msg: List<Byte> = [
         0x01_u8, 0x00_u8, 0x00_u8, 0x03_u8,
@@ -56,7 +56,7 @@ fn complete_small_message_yields_whole_bytes() {
 }
 
 fn message_split_across_two_pushes_reassembles() {
-    let mut r = HandshakeReassembler::new();
+    let mut r = HandshakeReassembler.new();
     // 7-byte message — feed (header + 1 byte) then the remaining 2 bytes.
     let first:  List<Byte> = [0x01_u8, 0x00_u8, 0x00_u8, 0x03_u8, 0xAA_u8];
     let second: List<Byte> = [0xBB_u8, 0xCC_u8];
@@ -77,7 +77,7 @@ fn message_split_across_two_pushes_reassembles() {
 }
 
 fn multiple_messages_drain_in_sequence() {
-    let mut r = HandshakeReassembler::new();
+    let mut r = HandshakeReassembler.new();
     // Two back-to-back messages in one push.
     let two: List<Byte> = [
         // msg1: type 0x01, length 2, body 0xAA 0xBB
@@ -106,7 +106,7 @@ fn multiple_messages_drain_in_sequence() {
 }
 
 fn take_next_idempotent_once_drained() {
-    let mut r = HandshakeReassembler::new();
+    let mut r = HandshakeReassembler.new();
     let msg: List<Byte> = [0x01_u8, 0x00_u8, 0x00_u8, 0x00_u8];   // 0-length body
     r.push(msg.as_slice());
     match r.take_next() {

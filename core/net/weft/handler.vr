@@ -262,7 +262,7 @@ public fn query_int(
 /// Raw body bytes extractor.
 ///
 /// Renamed from the historic `Bytes` to `BodyBytes` to avoid simple-name
-/// collision with `core.base::Bytes` (alias for `List<Byte>`).  The
+/// collision with `core.base.Bytes` (alias for `List<Byte>`).  The
 /// codegen variant table is keyed by simple type name, so two stdlib
 /// types named `Bytes` first-wins each other and one's methods drop
 /// out — see task #160 in the developer log.  The `Body<Format>`

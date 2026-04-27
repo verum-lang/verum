@@ -39,7 +39,7 @@ mount core.base.result.Result;
 /// the affine `LockHandle` returned from `try_lock`.
 ///
 /// Renamed from the historic `LockKind` to avoid simple-name
-/// collision with `core.database.sqlite.native.l0_vfs.vfs_protocol::LockKind`
+/// collision with `core.database.sqlite.native.l0_vfs.vfs_protocol.LockKind`
 /// (the SQLite VFS five-state protocol type).  See task #160.
 public type FileLockKind is Shared | Exclusive;
 

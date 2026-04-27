@@ -8,7 +8,7 @@
 // The canonical definitions live in core/math/hott.vr; this module
 // provides additional cubical-specific utilities and re-exports.
 //
-// The compiler's cubical normalizer (verum_types::cubical) provides
+// The compiler's cubical normalizer (verum_types.cubical) provides
 // 8 reduction rules for computational content. These fire automatically
 // during type-checking when Path terms appear.
 //

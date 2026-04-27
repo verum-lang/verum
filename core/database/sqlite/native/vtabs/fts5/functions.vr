@@ -166,7 +166,7 @@ public fn snippet(
 }
 
 // -----------------------------------------------------------------------------
-// bm25() — already computed by `query::rank_bm25`; this is a façade
+// bm25() — already computed by `query.rank_bm25`; this is a façade
 // helper that picks the score for the row currently under cursor.
 // -----------------------------------------------------------------------------
 

@@ -6,7 +6,7 @@
 //
 // User functions returning Bool with propositional ensures must verify
 // through the body→result binding. `translate_bool_binop` + Bool-Eq
-// coercion + the `Bool::new_const("result").iff(body)` dispatch all
+// coercion + the `Bool.new_const("result").iff(body)` dispatch all
 // need to line up for complex prop-logic identities to close.
 
 @verify(formal)

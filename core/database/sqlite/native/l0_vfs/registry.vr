@@ -84,8 +84,8 @@ public type VfsParsedUri is {
 ///   `":memory:"`                    → Memory, path "", rwc flags
 ///   `"file:/abs/path"`              → Posix, rwc default
 ///   `"file:/abs/path?mode=ro"`      → Posix, ro flags
-///   `"file::memory:"`               → Memory
-///   `"file::memory:?cache=shared"`  → Memory with cache=shared (ignored for v1)
+///   `"file.memory:"`               → Memory
+///   `"file.memory:?cache=shared"`  → Memory with cache=shared (ignored for v1)
 ///   `"file:/p?vfs=unix"`            → explicit backend selection
 ///
 /// Matches SQLite's URI rules (sqlite.org/uri.html) up to query-string

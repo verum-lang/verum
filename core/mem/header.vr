@@ -260,10 +260,10 @@ implement AllocationHeader {
     /// (the size field gates pointer-derivation bounds).
     public fn for_type<T>(capabilities: UInt16) -> AllocationHeader {
         if T.size > 0xFFFF_FFFF {
-            panic("AllocationHeader::for_type<T>: T.size exceeds UInt32.MAX (header size field is UInt32-bounded)");
+            panic("AllocationHeader.for_type<T>: T.size exceeds UInt32.MAX (header size field is UInt32-bounded)");
         }
         if T.alignment > 0xFFFF_FFFF {
-            panic("AllocationHeader::for_type<T>: T.alignment exceeds UInt32.MAX");
+            panic("AllocationHeader.for_type<T>: T.alignment exceeds UInt32.MAX");
         }
         let size = T.size as UInt32;
         let alignment = T.alignment as UInt32;
@@ -290,7 +290,7 @@ implement AllocationHeader {
 
     /// Revoke the allocation iff the current generation matches
     /// `expected_gen`.  This is the load-bearing primitive for
-    /// `ThinRef::revoke`-style APIs: the verify-then-increment is
+    /// `ThinRef.revoke`-style APIs: the verify-then-increment is
     /// performed as a single CAS so two concurrent revokers can't
     /// both succeed, and a stale revoker can't double-bump the
     /// generation past a successor's freshly-issued reference.
@@ -613,7 +613,7 @@ implement AllocationHeader {
     public fn increment_ref_count(&mut self) -> UInt32 {
         let old = atomic_fetch_add_u32(&mut self.ref_count, 1, ORDERING_ACQ_REL);
         if old == 0xFFFF_FFFF {
-            panic("AllocationHeader::increment_ref_count overflow — ref_count exceeded UInt32.MAX; allocation has too many concurrent owners (clone leak likely)");
+            panic("AllocationHeader.increment_ref_count overflow — ref_count exceeded UInt32.MAX; allocation has too many concurrent owners (clone leak likely)");
         }
         // Audit-log the ref_count increment.  Slow path only — fast-
         // path `&checked` borrows do not touch ref_count and are not
@@ -641,7 +641,7 @@ implement AllocationHeader {
     public fn decrement_ref_count(&mut self) -> UInt32 {
         let old = atomic_fetch_sub_u32(&mut self.ref_count, 1, ORDERING_ACQ_REL);
         if old == 0 {
-            panic("AllocationHeader::decrement_ref_count underflow — ref_count was already 0; caller decrement-balance is broken");
+            panic("AllocationHeader.decrement_ref_count underflow — ref_count was already 0; caller decrement-balance is broken");
         }
         // Audit-log the ref_count decrement.
         let gen = self.load_generation();

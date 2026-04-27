@@ -357,10 +357,10 @@ implement<T> Maybe<T> {
     /// **Bound caveat**: Verum's type system can't express
     /// `T = Maybe<U>` from within `implement<T> Maybe<T>`, so the
     /// constraint is widened to `T: Default`. This is sound for
-    /// `T = Maybe<U>` because `Maybe::default() == None` — the
+    /// `T = Maybe<U>` because `Maybe.default() == None` — the
     /// flatten semantics are exact. For any other `T: Default`,
     /// this method instead behaves as `unwrap_or_default(self)`
-    /// (returns `T::default()` on `None`, the inner `T` on
+    /// (returns `T.default()` on `None`, the inner `T` on
     /// `Some(t)`); use [`unwrap_or_default`] explicitly if that's
     /// the intent so the call site reads honestly. Strict
     /// `Maybe<Maybe<U>>` callers can also use the free function
@@ -408,7 +408,7 @@ implement<T> Maybe<T> {
     }
 
     /// Gets the contained value or inserts the default value.
-    /// Equivalent to `get_or_insert(T::default())`.
+    /// Equivalent to `get_or_insert(T.default())`.
     public fn get_or_insert_default(&mut self) -> &mut T
     where T: Default
     {
@@ -590,7 +590,7 @@ implement<T, E> FromResidual<Result<Never, E>> for Maybe<T> {
 
 /// Strictly-typed flatten for `Maybe<Maybe<T>>` → `Maybe<T>`.
 ///
-/// Equivalent to [`Maybe::flatten`] when the receiver type is
+/// Equivalent to [`Maybe.flatten`] when the receiver type is
 /// `Maybe<Maybe<T>>`, but with a tight signature that rejects
 /// non-nested calls at compile time. Useful when the call-site
 /// reader benefits from the unambiguous "this is monadic join"

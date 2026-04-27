@@ -6,13 +6,13 @@
 // @expected-exit: 0
 //
 // Regression test for Issue #2 (root fix in crates/verum_vbc/src/codegen/
-// expressions.rs::compile_binary BinOp::Shr path).
+// expressions.rs.compile_binary BinOp.Shr path).
 //
 // `>>` on an unsigned type must be a LOGICAL (zero-filling) shift, not
 // arithmetic. The handler `handle_shr` in
 // `interpreter/dispatch_table/handlers/bitwise.rs` is sign-preserving
 // (because all Verum values land in i64 inside the NaN-box). The codegen
-// now picks `BitwiseOp::Ushr` for any operand whose declared type is
+// now picks `BitwiseOp.Ushr` for any operand whose declared type is
 // UInt8/16/32/64, Byte, or USize.
 //
 // Without the fix, CRC32 table entries whose bit 31 is set (e.g.

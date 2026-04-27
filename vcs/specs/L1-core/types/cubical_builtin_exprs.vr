@@ -22,7 +22,7 @@ public type I is @builtin_interval;
 public let i0: I = @builtin_i0;
 public let i1: I = @builtin_i1;
 
-/// Path type constructor (elaborated to `Type::Eq` at use sites).
+/// Path type constructor (elaborated to `Type.Eq` at use sites).
 public type Path<A>(a: A, b: A) is @builtin_path;
 
 /// Reflexivity: `refl(x) : Path<A>(x, x)`. The signature carries the
@@ -44,7 +44,7 @@ public fn interval_eq(i: I, j: I) -> Bool { @builtin_interval_eq(i, j) }
 
 /// Glue-type constructor — type-level intrinsic declared via
 /// `@builtin_glue` meta-type (resolved by `resolve_builtin_meta_type`
-/// in `verum_types::infer`).
+/// in `verum_types.infer`).
 public type Glue<A>(phi: I, T: fn(I) -> Type, e: fn(i: I) -> Path<A>(T(i), A)) is @builtin_glue;
 
 fn main() {

@@ -133,7 +133,7 @@ fn main() {
     assert(HIDDEN_GLOBAL == 20);
     assert(PROTECTED_GLOBAL == 30);
 
-    let mut counter = Counter::new();
+    let mut counter = Counter.new();
     counter.increment();
     assert(counter.get() == 1);
 

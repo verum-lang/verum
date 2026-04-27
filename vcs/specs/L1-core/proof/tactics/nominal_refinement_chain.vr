@@ -11,7 +11,7 @@
 // refinements via explicit `requires` when using a type alias.
 //
 // Locks in `build_refinement_alias_map` +
-// `verify_proof_body_with_aliases` + the `TypeKind::Path` arm of
+// `verify_proof_body_with_aliases` + the `TypeKind.Path` arm of
 // `collect_refinements`.
 
 // Single-level alias.

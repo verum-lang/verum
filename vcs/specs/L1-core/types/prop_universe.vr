@@ -4,7 +4,7 @@
 // @description: Prop is a first-class universe — T1-S.
 //
 // Verum's type system has Prop as a distinct universe of propositions
-// (implemented as `Type::Prop` in verum_types/src/ty.rs). Propositions
+// (implemented as `Type.Prop` in verum_types/src/ty.rs). Propositions
 // are proof-irrelevant: any two proofs of the same proposition are
 // definitionally equal, and Prop : Type(1) in the universe hierarchy.
 //

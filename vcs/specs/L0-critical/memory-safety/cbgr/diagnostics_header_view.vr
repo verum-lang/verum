@@ -3,15 +3,15 @@
 // @level: L0
 // @tags: memory-safety, cbgr, diagnostics, introspection
 
-/// Regression test for `core::mem::diagnostics::HeaderView` (#197).
+/// Regression test for `core.mem.diagnostics.HeaderView` (#197).
 ///
 /// Pins the HeaderView API contract:
-///   - HeaderView is a public type re-exported from `core::mem`
+///   - HeaderView is a public type re-exported from `core.mem`
 ///   - `header_view_of(ptr)` returns `Maybe<HeaderView>` (null-safe)
 ///   - HeaderView has the documented field set (generation, epoch,
 ///     capabilities, size, alignment, type_id, flags, ref_count)
 ///   - HeaderView implements Display (single-line) and Debug (multi-line)
-///   - HeaderView::format_panic_context() composes with multi-line panics
+///   - HeaderView.format_panic_context() composes with multi-line panics
 ///
 /// Re-introducing the truncated / racy / unsafe-Send patterns the audit
 /// closed in #195 will fail this regression because every panic from
@@ -31,8 +31,8 @@ fn main() {
 /// core/mem/mod.vr will fail this test at parse time.
 fn test_header_view_is_public() {
     // HeaderView is mountable.  This compiles iff the type is
-    // exported via core::mem::diagnostics → core::mem.
-    assert(true, "HeaderView is publicly accessible via core::mem");
+    // exported via core.mem.diagnostics → core.mem.
+    assert(true, "HeaderView is publicly accessible via core.mem");
 }
 
 /// Pins the predicate API.  These methods document the capability

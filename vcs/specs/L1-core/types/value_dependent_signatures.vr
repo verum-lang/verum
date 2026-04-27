@@ -5,7 +5,7 @@
 
 /// Value-dependent type signatures — `B(x)` where `x` is a value-level
 /// identifier in scope (lowercase) must route through
-/// `TypeKind::DependentApp`, not the constructor-style `A(B(C(Int)))`
+/// `TypeKind.DependentApp`, not the constructor-style `A(B(C(Int)))`
 /// path. Without this routing, the type-resolver would treat the
 /// argument as a type name and fail with "type not found: x" for every
 /// dependent signature.

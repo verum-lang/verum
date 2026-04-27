@@ -16,7 +16,7 @@
 ///
 /// Spec: docs/improvements.md Section 17.2 (Context Polymorphism)
 /// Spec: docs/detailed/16-context-system.md
-/// Impl: crates/verum_ast/src/ty.rs:GenericParamKind::Context
+/// Impl: crates/verum_ast/src/ty.rs:GenericParamKind.Context
 /// Impl: crates/verum_parser/src/ty.rs:parse_generic_param
 
 // ============================================================================

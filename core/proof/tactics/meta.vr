@@ -3,7 +3,7 @@
 //
 // The three primitives here are the meta-programming entry
 // points documented in `docs/verification/tactic-dsl.md §7`.
-// They're the surface form of `TacticExpr::Quote / Unquote /
+// They're the surface form of `TacticExpr.Quote / Unquote /
 // GoalIntro` landed in task #73 at the compiler layer.
 //
 // The law `unquote(quote(t)) ≡ t` holds structurally — the

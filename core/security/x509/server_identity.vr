@@ -63,7 +63,7 @@ public type ServerIdentityError is
 
 /// Verify that `cert` identifies `reference_name` per RFC 6125. The
 /// reference may be a DNS name (e.g. "example.com") or an IP literal
-/// (e.g. "192.0.2.1" or "2001:db8::1").
+/// (e.g. "192.0.2.1" or "2001:db8.1").
 ///
 /// ```
 /// match verify_server_identity(&peer_cert, &server_name) {

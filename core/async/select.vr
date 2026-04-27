@@ -158,7 +158,7 @@ public type SelectAllResult<T> is {
 /// Select from a collection of futures, completing when any one finishes.
 ///
 /// Returns the result along with the index && remaining futures.
-/// Returns `Err(SelectError::EmptyInput)` when the input list is empty
+/// Returns `Err(SelectError.EmptyInput)` when the input list is empty
 /// (instead of panicking, which the previous implementation did).
 ///
 /// # Example
@@ -404,7 +404,7 @@ public async fn try_join3<A, B, C, E,
 /// Race a collection of futures — returns the first one to complete.
 /// Alias for `select_all` that drops the index and the remaining futures.
 ///
-/// Returns `Err(SelectError::EmptyInput)` when the input list is empty
+/// Returns `Err(SelectError.EmptyInput)` when the input list is empty
 /// (propagated from `select_all`).
 public async fn race_all<T, F: Future<Output = T>>(
     futures: List<F>,

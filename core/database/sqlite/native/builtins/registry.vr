@@ -10,7 +10,7 @@
 // dispatches on.
 //
 // The ranges 0..27 are **stable** — they match the historic inline table
-// in `l5_sql/codegen.vr::scalar_fn_kind` and `l4_vdbe/interpreter.vr::ScalarFn`.
+// in `l5_sql/codegen.vr.scalar_fn_kind` and `l4_vdbe/interpreter.vr.ScalarFn`.
 // New functions extend upward; the wire codes are fixed forever.
 //
 // To add a new built-in:

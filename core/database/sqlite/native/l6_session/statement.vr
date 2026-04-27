@@ -234,7 +234,7 @@ implement PreparedStatement {
     public fn cursor_count(&self) -> Int { self.program.cursor_count() }
 
     /// Accessors for the L6 cursor-bridge helpers. Exposed so
-    /// `l6_session.bridge::seed_cursors_from_connection` and its
+    /// `l6_session.bridge.seed_cursors_from_connection` and its
     /// writeback sibling can reach the state without requiring a
     /// visibility downgrade on the underlying fields.
     public fn program_ref(&self) -> &VdbeProgram { &self.program }

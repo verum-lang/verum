@@ -141,7 +141,7 @@ public fn divmod(a: Int, b: Int{!= 0}) -> (Int, Int) {
 // gcd) for Int.MIN inputs. |Int.MIN| = 2^63 is genuinely
 // unrepresentable in Int64 — there's no honest answer except to
 // reject. Callers that need to handle Int.MIN gracefully should
-// use the `try_*` variants which return `Maybe::None`.
+// use the `try_*` variants which return `Maybe.None`.
 @inline
 fn safe_abs_or_panic(x: Int, fn_name: &Text) -> Int {
     if x == Int.MIN {

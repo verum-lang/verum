@@ -272,8 +272,8 @@ fn test_overflow_detection() {
     assert(!overflow);
 
     // Overflow cases for Int64
-    let max_i64: Int64 = 9223372036854775807;  // i64::MAX
-    let min_i64: Int64 = -9223372036854775808; // i64::MIN
+    let max_i64: Int64 = 9223372036854775807;  // i64.MAX
+    let min_i64: Int64 = -9223372036854775808; // i64.MIN
 
     // Addition overflow
     let (_, overflow) = add_overflow(max_i64, 1 as Int64);
@@ -288,7 +288,7 @@ fn test_overflow_detection() {
     assert(overflow);
 
     // Note: UInt64 overflow test skipped - generic add_overflow uses signed overflow
-    // checking (i64::overflowing_add). For UInt64 max value (0xFFFFFFFFFFFFFFFF),
+    // checking (i64.overflowing_add). For UInt64 max value (0xFFFFFFFFFFFFFFFF),
     // this is -1 in two's complement, so -1 + 1 = 0 doesn't overflow as signed.
     // Would need add_overflow_unsigned intrinsic for proper UInt64 overflow detection.
 }
@@ -436,8 +436,8 @@ fn test_boundary_conditions() {
     assert(mul(1000000, 1000000) == 1000000000000);
 
     // Power of 2 boundaries
-    assert(add(2147483647, 1) == 2147483648);  // Just above i32::MAX
-    assert(sub(-2147483648, 1) == -2147483649); // Just below i32::MIN
+    assert(add(2147483647, 1) == 2147483648);  // Just above i32.MAX
+    assert(sub(-2147483648, 1) == -2147483649); // Just below i32.MIN
 
     // Remainder edge cases
     assert(rem(10, 1) == 0);

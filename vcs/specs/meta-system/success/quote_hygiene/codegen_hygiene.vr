@@ -188,13 +188,13 @@ meta fn gen_traced_fn(name: Ident, body: TokenStream) -> TokenStream {
 
     quote {
         fn $name() {
-            let $trace_id = trace::new_id();
-            let $start = time::now();
-            trace::enter($trace_id, ${name.as_str()});
+            let $trace_id = trace.new_id();
+            let $start = time.now();
+            trace.enter($trace_id, ${name.as_str()});
 
             let $result = { $body };
 
-            trace::exit($trace_id, time::now() - $start);
+            trace.exit($trace_id, time.now() - $start);
             $result
         }
     }
@@ -213,7 +213,7 @@ meta fn gen_safe_call(call: TokenStream) -> TokenStream {
         match $call {
             Ok($value) => $value,
             Err($error) => {
-                log::error(f"Call failed: {$error}");
+                log.error(f"Call failed: {$error}");
                 return Err($error);
             }
         }

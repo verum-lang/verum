@@ -4,12 +4,12 @@
 
 /// End-to-end test: `Path<A>(a, b)` is now a first-class type
 /// expression in Verum syntax, parsed by the fast_parser and
-/// lowered to `Type::Eq` in the type checker.
+/// lowered to `Type.Eq` in the type checker.
 ///
 /// The type checker correctly rejects non-proof values at path
 /// type positions (e.g., `fn f() -> Path<Int>(0,0) { 42 }` fails
 /// with "expected Eq<Int,...>, found Int"), confirming the lowering
-/// to `Type::Eq` is real.
+/// to `Type.Eq` is real.
 
 /// A type alias using path-type syntax — parsed and registered.
 type IntReflPath is Path<Int>(0, 0);

@@ -26,8 +26,8 @@
 //
 // # Placement in the runtime
 //
-// This module sits below the user-facing `core::diagnostics` (TODO,
-// future PR), which will compose `mem::diagnostics`, `async::diagnostics`,
+// This module sits below the user-facing `core.diagnostics` (TODO,
+// future PR), which will compose `mem.diagnostics`, `async.diagnostics`,
 // and tracing/metrics into a single observability surface.
 //
 // Spec: docs/architecture/observability.md (TODO)
@@ -255,7 +255,7 @@ implement HeaderView {
 ///
 /// # Format-stable contract
 ///
-/// - Returns `List<HeaderView>` (re-exported via `core::diagnostics`).
+/// - Returns `List<HeaderView>` (re-exported via `core.diagnostics`).
 /// - Order is unspecified — observers MUST NOT rely on ordering.
 /// - Best-effort point-in-time view; an allocation that frees during
 ///   the snapshot may appear with stale capabilities/refcount.

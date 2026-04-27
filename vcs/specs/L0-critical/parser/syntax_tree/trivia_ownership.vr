@@ -339,31 +339,31 @@ fn rich_token_complex_trivia() {
 
 // Test whitespace classification
 fn trivia_kind_whitespace() {
-    let    x = 1;  // Spaces and tabs are TriviaKind::Whitespace
+    let    x = 1;  // Spaces and tabs are TriviaKind.Whitespace
 }
 
 // Test newline classification
 fn trivia_kind_newline() {
     let x = 1;
-    let y = 2;  // Newline is TriviaKind::Newline
+    let y = 2;  // Newline is TriviaKind.Newline
 }
 
 // Test line comment classification
 fn trivia_kind_line_comment() {
-    // TriviaKind::LineComment
+    // TriviaKind.LineComment
     let x = 1;
 }
 
 // Test block comment classification
 fn trivia_kind_block_comment() {
-    /* TriviaKind::BlockComment */
+    /* TriviaKind.BlockComment */
     let x = 1;
 }
 
-/// TriviaKind::DocComment
+/// TriviaKind.DocComment
 fn trivia_kind_doc_comment() { }
 
-//! TriviaKind::InnerDocComment
+//! TriviaKind.InnerDocComment
 fn trivia_kind_inner_doc() { }
 
 // ============================================================================

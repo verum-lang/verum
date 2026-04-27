@@ -44,7 +44,7 @@ fn test_array_destructuring() {
 
     // With rest pattern
     let mut head = 0;
-    let mut tail: List<Int> = List::new();
+    let mut tail: List<Int> = List.new();
     [head, ..tail] = items;
 
     // Extract first two elements
@@ -221,8 +221,8 @@ fn test_real_world_patterns() {
     (x, y) = rotate_point(x, y, angle);
 
     // State update
-    let mut state = State::new();
-    let mut events: List<Event> = List::new();
+    let mut state = State.new();
+    let mut events: List<Event> = List.new();
     (state, events) = update(state, action);
 
     // Parse result handling

@@ -7,7 +7,7 @@ module test.debug.uint64_method;
 
 fn main() {
     // Test UInt64 method directly
-    let a: UInt64 = 0xFFFFFFFFFFFFFFFF;  // UInt64::MAX
+    let a: UInt64 = 0xFFFFFFFFFFFFFFFF;  // UInt64.MAX
     let b: UInt64 = 1;
 
     print(f"Testing UInt64.checked_add method");

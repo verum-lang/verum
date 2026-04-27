@@ -164,7 +164,7 @@ implement Monad for Result<_, E> where E: Clone {
 //
 // Previously (pre-L0-2) calling protocol methods through an HKT parameter
 // inside a function body produced "MapFuture<_, F<_>> vs F<_>" mismatches
-// because method resolution matched the FutureExt::map blanket before the
+// because method resolution matched the FutureExt.map blanket before the
 // bound on F was consulted. After L0-2 (part 1), protocol-qualified calls
 // `Functor.map(...)` / `Applicative.apply(...)` dispatch through F's bound
 // and return `F<B>` / `F<C>` with the caller's F substituted through.

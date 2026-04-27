@@ -542,8 +542,8 @@ fn test_ip_tag() {
     // IPv6
     let f = ip#"::1";
     let g = ip#"::";
-    let h = ip#"2001:db8::1";
-    let i = ip#"fe80::1";
+    let h = ip#"2001:db8.1";
+    let i = ip#"fe80.1";
     let j = ip#"2001:0db8:85a3:0000:0000:8a2e:0370:7334";
 }
 

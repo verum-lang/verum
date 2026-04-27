@@ -98,7 +98,7 @@ fn error_generic_mismatch(r: Result<Int, Text>) -> Text {
 // ERROR 8: TypeTest method call on wrong narrowed type
 // =============================================================================
 
-// Note: 'implement Trait for Variant' syntax (Animal::Dog) not valid Verum syntax
+// Note: 'implement Trait for Variant' syntax (Animal.Dog) not valid Verum syntax
 // Simplified ERROR 8: type mismatch in protocol method
 type Printable is protocol {
     fn print_val(&self) -> Int;

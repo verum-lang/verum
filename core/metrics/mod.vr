@@ -41,7 +41,7 @@
 // requests_total.with(&[&"GET".into(), &"200".into()]).inc();
 //
 // // Expose via Prometheus text format
-// let body = prometheus::encode(&registry);
+// let body = prometheus.encode(&registry);
 // ```
 // =============================================================================
 

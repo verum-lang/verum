@@ -26,7 +26,7 @@ mount core.intrinsics.{spin_hint, unreachable as intrinsic_unreachable, catch_un
 // as wrappers over libc `write(2, ...)` / `_exit(...)` (POSIX) or
 // kernel32 `WriteFile` / `ExitProcess` (Windows). The interpreter
 // path resolves `verum.io.write_stderr` / `verum.process.exit`
-// through `intrinsics::registry`. No platform-specific extern
+// through `intrinsics.registry`. No platform-specific extern
 // declarations are needed in this file — the platform shims live
 // at the codegen layer where they belong.
 

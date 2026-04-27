@@ -1,0 +1,92 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, list, capacity, overflow, cbgr-foundational-audit
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Runtime exercise of #194 List.try_with_capacity overflow
+//               guard.  Negative capacity must produce CapacityOverflow
+//               in BOTH interpreter and AOT — closes the parser-only
+//               anchor with an actual tier-equivalence check.
+
+fn main() -> Int {
+    // ----------------------------------------------------------------
+    // Case 1: negative capacity rejected with CapacityOverflow.
+    //
+    // Pre-fix: silent UB via wrap-then-truncate path.
+    // Post-fix (#194): typed Err(AllocError.CapacityOverflow{...})
+    //                  returned synchronously without any allocation.
+    // ----------------------------------------------------------------
+    let neg_result: Result<List<Int>, AllocError> = List.try_with_capacity(-1);
+    match neg_result {
+        Err(AllocError.CapacityOverflow { requested }) => {
+            if requested != -1 {
+                print("FAIL: requested mismatch (case 1)");
+                return 1;
+            }
+        }
+        Err(other) => {
+            print("FAIL: wrong error variant (case 1)");
+            return 1;
+        }
+        Ok(_) => {
+            print("FAIL: try_with_capacity(-1) returned Ok");
+            return 1;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Case 2: zero capacity produces empty list (Ok path, no alloc).
+    //
+    // The fast path in try_with_capacity short-circuits at zero;
+    // verifies the cap-overflow guard does NOT mis-fire on the
+    // boundary value.
+    // ----------------------------------------------------------------
+    let zero_result: Result<List<Int>, AllocError> = List.try_with_capacity(0);
+    match zero_result {
+        Ok(list) => {
+            if list.len() != 0 {
+                print("FAIL: zero-capacity list has non-zero len");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL: try_with_capacity(0) returned Err");
+            return 1;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Case 3: small reasonable capacity works.
+    //
+    // Smoke test that the post-fix code path still admits normal use.
+    // ----------------------------------------------------------------
+    let ok_result: Result<List<Int>, AllocError> = List.try_with_capacity(16);
+    match ok_result {
+        Ok(mut list) => {
+            // Exercise try_push too — it routes through try_grow which
+            // routes through try_resize_buffer where the cap-overflow
+            // guard lives.
+            let push_result = list.try_push(42);
+            match push_result {
+                Ok(_) => {
+                    if list.len() != 1 {
+                        print("FAIL: post-push len != 1");
+                        return 1;
+                    }
+                }
+                Err(_) => {
+                    print("FAIL: try_push errored on small list");
+                    return 1;
+                }
+            }
+        }
+        Err(_) => {
+            print("FAIL: try_with_capacity(16) returned Err");
+            return 1;
+        }
+    }
+
+    print("diff_list_capacity_overflow: ok");
+    0
+}

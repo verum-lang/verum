@@ -7,7 +7,7 @@
 // witness the adjunction α ⊣ ε that brides core.math.frameworks
 // (object-centric, OC) and core.action (dependency-centric, DC).
 //
-// Articulation is the *syntactic* projection of CoreTerm::FrameworkAxiom
+// Articulation is the *syntactic* projection of CoreTerm.FrameworkAxiom
 // — a framework name + citation pair — so it can be carried at runtime
 // by any Verum value without dragging a kernel-term dependency into the
 // stdlib.  When the kernel produces an axiom, it surfaces as

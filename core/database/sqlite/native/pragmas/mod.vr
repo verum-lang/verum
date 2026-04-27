@@ -12,7 +12,7 @@
 //   * `effect_phase`   — when a write becomes visible (immediate / on next txn / on next open)
 //
 // The L5 codegen translates `PRAGMA …` AST into a call to
-// `pragma_dispatch::execute`, threading the per-connection
+// `pragma_dispatch.execute`, threading the per-connection
 // `PragmaConfig` through the pipeline.
 // =============================================================================
 

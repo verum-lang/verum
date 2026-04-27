@@ -4,7 +4,7 @@
 //
 // Layer: Standard Library / Types
 //
-// Surface for `verum_types::poly_kinds`. Kind-level Hindley-Milner:
+// Surface for `verum_types.poly_kinds`. Kind-level Hindley-Milner:
 // kind variables, kind constructors (→, Type, Constraint), kind
 // unification.
 //

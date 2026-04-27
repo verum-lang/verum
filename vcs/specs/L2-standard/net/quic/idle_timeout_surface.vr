@@ -17,7 +17,7 @@ mount core.net.quic.idle_timeout.{IdleTimeoutTracker, TickResult};
 
 fn zero_local_and_peer_disables_timeout() {
     let now = Instant.now();
-    let t = IdleTimeoutTracker::new(0_u64, 0_u64, now);
+    let t = IdleTimeoutTracker.new(0_u64, 0_u64, now);
     match t.effective_ms() {
         None => {},
         _ => panic("both-zero must disable"),
@@ -32,7 +32,7 @@ fn zero_local_and_peer_disables_timeout() {
 fn peer_zero_takes_local_value() {
     // RFC 9000 §10.1 para 3: 0 from a peer means "no limit" — the
     // effective timeout is the other side's non-zero value.
-    let t = IdleTimeoutTracker::new(30_000_u64, 0_u64, Instant.now());
+    let t = IdleTimeoutTracker.new(30_000_u64, 0_u64, Instant.now());
     match t.effective_ms() {
         Some(ms) => assert(ms == 30_000_u64),
         _ => panic("peer-zero must keep local"),
@@ -40,7 +40,7 @@ fn peer_zero_takes_local_value() {
 }
 
 fn both_nonzero_takes_min() {
-    let t = IdleTimeoutTracker::new(30_000_u64, 15_000_u64, Instant.now());
+    let t = IdleTimeoutTracker.new(30_000_u64, 15_000_u64, Instant.now());
     match t.effective_ms() {
         Some(ms) => assert(ms == 15_000_u64),
         _ => panic("both-nonzero must take min"),
@@ -49,7 +49,7 @@ fn both_nonzero_takes_min() {
 
 fn set_pto_buffer_extends_deadline() {
     let start = Instant.now();
-    let mut t = IdleTimeoutTracker::new(1000_u64, 1000_u64, start.clone());
+    let mut t = IdleTimeoutTracker.new(1000_u64, 1000_u64, start.clone());
     // Raise the 3×PTO reordering buffer.
     t.set_pto_buffer(Duration.from_millis(500));
     // Tick at start — deadline must be 1000 + 500 = 1500 ms out.
@@ -61,7 +61,7 @@ fn set_pto_buffer_extends_deadline() {
 
 fn on_packet_received_resets_last_activity() {
     let start = Instant.now();
-    let mut t = IdleTimeoutTracker::new(1000_u64, 1000_u64, start.clone());
+    let mut t = IdleTimeoutTracker.new(1000_u64, 1000_u64, start.clone());
     // Advance time by 500 ms — but then a fresh ack-eliciting packet
     // arrives, pushing last_activity forward.
     let at_500 = start.checked_add(Duration.from_millis(500)).unwrap();

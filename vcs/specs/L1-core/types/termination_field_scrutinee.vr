@@ -10,7 +10,7 @@
 /// `ref` in the pattern — was flagged as `E321 unbounded recursion`
 /// even though the binding `lhs` is structurally smaller than `sel`.
 ///
-/// Root cause: `termination::find_recursive_calls_impl` only recorded
+/// Root cause: `termination.find_recursive_calls_impl` only recorded
 /// match_bindings when the scrutinee was a direct `Path` (bare
 /// parameter). A field scrutinee like `sel.kind` produced no binding
 /// and the subsequent structural-smaller check found nothing.

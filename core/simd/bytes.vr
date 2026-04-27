@@ -29,13 +29,13 @@
 //
 // ```verum
 // // HTTP header terminator scan
-// let idx = simd_bytes::find_byte(request_buf, b'\r\n');
+// let idx = simd_bytes.find_byte(request_buf, b'\r\n');
 //
 // // JSON structural-char find
-// let pos = simd_bytes::find_any_of(data, &[b'{', b'}', b'[', b']', b',', b':']);
+// let pos = simd_bytes.find_any_of(data, &[b'{', b'}', b'[', b']', b',', b':']);
 //
 // // UTF-8 validation
-// let ok = simd_bytes::is_valid_utf8(bytes);
+// let ok = simd_bytes.is_valid_utf8(bytes);
 // ```
 //
 // =============================================================================

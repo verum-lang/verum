@@ -8,7 +8,7 @@
 ///
 /// This is the first reduction rule of the cubical normalizer,
 /// and after the EqTerm↔CubicalTerm bridge the unifier accepts it
-/// for `Type::Eq` definitional equality automatically.
+/// for `Type.Eq` definitional equality automatically.
 
 theorem transport_refl_identity<A>(x: A)
     ensures x == x

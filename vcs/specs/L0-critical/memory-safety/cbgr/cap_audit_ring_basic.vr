@@ -6,8 +6,8 @@
 /// Regression test for the lock-free SPMC `CapEvent` ring buffer
 /// (#197 producer-side wiring, tracked under #202).
 ///
-/// Pins the public surface of `core::mem::cap_audit_ring` re-exported
-/// through the `core::diagnostics` umbrella:
+/// Pins the public surface of `core.mem.cap_audit_ring` re-exported
+/// through the `core.diagnostics` umbrella:
 ///
 ///   commit_cap_event(event) -> UInt64
 ///   recent_cap_events(n)    -> List<CapEvent>

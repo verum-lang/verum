@@ -71,13 +71,64 @@ public type BloomFilter is {
     admitted: UInt64,
 };
 
+// Reasonable upper bound on bloom-filter capacity. capacity * 24
+// (worst-case bits_per_entry) must not overflow Int; this cap keeps
+// us comfortably under 2^60 bits even at the highest BPE while still
+// admitting ~3.5×10^14 items — far past any plausible workload.
+public const MAX_BLOOM_CAPACITY: Int = 1_000_000_000_000;  // 10^12
+
+/// Validation failure for [`BloomFilter::try_with_target`] /
+/// [`BloomFilter::try_new`]. Surfaced as a typed error so the caller
+/// can branch on the specific cause rather than parsing strings.
+public type BloomError is
+    | EmptyCapacity
+    | CapacityTooLarge(Int)
+    | InvalidFpRate(Int);
+
 implement BloomFilter {
     /// Build a filter sized for a target capacity and FP rate.
+    /// Panics on invalid input; prefer [`try_with_target`] when the
+    /// inputs come from user data.
     public fn with_target(capacity: Int, fp_rate_ppm: Int) -> BloomFilter {
-        BloomFilter.new(BloomConfig { capacity: capacity, fp_rate_ppm: fp_rate_ppm })
+        match BloomFilter.try_with_target(capacity, fp_rate_ppm) {
+            Result.Ok(f)                          => f,
+            Result.Err(BloomError.EmptyCapacity)  => panic("BloomFilter capacity must be > 0"),
+            Result.Err(BloomError.CapacityTooLarge(c)) => panic(f"BloomFilter capacity {c} exceeds MAX_BLOOM_CAPACITY ({MAX_BLOOM_CAPACITY})"),
+            Result.Err(BloomError.InvalidFpRate(p))    => panic(f"BloomFilter fp_rate_ppm {p} must be in (0, 1_000_000)"),
+        }
+    }
+
+    /// Fallible counterpart of [`with_target`]. Validates that
+    /// `capacity > 0`, `capacity ≤ MAX_BLOOM_CAPACITY`, and
+    /// `0 < fp_rate_ppm < 1_000_000`. The validation guards against
+    /// the divide-by-zero in `compute_k` and the overflow in
+    /// `compute_bit_len(capacity * bits_per_entry)` that the prior
+    /// implementation silently leaked into the constructed filter.
+    public fn try_with_target(capacity: Int, fp_rate_ppm: Int) -> Result<BloomFilter, BloomError> {
+        BloomFilter.try_new(BloomConfig { capacity: capacity, fp_rate_ppm: fp_rate_ppm })
     }
 
     public fn new(cfg: BloomConfig) -> BloomFilter {
+        match BloomFilter.try_new(cfg) {
+            Result.Ok(f)                          => f,
+            Result.Err(BloomError.EmptyCapacity)  => panic("BloomFilter capacity must be > 0"),
+            Result.Err(BloomError.CapacityTooLarge(c)) => panic(f"BloomFilter capacity {c} exceeds MAX_BLOOM_CAPACITY ({MAX_BLOOM_CAPACITY})"),
+            Result.Err(BloomError.InvalidFpRate(p))    => panic(f"BloomFilter fp_rate_ppm {p} must be in (0, 1_000_000)"),
+        }
+    }
+
+    /// Fallible constructor from a [`BloomConfig`]. Same validation
+    /// as [`try_with_target`].
+    public fn try_new(cfg: BloomConfig) -> Result<BloomFilter, BloomError> {
+        if cfg.capacity <= 0 {
+            return Result.Err(BloomError.EmptyCapacity);
+        }
+        if cfg.capacity > MAX_BLOOM_CAPACITY {
+            return Result.Err(BloomError.CapacityTooLarge(cfg.capacity));
+        }
+        if cfg.fp_rate_ppm <= 0 || cfg.fp_rate_ppm >= 1_000_000 {
+            return Result.Err(BloomError.InvalidFpRate(cfg.fp_rate_ppm));
+        }
         let bit_len = compute_bit_len(cfg.capacity, cfg.fp_rate_ppm);
         let word_count = bit_len / 64;
         let mut bits: List<UInt64> = [];
@@ -85,13 +136,13 @@ implement BloomFilter {
         while i < word_count { bits.push(0_u64); i = i + 1; }
         let mut key: [Byte; 32] = [0_u8; 32];
         fill_secure(&mut key);
-        BloomFilter {
+        Result.Ok(BloomFilter {
             bits:     bits,
             bit_len:  bit_len,
             k:        compute_k(bit_len, cfg.capacity),
             key:      key,
             admitted: 0_u64,
-        }
+        })
     }
 
     public fn with_defaults() -> BloomFilter {

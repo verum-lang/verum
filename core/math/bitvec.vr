@@ -5,7 +5,7 @@
 // Layer: Standard Library / Mathematics
 //
 // User-facing surface for the bit-vector decision-procedure core
-// (`verum_types::bitvec_decision`). Fixed-width bit-vectors with
+// (`verum_types.bitvec_decision`). Fixed-width bit-vectors with
 // modular arithmetic, bitwise operations, and SMT-LIB-compatible
 // QF_BV semantics — foundation for cryptography, embedded
 // systems, packet filtering, and bounded-precision verification.

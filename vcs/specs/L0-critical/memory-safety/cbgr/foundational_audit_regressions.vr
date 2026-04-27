@@ -81,14 +81,14 @@ fn test_ref_count_overflow_is_loud() {
 }
 
 // =============================================================================
-// ThinRef::revoke / FatRef::revoke TOCTOU race (#195 thin_ref.vr / fat_ref.vr)
+// ThinRef.revoke / FatRef.revoke TOCTOU race (#195 thin_ref.vr / fat_ref.vr)
 // =============================================================================
 //
 // Pre-fix: verify-then-fetch_add pattern.  Stale revoker would
 // spuriously double-bump the generation past a freshly-issued
 // successor reference.
 //
-// Post-fix: routed through `AllocationHeader::try_revoke(expected_gen)`,
+// Post-fix: routed through `AllocationHeader.try_revoke(expected_gen)`,
 // a CAS verify-and-bump primitive.  Two threads racing see exactly
 // one Ok(()) and one Err(already_revoked).
 fn test_revoke_is_race_free() {
@@ -98,7 +98,7 @@ fn test_revoke_is_race_free() {
 }
 
 // =============================================================================
-// FatRef::slice_view bounds-check overflow (#195 fat_ref.vr)
+// FatRef.slice_view bounds-check overflow (#195 fat_ref.vr)
 // =============================================================================
 //
 // Pre-fix: `start + length > self.metadata` wraps for adversarial

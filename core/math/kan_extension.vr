@@ -186,8 +186,8 @@ public fn build_comma_category(
     morphisms_to_target: &List<(Int, Int, Int)>,
     target: Int,
 ) -> CommaCategory {
-    let mut objects = List::new();
-    let mut morphisms = List::new();
+    let mut objects = List.new();
+    let mut morphisms = List.new();
 
     // Collect objects: (c_i, f: K(c_i) → e) for each morphism K(c_i) → e
     for (src_idx, image, mor) in morphisms_to_target.iter() {
@@ -250,8 +250,8 @@ public fn compute_pointwise_lan(
     // exist iff K(c) = d (and the morphism is the identity).
     // In the general case, we use the provided morphisms.
 
-    let mut comma_objects = List::new();
-    let mut contributing = List::new();
+    let mut comma_objects = List.new();
+    let mut contributing = List.new();
 
     if morphisms.is_empty() {
         // Discrete case: only identity morphisms
@@ -320,8 +320,8 @@ public fn compute_pointwise_ran(
 
     // Build the co-comma category (d ↓ K):
     // Objects are (c, d → K(c)).
-    let mut cocomma_objects = List::new();
-    let mut contributing = List::new();
+    let mut cocomma_objects = List.new();
+    let mut contributing = List.new();
 
     if morphisms.is_empty() {
         let mut i = 0;
@@ -367,8 +367,8 @@ public fn compute_full_kan_extension(
     target_objects: &List<Int>,
     direction: KanDirection,
 ) -> List<KanExtensionResult> {
-    let mut results = List::new();
-    let empty_morphisms = List::new();
+    let mut results = List.new();
+    let empty_morphisms = List.new();
 
     for target in target_objects.iter() {
         let result = match direction {
@@ -430,14 +430,14 @@ public fn compute_obstruction(
     let n = original_values.len();
     if n == 0 {
         return ObstructionData {
-            points: List::new(),
+            points: List.new(),
             average_severity: 0.0,
             max_severity: 0.0,
         };
     }
 
-    let empty_morphisms = List::new();
-    let mut points = List::new();
+    let empty_morphisms = List.new();
+    let mut points = List.new();
     let mut total_severity: Float = 0.0;
     let mut max_severity: Float = 0.0;
 

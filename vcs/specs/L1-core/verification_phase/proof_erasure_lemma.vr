@@ -9,7 +9,7 @@
 /// theorems and must also be completely erased before VBC codegen.
 ///
 /// See `crates/verum_vbc/src/codegen/mod.rs:3243-3249` for the explicit
-/// match that skips `ItemKind::Lemma`.
+/// match that skips `ItemKind.Lemma`.
 
 lemma helper_monotone(a: Int, b: Int)
     requires a <= b

@@ -14,7 +14,7 @@
 /// Five registration sites used the same narrowing pattern
 /// (`throws_clause.error_types[0]` or `.iter().next()`). This
 /// commit routed them all through `wrap_return_type_for_sig`,
-/// which builds a `Type::Variant` union by flattening each
+/// which builds a `Type.Variant` union by flattening each
 /// throws entry — matching the semantics already used by
 /// `infer_try_operator` for the `?` operator.
 ///

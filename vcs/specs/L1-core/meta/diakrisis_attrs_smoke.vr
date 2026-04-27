@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: meta, diakrisis_attrs, vva-part-b, v8.1, meta1
+// @timeout: 5000
+// @expect: pass
+//
+// VVA Part B §§4/5/9/10 — Smoke test for the meta-system
+// reorganisation of advisory attributes (META1 follow-up to V21–V24).
+//
+// Verifies that the meta-fns in core.meta.diakrisis_attrs:
+//   - parse_effect_attr
+//   - parse_infinity_category
+//   - parse_autopoietic
+//   - parse_ludic_design
+//   - parse_cut_elimination
+// resolve at use-site (meta-side validation surface for Diakrisis
+// Part B advisory markers).
+
+mount core.meta.diakrisis_attrs.{
+    EffectKind,
+    EffectAttr,
+    parse_effect_attr,
+    InfinityLevel,
+    InfinityCategoryAttr,
+    parse_infinity_category,
+    AutopoieticAttr,
+    parse_autopoietic,
+    LudicDesignAttr,
+    parse_ludic_design,
+    CutEliminationAttr,
+    CUT_ELIMINATION_DEFAULT_BOUND,
+    parse_cut_elimination,
+};
+
+fn main() {
+    // The smoke check: every type / fn name resolves. Real
+    // semantic checks live in the per-fn unit tests inside
+    // core.meta.diakrisis_attrs (V12.1 pattern).
+    print("meta.diakrisis_attrs smoke ok");
+}

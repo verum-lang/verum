@@ -10,7 +10,7 @@
 // Lease lifecycle:
 //
 //   1. `acquire(deadline_ns, now_ns)` returns either a `Lease<Mode>`
-//      or `PoolError::Timeout`.
+//      or `PoolError.Timeout`.
 //   2. Caller uses the connection via `lease.connection_id()`.
 //   3. `release(lease)` returns the connection to the pool.
 //

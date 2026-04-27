@@ -7,7 +7,7 @@
 // bodies* using the protocol-qualified call form.
 //
 // Previously fails with: "expected '_<_>', found 'MapFuture<_, F<_>>'"
-// because method resolution on `fa: F<A>` fell through to FutureExt::map
+// because method resolution on `fa: F<A>` fell through to FutureExt.map
 // (a blanket impl that shadows the Functor bound on F). The fix adds a
 // bound-first dispatch path in `infer.rs` that, when the receiver's head
 // is a TypeVar (or a Generic whose name resolves to one) with a protocol

@@ -22,7 +22,7 @@
 //   3. Presheaf:     GraphPresheaf<G> is a contravariant functor
 //                    FreeGraphCategory<G>^op → Set. Sheaf cohomology on
 //                    this presheaf recovers the graph Laplacian spectrum
-//                    (integrates with core/math/linalg.vr::EigenDecomposition).
+//                    (integrates with core/math/linalg.vr.EigenDecomposition).
 //                    This is the view for spectral methods, graph neural
 //                    network message passing, and homology.
 //

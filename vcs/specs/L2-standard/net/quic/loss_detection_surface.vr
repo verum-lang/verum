@@ -19,7 +19,7 @@ mount core.net.quic.recovery.cc.new_reno.{NewReno};
 mount core.net.quic.recovery.rtt.{RttEstimator};
 
 fn fresh_detection_has_no_timer() {
-    let ld = LossDetection::new();
+    let ld = LossDetection.new();
     match ld.timer_fires_at() {
         None => {},
         _ => panic("fresh detection must have no timer armed"),
@@ -28,8 +28,8 @@ fn fresh_detection_has_no_timer() {
 }
 
 fn on_packet_sent_arms_timer() {
-    let mut ld = LossDetection::new();
-    let mut cc = NewReno::new();
+    let mut ld = LossDetection.new();
+    let mut cc = NewReno.new();
     let now = Instant.now();
     let info = SentPacketInfo {
         packet_number:  1_u64,
@@ -66,7 +66,7 @@ fn rtt_estimator_incorporates_sample() {
 }
 
 fn keys_discarded_unloads_space() {
-    let mut ld = LossDetection::new();
+    let mut ld = LossDetection.new();
     // Discarding keys for the Initial space MUST NOT panic.
     ld.on_keys_discarded(PnSpaceKind.Initial);
     ld.on_keys_discarded(PnSpaceKind.Handshake);
@@ -75,7 +75,7 @@ fn keys_discarded_unloads_space() {
 }
 
 fn new_reno_initial_window_is_conservative() {
-    let cc = NewReno::new();
+    let cc = NewReno.new();
     // RFC 9002 §7.2 initial cwnd = min(10 × max_datagram_size, max(14720, 2 × max_datagram_size))
     // with max_datagram_size = 1200 → 14400 bytes.
     assert(cc.window() >= 14000_u32);

@@ -33,7 +33,7 @@ mount core.*;
 
 // (i) counter strictly increases by one
 theorem key_update_counter_strictly_monotonic(n: UInt64)
-    requires n < 18446744073709551614_u64   // leave one slot below u64::MAX
+    requires n < 18446744073709551614_u64   // leave one slot below u64.MAX
     ensures  n + 1_u64 > n
     ensures  (n + 1_u64) - n == 1_u64
 {

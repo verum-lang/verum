@@ -6,7 +6,7 @@
 // @description: Method-dispatch receiver-type narrowing — Maybe sibling.
 //
 // Companion fixture to result_unwrap_err_receiver_narrow.vr.  Pins
-// that `Maybe<T>::None.unwrap()` panics — i.e. the receiver-type
+// that `Maybe<T>.None.unwrap()` panics — i.e. the receiver-type
 // narrowing in `compile_method_call` correctly distinguishes
 // Maybe.unwrap (panics on None — fc == 0) from Result.unwrap
 // (panics on Err — tag != 0) and from any historic generic-T

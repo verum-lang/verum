@@ -636,7 +636,7 @@ fn test_ipv6_parse_full() {
 @test
 fn test_ipv6_parse_abbreviated() {
     // :: abbreviation for zeros in the middle
-    let result = Ipv6Addr.parse("2001:db8::1");
+    let result = Ipv6Addr.parse("2001:db8.1");
     assert(result.is_ok());
     let addr = result.unwrap();
     assert_eq(addr.segments().0, 0x2001);
@@ -668,7 +668,7 @@ fn test_ipv6_parse_unspecified() {
 
 @test
 fn test_ipv6_parse_link_local() {
-    let result = Ipv6Addr.parse("fe80::1");
+    let result = Ipv6Addr.parse("fe80.1");
     assert(result.is_ok());
     let addr = result.unwrap();
     assert(addr.is_link_local());

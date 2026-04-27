@@ -72,7 +72,7 @@
 // | Language       | Arena Pattern          | Mass Invalidation | Safety    |
 // |----------------|------------------------|-------------------|-----------|
 // | C              | Custom arena           | Manual (unsafe)   | None      |
-// | C++            | pmr::monotonic_buffer  | Manual reset      | None      |
+// | C++            | pmr.monotonic_buffer  | Manual reset      | None      |
 // | Rust           | bumpalo                | Lifetime-based    | Compile   |
 // | Go             | sync.Pool              | GC-based          | Runtime   |
 // | Zig            | ArenaAllocator         | Manual deinit     | None      |

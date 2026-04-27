@@ -10,11 +10,11 @@
 /// Before this fix, `mount core.math.hott.{ua}` failed with E401
 /// because:
 ///
-///   1. `build_export_index` in `verum_compiler::core_compiler` dropped
-///      `ItemKind::Axiom` into a `_ => {}` bucket — import-validation
+///   1. `build_export_index` in `verum_compiler.core_compiler` dropped
+///      `ItemKind.Axiom` into a `_ => {}` bucket — import-validation
 ///      saw no export and reported "cannot find `ua`".
-///   2. `extract_function_type_from_module` in `verum_types::infer`
-///      only matched `ItemKind::Function` for AST-fallback resolution.
+///   2. `extract_function_type_from_module` in `verum_types.infer`
+///      only matched `ItemKind.Function` for AST-fallback resolution.
 ///
 /// The architectural root cause: axioms are trusted, parameterised
 /// declarations that semantically behave as functions at the type

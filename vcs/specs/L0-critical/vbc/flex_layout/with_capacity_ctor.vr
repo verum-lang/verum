@@ -11,7 +11,7 @@
 //
 // Before the fix, the stdlib's compiled `List.with_capacity(n)` body
 // returned a flat record (raw ptr + len/cap fields) that wasn't wired
-// into the interpreter's TypeId::LIST handler, so `xs.len()` later read
+// into the interpreter's TypeId.LIST handler, so `xs.len()` later read
 // garbage integers (e.g. `51173805664`) and any `push`/`[i]` on it
 // segfaulted. The fix (codegen) maps the call to the same `NewList` /
 // `NewMap` / `NewSet` opcode used by `<Collection>.new()`, dropping

@@ -6,7 +6,7 @@
 // @description: Corollary declarations are erased before VBC codegen (previously uncovered case).
 
 /// Proof erasure regression: prior to the fix in
-/// `crates/verum_vbc/src/codegen/mod.rs:3243-3249`, `ItemKind::Corollary`
+/// `crates/verum_vbc/src/codegen/mod.rs:3243-3249`, `ItemKind.Corollary`
 /// was not listed explicitly alongside Theorem/Lemma/Axiom and was only
 /// silently dropped by the catch-all `_ => {}` arm. The explicit match
 /// now lists Corollary so future additions to ItemKind cannot accidentally

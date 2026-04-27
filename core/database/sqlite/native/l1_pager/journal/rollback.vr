@@ -29,7 +29,7 @@ module core.database.sqlite.native.l1_pager.journal.rollback;
 //
 // This module implements the *pure* serialise / parse side; durability
 // (fsync barriers before any DB overwrite) is driven by the pager actor
-// via `JournalCommand::AppendPreimage` requests.
+// via `JournalCommand.AppendPreimage` requests.
 // =============================================================================
 
 mount core.*;
@@ -128,7 +128,7 @@ public fn rollback_parse_header(buf: &[Byte]) -> Result<RollbackHeader, Rollback
 // -----------------------------------------------------------------------------
 
 /// SQLite's rollback-journal record checksum — nonce + sum over every
-/// 200th byte of the page image (this is what pager.c::cksum() computes).
+/// 200th byte of the page image (this is what pager.c.cksum() computes).
 /// The nonce is the header's `checksum_nonce`.
 public fn rollback_record_checksum(nonce: UInt32, page_bytes: &[Byte]) -> UInt32 {
     let mut s = nonce;

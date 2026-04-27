@@ -15,7 +15,7 @@
 //   4. Iterate to fixpoint.
 //   5. Drop entries marked unreachable.
 //
-// We only consider opcodes catalogued in `opcode_catalog::effects`
+// We only consider opcodes catalogued in `opcode_catalog.effects`
 // as `is_branch` or terminator-shaped — extending the taxonomy adds
 // more terminators automatically.
 // =============================================================================

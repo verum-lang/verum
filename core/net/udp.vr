@@ -853,7 +853,7 @@ implement UdpSocket {
 
 /// Serialize a socket address to bytes for syscalls.
 ///
-/// Mirror of `core/net/tcp.vr::serialize_socket_addr` — same
+/// Mirror of `core/net/tcp.vr.serialize_socket_addr` — same
 /// BSD-vs-POSIX `sockaddr` header divergence (task #5).
 fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
     match *addr {

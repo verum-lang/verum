@@ -531,7 +531,7 @@ fn test_e086_variant_unclosed_tuple() {
 fn test_e086_variant_unclosed_record() {
     // ERROR: unclosed variant record
     match msg {
-        Message::Text { content => use(content),
+        Message.Text { content => use(content),
         _ => other()
     }
 }

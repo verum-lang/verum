@@ -5,7 +5,7 @@
 // Layer: Standard Library / Concurrency
 //
 // User-facing surface for the π-calculus analysis core
-// (`verum_types::pi_calculus`). Milner's π-calculus models mobile
+// (`verum_types.pi_calculus`). Milner's π-calculus models mobile
 // concurrent processes where channels are first-class values that
 // can be sent over other channels — modelling dynamic network
 // topology, not just a fixed set of communication paths.

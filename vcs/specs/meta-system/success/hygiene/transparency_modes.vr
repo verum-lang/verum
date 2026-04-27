@@ -53,7 +53,7 @@ fn test_transparent() {
 meta fn semi_transparent_create() -> TokenStream {
     quote {
         // Can use CallerType from caller's scope
-        let x: CallerType = CallerType::new();
+        let x: CallerType = CallerType.new();
         x
     }
 }

@@ -410,7 +410,7 @@ fn test_is_ip_address_ipv6_full() {
 
 @test
 fn test_is_ip_address_ipv6_compressed() {
-    let result: Bool = is_ip_address(&"2001:db8::1");
+    let result: Bool = is_ip_address(&"2001:db8.1");
     assert(result);
 }
 

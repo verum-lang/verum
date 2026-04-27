@@ -38,8 +38,8 @@ fn test_maximum_unsigned_values() {
     let max_u16 = 65535u16;
     let max_u32 = 4294967295u32;
     // Note: max u64 (18446744073709551615) cannot be expressed as a literal
-    // because it exceeds i64::MAX. Use u64.max instead.
-    let large_u64 = 9223372036854775807u64;  // i64::MAX fits
+    // because it exceeds i64.MAX. Use u64.max instead.
+    let large_u64 = 9223372036854775807u64;  // i64.MAX fits
 }
 
 fn test_minimum_signed_values() {

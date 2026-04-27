@@ -258,7 +258,7 @@ implement Debug for CapEvent {
 // Semantic record helpers
 // =============================================================================
 //
-// Thin convenience wrappers over `cap_audit_ring::commit` that build
+// Thin convenience wrappers over `cap_audit_ring.commit` that build
 // the `CapEvent` from per-writer arguments.  These are the entry points
 // CBGR write sites in `header.vr` (try_revoke, attenuate_capabilities,
 // increment_ref_count, decrement_ref_count, increment_generation) call

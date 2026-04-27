@@ -6,8 +6,8 @@
 // @expected-error-count: 3
 //
 // Regression for Issue #5 (root fix in
-// crates/verum_fast_parser/src/expr.rs::parse_macro_call +
-// crates/verum_fast_parser/src/decl.rs::parse_module).
+// crates/verum_fast_parser/src/expr.rs.parse_macro_call +
+// crates/verum_fast_parser/src/decl.rs.parse_module).
 //
 // Two distinct bugs combined to inflate the diagnostic count on Rust-
 // style macro syntax:

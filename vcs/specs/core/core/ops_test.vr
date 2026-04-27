@@ -17,7 +17,7 @@ mount core.collections.map.Map;
 // Section 1: ControlFlow Type Construction
 // =============================================================================
 
-/// Test ControlFlow::Continue construction
+/// Test ControlFlow.Continue construction
 @test
 fn test_control_flow_continue_construction() {
     let cf: ControlFlow<Text, Int> = Continue(42);
@@ -25,7 +25,7 @@ fn test_control_flow_continue_construction() {
     assert(!cf.is_break());
 }
 
-/// Test ControlFlow::Break construction
+/// Test ControlFlow.Break construction
 @test
 fn test_control_flow_break_construction() {
     let cf: ControlFlow<Text, Int> = Break("error");
@@ -344,7 +344,7 @@ fn test_try_maybe_none() {
     }
 }
 
-/// Test Try::from_output for Maybe
+/// Test Try.from_output for Maybe
 @test
 fn test_try_from_output_maybe() {
     let maybe = Maybe.from_output(42);
@@ -408,7 +408,7 @@ fn test_try_result_err() {
     }
 }
 
-/// Test Try::from_output for Result
+/// Test Try.from_output for Result
 @test
 fn test_try_from_output_result() {
     let result: Result<Int, Text> = Result.from_output(42);

@@ -1381,7 +1381,7 @@ implement SupervisorInner {
     }
 
     /// Append a `RestartEvent` to the supervisor's history.  Caps
-    /// the history at `RestartEvent::MAX_HISTORY` (100) by evicting
+    /// the history at `RestartEvent.MAX_HISTORY` (100) by evicting
     /// the oldest entry when full — matches the documented
     /// "circular buffer" semantics on the field.
     ///

@@ -15,7 +15,7 @@ mount core.database.sqlite.native.{Connection, ConnectionMode};
 
 @main
 public async fn main() -> Result<(), Error> {
-    let conn = Connection::open_memory().await?;
+    let conn = Connection.open_memory().await?;
     // Connection is affine — must be closed explicitly or dropped by scope.
     conn.close().await?;
     Ok(())

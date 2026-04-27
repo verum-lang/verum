@@ -20,12 +20,12 @@ fn main() {
     // Test 2: audit a well-formed theory
     let mut good_theory = Theory {
         name: "WellFormed",
-        claims: List::new(),
-        statements: List::from([
+        claims: List.new(),
+        statements: List.from([
             Claim { id: "ax1", claim_type: ClaimType.Axiom, content: "Base", status: EpistemicStatus.Postulate },
             Claim { id: "thm1", claim_type: ClaimType.Theorem, content: "Derived", status: EpistemicStatus.Theorem },
         ]),
-        dependencies: List::from([("thm1", "ax1")]),
+        dependencies: List.from([("thm1", "ax1")]),
     };
 
     let result = audit_theory(&mut good_theory);
@@ -36,11 +36,11 @@ fn main() {
     // Test 3: detect dangling references
     let mut bad_theory = Theory {
         name: "Dangling",
-        claims: List::new(),
-        statements: List::from([
+        claims: List.new(),
+        statements: List.from([
             Claim { id: "thm1", claim_type: ClaimType.Theorem, content: "Needs proof", status: EpistemicStatus.Theorem },
         ]),
-        dependencies: List::from([("thm1", "nonexistent_axiom")]),
+        dependencies: List.from([("thm1", "nonexistent_axiom")]),
     };
 
     let result = audit_theory(&mut bad_theory);

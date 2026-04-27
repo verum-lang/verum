@@ -3,15 +3,15 @@
 // @level: L0
 // @tags: memory-safety, cbgr, diagnostics, introspection, async, observability, panic
 
-/// Regression test for `core::diagnostics` umbrella module (#197).
+/// Regression test for `core.diagnostics` umbrella module (#197).
 ///
 /// Pins the umbrella's compositional contract:
 ///   - `HeaderView` and `header_view_of` are reachable via `core.diagnostics`
-///     (re-exported from `core::mem::diagnostics`)
+///     (re-exported from `core.mem.diagnostics`)
 ///   - `TaskInfo` and `TaskLifecycleState` are reachable via `core.diagnostics`
-///     (re-exported from `core::async::diagnostics`)
+///     (re-exported from `core.async.diagnostics`)
 ///   - `PanicInfo` and `Location` are reachable via `core.diagnostics`
-///     (re-exported from `core::base::panic`)
+///     (re-exported from `core.base.panic`)
 ///   - `PanicReport` is the user-facing composing type — it bundles a
 ///     `PanicInfo` with optional `TaskInfo` / `HeaderView` / thread_name
 ///     into a single panic-site dump
@@ -45,10 +45,10 @@ fn main() {
     test_panic_report_format_methods();
     test_cap_event_predicates();
     test_umbrella_is_stable_boundary();
-    print("core::diagnostics umbrella regression test passed.");
+    print("core.diagnostics umbrella regression test passed.");
 }
 
-/// Pins re-exports from `core::mem::diagnostics`. Failure mode: the
+/// Pins re-exports from `core.mem.diagnostics`. Failure mode: the
 /// `mount core.diagnostics.HeaderView` line above does not resolve.
 fn test_mem_surface_re_exported() {
     assert(true, "HeaderView + header_view_of reachable via core.diagnostics");
@@ -58,19 +58,19 @@ fn test_mem_surface_re_exported() {
     assert(true, "live_allocations + live_allocation_count reachable via core.diagnostics");
 }
 
-/// Pins re-exports from `core::async::diagnostics`. Failure mode: the
+/// Pins re-exports from `core.async.diagnostics`. Failure mode: the
 /// `mount core.diagnostics.TaskInfo` line above does not resolve.
 fn test_async_surface_re_exported() {
     assert(true, "TaskInfo + TaskLifecycleState reachable via core.diagnostics");
 }
 
-/// Pins re-exports from `core::base::panic`. Failure mode: the
+/// Pins re-exports from `core.base.panic`. Failure mode: the
 /// `mount core.diagnostics.PanicInfo` line above does not resolve.
 fn test_panic_surface_re_exported() {
     assert(true, "PanicInfo + Location reachable via core.diagnostics");
 }
 
-/// Pins re-exports from `core::mem::cap_audit`. Failure mode: the
+/// Pins re-exports from `core.mem.cap_audit`. Failure mode: the
 /// `mount core.diagnostics.CapEvent` line above does not resolve.
 fn test_cap_audit_surface_re_exported() {
     assert(true, "CapEvent + CapEventKind reachable via core.diagnostics");
@@ -115,5 +115,5 @@ fn test_cap_event_predicates() {
 /// folds (tracing/metrics, capability audit, live_allocations) extend
 /// this surface without breaking existing callers.
 fn test_umbrella_is_stable_boundary() {
-    assert(true, "core::diagnostics is the stable observability surface");
+    assert(true, "core.diagnostics is the stable observability surface");
 }

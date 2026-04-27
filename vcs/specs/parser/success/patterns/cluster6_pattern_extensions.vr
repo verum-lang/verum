@@ -35,7 +35,7 @@
 // ============================================================================
 
 // ============================================================================
-// SECTION 1: WILDCARD PATTERN (PatternKind::Wildcard)
+// SECTION 1: WILDCARD PATTERN (PatternKind.Wildcard)
 // Grammar: '_'
 // ============================================================================
 
@@ -64,7 +64,7 @@ fn test_wildcard_patterns() {
 }
 
 // ============================================================================
-// SECTION 2: REST PATTERN (PatternKind::Rest)
+// SECTION 2: REST PATTERN (PatternKind.Rest)
 // Grammar: '..' , [ identifier ]
 // ============================================================================
 
@@ -92,7 +92,7 @@ fn test_rest_patterns() {
 }
 
 // ============================================================================
-// SECTION 3: IDENTIFIER PATTERN (PatternKind::Ident)
+// SECTION 3: IDENTIFIER PATTERN (PatternKind.Ident)
 // Grammar: identifier , [ '@' , pattern ]
 // ============================================================================
 
@@ -136,7 +136,7 @@ fn test_identifier_patterns() {
 }
 
 // ============================================================================
-// SECTION 4: LITERAL PATTERN (PatternKind::Literal)
+// SECTION 4: LITERAL PATTERN (PatternKind.Literal)
 // Grammar: integer | float | string | char | bool
 // ============================================================================
 
@@ -199,7 +199,7 @@ fn test_literal_patterns() {
 }
 
 // ============================================================================
-// SECTION 5: TUPLE PATTERN (PatternKind::Tuple)
+// SECTION 5: TUPLE PATTERN (PatternKind.Tuple)
 // Grammar: '(' , [ pattern , { ',' , pattern } , [ ',' ] ] , ')'
 // ============================================================================
 
@@ -240,7 +240,7 @@ fn test_tuple_patterns() {
 }
 
 // ============================================================================
-// SECTION 6: ARRAY PATTERN (PatternKind::Array)
+// SECTION 6: ARRAY PATTERN (PatternKind.Array)
 // Grammar: '[' , [ pattern , { ',' , pattern } ] , ']'
 // ============================================================================
 
@@ -276,7 +276,7 @@ fn test_array_patterns() {
 }
 
 // ============================================================================
-// SECTION 7: SLICE PATTERN (PatternKind::Slice)
+// SECTION 7: SLICE PATTERN (PatternKind.Slice)
 // Grammar: '[' , [ pattern , { ',' , pattern } ] , '..' , [ identifier ] , [ { ',' , pattern } ] , ']'
 // ============================================================================
 
@@ -318,7 +318,7 @@ fn test_slice_patterns() {
 }
 
 // ============================================================================
-// SECTION 8: RECORD PATTERN (PatternKind::Record)
+// SECTION 8: RECORD PATTERN (PatternKind.Record)
 // Grammar: path , '{' , [ field_pattern , { ',' , field_pattern } ] , [ '..' ] , '}'
 // ============================================================================
 
@@ -364,7 +364,7 @@ fn test_record_patterns() {
 }
 
 // ============================================================================
-// SECTION 9: VARIANT PATTERN (PatternKind::Variant)
+// SECTION 9: VARIANT PATTERN (PatternKind.Variant)
 // Grammar: path , [ '(' , [ pattern_list ] , ')' ] | [ '{' , field_patterns , '}' ]
 // ============================================================================
 
@@ -422,7 +422,7 @@ fn test_variant_patterns() {
 }
 
 // ============================================================================
-// SECTION 10: OR PATTERN (PatternKind::Or)
+// SECTION 10: OR PATTERN (PatternKind.Or)
 // Grammar: pattern , { '|' , pattern }
 // ============================================================================
 
@@ -474,7 +474,7 @@ fn test_or_patterns() {
 }
 
 // ============================================================================
-// SECTION 11: REFERENCE PATTERN (PatternKind::Reference)
+// SECTION 11: REFERENCE PATTERN (PatternKind.Reference)
 // Grammar: '&' , [ 'mut' ] , pattern
 // ============================================================================
 
@@ -518,7 +518,7 @@ fn test_reference_patterns() {
 }
 
 // ============================================================================
-// SECTION 12: RANGE PATTERN (PatternKind::Range)
+// SECTION 12: RANGE PATTERN (PatternKind.Range)
 // Grammar: range_start , ( '..' | '..=' ) , range_end
 // ============================================================================
 
@@ -571,7 +571,7 @@ fn test_range_patterns() {
 }
 
 // ============================================================================
-// SECTION 13: PAREN PATTERN (PatternKind::Paren)
+// SECTION 13: PAREN PATTERN (PatternKind.Paren)
 // Grammar: '(' , pattern , ')'
 // ============================================================================
 
@@ -599,7 +599,7 @@ fn test_paren_patterns() {
 }
 
 // ============================================================================
-// SECTION 14: ACTIVE PATTERN (PatternKind::Active)
+// SECTION 14: ACTIVE PATTERN (PatternKind.Active)
 // Grammar: identifier , '(' , [ expression_list ] , ')' , [ '(' , [ pattern_list ] , ')' ]
 // ============================================================================
 
@@ -666,7 +666,7 @@ fn test_active_patterns() {
 }
 
 // ============================================================================
-// SECTION 15: AND PATTERN (PatternKind::And)
+// SECTION 15: AND PATTERN (PatternKind.And)
 // Grammar: pattern , '&' , pattern
 // ============================================================================
 
@@ -706,7 +706,7 @@ fn test_and_patterns() {
 }
 
 // ============================================================================
-// SECTION 16: GUARD PATTERN (PatternKind::Guard)
+// SECTION 16: GUARD PATTERN (PatternKind.Guard)
 // Grammar: pattern , 'if' , expression
 // ============================================================================
 
@@ -771,7 +771,7 @@ fn test_guard_patterns() {
 }
 
 // ============================================================================
-// SECTION 17: TYPE TEST PATTERN (PatternKind::TypeTest)
+// SECTION 17: TYPE TEST PATTERN (PatternKind.TypeTest)
 // Grammar: identifier , 'is' , type_expr
 // ============================================================================
 
@@ -828,7 +828,7 @@ fn test_type_test_patterns() {
 }
 
 // ============================================================================
-// SECTION 18: STREAM PATTERN (PatternKind::Stream)
+// SECTION 18: STREAM PATTERN (PatternKind.Stream)
 // Grammar: 'stream' , '[' , stream_pattern_elements , ']'
 // ============================================================================
 

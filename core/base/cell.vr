@@ -61,7 +61,7 @@ implement<T: Clone> Cell<T> {
         old
     }
 
-    /// Take the value, leaving Default::default() in its place.
+    /// Take the value, leaving Default.default() in its place.
     public fn take(&self) -> T where T: Default {
         self.replace(T.default())
     }

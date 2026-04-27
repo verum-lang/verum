@@ -12,7 +12,7 @@ mount core.database.sqlite.native.{Connection, Transaction};
 
 @main
 public async fn main() -> Result<(), Error> {
-    let conn = Connection::open_memory().await?;
+    let conn = Connection.open_memory().await?;
     conn.execute(sql#"CREATE TABLE t (x INT)"#).await?;
 
     // Committed transaction:

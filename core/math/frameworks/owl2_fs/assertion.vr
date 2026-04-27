@@ -93,7 +93,7 @@ public axiom ObjectPropertyAssertion<I: Interpretation, P: ObjectPropertyExpress
 // §5.8 — anonymous individuals get distinct denotations under the
 // standard interpretation function (§3.1) and the negation treats
 // them identically to named ones. The body below uses bog-standard
-// Verum `!` over `Interpretation::object_property_pair`; do NOT
+// Verum `!` over `Interpretation.object_property_pair`; do NOT
 // introduce `¬∃b_anon. ⟦OPE⟧^I(a, b_anon)` framing — that confuses
 // the syntactic Skolem-style scoping of anonymous individuals at
 // RDF parse time with the meta-logical OWA of OWL 2 entailment.

@@ -38,7 +38,7 @@ public fn x509_der_parse_single() {
 
     let mut n: Int = 0;
     while n < BENCHMARK_ITERATIONS {
-        let mut r = DerReader::new(&blob);
+        let mut r = DerReader.new(&blob);
         let _ = r.read_tag_length();
         n = n + 1;
     }

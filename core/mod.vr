@@ -246,7 +246,7 @@ public module net;
 // =============================================================================
 
 // User-facing observability umbrella — composes layer-local CBGR
-// (mem::diagnostics) and async runtime (async::diagnostics) snapshot
+// (mem.diagnostics) and async runtime (async.diagnostics) snapshot
 // surfaces into a single import target.  Future folds: tracing/metrics
 // observability handle, capability audit log, symbolicated panic stack,
 // live_allocations iterator.  Tracked in #197.

@@ -49,7 +49,7 @@ public fn trap() -> Never { @intrinsic("trap") }
 /// `unreachable` was inconsistently marked safe even though both
 /// share the identical UB semantics). Safe-to-call panicking
 /// "this can't happen" diagnostics live at
-/// `core.base.panic::unreachable(msg)` — that one is the right
+/// `core.base.panic.unreachable(msg)` — that one is the right
 /// surface for almost all callers; this raw intrinsic is for
 /// codegen-internal paths where the compiler has already proven
 /// the unreachability.

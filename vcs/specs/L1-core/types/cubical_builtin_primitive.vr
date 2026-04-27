@@ -6,8 +6,8 @@
 /// Cubical HoTT language primitives exposed via `@builtin_*` meta-type
 /// markers. The stdlib `core/math/hott.vr` and `core/math/cubical.vr`
 /// declare these types; the type-checker resolves each marker name to
-/// an internal `Type::Interval` / `Type::PathType` / `Type::Named`
-/// primitive via `resolve_builtin_meta_type` in `verum_types::infer`.
+/// an internal `Type.Interval` / `Type.PathType` / `Type.Named`
+/// primitive via `resolve_builtin_meta_type` in `verum_types.infer`.
 ///
 /// This test pins the surface: each declaration parses and type-checks
 /// to its primitive, so follow-up cubical work (NbE reduction rules,
@@ -19,7 +19,7 @@ public type I is @builtin_interval;
 
 /// The path type constructor: `Path<A>(a, b)` is the type of paths
 /// from `a` to `b` in carrier `A`. Uses `Path<A>(a, b)` sugar at
-/// use-sites (elaborated to `Type::Eq` by the type-checker).
+/// use-sites (elaborated to `Type.Eq` by the type-checker).
 public type Path<A>(a: A, b: A) is @builtin_path;
 
 /// The glue type constructor — foundation of computational univalence.

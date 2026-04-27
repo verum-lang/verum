@@ -6,7 +6,7 @@
 //       §17.6 (generated columns), §17.7 (conflict resolution)
 //
 // Constraint catalogue. Each constraint kind carries a `Spec` record;
-// the L4 interpreter calls `enforce::check_<kind>` at INSERT/UPDATE
+// the L4 interpreter calls `enforce.check_<kind>` at INSERT/UPDATE
 // time. Conflict resolution policy (ABORT / FAIL / IGNORE / REPLACE /
 // ROLLBACK) is attached per-constraint and decides what happens on
 // violation.

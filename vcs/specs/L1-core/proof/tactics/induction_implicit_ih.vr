@@ -8,7 +8,7 @@
 // the un-justified `have ih: …;` is the induction hypothesis — the
 // proposition the induction principle gives you for free. The
 // grammar's proof_justification is required syntactically; the
-// parser sugars the missing `by CLAUSE` to `TacticExpr::Trivial`.
+// parser sugars the missing `by CLAUSE` to `TacticExpr.Trivial`.
 // The verifier now admits such steps ONLY when the enclosing
 // context is an induction case body. Top-level `have` without `by`
 // is still rejected — otherwise anyone could smuggle `false` in and

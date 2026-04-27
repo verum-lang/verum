@@ -18,14 +18,14 @@ public async fn main() -> Result<(), Error> {
         create: true,
         main_db: true,
         delete_on_close: true,  // auto-cleanup
-        ..OpenFlags::default()
+        ..OpenFlags.default()
     };
 
     let mut file = vfs.open(&path("/tmp/loom-vfs-smoke.db"), flags).await?;
 
     let page: [Byte; 4096] = fill_page(0xAB);
     file.write(&page, 0).await?;
-    file.sync(SyncFlags::full()).await?;
+    file.sync(SyncFlags.full()).await?;
 
     let mut read_buf: [Byte; 4096] = [0; 4096];
     file.read(&mut read_buf, 0).await?;

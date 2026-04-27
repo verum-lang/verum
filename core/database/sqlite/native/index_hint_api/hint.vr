@@ -40,5 +40,5 @@ public fn required_index(h: &IndexHint) -> Text {
 // CROSS JOIN is a JOIN-level hint — it tells the planner "do not reorder
 // this join". The hint lives on the JoinPair, not on a source table.
 public fn describes_cross_join_hint() -> Text {
-    "Use JoinKind::JkCross on full_outer_join_api::JoinPair for CROSS JOIN.".clone()
+    "Use JoinKind.JkCross on full_outer_join_api.JoinPair for CROSS JOIN.".clone()
 }

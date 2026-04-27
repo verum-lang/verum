@@ -342,7 +342,7 @@ public fn fmod_f64(x: Float64, y: Float64) -> Float64 { @intrinsic("fmod", x, y)
 
 /// Alias for [`is_inf`] — the canonical name in many other
 /// languages' float APIs (`Float64.is_infinite()` in Java/Swift,
-/// `f64::is_infinite` in Rust). Wraps the existing `is_inf`
+/// `f64.is_infinite` in Rust). Wraps the existing `is_inf`
 /// rather than re-binding the intrinsic so the two names share
 /// exactly one source of truth.
 @inline

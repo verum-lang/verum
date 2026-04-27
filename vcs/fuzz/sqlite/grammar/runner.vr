@@ -15,7 +15,7 @@ mount core.time.Duration;
 
 @main
 public async fn main(seed: Int, duration_secs: Int) -> Result<(), Error> {
-    let conn = Connection::open_memory().await?;
+    let conn = Connection.open_memory().await?;
 
     // Baseline schema for the fuzzer to work against.
     conn.execute(sql#"
@@ -25,7 +25,7 @@ public async fn main(seed: Int, duration_secs: Int) -> Result<(), Error> {
     "#).await?;
 
     let start = monotonic_now();
-    let mut rng = GrammarRng::new(seed);
+    let mut rng = GrammarRng.new(seed);
     let mut stmt_count = 0;
     let mut ok_count = 0;
     let mut err_count = 0;
@@ -36,8 +36,8 @@ public async fn main(seed: Int, duration_secs: Int) -> Result<(), Error> {
 
         match conn.execute_raw(&sql_str).await {
             Ok(_) => ok_count += 1,
-            Err(DbError::ParseError { .. }) => err_count += 1,
-            Err(DbError::Generic { .. }) => err_count += 1,
+            Err(DbError.ParseError { .. }) => err_count += 1,
+            Err(DbError.Generic { .. }) => err_count += 1,
             // Only real panics/infinite-loops escape — runner detects via timeout.
             Err(e) => err_count += 1,
         }

@@ -92,7 +92,7 @@ type RevocationCallbackEntry is {
 
 // Both callback entries are trivially clonable — `id: Int` is
 // Copy and the callback field is a function-pointer (also Copy).
-// Explicit impls are required because List<T>::clone() in
+// Explicit impls are required because List<T>.clone() in
 // `notify_callbacks` / `on_revocation` snapshot-iteration
 // (added to break the reentrant-deadlock bug) needs T: Clone.
 implement Clone for CallbackEntry {

@@ -35,7 +35,7 @@ fn checked_div_zero_overflows() {
 }
 
 fn checked_neg_of_min_overflows() {
-    // -(Int64::MIN) overflows.
+    // -(Int64.MIN) overflows.
     let min_i64: Int64 = -9223372036854775808 as Int64;
     match checked_neg(min_i64) {
         CheckedResult.Ok(_)     => { panic("negating MIN must overflow"); }

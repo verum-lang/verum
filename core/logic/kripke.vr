@@ -5,7 +5,7 @@
 // Layer: Standard Library / Logic
 //
 // User-facing surface for the Kripke-semantics analysis core
-// (`verum_types::kripke`). A Kripke frame is a set of *worlds*
+// (`verum_types.kripke`). A Kripke frame is a set of *worlds*
 // plus an *accessibility* relation; modal formulas `□φ` and `◇φ`
 // are evaluated over the frame.
 //

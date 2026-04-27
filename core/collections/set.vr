@@ -61,7 +61,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Fallible counterpart to `with_capacity`.
     ///
-    /// Returns `Err(AllocError::OutOfMemory)` instead of panicking
+    /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request.
     public fn try_with_capacity(capacity: Int) -> Result<Set<T>, AllocError> {
         match Map.try_with_capacity(capacity) {
@@ -101,7 +101,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Fallible counterpart to `insert`.
     ///
-    /// Returns `Err(AllocError::OutOfMemory)` if the underlying
+    /// Returns `Err(AllocError.OutOfMemory)` if the underlying
     /// table needs to grow and the allocator cannot satisfy the
     /// request. On Ok the inner `Bool` is `true` iff the value was
     /// not already present.
@@ -141,7 +141,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Fallible counterpart to `reserve`.
     ///
-    /// Returns `Err(AllocError::OutOfMemory)` instead of panicking
+    /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. The set is
     /// unchanged on failure.
     public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {

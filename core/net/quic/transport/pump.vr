@@ -33,7 +33,7 @@
 //        HP-protected + AEAD-sealed, then UDP-sent via transport.
 //
 //   4. **Phase promotion** — when handshake_driver reports keys ready,
-//      extract the traffic secrets + call `QuicConnection::promote_*`
+//      extract the traffic secrets + call `QuicConnection.promote_*`
 //      + discard Initial/Handshake keys per RFC 9001 §4.9.
 //
 // =============================================================================
@@ -121,7 +121,7 @@ public type ConnectionPump is {
     negotiated_hash:  Maybe<HashKind>,
     negotiated_aead:  Maybe<AeadKind>,
     /// Once the 1-RTT keys are installed we transition the typed
-    /// phase via `QuicConnection::promote_to_app`. Pump keeps a
+    /// phase via `QuicConnection.promote_to_app`. Pump keeps a
     /// phase tag to gate app-level stream operations.
     phase_tag:        PumpPhase,
     /// RFC 9002 §7.7 token-bucket send pacer. Its rate is refreshed

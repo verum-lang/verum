@@ -5,7 +5,7 @@
 // Layer: Standard Library / Logic
 //
 // User-facing surface for the linear-logic analysis core
-// (`verum_types::linear_logic`). Full Girard-style propositional
+// (`verum_types.linear_logic`). Full Girard-style propositional
 // linear logic with multiplicative, additive, and exponential
 // connectives — a richer foundation than QTT alone for resource
 // reasoning.

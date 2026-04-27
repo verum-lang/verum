@@ -35,7 +35,7 @@
 // ## Status
 //
 // **Experimental.** The MCP bridge and oracle-response parser live
-// in `core/meta/contexts.vr::MetaRuntime`. This file provides the
+// in `core/meta/contexts.vr.MetaRuntime`. This file provides the
 // Verum-level API surface.
 //
 // @cfg(feature = "llm_oracle")  — feature-gated; default off.

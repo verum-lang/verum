@@ -5,7 +5,7 @@
 // Layer: Standard Library / Concurrency
 //
 // User-facing surface for the session-types analysis core
-// (`verum_types::session_types`). A session type describes the
+// (`verum_types.session_types`). A session type describes the
 // sequence of sends, receives, and choices that two communicating
 // parties must perform on a shared channel; the type system can
 // statically rule out deadlocks, protocol mismatches, and

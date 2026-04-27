@@ -6,7 +6,7 @@
 // `BusyPolicy` is a protocol that decides whether to retry on
 // SQLITE_BUSY. Three implementations ship out of the box:
 //
-//   * `NoRetry`         — first BUSY → DbError::Busy
+//   * `NoRetry`         — first BUSY → DbError.Busy
 //   * `ConstantRetry`   — bounded number of retries with constant
 //                         per-retry sleep
 //   * `ExponentialRetry`— bounded retries with exponential backoff

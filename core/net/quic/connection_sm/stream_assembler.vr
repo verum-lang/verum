@@ -32,7 +32,7 @@
 //
 // # Output
 //
-// `assemble_stream_frames(...)` returns a list of Frame::StreamFrame
+// `assemble_stream_frames(...)` returns a list of Frame.StreamFrame
 // values the caller appends to the outbound packet's frame list.
 // It mutates:
 //   * SendStream.send_buf — drained by the emitted byte count.

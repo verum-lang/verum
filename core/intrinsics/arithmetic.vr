@@ -55,8 +55,8 @@ public fn mul<T>(a: T, b: T) -> T { @intrinsic("mul", a, b) }
 ///
 /// # Panics
 /// * Integer T: panics if `b == 0` (division by zero).
-/// * Signed-integer T: panics on `T::MIN / -1` (the only signed
-///   division that overflows; the mathematical result `|T::MIN|`
+/// * Signed-integer T: panics on `T.MIN / -1` (the only signed
+///   division that overflows; the mathematical result `|T.MIN|`
 ///   is unrepresentable).
 /// * Float T: follows IEEE 754 — `x / 0.0 = ±inf`, `0.0 / 0.0 = NaN`.
 ///
@@ -68,7 +68,7 @@ public fn div<T>(a: T, b: T) -> T { @intrinsic("div", a, b) }
 ///
 /// # Panics
 /// * Integer T: panics if `b == 0`.
-/// * Signed-integer T: panics on `T::MIN % -1` for the same reason
+/// * Signed-integer T: panics on `T.MIN % -1` for the same reason
 ///   as `div` — the trapping operand pair.
 ///
 /// Use `checked_rem` to recover without panicking.
@@ -77,26 +77,26 @@ public fn rem<T>(a: T, b: T) -> T { @intrinsic("rem", a, b) }
 /// Arithmetic negation (`-x`).
 ///
 /// # Panics
-/// On signed-integer T, panics on `T::MIN` because the
-/// mathematical result `|T::MIN|` is not representable in two's
+/// On signed-integer T, panics on `T.MIN` because the
+/// mathematical result `|T.MIN|` is not representable in two's
 /// complement. Float negation flips the sign bit and never panics.
 ///
-/// Use `checked_neg` to recover from the `T::MIN` case.
+/// Use `checked_neg` to recover from the `T.MIN` case.
 public fn neg<T>(x: T) -> T { @intrinsic("neg", x) }
 
 /// Absolute value.
 ///
 /// # Panics
-/// On signed-integer T, panics on `T::MIN` (same overflow as
+/// On signed-integer T, panics on `T.MIN` (same overflow as
 /// `neg`). Float `abs(NaN) = NaN`, `abs(±inf) = +inf`.
 ///
 /// For the safe form on integers, prefer `checked_neg` followed by
-/// a sign-aware compare, or use `saturating_abs` (clamps `T::MIN`
-/// to `T::MAX`).
+/// a sign-aware compare, or use `saturating_abs` (clamps `T.MIN`
+/// to `T.MAX`).
 public fn abs<T>(x: T) -> T { @intrinsic("abs", x) }
 
 /// Absolute value (signed types) — alias for [`abs`]. Identical
-/// panic behaviour: panics on `T::MIN` for signed-integer T.
+/// panic behaviour: panics on `T.MIN` for signed-integer T.
 public fn abs_signed<T>(x: T) -> T { @intrinsic("abs", x) }
 
 /// Signum: returns -1, 0, or 1 matching the sign of `x`.
@@ -196,14 +196,14 @@ public fn wrapping_mul<T>(a: T, b: T) -> T { @intrinsic("wrapping_mul", a, b) }
 ///
 /// # Panics
 /// Panics if `b == 0`. Unlike non-wrapping `div`, the trapping
-/// signed pair `T::MIN / -1` does NOT panic — it wraps to
-/// `T::MIN` (matching modular semantics).
+/// signed pair `T.MIN / -1` does NOT panic — it wraps to
+/// `T.MIN` (matching modular semantics).
 public fn wrapping_div<T>(a: T, b: T) -> T { @intrinsic("wrapping_div", a, b) }
 
 /// Wrapping remainder.
 ///
 /// # Panics
-/// Panics if `b == 0`. The trapping pair `T::MIN % -1` wraps to
+/// Panics if `b == 0`. The trapping pair `T.MIN % -1` wraps to
 /// `0` instead of panicking.
 public fn wrapping_rem<T>(a: T, b: T) -> T { @intrinsic("wrapping_rem", a, b) }
 

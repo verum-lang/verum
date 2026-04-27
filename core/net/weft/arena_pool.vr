@@ -38,7 +38,7 @@
 //   {
 //       let lease = pool.acquire();          // takes an arena
 //       // ... handler runs, allocates into &mut lease.arena ...
-//   }   // ArenaLease::Drop returns it to the pool (with reset()).
+//   }   // ArenaLease.Drop returns it to the pool (with reset()).
 //
 // The `ArenaLease` RAII discipline is the contract: handlers see
 // `&mut Arena`, never the lease itself, and have no way to leak a

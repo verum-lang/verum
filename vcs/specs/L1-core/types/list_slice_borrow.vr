@@ -6,7 +6,7 @@
 // @expected-exit: 0
 //
 // Regression for Issue #7 (root fix in
-// crates/verum_vbc/src/codegen/expressions.rs::compile_unary).
+// crates/verum_vbc/src/codegen/expressions.rs.compile_unary).
 //
 // Before the fix, `&list[..]` (any range index under the `&` borrow)
 // went through `compile_index`'s generic `GetE { arr, idx: range_value

@@ -15,25 +15,25 @@ mount core.database.sqlite.native.l0_vfs.{PosixVfs, OpenFlags, LockKind, VfsProt
 @main
 public async fn main() -> Result<(), Error> {
     let vfs = PosixVfs {};
-    let flags = OpenFlags { read_write: true, create: true, main_db: true, ..OpenFlags::default() };
+    let flags = OpenFlags { read_write: true, create: true, main_db: true, ..OpenFlags.default() };
     let path = path("/tmp/loom-locking.db");
 
     let mut file_a = vfs.open(&path, flags).await?;
     let mut file_b = vfs.open(&path, flags).await?;
 
     // Both acquire SHARED — OK.
-    file_a.lock(LockKind::Shared).await?;
-    file_b.lock(LockKind::Shared).await?;
+    file_a.lock(LockKind.Shared).await?;
+    file_b.lock(LockKind.Shared).await?;
 
     // file_a escalates to RESERVED — OK (only one writer attempt).
-    file_a.lock(LockKind::Reserved).await?;
+    file_a.lock(LockKind.Reserved).await?;
 
     // file_b tries to escalate to RESERVED — blocked (EBUSY).
-    let err = file_b.lock(LockKind::Reserved).await;
+    let err = file_b.lock(LockKind.Reserved).await;
     assert!(err.is_err());
 
     // Release everything.
-    file_a.unlock(LockKind::Unlocked).await?;
-    file_b.unlock(LockKind::Unlocked).await?;
+    file_a.unlock(LockKind.Unlocked).await?;
+    file_b.unlock(LockKind.Unlocked).await?;
     Ok(())
 }

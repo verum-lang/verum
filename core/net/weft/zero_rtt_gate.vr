@@ -31,7 +31,7 @@
 // The gate is implemented as a Weft `Layer<H>` so users compose it
 // with the rest of the middleware stack:
 //
-//   Server::new(handler)
+//   Server.new(handler)
 //       .with(ZeroRttGateLayer.policy(ZeroRttPolicy.SafeMethodsOnly))
 //       .with(RetryLayer.new(3))
 //       .serve()

@@ -38,8 +38,8 @@ fn token_kinds_are_distinct() {
 }
 
 fn key_generate_produces_distinct_random_values() {
-    let k1 = AddressTokenKey::generate();
-    let k2 = AddressTokenKey::generate();
+    let k1 = AddressTokenKey.generate();
+    let k2 = AddressTokenKey.generate();
     let id1 = k1.key_id();
     let id2 = k2.key_id();
     // CSPRNG collision probability on 64-bit key_id is negligible.

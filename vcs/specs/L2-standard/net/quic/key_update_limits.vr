@@ -17,7 +17,7 @@ mount core.net.quic.key_update.{
 };
 
 fn usage_starts_at_zero() {
-    let u = KeyPhaseUsage::new();
+    let u = KeyPhaseUsage.new();
     assert(u.encrypted == 0_u64);
     assert(u.decrypted == 0_u64);
     assert(u.integrity_failures == 0_u64);

@@ -438,7 +438,7 @@ implement UnixListener {
     /// Bind a listener to `path`. Default backlog 128.
     ///
     /// For filesystem paths, the file at `path` must not pre-exist — call
-    /// `std::fs::remove_file(path)` before bind if recovery-after-crash
+    /// `std.fs.remove_file(path)` before bind if recovery-after-crash
     /// matters, or use the Linux abstract namespace (`"\0name"`) which
     /// auto-cleans on close.
     public fn bind(path: &Text) -> Result<UnixListener, UnixError> {

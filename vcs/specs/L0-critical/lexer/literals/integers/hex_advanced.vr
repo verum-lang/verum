@@ -45,12 +45,12 @@ fn test_hex_with_type_suffixes() {
     let hex_i8 = 0xFF_i8;
     let hex_i16 = 0xFFFF_i16;
     let hex_i32 = 0xFFFFFFFF_i32;
-    let hex_i64 = 0x7FFFFFFFFFFFFFFF_i64;  // i64::MAX
+    let hex_i64 = 0x7FFFFFFFFFFFFFFF_i64;  // i64.MAX
 
     let hex_u8 = 0xFF_u8;
     let hex_u16 = 0xFFFF_u16;
     let hex_u32 = 0xFFFFFFFF_u32;
-    let hex_u64 = 0x7FFFFFFFFFFFFFFF_u64;  // Use i64::MAX for now (lexer limit)
+    let hex_u64 = 0x7FFFFFFFFFFFFFFF_u64;  // Use i64.MAX for now (lexer limit)
 }
 
 fn test_hex_underscores_then_suffix() {

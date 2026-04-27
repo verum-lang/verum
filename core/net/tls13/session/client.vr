@@ -184,7 +184,7 @@ public type Progress is
 implement TlsClient<Established> {
     /// Seal one application-data record. Returns the wire bytes the
     /// caller must transmit. `data.len()` must fit one record (≤ 2^14)
-    /// — fragmentation is handled by `fragment::seal_many` at a
+    /// — fragmentation is handled by `fragment.seal_many` at a
     /// higher layer.
     public fn write(&mut self, data: &[Byte]) -> Result<List<Byte>, TlsError> {
         if data.len() > MAX_PLAINTEXT_SIZE {

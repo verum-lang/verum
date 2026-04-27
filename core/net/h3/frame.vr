@@ -15,7 +15,7 @@
 //
 // Both Type and Length are QUIC varints. Unknown frame types on
 // request / control streams MUST be ignored (§7.2.8) — pass-through
-// via `FrameType::Reserved(v)` so client code can decide.
+// via `FrameType.Reserved(v)` so client code can decide.
 //
 // Frame catalogue (RFC 9114 §7.2):
 //

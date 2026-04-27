@@ -32,7 +32,7 @@
 //     content. Pattern matched lurie_htt.vr / petz_classification.vr.
 //
 //   • R2 (ε-coordinate canonicalisable) — every `@enact(epsilon = …)`
-//     must canonicalise via `EnactAttr::canonicalise` (8 primitive
+//     must canonicalise via `EnactAttr.canonicalise` (8 primitive
 //     names OR ordinal coordinate string). Other strings get rejected
 //     at parse time; this rule catches the ones that slipped through
 //     during a refactor.
@@ -155,7 +155,7 @@ public fn validate_epsilon_canonicalisable(
     epsilon_text: Text,
     decl_span: Span,
 ) -> Maybe<HygieneDiagnostic> {
-    // Mirrors EnactAttr::canonicalise in spirit. We treat the
+    // Mirrors EnactAttr.canonicalise in spirit. We treat the
     // canonicalisation as opaque here — when the AST-layer parser
     // accepts the coordinate, it's canonicalisable; when it
     // doesn't, the @enact attribute would have been rejected at

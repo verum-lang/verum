@@ -209,7 +209,7 @@ public fn radians(v: &Register) -> Register {
 //
 // We avoid depending on `core.math.real` here so the loom can build
 // even if a sysroot trims the math module. For higher-quality results
-// the catalogue can later be re-pointed at `core.math.real::*`.
+// the catalogue can later be re-pointed at `core.math.real.*`.
 // =============================================================================
 
 fn pi_const() -> Float64 { 3.141592653589793 }

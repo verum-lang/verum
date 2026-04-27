@@ -5,16 +5,16 @@
 // @expected-error: E370
 // @description: Strict-positivity over record-form types (V3 site).
 //
-// V1+V2 wired the K-Pos walker into TypeDeclBody::Variant only.
+// V1+V2 wired the K-Pos walker into TypeDeclBody.Variant only.
 // Record-shaped Berardi witnesses (`type Bad is { wrap: fn(Bad)
 // -> Bool };`) slipped through both `verum check` and `verum
 // build`. V3 closes the gap by:
 //
-//   1. Adding the same positivity check on TypeDeclBody::Record
+//   1. Adding the same positivity check on TypeDeclBody.Record
 //      arms in both register_type_declaration_inner and
 //      resolve_type_definition.
 //   2. Extending the walker with a `self_var` hint so it
-//      recognises post-elaboration `Type::Var(placeholder_var)`
+//      recognises post-elaboration `Type.Var(placeholder_var)`
 //      as a reference to the recursive type — the type-decl
 //      pre-pass installs this placeholder before resolving field
 //      types, otherwise the walker only sees TypeVar and can't
