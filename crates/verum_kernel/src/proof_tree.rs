@@ -795,9 +795,73 @@ impl KernelRule {
             KernelRule::KSmt => "V8",
             KernelRule::KFwAx => "V8",
             KernelRule::KRefineOmega => "V8",
+            // V8 (#236) — quotient types.
+            KernelRule::KQuotForm => "V8",
+            KernelRule::KQuotIntro => "V8",
+            KernelRule::KQuotElim => "V8",
+            // V8 (#241) — cohesive modalities ∫ ⊣ ♭ ⊣ ♯.
+            KernelRule::KShape => "V8",
+            KernelRule::KFlat => "V8",
+            KernelRule::KSharp => "V8",
             KernelRule::KEpsMu => "V2",
             KernelRule::KUniverseAscent => "V1",
             _ => "V0",
+        }
+    }
+
+    /// V8 (#240) — VVA-spec citation for this rule. Returns the
+    /// spec section anchor (e.g. `"VVA §7.5"`) plus the V8 ticket
+    /// number that landed it (e.g. `"#236"`). Used by `verum audit
+    /// --kernel-rules` to surface the per-VVA-N preprint citation
+    /// trail without duplicating it in every diagnostic.
+    ///
+    /// Returns `None` for rules that don't have a single canonical
+    /// citation (e.g. variable-binding rules that pre-date the V8
+    /// numbering scheme).
+    pub fn citation(&self) -> Option<&'static str> {
+        match self {
+            // V8 (#236) — Quotient types.
+            KernelRule::KQuotForm => Some("VVA §7.5 (#236)"),
+            KernelRule::KQuotIntro => Some("VVA §7.5 (#236)"),
+            KernelRule::KQuotElim => Some("VVA §7.5 (#236)"),
+            // V8 (#241) — Cohesive modalities.
+            KernelRule::KShape => Some("VVA §7.7 (#241)"),
+            KernelRule::KFlat => Some("VVA §7.7 (#241)"),
+            KernelRule::KSharp => Some("VVA §7.7 (#241)"),
+            // VVA-1 — ε / α duality.
+            KernelRule::KEpsilonOf => Some("VVA §6.4"),
+            KernelRule::KAlphaOf => Some("VVA §6.4"),
+            KernelRule::KEpsMu => Some("VVA §6.5 (V2)"),
+            // VVA-3 — universe ascent.
+            KernelRule::KUniverseAscent => Some("VVA §A.Z.2"),
+            // VVA-7 — modal logic operators.
+            KernelRule::KModalBox => Some("VVA §7 modal"),
+            KernelRule::KModalDiamond => Some("VVA §7 modal"),
+            KernelRule::KModalBigAnd => Some("VVA §7 modal"),
+            // §4.4a — kernel-foundation rules.
+            KernelRule::KUniv => Some("VVA §4.4a"),
+            KernelRule::KPiForm => Some("VVA §4.4a"),
+            KernelRule::KLamIntro => Some("VVA §4.4a"),
+            KernelRule::KAppElim => Some("VVA §4.4a"),
+            KernelRule::KSigmaForm => Some("VVA §4.4a"),
+            KernelRule::KPairIntro => Some("VVA §4.4a"),
+            KernelRule::KFstElim => Some("VVA §4.4a"),
+            KernelRule::KSndElim => Some("VVA §4.4a"),
+            KernelRule::KPathTyForm => Some("VVA §4.4a (cubical)"),
+            KernelRule::KReflIntro => Some("VVA §4.4a (cubical)"),
+            KernelRule::KHComp => Some("VVA §4.4a (cubical)"),
+            KernelRule::KTransp => Some("VVA §4.4a (cubical)"),
+            KernelRule::KGlue => Some("VVA §4.4a (cubical)"),
+            KernelRule::KRefine => Some("VVA §4.4a (refinement)"),
+            KernelRule::KRefineOmega => Some("VVA §17.4 K-Refine-omega"),
+            KernelRule::KRefineIntro => Some("VVA §4.4a (refinement)"),
+            KernelRule::KRefineErase => Some("VVA §4.4a (refinement)"),
+            KernelRule::KInductive => Some("VVA §7.3"),
+            KernelRule::KPos => Some("VVA §7.3 K-Pos"),
+            KernelRule::KElim => Some("VVA §7.4 (#237)"),
+            KernelRule::KSmt => Some("VVA §8 SMT replay"),
+            KernelRule::KFwAx => Some("VVA §6 framework axiom"),
+            KernelRule::KVar => None,
         }
     }
 }
@@ -1698,5 +1762,90 @@ mod tests {
         assert!(strs.contains(&"mp"));
         assert!(strs.contains(&"="));
         assert!(!is_known_rule("z3", "="));
+    }
+
+    // -- V8 (#240) — V-stage + citation wiring --------------------
+
+    #[test]
+    fn quotient_rules_report_v8_stage() {
+        // V8 (#236) — Quot-Form / Intro / Elim must report V8.
+        // Pre-#240 these silently fell through to "V0" because the
+        // v_stage match only listed the original eight V8 rules.
+        assert_eq!(KernelRule::KQuotForm.v_stage(), "V8");
+        assert_eq!(KernelRule::KQuotIntro.v_stage(), "V8");
+        assert_eq!(KernelRule::KQuotElim.v_stage(), "V8");
+    }
+
+    #[test]
+    fn cohesive_rules_report_v8_stage() {
+        // V8 (#241) — Shape / Flat / Sharp must report V8.
+        assert_eq!(KernelRule::KShape.v_stage(), "V8");
+        assert_eq!(KernelRule::KFlat.v_stage(), "V8");
+        assert_eq!(KernelRule::KSharp.v_stage(), "V8");
+    }
+
+    #[test]
+    fn quotient_rules_carry_section_75_citation() {
+        // V8 (#236) → VVA §7.5.
+        assert_eq!(
+            KernelRule::KQuotForm.citation(),
+            Some("VVA §7.5 (#236)")
+        );
+        assert_eq!(
+            KernelRule::KQuotIntro.citation(),
+            Some("VVA §7.5 (#236)")
+        );
+        assert_eq!(
+            KernelRule::KQuotElim.citation(),
+            Some("VVA §7.5 (#236)")
+        );
+    }
+
+    #[test]
+    fn cohesive_rules_carry_section_77_citation() {
+        // V8 (#241) → VVA §7.7.
+        assert_eq!(KernelRule::KShape.citation(), Some("VVA §7.7 (#241)"));
+        assert_eq!(KernelRule::KFlat.citation(), Some("VVA §7.7 (#241)"));
+        assert_eq!(KernelRule::KSharp.citation(), Some("VVA §7.7 (#241)"));
+    }
+
+    #[test]
+    fn elim_rule_now_cites_section_74_with_237() {
+        // V8 (#237) — HIT eliminator auto-gen lives at K-Elim.
+        // Post-#240 the citation surfaces it.
+        assert_eq!(
+            KernelRule::KElim.citation(),
+            Some("VVA §7.4 (#237)")
+        );
+    }
+
+    #[test]
+    fn variable_rule_has_no_canonical_citation() {
+        // K-Var pre-dates the V8 numbering scheme; honest answer
+        // is `None` rather than backfilling a fake citation.
+        assert_eq!(KernelRule::KVar.citation(), None);
+    }
+
+    #[test]
+    fn citation_returns_for_every_v8_rule_landed_this_session() {
+        // Tier the citation contract: every V8 rule landed in
+        // 2026-04-26/27 work (Quotient + Cohesive + HIT-Elim) MUST
+        // carry a citation. Drift here means a future reviewer
+        // can't trace the rule back to its spec section.
+        let v8_rules = [
+            KernelRule::KQuotForm,
+            KernelRule::KQuotIntro,
+            KernelRule::KQuotElim,
+            KernelRule::KShape,
+            KernelRule::KFlat,
+            KernelRule::KSharp,
+            KernelRule::KElim,
+        ];
+        for rule in v8_rules {
+            assert!(
+                rule.citation().is_some(),
+                "rule {rule:?} must carry a citation post-#240"
+            );
+        }
     }
 }
