@@ -2362,6 +2362,281 @@ pub fn audit_hygiene() -> Result<()> {
     audit_hygiene_with_format(AuditFormat::Plain)
 }
 
+// =============================================================================
+// V2 hygiene enforcement (#196) — `verum audit --hygiene-strict`
+//
+// VVA §13.3 V2: walk every top-level free function body for raw `self`
+// occurrences. A *free function* is one declared at module scope (not
+// inside `implement` / `protocol` blocks) whose first parameter is NOT
+// a self-receiver. Such functions cannot legally bind the `self`
+// keyword — any `self`-bearing path in the body indicates a hygiene
+// violation that is rejected with `E_HYGIENE_UNFACTORED_SELF`.
+//
+// Methods inside `implement` / `protocol` blocks are skipped — they
+// have a typed receiver and `self` resolves through the proper
+// hygiene factorisation (the §13.2 hygiene table covers their
+// self-reference shapes).
+// =============================================================================
+
+/// V2 (#196) — error code for unfactored `self` in a free function.
+pub const E_HYGIENE_UNFACTORED_SELF: &str = "E_HYGIENE_UNFACTORED_SELF";
+
+/// V2 (#196) — one violation surfaced by the strict hygiene walker.
+#[derive(Debug, Clone)]
+pub struct HygieneSelfViolation {
+    /// Free function in which the raw `self` was found.
+    pub function: Text,
+    /// Source file relative to the manifest root.
+    pub file: PathBuf,
+    /// Stable error code per VVA §13.3.
+    pub code: &'static str,
+}
+
+/// Recursively look for any `PathSegment::SelfValue` segment in the
+/// expression tree. Returns `true` on the first hit.
+fn expr_contains_raw_self(expr: &verum_ast::expr::Expr) -> bool {
+    use verum_ast::expr::ExprKind;
+    use verum_ast::ty::PathSegment;
+    match &expr.kind {
+        ExprKind::Path(p) => p
+            .segments
+            .iter()
+            .any(|s| matches!(s, PathSegment::SelfValue)),
+        ExprKind::Binary { left, right, .. }
+        | ExprKind::Pipeline { left, right }
+        | ExprKind::NullCoalesce { left, right } => {
+            expr_contains_raw_self(left) || expr_contains_raw_self(right)
+        }
+        ExprKind::Unary { expr, .. }
+        | ExprKind::Field { expr, .. }
+        | ExprKind::OptionalChain { expr, .. }
+        | ExprKind::TupleIndex { expr, .. }
+        | ExprKind::Cast { expr, .. } => expr_contains_raw_self(expr),
+        ExprKind::Index { expr, index } => {
+            expr_contains_raw_self(expr) || expr_contains_raw_self(index)
+        }
+        ExprKind::Try(inner) | ExprKind::TryBlock(inner) => {
+            expr_contains_raw_self(inner)
+        }
+        ExprKind::Paren(inner) => expr_contains_raw_self(inner),
+        ExprKind::NamedArg { value, .. } => expr_contains_raw_self(value),
+        ExprKind::Call { func, args, .. } => {
+            expr_contains_raw_self(func)
+                || args.iter().any(expr_contains_raw_self)
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            expr_contains_raw_self(receiver)
+                || args.iter().any(expr_contains_raw_self)
+        }
+        ExprKind::Block(b) => block_contains_raw_self(b),
+        ExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            if_condition_contains_raw_self(condition)
+                || block_contains_raw_self(then_branch)
+                || matches!(else_branch, verum_common::Maybe::Some(e) if expr_contains_raw_self(e))
+        }
+        ExprKind::Match { expr: scrutinee, arms } => {
+            expr_contains_raw_self(scrutinee)
+                || arms.iter().any(|arm| expr_contains_raw_self(&arm.body))
+        }
+        ExprKind::Loop { body, .. } => block_contains_raw_self(body),
+        ExprKind::While {
+            condition, body, ..
+        } => expr_contains_raw_self(condition) || block_contains_raw_self(body),
+        ExprKind::For { iter, body, .. } => {
+            expr_contains_raw_self(iter) || block_contains_raw_self(body)
+        }
+        // Conservative leaf for shapes we don't recurse into. The V2
+        // walker covers the common surface; deeper coverage (await,
+        // closures, comprehensions) is V2.1.
+        _ => false,
+    }
+}
+
+fn if_condition_contains_raw_self(cond: &verum_ast::expr::IfCondition) -> bool {
+    use verum_ast::expr::ConditionKind;
+    cond.conditions.iter().any(|c| match c {
+        ConditionKind::Expr(e) => expr_contains_raw_self(e),
+        ConditionKind::Let { value, .. } => expr_contains_raw_self(value),
+    })
+}
+
+fn block_contains_raw_self(block: &verum_ast::expr::Block) -> bool {
+    use verum_ast::stmt::StmtKind;
+    for stmt in block.stmts.iter() {
+        let hit = match &stmt.kind {
+            StmtKind::Let { value, .. } => {
+                matches!(value, verum_common::Maybe::Some(v) if expr_contains_raw_self(v))
+            }
+            StmtKind::LetElse {
+                value, else_block, ..
+            } => expr_contains_raw_self(value) || block_contains_raw_self(else_block),
+            StmtKind::Expr { expr, .. }
+            | StmtKind::Defer(expr)
+            | StmtKind::Errdefer(expr) => expr_contains_raw_self(expr),
+            _ => false,
+        };
+        if hit {
+            return true;
+        }
+    }
+    if let verum_common::Maybe::Some(tail) = &block.expr {
+        return expr_contains_raw_self(tail);
+    }
+    false
+}
+
+fn function_body_contains_raw_self(decl: &verum_ast::decl::FunctionDecl) -> bool {
+    use verum_ast::decl::FunctionBody;
+    match &decl.body {
+        verum_common::Maybe::Some(FunctionBody::Block(b)) => block_contains_raw_self(b),
+        verum_common::Maybe::Some(FunctionBody::Expr(e)) => expr_contains_raw_self(e),
+        verum_common::Maybe::None => false,
+    }
+}
+
+/// V2 (#196) entry-point — `verum audit --hygiene-strict`.
+///
+/// Walks every top-level **free** function (not inside `implement`
+/// or `protocol`) whose signature has no self-receiver, and flags
+/// any body that mentions the `self` keyword. Exits non-zero if any
+/// violation is found, surfacing each as `E_HYGIENE_UNFACTORED_SELF`
+/// per VVA §13.3.
+pub fn audit_hygiene_strict_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Walking free functions for raw `self` (VVA §13.3 V2)");
+    }
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut violations: Vec<HygieneSelfViolation> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+        for item in &module.items {
+            if let ItemKind::Function(decl) = &item.kind {
+                // Methods (functions with a self-receiver param) are
+                // NOT in scope — `self` is bound there. Free
+                // functions cannot legally bind `self`.
+                if decl.is_method() {
+                    continue;
+                }
+                if function_body_contains_raw_self(decl) {
+                    violations.push(HygieneSelfViolation {
+                        function: decl.name.name.clone(),
+                        file: rel_path.clone(),
+                        code: E_HYGIENE_UNFACTORED_SELF,
+                    });
+                }
+            }
+        }
+    }
+
+    match format {
+        AuditFormat::Plain => print_hygiene_strict_report(parsed_files, skipped_files, &violations),
+        AuditFormat::Json => print_hygiene_strict_report_json(parsed_files, skipped_files, &violations),
+    }
+
+    if !violations.is_empty() {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "{} {} violation(s): raw `self` in free function body",
+                violations.len(),
+                E_HYGIENE_UNFACTORED_SELF,
+            )
+            .into(),
+        ));
+    }
+    Ok(())
+}
+
+fn print_hygiene_strict_report(
+    parsed_files: usize,
+    skipped_files: usize,
+    violations: &[HygieneSelfViolation],
+) {
+    println!();
+    println!("{}", "Articulation Hygiene strict (VVA §13.3 V2)".bold());
+    println!("{}", "─".repeat(50).dimmed());
+    println!(
+        "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
+        parsed_files, skipped_files
+    );
+    println!();
+    if violations.is_empty() {
+        println!("  {} no E_HYGIENE_UNFACTORED_SELF violations.", "·".dimmed());
+        println!();
+        return;
+    }
+    println!(
+        "  Found {} {} violation(s):",
+        violations.len().to_string().bold(),
+        E_HYGIENE_UNFACTORED_SELF.bold(),
+    );
+    println!();
+    for v in violations {
+        println!(
+            "    {} {}  —  {}  [{}]",
+            "✗".red(),
+            v.function.as_str().cyan(),
+            v.file.display(),
+            v.code.dimmed(),
+        );
+    }
+    println!();
+}
+
+fn print_hygiene_strict_report_json(
+    parsed_files: usize,
+    skipped_files: usize,
+    violations: &[HygieneSelfViolation],
+) {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
+    out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
+    out.push_str(&format!("  \"violation_count\": {},\n", violations.len()));
+    out.push_str(&format!("  \"error_code\": \"{}\",\n", E_HYGIENE_UNFACTORED_SELF));
+    out.push_str("  \"violations\": [\n");
+    let total = violations.len();
+    for (i, v) in violations.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"function\": \"{}\",\n",
+            json_escape(v.function.as_str())
+        ));
+        out.push_str(&format!(
+            "      \"file\": \"{}\"\n",
+            json_escape(&v.file.display().to_string())
+        ));
+        out.push_str(if i + 1 == total { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ]\n");
+    out.push_str("}\n");
+    print!("{}", out);
+}
+
 pub fn audit_hygiene_with_format(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
         ui::step("Walking Articulation Hygiene factorisations (VVA §13.2)");

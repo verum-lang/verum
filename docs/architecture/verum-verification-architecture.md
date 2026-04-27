@@ -2651,9 +2651,9 @@ production ready" directive, VVA must additionally satisfy:
 |---|---|---|
 | Every shipped kernel rule has formal premise + V-stage tag | ✓ V8 #214 (29 rules in §4.4a) | ✓ Maintained |
 | Every shipped kernel rule has implementation cross-ref | ✓ V8 #214 (file:fn) | ✓ Maintained |
-| Every framework axiom passes K-FwAx soundness gate | ◐ (V8 #217 + #220 shipped; loader migration #222 done; production callers using strict regime) | Production CLI defaults `register_subsingleton` |
+| Every framework axiom passes K-FwAx soundness gate | ✓ V8.1 (#222 follow-up): `AxiomRegistry::register` and `load_framework_axioms` now default to `ClosedPropositionOnly`; legacy shim is opt-in via `register_legacy_unchecked` / `load_framework_axioms_legacy_unchecked` | ✓ Maintained |
 | Every Diakrisis axiom mapped to kernel rule OR framework axiom | ◐ (this chapter §A.Z.1; defects flagged) | Closure of Axi-1, Axi-4, Axi-9, T-α delegations |
-| (Fw, ν, τ) coordinate per theorem | ◐ (registry populated; per-theorem inference pending) | `verum audit --coord` default-on |
+| (Fw, ν, τ) coordinate per theorem | ✓ V8.1 (#222 follow-up): bare `verum audit` runs dependency-audit + per-theorem coord audit by default; `--no-coord` opts out; `--coord` keeps legacy "coord-only" meaning | ✓ Maintained |
 | AC/OC duality wired | ◐ (`core.action.*` skeleton; 108.T preprint blocker) | `@enact` ungated post-preprint |
 | Cross-tool replay matrix | ◐ (#90 tracked) | Lean + Coq + Agda day-one round-trip |
 | Kernel TCB ≤ 6 500 LOC | ✓ (~4 700 LOC post-V8) | ✓ Maintained with audit gate |
