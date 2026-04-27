@@ -5,6 +5,7 @@
 pub mod cache_manager;
 pub mod client;
 pub mod content_store;
+pub mod lockfile_v3;
 pub mod enterprise;
 pub mod ipfs;
 pub mod lockfile;
