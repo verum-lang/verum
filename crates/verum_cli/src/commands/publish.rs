@@ -28,7 +28,7 @@ pub fn publish(options: PublishOptions) -> Result<()> {
 
     // Find and validate manifest
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest_path = manifest_dir.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
     let manifest = Manifest::from_file(&manifest_path)?;
 
     // Validate manifest
@@ -500,7 +500,10 @@ fn create_cog_tarball(manifest_dir: &Path, manifest: &Manifest) -> Result<std::p
     add_directory_to_tar(&mut tar, &manifest_dir.join("src"), "src")?;
 
     // Add manifest
-    tar.append_path_with_name(manifest_dir.join("Verum.toml"), "Verum.toml")?;
+    tar.append_path_with_name(
+        Manifest::manifest_path(&manifest_dir),
+        Manifest::MANIFEST_FILENAME,
+    )?;
 
     // Add README if exists
     if manifest_dir.join("README.md").exists() {
@@ -1030,7 +1033,7 @@ pub fn publish_multi_platform(options: MultiPlatformPublishOptions) -> Result<()
 
     // Find and validate manifest
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest_path = manifest_dir.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
     let manifest = Manifest::from_file(&manifest_path)?;
 
     // Validate manifest
@@ -1332,7 +1335,10 @@ fn create_multi_platform_tarball(
     add_directory_to_tar(&mut tar, &manifest_dir.join("src"), "src")?;
 
     // Add manifest
-    tar.append_path_with_name(manifest_dir.join("Verum.toml"), "Verum.toml")?;
+    tar.append_path_with_name(
+        Manifest::manifest_path(&manifest_dir),
+        Manifest::MANIFEST_FILENAME,
+    )?;
 
     // Add README if exists
     if manifest_dir.join("README.md").exists() {
@@ -1428,7 +1434,7 @@ fn print_multi_platform_summary(
 pub fn validate_cog(manifest_dir: &Path) -> Result<ValidationReport> {
     ui::step("Validating package");
 
-    let manifest_path = manifest_dir.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
     let manifest = Manifest::from_file(&manifest_path)?;
 
     let mut report = ValidationReport::default();

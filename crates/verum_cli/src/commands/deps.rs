@@ -28,7 +28,7 @@ pub fn add(name: &str, version: Option<Text>, dev: bool, build: bool) -> Result<
     ui::step(&format!("Adding {}: {}", dep_type, name.cyan()));
 
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest_path = manifest_dir.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
     let mut manifest = Manifest::from_file(&manifest_path)?;
 
     let dep = if let Some(v) = version {
@@ -62,7 +62,7 @@ pub fn add(name: &str, version: Option<Text>, dev: bool, build: bool) -> Result<
 /// If neither `dev` nor `build` is specified, removes from all sections.
 pub fn remove(name: &str, dev: bool, build: bool) -> Result<()> {
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest_path = manifest_dir.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
     let mut manifest = Manifest::from_file(&manifest_path)?;
 
     let mut removed = false;
@@ -115,7 +115,7 @@ pub fn update(package: Option<Text>) -> Result<()> {
     }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest_path = manifest_dir.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
     let mut manifest = Manifest::from_file(&manifest_path)?;
 
     // Create registry client
@@ -257,7 +257,7 @@ fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Resul
     use verum_common::Map;
     use verum_common::Set;
 
-    let lockfile_path = manifest_dir.join("Verum.lock");
+    let lockfile_path = Manifest::lockfile_path(&manifest_dir);
     let mut lockfile = if lockfile_path.exists() {
         Lockfile::from_file(&lockfile_path)?
     } else {
@@ -356,7 +356,7 @@ fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Resul
 
 pub fn list(tree: bool) -> Result<()> {
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest = Manifest::from_file(&manifest_dir.join("Verum.toml"))?;
+    let manifest = Manifest::from_file(&Manifest::manifest_path(&manifest_dir))?;
 
     println!();
     println!("{}", "Dependencies:".bold());

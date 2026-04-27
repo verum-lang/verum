@@ -59,7 +59,7 @@ pub fn add(options: AddOptions) -> Result<()> {
 
     // Find manifest
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest_path = manifest_dir.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
     let mut manifest = Manifest::from_file(&manifest_path)?;
 
     // Determine dependency source

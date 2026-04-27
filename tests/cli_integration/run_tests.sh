@@ -105,7 +105,7 @@ done
 echo ""
 echo "=== Multi-Module Tests ==="
 for project_dir in "${TEST_DIR}"/multimodule/*/; do
-    if [ -d "$project_dir" ] && [ -f "${project_dir}/Verum.toml" ]; then
+    if [ -d "$project_dir" ] && { [ -f "${project_dir}/verum.toml" ] || [ -f "${project_dir}/Verum.toml" ]; }; then
         project_name=$(basename "$project_dir")
         echo ""
         echo "--- $project_name ---"

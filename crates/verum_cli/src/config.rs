@@ -1405,12 +1405,38 @@ impl Manifest {
         Self::from_file(&manifest_path)
     }
 
+    /// Canonical manifest filename (lowercase, like `verum.lock`,
+    /// `verum.work`). Use this when *writing* a new manifest. When
+    /// *reading*, prefer [`Config::manifest_path`] which falls back
+    /// to the legacy capitalised form for backward compatibility.
+    pub const MANIFEST_FILENAME: &'static str = "verum.toml";
+
+    /// Canonical lockfile filename. See [`Config::MANIFEST_FILENAME`]
+    /// for the read/write convention.
+    pub const LOCKFILE_FILENAME: &'static str = "verum.lock";
+
+    /// Resolve the manifest path under `dir`. Prefers lowercase
+    /// `verum.toml` (canonical); falls back to legacy `Verum.toml`
+    /// when the lowercase form is missing — keeps existing user
+    /// projects working through the casing migration.
     pub fn manifest_path(dir: &Path) -> PathBuf {
-        let verum_path = dir.join("verum.toml");
+        let verum_path = dir.join(Self::MANIFEST_FILENAME);
         if verum_path.exists() {
             verum_path
         } else {
             dir.join("Verum.toml")
+        }
+    }
+
+    /// Resolve the lockfile path under `dir`. Same convention as
+    /// [`Config::manifest_path`]: lowercase canonical, capitalised
+    /// fallback.
+    pub fn lockfile_path(dir: &Path) -> PathBuf {
+        let verum_path = dir.join(Self::LOCKFILE_FILENAME);
+        if verum_path.exists() {
+            verum_path
+        } else {
+            dir.join("Verum.lock")
         }
     }
 

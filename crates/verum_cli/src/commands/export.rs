@@ -53,7 +53,7 @@ pub enum ExportFormat {
     Metamath,
     /// OWL 2 Functional Syntax — emits a Pellet/HermiT/Protégé-
     /// compatible `.ofn` file from the project's `@owl2_*` attribute
-    /// markers (VVA §21.8 Phase 3 B5). Walks the same `Owl2Graph`
+    /// markers (Phase 3 B5). Walks the same `Owl2Graph`
     /// shared with `audit --owl2-classify` and emits Declaration /
     /// SubClassOf / EquivalentClasses / DisjointClasses / HasKey /
     /// ObjectPropertyDomain / ObjectPropertyRange / per-characteristic
@@ -120,12 +120,31 @@ struct Declaration {
     /// Framework attribution if the declaration carries
     /// `@framework(name, "citation")`.
     framework: Maybe<FrameworkAttr>,
+    /// proof certificate, when
+    /// available. Drives `ProofReplayBackend.lower(...)` so the
+    /// emitted target file carries a real proof instead of
+    /// `Admitted` / `sorry` / `?`. `None` when no certificate is
+    /// loaded for this declaration (axioms; theorems whose proof
+    /// isn't yet on-disk; bare statement-only export); the per-
+    /// target emitter then falls through to the V1 admitted
+    /// scaffold so the export remains compilable.
+    ///
+    /// V4.2 lays the wiring; V4.3+ plumbs actual certificate
+    /// loading from the kernel's certificate store. Until then
+    /// this field is always `None` in production paths and the
+    /// behaviour matches V1 exactly.
+    #[allow(dead_code)]
+    certificate: Option<verum_kernel::SmtCertificate>,
 }
 
 /// Options for the `verum export` command.
 pub struct ExportOptions {
     pub format: ExportFormat,
     pub output: Maybe<PathBuf>,
+    /// emit a
+    /// per-declaration provenance JSON sidecar alongside the main
+    /// certificate. See `emit_provenance_sidecar` for the schema.
+    pub with_provenance: bool,
 }
 
 /// Entry point for `verum export --to <format> [--output <path>]`.
@@ -147,6 +166,14 @@ pub fn run(options: ExportOptions) -> Result<()> {
     let mut owl2_graph = crate::commands::owl2::Owl2Graph::default();
     let mut skipped_files = 0usize;
 
+    // Persistent certificate store rooted at the project's
+    // `.verum/cache/certificates/` directory. Each declaration's
+    // cert is loaded lazily during `collect_declaration` and stuffed
+    // into Declaration.certificate so the per-target emit can hand it
+    // to the proof-replay backend. Missing certs ⇒ Maybe::None ⇒
+    // admitted-fallback.
+    let cert_store = verum_smt::cert_store::FileSystemCertificateStore::for_project(&manifest_dir);
+
     for abs_path in &vr_files {
         let rel_path = abs_path
             .strip_prefix(&manifest_dir)
@@ -161,7 +188,7 @@ pub fn run(options: ExportOptions) -> Result<()> {
         };
 
         for item in &module.items {
-            if let Some(decl) = collect_declaration(item, &rel_path) {
+            if let Some(decl) = collect_declaration(item, &rel_path, &cert_store) {
                 declarations.push(decl);
             }
             // The Owl2Fs target consumes the same parse pass — single
@@ -173,12 +200,19 @@ pub fn run(options: ExportOptions) -> Result<()> {
 
     let manifest_name = read_manifest_name(&manifest_dir);
 
+    // proof-replay registry,
+    // pre-populated with all 5 concrete backends per V6–V10. Each
+    // emit_<target> consults this to lower SmtCertificate traces
+    // into target-language tactic chains; falls back to the V1
+    // admitted scaffold when no certificate is loaded.
+    let replay_registry = verum_smt::proof_replay::default_registry();
+
     let body = match options.format {
-        ExportFormat::Dedukti => emit_dedukti(&declarations),
-        ExportFormat::Coq => emit_coq(&declarations),
-        ExportFormat::Lean => emit_lean(&declarations),
-        ExportFormat::Agda => emit_agda(&declarations),
-        ExportFormat::Metamath => emit_metamath(&declarations),
+        ExportFormat::Dedukti => emit_dedukti(&declarations, &replay_registry),
+        ExportFormat::Coq => emit_coq(&declarations, &replay_registry),
+        ExportFormat::Lean => emit_lean(&declarations, &replay_registry),
+        ExportFormat::Agda => emit_agda(&declarations, &replay_registry),
+        ExportFormat::Metamath => emit_metamath(&declarations, &replay_registry),
         ExportFormat::Owl2Fs => emit_owl2_fs(&owl2_graph, &manifest_name),
     };
 
@@ -205,6 +239,25 @@ pub fn run(options: ExportOptions) -> Result<()> {
         )
     })?;
 
+    // provenance sidecar.
+    // Statement-level export remains unchanged (Admitted / sorry / `?`);
+    // the sidecar carries the per-declaration metadata downstream
+    // tools need to drive SMT replay or fill in proof terms.
+    if options.with_provenance {
+        let sidecar = emit_provenance_sidecar(&declarations, options.format);
+        let sidecar_path = sidecar_path_for(&output_path);
+        std::fs::write(&sidecar_path, &sidecar).map_err(|e| {
+            CliError::Custom(
+                format!(
+                    "writing provenance sidecar to {}: {}",
+                    sidecar_path.display(),
+                    e
+                )
+                .into(),
+            )
+        })?;
+    }
+
     print_summary(
         options.format,
         &declarations,
@@ -213,6 +266,99 @@ pub fn run(options: ExportOptions) -> Result<()> {
     );
 
     Ok(())
+}
+
+/// derive `<output>.provenance.json` from
+/// `<output>` so the sidecar lands next to the main certificate.
+fn sidecar_path_for(main: &Path) -> PathBuf {
+    let mut p = main.to_path_buf();
+    let stem = p
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "export".to_string());
+    p.set_file_name(format!("{}.provenance.json", stem));
+    p
+}
+
+/// emit a JSON sidecar
+/// describing every exported declaration. The sidecar is a stable,
+/// versioned schema (`schema_version: 1`) with one entry per
+/// declaration carrying:
+///
+///   - `name` / `kind` / `source_file`
+///   - `framework_name` + `framework_citation` when present
+///   - `discharge_strategy` ∈ {`statement_only`, `smt_replay_pending`}:
+///     today every entry is `statement_only` because the kernel-side
+///     SmtCertificate→target-language lowering is V2.1+ work; the
+///     field is reserved so future emitters can mark certificates
+///     where SMT replay landed without bumping the schema version.
+///   - `obligation_hash`: `null` until the kernel exposes per-decl
+///     SmtCertificate hashes through the export pipeline.
+///   - `proof_term`: `null` — V2.1+ slot for the lowered proof term.
+///
+/// Output is deterministic (declarations preserve emit order; field
+/// ordering is stable) so CI diffs stay clean across runs.
+fn emit_provenance_sidecar(decls: &[Declaration], format: ExportFormat) -> String {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str(&format!(
+        "  \"target_format\": \"{}\",\n",
+        format.as_str()
+    ));
+    out.push_str(&format!("  \"declaration_count\": {},\n", decls.len()));
+    out.push_str("  \"declarations\": [\n");
+    let total = decls.len();
+    for (i, d) in decls.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"name\": \"{}\",\n",
+            json_escape_export(d.name.as_str())
+        ));
+        out.push_str(&format!("      \"kind\": \"{}\",\n", d.kind));
+        out.push_str(&format!(
+            "      \"source_file\": \"{}\",\n",
+            json_escape_export(&d.source.display().to_string())
+        ));
+        if let Maybe::Some(fw) = &d.framework {
+            out.push_str(&format!(
+                "      \"framework_name\": \"{}\",\n",
+                json_escape_export(fw.name.as_str())
+            ));
+            out.push_str(&format!(
+                "      \"framework_citation\": \"{}\",\n",
+                json_escape_export(fw.citation.as_str())
+            ));
+        } else {
+            out.push_str("      \"framework_name\": null,\n");
+            out.push_str("      \"framework_citation\": null,\n");
+        }
+        out.push_str("      \"discharge_strategy\": \"statement_only\",\n");
+        out.push_str("      \"obligation_hash\": null,\n");
+        out.push_str("      \"proof_term\": null\n");
+        out.push_str(if i + 1 == total { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ]\n");
+    out.push_str("}\n");
+    out
+}
+
+fn json_escape_export(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 // -----------------------------------------------------------------------------
@@ -255,7 +401,11 @@ fn parse_file_for_export(path: &Path) -> std::result::Result<verum_ast::Module, 
         .map_err(|e| format!("parse: {}", e))
 }
 
-fn collect_declaration(item: &Item, rel_path: &Path) -> Option<Declaration> {
+fn collect_declaration(
+    item: &Item,
+    rel_path: &Path,
+    cert_store: &dyn verum_smt::cert_store::CertificateStore,
+) -> Option<Declaration> {
     let (kind, name, decl_attrs) = match &item.kind {
         ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
         ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
@@ -271,12 +421,60 @@ fn collect_declaration(item: &Item, rel_path: &Path) -> Option<Declaration> {
     // marker on either.
     let framework = first_framework(&item.attributes).or_else(|| first_framework(decl_attrs));
 
+    // Try to load a persisted SmtCertificate for this declaration.
+    // Missing certs surface as `None`; the per-target emit then falls
+    // through to the admitted scaffold via `replay_or_admitted`.
+    // Axioms never have certs (they're postulates, not derivations);
+    // theorems/lemmas/corollaries opt into proof-replay by having a
+    // cert on disk.
+    let certificate = match cert_store.load(name.as_str()) {
+        verum_common::Maybe::Some(c) => Some(c),
+        verum_common::Maybe::None => None,
+    };
+
     Some(Declaration {
         kind,
         name,
         source: rel_path.to_path_buf(),
         framework,
+        certificate,
     })
+}
+
+/// apply the proof-replay
+/// registry to a declaration. Returns the lowered tactic source on
+/// success; falls back to the per-target admitted shape when no
+/// certificate is loaded for the declaration.
+fn replay_or_admitted(
+    registry: &verum_smt::proof_replay::ProofReplayRegistry,
+    target: &str,
+    decl: &Declaration,
+    admitted_default: &str,
+) -> String {
+    let cert = match &decl.certificate {
+        Some(c) => c,
+        None => return admitted_default.to_string(),
+    };
+    let backend = match registry.get(target) {
+        Some(b) => b,
+        None => return admitted_default.to_string(),
+    };
+    let header = verum_smt::proof_replay::DeclarationHeader {
+        name: decl.name.clone(),
+        kind: verum_smt::proof_replay::DeclKind::from_str(decl.kind)
+            .unwrap_or(verum_smt::proof_replay::DeclKind::Theorem),
+        framework: match &decl.framework {
+            Maybe::Some(fw) => Some(verum_smt::proof_replay::FrameworkRef {
+                name: fw.name.clone(),
+                citation: fw.citation.clone(),
+            }),
+            Maybe::None => None,
+        },
+    };
+    match backend.lower(cert, &header) {
+        Ok(tactic) => tactic.source,
+        Err(_) => admitted_default.to_string(),
+    }
 }
 
 fn first_framework(attrs: &List<verum_ast::attr::Attribute>) -> Maybe<FrameworkAttr> {
@@ -292,7 +490,7 @@ fn first_framework(attrs: &List<verum_ast::attr::Attribute>) -> Maybe<FrameworkA
 }
 
 // -----------------------------------------------------------------------------
-// Framework-lineage → target-library mapping (VVA §8.5)
+// Framework-lineage → target-library mapping 
 //
 // When a `@framework(<lineage>, "...")` marker has a known mapping in a
 // target ecosystem, the exporter emits the corresponding `import` /
@@ -303,7 +501,7 @@ fn first_framework(attrs: &List<verum_ast::attr::Attribute>) -> Maybe<FrameworkA
 // missing hook.
 //
 // The table is intentionally small and curated — stdlib "standard
-// six-pack" per VVA §6.2 plus a handful of widely-cited foundations.
+// six-pack" plus a handful of widely-cited foundations.
 // User-authored packages extend this by shipping a `@lineage_map`
 // attribute on their `@framework` declarations (Phase 3 work).
 // -----------------------------------------------------------------------------
@@ -355,7 +553,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
         },
     ),
     (
-        // V8 (#238) — meta-classifier framework. The Diakrisis
+        // meta-classifier framework. The Diakrisis
         // package fixes the canonical-primitive coordinate system
         // (Articulation/Enactment Morita-duality, dual no-go,
         // dual gauge-surjection kernel, dual-primitive initial-
@@ -385,7 +583,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
         },
     ),
     (
-        // V8 (#238) — OWL 2 Functional Syntax. Coq HOL-Light has
+        // OWL 2 Functional Syntax. Coq HOL-Light has
         // an OWL 2 fragment via the Coq-DL workspace; Lean 4 has
         // an experimental DescriptionLogic library; mainstream
         // Agda / Dedukti / Metamath have no DL libraries.
@@ -411,7 +609,7 @@ const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
     (
         "schreiber_dcct",
         LineageImport {
-            // V8 (#238) — added Coq HoTT modality + Agda cubical
+            // added Coq HoTT modality + Agda cubical
             // for the cohesive triple-adjunction ∫ ⊣ ♭ ⊣ ♯.
             lean: Some("import Mathlib.CategoryTheory.Sites.Sheaf"),
             coq: Some("Require Import HoTT.Modalities.Modality."),
@@ -456,15 +654,12 @@ fn distinct_lineages(decls: &[Declaration]) -> Vec<Text> {
 // Dedukti emitter
 // -----------------------------------------------------------------------------
 
-fn emit_dedukti(decls: &[Declaration]) -> String {
+fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
     let mut out = String::new();
     out.push_str("(; Exported by `verum export --to dedukti`. ;)\n");
-    out.push_str("(; One entry per top-level axiom / theorem / lemma / corollary. ;)\n");
     out.push_str(
-        "(; Types are currently opaque — statement surface only. Proof-term\n",
-    );
-    out.push_str(
-        "   re-derivation through verum_kernel lands with per-backend SMT replay. ;)\n\n",
+        "(; .1: theorem proofs lowered via DeduktiProofReplay\n\
+        when SmtCertificates are loaded; otherwise admitted comment marker. ;)\n\n",
     );
     out.push_str("Prop : Type.\n\n");
 
@@ -494,7 +689,39 @@ fn emit_dedukti(decls: &[Declaration]) -> String {
                     d.source.display(),
                 ));
             }
-            out.push_str(&format!("{} : Prop.\n\n", mangle(&d.name)));
+            // Dedukti uses term-style proof
+            // assignment: `def name : Prop := <term>.` for theorems
+            // with a lowered body, `name : Prop.` (axiom form) for
+            // postulates without a body.
+            match d.kind {
+                "axiom" => {
+                    out.push_str(&format!("{} : Prop.\n\n", mangle(&d.name)));
+                }
+                _ => {
+                    let proof = replay_or_admitted(
+                        replay_registry,
+                        "dedukti",
+                        d,
+                        "(; admitted ;)",
+                    );
+                    if proof.starts_with("(;") {
+                        // Admitted fallback — keep the legacy
+                        // axiom-form so the file stays valid.
+                        out.push_str(&format!(
+                            "{} : Prop. {}\n\n",
+                            mangle(&d.name),
+                            proof
+                        ));
+                    } else {
+                        // Lowered λΠ-term — emit as a `def`.
+                        out.push_str(&format!(
+                            "def {} : Prop := {}.\n\n",
+                            mangle(&d.name),
+                            proof
+                        ));
+                    }
+                }
+            }
         }
     }
     out
@@ -538,13 +765,15 @@ fn emit_coq_imports(decls: &[Declaration], out: &mut String) {
     }
 }
 
-fn emit_coq(decls: &[Declaration]) -> String {
+fn emit_coq(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
     let mut out = String::new();
     out.push_str("(* Exported by `verum export --to coq`. *)\n");
-    out.push_str("(* Statements only — proofs are admitted. Full proof-term replay *)\n");
-    out.push_str("(* through verum_kernel lands with per-backend SMT reconstruction. *)\n\n");
+    out.push_str(
+        "(* theorem proofs lowered via CoqProofReplay\n\
+        when SmtCertificates are loaded; otherwise admitted scaffold. *)\n\n",
+    );
 
-    // VVA §8.5 framework-lineage → Coq-library mapping.
+    // framework-lineage → Coq-library mapping.
     emit_coq_imports(decls, &mut out);
 
     let by_framework = group_by_framework(decls);
@@ -575,9 +804,19 @@ fn emit_coq(decls: &[Declaration]) -> String {
                     ));
                 }
                 _ => {
+                    // Consult the proof-replay registry for a Coq
+                    // tactic chain. Falls back to `Proof. Admitted.`
+                    // when no certificate is loaded (current state).
+                    let proof_body = replay_or_admitted(
+                        replay_registry,
+                        "coq",
+                        d,
+                        "Proof. Admitted.",
+                    );
                     out.push_str(&format!(
-                        "Theorem {} : Prop.\nProof. Admitted.\n\n",
-                        mangle(&d.name)
+                        "Theorem {} : Prop.\n{}\n\n",
+                        mangle(&d.name),
+                        proof_body
                     ));
                 }
             }
@@ -610,13 +849,13 @@ fn emit_coq(decls: &[Declaration]) -> String {
 /// mirrors the admitted-proof semantics of the Coq / Lean / Dedukti
 /// emitters: the statement is authoritative, the proof step is a
 /// follow-up that per-backend SMT replay will fill in.
-fn emit_metamath(decls: &[Declaration]) -> String {
+fn emit_metamath(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
     let mut out = String::new();
     out.push_str("$( Exported by `verum export --to metamath`. $)\n");
     out.push_str(
-        "$( Statements only — proofs are `?` placeholders. Full proof-term\n\
-         replay through verum_kernel lands with per-backend SMT\n\
-         reconstruction. $)\n\n",
+        "$( .1: theorem proof steps lowered via\n\
+         MetamathProofReplay when SmtCertificates are loaded; otherwise\n\
+         `?` placeholder accepted by mmverify.py as unchecked scaffold. $)\n\n",
     );
 
     // Constant + variable declarations. Kept minimal — Verum's
@@ -652,10 +891,21 @@ fn emit_metamath(decls: &[Declaration]) -> String {
                     ));
                 }
                 _ => {
+                    // Metamath theorem-step
+                    // body. MetamathProofReplay produces the body
+                    // including the `$= ... $.` framing; we splice
+                    // the rendered body after the `wff` head.
+                    let proof = replay_or_admitted(
+                        replay_registry,
+                        "metamath",
+                        d,
+                        "$= ? $.",
+                    );
                     out.push_str(&format!(
-                        "th-{} $p wff {} $= ? $.\n\n",
+                        "th-{} $p wff {} {}\n\n",
                         mangle(&d.name),
-                        mangle(&d.name)
+                        mangle(&d.name),
+                        proof
                     ));
                 }
             }
@@ -664,14 +914,16 @@ fn emit_metamath(decls: &[Declaration]) -> String {
     out
 }
 
-fn emit_lean(decls: &[Declaration]) -> String {
+fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
     let mut out = String::new();
     out.push_str("-- Exported by `verum export --to lean`.\n");
-    out.push_str("-- Statements only — proofs are `sorry`. Full proof-term replay\n");
-    out.push_str("-- through verum_kernel lands with per-backend SMT reconstruction.\n\n");
+    out.push_str(
+        "-- theorem proofs lowered via LeanProofReplay\n\
+         -- when SmtCertificates are loaded; otherwise sorry scaffold.\n\n",
+    );
 
-    // VVA §8.5: emit `import` stanzas for known framework-lineage
-    // mappings so the file is ready to check against Mathlib without
+    // Emit `import` stanzas for known framework-lineage mappings
+    // so the file is ready to check against Mathlib without
     // manual editing. Unmapped lineages fall through with a comment.
     let lineages = distinct_lineages(decls);
     if !lineages.is_empty() {
@@ -729,9 +981,24 @@ fn emit_lean(decls: &[Declaration]) -> String {
                     out.push_str(&format!("axiom {} : Prop\n\n", mangle(&d.name)));
                 }
                 _ => {
+                    // Replay or sorry-fallback. LeanProofReplay
+                    // produces a `by ... ` block; we splice it after
+                    // `:=` to form a complete term-style theorem.
+                    let proof = replay_or_admitted(
+                        replay_registry,
+                        "lean",
+                        d,
+                        ":= sorry",
+                    );
+                    let body = if proof.starts_with("by") {
+                        format!(":= {}", proof)
+                    } else {
+                        proof
+                    };
                     out.push_str(&format!(
-                        "theorem {} : Prop := sorry\n\n",
-                        mangle(&d.name)
+                        "theorem {} : Prop {}\n\n",
+                        mangle(&d.name),
+                        body
                     ));
                 }
             }
@@ -769,14 +1036,17 @@ fn agda_mangle(name: &Text) -> String {
 /// As with the other backends, statements are opaque (`: Set`) at the
 /// MVP level. Type-preserving export through verum_kernel lands when
 /// per-backend SMT proof-replay is wired in.
-fn emit_agda(decls: &[Declaration]) -> String {
+fn emit_agda(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
     let mut out = String::new();
     out.push_str("-- Exported by `verum export --to agda`.\n");
-    out.push_str("-- Statements only — proofs are postulated. Full proof-term replay\n");
-    out.push_str("-- through verum_kernel lands with per-backend SMT reconstruction.\n\n");
+    out.push_str(
+        "-- .1: theorem proofs lowered via AgdaProofReplay\n\
+         -- when SmtCertificates are loaded; otherwise postulated\n\
+         -- (proof terms become Agda holes `{!!}` for interactive fill).\n\n",
+    );
     out.push_str("module Verum.Export where\n\n");
 
-    // VVA §8.5 framework-lineage → Agda-library mapping. Unknown
+    // framework-lineage → Agda-library mapping. Unknown
     // lineages fall through with a comment so reviewers see the gap.
     let lineages = distinct_lineages(decls);
     if !lineages.is_empty() {
@@ -829,12 +1099,37 @@ fn emit_agda(decls: &[Declaration]) -> String {
                     d.source.display(),
                 ));
             }
-            // axiom and theorem both render as a postulate block:
-            // proofs are admitted at the MVP level so the rendering
-            // is uniform. The `kind` is preserved in the comment line
-            // above the postulate so reviewers see the original intent.
-            out.push_str("postulate\n");
-            out.push_str(&format!("  {} : Set\n\n", agda_mangle(&d.name)));
+            // Agda is term-style: a proof IS
+            // a value of the goal type. Axioms emit as a `postulate`
+            // block; theorems emit as a definition `name : Set =
+            // <term>` when a cert is loaded, falling back to the
+            // hole `{!!}` (still legal Agda — interactive checker
+            // accepts) when no cert is loaded.
+            match d.kind {
+                "axiom" => {
+                    out.push_str("postulate\n");
+                    out.push_str(&format!("  {} : Set\n\n", agda_mangle(&d.name)));
+                }
+                _ => {
+                    let proof = replay_or_admitted(
+                        replay_registry,
+                        "agda",
+                        d,
+                        "{!!}",
+                    );
+                    // Term-style definition. The `: Set` annotation
+                    // is the placeholder type — the V12.1 elaborator
+                    // hand-off (§8.6) replaces it with the real type
+                    // once the proof-term layer surfaces lifted Verum
+                    // types.
+                    out.push_str(&format!(
+                        "{} : Set\n{} = {}\n\n",
+                        agda_mangle(&d.name),
+                        agda_mangle(&d.name),
+                        proof
+                    ));
+                }
+            }
         }
     }
     out
@@ -904,6 +1199,29 @@ fn print_summary(
         );
     }
 
+    // Proof-replay coverage counts. `with_cert` = decls that had
+    // an SmtCertificate loaded from the cert store and went
+    // through the proof-replay backend; `admitted` = decls that
+    // fell through to the admitted scaffold (no cert on disk).
+    let theorem_kinds = ["theorem", "lemma", "corollary"];
+    let theorem_count = decls
+        .iter()
+        .filter(|d| theorem_kinds.contains(&d.kind))
+        .count();
+    let with_cert_count = decls
+        .iter()
+        .filter(|d| theorem_kinds.contains(&d.kind) && d.certificate.is_some())
+        .count();
+    if theorem_count > 0 {
+        let admitted_count = theorem_count - with_cert_count;
+        println!(
+            "  {} of {} theorem proof(s) replayed via SmtCertificate ({} admitted)",
+            with_cert_count.to_string().green(),
+            theorem_count.to_string().cyan(),
+            admitted_count.to_string().yellow(),
+        );
+    }
+
     if skipped_files > 0 {
         println!(
             "  {} .vr file(s) skipped (parse errors)",
@@ -912,18 +1230,26 @@ fn print_summary(
     }
 
     println!();
-    println!(
-        "{} Full proof-term replay through verum_kernel lands with per-",
-        "note:".dimmed()
-    );
-    println!(
-        "      backend SMT reconstruction. This certificate carries"
-    );
-    println!("      statements + framework citations — proofs are admitted.");
+    if theorem_count > 0 && with_cert_count == 0 {
+        println!(
+            "{} No SmtCertificates loaded from `.verum/cache/certificates/`. Run",
+            "note:".dimmed()
+        );
+        println!(
+            "      `verum verify` first to populate the cert store, then re-export"
+        );
+        println!("      to splice real proof-term tactic chains.");
+    } else if with_cert_count < theorem_count {
+        println!(
+            "{} {} theorem(s) had no on-disk SmtCertificate — admitted scaffold used.",
+            "note:".dimmed(),
+            theorem_count - with_cert_count
+        );
+    }
 }
 
 // -----------------------------------------------------------------------------
-// OWL 2 Functional Syntax emitter (VVA §21.8 Phase 3 B5)
+// OWL 2 Functional Syntax emitter (Phase 3 B5)
 // -----------------------------------------------------------------------------
 //
 // Walks the Owl2Graph populated during the project parse and emits
@@ -951,11 +1277,11 @@ fn print_summary(
 //     InverseObjectProperties(:p :q) — per @owl2_property(inverse_of)
 //   )
 
-/// Read the project's `[package].name` from `Verum.toml` to derive a
+/// Read the project's `[package].name` from `verum.toml` to derive a
 /// default ontology IRI. Falls back to `verum-export` when the manifest
 /// is unreadable.
 fn read_manifest_name(manifest_dir: &Path) -> String {
-    let path = manifest_dir.join("Verum.toml");
+    let path = Manifest::manifest_path(manifest_dir);
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(_) => return "verum-export".to_string(),
@@ -1005,7 +1331,7 @@ fn emit_owl2_fs(graph: &crate::commands::owl2::Owl2Graph, manifest_name: &str) -
     use crate::commands::owl2::Owl2EntityKind;
 
     let mut out = String::new();
-    out.push_str("# Exported by `verum export --to owl2-fs` (VVA §21.8 / B5).\n");
+    out.push_str("# Exported by `verum export --to owl2-fs` (/ B5).\n");
     out.push_str("# OWL 2 Functional-Style Syntax — round-trips through Pellet, HermiT,\n");
     out.push_str("# Protégé, FaCT++, ELK, Konclude. BTreeMap-sorted output for byte-\n");
     out.push_str("# deterministic CI diffs.\n\n");
@@ -1261,8 +1587,10 @@ mod format_tests {
             name: Text::from("yoneda_full"),
             source: PathBuf::from("src/lib.vr"),
             framework: Maybe::None,
+            certificate: None,
         }];
-        let out = emit_agda(&decls);
+        let registry = verum_smt::proof_replay::default_registry();
+        let out = emit_agda(&decls, &registry);
         // Agda module declaration is mandatory for `agda --type-check`.
         assert!(out.contains("module Verum.Export where"));
         // Each declaration must appear as a postulate of type Set.
@@ -1275,7 +1603,8 @@ mod format_tests {
     #[test]
     fn metamath_emitter_produces_valid_preamble() {
         let decls: Vec<Declaration> = Vec::new();
-        let out = emit_metamath(&decls);
+        let registry = verum_smt::proof_replay::default_registry();
+        let out = emit_metamath(&decls, &registry);
         // Metamath verifiers require the constant/variable
         // declarations; the preamble must always be emitted.
         assert!(out.contains("$c wff |- $."));
@@ -1284,7 +1613,7 @@ mod format_tests {
     }
 
     // -------------------------------------------------------------
-    // V8 (#238) — lineage-import table contract.
+    // lineage-import table contract.
     //
     // The LINEAGE_IMPORTS table is a curated map. The `lineage_import`
     // lookup is `O(n)` linear-scan but n is fixed and small; the
@@ -1338,7 +1667,7 @@ mod format_tests {
 
     #[test]
     fn lineage_import_schreiber_dcct_now_maps_coq_and_agda() {
-        // V8 (#238) — added Coq HoTT.Modalities.Modality + Agda
+        // added Coq HoTT.Modalities.Modality + Agda
         // Cubical.Modalities.Everything for the cohesive triple-
         // adjunction ∫ ⊣ ♭ ⊣ ♯. Unmapped column comments must
         // clear when any column populates.

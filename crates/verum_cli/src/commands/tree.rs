@@ -21,9 +21,9 @@ pub fn tree(options: TreeOptions) -> Result<()> {
 
     // Find manifest and lockfile
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest = Manifest::from_file(&manifest_dir.join("Verum.toml"))?;
+    let manifest = Manifest::from_file(&Manifest::manifest_path(&manifest_dir))?;
 
-    let lockfile_path = manifest_dir.join("Verum.lock");
+    let lockfile_path = Manifest::lockfile_path(&manifest_dir);
     if !lockfile_path.exists() {
         ui::warn("No lockfile found. Run 'verum build' first.");
         return Ok(());
