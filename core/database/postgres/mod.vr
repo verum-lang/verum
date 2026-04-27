@@ -33,6 +33,7 @@ public module adapter;
 public module stmt_cache;
 public module extended;
 public module pool;
+public module introspect;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -51,3 +52,4 @@ public mount .extended.{
     build_parse_bind_execute, build_bind_execute,
 };
 public mount .pool.PgPool;
+public mount .introspect.introspect as introspect_postgres;
