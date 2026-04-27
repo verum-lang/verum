@@ -62,6 +62,139 @@ use crate::strategy_selection::ProblemCharacteristics;
 // Public types
 // ============================================================================
 
+// ----------------------------------------------------------------------------
+// CvcStrategyCache (#103 follow-up — task #6 dual-backend cache parity)
+// ----------------------------------------------------------------------------
+//
+// Mirror of `tactics::TacticCache` for the CVC5 / capability-router side.
+// The Z3 cache memoises `FormulaCharacteristics` keyed on a Z3-formula
+// signature; this cache memoises `ExtendedCharacteristics` keyed on a
+// stable signature of the assertion-set's text rendering.  Both caches
+// share the same shape (DashMap + AtomicU64 hit/miss counters + capacity
+// hint) so per-backend telemetry is symmetric and can be reported in
+// the same `routing-stats` view.
+//
+// Why not reuse `TacticCache` directly? — `FormulaCharacteristics` and
+// `ExtendedCharacteristics` carry DIFFERENT theory-detection state and
+// the CVC5 path runs heuristic AST walks that don't exist on the Z3
+// side (string / sequence / regex / inductive-datatype detection live
+// in the CVC5 router because Z3 probes already cover them natively).
+// A single cache type would force the union shape and lose precision.
+
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+/// Stable structural signature of an assertion set, used as the
+/// [`CvcStrategyCache`] key.  Computed via blake3 over the text
+/// rendering of the assertions in their original order.  The same
+/// signature shape (`[u8; 32]`) is used by `tactics::FormulaSignature`
+/// so the two cache surfaces stay symmetric.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AssertionSetSignature([u8; 32]);
+
+impl AssertionSetSignature {
+    /// Compute the signature of an assertion set.  Caller renders
+    /// each assertion to its canonical text form (typically the AST
+    /// `Debug` representation; for SMT-LIB-bound paths the SMT-LIB
+    /// rendering is more compact and equally stable).
+    pub fn of_text(s: &str) -> Self {
+        Self(blake3::hash(s.as_bytes()).into())
+    }
+
+    /// Raw 32-byte signature for callers that want to fold it into
+    /// another hash (e.g. a per-module proof certificate).
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Aggregate cache statistics — same shape as
+/// `tactics::TacticCacheStats` for symmetric reporting.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CvcStrategyCacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub entries: usize,
+    pub hit_rate: f64,
+}
+
+/// Concurrent, sharded cache mapping [`AssertionSetSignature`] →
+/// cached [`ExtendedCharacteristics`].  Lock-free reads under
+/// rayon-parallel verification (DashMap interior).  `Send + Sync` so
+/// it sits on `SmtBackendSwitcher` and can be cloned by Arc across
+/// every solve attempt.
+pub struct CvcStrategyCache {
+    entries: dashmap::DashMap<AssertionSetSignature, ExtendedCharacteristics>,
+    hits: AtomicU64,
+    misses: AtomicU64,
+}
+
+impl Default for CvcStrategyCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CvcStrategyCache {
+    /// Default capacity hint = 8192 entries, matching `TacticCache`.
+    pub fn new() -> Self {
+        Self::with_capacity(8192)
+    }
+
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            entries: dashmap::DashMap::with_capacity(cap),
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+        }
+    }
+
+    /// Look up cached characteristics by signature.  Increments
+    /// `hits` on Some, `misses` on None.
+    pub fn get(&self, sig: &AssertionSetSignature) -> Option<ExtendedCharacteristics> {
+        match self.entries.get(sig) {
+            Some(entry) => {
+                self.hits.fetch_add(1, AtomicOrdering::Relaxed);
+                Some(entry.clone())
+            }
+            None => {
+                self.misses.fetch_add(1, AtomicOrdering::Relaxed);
+                None
+            }
+        }
+    }
+
+    /// Insert (or replace) the characteristics for `sig`.
+    pub fn insert(&self, sig: AssertionSetSignature, chars: ExtendedCharacteristics) {
+        self.entries.insert(sig, chars);
+    }
+
+    /// Drop all cached entries (e.g. between independent verification
+    /// sessions to keep working-set bounded).  Resets stats.
+    pub fn clear(&self) {
+        self.entries.clear();
+        self.hits.store(0, AtomicOrdering::Relaxed);
+        self.misses.store(0, AtomicOrdering::Relaxed);
+    }
+
+    /// Snapshot the current statistics.
+    pub fn stats(&self) -> CvcStrategyCacheStats {
+        let hits = self.hits.load(AtomicOrdering::Relaxed);
+        let misses = self.misses.load(AtomicOrdering::Relaxed);
+        let total = hits.saturating_add(misses);
+        let hit_rate = if total == 0 {
+            0.0
+        } else {
+            hits as f64 / total as f64
+        };
+        CvcStrategyCacheStats {
+            hits,
+            misses,
+            entries: self.entries.len(),
+            hit_rate,
+        }
+    }
+}
+
 /// Extended problem characteristics including theory-specific flags needed
 /// for fine-grained routing decisions.
 ///
@@ -543,6 +676,53 @@ mod tests {
 
     fn ext_chars(base: ProblemCharacteristics) -> ExtendedCharacteristics {
         ExtendedCharacteristics::from_base(base)
+    }
+
+    // ----- CvcStrategyCache (#103/#6) -----
+
+    #[test]
+    fn cvc_cache_signature_is_stable_across_calls() {
+        let s1 = AssertionSetSignature::of_text("(assert (= x 1))");
+        let s2 = AssertionSetSignature::of_text("(assert (= x 1))");
+        assert_eq!(s1, s2);
+        assert_eq!(s1.as_bytes(), s2.as_bytes());
+    }
+
+    #[test]
+    fn cvc_cache_signature_differs_for_distinct_text() {
+        let s1 = AssertionSetSignature::of_text("(assert (= x 1))");
+        let s2 = AssertionSetSignature::of_text("(assert (= x 2))");
+        assert_ne!(s1, s2);
+    }
+
+    #[test]
+    fn cvc_cache_hit_miss_counters_track_lookups() {
+        let cache = CvcStrategyCache::new();
+        let sig = AssertionSetSignature::of_text("(check-sat)");
+        let chars = ext_chars(base_chars());
+
+        // Miss
+        assert!(cache.get(&sig).is_none());
+        let stats0 = cache.stats();
+        assert_eq!(stats0.hits, 0);
+        assert_eq!(stats0.misses, 1);
+
+        // Insert + hit
+        cache.insert(sig, chars.clone());
+        let got = cache.get(&sig).expect("inserted");
+        assert_eq!(got.base.size, chars.base.size);
+        let stats1 = cache.stats();
+        assert_eq!(stats1.hits, 1);
+        assert_eq!(stats1.misses, 1);
+        assert!((stats1.hit_rate - 0.5).abs() < f64::EPSILON);
+
+        // clear() resets entries + counters
+        cache.clear();
+        let stats2 = cache.stats();
+        assert_eq!(stats2.hits, 0);
+        assert_eq!(stats2.misses, 0);
+        assert_eq!(stats2.entries, 0);
+        assert!(cache.get(&sig).is_none());
     }
 
     #[test]
