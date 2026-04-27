@@ -33,6 +33,7 @@
 //!   subcommand" error reaches the user.
 
 pub mod cache;
+pub mod context;
 pub mod frontmatter;
 pub mod lockfile;
 pub mod permission_flags;
