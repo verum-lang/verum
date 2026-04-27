@@ -91,7 +91,6 @@ verum_diagnostics = { workspace = true }
 verum_dap = { workspace = true }
 verum_vbc = { workspace = true }
 verum_error = { workspace = true }
-verum_toolchain = { workspace = true }
 
 # TUI support for playbook
 ratatui = "0.30"

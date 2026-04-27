@@ -134,11 +134,11 @@ fn list(root: Option<PathBuf>, sort: &str, limit: usize, json: bool) -> Result<(
         for (key, meta) in entries.iter().take(take) {
             writeln!(
                 out,
-                r#"{{"key":"{}","vbc_len":{},"source_path":{},"toolchain":{},"created_at":{},"accessed_at":{}}}"#,
+                r#"{{"key":"{}","vbc_len":{},"source_path":{},"compiler":{},"created_at":{},"accessed_at":{}}}"#,
                 key.to_hex(),
                 meta.vbc_len,
                 json_str(&meta.source_path),
-                json_str(&meta.toolchain_version),
+                json_str(&meta.compiler_version),
                 meta.created_at,
                 meta.last_accessed_at,
             )
@@ -160,7 +160,7 @@ fn list(root: Option<PathBuf>, sort: &str, limit: usize, json: bool) -> Result<(
     println!();
     println!(
         "{:<16}  {:>10}  {:>12}  {:<20}  {}",
-        "KEY", "SIZE", "ACCESSED", "TOOLCHAIN", "SOURCE"
+        "KEY", "SIZE", "ACCESSED", "COMPILER", "SOURCE"
     );
     for (key, meta) in entries.iter().take(take) {
         let hex = key.to_hex();
@@ -170,7 +170,7 @@ fn list(root: Option<PathBuf>, sort: &str, limit: usize, json: bool) -> Result<(
             short,
             format_bytes(meta.vbc_len),
             relative_time(meta.last_accessed_at),
-            truncate(&meta.toolchain_version, 20),
+            truncate(&meta.compiler_version, 20),
             truncate(&meta.source_path, 60),
         );
     }
@@ -267,7 +267,7 @@ fn show(root: Option<PathBuf>, prefix: &str) -> Result<()> {
             println!("schema_version     : {}", meta.schema_version);
             println!("source_path        : {}", meta.source_path);
             println!("source_len         : {} bytes", meta.source_len);
-            println!("toolchain_version  : {}", meta.toolchain_version);
+            println!("compiler_version  : {}", meta.compiler_version);
             println!("created_at         : {}", meta.created_at);
             println!("last_accessed_at   : {}", meta.last_accessed_at);
             println!(

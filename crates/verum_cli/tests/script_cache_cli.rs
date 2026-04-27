@@ -201,7 +201,7 @@ fn cache_show_finds_unique_prefix() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains(&hex), "full key not echoed: {stdout:?}");
     assert!(stdout.contains("source_path"));
-    assert!(stdout.contains("toolchain_version"));
+    assert!(stdout.contains("compiler_version"));
     assert!(stdout.contains("script_0.vr"));
 }
 

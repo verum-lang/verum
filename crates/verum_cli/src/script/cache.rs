@@ -11,12 +11,12 @@
 //!
 //! # Cache key
 //!
-//! `CacheKey = blake3(source_bytes ++ toolchain_version ++ flags)`.
+//! `CacheKey = blake3(source_bytes ++ compiler_version ++ flags)`.
 //!
-//! Both `toolchain_version` and `flags` are part of the digest because a
+//! Both `compiler_version` and `flags` are part of the digest because a
 //! source file alone does NOT determine the compilation output:
 //!
-//!   * a different toolchain version may emit different VBC for the same
+//!   * a different compiler version may emit different VBC for the same
 //!     source (e.g. an intrinsic-name change, a codegen optimisation
 //!     pass that landed mid-release);
 //!   * profile flags (verify mode, tier, opt-level) change the bytecode
@@ -46,7 +46,7 @@
 //!
 //! # Performance
 //!
-//! - `key_for`: single-pass blake3 over `source ++ toolchain_version ++
+//! - `key_for`: single-pass blake3 over `source ++ compiler_version ++
 //!   flags`, ~1 GB/s on modern CPUs. A 10 KB source = ~10 µs.
 //! - `lookup`: 2 fs reads + 1 TOML parse. Cold lookup ~200 µs on SSD;
 //!   warm (page cache) ~30 µs.
@@ -126,17 +126,17 @@ impl std::fmt::Display for CacheKey {
     }
 }
 
-/// Compute the cache key for a source + toolchain + flag set.
+/// Compute the cache key for a source + compiler + flag set.
 ///
-/// The digest order is `source ++ b"\x00" ++ toolchain ++ b"\x00" ++ flag1
+/// The digest order is `source ++ b"\x00" ++ compiler ++ b"\x00" ++ flag1
 /// ++ b"\x00" ++ flag2 ++ ...` — null bytes between fields prevent
 /// length-extension collisions where, e.g., `("a", "bc")` and `("ab",
 /// "c")` would otherwise hash identically.
-pub fn key_for(source: &[u8], toolchain_version: &str, flags: &[&str]) -> CacheKey {
+pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> CacheKey {
     let mut hasher = blake3::Hasher::new();
     hasher.update(source);
     hasher.update(&[0]);
-    hasher.update(toolchain_version.as_bytes());
+    hasher.update(compiler_version.as_bytes());
     for flag in flags {
         hasher.update(&[0]);
         hasher.update(flag.as_bytes());
@@ -165,7 +165,7 @@ pub struct CacheMeta {
     /// signal independent of the digest.
     pub source_len: u64,
     /// Toolchain version that produced the bytecode. Diagnostic.
-    pub toolchain_version: String,
+    pub compiler_version: String,
     /// Wall-clock seconds since UNIX epoch when the entry was created.
     pub created_at: u64,
     /// Wall-clock seconds since UNIX epoch when the entry was last
@@ -344,7 +344,7 @@ impl ScriptCache {
         vbc: &[u8],
         source_path: impl Into<String>,
         source_len: u64,
-        toolchain_version: impl Into<String>,
+        compiler_version: impl Into<String>,
     ) -> CacheResult<()> {
         let dir = self.entry_dir(key);
         let nonce = TEMPDIR_NONCE.fetch_add(1, Ordering::Relaxed);
@@ -367,7 +367,7 @@ impl ScriptCache {
             schema_version: META_SCHEMA_VERSION,
             source_path: source_path.into(),
             source_len,
-            toolchain_version: toolchain_version.into(),
+            compiler_version: compiler_version.into(),
             created_at: now,
             last_accessed_at: now,
             vbc_len: vbc.len() as u64,
@@ -604,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn key_for_distinguishes_toolchain() {
+    fn key_for_distinguishes_compiler() {
         let a = key_for(b"src", "0.6.0", &["tier=0"]);
         let b = key_for(b"src", "0.7.0", &["tier=0"]);
         assert_ne!(a, b);
@@ -648,7 +648,7 @@ mod tests {
         assert_eq!(entry.vbc, bytecode);
         assert_eq!(entry.meta.source_path, "/tmp/x.vr");
         assert_eq!(entry.meta.source_len, 100);
-        assert_eq!(entry.meta.toolchain_version, "0.6.0");
+        assert_eq!(entry.meta.compiler_version, "0.6.0");
         assert_eq!(entry.meta.vbc_len as usize, bytecode.len());
         assert_eq!(entry.meta.schema_version, META_SCHEMA_VERSION);
         let _ = fs::remove_dir_all(&root);

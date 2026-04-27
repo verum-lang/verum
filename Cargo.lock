@@ -5055,6 +5055,7 @@ dependencies = [
  "ed25519-dalek",
  "flate2",
  "git2",
+ "glob",
  "hex",
  "http-body-util",
  "hyper",
@@ -5100,7 +5101,6 @@ dependencies = [
  "verum_lsp",
  "verum_parser",
  "verum_smt",
- "verum_toolchain",
  "verum_types",
  "verum_vbc",
  "verum_verification",
@@ -5519,6 +5519,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml",
@@ -5526,6 +5527,7 @@ dependencies = [
  "verum_ast",
  "verum_common",
  "verum_error",
+ "verum_kernel",
  "verum_protocol_types",
  "verum_types",
  "z3",
@@ -5550,24 +5552,6 @@ dependencies = [
  "cc",
  "paste",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "verum_toolchain"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
- "hex",
- "parking_lot",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "thiserror 2.0.18",
- "toml",
- "tracing",
- "walkdir",
 ]
 
 [[package]]

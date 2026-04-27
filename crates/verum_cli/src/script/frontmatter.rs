@@ -39,7 +39,7 @@
 //!
 //! | key | type | meaning |
 //! |---|---|---|
-//! | `verum` | semver spec | required minimum Verum toolchain |
+//! | `verum` | semver spec | required minimum Verum compiler |
 //! | `dependencies` | array or table | registry deps for this script |
 //! | `permissions` | array of strings | Deno-style permission scopes |
 //! | `edition` | string | language edition (currently informational) |
@@ -61,7 +61,7 @@ pub struct Frontmatter {
     #[serde(skip)]
     pub raw_toml: String,
 
-    /// Required minimum toolchain version, e.g. `">=0.6.0"`. None if absent.
+    /// Required minimum compiler version, e.g. `">=0.6.0"`. None if absent.
     #[serde(default)]
     pub verum: Option<String>,
 

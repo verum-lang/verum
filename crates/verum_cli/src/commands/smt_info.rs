@@ -1,11 +1,11 @@
-//! `verum smt-info` — diagnose the formal verification toolchain.
+//! `verum smt-info` — diagnose the formal verification stack.
 //!
 //! Shows:
 //! - Linked SMT backends and their versions
 //! - Advanced capability matrix (interpolation, synthesis, abduction, etc.)
 //! - Recommendations for enabling additional features
 //!
-//! This command is a pure toolchain diagnostic — it does not touch user code.
+//! This command is a pure verifier diagnostic — it does not touch user code.
 
 use anyhow::Result;
 use colored::Colorize;
