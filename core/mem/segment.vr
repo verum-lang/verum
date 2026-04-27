@@ -702,6 +702,13 @@ public type SegmentError is
     | MmapFailed { code: Int }
     | MunmapFailed { code: Int }
     | OutOfMemory
+    /// The current target OS has no platform lowering for the
+    /// segment-allocator entry point named by `op`. Surfaced as a
+    /// typed error rather than `unreachable()` so a future cross-
+    /// compile to an unsupported target is propagable, not a runtime
+    /// panic from inside the segment hot path. Mirrors
+    /// AllocError::UnsupportedOs in core/mem/allocator.vr.
+    | UnsupportedOs { op: Text }
     ;
 
 implement SegmentError {
@@ -710,6 +717,7 @@ implement SegmentError {
             MmapFailed { code } => f"segment mmap failed: {code}",
             MunmapFailed { code } => f"segment munmap failed: {code}",
             OutOfMemory => "out of memory for segment allocation",
+            UnsupportedOs { op } => f"{op} not supported on this target OS (no platform lowering)",
         }
     }
 }
@@ -861,8 +869,11 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
         return Ok(aligned_addr as &unsafe Byte);
     }
 
-    // Unreachable - all supported platforms covered above
-    unreachable()
+    // No @cfg block matched: cross-compiled to an OS we don't
+    // have a segment lowering for. Surface as a typed error so the
+    // caller can fall back to a different allocator or refuse the
+    // op explicitly (cf. AllocError::UnsupportedOs in allocator.vr).
+    Err(SegmentError.UnsupportedOs { op: "os_alloc_segment" })
 }
 
 /// Free a segment back to OS
@@ -882,7 +893,10 @@ fn os_free_segment(ptr: &unsafe Byte) {
         return;
     }
 
-    unreachable()
+    // Void return — no propagation channel. Descriptive panic so a
+    // future unsupported-target build surfaces with actionable
+    // diagnostics instead of `unreachable: entered unreachable code`.
+    panic("os_free_segment: no platform lowering for this target OS")
 }
 
 /// Purge memory (return physical pages to OS but keep virtual mapping)
@@ -902,7 +916,8 @@ fn purge_memory(ptr: &unsafe Byte, size: Int) {
         return;
     }
 
-    unreachable()
+    // Void return — see os_free_segment above.
+    panic("purge_memory: no platform lowering for this target OS")
 }
 
 /// Get monotonic time in nanoseconds
@@ -920,7 +935,11 @@ fn get_monotonic_time() -> UInt64 {
         return sys.windows.time.query_performance_counter_ns();
     }
 
-    unreachable()
+    // UInt64 return — descriptive panic. A future unsupported target
+    // would have to provide a monotonic-clock lowering before any
+    // segment-allocation telemetry can run; failing loud is the right
+    // call here.
+    panic("get_monotonic_time: no platform lowering for this target OS")
 }
 
 // =============================================================================
