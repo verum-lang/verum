@@ -53,6 +53,18 @@ mount core.intrinsics.atomic.{
     atomic_load_u64,
 };
 
+// Audit-log writers — emit a CapEvent on every successful CBGR state
+// transition.  When `cap_audit_is_enabled()` returns false (default
+// production state), each helper short-circuits with a relaxed-load +
+// branch (~1-2 ns) and the CBGR hot path stays within budget.
+mount super.cap_audit.{
+    record_revoke,
+    record_attenuate,
+    record_ref_incr,
+    record_ref_decr,
+    record_gen_bump,
+};
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -340,6 +352,12 @@ implement AllocationHeader {
             super.epoch.GLOBAL_EPOCH.on_wraparound();
         }
 
+        // Emit audit event after the revoke is fully committed.  The
+        // runtime gate (`cap_audit_is_enabled`) keeps this O(1) when
+        // audit is off; observers never see speculative or torn state.
+        let caps = self.load_capabilities();
+        record_revoke(0, expected_gen, new_gen, caps, 0);
+
         Some(new_gen)
     }
 
@@ -431,6 +449,14 @@ implement AllocationHeader {
             // Notify epoch manager.
             super.epoch.GLOBAL_EPOCH.on_wraparound();
         }
+
+        // Audit-log the generation bump.  Note: `old_gen` is the value
+        // *before* fetch_add, so the post-bump value is `old_gen + 1`
+        // (wraparound resets to GEN_INITIAL — we record what the caller
+        // sees, the new generation after the transition).
+        let new_gen = if old_gen >= GEN_MAX - 1 { GEN_INITIAL } else { old_gen + 1 };
+        let caps = self.load_capabilities();
+        record_gen_bump(0, old_gen, new_gen, caps, 0);
 
         old_gen
     }
@@ -540,7 +566,15 @@ implement AllocationHeader {
         // AND the upper 16 bits (caps) while preserving lower 16 bits (epoch)
         let u32_mask = ((mask as UInt32) << 16) | 0xFFFF;
         let old_packed = atomic_fetch_and_u32(&mut self.epoch_and_caps, u32_mask, ORDERING_ACQ_REL);
-        ((old_packed >> 16) & 0xFFFF) as UInt16
+        let caps_before = ((old_packed >> 16) & 0xFFFF) as UInt16;
+
+        // Audit-log the attenuation.  caps_after = caps_before AND mask
+        // (monotonic narrowing).  Generation is unaffected.
+        let caps_after = caps_before & mask;
+        let gen = self.load_generation();
+        record_attenuate(0, gen, caps_before, caps_after, 0);
+
+        caps_before
     }
 
     /// Check if a specific capability is set.
@@ -570,6 +604,12 @@ implement AllocationHeader {
         if old == 0xFFFF_FFFF {
             panic("AllocationHeader::increment_ref_count overflow — ref_count exceeded UInt32.MAX; allocation has too many concurrent owners (clone leak likely)");
         }
+        // Audit-log the ref_count increment.  Slow path only — fast-
+        // path `&checked` borrows do not touch ref_count and are not
+        // audited.  The runtime gate keeps this O(1) when off.
+        let gen = self.load_generation();
+        let caps = self.load_capabilities();
+        record_ref_incr(0, gen, caps, 0);
         old
     }
 
@@ -592,6 +632,10 @@ implement AllocationHeader {
         if old == 0 {
             panic("AllocationHeader::decrement_ref_count underflow — ref_count was already 0; caller decrement-balance is broken");
         }
+        // Audit-log the ref_count decrement.
+        let gen = self.load_generation();
+        let caps = self.load_capabilities();
+        record_ref_decr(0, gen, caps, 0);
         old - 1
     }
 
