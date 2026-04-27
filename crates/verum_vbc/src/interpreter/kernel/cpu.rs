@@ -7476,17 +7476,6 @@ impl EinsumEquation {
         shape
     }
 
-    /// Get the total number of contracted elements (product of contracted index sizes).
-    #[allow(dead_code)]
-    pub fn contracted_size(&self) -> usize {
-        let mut size = 1;
-        for idx in 0..EINSUM_MAX_INDICES {
-            if self.contracted_indices[idx] {
-                size *= self.index_sizes[idx].max(1);
-            }
-        }
-        size
-    }
 }
 
 /// Einstein summation for F32 tensors.

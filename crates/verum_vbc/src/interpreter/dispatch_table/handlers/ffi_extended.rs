@@ -26,7 +26,6 @@ use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
 const MAX_FFI_ALLOCATION_SIZE: usize = 1 << 30; // 1 GiB
 
 /// Helper: read an element from a heap-allocated array or list by index.
-#[allow(dead_code)]
 fn get_array_element(ptr: *const u8, header: &heap::ObjectHeader, index: usize) -> InterpreterResult<Value> {
     // SECURITY: `index * size_of::<Value>()` can overflow `usize` on huge indices,
     // producing a wrapped offset that would point into arbitrary memory. Use
