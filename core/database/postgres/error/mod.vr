@@ -71,12 +71,18 @@ fn take_first_two(s: &Text) -> Text {
 fn parse_optional_int(s: &Text) -> Maybe<Int> {
     if s.len() == 0 { return None; }
     let bytes = s.as_bytes();
+    // SOUNDNESS: server-controlled error-message position field.
+    // Cap at 19 digits (Int.MAX width) plus per-step pre-multiply
+    // guard. Same recipe as the #71-#75 sweep.
+    if bytes.len() > 19 { return None; }
     let mut acc: Int = 0;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
         if b < (0x30 as Byte) || b > (0x39 as Byte) { return None; }
+        if acc > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
         acc = acc * 10 + ((b as Int) - 0x30);
+        if acc < 0 { return None; }                          // wrap-around guard
         i = i + 1;
     }
     Some(acc)
