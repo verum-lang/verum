@@ -36,3 +36,4 @@ module core.database;
 public module common;
 public module sqlite;
 public module postgres;
+public module mysql;
