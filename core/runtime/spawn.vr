@@ -264,8 +264,15 @@ public type SupervisorSpawnConfig is {
     /// Inline context storage (up to 4 contexts)
     contexts_inline: InlineContextStorage,
 
-    /// Overflow contexts (heap allocated, rare)
-    contexts_overflow: Maybe<&List<(TypeId, &dyn Any)>>,
+    /// Overflow contexts (heap allocated, rare).
+    ///
+    /// Owns the spilled-context list when the inline 4-slot storage
+    /// is full. Pre-fix this was `Maybe<&List<...>>` (a *reference*),
+    /// initialised with `Some(&List.new())` — which borrowed a
+    /// temporary that dropped at end of expression, leaving a dangling
+    /// reference and (separately) an immutable view that couldn't
+    /// accept the subsequent `push`. Owning the list fixes both.
+    contexts_overflow: Maybe<List<(TypeId, &dyn Any)>>,
 
     /// Supervisor attachment
     supervisor: Maybe<&SupervisorHandle>,
@@ -445,16 +452,15 @@ implement SupervisorSpawnConfig {
 
         // Try inline storage first
         if !self.contexts_inline.push(type_id, value as &dyn Any) {
-            // Overflow to heap
+            // Overflow to heap. Lazily initialise the owned List on
+            // first overflow.
             if self.contexts_overflow.is_none() {
-                self.contexts_overflow = Some(&List.new());
+                self.contexts_overflow = Some(List.new());
             }
-            // Populate-guard above just stored Some(...). Reaching
-            // None here would mean the field was concurrently mutated
-            // — surface that with context. (NB: there's a separate
-            // lifetime bug here — `Some(&List.new())` references a
-            // temporary; tracked as task #61.)
-            let overflow = self.contexts_overflow
+            // Populate-guard above just stored Some(...). `as_mut`
+            // gives a `Maybe<&mut List<...>>`; .expect() unwraps the
+            // invariant.
+            let overflow = self.contexts_overflow.as_mut()
                 .expect("with_context: contexts_overflow must be Some after populate-guard");
             overflow.push((type_id, value as &dyn Any));
         }
@@ -594,7 +600,7 @@ implement Clone for SupervisorSpawnConfig {
             circuit_breaker: self.circuit_breaker.clone(),
             retry: self.retry.clone(),
             contexts_inline: self.contexts_inline,
-            contexts_overflow: self.contexts_overflow,
+            contexts_overflow: self.contexts_overflow.clone(),
             supervisor: self.supervisor,
             child_spec: self.child_spec.clone(),
             deadline_ns: self.deadline_ns,
