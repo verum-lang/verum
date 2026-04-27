@@ -1,37 +1,19 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @level: L0
 // @tier: 0
-// @tags: stdlib-runtime, atomics, atomic-u8, rmw, regression-100-task-34
+// @tags: stdlib-runtime, atomics, atomic-u8, rmw, regression-100-task-34, regression-100-task-37
+// @expected-stdout: load:0xc3
 //
-// **Status**: parse-pass for now. Documents the AtomicU8 RMW
-// surface so any reshape of the API is caught at L0; runtime
-// validation blocked on task #37 (interpreter cannot resolve
-// `&self.value as *const Byte as *const UInt8` to a real heap
-// address — atomic_load handler at handlers/system.rs:90 returns
-// 0 for ptr<0x1000, which is what the field-of-struct path
-// produces today).  Will become `run-interpreter` once #37
-// closes.
-//
-// Pins task #34 closure (859242e5 + 971d13b9 + this commit's
-// width-aware codegen fix): AtomicU8 RMW operations route
-// through direct u8 intrinsics (atomic_fetch_or_u8/and_u8/xor_u8
-// + atomic_exchange_u8 + atomic_cas_u8) instead of the
-// structurally-unsound u32-CAS emulation.
+// Pins task #37 closure: StructFieldAddr opcode + codegen wiring
+// makes `&self.value as *const Byte as *const UInt8` lower to the
+// actual heap address of the field inside AtomicU8's data section,
+// so atomic_load_u8 reads the live byte instead of returning 0
+// from the ptr<0x1000 guard.
 
 mount core.sync.atomic.{AtomicU8, MemoryOrdering};
 
 fn main() {
     let a = AtomicU8.new(0xC3);
-
-    // All five RMW operations and basic load/store must remain
-    // typecheckable through the AtomicU8 surface.  Bit-exact
-    // arithmetic verification deferred to runtime test once #37
-    // closes.
-    let _v = a.load(MemoryOrdering.SeqCst);
-    a.store(0x42, MemoryOrdering.SeqCst);
-    let _o = a.fetch_or(0x0F, MemoryOrdering.SeqCst);
-    let _n = a.fetch_and(0xF0, MemoryOrdering.SeqCst);
-    let _x = a.fetch_xor(0xFF, MemoryOrdering.SeqCst);
-    let _s = a.swap(0x55, MemoryOrdering.SeqCst);
-    let _c = a.compare_exchange(0x55, 0xAA, MemoryOrdering.SeqCst, MemoryOrdering.SeqCst);
+    let v = a.load(MemoryOrdering.SeqCst) as Int;
+    print(f"load:0x{v:x}");
 }

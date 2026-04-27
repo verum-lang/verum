@@ -17238,6 +17238,43 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        Some(FfiSubOpcode::StructFieldAddr) => {
+            // Get raw heap address of a struct field — task #37 closure.
+            //
+            // Format: dst:reg, obj:reg, offset_lo:u8, offset_hi:u8
+            // Result: dst = obj_ptr + OBJECT_HEADER_SIZE + field_offset
+            //
+            // Mirror of the Tier-0 interpreter handler (handlers/ffi_extended.rs).
+            // GEP at i8 element type so the offset is a simple byte add.
+            if operands.len() < 4 {
+                return Err(LlvmLoweringError::internal("StructFieldAddr: insufficient operands"));
+            }
+            let dst_reg = operands[0] as u16;
+            let obj_ptr = as_ptr(ctx, ctx.get_register(operands[1] as u16)?, "sf_obj")?;
+            let offset_lo = operands[2] as u64;
+            let offset_hi = operands[3] as u64;
+            let field_offset = (offset_hi << 8) | offset_lo;
+            // OBJECT_HEADER_SIZE = 24 (matches verum_vbc::interpreter::heap::OBJECT_HEADER_SIZE).
+            // We hardcode here rather than introduce a Rust-side cross-crate
+            // constant import because the layout is part of the ABI contract.
+            let total_offset = 24u64 + field_offset;
+            let i8_ty = ctx.llvm_context().i8_type();
+            let i64_ty = ctx.types().i64_type();
+            let offset_const = i64_ty.const_int(total_offset, false);
+            // SAFETY: Verum codegen only emits StructFieldAddr for receivers
+            // proven to live in the heap (registered struct types) and for
+            // field_offsets pre-validated against the struct's data section
+            // size by compute_field_offset; the GEP therefore stays within
+            // the live allocation.
+            let field_ptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_ty, obj_ptr, &[offset_const], "sf_field_ptr")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
+            ctx.set_register(dst_reg, field_ptr.into());
+            Ok(())
+        }
+
         Some(FfiSubOpcode::CreateCallback) | Some(FfiSubOpcode::FreeCallback) => {
             // Callback trampolines: pass through function pointer as-is for now
             if operands.is_empty() {
