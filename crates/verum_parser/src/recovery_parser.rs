@@ -965,6 +965,7 @@ fn trivia_kind_to_syntax_kind(kind: LexerTriviaKind) -> SyntaxKind {
         LexerTriviaKind::DocComment => SyntaxKind::DOC_COMMENT,
         LexerTriviaKind::InnerDocComment => SyntaxKind::DOC_COMMENT,
         LexerTriviaKind::Shebang => SyntaxKind::SHEBANG,
+        LexerTriviaKind::ByteOrderMark => SyntaxKind::BYTE_ORDER_MARK,
     }
 }
 

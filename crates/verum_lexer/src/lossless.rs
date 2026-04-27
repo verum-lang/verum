@@ -9,24 +9,57 @@
 //! leading or trailing trivia attached to the nearest token. This supports
 //! incremental parsing, IDE refactoring, and exact source round-tripping.
 
+use crate::lexer::UTF8_BOM;
 use crate::token::{Token, TokenKind};
 use verum_ast::span::{FileId, Span};
 use verum_common::List;
 
-/// If `source` begins with a POSIX shebang (`#!...\n`), build the corresponding
-/// shebang [`TriviaItem`]. Returns `None` otherwise. The trivia text includes
-/// `#!`, the body of the line, and the trailing newline (if any).
-pub(crate) fn detect_shebang(source: &str, file_id: FileId) -> Option<TriviaItem> {
-    let bytes = source.as_bytes();
-    if bytes.len() < 2 || bytes[0] != b'#' || bytes[1] != b'!' {
+/// If `source` begins with a UTF-8 BOM (`EF BB BF`), build the corresponding
+/// trivia item. Returns `None` otherwise. The trivia text is exactly the
+/// 3-byte BOM sequence so lossless source reconstruction is byte-perfect.
+pub(crate) fn detect_utf8_bom(source: &str, file_id: FileId) -> Option<TriviaItem> {
+    if !source.as_bytes().starts_with(UTF8_BOM) {
         return None;
     }
-    let end = bytes.iter().position(|&b| b == b'\n').map_or(bytes.len(), |i| i + 1);
+    Some(TriviaItem {
+        kind: TriviaKind::ByteOrderMark,
+        text: source[..UTF8_BOM.len()].to_string(),
+        span: Span::new(0, UTF8_BOM.len() as u32, file_id),
+    })
+}
+
+/// If `source` begins with a POSIX shebang (`#!...\n`) at byte `start`, build
+/// the corresponding shebang [`TriviaItem`]. Returns `None` otherwise. The
+/// trivia text includes `#!`, the body of the line, and the trailing newline
+/// (if any). Spans are emitted relative to the *original* source — the
+/// caller passes in `start` (typically 0 or `UTF8_BOM.len()` when a BOM has
+/// already been stripped) so spans round-trip cleanly.
+pub(crate) fn detect_shebang_at(
+    source: &str,
+    start: usize,
+    file_id: FileId,
+) -> Option<TriviaItem> {
+    let bytes = source.as_bytes();
+    if start + 2 > bytes.len() || bytes[start] != b'#' || bytes[start + 1] != b'!' {
+        return None;
+    }
+    let nl = bytes[start..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(bytes.len() - start, |i| i + 1);
+    let end = start + nl;
     Some(TriviaItem {
         kind: TriviaKind::Shebang,
-        text: source[..end].to_string(),
-        span: Span::new(0, end as u32, file_id),
+        text: source[start..end].to_string(),
+        span: Span::new(start as u32, end as u32, file_id),
     })
+}
+
+/// Backward-compatible wrapper: detect a shebang at byte 0. Equivalent to
+/// `detect_shebang_at(source, 0, file_id)`. Kept for callers that don't
+/// expect a BOM-prefixed source.
+pub(crate) fn detect_shebang(source: &str, file_id: FileId) -> Option<TriviaItem> {
+    detect_shebang_at(source, 0, file_id)
 }
 
 /// Trivia attached to a token.
@@ -89,9 +122,15 @@ pub enum TriviaKind {
     DocComment,
     /// Inner doc comment: `//! ...`
     InnerDocComment,
-    // Shebang line at file start (`#!...`). Always exactly one, at byte offset 0.
-    // Used by script-mode dispatch in `verum run`.
+    // Shebang line at file start (`#!...`). Always exactly one, at byte
+    // offset 0 (or 3 if a UTF-8 BOM precedes it). Used by script-mode
+    // dispatch in `verum run`.
     Shebang,
+    /// UTF-8 byte-order mark (`EF BB BF`) at file start. Always exactly
+    /// one, always at byte offset 0. Cross-platform editors frequently
+    /// prepend it; preserving it as trivia keeps lossless source
+    /// reconstruction byte-perfect.
+    ByteOrderMark,
 }
 
 /// A token with attached trivia for lossless parsing.
@@ -158,21 +197,40 @@ pub struct LosslessLexer<'source> {
     file_id: FileId,
     pos: usize,
     eof_reached: bool,
-    /// Pending shebang trivia, attached to the leading trivia of the first
-    /// real token. `None` once consumed (or if no shebang was present).
+    /// Pending file-prefix trivia (BOM, then shebang), attached to the
+    /// leading trivia of the first real token. Each slot is consumed once
+    /// or never if absent. Order matters for lossless reconstruction:
+    /// BOM → shebang → first real trivia.
+    pending_bom: Option<TriviaItem>,
     pending_shebang: Option<TriviaItem>,
 }
 
 impl<'source> LosslessLexer<'source> {
     /// Create a new lossless lexer.
+    ///
+    /// Two file-prefix layers are recognised before scan_token starts:
+    ///
+    /// 1. **UTF-8 BOM** (`EF BB BF`) — emitted as `TriviaKind::ByteOrderMark`,
+    ///    span `[0..3)`.
+    /// 2. **POSIX shebang** (`#!...\n`) at the first non-BOM byte — emitted
+    ///    as `TriviaKind::Shebang`, span `[start..end)` where `start` is
+    ///    `0` or `3` (after BOM).
+    ///
+    /// Both contribute to the leading-trivia slot of the first real token,
+    /// preserving byte-perfect round-trip behaviour for lossless source
+    /// reconstruction (formatters, IDE rename, incremental reparse).
     pub fn new(source: &'source str, file_id: FileId) -> Self {
-        let pending_shebang = detect_shebang(source, file_id);
-        let pos = pending_shebang.as_ref().map_or(0, |t| t.text.len());
+        let pending_bom = detect_utf8_bom(source, file_id);
+        let bom_len = pending_bom.as_ref().map_or(0, |t| t.text.len());
+        let pending_shebang = detect_shebang_at(source, bom_len, file_id);
+        let shebang_len = pending_shebang.as_ref().map_or(0, |t| t.text.len());
+        let pos = bom_len + shebang_len;
         Self {
             source,
             file_id,
             pos,
             eof_reached: false,
+            pending_bom,
             pending_shebang,
         }
     }
@@ -359,9 +417,14 @@ impl<'source> LosslessLexer<'source> {
     /// Tokenize the entire input into rich tokens.
     pub fn tokenize(mut self) -> List<RichToken> {
         let mut tokens = List::new();
-        // Seed pending trivia with a stripped shebang, if any. It will attach
-        // to the leading trivia of the first emitted token.
+        // Seed pending trivia with the file-prefix layers (BOM, then shebang),
+        // in that exact order. They attach to the leading trivia of the first
+        // emitted token, preserving byte-perfect round-trip behaviour for
+        // lossless source reconstruction.
         let mut pending_trivia = Trivia::new();
+        if let Some(bom) = self.pending_bom.take() {
+            pending_trivia.push(bom);
+        }
         if let Some(shebang) = self.pending_shebang.take() {
             pending_trivia.push(shebang);
         }

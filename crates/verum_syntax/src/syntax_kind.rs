@@ -811,11 +811,16 @@ pub enum SyntaxKind {
     /// FFI block
     FFI_BLOCK = 603,
 
-    // === Script trivia (605) ===
+    // === Script trivia (605-606) ===
     /// Shebang line `#!...\n` at the start of a script file. Emitted at most
-    /// once per source file (always at byte offset 0). Used by script-mode
-    /// dispatch to recognize executable `.vr` scripts.
+    /// once per source file (always at byte offset 0, or 3 if a BOM
+    /// precedes it). Used by script-mode dispatch to recognize executable
+    /// `.vr` scripts.
     SHEBANG = 605,
+    /// UTF-8 byte-order mark (`EF BB BF`) at file start. Always exactly
+    /// one, always at byte offset 0. Preserved in the syntax tree so
+    /// formatters / lossless reconstruction round-trip byte-perfect.
+    BYTE_ORDER_MARK = 606,
 
     // Ensure we have a known maximum
     #[doc(hidden)]
