@@ -37,22 +37,76 @@ public type Base32Error is
     | TrailingBits;
 
 // =============================================================================
-// Alphabet
+// Alphabet — V8 (#252) — RFC 4648 §6 (Standard) and §7 (Extended Hex).
 // =============================================================================
 
-/// Character at index 0..=31 of the Base32 alphabet.
-fn alphabet_char(i: Int) -> Byte {
-    if i < 26 { ('A' as Byte) + (i as Byte) }
-    else      { ('2' as Byte) + ((i - 26) as Byte) }
+/// Which RFC 4648 alphabet to use. The Standard alphabet (§6) is
+/// the one used by TOTP / HOTP / onion v3 addresses; the
+/// ExtendedHex alphabet (§7) is the one used by NSEC3 hashed-owner
+/// names (DNSSEC) and any other protocol that wants the encoding
+/// to preserve sort order with the input bytes.
+@derive(Clone)
+public type Base32Alphabet is
+      Standard      // RFC 4648 §6: A-Z, 2-7
+    | ExtendedHex;  // RFC 4648 §7: 0-9, A-V (sort-order-preserving)
+
+/// Character at index 0..=31 of the chosen Base32 alphabet.
+fn alphabet_char_for(alpha: Base32Alphabet, i: Int) -> Byte {
+    match alpha {
+        // RFC 4648 §6: A..Z then 2..7.
+        Standard => {
+            if i < 26 { ('A' as Byte) + (i as Byte) }
+            else      { ('2' as Byte) + ((i - 26) as Byte) }
+        },
+        // RFC 4648 §7: 0..9 then A..V.
+        ExtendedHex => {
+            if i < 10 { ('0' as Byte) + (i as Byte) }
+            else      { ('A' as Byte) + ((i - 10) as Byte) }
+        },
+    }
 }
 
-/// Decode a single character to its 0..=31 code point. Returns -1
-/// for non-alphabet characters (case-insensitive).
+/// Char-at-index for the Standard alphabet — preserved for the
+/// existing internal call sites.
+fn alphabet_char(i: Int) -> Byte {
+    alphabet_char_for(Standard, i)
+}
+
+/// Decode a single character to its 0..=31 code point under the
+/// chosen alphabet. Returns -1 for non-alphabet characters
+/// (case-insensitive).
+fn decode_char_for(alpha: Base32Alphabet, b: Byte) -> Int {
+    match alpha {
+        Standard => {
+            if b >= ('A' as Byte) && b <= ('Z' as Byte) {
+                return (b - ('A' as Byte)) as Int;
+            }
+            if b >= ('a' as Byte) && b <= ('z' as Byte) {
+                return (b - ('a' as Byte)) as Int;
+            }
+            if b >= ('2' as Byte) && b <= ('7' as Byte) {
+                return 26 + (b - ('2' as Byte)) as Int;
+            }
+            -1
+        },
+        ExtendedHex => {
+            // 0..9 → 0..9, A..V → 10..31 (case-insensitive).
+            if b >= ('0' as Byte) && b <= ('9' as Byte) {
+                return (b - ('0' as Byte)) as Int;
+            }
+            if b >= ('A' as Byte) && b <= ('V' as Byte) {
+                return 10 + (b - ('A' as Byte)) as Int;
+            }
+            if b >= ('a' as Byte) && b <= ('v' as Byte) {
+                return 10 + (b - ('a' as Byte)) as Int;
+            }
+            -1
+        },
+    }
+}
+
 fn decode_char(b: Byte) -> Int {
-    if b >= ('A' as Byte) && b <= ('Z' as Byte) { return (b - ('A' as Byte)) as Int; }
-    if b >= ('a' as Byte) && b <= ('z' as Byte) { return (b - ('a' as Byte)) as Int; }
-    if b >= ('2' as Byte) && b <= ('7' as Byte) { return 26 + (b - ('2' as Byte)) as Int; }
-    -1
+    decode_char_for(Standard, b)
 }
 
 // =============================================================================
@@ -223,4 +277,154 @@ fn tail_check(out: List<Byte>, group: [Int; 8], pad: Int) -> Result<List<Byte>, 
         _ => false,
     };
     if bad { Err(Base32Error.TrailingBits) } else { Ok(out) }
+}
+
+// =============================================================================
+// V8 (#252) — Extended Hex alphabet (RFC 4648 §7).
+//
+// The §7 alphabet (0-9, A-V) preserves lex-sort order with the
+// underlying bytes — encoded strings sort identically to their
+// pre-encode bytes. Used by:
+//
+//   • NSEC3 hashed-owner names (RFC 5155): the hash output is
+//     base32hex-encoded so authoritative resolvers can binary-search
+//     the sorted hash chain.
+//   • Protocols that route on the encoded form and want bytewise
+//     and encoded sort orders to agree.
+//
+// The bit-shuffling layout is identical to standard Base32; only
+// the character mapping changes — the decoder accepts both alphabets
+// when called via the explicit `_hex` entry points.
+// =============================================================================
+
+/// Encode bytes into a Base32hex (Extended Hex) string per RFC 4648 §7.
+/// Output is uppercase, `=`-padded to a multiple of 8 characters.
+public fn encode_hex(src: &[Byte]) -> List<Byte> {
+    encode_with_alpha(src, ExtendedHex)
+}
+
+/// Decode a `=`-padded Base32hex string per RFC 4648 §7.
+public fn decode_hex(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
+    if src.len() % 8 != 0 { return Err(Base32Error.InvalidLength(src.len())); }
+    decode_core_with_alpha(src, ExtendedHex)
+}
+
+/// Decode a Base32hex string without requiring `=` padding —
+/// the §7 analogue of [`decode_no_pad`].
+public fn decode_hex_no_pad(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
+    let mut effective_len: Int = 0;
+    let mut i: Int = 0;
+    while i < src.len() && src[i] != ('=' as Byte) {
+        if !is_ws(src[i]) { effective_len = effective_len + 1; }
+        i = i + 1;
+    }
+    let tail = effective_len % 8;
+    if tail == 1 || tail == 3 || tail == 6 {
+        return Err(Base32Error.InvalidLength(effective_len));
+    }
+    let mut padded: List<Byte> = [];
+    let mut j: Int = 0;
+    while j < src.len() {
+        if !is_ws(src[j]) && src[j] != ('=' as Byte) { padded.push(src[j]); }
+        j = j + 1;
+    }
+    while padded.len() % 8 != 0 { padded.push('=' as Byte); }
+    decode_core_with_alpha(padded.as_slice(), ExtendedHex)
+}
+
+fn encode_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let n = src.len();
+    if n == 0 { return out; }
+
+    let mut i: Int = 0;
+    while i + 5 <= n {
+        let b0 = src[i] as UInt32;
+        let b1 = src[i + 1] as UInt32;
+        let b2 = src[i + 2] as UInt32;
+        let b3 = src[i + 3] as UInt32;
+        let b4 = src[i + 4] as UInt32;
+        out.push(alphabet_char_for(alpha, ((b0 >> 3) & 0x1F_u32) as Int));
+        out.push(alphabet_char_for(alpha, (((b0 << 2) | (b1 >> 6)) & 0x1F_u32) as Int));
+        out.push(alphabet_char_for(alpha, ((b1 >> 1) & 0x1F_u32) as Int));
+        out.push(alphabet_char_for(alpha, (((b1 << 4) | (b2 >> 4)) & 0x1F_u32) as Int));
+        out.push(alphabet_char_for(alpha, (((b2 << 1) | (b3 >> 7)) & 0x1F_u32) as Int));
+        out.push(alphabet_char_for(alpha, ((b3 >> 2) & 0x1F_u32) as Int));
+        out.push(alphabet_char_for(alpha, (((b3 << 3) | (b4 >> 5)) & 0x1F_u32) as Int));
+        out.push(alphabet_char_for(alpha, (b4 & 0x1F_u32) as Int));
+        i = i + 5;
+    }
+
+    let rem = n - i;
+    if rem == 0 { return out; }
+    let b0 = src[i] as UInt32;
+    out.push(alphabet_char_for(alpha, ((b0 >> 3) & 0x1F_u32) as Int));
+    if rem == 1 {
+        out.push(alphabet_char_for(alpha, ((b0 << 2) & 0x1F_u32) as Int));
+        out.push('=' as Byte); out.push('=' as Byte);
+        out.push('=' as Byte); out.push('=' as Byte);
+        out.push('=' as Byte); out.push('=' as Byte);
+        return out;
+    }
+    let b1 = src[i + 1] as UInt32;
+    out.push(alphabet_char_for(alpha, (((b0 << 2) | (b1 >> 6)) & 0x1F_u32) as Int));
+    out.push(alphabet_char_for(alpha, ((b1 >> 1) & 0x1F_u32) as Int));
+    if rem == 2 {
+        out.push(alphabet_char_for(alpha, ((b1 << 4) & 0x1F_u32) as Int));
+        out.push('=' as Byte); out.push('=' as Byte);
+        out.push('=' as Byte); out.push('=' as Byte);
+        return out;
+    }
+    let b2 = src[i + 2] as UInt32;
+    out.push(alphabet_char_for(alpha, (((b1 << 4) | (b2 >> 4)) & 0x1F_u32) as Int));
+    if rem == 3 {
+        out.push(alphabet_char_for(alpha, ((b2 << 1) & 0x1F_u32) as Int));
+        out.push('=' as Byte); out.push('=' as Byte); out.push('=' as Byte);
+        return out;
+    }
+    let b3 = src[i + 3] as UInt32;
+    out.push(alphabet_char_for(alpha, (((b2 << 1) | (b3 >> 7)) & 0x1F_u32) as Int));
+    out.push(alphabet_char_for(alpha, ((b3 >> 2) & 0x1F_u32) as Int));
+    out.push(alphabet_char_for(alpha, ((b3 << 3) & 0x1F_u32) as Int));
+    out.push('=' as Byte);
+    out
+}
+
+fn decode_core_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> Result<List<Byte>, Base32Error> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() {
+        let mut group: [Int; 8] = [0; 8];
+        let mut pad: Int = 0;
+        let mut k: Int = 0;
+        while k < 8 {
+            let c = src[i + k];
+            if c == ('=' as Byte) {
+                group[k] = 0;
+                pad = pad + 1;
+            } else {
+                let v = decode_char_for(alpha, c);
+                if v < 0 { return Err(Base32Error.InvalidCharacter(c)); }
+                if pad > 0 { return Err(Base32Error.InvalidCharacter(c)); }
+                group[k] = v;
+            }
+            k = k + 1;
+        }
+        let v0 = ((group[0] << 3) | (group[1] >> 2)) & 0xFF;
+        out.push(v0 as Byte);
+        if pad >= 6 { return tail_check(out, group, pad); }
+        let v1 = (((group[1] & 0x3) << 6) | (group[2] << 1) | (group[3] >> 4)) & 0xFF;
+        out.push(v1 as Byte);
+        if pad >= 4 { return tail_check(out, group, pad); }
+        let v2 = (((group[3] & 0xF) << 4) | (group[4] >> 1)) & 0xFF;
+        out.push(v2 as Byte);
+        if pad >= 3 { return tail_check(out, group, pad); }
+        let v3 = (((group[4] & 0x1) << 7) | (group[5] << 2) | (group[6] >> 3)) & 0xFF;
+        out.push(v3 as Byte);
+        if pad >= 1 { return tail_check(out, group, pad); }
+        let v4 = (((group[6] & 0x7) << 5) | group[7]) & 0xFF;
+        out.push(v4 as Byte);
+        i = i + 8;
+    }
+    Ok(out)
 }

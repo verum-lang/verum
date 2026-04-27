@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, base32, base32hex, rfc-4648
+// @timeout: 10000
+// @expect: pass
+//
+// V8 (#252) — RFC 4648 §10 known-answer vectors for the
+// Extended Hex (base32hex) alphabet.
+//
+// Per RFC 4648 §10:
+//
+//     BASE32HEX("")        = ""
+//     BASE32HEX("f")       = "CO======"
+//     BASE32HEX("fo")      = "CPNG===="
+//     BASE32HEX("foo")     = "CPNMU==="
+//     BASE32HEX("foob")    = "CPNMUOG="
+//     BASE32HEX("fooba")   = "CPNMUOJ1"
+//     BASE32HEX("foobar")  = "CPNMUOJ1E8======"
+//
+// Plus round-trips and the lex-sort property that motivates
+// base32hex: encoded forms preserve the byte-order ordering.
+
+mount core.encoding.base32.{encode_hex, decode_hex, encode, decode};
+
+fn bytes_of(s: Text) -> List<Byte> {
+    s.as_bytes().to_owned()
+}
+
+fn list_eq(a: List<Byte>, b: List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn exercise_rfc4648_section_10_hex_vectors() {
+    // BASE32HEX("") = ""
+    let empty: List<Byte> = [];
+    let enc_empty = encode_hex(empty.as_slice());
+    assert(enc_empty.len() == 0);
+
+    // BASE32HEX("f") = "CO======"
+    let f = [0x66_u8];
+    let enc_f = encode_hex(f.as_slice());
+    let want_f = bytes_of(Text.from("CO======"));
+    assert(list_eq(enc_f, want_f));
+
+    // BASE32HEX("fo") = "CPNG===="
+    let fo = [0x66_u8, 0x6f_u8];
+    let enc_fo = encode_hex(fo.as_slice());
+    let want_fo = bytes_of(Text.from("CPNG===="));
+    assert(list_eq(enc_fo, want_fo));
+
+    // BASE32HEX("foo") = "CPNMU==="
+    let foo = [0x66_u8, 0x6f_u8, 0x6f_u8];
+    let enc_foo = encode_hex(foo.as_slice());
+    let want_foo = bytes_of(Text.from("CPNMU==="));
+    assert(list_eq(enc_foo, want_foo));
+
+    // BASE32HEX("foob") = "CPNMUOG="
+    let foob = [0x66_u8, 0x6f_u8, 0x6f_u8, 0x62_u8];
+    let enc_foob = encode_hex(foob.as_slice());
+    let want_foob = bytes_of(Text.from("CPNMUOG="));
+    assert(list_eq(enc_foob, want_foob));
+
+    // BASE32HEX("fooba") = "CPNMUOJ1"
+    let fooba = [0x66_u8, 0x6f_u8, 0x6f_u8, 0x62_u8, 0x61_u8];
+    let enc_fooba = encode_hex(fooba.as_slice());
+    let want_fooba = bytes_of(Text.from("CPNMUOJ1"));
+    assert(list_eq(enc_fooba, want_fooba));
+
+    // BASE32HEX("foobar") = "CPNMUOJ1E8======"
+    let foobar = [0x66_u8, 0x6f_u8, 0x6f_u8, 0x62_u8, 0x61_u8, 0x72_u8];
+    let enc_foobar = encode_hex(foobar.as_slice());
+    let want_foobar = bytes_of(Text.from("CPNMUOJ1E8======"));
+    assert(list_eq(enc_foobar, want_foobar));
+}
+
+fn exercise_decode_hex_round_trip() {
+    // Encode then decode must recover the original bytes for every
+    // RFC test vector + a couple of stress cases.
+    let inputs: List<List<Byte>> = [
+        bytes_of(Text.from("")),
+        bytes_of(Text.from("f")),
+        bytes_of(Text.from("fo")),
+        bytes_of(Text.from("foo")),
+        bytes_of(Text.from("foob")),
+        bytes_of(Text.from("fooba")),
+        bytes_of(Text.from("foobar")),
+        bytes_of(Text.from("Hello, RFC 4648!")),
+    ];
+    let mut i: Int = 0;
+    while i < inputs.len() {
+        let src = inputs[i].as_slice();
+        let enc = encode_hex(src);
+        let dec_result = decode_hex(enc.as_slice());
+        match dec_result {
+            Ok(decoded) => assert(list_eq(decoded, inputs[i])),
+            Err(_)      => panic("base32hex decode failed on round-trip"),
+        }
+        i = i + 1;
+    }
+}
+
+fn exercise_alphabets_are_independent() {
+    // Same input → different encoded form per alphabet, but each
+    // round-trips against its own decoder.
+    let src: List<Byte> = [0x66_u8, 0x6f_u8, 0x6f_u8, 0x62_u8, 0x61_u8, 0x72_u8];
+
+    let std_enc = encode(src.as_slice());
+    let hex_enc = encode_hex(src.as_slice());
+    // Encoded forms differ (CO* prefix in hex vs MZ* prefix in std).
+    assert(!list_eq(std_enc.clone(), hex_enc.clone()));
+
+    // Each decoder accepts only its own alphabet (cross-decoding may
+    // yield invalid-character or an unrelated decoded byte sequence).
+    match decode(std_enc.as_slice()) {
+        Ok(out) => assert(list_eq(out, src.clone())),
+        Err(_)  => panic("std decode failed"),
+    }
+    match decode_hex(hex_enc.as_slice()) {
+        Ok(out) => assert(list_eq(out, src)),
+        Err(_)  => panic("hex decode failed"),
+    }
+}
+
+fn main() {
+    exercise_rfc4648_section_10_hex_vectors();
+    exercise_decode_hex_round_trip();
+    exercise_alphabets_are_independent();
+}
