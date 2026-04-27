@@ -54,13 +54,50 @@ fn canonical_naturality_square_accepted_for_identity_functor() {
 }
 
 #[test]
-fn naturality_with_non_identity_functor_conservatively_accepted() {
-    // V1 is conservative for non-identity M (per the function docs):
-    // (EpsilonOf(M_α), AlphaOf(EpsilonOf(α))) where M_α ≠ α
-    // structurally — the τ-witness is V2 work; V1 accepts.
+fn v3_non_identity_distinct_free_vars_rejected() {
+    // V3 gate (b): Diakrisis Axi-2 M is variable-preserving — it
+    // cannot rename free variables. (EpsilonOf(M_α), AlphaOf(EpsilonOf(α)))
+    // with structurally different inner vars has free_vars(M_α) =
+    // {M_α} ≠ {α} = free_vars(α), so no τ-witness can exist.
+    //
+    // Pre-V3 this test was named *conservatively_accepted* because
+    // V1 / V2 had no free-vars check; V3-incremental rejects it
+    // correctly with a free-var-mismatch diagnostic.
     let lhs = epsilon_of(var("M_α"));
     let rhs = alpha_of(epsilon_of(var("α")));
-    assert!(check_eps_mu_coherence(&lhs, &rhs, "non_identity_M").is_ok());
+    let err = check_eps_mu_coherence(&lhs, &rhs, "non_identity_M_distinct_vars")
+        .unwrap_err();
+    match err {
+        KernelError::EpsMuNaturalityFailed { context } => {
+            assert!(
+                context.as_str().contains("free-var mismatch"),
+                "expected free-var-mismatch diagnostic, got {:?}",
+                context
+            );
+        }
+        other => panic!("expected EpsMuNaturalityFailed, got {:?}", other),
+    }
+}
+
+#[test]
+fn v3_non_identity_matching_free_vars_accepted() {
+    // V3-incremental still accepts non-identity M whose τ-witness
+    // necessary conditions all pass. Here M acts on α via a wrapping
+    // metaisation (modelled by the same Var name on both sides)
+    // — free vars match, depths match, no β-redex distinction.
+    //
+    // The full sufficient witness construction (σ_α / π_α) is the
+    // V3-final step still tracked under #181; this test pins
+    // V3-incremental's accept path.
+    let lhs = epsilon_of(var("α"));
+    let rhs = alpha_of(epsilon_of(var("α")));
+    // M_α structurally equals α here (identity-functor sub-case),
+    // accepted on the structural-equality fast path before the V3
+    // gates fire.
+    assert!(
+        check_eps_mu_coherence(&lhs, &rhs, "v3_identity_alpha").is_ok(),
+        "structurally equal inner-α should hit identity sub-case"
+    );
 }
 
 #[test]
@@ -122,15 +159,37 @@ fn modal_box(t: CoreTerm) -> CoreTerm {
 }
 
 #[test]
-fn v2_non_identity_with_matching_depths_still_accepted() {
-    // M_α = Box(α') with rank 1; α = Box(α) with rank 1.
-    // Both have md^ω = 1 ⇒ depth precondition holds ⇒ V2 accepts
-    // (V3 / #181 will sharpen with the actual τ-witness check).
+fn v3_modal_box_distinct_inner_var_rejected() {
+    // M_α = Box(α_prime), α = Box(α). Both have md^ω = 1 (depth
+    // gate passes) but free_vars are {α_prime} ≠ {α} (V3 gate (b)
+    // rejects). Pre-V3 (V1 / V2) this was the canonical
+    // "depth-matched non-identity-M" *accept* fixture; V3-incremental
+    // tightens by also requiring free-var preservation.
     let lhs = epsilon_of(modal_box(var("α_prime")));
     let rhs = alpha_of(epsilon_of(modal_box(var("α"))));
+    let err = check_eps_mu_coherence(&lhs, &rhs, "v3_modal_box_var_mismatch")
+        .unwrap_err();
+    match err {
+        KernelError::EpsMuNaturalityFailed { context } => {
+            assert!(
+                context.as_str().contains("free-var mismatch"),
+                "expected free-var-mismatch diagnostic, got {:?}",
+                context
+            );
+        }
+        other => panic!("expected EpsMuNaturalityFailed, got {:?}", other),
+    }
+}
+
+#[test]
+fn v3_modal_box_same_inner_var_accepted() {
+    // M_α = Box(α), α = Box(α). Free vars match {α}, depth matches
+    // (md^ω = 1). Structurally equal ⇒ identity sub-case fast path.
+    let lhs = epsilon_of(modal_box(var("α")));
+    let rhs = alpha_of(epsilon_of(modal_box(var("α"))));
     assert!(
-        check_eps_mu_coherence(&lhs, &rhs, "v2_matching_depth").is_ok(),
-        "depth-matched non-identity M must still pass (V2 conservative-accept)"
+        check_eps_mu_coherence(&lhs, &rhs, "v3_modal_box_var_match").is_ok(),
+        "matching free vars + depths should pass V3-incremental"
     );
 }
 
@@ -181,19 +240,40 @@ fn v2_identity_case_unaffected_by_depth_check() {
 }
 
 #[test]
-fn v2_depth_check_uses_omega_aware_ranks() {
-    // Both sides reach into ω-rank territory (Box(Box(...)) ranks
-    // are finite, but the depth comparison is total over the
-    // OrdinalDepth lattice — pure-finite k1 == pure-finite k2
-    // iff k1 == k2.
-    let m_alpha = modal_box(modal_box(modal_box(var("M_α"))));
+fn v3_depth_check_uses_omega_aware_ranks_with_var_preservation() {
+    // Both sides have rank 3 (Box × 3) and matching inner var names
+    // — V3-incremental accepts because depth + free-vars + β-eq
+    // all hold simultaneously. Pre-V3 the test only required depth
+    // match; V3 adds the free-vars half of the necessary-condition
+    // tuple.
+    let m_alpha = modal_box(modal_box(modal_box(var("α"))));
     let alpha   = modal_box(modal_box(modal_box(var("α"))));
-    // Same rank (3), different inner Var names ⇒ structurally
-    // unequal but depth-matched ⇒ V2 accepts.
     let lhs = epsilon_of(m_alpha);
     let rhs = alpha_of(epsilon_of(alpha));
     assert!(
-        check_eps_mu_coherence(&lhs, &rhs, "v2_omega_rank_match").is_ok(),
-        "same finite rank should pass V2"
+        check_eps_mu_coherence(&lhs, &rhs, "v3_omega_rank_match").is_ok(),
+        "same finite rank + matching free vars should pass V3-incremental"
     );
+}
+
+#[test]
+fn v3_depth_match_but_distinct_vars_rejected() {
+    // Same rank (3) but distinct inner Var names: depth gate (a)
+    // passes, free-vars gate (b) fails ⇒ reject under V3-incremental.
+    let m_alpha = modal_box(modal_box(modal_box(var("M_α"))));
+    let alpha   = modal_box(modal_box(modal_box(var("α"))));
+    let lhs = epsilon_of(m_alpha);
+    let rhs = alpha_of(epsilon_of(alpha));
+    let err = check_eps_mu_coherence(&lhs, &rhs, "v3_depth_match_var_mismatch")
+        .unwrap_err();
+    match err {
+        KernelError::EpsMuNaturalityFailed { context } => {
+            assert!(
+                context.as_str().contains("free-var mismatch"),
+                "expected free-var-mismatch diagnostic, got {:?}",
+                context
+            );
+        }
+        other => panic!("expected EpsMuNaturalityFailed, got {:?}", other),
+    }
 }
