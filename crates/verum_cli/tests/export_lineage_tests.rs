@@ -1,5 +1,5 @@
 //! End-to-end smoke tests for `verum export --to <lean|coq|dedukti|metamath>`
-//! focusing on the VVA §8.5 framework-lineage → target-library
+//! focusing on the framework-lineage → target-library
 //! mapping (lineage imports emitted in the header, unmapped lineages
 //! annotated as comments, unknown lineages never breaking the export).
 
