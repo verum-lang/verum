@@ -366,7 +366,7 @@ implement AsyncRuntime {
         // Walk ready queue — these tasks have been woken and are
         // queued for the next poll cycle (Running state).
         {
-            let ready = self.ready_queue.lock().unwrap();
+            let ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
             let mut i: Int = 0;
             while i < ready.len() {
                 let entry = &ready[i];
@@ -389,7 +389,7 @@ implement AsyncRuntime {
         // Walk pending queue — these tasks are awaiting external
         // wakeup (Parked state) or have not yet been polled (Pending).
         {
-            let pending = self.task_queue.lock().unwrap();
+            let pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
             let mut i: Int = 0;
             while i < pending.len() {
                 let entry = &pending[i];
@@ -503,7 +503,7 @@ implement AsyncRuntime {
 
         // Add to task queue
         {
-            let mut queue = self.task_queue.lock().unwrap();
+            let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
             queue.push(entry);
         }
 
@@ -638,7 +638,7 @@ implement AsyncRuntime {
 
         // Collect ready tasks (explicitly woken) -- these have priority
         {
-            let mut ready = self.ready_queue.lock().unwrap();
+            let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
             while !ready.is_empty() && tasks_to_poll.len() < budget {
                 if let Some(task) = ready.pop() {
                     tasks_to_poll.push(task);
@@ -648,7 +648,7 @@ implement AsyncRuntime {
 
         // Fill remaining budget with pending tasks (newly spawned, need initial poll)
         {
-            let mut pending = self.task_queue.lock().unwrap();
+            let mut pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
             while !pending.is_empty() && tasks_to_poll.len() < budget {
                 if let Some(task) = pending.pop() {
                     tasks_to_poll.push(task);
@@ -691,7 +691,7 @@ implement AsyncRuntime {
                 Poll.Pending => {
                     // Task yielded -- return to pending queue.
                     // It will be moved to the ready queue when its waker fires.
-                    let mut queue = self.task_queue.lock().unwrap();
+                    let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
                     queue.push(entry);
                 }
             }
@@ -708,7 +708,7 @@ implement AsyncRuntime {
     fn drain_all_tasks(&self) {
         // Drain ready queue
         {
-            let mut ready = self.ready_queue.lock().unwrap();
+            let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
             while !ready.is_empty() {
                 if let Some(entry) = ready.pop() {
                     if !entry.completed {
@@ -720,7 +720,7 @@ implement AsyncRuntime {
 
         // Drain pending queue
         {
-            let mut pending = self.task_queue.lock().unwrap();
+            let mut pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
             while !pending.is_empty() {
                 if let Some(entry) = pending.pop() {
                     if !entry.completed {
@@ -748,11 +748,11 @@ implement AsyncRuntime {
 
             // Check if there are any more ready tasks
             let has_ready = {
-                let ready = self.ready_queue.lock().unwrap();
+                let ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
                 !ready.is_empty()
             };
             let has_pending = {
-                let pending = self.task_queue.lock().unwrap();
+                let pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
                 !pending.is_empty()
             };
 
@@ -876,7 +876,7 @@ implement AsyncRuntime {
 
         // Find and remove task from pending queue
         {
-            let mut queue = self.task_queue.lock().unwrap();
+            let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
             for i in range(0, queue.len()) {
                 if queue.get(i).map(|e| e.id == task_id).unwrap_or(false) {
                     task_to_wake = Some(queue.remove(i));
@@ -887,7 +887,7 @@ implement AsyncRuntime {
 
         // Move to ready queue
         if let Some(task) = task_to_wake {
-            let mut ready = self.ready_queue.lock().unwrap();
+            let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
             ready.push(task);
         }
     }

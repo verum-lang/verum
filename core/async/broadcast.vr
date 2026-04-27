@@ -147,7 +147,7 @@ fn new_inner<T>(capacity: Int, policy: LagPolicy) -> BroadcastInner<T> {
 /// Wake all receivers currently registered (snapshot + fire outside lock).
 fn wake_all_receivers<T>(inner: &BroadcastInner<T>) {
     let snapshot = {
-        let guard = inner.slots.lock().unwrap();
+        let guard = inner.slots.lock().unwrap_or_else(|p| p.into_inner());
         let mut copy: List<Shared<RecvSlot>> = [];
         for slot in guard.iter() {
             copy.push(slot.clone());
@@ -156,7 +156,7 @@ fn wake_all_receivers<T>(inner: &BroadcastInner<T>) {
     };
     for slot in snapshot {
         if slot.dropped.load(MemoryOrdering.Acquire) { continue; }
-        let mut w = slot.waker.lock().unwrap();
+        let mut w = slot.waker.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(waker) = w.take() {
             waker.wake();
         }
@@ -201,7 +201,7 @@ implement<T> BroadcastSender<T> {
 
         // Insert under buffer lock.
         {
-            let mut buf = self.inner.buffer.lock().unwrap();
+            let mut buf = self.inner.buffer.lock().unwrap_or_else(|p| p.into_inner());
             buf[idx] = Some(value);
         }
 
@@ -232,7 +232,7 @@ implement<T> BroadcastSender<T> {
             dropped: AtomicBool.new(false),
         });
         {
-            let mut slots = self.inner.slots.lock().unwrap();
+            let mut slots = self.inner.slots.lock().unwrap_or_else(|p| p.into_inner());
             slots.push(slot.clone());
         }
         BroadcastReceiver {
@@ -341,7 +341,7 @@ implement<T> Drop for BroadcastReceiver<T> {
         self.slot.dropped.store(true, MemoryOrdering.Release);
         self.inner.receiver_count.fetch_sub(1, MemoryOrdering.AcqRel);
         // Best-effort compaction: remove our slot under the slots lock.
-        let mut slots = self.inner.slots.lock().unwrap();
+        let mut slots = self.inner.slots.lock().unwrap_or_else(|p| p.into_inner());
         slots.retain(|s| s.id != self.slot.id);
     }
 }
@@ -441,7 +441,7 @@ fn poll_recv_inner<T>(
         }
         // Register waker if async context was provided.
         if let Some(ctx) = cx {
-            let mut w = slot.waker.lock().unwrap();
+            let mut w = slot.waker.lock().unwrap_or_else(|p| p.into_inner());
             *w = Some(ctx.waker().clone());
             // Re-check after register to close lost-wake race.
             let write_pos_2 = inner.write_pos.load(MemoryOrdering.Acquire);
@@ -462,7 +462,7 @@ fn poll_recv_inner<T>(
 
     // Read slot at read_pos.
     let idx = read_pos % capacity;
-    let buf = inner.buffer.lock().unwrap();
+    let buf = inner.buffer.lock().unwrap_or_else(|p| p.into_inner());
     let value_maybe = buf[idx];
     drop(buf);
 
@@ -510,7 +510,7 @@ public fn broadcast_channel_with<T>(capacity: Int, policy: LagPolicy)
         dropped: AtomicBool.new(false),
     });
     {
-        let mut slots = inner.slots.lock().unwrap();
+        let mut slots = inner.slots.lock().unwrap_or_else(|p| p.into_inner());
         slots.push(slot.clone());
     }
 
