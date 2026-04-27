@@ -94,13 +94,14 @@ public type PemError is
 ///   <base64>                \n      (line-wrapped at 64 chars)
 ///   -----END <label>-----\n
 public fn encode_block(label: &str, contents: &[Byte]) -> Text {
-    let mut out: List<Byte> = [];
+    let b64 = b64_encode(contents);
+    let b64b = b64.as_bytes();
+    // Output: 22 (BEGIN/END markers) + 2*label.len + b64b.len + ceil(b64b.len/64) (newlines).
+    let cap = 24 + label.as_bytes().len() * 2 + b64b.len() + (b64b.len() / 64 + 4);
+    let mut out: List<Byte> = List.with_capacity(cap);
     push_bytes(&mut out, b"-----BEGIN ");
     push_bytes(&mut out, label.as_bytes());
     push_bytes(&mut out, b"-----\n");
-
-    let b64 = b64_encode(contents);
-    let b64b = b64.as_bytes();
 
     // RFC 7468 §2: lines MUST wrap at 64 base64 chars.
     let mut i: Int = 0;
@@ -121,7 +122,10 @@ public fn encode_block(label: &str, contents: &[Byte]) -> Text {
 /// Emit multiple blocks back-to-back (the typical certificate-
 /// chain / keystore file format).
 public fn encode_bundle(blocks: &List<PemBlock>) -> Text {
-    let mut out: List<Byte> = [];
+    // Heuristic 256-byte/block initial capacity for typical
+    // certificate / private-key / chain blocks. Avoids the first
+    // few growth events for the common 1-3-block bundle.
+    let mut out: List<Byte> = List.with_capacity(blocks.len() * 256);
     let mut i: Int = 0;
     while i < blocks.len() {
         let block_text = encode_block(text_as_str(&blocks[i].label), blocks[i].contents.as_slice());
@@ -234,14 +238,16 @@ fn find_sub(haystack: &[Byte], needle: &[Byte], from: Int) -> Maybe<Int> {
 }
 
 fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
-    let mut out: List<Byte> = [];
+    // Output is exactly `end - start` bytes.
+    let mut out: List<Byte> = List.with_capacity(end - start);
     let mut i: Int = start;
     while i < end { out.push(bytes[i]); i = i + 1; }
     Text.from_utf8_unchecked(out.as_slice())
 }
 
 fn trim_base64_bytes(bytes: &[Byte], start: Int, end: Int) -> List<Byte> {
-    let mut out: List<Byte> = [];
+    // Output ≤ end - start (strips whitespace).
+    let mut out: List<Byte> = List.with_capacity(end - start);
     let mut i: Int = start;
     while i < end {
         let c = bytes[i];
