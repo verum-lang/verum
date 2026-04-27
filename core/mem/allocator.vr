@@ -1124,16 +1124,23 @@ public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UIn
 
 /// Allocate zeroed memory with CBGR tracking.
 /// Mapped to the `cbgr_alloc_zeroed` intrinsic (FfiSubOpcode 0xA1).
+///
+/// Earlier revisions zeroed via a per-byte
+/// `for i in 0..size { ptr_write(ptr_offset(ptr, i), 0) }`
+/// loop — for any allocation larger than a single cache line
+/// this is 50–100× slower than `memset(ptr, 0, size)` because
+/// the per-byte version emits a serial dependency chain that
+/// the CPU can't vectorize, while `memset` lowers to LLVM's
+/// `memset` intrinsic (rep stosb / NEON / SVE / AVX-512). The
+/// stdlib `List`/`Map`/`Heap` zero-init paths feed straight
+/// into this function so the perf gap was paid by every
+/// container construction.
 @intrinsic("cbgr_alloc_zeroed")
 @inline
 public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
     match cbgr_alloc(size, align) {
         Ok(result) => {
-            // Zero the memory - write zeros byte by byte
-            let ptr = result.0;
-            for i in 0..size {
-                unsafe { ptr_write(ptr_offset(ptr, i), 0 as Byte); };
-            }
+            memset(result.0, 0, size);
             Ok(result)
         }
         Err(e) => Err(e),
@@ -1141,6 +1148,14 @@ public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt
 }
 
 /// Deallocate memory.
+///
+/// Forwards the underlying heap-side error verbatim instead
+/// of collapsing every failure to `InvalidPointer`. The
+/// previous `Err(e) => Err(AllocError.InvalidPointer)` arm
+/// silently lost the actual root cause (could have been
+/// `OutOfMemory` from a return-page-to-OS munmap, an
+/// allocator-state corruption signal, etc.) — a debuggability
+/// gap on the dealloc fast path.
 @inline
 public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
     if (ptr as Int) == 0 {
@@ -1148,34 +1163,57 @@ public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
     }
 
     let heap = get_local_heap();
-    match heap.dealloc(ptr) {
-        Ok(()) => Ok(()),
-        Err(e) => Err(AllocError.InvalidPointer),
-    }
+    heap.dealloc(ptr)
 }
 
 /// Reallocate memory to new size.
+///
+/// Two improvements over the earlier per-byte implementation:
+///
+///   * Copy via `memcpy(new_ptr, ptr, copy_size)` instead of
+///     a per-byte `ptr_write(ptr_offset(ptr, i), byte_val)`
+///     loop. Same 50-100× speedup story as
+///     `cbgr_alloc_zeroed`'s memset switch — `memcpy` lowers
+///     to LLVM's memcpy intrinsic and the OS gets to use
+///     `rep movsb` / NEON / SVE for optimal bandwidth. Every
+///     `List::push` past initial capacity, every `Text` grow,
+///     every `Map` rehash funnels through this path.
+///
+///   * Strong-guarantee semantics on dealloc-failure: if the
+///     new allocation succeeds but freeing the old block
+///     fails, we now `cbgr_dealloc(new_result.0)` to release
+///     the freshly-allocated block and surface the original
+///     error.  Earlier revisions returned `Err` on
+///     dealloc-failure but **leaked the new block** —
+///     callers got back an error AND lost the new
+///     allocation, doubling the impact of any rare
+///     dealloc-side failure.
 public fn cbgr_realloc(
     ptr: &unsafe Byte,
     old_size: Int,
     new_size: Int,
     align: Int,
 ) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
-    // Allocate new
     match cbgr_alloc(new_size, align) {
         Ok(new_result) => {
-            // Copy old data byte by byte
             let new_ptr = new_result.0;
             let copy_size = if old_size < new_size { old_size } else { new_size };
-            for i in 0..copy_size {
-                let byte_val: Byte = unsafe { ptr_read(ptr_offset(ptr, i)) };
-                unsafe { ptr_write(ptr_offset(new_ptr, i), byte_val); };
-            }
+            // Bulk copy via memcpy — see function-level doc.
+            memcpy(new_ptr, ptr, copy_size);
 
-            // Free old
             match cbgr_dealloc(ptr) {
                 Ok(()) => Ok(new_result),
-                Err(e) => Err(e),
+                Err(e) => {
+                    // Strong guarantee: the original allocation
+                    // is still live (dealloc failed) AND we
+                    // just allocated a new block.  Release the
+                    // new block so the caller doesn't end up
+                    // owning two copies of the same logical
+                    // allocation.  The original `ptr` remains
+                    // owned by the caller.
+                    let _ = cbgr_dealloc(new_ptr);
+                    Err(e)
+                }
             }
         }
         Err(e) => Err(e),
