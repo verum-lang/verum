@@ -1,0 +1,65 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, sync, once, race-safe-set
+// @expected-stdout: ok
+//
+// Pins task #31 closure: OnceLock single-threaded contract holds
+// across get_or_try_init, set, try_get_or_set on every code path
+// (init success, init failure with retry, double-set rejection).
+//
+// Concurrent contention is exercised by the unit-test surface
+// in `tests/once_*.rs` (out of scope for the L0 budget which runs
+// single-threaded).
+
+mount core.sync.once.{OnceLock};
+
+fn main() {
+    // 1. get_or_try_init — Ok path on first call
+    let lock = OnceLock<Int>.new();
+    let r1 = lock.get_or_try_init<Text, _>(|| Ok(42));
+    assert(r1.is_ok());
+    assert(*r1.unwrap() == 42);
+
+    // 2. get_or_try_init returns the SAME value on second call
+    //    without re-running f (idempotent contract)
+    let r2 = lock.get_or_try_init<Text, _>(|| Ok(100));
+    assert(r2.is_ok());
+    assert(*r2.unwrap() == 42);
+
+    // 3. get_or_try_init Err path — Once stays uninitialised so
+    //    caller can retry
+    let lock2 = OnceLock<Int>.new();
+    let r3 = lock2.get_or_try_init<Text, _>(|| Err("nope".to_text()));
+    assert(r3.is_err());
+    assert(!lock2.is_initialized());
+
+    // 4. retry after failed init succeeds
+    let r4 = lock2.get_or_try_init<Text, _>(|| Ok(7));
+    assert(r4.is_ok());
+    assert(*r4.unwrap() == 7);
+
+    // 5. try_get_or_set — preserves rejected value across the
+    //    already-initialised path (no use-after-move, no panic)
+    let lock3 = OnceLock<Int>.new();
+    let r5 = lock3.try_get_or_set(99);
+    assert(r5.is_ok());
+    let r6 = lock3.try_get_or_set(123);
+    assert(r6.is_err());
+    match r6 {
+        Ok(_) => panic("expected Err"),
+        Err(rejected) => assert(rejected == 123),
+    }
+
+    // 6. set wraps try_get_or_set — same Err-preservation
+    let lock4 = OnceLock<Int>.new();
+    assert(lock4.set(1).is_ok());
+    let r7 = lock4.set(2);
+    assert(r7.is_err());
+    match r7 {
+        Ok(_) => panic("expected Err"),
+        Err(rejected) => assert(rejected == 2),
+    }
+
+    print("ok");
+}
