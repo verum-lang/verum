@@ -336,13 +336,36 @@ public fn atomic_exchange_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) 
 @vbc_direct_lowering
 public fn atomic_exchange_i32(ptr: *mut Int32, value: Int32, ordering: UInt8) -> Int32;
 
+/// Atomic fetch-and-sub for UInt64. (`fetch_sub_u32` was the
+/// only fetch_sub variant declared previously despite the
+/// codegen-side registry already supporting `fetch_sub_u64`
+/// — surface the existing capability.)
+@intrinsic("atomic_fetch_sub_u64")
+@vbc_direct_lowering
+public fn atomic_fetch_sub_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
+
 // =============================================================================
 // SECTION 8: Int-sized Atomic Helpers
 // =============================================================================
 // Convenience wrappers that delegate to size-specific atomics.
+//
+// **Pointer-width assumption**: every helper here delegates
+// to the `_u64` family, which is sound iff `Int` is 64-bit
+// (i.e. `target_pointer_width = "64"`). Verum currently
+// supports only 64-bit targets in the codegen pipeline, so
+// the assumption holds for every shipping configuration.
+// If the language ever grows a 32-bit target, these helpers
+// must be split via @cfg(target_pointer_width) — the
+// `as UInt64` round-trip silently sign-extends a 32-bit
+// `Int`, then the `_u64` atomic operates on 8 bytes (one
+// scalar past the actual storage), producing immediate
+// memory corruption. The compiler-side gap (no
+// `atomic_*_int_native` family that picks width at codegen
+// time) is the right place to fix this; tracked as the
+// follow-up to task #24.
 // =============================================================================
 
-/// Atomic load for Int (delegates to UInt64 on 64-bit platforms).
+/// Atomic load for Int (delegates to UInt64; assumes 64-bit Int).
 @inline(always)
 public fn atomic_load_int(ptr: *const Int, ordering: UInt8) -> Int {
     atomic_load_u64(ptr as *const UInt64, ordering) as Int
