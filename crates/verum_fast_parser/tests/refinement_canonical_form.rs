@@ -12,9 +12,9 @@
     useless_ptr_null_checks,
     unused_assignments
 )]
-//! Regression tests for the VVA §5 refinement-type canonicalisation.
+//! Regression tests for the refinement-type canonicalisation.
 //!
-//! Per VVA §5 the three surface forms for refinement types all collapse onto
+//! Per the three surface forms for refinement types all collapse onto
 //! a single AST node — `TypeKind::Refined { base, predicate }` — where the
 //! optional `predicate.binding` identifies the binder (when one exists):
 //!
@@ -93,7 +93,7 @@ fn declarative_named_predicate_form_is_refined() {
                 other => {
                     // The current parser may produce a different expression
                     // shape for bare `where`. We still assert the outer
-                    // node is Refined — which is the VVA §5 invariant.
+                    // node is Refined — which is the invariant.
                     let _ = other;
                 }
             }
@@ -134,7 +134,7 @@ fn sigma_form_has_explicit_binding_and_predicate() {
 }
 
 /// All three surface forms must produce the same outer AST variant —
-/// `TypeKind::Refined`. Pins the VVA §5 structural invariant.
+/// `TypeKind::Refined`. Pins the structural invariant.
 #[test]
 fn all_three_forms_produce_refined() {
     let inline = parse_type("Int{> 0}");

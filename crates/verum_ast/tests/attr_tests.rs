@@ -732,6 +732,105 @@ fn test_framework_attr_display_roundtrip() {
 }
 
 // ============================================================================
+// ExtractAttr Tests — `@extract` / `@extract(<target>)`
+// ============================================================================
+
+#[test]
+fn test_extract_bare_defaults_to_verum() {
+    let raw = Attribute::new(Text::from("extract"), Maybe::None, Span::default());
+    match ExtractAttr::from_attribute(&raw) {
+        Maybe::Some(a) => assert_eq!(a.target, ExtractTarget::Verum),
+        Maybe::None => panic!("bare @extract must default to Verum"),
+    }
+}
+
+#[test]
+fn test_extract_with_target_lean() {
+    let span = Span::default();
+    let target_expr = Expr::ident(Ident::new(Text::from("lean"), span));
+    let mut args = List::new();
+    args.push(target_expr);
+    let raw = Attribute::new(Text::from("extract"), Maybe::Some(args), span);
+    match ExtractAttr::from_attribute(&raw) {
+        Maybe::Some(a) => assert_eq!(a.target, ExtractTarget::Lean),
+        Maybe::None => panic!("@extract(lean) must parse"),
+    }
+}
+
+#[test]
+fn test_extract_rejects_unknown_target() {
+    let span = Span::default();
+    let target_expr = Expr::ident(Ident::new(Text::from("haskell"), span));
+    let mut args = List::new();
+    args.push(target_expr);
+    let raw = Attribute::new(Text::from("extract"), Maybe::Some(args), span);
+    assert!(matches!(
+        ExtractAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+}
+
+#[test]
+fn test_extract_rejects_wrong_name() {
+    let raw = Attribute::new(Text::from("inline"), Maybe::None, Span::default());
+    assert!(matches!(ExtractAttr::from_attribute(&raw), Maybe::None));
+}
+
+#[test]
+fn test_extract_witness_with_coq() {
+    let span = Span::default();
+    let target_expr = Expr::ident(Ident::new(Text::from("coq"), span));
+    let mut args = List::new();
+    args.push(target_expr);
+    let raw = Attribute::new(
+        Text::from("extract_witness"),
+        Maybe::Some(args),
+        span,
+    );
+    match ExtractWitnessAttr::from_attribute(&raw) {
+        Maybe::Some(a) => assert_eq!(a.target, ExtractTarget::Coq),
+        Maybe::None => panic!("@extract_witness(coq) must parse"),
+    }
+}
+
+#[test]
+fn test_extract_contract_bare_defaults_to_verum() {
+    let raw = Attribute::new(
+        Text::from("extract_contract"),
+        Maybe::None,
+        Span::default(),
+    );
+    match ExtractContractAttr::from_attribute(&raw) {
+        Maybe::Some(a) => assert_eq!(a.target, ExtractTarget::Verum),
+        Maybe::None => panic!("bare @extract_contract must default to Verum"),
+    }
+}
+
+#[test]
+fn test_extract_target_from_ident_round_trip() {
+    for (s, expected) in &[
+        ("verum", ExtractTarget::Verum),
+        ("VERUM", ExtractTarget::Verum),
+        ("ocaml", ExtractTarget::OCaml),
+        ("lean", ExtractTarget::Lean),
+        ("Coq", ExtractTarget::Coq),
+    ] {
+        assert_eq!(ExtractTarget::from_ident(s), Some(*expected), "{}", s);
+    }
+    assert_eq!(ExtractTarget::from_ident("rust"), None);
+    assert_eq!(ExtractTarget::from_ident(""), None);
+}
+
+#[test]
+fn test_extract_attr_display_format() {
+    let attr = ExtractAttr::new(ExtractTarget::Lean, Span::default());
+    assert_eq!(format!("{}", attr), "@extract(lean)");
+    let wattr = ExtractWitnessAttr::new(ExtractTarget::Coq, Span::default());
+    assert_eq!(format!("{}", wattr), "@extract_witness(coq)");
+    let cattr = ExtractContractAttr::new(ExtractTarget::Verum, Span::default());
+    assert_eq!(format!("{}", cattr), "@extract_contract(verum)");
+}
+// ============================================================================
 // FrameworkTranslateAttr Tests — `@framework_translate(source, target, "...")`
 // ============================================================================
 
@@ -823,7 +922,7 @@ fn test_framework_translate_display_roundtrip() {
 }
 
 // ============================================================================
-// OWL 2 ATTRIBUTION FAMILY — VVA §21.6 Phase 3 C8
+// OWL 2 ATTRIBUTION FAMILY — Phase 3 C8
 // ============================================================================
 //
 // Round-trip tests for every Owl2*Attr from typed.rs. Builds a generic
@@ -1160,7 +1259,7 @@ fn owl2_attrs_reject_wrong_attribute_name() {
 }
 
 // ============================================================================
-// QUANTITATIVE TYPE THEORY (Atkey QTT) — VVA §7.6 Phase 3 C5 V1
+// QUANTITATIVE TYPE THEORY (Atkey QTT) — Phase 3 C5 V1
 // ============================================================================
 //
 // Round-trip tests for QuantityAttr. The attribute accepts five
@@ -1264,7 +1363,7 @@ fn quantity_attr_display_round_trip() {
 }
 
 // =============================================================================
-// V8 (#228) — @accessibility(λ) typed attribute (VVA §A.Z.5 item 4)
+// @accessibility(λ) typed attribute (item 4)
 // =============================================================================
 
 mod accessibility_tests {

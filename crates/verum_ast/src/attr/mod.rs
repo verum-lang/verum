@@ -154,12 +154,16 @@ pub use typed::{
     DeadlockDetectionAttr,
     DifferentiableAttr,
     EnactAttr,
-    // VVA §0.0 governance — opt-in / opt-out for kernel extensions.
+    // governance — opt-in / opt-out for kernel extensions.
     ExtensionRequirementAttr,
     ExtensionToggleKind,
-    // VVA §A.Z.5 item 4 — Diakrisis Axi-4 accessibility marker.
+    // item 4 — Diakrisis Axi-4 accessibility marker.
     AccessibilityAttr,
     FeatureAttr,
+    ExtractAttr,
+    ExtractContractAttr,
+    ExtractTarget,
+    ExtractWitnessAttr,
     FrameworkAttr,
     FrameworkTranslateAttr,
     HotAttr,

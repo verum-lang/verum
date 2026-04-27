@@ -16,7 +16,7 @@
 //!
 //! This module tests the advanced type system features introduced in v6.0:
 //! - TypeKind::Refined with an explicit binder (the canonical sigma form per
-//!   VVA §5 — `x: T where P(x)` parses to `Refined` with
+//!   — `x: T where P(x)` parses to `Refined` with
 //!   `predicate.binding = Some(x)`)
 //! - TypeKind::Ownership (mutable/immutable)
 //! - WherePredicateKind::Meta
@@ -46,7 +46,7 @@ fn test_ident(name: &str) -> Ident {
 // ============================================================================
 // Refinement (sigma surface form) Tests — Rule 3: x: T where P(x)
 //
-// Per VVA §5 the sigma surface form collapses onto `TypeKind::Refined` with
+// Per the sigma surface form collapses onto `TypeKind::Refined` with
 // `predicate.binding = Some(name)`.
 // ============================================================================
 

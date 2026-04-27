@@ -3060,7 +3060,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Check if this is a sigma-form refinement followed by comma -
         // indicates sigma-bindings (e.g. `type SizedVec is n: Int, data: [Int; n];`).
-        // Post VVA §5 canonicalisation, the sigma surface form parses as
+        // Post canonicalisation, the sigma surface form parses as
         // `TypeKind::Refined` with `predicate.binding = Some(name)`; we detect
         // that shape here.
         let looks_like_sigma_binding = matches!(
@@ -3360,6 +3360,8 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a variant.
     fn parse_variant(&mut self) -> ParseResult<Variant> {
+        // (Companion fn `path_endpoint_depth` defined at module
+        // scope below, used by this fn to compute n-cell dim.)
         let start_pos = self.stream.position();
 
         // Parse optional attributes: @attr VariantName(...)
@@ -3412,11 +3414,23 @@ impl<'a> RecursiveParser<'a> {
                 let cp = self.stream.position();
                 self.stream.advance(); // consume `=`
                 if let Ok(expr) = self.parse_expr_no_struct() {
+                    // peel one
+                    // optional outer Paren so users can write
+                    // `= (a..b)` for 1-cells (just as readable as
+                    // `= a..b`). For n-cells the user always
+                    // writes `(a..b)..(c..d)` whose top level is
+                    // a Range; the parens around endpoints
+                    // survive on lhs/rhs so the depth probe can
+                    // count them.
+                    let unwrapped = match &expr.kind {
+                        verum_ast::ExprKind::Paren(inner) => (**inner).clone(),
+                        _ => expr.clone(),
+                    };
                     if let verum_ast::ExprKind::Range {
                         start: verum_common::Maybe::Some(lhs),
                         end: verum_common::Maybe::Some(rhs),
                         ..
-                    } = &expr.kind
+                    } = &unwrapped.kind
                     {
                         path_endpoints = Maybe::Some((lhs.clone(), rhs.clone()));
                         data = Maybe::Some(VariantData::Tuple(types.into_iter().collect()));
@@ -3568,6 +3582,19 @@ impl<'a> RecursiveParser<'a> {
         };
 
         let span = self.stream.make_span(start_pos);
+        // n-cell dimension
+        // detection. For a 1-cell variant `= a..b` both endpoints
+        // are bare expressions ⇒ dim = 1. For an n-cell variant
+        // both endpoints are paren-wrapped ranges (one dimension
+        // up each). The dim is the max of the lhs / rhs nesting
+        // depths plus 1 (since the range itself is one dimension).
+        let path_dim: u32 = match &path_endpoints {
+            Maybe::Some((lhs, rhs)) => {
+                let d = path_endpoint_depth(lhs).max(path_endpoint_depth(rhs)) + 1;
+                d
+            }
+            Maybe::None => 1,
+        };
         Ok(Variant {
             name: Ident::new(name, name_span),
             generic_params: generic_params.into_iter().collect(),
@@ -3575,6 +3602,7 @@ impl<'a> RecursiveParser<'a> {
             where_clause,
             attributes: attributes.into_iter().collect(),
             path_endpoints,
+            path_dim,
             span,
         })
     }
@@ -3583,6 +3611,8 @@ impl<'a> RecursiveParser<'a> {
     /// This is like parse_expr but stops before '|' (which has left_bp=7 as BitOr).
     /// GADT where clauses contain comparisons like `T == Int`, `N > 0`.
     fn parse_variant_where_constraint(&mut self) -> ParseResult<Expr> {
+        // (Companion: see `path_endpoint_depth` below for the n-cell
+        // dimension-detection helper used by the variant parser.)
         // Parse LHS - use bp=8 to stop before '|' (left_bp=7)
         let lhs = self.parse_expr_bp(8)?;
 
@@ -7213,7 +7243,7 @@ impl<'a> RecursiveParser<'a> {
             }
             // Refined types (all three surface forms: `T{p}`, `T where p`,
             // `n: T where p`) fall through to the `Refined` arm above; the
-            // dedicated Sigma arm is gone after VVA §5 collapse.
+            // dedicated Sigma arm is gone after collapse.
             _ => Err(ParseError::invalid_syntax(
                 "expected path or refined type in type bound",
                 ty.span,
@@ -7493,5 +7523,113 @@ impl<'a> RecursiveParser<'a> {
         decl.attributes = attrs.into_iter().collect();
 
         Ok(Item::new(ItemKind::Pattern(decl), span))
+    }
+}
+
+/// recursive depth probe for
+/// HIT path-constructor endpoints.
+///
+/// A 1-cell path-constructor's endpoints are bare expressions (`Var`,
+/// `App`, …) — depth 0. An n-cell endpoint is itself a parenthesised
+/// range `(a..b)` — depth = 1 + max-depth-of-inner-endpoints. The
+/// variant parser uses this to compute `path_dim`:
+///
+///   `dim = max(depth(lhs), depth(rhs)) + 1`
+///
+/// (Adding 1 because the outer `..` itself is one dimensional step.)
+///
+/// Examples (depth in `()`s):
+///   * `Base` → depth 0
+///   * `(loop_a..loop_b)` (`Paren` of `Range`) → depth 1
+///   * `((p..q)..(r..s))` → depth 2
+///
+/// Non-path expressions return depth 0 unconditionally — the parser
+/// treats anything that isn't a `Paren(Range(_, _))` as a point
+/// endpoint.
+fn path_endpoint_depth(expr: &verum_ast::Expr) -> u32 {
+    use verum_ast::ExprKind;
+    use verum_common::Maybe;
+    match &expr.kind {
+        ExprKind::Paren(inner) => match &inner.kind {
+            ExprKind::Range {
+                start: Maybe::Some(lhs),
+                end: Maybe::Some(rhs),
+                ..
+            } => 1 + path_endpoint_depth(lhs).max(path_endpoint_depth(rhs)),
+            _ => path_endpoint_depth(inner),
+        },
+        ExprKind::Range {
+            start: Maybe::Some(lhs),
+            end: Maybe::Some(rhs),
+            ..
+        } => 1 + path_endpoint_depth(lhs).max(path_endpoint_depth(rhs)),
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod path_endpoint_depth_tests {
+    use super::path_endpoint_depth;
+    use verum_ast::{Expr, ExprKind, Path};
+    use verum_ast::span::Span;
+    use verum_common::{Heap, Maybe};
+
+    fn var(name: &str) -> Expr {
+        let span = Span::default();
+        Expr::path(Path::single(verum_ast::Ident::new(verum_common::Text::from(name), span)))
+    }
+
+    fn range(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::new(
+            ExprKind::Range {
+                start: Maybe::Some(Heap::new(lhs)),
+                end: Maybe::Some(Heap::new(rhs)),
+                inclusive: false,
+            },
+            Span::default(),
+        )
+    }
+
+    fn paren(inner: Expr) -> Expr {
+        Expr::new(ExprKind::Paren(Heap::new(inner)), Span::default())
+    }
+
+    #[test]
+    fn point_endpoint_has_depth_zero() {
+        assert_eq!(path_endpoint_depth(&var("Base")), 0);
+    }
+
+    #[test]
+    fn paren_around_var_has_depth_zero() {
+        // `(Base)` — paren around non-range → 0.
+        assert_eq!(path_endpoint_depth(&paren(var("Base"))), 0);
+    }
+
+    #[test]
+    fn paren_around_range_is_one_cell() {
+        // `(a..b)` is a 1-cell endpoint — depth 1.
+        let p = paren(range(var("a"), var("b")));
+        assert_eq!(path_endpoint_depth(&p), 1);
+    }
+
+    #[test]
+    fn nested_paren_range_is_two_cell() {
+        // `((p..q)..(r..s))` is a 2-cell endpoint — depth 2.
+        let inner_lhs = paren(range(var("p"), var("q")));
+        let inner_rhs = paren(range(var("r"), var("s")));
+        let p = paren(range(inner_lhs, inner_rhs));
+        assert_eq!(path_endpoint_depth(&p), 2);
+    }
+
+    #[test]
+    fn three_deep_nesting_yields_depth_three() {
+        let l1 = paren(range(var("a"), var("b")));
+        let l1b = paren(range(var("c"), var("d")));
+        let l2 = paren(range(l1, l1b));
+        let l1c = paren(range(var("e"), var("f")));
+        let l1d = paren(range(var("g"), var("h")));
+        let l2b = paren(range(l1c, l1d));
+        let l3 = paren(range(l2, l2b));
+        assert_eq!(path_endpoint_depth(&l3), 3);
     }
 }
