@@ -1087,7 +1087,22 @@ pub struct Variant {
     /// emits a `PathConstructor` with these endpoints instead of a
     /// regular `Constructor` record.
     pub path_endpoints: Maybe<(Heap<crate::expr::Expr>, Heap<crate::expr::Expr>)>,
+    /// cell **dimension** for
+    /// path-constructor variants. `1` for classical 1-cells (S¹
+    /// `Loop`, Interval `Seg`); `≥ 2` for higher cells parsed via
+    /// the nested-endpoint surface `(a..b)..(c..d)`. The parser
+    /// computes `dim` from the nesting depth of the endpoint
+    /// expressions (paren-wrapped `Range` shapes count one
+    /// dimension up). Default `1` keeps pre-V8.1 1-cell variants
+    /// unchanged; `#[serde(default = "default_path_dim")]` keeps
+    /// pre-V8.1 on-disk AST artefacts deserialisable.
+    #[serde(default = "default_path_dim")]
+    pub path_dim: u32,
     pub span: Span,
+}
+
+fn default_path_dim() -> u32 {
+    1
 }
 
 impl Variant {
@@ -1100,6 +1115,7 @@ impl Variant {
             where_clause: Maybe::None,
             attributes: List::new(),
             path_endpoints: Maybe::None,
+            path_dim: default_path_dim(),
             span,
         }
     }
@@ -1118,6 +1134,7 @@ impl Variant {
             where_clause: Maybe::None,
             attributes,
             path_endpoints: Maybe::None,
+            path_dim: default_path_dim(),
             span,
         }
     }

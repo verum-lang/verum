@@ -861,7 +861,7 @@ impl PrettyPrinter {
                 self.write(assoc_name.as_str());
             }
             TypeKind::Refined { base, predicate } => {
-                // VVA §5 collapses the three refinement surface forms into
+                // collapses the three refinement surface forms into
                 // `TypeKind::Refined`. Render the sigma form (`x: T where P(x)`)
                 // when the predicate carries an explicit binder; otherwise fall
                 // back to the inline form `T{pred}`.

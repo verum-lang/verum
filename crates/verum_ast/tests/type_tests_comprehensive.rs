@@ -571,7 +571,7 @@ fn test_refined_type_with_lambda() {
 fn test_sigma_type() {
     // Rule 3 (Sigma): x: Int where x > 0
     //
-    // Per VVA §5 the sigma surface form collapses onto
+    // Per the sigma surface form collapses onto
     // `TypeKind::Refined { predicate.binding = Some(name) }`.
     let span = test_span();
     let name = test_ident("x");

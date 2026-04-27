@@ -1125,7 +1125,7 @@ pub enum VerificationMode {
     /// @verify(fast) — bounded SMT, ν=2, ≤100 ms.
     Fast,
     /// @verify(complexity_typed) — bounded-arithmetic verification
-    /// (VVA-8). Polynomial-time; CI budget ≤30 s. ν<ω.
+    /// (Bounded-arithmetic). Polynomial-time; CI budget ≤30 s. ν<ω.
     ComplexityTyped,
     /// @verify(formal) — full SMT portfolio, ν=ω, ≤5 s.
     Formal,
@@ -1138,12 +1138,12 @@ pub enum VerificationMode {
     /// @verify(certified) — certificate re-check, ν=ω·2+2.
     Certified,
     /// @verify(coherent_static) — α-cert + symbolic ε-claim
-    /// (VVA-6 weak). Polynomial; ≤60 s. ν=ω·2+3.
+    /// (Coherent verification weak). Polynomial; ≤60 s. ν=ω·2+3.
     CoherentStatic,
     /// @verify(coherent_runtime) — α-cert + runtime ε-monitor
-    /// (VVA-6 hybrid). Trace-bounded; ≤5 min. ν=ω·2+4.
+    /// (Coherent verification hybrid). Trace-bounded; ≤5 min. ν=ω·2+4.
     CoherentRuntime,
-    /// @verify(coherent) — α/ε bidirectional check (VVA-6 strict).
+    /// @verify(coherent) — α/ε bidirectional check (Coherent verification strict).
     /// Single-exponential; ≤30 min. ν=ω·2+5.
     Coherent,
     /// @verify(synthesize) — inverse proof search, ν≤ω·3+1.
@@ -4950,7 +4950,7 @@ impl std::fmt::Display for FrameworkAttr {
 }
 
 // =============================================================================
-// FRAMEWORK BRIDGE TRANSLATION (VVA Task C7b enabler, V8.1 #196 follow-up)
+// FRAMEWORK BRIDGE TRANSLATION (VVA Task C7b enabler, )
 //
 // `@framework_translate(source, target, "<bridge-citation>")` annotates a
 // trusted-boundary axiom that bridges two Standard frameworks. Used by
@@ -5067,7 +5067,371 @@ impl std::fmt::Display for FrameworkTranslateAttr {
 }
 
 // =============================================================================
-// ENACTMENT ATTRIBUTION (VVA §11.4)
+// PROGRAM EXTRACTION (V2, )
+//
+// `@extract`, `@extract_witness`, `@extract_contract` annotate a constructive
+// proof / theorem / function with the program-extraction surface defined in
+// `verum_smt::program_extraction` (Curry-Howard correspondence). The
+// attributes carry the extraction target so the elaborator can dispatch
+// to the correct backend (Verum native code / OCaml / Lean / Coq).
+//
+//   @extract                      → extract the full constructive program
+//   @extract(verum)               → same, explicit Verum target
+//   @extract(lean)                → extract to Lean
+//   @extract_witness(coq)         → extract only the existential witness
+//   @extract_contract             → emit runtime contract from refinement
+//
+// V1 (statement-only): the attributes round-trip through the typed-attr
+// catalogue; the elaborator is responsible for invoking the backend.
+// V2 (`verum extract --to <lang>`) is a CLI follow-up tracked separately.
+// =============================================================================
+
+/// — target language for `@extract` / `@extract_witness` /
+/// `@extract_contract`.
+///
+/// Mirrors `verum_smt::program_extraction::ExtractionTarget` shape so
+/// the elaborator can map directly when dispatching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExtractTarget {
+    /// Verum native code (default).
+    Verum,
+    /// OCaml — common backend for Coq's stdlib extraction.
+    OCaml,
+    /// Lean (4.x).
+    Lean,
+    /// Coq native (.v).
+    Coq,
+}
+
+impl ExtractTarget {
+    /// Parse a target identifier (case-insensitive: `verum` / `ocaml` /
+    /// `lean` / `coq`). Returns `None` for unknown targets so the caller
+    /// can surface a precise diagnostic.
+    pub fn from_ident(ident: &str) -> Option<Self> {
+        match ident.to_ascii_lowercase().as_str() {
+            "verum" => Some(Self::Verum),
+            "ocaml" => Some(Self::OCaml),
+            "lean" => Some(Self::Lean),
+            "coq" => Some(Self::Coq),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Verum => "verum",
+            Self::OCaml => "ocaml",
+            Self::Lean => "lean",
+            Self::Coq => "coq",
+        }
+    }
+}
+
+impl std::fmt::Display for ExtractTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// — `@extract` / `@extract(<target>)` / `@extract(realize="fn_name")`
+/// typed attribute.
+///
+/// Marks a constructive proof or theorem for full program extraction
+/// per Curry-Howard. Default target is `Verum` when no argument is
+/// given. The optional `realize="<name>"` kwarg routes the extracted
+/// scaffold to a hand-written native function with the given name and
+/// signature instead of synthesising the body from the proof term —
+/// useful when the proof is a specification of a primitive that the
+/// runtime provides natively (e.g. crypto stubs, intrinsic wrappers).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExtractAttr {
+    pub target: ExtractTarget,
+    /// Name of a native function to bind the extracted scaffold to.
+    /// `None` ⇒ the lowerer synthesises a body from the proof term;
+    /// `Some(name)` ⇒ emit a thin wrapper that delegates to `name`.
+    pub realize: Maybe<Text>,
+    pub span: Span,
+}
+
+impl ExtractAttr {
+    pub fn new(target: ExtractTarget, span: Span) -> Self {
+        Self { target, realize: Maybe::None, span }
+    }
+
+    pub fn with_realize(target: ExtractTarget, realize: Text, span: Span) -> Self {
+        Self { target, realize: Maybe::Some(realize), span }
+    }
+
+    /// Try to extract an `ExtractAttr` from a generic `Attribute`.
+    /// Accepts:
+    ///   * `@extract` (defaults to Verum, no realize binding).
+    ///   * `@extract(<ident>)` where `<ident>` ∈ {verum,ocaml,lean,coq}.
+    ///   * `@extract(realize="fn_name")` — Verum target, native binding.
+    ///   * `@extract(<ident>, realize="fn_name")` — explicit target + native binding.
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("extract") {
+            return Maybe::None;
+        }
+        parse_extract_args(attr).map(|(t, r)| Self {
+            target: t,
+            realize: r,
+            span: attr.span,
+        })
+    }
+}
+
+impl Spanned for ExtractAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for ExtractAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.realize {
+            Maybe::None => write!(f, "@extract({})", self.target),
+            Maybe::Some(name) => {
+                write!(f, "@extract({}, realize=\"{}\")", self.target, name.as_str())
+            }
+        }
+    }
+}
+
+/// — `@extract_witness` / `@extract_witness(<target>)` /
+/// `@extract_witness(realize="fn_name")`.
+///
+/// Extracts the existential witness from a constructive existence
+/// proof. Body of the proof is discarded; only the witness term is
+/// materialised in the target language. The optional `realize=`
+/// kwarg binds the witness to a hand-written native function (same
+/// semantics as on `@extract`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExtractWitnessAttr {
+    pub target: ExtractTarget,
+    pub realize: Maybe<Text>,
+    pub span: Span,
+}
+
+impl ExtractWitnessAttr {
+    pub fn new(target: ExtractTarget, span: Span) -> Self {
+        Self { target, realize: Maybe::None, span }
+    }
+
+    pub fn with_realize(target: ExtractTarget, realize: Text, span: Span) -> Self {
+        Self { target, realize: Maybe::Some(realize), span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("extract_witness") {
+            return Maybe::None;
+        }
+        parse_extract_args(attr).map(|(t, r)| Self {
+            target: t,
+            realize: r,
+            span: attr.span,
+        })
+    }
+}
+
+impl Spanned for ExtractWitnessAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for ExtractWitnessAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.realize {
+            Maybe::None => write!(f, "@extract_witness({})", self.target),
+            Maybe::Some(name) => write!(
+                f,
+                "@extract_witness({}, realize=\"{}\")",
+                self.target,
+                name.as_str()
+            ),
+        }
+    }
+}
+
+/// — `@extract_contract` / `@extract_contract(<target>)` /
+/// `@extract_contract(realize="fn_name")`.
+///
+/// Emits a runtime contract from a refinement-typed function so the
+/// extracted code preserves the refinement as a runtime check
+/// (rather than the static proof being erased entirely). The
+/// optional `realize=` kwarg binds the contract wrapper to a
+/// hand-written native function (same semantics as on `@extract`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExtractContractAttr {
+    pub target: ExtractTarget,
+    pub realize: Maybe<Text>,
+    pub span: Span,
+}
+
+impl ExtractContractAttr {
+    pub fn new(target: ExtractTarget, span: Span) -> Self {
+        Self { target, realize: Maybe::None, span }
+    }
+
+    pub fn with_realize(target: ExtractTarget, realize: Text, span: Span) -> Self {
+        Self { target, realize: Maybe::Some(realize), span }
+    }
+
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("extract_contract") {
+            return Maybe::None;
+        }
+        parse_extract_args(attr).map(|(t, r)| Self {
+            target: t,
+            realize: r,
+            span: attr.span,
+        })
+    }
+}
+
+impl Spanned for ExtractContractAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for ExtractContractAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.realize {
+            Maybe::None => write!(f, "@extract_contract({})", self.target),
+            Maybe::Some(name) => write!(
+                f,
+                "@extract_contract({}, realize=\"{}\")",
+                self.target,
+                name.as_str()
+            ),
+        }
+    }
+}
+
+/// Shared helper: pull the `(ExtractTarget, realize-binding)` pair
+/// from an `@extract*` attribute's args. Accepted shapes:
+///   * `@extract` (no args) → `(Verum, None)`.
+///   * `@extract(<ident>)` → `(<target>, None)`.
+///   * `@extract(realize="name")` → `(Verum, Some("name"))`.
+///   * `@extract(<ident>, realize="name")` → `(<target>, Some("name"))`.
+/// Anything else → `Maybe::None`.
+fn parse_extract_args(attr: &Attribute) -> Maybe<(ExtractTarget, Maybe<Text>)> {
+    use crate::expr::{BinOp, Expr, ExprKind};
+    use crate::literal::{LiteralKind, StringLit};
+
+    fn ident_target(e: &Expr) -> Option<ExtractTarget> {
+        match &e.kind {
+            ExprKind::Path(p) => p.segments.last().and_then(|seg| match seg {
+                crate::ty::PathSegment::Name(ident) => {
+                    ExtractTarget::from_ident(ident.name.as_str())
+                }
+                _ => None,
+            }),
+            _ => None,
+        }
+    }
+
+    fn realize_kwarg(e: &Expr) -> Option<Text> {
+        match &e.kind {
+            ExprKind::Binary { op: BinOp::Assign, left, right } => {
+                let key_is_realize = match &left.kind {
+                    ExprKind::Path(p) => p
+                        .segments
+                        .last()
+                        .map(|seg| match seg {
+                            crate::ty::PathSegment::Name(ident) => {
+                                ident.name.as_str() == "realize"
+                            }
+                            _ => false,
+                        })
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                if !key_is_realize {
+                    return None;
+                }
+                match &right.kind {
+                    ExprKind::Literal(lit) => match &lit.kind {
+                        LiteralKind::Text(StringLit::Regular(s))
+                        | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    match &attr.args {
+        Maybe::None => Maybe::Some((ExtractTarget::Verum, Maybe::None)),
+        Maybe::Some(args) => {
+            if args.is_empty() {
+                return Maybe::Some((ExtractTarget::Verum, Maybe::None));
+            }
+            // One arg: either a target ident, or `realize="..."`.
+            if args.len() == 1 {
+                let a = args.get(0).unwrap();
+                if let Some(t) = ident_target(a) {
+                    return Maybe::Some((t, Maybe::None));
+                }
+                if let Some(r) = realize_kwarg(a) {
+                    return Maybe::Some((ExtractTarget::Verum, Maybe::Some(r)));
+                }
+                return Maybe::None;
+            }
+            // Two args: positional target + `realize="..."`.
+            if args.len() == 2 {
+                let target = ident_target(args.get(0).unwrap());
+                let realize = realize_kwarg(args.get(1).unwrap());
+                if let (Some(t), Some(r)) = (target, realize) {
+                    return Maybe::Some((t, Maybe::Some(r)));
+                }
+                return Maybe::None;
+            }
+            Maybe::None
+        }
+    }
+}
+
+/// Backwards-compatible wrapper for callers that don't need the
+/// realize binding. Kept for the legacy single-target call sites
+/// outside this module.
+#[allow(dead_code)]
+fn extract_target_from_attr_args(attr: &Attribute) -> Maybe<ExtractTarget> {
+    use crate::expr::{Expr, ExprKind};
+    match &attr.args {
+        Maybe::None => Maybe::Some(ExtractTarget::Verum),
+        Maybe::Some(args) => {
+            if args.is_empty() {
+                return Maybe::Some(ExtractTarget::Verum);
+            }
+            if args.len() != 1 {
+                return Maybe::None;
+            }
+            let ident_text: Option<String> = match args.get(0) {
+                Some(Expr {
+                    kind: ExprKind::Path(path),
+                    ..
+                }) => path.segments.last().and_then(|seg| match seg {
+                    crate::ty::PathSegment::Name(ident) => {
+                        Some(ident.name.as_str().to_string())
+                    }
+                    _ => None,
+                }),
+                _ => None,
+            };
+            match ident_text.and_then(|s| ExtractTarget::from_ident(&s)) {
+                Some(t) => Maybe::Some(t),
+                None => Maybe::None,
+            }
+        }
+    }
+}
+
+// =============================================================================
+// ENACTMENT ATTRIBUTION 
 //
 // `@enact(epsilon = "ε_prove")` tags a function / theorem / lemma / axiom
 // declaration with a Diakrisis primitive act on the Actic (DC) side of
@@ -5078,7 +5442,7 @@ impl std::fmt::Display for FrameworkTranslateAttr {
 //
 // The seven canonical primitives — ε_math, ε_compute, ε_observe,
 // ε_prove, ε_decide, ε_translate, ε_construct — are defined in
-// `core.action.primitives` and documented in VVA §11.2. User-defined
+// `core.action.primitives` and documented in User-defined
 // ε-contracts (composites under `core.action.enactments`) are not
 // supported by this attribute in Phase 5 E3; they are tracked through
 // the per-function enactment inferred from the body.
@@ -5096,7 +5460,7 @@ impl std::fmt::Display for FrameworkTranslateAttr {
 
 /// Typed form of `@enact(epsilon = "<primitive>")`.
 ///
-/// The primitive is one of the seven Diakrisis ε-tags (VVA §11.2).
+/// The primitive is one of the seven Diakrisis ε-tags .
 /// Unicode (`ε_prove`) and ASCII (`epsilon_prove`) spellings are both
 /// accepted at parse time; the typed form stores the canonical Unicode
 /// string so `verum audit --epsilon` renders deterministically.
@@ -5325,10 +5689,10 @@ impl std::fmt::Display for EnactAttr {
 }
 
 // =============================================================================
-// @require_extension / @disable_extension — VVA §0.0 governance gate
+// @require_extension / @disable_extension — governance gate
 // =============================================================================
 
-/// VVA §0.0 governance — `@require_extension(vfe_N)` opts a module /
+/// governance — `@require_extension(vfe_N)` opts a module /
 /// declaration into a specific VVA extension's kernel rules /
 /// strategies / typed attributes. Without this annotation the kernel
 /// runs in VVA-baseline mode for the affected scope.
@@ -5463,10 +5827,10 @@ impl std::fmt::Display for ExtensionRequirementAttr {
 }
 
 // =============================================================================
-// @accessibility(λ) — Diakrisis Axi-4 accessibility marker (VVA §A.Z.5 item 4)
+// @accessibility(λ) — Diakrisis Axi-4 accessibility marker (item 4)
 // =============================================================================
 
-/// V8 (#228) — `@accessibility(λ)` typed attribute.
+/// `@accessibility(λ)` typed attribute.
 ///
 /// Closes Diakrisis Axi-4's λ-accessibility premise per VVA
 /// §A.Z.1 defect inventory. The kernel cannot internally
@@ -5600,12 +5964,12 @@ impl std::fmt::Display for AccessibilityAttr {
 }
 
 // =============================================================================
-// OWL 2 ATTRIBUTION FAMILY (VVA §21.6 Phase 3 C8 V1)
+// OWL 2 ATTRIBUTION FAMILY (Phase 3 C8 V1)
 //
 // Vocabulary-preserving typed attributes for the OWL 2 Direct Semantics
 // surface. Each attribute installs (1) a `CoreTerm::FrameworkAxiom`
 // reference into `core.math.frameworks.owl2_fs.*`, (2) a `@verify(...)`
-// obligation per VVA §21.3 Table, and (3) a round-trip marker consumed
+// obligation Table, and (3) a round-trip marker consumed
 // by `verum export --to owl2-fs` (B5, deferred).
 //
 // V1 ships four attributes covering the most common OWL 2 surface forms;
@@ -5628,7 +5992,7 @@ impl std::fmt::Display for AccessibilityAttr {
 
 /// Open-world / closed-world semantics flag.  OWL 2 DS is normally
 /// open-world; Verum's typed refinement system is closed-world.
-/// VVA §21.4 picks CWA as the default and admits OWA only when
+/// picks CWA as the default and admits OWA only when
 /// the user explicitly opts in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Owl2Semantics {
@@ -5661,10 +6025,10 @@ impl Owl2Semantics {
 
 /// `@owl2_class` — marks a Verum type as an OWL 2 Class. Optional
 /// `semantics = "OpenWorld" | "ClosedWorld"` argument selects the
-/// semantic regime per VVA §21.4.
+/// semantic regime.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Owl2ClassAttr {
-    /// Optional semantics qualifier; default is ClosedWorld per VVA §21.4.
+    /// Optional semantics qualifier; default is ClosedWorld.
     pub semantics: Maybe<Owl2Semantics>,
     pub span: Span,
 }
@@ -5825,8 +6189,8 @@ impl Spanned for Owl2DisjointWithAttr {
     }
 }
 
-/// One of the seven OWL 2 object-property characteristics from
-/// Shkotin 2019 Table 6 / VVA §21.6.
+/// One of the seven OWL 2 object-property characteristics
+/// (Shkotin 2019 Table 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Owl2Characteristic {
     Transitive,
@@ -5976,7 +6340,7 @@ fn parse_class_name_arg(arg: &crate::expr::Expr) -> Option<Text> {
 // =============================================================================
 //
 // V1+ extension covering the three remaining attributes from the
-// VVA §21.6 catalogue:
+// catalogue:
 //
 //   @owl2_property(domain = ..., range = ...,
 //                  characteristic = [...], inverse_of = ...)
@@ -6069,7 +6433,7 @@ impl Owl2PropertyAttr {
             // Unknown / malformed key — reject the whole attribute.
             return Maybe::None;
         }
-        // Domain and range are MANDATORY per VVA §21.6 grammar — the
+        // Domain and range are MANDATORY grammar — the
         // attribute is meaningless without them.
         match (&domain, &range) {
             (Maybe::Some(_), Maybe::Some(_)) => Maybe::Some(Self::new(
@@ -6132,7 +6496,7 @@ impl Spanned for Owl2EquivalentClassAttr {
 ///
 /// The NAMED restriction means this constraint applies only to
 /// `NamedIndividual`s, not anonymous individuals — a deliberate OWL 2
-/// design decision per Shkotin §2.3.5; VVA §21.3 routes HasKey
+/// design decision per Shkotin §2.3.5; routes HasKey
 /// obligations to `@verify(proof)` because the DL reasoner case
 /// requires a user-supplied tactic.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6272,7 +6636,7 @@ fn parse_named_characteristic_list_arg(
 }
 
 // =============================================================================
-// QUANTITATIVE TYPE THEORY (Atkey QTT — VVA §7.6 Phase 3 C5 V1)
+// QUANTITATIVE TYPE THEORY (Atkey QTT — Phase 3 C5 V1)
 // =============================================================================
 //
 // Atkey 2018 / McBride 2016 QTT: every binder carries a **quantity**
@@ -6290,7 +6654,7 @@ fn parse_named_characteristic_list_arg(
 //            number of times including zero. This is the standard
 //            functional-programming default.
 //
-// VVA §7.6 chooses ω as the kernel default — without an explicit
+// chooses ω as the kernel default — without an explicit
 // quantity annotation a binder is unrestricted. The opt-in form is
 // `@quantity(0)` / `@quantity(1)` / `@quantity(omega)` per the
 // existing attribute grammar; bare-form `@0` / `@1` / `@ω` is a
@@ -6310,14 +6674,14 @@ fn parse_named_characteristic_list_arg(
 // shipped now; full elaboration of Inductive eliminators continues).
 
 /// Atkey QTT quantity. Default at parse sites without an annotation
-/// is `Many` per VVA §7.6 (existing code stays unchanged).
+/// is `Many` (existing code stays unchanged).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Quantity {
     /// `@quantity(0)` — erased (compile-time only).
     Zero,
     /// `@quantity(1)` — linear (use exactly once).
     One,
-    /// `@quantity(omega)` — unrestricted (the default; VVA §7.6).
+    /// `@quantity(omega)` — unrestricted (the default).
     Many,
 }
 
@@ -6431,3 +6795,4 @@ impl std::fmt::Display for QuantityAttr {
         write!(f, "@quantity({})", self.quantity.as_str())
     }
 }
+
