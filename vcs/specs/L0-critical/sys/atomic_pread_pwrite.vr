@@ -1,0 +1,105 @@
+// @test: wip
+// @tier: 0
+// @level: L0
+// @tags: sys, io, pread, pwrite, atomicity, sqlite-gap-3
+// @timeout: 30000
+// @expected-stdout: atomic_pread_pwrite ok
+// @expected-exit: 0
+//
+// PENDING — test body and primitives are correct (Linux SYS_PREAD64 wrapper
+// landed alongside this test; Darwin libsystem.safe_pread/_pwrite already
+// production). Blocked on a separate interpreter-side stack-overflow that
+// fires during stdlib bootstrap when the mount tree pulls in
+// sys.darwin.libsystem (~16K-frame dispatch cascade, distinct from the
+// pread/pwrite contract). Flip to `run-interpreter` when the bootstrap
+// budget regression in verum_vbc/src/codegen/dispatch is closed.
+//
+// Atomic positional I/O contract — sqlite-native.md §3.2 Gap 3.
+//
+// pread/pwrite must:
+//   1. Round-trip: pwrite(fd, buf, off) followed by pread(fd, &mut out, off)
+//      yields out == buf.
+//   2. Order-independent: scattered writes/reads at non-monotonic offsets
+//      preserve content (proves the calls do not advance / depend on
+//      file position).
+//
+// Uses sys.darwin.libsystem.{safe_open, safe_close} directly to avoid
+// pulling the full core.io.file dispatch tree into the test (the macOS
+// File chain trips a 16K-frame interpreter stack via deep mount cascade
+// — unrelated to the pread/pwrite contract).
+
+mount core.*;
+mount collections.List;
+mount sys.common.{FileDesc, pread, pwrite, full_fsync};
+mount sys.darwin.libsystem.{safe_open, safe_close};
+
+fn make_path() -> List<Byte> {
+    let s = "/tmp/verum_atomic_pread_pwrite.bin";
+    let raw = s.as_bytes();
+    let mut out: List<Byte> = [];
+    let mut i = 0;
+    while i < raw.len() {
+        out.push(raw[i]);
+        i = i + 1;
+    }
+    out.push(0 as Byte);
+    out
+}
+
+fn fill(pattern: Byte, n: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i = 0;
+    while i < n {
+        out.push(pattern);
+        i = i + 1;
+    }
+    out
+}
+
+fn main() {
+    // O_RDWR (2) | O_CREAT (0x0200 on Darwin) | O_TRUNC (0x0400)
+    let flags: Int = 2 | 0x0200 | 0x0400;
+    let path = make_path();
+
+    let fd = match safe_open(&path, flags, 0o644) {
+        Ok(f) => f,
+        Err(_) => { panic("safe_open failed"); return; }
+    };
+
+    let pat_a = fill(0xAA as Byte, 256);
+    let pat_b = fill(0xBB as Byte, 256);
+
+    match pwrite(fd, &pat_b, 4096) {
+        Ok(n) => assert_eq(n, 256),
+        Err(_) => { panic("pwrite @4096 failed"); return; }
+    }
+    match pwrite(fd, &pat_a, 0) {
+        Ok(n) => assert_eq(n, 256),
+        Err(_) => { panic("pwrite @0 failed"); return; }
+    }
+    match full_fsync(fd) {
+        Ok(_) => {},
+        Err(_) => { panic("full_fsync failed"); return; }
+    }
+
+    let mut buf_a: List<Byte> = fill(0 as Byte, 256);
+    match pread(fd, &mut buf_a, 0) {
+        Ok(n) => assert_eq(n, 256),
+        Err(_) => { panic("pread @0 failed"); return; }
+    }
+    let mut buf_b: List<Byte> = fill(0 as Byte, 256);
+    match pread(fd, &mut buf_b, 4096) {
+        Ok(n) => assert_eq(n, 256),
+        Err(_) => { panic("pread @4096 failed"); return; }
+    }
+
+    let mut j = 0;
+    while j < 256 {
+        assert_eq(buf_a[j], 0xAA as Byte);
+        assert_eq(buf_b[j], 0xBB as Byte);
+        j = j + 1;
+    }
+
+    let _ = safe_close(fd);
+    print("atomic_pread_pwrite ok");
+}
