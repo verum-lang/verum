@@ -32,6 +32,7 @@ public module connection;
 public module adapter;
 public module stmt_cache;
 public module extended;
+public module pool;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -49,3 +50,4 @@ public mount .extended.{
     ExtendedQueryResult, PipelineEntry, PipelineBatch, ExtendedResultBuilder,
     build_parse_bind_execute, build_bind_execute,
 };
+public mount .pool.PgPool;

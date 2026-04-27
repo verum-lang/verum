@@ -24,6 +24,7 @@ public module error;
 public module config;
 public module connection;
 public module adapter;
+public module pool;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
@@ -36,3 +37,4 @@ public mount .connection.{
 };
 public mount .adapter.MysqlAdapter;
 public mount .error.dberr_from_mysql;
+public mount .pool.MysqlPool;

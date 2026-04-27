@@ -1,0 +1,70 @@
+// =============================================================================
+// core/database/sqlite/pool.vr — SqlitePool: ConnectionPool<SqliteConnection>
+// =============================================================================
+// Layer: 3 (Database — sqlite façade)
+// Spec: internal/specs/database.md §4.3
+//
+// Thin vendor binding over `core.database.common.pool_impl.ConnectionPool<C>`.
+// Holds a `SqliteConfig` clone plus the generic pool; `acquire` returns a
+// `PooledConnection<SqliteConnection>` whose `release_healthy` /
+// `release_discard` decide recycling vs reopen.
+//
+// SQLite-specific quirk: in-memory databases (`StMemory`) cannot be
+// genuinely shared across pool members — each new connection brings up a
+// fresh process-private DB. The pool surface still works (each acquire
+// hands out a connection to its own DB), but applications that *need*
+// sharing must use `StSharedMemory(name)` once shared-cache support
+// lands. We surface the trap in the doc comment but don't artificially
+// reject the configuration.
+// =============================================================================
+
+module core.database.sqlite.pool;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.common.pool_impl.{
+    ConnectionPool, PoolConfig, PooledConnection, PoolStatsSnapshot,
+    ReleaseKind, Healthy, Discard,
+};
+mount core.database.sqlite.connection.SqliteConnection;
+mount core.database.sqlite.adapter.{SqliteConfig, SqliteAdapter};
+
+// -----------------------------------------------------------------------------
+// SqlitePool — bound generic.
+// -----------------------------------------------------------------------------
+
+public type SqlitePool is {
+    inner: ConnectionPool<SqliteConnection>,
+    config: SqliteConfig,
+}
+
+implement SqlitePool {
+    /// Build a pool from a SqliteConfig + PoolConfig. Eagerly opens
+    /// `pool_cfg.min_connections` so the first acquire is warm.
+    public fn launch(
+        sqlite_cfg: SqliteConfig,
+        pool_cfg: PoolConfig,
+    ) -> Result<SqlitePool, DbError> {
+        let cfg_for_factory = sqlite_cfg.clone();
+        let factory = || -> Result<SqliteConnection, DbError> {
+            SqliteAdapter.connect(&cfg_for_factory)
+        };
+        match ConnectionPool.launch(pool_cfg, factory) {
+            Ok(p)  => Ok(SqlitePool { inner: p, config: sqlite_cfg }),
+            Err(e) => Err(e),
+        }
+    }
+
+    public fn acquire(&self) -> Result<PooledConnection<SqliteConnection>, DbError> {
+        self.inner.acquire()
+    }
+
+    public fn drain(&self, deadline_ms: Int) -> Result<(), DbError> {
+        self.inner.drain(deadline_ms)
+    }
+
+    public fn stats(&self) -> PoolStatsSnapshot { self.inner.stats() }
+
+    public fn config(&self) -> &SqliteConfig { &self.config }
+}
