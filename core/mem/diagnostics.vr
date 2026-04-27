@@ -231,3 +231,55 @@ implement HeaderView {
         out
     }
 }
+
+// =============================================================================
+// Live allocation enumeration
+// =============================================================================
+
+/// Snapshot the set of CBGR-managed allocations currently live in the
+/// process as a List of `HeaderView` records.
+///
+/// # Status: format-stable boundary; producer-side wiring deferred
+///
+/// CBGR allocations currently live in per-thread `LocalHeap` instances
+/// (see `core/mem/heap.vr`) plus the cross-thread free path in
+/// `MemSegment` slots.  There is no global allocation index — by
+/// design, because maintaining one would 30-50× the allocation hot-
+/// path cost (~0.93 ns CBGR check + global mutex acquire = ~30 ns).
+///
+/// The `live_allocations()` boundary ships today returning an empty
+/// List so observer code can call it safely; when the global-index
+/// sidecar (gated under `@cfg(feature = "cbgr_audit")`) lands, this
+/// function will return real entries without changing the call-site
+/// API.  Tracked in #202.
+///
+/// # Format-stable contract
+///
+/// - Returns `List<HeaderView>` (re-exported via `core::diagnostics`).
+/// - Order is unspecified — observers MUST NOT rely on ordering.
+/// - Best-effort point-in-time view; an allocation that frees during
+///   the snapshot may appear with stale capabilities/refcount.
+/// - Empty list does NOT mean "no live allocations" — until the
+///   sidecar lands, it means "enumeration is not yet wired".
+///
+/// # Performance (when sidecar lands)
+///
+/// O(live_allocations) HeaderView clones + 1 mutex acquire on the
+/// allocation index.  Not on the alloc/free hot path; observers call
+/// this from monitoring dashboards or panic post-mortem dumps.
+public fn live_allocations() -> List<HeaderView> {
+    // Empty stub: no global allocation index exists yet.  Observers
+    // calling this today get a graceful empty-result; when the
+    // sidecar producer is wired, this body changes without API churn.
+    List.new()
+}
+
+/// Total number of CBGR-managed allocations currently live, when the
+/// global-index sidecar is wired.  Returns `0` until then.
+///
+/// Symmetric counterpart to `cap_event_count()` for the cap_audit
+/// ring — observers monitoring memory pressure or leak tests can
+/// poll this value across time-windows.
+public fn live_allocation_count() -> Int {
+    0
+}

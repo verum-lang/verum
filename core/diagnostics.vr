@@ -61,7 +61,10 @@ mount core.{Maybe, Text};
 // CBGR allocation introspection (re-exports from core::mem::diagnostics)
 // =============================================================================
 
-public mount core.mem.diagnostics.{HeaderView, header_view_of};
+public mount core.mem.diagnostics.{
+    HeaderView, header_view_of,
+    live_allocations, live_allocation_count,
+};
 
 // =============================================================================
 // CBGR capability audit (re-exports from core::mem::cap_audit + ring)
