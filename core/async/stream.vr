@@ -1319,7 +1319,12 @@ implement<S: Stream> StreamPeekable<S> {
         match &self.peeked {
             Some(Some(item)) => Poll.Ready(Some(item)),
             Some(None) => Poll.Ready(None),
-            None => unreachable(),
+            // Invariant violation: the if-guard above just stored
+            // `Some(item)` into `self.peeked` (or returned Pending).
+            // Reaching `None` here means either the guard was
+            // bypassed by another path or `peeked` was concurrently
+            // mutated — both are bugs; surface them with context.
+            None => unreachable("StreamPeekable::peek: self.peeked must be Some after the populate-guard ran"),
         }
     }
 }
