@@ -625,14 +625,6 @@ impl MetaRegistryPhase {
             .any(|attr| attr.name.as_str() == "interpolation_handler")
     }
 
-    /// Check if function has @attribute_macro attribute (defines a custom attribute)
-    #[allow(dead_code)] // Reserved for custom attribute macro support
-    fn has_attribute_macro_attr(&self, func: &FunctionDecl) -> bool {
-        func.attributes
-            .iter()
-            .any(|attr| attr.name.as_str() == "attribute_macro")
-    }
-
     // ========== Public Accessors ==========
 
     /// Get the MetaRegistry (for use by later phases)
