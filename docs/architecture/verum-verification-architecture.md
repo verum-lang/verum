@@ -3709,6 +3709,18 @@ type State<S, A> = fn(S) -> (A, S);
 - Каждый effect-class имеет каноническую ε-координату через Лемму 17.L1.
 - Concurrent correctness через ⊗-commutativity (только для commutative monads).
 
+### 9.3 Effect-classifier surface (V8 #244)
+
+`core.action.effects` exposes the eight-effect classification of Theorem 17.T1 as a runtime-queryable surface:
+
+* `EffectKind` enum — one variant per effect (`PureEffect`, `ReaderEffect`, `WriterEffect`, `ProbabilityEffect`, `ListEffect`, `StateEffect`, `ExceptionEffect`, `IoEffect`).
+* `is_commutative_effect(kind) -> Bool` — gate for Corollary 17.C2 (parallel composition preserves `@verify(coherent)`).
+* `effect_epsilon_coord(kind) -> Text` — Diakrisis ε-coordinate (`"0"` for Pure, `"ω"` for the four other commutatives, `"ω + 1"` for the three non-commutatives).
+* `effect_kind_name(kind) -> Text` — canonical name for audit / JSON-RPC emission.
+* `parallel_coherent(kinds: List<EffectKind>) -> Bool` — true iff every kind is commutative; gate for Corollary 17.C2 at the program-composition site.
+
+Pre-#244 those classifications were trapped inside axiom names (`effect_state_is_not_commutative`, `effect_pure_is_commutative`, etc.); user code that wanted to ask "is `Probability` commutative?" had no stable surface to query. Coverage: `vcs/specs/L2-standard/action/effect_classifier_typecheck.vr` pins the spec contract via typecheck assertion.
+
 ---
 
 ## 10. VVA-10 — Ludics-cells via complicial sets

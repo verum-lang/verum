@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: action, effects, vva-section-17, theorem-17-T1, oc-dc
+// @timeout: 10000
+// @expect: pass
+//
+// VVA §17 (#244) — effect-classifier surface.
+//
+// Pins Theorem 17.T1's eight-effect classification at the
+// public-API boundary so the spec contract surfaces as a
+// typecheck failure if anyone reclassifies an effect:
+//   • Pure                       → commutative,     ε = "0"
+//   • Reader / Writer            → commutative,     ε = "ω"
+//   • Probability / List         → commutative,     ε = "ω"
+//   • State / Exception / Io     → NON-commutative, ε = "ω + 1"
+//
+// Plus Corollary 17.C2 — `parallel_coherent` returns true iff
+// every input kind is commutative.
+
+mount core.action.{
+    EffectKind,
+    PureEffect, ReaderEffect, WriterEffect, ProbabilityEffect,
+    ListEffect, StateEffect, ExceptionEffect, IoEffect,
+    is_commutative_effect, effect_epsilon_coord, effect_kind_name,
+    parallel_coherent,
+};
+
+fn exercise_commutative_classification() {
+    // Five commutative effects.
+    assert(is_commutative_effect(PureEffect));
+    assert(is_commutative_effect(ReaderEffect));
+    assert(is_commutative_effect(WriterEffect));
+    assert(is_commutative_effect(ProbabilityEffect));
+    assert(is_commutative_effect(ListEffect));
+
+    // Three non-commutative effects.
+    assert(!is_commutative_effect(StateEffect));
+    assert(!is_commutative_effect(ExceptionEffect));
+    assert(!is_commutative_effect(IoEffect));
+}
+
+fn exercise_epsilon_coordinates() {
+    // Pure lives at coordinate 0 (identity effect).
+    assert(effect_epsilon_coord(PureEffect) == "0");
+
+    // Every other commutative effect lives at ω.
+    assert(effect_epsilon_coord(ReaderEffect) == "ω");
+    assert(effect_epsilon_coord(WriterEffect) == "ω");
+    assert(effect_epsilon_coord(ProbabilityEffect) == "ω");
+    assert(effect_epsilon_coord(ListEffect) == "ω");
+
+    // Non-commutative effects live at ω + 1 (order-dependence
+    // bumps the ordinal coordinate).
+    assert(effect_epsilon_coord(StateEffect) == "ω + 1");
+    assert(effect_epsilon_coord(ExceptionEffect) == "ω + 1");
+    assert(effect_epsilon_coord(IoEffect) == "ω + 1");
+}
+
+fn exercise_canonical_names() {
+    assert(effect_kind_name(PureEffect) == "Pure");
+    assert(effect_kind_name(ReaderEffect) == "Reader");
+    assert(effect_kind_name(StateEffect) == "State");
+    assert(effect_kind_name(IoEffect) == "Io");
+}
+
+fn exercise_parallel_coherent_corollary_17_c2() {
+    // Empty input is vacuously coherent.
+    let empty: List<EffectKind> = List.new();
+    assert(parallel_coherent(empty));
+
+    // All-commutative composes coherently.
+    let mut all_commutative: List<EffectKind> = List.new();
+    all_commutative.push(PureEffect);
+    all_commutative.push(ReaderEffect);
+    all_commutative.push(ProbabilityEffect);
+    assert(parallel_coherent(all_commutative));
+
+    // Single non-commutative breaks parallel coherence.
+    let mut with_state: List<EffectKind> = List.new();
+    with_state.push(PureEffect);
+    with_state.push(StateEffect);   // ⇐ poisons the bucket
+    with_state.push(ReaderEffect);
+    assert(!parallel_coherent(with_state));
+
+    // All-non-commutative also fails (defensive lower bound).
+    let mut all_non_commutative: List<EffectKind> = List.new();
+    all_non_commutative.push(StateEffect);
+    all_non_commutative.push(ExceptionEffect);
+    all_non_commutative.push(IoEffect);
+    assert(!parallel_coherent(all_non_commutative));
+}
+
+fn main() {
+    exercise_commutative_classification();
+    exercise_epsilon_coordinates();
+    exercise_canonical_names();
+    exercise_parallel_coherent_corollary_17_c2();
+}
