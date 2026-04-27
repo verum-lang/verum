@@ -1,0 +1,202 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l1, wal, recovery, torn-tail, regression
+// @timeout: 15000
+// @description: WAL recovery — header validation + torn-tail truncation
+//
+// Spec: internal/specs/sqlite-native.md §8.5
+//
+// `wal_scan` returns a `RecoveryPlan` describing the last commit
+// frame's index, the resulting db_size, and the page→offset map.
+// The contract:
+//   1. A header with a corrupted self-checksum is refused with
+//      BadMagic (no silent recovery against tampered salts).
+//   2. Frames past the last valid checksum are dropped (torn-tail).
+//   3. Frames past the last commit are dropped from the page map
+//      even if their checksums chained correctly (uncommitted-prefix
+//      isolation).
+
+mount core.*;
+mount collections.{List, Map};
+mount core.database.sqlite.native.l1_pager.recovery.{
+    RecoveryPlan, RecoveryError,
+    ShortFile, BadMagic, ZeroPageSize,
+    wal_scan, plan_has_recoverable_commit,
+};
+mount core.database.sqlite.native.l1_pager.journal.wal.{
+    WalHeader, PagerWalFrameHeader, WalChecksum,
+    WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE, WAL_FORMAT_VERSION,
+    WAL_MAGIC_LE,
+    wal_new, wal_header_serialize, wal_frame_header_serialize,
+    wal_running_checksum,
+};
+
+// -----------------------------------------------------------------------------
+// Builders — assemble a plausible WAL byte stream in memory.
+// -----------------------------------------------------------------------------
+
+fn push_be32(buf: &mut List<Byte>, v: UInt32) {
+    buf.push(((v >> 24) & 0xFF) as Byte);
+    buf.push(((v >> 16) & 0xFF) as Byte);
+    buf.push(((v >> 8)  & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+fn page_of(filler: Byte, n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        out.push(filler);
+        i = i + 1;
+    }
+    out
+}
+
+/// Build a minimal valid WAL — header + N frames where the last frame
+/// (`commit_at_idx`) carries `db_size_after_commit > 0`.
+fn build_wal(
+    page_size: Int,
+    commit_at_idx: Int,
+    n_frames: Int,
+) -> List<Byte> {
+    let wal = wal_new(page_size as UInt32, 0xCAFEBABE_u32, 0xDEADBEEF_u32, 1_u32);
+    let header_bytes = wal_header_serialize(&wal.header);
+
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < header_bytes.len() {
+        out.push(header_bytes[i]);
+        i = i + 1;
+    }
+
+    let mut running = wal.running;
+    let mut k: Int = 0;
+    while k < n_frames {
+        let body = page_of((0x10 + k) as Byte, page_size);
+        let db_size_after = if k == commit_at_idx { 1_u32 } else { 0_u32 };
+        // Running cksum prefix = (page_no, db_size, salt_1, salt_2)
+        let mut prefix: List<Byte> = List.new();
+        push_be32(&mut prefix, (k + 1) as UInt32);
+        push_be32(&mut prefix, db_size_after);
+        push_be32(&mut prefix, wal.header.salt_1);
+        push_be32(&mut prefix, wal.header.salt_2);
+        let after_prefix = wal_running_checksum(running.clone(), prefix.as_slice());
+        let after_body   = wal_running_checksum(after_prefix, body.as_slice());
+        let fh = PagerWalFrameHeader {
+            page_number: (k + 1) as UInt32,
+            db_size_after_commit: db_size_after,
+            salt_1: wal.header.salt_1,
+            salt_2: wal.header.salt_2,
+            checksum_1: after_body.s1,
+            checksum_2: after_body.s2,
+        };
+        let fh_bytes = wal_frame_header_serialize(&fh);
+        let mut j: Int = 0;
+        while j < fh_bytes.len() { out.push(fh_bytes[j]); j = j + 1; }
+        let mut p: Int = 0;
+        while p < body.len() { out.push(body[p]); p = p + 1; }
+
+        running = after_body;
+        k = k + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+fn empty_or_short_file() {
+    let small: List<Byte> = List.new();
+    match wal_scan(small.as_slice(), 4096) {
+        Err(ShortFile(_)) => {},
+        _ => panic("empty file should be ShortFile"),
+    }
+}
+
+fn zero_page_size_rejected() {
+    let buf: List<Byte> = page_of(0 as Byte, 64);
+    match wal_scan(buf.as_slice(), 0) {
+        Err(ZeroPageSize) => {},
+        _ => panic("page_size=0 should be ZeroPageSize"),
+    }
+}
+
+fn corrupt_header_refused() {
+    let mut wal = build_wal(512, 0, 1);
+    // Flip a byte inside the salt_1 field (offset 16..19) — every
+    // subsequent frame's salt-comparison would still match against the
+    // tampered header, so the header checksum is the *only* invariant
+    // protecting against this attack.
+    wal[18] = (wal[18] ^ 0xFF) as Byte;
+    match wal_scan(wal.as_slice(), 512) {
+        Err(BadMagic) => {},
+        _ => panic("tampered header must be refused"),
+    }
+}
+
+fn three_valid_frames_one_commit() {
+    // Frames 0, 1, 2 — commit at index 1. Frame 2 is uncommitted (its
+    // cksum chains correctly off frame 1 but lies past the last
+    // commit) → should NOT appear in the page map.
+    let wal = build_wal(512, 1, 3);
+    match wal_scan(wal.as_slice(), 512) {
+        Ok(plan) => {
+            assert(plan.valid_frame_count == 3);
+            assert(plan.last_commit_index == 1);
+            assert(plan.db_size_after == 1);
+            assert(plan_has_recoverable_commit(&plan));
+            // Pages 1 and 2 are at-or-before the commit; page 3 is past.
+            assert(plan.page_map.contains_key(&1));
+            assert(plan.page_map.contains_key(&2));
+            assert(!plan.page_map.contains_key(&3));
+        }
+        Err(_) => panic("3-frame valid wal should scan cleanly"),
+    }
+}
+
+fn no_commit_no_recovery() {
+    // 2 frames, no commit anywhere. The plan must report no recoverable
+    // content and the page_map must be empty.
+    let wal = build_wal(512, -1, 2);
+    match wal_scan(wal.as_slice(), 512) {
+        Ok(plan) => {
+            assert(plan.last_commit_index == -1);
+            assert(!plan_has_recoverable_commit(&plan));
+            assert(plan.page_map.len() == 0);
+        }
+        Err(_) => panic("no-commit wal should parse but yield no recovery"),
+    }
+}
+
+fn torn_tail_truncates() {
+    // A WAL with 2 valid frames + a torn third (one cksum byte flipped)
+    // must report the first 2 frames and stop at the torn one.
+    let mut wal = build_wal(512, 1, 3);
+    // Find offset of frame 2's cksum_1 (4 bytes at frame_header[16..19]).
+    // 24 = WAL_FRAME_HEADER_SIZE; 32 = WAL_HEADER_SIZE.
+    let frame_stride: Int = 24 + 512;
+    let frame2_cksum_off: Int = 32 + 2 * frame_stride + 16;
+    wal[frame2_cksum_off] = (wal[frame2_cksum_off] ^ 0xAA) as Byte;
+    match wal_scan(wal.as_slice(), 512) {
+        Ok(plan) => {
+            assert(plan.valid_frame_count == 2);
+            assert(plan.last_commit_index == 1);
+            assert(plan.page_map.contains_key(&1));
+            assert(plan.page_map.contains_key(&2));
+            assert(!plan.page_map.contains_key(&3));
+        }
+        Err(_) => panic("torn-tail should still produce a plan covering the valid prefix"),
+    }
+}
+
+fn main() {
+    empty_or_short_file();
+    zero_page_size_rejected();
+    corrupt_header_refused();
+    three_valid_frames_one_commit();
+    no_commit_no_recovery();
+    torn_tail_truncates();
+    print("wal_recovery typecheck ok");
+}
