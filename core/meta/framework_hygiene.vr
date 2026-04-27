@@ -216,7 +216,8 @@ public fn validate_meta_classifier_uniqueness(
     let mut msg: Text = Text.from("multiple meta-classifier frameworks detected: ");
     let mut i: Int = 0;
     while i < tally.candidates.len() as Int {
-        let name = (*tally.candidates.get(i as Int).unwrap()).clone();
+        let name = (*tally.candidates.get(i as Int)
+            .expect("R3: i < tally.candidates.len() by while-condition")).clone();
         msg = msg.concat(name);
         if i + 1 < tally.candidates.len() as Int {
             msg = msg.concat(", ");
@@ -256,7 +257,8 @@ public fn run_all_hygiene_rules(
     // R1 — foundation-neutral names
     let mut i: Int = 0;
     while i < declarations.len() as Int {
-        let pair = (*declarations.get(i as Int).unwrap()).clone();
+        let pair = (*declarations.get(i as Int)
+            .expect("R1: i < declarations.len() by while-condition")).clone();
         match validate_foundation_neutral_name(pair.0, pair.1) {
             Maybe.Some(d) => diagnostics.push(d),
             Maybe.None    => {},
@@ -267,7 +269,8 @@ public fn run_all_hygiene_rules(
     // R2 — ε-coordinate canonicalisable
     i = 0;
     while i < epsilon_uses.len() as Int {
-        let pair = (*epsilon_uses.get(i as Int).unwrap()).clone();
+        let pair = (*epsilon_uses.get(i as Int)
+            .expect("R2: i < epsilon_uses.len() by while-condition")).clone();
         match validate_epsilon_canonicalisable(pair.0, pair.1) {
             Maybe.Some(d) => diagnostics.push(d),
             Maybe.None    => {},
