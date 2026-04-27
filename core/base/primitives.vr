@@ -616,7 +616,7 @@ fn format_radix_signed(n: Int, radix: Int) -> Text {
     let mut digits = List<Char>.new();
     while mag > (0 as UInt64) {
         let digit = (mag % radix_u) as Int;
-        digits.push(hex_chars.nth_char(digit).unwrap());
+        digits.push(hex_chars.nth_char(digit).expect("format_radix_signed: digit < radix ≤ hex_chars.len() guaranteed by caller (radix in 2..=16)"));
         mag = mag / radix_u;
     }
 
