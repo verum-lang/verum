@@ -40,12 +40,32 @@ mount core.intrinsics.spin_hint;
 // =============================================================================
 
 // Read-write lock allowing multiple readers or one writer.
+//
+// **Fairness model: writer-preferred.**  When at least one
+// writer is queued (`writers_waiting > 0`), incoming readers
+// step aside and sleep on the futex even if they could
+// otherwise CAS the reader count up.  This prevents the
+// classic readers-preferred starvation pattern where a steady
+// stream of new readers keeps the state positive and writers
+// never observe the `state == 0` window they need.  The cost
+// is mild reader latency under sustained writer pressure;
+// the benefit is bounded writer wait-time.
+//
+// `writers_waiting` is incremented by `write()` BEFORE its
+// futex_wait registration (Release, paired with the
+// `read()`-side Acquire load) and decremented after the CAS
+// from 0 → WRITE_LOCKED succeeds (or after we exit the loop
+// via giving up — none of the current paths give up, but
+// future try_write_for_timeout would).
 public type RwLock<T> is {
     // State encoding:
     // - 0: unlocked
     // - positive: number of readers
     // - -1: write locked
     state: AtomicInt,
+    // Number of writers blocked in write() awaiting state==0.
+    // Readers must yield to queued writers.
+    writers_waiting: AtomicInt,
     data: T,
     poisoned: AtomicBool,
 };
@@ -57,17 +77,27 @@ implement<T> RwLock<T> {
     public fn new(data: T) -> RwLock<T> {
         RwLock {
             state: AtomicInt.new(0),
+            writers_waiting: AtomicInt.new(0),
             data: data,
             poisoned: AtomicBool.new(false),
         }
     }
 
     // Acquire read lock.
-    // Blocks via futex until no writer holds the lock.
+    //
+    // Blocks via futex until no writer holds the lock AND no writer
+    // is queued. The "no writer queued" check is the writer-preference
+    // gate: when `writers_waiting > 0`, incoming readers step aside
+    // and sleep, letting the queued writer drain the reader pile and
+    // acquire the lock. Without this gate a steady stream of new
+    // readers could keep `state` positive indefinitely and starve
+    // every writer.
     public fn read(&self) -> LockResult<RwLockReadGuard<T>> {
         loop {
             let state = self.state.load(MemoryOrdering.Acquire);
-            if state >= 0 {
+            // Yield to any queued writer (writer-preference fairness).
+            let queued_writers = self.writers_waiting.load(MemoryOrdering.Acquire);
+            if state >= 0 && queued_writers == 0 {
                 // Try to increment reader count
                 if self.state.compare_exchange(state, state + 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
                     let guard = RwLockReadGuard { rwlock: self };
@@ -77,16 +107,23 @@ implement<T> RwLock<T> {
                     return Ok(guard);
                 }
             } else {
-                // Writer present — sleep via futex until state changes
+                // Writer present OR queued — sleep via futex until state changes.
+                // futex_wait checks state.value == state and returns
+                // EAGAIN if it doesn't match (covers the race where
+                // state changes between our load and our wait).
                 let _ = sys_futex_wait(&self.state.value, state, None);
             }
         }
     }
 
     // Try to acquire read lock without blocking.
+    //
+    // Honours the writer-preference gate identically to `read()`:
+    // returns `WouldBlock` when a writer is queued even if `state >= 0`.
     public fn try_read(&self) -> TryLockResult<RwLockReadGuard<T>> {
         let state = self.state.load(MemoryOrdering.Acquire);
-        if state >= 0 {
+        let queued_writers = self.writers_waiting.load(MemoryOrdering.Acquire);
+        if state >= 0 && queued_writers == 0 {
             if self.state.compare_exchange(state, state + 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
                 let guard = RwLockReadGuard { rwlock: self };
                 if self.poisoned.load(MemoryOrdering.Acquire) {
@@ -99,12 +136,21 @@ implement<T> RwLock<T> {
     }
 
     // Acquire write lock.
+    //
     // Blocks via futex until no readers or writers hold the lock.
+    // Increments `writers_waiting` on entry to gate incoming readers
+    // (writer-preference fairness — see `read()` doc). The counter
+    // is decremented exactly once: on successful CAS into
+    // WRITE_LOCKED state. The `Release` ordering on the increment
+    // synchronises-with the `Acquire` load in `read()` / `try_read()`
+    // so an incoming reader observing our registration yields.
     public fn write(&self) -> LockResult<RwLockWriteGuard<T>> {
+        self.writers_waiting.fetch_add(1, MemoryOrdering.Release);
         loop {
             let state = self.state.load(MemoryOrdering.Acquire);
             if state == 0 {
                 if self.state.compare_exchange(0, WRITE_LOCKED, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
+                    self.writers_waiting.fetch_sub(1, MemoryOrdering.Release);
                     let guard = RwLockWriteGuard { rwlock: self };
                     if self.poisoned.load(MemoryOrdering.Acquire) {
                         return Err(PoisonError.new(guard));
