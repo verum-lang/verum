@@ -128,7 +128,10 @@ public fn encode(input: &[Byte], out: &mut List<Byte>) {
 // =============================================================================
 
 public fn decode(input: &[Byte]) -> Result<List<Byte>, HuffError> {
-    let mut out: List<Byte> = [];
+    // Huffman decode expansion ratio: HPACK Huffman codes 256-symbol
+    // alphabet at ~5 bits average, so output ≈ 8/5 × input. Round up
+    // and pre-allocate.
+    let mut out: List<Byte> = List.with_capacity((input.len() * 8) / 5 + 4);
     let mut state: Int = 0;     // root
     let mut accum: UInt64 = 0_u64;
     let mut abits: Int = 0;
