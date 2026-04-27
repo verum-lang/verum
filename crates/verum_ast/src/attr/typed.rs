@@ -4950,6 +4950,123 @@ impl std::fmt::Display for FrameworkAttr {
 }
 
 // =============================================================================
+// FRAMEWORK BRIDGE TRANSLATION (VVA Task C7b enabler, V8.1 #196 follow-up)
+//
+// `@framework_translate(source, target, "<bridge-citation>")` annotates a
+// trusted-boundary axiom that bridges two Standard frameworks. Used by
+// the OC bridges in `core/theory_interop/bridges/<source>_to_<target>.vr`
+// (e.g., `owl2_to_htt.vr`) so the audit + export tooling can identify
+// inter-framework translation axioms separately from regular intra-
+// framework `@framework(name, "citation")` axioms.
+//
+// Replaces the V1 workaround of using `@framework(<source>, "Bridge ...")`
+// to mark cross-framework axioms — that overload conflated intra- and
+// inter-framework attribution. The typed `@framework_translate` makes
+// the source → target intent first-class.
+//
+// Grammar shape: `@framework_translate(<source-ident>, <target-ident>, "<citation>")`.
+// =============================================================================
+
+/// VVA Task C7b — typed cross-framework bridge attribution.
+///
+/// Marks a trusted-boundary axiom whose role is to translate between
+/// two Standard frameworks. Both `source` and `target` are framework
+/// identifiers (matching files under `core/math/frameworks/<id>.vr`).
+/// `citation` is a free-form string explaining the bridge image.
+///
+/// Used by the cross-framework bridges in
+/// `core/theory_interop/bridges/<source>_to_<target>.vr`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FrameworkTranslateAttr {
+    /// Source framework identifier (e.g., `owl2_fs`).
+    pub source: Text,
+    /// Target framework identifier (e.g., `lurie_htt`).
+    pub target: Text,
+    /// Citation describing the bridge image (e.g., `"Class → Presheaf"`).
+    pub citation: Text,
+    /// Source span of the `@framework_translate(...)` form.
+    pub span: Span,
+}
+
+impl FrameworkTranslateAttr {
+    /// Construct directly. Prefer `from_attribute` at parse time.
+    pub fn new(source: Text, target: Text, citation: Text, span: Span) -> Self {
+        Self {
+            source,
+            target,
+            citation,
+            span,
+        }
+    }
+
+    /// Try to extract a `FrameworkTranslateAttr` from a generic
+    /// `Attribute`. Returns `None` when the attribute name is not
+    /// `"framework_translate"` or the argument shape does not match
+    /// `(source-ident, target-ident, string-literal)`.
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("framework_translate") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None => return Maybe::None,
+        };
+        if args.len() != 3 {
+            return Maybe::None;
+        }
+        use crate::expr::{Expr, ExprKind};
+        use crate::literal::{LiteralKind, StringLit};
+        let extract_ident = |idx: usize| -> Option<Text> {
+            match args.get(idx) {
+                Some(Expr {
+                    kind: ExprKind::Path(path),
+                    ..
+                }) => path.segments.last().and_then(|seg| match seg {
+                    crate::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                    _ => None,
+                }),
+                _ => None,
+            }
+        };
+        let source = extract_ident(0);
+        let target = extract_ident(1);
+        let citation: Option<Text> = match args.get(2) {
+            Some(Expr {
+                kind: ExprKind::Literal(lit),
+                ..
+            }) => match &lit.kind {
+                LiteralKind::Text(StringLit::Regular(s))
+                | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        match (source, target, citation) {
+            (Some(s), Some(t), Some(c)) => {
+                Maybe::Some(FrameworkTranslateAttr::new(s, t, c, attr.span))
+            }
+            _ => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for FrameworkTranslateAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for FrameworkTranslateAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "@framework_translate({}, {}, \"{}\")",
+            self.source, self.target, self.citation
+        )
+    }
+}
+
+// =============================================================================
 // ENACTMENT ATTRIBUTION (VVA §11.4)
 //
 // `@enact(epsilon = "ε_prove")` tags a function / theorem / lemma / axiom

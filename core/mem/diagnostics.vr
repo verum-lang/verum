@@ -1,0 +1,233 @@
+// =============================================================================
+// mem/diagnostics.vr - Read-only Introspection Surface for CBGR State
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: mem/header, mem/capability
+// =============================================================================
+//
+// The diagnostics module exposes structural views of CBGR-managed memory
+// for post-mortem dumps, runtime monitoring, and (eventually) live
+// debugger / observer integrations such as JFR / tokio-console / Erlang
+// :observer.  It deliberately surfaces NO mutation: every type here is a
+// snapshot, captured under Acquire-ordered atomic loads so observed
+// values are consistent with respect to the happens-before that includes
+// the most recent generation/epoch/refcount writer.
+//
+// # Anti-goals
+//
+// - No reflection / type-erasure escape hatch that would break CBGR.
+//   `HeaderView` summarises numerically (generation, size, type_id) but
+//   does NOT yield a raw `&unsafe T` pointer.
+// - No global mutable state.  Diagnostic handles are scoped values that
+//   the caller drops when done.
+// - Zero overhead when not subscribed.  All readers are inlinable and
+//   the module is feature-gated via `@cfg(feature = "diagnostics")`
+//   for builds that want to strip it (e.g. embedded targets).
+//
+// # Placement in the runtime
+//
+// This module sits below the user-facing `core::diagnostics` (TODO,
+// future PR), which will compose `mem::diagnostics`, `async::diagnostics`,
+// and tracing/metrics into a single observability surface.
+//
+// Spec: docs/architecture/observability.md (TODO)
+// =============================================================================
+
+module core.mem.diagnostics;
+
+mount super.header.{AllocationHeader, HEADER_SIZE};
+mount super.capability.{
+    CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE, CAP_OWNED,
+    has_capability,
+};
+
+// =============================================================================
+// HeaderView — snapshot of an AllocationHeader's fields
+// =============================================================================
+
+/// Read-only snapshot of an `AllocationHeader`'s fields.  Independent
+/// of generic type T so it can be stored in heterogeneous diagnostic
+/// containers (e.g. a global allocation index keyed by user-pointer
+/// address).
+///
+/// All fields are captured atomically under Acquire ordering — see
+/// `from_header` for the exact memory-ordering contract.
+public type HeaderView is {
+    /// Generation counter at observation time.  Used by CBGR to detect
+    /// use-after-free; observers can tag log entries with this value to
+    /// reconstruct the lifetime ordering of references in a panic dump.
+    generation:   UInt32,
+
+    /// Epoch counter at observation time.  Lower 16 bits of
+    /// `epoch_and_caps`; advances on generation wraparound.
+    epoch:        UInt16,
+
+    /// Capability mask (upper 16 bits of `epoch_and_caps`).  Bit set
+    /// iff the corresponding capability is currently granted.
+    capabilities: UInt16,
+
+    /// Allocation payload size in bytes (excluding the 32-byte header).
+    size:         UInt32,
+
+    /// Required alignment for the payload.  Always a power of two.
+    alignment:    UInt32,
+
+    /// Runtime type identifier.  Used by debug builds to symbolicate
+    /// allocations in dumps; production builds may compress to 0.
+    type_id:      UInt32,
+
+    /// Allocation-state flag bitmap (FLAG_PINNED, FLAG_LEAKED, …).
+    flags:        UInt32,
+
+    /// Outstanding reference count.  Counts owners, not borrowed
+    /// references — borrows do not modify this field.
+    ref_count:    UInt32,
+};
+
+implement HeaderView {
+    /// Capture a snapshot of a header.
+    ///
+    /// # Memory ordering
+    ///
+    /// `generation` and `epoch` are read via the existing
+    /// `load_generation_epoch_fast` (Acquire on generation, Relaxed
+    /// on epoch — generation's fence subsumes epoch's adjacency).
+    /// Capabilities, size, alignment, type_id, flags, and ref_count
+    /// follow with Acquire-ordered atomics where the field is
+    /// concurrently mutated and direct field reads where it is not
+    /// (size / alignment / type_id are write-once at construction).
+    ///
+    /// The snapshot is therefore consistent with-respect-to a
+    /// happens-before that includes the most recent
+    /// `increment_generation` / `try_revoke` / `attenuate_capabilities`
+    /// /  `increment_ref_count` writer.  Two callers observing the
+    /// same allocation under contention may see different snapshots,
+    /// which is the correct semantic for monitoring (the snapshot
+    /// reflects the moment-of-observation state, not a single
+    /// totally-ordered global view).
+    public fn from_header(header: &AllocationHeader) -> HeaderView {
+        let (generation, epoch) = header.load_generation_epoch_fast();
+        HeaderView {
+            generation:   generation,
+            epoch:        epoch,
+            capabilities: header.load_capabilities(),
+            size:         header.get_size(),
+            alignment:    header.get_alignment(),
+            type_id:      header.get_type_id(),
+            flags:        header.flags,
+            ref_count:    header.load_ref_count(),
+        }
+    }
+
+    /// Capture a snapshot starting from a user-data pointer (the
+    /// pointer stored in ThinRef / FatRef).  Walks back to the
+    /// AllocationHeader at offset -HEADER_SIZE.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` MUST be a CBGR-managed user pointer (i.e. produced by
+    /// the heap allocator).  Calling this on a non-CBGR pointer
+    /// dereferences arbitrary memory at offset -32.
+    public unsafe fn from_user_ptr(ptr: &unsafe Byte) -> HeaderView {
+        let header = AllocationHeader.from_user_ptr(ptr);
+        HeaderView.from_header(header)
+    }
+
+    /// True iff the read capability is currently granted.
+    @inline
+    public fn can_read(&self) -> Bool {
+        has_capability(self.capabilities, CAP_READ)
+    }
+
+    /// True iff the write capability is currently granted.
+    @inline
+    public fn can_write(&self) -> Bool {
+        has_capability(self.capabilities, CAP_WRITE)
+    }
+
+    /// True iff the mutable capability is currently granted.
+    @inline
+    public fn can_mutate(&self) -> Bool {
+        has_capability(self.capabilities, CAP_MUTABLE)
+    }
+
+    /// True iff the revoke capability is currently granted.
+    @inline
+    public fn can_revoke(&self) -> Bool {
+        has_capability(self.capabilities, CAP_REVOKE)
+    }
+
+    /// Total allocation footprint in bytes (header + payload).
+    @inline
+    public fn total_bytes(&self) -> Int {
+        HEADER_SIZE + self.size as Int
+    }
+}
+
+implement Display for HeaderView {
+    /// Single-line summary suitable for log lines.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"alloc[gen={self.generation},epoch={self.epoch},size={self.size},cap=0x{self.capabilities},refs={self.ref_count}]")
+    }
+}
+
+implement Debug for HeaderView {
+    /// Multi-line dump suitable for panic post-mortems.
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("AllocationHeader {\n")?;
+        f.write_str(f"  generation:   {self.generation}\n")?;
+        f.write_str(f"  epoch:        {self.epoch}\n")?;
+        f.write_str(f"  capabilities: 0x{self.capabilities} (read={self.can_read()}, write={self.can_write()}, mutable={self.can_mutate()}, revoke={self.can_revoke()})\n")?;
+        f.write_str(f"  size:         {self.size} bytes\n")?;
+        f.write_str(f"  alignment:    {self.alignment}\n")?;
+        f.write_str(f"  type_id:      {self.type_id}\n")?;
+        f.write_str(f"  flags:        0x{self.flags}\n")?;
+        f.write_str(f"  ref_count:    {self.ref_count}\n")?;
+        f.write_str(f"  total_bytes:  {self.total_bytes()}\n")?;
+        f.write_str("}")
+    }
+}
+
+// =============================================================================
+// Public diagnostic functions
+// =============================================================================
+
+/// Capture a HeaderView snapshot of the allocation backing the given
+/// user-data pointer.  Returns `None` if `ptr` is null.
+///
+/// # Safety
+///
+/// `ptr` MUST be a CBGR-managed pointer (produced by the heap
+/// allocator) when non-null.  This function is the recommended entry
+/// point for panic handlers and debug-print helpers because it
+/// short-circuits on null without dereferencing.
+public unsafe fn header_view_of(ptr: &unsafe Byte) -> Maybe<HeaderView> {
+    if (ptr as Int) == 0 {
+        return None;
+    }
+    Some(HeaderView.from_user_ptr(ptr))
+}
+
+/// Format a HeaderView as a panic-context block.  Two-space indented
+/// so it composes naturally with multi-line panic messages:
+///
+///   panic(f"use-after-free at {ptr}\n{format_panic_context(view)}");
+///
+/// The block is single-allocation: callers in OOM scenarios should
+/// prefer `Display` (single-line) over this function.
+implement HeaderView {
+    /// Format as a panic-context block.  Two-space indented so it
+    /// composes naturally with multi-line panic messages.  Single
+    /// allocation per call so callers in OOM scenarios should prefer
+    /// `Display` (single-line) when possible.
+    public fn format_panic_context(&self) -> Text {
+        let mut out: Text = "  CBGR header view at panic site:\n".clone();
+        out = out + f"    generation:   {self.generation}\n";
+        out = out + f"    epoch:        {self.epoch}\n";
+        out = out + f"    capabilities: 0x{self.capabilities}\n";
+        out = out + f"    size:         {self.size} bytes\n";
+        out = out + f"    type_id:      {self.type_id}\n";
+        out = out + f"    ref_count:    {self.ref_count}";
+        out
+    }
+}

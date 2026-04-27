@@ -403,6 +403,47 @@ public fn atomic_fetch_add_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) ->
 public fn atomic_fetch_sub_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
 
 // -----------------------------------------------------------------------------
+// u8 RMW closure (#100, task #34) — bitwise + xchg + cas.
+//
+// Closes the gap that core/sync/atomic.vr's AtomicU8 was
+// papering over with u32-aligned CAS-loop emulation
+// (structurally unsound in mixed-field layouts — see
+// commit 228ea664 for the full rationale).  Same compiler-
+// side pattern as task #24's fetch_add_u8/sub_u8 closure.
+// -----------------------------------------------------------------------------
+
+/// Atomic fetch-and-and for UInt8.
+@intrinsic("atomic_fetch_and_u8")
+@vbc_direct_lowering
+public fn atomic_fetch_and_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
+
+/// Atomic fetch-and-or for UInt8.
+@intrinsic("atomic_fetch_or_u8")
+@vbc_direct_lowering
+public fn atomic_fetch_or_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
+
+/// Atomic fetch-and-xor for UInt8.
+@intrinsic("atomic_fetch_xor_u8")
+@vbc_direct_lowering
+public fn atomic_fetch_xor_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
+
+/// Atomic exchange for UInt8.
+@intrinsic("atomic_exchange_u8")
+@vbc_direct_lowering
+public fn atomic_exchange_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
+
+/// Atomic compare-and-swap for UInt8.
+@intrinsic("atomic_cas_u8")
+@vbc_direct_lowering
+public fn atomic_cas_u8(
+    ptr: *mut UInt8,
+    expected: UInt8,
+    desired: UInt8,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (UInt8, Bool);
+
+// -----------------------------------------------------------------------------
 // Symmetric coverage closure (#100, task #24)
 // -----------------------------------------------------------------------------
 

@@ -41,7 +41,10 @@ mount core.intrinsics.atomic.{
     // Typed atomic fetch operations (per-width)
     atomic_fetch_add_u8, atomic_fetch_add_u32, atomic_fetch_add_u64,
     atomic_fetch_sub_u8, atomic_fetch_sub_u32, atomic_fetch_sub_u64,
-    atomic_fetch_and_u64, atomic_fetch_or_u64,
+    atomic_fetch_and_u8, atomic_fetch_and_u64,
+    atomic_fetch_or_u8, atomic_fetch_or_u64,
+    atomic_fetch_xor_u8,
+    atomic_exchange_u8, atomic_cas_u8,
 };
 mount core.intrinsics.platform.{spin_hint};
 
@@ -331,27 +334,22 @@ implement AtomicU8 {
     }
 
     // Swap value, returning old value.
-    // Uses u32-aligned CAS loop for true atomicity on sub-word types.
+    //
+    // Direct `atomic_exchange_u8` intrinsic (registered
+    // compiler-side in task #34).  Earlier revision used a
+    // u32-aligned CAS loop with byte-masking — same structural-
+    // soundness hazard as `fetch_add` (see below), now closed.
     public fn swap(&self, val: Byte, order: MemoryOrdering) -> Byte {
-        let order_u8 = ordering_to_u8(order);
-        // Align down to 4-byte boundary for u32 CAS
-        let byte_ptr = &self.value as *const Byte as Int;
-        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
-        let byte_offset = (byte_ptr & 3) as UInt32;
-        let shift = byte_offset * 8;
-        let mask: UInt32 = 0xFF << shift;
-        loop {
-            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
-            let new_word = (word & !mask) | (((val as UInt32) & 0xFF) << shift);
-            let (old_word, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
-            if success {
-                return ((old_word >> shift) & 0xFF) as Byte;
-            }
-        }
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        atomic_exchange_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
     }
 
     // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
-    // Uses u32-aligned word-level CAS with byte masking for true atomicity.
+    //
+    // Direct `atomic_cas_u8` intrinsic (registered compiler-side
+    // in task #34).  Earlier revision used a u32-aligned word-
+    // level CAS with byte masking — same structural-soundness
+    // hazard as `fetch_add` (see below), now closed.
     public fn compare_exchange(
         &self,
         current: Byte,
@@ -359,25 +357,18 @@ implement AtomicU8 {
         success: MemoryOrdering,
         failure: MemoryOrdering
     ) -> Result<Byte, Byte> {
-        let byte_ptr = &self.value as *const Byte as Int;
-        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
-        let byte_offset = (byte_ptr & 3) as UInt32;
-        let shift = byte_offset * 8;
-        let mask: UInt32 = 0xFF << shift;
-        let success_u8 = ordering_to_u8(success);
-        let failure_u8 = ordering_to_u8(failure);
-        loop {
-            let word = atomic_load_u32(aligned_ptr as *const UInt32, failure_u8);
-            let actual_byte = ((word >> shift) & 0xFF) as Byte;
-            if actual_byte != current {
-                return Err(actual_byte);
-            }
-            let new_word = (word & !mask) | (((new as UInt32) & 0xFF) << shift);
-            let (_, did_swap) = atomic_cas_u32(aligned_ptr, word, new_word, success_u8, failure_u8);
-            if did_swap {
-                return Ok(current);
-            }
-            // Word changed by another thread on a different byte — retry
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        let (actual, did_swap) = atomic_cas_u8(
+            ptr,
+            current as UInt8,
+            new as UInt8,
+            ordering_to_u8(success),
+            ordering_to_u8(failure),
+        );
+        if did_swap {
+            Ok(current)
+        } else {
+            Err(actual as Byte)
         }
     }
 
@@ -410,62 +401,34 @@ implement AtomicU8 {
 
     // Atomic fetch-or, returns old value.
     //
-    // **Structural-soundness caveat (deferred fix)**: this
-    // path uses a u32-aligned CAS loop with byte-masking
-    // because the compiler-side `atomic_fetch_or_u8` intrinsic
-    // is not yet registered.  The load_u32 reads 3 bytes
-    // BELONGING TO ADJACENT FIELDS in the enclosing struct;
-    // concurrent writes to those neighbour bytes by other
-    // threads cause our CAS to retry (functional but slower
-    // than direct u8) AND can observe torn reads of
-    // neighbour data if those bytes are NOT themselves
-    // accessed via the same atomic protocol.  The right fix
-    // is registering `atomic_fetch_or_u8` /
-    // `atomic_fetch_and_u8` / `atomic_fetch_xor_u8`
-    // compiler-side and switching to direct intrinsics —
-    // tracked as a follow-up to task #24's atomic-completeness
-    // work.  For struct layouts where AtomicU8 is in a
-    // dedicated cache-line slot, the CAS loop is sound; for
-    // mixed-field layouts callers should ensure no foreign
-    // writes target the same word.
+    // Direct `atomic_fetch_or_u8` intrinsic (registered
+    // compiler-side in task #34).  Earlier revision used a
+    // u32-aligned CAS loop with byte-masking — same structural-
+    // soundness hazard as `fetch_add` (the load_u32 reads 3
+    // bytes belonging to adjacent fields, foreign writes to
+    // those bytes caused indefinite retry + torn-read risk).
+    // Now closed via direct u8 atomicrmw.
     public fn fetch_or(&self, val: Byte, order: MemoryOrdering) -> Byte {
-        let byte_ptr = &self.value as *const Byte as Int;
-        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
-        let byte_offset = (byte_ptr & 3) as UInt32;
-        let shift = byte_offset * 8;
-        let mask: UInt32 = 0xFF << shift;
-        let order_u8 = ordering_to_u8(order);
-        loop {
-            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
-            let old_byte = ((word >> shift) & 0xFF) as Byte;
-            let new_byte = ((old_byte as UInt32 | val as UInt32) & 0xFF) as UInt32;
-            let new_word = (word & !mask) | (new_byte << shift);
-            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
-            if success {
-                return old_byte;
-            }
-        }
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        atomic_fetch_or_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
     }
 
     // Atomic fetch-and, returns old value.
-    // Uses u32-aligned CAS loop for true atomicity.
+    //
+    // Direct `atomic_fetch_and_u8` intrinsic — same rationale
+    // as `fetch_or` above.
     public fn fetch_and(&self, val: Byte, order: MemoryOrdering) -> Byte {
-        let byte_ptr = &self.value as *const Byte as Int;
-        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
-        let byte_offset = (byte_ptr & 3) as UInt32;
-        let shift = byte_offset * 8;
-        let mask: UInt32 = 0xFF << shift;
-        let order_u8 = ordering_to_u8(order);
-        loop {
-            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
-            let old_byte = ((word >> shift) & 0xFF) as Byte;
-            let new_byte = ((old_byte as UInt32 & val as UInt32) & 0xFF) as UInt32;
-            let new_word = (word & !mask) | (new_byte << shift);
-            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
-            if success {
-                return old_byte;
-            }
-        }
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        atomic_fetch_and_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
+    }
+
+    // Atomic fetch-xor, returns old value.
+    //
+    // Direct `atomic_fetch_xor_u8` intrinsic — same rationale
+    // as `fetch_or` above.
+    public fn fetch_xor(&self, val: Byte, order: MemoryOrdering) -> Byte {
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        atomic_fetch_xor_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
     }
 
     // Get mutable reference to underlying value.
