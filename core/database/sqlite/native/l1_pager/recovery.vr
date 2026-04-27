@@ -108,14 +108,20 @@ public fn wal_scan(
         i = i + 1;
     }
     let mut running = wal_running_checksum(
-        WalChecksum { s1: 0 as UInt32, s2: 0 as UInt32 },
-        &seed,
+        WalChecksum { s1: 0_u32, s2: 0_u32 },
+        seed.as_slice(),
     );
 
-    // We don't verify the header checksum against the stored values
-    // directly — the header is already sound if it parsed, and the
-    // running state must simply be continued.
-    let _ = running;
+    // Validate the header's own checksum-of-self. A header whose stored
+    // (cksum_1, cksum_2) doesn't match the running state we just
+    // computed is corrupted at rest — refuse the entire WAL rather
+    // than silently recovering against a tampered salt/page_size pair
+    // (which would mis-classify every subsequent frame's salt
+    // comparison and could allow an attacker to swap salts to bypass
+    // the torn-tail invariant).
+    if running.s1 != header.checksum_1 || running.s2 != header.checksum_2 {
+        return Err(BadMagic);
+    }
 
     let frame_stride = WAL_FRAME_HEADER_SIZE + page_size;
     let mut offset: Int = WAL_HEADER_SIZE;
@@ -158,7 +164,7 @@ public fn wal_scan(
         }
         let new_running = wal_running_checksum(
             WalChecksum { s1: running.s1, s2: running.s2 },
-            &chk_bytes,
+            chk_bytes.as_slice(),
         );
 
         if new_running.s1 != fh.checksum_1 || new_running.s2 != fh.checksum_2 {
