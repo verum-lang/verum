@@ -288,7 +288,8 @@ fn insert_route(
                     });
                     match &mut node.param_child {
                         Some(e) => e,
-                        None => unreachable(),
+                        // Just stored Some(...) on the previous line.
+                        None => unreachable("Router insert_route: node.param_child must be Some immediately after assignment"),
                     }
                 }
             };
