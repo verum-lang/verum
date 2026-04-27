@@ -22,6 +22,7 @@ mod commands;
 mod config;
 mod error;
 mod feature_overrides;
+mod script;
 mod tier;
 mod cog;
 mod cog_manager;
@@ -896,8 +897,22 @@ enum Commands {
         /// (Framework, ν, τ) per VVA §10.4. Reads the same source as
         /// `--framework-axioms` and additionally annotates each
         /// framework with its Diakrisis ν-rank and intensional flag.
+        ///
+        /// V8.1 (#222 follow-up): the per-theorem coord audit is
+        /// **default-on** per `verification-architecture.md` §A.Z.4.
+        /// Bare `verum audit` runs dependency-audit + coord-audit
+        /// together; pass `--no-coord` to skip the coord pass.
+        /// `--coord` (this flag) keeps its legacy meaning of
+        /// "coord-only" mode (skips dependency audit).
         #[clap(long)]
         coord: bool,
+
+        /// V8.1 (#222 follow-up): skip the per-theorem coord audit
+        /// that bare `verum audit` runs by default. Honoured only
+        /// in the default (no-specific-audit-flag) dispatch path —
+        /// other specific audit modes ignore it.
+        #[clap(long)]
+        no_coord: bool,
 
         /// Articulation Hygiene audit (VVA §13.3, F3): walk every type
         /// and function declaration, classify each self-referential
@@ -907,6 +922,15 @@ enum Commands {
         /// @corecursive surfaces.
         #[clap(long)]
         hygiene: bool,
+
+        /// V2 (#196) — Articulation Hygiene strict enforcement
+        /// (VVA §13.3 V2): walk every top-level free function body
+        /// and reject raw `self` occurrences with
+        /// `E_HYGIENE_UNFACTORED_SELF`. Methods (functions with a
+        /// self-receiver param) are skipped — `self` is bound there.
+        /// Exits non-zero on any violation; safe to wire into CI.
+        #[clap(long)]
+        hygiene_strict: bool,
 
         /// OWL 2 classification hierarchy audit (VVA §21.10, F5):
         /// walk every Owl2*Attr in the project, build the
@@ -1232,7 +1256,13 @@ fn main() {
 }
 
 fn main_inner() {
-    let cli = Cli::parse();
+    // Script-mode dispatch: rewrite `verum path/to/file.vr [args…]` into
+    // `verum run path/to/file.vr [args…]` BEFORE clap sees the argv. See
+    // crate::script for the full rationale and invariants. The rewrite is
+    // a no-op for any normal subcommand invocation.
+    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    let argv = script::rewrite_argv_for_script_mode(argv);
+    let cli = Cli::parse_from(argv);
 
     // B14 (#212): --vva-version short-circuit. Print the kernel
     // version stamp and exit cleanly without dispatching a
@@ -2192,7 +2222,9 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_rules,
             epsilon,
             coord,
+            no_coord,
             hygiene,
+            hygiene_strict,
             owl2_classify,
             framework_conflicts,
             accessibility,
@@ -2221,6 +2253,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_coord_with_format(output_format)
             } else if hygiene {
                 commands::audit::audit_hygiene_with_format(output_format)
+            } else if hygiene_strict {
+                commands::audit::audit_hygiene_strict_with_format(output_format)
             } else if owl2_classify {
                 commands::audit::audit_owl2_classify_with_format(output_format)
             } else if framework_conflicts {
@@ -2236,7 +2270,18 @@ fn run_command(cli: Cli) -> Result<()> {
                     fix: false,
                     direct_only,
                 };
-                commands::audit::audit(options)
+                let dep_result = commands::audit::audit(options);
+                // V8.1 (#222 follow-up): per-theorem coord audit is
+                // default-on per VVA §A.Z.4. Skip with --no-coord.
+                if !no_coord {
+                    let coord_result =
+                        commands::audit::audit_coord_with_format(output_format);
+                    // Surface either failure; prefer the dep-audit
+                    // error for backwards compatibility.
+                    dep_result.and(coord_result)
+                } else {
+                    dep_result
+                }
             }
         }
         Commands::Export { to, output } | Commands::ExportProofs { to, output } => {

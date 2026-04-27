@@ -232,6 +232,105 @@ pub use visitor::{
     walk_pattern, walk_stmt, walk_type,
 };
 
+/// What kind of compilation unit a `Module` represents. The vast majority of
+/// modules are libraries; binaries are determined by the presence of a
+/// `fn main()` and the project manifest. Scripts are a third category: a
+/// single source file with a `#!` shebang, optional `// /// script`
+/// frontmatter, and a top-level body that is not required to be wrapped in
+/// `fn main()`. Scripts bypass `verum.toml` discovery and are executed via
+/// `verum run path.vr` (or directly via the shebang chain).
+///
+/// The kind is encoded as a synthetic module attribute (`@![__verum_kind(...)]`)
+/// to avoid breaking the `Module` struct's field layout — there are dozens of
+/// struct-literal construction sites across the codebase. Use
+/// [`CogKind::of`] / [`CogKind::set_on_module`] to inspect or set it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+pub enum CogKind {
+    /// Library cog. Default. No `fn main()` is required; one may exist for
+    /// developer convenience but is not the entry point.
+    #[default]
+    Library,
+    /// Binary cog. `fn main()` is required and is the entry point.
+    Binary,
+    /// Script cog. Single-file, shebang- or frontmatter-detected. Top-level
+    /// statements are allowed and are wrapped in a synthesised
+    /// `fn __verum_script_main()` by the compiler.
+    Script,
+}
+
+impl CogKind {
+    /// Synthetic module attribute name used to encode the cog kind.
+    pub const ATTR_NAME: &'static str = "__verum_kind";
+
+    /// Stable string tag for serialisation (attribute argument value).
+    pub fn as_tag(self) -> &'static str {
+        match self {
+            Self::Library => "library",
+            Self::Binary => "binary",
+            Self::Script => "script",
+        }
+    }
+
+    /// Parse the tag back into a `CogKind`.
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "library" => Some(Self::Library),
+            "binary" => Some(Self::Binary),
+            "script" => Some(Self::Script),
+            _ => None,
+        }
+    }
+
+    /// Resolve the kind of `module` by inspecting its synthetic
+    /// `@![__verum_kind(...)]` attribute. Defaults to [`CogKind::Library`]
+    /// when no such attribute is present.
+    ///
+    /// The attribute carries the tag as a string token. Attribute argument
+    /// representation is introspected via `Debug` formatting rather than a
+    /// typed walk because the attr-arg AST layout intentionally varies
+    /// across attribute kinds; matching on the canonical tag strings keeps
+    /// this resolver decoupled from those evolving shapes.
+    pub fn of(module: &Module) -> Self {
+        for attr in module.attributes.iter() {
+            if attr.name.as_str() != Self::ATTR_NAME {
+                continue;
+            }
+            let dbg = format!("{:?}", attr);
+            if dbg.contains("\"script\"") {
+                return Self::Script;
+            }
+            if dbg.contains("\"binary\"") {
+                return Self::Binary;
+            }
+            if dbg.contains("\"library\"") {
+                return Self::Library;
+            }
+        }
+        Self::Library
+    }
+}
+
+#[cfg(test)]
+mod cog_kind_tests {
+    use super::*;
+    use crate::span::FileId;
+
+    #[test]
+    fn default_module_is_library() {
+        let m = Module::empty(FileId::new(0));
+        assert_eq!(CogKind::of(&m), CogKind::Library);
+        assert!(!m.is_script());
+    }
+
+    #[test]
+    fn tag_round_trip() {
+        for k in [CogKind::Library, CogKind::Binary, CogKind::Script] {
+            assert_eq!(CogKind::from_tag(k.as_tag()), Some(k));
+        }
+        assert_eq!(CogKind::from_tag("nonsense"), None);
+    }
+}
+
 /// The root of an AST - a complete module or file.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Module {
@@ -278,6 +377,13 @@ impl Module {
             file_id,
             span: Span::new(0, 0, file_id),
         }
+    }
+
+    /// True iff this module was parsed in script mode. Scripts allow
+    /// top-level statements without an enclosing `fn main()`. Encoded as a
+    /// synthetic `@![__verum_kind("script")]` attribute (see [`CogKind`]).
+    pub fn is_script(&self) -> bool {
+        matches!(CogKind::of(self), CogKind::Script)
     }
 
     /// Check if this module has the @![no_implicit_prelude] attribute.
