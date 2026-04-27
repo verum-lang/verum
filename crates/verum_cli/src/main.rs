@@ -956,7 +956,7 @@ enum Commands {
         #[clap(long)]
         owl2_classify: bool,
 
-        /// Framework-compatibility audit (#197 V0): walk every
+        /// Framework-compatibility audit walk every
         /// `@framework(corpus, ...)` marker in the project, collect
         /// the distinct corpus identifiers, and check the well-known
         /// incompatibility matrix (uip ⊥ univalence, anti_classical
@@ -1322,7 +1322,7 @@ fn main_inner() {
     let argv = script::rewrite_argv_for_script_mode(argv);
     let cli = Cli::parse_from(argv);
 
-    // B14 (#212): --vva-version short-circuit. Print the kernel
+    // B14 --vva-version short-circuit. Print the kernel
     // version stamp and exit cleanly without dispatching a
     // subcommand. Tooling integrations (CI, certificate emitters,
     // cross-tool replay matrix) read this single line as their
@@ -1401,7 +1401,7 @@ fn resolve_path(path: Option<&Text>) -> Result<PathTarget> {
     let fs_path = std::path::Path::new(project_path.as_str());
 
     if fs_path.is_dir() {
-        let manifest = fs_path.join("Verum.toml");
+        let manifest = config::Manifest::manifest_path(fs_path);
         if manifest.exists() {
             std::env::set_current_dir(fs_path).map_err(|e| {
                 CliError::Custom(format!("Failed to change to project directory: {}", e))
@@ -1409,7 +1409,7 @@ fn resolve_path(path: Option<&Text>) -> Result<PathTarget> {
             Ok(PathTarget::Project)
         } else {
             Err(CliError::FileNotFound(format!(
-                "{}: Not a Verum project (no Verum.toml found)",
+                "{}: Not a Verum project (no verum.toml found)",
                 project_path
             )))
         }

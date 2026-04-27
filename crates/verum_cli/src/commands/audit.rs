@@ -42,9 +42,9 @@ pub fn audit(options: AuditOptions) -> Result<()> {
 
     // Find manifest and lockfile
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest = Manifest::from_file(&manifest_dir.join("Verum.toml"))?;
+    let manifest = Manifest::from_file(&Manifest::manifest_path(&manifest_dir))?;
 
-    let lockfile_path = manifest_dir.join("Verum.lock");
+    let lockfile_path = Manifest::lockfile_path(&manifest_dir);
     if !lockfile_path.exists() {
         ui::warn("No lockfile found. Run 'verum build' first.");
         return Ok(());
@@ -293,8 +293,8 @@ fn fix_vulnerabilities(
 
     // Find manifest
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest_path = manifest_dir.join("Verum.toml");
-    let lockfile_path = manifest_dir.join("Verum.lock");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
+    let lockfile_path = Manifest::lockfile_path(&manifest_dir);
 
     let mut manifest = Manifest::from_file(&manifest_path)?;
     let mut lockfile = if lockfile_path.exists() {
@@ -657,11 +657,11 @@ pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
 ///
 /// Exits non-zero if any incompatible pair is found — the project's
 /// axiom bundle would derive False, breaking every theorem (per
-/// VVA §4.5 and the framework-compat module's V0 catalogue).
+/// and the framework-compat module's V0 catalogue).
 ///
 /// V0 (this revision) reads conflicts from the static Rust matrix
 /// shipped at `crates/verum_verification/src/framework_compat.rs`.
-/// V1 (#205) will add per-package declarative conflicts so the
+///  will add per-package declarative conflicts so the
 /// matrix doesn't have to be updated centrally for every new
 /// framework package.
 pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> {
@@ -805,7 +805,7 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
     Ok(())
 }
 
-/// V8 (#231) — `verum audit --accessibility` (VVA §A.Z.5 item 4).
+/// `verum audit --accessibility` (item 4).
 ///
 /// Walks every `@enact(...)` marker (and EpsilonOf-tagged
 /// declaration) in the project, cross-references against
@@ -1421,7 +1421,7 @@ fn print_framework_report(
 }
 
 // =============================================================================
-// ε-audit — `verum audit --epsilon` (VVA §11.4 Phase 5 E3)
+// ε-audit — `verum audit --epsilon` (Phase 5 E3)
 //
 // Mirrors the `--framework-axioms` audit but for the DC (Actic) side of
 // the OC/DC duality. Enumerates every `@enact(epsilon = "...")` marker
@@ -1429,14 +1429,14 @@ fn print_framework_report(
 // ε-primitive, so a reviewer sees the DC coordinate of the corpus
 // parallel to the OC coordinate produced by `--framework-axioms`.
 //
-// Per VVA §11.2 + §21 (OWL 2 ecosystem), the eight canonical primitives are
+// Per + §21 (OWL 2 ecosystem), the eight canonical primitives are
 //   ε_math, ε_compute, ε_observe, ε_prove,
 //   ε_decide, ε_translate, ε_construct, ε_classify
 // — see `core.action.primitives.Primitive`. Only these eight are
 // recognised. Unknown strings land in the `malformed` bucket with a
 // diagnostic suggesting the expected primitive set. ε_classify is the
 // catalogue extension for ontology classification / subsumption /
-// instance-check obligations introduced by VVA §21 (OWL 2 V1).
+// instance-check obligations introduced by (OWL 2 V1).
 // =============================================================================
 
 /// One `@enact(...)` usage collected from the project AST.
@@ -1726,11 +1726,11 @@ fn print_epsilon_report_json(
 }
 
 // =============================================================================
-// MSFS-coord audit — `verum audit --coord` (VVA §10.4 Phase 5 E4)
+// MSFS-coord audit — `verum audit --coord` (Phase 5 E4)
 //
 // Walks the same `@framework(name, "citation")` markers that `--framework-
 // axioms` enumerates, and projects each unique framework to its MSFS
-// coordinate (Framework, ν, τ) per VVA §10.4. The (ν, τ) lookup mirrors
+// coordinate (Framework, ν, τ). The (ν, τ) lookup mirrors
 // `core.theory_interop.coord::coord_of` for the standard six-pack — when
 // they drift, this is the canonical source for the CLI surface.
 // =============================================================================
@@ -1776,7 +1776,7 @@ impl CliOrdinal {
         }
     }
 
-    /// V8 (#230) — lex ordering on (omega_coeff, finite_offset).
+    /// lex ordering on (omega_coeff, finite_offset).
     /// Mirrors `verum_kernel::OrdinalDepth::lt` exactly so the
     /// CLI side produces identical results to the kernel for any
     /// shared ordinal pair.
@@ -1966,7 +1966,7 @@ fn print_coord_report(
         println!();
     }
 
-    // V8 (#230) — per-theorem inferred-coordinate section.
+    // per-theorem inferred-coordinate section.
     // For each theorem/lemma/corollary, the inferred (Fw, ν, τ)
     // is the **max-of-cited-coords**: the lex-maximum over all
     // framework-coordinates cited via @framework annotations on
@@ -2009,11 +2009,11 @@ fn print_coord_report(
     }
 }
 
-/// V8 (#230) — invert the per-framework view to a per-theorem
+/// invert the per-framework view to a per-theorem
 /// view, computing the max-of-cited-coords inference for each
 /// theorem/lemma/corollary/axiom.
 ///
-/// Per VVA §A.Z.2.2 defect 2: every theorem in the project
+/// Per defect 2: every theorem in the project
 /// gets a (Fw, ν, τ) coordinate inferred from the maximum
 /// (lex on OrdinalDepth) of the framework coordinates cited
 /// via @framework markers on that item. Returns a sorted
@@ -2075,7 +2075,7 @@ fn invert_to_per_theorem(
     result
 }
 
-/// V8 (#230) — per-theorem inferred coordinate row.
+/// per-theorem inferred coordinate row.
 #[derive(Debug, Clone)]
 struct PerTheoremCoord {
     file: PathBuf,
@@ -2168,10 +2168,10 @@ fn print_coord_report_json(
 }
 
 // =============================================================================
-// Articulation Hygiene audit — `verum audit --hygiene` (VVA §13.3, F3)
+// Articulation Hygiene audit — `verum audit --hygiene`
 //
 // Walks every type / function declaration in the project and classifies each
-// "self-X" surface form per the §13.2 hygiene table:
+// "self-X" surface form against the hygiene table:
 //
 //   Surface                                  Factorisation (Φ, κ, t)
 //   ──────────────────────────────────────   ───────────────────────────
@@ -2363,9 +2363,9 @@ pub fn audit_hygiene() -> Result<()> {
 }
 
 // =============================================================================
-// V2 hygiene enforcement (#196) — `verum audit --hygiene-strict`
+// V2 hygiene enforcement  — `verum audit --hygiene-strict`
 //
-// VVA §13.3 V2: walk every top-level free function body for raw `self`
+// V2: walk every top-level free function body for raw `self`
 // occurrences. A *free function* is one declared at module scope (not
 // inside `implement` / `protocol` blocks) whose first parameter is NOT
 // a self-receiver. Such functions cannot legally bind the `self`
@@ -2378,17 +2378,17 @@ pub fn audit_hygiene() -> Result<()> {
 // self-reference shapes).
 // =============================================================================
 
-/// V2 (#196) — error code for unfactored `self` in a free function.
+/// error code for unfactored `self` in a free function.
 pub const E_HYGIENE_UNFACTORED_SELF: &str = "E_HYGIENE_UNFACTORED_SELF";
 
-/// V2 (#196) — one violation surfaced by the strict hygiene walker.
+/// one violation surfaced by the strict hygiene walker.
 #[derive(Debug, Clone)]
 pub struct HygieneSelfViolation {
     /// Free function in which the raw `self` was found.
     pub function: Text,
     /// Source file relative to the manifest root.
     pub file: PathBuf,
-    /// Stable error code per VVA §13.3.
+    /// Stable error code.
     pub code: &'static str,
 }
 
@@ -2498,16 +2498,16 @@ fn function_body_contains_raw_self(decl: &verum_ast::decl::FunctionDecl) -> bool
     }
 }
 
-/// V2 (#196) entry-point — `verum audit --hygiene-strict`.
+///  entry-point — `verum audit --hygiene-strict`.
 ///
 /// Walks every top-level **free** function (not inside `implement`
 /// or `protocol`) whose signature has no self-receiver, and flags
 /// any body that mentions the `self` keyword. Exits non-zero if any
 /// violation is found, surfacing each as `E_HYGIENE_UNFACTORED_SELF`
-/// per VVA §13.3.
+///.
 pub fn audit_hygiene_strict_with_format(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Walking free functions for raw `self` (VVA §13.3 V2)");
+        ui::step("Walking free functions for raw `self` (V2)");
     }
     let manifest_dir = Manifest::find_manifest_dir()?;
     let vr_files = discover_vr_files(&manifest_dir);
@@ -2576,7 +2576,7 @@ fn print_hygiene_strict_report(
     violations: &[HygieneSelfViolation],
 ) {
     println!();
-    println!("{}", "Articulation Hygiene strict (VVA §13.3 V2)".bold());
+    println!("{}", "Articulation Hygiene strict (V2)".bold());
     println!("{}", "─".repeat(50).dimmed());
     println!(
         "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
@@ -2639,7 +2639,7 @@ fn print_hygiene_strict_report_json(
 
 pub fn audit_hygiene_with_format(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Walking Articulation Hygiene factorisations (VVA §13.2)");
+        ui::step("Walking Articulation Hygiene factorisations ");
     }
     let manifest_dir = Manifest::find_manifest_dir()?;
     let vr_files = discover_vr_files(&manifest_dir);
@@ -2693,7 +2693,7 @@ fn print_hygiene_report(
     entries: &[HygieneEntry],
 ) {
     println!();
-    println!("{}", "Articulation Hygiene factorisations (VVA §13.2)".bold());
+    println!("{}", "Articulation Hygiene factorisations ".bold());
     println!("{}", "─".repeat(50).dimmed());
     println!(
         "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
@@ -2776,7 +2776,7 @@ fn print_hygiene_report_json(
 }
 
 // =============================================================================
-// OWL 2 classification audit — `verum audit --owl2-classify` (VVA §21.10, F5)
+// OWL 2 classification audit — `verum audit --owl2-classify`
 //
 // Walks every Owl2*Attr in the project, builds the OWL 2 classification
 // graph (subclass edges, equivalence partitions, disjointness pairs,
@@ -2818,7 +2818,7 @@ pub fn audit_owl2_classify() -> Result<()> {
 
 pub fn audit_owl2_classify_with_format(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Computing OWL 2 classification hierarchy (VVA §21.10)");
+        ui::step("Computing OWL 2 classification hierarchy ");
     }
     let manifest_dir = Manifest::find_manifest_dir()?;
     let vr_files = discover_vr_files(&manifest_dir);
@@ -2880,7 +2880,7 @@ fn print_owl2_report(
     violations: &BTreeSet<(Text, Text)>,
 ) {
     println!();
-    println!("{}", "OWL 2 classification hierarchy (VVA §21.10)".bold());
+    println!("{}", "OWL 2 classification hierarchy ".bold());
     println!("{}", "─".repeat(50).dimmed());
     println!(
         "  Parsed {} .vr file(s), skipped {} unparseable file(s).",

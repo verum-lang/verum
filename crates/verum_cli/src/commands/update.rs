@@ -32,7 +32,7 @@ pub fn update(options: UpdateOptions) -> Result<()> {
 fn update_single_cog(package: &str, options: &UpdateOptions) -> Result<()> {
     // Find manifest
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest = Manifest::from_file(&manifest_dir.join("Verum.toml"))?;
+    let manifest = Manifest::from_file(&Manifest::manifest_path(&manifest_dir))?;
 
     // Check if package exists in dependencies
     let package_key = Text::from(package);
@@ -99,7 +99,7 @@ fn update_single_cog(package: &str, options: &UpdateOptions) -> Result<()> {
 /// Update all packages
 fn update_all_cogs(options: &UpdateOptions) -> Result<()> {
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest = Manifest::from_file(&manifest_dir.join("Verum.toml"))?;
+    let manifest = Manifest::from_file(&Manifest::manifest_path(&manifest_dir))?;
 
     let lockfile_path = manifest_dir.join("verum.lock");
     if !lockfile_path.exists() {

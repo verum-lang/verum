@@ -24,7 +24,7 @@ use verum_common::{List, Map, Text};
 /// # Implementation
 ///
 /// This function:
-/// 1. Validates the manifest (Verum.toml)
+/// 1. Validates the manifest (verum.toml)
 /// 2. Builds the cog tarball (.vr archive)
 /// 3. Signs the cog with Ed25519 (if key available)
 /// 4. Uploads to the central registry
@@ -54,7 +54,7 @@ pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
 
     // Find and validate manifest
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let manifest_path = manifest_dir.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
     let manifest = Manifest::from_file(&manifest_path)?;
 
     // Validate manifest
@@ -209,8 +209,8 @@ pub fn search(query: &str, limit: usize) -> Result<()> {
 /// 2. Downloads the cog from the registry
 /// 3. Verifies the cog signature
 /// 4. Extracts to the local cache
-/// 5. Updates Verum.toml with the dependency
-/// 6. Updates the lockfile (Verum.lock)
+/// 5. Updates verum.toml with the dependency
+/// 6. Updates the lockfile (verum.lock)
 ///
 /// # Arguments
 ///
@@ -309,12 +309,12 @@ pub fn install(name: &str, version: Option<Text>) -> Result<()> {
         }
     }
 
-    // Update Verum.toml
-    ui::step("Updating Verum.toml");
+    // Update verum.toml
+    ui::step("Updating verum.toml");
     update_manifest_dependency(name, resolved_version.as_str())?;
 
     // Update lockfile
-    ui::step("Updating Verum.lock");
+    ui::step("Updating verum.lock");
     update_lockfile(name, &metadata)?;
 
     ui::success(&format!(
@@ -374,8 +374,12 @@ fn create_cog_tarball(manifest_dir: &Path, manifest: &Manifest) -> Result<PathBu
     let encoder = GzEncoder::new(file, Compression::best());
     let mut archive = Builder::new(encoder);
 
-    // Add Verum.toml
-    archive.append_path_with_name(manifest_dir.join("Verum.toml"), "Verum.toml")?;
+    // Add manifest, canonicalising the entry name to lowercase even
+    // if the on-disk file is the legacy capitalised form.
+    archive.append_path_with_name(
+        Manifest::manifest_path(&manifest_dir),
+        Manifest::MANIFEST_FILENAME,
+    )?;
 
     // Add src directory
     let src_dir = manifest_dir.join("src");
@@ -583,14 +587,14 @@ fn format_downloads(downloads: u64) -> String {
     }
 }
 
-/// Update Verum.toml with new dependency
+/// Update verum.toml with new dependency
 fn update_manifest_dependency(name: &str, version: &str) -> Result<()> {
-    let manifest_path = Manifest::find_manifest_dir()?.join("Verum.toml");
+    let manifest_path = Manifest::manifest_path(&Manifest::find_manifest_dir()?);
     let content = fs::read_to_string(&manifest_path)?;
 
     // Parse TOML
     let mut manifest: toml::Value = toml::from_str(&content)
-        .map_err(|e| CliError::Custom(format!("Failed to parse Verum.toml: {}", e)))?;
+        .map_err(|e| CliError::Custom(format!("Failed to parse verum.toml: {}", e)))?;
 
     // Ensure dependencies section exists and add dependency
     if let Some(table) = manifest.as_table_mut() {
@@ -605,7 +609,7 @@ fn update_manifest_dependency(name: &str, version: &str) -> Result<()> {
 
     // Write back
     let updated = toml::to_string_pretty(&manifest)
-        .map_err(|e| CliError::Custom(format!("Failed to serialize Verum.toml: {}", e)))?;
+        .map_err(|e| CliError::Custom(format!("Failed to serialize verum.toml: {}", e)))?;
     fs::write(&manifest_path, updated)?;
 
     Ok(())
@@ -614,10 +618,10 @@ fn update_manifest_dependency(name: &str, version: &str) -> Result<()> {
 /// Update lockfile with new cog
 fn update_lockfile(name: &str, metadata: &CogMetadata) -> Result<()> {
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let lockfile_path = manifest_dir.join("Verum.lock");
+    let lockfile_path = Manifest::lockfile_path(&manifest_dir);
 
     // Get root cog name from manifest
-    let manifest = Manifest::from_file(&manifest_dir.join("Verum.toml"))?;
+    let manifest = Manifest::from_file(&Manifest::manifest_path(&manifest_dir))?;
     let root_name = manifest.cog.name.clone();
 
     let mut lockfile = if lockfile_path.exists() {
