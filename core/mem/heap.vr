@@ -74,7 +74,7 @@ mount core.intrinsics.memory.{
     slice_from_raw_parts_mut, memset,
 };
 mount core.intrinsics.atomic.{
-    atomic_load_u8, atomic_store_u8,
+    atomic_load_u8, atomic_store_u8, atomic_fetch_add_u8,
     atomic_load_u64, atomic_exchange_u64, atomic_compare_exchange_u64,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL,
 };
@@ -340,14 +340,29 @@ implement HeapPageHeader {
     }
 
     /// Free a block from another thread (atomic)
+    ///
+    /// SOUNDNESS: the slot-generation increment must be a single
+    /// atomic RMW (fetch_add), not a load-then-store.  The previous
+    /// implementation read old_gen, computed new_gen, then stored —
+    /// which races concurrent xthread frees on the same slot and
+    /// silently LOSES generation increments.  A lost increment is a
+    /// CBGR soundness violation: a stale ThinRef whose slot
+    /// generation matches the lost-increment value would pass
+    /// validation even though the slot has been logically retired.
+    /// Concurrent frees on the same slot are a double-free bug, but
+    /// silently absorbing them defeats CBGR's whole purpose of
+    /// detecting use-after-free.  fetch_add gives a totally-ordered
+    /// sequence and lets a downstream dedup pass surface the
+    /// duplicate xthread_free push.
+    ///
+    /// `fetch_add` on UInt8 wraps mod 256 by intrinsic semantics, so
+    /// the explicit `% 256` is no longer needed.
     public fn free_block_xthread(&mut self, ptr: &unsafe Byte) {
         let index = self.block_index(ptr);
 
-        // Increment slot generation (CBGR invalidation) - atomic for safety
+        // Increment slot generation atomically.
         let gen_ptr = &mut self.slot_generations[index];
-        let old_gen = atomic_load_u8(gen_ptr as *const UInt8, ORDERING_ACQUIRE);
-        let new_gen = ((old_gen as Int + 1) % 256) as UInt8;
-        atomic_store_u8(gen_ptr as *mut UInt8, new_gen, ORDERING_RELEASE);
+        let _old_gen = atomic_fetch_add_u8(gen_ptr as *mut UInt8, 1, ORDERING_ACQ_REL);
 
         // Push to xthread_free list atomically
         let encoded = encode_ptr(ptr as UInt64);
