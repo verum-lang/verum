@@ -60,12 +60,52 @@ type ExitStatus is {
 };
 
 implement ExitStatus {
-    /// Returns true if the process exited successfully (code 0).
+    /// Returns true iff the process exited normally with code 0.
+    /// A child terminated by a signal — even SIGTERM — is *not* a success;
+    /// callers that treat such a child as having exited 0 will mis-classify
+    /// SIGSEGV / SIGKILL as "succeeded", masking real crashes.
     fn success(&self) -> Bool {
-        self.code() == 0
+        self.is_exited() && self.code() == 0
     }
 
-    /// Returns the exit code.
+    /// Returns true iff the process exited normally (POSIX WIFEXITED).
+    /// On Windows there is no signal/exit distinction, so this is always true.
+    fn is_exited(&self) -> Bool {
+        @cfg(any(target_os = "linux", target_os = "macos"))
+        { (self.raw & 0x7F) == 0 }
+
+        @cfg(target_os = "windows")
+        { true }
+    }
+
+    /// Returns true iff the process was terminated by a signal (POSIX WIFSIGNALED).
+    /// Always false on Windows.
+    fn is_signaled(&self) -> Bool {
+        @cfg(any(target_os = "linux", target_os = "macos"))
+        {
+            let low = self.raw & 0x7F;
+            low != 0 && low != 0x7F
+        }
+
+        @cfg(target_os = "windows")
+        { false }
+    }
+
+    /// Returns the signal number that terminated the process (POSIX WTERMSIG),
+    /// or 0 if the process was not signal-terminated. Always 0 on Windows.
+    fn signal(&self) -> Int {
+        @cfg(any(target_os = "linux", target_os = "macos"))
+        {
+            if self.is_signaled() { self.raw & 0x7F } else { 0 }
+        }
+
+        @cfg(target_os = "windows")
+        { 0 }
+    }
+
+    /// Returns the WEXITSTATUS exit code. Only meaningful when
+    /// `is_exited()` is true; for signal-terminated processes the
+    /// caller should consult `signal()` instead.
     fn code(&self) -> Int {
         // Unix: raw is waitpid status — WEXITSTATUS = (status >> 8) & 0xFF
         // Windows: raw is the exit code directly
@@ -79,7 +119,9 @@ implement ExitStatus {
 
 implement Display for ExitStatus {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Text> {
-        if self.success() {
+        if self.is_signaled() {
+            f.write_str(f"signal: {self.signal()}")
+        } else if self.success() {
             f.write_str("exit status: 0")
         } else {
             f.write_str(f"exit status: {self.code()}")
