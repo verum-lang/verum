@@ -213,10 +213,10 @@ implement<T> Drop for MutexGuard<T> {
 // =============================================================================
 
 // Result type for lock operations.
-public type LockResult<T> = Result<T, PoisonError<T>>;
+public type LockResult<T> is Result<T, PoisonError<T>>;
 
 // Result type for try_lock operations.
-public type TryLockResult<T> = Result<T, TryLockError<T>>;
+public type TryLockResult<T> is Result<T, TryLockError<T>>;
 
 // Error when mutex was held by panicking thread.
 public type PoisonError<T> is {

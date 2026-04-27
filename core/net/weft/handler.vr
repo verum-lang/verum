@@ -187,9 +187,10 @@ implement<T> PathParam<T> {
     public fn into_inner(self) -> T { self.value }
 }
 
-/// Extract a Text path-param by name. Named API: Verum's current
-/// turbofish only works in expression position, not on static methods,
-/// so we keep a distinct function per T.
+/// Extract a Text path-param by name. Named API: explicit type arguments
+/// on static methods (`PathParam.parse<T>(...)`) are not yet wired
+/// end-to-end through resolution, so we keep a distinct function per T
+/// for now.
 public fn path_text(
     req: &mut WeftRequest,
     name: &Text,

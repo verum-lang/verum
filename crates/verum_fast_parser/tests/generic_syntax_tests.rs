@@ -128,62 +128,49 @@ fn test_generic_with_const_arg() {
 }
 
 // =============================================================================
-// SECTION 2: Invalid Rust Turbofish Syntax (should fail)
+// SECTION 2: Rust-style turbofish (`::<T>`) — REJECTED in Verum
 // =============================================================================
+//
+// Per `grammar/verum.ebnf`, `::` is not a token: paths use `.` and generic
+// calls use the spaceless form `foo<T>(args)` / `obj.method<T>(args)`. Any
+// `::<…>` (or bare `::`) appearing in a Verum expression is grammar-illegal
+// and the parser must reject it.
 
 #[test]
 fn test_turbofish_function_call_rejected() {
-    // Rust turbofish syntax should be rejected: foo::<T>()
+    // `size_of::<Int>()` — Rust turbofish, not Verum.
     let input = "size_of::<Int>()";
-    let result = parse_expr(input);
-
-    // The parser should fail or produce an error
-    // because :: is not valid in Verum paths
     assert!(
-        result.is_err() || {
-            // If it parses, it should NOT be a valid generic call
-            // It might parse as size_of :: <Int>() which is invalid semantically
-            let expr = result.unwrap();
-            // Check that it's not parsed as a generic call
-            !matches!(expr.kind, verum_ast::ExprKind::Call { .. })
-        },
-        "Turbofish syntax ::<T> should not be parsed as a generic function call"
+        parses_fully_err(input),
+        "Turbofish ::<T>() must be rejected — Verum uses size_of<Int>()"
     );
 }
 
 #[test]
 fn test_turbofish_method_call_rejected() {
-    // Rust turbofish method syntax should be rejected: obj.method::<T>()
+    // `list.map::<Int>(f)` — Rust turbofish on a method.
     let input = "list.map::<Int>(f)";
-    let result = parse_expr(input);
-
     assert!(
-        result.is_err() || {
-            let expr = result.unwrap();
-            !matches!(expr.kind, verum_ast::ExprKind::MethodCall { .. })
-        },
-        "Turbofish method syntax ::<T> should not be parsed as a generic method call"
+        parses_fully_err(input),
+        "Turbofish ::<T> on method must be rejected — Verum uses list.map<Int>(f)"
     );
 }
 
 #[test]
 fn test_turbofish_transmute_rejected() {
-    // Rust-style transmute::<A, B>(x) should fail to fully parse
-    // The parser will stop at :: leaving the rest unconsumed
     let input = "transmute::<Int, Float>(x)";
     assert!(
         parses_fully_err(input),
-        "Turbofish transmute::<A, B>(x) should not fully parse"
+        "Turbofish ::<A, B>(x) must be rejected — Verum uses transmute<Int, Float>(x)"
     );
 }
 
 #[test]
 fn test_turbofish_collect_rejected() {
-    // Rust-style iter.collect::<List<_>>() should fail to fully parse
     let input = "iter.collect::<List<Int>>()";
     assert!(
         parses_fully_err(input),
-        "Turbofish collect::<T>() should not fully parse"
+        "Turbofish collect::<List<Int>>() must be rejected — Verum uses iter.collect<List<Int>>()"
     );
 }
 

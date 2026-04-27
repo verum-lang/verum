@@ -77,8 +77,8 @@ public type TheoryRegistry is {
 /// Create a new empty theory registry.
 public fn new_registry() -> TheoryRegistry {
     TheoryRegistry {
-        theories: List::new(),
-        translations: List::new(),
+        theories: List.new(),
+        translations: List.new(),
         next_handle: 1,
     }
 }
@@ -180,8 +180,8 @@ public fn translate(
 
     // Build the functor K: source_claims → target_claims from partial_map
     // k_values[i] = target index that source claim i maps to (or -1 if unmapped)
-    let mut k_values = List::new();
-    let mut f_values = List::new();
+    let mut k_values = List.new();
+    let mut f_values = List.new();
 
     // For each source claim, compute K(c_i) and F(c_i)
     // K maps source objects to target objects
@@ -201,8 +201,8 @@ public fn translate(
     }
 
     // Compute optimistic translation (Left Kan = colimit)
-    let mut optimistic = List::new();
-    let empty_morphisms = List::new();
+    let mut optimistic = List.new();
+    let empty_morphisms = List.new();
     let mut j = 0;
     while j < n_target {
         let result = compute_pointwise_lan(&k_values, &f_values, j, &empty_morphisms);
@@ -211,7 +211,7 @@ public fn translate(
     }
 
     // Compute conservative translation (Right Kan = limit)
-    let mut conservative = List::new();
+    let mut conservative = List.new();
     j = 0;
     while j < n_target {
         let result = compute_pointwise_ran(&k_values, &f_values, j, &empty_morphisms);
@@ -220,7 +220,7 @@ public fn translate(
     }
 
     // Compute obstruction: how much does Ran ∘ K* deviate from Id?
-    let mut original_values = List::new();
+    let mut original_values = List.new();
     j = 0;
     while j < n_target {
         original_values.push(j);  // identity: each claim maps to itself
@@ -247,7 +247,7 @@ public fn translate_with_oracle<C, D: InfinityCategory>(
     confidence: Float{> 0.0 && <= 1.0},
 ) -> TranslationResult {
     // Use oracle to generate candidate mappings
-    let mut partial_map = List::new();
+    let mut partial_map = List.new();
 
     // For each source claim, ask the oracle for the best target match
     let mut i = 0;
@@ -290,7 +290,7 @@ public fn check_coherence(
     translation_pairs: &List<(Text, Text)>,
 ) -> CoherenceResult {
     // Build Translation objects from registry
-    let mut translations = List::new();
+    let mut translations = List.new();
 
     for (src_name, tgt_name) in translation_pairs.iter() {
         let src_theory = find_theory(registry, src_name);
@@ -300,7 +300,7 @@ public fn check_coherence(
             (Some(s), Some(t)) => {
                 // Find the stored translation result
                 let mut dev = 0.0;
-                let mut claim_map = List::new();
+                let mut claim_map = List.new();
                 for record in registry.translations.iter() {
                     if record.source_name == *src_name && record.target_name == *tgt_name {
                         dev = record.result.obstruction.average_severity;
@@ -375,7 +375,7 @@ public fn audit_theory(theory: &mut Theory) -> AuditResult {
     let dep_count = theory.dependencies.len();
 
     // Step 1: Propagate status and collect changes
-    let mut changes = List::new();
+    let mut changes = List.new();
     // Propagate from each claim to find inconsistencies
     for claim in theory.statements.iter() {
         let sub_changes = propagate_status(theory, &claim.id, claim.status);
@@ -383,18 +383,18 @@ public fn audit_theory(theory: &mut Theory) -> AuditResult {
     }
 
     // Step 2: Detect circular dependencies via DFS
-    let mut circular = List::new();
+    let mut circular = List.new();
     // Simplified: check for self-loops and 2-cycles
     for (from, to) in theory.dependencies.iter() {
         for (from2, to2) in theory.dependencies.iter() {
             if *from == *to2 && *to == *from2 {
-                circular.push(List::from([from.clone(), to.clone()]));
+                circular.push(List.from([from.clone(), to.clone()]));
             }
         }
     }
 
     // Step 3: Detect dangling references
-    let mut dangling = List::new();
+    let mut dangling = List.new();
     let claim_ids: List<Text> = theory.statements.iter()
         .map(fn(c) -> c.id.clone()).collect();
     for (from, to) in theory.dependencies.iter() {
@@ -431,9 +431,9 @@ public fn audit_meta() -> AuditResult {
     // T_meta is a fixed theory with known structure
     let mut meta_theory = Theory {
         name: f"T_meta",
-        claims: List::new(),
-        statements: List::new(),
-        dependencies: List::new(),
+        claims: List.new(),
+        statements: List.new(),
+        dependencies: List.new(),
     };
 
     // Add the meta-claims

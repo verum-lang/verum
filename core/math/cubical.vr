@@ -199,7 +199,7 @@ theorem transport_sym_ua_computes<A, B>(e: Equiv<A, B>, y: B)
 /// ua of the identity equivalence is refl.
 @verify(formal)
 theorem ua_id_is_refl<A>()
-    ensures ua(equiv_id::<A>()) == refl(A)
+    ensures ua(equiv_id<A>()) == refl(A)
     proof by auto;
 
 /// Interval reversal is involutive: rev(rev(i)) = i.

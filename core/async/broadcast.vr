@@ -500,7 +500,7 @@ public fn broadcast_channel_with<T>(capacity: Int, policy: LagPolicy)
     -> (BroadcastSender<T>, BroadcastReceiver<T>)
 {
     assert(capacity > 0, "broadcast capacity must be positive");
-    let inner = Shared.new(new_inner::<T>(capacity, policy));
+    let inner = Shared.new(new_inner<T>(capacity, policy));
 
     // Initial receiver slot.
     let slot = Shared.new(RecvSlot {

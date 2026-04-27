@@ -354,7 +354,7 @@ implement<T> FromRequest for WeftExtractorJson<T>
         -> Result<WeftExtractorJson<T>, JsonExtractError>
     {
         let cfg = JsonExtractorConfig.default();
-        let value = extract_json::<T>(req, &cfg)?;
+        let value = extract_json<T>(req, &cfg)?;
         Ok(WeftExtractorJson { inner: value })
     }
 }

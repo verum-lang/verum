@@ -253,8 +253,8 @@ b"bytes"        // Byte string
 | `,` | Comma | Separator |
 | `;` | Semicolon | Statement terminator |
 | `:` | Colon | Type annotation |
-| `::` | Double colon | Path separator, turbofish |
-| `.` | Dot | Member access |
+| `::` | Double colon | Lexed only for diagnostic recovery on Rust-style ports — Verum paths use `.` (`std.collections.List`) and generic calls use `foo<T>(args)`. |
+| `.` | Dot | Member access; path separator (`std.collections.List`) |
 | `@` | At | Attributes |
 | `$` | Dollar | Context-adaptive literals |
 | `#` | Hash | Tagged literals |

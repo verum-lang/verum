@@ -82,7 +82,7 @@ public type Trie<V> is {
 
 implement<V: Clone> Trie<V> {
     public fn new() -> Trie<V> {
-        Trie { root: empty_node::<V>(), size: 0 }
+        Trie { root: empty_node<V>(), size: 0 }
     }
 
     /// Insert `value` at `key`. Returns the prior value when the
@@ -93,7 +93,7 @@ implement<V: Clone> Trie<V> {
         while i < key.len() {
             let b = key[i];
             if !node.children.contains_key(&b) {
-                node.children.insert(b, Heap(empty_node::<V>()));
+                node.children.insert(b, Heap(empty_node<V>()));
             }
             // Descend — we need the &mut inside the Heap.
             match node.children.get_mut(&b) {

@@ -583,7 +583,9 @@ fn test_deeply_nested_generics() {
 
 #[test]
 fn test_generic_function_call() {
-    parse_expr_ok("parse::<Int>(\"42\")");
+    // Verum uses the spaceless generic-call form, NOT Rust turbofish.
+    // `::<T>` is rejected by the parser per `grammar/verum.ebnf`.
+    parse_expr_ok("parse<Int>(\"42\")");
 }
 
 // ============================================================================

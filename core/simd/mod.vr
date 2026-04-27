@@ -155,28 +155,28 @@ public type Vec<T: SimdElement, N: meta USize> is { lanes: [T; N] };
 // =============================================================================
 
 // 128-bit vectors (SSE/NEON)
-public type Vec4f  = Vec<Float32, 4>;   // 4x32-bit float
-public type Vec2d  = Vec<Float64, 2>;   // 2x64-bit float
-public type Vec4i  = Vec<Int32, 4>;     // 4x32-bit int
-public type Vec2l  = Vec<Int64, 2>;     // 2x64-bit int
-public type Vec16b = Vec<UInt8, 16>;    // 16x8-bit byte
-public type Vec8s  = Vec<Int16, 8>;     // 8x16-bit short
+public type Vec4f  is Vec<Float32, 4>;   // 4x32-bit float
+public type Vec2d  is Vec<Float64, 2>;   // 2x64-bit float
+public type Vec4i  is Vec<Int32, 4>;     // 4x32-bit int
+public type Vec2l  is Vec<Int64, 2>;     // 2x64-bit int
+public type Vec16b is Vec<UInt8, 16>;    // 16x8-bit byte
+public type Vec8s  is Vec<Int16, 8>;     // 8x16-bit short
 
 // 256-bit vectors (AVX)
-public type Vec8f  = Vec<Float32, 8>;   // 8x32-bit float
-public type Vec4d  = Vec<Float64, 4>;   // 4x64-bit float
-public type Vec8i  = Vec<Int32, 8>;     // 8x32-bit int
-public type Vec4l  = Vec<Int64, 4>;     // 4x64-bit int
-public type Vec32b = Vec<UInt8, 32>;    // 32x8-bit byte
-public type Vec16s = Vec<Int16, 16>;    // 16x16-bit short
+public type Vec8f  is Vec<Float32, 8>;   // 8x32-bit float
+public type Vec4d  is Vec<Float64, 4>;   // 4x64-bit float
+public type Vec8i  is Vec<Int32, 8>;     // 8x32-bit int
+public type Vec4l  is Vec<Int64, 4>;     // 4x64-bit int
+public type Vec32b is Vec<UInt8, 32>;    // 32x8-bit byte
+public type Vec16s is Vec<Int16, 16>;    // 16x16-bit short
 
 // 512-bit vectors (AVX-512)
-public type Vec16f = Vec<Float32, 16>;  // 16x32-bit float
-public type Vec8d  = Vec<Float64, 8>;   // 8x64-bit float
-public type Vec16i = Vec<Int32, 16>;    // 16x32-bit int
-public type Vec8l  = Vec<Int64, 8>;     // 8x64-bit int
-public type Vec64b = Vec<UInt8, 64>;    // 64x8-bit byte
-public type Vec32s = Vec<Int16, 32>;    // 32x16-bit short
+public type Vec16f is Vec<Float32, 16>;  // 16x32-bit float
+public type Vec8d  is Vec<Float64, 8>;   // 8x64-bit float
+public type Vec16i is Vec<Int32, 16>;    // 16x32-bit int
+public type Vec8l  is Vec<Int64, 8>;     // 8x64-bit int
+public type Vec64b is Vec<UInt8, 64>;    // 64x8-bit byte
+public type Vec32s is Vec<Int16, 32>;    // 32x16-bit short
 
 // =============================================================================
 // SIMD MASK TYPE
@@ -193,9 +193,9 @@ public type Vec32s = Vec<Int16, 32>;    // 32x16-bit short
 public type Mask<N: meta USize> is { lanes: [Bool; N] };
 
 // Common mask aliases
-public type Mask4  = Mask<4>;
-public type Mask8  = Mask<8>;
-public type Mask16 = Mask<16>;
+public type Mask4  is Mask<4>;
+public type Mask8  is Mask<8>;
+public type Mask16 is Mask<16>;
 
 // =============================================================================
 // VECTOR CONSTRUCTION

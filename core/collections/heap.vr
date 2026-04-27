@@ -967,7 +967,7 @@ implement<T: Ord> From<List<T>> for BinaryHeap<T> {
 // =============================================================================
 
 // Type alias for min-heap.
-public type MinHeap<T: Ord> = BinaryHeap<Reverse<T>>;
+public type MinHeap<T: Ord> is BinaryHeap<Reverse<T>>;
 
 // Create heap from values.
 public fn heap<T: Ord>(values: &[T]) -> BinaryHeap<T>

@@ -972,8 +972,17 @@ impl_item       = visibility , [ 'default' ] , ( function_def
    proposition at model-verification time. *)
 proof_clause    = 'proof' , identifier , 'by' , tactic_expr , ';' ;
 
-(* Associated type binding in implementations *)
-(* Example: type Item is T; or type Item<U> is List<U> *)
+(* Associated type binding in implementations.                                *)
+(*                                                                            *)
+(* Used INSIDE `implement` / `protocol` blocks to bind a protocol's           *)
+(* associated type to a concrete type. Distinct from top-level `type_def`     *)
+(* (line ~474) which uses `is` — only the associated-type binding uses `=`.   *)
+(*                                                                            *)
+(* Example:                                                                   *)
+(*   implement Iterator for Range {                                           *)
+(*       type Item = Int;            (* this production *)                    *)
+(*       fn next(&mut self) -> ... { ... }                                    *)
+(*   }                                                                        *)
 type_alias      = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ]
                 , '=' , type_expr , ';' ;
 
