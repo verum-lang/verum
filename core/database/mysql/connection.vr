@@ -280,6 +280,42 @@ implement MysqlConnection {
         })
     }
 
+    /// Convenience — run a single DML / DDL / TX-control statement and
+    /// return only the affected-row count from the resulting OK
+    /// packet. The Spindle façade prefers this over `simple_query`
+    /// for non-SELECT shapes since the columns / rows lists are empty
+    /// anyway.
+    public fn execute(&mut self, sql: &Text) -> Result<Int, DbError> {
+        match self.simple_query(sql) {
+            Ok(result) => Ok(result.affected_rows),
+            Err(e)     => Err(e),
+        }
+    }
+
+    /// Convenience — run a SELECT and return only the rows. Drops the
+    /// columns list (callers that need column metadata stay on
+    /// `simple_query`).
+    public fn query_all(&mut self, sql: &Text) -> Result<List<List<MysqlTextValue>>, DbError> {
+        match self.simple_query(sql) {
+            Ok(result) => Ok(result.rows),
+            Err(e)     => Err(e),
+        }
+    }
+
+    /// Convenience — first row of a SELECT or `Ok(None)` if empty.
+    public fn query_first(&mut self, sql: &Text) -> Result<Maybe<List<MysqlTextValue>>, DbError> {
+        match self.simple_query(sql) {
+            Ok(result) => {
+                if (result.rows.len() as Int) == 0 {
+                    Ok(None)
+                } else {
+                    Ok(Some(result.rows[0].clone()))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Round-trip ping — succeeds when the server returns OK.
     public fn ping(&mut self) -> Result<(), DbError> {
         match self.state {
