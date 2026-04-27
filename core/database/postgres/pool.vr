@@ -1,0 +1,60 @@
+// =============================================================================
+// core/database/postgres/pool.vr — PgPool: ConnectionPool<PgConnection>
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §4.3
+//
+// Thin vendor binding over `core.database.common.pool_impl.ConnectionPool<C>`.
+// PgPool clones the PgConfig once at launch and re-invokes the
+// adapter on each cold-acquire path; checked-out connections are
+// reused on the warm path so each PARSE / startup handshake amortises
+// across many queries.
+//
+// Postgres-specific note: the connection's BackendKeyData (process_id,
+// secret_key) is captured per-connection at startup and lives inside
+// the wrapped PgConnection, so a CancelRequest on a busy connection
+// works end-to-end through `PooledConnection<PgConnection>::conn_ref`.
+// =============================================================================
+
+module core.database.postgres.pool;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.common.pool_impl.{
+    ConnectionPool, PoolConfig, PooledConnection, PoolStatsSnapshot,
+    ReleaseKind, Healthy, Discard,
+};
+mount core.database.postgres.connection.PgConnection;
+mount core.database.postgres.config.PgConfig;
+mount core.database.postgres.connection.connect as pg_connect;
+
+public type PgPool is {
+    inner: ConnectionPool<PgConnection>,
+    config: PgConfig,
+}
+
+implement PgPool {
+    public fn launch(pg_cfg: PgConfig, pool_cfg: PoolConfig) -> Result<PgPool, DbError> {
+        let cfg_for_factory = pg_cfg.clone();
+        let factory = || -> Result<PgConnection, DbError> {
+            pg_connect(&cfg_for_factory)
+        };
+        match ConnectionPool.launch(pool_cfg, factory) {
+            Ok(p)  => Ok(PgPool { inner: p, config: pg_cfg }),
+            Err(e) => Err(e),
+        }
+    }
+
+    public fn acquire(&self) -> Result<PooledConnection<PgConnection>, DbError> {
+        self.inner.acquire()
+    }
+
+    public fn drain(&self, deadline_ms: Int) -> Result<(), DbError> {
+        self.inner.drain(deadline_ms)
+    }
+
+    public fn stats(&self) -> PoolStatsSnapshot { self.inner.stats() }
+
+    public fn config(&self) -> &PgConfig { &self.config }
+}

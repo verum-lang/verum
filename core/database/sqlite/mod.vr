@@ -27,6 +27,7 @@ public module native;
 public module error;
 public module connection;
 public module adapter;
+public module pool;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .adapter.{
@@ -40,3 +41,4 @@ public mount .connection.{
     ScRead, ScReadWrite, ScAdmin,
 };
 public mount .error.dberr_from_loom;
+public mount .pool.SqlitePool;

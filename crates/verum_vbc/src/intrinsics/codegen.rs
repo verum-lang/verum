@@ -1570,23 +1570,37 @@ impl<'a> IntrinsicCodegen<'a> {
     }
 
     /// sys_madvise: Memory advise returning Result.
-    fn emit_sys_madvise(&mut self, args: &[Reg]) -> Option<Reg> {
+    ///
+    /// Tier-0 stub: madvise is *advisory* — the kernel is free to
+    /// ignore the hint, so a no-op interpreter implementation is
+    /// semantically correct (we just don't pre-fault / drop pages).
+    /// Emits a LoadConst Unit so the result register is initialised
+    /// without referencing the (addr, len, advice) argument tuple,
+    /// avoiding the `InvalidRegister(2)` failure class when the
+    /// caller's frame is sized smaller than 3 registers (T0.7).
+    /// AOT lowering replaces this with the real FFI extern call.
+    fn emit_sys_madvise(&mut self, _args: &[Reg]) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::Generic {
-            opcode: Opcode::Nop,
+            opcode: Opcode::LoadUnit,
             dst: Some(result),
-            args: args.to_vec(),
+            args: vec![],
         });
         Some(result)
     }
 
     /// sys_getentropy: Get entropy returning Result.
-    fn emit_sys_getentropy(&mut self, args: &[Reg]) -> Option<Reg> {
+    ///
+    /// Tier-0 stub: same shape as `sys_madvise` — interpreter
+    /// returns Unit without referencing buffer arguments. AOT
+    /// lowering replaces with the real `arc4random_buf` call on
+    /// macOS / `getrandom(2)` on Linux.
+    fn emit_sys_getentropy(&mut self, _args: &[Reg]) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::Generic {
-            opcode: Opcode::Nop,
+            opcode: Opcode::LoadUnit,
             dst: Some(result),
-            args: args.to_vec(),
+            args: vec![],
         });
         Some(result)
     }
