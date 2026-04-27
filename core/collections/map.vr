@@ -1081,14 +1081,26 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// assert(m.contains_value(&42));
     /// assert(!m.contains_value(&99));
     /// ```
+    /// O(n) reverse lookup: linear scan over the occupied entries
+    /// (open-addressing hash maps can't index by value, so reverse
+    /// lookup is fundamentally linear). Early-terminates after
+    /// `self.len` occupied slots have been visited so a sparsely-
+    /// used map (high capacity, low len after many removals) doesn't
+    /// pay the full capacity cost.
     public fn contains_value(&self, value: &V) -> Bool
     where V: Eq
     {
-        for i in range(0, self.cap) {
+        let mut seen: Int = 0;
+        let mut i: Int = 0;
+        while i < self.cap && seen < self.len {
             let entry = unsafe { &*self.entries.offset(i) };
-            if (entry.hash > 0) && entry.value == *value {
-                return true;
+            if entry.hash > 0 {
+                if entry.value == *value {
+                    return true;
+                }
+                seen = seen + 1;
             }
+            i = i + 1;
         }
         false
     }
