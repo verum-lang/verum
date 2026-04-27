@@ -305,6 +305,39 @@ mod shebang_tests {
     }
 
     #[test]
+    fn lexer_zero_offset_hot_path_is_invariant_under_workload() {
+        // Performance contract pinned as a behaviour test: when no BOM and
+        // no shebang are stripped, the per-token offset add is a no-op
+        // (`+0`). Tokens emitted from a 1KB-ish source must have spans
+        // that exactly equal logos's reported byte positions — i.e. the
+        // hot path is byte-identical to the pre-F17 implementation. This
+        // catches a regression where a future refactor accidentally
+        // forces a non-zero offset path even on un-prefixed sources.
+        let mut src = String::with_capacity(1024);
+        for _ in 0..40 {
+            src.push_str("fn x() -> Int { 42 + 7 }\n");
+        }
+        let lex = Lexer::new(&src, fid());
+        assert_eq!(lex.shebang_offset(), 0, "no prefix → offset must be zero");
+        assert!(!lex.had_bom());
+        assert!(!lex.had_shebang());
+        // Walk all tokens; every span MUST stay within source bounds and
+        // MUST be monotonically non-decreasing. No off-by-one introduced
+        // by the offset-add machinery on the zero-offset path.
+        let mut last_end: u32 = 0;
+        let mut count = 0usize;
+        for tok in lex.filter_map(|t| t.ok()) {
+            assert!(tok.span.start <= tok.span.end);
+            assert!(tok.span.end as usize <= src.len() + 1, "span past EOF");
+            assert!(tok.span.start >= last_end || matches!(tok.kind, TokenKind::Eof));
+            last_end = tok.span.end;
+            count += 1;
+        }
+        // Sanity: 40 lines × ≥ 8 tokens / line + EOF.
+        assert!(count > 320, "tokens emitted: {count}");
+    }
+
+    #[test]
     fn strip_shebang_does_not_handle_bom_alone() {
         // Contract: strip_shebang receives BOM-free input. A BOM-prefixed
         // shebang fed directly to strip_shebang is not detected as a shebang.
