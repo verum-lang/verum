@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/postgres/mod.vr — Spindle Postgres adapter (pure-Verum)
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1
+// Codename: spindle (postgres back end)
+// =============================================================================
+//
+// Pure-Verum Postgres v3 protocol implementation. No FFI to libpq.
+//
+//   wire.{frame,frontend,backend}    — v3 message framing + taxonomy
+//   auth.scram                       — SCRAM-SHA-256 client state machine
+//                                      (md5 / password / trust modes are
+//                                      compile-time-rejected per the spec)
+//   error                            — Postgres ErrorResponse → DbError
+//   config                           — PgConfig (host / port / user /
+//                                      database / TLS mode / app_name)
+//   connection                       — Startup handshake + simple-query
+//                                      protocol over the wire layer
+//
+// The L4-L9 stack (extended protocol, pipelining, pool, NOTIFY,
+// COPY, logical replication) lands incrementally — see T9.
+// =============================================================================
+
+module core.database.postgres;
+
+public module wire;
+public module auth;
+public module error;

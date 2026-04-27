@@ -1,0 +1,209 @@
+// =============================================================================
+// core/database/postgres/wire/frontend.vr — frontend message builders
+// =============================================================================
+// Spec: postgresql.org/docs/16/protocol-message-formats.html
+//
+// Pure encoders — every function returns the wire bytes ready to be
+// shipped to the socket. The closure-based `frame` helper takes care
+// of length-self-adjustment, so every payload builder writes only
+// the post-length body.
+// =============================================================================
+
+module core.database.postgres.wire.frontend;
+
+mount core.*;
+mount base.{Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.types.WireBuf;
+mount core.database.postgres.wire.frame.frame;
+mount core.database.postgres.wire.frame.frame_untagged;
+mount core.database.postgres.wire.types.{
+    FE_QUERY, FE_PARSE, FE_BIND, FE_DESCRIBE, FE_EXECUTE, FE_FLUSH,
+    FE_SYNC, FE_TERMINATE, FE_CLOSE, FE_PASSWORD,
+    PROTO_V3_0,
+};
+
+// -----------------------------------------------------------------------------
+// Startup message — untagged, length-prefixed.
+// -----------------------------------------------------------------------------
+//
+// Body layout:
+//   * 4-byte BE protocol version (PROTO_V3_0 = 196608)
+//   * sequence of NUL-terminated `key`, NUL-terminated `value` pairs
+//   * trailing NUL byte (empty key) terminates the parameter list
+//
+// Mandatory parameters: `user`. Optional: `database`, `application_name`,
+// `client_encoding`, `replication`. Spindle defaults `client_encoding` to
+// `UTF8` and `application_name` to `verum-spindle`.
+
+public type StartupParams is {
+    user: Text,
+    database: Maybe<Text>,
+    application_name: Text,
+    client_encoding: Text,
+    replication: Maybe<Text>,
+};
+
+implement StartupParams {
+    public fn new(user: Text) -> StartupParams {
+        StartupParams {
+            user: user,
+            database: None,
+            application_name: "verum-spindle".clone(),
+            client_encoding: "UTF8".clone(),
+            replication: None,
+        }
+    }
+
+    public fn with_database(self, db: Text) -> StartupParams {
+        StartupParams { database: Some(db), .. self }
+    }
+
+    public fn with_application_name(self, name: Text) -> StartupParams {
+        StartupParams { application_name: name, .. self }
+    }
+
+    public fn with_replication(self, replication: Text) -> StartupParams {
+        StartupParams { replication: Some(replication), .. self }
+    }
+}
+
+public fn startup(params: &StartupParams) -> List<Byte> {
+    let user = params.user.clone();
+    let app_name = params.application_name.clone();
+    let client_enc = params.client_encoding.clone();
+    let database = params.database.clone();
+    let replication = params.replication.clone();
+    frame_untagged(|buf: &mut WireBuf| {
+        buf.put_i32_be(PROTO_V3_0);
+        buf.put_cstr(&"user".clone());
+        buf.put_cstr(&user);
+        match database {
+            Some(db) => {
+                buf.put_cstr(&"database".clone());
+                buf.put_cstr(&db);
+            }
+            None => {}
+        }
+        buf.put_cstr(&"application_name".clone());
+        buf.put_cstr(&app_name);
+        buf.put_cstr(&"client_encoding".clone());
+        buf.put_cstr(&client_enc);
+        match replication {
+            Some(r) => {
+                buf.put_cstr(&"replication".clone());
+                buf.put_cstr(&r);
+            }
+            None => {}
+        }
+        // Empty key terminates the parameter list.
+        buf.put_u8(0);
+    })
+}
+
+// -----------------------------------------------------------------------------
+// SSLRequest / CancelRequest — untagged, fixed payload.
+// -----------------------------------------------------------------------------
+
+/// Magic packet sent BEFORE the startup message to negotiate TLS. The
+/// server replies with a single byte (`'S'` accept / `'N'` decline)
+/// outside the normal frame stream.
+public fn ssl_request() -> List<Byte> {
+    frame_untagged(|buf: &mut WireBuf| {
+        buf.put_i32_be(80877103);    // 0x04D2162F  (SSL request magic)
+    })
+}
+
+/// Cancel a running query. Sent on a *separate* TCP connection using
+/// the (process_id, secret_key) pair captured from the original
+/// startup handshake's BackendKeyData.
+public fn cancel_request(process_id: Int, secret_key: Int) -> List<Byte> {
+    frame_untagged(|buf: &mut WireBuf| {
+        buf.put_i32_be(80877102);    // 0x04D2162E  (CancelRequest magic)
+        buf.put_i32_be(process_id);
+        buf.put_i32_be(secret_key);
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Simple Query (Q) — single SQL string, mode is "simple query"
+// (no parameters, server may stream multiple result-sets back).
+// -----------------------------------------------------------------------------
+
+public fn simple_query(sql: &Text) -> List<Byte> {
+    let s = sql.clone();
+    frame(FE_QUERY, |buf: &mut WireBuf| {
+        buf.put_cstr(&s);
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Terminate (X) — orderly close. The server processes nothing after
+// this; the connection is shut down at the TCP level next.
+// -----------------------------------------------------------------------------
+
+public fn terminate() -> List<Byte> {
+    frame(FE_TERMINATE, |_buf: &mut WireBuf| {})
+}
+
+// -----------------------------------------------------------------------------
+// Sync (S) — extended-protocol pipeline barrier. Forces a ReadyForQuery.
+// -----------------------------------------------------------------------------
+
+public fn sync() -> List<Byte> {
+    frame(FE_SYNC, |_buf: &mut WireBuf| {})
+}
+
+// -----------------------------------------------------------------------------
+// Flush (H) — extended-protocol "send the responses you've buffered".
+// Useful when pipelining without inserting a Sync barrier.
+// -----------------------------------------------------------------------------
+
+public fn flush() -> List<Byte> {
+    frame(FE_FLUSH, |_buf: &mut WireBuf| {})
+}
+
+// -----------------------------------------------------------------------------
+// PasswordMessage — also carries SCRAM client messages.
+// -----------------------------------------------------------------------------
+
+public fn password_message(payload: &[Byte]) -> List<Byte> {
+    let owned = bytes_to_list(payload);
+    frame(FE_PASSWORD, |buf: &mut WireBuf| {
+        buf.put_bytes(owned.as_slice());
+    })
+}
+
+/// SASL initial response: mechanism name + NUL + 4-byte BE length +
+/// initial-response bytes (or `-1` for empty).
+public fn sasl_initial_response(mechanism: &Text, initial_response: &[Byte]) -> List<Byte> {
+    let mech = mechanism.clone();
+    let body = bytes_to_list(initial_response);
+    frame(FE_PASSWORD, |buf: &mut WireBuf| {
+        buf.put_cstr(&mech);
+        buf.put_i32_be(body.len() as Int);
+        buf.put_bytes(body.as_slice());
+    })
+}
+
+/// SASL response: subsequent client SCRAM messages after the initial.
+public fn sasl_response(client_message: &[Byte]) -> List<Byte> {
+    let body = bytes_to_list(client_message);
+    frame(FE_PASSWORD, |buf: &mut WireBuf| {
+        buf.put_bytes(body.as_slice());
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn bytes_to_list(buf: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < buf.len() {
+        out.push(buf[i]);
+        i = i + 1;
+    }
+    out
+}

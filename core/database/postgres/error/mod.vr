@@ -1,0 +1,83 @@
+// =============================================================================
+// core/database/postgres/error/mod.vr — translate PG ErrorResponse → DbError
+// =============================================================================
+// Spec: internal/specs/database.md §5.6 (DbError taxonomy),
+//       postgresql.org/docs/16/errcodes-appendix.html
+//
+// `Diagnostic` is the structured Postgres error from `wire/backend.vr`;
+// this module folds it into the unified `core.database.common.error.
+// DbError` so portable retry / IntoResponse code paths Just Work.
+// =============================================================================
+
+module core.database.postgres.error;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount core.database.common.error.{
+    DbError, AdapterId, AdapterSpecific, SqlState,
+    ConnectionErrorKind, AuthErrorKind, TimeoutPhase,
+};
+mount core.database.postgres.wire.backend.Diagnostic;
+
+/// Fold a Postgres `Diagnostic` into a Spindle `DbError`.
+///
+///   * 08xxx → ConnectionFailed
+///   * 28xxx → AuthFailed
+///   * 40xxx (rollback / serialization / deadlock) → QueryFailed
+///     with retryable=true via `SqlState.is_retryable()`
+///   * 23xxx (integrity) / 22xxx (data) → QueryFailed with
+///     `is_constraint_violation` true via `SqlState.is_integrity()`
+///   * everything else → QueryFailed
+public fn dberr_from_pg(d: Diagnostic) -> DbError {
+    let class = if d.code.len() >= 2 { take_first_two(&d.code) } else { "".clone() };
+    if class == "08" {
+        return DbError.ConnectionFailed {
+            source: ConnectionErrorKind.CekServerTerminated,
+            adapter: AdapterId.AdPostgres,
+        };
+    }
+    if class == "28" {
+        return DbError.AuthFailed {
+            kind: AuthErrorKind.AekRoleNotPermitted(d.message.clone()),
+        };
+    }
+    let state = match SqlState.parse(&d.code) {
+        Some(s) => s,
+        None    => match SqlState.parse(&"XX000".clone()) {
+            Some(s2) => s2,
+            None     => SqlState.parse(&"XX000".clone()).unwrap(),
+        }
+    };
+    let position = parse_optional_int(&d.position);
+    DbError.QueryFailed {
+        sql_state: state,
+        message: d.message,
+        position: position,
+    }
+}
+
+fn take_first_two(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out: List<Byte> = List.new();
+    let n = if bytes.len() < 2 { bytes.len() } else { 2 };
+    let mut i = 0;
+    while i < n {
+        out.push(bytes[i]);
+        i = i + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+fn parse_optional_int(s: &Text) -> Maybe<Int> {
+    if s.len() == 0 { return None; }
+    let bytes = s.as_bytes();
+    let mut acc: Int = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b < (0x30 as Byte) || b > (0x39 as Byte) { return None; }
+        acc = acc * 10 + ((b as Int) - 0x30);
+        i = i + 1;
+    }
+    Some(acc)
+}

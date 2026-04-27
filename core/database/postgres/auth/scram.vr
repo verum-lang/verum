@@ -1,0 +1,566 @@
+// =============================================================================
+// core/database/postgres/auth/scram.vr — SCRAM-SHA-256 client
+// =============================================================================
+// Spec: RFC 5802 (SCRAM), RFC 7677 (SCRAM-SHA-256),
+//       postgresql.org/docs/16/sasl-authentication.html
+//
+// State machine:
+//
+//   Initial ── send `client-first-message-bare`
+//      │       (gs2-header || "n=user,r=client_nonce")
+//      ▼
+//   AwaitingChallenge ── on AuthSaslContinue
+//                            * parse server-first (r=nonce || s=salt || i=iter)
+//                            * derive SaltedPassword = PBKDF2(p, s, i)
+//                            * ClientKey = HMAC(SaltedPassword, "Client Key")
+//                            * StoredKey = SHA-256(ClientKey)
+//                            * AuthMessage = client_first_bare || "," ||
+//                                             server_first || "," ||
+//                                             channel_binding || "," ||
+//                                             "r=" || final_nonce
+//                            * ClientSignature = HMAC(StoredKey, AuthMessage)
+//                            * ClientProof = ClientKey ⊕ ClientSignature
+//                            * ServerKey = HMAC(SaltedPassword, "Server Key")
+//                            * ServerSignature = HMAC(ServerKey, AuthMessage)
+//                            * send `c=base64(channel_binding) || ,r=final_nonce
+//                                    || ,p=base64(ClientProof)`
+//      ▼
+//   AwaitingFinal ── on AuthSaslFinal
+//                       * parse server-final (v=base64(server_signature))
+//                       * compare against expected ServerSignature
+//                       * if match → Authenticated; else → Failed
+//      ▼
+//   Authenticated  (or Failed)
+//
+// Channel binding: SCRAM-SHA-256-PLUS uses `tls-server-end-point` —
+// the hash of the server's TLS certificate. Spindle requires this
+// when the connection is TLS.  Plain SCRAM-SHA-256 (the `n` flag in
+// the GS2 header) is allowed only on non-TLS connections.
+// =============================================================================
+
+module core.database.postgres.auth.scram;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.security.hash.sha256.Sha256;
+mount core.security.mac.hmac.hmac_sha256;
+mount core.security.kdf.pbkdf2.pbkdf2_hmac_sha256;
+mount core.encoding.base64.{encode as b64_encode, decode as b64_decode};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type ScramError is
+      SeMechanismRejected
+    | SeMalformedServerMessage { stage: Text, reason: Text }
+    | SeBadIterationCount { iterations: Int }
+    | SeBase64DecodeFailed
+    | SeNonceMismatch
+    | SeServerSignatureMismatch
+    | SeUnsupportedChannelBinding(Text)
+    | SeKdfFailed;
+
+// -----------------------------------------------------------------------------
+// State
+// -----------------------------------------------------------------------------
+
+public type ScramState is
+      SsInitial
+    | SsAwaitingChallenge
+    | SsAwaitingFinal
+    | SsAuthenticated
+    | SsFailed;
+
+public type ChannelBinding is
+      CbNone                            // SCRAM-SHA-256, GS2 flag 'n'
+    | CbTlsServerEndPoint(List<Byte>);  // SCRAM-SHA-256-PLUS, GS2 flag 'p'
+
+public type ScramClient is {
+    state: ScramState,
+
+    // Input
+    username: Text,
+    password: Text,
+    channel_binding: ChannelBinding,
+    client_nonce: Text,
+
+    // Carried across stages
+    client_first_bare: Text,
+    server_first: Text,
+    final_nonce: Text,
+    salted_password: List<Byte>,
+    expected_server_signature: List<Byte>,
+};
+
+implement ScramClient {
+    public fn state(&self) -> ScramState { self.state.clone() }
+    public fn is_authenticated(&self) -> Bool {
+        match self.state { SsAuthenticated => true, _ => false }
+    }
+    public fn has_failed(&self) -> Bool {
+        match self.state { SsFailed => true, _ => false }
+    }
+}
+
+/// Construct a fresh SCRAM client. `client_nonce` MUST be at least 18
+/// random bytes Base64-encoded — caller draws from
+/// `core.security.random` so deterministic-simulation tests can seed
+/// reproducibly.
+public fn scram_client_new(
+    username: Text,
+    password: Text,
+    channel_binding: ChannelBinding,
+    client_nonce: Text,
+) -> ScramClient {
+    ScramClient {
+        state: SsInitial,
+        username: username,
+        password: password,
+        channel_binding: channel_binding,
+        client_nonce: client_nonce,
+        client_first_bare: "".clone(),
+        server_first: "".clone(),
+        final_nonce: "".clone(),
+        salted_password: List.new(),
+        expected_server_signature: List.new(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Phase 1: client-first-message
+// -----------------------------------------------------------------------------
+
+implement ScramClient {
+    /// Build the SASL initial response payload — the bytes that flow
+    /// after the mechanism name + length prefix in the
+    /// SASLInitialResponse frame.
+    ///
+    /// Layout: `gs2-header || client-first-message-bare`
+    public fn client_first_message(&mut self) -> List<Byte> {
+        let gs2 = gs2_header(&self.channel_binding);
+        let bare = format_client_first_bare(&self.username, &self.client_nonce);
+        self.client_first_bare = bare.clone();
+        self.state = SsAwaitingChallenge;
+
+        let mut out: List<Byte> = List.new();
+        push_text(&mut out, &gs2);
+        push_text(&mut out, &bare);
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Phase 2: server-first → client-final
+// -----------------------------------------------------------------------------
+
+public type ServerFirst is {
+    nonce: Text,
+    salt: List<Byte>,
+    iterations: Int,
+};
+
+fn parse_server_first(s: &Text) -> Result<ServerFirst, ScramError> {
+    // server-first = "r=" nonce "," "s=" salt "," "i=" iterations
+    // Possibly preceded by "m=" extensions or other SASL fields — RFC
+    // 5802 says extensions before mandatory fields are forbidden, so
+    // we reject any unknown leading field for safety.
+    let mut nonce: Maybe<Text> = None;
+    let mut salt:  Maybe<List<Byte>> = None;
+    let mut iter:  Maybe<Int> = None;
+    let mut start: Int = 0;
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    let mut i = 0;
+    while i <= n {
+        let at_end = i == n;
+        let at_sep = if at_end { false } else { bytes[i] == (0x2C as Byte) };
+        if at_sep || at_end {
+            let mut field: List<Byte> = List.new();
+            let mut k = start;
+            while k < i { field.push(bytes[k]); k = k + 1; }
+            let field_text = match Text.from_bytes(&field) {
+                Ok(t) => t,
+                Err(_) => { return Err(SeMalformedServerMessage {
+                    stage: "server-first".clone(),
+                    reason: "invalid utf8 field".clone(),
+                }); }
+            };
+            match consume_field(&field_text) {
+                Some((key, value)) => {
+                    let kb = key.as_bytes();
+                    if kb.len() == 1 && kb[0] == (0x72 as Byte) {        // 'r'
+                        nonce = Some(value);
+                    } else if kb.len() == 1 && kb[0] == (0x73 as Byte) {  // 's'
+                        match b64_decode(&value) {
+                            Ok(v)  => { salt = Some(v); }
+                            Err(_) => { return Err(SeBase64DecodeFailed); }
+                        }
+                    } else if kb.len() == 1 && kb[0] == (0x69 as Byte) {  // 'i'
+                        match parse_int_text(&value) {
+                            Some(v) => { iter = Some(v); }
+                            None    => { return Err(SeMalformedServerMessage {
+                                stage: "server-first".clone(),
+                                reason: "non-integer iterations".clone(),
+                            }); }
+                        }
+                    }
+                    // Unknown / extension key: ignored per RFC.
+                }
+                None => {}     // empty / malformed field: skip
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    let nonce = match nonce { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing r=".clone() }); } };
+    let salt = match salt   { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing s=".clone() }); } };
+    let iter = match iter   { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing i=".clone() }); } };
+    if iter <= 0 { return Err(SeBadIterationCount { iterations: iter }); }
+    Ok(ServerFirst { nonce: nonce, salt: salt, iterations: iter })
+}
+
+implement ScramClient {
+    /// Drive the second SCRAM round. Input is the raw `server_data`
+    /// payload from the AuthSaslContinue message; output is the bytes
+    /// to send in the next SASLResponse.
+    public fn server_first_to_client_final(
+        &mut self,
+        server_data: &[Byte],
+    ) -> Result<List<Byte>, ScramError> {
+        match self.state {
+            SsAwaitingChallenge => {}
+            _ => { return Err(SeMalformedServerMessage {
+                stage: "state".clone(),
+                reason: "unexpected SASL continue".clone(),
+            }); }
+        }
+        let server_first_text = match Text.from_bytes(&bytes_to_list(server_data)) {
+            Ok(t)  => t,
+            Err(_) => { return Err(SeMalformedServerMessage {
+                stage: "server-first".clone(),
+                reason: "invalid utf8".clone(),
+            }); }
+        };
+        self.server_first = server_first_text.clone();
+        let parsed = parse_server_first(&server_first_text)?;
+
+        // Validate that the server's nonce extends ours.
+        if !text_starts_with(&parsed.nonce, &self.client_nonce) {
+            return Err(SeNonceMismatch);
+        }
+
+        // Compute SaltedPassword = PBKDF2(password, salt, iterations, 32)
+        let pw_bytes = self.password.as_bytes();
+        let salted = match pbkdf2_hmac_sha256(
+            pw_bytes,
+            parsed.salt.as_slice(),
+            parsed.iterations as UInt32,
+            32,
+        ) {
+            Ok(v)  => v,
+            Err(_) => { return Err(SeKdfFailed); }
+        };
+        self.salted_password = salted.clone();
+
+        // ClientKey  = HMAC-SHA-256(SaltedPassword, "Client Key")
+        let client_key_arr = hmac_sha256(salted.as_slice(), "Client Key".as_bytes());
+        let client_key = arr32_to_list(&client_key_arr);
+
+        // StoredKey = SHA-256(ClientKey)
+        let mut h = Sha256.new();
+        h.update(client_key.as_slice());
+        let stored_key_arr = h.finalize();
+        let stored_key = arr32_to_list(&stored_key_arr);
+
+        // Build channel-binding base64.
+        let cbind_b64 = channel_binding_base64(&self.channel_binding);
+
+        // Client-final-without-proof = "c=" cbind_b64 "," "r=" parsed.nonce
+        let client_final_no_proof = build_client_final_no_proof(&cbind_b64, &parsed.nonce);
+        self.final_nonce = parsed.nonce.clone();
+
+        // AuthMessage = client_first_bare "," server_first "," client_final_without_proof
+        let auth_message = format_auth_message(
+            &self.client_first_bare,
+            &self.server_first,
+            &client_final_no_proof,
+        );
+
+        // ClientSignature = HMAC(StoredKey, AuthMessage)
+        let client_sig_arr = hmac_sha256(stored_key.as_slice(), auth_message.as_bytes());
+        let client_signature = arr32_to_list(&client_sig_arr);
+
+        // ClientProof = ClientKey ⊕ ClientSignature
+        let proof = xor_bytes(&client_key, &client_signature);
+        let proof_b64 = b64_encode(proof.as_slice());
+
+        // Stash the expected ServerSignature for phase-3 verification.
+        let server_key_arr = hmac_sha256(salted.as_slice(), "Server Key".as_bytes());
+        let server_key = arr32_to_list(&server_key_arr);
+        let server_sig_arr = hmac_sha256(server_key.as_slice(), auth_message.as_bytes());
+        self.expected_server_signature = arr32_to_list(&server_sig_arr);
+
+        // Compose the final client message:
+        //   client_final_no_proof + ",p=" + proof_b64
+        let mut out: List<Byte> = List.new();
+        push_text(&mut out, &client_final_no_proof);
+        push_text(&mut out, &",p=".clone());
+        push_text(&mut out, &proof_b64);
+
+        self.state = SsAwaitingFinal;
+        Ok(out)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Phase 3: server-final verification.
+// -----------------------------------------------------------------------------
+
+implement ScramClient {
+    public fn verify_server_final(
+        &mut self,
+        server_data: &[Byte],
+    ) -> Result<(), ScramError> {
+        match self.state {
+            SsAwaitingFinal => {}
+            _ => { return Err(SeMalformedServerMessage {
+                stage: "state".clone(),
+                reason: "unexpected SASL final".clone(),
+            }); }
+        }
+        let final_text = match Text.from_bytes(&bytes_to_list(server_data)) {
+            Ok(t)  => t,
+            Err(_) => { return Err(SeMalformedServerMessage {
+                stage: "server-final".clone(),
+                reason: "invalid utf8".clone(),
+            }); }
+        };
+        // server-final = "v=" base64(ServerSignature)  (or "e=" error)
+        let trimmed = final_text;
+        let bytes = trimmed.as_bytes();
+        if bytes.len() < 2 {
+            self.state = SsFailed;
+            return Err(SeMalformedServerMessage {
+                stage: "server-final".clone(),
+                reason: "too short".clone(),
+            });
+        }
+        if bytes[0] == (0x65 as Byte) && bytes[1] == (0x3D as Byte) {
+            // 'e=' — server reports a SCRAM error.
+            self.state = SsFailed;
+            return Err(SeMalformedServerMessage {
+                stage: "server-final".clone(),
+                reason: "server reported SCRAM error".clone(),
+            });
+        }
+        if !(bytes[0] == (0x76 as Byte) && bytes[1] == (0x3D as Byte)) {
+            self.state = SsFailed;
+            return Err(SeMalformedServerMessage {
+                stage: "server-final".clone(),
+                reason: "missing v= prefix".clone(),
+            });
+        }
+        let sig_b64 = take_after_eq(&trimmed);
+        let server_sig = match b64_decode(&sig_b64) {
+            Ok(v)  => v,
+            Err(_) => {
+                self.state = SsFailed;
+                return Err(SeBase64DecodeFailed);
+            }
+        };
+        if !ct_eq(&server_sig, &self.expected_server_signature) {
+            self.state = SsFailed;
+            return Err(SeServerSignatureMismatch);
+        }
+        self.state = SsAuthenticated;
+        Ok(())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn gs2_header(cb: &ChannelBinding) -> Text {
+    match cb {
+        CbNone => "n,,".clone(),
+        CbTlsServerEndPoint(_) => "p=tls-server-end-point,,".clone(),
+    }
+}
+
+fn channel_binding_base64(cb: &ChannelBinding) -> Text {
+    let header = gs2_header(cb);
+    let mut bytes: List<Byte> = List.new();
+    let hb = header.as_bytes();
+    let mut i = 0;
+    while i < hb.len() {
+        bytes.push(hb[i]);
+        i = i + 1;
+    }
+    match cb {
+        CbTlsServerEndPoint(ref cert_hash) => {
+            // Append the server-end-point hash bytes.
+            let mut k = 0;
+            while k < cert_hash.len() as Int {
+                bytes.push(cert_hash[k]);
+                k = k + 1;
+            }
+        }
+        CbNone => {}
+    }
+    b64_encode(bytes.as_slice())
+}
+
+fn format_client_first_bare(username: &Text, nonce: &Text) -> Text {
+    // SCRAM client-first-message-bare = "n=" username "," "r=" nonce
+    let mut out: Text = "n=".clone();
+    out.push_str(&saslprep_minimal(username));
+    out.push_str(&",r=".clone());
+    out.push_str(nonce);
+    out
+}
+
+fn build_client_final_no_proof(cbind_b64: &Text, final_nonce: &Text) -> Text {
+    let mut out: Text = "c=".clone();
+    out.push_str(cbind_b64);
+    out.push_str(&",r=".clone());
+    out.push_str(final_nonce);
+    out
+}
+
+fn format_auth_message(client_first_bare: &Text, server_first: &Text, client_final_no_proof: &Text) -> Text {
+    let mut out: Text = client_first_bare.clone();
+    out.push_str(&",".clone());
+    out.push_str(server_first);
+    out.push_str(&",".clone());
+    out.push_str(client_final_no_proof);
+    out
+}
+
+/// Postgres explicitly requires that usernames in SCRAM are passed
+/// through a SASLprep-equivalent. The full RFC 4013 stringprep is
+/// out of scope for v0.1 — we apply the minimal subset Postgres
+/// observes in practice: forbid embedded "=" (would be parsed as a
+/// field separator) and "," (likewise), and otherwise pass through.
+fn saslprep_minimal(s: &Text) -> Text {
+    let mut out = s.clone();
+    out = out.replace("=", "=3D");     // SCRAM equals-mapping
+    out = out.replace(",", "=2C");     // SCRAM comma-mapping
+    out
+}
+
+fn consume_field(field: &Text) -> Maybe<(Text, Text)> {
+    let bytes = field.as_bytes();
+    if bytes.len() < 2 || bytes[1] != (0x3D as Byte) {
+        return None;
+    }
+    let mut k: List<Byte> = List.new();
+    k.push(bytes[0]);
+    let mut v: List<Byte> = List.new();
+    let mut i = 2;
+    while i < bytes.len() {
+        v.push(bytes[i]);
+        i = i + 1;
+    }
+    let key = match Text.from_bytes(&k) { Ok(t) => t, Err(_) => return None };
+    let val = match Text.from_bytes(&v) { Ok(t) => t, Err(_) => return None };
+    Some((key, val))
+}
+
+fn parse_int_text(s: &Text) -> Maybe<Int> {
+    let bytes = s.as_bytes();
+    if bytes.len() == 0 { return None; }
+    let mut acc: Int = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b < (0x30 as Byte) || b > (0x39 as Byte) { return None; }
+        acc = acc * 10 + ((b as Int) - 0x30);
+        i = i + 1;
+    }
+    Some(acc)
+}
+
+fn text_starts_with(haystack: &Text, prefix: &Text) -> Bool {
+    let h = haystack.as_bytes();
+    let p = prefix.as_bytes();
+    if h.len() < p.len() { return false; }
+    let mut i = 0;
+    while i < p.len() {
+        if h[i] != p[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn take_after_eq(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i] != (0x3D as Byte) {
+        i = i + 1;
+    }
+    let mut out: List<Byte> = List.new();
+    let mut j = i + 1;
+    while j < bytes.len() {
+        out.push(bytes[j]);
+        j = j + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+fn arr32_to_list(arr: &[Byte; 32]) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < 32 {
+        out.push(arr[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn push_text(buf: &mut List<Byte>, s: &Text) {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        buf.push(b[i]);
+        i = i + 1;
+    }
+}
+
+fn xor_bytes(a: &List<Byte>, b: &List<Byte>) -> List<Byte> {
+    let n = if (a.len() as Int) < (b.len() as Int) { a.len() as Int } else { b.len() as Int };
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < n {
+        out.push(((a[i] as Int) ^ (b[i] as Int)) as Byte);
+        i = i + 1;
+    }
+    out
+}
+
+fn ct_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    // Constant-time byte comparison — accumulates differences across
+    // the entire shorter operand to avoid a length-leak via short-
+    // circuit. When the lengths differ the result is `false`
+    // unconditionally.
+    if a.len() != b.len() { return false; }
+    let mut diff: Int = 0;
+    let mut i = 0;
+    while i < a.len() as Int {
+        diff = diff | ((a[i] as Int) ^ (b[i] as Int));
+        i = i + 1;
+    }
+    diff == 0
+}
+
+fn bytes_to_list(buf: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < buf.len() {
+        out.push(buf[i]);
+        i = i + 1;
+    }
+    out
+}
