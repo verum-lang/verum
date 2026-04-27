@@ -177,6 +177,81 @@ public type Text is {
     cap: Int,            // Capacity (0 = immutable/static)
 };
 
+/// Knuth-Morris-Pratt failure-function preprocessing for byte-pattern
+/// search. `table[i]` is the length of the longest proper prefix of
+/// `pattern[..=i]` that is also a suffix — this lets [`kmp_find`]
+/// shift the pattern by `i - table[i-1]` instead of restarting from
+/// scratch on a mismatch.
+///
+/// O(m) time + space where `m = pattern.len()`. Building the table
+/// once and reusing it across repeated searches (as `replace` does)
+/// gives the search loop an amortised O(n + km) cost — linear in the
+/// haystack length plus pattern-length per match — versus the naive
+/// O(n·m) nested-loop scan.
+fn kmp_failure_table(pattern: &[Byte]) -> List<Int> {
+    let plen = pattern.len();
+    let mut table: List<Int> = List.new();
+    let mut idx = 0;
+    while idx < plen {
+        table.push(0);
+        idx = idx + 1;
+    }
+    if plen <= 1 {
+        return table;
+    }
+    let mut k = 0;
+    let mut j = 1;
+    while j < plen {
+        if pattern[j] == pattern[k] {
+            k = k + 1;
+            table[j] = k;
+            j = j + 1;
+        } else if k > 0 {
+            k = table[k - 1];
+        } else {
+            table[j] = 0;
+            j = j + 1;
+        }
+    }
+    table
+}
+
+/// Find the next occurrence of `pattern` inside `haystack` starting
+/// at byte offset `start`. Returns the byte index of the match, or
+/// `-1` if no match is reachable. Empty pattern matches at `start`
+/// per convention.
+///
+/// Uses the precomputed KMP failure-function table from
+/// [`kmp_failure_table`]. Each haystack byte is examined at most a
+/// constant number of times across the whole call, so total time is
+/// O(haystack.len() - start + pattern.len()) bytes.
+fn kmp_find(haystack: &[Byte], pattern: &[Byte], table: &List<Int>, start: Int) -> Int {
+    let hlen = haystack.len();
+    let plen = pattern.len();
+    if plen == 0 {
+        return start;
+    }
+    if start < 0 || start > hlen {
+        return -1;
+    }
+    let mut i = start;
+    let mut j = 0;
+    while i < hlen {
+        if haystack[i] == pattern[j] {
+            i = i + 1;
+            j = j + 1;
+            if j == plen {
+                return i - j;
+            }
+        } else if j > 0 {
+            j = table[j - 1];
+        } else {
+            i = i + 1;
+        }
+    }
+    -1
+}
+
 implement Text {
     // =========================================================================
     // Construction
@@ -857,50 +932,42 @@ implement Text {
         self.slice(0, end)
     }
 
-    /// Replace all occurrences of pattern with replacement.
+    /// Replace every occurrence of `pattern` with `replacement`.
+    /// Linear-time: precomputes the KMP failure table once
+    /// (O(pattern.len())), then scans the haystack in O(n + km) total
+    /// — `n` haystack bytes plus `m` pattern bytes per match. The
+    /// previous nested-loop implementation was O(n·m) per call, which
+    /// blew up on large inputs with long patterns.
+    ///
+    /// Empty pattern is a no-op: returns a clone of `self` unchanged
+    /// (matches Rust's `str::replace` semantics — replacing the empty
+    /// string with anything would be ill-defined).
     public fn replace(&self, pattern: &Text, replacement: &Text) -> Text {
-        let mut res = Text.new();
         let bytes = self.as_bytes();
         let pat_bytes = pattern.as_bytes();
-        let blen = bytes.len();
         let plen = pat_bytes.len();
+        let blen = bytes.len();
 
         if plen == 0 {
             return self.clone();
         }
+        if plen > blen {
+            return self.clone();
+        }
 
+        let table = kmp_failure_table(pat_bytes);
+        let mut res = Text.new();
         let mut pos = 0;
-        while pos < blen {
-            // inline byte-level search for pattern starting at pos
-            let mut found_at = -1;
-            let search_end = blen - plen + 1;
-            let mut i = pos;
-            while i < search_end {
-                let mut match_ok = true;
-                let mut j = 0;
-                while j < plen {
-                    if bytes[i + j] != pat_bytes[j] {
-                        match_ok = false;
-                        break;
-                    }
-                    j = j + 1;
-                }
-                if match_ok {
-                    found_at = i;
-                    break;
-                }
-                i = i + 1;
-            }
-            if found_at >= 0 {
-                res.push_str(&self.slice(pos, found_at));
-                res.push_str(replacement);
-                pos = found_at + plen;
-            } else {
+        while pos <= blen {
+            let found_at = kmp_find(bytes, pat_bytes, &table, pos);
+            if found_at < 0 {
                 res.push_str(&self.slice(pos, blen));
                 break;
             }
+            res.push_str(&self.slice(pos, found_at));
+            res.push_str(replacement);
+            pos = found_at + plen;
         }
-
         res
     }
 

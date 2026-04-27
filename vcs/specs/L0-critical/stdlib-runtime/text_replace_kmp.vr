@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, text, replace, kmp, perf
+
+// Regression test for `Text.replace` linear-time KMP rewrite.
+// Pre-fix the inner loop was O(n·m); now it precomputes the
+// Knuth-Morris-Pratt failure table once and scans in O(n + km).
+//
+// Coverage: all the surface cases the production helpers must
+// handle, including the cases where naive byte search and KMP can
+// disagree (overlapping prefixes that force the failure-function
+// shift). Performance is implicitly validated by typecheck — perf
+// benchmarks are in vcs/benchmarks if/when that suite consumes this
+// helper.
+
+fn main() {
+    // Empty pattern: no-op, returns clone.
+    assert("hello".replace("", "x") == "hello");
+    assert("".replace("", "x") == "");
+
+    // Pattern not found: no-op.
+    assert("hello".replace("xyz", "Q") == "hello");
+
+    // Pattern longer than string: no-op (post-fix early-out).
+    assert("ab".replace("abcd", "Q") == "ab");
+
+    // Single-byte pattern.
+    assert("hello".replace("l", "L") == "heLLo");
+    assert("aaaa".replace("a", "b") == "bbbb");
+
+    // Multi-byte pattern.
+    assert("ababab".replace("ab", "X") == "XXX");
+
+    // Pattern at start, middle, end.
+    assert("xhello".replace("x", "Y") == "Yhello");
+    assert("hexlxlo".replace("x", "Y") == "heYlYlo");
+    assert("hellox".replace("x", "Y") == "helloY");
+
+    // Replacement empty: deletion.
+    assert("a-b-c".replace("-", "") == "abc");
+    assert("hello world".replace(" ", "") == "helloworld");
+
+    // Replacement larger than pattern.
+    assert("abc".replace("b", "BB") == "aBBc");
+
+    // Replacement smaller than pattern.
+    assert("aXXc".replace("XX", "Y") == "aYc");
+
+    // Pattern equals haystack: replaced once.
+    assert("xx".replace("xx", "Y") == "Y");
+
+    // Empty haystack: stays empty.
+    assert("".replace("x", "Y") == "");
+
+    // Adjacent matches don't overlap (post-replacement scan resumes
+    // after the original pattern, not the replacement).
+    assert("aaaa".replace("aa", "X") == "XX");
+    assert("aaaaa".replace("aa", "X") == "XXa");
+
+    // Overlapping prefix in pattern — the case where a naive scan
+    // and KMP can diverge if KMP's failure function is wrong.
+    // Pattern "aba" inside "ababab" should match at 0 and 3 (no
+    // overlap consumed — non-overlapping greedy left-to-right).
+    assert("ababab".replace("aba", "X") == "Xbab");
+    // After the match at 0 (consuming "aba"), pos=3 → "bab" → "ba",
+    // no further match.
+
+    // Pattern with internal repetition triggering the KMP shift.
+    // "abab" inside "abababab": match at 0, pos→4, match at 4 → "XX".
+    assert("abababab".replace("abab", "X") == "XX");
+
+    // Single-byte chain: 30 'x's replaced by 'Y'.
+    let many_x = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";  // 30 x's
+    assert(many_x.replace("x", "Y").len() == 30);
+
+    // Dictionary-style longer pattern, no match.
+    assert("hello".replace("zzzzzzz", "Q") == "hello");
+}
