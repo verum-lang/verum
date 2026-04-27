@@ -34,8 +34,6 @@ static UI_STATE: Mutex<Option<UiState>> = Mutex::new(None);
 struct UiState {
     verbose: bool,
     quiet: bool,
-    #[allow(dead_code)]
-    colors_enabled: bool,
 }
 
 pub fn init(verbose: bool, quiet: bool, color: &str) -> crate::error::Result<()> {
@@ -78,11 +76,7 @@ pub fn init(verbose: bool, quiet: bool, color: &str) -> crate::error::Result<()>
         .try_init();
 
     let mut state = UI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    *state = Some(UiState {
-        verbose,
-        quiet,
-        colors_enabled,
-    });
+    *state = Some(UiState { verbose, quiet });
 
     Ok(())
 }
