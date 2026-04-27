@@ -244,7 +244,7 @@ implement UpstreamPool {
         let now = Instant.now().duration_since_epoch().as_millis();
         let timeout = self.state.config.idle_timeout_ms;
         while !bucket.is_empty() {
-            let c = bucket.pop().unwrap();
+            let c = bucket.pop().expect("upstream_pool: bucket non-empty by while-condition guard");
             if now - c.last_used_ms <= timeout {
                 return Some(c.stream);
             }
@@ -278,7 +278,8 @@ implement Drop for ConnectionLease {
             Some(b) => b,
             None => {
                 idle.insert(self.upstream.clone(), List.new());
-                idle.get_mut(&self.upstream).unwrap()
+                idle.get_mut(&self.upstream)
+                    .expect("upstream_pool: just inserted self.upstream above — get_mut is_some")
             }
         };
         // Bound per-host; drop the oldest if above limit.
