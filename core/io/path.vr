@@ -776,7 +776,7 @@ implement Iterator for Components {
                 if second == Some(':') {
                     let prefix = self.path.slice(0, 2);
                     self.pos = 2;
-                    if self.path.len() > 2 && is_separator(self.path.char_at(2).unwrap()) {
+                    if self.path.len() > 2 && is_separator(self.path.char_at(2).expect("Path component iter: len > 2 guaranteed by guard above")) {
                         self.pos = 3;
                     }
                     return Some(Prefix(prefix));
