@@ -474,7 +474,13 @@ fn test_compile_stdlib_file() {
     }
 }
 
-/// Tests compilation of core/base/ops.vr
+/// Tests compilation of core/base/ops.vr.
+///
+/// Exercises the bottom-type alias `public type Never is !;` end-to-end
+/// (parser → AST `TypeDeclBody::Alias(TypeKind::Never)` → codegen). Use
+/// `compile_stdlib_file` because `ops.vr` declares its operator-overloading
+/// protocols self-contained and does not pull cross-module symbols via
+/// `mount`.
 #[test]
 fn test_compile_stdlib_ops() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/base/ops.vr");
@@ -984,30 +990,50 @@ fn test_compile_stdlib_mem_header() {
     }
 }
 
-/// Tests compilation of core/mem/heap.vr
+/// Tests compilation of core/mem/heap.vr.
+///
+/// Uses `compile_stdlib_file_with_mounts` because `heap.vr` brings
+/// `SEGMENT_HUGE`, `SEGMENT_NORMAL`, `MemSegment`, page-size constants and
+/// segment-allocator helpers in via `mount super.segment.{ … }`. Without
+/// mount resolution those references are undefined — a test-harness gap,
+/// not a real codegen bug. (Same rationale as
+/// `test_compile_stdlib_list` above.)
 #[test]
 fn test_compile_stdlib_mem_heap() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/mem/heap.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile mem/heap.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile mem/heap.vr");
     }
 }
 
-/// Tests compilation of core/mem/thin_ref.vr
+/// Tests compilation of core/mem/thin_ref.vr.
+///
+/// Uses `compile_stdlib_file_with_mounts` for the same reason as
+/// `test_compile_stdlib_mem_heap`: pulls cross-module CBGR symbols via
+/// `mount`.
 #[test]
 fn test_compile_stdlib_mem_thin_ref() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/mem/thin_ref.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile mem/thin_ref.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile mem/thin_ref.vr");
     }
 }
 
-/// Tests compilation of core/mem/fat_ref.vr
+/// Tests compilation of core/mem/fat_ref.vr.
+///
+/// Uses `compile_stdlib_file_with_mounts` for the same reason as
+/// `test_compile_stdlib_mem_heap`.
 #[test]
 fn test_compile_stdlib_mem_fat_ref() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/mem/fat_ref.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile mem/fat_ref.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile mem/fat_ref.vr");
     }
 }
 

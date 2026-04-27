@@ -1977,10 +1977,26 @@ impl<'a> RecursiveParser<'a> {
             Vec::new()
         };
 
-        // 'is' keyword or '=' for type alias syntax
-        // Both syntaxes are supported:
-        // - type Name<T> is List<T>;  (standard Verum)
-        // - type Name<T> = List<T>;   (type alias shorthand)
+        // 'is' keyword (canonical) or '=' (for two specific top-level
+        // alias productions) introduces the type body.
+        //
+        // Per `grammar/verum.ebnf` the canonical top-level form is `type_def`
+        // (line ~474), which uses `is`. Two related productions accept `=`
+        // at top level:
+        //
+        //   - `type_function_def`     (line ~518) — type-level functions
+        //                              with higher-kinded params:
+        //                              `type Map<F<_>, A> = List<F<A>>;`
+        //   - `constrained_type_alias` (line ~519) — generic aliases with
+        //                              `where`-bounds on params:
+        //                              `type Sortable<T: Ord> = List<T>;`
+        //
+        // The recursive-descent parser cannot distinguish those productions
+        // from a plain `type_def` from a single token of lookahead, so it
+        // accepts `=` here unconditionally and emits a `TypeDeclBody::Alias`.
+        // Diagnostics that prefer the `is` form for non-HKT/non-bounded
+        // aliases are tracked separately (see lint/style work) and live
+        // outside the parser.
         let is_alias_syntax = if self.stream.check(&TokenKind::Eq) {
             self.stream.advance(); // consume '='
             true
@@ -2537,6 +2553,33 @@ impl<'a> RecursiveParser<'a> {
         // Note: For unit types, use `type Marker is ();` syntax
         if self.stream.check(&TokenKind::Semicolon) {
             return Err(ParseError::missing_type_body(self.stream.current_span()));
+        }
+
+        // Bottom-type alias: `type Never is !;`
+        //
+        // The bottom type `!` is the unique uninhabited type — no value of `!`
+        // exists. It is the canonical type for diverging functions
+        // (`fn panic(...) -> !`), provably-dead match arms, and the residual
+        // discriminator that lets refinement-friendly variants like
+        // `Maybe<T>::from_residual` document "this branch cannot run" in the
+        // type itself.
+        //
+        // The Type-level parser already accepts `!` in expression position
+        // (`fn foo() -> !`), but the `type T is BODY;` body parser previously
+        // routed every non-keyword head through `parse_type` only via specific
+        // entry-points. Calling `parse_type()` here lets the top-level
+        // `Never type: !` arm in `ty.rs` fire and produce `TypeKind::Never`,
+        // which we wrap in `TypeDeclBody::Alias` — semantically identical to
+        // the alias-equals form `type Never = !;`.
+        //
+        // This restores the foundational audit's `Never is !` alias so
+        // downstream `unsafe unreachable_unchecked` arms in
+        // `Maybe::from_residual` / `Result::from_residual` (which depend on
+        // Never being uninhabited, not just a unit-shaped placeholder) compile
+        // cleanly.
+        if self.stream.check(&TokenKind::Bang) {
+            let aliased_type = self.parse_type()?;
+            return Ok(TypeDeclBody::Alias(aliased_type));
         }
 
         // Protocol: type X is protocol [extends Base1 + Base2] [where T: Clone] { ... }
