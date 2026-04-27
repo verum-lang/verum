@@ -1,0 +1,294 @@
+// =============================================================================
+// core/database/mysql/introspect.vr — MySQL SchemaSnapshot extractor
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §5.3 (verum db:introspect)
+// =============================================================================
+//
+// Drives a live MysqlConnection through `information_schema` to populate
+// `core.database.common.schema.SchemaSnapshot`.
+//
+// Source views:
+//   * `information_schema.tables`        — table list scoped by
+//                                          `table_schema = current_database()`
+//   * `information_schema.columns`       — declared_type via column_type
+//                                          (preserves length / precision),
+//                                          is_nullable, column_default,
+//                                          extra (carries 'auto_increment')
+//   * `information_schema.statistics`    — index list with non_unique,
+//                                          column_name, seq_in_index
+//   * `information_schema.key_column_usage`
+//     + `information_schema.referential_constraints`
+//                                        — FK columns + ON DELETE / ON UPDATE
+//
+// CHECK-constraint introspection (`information_schema.check_constraints`,
+// MySQL 8.0+) is left for a follow-up so this module stays stable
+// against the 5.7 corpus the docker rig still tests against.
+// =============================================================================
+
+module core.database.mysql.introspect;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.common.schema.{
+    SchemaSnapshot, TableSnap, ColumnSnap, IndexSnap, ForeignKeySnap,
+};
+mount core.database.mysql.connection.{MysqlConnection, MysqlTextValue, MtvNull, MtvBytes};
+
+/// Build a SchemaSnapshot off a live MysqlConnection. Schema scope is
+/// the connection's current database; pass an explicit `scope_schema`
+/// to introspect a different namespace.
+public fn introspect(conn: &mut MysqlConnection) -> Result<SchemaSnapshot, DbError> {
+    let db = match probe_current_database(conn) {
+        Ok(s)  => s,
+        Err(e) => { return Err(e); }
+    };
+    introspect_schema(conn, &db)
+}
+
+public fn introspect_schema(conn: &mut MysqlConnection, schema: &Text) -> Result<SchemaSnapshot, DbError> {
+    let mut snap = SchemaSnapshot.empty(AdMysql);
+    snap.default_schema = schema.clone();
+    snap.server_version = match probe_version(conn) {
+        Ok(v)  => v,
+        Err(_) => "unknown".clone(),
+    };
+
+    let tables = list_tables(conn, schema)?;
+    let mut i: Int = 0;
+    while i < tables.len() as Int {
+        let name = &tables[i];
+        let table = build_table_snap(conn, schema, name)?;
+        snap.add_table(table);
+        i = i + 1;
+    }
+    Ok(snap)
+}
+
+// -----------------------------------------------------------------------------
+// Probes
+// -----------------------------------------------------------------------------
+
+fn probe_current_database(conn: &mut MysqlConnection) -> Result<Text, DbError> {
+    match conn.query_first(&"SELECT DATABASE()".clone()) {
+        Ok(opt) => match opt {
+            Some(row) => {
+                if (row.len() as Int) >= 1 {
+                    Ok(value_to_text(&row[0]))
+                } else { Ok("".clone()) }
+            }
+            None => Ok("".clone()),
+        },
+        Err(e) => Err(e),
+    }
+}
+
+fn probe_version(conn: &mut MysqlConnection) -> Result<Text, DbError> {
+    match conn.query_first(&"SELECT VERSION()".clone()) {
+        Ok(opt) => match opt {
+            Some(row) => {
+                if (row.len() as Int) >= 1 {
+                    Ok(value_to_text(&row[0]))
+                } else { Ok("".clone()) }
+            }
+            None => Ok("".clone()),
+        },
+        Err(e) => Err(e),
+    }
+}
+
+fn list_tables(conn: &mut MysqlConnection, schema: &Text) -> Result<List<Text>, DbError> {
+    let mut sql: Text = "SELECT table_name FROM information_schema.tables WHERE table_schema = '".clone();
+    sql.push_str(schema);
+    sql.push_str(&"' AND table_type = 'BASE TABLE' ORDER BY table_name".clone());
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            let mut out: List<Text> = List.new();
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                if (r.len() as Int) >= 1 {
+                    out.push(value_to_text(&r[0]));
+                }
+                i = i + 1;
+            }
+            Ok(out)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn build_table_snap(conn: &mut MysqlConnection, schema: &Text, name: &Text) -> Result<TableSnap, DbError> {
+    let mut t = TableSnap.empty(schema.clone(), name.clone());
+    t.columns      = read_columns(conn, schema, name)?;
+    t.indexes      = read_indexes(conn, schema, name)?;
+    t.foreign_keys = read_foreign_keys(conn, schema, name)?;
+    Ok(t)
+}
+
+// -----------------------------------------------------------------------------
+// Columns
+// -----------------------------------------------------------------------------
+
+fn read_columns(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Result<List<ColumnSnap>, DbError> {
+    let mut sql: Text = "SELECT column_name, column_type, is_nullable, column_default, extra, column_key FROM information_schema.columns WHERE table_schema = '".clone();
+    sql.push_str(schema);
+    sql.push_str(&"' AND table_name = '".clone());
+    sql.push_str(table);
+    sql.push_str(&"' ORDER BY ordinal_position".clone());
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            let mut out: List<ColumnSnap> = List.new();
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                if (r.len() as Int) >= 6 {
+                    let col_name = value_to_text(&r[0]);
+                    let col_type = value_to_text(&r[1]);
+                    let is_null  = value_to_text(&r[2]);
+                    let default_text = value_to_text(&r[3]);
+                    let extra    = value_to_text(&r[4]);
+                    let col_key  = value_to_text(&r[5]);
+                    let nullable = is_null == "YES";
+                    let default_expr = if default_text.len() == 0 { None } else { Some(default_text) };
+                    let autoincrement = text_contains(&extra, &"auto_increment".clone());
+                    let pk     = col_key == "PRI";
+                    let unique = col_key == "UNI";
+                    out.push(ColumnSnap {
+                        name: col_name,
+                        declared_type: col_type,
+                        nullable: nullable,
+                        pk: pk,
+                        unique: unique,
+                        autoincrement: autoincrement,
+                        default_expr: default_expr,
+                        refinement: None,
+                        check_constraint: None,
+                    });
+                }
+                i = i + 1;
+            }
+            Ok(out)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Indexes
+// -----------------------------------------------------------------------------
+
+fn read_indexes(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Result<List<IndexSnap>, DbError> {
+    let mut sql: Text = "SELECT index_name, non_unique, column_name, seq_in_index FROM information_schema.statistics WHERE table_schema = '".clone();
+    sql.push_str(schema);
+    sql.push_str(&"' AND table_name = '".clone());
+    sql.push_str(table);
+    sql.push_str(&"' ORDER BY index_name, seq_in_index".clone());
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            let mut grouped: List<IndexSnap> = List.new();
+            let mut current_name: Text = "".clone();
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                if (r.len() as Int) >= 4 {
+                    let idx_name = value_to_text(&r[0]);
+                    let non_uniq_text = value_to_text(&r[1]);
+                    let col_name = value_to_text(&r[2]);
+                    let unique = non_uniq_text == "0";
+                    if idx_name != current_name {
+                        grouped.push(IndexSnap {
+                            name: idx_name.clone(),
+                            columns: List.new(),
+                            predicate: None,
+                            unique: unique,
+                        });
+                        current_name = idx_name;
+                    }
+                    let last = (grouped.len() as Int) - 1;
+                    grouped[last].columns.push(col_name);
+                }
+                i = i + 1;
+            }
+            Ok(grouped)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Foreign keys
+// -----------------------------------------------------------------------------
+
+fn read_foreign_keys(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Result<List<ForeignKeySnap>, DbError> {
+    let mut sql: Text = "SELECT kcu.constraint_name, kcu.column_name, kcu.referenced_table_name, kcu.referenced_column_name, rc.update_rule, rc.delete_rule FROM information_schema.key_column_usage kcu JOIN information_schema.referential_constraints rc ON kcu.constraint_name = rc.constraint_name AND kcu.constraint_schema = rc.constraint_schema WHERE kcu.table_schema = '".clone();
+    sql.push_str(schema);
+    sql.push_str(&"' AND kcu.table_name = '".clone());
+    sql.push_str(table);
+    sql.push_str(&"' AND kcu.referenced_table_name IS NOT NULL ORDER BY kcu.constraint_name, kcu.ordinal_position".clone());
+    match conn.query_all(&sql) {
+        Ok(rows) => {
+            let mut grouped: List<ForeignKeySnap> = List.new();
+            let mut current_name: Text = "".clone();
+            let mut i: Int = 0;
+            while i < rows.len() as Int {
+                let r = &rows[i];
+                if (r.len() as Int) >= 6 {
+                    let cname    = value_to_text(&r[0]);
+                    let from_col = value_to_text(&r[1]);
+                    let ref_tab  = value_to_text(&r[2]);
+                    let to_col   = value_to_text(&r[3]);
+                    let on_upd   = value_to_text(&r[4]);
+                    let on_del   = value_to_text(&r[5]);
+                    if cname != current_name {
+                        grouped.push(ForeignKeySnap {
+                            columns: List.new(),
+                            referenced_table: ref_tab.clone(),
+                            referenced_columns: List.new(),
+                            on_delete: on_del.clone(),
+                            on_update: on_upd.clone(),
+                        });
+                        current_name = cname;
+                    }
+                    let last = (grouped.len() as Int) - 1;
+                    grouped[last].columns.push(from_col);
+                    grouped[last].referenced_columns.push(to_col);
+                }
+                i = i + 1;
+            }
+            Ok(grouped)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MysqlTextValue → Text helpers
+// -----------------------------------------------------------------------------
+
+fn value_to_text(v: &MysqlTextValue) -> Text {
+    match v {
+        MtvNull     => "".clone(),
+        MtvBytes(b) => Text.from_bytes(b).unwrap_or("".clone()),
+    }
+}
+
+fn text_contains(hay: &Text, needle: &Text) -> Bool {
+    let h = hay.as_bytes();
+    let n = needle.as_bytes();
+    if n.len() > h.len() { return false; }
+    let mut i: Int = 0;
+    while i + n.len() <= h.len() {
+        let mut k: Int = 0;
+        let mut hit = true;
+        while k < n.len() {
+            if h[i + k] != n[k] { hit = false; break; }
+            k = k + 1;
+        }
+        if hit { return true; }
+        i = i + 1;
+    }
+    false
+}
