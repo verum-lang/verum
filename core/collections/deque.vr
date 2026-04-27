@@ -401,7 +401,7 @@ implement<T> Deque<T> {
     where T: Eq
     {
         for i in range(0, self.len) {
-            if self.get(i).unwrap() == value {
+            if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") == value {
                 return true;
             }
         }
@@ -416,7 +416,7 @@ implement<T> Deque<T> {
         let mut high = self.len;
         while low < high {
             let mid = low + (high - low) / 2;
-            let item = self.get(mid).unwrap();
+            let item = self.get(mid).expect("Deque::binary_search: mid < high ≤ self.len — get is_some");
             match item.cmp(value) {
                 Ordering.Less => { low = mid + 1; },
                 Ordering.Greater => { high = mid; },
@@ -437,7 +437,7 @@ implement<T> Deque<T> {
         let mut high = self.len;
         while low < high {
             let mid = low + (high - low) / 2;
-            let item = self.get(mid).unwrap();
+            let item = self.get(mid).expect("Deque::binary_search: mid < high ≤ self.len — get is_some");
             match f(item) {
                 Ordering.Less => { low = mid + 1; },
                 Ordering.Greater => { high = mid; },
@@ -464,7 +464,7 @@ implement<T> Deque<T> {
     /// Find first element matching predicate.
     public fn find<F: fn(&T) -> Bool>(&self, predicate: F) -> Maybe<&T> {
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if predicate(item) {
                 return Some(item);
             }
@@ -475,7 +475,7 @@ implement<T> Deque<T> {
     /// Find position of first element matching predicate.
     public fn find_position<F: fn(&T) -> Bool>(&self, predicate: F) -> Maybe<Int> {
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if predicate(item) {
                 return Some(i);
             }
@@ -486,7 +486,7 @@ implement<T> Deque<T> {
     /// Check if any element satisfies the predicate.
     public fn any<F: fn(&T) -> Bool>(&self, predicate: F) -> Bool {
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if predicate(item) {
                 return true;
             }
@@ -497,7 +497,7 @@ implement<T> Deque<T> {
     /// Check if all elements satisfy the predicate.
     public fn all<F: fn(&T) -> Bool>(&self, predicate: F) -> Bool {
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if !predicate(item) {
                 return false;
             }
@@ -517,9 +517,9 @@ implement<T> Deque<T> {
         if self.is_empty() {
             return None;
         }
-        let mut min_val = self.get(0).unwrap();
+        let mut min_val = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some");
         for i in range(1, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if item < min_val {
                 min_val = item;
             }
@@ -535,9 +535,9 @@ implement<T> Deque<T> {
         if self.is_empty() {
             return None;
         }
-        let mut max_val = self.get(0).unwrap();
+        let mut max_val = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some");
         for i in range(1, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if item > max_val {
                 max_val = item;
             }
@@ -555,7 +555,7 @@ implement<T> Deque<T> {
     {
         let mut result: List<T> = List.with_capacity(self.len);
         for i in range(0, self.len) {
-            result.push(self.get(i).unwrap().clone());
+            result.push(self.get(i).expect("Deque: i in range(0, self.len) — get is_some").clone());
         }
         result
     }
@@ -971,8 +971,8 @@ implement<T> Deque<T> {
             return true;
         }
         for i in range(0, self.len - 1) {
-            let a = self.get(i).unwrap();
-            let b = self.get(i + 1).unwrap();
+            let a = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let b = self.get(i + 1).expect("Deque: i+1 < self.len — get is_some by loop bound `range(0, self.len - 1)`");
             if a > b {
                 return false;
             }
@@ -986,8 +986,8 @@ implement<T> Deque<T> {
             return true;
         }
         for i in range(0, self.len - 1) {
-            let a = self.get(i).unwrap();
-            let b = self.get(i + 1).unwrap();
+            let a = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let b = self.get(i + 1).expect("Deque: i+1 < self.len — get is_some by loop bound `range(0, self.len - 1)`");
             if compare(a, b) is Ordering.Greater {
                 return false;
             }
@@ -1001,8 +1001,8 @@ implement<T> Deque<T> {
             return true;
         }
         for i in range(0, self.len - 1) {
-            let a = self.get(i).unwrap();
-            let b = self.get(i + 1).unwrap();
+            let a = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let b = self.get(i + 1).expect("Deque: i+1 < self.len — get is_some by loop bound `range(0, self.len - 1)`");
             let ka: K = key(a);
             let kb: K = key(b);
             if ka > kb {
@@ -1057,7 +1057,7 @@ implement<T> Deque<T> {
                 let mut window: List<T> = List.with_capacity(size);
                 let mut j = 0;
                 while j < size {
-                    let item = self.get(i + j).unwrap();
+                    let item = self.get(i + j).expect("Deque substring search: i + j < self.len guaranteed by outer + inner loop bounds");
                     window.push(item.clone());
                     j = j + 1;
                 }
@@ -1080,7 +1080,7 @@ implement<T> Deque<T> {
             let mut chunk: List<T> = List.with_capacity(chunk_end - i);
             let mut j = i;
             while j < chunk_end {
-                let item = self.get(j).unwrap();
+                let item = self.get(j).expect("Deque substring search: j < self.len by loop bound");
                 chunk.push(item.clone());
                 j = j + 1;
             }
@@ -1101,7 +1101,7 @@ implement<T> Deque<T> {
             let mut chunk: List<T> = List.with_capacity(size);
             let mut j = 0;
             while j < size {
-                let item = self.get(i + j).unwrap();
+                let item = self.get(i + j).expect("Deque substring search: i + j < self.len guaranteed by outer + inner loop bounds");
                 chunk.push(item.clone());
                 j = j + 1;
             }
@@ -1121,7 +1121,7 @@ implement<T> Deque<T> {
         let mut result: List<T> = [];
         let mut i = start;
         while i < self.len {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             result.push(item.clone());
             i = i + 1;
         }
@@ -1138,7 +1138,7 @@ implement<T> Deque<T> {
     {
         let mut result = Deque.new();
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if f(item) {
                 result.push_back(item.clone());
             }
@@ -1150,7 +1150,7 @@ implement<T> Deque<T> {
     public fn map<U, F: fn(&T) -> U>(&self, f: F) -> Deque<U> {
         let mut result: Deque<U> = Deque.with_capacity(self.len);
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             result.push_back(f(item));
         }
         result
@@ -1164,7 +1164,7 @@ implement<T> Deque<T> {
         let mut yes = Deque.new();
         let mut no = Deque.new();
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if f(item) {
                 yes.push_back(item.clone());
             } else {
@@ -1178,7 +1178,7 @@ implement<T> Deque<T> {
     public fn count_where<F: fn(&T) -> Bool>(&self, f: F) -> Int {
         let mut count = 0;
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if f(item) {
                 count = count + 1;
             }
@@ -1190,7 +1190,7 @@ implement<T> Deque<T> {
     public fn filter_map<U, F: fn(&T) -> Maybe<U>>(&self, f: F) -> Deque<U> {
         let mut result: Deque<U> = Deque.new();
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             match f(item) {
                 Some(v) => result.push_back(v),
                 None => {}
@@ -1203,7 +1203,7 @@ implement<T> Deque<T> {
     public fn fold<U>(&self, init: U, f: fn(U, &T) -> U) -> U {
         let mut acc = init;
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             acc = f(acc, item);
         }
         acc
@@ -1212,7 +1212,7 @@ implement<T> Deque<T> {
     /// Apply a function to each element for its side effects.
     public fn for_each<F: fn(&T)>(&self, f: F) {
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             f(item);
         }
     }
@@ -1225,9 +1225,9 @@ implement<T> Deque<T> {
         if self.len == 0 {
             return None;
         }
-        let mut acc: T = self.get(0).unwrap().clone();
+        let mut acc: T = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some").clone();
         for i in range(1, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             acc = f(acc, item);
         }
         Some(acc)
@@ -1238,7 +1238,7 @@ implement<T> Deque<T> {
     public fn flat_map<U, F: fn(&T) -> List<U>>(&self, f: F) -> Deque<U> {
         let mut result: Deque<U> = Deque.new();
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             let inner = f(item);
             for j in range(0, inner.len()) {
                 result.push_back(inner[j].clone());
@@ -1255,7 +1255,7 @@ implement<T> Deque<T> {
             return false;
         }
         for i in range(0, prefix.len) {
-            if self.get(i).unwrap() != prefix.get(i).unwrap() {
+            if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") != prefix.get(i).expect("Deque::starts_with: i < prefix.len — get is_some") {
                 return false;
             }
         }
@@ -1271,7 +1271,7 @@ implement<T> Deque<T> {
         }
         let offset = self.len - suffix.len;
         for i in range(0, suffix.len) {
-            if self.get(offset + i).unwrap() != suffix.get(i).unwrap() {
+            if self.get(offset + i).expect("Deque::ends_with: offset+i < self.len (offset = self.len - suffix.len, i < suffix.len)") != suffix.get(i).expect("Deque::ends_with: i < suffix.len") {
                 return false;
             }
         }
@@ -1283,7 +1283,7 @@ implement<T> Deque<T> {
     where T: Eq
     {
         for i in range(0, self.len) {
-            if self.get(i).unwrap() == value {
+            if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") == value {
                 return Some(i);
             }
         }
@@ -1296,7 +1296,7 @@ implement<T> Deque<T> {
     {
         let mut i = self.len - 1;
         while i >= 0 {
-            if self.get(i).unwrap() == value {
+            if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") == value {
                 return Some(i);
             }
             i = i - 1;
@@ -1316,7 +1316,7 @@ implement<T> Deque<T> {
             if i > 0 {
                 result.push_back(separator.clone());
             }
-            result.push_back(self.get(i).unwrap().clone());
+            result.push_back(self.get(i).expect("Deque: i in range(0, self.len) — get is_some").clone());
         }
         result
     }
@@ -1333,7 +1333,7 @@ implement<T> Deque<T> {
             if i > 0 {
                 result.push_back(separator());
             }
-            result.push_back(self.get(i).unwrap().clone());
+            result.push_back(self.get(i).expect("Deque: i in range(0, self.len) — get is_some").clone());
         }
         result
     }
@@ -1657,7 +1657,7 @@ implement<T: Clone> Clone for Deque<T> {
     fn clone(&self) -> Deque<T> {
         let mut new_deque = Deque.with_capacity(self.len);
         for i in range(0, self.len) {
-            new_deque.push_back(self.get(i).unwrap().clone());
+            new_deque.push_back(self.get(i).expect("Deque: i in range(0, self.len) — get is_some").clone());
         }
         new_deque
     }
@@ -1915,8 +1915,8 @@ implement<T: Ord> Ord for Deque<T> {
     fn cmp(&self, other: &Deque<T>) -> Ordering {
         let min_len = if self.len < other.len { self.len } else { other.len };
         for i in range(0, min_len) {
-            let a = self.get(i).unwrap();
-            let b = other.get(i).unwrap();
+            let a = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let b = other.get(i).expect("Deque cmp/eq: i < min_len ≤ other.len (or self.len == other.len)");
             let c = a.cmp(b);
             match c {
                 Ordering.Equal => {}
@@ -1937,7 +1937,7 @@ implement<T: Hash> Hash for Deque<T> {
     fn hash(&self, hasher: &mut Hasher) {
         hasher.write_int(self.len);
         for i in range(0, self.len) {
-            let item = self.get(i).unwrap();
+            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             item.hash(hasher);
         }
     }
@@ -1949,7 +1949,7 @@ implement<T: Eq> Eq for Deque<T> {
             return false;
         }
         for i in range(0, self.len) {
-            if self.get(i).unwrap() != other.get(i).unwrap() {
+            if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") != other.get(i).expect("Deque cmp/eq: i < min_len ≤ other.len (or self.len == other.len)") {
                 return false;
             }
         }
