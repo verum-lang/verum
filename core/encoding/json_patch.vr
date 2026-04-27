@@ -446,12 +446,19 @@ fn parse_array_index(s: &Text) -> Maybe<Int> {
     let b = s.as_bytes();
     if b.len() == 0 { return None; }
     if b.len() > 1 && b[0] == ('0' as Byte) { return None; }
+    // SOUNDNESS: same overflow-defense recipe as the sibling
+    // core/encoding/json_pointer.vr (#72). Int.MAX is 19 decimal
+    // digits; any longer digit run necessarily overflows the
+    // accumulator. Reject pre-loop, then guard each multiply.
+    if b.len() > 19 { return None; }
     let mut v: Int = 0;
     let mut i: Int = 0;
     while i < b.len() {
         let c = b[i];
         if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
+        if v > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
         v = v * 10 + ((c - ('0' as Byte)) as Int);
+        if v < 0 { return None; }                          // wrap-around guard
         i = i + 1;
     }
     Some(v)
