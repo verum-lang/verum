@@ -31,9 +31,22 @@ fn parse_module(source: &str) -> Result<Vec<verum_ast::Item>, String> {
     let tokens: Vec<_> = lexer.filter_map(|r| r.ok()).collect();
     let mut parser = RecursiveParser::new(&tokens, file_id);
 
-    parser
+    // `RecursiveParser::parse_module` is a recovery parser: it returns
+    // `Ok(items)` even when errors were collected during the walk, accumulating
+    // them on `parser.errors`. The high-level `FastParser::parse_module`
+    // (lib.rs) checks that vector and converts a non-empty list into `Err`.
+    // Tests that want "did the source parse cleanly?" must do the same — a
+    // bare `parse_module().is_ok()` silently drops every recovered error.
+    let items = parser
         .parse_module()
-        .map_err(|e| format!("Parse error: {:?}", e))
+        .map_err(|e| format!("Parse error: {:?}", e))?;
+    if !parser.errors.is_empty() {
+        return Err(format!(
+            "Parse error(s): {:?}",
+            parser.errors.into_iter().collect::<Vec<_>>()
+        ));
+    }
+    Ok(items)
 }
 
 #[test]
