@@ -5,9 +5,36 @@
 // Dependencies: core
 // =============================================================================
 //
-// Provides the Regex type for pattern matching on text.
-// Regex values are typically created from `re#"..."` or `rx#"..."` tagged literals.
+// Provides the Regex type for pattern matching on text. Regex values are
+// typically created from `re#"..."` or `rx#"..."` tagged literals, which the
+// parser desugars to `Regex::new(pattern).unwrap_or_else(...)`.
 //
+// # Runtime
+//
+// Each operation forwards to a Verum intrinsic backed by the `regex` 1.x
+// crate inside the VBC interpreter (and by the same engine after AOT
+// lowering). Pattern compilation happens **per call**: today we do not cache
+// the compiled DFA across calls. That is a deliberate v1 trade-off — the
+// `regex` crate's `is_match` of a small pre-validated pattern runs in single-
+// digit microseconds, and most callers reuse a small set of literal
+// patterns where the DFA cache inside the crate already absorbs the cost.
+// A v2 may introduce a per-Regex compiled handle once we surface a
+// fallible `Regex::compile` returning a runtime-side handle.
+//
+// # Available operations
+//
+// Today the following four intrinsics are wired end-to-end:
+// `is_match`, `find_all`, `replace_all`, `split`. The interpreter kernel
+// (verum_vbc/src/interpreter/kernel/mod.rs) hosts the dispatchers; the
+// intrinsic registry (verum_vbc/src/intrinsics/registry.rs) advertises them
+// under the canonical lowercase names `regex_is_match`, `regex_find_all`,
+// `regex_replace_all`, `regex_split`.
+//
+// First-match variants (`find`, `replace`, `captures`) are tracked but not
+// yet wired — they require new TensorSubOpcode/InlineSequenceId values plus
+// dispatchers. Until they land, prefer the `_all`-family or use
+// `find_all().first()` / `replace_all` with a regex anchored to the leading
+// match position.
 // =============================================================================
 
 module regex;
@@ -18,22 +45,17 @@ mount core.*;
 // Regex Type
 // =============================================================================
 
-/// A compiled regular expression pattern.
-///
-/// Created from regex tagged literals:
-/// ```verum
-/// let pattern = re#"""\\d+""";
-/// let found = pattern.is_match("abc 123 def");
-/// ```
+/// A compiled regular expression pattern. Internally stores the pattern
+/// string only; the runtime compiles a fresh `regex::Regex` on each call.
 public type Regex is {
-    /// The original pattern string
+    /// The original pattern string.
     pattern: Text,
 };
 
-/// Error returned when a pattern string cannot be compiled into a
-/// `Regex`. The VBC runtime currently accepts any pattern and defers
-/// validation to match-time, so this error is only surfaced by callers
-/// that explicitly pre-validate.
+/// Error returned when a pattern string cannot be compiled into a `Regex`.
+/// The current runtime defers structural validation to match-time — every
+/// `Regex::new` succeeds — so this error is reserved for callers that
+/// pre-validate via a future `Regex::compile`.
 public type RegexError is { message: Text };
 
 // =============================================================================
@@ -41,69 +63,60 @@ public type RegexError is { message: Text };
 // =============================================================================
 
 implement Regex {
-    /// Create a new Regex from a pattern string.
+    /// Construct a `Regex` from a pattern string.
     ///
-    /// Returns `Result<Regex, RegexError>` so callers can pattern-match
-    /// on invalid patterns (e.g. `[invalid`). The VBC runtime does not
-    /// perform structural validation today — every pattern compiles —
-    /// so the returned value is always `Ok` under Tier 0. AOT builds
-    /// will tighten this when the native regex engine lands.
+    /// Returns `Result<Regex, RegexError>` for forward compatibility with a
+    /// future fallible compile; today every call is `Ok` because compilation
+    /// is deferred to match-time. Catches malformed patterns at compile-time
+    /// will land alongside the cached-handle migration.
     public fn new(pattern: Text) -> Result<Regex, RegexError> {
         Ok(Regex { pattern: pattern })
     }
 
     /// Test whether the pattern matches anywhere in the given text.
-    /// Returns true if the regex matches at least one substring of the input.
     public fn is_match(&self, text: Text) -> Bool {
-        // Intrinsic: delegates to the runtime regex engine
-        __regex_is_match(self.pattern, text)
-    }
-
-    /// Find the first match of the pattern in the text.
-    /// Returns the matched substring, or None if no match.
-    public fn find(&self, text: Text) -> Maybe<Text> {
-        __regex_find(self.pattern, text)
+        regex_is_match(self.pattern, text)
     }
 
     /// Find all non-overlapping matches of the pattern in the text.
+    /// Returns an empty list if no match.
     public fn find_all(&self, text: Text) -> List<Text> {
-        __regex_find_all(self.pattern, text)
+        regex_find_all(self.pattern, text)
     }
 
-    /// Replace the first match with the replacement string.
-    public fn replace(&self, text: Text, replacement: Text) -> Text {
-        __regex_replace(self.pattern, text, replacement)
-    }
-
-    /// Replace all matches with the replacement string.
+    /// Replace all matches with the replacement string. Replacement supports
+    /// `$N` (1-indexed) capture-group back-references — `regex` crate
+    /// semantics.
     public fn replace_all(&self, text: Text, replacement: Text) -> Text {
-        __regex_replace_all(self.pattern, text, replacement)
+        regex_replace_all(self.pattern, text, replacement)
     }
 
-    /// Split the text by the pattern.
+    /// Split the text by every match of the pattern.
     public fn split(&self, text: Text) -> List<Text> {
-        __regex_split(self.pattern, text)
+        regex_split(self.pattern, text)
     }
 
-    /// Capture groups from the first match.
-    public fn captures(&self, text: Text) -> List<Text> {
-        __regex_captures(self.pattern, text)
-    }
-
-    /// Returns the pattern string.
+    /// Returns the original pattern string.
     public fn as_str(&self) -> Text {
         self.pattern
     }
 }
 
 // =============================================================================
-// Intrinsic Declarations (implemented by runtime)
+// Intrinsic Declarations
 // =============================================================================
+// These names match the registry entries in
+// verum_vbc/src/intrinsics/registry.rs, lowercase-with-underscores per the
+// canonical `@intrinsic("…")` convention used elsewhere in core/intrinsics/.
 
-extern fn __regex_is_match(pattern: Text, text: Text) -> Bool;
-extern fn __regex_find(pattern: Text, text: Text) -> Maybe<Text>;
-extern fn __regex_find_all(pattern: Text, text: Text) -> List<Text>;
-extern fn __regex_replace(pattern: Text, text: Text, replacement: Text) -> Text;
-extern fn __regex_replace_all(pattern: Text, text: Text, replacement: Text) -> Text;
-extern fn __regex_split(pattern: Text, text: Text) -> List<Text>;
-extern fn __regex_captures(pattern: Text, text: Text) -> List<Text>;
+@intrinsic("regex_is_match")
+public fn regex_is_match(pattern: Text, text: Text) -> Bool;
+
+@intrinsic("regex_find_all")
+public fn regex_find_all(pattern: Text, text: Text) -> List<Text>;
+
+@intrinsic("regex_replace_all")
+public fn regex_replace_all(pattern: Text, text: Text, replacement: Text) -> Text;
+
+@intrinsic("regex_split")
+public fn regex_split(pattern: Text, text: Text) -> List<Text>;

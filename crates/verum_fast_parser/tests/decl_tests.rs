@@ -2238,3 +2238,36 @@ fn test_type_alias_with_named_refinement_predicates() {
     // Grammar: refinement_predicate = identifier , ':' , expression | expression ;
     assert_parses("type BoundedInt is Int { value: self, min: self >= 0, max: self <= 100 };");
 }
+
+// ============================================================================
+// SECTION N: BOTTOM TYPE (NEVER) ALIASES
+// ============================================================================
+// `type T is !;` aliases T to the bottom (uninhabited) type. This is the
+// load-bearing form for `core/base/ops.vr::Never` so that downstream code
+// that pattern-matches on `Maybe::from_residual` / `Result::from_residual`
+// residuals can prove dead branches via uninhabitedness rather than relying
+// on a unit-shaped Never (which was a soundness gap fixed during the
+// foundational audit). Pin the parsing here so future grammar refactors
+// can't quietly drop it again.
+//
+// Per `grammar/verum.ebnf:474-476` only the `is` form is grammar-canonical:
+// the recursive-descent parser additionally accepts `=` for historical
+// reasons but that path contradicts the authoritative grammar and is
+// tracked separately for cleanup.
+
+#[test]
+fn test_type_never_is_bang_alias() {
+    assert_parses("type Never is !;");
+}
+
+#[test]
+fn test_type_never_is_bang_with_visibility() {
+    assert_parses("public type Never is !;");
+}
+
+#[test]
+fn test_type_never_used_as_return_type() {
+    // The Type-level parser already accepted `!` here; this regression-pins
+    // it alongside the type-body form.
+    assert_parses("fn diverge() -> ! { panic(\"unreachable\") }");
+}

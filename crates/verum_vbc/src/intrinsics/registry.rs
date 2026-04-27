@@ -2382,6 +2382,71 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Atomic fetch-and-sub for u8",
     },
     // -----------------------------------------------------------------------
+    // u8 RMW closure (#100, task #34) — bitwise + xchg + cas.
+    //
+    // Closes the gap that core/sync/atomic.vr's AtomicU8
+    // currently papers over with a u32-aligned CAS loop +
+    // byte-masking emulation. That emulation is structurally
+    // unsound in mixed-field layouts where the load_u32 reads
+    // 3 neighbour-field bytes (concurrent neighbour writes
+    // cause infinite retry + torn neighbour reads).  Same
+    // pattern as task #24's fetch_add_u8/sub_u8 closure.
+    // -----------------------------------------------------------------------
+    Intrinsic {
+        name: "atomic_fetch_and_u8",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchAnd),
+        mlir_op: Some("llvm.atomicrmw and"),
+        doc: "Atomic fetch-and-and for u8",
+    },
+    Intrinsic {
+        name: "atomic_fetch_or_u8",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchOr),
+        mlir_op: Some("llvm.atomicrmw or"),
+        doc: "Atomic fetch-and-or for u8",
+    },
+    Intrinsic {
+        name: "atomic_fetch_xor_u8",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchXor),
+        mlir_op: Some("llvm.atomicrmw xor"),
+        doc: "Atomic fetch-and-xor for u8",
+    },
+    Intrinsic {
+        name: "atomic_exchange_u8",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicExchange),
+        mlir_op: Some("llvm.atomicrmw xchg"),
+        doc: "Atomic exchange for u8",
+    },
+    Intrinsic {
+        name: "atomic_cas_u8",
+        category: IntrinsicCategory::Atomic,
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::MultiReturn,
+        ],
+        param_count: 5,
+        return_count: 2,
+        strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicCas, 1),
+        mlir_op: Some("llvm.cmpxchg"),
+        doc: "Atomic compare-and-swap for u8",
+    },
+    // -----------------------------------------------------------------------
     // Symmetric coverage closure: fetch_sub_u16, fetch_or_u32,
     // fetch_xor_u32 (each was missing the symmetric variant
     // even though the unsigned-add / u64 counterparts existed).
