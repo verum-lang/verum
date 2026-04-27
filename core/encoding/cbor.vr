@@ -67,9 +67,23 @@ public type CborError is
     | InvalidUtf8
     | InvalidIndefinite
     | NestingTooDeep
+    | ArrayTooLarge
+    | MapTooLarge
     | TrailingBytes(Int);
 
 public const MAX_CBOR_NESTING: Int = 128;
+
+// Maximum number of items in a single CBOR array.  CBOR's wire format
+// permits an 8-byte length argument, so a 9-byte hostile input can
+// claim an array of 2^63 elements; without this cap the decoder
+// would call decode_item that many times and OOM the process.
+// 1M elements is well above any realistic CBOR document.
+public const MAX_CBOR_ARRAY_ITEMS: Int = 1_000_000;
+
+// Maximum number of entries in a single CBOR map.  Same rationale as
+// the array cap — protects against attacker-supplied huge counts
+// that consume O(N) memory regardless of input size.
+public const MAX_CBOR_MAP_ENTRIES: Int = 1_000_000;
 
 // =============================================================================
 // Encoding
@@ -213,6 +227,14 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
         4_u8 => {
             if minor == 31_u8 { return decode_indef_array(bytes, pos, depth); }
             let n = read_arg(bytes, pos, minor)? as Int;
+            // SOUNDNESS: cap attacker-supplied array length BEFORE
+            // entering the alloc loop.  CBOR's 8-byte length argument
+            // can claim 2^63 items in 9 bytes of input — without this
+            // cap, decode_item would be called billions of times and
+            // OOM the process.
+            if n < 0 || n > MAX_CBOR_ARRAY_ITEMS {
+                return Err(CborError.ArrayTooLarge);
+            }
             let mut items: List<CborValue> = [];
             let mut i: Int = 0;
             while i < n {
@@ -224,6 +246,11 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
         5_u8 => {
             if minor == 31_u8 { return decode_indef_map(bytes, pos, depth); }
             let n = read_arg(bytes, pos, minor)? as Int;
+            // SOUNDNESS: cap attacker-supplied map size — same
+            // rationale as the array cap above.
+            if n < 0 || n > MAX_CBOR_MAP_ENTRIES {
+                return Err(CborError.MapTooLarge);
+            }
             let mut entries: List<(CborValue, CborValue)> = [];
             let mut i: Int = 0;
             while i < n {
@@ -333,6 +360,13 @@ fn decode_indef_array(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborV
         if *pos >= bytes.len() { return Err(CborError.Truncated(*pos)); }
         if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Ok(CborValue.CborArray(items)); }
         items.push(decode_item(bytes, pos, depth + 1)?);
+        // SOUNDNESS: indefinite-length arrays bypass the explicit
+        // length-arg cap above.  Hostile inputs with millions of
+        // tiny elements followed by 0xFF would still OOM the parser
+        // without this post-push cap.
+        if items.len() > MAX_CBOR_ARRAY_ITEMS {
+            return Err(CborError.ArrayTooLarge);
+        }
     }
 }
 
@@ -344,6 +378,10 @@ fn decode_indef_map(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborVal
         let k = decode_item(bytes, pos, depth + 1)?;
         let v = decode_item(bytes, pos, depth + 1)?;
         entries.push((k, v));
+        // SOUNDNESS: same indefinite-length cap as decode_indef_array.
+        if entries.len() > MAX_CBOR_MAP_ENTRIES {
+            return Err(CborError.MapTooLarge);
+        }
     }
 }
 
