@@ -138,9 +138,25 @@ public fn totp(
     hotp(secret, counter, digits, algo)
 }
 
+/// Maximum permitted anti-drift window in step units.  Each window
+/// step costs one HMAC computation per `totp_verify` call; without
+/// this cap, a buggy / malicious caller passing `window = 10^9`
+/// would force the verifier to run 2×10^9+1 HOTP computations.
+/// 100 steps (±50 minutes for 30s steps) is well above any
+/// realistic clock-skew tolerance.
+public const MAX_TOTP_WINDOW: Int = 100;
+
 /// Verify a candidate TOTP code within ±`window` steps. Returns
 /// true on match. Each comparison is constant-time against the
 /// candidate to avoid timing leakage.
+///
+/// SOUNDNESS:
+///   * `step_sec == 0` rejected (division-by-zero / undefined
+///     counter semantics).
+///   * `window` clamped to MAX_TOTP_WINDOW to bound the per-call
+///     HMAC work (CPU-DoS prevention).  Negative `window` rejected
+///     (would be a programming error — the loop would never run
+///     and the verify would always return false).
 public fn totp_verify(
     secret:    &[Byte],
     candidate: &Text,
@@ -150,6 +166,9 @@ public fn totp_verify(
     algo:      &OtpHash,
     window:    Int,
 ) -> Bool {
+    if step_sec == 0_u64 || window < 0 || window > MAX_TOTP_WINDOW {
+        return false;
+    }
     let counter = unix_time / step_sec;
     let mut offset: Int = -window;
     while offset <= window {
@@ -180,7 +199,8 @@ public fn totp_verify(
 /// Generate a fresh random TOTP secret of `len_bytes` bytes.
 public fn generate_secret(len_bytes: Int) -> List<Byte> {
     let n = if len_bytes < MIN_SECRET_BYTES { MIN_SECRET_BYTES } else { len_bytes };
-    let mut buf: List<Byte> = [];
+    // Output is exactly `n` bytes — pre-allocate.
+    let mut buf: List<Byte> = List.with_capacity(n);
     let mut tmp: [Byte; 32] = [0_u8; 32];
     while buf.len() < n {
         fill_secure(&mut tmp);
@@ -215,7 +235,8 @@ public fn provisioning_uri(
         OtpHash.Sha256 => "SHA256",
         OtpHash.Sha512 => "SHA512",
     };
-    let mut buf: List<Byte> = [];
+    // Typical otpauth URI ≤ 256 bytes (label + issuer + secret + 4 small ints).
+    let mut buf: List<Byte> = List.with_capacity(256);
     push_bytes(&mut buf, b"otpauth://totp/");
     push_text(&mut buf, label);
     push_bytes(&mut buf, b"?secret=");
@@ -251,7 +272,8 @@ fn u64_be(x: UInt64) -> [Byte; 8] {
 }
 
 fn slice_owned(src: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
+    // Output is exactly src.len() bytes — pre-allocate.
+    let mut out: List<Byte> = List.with_capacity(src.len());
     let mut i: Int = 0;
     while i < src.len() { out.push(src[i]); i = i + 1; }
     out
@@ -275,7 +297,8 @@ fn pow10(n: Int) -> UInt64 {
 }
 
 fn format_padded(value: UInt64, digits: Int) -> Text {
-    let mut buf: List<Byte> = [];
+    // Output is exactly `digits` bytes (zero-padded to `digits`).
+    let mut buf: List<Byte> = List.with_capacity(digits);
     // Emit digits into a reversed buffer.
     let mut v = value;
     let mut produced: Int = 0;
@@ -296,7 +319,7 @@ fn format_padded(value: UInt64, digits: Int) -> Text {
         produced = produced + 1;
     }
     // Reverse.
-    let mut rev: List<Byte> = [];
+    let mut rev: List<Byte> = List.with_capacity(buf.len());
     let mut i: Int = buf.len() - 1;
     while i >= 0 { rev.push(buf[i]); i = i - 1; }
     Text.from_utf8_unchecked(rev.as_slice())
@@ -314,7 +337,8 @@ fn push_text(dst: &mut List<Byte>, src: &Text) {
 }
 
 fn push_int(dst: &mut List<Byte>, n: Int) {
-    let mut buf: List<Byte> = [];
+    // Int.MAX has 19 decimal digits; 24 is comfortable.
+    let mut buf: List<Byte> = List.with_capacity(24);
     let mut x = if n < 0 { -n } else { n };
     if x == 0 { buf.push('0' as Byte); }
     while x > 0 {
@@ -327,7 +351,8 @@ fn push_int(dst: &mut List<Byte>, n: Int) {
 }
 
 fn push_u64(dst: &mut List<Byte>, n: UInt64) {
-    let mut buf: List<Byte> = [];
+    // UInt64.MAX has 20 decimal digits; 24 is comfortable.
+    let mut buf: List<Byte> = List.with_capacity(24);
     let mut x = n;
     if x == 0_u64 { buf.push('0' as Byte); }
     while x > 0_u64 {
