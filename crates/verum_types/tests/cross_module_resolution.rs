@@ -78,8 +78,8 @@ fn test_same_module_type_resolution() {
 /// Test 2: Type resolution across modules (Module A defines, Module B uses)
 #[test]
 fn test_cross_module_type_resolution() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let mut resolver = NameResolver::new();
 
     let module_a = ModuleId::new(1);
@@ -129,8 +129,8 @@ fn test_cross_module_type_resolution() {
 /// Test 3: Qualified path resolution (A.Container)
 #[test]
 fn test_qualified_path_resolution() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let mut resolver = NameResolver::new();
 
     let module_a = ModuleId::new(1);
@@ -174,8 +174,8 @@ fn test_qualified_path_resolution() {
 /// Test 4: Nested module resolution (std.collections.List)
 #[test]
 fn test_nested_module_resolution() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let mut resolver = NameResolver::new();
 
     let std_id = ModuleId::new(1);
@@ -230,8 +230,8 @@ fn test_nested_module_resolution() {
 /// Test 5: Generic types across modules (A.Container<B.Item>)
 #[test]
 fn test_generic_types_cross_module() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
 
     let module_a = ModuleId::new(1);
     let module_b = ModuleId::new(2);
@@ -433,8 +433,8 @@ fn test_prelude_types() {
 /// Test 13: Circular module references
 #[test]
 fn test_circular_module_reference() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
 
     let module_a = ModuleId::new(1);
     let module_b = ModuleId::new(2);
@@ -469,11 +469,11 @@ fn test_circular_module_reference() {
 /// Test 14: Module registry integration
 #[test]
 fn test_module_registry_integration() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let _checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let _checker = TypeChecker::with_shared_registry(registry.clone());
 
-    // Registry should be shared
-    let _id = registry.allocate_id();
+    // Registry should be shared. Allocate an ID through the inner handle.
+    let _id = registry.write().allocate_id();
 
     // Type checker should have access to the same registry
     // This ensures consistent module IDs across the system

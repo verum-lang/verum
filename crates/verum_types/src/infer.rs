@@ -1766,8 +1766,23 @@ impl TypeChecker {
         self.protocol_checker.write().set_current_crate(name);
     }
 
+    /// Create a new type checker that owns a [`SharedModuleRegistry`].
+    ///
+    /// **Recommended** entry point for new code. The newtype encapsulates the
+    /// `Shared<RwLock<...>>` wrapping so callers cannot accidentally pass the
+    /// wrong shape (a class of bug that historically produced 30+ `mismatched
+    /// types` errors when the registry's wrapping was tightened — see
+    /// [`verum_modules::SharedModuleRegistry`] for context).
+    pub fn with_shared_registry(registry: verum_modules::SharedModuleRegistry) -> Self {
+        Self::with_registry(registry.into_inner())
+    }
+
     /// Create a new type checker with a shared module registry
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Shared module state
+    ///
+    /// Legacy raw-handle API kept for callers that still hold an unwrapped
+    /// `Shared<RwLock<ModuleRegistry>>`. New code should prefer
+    /// [`Self::with_shared_registry`].
     pub fn with_registry(registry: Shared<parking_lot::RwLock<ModuleRegistry>>) -> Self {
         Self {
             ctx: TypeContext::new(),
@@ -52552,7 +52567,7 @@ impl TypeChecker {
                 GenericParamKind::Meta { name, ty, .. } => {
                     // Meta (const generic) parameters are compile-time values.
                     // Create a fresh TypeVar so they are included in the scheme's vars list,
-                    // allowing explicit type arguments (turbofish) to provide meta values.
+                    // allowing explicit type arguments `foo<N>(args)` to bind meta values.
                     let fresh_var = TypeVar::fresh();
                     let meta_type = self.ast_to_type(ty)?;
                     let name_text: Text = name.name.clone();

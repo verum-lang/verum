@@ -565,6 +565,112 @@ impl Default for ModuleRegistry {
     }
 }
 
+/// A reference-counted, interior-mutable handle to a [`ModuleRegistry`].
+///
+/// This is the canonical shape for sharing a registry across the compiler's
+/// concurrently-compiled module set. Most components — `verum_types`,
+/// `verum_compiler`, `verum_lsp` — store one of these and call [`Self::read`]
+/// / [`Self::write`] to access the inner registry.
+///
+/// The newtype encapsulates the locking choice (currently
+/// `Shared<parking_lot::RwLock<ModuleRegistry>>`); future refactors can switch
+/// to a different concurrent map (e.g. `DashMap`) without touching call sites.
+///
+/// # Why this exists
+///
+/// Earlier code spelled out the wrapping inline at every construction site:
+///
+/// ```ignore
+/// let reg = Shared::new(parking_lot::RwLock::new(ModuleRegistry::new()));
+/// ```
+///
+/// That repetition is both verbose and a foot-gun: tests and dev tools
+/// frequently constructed `Shared::new(ModuleRegistry::new())` (no `RwLock`)
+/// and silently passed a `Shared<ModuleRegistry>` into APIs expecting a
+/// `Shared<RwLock<ModuleRegistry>>` — producing 30+ `mismatched types` build
+/// failures when the API tightened. This newtype makes such drift impossible
+/// at the type level: the inner shape is private.
+#[derive(Clone)]
+pub struct SharedModuleRegistry {
+    inner: Shared<parking_lot::RwLock<ModuleRegistry>>,
+}
+
+impl SharedModuleRegistry {
+    /// Create a new shared registry containing an empty [`ModuleRegistry`].
+    pub fn empty() -> Self {
+        Self {
+            inner: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
+        }
+    }
+
+    /// Wrap an existing [`ModuleRegistry`] into a shared handle.
+    pub fn from_registry(registry: ModuleRegistry) -> Self {
+        Self {
+            inner: Shared::new(parking_lot::RwLock::new(registry)),
+        }
+    }
+
+    /// Construct from an already-wrapped registry. Accepts any
+    /// `Shared<RwLock<ModuleRegistry>>`-compatible handle.
+    ///
+    /// Useful at module boundaries where another component has already done
+    /// the wrapping. Avoids double-locking.
+    pub fn from_raw(inner: Shared<parking_lot::RwLock<ModuleRegistry>>) -> Self {
+        Self { inner }
+    }
+
+    /// Acquire a read guard. Multiple read guards may exist concurrently;
+    /// they exclude write guards.
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, ModuleRegistry> {
+        self.inner.read()
+    }
+
+    /// Acquire a write guard. Excludes all other guards.
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, ModuleRegistry> {
+        self.inner.write()
+    }
+
+    /// Borrow the inner `Shared<RwLock<ModuleRegistry>>` for legacy APIs that
+    /// still take it directly. Prefer [`Self::read`] / [`Self::write`].
+    pub fn as_inner(&self) -> &Shared<parking_lot::RwLock<ModuleRegistry>> {
+        &self.inner
+    }
+
+    /// Return the inner handle, consuming this wrapper. Symmetric with
+    /// [`Self::from_raw`].
+    pub fn into_inner(self) -> Shared<parking_lot::RwLock<ModuleRegistry>> {
+        self.inner
+    }
+
+    /// Strong reference count for the inner handle. For diagnostic and test
+    /// use only.
+    pub fn strong_count(&self) -> usize {
+        Shared::strong_count(&self.inner)
+    }
+}
+
+impl Default for SharedModuleRegistry {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl std::fmt::Debug for SharedModuleRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedModuleRegistry")
+            .field("strong_count", &self.strong_count())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Convenience: any `ModuleRegistry` can be `.into()`-converted into a shared
+/// handle. Equivalent to [`SharedModuleRegistry::from_registry`].
+impl From<ModuleRegistry> for SharedModuleRegistry {
+    fn from(registry: ModuleRegistry) -> Self {
+        Self::from_registry(registry)
+    }
+}
+
 impl ModuleRegistry {
     /// Create a deep clone of the registry with a fresh ID counter.
     ///

@@ -5451,6 +5451,7 @@ dependencies = [
  "criterion",
  "dashmap 6.1.0",
  "num_cpus",
+ "parking_lot",
  "petgraph",
  "rayon",
  "serde",
