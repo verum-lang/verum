@@ -12,6 +12,9 @@ mount collections.List;
 mount core.database.common.error.{DbError, AdapterId, AdMysql};
 mount core.database.mysql.{
     MysqlAdapter, MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
+    MysqlConnection, MysqlConnState,
+    McsConnecting, McsAuthenticating, McsReady, McsBusy, McsClosed, McsFailed,
+    SimpleQueryResult, MysqlTextValue, MtvNull, MtvBytes,
 };
 mount core.database.mysql.auth.caching_sha2.{
     scramble_caching_sha2,
@@ -85,6 +88,22 @@ fn check_packet_roundtrip() {
     }
 }
 
+fn check_state_machine() {
+    let _: MysqlConnState = McsConnecting;
+    let _: MysqlConnState = McsAuthenticating;
+    let _: MysqlConnState = McsReady;
+    let _: MysqlConnState = McsBusy;
+    let _: MysqlConnState = McsClosed;
+    let _: MysqlConnState = McsFailed;
+}
+
+fn check_text_value() {
+    let n: MysqlTextValue = MtvNull;
+    let b: MysqlTextValue = MtvBytes([0x41 as Byte, 0x42 as Byte]);
+    match n { MtvNull => {}, _ => panic("MtvNull"), }
+    match b { MtvBytes(_) => {}, _ => panic("MtvBytes"), }
+}
+
 fn check_caching_sha2() {
     // Empty password yields an empty response per spec.
     let pw: List<Byte> = List.new();
@@ -123,4 +142,6 @@ fn main() {
     check_lei_codec();
     check_packet_roundtrip();
     check_caching_sha2();
+    check_state_machine();
+    check_text_value();
 }
