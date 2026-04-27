@@ -320,7 +320,7 @@ type CcAlphaEntry is { name: Text, index: Int };
 fn cc_alpha_lookup(ctx: List<CcAlphaEntry>, name: Text) -> Int {
     let mut i: Int = 0;
     while i < ctx.len() as Int {
-        let e: CcAlphaEntry = (*ctx.get(i as Int).unwrap()).clone();
+        let e: CcAlphaEntry = (*ctx.get(i as Int).expect("cc_alpha_lookup: i < ctx.len() guaranteed by while-condition")).clone();
         if e.name == name {
             return e.index;
         }
