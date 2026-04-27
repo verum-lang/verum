@@ -2277,6 +2277,145 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         mlir_op: Some("llvm.atomicrmw xchg"),
         doc: "Atomic exchange for signed i32",
     },
+    // -----------------------------------------------------------------------
+    // 64-bit signed atomics (#100, task #24)
+    //
+    // Closes the asymmetry where signed 64-bit code had to
+    // round through `_u64` with `as UInt64` cast — the
+    // bit-pattern survived but the static type information
+    // was lost at every atomic operation.  Same opcodes as
+    // the unsigned variants (LLVM atomicrmw/load/store
+    // doesn't care about signedness for add/sub/xchg/cas;
+    // only max/min differ between signed and unsigned).
+    // -----------------------------------------------------------------------
+    Intrinsic {
+        name: "atomic_load_i64",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicLoad, 8),
+        mlir_op: Some("llvm.load atomic"),
+        doc: "Atomic load for signed i64",
+    },
+    Intrinsic {
+        name: "atomic_store_i64",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 0,
+        strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicStore, 8),
+        mlir_op: Some("llvm.store atomic"),
+        doc: "Atomic store for signed i64",
+    },
+    Intrinsic {
+        name: "atomic_cas_i64",
+        category: IntrinsicCategory::Atomic,
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::MultiReturn,
+        ],
+        param_count: 5,
+        return_count: 2,
+        strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicCas, 8),
+        mlir_op: Some("llvm.cmpxchg"),
+        doc: "Atomic compare-and-swap for signed i64",
+    },
+    Intrinsic {
+        name: "atomic_fetch_add_i64",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchAdd),
+        mlir_op: Some("llvm.atomicrmw add"),
+        doc: "Atomic fetch-and-add for signed i64",
+    },
+    Intrinsic {
+        name: "atomic_fetch_sub_i64",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchSub),
+        mlir_op: Some("llvm.atomicrmw sub"),
+        doc: "Atomic fetch-and-sub for signed i64",
+    },
+    Intrinsic {
+        name: "atomic_exchange_i64",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicExchange),
+        mlir_op: Some("llvm.atomicrmw xchg"),
+        doc: "Atomic exchange for signed i64",
+    },
+    // -----------------------------------------------------------------------
+    // u8 atomic counters (#100, task #24)
+    //
+    // Enables race-hardening of single-byte counters such as
+    // the CBGR slot-generation rotation in heap.vr's
+    // free_block_xthread (currently uses non-atomic
+    // load+store because no UInt8 atomic fetch_add was
+    // available).
+    // -----------------------------------------------------------------------
+    Intrinsic {
+        name: "atomic_fetch_add_u8",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchAdd),
+        mlir_op: Some("llvm.atomicrmw add"),
+        doc: "Atomic fetch-and-add for u8",
+    },
+    Intrinsic {
+        name: "atomic_fetch_sub_u8",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchSub),
+        mlir_op: Some("llvm.atomicrmw sub"),
+        doc: "Atomic fetch-and-sub for u8",
+    },
+    // -----------------------------------------------------------------------
+    // Symmetric coverage closure: fetch_sub_u16, fetch_or_u32,
+    // fetch_xor_u32 (each was missing the symmetric variant
+    // even though the unsigned-add / u64 counterparts existed).
+    // -----------------------------------------------------------------------
+    Intrinsic {
+        name: "atomic_fetch_sub_u16",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchSub),
+        mlir_op: Some("llvm.atomicrmw sub"),
+        doc: "Atomic fetch-and-sub for u16",
+    },
+    Intrinsic {
+        name: "atomic_fetch_or_u32",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchOr),
+        mlir_op: Some("llvm.atomicrmw or"),
+        doc: "Atomic fetch-and-or for u32",
+    },
+    Intrinsic {
+        name: "atomic_fetch_xor_u32",
+        category: IntrinsicCategory::Atomic,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AtomicFetchXor),
+        mlir_op: Some("llvm.atomicrmw xor"),
+        doc: "Atomic fetch-and-xor for u32",
+    },
     Intrinsic {
         name: "atomic_fence",
         category: IntrinsicCategory::Atomic,
@@ -9297,10 +9436,15 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Log warning message",
     },
     // =========================================================================
-    // Regex Operations
+    // Regex Operations — backed by `regex` 1.x in the runtime kernel
+    // (verum_vbc/src/interpreter/kernel/mod.rs::dispatch_regex_*). Names are
+    // lowercase to match the canonical `@intrinsic("…")` attribute convention
+    // used everywhere else in the registry; the previous uppercase spelling
+    // for FIND_ALL/REPLACE_ALL was a typo that prevented Verum-side
+    // `core/text/regex.vr` from resolving them.
     // =========================================================================
     Intrinsic {
-        name: "REGEX_FIND_ALL",
+        name: "regex_find_all",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Alloc],
         param_count: 2, // pattern, text
@@ -9310,7 +9454,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Find all regex matches in text",
     },
     Intrinsic {
-        name: "REGEX_REPLACE_ALL",
+        name: "regex_replace_all",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Alloc],
         param_count: 3, // pattern, text, replacement
@@ -9318,6 +9462,26 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexReplaceAll),
         mlir_op: Some("verum.regex_replace_all"),
         doc: "Replace all regex matches in text",
+    },
+    Intrinsic {
+        name: "regex_is_match",
+        category: IntrinsicCategory::Regex,
+        hints: &[IntrinsicHint::Pure],
+        param_count: 2, // pattern, text
+        return_count: 1, // bool
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexIsMatch),
+        mlir_op: Some("verum.regex_is_match"),
+        doc: "Test whether a regex pattern matches anywhere in text",
+    },
+    Intrinsic {
+        name: "regex_split",
+        category: IntrinsicCategory::Regex,
+        hints: &[IntrinsicHint::Alloc],
+        param_count: 2, // pattern, text
+        return_count: 1, // parts list
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexSplit),
+        mlir_op: Some("verum.regex_split"),
+        doc: "Split text by a regex pattern",
     },
     // =========================================================================
     // Time Operations
@@ -9669,5 +9833,36 @@ mod tests {
     #[test]
     fn test_unknown_intrinsic() {
         assert!(INTRINSIC_REGISTRY.lookup("nonexistent").is_none());
+    }
+
+    /// Pin the regex intrinsic naming. Earlier two of the four entries used
+    /// uppercase ("REGEX_FIND_ALL") which broke `core/text/regex.vr` because
+    /// `lookup` is case-sensitive and every other entry uses lowercase. Two
+    /// more (is_match, split) had no entry at all even though the dispatcher
+    /// existed in the interpreter kernel. This regression test fails loudly
+    /// if any of the four lowercase names disappears or returns the wrong
+    /// strategy.
+    #[test]
+    fn test_regex_intrinsics_registered_lowercase() {
+        for (name, expected_params, expected_returns) in [
+            ("regex_is_match", 2u8, 1u8),
+            ("regex_find_all", 2, 1),
+            ("regex_replace_all", 3, 1),
+            ("regex_split", 2, 1),
+        ] {
+            let intr = INTRINSIC_REGISTRY
+                .lookup(name)
+                .unwrap_or_else(|| panic!("regex intrinsic `{name}` must be registered"));
+            assert_eq!(intr.category, IntrinsicCategory::Regex, "{name} category");
+            assert_eq!(intr.param_count, expected_params, "{name} param_count");
+            assert_eq!(intr.return_count, expected_returns, "{name} return_count");
+            assert!(
+                matches!(intr.strategy, CodegenStrategy::InlineSequence(_)),
+                "{name} strategy should be InlineSequence"
+            );
+        }
+        // Guard against re-introduction of the uppercase typo.
+        assert!(INTRINSIC_REGISTRY.lookup("REGEX_FIND_ALL").is_none());
+        assert!(INTRINSIC_REGISTRY.lookup("REGEX_REPLACE_ALL").is_none());
     }
 }

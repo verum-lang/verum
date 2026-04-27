@@ -336,13 +336,95 @@ public fn atomic_exchange_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) 
 @vbc_direct_lowering
 public fn atomic_exchange_i32(ptr: *mut Int32, value: Int32, ordering: UInt8) -> Int32;
 
-/// Atomic fetch-and-sub for UInt64. (`fetch_sub_u32` was the
-/// only fetch_sub variant declared previously despite the
-/// codegen-side registry already supporting `fetch_sub_u64`
-/// — surface the existing capability.)
+/// Atomic fetch-and-sub for UInt64.
 @intrinsic("atomic_fetch_sub_u64")
 @vbc_direct_lowering
 public fn atomic_fetch_sub_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
+
+// -----------------------------------------------------------------------------
+// 64-bit signed atomics (#100, task #24)
+//
+// Closes the asymmetry where signed 64-bit code rounded
+// through `_u64` with `as UInt64` cast — the bit-pattern
+// survived but the static type information was lost at
+// every atomic operation. LLVM atomicrmw / load / store /
+// cmpxchg don't care about signedness for these ops; the
+// signed variants share the same opcode tree as unsigned.
+// -----------------------------------------------------------------------------
+
+/// Atomic load of Int64 (VBC opcode: AtomicLoad 0x48 with size=8).
+@intrinsic("atomic_load_i64")
+@vbc_direct_lowering
+public fn atomic_load_i64(ptr: *const Int64, ordering: UInt8) -> Int64;
+
+/// Atomic store of Int64.
+@intrinsic("atomic_store_i64")
+@vbc_direct_lowering
+public fn atomic_store_i64(ptr: *mut Int64, value: Int64, ordering: UInt8);
+
+/// Atomic compare-and-swap for Int64.
+@intrinsic("atomic_cas_i64")
+@vbc_direct_lowering
+public fn atomic_cas_i64(
+    ptr: *mut Int64,
+    expected: Int64,
+    desired: Int64,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (Int64, Bool);
+
+/// Atomic fetch-and-add for Int64.
+@intrinsic("atomic_fetch_add_i64")
+@vbc_direct_lowering
+public fn atomic_fetch_add_i64(ptr: *mut Int64, value: Int64, ordering: UInt8) -> Int64;
+
+/// Atomic fetch-and-sub for Int64.
+@intrinsic("atomic_fetch_sub_i64")
+@vbc_direct_lowering
+public fn atomic_fetch_sub_i64(ptr: *mut Int64, value: Int64, ordering: UInt8) -> Int64;
+
+/// Atomic exchange for Int64.
+@intrinsic("atomic_exchange_i64")
+@vbc_direct_lowering
+public fn atomic_exchange_i64(ptr: *mut Int64, value: Int64, ordering: UInt8) -> Int64;
+
+// -----------------------------------------------------------------------------
+// u8 atomic counters (#100, task #24)
+//
+// Enables race-hardening of single-byte counters such as
+// the CBGR slot-generation rotation in heap.vr's
+// free_block_xthread (currently uses non-atomic load+store
+// because no UInt8 atomic fetch_add was available).
+// -----------------------------------------------------------------------------
+
+/// Atomic fetch-and-add for UInt8.
+@intrinsic("atomic_fetch_add_u8")
+@vbc_direct_lowering
+public fn atomic_fetch_add_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
+
+/// Atomic fetch-and-sub for UInt8.
+@intrinsic("atomic_fetch_sub_u8")
+@vbc_direct_lowering
+public fn atomic_fetch_sub_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
+
+// -----------------------------------------------------------------------------
+// Symmetric coverage closure (#100, task #24)
+// -----------------------------------------------------------------------------
+
+/// Atomic fetch-and-sub for UInt16.
+@intrinsic("atomic_fetch_sub_u16")
+@vbc_direct_lowering
+public fn atomic_fetch_sub_u16(ptr: *mut UInt16, value: UInt16, ordering: UInt8) -> UInt16;
+
+/// Atomic fetch-and-or for UInt32.
+@intrinsic("atomic_fetch_or_u32")
+@vbc_direct_lowering
+public fn atomic_fetch_or_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
+
+/// Atomic fetch-and-xor for UInt32.
+@intrinsic("atomic_fetch_xor_u32")
+@vbc_direct_lowering
+public fn atomic_fetch_xor_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
 
 // =============================================================================
 // SECTION 8: Int-sized Atomic Helpers
