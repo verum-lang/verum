@@ -704,8 +704,19 @@ impl StdlibModuleResolver {
             ("core.sys.windows", vec!["core.sys"]),
             // mem module depends only on sys.* for mmap/VirtualAlloc (NOT core/sync)
             ("core.mem", vec!["core.sys", "core.sys.linux", "core.sys.darwin", "core.sys.windows"]),
-            // base depends on core
-            ("core.base", vec!["core"]),
+            // base depends on core AND core.mem because core/base/memory.vr
+            // imports cbgr_alloc / cbgr_alloc_zeroed / cbgr_dealloc / cbgr_realloc
+            // from core.mem.allocator (line 21 of memory.vr).  Without this
+            // dependency edge, core.base can compile BEFORE core.mem in topological
+            // order, leaving cbgr_alloc unresolved when try_alloc's body compiles.
+            // The stubbed try_alloc is then never exported, which cascades into
+            // every module that depends on core.base — List.try_with_capacity,
+            // List.try_resize_buffer, Map.try_resize, Text.try_with_capacity all
+            // get stubbed at codegen, panic at runtime with FunctionNotFound (AOT)
+            // or null-deref at FatRef.is_null pc=0 (interpreter).  Documented in
+            // task #200; runtime regression anchor in
+            // vcs/differential/cross-impl/diff_list_try_with_capacity_runtime.vr.
+            ("core.base", vec!["core", "core.mem"]),
             // sync depends on base
             ("core.sync", vec!["core.base"]),
             // text imports sys_write from sys.*
@@ -791,6 +802,14 @@ impl StdlibModuleResolver {
         }
 
         self.compilation_order = order;
+        // Diagnostic: surface the resolved order under `RUST_LOG=info` so
+        // dependency-edge edits (#200 audit) are visible without grepping
+        // a huge trace.  Logged once per discover() call, at info level.
+        tracing::info!(
+            "[stdlib] compilation order ({} modules): {}",
+            self.compilation_order.len(),
+            self.compilation_order.join(" -> ")
+        );
         Ok(())
     }
 

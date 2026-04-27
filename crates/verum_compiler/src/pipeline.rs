@@ -11038,6 +11038,17 @@ impl<'s> CompilationPipeline<'s> {
             "core.time.duration",
             "core.time.instant",
             "core.base.ordering",
+            // core.base.memory hosts the typed-OOM primitives `try_alloc` /
+            // `try_alloc_zeroed` / `try_realloc` that List / Map / Text /
+            // Deque use internally for their `try_with_capacity` / `try_grow`
+            // / `try_resize` paths.  Without this entry, the per-mount
+            // scan WOULD pick up core.base.memory only AFTER the dependent
+            // modules have already been compiled (they're earlier in this
+            // list).  The result was bug-class lenient SKIPs across
+            // List.try_with_capacity, List.try_resize_buffer,
+            // Map.try_resize, Text.try_with_capacity, Deque.try_reallocate
+            // — every fallible-allocation API in core/.  Closes #200.
+            "core.base.memory",
             // Phase 2B: New modules — added incrementally, each tested
             "core.text.char",
             // Phase 2C: Map/Set — codegen fixes for struct array pointers enable these.
