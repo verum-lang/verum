@@ -64,10 +64,22 @@ mount core.{Maybe, Text};
 public mount core.mem.diagnostics.{HeaderView, header_view_of};
 
 // =============================================================================
-// CBGR capability audit (re-exports from core::mem::cap_audit)
+// CBGR capability audit (re-exports from core::mem::cap_audit + ring)
 // =============================================================================
 
 public mount core.mem.cap_audit.{CapEvent, CapEventKind};
+
+/// Producer + reader API for the capability-audit ring buffer.  The
+/// producer side is wired into CBGR write sites; observers call
+/// `recent_cap_events(n)` to snapshot the last N events.  The umbrella
+/// re-exports them under stable names so consumers only need to mount
+/// `core.diagnostics.*` to access the entire audit surface.
+public mount core.mem.cap_audit_ring.{
+    commit as commit_cap_event,
+    recent as recent_cap_events,
+    count as cap_event_count,
+    CAP_AUDIT_RING_CAPACITY,
+};
 
 // =============================================================================
 // Async runtime introspection (re-exports from core::async::diagnostics)

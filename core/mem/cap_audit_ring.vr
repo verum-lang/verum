@@ -1,0 +1,300 @@
+// =============================================================================
+// mem/cap_audit_ring.vr — Lock-free SPMC Ring Buffer for CapEvent
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: mem/cap_audit (event type), intrinsics/atomic (lock-free ops)
+// =============================================================================
+//
+// Storage backend for the capability-audit log declared in `mem/cap_audit.vr`.
+// This file owns the producer-side ring buffer that turns the format-stable
+// `CapEvent` boundary type into a load-bearing audit trail observers can
+// subscribe to.
+//
+// # Concurrency model: per-slot seqlock SPMC
+//
+// Multiple producers concurrently CBGR-write (revoke / attenuate / refcount-
+// change) and emit one `CapEvent` per write.  A single reader (or many
+// readers) periodically snapshot the most-recent N events.
+//
+// Each slot holds two cells:
+//
+//   `state`: AtomicU64 — encodes (writing_flag, published_seq).  High bit
+//   set means a writer currently owns the slot; low 63 bits are the
+//   publication sequence number when the writer is finished.  An
+//   uninitialised slot has state == 0 (no writer ever claimed it).
+//
+//   `event`: CapEvent — the published payload.  Mutated only by the
+//   slot's current owner (under WRITING flag); read-only when the WRITING
+//   flag is clear.
+//
+// # Writer protocol
+//
+// 1. atomic_fetch_add(NEXT_SEQ, 1) — claim a globally unique sequence number
+//    `seq ≥ 1` (zero is reserved for "uncommitted").
+// 2. Locate slot at index `(seq - 1) mod CAP`.
+// 3. CAS-loop on `slot.state`:
+//    - load `prev`; extract `prev_seq = prev & !WRITING_BIT`.
+//    - if `prev_seq >= seq` a strictly newer writer has already claimed
+//      this slot; abandon our event (it would be overwritten before any
+//      reader could observe it; reporting it would be a stale read).
+//    - else CAS `prev → (WRITING_BIT | seq)`.  On success break the loop;
+//      on failure spin and retry.
+// 4. Write the event payload.
+// 5. Release-store `state = seq` (clears WRITING_BIT, publishes seq).
+//
+// # Reader protocol (seqlock retry)
+//
+// 1. Acquire-load `NEXT_SEQ` to get the upper bound `cur`.
+// 2. For `s` in `[max(1, cur - n + 1) .. cur]`:
+//    - Acquire-load `slot.state` → `state1`.
+//    - If `state1 == s`: copy slot.event into a local; Acquire-load
+//      `slot.state` → `state2`.  If `state2 == s` the event is consistent
+//      with sequence `s` (no concurrent writer corrupted it); push into
+//      result.
+//    - Else: a writer raced; skip.
+//
+// # Memory ordering
+//
+// Writer's release-store `state = seq` synchronises-with the reader's
+// acquire-load returning `seq`, transitively making the writer's prior
+// payload writes visible.  The acquire-acquire fence on the reader's two
+// state loads brackets the payload copy — if `state2 == state1 == seq`,
+// no writer mutated the slot during the copy.
+//
+// # Capacity sizing
+//
+// 256 slots × ~64-byte CapEvent ≈ 16 KiB.  At a sustained 10 µs/event
+// CBGR-write rate this is ~2.5 ms of history; sufficient for forensic
+// post-mortem (the tail-end window of writes preceding a panic).  Fixed-
+// size avoids unbounded memory growth and gives O(1) writer / O(N)
+// reader.
+//
+// Spec: docs/architecture/observability.md (TODO)
+// =============================================================================
+
+module core.mem.cap_audit_ring;
+
+mount super.cap_audit.{CapEvent, CapEventKind};
+mount core.intrinsics.atomic.{
+    atomic_load_u64, atomic_store_u64, atomic_fetch_add_u64,
+    atomic_compare_exchange_u64,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL,
+};
+mount core.intrinsics.platform.spin_hint;
+
+// =============================================================================
+// Compile-time constants
+// =============================================================================
+
+/// Number of slots in the ring buffer.  MUST be a power of two so that
+/// `(seq - 1) & CAP_AUDIT_RING_MASK` is a fast modular reduction.
+public const CAP_AUDIT_RING_CAPACITY: Int = 256;
+
+/// Bitmask for fast modular reduction (CAP - 1).
+const CAP_AUDIT_RING_MASK: UInt64 = 255;
+
+/// High bit of `slot.state` indicating a writer currently owns the slot.
+const SLOT_WRITING_BIT: UInt64 = 0x8000_0000_0000_0000;
+
+/// Initial sequence value — zero indicates "no event ever committed to
+/// this slot" so `recent()` can skip uninitialised slots.
+const SLOT_UNINITIALISED: UInt64 = 0;
+
+// =============================================================================
+// Slot layout — one cell of the ring
+// =============================================================================
+
+/// One ring slot.  Two cache-aligned cells: a 64-bit seqlock state and
+/// the published CapEvent payload.  No padding needed — CapEvent is
+/// already by-value with all-integer fields.
+type CapAuditSlot is {
+    /// Seqlock state.  Encoding:
+    ///   - 0                   → uninitialised
+    ///   - WRITING_BIT | seq   → writer currently in-flight, seq pending
+    ///   - seq (low 63 bits)   → stable, payload reflects this seq
+    state: UInt64,
+
+    /// Published payload.  Read-only when `state` is stable.
+    event: CapEvent,
+};
+
+// =============================================================================
+// Global ring storage
+// =============================================================================
+
+/// Monotonic global sequence counter.  Each commit() reserves `++NEXT_SEQ`
+/// before locating its slot, so sequences are globally unique even when
+/// they collide on the same slot index.
+public static mut CAP_AUDIT_NEXT_SEQ: UInt64 = 0;
+
+/// Ring buffer of slots.  Initialised at module load with all-zero state
+/// (uninitialised) and a placeholder CapEvent that observers will never
+/// see (filtered out by `state == 0` check in `recent()`).
+public static mut CAP_AUDIT_RING: [CapAuditSlot; 256] = [
+    CapAuditSlot {
+        state: 0,
+        event: CapEvent {
+            kind: Revoke,
+            seq: 0,
+            ptr_id: 0,
+            generation_before: 0,
+            generation_after: 0,
+            capabilities_before: 0,
+            capabilities_after: 0,
+            timestamp_ns: 0,
+        },
+    };
+    256
+];
+
+// =============================================================================
+// Writer API
+// =============================================================================
+
+/// Commit a CapEvent into the ring.  Assigns a globally unique sequence
+/// number, claims the target slot via CAS-loop, writes the payload, and
+/// publishes the new sequence with a release store.
+///
+/// The caller's `event.seq` is overwritten with the assigned sequence
+/// before publication; callers should pass `event.seq = 0` (the
+/// `CapEvent.new` default) and read back the assigned seq from
+/// `recent()` snapshots.
+///
+/// # Returns
+///
+/// The assigned sequence number.  Useful for tests that want to verify
+/// monotonicity or correlate other operations with the audit event.
+///
+/// # Concurrency
+///
+/// Lock-free for any number of writers.  No reader-blocking — readers
+/// detect concurrent writers via the seqlock retry protocol and skip
+/// torn slots.
+public fn commit(event: CapEvent) -> UInt64 {
+    let next_seq_ptr = unsafe { &CAP_AUDIT_NEXT_SEQ as *mut UInt64 };
+    let seq = atomic_fetch_add_u64(next_seq_ptr, 1, ORDERING_ACQ_REL) + 1;
+
+    let idx = ((seq - 1) & CAP_AUDIT_RING_MASK) as Int;
+    let slot_ptr = unsafe { &mut CAP_AUDIT_RING[idx] as *mut CapAuditSlot };
+    let state_ptr = unsafe { &mut (*slot_ptr).state as *mut UInt64 };
+
+    // Stamp the event with the assigned sequence before publication so
+    // observers reading the published payload see the correct seq.
+    let mut stamped = event;
+    stamped.seq = seq;
+
+    // Claim the slot.  CAS until we either win or observe a strictly
+    // newer writer (in which case our event is stale and we drop it).
+    let claim = SLOT_WRITING_BIT | seq;
+    loop {
+        let prev = atomic_load_u64(state_ptr, ORDERING_ACQUIRE);
+        let prev_seq = prev & !SLOT_WRITING_BIT;
+        if prev_seq >= seq {
+            // A writer with a higher seq has already taken this slot;
+            // our event would be overwritten before any reader could
+            // see it.  Abandon to keep the audit log advancing.
+            return seq;
+        }
+        let (_, ok) = atomic_compare_exchange_u64(
+            state_ptr, prev, claim,
+            ORDERING_ACQ_REL, ORDERING_RELAXED,
+        );
+        if ok {
+            break;
+        }
+        spin_hint();
+    }
+
+    // We own the slot.  Write the payload (single struct assignment).
+    unsafe {
+        (*slot_ptr).event = stamped;
+    }
+
+    // Publish: release-store seq with WRITING_BIT cleared.  This makes
+    // the payload writes visible to readers performing acquire-loads.
+    atomic_store_u64(state_ptr, seq, ORDERING_RELEASE);
+
+    seq
+}
+
+// =============================================================================
+// Reader API
+// =============================================================================
+
+/// Snapshot the most recent `n` committed events.  Returns events in
+/// ascending seq order (oldest first).  The returned list may have
+/// fewer than `n` elements if:
+///
+/// - Fewer than `n` events have ever been committed.
+/// - One or more slots in the requested window were torn-read (a
+///   concurrent writer mutated the slot during the reader's pass).
+///   These are filtered out rather than reported as garbage.
+///
+/// Performance: O(n) atomic loads + O(n) struct copies.  No
+/// allocations beyond the result list.
+public fn recent(n: Int) -> List<CapEvent> {
+    let next_seq_ptr = unsafe { &CAP_AUDIT_NEXT_SEQ as *const UInt64 };
+    let cur = atomic_load_u64(next_seq_ptr, ORDERING_ACQUIRE);
+
+    let mut result: List<CapEvent> = List.with_capacity(n);
+    if cur == 0 || n <= 0 {
+        return result;
+    }
+
+    let n_u64 = n as UInt64;
+    let start: UInt64 = if cur > n_u64 { cur - n_u64 + 1 } else { 1 };
+
+    let mut s = start;
+    while s <= cur {
+        let idx = ((s - 1) & CAP_AUDIT_RING_MASK) as Int;
+        let slot_ptr = unsafe { &CAP_AUDIT_RING[idx] as *const CapAuditSlot };
+        let state_ptr = unsafe { &(*slot_ptr).state as *const UInt64 };
+
+        let state1 = atomic_load_u64(state_ptr, ORDERING_ACQUIRE);
+        if state1 == s {
+            // Slot is stable and reflects exactly the seq we want.
+            // Copy the payload, then re-check state to detect a torn
+            // read against a concurrent writer.
+            let ev = unsafe { (*slot_ptr).event };
+            let state2 = atomic_load_u64(state_ptr, ORDERING_ACQUIRE);
+            if state2 == s {
+                result.push(ev);
+            }
+            // Else: writer raced; skip this seq.
+        }
+        // Else: slot was overwritten by a higher seq, or the writer
+        // for this seq never finished publishing — skip.
+        s = s + 1;
+    }
+
+    result
+}
+
+/// Total number of events ever committed to the ring (including those
+/// since overwritten by wraparound).  Equal to the most-recent assigned
+/// sequence number.
+public fn count() -> UInt64 {
+    let next_seq_ptr = unsafe { &CAP_AUDIT_NEXT_SEQ as *const UInt64 };
+    atomic_load_u64(next_seq_ptr, ORDERING_ACQUIRE)
+}
+
+/// Reset the ring to the empty state.  Intended for tests; production
+/// code should never call this because it discards forensic history.
+///
+/// Not safe to call concurrently with `commit()` — the reset clears
+/// the global counter and per-slot states without coordinating with
+/// in-flight writers, so a writer mid-publication could corrupt a
+/// reset slot.  Callers must establish a quiescent point before
+/// resetting (e.g. test setup with no live producers).
+public fn reset_for_tests() {
+    let next_seq_ptr = unsafe { &CAP_AUDIT_NEXT_SEQ as *mut UInt64 };
+    atomic_store_u64(next_seq_ptr, 0, ORDERING_RELEASE);
+
+    let mut i: Int = 0;
+    while i < CAP_AUDIT_RING_CAPACITY {
+        let slot_ptr = unsafe { &mut CAP_AUDIT_RING[i] as *mut CapAuditSlot };
+        let state_ptr = unsafe { &mut (*slot_ptr).state as *mut UInt64 };
+        atomic_store_u64(state_ptr, 0, ORDERING_RELEASE);
+        i = i + 1;
+    }
+}
