@@ -27,6 +27,9 @@ mount core.database.postgres.{
     PgConnection, PgConnState,
     PcsConnecting, PcsAuthenticating, PcsReady, PcsBusy, PcsClosed, PcsFailed,
     SimpleQueryResult,
+    StmtCache, CacheEntry,
+    ExtendedQueryResult, PipelineBatch,
+    build_parse_bind_execute, build_bind_execute,
 };
 
 fn check_config_builders() {
@@ -68,8 +71,82 @@ fn check_state_machine() {
     let _: PgConnState = PcsFailed;
 }
 
+fn check_stmt_cache() {
+    let mut cache = StmtCache.new(2);
+    assert(cache.cap() == 2);
+    assert(cache.len() == 0);
+
+    // Miss
+    match cache.lookup(0xAAAA) {
+        None    => {},
+        Some(_) => panic("expected miss"),
+    }
+
+    // Insert + hit
+    let _ = cache.insert(0xAAAA, "s00aaaa".clone());
+    assert(cache.len() == 1);
+    match cache.lookup(0xAAAA) {
+        Some(name) => assert(name == "s00aaaa"),
+        None       => panic("expected hit"),
+    }
+
+    // Cap eviction at 2 entries — third insert evicts oldest.
+    let _ = cache.insert(0xBBBB, "s00bbbb".clone());
+    let evicted = cache.insert(0xCCCC, "s00cccc".clone());
+    match evicted {
+        Some(_) => {},
+        None    => panic("expected an eviction at cap"),
+    }
+    assert(cache.len() == 2);
+
+    // invalidate_all should reset.
+    let cleared = cache.invalidate_all();
+    assert(cleared.len() == 2);
+    assert(cache.len() == 0);
+}
+
+fn check_pipeline_batch() {
+    let mut batch = PipelineBatch.new();
+    assert(batch.len() == 0);
+    let p: List<Byte> = List.new();
+    let b: List<Byte> = List.new();
+    let e: List<Byte> = List.new();
+    batch.push(p, b, e);
+    assert(batch.len() == 1);
+    let flat = batch.flatten();
+    // Sync packet is 5 bytes ('S' + 4-byte length); our entry is empty.
+    assert(flat.len() == 5);
+}
+
+fn check_extended_builders() {
+    // Build + don't crash. We don't connect — just shape-check.
+    let oids: List<Int> = List.new();
+    let pf: List<Int>   = List.new();
+    let rf: List<Int>   = List.new();
+    let params: List<Maybe<List<Byte>>> = List.new();
+    let stmt = "s_test".clone();
+    let portal = "".clone();
+    let bytes = build_parse_bind_execute(
+        &stmt, &"SELECT 1".clone(),
+        oids.as_slice(), pf.as_slice(), &params, rf.as_slice(),
+        &portal, 0,
+    );
+    // Parse + Bind + Execute + Sync — all four messages are tagged
+    // and length-prefixed, so the byte count is at least 5*4 = 20.
+    assert(bytes.len() > 20);
+
+    let bytes2 = build_bind_execute(
+        &stmt, pf.as_slice(), &params, rf.as_slice(), &portal, 0,
+    );
+    // Bind + Execute + Sync = ≥ 15 bytes.
+    assert(bytes2.len() > 15);
+}
+
 fn main() {
     check_config_builders();
     check_adapter_identity();
     check_state_machine();
+    check_stmt_cache();
+    check_pipeline_batch();
+    check_extended_builders();
 }

@@ -195,8 +195,166 @@ public fn sasl_response(client_message: &[Byte]) -> List<Byte> {
 }
 
 // -----------------------------------------------------------------------------
+// Extended protocol — Parse / Bind / Describe / Execute / Close
+// -----------------------------------------------------------------------------
+//
+// The extended-query path lets the client cache a parsed statement on
+// the server (Parse), bind parameters by reference (Bind), describe
+// the result-set shape (Describe), and run it (Execute). A Sync at
+// the end of a chain forces the server to emit ReadyForQuery and
+// flush its responses; pipelining runs many round-trips before that
+// barrier.
+//
+// Naming convention for portal / statement names: Spindle uses the
+// 16-hex-char `s<fingerprint_hex>` slot from `PreparedQuery::server_
+// name()`; an empty Text means "use the unnamed default slot" and is
+// only safe when no other request is in flight.
+
+/// Parse — register a SQL string with the server under `name`. Pass
+/// `param_oids` empty to let the server infer parameter types (it
+/// will then send `ParameterDescription` after Sync).
+public fn parse(name: &Text, sql: &Text, param_oids: &[Int]) -> List<Byte> {
+    let n = name.clone();
+    let q = sql.clone();
+    let oids = ints_to_list(param_oids);
+    frame(FE_PARSE, |buf: &mut WireBuf| {
+        buf.put_cstr(&n);
+        buf.put_cstr(&q);
+        buf.put_u16_be(oids.len() as Int);
+        let mut i = 0;
+        while i < oids.len() as Int {
+            buf.put_i32_be(oids[i]);
+            i = i + 1;
+        }
+    })
+}
+
+/// Bind — bind values to a previously-parsed statement.
+///   * `portal`   — destination portal name; "" = unnamed default
+///   * `stmt_name` — source statement name; "" = unnamed default
+///   * `param_formats` — per-parameter wire format (0 text, 1 binary).
+///                       Pass an empty slice to default every param to
+///                       text; pass length-1 to apply one format to
+///                       all; pass length-N to vary per param.
+///   * `params` — the parameter values; each entry is an
+///                already-encoded byte slice or `None` for SQL NULL.
+///   * `result_formats` — per-column result format. Same length-N
+///                        rules as `param_formats`.
+public fn bind(
+    portal: &Text,
+    stmt_name: &Text,
+    param_formats: &[Int],
+    params: &List<Maybe<List<Byte>>>,
+    result_formats: &[Int],
+) -> List<Byte> {
+    let p = portal.clone();
+    let s = stmt_name.clone();
+    let pf = ints_to_list(param_formats);
+    let rf = ints_to_list(result_formats);
+    let owned_params = clone_params(params);
+    frame(FE_BIND, |buf: &mut WireBuf| {
+        buf.put_cstr(&p);
+        buf.put_cstr(&s);
+        // Param formats
+        buf.put_u16_be(pf.len() as Int);
+        let mut i = 0;
+        while i < pf.len() as Int {
+            buf.put_u16_be(pf[i]);
+            i = i + 1;
+        }
+        // Param values
+        buf.put_u16_be(owned_params.len() as Int);
+        let mut k = 0;
+        while k < owned_params.len() as Int {
+            match &owned_params[k] {
+                None    => { buf.put_i32_be(-1); }
+                Some(v) => {
+                    buf.put_i32_be(v.len() as Int);
+                    buf.put_bytes(v.as_slice());
+                }
+            }
+            k = k + 1;
+        }
+        // Result formats
+        buf.put_u16_be(rf.len() as Int);
+        let mut j = 0;
+        while j < rf.len() as Int {
+            buf.put_u16_be(rf[j]);
+            j = j + 1;
+        }
+    })
+}
+
+/// Describe — kind 'S' (statement) or 'P' (portal).
+public fn describe_statement(name: &Text) -> List<Byte> {
+    let n = name.clone();
+    frame(FE_DESCRIBE, |buf: &mut WireBuf| {
+        buf.put_u8(0x53);     // 'S'
+        buf.put_cstr(&n);
+    })
+}
+
+public fn describe_portal(name: &Text) -> List<Byte> {
+    let n = name.clone();
+    frame(FE_DESCRIBE, |buf: &mut WireBuf| {
+        buf.put_u8(0x50);     // 'P'
+        buf.put_cstr(&n);
+    })
+}
+
+/// Execute — run a portal until it produces `max_rows` rows (0 = all).
+public fn execute(portal: &Text, max_rows: Int) -> List<Byte> {
+    let p = portal.clone();
+    frame(FE_EXECUTE, |buf: &mut WireBuf| {
+        buf.put_cstr(&p);
+        buf.put_i32_be(max_rows);
+    })
+}
+
+/// Close — kind 'S' (statement) or 'P' (portal). Caller picks one
+/// per the slot they want to release; the server emits CloseComplete.
+public fn close_statement(name: &Text) -> List<Byte> {
+    let n = name.clone();
+    frame(FE_CLOSE, |buf: &mut WireBuf| {
+        buf.put_u8(0x53);
+        buf.put_cstr(&n);
+    })
+}
+
+public fn close_portal(name: &Text) -> List<Byte> {
+    let n = name.clone();
+    frame(FE_CLOSE, |buf: &mut WireBuf| {
+        buf.put_u8(0x50);
+        buf.put_cstr(&n);
+    })
+}
+
+// -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
+
+fn ints_to_list(xs: &[Int]) -> List<Int> {
+    let mut out: List<Int> = List.new();
+    let mut i = 0;
+    while i < xs.len() {
+        out.push(xs[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_params(src: &List<Maybe<List<Byte>>>) -> List<Maybe<List<Byte>>> {
+    let mut out: List<Maybe<List<Byte>>> = List.new();
+    let mut i = 0;
+    while i < src.len() as Int {
+        match &src[i] {
+            None    => out.push(None),
+            Some(v) => out.push(Some(v.clone())),
+        }
+        i = i + 1;
+    }
+    out
+}
 
 fn bytes_to_list(buf: &[Byte]) -> List<Byte> {
     let mut out: List<Byte> = List.new();

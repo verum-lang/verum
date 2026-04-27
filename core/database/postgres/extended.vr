@@ -1,0 +1,235 @@
+// =============================================================================
+// core/database/postgres/extended.vr — Extended-protocol query driver
+// =============================================================================
+// Spec: internal/specs/database.md §6.1, postgresql.org/docs/16/protocol-flow.html
+//
+// Extended protocol per Sync round:
+//
+//   client →  Parse + Bind + Describe + Execute + Sync          (one shot)
+//   client →  [Parse +] Bind + Execute + ... [+ Bind + Execute] + Sync   (pipelined)
+//   server ←  ParseComplete + BindComplete + RowDescription +
+//             DataRow* + CommandComplete + ReadyForQuery
+//
+// On a hit in `StmtCache` we skip Parse and emit only Bind + Execute
+// + Sync. The Spindle pipelining model is implicit — `pipeline` lets
+// the caller queue a batch of (sql, params) pairs and flushes them
+// behind a single Sync at the end.
+// =============================================================================
+
+module core.database.postgres.extended;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
+mount core.database.common.types.WireValue;
+
+mount core.database.postgres.wire.frontend.{
+    parse, bind, describe_statement, execute, sync as send_sync, close_statement,
+};
+mount core.database.postgres.wire.backend.{
+    BackendMessage,
+    BmRowDescription, BmDataRow, BmCommandComplete, BmEmptyQueryResponse,
+    BmError, BmNotice, BmParseComplete, BmBindComplete, BmCloseComplete,
+    BmNoData, BmPortalSuspend, BmReadyForQuery, BmParameterStatus, BmAuth,
+    BmBackendKeyData, BmUnknown,
+    RowDescription, DataRow, CommandComplete, Diagnostic, ColumnDesc,
+    TxStatus,
+};
+
+// -----------------------------------------------------------------------------
+// Public types — the result of one extended-protocol round-trip.
+// -----------------------------------------------------------------------------
+
+public type ExtendedQueryResult is {
+    command_tag: Text,
+    row_description: Maybe<RowDescription>,
+    rows: List<List<WireValue>>,
+};
+
+public type PipelineEntry is {
+    /// Pre-built Parse payload bytes — empty if the entry is a
+    /// cache-hit re-bind.
+    parse_bytes: List<Byte>,
+    bind_bytes: List<Byte>,
+    execute_bytes: List<Byte>,
+};
+
+public type PipelineBatch is {
+    entries: List<PipelineEntry>,
+    /// Trailing Sync — one per batch.
+    sync_bytes: List<Byte>,
+};
+
+implement PipelineBatch {
+    public fn new() -> PipelineBatch {
+        PipelineBatch { entries: List.new(), sync_bytes: send_sync() }
+    }
+
+    /// Append a Parse + Bind + Execute triple. Pass `parse_bytes` empty
+    /// (List.new()) for a cache-hit re-bind.
+    public fn push(
+        &mut self,
+        parse_bytes: List<Byte>,
+        bind_bytes: List<Byte>,
+        execute_bytes: List<Byte>,
+    ) {
+        self.entries.push(PipelineEntry {
+            parse_bytes: parse_bytes,
+            bind_bytes: bind_bytes,
+            execute_bytes: execute_bytes,
+        });
+    }
+
+    /// Flatten into a single byte buffer ready to be written to the
+    /// connection in one syscall (Postgres allows this — server reads
+    /// all messages up to the next Sync before responding).
+    public fn flatten(&self) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            let e = &self.entries[i];
+            append_all(&mut out, e.parse_bytes.as_slice());
+            append_all(&mut out, e.bind_bytes.as_slice());
+            append_all(&mut out, e.execute_bytes.as_slice());
+            i = i + 1;
+        }
+        append_all(&mut out, self.sync_bytes.as_slice());
+        out
+    }
+
+    public fn len(&self) -> Int { self.entries.len() as Int }
+}
+
+// -----------------------------------------------------------------------------
+// Build helpers — assemble the bytes for one extended-protocol round.
+// -----------------------------------------------------------------------------
+
+/// Build the bytes to send for `execute_named` against an *uncached*
+/// statement. Caller writes the whole buffer to the connection then
+/// reads ParseComplete / BindComplete / [RowDescription] / DataRow* /
+/// CommandComplete / ReadyForQuery.
+public fn build_parse_bind_execute(
+    stmt_name: &Text,
+    sql: &Text,
+    param_oids: &[Int],
+    param_formats: &[Int],
+    params: &List<Maybe<List<Byte>>>,
+    result_formats: &[Int],
+    portal: &Text,
+    max_rows: Int,
+) -> List<Byte> {
+    let p = parse(stmt_name, sql, param_oids);
+    let b = bind(portal, stmt_name, param_formats, params, result_formats);
+    let e = execute(portal, max_rows);
+    let s = send_sync();
+    let mut out: List<Byte> = List.new();
+    append_all(&mut out, p.as_slice());
+    append_all(&mut out, b.as_slice());
+    append_all(&mut out, e.as_slice());
+    append_all(&mut out, s.as_slice());
+    out
+}
+
+/// Cache-hit re-bind: skip Parse, emit only Bind + Execute + Sync.
+public fn build_bind_execute(
+    stmt_name: &Text,
+    param_formats: &[Int],
+    params: &List<Maybe<List<Byte>>>,
+    result_formats: &[Int],
+    portal: &Text,
+    max_rows: Int,
+) -> List<Byte> {
+    let b = bind(portal, stmt_name, param_formats, params, result_formats);
+    let e = execute(portal, max_rows);
+    let s = send_sync();
+    let mut out: List<Byte> = List.new();
+    append_all(&mut out, b.as_slice());
+    append_all(&mut out, e.as_slice());
+    append_all(&mut out, s.as_slice());
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Reply consumer — turn a stream of BackendMessage into ExtendedQueryResult.
+// -----------------------------------------------------------------------------
+
+public type ExtendedResultBuilder is {
+    rows: List<List<WireValue>>,
+    row_desc: Maybe<RowDescription>,
+    command_tag: Text,
+    diagnostic: Maybe<Diagnostic>,
+    finished: Bool,
+};
+
+implement ExtendedResultBuilder {
+    public fn new() -> ExtendedResultBuilder {
+        ExtendedResultBuilder {
+            rows: List.new(),
+            row_desc: None,
+            command_tag: "".clone(),
+            diagnostic: None,
+            finished: false,
+        }
+    }
+
+    /// Drive one backend message into the builder. Returns `true` when
+    /// the round is complete (ReadyForQuery seen).
+    public fn step(&mut self, msg: BackendMessage) -> Bool {
+        match msg {
+            BmParseComplete    => {}
+            BmBindComplete     => {}
+            BmCloseComplete    => {}
+            BmNoData           => {}
+            BmPortalSuspend    => {
+                // Suspended mid-execute (max_rows reached). Caller has
+                // to issue a fresh Execute to keep going; we report the
+                // current set as a partial result.
+                self.command_tag = "PORTAL_SUSPEND".clone();
+            }
+            BmRowDescription(rd) => { self.row_desc = Some(rd); }
+            BmDataRow(dr)        => { self.rows.push(dr.values); }
+            BmCommandComplete(cc) => {
+                if self.command_tag.len() == 0 { self.command_tag = cc.tag; }
+            }
+            BmEmptyQueryResponse => {
+                if self.command_tag.len() == 0 { self.command_tag = "EMPTY".clone(); }
+            }
+            BmError(d) => { self.diagnostic = Some(d); }
+            BmNotice(_) => {}
+            BmReadyForQuery(_) => { self.finished = true; }
+            BmParameterStatus(_) => {}
+            BmBackendKeyData(_) => {}
+            BmAuth(_) => {}
+            BmUnknown { .. } => {}
+        }
+        self.finished
+    }
+
+    /// Finalise. Returns Err(DbError) when the round contained an
+    /// ErrorResponse; otherwise the populated result.
+    public fn finish(self, error_translator: fn(Diagnostic) -> DbError)
+        -> Result<ExtendedQueryResult, DbError>
+    {
+        match self.diagnostic {
+            Some(d) => Err(error_translator(d)),
+            None    => Ok(ExtendedQueryResult {
+                command_tag: self.command_tag,
+                row_description: self.row_desc,
+                rows: self.rows,
+            }),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn append_all(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i = 0;
+    while i < src.len() {
+        dst.push(src[i]);
+        i = i + 1;
+    }
+}

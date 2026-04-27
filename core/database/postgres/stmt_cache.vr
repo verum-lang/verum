@@ -1,0 +1,149 @@
+// =============================================================================
+// core/database/postgres/stmt_cache.vr — per-connection prepared-stmt cache
+// =============================================================================
+// Spec: internal/specs/database.md §6.1 (extended-query protocol)
+//
+// Postgres caches a parsed plan keyed by named statement on the
+// server. Spindle keeps a parallel client-side cache of which
+// fingerprints we've already Parsed on this connection, so subsequent
+// Bind / Execute can skip Parse.
+//
+// Eviction is LRU at a fixed cap (default 256 entries — matches
+// asyncpg / pgx defaults). We keep the entries in insertion order in
+// a List and walk linearly on lookup; for a 256-entry hot cache that
+// is single-digit microseconds and avoids the Map churn for a small
+// table.
+//
+// On schema-version-bump (received via `parameter_status: schema_version`
+// or detected by InvalidSchema error class) the cache is cleared so
+// stale plans are not reused.
+// =============================================================================
+
+module core.database.postgres.stmt_cache;
+
+mount core.*;
+mount base.{Text, Maybe, None, Some};
+mount collections.List;
+
+public type CacheEntry is {
+    fingerprint: Int,
+    server_name: Text,
+    /// Logical clock used for LRU recency tracking.
+    last_seen: Int,
+};
+
+public type StmtCache is {
+    entries: List<CacheEntry>,
+    cap: Int,
+    /// Monotonic clock — incremented on every touch / insert.
+    clock: Int,
+};
+
+implement StmtCache {
+    public fn new(cap: Int) -> StmtCache {
+        StmtCache { entries: List.new(), cap: cap, clock: 0 }
+    }
+
+    public fn default() -> StmtCache { StmtCache.new(256) }
+
+    public fn len(&self) -> Int { self.entries.len() as Int }
+    public fn cap(&self) -> Int { self.cap }
+
+    /// Lookup by fingerprint. Updates LRU recency. Returns the cached
+    /// server_name on hit.
+    public fn lookup(&mut self, fingerprint: Int) -> Maybe<Text> {
+        self.clock = self.clock + 1;
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].fingerprint == fingerprint {
+                self.entries[i].last_seen = self.clock;
+                return Some(self.entries[i].server_name.clone());
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Insert a new entry, evicting the least-recently-used one if
+    /// we'd overflow the cap. Returns the evicted server_name (if any)
+    /// so the caller can emit `Close 'S'` to release the server slot.
+    public fn insert(&mut self, fingerprint: Int, server_name: Text) -> Maybe<Text> {
+        self.clock = self.clock + 1;
+        let mut evicted: Maybe<Text> = None;
+        if self.entries.len() as Int >= self.cap {
+            // Find the oldest entry by `last_seen`.
+            let mut victim: Int = 0;
+            let mut oldest: Int = self.entries[0].last_seen;
+            let mut i: Int = 1;
+            while i < self.entries.len() as Int {
+                if self.entries[i].last_seen < oldest {
+                    oldest = self.entries[i].last_seen;
+                    victim = i;
+                }
+                i = i + 1;
+            }
+            evicted = Some(self.entries[victim].server_name.clone());
+            // O(n) remove — fine at cap=256.
+            let mut new_entries: List<CacheEntry> = List.new();
+            let mut k: Int = 0;
+            while k < self.entries.len() as Int {
+                if k != victim {
+                    new_entries.push(CacheEntry {
+                        fingerprint: self.entries[k].fingerprint,
+                        server_name: self.entries[k].server_name.clone(),
+                        last_seen: self.entries[k].last_seen,
+                    });
+                }
+                k = k + 1;
+            }
+            self.entries = new_entries;
+        }
+        self.entries.push(CacheEntry {
+            fingerprint: fingerprint,
+            server_name: server_name,
+            last_seen: self.clock,
+        });
+        evicted
+    }
+
+    /// Drop every entry — invoked on schema-version bump. Returns the
+    /// list of server_names so the caller can issue Close 'S' for
+    /// each (or simply forget about them — Postgres will GC them when
+    /// the session ends).
+    public fn invalidate_all(&mut self) -> List<Text> {
+        let mut out: List<Text> = List.new();
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            out.push(self.entries[i].server_name.clone());
+            i = i + 1;
+        }
+        self.entries = List.new();
+        out
+    }
+
+    /// Drop a single entry (e.g. server reported the statement was
+    /// invalidated). Returns true if found.
+    public fn invalidate(&mut self, fingerprint: Int) -> Bool {
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].fingerprint == fingerprint {
+                let mut new_entries: List<CacheEntry> = List.new();
+                let mut k: Int = 0;
+                while k < self.entries.len() as Int {
+                    if k != i {
+                        new_entries.push(CacheEntry {
+                            fingerprint: self.entries[k].fingerprint,
+                            server_name: self.entries[k].server_name.clone(),
+                            last_seen: self.entries[k].last_seen,
+                        });
+                    }
+                    k = k + 1;
+                }
+                self.entries = new_entries;
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+}
