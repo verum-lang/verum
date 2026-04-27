@@ -252,7 +252,7 @@ public fn f64_neg_infinity() -> Float64 { @intrinsic("f64_neg_infinity") }
 public fn f64_nan() -> Float64 { @intrinsic("f64_nan") }
 
 // =============================================================================
-// SECTION 8: Type-Specific Float Operations
+// SECTION 10: Type-Specific Float Operations
 // =============================================================================
 // Float32-specific
 public fn abs_f32(x: Float32) -> Float32 { @intrinsic("fabs", x) }
@@ -337,11 +337,16 @@ public fn fmod_f32(x: Float32, y: Float32) -> Float32 { @intrinsic("fmod", x, y)
 public fn fmod_f64(x: Float64, y: Float64) -> Float64 { @intrinsic("fmod", x, y) }
 
 // =============================================================================
-// SECTION 10: Aliases and Convenience Functions
+// SECTION 11: Aliases and Convenience Functions
 // =============================================================================
 
-/// Alias: is_infinite (same as is_inf)
-public fn is_infinite<T>(x: T) -> Bool { @intrinsic("is_inf", x) }
+/// Alias for [`is_inf`] — the canonical name in many other
+/// languages' float APIs (`Float64.is_infinite()` in Java/Swift,
+/// `f64::is_infinite` in Rust). Wraps the existing `is_inf`
+/// rather than re-binding the intrinsic so the two names share
+/// exactly one source of truth.
+@inline
+public fn is_infinite<T>(x: T) -> Bool { is_inf(x) }
 
 /// Generic infinity (Float64)
 public fn infinity() -> Float { @intrinsic("f64_infinity") }
