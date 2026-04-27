@@ -485,17 +485,43 @@ implement<T> FatRef<T> {
     public fn slice_view<U>(&self, start: Int, length: Int) -> Result<FatRef<T>, UseAfterFreeError> {
         self.validate_for_tier()?;
 
-        // Bounds check
-        if start < 0 || length < 0 || start + length > self.metadata {
+        // Bounds check.  Order matters: reject negative inputs and
+        // out-of-range start FIRST so the subsequent
+        // `length > self.metadata - start` cannot overflow (since
+        // `start <= self.metadata`, the RHS is non-negative).  The
+        // earlier formulation `start + length > self.metadata`
+        // was vulnerable to addition wraparound: `start = Int.MAX,
+        // length = 1` wraps to `Int.MIN`, slipping past the
+        // comparison and yielding an out-of-bounds slice.
+        if start < 0 || length < 0 || start > self.metadata {
+            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
+        }
+        if length > self.metadata - start {
             return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
         }
 
-        // Calculate byte offset
+        // Calculate byte offset.  `start * element_size` can
+        // overflow `Int` for adversarial inputs; checked_mul
+        // surfaces the overflow as a typed error rather than a
+        // wraparound that derives an out-of-allocation pointer.
         let element_size = U.size as Int;
-        let byte_offset = start * element_size;
+        let byte_offset = match start.checked_mul(element_size) {
+            Some(v) => v,
+            None    => return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view")),
+        };
+
+        // The new offset_from_base must fit in UInt32 (the field
+        // type).  Adversarial nesting of subslice views could push
+        // this past 4 GiB; reject rather than silently truncate the
+        // upper bits, which would corrupt subsequent
+        // header-relative pointer derivation.
+        let new_offset_64 = (self.offset_from_base as Int) + byte_offset;
+        if new_offset_64 < 0 || new_offset_64 > 0xFFFF_FFFF {
+            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
+        }
 
         let new_ptr = ptr_offset(self.ptr, byte_offset);
-        let new_offset = self.offset_from_base + (byte_offset as UInt32);
+        let new_offset = new_offset_64 as UInt32;
 
         Ok(FatRef {
             ptr: new_ptr,
@@ -576,8 +602,21 @@ implement<T> FatRef<T> {
 
     /// Explicitly revoke this reference.
     ///
-    /// Increments the generation counter at the base allocation, invalidating
-    /// this reference, all subslice views, and all copies.
+    /// Atomically bumps the base allocation's generation iff its
+    /// current value still matches `self.generation`.  On success,
+    /// this reference, every subslice view derived from it, and
+    /// every copy that shares the same generation are invalidated.
+    ///
+    /// # Concurrency
+    ///
+    /// Two threads racing on `revoke()` for the same allocation see
+    /// exactly one `Ok(())` and one `Err(already_revoked)`.  The
+    /// previous implementation used a verify-then-fetch_add pattern
+    /// that allowed the late thread to spuriously double-bump the
+    /// generation past a freshly-issued successor reference; the
+    /// CAS-based `try_revoke` primitive on the header makes the
+    /// "verify and bump" atomic.  See ThinRef::revoke for the
+    /// twin fix.
     public fn revoke(&self) -> Result<(), RevocationError> {
         if self.is_null() {
             return Err(RevocationError.null_pointer("FatRef"));
@@ -590,31 +629,29 @@ implement<T> FatRef<T> {
         unsafe {
             let header = self.base_header_mut();
 
-            // Verify current state
-            let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
-
-            if self.generation != actual_gen || self.epoch() != actual_epoch {
+            // Pre-check epoch (the CAS only covers generation; an
+            // epoch already advanced past us via wraparound means
+            // we've been retired).
+            let actual_epoch = header.load_epoch();
+            if self.epoch() != actual_epoch {
                 return Err(RevocationError.already_revoked("FatRef"));
             }
 
-            // Increment generation
-            let old_gen = header.increment_generation();
+            // Atomic verify-and-bump.  None means another thread
+            // already revoked.
+            let new_gen = match header.try_revoke(self.generation) {
+                Some(g) => g,
+                None    => return Err(RevocationError.already_revoked("FatRef")),
+            };
 
-            if old_gen != actual_gen {
-                return Err(RevocationError.internal_error(
-                    "FatRef",
-                    "generation changed during revocation",
-                ));
-            }
-
-            // Notify epoch manager
-            let new_gen = header.load_generation();
-            let new_epoch = header.load_epoch();
+            // Notify epoch manager — read post-revoke epoch since
+            // `try_revoke` may have crossed the wraparound boundary.
+            let post_epoch = header.load_epoch();
             GLOBAL_EPOCH.on_revocation(
                 self.base_ptr(),
-                actual_gen,
+                self.generation,
                 new_gen,
-                new_epoch,
+                post_epoch,
             );
 
             Ok(())
