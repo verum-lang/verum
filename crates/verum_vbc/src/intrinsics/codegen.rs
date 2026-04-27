@@ -32,28 +32,9 @@ pub struct IntrinsicCodegen<'a> {
     instructions: Vec<IntrinsicInstruction>,
     /// Next available register.
     next_reg: u16,
-    /// Platform target for SIMD selection.
-    #[allow(dead_code)] // Reserved for future SIMD platform-specific codegen
-    target: TargetPlatform,
     /// Reference to intrinsic being compiled.
     intrinsic: &'a Intrinsic,
 }
-
-/// Target platform for codegen decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
-pub enum TargetPlatform {
-    /// x86_64 with AVX2 (256-bit vectors)
-    X86_64Avx2,
-    /// x86_64 with AVX-512 (512-bit vectors)
-    X86_64Avx512,
-    /// ARM64 with NEON (128-bit vectors)
-    #[default]
-    Aarch64Neon,
-    /// Generic (no SIMD)
-    Generic,
-}
-
 
 /// Result of intrinsic codegen.
 #[derive(Debug)]
@@ -68,11 +49,10 @@ pub struct IntrinsicCodegenResult {
 
 impl<'a> IntrinsicCodegen<'a> {
     /// Create a new codegen for the given intrinsic.
-    pub fn new(intrinsic: &'a Intrinsic, first_reg: u16, target: TargetPlatform) -> Self {
+    pub fn new(intrinsic: &'a Intrinsic, first_reg: u16) -> Self {
         Self {
             instructions: Vec::with_capacity(8),
             next_reg: first_reg,
-            target,
             intrinsic,
         }
     }
@@ -3116,7 +3096,7 @@ mod tests {
     #[test]
     fn test_direct_opcode_codegen() {
         let intrinsic = INTRINSIC_REGISTRY.lookup("wrapping_add").unwrap();
-        let codegen = IntrinsicCodegen::new(intrinsic, 0, TargetPlatform::Generic);
+        let codegen = IntrinsicCodegen::new(intrinsic, 0);
         let args = vec![Reg::new(0), Reg::new(1)];
         let result = codegen.generate(&args);
 
@@ -3127,7 +3107,7 @@ mod tests {
     #[test]
     fn test_atomic_codegen() {
         let intrinsic = INTRINSIC_REGISTRY.lookup("atomic_load_u64").unwrap();
-        let codegen = IntrinsicCodegen::new(intrinsic, 0, TargetPlatform::Generic);
+        let codegen = IntrinsicCodegen::new(intrinsic, 0);
         let args = vec![Reg::new(0), Reg::new(1)]; // ptr, ordering
         let result = codegen.generate(&args);
 
@@ -3137,7 +3117,7 @@ mod tests {
     #[test]
     fn test_syscall_codegen() {
         let intrinsic = INTRINSIC_REGISTRY.lookup("syscall3").unwrap();
-        let codegen = IntrinsicCodegen::new(intrinsic, 0, TargetPlatform::Generic);
+        let codegen = IntrinsicCodegen::new(intrinsic, 0);
         let args = vec![Reg::new(0), Reg::new(1), Reg::new(2), Reg::new(3)]; // num, a1, a2, a3
         let result = codegen.generate(&args);
 

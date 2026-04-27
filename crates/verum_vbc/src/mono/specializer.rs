@@ -968,12 +968,6 @@ impl<'a> BytecodeSpecializer<'a> {
         self.register_types.insert(dst, type_ref);
     }
 
-    /// Clears register type tracking (e.g., at control flow merge points).
-    #[allow(dead_code)]
-    fn clear_register_types(&mut self) {
-        self.register_types.clear();
-    }
-
     // ========================================================================
     // Bytecode Reading Helpers
     // ========================================================================
