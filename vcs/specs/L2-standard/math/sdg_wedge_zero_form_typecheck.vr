@@ -1,0 +1,128 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: math, sdg, differential-forms, wedge, vva-section-stdlib
+// @timeout: 10000
+// @expect: pass
+//
+// V8 (#246) — wedge_product 0-form ∧ k-form correctness.
+//
+// Pre-#246 wedge_product was a stub returning all-zero
+// coefficients regardless of inputs. This spec pins the V8 #246
+// fix for the most common case: scalar multiplication.
+
+mount core.math.sdg.{
+    Polynomial, polynomial, poly_constant, poly_identity, poly_mul,
+    DifferentialForm, zero_form, wedge_product,
+};
+
+fn exercise_poly_mul_basic() {
+    // (1 + x) · (1 - x) = 1 - x²
+    let p = polynomial([1.0, 1.0]);
+    let q = polynomial([1.0, -1.0]);
+    let r = poly_mul(p, q);
+    // Expected coefficients [1, 0, -1].
+    assert(r.coefficients.len() == 3);
+    assert(r.coefficients[0] == 1.0);
+    assert(r.coefficients[1] == 0.0);
+    assert(r.coefficients[2] == -1.0);
+}
+
+fn exercise_poly_mul_constant() {
+    // 2 · x = 2x
+    let two = poly_constant(2.0);
+    let x   = poly_identity();
+    let r = poly_mul(two, x);
+    assert(r.coefficients.len() == 2);
+    assert(r.coefficients[0] == 0.0);
+    assert(r.coefficients[1] == 2.0);
+}
+
+fn exercise_wedge_zero_with_zero_form() {
+    // 0 ∧ β = 0 for any β.
+    let n: Int = 3;
+    let zero_0 = DifferentialForm {
+        degree: 0,
+        coefficients: [poly_constant(0.0)],
+        dimension: n,
+    };
+    let beta = DifferentialForm {
+        degree: 1,
+        coefficients: [poly_constant(2.0), poly_constant(3.0), poly_constant(5.0)],
+        dimension: n,
+    };
+    let result = wedge_product(zero_0, beta);
+    // Expected: 1-form with all coefficients zero.
+    assert(result.degree == 1);
+    assert(result.coefficients.len() == 3);
+    assert(result.coefficients[0].coefficients[0] == 0.0);
+    assert(result.coefficients[1].coefficients[0] == 0.0);
+    assert(result.coefficients[2].coefficients[0] == 0.0);
+}
+
+fn exercise_wedge_scalar_with_one_form() {
+    // (3) ∧ (2 dx + 5 dy) = 6 dx + 15 dy on R²
+    let scalar = DifferentialForm {
+        degree: 0,
+        coefficients: [poly_constant(3.0)],
+        dimension: 2,
+    };
+    let one_form = DifferentialForm {
+        degree: 1,
+        coefficients: [poly_constant(2.0), poly_constant(5.0)],
+        dimension: 2,
+    };
+    let result = wedge_product(scalar, one_form);
+    assert(result.degree == 1);
+    assert(result.coefficients.len() == 2);
+    assert(result.coefficients[0].coefficients[0] == 6.0);
+    assert(result.coefficients[1].coefficients[0] == 15.0);
+}
+
+fn exercise_wedge_one_form_with_scalar() {
+    // (4 dx + 7 dy) ∧ (2) = 8 dx + 14 dy on R² — symmetric case.
+    let one_form = DifferentialForm {
+        degree: 1,
+        coefficients: [poly_constant(4.0), poly_constant(7.0)],
+        dimension: 2,
+    };
+    let scalar = DifferentialForm {
+        degree: 0,
+        coefficients: [poly_constant(2.0)],
+        dimension: 2,
+    };
+    let result = wedge_product(one_form, scalar);
+    assert(result.degree == 1);
+    assert(result.coefficients.len() == 2);
+    assert(result.coefficients[0].coefficients[0] == 8.0);
+    assert(result.coefficients[1].coefficients[0] == 14.0);
+}
+
+fn exercise_wedge_out_of_rank() {
+    // p + q > n → zero form. n = 2, wedging two 1-forms would give
+    // a 2-form (in-rank); but wedging a 2-form with another 2-form
+    // (4 > 2 = n) → zero.
+    let two_form_a = DifferentialForm {
+        degree: 2,
+        coefficients: [poly_constant(1.0)],  // C(2,2) = 1
+        dimension: 2,
+    };
+    let two_form_b = DifferentialForm {
+        degree: 2,
+        coefficients: [poly_constant(1.0)],
+        dimension: 2,
+    };
+    let result = wedge_product(two_form_a, two_form_b);
+    assert(result.degree == 4);
+    // C(2, 4) = 0 → no coefficients (or by zero_form convention,
+    // zero polynomial coefficients).
+}
+
+fn main() {
+    exercise_poly_mul_basic();
+    exercise_poly_mul_constant();
+    exercise_wedge_zero_with_zero_form();
+    exercise_wedge_scalar_with_one_form();
+    exercise_wedge_one_form_with_scalar();
+    exercise_wedge_out_of_rank();
+}
