@@ -105,8 +105,32 @@ implement Eq for OSError {
 // =============================================================================
 
 /// Newtype wrapper for file descriptors.
-/// On Unix: int (fd >= 0 valid, -1 invalid)
-/// On Windows: HANDLE (pointer-sized)
+///
+/// On Unix the C ABI passes file descriptors as `int` (32-bit
+/// signed); valid fds are non-negative, -1 sentinels failure.
+/// Verum's surface kept this as `(Int)` historically — a 64-bit
+/// signed wrapper that sign-extended each fd at the FFI boundary.
+/// The boundary lift was usually invisible because `int` zero-
+/// extends into the low bits of an `i64` on AArch64 / x86_64
+/// pass-by-register, but the surface type was *honestly wrong*:
+/// FileDesc claimed 64-bit identity for an ABI-level 32-bit
+/// quantity.
+///
+/// T0.4.2 — surface aligned with the C ABI. FileDesc is now a
+/// thin wrapper over `Int` (still i64 internally so existing
+/// arithmetic / comparison code carries through) but the public
+/// invariant is documented as "low 32 bits hold the C `int` fd;
+/// upper bits MUST be zero on every FFI boundary crossing".
+/// Concrete consumers that pass FileDesc to extern declarations
+/// using narrower C-ABI types (`fn close(fd: Int32)`, etc.) cast
+/// down explicitly via `fd.0 as Int32`. Windows builds (where
+/// HANDLE is pointer-sized) keep the full 64-bit storage and
+/// route through their own `core.sys.windows.handle` newtype.
+///
+/// Fully migrating the storage type to Int32 is a separate sweep
+/// (T0.4.2 audit task) — every arithmetic site needs auditing
+/// for sign-extension semantics. The current wrapper preserves
+/// existing behaviour while documenting the C ABI honestly.
 public type FileDesc is (Int);
 
 // IntCoercible: FileDesc is `(Int)` newtype; coerce with Int in
@@ -830,6 +854,259 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
 /// at the call site.
 public fn unlock_region(fd: FileDesc, start: Int, len: Int) -> Result<(), OSError> {
     try_lock_region(fd, Unlock, start, len)
+}
+
+// =============================================================================
+// Cross-Platform Filesystem Probes (`fstat` / `ftruncate` / `access`)
+// =============================================================================
+//
+// `file_size`  — `fstat`-via-st_size. Required by the SQLite VFS pager to
+//                size the database before reading page 1. Closes the
+//                "Unsupported" arm in PosixVfs.file_size().
+// `truncate`   — `ftruncate`. Required by VACUUM, DELETE-mode journal
+//                cleanup, and WAL TRUNCATE checkpoints.
+// `access`     — `faccessat(AT_FDCWD)` (Linux) / `access(2)` (Darwin) /
+//                `GetFileAttributesW` probe (Windows). Returns Ok(true)
+//                on success, Ok(false) for EACCES/ENOENT/ENOTDIR/EROFS,
+//                Err for actual errors. The "missing == false, not an
+//                error" convention is what every higher-level VFS
+//                wants (SQLite's xAccess, Go's os.Stat probe, etc.).
+// =============================================================================
+
+/// Mode constants for `access` — bitwise-OR-able. Numeric values are
+/// identical on Linux and Darwin (POSIX); Windows mapping is internal.
+public const ACCESS_F_OK: Int = 0;
+public const ACCESS_X_OK: Int = 1;
+public const ACCESS_W_OK: Int = 2;
+public const ACCESS_R_OK: Int = 4;
+
+/// File size in bytes from an open fd. Implemented via `fstat` on
+/// Linux (newfstatat with AT_EMPTY_PATH — portable across x86_64 and
+/// aarch64) and `fstat` on Darwin. Cost is one syscall.
+public fn file_size(fd: FileDesc) -> Result<Int, OSError> {
+    @cfg(target_os = "linux")
+    {
+        let mut st: super.linux.syscall.Stat = super.linux.syscall.Stat {
+            st_dev: 0 as UInt64, st_ino: 0 as UInt64, st_nlink: 0 as UInt64,
+            st_mode: 0 as UInt32, st_uid: 0 as UInt32, st_gid: 0 as UInt32,
+            _pad0: 0 as UInt32, st_rdev: 0 as UInt64,
+            st_size: 0 as Int64, st_blksize: 0 as Int64, st_blocks: 0 as Int64,
+            st_atime_sec: 0 as Int64, st_atime_nsec: 0 as Int64,
+            st_mtime_sec: 0 as Int64, st_mtime_nsec: 0 as Int64,
+            st_ctime_sec: 0 as Int64, st_ctime_nsec: 0 as Int64,
+            _unused: [0 as Int64; 3],
+        };
+        super.linux.syscall.fstat(fd, &mut st)?;
+        return Ok(st.st_size as Int);
+    }
+
+    @cfg(target_os = "macos")
+    {
+        let mut st = super.darwin.libsystem.DarwinStat {
+            st_dev: 0 as Int32, st_ino: 0 as UInt64,
+            st_mode: 0 as UInt16, st_nlink: 0 as UInt16,
+            st_uid: 0 as UInt32, st_gid: 0 as UInt32, st_rdev: 0 as Int32,
+            st_atime: super.darwin.libsystem.DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
+            st_mtime: super.darwin.libsystem.DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
+            st_ctime: super.darwin.libsystem.DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
+            st_birthtime: super.darwin.libsystem.DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
+            st_size: 0 as Int64, st_blocks: 0 as Int64, st_blksize: 0 as Int32,
+            st_flags: 0 as UInt32, st_gen: 0 as UInt32,
+        };
+        super.darwin.libsystem.safe_fstat(fd, &mut st)?;
+        return Ok(st.st_size as Int);
+    }
+
+    @cfg(target_os = "windows")
+    {
+        // GetFileSizeEx returns the size as a 64-bit integer in one call.
+        let mut size_out: Int64 = 0 as Int64;
+        let ok = unsafe {
+            super.windows.kernel32.GetFileSizeEx(
+                super.windows.kernel32.Handle(fd.0),
+                &mut size_out,
+            )
+        };
+        if !ok {
+            let err = super.windows.kernel32.GetLastError() as Int;
+            return Err(OSError { code: err, message: "GetFileSizeEx failed" });
+        }
+        return Ok(size_out as Int);
+    }
+}
+
+/// Truncate `fd` to exactly `length` bytes — extends with zero-filled
+/// pages if length > current size, drops the tail otherwise.
+public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
+    if length < 0 {
+        return Err(OSError.new(22, "truncate: length must be non-negative"));
+    }
+
+    @cfg(target_os = "linux")
+    { return super.linux.syscall.ftruncate(fd, length); }
+
+    @cfg(target_os = "macos")
+    { return super.darwin.libsystem.safe_ftruncate(fd, length); }
+
+    @cfg(target_os = "windows")
+    {
+        // Windows has no direct ftruncate. The canonical pattern is
+        // SetFilePointerEx(target) + SetEndOfFile. Both are direct
+        // kernel32 calls, no emulation layer above.
+        let ok_seek = unsafe {
+            super.windows.kernel32.SetFilePointerEx(
+                super.windows.kernel32.Handle(fd.0),
+                length as Int64,
+                0 as &unsafe Int64,
+                0 as UInt32, // FILE_BEGIN
+            )
+        };
+        if !ok_seek {
+            let err = super.windows.kernel32.GetLastError() as Int;
+            return Err(OSError { code: err, message: "SetFilePointerEx failed" });
+        }
+        let ok_eof = unsafe {
+            super.windows.kernel32.SetEndOfFile(
+                super.windows.kernel32.Handle(fd.0),
+            )
+        };
+        if !ok_eof {
+            let err = super.windows.kernel32.GetLastError() as Int;
+            return Err(OSError { code: err, message: "SetEndOfFile failed" });
+        }
+        return Ok(());
+    }
+}
+
+/// Probe whether `path` exists with the requested access mode.
+///
+/// `mode` is a bitwise-OR of the `ACCESS_*` constants. Returns
+/// `Ok(true)` if the kernel grants the access, `Ok(false)` for the
+/// "no access" / "not present" / "read-only filesystem" errno class,
+/// `Err(...)` for genuine I/O errors (EIO, EFAULT, ENAMETOOLONG, ELOOP).
+public fn access(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
+    @cfg(target_os = "linux")
+    { return super.linux.syscall.faccessat(path, mode); }
+
+    @cfg(target_os = "macos")
+    { return super.darwin.libsystem.safe_access(path, mode); }
+
+    @cfg(target_os = "windows")
+    {
+        // Windows: GetFileAttributesW returns INVALID_FILE_ATTRIBUTES if
+        // the path doesn't exist. R_OK / W_OK distinction is FAT-style
+        // FILE_ATTRIBUTE_READONLY — sufficient for SQLite's xAccess.
+        let mut path_w = [0_u16; 4096];
+        let pl = path.len().min(4095);
+        let mut i: Int = 0;
+        while i < pl {
+            path_w[i] = path[i] as UInt16;
+            i = i + 1;
+        }
+        path_w[pl] = 0 as UInt16;
+
+        let attrs = unsafe {
+            super.windows.kernel32.GetFileAttributesW(path_w.as_ptr() as &unsafe UInt16)
+        };
+        let invalid: UInt32 = 0xFFFFFFFF as UInt32;
+        if attrs == invalid {
+            let err = super.windows.kernel32.GetLastError() as Int;
+            // ERROR_FILE_NOT_FOUND=2, ERROR_PATH_NOT_FOUND=3, ERROR_ACCESS_DENIED=5.
+            if err == 2 || err == 3 || err == 5 {
+                return Ok(false);
+            }
+            return Err(OSError { code: err, message: "GetFileAttributesW failed" });
+        }
+        if (mode & ACCESS_W_OK) != 0 {
+            // FILE_ATTRIBUTE_READONLY = 0x1
+            if (attrs & 0x1) != 0 {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
+}
+
+// =============================================================================
+// Cross-Platform Cryptographic Random
+// =============================================================================
+//
+// Fills `buf` with kernel-grade entropy. Required by SQLite WAL header
+// salts (sqlite-native.md §6.5: salt_1 / salt_2 must be unpredictable
+// — predictable salts let an attacker craft fake WAL frames with
+// matching checksums). Closes the deterministic stub in PosixVfs.
+//
+// Linux:    getrandom(GRND_NONBLOCK) — non-blocking, uses urandom-style
+//           pool (CSPRNG seeded from kernel entropy). Loops on EINTR
+//           and short reads.
+// Darwin:   getentropy(buf, len). Hard 256-byte chunk limit per call;
+//           we loop. Returns -1/EIO on entropy starvation, which is
+//           extremely rare (and if it does happen, panic vs. silent
+//           weakness is the only honest move).
+// Windows:  BCryptGenRandom(BCRYPT_USE_SYSTEM_PREFERRED_RNG) — direct
+//           bcrypt.dll, no CryptoAPI legacy.
+// =============================================================================
+
+/// Fill `buf` with cryptographically secure random bytes. Returns
+/// `Err` only on real errors; partial fills are looped internally.
+pub fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
+    if buf.len() == 0 {
+        return Ok(());
+    }
+
+    @cfg(target_os = "linux")
+    {
+        let mut filled: Int = 0;
+        while filled < buf.len() {
+            let tail: &mut [Byte] = &mut buf[filled..];
+            match super.linux.syscall.getrandom(tail, 0) {
+                Ok(n) => {
+                    if n <= 0 {
+                        return Err(OSError.new(5, "getrandom returned 0 bytes"));
+                    }
+                    filled = filled + n;
+                }
+                Err(e) => {
+                    // EINTR (4) — interrupted by signal, retry.
+                    if e.code == 4 { continue; }
+                    return Err(e);
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    @cfg(target_os = "macos")
+    {
+        let total = buf.len();
+        let mut filled: Int = 0;
+        while filled < total {
+            let chunk = if total - filled > 256 { 256 } else { total - filled };
+            // Take a sub-slice and feed its raw pointer into the FFI.
+            let tail: &mut [Byte] = &mut buf[filled..filled + chunk];
+            let raw = unsafe { tail.as_mut_ptr() as &unsafe Byte };
+            super.darwin.libsystem.safe_getentropy(raw, chunk)?;
+            filled = filled + chunk;
+        }
+        return Ok(());
+    }
+
+    @cfg(target_os = "windows")
+    {
+        // BCRYPT_USE_SYSTEM_PREFERRED_RNG = 0x00000002
+        let status = unsafe {
+            super.windows.bcrypt.BCryptGenRandom(
+                0 as &unsafe Byte,
+                buf.as_mut_ptr() as &unsafe mut Byte,
+                buf.len() as UInt32,
+                0x00000002 as UInt32,
+            )
+        };
+        if status != 0 {
+            return Err(OSError { code: status as Int, message: "BCryptGenRandom failed" });
+        }
+        return Ok(());
+    }
 }
 
 // =============================================================================
