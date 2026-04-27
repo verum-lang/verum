@@ -151,6 +151,14 @@ public mount .heap.{
     PAGE_HEADER_SIZE, DIRECT_LOOKUP_SIZE,
 };
 
+/// Read-only introspection surface for CBGR-managed allocations.
+/// Used by panic post-mortem dumps, runtime monitoring, and (eventually)
+/// live debugger / observer integrations.  See `mem/diagnostics.vr` for
+/// the design rationale and memory-ordering contract.
+public mount .diagnostics.{
+    HeaderView, header_view_of,
+};
+
 // =============================================================================
 // Constants
 // =============================================================================
