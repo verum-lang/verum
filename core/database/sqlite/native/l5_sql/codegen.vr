@@ -104,6 +104,17 @@ public type CgState is {
     limit_offset_reg: Int,  // -1 → no OFFSET clause
     limit_skip_reg: Int,    // rows seen so far in the offset-skip phase
     limit_patches: List<Int>,
+
+    // Compound-SELECT capture redirect. When non-negative, every
+    // `emit_result_row` call writes the row into the ephemeral cursor
+    // identified by `capture_cid` (via NewRowid + Insert) instead of
+    // emitting `ResultRow`. Used by `emit_union` / `emit_intersect`
+    // / `emit_except` to materialise both sides of a compound SELECT
+    // without inventing a new "subplan" emit path.
+    //
+    // Set to -1 in the default state; the compound emitters save and
+    // restore around each side's `emit_plan` recursion.
+    capture_cid: Int,
 };
 
 fn cg_state_new(sql: Text) -> CgState {
@@ -117,7 +128,32 @@ fn cg_state_new(sql: Text) -> CgState {
         limit_offset_reg: -1,
         limit_skip_reg: -1,
         limit_patches: List.new(),
+        capture_cid: -1,
     }
+}
+
+// -----------------------------------------------------------------------------
+// emit_result_row — single point that lowers "row out" to either a
+// `ResultRow` (caller surface) or a capture-redirect Insert (compound
+// SELECT subplan materialisation). All 11 historical `ResultRow` emit
+// sites now route through here.
+// -----------------------------------------------------------------------------
+
+fn emit_result_row(st: &mut CgState, start: Int, n: Int) {
+    // Cache `capture_cid` into a local so the following
+    // `st.program.emit(...)` calls don't co-borrow `st` with another
+    // field access (Verum's affine field-move rules forbid that).
+    let cid = st.capture_cid;
+    if cid < 0 {
+        let _ = st.program.emit(ResultRow(start, n));
+        return;
+    }
+    // Compound capture mode — write the n registers starting at
+    // `start` into the ephemeral cursor as one row. Same shape as
+    // the existing PnDistinct / PnValues materialisation paths.
+    let key_reg = st.regs.alloc();
+    let _ = st.program.emit(NewRowid(cid, key_reg));
+    let _ = st.program.emit(Insert(cid, start, key_reg, 0));
 }
 
 /// Seal the state — bake the final register count into the program
@@ -172,6 +208,9 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnNestedLoopJoin(_, _, _, _, _, _, _, _) =>
             Err(unsupported("bare nested-loop join needs a Project wrapper in v1".clone())),
         PnUnionAll(ref lhs, ref rhs) => emit_union_all(st, lhs, rhs),
+        PnUnion(ref lhs, ref rhs, n_proj) => emit_union(st, lhs, rhs, n_proj),
+        PnIntersect(ref lhs, ref rhs, n_proj) => emit_intersect(st, lhs, rhs, n_proj),
+        PnExcept(ref lhs, ref rhs, n_proj) => emit_except(st, lhs, rhs, n_proj),
         PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
         PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
         PnDelete(ref t, cid, ref pred) => emit_delete(st, t, cid, pred),
@@ -206,7 +245,7 @@ fn emit_values(st: &mut CgState, rows: &List<List<Expr>>, col_count: Int) -> Res
             j = j + 1;
         }
         let gp = emit_limit_body_prefix(st);
-        let _ = st.program.emit(ResultRow(start, row.len()));
+        emit_result_row(st, start, row.len());
         emit_limit_body_counter(st, gp);
         i = i + 1;
     }
@@ -348,7 +387,7 @@ fn emit_scan_with_project(
         i = i + 1;
     }
     let gp = emit_limit_body_prefix(st);
-    let _ = st.program.emit(ResultRow(proj_start, project_cols.len()));
+    emit_result_row(st, proj_start, project_cols.len());
     emit_limit_body_counter(st, gp);
     let _ = st.program.emit(Next(cursor_id, loop_top));
 
@@ -393,7 +432,7 @@ fn emit_scan_with_filter_project(
         i = i + 1;
     }
     let gp = emit_limit_body_prefix(st);
-    let _ = st.program.emit(ResultRow(proj_start, project_cols.len()));
+    emit_result_row(st, proj_start, project_cols.len());
     emit_limit_body_counter(st, gp);
 
     let after_body = st.program.instruction_count();
@@ -422,6 +461,275 @@ fn emit_union_all(
         Ok(_)  => {}, Err(e) => { return Err(e); }
     }
     emit_plan(st, rhs)
+}
+
+// -----------------------------------------------------------------------------
+// UNION / INTERSECT / EXCEPT — compound SELECTs with set semantics.
+//
+// All three share the same materialise-then-walk skeleton:
+//   1. Open ephemeral cursor sid.
+//   2. Set st.capture_cid = sid so each child's `emit_result_row` writes
+//      into the ephemeral instead of `ResultRow`.
+//   3. emit_plan(child) — child's pipeline runs normally; capture mode
+//      reroutes the row out.
+//   4. Restore capture_cid, sort + dedup the ephemeral, walk it,
+//      emitting `ResultRow` for each cell.
+//
+// UNION uses a single ephemeral that both sides write into, then a
+// single sort+dedup. INTERSECT / EXCEPT use two ephemerals (one per
+// side), sort+dedup both, then merge-walk producing rows that satisfy
+// the set predicate.
+// -----------------------------------------------------------------------------
+
+// Materialise a child plan into an ephemeral cursor by toggling
+// capture mode around `emit_plan`.  Restores the prior capture_cid on
+// success or failure so nested compound SELECTs nest correctly.
+fn emit_subplan_to_capture(
+    st: &mut CgState,
+    child: &PlanNode,
+    sid: Int,
+) -> Result<(), CodegenError> {
+    let prev = st.capture_cid;
+    st.capture_cid = sid;
+    let r = emit_plan(st, child);
+    st.capture_cid = prev;
+    r
+}
+
+// Walk an ephemeral cursor `sid` (sorted+deduped) emitting one
+// `ResultRow` per row.  Used by all three compound emitters as the
+// shared "drain to user" tail.
+//
+// Honours the active LIMIT scope so that an outer PnLimit wrapping
+// the compound result correctly bounds emission.
+fn emit_ephemeral_drain(st: &mut CgState, sid: Int, n_proj: Int) {
+    let rewind_idx = st.program.emit(Rewind(sid, 0));
+    let loop_top = st.program.instruction_count();
+    let dst = st.regs.alloc_n(n_proj);
+    let mut k: Int = 0;
+    while k < n_proj {
+        let _ = st.program.emit(Column(sid, k, dst + k));
+        k = k + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, dst, n_proj);
+    emit_limit_body_counter(st, gp);
+    let _ = st.program.emit(Next(sid, loop_top));
+    let after = st.program.instruction_count();
+    st.program.replace(rewind_idx, Rewind(sid, after));
+    emit_limit_finalize_patches(st, after);
+    let _ = st.program.emit(Close(sid));
+}
+
+fn emit_union(
+    st: &mut CgState,
+    lhs: &PlanNode,
+    rhs: &PlanNode,
+    n_proj: Int,
+) -> Result<(), CodegenError> {
+    if n_proj <= 0 {
+        return Err(unsupported(
+            "UNION requires both sides to project at least one column".clone()
+        ));
+    }
+    // Single ephemeral: both sides write into the same store, then a
+    // single sort+dedup yields the distinct union.
+    let sid = st.program.declare_cursor(CkTable, 0, n_proj);
+    let _ = st.program.emit(OpenEphemeral(sid, n_proj));
+
+    match emit_subplan_to_capture(st, lhs, sid) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    match emit_subplan_to_capture(st, rhs, sid) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+
+    let _ = st.program.emit(SortRowStore(sid, n_proj, 0));
+    let _ = st.program.emit(DedupRowStore(sid, n_proj));
+    emit_ephemeral_drain(st, sid, n_proj);
+    Ok(())
+}
+
+// Removed: emit_b_membership_scan / _v2 prototypes.  The inlined
+// inner-scan logic in emit_intersect / emit_except subsumes both.
+//
+// Shared scaffold: materialise both sides of a set-binary compound
+// op into separate ephemerals (A from L, B from R); A is sorted+
+// deduped (the output is always distinct), B is left as-is (it's
+// only used for membership tests).  Returns (a_cid, b_cid).
+fn emit_set_compound_materialize(
+    st: &mut CgState,
+    lhs: &PlanNode,
+    rhs: &PlanNode,
+    n_proj: Int,
+) -> Result<(Int, Int), CodegenError> {
+    let a_cid = st.program.declare_cursor(CkTable, 0, n_proj);
+    let _ = st.program.emit(OpenEphemeral(a_cid, n_proj));
+    match emit_subplan_to_capture(st, lhs, a_cid) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    let _ = st.program.emit(SortRowStore(a_cid, n_proj, 0));
+    let _ = st.program.emit(DedupRowStore(a_cid, n_proj));
+
+    let b_cid = st.program.declare_cursor(CkTable, 0, n_proj);
+    let _ = st.program.emit(OpenEphemeral(b_cid, n_proj));
+    match emit_subplan_to_capture(st, rhs, b_cid) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    Ok((a_cid, b_cid))
+}
+
+fn emit_intersect(
+    st: &mut CgState,
+    lhs: &PlanNode,
+    rhs: &PlanNode,
+    n_proj: Int,
+) -> Result<(), CodegenError> {
+    if n_proj <= 0 {
+        return Err(unsupported(
+            "INTERSECT requires both sides to project at least one column".clone()
+        ));
+    }
+    let (a_cid, b_cid) = match emit_set_compound_materialize(st, lhs, rhs, n_proj) {
+        Ok(p)  => p, Err(e) => { return Err(e); }
+    };
+
+    // Outer loop A: for each row a, scan B for membership; emit a if
+    // found, skip otherwise.
+    let outer_rewind = st.program.emit(Rewind(a_cid, 0));
+    let outer_top = st.program.instruction_count();
+
+    // Inner B-scan (forward-references match_label and no_match).
+    let rewind_b = st.program.emit(Rewind(b_cid, 0));
+    let inner_top = st.program.instruction_count();
+    let mut nes: List<(Int, Int, Int)> = List.new();
+    let mut i: Int = 0;
+    while i < n_proj {
+        let ra = st.regs.alloc();
+        let rb = st.regs.alloc();
+        let _ = st.program.emit(Column(a_cid, i, ra));
+        let _ = st.program.emit(Column(b_cid, i, rb));
+        let p = st.program.emit(Ne(ra, rb, 0));
+        nes.push((p, ra, rb));
+        i = i + 1;
+    }
+    let match_goto = st.program.emit(Goto(0));   // patched to match_label
+    let next_b_label = st.program.instruction_count();
+    let _ = st.program.emit(Next(b_cid, inner_top));
+    // Fall-through past the inner loop = no match found in B.
+    // For INTERSECT: skip emit, advance A.
+    let no_match_label = st.program.instruction_count();
+    let _ = st.program.emit(Next(a_cid, outer_top));
+    let after_no_match = st.program.instruction_count();
+    let _ = after_no_match;
+    let _ = st.program.emit(Goto(0));            // patched to end_label (after-A-exhaust path)
+
+    // Match path: emit A.curr, advance A.
+    let match_label = st.program.instruction_count();
+    let dst = st.regs.alloc_n(n_proj);
+    let mut k: Int = 0;
+    while k < n_proj {
+        let _ = st.program.emit(Column(a_cid, k, dst + k));
+        k = k + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, dst, n_proj);
+    emit_limit_body_counter(st, gp);
+    let _ = st.program.emit(Next(a_cid, outer_top));
+    let _ = st.program.emit(Goto(0));            // patched to end_label
+
+    let end_label = st.program.instruction_count();
+
+    // Backpatches.
+    st.program.replace(outer_rewind, Rewind(a_cid, end_label));
+    st.program.replace(rewind_b, Rewind(b_cid, no_match_label));
+    st.program.replace(match_goto, Goto(match_label));
+    let mut p: Int = 0;
+    while p < nes.len() {
+        let triple = nes[p];
+        let (pos, ra, rb) = triple;
+        st.program.replace(pos, Ne(ra, rb, next_b_label));
+        p = p + 1;
+    }
+
+    emit_limit_finalize_patches(st, end_label);
+    let _ = st.program.emit(Close(a_cid));
+    let _ = st.program.emit(Close(b_cid));
+    Ok(())
+}
+
+fn emit_except(
+    st: &mut CgState,
+    lhs: &PlanNode,
+    rhs: &PlanNode,
+    n_proj: Int,
+) -> Result<(), CodegenError> {
+    if n_proj <= 0 {
+        return Err(unsupported(
+            "EXCEPT requires both sides to project at least one column".clone()
+        ));
+    }
+    let (a_cid, b_cid) = match emit_set_compound_materialize(st, lhs, rhs, n_proj) {
+        Ok(p)  => p, Err(e) => { return Err(e); }
+    };
+
+    // Outer loop A: for each row a, scan B; SKIP a if a found in B,
+    // otherwise EMIT a.  (Inverse of INTERSECT.)
+    let outer_rewind = st.program.emit(Rewind(a_cid, 0));
+    let outer_top = st.program.instruction_count();
+
+    let rewind_b = st.program.emit(Rewind(b_cid, 0));
+    let inner_top = st.program.instruction_count();
+    let mut nes: List<(Int, Int, Int)> = List.new();
+    let mut i: Int = 0;
+    while i < n_proj {
+        let ra = st.regs.alloc();
+        let rb = st.regs.alloc();
+        let _ = st.program.emit(Column(a_cid, i, ra));
+        let _ = st.program.emit(Column(b_cid, i, rb));
+        let p = st.program.emit(Ne(ra, rb, 0));
+        nes.push((p, ra, rb));
+        i = i + 1;
+    }
+    let match_goto = st.program.emit(Goto(0));
+    let next_b_label = st.program.instruction_count();
+    let _ = st.program.emit(Next(b_cid, inner_top));
+    // Fall-through = no match found in B.  For EXCEPT: emit a.
+    let no_match_label = st.program.instruction_count();
+    let dst = st.regs.alloc_n(n_proj);
+    let mut k: Int = 0;
+    while k < n_proj {
+        let _ = st.program.emit(Column(a_cid, k, dst + k));
+        k = k + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, dst, n_proj);
+    emit_limit_body_counter(st, gp);
+    let _ = st.program.emit(Next(a_cid, outer_top));
+    let _ = st.program.emit(Goto(0));            // patched to end_label
+
+    // Match path: skip a, advance A.
+    let match_label = st.program.instruction_count();
+    let _ = st.program.emit(Next(a_cid, outer_top));
+    let _ = st.program.emit(Goto(0));            // patched to end_label
+
+    let end_label = st.program.instruction_count();
+
+    st.program.replace(outer_rewind, Rewind(a_cid, end_label));
+    st.program.replace(rewind_b, Rewind(b_cid, no_match_label));
+    st.program.replace(match_goto, Goto(match_label));
+    let mut p: Int = 0;
+    while p < nes.len() {
+        let triple = nes[p];
+        let (pos, ra, rb) = triple;
+        st.program.replace(pos, Ne(ra, rb, next_b_label));
+        p = p + 1;
+    }
+
+    emit_limit_finalize_patches(st, end_label);
+    let _ = st.program.emit(Close(a_cid));
+    let _ = st.program.emit(Close(b_cid));
+    Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -525,7 +833,7 @@ fn emit_join_with_project(
         i = i + 1;
     }
     let gp = emit_limit_body_prefix(st);
-    let _ = st.program.emit(ResultRow(proj_start, n_proj));
+    emit_result_row(st, proj_start, n_proj);
     emit_limit_body_counter(st, gp);
 
     // inner_next — after the row body (or where-skip).
@@ -560,7 +868,7 @@ fn emit_join_with_project(
             k = k + 1;
         }
         let gp2 = emit_limit_body_prefix(st);
-        let _ = st.program.emit(ResultRow(nproj_start2, n_proj));
+        emit_result_row(st, nproj_start2, n_proj);
         emit_limit_body_counter(st, gp2);
         let after_nullrow = st.program.instruction_count();
         st.program.replace(outer_next_patch, If(matched_flag, after_nullrow));
@@ -763,7 +1071,7 @@ fn emit_aggregate_scan(
     }
 
     // Emit exactly one result row.
-    let _ = st.program.emit(ResultRow(acc_start, n_proj));
+    emit_result_row(st, acc_start, n_proj);
     Ok(())
 }
 
@@ -1139,7 +1447,7 @@ fn emit_group_by(
     // Project out_start from prev_group_keys + acc_start (finalized).
     emit_group_project(st, out_start, n_proj, &proj_kind, &agg_kind_for_slot, prev_key_start, acc_start);
     let gp = emit_limit_body_prefix(st);
-    let _ = st.program.emit(ResultRow(out_start, n_proj));
+    emit_result_row(st, out_start, n_proj);
     emit_limit_body_counter(st, gp);
     if having_skip_patch >= 0 {
         let tgt = st.program.instruction_count();
@@ -1207,7 +1515,7 @@ fn emit_group_by(
     }
     emit_group_project(st, out_start, n_proj, &proj_kind, &agg_kind_for_slot, prev_key_start, acc_start);
     let gp_final = emit_limit_body_prefix(st);
-    let _ = st.program.emit(ResultRow(out_start, n_proj));
+    emit_result_row(st, out_start, n_proj);
     emit_limit_body_counter(st, gp_final);
     if final_having_skip >= 0 {
         let tgt = st.program.instruction_count();
@@ -1453,7 +1761,7 @@ fn emit_distinct_pipeline(
         ek = ek + 1;
     }
     let gp = emit_limit_body_prefix(st);
-    let _ = st.program.emit(ResultRow(dst, n_proj));
+    emit_result_row(st, dst, n_proj);
     emit_limit_body_counter(st, gp);
     let _ = st.program.emit(Next(sid, emit_loop_top));
     let after_emit = st.program.instruction_count();
@@ -1596,7 +1904,7 @@ fn emit_sort_pipeline(
         ek = ek + 1;
     }
     let gp = emit_limit_body_prefix(st);
-    let _ = st.program.emit(ResultRow(proj_dst_start, n_proj));
+    emit_result_row(st, proj_dst_start, n_proj);
     emit_limit_body_counter(st, gp);
     let _ = st.program.emit(Next(sid, emit_loop_top));
     let after_emit = st.program.instruction_count();
@@ -1637,7 +1945,7 @@ fn emit_filter(
                 }
                 let skip_idx = st.program.emit(IfNot(pred_reg, 0));
                 let gp = emit_limit_body_prefix(st);
-                let _ = st.program.emit(ResultRow(start, row.len()));
+                emit_result_row(st, start, row.len());
                 emit_limit_body_counter(st, gp);
                 let after_idx = st.program.instruction_count();
                 st.program.replace(skip_idx, IfNot(pred_reg, after_idx));
