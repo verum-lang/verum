@@ -583,7 +583,7 @@ implement TextFormatter {
         let mut i: Int = 63;
         while mag > (0 as UInt64) {
             let digit = (mag % base_u) as Int;
-            buf[i] = digits.nth_char(digit).unwrap() as Byte;
+            buf[i] = digits.nth_char(digit).expect("write_int_base: digit < base ≤ digits.len() guaranteed by caller (currently bases 2..=16)") as Byte;
             mag = mag / base_u;
             i = i - 1;
         }
