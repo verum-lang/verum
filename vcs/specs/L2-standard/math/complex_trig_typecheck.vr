@@ -1,0 +1,157 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: math, complex, trig, hyperbolic, csin, ccos, csinh, ccosh
+// @timeout: 10000
+// @expect: pass
+//
+// V8 (#250) — Complex<Float> trig + hyperbolic.
+//
+// Pre-#250 Complex<Float> shipped cexp/cln/cpow/csqrt + arithmetic
+// but had no trig (csin/ccos/ctan), no hyperbolic (csinh/ccosh/
+// ctanh), and no axis-relation predicates (is_real / is_imaginary).
+// This spec pins the V1 contract:
+//   • csin² + ccos² = 1 (Pythagorean identity over ℂ).
+//   • ccosh² − csinh² = 1 (hyperbolic Pythagorean over ℂ).
+//   • csin / ccos / csinh / ccosh agree with the real-axis
+//     functions when im = 0.
+//   • is_real / is_imaginary axis-membership checks.
+
+mount core.math.complex.{Complex};
+mount core.math.elementary.{sin, cos, sinh, cosh, abs};
+
+fn approx_eq(a: Float, b: Float, eps: Float) -> Bool {
+    abs(a - b) < eps
+}
+
+fn complex_approx_eq(a: Complex<Float>, b: Complex<Float>, eps: Float) -> Bool {
+    approx_eq(a.re, b.re, eps) && approx_eq(a.im, b.im, eps)
+}
+
+fn exercise_axis_predicates() {
+    let real_z = Complex.new(3.0, 0.0);
+    let imag_z = Complex.new(0.0, 4.0);
+    let mixed = Complex.new(1.0, 2.0);
+
+    assert(real_z.is_real());
+    assert(!real_z.is_imaginary());
+
+    assert(imag_z.is_imaginary());
+    assert(!imag_z.is_real());
+
+    assert(!mixed.is_real());
+    assert(!mixed.is_imaginary());
+}
+
+fn exercise_csin_real_axis_matches_real_sin() {
+    // csin(x + 0i) = sin(x) + 0i (real-axis specialisation).
+    let xs = [0.0, 0.5, 1.0, 2.0, -1.5];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        let z = Complex.new(x, 0.0);
+        let cs = z.csin();
+        assert(approx_eq(cs.re, sin(x), 1.0e-10));
+        assert(approx_eq(cs.im, 0.0, 1.0e-10));
+        i = i + 1;
+    }
+}
+
+fn exercise_ccos_real_axis_matches_real_cos() {
+    let xs = [0.0, 0.5, 1.0, 2.0];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        let z = Complex.new(x, 0.0);
+        let cc = z.ccos();
+        assert(approx_eq(cc.re, cos(x), 1.0e-10));
+        assert(approx_eq(cc.im, 0.0, 1.0e-10));
+        i = i + 1;
+    }
+}
+
+fn exercise_csinh_real_axis_matches_real_sinh() {
+    let xs = [0.0, 0.5, 1.0, -1.0];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        let z = Complex.new(x, 0.0);
+        let cs = z.csinh();
+        assert(approx_eq(cs.re, sinh(x), 1.0e-10));
+        assert(approx_eq(cs.im, 0.0, 1.0e-10));
+        i = i + 1;
+    }
+}
+
+fn exercise_ccosh_real_axis_matches_real_cosh() {
+    let xs = [0.0, 0.5, 1.0, -1.0];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        let z = Complex.new(x, 0.0);
+        let cc = z.ccosh();
+        assert(approx_eq(cc.re, cosh(x), 1.0e-10));
+        assert(approx_eq(cc.im, 0.0, 1.0e-10));
+        i = i + 1;
+    }
+}
+
+fn exercise_complex_pythagorean_identity() {
+    // csin²(z) + ccos²(z) = 1 for any complex z.
+    let zs = [
+        Complex.new(0.0, 0.0),
+        Complex.new(1.0, 0.0),
+        Complex.new(0.0, 1.0),
+        Complex.new(0.5, 0.5),
+        Complex.new(2.0, -1.0),
+    ];
+    let one = Complex.new(1.0, 0.0);
+    let mut i: Int = 0;
+    while i < zs.len() {
+        let z = zs[i];
+        let s = z.csin();
+        let c = z.ccos();
+        let total = s.clone() * s + c.clone() * c;
+        assert(complex_approx_eq(total, one, 1.0e-9));
+        i = i + 1;
+    }
+}
+
+fn exercise_hyperbolic_pythagorean_identity() {
+    // ccosh²(z) − csinh²(z) = 1 for any complex z.
+    let zs = [
+        Complex.new(0.0, 0.0),
+        Complex.new(1.0, 0.0),
+        Complex.new(0.0, 1.0),
+        Complex.new(0.5, 0.7),
+    ];
+    let one = Complex.new(1.0, 0.0);
+    let mut i: Int = 0;
+    while i < zs.len() {
+        let z = zs[i];
+        let sh = z.csinh();
+        let ch = z.ccosh();
+        let total = ch.clone() * ch - sh.clone() * sh;
+        assert(complex_approx_eq(total, one, 1.0e-9));
+        i = i + 1;
+    }
+}
+
+fn exercise_csin_pure_imaginary_is_imaginary() {
+    // csin(0 + iy) = 0 + i sinh(y) — purely imaginary result.
+    let z = Complex.new(0.0, 1.5);
+    let cs = z.csin();
+    assert(approx_eq(cs.re, 0.0, 1.0e-10));
+    assert(approx_eq(cs.im, sinh(1.5), 1.0e-10));
+}
+
+fn main() {
+    exercise_axis_predicates();
+    exercise_csin_real_axis_matches_real_sin();
+    exercise_ccos_real_axis_matches_real_cos();
+    exercise_csinh_real_axis_matches_real_sinh();
+    exercise_ccosh_real_axis_matches_real_cosh();
+    exercise_complex_pythagorean_identity();
+    exercise_hyperbolic_pythagorean_identity();
+    exercise_csin_pure_imaginary_is_imaginary();
+}
