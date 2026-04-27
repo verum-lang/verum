@@ -592,68 +592,40 @@ implement Text {
     }
 
     /// Check if contains substring.
+    /// Linear-time substring containment via KMP. Pre-fix: nested
+    /// O(n·m) byte search.
     public fn contains(&self, needle: &Text) -> Bool {
         let self_bytes = self.as_bytes();
         let needle_bytes = needle.as_bytes();
         let nlen = needle_bytes.len();
-        if nlen > self_bytes.len() {
-            return false;
-        }
         if nlen == 0 {
             return true;
         }
-        let end = self_bytes.len() - nlen + 1;
-        let mut i = 0;
-        while i < end {
-            let mut found = true;
-            let mut j = 0;
-            while j < nlen {
-                if self_bytes[i + j] != needle_bytes[j] {
-                    found = false;
-                    break;
-                }
-                j = j + 1;
-            }
-            if found {
-                return true;
-            }
-            i = i + 1;
+        if nlen > self_bytes.len() {
+            return false;
         }
-        false
+        let table = kmp_failure_table(needle_bytes);
+        kmp_find(self_bytes, needle_bytes, &table, 0) >= 0
     }
 
-    /// Find first occurrence of substring.
+    /// Find first occurrence of substring. Linear-time via KMP.
     public fn find(&self, needle: &Text) -> Maybe<Int> {
         let self_bytes = self.as_bytes();
         let needle_bytes = needle.as_bytes();
         let nlen = needle_bytes.len();
-
-        if nlen > self_bytes.len() {
-            return None;
-        }
-
         if nlen == 0 {
             return Some(0);
         }
-
-        let end = self_bytes.len() - nlen + 1;
-        let mut i = 0;
-        while i < end {
-            let mut found = true;
-            let mut j = 0;
-            while j < nlen {
-                if self_bytes[i + j] != needle_bytes[j] {
-                    found = false;
-                    break;
-                }
-                j = j + 1;
-            }
-            if found {
-                return Some(i);
-            }
-            i = i + 1;
+        if nlen > self_bytes.len() {
+            return None;
         }
-        None
+        let table = kmp_failure_table(needle_bytes);
+        let idx = kmp_find(self_bytes, needle_bytes, &table, 0);
+        if idx < 0 {
+            None
+        } else {
+            Some(idx)
+        }
     }
 
     /// Find last occurrence of substring.
@@ -972,6 +944,9 @@ implement Text {
     }
 
     /// Split by separator.
+    /// Split by separator. Linear-time via KMP — pre-fix the inner
+    /// search was O(n·m) per separator hit, so a 1MB log split on
+    /// "==" with 1k separators was 10^9+ byte comparisons.
     public fn split(&self, sep: &Text) -> List<Text> {
         let mut res = List.new();
         let bytes = self.as_bytes();
@@ -984,35 +959,16 @@ implement Text {
             return res;
         }
 
+        let table = kmp_failure_table(sep_bytes);
         let mut start = 0;
         while start <= blen {
-            // inline byte-level search for separator
-            let mut found_at = -1;
-            let search_end = blen - slen + 1;
-            let mut i = start;
-            while i < search_end {
-                let mut match_ok = true;
-                let mut j = 0;
-                while j < slen {
-                    if bytes[i + j] != sep_bytes[j] {
-                        match_ok = false;
-                        break;
-                    }
-                    j = j + 1;
-                }
-                if match_ok {
-                    found_at = i;
-                    break;
-                }
-                i = i + 1;
-            }
-            if found_at >= 0 {
-                res.push(self.slice(start, found_at));
-                start = found_at + slen;
-            } else {
+            let found_at = kmp_find(bytes, sep_bytes, &table, start);
+            if found_at < 0 {
                 res.push(self.slice(start, blen));
                 break;
             }
+            res.push(self.slice(start, found_at));
+            start = found_at + slen;
         }
 
         res
@@ -1810,24 +1766,32 @@ implement Text {
         self.to_lowercase() == other.to_lowercase()
     }
 
-    /// Count non-overlapping occurrences of pattern.
+    /// Count non-overlapping occurrences of pattern. Linear-time via
+    /// KMP. Pre-fix this allocated a fresh `Text.slice(start, end)`
+    /// on every iteration *and* then ran the (then-naive) `find`
+    /// inside it — O(n·m) at minimum, with O(n) extra allocations.
+    /// Now: one `kmp_failure_table` build, one in-place scan.
     public fn count_matches(&self, pattern: &Text) -> Int {
         if pattern.is_empty() {
             return self.char_count() + 1;
         }
+        let bytes = self.as_bytes();
+        let pat_bytes = pattern.as_bytes();
+        let plen = pat_bytes.len();
+        let blen = bytes.len();
+        if plen > blen {
+            return 0;
+        }
+        let table = kmp_failure_table(pat_bytes);
         let mut count = 0;
         let mut start = 0;
-        let bytes = self.as_bytes();
-        while start <= bytes.len() - pattern.len() {
-            match self.slice(start, bytes.len()).find(pattern) {
-                Some(offset) => {
-                    count = count + 1;
-                    start = start + offset + pattern.len();
-                }
-                None => {
-                    return count;
-                }
+        while start <= blen {
+            let found_at = kmp_find(bytes, pat_bytes, &table, start);
+            if found_at < 0 {
+                break;
             }
+            count = count + 1;
+            start = found_at + plen;
         }
         count
     }
