@@ -151,6 +151,16 @@ pub enum FrontmatterError {
     UnterminatedBlock { line: usize },
     InvalidToml { line: usize, source: String },
     NonCommentLineInBlock { line: usize, content: String },
+    /// `verum = "<spec>"` is not a valid semver requirement.
+    InvalidVerumRequirement { value: String, reason: String },
+    /// A `dependencies` short-form entry doesn't match `name(@version)?`
+    /// or the name is not a valid cog identifier.
+    InvalidDepShortForm { value: String, reason: String },
+    /// A `dependencies` long-form table entry has an empty / invalid `name`.
+    InvalidDepLongForm { name: String, reason: String },
+    /// A `permissions` scope string doesn't match the documented grammar.
+    /// `value` is the full scope string; `reason` explains the violation.
+    InvalidPermissionScope { value: String, reason: String },
 }
 
 impl std::fmt::Display for FrontmatterError {
@@ -167,11 +177,265 @@ impl std::fmt::Display for FrontmatterError {
                 f,
                 "frontmatter: line {line} inside block does not start with `//`: {content:?}",
             ),
+            Self::InvalidVerumRequirement { value, reason } => write!(
+                f,
+                "frontmatter: `verum = {value:?}` is not a valid semver requirement: {reason}",
+            ),
+            Self::InvalidDepShortForm { value, reason } => write!(
+                f,
+                "frontmatter: dependency entry {value:?} is not a valid `name(@version)?` form: {reason}",
+            ),
+            Self::InvalidDepLongForm { name, reason } => write!(
+                f,
+                "frontmatter: long-form dependency `{name}`: {reason}",
+            ),
+            Self::InvalidPermissionScope { value, reason } => write!(
+                f,
+                "frontmatter: permission scope {value:?} is invalid: {reason}",
+            ),
         }
     }
 }
 
 impl std::error::Error for FrontmatterError {}
+
+// =============================================================================
+// Schema validation
+// =============================================================================
+//
+// Beyond TOML well-formedness, the frontmatter contract pins a precise grammar
+// for each user-facing field. We validate after the TOML pass so individual
+// errors can pinpoint the offending value rather than fail the whole block on
+// the first malformed entry.
+
+/// Cog identifier grammar (matches `grammar/verum.ebnf` `identifier` for the
+/// kebab-or-snake-case subset used in registry / mount paths):
+///
+/// ```text
+/// cog_ident = ascii_alpha , { ascii_alpha | ascii_digit | "_" | "-" } ;
+/// ```
+///
+/// First character must be an ASCII letter (so `42json` is rejected); rest
+/// allow letters / digits / `_` / `-`. We deliberately stay ASCII to match
+/// crates.io / cargo / npm cog-name conventions; Unicode identifiers are
+/// fine inside Verum source but not in registry-targeted dep names where
+/// case-folding ambiguity would be a real bug.
+fn is_valid_cog_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    let first = match chars.next() {
+        Some(c) => c,
+        None => return false,
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Semver requirement validator. Accepts:
+///
+///  * Bare version    — `1.2.3`, `0.1.0-rc.1`
+///  * Operator + ver  — `>=0.6.0`, `^1.2`, `~2.3.4`, `<3`, `>1.0`, `=1.2.3`
+///  * Wildcard        — `1.*`, `1.2.*`, `*`
+///  * Comma list      — `>=1.2, <2`
+///
+/// The grammar is deliberately permissive (matches Cargo's `VersionReq`)
+/// because the PubGrub-side resolver (P4) does the load-bearing matching;
+/// we just refuse obvious typos here so a misspelled spec fails at parse
+/// time rather than at resolve time.
+fn validate_semver_req(spec: &str) -> Result<(), &'static str> {
+    let s = spec.trim();
+    if s.is_empty() {
+        return Err("empty spec");
+    }
+    // Each comma-separated clause is independently validated.
+    for clause in s.split(',') {
+        let clause = clause.trim();
+        if clause.is_empty() {
+            return Err("empty clause inside comma-separated requirement");
+        }
+        // Strip a leading operator if present.
+        let body = if let Some(rest) = clause.strip_prefix(">=") {
+            rest
+        } else if let Some(rest) = clause.strip_prefix("<=") {
+            rest
+        } else if let Some(rest) = clause.strip_prefix('>') {
+            rest
+        } else if let Some(rest) = clause.strip_prefix('<') {
+            rest
+        } else if let Some(rest) = clause.strip_prefix('^') {
+            rest
+        } else if let Some(rest) = clause.strip_prefix('~') {
+            rest
+        } else if let Some(rest) = clause.strip_prefix('=') {
+            rest
+        } else {
+            clause
+        };
+        let body = body.trim();
+        if body == "*" {
+            continue;
+        }
+        // Body must look like a numeric version: digits, dots, and the
+        // standard hyphenated pre-release / metadata tail (`-rc.1+sha.…`).
+        let core = body.split(['-', '+']).next().unwrap_or(body);
+        // Each dotted segment must be `*` or an ASCII numeric literal.
+        let mut saw_segment = false;
+        for seg in core.split('.') {
+            saw_segment = true;
+            if seg == "*" {
+                continue;
+            }
+            if seg.is_empty() || !seg.chars().all(|c| c.is_ascii_digit()) {
+                return Err("dotted segment must be digits or `*`");
+            }
+        }
+        if !saw_segment {
+            return Err("missing version core");
+        }
+    }
+    Ok(())
+}
+
+/// Validate a `dependencies` short-form entry of the form
+/// `name(@version)?`. Both the name and the optional version are checked
+/// against their respective grammars.
+fn validate_dep_short_form(spec: &str) -> Result<(), String> {
+    if spec.is_empty() {
+        return Err("empty dependency spec".to_string());
+    }
+    let (name, ver) = match spec.split_once('@') {
+        Some((n, v)) => (n, Some(v)),
+        None => (spec, None),
+    };
+    if !is_valid_cog_ident(name) {
+        return Err(format!(
+            "invalid cog name {name:?} (must start with an ASCII letter; \
+             chars allowed: letters, digits, `_`, `-`)"
+        ));
+    }
+    if let Some(v) = ver {
+        validate_semver_req(v).map_err(|r| format!("invalid version {v:?}: {r}"))?;
+    }
+    Ok(())
+}
+
+/// Permission scope grammar — must match the design's
+/// [run].default-permissions documentation exactly:
+///
+/// ```text
+/// scope     = scope_kind , [ "=" , scope_targets ]
+/// scope_kind = "fs:read" | "fs:write" | "net" | "env" | "run" | "ffi"
+///            | "time"    | "random"
+/// scope_targets = target , { "," , target }      (* non-empty, no whitespace *)
+/// target    = any non-comma, non-whitespace UTF-8 sequence
+/// ```
+///
+/// `time` and `random` are the only scopes that have no `=value` form;
+/// every other scope may stand alone (granting blanket access) or be
+/// narrowed via `=`-separated targets.
+fn validate_permission_scope(scope: &str) -> Result<(), String> {
+    const KINDS: &[&str] = &[
+        "fs:read", "fs:write", "net", "env", "run", "ffi", "time", "random",
+    ];
+    let s = scope.trim();
+    if s.is_empty() {
+        return Err("empty scope".to_string());
+    }
+    let (kind, targets) = match s.split_once('=') {
+        Some((k, t)) => (k.trim(), Some(t)),
+        None => (s, None),
+    };
+    if !KINDS.contains(&kind) {
+        return Err(format!(
+            "unknown scope kind {kind:?} (expected one of {KINDS:?})"
+        ));
+    }
+    if let Some(targets) = targets {
+        if targets.is_empty() {
+            return Err(format!("scope {kind:?} has empty target list after `=`"));
+        }
+        // `time` / `random` — no `=value` form per the grammar.
+        if matches!(kind, "time" | "random") {
+            return Err(format!(
+                "scope {kind:?} does not accept `=value` (it grants blanket access)"
+            ));
+        }
+        for t in targets.split(',') {
+            if t.is_empty() {
+                return Err(format!("scope {kind:?} has an empty target between commas"));
+            }
+            if t.chars().any(|c| c.is_whitespace()) {
+                return Err(format!(
+                    "scope target {t:?} contains whitespace; use commas to separate targets"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate a [`Frontmatter`]'s well-known fields against the documented
+/// grammar. Called after [`extract`]'s TOML parse; returns the *first*
+/// error encountered so the user can see one structured diagnostic at a
+/// time. Re-validating after a fix surfaces the next issue.
+pub fn validate(fm: &Frontmatter) -> Result<(), FrontmatterError> {
+    if let Some(spec) = &fm.verum {
+        validate_semver_req(spec).map_err(|reason| FrontmatterError::InvalidVerumRequirement {
+            value: spec.clone(),
+            reason: reason.to_string(),
+        })?;
+    }
+    for dep in &fm.dependencies {
+        match dep {
+            DepSpec::Short(s) => {
+                validate_dep_short_form(s).map_err(|reason| {
+                    FrontmatterError::InvalidDepShortForm {
+                        value: s.clone(),
+                        reason,
+                    }
+                })?;
+            }
+            DepSpec::Long(d) => {
+                if !is_valid_cog_ident(&d.name) {
+                    return Err(FrontmatterError::InvalidDepLongForm {
+                        name: d.name.clone(),
+                        reason: "name must be a valid cog identifier (ASCII letter + \
+                                 letters / digits / `_` / `-`)"
+                            .to_string(),
+                    });
+                }
+                if let Some(v) = &d.version {
+                    validate_semver_req(v).map_err(|reason| {
+                        FrontmatterError::InvalidDepLongForm {
+                            name: d.name.clone(),
+                            reason: format!("version {v:?}: {reason}"),
+                        }
+                    })?;
+                }
+            }
+        }
+    }
+    for perm in &fm.permissions {
+        validate_permission_scope(perm).map_err(|reason| {
+            FrontmatterError::InvalidPermissionScope {
+                value: perm.clone(),
+                reason,
+            }
+        })?;
+    }
+    if let Some(run) = &fm.run {
+        for perm in &run.default_permissions {
+            validate_permission_scope(perm).map_err(|reason| {
+                FrontmatterError::InvalidPermissionScope {
+                    value: perm.clone(),
+                    reason,
+                }
+            })?;
+        }
+    }
+    Ok(())
+}
 
 /// Locate the `// /// script` ... `// ///` block in `source`, parse the body
 /// as TOML, and return the structured `Frontmatter`. Returns `Ok(None)` if
@@ -511,6 +775,206 @@ print("hello");
     fn bom_with_no_block_returns_none() {
         let src = "\u{FEFF}fn main() {}";
         assert!(extract(src).unwrap().is_none());
+    }
+
+    // =========================================================================
+    // Schema validation (F20)
+    // =========================================================================
+
+    fn validated(src: &str) -> Result<Frontmatter, FrontmatterError> {
+        let e = extract(src).unwrap().expect("frontmatter must extract");
+        validate(&e.frontmatter)?;
+        Ok(e.frontmatter)
+    }
+
+    // --- semver req ---------------------------------------------------------
+
+    #[test]
+    fn validate_semver_accepts_canonical_forms() {
+        for spec in &[
+            "0.6.0", "1.2.3", "0.1.0-rc.1",
+            ">=0.6.0", "^1.2", "~2.3.4", "<3", ">1.0", "=1.2.3", "<=4.5",
+            "1.*", "1.2.*", "*",
+            ">=1.2, <2",
+        ] {
+            assert!(
+                validate_semver_req(spec).is_ok(),
+                "should accept {spec:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_semver_rejects_garbage() {
+        for spec in &["", "abc", ">=v1", "1.x.0", "..1", "1..", ">"] {
+            assert!(
+                validate_semver_req(spec).is_err(),
+                "should reject {spec:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_then_validate_invalid_verum() {
+        let src = "// /// script\n// verum = \"not-a-version\"\n// ///\n";
+        let err = validated(src).expect_err("expected validation error");
+        match err {
+            FrontmatterError::InvalidVerumRequirement { value, .. } => {
+                assert_eq!(value, "not-a-version");
+            }
+            other => panic!("expected InvalidVerumRequirement, got {other:?}"),
+        }
+    }
+
+    // --- dep names ----------------------------------------------------------
+
+    #[test]
+    fn validate_dep_short_form_accepts_canonical() {
+        for s in &["json", "json@1", "http@^0.2", "kebab-name@1.2.3", "snake_name"] {
+            assert!(validate_dep_short_form(s).is_ok(), "should accept {s:?}");
+        }
+    }
+
+    #[test]
+    fn validate_dep_short_form_rejects_garbage() {
+        for s in &["", "@1.0", "42json@1.0", "with spaces@1", "json@bad"] {
+            assert!(validate_dep_short_form(s).is_err(), "should reject {s:?}");
+        }
+    }
+
+    #[test]
+    fn extract_then_validate_invalid_dep_short() {
+        let src = "// /// script\n// dependencies = [\"42json\"]\n// ///\n";
+        let err = validated(src).expect_err("expected validation error");
+        assert!(
+            matches!(err, FrontmatterError::InvalidDepShortForm { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn extract_then_validate_invalid_dep_long_name() {
+        let src =
+            "// /// script\n// dependencies = [{ name = \"-bad\", version = \"1\" }]\n// ///\n";
+        let err = validated(src).expect_err("expected validation error");
+        assert!(
+            matches!(err, FrontmatterError::InvalidDepLongForm { .. }),
+            "got {err:?}"
+        );
+    }
+
+    // --- permissions --------------------------------------------------------
+
+    #[test]
+    fn validate_permission_accepts_canonical_scopes() {
+        for s in &[
+            "fs:read",
+            "fs:write",
+            "fs:read=./data",
+            "fs:read=./data,./logs",
+            "net",
+            "net=api.example.com",
+            "net=api.example.com:443,localhost",
+            "env",
+            "env=PATH,HOME",
+            "run",
+            "ffi=libc",
+            "time",
+            "random",
+        ] {
+            assert!(validate_permission_scope(s).is_ok(), "should accept {s:?}");
+        }
+    }
+
+    #[test]
+    fn validate_permission_rejects_unknown_kind() {
+        let err = validate_permission_scope("kernel=/dev/mem")
+            .expect_err("unknown kind must be rejected");
+        assert!(err.contains("unknown scope kind"), "got {err:?}");
+    }
+
+    #[test]
+    fn validate_permission_rejects_time_with_value() {
+        // `time` is blanket-only.
+        assert!(validate_permission_scope("time=1h").is_err());
+        assert!(validate_permission_scope("random=/dev/urandom").is_err());
+    }
+
+    #[test]
+    fn validate_permission_rejects_empty_target() {
+        assert!(validate_permission_scope("net=").is_err());
+        assert!(validate_permission_scope("fs:read=,foo").is_err());
+    }
+
+    #[test]
+    fn validate_permission_rejects_whitespace_target() {
+        assert!(validate_permission_scope("net=foo bar").is_err());
+    }
+
+    #[test]
+    fn extract_then_validate_invalid_permission() {
+        let src = "// /// script\n// permissions = [\"kernel=/dev/mem\"]\n// ///\n";
+        let err = validated(src).expect_err("expected validation error");
+        match err {
+            FrontmatterError::InvalidPermissionScope { value, .. } => {
+                assert_eq!(value, "kernel=/dev/mem");
+            }
+            other => panic!("expected InvalidPermissionScope, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_then_validate_invalid_permission_in_run_section() {
+        let src = "// /// script\n// [run]\n// default-permissions = [\"unknown=x\"]\n// ///\n";
+        let err = validated(src).expect_err("expected validation error");
+        assert!(
+            matches!(err, FrontmatterError::InvalidPermissionScope { .. }),
+            "got {err:?}"
+        );
+    }
+
+    // --- positive end-to-end ------------------------------------------------
+
+    #[test]
+    fn validate_full_canonical_block_passes() {
+        let src = r#"// /// script
+// verum = ">=0.6.0"
+// dependencies = ["json@1", "http@^0.2", { name = "x", version = "1" }]
+// permissions = ["net=api.example.com:443", "fs:read=./data", "time"]
+// edition = "2026"
+// [profile]
+// tier = 0
+// [run]
+// default-permissions = ["fs:cwd"]
+// ///
+"#;
+        // Note: `fs:cwd` is intentionally rejected — it's not in the
+        // documented kind list — and that's exactly what we want to surface.
+        let err = validated(src).expect_err("fs:cwd is not a documented scope kind");
+        match err {
+            FrontmatterError::InvalidPermissionScope { value, .. } => {
+                assert_eq!(value, "fs:cwd");
+            }
+            other => panic!("expected InvalidPermissionScope, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_minimal_block_passes() {
+        // No fields → no validation errors.
+        assert!(validated("// /// script\n// ///\n").is_ok());
+    }
+
+    #[test]
+    fn cog_ident_grammar_pin() {
+        // Pin the cog-ident contract so registry/mount-path consumers
+        // can rely on it without re-checking.
+        for s in &["a", "abc", "a-b", "a_b", "abc-123_x"] {
+            assert!(is_valid_cog_ident(s), "should accept {s:?}");
+        }
+        for s in &["", "1abc", "-abc", "_abc", "a b", "a.b", "Ünicode"] {
+            assert!(!is_valid_cog_ident(s), "should reject {s:?}");
+        }
     }
 
     #[test]
