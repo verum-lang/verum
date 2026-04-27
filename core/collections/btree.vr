@@ -1486,8 +1486,8 @@ implement<K: Ord, V: Ord> Ord for BTreeMap<K, V> {
             if b.is_none() {
                 return Ordering.Greater;
             }
-            let pa = a.unwrap();
-            let pb = b.unwrap();
+            let pa = a.expect("BTreeMap.cmp: a is_some after the is_none early-returns above");
+            let pb = b.expect("BTreeMap.cmp: b is_some after the is_none early-returns above");
             // Compare keys first
             let key_cmp = pa.0.cmp(pb.0);
             match key_cmp {
@@ -1521,8 +1521,8 @@ implement<T: Ord> Ord for BTreeSet<T> {
             if b.is_none() {
                 return Ordering.Greater;
             }
-            let va = a.unwrap();
-            let vb = b.unwrap();
+            let va = a.expect("BTreeSet.cmp: a is_some after the is_none early-returns above");
+            let vb = b.expect("BTreeSet.cmp: b is_some after the is_none early-returns above");
             let c = va.cmp(vb);
             match c {
                 Ordering.Equal => {}
@@ -3094,10 +3094,10 @@ implement<K: Ord, V> BTreeEntry<K, V> {
     where K: Clone, V: Clone
     {
         match self {
-            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).unwrap(),
+            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).expect("BTreeEntry: key invariant — Occupied or just-inserted Vacant guarantees get_mut is_some"),
             BTreeEntry.Vacant(entry) => {
                 entry.map.insert(entry.key.clone(), default);
-                entry.map.get_mut(&entry.key).unwrap()
+                entry.map.get_mut(&entry.key).expect("BTreeEntry: key invariant — Occupied or just-inserted Vacant guarantees get_mut is_some")
             }
         }
     }
@@ -3107,10 +3107,10 @@ implement<K: Ord, V> BTreeEntry<K, V> {
     where K: Clone, V: Clone
     {
         match self {
-            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).unwrap(),
+            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).expect("BTreeEntry: key invariant — Occupied or just-inserted Vacant guarantees get_mut is_some"),
             BTreeEntry.Vacant(entry) => {
                 entry.map.insert(entry.key.clone(), f());
-                entry.map.get_mut(&entry.key).unwrap()
+                entry.map.get_mut(&entry.key).expect("BTreeEntry: key invariant — Occupied or just-inserted Vacant guarantees get_mut is_some")
             }
         }
     }
@@ -3120,11 +3120,11 @@ implement<K: Ord, V> BTreeEntry<K, V> {
     where K: Clone, V: Clone
     {
         match self {
-            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).unwrap(),
+            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).expect("BTreeEntry: key invariant — Occupied or just-inserted Vacant guarantees get_mut is_some"),
             BTreeEntry.Vacant(entry) => {
                 let value = f(&entry.key);
                 entry.map.insert(entry.key.clone(), value);
-                entry.map.get_mut(&entry.key).unwrap()
+                entry.map.get_mut(&entry.key).expect("BTreeEntry: key invariant — Occupied or just-inserted Vacant guarantees get_mut is_some")
             }
         }
     }
@@ -3134,10 +3134,10 @@ implement<K: Ord, V> BTreeEntry<K, V> {
     where K: Clone, V: Clone + Default
     {
         match self {
-            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).unwrap(),
+            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).expect("BTreeEntry: key invariant — Occupied or just-inserted Vacant guarantees get_mut is_some"),
             BTreeEntry.Vacant(entry) => {
                 entry.map.insert(entry.key.clone(), V.default());
-                entry.map.get_mut(&entry.key).unwrap()
+                entry.map.get_mut(&entry.key).expect("BTreeEntry: key invariant — Occupied or just-inserted Vacant guarantees get_mut is_some")
             }
         }
     }
