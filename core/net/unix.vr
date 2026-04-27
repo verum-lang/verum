@@ -121,12 +121,28 @@ fn serialize_unix_addr(path: &Text) -> Result<List<Byte>, UnixError> {
         return Err(UnixError.InvalidPath("empty path".into()));
     }
 
-    // struct sockaddr_un { u16 family_le; char path[SUN_PATH_MAX]; }
-    // Native byte order — AF_UNIX = 1 on all platforms. Family stored in
-    // native byte order (NOT network order); on little-endian: [1, 0, ...].
+    // struct sockaddr_un layout, platform-specific (task #5):
+    //   Linux/Windows: { u16 sun_family_le; char sun_path[SUN_PATH_MAX]; }
+    //   macOS (BSD):   { u8  sun_len; u8 sun_family; char sun_path[104]; }
     let mut buf = List.with_capacity(2 + path_bytes.len() + 1);
-    buf.push(AF_UNIX as Byte);
-    buf.push(0);
+
+    @cfg(target_os = "macos")
+    {
+        // sun_len = 2-byte header + path bytes + null terminator.
+        // The kernel's max sun_len is 255 (u8), and SUN_PATH_MAX=104
+        // on macOS so path_bytes.len() < 104 is enforced above —
+        // sun_len cannot exceed 2+104+1=107 < 255.
+        let sun_len = (2 + path_bytes.len() + 1) as Byte;
+        buf.push(sun_len);
+        buf.push(AF_UNIX as Byte);
+    }
+    @cfg(any(target_os = "linux", target_os = "windows"))
+    {
+        // POSIX: sun_family is u16 little-endian — AF_UNIX = 1.
+        buf.push(AF_UNIX as Byte);
+        buf.push(0);
+    }
+
     for b in path_bytes {
         buf.push(*b);
     }

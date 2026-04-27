@@ -852,14 +852,24 @@ implement UdpSocket {
 // =============================================================================
 
 /// Serialize a socket address to bytes for syscalls.
+///
+/// Mirror of `core/net/tcp.vr::serialize_socket_addr` — same
+/// BSD-vs-POSIX `sockaddr` header divergence (task #5).
 fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
     match *addr {
         SocketAddr.V4(v4) => {
             let mut buf = List.with_capacity(16);
 
-            // sin_family
-            buf.push(AF_INET as Byte);
-            buf.push(0);
+            @cfg(target_os = "macos")
+            {
+                buf.push(16 as Byte);          // sin_len
+                buf.push(AF_INET as Byte);     // sin_family
+            }
+            @cfg(any(target_os = "linux", target_os = "windows"))
+            {
+                buf.push(AF_INET as Byte);     // sin_family low byte
+                buf.push(0);                   // sin_family high byte
+            }
 
             // sin_port (big-endian)
             let port = v4.port;
@@ -882,9 +892,16 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
         SocketAddr.V6(v6) => {
             let mut buf = List.with_capacity(28);
 
-            // sin6_family
-            buf.push(AF_INET6 as Byte);
-            buf.push(0);
+            @cfg(target_os = "macos")
+            {
+                buf.push(28 as Byte);          // sin6_len
+                buf.push(AF_INET6 as Byte);    // sin6_family
+            }
+            @cfg(any(target_os = "linux", target_os = "windows"))
+            {
+                buf.push(AF_INET6 as Byte);
+                buf.push(0);
+            }
 
             // sin6_port (big-endian)
             let port = v6.port;
