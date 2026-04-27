@@ -561,28 +561,6 @@ impl TierAnalyzer {
         refs
     }
 
-    /// Decide tier for a single reference (basic version).
-    #[allow(dead_code)]
-    fn decide_tier(
-        &self,
-        ref_id: RefId,
-        escape_analyzer: &EnhancedEscapeAnalyzer,
-        dominance_info: &DominanceInfo,
-        async_info: Option<&crate::promotion_decision::AsyncBoundaryInfo>,
-        exception_info: Option<&crate::promotion_decision::ExceptionPathInfo>,
-    ) -> ReferenceTier {
-        self.decide_tier_enhanced(
-            ref_id,
-            escape_analyzer,
-            dominance_info,
-            async_info,
-            exception_info,
-            None,
-            None,
-            None,
-        )
-    }
-
     /// Decide tier for a single reference with all analyses (enhanced version).
     fn decide_tier_enhanced(
         &self,

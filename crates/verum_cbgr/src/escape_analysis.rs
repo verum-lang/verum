@@ -55,7 +55,7 @@
 //! 5. Integrate with codegen to skip CBGR checks for `NoEscape` refs
 
 use crate::analysis::{
-    BlockId, ControlFlowGraph, DefSite, EscapeResult, FunctionId, RefId, UseeSite,
+    BlockId, ControlFlowGraph, DefSite, EscapeResult, RefId, UseeSite,
 };
 use crate::call_graph::CallGraph;
 use crate::ssa::SsaFunction;
@@ -293,10 +293,6 @@ pub struct EnhancedEscapeAnalyzer {
     /// Call graph for interprocedural analysis
     call_graph: Maybe<CallGraph>,
 
-    /// Current function being analyzed
-    #[allow(dead_code)]
-    current_function: Maybe<FunctionId>,
-
     /// Statistics
     stats: EscapeAnalysisStats,
 
@@ -419,7 +415,6 @@ impl EnhancedEscapeAnalyzer {
             escape_states: Map::new(),
             escape_points: List::new(),
             call_graph: Maybe::None,
-            current_function: Maybe::None,
             stats: EscapeAnalysisStats::default(),
             config: EscapeAnalysisConfig::default(),
         }
@@ -434,7 +429,6 @@ impl EnhancedEscapeAnalyzer {
             escape_states: Map::new(),
             escape_points: List::new(),
             call_graph: Maybe::None,
-            current_function: Maybe::None,
             stats: EscapeAnalysisStats::default(),
             config: EscapeAnalysisConfig::default(),
         }
@@ -442,18 +436,13 @@ impl EnhancedEscapeAnalyzer {
 
     /// Create analyzer with call graph for interprocedural analysis
     #[must_use]
-    pub fn with_call_graph(
-        cfg: ControlFlowGraph,
-        call_graph: CallGraph,
-        function_id: FunctionId,
-    ) -> Self {
+    pub fn with_call_graph(cfg: ControlFlowGraph, call_graph: CallGraph) -> Self {
         Self {
             cfg,
             ssa: Maybe::None,
             escape_states: Map::new(),
             escape_points: List::new(),
             call_graph: Maybe::Some(call_graph),
-            current_function: Maybe::Some(function_id),
             stats: EscapeAnalysisStats::default(),
             config: EscapeAnalysisConfig::default(),
         }
