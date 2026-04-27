@@ -120,8 +120,8 @@ public fn term_syntactic_eq(a: Term, b: Term) -> Bool {
     }
     let mut i: Int = 0;
     while i < a.arity {
-        let ai: Int = *a.args.get(i as Int).unwrap();
-        let bi: Int = *b.args.get(i as Int).unwrap();
+        let ai: Int = *a.args.get(i as Int).expect("congruence_closure: i < a.arity == args.len() — get is_some");
+        let bi: Int = *b.args.get(i as Int).expect("congruence_closure: i < b.arity == args.len() — get is_some");
         if ai != bi {
             return false;
         }
@@ -219,7 +219,7 @@ fn term_signature(t: &Term, uf: &mut UnionFindInt) -> Text {
     sig.push_str(&Text.from("|"));
     let mut k: Int = 0;
     while k < t.arity {
-        let arg_id: Int = *t.args.get(k as Int).unwrap();
+        let arg_id: Int = *t.args.get(k as Int).expect("congruence_closure: k < t.arity == args.len() — get is_some");
         let canonical: Int = uf.find(arg_id);
         if k > 0 {
             sig.push_str(&Text.from(","));
@@ -244,7 +244,7 @@ fn one_congruence_round(eqs: &EquationSet, uf: &mut UnionFindInt) -> Bool {
     let n: Int = eqs.terms.len() as Int;
     let mut i: Int = 0;
     while i < n {
-        let t: Term = (*eqs.terms.get(i as Int).unwrap()).clone();
+        let t: Term = (*eqs.terms.get(i as Int).expect("congruence_closure: i < eqs.terms.len() by loop bound")).clone();
         if !term_is_constant(t.clone()) {
             let sig: Text = term_signature(&t, &mut uf);
             match sig_table.get_optional(sig.clone()) {
@@ -293,7 +293,7 @@ public fn congruence_close(eqs: EquationSet) -> CongruenceClosure {
     // Seed: union all input equations.
     let mut i: Int = 0;
     while i < eqs.equations.len() as Int {
-        let eq: Equation = (*eqs.equations.get(i as Int).unwrap()).clone();
+        let eq: Equation = (*eqs.equations.get(i as Int).expect("congruence_closure: i < eqs.equations.len() by loop bound")).clone();
         uf.union(eq.lhs, eq.rhs);
         i = i + 1;
     }
