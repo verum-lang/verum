@@ -279,8 +279,10 @@ implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for JoinPair<A, B
 
         // Check if both done
         if self.result_a.is_some() && self.result_b.is_some() {
-            let a = self.result_a.take().unwrap();
-            let b = self.result_b.take().unwrap();
+            let a = self.result_a.take()
+                .expect("Join: result_a is_some by guard above");
+            let b = self.result_b.take()
+                .expect("Join: result_b is_some by guard above");
             Poll.Ready((a, b))
         } else {
             Poll.Pending
@@ -479,8 +481,13 @@ implement<T, F: Future<Output>> Future for JoinAll<T, F> {
 
         // Check if all done
         if self.completed == self.futures.len() {
+            // Every result slot is Some by the time `completed`
+            // counts up to `futures.len()` — each future-poll branch
+            // above sets exactly one result slot before incrementing
+            // `completed`.
             let ress = self.results.iter()
-                .map(|opt| opt.take().unwrap())
+                .map(|opt| opt.take()
+                    .expect("JoinAll: every result slot is_some when completed == futures.len()"))
                 .collect();
             Poll.Ready(ress)
         } else {
