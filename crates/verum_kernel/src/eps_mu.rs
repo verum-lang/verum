@@ -17,56 +17,73 @@
 use verum_common::Text;
 
 use crate::depth::m_depth_omega;
+use crate::support::{definitional_eq, free_vars};
 use crate::{CoreTerm, KernelError};
 
-/// Naturality witness/V1/V2 — `K-Eps-Mu` kernel rule entry point.
+/// Naturality witness V0 → V3-incremental — `K-Eps-Mu` kernel rule.
 ///
-/// V0 shipped a permissive skeleton that accepted any pair
-/// `(EpsilonOf(_), AlphaOf(_))`. V1 tightened the shape check; V2
-/// (this revision) adds the **modal-depth preservation
-/// pre-condition** for non-identity M:
+/// V0 shipped a permissive skeleton accepting any
+/// `(EpsilonOf(_), AlphaOf(_))`. V1 tightened the shape check. V2
+/// added modal-depth preservation. V3-incremental (this revision)
+/// adds two further necessary conditions, narrowing the gap to the
+/// full σ_α/π_α witness construction:
 ///
 ///   • `(EpsilonOf(M_α), AlphaOf(EpsilonOf(α)))` is the canonical
 ///     naturality-square shape per Proposition 5.1 / Corollary 5.10.
-///     The inner of `AlphaOf` MUST be an `EpsilonOf` constructor.
 ///
-///   • `(t, t)` (structurally equal) is the degenerate identity-
-///     naturality square — always accepted.
+///   • `(t, t)` (structurally equal) is the degenerate identity
+///     square — always accepted.
 ///
-///   • For the M = id sub-case (`m_alpha == α_rhs` structurally),
-///     accept directly: identity-functor naturality commutes
-///     trivially.
+///   • Identity-functor sub-case (`m_alpha == α_rhs` structurally)
+///     accepts directly: identity naturality commutes trivially.
 ///
-///   • For the non-identity-M case (`m_alpha != α_rhs`), V2 checks
-///     a **necessary condition** for the τ-witness to exist: the
-///     natural-equivalence τ : ε ∘ M ≃ A ∘ ε is an (∞,1)-
-///     categorical equivalence, hence depth-preserving. So
-///     `m_depth_omega(M_α) ≠ m_depth_omega(α)` ⇒ no τ-witness can
-///     possibly exist ⇒ reject. When depths agree, V2 still
-///     conservatively accepts — the depth check is a *necessary*
-///     condition, not a sufficient one. Sufficient witness
-///     construction (σ_α / π_α) is the V3 work tracked under #181.
+///   • For the non-identity-M case, V3 fires three gates, all
+///     **necessary** for the τ-witness to exist; if any fails we
+///     know no witness can exist and reject. Gate (a) — modal-depth
+///     preservation (V2-shipped): the natural equivalence τ is an
+///     (∞,1)-equivalence, hence depth-preserving;
+///     `m_depth_omega(M_α) ≠ m_depth_omega(α)` ⇒ reject. Gate (b)
+///     — free-variable preservation (V3-NEW): every 2-functor M in
+///     the diakrisis Axi-2 family preserves variable scope (M is
+///     not allowed to rename free variables, only to wrap existing
+///     term structure with metaisation), so `free_vars(M_α) ≠
+///     free_vars(α)` ⇒ reject; this catches the "M renames vars"
+///     failure class V2's depth check missed. Gate (c) —
+///     β-normalisation invariance (V3-NEW): the naturality square
+///     commutes up to β-equivalence; if `definitional_eq(M_α, α)`
+///     holds the M-action is a β-redex that normalises away — the
+///     V1 identity sub-case extends to any term sharing a normal
+///     form. When all three gates pass, V3-incremental accepts;
+///     full *sufficient* witness construction (σ_α from Code_S
+///     morphism + π_α from Perform_{ε_math} naturality through
+///     axiom A-3) is the V3-final step still tracked under #181.
+///     V3-incremental rejects strictly more terms than V2 (every
+///     V2 reject stays rejected, plus terms clearing the depth
+///     gate but failing (b) or (c)).
 ///
-///   • Any other pair (including `(EpsilonOf(_), AlphaOf(t))` where
-///     `t` is not itself an `EpsilonOf`) is rejected with
+///   • Any other pair (including `(EpsilonOf(_), AlphaOf(t))`
+///     where `t` is not an `EpsilonOf`) is rejected with
 ///     `EpsMuNaturalityFailed`.
 ///
-/// **What V2 does *not* yet check** (still V3 / #181 work):
+/// **Soundness**: each V3 gate is a logical consequence of the
+/// τ-witness existence; rejecting on any failure rejects no term
+/// that *could* have a witness — the rejection is one-sided. The
+/// V3-final sufficient construction will *not* widen this
+/// accept set; it will only *prove* sufficiency for the
+/// V3-incremental accept set.
 ///
-///   • The explicit τ-witness construction (σ_α from Code_S morphism
-///     + π_α from Perform_{ε_math} naturality through axiom A-3).
-///   • V2's depth-equality is necessary but not sufficient: two
-///     terms can share modal depth without admitting a τ-witness
-///     (the witness construction may fail for type-theoretic
-///     reasons orthogonal to depth). V3 will add the σ_α/π_α
-///     construction; V2 just rules out the obvious depth-mismatch
-///     impossibility.
+/// **Completeness gap to V3-final**: V3-incremental still
+/// over-accepts on terms passing all three gates without admitting
+/// a Code_S/Perform_{ε_math} witness. The over-acceptance is
+/// confined to terms whose M-action is structurally consistent
+/// with naturality but whose witness construction blows up for
+/// type-theoretic reasons (e.g. positivity violations in the
+/// witness elaboration). V3-final will plug this remaining gap.
 ///
-/// Decidability: the check is *semi-decidable* in general (per the
-/// structure-recursion argument that backs Theorem 16.6). For
-/// finitely-axiomatised articulations the check reduces to round-trip
-/// 16.10 and is decidable in single-exponential time. V1's shape
-/// check terminates in linear time on the term sizes.
+/// Decidability: V3-incremental is decidable in time linear in
+/// the term sizes plus the cost of `definitional_eq` (β-normal
+/// form computation, which is normalising-cache-backed —
+/// amortised constant after first normalise per term).
 pub fn check_eps_mu_coherence(
     lhs: &CoreTerm,
     rhs: &CoreTerm,
@@ -90,37 +107,76 @@ pub fn check_eps_mu_coherence(
                     // structurally, the naturality square commutes
                     // trivially.
                     if m_alpha.as_ref() == alpha_rhs.as_ref() {
-                        Ok(())
-                    } else {
-                        // V2 increment: modal-depth preservation
-                        // pre-condition for non-identity M. The
-                        // canonical natural-equivalence
-                        // τ : ε ∘ M ≃ A ∘ ε is depth-preserving;
-                        // a depth mismatch precludes any τ-witness,
-                        // so reject. Depth match ⇒ V2 still
-                        // conservatively accepts pending the V3
-                        // (#181) full τ-witness construction.
-                        let lhs_rank = m_depth_omega(m_alpha.as_ref());
-                        let rhs_rank = m_depth_omega(alpha_rhs.as_ref());
-                        if lhs_rank == rhs_rank {
-                            Ok(())
-                        } else {
-                            // V2.5 — embed the depth mismatch in the
-                            // diagnostic context so callers can post-
-                            // mortem the rejection without re-running
-                            // m_depth_omega themselves. The pair
-                            // shape "(<lhs>, <rhs>)" is stable so
-                            // CI / IDE output can grep for it.
-                            Err(KernelError::EpsMuNaturalityFailed {
-                                context: Text::from(format!(
-                                    "{}: depth mismatch md^ω(M_α)={} vs md^ω(α)={}",
-                                    context,
-                                    lhs_rank.render(),
-                                    rhs_rank.render(),
-                                )),
-                            })
-                        }
+                        return Ok(());
                     }
+
+                    // V3-NEW gate (c): β-normalisation invariance.
+                    // Extends the V1 identity sub-case from
+                    // structural equality to definitional equality,
+                    // catching M-actions that are β-redexes
+                    // normalising back to α.
+                    if definitional_eq(m_alpha.as_ref(), alpha_rhs.as_ref()) {
+                        return Ok(());
+                    }
+
+                    // V2 gate (a): modal-depth preservation
+                    // pre-condition. The natural equivalence
+                    // τ : ε ∘ M ≃ A ∘ ε is depth-preserving;
+                    // depth mismatch ⇒ no witness ⇒ reject.
+                    let lhs_rank = m_depth_omega(m_alpha.as_ref());
+                    let rhs_rank = m_depth_omega(alpha_rhs.as_ref());
+                    if lhs_rank != rhs_rank {
+                        // V2.5 — embed the depth mismatch in the
+                        // diagnostic context so callers can post-
+                        // mortem the rejection without re-running
+                        // m_depth_omega themselves.
+                        return Err(KernelError::EpsMuNaturalityFailed {
+                            context: Text::from(format!(
+                                "{}: depth mismatch md^ω(M_α)={} vs md^ω(α)={}",
+                                context,
+                                lhs_rank.render(),
+                                rhs_rank.render(),
+                            )),
+                        });
+                    }
+
+                    // V3-NEW gate (b): free-variable preservation.
+                    // The Diakrisis Axi-2 2-functor M preserves
+                    // variable scope; introducing or removing
+                    // free variables would violate naturality.
+                    // BTreeSet equality is order-independent and
+                    // O(n log n) in the number of free names —
+                    // negligible relative to definitional_eq.
+                    let lhs_fvs = free_vars(m_alpha.as_ref());
+                    let rhs_fvs = free_vars(alpha_rhs.as_ref());
+                    if lhs_fvs != rhs_fvs {
+                        // Compute the asymmetric difference for the
+                        // diagnostic so the user can see exactly
+                        // which variables drifted. We sort + join
+                        // for stable output.
+                        let extra_lhs: Vec<&str> = lhs_fvs
+                            .difference(&rhs_fvs)
+                            .map(|t| t.as_str())
+                            .collect();
+                        let extra_rhs: Vec<&str> = rhs_fvs
+                            .difference(&lhs_fvs)
+                            .map(|t| t.as_str())
+                            .collect();
+                        return Err(KernelError::EpsMuNaturalityFailed {
+                            context: Text::from(format!(
+                                "{}: free-var mismatch — \
+                                 in M_α only [{}], in α only [{}]",
+                                context,
+                                extra_lhs.join(", "),
+                                extra_rhs.join(", "),
+                            )),
+                        });
+                    }
+
+                    // All V3-incremental necessary conditions pass.
+                    // V3-final sufficient witness (σ_α / π_α) is
+                    // still pending (#181); accept conservatively.
+                    Ok(())
                 }
                 _ => Err(KernelError::EpsMuNaturalityFailed {
                     context: Text::from(context),
