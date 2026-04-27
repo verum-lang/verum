@@ -628,38 +628,47 @@ implement Text {
         }
     }
 
-    /// Find last occurrence of substring.
+    /// Find last occurrence of substring. Returns the byte start of
+    /// the *rightmost* match (overlapping matches included — same
+    /// semantics as the previous reverse-scan implementation, and
+    /// matches Rust's `str::rfind`). Linear-time via forward KMP
+    /// with track-last + failure-function fallback after each
+    /// match — pre-fix this was nested O(n·m).
     public fn rfind(&self, needle: &Text) -> Maybe<Int> {
         let self_bytes = self.as_bytes();
         let needle_bytes = needle.as_bytes();
         let nlen = needle_bytes.len();
+        let hlen = self_bytes.len();
 
-        if nlen > self_bytes.len() {
+        if nlen == 0 {
+            return Some(hlen);
+        }
+        if nlen > hlen {
             return None;
         }
 
-        if nlen == 0 {
-            return Some(self_bytes.len());
-        }
-
-        let mut i = self_bytes.len() - nlen;
-        while i >= 0 {
-            let mut found = true;
-            let mut j = 0;
-            while j < nlen {
-                if self_bytes[i + j] != needle_bytes[j] {
-                    found = false;
-                    break;
-                }
+        let table = kmp_failure_table(needle_bytes);
+        let mut last: Maybe<Int> = None;
+        let mut i = 0;
+        let mut j = 0;
+        while i < hlen {
+            if self_bytes[i] == needle_bytes[j] {
+                i = i + 1;
                 j = j + 1;
+                if j == nlen {
+                    last = Some(i - j);
+                    // Fall back via failure table to allow
+                    // overlapping matches — preserves the legacy
+                    // "rightmost start of any match" semantics.
+                    j = table[j - 1];
+                }
+            } else if j > 0 {
+                j = table[j - 1];
+            } else {
+                i = i + 1;
             }
-            if found {
-                return Some(i);
-            }
-            if i == 0 { break; }
-            i = i - 1;
         }
-        None
+        last
     }
 
     /// Find character.

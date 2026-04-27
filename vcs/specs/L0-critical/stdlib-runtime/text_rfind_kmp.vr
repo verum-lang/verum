@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, text, rfind, kmp
+
+// Regression test for `Text.rfind` linear-time KMP rewrite. The
+// rightmost-start semantics (overlapping matches included) are
+// preserved from the prior reverse-scan implementation; the new
+// version is O(n + m) instead of O(n·m).
+
+fn main() {
+    // Empty needle: returns Some(haystack.len()) per convention.
+    match "hello".rfind("") {
+        Some(idx) => assert(idx == 5),
+        None      => panic("expected Some(5) for empty needle"),
+    }
+
+    // Needle larger than haystack.
+    match "ab".rfind("abcd") {
+        Some(_) => panic("expected None"),
+        None    => {},
+    }
+
+    // No match.
+    match "hello".rfind("xyz") {
+        Some(_) => panic("expected None"),
+        None    => {},
+    }
+
+    // Single occurrence.
+    match "hello world".rfind("world") {
+        Some(idx) => assert(idx == 6),
+        None      => panic("expected Some(6)"),
+    }
+
+    // Multiple occurrences — return rightmost.
+    match "abcabc".rfind("abc") {
+        Some(idx) => assert(idx == 3),
+        None      => panic("expected Some(3)"),
+    }
+
+    // Overlapping case — semantics-pinning.
+    // "aaaaa".rfind("aa") must be Some(3): the rightmost START
+    // position where pattern "aa" matches is index 3 (covering
+    // positions 3-4). Forward non-overlapping scan would say 2;
+    // we explicitly want 3 to match Rust + the legacy reverse-scan
+    // implementation.
+    match "aaaaa".rfind("aa") {
+        Some(idx) => assert(idx == 3),
+        None      => panic("expected Some(3)"),
+    }
+
+    match "aaaa".rfind("aa") {
+        Some(idx) => assert(idx == 2),
+        None      => panic("expected Some(2)"),
+    }
+
+    // Single-byte rfind.
+    match "hello".rfind("l") {
+        Some(idx) => assert(idx == 3),
+        None      => panic("expected Some(3)"),
+    }
+
+    // Pattern at the end.
+    match "abcdef".rfind("ef") {
+        Some(idx) => assert(idx == 4),
+        None      => panic("expected Some(4)"),
+    }
+
+    // Pattern at the start (only occurrence).
+    match "abcdef".rfind("ab") {
+        Some(idx) => assert(idx == 0),
+        None      => panic("expected Some(0)"),
+    }
+
+    // KMP-divergent: "aba" in "abababa" — overlapping matches at 0, 2, 4.
+    // Rightmost start is 4.
+    match "abababa".rfind("aba") {
+        Some(idx) => assert(idx == 4),
+        None      => panic("expected Some(4)"),
+    }
+
+    // Pattern equals haystack.
+    match "abc".rfind("abc") {
+        Some(idx) => assert(idx == 0),
+        None      => panic("expected Some(0)"),
+    }
+
+    // Empty haystack with non-empty needle.
+    match "".rfind("x") {
+        Some(_) => panic("expected None"),
+        None    => {},
+    }
+}
