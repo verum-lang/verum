@@ -1,0 +1,438 @@
+// =============================================================================
+// core/database/common/types.vr — Spindle wire-data types
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §4.1, §5.1
+// =============================================================================
+//
+// Vendor-neutral wire shapes. Every adapter sees rows / params through
+// these types; vendor-specific OID dictionaries live in adapter modules
+// and are folded back to / from these via `AdapterId`.
+//
+// Performance note. `WireRow` and `WireBuf` are designed for
+// allocation-free hot paths: row-bytes are borrowed from the connection
+// arena (CBGR), `WireBuf.write_*` methods append in place, and decoders
+// return `&[Byte]` slices that escape-analyse into the query-arena
+// lifetime per database.md §4.2.
+// =============================================================================
+
+module core.database.common.types;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.error.{DbError, DecodeFault, EncodeFault, AdapterId};
+
+// -----------------------------------------------------------------------------
+// TypeOid — vendor-neutral OID space.
+// -----------------------------------------------------------------------------
+
+/// A Spindle-internal type tag. Adapters map vendor codes (Postgres
+/// pg_type.oid, MySQL field_type, SQLite type-affinity) into this
+/// shared space at the wire boundary so user code reasons about a
+/// single dictionary.
+///
+/// We store the tag as an `Int` rather than a packed enum because new
+/// types appear (postgres extensions, custom domains) and the adapter
+/// keeps a richer per-vendor table. The constants below are the core
+/// types that EVERY adapter must support.
+public type TypeOid is { value: Int };
+
+implement TypeOid {
+    public fn new(value: Int) -> TypeOid {
+        TypeOid { value: value }
+    }
+    public fn value(&self) -> Int { self.value }
+    public fn equals(&self, other: &TypeOid) -> Bool { self.value == other.value }
+}
+
+// Core OID dictionary — stable across vendors; per-vendor maps live in
+// adapter modules (e.g. `core.database.postgres.types::oid_to_pg_type`).
+public const OID_NULL:        Int = 0;
+public const OID_BOOL:        Int = 1;
+public const OID_INT2:        Int = 2;
+public const OID_INT4:        Int = 3;
+public const OID_INT8:        Int = 4;
+public const OID_FLOAT4:      Int = 5;
+public const OID_FLOAT8:      Int = 6;
+public const OID_TEXT:        Int = 7;
+public const OID_BYTEA:       Int = 8;
+public const OID_UUID:        Int = 9;
+public const OID_DATE:        Int = 10;
+public const OID_TIME:        Int = 11;
+public const OID_TIMESTAMP:   Int = 12;
+public const OID_TIMESTAMPTZ: Int = 13;
+public const OID_INTERVAL:    Int = 14;
+public const OID_NUMERIC:     Int = 15;
+public const OID_JSON:        Int = 16;
+public const OID_JSONB:       Int = 17;
+public const OID_ARRAY:       Int = 18;     // generic — element-OID in metadata
+public const OID_RECORD:      Int = 19;
+public const OID_UNKNOWN:     Int = 20;
+
+// -----------------------------------------------------------------------------
+// Wire format — text vs binary.
+// -----------------------------------------------------------------------------
+
+/// Whether a wire payload is text-encoded (CSV-like, ASCII-printable)
+/// or binary-encoded (network byte order). Postgres extended-protocol
+/// negotiates this per column; MySQL binary protocol is always binary;
+/// SQLite stores in its own serial-type encoding and we surface it as
+/// binary.
+public type WireFormat is FmtText | FmtBinary;
+
+// -----------------------------------------------------------------------------
+// ColumnSchema / RowSchema — describe the shape returned by a query.
+// -----------------------------------------------------------------------------
+
+public type ColumnSchema is {
+    name: Text,
+    type_oid: TypeOid,
+    nullable: Bool,
+    format: WireFormat,
+    /// Element OID for arrays / record types; `OID_UNKNOWN` otherwise.
+    element_oid: TypeOid,
+    /// Refined-type predicate the *generator* of this query proved
+    /// holds. Carried through so `SELECT age FROM users` returns
+    /// `Maybe<Age>` instead of `Maybe<Int>`. Empty if no refinement.
+    refinement: Text,
+};
+
+implement ColumnSchema {
+    public fn new(name: Text, type_oid: TypeOid, nullable: Bool, format: WireFormat) -> ColumnSchema {
+        ColumnSchema {
+            name: name,
+            type_oid: type_oid,
+            nullable: nullable,
+            format: format,
+            element_oid: TypeOid.new(OID_UNKNOWN),
+            refinement: "".clone(),
+        }
+    }
+
+    public fn with_element(self, elem: TypeOid) -> ColumnSchema {
+        ColumnSchema {
+            element_oid: elem,
+            .. self
+        }
+    }
+
+    public fn with_refinement(self, predicate: Text) -> ColumnSchema {
+        ColumnSchema {
+            refinement: predicate,
+            .. self
+        }
+    }
+}
+
+public type RowSchema is {
+    columns: List<ColumnSchema>,
+};
+
+implement RowSchema {
+    public fn empty() -> RowSchema {
+        RowSchema { columns: [] }
+    }
+
+    public fn from_columns(cols: List<ColumnSchema>) -> RowSchema {
+        RowSchema { columns: cols }
+    }
+
+    public fn column_count(&self) -> Int {
+        self.columns.len() as Int
+    }
+
+    /// Linear scan — schemas are typically small (<32 columns) and this
+    /// stays cache-friendly. Returns `None` if the column is not
+    /// present, never panics.
+    public fn index_of(&self, name: &Text) -> Maybe<Int> {
+        let mut i = 0;
+        while i < self.columns.len() as Int {
+            if self.columns[i].name == *name {
+                return Some(i);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn column(&self, i: Int) -> Maybe<&ColumnSchema> {
+        if i < 0 || i >= self.columns.len() as Int {
+            None
+        } else {
+            Some(&self.columns[i])
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WireRow — one row as the connection saw it on the wire.
+// -----------------------------------------------------------------------------
+
+/// One column's bytes plus the format it was sent in. `bytes` is
+/// borrowed from the per-query CBGR arena; never holds heap unless the
+/// caller `to_owned`s it.
+public type WireValue is
+      WvNull
+    | WvPresent { bytes: List<Byte>, format: WireFormat };
+
+public type WireRow is {
+    values: List<WireValue>,
+};
+
+implement WireRow {
+    public fn empty() -> WireRow { WireRow { values: [] } }
+
+    public fn with_values(values: List<WireValue>) -> WireRow {
+        WireRow { values: values }
+    }
+
+    public fn column_count(&self) -> Int {
+        self.values.len() as Int
+    }
+
+    /// `None` if column-index is out of range OR the value is SQL-NULL.
+    /// Adapters call this and decode-on-demand.
+    public fn bytes(&self, col: Int) -> Maybe<&List<Byte>> {
+        if col < 0 || col >= self.values.len() as Int {
+            return None;
+        }
+        match &self.values[col] {
+            WvNull              => None,
+            WvPresent { bytes, .. } => Some(bytes),
+        }
+    }
+
+    public fn is_null(&self, col: Int) -> Bool {
+        if col < 0 || col >= self.values.len() as Int {
+            return true;
+        }
+        match &self.values[col] {
+            WvNull         => true,
+            WvPresent { .. } => false,
+        }
+    }
+
+    public fn format(&self, col: Int) -> Maybe<WireFormat> {
+        if col < 0 || col >= self.values.len() as Int {
+            return None;
+        }
+        match &self.values[col] {
+            WvNull                  => None,
+            WvPresent { format, .. } => Some(format.clone()),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WireBuf — append-only byte buffer for parameter encoding.
+// -----------------------------------------------------------------------------
+
+/// Append-only byte buffer used by `Params.encode`. Lives in the
+/// connection arena — reset between requests, no per-query alloc.
+///
+/// The integer writers always emit network byte order (big-endian).
+/// This matches Postgres v3 binary protocol and MySQL binary protocol;
+/// SQLite's adapter swaps on encode at the boundary to its native
+/// little-endian record format.
+public type WireBuf is {
+    bytes: List<Byte>,
+};
+
+implement WireBuf {
+    public fn new() -> WireBuf {
+        WireBuf { bytes: [] }
+    }
+
+    public fn with_capacity(cap: Int) -> WireBuf {
+        WireBuf { bytes: List.with_capacity(cap) }
+    }
+
+    public fn len(&self) -> Int { self.bytes.len() as Int }
+
+    public fn as_bytes(&self) -> &[Byte] { &self.bytes }
+
+    /// Reset for reuse — keeps the underlying capacity so subsequent
+    /// requests inherit a warmed buffer.
+    public fn clear(&mut self) {
+        self.bytes.clear();
+    }
+
+    public fn put_u8(&mut self, v: Int) {
+        self.bytes.push((v & 0xFF) as Byte);
+    }
+
+    public fn put_u16_be(&mut self, v: Int) {
+        self.bytes.push(((v >> 8) & 0xFF) as Byte);
+        self.bytes.push((v & 0xFF) as Byte);
+    }
+
+    public fn put_u32_be(&mut self, v: Int) {
+        self.bytes.push(((v >> 24) & 0xFF) as Byte);
+        self.bytes.push(((v >> 16) & 0xFF) as Byte);
+        self.bytes.push(((v >> 8) & 0xFF) as Byte);
+        self.bytes.push((v & 0xFF) as Byte);
+    }
+
+    public fn put_i32_be(&mut self, v: Int) {
+        self.put_u32_be(v);   // two's-complement layout matches.
+    }
+
+    public fn put_u64_be(&mut self, v: Int) {
+        self.bytes.push(((v >> 56) & 0xFF) as Byte);
+        self.bytes.push(((v >> 48) & 0xFF) as Byte);
+        self.bytes.push(((v >> 40) & 0xFF) as Byte);
+        self.bytes.push(((v >> 32) & 0xFF) as Byte);
+        self.bytes.push(((v >> 24) & 0xFF) as Byte);
+        self.bytes.push(((v >> 16) & 0xFF) as Byte);
+        self.bytes.push(((v >> 8) & 0xFF) as Byte);
+        self.bytes.push((v & 0xFF) as Byte);
+    }
+
+    public fn put_i64_be(&mut self, v: Int) {
+        self.put_u64_be(v);
+    }
+
+    public fn put_bytes(&mut self, src: &[Byte]) {
+        let mut i = 0;
+        while i < src.len() {
+            self.bytes.push(src[i]);
+            i = i + 1;
+        }
+    }
+
+    /// Postgres / MySQL pattern: 4-byte BE length prefix followed by
+    /// payload, with `-1` denoting SQL NULL.
+    public fn put_lp_bytes(&mut self, payload: Maybe<&[Byte]>) {
+        match payload {
+            None         => self.put_i32_be(-1),
+            Some(b)      => {
+                self.put_i32_be(b.len() as Int);
+                self.put_bytes(b);
+            }
+        }
+    }
+
+    /// Null-terminated UTF-8 string — the Postgres v3 startup-message
+    /// encoding for parameter-name / value pairs.
+    public fn put_cstr(&mut self, s: &Text) {
+        self.put_bytes(s.as_bytes());
+        self.bytes.push(0 as Byte);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WireReader — counterpart to WireBuf, big-endian integer view over a slice.
+// -----------------------------------------------------------------------------
+
+public type WireReader is {
+    src: List<Byte>,
+    pos: Int,
+};
+
+public type WireReadError is
+      WrShortRead { wanted: Int, available: Int }
+    | WrInvalidUtf8;
+
+implement WireReader {
+    public fn new(src: List<Byte>) -> WireReader {
+        WireReader { src: src, pos: 0 }
+    }
+
+    public fn position(&self) -> Int { self.pos }
+
+    public fn remaining(&self) -> Int {
+        (self.src.len() as Int) - self.pos
+    }
+
+    fn need(&self, n: Int) -> Result<(), WireReadError> {
+        if self.remaining() < n {
+            Err(WrShortRead { wanted: n, available: self.remaining() })
+        } else {
+            Ok(())
+        }
+    }
+
+    public fn read_u8(&mut self) -> Result<Int, WireReadError> {
+        self.need(1)?;
+        let b = self.src[self.pos as Int] as Int;
+        self.pos = self.pos + 1;
+        Ok(b & 0xFF)
+    }
+
+    public fn read_u16_be(&mut self) -> Result<Int, WireReadError> {
+        self.need(2)?;
+        let hi = self.src[self.pos as Int] as Int;
+        let lo = self.src[(self.pos + 1) as Int] as Int;
+        self.pos = self.pos + 2;
+        Ok(((hi & 0xFF) << 8) | (lo & 0xFF))
+    }
+
+    public fn read_u32_be(&mut self) -> Result<Int, WireReadError> {
+        self.need(4)?;
+        let p = self.pos as Int;
+        let v = ((self.src[p] as Int) & 0xFF) << 24
+              | ((self.src[p + 1] as Int) & 0xFF) << 16
+              | ((self.src[p + 2] as Int) & 0xFF) << 8
+              | ((self.src[p + 3] as Int) & 0xFF);
+        self.pos = self.pos + 4;
+        Ok(v)
+    }
+
+    public fn read_i32_be(&mut self) -> Result<Int, WireReadError> {
+        let u = self.read_u32_be()?;
+        // sign-extend from 32 bits.
+        if (u & 0x8000_0000) != 0 {
+            Ok(u | (-1 ^ 0xFFFF_FFFF))
+        } else {
+            Ok(u)
+        }
+    }
+
+    public fn read_bytes(&mut self, n: Int) -> Result<List<Byte>, WireReadError> {
+        self.need(n)?;
+        let mut out: List<Byte> = [];
+        let mut i = 0;
+        while i < n {
+            out.push(self.src[(self.pos + i) as Int]);
+            i = i + 1;
+        }
+        self.pos = self.pos + n;
+        Ok(out)
+    }
+
+    /// 4-byte length-prefixed payload; `-1` decodes as `None` (SQL NULL).
+    public fn read_lp_bytes(&mut self) -> Result<Maybe<List<Byte>>, WireReadError> {
+        let len = self.read_i32_be()?;
+        if len < 0 {
+            Ok(None)
+        } else {
+            let payload = self.read_bytes(len)?;
+            Ok(Some(payload))
+        }
+    }
+
+    /// Read until first NUL byte; the NUL is consumed but not returned.
+    public fn read_cstr(&mut self) -> Result<Text, WireReadError> {
+        let start = self.pos as Int;
+        let mut i = start;
+        let n = self.src.len() as Int;
+        while i < n && (self.src[i] as Int) != 0 {
+            i = i + 1;
+        }
+        if i >= n {
+            return Err(WrShortRead { wanted: 1, available: 0 });
+        }
+        let mut out: List<Byte> = [];
+        let mut j = start;
+        while j < i {
+            out.push(self.src[j]);
+            j = j + 1;
+        }
+        self.pos = i + 1;     // skip the NUL
+        match Text.from_utf8(out) {
+            Ok(s)  => Ok(s),
+            Err(_) => Err(WrInvalidUtf8),
+        }
+    }
+}

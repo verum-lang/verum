@@ -1,0 +1,142 @@
+// =============================================================================
+// core/database/common/pool.vr — Pool<C, M> protocol + PoolMode
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §4.3
+// =============================================================================
+//
+// `Pool<C, M>` is a supervisor-tree node managing a fleet of
+// connections to a single database. The mode marker `M` controls
+// pgbouncer-compat: `Session` (default) keeps a connection across
+// transactions; `Transaction` releases on every commit/rollback;
+// `Statement` releases on every query. The compiler enforces the
+// matrix at the type level — `Pool<_, Transaction>` cannot LISTEN.
+// =============================================================================
+
+module core.database.common.pool;
+
+mount core.*;
+mount base.{Result, Text, Maybe, None, Some};
+mount async.duration.Duration;
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.common.protocol.Connection;
+
+// -----------------------------------------------------------------------------
+// Pool mode marker types.
+// -----------------------------------------------------------------------------
+
+/// Connection held for the whole client session — default for direct
+/// connections. All Postgres / MySQL / SQLite features work.
+public type Session is ();
+
+/// Connection held for one transaction — pgbouncer / Supavisor proxy
+/// pattern. LISTEN / SET / cursors that span transactions are forbidden.
+public type Transaction is ();
+
+/// Connection held for one statement — autocommit-only, very rare in
+/// practice. Used for serverless front-ends with bursty traffic.
+public type Statement is ();
+
+// -----------------------------------------------------------------------------
+// Pool — supervisor + checkout API.
+// -----------------------------------------------------------------------------
+
+/// A pool of `Conn` connections operating under mode `Mode`. The
+/// adapter implements this; the trait surface is portable.
+public type Pool is protocol {
+    type Conn: Connection;
+    type Mode;
+    type Cfg;
+
+    /// Build and bring the pool up to `min_connections`. Returns when
+    /// the supervision tree is ready and at least one connection is
+    /// healthy.
+    async fn launch(cfg: Self.Cfg) -> Result<Self, DbError>;
+
+    /// Acquire a checked-out connection or wait up to `timeout`.
+    async fn acquire(&self, timeout: Duration) -> Result<PoolHandle<Self.Conn>, DbError>;
+
+    /// Drain — refuse new acquisitions, wait for in-flight checkouts,
+    /// close gracefully.  Returns when all connections are closed.
+    async fn drain(&self, deadline: Duration) -> Result<(), DbError>;
+
+    /// Live counts — useful for metrics / health-checks.
+    fn stats(&self) -> PoolStats;
+}
+
+// -----------------------------------------------------------------------------
+// PoolHandle — affine RAII checkout.
+// -----------------------------------------------------------------------------
+
+/// One checked-out connection. Affine: must be released by `release()`
+/// or by being consumed inside `with_connection`. Dropping the handle
+/// returns the connection to the pool.
+public type affine PoolHandle<C: Connection> is {
+    conn: C,
+    pool_id: Int,
+    checked_out_at_ms: Int,
+}
+
+implement<C: Connection> PoolHandle<C> {
+    public fn new(conn: C, pool_id: Int, checked_out_at_ms: Int) -> PoolHandle<C> {
+        PoolHandle {
+            conn: conn,
+            pool_id: pool_id,
+            checked_out_at_ms: checked_out_at_ms,
+        }
+    }
+
+    public fn conn(&mut self) -> &mut C { &mut self.conn }
+    public fn pool_id(&self) -> Int { self.pool_id }
+    public fn checked_out_at_ms(&self) -> Int { self.checked_out_at_ms }
+}
+
+// -----------------------------------------------------------------------------
+// PoolStats — observable counters.
+// -----------------------------------------------------------------------------
+
+public type PoolStats is {
+    total: Int,           // total connections currently managed
+    idle: Int,            // currently in the pool
+    in_use: Int,          // currently checked out
+    waiting: Int,         // callers parked on `acquire`
+    total_acquired: Int,  // monotonic: total successful acquires since launch
+    total_timeouts: Int,
+    total_errors: Int,
+}
+
+implement PoolStats {
+    public fn empty() -> PoolStats {
+        PoolStats {
+            total: 0, idle: 0, in_use: 0, waiting: 0,
+            total_acquired: 0, total_timeouts: 0, total_errors: 0,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Vegas-like adaptive sizer config — referenced by §4.3.
+// -----------------------------------------------------------------------------
+
+public type AdaptiveSizerConfig is {
+    min_connections: Int,
+    max_connections: Int,
+    initial_connections: Int,
+    /// p95 latency target — sizer increases concurrency while we are
+    /// below; backs off above. 50ms is a good default for OLTP.
+    target_p95_ms: Int,
+    /// Probe interval for the sizer.
+    probe_interval_ms: Int,
+}
+
+implement AdaptiveSizerConfig {
+    public fn default(cpu_count: Int) -> AdaptiveSizerConfig {
+        AdaptiveSizerConfig {
+            min_connections: 1,
+            max_connections: cpu_count * 2,
+            initial_connections: cpu_count,
+            target_p95_ms: 50,
+            probe_interval_ms: 1000,
+        }
+    }
+}

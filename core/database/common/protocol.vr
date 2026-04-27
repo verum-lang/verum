@@ -1,0 +1,178 @@
+// =============================================================================
+// core/database/common/protocol.vr — Adapter / Connection / Transaction
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §4.1
+// =============================================================================
+//
+// The contract every adapter implements. Two design pillars:
+//
+//   1. `Transaction` is `affine` — the value MUST be consumed by exactly
+//      one of `commit` / `rollback`. The compiler refuses to drop a
+//      live transaction; the runtime issues an implicit ROLLBACK on
+//      panic before the affine destructor fires.
+//
+//   2. Errors are associated types per protocol — `Connection.Error`,
+//      `Transaction.Error`. Adapter authors stitch their vendor error
+//      type into `DbError` via `From`. This keeps a `match` on a
+//      Postgres SQLSTATE working without a dyn-cast at the cost of one
+//      generic parameter on the handler.
+// =============================================================================
+
+module core.database.common.protocol;
+
+mount core.*;
+mount base.{Result, Text};
+mount collections.List;
+mount async.stream.Stream;
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.common.query.{PreparedQuery};
+mount core.database.common.types.{WireRow, WireBuf, RowSchema, TypeOid};
+
+// -----------------------------------------------------------------------------
+// Row / Params — unit-of-data protocols.
+// -----------------------------------------------------------------------------
+
+/// Decode-from-wire and reflection. Any user-defined record produced by
+/// `sql#"SELECT ..."` automatically gets a derived `Row` impl; explicit
+/// impls are only needed for hand-written one-offs.
+public type Row is protocol {
+    /// Materialise from the per-column wire bytes against a
+    /// pre-validated schema. Errors carry column index so handlers can
+    /// produce useful diagnostics.
+    fn from_wire(wire: &WireRow, schema: &RowSchema) -> Result<Self, DbError>;
+
+    /// How many columns the row exposes — matches `schema.column_count()`.
+    fn column_count() -> Int;
+
+    /// Column name at index `i`. Used for `SELECT *` round-trips
+    /// against vendor schemas.
+    fn column_name(i: Int) -> Text;
+}
+
+/// Encode-to-wire. The `()`/empty-tuple type is the trivial impl for
+/// statements with no parameters. Single-value tuples and nested
+/// records are derived automatically by the framework.
+public type Params is protocol {
+    fn encode(&self, buf: &mut WireBuf, adapter: AdapterId) -> Result<(), DbError>;
+
+    /// OIDs of the parameters in source order — matches the
+    /// `${expr}` interpolations of the originating `sql#"..."` literal.
+    fn type_oids(adapter: AdapterId) -> List<TypeOid>;
+}
+
+// -----------------------------------------------------------------------------
+// Adapter — connect into a typed Connection.
+// -----------------------------------------------------------------------------
+
+public type AdapterConfig is protocol {
+    fn adapter_id() -> AdapterId;
+    fn target_label() -> Text;     // host / file path / DSN summary — never secret
+}
+
+public type Adapter is protocol {
+    type Conn: Connection;
+    type Config: AdapterConfig;
+
+    async fn connect(config: &Self.Config) -> Result<Self.Conn, DbError>;
+
+    fn name() -> Text;             // "postgres" | "sqlite" | "mysql"
+
+    /// Minimum server semver supported. Adapters refuse to startup-
+    /// handshake against older servers (compile-time sanity is for the
+    /// driver itself; runtime version-check is for the database).
+    fn version_required() -> Text;
+}
+
+// -----------------------------------------------------------------------------
+// Connection — multiplexed session over a single physical channel.
+// -----------------------------------------------------------------------------
+
+public type Connection is protocol {
+    type Tx: Transaction;
+
+    /// Round-trip; cheap on Postgres (Sync), free on SQLite (no-op).
+    async fn ping(&mut self) -> Result<(), DbError>;
+
+    async fn begin(&mut self) -> Result<Self.Tx, DbError>;
+
+    /// Auto-commit `INSERT` / `UPDATE` / `DELETE`. Returns the number
+    /// of rows affected per RowsAffected wire frame.
+    async fn execute<P: Params>(
+        &mut self,
+        q: &PreparedQuery<(), P>,
+        params: P,
+    ) -> Result<Int, DbError>;
+
+    /// Auto-commit `SELECT`. Materialises ALL rows; for streaming use
+    /// `query_stream`.
+    async fn query<R: Row, P: Params>(
+        &mut self,
+        q: &PreparedQuery<R, P>,
+        params: P,
+    ) -> Result<List<R>, DbError>;
+
+    /// Streaming variant — `Stream<R>` is backpressure-aware and
+    /// driven by the cooperative async runtime. Postgres uses a server
+    /// cursor; MySQL holds the result-set on the connection; SQLite
+    /// loops `step()`.
+    async fn query_stream<R: Row, P: Params>(
+        &mut self,
+        q: &PreparedQuery<R, P>,
+        params: P,
+    ) -> Result<Stream<R>, DbError>;
+
+    async fn close(self) -> Result<(), DbError>;
+}
+
+// -----------------------------------------------------------------------------
+// Transaction — affine resource.
+// -----------------------------------------------------------------------------
+
+/// A live database transaction.
+///
+/// `affine`: the value MUST be consumed by exactly one terminal call —
+/// either `commit` or `rollback`. The compiler refuses to drop a
+/// `Transaction` value out of scope. On panic the runtime emits
+/// `ROLLBACK` to the wire before destruction so the server side never
+/// leaves an orphan tx.
+public type affine Transaction is protocol {
+    type SP: Savepoint;
+
+    async fn commit(self) -> Result<(), DbError>;
+    async fn rollback(self) -> Result<(), DbError>;
+
+    async fn savepoint(&mut self, name: &Text) -> Result<Self.SP, DbError>;
+
+    async fn execute<P: Params>(
+        &mut self,
+        q: &PreparedQuery<(), P>,
+        params: P,
+    ) -> Result<Int, DbError>;
+
+    async fn query<R: Row, P: Params>(
+        &mut self,
+        q: &PreparedQuery<R, P>,
+        params: P,
+    ) -> Result<List<R>, DbError>;
+
+    async fn query_stream<R: Row, P: Params>(
+        &mut self,
+        q: &PreparedQuery<R, P>,
+        params: P,
+    ) -> Result<Stream<R>, DbError>;
+}
+
+// -----------------------------------------------------------------------------
+// Savepoint — also affine.
+// -----------------------------------------------------------------------------
+
+/// Nested-transaction savepoint, also affine. Vendor support:
+///   * Postgres: SAVEPOINT name / RELEASE SAVEPOINT name / ROLLBACK TO SAVEPOINT name
+///   * SQLite:   identical syntax
+///   * MySQL:    SAVEPOINT name / RELEASE / ROLLBACK TO — with caveats on DDL.
+public type affine Savepoint is protocol {
+    async fn release(self) -> Result<(), DbError>;
+    async fn rollback_to(self) -> Result<(), DbError>;
+    fn name(&self) -> Text;
+}
