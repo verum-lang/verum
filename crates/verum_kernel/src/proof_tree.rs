@@ -856,8 +856,6 @@ impl KernelRule {
             KernelRule::KFstElim => Some("VVA §4.4a"),
             KernelRule::KSndElim => Some("VVA §4.4a"),
             KernelRule::KPathTyForm => Some("VVA §4.4a (cubical)"),
-            // V8.1 #196 §7.4 V3 — heterogeneous path-over (`PathOver`).
-            KernelRule::KPathOverForm => Some("VVA §7.4 (#196 V3, cubical)"),
             KernelRule::KReflIntro => Some("VVA §4.4a (cubical)"),
             KernelRule::KHComp => Some("VVA §4.4a (cubical)"),
             KernelRule::KTransp => Some("VVA §4.4a (cubical)"),
