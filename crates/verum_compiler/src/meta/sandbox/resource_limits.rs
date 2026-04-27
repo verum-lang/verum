@@ -104,12 +104,40 @@ impl ResourceLimiter {
         }
     }
 
-    /// Check if memory limit has been exceeded
+    /// Reserve `bytes` from the memory budget, returning Err if the
+    /// reservation would exceed the configured maximum.
+    ///
+    /// SOUNDNESS: this method tentatively adds `bytes` via fetch_add,
+    /// then checks whether the post-add total exceeds the limit.  If
+    /// it does, the bytes are rolled back via fetch_sub before
+    /// returning Err — otherwise the bytes would leak in the counter
+    /// (the caller does not build a MemoryGuard on Err, so Drop
+    /// never fires the corresponding sub_memory call).
+    ///
+    /// Two bugs were closed by this revision:
+    ///   1. The pre-revision condition `current >= max` compared the
+    ///      pre-add value against max, allowing post-add over-budget
+    ///      states (e.g. max=100, prev=80, request=50 → counter=130
+    ///      but check passed because 80 < 100).  Now compares the
+    ///      post-add total.
+    ///   2. The pre-revision Err path leaked the tentatively-added
+    ///      bytes forever — every memory-limit-exceeded request
+    ///      permanently reduced the available budget.
+    ///
+    /// The fetch_add + conditional fetch_sub pattern accepts a brief
+    /// over-counting window between the two ops; this is acceptable
+    /// for sandbox bookkeeping (concurrent requests get conservative
+    /// rejections, never over-allocations).  A CAS-loop alternative
+    /// avoids the window but adds spin retries under contention; for
+    /// the meta-system sandbox use case (compile-time evaluation,
+    /// low contention) the simpler rollback is preferred.
     pub fn check_memory_limit(&self, bytes: usize) -> Result<(), SandboxError> {
-        let current = self.current_memory.fetch_add(bytes, Ordering::SeqCst);
-        if current >= self.limits.max_memory_bytes {
+        let prev = self.current_memory.fetch_add(bytes, Ordering::SeqCst);
+        let after = prev.saturating_add(bytes);
+        if after > self.limits.max_memory_bytes {
+            self.current_memory.fetch_sub(bytes, Ordering::SeqCst);
             Err(SandboxError::MemoryLimitExceeded {
-                allocated: current,
+                allocated: after,
                 limit: self.limits.max_memory_bytes,
             })
         } else {
