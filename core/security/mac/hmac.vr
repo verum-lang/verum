@@ -45,6 +45,8 @@
 
 module core.security.mac.hmac;
 mount core.*;
+mount core.security.hash.sha1.{Sha1,
+    SHA1_BLOCK_SIZE, SHA1_DIGEST_SIZE};
 mount core.security.hash.sha256.{Sha256,
     BLOCK_SIZE as SHA256_BLOCK, OUTPUT_SIZE as SHA256_OUTPUT};
 mount core.security.hash.sha384.{Sha384,
@@ -226,6 +228,83 @@ implement HmacSha512 {
 @inline
 public fn hmac_sha512(key: &[Byte], data: &[Byte]) -> [Byte; 64] {
     let mut h = HmacSha512.new(key);
+    h.update(data);
+    h.finalize()
+}
+
+// =============================================================================
+// HmacSha1 — streaming HMAC over SHA-1 (V8 #247)
+// =============================================================================
+//
+// SHA-1 is cryptographically broken for digital-signature purposes
+// (Wang-Yin 2005 collision attack; SHATTERED 2017). HMAC-SHA-1 is
+// **not** broken in the same way — HMAC's bidirectional construction
+// resists collision attacks even when the underlying hash is
+// collision-vulnerable. RFC 6151 (2011) reaffirms HMAC-SHA-1 as
+// secure for message authentication.
+//
+// Use cases:
+//   • RFC 6238 TOTP / RFC 4226 HOTP — Sha1 is the default, baseline-
+//     compatible across legacy authenticators.
+//   • RFC 6455 WebSocket Sec-WebSocket-Accept handshake.
+//   • TLS 1.0/1.1 PRF (legacy interop only — TLS 1.2+ uses SHA-256).
+//
+// Do NOT use for new digital-signature constructions; prefer SHA-256.
+// =============================================================================
+
+public type HmacSha1 is {
+    inner: Sha1,
+    outer_key: [Byte; 64],
+};
+
+implement HmacSha1 {
+    public fn new(key: &[Byte]) -> HmacSha1 {
+        let mut k: [Byte; 64] = [0; 64];
+        if key.len() > SHA1_BLOCK_SIZE {
+            let digest = Sha1.digest(key);
+            let mut i = 0;
+            while i < SHA1_DIGEST_SIZE { k[i] = digest[i]; i = i + 1; }
+        } else {
+            let mut i = 0;
+            while i < key.len() { k[i] = key[i]; i = i + 1; }
+        }
+
+        let mut ipad: [Byte; 64] = [0; 64];
+        let mut opad: [Byte; 64] = [0; 64];
+        let mut i = 0;
+        while i < SHA1_BLOCK_SIZE {
+            ipad[i] = k[i] ^ IPAD;
+            opad[i] = k[i] ^ OPAD;
+            i = i + 1;
+        }
+
+        let mut inner = Sha1.new();
+        inner.update(&ipad);
+        HmacSha1 { inner: inner, outer_key: opad }
+    }
+
+    @inline
+    public fn update(&mut self, data: &[Byte]) {
+        self.inner.update(data);
+    }
+
+    public fn finalize(self) -> [Byte; 20] {
+        let inner_digest = self.inner.finalize();
+        let mut outer = Sha1.new();
+        outer.update(&self.outer_key);
+        outer.update(&inner_digest);
+        outer.finalize()
+    }
+}
+
+/// One-shot HMAC-SHA-1. RFC 2202 test vectors pass byte-exact.
+///
+/// HMAC-SHA-1 is acceptable for message authentication (RFC 6151
+/// 2011) despite SHA-1 being broken for digital-signature purposes.
+/// Prefer `hmac_sha256` for new constructions.
+@inline
+public fn hmac_sha1(key: &[Byte], data: &[Byte]) -> [Byte; 20] {
+    let mut h = HmacSha1.new(key);
     h.update(data);
     h.finalize()
 }
