@@ -60,7 +60,16 @@ public type JsonPointer is {
 
 public type JsonPointerError is
       Malformed(Text)
-    | InvalidEscape(Text);
+    | InvalidEscape(Text)
+    | PointerTooLong { limit_bytes: Int };
+
+/// Maximum permitted JSON Pointer string length in bytes.  RFC 6901
+/// places no upper bound — hostile callers can construct multi-MB
+/// pointers that pin the parser walking byte-by-byte through the
+/// reference-token decoder.  64 KiB matches `MAX_URL_LENGTH_BYTES`
+/// from `core/net/url.vr` (5c35083c) — pointers over 64 KiB are
+/// almost certainly DoS attempts or a misuse of the format.
+public const MAX_JSON_POINTER_BYTES: Int = 64 * 1024;
 
 // =============================================================================
 // Parser
@@ -70,6 +79,14 @@ public fn parse(s: &Text) -> Result<JsonPointer, JsonPointerError> {
     let b = s.as_bytes();
     if b.len() == 0 {
         return Ok(JsonPointer { tokens: [] });
+    }
+    // SOUNDNESS: cap input length before the per-byte walk.  Without
+    // this, a hostile caller could pin the parser O(N) on multi-MB
+    // pointer strings.
+    if b.len() > MAX_JSON_POINTER_BYTES {
+        return Err(JsonPointerError.PointerTooLong {
+            limit_bytes: MAX_JSON_POINTER_BYTES,
+        });
     }
     if b[0] != ('/' as Byte) {
         return Err(JsonPointerError.Malformed(Text.from("missing leading '/'")));
