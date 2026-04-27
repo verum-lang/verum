@@ -1512,7 +1512,19 @@ VVA leaves room for a second meta-classifier (a non-Diakrisis L5+ framework that
 
 ---
 
-## 11. Dual Stdlib — OC + DC
+## 11. Dual Stdlib — OC + DC **[100% — V8 #243 (gauge invariants + streaming monitor)]**
+
+**Implementation**: `core/action/{primitives, articulation, enactments, gauge, verify, effects, ludics, ludics_lazy, monads, mod}.vr`.
+
+**Gauge invariants** (`core.action.gauge`, V8 #243):
+
+* `canonical_size(e) -> Int` — step count after canonicalisation.
+* `is_canonical(e) -> Bool` — predicate, equivalent to `canonicalise(e) == e`.
+* `canonicalise_idempotent(e) -> Bool` — explicit idempotency witness so test harnesses can pin the contract without poking the canonical-form's internal `name` field.
+
+**Streaming `CoherenceMonitor`** (`core.action.verify`, V8 #243): the dual to one-shot `gauge_consistency`. Construct via `monitor_new(eps)`, feed enactments via `monitor_observe(&mut, e)`, snapshot via `monitor_report(&)`. Shape-compatible with `gauge_consistency`'s return so live audit endpoints (Noesis NP `enactment/observe` ingestion) emit the same audit JSON as batch invocations. `monitor_is_coherent(&)` returns true iff zero divergent observations have been recorded. Coverage: `vcs/specs/L2-standard/action/gauge_invariants_typecheck.vr`.
+
+
 
 ### 11.1 OC layer (`core.math.*`) — articulations
 

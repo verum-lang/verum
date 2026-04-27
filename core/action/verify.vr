@@ -98,3 +98,91 @@ public fn gauge_consistency(
 public fn autopoietic_flag(e: Enactment) -> Bool {
     is_autopoietic(e)
 }
+
+// =============================================================================
+// §11.4 (#243) — streaming CoherenceMonitor
+//
+// `gauge_consistency` is one-shot: pass a `List<Enactment>`, get a
+// summary report. The streaming monitor below is the dual: build
+// incrementally, observe one enactment at a time, ask for the
+// running report. This is what live audit endpoints (Noesis NP
+// `enactment/observe` ingestion) use — they can't materialise the
+// full history before deciding whether a freshly-recorded
+// enactment is consistent with the prior gauge class.
+// =============================================================================
+
+/// A streaming gauge-coherence monitor for one declared ε-primitive.
+/// Construct via `monitor_new(eps)`, feed enactments via
+/// `monitor_observe(&mut self, e)`, read the running tally via
+/// `monitor_report(&self)`.
+///
+/// The monitor maintains a single canonicalised representative — the
+/// first observed enactment — and decides each subsequent enactment's
+/// gauge-equivalence against that representative. This matches the
+/// one-shot `gauge_consistency` semantics so downstream consumers
+/// can swap freely between batch and streaming use.
+public type CoherenceMonitor is {
+    epsilon: Primitive,
+    representative: Maybe<Enactment>,
+    consistent: Int,
+    divergent: Int,
+};
+
+/// Construct a fresh monitor for a declared ε-primitive.
+public fn monitor_new(epsilon: Primitive) -> CoherenceMonitor {
+    CoherenceMonitor {
+        epsilon: epsilon,
+        representative: None,
+        consistent: 0,
+        divergent: 0,
+    }
+}
+
+/// Observe one enactment. The first observation seeds the
+/// representative; every subsequent observation increments either
+/// `consistent` or `divergent` based on `gauge_equivalent` against
+/// the representative.
+///
+/// Returns `true` iff the observation was recorded as consistent
+/// (so the call site can short-circuit on first divergence if
+/// desired).
+public fn monitor_observe(m: &mut CoherenceMonitor, e: Enactment) -> Bool {
+    let canonical: Enactment = canonicalise(e);
+    match &m.representative {
+        Some(rep) => {
+            if gauge_equivalent(rep.clone(), canonical) {
+                m.consistent = m.consistent + 1;
+                true
+            } else {
+                m.divergent = m.divergent + 1;
+                false
+            }
+        },
+        None => {
+            m.representative = Some(canonical);
+            m.consistent = 1;
+            true
+        },
+    }
+}
+
+/// Snapshot the current monitor state as a `ConsistencyReport` —
+/// shape-compatible with `gauge_consistency`'s return value so a
+/// streaming endpoint can emit the same audit JSON as a batch
+/// invocation.
+public fn monitor_report(m: &CoherenceMonitor) -> ConsistencyReport {
+    let total: Int = m.consistent + m.divergent;
+    ConsistencyReport {
+        epsilon: primitive_as_text(m.epsilon),
+        declared_count: total,
+        consistent_count: m.consistent,
+        divergent_count: m.divergent,
+    }
+}
+
+/// True iff the monitor has observed only gauge-consistent
+/// enactments since construction. Empty monitors (no observations)
+/// trivially satisfy this.
+public fn monitor_is_coherent(m: &CoherenceMonitor) -> Bool {
+    m.divergent == 0
+}

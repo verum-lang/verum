@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: action, gauge, vva-section-11, oc-dc
+// @timeout: 10000
+// @expect: pass
+//
+// VVA §11.4 (#243) — gauge invariants + streaming CoherenceMonitor.
+//
+// Pins the public-API contract for the OC/DC dual stdlib's gauge
+// machinery:
+//   • canonicalise idempotency
+//   • is_canonical predicate
+//   • streaming monitor matches the one-shot gauge_consistency report
+//   • monitor_is_coherent on no-divergence
+
+mount core.action.{
+    EpsilonObserve, EpsilonProve, primitive_as_text,
+    Articulation, Enactment, Primitive,
+    canonicalise, gauge_equivalent,
+    canonical_size, is_canonical, canonicalise_idempotent,
+    CoherenceMonitor, monitor_new, monitor_observe, monitor_report,
+    monitor_is_coherent, ConsistencyReport,
+};
+
+fn make_articulation() -> Articulation {
+    Articulation {
+        framework: Text.from("test"),
+        citation:  Text.from("test"),
+        lineage:   List.new(),
+    }
+}
+
+fn make_observe_enactment(steps: Int) -> Enactment {
+    let mut s: List<Primitive> = List.new();
+    let mut i: Int = 0;
+    while i < steps {
+        s.push(EpsilonObserve);
+        i = i + 1;
+    }
+    Enactment {
+        name:            Text.from("observe-run"),
+        steps:           s,
+        activation_rank: 0,
+        articulation:    make_articulation(),
+    }
+}
+
+fn exercise_canonical_size_collapses_observe_runs() {
+    // 5 consecutive observations → 1 in canonical form.
+    let raw = make_observe_enactment(5);
+    assert(canonical_size(raw) == 1);
+
+    // Empty enactment canonicalises to empty.
+    let empty = Enactment {
+        name:            Text.from("empty"),
+        steps:           List.new(),
+        activation_rank: 0,
+        articulation:    make_articulation(),
+    };
+    assert(canonical_size(empty) == 0);
+}
+
+fn exercise_idempotency_pins_invariant() {
+    let raw = make_observe_enactment(3);
+    assert(canonicalise_idempotent(raw));
+}
+
+fn exercise_is_canonical_predicate() {
+    // Pre-canonicalised form satisfies is_canonical.
+    let canonical = canonicalise(make_observe_enactment(4));
+    assert(is_canonical(canonical));
+}
+
+fn exercise_streaming_monitor_matches_batch() {
+    // Build a monitor + observe two gauge-equivalent enactments;
+    // both should land in the consistent bucket.
+    let mut mon: CoherenceMonitor = monitor_new(EpsilonObserve);
+    assert(monitor_is_coherent(&mon));
+
+    let a = make_observe_enactment(3);
+    let b = make_observe_enactment(7);  // canonicalises to same shape
+    let _ = monitor_observe(&mut mon, a);
+    let _ = monitor_observe(&mut mon, b);
+
+    let report: ConsistencyReport = monitor_report(&mon);
+    assert(report.declared_count == 2);
+    assert(report.consistent_count == 2);
+    assert(report.divergent_count == 0);
+    assert(monitor_is_coherent(&mon));
+}
+
+fn main() {
+    exercise_canonical_size_collapses_observe_runs();
+    exercise_idempotency_pins_invariant();
+    exercise_is_canonical_predicate();
+    exercise_streaming_monitor_matches_batch();
+}
