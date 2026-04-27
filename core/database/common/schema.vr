@@ -1,0 +1,375 @@
+// =============================================================================
+// core/database/common/schema.vr — SchemaSnapshot
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §5.3 (sql# meta-fn schema-aware mode)
+// =============================================================================
+//
+// `SchemaSnapshot` is the data the `verum db:introspect` tooling
+// emits as a `schema.snap.vr` file and the `sql#"..."` meta-fn loads
+// at compile time to derive typed row shapes ("SELECT id, name FROM
+// users" → `PreparedQuery<{id: UserId, name: Text}, ()>`).
+//
+// The snapshot carries vendor-neutral structure plus per-column
+// refinement-predicate text — when the user types a column with
+// `type Email is Text where rx#"^[^@]+@[^@]+\..+$".matches(s)`, the
+// introspector serialises that predicate into the snapshot so the
+// meta-fn can carry the refinement through to the result row type.
+//
+// Shape choices:
+//   * String-typed (`Text`) for vendor type names — the Verum-side
+//     mapping (`VARCHAR` → `Text`, `INTEGER` → `Int`, …) is per-vendor
+//     and lives in the adapter modules.
+//   * `nullable: Bool` per column — used by sql# to pick `T` vs
+//     `Maybe<T>` for the result row.
+//   * `pk: Bool` and `unique: Bool` per column — informational; the
+//     planner uses these to detect at-most-one-row queries (`WHERE
+//     id = ${id}` against a PK column → row-level result type).
+//   * `default_expr: Maybe<Text>` — informational; surfaces as a
+//     compile-time hint in INSERT-without-default sites.
+//
+// The snapshot is intentionally portable: a Postgres snapshot can be
+// loaded against a SQLite back end and vice versa — the meta-fn
+// reports a typed warning when the dialect mismatches but does not
+// fail (the underlying SQL may still be valid; the warning lets the
+// developer audit cross-dialect surfaces).
+// =============================================================================
+
+module core.database.common.schema;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.error.AdapterId;
+
+// -----------------------------------------------------------------------------
+// ColumnSnap
+// -----------------------------------------------------------------------------
+
+public type ColumnSnap is {
+    name: Text,
+    /// Vendor type name (`int8`, `text`, `bigint`, `varchar(254)` …)
+    declared_type: Text,
+    /// Whether SQL NULL is allowed for this column.
+    nullable: Bool,
+    /// True if the column is a PK or part of one.
+    pk: Bool,
+    /// True if the column has a UNIQUE constraint.
+    unique: Bool,
+    /// True if the column auto-increments / has a default sequence.
+    autoincrement: Bool,
+    /// SQL DEFAULT expression text, or None.
+    default_expr: Maybe<Text>,
+    /// Verum refinement-predicate text (carried verbatim from the
+    /// originating column type if the introspector recognised one).
+    refinement: Maybe<Text>,
+    /// CHECK-constraint text — multiple constraints concatenated by
+    /// " AND " in declaration order.
+    check_constraint: Maybe<Text>,
+}
+
+// -----------------------------------------------------------------------------
+// IndexSnap
+// -----------------------------------------------------------------------------
+
+public type IndexSnap is {
+    name: Text,
+    /// Columns indexed in order.
+    columns: List<Text>,
+    /// Partial-index predicate (Postgres / SQLite) — carried verbatim.
+    predicate: Maybe<Text>,
+    unique: Bool,
+}
+
+// -----------------------------------------------------------------------------
+// ForeignKeySnap
+// -----------------------------------------------------------------------------
+
+public type ForeignKeySnap is {
+    columns: List<Text>,
+    referenced_table: Text,
+    referenced_columns: List<Text>,
+    /// ON DELETE action — "cascade", "restrict", "set null", "no action".
+    on_delete: Text,
+    on_update: Text,
+}
+
+// -----------------------------------------------------------------------------
+// TableSnap
+// -----------------------------------------------------------------------------
+
+public type TableSnap is {
+    schema: Text,            // pg = "public", mysql = db_name, sqlite = "main"
+    name: Text,
+    columns: List<ColumnSnap>,
+    indexes: List<IndexSnap>,
+    foreign_keys: List<ForeignKeySnap>,
+    /// Postgres tablespace / SQLite WITHOUT ROWID flag — vendor-specific
+    /// hints carried as opaque key=value pairs.
+    options: List<(Text, Text)>,
+}
+
+implement TableSnap {
+    public fn empty(schema: Text, name: Text) -> TableSnap {
+        TableSnap {
+            schema: schema,
+            name: name,
+            columns: List.new(),
+            indexes: List.new(),
+            foreign_keys: List.new(),
+            options: List.new(),
+        }
+    }
+
+    public fn column(&self, name: &Text) -> Maybe<&ColumnSnap> {
+        let mut i: Int = 0;
+        while i < self.columns.len() as Int {
+            if self.columns[i].name == *name {
+                return Some(&self.columns[i]);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn primary_key_columns(&self) -> List<Text> {
+        let mut out: List<Text> = List.new();
+        let mut i: Int = 0;
+        while i < self.columns.len() as Int {
+            if self.columns[i].pk {
+                out.push(self.columns[i].name.clone());
+            }
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SchemaSnapshot — the file-level artefact.
+// -----------------------------------------------------------------------------
+
+public type SchemaSnapshot is {
+    /// Adapter the snapshot was extracted from. The sql# meta-fn warns
+    /// at compile time when a query's dialect (sql.postgres / sql.sqlite
+    /// / sql.mysql) doesn't match the snapshot's adapter; cross-dialect
+    /// SQL is allowed but not recommended.
+    adapter: AdapterId,
+    /// Server version captured at introspection time. Used by the
+    /// meta-fn to gate features (e.g. RETURNING is Postgres ≥ 8.2).
+    server_version: Text,
+    /// Default schema (search_path[0] in pg, current_database in mysql,
+    /// "main" in sqlite). The meta-fn resolves unqualified table
+    /// references against this schema first.
+    default_schema: Text,
+    /// All known tables. Order is insertion-order (the introspector
+    /// emits them sorted by (schema, name) for stable diffs).
+    tables: List<TableSnap>,
+    /// Free-form metadata — captured-at timestamp, host, user, etc.
+    /// Diff-stable across re-introspections of the same DB state.
+    metadata: List<(Text, Text)>,
+}
+
+implement SchemaSnapshot {
+    public fn empty(adapter: AdapterId) -> SchemaSnapshot {
+        SchemaSnapshot {
+            adapter: adapter,
+            server_version: "".clone(),
+            default_schema: default_schema_for(&adapter),
+            tables: List.new(),
+            metadata: List.new(),
+        }
+    }
+
+    /// Find a table by its (schema, name). Returns None if either the
+    /// schema or the name doesn't match. Pass an empty schema string
+    /// to match against the default schema only.
+    public fn table(&self, schema: &Text, name: &Text) -> Maybe<&TableSnap> {
+        let lookup_schema = if schema.len() == 0 {
+            self.default_schema.clone()
+        } else {
+            schema.clone()
+        };
+        let mut i: Int = 0;
+        while i < self.tables.len() as Int {
+            let t = &self.tables[i];
+            if t.schema == lookup_schema && t.name == *name {
+                return Some(t);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn table_count(&self) -> Int { self.tables.len() as Int }
+
+    public fn add_table(&mut self, t: TableSnap) {
+        self.tables.push(t);
+    }
+}
+
+fn default_schema_for(adapter: &AdapterId) -> Text {
+    match adapter {
+        AdPostgres => "public".clone(),
+        AdSqlite   => "main".clone(),
+        AdMysql    => "".clone(),     // current_database; introspector fills it in
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Renderer — emit a `.vr` file the meta-fn can read at compile time.
+// -----------------------------------------------------------------------------
+//
+// Format choice. The snapshot is data, not code — but emitting a
+// JSON-ish blob that the meta-fn parses at compile time means
+// implementing a full JSON parser inside the meta-fn machinery. The
+// pragmatic alternative: emit a Verum data literal that's just a
+// nested record / list construction the parser already handles. Any
+// future migration to a binary format can swap in the renderer
+// without touching the SchemaSnapshot shape itself.
+//
+// The renderer below produces a deterministic, line-stable text
+// representation suitable for committing to the repo and diffing
+// across re-introspections. The actual loading-at-compile-time
+// pathway lands with the sql# schema-aware path (T23a follow-up).
+
+public fn render_to_text(snap: &SchemaSnapshot) -> Text {
+    let mut out: Text = "// AUTOGENERATED BY `verum db:introspect` — do not hand-edit.\n".clone();
+    out.push_str(&"// Spec: internal/specs/database.md §5.3 (schema-aware sql# meta-fn).\n".clone());
+    out.push_str(&"\n".clone());
+    out.push_str(&"adapter = ".clone());
+    out.push_str(&adapter_name(&snap.adapter));
+    out.push_str(&"\nserver_version = \"".clone());
+    out.push_str(&snap.server_version);
+    out.push_str(&"\"\ndefault_schema = \"".clone());
+    out.push_str(&snap.default_schema);
+    out.push_str(&"\"\n\n".clone());
+    let mut i: Int = 0;
+    while i < snap.tables.len() as Int {
+        render_table(&mut out, &snap.tables[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn adapter_name(a: &AdapterId) -> Text {
+    match a {
+        AdPostgres => "postgres".clone(),
+        AdSqlite   => "sqlite".clone(),
+        AdMysql    => "mysql".clone(),
+    }
+}
+
+fn render_table(out: &mut Text, t: &TableSnap) {
+    out.push_str(&"table \"".clone());
+    out.push_str(&t.schema);
+    out.push_str(&"\".\"".clone());
+    out.push_str(&t.name);
+    out.push_str(&"\" {\n".clone());
+    let mut i: Int = 0;
+    while i < t.columns.len() as Int {
+        render_column(out, &t.columns[i]);
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < t.indexes.len() as Int {
+        render_index(out, &t.indexes[j]);
+        j = j + 1;
+    }
+    let mut k: Int = 0;
+    while k < t.foreign_keys.len() as Int {
+        render_foreign_key(out, &t.foreign_keys[k]);
+        k = k + 1;
+    }
+    out.push_str(&"}\n\n".clone());
+}
+
+fn render_column(out: &mut Text, c: &ColumnSnap) {
+    out.push_str(&"  column \"".clone());
+    out.push_str(&c.name);
+    out.push_str(&"\" ".clone());
+    out.push_str(&c.declared_type);
+    if c.pk            { out.push_str(&" PK".clone()); }
+    if c.unique        { out.push_str(&" UNIQUE".clone()); }
+    if c.autoincrement { out.push_str(&" AUTOINCREMENT".clone()); }
+    if !c.nullable     { out.push_str(&" NOT NULL".clone()); }
+    match &c.default_expr {
+        Some(d) => {
+            out.push_str(&" DEFAULT (".clone());
+            out.push_str(d);
+            out.push_str(&")".clone());
+        }
+        None => {}
+    }
+    match &c.check_constraint {
+        Some(p) => {
+            out.push_str(&" CHECK (".clone());
+            out.push_str(p);
+            out.push_str(&")".clone());
+        }
+        None => {}
+    }
+    match &c.refinement {
+        Some(r) => {
+            out.push_str(&" REFINEMENT (".clone());
+            out.push_str(r);
+            out.push_str(&")".clone());
+        }
+        None => {}
+    }
+    out.push_str(&"\n".clone());
+}
+
+fn render_index(out: &mut Text, idx: &IndexSnap) {
+    out.push_str(&"  index \"".clone());
+    out.push_str(&idx.name);
+    out.push_str(&"\"".clone());
+    if idx.unique { out.push_str(&" UNIQUE".clone()); }
+    out.push_str(&" (".clone());
+    let mut i: Int = 0;
+    while i < idx.columns.len() as Int {
+        if i > 0 { out.push_str(&", ".clone()); }
+        out.push_str(&"\"".clone());
+        out.push_str(&idx.columns[i]);
+        out.push_str(&"\"".clone());
+        i = i + 1;
+    }
+    out.push_str(&")".clone());
+    match &idx.predicate {
+        Some(p) => {
+            out.push_str(&" WHERE (".clone());
+            out.push_str(p);
+            out.push_str(&")".clone());
+        }
+        None => {}
+    }
+    out.push_str(&"\n".clone());
+}
+
+fn render_foreign_key(out: &mut Text, fk: &ForeignKeySnap) {
+    out.push_str(&"  foreign_key (".clone());
+    let mut i: Int = 0;
+    while i < fk.columns.len() as Int {
+        if i > 0 { out.push_str(&", ".clone()); }
+        out.push_str(&"\"".clone());
+        out.push_str(&fk.columns[i]);
+        out.push_str(&"\"".clone());
+        i = i + 1;
+    }
+    out.push_str(&") REFERENCES \"".clone());
+    out.push_str(&fk.referenced_table);
+    out.push_str(&"\" (".clone());
+    let mut j: Int = 0;
+    while j < fk.referenced_columns.len() as Int {
+        if j > 0 { out.push_str(&", ".clone()); }
+        out.push_str(&"\"".clone());
+        out.push_str(&fk.referenced_columns[j]);
+        out.push_str(&"\"".clone());
+        j = j + 1;
+    }
+    out.push_str(&") ON DELETE ".clone());
+    out.push_str(&fk.on_delete);
+    out.push_str(&" ON UPDATE ".clone());
+    out.push_str(&fk.on_update);
+    out.push_str(&"\n".clone());
+}
