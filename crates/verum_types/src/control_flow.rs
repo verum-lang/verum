@@ -485,9 +485,6 @@ impl FlowSensitiveChecker {
             // we don't have full type information. Control flow analysis focuses
             // on error type handling semantics, not the actual type.
             //
-            // The actual type will be resolved during type checking phase and
-            // can be updated via update_result_type() if needed for diagnostics.
-            //
             // For @must_handle checking, only the error_type_name matters:
             // - We track whether the error path is explicitly handled
             // - The ok type (T in Result<T, E>) is irrelevant for this analysis
@@ -532,18 +529,6 @@ impl FlowSensitiveChecker {
 
             // Mark for immediate error - wildcard can never be handled
             self.immediate_drops.push((var_id, creation_span));
-        }
-    }
-
-    /// Update the result type for a tracked Result variable
-    ///
-    /// Call this after type checking resolves the actual Result type.
-    /// This is useful for better diagnostic messages that can show
-    /// the full type signature.
-    #[allow(dead_code)]
-    pub fn update_result_type(&mut self, var_id: VarId, result_type: Type) {
-        if let Some(info) = self.tracked_results.get_mut(&var_id) {
-            info.result_type = result_type;
         }
     }
 

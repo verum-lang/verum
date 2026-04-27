@@ -2256,15 +2256,6 @@ fn parse_raw_string(lex: &mut logos::Lexer<TokenKind>) -> Option<Text> {
     }
 }
 
-#[allow(dead_code)] // Reserved for future char literal parsing
-fn parse_char(lex: &mut logos::Lexer<TokenKind>) -> Option<char> {
-    let s = lex.slice();
-    // Remove surrounding quotes
-    let content = &s[1..s.len() - 1];
-    let unescaped = unescape_string(content);
-    unescaped.chars().next()
-}
-
 fn parse_interpolated_string(
     lex: &mut logos::Lexer<TokenKind>,
 ) -> Option<InterpolatedStringLiteral> {
