@@ -191,7 +191,8 @@ implement H3DataSink {
     /// emission. Called by the tx pump.
     public fn drain_pending(&self) -> List<Byte> {
         let mut p = self.pending.lock();
-        let mut out: List<Byte> = [];
+        // Output is exactly p.len() bytes.
+        let mut out: List<Byte> = List.with_capacity(p.len());
         let mut i: Int = 0;
         while i < p.len() {
             out.push(p[i]);
