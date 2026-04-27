@@ -67,7 +67,11 @@ public fn encode_url(input: &[Byte]) -> Text {
 
 fn encode_with(input: &[Byte], alpha: &[Byte; 64], pad: Bool) -> Text {
     let n = input.len();
-    let mut out = Text.new();
+    // Output length: ceil(n/3) * 4. Pad-or-not affects the tail
+    // bytes but the upper bound is the same. Pre-allocate so the
+    // ~4n/3 push_byte calls don't grow the buffer ~log(4n/3) times.
+    let cap = ((n + 2) / 3) * 4;
+    let mut out = Text.with_capacity(cap);
     let mut i = 0;
     while i + 3 <= n {
         let b0 = input[i] as Int;
@@ -108,9 +112,12 @@ public fn decode_url(input: &Text) -> Result<List<Byte>, Base64Error> {
 
 fn decode_with(input: &Text, url_safe: Bool) -> Result<List<Byte>, Base64Error> {
     let bytes = input.as_bytes();
-    let mut out: List<Byte> = [];
-    let mut i = 0;
     let n = bytes.len();
+    // Output upper bound: 3n/4. Pre-allocate so the push loop runs
+    // against a single sized buffer.
+    let cap = (n / 4) * 3 + 2;
+    let mut out: List<Byte> = List.with_capacity(cap);
+    let mut i = 0;
     // Strip trailing '=' padding — treat it as a length hint only.
     let mut effective = n;
     while effective > 0 && bytes[effective - 1] == 0x3D_u8 {
