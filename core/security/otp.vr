@@ -61,6 +61,7 @@ public type OtpHash is
 public type OtpError is
       InvalidSecret
     | InvalidDigits(Int)
+    | InvalidStep
     | UnsupportedHash
     | Base32Decode;
 
@@ -127,6 +128,11 @@ public fn hotp(
 // =============================================================================
 
 /// Compute the TOTP code for (secret, unix_time).
+///
+/// SOUNDNESS: rejects `step_sec == 0` to avoid integer division-
+/// by-zero (Verum's `UInt64 / 0` semantics are undefined / panic-
+/// dependent).  RFC 6238 §5.2 mandates a positive step (typically
+/// 30 seconds); `0` is always a misuse.
 public fn totp(
     secret:    &[Byte],
     unix_time: UInt64,
@@ -134,6 +140,9 @@ public fn totp(
     digits:    Int,
     algo:      &OtpHash,
 ) -> Result<Text, OtpError> {
+    if step_sec == 0_u64 {
+        return Err(OtpError.InvalidStep);
+    }
     let counter = unix_time / step_sec;
     hotp(secret, counter, digits, algo)
 }
