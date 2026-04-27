@@ -157,6 +157,7 @@ public mount .heap.{
 /// the design rationale and memory-ordering contract.
 public mount .diagnostics.{
     HeaderView, header_view_of,
+    live_allocations, live_allocation_count,
 };
 
 /// Capability-audit event type — one auditable CBGR state transition
