@@ -331,24 +331,191 @@ fn binom(n: Int, k: Int) -> Int {
     else { binom(n - 1, k - 1) + binom(n - 1, k) }
 }
 
+/// V8 (#248) — enumerate the lex-sorted k-subsets of {0..n-1}.
+///
+/// Returns a list of length C(n, k); each entry is a sorted
+/// strictly-increasing length-k tuple over {0..n-1}. The
+/// ordering is **lexicographic on the tuples** so that
+/// `combinations(n, k)[i]` is the i-th basis multi-index
+/// in the canonical Λ^k(R^n) presentation.
+///
+///   combinations(3, 2) = [[0,1], [0,2], [1,2]]
+///   combinations(4, 2) = [[0,1], [0,2], [0,3], [1,2], [1,3], [2,3]]
+public fn combinations(n: Int{>= 0}, k: Int{>= 0, <= n}) -> List<List<Int>> {
+    let mut out: List<List<Int>> = [];
+    if k == 0 {
+        let empty: List<Int> = [];
+        out.push(empty);
+        return out;
+    }
+    if k > n { return out; }
+    // Initialise the first k-subset [0, 1, ..., k-1].
+    let mut current: List<Int> = [];
+    let mut i: Int = 0;
+    while i < k { current.push(i); i = i + 1; }
+    out.push(clone_int_list(&current));
+
+    // Generate successors in lex order. Algorithm: find the
+    // rightmost element that can advance (i.e. position p where
+    // current[p] < n - k + p), increment it, and reset all
+    // following positions to consecutive successors.
+    loop {
+        // Find rightmost advanceable position.
+        let mut p: Int = k - 1;
+        let mut found: Bool = false;
+        while p >= 0 {
+            if current[p] < n - k + p {
+                found = true;
+                p = p;
+                break;
+            }
+            p = p - 1;
+        }
+        if !found { break; }
+        current[p] = current[p] + 1;
+        let mut q: Int = p + 1;
+        while q < k {
+            current[q] = current[q - 1] + 1;
+            q = q + 1;
+        }
+        out.push(clone_int_list(&current));
+    }
+    out
+}
+
+fn clone_int_list(xs: &List<Int>) -> List<Int> {
+    let mut out: List<Int> = [];
+    let mut i: Int = 0;
+    while i < xs.len() { out.push(xs[i]); i = i + 1; }
+    out
+}
+
+/// V8 (#248) — index of a sorted k-subset in the lex enumeration.
+///
+/// Inverse of [`combinations`]: for a sorted strictly-increasing
+/// list `combo` over {0..n-1}, returns the position `i` such that
+/// `combinations(n, combo.len())[i] == combo`.
+///
+/// Implementation: combinatorial number system / unranking. For
+/// position p in the combo with value v, contribute Σ_{j < v,
+/// j unconsumed} C(remaining_slots - 1, k - 1 - p). Equivalent
+/// to scanning all earlier-than-combo[p] choices at slot p.
+public fn combination_index(n: Int{>= 0}, combo: List<Int>) -> Int {
+    let k = combo.len();
+    if k == 0 { return 0; }
+    let mut idx: Int = 0;
+    let mut prev: Int = -1;
+    let mut p: Int = 0;
+    while p < k {
+        let v = combo[p];
+        // Count subsets that start with [prev+1 .. v-1] at slot p
+        // and any valid completion in the remaining (k-1-p) slots.
+        let mut j = prev + 1;
+        while j < v {
+            // Remaining elements after picking j at slot p: choose
+            // (k - 1 - p) from {j+1 .. n-1}, i.e. C(n - 1 - j, k - 1 - p).
+            idx = idx + binom(n - 1 - j, k - 1 - p);
+            j = j + 1;
+        }
+        prev = v;
+        p = p + 1;
+    }
+    idx
+}
+
+/// V8 (#248) — disjointness check for two sorted strictly-increasing lists.
+fn disjoint(a: &List<Int>, b: &List<Int>) -> Bool {
+    let mut i: Int = 0;
+    let mut j: Int = 0;
+    while i < a.len() && j < b.len() {
+        if a[i] == b[j] { return false; }
+        if a[i] < b[j] { i = i + 1; }
+        else           { j = j + 1; }
+    }
+    true
+}
+
+/// V8 (#248) — merge two disjoint sorted lists into one sorted
+/// list, returning (merged, sign). The sign is the parity of the
+/// shuffle permutation that brings the concatenation `a ++ b` into
+/// lex-sorted order; +1 if even, -1 if odd.
+///
+/// This is the core of the wedge product's anti-symmetry: when
+/// we lift two basis multi-indices `dx_I` and `dx_J` and reorder
+/// to canonical sorted form `dx_K`, the sign records how many
+/// adjacent transpositions of basis 1-forms (each contributing a
+/// −1 by anti-commutativity of dxᵢ ∧ dxⱼ) it took.
+fn merge_with_sign(a: &List<Int>, b: &List<Int>) -> (List<Int>, Int) {
+    let mut out: List<Int> = [];
+    let mut i: Int = 0;
+    let mut j: Int = 0;
+    let mut sign: Int = 1;
+    while i < a.len() && j < b.len() {
+        if a[i] < b[j] {
+            out.push(a[i]);
+            i = i + 1;
+        } else {
+            // b[j] crosses (a.len() - i) elements of `a` to land
+            // here — each crossing flips the sign.
+            let crossings = a.len() - i;
+            if (crossings & 1) == 1 { sign = -sign; }
+            out.push(b[j]);
+            j = j + 1;
+        }
+    }
+    while i < a.len() { out.push(a[i]); i = i + 1; }
+    while j < b.len() { out.push(b[j]); j = j + 1; }
+    (out, sign)
+}
+
+/// V8 (#248) — scalar-multiply a polynomial by an integer (±1
+/// for shuffle-sign accumulation).
+fn poly_scale_int(p: Polynomial, sign: Int) -> Polynomial {
+    if sign == 1 { return p; }
+    let mut out: List<Float> = [];
+    let mut i: Int = 0;
+    while i < p.coefficients.len() {
+        out.push((sign as Float) * p.coefficients[i]);
+        i = i + 1;
+    }
+    polynomial(out)
+}
+
+/// V8 (#248) — polynomial addition for accumulating wedge terms.
+fn poly_add(a: Polynomial, b: Polynomial) -> Polynomial {
+    let max_len = if a.coefficients.len() > b.coefficients.len() {
+        a.coefficients.len()
+    } else {
+        b.coefficients.len()
+    };
+    let mut out: List<Float> = [];
+    let mut i: Int = 0;
+    while i < max_len {
+        let ai = if i < a.coefficients.len() { a.coefficients[i] } else { 0.0 };
+        let bi = if i < b.coefficients.len() { b.coefficients[i] } else { 0.0 };
+        out.push(ai + bi);
+        i = i + 1;
+    }
+    polynomial(out)
+}
+
 /// Wedge product  α ∧ β  of a p-form and a q-form.
 /// Degree of result is p + q; zero form if p + q > n.
 ///
-/// V8 (#246) — three cases handled:
+/// V8 (#246 + #248) — full implementation:
 ///
 ///   • **Out-of-rank** (p + q > n): result is the zero (p+q)-form.
 ///     Always correct because Λ^{p+q}(R^n) = 0 for p+q > n.
 ///   • **0-form ∧ k-form** (or symmetric): scalar multiplication.
 ///     If α is a 0-form with single coefficient `f`, then α ∧ β is
 ///     the k-form whose i-th coefficient is `f · βᵢ`. Symmetric
-///     for β a 0-form.
-///   • **General p-form ∧ q-form** (p, q ≥ 1, p + q ≤ n): falls
-///     through to the degree-correct zero-coefficient stub. Full
-///     multi-index Leibniz expansion requires k-subset
-///     combinatorics + shuffle-sign that haven't landed; deferred
-///     to V2 (#246 V2 follow-up). Documented in the result so
-///     downstream callers can detect the partial-implementation
-///     boundary.
+///     for β a 0-form. (V8 #246)
+///   • **General p-form ∧ q-form** (p, q ≥ 1, p + q ≤ n): full
+///     multi-index Leibniz expansion (V8 #248):
+///         α ∧ β = Σ_{I,J: I∩J=∅} sgn(I,J) · a_I · b_J · dx_{I∪J}
+///     where sgn(I,J) = ±1 is the parity of the shuffle that
+///     brings I++J into sorted order. Anti-symmetry α∧β = (-1)^{pq} β∧α
+///     follows definitionally from this construction.
 @verify(formal)
 public fn wedge_product(
     alpha: DifferentialForm,
@@ -393,15 +560,48 @@ public fn wedge_product(
         };
     }
 
-    // V2 fall-through: degree-correct zero result for higher-degree
-    // wedges. Multi-index Leibniz expansion deferred.
-    let size = binom(n, new_degree);
+    // V8 (#248) — full multi-index Leibniz wedge for p, q ≥ 1.
+    //
+    //   α = Σ_I a_I dx_I  (length-p sorted multi-index I)
+    //   β = Σ_J b_J dx_J  (length-q sorted multi-index J)
+    //   α ∧ β = Σ_{I, J: I ∩ J = ∅} sgn(I, J) · a_I · b_J · dx_{I ∪ J}
+    //
+    // Where sgn(I, J) = ±1 is the parity of the shuffle that
+    // brings the concatenation I++J into sorted order — captures
+    // the anti-symmetry of the underlying basis 1-forms.
+    let p = alpha.degree;
+    let q = beta.degree;
+    let pq_idx_size = binom(n, new_degree);
     let mut coeffs: List<Polynomial> = [];
-    let mut i: Int = 0;
-    while i < size {
-        coeffs.push(poly_constant(0.0));
-        i = i + 1;
+    let mut k: Int = 0;
+    while k < pq_idx_size { coeffs.push(poly_constant(0.0)); k = k + 1; }
+
+    let p_combos = combinations(n, p);
+    let q_combos = combinations(n, q);
+    let mut ai: Int = 0;
+    while ai < p_combos.len() {
+        let i_combo = &p_combos[ai];
+        let mut bj: Int = 0;
+        while bj < q_combos.len() {
+            let j_combo = &q_combos[bj];
+            if disjoint(i_combo, j_combo) {
+                let (merged, sign) = merge_with_sign(i_combo, j_combo);
+                let target_idx = combination_index(n, merged);
+                let term = poly_mul(
+                    alpha.coefficients[ai],
+                    beta.coefficients[bj],
+                );
+                let signed_term = poly_scale_int(term, sign);
+                coeffs[target_idx] = poly_add(
+                    coeffs[target_idx],
+                    signed_term,
+                );
+            }
+            bj = bj + 1;
+        }
+        ai = ai + 1;
     }
+
     DifferentialForm { degree: new_degree, coefficients: coeffs, dimension: n }
 }
 
