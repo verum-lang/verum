@@ -42,6 +42,16 @@ public type Pbkdf2Error is
 /// 1 MiB in this API to keep List<Byte> allocation sane.
 const MAX_OUT_LEN: Int = 1_048_576;
 
+/// Maximum permitted iteration count.  Without this, callers passing
+/// attacker-controlled iteration counts (e.g. parsed from a PHC
+/// string, JWT header, or wire-format key descriptor) could pin
+/// CPU on a single derive call.  10M is well above OWASP 2023
+/// recommendations (600k for SHA-256, 210k for SHA-512) and any
+/// realistic deployment, but bounded enough to keep verify-time
+/// on the order of seconds.  Mirrors the matching cap at the
+/// password_hash wrapper layer (fe510d3d).
+public const MAX_PBKDF2_ITERATIONS: UInt32 = 10_000_000_u32;
+
 // =============================================================================
 // HMAC-SHA256
 // =============================================================================
@@ -53,7 +63,9 @@ public fn pbkdf2_hmac_sha256(
     out_len:    Int,
 ) -> Result<List<Byte>, Pbkdf2Error> {
     if out_len <= 0 || out_len > MAX_OUT_LEN { return Err(Pbkdf2Error.BadOutputLength); }
-    if iterations == 0_u32 { return Err(Pbkdf2Error.BadIterations); }
+    if iterations == 0_u32 || iterations > MAX_PBKDF2_ITERATIONS {
+        return Err(Pbkdf2Error.BadIterations);
+    }
     pbkdf2_inner(password, salt, iterations, out_len, PRF.Sha256)
 }
 
@@ -64,7 +76,9 @@ public fn pbkdf2_hmac_sha384(
     out_len:    Int,
 ) -> Result<List<Byte>, Pbkdf2Error> {
     if out_len <= 0 || out_len > MAX_OUT_LEN { return Err(Pbkdf2Error.BadOutputLength); }
-    if iterations == 0_u32 { return Err(Pbkdf2Error.BadIterations); }
+    if iterations == 0_u32 || iterations > MAX_PBKDF2_ITERATIONS {
+        return Err(Pbkdf2Error.BadIterations);
+    }
     pbkdf2_inner(password, salt, iterations, out_len, PRF.Sha384)
 }
 
@@ -75,7 +89,9 @@ public fn pbkdf2_hmac_sha512(
     out_len:    Int,
 ) -> Result<List<Byte>, Pbkdf2Error> {
     if out_len <= 0 || out_len > MAX_OUT_LEN { return Err(Pbkdf2Error.BadOutputLength); }
-    if iterations == 0_u32 { return Err(Pbkdf2Error.BadIterations); }
+    if iterations == 0_u32 || iterations > MAX_PBKDF2_ITERATIONS {
+        return Err(Pbkdf2Error.BadIterations);
+    }
     pbkdf2_inner(password, salt, iterations, out_len, PRF.Sha512)
 }
 
