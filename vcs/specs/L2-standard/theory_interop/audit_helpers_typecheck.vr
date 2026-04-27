@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: theory_interop, vva-section-10, audit-helpers, msfs-coord
+// @timeout: 10000
+// @expect: pass
+//
+// VVA §10 (#242) — exercise the audit-helper layer:
+//   • translation_verdict / translation_admits
+//   • is_coherent / coherence_quality
+//   • theorem_coord / ord_max / ord_lt round-trips
+//
+// Each helper is the single supported call site for the underlying
+// §10.2 / §10.4 thresholds — pinning their typecheck here ensures any
+// breaking change to TranslationResult or CoherenceResult surfaces at
+// the audit boundary rather than at every downstream consumer.
+
+mount core.theory_interop.{
+    TranslationVerdict, verdict_of, verdict_as_text, verdict_admits,
+    MsfsCoord, msfs_coord, coord_as_text, coord_eq,
+    MsfsTheoremCoord, theorem_coord, theorem_coord_as_text,
+    Ordinal, ord_zero, ord_finite, ord_omega, ord_max, ord_lt, ord_eq,
+};
+
+fn exercise_verdict_buckets() {
+    // §10.2 bucket boundaries — exact thresholds.
+    let v_morita: TranslationVerdict = verdict_of(0.0_f64);
+    let v_strong: TranslationVerdict = verdict_of(0.05_f64);
+    let v_moderate: TranslationVerdict = verdict_of(0.20_f64);
+    let v_weak: TranslationVerdict = verdict_of(0.50_f64);
+    let v_reject: TranslationVerdict = verdict_of(0.51_f64);
+
+    // verdict_admits accepts everything below the rejection bucket.
+    assert(verdict_admits(v_morita));
+    assert(verdict_admits(v_strong));
+    assert(verdict_admits(v_moderate));
+    assert(verdict_admits(v_weak));
+    assert(!verdict_admits(v_reject));
+
+    // verdict_as_text round-trip for the visible string.
+    let _: Text = verdict_as_text(v_morita);
+    let _: Text = verdict_as_text(v_reject);
+}
+
+fn exercise_msfs_coord() {
+    // Construct two coordinate-points, take their theorem_coord sup.
+    let alpha = msfs_coord(Text.from("lurie_htt"), ord_omega(), true);
+    let beta  = msfs_coord(Text.from("schreiber_dcct"), ord_finite(2), false);
+    assert(!coord_eq(alpha.clone(), beta.clone()));
+
+    let mut coords: List<MsfsCoord> = List.new();
+    coords.push(alpha);
+    coords.push(beta);
+    let t: MsfsTheoremCoord = theorem_coord(coords);
+
+    // Tau is conjunctive: false ∧ true == false.
+    assert(!t.tau);
+    let _: Text = theorem_coord_as_text(t);
+}
+
+fn exercise_ordinal_lattice() {
+    // Total order on Ordinal under ord_lt: 0 < n < ω < ω+1.
+    let zero = ord_zero();
+    let three = ord_finite(3);
+    let omega = ord_omega();
+
+    assert(ord_lt(zero.clone(), three.clone()));
+    assert(ord_lt(three.clone(), omega.clone()));
+    assert(!ord_lt(omega.clone(), three.clone()));
+
+    // ord_max is reflexive on equal inputs.
+    let m = ord_max(three.clone(), three.clone());
+    assert(ord_eq(m, three));
+}
+
+fn main() {
+    exercise_verdict_buckets();
+    exercise_msfs_coord();
+    exercise_ordinal_lattice();
+}

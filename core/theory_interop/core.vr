@@ -493,3 +493,63 @@ theorem zero_obstruction_exact(result: TranslationResult)
     requires result.obstruction.max_severity == 0.0
     ensures result.quality == 1.0
     proof by auto;
+
+// =============================================================================
+// §6. Audit-helper layer (#242)
+//
+// Translation+coherence operations return rich structures; downstream
+// callers (CLI `verum audit --coord`, IDE plugins, the JSON-RPC server)
+// need a tiny, stable surface for verdict classification + admit/reject.
+// These helpers close the gap between the spec's §10.2 thresholds and
+// the actual return types of `translate` / `check_coherence`.
+// =============================================================================
+
+mount core.theory_interop.coord.{
+    TranslationVerdict, verdict_of,
+};
+
+/// Classify a `TranslationResult` against the §10.2 thresholds.
+///
+///   • `result.obstruction.average_severity == 0`   ⇒ `Morita`
+///   • `(0,    0.05]`                                ⇒ `Strong`
+///   • `(0.05, 0.20]`                                ⇒ `Moderate`
+///   • `(0.20, 0.50]`                                ⇒ `Weak`
+///   • `(0.50, 1]`                                   ⇒ `Untranslatable`
+///
+/// Use this instead of inlining `verdict_of(result.obstruction.average_severity)`
+/// at every call site — the helper hides the obstruction internals so the
+/// spec's bucket boundaries can evolve without churning callers.
+public fn translation_verdict(result: &TranslationResult) -> TranslationVerdict {
+    verdict_of(result.obstruction.average_severity)
+}
+
+/// True iff the translation is admitted (anything other than `Untranslatable`).
+public fn translation_admits(result: &TranslationResult) -> Bool {
+    match translation_verdict(result) {
+        Untranslatable => false,
+        _              => true,
+    }
+}
+
+/// True iff a coherence check produced a `Coherent` global section.
+/// `Obstruction` results — even with `severity == 0` (i.e. only soft
+/// flag violations) — count as not-coherent for admit-or-reject use.
+public fn is_coherent(result: &CoherenceResult) -> Bool {
+    match result {
+        Coherent { .. }    => true,
+        Obstruction { .. } => false,
+    }
+}
+
+/// Quality score from a coherence result. Returns the global quality
+/// when `Coherent`; for `Obstruction`, returns `1 - severity` so callers
+/// have a single number to log / compare across runs.
+public fn coherence_quality(result: &CoherenceResult) -> Float {
+    match result {
+        Coherent { global_quality } => *global_quality,
+        Obstruction { severity, .. } => {
+            let s: Float = *severity;
+            if s >= 1.0 { 0.0 } else { 1.0 - s }
+        },
+    }
+}

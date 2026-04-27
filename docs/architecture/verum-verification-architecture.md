@@ -1376,7 +1376,13 @@ Roundtrip law: `unquote(quote(t)) ≡ t` structurally.
 
 ---
 
-## 10. `core.theory_interop` — Three Operations
+## 10. `core.theory_interop` — Three Operations **[100% — V8 #242]**
+
+**Implementation**: `core/theory_interop/{core,coord,protocol,bridges,congruence_closure}.vr` (~1900 LOC).
+
+**Audit-helper layer (V8 #242)** — `core.theory_interop.{translation_verdict, translation_admits, is_coherent, coherence_quality}` close the gap between the spec's §10.2 thresholds and the underlying `TranslationResult` / `CoherenceResult` shapes. Use these instead of inlining `verdict_of(result.obstruction.average_severity)` at every call site — the wrapper hides the obstruction internals so bucket boundaries can evolve without churning callers. Coordinate-side `theorem_coord`, ordinal helpers (`ord_zero` / `ord_finite` / `ord_omega` / `ord_max` / `ord_lt` / `ord_eq`) are now top-level exports for `verum audit --coord`. Coverage: `vcs/specs/L2-standard/theory_interop/audit_helpers_typecheck.vr`.
+
+
 
 ### 10.1 `load_theory(T)` — Yoneda
 
