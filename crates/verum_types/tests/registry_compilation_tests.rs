@@ -47,8 +47,8 @@ use verum_types::ty::Type;
 #[test]
 fn test_registry_with_cross_module_types_basic() {
     // Create shared registry
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Maybe<Int> = None | Some(Int) as if from std module
@@ -79,11 +79,11 @@ fn test_registry_with_cross_module_types_basic() {
 #[test]
 fn test_registry_multiple_modules_with_types() {
     // Create shared registry
-    let registry = Shared::new(ModuleRegistry::new());
+    let registry = verum_modules::SharedModuleRegistry::empty();
 
     // Create multiple checkers for different modules
-    let mut checker1 = TypeChecker::with_registry(registry.clone());
-    let mut checker2 = TypeChecker::with_registry(registry.clone());
+    let mut checker1 = TypeChecker::with_shared_registry(registry.clone());
+    let mut checker2 = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Module 1: Define User type
@@ -116,11 +116,11 @@ fn test_registry_multiple_modules_with_types() {
 #[test]
 fn test_registry_type_sharing_across_checkers() {
     // Create shared registry
-    let registry = Shared::new(ModuleRegistry::new());
+    let registry = verum_modules::SharedModuleRegistry::empty();
     let span = Span::dummy();
 
     // Checker 1: Define and use Maybe type
-    let mut checker1 = TypeChecker::with_registry(registry.clone());
+    let mut checker1 = TypeChecker::with_shared_registry(registry.clone());
 
     let mut maybe_variants = IndexMap::new();
     maybe_variants.insert(Text::from("None"), Type::Unit);
@@ -133,7 +133,7 @@ fn test_registry_type_sharing_across_checkers() {
         .insert(Text::from("maybe_val"), TypeScheme::mono(maybe_int.clone()));
 
     // Checker 2: Can use the same registry
-    let mut checker2 = TypeChecker::with_registry(registry.clone());
+    let mut checker2 = TypeChecker::with_shared_registry(registry.clone());
 
     // Both checkers share the same registry instance
     // This simulates cross-module compilation
@@ -150,8 +150,8 @@ fn test_registry_type_sharing_across_checkers() {
 
 #[test]
 fn test_registry_type_lookup_simple() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define a named type
@@ -182,8 +182,8 @@ fn test_registry_type_lookup_simple() {
 
 #[test]
 fn test_registry_variant_type_lookup() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Maybe variant
@@ -214,8 +214,8 @@ fn test_registry_variant_type_lookup() {
 
 #[test]
 fn test_registry_generic_type_lookup() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Result<Int, Text>
@@ -241,8 +241,8 @@ fn test_registry_generic_type_lookup() {
 
 #[test]
 fn test_variant_pattern_with_registry_maybe() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Maybe<Int> in registry
@@ -278,8 +278,8 @@ fn test_variant_pattern_with_registry_maybe() {
 
 #[test]
 fn test_variant_pattern_with_registry_result() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Result<Text, Int> in registry
@@ -315,8 +315,8 @@ fn test_variant_pattern_with_registry_result() {
 
 #[test]
 fn test_variant_pattern_match_expression_with_registry() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Maybe<Int> in registry
@@ -399,8 +399,8 @@ fn test_variant_pattern_match_expression_with_registry() {
 
 #[test]
 fn test_field_access_with_registry_record() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define User record in registry
@@ -438,8 +438,8 @@ fn test_field_access_with_registry_record() {
 
 #[test]
 fn test_nested_field_access_with_registry() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Address record
@@ -496,8 +496,8 @@ fn test_nested_field_access_with_registry() {
 
 #[test]
 fn test_registry_variant_nested_with_records() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Error record
@@ -545,8 +545,8 @@ fn test_registry_variant_nested_with_records() {
 
 #[test]
 fn test_registry_multiple_variants_with_complex_payloads() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define complex Status variant
@@ -608,8 +608,8 @@ fn test_registry_multiple_variants_with_complex_payloads() {
 
 #[test]
 fn test_registry_type_consistency_across_operations() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Point type
@@ -674,11 +674,11 @@ fn test_registry_type_consistency_across_operations() {
 
 #[test]
 fn test_registry_shared_state_consistency() {
-    let registry = Shared::new(ModuleRegistry::new());
+    let registry = verum_modules::SharedModuleRegistry::empty();
 
     // Create two checkers sharing the same registry
-    let checker1 = TypeChecker::with_registry(registry.clone());
-    let checker2 = TypeChecker::with_registry(registry.clone());
+    let checker1 = TypeChecker::with_shared_registry(registry.clone());
+    let checker2 = TypeChecker::with_shared_registry(registry.clone());
 
     // Both should reference the same registry
     // This test verifies that the shared state is maintained
@@ -691,8 +691,8 @@ fn test_registry_shared_state_consistency() {
 
 #[test]
 fn test_registry_type_not_found_error() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Try to lookup a non-existent type
@@ -702,8 +702,8 @@ fn test_registry_type_not_found_error() {
 
 #[test]
 fn test_registry_variant_binding_correctness() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Maybe<Text>
@@ -740,8 +740,8 @@ fn test_registry_variant_binding_correctness() {
 
 #[test]
 fn test_registry_complex_nested_pattern_binding() {
-    let registry = Shared::new(ModuleRegistry::new());
-    let mut checker = TypeChecker::with_registry(registry.clone());
+    let registry = verum_modules::SharedModuleRegistry::empty();
+    let mut checker = TypeChecker::with_shared_registry(registry.clone());
     let span = Span::dummy();
 
     // Define Maybe<Int>
@@ -792,11 +792,11 @@ fn test_registry_complex_nested_pattern_binding() {
 
 #[test]
 fn test_registry_independent_checker_contexts() {
-    let registry = Shared::new(ModuleRegistry::new());
+    let registry = verum_modules::SharedModuleRegistry::empty();
     let span = Span::dummy();
 
     // Checker 1: Define and use type A
-    let mut checker1 = TypeChecker::with_registry(registry.clone());
+    let mut checker1 = TypeChecker::with_shared_registry(registry.clone());
     let mut type_a_fields = IndexMap::new();
     type_a_fields.insert(Text::from("field_a"), Type::int());
     let type_a = Type::Record(type_a_fields);
@@ -807,7 +807,7 @@ fn test_registry_independent_checker_contexts() {
         .insert(Text::from("TypeA"), TypeScheme::mono(type_a.clone()));
 
     // Checker 2: Define and use type B
-    let mut checker2 = TypeChecker::with_registry(registry.clone());
+    let mut checker2 = TypeChecker::with_shared_registry(registry.clone());
     let mut type_b_fields = IndexMap::new();
     type_b_fields.insert(Text::from("field_b"), Type::text());
     let type_b = Type::Record(type_b_fields);

@@ -28,6 +28,7 @@ tokio = { workspace = true }     # For async parallel loading
 rayon = { workspace = true }     # For sync parallel loading
 num_cpus = { workspace = true }  # For default concurrency config
 blake3 = { workspace = true }    # For content hashing (unified with compiler)
+parking_lot = { workspace = true }  # For SharedModuleRegistry RwLock
 
 [dev-dependencies]
 tempfile = "3.14"
