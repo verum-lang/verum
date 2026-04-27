@@ -1,0 +1,67 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, list, generic-method-scope, codegen-bug, regression
+// @timeout: 30000
+// @expected-exit: 0
+// @description: Tier-equivalence runtime exercise of List.try_with_capacity.
+//               REGRESSION ANCHOR for an existing tier-divergence bug:
+//
+//               Tier-0 (interpreter):
+//                 error: VBC execution error:
+//                   Null pointer dereference: op=opcode 0x62 (GetF)
+//                   at FatRef.is_null (pc=0)
+//
+//               Tier-1 (AOT):
+//                 [lenient] SKIP List.try_with_capacity (bug-class):
+//                   undefined function: try_alloc
+//                 → exit 255 (FunctionNotFound at runtime)
+//
+//               Root cause: the `mount core.base.memory.{try_alloc, try_realloc};`
+//               directive at the top of `core/collections/list.vr` is supposed
+//               to bring `try_alloc` into scope for every function defined in
+//               that file.  But for METHODS on the GENERIC TYPE `List<T>`
+//               (specifically `try_with_capacity` and `try_resize_buffer`), the
+//               codegen's name-resolution chain fails to propagate the
+//               file-level mount — it searches `ctx.functions` (3851 entries)
+//               and finds no `try_alloc`, even though the symbol is
+//               registered globally.
+//
+//               Once direct, free-function calls to `try_alloc` work in
+//               BOTH tiers (see /tmp/direct_try_alloc.vr in #199 investigation
+//               history).  The bug is exclusively the generic-method-scope
+//               propagation.
+//
+//               This file pins the SAME assertions that should pass once the
+//               codegen scope bug is fixed.  Until then it should be added to
+//               a "known-divergence" allowlist, not silently skipped.
+//
+// Tracking: #199 (root-cause investigation) → fix lands in compiler /
+// stdlib, NOT in this test file.
+
+fn main() -> Int {
+    // Case 1: positive capacity returns Ok with empty list backed by buffer.
+    let r1: Result<List<Int>, AllocError> = List.try_with_capacity(8);
+    if !r1.is_ok() {
+        print("FAIL: try_with_capacity(8) returned Err");
+        return 1;
+    }
+
+    // Case 2: zero capacity short-circuits to Ok(empty list, no alloc).
+    let r2: Result<List<Int>, AllocError> = List.try_with_capacity(0);
+    if !r2.is_ok() {
+        print("FAIL: try_with_capacity(0) returned Err");
+        return 1;
+    }
+
+    // Case 3: negative capacity returns Err(CapacityOverflow) — pinned by
+    // the #194 fix.
+    let r3: Result<List<Int>, AllocError> = List.try_with_capacity(-1);
+    if !r3.is_err() {
+        print("FAIL: try_with_capacity(-1) returned Ok");
+        return 1;
+    }
+
+    print("diff_list_try_with_capacity_runtime: ok");
+    0
+}
