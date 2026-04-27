@@ -97,7 +97,8 @@ fn parse_ip_literal(s: &Text) -> Maybe<List<Byte>> {
     match Ipv4Addr.parse(s) {
         Ok(addr) => {
             let (a, b, c, d) = addr.octets();
-            let mut bytes: List<Byte> = [];
+            // IPv4 = exactly 4 bytes.
+            let mut bytes: List<Byte> = List.with_capacity(4);
             bytes.push(a); bytes.push(b); bytes.push(c); bytes.push(d);
             return Some(bytes);
         },
@@ -107,7 +108,8 @@ fn parse_ip_literal(s: &Text) -> Maybe<List<Byte>> {
     match Ipv6Addr.parse(s) {
         Ok(addr) => {
             let arr: [Byte; 16] = addr.octets();
-            let mut bytes: List<Byte> = [];
+            // IPv6 = exactly 16 bytes.
+            let mut bytes: List<Byte> = List.with_capacity(16);
             let mut i: Int = 0;
             while i < 16 { bytes.push(arr[i]); i = i + 1; }
             Some(bytes)
