@@ -63,9 +63,9 @@ fn test_negative_integer_widths_match() {
 }
 
 fn test_evaluate_int_dispatches_to_serial_width() {
-    let r = evaluate(&VkInt0_i64);
+    let r = evaluate(&VkInt(0_i64));
     assert_eq(result_bytes(&r), 0);
-    let r2 = evaluate(&VkInt1_000_000_i64);
+    let r2 = evaluate(&VkInt1_000_(000_i64));
     assert_eq(result_bytes(&r2), 4);
 }
 

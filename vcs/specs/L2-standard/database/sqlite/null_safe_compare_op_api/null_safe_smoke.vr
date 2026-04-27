@@ -22,27 +22,27 @@ fn test_op_names_and_arity() {
 
 fn test_null_safe_equal_branches() {
     assert(null_safe_equal(&VNull, &VNull));
-    assert(!null_safe_equal(&VNull, &VInt0_i64));
-    assert(!null_safe_equal(&VInt0_i64, &VNull));
-    assert(null_safe_equal(&VInt5_i64, &VInt5_i64));
-    assert(!null_safe_equal(&VInt5_i64, &VInt6_i64));
+    assert(!null_safe_equal(&VNull, &VInt(0_i64)));
+    assert(!null_safe_equal(&VInt(0_i64), &VNull));
+    assert(null_safe_equal(&VInt(5_i64), &VInt(5_i64)));
+    assert(!null_safe_equal(&VInt(5_i64), &VInt(6_i64)));
     assert(null_safe_equal(&VText("a".clone()), &VText("a".clone())));
     assert(!null_safe_equal(&VText("a".clone()), &VText("b".clone())));
-    assert(!null_safe_equal(&VInt1_i64, &VText("1".clone())));
+    assert(!null_safe_equal(&VInt(1_i64), &VText("1".clone())));
 }
 
 fn test_evaluate_distinct_from() {
     assert_eq(evaluate(&OpDistinctFrom, &VNull,             &VNull),                   0);
-    assert_eq(evaluate(&OpDistinctFrom, &VInt1_i64, &VInt1_i64),         0);
-    assert_eq(evaluate(&OpDistinctFrom, &VInt1_i64, &VInt2_i64),         1);
-    assert_eq(evaluate(&OpDistinctFrom, &VNull,             &VInt1_i64),         1);
+    assert_eq(evaluate(&OpDistinctFrom, &VInt(1_i64), &VInt(1_i64)),         0);
+    assert_eq(evaluate(&OpDistinctFrom, &VInt(1_i64), &VInt(2_i64)),         1);
+    assert_eq(evaluate(&OpDistinctFrom, &VNull,             &VInt(1_i64)),         1);
 }
 
 fn test_evaluate_not_distinct_from() {
     assert_eq(evaluate(&OpNotDistinctFrom, &VNull,             &VNull),                  1);
-    assert_eq(evaluate(&OpNotDistinctFrom, &VInt1_i64, &VInt1_i64),         1);
-    assert_eq(evaluate(&OpNotDistinctFrom, &VInt1_i64, &VInt2_i64),         0);
-    assert_eq(evaluate(&OpNotDistinctFrom, &VNull,             &VInt1_i64),         0);
+    assert_eq(evaluate(&OpNotDistinctFrom, &VInt(1_i64), &VInt(1_i64)),         1);
+    assert_eq(evaluate(&OpNotDistinctFrom, &VInt(1_i64), &VInt(2_i64)),         0);
+    assert_eq(evaluate(&OpNotDistinctFrom, &VNull,             &VInt(1_i64)),         0);
 }
 
 fn test_equivalence_to_is_ops() {
@@ -54,8 +54,8 @@ fn test_equivalence_to_is_ops() {
 
 fn test_classify_result() {
     match classify_result(&VNull,             &VNull)                  { RcEqual     => {}, _ => assert(false) }
-    match classify_result(&VInt7_i64, &VInt7_i64)         { RcEqual     => {}, _ => assert(false) }
-    match classify_result(&VNull,             &VInt7_i64)         { RcDifferent => {}, _ => assert(false) }
+    match classify_result(&VInt(7_i64), &VInt(7_i64))         { RcEqual     => {}, _ => assert(false) }
+    match classify_result(&VNull,             &VInt(7_i64))         { RcDifferent => {}, _ => assert(false) }
     assert(class_name(&RcEqual)     == "equal".clone());
     assert(class_name(&RcDifferent) == "different".clone());
 }

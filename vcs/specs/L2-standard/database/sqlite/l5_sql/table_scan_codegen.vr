@@ -40,7 +40,7 @@ fn scan_with_filter_project() {
     // SELECT id FROM t WHERE id = 1
     let tref = TableRef { schema: "".clone(), name: "t".clone(), alias: "".clone() };
     let scan: PlanNode = PnTableScan(tref, 0, 2);
-    let pred: Expr = EBinary(BEq, Heap(EColumnRef(0, 0)), Heap(ELit(LInt1_i64)));
+    let pred: Expr = EBinary(BEq, Heap(EColumnRef(0, 0)), Heap(ELit(LInt(1_i64))));
     let filter: PlanNode = PnFilter(Heap(scan), pred);
     let cols: List<PlanColumn> = [PlanColumn { alias: "id".clone(), expr: EColumnRef(0, 0) }];
     let plan: PlanNode = PnProject(Heap(filter), cols);
@@ -54,7 +54,7 @@ fn columnref_in_arithmetic() {
     // SELECT id + 1 FROM t
     let tref = TableRef { schema: "".clone(), name: "t".clone(), alias: "".clone() };
     let scan: PlanNode = PnTableScan(tref, 0, 1);
-    let expr: Expr = EBinary(BAdd, Heap(EColumnRef(0, 0)), Heap(ELit(LInt1_i64)));
+    let expr: Expr = EBinary(BAdd, Heap(EColumnRef(0, 0)), Heap(ELit(LInt(1_i64))));
     let cols: List<PlanColumn> = [PlanColumn { alias: "".clone(), expr: expr }];
     let plan: PlanNode = PnProject(Heap(scan), cols);
     match codegen(&plan, "SELECT id+1 FROM t".clone()) {

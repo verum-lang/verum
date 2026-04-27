@@ -51,10 +51,10 @@ public type JsonField is { key: Text, value: SqlJsonValue };
 public fn json_valid(v: &Register) -> Register {
     match v {
         RText(s) => match parse_json(s) {
-            Some(_) => RInt1_i64,
-            None    => RInt0_i64,
+            Some(_) => RInt(1_i64),
+            None    => RInt(0_i64),
         },
-        _ => RInt0_i64,
+        _ => RInt(0_i64),
     }
 }
 
@@ -106,7 +106,7 @@ public fn json_array_length(v: &Register) -> Register {
         RText(s) => match parse_json(s) {
             Some(jv) => match jv {
                 JArray(items) => RInt(items.len() as Int64),
-                _ => RInt0_i64,
+                _ => RInt(0_i64),
             },
             None => RNull,
         },

@@ -1892,7 +1892,7 @@ implement UInt64 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt64> {
         if exp < 0 { None }
-        else if exp == 0 { Some1_u64 }
+        else if exp == 0 { Some(1_u64) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2041,7 +2041,7 @@ implement UInt32 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt32> {
         if exp < 0 { None }
-        else if exp == 0 { Some1_u32 }
+        else if exp == 0 { Some(1_u32) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2190,7 +2190,7 @@ implement UInt16 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt16> {
         if exp < 0 { None }
-        else if exp == 0 { Some1_u16 }
+        else if exp == 0 { Some(1_u16) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2339,7 +2339,7 @@ implement UInt8 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt8> {
         if exp < 0 { None }
-        else if exp == 0 { Some1_u8 }
+        else if exp == 0 { Some(1_u8) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2634,7 +2634,7 @@ implement Int8 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<Int8> {
         if exp < 0 { None }
-        else if exp == 0 { Some1_i8 }
+        else if exp == 0 { Some(1_i8) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2795,7 +2795,7 @@ implement Int16 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<Int16> {
         if exp < 0 { None }
-        else if exp == 0 { Some1_i16 }
+        else if exp == 0 { Some(1_i16) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2956,7 +2956,7 @@ implement Int32 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<Int32> {
         if exp < 0 { None }
-        else if exp == 0 { Some1_i32 }
+        else if exp == 0 { Some(1_i32) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -3118,7 +3118,7 @@ implement Int64 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<Int64> {
         if exp < 0 { None }
-        else if exp == 0 { Some1_i64 }
+        else if exp == 0 { Some(1_i64) }
         else {
             let mut base = self;
             let mut e = exp;

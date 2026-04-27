@@ -39,14 +39,14 @@ fn test_marker_part_flags() {
 
 fn test_form_names() {
     assert(form_name(&DfNull) == "NULL".clone());
-    assert(form_name(&DfIntLiteral42_i64) == "INT".clone());
+    assert(form_name(&DfIntLiteral(42_i64)) == "INT".clone());
     assert(form_name(&DfCurrent(CmDate)) == "CURRENT_*".clone());
     assert(form_name(&DfExpression("foo()".clone())) == "EXPRESSION".clone());
 }
 
 fn test_is_literal() {
     assert(is_literal(&DfNull));
-    assert(is_literal(&DfIntLiteral1_i64));
+    assert(is_literal(&DfIntLiteral(1_i64)));
     assert(is_literal(&DfRealLiteral(1.5 as Float)));
     assert(is_literal(&DfTextLiteral("x".clone())));
     assert(is_literal(&DfBlobLiteral));
@@ -57,20 +57,20 @@ fn test_is_literal() {
 fn test_allowed_in_add_column() {
     assert(allowed_in_add_column(&DfNull));
     assert(allowed_in_add_column(&DfCurrent(CmTimestamp)));
-    assert(allowed_in_add_column(&DfIntLiteral0_i64));
+    assert(allowed_in_add_column(&DfIntLiteral(0_i64)));
     assert(!allowed_in_add_column(&DfExpression("f()".clone())));
 }
 
 fn test_is_runtime_constant() {
     assert(is_runtime_constant(&DfCurrent(CmDate)));
     assert(!is_runtime_constant(&DfNull));
-    assert(!is_runtime_constant(&DfIntLiteral1_i64));
+    assert(!is_runtime_constant(&DfIntLiteral(1_i64)));
 }
 
 fn test_evaluated_per_insert() {
     assert(evaluated_per_insert(&DfCurrent(CmTime)));
     assert(evaluated_per_insert(&DfExpression("random()".clone())));
-    assert(!evaluated_per_insert(&DfIntLiteral0_i64));
+    assert(!evaluated_per_insert(&DfIntLiteral(0_i64)));
     assert(!evaluated_per_insert(&DfNull));
     assert(!evaluated_per_insert(&DfTextLiteral("x".clone())));
 }

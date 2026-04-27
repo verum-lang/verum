@@ -28,21 +28,21 @@ fn test_target_page_count_all_takes_full_freelist() {
 }
 
 fn test_target_page_count_atmost_caps_at_freelist() {
-    assert_eq(target_page_count(&RqAtMost50_i64, 250 as Int64), 50 as Int64);
-    assert_eq(target_page_count(&RqAtMost500_i64, 250 as Int64), 250 as Int64);
+    assert_eq(target_page_count(&RqAtMost(50_i64), 250 as Int64), 50 as Int64);
+    assert_eq(target_page_count(&RqAtMost(500_i64), 250 as Int64), 250 as Int64);
 }
 
 fn test_outcome_names() {
-    assert(outcome_name(&OkReclaimed0_i64)        == "ok_reclaimed".clone());
+    assert(outcome_name(&OkReclaimed(0_i64))        == "ok_reclaimed".clone());
     assert(outcome_name(&ErrModeNotIncremental)          == "err_mode_not_incremental".clone());
     assert(outcome_name(&ErrInTransaction)               == "err_in_transaction".clone());
     assert(outcome_name(&ErrCorrupt)                     == "err_corrupt".clone());
 }
 
 fn test_is_ok_and_pages_reclaimed() {
-    assert(is_ok(&OkReclaimed7_i64));
+    assert(is_ok(&OkReclaimed(7_i64)));
     assert(!is_ok(&ErrCorrupt));
-    assert_eq(pages_reclaimed(&OkReclaimed7_i64), 7 as Int64);
+    assert_eq(pages_reclaimed(&OkReclaimed(7_i64)), 7 as Int64);
     assert_eq(pages_reclaimed(&ErrInTransaction), 0 as Int64);
 }
 

@@ -25,7 +25,7 @@ fn build_select_one() {
     // SELECT 1
     let simple = SimpleSelect {
         distinct: false,
-        result_columns: [RcExpr(ELit(LInt1_i64), "".clone())],
+        result_columns: [RcExpr(ELit(LInt(1_i64)), "".clone())],
         from: None,
         where_clause: None,
         group_by: [],
@@ -44,7 +44,7 @@ fn build_select_one() {
 
 fn build_insert_values() {
     let t = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
-    let row: List<Expr> = [ELit(LInt1_i64), ELit(LText("Alice".clone()))];
+    let row: List<Expr> = [ELit(LInt(1_i64)), ELit(LText("Alice".clone()))];
     let ins = InsertStmt {
         table: t,
         columns: ["id".clone(), "name".clone()],
@@ -65,7 +65,7 @@ fn build_update_basic() {
         table: t,
         assignments: [asg],
         from: None,
-        where_clause: Some(EBinary(BEq, Heap(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())), Heap(ELit(LInt1_i64)))),
+        where_clause: Some(EBinary(BEq, Heap(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())), Heap(ELit(LInt(1_i64))))),
         on_conflict: None,
         returning: [],
     };
@@ -119,13 +119,13 @@ fn build_expression_variety() {
     let _ = ELit(LNull);
     let _ = ELit(LTrue);
     let _ = ELit(LCurrentTimestamp);
-    let a = ELit(LInt1_i64);
-    let b = ELit(LInt2_i64);
+    let a = ELit(LInt(1_i64));
+    let b = ELit(LInt(2_i64));
     let _ = EBinary(BAdd, Heap(a), Heap(b));
-    let _ = EUnary(UNeg, Heap(ELit(LInt5_i64)));
-    let _ = EFunc("abs".clone(), [ELit(LInt10_i64)], false);
-    let _ = ECoalesce([ELit(LNull), ELit(LInt1_i64)]);
-    let _ = ECast(Heap(ELit(LInt1_i64)), "REAL".clone());
+    let _ = EUnary(UNeg, Heap(ELit(LInt(5_i64))));
+    let _ = EFunc("abs".clone(), [ELit(LInt(10_i64))], false);
+    let _ = ECoalesce([ELit(LNull), ELit(LInt(1_i64))]);
+    let _ = ECast(Heap(ELit(LInt(1_i64))), "REAL".clone());
 }
 
 fn build_transaction_statements() {

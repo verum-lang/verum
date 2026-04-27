@@ -41,13 +41,13 @@ fn require_null(r: Register) {
 }
 
 fn test_abs() {
-    require_int(fn_abs(&RInt-7_i64), 7 as Int64);
-    require_int(fn_abs(&RInt7_i64), 7 as Int64);
+    require_int(fn_abs(&RInt(-7_i64)), 7 as Int64);
+    require_int(fn_abs(&RInt(7_i64)), 7 as Int64);
     require_null(fn_abs(&RNull));
 }
 
 fn test_round_zero_digits() {
-    match fn_round(&RReal(3.7), &RInt0_i64) {
+    match fn_round(&RReal(3.7), &RInt(0_i64)) {
         RReal(x) => assert(x == 4.0),
         _        => panic("ROUND should return REAL"),
     }
@@ -56,7 +56,7 @@ fn test_round_zero_digits() {
 fn test_coalesce_picks_first_non_null() {
     let mut args: List<Register> = List.new();
     args.push(RNull);
-    args.push(RInt42_i64);
+    args.push(RInt(42_i64));
     args.push(RNull);
     require_int(fn_coalesce(&args), 42 as Int64);
 }
@@ -69,45 +69,45 @@ fn test_coalesce_all_null() {
 }
 
 fn test_ifnull() {
-    require_int(fn_ifnull(&RNull, &RInt99_i64), 99 as Int64);
-    require_int(fn_ifnull(&RInt1_i64, &RInt2_i64), 1 as Int64);
+    require_int(fn_ifnull(&RNull, &RInt(99_i64)), 99 as Int64);
+    require_int(fn_ifnull(&RInt(1_i64), &RInt(2_i64)), 1 as Int64);
 }
 
 fn test_nullif() {
-    require_int(fn_nullif(&RInt1_i64, &RInt2_i64), 1 as Int64);
-    require_null(fn_nullif(&RInt5_i64, &RInt5_i64));
+    require_int(fn_nullif(&RInt(1_i64), &RInt(2_i64)), 1 as Int64);
+    require_null(fn_nullif(&RInt(5_i64), &RInt(5_i64)));
 }
 
 fn test_min_max_varargs_skip_null() {
     let mut args: List<Register> = List.new();
     args.push(RNull);
-    args.push(RInt3_i64);
-    args.push(RInt1_i64);
-    args.push(RInt2_i64);
+    args.push(RInt(3_i64));
+    args.push(RInt(1_i64));
+    args.push(RInt(2_i64));
     require_int(min_var(&args), 1 as Int64);
     require_int(max_var(&args), 3 as Int64);
 }
 
 fn test_iif() {
     require_int(
-        fn_iif(&RInt1_i64, &RInt11_i64, &RInt22_i64),
+        fn_iif(&RInt(1_i64), &RInt(11_i64), &RInt(22_i64)),
         11 as Int64,
     );
     require_int(
-        fn_iif(&RNull, &RInt11_i64, &RInt22_i64),
+        fn_iif(&RNull, &RInt(11_i64), &RInt(22_i64)),
         22 as Int64,
     );
 }
 
 fn test_sign() {
-    require_int(fn_sign(&RInt5_i64), 1 as Int64);
-    require_int(fn_sign(&RInt-5_i64), -1 as Int64);
-    require_int(fn_sign(&RInt0_i64), 0 as Int64);
+    require_int(fn_sign(&RInt(5_i64)), 1 as Int64);
+    require_int(fn_sign(&RInt(-5_i64)), -1 as Int64);
+    require_int(fn_sign(&RInt(0_i64)), 0 as Int64);
     require_null(fn_sign(&RNull));
 }
 
 fn test_zero_blob_size() {
-    match zero_blob(&RInt8_i64) {
+    match zero_blob(&RInt(8_i64)) {
         RBlob(b) => assert_eq(b.len(), 8),
         _        => panic("ZEROBLOB should return RBlob"),
     }
@@ -115,7 +115,7 @@ fn test_zero_blob_size() {
 
 fn test_random_blob_size() {
     let mut rng = rng_new1234_i64;
-    match random_blob(&RInt16_i64, &mut rng) {
+    match random_blob(&RInt(16_i64), &mut rng) {
         RBlob(b) => assert_eq(b.len(), 16),
         _        => panic("RANDOMBLOB should return RBlob"),
     }

@@ -80,7 +80,7 @@ fn test_allocate_returns_full_at_max() {
 }
 
 fn test_outcome_names() {
-    assert(outcome_name(&AoRowid1_i64) == "rowid".clone());
+    assert(outcome_name(&AoRowid(1_i64)) == "rowid".clone());
     assert(outcome_name(&AoFull) == "full".clone());
 }
 

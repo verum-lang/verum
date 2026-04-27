@@ -48,10 +48,10 @@ fn test_note_bytes_accumulates() {
 }
 
 fn test_ingest_name_and_size() {
-    assert(ingest_name(&IkBuffered1024_i64) == "buffered".clone());
-    assert(ingest_name(&IkIterator42_i64) == "iterator".clone());
-    assert_eq(ingest_size(&IkBuffered1024_i64), 1024 as Int64);
-    assert_eq(ingest_size(&IkIterator42_i64), 0 as Int64);
+    assert(ingest_name(&IkBuffered(1024_i64)) == "buffered".clone());
+    assert(ingest_name(&IkIterator(42_i64)) == "iterator".clone());
+    assert_eq(ingest_size(&IkBuffered(1024_i64)), 1024 as Int64);
+    assert_eq(ingest_size(&IkIterator(42_i64)), 0 as Int64);
 }
 
 fn test_add_is_ok() {

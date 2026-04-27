@@ -45,25 +45,25 @@ fn test_default_unit_is_range() {
 
 fn test_bound_predicates() {
     assert(is_before_current(&FbUnboundedPreceding));
-    assert(is_before_current(&FbPreceding3_i64));
+    assert(is_before_current(&FbPreceding(3_i64)));
     assert(is_anchored_current(&FbCurrentRow));
-    assert(is_after_current(&FbFollowing2_i64));
+    assert(is_after_current(&FbFollowing(2_i64)));
     assert(is_after_current(&FbUnboundedFollowing));
     assert(!is_before_current(&FbCurrentRow));
 }
 
 fn test_offset_non_negative() {
-    assert(offset_is_valid(&FbPreceding0_i64));
-    assert(offset_is_valid(&FbPreceding5_i64));
-    assert(!offset_is_valid(&FbPreceding-1_i64));
-    assert(!offset_is_valid(&FbFollowing-3_i64));
+    assert(offset_is_valid(&FbPreceding(0_i64)));
+    assert(offset_is_valid(&FbPreceding(5_i64)));
+    assert(!offset_is_valid(&FbPreceding(-1_i64)));
+    assert(!offset_is_valid(&FbFollowing(-3_i64)));
 }
 
 fn test_ordering_index_is_total() {
-    assert(ordering_index(&FbUnboundedPreceding) < ordering_index(&FbPreceding1_i64));
-    assert(ordering_index(&FbPreceding1_i64) < ordering_index(&FbCurrentRow));
-    assert(ordering_index(&FbCurrentRow) < ordering_index(&FbFollowing1_i64));
-    assert(ordering_index(&FbFollowing1_i64) < ordering_index(&FbUnboundedFollowing));
+    assert(ordering_index(&FbUnboundedPreceding) < ordering_index(&FbPreceding(1_i64)));
+    assert(ordering_index(&FbPreceding(1_i64)) < ordering_index(&FbCurrentRow));
+    assert(ordering_index(&FbCurrentRow) < ordering_index(&FbFollowing(1_i64)));
+    assert(ordering_index(&FbFollowing(1_i64)) < ordering_index(&FbUnboundedFollowing));
 }
 
 fn test_exclude_semantics() {
@@ -85,7 +85,7 @@ fn test_default_frame() {
 }
 
 fn test_well_formed_rejects_inverted() {
-    let bad = make(FuRows, FbFollowing5_i64, FbPreceding1_i64);
+    let bad = make(FuRows, FbFollowing(5_i64), FbPreceding(1_i64));
     assert(!is_well_formed(&bad));
 }
 

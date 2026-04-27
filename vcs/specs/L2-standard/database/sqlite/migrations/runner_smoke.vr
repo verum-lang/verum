@@ -50,8 +50,8 @@ fn test_migration_builder() {
 
 fn test_status_names() {
     assert(status_name(&MsPending) == "pending".clone());
-    assert(status_name(&MsApplied100_i64) == "applied".clone());
-    assert(status_name(&MsRolledBack0_i64) == "rolled_back".clone());
+    assert(status_name(&MsApplied(100_i64)) == "applied".clone());
+    assert(status_name(&MsRolledBack(0_i64)) == "rolled_back".clone());
     assert(status_name(&MsFailed("boom".clone())) == "failed".clone());
 }
 

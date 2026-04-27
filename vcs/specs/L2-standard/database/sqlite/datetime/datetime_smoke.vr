@@ -206,7 +206,7 @@ fn test_parse_unknown_returns_none() {
 
 fn test_apply_add_days_advances_jd() {
     let i = from_ymd(2024, 4, 24);
-    let i2 = apply_modifier(&i, &MAddDays7_i64, 0 as Int64);
+    let i2 = apply_modifier(&i, &MAddDays(7_i64), 0 as Int64);
     assert_eq(i2.jd_int - i.jd_int, 7 as Int64);
 }
 

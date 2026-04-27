@@ -13,15 +13,15 @@ mount core.base.maybe.{Maybe, Some, None};
 
 @test
 fn test_int8_from_str_radix_decimal() {
-    assert_eq(Int8.from_str_radix(&"42", 10), Some42_i8);
-    assert_eq(Int8.from_str_radix(&"-128", 10), Some-128_i8);
-    assert_eq(Int8.from_str_radix(&"127", 10), Some127_i8);
+    assert_eq(Int8.from_str_radix(&"42", 10), Some(42_i8));
+    assert_eq(Int8.from_str_radix(&"-128", 10), Some(-128_i8));
+    assert_eq(Int8.from_str_radix(&"127", 10), Some(127_i8));
 }
 
 @test
 fn test_int8_from_str_radix_hex() {
-    assert_eq(Int8.from_str_radix(&"7f", 16), Some127_i8);
-    assert_eq(Int8.from_str_radix(&"0", 16), Some0_i8);
+    assert_eq(Int8.from_str_radix(&"7f", 16), Some(127_i8));
+    assert_eq(Int8.from_str_radix(&"0", 16), Some(0_i8));
 }
 
 @test
@@ -32,14 +32,14 @@ fn test_int8_from_str_radix_overflow() {
 
 @test
 fn test_int16_from_str_radix_decimal() {
-    assert_eq(Int16.from_str_radix(&"1000", 10), Some1000_i16);
-    assert_eq(Int16.from_str_radix(&"-32768", 10), Some-32768_i16);
-    assert_eq(Int16.from_str_radix(&"32767", 10), Some32767_i16);
+    assert_eq(Int16.from_str_radix(&"1000", 10), Some(1000_i16));
+    assert_eq(Int16.from_str_radix(&"-32768", 10), Some(-32768_i16));
+    assert_eq(Int16.from_str_radix(&"32767", 10), Some(32767_i16));
 }
 
 @test
 fn test_int16_from_str_radix_hex() {
-    assert_eq(Int16.from_str_radix(&"ff", 16), Some255_i16);
+    assert_eq(Int16.from_str_radix(&"ff", 16), Some(255_i16));
 }
 
 @test
@@ -49,8 +49,8 @@ fn test_int16_from_str_radix_overflow() {
 
 @test
 fn test_int32_from_str_radix_decimal() {
-    assert_eq(Int32.from_str_radix(&"100000", 10), Some100000_i32);
-    assert_eq(Int32.from_str_radix(&"-2147483648", 10), Some-2147483648_i32);
+    assert_eq(Int32.from_str_radix(&"100000", 10), Some(100000_i32));
+    assert_eq(Int32.from_str_radix(&"-2147483648", 10), Some(-2147483648_i32));
 }
 
 @test
@@ -60,13 +60,13 @@ fn test_int32_from_str_radix_overflow() {
 
 @test
 fn test_int64_from_str_radix_decimal() {
-    assert_eq(Int64.from_str_radix(&"123456789", 10), Some123456789_i64);
-    assert_eq(Int64.from_str_radix(&"-1", 10), Some-1_i64);
+    assert_eq(Int64.from_str_radix(&"123456789", 10), Some(123456789_i64));
+    assert_eq(Int64.from_str_radix(&"-1", 10), Some(-1_i64));
 }
 
 @test
 fn test_int64_from_str_radix_binary() {
-    assert_eq(Int64.from_str_radix(&"1010", 2), Some10_i64);
+    assert_eq(Int64.from_str_radix(&"1010", 2), Some(10_i64));
 }
 
 @test
@@ -96,14 +96,14 @@ fn test_isize_from_str_radix_octal() {
 
 @test
 fn test_uint8_from_str_radix_decimal() {
-    assert_eq(UInt8.from_str_radix(&"255", 10), Some255_u8);
-    assert_eq(UInt8.from_str_radix(&"0", 10), Some0_u8);
+    assert_eq(UInt8.from_str_radix(&"255", 10), Some(255_u8));
+    assert_eq(UInt8.from_str_radix(&"0", 10), Some(0_u8));
 }
 
 @test
 fn test_uint8_from_str_radix_hex() {
-    assert_eq(UInt8.from_str_radix(&"ff", 16), Some255_u8);
-    assert_eq(UInt8.from_str_radix(&"a", 16), Some10_u8);
+    assert_eq(UInt8.from_str_radix(&"ff", 16), Some(255_u8));
+    assert_eq(UInt8.from_str_radix(&"a", 16), Some(10_u8));
 }
 
 @test
@@ -114,8 +114,8 @@ fn test_uint8_from_str_radix_overflow() {
 
 @test
 fn test_uint16_from_str_radix_decimal() {
-    assert_eq(UInt16.from_str_radix(&"65535", 10), Some65535_u16);
-    assert_eq(UInt16.from_str_radix(&"1000", 10), Some1000_u16);
+    assert_eq(UInt16.from_str_radix(&"65535", 10), Some(65535_u16));
+    assert_eq(UInt16.from_str_radix(&"1000", 10), Some(1000_u16));
 }
 
 @test
@@ -126,12 +126,12 @@ fn test_uint16_from_str_radix_overflow() {
 
 @test
 fn test_uint32_from_str_radix_decimal() {
-    assert_eq(UInt32.from_str_radix(&"100000", 10), Some100000_u32);
+    assert_eq(UInt32.from_str_radix(&"100000", 10), Some(100000_u32));
 }
 
 @test
 fn test_uint32_from_str_radix_hex() {
-    assert_eq(UInt32.from_str_radix(&"deadbeef", 16), Some3735928559_u32);
+    assert_eq(UInt32.from_str_radix(&"deadbeef", 16), Some(3735928559_u32));
 }
 
 @test
@@ -141,7 +141,7 @@ fn test_uint32_from_str_radix_overflow() {
 
 @test
 fn test_uint64_from_str_radix_decimal() {
-    assert_eq(UInt64.from_str_radix(&"1000000", 10), Some1000000_u64);
+    assert_eq(UInt64.from_str_radix(&"1000000", 10), Some(1000000_u64));
 }
 
 @test
@@ -197,19 +197,19 @@ fn test_from_str_radix_invalid_radix() {
 
 @test
 fn test_from_str_radix_binary() {
-    assert_eq(Int8.from_str_radix(&"1111111", 2), Some127_i8);
-    assert_eq(UInt8.from_str_radix(&"11111111", 2), Some255_u8);
+    assert_eq(Int8.from_str_radix(&"1111111", 2), Some(127_i8));
+    assert_eq(UInt8.from_str_radix(&"11111111", 2), Some(255_u8));
 }
 
 @test
 fn test_from_str_radix_octal() {
-    assert_eq(Int16.from_str_radix(&"777", 8), Some511_i16);
-    assert_eq(UInt16.from_str_radix(&"1000", 8), Some512_u16);
+    assert_eq(Int16.from_str_radix(&"777", 8), Some(511_i16));
+    assert_eq(UInt16.from_str_radix(&"1000", 8), Some(512_u16));
 }
 
 @test
 fn test_from_str_radix_base36() {
-    assert_eq(Int32.from_str_radix(&"zz", 36), Some1295_i32);
+    assert_eq(Int32.from_str_radix(&"zz", 36), Some(1295_i32));
 }
 
 // =============================================================================
@@ -227,6 +227,6 @@ fn test_from_str_radix_consistency_with_int() {
 
 @test
 fn test_from_str_radix_sign_prefix() {
-    assert_eq(Int16.from_str_radix(&"+42", 10), Some42_i16);
-    assert_eq(Int32.from_str_radix(&"-42", 10), Some-42_i32);
+    assert_eq(Int16.from_str_radix(&"+42", 10), Some(42_i16));
+    assert_eq(Int32.from_str_radix(&"-42", 10), Some(-42_i32));
 }

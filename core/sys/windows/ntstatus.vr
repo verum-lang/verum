@@ -170,164 +170,164 @@ public const STATUS_THREAD_WAS_SUSPENDED: NtStatus = NtStatus(0x40000001);
 // =============================================================================
 
 /// The specified buffer was too small for the data.
-public const STATUS_BUFFER_OVERFLOW: NtStatus = NtStatus0x80000005_i32;
+public const STATUS_BUFFER_OVERFLOW: NtStatus = NtStatus(0x80000005_i32);
 
 /// No more files were found.
-public const STATUS_NO_MORE_FILES: NtStatus = NtStatus0x80000006_i32;
+public const STATUS_NO_MORE_FILES: NtStatus = NtStatus(0x80000006_i32);
 
 /// No more entries in the enumeration.
-public const STATUS_NO_MORE_ENTRIES: NtStatus = NtStatus0x8000001A_i32;
+public const STATUS_NO_MORE_ENTRIES: NtStatus = NtStatus(0x8000001A_i32);
 
 // =============================================================================
 // Error Status Codes (0xC0000000)
 // =============================================================================
 
 /// The requested operation was unsuccessful.
-public const STATUS_UNSUCCESSFUL: NtStatus = NtStatus0xC0000001_i32;
+public const STATUS_UNSUCCESSFUL: NtStatus = NtStatus(0xC0000001_i32);
 
 /// The requested operation is not implemented.
-public const STATUS_NOT_IMPLEMENTED: NtStatus = NtStatus0xC0000002_i32;
+public const STATUS_NOT_IMPLEMENTED: NtStatus = NtStatus(0xC0000002_i32);
 
 /// The specified information class is not valid.
-public const STATUS_INVALID_INFO_CLASS: NtStatus = NtStatus0xC0000003_i32;
+public const STATUS_INVALID_INFO_CLASS: NtStatus = NtStatus(0xC0000003_i32);
 
 /// The specified info length is not valid.
-public const STATUS_INFO_LENGTH_MISMATCH: NtStatus = NtStatus0xC0000004_i32;
+public const STATUS_INFO_LENGTH_MISMATCH: NtStatus = NtStatus(0xC0000004_i32);
 
 /// Invalid memory access.
-public const STATUS_ACCESS_VIOLATION: NtStatus = NtStatus0xC0000005_i32;
+public const STATUS_ACCESS_VIOLATION: NtStatus = NtStatus(0xC0000005_i32);
 
 /// An invalid status code was passed.
-public const STATUS_IN_PAGE_ERROR: NtStatus = NtStatus0xC0000006_i32;
+public const STATUS_IN_PAGE_ERROR: NtStatus = NtStatus(0xC0000006_i32);
 
 /// The page file quota for the process has been exhausted.
-public const STATUS_PAGEFILE_QUOTA: NtStatus = NtStatus0xC0000007_i32;
+public const STATUS_PAGEFILE_QUOTA: NtStatus = NtStatus(0xC0000007_i32);
 
 /// An invalid HANDLE was specified.
-public const STATUS_INVALID_HANDLE: NtStatus = NtStatus0xC0000008_i32;
+public const STATUS_INVALID_HANDLE: NtStatus = NtStatus(0xC0000008_i32);
 
 /// An invalid initial stack was specified.
-public const STATUS_BAD_INITIAL_STACK: NtStatus = NtStatus0xC0000009_i32;
+public const STATUS_BAD_INITIAL_STACK: NtStatus = NtStatus(0xC0000009_i32);
 
 /// An invalid parameter was passed.
-public const STATUS_INVALID_PARAMETER: NtStatus = NtStatus0xC000000D_i32;
+public const STATUS_INVALID_PARAMETER: NtStatus = NtStatus(0xC000000D_i32);
 
 /// A device which does not exist was specified.
-public const STATUS_NO_SUCH_DEVICE: NtStatus = NtStatus0xC000000E_i32;
+public const STATUS_NO_SUCH_DEVICE: NtStatus = NtStatus(0xC000000E_i32);
 
 /// The specified file does not exist.
-public const STATUS_NO_SUCH_FILE: NtStatus = NtStatus0xC000000F_i32;
+public const STATUS_NO_SUCH_FILE: NtStatus = NtStatus(0xC000000F_i32);
 
 /// The request is not valid for this device.
-public const STATUS_INVALID_DEVICE_REQUEST: NtStatus = NtStatus0xC0000010_i32;
+public const STATUS_INVALID_DEVICE_REQUEST: NtStatus = NtStatus(0xC0000010_i32);
 
 /// The end of the file was reached.
-public const STATUS_END_OF_FILE: NtStatus = NtStatus0xC0000011_i32;
+public const STATUS_END_OF_FILE: NtStatus = NtStatus(0xC0000011_i32);
 
 /// Insufficient system memory.
-public const STATUS_NO_MEMORY: NtStatus = NtStatus0xC0000017_i32;
+public const STATUS_NO_MEMORY: NtStatus = NtStatus(0xC0000017_i32);
 
 /// Insufficient resources.
-public const STATUS_INSUFFICIENT_RESOURCES: NtStatus = NtStatus0xC000009A_i32;
+public const STATUS_INSUFFICIENT_RESOURCES: NtStatus = NtStatus(0xC000009A_i32);
 
 /// Access was denied.
-public const STATUS_ACCESS_DENIED: NtStatus = NtStatus0xC0000022_i32;
+public const STATUS_ACCESS_DENIED: NtStatus = NtStatus(0xC0000022_i32);
 
 /// The buffer was too small.
-public const STATUS_BUFFER_TOO_SMALL: NtStatus = NtStatus0xC0000023_i32;
+public const STATUS_BUFFER_TOO_SMALL: NtStatus = NtStatus(0xC0000023_i32);
 
 /// Object type mismatch.
-public const STATUS_OBJECT_TYPE_MISMATCH: NtStatus = NtStatus0xC0000024_i32;
+public const STATUS_OBJECT_TYPE_MISMATCH: NtStatus = NtStatus(0xC0000024_i32);
 
 /// Invalid object name.
-public const STATUS_OBJECT_NAME_INVALID: NtStatus = NtStatus0xC0000033_i32;
+public const STATUS_OBJECT_NAME_INVALID: NtStatus = NtStatus(0xC0000033_i32);
 
 /// Object name not found.
-public const STATUS_OBJECT_NAME_NOT_FOUND: NtStatus = NtStatus0xC0000034_i32;
+public const STATUS_OBJECT_NAME_NOT_FOUND: NtStatus = NtStatus(0xC0000034_i32);
 
 /// Object name already exists.
-public const STATUS_OBJECT_NAME_COLLISION: NtStatus = NtStatus0xC0000035_i32;
+public const STATUS_OBJECT_NAME_COLLISION: NtStatus = NtStatus(0xC0000035_i32);
 
 /// Object path not found.
-public const STATUS_OBJECT_PATH_NOT_FOUND: NtStatus = NtStatus0xC000003A_i32;
+public const STATUS_OBJECT_PATH_NOT_FOUND: NtStatus = NtStatus(0xC000003A_i32);
 
 /// Invalid object path syntax.
-public const STATUS_OBJECT_PATH_SYNTAX_BAD: NtStatus = NtStatus0xC000003B_i32;
+public const STATUS_OBJECT_PATH_SYNTAX_BAD: NtStatus = NtStatus(0xC000003B_i32);
 
 /// Sharing violation.
-public const STATUS_SHARING_VIOLATION: NtStatus = NtStatus0xC0000043_i32;
+public const STATUS_SHARING_VIOLATION: NtStatus = NtStatus(0xC0000043_i32);
 
 /// Data was too large for the buffer.
-public const STATUS_DATA_OVERRUN: NtStatus = NtStatus0xC000003C_i32;
+public const STATUS_DATA_OVERRUN: NtStatus = NtStatus(0xC000003C_i32);
 
 /// Data was incomplete.
-public const STATUS_DATA_LATE_ERROR: NtStatus = NtStatus0xC000003D_i32;
+public const STATUS_DATA_LATE_ERROR: NtStatus = NtStatus(0xC000003D_i32);
 
 /// Integer overflow.
-public const STATUS_INTEGER_OVERFLOW: NtStatus = NtStatus0xC0000095_i32;
+public const STATUS_INTEGER_OVERFLOW: NtStatus = NtStatus(0xC0000095_i32);
 
 /// Media is write protected.
-public const STATUS_MEDIA_WRITE_PROTECTED: NtStatus = NtStatus0xC00000A2_i32;
+public const STATUS_MEDIA_WRITE_PROTECTED: NtStatus = NtStatus(0xC00000A2_i32);
 
 /// Disk is full.
-public const STATUS_DISK_FULL: NtStatus = NtStatus0xC00000A3_i32;
+public const STATUS_DISK_FULL: NtStatus = NtStatus(0xC00000A3_i32);
 
 /// File is a directory.
-public const STATUS_FILE_IS_A_DIRECTORY: NtStatus = NtStatus0xC00000BA_i32;
+public const STATUS_FILE_IS_A_DIRECTORY: NtStatus = NtStatus(0xC00000BA_i32);
 
 /// Operation not supported.
-public const STATUS_NOT_SUPPORTED: NtStatus = NtStatus0xC00000BB_i32;
+public const STATUS_NOT_SUPPORTED: NtStatus = NtStatus(0xC00000BB_i32);
 
 /// Not the same device.
-public const STATUS_NOT_SAME_DEVICE: NtStatus = NtStatus0xC00000D4_i32;
+public const STATUS_NOT_SAME_DEVICE: NtStatus = NtStatus(0xC00000D4_i32);
 
 /// Internal error.
-public const STATUS_INTERNAL_ERROR: NtStatus = NtStatus0xC00000E5_i32;
+public const STATUS_INTERNAL_ERROR: NtStatus = NtStatus(0xC00000E5_i32);
 
 /// Directory not empty.
-public const STATUS_DIRECTORY_NOT_EMPTY: NtStatus = NtStatus0xC0000101_i32;
+public const STATUS_DIRECTORY_NOT_EMPTY: NtStatus = NtStatus(0xC0000101_i32);
 
 /// Operation cancelled.
-public const STATUS_CANCELLED: NtStatus = NtStatus0xC0000120_i32;
+public const STATUS_CANCELLED: NtStatus = NtStatus(0xC0000120_i32);
 
 /// Cannot delete object.
-public const STATUS_CANNOT_DELETE: NtStatus = NtStatus0xC0000121_i32;
+public const STATUS_CANNOT_DELETE: NtStatus = NtStatus(0xC0000121_i32);
 
 /// File has been closed.
-public const STATUS_FILE_CLOSED: NtStatus = NtStatus0xC0000128_i32;
+public const STATUS_FILE_CLOSED: NtStatus = NtStatus(0xC0000128_i32);
 
 /// DLL not found.
-public const STATUS_DLL_NOT_FOUND: NtStatus = NtStatus0xC0000135_i32;
+public const STATUS_DLL_NOT_FOUND: NtStatus = NtStatus(0xC0000135_i32);
 
 /// Process terminated by Ctrl+C.
-public const STATUS_CONTROL_C_EXIT: NtStatus = NtStatus0xC000013A_i32;
+public const STATUS_CONTROL_C_EXIT: NtStatus = NtStatus(0xC000013A_i32);
 
 /// Connection disconnected.
-public const STATUS_CONNECTION_DISCONNECTED: NtStatus = NtStatus0xC000020C_i32;
+public const STATUS_CONNECTION_DISCONNECTED: NtStatus = NtStatus(0xC000020C_i32);
 
 /// Connection reset.
-public const STATUS_CONNECTION_RESET: NtStatus = NtStatus0xC000020D_i32;
+public const STATUS_CONNECTION_RESET: NtStatus = NtStatus(0xC000020D_i32);
 
 /// Not found.
-public const STATUS_NOT_FOUND: NtStatus = NtStatus0xC0000225_i32;
+public const STATUS_NOT_FOUND: NtStatus = NtStatus(0xC0000225_i32);
 
 /// Port not set.
-public const STATUS_PORT_NOT_SET: NtStatus = NtStatus0xC0000257_i32;
+public const STATUS_PORT_NOT_SET: NtStatus = NtStatus(0xC0000257_i32);
 
 /// Thread is terminating.
-public const STATUS_THREAD_IS_TERMINATING: NtStatus = NtStatus0xC000004B_i32;
+public const STATUS_THREAD_IS_TERMINATING: NtStatus = NtStatus(0xC000004B_i32);
 
 /// Process is terminating.
-public const STATUS_PROCESS_IS_TERMINATING: NtStatus = NtStatus0xC000004C_i32;
+public const STATUS_PROCESS_IS_TERMINATING: NtStatus = NtStatus(0xC000004C_i32);
 
 /// Invalid page protection.
-public const STATUS_INVALID_PAGE_PROTECTION: NtStatus = NtStatus0xC0000045_i32;
+public const STATUS_INVALID_PAGE_PROTECTION: NtStatus = NtStatus(0xC0000045_i32);
 
 /// Section too big.
-public const STATUS_SECTION_TOO_BIG: NtStatus = NtStatus0xC0000040_i32;
+public const STATUS_SECTION_TOO_BIG: NtStatus = NtStatus(0xC0000040_i32);
 
 /// Section not extended.
-public const STATUS_SECTION_NOT_EXTENDED: NtStatus = NtStatus0xC0000087_i32;
+public const STATUS_SECTION_NOT_EXTENDED: NtStatus = NtStatus(0xC0000087_i32);
 
 // =============================================================================
 // Helper Functions
