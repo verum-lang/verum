@@ -449,7 +449,13 @@ implement SupervisorSpawnConfig {
             if self.contexts_overflow.is_none() {
                 self.contexts_overflow = Some(&List.new());
             }
-            let overflow = self.contexts_overflow.unwrap();
+            // Populate-guard above just stored Some(...). Reaching
+            // None here would mean the field was concurrently mutated
+            // — surface that with context. (NB: there's a separate
+            // lifetime bug here — `Some(&List.new())` references a
+            // temporary; tracked as task #61.)
+            let overflow = self.contexts_overflow
+                .expect("with_context: contexts_overflow must be Some after populate-guard");
             overflow.push((type_id, value as &dyn Any));
         }
         self
