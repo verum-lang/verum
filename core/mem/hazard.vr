@@ -449,9 +449,28 @@ implement Drop for HazardGuard {
     }
 }
 
-/// HazardGuard can be sent between threads (the protection is per-slot,
-/// not per-thread).
-unsafe implement Send for HazardGuard {}
+// SOUNDNESS: HazardGuard is intentionally !Send.
+//
+// Drop calls `THREAD_HAZARD_RECORD.release(self.slot)`, where
+// `THREAD_HAZARD_RECORD` is thread-local.  A guard acquired on
+// thread A and dropped on thread B would call B's
+// THREAD_HAZARD_RECORD.release(slot_from_A) — clobbering a slot
+// in B's record that may belong to a live hazard pointer of
+// B's, corrupting B's CBGR validation surface.
+//
+// The earlier `unsafe implement Send for HazardGuard {}` was
+// load-bearingly wrong: the doc claimed "protection is per-slot,
+// not per-thread" but the implementation does the opposite —
+// release indexes into the *dropping* thread's record, not the
+// acquiring thread's.  Even worse, `next_slot` is also per-thread
+// (LIFO stack discipline), so a cross-thread drop also breaks
+// the LIFO invariant.
+//
+// Removing the Send impl makes HazardGuard a thread-local RAII
+// resource, which matches every actual call site (try_deref
+// always drops the guard in the same scope it acquires it).
+// Code that needs cross-thread CBGR protection should acquire
+// a fresh guard on the destination thread.
 
 // =============================================================================
 // Public API
