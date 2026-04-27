@@ -78,20 +78,25 @@ public type Base58Error is
 // =============================================================================
 
 public fn encode(input: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
-    if input.len() == 0 { return out; }
+    let n = input.len();
+    // Output upper bound: ceil(n * log_58(256)) ≈ n * 1.366. Use
+    // n * 138 / 100 + 1 as a safe approximation (matches Bitcoin
+    // Core's classic base58 encode buffer-sizing formula).
+    let cap = (n * 138) / 100 + 1;
+    let mut out: List<Byte> = List.with_capacity(cap);
+    if n == 0 { return out; }
 
     // Count leading zero bytes.
     let mut zeros: Int = 0;
-    while zeros < input.len() && input[zeros] == 0_u8 { zeros = zeros + 1; }
+    while zeros < n && input[zeros] == 0_u8 { zeros = zeros + 1; }
 
     // Copy input into a mutable buffer we can divide in place.
-    let mut buf: List<Byte> = [];
+    let mut buf: List<Byte> = List.with_capacity(n);
     let mut i: Int = 0;
-    while i < input.len() { buf.push(input[i]); i = i + 1; }
+    while i < n { buf.push(input[i]); i = i + 1; }
 
     // Repeatedly divide by 58 and collect remainders.
-    let mut digits_rev: List<Byte> = [];
+    let mut digits_rev: List<Byte> = List.with_capacity(cap);
     let mut start: Int = 0;
     while start < buf.len() {
         let mut remainder: UInt32 = 0_u32;
@@ -130,7 +135,9 @@ public fn decode(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
     }
 
     // Accumulate big integer via repeated *58 + digit.
-    let mut out_rev: List<Byte> = [];
+    // Output upper bound: n * log_256(58) ≈ n * 0.733, so n bytes
+    // is a safe over-estimate.
+    let mut out_rev: List<Byte> = List.with_capacity(input.len());
     let mut i: Int = 0;
     while i < input.len() {
         let d = decode_digit(input[i])?;
@@ -149,7 +156,8 @@ public fn decode(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
         i = i + 1;
     }
 
-    let mut out: List<Byte> = [];
+    // Output: leading zeros + reversed accumulated bytes.
+    let mut out: List<Byte> = List.with_capacity(ones + out_rev.len());
     // Prepend leading zeros.
     let mut z: Int = 0;
     while z < ones { out.push(0_u8); z = z + 1; }
@@ -183,7 +191,8 @@ fn decode_digit(b: Byte) -> Result<Int, Base58Error> {
 
 public fn encode_check(payload: &[Byte]) -> List<Byte> {
     let checksum = compute_checksum(payload);
-    let mut wire: List<Byte> = [];
+    // payload + 4-byte trailing checksum.
+    let mut wire: List<Byte> = List.with_capacity(payload.len() + 4);
     let mut i: Int = 0;
     while i < payload.len() { wire.push(payload[i]); i = i + 1; }
     let mut j: Int = 0;
@@ -197,7 +206,7 @@ public fn decode_check(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
         return Err(Base58Error.TruncatedChecksum);
     }
     let payload_len = decoded.len() - 4;
-    let mut payload: List<Byte> = [];
+    let mut payload: List<Byte> = List.with_capacity(payload_len);
     let mut i: Int = 0;
     while i < payload_len { payload.push(decoded[i]); i = i + 1; }
     let expected = compute_checksum(payload.as_slice());

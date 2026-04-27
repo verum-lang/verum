@@ -115,8 +115,10 @@ fn decode_char(b: Byte) -> Int {
 
 /// Encode `src` bytes into a Base32 string (uppercase, `=` padded).
 public fn encode(src: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
     let n = src.len();
+    // 5 input bytes → 8 output chars. Pre-allocate.
+    let cap = ((n + 4) / 5) * 8;
+    let mut out: List<Byte> = List.with_capacity(cap);
     if n == 0 { return out; }
 
     // Process 5-byte chunks → 8 Base32 chars.
@@ -210,7 +212,8 @@ public fn decode_no_pad(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
     if tail == 1 || tail == 3 || tail == 6 {
         return Err(Base32Error.InvalidLength(effective_len));
     }
-    let mut padded: List<Byte> = [];
+    // Worst case: every src byte non-padding + up to 7 trailing '='.
+    let mut padded: List<Byte> = List.with_capacity(src.len() + 8);
     let mut j: Int = 0;
     while j < src.len() {
         if !is_ws(src[j]) && src[j] != ('=' as Byte) { padded.push(src[j]); }
@@ -226,7 +229,9 @@ fn is_ws(b: Byte) -> Bool {
 }
 
 fn decode_core(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
-    let mut out: List<Byte> = [];
+    // Upper bound: 5n/8 output bytes from n input chars (8→5).
+    let cap = (src.len() / 8) * 5 + 4;
+    let mut out: List<Byte> = List.with_capacity(cap);
     let mut i: Int = 0;
     while i < src.len() {
         let mut group: [Int; 8] = [0; 8];
@@ -322,7 +327,8 @@ public fn decode_hex_no_pad(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
     if tail == 1 || tail == 3 || tail == 6 {
         return Err(Base32Error.InvalidLength(effective_len));
     }
-    let mut padded: List<Byte> = [];
+    // Worst case: every src byte non-padding + up to 7 trailing '='.
+    let mut padded: List<Byte> = List.with_capacity(src.len() + 8);
     let mut j: Int = 0;
     while j < src.len() {
         if !is_ws(src[j]) && src[j] != ('=' as Byte) { padded.push(src[j]); }
@@ -333,8 +339,10 @@ public fn decode_hex_no_pad(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
 }
 
 fn encode_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> List<Byte> {
-    let mut out: List<Byte> = [];
     let n = src.len();
+    // 5 input bytes → 8 output chars (with-padding upper bound).
+    let cap = ((n + 4) / 5) * 8;
+    let mut out: List<Byte> = List.with_capacity(cap);
     if n == 0 { return out; }
 
     let mut i: Int = 0;
@@ -391,7 +399,9 @@ fn encode_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> List<Byte> {
 }
 
 fn decode_core_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> Result<List<Byte>, Base32Error> {
-    let mut out: List<Byte> = [];
+    // Upper bound: 5n/8 from n input chars (8→5).
+    let cap = (src.len() / 8) * 5 + 4;
+    let mut out: List<Byte> = List.with_capacity(cap);
     let mut i: Int = 0;
     while i < src.len() {
         let mut group: [Int; 8] = [0; 8];
