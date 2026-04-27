@@ -148,19 +148,32 @@ fn parse_interpolation_expr(
         (false, expr_str)
     };
 
-    // Handle format specifiers: f"{expr:spec}" -> strip ":spec" before parsing
-    // A format specifier starts with ':' at the top level (not inside brackets/parens)
-    // Examples: f"{x:02}", f"{val:.2f}", f"{name:>20}", f"{:?}"
-    let actual_expr_str = {
-        let stripped = strip_format_spec(actual_expr_str);
-        if stripped.is_empty() && actual_expr_str.contains(':') {
-            // Empty expression with format spec (e.g., {:?}) - not valid in Verum
-            // Return the original to produce a clear error
-            actual_expr_str
-        } else {
-            stripped
-        }
-    };
+    // Handle format specifiers: f"{expr:spec}" -> wrap expr in stdlib
+    // formatter call so the codegen path actually honours the spec.
+    //
+    // History: this used to silently DROP the format spec (the
+    // returned string was just the expression, the spec discarded).
+    // Result: f"{v:x}" with v=195 emitted "195" instead of "c3" —
+    // discovered while validating task #37, opened as task #38.
+    //
+    // Strategy: split the expression and the spec here, parse the
+    // expression normally, then wrap in `expr.to_<radix>()` (or
+    // future `__fmt(expr, "spec")` for richer specs).  Keeps the
+    // AST shape unchanged (still a single Expr per interpolation)
+    // and reuses the existing stdlib `Int.to_hex / to_octal /
+    // to_binary` methods on `core/base/primitives.vr`.
+    let (actual_expr_str, format_spec) = split_expr_and_spec(actual_expr_str);
+    if actual_expr_str.is_empty() && format_spec.is_some() {
+        // Empty expression with format spec (e.g., {:?}) - not valid in Verum
+        return Err(ParseError::invalid_interpolation(
+            format!("empty expression with format spec `{}`", format_spec.unwrap_or("")),
+            Span::new(
+                start_pos as u32,
+                (start_pos + expr_str.len()) as u32,
+                file_id,
+            ),
+        ));
+    }
 
     // Unescape the expression string so that \" becomes " and \\ becomes \, etc.
     // This is necessary because inside interpolated strings, escape sequences like \"
@@ -201,6 +214,16 @@ fn parse_interpolation_expr(
     };
     // tokens is dropped here, no memory leak
 
+    // Apply format spec by wrapping in a method call (e.g.
+    // `{v:x}` → `v.to_hex()`).  We do this BEFORE the @raw wrap so
+    // that `@raw {expr:html}` (hypothetical) would honour spec then
+    // mark raw — order matches HTML's typical compose pipeline.
+    let expr = if let Some(spec) = format_spec {
+        wrap_with_format_spec(expr, spec)?
+    } else {
+        expr
+    };
+
     // If @raw directive was used, wrap the expression in a call to `__raw_interpolation`
     // This is a compiler intrinsic that marks the value as not needing escaping
     if is_raw {
@@ -221,6 +244,233 @@ fn parse_interpolation_expr(
     } else {
         Ok(expr)
     }
+}
+
+/// Wrap an interpolation expression with stdlib formatter calls
+/// based on the format spec — Python-style grammar:
+///
+/// `[[fill]align][sign][#][0][width][.precision][type]`
+///
+/// Supported specs (compose using existing stdlib methods on
+/// `core/base/primitives.vr` and `core/text/text.vr`; no ad-hoc
+/// opcodes — every formatter call is a regular method dispatch):
+///
+///   - `x` → `expr.to_hex()`
+///   - `X` → `expr.to_hex().to_uppercase()`  (case via Text.to_uppercase)
+///   - `o` → `expr.to_octal()`
+///   - `b` → `expr.to_binary()`
+///   - `?` / `s` / nothing → `expr.to_string()` (canonical default)
+///   - bare width N (digits only): `expr.to_string().pad_left(N, ' ')`
+///   - `0N`  zero-padded width: `... .pad_left(N, '0')`
+///   - `>N`  right-align (default for numerics): `... .pad_left(N, ' ')`
+///   - `<N`  left-align: `... .pad_right(N, ' ')`
+///   - `0Nx` zero-padded hex of width N
+///   - `Nx`  hex padded with spaces to width N
+///
+/// Anything not matching falls through to plain ToString — better
+/// than rejecting valid programs while a future native FormatValue
+/// opcode (richer specs: precision / sign / alternate / fill char /
+/// center align) is staged separately.
+fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
+    let parsed = parse_format_spec(spec);
+
+    let span = expr.span;
+    // Stage 1 — radix/type conversion.
+    let converted = match parsed.type_char {
+        Some('x') | Some('X') => method_call_no_args(expr, "to_hex", span),
+        Some('o') => method_call_no_args(expr, "to_octal", span),
+        Some('b') => method_call_no_args(expr, "to_binary", span),
+        // 's' / '?' / None all default to the canonical to_string path,
+        // which is what the InterpolatedString codegen does anyway via
+        // Instruction::ToString.  Skip the redundant method call when
+        // there is no width/align spec either, so the common
+        // `f"{x}"` and `f"{x:?}"` paths remain a single ToString op.
+        _ => {
+            if parsed.width == 0 && !parsed.upper {
+                return Ok(expr);
+            }
+            method_call_no_args(expr, "to_string", span)
+        }
+    };
+
+    // Stage 2 — uppercase if `X` was requested.
+    let cased = if parsed.upper {
+        method_call_no_args(converted, "to_uppercase", span)
+    } else {
+        converted
+    };
+
+    // Stage 3 — width / alignment / fill.
+    if parsed.width > 0 {
+        let fill_char = parsed.fill;
+        let width_lit = int_literal(parsed.width as i64, span);
+        let fill_lit = char_literal(fill_char, span);
+        let pad_method = if parsed.left_align {
+            "pad_right"
+        } else {
+            "pad_left"
+        };
+        let padded = Expr::new(
+            ExprKind::MethodCall {
+                receiver: verum_common::Heap::new(cased),
+                method: verum_ast::Ident::new(pad_method, span),
+                type_args: List::new(),
+                args: List::from(vec![width_lit, fill_lit]),
+            },
+            span,
+        );
+        Ok(padded)
+    } else {
+        Ok(cased)
+    }
+}
+
+/// Compact Python-style format-spec descriptor.
+struct ParsedSpec {
+    /// Fill character used by pad_left / pad_right (default ' ').
+    fill: char,
+    /// `true` when the spec used `<` alignment (left-pad).
+    /// `false` for default (right-pad) and `>`.
+    /// Centre-align (`^`) is currently treated as right-pad —
+    /// proper centre composition needs a `pad_centre` stdlib method.
+    left_align: bool,
+    /// Minimum field width (0 = no padding).
+    width: u32,
+    /// Conversion-type character (`x`/`o`/`b`/`?`/`s`/`X`/None).
+    type_char: Option<char>,
+    /// True when type was `X` (uppercase hex); drives the
+    /// `.to_uppercase()` post-processing step.
+    upper: bool,
+}
+
+fn parse_format_spec(spec: &str) -> ParsedSpec {
+    let mut chars = spec.chars().peekable();
+
+    // Default state.
+    let mut fill: char = ' ';
+    let mut left_align: bool = false;
+    let mut width: u32 = 0;
+
+    // [[fill]align] — fill is a single char immediately followed
+    // by an alignment char.  Spec like `*<5` means fill='*',
+    // align='<', width=5.  Plain `<5` means fill=' ', align='<',
+    // width=5 (no fill specified).
+    let snapshot: Vec<char> = chars.clone().collect();
+    if snapshot.len() >= 2 && matches!(snapshot[1], '<' | '>' | '^' | '=') {
+        fill = snapshot[0];
+        left_align = snapshot[1] == '<';
+        // consume both
+        chars.next();
+        chars.next();
+    } else if let Some(&first) = chars.peek()
+        && matches!(first, '<' | '>' | '^' | '=')
+    {
+        left_align = first == '<';
+        chars.next();
+    }
+
+    // [0] — zero-pad shortcut: '0' before width digits.  Sets
+    // fill='0' unless an explicit fill was already provided.
+    if chars.peek() == Some(&'0') {
+        // Peek ahead: only treat as zero-pad if next char is a digit
+        let mut probe = chars.clone();
+        probe.next();
+        if probe.peek().is_some_and(|c| c.is_ascii_digit()) {
+            if fill == ' ' {
+                fill = '0';
+            }
+            chars.next(); // consume the '0'
+        }
+    }
+
+    // [width] — leading digits.
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            width = width * 10 + (c as u32 - '0' as u32);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    // Skip optional '.precision' for now (not yet wired through;
+    // it would compose via a stdlib `format_float_precision(n)`
+    // helper which doesn't exist yet — punted).
+    if chars.peek() == Some(&'.') {
+        chars.next();
+        while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+            chars.next();
+        }
+    }
+
+    // [type]
+    let type_char = chars.next();
+    let upper = matches!(type_char, Some('X'));
+
+    ParsedSpec {
+        fill,
+        left_align,
+        width,
+        type_char,
+        upper,
+    }
+}
+
+fn method_call_no_args(receiver: Expr, name: &str, span: verum_ast::Span) -> Expr {
+    Expr::new(
+        ExprKind::MethodCall {
+            receiver: verum_common::Heap::new(receiver),
+            method: verum_ast::Ident::new(name, span),
+            type_args: List::new(),
+            args: List::new(),
+        },
+        span,
+    )
+}
+
+fn int_literal(value: i64, span: verum_ast::Span) -> Expr {
+    use verum_ast::literal::{IntLit, Literal, LiteralKind};
+    Expr::new(
+        ExprKind::Literal(Literal {
+            kind: LiteralKind::Int(IntLit {
+                value: value as i128,
+                suffix: None,
+            }),
+            span,
+        }),
+        span,
+    )
+}
+
+fn char_literal(value: char, span: verum_ast::Span) -> Expr {
+    use verum_ast::literal::{Literal, LiteralKind};
+    Expr::new(
+        ExprKind::Literal(Literal {
+            kind: LiteralKind::Char(value),
+            span,
+        }),
+        span,
+    )
+}
+
+/// Split an interpolation expression into (expr_str, format_spec).
+///
+/// Mirrors the bracket-aware logic of `strip_format_spec` but
+/// returns the spec instead of dropping it.
+fn split_expr_and_spec(expr_str: &str) -> (&str, Option<&str>) {
+    let mut depth = 0i32;
+    for (i, ch) in expr_str.char_indices() {
+        match ch {
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' | '>' => depth -= 1,
+            ':' if depth == 0 => {
+                let spec = &expr_str[i + 1..];
+                return (&expr_str[..i], Some(spec));
+            }
+            _ => {}
+        }
+    }
+    (expr_str, None)
 }
 
 /// Strip format specifier from an interpolation expression.
