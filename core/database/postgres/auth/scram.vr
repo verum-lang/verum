@@ -62,6 +62,18 @@ public type ScramError is
     | SeUnsupportedChannelBinding(Text)
     | SeKdfFailed;
 
+/// RFC 7677 §4: SCRAM-SHA-256 servers SHOULD use at least 4096
+/// iterations. We accept anything ≥ this; lower values indicate a
+/// misconfigured / downgrade-attempting server.
+public const MIN_SCRAM_ITERATIONS: Int = 4096;
+
+/// Hostile-server CPU-DoS cap. Each PBKDF2 round is one HMAC-SHA-256;
+/// 10M rounds ≈ 1-10 s of pure CPU on a modern client. Beyond that,
+/// a malicious / MITM server is mounting a denial-of-service rather
+/// than enforcing a security policy. Same value as
+/// `core.security.password_hash.MAX_PBKDF2_ITERATIONS` for consistency.
+public const MAX_SCRAM_ITERATIONS: Int = 10_000_000;
+
 // -----------------------------------------------------------------------------
 // State
 // -----------------------------------------------------------------------------
@@ -217,7 +229,14 @@ fn parse_server_first(s: &Text) -> Result<ServerFirst, ScramError> {
     let nonce = match nonce { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing r=".clone() }); } };
     let salt = match salt   { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing s=".clone() }); } };
     let iter = match iter   { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing i=".clone() }); } };
-    if iter <= 0 { return Err(SeBadIterationCount { iterations: iter }); }
+    // Policy bounds. RFC 7677 recommends ≥ 4096 iterations for
+    // SCRAM-SHA-256; values below that are an obvious downgrade.
+    // Upper bound MAX_SCRAM_ITERATIONS prevents a hostile / MITM
+    // server from forcing the client to compute a multi-million-
+    // round PBKDF2 chain on every connection (CPU-DoS amplifier).
+    if iter < MIN_SCRAM_ITERATIONS || iter > MAX_SCRAM_ITERATIONS {
+        return Err(SeBadIterationCount { iterations: iter });
+    }
     Ok(ServerFirst { nonce: nonce, salt: salt, iterations: iter })
 }
 
@@ -472,12 +491,20 @@ fn consume_field(field: &Text) -> Maybe<(Text, Text)> {
 fn parse_int_text(s: &Text) -> Maybe<Int> {
     let bytes = s.as_bytes();
     if bytes.len() == 0 { return None; }
+    // SOUNDNESS: hostile/MITM server can send arbitrarily long
+    // iteration count; reject before the multiply can overflow.
+    // Int.MAX is 19 digits; cap at 19 keeps acc representable.
+    // Per-step `acc > Int.MAX/10` guard backs the cap with
+    // overflow-safe arithmetic regardless of backend semantics.
+    if bytes.len() > 19 { return None; }
     let mut acc: Int = 0;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
         if b < (0x30 as Byte) || b > (0x39 as Byte) { return None; }
+        if acc > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
         acc = acc * 10 + ((b as Int) - 0x30);
+        if acc < 0 { return None; }                          // wrap-around guard
         i = i + 1;
     }
     Some(acc)
