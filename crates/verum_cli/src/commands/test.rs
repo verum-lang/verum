@@ -237,11 +237,24 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     std::fs::create_dir_all(&test_target_dir).ok();
 
     // Thread pool: wire --test-threads so it actually takes effect.
+    //
+    // T0.5.1 — rayon worker threads default to a small stack (512 KiB
+    // on macOS, ~2 MiB on Linux). Each test invokes the full compiler
+    // pipeline (type checker + VBC codegen + AOT) which recursively
+    // walks AST / Type / CoreTerm structures; the recursion-guard
+    // bounds (parser MAX_RECURSION_DEPTH=128, types MAX_AST_TO_TYPE_
+    // DEPTH=64) are sized for typical program ASTs but stdlib
+    // bootstrap can blow them on debug builds at deeper modules.
+    //
+    // Match the main thread's 16 MiB stack so workers don't SIGBUS
+    // mid-stdlib-load.
     let pool: Option<rayon::ThreadPool> = if manifest.test.parallel {
         let n = opts.test_threads.unwrap_or_else(num_cpus::get).max(1);
+        const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
         Some(
             rayon::ThreadPoolBuilder::new()
                 .num_threads(n)
+                .stack_size(WORKER_STACK_SIZE)
                 .build()
                 .map_err(|e| CliError::Custom(format!("rayon: {}", e)))?,
         )
@@ -721,8 +734,17 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     if cfg.deny_warnings {
         lint_config.deny_warnings = true;
     }
+
+    // T6.0.4 — AOT path companion to the interpret-mode auto-mount.
+    // If the test file lives inside a cog with a src/lib.vr or
+    // src/main.vr, synthesise a `mount cog.lib.*` (or `mount cog.main.*`)
+    // line and prepend it via a temp file so the production pipeline
+    // resolves crate-root references without per-test boilerplate.
+    let test_input = synthesise_test_input_with_crate_root(&test.file, target_dir)
+        .unwrap_or_else(|| test.file.clone());
+
     let options = CompilerOptions {
-        input: test.file.clone(),
+        input: test_input,
         output: output_path.clone(),
         verify_mode: VerifyMode::Runtime,
         output_format: OutputFormat::Human,
@@ -822,6 +844,68 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
             .unwrap_or_else(|| "process terminated by signal".to_string());
         TestResult::Fail { duration, stdout, stderr, exit_code: code, error }
     }
+}
+
+/// T6.0.4 (AOT companion) — synthesise a temp test source file that
+/// prepends crate-root contents to the user's test file. The AOT
+/// pipeline operates on a single input file, so to give tests/
+/// implicit access to src/lib.vr we read both, concatenate body
+/// contents (stripping any duplicate `module` header from the
+/// crate root since the test file owns its own module identity),
+/// and write to `<target_dir>/test_<stem>.merged.vr`. Returns the
+/// merged file path on success, `None` (= use the original test
+/// file) if no manifest / no crate root / IO failure.
+fn synthesise_test_input_with_crate_root(
+    test_file: &Path,
+    target_dir: &Path,
+) -> Option<PathBuf> {
+    let mut cur = test_file.parent()?;
+    let cog_root = loop {
+        if cur.join("verum.toml").is_file() || cur.join("Verum.toml").is_file() {
+            break cur.to_path_buf();
+        }
+        cur = cur.parent()?;
+    };
+
+    let candidates = [cog_root.join("src/lib.vr"), cog_root.join("src/main.vr")];
+    let root_path = candidates.iter().find(|p| p.is_file())?;
+
+    let test_source = std::fs::read_to_string(test_file).ok()?;
+    let root_source = std::fs::read_to_string(root_path).ok()?;
+
+    // Strip any leading `module …;` declaration from the crate root —
+    // the test file's module identity wins.
+    let stripped_root = root_source
+        .lines()
+        .skip_while(|l| {
+            let t = l.trim_start();
+            t.is_empty() || t.starts_with("//") || t.starts_with("/*")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let stripped_root = if stripped_root.trim_start().starts_with("module ") {
+        // Drop the module header line (and its trailing semicolon).
+        stripped_root.split_once(';').map(|(_, rest)| rest).unwrap_or(&stripped_root)
+            .to_string()
+    } else {
+        stripped_root
+    };
+
+    let stem = test_file.file_stem()?.to_str()?;
+    let merged_path = target_dir.join(format!("test_{}.merged.vr", stem));
+    if std::fs::create_dir_all(target_dir).is_err() {
+        return None;
+    }
+    let merged = format!(
+        "// Auto-merged by T6.0.4 — test file body appended after stripped crate root.\n\
+         // Source test: {}\n// Source crate root: {}\n\n{}\n\n// === test body ===\n{}\n",
+        test_file.display(),
+        root_path.display(),
+        stripped_root,
+        test_source,
+    );
+    std::fs::write(&merged_path, merged).ok()?;
+    Some(merged_path)
 }
 
 /// T6.0.4 — locate the cog's crate root (src/lib.vr or src/main.vr)
