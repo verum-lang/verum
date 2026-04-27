@@ -65,6 +65,16 @@ implement Semaphore {
 
     // Acquire a permit, blocking via futex until available.
     // Does NOT busy-wait — threads sleep via OS futex when no permits available.
+    //
+    // **Memory ordering on `waiters` counter**: `fetch_add` uses
+    // `Release` (not `Relaxed`) so the waiter-registration
+    // happens-before-paired with the `Acquire` load in
+    // `release()` / `release_many()` / `add_permits()`.  With
+    // `Relaxed` the registration could be invisible to a
+    // concurrent releaser, leading to a missed wakeup
+    // (waiter sleeps on futex(0); releaser reads waiters==0
+    // and skips the wake; waiter never wakes up). The
+    // `Release` ⇄ `Acquire` pair closes the race.
     public fn acquire(&self) {
         loop {
             let current = self.permits.load(MemoryOrdering.Acquire);
@@ -75,8 +85,11 @@ implement Semaphore {
                 // CAS failed, retry without sleeping
                 continue;
             }
-            // No permits available — sleep via futex
-            self.waiters.fetch_add(1, MemoryOrdering.Relaxed);
+            // No permits available — sleep via futex.
+            // Release on the fetch_add publishes the
+            // registration to any concurrent releaser's
+            // Acquire load.
+            self.waiters.fetch_add(1, MemoryOrdering.Release);
             // Re-check permits before sleeping (avoid missed wakeup)
             let snap = self.permits.load(MemoryOrdering.Acquire);
             if snap == 0 {
@@ -87,6 +100,8 @@ implement Semaphore {
     }
 
     // Acquire multiple permits, blocking via futex until available.
+    // See `acquire()` doc for the Release ordering rationale on
+    // `waiters.fetch_add`.
     public fn acquire_many(&self, n: Int) {
         assert(n > 0, "Must acquire at least one permit");
         assert(n <= self.max_permits.load(MemoryOrdering.Relaxed), "Cannot acquire more than max permits");
@@ -99,8 +114,8 @@ implement Semaphore {
                 }
                 continue;
             }
-            // Not enough permits — sleep via futex
-            self.waiters.fetch_add(1, MemoryOrdering.Relaxed);
+            // Not enough permits — sleep via futex.
+            self.waiters.fetch_add(1, MemoryOrdering.Release);
             let snap = self.permits.load(MemoryOrdering.Acquire);
             if snap < n {
                 let _ = sys_futex_wait(&self.permits.value, snap, None);
