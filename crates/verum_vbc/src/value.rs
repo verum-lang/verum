@@ -639,6 +639,18 @@ impl Value {
         self.is_ptr() && (self.0 & PAYLOAD_MASK) == 0
     }
 
+    /// Returns the raw 64-bit NaN-box bit-pattern of this Value.
+    ///
+    /// Used by interpreter handlers that need to round-trip the
+    /// FULL Value through raw memory (e.g. `DerefMutRaw` writing
+    /// a heap-allocated Variant pointer to a struct field's
+    /// 8-byte slot).  Use `as_i64` / `as_ptr` / etc. for the
+    /// type-tagged accessors.
+    #[inline]
+    pub fn bits(&self) -> u64 {
+        self.0
+    }
+
     /// Creates a generator reference value.
     ///
     /// Generators are encoded using TAG_POINTER with the GENERATOR_MARKER bit set.

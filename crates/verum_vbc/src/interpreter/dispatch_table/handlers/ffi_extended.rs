@@ -624,7 +624,18 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 return Err(InterpreterError::NullPointer);
             }
 
-            let value = state.get_reg(value_reg).as_i64();
+            // Extract the raw bits of the Value to write — for sub-word
+            // sizes we want the inline-int payload (low bits), but for
+            // an 8-byte write we want the FULL 64-bit Value bit-pattern
+            // including any NaN-box tag header so that Pointer-tagged
+            // values (e.g. heap-allocated Variant Some(v) writes via
+            // `*ptr = Some(value)` in user code) round-trip correctly.
+            //
+            // The previous impl always called `.as_i64()`, which debug-
+            // asserts the value is Int-tagged and therefore panicked
+            // with "Expected int, got Some(0)" for any pointer-tagged
+            // write — discovered while validating task #40.
+            let val_value = state.get_reg(value_reg);
             // SAFETY: `ptr` was null-checked above AND rejected if it was not a
             // pointer-tagged Value (guards against arbitrary integer-to-pointer
             // writes). The caller is responsible for ensuring the target is
@@ -632,10 +643,34 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // handles arbitrary alignment.
             unsafe {
                 match size {
-                    1 => *ptr = value as u8,
-                    2 => std::ptr::write_unaligned(ptr as *mut i16, value as i16),
-                    4 => std::ptr::write_unaligned(ptr as *mut i32, value as i32),
-                    8 => std::ptr::write_unaligned(ptr as *mut i64, value),
+                    1 | 2 | 4 => {
+                        // Sub-word writes use the inline-int payload.
+                        // For sub-word atomic stores on Verum struct
+                        // fields the payload's low bytes ARE the user-
+                        // visible value; this matches handle_atomic_store.
+                        let value = if val_value.is_int() {
+                            val_value.as_i64()
+                        } else {
+                            // Pointer-tagged Value at sub-word size is
+                            // an unusual case (typically the user is
+                            // writing a NaN-boxed pointer to a non-aligned
+                            // slot) — fall back to the raw bits.
+                            val_value.bits() as i64
+                        };
+                        match size {
+                            1 => *ptr = value as u8,
+                            2 => std::ptr::write_unaligned(ptr as *mut i16, value as i16),
+                            4 => std::ptr::write_unaligned(ptr as *mut i32, value as i32),
+                            _ => unreachable!(),
+                        }
+                    }
+                    8 => {
+                        // Write the FULL 8-byte Value bit-pattern so
+                        // Pointer-tagged writes (heap variant Some(v),
+                        // boxed integers, ThinRef indices, etc.) survive
+                        // round-trip through the raw-pointer storage.
+                        std::ptr::write_unaligned(ptr as *mut u64, val_value.bits());
+                    }
                     _ => return Err(InterpreterError::InvalidOperand {
                         message: format!("invalid deref size: {}", size),
                     }),
