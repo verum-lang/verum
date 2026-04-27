@@ -90,6 +90,11 @@ extern {
     /// Get file status (symlink)
     fn lstat(path: &Byte, buf: &unsafe DarwinStat) -> Int;
 
+    /// Probe path accessibility — `int access(const char *path, int amode)`.
+    /// `amode` is `F_OK | R_OK | W_OK | X_OK`. Returns 0 on success, -1
+    /// with errno on failure (EACCES means "no access").
+    fn access(path: &Byte, amode: Int) -> Int;
+
     /// Scatter read
     fn readv(fd: Int, iov: &IOVec, iovcnt: Int) -> Int;
 
@@ -1097,10 +1102,17 @@ public fn safe_munmap(addr: Int, len: Int) -> Result<(), OSError> {
     }
 }
 
-/// Memory advise (safe wrapper)
-/// Advise kernel about memory usage patterns
-@intrinsic("sys_madvise")
-@vbc_direct_lowering
+// T0.7.1 — `@intrinsic("sys_madvise")` + `@vbc_direct_lowering`
+// removed. Together they wired safe_madvise into the AOT
+// `FfiSubOpcode::SysMadvise` opcode-handler that expected three
+// explicit operand registers; the inlined operand-3 lookup hit
+// `InvalidRegister(2)` in the 5 thin madvise_* wrappers below
+// because their 2-arg frame had no slot 2 yet allocated when the
+// constant `MADV_*` third arg was loaded. Without the annotations
+// safe_madvise goes through the standard function-call lowering —
+// Reg 2 is allocated normally; the third arg lands cleanly. madvise
+// is purely advisory so the very-slight extra call overhead is
+// invisible at runtime.
 public fn safe_madvise(addr: &unsafe Byte, len: Int, advice: Int) -> Result<(), OSError> {
     let result = unsafe { madvise(addr as Int, len, advice) };
     if result < 0 {
@@ -1349,6 +1361,35 @@ public fn safe_lstat(path: &[Byte], stat_buf: &mut DarwinStat) -> Result<(), OSE
         Err(OSError { code: err, message: errno_to_message(err) })
     } else {
         Ok(())
+    }
+}
+
+// POSIX access(2) mode bits — same numeric values across BSD/Darwin/Linux.
+public const F_OK: Int = 0;
+public const X_OK: Int = 1;
+public const W_OK: Int = 2;
+public const R_OK: Int = 4;
+
+/// Probe path accessibility via libSystem `access(2)`.
+///
+/// `mode` is a bitwise-OR of `F_OK | R_OK | W_OK | X_OK`. Returns
+/// `Ok(true)` on success, `Ok(false)` for EACCES/ENOENT/ENOTDIR/EROFS,
+/// `Err(...)` for everything else.
+public fn safe_access(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { access(path_buf.as_ptr() as &Byte, mode) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let code = errno();
+    if code == 2 || code == 13 || code == 20 || code == 30 {
+        Ok(false)
+    } else {
+        Err(OSError { code: code, message: errno_to_message(code) })
     }
 }
 
