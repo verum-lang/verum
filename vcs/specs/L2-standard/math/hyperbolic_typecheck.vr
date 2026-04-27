@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: math, elementary, hyperbolic, sinh, cosh, tanh
+// @timeout: 10000
+// @expect: pass
+//
+// V8 (#249) — hyperbolic family (sinh / cosh / tanh + inverses).
+//
+// Pre-#249 the hyperbolic family was missing entirely from
+// core.math.elementary. This spec pins the V1 contract:
+//   • Identities (sinh/cosh parity, cosh² − sinh² = 1, tanh = sinh/cosh).
+//   • Saturation for |x| > 22 (tanh ± 1, sinh / cosh ≈ eˣ/2).
+//   • Round-trip with inverses on representative ranges.
+
+mount core.math.elementary.{
+    sinh, cosh, tanh, asinh, acosh, atanh,
+    abs, log, exp,
+};
+
+fn approx_eq(a: Float, b: Float, eps: Float) -> Bool {
+    abs(a - b) < eps
+}
+
+fn exercise_sinh_cosh_at_zero() {
+    // sinh(0) = 0, cosh(0) = 1.
+    assert(approx_eq(sinh(0.0), 0.0, 1.0e-10));
+    assert(approx_eq(cosh(0.0), 1.0, 1.0e-10));
+    assert(approx_eq(tanh(0.0), 0.0, 1.0e-10));
+}
+
+fn exercise_parity() {
+    // sinh is odd: sinh(-x) = -sinh(x).
+    let x = 1.5;
+    assert(approx_eq(sinh(-x), -sinh(x), 1.0e-10));
+    // cosh is even: cosh(-x) = cosh(x).
+    assert(approx_eq(cosh(-x), cosh(x), 1.0e-10));
+    // tanh is odd.
+    assert(approx_eq(tanh(-x), -tanh(x), 1.0e-10));
+}
+
+fn exercise_pythagorean_identity() {
+    // cosh²(x) − sinh²(x) = 1 for all x.
+    let xs = [0.5, 1.0, 2.0, -1.5, 5.0];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        let s = sinh(x);
+        let c = cosh(x);
+        assert(approx_eq(c * c - s * s, 1.0, 1.0e-9));
+        i = i + 1;
+    }
+}
+
+fn exercise_tanh_equals_sinh_over_cosh() {
+    let xs = [0.5, 1.0, 2.5, -1.0];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        assert(approx_eq(tanh(x), sinh(x) / cosh(x), 1.0e-10));
+        i = i + 1;
+    }
+}
+
+fn exercise_tanh_saturation() {
+    // For |x| > 22 tanh saturates to ±1 (within float ulp).
+    assert(tanh(50.0) == 1.0);
+    assert(tanh(-50.0) == -1.0);
+    assert(tanh(100.0) == 1.0);
+}
+
+fn exercise_asinh_round_trip() {
+    // asinh(sinh(x)) = x within precision for |x| ≤ 5.
+    let xs = [-2.0, -0.5, 0.0, 0.5, 2.0, 5.0];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        assert(approx_eq(asinh(sinh(x)), x, 1.0e-9));
+        i = i + 1;
+    }
+}
+
+fn exercise_acosh_round_trip() {
+    // acosh(cosh(x)) = |x| for x ≥ 0; refinement type bounds input.
+    let xs = [0.0, 0.5, 1.5, 3.0];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        assert(approx_eq(acosh(cosh(x)), x, 1.0e-8));
+        i = i + 1;
+    }
+}
+
+fn exercise_atanh_round_trip() {
+    // atanh(tanh(x)) = x for moderate x (within float precision).
+    let xs = [-1.0, -0.3, 0.0, 0.3, 1.0];
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let x = xs[i];
+        assert(approx_eq(atanh(tanh(x)), x, 1.0e-9));
+        i = i + 1;
+    }
+}
+
+fn main() {
+    exercise_sinh_cosh_at_zero();
+    exercise_parity();
+    exercise_pythagorean_identity();
+    exercise_tanh_equals_sinh_over_cosh();
+    exercise_tanh_saturation();
+    exercise_asinh_round_trip();
+    exercise_acosh_round_trip();
+    exercise_atanh_round_trip();
+}

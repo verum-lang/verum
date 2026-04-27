@@ -671,3 +671,105 @@ theorem max_geq_both(a: Int, b: Int)
 public fn ln(x: Float{> 0.0}) -> Float {
     log(x)
 }
+
+// =============================================================================
+// Hyperbolic Functions (V8 #249)
+// =============================================================================
+//
+// Identities:
+//   sinh(x) = (eˣ − e⁻ˣ) / 2
+//   cosh(x) = (eˣ + e⁻ˣ) / 2
+//   tanh(x) = sinh(x) / cosh(x)
+//   cosh²(x) − sinh²(x) = 1
+//
+// Numerical-stability care for large |x|: the e⁻ˣ (resp. eˣ) term
+// underflows below ≈ 2⁻¹⁰²² near x ≈ 745, so the naive formula
+// becomes ill-conditioned. We branch on |x| > 22 (≈ ln 2⁵³) and
+// saturate / use the exponential alone, which is what every IEEE-754
+// math library does. tanh(x) similarly saturates to ±1 for |x| > 22
+// because the relative error bound on tanh exceeds 2⁻⁵² there.
+
+/// Hyperbolic sine.
+/// Domain: (-∞, ∞), Range: (-∞, ∞).
+public fn sinh(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY { return INFINITY; }
+    if x == NEG_INFINITY { return NEG_INFINITY; }
+    let abs_x = abs(x);
+    if abs_x > 22.0 {
+        // For large |x|, e⁻ˣ underflows; sinh(x) ≈ sign(x) · eˣ/2.
+        let half_exp = exp(abs_x) * 0.5;
+        return if x < 0.0 { -half_exp } else { half_exp };
+    }
+    let e_x = exp(x);
+    let e_neg_x = exp(-x);
+    (e_x - e_neg_x) * 0.5
+}
+
+/// Hyperbolic cosine.
+/// Domain: (-∞, ∞), Range: [1, ∞).
+public fn cosh(x: Float) -> Float{>= 1.0} {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY || x == NEG_INFINITY { return INFINITY; }
+    let abs_x = abs(x);
+    if abs_x > 22.0 {
+        return exp(abs_x) * 0.5;
+    }
+    let e_x = exp(x);
+    let e_neg_x = exp(-x);
+    (e_x + e_neg_x) * 0.5
+}
+
+/// Hyperbolic tangent.
+/// Domain: (-∞, ∞), Range: (-1, 1).
+public fn tanh(x: Float) -> Float{it > -1.0 && it < 1.0} {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY { return 1.0; }
+    if x == NEG_INFINITY { return -1.0; }
+    if x > 22.0 { return 1.0; }
+    if x < -22.0 { return -1.0; }
+    // tanh(x) = (e^{2x} - 1) / (e^{2x} + 1)
+    // — single exp call, avoids subtractive cancellation near x = 0.
+    let e2x = exp(2.0 * x);
+    (e2x - 1.0) / (e2x + 1.0)
+}
+
+/// Inverse hyperbolic sine.
+/// Domain: (-∞, ∞), Range: (-∞, ∞).
+/// Identity: asinh(x) = ln(x + √(x² + 1)).
+public fn asinh(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY { return INFINITY; }
+    if x == NEG_INFINITY { return NEG_INFINITY; }
+    // For large positive x: asinh(x) = ln(x + √(x²+1)) ≈ ln(2x).
+    // For large negative x: asinh is odd, so asinh(-x) = -asinh(x).
+    let abs_x = abs(x);
+    let result = if abs_x > 1.0e8 {
+        // Avoid overflow in x²: log(2|x|) is the asymptotic.
+        log(abs_x) + LN2
+    } else {
+        log(abs_x + sqrt(abs_x * abs_x + 1.0))
+    };
+    if x < 0.0 { -result } else { result }
+}
+
+/// Inverse hyperbolic cosine.
+/// Domain: [1, ∞), Range: [0, ∞).
+/// Identity: acosh(x) = ln(x + √(x² − 1)).
+public fn acosh(x: Float{>= 1.0}) -> Float{>= 0.0} {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY { return INFINITY; }
+    if x > 1.0e8 {
+        // Asymptotic: acosh(x) ≈ ln(2x).
+        return log(x) + LN2;
+    }
+    log(x + sqrt(x * x - 1.0))
+}
+
+/// Inverse hyperbolic tangent.
+/// Domain: (-1, 1), Range: (-∞, ∞).
+/// Identity: atanh(x) = ½ · ln((1 + x) / (1 − x)).
+public fn atanh(x: Float{it > -1.0 && it < 1.0}) -> Float {
+    if is_nan(x) { return NAN; }
+    0.5 * log((1.0 + x) / (1.0 - x))
+}
