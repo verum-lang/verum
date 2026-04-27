@@ -317,8 +317,24 @@ public fn parse_float64(s: &Text) -> Float64 {
         if i < raw.len() && raw[i] == (0x2D as Byte) { exp_neg = true; i = i + 1; }
         else if i < raw.len() && raw[i] == (0x2B as Byte) { i = i + 1; }
         let mut exp: Int = 0;
+        // SOUNDNESS: Float64 representable exponent range is roughly
+        // ±308 (DBL_MAX_EXP / DBL_MIN_EXP). Anything > 999 saturates
+        // to ±Inf / 0 anyway, and a 22-digit exp string would overflow
+        // the Int accumulator silently AND drive the multiply loop
+        // below for ~Int.MAX iterations (DoS). Cap at 3 digits, reject
+        // non-digit bytes (the original loop accepted any byte —
+        // `1eABC` would interpret 'A','B','C' as digits via wrap).
+        let mut exp_consumed: Int = 0;
         while i < raw.len() {
-            exp = exp * 10 + ((raw[i] - (0x30 as Byte)) as Int);
+            let b = raw[i];
+            if b < (0x30 as Byte) || b > (0x39 as Byte) { break; }
+            if exp_consumed >= 3 {
+                // Saturate to a definitive over-/underflow factor.
+                exp = 999;
+                break;
+            }
+            exp = exp * 10 + ((b - (0x30 as Byte)) as Int);
+            exp_consumed = exp_consumed + 1;
             i = i + 1;
         }
         let mut factor: Float64 = 1.0;
