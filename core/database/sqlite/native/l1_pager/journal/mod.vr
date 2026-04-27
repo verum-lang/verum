@@ -21,6 +21,7 @@ module core.database.sqlite.native.l1_pager.journal;
 // =============================================================================
 
 public module wal;
+public module writer;
 public module rollback;
 
 public mount .wal.{
@@ -39,4 +40,9 @@ public mount .rollback.{
     rollback_serialize_header, rollback_parse_header,
     rollback_record_checksum, rollback_serialize_record,
     rollback_parse_record, rollback_replay,
+};
+
+public mount .writer.{
+    WalWriter, WalWriteError,
+    WweIo, WweShortWrite, WweBadPageSize, WweClosed,
 };
