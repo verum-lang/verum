@@ -1,0 +1,104 @@
+// =============================================================================
+// core/database/mysql/wire/types.vr — packet markers + capability flags
+// =============================================================================
+// Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
+// =============================================================================
+
+module core.database.mysql.wire.types;
+
+mount core.*;
+mount base.Text;
+
+// -----------------------------------------------------------------------------
+// First-byte payload markers (server packets).
+// -----------------------------------------------------------------------------
+
+public const PKT_OK:        Byte = 0x00 as Byte;
+public const PKT_AUTH_SW:   Byte = 0xFE as Byte;     // AuthSwitchRequest (also EOF in old proto)
+public const PKT_EOF:       Byte = 0xFE as Byte;     // EOF marker (deprecated)
+public const PKT_ERROR:     Byte = 0xFF as Byte;
+public const PKT_LOCAL_INF: Byte = 0xFB as Byte;     // LOCAL INFILE
+public const PKT_AUTH_MORE: Byte = 0x01 as Byte;     // AuthMoreData (caching_sha2)
+
+// -----------------------------------------------------------------------------
+// COM_* command bytes (frontend → server).
+// -----------------------------------------------------------------------------
+
+public const COM_SLEEP:                Byte = 0x00 as Byte;
+public const COM_QUIT:                 Byte = 0x01 as Byte;
+public const COM_INIT_DB:              Byte = 0x02 as Byte;
+public const COM_QUERY:                Byte = 0x03 as Byte;
+public const COM_FIELD_LIST:           Byte = 0x04 as Byte;
+public const COM_PING:                 Byte = 0x0E as Byte;
+public const COM_STMT_PREPARE:         Byte = 0x16 as Byte;
+public const COM_STMT_EXECUTE:         Byte = 0x17 as Byte;
+public const COM_STMT_CLOSE:           Byte = 0x19 as Byte;
+public const COM_STMT_RESET:           Byte = 0x1A as Byte;
+public const COM_RESET_CONNECTION:     Byte = 0x1F as Byte;
+
+// -----------------------------------------------------------------------------
+// Capability flags (subset that Spindle negotiates).
+// -----------------------------------------------------------------------------
+
+public const CAP_LONG_PASSWORD:           Int = 0x00000001;
+public const CAP_FOUND_ROWS:              Int = 0x00000002;
+public const CAP_LONG_FLAG:               Int = 0x00000004;
+public const CAP_CONNECT_WITH_DB:         Int = 0x00000008;
+public const CAP_NO_SCHEMA:               Int = 0x00000010;
+public const CAP_COMPRESS:                Int = 0x00000020;
+public const CAP_ODBC:                    Int = 0x00000040;
+public const CAP_LOCAL_FILES:             Int = 0x00000080;
+public const CAP_IGNORE_SPACE:            Int = 0x00000100;
+public const CAP_PROTOCOL_41:             Int = 0x00000200;
+public const CAP_INTERACTIVE:             Int = 0x00000400;
+public const CAP_SSL:                     Int = 0x00000800;
+public const CAP_TRANSACTIONS:            Int = 0x00002000;
+public const CAP_SECURE_CONNECTION:       Int = 0x00008000;
+public const CAP_MULTI_STATEMENTS:        Int = 0x00010000;
+public const CAP_MULTI_RESULTS:           Int = 0x00020000;
+public const CAP_PS_MULTI_RESULTS:        Int = 0x00040000;
+public const CAP_PLUGIN_AUTH:             Int = 0x00080000;
+public const CAP_CONNECT_ATTRS:           Int = 0x00100000;
+public const CAP_PLUGIN_AUTH_LENENC:      Int = 0x00200000;     // CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
+public const CAP_DEPRECATE_EOF:           Int = 0x01000000;
+
+// Spindle negotiates this set during handshake.
+public const SPINDLE_CLIENT_FLAGS: Int =
+      CAP_PROTOCOL_41
+    | CAP_SECURE_CONNECTION
+    | CAP_PLUGIN_AUTH
+    | CAP_PLUGIN_AUTH_LENENC
+    | CAP_CONNECT_WITH_DB
+    | CAP_TRANSACTIONS
+    | CAP_LONG_FLAG
+    | CAP_DEPRECATE_EOF
+    | CAP_MULTI_RESULTS;
+
+// -----------------------------------------------------------------------------
+// Status flags (in EOF / OK packets).
+// -----------------------------------------------------------------------------
+
+public const STATUS_IN_TRANS:                Int = 0x0001;
+public const STATUS_AUTOCOMMIT:              Int = 0x0002;
+public const STATUS_MORE_RESULTS:            Int = 0x0008;
+public const STATUS_NO_GOOD_INDEX:           Int = 0x0010;
+public const STATUS_NO_INDEX_USED:           Int = 0x0020;
+public const STATUS_CURSOR_EXISTS:           Int = 0x0040;
+public const STATUS_LAST_ROW_SENT:           Int = 0x0080;
+public const STATUS_DB_DROPPED:              Int = 0x0100;
+public const STATUS_NO_BACKSLASH_ESCAPES:    Int = 0x0200;
+public const STATUS_METADATA_CHANGED:        Int = 0x0400;
+
+// -----------------------------------------------------------------------------
+// caching_sha2_password sub-protocol markers.
+// -----------------------------------------------------------------------------
+
+public const CSHA2_FAST_AUTH_DONE:    Byte = 0x03 as Byte;
+public const CSHA2_FULL_AUTH_NEEDED:  Byte = 0x04 as Byte;
+
+// -----------------------------------------------------------------------------
+// Auth plugin names (NUL-terminated on the wire).
+// -----------------------------------------------------------------------------
+
+public fn plugin_caching_sha2_password() -> Text { "caching_sha2_password".clone() }
+public fn plugin_mysql_native_password() -> Text { "mysql_native_password".clone() }
