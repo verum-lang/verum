@@ -182,23 +182,43 @@ impl std::error::Error for FrontmatterError {}
 ///   inner whitespace, e.g. `//  /// script` is also accepted — we strip a
 ///   single space after `//`).
 /// - Closing line, after trim, equals `// ///`.
-/// - Detection scans the source from byte 0; a leading shebang line is
+/// - Detection scans the source from byte 0; a leading UTF-8 BOM
+///   (`EF BB BF`) is silently skipped, and a leading shebang line is also
 ///   silently skipped if present.
 /// - At most one block per source. The opening match wins; subsequent
 ///   `// /// script` lines are treated as ordinary comments.
+///
+/// Byte ranges in the returned [`Extracted::range`] are in *original-source*
+/// coordinates (i.e. include any BOM byte offset). Callers that strip the
+/// BOM separately can subtract `UTF8_BOM_LEN` themselves.
 pub fn extract(source: &str) -> Result<Option<Extracted>, FrontmatterError> {
+    // Detect and skip a leading UTF-8 BOM. Cross-platform editors prepend
+    // it on save and the marker-matcher below can't see past it (the BOM
+    // is 3 bytes that don't form a valid `//` prefix). We skip the BOM
+    // for line-walking but add `bom_len` back to every byte range we
+    // return so callers stay in original-source coordinates.
+    const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+    let bom_len = if source.as_bytes().starts_with(UTF8_BOM) {
+        UTF8_BOM.len()
+    } else {
+        0
+    };
+    let scan = &source[bom_len..];
+
     let mut lines: Vec<(Range<usize>, &str)> = Vec::new();
-    let bytes = source.as_bytes();
+    let bytes = scan.as_bytes();
     let mut start = 0usize;
     for i in 0..bytes.len() {
         if bytes[i] == b'\n' {
-            let line = &source[start..i];
+            let line = &scan[start..i];
+            // Spans here are scan-relative; we shift them by `bom_len`
+            // when assembling `Extracted::range` below.
             lines.push((start..i + 1, line));
             start = i + 1;
         }
     }
     if start < bytes.len() {
-        lines.push((start..bytes.len(), &source[start..]));
+        lines.push((start..bytes.len(), &scan[start..]));
     }
 
     // Optional shebang skip on first line.
@@ -268,7 +288,9 @@ pub fn extract(source: &str) -> Result<Option<Extracted>, FrontmatterError> {
         }
     };
 
-    let range = lines[open_idx].0.start..lines[close_idx].0.end;
+    // Shift scan-relative byte ranges back into original-source coordinates
+    // by re-adding the BOM length we stripped at the top.
+    let range = (lines[open_idx].0.start + bom_len)..(lines[close_idx].0.end + bom_len);
     Ok(Some(Extracted {
         frontmatter: parsed,
         range,
@@ -454,6 +476,41 @@ print("hello");
         let src = "\n\n// /// script\n// verum = \"0.6\"\n// ///\n";
         let e = extract(src).unwrap().unwrap();
         assert_eq!(e.frontmatter.verum.as_deref(), Some("0.6"));
+    }
+
+    #[test]
+    fn bom_only_then_block() {
+        // Cross-platform editor saved the script with a UTF-8 BOM. The
+        // marker matcher must look past the BOM and the byte range we
+        // return must be in original-source coordinates.
+        let src = "\u{FEFF}// /// script\n// verum = \"0.6\"\n// ///\nmount core.io";
+        let e = extract(src).unwrap().unwrap();
+        assert_eq!(e.frontmatter.verum.as_deref(), Some("0.6"));
+        // Range must be original-source coords: start at byte 3 (post-BOM).
+        assert_eq!(e.range.start, 3);
+        let covered = &src[e.range];
+        assert!(covered.starts_with("// /// script"));
+        assert!(covered.trim_end().ends_with("// ///"));
+    }
+
+    #[test]
+    fn bom_then_shebang_then_block() {
+        // Most-permissive layout: BOM precedes shebang precedes block.
+        // Both prefix layers must be silently skipped.
+        let src = "\u{FEFF}#!/usr/bin/env verum\n// /// script\n// verum = \"0.6\"\n// ///\n";
+        let e = extract(src).unwrap().unwrap();
+        assert_eq!(e.frontmatter.verum.as_deref(), Some("0.6"));
+        // Range starts at 3 (BOM) + 21 (shebang) = 24.
+        let expected_start = 3 + "#!/usr/bin/env verum\n".len();
+        assert_eq!(e.range.start, expected_start);
+        let covered = &src[e.range];
+        assert!(covered.starts_with("// /// script"));
+    }
+
+    #[test]
+    fn bom_with_no_block_returns_none() {
+        let src = "\u{FEFF}fn main() {}";
+        assert!(extract(src).unwrap().is_none());
     }
 
     #[test]
