@@ -12,7 +12,7 @@
 // Key protocols:
 // - Try: Enables the ? operator for error/option propagation
 // - FromResidual: Enables error type conversion in ? chains
-// - ControlFlow: Result of Try::branch() for control flow decisions
+// - ControlFlow: Result of Try.branch() for control flow decisions
 //
 // =============================================================================
 
@@ -127,7 +127,7 @@ implement<B: Debug, C: Debug> Debug for ControlFlow<B, C> {
 ///
 /// The `?` operator provides early return on failure. When applied to a value
 /// of type `T: Try`, it:
-/// 1. Calls `T::branch()` to check success/failure
+/// 1. Calls `T.branch()` to check success/failure
 /// 2. On `Continue(output)`: extracts the output value
 /// 3. On `Break(residual)`: converts residual and returns early
 ///
@@ -226,8 +226,8 @@ public type FromResidual<R> is protocol {
 /// declared `Never` as `type Never is {};` — a unit-record with
 /// exactly one inhabitant (`Never {}`) — which silently broke
 /// the uninhabitedness contract that downstream `unsafe
-/// unreachable_unchecked` arms in `Maybe::from_residual` /
-/// `Result::from_residual` rely on. The alias to `!` restores
+/// unreachable_unchecked` arms in `Maybe.from_residual` /
+/// `Result.from_residual` rely on. The alias to `!` restores
 /// the invariant: there is no syntax (safe or unsafe) that
 /// produces a value of `!`, so the residual `Some(_)` /
 /// `Ok(_)` arms are provably dead at every call site.

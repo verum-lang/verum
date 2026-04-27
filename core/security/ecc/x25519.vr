@@ -177,13 +177,11 @@ fn scalar_mult(
     u: &[Byte; 32],
     out: &mut [Byte; 32],
 ) {
-    // Primary path: runtime intrinsic. The runtime selects the best
-    // backend for the current target (`fiat-crypto` default,
-    // hardware variants when available). On backends that haven't
-    // been wired yet, `intrinsic_not_ready` returns true and we fall
-    // back to the reference port — currently itself marked TODO, so
-    // downstream code gets a clear error instead of a silent
-    // miscomputation.
+    // Runtime intrinsic. The runtime selects the best backend for
+    // the current target (`fiat-crypto` default, hardware variants
+    // when available). The scalar-mult intrinsic is mandatory; it
+    // panics on unsupported targets rather than silently
+    // miscomputing — there is no in-Verum reference fallback.
     let result = @intrinsic("verum.x25519.scalar_mult", scalar, u);
     let mut i = 0;
     while i < 32 {

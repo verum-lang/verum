@@ -40,7 +40,7 @@ meta fn test_text_split_adjacent() -> Int {
 
 // Test text_split longer separator
 meta fn test_text_split_long_sep() -> Int {
-    let parts = text_split("a.b::c", "::");
+    let parts = text_split("a.b.c", "::");
     list_len(parts)  // Should be 3
 }
 

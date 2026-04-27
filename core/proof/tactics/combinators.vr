@@ -1,7 +1,7 @@
 // core.proof.tactics.combinators — tacticals.
 //
 // The algebraic laws these combinators satisfy are encoded in
-// `verum_smt::tactic_laws` (task #86); see that module for the
+// `verum_smt.tactic_laws` (task #86); see that module for the
 // full inventory. Key laws:
 //
 //   skip ; t  ≡  t            (AndThen left identity)

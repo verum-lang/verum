@@ -12,7 +12,7 @@ mount core.database.sqlite.native.{Connection};
 
 @main
 public async fn main() -> Result<(), Error> {
-    let conn = Connection::open("/tmp/loom-wal-test.db").await?;
+    let conn = Connection.open("/tmp/loom-wal-test.db").await?;
     let mode: Text = conn.query_scalar(sql#"PRAGMA journal_mode = WAL"#).await?;
     assert_eq(mode, "wal");
 

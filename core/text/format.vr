@@ -69,7 +69,7 @@ const STDERR_FD: Int = 2;
 /// overflowed back to `Int.MIN` in two's-complement and the
 /// `while val > 0` loop skipped — producing "-" with no digits.
 /// This site is THE canonical integer formatter for the entire
-/// stdlib (used by `Formatter::write_int_decimal`,
+/// stdlib (used by `Formatter.write_int_decimal`,
 /// `panic_fmt`, every `Display for Int` / `Debug for Int`
 /// path), so the fix here cascades broadly.
 ///
@@ -267,7 +267,7 @@ implement Debug for WriteError {
 // =============================================================================
 
 /// Result type for formatting operations.
-/// This is the standard return type for Display::fmt and similar methods.
+/// This is the standard return type for Display.fmt and similar methods.
 public type FormatResult is Result<(), FormatError>;
 
 // =============================================================================
@@ -554,7 +554,7 @@ implement TextFormatter {
     //
     // Replaces the old `Text → List<Char> → Text` reverse-and-
     // collect chain (~4× allocations + ~3× memcpy) with a
-    // 64-byte stack buffer + single `Text::push_str` of the
+    // 64-byte stack buffer + single `Text.push_str` of the
     // assembled digit slice.
     fn write_int_base(&mut self, n: Int, base: Int, uppercase: Bool) -> Result<(), FormatError> {
         let negative = n < 0;

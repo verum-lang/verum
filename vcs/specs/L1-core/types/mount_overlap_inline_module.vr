@@ -13,7 +13,7 @@
 /// ```
 ///
 /// Root cause: `register_imported_item_from_inline_module` fell
-/// through to a `Span::dummy()` `TypeError::UnboundVariable` when
+/// through to a `Span.dummy()` `TypeError.UnboundVariable` when
 /// the target inline module had no populated `items` list (common
 /// during stdlib registration when submodule items are loaded
 /// lazily), or when the item was re-exported via a `public mount`
@@ -21,7 +21,7 @@
 ///
 /// The emitted error had **no actionable source location** — the
 /// `<generated>:1:1` span is the fallback for dummy-span conversion
-/// in `session::convert_span`. Users saw `E100 unbound variable: Ok`
+/// in `session.convert_span`. Users saw `E100 unbound variable: Ok`
 /// with no way to find where in their code the problem was, even
 /// though `Ok` was bound via the prior `mount core.*`.
 ///

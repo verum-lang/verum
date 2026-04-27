@@ -7,8 +7,8 @@
 //
 // RFC 5952 — the one-true-spelling for IPv6 addresses. Without a
 // shared canonicaliser, the same address surfaces under a dozen
-// equivalent strings (`2001:0db8::1` / `2001:DB8::1` /
-// `2001:db8:0:0:0:0:0:1` / `2001:0:0:0:db8::1` / …) and every
+// equivalent strings (`2001:0db8.1` / `2001:DB8.1` /
+// `2001:db8:0:0:0:0:0:1` / `2001:0:0:0:db8.1` / …) and every
 // log-dedup, firewall-rule, and allowlist implementation ends up
 // with a pile of near-duplicates.
 //
@@ -28,7 +28,7 @@
 // let canon: Text = ipv6_canonical.format_ipv6(&ipv6_addr);
 //
 // let parsed: Ipv6Addr = ipv6_canonical.parse(&Text.from("2001:0DB8:0:0:0:0:0:1"))?;
-// let canon = ipv6_canonical.format_ipv6(&parsed);   // "2001:db8::1"
+// let canon = ipv6_canonical.format_ipv6(&parsed);   // "2001:db8.1"
 // ```
 //
 // `parse` is a thin wrapper over `Ipv6Addr.parse` — the only

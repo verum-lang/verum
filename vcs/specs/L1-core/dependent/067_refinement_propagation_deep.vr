@@ -15,7 +15,7 @@
 ///      each layer.
 ///   3. Theorems reference these functions in their proof bodies.
 ///
-/// This exercises the fix to `refinement.rs::substitute_in_expr`
+/// This exercises the fix to `refinement.rs.substitute_in_expr`
 /// and the call-site substitution path in `infer.rs`.
 
 /// Bounded indexing: `i` must be in `[0, len)`.

@@ -452,7 +452,7 @@ fn test_atomic_boundary_values() {
     atomic_store_u32(ptr_u32, 0, ORDERING_SEQ_CST);
     assert(atomic_load_u32(ptr_u32 as *const UInt32, ORDERING_SEQ_CST) == 0);
 
-    atomic_store_u32(ptr_u32, 4294967295, ORDERING_SEQ_CST);  // u32::MAX
+    atomic_store_u32(ptr_u32, 4294967295, ORDERING_SEQ_CST);  // u32.MAX
     assert(atomic_load_u32(ptr_u32 as *const UInt32, ORDERING_SEQ_CST) == 4294967295);
 
     // UInt64 boundaries
@@ -461,16 +461,16 @@ fn test_atomic_boundary_values() {
     atomic_store_u64(ptr_u64, 0, ORDERING_SEQ_CST);
     assert(atomic_load_u64(ptr_u64 as *const UInt64, ORDERING_SEQ_CST) == 0);
 
-    atomic_store_u64(ptr_u64, 18446744073709551615, ORDERING_SEQ_CST);  // u64::MAX
+    atomic_store_u64(ptr_u64, 18446744073709551615, ORDERING_SEQ_CST);  // u64.MAX
     assert(atomic_load_u64(ptr_u64 as *const UInt64, ORDERING_SEQ_CST) == 18446744073709551615);
 
     // Int32 boundaries
     let mut val_i32: Int32 = 0;
     let ptr_i32 = &mut val_i32 as *mut Int32;
-    atomic_store_i32(ptr_i32, -2147483648, ORDERING_SEQ_CST);  // i32::MIN
+    atomic_store_i32(ptr_i32, -2147483648, ORDERING_SEQ_CST);  // i32.MIN
     assert(atomic_load_i32(ptr_i32 as *const Int32, ORDERING_SEQ_CST) == -2147483648);
 
-    atomic_store_i32(ptr_i32, 2147483647, ORDERING_SEQ_CST);  // i32::MAX
+    atomic_store_i32(ptr_i32, 2147483647, ORDERING_SEQ_CST);  // i32.MAX
     assert(atomic_load_i32(ptr_i32 as *const Int32, ORDERING_SEQ_CST) == 2147483647);
 
     // Fetch-add wrapping behavior

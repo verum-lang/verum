@@ -1,6 +1,6 @@
 // core.verify.attempt — proof-attempt outcome types.
 //
-// Mirror of `verum_verification::level::ProofAttempt` +
+// Mirror of `verum_verification.level.ProofAttempt` +
 // `VerificationOutcome`. Lets user code structure its own
 // dispatch on "prove / fall-back / hard-fail" in the same
 // semantic table the compiler enforces.
@@ -19,7 +19,7 @@ type ProofAttempt is
 //
 // Every `(VerificationLevel, ProofAttempt)` pair maps to
 // exactly one `VerificationOutcome` via the table in
-// `verum_verification::level::evaluate_attempt`:
+// `verum_verification.level.evaluate_attempt`:
 //
 //   Runtime, _              → EmitRuntimeCheck
 //   Static,  Proven         → ElideCheck
@@ -37,7 +37,7 @@ type VerificationOutcome is
 // Evaluate the outcome of a proof attempt at the given level.
 //
 // This is the user-space mirror of
-// `verum_verification::level::VerificationLevel::
+// `verum_verification.level.VerificationLevel::
 // evaluate_attempt` — the fundamental-level policy dispatch
 // from task #70.
 //

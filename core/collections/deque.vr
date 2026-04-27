@@ -72,7 +72,7 @@ implement<T> Deque<T> {
         } as &unsafe T;
 
         if data.is_null() {
-            panic(f"Deque::with_capacity({capacity}) failed: requested {cap * T.size} bytes");
+            panic(f"Deque.with_capacity({capacity}) failed: requested {cap * T.size} bytes");
         }
 
         Deque {
@@ -152,7 +152,7 @@ implement<T> Deque<T> {
     }
 
     // Push element to back. Fallible counterpart to push_back —
-    // returns Err(AllocError::OutOfMemory) instead of panicking
+    // returns Err(AllocError.OutOfMemory) instead of panicking
     // when the underlying grow() can't allocate. Use this on the
     // production hot path of long-running services that must
     // degrade gracefully rather than crash.
@@ -1548,7 +1548,7 @@ implement<T> Deque<T> {
     }
 
     // Internal: fallible reallocate to new capacity. Returns
-    // Err(AllocError::OutOfMemory) on alloc failure rather than
+    // Err(AllocError.OutOfMemory) on alloc failure rather than
     // panicking. This is the load-bearing primitive for every
     // try_<op> method; the panicking `reallocate` simply panics
     // on the same failure mode.
@@ -1560,7 +1560,7 @@ implement<T> Deque<T> {
         let new_data = new_raw as &unsafe T;
 
         if new_data.is_null() {
-            return Err(AllocError::OutOfMemory {
+            return Err(AllocError.OutOfMemory {
                 requested: new_cap * T.size,
             });
         }

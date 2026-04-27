@@ -23,7 +23,7 @@ mount core.*;
 mount core.net.quic.stream_sm.flow_control.{ConnFlowControl};
 
 fn client_bidi_ids_have_low_bits_00() {
-    let mut fc = ConnFlowControl::new(
+    let mut fc = ConnFlowControl.new(
         0_u64, 0_u64,
         /* max_bidi_remote */ 3_u64, 0_u64,
         0_u64, 0_u64,
@@ -48,7 +48,7 @@ fn client_bidi_ids_have_low_bits_00() {
 }
 
 fn server_bidi_ids_have_low_bits_01() {
-    let mut fc = ConnFlowControl::new(0_u64, 0_u64, 2_u64, 0_u64, 0_u64, 0_u64);
+    let mut fc = ConnFlowControl.new(0_u64, 0_u64, 2_u64, 0_u64, 0_u64, 0_u64);
     match fc.alloc_stream_bidi(true) {
         Some(id) => assert(id == 1_u64),       // seq 0 << 2 | 0x01
         None => panic("server bidi 0"),
@@ -60,7 +60,7 @@ fn server_bidi_ids_have_low_bits_01() {
 }
 
 fn client_uni_ids_have_low_bits_10() {
-    let mut fc = ConnFlowControl::new(0_u64, 0_u64, 0_u64, 0_u64, 2_u64, 0_u64);
+    let mut fc = ConnFlowControl.new(0_u64, 0_u64, 0_u64, 0_u64, 2_u64, 0_u64);
     match fc.alloc_stream_uni(false) {
         Some(id) => assert(id == 2_u64),       // seq 0 << 2 | 0x02
         None => panic("client uni 0"),
@@ -72,7 +72,7 @@ fn client_uni_ids_have_low_bits_10() {
 }
 
 fn server_uni_ids_have_low_bits_11() {
-    let mut fc = ConnFlowControl::new(0_u64, 0_u64, 0_u64, 0_u64, 2_u64, 0_u64);
+    let mut fc = ConnFlowControl.new(0_u64, 0_u64, 0_u64, 0_u64, 2_u64, 0_u64);
     match fc.alloc_stream_uni(true) {
         Some(id) => assert(id == 3_u64),       // seq 0 << 2 | 0x03
         None => panic("server uni 0"),
@@ -84,7 +84,7 @@ fn server_uni_ids_have_low_bits_11() {
 }
 
 fn on_peer_max_streams_unblocks_allocator() {
-    let mut fc = ConnFlowControl::new(0_u64, 0_u64, 1_u64, 0_u64, 0_u64, 0_u64);
+    let mut fc = ConnFlowControl.new(0_u64, 0_u64, 1_u64, 0_u64, 0_u64, 0_u64);
     // Spend the single credit.
     let _ = fc.alloc_stream_bidi(false);
     match fc.alloc_stream_bidi(false) {
@@ -102,7 +102,7 @@ fn on_peer_max_streams_unblocks_allocator() {
 fn stream_id_low_bits_are_pairwise_distinct_across_roles() {
     // Allocate one of each kind and verify the low 2 bits form the
     // complete set {00, 01, 10, 11} = {0, 1, 2, 3}.
-    let mut fc = ConnFlowControl::new(0_u64, 0_u64, 2_u64, 2_u64, 2_u64, 2_u64);
+    let mut fc = ConnFlowControl.new(0_u64, 0_u64, 2_u64, 2_u64, 2_u64, 2_u64);
     let client_bidi = fc.alloc_stream_bidi(false).unwrap() & 0x03_u64;
     let server_bidi = fc.alloc_stream_bidi(true).unwrap()  & 0x03_u64;
     let client_uni  = fc.alloc_stream_uni(false).unwrap()  & 0x03_u64;

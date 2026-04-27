@@ -30,8 +30,8 @@
 mount core.math.frameworks.owl2_fs.types;
 
 /// `E_OWL2_UNBOUNDED_COUNT` diagnostic name.  Returned as part of a
-/// `Maybe::None` from `count_o_unbounded` and surfaced by the typed
-/// elaboration layer (`verum_ast::attr::typed::Owl2ClassAttr`) when a
+/// `Maybe.None` from `count_o_unbounded` and surfaced by the typed
+/// elaboration layer (`verum_ast.attr.typed.Owl2ClassAttr`) when a
 /// `count_o` query is issued against a class that lacks
 /// `@owl2_class(semantics = ClosedWorld)` or an explicit
 /// `closed_domain = true` annotation.
@@ -64,10 +64,10 @@ public fn count_o<I: Individual>(
     hits
 }
 
-/// Unbounded count: returns `Maybe::Some(n)` iff the domain witness
-/// can be supplied; otherwise `Maybe::None` to signal
+/// Unbounded count: returns `Maybe.Some(n)` iff the domain witness
+/// can be supplied; otherwise `Maybe.None` to signal
 /// `E_OWL2_UNBOUNDED_COUNT`. V1 always requires a witness; V2 will
-/// dispatch to CVC5 FMF when the witness is `Maybe::None` and the
+/// dispatch to CVC5 FMF when the witness is `Maybe.None` and the
 /// surrounding `@owl2_class` carries `semantics = ClosedWorld`.
 public fn count_o_unbounded<I: Individual>(
     domain: Maybe<List<I>>,

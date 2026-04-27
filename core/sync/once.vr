@@ -138,7 +138,7 @@ implement Once {
     /// `Ok(false)` when another thread already completed init;
     /// `Err(e)` when this caller's `f` ran AND failed.
     ///
-    /// This is the foundation primitive for `OnceLock::get_or_try_init`
+    /// This is the foundation primitive for `OnceLock.get_or_try_init`
     /// — the previous implementation ran `f()` BEFORE entering
     /// `call_once`, which let multiple racing callers all execute
     /// `f` concurrently (contract violation: `f` must run at most
@@ -431,7 +431,7 @@ implement<T> OnceLock<T> {
                 return Ok(self.value.as_ref().unwrap());
             }
             if observed == POISONED {
-                panic("OnceLock::get_or_try_init on poisoned Once");
+                panic("OnceLock.get_or_try_init on poisoned Once");
             }
             if observed == RUNNING {
                 while self.once.state.load(MemoryOrdering.Acquire) == RUNNING {
@@ -508,7 +508,7 @@ implement<T> OnceLock<T> {
                 return Err(value);
             }
             if observed == POISONED {
-                panic("OnceLock::try_get_or_set on poisoned Once — use try_get_or_set_force to recover");
+                panic("OnceLock.try_get_or_set on poisoned Once — use try_get_or_set_force to recover");
             }
             if observed == RUNNING {
                 // Spin until the winning thread releases RUNNING

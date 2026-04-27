@@ -82,8 +82,8 @@ implement<T> Mutex<T> {
     /// # Note on poisoning semantics
     ///
     /// Verum does NOT yet expose a "currently unwinding a panic" predicate
-    /// at the language level (the Rust `std::thread::panicking()` analogue),
-    /// so `MutexGuard::drop` cannot poison the mutex automatically when
+    /// at the language level (the Rust `std.thread.panicking()` analogue),
+    /// so `MutexGuard.drop` cannot poison the mutex automatically when
     /// dropped during a panic. As a result, the poison flag is only set
     /// when callers explicitly invoke `poison()` before raising — typically
     /// right before a `panic(...)` site that observes inconsistent state

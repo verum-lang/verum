@@ -53,7 +53,7 @@ implement OSError {
     ///   * macOS:   EAGAIN = EWOULDBLOCK = 35
     ///   * Windows: WSAEWOULDBLOCK = 10035 (winsock-side)
     ///
-    /// Verum's `core/io/protocols.vr::from_raw_os_error` uses
+    /// Verum's `core/io/protocols.vr.from_raw_os_error` uses
     /// platform-conditioned tables (#67) — this helper accepts ALL
     /// known would-block codes since OSError is the cross-platform
     /// shim type (the actual platform-conditional dispatch lives in
@@ -711,7 +711,7 @@ public const F_UNLCK: Int16 = 2;
 /// Kind of byte-range lock — the caller's side of the type.
 ///
 /// Renamed from the historic `LockKind` to avoid simple-name
-/// collision with `core.database.sqlite.native.l0_vfs.vfs_protocol::LockKind`
+/// collision with `core.database.sqlite.native.l0_vfs.vfs_protocol.LockKind`
 /// (the SQLite VFS five-state protocol type).  The codegen variant
 /// table is keyed by simple type name, so two stdlib types named
 /// `LockKind` first-wins each other and one set of variants
@@ -836,7 +836,7 @@ public fn unlock_region(fd: FileDesc, start: Int, len: Int) -> Result<(), OSErro
 // Cross-Platform Context System
 // =============================================================================
 // V-LLSI Context System provides unified access to thread-local context slots
-// across all platforms. This replaces tokio::task_local! with native TLS.
+// across all platforms. This replaces tokio.task_local! with native TLS.
 //
 // Performance comparison (from new-arch-spec.md Appendix F.3):
 // - tokio HashMap lookup: ~20ns

@@ -1432,7 +1432,7 @@ public fn lookup_addr(addr: &IpAddr) -> Result<Text, DnsError> {
 /// Build PTR query name from IP address.
 ///
 /// For IPv4: 1.2.3.4 -> 4.3.2.1.in-addr.arpa
-/// For IPv6: 2001:db8::1 -> 1.0.0.0...8.b.d.0.1.0.0.2.ip6.arpa
+/// For IPv6: 2001:db8.1 -> 1.0.0.0...8.b.d.0.1.0.0.2.ip6.arpa
 fn build_ptr_name(addr: &IpAddr) -> Text {
     match *addr {
         IpAddr.V4(ref v4) => {
@@ -1719,7 +1719,7 @@ fn test_is_ip_address() {
     assert(is_ip_address(&"192.168.1.1"));
     assert(is_ip_address(&"127.0.0.1"));
     assert(is_ip_address(&"::1"));
-    assert(is_ip_address(&"2001:db8::1"));
+    assert(is_ip_address(&"2001:db8.1"));
 
     assert(!is_ip_address(&"example.com"));
     assert(!is_ip_address(&"localhost"));

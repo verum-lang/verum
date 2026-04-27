@@ -17,7 +17,7 @@ mount core.net.h3.push.{
 };
 
 fn reserve_without_grant_fails() {
-    let mut emitter = PushEmitter::new();
+    let mut emitter = PushEmitter.new();
     // With zero budget any reservation fails.
     let headers: List<Byte> = [0xD1_u8];   // QPACK indexed :method GET
     let res = emitter.reserve(headers);
@@ -28,7 +28,7 @@ fn reserve_without_grant_fails() {
 }
 
 fn grant_then_reserve_succeeds() {
-    let mut emitter = PushEmitter::new();
+    let mut emitter = PushEmitter.new();
     emitter.grant(3_u64);
 
     let headers_a: List<Byte> = [0xD1_u8, 0x50_u8, 0x02_u8, 0x2F_u8, 0x01_u8];
@@ -53,7 +53,7 @@ fn grant_then_reserve_succeeds() {
 }
 
 fn cancelled_push_flagged() {
-    let mut emitter = PushEmitter::new();
+    let mut emitter = PushEmitter.new();
     assert(false == emitter.is_cancelled(42_u64));
     emitter.mark_cancelled(42_u64);
     assert(emitter.is_cancelled(42_u64));
@@ -63,7 +63,7 @@ fn cancelled_push_flagged() {
 }
 
 fn goaway_blocks_at_threshold() {
-    let mut emitter = PushEmitter::new();
+    let mut emitter = PushEmitter.new();
     emitter.grant(10_u64);
     emitter.mark_client_goneaway(2_u64);   // no new push_ids ≥ 2
 

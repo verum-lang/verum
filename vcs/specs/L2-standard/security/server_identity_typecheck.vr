@@ -19,7 +19,7 @@ fn exercise_identity_check(cert_der: &[Byte]) -> Result<(), ServerIdentityError>
     // IPv4 literal reference.
     let _ = verify_server_identity(&cert, &Text.from("192.0.2.1"));
     // IPv6 literal reference.
-    let _ = verify_server_identity(&cert, &Text.from("2001:db8::1"));
+    let _ = verify_server_identity(&cert, &Text.from("2001:db8.1"));
     // Empty reference → EmptyReference error branch.
     let _ = verify_server_identity(&cert, &Text.from(""));
     Ok(())

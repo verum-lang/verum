@@ -12,12 +12,12 @@
 ///                       | 'certified' | 'synthesize' ) ;
 ///
 /// Two independent surfaces must agree on this list:
-///   1. `VerificationLevel::from_annotation` in `verum_verification::level`
+///   1. `VerificationLevel.from_annotation` in `verum_verification.level`
 ///      — the coarse compile-time gradient (projects every name onto
 ///      Runtime / Static / Proof).
-///   2. `VerifyStrategy::from_attribute_value` in `verum_smt::verify_strategy`
+///   2. `VerifyStrategy.from_attribute_value` in `verum_smt.verify_strategy`
 ///      — the fine-grained operational strategy driving the
-///      `BackendSwitcher::solve_with_strategy` dispatch (Formal=Capability,
+///      `BackendSwitcher.solve_with_strategy` dispatch (Formal=Capability,
 ///      Fast=Capability+tight-timeout, Thorough=Portfolio,
 ///      Certified=cross-validate, Synthesize=SyGuS-route).
 

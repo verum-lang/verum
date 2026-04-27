@@ -6,8 +6,8 @@
 // @expected-exit: 0
 //
 // Regression for Issue #4 (root fix in
-// crates/verum_types/src/aliasing.rs::borrow_immut_for_call +
-// crates/verum_types/src/infer.rs UnOp::Ref case).
+// crates/verum_types/src/aliasing.rs.borrow_immut_for_call +
+// crates/verum_types/src/infer.rs UnOp.Ref case).
 //
 // A sequence `call(&value); mutate(&mut value);` — with no `value`-derived
 // reference surviving the first call's return — must type-check without

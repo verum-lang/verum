@@ -234,7 +234,7 @@ fn validate_jwt<P: TrustBundleProvider>(req: &WeftRequest, provider: &P)
         Some(b) => b,
     };
     // Runtime-level crypto check — implemented in the runtime crate
-    // via `verum_security::spiffe::validate_jwt_svid`. Phase-6 skel:
+    // via `verum_security.spiffe.validate_jwt_svid`. Phase-6 skel:
     // returns InvalidCredential until the intrinsic hookup is done.
     match runtime_validate_jwt_svid(&token, &bundle) {
         Err(e)        => Err(AuthRejection.InvalidCredential(e)),

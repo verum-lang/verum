@@ -27,14 +27,14 @@ fn constants_match_rfc() {
 }
 
 fn initial_window_meets_v5() {
-    let cc = NewReno::new();
+    let cc = NewReno.new();
     assert(cc.window() == INITIAL_WINDOW_BYTES);
     assert(cc.window_min_ok());
     assert(cc.bytes_in_flight() == 0_u32);
 }
 
 fn slow_start_grows_cwnd_on_ack() {
-    let mut cc = NewReno::new();
+    let mut cc = NewReno.new();
     let cwnd_before = cc.window();
     // Simulate a sent + acked 1200-byte packet.
     cc.on_packet_sent(1200_u32);
@@ -47,7 +47,7 @@ fn slow_start_grows_cwnd_on_ack() {
 }
 
 fn loss_triggers_recovery_and_halves_cwnd() {
-    let mut cc = NewReno::new();
+    let mut cc = NewReno.new();
     // Inflate cwnd well above MIN by repeated slow-start ACKs.
     let mut step: Int = 0;
     while step < 5 {
@@ -69,7 +69,7 @@ fn loss_triggers_recovery_and_halves_cwnd() {
 }
 
 fn repeated_loss_in_recovery_does_not_halve_twice() {
-    let mut cc = NewReno::new();
+    let mut cc = NewReno.new();
     cc.on_packet_sent(1200_u32);
     cc.on_packets_lost(1200_u32, Instant.now());
     let cwnd_in_recovery = cc.window();
@@ -82,14 +82,14 @@ fn repeated_loss_in_recovery_does_not_halve_twice() {
 }
 
 fn pto_does_not_change_cwnd() {
-    let mut cc = NewReno::new();
+    let mut cc = NewReno.new();
     let w_before = cc.window();
     cc.on_pto(Instant.now());
     assert(cc.window() == w_before);
 }
 
 fn bytes_in_flight_floors_at_zero() {
-    let mut cc = NewReno::new();
+    let mut cc = NewReno.new();
     cc.on_packet_sent(1200_u32);
     // ACK more than we actually have in flight — bytes_in_flight must
     // saturate at 0, not underflow.

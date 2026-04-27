@@ -19,7 +19,7 @@ mount core.net.quic.stateless_reset.{
 };
 
 fn token_same_cid_is_deterministic() {
-    let k = StatelessResetKey::generate();
+    let k = StatelessResetKey.generate();
     let cid: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
     let t1 = k.token_for_cid(cid.as_slice());
     let t2 = k.token_for_cid(cid.as_slice());
@@ -31,7 +31,7 @@ fn token_same_cid_is_deterministic() {
 }
 
 fn token_differs_across_cids() {
-    let k = StatelessResetKey::generate();
+    let k = StatelessResetKey.generate();
     let cid_a: List<Byte> = [0xAA_u8, 0xAA_u8, 0xAA_u8, 0xAA_u8];
     let cid_b: List<Byte> = [0xBB_u8, 0xBB_u8, 0xBB_u8, 0xBB_u8];
     let t_a = k.token_for_cid(cid_a.as_slice());
@@ -83,7 +83,7 @@ fn build_stateless_reset_at_larger_target() {
 }
 
 fn reset_token_set_basic_ops() {
-    let mut set = ResetTokenSet::new();
+    let mut set = ResetTokenSet.new();
     assert(set.len() == 0);
     let t: [Byte; 16] = [0x01_u8; 16];
     set.insert(t);

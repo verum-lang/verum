@@ -6,7 +6,7 @@
 ///
 /// The `Variant() = from..to` syntax declares a path constructor in
 /// a HIT. The endpoint expressions are captured by the parser into
-/// `Variant::path_endpoints` and registered on the type checker's
+/// `Variant.path_endpoints` and registered on the type checker's
 /// `hit_path_constructors` side-channel for use by HIT-aware tactics
 /// (cubical, descent).
 ///

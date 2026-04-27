@@ -122,7 +122,7 @@ meta fn derive_default_generic(type_info: TypeInfo) -> TokenStream {
             fn default() -> Self {
                 Self {
                     $[for f in fields {
-                        $f: Default::default(),
+                        $f: Default.default(),
                     }]
                 }
             }

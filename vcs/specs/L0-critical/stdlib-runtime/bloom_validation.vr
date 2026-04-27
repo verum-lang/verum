@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, collections, bloom, validation
+
+// Validation surface for `BloomFilter::try_with_target`. Pre-fix
+// the constructor accepted negative or zero capacity (divide-by-
+// zero in compute_k) and out-of-range fp_rate_ppm (degenerate
+// math). The fallible variant now surfaces a structured BloomError
+// so callers can branch on the specific cause.
+
+mount core.collections.bloom.{BloomFilter, BloomError, BloomConfig};
+mount core.base.result.{Result};
+
+fn main() {
+    // Happy path: typical capacity + 0.1% FP rate.
+    let ok = BloomFilter.try_with_target(1024, 1_000);
+    assert(ok is Result.Ok(_));
+
+    // Empty capacity rejected.
+    match BloomFilter.try_with_target(0, 1_000) {
+        Result.Err(BloomError.EmptyCapacity) => {},
+        _                                    => panic("expected EmptyCapacity for capacity=0"),
+    }
+
+    // Negative capacity rejected.
+    match BloomFilter.try_with_target(-1, 1_000) {
+        Result.Err(BloomError.EmptyCapacity) => {},
+        _                                    => panic("expected EmptyCapacity for capacity=-1"),
+    }
+
+    // Capacity over the cap rejected.
+    match BloomFilter.try_with_target(2_000_000_000_000, 1_000) {
+        Result.Err(BloomError.CapacityTooLarge(_)) => {},
+        _                                          => panic("expected CapacityTooLarge"),
+    }
+
+    // Zero FP rate rejected.
+    match BloomFilter.try_with_target(1024, 0) {
+        Result.Err(BloomError.InvalidFpRate(_)) => {},
+        _                                       => panic("expected InvalidFpRate for ppm=0"),
+    }
+
+    // Negative FP rate rejected.
+    match BloomFilter.try_with_target(1024, -1) {
+        Result.Err(BloomError.InvalidFpRate(_)) => {},
+        _                                       => panic("expected InvalidFpRate for ppm=-1"),
+    }
+
+    // FP rate at or above 100% rejected.
+    match BloomFilter.try_with_target(1024, 1_000_000) {
+        Result.Err(BloomError.InvalidFpRate(_)) => {},
+        _                                       => panic("expected InvalidFpRate for ppm>=10^6"),
+    }
+
+    // Boundary: capacity = 1, fp_rate_ppm = 1 (very small).
+    let edge = BloomFilter.try_with_target(1, 1);
+    assert(edge is Result.Ok(_));
+
+    // try_new variant on a BloomConfig: same validation.
+    match BloomFilter.try_new(BloomConfig { capacity: 0, fp_rate_ppm: 1_000 }) {
+        Result.Err(BloomError.EmptyCapacity) => {},
+        _                                    => panic("expected EmptyCapacity from try_new"),
+    }
+}

@@ -152,7 +152,7 @@ fn main() -> Int {
     }
 
     // Test 12: split on multi-char delimiter
-    let data = "one::two::three";
+    let data = "one.two.three";
     let dp = data.split("::");
     if (dp.len() != 3) {
         print(f"FAIL t12: dp.len()={dp.len()}");

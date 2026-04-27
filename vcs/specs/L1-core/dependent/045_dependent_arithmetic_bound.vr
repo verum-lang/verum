@@ -10,7 +10,7 @@
 /// refinement checker substitutes earlier arguments (`src_len = 10`,
 /// `offset = 2`), the predicate becomes `count <= 10 - 2`, which is
 /// then constant-folded to `count <= 8` before being compared against
-/// the third argument. This exercises the TypeChecker::const_fold_expr
+/// the third argument. This exercises the TypeChecker.const_fold_expr
 /// pass in crates/verum_types/src/infer.rs that runs after dependent
 /// refinement substitution.
 ///

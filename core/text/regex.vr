@@ -7,7 +7,7 @@
 //
 // Provides the Regex type for pattern matching on text. Regex values are
 // typically created from `re#"..."` or `rx#"..."` tagged literals, which the
-// parser desugars to `Regex::new(pattern).unwrap_or_else(...)`.
+// parser desugars to `Regex.new(pattern).unwrap_or_else(...)`.
 //
 // # Runtime
 //
@@ -19,7 +19,7 @@
 // digit microseconds, and most callers reuse a small set of literal
 // patterns where the DFA cache inside the crate already absorbs the cost.
 // A v2 may introduce a per-Regex compiled handle once we surface a
-// fallible `Regex::compile` returning a runtime-side handle.
+// fallible `Regex.compile` returning a runtime-side handle.
 //
 // # Available operations
 //
@@ -46,7 +46,7 @@ mount core.*;
 // =============================================================================
 
 /// A compiled regular expression pattern. Internally stores the pattern
-/// string only; the runtime compiles a fresh `regex::Regex` on each call.
+/// string only; the runtime compiles a fresh `regex.Regex` on each call.
 public type Regex is {
     /// The original pattern string.
     pattern: Text,
@@ -54,8 +54,8 @@ public type Regex is {
 
 /// Error returned when a pattern string cannot be compiled into a `Regex`.
 /// The current runtime defers structural validation to match-time — every
-/// `Regex::new` succeeds — so this error is reserved for callers that
-/// pre-validate via a future `Regex::compile`.
+/// `Regex.new` succeeds — so this error is reserved for callers that
+/// pre-validate via a future `Regex.compile`.
 public type RegexError is { message: Text };
 
 // =============================================================================

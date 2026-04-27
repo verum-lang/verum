@@ -5,7 +5,7 @@
 // Layer: Standard Library / Security
 //
 // User-facing surface for the region-calculus analysis core
-// (`verum_types::region_calculus`). Region-based memory: every
+// (`verum_types.region_calculus`). Region-based memory: every
 // allocation is tagged with a *region* (named lifetime) and the
 // type system enforces that no value escapes its containing
 // region.

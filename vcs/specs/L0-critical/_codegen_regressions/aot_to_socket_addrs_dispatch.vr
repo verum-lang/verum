@@ -37,7 +37,7 @@
 //
 // REMOVE @skip once the dispatcher in
 // `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
-// (or `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`
+// (or `crates/verum_vbc/src/codegen/expressions.rs.compile_method_call`
 // receiver-narrowing path at lines ~6020-6051) correctly picks the
 // `implement ToSocketAddrs for SocketAddr` impl rather than falling
 // through to the `Text` impl.

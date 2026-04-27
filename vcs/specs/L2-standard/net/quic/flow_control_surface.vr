@@ -15,7 +15,7 @@ mount core.*;
 mount core.net.quic.stream_sm.flow_control.{ConnFlowControl};
 
 fn fresh_fc_accounting() {
-    let fc = ConnFlowControl::new(
+    let fc = ConnFlowControl.new(
         /* max_data_remote */ 8_192_u64,
         /* max_data_local  */ 16_384_u64,
         /* max_streams_bidi_remote */ 10_u64,
@@ -27,7 +27,7 @@ fn fresh_fc_accounting() {
 }
 
 fn on_bytes_sent_drains_budget() {
-    let mut fc = ConnFlowControl::new(
+    let mut fc = ConnFlowControl.new(
         1000_u64, 1000_u64, 0_u64, 0_u64, 0_u64, 0_u64
     );
     fc.on_bytes_sent(600_u64);
@@ -40,7 +40,7 @@ fn on_bytes_sent_drains_budget() {
 }
 
 fn on_peer_max_data_monotonic_raise_only() {
-    let mut fc = ConnFlowControl::new(
+    let mut fc = ConnFlowControl.new(
         1000_u64, 1000_u64, 0_u64, 0_u64, 0_u64, 0_u64
     );
     fc.on_bytes_sent(500_u64);
@@ -53,7 +53,7 @@ fn on_peer_max_data_monotonic_raise_only() {
 }
 
 fn on_bytes_recv_enforces_local_max_data() {
-    let mut fc = ConnFlowControl::new(
+    let mut fc = ConnFlowControl.new(
         1000_u64, 1000_u64, 0_u64, 0_u64, 0_u64, 0_u64
     );
     // Within budget — accept.
@@ -67,7 +67,7 @@ fn on_bytes_recv_enforces_local_max_data() {
 }
 
 fn suggested_max_data_tracks_recv_plus_window() {
-    let mut fc = ConnFlowControl::new(
+    let mut fc = ConnFlowControl.new(
         0_u64, 10_000_u64, 0_u64, 0_u64, 0_u64, 0_u64
     );
     assert(fc.suggested_max_data(16_384_u64) == 16_384_u64);
@@ -76,7 +76,7 @@ fn suggested_max_data_tracks_recv_plus_window() {
 }
 
 fn update_max_data_local_publishes_to_peer() {
-    let mut fc = ConnFlowControl::new(
+    let mut fc = ConnFlowControl.new(
         0_u64, 1_000_u64, 0_u64, 0_u64, 0_u64, 0_u64
     );
     fc.update_max_data_local(2_000_u64);

@@ -1,0 +1,279 @@
+// =============================================================================
+// core.meta.diakrisis_attrs — Part B advisory attributes via meta-system
+// =============================================================================
+// Spec: docs/architecture/verum-verification-architecture.md Part B §§5/9/10
+// Version: V8.1 #196 V21+V22+V23+V24 (META1 unified)
+// =============================================================================
+//
+// VVA Part B introduces a small family of *advisory* attributes that
+// classify functions / theorems / types along Diakrisis foundational
+// axes without changing compiler dispatch:
+//
+//   `@effect(<kind>)`            — computational-effect classifier
+//                                  (VVA Part B §9 — Kleisli categories)
+//   `@infinity_category(<n>)`    — (∞,∞)-categorical level
+//                                  (VVA Part B §4)
+//   `@autopoietic(epsilon, depth)` — ε-fixpoint coordinate + finite
+//                                  approximation budget
+//                                  (VVA Part B §5)
+//   `@ludic_design`              — marks a value as a ludics design
+//                                  (lazy-evaluated proof tree)
+//                                  (VVA Part B §10)
+//   `@cut_elimination(bound)`    — cut-elimination step bound
+//                                  (VVA Part B §10)
+//
+// **Architectural rationale (V8.1 #196 META1 reorganisation):** these
+// attributes were initially shipped as Rust-side typed-attrs in
+// `verum_ast.attr.typed`. Architectural review concluded that
+// typed-attrs should be reserved for compiler-internal dispatch
+// (verify_strategy, framework_axioms TCB, extract pipeline,
+// audit walker, etc.) — every advisory marker that does NOT
+// participate in compile-time dispatch is BETTER expressed via
+// the meta-system per the principles laid out in
+// `core/meta/framework_hygiene.vr`:
+//
+//   1. *Zero grammar bloat* — the generic `identifier(args)` form
+//      already parses; no parser extension required.
+//   2. *User-extensible* — users can add their own classifiers by
+//      adding analogous meta-fns in a sibling module.
+//   3. *Validation in source* — the meta-fn validates argument
+//      shape with the same Verum semantic types Rust would use.
+//   4. *Single source of truth* — definition + validation +
+//      docstring + spec citation all live in one `.vr` file.
+//
+// Each meta-fn in this module accepts an `Attribute` (the generic
+// AST representation) and returns either a domain-typed record on
+// success or a structured `Diagnostic` on failure.
+//
+// =============================================================================
+
+module meta.diakrisis_attrs;
+
+mount core.{Text, List, Maybe, Result};
+mount meta.attribute.{Attribute, AttributeArg};
+mount meta.span.{Span};
+
+// -----------------------------------------------------------------------------
+// 1. @effect(<kind>) — VVA Part B §9
+// -----------------------------------------------------------------------------
+
+/// Canonical effect-kind enumeration per Diakrisis Part B §9.
+public type EffectKind is
+    | Pure        // No effects (default; redundant marker).
+    | Io          // Input/output (file system, network, console).
+    | State       // Mutable-state effects (cells, refs, mutexes).
+    | Async       // Asynchronous / Future-typed effects.
+    | Exception   // Result / panic / throw.
+    | Nondet      // Non-deterministic (random, choice, search).
+    | Quantum     // VVA §14.4 quantum effect class.
+    ;
+
+implement EffectKind {
+    /// Parse an effect-kind identifier (case-insensitive). Returns
+    /// `Maybe.Some(kind)` for canonical names + `exn` / `non_det`
+    /// aliases; `Maybe.None` for unknown.
+    public fn from_ident(s: Text) -> Maybe<EffectKind> {
+        let lower = s.to_ascii_lowercase();
+        if lower == "pure"       { Maybe.Some(EffectKind.Pure) }
+        else if lower == "io"        { Maybe.Some(EffectKind.Io) }
+        else if lower == "state"     { Maybe.Some(EffectKind.State) }
+        else if lower == "async"     { Maybe.Some(EffectKind.Async) }
+        else if lower == "exception" { Maybe.Some(EffectKind.Exception) }
+        else if lower == "exn"       { Maybe.Some(EffectKind.Exception) }
+        else if lower == "nondet"    { Maybe.Some(EffectKind.Nondet) }
+        else if lower == "non_det"   { Maybe.Some(EffectKind.Nondet) }
+        else if lower == "quantum"   { Maybe.Some(EffectKind.Quantum) }
+        else                         { Maybe.None }
+    }
+
+    /// Canonical lowercase identifier.
+    public fn as_str(&self) -> Text {
+        match self {
+            EffectKind.Pure      => "pure",
+            EffectKind.Io        => "io",
+            EffectKind.State     => "state",
+            EffectKind.Async     => "async",
+            EffectKind.Exception => "exception",
+            EffectKind.Nondet    => "nondet",
+            EffectKind.Quantum   => "quantum",
+        }
+    }
+}
+
+/// Validated `@effect(<kind>)` annotation.
+public type EffectAttr is {
+    kind: EffectKind,
+    span: Span,
+};
+
+/// Meta-fn: extract a validated `EffectAttr` from a generic
+/// attribute, or `Maybe.None` when the shape doesn't match.
+///
+/// Accepts: `@effect(<kind-ident>)` exactly one arg, identifier.
+public fn parse_effect_attr(attr: &Attribute) -> Maybe<EffectAttr> {
+    if attr.name != "effect" { return Maybe.None; }
+    if attr.args.len() != 1 { return Maybe.None; }
+    let arg_kind = match attr.args.get(0) {
+        Maybe.Some(AttributeArg.Ident(name)) => EffectKind.from_ident(name),
+        _                                    => Maybe.None,
+    };
+    match arg_kind {
+        Maybe.Some(k) => Maybe.Some(EffectAttr { kind: k, span: attr.span }),
+        Maybe.None    => Maybe.None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2. @infinity_category(<level>) — VVA Part B §4
+// -----------------------------------------------------------------------------
+
+/// (∞,∞)-categorical level marker.
+public type InfinityLevel is
+    | Finite(Int)        // Concrete level (0=set, 1=1-cat, 2=2-cat, …).
+    | Omega              // (∞, 1) — Lurie HTT.
+    | OmegaOmega         // (∞, ∞) — full higher-cell stratification.
+    ;
+
+implement InfinityLevel {
+    public fn as_str(&self) -> Text {
+        match self {
+            InfinityLevel.Finite(n) => f"{n}",
+            InfinityLevel.Omega      => "omega",
+            InfinityLevel.OmegaOmega => "omega_omega",
+        }
+    }
+}
+
+/// Validated `@infinity_category(<level>)` annotation.
+public type InfinityCategoryAttr is {
+    level: InfinityLevel,
+    span: Span,
+};
+
+/// Meta-fn: extract `InfinityCategoryAttr` from generic attribute.
+/// Accepts: `@infinity_category(<int|omega|omega_omega>)`.
+public fn parse_infinity_category(attr: &Attribute) -> Maybe<InfinityCategoryAttr> {
+    if attr.name != "infinity_category" { return Maybe.None; }
+    if attr.args.len() != 1 { return Maybe.None; }
+    let level = match attr.args.get(0) {
+        Maybe.Some(AttributeArg.Int(n)) => {
+            if n < 0 { Maybe.None }
+            else     { Maybe.Some(InfinityLevel.Finite(n)) }
+        },
+        Maybe.Some(AttributeArg.Ident(name)) => {
+            let lower = name.to_ascii_lowercase();
+            if lower == "omega"             { Maybe.Some(InfinityLevel.Omega) }
+            else if lower == "omega_omega"  { Maybe.Some(InfinityLevel.OmegaOmega) }
+            else                            { Maybe.None }
+        },
+        _ => Maybe.None,
+    };
+    match level {
+        Maybe.Some(l) => Maybe.Some(InfinityCategoryAttr { level: l, span: attr.span }),
+        Maybe.None    => Maybe.None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. @autopoietic(epsilon, depth) — VVA Part B §5
+// -----------------------------------------------------------------------------
+
+/// Validated `@autopoietic(epsilon = "<ε>", depth = N)` annotation.
+public type AutopoieticAttr is {
+    epsilon: Text,
+    depth: Int,
+    span: Span,
+};
+
+/// Meta-fn: extract `AutopoieticAttr` from generic attribute.
+/// Accepts: `@autopoietic(epsilon = <string>, depth = <int>)`
+/// (named-args, order-independent).
+public fn parse_autopoietic(attr: &Attribute) -> Maybe<AutopoieticAttr> {
+    if attr.name != "autopoietic" { return Maybe.None; }
+    let mut epsilon: Maybe<Text> = Maybe.None;
+    let mut depth:   Maybe<Int>  = Maybe.None;
+    for arg in &attr.args {
+        match arg {
+            AttributeArg.Named { name, value } => {
+                if name == "epsilon" {
+                    if let AttributeArg.Str(s) = *value {
+                        epsilon = Maybe.Some(s);
+                    }
+                } else if name == "depth" {
+                    if let AttributeArg.Int(n) = *value {
+                        if n >= 0 { depth = Maybe.Some(n); }
+                    }
+                }
+            },
+            _ => {},
+        }
+    }
+    match (epsilon, depth) {
+        (Maybe.Some(e), Maybe.Some(d)) =>
+            Maybe.Some(AutopoieticAttr { epsilon: e, depth: d, span: attr.span }),
+        _ => Maybe.None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4. @ludic_design — VVA Part B §10
+// -----------------------------------------------------------------------------
+
+/// Validated `@ludic_design` annotation (zero-arg marker).
+public type LudicDesignAttr is {
+    span: Span,
+};
+
+/// Meta-fn: extract `LudicDesignAttr` from generic attribute.
+/// Accepts: `@ludic_design` exactly zero args.
+public fn parse_ludic_design(attr: &Attribute) -> Maybe<LudicDesignAttr> {
+    if attr.name != "ludic_design" { return Maybe.None; }
+    if attr.args.len() != 0 { return Maybe.None; }
+    Maybe.Some(LudicDesignAttr { span: attr.span })
+}
+
+// -----------------------------------------------------------------------------
+// 5. @cut_elimination[(bound)] — VVA Part B §10
+// -----------------------------------------------------------------------------
+
+/// Default cut-elimination step bound per VVA Part B §13.5 caveat.
+public const CUT_ELIMINATION_DEFAULT_BOUND: Int = 1000;
+
+/// Validated `@cut_elimination[(bound = N)]` annotation. Bound is
+/// optional; default per `CUT_ELIMINATION_DEFAULT_BOUND`.
+public type CutEliminationAttr is {
+    bound: Int,
+    span: Span,
+};
+
+/// Meta-fn: extract `CutEliminationAttr` from generic attribute.
+/// Accepts:
+///   `@cut_elimination`                   → bound = default (1000)
+///   `@cut_elimination(bound = <int>)`    → named-arg form
+///   `@cut_elimination(<int>)`            → bare-int form
+public fn parse_cut_elimination(attr: &Attribute) -> Maybe<CutEliminationAttr> {
+    if attr.name != "cut_elimination" { return Maybe.None; }
+    if attr.args.len() == 0 {
+        return Maybe.Some(CutEliminationAttr {
+            bound: CUT_ELIMINATION_DEFAULT_BOUND,
+            span:  attr.span,
+        });
+    }
+    if attr.args.len() != 1 { return Maybe.None; }
+    let bound = match attr.args.get(0) {
+        Maybe.Some(AttributeArg.Int(n)) =>
+            if n >= 0 { Maybe.Some(n) } else { Maybe.None },
+        Maybe.Some(AttributeArg.Named { name, value }) =>
+            if name == "bound" {
+                if let AttributeArg.Int(n) = *value {
+                    if n >= 0 { Maybe.Some(n) } else { Maybe.None }
+                } else { Maybe.None }
+            } else { Maybe.None },
+        _ => Maybe.None,
+    };
+    match bound {
+        Maybe.Some(b) =>
+            Maybe.Some(CutEliminationAttr { bound: b, span: attr.span }),
+        Maybe.None => Maybe.None,
+    }
+}

@@ -29,7 +29,7 @@ module core.database.sqlite.native.l5_sql.codegen;
 //   * PnPragma            — currently emits a Halt(0) + comment;
 //                           pragma registry lookup lands in L6
 //
-// Unsupported nodes produce `Err(CodegenError::Unsupported)` so the
+// Unsupported nodes produce `Err(CodegenError.Unsupported)` so the
 // caller knows the compile pipeline hit a gap rather than silently
 // emitting a broken program.
 // =============================================================================

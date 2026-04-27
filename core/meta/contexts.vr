@@ -1405,7 +1405,7 @@ public context CodeSearch {
     ///
     /// # Example
     /// ```verum
-    /// // Find all Result::unwrap() calls
+    /// // Find all Result.unwrap() calls
     /// let unwraps = CodeSearch.find_pattern("_.unwrap()");
     ///
     /// // Find all if-let-some patterns

@@ -4,7 +4,7 @@
 // Layer: 4 (Async)
 // Dependencies: core, async/poll, async/waker, async/future, async/stream
 // Grammar ref: grammar/verum.ebnf — for_await_loop production (v2.10)
-// Compiler ref: verum_types/protocol.rs::resolve_async_iterator_protocol
+// Compiler ref: verum_types/protocol.rs.resolve_async_iterator_protocol
 // =============================================================================
 //
 // AsyncIterator is the protocol that `for await item in ...` desugars to.
@@ -48,7 +48,7 @@
 //   iterator from a collection-shaped thing. Every AsyncIterator is
 //   trivially IntoAsyncIterator.
 // - The distinction between `Stream` (raw poll) and `AsyncIterator` (awaitable)
-//   follows Rust's async_std::stream::Stream vs futures::stream::StreamExt
+//   follows Rust's async_std.stream.Stream vs futures.stream.StreamExt
 //   split, and matches Scheme-ish "observer" vs "iterator" separation.
 //
 // =============================================================================
@@ -81,7 +81,7 @@ public type AsyncIterator is protocol {
     ///
     /// After returning `None`, further calls are allowed but will continue
     /// returning `None` — the iterator is not restarted (matches the
-    /// "fused" behavior of std::iter::Fuse / futures::stream::Fuse).
+    /// "fused" behavior of std.iter.Fuse / futures.stream.Fuse).
     async fn next(&mut self) -> Maybe<Self.Item>;
 
     /// Bounds on the remaining length of the iterator. Returns

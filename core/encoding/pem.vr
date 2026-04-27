@@ -267,6 +267,6 @@ fn text_as_str(t: &Text) -> &str {
     // Zero-cost — Verum's `Text` wraps a UTF-8 slice and exposes
     // a borrow to the underlying `&str` via `as_str()`. Wrapped
     // here so callers don't have to import `Text` API alongside
-    // `pem::encode_block`.
+    // `pem.encode_block`.
     t.as_str()
 }

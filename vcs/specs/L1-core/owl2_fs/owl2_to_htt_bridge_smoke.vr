@@ -1,36 +1,60 @@
 // @test: typecheck-pass
 // @tier: 0
 // @level: L1
-// @tags: owl2, owl2_fs, bridge, lurie_htt, theory_interop, vuva, phase-3, c7b
+// @tags: owl2, owl2_fs, bridge, lurie_htt, theory_interop, vva, phase-3, c7b
 // @timeout: 5000
 // @expect: pass
 //
 // VVA §21.7 Phase 3 C7b — owl2_fs → lurie_htt canonical bridge smoke.
 //
-// Smoke test: mounts the 24 @framework(owl2_fs, ...) translation
-// markers and asserts they resolve at use-site. The actual category-
-// theoretic content lives in the citation strings; the boundary is
-// enumerated by `verum audit --framework-axioms --by-lineage owl2_fs`.
+// V2 (V8.1 #196): mounts the 30 @framework_translate(owl2_fs, lurie_htt, ...)
+// translation markers and asserts they resolve at use-site. The actual
+// category-theoretic content lives in the citation strings; the
+// boundary is enumerated by `verum audit --framework-axioms
+// --by-lineage owl2_fs` (cross-framework axioms additionally tagged
+// via the typed FrameworkTranslateAttr).
 
 mount core.theory_interop.bridges.owl2_to_htt.{
+    // Tier 1 — class-level (5)
     class_to_presheaf,
+    named_individual_to_object,
     subclass_to_monomorphism,
     equivalent_classes_to_isomorphism,
     disjoint_classes_to_initial_pullback,
+    // Tier 2 — object-property (6)
     object_property_to_functor,
+    object_property_chain_to_composition,
+    inverse_object_properties_to_adjoint,
+    object_property_domain_to_restriction,
+    object_property_range_to_restriction,
     haskey_to_representable_presheaf,
+    // Tier 3 — characteristic flags (8 incl. NEW has_self)
     symmetric_to_self_inverse_functor,
     transitive_to_idempotent_composition,
+    asymmetric_to_empty_intersection,
+    reflexive_to_identity_nt,
+    irreflexive_to_empty_diagonal,
     functional_to_monomorphism,
+    inverse_functional_to_epimorphism,
+    has_self_to_diagonal_nt,
+    // Tier 4 — class-expression ctors (7 incl. NEW complement, has_value, max_cardinality)
     intersection_to_limit,
     union_to_colimit,
+    complement_to_lex_coreflection,
     some_values_to_existential_image,
     all_values_to_universal_image,
+    has_value_to_slice_presheaf,
+    max_cardinality_to_bounded_fibre,
+    // Tier 5 — individual axioms (NEW)
+    same_individual_to_equalizer,
+    different_individuals_to_disjoint_coproduct,
+    // Tier 6 — data-property bridge (NEW)
+    data_property_to_enriched_functor,
+    data_some_values_to_existential_image,
 };
 
 fn main() {
-    // Touch one marker from each tier to make sure the mount tree
-    // is actually wired.
+    // Touch one marker from each tier — covers the bridge surface.
     let _ = class_to_presheaf();                          // Tier 1
     let _ = subclass_to_monomorphism();                   // Tier 1
     let _ = equivalent_classes_to_isomorphism();          // Tier 1
@@ -40,10 +64,18 @@ fn main() {
     let _ = symmetric_to_self_inverse_functor();          // Tier 3
     let _ = transitive_to_idempotent_composition();       // Tier 3
     let _ = functional_to_monomorphism();                 // Tier 3
+    let _ = has_self_to_diagonal_nt();                    // Tier 3 NEW
     let _ = intersection_to_limit();                      // Tier 4
     let _ = union_to_colimit();                           // Tier 4
+    let _ = complement_to_lex_coreflection();             // Tier 4 NEW
     let _ = some_values_to_existential_image();           // Tier 4
     let _ = all_values_to_universal_image();              // Tier 4
+    let _ = has_value_to_slice_presheaf();                // Tier 4 NEW
+    let _ = max_cardinality_to_bounded_fibre();           // Tier 4 NEW
+    let _ = same_individual_to_equalizer();               // Tier 5 NEW
+    let _ = different_individuals_to_disjoint_coproduct();// Tier 5 NEW
+    let _ = data_property_to_enriched_functor();          // Tier 6 NEW
+    let _ = data_some_values_to_existential_image();      // Tier 6 NEW
 
-    print("owl2_fs → lurie_htt bridge ok");
+    print("owl2_fs → lurie_htt bridge ok (V2: 30 typed @framework_translate markers)");
 }

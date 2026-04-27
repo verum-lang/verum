@@ -39,7 +39,7 @@ fn discard_marks_space_inactive() {
 }
 
 fn loss_detection_keys_discarded_is_no_op_on_fresh_tracker() {
-    let mut ld = LossDetection::new();
+    let mut ld = LossDetection.new();
     // Sequence of discards — none should throw.
     ld.on_keys_discarded(PnSpaceKind.Initial);
     ld.on_keys_discarded(PnSpaceKind.Handshake);

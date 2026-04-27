@@ -23,7 +23,7 @@
 //   * Reflected input, reflected output
 //   * Reflected polynomial: 0x82F63B78
 //
-// Matches Python's `crc32c.crc32c`, Rust's `crc32c::crc32c`, and
+// Matches Python's `crc32c.crc32c`, Rust's `crc32c.crc32c`, and
 // Go's `hash/crc32` with `IEEE ^ 0x1EDC6F41` (Castagnoli table).
 //
 // # API

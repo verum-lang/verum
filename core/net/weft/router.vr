@@ -155,7 +155,7 @@ implement Router {
     /// Requests whose path starts with `prefix + "/"` have that prefix
     /// stripped before being handed to the inner router, so a sub-router
     /// registered under `/api/v1` sees paths like `/users/42` in its own
-    /// tree — this mirrors axum::Router::nest.
+    /// tree — this mirrors axum.Router.nest.
     public fn nest(mut self, prefix: Text, inner: Router) -> Router {
         if !prefix.starts_with("/") {
             panic(f"Router.nest: prefix must start with '/': {prefix}");

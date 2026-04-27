@@ -5,7 +5,7 @@
 // Layer: Standard Library / Proof
 //
 // User-facing surface for the dependent-contracts analysis core
-// (`verum_types::contracts_old`). Postconditions in mutating
+// (`verum_types.contracts_old`). Postconditions in mutating
 // functions often need to refer to the *prior* value of state,
 // not the current value. Eiffel, JML, Dafny, and SPARK use
 // `old(expr)` for this.

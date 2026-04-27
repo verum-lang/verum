@@ -8,8 +8,8 @@
 // has at least an `x: Int` field, regardless of what else it contains.
 // The row variable `r` captures the additional fields.
 //
-// AST: `TypeKind::Record { fields, row_var: Maybe::Some(r) }`.
-// Elaborated type: `Type::ExtensibleRecord { fields, row_var }`.
+// AST: `TypeKind.Record { fields, row_var: Maybe.Some(r) }`.
+// Elaborated type: `Type.ExtensibleRecord { fields, row_var }`.
 
 // Single-field row-polymorphic function.
 fn get_x<r>(p: {x: Int | r}) -> Int { p.x }

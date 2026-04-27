@@ -1,5 +1,5 @@
 // core.verify.certificate — user-facing view of
-// `verum_kernel::SmtCertificate`.
+// `verum_kernel.SmtCertificate`.
 //
 // Lets user code read / construct SMT certificates —
 // primarily for test code that wants to verify the certificate
@@ -14,7 +14,7 @@
 
 // Current certificate envelope schema version.
 //
-// Kept in sync with `verum_kernel::CERTIFICATE_SCHEMA_VERSION`.
+// Kept in sync with `verum_kernel.CERTIFICATE_SCHEMA_VERSION`.
 // A newer kernel accepts any certificate at version
 // `[0, CERTIFICATE_SCHEMA_VERSION_MAX]` — version 0 is the
 // legacy pre-versioned form, kept for backward compatibility.
@@ -43,7 +43,7 @@ type CertificateSummary is {
 // Check that a certificate's schema version is within the
 // supported range for the current kernel build.
 //
-// Matches `verum_kernel::SmtCertificate::validate_schema` —
+// Matches `verum_kernel.SmtCertificate.validate_schema` —
 // user libraries should call this before trusting a
 // certificate loaded from disk / received over the wire.
 fn validate_schema(cert: CertificateSummary) -> Bool {

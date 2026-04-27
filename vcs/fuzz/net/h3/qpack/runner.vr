@@ -70,7 +70,7 @@ fn feed(bytes: &[Byte]) -> Int {
 
 @main
 public fn main() -> Int {
-    let mut rng = FuzzRng::new(5);
+    let mut rng = FuzzRng.new(5);
     let seed = seed_qpack_static_path();
     let mut iters: Int = 0;
     let mut accepted: Int = 0;

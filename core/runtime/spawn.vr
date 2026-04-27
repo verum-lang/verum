@@ -48,7 +48,7 @@
 ///
 /// | Operation               | Time      | Notes                           |
 /// |-------------------------|-----------|----------------------------------|
-/// | SupervisorSpawnConfig::new()      | ~10ns     | Zero-cost builder init          |
+/// | SupervisorSpawnConfig.new()      | ~10ns     | Zero-cost builder init          |
 /// | Each builder method     | ~0-5ns    | Inline assignment               |
 /// | apply_to_env()          | ~50-100ns | Conditional overrides           |
 /// | Context merge           | ~5-30ns   | Per context                     |

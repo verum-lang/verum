@@ -11,7 +11,7 @@
 //       materialisation.
 //   (b) Cut-elimination is bounded-depth (default 1000 steps);
 //       divergent computations return UNKNOWN verdict via
-//       BisimulationResult::Unknown.
+//       BisimulationResult.Unknown.
 //   (c) Orthogonality is decided via finite-depth bisimulation —
 //       the limit-as-depth → ∞ relation is genuine; the bounded
 //       check is sound for all observable contexts up to that
@@ -74,7 +74,7 @@ public fn lazy_design(
 /// True iff every recursive call in the design is guarded
 /// (productivity verdict). A non-productive design's cut-elim
 /// may diverge; the bounded depth-cap then surfaces it as
-/// `BisimulationResult::Unknown`.
+/// `BisimulationResult.Unknown`.
 public fn lazy_design_is_productive(d: LazyDesign) -> Bool {
     let verdict = check_productivity(d.corec_calls.clone());
     match verdict {

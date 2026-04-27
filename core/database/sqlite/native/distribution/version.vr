@@ -43,7 +43,7 @@ fn append_int(dst: &mut Text, n: Int) {
     if n == 0 { dst.push_byte(48 as Byte); return; }
     let mut digits: List<Byte> = List.new();
     // UInt64 magnitude — Int.MIN-safe.  See canonical fix in
-    // core/text/format::int_to_string.
+    // core/text/format.int_to_string.
     let mut mag: UInt64 = if n < 0 {
         (((!n) as UInt64) + (1 as UInt64))
     } else {

@@ -34,7 +34,7 @@ public fn extract_prefix(op: &PatternOp, pattern: &Text) -> Text {
             i = i + 1;
         }
     }
-    // Rebuild a Text from bytes via Text::from_bytes.
+    // Rebuild a Text from bytes via Text.from_bytes.
     let mut out = "".clone();
     let mut j: Int = 0;
     while j < out_bytes.len() {

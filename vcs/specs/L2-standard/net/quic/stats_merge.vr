@@ -12,7 +12,7 @@ mount core.*;
 mount core.net.quic.stats.{QuicStats, EndpointStats};
 
 fn new_stats_are_all_zero() {
-    let s = QuicStats::new();
+    let s = QuicStats.new();
     assert(s.datagrams_sent   == 0_u64);
     assert(s.datagrams_recv   == 0_u64);
     assert(s.bytes_sent       == 0_u64);
@@ -25,13 +25,13 @@ fn new_stats_are_all_zero() {
 }
 
 fn merge_is_additive_per_field() {
-    let mut a = QuicStats::new();
+    let mut a = QuicStats.new();
     a.datagrams_sent = 10_u64;
     a.bytes_sent     = 1500_u64;
     a.packets_lost   = 2_u64;
     a.paths_validated = 1_u64;
 
-    let mut b = QuicStats::new();
+    let mut b = QuicStats.new();
     b.datagrams_sent = 5_u64;
     b.bytes_sent     = 800_u64;
     b.packets_lost   = 3_u64;
@@ -47,17 +47,17 @@ fn merge_is_additive_per_field() {
 }
 
 fn merge_zero_does_not_perturb() {
-    let mut a = QuicStats::new();
+    let mut a = QuicStats.new();
     a.datagrams_sent = 42_u64;
     a.rtt_smoothed_us = 20_000_u64;
-    let z = QuicStats::new();
+    let z = QuicStats.new();
     a.merge(&z);
     assert(a.datagrams_sent   == 42_u64);
     assert(a.rtt_smoothed_us  == 20_000_u64);
 }
 
 fn endpoint_stats_constructible() {
-    let e = EndpointStats::new();
+    let e = EndpointStats.new();
     // Endpoint aggregates exist separately from per-connection stats;
     // the exact fields are implementation-internal, but new() must
     // return a fully-initialised zero aggregate.

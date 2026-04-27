@@ -6,7 +6,7 @@
 // @tier: 0
 // @tags: collections, map, set, reserve, shrink, capacity, production, core
 // @description: Tests for Map/Set reserve(), shrink_to_fit(), shrink_to(),
-//               and Set::replace(). These are critical for production workloads
+//               and Set.replace(). These are critical for production workloads
 //               that need explicit memory management.
 // =============================================================================
 
@@ -16,7 +16,7 @@ mount core.*;
 mount core.base.ordering.{Ordering};
 
 // =============================================================================
-// Section 1: Map::reserve() Tests
+// Section 1: Map.reserve() Tests
 // =============================================================================
 
 @test
@@ -63,7 +63,7 @@ fn test_map_reserve_already_sufficient() {
 }
 
 // =============================================================================
-// Section 2: Map::shrink_to_fit() Tests
+// Section 2: Map.shrink_to_fit() Tests
 // =============================================================================
 
 @test
@@ -111,7 +111,7 @@ fn test_map_shrink_to_fit_after_removal() {
 }
 
 // =============================================================================
-// Section 3: Map::shrink_to() Tests
+// Section 3: Map.shrink_to() Tests
 // =============================================================================
 
 @test
@@ -141,7 +141,7 @@ fn test_map_shrink_to_below_len() {
 }
 
 // =============================================================================
-// Section 4: Set::reserve() Tests
+// Section 4: Set.reserve() Tests
 // =============================================================================
 
 @test
@@ -166,7 +166,7 @@ fn test_set_reserve_with_existing() {
 }
 
 // =============================================================================
-// Section 5: Set::shrink_to_fit() Tests
+// Section 5: Set.shrink_to_fit() Tests
 // =============================================================================
 
 @test
@@ -192,7 +192,7 @@ fn test_set_shrink_to_fit_with_elements() {
 }
 
 // =============================================================================
-// Section 6: Set::shrink_to() Tests
+// Section 6: Set.shrink_to() Tests
 // =============================================================================
 
 @test
@@ -206,7 +206,7 @@ fn test_set_shrink_to() {
 }
 
 // =============================================================================
-// Section 7: Set::replace() Tests
+// Section 7: Set.replace() Tests
 // =============================================================================
 
 @test
@@ -272,7 +272,7 @@ fn test_map_shrink_then_grow() {
 }
 
 // =============================================================================
-// Section 9: Map::with_capacity Tests
+// Section 9: Map.with_capacity Tests
 // =============================================================================
 
 @test
@@ -302,7 +302,7 @@ fn test_map_with_capacity_insert_no_resize() {
 }
 
 // =============================================================================
-// Section 10: Set::with_capacity Tests
+// Section 10: Set.with_capacity Tests
 // =============================================================================
 
 @test

@@ -69,7 +69,7 @@ fn seed_der_sequence_oid_octets() -> List<Byte> {
 }
 
 fn feed(bytes: &[Byte]) -> Int {
-    let mut r = DerReader::new(bytes);
+    let mut r = DerReader.new(bytes);
     match r.read_tag_length() {
         Ok(_)  => 1,
         Err(_) => 0,
@@ -78,7 +78,7 @@ fn feed(bytes: &[Byte]) -> Int {
 
 @main
 public fn main() -> Int {
-    let mut rng = FuzzRng::new(6);
+    let mut rng = FuzzRng.new(6);
     let s1 = seed_der_minimal_sequence();
     let s2 = seed_der_sequence_oid_octets();
     let mut iters: Int = 0;

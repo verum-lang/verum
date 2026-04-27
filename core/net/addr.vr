@@ -297,7 +297,7 @@ implement Ipv6Addr {
     /// # Example
     /// ```verum
     /// let addr = Ipv6Addr.parse(".1")?;          // Localhost
-    /// let addr = Ipv6Addr.parse("2001:db8::1")?;  // Compressed
+    /// let addr = Ipv6Addr.parse("2001:db8.1")?;  // Compressed
     /// ```
     public fn parse(s: &Text) -> Result<Ipv6Addr, AddrParseError> {
         // Handle empty string
@@ -675,7 +675,7 @@ implement SocketAddr {
     /// the inner record's first FIELD value rather than a pointer to
     /// the full record (object size 8 instead of 16). Tracked as #76.
     /// The qualified form forces the resolver to treat the
-    /// constructor as `SocketAddr::V4` and dispatches through the
+    /// constructor as `SocketAddr.V4` and dispatches through the
     /// path that user code uses, which compiles correctly.
     public fn new_v4(ip: Ipv4Addr, port: Int) -> SocketAddr {
         SocketAddr.V4(SocketAddrV4.new(ip, port))

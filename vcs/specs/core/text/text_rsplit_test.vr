@@ -46,7 +46,7 @@ fn test_rsplit_at_end() {
 
 @test
 fn test_rsplit_multiple() {
-    let s = "one::two::three";
+    let s = "one.two.three";
     let parts = s.rsplit("::");
     assert_eq(parts.len(), 3);
     assert_eq(parts[0], "one");

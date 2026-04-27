@@ -7,7 +7,7 @@
 // Pure-Verum predicates the L4 interpreter calls at every INSERT /
 // UPDATE step. Each check returns a `Violation` if the constraint
 // fails; the caller threads the matching `OnConflict` policy through
-// `conflict::decision_for` to decide what to do next.
+// `conflict.decision_for` to decide what to do next.
 //
 // `check_check_expr` returns `Ok(true)` for satisfied, `Ok(false)`
 // for violated, `Err` for evaluation error. The CHECK expression

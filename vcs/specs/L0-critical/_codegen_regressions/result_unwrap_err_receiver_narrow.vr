@@ -8,12 +8,12 @@
 // Multiple stdlib types declare `fn unwrap(self)` — Result.unwrap
 // (panics on Err), Maybe.unwrap (panics on None), Poll.unwrap
 // (panics on Pending), and historic generic-T unwraps. The codegen
-// in `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`
+// in `crates/verum_vbc/src/codegen/expressions.rs.compile_method_call`
 // builds `effective_method_name` via a giant match over receiver
 // expression shapes; before #153 the catch-all fell through to
 // bare `unwrap` whenever the expression shape wasn't covered, and
 // the dispatcher then picked WHICHEVER candidate was registered
-// first by name+arity. For `Result<Int,Int>::Err(99).unwrap()`,
+// first by name+arity. For `Result<Int,Int>.Err(99).unwrap()`,
 // that frequently resolved to a candidate whose unwrap does NOT
 // panic on Err — the call returned 99 and downstream code saw a
 // malformed value.

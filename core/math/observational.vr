@@ -4,7 +4,7 @@
 //
 // Layer: Standard Library / Mathematics
 //
-// Surface for `verum_types::observational_equality`. Type-directed
+// Surface for `verum_types.observational_equality`. Type-directed
 // equality alternative to cubical: two values' equality is
 // *defined by what we can observe about them*. Products decompose
 // into component equality; functions decompose into pointwise

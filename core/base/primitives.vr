@@ -582,7 +582,7 @@ fn char_to_digit(ch: Char, radix: Int) -> Int {
 /// Helper: format `n` in the given `radix` (2..=36) using math
 /// convention for negative values (`-magnitude`, not
 /// two's-complement bits).  The shared backend for
-/// [`Int::to_binary`], [`Int::to_hex`], and [`Int::to_octal`].
+/// [`Int.to_binary`], [`Int.to_hex`], and [`Int.to_octal`].
 ///
 /// Magnitude is computed in `UInt64` so `Int.MIN`'s magnitude
 /// (`2^63`, unrepresentable as a positive `Int`) is exact.
@@ -1427,12 +1427,12 @@ implement Byte {
     ///
     /// Matches the canonical "ASCII whitespace" set defined by
     /// the WHATWG Infra spec and used by Rust's
-    /// `u8::is_ascii_whitespace`: SPACE (0x20), HORIZONTAL TAB
+    /// `u8.is_ascii_whitespace`: SPACE (0x20), HORIZONTAL TAB
     /// (0x09), LINE FEED (0x0A), FORM FEED (0x0C), CARRIAGE
     /// RETURN (0x0D). The previous implementation omitted FORM
     /// FEED, silently disagreeing with every other language's
     /// ASCII-whitespace classifier (and with the Verum
-    /// `Char::is_whitespace` Unicode-aware classifier, which
+    /// `Char.is_whitespace` Unicode-aware classifier, which
     /// does include FF via the broader Unicode whitespace
     /// table) — the resulting inconsistency was a subtle
     /// foot-gun for parsers operating on byte streams.

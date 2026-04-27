@@ -71,7 +71,7 @@ fn feed(bytes: &[Byte]) -> Int {
 
 @main
 public fn main() -> Int {
-    let mut rng = FuzzRng::new(4);
+    let mut rng = FuzzRng.new(4);
     let seed = seed_h3_frames();
     let mut iters: Int = 0;
     let mut accepted: Int = 0;

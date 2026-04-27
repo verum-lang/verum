@@ -96,7 +96,7 @@ fn feed_short(bytes: &[Byte], dcid_len: Int) -> Int {
 
 @main
 public fn main() -> Int {
-    let mut rng = FuzzRng::new(2);
+    let mut rng = FuzzRng.new(2);
     let long_seed = seed_long_header_initial();
     let short_seed = seed_short_header();
     let mut iters: Int = 0;

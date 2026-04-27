@@ -5,7 +5,7 @@
 // Layer: Standard Library / Security
 //
 // User-facing surface for the modal-types analysis core
-// (`verum_types::modal_types`). Lattice-based security labels
+// (`verum_types.modal_types`). Lattice-based security labels
 // classify values; the type system enforces that labeled values
 // only flow to contexts permitted by the lattice ordering, ruling
 // out information leaks at compile time.

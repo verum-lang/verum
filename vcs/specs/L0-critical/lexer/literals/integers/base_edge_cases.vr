@@ -67,8 +67,8 @@ fn test_max_u32_representations() {
 
 fn test_max_u64_representations() {
     // Note: max u64 values (0xFFFFFFFFFFFFFFFF, 18446744073709551615) cannot
-    // be expressed as literals because they exceed i64::MAX. Use u64.max instead.
-    // Testing largest representable literal value (i64::MAX):
+    // be expressed as literals because they exceed i64.MAX. Use u64.max instead.
+    // Testing largest representable literal value (i64.MAX):
     let max_literal_hex = 0x7FFFFFFFFFFFFFFF;
     let max_literal_dec = 9223372036854775807;
 }

@@ -155,7 +155,7 @@ public axiom k_adj_unit_identity<A: Articulation>(alpha: A) -> Bool
 /// For every enactment e, the kernel certifies that the round-trip
 /// `e → alpha_of(e) → epsilon(alpha_of(e))` recovers e up to gauge
 /// equivalence (the canonical equivalence relation on enactments
-/// induced by `core.action.gauge::gauge_equivalent`).
+/// induced by `core.action.gauge.gauge_equivalent`).
 ///
 /// Self-recognition form: postulates that the round-trip identity
 /// recovers `e` modulo gauge.

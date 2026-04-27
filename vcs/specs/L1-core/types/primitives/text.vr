@@ -106,7 +106,7 @@ fn main() {
     // Default value
     let default_text: Text = Text.default();
 
-    // Parsing (Display::to_string via ToString protocol)
+    // Parsing (Display.to_string via ToString protocol)
     let from_int: Text = 42.to_string();
     let from_bool: Text = true.to_string();
 

@@ -71,7 +71,7 @@ public axiom count_o_spec() -> Bool
 // Every assertion / class / property axiom of OWL 2 DS is a Boolean
 // proposition over these mappings. V2 axiom bodies in this package
 // state those propositions via `ensures` clauses on
-// `Interpretation::contains_*` predicates. The predicates are
+// `Interpretation.contains_*` predicates. The predicates are
 // *abstract* — concrete reasoners instantiate `Interpretation` with
 // the specific domain witness (Pellet, HermiT, Z3-based, …) at
 // `verum verify --owl2-reasoner=…` ship time.

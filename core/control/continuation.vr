@@ -5,7 +5,7 @@
 // Layer: Standard Library / Control
 //
 // User-facing surface for the continuation-calculus analysis core
-// (`verum_types::continuation_calculus`). Delimited control as a
+// (`verum_types.continuation_calculus`). Delimited control as a
 // first-class computational primitive: `reset { e }` installs a
 // prompt; `shift k. e` captures the surrounding computation up to
 // the nearest reset and binds it to `k`.

@@ -4,7 +4,7 @@
 //
 // Layer: Standard Library / Mathematics
 //
-// Comprehensive SDG surface over `verum_types::sdg`.  Derivatives arise
+// Comprehensive SDG surface over `verum_types.sdg`.  Derivatives arise
 // from nilpotent infinitesimals rather than ε-δ limits.  The whole tower:
 //
 //   Infinitesimals → Tangent bundles → Jet spaces

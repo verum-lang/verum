@@ -200,18 +200,18 @@ implement Layout {
     }
 
     /// Fallible counterpart to [`from_size_align`]. Returns
-    /// `Err(AllocError::InvalidAlignment { alignment })` when the
+    /// `Err(AllocError.InvalidAlignment { alignment })` when the
     /// alignment is non-positive or not a power of two, and
-    /// `Err(AllocError::InvalidSize { size })` when the size is
+    /// `Err(AllocError.InvalidSize { size })` when the size is
     /// negative. Use this from any path that takes the alignment
     /// from external input (FFI, configuration, deserialised
     /// data) — panic is the wrong failure mode at trust boundaries.
     public fn try_from_size_align(size: Int, align: Int) -> Result<Layout, AllocError> {
         if size < 0 {
-            return Err(AllocError::InvalidSize { size: size });
+            return Err(AllocError.InvalidSize { size: size });
         }
         if align <= 0 || (align & (align - 1)) != 0 {
-            return Err(AllocError::InvalidAlignment { alignment: align });
+            return Err(AllocError.InvalidAlignment { alignment: align });
         }
         Ok(Layout { size_: size, align_: align })
     }
@@ -269,14 +269,14 @@ implement Layout {
     }
 
     /// Fallible counterpart to [`repeat`]. Returns
-    /// `Err(AllocError::InvalidSize)` for `n < 0` or for the
+    /// `Err(AllocError.InvalidSize)` for `n < 0` or for the
     /// `size_ * n` overflow case. Use at trust boundaries.
     public fn try_repeat(&self, n: Int) -> Result<Layout, AllocError> {
         if n < 0 {
-            return Err(AllocError::InvalidSize { size: n });
+            return Err(AllocError.InvalidSize { size: n });
         }
         if n > 0 && self.size_ > 0 && self.size_ > Int.MAX / n {
-            return Err(AllocError::InvalidSize { size: -1 });   // -1 sentinel: unrepresentable
+            return Err(AllocError.InvalidSize { size: -1 });   // -1 sentinel: unrepresentable
         }
         Ok(Layout {
             size_: self.size_ * n,
@@ -310,15 +310,15 @@ implement Layout {
     }
 
     /// Fallible counterpart to [`extend`]. Returns
-    /// `Err(AllocError::InvalidSize)` on either overflow path.
+    /// `Err(AllocError.InvalidSize)` on either overflow path.
     public fn try_extend(&self, other: Layout) -> Result<Layout, AllocError> {
         let align = other.align_;
         if self.size_ > Int.MAX - (align - 1) {
-            return Err(AllocError::InvalidSize { size: -1 });
+            return Err(AllocError.InvalidSize { size: -1 });
         }
         let padded_size = align_up(self.size_, align);
         if padded_size > Int.MAX - other.size_ {
-            return Err(AllocError::InvalidSize { size: -1 });
+            return Err(AllocError.InvalidSize { size: -1 });
         }
         Ok(Layout {
             size_: padded_size + other.size_,
@@ -1184,7 +1184,7 @@ public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
 ///     `cbgr_alloc_zeroed`'s memset switch — `memcpy` lowers
 ///     to LLVM's memcpy intrinsic and the OS gets to use
 ///     `rep movsb` / NEON / SVE for optimal bandwidth. Every
-///     `List::push` past initial capacity, every `Text` grow,
+///     `List.push` past initial capacity, every `Text` grow,
 ///     every `Map` rehash funnels through this path.
 ///
 ///   * Strong-guarantee semantics on dealloc-failure: if the

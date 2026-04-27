@@ -112,7 +112,7 @@ public axiom quantum_dagger_compact_structure() -> Bool ensures true;
 
 /// CPTP-map factorisation: every quantum process factors as a
 /// completely-positive trace-preserving map. Per Theorem 114.T
-/// (`core.math.frameworks.diakrisis_acts::performance_morphisms_are_cptp`),
+/// (`core.math.frameworks.diakrisis_acts.performance_morphisms_are_cptp`),
 /// performance morphisms in α_quantum coincide with CPTP maps.
 @framework(diakrisis, "Theorem 114.T link (CPTP factorisation in α_quantum)")
 public axiom quantum_cptp_factorisation() -> Bool ensures true;

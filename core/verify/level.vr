@@ -1,5 +1,5 @@
 // core.verify.level — user-facing mirror of
-// `verum_verification::level::VerificationLevel`.
+// `verum_verification.level.VerificationLevel`.
 //
 // Lets user code query / branch on the current verification
 // level. The three levels and their semantics are documented in
@@ -55,7 +55,7 @@ fn requires_smt(level: VerificationLevel) -> Bool {
 // True iff this level permits silent fallback to runtime checks
 // on proof failure.
 //
-// See `verum_verification::level::VerificationLevel::
+// See `verum_verification.level.VerificationLevel::
 // evaluate_attempt` for the fundamental-level enforcement
 // table — `allows_runtime_fallback` is the user-facing mirror
 // of `Static == fallback | Proof == no-fallback`.

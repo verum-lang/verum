@@ -349,7 +349,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Fallible counterpart to `with_capacity`.
     ///
-    /// Returns `Err(AllocError::OutOfMemory)` instead of panicking
+    /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. Use at trust
     /// boundaries (FFI, untrusted-size config, large allocations
     /// where OOM is recoverable).
@@ -622,7 +622,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Fallible counterpart to `insert`.
     ///
-    /// Returns `Err(AllocError::OutOfMemory)` if the table needs to
+    /// Returns `Err(AllocError.OutOfMemory)` if the table needs to
     /// grow and the allocator cannot satisfy the request. On Ok the
     /// inner `Maybe<V>` is the previous value for `key` (if any).
     public fn try_insert(&mut self, key: K, value: V) -> Result<Maybe<V>, AllocError> {
@@ -838,7 +838,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Fallible counterpart to `reserve`.
     ///
-    /// Returns `Err(AllocError::OutOfMemory)` instead of panicking
+    /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. The map is
     /// unchanged on failure.
     public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
@@ -1042,7 +1042,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
         self.entry(key).or_insert_with(f)
     }
 
-    /// Get a mutable reference to the value for `key`, inserting `V::default()` if not present.
+    /// Get a mutable reference to the value for `key`, inserting `V.default()` if not present.
     public fn get_or_default(&mut self, key: K) -> &mut V
     where V: Default
     {
@@ -1737,7 +1737,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Internal: fallible counterpart to `ensure_capacity`. Returns
-    // Err(AllocError::OutOfMemory) on alloc failure rather than
+    // Err(AllocError.OutOfMemory) on alloc failure rather than
     // panicking. Used by every try_<op> method that may grow.
     fn try_ensure_capacity(&mut self) -> Result<Unit, AllocError> {
         if self.cap == 0 {
@@ -1811,7 +1811,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // Resize hash table.
     //
     // Panics with descriptive message on allocation failure. For a
-    // fallible counterpart that returns Err(AllocError::OutOfMemory)
+    // fallible counterpart that returns Err(AllocError.OutOfMemory)
     // instead of panicking, see `try_resize`.
     fn resize(&mut self, new_cap: Int) {
         let size = new_cap * SLOT_SIZE;
@@ -1834,7 +1834,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
         let raw = try_alloc_zeroed(size, SLOT_ALIGN)?;
         let new_entries = raw as &unsafe Slot<K, V>;
         if new_entries.is_null() {
-            return Err(AllocError::OutOfMemory { requested: size });
+            return Err(AllocError.OutOfMemory { requested: size });
         }
         self.swap_in_table(new_entries, new_cap);
         Ok(())

@@ -101,7 +101,7 @@ meta fn paired_bindings(count: Int) -> TokenStream {
         .collect();
 
     quote {
-        let map = Map::new();
+        let map = Map.new();
         $[for (k, v) in pairs {
             let $k = ${k.as_str()};
             let $v = ${v.as_str()};
@@ -130,7 +130,7 @@ meta fn cumulative_sum(values: List<Int>) -> TokenStream {
 // Build linked structure
 meta fn linked_list_gen(values: List<Int>) -> TokenStream {
     quote {
-        let mut list = LinkedList::new();
+        let mut list = LinkedList.new();
         $[for v in values {
             list.push_back($v);
         }]

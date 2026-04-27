@@ -178,7 +178,7 @@ implement<T> RwLock<T> {
 
     /// Check if rwlock is poisoned (previous holder marked it as poisoned).
     ///
-    /// See `Mutex::is_poisoned` for notes on poisoning semantics — Verum
+    /// See `Mutex.is_poisoned` for notes on poisoning semantics — Verum
     /// does not yet expose a "currently unwinding" predicate, so the
     /// poison flag is only set when callers explicitly invoke `poison()`.
     public fn is_poisoned(&self) -> Bool {

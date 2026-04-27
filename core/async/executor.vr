@@ -347,7 +347,7 @@ implement AsyncRuntime {
     ///
     /// # Format-stable boundary
     ///
-    /// Returns `List<TaskInfo>` (re-exported via core::diagnostics)
+    /// Returns `List<TaskInfo>` (re-exported via core.diagnostics)
     /// so observers code against the umbrella surface and aren't
     /// coupled to TaskEntry's internal layout.  Per-task metadata
     /// the executor doesn't currently track (poll_count, name,

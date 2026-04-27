@@ -15,27 +15,27 @@ fn main() {
     // Load three theories forming a triangle
     let t1 = Theory {
         name: "T1",
-        claims: List::new(),
-        statements: List::from([
+        claims: List.new(),
+        statements: List.from([
             Claim { id: "c1", claim_type: ClaimType.Axiom, content: "X", status: EpistemicStatus.Theorem },
         ]),
-        dependencies: List::new(),
+        dependencies: List.new(),
     };
     let t2 = Theory {
         name: "T2",
-        claims: List::new(),
-        statements: List::from([
+        claims: List.new(),
+        statements: List.from([
             Claim { id: "c2", claim_type: ClaimType.Axiom, content: "X'", status: EpistemicStatus.Theorem },
         ]),
-        dependencies: List::new(),
+        dependencies: List.new(),
     };
     let t3 = Theory {
         name: "T3",
-        claims: List::new(),
-        statements: List::from([
+        claims: List.new(),
+        statements: List.from([
             Claim { id: "c3", claim_type: ClaimType.Axiom, content: "X''", status: EpistemicStatus.Theorem },
         ]),
-        dependencies: List::new(),
+        dependencies: List.new(),
     };
 
     load_theory(&mut reg, t1);
@@ -43,7 +43,7 @@ fn main() {
     load_theory(&mut reg, t3);
 
     // Check coherence of translation triangle
-    let pairs = List::from([
+    let pairs = List.from([
         ("T1", "T2"),
         ("T2", "T3"),
         ("T1", "T3"),

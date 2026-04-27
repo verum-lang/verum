@@ -12,7 +12,7 @@
 //   * `pc`        — original PC index (so jump targets remain valid
 //                   when entries are dropped or moved)
 //
-// The optimiser doesn't touch the actual `l4_vdbe::VdbeProgram` —
+// The optimiser doesn't touch the actual `l4_vdbe.VdbeProgram` —
 // the gated interpreter file owns it. We define a minimal model that's
 // enough to run the passes; the codegen ingests the optimised stream.
 // =============================================================================

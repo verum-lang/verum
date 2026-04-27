@@ -802,7 +802,7 @@ fn test_mixed_nested() {
 }
 
 // =============================================================================
-// SECTION 13: Data::path() - Dot Notation Navigation
+// SECTION 13: Data.path() - Dot Notation Navigation
 // =============================================================================
 
 @test

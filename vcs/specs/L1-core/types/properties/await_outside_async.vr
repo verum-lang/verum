@@ -9,7 +9,7 @@
 // `fn must_fail()` is declared `fn`, not `async fn`; its body awaits a
 // future. Before this spec, the inference pass correctly marked the
 // caller as having the {Async} property but the enforcement layer
-// only emitted a `tracing::debug!` for E504 and let the program
+// only emitted a `tracing.debug!` for E504 and let the program
 // through. That meant downstream callers could invoke `must_fail`
 // from any synchronous context even though it contains async
 // operations — a silent soundness break for the async contract.

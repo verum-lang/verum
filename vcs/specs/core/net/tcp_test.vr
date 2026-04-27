@@ -872,7 +872,7 @@ fn test_tcp_broadcast_addr_not_valid_for_tcp() {
 
 @test
 fn test_tcp_ipv6_link_local_addr() {
-    // Link-local IPv6 address (fe80::1) with scope_id
+    // Link-local IPv6 address (fe80.1) with scope_id
     let addr = SocketAddrV6.new(
         Ipv6Addr.new(0xfe80, 0, 0, 0, 0, 0, 0, 1),
         8080, 0, 1

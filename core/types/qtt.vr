@@ -4,7 +4,7 @@
 //
 // Layer: Standard Library / Types
 //
-// Surface for `verum_types::qtt_usage` + `verum_types::qtt_walker`.
+// Surface for `verum_types.qtt_usage` + `verum_types.qtt_walker`.
 // QTT assigns every binding a *quantity* describing how many
 // times it may be used. The type system enforces these counts
 // at compile time, preventing resource leaks (Linear used zero

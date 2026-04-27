@@ -33,10 +33,10 @@
 //   • `congruence_close(eqs) -> CongruenceClosure` — runs the
 //     iteration to fixed point and returns the result.
 //
-//   • `CongruenceClosure::representative(t)` — the canonical
+//   • `CongruenceClosure.representative(t)` — the canonical
 //     representative of `t`'s equivalence class.
 //
-//   • `CongruenceClosure::merged(t1, t2)` — true iff `t1` and `t2`
+//   • `CongruenceClosure.merged(t1, t2)` — true iff `t1` and `t2`
 //     ended up in the same class.
 //
 // V1 (this file) ships the closure operating on integer-keyed terms.

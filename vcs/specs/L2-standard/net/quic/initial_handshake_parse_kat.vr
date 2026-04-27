@@ -12,7 +12,7 @@
 //
 // §17.2.4 Handshake + §17.2.3 0-RTT skip Token Length/Token.
 //
-// All caller-visible long-header fields end up in LongPacket::body; this
+// All caller-visible long-header fields end up in LongPacket.body; this
 // KAT exercises the Token Length + Token round-trip for Initial packets
 // and verifies Handshake packets reject an Initial-style token block.
 //

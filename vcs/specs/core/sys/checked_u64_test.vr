@@ -9,7 +9,7 @@ mount core.intrinsics.arithmetic.{checked_add_u64};
 
 fn main() {
     // Direct test of checked_add_u64
-    let a: UInt64 = 0xFFFFFFFFFFFFFFFF;  // UInt64::MAX
+    let a: UInt64 = 0xFFFFFFFFFFFFFFFF;  // UInt64.MAX
     let b: UInt64 = 1;
 
     print(f"a = {a as Int}");

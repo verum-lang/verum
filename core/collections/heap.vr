@@ -44,7 +44,7 @@ implement<T: Ord> BinaryHeap<T> {
     }
 
     // Fallible counterpart to `with_capacity`.  Returns
-    // `Err(AllocError::OutOfMemory)` instead of panicking when the
+    // `Err(AllocError.OutOfMemory)` instead of panicking when the
     // underlying allocator cannot satisfy the request.  No partial
     // state is left behind on Err.
     public fn try_with_capacity(capacity: Int) -> Result<BinaryHeap<T>, AllocError> {
@@ -122,7 +122,7 @@ implement<T: Ord> BinaryHeap<T> {
     }
 
     // Fallible counterpart to `push`.  Returns
-    // `Err(AllocError::OutOfMemory)` on growth failure; the heap
+    // `Err(AllocError.OutOfMemory)` on growth failure; the heap
     // is left untouched in that case so the invariant is preserved.
     public fn try_push(&mut self, value: T) -> Result<Unit, AllocError> {
         self.data.try_push(value)?;
@@ -199,7 +199,7 @@ implement<T: Ord> BinaryHeap<T> {
     }
 
     // Fallible counterpart to `reserve`.  Returns
-    // `Err(AllocError::OutOfMemory)` if the underlying allocator
+    // `Err(AllocError.OutOfMemory)` if the underlying allocator
     // cannot satisfy the growth.
     public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
         self.data.try_reserve(additional)
@@ -894,7 +894,7 @@ implement<T: Ord> Extend<T> for BinaryHeap<T> {
 
 implement<T: Ord> BinaryHeap<T> {
     /// Fallible counterpart to `extend`.  Stops at the first allocation
-    /// failure and returns `Err(AllocError::OutOfMemory)`; elements
+    /// failure and returns `Err(AllocError.OutOfMemory)`; elements
     /// pushed before the failure stay in the heap (consistent with
     /// `List.try_push` semantics — partial success is observable but
     /// the heap invariant is preserved).

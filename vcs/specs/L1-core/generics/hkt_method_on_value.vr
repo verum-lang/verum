@@ -6,7 +6,7 @@
 // Companion anchor to `hkt_function_body.vr`. Exercises method-on-value
 // dispatch through an HKT protocol bound: `fa.map(f)` where
 // `fa: F<A>` and `F<_>: Functor`. Before the L0-2 fix this resolved
-// to `FutureExt::map` and produced "MapFuture<_, fn(_) -> _>" mismatches;
+// to `FutureExt.map` and produced "MapFuture<_, fn(_) -> _>" mismatches;
 // after the fix the bound-first dispatch in `infer.rs` recognises the
 // head `F` as an HKT type parameter (via `hkt_type_var_by_name`),
 // finds `map` on its `Functor` bound, and transparently strips the

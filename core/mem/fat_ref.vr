@@ -615,7 +615,7 @@ implement<T> FatRef<T> {
     /// that allowed the late thread to spuriously double-bump the
     /// generation past a freshly-issued successor reference; the
     /// CAS-based `try_revoke` primitive on the header makes the
-    /// "verify and bump" atomic.  See ThinRef::revoke for the
+    /// "verify and bump" atomic.  See ThinRef.revoke for the
     /// twin fix.
     public fn revoke(&self) -> Result<(), RevocationError> {
         if self.is_null() {

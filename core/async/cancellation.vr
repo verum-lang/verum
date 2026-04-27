@@ -58,7 +58,7 @@
 // help handlers distinguish user-cancel (Cancelled) from timeout (Timeout)
 // from parent-cancel (ParentCancelled) from explicit abort (Aborted).
 //
-// Matches the vocabulary of Rust tokio::sync::CancellationToken, .NET
+// Matches the vocabulary of Rust tokio.sync.CancellationToken, .NET
 // CancellationToken and Trio CancelScope.
 // =============================================================================
 

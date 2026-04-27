@@ -5,7 +5,7 @@
 // Layer: Standard Library / Base
 //
 // User-facing surface for the coinductive analysis core
-// (`verum_types::coinductive_analysis`). Coinductive types are
+// (`verum_types.coinductive_analysis`). Coinductive types are
 // *greatest* fixed points — infinite objects defined by what we
 // can observe about them. Streams, infinite trees, processes are
 // the classic examples.

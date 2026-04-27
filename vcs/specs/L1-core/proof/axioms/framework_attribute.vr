@@ -11,7 +11,7 @@
 ///
 /// Grammar: the generic `attribute = identifier , [ '(' , attribute_args , ')' ]`
 /// production (grammar/verum.ebnf §2) accepts this shape. `FrameworkAttr`
-/// in `verum_ast::attr` extracts `(name, citation)` as a typed pair.
+/// in `verum_ast.attr` extracts `(name, citation)` as a typed pair.
 ///
 /// `verum audit --framework-axioms` enumerates the trusted boundary
 /// using these markers.

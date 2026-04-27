@@ -30,8 +30,8 @@ fn surface_exercise() {
     let _ = parse_uri(&"/abs/path".clone());
     let _ = parse_uri(&"file:/tmp/a.db".clone());
     let _ = parse_uri(&"file:/tmp/a.db?mode=ro".clone());
-    let _ = parse_uri(&"file::memory:".clone());
-    let _ = parse_uri(&"file::memory:?cache=shared".clone());
+    let _ = parse_uri(&"file.memory:".clone());
+    let _ = parse_uri(&"file.memory:?cache=shared".clone());
     let _ = parse_uri(&"file:/p?vfs=unix".clone());
 }
 

@@ -10,7 +10,7 @@
 // the underlying List element. Previously the compile_unary path
 // wrapped `arr[i]` (a copied Value) in a CBGR register-ref, so the
 // DerefMut wrote to a temporary register instead of the List
-// backing. Fixed by emitting CbgrSubOpcode::RefListElement, which
+// backing. Fixed by emitting CbgrSubOpcode.RefListElement, which
 // produces a plain pointer into the List's backing buffer.
 
 fn main() -> Int {

@@ -20,13 +20,13 @@ fn make_cid(b: Byte) -> ConnectionId {
 }
 
 fn new_pool_clamps_limit_to_two() {
-    let p = CidPool::new(0);
+    let p = CidPool.new(0);
     assert(p.cid_limit_ok());
     assert(p.active_count() == 0);
 }
 
 fn seed_initial_admits_without_limit_check() {
-    let mut p = CidPool::new(2);
+    let mut p = CidPool.new(2);
     let token: [Byte; 16] = [0_u8; 16];
     p.seed_initial(make_cid(0xAA_u8), token);
     assert(p.active_count() == 1);
@@ -34,7 +34,7 @@ fn seed_initial_admits_without_limit_check() {
 }
 
 fn on_new_connection_id_admits_second_cid() {
-    let mut p = CidPool::new(2);
+    let mut p = CidPool.new(2);
     let token: [Byte; 16] = [0_u8; 16];
     p.seed_initial(make_cid(0xAA_u8), token);
     let retired = p.on_new_connection_id(
@@ -49,7 +49,7 @@ fn on_new_connection_id_admits_second_cid() {
 }
 
 fn limit_exceeded_when_budget_full() {
-    let mut p = CidPool::new(2);
+    let mut p = CidPool.new(2);
     let token: [Byte; 16] = [0_u8; 16];
     p.seed_initial(make_cid(0xAA_u8), token);
     p.on_new_connection_id(1_u64, 0_u64, make_cid(0xBB_u8), token).unwrap();
@@ -61,7 +61,7 @@ fn limit_exceeded_when_budget_full() {
 }
 
 fn retire_prior_to_evicts_old_entries() {
-    let mut p = CidPool::new(3);
+    let mut p = CidPool.new(3);
     let token: [Byte; 16] = [0_u8; 16];
     p.seed_initial(make_cid(0xAA_u8), token);
     p.on_new_connection_id(1_u64, 0_u64, make_cid(0xBB_u8), token).unwrap();
@@ -78,7 +78,7 @@ fn retire_prior_to_evicts_old_entries() {
 }
 
 fn duplicate_sequence_rejected() {
-    let mut p = CidPool::new(2);
+    let mut p = CidPool.new(2);
     let token: [Byte; 16] = [0_u8; 16];
     p.seed_initial(make_cid(0xAA_u8), token);
     match p.on_new_connection_id(0_u64, 0_u64, make_cid(0xBB_u8), token) {
@@ -88,7 +88,7 @@ fn duplicate_sequence_rejected() {
 }
 
 fn retire_prior_regression_rejected() {
-    let mut p = CidPool::new(3);
+    let mut p = CidPool.new(3);
     let token: [Byte; 16] = [0_u8; 16];
     p.seed_initial(make_cid(0xAA_u8), token);
     p.on_new_connection_id(1_u64, 1_u64, make_cid(0xBB_u8), token).unwrap();
@@ -100,7 +100,7 @@ fn retire_prior_regression_rejected() {
 }
 
 fn cid_issuer_sequences_monotonically() {
-    let mut iss = CidIssuer::new();
+    let mut iss = CidIssuer.new();
     assert(iss.next() == 0_u64);
     assert(iss.next() == 1_u64);
     assert(iss.next() == 2_u64);

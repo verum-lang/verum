@@ -337,16 +337,54 @@ implement Drop for File {
 }
 
 implement Clone for File {
+    /// Clone the file handle by duplicating the underlying file descriptor.
+    ///
+    /// SOUNDNESS: previous revision had a "Fallback to shallow clone if
+    /// dup fails" path that returned `File { fd: self.fd }` — a SHALLOW
+    /// COPY sharing the original fd integer.  This is a critical
+    /// double-close / use-after-free hazard:
+    ///
+    ///   1. Both Files now hold the same fd value.
+    ///   2. Whichever is dropped first calls `sys_close(fd)`.
+    ///   3. The kernel marks fd as available for reuse.
+    ///   4. The surviving File still holds the same fd value.
+    ///   5. A concurrent `open()` (or any FD-allocating syscall) in
+    ///      another thread reuses the closed fd, pointing it at an
+    ///      UNRELATED resource (a socket, pipe, /etc/passwd, etc.).
+    ///   6. The surviving File's next read/write hits the unrelated
+    ///      resource — silent data corruption or information leak.
+    ///
+    /// dup() failure is rare (process FD limit exceeded, kernel ENOMEM)
+    /// and indicates a genuine resource-exhaustion condition the
+    /// caller cannot recover from while preserving the Clone contract.
+    /// Loud-failing here surfaces the real problem at the actual misuse
+    /// site instead of as far-removed kernel-state corruption.
+    ///
+    /// Callers that want a fallible alternative can use `try_clone()`
+    /// instead, which returns `Result<File, IoError>` and lets the
+    /// caller decide how to recover.
     fn clone(&self) -> File {
-        // Use dup() to create a new file descriptor pointing to the same file
         let fd = FileDesc.from_raw(self.fd);
         match sys_dup(fd) {
             Ok(new_fd) => File { fd: new_fd.as_raw() },
-            Err(_) => {
-                // Fallback to shallow clone if dup fails
-                // This maintains the original behavior but is not ideal
-                File { fd: self.fd }
+            Err(e) => {
+                panic(f"File.clone failed: dup({self.fd}) returned error {e}; the fallback shallow-clone path was a double-close hazard and has been removed — use try_clone() for a fallible alternative");
             }
+        }
+    }
+}
+
+implement File {
+    /// Fallible clone — returns `Err` on dup failure instead of
+    /// panicking.  Use this when the caller can plausibly recover
+    /// from FD exhaustion (e.g. by closing other handles or
+    /// retrying after a backoff).  Mirrors the `Clone.clone`
+    /// implementation but surfaces dup failures as IoResult errors.
+    public fn try_clone(&self) -> IoResult<File> {
+        let fd = FileDesc.from_raw(self.fd);
+        match sys_dup(fd) {
+            Ok(new_fd) => Ok(File { fd: new_fd.as_raw() }),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 }

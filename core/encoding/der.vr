@@ -26,7 +26,7 @@
 //   * INTEGER must have no redundant leading 0x00 / 0xFF.
 //   * OID arc 1 ≤ 39 when arc 0 ∈ {0, 1} (X.690 §8.19.4).
 //
-// Encountering BER-only wire form = `DerError::MalformedDer`.
+// Encountering BER-only wire form = `DerError.MalformedDer`.
 //
 // # Zero-alloc discipline
 //

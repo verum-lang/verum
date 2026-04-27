@@ -6,7 +6,7 @@
 // A protocol can declare axioms inside its body. Each axiom is a
 // universally quantified proposition over the protocol's parameters
 // and the implementing type's associated types. Phase 1 (this commit)
-// parses and stores axioms in `ProtocolItemKind::Axiom(AxiomDecl)`.
+// parses and stores axioms in `ProtocolItemKind.Axiom(AxiomDecl)`.
 //
 // Phase 2 (future) — the `implement` block will auto-discharge each
 // axiom as an SMT proof obligation, making every successful impl a

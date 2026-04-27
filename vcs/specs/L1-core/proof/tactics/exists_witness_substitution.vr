@@ -11,7 +11,7 @@
 // existentials but failed whenever a specific witness was needed (e.g.
 // `exists y: Int. y == x + x` with witness `x + x`).
 //
-// Locks in both the Exists tactic (AST form `TacticExpr::Exists(expr)`)
+// Locks in both the Exists tactic (AST form `TacticExpr.Exists(expr)`)
 // and the `witness`/`use` named-tactic dispatch routes.
 
 @verify(formal)

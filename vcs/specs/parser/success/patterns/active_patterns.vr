@@ -20,13 +20,13 @@ pattern Divisible(by: Int)(n: Int) -> Bool = n % by == 0;
 pattern HasLength(len: Int)(s: Text) -> Bool = s.len() == len;
 
 // Partial patterns return Maybe<T> - extract on match
-pattern ParseInt(s: Text) -> Maybe<Int> = Int::parse(s);
-pattern ParseFloat(s: Text) -> Maybe<Float> = Float::parse(s);
+pattern ParseInt(s: Text) -> Maybe<Int> = Int.parse(s);
+pattern ParseFloat(s: Text) -> Maybe<Float> = Float.parse(s);
 pattern HeadTail(list: List<T>) -> Maybe<(T, List<T>)> =
     if list.is_empty() { None } else { Some((list.head(), list.tail())) };
 
 // Parameterized partial patterns
-pattern RegexMatch(re: Text)(s: Text) -> Maybe<List<Text>> = Regex::new(re).find(s);
+pattern RegexMatch(re: Text)(s: Text) -> Maybe<List<Text>> = Regex.new(re).find(s);
 pattern SplitAt(idx: Int)(list: List<T>) -> Maybe<(List<T>, List<T>)> = list.split_at(idx);
 
 // =============================================================================

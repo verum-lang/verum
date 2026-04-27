@@ -4,7 +4,7 @@
 //
 // Layer: Standard Library / Proof
 //
-// Surface for `verum_smt::proof_carrying_code`. Necula-style PCC:
+// Surface for `verum_smt.proof_carrying_code`. Necula-style PCC:
 // formal proof certificates bundled with bytecode, content-
 // addressed by goal hash, with audit-trail metadata.
 //

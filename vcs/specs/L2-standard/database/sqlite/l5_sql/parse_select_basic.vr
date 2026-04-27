@@ -15,7 +15,7 @@ public async fn main() -> Result<(), Error> {
     // Simple SELECT:
     let stmt = parse("SELECT id, name FROM users WHERE id = 1")?;
     match stmt {
-        SqlStatement::Select(s) => {
+        SqlStatement.Select(s) => {
             assert!(s.order_by.is_none());
             assert!(s.limit.is_none());
         }

@@ -92,7 +92,7 @@ fn vec_u16_backpatches_length() {
 
 fn reader_take_u8_advances_cursor() {
     let bytes: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
-    let mut r = Tls13HandshakeReader::new(bytes.as_slice());
+    let mut r = Tls13HandshakeReader.new(bytes.as_slice());
     assert(r.remaining() == 3);
     assert(r.take_u8().unwrap() == 0xAA_u8);
     assert(r.take_u8().unwrap() == 0xBB_u8);
@@ -103,13 +103,13 @@ fn reader_take_u8_advances_cursor() {
 
 fn reader_take_u16_big_endian() {
     let bytes: List<Byte> = [0x12_u8, 0x34_u8];
-    let mut r = Tls13HandshakeReader::new(bytes.as_slice());
+    let mut r = Tls13HandshakeReader.new(bytes.as_slice());
     assert(r.take_u16().unwrap() == 0x1234_u16);
 }
 
 fn reader_truncated_take_returns_err() {
     let bytes: List<Byte> = [0x01_u8];
-    let mut r = Tls13HandshakeReader::new(bytes.as_slice());
+    let mut r = Tls13HandshakeReader.new(bytes.as_slice());
     match r.take_u16() {
         Err(CodecError.Truncated) => {},
         _ => panic("take_u16 on 1-byte buffer must return Truncated"),

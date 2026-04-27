@@ -146,6 +146,15 @@ public module reflection;
 /// Provides: Attribute, AttributeArg
 public module attribute;
 
+/// V8.1 (#196 META1): Diakrisis Part B advisory attributes through
+/// the meta-system. Provides: EffectAttr / EffectKind /
+/// InfinityCategoryAttr / InfinityLevel / AutopoieticAttr /
+/// LudicDesignAttr / CutEliminationAttr — all parsed via meta-fns
+/// without grammar extension. See header of `diakrisis_attrs.vr`
+/// for architectural rationale (Rust typed-attrs reserved for
+/// compiler-internal dispatch; advisory markers go through meta).
+public module diakrisis_attrs;
+
 // =============================================================================
 // Contexts (Primary API)
 // =============================================================================

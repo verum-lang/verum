@@ -8,7 +8,7 @@
 // L0-4 positive anchor: a refinement written with the `self` keyword must
 // be enforceable. `Int{self != 0}` is a common surface syntax for "this
 // value is not zero"; the parser represents `self` as
-// `PathSegment::SelfValue`, not as a plain `Name("self")`, so the
+// `PathSegment.SelfValue`, not as a plain `Name("self")`, so the
 // refinement checker used to silently miss the bound-variable
 // substitution and hand back Unknown. This test passes a valid value
 // (2) and verifies normal execution still works after the L0-4 fix.

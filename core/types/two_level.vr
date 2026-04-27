@@ -4,7 +4,7 @@
 //
 // Layer: Standard Library / Types
 //
-// Surface for `verum_types::two_level`. Voevodsky/ACK stratification
+// Surface for `verum_types.two_level`. Voevodsky/ACK stratification
 // of universes into fibrant (HoTT/cubical) and strict
 // (UIP-holding, decidable equality) layers.
 //

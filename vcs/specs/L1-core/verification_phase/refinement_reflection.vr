@@ -11,7 +11,7 @@
 // and the translator rejected any user-defined function call with
 // `UnsupportedFunction`, blocking the axiom from ever applying.
 // Locks in:
-//   * `verify_cmd::verify_module` builds the reflection registry,
+//   * `verify_cmd.verify_module` builds the reflection registry,
 //   * `verify_theorem` seeds each proof engine with it,
 //   * `translate_call`'s unknown-name arm emits a uninterpreted Z3
 //     FuncDecl application with `(Int … → Int)` sort defaults so the

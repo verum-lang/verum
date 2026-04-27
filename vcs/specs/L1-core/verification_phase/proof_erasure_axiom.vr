@@ -10,7 +10,7 @@
 /// phase but **not** the VBC codegen phase.
 ///
 /// See `crates/verum_vbc/src/codegen/mod.rs:3243-3249` for the explicit
-/// match that skips `ItemKind::Axiom`.
+/// match that skips `ItemKind.Axiom`.
 
 axiom chosen_well_ordering(n: Int) -> Bool;
 

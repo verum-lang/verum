@@ -5,7 +5,7 @@
 // Layer: Standard Library / Proof
 //
 // User-facing surface for the refinement-reflection analysis core
-// (`verum_smt::refinement_reflection`). Pure, total user functions
+// (`verum_smt.refinement_reflection`). Pure, total user functions
 // can be reflected into the Z3 context as universally-quantified
 // equality axioms, so downstream proofs may *unfold* calls to
 // `f(x)` instead of treating `f` as an uninterpreted symbol.

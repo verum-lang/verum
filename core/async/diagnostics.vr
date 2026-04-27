@@ -9,12 +9,12 @@
 // lifecycle states, and last-poll provenance — for post-mortem dumps,
 // debugger / observer integrations, and live monitoring dashboards.
 //
-// Companion to `core::mem::diagnostics` (CBGR allocation introspection).
+// Companion to `core.mem.diagnostics` (CBGR allocation introspection).
 // Together they form the substrate of the user-facing
-// `core::diagnostics` umbrella module mandated by the production-ready
+// `core.diagnostics` umbrella module mandated by the production-ready
 // directive.
 //
-// # Anti-goals (mirroring core::mem::diagnostics)
+// # Anti-goals (mirroring core.mem.diagnostics)
 //
 // - No mutation surface.  Snapshots are read-only.
 // - No reflection escape that would bypass async cancellation.

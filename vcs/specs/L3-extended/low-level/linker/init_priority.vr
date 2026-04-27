@@ -48,7 +48,7 @@ let GLOBAL_LOGGER: Logger = Logger { level: 3 };
 
 /// Configuration with later init
 @init_priority(300)
-let CONFIG: Map<Text, Text> = Map::new();
+let CONFIG: Map<Text, Text> = Map.new();
 
 /// Constants don't need init_priority (compile-time)
 let VERSION: Int = 1;

@@ -61,7 +61,7 @@ public axiom relative_consistency_under_2_inaccessibles() -> Bool
 /// enactment of using it) and `A` is the activation modality (taking an
 /// enactment to the articulation it presupposes). The biadjunction is
 /// witnessed by the unit / counit pair already exposed in
-/// `core.action.enactments::is_adjoint`.
+/// `core.action.enactments.is_adjoint`.
 ///
 /// Operational form: for any `α : Articulation`, the canonical pair
 /// `(α, ε(α))` is biadjoint — `is_adjoint(α, ε(α))` holds — and this

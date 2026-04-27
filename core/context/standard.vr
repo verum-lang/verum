@@ -416,7 +416,7 @@ public context Metrics {
 // Sampler + SpanProcessor + SpanExporter + W3C Trace Context
 // propagation). This context is the test-time seam — tests provide a
 // mock `Tracer`; production code installs a provider that delegates
-// to `core.tracing::get_tracer(...)`.
+// to `core.tracing.get_tracer(...)`.
 //
 // The `Span` type is the one from `core.tracing.span`; there is no
 // parallel definition here.

@@ -17,8 +17,8 @@ fn main() {
     // Create a minimal theory
     let theory = Theory {
         name: "TestTheory",
-        claims: List::new(),
-        statements: List::from([
+        claims: List.new(),
+        statements: List.from([
             Claim {
                 id: "axiom_1",
                 claim_type: ClaimType.Axiom,
@@ -32,7 +32,7 @@ fn main() {
                 status: EpistemicStatus.Theorem,
             },
         ]),
-        dependencies: List::from([("thm_1", "axiom_1")]),
+        dependencies: List.from([("thm_1", "axiom_1")]),
     };
 
     // Load theory

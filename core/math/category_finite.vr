@@ -5,7 +5,7 @@
 // Layer: Standard Library / Mathematics
 //
 // User-facing surface for the categorical-algebra analysis core
-// (`verum_types::category_algebra`). Concrete data structure for
+// (`verum_types.category_algebra`). Concrete data structure for
 // finite category presentations, complementing the protocol-level
 // `core/math/category.vr` (which describes categories abstractly
 // via traits/protocols).

@@ -5,7 +5,7 @@
 // Layer: Standard Library / Meta
 //
 // User-facing surface for the tactic-metaprogramming analysis core
-// (`verum_types::tactic_meta`). Lean-4-style proof procedures
+// (`verum_types.tactic_meta`). Lean-4-style proof procedures
 // written *as Verum data*: quote expressions, splice them back,
 // reflect goals into inspectable values, register custom
 // elaborators that transform meta terms.

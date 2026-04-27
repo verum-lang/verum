@@ -635,7 +635,7 @@ fn test_let_else_diverges() {
     };
 
     let Some(value) = compute() else {
-        return Err(Error::NotFound);
+        return Err(Error.NotFound);
     };
 }
 
@@ -677,12 +677,12 @@ fn test_resource_acquisition_pattern() {
 }
 
 fn test_state_machine_pattern() {
-    if let State::Ready { data } = machine.state()
+    if let State.Ready { data } = machine.state()
         && data.is_complete()
         && let Some(result) = machine.execute(data)
         && result.is_success()
     {
-        machine.transition(State::Complete(result));
+        machine.transition(State.Complete(result));
     }
 }
 

@@ -7,7 +7,7 @@
 // `match` expressions in postcondition / body positions must
 // translate to an `ite`-chain so the SMT can reason about the
 // selected arm under each discriminator value. Before the fix,
-// `ExprKind::Match` had no translator arm — every match-bodied
+// `ExprKind.Match` had no translator arm — every match-bodied
 // function or match-involving ensures failed.
 
 @verify(formal)

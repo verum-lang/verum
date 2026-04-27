@@ -14,12 +14,12 @@ mount core.database.sqlite.native.l0_vfs.{MemDbVfs};
 
 @main
 public async fn main() -> Result<(), Error> {
-    let vfs = MemDbVfs::new();
-    let pager = Pager::open_memory(vfs).await?;
-    let mut tree: Btree<Int64, List<Byte>> = Btree::create(
+    let vfs = MemDbVfs.new();
+    let pager = Pager.open_memory(vfs).await?;
+    let mut tree: Btree<Int64, List<Byte>> = Btree.create(
         &pager,
-        BtreeKind::TableBtree,
-        Int64::compare,
+        BtreeKind.TableBtree,
+        Int64.compare,
     ).await?;
 
     // Scrambled insert order:

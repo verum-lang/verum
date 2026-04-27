@@ -67,7 +67,7 @@ fn seed_client_hello_prefix() -> List<Byte> {
 }
 
 fn feed(bytes: &[Byte]) -> Int {
-    let mut r = Reader::new(bytes);
+    let mut r = Reader.new(bytes);
     match decode_handshake(&mut r) {
         Ok(_)  => 1,
         Err(_) => 0,
@@ -76,7 +76,7 @@ fn feed(bytes: &[Byte]) -> Int {
 
 @main
 public fn main() -> Int {
-    let mut rng = FuzzRng::new(1);
+    let mut rng = FuzzRng.new(1);
     let seed = seed_client_hello_prefix();
     let mut iters: Int = 0;
     let mut accepted: Int = 0;

@@ -32,7 +32,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount collections.List;
 
-// Parsed URL. Empty/absent components are Maybe::None; present-but-empty
+// Parsed URL. Empty/absent components are Maybe.None; present-but-empty
 // components (e.g. `"http:///path"` has empty host) are Some("").
 public type Url is {
     scheme: Text,

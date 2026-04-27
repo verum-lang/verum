@@ -132,7 +132,7 @@ public const CONTEXT_STACK_DEPTH: Int = 8;
 /// parent-chain pointer + an active-bit bitmap.
 ///
 /// Renamed from `ContextSlots` to disambiguate from the
-/// cross-platform high-level `core.sys.common::ContextSlots`
+/// cross-platform high-level `core.sys.common.ContextSlots`
 /// (which uses typed `ContextEntry` values rather than raw
 /// `&unsafe Byte`s).  The `Raw` prefix signals the low-level
 /// nature; the high-level wrapper in `core.sys.common` keeps

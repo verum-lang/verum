@@ -1708,7 +1708,7 @@ fn test_cloned_basic() {
 // Section 54: ReduceResult Type
 // =============================================================================
 
-/// Test ReduceResult::Reduced
+/// Test ReduceResult.Reduced
 @test
 fn test_reduce_result_reduced() {
     let result: ReduceResult<Int> = Reduced(99);
@@ -1716,7 +1716,7 @@ fn test_reduce_result_reduced() {
     assert_eq(result.unwrap(), 99);
 }
 
-/// Test ReduceResult::map on Reduced
+/// Test ReduceResult.map on Reduced
 @test
 fn test_reduce_result_map() {
     let red: ReduceResult<Int> = Reduced(10);

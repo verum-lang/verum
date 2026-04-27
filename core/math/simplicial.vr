@@ -123,7 +123,7 @@ public type KanComplex is protocol extends SimplicialSet {
 };
 
 /// An **∞-groupoid** is (modelled as) a Kan complex. This alias is the
-/// bridge to HoTT: Verum's `hott::IsContr`, `IsProp`, `IsSet` are the
+/// bridge to HoTT: Verum's `hott.IsContr`, `IsProp`, `IsSet` are the
 /// truncation levels of objects living in an ∞-groupoid.
 public type InfinityGroupoid is protocol extends KanComplex {};
 

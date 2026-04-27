@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @expect: pass
 
-// Async-backpressure send: SendFut<T> + Sender::send_async
+// Async-backpressure send: SendFut<T> + Sender.send_async
 
 mount core.async.channel.{
     Sender, Receiver, SendError, TrySendError,

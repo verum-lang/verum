@@ -323,21 +323,21 @@ public fn compute_cech_nerve(
     target: Int,
     max_level: Int{>= 0 && <= 5},
 ) -> CechNerve {
-    let mut levels = List::new();
+    let mut levels = List.new();
     let n = covering.len();
 
     // Level 0: the covering objects themselves
     levels.push(CechNerveLevel {
         level: 0,
         components: covering.clone(),
-        face_maps: List::new(),
-        degeneracy_maps: List::new(),
+        face_maps: List.new(),
+        degeneracy_maps: List.new(),
     });
 
     // Level 1: fiber products U_i ×_X U_j
     if max_level >= 1 {
-        let mut overlaps = List::new();
-        let mut faces = List::new();
+        let mut overlaps = List.new();
+        let mut faces = List.new();
         let mut i = 0;
         while i < n {
             let mut j = 0;
@@ -354,13 +354,13 @@ public fn compute_cech_nerve(
             level: 1,
             components: overlaps,
             face_maps: faces,
-            degeneracy_maps: List::new(),
+            degeneracy_maps: List.new(),
         });
     }
 
     // Level 2: triple fiber products U_i ×_X U_j ×_X U_k
     if max_level >= 2 {
-        let mut triples = List::new();
+        let mut triples = List.new();
         let mut i = 0;
         while i < n {
             let mut j = 0;
@@ -377,8 +377,8 @@ public fn compute_cech_nerve(
         levels.push(CechNerveLevel {
             level: 2,
             components: triples,
-            face_maps: List::new(),
-            degeneracy_maps: List::new(),
+            face_maps: List.new(),
+            degeneracy_maps: List.new(),
         });
     }
 
@@ -520,7 +520,7 @@ public type Translation is {
 /// Verify coherence of a set of translations between theories.
 /// Returns all detected violations.
 public fn check_coherence(translations: &List<Translation>) -> List<CoherenceViolation> {
-    let mut violations = List::new();
+    let mut violations = List.new();
     let n = translations.len();
 
     // Check functorial coherence: for composable translations f₁₂, f₂₃,
