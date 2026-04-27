@@ -1,0 +1,255 @@
+// =============================================================================
+// mem/cap_audit.vr — Capability Audit Event Type
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: mem/capability (for CAP_* mask values)
+// =============================================================================
+//
+// `CapEvent` is the load-bearing record type for forensic reconstruction
+// of CBGR capability changes.  Where `HeaderView` snapshots an
+// allocation's *current* state, a sequence of `CapEvent`s lets observers
+// reconstruct the *history* of capability and generation changes that
+// led there — essential for diagnosing use-after-free, capability
+// underflow, double-revoke, and ref-count leak bugs.
+//
+// # Architecture
+//
+// This file defines only the *event type* — the format-stable boundary
+// that observers code against.  The producer-side ring buffer and
+// integration with `header.vr`'s `try_revoke` / `increment_ref_count` /
+// `attenuate_capabilities` writers lands separately under
+// `@cfg(feature = "diagnostics")` so that the CBGR hot path retains its
+// ~0.93ns budget for builds that opt out of recording.
+//
+// Splitting the type from the recording infrastructure follows the
+// established pattern in `mem/diagnostics.vr` (HeaderView ships before
+// `live_allocations` iterator) and `async/diagnostics.vr` (TaskInfo
+// ships before per-executor `snapshot_tasks` walker).
+//
+// # Anti-goals
+//
+// - No reflection escape hatch.  CapEvent fields are scalar values
+//   (UInt32 / UInt16 / UInt64) — no raw pointers, no type-erased
+//   payloads.
+// - No global mutable state in the type.  Storage / ring buffer is
+//   future producer-side work.
+// - No allocation per record event.  Every field is by-value; events
+//   live on the stack and are copy-out into the (future) ring buffer
+//   via plain memcpy.
+//
+// Spec: docs/architecture/observability.md (TODO)
+// =============================================================================
+
+module core.mem.cap_audit;
+
+mount super.capability.{
+    CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE, CAP_OWNED,
+    has_capability,
+};
+
+// =============================================================================
+// CapEventKind — discriminator for capability/lifecycle events
+// =============================================================================
+
+/// Discriminator over the categories of CBGR state transition that an
+/// audit event records.  Mirrors the writer entry points in `header.vr`
+/// so callers can correlate events back to the source operation.
+///
+/// # Variants
+///
+/// - `Revoke` — Successful `try_revoke` CAS: generation bumped,
+///   capabilities cleared.  Emitted *exactly once* per allocation
+///   transition from live → dead.  A failed (lost-race) revoke does
+///   NOT emit an event.
+/// - `Attenuate` — Capability narrowing via
+///   `attenuate_capabilities` (monotonic — only clears bits).
+/// - `RefIncr` — Reference count increment.  Emitted on the slow path
+///   (`increment_ref_count`) only — fast-path `&checked` borrows do
+///   NOT touch ref_count and are therefore not audited.
+/// - `RefDecr` — Reference count decrement.
+/// - `GenBump` — Explicit `increment_generation` (segment reuse,
+///   distinct from revoke).
+/// - `EpochAdvance` — Epoch counter advanced past the
+///   generation-wraparound watermark.
+public type CapEventKind is
+    | Revoke
+    | Attenuate
+    | RefIncr
+    | RefDecr
+    | GenBump
+    | EpochAdvance;
+
+implement Display for CapEventKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Revoke       => f.write_str("revoke"),
+            Attenuate    => f.write_str("attenuate"),
+            RefIncr      => f.write_str("ref_incr"),
+            RefDecr      => f.write_str("ref_decr"),
+            GenBump      => f.write_str("gen_bump"),
+            EpochAdvance => f.write_str("epoch_advance"),
+        }
+    }
+}
+
+// =============================================================================
+// CapEvent — single auditable CBGR state transition
+// =============================================================================
+
+/// One auditable CBGR state transition.  Every field is by-value; an
+/// event is a flat 48-byte record (3× UInt64 + 2× UInt32 + 2× UInt16
+/// + 1× UInt8 padding) suitable for direct memcpy into the (future)
+/// ring buffer slot.
+///
+/// # Field provenance
+///
+/// - `kind` records the category of writer that emitted the event
+///   (see `CapEventKind`).
+/// - `seq` is a monotonic, globally-unique sequence number assigned
+///   by the audit ring on event commit.  Used by observers to total-
+///   order events across threads (the `timestamp_ns` clock alone is
+///   not sufficient because monotonic-clock reads can collide on
+///   coarse-resolution timers).  `0` indicates an un-committed event
+///   (caller built the record but did not emit it).
+/// - `ptr_id` is the CBGR user-pointer address as `Int.bitcast`-ed to
+///   UInt64.  This is the stable identity observers use to group
+///   events for the same allocation.  CBGR ensures generation
+///   wraparound does not reuse pointers within a single epoch, so
+///   `(ptr_id, generation_after)` is unique within an epoch.
+/// - `generation_before` / `generation_after` capture the generation
+///   counter on entry / exit.  Equal for non-generation-bumping
+///   events (Attenuate, RefIncr, RefDecr).
+/// - `capabilities_before` / `capabilities_after` capture the
+///   capability mask on entry / exit.  Equal for non-capability-
+///   modifying events (RefIncr, RefDecr, GenBump, EpochAdvance).
+/// - `timestamp_ns` is a monotonic-clock nanosecond timestamp.  `0`
+///   when the platform's clock is unsupported or the recorder opted
+///   out of timestamps for performance.
+public type CapEvent is {
+    /// Category of state transition (Revoke, Attenuate, ...).
+    kind: CapEventKind,
+
+    /// Monotonic global sequence number.  `0` = un-committed.
+    seq: UInt64,
+
+    /// CBGR user-pointer address as UInt64 (stable identity).
+    ptr_id: UInt64,
+
+    /// Generation counter on entry to the writer.
+    generation_before: UInt32,
+
+    /// Generation counter on exit from the writer.  Equal to
+    /// `generation_before` for events that don't bump generation.
+    generation_after: UInt32,
+
+    /// Capability mask on entry to the writer.
+    capabilities_before: UInt16,
+
+    /// Capability mask on exit from the writer.  Equal to
+    /// `capabilities_before` for events that don't modify caps.
+    capabilities_after: UInt16,
+
+    /// Monotonic-clock nanosecond timestamp.  `0` when unsupported.
+    timestamp_ns: UInt64,
+};
+
+implement CapEvent {
+    /// Construct an un-committed event (seq=0).  The producer-side
+    /// ring buffer assigns `seq` on commit; callers should not set
+    /// it by hand.
+    public fn new(
+        kind: CapEventKind,
+        ptr_id: UInt64,
+        generation_before: UInt32,
+        generation_after: UInt32,
+        capabilities_before: UInt16,
+        capabilities_after: UInt16,
+        timestamp_ns: UInt64,
+    ) -> CapEvent {
+        CapEvent {
+            kind: kind,
+            seq: 0,
+            ptr_id: ptr_id,
+            generation_before: generation_before,
+            generation_after: generation_after,
+            capabilities_before: capabilities_before,
+            capabilities_after: capabilities_after,
+            timestamp_ns: timestamp_ns,
+        }
+    }
+
+    /// True iff this event bumped the generation counter (Revoke or
+    /// GenBump).  Useful for filtering out non-lifetime-affecting
+    /// events when reconstructing a use-after-free trace.
+    @inline
+    public fn bumped_generation(&self) -> Bool {
+        self.generation_before != self.generation_after
+    }
+
+    /// True iff this event modified the capability mask (Revoke or
+    /// Attenuate).  RefIncr / RefDecr / GenBump / EpochAdvance leave
+    /// the mask unchanged.
+    @inline
+    public fn modified_capabilities(&self) -> Bool {
+        self.capabilities_before != self.capabilities_after
+    }
+
+    /// Bitmask of capabilities cleared by this event.  Returns 0
+    /// when no capabilities were cleared (Attenuate is monotonic, so
+    /// `cleared = before AND NOT after`).
+    @inline
+    public fn cleared_capabilities(&self) -> UInt16 {
+        self.capabilities_before & !self.capabilities_after
+    }
+
+    /// True iff the event is committed (seq != 0).  Un-committed
+    /// events exist only inside the recorder's stack frame and are
+    /// not visible to readers.
+    @inline
+    public fn is_committed(&self) -> Bool {
+        self.seq != 0
+    }
+
+    /// Format as a panic-context block.  Two-space indented so it
+    /// composes with multi-line panic messages.  Single allocation
+    /// per call.
+    public fn format_panic_context(&self) -> Text {
+        let mut out: Text = "  CBGR cap-audit event:\n".clone();
+        out = out + f"    kind:           {self.kind}\n";
+        out = out + f"    seq:            {self.seq}\n";
+        out = out + f"    ptr_id:         0x{self.ptr_id}\n";
+        out = out + f"    generation:     {self.generation_before} -> {self.generation_after}\n";
+        out = out + f"    capabilities:   0x{self.capabilities_before} -> 0x{self.capabilities_after}";
+        if self.timestamp_ns != 0 {
+            out = out + f"\n    timestamp_ns:   {self.timestamp_ns}";
+        }
+        out
+    }
+}
+
+implement Display for CapEvent {
+    /// Single-line summary suitable for log lines.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"cap_event[seq={self.seq},kind={self.kind},ptr=0x{self.ptr_id},gen={self.generation_before}->{self.generation_after},cap=0x{self.capabilities_before}->0x{self.capabilities_after}]")
+    }
+}
+
+implement Debug for CapEvent {
+    /// Multi-line dump suitable for panic post-mortems.
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("CapEvent {\n")?;
+        f.write_str(f"  kind:                {self.kind}\n")?;
+        f.write_str(f"  seq:                 {self.seq}\n")?;
+        f.write_str(f"  ptr_id:              0x{self.ptr_id}\n")?;
+        f.write_str(f"  generation_before:   {self.generation_before}\n")?;
+        f.write_str(f"  generation_after:    {self.generation_after}\n")?;
+        f.write_str(f"  capabilities_before: 0x{self.capabilities_before}\n")?;
+        f.write_str(f"  capabilities_after:  0x{self.capabilities_after}\n")?;
+        f.write_str(f"  timestamp_ns:        {self.timestamp_ns}\n")?;
+        f.write_str(f"  is_committed:        {self.is_committed()}\n")?;
+        f.write_str(f"  bumped_generation:   {self.bumped_generation()}\n")?;
+        f.write_str(f"  modified_caps:       {self.modified_capabilities()}\n")?;
+        f.write_str(f"  cleared_caps:        0x{self.cleared_capabilities()}\n")?;
+        f.write_str("}")
+    }
+}

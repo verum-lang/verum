@@ -64,6 +64,12 @@ mount core.{Maybe, Text};
 public mount core.mem.diagnostics.{HeaderView, header_view_of};
 
 // =============================================================================
+// CBGR capability audit (re-exports from core::mem::cap_audit)
+// =============================================================================
+
+public mount core.mem.cap_audit.{CapEvent, CapEventKind};
+
+// =============================================================================
 // Async runtime introspection (re-exports from core::async::diagnostics)
 // =============================================================================
 
