@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "crates/verum_cli",
-    "crates/verum_toolchain",
     "crates/verum_compiler",
     "crates/verum_common",
     "crates/verum_error",
@@ -66,7 +65,6 @@ verum_ast = { path = "crates/verum_ast" }
 verum_protocol_types = { path = "crates/verum_protocol_types" }
 verum_types = { path = "crates/verum_types" }
 verum_cbgr = { path = "crates/verum_cbgr" }
-verum_toolchain = { path = "crates/verum_toolchain" }
 verum_codegen = { path = "crates/verum_codegen" }
 verum_compiler = { path = "crates/verum_compiler" }
 verum_diagnostics = { path = "crates/verum_diagnostics" }

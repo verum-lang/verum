@@ -93,7 +93,6 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
     "smt_info",
     "smt_stats",
     "test",
-    "toolchain",
     "tree",
     "update",
     "verify",

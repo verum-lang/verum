@@ -9,7 +9,7 @@
 // order — this direct reference ensures symbols remain available.
 extern crate verum_llvm_sys;
 
-// Main entry point for the Verum language toolchain
+// Main entry point for the Verum language compiler
 
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
@@ -37,7 +37,7 @@ use error::{CliError, Result};
 #[clap(
     name = "verum",
     version = env!("CARGO_PKG_VERSION"),
-    about = "The Verum language toolchain \u{2014} semantic honesty, cost transparency, zero-cost safety",
+    about = "The Verum language compiler \u{2014} semantic honesty, cost transparency, zero-cost safety",
     after_help = "\
 QUICK START:
   verum new my_project --profile application   Create a new project
@@ -553,7 +553,7 @@ enum Commands {
 
     /// Manage the script-mode VBC cache (`~/.verum/script-cache/`).
     /// Subcommands: `path`, `list`, `clear`, `gc`, `show`. The cache
-    /// is content-addressed by source + toolchain + flags, so a hit is
+    /// is content-addressed by source + compiler + flags, so a hit is
     /// always a valid reuse — there is no "stale cache" failure mode.
     /// `gc` evicts least-recently-accessed entries until under a budget;
     /// `clear` removes everything.
@@ -1107,7 +1107,7 @@ enum Commands {
 
     /// Show formal-verification engine capabilities and backends.
     ///
-    /// This command diagnoses the toolchain itself: which verification
+    /// This command diagnoses the verifier itself: which verification
     /// techniques are available, which advanced features (interpolation,
     /// synthesis, abduction, …) the current build supports. It does not
     /// touch user code.

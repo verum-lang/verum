@@ -53,7 +53,7 @@ pub struct ScriptContext {
     pub source: Vec<u8>,
 
     /// blake3 hex digest of `source`. Used as both the lockfile
-    /// integrity check and (mixed with toolchain + flags) the cache
+    /// integrity check and (mixed with compiler + flags) the cache
     /// key.
     pub source_hash: String,
 
@@ -65,13 +65,13 @@ pub struct ScriptContext {
     /// or the [`--allow-all`/`--deny-all`] override result.
     pub permissions: PermissionSet,
 
-    /// Cache key for this (source, toolchain, extra-flags) tuple.
+    /// Cache key for this (source, compiler, extra-flags) tuple.
     pub cache_key: CacheKey,
 
     /// Toolchain version that built this context. Pinned so cache
     /// stores carry the right diagnostic and lockfile verification
     /// keys on the same string.
-    pub toolchain_version: String,
+    pub compiler_version: String,
 }
 
 /// Caller-supplied options. Toolchain + flags are required; permission
@@ -81,10 +81,10 @@ pub struct ScriptContextOptions {
     /// CLI permission flags (`--allow`, `--allow-all`, `--deny-all`).
     pub flags: PermissionFlags,
 
-    /// Toolchain version stamp. Mixed into the cache key so a toolchain
+    /// Toolchain version stamp. Mixed into the cache key so a compiler
     /// upgrade invalidates the cache, and stored verbatim in the
     /// lockfile so verify_against can detect drift.
-    pub toolchain_version: String,
+    pub compiler_version: String,
 
     /// Extra cache-key contributors: profile tier, opt-level, verify
     /// mode, etc. Order is preserved and contributes to the digest, so
@@ -172,7 +172,7 @@ impl ScriptContext {
         let permissions = build_permission_set(frontmatter.as_ref(), &opts.flags)?;
 
         let extra_refs: Vec<&str> = opts.extra_cache_flags.iter().map(|s| s.as_str()).collect();
-        let cache_key = key_for(&source, &opts.toolchain_version, &extra_refs);
+        let cache_key = key_for(&source, &opts.compiler_version, &extra_refs);
 
         Ok(Self {
             source_path,
@@ -181,7 +181,7 @@ impl ScriptContext {
             frontmatter,
             permissions,
             cache_key,
-            toolchain_version: opts.toolchain_version.clone(),
+            compiler_version: opts.compiler_version.clone(),
         })
     }
 
@@ -200,7 +200,7 @@ impl ScriptContext {
     }
 
     /// Cache store for the compiled VBC produced from this context's
-    /// source. Consistent metadata: source path + length + toolchain
+    /// source. Consistent metadata: source path + length + compiler
     /// version are pinned to the values this context already holds.
     pub fn cache_store(&self, cache: &ScriptCache, vbc: &[u8]) -> Result<(), CacheError> {
         cache.store(
@@ -208,13 +208,13 @@ impl ScriptContext {
             vbc,
             self.source_path.display().to_string(),
             self.source.len() as u64,
-            self.toolchain_version.clone(),
+            self.compiler_version.clone(),
         )
     }
 
     /// Construct a fresh lockfile for this run. Caller fills in `deps`
     /// from whichever resolver handled the frontmatter dependency list;
-    /// this convenience pre-fills the source hash, path, and toolchain.
+    /// this convenience pre-fills the source hash, path, and compiler.
     pub fn fresh_lockfile(
         &self,
         deps: Vec<crate::script::lockfile::LockedDep>,
@@ -222,7 +222,7 @@ impl ScriptContext {
         ScriptLockfile::new(
             self.source_path.clone(),
             self.source_hash.clone(),
-            self.toolchain_version.clone(),
+            self.compiler_version.clone(),
             deps,
         )
     }
@@ -242,10 +242,10 @@ mod tests {
         path
     }
 
-    fn opts_with_toolchain(version: &str) -> ScriptContextOptions {
+    fn opts_with_compiler(version: &str) -> ScriptContextOptions {
         ScriptContextOptions {
             flags: PermissionFlags::default(),
-            toolchain_version: version.to_string(),
+            compiler_version: version.to_string(),
             extra_cache_flags: Vec::new(),
         }
     }
@@ -254,10 +254,10 @@ mod tests {
     fn from_path_plain_script_no_frontmatter() {
         let tmp = TempDir::new().unwrap();
         let path = write_script(tmp.path(), "plain.vr", "fn main() { 0 }\n");
-        let ctx = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
+        let ctx = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
         assert!(ctx.frontmatter.is_none());
         assert!(ctx.permissions.is_empty());
-        assert_eq!(ctx.toolchain_version, "0.1.0");
+        assert_eq!(ctx.compiler_version, "0.1.0");
         assert_eq!(ctx.source, b"fn main() { 0 }\n");
         assert_eq!(ctx.source_hash.len(), 64);
     }
@@ -270,7 +270,7 @@ mod tests {
                     // ///\n\
                     fn main() { 0 }\n";
         let path = write_script(tmp.path(), "x.vr", body);
-        let ctx = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
+        let ctx = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
         assert!(ctx.frontmatter.is_some());
         assert_eq!(ctx.frontmatter.as_ref().unwrap().permissions.len(), 1);
         assert!(ctx
@@ -286,7 +286,7 @@ mod tests {
     fn from_path_returns_io_error_for_missing_script() {
         let tmp = TempDir::new().unwrap();
         let absent = tmp.path().join("absent.vr");
-        let err = ScriptContext::from_path(&absent, &opts_with_toolchain("0.1.0")).unwrap_err();
+        let err = ScriptContext::from_path(&absent, &opts_with_compiler("0.1.0")).unwrap_err();
         assert!(matches!(err, ScriptContextError::Io { .. }));
     }
 
@@ -300,7 +300,7 @@ mod tests {
                 allow: vec!["fs:read=./data".to_string()],
                 ..Default::default()
             },
-            toolchain_version: "0.1.0".to_string(),
+            compiler_version: "0.1.0".to_string(),
             extra_cache_flags: Vec::new(),
         };
         let ctx = ScriptContext::from_path(&path, &opts).unwrap();
@@ -321,7 +321,7 @@ mod tests {
                 deny_all: true,
                 ..Default::default()
             },
-            toolchain_version: "0.1.0".to_string(),
+            compiler_version: "0.1.0".to_string(),
             extra_cache_flags: Vec::new(),
         };
         let ctx = ScriptContext::from_path(&path, &opts).unwrap();
@@ -333,17 +333,17 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let body = "// /// script\n// permissions = [\"kernel=/dev/mem\"]\n// ///\nfn main() {}\n";
         let path = write_script(tmp.path(), "x.vr", body);
-        let err = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap_err();
+        let err = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap_err();
         // Frontmatter validate catches it first.
         assert!(matches!(err, ScriptContextError::Frontmatter(_)));
     }
 
     #[test]
-    fn cache_key_changes_with_toolchain() {
+    fn cache_key_changes_with_compiler() {
         let tmp = TempDir::new().unwrap();
         let path = write_script(tmp.path(), "x.vr", "fn main() {}\n");
-        let a = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
-        let b = ScriptContext::from_path(&path, &opts_with_toolchain("0.2.0")).unwrap();
+        let a = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
+        let b = ScriptContext::from_path(&path, &opts_with_compiler("0.2.0")).unwrap();
         assert_ne!(a.cache_key, b.cache_key);
     }
 
@@ -351,11 +351,11 @@ mod tests {
     fn cache_key_changes_with_extra_flags() {
         let tmp = TempDir::new().unwrap();
         let path = write_script(tmp.path(), "x.vr", "fn main() {}\n");
-        let plain = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
+        let plain = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
         let with_flags = ScriptContext::from_path(
             &path,
             &ScriptContextOptions {
-                toolchain_version: "0.1.0".into(),
+                compiler_version: "0.1.0".into(),
                 extra_cache_flags: vec!["tier=1".into(), "opt=2".into()],
                 ..Default::default()
             },
@@ -368,8 +368,8 @@ mod tests {
     fn cache_key_stable_across_runs() {
         let tmp = TempDir::new().unwrap();
         let path = write_script(tmp.path(), "x.vr", "fn main() { 1 + 1 }\n");
-        let a = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
-        let b = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
+        let a = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
+        let b = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
         assert_eq!(a.cache_key, b.cache_key);
         assert_eq!(a.source_hash, b.source_hash);
     }
@@ -378,7 +378,7 @@ mod tests {
     fn lockfile_path_is_sidecar() {
         let tmp = TempDir::new().unwrap();
         let path = write_script(tmp.path(), "script.vr", "fn main() {}\n");
-        let ctx = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
+        let ctx = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
         let lock_path = ctx.lockfile_path();
         assert!(lock_path.to_string_lossy().ends_with("script.vr.lock"));
     }
@@ -389,7 +389,7 @@ mod tests {
         let cache_root = tmp.path().join("cache");
         let cache = ScriptCache::at(cache_root).unwrap();
         let path = write_script(tmp.path(), "x.vr", "fn main() { 7 }\n");
-        let ctx = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
+        let ctx = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
 
         // Initial lookup is a miss.
         assert!(ctx.cache_lookup(&cache).unwrap().is_none());
@@ -398,7 +398,7 @@ mod tests {
         ctx.cache_store(&cache, b"\x01\x02\x03 fake VBC").unwrap();
         let entry = ctx.cache_lookup(&cache).unwrap().expect("hit");
         assert_eq!(entry.vbc, b"\x01\x02\x03 fake VBC");
-        assert_eq!(entry.meta.toolchain_version, "0.1.0");
+        assert_eq!(entry.meta.compiler_version, "0.1.0");
         assert_eq!(entry.meta.source_len, ctx.source.len() as u64);
         assert!(entry.meta.source_path.contains("x.vr"));
     }
@@ -407,10 +407,10 @@ mod tests {
     fn fresh_lockfile_pins_context_metadata() {
         let tmp = TempDir::new().unwrap();
         let path = write_script(tmp.path(), "x.vr", "fn main() {}\n");
-        let ctx = ScriptContext::from_path(&path, &opts_with_toolchain("0.7.3")).unwrap();
+        let ctx = ScriptContext::from_path(&path, &opts_with_compiler("0.7.3")).unwrap();
         let lf = ctx.fresh_lockfile(Vec::new());
         assert_eq!(lf.source_hash, ctx.source_hash);
-        assert_eq!(lf.toolchain_version, "0.7.3");
+        assert_eq!(lf.compiler_version, "0.7.3");
         assert!(lf.deps.is_empty());
     }
 
@@ -420,7 +420,7 @@ mod tests {
         let ctx = ScriptContext::from_source(
             path,
             b"fn main() {}\n".to_vec(),
-            &opts_with_toolchain("0.1.0"),
+            &opts_with_compiler("0.1.0"),
         )
         .unwrap();
         // Source path falls back to input when canonicalize fails.
@@ -434,7 +434,7 @@ mod tests {
         let path = tmp.path().join("bin.vr");
         // Mid-byte invalid UTF-8 sequence.
         fs::write(&path, &[0xFFu8, 0xFE, 0xFD, b'\n']).unwrap();
-        let ctx = ScriptContext::from_path(&path, &opts_with_toolchain("0.1.0")).unwrap();
+        let ctx = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
         assert!(ctx.frontmatter.is_none());
         assert!(ctx.permissions.is_empty());
     }

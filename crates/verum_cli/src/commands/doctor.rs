@@ -102,7 +102,7 @@ fn max_status(a: Status, b: Status) -> Status {
 
 fn emit_human(results: &[CheckResult], summary_status: Status) -> Result<()> {
     let mut out = io::stdout().lock();
-    writeln!(out, "verum doctor — toolchain v{}", env!("CARGO_PKG_VERSION"))
+    writeln!(out, "verum doctor — compiler v{}", env!("CARGO_PKG_VERSION"))
         .map_err(CliError::Io)?;
     writeln!(out).map_err(CliError::Io)?;
     let mut name_w = 0usize;
@@ -183,7 +183,7 @@ fn json_str(s: &str) -> String {
 
 fn run_all_checks() -> Vec<CheckResult> {
     let mut results = Vec::with_capacity(8);
-    results.push(check_toolchain_version());
+    results.push(check_compiler_version());
     let home = check_home_directory(&mut results);
     if let Some(home) = &home {
         results.push(check_verum_directory(home));
@@ -197,9 +197,9 @@ fn run_all_checks() -> Vec<CheckResult> {
 
 // ── individual checks ────────────────────────────────────────────────
 
-fn check_toolchain_version() -> CheckResult {
+fn check_compiler_version() -> CheckResult {
     CheckResult {
-        id: "toolchain_version",
+        id: "compiler_version",
         status: Status::Pass,
         summary: format!(
             "verum CLI v{} (built against rustc target {})",
@@ -505,8 +505,8 @@ mod tests {
     }
 
     #[test]
-    fn check_toolchain_version_carries_pkg_version() {
-        let r = check_toolchain_version();
+    fn check_compiler_version_carries_pkg_version() {
+        let r = check_compiler_version();
         assert_eq!(r.status, Status::Pass);
         assert!(r.summary.contains(env!("CARGO_PKG_VERSION")));
     }

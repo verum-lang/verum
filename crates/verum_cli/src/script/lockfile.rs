@@ -2,7 +2,7 @@
 //!
 //! A `<script>.lock` sidecar pins the resolved-dependency graph for a
 //! single `.vr` script so subsequent runs (a) skip dependency resolution
-//! when the source + toolchain are unchanged, and (b) reproduce identical
+//! when the source + compiler are unchanged, and (b) reproduce identical
 //! VBC builds across machines. The full-workspace `verum.lock` (handled
 //! by [`crate::registry::lockfile`]) is structurally similar but lives at
 //! the cog root and tracks a multi-cog graph; this module is its single-
@@ -14,7 +14,7 @@
 //! version           = 1
 //! source_path       = "/abs/path/to/script.vr"
 //! source_hash       = "<blake3 hex>"
-//! toolchain_version = "0.1.0"
+//! compiler_version = "0.1.0"
 //! created_at        = 1714161000
 //! updated_at        = 1714161000
 //!
@@ -75,7 +75,7 @@ pub struct ScriptLockfile {
     /// blake3 hex digest of the script source bytes.
     pub source_hash: String,
     /// Toolchain version that produced the dep resolution.
-    pub toolchain_version: String,
+    pub compiler_version: String,
     /// Wall-clock seconds since UNIX epoch when first created.
     pub created_at: u64,
     /// Wall-clock seconds since UNIX epoch when last refreshed.
@@ -93,7 +93,7 @@ impl ScriptLockfile {
     pub fn new(
         source_path: impl Into<PathBuf>,
         source_hash: impl Into<String>,
-        toolchain_version: impl Into<String>,
+        compiler_version: impl Into<String>,
         deps: Vec<LockedDep>,
     ) -> Self {
         let now = now_secs();
@@ -103,7 +103,7 @@ impl ScriptLockfile {
             version: SCHEMA_VERSION,
             source_path: source_path.into(),
             source_hash: source_hash.into(),
-            toolchain_version: toolchain_version.into(),
+            compiler_version: compiler_version.into(),
             created_at: now,
             updated_at: now,
             deps,
@@ -182,24 +182,24 @@ impl ScriptLockfile {
     }
 
     /// Compare this lockfile against a candidate `(source_bytes,
-    /// toolchain_version)` and decide whether it is still fresh.
+    /// compiler_version)` and decide whether it is still fresh.
     ///
     /// The check is intentionally conservative: any mismatch — schema,
-    /// source-hash, or toolchain — yields a regenerate verdict. Callers
+    /// source-hash, or compiler — yields a regenerate verdict. Callers
     /// downstream don't need to inspect the discriminant unless they
     /// want a diagnostic; the boolean [`VerifyOutcome::is_fresh`] is
     /// sufficient for the fast-path.
-    pub fn verify_against(&self, source_bytes: &[u8], toolchain_version: &str) -> VerifyOutcome {
+    pub fn verify_against(&self, source_bytes: &[u8], compiler_version: &str) -> VerifyOutcome {
         if self.version != SCHEMA_VERSION {
             return VerifyOutcome::SchemaSkew {
                 lockfile_version: self.version,
                 expected: SCHEMA_VERSION,
             };
         }
-        if self.toolchain_version != toolchain_version {
-            return VerifyOutcome::ToolchainChanged {
-                lockfile: self.toolchain_version.clone(),
-                current: toolchain_version.to_string(),
+        if self.compiler_version != compiler_version {
+            return VerifyOutcome::CompilerChanged {
+                lockfile: self.compiler_version.clone(),
+                current: compiler_version.to_string(),
             };
         }
         let actual = Self::hash_source(source_bytes);
@@ -221,7 +221,7 @@ pub enum VerifyOutcome {
     /// Source bytes differ — regenerate.
     SourceChanged { lockfile: String, current: String },
     /// Toolchain version differs — regenerate.
-    ToolchainChanged { lockfile: String, current: String },
+    CompilerChanged { lockfile: String, current: String },
     /// Schema-version skew — regenerate.
     SchemaSkew { lockfile_version: u32, expected: u32 },
 }
@@ -238,8 +238,8 @@ impl VerifyOutcome {
         match self {
             Self::Fresh => None,
             Self::SourceChanged { .. } => Some("script source changed".to_string()),
-            Self::ToolchainChanged { lockfile, current } => Some(format!(
-                "toolchain changed: lockfile={lockfile}, current={current}"
+            Self::CompilerChanged { lockfile, current } => Some(format!(
+                "compiler changed: lockfile={lockfile}, current={current}"
             )),
             Self::SchemaSkew {
                 lockfile_version,
@@ -335,7 +335,7 @@ mod tests {
         let read = ScriptLockfile::read_from(&path).unwrap().unwrap();
         assert_eq!(read.version, lf.version);
         assert_eq!(read.source_hash, lf.source_hash);
-        assert_eq!(read.toolchain_version, lf.toolchain_version);
+        assert_eq!(read.compiler_version, lf.compiler_version);
         assert_eq!(read.deps, lf.deps);
     }
 
@@ -407,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_against_detects_toolchain_change() {
+    fn verify_against_detects_compiler_change() {
         let src = b"x";
         let lf = ScriptLockfile::new(
             "/tmp/x.vr",
@@ -416,7 +416,7 @@ mod tests {
             vec![],
         );
         let outcome = lf.verify_against(src, "0.2.0");
-        assert!(matches!(outcome, VerifyOutcome::ToolchainChanged { .. }));
+        assert!(matches!(outcome, VerifyOutcome::CompilerChanged { .. }));
         let reason = outcome.reason().unwrap();
         assert!(reason.contains("0.1.0") && reason.contains("0.2.0"));
     }

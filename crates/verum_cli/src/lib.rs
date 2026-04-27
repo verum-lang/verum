@@ -59,6 +59,3 @@ pub use registry::enterprise::{
 // Re-export security types for tests
 pub use registry::security::{LicenseIssueType, RiskLevel, SecurityReport, SecurityScanner};
 
-// Re-export toolchain for compiler integration
-#[allow(deprecated)]
-pub use verum_toolchain::{RuntimeArtifacts, Toolchain, ToolchainManager};
