@@ -11552,6 +11552,15 @@ impl<'s> CompilationPipeline<'s> {
             "core.sys.darwin.thread",
             "core.sys.linux.syscall",
             "core.sys.linux.thread",
+            // T0.6.1 — per-platform TLS providers: thread_entry's
+            // create_thread_tls call resolves through these (one
+            // platform module wins the conditional cfg). Pre-T0.6.1
+            // they were missing from the AOT-retention list and the
+            // top-level `thread_entry` function bug-class lenient-
+            // SKIPped, leaving the runtime entry without thread-local
+            // storage init.
+            "core.sys.darwin.tls",
+            "core.sys.linux.tls",
             // Collections
             "core.collections.list",
             "core.collections.map",
@@ -11568,6 +11577,15 @@ impl<'s> CompilationPipeline<'s> {
             "core.base.maybe",
             "core.base.result",
             "core.base.ordering",
+            // T0.6.1 — typed-OOM allocation primitives. core.base.memory
+            // hosts try_alloc / try_alloc_zeroed / try_realloc that
+            // List / Map / Text / Deque / Heap call from
+            // try_with_capacity / try_grow / try_resize. Without retention
+            // here, the AOT cull dropped memory's AST before VBC codegen
+            // and every fallible-allocation API ended up bug-class
+            // lenient-SKIPped (#200 follow-up; companion to the
+            // type-checking ALWAYS_INCLUDE entry around line 11061).
+            "core.base.memory",
             // Time
             "core.time.duration",
             // Sync
@@ -11616,6 +11634,12 @@ impl<'s> CompilationPipeline<'s> {
             "core.mem.size_class",
             "core.mem.capability",
             "core.mem.raw_ops",
+            // T0.6.1 — segment-classification constants used by
+            // LocalHeap.alloc_huge / LocalHeap.free for the
+            // SEGMENT_HUGE branch. Without retention, both methods
+            // bug-class lenient-SKIP because SEGMENT_HUGE resolves
+            // as undefined at codegen.
+            "core.mem.segment",
             // I/O — excluded from AOT retention: core.io.fs read()/write()
             // FFI declarations conflict with LLVM builtins (wrong arg count).
             // Included in the type-checking ALWAYS_INCLUDE list (list 1) above.
