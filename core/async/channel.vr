@@ -417,8 +417,16 @@ implement<T> Debug for Sender<T> {
 }
 
 implement<T> Drop for Sender<T> {
+    /// SOUNDNESS: previous revision used `Relaxed` on the fetch_sub,
+    /// missing the Acquire-fence on the "last sender" path.  On
+    /// weakly-ordered architectures (ARM / AArch64 / Apple Silicon),
+    /// the last-sender thread could observe `count == 0` BEFORE
+    /// concurrent siblings' Release-ordered writes were visible —
+    /// close publication and waker-wake then ran against stale state.
+    /// `AcqRel` encodes both halves: Release on the decrement, Acquire
+    /// on the "I'm last" observation.
     fn drop(&mut self) {
-        let count = self.inner.sender_count.fetch_sub(1, MemoryOrdering.Relaxed) - 1;
+        let count = self.inner.sender_count.fetch_sub(1, MemoryOrdering.AcqRel) - 1;
         if count == 0 {
             // Last sender dropped - close channel
             self.inner.closed.store(true, MemoryOrdering.Release);
