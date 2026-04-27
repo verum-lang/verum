@@ -455,14 +455,25 @@ implement<T> ThinRef<T> {
 
     /// Explicitly revoke this reference.
     ///
-    /// Increments the generation counter in the allocation header, which
-    /// invalidates this reference and ALL copies that share the same
-    /// generation value.
+    /// Atomically bumps the generation counter in the allocation
+    /// header iff its current value still matches `self.generation`.
+    /// On success, this reference and ALL copies that share the same
+    /// generation value are invalidated.
     ///
     /// # Requirements
     ///
     /// - Reference must have CAP_REVOKE capability
     /// - Reference must be valid (not already revoked)
+    ///
+    /// # Concurrency
+    ///
+    /// Two threads racing on `revoke()` for the same allocation will
+    /// see exactly one `Ok(())` and one `Err(already_revoked)`.  The
+    /// previous implementation used a verify-then-fetch_add pattern
+    /// that allowed the late thread to spuriously double-bump the
+    /// generation past a freshly-issued successor reference; the
+    /// CAS-based `try_revoke` primitive on the header makes the
+    /// "verify and bump" atomic.
     public fn revoke(&self) -> Result<(), RevocationError> {
         if self.is_null() {
             return Err(RevocationError.null_pointer(T.name));
@@ -475,31 +486,30 @@ implement<T> ThinRef<T> {
         unsafe {
             let header = AllocationHeader.from_user_ptr_mut(self.ptr as &unsafe Byte);
 
-            // Verify current state matches expected
-            let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
-
-            if self.generation != actual_gen || self.epoch() != actual_epoch {
+            // Verify epoch matches before attempting CAS — the CAS
+            // covers the generation but the epoch may have advanced
+            // (via a separate wraparound) while we were stale.
+            let actual_epoch = header.load_epoch();
+            if self.epoch() != actual_epoch {
                 return Err(RevocationError.already_revoked(T.name));
             }
 
-            // Increment generation atomically
-            let old_gen = header.increment_generation();
+            // Atomic verify-and-bump.  None means the generation
+            // moved under us → already revoked by another thread.
+            let new_gen = match header.try_revoke(self.generation) {
+                Some(g) => g,
+                None    => return Err(RevocationError.already_revoked(T.name)),
+            };
 
-            if old_gen != actual_gen {
-                return Err(RevocationError.internal_error(
-                    T.name,
-                    "generation changed during revocation",
-                ));
-            }
-
-            // Notify epoch manager
-            let new_gen = header.load_generation();
-            let new_epoch = header.load_epoch();
+            // Notify epoch manager — read the post-revoke epoch
+            // since try_revoke may have crossed the wraparound
+            // boundary and bumped it.
+            let post_epoch = header.load_epoch();
             GLOBAL_EPOCH.on_revocation(
                 self.ptr as &unsafe Byte,
-                actual_gen,
+                self.generation,
                 new_gen,
-                new_epoch,
+                post_epoch,
             );
 
             Ok(())
