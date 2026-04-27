@@ -231,17 +231,41 @@ public type Phaser is {
     mutex: Mutex<Bool>,
 };
 
-// State encoding:
-// Bits 0-15: parties (number of registered threads)
-// Bits 16-31: arrived (number that have arrived this phase)
-// Bits 32-62: phase number
-// Bit 63: terminated flag
+// State encoding (packed in i64, MUST avoid the sign bit):
+//
+//   Bit 63    — UNUSED (sign bit; storing 1 here corrupts every
+//               arithmetic-shift right because i64 `>>` is
+//               sign-extending; was previously TERMINATED_BIT
+//               which silently broke phase decoding after
+//               terminate() — see task #32).
+//   Bit 62    — terminated flag
+//   Bits 32-61 — phase number (30 bits = ~1.07 billion phases)
+//   Bits 16-31 — arrived (≤ 0xFFFF parties per phase)
+//   Bits  0-15 — parties (≤ 0xFFFF registered threads)
+//
+// The arithmetic-right-shift hazard: `state >> PHASE_SHIFT` on
+// a signed i64 sign-extends the high bit.  If TERMINATED_BIT is
+// the sign bit, every phase decode after terminate() reads
+// `0xFFFF_FFFF_FFFF_FFFF as Int = -1`, then `(-1 + 1) << 32 = 0`
+// in `arrive_and_await`'s phase-advance loop — the entire
+// reconstructed state collapses to `0 | parties`, ALSO losing
+// the TERMINATED_BIT itself.  Net effect: terminated phaser
+// silently un-terminates the moment any thread arrives.
+//
+// Moving TERMINATED_BIT to bit 62 keeps the whole state
+// non-negative regardless of termination state, so the
+// arithmetic shift behaves identically to the logical shift on
+// every architecture.
 
 const PARTIES_MASK: Int = 0xFFFF;
 const ARRIVED_SHIFT: Int = 16;
 const ARRIVED_MASK: Int = 0xFFFF0000;
 const PHASE_SHIFT: Int = 32;
-const TERMINATED_BIT: Int = 1 << 63;
+// 30 bits available for the phase counter; mask used by all
+// phase-decoding sites so the TERMINATED_BIT never bleeds into
+// the phase value even if a code path forgets to strip it.
+const PHASE_MASK_SHIFTED: Int = 0x3FFFFFFF;  // 30 bits == bits 32-61 once shifted right
+const TERMINATED_BIT: Int = 1 << 62;
 
 implement Phaser {
     /// Create a new phaser with initial parties.
@@ -262,7 +286,10 @@ implement Phaser {
         let _guard = self.mutex.lock().unwrap();
 
         let old_state = self.state.fetch_add(1, MemoryOrdering.SeqCst);
-        (old_state >> PHASE_SHIFT) as Int
+        // PHASE_MASK_SHIFTED guarantees the TERMINATED_BIT (now at
+        // bit 62, but historically prone to bleed) never appears
+        // in the returned phase number even under skew.
+        ((old_state >> PHASE_SHIFT) & PHASE_MASK_SHIFTED) as Int
     }
 
     /// Arrive at the barrier && wait for others.
@@ -283,18 +310,22 @@ implement Phaser {
         let old_state = self.state.fetch_add(1 << ARRIVED_SHIFT, MemoryOrdering.SeqCst);
         let parties = (old_state & PARTIES_MASK) as Int;
         let arrived = ((old_state & ARRIVED_MASK) >> ARRIVED_SHIFT) as Int + 1;
-        let phase = (old_state >> PHASE_SHIFT) as Int;
+        let phase = ((old_state >> PHASE_SHIFT) & PHASE_MASK_SHIFTED) as Int;
 
         if arrived == parties {
             // We're the last — advance phase via CAS so any
             // concurrent register/deregister isn't lost.
             // Loop on observed-parties since concurrent
             // operations may have changed the count between
-            // our fetch_add and our CAS.
+            // our fetch_add and our CAS.  We MUST preserve
+            // TERMINATED_BIT in the new state (was lost in the
+            // earlier reconstruction — terminated phaser silently
+            // un-terminated on next arrival, see task #32).
             loop {
                 let cur = self.state.load(MemoryOrdering.SeqCst);
                 let cur_parties = (cur & PARTIES_MASK) as Int;
-                let cur_phase = (cur >> PHASE_SHIFT) as Int;
+                let cur_phase = ((cur >> PHASE_SHIFT) & PHASE_MASK_SHIFTED) as Int;
+                let cur_terminated = cur & TERMINATED_BIT;
                 // Safety net: another thread may have already
                 // advanced the phase (race with concurrent
                 // last-arriver from a re-registration).  In
@@ -302,7 +333,8 @@ implement Phaser {
                 if cur_phase != phase {
                     break;
                 }
-                let new_state = ((phase + 1) << PHASE_SHIFT) | cur_parties;
+                let next_phase = ((phase + 1) & PHASE_MASK_SHIFTED) << PHASE_SHIFT;
+                let new_state = next_phase | cur_parties | cur_terminated;
                 if self.state.compare_exchange(cur, new_state, MemoryOrdering.SeqCst, MemoryOrdering.SeqCst).is_ok() {
                     break;
                 }
@@ -325,6 +357,17 @@ implement Phaser {
     /// Arrive && deregister from the phaser.
     ///
     /// The calling thread will no longer participate in future phases.
+    ///
+    /// **Phase-advance race fix (task #32)**: the earlier
+    /// implementation used `state.store(new_state)` to advance
+    /// the phase while only holding `mutex` — that mutex is
+    /// shared with `register()` but NOT with `arrive_and_await()`,
+    /// so a concurrent `arrive_and_await` could `fetch_add`
+    /// the arrived counter between our fetch_add and our store,
+    /// and the store would silently overwrite the increment.
+    /// Same data-loss class as the bug previously fixed in
+    /// `arrive_and_await` itself.  We now use the same CAS-loop
+    /// pattern with TERMINATED_BIT preservation.
     public fn arrive_and_deregister(&self) -> Int {
         let _guard = self.mutex.lock().unwrap();
 
@@ -334,12 +377,29 @@ implement Phaser {
 
         let parties = ((old_state & PARTIES_MASK) - 1) as Int;
         let arrived = ((old_state & ARRIVED_MASK) >> ARRIVED_SHIFT) as Int + 1;
-        let phase = (old_state >> PHASE_SHIFT) as Int;
+        let phase = ((old_state >> PHASE_SHIFT) & PHASE_MASK_SHIFTED) as Int;
 
         if arrived == parties + 1 {  // +1 because we decremented parties
-            // Last one - advance phase
-            let new_state = ((phase + 1) << PHASE_SHIFT) | parties;
-            self.state.store(new_state, MemoryOrdering.SeqCst);
+            // Last one — advance phase via CAS preserving any
+            // concurrent register/arrive_and_await + the
+            // TERMINATED_BIT.  Loop on observed parties because
+            // a concurrent register() under the mutex is impossible
+            // (we hold it), but arrive_and_await is mutex-free and
+            // can race the arrived counter forward.
+            loop {
+                let cur = self.state.load(MemoryOrdering.SeqCst);
+                let cur_parties = (cur & PARTIES_MASK) as Int;
+                let cur_phase = ((cur >> PHASE_SHIFT) & PHASE_MASK_SHIFTED) as Int;
+                let cur_terminated = cur & TERMINATED_BIT;
+                if cur_phase != phase {
+                    break;  // someone else already advanced
+                }
+                let next_phase = ((phase + 1) & PHASE_MASK_SHIFTED) << PHASE_SHIFT;
+                let new_state = next_phase | cur_parties | cur_terminated;
+                if self.state.compare_exchange(cur, new_state, MemoryOrdering.SeqCst, MemoryOrdering.SeqCst).is_ok() {
+                    break;
+                }
+            }
             self.condvar.notify_all();
         }
 
@@ -348,7 +408,7 @@ implement Phaser {
 
     /// Get the current phase number.
     public fn get_phase(&self) -> Int {
-        (self.state.load(MemoryOrdering.SeqCst) >> PHASE_SHIFT) as Int
+        ((self.state.load(MemoryOrdering.SeqCst) >> PHASE_SHIFT) & PHASE_MASK_SHIFTED) as Int
     }
 
     /// Get the number of registered parties.
