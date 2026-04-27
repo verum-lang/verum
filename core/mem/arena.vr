@@ -94,7 +94,7 @@
 module arena;
 
 mount super.header.{AllocationHeader, HEADER_SIZE, FLAG_ARENA};
-mount super.raw_ops.{memset, memzero, load_i64, store_i64};
+mount super.raw_ops.{memcpy, memset, memzero, load_i64, store_i64};
 
 // Platform-level raw allocation intrinsics
 mount core.sys.raw.{__alloc_raw, __alloc_zeroed_raw, __dealloc_raw};
@@ -324,13 +324,24 @@ implement GenerationalArena {
                 if capped >= end {
                     let new_buf = __alloc_zeroed_raw(capped);
                     if new_buf != 0 {
-                        // Copy existing data to new buffer
-                        let mut i = 0;
-                        while i < self.used {
-                            let val = load_i64(self.buffer + i);
-                            store_i64(new_buf + i, val);
-                            i = i + 8;
-                        }
+                        // Copy existing data to new buffer.
+                        // Earlier revisions used a manual
+                        // 8-byte i64 load/store loop bounded by
+                        // `i < self.used`; this read up to 7
+                        // bytes past `used` when `used` was not
+                        // a multiple of 8 (always within
+                        // `capacity`, so memory-safe, but
+                        // wrote 7 bytes of stale tail data
+                        // into the new buffer past the
+                        // logical fill mark — defeating the
+                        // `__alloc_zeroed_raw` zero-init for
+                        // those bytes if any caller expected
+                        // post-grow tail to be clean).
+                        // `memcpy` honours `self.used` exactly
+                        // and is also lowered to LLVM's
+                        // memcpy intrinsic for optimal
+                        // bandwidth (rep movsb / NEON / SVE).
+                        memcpy(new_buf, self.buffer, self.used);
                         // Free old buffer
                         __dealloc_raw(self.buffer, self.capacity);
                         self.buffer = new_buf;
@@ -356,6 +367,19 @@ implement GenerationalArena {
     /// Allocate `size` bytes with explicit alignment.
     ///
     /// The alignment must be a power of 2 and at least ARENA_ALIGNMENT.
+    ///
+    /// **Asymmetry with `alloc`:** this path does NOT trigger
+    /// arena auto-growth on capacity exhaustion — it returns 0
+    /// immediately when the aligned-end exceeds capacity. The
+    /// reason is that re-allocating the buffer would change
+    /// the buffer's base address, which may invalidate the
+    /// alignment property the caller asked for (the new base
+    /// satisfies whatever the OS allocator returned, typically
+    /// 16-byte aligned, not necessarily caller's request).
+    /// Callers that need higher alignment AND auto-growth
+    /// should pre-size the arena via `with_capacity` so the
+    /// initial buffer is large enough to hold every aligned
+    /// allocation in the workload.
     public fn alloc_aligned(&mut self, size: Int, alignment: Int) -> Int {
         if self.buffer == 0 {
             return 0;
