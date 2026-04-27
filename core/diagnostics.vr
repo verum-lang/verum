@@ -83,6 +83,9 @@ public mount core.mem.cap_audit_ring.{
     commit as commit_cap_event,
     recent as recent_cap_events,
     count as cap_event_count,
+    enable as enable_cap_audit,
+    disable as disable_cap_audit,
+    is_enabled as cap_audit_is_enabled,
     CAP_AUDIT_RING_CAPACITY,
 };
 
