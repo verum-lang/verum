@@ -139,7 +139,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
         if self.root.is_none() {
             return None;
         }
-        let node = self.root.as_ref().unwrap();
+        let node = self.root.as_ref()
+            .expect("BTreeMap.get: root is_some by guard above");
         self.search_node(node, key)
     }
 
@@ -148,7 +149,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
         if self.root.is_none() {
             return None;
         }
-        let node = self.root.as_mut().unwrap();
+        let node = self.root.as_mut()
+            .expect("BTreeMap.get_mut: root is_some by guard above");
         self.search_node_mut(node, key)
     }
 
@@ -185,7 +187,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
         // Check if key exists — replace value directly via SetE (no &mut references)
         // Pass key by value (not &key) to avoid alloca/deref mismatch in VBC generics.
-        let root_ref = self.root.as_mut().unwrap();
+        let root_ref = self.root.as_mut()
+            .expect("BTreeMap.insert: root is_some after the empty-tree initial-insert branch above");
         match self.replace_value_in_node(root_ref, key, value) {
             Some(old_val) => {
                 return Some(old_val);
@@ -194,7 +197,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
         }
 
         // Insert into tree
-        let root = self.root.as_mut().unwrap();
+        let root = self.root.as_mut()
+            .expect("BTreeMap.insert: root is_some (still) after the replace-in-node branch above");
 
         // If root is full, split it
         if root.keys.len() == MAX_KEYS {
@@ -226,7 +230,11 @@ implement<K: Ord, V> BTreeMap<K, V> {
             return None;
         }
 
-        let res = self.remove_from_node(self.root.as_mut().unwrap(), key);
+        let res = self.remove_from_node(
+            self.root.as_mut()
+                .expect("BTreeMap.remove: root is_some by guard above"),
+            key,
+        );
 
         // If root became empty && has a child, make child the new root
         if let Some(ref mut root) = self.root {
