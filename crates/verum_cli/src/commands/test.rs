@@ -824,6 +824,39 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     }
 }
 
+/// T6.0.4 — locate the cog's crate root (src/lib.vr or src/main.vr)
+/// and parse its items so the test module can reference them
+/// without an explicit `mount` line. Walks up from the test file
+/// looking for a `verum.toml`; on hit, tries `src/lib.vr` then
+/// `src/main.vr`. Returns the parsed root's items on success;
+/// `None` if no cog manifest, no root file, or parse failure
+/// (we silently fall through — a parse error in the crate root
+/// will surface as the user runs `verum check` separately).
+fn find_and_parse_crate_root(test: &Test) -> Option<List<verum_ast::Item>> {
+    use std::path::Path;
+
+    fn walk_up_for_manifest(start: &Path) -> Option<std::path::PathBuf> {
+        let mut cur = start.parent()?;
+        loop {
+            if cur.join("verum.toml").is_file() || cur.join("Verum.toml").is_file() {
+                return Some(cur.to_path_buf());
+            }
+            cur = cur.parent()?;
+        }
+    }
+
+    let cog_root = walk_up_for_manifest(&test.file)?;
+    let candidates = [cog_root.join("src/lib.vr"), cog_root.join("src/main.vr")];
+    let root_path = candidates.iter().find(|p| p.is_file())?;
+
+    let source = std::fs::read_to_string(root_path).ok()?;
+    let file_id = FileId::new(1); // Distinct from test file's FileId(0).
+    let parser = VerumParser::new();
+    let lexer = Lexer::new(&source, file_id);
+    let module = parser.parse_module(lexer, file_id).ok()?;
+    Some(module.items)
+}
+
 fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
     use verum_vbc::interpreter::Interpreter;
@@ -843,7 +876,7 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     let file_id = FileId::new(0);
     let parser = VerumParser::new();
     let lexer = Lexer::new(&source, file_id);
-    let ast = match parser.parse_module(lexer, file_id) {
+    let mut ast = match parser.parse_module(lexer, file_id) {
         Ok(m) => m,
         Err(errs) => {
             let joined = errs.iter().map(|e| format!("{}", e)).collect::<Vec<_>>().join("\n");
@@ -853,6 +886,22 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
             };
         }
     };
+
+    // T6.0.4 — tests/ files implicitly mount the cog's crate root
+    // (src/lib.vr or src/main.vr). Cargo / npm conventionally make a
+    // package's tests/ directory have unrestricted access to the
+    // package's public API; Verum aligns: locate the cog manifest by
+    // walking up from the test file, parse the crate root, and
+    // append its items to the test module's item list. Mount-line
+    // boilerplate in test files becomes optional.
+    if let Some(crate_root_items) = find_and_parse_crate_root(test) {
+        // Prepend crate-root items so test items can reference them.
+        let mut merged = crate_root_items;
+        for item in ast.items.iter() {
+            merged.push((*item).clone());
+        }
+        ast.items = merged;
+    }
 
     let config = CodegenConfig::new("test");
     let mut codegen = VbcCodegen::with_config(config);

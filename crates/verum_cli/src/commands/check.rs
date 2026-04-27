@@ -88,18 +88,20 @@ pub fn execute(_workspace: bool, strict: bool, verbose: bool) -> Result<()> {
                 )));
             }
 
-            // Show warnings if any
+            // Show warnings if any (T6.0.1 — diagnostics surface
+            // unconditionally so users see *what* the warnings are
+            // without re-running with `-v`. The verbose flag now
+            // controls *additional* per-warning trace, not the
+            // baseline diagnostic body).
             if warning_count > 0 {
+                session.display_diagnostics().map_err(|e| {
+                    CliError::Custom(format!("Failed to display diagnostics: {}", e))
+                })?;
                 ui::warn(&format!(
                     "{} warning{} emitted",
                     warning_count,
                     if warning_count == 1 { "" } else { "s" }
                 ));
-                if verbose {
-                    session.display_diagnostics().map_err(|e| {
-                        CliError::Custom(format!("Failed to display diagnostics: {}", e))
-                    })?;
-                }
             }
 
             // Cargo-style finish line
