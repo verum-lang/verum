@@ -172,7 +172,7 @@ fn decode_settings(buf: &[Byte], start: Int, end: Int) -> Result<List<(UInt64, U
 }
 
 fn take_bytes(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
-    let mut out: List<Byte> = [];
+    let mut out: List<Byte> = List.with_capacity(end - start);
     let mut i: Int = start;
     while i < end { out.push(buf[i]); i = i + 1; }
     out
@@ -195,14 +195,16 @@ public fn encode_frame(frame: &H3Frame, out: &mut List<Byte>) {
             append(out, encoded);
         },
         H3Frame.CancelPushFrame(push_id) => {
-            let mut body: List<Byte> = [];
+            // varint-encoded id is at most 8 bytes.
+            let mut body: List<Byte> = List.with_capacity(8);
             let _ = quic_encode_into(&mut body, *push_id);
             let _ = quic_encode_into(out, FT_CANCEL_PUSH);
             let _ = quic_encode_into(out, body.len() as UInt64);
             append(out, &body);
         },
         H3Frame.SettingsFrame(entries) => {
-            let mut body: List<Byte> = [];
+            // 2 varints per entry × ≤ 8 bytes = up to 16 bytes/entry.
+            let mut body: List<Byte> = List.with_capacity(entries.len() * 16);
             let mut i: Int = 0;
             while i < entries.len() {
                 let (id, val) = &entries[i];
@@ -215,7 +217,8 @@ public fn encode_frame(frame: &H3Frame, out: &mut List<Byte>) {
             append(out, &body);
         },
         H3Frame.PushPromiseFrame { push_id, encoded_headers } => {
-            let mut body: List<Byte> = [];
+            // varint-encoded id is at most 8 bytes.
+            let mut body: List<Byte> = List.with_capacity(8);
             let _ = quic_encode_into(&mut body, *push_id);
             append(&mut body, encoded_headers);
             let _ = quic_encode_into(out, FT_PUSH_PROMISE);
@@ -223,14 +226,16 @@ public fn encode_frame(frame: &H3Frame, out: &mut List<Byte>) {
             append(out, &body);
         },
         H3Frame.GoawayFrame(id) => {
-            let mut body: List<Byte> = [];
+            // varint-encoded id is at most 8 bytes.
+            let mut body: List<Byte> = List.with_capacity(8);
             let _ = quic_encode_into(&mut body, *id);
             let _ = quic_encode_into(out, FT_GOAWAY);
             let _ = quic_encode_into(out, body.len() as UInt64);
             append(out, &body);
         },
         H3Frame.MaxPushIdFrame(id) => {
-            let mut body: List<Byte> = [];
+            // varint-encoded id is at most 8 bytes.
+            let mut body: List<Byte> = List.with_capacity(8);
             let _ = quic_encode_into(&mut body, *id);
             let _ = quic_encode_into(out, FT_MAX_PUSH_ID);
             let _ = quic_encode_into(out, body.len() as UInt64);
