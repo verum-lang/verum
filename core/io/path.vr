@@ -784,14 +784,24 @@ implement Iterator for Components {
             }
         }
 
-        // Skip any separators
+        // Skip any separators.
+        //
+        // SOUNDNESS: previous revision had `if let Some(c) = char_at()
+        // { ... }` with no else branch.  If `char_at` ever returned
+        // None mid-string (e.g. on an invalid UTF-8 boundary), the
+        // loop would never advance `self.pos` and would spin forever.
+        // The fix treats None as end-of-string and breaks out — same
+        // semantics as the documented `pos >= path.len()` exit.
         while self.pos < self.path.len() {
-            if let Some(c) = self.path.char_at(self.pos) {
-                if is_separator(c) {
-                    self.pos = self.pos + 1;
-                } else {
-                    break;
+            match self.path.char_at(self.pos) {
+                Some(c) => {
+                    if is_separator(c) {
+                        self.pos = self.pos + 1;
+                    } else {
+                        break;
+                    }
                 }
+                None => break,
             }
         }
 
@@ -799,14 +809,18 @@ implement Iterator for Components {
             return None;
         }
 
-        // Find the end of this component
+        // Find the end of this component.  Same defensive handling
+        // for `char_at == None` as the separator-skip loop above.
         let start = self.pos;
         while self.pos < self.path.len() {
-            if let Some(c) = self.path.char_at(self.pos) {
-                if is_separator(c) {
-                    break;
+            match self.path.char_at(self.pos) {
+                Some(c) => {
+                    if is_separator(c) {
+                        break;
+                    }
+                    self.pos = self.pos + 1;
                 }
-                self.pos = self.pos + 1;
+                None => break,
             }
         }
 
