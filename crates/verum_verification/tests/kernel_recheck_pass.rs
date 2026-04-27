@@ -611,7 +611,7 @@ fn static_analysis_pipeline_kernel_recheck_result_visible() {
 }
 
 // =============================================================================
-// V8 (#211, B12) — VVA @require_extension governance gating
+// VVA @require_extension governance gating
 // =============================================================================
 
 use verum_verification::extension_policy::{EnabledExtensions, ExtensionPolicy};
@@ -738,7 +738,7 @@ fn b12_policy_accessor_returns_configured_policy() {
 }
 
 // =============================================================================
-// V8 (#208, B7) — pipeline halt-policy modes
+// pipeline halt-policy modes
 // =============================================================================
 
 use verum_verification::{PassClassification, PipelineMode};
@@ -860,7 +860,7 @@ fn b7_kernel_recheck_remains_soundness_critical() {
 }
 
 // =============================================================================
-// V8 (#218) — pipeline-level kernel-policy threading
+// pipeline-level kernel-policy threading
 // =============================================================================
 
 #[test]
@@ -881,7 +881,7 @@ fn task_218_static_pipeline_with_opt_in_policy_skips_modal_overshoot() {
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
     // OptInOnly + no annotation → no rejection → all 5 passes run.
-    assert_eq!(results.len(), 5, "all passes run when VVA-7 inactive");
+    assert_eq!(results.len(), 5, "all passes run when Modal-depth inactive");
     let kernel = results.get(1).expect("KernelRecheck row");
     assert!(kernel.success, "kernel recheck succeeds (skipped) under OptInOnly");
 }

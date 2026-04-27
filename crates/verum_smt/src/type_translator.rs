@@ -34,7 +34,7 @@
 //!
 //! ### Inductive Types
 //! Encoded as Z3 algebraic datatypes using `DatatypeBuilder`:
-//! ```rust
+//! ```text
 //! // inductive Nat { zero, succ(Nat) }
 //! DatatypeBuilder::new("Nat")
 //!     .variant("zero", vec![])

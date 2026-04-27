@@ -1,6 +1,6 @@
 //! Framework-compatibility matrix — V0.
 //!
-//! VVA §4.5 metatheory table delegates "axiom bundle's mutual
+//! metatheory table delegates "axiom bundle's mutual
 //! consistency" to "the bundle's citation" — an honest soundness
 //! escape hatch. A user who imports two contradictory framework
 //! packages (e.g., `core.math.frameworks.classical_lem` +

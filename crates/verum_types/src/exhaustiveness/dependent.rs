@@ -644,3 +644,121 @@ mod tests {
         assert!(!checker.are_indices_incompatible(&zero, &zero));
     }
 }
+
+// =============================================================================
+// HOU strategy.
+// =============================================================================
+
+/// higher-order unification strategy
+/// for dependent pattern-match coverage checking.
+///
+/// Q#11 picks **`MillerPatternFragment`** as the
+/// production default. Rationale:
+///
+/// * **Decidable** — Miller's pattern fragment is decidable by
+///   first-order unification on the linear-pattern subset.
+///   Termination is guaranteed; the checker never diverges.
+/// * **Sufficient in practice** — Coq, Lean, and Agda all use
+///   Miller-pattern style for their dependent-pattern coverage.
+///   Real-world index-dependent patterns (length-indexed lists,
+///   dimension-indexed vectors, depth-indexed trees) fall in
+///   the pattern fragment.
+/// * **Aligned with VVA philosophy** — `Zero-Cost Abstractions`
+///   and `No Magic`: an undecidable HOU would surprise users
+///   with non-termination on innocent-looking patterns.
+/// * **Forward-compat path** — `RestrictedHigherOrderMatching`
+///   reserved for future extensions that need patterns slightly
+///   outside Miller's fragment (linearity-violating but
+///   structurally-decidable). `FullHigherOrderUnification` is
+///   exposed for explicit opt-in only — turning it on means the
+///   checker may diverge on adversarial patterns and the kernel
+///   refuses to admit such programs without `@verify(thorough)`
+///   or higher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HouStrategy {
+    /// Decidable: Miller's pattern fragment. Production default.
+    /// First-order unification on the linear-pattern subset.
+    MillerPatternFragment,
+    /// Decidable but more permissive: structurally-decidable
+    /// matching beyond strict Miller patterns. Reserved for
+    /// future extensions; not yet used by the V2 K-Elim per-case
+    /// typing pass.
+    RestrictedHigherOrderMatching,
+    /// **Undecidable**: full HOU (Huet's algorithm). Opt-in only;
+    /// the kernel refuses to admit programs requiring this
+    /// strategy without `@verify(thorough)` or higher.
+    FullHigherOrderUnification,
+}
+
+impl HouStrategy {
+    /// Production default Q#11.
+    pub const DEFAULT: HouStrategy = HouStrategy::MillerPatternFragment;
+
+    /// `true` when this strategy is guaranteed to terminate. The
+    /// V2 K-Elim per-case typing pass refuses to admit user
+    /// programs whose dependent-pattern coverage requires a
+    /// non-terminating strategy without an explicit
+    /// `@verify(thorough)` or stronger annotation.
+    pub fn is_decidable(&self) -> bool {
+        match self {
+            Self::MillerPatternFragment | Self::RestrictedHigherOrderMatching => true,
+            Self::FullHigherOrderUnification => false,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MillerPatternFragment => "miller-pattern",
+            Self::RestrictedHigherOrderMatching => "restricted-higher-order-matching",
+            Self::FullHigherOrderUnification => "full-hou",
+        }
+    }
+}
+
+impl Default for HouStrategy {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+impl std::fmt::Display for HouStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod hou_strategy_tests {
+    use super::HouStrategy;
+
+    #[test]
+    fn default_is_miller_pattern_fragment() {
+        assert_eq!(HouStrategy::default(), HouStrategy::MillerPatternFragment);
+        assert_eq!(HouStrategy::DEFAULT, HouStrategy::MillerPatternFragment);
+    }
+
+    #[test]
+    fn miller_pattern_is_decidable() {
+        assert!(HouStrategy::MillerPatternFragment.is_decidable());
+    }
+
+    #[test]
+    fn restricted_higher_order_matching_is_decidable() {
+        assert!(HouStrategy::RestrictedHigherOrderMatching.is_decidable());
+    }
+
+    #[test]
+    fn full_hou_is_undecidable() {
+        assert!(!HouStrategy::FullHigherOrderUnification.is_decidable());
+    }
+
+    #[test]
+    fn display_round_trips_canonical_names() {
+        assert_eq!(format!("{}", HouStrategy::MillerPatternFragment), "miller-pattern");
+        assert_eq!(
+            format!("{}", HouStrategy::RestrictedHigherOrderMatching),
+            "restricted-higher-order-matching"
+        );
+        assert_eq!(format!("{}", HouStrategy::FullHigherOrderUnification), "full-hou");
+    }
+}

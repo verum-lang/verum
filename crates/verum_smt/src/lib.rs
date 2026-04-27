@@ -114,6 +114,15 @@ pub mod domains; // Phase D.3: sheaf + epistemic domain encodings
 pub mod refinement_reflection; // Liquid-style: user fns as SMT axioms
 pub mod expr_to_smtlib; // Expr → SMT-LIB2 translator for reflection
 pub mod proof_carrying_code; // PCC: serializable proof bundles attached to VBC
+// Cross-target proof-replay framework (SmtCertificate →
+// Coq/Lean/Agda/Dedukti/Metamath tactic chains). Trait +
+// registry + AdmittedReplay fallback; per-target lowering
+// is shipped incrementally.
+pub mod proof_replay;
+// Persistent CertificateStore — bridges SMT-verification-emitted
+// SmtCertificates to proof-replay consumption in `verum export`.
+// Trait + FileSystemCertificateStore + InMemoryCertificateStore.
+pub mod cert_store;
 pub mod error_conversions; // Conversions to verum_error::VerumError
 pub mod solver;
 pub mod subsumption;

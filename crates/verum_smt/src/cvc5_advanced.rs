@@ -222,7 +222,9 @@ pub fn synthesize(problem: &SyGuSProblem) -> Cvc5AdvancedResult<SyGuSResult> {
 /// Given axioms `Γ` and a conjecture `ψ` that is NOT provable from `Γ` alone,
 /// find the weakest formula `A` (over a permitted vocabulary) such that:
 ///
-///     Γ ∪ {A} ⊨ ψ
+/// ```text
+/// Γ ∪ {A} ⊨ ψ
+/// ```
 ///
 /// This is the dual of unsat-core extraction: instead of finding which
 /// assertions are responsible for UNSAT, we find what additional assumption

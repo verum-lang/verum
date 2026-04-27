@@ -81,6 +81,7 @@ fn make_variant_body(variants: Vec<&str>) -> TypeDeclBody {
             where_clause: verum_common::Maybe::None,
             attributes: vec![].into(),
             path_endpoints: None,
+            path_dim: 1,
             span: Span::dummy(),
         })
         .collect();
@@ -306,6 +307,7 @@ fn test_variant_with_forward_reference_payload() {
                 where_clause: verum_common::Maybe::None,
                 attributes: vec![].into(),
                 path_endpoints: None,
+                path_dim: 1,
                 span: Span::dummy(),
             },
             Variant {
@@ -315,6 +317,7 @@ fn test_variant_with_forward_reference_payload() {
                 where_clause: verum_common::Maybe::None,
                 attributes: vec![].into(),
                 path_endpoints: None,
+                path_dim: 1,
                 span: Span::dummy(),
             },
         ].into()),

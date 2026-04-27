@@ -369,7 +369,7 @@ pub struct TypeChecker {
     /// success so a Berardi-shaped declaration tucked inside an
     /// imported module still aborts the build.
     pub(crate) deferred_soundness_errors: Vec<TypeError>,
-    /// VVA #146 / MOD-MED-2 — provenance side-table for glob-imported
+    /// MOD-MED-2 — provenance side-table for glob-imported
     /// names. Maps each name registered by a glob mount to its
     /// `ImportProvenance { origin, module_path }`. Consulted at every
     /// glob-registration site to decide whether the incoming glob
@@ -378,7 +378,7 @@ pub struct TypeChecker {
     /// Explicit imports bypass this map entirely.
     pub(crate) glob_import_provenance:
         std::collections::HashMap<verum_common::Text, crate::import_origin::ImportProvenance>,
-    /// VVA #146 / MOD-MED-2 — name of the user's current cog used by
+    /// MOD-MED-2 — name of the user's current cog used by
     /// `ImportOrigin::classify` to distinguish project paths from
     /// stdlib/external. Empty string means classification falls back
     /// to "External" for non-stdlib paths.
@@ -7559,7 +7559,7 @@ impl TypeChecker {
         self.current_module_path = path.into();
     }
 
-    /// VVA #146 / MOD-MED-2 — set the user's cog name so
+    /// MOD-MED-2 — set the user's cog name so
     /// `ImportOrigin::classify` can distinguish project-owned modules
     /// from stdlib/external during glob shadow arbitration. Should be
     /// called once at the start of `phase_type_check` from the manifest.
@@ -7567,7 +7567,7 @@ impl TypeChecker {
         self.current_cog_name = name.into();
     }
 
-    /// VVA #146 / MOD-MED-2 — central glob-shadow arbiter. Decides
+    /// MOD-MED-2 — central glob-shadow arbiter. Decides
     /// whether the incoming glob (provenance `incoming`) is allowed
     /// to register / overwrite the entry currently held under `name`
     /// in the env. Returns `true` to allow registration, `false` to
@@ -22250,7 +22250,7 @@ impl TypeChecker {
                 use Option;
 
                 let base_ty = self.ast_to_type(base)?;
-                // Post VVA §5 collapse, `TypeKind::Refined` carries all three
+                // Post collapse, `TypeKind::Refined` carries all three
                 // surface forms. The sigma form reaches us with a
                 // `predicate.binding = Some(name)`; preserve that distinction
                 // by emitting a `RefinementBinding::Sigma` when the binding
@@ -29228,7 +29228,7 @@ impl TypeChecker {
             return Ok(());
         }
 
-        // VVA #146 / MOD-MED-2 — glob origin discipline. For
+        // MOD-MED-2 — glob origin discipline. For
         // glob/internal imports (`import_span.is_none()`), classify
         // the source module against the user's cog name and consult
         // `glob_shadow_arbiter` to decide whether the incoming entry
@@ -29253,7 +29253,7 @@ impl TypeChecker {
             }
         }
 
-        // VVA #144 cycle guard: nested explicit imports (`mount A.{Item}`)
+        // Cycle guard: nested explicit imports (`mount A.{Item}`)
         // can re-enter through impl-block elaboration, type-resolution
         // chains, and re-export walks.
         //
@@ -35882,7 +35882,7 @@ impl TypeChecker {
         // or when future extensions add `linear`/`affine` keywords.
         // In the common case (all params Omega), the check is a
         // no-op and exits immediately.
-        // V8 (#235, A.Z.5 §7.6) — Quantitative Type Theory (QTT)
+        // Quantitative Type Theory (QTT)
         // V2 enforcement. Walks the function's parameters + meta-
         // generics, extracts each binding's declared `Quantity` from
         // its `@quantity(...)` attribute (V1 surface from Task C5),
@@ -35894,7 +35894,7 @@ impl TypeChecker {
         //     (erased at runtime by definition).
         //   • Regular parameters → read `@quantity(...)` attribute
         //     via `QuantityAttr::from_attribute`. Default is
-        //     `Quantity::Omega` (unrestricted) per VVA §7.6 — every
+        //     `Quantity::Omega` (unrestricted) — every
         //     existing function compiles unchanged.
         //
         // Body coverage: walks BOTH block.stmts AND block.expr so
@@ -47417,7 +47417,7 @@ impl TypeChecker {
                     variant_map.insert(variant_name, payload_type);
                 }
 
-                // VVA #150 / C2-WIRE V1+#154 unified call site —
+                // C2-WIRE V1+#154 unified call site —
                 // strict-positivity check on the variant body via
                 // the canonical `check_variant_body_positivity`
                 // helper. Mirrors the kernel's CoreTerm-level
@@ -47579,7 +47579,7 @@ impl TypeChecker {
                     inductive_constructors.push(constructor);
                 }
 
-                // VVA #150 / C2-WIRE V1 + #154 unified — second
+                // C2-WIRE V1 + #154 unified — second
                 // strict-positivity gate, this time on the
                 // well-typed inductive_constructors (with full
                 // type_params and return_type bookkeeping).
@@ -47846,7 +47846,7 @@ impl TypeChecker {
                     record_map.insert(field_name, field_type);
                 }
 
-                // VVA #152 / C2-WIRE V3 + #154 unified call site —
+                // C2-WIRE V3 + #154 unified call site —
                 // strict-positivity on record-shaped types via the
                 // canonical helper. The placeholder TypeVar is
                 // passed through so post-elaboration `Type::Var`
@@ -48486,7 +48486,7 @@ impl TypeChecker {
             }
             TypeDeclBody::SigmaTuple(types) => {
                 // Dependent pair / sigma type (e.g., `type Interval is lo: Int, hi: Int where hi >= lo;`)
-                // Post VVA §5, each sigma-binding element parses as
+                // The each sigma-binding element parses as
                 // `TypeKind::Refined { base, predicate }` with
                 // `predicate.binding = Some(field_name)`.
                 let element_types: List<Type> = types
@@ -49111,7 +49111,7 @@ impl TypeChecker {
                     }
                 }
 
-                // VVA #151 / C2-WIRE V2 + #154 unified call site —
+                // C2-WIRE V2 + #154 unified call site —
                 // strict-positivity on the resolved variant body for
                 // the `verum build` two-pass type-resolution loop
                 // (Pass 1b — see phase_type_check). Routes through
@@ -49352,7 +49352,7 @@ impl TypeChecker {
                     record_map.insert(field_name, field_type);
                 }
 
-                // VVA #152 / C2-WIRE V3 + #154 unified call site —
+                // C2-WIRE V3 + #154 unified call site —
                 // strict-positivity for record-form types in the
                 // `verum build` path. Routes through the same
                 // canonical helper as the
@@ -49917,7 +49917,7 @@ impl TypeChecker {
                     .define_type(inner_key, Type::Tuple(element_types));
 
                 // Register named fields as struct fields for field access.
-                // Post VVA §5, sigma-binding elements parse as
+                // The sigma-binding elements parse as
                 // `TypeKind::Refined` with `predicate.binding = Some(field)`.
                 let mut fields = indexmap::IndexMap::new();
                 for sigma_ty in types {
@@ -55604,7 +55604,7 @@ impl crate::kind_inference::KindInference for TypeChecker {
 
 // ==================== QTT V2 helpers (#235, A.Z.5 §7.6) ====================
 
-/// V8 (#235) — extract the declared QTT [`crate::ty::Quantity`]
+/// extract the declared QTT [`crate::ty::Quantity`]
 /// from a parameter's attribute list.
 ///
 /// Reads the first `@quantity(...)` attribute via
@@ -55612,7 +55612,7 @@ impl crate::kind_inference::KindInference for TypeChecker {
 /// AST-side enum (`Zero / One / Many`) to the verum_types-side
 /// [`crate::ty::Quantity`] (`Zero / One / Omega / AtMost / Graded`).
 /// Returns `Quantity::Omega` (unrestricted) when no `@quantity`
-/// attribute is present — matches VVA §7.6 default.
+/// attribute is present — matches default.
 fn extract_quantity_from_attrs(
     attrs: &verum_common::List<verum_ast::attr::Attribute>,
 ) -> crate::ty::Quantity {
@@ -55630,7 +55630,7 @@ fn extract_quantity_from_attrs(
     crate::ty::Quantity::Omega
 }
 
-/// V8 (#235) — walk a single statement node, accumulating QTT
+/// walk a single statement node, accumulating QTT
 /// usage for tracked bindings into `usage`. Per QTT calculus,
 /// statements compose sequentially — each contributes
 /// `merge_sequential` to the running tally.
@@ -55991,7 +55991,7 @@ fn resolve_primitive_method(recv_ty: &Type, method: &str, arg_count: usize) -> O
 
 #[cfg(test)]
 mod qtt_v2_enforcement_tests {
-    //! V8 (#235) — QTT V2 enforcement pass tests. Validates the
+    //! QTT V2 enforcement pass tests. Validates the
     //! integration: `@quantity(0|1|omega)` attribute on a parameter
     //! produces a `Quantity` declaration that drives `qtt_walker`-
     //! based usage counting + `qtt_usage::check_usage` validation.

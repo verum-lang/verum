@@ -5972,7 +5972,7 @@ impl VbcCodegen {
         } else {
             method.name.to_string()
         };
-        // VVA #153 — receiver-narrowing safety net. The giant match
+        // Receiver-narrowing safety net. The giant match
         // above tries to extract the receiver type from a closed list
         // of expression shapes (Path / Call / MethodCall / Field /
         // Literal / Unary / Paren). When none match we fall through

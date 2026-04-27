@@ -1,4 +1,4 @@
-//! Kernel-rule re-checking verification pass (#187).
+//! Kernel-rule re-checking verification pass .
 //!
 //! Invokes the trusted-base K-rules from `verum_kernel` on every
 //! function in the module. Currently runs `K-Refine-omega` over
@@ -9,8 +9,8 @@
 //!
 //! # Why this is its own pass
 //!
-//! Kernel rules are the trusted base of the verification ladder
-//! (VVA §§9.2, 12.4). Routing them through a dedicated pass gives
+//! Kernel rules are the trusted base of the verification ladder.
+//! Routing them through a dedicated pass gives
 //! three structural advantages:
 //!
 //!   1. *Defense-in-depth* — `SmtVerificationPass::verify_function`
@@ -44,7 +44,7 @@ use super::{VerificationError, VerificationPass, VerificationResult};
 pub struct KernelRecheckPass {
     /// Per-function rejection counts (recorded for diagnostics).
     rejections: List<Text>,
-    /// V8 (#211, B12) — VVA governance policy. Default is
+    /// VVA governance policy. Default is
     /// [`ExtensionPolicy::AllRulesActive`], matching the pre-V8
     /// always-on behaviour. The opt-in / opt-out tiers are
     /// configurable via [`Self::with_policy`].
@@ -60,9 +60,9 @@ impl KernelRecheckPass {
         }
     }
 
-    /// V8 (#211, B12) — configure the VVA governance policy
+    /// configure the VVA governance policy
     /// applied during this pass. The pass currently only gates
-    /// VVA-7 (`vfe_7` = K-Refine-omega). When the policy reports
+    /// Modal-depth (`vfe_7` = K-Refine-omega). When the policy reports
     /// `vfe_7` as inactive for the surrounding scope, this pass
     /// is a no-op for that scope (returns success without
     /// running the kernel-recheck walker). Pre-V8 always ran;
@@ -72,7 +72,7 @@ impl KernelRecheckPass {
         self
     }
 
-    /// V8 (#211, B12) — read-only accessor for the configured
+    /// read-only accessor for the configured
     /// VVA governance policy.
     pub fn policy(&self) -> crate::extension_policy::ExtensionPolicy {
         self.policy
@@ -86,7 +86,7 @@ impl KernelRecheckPass {
 
     /// Run the K-rules on a single function and append its
     /// per-call cost record to `costs`. Used by both the
-    /// top-level Function arm and the V5 (#192) impl-method
+    /// top-level Function arm and the  impl-method
     /// recursion.
     fn recheck_one_function(
         &mut self,
@@ -99,7 +99,7 @@ impl KernelRecheckPass {
         self.record_outcomes(&func.name.name, outcomes, level, func_start, costs);
     }
 
-    /// V6 (#200) — dispatch K-rule recheck for a single ItemKind.
+    /// dispatch K-rule recheck for a single ItemKind.
     /// Walks Function (V0/V4), Impl-block methods (V5), Theorem /
     /// Lemma / Corollary / Axiom signatures (V6), and Module
     /// nested items (V6). Other ItemKind variants are no-ops —
@@ -199,9 +199,9 @@ impl VerificationPass for KernelRecheckPass {
         let mut costs: List<VerificationCost> = List::new();
         self.rejections = List::new();
 
-        // V8 (#211, B12) — read the module's `@require_extension`
+        // read the module's `@require_extension`
         // / `@disable_extension` set, then ask the configured
-        // policy whether VVA-7 (K-Refine-omega) is active. When
+        // policy whether Modal-depth (K-Refine-omega) is active. When
         // inactive, we skip the recheck walker entirely — no
         // outcomes accumulated, no rejection list populated.
         // The default policy (`AllRulesActive`) always returns

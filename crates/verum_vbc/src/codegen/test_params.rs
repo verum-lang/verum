@@ -988,7 +988,7 @@ fn test_compile_stdlib_mem_epoch() {
 /// the `cap_audit` writer helpers (record_revoke / record_attenuate /
 /// record_ref_incr / record_ref_decr / record_gen_bump) so every
 /// successful CBGR state transition can emit a CapEvent through the
-/// runtime-gated audit ring (#202).
+/// runtime-gated audit ring .
 #[test]
 fn test_compile_stdlib_mem_header() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/mem/header.vr");

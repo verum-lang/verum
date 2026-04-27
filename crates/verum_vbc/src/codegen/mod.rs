@@ -7933,7 +7933,7 @@ impl VbcCodegen {
             let Some((param_name, _)) = self.extract_param_name_and_mutable(param) else { continue };
 
             // Extract (predicate_expr, binding_name) from the canonical
-            // `Refined` node (post VVA §5 — the sigma surface form parses
+            // `Refined` node (post — the sigma surface form parses
             // to `Refined` with `predicate.binding = Some(name)`).
             let (pred_expr, binding_name) = match &ty.kind {
                 verum_ast::ty::TypeKind::Refined { predicate, .. } => {

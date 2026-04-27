@@ -1,4 +1,4 @@
-//! Import provenance — VVA #146 / MOD-MED-2.
+//! Import provenance — MOD-MED-2.
 //!
 //! Glob imports (`mount X.*`) without provenance discipline produced
 //! source-text-dependent name resolution: when two globs both

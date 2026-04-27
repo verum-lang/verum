@@ -1,38 +1,37 @@
-//! # VVA extension governance gating (B12, #211)
+//! # Extension governance gating
 //!
-//! Closes red-team gap B12. The typed attribute
-//! [`verum_ast::attr::typed::ExtensionRequirementAttr`] has shipped
-//! since the VVA V0 layer (commit f53ae27b), but no verification
-//! pass consumed it: kernel rules from VVA-N extensions ran
-//! unconditionally in every module. This violates the VVA §0.0
-//! rollout governance:
+//! The typed attribute
+//! [`verum_ast::attr::typed::ExtensionRequirementAttr`] is consumed
+//! here so kernel-rule extensions can be gated per scope rather
+//! than running unconditionally in every module.
 //!
-//!   * **Year 0–2**: VVA rules are *opt-in only* via
+//! Rollout governance:
+//!
+//!   * **Year 0–2**: extension rules are *opt-in only* via
 //!     `@require_extension(vfe_N)`.
 //!   * **Year 2–4**: rules become default-on; opt-out via
 //!     `@disable_extension(vfe_N)`.
 //!   * **Year 4+**: opt-out is removed; rule is a hard requirement.
 //!
-//! V8 ships the gating *infrastructure* — the policy enum, the
-//! attribute scanner, and the active-extension predicate — without
-//! flipping any production-pass default. Each VVA-aware pass
+//! This module ships the gating *infrastructure* — the policy enum,
+//! the attribute scanner, and the active-extension predicate — without
+//! flipping any production-pass default. Each extension-aware pass
 //! (currently `KernelRecheckPass`) gains a builder
 //! (`with_extension_policy`) that drives gating from a configured
 //! `ExtensionPolicy`. The default policy stays `AllRulesActive` so the
-//! existing test corpus (which doesn't carry
-//! `@require_extension`) continues to pass; flipping the default
-//! to `OptInOnly` is a follow-up bump on the rollout calendar
-//! (tracked alongside the next VVA minor bump per
-//! `verum_kernel::VVA_VERSION`).
+//! existing test corpus (which doesn't carry `@require_extension`)
+//! continues to pass; flipping the default to `OptInOnly` is a
+//! follow-up bump on the rollout calendar (tracked alongside
+//! `verum_kernel::VVA_VERSION` minor bumps).
 //!
 //! ## Module-level vs item-level scope
 //!
 //! `@require_extension` may appear at module level (`Module.attributes`)
-//! or on individual items. V8 reads from both; the module-level
-//! scope establishes the baseline, and an item-level annotation
-//! is an additive override (an item can require an extension the
-//! module doesn't, but cannot disable an extension the module
-//! requires — see [`EnabledExtensions::resolve_for_item`]).
+//! or on individual items. Both are read; the module-level scope
+//! establishes the baseline, and an item-level annotation is an
+//! additive override (an item can require an extension the module
+//! doesn't, but cannot disable an extension the module requires —
+//! see [`EnabledExtensions::resolve_for_item`]).
 
 use std::collections::HashSet;
 
@@ -42,26 +41,25 @@ use verum_ast::attr::Attribute;
 use verum_ast::attr::{ExtensionRequirementAttr, ExtensionToggleKind};
 use verum_common::{Maybe, Text};
 
-/// V8 (#211, B12) — VVA rollout policy. Drives whether a given
-/// extension is "active" for a given scope. `AllRulesActive` is
-/// the V8 default and matches the pre-V8 always-on behaviour so
-/// no existing tests regress.
+/// Extension rollout policy. Drives whether a given extension is
+/// "active" for a given scope. `AllRulesActive` is the current
+/// default and matches always-on behaviour so no existing tests
+/// regress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExtensionPolicy {
-    /// Year 0–2: VVA rules are off unless the scope explicitly
+    /// Year 0–2: extension rules are off unless the scope explicitly
     /// `@require_extension(vfe_N)`.
     OptInOnly,
-    /// Year 2–4: VVA rules are on unless the scope explicitly
+    /// Year 2–4: extension rules are on unless the scope explicitly
     /// `@disable_extension(vfe_N)`.
     OptOutOnly,
-    /// Year 4+: VVA rules are mandatory; `@disable_extension` is
-    /// rejected with a hygiene-style error (V8 doesn't yet emit
-    /// that error — wired alongside future Mandatory-tier flip).
+    /// Year 4+: extension rules are mandatory; `@disable_extension`
+    /// is rejected with a hygiene-style error (the error is wired
+    /// alongside the future Mandatory-tier flip).
     Mandatory,
-    /// V8 default — runs every VVA rule regardless of opt-in.
-    /// Equivalent to pre-V8 behaviour. Used while the rollout
-    /// calendar is uncertain and to keep the existing VCS suite
-    /// green.
+    /// Default — runs every extension rule regardless of opt-in.
+    /// Used while the rollout calendar is uncertain and to keep
+    /// the existing VCS suite green.
     AllRulesActive,
 }
 
