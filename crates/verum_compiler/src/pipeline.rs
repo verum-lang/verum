@@ -2700,7 +2700,7 @@ impl<'s> CompilationPipeline<'s> {
                     "  hint: pick exactly one of the file form (`<name>.vr`) \
                      or the directory form (`<name>/mod.vr`); having both makes \
                      declarations in the loser invisible at use sites and is \
-                     classified as `E_MODULE_PATH_COLLISION` per VVA §15.5"
+                     classified as `E_MODULE_PATH_COLLISION`"
                 );
                 continue;
             }
@@ -2780,7 +2780,7 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
 
-                    // VVA #155 — header validation at every
+                    // Header validation at every
                     // user-source parse_module site. The
                     // virtual_path is a PathBuf reflecting the
                     // logical source path; pass it through to the
@@ -3773,7 +3773,7 @@ impl<'s> CompilationPipeline<'s> {
                     "  hint: pick exactly one of the file form (`<name>.vr`) \
                      or the directory form (`<name>/mod.vr`); having both makes \
                      declarations in the loser invisible at use sites and is \
-                     classified as `E_MODULE_PATH_COLLISION` per VVA §15.5"
+                     classified as `E_MODULE_PATH_COLLISION`"
                 );
                 continue;
             }
@@ -3814,7 +3814,7 @@ impl<'s> CompilationPipeline<'s> {
                     let export_table = Self::extract_all_exports(&module, module_id, &module_path);
                     module_info.exports = export_table;
 
-                    // VVA #145 / MOD-MED-1 — validate `module foo;`
+                    // MOD-MED-1 — validate `module foo;`
                     // headers against the filesystem. Emits warnings
                     // for dangling forward-decls
                     // (E_MODULE_HEADER_FORWARD_DECL_NO_SOURCE) and
@@ -4168,7 +4168,7 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // VVA #155 — header validation at the parse_and_register
+        // Header validation at the parse_and_register
         // user-source path. Surfaces dangling forward-decls and
         // inline-vs-filesystem overlaps for files that don't go
         // through phase_parse (e.g. multi-source registration in
@@ -4628,7 +4628,7 @@ impl<'s> CompilationPipeline<'s> {
                         | "term"
                         | "net"
                         | "meta" | "cognitive"
-                        // VVA §11.2 Actic-dual stdlib (Phase 5 E1).
+                        // Actic-dual stdlib (Phase 5 E1).
                         | "action"
                     );
                     let (resolved_path, base_dir) = if is_stdlib_import {
@@ -4744,7 +4744,7 @@ impl<'s> CompilationPipeline<'s> {
                             let cfg_evaluator = self.session.cfg_evaluator();
                             imported_module.items = cfg_evaluator.filter_items(&imported_module.items);
 
-                            // VVA #155 — header validation at the
+                            // Header validation at the
                             // import-on-demand parse path. The
                             // imported module's filesystem path is
                             // `candidate`; pass it to the validator
@@ -5650,7 +5650,7 @@ impl<'s> CompilationPipeline<'s> {
             parse_time.as_millis()
         );
 
-        // VVA #145 / MOD-MED-1 — validate module headers against
+        // MOD-MED-1 — validate module headers against
         // the filesystem. Surfaces dangling forward declarations
         // (`module foo;` with no source file) and inline-vs-
         // filesystem overlaps (`module foo { … }` alongside an
@@ -8539,7 +8539,7 @@ impl<'s> CompilationPipeline<'s> {
             }
             TypeKind::Refined { base, predicate } => {
                 let base_text = self.type_to_text(base);
-                // Post VVA §5 the sigma surface form lives here too (binder
+                // Post the sigma surface form lives here too (binder
                 // carried by the predicate); render it distinctly when bound.
                 match &predicate.binding {
                     verum_common::Maybe::Some(binder) => {
@@ -11063,6 +11063,21 @@ impl<'s> CompilationPipeline<'s> {
             "core.mem.mod",          // ExecutionTier enum, error types
             "core.mem.capability",   // Capability flags, pure bit ops
             "core.mem.size_class",   // Size class bins (needs clz_u64, wired via ArithExtended)
+            // Tier 1.5: Capability-audit substrate (#202).  MUST come
+            // before `core.mem.header` because header.vr's writer
+            // entry points (try_revoke / attenuate_capabilities /
+            // increment_ref_count / decrement_ref_count /
+            // increment_generation) emit `record_*` calls into the
+            // audit ring on every successful CBGR state transition.
+            // Without these in the codegen session, header.vr's
+            // record_* references become undefined and the writer
+            // methods get bug-class lenient SKIP'd — disabling every
+            // CBGR primitive at runtime.  The runtime gate inside
+            // `cap_audit_ring.commit` keeps these calls O(1) when
+            // audit is off, so always-loading the modules has no
+            // perf cost beyond the 1-2 ns gate-check.
+            "core.mem.cap_audit_ring",
+            "core.mem.cap_audit",
             // Tier 2: Atomic operations
             "core.mem.header",       // AllocationHeader (atomic load/store/fetch_add u32/u16/u64)
             "core.mem.epoch",        // Global epoch manager (atomics + spin_hint)
@@ -11574,6 +11589,16 @@ impl<'s> CompilationPipeline<'s> {
             // See KNOWN_ISSUES.md "Shared<T> / CBGR-allocator Bootstrap".
             "core.mem.allocator",
             "core.mem.heap",
+            // Capability-audit substrate (#202).  MUST be retained
+            // alongside `core.mem.header` because every CBGR writer
+            // entry point (try_revoke / attenuate_capabilities /
+            // increment_ref_count / decrement_ref_count /
+            // increment_generation) emits a `record_*` call into the
+            // audit ring.  Without these in the retained set, the
+            // codegen skips the writer methods (bug-class) and CBGR
+            // primitives have no working bodies.
+            "core.mem.cap_audit_ring",
+            "core.mem.cap_audit",
             "core.mem.header",
             "core.mem.thin_ref",
             "core.mem.fat_ref",

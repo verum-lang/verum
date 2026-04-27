@@ -1,11 +1,11 @@
-//! Method-dispatch receiver-type-narrowing guardrail (#169 / VVA-153).
+//! Method-dispatch receiver-type-narrowing guardrail (#169 / method-dispatch narrowing).
 //!
 //! Multiple stdlib types declare a method with the same simple name —
 //! most notably `unwrap`, declared on Result, Maybe, Poll, and (historic)
 //! generic-T paths.  The codegen in
 //! `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`
 //! resolves the call by first building an `effective_method_name` from
-//! the receiver expression's shape; before VVA-153 the catch-all fell
+//! the receiver expression's shape; before method-dispatch narrowing the catch-all fell
 //! through to bare `unwrap` whenever the expression shape wasn't
 //! covered, and the dispatcher picked WHICHEVER candidate was
 //! registered first by name+arity.
@@ -16,7 +16,7 @@
 //! later as `field index N (offset M) exceeds object data size K` or
 //! `null pointer dereference` far from the cause.
 //!
-//! VVA-153 added a safety net: after the giant match, if the
+//! method-dispatch narrowing added a safety net: after the giant match, if the
 //! resulting `effective_method_name` is still bare (no `.`, no `$`),
 //! retry via `infer_expr_type_name(receiver)` — a generic best-effort
 //! type-inference helper — and prefix as `Type.method` when the
@@ -76,7 +76,7 @@ fn assert_dispatch_panic(scenario: &str, fixture: &std::path::Path) {
          a different type's variant table, and the body that should \
          have panicked silently returned a malformed value or panicked \
          with the wrong message.\n\n\
-         Check VVA-153 fix: the safety net after the giant \
+         Check method-dispatch narrowing fix: the safety net after the giant \
          expression-shape match that retries via \
          `infer_expr_type_name(receiver)` and prefixes as \
          `Type.method` when inference succeeds.\n\n\

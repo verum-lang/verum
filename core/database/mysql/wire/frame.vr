@@ -1,0 +1,288 @@
+// =============================================================================
+// core/database/mysql/wire/frame.vr — packet framing + LEI codec
+// =============================================================================
+// Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
+//
+// Pure encoders / decoders. Network I/O layered above.
+// =============================================================================
+
+module core.database.mysql.wire.frame;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type FrameError is
+      FeShort { wanted: Int, available: Int }
+    | FeBadLength { len: Int }
+    | FeInvalidUtf8;
+
+// -----------------------------------------------------------------------------
+// Packet
+// -----------------------------------------------------------------------------
+
+public type MysqlPacket is {
+    sequence: Int,        // 0..255 (rolls over per command)
+    payload: List<Byte>,
+};
+
+implement MysqlPacket {
+    public fn new(sequence: Int, payload: List<Byte>) -> MysqlPacket {
+        MysqlPacket { sequence: sequence, payload: payload }
+    }
+    public fn sequence(&self) -> Int { self.sequence }
+    public fn payload(&self) -> &List<Byte> { &self.payload }
+    public fn into_payload(self) -> List<Byte> { self.payload }
+}
+
+// -----------------------------------------------------------------------------
+// Encode / decode the 4-byte packet header.
+// -----------------------------------------------------------------------------
+
+/// Wrap `payload` in a MySQL packet — 3-byte LE length + 1-byte
+/// sequence + payload bytes. Caller maintains the sequence counter.
+public fn frame_packet(sequence: Int, payload: &[Byte]) -> List<Byte> {
+    let n = payload.len() as Int;
+    let mut out: List<Byte> = List.new();
+    out.push((n & 0xFF) as Byte);
+    out.push(((n >> 8) & 0xFF) as Byte);
+    out.push(((n >> 16) & 0xFF) as Byte);
+    out.push((sequence & 0xFF) as Byte);
+    let mut i = 0;
+    while i < payload.len() {
+        out.push(payload[i]);
+        i = i + 1;
+    }
+    out
+}
+
+public type ParseOutcome is {
+    packet: MysqlPacket,
+    bytes_consumed: Int,
+};
+
+/// Try to parse one complete packet from the front of `buf`.
+public fn try_parse_packet(buf: &[Byte]) -> Result<Maybe<ParseOutcome>, FrameError> {
+    if (buf.len() as Int) < 4 {
+        return Ok(None);
+    }
+    let len =
+          ((buf[0] as Int) & 0xFF)
+        | (((buf[1] as Int) & 0xFF) << 8)
+        | (((buf[2] as Int) & 0xFF) << 16);
+    if len < 0 {
+        return Err(FeBadLength { len: len });
+    }
+    let total = 4 + len;
+    if (buf.len() as Int) < total {
+        return Ok(None);
+    }
+    let seq = (buf[3] as Int) & 0xFF;
+    let mut payload: List<Byte> = List.new();
+    let mut i: Int = 4;
+    while i < total {
+        payload.push(buf[i]);
+        i = i + 1;
+    }
+    Ok(Some(ParseOutcome {
+        packet: MysqlPacket { sequence: seq, payload: payload },
+        bytes_consumed: total,
+    }))
+}
+
+// -----------------------------------------------------------------------------
+// Length-encoded integer (LEI)
+// -----------------------------------------------------------------------------
+
+public type LeiKind is
+      LkNull           // 0xFB — only valid in DataRow
+    | LkOneByte
+    | LkTwoBytes
+    | LkThreeBytes
+    | LkEightBytes;
+
+/// Encode a non-negative integer as a LEI.
+public fn encode_lei(buf: &mut List<Byte>, v: Int) {
+    if v < 0 {
+        // Negative LEI is undefined; clamp at 0 to avoid emitting
+        // a malformed LEI that the server would reject.
+        buf.push(0 as Byte);
+        return;
+    }
+    if v < 0xFB {
+        buf.push((v & 0xFF) as Byte);
+    } else if v < 0x10000 {
+        buf.push(0xFC as Byte);
+        buf.push((v & 0xFF) as Byte);
+        buf.push(((v >> 8) & 0xFF) as Byte);
+    } else if v < 0x1000000 {
+        buf.push(0xFD as Byte);
+        buf.push((v & 0xFF) as Byte);
+        buf.push(((v >> 8) & 0xFF) as Byte);
+        buf.push(((v >> 16) & 0xFF) as Byte);
+    } else {
+        buf.push(0xFE as Byte);
+        let mut k = 0;
+        while k < 8 {
+            buf.push(((v >> (k * 8)) & 0xFF) as Byte);
+            k = k + 1;
+        }
+    }
+}
+
+/// Decode a LEI starting at `offset`. On success returns
+/// `Ok((value, kind, bytes_consumed))`.
+public fn decode_lei(buf: &[Byte], offset: Int) -> Result<(Int, LeiKind, Int), FrameError> {
+    if offset >= buf.len() as Int {
+        return Err(FeShort { wanted: 1, available: 0 });
+    }
+    let first = (buf[offset] as Int) & 0xFF;
+    if first < 0xFB {
+        return Ok((first, LkOneByte, 1));
+    }
+    if first == 0xFB {
+        return Ok((-1, LkNull, 1));     // NULL marker — caller must handle
+    }
+    if first == 0xFC {
+        if (buf.len() as Int) < offset + 3 {
+            return Err(FeShort { wanted: 3, available: (buf.len() as Int) - offset });
+        }
+        let v = ((buf[offset + 1] as Int) & 0xFF) | (((buf[offset + 2] as Int) & 0xFF) << 8);
+        return Ok((v, LkTwoBytes, 3));
+    }
+    if first == 0xFD {
+        if (buf.len() as Int) < offset + 4 {
+            return Err(FeShort { wanted: 4, available: (buf.len() as Int) - offset });
+        }
+        let v =
+              ((buf[offset + 1] as Int) & 0xFF)
+            | (((buf[offset + 2] as Int) & 0xFF) << 8)
+            | (((buf[offset + 3] as Int) & 0xFF) << 16);
+        return Ok((v, LkThreeBytes, 4));
+    }
+    if first == 0xFE {
+        if (buf.len() as Int) < offset + 9 {
+            return Err(FeShort { wanted: 9, available: (buf.len() as Int) - offset });
+        }
+        let mut v: Int = 0;
+        let mut k: Int = 0;
+        while k < 8 {
+            v = v | (((buf[offset + 1 + k] as Int) & 0xFF) << (k * 8));
+            k = k + 1;
+        }
+        return Ok((v, LkEightBytes, 9));
+    }
+    Err(FeBadLength { len: first })
+}
+
+// -----------------------------------------------------------------------------
+// Fixed-width integer encoders / decoders (little-endian).
+// -----------------------------------------------------------------------------
+
+public fn put_u8(buf: &mut List<Byte>, v: Int) {
+    buf.push((v & 0xFF) as Byte);
+}
+
+public fn put_u16_le(buf: &mut List<Byte>, v: Int) {
+    buf.push((v & 0xFF) as Byte);
+    buf.push(((v >> 8) & 0xFF) as Byte);
+}
+
+public fn put_u32_le(buf: &mut List<Byte>, v: Int) {
+    let mut k = 0;
+    while k < 4 {
+        buf.push(((v >> (k * 8)) & 0xFF) as Byte);
+        k = k + 1;
+    }
+}
+
+public fn put_bytes(buf: &mut List<Byte>, src: &[Byte]) {
+    let mut i = 0;
+    while i < src.len() {
+        buf.push(src[i]);
+        i = i + 1;
+    }
+}
+
+public fn put_cstr(buf: &mut List<Byte>, s: &Text) {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() { buf.push(b[i]); i = i + 1; }
+    buf.push(0 as Byte);
+}
+
+public fn put_lenenc_string(buf: &mut List<Byte>, s: &[Byte]) {
+    encode_lei(buf, s.len() as Int);
+    put_bytes(buf, s);
+}
+
+public fn read_u8(buf: &[Byte], off: Int) -> Result<Int, FrameError> {
+    if off >= buf.len() as Int {
+        return Err(FeShort { wanted: 1, available: 0 });
+    }
+    Ok((buf[off] as Int) & 0xFF)
+}
+
+public fn read_u16_le(buf: &[Byte], off: Int) -> Result<Int, FrameError> {
+    if (buf.len() as Int) < off + 2 {
+        return Err(FeShort { wanted: 2, available: (buf.len() as Int) - off });
+    }
+    let v = ((buf[off] as Int) & 0xFF) | (((buf[off + 1] as Int) & 0xFF) << 8);
+    Ok(v)
+}
+
+public fn read_u32_le(buf: &[Byte], off: Int) -> Result<Int, FrameError> {
+    if (buf.len() as Int) < off + 4 {
+        return Err(FeShort { wanted: 4, available: (buf.len() as Int) - off });
+    }
+    let mut v: Int = 0;
+    let mut k = 0;
+    while k < 4 {
+        v = v | (((buf[off + k] as Int) & 0xFF) << (k * 8));
+        k = k + 1;
+    }
+    Ok(v)
+}
+
+public fn read_cstr(buf: &[Byte], off: Int) -> Result<(Text, Int), FrameError> {
+    let mut i = off;
+    let n = buf.len() as Int;
+    while i < n && (buf[i] as Int) != 0 { i = i + 1; }
+    if i >= n { return Err(FeShort { wanted: 1, available: 0 }); }
+    let mut bytes: List<Byte> = List.new();
+    let mut j = off;
+    while j < i { bytes.push(buf[j]); j = j + 1; }
+    let s = match Text.from_bytes(&bytes) {
+        Ok(t)  => t,
+        Err(_) => { return Err(FeInvalidUtf8); }
+    };
+    Ok((s, i + 1 - off))
+}
+
+public fn read_bytes(buf: &[Byte], off: Int, n: Int) -> Result<List<Byte>, FrameError> {
+    if (buf.len() as Int) < off + n {
+        return Err(FeShort { wanted: n, available: (buf.len() as Int) - off });
+    }
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < n {
+        out.push(buf[off + i]);
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+public fn read_lenenc_string(buf: &[Byte], off: Int) -> Result<(Maybe<List<Byte>>, Int), FrameError> {
+    let (len, kind, hdr) = decode_lei(buf, off)?;
+    match kind {
+        LkNull => Ok((None, hdr)),
+        _ => {
+            let body = read_bytes(buf, off + hdr, len)?;
+            Ok((Some(body), hdr + len))
+        }
+    }
+}

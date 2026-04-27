@@ -2147,7 +2147,9 @@ fn heuristic_suggestions(
 /// "the caller supplies a proof of `Q`". Inside the body we can treat
 /// `Q` as `true`. Before this elaboration, goals of shape
 ///
-///     theorem id_trivial<P: Prop>(p: P): P { proof by auto }
+/// ```text
+/// theorem id_trivial<P: Prop>(p: P): P { proof by auto }
+/// ```
 ///
 /// died in the SMT with "Goal is not boolean" because `P` was a bare
 /// Path with no context telling the solver that its value is fixed
