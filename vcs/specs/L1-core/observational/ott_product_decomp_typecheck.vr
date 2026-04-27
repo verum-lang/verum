@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: ott, observational-equality, type-directed-equality
+// @timeout: 10000
+// @expect: pass
+//
+// Pre-#245 ott_decide always returned OttStuck for products
+// because OttProduct / OttPair were declared but never matched.
+// This spec pins the V8 #245 contract: products decompose
+// component-wise.
+
+mount core.math.observational.{
+    OttType, OttValue, OttEqResult,
+    OttBool, OttNat, OttUnit, OttProduct,
+    OttBoolVal, OttNatVal, OttUnitVal, OttPair,
+    OttTrue, OttFalse, OttStuck,
+    ott_decide,
+};
+
+fn exercise_atom_decisions() {
+    // Bool — direct decision.
+    assert(matches!(
+        ott_decide(OttBool, OttBoolVal { value: true }, OttBoolVal { value: true }),
+        OttTrue
+    ));
+    assert(matches!(
+        ott_decide(OttBool, OttBoolVal { value: true }, OttBoolVal { value: false }),
+        OttFalse
+    ));
+    // Nat.
+    assert(matches!(
+        ott_decide(OttNat, OttNatVal { value: 42 }, OttNatVal { value: 42 }),
+        OttTrue
+    ));
+    assert(matches!(
+        ott_decide(OttNat, OttNatVal { value: 1 }, OttNatVal { value: 2 }),
+        OttFalse
+    ));
+}
+
+fn exercise_product_equal() {
+    // (true, 7) =_(Bool×Nat) (true, 7) → True.
+    let bool_nat = OttProduct {
+        left:  Heap.new(OttBool),
+        right: Heap.new(OttNat),
+    };
+    let lhs = OttPair {
+        first:  Heap.new(OttBoolVal { value: true }),
+        second: Heap.new(OttNatVal  { value: 7 }),
+    };
+    let rhs = OttPair {
+        first:  Heap.new(OttBoolVal { value: true }),
+        second: Heap.new(OttNatVal  { value: 7 }),
+    };
+    assert(matches!(ott_decide(bool_nat, lhs, rhs), OttTrue));
+}
+
+fn exercise_product_first_differs() {
+    // (true, 7) =_(Bool×Nat) (false, 7) → False (first differs).
+    let bool_nat = OttProduct {
+        left:  Heap.new(OttBool),
+        right: Heap.new(OttNat),
+    };
+    let lhs = OttPair {
+        first:  Heap.new(OttBoolVal { value: true }),
+        second: Heap.new(OttNatVal  { value: 7 }),
+    };
+    let rhs = OttPair {
+        first:  Heap.new(OttBoolVal { value: false }),
+        second: Heap.new(OttNatVal  { value: 7 }),
+    };
+    assert(matches!(ott_decide(bool_nat, lhs, rhs), OttFalse));
+}
+
+fn exercise_product_second_differs() {
+    // (true, 7) =_(Bool×Nat) (true, 8) → False (second differs).
+    let bool_nat = OttProduct {
+        left:  Heap.new(OttBool),
+        right: Heap.new(OttNat),
+    };
+    let lhs = OttPair {
+        first:  Heap.new(OttBoolVal { value: true }),
+        second: Heap.new(OttNatVal  { value: 7 }),
+    };
+    let rhs = OttPair {
+        first:  Heap.new(OttBoolVal { value: true }),
+        second: Heap.new(OttNatVal  { value: 8 }),
+    };
+    assert(matches!(ott_decide(bool_nat, lhs, rhs), OttFalse));
+}
+
+fn exercise_nested_product() {
+    // ((true, 1), unit) =_((Bool×Nat)×Unit) ((true, 1), unit) → True.
+    let inner = OttProduct {
+        left:  Heap.new(OttBool),
+        right: Heap.new(OttNat),
+    };
+    let outer = OttProduct {
+        left:  Heap.new(inner.clone()),
+        right: Heap.new(OttUnit),
+    };
+    let inner_pair = OttPair {
+        first:  Heap.new(OttBoolVal { value: true }),
+        second: Heap.new(OttNatVal  { value: 1 }),
+    };
+    let lhs = OttPair {
+        first:  Heap.new(inner_pair.clone()),
+        second: Heap.new(OttUnitVal),
+    };
+    let rhs = OttPair {
+        first:  Heap.new(inner_pair),
+        second: Heap.new(OttUnitVal),
+    };
+    assert(matches!(ott_decide(outer, lhs, rhs), OttTrue));
+}
+
+fn main() {
+    exercise_atom_decisions();
+    exercise_product_equal();
+    exercise_product_first_differs();
+    exercise_product_second_differs();
+    exercise_nested_product();
+}

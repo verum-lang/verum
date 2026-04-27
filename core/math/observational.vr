@@ -38,8 +38,18 @@ public type OttEqResult is
     | OttStuck;
 
 /// Type-directed equality on first-order values. Decomposes
-/// products; decides Bool/Nat/Unit directly; returns Stuck on
-/// opaque types with different names.
+/// products into component-wise equality (V8 #245); decides
+/// Bool/Nat/Unit directly; returns Stuck on opaque types with
+/// different names. Functions return Stuck — funext is
+/// undecidable for arbitrary functions; the type-checker uses
+/// observational equality on functions only via η-expansion at
+/// the elaborator layer.
+///
+/// Per VVA OTT §observational: equality at a product type is
+/// decidable iff equality at each component type is decidable.
+/// `OttStuck` propagates: if either component returns Stuck,
+/// the pair returns Stuck (we cannot decide the conjunction
+/// without deciding both clauses).
 public fn ott_decide(ty: OttType, lhs: OttValue, rhs: OttValue) -> OttEqResult {
     match (ty, lhs, rhs) {
         (OttType.OttBool, OttValue.OttBoolVal { value: a }, OttValue.OttBoolVal { value: b }) =>
@@ -50,6 +60,30 @@ public fn ott_decide(ty: OttType, lhs: OttValue, rhs: OttValue) -> OttEqResult {
             OttEqResult.OttTrue,
         (OttType.OttOpaque { name: _ }, OttValue.OttOpaqueVal { name: a }, OttValue.OttOpaqueVal { name: b }) =>
             if a == b { OttEqResult.OttTrue } else { OttEqResult.OttStuck },
+
+        // V8 (#245) — Product decomposition. (l1,l2) =_AxB (r1,r2)
+        // iff l1 =_A r1 AND l2 =_B r2. False propagates eagerly
+        // (one mismatch is enough to refute); Stuck propagates
+        // when either component is undecidable.
+        (
+            OttType.OttProduct { left: ty_a, right: ty_b },
+            OttValue.OttPair { first: la, second: lb },
+            OttValue.OttPair { first: ra, second: rb },
+        ) => {
+            let left_eq = ott_decide(*ty_a, *la, *ra);
+            match left_eq {
+                OttEqResult.OttFalse => OttEqResult.OttFalse,
+                _ => {
+                    let right_eq = ott_decide(*ty_b, *lb, *rb);
+                    match (left_eq, right_eq) {
+                        (OttEqResult.OttTrue, OttEqResult.OttTrue) => OttEqResult.OttTrue,
+                        (_, OttEqResult.OttFalse)                  => OttEqResult.OttFalse,
+                        _                                          => OttEqResult.OttStuck,
+                    }
+                }
+            }
+        },
+
         (_, _, _) => OttEqResult.OttStuck,
     }
 }
