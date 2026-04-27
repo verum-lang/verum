@@ -250,8 +250,22 @@ const MAX_PARSER_OPERATIONS: usize = 1_000_000;
 
 /// Maximum recursion depth for nested expressions, types, and patterns.
 /// Prevents stack overflow on deeply nested input like `(((((...)))))`
-/// or `List<List<List<...>>>`. 256 levels is more than any real program needs.
-const MAX_RECURSION_DEPTH: usize = 256;
+/// or `List<List<List<...>>>`.
+///
+/// Sized for rayon worker threads (macOS default stack = 512 KiB; Linux
+/// glibc default = 8 MiB but Rust threads often sized to 2 MiB). Each
+/// `parse_expr_bp` frame consumes ~2-3 KiB on aarch64 release builds
+/// once locals + ParseResult + saved registers are accounted for; 128
+/// frames × ~3 KiB ≈ 384 KiB, fitting inside 512 KiB with margin for
+/// the calling stack. Real program ASTs rarely exceed depth 30; 128 is
+/// more than any *human-written* program needs while staying safe on
+/// the smallest worker-thread stack we ship to.
+///
+/// Tuning history: the bound was 256 before T0.5; the resulting
+/// 768 KiB worst-case frame chain reliably hit SIGBUS on macOS
+/// rayon workers during stdlib loading. Halving to 128 closes the
+/// crash class.
+const MAX_RECURSION_DEPTH: usize = 128;
 
 /// Main recursive descent parser with helper methods for common parsing patterns.
 ///

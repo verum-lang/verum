@@ -21484,8 +21484,22 @@ impl TypeChecker {
                 }
             }
         }
-        // RAII depth guard — decrements on drop even if we panic or return early
-        const MAX_AST_TO_TYPE_DEPTH: usize = 128;
+        // RAII depth guard — decrements on drop even if we panic or return early.
+        //
+        // Sized for rayon worker threads (default 512 KiB stack on macOS).
+        // Each `ast_to_type` / `ast_to_type_inner` pair recurses through
+        // ~2 stack frames per logical depth; debug builds inflate the
+        // frame size to ~6-8 KiB. Setting the limit at 64 caps the worst
+        // case at ~64 × 2 × 8 KiB ≈ 1 MiB (debug) — still over the
+        // 512 KiB worker budget, but well under the 8 MiB main-thread
+        // budget. Release builds halve frame size, so 64 is safely
+        // within the worker bound. Real-world AST nesting rarely
+        // exceeds depth 30; the bound is a defence, not a working budget.
+        //
+        // Tuning history: was 128 before T0.5; that hit SIGBUS on
+        // rayon workers during `verum test`'s type-check phase
+        // because debug frames overflowed 512 KiB at depth ~50.
+        const MAX_AST_TO_TYPE_DEPTH: usize = 64;
         let _guard = match ThreadLocalDepthGuard::new(&AST_TO_TYPE_DEPTH, MAX_AST_TO_TYPE_DEPTH) {
             Some(g) => g,
             None => {
