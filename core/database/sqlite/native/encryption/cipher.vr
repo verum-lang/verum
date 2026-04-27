@@ -8,15 +8,44 @@
 //
 //   * `NullCipher`     — passthrough; used for testing + when an
 //                         encryption-enabled binary opens a plaintext db
-//   * `AesGcmCipher`   — AES-256-GCM with per-page nonce; the
-//                         actual block-cipher primitive comes from
-//                         `core.security.aes` (out of this module's
-//                         scope — we define the protocol contract)
-//   * `Chacha20Cipher` — ChaCha20-Poly1305; an alternative when
-//                         AES hardware isn't present
+//   * `AesGcmCipher`   — AES-256-GCM with per-page nonce; backed by
+//                         core.security.aead.aes_gcm.Aes256Gcm
+//   * `Chacha20Cipher` — ChaCha20-Poly1305 backed by
+//                         core.security.aead.chacha20_poly1305
 //
 // All three are surfaced via the same protocol so the pager can
 // switch them at startup without recompiling.
+//
+// # Per-page nonce derivation
+//
+// The 12-byte nonce is derived deterministically from `page_no`:
+// the low 4 bytes encode the page number little-endian, the upper 8
+// bytes are zero. Safe so long as the same (key, page_no) is never
+// re-encrypted with two different plaintexts — the standard SQLite
+// page-rewrite pattern (in-place page update under a single key)
+// triggers exactly this hazard at WAL checkpoint time. Callers that
+// need rewrite-safe encryption MUST rotate the key on each page
+// rewrite (KeyRing handles this) or compose with a per-write
+// counter via the kdf module. The SOUNDNESS comment in
+// core/security/aead/aes_gcm.vr explains the keystream-reuse
+// catastrophe in detail.
+//
+// # Wire format
+//
+// Each encrypted page is laid out as:
+//
+//     [ nonce (12 bytes) || ciphertext (N bytes) || tag (16 bytes) ]
+//
+// where N is the plaintext length. `overhead_bytes()` reports
+// `nonce_len + tag_len`. Callers size the page accordingly.
+//
+// # Authenticity
+//
+// `decrypt` returns `CeAuthFailure` on tag-verification failure and
+// does NOT expose any plaintext (the underlying AEAD verifies tag
+// before producing output). A wrong key, tampered ciphertext, or
+// tampered nonce all surface as `CeAuthFailure` — never silent
+// success.
 // =============================================================================
 
 module core.database.sqlite.native.encryption.cipher;
@@ -24,6 +53,10 @@ module core.database.sqlite.native.encryption.cipher;
 mount core.*;
 mount base.{Text, Bool, Result, Ok, Err};
 mount collections.List;
+mount core.security.cipher.aes.{AesKey256};
+mount core.security.cipher.chacha20.{ChaChaKey, ChaChaNonce};
+mount core.security.aead.aes_gcm.{Aes256Gcm, GcmError};
+mount core.security.aead.chacha20_poly1305.{ChaCha20Poly1305, AeadError};
 
 // -----------------------------------------------------------------------------
 // CipherError
@@ -79,7 +112,7 @@ implement PageCipher for NullCipher {
 }
 
 // -----------------------------------------------------------------------------
-// AesGcmCipher — AES-256-GCM (contract; key handling is opaque)
+// AesGcmCipher — AES-256-GCM (NIST SP 800-38D)
 // -----------------------------------------------------------------------------
 
 public const AES_GCM_NONCE_BYTES: Int = 12;
@@ -88,15 +121,18 @@ public const AES_KEY_BYTES: Int = 32;
 
 public type AesGcmCipher is {
     /// 256-bit master key — supplied by KeyDerivation on creation.
-    /// Length must be exactly AES_KEY_BYTES.
-    key: List<Byte>,
+    /// Length is exactly AES_KEY_BYTES (validated at construction).
+    key: AesKey256,
 }
 
 public fn aes_gcm_cipher(key: List<Byte>) -> Result<AesGcmCipher, CipherError> {
     if key.len() != AES_KEY_BYTES {
         return Err(CeUnsupported("AES-256-GCM requires 32-byte key".clone()));
     }
-    Ok(AesGcmCipher { key: key })
+    let mut k: AesKey256 = [0; 32];
+    let mut i: Int = 0;
+    while i < AES_KEY_BYTES { k[i] = key[i]; i = i + 1; }
+    Ok(AesGcmCipher { key: k })
 }
 
 implement PageCipher for AesGcmCipher {
@@ -104,33 +140,23 @@ implement PageCipher for AesGcmCipher {
     fn overhead_bytes(&self) -> Int { AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES }
 
     fn encrypt(&self, page_no: Int, plaintext: &List<Byte>) -> Result<List<Byte>, CipherError> {
-        // Real impl delegates to core.security.aes.aes_gcm_encrypt;
-        // we surface the contract: nonce derived deterministically
-        // from page_no (so encrypted pages are byte-stable), payload
-        // = ciphertext, tail = auth tag.
-        let mut out: List<Byte> = List.new();
-        // Synthetic nonce (page_no little-endian + zeros).
+        let nonce = derive_page_nonce_12(page_no);
+        let cipher = Aes256Gcm.new(&self.key);
+
+        let mut ciphertext: List<Byte> = List.with_capacity(plaintext.len());
+        let mut tag: [Byte; 16] = [0; 16];
+        let aad: [Byte; 0] = [];
+        cipher.encrypt(&nonce, &aad, plaintext.as_slice(), &mut ciphertext, &mut tag);
+
+        // Wire layout: nonce || ciphertext || tag.
+        let total = AES_GCM_NONCE_BYTES + plaintext.len() + AES_GCM_TAG_BYTES;
+        let mut out: List<Byte> = List.with_capacity(total);
         let mut i: Int = 0;
-        while i < AES_GCM_NONCE_BYTES {
-            let b: Byte = if i < 4 {
-                ((page_no >> (i * 8)) & 255) as Byte
-            } else { 0 as Byte };
-            out.push(b);
-            i = i + 1;
-        }
-        // Plaintext appended (placeholder XOR with key[0]).
-        let xor_key: Byte = if self.key.len() > 0 { self.key[0] } else { 0 as Byte };
-        let mut k: Int = 0;
-        while k < plaintext.len() {
-            out.push(plaintext[k] ^ xor_key);
-            k = k + 1;
-        }
-        // 16-byte tag (placeholder zeros).
+        while i < AES_GCM_NONCE_BYTES { out.push(nonce[i]); i = i + 1; }
+        let mut j: Int = 0;
+        while j < ciphertext.len() { out.push(ciphertext[j]); j = j + 1; }
         let mut t: Int = 0;
-        while t < AES_GCM_TAG_BYTES {
-            out.push(0 as Byte);
-            t = t + 1;
-        }
+        while t < AES_GCM_TAG_BYTES { out.push(tag[t]); t = t + 1; }
         Ok(out)
     }
 
@@ -139,78 +165,104 @@ implement PageCipher for AesGcmCipher {
             return Err(CeMalformedPage);
         }
         let payload_len = ciphertext.len() - AES_GCM_NONCE_BYTES - AES_GCM_TAG_BYTES;
-        let xor_key: Byte = if self.key.len() > 0 { self.key[0] } else { 0 as Byte };
-        let mut out: List<Byte> = List.new();
-        let mut i: Int = AES_GCM_NONCE_BYTES;
-        let mut copied: Int = 0;
-        while copied < payload_len {
-            out.push(ciphertext[i] ^ xor_key);
-            i = i + 1;
-            copied = copied + 1;
+
+        // Slice the wire layout back apart. The AEAD verifies tag
+        // before exposing any plaintext, so wrong-key / tampered
+        // input surfaces as TagMismatch — never silent success.
+        let mut nonce: [Byte; 12] = [0; 12];
+        let mut k: Int = 0;
+        while k < AES_GCM_NONCE_BYTES { nonce[k] = ciphertext[k]; k = k + 1; }
+
+        let mut tag: [Byte; 16] = [0; 16];
+        let tag_off = AES_GCM_NONCE_BYTES + payload_len;
+        let mut tt: Int = 0;
+        while tt < AES_GCM_TAG_BYTES { tag[tt] = ciphertext[tag_off + tt]; tt = tt + 1; }
+
+        let body_slice = ciphertext.as_slice();
+        let body_view = &body_slice[AES_GCM_NONCE_BYTES..tag_off];
+
+        let cipher = Aes256Gcm.new(&self.key);
+        let aad: [Byte; 0] = [];
+        let mut plaintext: List<Byte> = List.with_capacity(payload_len);
+        match cipher.decrypt(&nonce, &aad, body_view, &tag, &mut plaintext) {
+            Ok(()) => Ok(plaintext),
+            Err(GcmError.TagMismatch) => Err(CeAuthFailure),
+            Err(GcmError.InvalidInput { reason: _ }) => Err(CeMalformedPage),
+            Err(GcmError.InputTooLarge { limit_bytes: _ }) => Err(CeMalformedPage),
         }
-        Ok(out)
     }
 }
 
 // -----------------------------------------------------------------------------
-// ChaCha20Cipher — ChaCha20-Poly1305 (contract only)
+// Chacha20Cipher — ChaCha20-Poly1305 (RFC 8439)
 // -----------------------------------------------------------------------------
 
 public const CHACHA_NONCE_BYTES: Int = 12;
 public const CHACHA_TAG_BYTES: Int = 16;
 
-public type Chacha20Cipher is { key: List<Byte> }
+public type Chacha20Cipher is { key: ChaChaKey }
 
 public fn chacha20_cipher(key: List<Byte>) -> Result<Chacha20Cipher, CipherError> {
     if key.len() != AES_KEY_BYTES {
         return Err(CeUnsupported("ChaCha20-Poly1305 requires 32-byte key".clone()));
     }
-    Ok(Chacha20Cipher { key: key })
+    let mut k: ChaChaKey = [0; 32];
+    let mut i: Int = 0;
+    while i < AES_KEY_BYTES { k[i] = key[i]; i = i + 1; }
+    Ok(Chacha20Cipher { key: k })
 }
 
 implement PageCipher for Chacha20Cipher {
     fn name(&self) -> Text { "chacha20-poly1305".clone() }
     fn overhead_bytes(&self) -> Int { CHACHA_NONCE_BYTES + CHACHA_TAG_BYTES }
+
     fn encrypt(&self, page_no: Int, plaintext: &List<Byte>) -> Result<List<Byte>, CipherError> {
-        // Same shape as AesGcmCipher.encrypt; real cipher swap is
-        // a one-line change in the host module.
-        let mut out: List<Byte> = List.new();
+        let nonce: ChaChaNonce = derive_page_nonce_12(page_no);
+        let cipher = ChaCha20Poly1305.new(&self.key);
+
+        let mut ciphertext: List<Byte> = List.with_capacity(plaintext.len());
+        let mut tag: [Byte; 16] = [0; 16];
+        let aad: [Byte; 0] = [];
+        cipher.encrypt(&nonce, &aad, plaintext.as_slice(), &mut ciphertext, &mut tag);
+
+        let total = CHACHA_NONCE_BYTES + plaintext.len() + CHACHA_TAG_BYTES;
+        let mut out: List<Byte> = List.with_capacity(total);
         let mut i: Int = 0;
-        while i < CHACHA_NONCE_BYTES {
-            let b: Byte = if i < 4 {
-                ((page_no >> (i * 8)) & 255) as Byte
-            } else { 0 as Byte };
-            out.push(b);
-            i = i + 1;
-        }
-        let xor_key: Byte = if self.key.len() > 0 { self.key[0] } else { 0 as Byte };
-        let mut k: Int = 0;
-        while k < plaintext.len() {
-            out.push(plaintext[k] ^ xor_key);
-            k = k + 1;
-        }
+        while i < CHACHA_NONCE_BYTES { out.push(nonce[i]); i = i + 1; }
+        let mut j: Int = 0;
+        while j < ciphertext.len() { out.push(ciphertext[j]); j = j + 1; }
         let mut t: Int = 0;
-        while t < CHACHA_TAG_BYTES {
-            out.push(0 as Byte);
-            t = t + 1;
-        }
+        while t < CHACHA_TAG_BYTES { out.push(tag[t]); t = t + 1; }
         Ok(out)
     }
+
     fn decrypt(&self, _pgno: Int, ciphertext: &List<Byte>) -> Result<List<Byte>, CipherError> {
         if ciphertext.len() < CHACHA_NONCE_BYTES + CHACHA_TAG_BYTES {
             return Err(CeMalformedPage);
         }
         let payload_len = ciphertext.len() - CHACHA_NONCE_BYTES - CHACHA_TAG_BYTES;
-        let xor_key: Byte = if self.key.len() > 0 { self.key[0] } else { 0 as Byte };
-        let mut out: List<Byte> = List.new();
-        let mut i: Int = CHACHA_NONCE_BYTES;
-        let mut copied: Int = 0;
-        while copied < payload_len {
-            out.push(ciphertext[i] ^ xor_key);
-            i = i + 1;
-            copied = copied + 1;
+
+        let mut nonce: ChaChaNonce = [0; 12];
+        let mut k: Int = 0;
+        while k < CHACHA_NONCE_BYTES { nonce[k] = ciphertext[k]; k = k + 1; }
+
+        let mut tag: [Byte; 16] = [0; 16];
+        let tag_off = CHACHA_NONCE_BYTES + payload_len;
+        let mut tt: Int = 0;
+        while tt < CHACHA_TAG_BYTES { tag[tt] = ciphertext[tag_off + tt]; tt = tt + 1; }
+
+        let body_slice = ciphertext.as_slice();
+        let body_view = &body_slice[CHACHA_NONCE_BYTES..tag_off];
+
+        let cipher = ChaCha20Poly1305.new(&self.key);
+        let aad: [Byte; 0] = [];
+        let mut plaintext: List<Byte> = List.with_capacity(payload_len);
+        match cipher.decrypt(&nonce, &aad, body_view, &tag, &mut plaintext) {
+            Ok(()) => Ok(plaintext),
+            Err(AeadError.TagMismatch) => Err(CeAuthFailure),
+            Err(AeadError.InvalidInput { reason: _ }) => Err(CeMalformedPage),
+            Err(AeadError.InputTooLarge { limit_bytes: _ }) => Err(CeMalformedPage),
         }
-        Ok(out)
     }
 }
 
@@ -223,4 +275,18 @@ fn clone_bytes(b: &List<Byte>) -> List<Byte> {
     let mut i: Int = 0;
     while i < b.len() { out.push(b[i]); i = i + 1; }
     out
+}
+
+/// Derive a 12-byte nonce deterministically from a page number.
+/// Layout: low 4 bytes = page_no LE, upper 8 bytes = zero. Safe
+/// so long as `(key, page_no)` is never re-encrypted under a
+/// different plaintext (see header documentation).
+fn derive_page_nonce_12(page_no: Int) -> [Byte; 12] {
+    let mut n: [Byte; 12] = [0; 12];
+    let mut i: Int = 0;
+    while i < 4 {
+        n[i] = ((page_no >> (i * 8)) & 255) as Byte;
+        i = i + 1;
+    }
+    n
 }
