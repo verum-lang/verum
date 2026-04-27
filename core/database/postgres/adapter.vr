@@ -1,0 +1,41 @@
+// =============================================================================
+// core/database/postgres/adapter.vr — Spindle Postgres adapter façade
+// =============================================================================
+// Spec: internal/specs/database.md §6.1
+//
+// Vendor-side identity layer over the wire / auth / connection stack.
+// Mirrors the shape of `core.database.sqlite.adapter` so portable
+// code can wire either back-end through the same Spindle entry-point.
+// =============================================================================
+
+module core.database.postgres.adapter;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.postgres.config.PgConfig;
+mount core.database.postgres.connection.{PgConnection, connect as pg_connect};
+
+// -----------------------------------------------------------------------------
+// PgAdapter — vendor identity + connect entry-point.
+// -----------------------------------------------------------------------------
+
+public type PgAdapter is ();
+
+implement PgAdapter {
+    public fn name() -> Text { "postgres".clone() }
+
+    /// Lower bound on server version Spindle was tested against. The
+    /// adapter speaks Postgres v3 protocol which is compatible
+    /// 9.6+; we set the floor at 14 (caching_sha2-equivalent SCRAM
+    /// support is mature there) and warn-only against earlier.
+    public fn version_required() -> Text { "14.0.0".clone() }
+
+    public fn adapter_id() -> AdapterId { AdPostgres }
+
+    /// Connect — TCP + Startup + SCRAM auth + ParameterStatus loop.
+    /// Returns when the server emits ReadyForQuery.
+    public fn connect(cfg: &PgConfig) -> Result<PgConnection, DbError> {
+        pg_connect(cfg)
+    }
+}

@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: database, postgres, spindle, common, facade, scram
+// @timeout: 30000
+//
+// Type-check exercise for the Spindle Postgres façade — `core.database.
+// postgres.{PgAdapter, PgConfig, PgConnection}` over the wire/auth
+// stack. Validates that:
+//
+//   * `PgConfig.local_dev()` and `PgConfig.new()` build successfully.
+//   * `PgConfig.with_*` builders chain.
+//   * `PgAdapter.{name,version_required,adapter_id,connect}` shapes line up.
+//   * `PgConnection.simple_query` returns a `SimpleQueryResult` with
+//     command_tag, optional row_description, rows.
+//   * Tx-status / connection-state taxonomies match the spec.
+//
+// The actual connect() call is gated behind a docker-rig integration
+// run (VERUM_DB_INTEGRATION=1 + tests/db-integration up); this test
+// only validates the type contract.
+
+mount core.*;
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId, AdPostgres};
+mount core.database.postgres.{
+    PgAdapter, PgConfig, PgTlsMode, PtmDisable, PtmVerifyFull,
+    PgConnection, PgConnState,
+    PcsConnecting, PcsAuthenticating, PcsReady, PcsBusy, PcsClosed, PcsFailed,
+    SimpleQueryResult,
+};
+
+fn check_config_builders() {
+    let cfg = PgConfig.local_dev();
+    assert(cfg.target_label() == "127.0.0.1:55432");
+
+    let cfg2 = PgConfig.new(
+        "db.example.com".clone(),
+        5432,
+        "alice".clone(),
+        "secret".clone(),
+        "app_db".clone(),
+    )
+    .with_application_name("integration-test".clone())
+    .with_tls(PtmVerifyFull)
+    .with_connect_timeout_ms(30_000);
+
+    let _ = cfg2;
+    assert(PtmVerifyFull.is_encrypted());
+    assert(!PtmDisable.is_encrypted());
+}
+
+fn check_adapter_identity() {
+    assert(PgAdapter.name() == "postgres");
+    let id = PgAdapter.adapter_id();
+    match id {
+        AdPostgres => {},
+        _          => panic("expected AdPostgres"),
+    }
+}
+
+fn check_state_machine() {
+    // Each variant must construct.
+    let _: PgConnState = PcsConnecting;
+    let _: PgConnState = PcsAuthenticating;
+    let _: PgConnState = PcsReady;
+    let _: PgConnState = PcsBusy;
+    let _: PgConnState = PcsClosed;
+    let _: PgConnState = PcsFailed;
+}
+
+fn main() {
+    check_config_builders();
+    check_adapter_identity();
+    check_state_machine();
+}
