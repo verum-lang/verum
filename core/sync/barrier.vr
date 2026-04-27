@@ -268,6 +268,16 @@ implement Phaser {
     /// Arrive at the barrier && wait for others.
     ///
     /// Returns the phase number that was completed.
+    ///
+    /// **Phase-advance race fix**: when this thread is the
+    /// last arrival, the phase-advance must use CAS to preserve
+    /// concurrent `register()` / `arrive_and_deregister()`
+    /// updates that may have run between our `fetch_add` and
+    /// the advance. The earlier `state.store(new_state)`
+    /// overwrote the entire packed atomic — silently dropping
+    /// any concurrent party-count adjustment. The CAS loop
+    /// retries with the latest observed `parties` value so
+    /// concurrent registrations are preserved.
     public fn arrive_and_await(&self) -> Int {
         // Increment arrived count
         let old_state = self.state.fetch_add(1 << ARRIVED_SHIFT, MemoryOrdering.SeqCst);
@@ -276,9 +286,29 @@ implement Phaser {
         let phase = (old_state >> PHASE_SHIFT) as Int;
 
         if arrived == parties {
-            // We're the last - advance phase
-            let new_state = ((phase + 1) << PHASE_SHIFT) | parties;
-            self.state.store(new_state, MemoryOrdering.SeqCst);
+            // We're the last — advance phase via CAS so any
+            // concurrent register/deregister isn't lost.
+            // Loop on observed-parties since concurrent
+            // operations may have changed the count between
+            // our fetch_add and our CAS.
+            loop {
+                let cur = self.state.load(MemoryOrdering.SeqCst);
+                let cur_parties = (cur & PARTIES_MASK) as Int;
+                let cur_phase = (cur >> PHASE_SHIFT) as Int;
+                // Safety net: another thread may have already
+                // advanced the phase (race with concurrent
+                // last-arriver from a re-registration).  In
+                // that case our work is done.
+                if cur_phase != phase {
+                    break;
+                }
+                let new_state = ((phase + 1) << PHASE_SHIFT) | cur_parties;
+                if self.state.compare_exchange(cur, new_state, MemoryOrdering.SeqCst, MemoryOrdering.SeqCst).is_ok() {
+                    break;
+                }
+                // CAS lost — reload and retry.  Bounded by
+                // contention (typically 1-2 retries).
+            }
             self.condvar.notify_all();
             return phase;
         }
