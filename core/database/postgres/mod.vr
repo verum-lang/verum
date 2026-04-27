@@ -30,6 +30,8 @@ public module error;
 public module config;
 public module connection;
 public module adapter;
+public module stmt_cache;
+public module extended;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -42,3 +44,8 @@ public mount .connection.{
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
+public mount .stmt_cache.{StmtCache, CacheEntry};
+public mount .extended.{
+    ExtendedQueryResult, PipelineEntry, PipelineBatch, ExtendedResultBuilder,
+    build_parse_bind_execute, build_bind_execute,
+};
