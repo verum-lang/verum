@@ -1,0 +1,150 @@
+// =============================================================================
+// core/database/common/query.vr — PreparedQuery<R, P> handle
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §5.1, §5.3
+// =============================================================================
+//
+// `PreparedQuery<R, P>` is the central API type produced by `sql#"..."`
+// at compile time. The type parameters carry:
+//   * R — row shape (record type derived from SELECT-list, or `()` for
+//         INSERT/UPDATE/DELETE).
+//   * P — tuple of bound-parameter types matching `${expr}`
+//         interpolations in source order.
+//
+// At runtime PreparedQuery is a small POD (sql + fingerprint + meta).
+// Server-side caching is a per-adapter concern: the adapter looks at
+// `fingerprint` and `cached_on_server`, hashes against its named-
+// statement cache, and emits Parse only on first use.
+// =============================================================================
+
+module core.database.common.query;
+
+mount core.*;
+mount base.{Text, Maybe, None, Some};
+mount collections.List;
+mount sync.atomic.{AtomicBool, MemoryOrdering};
+mount core.database.common.types.{TypeOid, RowSchema};
+mount core.database.common.error.AdapterId;
+
+// -----------------------------------------------------------------------------
+// Statement kind — drives Sync flushing and cursor lifetime in adapters.
+// -----------------------------------------------------------------------------
+
+public type StmtKind is
+      SkSelect       // returns rows
+    | SkDml          // INSERT / UPDATE / DELETE — affected_rows
+    | SkDdl          // CREATE / ALTER / DROP — schema-version bump
+    | SkTx           // BEGIN / COMMIT / ROLLBACK / SAVEPOINT
+    | SkUtility;     // SET, COPY, vendor-specific admin
+
+implement StmtKind {
+    public fn returns_rows(&self) -> Bool {
+        match self {
+            SkSelect => true,
+            _        => false,
+        }
+    }
+
+    public fn writes(&self) -> Bool {
+        match self {
+            SkDml | SkDdl => true,
+            _             => false,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PreparedQuery — central API type.
+// -----------------------------------------------------------------------------
+
+/// Compile-time-shaped query handle. Constructed by `sql#"..."` meta-fn
+/// (see database.md §5.3 for the macro contract); user code never
+/// constructs this directly except in tests.
+///
+/// `R` and `P` are phantom for runtime — they constrain the API at the
+/// type level so `Connection.query::<User, (UserId,)>` only accepts a
+/// `PreparedQuery<User, (UserId,)>` and the compiler refuses any other
+/// shape.
+public type PreparedQuery<R, P> is {
+    /// SQL text, normalized (whitespace-collapsed, comment-stripped).
+    sql: Text,
+    /// 64-bit hash of normalized AST. Two queries differing only in
+    /// whitespace / comments share a fingerprint and a server-side
+    /// cached statement.
+    fingerprint: Int,
+    /// OIDs of `${...}` interpolations in source order. Same arity as P.
+    param_oids: List<TypeOid>,
+    /// Schema of returned rows. Empty when `kind != SkSelect`.
+    result_schema: RowSchema,
+    /// What kind of statement this is — drives flushing in adapters.
+    kind: StmtKind,
+    /// Lazily set by the adapter on first server-side cache hit so
+    /// subsequent calls skip Parse and emit only Bind / Execute / Sync.
+    cached_on_server: AtomicBool,
+}
+
+implement<R, P> PreparedQuery<R, P> {
+    /// Build directly from the compile-time pieces. Adapter wire code
+    /// uses this; user code uses `sql#"..."` instead.
+    public fn build(
+        sql: Text,
+        fingerprint: Int,
+        param_oids: List<TypeOid>,
+        result_schema: RowSchema,
+        kind: StmtKind,
+    ) -> PreparedQuery<R, P> {
+        PreparedQuery {
+            sql: sql,
+            fingerprint: fingerprint,
+            param_oids: param_oids,
+            result_schema: result_schema,
+            kind: kind,
+            cached_on_server: AtomicBool.new(false),
+        }
+    }
+
+    public fn sql(&self) -> &Text { &self.sql }
+    public fn fingerprint(&self) -> Int { self.fingerprint }
+    public fn param_oids(&self) -> &List<TypeOid> { &self.param_oids }
+    public fn result_schema(&self) -> &RowSchema { &self.result_schema }
+    public fn kind(&self) -> StmtKind { self.kind.clone() }
+
+    /// Stable name for the named-statement slot on the server. We
+    /// lowercase-hex 16 bits of the fingerprint and prefix with `s` so
+    /// the result is a valid Postgres identifier (and a valid MySQL
+    /// statement-name; SQLite ignores it).
+    public fn server_name(&self) -> Text {
+        // 16 hex chars from the bottom 64 bits.
+        let mut out: Text = "s".clone();
+        let mut shift = 60;
+        while shift >= 0 {
+            let nibble = (self.fingerprint >> shift) & 0xF;
+            let ch = if nibble < 10 {
+                (0x30 + nibble) as Char
+            } else {
+                (0x61 + (nibble - 10)) as Char
+            };
+            out.push(ch);
+            shift = shift - 4;
+        }
+        out
+    }
+
+    /// Has the server cached this statement at least once on the
+    /// current connection? Adapters call `mark_cached` after a
+    /// successful Parse.
+    public fn is_cached(&self) -> Bool {
+        self.cached_on_server.load(MemoryOrdering.Acquire)
+    }
+
+    public fn mark_cached(&self) {
+        self.cached_on_server.store(true, MemoryOrdering.Release);
+    }
+
+    /// Connection-level cache invalidation — schema-version bumped or
+    /// connection recycled. Forces the next call to re-Parse.
+    public fn invalidate(&self) {
+        self.cached_on_server.store(false, MemoryOrdering.Release);
+    }
+}

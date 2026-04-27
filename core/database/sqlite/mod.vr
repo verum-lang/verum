@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/mod.vr
+// =============================================================================
+// Layer: 3 (Database — SQLite namespace)
+// Spec: internal/specs/sqlite-native.md
+// =============================================================================
+
+module core.database.sqlite;
+
+// Pure-Verum SQLite reimplementation (loom).
+public module native;

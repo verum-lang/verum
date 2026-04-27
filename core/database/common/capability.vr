@@ -1,0 +1,119 @@
+// =============================================================================
+// core/database/common/capability.vr — Spindle Database<C> capabilities
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §5.4
+// =============================================================================
+//
+// Type-level access control. `Database<DbRead>` exposes `.query` only;
+// `Database<DbReadWriteTx>` exposes the full surface; misuse is a
+// compile error, not a runtime check.
+//
+// We model capabilities as phantom marker types. The wrapper
+// `Database<C>` carries the marker through `using [Database<C>]`
+// context; method bodies are gated on capability bounds.
+// =============================================================================
+
+module core.database.common.capability;
+
+mount core.*;
+mount base.{Result, Text};
+
+// -----------------------------------------------------------------------------
+// Capability bit-flags — also encoded as marker types below for compile
+// time access control.
+// -----------------------------------------------------------------------------
+
+public const CAP_READ:    Int = 0x0001;
+public const CAP_WRITE:   Int = 0x0002;
+public const CAP_TX:      Int = 0x0004;
+public const CAP_ADMIN:   Int = 0x0008;
+public const CAP_REPL:    Int = 0x0010;
+public const CAP_NOTIFY:  Int = 0x0020;
+public const CAP_COPY:    Int = 0x0040;
+public const CAP_UNSAFE:  Int = 0x0080;
+
+/// Runtime view of a capability set — used to attach a label to metric
+/// samples and to feed `EXPLAIN` output for the `verum db:audit`
+/// tooling.
+public type CapabilitySet is { mask: Int };
+
+implement CapabilitySet {
+    public fn empty() -> CapabilitySet { CapabilitySet { mask: 0 } }
+
+    public fn read_only() -> CapabilitySet {
+        CapabilitySet { mask: CAP_READ }
+    }
+
+    public fn read_write_tx() -> CapabilitySet {
+        CapabilitySet { mask: CAP_READ | CAP_WRITE | CAP_TX }
+    }
+
+    public fn admin() -> CapabilitySet {
+        CapabilitySet { mask: CAP_READ | CAP_WRITE | CAP_TX | CAP_ADMIN }
+    }
+
+    public fn replication() -> CapabilitySet {
+        CapabilitySet { mask: CAP_READ | CAP_REPL }
+    }
+
+    public fn has(&self, bit: Int) -> Bool {
+        (self.mask & bit) != 0
+    }
+
+    public fn add(&self, bit: Int) -> CapabilitySet {
+        CapabilitySet { mask: self.mask | bit }
+    }
+
+    public fn intersect(&self, other: &CapabilitySet) -> CapabilitySet {
+        CapabilitySet { mask: self.mask & other.mask }
+    }
+
+    /// Is this set a (non-strict) subset of `other`? Used by Spindle
+    /// to enforce: a downgraded `db.readonly()` cannot escalate back.
+    public fn is_subset_of(&self, other: &CapabilitySet) -> Bool {
+        (self.mask & other.mask) == self.mask
+    }
+
+    public fn render(&self) -> Text {
+        let mut out: Text = "[".clone();
+        let mut first = true;
+        let mut bit = 0x0001;
+        let names: List<Text> = [
+            "READ".clone(), "WRITE".clone(), "TX".clone(), "ADMIN".clone(),
+            "REPL".clone(), "NOTIFY".clone(), "COPY".clone(), "UNSAFE".clone(),
+        ];
+        let mut i = 0;
+        while i < 8 {
+            if (self.mask & bit) != 0 {
+                if !first { out.push_str(&","); }
+                out.push_str(&names[i]);
+                first = false;
+            }
+            bit = bit << 1;
+            i = i + 1;
+        }
+        out.push_str(&"]");
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Marker types — phantom carriers for compile-time access control.
+// -----------------------------------------------------------------------------
+//
+// User code annotates the `Database<C>` capability they need:
+//
+//     async fn analytics(_db: &Database<DbRead>) using [Logger] {
+//         _db.query(sql#"...").await
+//     }
+//
+// Calling a method that requires `DbWrite` on a `Database<DbRead>`
+// fails to type-check.
+// -----------------------------------------------------------------------------
+
+public type DbRead          is ();
+public type DbReadWriteTx   is ();
+public type DbAdmin         is ();
+public type DbReplication   is ();
+public type DbNotify        is ();

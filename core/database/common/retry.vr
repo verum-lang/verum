@@ -1,0 +1,135 @@
+// =============================================================================
+// core/database/common/retry.vr — RetryPolicy + run_with_retry combinator
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §5.5
+// =============================================================================
+//
+// Vendor-neutral retry. The policy uses full-jitter exponential backoff
+// (AWS's recommended algorithm — strictly better tail latency than
+// equal-jitter on contended writes per Marc Brooker's analysis).
+//
+// `run_with_retry` is a combinator over a closure that produces a
+// fresh transaction body on each attempt. It is NOT a `for` loop the
+// adapter writes inside — handlers compose it themselves so they can
+// log per-attempt or layer additional decisions.
+// =============================================================================
+
+module core.database.common.retry;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.common.error.DbError;
+
+// -----------------------------------------------------------------------------
+// RetryPolicy — config object.
+// -----------------------------------------------------------------------------
+
+public type RetryPolicy is {
+    /// Hard cap on attempts including the first. `max_attempts == 1`
+    /// disables retry. Default 5.
+    max_attempts: Int,
+
+    /// First-retry delay in milliseconds. Default 10ms.
+    base_delay_ms: Int,
+
+    /// Cap on a single delay slot — backoff is clamped here. Default 1000ms.
+    max_delay_ms: Int,
+
+    /// Multiplier per attempt. Default 2.0 — pure binary exponential.
+    multiplier_milli: Int,
+
+    /// PRNG seed. `0` means draw from the global PRNG; non-zero is for
+    /// deterministic-simulation testing.
+    seed: Int,
+}
+
+implement RetryPolicy {
+    /// Spec default — 5 attempts, full-jitter, 10ms base, 1s cap.
+    public fn default() -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: 5,
+            base_delay_ms: 10,
+            max_delay_ms: 1000,
+            multiplier_milli: 2000,    // 2.0 in milli-fixed-point
+            seed: 0,
+        }
+    }
+
+    public fn aggressive() -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: 10,
+            base_delay_ms: 5,
+            max_delay_ms: 2000,
+            multiplier_milli: 2000,
+            seed: 0,
+        }
+    }
+
+    public fn disabled() -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: 1,
+            base_delay_ms: 0,
+            max_delay_ms: 0,
+            multiplier_milli: 1000,
+            seed: 0,
+        }
+    }
+
+    /// Compute the *exponential ceiling* for attempt `n` (zero-based)
+    /// in milliseconds. Caller draws U(0, ceiling) for full-jitter.
+    public fn delay_ceiling_ms(&self, attempt: Int) -> Int {
+        if attempt <= 0 {
+            return 0;
+        }
+        // base * (mult/1000)^(attempt - 1), clamped to max_delay_ms.
+        let mut acc_milli: Int = self.base_delay_ms * 1000;
+        let mut k = 1;
+        while k < attempt {
+            acc_milli = (acc_milli * self.multiplier_milli) / 1000;
+            // Saturating clamp — avoid overflow on long retries.
+            let cap_milli = self.max_delay_ms * 1000;
+            if acc_milli > cap_milli {
+                acc_milli = cap_milli;
+            }
+            k = k + 1;
+        }
+        let result = acc_milli / 1000;
+        if result > self.max_delay_ms { self.max_delay_ms } else { result }
+    }
+
+    /// Full-jitter draw: U(0, delay_ceiling_ms(attempt)).
+    /// Replace the LCG with `core.random` once we wire RNG injection.
+    public fn jittered_delay_ms(&self, attempt: Int, prng_state: &mut Int) -> Int {
+        let ceiling = self.delay_ceiling_ms(attempt);
+        if ceiling <= 0 {
+            return 0;
+        }
+        // Numerical Recipes LCG — adequate for jitter; not for crypto.
+        *prng_state = (*prng_state * 1664525) + 1013904223;
+        let r = (*prng_state) & 0x7FFF_FFFF;
+        r % (ceiling + 1)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RetryAttemptInfo — observable state for tracing / metrics.
+// -----------------------------------------------------------------------------
+
+public type RetryAttemptInfo is {
+    attempt: Int,
+    last_error: Text,
+    next_delay_ms: Int,
+}
+
+// -----------------------------------------------------------------------------
+// Idempotent — opt-in marker the style-checker greps for.
+// -----------------------------------------------------------------------------
+
+/// Tag a closure as idempotent. The compiler does not enforce
+/// idempotence — that is a semantic property — but Spindle's style
+/// pass warns when `run_with_retry` is called with a body that lacks
+/// this attestation, prompting the author to think.
+public type Idempotent is protocol {
+    fn idempotency_attestation() -> Text;
+}

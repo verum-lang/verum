@@ -1,0 +1,37 @@
+// =============================================================================
+// core/database/mod.vr — Spindle (Verum database client framework)
+// =============================================================================
+// Layer: 3 (Database)
+// Spec: internal/specs/database.md
+// Codename: spindle
+// =============================================================================
+//
+// Spindle is the Verum database client framework. It provides:
+//
+//   * `core.database.common`  — vendor-neutral protocol surface
+//                               (Adapter / Connection / Transaction /
+//                                Row / Params / PreparedQuery / Pool /
+//                                DbError / RetryPolicy / capability
+//                                markers).
+//
+//   * `core.database.sqlite`  — pure-Verum SQLite implementation
+//                               (loom: spec internal/specs/sqlite-native.md).
+//
+//   * `core.database.postgres` — pure-Verum Postgres v3 wire driver
+//                               (alpha — see internal/specs/database.md
+//                               §6.1 for the surface).
+//
+//   * `core.database.mysql`    — pure-Verum MySQL 8 binary driver
+//                               (alpha — see internal/specs/database.md
+//                               §6.3 for the surface).
+//
+// Cross-vendor portable code is the unusual case — handlers normally
+// `mount core.database.postgres;` directly. The `common` module exists
+// so a single retry combinator and a single `IntoResponse` bridge can
+// cover all three back ends.
+// =============================================================================
+
+module core.database;
+
+public module common;
+public module sqlite;

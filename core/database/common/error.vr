@@ -1,0 +1,313 @@
+// =============================================================================
+// core/database/common/error.vr — Spindle DbError taxonomy
+// =============================================================================
+// Layer: 3 (Database — common error surface)
+// Spec: internal/specs/database.md §5.6
+// =============================================================================
+//
+// One error type for every adapter. Vendor-specific codes are carried
+// through `Adapter(AdapterError)`, but classifiers (`is_retryable`,
+// `is_constraint_violation`, `category`) work portably so a single
+// `run_with_retry` combinator covers Postgres SQLSTATE 40001, MySQL
+// 1213, and SQLite SQLITE_BUSY without per-vendor branching at the
+// call site.
+//
+// `IntoResponse` wires Weft → DbError automatically: a handler that
+// uses [Database] gets `?` propagation to a 4xx/5xx response with the
+// right status and never leaks server-internal SQL text to clients.
+// =============================================================================
+
+module core.database.common.error;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+
+// -----------------------------------------------------------------------------
+// AdapterId — which vendor produced the error / wire frame.
+// -----------------------------------------------------------------------------
+
+/// Vendor tag carried by every Spindle wire frame. Used by `Params.encode`
+/// to choose the right OID dictionary, by `DbError` to format adapter-
+/// specific messages, and by metrics to label samples.
+public type AdapterId is
+      AdPostgres
+    | AdSqlite
+    | AdMysql;
+
+implement AdapterId {
+    public fn name(&self) -> Text {
+        match self {
+            AdPostgres => "postgres",
+            AdSqlite   => "sqlite",
+            AdMysql    => "mysql",
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SqlState — five-character SQLSTATE codes (SQL-92).
+// -----------------------------------------------------------------------------
+
+/// Five-character SQLSTATE code as the standard defines it. Postgres
+/// emits these natively; MySQL maps server errno → SQLSTATE in the
+/// adapter; SQLite synthesises a small subset.
+///
+/// The code is held as a `Text` (5 ASCII chars) rather than a packed
+/// integer because every operator from now on (display, log, retry
+/// policy lookup) reads it as text. The 5-char invariant is enforced
+/// at construction.
+public type SqlState is { code: Text };
+
+implement SqlState {
+    /// Construct after validating the 5-character ASCII shape. Returns
+    /// `None` on malformed input — never panics.
+    public fn parse(s: &Text) -> Maybe<SqlState> {
+        if s.len() != 5 {
+            return None;
+        }
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < 5 {
+            let b = bytes[i] as Int;
+            // SQLSTATE is digits + uppercase ASCII letters only.
+            let is_digit = b >= 0x30 && b <= 0x39;
+            let is_upper = b >= 0x41 && b <= 0x5A;
+            if !(is_digit || is_upper) {
+                return None;
+            }
+            i = i + 1;
+        }
+        Some(SqlState { code: s.clone() })
+    }
+
+    public fn code(&self) -> &Text { &self.code }
+
+    /// SQLSTATE class is the first two characters: 23 = integrity, 40 =
+    /// transaction rollback, 08 = connection exception, etc.
+    public fn class(&self) -> Text {
+        let bytes = self.code.as_bytes();
+        let mut out: Text = "".clone();
+        out.push(bytes[0] as Char);
+        out.push(bytes[1] as Char);
+        out
+    }
+
+    /// Retryable per database.md §5.5: 40xxx (rollback / serialization),
+    /// 08xxx (connection failure). Per-adapter overlays may expand this
+    /// — see `Adapter.is_retryable`.
+    public fn is_retryable(&self) -> Bool {
+        let cls = self.class();
+        cls == "40" || cls == "08"
+    }
+
+    /// Constraint violations: 23xxx (integrity), 22xxx (data exception).
+    public fn is_integrity(&self) -> Bool {
+        let cls = self.class();
+        cls == "23" || cls == "22"
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Error category — drives IntoResponse status and retry policy.
+// -----------------------------------------------------------------------------
+
+public type ErrorCategory is
+      EcTransient    // network blip, retryable
+    | EcPermanent    // constraint violation, schema mismatch
+    | EcSecurity     // auth, capability — never echo to client
+    | EcClient       // bad input — 400-class
+    | EcUpstream;    // server-side bug — 5xx + log
+
+// -----------------------------------------------------------------------------
+// Sub-error kinds.
+// -----------------------------------------------------------------------------
+
+public type ConnectionErrorKind is
+      CekDnsFailure(Text)
+    | CekConnectRefused
+    | CekTlsHandshakeFailed(Text)
+    | CekProtocolMismatch(Text)
+    | CekServerTerminated
+    | CekKeepaliveTimeout;
+
+public type AuthErrorKind is
+      AekBadCredentials
+    | AekScramFailed(Text)
+    | AekChannelBindingMismatch
+    | AekIamTokenExpired
+    | AekRoleNotPermitted(Text);
+
+public type TimeoutPhase is
+      TpConnect
+    | TpStatement
+    | TpIdle
+    | TpAcquire;
+
+public type PoolErrorKind is
+      PekExhausted
+    | PekDraining
+    | PekHealthCheckFailed
+    | PekConfigInvalid(Text);
+
+/// Vendor-specific payload — adapter modules implement their own
+/// concrete type and wrap into `Adapter(AdapterSpecific.From(impl))`.
+/// We keep this opaque via `Text` here; adapters that want richer
+/// behaviour use the `is_retryable_adapter` hook on `DbError`.
+public type AdapterSpecific is {
+    adapter: AdapterId,
+    code: Text,
+    message: Text,
+    retryable: Bool,
+};
+
+// -----------------------------------------------------------------------------
+// DbError — the surface every adapter speaks.
+// -----------------------------------------------------------------------------
+
+/// Wire-decoder context that explains *which* column on *what* row
+/// failed and what the server claimed it was sending.
+public type DecodeFault is {
+    column_index: Int,
+    column_name: Text,
+    expected_type: Text,
+    found_oid: Int,
+    detail: Text,
+};
+
+public type EncodeFault is {
+    param_index: Int,
+    type_name: Text,
+    reason: Text,
+};
+
+public type DbError is
+      ConnectionFailed { source: ConnectionErrorKind, adapter: AdapterId }
+    | QueryFailed     { sql_state: SqlState, message: Text, position: Maybe<Int> }
+    | DecodeFailed    { fault: DecodeFault }
+    | EncodeFailed    { fault: EncodeFault }
+    | TimedOut        { phase: TimeoutPhase }
+    | Cancelled
+    | RefinementViolated { column: Text, predicate: Text }
+    | PoolFailure     { kind: PoolErrorKind }
+    | AuthFailed      { kind: AuthErrorKind }
+    | Adapter(AdapterSpecific);
+
+implement DbError {
+    /// Short human-readable summary — never includes secrets / SQL
+    /// text. For full context use `DbError.detail()`.
+    public fn message(&self) -> Text {
+        match self {
+            ConnectionFailed { adapter, .. } =>
+                f"connection to {adapter.name()} failed",
+            QueryFailed { sql_state, .. } =>
+                f"query failed: SQLSTATE {sql_state.code()}",
+            DecodeFailed { fault } =>
+                f"row decode failed at column {fault.column_index} ({fault.column_name})",
+            EncodeFailed { fault } =>
+                f"param encode failed at index {fault.param_index} ({fault.type_name})",
+            TimedOut { phase } =>
+                f"timeout in phase {phase_name(phase)}",
+            Cancelled            => "query cancelled".clone(),
+            RefinementViolated { column, .. } =>
+                f"refinement violation on column {column}",
+            PoolFailure { kind } =>
+                f"pool failure: {pool_kind_name(kind)}",
+            AuthFailed { kind } =>
+                f"authentication failed: {auth_kind_name(kind)}",
+            Adapter(spec)        =>
+                f"{spec.adapter.name()} error {spec.code}: {spec.message}",
+        }
+    }
+
+    /// Is the error worth retrying with the same operation? Drives
+    /// `run_with_retry`. False positives are bugs — never retry a
+    /// constraint violation or a syntax error.
+    public fn is_retryable(&self) -> Bool {
+        match self {
+            ConnectionFailed { .. }                       => true,
+            QueryFailed { sql_state, .. }                 => sql_state.is_retryable(),
+            TimedOut { phase: TpStatement }               => true,
+            TimedOut { phase: TpIdle }                    => true,
+            TimedOut { phase: TpAcquire }                 => true,
+            TimedOut { .. }                               => false,
+            Cancelled                                     => false,
+            RefinementViolated { .. }                     => false,
+            PoolFailure { kind: PekHealthCheckFailed }    => true,
+            PoolFailure { kind: PekExhausted }            => true,
+            PoolFailure { .. }                            => false,
+            AuthFailed { .. }                             => false,
+            DecodeFailed { .. }                           => false,
+            EncodeFailed { .. }                           => false,
+            Adapter(spec)                                 => spec.retryable,
+        }
+    }
+
+    /// Did the error come from a `CHECK` / `UNIQUE` / `FOREIGN KEY`
+    /// violation? Useful for upsert-patterns and surfacing 409 to API
+    /// clients.
+    public fn is_constraint_violation(&self) -> Bool {
+        match self {
+            QueryFailed { sql_state, .. } => sql_state.is_integrity(),
+            RefinementViolated { .. }     => true,
+            _                             => false,
+        }
+    }
+
+    /// Used by `IntoResponse` and by metrics labels.
+    public fn category(&self) -> ErrorCategory {
+        match self {
+            ConnectionFailed { .. }     => EcTransient,
+            TimedOut { .. }             => EcTransient,
+            PoolFailure { .. }          => EcTransient,
+            AuthFailed { .. }           => EcSecurity,
+            QueryFailed { sql_state, .. } => {
+                if sql_state.is_integrity() {
+                    EcClient
+                } else if sql_state.is_retryable() {
+                    EcTransient
+                } else {
+                    EcUpstream
+                }
+            }
+            DecodeFailed { .. }         => EcUpstream,
+            EncodeFailed { .. }         => EcClient,
+            Cancelled                   => EcClient,
+            RefinementViolated { .. }   => EcClient,
+            Adapter(spec)               => {
+                if spec.retryable { EcTransient } else { EcUpstream }
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers (kept private — `DbError.message` consumes them).
+// -----------------------------------------------------------------------------
+
+fn phase_name(p: &TimeoutPhase) -> Text {
+    match p {
+        TpConnect    => "connect".clone(),
+        TpStatement  => "statement".clone(),
+        TpIdle       => "idle".clone(),
+        TpAcquire    => "acquire".clone(),
+    }
+}
+
+fn pool_kind_name(k: &PoolErrorKind) -> Text {
+    match k {
+        PekExhausted              => "exhausted".clone(),
+        PekDraining               => "draining".clone(),
+        PekHealthCheckFailed      => "health_check_failed".clone(),
+        PekConfigInvalid(_)       => "config_invalid".clone(),
+    }
+}
+
+fn auth_kind_name(k: &AuthErrorKind) -> Text {
+    match k {
+        AekBadCredentials               => "bad_credentials".clone(),
+        AekScramFailed(_)               => "scram_failed".clone(),
+        AekChannelBindingMismatch       => "channel_binding_mismatch".clone(),
+        AekIamTokenExpired              => "iam_token_expired".clone(),
+        AekRoleNotPermitted(_)          => "role_not_permitted".clone(),
+    }
+}

@@ -1,0 +1,45 @@
+// =============================================================================
+// core/database/common/mod.vr — Spindle protocol-independent core
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §4.1, §5.1-§5.6
+// Codename: spindle
+// =============================================================================
+//
+// `core.database.common` holds *only* the vendor-neutral surface that
+// every adapter (postgres / sqlite / mysql) must speak. It defines:
+//
+//   * `DbError`            — single error taxonomy with retryable /
+//                            constraint-violation classifiers and
+//                            IntoResponse bridge to Weft
+//   * `TypeOid` / `WireRow` / `WireBuf` / `RowSchema`
+//                          — protocol-neutral wire-data shapes
+//   * `PreparedQuery<R, P>` — compile-time-shaped query handle produced
+//                            by `sql#"..."` meta-fn
+//   * `Adapter` / `Connection` / `Transaction` / `Row` / `Params`
+//                          — the contract every adapter implements;
+//                            `Transaction` is `affine` so commit /
+//                            rollback consume the value
+//   * `Capability` + `Database<C>`
+//                          — type-level access control (READ / WRITE /
+//                            TX / ADMIN / REPL / NOTIFY / COPY / UNSAFE)
+//   * `RetryPolicy` + `run_with_retry`
+//                          — full-jitter exponential backoff over
+//                            retryable DbError classes
+//   * `Pool<Mode>` + `PoolMode`
+//                          — `Session` / `Transaction` / `Statement`
+//                            modes encoded at the type level
+//
+// Vendor specifics live in `core.database.{postgres,sqlite,mysql}`.
+// Cross-adapter portable code is the unusual case, not the default.
+// =============================================================================
+
+module core.database.common;
+
+public module error;
+public module types;
+public module query;
+public module protocol;
+public module capability;
+public module retry;
+public module pool;
