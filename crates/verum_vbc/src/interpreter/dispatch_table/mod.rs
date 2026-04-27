@@ -877,18 +877,39 @@ pub(crate) fn get_array_length(ptr: *const u8, header: &super::heap::ObjectHeade
 }
 
 /// Get element at index from an array (Value array or List).
-pub(crate) fn get_array_element(ptr: *const u8, header: &super::heap::ObjectHeader, index: usize) -> InterpreterResult<Value> {
+///
+/// SECURITY: `index * size_of::<Value>()` can overflow `usize` on
+/// huge indices, producing a wrapped offset that would point into
+/// arbitrary memory.  Use `checked_mul` and return an overflow
+/// error if the multiplication wraps.  This was previously a
+/// silent unsafe-multiply hazard duplicated across handlers; this
+/// canonical implementation absorbs the safer variant.
+pub(crate) fn get_array_element(
+    ptr: *const u8,
+    header: &super::heap::ObjectHeader,
+    index: usize,
+) -> InterpreterResult<Value> {
+    let elem_offset = index
+        .checked_mul(std::mem::size_of::<Value>())
+        .ok_or(InterpreterError::IntegerOverflow {
+            operation: "array_index_offset",
+        })?;
+
     if header.type_id == TypeId::LIST {
         // SAFETY: List layout is [header | len | cap | backing_ptr]. The backing pointer
         // points to an array allocation with elements after its own OBJECT_HEADER_SIZE.
+        // `elem_offset` was checked_mul-bounded above, so the pointer arithmetic stays
+        // within `usize` and the resulting address is within the live allocation.
         let data_ptr = unsafe { ptr.add(super::heap::OBJECT_HEADER_SIZE) as *const Value };
         let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-        let elem_offset = index * std::mem::size_of::<Value>();
-        let elem_ptr = unsafe { backing.add(super::heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
+        let elem_ptr =
+            unsafe { backing.add(super::heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
         Ok(unsafe { *elem_ptr })
     } else {
-        let elem_offset = index * std::mem::size_of::<Value>();
-        let elem_ptr = unsafe { ptr.add(super::heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
+        // SAFETY: Non-LIST arrays store Values directly after the header.  Same
+        // checked-offset reasoning as the LIST branch above.
+        let elem_ptr =
+            unsafe { ptr.add(super::heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
         Ok(unsafe { *elem_ptr })
     }
 }

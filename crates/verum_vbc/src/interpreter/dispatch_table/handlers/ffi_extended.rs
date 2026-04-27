@@ -12,7 +12,6 @@ use crate::types::TypeId;
 use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
-use super::super::super::heap;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
 use super::string_helpers::*;
@@ -24,45 +23,6 @@ use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
 /// register values are passed as sizes to raw memory operations
 /// (`CMemcpy`, `CMemset`, `CMemmove`, `CMemcmp`).
 const MAX_FFI_ALLOCATION_SIZE: usize = 1 << 30; // 1 GiB
-
-/// Helper: read an element from a heap-allocated array or list by index.
-fn get_array_element(ptr: *const u8, header: &heap::ObjectHeader, index: usize) -> InterpreterResult<Value> {
-    // SECURITY: `index * size_of::<Value>()` can overflow `usize` on huge indices,
-    // producing a wrapped offset that would point into arbitrary memory. Use
-    // `checked_mul` and return an overflow error if the multiplication wraps.
-    let elem_offset = index
-        .checked_mul(std::mem::size_of::<Value>())
-        .ok_or(InterpreterError::IntegerOverflow { operation: "array_index_offset" })?;
-    if header.type_id == TypeId::LIST {
-        // SAFETY: `ptr` points to a heap-allocated object with a valid ObjectHeader
-        // followed by Value slots. Adding OBJECT_HEADER_SIZE skips the header and
-        // lands on the first Value slot (the List descriptor). Caller guarantees
-        // `ptr` remains valid for the duration of this read.
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        // SAFETY: List layout stores `[len, capacity, backing_ptr, ...]` inline.
-        // Slot 2 holds the backing-buffer pointer — dereferencing is safe because
-        // `data_ptr` is aligned and derived from a live heap allocation above.
-        let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-        // SAFETY: `backing` is the List's backing buffer (another heap object with
-        // its own header). `elem_offset` has been bounds-checked via checked_mul
-        // above, so the byte offset cannot overflow or wrap. Resulting pointer
-        // stays within the allocation.
-        let elem_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
-        // SAFETY: `elem_ptr` is a properly aligned pointer to an initialized
-        // Value slot within the backing buffer. Value is Copy, so the read does
-        // not move ownership.
-        Ok(unsafe { *elem_ptr })
-    } else {
-        // SAFETY: Non-LIST arrays store Values directly after the header.
-        // `elem_offset` was checked_mul-bounded above, so the addition cannot
-        // overflow, and the resulting pointer is within the allocation.
-        let elem_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
-        // SAFETY: `elem_ptr` is aligned and points to an initialized Value.
-        // Value is Copy; the read is sound.
-        Ok(unsafe { *elem_ptr })
-    }
-}
-
 
 // Extended opcode handlers
 
@@ -1102,7 +1062,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 } else {
                     // Marshal each element from NaN-boxed Value to C type
                     for i in 0..count {
-                        let elem = get_array_element(arr_ptr, header, i)?;
+                        let elem = super::super::get_array_element(arr_ptr, header, i)?;
                         // SAFETY: `buffer` has `buf_size = count * elem_size`
                         // bytes; each write below indexes `i < count` elements
                         // of `elem_size` bytes, staying in bounds. The element

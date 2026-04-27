@@ -982,12 +982,20 @@ fn test_compile_stdlib_mem_epoch() {
     }
 }
 
-/// Tests compilation of core/mem/header.vr
+/// Tests compilation of core/mem/header.vr.
+///
+/// Uses `compile_stdlib_file_with_mounts` because `header.vr` mounts
+/// the `cap_audit` writer helpers (record_revoke / record_attenuate /
+/// record_ref_incr / record_ref_decr / record_gen_bump) so every
+/// successful CBGR state transition can emit a CapEvent through the
+/// runtime-gated audit ring (#202).
 #[test]
 fn test_compile_stdlib_mem_header() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/mem/header.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile mem/header.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile mem/header.vr");
     }
 }
 
