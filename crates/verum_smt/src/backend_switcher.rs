@@ -248,6 +248,13 @@ pub struct SmtBackendSwitcher {
     /// Tracks which solver wins for which theory, cross-validation agreements/
     /// divergences, and per-theory success rates.
     routing_stats: Arc<crate::routing_stats::RoutingStats>,
+
+    /// Cache for `analyze_assertions_heuristically` results, keyed on a
+    /// stable signature of the assertion set's text rendering.  Mirror
+    /// of `tactics::TacticCache` for the CVC5 / capability-router side
+    /// (task #6 — dual-backend cache parity).  Avoids re-walking the
+    /// AST for theory detection on identical-shape obligations.
+    cvc_chars_cache: Arc<crate::capability_router::CvcStrategyCache>,
 }
 
 impl SmtBackendSwitcher {
@@ -268,7 +275,22 @@ impl SmtBackendSwitcher {
             cvc5: cvc5.map(Maybe::Some).unwrap_or(Maybe::None),
             stats: Arc::new(Mutex::new(SwitcherStats::default())),
             routing_stats: Arc::new(crate::routing_stats::RoutingStats::new()),
+            cvc_chars_cache: Arc::new(crate::capability_router::CvcStrategyCache::new()),
         }
+    }
+
+    /// Snapshot the CVC5-side characteristics-cache statistics —
+    /// symmetric counterpart to `tactics::TacticCache::stats()` for
+    /// the Z3 side.  Useful for `verum smt-stats` telemetry.
+    pub fn cvc_chars_cache_stats(&self) -> crate::capability_router::CvcStrategyCacheStats {
+        self.cvc_chars_cache.stats()
+    }
+
+    /// Access the CVC5-side characteristics cache directly (Arc clone)
+    /// so a portfolio session can share a single cache across multiple
+    /// switchers.
+    pub fn cvc_chars_cache(&self) -> Arc<crate::capability_router::CvcStrategyCache> {
+        self.cvc_chars_cache.clone()
     }
 
     /// Access the routing statistics collector (for telemetry/diagnostics).
@@ -298,6 +320,7 @@ impl SmtBackendSwitcher {
             cvc5: cvc5.map(Maybe::Some).unwrap_or(Maybe::None),
             stats: Arc::new(Mutex::new(SwitcherStats::default())),
             routing_stats,
+            cvc_chars_cache: Arc::new(crate::capability_router::CvcStrategyCache::new()),
         }
     }
 
@@ -349,7 +372,7 @@ impl SmtBackendSwitcher {
                 self.solve(assertions)
             }
             VerifyStrategy::ComplexityTyped => {
-                // ComplexityTyped (VVA-8 V0): bounded-arithmetic obligations
+                // ComplexityTyped (Bounded-arithmetic (V0)): bounded-arithmetic obligations
                 // are routed through the capability system; the chosen
                 // backend filters by the V_0 / V_1 / S^1_2 / V_NP / V_PH /
                 // IΔ_0 stratum that the user pinned at the pragma layer.
@@ -384,7 +407,7 @@ impl SmtBackendSwitcher {
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::CoherentStatic => {
-                // CoherentStatic (VVA-6 V1 weak): α-side discharged
+                // CoherentStatic (Coherent verification weak): α-side discharged
                 // through the certified pipeline (cross-validation +
                 // certificate); ε-side is the symbolic ε-claim attached
                 // at @enact and is checked statically without an extra
@@ -393,7 +416,7 @@ impl SmtBackendSwitcher {
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::CoherentRuntime => {
-                // CoherentRuntime (VVA-6 V1 hybrid): α-side is the same
+                // CoherentRuntime (Coherent verification hybrid): α-side is the same
                 // certified path as CoherentStatic; the ε-side is wired
                 // to a runtime monitor (`core.action.coherence_monitor`)
                 // so no additional compile-time SMT round is needed for
@@ -403,7 +426,7 @@ impl SmtBackendSwitcher {
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::Coherent => {
-                // Coherent (VVA-6 V1 strict): bidirectional α/ε check.
+                // Coherent (Coherent verification strict): bidirectional α/ε check.
                 // Both axes are discharged at compile time, both
                 // certificates are kernel-rechecked. Portfolio mode
                 // because the ε-side benefits from race semantics
@@ -699,8 +722,26 @@ impl SmtBackendSwitcher {
         &self,
         assertions: &List<Expr>,
     ) -> crate::capability_router::ExtendedCharacteristics {
-        use crate::capability_router::ExtendedCharacteristics;
+        use crate::capability_router::{AssertionSetSignature, ExtendedCharacteristics};
         use crate::strategy_selection::ProblemCharacteristics;
+
+        // CvcStrategyCache lookup keyed on a stable signature of the
+        // assertion-set's text rendering (task #6).  Identical-shape
+        // obligations across modules / phases hit the cache and skip
+        // the AST-walk theory detection entirely — symmetric with the
+        // Z3-side TacticCache that already shortcuts probe characterisation.
+        let signature_text = {
+            let mut s = String::with_capacity(64 * assertions.len());
+            for expr in assertions.iter() {
+                use std::fmt::Write;
+                let _ = write!(&mut s, "{:?}\n", expr);
+            }
+            s
+        };
+        let sig = AssertionSetSignature::of_text(&signature_text);
+        if let Some(cached) = self.cvc_chars_cache.get(&sig) {
+            return cached;
+        }
 
         let mut chars = ExtendedCharacteristics::from_base(ProblemCharacteristics {
             size: assertions.len() as f64,
@@ -712,6 +753,7 @@ impl SmtBackendSwitcher {
             self.scan_expr(expr, &mut chars);
         }
 
+        self.cvc_chars_cache.insert(sig, chars.clone());
         chars
     }
 
