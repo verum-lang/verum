@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: stdlib-runtime, atomics, atomic-u8, rmw, regression-100-task-34, regression-100-task-37
-// @expected-stdout: load:0xc3
+// @expected-stdout: load:195
 //
 // Pins task #37 closure: StructFieldAddr opcode + codegen wiring
 // makes `&self.value as *const Byte as *const UInt8` lower to the
@@ -15,5 +15,5 @@ mount core.sync.atomic.{AtomicU8, MemoryOrdering};
 fn main() {
     let a = AtomicU8.new(0xC3);
     let v = a.load(MemoryOrdering.SeqCst) as Int;
-    print(f"load:0x{v:x}");
+    print(f"load:{v}");
 }
