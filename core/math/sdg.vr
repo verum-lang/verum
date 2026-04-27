@@ -208,6 +208,35 @@ public fn derivative_polynomial(p: Polynomial) -> Polynomial {
     polynomial(new_coeffs)
 }
 
+/// V8 (#246) — polynomial multiplication via convolution.
+///
+/// Given p = Σ aᵢ xⁱ (degree m) and q = Σ bⱼ xʲ (degree n), the
+/// product p·q has degree m+n and coefficient cₖ = Σ_{i+j=k} aᵢ·bⱼ.
+///
+/// Used by wedge_product's 0-form scalar-multiplication case.
+public fn poly_mul(p: Polynomial, q: Polynomial) -> Polynomial {
+    if p.coefficients.len() == 0 || q.coefficients.len() == 0 {
+        return poly_constant(0.0);
+    }
+    let result_len = p.coefficients.len() + q.coefficients.len() - 1;
+    let mut coeffs: List<Float> = [];
+    let mut k: Int = 0;
+    while k < result_len {
+        coeffs.push(0.0);
+        k = k + 1;
+    }
+    let mut i: Int = 0;
+    while i < p.coefficients.len() {
+        let mut j: Int = 0;
+        while j < q.coefficients.len() {
+            coeffs[i + j] = coeffs[i + j] + p.coefficients[i] * q.coefficients[j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    polynomial(coeffs)
+}
+
 /// Kock-Lawvere axiom check: symbolic and synthetic derivatives agree.
 /// In a genuine SDG model this holds definitionally; here we verify numerically.
 @verify(formal)
@@ -304,6 +333,22 @@ fn binom(n: Int, k: Int) -> Int {
 
 /// Wedge product  α ∧ β  of a p-form and a q-form.
 /// Degree of result is p + q; zero form if p + q > n.
+///
+/// V8 (#246) — three cases handled:
+///
+///   • **Out-of-rank** (p + q > n): result is the zero (p+q)-form.
+///     Always correct because Λ^{p+q}(R^n) = 0 for p+q > n.
+///   • **0-form ∧ k-form** (or symmetric): scalar multiplication.
+///     If α is a 0-form with single coefficient `f`, then α ∧ β is
+///     the k-form whose i-th coefficient is `f · βᵢ`. Symmetric
+///     for β a 0-form.
+///   • **General p-form ∧ q-form** (p, q ≥ 1, p + q ≤ n): falls
+///     through to the degree-correct zero-coefficient stub. Full
+///     multi-index Leibniz expansion requires k-subset
+///     combinatorics + shuffle-sign that haven't landed; deferred
+///     to V2 (#246 V2 follow-up). Documented in the result so
+///     downstream callers can detect the partial-implementation
+///     boundary.
 @verify(formal)
 public fn wedge_product(
     alpha: DifferentialForm,
@@ -314,11 +359,46 @@ public fn wedge_product(
     if new_degree > n {
         return zero_form(new_degree, n);
     }
+
+    // 0-form on the left: α is a scalar (single coefficient).
+    // α ∧ β multiplies each β coefficient by the scalar polynomial.
+    if alpha.degree == 0 && alpha.coefficients.len() >= 1 {
+        let scalar = alpha.coefficients[0];
+        let mut coeffs: List<Polynomial> = [];
+        let mut i: Int = 0;
+        while i < beta.coefficients.len() {
+            coeffs.push(poly_mul(scalar, beta.coefficients[i]));
+            i = i + 1;
+        }
+        return DifferentialForm {
+            degree: beta.degree,
+            coefficients: coeffs,
+            dimension: n,
+        };
+    }
+
+    // 0-form on the right: symmetric.
+    if beta.degree == 0 && beta.coefficients.len() >= 1 {
+        let scalar = beta.coefficients[0];
+        let mut coeffs: List<Polynomial> = [];
+        let mut i: Int = 0;
+        while i < alpha.coefficients.len() {
+            coeffs.push(poly_mul(alpha.coefficients[i], scalar));
+            i = i + 1;
+        }
+        return DifferentialForm {
+            degree: alpha.degree,
+            coefficients: coeffs,
+            dimension: n,
+        };
+    }
+
+    // V2 fall-through: degree-correct zero result for higher-degree
+    // wedges. Multi-index Leibniz expansion deferred.
     let size = binom(n, new_degree);
     let mut coeffs: List<Polynomial> = [];
     let mut i: Int = 0;
     while i < size {
-        // Full expansion uses multi-index Leibniz rule; stub is degree-correct.
         coeffs.push(poly_constant(0.0));
         i = i + 1;
     }
