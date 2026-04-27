@@ -1,0 +1,45 @@
+// docs/by-example/04-result-error/main.vr
+// Result<T, E>, Maybe<T>, and `?` propagation.
+
+type ParseError is
+    | EmptyInput
+    | NotANumber(Text)
+    | OutOfRange(Int);
+
+fn parse_positive(s: &Text) -> Result<Int, ParseError> {
+    if s.is_empty() {
+        return Err(ParseError.EmptyInput);
+    }
+    // Try to parse as integer.
+    let n = match s.to_int() {
+        Some(v) => v,
+        None    => return Err(ParseError.NotANumber(s.clone())),
+    };
+    if n <= 0 {
+        return Err(ParseError.OutOfRange(n));
+    }
+    Ok(n)
+}
+
+fn double_positive(s: &Text) -> Result<Int, ParseError> {
+    let n = parse_positive(s)?;          // ? propagates Err early
+    Ok(n * 2)
+}
+
+fn report(s: &Text) {
+    match double_positive(s) {
+        Ok(n)                      => print(f"  {s} -> {n}"),
+        Err(ParseError.EmptyInput)        => print(f"  {s} -> empty input rejected"),
+        Err(ParseError.NotANumber(t))     => print(f"  {s} -> not a number: {t}"),
+        Err(ParseError.OutOfRange(n))     => print(f"  {s} -> out of range: {n}"),
+    }
+}
+
+fn main() {
+    print("double_positive results:");
+    report(&"7");
+    report(&"42");
+    report(&"");
+    report(&"hello");
+    report(&"-5");
+}

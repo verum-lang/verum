@@ -1,0 +1,6 @@
+// docs/by-example/01-hello-world/main.vr
+// First example: print a line to stdout and exit cleanly.
+
+fn main() {
+    print("Hello, Verum!");
+}
