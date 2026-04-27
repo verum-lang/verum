@@ -2633,10 +2633,12 @@ fn trivia_kind_to_syntax_kind(kind: LexerTriviaKind) -> SyntaxKind {
         LexerTriviaKind::BlockComment => SyntaxKind::BLOCK_COMMENT,
         LexerTriviaKind::DocComment => SyntaxKind::DOC_COMMENT,
         LexerTriviaKind::InnerDocComment => SyntaxKind::DOC_COMMENT,
-        // Shebang lines are leading-trivia in the lossless tree;
-        // they map to LINE_COMMENT (semantically a "comment" the
-        // CST preserves but the parser ignores).
-        LexerTriviaKind::Shebang => SyntaxKind::LINE_COMMENT,
+        // Shebang and BOM are file-prefix trivia in the lossless tree;
+        // they map to dedicated syntax kinds (SHEBANG, BYTE_ORDER_MARK)
+        // so formatters / lossless reconstruction round-trip exactly,
+        // but the parser ignores them as it does line comments.
+        LexerTriviaKind::Shebang => SyntaxKind::SHEBANG,
+        LexerTriviaKind::ByteOrderMark => SyntaxKind::BYTE_ORDER_MARK,
     }
 }
 

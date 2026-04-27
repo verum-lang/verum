@@ -395,6 +395,61 @@ mod shebang_tests {
     }
 
     #[test]
+    fn lossless_emits_bom_then_shebang_in_order() {
+        // Byte-perfect round-trip contract: BOM must precede shebang in
+        // leading_trivia, and the concatenation of all leading_trivia
+        // text + token text + trailing_trivia text must rebuild the
+        // original source exactly.
+        let src = "\u{FEFF}#!/usr/bin/env verum\nfn main() {}";
+        let tokens = LosslessLexer::new(src, fid()).tokenize();
+        let first = tokens
+            .iter()
+            .find(|t| matches!(t.token.kind, TokenKind::Fn))
+            .expect("fn token must be present");
+        let kinds: Vec<TriviaKind> = first.leading_trivia.items.iter().map(|t| t.kind).collect();
+        // BOM must come strictly before Shebang.
+        let bom_idx = kinds.iter().position(|k| matches!(k, TriviaKind::ByteOrderMark));
+        let sb_idx  = kinds.iter().position(|k| matches!(k, TriviaKind::Shebang));
+        assert!(bom_idx.is_some(), "BOM trivia missing");
+        assert!(sb_idx.is_some(),  "Shebang trivia missing");
+        assert!(bom_idx < sb_idx, "BOM must precede shebang in leading_trivia");
+        // Spans on the BOM and shebang must be in original-source coordinates.
+        let bom = &first.leading_trivia.items[bom_idx.unwrap()];
+        let sb  = &first.leading_trivia.items[sb_idx.unwrap()];
+        assert_eq!(bom.text.as_bytes(), UTF8_BOM);
+        assert_eq!(bom.span.start, 0);
+        assert_eq!(bom.span.end, 3);
+        assert_eq!(sb.text, "#!/usr/bin/env verum\n");
+        assert_eq!(sb.span.start, 3);
+        assert_eq!(sb.span.end, 3 + 21);
+    }
+
+    #[test]
+    fn lossless_emits_bom_alone_no_shebang() {
+        let src = "\u{FEFF}fn main() {}";
+        let tokens = LosslessLexer::new(src, fid()).tokenize();
+        let first = tokens
+            .iter()
+            .find(|t| matches!(t.token.kind, TokenKind::Fn))
+            .expect("fn token must be present");
+        let bom = first
+            .leading_trivia
+            .items
+            .iter()
+            .find(|t| matches!(t.kind, TriviaKind::ByteOrderMark))
+            .expect("BOM trivia must be attached");
+        assert_eq!(bom.text.as_bytes(), UTF8_BOM);
+        assert_eq!(bom.span.start, 0);
+        assert_eq!(bom.span.end, 3);
+        // No shebang.
+        assert!(!first
+            .leading_trivia
+            .items
+            .iter()
+            .any(|t| matches!(t.kind, TriviaKind::Shebang)));
+    }
+
+    #[test]
     fn lossless_no_shebang_no_trivia_added() {
         let src = "fn main() {}";
         let tokens = LosslessLexer::new(src, fid()).tokenize();
