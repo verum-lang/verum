@@ -172,20 +172,27 @@ fn looks_like_script_invocation(arg: &OsString) -> bool {
     has_shebang(path)
 }
 
-/// Returns true iff the file's first two bytes are `#!`.
+/// Returns true iff the file begins with a `#!` shebang. A leading UTF-8
+/// BOM (`EF BB BF`) is tolerated — Windows / cross-platform editors
+/// frequently prepend one and the shebang line is still shell-significant
+/// at byte 3 in that case (the kernel ignores the BOM, treating the line
+/// as `#!...`). Reading at most 5 bytes is enough to cover both layouts.
 fn has_shebang(path: &Path) -> bool {
     use std::fs::File;
     use std::io::Read;
-    match File::open(path) {
-        Ok(mut f) => {
-            let mut buf = [0u8; 2];
-            match f.read(&mut buf) {
-                Ok(2) => &buf == b"#!",
-                _ => false,
-            }
-        }
-        Err(_) => false,
+    let mut f = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut buf = [0u8; 5];
+    let n = match f.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    if n >= 5 && &buf[..3] == [0xEF, 0xBB, 0xBF] && &buf[3..5] == b"#!" {
+        return true;
     }
+    n >= 2 && &buf[..2] == b"#!"
 }
 
 /// Returns true iff `argv[1]` (when present) is a script invocation — i.e. the
@@ -346,6 +353,20 @@ mod tests {
         // Same as above but without chmod — the rewrite logic only inspects
         // file content, not permission bits, so this works on every platform.
         let p = write_temp("greet2", "#!/usr/bin/env verum\nfn main() {}\n");
+        let a = argv(&["verum", p.to_str().unwrap()]);
+        let r = rewrite_argv_for_script_mode(a);
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[1], OsString::from("run"));
+        let _ = fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn rewrite_for_bom_prefixed_shebang_file() {
+        // Cross-platform editors that emit UTF-8 BOM (`EF BB BF`) still
+        // produce a shebang script when the BOM precedes `#!`. The
+        // shell/kernel happily accepts this layout (the BOM is just bytes
+        // before the shebang); script-mode dispatch must follow suit.
+        let p = write_temp("bom_script", "\u{FEFF}#!/usr/bin/env verum\nfn main() {}\n");
         let a = argv(&["verum", p.to_str().unwrap()]);
         let r = rewrite_argv_for_script_mode(a);
         assert_eq!(r.len(), 3);
