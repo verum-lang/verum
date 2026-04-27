@@ -356,6 +356,25 @@ fn labeled_extract(
     Ok(hkdf_extract_sha256(salt, labeled_ikm.as_slice()).to_list())
 }
 
+/// RFC 9180 §4 LabeledExpand.  Builds the HPKE-v1 labeled-info
+/// envelope and forwards to the SHA-256 HKDF expander.
+///
+/// SOUNDNESS: previous revision called `hkdf_expand_sha256(prk,
+/// info, length)` — three positional args returning
+/// `Result<List<Byte>, _>`.  The actual signature in
+/// `core/security/kdf/hkdf.vr:82` is
+/// `(prk, info, length, out: &mut List<Byte>) -> Result<(), HkdfError>`.
+/// The arity mismatch was masked by the codegen lenient-SKIP class
+/// (#166): `labeled_expand` was emitted as a bug-class skip and every
+/// caller silently received `Ok(empty list)` at runtime — every
+/// HPKE export and every key-schedule derivation produced empty
+/// secrets, breaking the entire HPKE pipeline.
+///
+/// Also adds the I2OSP length-bound check: RFC 9180 §4 requires
+/// `length` fit in two bytes (UInt16); HKDF-SHA256's own cap
+/// (255 × 32 = 8160) is well below that.  Reject length > 0xFFFF
+/// at this layer with a clear KdfFailure rather than truncating
+/// the encoded length silently.
 fn labeled_expand(
     prk:      &[Byte],
     label:    &[Byte],
@@ -363,6 +382,9 @@ fn labeled_expand(
     length:   Int,
     suite_id: &[Byte],
 ) -> Result<List<Byte>, HpkeError> {
+    if length < 0 || length > 0xFFFF {
+        return Err(HpkeError.KdfFailure);
+    }
     // labeled_info = I2OSP(L, 2) || "HPKE-v1" (7) || suite_id || label || info.
     let mut labeled_info: List<Byte> =
         List.with_capacity(2 + 7 + suite_id.len() + label.len() + info.len());
@@ -372,8 +394,11 @@ fn labeled_expand(
     push_bytes(&mut labeled_info, suite_id);
     push_bytes(&mut labeled_info, label);
     push_bytes(&mut labeled_info, info);
-    hkdf_expand_sha256(prk, labeled_info.as_slice(), length)
-        .map_err(|_| HpkeError.KdfFailure)
+    let mut out: List<Byte> = List.with_capacity(length);
+    match hkdf_expand_sha256(prk, labeled_info.as_slice(), length, &mut out) {
+        Ok(()) => Ok(out),
+        Err(_) => Err(HpkeError.KdfFailure),
+    }
 }
 
 fn labeled_expand_hpke(
