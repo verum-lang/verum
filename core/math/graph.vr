@@ -240,7 +240,7 @@ public fn dfs<V, L, G>(g: &G, start: V) -> List<V>
     let mut stack: List<V> = List.new();
     stack.push(start);
     while !stack.is_empty() {
-        let v = stack.pop().unwrap();
+        let v = stack.pop().expect("dfs: stack non-empty by while-condition guard");
         if visited.contains(&v) { continue; }
         visited.push(v.clone());
         // Push neighbours in reverse order so the leftmost child
