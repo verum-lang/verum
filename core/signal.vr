@@ -226,7 +226,12 @@ const BROADCAST_CAPACITY: Int = 64;
 static REGISTRY: Mutex<Maybe<Shared<SignalRegistry>>> = Mutex.new(None);
 
 fn ensure_registry() -> Shared<SignalRegistry> {
-    let mut guard = REGISTRY.lock().unwrap();
+    // Poison-tolerant: signal infrastructure must keep running even
+    // if an unrelated panic poisoned the registry mutex. The lock-
+    // protected state (REGISTRY: Maybe<Shared<...>>) is always either
+    // None (uninitialized) or Some(reg); both observable values are
+    // safe to keep using even if an unrelated thread panicked.
+    let mut guard = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
     match &*guard {
         Some(r) => r.clone(),
         None => {
@@ -246,7 +251,8 @@ implement SignalRegistry {
     ///
     /// Spawns the background poller on first-ever call.
     public fn ensure_signal_registered(&self, sig: Signal) -> BroadcastSender<Signal> {
-        let mut entries = self.entries.lock().unwrap();
+        // Poison-tolerant: see ensure_registry above for rationale.
+        let mut entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
 
         // Fast path — already registered.
         for e in entries.iter() {
@@ -288,10 +294,18 @@ implement SignalRegistry {
         // until the registry drops (never, in current design) or process
         // exits. That's fine — it's detached, low-priority.
         let self_clone = {
-            // Build a strong ref via the mutex; unwrap is safe because
-            // ensure_registry just stored Some(...).
-            let g = REGISTRY.lock().unwrap();
-            g.as_ref().unwrap().clone()
+            // Build a strong ref via the static REGISTRY. Poison-
+            // tolerant lock; the `expect` guards a structural
+            // invariant — `spawn_poller` is only ever reached via
+            // `ensure_signal_registered`, which is only callable
+            // through `ensure_registry()`, and that fn ALWAYS stores
+            // Some(reg) before returning. A None here would mean
+            // someone bypassed the API contract; surface that with
+            // a descriptive panic instead of a generic unwrap.
+            let g = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
+            g.as_ref()
+                .expect("signal::spawn_poller — REGISTRY must be Some by API contract; called outside ensure_registry?")
+                .clone()
         };
 
         let _ = spawn_detached(async move {
@@ -300,7 +314,8 @@ implement SignalRegistry {
 
                 // Scan + drain.
                 let snapshot: List<(Signal, BroadcastSender<Signal>)> = {
-                    let entries = self_clone.entries.lock().unwrap();
+                    // Poison-tolerant — see ensure_registry above.
+                    let entries = self_clone.entries.lock().unwrap_or_else(|p| p.into_inner());
                     let mut fired: List<(Signal, BroadcastSender<Signal>)> = List.new();
                     for e in entries.iter() {
                         if e.flag.is_set() {
