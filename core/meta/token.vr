@@ -126,7 +126,8 @@ implement TokenStream {
         let span = if trees.is_empty() {
             Span.call_site()
         } else {
-            trees.first().unwrap().span().join(trees.last().unwrap().span())
+            trees.first().expect("from_trees: non-empty branch (else-branch above)").span()
+                .join(trees.last().expect("from_trees: non-empty branch — last is_some too").span())
         };
 
         Self { tokens: trees, span }
@@ -335,8 +336,12 @@ implement TokenStream {
         if self.tokens.is_empty() {
             self.span = Span.call_site();
         } else {
-            self.span = self.tokens.first().unwrap().span()
-                .join(self.tokens.last().unwrap().span());
+            self.span = self.tokens.first()
+                .expect("recalculate_span: non-empty branch (else-branch above)")
+                .span()
+                .join(self.tokens.last()
+                    .expect("recalculate_span: non-empty branch — last is_some too")
+                    .span());
         }
     }
 }
