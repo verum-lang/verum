@@ -1,0 +1,112 @@
+# =============================================================================
+# tests/db-integration/docker-compose.yml — Spindle integration test rig
+# =============================================================================
+# Spec: internal/specs/database.md §22 (DST + integration testing)
+#
+# Brings up the database servers Spindle's Postgres / MySQL adapters
+# need for full end-to-end testing. SQLite is in-process and needs no
+# Docker.
+#
+# Usage:
+#
+#   make -C tests/db-integration up    # start, wait healthy
+#   make -C tests/db-integration test  # run vcs adapter tests
+#   make -C tests/db-integration down  # stop + remove volumes
+#
+# All containers are bound to localhost only (127.0.0.1). Ports are
+# bumped off the defaults so a developer's local Postgres/MySQL aren't
+# stomped on:
+#
+#   pg16 / pg14 → 55432 / 55434
+#   mysql8       → 53306
+#
+# Each service publishes a `wait-for` readiness probe via healthcheck
+# so the runner blocks on availability instead of polling itself.
+# Volumes are unnamed (anonymous) so `down -v` cleans state.
+# =============================================================================
+
+services:
+  pg16:
+    image: postgres:16-alpine
+    container_name: verum-spindle-pg16
+    restart: "no"
+    environment:
+      POSTGRES_USER: spindle
+      POSTGRES_PASSWORD: spindle_pw_local_only
+      POSTGRES_DB: spindle_test
+      # Force SCRAM-SHA-256 auth to exercise our Postgres SCRAM
+      # implementation; md5 is rejected at compile-time anyway.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - ./init/postgres:/docker-entrypoint-initdb.d:ro
+    command: >
+      postgres
+      -c listen_addresses=*
+      -c log_statement=all
+      -c log_connections=on
+      -c log_disconnections=on
+      -c shared_preload_libraries=pg_stat_statements
+      -c max_connections=200
+      -c shared_buffers=128MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spindle -d spindle_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  pg14:
+    image: postgres:14-alpine
+    container_name: verum-spindle-pg14
+    restart: "no"
+    environment:
+      POSTGRES_USER: spindle
+      POSTGRES_PASSWORD: spindle_pw_local_only
+      POSTGRES_DB: spindle_test
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+    ports:
+      - "127.0.0.1:55434:5432"
+    volumes:
+      - ./init/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spindle -d spindle_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  mysql8:
+    image: mysql:8.0
+    container_name: verum-spindle-mysql8
+    restart: "no"
+    environment:
+      MYSQL_ROOT_PASSWORD: spindle_root_pw_local_only
+      MYSQL_DATABASE: spindle_test
+      MYSQL_USER: spindle
+      MYSQL_PASSWORD: spindle_pw_local_only
+    ports:
+      - "127.0.0.1:53306:3306"
+    volumes:
+      - ./init/mysql:/docker-entrypoint-initdb.d:ro
+    command: >
+      --default-authentication-plugin=caching_sha2_password
+      --general-log=ON
+      --general-log-file=/var/lib/mysql/general.log
+      --max-connections=200
+    healthcheck:
+      test:
+        - CMD
+        - mysqladmin
+        - ping
+        - -h
+        - 127.0.0.1
+        - -uspindle
+        - -pspindle_pw_local_only
+      interval: 2s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
