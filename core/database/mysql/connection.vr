@@ -1,0 +1,603 @@
+// =============================================================================
+// core/database/mysql/connection.vr — MysqlConnection state machine
+// =============================================================================
+// Spec: internal/specs/database.md §6.3, dev.mysql.com/doc/dev/mysql-server/
+//       latest/page_protocol_basic_packets.html
+//
+// Drives the v10 protocol forward:
+//
+//   1. TCP connect.
+//   2. Read Initial Handshake — capture capabilities + auth-plugin name +
+//      20-byte auth scramble.
+//   3. Reject auth-plugin != caching_sha2_password (mysql_native_password
+//      requires `@allow_legacy_auth` opt-in; v0.1 ships only the modern
+//      default).
+//   4. Build & send HandshakeResponse41 with the caching_sha2 fast-path
+//      response. Increment sequence number per packet.
+//   5. Read AuthMoreData / OK / ERR / AuthSwitchRequest:
+//        * OK directly      → fast auth without AuthMoreData (server
+//                             cached the password successfully)
+//        * AuthMoreData(0x03) → expect OK next
+//        * AuthMoreData(0x04) → full-auth required; v0.1 returns
+//                                TLS_PENDING (RSA exchange + cleartext
+//                                fall-back land in T10c)
+//        * AuthSwitch        → reject; pinned to caching_sha2_password
+//        * ERR               → translate via dberr_from_mysql
+//   6. simple_query(sql) sends COM_QUERY (resets seq to 0), reads
+//      ColumnCount LEI → ColumnDefinition41 packets → EOF (or
+//      DEPRECATE_EOF skips this) → DataRow text packets → OK / EOF /
+//      ERR. Returns SimpleQueryResult.
+// =============================================================================
+
+module core.database.mysql.connection;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.net.tcp.TcpStream;
+mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
+mount core.database.mysql.config.{MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired};
+mount core.database.mysql.error.dberr_from_mysql;
+mount core.database.mysql.wire.frame.{
+    MysqlPacket, ParseOutcome, frame_packet, try_parse_packet,
+    decode_lei, read_lenenc_string, read_bytes,
+};
+mount core.database.mysql.wire.frontend.{
+    handshake_response, com_query, com_ping, com_quit,
+    default_plugin_name,
+};
+mount core.database.mysql.wire.backend.{
+    InitialHandshake, OkPacket, ErrPacket, AuthSwitch, AuthMore, ColumnDef,
+    ServerPacketKind,
+    SkOk, SkError, SkEof, SkAuthSwitch, SkAuthMore, SkLocalInfile, SkData,
+    parse_initial_handshake, parse_ok, parse_err, parse_auth_switch,
+    parse_auth_more, parse_column_def, classify,
+};
+mount core.database.mysql.wire.types.{
+    PKT_OK, PKT_EOF, PKT_ERROR, CAP_PROTOCOL_41, CAP_DEPRECATE_EOF,
+    plugin_caching_sha2_password,
+};
+mount core.database.mysql.auth.caching_sha2.{
+    scramble_caching_sha2,
+    CachingSha2State, CsFastAuthOk, CsFullAuthRequired, CsFailed,
+    classify_auth_more,
+};
+
+// -----------------------------------------------------------------------------
+// State
+// -----------------------------------------------------------------------------
+
+public type MysqlConnState is
+      McsConnecting
+    | McsAuthenticating
+    | McsReady
+    | McsBusy
+    | McsClosed
+    | McsFailed;
+
+// -----------------------------------------------------------------------------
+// SimpleQueryResult — text-mode rows.
+// -----------------------------------------------------------------------------
+
+/// One column value as it sat on the wire — text-encoded bytes (the
+/// MySQL text-mode result-set encoding) or NULL.
+public type MysqlTextValue is
+      MtvNull
+    | MtvBytes(List<Byte>);
+
+public type SimpleQueryResult is {
+    columns: List<ColumnDef>,
+    rows: List<List<MysqlTextValue>>,
+    affected_rows: Int,           // 0 unless OK packet supplied a count
+    last_insert_id: Int,
+    info: Text,
+};
+
+// -----------------------------------------------------------------------------
+// MysqlConnection
+// -----------------------------------------------------------------------------
+
+public type MysqlConnection is {
+    stream: TcpStream,
+    state: MysqlConnState,
+    sequence: Int,
+    recv: List<Byte>,
+    capabilities: Int,
+    server_version: Text,
+    connection_id: Int,
+};
+
+// -----------------------------------------------------------------------------
+// Open / close
+// -----------------------------------------------------------------------------
+
+public fn connect(config: &MysqlConfig) -> Result<MysqlConnection, DbError> {
+    match config.tls_mode {
+        MtmDisable => {}
+        MtmRequired => {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "TLS_PENDING".clone(),
+                message: "MtmRequired pending core.net.tls integration".clone(),
+                retryable: false,
+            }));
+        }
+    }
+
+    let target = format_host_port(&config.host, config.port);
+    let stream = match TcpStream.connect(target.as_str()) {
+        Ok(s)  => s,
+        Err(_) => {
+            return Err(DbError.ConnectionFailed {
+                source: core.database.common.error.ConnectionErrorKind.CekConnectRefused,
+                adapter: AdMysql,
+            });
+        }
+    };
+
+    let mut conn = MysqlConnection {
+        stream: stream,
+        state: McsConnecting,
+        sequence: 0,
+        recv: List.new(),
+        capabilities: 0,
+        server_version: "".clone(),
+        connection_id: 0,
+    };
+
+    drive_handshake(&mut conn, config)?;
+    Ok(conn)
+}
+
+implement MysqlConnection {
+    public fn state(&self) -> MysqlConnState { self.state.clone() }
+    public fn server_version(&self) -> Text { self.server_version.clone() }
+    public fn connection_id(&self) -> Int { self.connection_id }
+    public fn capabilities(&self) -> Int { self.capabilities }
+
+    /// Issue a COM_QUERY single-statement query in text-mode protocol.
+    /// Returns ColumnDef list + decoded text rows (NULL preserved as
+    /// `MtvNull`).
+    public fn simple_query(&mut self, sql: &Text) -> Result<SimpleQueryResult, DbError> {
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "simple_query requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = McsBusy;
+
+        // COM_QUERY resets the sequence counter to 0.
+        self.sequence = 0;
+        let payload = com_query(sql);
+        send_packet(self, payload.as_slice())?;
+
+        // First reply is one of:
+        //   * ERR              → translated, return
+        //   * OK               → INSERT/UPDATE/DELETE/DDL — no rows
+        //   * LOCAL INFILE     → not supported in v0.1, return error
+        //   * column-count LEI → SELECT, decode rows
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        let kind = classify(body.as_slice(), self.capabilities);
+        match kind {
+            SkError => {
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("ERR")); }
+                };
+                self.state = McsReady;
+                return Err(dberr_from_mysql(err));
+            }
+            SkOk => {
+                let ok = match parse_ok(body.as_slice(), self.capabilities) {
+                    Ok(p)  => p,
+                    Err(_) => { return Err(bad_decode("OK")); }
+                };
+                self.state = McsReady;
+                return Ok(SimpleQueryResult {
+                    columns: List.new(),
+                    rows: List.new(),
+                    affected_rows: ok.affected_rows,
+                    last_insert_id: ok.last_insert_id,
+                    info: ok.info,
+                });
+            }
+            SkLocalInfile => {
+                self.state = McsFailed;
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdMysql,
+                    code: "LOCAL_INFILE_DISABLED".clone(),
+                    message: "LOCAL INFILE protocol disabled".clone(),
+                    retryable: false,
+                }));
+            }
+            _ => {
+                // Column-count LEI; fall through to result-set decoder.
+            }
+        }
+
+        let (col_count, _, _) = match decode_lei(body.as_slice(), 0) {
+            Ok(t)  => t,
+            Err(_) => { return Err(bad_decode("column count LEI")); }
+        };
+
+        let mut columns: List<ColumnDef> = List.new();
+        let mut i: Int = 0;
+        while i < col_count {
+            let p = recv_packet(self)?;
+            let cd = match parse_column_def(p.payload().as_slice()) {
+                Ok(c)  => c,
+                Err(_) => { return Err(bad_decode("ColumnDef41")); }
+            };
+            columns.push(cd);
+            i = i + 1;
+        }
+
+        // EOF after column list — only when DEPRECATE_EOF NOT negotiated.
+        let deprecate_eof = (self.capabilities & CAP_DEPRECATE_EOF) != 0;
+        if !deprecate_eof {
+            let _ = recv_packet(self)?;     // EOF marker, no further state
+        }
+
+        // Read DataRow packets until OK / EOF / ERR.
+        let mut rows: List<List<MysqlTextValue>> = List.new();
+        loop {
+            let p = recv_packet(self)?;
+            let payload = p.into_payload();
+            let pk = classify(payload.as_slice(), self.capabilities);
+            match pk {
+                SkError => {
+                    let err = match parse_err(payload.as_slice(), self.capabilities) {
+                        Ok(e)  => e,
+                        Err(_) => { return Err(bad_decode("ERR")); }
+                    };
+                    self.state = McsReady;
+                    return Err(dberr_from_mysql(err));
+                }
+                SkEof => { break; }
+                SkOk  => { break; }
+                _ => {
+                    let row = match decode_text_row(payload.as_slice(), col_count) {
+                        Ok(r)  => r,
+                        Err(_) => { return Err(bad_decode("DataRow")); }
+                    };
+                    rows.push(row);
+                }
+            }
+        }
+
+        self.state = McsReady;
+        Ok(SimpleQueryResult {
+            columns: columns,
+            rows: rows,
+            affected_rows: 0,
+            last_insert_id: 0,
+            info: "".clone(),
+        })
+    }
+
+    /// Round-trip ping — succeeds when the server returns OK.
+    public fn ping(&mut self) -> Result<(), DbError> {
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "ping requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.sequence = 0;
+        let payload = com_ping();
+        send_packet(self, payload.as_slice())?;
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        match classify(body.as_slice(), self.capabilities) {
+            SkOk => Ok(()),
+            SkError => {
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("ping ERR")); }
+                };
+                Err(dberr_from_mysql(err))
+            }
+            _ => Err(bad_decode("ping reply")),
+        }
+    }
+
+    /// Orderly close — sends COM_QUIT then closes the TCP stream.
+    /// Affine: caller cannot re-use after this.
+    public fn close(mut self) -> Result<(), DbError> {
+        match self.state {
+            McsClosed => return Ok(()),
+            _ => {}
+        }
+        self.sequence = 0;
+        let payload = com_quit();
+        let _ = send_packet(&mut self, payload.as_slice());
+        self.state = McsClosed;
+        Ok(())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Handshake driver
+// -----------------------------------------------------------------------------
+
+fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(), DbError> {
+    conn.state = McsAuthenticating;
+
+    // Step 1 — Initial Handshake.
+    let pkt = recv_packet(conn)?;
+    let body = pkt.into_payload();
+    if body.len() > 0 && body[0] == PKT_ERROR {
+        let err = match parse_err(body.as_slice(), 0) {
+            Ok(e)  => e,
+            Err(_) => { return Err(bad_decode("initial ERR")); }
+        };
+        conn.state = McsFailed;
+        return Err(dberr_from_mysql(err));
+    }
+    let hs = match parse_initial_handshake(body.as_slice()) {
+        Ok(h)  => h,
+        Err(_) => { return Err(bad_decode("InitialHandshake")); }
+    };
+    conn.capabilities = hs.capabilities;
+    conn.server_version = hs.server_version.clone();
+    conn.connection_id = hs.connection_id;
+
+    // Step 2 — pin caching_sha2_password.
+    if hs.auth_plugin_name != plugin_caching_sha2_password() {
+        conn.state = McsFailed;
+        return Err(DbError.AuthFailed {
+            kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
+                f"server requires plugin '{hs.auth_plugin_name}' (Spindle pinned to caching_sha2_password)",
+            ),
+        });
+    }
+
+    // Step 3 — build HandshakeResponse41.
+    let scramble = scramble_caching_sha2(
+        config.password.as_bytes(),
+        hs.auth_plugin_data.as_slice(),
+    );
+    let resp = handshake_response(
+        &config.user,
+        scramble.as_slice(),
+        &config.database,
+        &plugin_caching_sha2_password(),
+        config.character_set,
+        16_777_216,     // max packet — 16 MiB advisory
+    );
+    conn.sequence = 1;     // server handshake was seq 0; our reply is seq 1
+    send_packet(conn, resp.as_slice())?;
+
+    // Step 4 — read auth result.
+    loop {
+        let pkt = recv_packet(conn)?;
+        let body = pkt.into_payload();
+        let kind = classify(body.as_slice(), conn.capabilities);
+        match kind {
+            SkOk => {
+                conn.state = McsReady;
+                return Ok(());
+            }
+            SkError => {
+                let err = match parse_err(body.as_slice(), conn.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("auth ERR")); }
+                };
+                conn.state = McsFailed;
+                return Err(dberr_from_mysql(err));
+            }
+            SkAuthMore => {
+                let am = match parse_auth_more(body.as_slice()) {
+                    Ok(m)  => m,
+                    Err(_) => { return Err(bad_decode("AuthMoreData")); }
+                };
+                match classify_auth_more(am.data.as_slice()) {
+                    CsFastAuthOk        => {
+                        // Next packet must be OK.
+                    }
+                    CsFullAuthRequired => {
+                        conn.state = McsFailed;
+                        return Err(DbError.AuthFailed {
+                            kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
+                                "server demanded full caching_sha2 auth (RSA / TLS) — pending T10c".clone(),
+                            ),
+                        });
+                    }
+                    CsFailed            => {
+                        conn.state = McsFailed;
+                        return Err(DbError.AuthFailed {
+                            kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
+                                "caching_sha2 server reply not classifiable".clone(),
+                            ),
+                        });
+                    }
+                }
+            }
+            SkAuthSwitch => {
+                let sw = match parse_auth_switch(body.as_slice()) {
+                    Ok(s)  => s,
+                    Err(_) => { return Err(bad_decode("AuthSwitch")); }
+                };
+                conn.state = McsFailed;
+                return Err(DbError.AuthFailed {
+                    kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
+                        f"server requested auth switch to '{sw.plugin_name}' (Spindle pinned to caching_sha2_password)",
+                    ),
+                });
+            }
+            _ => { return Err(bad_decode("unexpected packet during auth")); }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Text-mode row decoder.
+// -----------------------------------------------------------------------------
+
+fn decode_text_row(payload: &[Byte], cols: Int) -> Result<List<MysqlTextValue>, DbError> {
+    let mut out: List<MysqlTextValue> = List.new();
+    let mut off: Int = 0;
+    let mut i: Int = 0;
+    while i < cols {
+        if off >= payload.len() as Int {
+            return Err(bad_decode("short text row"));
+        }
+        if (payload[off] as Int) == 0xFB {
+            out.push(MtvNull);
+            off = off + 1;
+        } else {
+            let (bytes_opt, used) = match read_lenenc_string(payload, off) {
+                Ok(t)  => t,
+                Err(_) => { return Err(bad_decode("text row LEI")); }
+            };
+            match bytes_opt {
+                None    => out.push(MtvNull),
+                Some(b) => out.push(MtvBytes(b)),
+            }
+            off = off + used;
+        }
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+// -----------------------------------------------------------------------------
+// I/O helpers
+// -----------------------------------------------------------------------------
+
+fn send_packet(conn: &mut MysqlConnection, payload: &[Byte]) -> Result<(), DbError> {
+    let pkt = frame_packet(conn.sequence, payload);
+    conn.sequence = (conn.sequence + 1) & 0xFF;
+    write_all(&mut conn.stream, pkt.as_slice())
+}
+
+fn recv_packet(conn: &mut MysqlConnection) -> Result<MysqlPacket, DbError> {
+    loop {
+        match try_parse_packet(conn.recv.as_slice()) {
+            Ok(Some(out)) => {
+                conn.sequence = (out.packet.sequence() + 1) & 0xFF;
+                drop_front(&mut conn.recv, out.bytes_consumed);
+                return Ok(out.packet);
+            }
+            Ok(None) => {
+                let mut tmp: List<Byte> = List.new();
+                let mut i = 0;
+                while i < 4096 { tmp.push(0 as Byte); i = i + 1; }
+                let n = match conn.stream.read(tmp.as_mut_slice()) {
+                    Ok(v)  => v,
+                    Err(_) => {
+                        return Err(DbError.ConnectionFailed {
+                            source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                            adapter: AdMysql,
+                        });
+                    }
+                };
+                if n <= 0 {
+                    return Err(DbError.ConnectionFailed {
+                        source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                        adapter: AdMysql,
+                    });
+                }
+                let mut k = 0;
+                while k < n {
+                    conn.recv.push(tmp[k]);
+                    k = k + 1;
+                }
+            }
+            Err(_) => {
+                return Err(bad_decode("packet framing"));
+            }
+        }
+    }
+}
+
+fn write_all(stream: &mut TcpStream, buf: &[Byte]) -> Result<(), DbError> {
+    let mut written: Int = 0;
+    while written < buf.len() as Int {
+        let chunk = sub_slice(buf, written, buf.len() as Int);
+        match stream.write(chunk.as_slice()) {
+            Ok(n) => {
+                if n <= 0 {
+                    return Err(DbError.ConnectionFailed {
+                        source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                        adapter: AdMysql,
+                    });
+                }
+                written = written + n;
+            }
+            Err(_) => {
+                return Err(DbError.ConnectionFailed {
+                    source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                    adapter: AdMysql,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sub_slice(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = start;
+    while i < end {
+        out.push(buf[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn drop_front(buf: &mut List<Byte>, n: Int) {
+    let mut tmp: List<Byte> = List.new();
+    let total = buf.len() as Int;
+    let mut i = n;
+    while i < total {
+        tmp.push(buf[i]);
+        i = i + 1;
+    }
+    buf.clear();
+    let mut k = 0;
+    while k < tmp.len() as Int {
+        buf.push(tmp[k]);
+        k = k + 1;
+    }
+}
+
+fn format_host_port(host: &Text, port: Int) -> Text {
+    let mut out = host.clone();
+    out.push_str(&":".clone());
+    out.push_str(&itoa(port));
+    out
+}
+
+fn itoa(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    let neg = n < 0;
+    let mut abs = if neg { -n } else { n };
+    let mut digits: List<Byte> = List.new();
+    while abs > 0 {
+        digits.push(((abs % 10) + 0x30) as Byte);
+        abs = abs / 10;
+    }
+    let mut out: List<Byte> = List.new();
+    if neg { out.push(0x2D as Byte); }
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 { out.push(digits[i]); i = i - 1; }
+    Text.from_bytes(&out).unwrap_or("0".clone())
+}
+
+fn bad_decode(label: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "BAD_DECODE".clone(),
+        message: f"protocol decode failed: {label}",
+        retryable: false,
+    })
+}

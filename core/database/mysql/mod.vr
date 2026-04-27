@@ -22,10 +22,17 @@ public module wire;
 public module auth;
 public module error;
 public module config;
+public module connection;
 public module adapter;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
+};
+public mount .connection.{
+    MysqlConnection, MysqlConnState, SimpleQueryResult,
+    MysqlTextValue, MtvNull, MtvBytes,
+    McsConnecting, McsAuthenticating, McsReady, McsBusy, McsClosed, McsFailed,
+    connect,
 };
 public mount .adapter.MysqlAdapter;
 public mount .error.dberr_from_mysql;
