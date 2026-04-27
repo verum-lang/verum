@@ -116,6 +116,13 @@ public type AllocError is
     | MunmapFailed { code: Int }
     | PageExhausted
     | InvalidPointer
+    /// The requested allocation would overflow the addressable size
+    /// space (e.g. `cap * elem_size > Int.MAX`, or `len + 1` would
+    /// wrap an `Int`).  Surfaced by container types as the typed
+    /// alternative to panicking on adversarial sizes.  `requested`
+    /// is the would-be element / capacity count that triggered the
+    /// overflow (not bytes, since the byte count itself overflowed).
+    | CapacityOverflow { requested: Int }
     ;
 
 implement AllocError {
@@ -128,6 +135,7 @@ implement AllocError {
             MunmapFailed { code } => f"munmap failed with code {code}",
             PageExhausted => "page exhausted, need new page",
             InvalidPointer => "invalid pointer for deallocation",
+            CapacityOverflow { requested } => f"capacity overflow: {requested} elements would overflow addressable size space",
         }
     }
 }

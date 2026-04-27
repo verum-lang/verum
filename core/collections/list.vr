@@ -65,6 +65,28 @@ public type List<T> is {
 implement<T> IntCoercible for List<T> {}
 implement<T> Indexable for List<T> {}
 
+// Maximum allowed `List<T>` length / capacity given an element size.
+//
+// Computed so every derived index expression in the hot path stays
+// within `Int` (i.e. never wraps), which is the load-bearing soundness
+// invariant for `insert` / `remove`'s `idx + 1` arithmetic and for the
+// byte-count multiplications inside `resize_buffer` and the
+// `memmove`s.
+//
+// Bound: `Int.MAX / 4 / max(elem_size, 1)`:
+//   - `/ elem_size` keeps `cap * elem_size` from overflowing.
+//   - `/ 4` headroom keeps `cap * 2` (grow doubling) and `len + 1`
+//     (insert) safe even after a doubling step.  In practice this
+//     caps a `List<Int>` at ~2^59 elements, which is >>> any
+//     addressable physical memory.
+//
+// For zero-sized types the bound saturates to `Int.MAX / 4`, which
+// is still well below the wraparound boundary.
+fn list_max_len(elem_size: Int) -> Int {
+    let factor = if elem_size > 0 { elem_size } else { 1 };
+    Int.MAX / 4 / factor
+}
+
 implement<T> List<T> {
     // =========================================================================
     // Construction
@@ -89,6 +111,13 @@ implement<T> List<T> {
             return List.new();
         }
 
+        // Capacity-overflow guard so the byte-size multiplication
+        // below cannot wrap.  Match the panicking discipline of this
+        // constructor; recoverable callers use `try_with_capacity`.
+        if capacity < 0 || capacity > list_max_len(T.size) {
+            panic(f"List::with_capacity({capacity}) capacity overflow (max {list_max_len(T.size)})");
+        }
+
         let ptr = unsafe {
             alloc(capacity * T.size, T.alignment) as &unsafe T
         };
@@ -105,12 +134,20 @@ implement<T> List<T> {
     }
 
     // Fallible counterpart to `with_capacity`. Returns
-    // `Err(AllocError::OutOfMemory)` instead of panicking when the
+    // `Err(AllocError::OutOfMemory)` (or `CapacityOverflow` when
+    // `capacity > max_len()`) instead of panicking when the
     // allocator can't satisfy the request — for daemons / services
     // that need to degrade rather than crash.
     public fn try_with_capacity(capacity: Int) -> Result<List<T>, AllocError> {
         if capacity == 0 {
             return Ok(List.new());
+        }
+
+        // Capacity-overflow guard.  Same role as in
+        // `try_resize_buffer`, repeated here because direct callers
+        // of `try_with_capacity` skip the resize path.
+        if capacity < 0 || capacity > list_max_len(T.size) {
+            return Err(AllocError::CapacityOverflow { requested: capacity });
         }
 
         // Route through try_alloc so allocator-side errors (OutOfMemory,
@@ -336,6 +373,11 @@ implement<T> List<T> {
     }
 
     // Insert at index, shifting elements right.
+    //
+    // SOUNDNESS: relies on the `self.len ≤ max_len()` invariant
+    // maintained by `resize_buffer` / `try_resize_buffer`, so
+    // `idx + 1` (with `idx ≤ self.len`) and `(self.len - idx) * T.size`
+    // are guaranteed not to overflow `Int`.
     public fn insert(&mut self, idx: Int, value: T) {
         assert(idx >= 0 && idx <= self.len, "insert index out of bounds");
 
@@ -356,6 +398,10 @@ implement<T> List<T> {
     }
 
     // Remove at index, shifting elements left.
+    //
+    // SOUNDNESS: same invariant as `insert` — `self.len ≤ max_len()`,
+    // so `idx + 1` cannot overflow and the byte-count computation is
+    // safe.
     public fn remove(&mut self, idx: Int) -> T {
         assert(idx >= 0 && idx < self.len, "remove index out of bounds");
 
@@ -519,18 +565,40 @@ implement<T> List<T> {
         }
     }
 
-    // Grow capacity (double || minimum 4).
+    // Grow capacity (double || minimum 4).  Saturates at
+    // `max_len()` so the doubling step itself can't overflow Int.
+    // `try_resize_buffer` is the chokepoint that finally rejects
+    // anything past the bound, but doing the saturation here lets
+    // the doubling formula stay safe.
     fn grow(&mut self) {
-        let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
+        let new_cap = self.next_cap();
         self.resize_buffer(new_cap);
     }
 
     // Fallible counterpart to grow. The load-bearing primitive for
     // every `try_*` method on `List` — propagates OOM as
-    // `Err(AllocError::OutOfMemory)` instead of crashing.
+    // `Err(AllocError::OutOfMemory)` (or `CapacityOverflow` when
+    // doubling would exceed `max_len()`) instead of crashing.
     fn try_grow(&mut self) -> Result<Unit, AllocError> {
-        let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
+        let new_cap = self.next_cap();
         self.try_resize_buffer(new_cap)
+    }
+
+    // Computes the next capacity (saturating doubling).  Saturating
+    // at `max_len()` rather than wrapping ensures the multiplication
+    // can never overflow Int; the subsequent `try_resize_buffer`
+    // either accepts the saturated value or rejects with
+    // `CapacityOverflow` if the existing cap is already at max.
+    fn next_cap(&self) -> Int {
+        if self.cap == 0 {
+            return 4;
+        }
+        let max = list_max_len(T.size);
+        // checked_mul instead of `*` so the doubling can't wrap.
+        match self.cap.checked_mul(2) {
+            Some(doubled) => if doubled > max { max } else { doubled },
+            None          => max,
+        }
     }
 
     // Resize internal buffer. Panics on OOM with the requested
@@ -540,6 +608,13 @@ implement<T> List<T> {
     // explicit null check + panic surfaces the failure at its
     // origin rather than the deref site.
     fn resize_buffer(&mut self, new_cap: Int) {
+        // Capacity-overflow guard: a `cap > max_len` would wrap the
+        // byte-size multiplication below.  Panic here matches the
+        // panicking discipline of this whole path; callers wanting
+        // recoverability use `try_resize_buffer` instead.
+        if new_cap < 0 || new_cap > list_max_len(T.size) {
+            panic(f"List buffer resize: capacity overflow (requested {new_cap}, max {list_max_len(T.size)})");
+        }
         let new_size = new_cap * T.size;
         let align = T.alignment;
 
@@ -570,6 +645,15 @@ implement<T> List<T> {
     // `self.cap` unchanged on failure so the caller can retry with a
     // smaller new_cap or surface the error.
     fn try_resize_buffer(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
+        // Capacity-overflow guard: refuse new_cap > max_len so the
+        // byte-count multiplication below cannot wrap, and so any
+        // subsequent insert (`idx + 1`) is safe by construction.
+        // This is the single chokepoint for the List len/cap
+        // monotonicity invariant — push/insert/reserve all funnel
+        // through here on growth.
+        if new_cap < 0 || new_cap > list_max_len(T.size) {
+            return Err(AllocError::CapacityOverflow { requested: new_cap });
+        }
         let new_size = new_cap * T.size;
         let align = T.alignment;
 
