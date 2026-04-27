@@ -179,23 +179,41 @@ implement Condvar {
 
     /// Notify one waiting thread.
     ///
-    /// If there are threads waiting on this condition variable, one of them
-    /// will be woken via OS futex wake.
+    /// Always increments the sequence counter AND issues a futex wake —
+    /// the previous implementation gated both behind
+    /// `if waiters.load(SeqCst) > 0` to skip the wake syscall when
+    /// no waiters were observed. That gating is unsafe in the
+    /// notify-without-lock pattern: producer modifies state under
+    /// mutex, releases the mutex, then calls `notify_one()` without
+    /// re-acquiring it (a common performance pattern that avoids
+    /// the lock-contention wake-storm). Concurrent consumer reads
+    /// the predicate, observes it false, calls `condvar.wait()` —
+    /// the waiter's `waiters.fetch_add(1)` may not be observed by
+    /// notifier's `waiters.load()` because there's no mutex-mediated
+    /// synchronization edge between them. Notifier sees waiters == 0,
+    /// skips the wake; waiter sleeps on futex; missed wakeup —
+    /// waiter sleeps forever.
+    ///
+    /// The fix removes the gate. Cost: one extra `futex_wake` syscall
+    /// per notify on truly-uncontended condvars (the kernel returns
+    /// immediately when no tasks are waiting on the futex). The
+    /// `seq.fetch_add` is necessary regardless — it changes the
+    /// futex-watched value so any in-flight waiter who already
+    /// snapshotted the old seq will see the mismatch and exit
+    /// futex_wait with EAGAIN.
     public fn notify_one(&self) {
-        if self.waiters.load(MemoryOrdering.SeqCst) > 0 {
-            self.seq.fetch_add(1, MemoryOrdering.Release);
-            let _ = sys_futex_wake(&self.seq.value, 1);
-        }
+        self.seq.fetch_add(1, MemoryOrdering.Release);
+        let _ = sys_futex_wake(&self.seq.value, 1);
     }
 
     /// Notify all waiting threads.
     ///
-    /// All threads currently waiting will be woken via OS futex wake-all.
+    /// Same lost-wakeup-fix rationale as `notify_one` — see its
+    /// doc for why the previous `if waiters > 0` gate was unsafe
+    /// for the notify-without-lock pattern.
     public fn notify_all(&self) {
-        if self.waiters.load(MemoryOrdering.SeqCst) > 0 {
-            self.seq.fetch_add(1, MemoryOrdering.Release);
-            let _ = sys_futex_wake(&self.seq.value, Int.MAX);
-        }
+        self.seq.fetch_add(1, MemoryOrdering.Release);
+        let _ = sys_futex_wake(&self.seq.value, Int.MAX);
     }
 
     /// Get the number of threads currently waiting.
