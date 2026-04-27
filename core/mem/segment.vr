@@ -42,6 +42,7 @@ mount core.intrinsics.platform.{spin_hint};
 mount core.intrinsics.atomic.{
     atomic_load_u64, atomic_store_u64, atomic_exchange_u64, atomic_compare_exchange_u64,
     atomic_load_u32, atomic_store_u32, atomic_compare_exchange_u32,
+    atomic_fetch_add_u32,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL,
 };
 
@@ -442,19 +443,34 @@ implement MemSegment {
         self.used_slices == 0
     }
 
-    /// Increment base generation (called on epoch advance)
+    /// Increment base generation (called on epoch advance).
+    ///
+    /// SOUNDNESS: must be a single atomic RMW, not a load-then-store.
+    /// The previous implementation read old_gen, computed new_gen,
+    /// then stored — which races concurrent calls and silently
+    /// LOSES increments.  Lost generation increments are a CBGR
+    /// soundness violation: a stale reference whose generation
+    /// matches the lost-increment value would pass validation
+    /// even though the allocation has been logically advanced.
+    ///
+    /// Uses `atomic_fetch_add_u32` so concurrent callers see a
+    /// totally-ordered sequence of generation values; wraparound
+    /// is detected by reading the returned old value (the post-
+    /// add value wrapped to 0 iff old was UInt32.MAX).
+    ///
+    /// The `self.epoch` increment in the wraparound branch is
+    /// best-effort under extreme contention because UInt16 doesn't
+    /// have a direct atomic add intrinsic in this build; epoch
+    /// wraparound fires once per ~4 billion increments so the
+    /// race window is empirically irrelevant.  When u16 atomics
+    /// land, this branch should also be hardened.
     public fn increment_generation(&mut self) {
-        let old_gen = atomic_load_u32(&self.base_generation, ORDERING_ACQUIRE);
-        let new_gen = old_gen + 1;
-
-        // Check for wraparound
-        if new_gen == 0 {
-            // Notify epoch manager
+        let old_gen = atomic_fetch_add_u32(&mut self.base_generation, 1, ORDERING_ACQ_REL);
+        // Wraparound: old == UInt32.MAX → post-add value wrapped to 0.
+        if old_gen == 0xFFFF_FFFF {
             unsafe { GLOBAL_EPOCH.on_wraparound() };
             self.epoch = self.epoch + 1;
         }
-
-        atomic_store_u32(&mut self.base_generation, new_gen, ORDERING_RELEASE);
     }
 }
 
