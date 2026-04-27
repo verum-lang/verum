@@ -531,27 +531,63 @@ implement RecoveryCircuitBreaker {
         }
     }
 
-    /// Transition to new state
+    /// Transition to a new state.
+    ///
+    /// SOUNDNESS: previous revision did `if self.state() != new { store(new); ... }`
+    /// — a load + check + store sequence that races concurrent transitions.
+    /// Two threads observing the same `old_state` could both pass the
+    /// inequality check, both execute the store, and both run the
+    /// counter-reset side-effects (double-incrementing `state_changes`
+    /// and racing the per-state counter resets against each other).
+    ///
+    /// The CAS-loop below ensures only one thread per logical
+    /// transition wins the state-bit flip and proceeds to the
+    /// side-effects.  Concurrent contenders see their CAS fail and
+    /// retry; if the state has already converged to `new_state`
+    /// (e.g. a winning thread completed first) the retry short-
+    /// circuits at the early-return.
     fn transition_to(&self, new_state: RecoveryCircuitState) {
-        let old_state = self.state();
-        if old_state != new_state {
-            self.state.store(new_state.to_u8(), MemoryOrdering.Release);
-            self.last_transition_nanos.store(monotonic_nanos(), MemoryOrdering.Release);
-            self.state_changes.fetch_add(1, MemoryOrdering.SeqCst);
+        let new_byte = new_state.to_u8();
+        loop {
+            let cur = self.state.load(MemoryOrdering.Acquire);
+            if cur == new_byte {
+                // Already at target state (either initially or
+                // because another thread won the race).  Skip the
+                // side-effects to avoid double-counting.
+                return;
+            }
+            match self.state.compare_exchange(
+                cur,
+                new_byte,
+                MemoryOrdering.AcqRel,
+                MemoryOrdering.Acquire,
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    // CAS lost — another thread changed the state.
+                    // Reload and retry; the early-return above
+                    // catches the case where the new state matches.
+                }
+            }
+        }
 
-            // Reset counters based on new state
-            match new_state {
-                Closed => {
-                    self.failure_count.store(0, MemoryOrdering.SeqCst);
-                    self.success_count.store(0, MemoryOrdering.SeqCst);
-                }
-                Open => {
-                    self.success_count.store(0, MemoryOrdering.SeqCst);
-                }
-                HalfOpen => {
-                    self.failure_count.store(0, MemoryOrdering.SeqCst);
-                    self.success_count.store(0, MemoryOrdering.SeqCst);
-                }
+        // We are the unique thread that effected this transition.
+        // Run the side-effects without further synchronisation.
+        self.last_transition_nanos.store(monotonic_nanos(), MemoryOrdering.Release);
+        self.state_changes.fetch_add(1, MemoryOrdering.SeqCst);
+
+        // Reset counters based on new state.
+        match new_state {
+            Closed => {
+                self.failure_count.store(0, MemoryOrdering.SeqCst);
+                self.success_count.store(0, MemoryOrdering.SeqCst);
+            }
+            Open => {
+                self.success_count.store(0, MemoryOrdering.SeqCst);
+            }
+            HalfOpen => {
+                self.failure_count.store(0, MemoryOrdering.SeqCst);
+                self.success_count.store(0, MemoryOrdering.SeqCst);
             }
         }
     }
