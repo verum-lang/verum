@@ -154,7 +154,9 @@ public type DerReader is {
 implement DerReader {
     /// Construct a reader over the entire input buffer.
     public fn new(input: &[Byte]) -> DerReader {
-        let mut b: List<Byte> = [];
+        // Reader copies the input buffer once; pre-allocate to its
+        // exact size so the per-byte push loop doesn't grow log(n) times.
+        let mut b: List<Byte> = List.with_capacity(input.len());
         let mut i: Int = 0;
         while i < input.len() {
             b.push(input[i]);
@@ -189,7 +191,8 @@ implement DerReader {
         if start < 0 || end < start || end > self.buf.len() {
             return Err(err(UnexpectedEndOfInput, start, "buffer_copy_region out of bounds"));
         }
-        let mut out: List<Byte> = [];
+        // Output is exactly `end - start` bytes — pre-allocate.
+        let mut out: List<Byte> = List.with_capacity(end - start);
         let mut i: Int = start;
         while i < end {
             out.push(self.buf[i]);
@@ -251,7 +254,8 @@ implement DerReader {
         if n < 0 || self.pos + n > self.end {
             return Err(err(UnexpectedEndOfInput, self.pos, "take_bytes past end"));
         }
-        let mut out: List<Byte> = [];
+        // Output is exactly `n` bytes.
+        let mut out: List<Byte> = List.with_capacity(n);
         let mut i: Int = 0;
         while i < n {
             out.push(self.buf[self.pos + i]);
