@@ -592,11 +592,22 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
 
     // Path-constructor branches (right-to-left so they end up in
     // declaration order in the outer Pi-chain).
+    // V8 (#237 V2) — collect point-ctor names so recursor_image_at_endpoint
+    // can resolve `Var("Base")` ↦ `Var("case_Base")` when the bare name
+    // matches a registered point ctor. Without this resolution the
+    // path-branch's PathTy endpoints reference the constructor itself
+    // (a value of `T`) rather than the recursor's image at that point
+    // (a value of `motive(point)` per the dependent eliminator's
+    // type) — which is what an actual user-supplied recursor case
+    // body has to typecheck against.
+    let point_ctor_names: Vec<&str> =
+        decl.constructors.iter().map(|c| c.name.as_str()).collect();
+
     for path in iter_rev(&decl.path_constructors) {
         let carrier =
             CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(path.lhs.clone()));
-        let lhs_image = recursor_image_at_endpoint(&path.lhs);
-        let rhs_image = recursor_image_at_endpoint(&path.rhs);
+        let lhs_image = recursor_image_at_endpoint(&path.lhs, &point_ctor_names);
+        let rhs_image = recursor_image_at_endpoint(&path.rhs, &point_ctor_names);
         let branch_ty = CoreTerm::PathTy {
             carrier: Heap::new(carrier),
             lhs: Heap::new(lhs_image),
@@ -673,12 +684,32 @@ pub fn point_constructor_case_type(
 
 /// V8 (#237) — recursor's image at a path-constructor endpoint.
 ///
-/// V1: emit the endpoint expression as-is. The kernel records the
-/// structural shape; the elaborator / framework axiom system supplies
-/// the computational content (the actual case-app chain that the
-/// recursor produces at this endpoint). V2 will resolve nullary
-/// endpoints to `Var("case_<ctor_name>")` and recurse on App-chains.
-fn recursor_image_at_endpoint(endpoint: &CoreTerm) -> CoreTerm {
+/// V1: emit the endpoint expression as-is.
+///
+/// V2 (#237 V2): when `endpoint` is `Var(name)` and `name` matches a
+/// registered point ctor, rewrite to `Var("case_<name>")`. This
+/// produces an eliminator type whose path-branch PathTy endpoints
+/// reference the recursor's image (a value of `motive(point)`)
+/// rather than the constructor itself (a value of `T`). This is the
+/// shape an actual user-supplied recursor case body has to
+/// typecheck against.
+///
+/// Recursive App-chains (`App(Var("Cons"), App(Var("Cons"), …))`)
+/// fall through unchanged in V2 — the recursor's image at a
+/// non-nullary endpoint requires per-instance recursion that
+/// belongs to the elaborator. Higher-arity endpoint resolution is
+/// V3 follow-up.
+fn recursor_image_at_endpoint(
+    endpoint: &CoreTerm,
+    point_ctor_names: &[&str],
+) -> CoreTerm {
+    if let CoreTerm::Var(name) = endpoint {
+        if point_ctor_names.iter().any(|c| *c == name.as_str()) {
+            return CoreTerm::Var(Text::from(
+                format!("case_{}", name.as_str()).as_str(),
+            ));
+        }
+    }
     endpoint.clone()
 }
 

@@ -1004,7 +1004,7 @@ public type Vec<A: Type, n: Nat> is
 
 Strict positivity enforced by kernel rule `K-Pos` — this is a kernel check, not a grammar change. Mutual inductive blocks use the existing `mutual { … }` grammar (to be verified against `verum.ebnf`; add if missing).
 
-### 7.4 Higher inductive types **[60% — V8 #237 (1-cells + eliminator auto-gen); V2 = β-rule, dependent path-over, higher cells]**
+### 7.4 Higher inductive types **[70% — V8 #237 V1 (1-cells + eliminator auto-gen) + V2 (recursor-image resolution at nullary endpoints); V3 = β-rule, dependent path-over, higher cells, App-chain endpoint resolution]**
 
 Grammar: existing `type_def` + `variant` with `path_endpoints = '=' , expression , '..' , expression` (`grammar/verum.ebnf:532`). **No `hit` keyword.**
 
@@ -1037,7 +1037,7 @@ elim_T : Π (motive : T → Type_u) .
          Π (x : T) . motive(x)
 ```
 
-`↻(e)` is the recursor's image at endpoint `e`. V1 emits `↻(e) = e`; V2 will resolve nullary endpoints to `case_<ctor>` and recurse on App-chains for higher-arity endpoints. Path-over (the dependent path needed when `motive(lhs) ≠ motive(rhs)` definitionally) is approximated by `PathTy` over `motive(lhs)` for V1; the framework system attests homogeneity.
+`↻(e)` is the recursor's image at endpoint `e`. **V1**: `↻(e) = e`. **V2 (#237 V2 shipped)**: nullary `Var(point_ctor_name)` endpoints resolve to `Var("case_<ctor_name>")` — the eliminator's PathTy branch endpoints now reference the recursor's image (a value of `motive(point)`) rather than the constructor itself (a value of `T`), which is the shape an actual user-supplied recursor case body has to typecheck against. **V3**: App-chain resolution for higher-arity endpoints (e.g. suspension's `merid : Σ X ↝ Σ X`) — recursor's image at `App(Var("Cons"), v)` requires per-instance recursion belonging to the elaborator. Path-over (the dependent path needed when `motive(lhs) ≠ motive(rhs)` definitionally) is approximated by `PathTy` over `motive(lhs)` for V1+V2; the framework system attests homogeneity.
 
 **Kernel surface** (`crates/verum_kernel/src/inductive.rs`):
 
@@ -1049,7 +1049,7 @@ elim_T : Π (motive : T → Type_u) .
 
 **Validation** at `InductiveRegistry::register` time: path-ctor names must not collide with any point ctor name on the same inductive AND must be unique among themselves; both surface as `KernelError::DuplicateInductive` with diagnostic detail.
 
-**Coverage**: `crates/verum_kernel/tests/k_hit_eliminator.rs` (10 integration tests) — Bool / Nat ordinary recursor shape, S¹ / Interval HIT recursor shape, namespace-collision rejection, duplicate-path-ctor rejection, back-compat (no path ctors), nullary + binary point-ctor case typing, declared-universe propagation.
+**Coverage**: `crates/verum_kernel/tests/k_hit_eliminator.rs` (13 integration tests) — Bool / Nat ordinary recursor shape, S¹ / Interval HIT recursor shape, namespace-collision rejection, duplicate-path-ctor rejection, back-compat (no path ctors), nullary + binary point-ctor case typing, declared-universe propagation, V2: nullary endpoint rewrites to case_<ctor> binder, non-point-ctor name falls through unchanged, App-chain endpoint falls through unchanged.
 
 **V2 scope (tracked):**
 * Path-constructor β-rule wiring through `Elim`.
