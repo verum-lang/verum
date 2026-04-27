@@ -243,10 +243,9 @@ public fn verify_sign1(
             let mut sig: [Byte; 64] = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig[i] = signature[i]; i = i + 1; }
-            if Ed25519.verify(pk, to_verify.as_slice(), &sig) {
-                Ok(payload)
-            } else {
-                Err(CoseError.SignatureMismatch)
+            match Ed25519.verify(pk, to_verify.as_slice(), &sig) {
+                Ok(())  => Ok(payload),
+                Err(_)  => Err(CoseError.SignatureMismatch),
             }
         },
         (CoseAlg.EdDSA, CoseKey.Ed25519Seeded(sk)) => {
@@ -256,10 +255,9 @@ public fn verify_sign1(
             let mut sig: [Byte; 64] = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig[i] = signature[i]; i = i + 1; }
-            if Ed25519.verify(&pk, to_verify.as_slice(), &sig) {
-                Ok(payload)
-            } else {
-                Err(CoseError.SignatureMismatch)
+            match Ed25519.verify(&pk, to_verify.as_slice(), &sig) {
+                Ok(())  => Ok(payload),
+                Err(_)  => Err(CoseError.SignatureMismatch),
             }
         },
         _ => Err(CoseError.WrongKeyKind),
