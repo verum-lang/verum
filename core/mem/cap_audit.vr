@@ -271,8 +271,7 @@ implement Debug for CapEvent {
 // literal no-op (preserves the ~0.93ns CBGR hot-path budget).
 // =============================================================================
 
-mount super.cap_audit_ring.commit as ring_commit;
-mount super.cap_audit_ring.is_enabled as ring_is_enabled;
+mount super.cap_audit_ring;
 
 /// Record a successful `try_revoke` event (generation bumped, no
 /// capability change — the revoke caps clear is a separate
@@ -289,7 +288,7 @@ public fn record_revoke(
     capabilities: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !ring_is_enabled() {
+    if !super.cap_audit_ring.is_enabled() {
         return 0;
     }
     let event = CapEvent.new(
@@ -301,7 +300,7 @@ public fn record_revoke(
         capabilities,        // after — revoke does not modify caps mask
         timestamp_ns,
     );
-    ring_commit(event)
+    super.cap_audit_ring.commit(event)
 }
 
 /// Record a successful `attenuate_capabilities` event (capabilities
@@ -314,7 +313,7 @@ public fn record_attenuate(
     capabilities_after: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !ring_is_enabled() {
+    if !super.cap_audit_ring.is_enabled() {
         return 0;
     }
     let event = CapEvent.new(
@@ -326,7 +325,7 @@ public fn record_attenuate(
         capabilities_after,
         timestamp_ns,
     );
-    ring_commit(event)
+    super.cap_audit_ring.commit(event)
 }
 
 /// Record an `increment_ref_count` event (slow path only — fast-path
@@ -338,7 +337,7 @@ public fn record_ref_incr(
     capabilities: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !ring_is_enabled() {
+    if !super.cap_audit_ring.is_enabled() {
         return 0;
     }
     let event = CapEvent.new(
@@ -350,7 +349,7 @@ public fn record_ref_incr(
         capabilities,
         timestamp_ns,
     );
-    ring_commit(event)
+    super.cap_audit_ring.commit(event)
 }
 
 /// Record a `decrement_ref_count` event.
@@ -361,7 +360,7 @@ public fn record_ref_decr(
     capabilities: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !ring_is_enabled() {
+    if !super.cap_audit_ring.is_enabled() {
         return 0;
     }
     let event = CapEvent.new(
@@ -373,7 +372,7 @@ public fn record_ref_decr(
         capabilities,
         timestamp_ns,
     );
-    ring_commit(event)
+    super.cap_audit_ring.commit(event)
 }
 
 /// Record an explicit `increment_generation` event (segment reuse
@@ -387,7 +386,7 @@ public fn record_gen_bump(
     capabilities: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !ring_is_enabled() {
+    if !super.cap_audit_ring.is_enabled() {
         return 0;
     }
     let event = CapEvent.new(
@@ -399,7 +398,7 @@ public fn record_gen_bump(
         capabilities,
         timestamp_ns,
     );
-    ring_commit(event)
+    super.cap_audit_ring.commit(event)
 }
 
 /// Record an `epoch_advance` event (epoch counter advanced past the
@@ -411,7 +410,7 @@ public fn record_epoch_advance(
     epoch_after: UInt16,
     timestamp_ns: UInt64,
 ) -> UInt64 {
-    if !ring_is_enabled() {
+    if !super.cap_audit_ring.is_enabled() {
         return 0;
     }
     let event = CapEvent.new(
@@ -423,5 +422,5 @@ public fn record_epoch_advance(
         epoch_after,
         timestamp_ns,
     );
-    ring_commit(event)
+    super.cap_audit_ring.commit(event)
 }
