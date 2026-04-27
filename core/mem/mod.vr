@@ -159,6 +159,14 @@ public mount .diagnostics.{
     HeaderView, header_view_of,
 };
 
+/// Capability-audit event type — one auditable CBGR state transition
+/// (revoke / attenuate / ref_count change / generation bump).  Format-
+/// stable boundary that observers code against; the producer-side ring
+/// buffer + writer integration lands separately under
+/// `@cfg(feature = "diagnostics")`.  See `mem/cap_audit.vr` for the
+/// design rationale.
+public mount .cap_audit.{CapEvent, CapEventKind};
+
 // =============================================================================
 // Constants
 // =============================================================================

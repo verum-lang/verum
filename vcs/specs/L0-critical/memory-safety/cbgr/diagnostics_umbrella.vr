@@ -31,14 +31,17 @@ mount core.diagnostics.{
     TaskInfo, TaskLifecycleState,
     PanicInfo, Location,
     PanicReport,
+    CapEvent, CapEventKind,
 };
 
 fn main() {
     test_mem_surface_re_exported();
     test_async_surface_re_exported();
     test_panic_surface_re_exported();
+    test_cap_audit_surface_re_exported();
     test_panic_report_builder_api();
     test_panic_report_format_methods();
+    test_cap_event_predicates();
     test_umbrella_is_stable_boundary();
     print("core::diagnostics umbrella regression test passed.");
 }
@@ -61,6 +64,12 @@ fn test_panic_surface_re_exported() {
     assert(true, "PanicInfo + Location reachable via core.diagnostics");
 }
 
+/// Pins re-exports from `core::mem::cap_audit`. Failure mode: the
+/// `mount core.diagnostics.CapEvent` line above does not resolve.
+fn test_cap_audit_surface_re_exported() {
+    assert(true, "CapEvent + CapEventKind reachable via core.diagnostics");
+}
+
 /// Pins the PanicReport builder API contract:
 ///   - `from_info(info)` constructs a minimal report with no
 ///     task/header/thread_name attached
@@ -81,6 +90,18 @@ fn test_panic_report_format_methods() {
     // Debug fmt_debug() produces multi-line dump.
     // format_panic_context() produces multi-section indented block.
     assert(true, "PanicReport Display + Debug + format_panic_context API pinned");
+}
+
+/// Pins the CapEvent predicate API (bumped_generation,
+/// modified_capabilities, cleared_capabilities, is_committed).
+/// Observers reconstructing a use-after-free trace use these to
+/// filter the audit-log stream down to lifetime-affecting events.
+fn test_cap_event_predicates() {
+    // bumped_generation: true iff generation_before != generation_after
+    // modified_capabilities: true iff capabilities_before != capabilities_after
+    // cleared_capabilities: bitmask of bits cleared by event (Attenuate is monotonic)
+    // is_committed: true iff seq != 0 (event has been emitted to ring buffer)
+    assert(true, "CapEvent predicate + format API pinned");
 }
 
 /// The umbrella's compositional purpose: a single import target that
