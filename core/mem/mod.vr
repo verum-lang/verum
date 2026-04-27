@@ -161,11 +161,21 @@ public mount .diagnostics.{
 
 /// Capability-audit event type — one auditable CBGR state transition
 /// (revoke / attenuate / ref_count change / generation bump).  Format-
-/// stable boundary that observers code against; the producer-side ring
-/// buffer + writer integration lands separately under
-/// `@cfg(feature = "diagnostics")`.  See `mem/cap_audit.vr` for the
-/// design rationale.
+/// stable boundary that observers code against.  See `mem/cap_audit.vr`
+/// for the design rationale.
 public mount .cap_audit.{CapEvent, CapEventKind};
+
+/// Capability-audit ring buffer — lock-free SPMC storage for CapEvent.
+/// Producers call `commit(event)` from CBGR write sites; observers
+/// snapshot the recent history via `recent(n)`.  See
+/// `mem/cap_audit_ring.vr` for the design rationale and seqlock
+/// concurrency protocol.
+public mount .cap_audit_ring.{
+    commit as commit_cap_event,
+    recent as recent_cap_events,
+    count as cap_event_count,
+    CAP_AUDIT_RING_CAPACITY,
+};
 
 // =============================================================================
 // Constants
