@@ -218,7 +218,9 @@ implement<T: WeftTransport> WsSession<T> {
                     if self.overflow_check().is_err() {
                         return Err(WsError.MessageTooBig {
                             limit: self.max_message_bytes,
-                            attempted: self.partial.as_ref().unwrap().payload.len(),
+                            attempted: self.partial.as_ref()
+                                .expect("WS overflow_check: self.partial = Some(...) just stored above")
+                                .payload.len(),
                         });
                     }
                 }
@@ -238,7 +240,8 @@ implement<T: WeftTransport> WsSession<T> {
                                 });
                             }
                             if frame.fin {
-                                let assembled = self.partial.take().unwrap();
+                                let assembled = self.partial.take()
+                                    .expect("WS continuation: self.partial = Some(...) by Some(p) outer match arm");
                                 let dummy = WsFrame {
                                     fin: true, rsv1: false, rsv2: false, rsv3: false,
                                     opcode: assembled.opcode,

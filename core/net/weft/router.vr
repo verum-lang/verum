@@ -268,7 +268,8 @@ fn insert_route(
                 Some(n) => n,
                 None => {
                     node.static_children.insert(lit.clone(), Heap.new(Node.new()));
-                    node.static_children.get_mut(lit).unwrap()
+                    node.static_children.get_mut(lit)
+                        .expect("Router insert_route: just inserted lit above — get_mut is_some")
                 }
             };
             insert_route(&mut **child, segments, idx + 1, method, handler);

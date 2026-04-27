@@ -676,7 +676,8 @@ implement<T> Future for SendFut<T> {
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<(), SendError<T>>> {
         if self.inner.closed.load(MemoryOrdering.Acquire) {
-            let v = self.value.take().unwrap();
+            let v = self.value.take()
+                .expect("SendFut::poll: self.value is_some until first successful poll consumes it");
             return Poll.Ready(Err(SendError(v)));
         }
 
@@ -693,7 +694,8 @@ implement<T> Future for SendFut<T> {
             }
         }
 
-        let v = self.value.take().unwrap();
+        let v = self.value.take()
+            .expect("SendFut::poll: self.value is_some until first successful poll consumes it");
         guard.push_back(v);
         drop(guard);
 

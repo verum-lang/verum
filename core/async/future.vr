@@ -262,7 +262,12 @@ implement<Fut1: Future, Fut2: Future> Future for Join2<Fut1, Fut2> {
 
         // Check if both complete
         if self.result1.is_some() && self.result2.is_some() {
-            Poll.Ready((self.result1.take().unwrap(), self.result2.take().unwrap()))
+            Poll.Ready((
+                self.result1.take()
+                    .expect("Join2: result1 is_some by outer && guard"),
+                self.result2.take()
+                    .expect("Join2: result2 is_some by outer && guard"),
+            ))
         } else {
             Poll.Pending
         }
@@ -378,9 +383,12 @@ implement<Fut1: Future, Fut2: Future, Fut3: Future> Future for Join3<Fut1, Fut2,
 
         // Check if all done
         if self.result1.is_some() && self.result2.is_some() && self.result3.is_some() {
-            let r1 = self.result1.take().unwrap();
-            let r2 = self.result2.take().unwrap();
-            let r3 = self.result3.take().unwrap();
+            let r1 = self.result1.take()
+                .expect("Join3: result1 is_some by outer && guard");
+            let r2 = self.result2.take()
+                .expect("Join3: result2 is_some by outer && guard");
+            let r3 = self.result3.take()
+                .expect("Join3: result3 is_some by outer && guard");
             Poll.Ready((r1, r2, r3))
         } else {
             Poll.Pending

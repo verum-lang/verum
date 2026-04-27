@@ -331,7 +331,8 @@ implement MultipathScheduler for WeightedScheduler {
             None    => {
                 let c = AtomicInt.new(0);
                 counts.insert(id, c);
-                counts.get(&id).unwrap()
+                counts.get(&id)
+                    .expect("multipath counts: just inserted id above — get is_some")
             }
         };
         cnt.fetch_add(1, MemoryOrdering.AcqRel);

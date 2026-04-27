@@ -789,7 +789,9 @@ implement<T: Clone> Stream for StreamRepeatN<T> {
             if self.remaining == 0 {
                 Poll.Ready(self.value.take())
             } else {
-                Poll.Ready(Some(self.value.as_ref().unwrap().clone()))
+                Poll.Ready(Some(self.value.as_ref()
+                    .expect("Stream::repeat poll_next: self.value is_some until remaining hits 0 (which takes the take-branch above)")
+                    .clone()))
             }
         } else {
             Poll.Ready(None)
@@ -1489,11 +1491,13 @@ implement<S: Stream, B, F: fn(B, S.Item) -> B> Future for StreamFold<S, B, F> {
         loop {
             match self.stream.poll_next(cx) {
                 Poll.Ready(Some(item)) => {
-                    let acc = self.acc.take().unwrap();
+                    let acc = self.acc.take()
+                        .expect("StreamFold: acc is_some — set by constructor and re-stored after every fold step");
                     self.acc = Some((self.f)(acc, item));
                 }
                 Poll.Ready(None) => {
-                    return Poll.Ready(self.acc.take().unwrap());
+                    return Poll.Ready(self.acc.take()
+                        .expect("StreamFold: acc is_some at end-of-stream (constructor + every step re-stores)"));
                 }
                 Poll.Pending => return Poll.Pending,
             }
@@ -2246,7 +2250,8 @@ implement<S: Stream> Stream for DebouncedStream<S> {
             let elapsed = Instant.now().duration_since(*last_time);
             if elapsed >= self.duration {
                 // Debounce period elapsed - yield item
-                let item = self.last_item.take().unwrap();
+                let item = self.last_item.take()
+                    .expect("StreamDebounce: last_item is_some by outer if-let pattern match");
                 self.last_time = None;
                 return Poll.Ready(Some(item));
             }
