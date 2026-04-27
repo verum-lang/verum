@@ -122,6 +122,15 @@ pub enum ParsedLiteral {
     Xml(Text),
     /// YAML value
     Yaml(Text),
+    /// Compile-time-validated SQL with a per-dialect tag, the
+    /// number of `${expr}` parameter slots, and a 64-bit fingerprint
+    /// suitable for the server-side prepared-statement slot name.
+    Sql {
+        sql: Text,
+        dialect: Text,
+        param_count: u32,
+        fingerprint: i64,
+    },
     /// Generic custom literal (for user-defined handlers)
     Custom { tag: Text, value: Text },
 }
@@ -232,6 +241,11 @@ impl LiteralRegistry {
             "json" => self.parse_json(content, span, source_file),
             "xml" => self.parse_xml(content, span, source_file),
             "yaml" | "yml" => self.parse_yaml(content, span, source_file),
+            "sql" | "sql.postgres" | "pg" | "psql"
+                  | "sql.sqlite" | "sqlite"
+                  | "sql.mysql"  | "mysql" => {
+                self.parse_sql(tag, content, span, source_file)
+            }
             _ => {
                 // Custom handler - return generic custom literal
                 Ok(ParsedLiteral::Custom {
@@ -240,6 +254,17 @@ impl LiteralRegistry {
                 })
             }
         }
+    }
+
+    /// Parse SQL literal — see literal_parsers::sql.
+    fn parse_sql(
+        &self,
+        tag: &Text,
+        content: &Text,
+        span: Span,
+        source_file: Option<&SourceFile>,
+    ) -> std::result::Result<ParsedLiteral, Diagnostic> {
+        crate::literal_parsers::parse_sql(content, tag.as_str(), span, source_file)
     }
 
     /// Parse UUID literal
@@ -411,6 +436,55 @@ impl LiteralRegistry {
                 compile_time: true,
                 runtime: false,
             },
+            // SQL literals — generic + per-dialect aliases.
+            TaggedLiteralHandler {
+                tag: Text::from("sql"),
+                handler_fn: Text::from("verum_compiler::literal_parsers::parse_sql"),
+                compile_time: true,
+                runtime: false,
+            },
+            TaggedLiteralHandler {
+                tag: Text::from("sql.postgres"),
+                handler_fn: Text::from("verum_compiler::literal_parsers::parse_sql"),
+                compile_time: true,
+                runtime: false,
+            },
+            TaggedLiteralHandler {
+                tag: Text::from("pg"),
+                handler_fn: Text::from("verum_compiler::literal_parsers::parse_sql"),
+                compile_time: true,
+                runtime: false,
+            },
+            TaggedLiteralHandler {
+                tag: Text::from("psql"),
+                handler_fn: Text::from("verum_compiler::literal_parsers::parse_sql"),
+                compile_time: true,
+                runtime: false,
+            },
+            TaggedLiteralHandler {
+                tag: Text::from("sql.sqlite"),
+                handler_fn: Text::from("verum_compiler::literal_parsers::parse_sql"),
+                compile_time: true,
+                runtime: false,
+            },
+            TaggedLiteralHandler {
+                tag: Text::from("sqlite"),
+                handler_fn: Text::from("verum_compiler::literal_parsers::parse_sql"),
+                compile_time: true,
+                runtime: false,
+            },
+            TaggedLiteralHandler {
+                tag: Text::from("sql.mysql"),
+                handler_fn: Text::from("verum_compiler::literal_parsers::parse_sql"),
+                compile_time: true,
+                runtime: false,
+            },
+            TaggedLiteralHandler {
+                tag: Text::from("mysql"),
+                handler_fn: Text::from("verum_compiler::literal_parsers::parse_sql"),
+                compile_time: true,
+                runtime: false,
+            },
         ];
 
         for handler in handlers {
@@ -442,6 +516,11 @@ impl LiteralRegistry {
         self.register_format(Text::from("json"), Text::from("JSON value"));
         self.register_format(Text::from("xml"), Text::from("XML document"));
         self.register_format(Text::from("yaml"), Text::from("YAML value"));
+        self.register_format(
+            Text::from("sql"),
+            Text::from("SQL with `${expr}` parameter slots — \
+                        compile-time validated against balance / quotes / comments"),
+        );
     }
 
     // Built-in parser stubs - actual implementation in literal_parsers module

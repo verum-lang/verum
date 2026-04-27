@@ -787,6 +787,18 @@ impl MacroExpansionPhase {
             ParsedLiteral::Json(json) => LiteralKind::Text(StringLit::Regular(json.into())),
             ParsedLiteral::Xml(xml) => LiteralKind::Text(StringLit::Regular(xml.into())),
             ParsedLiteral::Yaml(yaml) => LiteralKind::Text(StringLit::Regular(yaml.into())),
+            ParsedLiteral::Sql { sql, dialect, param_count: _, fingerprint: _ } => {
+                // Preserve the dialect tag; the runtime adapter reads
+                // the normalised SQL from `content`. PreparedQuery<R, P>
+                // construction (with the fingerprint + param_count
+                // metadata) is the next layer up — the macro expansion
+                // here just keeps the dialect-tagged literal so type
+                // resolution can still see it as `sql.<dialect>#"..."`.
+                LiteralKind::Tagged {
+                    tag: format!("sql.{}", dialect.as_str()).into(),
+                    content: sql,
+                }
+            }
             ParsedLiteral::Custom { tag, value } => LiteralKind::Tagged {
                 tag,
                 content: value,
