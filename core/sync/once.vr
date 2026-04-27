@@ -316,7 +316,7 @@ implement<T> OnceLock<T> {
             }
         });
 
-        self.value.as_ref().unwrap()
+        self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed")
     }
 
     // Get value if initialized.
@@ -376,7 +376,7 @@ implement<T> OnceLock<T> {
     public fn get_or_try_init<E, F: fn() -> Result<T, E>>(&self, f: F) -> Result<&T, E> {
         // Fast path: already initialised
         if self.once.is_completed() {
-            return Ok(self.value.as_ref().unwrap());
+            return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
         }
 
         // Slow path: race for INCOMPLETE → RUNNING transition.
@@ -414,7 +414,7 @@ implement<T> OnceLock<T> {
                             *ptr = Some(v);
                         }
                         self.once.state.store(COMPLETE, MemoryOrdering.Release);
-                        return Ok(self.value.as_ref().unwrap());
+                        return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
                     }
                     Err(e) => {
                         self.once.state.store(INCOMPLETE, MemoryOrdering.Release);
@@ -428,7 +428,7 @@ implement<T> OnceLock<T> {
                 Ok(_) => unsafe { unreachable_unchecked() },
             };
             if observed == COMPLETE {
-                return Ok(self.value.as_ref().unwrap());
+                return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
             }
             if observed == POISONED {
                 panic("OnceLock.get_or_try_init on poisoned Once");
@@ -498,7 +498,7 @@ implement<T> OnceLock<T> {
                     *ptr = Some(value);
                 }
                 self.once.state.store(COMPLETE, MemoryOrdering.Release);
-                return Ok(self.value.as_ref().unwrap());
+                return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
             }
             let observed: Int = match cas {
                 Err(actual) => actual,
