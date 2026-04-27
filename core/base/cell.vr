@@ -386,11 +386,11 @@ implement<T> OnceCell<T> {
     /// The init function is guaranteed to be called at most once.
     public fn get_or_init(&self, init: fn() -> T) -> T where T: Clone {
         if self.value.is_some() {
-            self.value.clone().unwrap()
+            self.value.clone().expect("OnceCell::get_or_init: value is_some by guard above")
         } else {
             let val = init();
             @vbc(ONCECELL_SET, self, val);
-            self.value.clone().unwrap()
+            self.value.clone().expect("OnceCell::get_or_init: ONCECELL_SET intrinsic just stored Some(val)")
         }
     }
 
@@ -438,7 +438,9 @@ implement<T: Clone + Debug> Debug for OnceCell<T> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         if self.value.is_some() {
             f.write_str("OnceCell(")?;
-            self.value.clone().unwrap().fmt_debug(f)?;
+            self.value.clone()
+                .expect("OnceCell::fmt_debug: value is_some by guard above")
+                .fmt_debug(f)?;
             f.write_str(")")
         } else {
             f.write_str("OnceCell(<empty>)")
@@ -487,12 +489,13 @@ implement<T> LazyCell<T> {
     /// the cached value without calling the init function again.
     public fn force(&self) -> T where T: Clone {
         if self.value.is_some() {
-            self.value.clone().unwrap()
+            self.value.clone().expect("LazyCell::force: value is_some by guard above")
         } else {
-            let init_fn = self.init.clone().unwrap();
+            let init_fn = self.init.clone()
+                .expect("LazyCell::force: init is_some until LAZYCELL_FORCE clears it (constructor stored Some)");
             let val = init_fn();
             @vbc(LAZYCELL_FORCE, self, val);
-            self.value.clone().unwrap()
+            self.value.clone().expect("LazyCell::force: LAZYCELL_FORCE intrinsic just stored Some(val)")
         }
     }
 
