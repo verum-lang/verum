@@ -541,12 +541,23 @@ implement SupervisorSpawnConfig {
             );
         }
 
-        // Apply circuit breaker configuration
+        // Apply circuit breaker configuration.
+        // The env-level API takes the simpler `CircuitBreakerConfig`
+        // (3 Int fields) while spawn config holds the richer
+        // `RecoveryCircuitBreakerConfig` (UInt16/UInt32 + ErrorPredicate).
+        // Map the load-bearing fields across; the recovery-only
+        // `error_predicate` is informational at the spawn-config layer
+        // and isn't part of the env's circuit-breaker primitive.
         if let Some(config) = &self.circuit_breaker {
             let name = self.name.as_ref()
                 .map(|n| n.clone())
                 .unwrap_or_else(|| "spawn_task".into());
-            env.error_recovery_mut().register_circuit_breaker(name, config.clone());
+            let env_config = CircuitBreakerConfig {
+                failure_threshold: config.failure_threshold as Int,
+                reset_timeout_ms:  config.timeout_ms as Int,
+                half_open_max_calls: config.required_successes as Int,
+            };
+            env.error_recovery_mut().register_circuit_breaker(name, env_config);
         }
 
         // Apply restart policy override
