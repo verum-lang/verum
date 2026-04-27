@@ -183,8 +183,10 @@ fn s1_eliminator_has_path_branch() {
         rhs: CoreTerm::Var(Text::from("Base")),
     });
     let elim = eliminator_type(&s1);
-    // Π (motive). Π (case_Base : motive(Base)).
-    //   Π (case_Loop : PathTy(motive(Base), Base, Base)). Π (x : S1). motive(x)
+    // V8 (#237 V2) recursor-image resolution:
+    //   Π (motive). Π (case_Base : motive(Base)).
+    //     Π (case_Loop : PathTy(motive(Base), case_Base, case_Base)).
+    //     Π (x : S1). motive(x)
     let CoreTerm::Pi { codomain: after_motive, .. } = elim else {
         panic!()
     };
@@ -210,9 +212,9 @@ fn s1_eliminator_has_path_branch() {
             if matches!(f.as_ref(), CoreTerm::Var(n) if n.as_str() == "motive")
                 && matches!(a.as_ref(), CoreTerm::Var(n) if n.as_str() == "Base")
     ));
-    // lhs = rhs = Base (closed loop).
-    assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "Base"));
-    assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "Base"));
+    // V2: lhs = rhs = case_Base (recursor's image at the closed loop).
+    assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Base"));
+    assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Base"));
     // Innermost remains Π (x : S1) . motive(x).
     let CoreTerm::Pi { binder, .. } = after_loop.as_ref() else { panic!() };
     assert_eq!(binder.as_str(), "x");
@@ -242,8 +244,11 @@ fn interval_eliminator_has_two_points_and_seg_branch() {
     let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else {
         panic!("Seg branch must be a PathTy");
     };
-    assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "Zero"));
-    assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "One"));
+    // V8 (#237 V2): nullary endpoints rewrite to recursor-image
+    // references so the Seg branch types against the user-supplied
+    // case bodies, not the bare ctor values.
+    assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Zero"));
+    assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_One"));
 }
 
 // =============================================================================
@@ -354,6 +359,90 @@ fn binary_ctor_case_type_chains_pi() {
 // =============================================================================
 // Universe-level preservation
 // =============================================================================
+
+// =============================================================================
+// V8 (#237 V2) — recursor-image resolution at nullary endpoints
+// =============================================================================
+
+#[test]
+fn nullary_endpoint_rewrites_to_case_binder() {
+    // S¹ → case_Loop : PathTy(motive(Base), case_Base, case_Base).
+    // Without V2 resolution the endpoints would be `Var("Base")` —
+    // wrong shape for the recursor's image, which lives at
+    // `motive(Base)`.
+    let s1 = RegisteredInductive::new(
+        Text::from("S1"),
+        List::new(),
+        List::from_iter(vec![nullary("Base")]),
+    )
+    .with_path_constructor(PathCtorSig {
+        name: Text::from("Loop"),
+        lhs: CoreTerm::Var(Text::from("Base")),
+        rhs: CoreTerm::Var(Text::from("Base")),
+    });
+    let elim = eliminator_type(&s1);
+    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else { panic!() };
+    assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Base"));
+    assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Base"));
+}
+
+#[test]
+fn endpoint_not_referencing_point_ctor_falls_through_unchanged() {
+    // If an endpoint references something OTHER than a registered
+    // point ctor (e.g. an external constant `External`), V2 must
+    // leave it alone — only point-ctor names rewrite to case-binders.
+    let hit = RegisteredInductive::new(
+        Text::from("Weird"),
+        List::new(),
+        List::from_iter(vec![nullary("Pt")]),
+    )
+    .with_path_constructor(PathCtorSig {
+        name: Text::from("Edge"),
+        lhs: CoreTerm::Var(Text::from("External")),
+        rhs: CoreTerm::Var(Text::from("External")),
+    });
+    let elim = eliminator_type(&hit);
+    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else { panic!() };
+    // External is NOT a registered point ctor, so it stays as-is.
+    assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "External"));
+    assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "External"));
+}
+
+#[test]
+fn app_chain_endpoint_falls_through_unchanged() {
+    // V2 only resolves bare-Var endpoints. A non-nullary endpoint
+    // like `App(Var("Cons"), Var("a0"))` falls through to the
+    // elaborator (V3 follow-up).
+    let hit = RegisteredInductive::new(
+        Text::from("Sus"),
+        List::new(),
+        List::from_iter(vec![nullary("North"), nullary("South")]),
+    )
+    .with_path_constructor(PathCtorSig {
+        name: Text::from("Merid"),
+        lhs: CoreTerm::App(
+            verum_common::Heap::new(CoreTerm::Var(Text::from("North"))),
+            verum_common::Heap::new(CoreTerm::Var(Text::from("a0"))),
+        ),
+        rhs: CoreTerm::Var(Text::from("South")),
+    });
+    let elim = eliminator_type(&hit);
+    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else { panic!() };
+    // App-chain lhs unchanged — V2 only resolves bare Var.
+    assert!(matches!(lhs.as_ref(), CoreTerm::App(..)));
+    // Bare Var rhs ("South") IS a point ctor → resolves to case_South.
+    assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_South"));
+}
 
 #[test]
 fn elim_preserves_declared_universe_level() {
