@@ -167,30 +167,33 @@ fn verify_llvm_version(llvm_dir: &Path) {
 /// never reaches at runtime. Anything whose stem *contains* one of these
 /// substrings is excluded from the link line.
 ///
-/// Rationale (Verum uses CPU codegen for X86/AArch64/WebAssembly and GPU
-/// codegen via NVVM/ROCDL/SPIRV). The dialects below are specialised
-/// extensions that none of the Verum passes target.
-const MLIR_LIB_SKIP_FRAGMENTS: &[&str] = &[
-    // Framework directives / HPC runtimes not in the Verum pipeline.
-    "OpenMP", "OpenACC", "MPI",
-    // Tensor Operator Set Architecture — not part of Verum's tensor path.
-    "Tosa",
-    // Architecture-specific vector extensions Verum does not emit.
-    "ArmSME", "ArmSVE", "ArmNeon", "AMX", "X86Vector",
-    // Sparse-tensor and friends.
-    "SparseTensor",
-    // Specialty / research dialects.
-    "Quant", "Polynomial", "Mesh", "Shape",
-    // Pattern-Descriptor DSL — only needed when user code defines dialects.
-    "IRDL", "PDL", "PDLInterp", "PDLToPDLInterp",
-    // C-source emission backend.
-    "EmitC", "TargetCpp",
-    // Async runtime (Verum has its own async in core/async/).
-    "AsyncDialect", "AsyncToLLVM", "AsyncToAsyncRuntime", "AsyncTransforms",
-    "AsyncRuntime",
-    // High-level GPU wrapper (we lower straight to NVVM / ROCDL / SPIRV).
-    "NVGPU",
-];
+/// Static archives the build deliberately skips when linking MLIR.
+///
+/// **Empty by design.** `verum_mlir_sys` is a *complete* MLIR C-API
+/// binding: it exposes `mlirRegisterAll{Dialects,Extensions,Passes}` and
+/// includes `<mlir-c/RegisterEverything.h>` from the wrapper. The full
+/// registration entry points reference every dialect/pass archive
+/// transitively (`MLIRSparseTensor*`, `MLIRTosa*`, `MLIREmitC*`,
+/// `MLIRShape*`, `MLIRX86Vector*`, `MLIRArmNeon*`, `MLIRPDL*`,
+/// `MLIRIRDL`, `MLIRAsync*`), and dropping any archive breaks the link.
+///
+/// Production callers in Verum's pipeline use `verum_mlir::utility::
+/// register_used_dialects` (declared in `crates/llvm/verum_mlir/src/
+/// utility.rs`) to register only the dialects the codegen targets —
+/// arith/func/scf/cf/memref/llvm/math/linalg/tensor/vector/transform
+/// plus gpu/nvvm/rocdl/spirv/amdgpu. That is the runtime-side
+/// minimisation; it does NOT remove symbols from the link line because
+/// the public Rust API (`register_all_dialects`, `register_all_passes`)
+/// still references the full registration entry points and is exercised
+/// by tests and tooling.
+///
+/// Shrinking the link footprint requires reducing the *binding's*
+/// surface (drop `RegisterEverything.h` from the wrapper, remove the
+/// `register_all_*` Rust functions, and migrate every test/tool caller
+/// to per-dialect/per-pass registration). Until that decision is taken,
+/// the skip list is empty: completeness of the binding implies linking
+/// every archive it references.
+const MLIR_LIB_SKIP_FRAGMENTS: &[&str] = &[];
 
 /// LLVM component names that ship in `llvm-config --libnames` but are
 /// only relevant to host-tooling paths Verum never enters. Each entry is
