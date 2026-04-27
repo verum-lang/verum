@@ -89,7 +89,7 @@ public type NonZeroDuration is EngineDuration where |d| d.0 > 0;
 public const MAX_PRACTICAL_DURATION: UInt64 = 365 * 24 * 60 * 60 * 1_000_000_000;
 
 implement EngineDuration {
-    public const ZERO: EngineDuration = EngineDuration0_u64;
+    public const ZERO: EngineDuration = EngineDuration(0_u64);
     public const MAX: EngineDuration = EngineDuration(UInt64.MAX);
 
     /// Create duration from nanoseconds (zero-copy, compile-time constant capable)
@@ -158,7 +158,7 @@ implement EngineDuration {
         if self.0 >= other.0 {
             EngineDuration(self.0 - other.0)
         } else {
-            EngineDuration0_u64
+            EngineDuration(0_u64)
         }
     }
 
