@@ -1,0 +1,108 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l1, wal, checksum, regression
+// @timeout: 15000
+// @description: SQLite WAL running checksum — additive (NOT xor) per wal.c
+//
+// Spec: internal/specs/sqlite-native.md §8.3, sqlite.org/walformat.html
+//
+// Pins the additive form of `walChecksumBytes` from the SQLite source:
+//
+//     s1 += word + s2
+//     s2 += word + s1
+//
+// An earlier revision used `s1 += word ^ s2` (xor) which produced
+// WAL files real SQLite would reject as torn. This test exists so the
+// regression cannot recur silently.
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l1_pager.journal.wal.{
+    WalChecksum, wal_running_checksum,
+};
+
+fn push_be32(buf: &mut List<Byte>, v: UInt32) {
+    buf.push(((v >> 24) & 0xFF) as Byte);
+    buf.push(((v >> 16) & 0xFF) as Byte);
+    buf.push(((v >> 8)  & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+fn empty_seed() -> WalChecksum {
+    WalChecksum { s1: 0 as UInt32, s2: 0 as UInt32 }
+}
+
+fn one_pair_zero_zero_yields_zero() {
+    let mut buf: List<Byte> = List.new();
+    push_be32(&mut buf, 0 as UInt32);
+    push_be32(&mut buf, 0 as UInt32);
+    let out = wal_running_checksum(empty_seed(), buf.as_slice());
+    // s1 = 0 + 0 + 0 = 0; s2 = 0 + 0 + 0 = 0
+    assert(out.s1 == (0 as UInt32));
+    assert(out.s2 == (0 as UInt32));
+}
+
+fn additive_not_xor() {
+    // Pair (1, 2) under additive form:
+    //   s1 = 0 + 1 + 0 = 1
+    //   s2 = 0 + 2 + 1 = 3
+    // Under the (buggy) xor form the result would be:
+    //   s1 = 0 + (1 xor 0) = 1
+    //   s2 = 0 + (2 xor 1) = 3
+    // Both happen to agree on this trivial pair — pick a richer
+    // probe to discriminate.
+    let mut buf: List<Byte> = List.new();
+    push_be32(&mut buf, 0xABCD0001 as UInt32);
+    push_be32(&mut buf, 0x1234ABCD as UInt32);
+    let out = wal_running_checksum(empty_seed(), buf.as_slice());
+    // Additive arithmetic in the u32 domain (Verum Int wraps via the
+    // & 0xFFFFFFFF mask inside the algorithm — here we predict by
+    // hand-computing the u32 sums).
+    //   s1 = 0 + 0xABCD0001 + 0      = 0xABCD0001
+    //   s2 = 0 + 0x1234ABCD + s1     = 0x1234ABCD + 0xABCD0001
+    //                                = 0xBE01ABCE
+    assert(out.s1 == (0xABCD0001 as UInt32));
+    assert(out.s2 == (0xBE01ABCE as UInt32));
+}
+
+fn chaining_two_pairs() {
+    // Process (a, b) then (c, d) over a single 16-byte buffer; the
+    // output must equal `cs2 = wal(cs1, [c,d])` where
+    // `cs1 = wal(empty, [a,b])`. Proves the function honours the
+    // running-state accumulation contract (used by every frame).
+    let mut buf: List<Byte> = List.new();
+    push_be32(&mut buf, 1 as UInt32);
+    push_be32(&mut buf, 2 as UInt32);
+    push_be32(&mut buf, 3 as UInt32);
+    push_be32(&mut buf, 4 as UInt32);
+    let combined = wal_running_checksum(empty_seed(), buf.as_slice());
+
+    let mut head: List<Byte> = List.new();
+    push_be32(&mut head, 1 as UInt32);
+    push_be32(&mut head, 2 as UInt32);
+    let cs1 = wal_running_checksum(empty_seed(), head.as_slice());
+
+    let mut tail: List<Byte> = List.new();
+    push_be32(&mut tail, 3 as UInt32);
+    push_be32(&mut tail, 4 as UInt32);
+    let cs2 = wal_running_checksum(cs1, tail.as_slice());
+
+    assert(combined.s1 == cs2.s1);
+    assert(combined.s2 == cs2.s2);
+}
+
+fn empty_input_no_op() {
+    let buf: List<Byte> = List.new();
+    let out = wal_running_checksum(empty_seed(), buf.as_slice());
+    assert(out.s1 == (0 as UInt32));
+    assert(out.s2 == (0 as UInt32));
+}
+
+fn main() {
+    one_pair_zero_zero_yields_zero();
+    additive_not_xor();
+    chaining_two_pairs();
+    empty_input_no_op();
+    print("wal_checksum typecheck ok");
+}

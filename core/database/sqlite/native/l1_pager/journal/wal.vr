@@ -257,13 +257,18 @@ public fn wal_frame_header_parse(buf: &[Byte]) -> Result<PagerWalFrameHeader, Te
 /// multiple of 8 bytes — WAL buffers always are (page_size is a
 /// power-of-two ≥ 512, and headers are 24/32 bytes both multiples of 8).
 ///
-/// Per spec §3.1:
+/// Per SQLite source `wal.c::walChecksumBytes` (NOT the public
+/// walformat.html prose, which is misleading):
 ///
-///     s1 = s1 + (x[i] ^ s2)
-///     s2 = s2 + (x[i+1] ^ s1)
+///     s1 += word_be32(x[i])     + s2
+///     s2 += word_be32(x[i+1])   + s1
 ///
-/// where x[] is big-endian u32 from the input buffer. All arithmetic
-/// is wrapping 32-bit.
+/// where word_be32 reads a big-endian u32 (or native-order under
+/// `WAL_MAGIC_BE`, which we don't yet emit). All arithmetic is
+/// wrapping 32-bit.  An earlier revision of this file used `^` (xor)
+/// instead of `+ s2 / + s1` which produced WAL files that real SQLite
+/// would reject as torn — see the differential corpus regression in
+/// `vcs/specs/L2-standard/database/sqlite/l1_pager/wal_checksum.vr`.
 public fn wal_running_checksum(seed: WalChecksum, data: &[Byte]) -> WalChecksum {
     let mut s1 = seed.s1;
     let mut s2 = seed.s2;
@@ -273,8 +278,8 @@ public fn wal_running_checksum(seed: WalChecksum, data: &[Byte]) -> WalChecksum 
     while i + 8 <= n {
         let a = read_u32_be(data, i);
         let b = read_u32_be(data, i + 4);
-        s1 = s1 + (a ^ s2);
-        s2 = s2 + (b ^ s1);
+        s1 = s1 + a + s2;
+        s2 = s2 + b + s1;
         i = i + 8;
     }
     WalChecksum { s1: s1, s2: s2 }

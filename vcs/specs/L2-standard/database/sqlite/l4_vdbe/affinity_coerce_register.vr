@@ -31,15 +31,15 @@ fn null_passes_through() {
 }
 
 fn rowid_folds_to_int() {
-    match register_to_value(RRowId(42 as Int64)) {
-        VInt(i) => { assert(i == (42 as Int64)); }
+    match register_to_value(RRowId(42_i64)) {
+        VInt(i) => { assert(i == 42_i64); }
         _ => panic("RRowId → VInt"),
     }
 }
 
 fn integer_affinity_text_to_int() {
     match coerce_register(RText("123".clone()), Affinity.Integer) {
-        RInt(i) => { assert(i == (123 as Int64)); }
+        RInt(i) => { assert(i == 123_i64); }
         _ => panic("text '123' → Int"),
     }
     match coerce_register(RText("abc".clone()), Affinity.Integer) {
@@ -49,7 +49,7 @@ fn integer_affinity_text_to_int() {
 }
 
 fn real_affinity_int_to_real() {
-    match coerce_register(RInt(42 as Int64), Affinity.Real) {
+    match coerce_register(RInt(42_i64), Affinity.Real) {
         RReal(x) => { assert(x == 42.0); }
         _ => panic("int → real"),
     }
@@ -67,7 +67,7 @@ fn numeric_affinity_text() {
 }
 
 fn blob_affinity_no_coerce() {
-    match coerce_register(RInt(7 as Int64), Affinity.Blob) {
+    match coerce_register(RInt(7_i64), Affinity.Blob) {
         RInt(_) => {},   // unchanged
         _ => panic("blob no-op on int"),
     }
@@ -77,7 +77,7 @@ fn coerce_row_partial_affinities() {
     let mut row: List<Register> = List.new();
     row.push(RText("42".clone()));
     row.push(RText("hello".clone()));
-    row.push(RInt(7 as Int64));
+    row.push(RInt(7_i64));
 
     let mut affs: List<Affinity> = List.new();
     affs.push(Affinity.Integer);
@@ -85,9 +85,9 @@ fn coerce_row_partial_affinities() {
     // No third affinity → trailing register left untouched.
 
     let out = coerce_row(row, &affs);
-    match out[0] { RInt(i) => assert(i == (42 as Int64)), _ => panic("col0 not Int"), }
+    match out[0] { RInt(i) => assert(i == 42_i64), _ => panic("col0 not Int"), }
     match out[1] { RText(_) => {}, _ => panic("col1 not Text"), }
-    match out[2] { RInt(i) => assert(i == (7 as Int64)), _ => panic("col2 untouched"), }
+    match out[2] { RInt(i) => assert(i == 7_i64), _ => panic("col2 untouched"), }
 }
 
 fn round_trip_register_value() {

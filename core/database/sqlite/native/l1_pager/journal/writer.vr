@@ -1,0 +1,263 @@
+module core.database.sqlite.native.l1_pager.journal.writer;
+
+// =============================================================================
+// l1_pager/journal/writer.vr — Atomic-pwrite WAL writer
+// =============================================================================
+// Layer: 1 (Pager — WAL writer)
+// Spec: sqlite-native.md §8.3, sqlite.org/walformat.html
+//
+// Wraps the existing serialisation surface in `journal/wal.vr` with
+// the actual file-I/O pathway: header pwrite → frame-prefix pwrite →
+// frame-body pwrite → conditional `full_fsync` on commit. Every disk
+// touch goes through `core.sys.common.pwrite` at an explicit offset
+// (sqlite-native.md §3.2 Gap 3 — atomic positional I/O), so a crash
+// between the prefix-pwrite and body-pwrite leaves a torn frame whose
+// checksum no longer matches and which recovery rejects (the WAL
+// "torn-tail" invariant).
+//
+// `WalWriter` is sync — the L1 actor that wraps it (`l1_pager/actor.vr`)
+// makes that async via `core.async.task::block_on_io`. Direct callers
+// in tests can use this surface as-is.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount core.sys.common.{FileDesc, OSError, pwrite, full_fsync};
+mount core.database.sqlite.native.l1_pager.journal.wal.{
+    Wal, WalHeader, WalChecksum, PagerWalFrameHeader,
+    WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE, WAL_FORMAT_VERSION,
+    wal_new, wal_header_serialize, wal_frame_header_serialize,
+    wal_running_checksum,
+};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type WalWriteError is
+      WweIo(OSError)
+    | WweShortWrite { wanted: Int, written: Int }
+    | WweBadPageSize { found: Int }
+    | WweClosed;
+
+// -----------------------------------------------------------------------------
+// WalWriter
+// -----------------------------------------------------------------------------
+
+public type WalWriter is {
+    fd: FileDesc,
+    page_size: Int,
+    salt_1: UInt32,
+    salt_2: UInt32,
+    /// Running checksum AFTER the most recently appended frame, or
+    /// after the file header for an empty WAL.
+    running: WalChecksum,
+    /// Index of the next frame to append (0 = first after header).
+    next_index: Int,
+    closed: Bool,
+}
+
+implement WalWriter {
+    /// Initialise an empty WAL: write the 32-byte header at offset 0
+    /// then fsync. Subsequent `append_frame` calls produce frames
+    /// whose checksums chain off the header's checksum.
+    public fn create(
+        fd: FileDesc,
+        page_size: Int,
+        salt_1: UInt32,
+        salt_2: UInt32,
+        checkpoint_seq: UInt32,
+    ) -> Result<WalWriter, WalWriteError> {
+        if !is_valid_page_size(page_size) {
+            return Err(WweBadPageSize { found: page_size });
+        }
+        let wal = wal_new(page_size as UInt32, salt_1, salt_2, checkpoint_seq);
+        let header_bytes = wal_header_serialize(&wal.header);
+        match pwrite(fd, header_bytes.as_slice(), 0) {
+            Ok(n) => {
+                if n != header_bytes.len() as Int {
+                    return Err(WweShortWrite {
+                        wanted: header_bytes.len() as Int,
+                        written: n,
+                    });
+                }
+            }
+            Err(e) => { return Err(WweIo(e)); }
+        }
+        match full_fsync(fd) {
+            Ok(_)  => {}
+            Err(e) => { return Err(WweIo(e)); }
+        }
+        Ok(WalWriter {
+            fd: fd,
+            page_size: page_size,
+            salt_1: salt_1,
+            salt_2: salt_2,
+            running: wal.running,
+            next_index: 0,
+            closed: false,
+        })
+    }
+
+    /// Re-open an existing WAL after recovery has identified the last
+    /// valid frame. `next_index` is the slot the next append will land
+    /// in; `running` is the checksum after that last valid frame.
+    public fn reopen(
+        fd: FileDesc,
+        page_size: Int,
+        salt_1: UInt32,
+        salt_2: UInt32,
+        next_index: Int,
+        running: WalChecksum,
+    ) -> WalWriter {
+        WalWriter {
+            fd: fd,
+            page_size: page_size,
+            salt_1: salt_1,
+            salt_2: salt_2,
+            running: running,
+            next_index: next_index,
+            closed: false,
+        }
+    }
+
+    public fn page_size(&self) -> Int { self.page_size }
+    public fn next_index(&self) -> Int { self.next_index }
+    public fn salt_1(&self) -> UInt32 { self.salt_1 }
+    public fn salt_2(&self) -> UInt32 { self.salt_2 }
+    public fn running_checksum(&self) -> WalChecksum {
+        WalChecksum { s1: self.running.s1, s2: self.running.s2 }
+    }
+    public fn is_closed(&self) -> Bool { self.closed }
+
+    /// Byte offset of frame `i` (0-based) within the WAL file.
+    public fn frame_offset(&self, frame_index: Int) -> Int {
+        WAL_HEADER_SIZE + frame_index * (WAL_FRAME_HEADER_SIZE + self.page_size)
+    }
+
+    /// Append one frame. The body MUST be exactly `page_size` bytes.
+    /// Set `db_size_after_commit > 0` to mark the frame as a commit
+    /// frame; a commit triggers `full_fsync` so durability is in
+    /// place before we return. Returns the 0-based index of the
+    /// newly-written frame.
+    ///
+    /// Atomicity: header and body are pwrite'd at distinct offsets;
+    /// a crash between them leaves a torn frame whose recomputed
+    /// checksum will not match the stored one, so recovery discards
+    /// it (and every later frame, by transitive checksum chain).
+    public fn append_frame(
+        &mut self,
+        page_no: UInt32,
+        db_size_after_commit: UInt32,
+        body: &[Byte],
+    ) -> Result<Int, WalWriteError> {
+        if self.closed { return Err(WweClosed); }
+        if body.len() as Int != self.page_size {
+            return Err(WweBadPageSize { found: body.len() as Int });
+        }
+        let frame_idx = self.next_index;
+        let offset = self.frame_offset(frame_idx);
+
+        // The running checksum spans the 16-byte frame prefix
+        // (page_no + db_size + salt_1 + salt_2) followed by the body.
+        // We assemble the prefix, advance the running cksum across it,
+        // then advance across the body. The resulting (s1, s2) goes
+        // into the on-disk frame header.
+        let prefix = build_frame_prefix(page_no, db_size_after_commit, self.salt_1, self.salt_2);
+        let after_prefix = wal_running_checksum(self.running.clone(), prefix.as_slice());
+        let after_body   = wal_running_checksum(after_prefix, body);
+
+        let frame_header = PagerWalFrameHeader {
+            page_number: page_no,
+            db_size_after_commit: db_size_after_commit,
+            salt_1: self.salt_1,
+            salt_2: self.salt_2,
+            checksum_1: after_body.s1,
+            checksum_2: after_body.s2,
+        };
+        let header_bytes = wal_frame_header_serialize(&frame_header);
+
+        match pwrite(self.fd, header_bytes.as_slice(), offset) {
+            Ok(n) => {
+                if n != header_bytes.len() as Int {
+                    return Err(WweShortWrite {
+                        wanted: header_bytes.len() as Int,
+                        written: n,
+                    });
+                }
+            }
+            Err(e) => { return Err(WweIo(e)); }
+        }
+        let body_offset = offset + WAL_FRAME_HEADER_SIZE as Int;
+        match pwrite(self.fd, body, body_offset) {
+            Ok(n) => {
+                if n != body.len() as Int {
+                    return Err(WweShortWrite {
+                        wanted: body.len() as Int,
+                        written: n,
+                    });
+                }
+            }
+            Err(e) => { return Err(WweIo(e)); }
+        }
+        if db_size_after_commit > 0_u32 {
+            match full_fsync(self.fd) {
+                Ok(_)  => {}
+                Err(e) => { return Err(WweIo(e)); }
+            }
+        }
+        self.running = WalChecksum { s1: after_body.s1, s2: after_body.s2 };
+        self.next_index = frame_idx + 1;
+        Ok(frame_idx)
+    }
+
+    /// Force a fsync without writing a frame — useful when the caller
+    /// has appended several non-commit frames and now wants to make
+    /// them durable as a group (group-commit pattern).
+    public fn fsync(&self) -> Result<(), WalWriteError> {
+        if self.closed { return Err(WweClosed); }
+        match full_fsync(self.fd) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(WweIo(e)),
+        }
+    }
+
+    /// Affine close — caller must call this exactly once. Subsequent
+    /// methods return `WweClosed`. We do NOT fsync here — the caller
+    /// is responsible for committing-then-closing in that order.
+    public fn close(mut self) {
+        self.closed = true;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn build_frame_prefix(
+    page_no: UInt32,
+    db_size_after_commit: UInt32,
+    salt_1: UInt32,
+    salt_2: UInt32,
+) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    push_u32_be(&mut out, page_no);
+    push_u32_be(&mut out, db_size_after_commit);
+    push_u32_be(&mut out, salt_1);
+    push_u32_be(&mut out, salt_2);
+    out
+}
+
+fn push_u32_be(buf: &mut List<Byte>, v: UInt32) {
+    buf.push(((v >> 24) & 0xFF) as Byte);
+    buf.push(((v >> 16) & 0xFF) as Byte);
+    buf.push(((v >> 8)  & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+fn is_valid_page_size(p: Int) -> Bool {
+    if p == 1 { return true; }     // 1 == 65536 sentinel
+    if p < 512 || p > 65536 { return false; }
+    (p & (p - 1)) == 0
+}
