@@ -333,10 +333,6 @@ pub struct PredicateAbstractor {
     /// Configuration
     config: AbstractionConfig,
 
-    /// Abstract predicates by hash
-    #[allow(dead_code)]
-    abstractions: Map<u64, AbstractPredicate>,
-
     /// Abstraction cache (predicate hash -> abstracted form)
     abstraction_cache: Map<u64, PathPredicate>,
 
@@ -387,7 +383,6 @@ impl PredicateAbstractor {
     pub fn new(config: AbstractionConfig) -> Self {
         Self {
             config,
-            abstractions: Map::new(),
             abstraction_cache: Map::new(),
             equivalence_cache: Map::new(),
             subsumption_cache: Map::new(),

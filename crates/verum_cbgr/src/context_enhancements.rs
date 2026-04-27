@@ -478,11 +478,6 @@ impl AbstractContext {
                     .or_default()
                     .mark_present();
             }
-
-            // Also track predicates that are absent in this state
-            for tracked in all_predicates.values_mut() {
-                tracked.increment_total();
-            }
         }
 
         // Classify predicates
@@ -624,28 +619,17 @@ pub enum AbstractPredicate {
 struct PredicateTracker {
     /// Number of states where this predicate is present
     present_count: usize,
-    /// Total number of states analyzed
-    #[allow(dead_code)]
-    total_count: usize,
 }
 
 impl PredicateTracker {
     /// Create new tracker
     fn new() -> Self {
-        Self {
-            present_count: 0,
-            total_count: 0,
-        }
+        Self { present_count: 0 }
     }
 
     /// Mark predicate as present in current state
     fn mark_present(&mut self) {
         self.present_count += 1;
-    }
-
-    /// Increment total count (called for each state)
-    fn increment_total(&mut self) {
-        self.total_count += 1;
     }
 }
 
