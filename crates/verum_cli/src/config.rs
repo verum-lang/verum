@@ -1235,17 +1235,82 @@ pub enum ReferenceMode {
     Mixed,   // Smart selection (recommended)
 }
 
-// Verification levels
-// Gradual verification: None (no checks), Runtime (default, runtime assertions),
-// Proof (formal verification via Z3 SMT solver for refinement types and contracts)
+// Verification levels — full VVA §2.3 9-strategy ladder.
+//
+// The ladder is *strictly monotone* under the ν-coordinate
+// (`MsfsCoord.nu`); each strategy is sound, but completeness and
+// cost grow strictly. A strategy at ν_i discharges every obligation
+// a strategy at ν_j ≤ ν_i can, plus more.
+//
+// | Strategy   | Meaning                                                        | ν       |
+// |------------|----------------------------------------------------------------|---------|
+// | `none`     | No verification (unsafe!).                                     | —       |
+// | `runtime`  | Emit runtime assertions; no compile-time discharge.            | 0       |
+// | `static`   | Conservative dataflow / constant folding / CBGR.               | 1       |
+// | `fast`     | Bounded SMT (single solver, ≤ 100 ms / goal).                  | 2       |
+// | `formal`   | Full SMT portfolio (Z3 + CVC5) with decision procedures.       | ω       |
+// | `proof`    | User tactic proof; kernel re-checks.                           | ω+1     |
+// | `thorough` | `formal` + mandatory invariant/frame/termination obligations.  | ω·2     |
+// | `reliable` | `thorough` + cross-solver agreement (Z3 ∧ CVC5 must agree).    | ω·2+1   |
+// | `certified`| `reliable` + certificate re-check + cross-format export.       | ω·2+2   |
+// | `synthesize`| Inverse proof search + dispatch to strictest non-synth.       | ≤ ω·3+1 |
+//
+// Direction: `@verify(proof)` on a function compiling under
+// `@verify(runtime)` is always accepted (lax → strict). The reverse
+// requires re-proof and is rejected by the level-inference pass.
+//
+// Wire format: `[serde(rename_all = "lowercase")]` so verum.toml
+// uses the lowercase identifiers (`verification = "certified"`,
+// `default_strategy = "synthesize"`, etc.).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum VerificationLevel {
-    None, // No verification (unsafe!)
+    /// No verification — completely unchecked. Never auto-selected.
+    None,
+    /// Emit runtime assertions; no compile-time discharge. Default
+    /// for the `application` profile.
     #[default]
-    Runtime, // Runtime checks (default)
-    Proof, // Formal verification
+    Runtime,
+    /// Conservative dataflow / constant folding / CBGR. Discharges
+    /// trivially-decidable refinements without SMT.
+    Static,
+    /// Bounded SMT (single solver, short timeout). Returns UNKNOWN
+    /// conservatively without escalating.
+    Fast,
+    /// Full SMT portfolio (Z3 + CVC5) with decision procedures.
+    /// Default for the `research` profile (dev / test / bench).
+    Formal,
+    /// User-supplied tactic proof; kernel re-checks. Promotes from
+    /// `formal` when SMT cannot discharge.
+    Proof,
+    /// `formal` + mandatory invariant / frame / termination
+    /// obligations. Catches missing specs.
+    Thorough,
+    /// `thorough` + cross-solver agreement (Z3 AND CVC5 must agree).
+    /// Fails on any disagreement.
+    Reliable,
+    /// `reliable` + certificate re-check + Lean / Coq / Agda /
+    /// Dedukti / Metamath cross-format export. Default for the
+    /// `research` profile (release).
+    Certified,
+    /// Inverse proof search across the moduli space; dispatches to
+    /// the strictest non-synthesize strategy in scope on success.
+    Synthesize,
+    /// VFE-6 — bounded-arithmetic verification (V_0 / V_1 / S^1_2 /
+    /// V_NP / V_PH / IΔ_0). Polynomial-time decidable fragments
+    /// inside the weak stratum; CI budget ≤ 30 s. ν < ω (n).
+    ComplexityTyped,
+    /// VFE-8 — coherent verification static fragment. Adds operational-
+    /// coherence (108.T round-trip) checks at compile time; static
+    /// portion only.
+    CoherentStatic,
+    /// VFE-8 — coherent verification runtime fragment. Same as
+    /// coherent_static + ε-monitor emission for the runtime layer.
+    CoherentRuntime,
+    /// VFE-8 — full coherent verification. Combines coherent_static
+    /// + coherent_runtime + bidirectional α-cert ⟺ ε-cert validation.
+    Coherent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1531,33 +1596,61 @@ pub fn create_default_manifest(
             features.insert("default".into(), List::new());
             features
         },
-        profile: ProfileConfig {
-            dev: Profile {
-                tier: CompilationTier::Interpreter,
-                verification: VerificationLevel::Runtime,
-                opt_level: 0,
-                debug: true,
-                debug_assertions: true,
-                overflow_checks: true,
-                lto: false,
-                incremental: true,
-                codegen_units: Some(256),
-                cbgr_checks: CbgrCheckMode::All,
-            },
-            release: Profile {
-                tier: CompilationTier::Aot,
-                verification: VerificationLevel::Runtime,
-                opt_level: 3,
-                debug: false,
-                debug_assertions: false,
-                overflow_checks: false,
-                lto: true,
-                incremental: false,
-                codegen_units: Some(16),
-                cbgr_checks: CbgrCheckMode::Optimized,
-            },
-            test: Profile::default(),
-            bench: Profile::default(),
+        profile: {
+            // Research profile gets the strictest verification ladder
+            // by default: dev = formal (full SMT portfolio with
+            // decidable-fragment completeness), release = certified
+            // (cross-format certificate export). Other profiles stay
+            // at runtime — research is opt-in via the [language]
+            // profile selection.
+            let (dev_verify, release_verify, test_verify) =
+                if profile == LanguageProfile::Research {
+                    (
+                        VerificationLevel::Formal,
+                        VerificationLevel::Certified,
+                        VerificationLevel::Formal,
+                    )
+                } else {
+                    (
+                        VerificationLevel::Runtime,
+                        VerificationLevel::Runtime,
+                        VerificationLevel::Runtime,
+                    )
+                };
+            ProfileConfig {
+                dev: Profile {
+                    tier: CompilationTier::Interpreter,
+                    verification: dev_verify,
+                    opt_level: 0,
+                    debug: true,
+                    debug_assertions: true,
+                    overflow_checks: true,
+                    lto: false,
+                    incremental: true,
+                    codegen_units: Some(256),
+                    cbgr_checks: CbgrCheckMode::All,
+                },
+                release: Profile {
+                    tier: CompilationTier::Aot,
+                    verification: release_verify,
+                    opt_level: 3,
+                    debug: false,
+                    debug_assertions: false,
+                    overflow_checks: false,
+                    lto: true,
+                    incremental: false,
+                    codegen_units: Some(16),
+                    cbgr_checks: CbgrCheckMode::Optimized,
+                },
+                test: Profile {
+                    verification: test_verify,
+                    ..Profile::default()
+                },
+                bench: Profile {
+                    verification: test_verify,
+                    ..Profile::default()
+                },
+            }
         },
         workspace: None,
         lsp: LspConfig::default(),
