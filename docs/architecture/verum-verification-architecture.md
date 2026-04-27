@@ -1289,7 +1289,28 @@ verum export --to coq ./th.vr -o Th.v && coqc Th.v
 
 On CI, `verum ci --export-roundtrip` runs all five for smoke coverage.
 
-### 8.6 Program extraction
+### 8.6 Program extraction **[80% — V8 #239 audit; V2 = surface @extract attribute parser wiring]**
+
+**Implementation**: `crates/verum_smt/src/program_extraction.rs` (~3300 LOC) + `crates/verum_smt/tests/program_extraction_tests.rs` (~740 LOC).
+
+**Surface today**:
+
+* `ProgramExtractor::new()` — main entry point, walks a `ProofTerm` and emits an `ExtractedProgram`.
+* `ExtractionTarget` — four targets shipped: `Verum` (native), `OCaml` (Coq integration), `Lean`, `Coq`. `file_extension()` and `language_name()` accessors stable.
+* `ExtractionConfig { target, optimize, ... }` — knobs for the extraction pipeline.
+* `ExtractedProgram` — top-level record bundling extracted code + parameters + contracts.
+* `ExtractedWitness` — for `@extract_witness`-style witness-only extraction.
+* `Contract { kind: ContractKind, ... }` — runtime contracts emitted for proof obligations.
+* `ProofEraser` — proof-irrelevant (Prop-typed) component erasure.
+* `CodeGenerator` — target-language emission.
+* `ExtractionStats` / `ErasureStats` — audit-grade statistics.
+
+**V2 scope (#239 follow-up)**:
+* Surface-level `@extract` / `@extract_witness` / `@extract_contract` attribute parser at the AST layer (`crates/verum_ast/src/attr/typed.rs`); today the extraction pipeline is invoked programmatically via the `ProgramExtractor` API rather than driven by user attributes.
+* `@extract(realize = "native_div_mod")` realization-directive routing through `ExtractionConfig`.
+* End-to-end `verum extract <file.vr>` CLI wiring.
+
+
 
 ```verum
 @extract
