@@ -52,7 +52,6 @@ const DEFAULT_SLOW_THRESHOLD: Duration = Duration::from_secs(5);
 pub struct VerificationProfiler {
     entries: List<ProfileEntry>,
     cache_stats: CacheStatistics,
-    #[allow(dead_code)]
     start_time: Instant,
     /// Configurable threshold for slow verification detection
     slow_threshold: Duration,
@@ -189,6 +188,16 @@ impl VerificationProfiler {
     /// Get the current slow verification threshold
     pub fn threshold(&self) -> Duration {
         self.slow_threshold
+    }
+
+    /// Wall-clock elapsed time since this profiler started.
+    ///
+    /// Distinct from `total_verification_time()` (which sums per-entry
+    /// active verification spans): this captures the full wall-clock
+    /// duration including idle gaps between verifications, useful for
+    /// reporting the profiler's observation window.
+    pub fn elapsed(&self) -> Duration {
+        self.start_time.elapsed()
     }
 
     /// Profile a single function verification
