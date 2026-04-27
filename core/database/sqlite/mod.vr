@@ -28,6 +28,7 @@ public module error;
 public module connection;
 public module adapter;
 public module pool;
+public module introspect;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .adapter.{
@@ -42,3 +43,4 @@ public mount .connection.{
 };
 public mount .error.dberr_from_loom;
 public mount .pool.SqlitePool;
+public mount .introspect.introspect as introspect_sqlite;
