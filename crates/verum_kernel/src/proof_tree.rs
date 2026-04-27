@@ -669,11 +669,11 @@ fn extract_aletha_rule_name(children: &List<ProofNode>) -> Option<String> {
 use verum_common::Heap;
 
 // =============================================================================
-// V8 (#224) — Kernel-rule typed proof-graph surface
+// Kernel-rule typed proof-graph surface
 // =============================================================================
 //
 // The S-expression-based ProofNode above models *backend* proof
-// trees (Z3, CVC5 ALETHE). V8 #224 introduces a parallel,
+// trees (Z3, CVC5 ALETHE). introduces a parallel,
 // typed surface that captures the kernel's OWN inference-rule
 // applications when typing a CoreTerm — the typing-derivation
 // graph that feeds:
@@ -684,7 +684,7 @@ use verum_common::Heap;
 //   • IDE step-debugger (interactive proof exploration)
 //   • Cross-tool replay matrix (#90)
 
-/// V8 (#224) — kernel inference rule taxonomy. One variant per
+/// kernel inference rule taxonomy. One variant per
 /// shipped typing rule per `verification-architecture.md` §4.4a.
 ///
 /// The `Display` representation is the canonical short name
@@ -692,54 +692,98 @@ use verum_common::Heap;
 /// certificate-export targets.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KernelRule {
-    // §4.4a.1 Structural (CCHM core)
+    // Structural (CCHM core)
+    /// Variable lookup: `Γ, x:A ⊢ x : A`.
     KVar,
+    /// Universe formation: `Γ ⊢ U_n : U_{n+1}`.
     KUniv,
+    /// Π-type formation: dependent function type.
     KPiForm,
+    /// λ-introduction: form an anonymous function.
     KLamIntro,
+    /// Application elimination: apply a function to an argument.
     KAppElim,
+    /// Σ-type formation: dependent pair type.
     KSigmaForm,
+    /// Pair introduction: form a Σ-pair `(a, b)`.
     KPairIntro,
+    /// First projection from a Σ-pair.
     KFstElim,
+    /// Second projection from a Σ-pair.
     KSndElim,
-    // §4.4a.2 Cubical
+    // Cubical
+    /// Path-type formation `Path<A>(a, b)`.
     KPathTyForm,
-    /// V8.1 (#196 follow-up, §7.4 V3) — dependent path-over,
-    /// `PathOver(motive, p, lhs, rhs) : U`.
+    /// Dependent path-over `PathOver(motive, p, lhs, rhs) : U`.
     KPathOverForm,
+    /// Reflexivity introduction `refl(a) : Path<A>(a, a)`.
     KReflIntro,
+    /// Cubical homogeneous composition `hcomp φ walls base`.
     KHComp,
+    /// Cubical transport `transp(p, r, t)`.
     KTransp,
+    /// Glue type `Glue<A>(φ, T, e)` for computational univalence.
     KGlue,
-    // §4.4a.3 Refinement
+    // Refinement
+    /// Refinement-type formation `{ x : A | P(x) }` (finite-depth).
     KRefine,
+    /// Ordinal-depth-stratified refinement formation
+    /// (modal-depth gating, transfinite version of K-Refine).
     KRefineOmega,
+    /// Refinement introduction (witness a refinement type).
     KRefineIntro,
+    /// Refinement erasure (drop the predicate, keep the carrier).
     KRefineErase,
-    // §7.5 Quotient types (V8 #236)
+    // Quotient types
+    /// Quotient-type formation `Quotient(T, ~)`.
     KQuotForm,
+    /// Quotient introduction `[t]_~ : T / ~`.
     KQuotIntro,
+    /// Quotient elimination with motive + respect-of-equivalence.
     KQuotElim,
-    // §4.4a.4 Inductive
+    // Inductive
+    /// Inductive-type registration with strict-positivity guard.
     KInductive,
+    /// Strict-positivity check (Berardi 1998 paradox-immunity).
     KPos,
+    /// Generic eliminator dispatch for inductive constructors.
     KElim,
-    // §4.4a.5 SMT + Axiom
+    // SMT + Axiom
+    /// SMT-certificate replay through the trusted-base proof checker.
     KSmt,
+    /// Framework-axiom registration with subsingleton + body-is-Prop
+    /// gates against UIP-shape leakage.
     KFwAx,
-    // §4.4a.6 Diakrisis VVA
+    // Diakrisis verification-architecture
+    /// Naturality-square `K-Eps-Mu`: `ε∘M ≃ A∘ε` coherence
+    /// (Proposition 5.1 / Corollary 5.10).
     KEpsMu,
+    /// Universe-ascent admission for `M_stack(α) : Articulation@U_{k+1}`.
     KUniverseAscent,
+    /// `K-Round-Trip` admission rule for the OC/DC duality
+    /// round-trip (Theorem 108.T / Theorem 16.10). Premise:
+    /// `α : Articulation` and `α.is_finitely_axiomatized()`;
+    /// conclusion: `RoundTripCert{α} : Type` is admissible.
+    /// V0 ships the kernel-taxonomy entry without the algorithmic
+    /// canonicalize check; V1 adds the
+    /// `canonicalize(inverse(translate(α))) = canonicalize(α)`
+    /// equality check.
+    KRoundTrip,
+    /// Type-formation for the meta-classifier `ε(α)`.
     KEpsilonOf,
+    /// Type-formation for the OC-coordinate `α(ε)`.
     KAlphaOf,
+    /// Necessity modality `□A` (S4 / S5 frames per pragma).
     KModalBox,
+    /// Possibility modality `◇A` (S4 / S5 frames per pragma).
     KModalDiamond,
+    /// Indexed conjunction `⋀_i A_i` over a modal index set.
     KModalBigAnd,
-    /// V8 (#241) — cohesive shape modality `∫A` (Schreiber DCCT).
+    /// cohesive shape modality `∫A` (Schreiber DCCT).
     KShape,
-    /// V8 (#241) — cohesive flat modality `♭A` (Schreiber DCCT).
+    /// cohesive flat modality `♭A` (Schreiber DCCT).
     KFlat,
-    /// V8 (#241) — cohesive sharp modality `♯A` (Schreiber DCCT).
+    /// cohesive sharp modality `♯A` (Schreiber DCCT).
     KSharp,
 }
 
@@ -776,6 +820,7 @@ impl KernelRule {
             KernelRule::KFwAx => "K-FwAx",
             KernelRule::KEpsMu => "K-Eps-Mu",
             KernelRule::KUniverseAscent => "K-Universe-Ascent",
+            KernelRule::KRoundTrip => "K-Round-Trip",
             KernelRule::KEpsilonOf => "K-EpsilonOf",
             KernelRule::KAlphaOf => "K-AlphaOf",
             KernelRule::KModalBox => "K-ModalBox",
@@ -793,7 +838,7 @@ impl KernelRule {
         match self {
             KernelRule::KUniv => "V8",
             KernelRule::KPathTyForm => "V8",
-            // V8.1 (#196 follow-up) — dependent path-over.
+            // dependent path-over.
             KernelRule::KPathOverForm => "V8.1",
             KernelRule::KAppElim => "V8",
             KernelRule::KInductive => "V8",
@@ -801,76 +846,95 @@ impl KernelRule {
             KernelRule::KSmt => "V8",
             KernelRule::KFwAx => "V8",
             KernelRule::KRefineOmega => "V8",
-            // V8 (#236) — quotient types.
+            // quotient types.
             KernelRule::KQuotForm => "V8",
             KernelRule::KQuotIntro => "V8",
             KernelRule::KQuotElim => "V8",
-            // V8 (#241) — cohesive modalities ∫ ⊣ ♭ ⊣ ♯.
+            // cohesive modalities ∫ ⊣ ♭ ⊣ ♯.
             KernelRule::KShape => "V8",
             KernelRule::KFlat => "V8",
             KernelRule::KSharp => "V8",
             KernelRule::KEpsMu => "V2",
             KernelRule::KUniverseAscent => "V1",
+            // Linear coherence round-trip 108.T scaffold.
+            // V0: rule registered in taxonomy; algorithmic
+            // canonicalize check is V1+ (preprint-blocked).
+            KernelRule::KRoundTrip => "V0",
             _ => "V0",
         }
     }
 
-    /// V8 (#240) — VVA-spec citation for this rule. Returns the
-    /// spec section anchor (e.g. `"VVA §7.5"`) plus the V8 ticket
-    /// number that landed it (e.g. `"#236"`). Used by `verum audit
-    /// --kernel-rules` to surface the per-VVA-N preprint citation
-    /// trail without duplicating it in every diagnostic.
+    /// Abstract semantic category this rule belongs to.
     ///
-    /// Returns `None` for rules that don't have a single canonical
-    /// citation (e.g. variable-binding rules that pre-date the V8
-    /// numbering scheme).
-    pub fn citation(&self) -> Option<&'static str> {
+    /// Returns a short, generic label naming the *kind* of rule
+    /// (e.g. `"Quotient types"`, `"Cohesive modalities"`,
+    /// `"Higher inductive types"`) without reference to any
+    /// internal specification document or ticket number. Used by
+    /// `verum audit --kernel-rules` to group rules by domain in
+    /// the audit report.
+    ///
+    /// Returns `None` for rules that fit no specific category
+    /// (e.g. variable-binding rules that are universal across
+    /// every dependent type theory).
+    pub fn category(&self) -> Option<&'static str> {
         match self {
-            // V8 (#236) — Quotient types.
-            KernelRule::KQuotForm => Some("VVA §7.5 (#236)"),
-            KernelRule::KQuotIntro => Some("VVA §7.5 (#236)"),
-            KernelRule::KQuotElim => Some("VVA §7.5 (#236)"),
-            // V8 (#241) — Cohesive modalities.
-            KernelRule::KShape => Some("VVA §7.7 (#241)"),
-            KernelRule::KFlat => Some("VVA §7.7 (#241)"),
-            KernelRule::KSharp => Some("VVA §7.7 (#241)"),
-            // V8.1 (#196 follow-up) — dependent path-over.
-            KernelRule::KPathOverForm => Some("VVA §7.4 V3 (#196)"),
-            // VVA-1 — ε / α duality.
-            KernelRule::KEpsilonOf => Some("VVA §6.4"),
-            KernelRule::KAlphaOf => Some("VVA §6.4"),
-            KernelRule::KEpsMu => Some("VVA §6.5 (V2)"),
-            // VVA-3 — universe ascent.
-            KernelRule::KUniverseAscent => Some("VVA §A.Z.2"),
-            // VVA-7 — modal logic operators.
-            KernelRule::KModalBox => Some("VVA §7 modal"),
-            KernelRule::KModalDiamond => Some("VVA §7 modal"),
-            KernelRule::KModalBigAnd => Some("VVA §7 modal"),
-            // §4.4a — kernel-foundation rules.
-            KernelRule::KUniv => Some("VVA §4.4a"),
-            KernelRule::KPiForm => Some("VVA §4.4a"),
-            KernelRule::KLamIntro => Some("VVA §4.4a"),
-            KernelRule::KAppElim => Some("VVA §4.4a"),
-            KernelRule::KSigmaForm => Some("VVA §4.4a"),
-            KernelRule::KPairIntro => Some("VVA §4.4a"),
-            KernelRule::KFstElim => Some("VVA §4.4a"),
-            KernelRule::KSndElim => Some("VVA §4.4a"),
-            KernelRule::KPathTyForm => Some("VVA §4.4a (cubical)"),
-            KernelRule::KReflIntro => Some("VVA §4.4a (cubical)"),
-            KernelRule::KHComp => Some("VVA §4.4a (cubical)"),
-            KernelRule::KTransp => Some("VVA §4.4a (cubical)"),
-            KernelRule::KGlue => Some("VVA §4.4a (cubical)"),
-            KernelRule::KRefine => Some("VVA §4.4a (refinement)"),
-            KernelRule::KRefineOmega => Some("VVA §17.4 K-Refine-omega"),
-            KernelRule::KRefineIntro => Some("VVA §4.4a (refinement)"),
-            KernelRule::KRefineErase => Some("VVA §4.4a (refinement)"),
-            KernelRule::KInductive => Some("VVA §7.3"),
-            KernelRule::KPos => Some("VVA §7.3 K-Pos"),
-            KernelRule::KElim => Some("VVA §7.4 (#237)"),
-            KernelRule::KSmt => Some("VVA §8 SMT replay"),
-            KernelRule::KFwAx => Some("VVA §6 framework axiom"),
+            // Quotient types.
+            KernelRule::KQuotForm
+            | KernelRule::KQuotIntro
+            | KernelRule::KQuotElim => Some("Quotient types"),
+            // Cohesive modalities.
+            KernelRule::KShape
+            | KernelRule::KFlat
+            | KernelRule::KSharp => Some("Cohesive modalities"),
+            // Higher inductive types — dependent path-over.
+            KernelRule::KPathOverForm => Some("Higher inductive types — dependent path-over"),
+            // ε / α duality (modality coalgebra).
+            KernelRule::KEpsilonOf | KernelRule::KAlphaOf => Some("ε / α modality duality"),
+            KernelRule::KEpsMu => Some("ε / α modality duality — naturality"),
+            // Universe ascent (stratified universes).
+            KernelRule::KUniverseAscent => Some("Stratified universe ascent"),
+            // OC / DC round-trip (translation framework).
+            KernelRule::KRoundTrip => Some("OC / DC translation round-trip"),
+            // Modal logic operators.
+            KernelRule::KModalBox
+            | KernelRule::KModalDiamond
+            | KernelRule::KModalBigAnd => Some("Modal logic operators"),
+            // Kernel-foundation rules — dependent type theory core.
+            KernelRule::KUniv
+            | KernelRule::KPiForm
+            | KernelRule::KLamIntro
+            | KernelRule::KAppElim
+            | KernelRule::KSigmaForm
+            | KernelRule::KPairIntro
+            | KernelRule::KFstElim
+            | KernelRule::KSndElim => Some("Dependent type theory — core"),
+            // Cubical fragment.
+            KernelRule::KPathTyForm
+            | KernelRule::KReflIntro
+            | KernelRule::KHComp
+            | KernelRule::KTransp
+            | KernelRule::KGlue => Some("Cubical type theory"),
+            // Refinement subtyping.
+            KernelRule::KRefine
+            | KernelRule::KRefineIntro
+            | KernelRule::KRefineErase => Some("Refinement subtyping"),
+            KernelRule::KRefineOmega => Some("Refinement subtyping — transfinite modal-depth"),
+            // Inductive types.
+            KernelRule::KInductive => Some("Inductive type formation"),
+            KernelRule::KPos => Some("Inductive type — strict positivity"),
+            KernelRule::KElim => Some("Inductive type — eliminator"),
+            // External proof obligations.
+            KernelRule::KSmt => Some("SMT proof replay"),
+            KernelRule::KFwAx => Some("Framework axiom admission"),
+            // Universal binding rules — no single category.
             KernelRule::KVar => None,
         }
+    }
+
+    #[doc(hidden)]
+    #[deprecated(note = "Use `category()` for an abstract semantic label. Internal-spec citations have been removed from the public API.")]
+    pub fn citation(&self) -> Option<&'static str> {
+        self.category()
     }
 }
 
@@ -880,7 +944,7 @@ impl std::fmt::Display for KernelRule {
     }
 }
 
-/// V8 (#224) — one node in the kernel-rule proof graph.
+/// one node in the kernel-rule proof graph.
 ///
 /// Each node records:
 ///   • The **rule** that justified the inference (e.g.
@@ -1000,7 +1064,7 @@ impl Ord for KernelRule {
     }
 }
 
-/// V8 (#224) — reconstruct the kernel proof tree for `term` by
+/// reconstruct the kernel proof tree for `term` by
 /// walking its CoreTerm structure and synthesising the
 /// inference-rule applications post-hoc.
 ///
@@ -1289,7 +1353,7 @@ fn inference_rule_and_premises(
             }
             KernelRule::KModalBigAnd
         }
-        // V8 (#241) — cohesive modalities ∫ ⊣ ♭ ⊣ ♯.
+        // cohesive modalities ∫ ⊣ ♭ ⊣ ♯.
         CoreTerm::Shape(t) => {
             if let Some(p) = record_inference(ctx, t, axioms) {
                 premises.push(p);
@@ -1787,11 +1851,11 @@ mod tests {
         assert!(!is_known_rule("z3", "="));
     }
 
-    // -- V8 (#240) — V-stage + citation wiring --------------------
+    // -- V-stage + citation wiring --------------------
 
     #[test]
     fn quotient_rules_report_v8_stage() {
-        // V8 (#236) — Quot-Form / Intro / Elim must report V8.
+        // Quot-Form / Intro / Elim must report V8.
         // Pre-#240 these silently fell through to "V0" because the
         // v_stage match only listed the original eight V8 rules.
         assert_eq!(KernelRule::KQuotForm.v_stage(), "V8");
@@ -1800,62 +1864,89 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_rule_registered_with_abstract_category() {
+        // K-Round-Trip is registered with V0 stage and the
+        // abstract semantic category "OC / DC translation
+        // round-trip" — no internal-spec ticket leakage.
+        assert_eq!(KernelRule::KRoundTrip.name(), "K-Round-Trip");
+        assert_eq!(KernelRule::KRoundTrip.v_stage(), "V0");
+        assert_eq!(
+            KernelRule::KRoundTrip.category(),
+            Some("OC / DC translation round-trip")
+        );
+    }
+
+    #[test]
+    fn category_returns_abstract_labels_only() {
+        // Smoke check: a representative sample of rules report
+        // category labels that name the *kind* of rule, with no
+        // internal-spec section / ticket references.
+        let cats: Vec<&str> = [
+            KernelRule::KQuotForm,
+            KernelRule::KShape,
+            KernelRule::KPathOverForm,
+            KernelRule::KEpsilonOf,
+            KernelRule::KRoundTrip,
+            KernelRule::KSmt,
+            KernelRule::KFwAx,
+        ]
+        .iter()
+        .filter_map(|r| r.category())
+        .collect();
+        for c in &cats {
+            assert!(
+                !c.contains("§") && !c.contains("VVA") && !c.contains("#"),
+                "category `{}` must be an abstract label without spec refs",
+                c
+            );
+        }
+    }
+
+    #[test]
     fn cohesive_rules_report_v8_stage() {
-        // V8 (#241) — Shape / Flat / Sharp must report V8.
+        // Shape / Flat / Sharp must report V8.
         assert_eq!(KernelRule::KShape.v_stage(), "V8");
         assert_eq!(KernelRule::KFlat.v_stage(), "V8");
         assert_eq!(KernelRule::KSharp.v_stage(), "V8");
     }
 
     #[test]
-    fn quotient_rules_carry_section_75_citation() {
-        // V8 (#236) → VVA §7.5.
-        assert_eq!(
-            KernelRule::KQuotForm.citation(),
-            Some("VVA §7.5 (#236)")
-        );
-        assert_eq!(
-            KernelRule::KQuotIntro.citation(),
-            Some("VVA §7.5 (#236)")
-        );
-        assert_eq!(
-            KernelRule::KQuotElim.citation(),
-            Some("VVA §7.5 (#236)")
-        );
+    fn quotient_rules_in_quotient_types_category() {
+        let cat = Some("Quotient types");
+        assert_eq!(KernelRule::KQuotForm.category(), cat);
+        assert_eq!(KernelRule::KQuotIntro.category(), cat);
+        assert_eq!(KernelRule::KQuotElim.category(), cat);
     }
 
     #[test]
-    fn cohesive_rules_carry_section_77_citation() {
-        // V8 (#241) → VVA §7.7.
-        assert_eq!(KernelRule::KShape.citation(), Some("VVA §7.7 (#241)"));
-        assert_eq!(KernelRule::KFlat.citation(), Some("VVA §7.7 (#241)"));
-        assert_eq!(KernelRule::KSharp.citation(), Some("VVA §7.7 (#241)"));
+    fn cohesive_rules_in_cohesive_modalities_category() {
+        let cat = Some("Cohesive modalities");
+        assert_eq!(KernelRule::KShape.category(), cat);
+        assert_eq!(KernelRule::KFlat.category(), cat);
+        assert_eq!(KernelRule::KSharp.category(), cat);
     }
 
     #[test]
-    fn elim_rule_now_cites_section_74_with_237() {
-        // V8 (#237) — HIT eliminator auto-gen lives at K-Elim.
-        // Post-#240 the citation surfaces it.
+    fn elim_rule_in_inductive_eliminator_category() {
         assert_eq!(
-            KernelRule::KElim.citation(),
-            Some("VVA §7.4 (#237)")
+            KernelRule::KElim.category(),
+            Some("Inductive type — eliminator")
         );
     }
 
     #[test]
-    fn variable_rule_has_no_canonical_citation() {
-        // K-Var pre-dates the V8 numbering scheme; honest answer
-        // is `None` rather than backfilling a fake citation.
-        assert_eq!(KernelRule::KVar.citation(), None);
+    fn variable_rule_has_no_specific_category() {
+        // K-Var is universal across every dependent type theory;
+        // honest answer is `None` rather than backfilling a category.
+        assert_eq!(KernelRule::KVar.category(), None);
     }
 
     #[test]
-    fn citation_returns_for_every_v8_rule_landed_this_session() {
-        // Tier the citation contract: every V8 rule landed in
-        // 2026-04-26/27 work (Quotient + Cohesive + HIT-Elim) MUST
-        // carry a citation. Drift here means a future reviewer
-        // can't trace the rule back to its spec section.
-        let v8_rules = [
+    fn category_present_for_every_concrete_rule() {
+        // Every named rule (excluding K-Var which is universal)
+        // must carry an abstract semantic category so the audit
+        // report can group rules by domain.
+        let concrete_rules = [
             KernelRule::KQuotForm,
             KernelRule::KQuotIntro,
             KernelRule::KQuotElim,
@@ -1863,11 +1954,13 @@ mod tests {
             KernelRule::KFlat,
             KernelRule::KSharp,
             KernelRule::KElim,
+            KernelRule::KRoundTrip,
+            KernelRule::KPathOverForm,
         ];
-        for rule in v8_rules {
+        for rule in concrete_rules {
             assert!(
-                rule.citation().is_some(),
-                "rule {rule:?} must carry a citation post-#240"
+                rule.category().is_some(),
+                "rule {rule:?} must carry an abstract category"
             );
         }
     }

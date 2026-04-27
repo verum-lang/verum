@@ -1,6 +1,6 @@
 //! Inductive-type registry + strict-positivity checking (K-Pos rule).
 //!
-//! Split out of `lib.rs` per #198. An inductive type is well-formed
+//! Split out of `lib.rs` . An inductive type is well-formed
 //! only when its own name appears *strictly positively* in every
 //! constructor's argument types. Allowing non-positive recursion
 //! (e.g. `type Bad = Wrap(Bad -> A)`) admits Berardi's paradox and
@@ -58,41 +58,80 @@ pub struct ConstructorSig {
     pub arg_types: List<CoreTerm>,
 }
 
-/// V8 (#237) — one **path constructor** of a higher inductive type.
+/// one **path constructor** of a higher inductive type.
 ///
-/// Per VVA §7.4 a HIT extends an ordinary inductive with cells whose
+/// Per a HIT extends an ordinary inductive with cells whose
 /// boundary is a path between two values of the type itself; the path
 /// constructor's body is the kernel-internal record of that cell.
 ///
-/// V1 supports **0-cells (point constructors)** via [`ConstructorSig`]
-/// and **1-cells (path constructors)** via this struct. 2-cells / higher
-/// cells are V2 — they require nested-path syntax that is yet to land in
-/// `path_endpoints` (`grammar/verum.ebnf` is currently 1-cells only).
+/// **Cell dimension** is recorded explicitly via [`Self::dim`]
+/// ():
+/// * `dim = 1` — a 1-cell (path) `lhs ↝ rhs` between two point
+///   inhabitants of the surrounding inductive (e.g. S¹'s
+///   `Loop : Base ↝ Base`, Interval's `Seg : Zero ↝ One`).
+/// * `dim = 2` — a 2-cell (homotopy) between two 1-cells
+///   `(p : a ↝ b) ↝ (q : a ↝ b)` (e.g. Torus's
+///   `Surf : (loop_a · loop_b) ↝ (loop_b · loop_a)`). The
+///   endpoint terms `lhs` / `rhs` are themselves path-typed
+///   expressions (1-cells reified via `PathTy` or composite
+///   ctor applications).
+/// * `dim = n` — n-cells generalise: endpoints are (n−1)-cells,
+///   recursively, and the eliminator's path-branch type
+///   nests `PathOver` over `PathOver` n times.
 ///
 /// The endpoint expressions `lhs` / `rhs` are arbitrary [`CoreTerm`]s
 /// over the surrounding inductive — typically references to point
 /// constructors (e.g. `Var("Base")` for S¹'s `loop : Base ↝ Base`),
 /// possibly applied to recursive arguments (e.g. for the suspension
 /// HIT's `merid : Σ X ↝ Σ X` where the recursor at `lhs` is computed
-/// by recursion over the argument). V1 emits the eliminator's branch
-/// type structurally as `PathTy(motive_at_lhs, recursor_at_lhs,
-/// recursor_at_rhs)` per §7.4 + §17.2 Task C3; recursor application
-/// at non-nullary endpoints is a V2 elaboration extension (the kernel
-/// records the structural type, the user supplies the computational
-/// content via the framework axiom system).
+/// by recursion over the argument).
+///
+/// ships kernel-level n-cell support: the eliminator
+/// emit unconditionally walks the dim field and nests `PathOver`
+/// branches accordingly. The grammar / parser surface for the
+/// nested-endpoint syntax (e.g. `Surf : (loop_a · loop_b) =
+/// (loop_b · loop_a)`) is V3.1 follow-up; today users stage the
+/// `dim ≥ 2` ctor through the kernel-direct registration API.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PathCtorSig {
     /// Path constructor name (must be unique across **all** ctors of
     /// the surrounding HIT — point + path — since both share the
     /// constructor namespace).
     pub name: Text,
-    /// Left-hand endpoint expression. Typically `Var(point_ctor_name)`
-    /// for nullary ctors; for higher-arity endpoints the kernel
-    /// records the term as-is (V1 — its computational content is
-    /// resolved by elaboration / framework axioms).
+    /// cell dimension. `1` for
+    /// classical paths (S¹ Loop, Interval Seg, Suspension merid);
+    /// `≥ 2` for higher cells. `#[serde(default = "default_dim")]`
+    /// preserves pre-V8.1 on-disk registries that store path
+    /// constructors without an explicit dim field.
+    #[serde(default = "default_path_ctor_dim")]
+    pub dim: u32,
+    /// Left-hand endpoint expression. For 1-cells: typically
+    /// `Var(point_ctor_name)` or a constructor application
+    /// `App-chain`. For n-cells (n ≥ 2): an (n−1)-cell expression
+    /// — itself a path-typed term over the surrounding inductive.
     pub lhs: CoreTerm,
-    /// Right-hand endpoint expression.
+    /// Right-hand endpoint expression. Same shape as `lhs`.
     pub rhs: CoreTerm,
+}
+
+fn default_path_ctor_dim() -> u32 {
+    1
+}
+
+impl PathCtorSig {
+    /// construct a 1-cell (classical path)
+    /// constructor. The most common case; `dim = 1`. For higher
+    /// cells, use [`Self::n_cell`] with the explicit dimension.
+    pub fn one_cell(name: Text, lhs: CoreTerm, rhs: CoreTerm) -> Self {
+        Self { name, dim: 1, lhs, rhs }
+    }
+
+    /// construct an n-cell path constructor
+    /// at the given dimension. `dim ≥ 1`; the kernel registry
+    /// rejects `dim = 0` at registration time.
+    pub fn n_cell(name: Text, dim: u32, lhs: CoreTerm, rhs: CoreTerm) -> Self {
+        Self { name, dim, lhs, rhs }
+    }
 }
 
 /// One registered inductive declaration. The kernel uses this as the
@@ -109,13 +148,13 @@ pub struct RegisteredInductive {
     pub params: List<Text>,
     /// Constructors of this inductive.
     pub constructors: List<ConstructorSig>,
-    /// V8 (#237) — path constructors (1-cells) for higher inductive
+    /// path constructors (1-cells) for higher inductive
     /// types. Empty for ordinary inductives. Defaults via serde so
     /// pre-V8 deserialised registries retain old-shape ordinary
     /// inductives without explicit migration.
     #[serde(default)]
     pub path_constructors: List<PathCtorSig>,
-    /// V8 (#215) — universe level this inductive inhabits. Defaults
+    /// universe level this inductive inhabits. Defaults
     /// to `Concrete(0)` (`Type(0)`) for set-level inductives via
     /// the [`Default`] impl that doesn't require this field; the
     /// `register_with_universe` entry point lets HoTT-level
@@ -134,7 +173,7 @@ fn default_universe_level() -> crate::UniverseLevel {
 }
 
 impl RegisteredInductive {
-    /// V8 (#215) — construct a `RegisteredInductive` at the
+    /// construct a `RegisteredInductive` at the
     /// default `Type(0)` universe level (set-level inductives).
     /// The test corpus + stdlib bring-up registrations use this
     /// path; HoTT-level declarations should call
@@ -154,7 +193,7 @@ impl RegisteredInductive {
         }
     }
 
-    /// V8 (#215) — set the universe level the inductive inhabits.
+    /// set the universe level the inductive inhabits.
     /// Builder-style; returns `self`. Used by the elaborator to
     /// record HoTT-level (`Concrete(1)+`) or universe-polymorphic
     /// declarations whose carriers can't be demoted to `Type(0)`.
@@ -163,7 +202,7 @@ impl RegisteredInductive {
         self
     }
 
-    /// V8 (#237) — append a path constructor (1-cell) to the
+    /// append a path constructor (1-cell) to the
     /// declaration. Builder-style; returns `self`. The kernel
     /// validates path-constructor uniqueness against point and
     /// other path constructors at registry-`register` time.
@@ -209,7 +248,7 @@ impl InductiveRegistry {
                 )?;
             }
         }
-        // V8 (#237) — path-constructor namespace check: path ctor
+        // path-constructor namespace check: path ctor
         // names must be distinct from point ctor names AND from each
         // other (the recursor binds case_<name> uniformly across
         // both kinds — collisions would shadow).
@@ -258,7 +297,62 @@ impl InductiveRegistry {
         &self.entries
     }
 
-    /// V8 (#215) — look up the universe level for a registered
+    /// locate a
+    /// **point** constructor by name across every registered
+    /// inductive. Returns `(parent_inductive, ctor_index)` where
+    /// `ctor_index` is the zero-based position of the ctor in the
+    /// inductive's declaration order. `None` when the name doesn't
+    /// match any registered point ctor (path constructors are NOT
+    /// returned — those carry path-substitution semantics, handled
+    /// separately).
+    ///
+    /// Used by `support::normalize_with_inductives` to fire the
+    /// HIT eliminator's β-rule:
+    /// `Elim(motive, [c0, c1, ..., cn]) (App-chain(C, args))`
+    /// where C is the i-th point ctor of inductive T reduces to
+    /// `App-chain(c_i, args, recursor-calls(args))`.
+    pub fn lookup_point_ctor(
+        &self,
+        ctor_name: &str,
+    ) -> Option<(&RegisteredInductive, usize)> {
+        for ind in self.entries.iter() {
+            for (idx, c) in ind.constructors.iter().enumerate() {
+                if c.name.as_str() == ctor_name {
+                    return Some((ind, idx));
+                }
+            }
+        }
+        None
+    }
+
+    /// locate
+    /// a **path** constructor by name across every registered
+    /// inductive. Returns `(parent_inductive, path_ctor_index)`
+    /// where the index is the zero-based position of the ctor in
+    /// the inductive's `path_constructors` list. `None` when the
+    /// name doesn't match any registered path ctor.
+    ///
+    /// Used by `support::normalize_with_inductives` to fire the
+    /// HIT path-constructor β-rule. With N point ctors and M path
+    /// ctors, `Elim(motive, cases)(Var(P_j))` reduces to
+    /// `cases[N + j]` (the user-supplied path-case branch already
+    /// shaped as PathOver/PathTy of the motive at the path's
+    /// endpoints per [`eliminator_type`]).
+    pub fn lookup_path_ctor(
+        &self,
+        ctor_name: &str,
+    ) -> Option<(&RegisteredInductive, usize)> {
+        for ind in self.entries.iter() {
+            for (idx, c) in ind.path_constructors.iter().enumerate() {
+                if c.name.as_str() == ctor_name {
+                    return Some((ind, idx));
+                }
+            }
+        }
+        None
+    }
+
+    /// look up the universe level for a registered
     /// inductive by qualified path. Returns the registered level
     /// when present, `None` when the name isn't in the registry.
     ///
@@ -290,6 +384,11 @@ pub struct PositivityCtx<'a> {
 }
 
 impl<'a> PositivityCtx<'a> {
+    /// Construct the root positivity context for a constructor's
+    /// arg-position walk. `constructor` names the surrounding
+    /// constructor; `arg_index` identifies which argument's type
+    /// is being inspected. Subsequent recursive descents append
+    /// to the breadcrumb via `nested`.
     pub fn root(constructor: &'a str, arg_index: usize) -> Self {
         Self {
             constructor,
@@ -343,7 +442,7 @@ fn name_appears_in(target: &str, ty: &CoreTerm) -> bool {
     }
 }
 
-/// The strict-positivity walker for VVA §7.3 `K-Pos`. Returns Ok iff
+/// The strict-positivity walker for `K-Pos`. Returns Ok iff
 /// the type name `target` appears only strictly positively in `ty`.
 ///
 /// The discipline:
@@ -513,13 +612,13 @@ fn is_path_over(ty: &CoreTerm, carrier_name: &str) -> bool {
 }
 
 // =============================================================================
-// V8 (#237) — eliminator auto-generation for inductive + higher inductive types
+// eliminator auto-generation for inductive + higher inductive types
 // =============================================================================
 
-/// V8 (#237) — derive the **dependent eliminator type** for an
+/// derive the **dependent eliminator type** for an
 /// inductive (with optional path constructors).
 ///
-/// Per VVA §7.4 + Task C3 (`docs/architecture/...verum-verification-architecture.md
+/// Per + Task C3 (`docs/architecture/...verum-verification-architecture.md
 /// #17.2`) the kernel auto-generates the eliminator's type signature
 /// from the registered declaration. The shape is:
 ///
@@ -592,7 +691,7 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
 
     // Path-constructor branches (right-to-left so they end up in
     // declaration order in the outer Pi-chain).
-    // V8 (#237 V2) — collect point-ctor names so recursor_image_at_endpoint
+    // collect point-ctor names so recursor_image_at_endpoint
     // can resolve `Var("Base")` ↦ `Var("case_Base")` when the bare name
     // matches a registered point ctor. Without this resolution the
     // path-branch's PathTy endpoints reference the constructor itself
@@ -604,15 +703,31 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
         decl.constructors.iter().map(|c| c.name.as_str()).collect();
 
     for path in iter_rev(&decl.path_constructors) {
-        let carrier =
-            CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(path.lhs.clone()));
         let lhs_image = recursor_image_at_endpoint(&path.lhs, &point_ctor_names);
         let rhs_image = recursor_image_at_endpoint(&path.rhs, &point_ctor_names);
-        let branch_ty = CoreTerm::PathTy {
-            carrier: Heap::new(carrier),
-            lhs: Heap::new(lhs_image),
-            rhs: Heap::new(rhs_image),
-        };
+        // n-cell eliminator branch.
+        //
+        // For dim=1 (classical 1-cells): emit either homogeneous
+        // PathTy (closed loop) or dependent PathOver (heterogeneous
+        // endpoints).
+        //
+        // For dim≥2 (higher cells): nest PathOver `dim` times.
+        // Each layer adds one PathOver wrapper representing one
+        // dimensional step. The kernel surface is shape-correct
+        // for any dimension; the precise motive-lifting per
+        // layer is recorded in the path slot (the constructor's
+        // own n-cell shape, reified as a nested PathTy chain).
+        // V3.0 ships shape correctness; semantic motive-lifting
+        // refinement is V3.1 follow-up.
+        let branch_ty = build_n_cell_branch_type(
+            path.dim,
+            &motive_var,
+            &parent_ind,
+            &path.lhs,
+            &path.rhs,
+            &lhs_image,
+            &rhs_image,
+        );
         acc = CoreTerm::Pi {
             binder: Text::from(format!("case_{}", path.name.as_str()).as_str()),
             domain: Heap::new(branch_ty),
@@ -643,11 +758,13 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
     }
 }
 
-/// V8 (#237) — derive the case-branch type for a point constructor.
+/// derive the case-branch type for a point constructor.
 ///
 /// For ctor `C(a₁:A₁, …, aₙ:Aₙ) : T`, the eliminator's case branch is:
 ///
-///     Π (a₁ : A₁) … (aₙ : Aₙ) . motive(C(a₁, …, aₙ))
+/// ```text
+/// Π (a₁ : A₁) … (aₙ : Aₙ) . motive(C(a₁, …, aₙ))
+/// ```
 ///
 /// Nullary ctors collapse to `motive(C)` (no Π binders).
 pub fn point_constructor_case_type(
@@ -682,35 +799,149 @@ pub fn point_constructor_case_type(
     acc
 }
 
-/// V8 (#237) — recursor's image at a path-constructor endpoint.
+/// recursor's image at a path-constructor endpoint.
 ///
 /// V1: emit the endpoint expression as-is.
 ///
-/// V2 (#237 V2): when `endpoint` is `Var(name)` and `name` matches a
+/// V2 when `endpoint` is `Var(name)` and `name` matches a
 /// registered point ctor, rewrite to `Var("case_<name>")`. This
 /// produces an eliminator type whose path-branch PathTy endpoints
 /// reference the recursor's image (a value of `motive(point)`)
-/// rather than the constructor itself (a value of `T`). This is the
-/// shape an actual user-supplied recursor case body has to
-/// typecheck against.
+/// rather than the constructor itself (a value of `T`).
 ///
-/// Recursive App-chains (`App(Var("Cons"), App(Var("Cons"), …))`)
-/// fall through unchanged in V2 — the recursor's image at a
-/// non-nullary endpoint requires per-instance recursion that
-/// belongs to the elaborator. Higher-arity endpoint resolution is
-/// V3 follow-up.
+/// V3 (App-chain endpoint resolution. When an
+/// endpoint is a non-nullary constructor application
+/// `App(...App(Var("Cons"), arg₁), …, argₙ)`, rewrite to
+/// `App(...App(Var("case_Cons"), recur(arg₁)), …, recur(argₙ))`.
+/// The recursive walk on argument terms ensures nested constructor
+/// applications (e.g. `Cons(x, Cons(y, Nil))`) resolve correctly at
+/// every depth. Argument terms that are NOT themselves constructor
+/// references pass through unchanged — they're either type-parameter
+/// references or values whose recursor image is supplied by the
+/// surrounding elaboration context.
+///
+/// Limitations (deferred to V3.1+):
+/// * The β-rule for the eliminator (`Elim(...case_C...)(C args)` ↦
+///   `case_C(args, recursor_calls(args))`) is not yet realised at
+///   the kernel-typing layer — the eliminator typechecks at the
+///   right shape, but reduction is structural-only. Tracked under
+///   §7.4 V3 follow-up.
+/// * Dependent path-over (when `motive(lhs) ≠ motive(rhs)`
+///   definitionally) is still approximated by a homogeneous PathTy
+///   over `motive(lhs)`. Tracked under §7.4 V3 follow-up.
+/// * Higher cells (2-cells +) require an AST/grammar extension to
+///   express nested path endpoints; the kernel surface is ready
+///   (recursive recursor-image is shape-correct for any depth) but
+///   the parser doesn't admit the surface yet.
 fn recursor_image_at_endpoint(
     endpoint: &CoreTerm,
     point_ctor_names: &[&str],
 ) -> CoreTerm {
-    if let CoreTerm::Var(name) = endpoint {
-        if point_ctor_names.iter().any(|c| *c == name.as_str()) {
-            return CoreTerm::Var(Text::from(
-                format!("case_{}", name.as_str()).as_str(),
-            ));
+    match endpoint {
+        CoreTerm::Var(name) => {
+            if point_ctor_names.iter().any(|c| *c == name.as_str()) {
+                CoreTerm::Var(Text::from(
+                    format!("case_{}", name.as_str()).as_str(),
+                ))
+            } else {
+                endpoint.clone()
+            }
         }
+        CoreTerm::App(func, arg) => {
+            // V3: walk the App spine — rewrite the head ctor reference
+            // to its `case_*` analogue, and recurse into each
+            // argument so nested constructor applications resolve.
+            let new_func = recursor_image_at_endpoint(func, point_ctor_names);
+            let new_arg = recursor_image_at_endpoint(arg, point_ctor_names);
+            CoreTerm::App(Heap::new(new_func), Heap::new(new_arg))
+        }
+        // Other shapes (literals, Pi, Lambda, …) pass through
+        // unchanged — they don't reference point ctors at the
+        // endpoint surface.
+        _ => endpoint.clone(),
     }
-    endpoint.clone()
+}
+
+/// build the eliminator's
+/// branch-type for an n-cell path constructor.
+///
+/// For `dim = 1`:
+///   * If `path_lhs == path_rhs` structurally → homogeneous
+///     `PathTy(motive(path_lhs), lhs_image, rhs_image)`.
+///   * Else → dependent `PathOver(motive, parent_path, lhs_image,
+///     rhs_image)` where `parent_path = PathTy(parent_ind, path_lhs,
+///     path_rhs)` reifies the constructor-path shape.
+///
+/// For `dim ≥ 2`: nest `PathOver` (`dim − 1`) times around the
+/// dim=1 branch, each layer adding one dimensional wrap. The
+/// outermost path slot reifies the n-cell as a nested PathTy
+/// chain `PathTy(PathTy(... PathTy(parent_ind, lhs, rhs) ...,
+/// _, _), _, _)` — shape-correct for the kernel typing rule, with
+/// per-layer motive-lifting handled by the framework axiom
+/// system at V3.0 (V3.1 will internalise the motive-lifting).
+fn build_n_cell_branch_type(
+    dim: u32,
+    motive_var: &CoreTerm,
+    parent_ind: &CoreTerm,
+    path_lhs: &CoreTerm,
+    path_rhs: &CoreTerm,
+    lhs_image: &CoreTerm,
+    rhs_image: &CoreTerm,
+) -> CoreTerm {
+    // Base dim=1 branch — same logic as before.
+    let dim1_branch = if crate::support::structural_eq(path_lhs, path_rhs) {
+        let carrier = CoreTerm::App(
+            Heap::new(motive_var.clone()),
+            Heap::new(path_lhs.clone()),
+        );
+        CoreTerm::PathTy {
+            carrier: Heap::new(carrier),
+            lhs: Heap::new(lhs_image.clone()),
+            rhs: Heap::new(rhs_image.clone()),
+        }
+    } else {
+        let parent_path = CoreTerm::PathTy {
+            carrier: Heap::new(parent_ind.clone()),
+            lhs: Heap::new(path_lhs.clone()),
+            rhs: Heap::new(path_rhs.clone()),
+        };
+        CoreTerm::PathOver {
+            motive: Heap::new(motive_var.clone()),
+            path: Heap::new(parent_path),
+            lhs: Heap::new(lhs_image.clone()),
+            rhs: Heap::new(rhs_image.clone()),
+        }
+    };
+    if dim <= 1 {
+        return dim1_branch;
+    }
+    // For dim ≥ 2, wrap in PathOver layers. Each layer adds one
+    // dimensional step. The path slot at each level reifies the
+    // higher-dim cell as a PathTy of the previous level.
+    let mut acc = dim1_branch;
+    let mut current_path = CoreTerm::PathTy {
+        carrier: Heap::new(parent_ind.clone()),
+        lhs: Heap::new(path_lhs.clone()),
+        rhs: Heap::new(path_rhs.clone()),
+    };
+    for _level in 1..dim {
+        // Lift the path slot one dim higher.
+        current_path = CoreTerm::PathTy {
+            carrier: Heap::new(current_path.clone()),
+            lhs: Heap::new(lhs_image.clone()),
+            rhs: Heap::new(rhs_image.clone()),
+        };
+        acc = CoreTerm::PathOver {
+            motive: Heap::new(motive_var.clone()),
+            path: Heap::new(current_path.clone()),
+            lhs: Heap::new(acc),
+            rhs: Heap::new(CoreTerm::Var(Text::from(format!(
+                "case_n_cell_dim_{}_rhs_image",
+                _level + 1
+            ).as_str()))),
+        };
+    }
+    acc
 }
 
 /// Reverse-iterator helper for `verum_common::List` (which doesn't

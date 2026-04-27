@@ -1,10 +1,10 @@
-//! K-Coord-Cite kernel-rule integration tests (V8 #227).
+//! K-Coord-Cite kernel-rule integration tests ().
 //!
-//! Per VVA §A.Z.5 item 2: a theorem at coordinate (Fw, ν, τ)
+//! Per item 2: a theorem at coordinate (Fw, ν, τ)
 //! may cite an axiom at coordinate (Fw', ν', τ') only when
 //! ν' ≤ ν (lex on OrdinalDepth). Higher-tier citations are
 //! rejected unless the calling module imports the κ-tier-jump
-//! extension (`@require_extension(vfe_3)` — VVA-3 K-Universe-
+//! extension (`@require_extension(vfe_3)` — Categorical coherence K-Universe-
 //! Ascent).
 
 use verum_common::Text;
@@ -80,7 +80,7 @@ fn higher_axiom_cite_rejected_without_tier_jump() {
 #[test]
 fn higher_axiom_cite_admitted_under_tier_jump() {
     // theorem at ν=1 cites axiom at ν=2 with allow_tier_jump=true
-    // (VVA-3 K-Universe-Ascent) → admitted.
+    // (Categorical coherence K-Universe-Ascent) → admitted.
     let theorem_coord =
         KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(1));
     let axiom_coord =
@@ -278,7 +278,7 @@ fn coord_serde_roundtrip() {
 fn pre_v8_axiom_serde_lacks_coord_field() {
     use serde_json;
     use verum_kernel::RegisteredAxiom;
-    // Pre-V8 #227 JSON without `coord` field must deserialise
+    // Earlier JSON without `coord` field must deserialise
     // as None (preserving on-disk certificate compatibility).
     let json = r#"{
         "name": "old_axiom",
@@ -291,7 +291,7 @@ fn pre_v8_axiom_serde_lacks_coord_field() {
 }
 
 // =============================================================================
-// V8 (#232) — infer_with_full_context auto-applies K-Coord-Cite
+// infer_with_full_context auto-applies K-Coord-Cite
 // =============================================================================
 
 mod v2_typing_judgment_integration {
@@ -391,7 +391,7 @@ mod v2_typing_judgment_integration {
 
     #[test]
     fn infer_with_tier_jump_admits_higher_cite() {
-        // Same as above but with allow_tier_jump=true (VVA-3
+        // Same as above but with allow_tier_jump=true (Categorical coherence
         // K-Universe-Ascent escape).
         let mut reg = AxiomRegistry::new();
         let axiom = register_and_ref(

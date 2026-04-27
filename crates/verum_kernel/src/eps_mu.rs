@@ -1,4 +1,4 @@
-//! VVA-1 K-Eps-Mu kernel rule — split per #198.
+//! K-Eps-Mu kernel rule — split per #198.
 //!
 //! Verifies the canonical 2-natural equivalence
 //!
@@ -19,7 +19,7 @@ use verum_common::Text;
 use crate::depth::m_depth_omega;
 use crate::{CoreTerm, KernelError};
 
-/// VVA-1 V0/V1/V2 — `K-Eps-Mu` kernel rule entry point.
+/// Naturality witness/V1/V2 — `K-Eps-Mu` kernel rule entry point.
 ///
 /// V0 shipped a permissive skeleton that accepted any pair
 /// `(EpsilonOf(_), AlphaOf(_))`. V1 tightened the shape check; V2

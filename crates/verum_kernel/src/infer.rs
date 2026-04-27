@@ -1,6 +1,6 @@
 //! Kernel typing judgment — `infer` / `check` / `verify` / `verify_full`.
 //!
-//! Split per #198. The core LCF-style judgment `Γ ⊢ t : T` of the
+//! Split . The core LCF-style judgment `Γ ⊢ t : T` of the
 //! kernel. Every proof term that reaches the kernel is either accepted
 //! with a concrete inferred type, or rejected with a [`KernelError`].
 
@@ -63,7 +63,7 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 /// in follow-up commits (Z3 proof format first, then CVC5, E,
 /// Vampire). That is the last piece needed to put every SMT backend
 /// **outside** the TCB.
-/// V8 (#215) — type-inference variant that consults a supplied
+/// type-inference variant that consults a supplied
 /// [`crate::InductiveRegistry`] when typing
 /// [`CoreTerm::Inductive`] heads. Returns the registered
 /// universe level for the named inductive instead of the
@@ -82,6 +82,10 @@ pub fn infer_with_inductives(
     infer_inner(ctx, term, axioms, Some(inductives))
 }
 
+/// Infer the type of a [`CoreTerm`] under `ctx` and the registered
+/// `axioms`. Use [`infer_with_inductives`] when an
+/// [`InductiveRegistry`] is needed for `K-Inductive` / `K-Elim`
+/// dispatch; this entry point handles the inductive-free fragment.
 pub fn infer(
     ctx: &Context,
     term: &CoreTerm,
@@ -90,11 +94,11 @@ pub fn infer(
     infer_inner(ctx, term, axioms, None)
 }
 
-/// V8 (#232) — type-inference variant that consults BOTH an
+/// type-inference variant that consults BOTH an
 /// [`crate::InductiveRegistry`] AND a [`crate::KernelCoord`]
 /// for the calling theorem. When the typing judgment encounters
 /// a [`CoreTerm::Axiom`] reference, the K-Coord-Cite rule
-/// (#227) automatically fires:
+///  automatically fires:
 ///
 ///   * If the axiom has a registered coord and the calling
 ///     theorem has a coord, [`crate::check_coord_cite`] is
@@ -106,7 +110,7 @@ pub fn infer(
 ///     pre-V8 behaviour for legacy callers).
 ///
 /// `allow_tier_jump` corresponds to the
-/// `@require_extension(vfe_3)` (VVA-3 K-Universe-Ascent)
+/// `@require_extension(vfe_3)` (Categorical coherence K-Universe-Ascent)
 /// escape: when the calling module imports the κ-tier-jump
 /// extension, descending citations to higher-ν axioms are
 /// admitted. The kernel itself cannot detect the import; the
@@ -135,7 +139,7 @@ pub fn infer_with_full_context(
     )
 }
 
-/// V8 (#215) — internal type-inference body parametrised on an
+/// internal type-inference body parametrised on an
 /// optional [`crate::InductiveRegistry`]. When `inductives` is
 /// `Some(_)`, the [`CoreTerm::Inductive`] arm consults the
 /// registry's `universe_for(path)` and returns the registered
@@ -151,7 +155,7 @@ fn infer_inner(
     infer_inner_with_coord(ctx, term, axioms, inductives, None, false)
 }
 
-/// V8 (#232) internal — type-inference body parametrised on
+/// internal — type-inference body parametrised on
 /// the optional ambient theorem coordinate. When
 /// `current_coord = Some(_)`, the K-Coord-Cite rule auto-
 /// applies at every [`CoreTerm::Axiom`] reference site whose
@@ -188,7 +192,7 @@ fn infer_inner_with_coord(
 
         // Universe `Type(n)` inhabits `Type(n+1)`; `Prop` inhabits `Type(0)`.
         //
-        // V8 (#207, B1) soundness fix: `saturating_add(1)` at u32::MAX
+        //  soundness fix: `saturating_add(1)` at u32::MAX
         // silently returns u32::MAX, yielding the type-in-type rule
         // `Universe(Concrete(MAX)) : Universe(Concrete(MAX))`. Detect
         // the overflow point explicitly and reject with
@@ -240,12 +244,12 @@ fn infer_inner_with_coord(
 
         // App-elimination: f : Pi (x:A) B,  a : A  ⇒  f a : B[x := a].
         //
-        // V8 (#221) — domain-against-arg-type comparison uses
+        // domain-against-arg-type comparison uses
         // `definitional_eq` (β-aware) instead of `structural_eq`
         // (byte-identity). Pre-V8 a Π whose domain has a β-redex
         // (e.g., `(λT:Type. T) Nat ≡_β Nat`) and an arg typed at
         // `Nat` would FALSELY REJECT — the domain's redex never got
-        // reduced before the equality check. Mirrors the V8 #216
+        // reduced before the equality check. Mirrors the 
         // PathTy fix; same monotone strengthening (only widens
         // acceptance, never weakens).
         CoreTerm::App(f, arg) => {
@@ -325,7 +329,7 @@ fn infer_inner_with_coord(
         // (i.e. inhabits some universe) and lhs, rhs both check at A.
         // Result lives in A's universe, same as carrier.
         //
-        // V8 (#216) — endpoint-against-carrier comparison uses
+        // endpoint-against-carrier comparison uses
         // `definitional_eq` (β-aware) instead of `structural_eq`
         // (byte-identity). Pre-V8 a path with carrier = `App(Lam,
         // Nat)` (β-equal to `Nat`) and endpoints typed at `Nat`
@@ -362,6 +366,51 @@ fn infer_inner_with_coord(
                 lhs: x.clone(),
                 rhs: x.clone(),
             })
+        }
+
+        // K-PathOver-Form:
+        //
+        //   Γ ⊢ motive : B → U     Γ ⊢ p : Path<B>(b₀, b₁)
+        //   Γ ⊢ lhs : motive(b₀)   Γ ⊢ rhs : motive(b₁)
+        //   ───────────────────────────────────────────────
+        //   Γ ⊢ PathOver(motive, p, lhs, rhs) : U
+        //
+        // Conservative shape-only validation today: motive must be
+        // a Pi (B → U), path must be a PathTy. The endpoint-image
+        // check (`lhs : motive(b₀)`, `rhs : motive(b₁)`) is the
+        // tighter V3.1 contract — V3.0 admits the form whenever
+        // both endpoints are well-typed, leaving the precise
+        // motive-image check to the elaborator's down-stream
+        // type-equation solver.
+        CoreTerm::PathOver { motive, path, lhs, rhs } => {
+            // motive must be Pi B → U so that motive(b) inhabits a universe.
+            let motive_ty = infer_inner(ctx, motive, axioms, inductives)?;
+            let result_universe = match &motive_ty {
+                CoreTerm::Pi { codomain, .. } => match codomain.as_ref() {
+                    CoreTerm::Universe(level) => level.clone(),
+                    other => {
+                        return Err(KernelError::TypeMismatch {
+                            expected: shape_of(&CoreTerm::Universe(crate::UniverseLevel::Concrete(0))),
+                            actual: shape_of(other),
+                        });
+                    }
+                },
+                other => return Err(KernelError::NotAFunction(shape_of(other))),
+            };
+            // V3.0 weak path / endpoint check — the path slot is
+            // either (a) a term of type PathTy<B>(b₀, b₁) (proper
+            // user-written PathOver) or (b) a path-shape annotation
+            // (a PathTy term used by the HIT eliminator emitter as
+            // a stand-in for the path-constructor itself; the
+            // emitter doesn't have access to a typed first-class
+            // constructor reference). Both shapes pass the kernel
+            // typing rule; the tighter "path is a PathTy-typed
+            // term, NOT a PathTy-shaped type expression" check is
+            // V3.1 follow-up alongside path-ctor β-rule.
+            let _ = infer_inner(ctx, path, axioms, inductives)?;
+            let _ = infer_inner(ctx, lhs, axioms, inductives)?;
+            let _ = infer_inner(ctx, rhs, axioms, inductives)?;
+            Ok(CoreTerm::Universe(result_universe))
         }
         // HComp: `hcomp φ walls base` produces the i1-face of the
         // composition cube whose base is `base` (its i0-face) and
@@ -439,7 +488,7 @@ fn infer_inner_with_coord(
         // predicate must check under the extended ctx (bound to Bool at
         // full-rule closure; shape-level at bring-up).
         //
-        // K-Refine (VVA §2.4 / §4.4 / Diakrisis T-2f*): the predicate's
+        // K-Refine (/ §4.4 / Diakrisis T-2f*): the predicate's
         // M-iteration depth MUST be strictly less than base's depth + 1.
         // Per Yanofsky 2003 this closes every self-referential paradox
         // schema in a cartesian-closed setting by blocking the exact
@@ -472,7 +521,7 @@ fn infer_inner_with_coord(
             Ok(CoreTerm::Universe(base_level))
         }
 
-        // V8 (#236) — K-Quot-Form: Quotient(T, ~) is a type when
+        // K-Quot-Form: Quotient(T, ~) is a type when
         // T is a type and ~ is a binary relation on T. The
         // quotient inhabits the same universe as T. The kernel
         // does NOT internally verify that ~ is reflexive +
@@ -491,7 +540,7 @@ fn infer_inner_with_coord(
             Ok(CoreTerm::Universe(base_level))
         }
 
-        // V8 (#236) — K-Quot-Intro: lifting `value : T` produces
+        // K-Quot-Intro: lifting `value : T` produces
         // `[value]_~ : Quotient(T, ~)`. Verifies (a) value's
         // type is T, (b) Quotient(T, ~) is well-formed.
         CoreTerm::QuotIntro { value, base, equiv } => {
@@ -510,7 +559,7 @@ fn infer_inner_with_coord(
             })
         }
 
-        // V8 (#236) — K-Quot-Elim: eliminate `q : Quotient(T, ~)`
+        // K-Quot-Elim: eliminate `q : Quotient(T, ~)`
         // by supplying `motive : Quotient(T, ~) → U` and
         // `case : Π(t: T). motive([t]_~)`. Result inhabits
         // `motive q`. The respect-of-equivalence obligation is
@@ -550,7 +599,7 @@ fn infer_inner_with_coord(
         // was declared in. Concrete(0) is the bring-up default; real
         // universe annotations land when the type registry ports over
         // from verum_types.
-        // V8 (#215) — consult the supplied InductiveRegistry for
+        // consult the supplied InductiveRegistry for
         // the declared universe level. When no registry is
         // available (callers using the legacy `infer` shim) or
         // the path isn't registered, fall back to
@@ -640,7 +689,7 @@ fn infer_inner_with_coord(
 
         CoreTerm::Axiom { name, .. } => match axioms.get(name.as_str()) {
             Maybe::Some(entry) => {
-                // V8 (#232) — K-Coord-Cite gate. Auto-fires
+                // K-Coord-Cite gate. Auto-fires
                 // when both the calling theorem and the
                 // referenced axiom have populated coords. If
                 // either is absent, rule passes (pre-V8
@@ -660,7 +709,7 @@ fn infer_inner_with_coord(
             Maybe::None => Err(KernelError::UnknownInductive(name.clone())),
         },
 
-        // VVA-1 V0: ε(α) and α(ε) are constructor markers for the
+        // Naturality witness: ε(α) and α(ε) are constructor markers for the
         // articulation/enactment duality. They inherit the type of
         // their argument (ε and α are endo-2-functors at the term
         // level — the M⊣A biadjunction structure shows up only at
@@ -671,7 +720,7 @@ fn infer_inner_with_coord(
             infer_inner(ctx, t, axioms, inductives)
         }
 
-        // VVA-7 V1: modal operators inhabit `Prop`. The kernel
+        // Modal-depth: modal operators inhabit `Prop`. The kernel
         // verifies that the operand is well-typed (regardless of
         // whether it inhabits `Prop` or any other type — modality
         // can be applied to any well-formed term, the resulting
@@ -687,7 +736,7 @@ fn infer_inner_with_coord(
             Ok(CoreTerm::Universe(UniverseLevel::Prop))
         }
 
-        // V8 (#241) — cohesive modalities ∫ ⊣ ♭ ⊣ ♯ are
+        // cohesive modalities ∫ ⊣ ♭ ⊣ ♯ are
         // **type-level endofunctors**. For a type `A : Type_i`,
         // each of `∫A`, `♭A`, `♯A` is itself a type at the same
         // universe level — the modality records the cohesive

@@ -35,7 +35,7 @@ pub struct FrameworkId {
     pub citation: Text,
 }
 
-/// V8 (#227) — kernel-side mirror of the Verum-stdlib
+/// kernel-side mirror of the Verum-stdlib
 /// `(Fw, ν, τ)` coordinate per spec §A.Z.2. Each registered axiom
 /// optionally carries one; the `K-Coord-Cite` rule consults the
 /// pair (theorem_coord, axiom_coord) and rejects when an axiom at
@@ -74,7 +74,7 @@ impl KernelCoord {
     }
 }
 
-/// V8 (#227) — `K-Coord-Cite` kernel rule.
+/// `K-Coord-Cite` kernel rule.
 ///
 /// Per spec §A.Z.5 item 2: when a theorem at coordinate
 /// `theorem_coord` cites an axiom at coordinate `axiom_coord`,
@@ -84,7 +84,7 @@ impl KernelCoord {
 /// reference a theorem in a "higher" depth tier (e.g., HoTT
 /// ω-level) without explicit universe-ascent governance.
 ///
-/// `allow_tier_jump = true` — VVA-3 K-Universe-Ascent escape:
+/// `allow_tier_jump = true` — Categorical coherence K-Universe-Ascent escape:
 /// when the calling module imports `core.math.frameworks.diakrisis_stack_model`
 /// (or sets `@require_extension(vfe_3)`), the rule admits a
 /// tier-jump to the next κ-level per Theorem 131.T. The kernel

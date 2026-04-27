@@ -1,6 +1,6 @@
-//! ε-invariant ↔ md-ω bridge tests (V8 #229, A.Z.5 item 5).
+//! ε-invariant ↔ md-ω bridge tests ().
 //!
-//! Per VVA §A.Z.3.2 defect 3: the Actic ε-invariant ordinal
+//! Per defect 3: the Actic ε-invariant ordinal
 //! arithmetic (Diakrisis 12-actic/03-epsilon-invariant.md) and
 //! the kernel's Cantor-normal-form OrdinalDepth (used by
 //! `m_depth_omega` for K-Refine-omega) are different

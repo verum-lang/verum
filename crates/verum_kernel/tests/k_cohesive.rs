@@ -1,5 +1,5 @@
-//! K-Shape / K-Flat / K-Sharp integration tests
-//! (V8 #241, VVA §7.7).
+//! K-Shape / K-Flat / K-Sharp integration tests for cohesive
+//! modalities.
 //!
 //! Cohesive modalities ∫ ⊣ ♭ ⊣ ♯ (Schreiber DCCT, cohesive HoTT).
 //! The kernel admits the type-formers unconditionally; the

@@ -87,9 +87,13 @@ pub struct AxiomAwareKey {
 /// `tactics::TacticCacheStats` for symmetric reporting.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NormalizeCacheStats {
+    /// Number of lookups that found a cached normal form.
     pub hits: u64,
+    /// Number of lookups that fell through to the normalizer.
     pub misses: u64,
+    /// Current entry count (sharded; sampled).
     pub entries: usize,
+    /// `hits / (hits + misses)` ratio in `[0.0, 1.0]`.
     pub hit_rate: f64,
 }
 

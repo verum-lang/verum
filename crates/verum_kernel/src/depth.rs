@@ -1,11 +1,11 @@
-//! Depth functions for kernel rules — split per #198.
+//! Depth functions for kernel rules — split .
 //!
 //! Two distinct depth notions live here:
 //!
-//!   • [`m_depth`] — finite-valued M-iteration depth (Diakrisis T-2f* /
-//!     VVA §4.3). Used by the baseline `K-Refine` rule.
-//!   • [`m_depth_omega`] — ordinal-valued modal-depth (VVA-7 / Theorem
-//!     136.T transfinite stratification). Used by `K-Refine-omega`.
+//!   • [`m_depth`] — finite-valued M-iteration depth (Diakrisis T-2f*).
+//!     Used by the baseline `K-Refine` rule.
+//!   • [`m_depth_omega`] — ordinal-valued modal-depth (Theorem 136.T
+//!     transfinite stratification). Used by `K-Refine-omega`.
 //!     Encoded as Cantor-normal-form prefix below ε_0 via
 //!     [`OrdinalDepth`].
 //!
@@ -18,8 +18,7 @@ use verum_common::Text;
 
 use crate::{CoreTerm, KernelError, UniverseLevel};
 
-/// Compute the M-iteration depth of a [`CoreTerm`], per Verum Unified
-/// Verification Architecture (VVA) §4.3.
+/// Compute the M-iteration depth of a [`CoreTerm`].
 ///
 /// The depth function is the operational realisation of the Diakrisis
 /// metaisation modality `M`: every construct that semantically *speaks
@@ -40,7 +39,7 @@ use crate::{CoreTerm, KernelError, UniverseLevel};
 ///
 ///   * `Var`, `Universe(n)` — zero (variables have no M-iteration;
 ///     the universe level is reported as depth to align with the
-///     stratification in VVA §4.3).
+///     stratification of the depth hierarchy).
 ///   * `Pi`, `Lam`, `Sigma`, `App`, `Pair`, `Fst`, `Snd`, `PathTy`,
 ///     `Refl`, `HComp`, `Transp`, `Glue`, `Elim` — maximum of their
 ///     sub-terms (structural, no depth bump).
@@ -75,7 +74,7 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         CoreTerm::PathTy { carrier, lhs, rhs } => {
             m_depth(carrier).max(m_depth(lhs)).max(m_depth(rhs))
         }
-        // V8.1 #196 §7.4 V3 — heterogeneous path-over: structurally a
+        // §7.4 V3 — heterogeneous path-over: structurally a
         // 4-child generalisation of `PathTy` whose extra component is
         // the constructor-path `path`. M-depth is the max over all four
         // children, identical to the homogeneous case extended.
@@ -111,7 +110,7 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         // An `Axiom` node in the kernel is a *term* — a proof witness
         // of its claimed type. Its depth is therefore `dp(ty)`, NOT
         // `dp(ty) + 1`. The schema-declaration side of a framework
-        // axiom (which *would* bump by +1, per VVA §4.3) is handled
+        // axiom (which *would* bump by +1,) is handled
         // by the declaration-time path (`AxiomRegistry::register`) —
         // that's where we reason about the axiom as a meta-statement.
         // Here we are only looking at invocation sites.
@@ -123,12 +122,12 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         // diagonal construction needs, and `K-Refine` forbids exactly
         // that equality).
         CoreTerm::Axiom { ty, .. } => m_depth(ty),
-        // VVA-1: ε(α) and α(ε) carry the M-depth of their argument.
+        //  ε(α) and α(ε) carry the M-depth of their argument.
         // The 2-natural equivalence τ : ε∘M ≃ A∘ε from Proposition 5.1
         // does not change m_depth at the term level — it lives at the
         // 2-cell level handled by `Kernel::check_eps_mu_coherence`.
         CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => m_depth(t),
-        // VVA-7: modal operators inherit M-depth from their operand.
+        // Modal-depth: modal operators inherit M-depth from their operand.
         // The M-iteration depth (used by K-Refine) does NOT see modal
         // structure; the modal-depth (used by K-Refine-omega) is a
         // *separate* ordinal-valued quantity computed by `m_depth_omega`.
@@ -136,13 +135,13 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         CoreTerm::ModalBigAnd(args) => {
             args.iter().map(|t| m_depth(t)).max().unwrap_or(0)
         }
-        // V8 (#241) — cohesive modalities are not in the M-iteration
+        // cohesive modalities are not in the M-iteration
         // family; m_depth descends without modal increment, leaving
         // ordinal-modal-depth tracking to `m_depth_omega`.
         CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
             m_depth(t)
         }
-        // V8 (#236) — quotient types: max over base + equiv
+        // quotient types: max over base + equiv
         // (the constructor's structural depth).
         CoreTerm::Quotient { base, equiv } => m_depth(base).max(m_depth(equiv)),
         CoreTerm::QuotIntro { value, base, equiv } => {
@@ -155,7 +154,7 @@ pub fn m_depth(term: &CoreTerm) -> usize {
 }
 
 // =============================================================================
-// VVA-7 V0 — K-Refine-omega ordinal modal-depth
+// Modal-depth (V0) — K-Refine-omega ordinal modal-depth
 // =============================================================================
 
 /// Ordinal-valued modal-depth for the K-Refine-omega kernel rule
@@ -199,7 +198,7 @@ impl OrdinalDepth {
 
     /// `+ 1` — adds one to the ordinal in Cantor-normal form.
     ///
-    /// **Soundness fix B4 (#206)**: pre-fix, the implementation
+    /// **Soundness fix B4 **: pre-fix, the implementation
     /// used `finite_offset.saturating_add(1)`, which silently capped
     /// finite_offset at u32::MAX. The kernel rule
     /// `m_depth_omega(P) < base.succ()` then *accepted* a maximally-
@@ -264,7 +263,7 @@ impl OrdinalDepth {
     }
 }
 
-/// VVA-7 V1 — `K-Refine-omega` modal-depth function `md^ω`.
+/// Modal-depth — `K-Refine-omega` modal-depth function `md^ω`.
 ///
 /// Per Definition 136.D1 (transfinite modal language L^ω_α):
 ///
@@ -284,7 +283,7 @@ impl OrdinalDepth {
 /// 136.L0 the ordinal recursion is well-defined for every term in
 /// the canonical-primitive language L^ω_α.
 ///
-/// Blocks (per VVA §7): Berry, paradoxical Löb, paraconsistent
+/// Blocks: Berry, paradoxical Löb, paraconsistent
 /// Curry, Beth-Monk ω-iteration, and any ω·k or ω^ω modal-paradox
 /// witness. The K-Refine-omega rule (`check_refine_omega`) routes
 /// the result through `OrdinalDepth::lt` to gate refinement-type
@@ -332,7 +331,7 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
                 ord_max(m_depth_omega(lhs), m_depth_omega(rhs)),
             )
         }
-        // V8.1 #196 §7.4 V3 — heterogeneous path-over: 4-child
+        // §7.4 V3 — heterogeneous path-over: 4-child
         // generalisation of `PathTy`. Modal-depth ordinal is the
         // pairwise max over motive / path / lhs / rhs.
         CoreTerm::PathOver { motive, path, lhs, rhs } => ord_max(
@@ -355,7 +354,7 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
         CoreTerm::Refine { base, predicate, .. } => {
             ord_max(m_depth_omega(base), m_depth_omega(predicate))
         }
-        // V8 (#236) — quotient types under modal-depth ordinal.
+        // quotient types under modal-depth ordinal.
         CoreTerm::Quotient { base, equiv } => {
             ord_max(m_depth_omega(base), m_depth_omega(equiv))
         }
@@ -390,7 +389,7 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
         CoreTerm::SmtProof(_) => OrdinalDepth::finite(0),
         CoreTerm::Axiom { ty, .. } => m_depth_omega(ty),
         CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => m_depth_omega(t),
-        // V8 (#241) — cohesive modalities. ∫ ⊣ ♭ ⊣ ♯ are bona-fide
+        // cohesive modalities. ∫ ⊣ ♭ ⊣ ♯ are bona-fide
         // modalities; each application bumps the ordinal modal-depth
         // by 1 (per Definition 136.D1's modality-as-Galois-connection
         // generalisation). The K-Refine-omega rule routes the result
@@ -406,7 +405,7 @@ pub(crate) fn ord_max(a: OrdinalDepth, b: OrdinalDepth) -> OrdinalDepth {
     if a.lt(&b) { b } else { a }
 }
 
-/// VVA-7 V0 — `K-Refine-omega` rule entry point.
+/// Modal-depth (V0) — `K-Refine-omega` rule entry point.
 ///
 /// Verifies the transfinite-stratification invariant
 ///

@@ -947,8 +947,7 @@ fn glue_rejects_non_universe_carrier() {
 
 /// `elim e motive cases : motive e` — shape-level Elim rule.
 ///
-/// V1 (#207-adjacent, this file's commit): Elim now requires
-/// motive's TYPE be a Π and scrutinee's type to match the Π's
+/// Elim now requires motive's TYPE be a Π and scrutinee's type to match the Π's
 /// domain. Result remains the syntactic `App(motive, scrutinee)`
 /// (β-reduction is downstream's job; returning the codomain would
 /// give the type's TYPE — i.e., a universe — instead).
@@ -1361,7 +1360,7 @@ fn single_pi_over_path_is_not_uip() {
         }),
     };
     let mut reg = AxiomRegistry::new();
-    // V8.1 (#222 follow-up): default register() is now strict;
+    // default register() is now strict;
     // this test pins the UIP-guard (regime-independent) so we
     // use the explicit legacy entry to avoid the orthogonal
     // subsingleton-rejection on the free-var-bearing body.
@@ -1377,7 +1376,7 @@ fn single_pi_over_path_is_not_uip() {
 }
 
 // =============================================================================
-// V8 (#222) — strict loader: load_framework_axioms_strict +
+// strict loader: load_framework_axioms_strict +
 // load_framework_axioms_with_regime
 // =============================================================================
 
@@ -1385,7 +1384,7 @@ fn single_pi_over_path_is_not_uip() {
 fn b222_strict_loader_admits_clean_axiom() {
     // The placeholder body the loader uses is
     // Universe(Concrete(0)) — a closed type at Type_0. Both
-    // V8 #217 (subsingleton) and V8 #220 (body-is-Prop) admit
+    // subsingleton check and body-is-Prop check admit
     // it under ClosedPropositionOnly regime.
     let module = module_with_axiom(
         "lurie_htt",
@@ -1405,7 +1404,7 @@ fn b222_strict_loader_admits_clean_axiom() {
 
 #[test]
 fn b222_strict_loader_report_has_v8_buckets() {
-    // Default LoadAxiomsReport must expose the new V8 #222
+    // Default LoadAxiomsReport must expose the new 
     // buckets — even when empty.
     let report = LoadAxiomsReport::default();
     assert!(report.subsingleton_violations.is_empty());
@@ -1417,7 +1416,7 @@ fn b222_strict_loader_report_has_v8_buckets() {
 
 #[test]
 fn b222_legacy_loader_preserves_pre_v8_behaviour() {
-    // V8.1 (#222 follow-up): the production default is now
+    // the production default is now
     // strict (ClosedPropositionOnly). Callers that intentionally
     // need the pre-V8.1 LegacyUnchecked shim must explicitly
     // call load_framework_axioms_legacy_unchecked.
@@ -1435,7 +1434,7 @@ fn b222_legacy_loader_preserves_pre_v8_behaviour() {
 
 #[test]
 fn b222_default_loader_is_strict_by_v8_1() {
-    // V8.1 (#222 follow-up): production-default loader now
+    // production-default loader now
     // routes through ClosedPropositionOnly. Closed-Prop
     // placeholder bodies (Universe(Concrete(0))) admit cleanly.
     let module = module_with_axiom(

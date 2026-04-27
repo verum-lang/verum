@@ -61,10 +61,6 @@
 
 #![warn(missing_docs)]
 
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use verum_common::{Heap, List, Maybe, Text};
-
 /// Verum Unified Verification Architecture (VVA) version stamp.
 ///
 /// Closes B14 . governance promises *"Каждое verification spec
