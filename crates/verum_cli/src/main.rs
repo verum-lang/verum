@@ -554,6 +554,15 @@ enum Commands {
     #[clap(subcommand)]
     Diagnose(commands::diagnose::DiagnoseCommands),
 
+    /// Manage the script-mode VBC cache (`~/.verum/script-cache/`).
+    /// Subcommands: `path`, `list`, `clear`, `gc`, `show`. The cache
+    /// is content-addressed by source + toolchain + flags, so a hit is
+    /// always a valid reuse — there is no "stale cache" failure mode.
+    /// `gc` evicts least-recently-accessed entries until under a budget;
+    /// `clear` removes everything.
+    #[clap(subcommand)]
+    Cache(commands::cache::CacheCommands),
+
     /// Watch for changes and rebuild
     Watch {
         #[clap(default_value = "build")]
@@ -994,6 +1003,16 @@ enum Commands {
         /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
+        /// V8.1 (#196 follow-up, §8.5 V2-foundation): emit a
+        /// per-declaration provenance JSON sidecar at
+        /// `<output>.provenance.json`. The sidecar lists every
+        /// exported declaration with its kind / source-file /
+        /// framework citation / discharge_strategy; downstream
+        /// tools use it to drive SMT replay or fill in proof terms.
+        /// Statement-level export (sorry / Admitted / `?`) is
+        /// unchanged when this flag is absent.
+        #[clap(long)]
+        with_provenance: bool,
     },
 
     /// Alias for `export --to <format>` — matches the wording in
@@ -1007,6 +1026,41 @@ enum Commands {
         to: String,
         /// Output file path (defaults to
         /// `certificates/<format>/export.<ext>`).
+        #[clap(long, short, value_name = "PATH")]
+        output: Option<std::path::PathBuf>,
+        /// V8.1 (#196 follow-up): see `Export::with_provenance`.
+        #[clap(long)]
+        with_provenance: bool,
+    },
+
+    /// V8.1 (#196 follow-up, VVA §8.6 V2.1) — extract executable
+    /// programs from constructive proofs marked with `@extract` /
+    /// `@extract_witness` / `@extract_contract`. Walks the project
+    /// for marked declarations, dispatches to the program-extraction
+    /// pipeline at the attribute's `ExtractTarget` (Verum / OCaml /
+    /// Lean / Coq), and emits per-target files at
+    /// `<output>/<decl>.{vr,ml,lean,v}`. Default output dir is
+    /// `extracted/`.
+    Extract {
+        /// Optional explicit input `.vr` path. When absent, all `.vr`
+        /// files under the project's manifest directory are scanned.
+        input: Option<std::path::PathBuf>,
+        /// Output directory (defaults to `extracted/`).
+        #[clap(long, short, value_name = "PATH")]
+        output: Option<std::path::PathBuf>,
+    },
+
+    /// V8.1 (#196 follow-up, Task B5) — import an external knowledge-
+    /// base format and emit a `.vr` file with the corresponding typed
+    /// attributes. Currently supports OWL 2 Functional-Style Syntax
+    /// (`--from owl2-fs`); round-trips with `verum export --to owl2-fs`.
+    Import {
+        /// Source format: `owl2-fs` (also `ofn`).
+        #[clap(long, value_name = "FORMAT")]
+        from: String,
+        /// Input path. Required.
+        input: std::path::PathBuf,
+        /// Output `.vr` path (defaults to `<input>.vr`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
     },
@@ -1809,6 +1863,7 @@ fn run_command(cli: Cli) -> Result<()> {
         }
         Commands::Clean { all } => commands::clean::execute(all),
         Commands::Diagnose(cmd) => commands::diagnose::execute(cmd),
+        Commands::Cache(cmd) => commands::cache::execute(cmd),
         Commands::Watch { command, clear } => commands::watch::execute(command.as_str(), clear),
         Commands::Hooks(cmd) => match cmd {
             HooksCommands::Install { force } => commands::hooks::install(force),
@@ -2284,7 +2339,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Commands::Export { to, output } | Commands::ExportProofs { to, output } => {
+        Commands::Export { to, output, with_provenance }
+        | Commands::ExportProofs { to, output, with_provenance } => {
             let format = commands::export::ExportFormat::parse(&to)?;
             let options = commands::export::ExportOptions {
                 format,
@@ -2292,8 +2348,23 @@ fn run_command(cli: Cli) -> Result<()> {
                     Some(p) => verum_common::Maybe::Some(p),
                     None => verum_common::Maybe::None,
                 },
+                with_provenance,
             };
             commands::export::run(options)
+        }
+        Commands::Import { from, input, output } => {
+            let format = commands::import::ImportFormat::parse(&from)?;
+            commands::import::run(commands::import::ImportOptions {
+                format,
+                input,
+                output,
+            })
+        }
+        Commands::Extract { input, output } => {
+            commands::extract::run(commands::extract::ExtractOptions {
+                input,
+                output,
+            })
         }
         Commands::Tree { duplicates, depth } => {
             let options = commands::tree::TreeOptions {

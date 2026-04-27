@@ -1,4 +1,5 @@
 pub mod analyze;
+pub mod cache;
 pub mod dap;
 pub mod bench;
 pub mod build;
@@ -42,6 +43,15 @@ pub mod workspace;
 pub mod add;
 pub mod audit;
 pub mod export;
+// V8.1 (#196 follow-up, VVA §8.6 V2.1): `verum extract <file.vr>`
+// — walk @extract / @extract_witness / @extract_contract attrs and
+// emit per-target scaffolds at extracted/<name>.{vr,ml,lean,v}.
+pub mod extract;
+// V8.1 (#196 follow-up, Task B5): `verum import --from owl2-fs <file>`
+// — read OWL 2 Functional-Style Syntax and emit the corresponding
+// `.vr` source with `@owl2_*` typed attributes. Round-trip with
+// `export --to owl2-fs`.
+pub mod import;
 // Shared OWL 2 graph + walker — consumed by `audit::audit_owl2_classify_*`
 // and `export` (B5 owl2-fs emitter). Single source of truth for the
 // Owl2*Attr → Owl2Graph projection.
