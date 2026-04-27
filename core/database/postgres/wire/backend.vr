@@ -1,0 +1,372 @@
+// =============================================================================
+// core/database/postgres/wire/backend.vr — backend message parsers
+// =============================================================================
+// Spec: postgresql.org/docs/16/protocol-message-formats.html
+//
+// Server → client message parsers. Each function takes a `Frame`
+// (already-decoded length-prefixed bytes) and returns a typed view.
+//
+// Errors propagate through `BackendDecodeError`; a malformed frame at
+// this layer is a server bug or a wire-tampering attack — callers
+// terminate the connection rather than retry.
+// =============================================================================
+
+module core.database.postgres.wire.backend;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.types.{WireReader, WireValue, WvNull, WvPresent, FmtBinary, FmtText};
+mount core.database.postgres.wire.frame.Frame;
+mount core.database.postgres.wire.types.{
+    BE_AUTH_REQUEST, BE_PARAMETER_STATUS, BE_BACKEND_KEY_DATA,
+    BE_READY_FOR_QUERY, BE_ROW_DESCRIPTION, BE_DATA_ROW,
+    BE_COMMAND_COMPLETE, BE_EMPTY_QUERY_RES,
+    BE_ERROR_RESPONSE, BE_NOTICE_RESPONSE, BE_NOTIFICATION,
+    BE_PARSE_COMPLETE, BE_BIND_COMPLETE, BE_CLOSE_COMPLETE,
+    BE_PARAMETER_DESC, BE_NO_DATA, BE_PORTAL_SUSPEND,
+    BE_NEGOTIATE_PROTO,
+    AUTH_OK, AUTH_CLEARTEXT_PASSWORD, AUTH_MD5_PASSWORD,
+    AUTH_SASL, AUTH_SASL_CONTINUE, AUTH_SASL_FINAL,
+    TX_IDLE, TX_IN_TX, TX_FAILED,
+};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type BackendDecodeError is
+      BdShortPayload { wanted: Int, available: Int }
+    | BdInvalidUtf8
+    | BdUnsupportedAuth { code: Int }
+    | BdUnsupportedTag { tag: Byte }
+    | BdProtocolViolation { reason: Text };
+
+// -----------------------------------------------------------------------------
+// Authentication
+// -----------------------------------------------------------------------------
+
+public type AuthRequest is
+      AuthOk
+    | AuthCleartextPassword
+    | AuthMd5Password { salt: List<Byte> }
+    | AuthSasl { mechanisms: List<Text> }
+    | AuthSaslContinue { server_data: List<Byte> }
+    | AuthSaslFinal { server_data: List<Byte> };
+
+public fn parse_auth_request(payload: List<Byte>) -> Result<AuthRequest, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let code = match r.read_i32_be() {
+        Ok(c)  => c,
+        Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+    };
+    if code == AUTH_OK {
+        return Ok(AuthOk);
+    }
+    if code == AUTH_CLEARTEXT_PASSWORD {
+        return Ok(AuthCleartextPassword);
+    }
+    if code == AUTH_MD5_PASSWORD {
+        match r.read_bytes(4) {
+            Ok(salt) => return Ok(AuthMd5Password { salt: salt }),
+            Err(_)   => return Err(BdShortPayload { wanted: 4, available: 0 }),
+        }
+    }
+    if code == AUTH_SASL {
+        // List of NUL-terminated mechanism names, terminated by an
+        // empty mechanism name (single NUL).
+        let mut mechs: List<Text> = List.new();
+        loop {
+            let mech = match r.read_cstr() {
+                Ok(m)  => m,
+                Err(_) => { return Err(BdShortPayload { wanted: 1, available: 0 }); }
+            };
+            if mech.len() == 0 {
+                break;
+            }
+            mechs.push(mech);
+        }
+        return Ok(AuthSasl { mechanisms: mechs });
+    }
+    if code == AUTH_SASL_CONTINUE {
+        let n = r.remaining();
+        match r.read_bytes(n) {
+            Ok(b)  => return Ok(AuthSaslContinue { server_data: b }),
+            Err(_) => return Err(BdShortPayload { wanted: n, available: 0 }),
+        }
+    }
+    if code == AUTH_SASL_FINAL {
+        let n = r.remaining();
+        match r.read_bytes(n) {
+            Ok(b)  => return Ok(AuthSaslFinal { server_data: b }),
+            Err(_) => return Err(BdShortPayload { wanted: n, available: 0 }),
+        }
+    }
+    Err(BdUnsupportedAuth { code: code })
+}
+
+// -----------------------------------------------------------------------------
+// ParameterStatus / BackendKeyData / ReadyForQuery
+// -----------------------------------------------------------------------------
+
+public type ParameterStatus is { name: Text, value: Text };
+
+public fn parse_parameter_status(payload: List<Byte>) -> Result<ParameterStatus, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let name = match r.read_cstr() {
+        Ok(s)  => s,
+        Err(_) => { return Err(BdInvalidUtf8); }
+    };
+    let value = match r.read_cstr() {
+        Ok(s)  => s,
+        Err(_) => { return Err(BdInvalidUtf8); }
+    };
+    Ok(ParameterStatus { name: name, value: value })
+}
+
+public type BackendKeyData is { process_id: Int, secret_key: Int };
+
+public fn parse_backend_key_data(payload: List<Byte>) -> Result<BackendKeyData, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let pid = match r.read_i32_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+    };
+    let key = match r.read_i32_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+    };
+    Ok(BackendKeyData { process_id: pid, secret_key: key })
+}
+
+public type TxStatus is TxIdle | TxInTransaction | TxFailedTransaction;
+
+public fn parse_ready_for_query(payload: List<Byte>) -> Result<TxStatus, BackendDecodeError> {
+    if payload.len() < 1 {
+        return Err(BdShortPayload { wanted: 1, available: 0 });
+    }
+    let b = payload[0];
+    if b == TX_IDLE  { return Ok(TxIdle); }
+    if b == TX_IN_TX { return Ok(TxInTransaction); }
+    if b == TX_FAILED { return Ok(TxFailedTransaction); }
+    Err(BdProtocolViolation { reason: "unknown tx-status byte".clone() })
+}
+
+// -----------------------------------------------------------------------------
+// RowDescription
+// -----------------------------------------------------------------------------
+
+public type ColumnDesc is {
+    name: Text,
+    table_oid: Int,
+    column_attr: Int,
+    type_oid: Int,
+    type_size: Int,
+    type_modifier: Int,
+    format: Int,        // 0 = text, 1 = binary
+};
+
+public type RowDescription is { columns: List<ColumnDesc> };
+
+public fn parse_row_description(payload: List<Byte>) -> Result<RowDescription, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let n = match r.read_u16_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+    };
+    let mut cols: List<ColumnDesc> = List.new();
+    let mut i = 0;
+    while i < n {
+        let name = match r.read_cstr()    { Ok(s) => s, Err(_) => { return Err(BdInvalidUtf8); } };
+        let toid = match r.read_i32_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); } };
+        let attr = match r.read_u16_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); } };
+        let typo = match r.read_i32_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); } };
+        let tsiz = match r.read_u16_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); } };
+        let tmod = match r.read_i32_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); } };
+        let fmt  = match r.read_u16_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); } };
+        cols.push(ColumnDesc {
+            name: name,
+            table_oid: toid,
+            column_attr: attr,
+            type_oid: typo,
+            type_size: tsiz,
+            type_modifier: tmod,
+            format: fmt,
+        });
+        i = i + 1;
+    }
+    Ok(RowDescription { columns: cols })
+}
+
+// -----------------------------------------------------------------------------
+// DataRow
+// -----------------------------------------------------------------------------
+
+public type DataRow is { values: List<WireValue> };
+
+/// Parse a `D` message into protocol-neutral `WireValue`s. Format
+/// (text vs binary) is per-column and lives in the originating
+/// RowDescription, not the DataRow itself — callers correlate by
+/// index.
+public fn parse_data_row(payload: List<Byte>, formats: &List<Int>) -> Result<DataRow, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let n = match r.read_u16_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+    };
+    let mut values: List<WireValue> = List.new();
+    let mut i = 0;
+    while i < n {
+        let len = match r.read_i32_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+        };
+        if len < 0 {
+            values.push(WvNull);
+        } else {
+            let bytes = match r.read_bytes(len) {
+                Ok(b)  => b,
+                Err(_) => { return Err(BdShortPayload { wanted: len, available: 0 }); }
+            };
+            let fmt = if i < formats.len() as Int && formats[i] == 1 {
+                FmtBinary
+            } else {
+                FmtText
+            };
+            values.push(WvPresent { bytes: bytes, format: fmt });
+        }
+        i = i + 1;
+    }
+    Ok(DataRow { values: values })
+}
+
+// -----------------------------------------------------------------------------
+// CommandComplete / EmptyQueryResponse
+// -----------------------------------------------------------------------------
+
+public type CommandComplete is { tag: Text };
+
+public fn parse_command_complete(payload: List<Byte>) -> Result<CommandComplete, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let tag = match r.read_cstr() {
+        Ok(s)  => s,
+        Err(_) => { return Err(BdInvalidUtf8); }
+    };
+    Ok(CommandComplete { tag: tag })
+}
+
+// -----------------------------------------------------------------------------
+// ErrorResponse / NoticeResponse — same shape, different severity intent.
+// -----------------------------------------------------------------------------
+
+public type Diagnostic is {
+    severity: Text,           // S
+    code: Text,               // C — SQLSTATE
+    message: Text,            // M
+    detail: Text,             // D
+    hint: Text,               // H
+    position: Text,           // P
+    where_field: Text,        // W
+    schema: Text,             // s
+    table: Text,              // t
+    column: Text,             // c
+    datatype: Text,           // d
+    constraint: Text,         // n
+    file: Text,               // F
+    line: Text,               // L
+    routine: Text,            // R
+};
+
+implement Diagnostic {
+    public fn empty() -> Diagnostic {
+        Diagnostic {
+            severity: "".clone(), code: "".clone(), message: "".clone(),
+            detail: "".clone(), hint: "".clone(), position: "".clone(),
+            where_field: "".clone(), schema: "".clone(), table: "".clone(),
+            column: "".clone(), datatype: "".clone(), constraint: "".clone(),
+            file: "".clone(), line: "".clone(), routine: "".clone(),
+        }
+    }
+}
+
+public fn parse_error_response(payload: List<Byte>) -> Result<Diagnostic, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let mut diag = Diagnostic.empty();
+    loop {
+        let field_byte = match r.read_u8() {
+            Ok(b)  => b,
+            Err(_) => { return Err(BdShortPayload { wanted: 1, available: 0 }); }
+        };
+        if field_byte == 0 {
+            break;
+        }
+        let value = match r.read_cstr() {
+            Ok(s)  => s,
+            Err(_) => { return Err(BdInvalidUtf8); }
+        };
+        // Match on field-tag character.
+        if field_byte == 0x53 { diag.severity = value; }
+        else if field_byte == 0x43 { diag.code = value; }
+        else if field_byte == 0x4D { diag.message = value; }
+        else if field_byte == 0x44 { diag.detail = value; }
+        else if field_byte == 0x48 { diag.hint = value; }
+        else if field_byte == 0x50 { diag.position = value; }
+        else if field_byte == 0x57 { diag.where_field = value; }
+        else if field_byte == 0x73 { diag.schema = value; }
+        else if field_byte == 0x74 { diag.table = value; }
+        else if field_byte == 0x63 { diag.column = value; }
+        else if field_byte == 0x64 { diag.datatype = value; }
+        else if field_byte == 0x6E { diag.constraint = value; }
+        else if field_byte == 0x46 { diag.file = value; }
+        else if field_byte == 0x4C { diag.line = value; }
+        else if field_byte == 0x52 { diag.routine = value; }
+        // Unknown field — Postgres allows additions; we ignore them.
+    }
+    Ok(diag)
+}
+
+// -----------------------------------------------------------------------------
+// BackendMessage discriminant — top-level parser dispatch.
+// -----------------------------------------------------------------------------
+
+public type BackendMessage is
+      BmAuth(AuthRequest)
+    | BmParameterStatus(ParameterStatus)
+    | BmBackendKeyData(BackendKeyData)
+    | BmReadyForQuery(TxStatus)
+    | BmRowDescription(RowDescription)
+    | BmDataRow(DataRow)
+    | BmCommandComplete(CommandComplete)
+    | BmEmptyQueryResponse
+    | BmError(Diagnostic)
+    | BmNotice(Diagnostic)
+    | BmParseComplete
+    | BmBindComplete
+    | BmCloseComplete
+    | BmNoData
+    | BmPortalSuspend
+    | BmUnknown { tag: Byte };
+
+/// Dispatch a `Frame` to the right parser. The DataRow path needs the
+/// per-column format vector from a preceding RowDescription, which is
+/// caller state — pass it in or use `Vec::new()` to default to text.
+public fn parse_backend(frame: Frame, data_row_formats: &List<Int>) -> Result<BackendMessage, BackendDecodeError> {
+    let tag = frame.tag();
+    let payload = frame.into_payload();
+    if tag == BE_AUTH_REQUEST     { return Ok(BmAuth(parse_auth_request(payload)?)); }
+    if tag == BE_PARAMETER_STATUS { return Ok(BmParameterStatus(parse_parameter_status(payload)?)); }
+    if tag == BE_BACKEND_KEY_DATA { return Ok(BmBackendKeyData(parse_backend_key_data(payload)?)); }
+    if tag == BE_READY_FOR_QUERY  { return Ok(BmReadyForQuery(parse_ready_for_query(payload)?)); }
+    if tag == BE_ROW_DESCRIPTION  { return Ok(BmRowDescription(parse_row_description(payload)?)); }
+    if tag == BE_DATA_ROW         { return Ok(BmDataRow(parse_data_row(payload, data_row_formats)?)); }
+    if tag == BE_COMMAND_COMPLETE { return Ok(BmCommandComplete(parse_command_complete(payload)?)); }
+    if tag == BE_EMPTY_QUERY_RES  { return Ok(BmEmptyQueryResponse); }
+    if tag == BE_ERROR_RESPONSE   { return Ok(BmError(parse_error_response(payload)?)); }
+    if tag == BE_NOTICE_RESPONSE  { return Ok(BmNotice(parse_error_response(payload)?)); }
+    if tag == BE_PARSE_COMPLETE   { return Ok(BmParseComplete); }
+    if tag == BE_BIND_COMPLETE    { return Ok(BmBindComplete); }
+    if tag == BE_CLOSE_COMPLETE   { return Ok(BmCloseComplete); }
+    if tag == BE_NO_DATA          { return Ok(BmNoData); }
+    if tag == BE_PORTAL_SUSPEND   { return Ok(BmPortalSuspend); }
+    Ok(BmUnknown { tag: tag })
+}

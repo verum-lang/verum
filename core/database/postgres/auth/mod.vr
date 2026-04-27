@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/postgres/auth/mod.vr — Postgres authentication
+// =============================================================================
+// Spec: internal/specs/database.md §6.1 (TLS / SCRAM-SHA-256 — only
+//       supported method without explicit @allow_legacy_auth opt-in)
+//
+// SCRAM-SHA-256 (RFC 5802 / 7677) is the only Postgres authentication
+// method Spindle ships by default. md5 / password / trust are
+// compile-time-rejected unless `@allow_legacy_auth` is on the call
+// site — and even then the channel binding `tls-server-end-point`
+// hash is mandatory under TLS.
+// =============================================================================
+
+module core.database.postgres.auth;
+
+public module scram;
+
+public mount .scram.{
+    ScramClient, ScramState, ScramError,
+    SsInitial, SsAwaitingChallenge, SsAwaitingFinal, SsAuthenticated, SsFailed,
+    scram_client_new,
+};

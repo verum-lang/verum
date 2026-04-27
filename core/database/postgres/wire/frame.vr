@@ -1,0 +1,127 @@
+// =============================================================================
+// core/database/postgres/wire/frame.vr — v3 frame encode/decode
+// =============================================================================
+// Spec: postgresql.org/docs/16/protocol-message-formats.html
+//
+// All Postgres wire integers are network byte order (big-endian).
+// Strings are NUL-terminated UTF-8.  Length prefixes COUNT THE LENGTH
+// PREFIX ITSELF — a 4-byte payload yields `0x00000008` on the wire.
+//
+// `WireBuf` from `core.database.common.types` already implements the
+// big-endian writer surface; this module is the Postgres-flavoured
+// frame wrapper around it (1-byte type tag prefix + length-self
+// adjustment).
+// =============================================================================
+
+module core.database.postgres.wire.frame;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.types.{WireBuf, WireReader};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type FrameError is
+      FeShort { wanted: Int, available: Int }
+    | FeBadLength { len: Int }
+    | FeInvalidUtf8;
+
+// -----------------------------------------------------------------------------
+// Frame writer
+// -----------------------------------------------------------------------------
+
+/// Wrap a payload-builder in a Postgres v3 frame. `tag == 0` skips the
+/// type byte (used for the initial Startup / SSLRequest / CancelRequest
+/// messages which have no tag).
+///
+/// The closure receives a fresh `WireBuf`; the function takes care of
+/// the length-self-adjustment after the closure returns.
+public fn frame<F: fn(&mut WireBuf) -> ()>(
+    tag: Byte,
+    write_payload: F,
+) -> List<Byte> {
+    let mut payload = WireBuf.new();
+    write_payload(&mut payload);
+
+    let mut out: List<Byte> = List.new();
+    if tag != (0 as Byte) {
+        out.push(tag);
+    }
+    // 4-byte BE length INCLUDING the length field itself.
+    let len_total = (payload.len() + 4) as Int;
+    out.push(((len_total >> 24) & 0xFF) as Byte);
+    out.push(((len_total >> 16) & 0xFF) as Byte);
+    out.push(((len_total >> 8)  & 0xFF) as Byte);
+    out.push((len_total & 0xFF) as Byte);
+
+    let body = payload.as_bytes();
+    let mut i: Int = 0;
+    while i < body.len() {
+        out.push(body[i]);
+        i = i + 1;
+    }
+    out
+}
+
+/// Convenience for un-tagged frames (Startup-class).
+public fn frame_untagged<F: fn(&mut WireBuf) -> ()>(write_payload: F) -> List<Byte> {
+    frame((0 as Byte), write_payload)
+}
+
+// -----------------------------------------------------------------------------
+// Frame reader — splits a stream byte buffer into individual messages.
+// -----------------------------------------------------------------------------
+
+public type Frame is {
+    tag: Byte,           // 0 if this is a tag-less frame (only ever the very
+                         // first response to SSLRequest, in practice)
+    payload: List<Byte>, // body excluding the tag and the 4-byte length
+}
+
+implement Frame {
+    public fn tag(&self) -> Byte { self.tag }
+    public fn payload(&self) -> &List<Byte> { &self.payload }
+    public fn into_payload(self) -> List<Byte> { self.payload }
+}
+
+/// Try to parse exactly one tagged frame from the front of `buf`.
+/// Returns `Ok(Some((frame, bytes_consumed)))` on success,
+/// `Ok(None)` if the buffer holds an incomplete frame, or `Err(...)`
+/// for protocol violations.
+public fn try_parse_tagged(buf: &[Byte]) -> Result<Maybe<TaggedReadOutcome>, FrameError> {
+    let n = buf.len() as Int;
+    if n < 5 {
+        return Ok(None);
+    }
+    let tag = buf[0];
+    let len_total =
+          ((buf[1] as Int) & 0xFF) << 24
+        | ((buf[2] as Int) & 0xFF) << 16
+        | ((buf[3] as Int) & 0xFF) << 8
+        | ((buf[4] as Int) & 0xFF);
+    if len_total < 4 {
+        return Err(FeBadLength { len: len_total });
+    }
+    let total_frame = 1 + len_total;     // 1 tag byte + len-and-payload
+    if n < total_frame {
+        return Ok(None);
+    }
+    let mut payload: List<Byte> = List.new();
+    let mut i: Int = 5;
+    while i < total_frame {
+        payload.push(buf[i]);
+        i = i + 1;
+    }
+    Ok(Some(TaggedReadOutcome {
+        frame: Frame { tag: tag, payload: payload },
+        bytes_consumed: total_frame,
+    }))
+}
+
+public type TaggedReadOutcome is {
+    frame: Frame,
+    bytes_consumed: Int,
+};

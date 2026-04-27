@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/postgres/wire/mod.vr — Postgres v3 wire layer
+// =============================================================================
+// Spec: internal/specs/database.md §6.1, postgresql.org/docs/16/protocol.html
+//
+// Postgres v3 message frame:
+//
+//     +---------- 1-byte type tag (frontend message; backend always sends one) ---+
+//     | 'Q'/'P'/'B'/'E'/'S'/'X'/...                                                |
+//     +---------- 4-byte big-endian length (counts the length itself) ------------+
+//     | 0x00 0x00 0x00 N                                                           |
+//     +---------- (N - 4) bytes of payload ----------------------------------------+
+//     | ...                                                                        |
+//     +----------------------------------------------------------------------------+
+//
+// The startup message is the lone exception — no type tag, just the
+// length-prefix.
+// =============================================================================
+
+module core.database.postgres.wire;
+
+public module frame;
+public module frontend;
+public module backend;
+public module types;

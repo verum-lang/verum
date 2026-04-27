@@ -1,0 +1,94 @@
+// =============================================================================
+// core/database/postgres/wire/types.vr — message-tag taxonomies
+// =============================================================================
+// Spec: postgresql.org/docs/16/protocol-message-formats.html
+//
+// Two enum-like classifications: `FrontendMsgTag` (what we send) and
+// `BackendMsgTag` (what we receive).  Stored as bytes so they can be
+// passed straight through `frame()`.
+// =============================================================================
+
+module core.database.postgres.wire.types;
+
+mount core.*;
+mount base.{Maybe, None, Some, Text};
+
+// -----------------------------------------------------------------------------
+// Frontend (client → server) message tags.
+// -----------------------------------------------------------------------------
+//
+// Tags from postgresql.org/docs/16/protocol-message-formats.html.
+// Untagged messages (Startup, SSLRequest, CancelRequest) are NOT
+// listed here — they're built by `frame_untagged`.
+
+public const FE_QUERY:           Byte = 0x51 as Byte;     // 'Q'
+public const FE_PARSE:           Byte = 0x50 as Byte;     // 'P'
+public const FE_BIND:            Byte = 0x42 as Byte;     // 'B'
+public const FE_DESCRIBE:        Byte = 0x44 as Byte;     // 'D'
+public const FE_EXECUTE:         Byte = 0x45 as Byte;     // 'E'
+public const FE_FLUSH:           Byte = 0x48 as Byte;     // 'H'
+public const FE_SYNC:            Byte = 0x53 as Byte;     // 'S'
+public const FE_TERMINATE:       Byte = 0x58 as Byte;     // 'X'
+public const FE_CLOSE:           Byte = 0x43 as Byte;     // 'C'
+public const FE_PASSWORD:        Byte = 0x70 as Byte;     // 'p' — also SCRAM messages
+public const FE_COPY_DATA:       Byte = 0x64 as Byte;     // 'd'
+public const FE_COPY_DONE:       Byte = 0x63 as Byte;     // 'c'
+public const FE_COPY_FAIL:       Byte = 0x66 as Byte;     // 'f'
+public const FE_FUNCTION_CALL:   Byte = 0x46 as Byte;     // 'F'
+
+// -----------------------------------------------------------------------------
+// Backend (server → client) message tags.
+// -----------------------------------------------------------------------------
+
+public const BE_AUTH_REQUEST:    Byte = 0x52 as Byte;     // 'R'
+public const BE_PARAMETER_STATUS:Byte = 0x53 as Byte;     // 'S'
+public const BE_BACKEND_KEY_DATA:Byte = 0x4B as Byte;     // 'K'
+public const BE_READY_FOR_QUERY: Byte = 0x5A as Byte;     // 'Z'
+public const BE_ROW_DESCRIPTION: Byte = 0x54 as Byte;     // 'T'
+public const BE_DATA_ROW:        Byte = 0x44 as Byte;     // 'D'
+public const BE_COMMAND_COMPLETE:Byte = 0x43 as Byte;     // 'C'
+public const BE_EMPTY_QUERY_RES: Byte = 0x49 as Byte;     // 'I'
+public const BE_ERROR_RESPONSE:  Byte = 0x45 as Byte;     // 'E'
+public const BE_NOTICE_RESPONSE: Byte = 0x4E as Byte;     // 'N'
+public const BE_NOTIFICATION:    Byte = 0x41 as Byte;     // 'A'
+public const BE_PARSE_COMPLETE:  Byte = 0x31 as Byte;     // '1'
+public const BE_BIND_COMPLETE:   Byte = 0x32 as Byte;     // '2'
+public const BE_CLOSE_COMPLETE:  Byte = 0x33 as Byte;     // '3'
+public const BE_PARAMETER_DESC:  Byte = 0x74 as Byte;     // 't'
+public const BE_NO_DATA:         Byte = 0x6E as Byte;     // 'n'
+public const BE_PORTAL_SUSPEND:  Byte = 0x73 as Byte;     // 's'
+public const BE_COPY_IN:         Byte = 0x47 as Byte;     // 'G'
+public const BE_COPY_OUT:        Byte = 0x48 as Byte;     // 'H'
+public const BE_COPY_BOTH:       Byte = 0x57 as Byte;     // 'W'
+public const BE_FUNCTION_RESULT: Byte = 0x56 as Byte;     // 'V'
+public const BE_NEGOTIATE_PROTO: Byte = 0x76 as Byte;     // 'v'
+
+// -----------------------------------------------------------------------------
+// AuthRequest sub-codes (first 4 bytes of payload).
+// -----------------------------------------------------------------------------
+
+public const AUTH_OK:                    Int = 0;
+public const AUTH_KERBEROS_V5:           Int = 2;
+public const AUTH_CLEARTEXT_PASSWORD:    Int = 3;
+public const AUTH_MD5_PASSWORD:          Int = 5;
+public const AUTH_SCM_CREDENTIAL:        Int = 6;
+public const AUTH_GSS:                   Int = 7;
+public const AUTH_GSS_CONTINUE:          Int = 8;
+public const AUTH_SSPI:                  Int = 9;
+public const AUTH_SASL:                  Int = 10;
+public const AUTH_SASL_CONTINUE:         Int = 11;
+public const AUTH_SASL_FINAL:            Int = 12;
+
+// -----------------------------------------------------------------------------
+// ReadyForQuery transaction-status byte payload.
+// -----------------------------------------------------------------------------
+
+public const TX_IDLE:        Byte = 0x49 as Byte;   // 'I'
+public const TX_IN_TX:       Byte = 0x54 as Byte;   // 'T'
+public const TX_FAILED:      Byte = 0x45 as Byte;   // 'E'
+
+// -----------------------------------------------------------------------------
+// Protocol version — packed (major << 16 | minor).
+// -----------------------------------------------------------------------------
+
+public const PROTO_V3_0: Int = 196608;     // 0x00030000
