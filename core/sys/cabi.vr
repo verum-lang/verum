@@ -1,0 +1,160 @@
+// =============================================================================
+// core.sys.cabi — C-ABI integer type aliases for FFI declarations
+// =============================================================================
+//
+// Layer: 0 (Foundation)
+//
+// Every `extern { ... }` block in `core/sys/{darwin,linux,windows}` must
+// declare its parameters and returns in *C-ABI types*, not Verum's
+// natural-width `Int`/`UInt`. Mismatched widths at the FFI boundary
+// produce LLVM IR like
+//
+//     %r = call i32 @close(i64 %fd)
+//
+// which the LLVM verifier rejects (and even when it doesn't reject,
+// the resulting binary reads garbage from the high bits of the
+// register the C ABI returned).
+//
+// This module provides the canonical alias set. Every POSIX or Windows
+// FFI declaration *must* use these instead of bare `Int` / `UInt` when
+// the C declaration uses one of the corresponding C types.
+//
+// Mapping discipline (POSIX 64-bit):
+//
+//   C type           | Width   | Verum alias  | Common uses
+//   -----------------|---------|--------------|------------------------------
+//   int              | 32 bit  | `CInt`       | file descriptors, signal nums,
+//                    |         |              | error codes, errno, fd flags,
+//                    |         |              | most `int`-typed arguments.
+//   unsigned int     | 32 bit  | `CUInt`      | `socklen_t` on macOS/Linux,
+//                    |         |              | `mode_t` (POSIX), `gid_t`.
+//   long             | 64 bit  | `CLong`      | `time_t` on most platforms,
+//                    |         |              | longjmp register sizes.
+//   unsigned long    | 64 bit  | `CULong`     | `ino_t`, `nlink_t`, sizes.
+//   size_t           | 64 bit  | `CSize`      | buffer lengths, allocation
+//                    |         |              | sizes, `nbyte` for read/write.
+//   ssize_t          | 64 bit  | `CSSize`     | return type of read / write /
+//                    |         |              | recv / send (signed size_t).
+//   off_t            | 64 bit  | `COff`       | `lseek` offset, `mmap` offset.
+//   mode_t           | 32 bit  | `CMode`      | open / chmod / mkdir mode bits.
+//   pid_t            | 32 bit  | `CPid`       | getpid / fork / waitpid.
+//   uid_t / gid_t    | 32 bit  | `CUid` / `CGid` | UID / GID for chown / setuid.
+//   clockid_t        | 32 bit  | `CClockId`   | clock_gettime / clock_settime.
+//   socklen_t        | 32 bit  | `CSockLen`   | bind / connect / accept sizes.
+//
+// And the universal POSIX file-descriptor alias:
+//
+//   `CFd = CInt`     | 32 bit  |              | every fd parameter / return.
+//
+// Wide notes:
+//
+//   • On Linux, `long` is 64-bit; on Windows MSVC, `long` is 32-bit.
+//     `CLong` here is sized for POSIX (64-bit). Windows-specific
+//     declarations should use `CWinLong = Int32` or refer to the
+//     Win32-side typedefs directly; the Windows FFI module is allowed
+//     to extend this catalogue with platform-specific aliases.
+//
+//   • `time_t` is left as a CLong (signed 64-bit) because POSIX 2008
+//     mandates it. Pre-2038 32-bit `time_t` builds aren't supported.
+//
+//   • Verum's `Int` is canonically i64. Don't hand C functions a
+//     value typed as `Int` if the C ABI expects `int`; cast on the
+//     FFI boundary or use `CInt` in the extern declaration.
+//
+// Soundness note: these aliases are *type-system thin wrappers* — at
+// the AOT layer they emit the same LLVM type as the underlying
+// `Int32` / `UInt32` / `Int` / `UInt` / `USize`. They exist purely
+// to make FFI signatures self-documenting and to give the type
+// checker a single authoritative handle for each C type's width.
+//
+// Spec: VVA §17 Q9 / `docs/architecture/verum-verification-architecture.md`
+// (kernel-ownership migration); audit task T0.4.1.
+// =============================================================================
+
+module core.sys.cabi;
+
+// =============================================================================
+// Width-bound type aliases
+// =============================================================================
+
+/// `C int` — 32-bit signed (POSIX / x86_64 / aarch64). The default
+/// integer width for parameters / returns of POSIX C functions.
+public type CInt is (Int32);
+
+/// `C unsigned int` — 32-bit unsigned. `socklen_t`, `mode_t`,
+/// `uid_t`, `gid_t`, …
+public type CUInt is (UInt32);
+
+/// `C long` — 64-bit signed on POSIX 64-bit. `time_t` on most
+/// platforms; longjmp register width.
+public type CLong is (Int);
+
+/// `C unsigned long` — 64-bit unsigned on POSIX 64-bit.
+public type CULong is (UInt);
+
+/// `C size_t` — 64-bit unsigned on 64-bit POSIX. Buffer lengths,
+/// allocation sizes, `nbyte` for read/write.
+public type CSize is (USize);
+
+/// `C ssize_t` — 64-bit signed. Return type of `read` / `write` /
+/// `recv` / `send` (signed size_t with -1 for error).
+public type CSSize is (Int);
+
+/// `C off_t` — 64-bit signed offset. `lseek` argument and return,
+/// `mmap` offset.
+public type COff is (Int);
+
+// =============================================================================
+// POSIX-typed integer aliases
+// =============================================================================
+
+/// POSIX `mode_t` — file mode bits (open / chmod / mkdir).
+/// Width: 16-bit historically, 32-bit on most modern systems.
+/// Promoted to 32-bit for ABI safety.
+public type CMode is (UInt32);
+
+/// POSIX `pid_t` — process / thread identifier. 32-bit signed on
+/// Linux / macOS.
+public type CPid is (Int32);
+
+/// POSIX `uid_t` — user identifier. 32-bit unsigned.
+public type CUid is (UInt32);
+
+/// POSIX `gid_t` — group identifier. 32-bit unsigned.
+public type CGid is (UInt32);
+
+/// POSIX `clockid_t` — clock type for `clock_gettime` / `clock_settime`.
+/// 32-bit signed on Linux / macOS.
+public type CClockId is (Int32);
+
+/// POSIX `socklen_t` — size argument for `bind` / `connect` /
+/// `accept` / `getsockname` / `setsockopt`. 32-bit unsigned on
+/// Linux / macOS / BSD.
+public type CSockLen is (UInt32);
+
+// =============================================================================
+// File descriptor — universal POSIX alias
+// =============================================================================
+
+/// POSIX file descriptor — `int` (32-bit signed). Universal alias
+/// for any fd parameter or return value; sub-zero values denote
+/// error sentinel returns from open / socket / accept / dup / etc.
+///
+/// Use `CFd` everywhere a POSIX function takes or returns an fd.
+/// Internal Verum code can keep wrapping this in
+/// `core.sys.common.FileDesc` for stronger newtype protection;
+/// the FFI boundary itself stays at the bare `CFd` level.
+public type CFd is (Int32);
+
+// =============================================================================
+// Convenience constants
+// =============================================================================
+
+/// POSIX `STDIN_FILENO`. Value: 0.
+public const CFD_STDIN: CFd = CFd(0 as Int32);
+
+/// POSIX `STDOUT_FILENO`. Value: 1.
+public const CFD_STDOUT: CFd = CFd(1 as Int32);
+
+/// POSIX `STDERR_FILENO`. Value: 2.
+public const CFD_STDERR: CFd = CFd(2 as Int32);
