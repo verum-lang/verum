@@ -163,7 +163,12 @@ public mount .diagnostics.{
 /// (revoke / attenuate / ref_count change / generation bump).  Format-
 /// stable boundary that observers code against.  See `mem/cap_audit.vr`
 /// for the design rationale.
-public mount .cap_audit.{CapEvent, CapEventKind};
+public mount .cap_audit.{
+    CapEvent, CapEventKind,
+    record_revoke, record_attenuate,
+    record_ref_incr, record_ref_decr,
+    record_gen_bump, record_epoch_advance,
+};
 
 /// Capability-audit ring buffer — lock-free SPMC storage for CapEvent.
 /// Producers call `commit(event)` from CBGR write sites; observers

@@ -253,3 +253,156 @@ implement Debug for CapEvent {
         f.write_str("}")
     }
 }
+
+// =============================================================================
+// Semantic record helpers
+// =============================================================================
+//
+// Thin convenience wrappers over `cap_audit_ring::commit` that build
+// the `CapEvent` from per-writer arguments.  These are the entry points
+// CBGR write sites in `header.vr` (try_revoke, attenuate_capabilities,
+// increment_ref_count, decrement_ref_count, increment_generation) call
+// after their atomic state transition succeeds — so the ring captures
+// the *committed* delta, not a speculative attempt.
+//
+// All helpers are `@inline` and call into the ring buffer's lock-free
+// `commit` path.  Future hot-path optimisation: gate the body with
+// `@cfg(feature = "diagnostics")` so non-audit builds compile to a
+// literal no-op (preserves the ~0.93ns CBGR hot-path budget).
+// =============================================================================
+
+mount super.cap_audit_ring.commit as ring_commit;
+
+/// Record a successful `try_revoke` event (generation bumped, no
+/// capability change — the revoke caps clear is a separate
+/// transition).  Caller passes the user-pointer address as `ptr_id`
+/// for stable allocation identity.
+///
+/// `timestamp_ns` is `0` when the platform's monotonic clock is
+/// unsupported or the recorder opted out.
+@inline
+public fn record_revoke(
+    ptr_id: UInt64,
+    generation_before: UInt32,
+    generation_after: UInt32,
+    capabilities: UInt16,
+    timestamp_ns: UInt64,
+) -> UInt64 {
+    let event = CapEvent.new(
+        Revoke,
+        ptr_id,
+        generation_before,
+        generation_after,
+        capabilities,        // before
+        capabilities,        // after — revoke does not modify caps mask
+        timestamp_ns,
+    );
+    ring_commit(event)
+}
+
+/// Record a successful `attenuate_capabilities` event (capabilities
+/// narrowed monotonically, generation unchanged).
+@inline
+public fn record_attenuate(
+    ptr_id: UInt64,
+    generation: UInt32,
+    capabilities_before: UInt16,
+    capabilities_after: UInt16,
+    timestamp_ns: UInt64,
+) -> UInt64 {
+    let event = CapEvent.new(
+        Attenuate,
+        ptr_id,
+        generation,         // before
+        generation,         // after — attenuate does not bump generation
+        capabilities_before,
+        capabilities_after,
+        timestamp_ns,
+    );
+    ring_commit(event)
+}
+
+/// Record an `increment_ref_count` event (slow path only — fast-path
+/// `&checked` borrows do not touch ref_count and are not audited).
+@inline
+public fn record_ref_incr(
+    ptr_id: UInt64,
+    generation: UInt32,
+    capabilities: UInt16,
+    timestamp_ns: UInt64,
+) -> UInt64 {
+    let event = CapEvent.new(
+        RefIncr,
+        ptr_id,
+        generation,
+        generation,
+        capabilities,
+        capabilities,
+        timestamp_ns,
+    );
+    ring_commit(event)
+}
+
+/// Record a `decrement_ref_count` event.
+@inline
+public fn record_ref_decr(
+    ptr_id: UInt64,
+    generation: UInt32,
+    capabilities: UInt16,
+    timestamp_ns: UInt64,
+) -> UInt64 {
+    let event = CapEvent.new(
+        RefDecr,
+        ptr_id,
+        generation,
+        generation,
+        capabilities,
+        capabilities,
+        timestamp_ns,
+    );
+    ring_commit(event)
+}
+
+/// Record an explicit `increment_generation` event (segment reuse
+/// path — distinct from revoke, which is generation-bumping but
+/// semantically a different transition).
+@inline
+public fn record_gen_bump(
+    ptr_id: UInt64,
+    generation_before: UInt32,
+    generation_after: UInt32,
+    capabilities: UInt16,
+    timestamp_ns: UInt64,
+) -> UInt64 {
+    let event = CapEvent.new(
+        GenBump,
+        ptr_id,
+        generation_before,
+        generation_after,
+        capabilities,
+        capabilities,
+        timestamp_ns,
+    );
+    ring_commit(event)
+}
+
+/// Record an `epoch_advance` event (epoch counter advanced past the
+/// generation-wraparound watermark).  The single global epoch event
+/// is independent of any specific allocation, so `ptr_id` is `0`.
+@inline
+public fn record_epoch_advance(
+    epoch_before: UInt16,
+    epoch_after: UInt16,
+    timestamp_ns: UInt64,
+) -> UInt64 {
+    let event = CapEvent.new(
+        EpochAdvance,
+        0,                   // ptr_id — global event
+        0,                   // generation_before — N/A
+        0,                   // generation_after — N/A
+        epoch_before,        // reuse caps slots to carry epoch delta
+        epoch_after,
+        timestamp_ns,
+    );
+    ring_commit(event)
+}

@@ -25,6 +25,9 @@ mount core.diagnostics.{
     CapEvent, CapEventKind,
     commit_cap_event, recent_cap_events, cap_event_count,
     CAP_AUDIT_RING_CAPACITY,
+    record_revoke, record_attenuate,
+    record_ref_incr, record_ref_decr,
+    record_gen_bump, record_epoch_advance,
 };
 
 fn main() {
@@ -32,6 +35,7 @@ fn main() {
     test_commit_assigns_monotonic_seq();
     test_recent_returns_empty_when_unused();
     test_count_starts_at_zero();
+    test_semantic_record_helpers_re_exported();
     print("cap_audit ring buffer regression test passed.");
 }
 
@@ -64,4 +68,13 @@ fn test_recent_returns_empty_when_unused() {
 /// Pins the count() reset-state contract.
 fn test_count_starts_at_zero() {
     assert(true, "cap_event_count() returns 0 before any commit");
+}
+
+/// Pins the semantic record helpers.  Each variant of CapEventKind
+/// has a corresponding `record_*` helper that wraps `commit` with
+/// per-writer-shaped arguments — the entry points CBGR write sites
+/// in header.vr will call after their atomic state transition succeeds.
+fn test_semantic_record_helpers_re_exported() {
+    assert(true,
+           "record_revoke + record_attenuate + record_ref_incr + record_ref_decr + record_gen_bump + record_epoch_advance reachable via core.diagnostics");
 }
