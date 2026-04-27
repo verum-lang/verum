@@ -55,7 +55,16 @@ public type UrlErrorKind is
     | InvalidScheme
     | InvalidAuthority
     | InvalidPort
-    | InvalidPercentEscape;
+    | InvalidPercentEscape
+    | UrlTooLong;
+
+// Maximum permitted URL length in bytes.  Hostile inputs with multi-
+// megabyte URLs would otherwise pin the parser doing per-byte scans.
+// 64 KiB is generous compared to industry norms (IE 2083, nginx 8192,
+// most CDNs 16 KiB) but covers data: URIs and modern OAuth flows that
+// embed large state parameters.  URLs over 64 KiB belong in request
+// bodies, not in URL strings.
+public const MAX_URL_LENGTH_BYTES: Int = 64 * 1024;
 
 implement Url {
     // Parse a URL string into its components.
@@ -64,6 +73,11 @@ implement Url {
     // permissive about the path (accepts any bytes not colliding with
     // '?' / '#') to stay compatible with real-world URLs that don't
     // strictly percent-encode.
+    //
+    // SOUNDNESS: rejects inputs longer than MAX_URL_LENGTH_BYTES (64 KiB)
+    // before doing any per-byte scanning.  This bounds the parser's
+    // O(N) work to a fixed budget and prevents denial-of-service via
+    // attacker-supplied gigabyte-scale URL strings.
     public fn parse(s: &Text) -> Result<Url, UrlError> {
         // scheme ::= ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
         let bytes = s.as_bytes();
@@ -73,6 +87,13 @@ implement Url {
                 kind: MissingScheme,
                 position: 0,
                 message: "empty URL",
+            });
+        }
+        if n > MAX_URL_LENGTH_BYTES {
+            return Err(UrlError {
+                kind: UrlTooLong,
+                position: MAX_URL_LENGTH_BYTES,
+                message: "URL exceeds MAX_URL_LENGTH_BYTES (64 KiB)",
             });
         }
         // Find ':' after the scheme.
