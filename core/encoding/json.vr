@@ -66,6 +66,9 @@ public type JsonErrorKind is
     | InvalidNumber
     | InvalidUnicode
     | DepthLimit
+    | StringTooLong
+    | ArrayTooLarge
+    | ObjectTooLarge
     | TrailingGarbage;
 
 // =============================================================================
@@ -77,6 +80,23 @@ public type JsonErrorKind is
 // 256 is well above any realistic JSON document while still fitting
 // comfortably inside typical OS thread stacks.
 const MAX_JSON_DEPTH: Int = 256;
+
+// Maximum byte length of a single JSON string value.  Caps hostile
+// inputs that would otherwise allocate gigabyte-sized strings.  32 MiB
+// matches the request-body cap used by the HTTP parser (#77) — large
+// enough for any realistic JSON document but small enough to prevent
+// trivial DoS.  Strings exceeding this cap fail with `StringTooLong`.
+const MAX_JSON_STRING_BYTES: Int = 32 * 1024 * 1024;
+
+// Maximum number of items in a single JSON array.  Flat arrays with
+// millions of elements bypass the depth-limit check entirely; the
+// element-count cap closes the residual O(N) memory hazard.  1 million
+// elements is well above any realistic JSON document.
+const MAX_JSON_ARRAY_ITEMS: Int = 1_000_000;
+
+// Maximum number of keys in a single JSON object.  Same rationale as
+// the array cap — protects against flat-but-huge object inputs.
+const MAX_JSON_OBJECT_KEYS: Int = 1_000_000;
 
 type Parser is {
     bytes: &[Byte],
@@ -245,6 +265,13 @@ fn parse_array(p: &mut Parser) -> Result<JsonValue, JsonError> {
         skip_ws(p);
         let v = parse_value_impl(p)?;
         elems.push(v);
+        // SOUNDNESS: cap element count.  Flat arrays bypass depth-
+        // limit but still allocate O(N) memory.  Without this cap,
+        // hostile inputs with millions of trivial elements would
+        // OOM the parser.
+        if elems.len() > MAX_JSON_ARRAY_ITEMS {
+            return Err(mk_err(p, ArrayTooLarge, &"array exceeds MAX_JSON_ARRAY_ITEMS (1M)"));
+        }
         skip_ws(p);
         match peek(p) {
             Some(0x2C_u8) => { advance(p); }               // ','
@@ -278,6 +305,12 @@ fn parse_object(p: &mut Parser) -> Result<JsonValue, JsonError> {
         skip_ws(p);
         let value = parse_value_impl(p)?;
         fields.insert(key, value);
+        // SOUNDNESS: cap key count.  Same rationale as the array
+        // cap — flat objects with millions of distinct keys allocate
+        // O(N) hash-map storage and bypass the depth-limit check.
+        if fields.len() > MAX_JSON_OBJECT_KEYS {
+            return Err(mk_err(p, ObjectTooLarge, &"object exceeds MAX_JSON_OBJECT_KEYS (1M)"));
+        }
         skip_ws(p);
         match peek(p) {
             Some(0x2C_u8) => { advance(p); }               // ','
@@ -296,6 +329,13 @@ fn parse_string_value(p: &mut Parser) -> Result<JsonValue, JsonError> {
 }
 
 // Parse a bare JSON string into a Verum Text (no leading/trailing quote).
+//
+// SOUNDNESS: enforces `MAX_JSON_STRING_BYTES` cap.  Without this,
+// hostile inputs with multi-gigabyte string values would allocate
+// unbounded memory (DoS via memory exhaustion).  The cap is checked
+// AFTER each push so a single extra byte can push past the limit
+// before we surface the error — that's safe because Text is exact-
+// length and the over-cap delta is bounded by 1.
 fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
     expect_byte(p, 0x22_u8, &"expected '\"'")?;
     let mut buf = Text.new();
@@ -314,6 +354,9 @@ fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
                 } else {
                     buf.push_byte(b);
                     advance(p);
+                }
+                if buf.len() > MAX_JSON_STRING_BYTES {
+                    return Err(mk_err(p, StringTooLong, &"string exceeds MAX_JSON_STRING_BYTES (32 MiB)"));
                 }
             }
         }
