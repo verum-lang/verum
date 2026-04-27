@@ -90,15 +90,31 @@ pub fn execute(
         );
     }
 
-    // Determine verification level
+    // Determine verification level — full nine-strategy ladder
+    // (T2.1.1 expansion) plus VFE-6/8 extensions (complexity_typed,
+    // coherent_*). Each strategy's ν-coordinate is strictly ordered;
+    // cli accepts the lowercase identifier matching `serde(rename_all)`.
     let verification = if let Some(v) = verify {
         match v.as_str() {
-            "none" => VerificationLevel::None,
-            "runtime" => VerificationLevel::Runtime,
-            "proof" => VerificationLevel::Proof,
+            "none"             => VerificationLevel::None,
+            "runtime"          => VerificationLevel::Runtime,
+            "static"           => VerificationLevel::Static,
+            "fast"             => VerificationLevel::Fast,
+            "formal"           => VerificationLevel::Formal,
+            "proof"            => VerificationLevel::Proof,
+            "thorough"         => VerificationLevel::Thorough,
+            "reliable"         => VerificationLevel::Reliable,
+            "certified"        => VerificationLevel::Certified,
+            "synthesize"       => VerificationLevel::Synthesize,
+            "complexitytyped"  => VerificationLevel::ComplexityTyped,
+            "coherentstatic"   => VerificationLevel::CoherentStatic,
+            "coherentruntime"  => VerificationLevel::CoherentRuntime,
+            "coherent"         => VerificationLevel::Coherent,
             _ => {
                 return Err(CliError::InvalidArgument(format!(
-                    "Invalid verification level '{}'. Must be: none, runtime, or proof",
+                    "Invalid verification level '{}'. \
+Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, certified, synthesize, complexitytyped, coherentstatic, coherentruntime, coherent \
+(see docs/verification/gradual-verification.md)",
                     v
                 )));
             }
@@ -224,11 +240,32 @@ pub fn execute(
         .map(|f| verum_common::Text::from(f.as_str()))
         .collect();
 
-    // Map verification level to new compiler's VerifyMode
+    // Map the 9-strategy ladder + VFE-6/8 extensions to the
+    // compiler's coarser `VerifyMode` until the SMT crate exposes
+    // per-strategy dispatch (T2.1 — fine-grained backend wiring).
+    // The mapping honours the ν-coordinate ordering:
+    //   - `runtime` / `static` / `fast`: compile-time-only or trivial,
+    //     collapse to `Runtime`.
+    //   - `coherent_runtime`: ε-monitor emission still runtime-level.
+    //   - `complexity_typed`: weak-stratum bounded arithmetic uses
+    //     SMT, hence `Proof`.
+    //   - `formal` and stricter (incl. `synthesize`, `coherent_*`):
+    //     promote to `Proof`.
     options.verify_mode = match verification {
-        VerificationLevel::None => VerifyMode::Runtime,
-        VerificationLevel::Runtime => VerifyMode::Runtime,
-        VerificationLevel::Proof => VerifyMode::Proof,
+        VerificationLevel::None
+        | VerificationLevel::Runtime
+        | VerificationLevel::Static
+        | VerificationLevel::Fast
+        | VerificationLevel::CoherentRuntime => VerifyMode::Runtime,
+        VerificationLevel::Formal
+        | VerificationLevel::Proof
+        | VerificationLevel::Thorough
+        | VerificationLevel::Reliable
+        | VerificationLevel::Certified
+        | VerificationLevel::Synthesize
+        | VerificationLevel::ComplexityTyped
+        | VerificationLevel::CoherentStatic
+        | VerificationLevel::Coherent => VerifyMode::Proof,
     };
 
     // Configure lint options
