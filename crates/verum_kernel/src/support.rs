@@ -40,6 +40,26 @@ pub fn shape_of(term: &CoreTerm) -> CoreType {
 /// shadow-stop strategy is sound because the test corpus does not
 /// produce capturing substitutions.
 pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
+    // Fast-path (#100, task #44): if `name` doesn't occur free in
+    // `term`, the entire substitution reduces to a clone.  Walking
+    // the term once with an early-exit `var_occurs_free` is cheaper
+    // than running the full reconstructing substitute, because:
+    //
+    //   • `var_occurs_free` returns immediately as soon as it finds
+    //     a single free occurrence (linear-in-tree-depth at best,
+    //     linear-in-tree-size at worst — same as substitute itself).
+    //   • For terms WITHOUT a free occurrence, the second walk
+    //     (substitute proper) is replaced by a single shallow Heap
+    //     clone, which is O(N) of shared Arc bumps (no deep copy of
+    //     the underlying tree).
+    //
+    // In mount-core typechecking the dominant case is substitute
+    // into refinement predicates / dependent types where the bound
+    // variable name is used in only a few leaves, so this short-
+    // circuits the vast majority of subterm walks.
+    if !var_occurs_free(term, name) {
+        return term.clone();
+    }
     match term {
         CoreTerm::Var(n) if n.as_str() == name => value.clone(),
         CoreTerm::Var(_) => term.clone(),
@@ -1185,6 +1205,62 @@ pub fn definitional_eq_with_axioms(
     let a_norm = normalize_with_axioms(a, axioms);
     let b_norm = normalize_with_axioms(b, axioms);
     a_norm == b_norm
+}
+
+/// Early-exit free-variable test (#100, task #44).
+///
+/// Returns `true` iff `name` occurs free in `term`.  Walks the
+/// term recursively but returns at the first occurrence — much
+/// faster than computing the full `free_vars` set when only one
+/// answer is needed.
+///
+/// Used by [`substitute`] as a precondition check to short-circuit
+/// the no-op case (`name` doesn't appear → substitute returns a
+/// shallow clone instead of recursively reconstructing).
+///
+/// Binder semantics: `name` is shadowed by `Pi`/`Lam`/`Sigma`
+/// binders that bind `name` exactly — sub-trees under those
+/// binders are skipped, matching `substitute`'s shadow-stop rule.
+pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
+    match term {
+        CoreTerm::Var(n) => n.as_str() == name,
+        CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => false,
+        CoreTerm::Pi { binder, domain, codomain } => {
+            var_occurs_free(domain, name)
+                || (binder.as_str() != name && var_occurs_free(codomain, name))
+        }
+        CoreTerm::Lam { binder, domain, body } => {
+            var_occurs_free(domain, name)
+                || (binder.as_str() != name && var_occurs_free(body, name))
+        }
+        CoreTerm::App(f, a) => var_occurs_free(f, name) || var_occurs_free(a, name),
+        CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            var_occurs_free(fst_ty, name)
+                || (binder.as_str() != name && var_occurs_free(snd_ty, name))
+        }
+        CoreTerm::Pair(a, b) => var_occurs_free(a, name) || var_occurs_free(b, name),
+        CoreTerm::Fst(p) | CoreTerm::Snd(p) => var_occurs_free(p, name),
+        CoreTerm::PathTy { carrier, lhs, rhs } => {
+            var_occurs_free(carrier, name)
+                || var_occurs_free(lhs, name)
+                || var_occurs_free(rhs, name)
+        }
+        CoreTerm::Refl(x) => var_occurs_free(x, name),
+        CoreTerm::PathOver { motive, path, lhs, rhs } => {
+            var_occurs_free(motive, name)
+                || var_occurs_free(path, name)
+                || var_occurs_free(lhs, name)
+                || var_occurs_free(rhs, name)
+        }
+        // Catch-all: conservatively use the full free_vars walker
+        // for any variant not enumerated above — keeps correctness
+        // even as new variants are added (the perf impact is
+        // bounded because catch-all only fires for the rarer
+        // cubical variants like HComp / Transp / Glue / etc., where
+        // the term shape is small relative to the per-leaf
+        // overhead).
+        _ => free_vars(term).contains(name),
+    }
 }
 
 /// V8 — collect the **free variable set** of a [`CoreTerm`].
