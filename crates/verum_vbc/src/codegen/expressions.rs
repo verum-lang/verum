@@ -16251,21 +16251,66 @@ impl VbcCodegen {
                 }
             }
 
-            // Atomic fetch operations - emit library calls
+            // Atomic fetch operations — width-aware inline emit.
+            //
+            // Earlier this arm dispatched through
+            // `emit_intrinsic_library_call("verum_atomic_fetch_*", ...)`
+            // whose handlers hardcoded `size: 8` regardless of the
+            // intrinsic's actual width.  That meant `atomic_fetch_or_u8`
+            // emitted an 8-byte AtomicLoad on a byte-aligned pointer —
+            // misaligned-atomic error in the interpreter (silent zero on
+            // load, then InvalidOperand on the cas), and a 7-byte read
+            // past the AtomicU8's storage in AOT.
+            //
+            // We now plumb `byte_width` (passed in from the registry's
+            // `InlineSequenceWithWidth(..., width)` strategy) through to
+            // both AtomicLoad and AtomicCas so the size byte matches the
+            // declared width.  Single-attempt CAS pattern is functionally
+            // correct for single-threaded execution; multi-threaded
+            // contention would need a real CAS-loop (separate follow-up).
             InlineSequenceId::AtomicFetchAdd |
             InlineSequenceId::AtomicFetchSub |
             InlineSequenceId::AtomicFetchAnd |
             InlineSequenceId::AtomicFetchOr |
             InlineSequenceId::AtomicFetchXor => {
-                let func_name = match seq_id {
-                    InlineSequenceId::AtomicFetchAdd => "verum_atomic_fetch_add",
-                    InlineSequenceId::AtomicFetchSub => "verum_atomic_fetch_sub",
-                    InlineSequenceId::AtomicFetchAnd => "verum_atomic_fetch_and",
-                    InlineSequenceId::AtomicFetchOr => "verum_atomic_fetch_or",
-                    InlineSequenceId::AtomicFetchXor => "verum_atomic_fetch_xor",
-                    _ => "verum_atomic_fetch_add",
-                };
-                self.emit_intrinsic_library_call(func_name, args, dest)?;
+                if args.len() >= 2 {
+                    let ptr = args[0];
+                    let val = args[1];
+                    let old_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: old_val, ptr, ordering: 4, size: byte_width,
+                    });
+                    let new_val = self.ctx.alloc_temp();
+                    match seq_id {
+                        InlineSequenceId::AtomicFetchAdd => self.ctx.emit(Instruction::BinaryI {
+                            op: BinaryIntOp::Add, dst: new_val, a: old_val, b: val,
+                        }),
+                        InlineSequenceId::AtomicFetchSub => self.ctx.emit(Instruction::BinaryI {
+                            op: BinaryIntOp::Sub, dst: new_val, a: old_val, b: val,
+                        }),
+                        InlineSequenceId::AtomicFetchAnd => self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::And, dst: new_val, a: old_val, b: val,
+                        }),
+                        InlineSequenceId::AtomicFetchOr => self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Or, dst: new_val, a: old_val, b: val,
+                        }),
+                        InlineSequenceId::AtomicFetchXor => self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Xor, dst: new_val, a: old_val, b: val,
+                        }),
+                        _ => unreachable!(),
+                    }
+                    let cas_result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: cas_result, ptr, expected: old_val, desired: new_val,
+                        ordering: 4, size: byte_width,
+                    });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.free_temp(cas_result);
+                    self.ctx.free_temp(new_val);
+                    self.ctx.free_temp(old_val);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
             }
 
             // Bit manipulation - emit ArithExtended with bit counting sub-opcodes
@@ -16990,9 +17035,29 @@ impl VbcCodegen {
                 self.emit_intrinsic_library_call("verum_global_allocator", args, dest)?;
             }
 
-            // Atomic exchange
+            // Atomic exchange — width-aware single-attempt CAS.
+            // Same width-bug as the AtomicFetch* arm above: prior
+            // dispatch hardcoded `size: 8`.  Now uses `byte_width`
+            // from `InlineSequenceWithWidth(..., width)`.
             InlineSequenceId::AtomicExchange => {
-                self.emit_intrinsic_library_call("verum_atomic_exchange", args, dest)?;
+                if args.len() >= 2 {
+                    let ptr = args[0];
+                    let new_val = args[1];
+                    let old_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: old_val, ptr, ordering: 4, size: byte_width,
+                    });
+                    let cas_result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: cas_result, ptr, expected: old_val, desired: new_val,
+                        ordering: 4, size: byte_width,
+                    });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.free_temp(cas_result);
+                    self.ctx.free_temp(old_val);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
             }
 
             // Tier 0 async: always return pending (no real async support)

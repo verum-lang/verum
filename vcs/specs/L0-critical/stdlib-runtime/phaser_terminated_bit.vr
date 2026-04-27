@@ -1,0 +1,28 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, sync, phaser, terminated-bit, regression-100-task-32
+//
+// **Status**: parse-pass for now.  Documents the Phaser
+// state-encoding contract; runtime validation blocked on task
+// #37 (Phaser.terminate / is_terminated route through
+// AtomicInt.fetch_or / load which today resolve to ptr=0 in
+// the interpreter — see #37 for the field-of-struct address
+// gap).  Becomes `run-interpreter` once #37 closes.
+//
+// Pins task #32 closure (commit ea3c5b85): TERMINATED_BIT
+// moved off the i64 sign bit (was 1<<63 = Int.MIN; sign-
+// extending arithmetic right-shifts silently corrupted phase
+// decode after terminate(), and the arrive_and_await
+// reconstruction silently dropped TERMINATED_BIT).
+
+mount core.sync.barrier.{Phaser};
+
+fn main() {
+    let p = Phaser.new(2);
+    p.terminate();
+    let _t = p.is_terminated();
+    let _ph = p.get_phase();
+    let _pa = p.get_registered_parties();
+    let _ar = p.get_arrived_parties();
+}
