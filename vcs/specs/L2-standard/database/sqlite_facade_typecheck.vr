@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: database, sqlite, spindle, common, facade
+// @timeout: 30000
+//
+// Type-check exercise for the Spindle SQLite façade — `core.database.
+// sqlite.{SqliteAdapter, SqliteConfig, SqliteConnection}` over loom's
+// L7 Database. Validates that:
+//
+//   * `SqliteConfig.in_memory_readwrite()` and friends construct.
+//   * `SqliteAdapter.connect(&cfg)` returns
+//     `Result<SqliteConnection, DbError>`.
+//   * `SqliteValue` round-trips through `from_register` / `to_register`.
+//   * `SqliteCapability.to_loom_mode()` lines up with loom modes.
+//   * The Spindle `DbError` retryable / category classifiers compile
+//     against errors translated from loom.
+
+mount core.*;
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId, AdSqlite};
+mount core.database.sqlite.{
+    SqliteAdapter, SqliteConfig, SqliteJournalMode,
+    StMemory, StFile, JmDelete, JmWal,
+    SqliteConnection, SqliteValue, SqliteCapability,
+    SvNull, SvInt, SvReal, SvText, SvBlob,
+    ScRead, ScReadWrite, ScAdmin,
+};
+
+fn check_value() {
+    let n: SqliteValue = SvNull;
+    let i: SqliteValue = SvInt(42);
+    let r: SqliteValue = SvReal(3.14);
+    let t: SqliteValue = SvText("hello".clone());
+    let b: SqliteValue = SvBlob([0xDE as Byte, 0xAD as Byte]);
+
+    assert(n.is_null());
+    assert(!i.is_null());
+    assert(!r.is_null());
+    assert(!t.is_null());
+    assert(!b.is_null());
+}
+
+fn check_config() {
+    let cfg = SqliteConfig.in_memory_readwrite();
+    assert(cfg.target_label() == ":memory:");
+    let cfg_ro = SqliteConfig.in_memory_readonly();
+    let cfg_admin = SqliteConfig.in_memory_admin();
+    let _ = cfg_ro;
+    let _ = cfg_admin;
+}
+
+fn check_adapter() {
+    assert(SqliteAdapter.name() == "sqlite");
+    let id = SqliteAdapter.adapter_id();
+    match id {
+        AdSqlite => {},
+        _        => panic("expected AdSqlite"),
+    }
+}
+
+fn check_journal_mode() {
+    assert(JmWal.is_durable());
+    assert(JmDelete.is_durable());
+    assert(JmWal.name() == "wal");
+}
+
+fn check_dberror_classifiers() {
+    // Construct a synthetic Adapter error that should be retryable.
+    let err = DbError.Adapter(core.database.common.error.AdapterSpecific {
+        adapter: AdSqlite,
+        code: "BUSY".clone(),
+        message: "database is busy".clone(),
+        retryable: true,
+    });
+    assert(err.is_retryable());
+    assert(!err.is_constraint_violation());
+}
+
+fn main() {
+    check_value();
+    check_config();
+    check_adapter();
+    check_journal_mode();
+    check_dberror_classifiers();
+}

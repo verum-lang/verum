@@ -1,0 +1,279 @@
+// =============================================================================
+// core/database/sqlite/connection.vr — Spindle SQLite connection façade
+// =============================================================================
+// Layer: 3 (Database — sqlite façade)
+// Spec: internal/specs/database.md §6.2
+// =============================================================================
+//
+// `SqliteConnection` is the user-facing handle for the Spindle SQLite
+// adapter. It wraps loom's L7 `Database` (synchronous, in-memory or
+// file-backed via PosixVfs once that lands) and surfaces the unified
+// `core.database.common.error.DbError` shape so user code is portable.
+//
+// Surface (vendor-idiomatic, sync — SQLite is local I/O):
+//
+//   * `SqliteConnection.open_in_memory(mode)` / `open_path(path, mode)`
+//   * `.execute(sql)`              — DDL / DML / TX statements
+//   * `.execute_with(sql, params)` — same with positional bindings
+//   * `.query_first(sql)`          — first row as `List<Value>`
+//   * `.query_all(sql)`            — all rows as `List<List<Value>>`
+//   * `.begin()` / `.begin_immediate()` / `.commit()` / `.rollback()`
+//   * `.close()`                   — affine consume (loom Database is
+//                                    `move`-by-construction)
+//
+// `SqliteValue` is the protocol-neutral cell type for a row column —
+// the variants mirror SQLite's storage classes (Null / Int / Real /
+// Text / Blob).  Higher-level user types (Email, UserId, Timestamp)
+// decode via the future `Row` derive once T12 (sql#) lands; in the
+// meantime authors decode by hand.
+// =============================================================================
+
+module core.database.sqlite.connection;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
+mount core.database.sqlite.error.dberr_from_loom;
+
+// Loom L7 — re-exports we drive directly. We do NOT bring loom's
+// `DbError` into scope (sibling-name collision with common's); we
+// reach for it via the full path inside `dberr_from_loom`.
+mount core.database.sqlite.native.l7_api.{
+    Database as LoomDatabase,
+    open_memory_db, open_readonly, open_readwrite, open_admin,
+};
+mount core.database.sqlite.native.l6_session.{
+    ConnectionMode, CmRead, CmWrite, CmAdmin,
+};
+mount core.database.sqlite.native.l4_vdbe.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+
+// -----------------------------------------------------------------------------
+// SqliteValue — protocol-neutral cell.
+// -----------------------------------------------------------------------------
+
+/// A single column value as it sits in a SQLite record. Mirrors
+/// SQLite's five storage classes (NULL / INTEGER / REAL / TEXT /
+/// BLOB).  We keep this distinct from `loom.Register` so the public
+/// surface is independent of loom's internal layout.
+public type SqliteValue is
+      SvNull
+    | SvInt(Int)
+    | SvReal(Float64)
+    | SvText(Text)
+    | SvBlob(List<Byte>);
+
+implement SqliteValue {
+    /// Promote a loom Register to the public value shape. SQLite's
+    /// rowid is just an `Int` from the user's perspective, so we fold
+    /// `RRowId` into `SvInt` here — the storage-class distinction is a
+    /// VDBE-internal concern.
+    public fn from_register(r: Register) -> SqliteValue {
+        match r {
+            RNull       => SvNull,
+            RInt(i)     => SvInt(i as Int),
+            RReal(x)    => SvReal(x),
+            RText(t)    => SvText(t),
+            RBlob(b)    => SvBlob(b),
+            RRowId(i)   => SvInt(i as Int),
+        }
+    }
+
+    /// Demote a public value to a loom Register for binding.
+    public fn to_register(self) -> Register {
+        match self {
+            SvNull      => RNull,
+            SvInt(i)    => RInt(i as Int64),
+            SvReal(x)   => RReal(x),
+            SvText(t)   => RText(t),
+            SvBlob(b)   => RBlob(b),
+        }
+    }
+
+    public fn is_null(&self) -> Bool {
+        match self {
+            SvNull => true,
+            _      => false,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SqliteCapability — vendor-side capability marker, mirrors loom's
+// ConnectionMode and is convertible from common-side capability tokens.
+// -----------------------------------------------------------------------------
+
+public type SqliteCapability is
+      ScRead
+    | ScReadWrite
+    | ScAdmin;
+
+implement SqliteCapability {
+    public fn to_loom_mode(&self) -> ConnectionMode {
+        match self {
+            ScRead       => CmRead,
+            ScReadWrite  => CmWrite,
+            ScAdmin      => CmAdmin,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SqliteConnection — the public façade.
+// -----------------------------------------------------------------------------
+
+/// A live SQLite connection. Wraps a loom `Database` (which itself
+/// wraps a session-layer `Connection`); all errors crossing this
+/// boundary get translated into the common `DbError`.
+public type SqliteConnection is {
+    inner: LoomDatabase,
+};
+
+implement SqliteConnection {
+    // -------------------------------------------------------------------------
+    // Open
+    // -------------------------------------------------------------------------
+
+    /// Open an in-memory database with the given capability. Use
+    /// `ScReadWrite` for the typical OLTP workload; `ScRead` for
+    /// readonly views that must refuse writes by type-construction.
+    public fn open_in_memory(cap: SqliteCapability) -> Result<SqliteConnection, DbError> {
+        let mode = cap.to_loom_mode();
+        match open_memory_db(mode) {
+            Ok(db)  => Ok(SqliteConnection { inner: db }),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Sugar — readonly in-memory.
+    public fn open_in_memory_readonly() -> Result<SqliteConnection, DbError> {
+        match open_readonly() {
+            Ok(db)  => Ok(SqliteConnection { inner: db }),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Sugar — read/write in-memory.
+    public fn open_in_memory_readwrite() -> Result<SqliteConnection, DbError> {
+        match open_readwrite() {
+            Ok(db)  => Ok(SqliteConnection { inner: db }),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Sugar — admin in-memory (allows DDL).
+    public fn open_in_memory_admin() -> Result<SqliteConnection, DbError> {
+        match open_admin() {
+            Ok(db)  => Ok(SqliteConnection { inner: db }),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Execute / query
+    // -------------------------------------------------------------------------
+
+    /// Run a no-result statement (DDL / INSERT / UPDATE / DELETE / TX
+    /// control).  Returns `()` on success — for affected-row counts use
+    /// the future `execute_with` overload once parameter binding is
+    /// wired through the public surface.
+    public fn execute(&mut self, sql: &Text) -> Result<(), DbError> {
+        match self.inner.execute(sql) {
+            Ok(_)   => Ok(()),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Run a SELECT and return its first row (if any) as a list of
+    /// public values. Returns `Ok([])` if the query completes with no
+    /// rows.
+    public fn query_first(&mut self, sql: &Text) -> Result<List<SqliteValue>, DbError> {
+        match self.inner.query_first_row(sql) {
+            Ok(regs) => Ok(registers_to_values(regs)),
+            Err(e)   => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Run a SELECT and collect every row. Acceptable for bounded
+    /// result sets; large scans should use the streaming variant once
+    /// landed.
+    public fn query_all(&mut self, sql: &Text) -> Result<List<List<SqliteValue>>, DbError> {
+        match self.inner.query_all(sql) {
+            Ok(rows) => {
+                let mut out: List<List<SqliteValue>> = [];
+                let mut i = 0;
+                while i < rows.len() as Int {
+                    out.push(registers_to_values(rows[i].clone()));
+                    i = i + 1;
+                }
+                Ok(out)
+            }
+            Err(e)   => Err(dberr_from_loom(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Transaction sugar
+    // -------------------------------------------------------------------------
+
+    public fn begin(&mut self) -> Result<(), DbError> {
+        match self.inner.begin() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    public fn begin_immediate(&mut self) -> Result<(), DbError> {
+        match self.inner.begin_immediate() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    public fn commit(&mut self) -> Result<(), DbError> {
+        match self.inner.commit() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    public fn rollback(&mut self) -> Result<(), DbError> {
+        match self.inner.rollback() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Introspection
+    // -------------------------------------------------------------------------
+
+    public fn mode(&self) -> ConnectionMode { self.inner.mode() }
+    public fn is_in_tx(&self) -> Bool { self.inner.is_in_tx() }
+    public fn schema_generation(&self) -> Int { self.inner.schema_generation() }
+
+    // -------------------------------------------------------------------------
+    // Close — affine consume.
+    // -------------------------------------------------------------------------
+
+    /// Consumes the connection. Further use is a compile error; loom's
+    /// underlying Database is moved-out so its destructor releases the
+    /// pager actor on drop.
+    public fn close(self) {
+        self.inner.close()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn registers_to_values(regs: List<Register>) -> List<SqliteValue> {
+    let mut out: List<SqliteValue> = [];
+    let mut i = 0;
+    while i < regs.len() as Int {
+        out.push(SqliteValue.from_register(regs[i].clone()));
+        i = i + 1;
+    }
+    out
+}

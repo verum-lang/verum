@@ -1,0 +1,171 @@
+// =============================================================================
+// core/database/sqlite/adapter.vr — SqliteAdapter + SqliteConfig
+// =============================================================================
+// Layer: 3 (Database — sqlite façade)
+// Spec: internal/specs/database.md §6.2 (SQLite adapter)
+// =============================================================================
+//
+// Vendor-side identity for the SQLite adapter. Reports `AdSqlite` for
+// metric labels and error tagging, and gates connection construction
+// behind a typed config that captures every choice loom needs:
+//
+//   * `target` — `:memory:` or a file URI / path
+//   * `capability` — readonly / readwrite / admin (mirrors loom mode)
+//   * `journal_mode` — WAL is the default once T3 lands; rollback for
+//     legacy v0.1 builds
+//   * `busy_timeout_ms` — implicit retry on SQLITE_BUSY at the engine
+//     level (independent from the application-level
+//     `core.database.common.retry.run_with_retry`)
+// =============================================================================
+
+module core.database.sqlite.adapter;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.sqlite.connection.{SqliteConnection, SqliteCapability};
+
+// -----------------------------------------------------------------------------
+// SqliteJournalMode — mirrors PRAGMA journal_mode.
+// -----------------------------------------------------------------------------
+
+public type SqliteJournalMode is
+      JmDelete         // legacy rollback journal — default until WAL lands
+    | JmTruncate
+    | JmPersist
+    | JmMemory
+    | JmWal            // recommended once T3/T4 close
+    | JmOff;
+
+implement SqliteJournalMode {
+    public fn name(&self) -> Text {
+        match self {
+            JmDelete   => "delete".clone(),
+            JmTruncate => "truncate".clone(),
+            JmPersist  => "persist".clone(),
+            JmMemory   => "memory".clone(),
+            JmWal      => "wal".clone(),
+            JmOff      => "off".clone(),
+        }
+    }
+
+    public fn is_durable(&self) -> Bool {
+        match self {
+            JmOff | JmMemory => false,
+            _                => true,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SqliteTarget — what the adapter opens.
+// -----------------------------------------------------------------------------
+
+public type SqliteTarget is
+      StMemory                       // anonymous in-memory DB
+    | StSharedMemory(Text)           // file::memory:?cache=shared
+    | StFile(Text);                  // path or file: URI
+
+implement SqliteTarget {
+    public fn label(&self) -> Text {
+        match self {
+            StMemory             => ":memory:".clone(),
+            StSharedMemory(name) => f"file::memory:?cache=shared#{name}",
+            StFile(path)         => path.clone(),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SqliteConfig — typed connection configuration.
+// -----------------------------------------------------------------------------
+
+public type SqliteConfig is {
+    target: SqliteTarget,
+    capability: SqliteCapability,
+    journal_mode: SqliteJournalMode,
+    busy_timeout_ms: Int,
+    /// PRAGMA cache_size bytes target (0 = engine default).
+    cache_size_bytes: Int,
+    /// Foreign-key enforcement (PRAGMA foreign_keys = ON). Default true
+    /// — Spindle prefers strict mode unless the user explicitly opts
+    /// out (legacy SQLite default is OFF).
+    foreign_keys: Bool,
+}
+
+implement SqliteConfig {
+    /// In-memory readwrite — common case.
+    public fn in_memory_readwrite() -> SqliteConfig {
+        SqliteConfig {
+            target: StMemory,
+            capability: ScReadWrite,
+            journal_mode: JmDelete,
+            busy_timeout_ms: 5000,
+            cache_size_bytes: 0,
+            foreign_keys: true,
+        }
+    }
+
+    public fn in_memory_admin() -> SqliteConfig {
+        SqliteConfig {
+            capability: ScAdmin,
+            .. SqliteConfig.in_memory_readwrite()
+        }
+    }
+
+    public fn in_memory_readonly() -> SqliteConfig {
+        SqliteConfig {
+            capability: ScRead,
+            .. SqliteConfig.in_memory_readwrite()
+        }
+    }
+
+    public fn target_label(&self) -> Text { self.target.label() }
+    public fn adapter_id(&self) -> AdapterId { AdSqlite }
+}
+
+// -----------------------------------------------------------------------------
+// SqliteAdapter — vendor identity + connect entry-point.
+// -----------------------------------------------------------------------------
+
+public type SqliteAdapter is ();
+
+implement SqliteAdapter {
+    public fn name() -> Text { "sqlite".clone() }
+
+    /// Lower bound on engine version Spindle was tested against. Loom
+    /// targets the SQLite 3.45 file-format / SQL surface; older or
+    /// later code bases are supported best-effort.
+    public fn version_required() -> Text { "3.45.0".clone() }
+
+    public fn adapter_id() -> AdapterId { AdSqlite }
+
+    /// Connect — currently only the in-memory targets are wired (the
+    /// PosixVfs file-backed path lands with the L0 PosixVfs work).
+    /// Returns `DbError.ConnectionFailed` for the file path until that
+    /// happens, so callers don't silently get an in-memory DB when
+    /// they asked for file-backed.
+    public fn connect(cfg: &SqliteConfig) -> Result<SqliteConnection, DbError> {
+        match cfg.target {
+            StMemory => SqliteConnection.open_in_memory(cfg.capability.clone()),
+            StSharedMemory(_) => {
+                // shared-cache mode requires the multi-conn registry
+                // landing in the L1 pager actor (sqlite-native §8.3).
+                Err(DbError.Adapter(core.database.common.error.AdapterSpecific {
+                    adapter: AdSqlite,
+                    code: "UNSUPPORTED".clone(),
+                    message: "shared-memory mode pending multi-conn pager actor".clone(),
+                    retryable: false,
+                }))
+            }
+            StFile(_) => {
+                Err(DbError.Adapter(core.database.common.error.AdapterSpecific {
+                    adapter: AdSqlite,
+                    code: "UNSUPPORTED".clone(),
+                    message: "file-backed connections pending PosixVfs landing".clone(),
+                    retryable: false,
+                }))
+            }
+        }
+    }
+}

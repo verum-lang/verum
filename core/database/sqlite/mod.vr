@@ -1,11 +1,42 @@
 // =============================================================================
-// core/database/sqlite/mod.vr
+// core/database/sqlite/mod.vr — Spindle SQLite adapter
 // =============================================================================
 // Layer: 3 (Database — SQLite namespace)
-// Spec: internal/specs/sqlite-native.md
+// Spec: internal/specs/sqlite-native.md (engine), internal/specs/database.md §6.2
+// =============================================================================
+//
+// Two-tier layout:
+//
+//   * `core.database.sqlite.{adapter,connection,error}` — Spindle
+//     adapter façade. Carries the unified `core.database.common.error.
+//     DbError`, exposes `SqliteAdapter` / `SqliteConfig` / `Sqlite-
+//     Connection` for user code.
+//
+//   * `core.database.sqlite.native` — pure-Verum SQLite reimplementation
+//     (loom). The façade above sits on top of `native.l7_api`; once
+//     loom's WAL + PosixVfs land (T3 / T4) the file-backed code path
+//     stops returning UNSUPPORTED.
 // =============================================================================
 
 module core.database.sqlite;
 
-// Pure-Verum SQLite reimplementation (loom).
+// Loom — pure-Verum engine.
 public module native;
+
+// Spindle adapter façade.
+public module error;
+public module connection;
+public module adapter;
+
+// Re-exports — keep the user-facing surface compact.
+public mount .adapter.{
+    SqliteAdapter, SqliteConfig, SqliteJournalMode, SqliteTarget,
+    StMemory, StSharedMemory, StFile,
+    JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+};
+public mount .connection.{
+    SqliteConnection, SqliteValue, SqliteCapability,
+    SvNull, SvInt, SvReal, SvText, SvBlob,
+    ScRead, ScReadWrite, ScAdmin,
+};
+public mount .error.dberr_from_loom;
