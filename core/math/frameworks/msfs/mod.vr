@@ -1,0 +1,60 @@
+// =============================================================================
+// lib.math.frameworks.msfs — entry point
+// =============================================================================
+//
+// Re-exports the three MSFS Convention 1.X / Definition 1.X framework
+// axiom modules so downstream theorem files mount one path:
+//
+//   mount core.math.frameworks.msfs.{...};
+//
+// rather than three separate paths. Each sub-module remains the
+// *source of truth* for its citations; this file is purely a
+// convenience facade.
+//
+// Source: A. Sereda, MSFS preprint, §1 — Conventions and Notation
+// (Zenodo 19755781, 2026).
+//
+// Stage M.1 (corpus README) — formalises:
+//   • Convention 1.1 — ZFC + 2-inacc + Grothendieck universes U_1 ⊂ U_2
+//                      (`baseline.vr`)
+//   • Convention 1.2 — Key symbols F, ρ, gauge, M_stack, Aut_2(F),
+//                      S_int, Syn^(∞,n) (`key_symbols.vr`)
+//   • Definition 1.3 — Total (∞, n)-category StrCat<S, n>
+//                      (`strcat.vr`)
+//
+// All three modules ship as @framework(msfs, "<citation>") axioms
+// citing the paper section directly. `verum audit --framework-axioms
+// --by-theorem` enumerates them on every transitively-citing theorem.
+// =============================================================================
+
+module core.math.frameworks.msfs;
+
+mount core.math.frameworks.msfs.baseline.{
+    Universe,
+    InaccessibleCardinal,
+    msfs_baseline_zfc_2inacc,
+    msfs_grothendieck_universes,
+    msfs_categorical_machinery_baseline,
+};
+
+mount core.math.frameworks.msfs.key_symbols.{
+    TwoCategory,
+    InfinityNCat,
+    TwoFunctor,
+    TwoStack,
+    TwoGroup,
+    msfs_F_is_2_category,
+    msfs_rho_is_classification_functor,
+    msfs_gauge_is_morita,
+    msfs_M_stack_quotient,
+    msfs_Aut_2_is_2_group,
+    msfs_S_int_is_2_category,
+    msfs_Syn_truncation,
+};
+
+mount core.math.frameworks.msfs.strcat.{
+    StrCatObject,
+    StrCat,
+    msfs_strcat_total_definition,
+    msfs_strcat_object_kappa_1_accessible,
+};

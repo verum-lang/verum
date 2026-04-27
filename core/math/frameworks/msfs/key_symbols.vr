@@ -1,0 +1,146 @@
+// =============================================================================
+// MSFS — Convention 1.2: Key symbols
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §1.2 — "Key symbols". The paper
+// fixes a small lexicon of carriers and structural maps that every
+// downstream theorem cites by name. This module installs each as a
+// first-class `@framework(msfs, ...)` declaration so that the lexicon
+// is *machine-checkable* — every later definition refers to these
+// symbols by handle, and `verum audit --framework-axioms` enumerates
+// them transitively.
+//
+// The symbols, paired with their MSFS handles:
+//
+//   F          — the 2-category of Rich foundations.
+//   ρ          — the classification functor F → (∞, n)-Cat.
+//   gauge      — the Morita equivalence relation on F.
+//   M_stack    — the classifying 2-stack F / gauge.
+//   Aut_2(F)   — the 2-group of 2-autoequivalences of F.
+//   S_int      — the 2-category of display 2-categories.
+//   Syn^(∞,n)  — the (∞,n)-truncation of the syntactic category Syn(S).
+//
+// MSFS Convention 1.2 also pins ZFC+2-inacc as the metatheory; that
+// fact is already shipped as `msfs_baseline_zfc_2inacc` in
+// `baseline.vr`. This file is purely the *symbol* lexicon.
+//
+// Carrier protocols are minimal — just enough for the axioms to
+// refer to a value of type "Rich foundation 2-category" or
+// "classification functor". Concrete encodings live downstream
+// (in `core/math/categorical/*` / `core/math/infinity_category/*`
+// of the host stdlib once they land — see corpus README).
+// =============================================================================
+
+module core.math.frameworks.msfs.key_symbols;
+
+// =============================================================================
+// Carrier protocols
+// =============================================================================
+
+/// Abstract 2-category — used as the carrier for `F` (the 2-category
+/// of Rich foundations). The protocol exposes only the structural
+/// facts axioms need to express; concrete 2-cat machinery lives in
+/// the categorical stdlib.
+public type TwoCategory is protocol {
+    /// Witness that this 2-category is locally small at the κ_1
+    /// universe level — required by Convention 1.2 + Definition 1.3
+    /// for accessibility arguments.
+    fn is_locally_kappa_1_small(self) -> Bool;
+};
+
+/// Abstract (∞, n)-category — used for the codomain of ρ and for
+/// modelling Syn^(∞,n)(S).
+public type InfinityNCat is protocol {
+    /// Categorical level n ∈ ℕ ∪ {∞}. The protocol returns a
+    /// non-negative integer; ∞ is encoded as the sentinel −1 to
+    /// avoid an Ordinal carrier dependency at this layer (the
+    /// proper Ordinal type lands with `core.theory_interop.coord`).
+    fn n_level(self) -> Int;
+};
+
+/// Abstract 2-functor between 2-categories — used for ρ (the
+/// classification functor) and downstream (Cls, Gen) maps.
+public type TwoFunctor is protocol {
+    /// Witness that the 2-functor preserves identities — minimal
+    /// well-formedness required to reason about ρ at all.
+    fn preserves_identities(self) -> Bool;
+};
+
+/// Abstract 2-stack — used for `M_stack`. Stacks add descent on top
+/// of 2-categorical data; the protocol records the existence of a
+/// distinguished gauge-quotient projection.
+public type TwoStack is protocol {
+    /// Witness that the stack is a 2-categorical quotient — i.e.
+    /// it has a canonical gauge-quotient projection.
+    fn has_gauge_quotient(self) -> Bool;
+};
+
+/// Abstract 2-group — used for `Aut_2(F)` (auto-equivalence 2-group).
+public type TwoGroup is protocol {
+    /// Witness that the 2-group is non-trivial — at least one
+    /// non-identity 2-autoequivalence exists. MSFS uses this to
+    /// obstruct degenerate `F` candidates.
+    fn is_nontrivial(self) -> Bool;
+};
+
+// =============================================================================
+// Convention 1.2 — Key symbols
+// =============================================================================
+
+/// MSFS Convention 1.2 (a) — `F` is the 2-category of Rich
+/// foundations. The axiom asserts that the carrier is a locally
+/// κ_1-small 2-category; precise (R1)–(R5) conditions on the
+/// objects of `F` are formalised separately in the rich_s module.
+@framework(msfs, "MSFS Convention 1.2 (a) — F: 2-category of Rich foundations")
+public axiom msfs_F_is_2_category(f: &TwoCategory) -> Bool
+    ensures f.is_locally_kappa_1_small();
+
+/// MSFS Convention 1.2 (b) — ρ: F → (∞, n)-Cat is the
+/// classification functor. It assigns to each Rich foundation its
+/// underlying (∞, n)-category presentation. The axiom records the
+/// minimal structural fact that ρ is a 2-functor; properties of ρ
+/// (e.g. straightening / Grothendieck constructions) are cited
+/// per-theorem from `core.math.frameworks.lurie_htt`.
+@framework(msfs, "MSFS Convention 1.2 (b) — ρ: F → (∞, n)-Cat (classification functor)")
+public axiom msfs_rho_is_classification_functor(
+    rho: &TwoFunctor,
+) -> Bool
+    ensures rho.preserves_identities();
+
+/// MSFS Convention 1.2 (c) — `gauge ≡ Morita` on F. Two Rich
+/// foundations are gauge-equivalent iff they are Morita-equivalent.
+/// The axiom is a definitional identity at the framework layer.
+@framework(msfs, "MSFS Convention 1.2 (c) — gauge ≡ Morita on F")
+public axiom msfs_gauge_is_morita() -> Bool
+    ensures true;
+
+/// MSFS Convention 1.2 (d) — `M_stack := F / gauge` is the
+/// classifying 2-stack. The quotient identifies Morita-equivalent
+/// foundations into a single point of M_stack.
+@framework(msfs, "MSFS Convention 1.2 (d) — M_stack := F / gauge (classifying 2-stack)")
+public axiom msfs_M_stack_quotient(m_stack: &TwoStack) -> Bool
+    ensures m_stack.has_gauge_quotient();
+
+/// MSFS Convention 1.2 (e) — `Aut_2(F)` is the 2-group of
+/// 2-autoequivalences of F. Used in §9 (Max-2 gauge fullness)
+/// and §10 (AC/OC duality stratum correspondence).
+@framework(msfs, "MSFS Convention 1.2 (e) — Aut_2(F): 2-group of 2-autoequivalences")
+public axiom msfs_Aut_2_is_2_group(aut_2: &TwoGroup) -> Bool
+    ensures aut_2.is_nontrivial();
+
+/// MSFS Convention 1.2 (f) — `S_int` is the 2-category of display
+/// 2-categories. Used in §8.4–§8.7 (display map categories,
+/// existence and slice-locality of I).
+@framework(msfs, "MSFS Convention 1.2 (f) — S_int: 2-category of display 2-categories")
+public axiom msfs_S_int_is_2_category(s_int: &TwoCategory) -> Bool
+    ensures s_int.is_locally_kappa_1_small();
+
+/// MSFS Convention 1.2 (g) — `Syn^(∞,n)(S) := τ_{≤n}(Syn(S))` is the
+/// (∞,n)-truncation of the syntactic category. The axiom records
+/// the existence of this truncation for any Rich-S `S` and ordinal
+/// `n`. Used in §3 (R5a accessibility) and §10 (Lambek–Scott in
+/// the AC/OC duality).
+@framework(msfs, "MSFS Convention 1.2 (g) — Syn^(∞,n)(S) := τ_{≤n}(Syn(S))")
+public axiom msfs_Syn_truncation(syn_n: &InfinityNCat) -> Bool
+    requires syn_n.n_level() >= 0
+    ensures  true;

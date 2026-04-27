@@ -1,0 +1,41 @@
+// =============================================================================
+// lib.math.s_definable — class S_S + Lemma 3.4 facade
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §3.3 — Definition 3.3 (class
+// S_S of S-definable structures) and §3.4 — Lemma 3.4 (S-definability).
+//
+// Re-exports:
+//
+//   • `class_s_s.vr` — Definition 3.3 + closure operations O1–O6
+//                      + accessibility / U_2-smallness facts.
+//   • `lemma_3_4.vr` — the *central* technical lemma making
+//                      Theorem 5.1 a one-paragraph proof.
+//
+// CRITICAL: this module is the linchpin of the entire MSFS proof
+// architecture. Every flagship theorem (5.1, 6.1, 7.1, 8.6, 9.6,
+// 10.4) cites Lemma 3.4 transitively.
+// =============================================================================
+
+module core.math.s_definable;
+
+mount core.math.s_definable.class_s_s.{
+    SSMembership,
+    msfs_s_s_local_base,
+    msfs_s_s_closed_under_kan_extensions,
+    msfs_s_s_closed_under_grothendieck,
+    msfs_s_s_closed_under_limits_colimits,
+    msfs_s_s_closed_under_slice_comma_opposite,
+    msfs_s_s_closed_under_derived_functors,
+    msfs_s_s_closed_under_monoidal,
+    msfs_s_s_global_kappa_1_accessible,
+    msfs_s_s_global_u_2_small,
+    msfs_s_s_local_subset_global,
+    msfs_s_s_equals_global,
+};
+
+mount core.math.s_definable.lemma_3_4.{
+    FormallySDefinable,
+    msfs_lemma_3_4_s_definability,
+    msfs_lemma_3_4_outputs_in_s_s_global,
+};

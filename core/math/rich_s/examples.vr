@@ -1,0 +1,116 @@
+// =============================================================================
+// MSFS — R-S examples (standard Rich foundations)
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §3.2 — Examples of R-S
+// metatheories. The paper enumerates eight canonical foundations
+// that satisfy (R1)–(R5); plus side-references to several
+// extensions (linear logic + !, Eff internal, Lurie ∞-topos
+// internal, cohesive ∞-topos, NCG, motivic homotopy theory, …).
+//
+// Each example here is a single `@framework(msfs, "<S> ∈ R-S")`
+// axiom that admits the *fact* that the named theory satisfies
+// (R1)–(R5). The actual proof of (R1)–(R5) for each theory lives
+// outside Verum (in the literature each theory cites — Robinson Q
+// interpretability, model existence, recursive axiomatisation,
+// Lambek–Scott style syntax-semantics theorem). Verum records the
+// admission, not the metatheoretic proof.
+//
+// The `n_S` value is captured per-axiom because §7 (vertical
+// absoluteness) consumes it directly. ∞ is encoded as `-1` in
+// keeping with `lib.math.frameworks.msfs.key_symbols::n_level`.
+// =============================================================================
+
+module core.math.rich_s.examples;
+
+// =============================================================================
+// (R1)–(R5) admission axioms per canonical theory
+// =============================================================================
+
+/// MSFS §3.2 — `ZFC ∈ R-S` with `n_ZFC = 1`. Classical first-order
+/// set theory; categorical level 1 because ZFC's models are
+/// 1-categories of sets.
+@framework(msfs, "MSFS §3.2 — ZFC ∈ R-S, n_ZFC = 1")
+public axiom msfs_zfc_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `ZFC + inaccessibles ∈ R-S` with `κ_S = κ_2`. The
+/// strengthened metatheory ZFC + inaccessibles is in R-S with the
+/// larger inaccessible cardinal κ_2.
+@framework(msfs, "MSFS §3.2 — ZFC + inaccessibles ∈ R-S, κ_S = κ_2")
+public axiom msfs_zfc_inacc_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `NBG ∈ R-S`. Von Neumann–Bernays–Gödel class
+/// theory. Conservative extension of ZFC over sets, but with
+/// proper-class quantification at the metatheory layer.
+@framework(msfs, "MSFS §3.2 — NBG ∈ R-S")
+public axiom msfs_nbg_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `MLTT ∈ R-S`, `n_MLTT = ∞`. Martin-Löf intensional
+/// type theory; categorical level ∞ because MLTT's syntactic
+/// category extends to all higher dimensions.
+@framework(msfs, "MSFS §3.2 — MLTT ∈ R-S, n_MLTT = ∞")
+public axiom msfs_mltt_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `CIC ∈ R-S`, `n_CIC = ∞`. Calculus of Inductive
+/// Constructions; the dependent-type theory of Coq.
+@framework(msfs, "MSFS §3.2 — CIC ∈ R-S, n_CIC = ∞")
+public axiom msfs_cic_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `HoTT ∈ R-S`, `n_HoTT = ∞`. Homotopy Type Theory
+/// (with univalence). The univalence axiom upgrades MLTT to a
+/// fully-extensional ∞-categorical metatheory.
+@framework(msfs, "MSFS §3.2 — HoTT (with univalence) ∈ R-S, n_HoTT = ∞")
+public axiom msfs_hott_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `Cubical HoTT ∈ R-S`. CCHM cubical type theory.
+/// Constructive computational interpretation of univalence.
+@framework(msfs, "MSFS §3.2 — Cubical HoTT (CCHM) ∈ R-S")
+public axiom msfs_cubical_hott_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `linear logic + ! ∈ R-S`. Girard's linear logic
+/// extended with the `!` modality (the exponential) recovering
+/// contraction-friendly fragments. Required for (R1) Robinson Q
+/// interpretability.
+@framework(msfs, "MSFS §3.2 — linear logic + ! ∈ R-S")
+public axiom msfs_linear_with_bang_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `Eff (effective topos internal) ∈ R-S`. Hyland's
+/// effective topos seen as an internal language; provides the
+/// canonical computability invariant `τ` used in Theorem 8.6
+/// (existence of `I`).
+@framework(msfs, "MSFS §3.2 — Eff (Hyland) internal language ∈ R-S")
+public axiom msfs_eff_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `Lurie ∞-topos internal ∈ R-S`. The internal
+/// language of an ∞-topos in the sense of HTT.
+@framework(msfs, "MSFS §3.2 — Lurie ∞-topos internal ∈ R-S")
+public axiom msfs_lurie_infinity_topos_internal_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `cohesive ∞-topos ∈ R-S` (Schreiber's cohesive
+/// framework — used as a separate sub-stack at L_Cls).
+@framework(msfs, "MSFS §3.2 — cohesive ∞-topos ∈ R-S")
+public axiom msfs_cohesive_infinity_topos_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `NCG (Connes) ∈ R-S`. Noncommutative geometry's
+/// internal language; used in the τ-invariant separation of
+/// MLTT vs ETT in §8.6.
+@framework(msfs, "MSFS §3.2 — NCG (Connes) ∈ R-S")
+public axiom msfs_ncg_in_rich_s() -> Bool
+    ensures true;
+
+/// MSFS §3.2 — `motivic homotopy theory ∈ R-S`. The (∞, 2)-topos
+/// of motivic spaces over a base scheme.
+@framework(msfs, "MSFS §3.2 — motivic homotopy theory ∈ R-S")
+public axiom msfs_motivic_in_rich_s() -> Bool
+    ensures true;

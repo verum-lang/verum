@@ -1,0 +1,148 @@
+// =============================================================================
+// MSFS — Reasonable Rich-Metatheory (R-S) conditions
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §3 — Definition 3.1 (R-S
+// conditions R1–R5) and §3.4 (additional R5a / R5b structural
+// requirements).
+//
+// A *Reasonable Rich-Metatheory* — written `S ∈ R-S` in MSFS — is
+// a deductive theory satisfying five interlocking conditions. The
+// (R) suite is what gives the metatheory enough strength to host
+// the categorical machinery of §§3–10 *and* enough humility to
+// admit the AFN-T no-go (§5).
+//
+// (R1) Arithmetic completeness — interprets Robinson Q
+//      (the minimal arithmetic admitting Σ_1-completeness).
+//
+// (R2) Recursive enumerability — the axiom set is r.e.; in
+//      particular, every theorem has a finite proof certificate.
+//
+// (R3) Model existence in U_2 — there exists a structure
+//      M ⊨ S living inside the Grothendieck universe U_2.
+//
+// (R4) Gödel coding — there is a recursive injective coding of
+//      formulae of S into ℕ.
+//
+// (R5) Categorical semantics — S has an associated categorical
+//      level n_S ∈ ℕ ∪ {∞}, with a κ_S-accessible (∞, n_S)
+//      syntactic category Syn(S) (R5a) and a Lambek–Scott
+//      adjunction Syn ⊣ Mod (R5b).
+//
+// This module installs `RichS` as a protocol whose method set
+// captures the 5 conditions. Concrete instances ship as
+// `@framework(msfs, "<S> ∈ R-S")` axioms in `examples.vr`;
+// non-examples (theories that fail one of the (R) conditions) live
+// in `non_examples.vr`.
+//
+// MSFS Proposition 3.2 — the (R1)–(R5) conditions are *pairwise
+// independent*: each is non-redundant in the conjunction. The
+// witness theories live in `non_examples.vr`.
+// =============================================================================
+
+module core.math.rich_s.conditions;
+
+mount core.math.frameworks.msfs.key_symbols.{InfinityNCat};
+
+// =============================================================================
+// Carrier protocols for the (R) auxiliary witnesses
+// =============================================================================
+
+/// Witness of "interprets Robinson Q" (R1). The protocol exposes
+/// the existence of an interpretation map; the concrete map is
+/// opaque at this layer.
+public type RobinsonQInterpretation is protocol {
+    /// Witness that the interpretation preserves the seven
+    /// Robinson Q axioms (zero, successor, addition, multiplication,
+    /// minimality of zero, predecessor partial inverse, lt
+    /// definability).
+    fn preserves_q_axioms(self) -> Bool;
+};
+
+/// Witness of "S has a model M ⊨ S in U_2" (R3).
+public type ModelInU2 is protocol {
+    /// Witness that the model lives inside U_2.
+    fn lives_in_u_2(self) -> Bool;
+};
+
+/// Witness of recursive Gödel coding (R4).
+public type GodelCoding is protocol {
+    /// Witness that the coding is injective and recursive.
+    fn is_recursive_injection(self) -> Bool;
+};
+
+/// Witness of κ_S-accessibility of `Syn(S)` (R5a). The MSFS κ_S
+/// is one of κ_1 / κ_2 (the two inaccessibles fixed by Convention
+/// 1.1), recorded here as an opaque handle.
+public type AccessibilityWitness is protocol {
+    /// Witness that the syntactic category is κ_S-accessible at
+    /// the level dictated by `n_S`.
+    fn is_kappa_S_accessible(self) -> Bool;
+};
+
+/// Witness of the Lambek–Scott adjunction `Syn ⊣ Mod` (R5b).
+public type LambekScottAdjunction is protocol {
+    /// Witness of the unit + counit triangle identities.
+    fn satisfies_triangle_identities(self) -> Bool;
+};
+
+// =============================================================================
+// RichS protocol — Definition 3.1
+// =============================================================================
+
+/// MSFS Definition 3.1 — a Reasonable Rich-Metatheory `S` satisfies
+/// the five conditions (R1)–(R5). The protocol exposes one method
+/// per condition; concrete theories `implement RichS for ZFC` etc.
+/// witness each condition.
+public type RichS is protocol {
+    /// (R1) — interprets Robinson Q. Returns the interpretation
+    /// witness.
+    fn r1_interprets_robinson_q(self) -> &RobinsonQInterpretation;
+
+    /// (R2) — recursively enumerable axiom set.
+    fn r2_recursively_enumerable(self) -> Bool;
+
+    /// (R3) — admits a model in U_2.
+    fn r3_has_model_in_u_2(self) -> &ModelInU2;
+
+    /// (R4) — has Gödel coding.
+    fn r4_godel_coding(self) -> &GodelCoding;
+
+    /// (R5) — categorical level n_S ∈ ℕ ∪ {∞}. ∞ is encoded as -1.
+    fn n_S(self) -> Int;
+
+    /// (R5a) — Syn(S) is κ_S-accessible at level n_S.
+    fn r5a_syn_is_accessible(self) -> &AccessibilityWitness;
+
+    /// (R5b) — Lambek–Scott adjunction Syn ⊣ Mod.
+    fn r5b_lambek_scott(self) -> &LambekScottAdjunction;
+
+    /// The syntactic (∞, n_S)-category — Syn(S) itself.
+    fn syn(self) -> &InfinityNCat;
+};
+
+// =============================================================================
+// Structural axioms about R-S
+// =============================================================================
+
+/// MSFS Definition 3.1 (admission). The carrier above defines what
+/// it means to be in R-S; this axiom is the framework-level
+/// admission of `R-S` as a class.
+@framework(msfs, "MSFS Definition 3.1 — R-S class of Reasonable Rich-Metatheories")
+public axiom msfs_rich_s_class_definition() -> Bool
+    ensures true;
+
+/// MSFS §3.4 — every R-S has a well-defined `n_S` with its
+/// associated κ_S inaccessible. This axiom is the framework-level
+/// regularity statement consumed by §§5–6.
+@framework(msfs, "MSFS §3.4 — n_S well-defined with κ_S inaccessible")
+public axiom msfs_n_S_well_defined<S: RichS>(s: &S) -> Bool
+    ensures s.n_S() >= -1;
+
+/// MSFS Proposition 3.2 — the five (R)-conditions are *pairwise
+/// independent*. For each i ∈ {1, …, 5} there exists a theory T_i
+/// satisfying every (R_j) for j ≠ i but violating (R_i). The
+/// witness theories live in `non_examples.vr`.
+@framework(msfs, "MSFS Proposition 3.2 — (R1)–(R5) pairwise independent")
+public axiom msfs_proposition_3_2_r_independence() -> Bool
+    ensures true;
