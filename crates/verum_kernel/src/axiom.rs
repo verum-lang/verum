@@ -139,15 +139,30 @@ impl AxiomRegistry {
     ///
     /// Corresponds to rule 10 in `docs/verification/trusted-kernel.md`.
     ///
-    /// V8 backwards-compat shim: this entry point delegates to
-    /// [`Self::register_with_regime`] with
-    /// [`SubsingletonRegime::LegacyUnchecked`], skipping the
-    /// closed-proposition check. New callers SHOULD use
-    /// [`Self::register_subsingleton`] (closed-only) or
-    /// [`Self::register_with_regime`] (regime-explicit) so the
-    /// `K-FwAx` subsingleton requirement from
-    /// `verification-architecture.md` §4.4 is enforced.
+    /// V8.1 (#222 follow-up) — production default is now
+    /// [`SubsingletonRegime::ClosedPropositionOnly`] per
+    /// `verification-architecture.md` §A.Z.4
+    /// "production CLI defaults `register_subsingleton`". The
+    /// previous `LegacyUnchecked` shim is reachable via
+    /// [`Self::register_legacy_unchecked`] for callers that need
+    /// the pre-V8.1 behaviour during stdlib bring-up.
     pub fn register(
+        &mut self,
+        name: Text,
+        ty: CoreTerm,
+        framework: FrameworkId,
+    ) -> Result<(), KernelError> {
+        self.register_with_regime(name, ty, framework, SubsingletonRegime::ClosedPropositionOnly)
+    }
+
+    /// V8.1 (#222 follow-up) — explicit legacy entry for callers
+    /// that intentionally need the pre-V8.1 `LegacyUnchecked` shim
+    /// (skips both V8 #217 subsingleton and V8 #220 body-is-Prop
+    /// checks). New code should NOT use this; it exists only so
+    /// the migration to strict-by-default can be staged across
+    /// the workspace rather than landing as a single breaking
+    /// change.
+    pub fn register_legacy_unchecked(
         &mut self,
         name: Text,
         ty: CoreTerm,
@@ -395,15 +410,32 @@ impl AxiomRegistry {
 /// Scan a parsed Verum module and register every axiom that carries a
 /// `@framework(identifier, "citation")` attribute.
 ///
-/// V8 backwards-compat shape: delegates to
-/// [`load_framework_axioms_with_regime`] with
-/// [`SubsingletonRegime::LegacyUnchecked`] — preserves pre-V8
-/// loader behaviour exactly. Production callers should use
-/// [`load_framework_axioms_strict`] (which selects
-/// `ClosedPropositionOnly` and surfaces V8 #217/#220 violations
-/// in the report) or [`load_framework_axioms_with_regime`] for
-/// regime control.
+/// V8.1 (#222 follow-up) — production default is now
+/// [`SubsingletonRegime::ClosedPropositionOnly`] per
+/// `verification-architecture.md` §A.Z.4 row "production callers
+/// using strict regime". The previous `LegacyUnchecked` default
+/// is reachable via [`load_framework_axioms_legacy_unchecked`]
+/// for callers that intentionally need the pre-V8.1 shim.
+///
+/// Equivalent to [`load_framework_axioms_strict`]; that function
+/// is kept as a discoverability alias.
 pub fn load_framework_axioms(
+    module: &verum_ast::Module,
+    registry: &mut AxiomRegistry,
+) -> LoadAxiomsReport {
+    load_framework_axioms_with_regime(
+        module,
+        registry,
+        SubsingletonRegime::ClosedPropositionOnly,
+    )
+}
+
+/// V8.1 (#222 follow-up) — explicit legacy loader entry for
+/// callers that need the pre-V8.1 `LegacyUnchecked` regime
+/// (skips V8 #217 subsingleton + V8 #220 body-is-Prop checks).
+/// New code should NOT use this; the strict default ([`load_framework_axioms`])
+/// is the production path per §A.Z.4.
+pub fn load_framework_axioms_legacy_unchecked(
     module: &verum_ast::Module,
     registry: &mut AxiomRegistry,
 ) -> LoadAxiomsReport {

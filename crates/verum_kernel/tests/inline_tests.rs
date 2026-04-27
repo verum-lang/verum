@@ -1361,7 +1361,11 @@ fn single_pi_over_path_is_not_uip() {
         }),
     };
     let mut reg = AxiomRegistry::new();
-    let result = reg.register(
+    // V8.1 (#222 follow-up): default register() is now strict;
+    // this test pins the UIP-guard (regime-independent) so we
+    // use the explicit legacy entry to avoid the orthogonal
+    // subsingleton-rejection on the free-var-bearing body.
+    let result = reg.register_legacy_unchecked(
         Text::from("path_forall"),
         almost,
         FrameworkId {
@@ -1413,19 +1417,37 @@ fn b222_strict_loader_report_has_v8_buckets() {
 
 #[test]
 fn b222_legacy_loader_preserves_pre_v8_behaviour() {
-    // load_framework_axioms() with no regime argument should
-    // delegate to LegacyUnchecked — preserving pre-V8 behaviour
-    // exactly so the existing test corpus + stdlib bring-up
-    // registrations don't break.
+    // V8.1 (#222 follow-up): the production default is now
+    // strict (ClosedPropositionOnly). Callers that intentionally
+    // need the pre-V8.1 LegacyUnchecked shim must explicitly
+    // call load_framework_axioms_legacy_unchecked.
+    use verum_kernel::load_framework_axioms_legacy_unchecked;
     let module = module_with_axiom(
         "lurie_htt",
         "HTT 6.2.2.7",
         "legacy_witness",
     );
     let mut reg = AxiomRegistry::new();
-    let report = load_framework_axioms(&module, &mut reg);
+    let report = load_framework_axioms_legacy_unchecked(&module, &mut reg);
     assert!(report.is_clean());
     assert_eq!(report.registered.len(), 1);
+}
+
+#[test]
+fn b222_default_loader_is_strict_by_v8_1() {
+    // V8.1 (#222 follow-up): production-default loader now
+    // routes through ClosedPropositionOnly. Closed-Prop
+    // placeholder bodies (Universe(Concrete(0))) admit cleanly.
+    let module = module_with_axiom(
+        "lurie_htt",
+        "HTT 6.2.2.7",
+        "default_strict_witness",
+    );
+    let mut reg = AxiomRegistry::new();
+    let report = load_framework_axioms(&module, &mut reg);
+    assert!(report.is_clean(), "V8.1 default-strict admits placeholder body: {:?}", report);
+    assert_eq!(report.registered.len(), 1);
+    assert_eq!(report.soundness_violation_count(), 0);
 }
 
 #[test]
