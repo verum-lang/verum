@@ -32,6 +32,7 @@
 //! - If the file does not exist, no rewrite happens — clap's normal "unknown
 //!   subcommand" error reaches the user.
 
+pub mod cache;
 pub mod frontmatter;
 
 use std::ffi::OsString;
