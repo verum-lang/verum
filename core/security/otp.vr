@@ -44,7 +44,7 @@ module core.security.otp;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.mac.hmac.{hmac_sha256, hmac_sha512};
+mount core.security.mac.hmac.{hmac_sha1, hmac_sha256, hmac_sha512};
 mount core.security.util.rng.{fill_secure};
 mount core.security.util.constant_time.{constant_time_eq};
 mount core.encoding.base32.{encode as base32_encode};
@@ -54,7 +54,7 @@ mount core.encoding.base32.{encode as base32_encode};
 // =============================================================================
 
 public type OtpHash is
-      Sha1         // RFC 6238 default; legacy compatibility — not yet wired here
+      Sha1         // RFC 6238 default; legacy authenticator compatibility (V8 #247)
     | Sha256       // recommended for new deployments
     | Sha512;
 
@@ -105,11 +105,14 @@ public fn hotp(
             slice_owned(&mac[..])
         },
         OtpHash.Sha1 => {
-            // SHA-1 HMAC not wired into the current stdlib HMAC family.
-            // Deployments needing RFC-6238 SHA-1 compatibility should
-            // link a SHA-1 HMAC backend; meanwhile we fail explicitly
-            // rather than silently fall back to SHA-256.
-            return Err(OtpError.UnsupportedHash);
+            // V8 (#247) — SHA-1 HMAC wired via core.security.mac.hmac.
+            // RFC 6238 default; legacy authenticator (Google
+            // Authenticator pre-2020, Authy, RFC 4226 HOTP-SHA-1)
+            // compatibility. HMAC-SHA-1 itself is RFC 6151 sound for
+            // message authentication despite SHA-1 collisions for
+            // digital signatures.
+            let mac = hmac_sha1(secret, &counter_bytes[..]);
+            slice_owned(&mac[..])
         },
     };
 
