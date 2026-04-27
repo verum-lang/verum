@@ -42,6 +42,7 @@ mount core.database.sqlite.error.dberr_from_loom;
 mount core.database.sqlite.native.l7_api.{
     Database as LoomDatabase,
     open_memory_db, open_readonly, open_readwrite, open_admin,
+    open_path, open_path_readonly, open_path_readwrite, open_path_admin,
 };
 mount core.database.sqlite.native.l6_session.{
     ConnectionMode, CmRead, CmWrite, CmAdmin,
@@ -164,6 +165,40 @@ implement SqliteConnection {
     /// Sugar — admin in-memory (allows DDL).
     public fn open_in_memory_admin() -> Result<SqliteConnection, DbError> {
         match open_admin() {
+            Ok(db)  => Ok(SqliteConnection { inner: db }),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // File-backed open — routes through L7 open_path → L6 open_file →
+    // L1 pager_open_file → L0 PosixVfs.
+    // -------------------------------------------------------------------------
+
+    public fn open_path_with(path: &Text, cap: SqliteCapability) -> Result<SqliteConnection, DbError> {
+        let mode = cap.to_loom_mode();
+        match open_path(path, mode) {
+            Ok(db)  => Ok(SqliteConnection { inner: db }),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    public fn open_path_ro(path: &Text) -> Result<SqliteConnection, DbError> {
+        match open_path_readonly(path) {
+            Ok(db)  => Ok(SqliteConnection { inner: db }),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    public fn open_path_rw(path: &Text) -> Result<SqliteConnection, DbError> {
+        match open_path_readwrite(path) {
+            Ok(db)  => Ok(SqliteConnection { inner: db }),
+            Err(e)  => Err(dberr_from_loom(e)),
+        }
+    }
+
+    public fn open_path_a(path: &Text) -> Result<SqliteConnection, DbError> {
+        match open_path_admin(path) {
             Ok(db)  => Ok(SqliteConnection { inner: db }),
             Err(e)  => Err(dberr_from_loom(e)),
         }

@@ -161,13 +161,12 @@ implement SqliteAdapter {
                     retryable: false,
                 }))
             }
-            StFile(_) => {
-                Err(DbError.Adapter(core.database.common.error.AdapterSpecific {
-                    adapter: AdSqlite,
-                    code: "UNSUPPORTED".clone(),
-                    message: "file-backed connections pending L1/L6/L7 VfsProtocol parameterisation (T19a — PosixVfs is ready at L0, the loom layers above it are not)".clone(),
-                    retryable: false,
-                }))
+            StFile(ref path) => {
+                // Closed in T20: loom L1/L6/L7 now parameterise over
+                // PagerBackend{Memory,File} — PosixVfs feeds the L1
+                // pager directly. The capability marker carries the
+                // file's open mode through to pager_open_file.
+                SqliteConnection.open_path_with(path, cfg.capability.clone())
             }
         }
     }
