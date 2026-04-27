@@ -140,21 +140,24 @@ implement SqliteAdapter {
 
     public fn adapter_id() -> AdapterId { AdSqlite }
 
-    /// Connect — currently only the in-memory targets are wired (the
-    /// PosixVfs file-backed path lands with the L0 PosixVfs work).
-    /// Returns `DbError.ConnectionFailed` for the file path until that
-    /// happens, so callers don't silently get an in-memory DB when
-    /// they asked for file-backed.
+    /// Connect — in-memory targets are fully wired through loom's L7
+    /// open_memory_db. PosixVfs (T17) is in place at L0, but loom's
+    /// L1 `pager_open_memory()` and L6 `open_memory()` are
+    /// hardcoded-to-memory. Plumbing PosixVfs through L1 → L6 → L7
+    /// is the next iteration (T19a: parameterise pager / session /
+    /// facade over `VfsProtocol`); until that lands the file-backed
+    /// branch returns a typed error rather than silently degrading
+    /// to in-memory.
     public fn connect(cfg: &SqliteConfig) -> Result<SqliteConnection, DbError> {
         match cfg.target {
             StMemory => SqliteConnection.open_in_memory(cfg.capability.clone()),
             StSharedMemory(_) => {
-                // shared-cache mode requires the multi-conn registry
-                // landing in the L1 pager actor (sqlite-native §8.3).
                 Err(DbError.Adapter(core.database.common.error.AdapterSpecific {
                     adapter: AdSqlite,
                     code: "UNSUPPORTED".clone(),
-                    message: "shared-memory mode pending multi-conn pager actor".clone(),
+                    message:
+                        "shared-memory mode pending multi-conn pager actor (sqlite-native.md §8.3)"
+                        .clone(),
                     retryable: false,
                 }))
             }
@@ -162,7 +165,7 @@ implement SqliteAdapter {
                 Err(DbError.Adapter(core.database.common.error.AdapterSpecific {
                     adapter: AdSqlite,
                     code: "UNSUPPORTED".clone(),
-                    message: "file-backed connections pending PosixVfs landing".clone(),
+                    message: "file-backed connections pending L1/L6/L7 VfsProtocol parameterisation (T19a — PosixVfs is ready at L0, the loom layers above it are not)".clone(),
                     retryable: false,
                 }))
             }
