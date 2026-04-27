@@ -798,28 +798,6 @@ fn collect_constructors_fast(col: &PatternColumn, out: &mut HashSet<Text>) {
     }
 }
 
-/// Collect constructor names from a pattern column (legacy List-based)
-#[allow(dead_code)]
-fn collect_constructors(col: &PatternColumn, out: &mut List<String>) {
-    match col {
-        PatternColumn::Constructor { name, .. } => {
-            let name_str = name.to_string();
-            if !out.iter().any(|n| n == &name_str) {
-                out.push(name_str);
-            }
-        }
-        PatternColumn::Or(alts) => {
-            for alt in alts.iter() {
-                collect_constructors(alt, out);
-            }
-        }
-        PatternColumn::Guarded(inner) => {
-            collect_constructors(inner, out);
-        }
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

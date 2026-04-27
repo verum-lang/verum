@@ -189,11 +189,6 @@ impl ResourceLimiter {
         self.current_recursion.fetch_sub(1, Ordering::SeqCst);
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn add_memory(&self, bytes: usize) {
-        self.current_memory.fetch_add(bytes, Ordering::SeqCst);
-    }
-
     pub(crate) fn sub_memory(&self, bytes: usize) {
         self.current_memory.fetch_sub(bytes, Ordering::SeqCst);
     }
