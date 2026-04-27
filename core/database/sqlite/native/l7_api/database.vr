@@ -33,12 +33,12 @@ mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.{Register, StepResult, VdbeProgram};
 mount core.database.sqlite.native.l5_sql.{
-    CompileError, Statement,
+    CompileError, Statement, Expr,
     parse_one,
 };
 mount core.database.sqlite.native.l6_session.{
     Connection, ConnectionMode, ConnectionError, TxMode,
-    PreparedStatement, StmtError,
+    PreparedStatement, StmtError, IndexMeta,
     open_memory, prepare, prepare_with_schema,
     mode_can_write, mode_can_ddl,
     table_meta_from_create,
@@ -200,6 +200,43 @@ implement Database {
                 } else {
                     let _ = self.conn.schema_mut().drop_table(&tref.schema, &tref.name);
                 }
+            }
+            SCreateIndex(ref ci) => {
+                match self.conn.ensure_admin() {
+                    Ok(_)  => {},
+                    Err(e) => { return Err(db_error_from_conn(e)); }
+                }
+                let root = self.conn.allocate_root_page();
+                let mut col_names: List<Text> = List.new();
+                let mut i: Int = 0;
+                while i < ci.columns.len() {
+                    match ci.columns[i].expr {
+                        EColumn(ref _t, ref n) => { col_names.push(n.clone()); }
+                        _ => {}
+                    }
+                    i = i + 1;
+                }
+                let meta = IndexMeta {
+                    schema: ci.index.schema.clone(),
+                    name: ci.index.name.clone(),
+                    table_name: ci.table.name.clone(),
+                    root_page: root,
+                    columns: col_names,
+                    unique: ci.unique,
+                };
+                match self.conn.schema_mut().register_index(meta) {
+                    Ok(_)  => {}
+                    Err(_) => {
+                        if !ci.if_not_exists {
+                            return Err(DbConstraint("index already exists".clone()));
+                        }
+                    }
+                }
+            }
+            SCreateView(ref _cv) => {
+                // Views are metadata-only in v1; codegen emits a no-op
+                // and the facade skips schema-cache registration until
+                // the view resolver lands.
             }
             _ => {}
         }

@@ -220,6 +220,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnDrop(ref kind, if_exists, ref target) => emit_drop(st, kind, if_exists, target),
         PnTransaction(ref action) => emit_transaction(st, action),
         PnPragma(ref name, ref val) => emit_pragma(st, name, val),
+        PnNoop => Ok(()),
     }
 }
 
