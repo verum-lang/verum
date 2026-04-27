@@ -68,7 +68,9 @@ public const MAX_MSGPACK_NESTING: Int = 128;
 // =============================================================================
 
 public fn encode(v: &MsgPackValue) -> List<Byte> {
-    let mut out: List<Byte> = [];
+    // Heuristic 64-byte starting capacity for the typical small-
+    // document case (saves first few growth events).
+    let mut out: List<Byte> = List.with_capacity(64);
     encode_into(v, &mut out);
     out
 }
