@@ -125,6 +125,20 @@ const DNS_MAX_UDP_SIZE: Int = 512;
 const DNS_HEADER_SIZE: Int = 12;
 const DNS_PORT: Int = 53;
 
+/// Maximum number of compression-pointer follows during a single
+/// `decode_domain_name` call.  RFC 1035 §4.1.4 allows pointer
+/// compression within DNS messages but doesn't cap the chain length;
+/// hostile responses can construct pointer chains where each pointer
+/// goes backward to a non-overlapping prior position, defeating the
+/// simple forward-pointer infinite-loop check.  Without a depth cap,
+/// the parser walks an attacker-supplied chain doing O(chain_length)
+/// work per query.
+///
+/// 16 follows is far above any legitimate DNS response (RFCs typically
+/// see ≤2 levels of compression in practice) but bounded enough to
+/// reject a pointer-bomb in O(1) work.
+const DNS_MAX_POINTER_DEPTH: Int = 16;
+
 // =============================================================================
 // DNS Error Types
 // =============================================================================
@@ -326,6 +340,19 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
     let mut pos = start;
     let mut bytes_consumed = 0;
     let mut followed_pointer = false;
+    // SOUNDNESS: cap the pointer-follow chain.  RFC 1035 compression
+    // permits backward pointers; previous revision only checked
+    // `offset >= pos` (forward loop), which doesn't catch a chain of
+    // backward pointers each landing on a non-overlapping prior
+    // position.  Without this counter, a hostile DNS response can
+    // force O(chain_length) work per query — pointer-bomb DoS.
+    let mut pointer_follows: Int = 0;
+    // SOUNDNESS: cap total bytes consumed.  A pointer chain that
+    // makes the parser visit many labels without ever hitting the
+    // 0-byte terminator is bounded by the name-length limit; this
+    // is an additional safety belt that fires before the per-label
+    // checks would.
+    let mut total_label_bytes: Int = 0;
 
     loop {
         if pos >= buf.len() {
@@ -356,16 +383,35 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
                 followed_pointer = true;
             }
 
-            // Follow pointer (prevent infinite loops by checking offset < pos).
+            // Reject self-loops + forward pointers (already-checked
+            // path) with the original guard.
             if offset >= pos && followed_pointer {
                 return Err(DnsError.InvalidResponse);
             }
+
+            // Cap pointer-chain depth.  Hostile responses construct
+            // chains of backward pointers each landing on a
+            // non-overlapping prior position; that pattern bypasses
+            // the offset >= pos check but still pins CPU.
+            pointer_follows = pointer_follows + 1;
+            if pointer_follows > DNS_MAX_POINTER_DEPTH {
+                return Err(DnsError.InvalidResponse);
+            }
+
             pos = offset;
             continue;
         }
 
         // Regular label.
         if pos + 1 + len > buf.len() {
+            return Err(DnsError.InvalidResponse);
+        }
+
+        // Belt-and-braces total-bytes cap: even with a bounded
+        // pointer chain, a chain that walks many distinct labels
+        // could exceed the legal name length.  Reject early.
+        total_label_bytes = total_label_bytes + len + 1;
+        if total_label_bytes > DNS_MAX_NAME_LENGTH {
             return Err(DnsError.InvalidResponse);
         }
 
