@@ -991,8 +991,9 @@ implement SupervisorHandle {
                 .cloned()
         }.ok_or(SupervisorError.ChildNotFound(child_id))?;
 
-        // Record manual restart
-        child.record_restart(&FailureReason.Manual);
+        // Record manual restart and persist to supervisor history.
+        let event = child.record_restart(&FailureReason.Manual);
+        inner.append_restart_event(event);
 
         // Respawn
         self.spawn_child(child_id).await
@@ -1162,8 +1163,9 @@ implement SupervisorHandle {
             // Apply supervision strategy
             match inner.config.strategy {
                 SupervisionStrategy.OneForOne => {
-                    // Just restart this child
-                    child.record_restart(&reason);
+                    // Just restart this child; persist event.
+                    let event = child.record_restart(&reason);
+                    inner.append_restart_event(event);
                     if let Err(e) = self.spawn_child(child_id).await {
                         child.set_status(ChildStatus.Failed);
                         self.handle_escalation(child_id, &FailureReason.ErrorExit(e.description())).await;
@@ -1249,9 +1251,10 @@ implement SupervisorHandle {
             child.set_status(ChildStatus.Restarting);
         }
 
-        // Restart all in original order
+        // Restart all in original order; persist each event.
         for child in children.iter() {
-            child.record_restart(reason);
+            let event = child.record_restart(reason);
+            inner.append_restart_event(event);
             if let Err(_) = self.spawn_child(child.id).await {
                 child.set_status(ChildStatus.Failed);
             }
@@ -1281,9 +1284,10 @@ implement SupervisorHandle {
             child.set_status(ChildStatus.Restarting);
         }
 
-        // Restart in original order
+        // Restart in original order; persist each event.
         for child in children_to_restart.iter() {
-            child.record_restart(reason);
+            let event = child.record_restart(reason);
+            inner.append_restart_event(event);
             if let Err(_) = self.spawn_child(child.id).await {
                 child.set_status(ChildStatus.Failed);
             }
@@ -1374,6 +1378,27 @@ implement SupervisorInner {
             is_running: AtomicBool.new(true),
             parent: None,
         }
+    }
+
+    /// Append a `RestartEvent` to the supervisor's history.  Caps
+    /// the history at `RestartEvent::MAX_HISTORY` (100) by evicting
+    /// the oldest entry when full — matches the documented
+    /// "circular buffer" semantics on the field.
+    ///
+    /// Holds the write lock for the duration of the append; the
+    /// critical section is O(1) on average and does not perform
+    /// allocation when the cap is reached (the eviction is an
+    /// in-place rotation, not a re-allocation).
+    public fn append_restart_event(&self, event: RestartEvent) {
+        let mut history = self.restart_history.write();
+        if history.len() >= RestartEvent.MAX_HISTORY {
+            // Evict oldest entry.  remove(0) is O(n) but n is
+            // bounded by MAX_HISTORY (100); the absolute cost is
+            // ~100 element copies, negligible compared to the
+            // surrounding fault-handling work.
+            let _ = history.remove(0);
+        }
+        history.push(event);
     }
 }
 
@@ -1474,19 +1499,41 @@ implement ChildState {
         self.factory.lock().clone()
     }
 
-    /// Record restart event
-    public fn record_restart(&self, reason: &FailureReason) {
-        self.restart_count.fetch_add(1, MemoryOrdering.SeqCst);
+    /// Record a restart event for this child and return the
+    /// constructed `RestartEvent` so callers can push it into the
+    /// supervisor's `restart_history`.
+    ///
+    /// SOUNDNESS: previous revision discarded the event with a
+    /// "Note: Event would be stored" comment, leaving
+    /// `restart_history` permanently empty — the audit trail for
+    /// supervisor decisions was missing entirely.  The fix returns
+    /// the event so callers (the supervisor's fault-handling logic,
+    /// which holds the SupervisorInner reference) can persist it.
+    ///
+    /// CONCURRENCY: previous revision had a race between the
+    /// `fetch_add(1)` and a separate `load()` to read the post-add
+    /// counter — concurrent record_restart calls could observe a
+    /// higher attempt number than their own increment produced.
+    /// The fix uses the value returned by fetch_add (pre-add) plus
+    /// 1 to recover the exact post-add count assigned to THIS
+    /// caller, eliminating the load/race.
+    public fn record_restart(&self, reason: &FailureReason) -> RestartEvent {
+        let prev = self.restart_count.fetch_add(1, MemoryOrdering.SeqCst);
+        let attempt_count = prev + 1;
 
         // Calculate run duration
         let started = self.started_at_ms.load(MemoryOrdering.Acquire);
         let now = monotonic_millis();
         let run_duration_secs = ((now - started) / 1000).min(65535) as UInt16;
 
-        let attempt = (self.restart_count.load(MemoryOrdering.Acquire) & 0xFF) as UInt8;
+        // Cap attempt at UInt8.MAX (255) — the RestartEvent.attempt
+        // field is intentionally narrow because individual children
+        // shouldn't accumulate >255 restarts before the supervisor
+        // escalates.  Saturating cast preserves "many restarts"
+        // semantics without wrap-around to 0.
+        let attempt = if attempt_count > 0xFF { 0xFFu8 } else { attempt_count as UInt8 };
 
-        let _event = RestartEvent.new(self.id, reason, attempt, run_duration_secs);
-        // Note: Event would be stored in supervisor's restart_history
+        RestartEvent.new(self.id, reason, attempt, run_duration_secs)
     }
 }
 
