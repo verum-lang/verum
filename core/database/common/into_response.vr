@@ -1,0 +1,65 @@
+// =============================================================================
+// core/database/common/into_response.vr — DbError → HTTP Response bridge
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §5.6, internal/specs/net-framework.md §5.6
+// =============================================================================
+//
+// Wires `core.database.common.error.DbError` into the Weft framework's
+// `IntoResponse` protocol so handlers that use `[Database]` get
+// `?`-propagation to a typed HTTP response with no extra ceremony.
+//
+// The mapping is conservative: server-internal detail (SQL text,
+// vendor error codes, position offsets, internal message bodies)
+// is NEVER echoed to clients — instead we emit a stable shape per
+// category. The full DbError still arrives at the configured logger
+// via the framework's tracing layer; the response carries only the
+// public-safe summary.
+//
+//   ErrorCategory       Status            Body                            Reason
+//   -----------------------------------------------------------------------------
+//   EcTransient    →    503 Service Unavailable    "service temporarily unavailable"
+//   EcPermanent    →    500 Internal Server Error  "internal error"
+//   EcSecurity     →    403 Forbidden              "access denied"
+//   EcClient       →    400 Bad Request            "<DbError.message>"  (safe — already de-detailed)
+//   EcUpstream     →    502 Bad Gateway            "upstream error"
+// =============================================================================
+
+module core.database.common.into_response;
+
+mount core.*;
+mount base.{Text};
+mount core.net.http.{Response, StatusCode};
+mount core.net.weft.error.IntoResponse;
+mount core.net.weft.response_ext.{
+    resp_status, resp_with_body_text,
+};
+mount core.database.common.error.{
+    DbError, ErrorCategory,
+    EcTransient, EcPermanent, EcSecurity, EcClient, EcUpstream,
+};
+
+implement IntoResponse for DbError {
+    fn into_response(self) -> Response {
+        let category = self.category();
+        let (status, body) = render_for_category(&category, &self);
+        let resp = resp_status(status);
+        resp_with_body_text(resp, body)
+    }
+}
+
+fn render_for_category(category: &ErrorCategory, err: &DbError) -> (StatusCode, Text) {
+    match category {
+        EcTransient => (StatusCode.new(503), "service temporarily unavailable".clone()),
+        EcPermanent => (StatusCode.new(500), "internal error".clone()),
+        EcSecurity  => (StatusCode.new(403), "access denied".clone()),
+        EcUpstream  => (StatusCode.new(502), "upstream error".clone()),
+        EcClient    => {
+            // DbError.message() is already de-detailed (no SQL text,
+            // no vendor codes — the constructors only carry safe
+            // summaries). Forwarding it tells the client what shape
+            // of validation failed without leaking server internals.
+            (StatusCode.new(400), err.message())
+        }
+    }
+}
