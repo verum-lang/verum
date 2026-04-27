@@ -6,6 +6,7 @@ pub mod cache_manager;
 pub mod client;
 pub mod content_store;
 pub mod lockfile_v3;
+pub mod pubgrub_resolver;
 pub mod resolver_errors;
 pub mod workspace_manifest;
 pub mod enterprise;
