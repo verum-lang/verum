@@ -3357,10 +3357,20 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
 
-                    // 2. Workspace root (dev mode)
+                    // 2. Workspace root (dev mode).
+                    //
+                    // T6.0.2 — only accept the candidate when
+                    // `core/mod.vr` is present. A bare `core/`
+                    // directory (e.g. inside a user cog that
+                    // happened to scaffold the namespace but
+                    // never populated it) silently shadowed the
+                    // embedded stdlib pre-fix; cogs whose `core/`
+                    // is empty (or absent) now fall through to
+                    // the embedded path correctly.
                     if let Ok(workspace_root) = self.find_workspace_root() {
                         let core_path = workspace_root.join("core");
-                        if core_path.exists() {
+                        let mod_file = core_path.join("mod.vr");
+                        if mod_file.is_file() {
                             candidates.push((core_path, Some(workspace_root)));
                         }
                     }
