@@ -45,7 +45,6 @@ use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::IntPredicate;
 
-use super::types::TypeLowering;
 use super::error::{LlvmLoweringError, Result};
 
 // =============================================================================
@@ -299,9 +298,6 @@ pub struct SimdLowering<'ctx> {
     context: &'ctx Context,
     /// LLVM IR builder
     builder: &'ctx Builder<'ctx>,
-    /// Type lowering helper
-    #[allow(dead_code)]
-    types: &'ctx TypeLowering<'ctx>,
     /// Target architecture
     target_arch: SimdTargetArch,
     /// Available feature level
@@ -315,14 +311,12 @@ impl<'ctx> SimdLowering<'ctx> {
     pub fn new(
         context: &'ctx Context,
         builder: &'ctx Builder<'ctx>,
-        types: &'ctx TypeLowering<'ctx>,
         target_arch: SimdTargetArch,
         feature_level: SimdFeatureLevel,
     ) -> Self {
         Self {
             context,
             builder,
-            types,
             target_arch,
             feature_level,
             stats: SimdStats::default(),

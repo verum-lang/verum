@@ -86,7 +86,6 @@ pub struct BitfieldLowering<'ctx> {
     /// LLVM IR builder
     builder: &'ctx Builder<'ctx>,
     /// Module for adding intrinsic declarations
-    #[allow(dead_code)]
     module: &'ctx Module<'ctx>,
     /// Whether we're on a little-endian platform
     target_is_little_endian: bool,
