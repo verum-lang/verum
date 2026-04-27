@@ -155,7 +155,15 @@ public type Iterator is protocol {
     }
 
     /// Get the nth element (0-indexed).
+    ///
+    /// **Negative `n`** returns `None` (no element exists at a
+    /// negative index).  Earlier impl folded into the
+    /// `range(0, n)` loop which is empty for `n < 0` — silently
+    /// returning the FIRST element.  Audit #12 fix.
     fn nth(&mut self, n: Int) -> Maybe<Self.Item> {
+        if n < 0 {
+            return None;
+        }
         for _ in range(0, n) {
             self.next()?;
         }
@@ -163,7 +171,18 @@ public type Iterator is protocol {
     }
 
     /// Advance by n elements && return the iterator.
+    ///
+    /// **Negative `n`** is treated as 0 (advance by zero).
+    /// Earlier impl had `range(0, n)` empty for `n < 0` and
+    /// silently returned `Ok(())` without conveying that the
+    /// caller's intent (advance backwards) was unreachable.
+    /// `Err(0)` would be misleading too — explicit `Ok(())` for
+    /// the no-op IS the truthful result.  Audit #12 fix
+    /// documents the contract.
     fn advance_by(&mut self, n: Int) -> Result<(), Int> {
+        if n <= 0 {
+            return Ok(());
+        }
         for i in range(0, n) {
             if self.next().is_none() {
                 return Err(i);
@@ -295,12 +314,28 @@ public type Iterator is protocol {
     }
 
     /// Group elements into fixed-size chunks.
+    ///
+    /// Panics if `size <= 0`.  Same precondition as `step_by` —
+    /// a non-positive chunk size has no sensible semantic and
+    /// the underlying ChunksIter::next would either silently
+    /// return None forever (size <= 0 → empty chunk → None) or
+    /// (for size_hint) divide by zero in `(inner + step - 1) / step`.
+    /// Audit #12 fix.
     fn chunks(self, size: Int) -> ChunksIter<Self> {
+        assert(size > 0, "chunks size must be positive");
         ChunksIter { iter: self, size: size }
     }
 
     /// Sliding window over elements.
+    ///
+    /// Panics if `size <= 0`.  Earlier impl with `size = 0`
+    /// produced an INFINITE stream of empty Lists — the next()
+    /// loop never filled the buffer, the buffer-empty branch
+    /// returned `Some([])`, then on the next call the buffer
+    /// was still empty (we returned a clone, not the original)
+    /// so the same Some([]) flowed forever.  Audit #12 fix.
     fn windows(self, size: Int) -> WindowsIter<Self> {
+        assert(size > 0, "windows size must be positive");
         WindowsIter { iter: self, size: size, buffer: [], done: false }
     }
 
