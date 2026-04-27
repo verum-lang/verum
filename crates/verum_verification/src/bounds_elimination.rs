@@ -2073,7 +2073,14 @@ impl MetaConstraint {
         }
     }
 
-    /// Substitute meta parameter with a concrete value (legacy method for compatibility)
+    /// Substitute meta parameter with a concrete value.
+    ///
+    /// Thin wrapper around `substitute_var` that pulls the parameter
+    /// name from `self.param_name`.  Currently has no in-tree caller
+    /// — kept here as a documented part of the legacy compatibility
+    /// surface for callers that still pass `MetaConstraint` instead
+    /// of explicit param name + value.  Removal needs cross-crate
+    /// search of all `MetaConstraint`-using paths first.
     #[allow(dead_code)]
     fn substitute_meta_param(&self, expr: &Expression, value: usize) -> Expression {
         self.substitute_var(expr, &self.param_name, value)
