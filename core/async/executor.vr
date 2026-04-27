@@ -774,88 +774,37 @@ implement AsyncRuntime {
     ///
     /// Uses the IOEngine wait() if available for event-driven wakeups,
     /// otherwise falls back to a brief OS sleep to avoid busy-waiting.
+    /// The platform-specific concrete-type cast is delegated to
+    /// `engine_wait_active` (per-target @cfg-gated helper) so the
+    /// type checker only sees the active platform's driver type —
+    /// previously 3 inline @cfg blocks each named a different
+    /// concrete driver, which forced the type checker to resolve
+    /// `IoDriver` even when targeting macOS where it doesn't exist.
     fn wait_for_events(&self) {
         if self.io_engine_ptr != 0 {
-            // We own the IOEngine — call wait() with 1ms timeout for event-driven wakeup.
-            // Platform-specific cast to concrete IOEngine type.
             let zero_cr = CompletionResult { user_data: 0, result: 0, flags: 0 };
             let mut results: [CompletionResult; 64] = [zero_cr; 64];
             let timeout = Some(IoDuration.from_millis(1));
 
-            @cfg(target_os = "macos") {
-                mount sys.darwin.io.{KqueueDriver};
-                let engine = self.io_engine_ptr as &mut KqueueDriver;
-                match engine.wait(&mut results, 0, timeout) {
-                    Ok(count) => {
-                        // Process completions — wake tasks whose I/O completed
-                        let mut i = 0;
-                        while i < count {
-                            let result = results[i];
-                            // Compare in UInt64 space — WAKE_TOKEN is
-                            // UInt64 0xFFFF_FFFF_FFFF_FFFF (2^64-1)
-                            // which doesn't representably cast to Int64.
-                            // Filter the sentinel before narrowing.
-                            let user_data = result.user_data;
-                            if user_data > 0_u64 && user_data != WAKE_TOKEN {
-                                self.wake_task(user_data as Int);
-                            }
-                            i = i + 1;
+            match engine_wait_active(self.io_engine_ptr, &mut results, timeout) {
+                Ok(count) => {
+                    // Process completions — wake tasks whose I/O completed.
+                    // Compare in UInt64 space — WAKE_TOKEN is
+                    // UInt64 0xFFFF_FFFF_FFFF_FFFF (2^64-1) which
+                    // doesn't representably cast to Int64; filter
+                    // the sentinel before narrowing.
+                    let mut i = 0;
+                    while i < count {
+                        let user_data = results[i].user_data;
+                        if user_data > 0_u64 && user_data != WAKE_TOKEN {
+                            self.wake_task(user_data as Int);
                         }
-                    }
-                    Err(_) => {
-                        // IOEngine error — fall back to brief sleep
-                        self.brief_sleep();
+                        i = i + 1;
                     }
                 }
-            }
-
-            @cfg(target_os = "linux") {
-                mount sys.linux.io.{IoDriver};
-                let engine = self.io_engine_ptr as &mut IoDriver;
-                match engine.wait(&mut results, 0, timeout) {
-                    Ok(count) => {
-                        let mut i = 0;
-                        while i < count {
-                            let result = results[i];
-                            // Compare in UInt64 space — WAKE_TOKEN is
-                            // UInt64 0xFFFF_FFFF_FFFF_FFFF (2^64-1)
-                            // which doesn't representably cast to Int64.
-                            // Filter the sentinel before narrowing.
-                            let user_data = result.user_data;
-                            if user_data > 0_u64 && user_data != WAKE_TOKEN {
-                                self.wake_task(user_data as Int);
-                            }
-                            i = i + 1;
-                        }
-                    }
-                    Err(_) => {
-                        self.brief_sleep();
-                    }
-                }
-            }
-
-            @cfg(target_os = "windows") {
-                mount sys.windows.io.{IoDriver};
-                let engine = self.io_engine_ptr as &mut IoDriver;
-                match engine.wait(&mut results, 0, timeout) {
-                    Ok(count) => {
-                        let mut i = 0;
-                        while i < count {
-                            let result = results[i];
-                            // Compare in UInt64 space — WAKE_TOKEN is
-                            // UInt64 0xFFFF_FFFF_FFFF_FFFF (2^64-1)
-                            // which doesn't representably cast to Int64.
-                            // Filter the sentinel before narrowing.
-                            let user_data = result.user_data;
-                            if user_data > 0_u64 && user_data != WAKE_TOKEN {
-                                self.wake_task(user_data as Int);
-                            }
-                            i = i + 1;
-                        }
-                    }
-                    Err(_) => {
-                        self.brief_sleep();
-                    }
+                Err(_) => {
+                    // IOEngine error — fall back to brief sleep.
+                    self.brief_sleep();
                 }
             }
         } else {
@@ -1266,6 +1215,60 @@ public type ExecutorTimeout<F: Future> is {
 @inline
 fn time_now_ns() -> UInt64 {
     monotonic_nanos()
+}
+
+// =============================================================================
+// Platform-specific IOEngine wait dispatch
+// =============================================================================
+//
+// `wait_for_events` previously embedded three near-identical inline
+// `@cfg(target_os)` blocks, each casting the io_engine_ptr to that
+// platform's concrete IOEngine implementation (KqueueDriver on
+// macOS, IoDriver on Linux/Windows) and calling .wait(). The type
+// checker resolved every block on every host — so a macOS check
+// would fail with "type not found: IoDriver" because the linux
+// branch's mount + cast were still on the resolution path.
+//
+// The fix is to define one fn per target where the @cfg gates the
+// entire definition (signature + body). Verum then sees only the
+// active platform's helper at type-check time; the call site
+// (`wait_for_events`) is uniform.
+//
+// All three return a uniform `Result<Int, EngineIoError>` — Ok
+// carries the completion count, Err falls through to brief_sleep
+// in the caller.
+
+@cfg(target_os = "macos")
+fn engine_wait_active(
+    io_engine_ptr: Int,
+    results: &mut [CompletionResult; 64],
+    timeout: Maybe<EngineDuration>,
+) -> Result<Int, EngineIoError> {
+    mount sys.darwin.io.{KqueueDriver};
+    let engine = io_engine_ptr as &mut KqueueDriver;
+    engine.wait(results, 0, timeout)
+}
+
+@cfg(target_os = "linux")
+fn engine_wait_active(
+    io_engine_ptr: Int,
+    results: &mut [CompletionResult; 64],
+    timeout: Maybe<EngineDuration>,
+) -> Result<Int, EngineIoError> {
+    mount sys.linux.io.{IoDriver};
+    let engine = io_engine_ptr as &mut IoDriver;
+    engine.wait(results, 0, timeout)
+}
+
+@cfg(target_os = "windows")
+fn engine_wait_active(
+    io_engine_ptr: Int,
+    results: &mut [CompletionResult; 64],
+    timeout: Maybe<EngineDuration>,
+) -> Result<Int, EngineIoError> {
+    mount sys.windows.io.{IoDriver};
+    let engine = io_engine_ptr as &mut IoDriver;
+    engine.wait(results, 0, timeout)
 }
 
 implement<F: Future> ExecutorTimeout<F> {
