@@ -1322,10 +1322,20 @@ implement Text {
             i = i + 1;
         }
         let mut val: Int = 0;
+        // SOUNDNESS: Int.MAX (2^63-1) is 19 digits wide. Cap iteration
+        // count so a hostile 100-digit input cannot drive `val * 10`
+        // past overflow before the digit-class check fails. to_int
+        // contract is "0 on parse failure"; overflow is a parse
+        // failure for our purposes — bail with 0 just like a non-digit.
+        let mut consumed: Int = 0;
         while i < blen {
             let b = bytes[i];
             if b >= 48 && b <= 57 {
+                if consumed >= 19 { return 0; }
+                if val > 922_337_203_685_477_580 { return 0; }   // Int.MAX/10
                 val = val * 10 + (b as Int - 48);
+                if val < 0 { return 0; }                          // wrap-around
+                consumed = consumed + 1;
                 i = i + 1;
             } else {
                 break;
@@ -1863,11 +1873,19 @@ implement Text {
         }
         let mut val: Int = 0;
         let mut has_digits = false;
+        // SOUNDNESS: cap digit count + per-step pre-multiply guard.
+        // 19 digits is the width of Int.MAX (2^63-1). A 100-digit
+        // hostile input would otherwise overflow `val * 10` silently.
+        let mut consumed: Int = 0;
         while i < blen {
             let b = bytes[i];
             if b >= 48 && b <= 57 {
+                if consumed >= 19 { return None; }
+                if val > 922_337_203_685_477_580 { return None; }   // Int.MAX/10
                 val = val * 10 + (b as Int - 48);
+                if val < 0 { return None; }                          // wrap-around
                 has_digits = true;
+                consumed = consumed + 1;
                 i = i + 1;
             } else {
                 break;
