@@ -1296,14 +1296,36 @@ impl<'a> RecursiveParser<'a> {
                 let path = self.parse_simple_expr_path()?;
                 Ok(Expr::path(path))
             }
-            // Quantifier expressions: `forall(x: T) expr` / `exists(x: T) expr`
-            // Disambiguate: only parse as quantifier if followed by binding syntax
-            // (identifier or parenthesized bindings). Otherwise treat as identifier.
+            // Quantifier expressions: `forall x: T . body` / `exists x: T . body`
+            // (also parenthesized: `forall(x: T) body`). Disambiguate by what
+            // follows the keyword:
+            //
+            //  • binding-starter (ident, `(`, `mut`, etc.) → parse as quantifier
+            //  • `.` → grammar requires AT LEAST ONE binder; the formula
+            //    `forall . body` / `exists . body` is well-formed neither as a
+            //    quantifier (no binder) nor as a path (`.` is a postfix op,
+            //    not a path segment) — diagnose at the keyword site so the
+            //    user sees a precise "missing binder" message instead of a
+            //    confusing field-access error downstream.
+            //  • anything else → treat the keyword as an ordinary path
+            //    identifier (rare but allowed by the grammar's lexical
+            //    `identifier` production for escape contexts).
             Some(TokenKind::Forall) => {
                 let next = self.stream.peek_nth_kind(1);
                 if matches!(next, Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
                     | Some(TokenKind::Some) | Some(TokenKind::None) | Some(TokenKind::Ok) | Some(TokenKind::Err)) {
                     self.parse_forall_expr()
+                } else if matches!(next, Some(TokenKind::Dot)) {
+                    self.stream.advance(); // consume `forall`
+                    let span = self.stream.current_span();
+                    Err(ParseError::invalid_syntax(
+                        "`forall` requires at least one binder before `.`",
+                        span,
+                    ).with_help(
+                        "Add a binder: `forall x: T . body`, `forall x in xs . body`,\n\
+                         or `forall x . body` (type inferred). Empty `forall . body`\n\
+                         is not valid Verum.",
+                    ))
                 } else {
                     let path = self.parse_simple_expr_path()?;
                     Ok(Expr::path(path))
@@ -1314,6 +1336,17 @@ impl<'a> RecursiveParser<'a> {
                 if matches!(next, Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
                     | Some(TokenKind::Some) | Some(TokenKind::None) | Some(TokenKind::Ok) | Some(TokenKind::Err)) {
                     self.parse_exists_expr()
+                } else if matches!(next, Some(TokenKind::Dot)) {
+                    self.stream.advance(); // consume `exists`
+                    let span = self.stream.current_span();
+                    Err(ParseError::invalid_syntax(
+                        "`exists` requires at least one binder before `.`",
+                        span,
+                    ).with_help(
+                        "Add a binder: `exists x: T . body`, `exists x in xs . body`,\n\
+                         or `exists x . body` (type inferred). Empty `exists . body`\n\
+                         is not valid Verum.",
+                    ))
                 } else {
                     let path = self.parse_simple_expr_path()?;
                     Ok(Expr::path(path))
@@ -2205,13 +2238,27 @@ impl<'a> RecursiveParser<'a> {
             // Syntactic sugar for `$(stage current){ expr }` — moves compile-time value into generated code
             Some(TokenKind::Lift) => self.parse_lift_expr(),
 
-            // Quantifier expressions: `forall(x: T) expr` / `exists(x: T) expr`
-            // Disambiguate: only parse as quantifier if followed by binding syntax
+            // Quantifier expressions: `forall x: T . body` / `exists x: T . body`
+            // (also parenthesized: `forall(x: T) body`). Empty-binder forms
+            // `forall . body` / `exists . body` are rejected with a precise
+            // diagnostic — see the matching arm in parse_primary above for
+            // the full rationale.
             Some(TokenKind::Forall) => {
                 let next = self.stream.peek_nth_kind(1);
                 if matches!(next, Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
                     | Some(TokenKind::Some) | Some(TokenKind::None) | Some(TokenKind::Ok) | Some(TokenKind::Err)) {
                     self.parse_forall_expr()
+                } else if matches!(next, Some(TokenKind::Dot)) {
+                    self.stream.advance(); // consume `forall`
+                    let span = self.stream.current_span();
+                    Err(ParseError::invalid_syntax(
+                        "`forall` requires at least one binder before `.`",
+                        span,
+                    ).with_help(
+                        "Add a binder: `forall x: T . body`, `forall x in xs . body`,\n\
+                         or `forall x . body` (type inferred). Empty `forall . body`\n\
+                         is not valid Verum.",
+                    ))
                 } else {
                     let path = self.parse_simple_expr_path()?;
                     Ok(Expr::path(path))
@@ -2222,6 +2269,17 @@ impl<'a> RecursiveParser<'a> {
                 if matches!(next, Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
                     | Some(TokenKind::Some) | Some(TokenKind::None) | Some(TokenKind::Ok) | Some(TokenKind::Err)) {
                     self.parse_exists_expr()
+                } else if matches!(next, Some(TokenKind::Dot)) {
+                    self.stream.advance(); // consume `exists`
+                    let span = self.stream.current_span();
+                    Err(ParseError::invalid_syntax(
+                        "`exists` requires at least one binder before `.`",
+                        span,
+                    ).with_help(
+                        "Add a binder: `exists x: T . body`, `exists x in xs . body`,\n\
+                         or `exists x . body` (type inferred). Empty `exists . body`\n\
+                         is not valid Verum.",
+                    ))
                 } else {
                     let path = self.parse_simple_expr_path()?;
                     Ok(Expr::path(path))
@@ -2673,7 +2731,8 @@ impl<'a> RecursiveParser<'a> {
 
                     // Check if it's a method call:
                     // - .method() - regular method call
-                    // - .method<T>() - generic method call (turbofish syntax)
+                    // - .method<T>() - generic method call (Verum's spaceless form;
+                    //   Verum has no Rust-style turbofish — `::` is not a token)
                     // For generic method calls, we need lookahead to distinguish from comparison:
                     // - .field < expr is a comparison, not generic args
                     // - .method<T>() is a generic method call (< must be followed by valid generic args and then >()
@@ -2918,37 +2977,29 @@ impl<'a> RecursiveParser<'a> {
                 ))
             }
 
-            // Turbofish generic call: `path::<T1, T2>(args)`.
+            // Rust-style turbofish `::<T1, T2>(args)` — REJECTED in Verum.
             //
-            // Verum prefers `foo<T>(args)` in most positions, but the
-            // turbofish form is the only unambiguous way to supply
-            // explicit generic arguments to a function call that
-            // otherwise parses as a comparison (`foo < T`). The stdlib
-            // (e.g. `core/math/cubical.vr`) uses it in contract
-            // expressions where any ambiguity would be syntactic.
+            // Per `grammar/verum.ebnf` paths use `.` and generic calls use the
+            // spaceless `foo<T>(args)` form. `::` is not a Verum token; any
+            // call site spelled `foo::<T>(args)` is a porting artefact from
+            // Rust and must be rewritten to `foo<T>(args)`.
+            //
+            // We refuse with a precise diagnostic so the user can mechanically
+            // remove the `::` (this is the most common case) instead of
+            // chasing a downstream parse error.
             Some(TokenKind::ColonColon)
                 if self.stream.peek_nth_kind(1) == Some(&TokenKind::Lt) =>
             {
-                self.stream.advance(); // consume `::`
-                let type_args = self.parse_generic_args()?;
-                // After `::<…>` a call `(args)` must follow — otherwise
-                // this is not a turbofish call and we shouldn't consume
-                // the turbofish; but by the grammar `::<T>` only
-                // appears as a generic-arg annotation on a call site,
-                // so treat a missing `(` as an error.
-                // parse_call_args consumes its own `(` and `)`.
-                let args = self.parse_call_args()?;
-                let span = lhs_span.merge(self.stream.make_span(start_pos));
-                return Ok((
-                    Expr::new(
-                        ExprKind::Call {
-                            func: Box::new(lhs),
-                            type_args: type_args.into_iter().collect::<List<_>>(),
-                            args: args.into(),
-                        },
-                        span,
-                    ),
-                    true,
+                let span = self.stream.current_span();
+                return Err(ParseError::invalid_syntax(
+                    "Rust-style turbofish `::<T>` is not valid Verum",
+                    span,
+                )
+                .with_help(
+                    "Verum uses the spaceless generic-call form. Drop the `::`:\n\
+                     \n    foo<T>(args)         instead of   foo::<T>(args)\n\
+                     \n    obj.method<T>(args)  instead of   obj.method::<T>(args)\n\
+                     \n(`::` is not a token in `grammar/verum.ebnf`.)",
                 ));
             }
 
@@ -3752,10 +3803,13 @@ impl<'a> RecursiveParser<'a> {
         // e.g., `Color.Red` is parsed as `Color` (path) + `.Red` (field access)
         // The type checker resolves `Type.Variant` to variant constructors
 
-        // However, DO consume `::` as an alternative path separator (Rust-style paths)
-        // This allows `List::new()`, `Int::parse()`, `State::Ready`, etc.
-        // Do NOT consume `::` followed by `<` (turbofish syntax like `foo::<T>`) -
-        // that should be handled by the caller or produce an error.
+        // Lenient diagnostic-recovery for Rust-style paths (`List::new()`,
+        // `Int::parse()`, `State::Ready`). `::` is NOT canonical Verum —
+        // grammar/verum.ebnf only knows `.` for path separation. Accepting
+        // it here lets us produce precise rename suggestions in the
+        // diagnostics layer instead of an opaque parse error. The
+        // turbofish form (`::` followed by `<`) is rejected explicitly in
+        // the postfix arm earlier in this file with its own diagnostic.
         while self.stream.check(&TokenKind::ColonColon) {
             // Peek at what follows `::` - only consume if it's an identifier-like token
             let next_is_ident = self.stream.peek_nth(1).map(|t| matches!(t.kind,
@@ -5728,6 +5782,30 @@ impl<'a> RecursiveParser<'a> {
 
         if has_outer_paren {
             self.stream.advance(); // consume the (
+        }
+
+        // Reject empty binding list directly (`forall . body` / `exists . body`).
+        //
+        // The grammar (`grammar/verum.ebnf` `forall_expr` / `exists_expr`)
+        // requires AT LEAST ONE `quantifier_binding` between the quantifier
+        // keyword and the `.` separator. Without this guard, `parse_pattern`
+        // below would lazily accept the `.` itself as a degenerate path-like
+        // pattern in some recovery branches and the formula `forall . true`
+        // would parse — hiding a real "user forgot the binder" mistake.
+        //
+        // We diagnose at this site (rather than letting parse_pattern fail
+        // with a downstream error) so the message is precise and actionable.
+        if !has_outer_paren && self.stream.check(&TokenKind::Dot) {
+            let span = self.stream.current_span();
+            return Err(ParseError::invalid_syntax(
+                "quantifier requires at least one binder before `.`",
+                span,
+            )
+            .with_help(
+                "Add a binder: `forall x: T . body`, `forall x in xs . body`,\n\
+                 or `forall x . body` (type inferred). Empty `forall . body` /\n\
+                 `exists . body` is not valid Verum.",
+            ));
         }
 
         // Parse first binding

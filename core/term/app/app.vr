@@ -112,7 +112,7 @@ public async fn run_async<M: Model>(mut model: M) -> IoResult<()> {
     // Unbounded MPSC channel — the application message bus. Receiver is owned
     // by the main loop; Sender is cloned into every spawned command and
     // subscription task.
-    let (tx, mut rx) = channel::<M.Msg>();
+    let (tx, mut rx) = channel<M.Msg>();
 
     // Cancellation token — cancelled when the loop exits (Quit, Ctrl+C, error).
     // Every spawned task observes this and terminates cooperatively.

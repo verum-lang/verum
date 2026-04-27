@@ -147,7 +147,7 @@ implement<T> RingBuffer<T> {
         let ptr = os_alloc(layout.size(), layout.align()) as &unsafe mut T;
 
         if ptr.is_null() {
-            panic(f"RingBuffer.new: os_alloc returned null for {layout.size()} bytes (capacity={cap}, elem_size={Layout.new::<T>().size()})");
+            panic(f"RingBuffer.new: os_alloc returned null for {layout.size()} bytes (capacity={cap}, elem_size={Layout.new<T>().size()})");
         }
 
         Self {

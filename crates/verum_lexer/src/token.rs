@@ -1338,7 +1338,11 @@ pub enum TokenKind {
     /// `:` colon
     #[token(":")]
     Colon,
-    /// `::` double colon (turbofish, path separator)
+    /// `::` double colon. NOT canonical Verum syntax — Verum uses `.` for
+    /// paths (`std.collections.List`) and the spaceless form `foo<T>(args)`
+    /// for generic calls. The token is kept in the lexer so the parser can
+    /// emit precise diagnostics on Rust-style ports (`foo::<T>()` /
+    /// `std::collections::List`) suggesting the canonical Verum spelling.
     #[token("::")]
     ColonColon,
     /// `.` dot (member access)

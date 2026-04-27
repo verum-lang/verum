@@ -139,7 +139,7 @@ implement BatchProcessor {
     }
 
     public fn with_config(exporter: Heap<dyn SpanExporter>, config: BatchConfig) -> BatchProcessor {
-        let (sender, receiver) = bounded::<BatchMessage>(config.max_queue_size);
+        let (sender, receiver) = bounded<BatchMessage>(config.max_queue_size);
         let exporter_clone = exporter.clone();
         let cfg_clone = config.clone();
         spawn_detached(async move {

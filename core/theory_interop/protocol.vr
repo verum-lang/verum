@@ -348,7 +348,7 @@ fn handle_translate(
             let tgt = find_theory(&server.registry, &p.target);
             match (src, tgt) {
                 (Some(s), Some(t)) => {
-                    let partial_map: List<(Int, Int)> = List::new();
+                    let partial_map: List<(Int, Int)> = List.new();
                     let result = translate(s, t, &partial_map);
                     let json   = serialize_translation_result(&result);
                     ok_response(id, json)
@@ -418,9 +418,9 @@ fn handle_load_theory(
             // knows the name.
             let theory = Theory {
                 name:         p.name.clone(),
-                claims:       List::new(),
-                statements:   List::new(),
-                dependencies: List::new(),
+                claims:       List.new(),
+                statements:   List.new(),
+                dependencies: List.new(),
             };
             let loaded = load_theory(&mut server.registry, theory);
             let json   = f"{{\"loaded\":true,\"name\":\"{p.name}\",\"handle\":{loaded.sheaf_handle}}}";
@@ -454,7 +454,7 @@ fn handle_coherence(
 /// Minimal parser for a JSON array of string pairs: [["A","B"],["C","D"]]
 /// Returns a List of (Text, Text) pairs by scanning for quoted strings.
 fn parse_name_pairs(json: &Text) -> List<(Text, Text)> {
-    let mut pairs: List<(Text, Text)> = List::new();
+    let mut pairs: List<(Text, Text)> = List.new();
     let mut rest = json.clone();
 
     loop {

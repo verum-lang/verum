@@ -345,7 +345,7 @@ public context Config {
 /// fn get_user_profile(id: Int) -> Profile using [Cache, Database] {
 ///     let key = f"user:{id}:profile";
 ///     if let Some(cached) = Cache.get(key) {
-///         return cached.deserialize::<Profile>();
+///         return cached.deserialize<Profile>();
 ///     }
 ///     let profile = Database.query(...)?;
 ///     Cache.set(key, profile.serialize(), Duration.mins(5));

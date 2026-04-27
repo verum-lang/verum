@@ -255,7 +255,7 @@ implement SignalRegistry {
 
         // Slow path — first subscribe to this signal.
         let flag = Shared.new(SignalFlag.new());
-        let (tx, _initial_rx) = broadcast_channel::<Signal>(BROADCAST_CAPACITY);
+        let (tx, _initial_rx) = broadcast_channel<Signal>(BROADCAST_CAPACITY);
 
         // Register async-signal-safe handler: JUST an atomic flag store.
         // No allocation, no locking, no re-entrant calls — fully safe
