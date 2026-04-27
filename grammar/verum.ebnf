@@ -394,13 +394,52 @@ visibility      = 'public' | 'internal' | 'protected' | epsilon ;
 epsilon         = ;
 
 attribute_item  = '@' , attribute , item ;
+(*
+ * Compiler-internal typed attributes are recognised by name; everything
+ * else falls through to the generic identifier form (parsed as
+ * `@<name>(args)` and interpreted by the meta-system OR ignored as
+ * advisory).
+ *
+ * V8.1 (#196) classification of attributes:
+ *
+ * COMPILER-INTERNAL TYPED ATTRIBUTES (recognised by name, dispatched
+ * by Rust passes — TCB / pipeline / audit walker / CLI driver):
+ *   - @verify(...)                VVA §12 verification ladder.
+ *   - @framework(name, "cite")    VVA §6 trusted-boundary axiom.
+ *   - @framework_translate(s, t, "cite")
+ *                                  VVA Task C7b cross-framework bridge.
+ *   - @extract[(<target>)] / @extract_witness[(<target>)] /
+ *     @extract_contract[(<target>)]
+ *                                  VVA §8.6 program-extraction.
+ *   - @enact(epsilon = "...")     VVA §11 DC/Actic side annotation.
+ *   - @accessibility(<lambda>)    Diakrisis Axi-4 marker.
+ *   - @quantity(0 | 1 | omega)    VVA §7.6 linearity.
+ *
+ * META-SYSTEM ADVISORY ATTRIBUTES (parsed via the generic
+ * `identifier(args)` form below; semantic validation lives in
+ * `core/meta/diakrisis_attrs.vr` via meta-fns — zero grammar bloat,
+ * user-extensible, single-source-of-truth):
+ *   - @effect(<kind>)             VVA Part B §9.
+ *   - @infinity_category(<level>) VVA Part B §4.
+ *   - @autopoietic(epsilon=<str>, depth=<int>)  VVA Part B §5.
+ *   - @ludic_design               VVA Part B §10.
+ *   - @cut_elimination[(bound=<int>)]            VVA Part B §10.
+ *
+ * Per V8.1 META1 architectural principle: typed attributes are
+ * reserved for compiler-internal dispatch where Rust-side performance
+ * and TCB constraints matter. Every advisory marker that doesn't
+ * participate in compile-time dispatch is BETTER expressed via the
+ * meta-system.
+ *)
 attribute       = std_attribute
                 | specialize_attribute
                 | derive_attribute
                 | verify_attribute
                 | identifier , [ '(' , attribute_args , ')' ] ;
-attribute_args  = expression_list ;
+attribute_args  = expression_list | named_arg_list ;
 expression_list = expression , { ',' , expression } ;
+named_arg_list  = named_arg , { ',' , named_arg } ;
+named_arg       = identifier , '=' , expression ;
 
 (* Special attribute forms *)
 (* Spec: docs/detailed/18-advanced-protocols.md Section 3.1 - Specialization *)
@@ -534,12 +573,27 @@ variant_list    = [ '|' ] , variant , { '|' , variant } ;
 (* HIT path constructors (higher inductive types):                        *)
 (* A variant with `= endpoint_a .. endpoint_b` is a path constructor,     *)
 (* introducing a path from endpoint_a to endpoint_b at the type level.    *)
-(* Example (circle S¹):                                                   *)
+(* Example (circle S¹) — 1-cell:                                          *)
 (*   type S1 is Base | Loop() = Base..Base;                               *)
-(* Example (interval):                                                    *)
+(* Example (interval) — 1-cell:                                           *)
 (*   type Interval is Zero | One | Seg() = Zero..One;                     *)
+(*                                                                        *)
+(* V8.1 (#196 follow-up, §7.4 V3.2) — n-cell HIT syntax:                  *)
+(* When an endpoint is itself a parenthesised range expression, the       *)
+(* variant's cell dimension lifts by one. This generalises naturally:     *)
+(*   1-cell:  | Loop() = Base..Base;                                      *)
+(*   2-cell:  | Surf() = (loop_a..loop_b)..(loop_b..loop_a);              *)
+(*   3-cell:  | Cell3() = ((p..q)..(r..s))..((t..u)..(v..w));             *)
+(* The kernel records the resulting `dim` on the PathCtorSig and the      *)
+(* eliminator-emit recursively nests `PathOver` per dimensional step.     *)
+(* Example (Torus T²) — has 2-cell `Surf`:                                *)
+(*   type Torus is Base | loop_a() = Base..Base | loop_b() = Base..Base   *)
+(*               | Surf() = (loop_a..loop_b)..(loop_b..loop_a);           *)
 variant         = { attribute } , identifier , [ variant_data ] , [ path_endpoints ] ;
 variant_data    = '{' , field_list , '}' | '(' , type_list , ')' ;
+(* `expression` here covers paren-wrapped range expressions for n-cells:  *)
+(*   `(a..b)` parses as `Paren(Range(a, b))` — picked up by the parser    *)
+(*   to compute the variant's `path_dim` at AST-build time.               *)
 path_endpoints  = '=' , expression , '..' , expression ;
 
 field_list      = [ field , { ',' , field } , [ ',' ] ] ;

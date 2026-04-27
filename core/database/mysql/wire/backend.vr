@@ -1,0 +1,385 @@
+// =============================================================================
+// core/database/mysql/wire/backend.vr — server-packet decoders
+// =============================================================================
+// Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
+//
+// Decodes the four basic server packet types (Initial Handshake,
+// OK / EOF, ERR, AuthSwitchRequest, AuthMoreData) plus the
+// ColumnDefinition41 + binary ResultsetRow used by COM_STMT_EXECUTE
+// and the text ResultsetRow used by COM_QUERY.
+// =============================================================================
+
+module core.database.mysql.wire.backend;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.mysql.wire.frame.{
+    FrameError, FeShort, FeBadLength, FeInvalidUtf8,
+    decode_lei, read_u8, read_u16_le, read_u32_le, read_cstr, read_bytes,
+    read_lenenc_string, LkNull,
+};
+mount core.database.mysql.wire.types.{
+    PKT_OK, PKT_EOF, PKT_ERROR, PKT_AUTH_SW, PKT_AUTH_MORE,
+    CSHA2_FAST_AUTH_DONE, CSHA2_FULL_AUTH_NEEDED,
+    CAP_PROTOCOL_41, CAP_PLUGIN_AUTH, CAP_PLUGIN_AUTH_LENENC,
+    CAP_DEPRECATE_EOF, CAP_SECURE_CONNECTION,
+};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type DecodeError is
+      DeShort { wanted: Int, available: Int }
+    | DeBadShape { reason: Text }
+    | DeInvalidUtf8;
+
+fn lift(e: FrameError) -> DecodeError {
+    match e {
+        FeShort { wanted: w, available: a } => DeShort { wanted: w, available: a },
+        FeBadLength { len: _ }              => DeBadShape { reason: "bad length-encoded marker".clone() },
+        FeInvalidUtf8                       => DeInvalidUtf8,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Initial Handshake (server → client, very first packet)
+// -----------------------------------------------------------------------------
+
+public type InitialHandshake is {
+    protocol_version: Int,        // 10 (v10 is current)
+    server_version: Text,         // e.g. "8.0.36"
+    connection_id: Int,
+    auth_plugin_data: List<Byte>, // concatenation of two scrambles → 20 bytes
+    capabilities: Int,            // 32-bit capability flags (lower16 | upper16<<16)
+    character_set: Int,
+    status_flags: Int,
+    auth_plugin_name: Text,       // "caching_sha2_password" by default in MySQL 8
+};
+
+public fn parse_initial_handshake(payload: &[Byte]) -> Result<InitialHandshake, DecodeError> {
+    let mut off: Int = 0;
+    let proto = match read_u8(payload, off)         { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 1;
+    if proto != 10 {
+        return Err(DeBadShape { reason: "unsupported handshake protocol version".clone() });
+    }
+    let (server_ver, used) = match read_cstr(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used;
+
+    let conn_id = match read_u32_le(payload, off)   { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 4;
+
+    // Auth-plugin-data part 1: 8 bytes + 1-byte filler
+    let mut scramble: List<Byte> = match read_bytes(payload, off, 8) {
+        Ok(v) => v, Err(e) => return Err(lift(e))
+    };
+    off = off + 8;
+    off = off + 1;     // filler 0x00
+
+    // Lower 2 bytes of capability flags
+    let caps_lo = match read_u16_le(payload, off)   { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 2;
+
+    let charset = match read_u8(payload, off)       { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 1;
+    let status = match read_u16_le(payload, off)    { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 2;
+    let caps_hi = match read_u16_le(payload, off)   { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 2;
+    let caps = caps_lo | (caps_hi << 16);
+
+    let auth_data_len = if (caps & CAP_PLUGIN_AUTH) != 0 {
+        let v = match read_u8(payload, off)         { Ok(v) => v, Err(e) => return Err(lift(e)) };
+        off = off + 1;
+        v
+    } else {
+        off = off + 1;     // skip 0
+        0
+    };
+
+    // Reserved 10 bytes
+    off = off + 10;
+
+    // Auth-plugin-data part 2 — at least 13 bytes including trailing NUL.
+    let part2_len = if auth_data_len >= 21 { auth_data_len - 8 } else { 13 };
+    let part2 = match read_bytes(payload, off, part2_len) {
+        Ok(v) => v, Err(e) => return Err(lift(e))
+    };
+    off = off + part2_len;
+
+    // Concatenate scramble (drop trailing NUL byte from part2).
+    let mut full: List<Byte> = List.new();
+    let mut i = 0;
+    while i < scramble.len() as Int { full.push(scramble[i]); i = i + 1; }
+    let mut k = 0;
+    let part2_end = if (part2.len() as Int) > 0 { (part2.len() as Int) - 1 } else { 0 };
+    while k < part2_end { full.push(part2[k]); k = k + 1; }
+
+    let mut plugin_name: Text = "".clone();
+    if (caps & CAP_PLUGIN_AUTH) != 0 {
+        match read_cstr(payload, off) {
+            Ok((s, _)) => { plugin_name = s; }
+            Err(e)     => { return Err(lift(e)); }
+        }
+    }
+
+    Ok(InitialHandshake {
+        protocol_version: proto,
+        server_version: server_ver,
+        connection_id: conn_id,
+        auth_plugin_data: full,
+        capabilities: caps,
+        character_set: charset,
+        status_flags: status,
+        auth_plugin_name: plugin_name,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// OK packet
+// -----------------------------------------------------------------------------
+
+public type OkPacket is {
+    affected_rows: Int,
+    last_insert_id: Int,
+    status_flags: Int,
+    warnings: Int,
+    info: Text,
+};
+
+public fn parse_ok(payload: &[Byte], capabilities: Int) -> Result<OkPacket, DecodeError> {
+    if (payload.len() as Int) < 1 {
+        return Err(DeShort { wanted: 1, available: 0 });
+    }
+    if payload[0] != PKT_OK {
+        return Err(DeBadShape { reason: "expected OK packet".clone() });
+    }
+    let mut off: Int = 1;
+    let (affected, _, used) = match decode_lei(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used;
+    let (last_id, _, used2) = match decode_lei(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used2;
+
+    let mut status: Int = 0;
+    let mut warnings: Int = 0;
+    if (capabilities & CAP_PROTOCOL_41) != 0 {
+        status = match read_u16_le(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+        off = off + 2;
+        warnings = match read_u16_le(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+        off = off + 2;
+    }
+
+    // Remaining payload — info (and session-tracking if STATUS_SESSION_STATE_CHANGED)
+    let mut info_bytes: List<Byte> = List.new();
+    let mut i = off;
+    while i < payload.len() as Int {
+        info_bytes.push(payload[i]);
+        i = i + 1;
+    }
+    let info = match Text.from_bytes(&info_bytes) {
+        Ok(t)  => t,
+        Err(_) => "".clone(),     // info field is best-effort
+    };
+
+    Ok(OkPacket {
+        affected_rows: affected,
+        last_insert_id: last_id,
+        status_flags: status,
+        warnings: warnings,
+        info: info,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// ERR packet
+// -----------------------------------------------------------------------------
+
+public type ErrPacket is {
+    code: Int,
+    sql_state: Text,        // 5-char ASCII (might be empty pre-4.1)
+    message: Text,
+};
+
+public fn parse_err(payload: &[Byte], capabilities: Int) -> Result<ErrPacket, DecodeError> {
+    if (payload.len() as Int) < 3 {
+        return Err(DeShort { wanted: 3, available: payload.len() as Int });
+    }
+    if payload[0] != PKT_ERROR {
+        return Err(DeBadShape { reason: "expected ERR packet".clone() });
+    }
+    let code = match read_u16_le(payload, 1) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    let mut off: Int = 3;
+    let mut sql_state: Text = "".clone();
+    if (capabilities & CAP_PROTOCOL_41) != 0 {
+        // 1-byte '#' marker + 5 ASCII bytes
+        off = off + 1;
+        let bytes = match read_bytes(payload, off, 5) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+        match Text.from_bytes(&bytes) {
+            Ok(t)  => { sql_state = t; }
+            Err(_) => {}
+        }
+        off = off + 5;
+    }
+    let mut msg_bytes: List<Byte> = List.new();
+    let mut i = off;
+    while i < payload.len() as Int {
+        msg_bytes.push(payload[i]);
+        i = i + 1;
+    }
+    let message = match Text.from_bytes(&msg_bytes) {
+        Ok(t)  => t,
+        Err(_) => "".clone(),
+    };
+    Ok(ErrPacket { code: code, sql_state: sql_state, message: message })
+}
+
+// -----------------------------------------------------------------------------
+// AuthSwitchRequest / AuthMoreData
+// -----------------------------------------------------------------------------
+
+public type AuthSwitch is {
+    plugin_name: Text,
+    auth_data: List<Byte>,    // typically 20 bytes
+};
+
+public fn parse_auth_switch(payload: &[Byte]) -> Result<AuthSwitch, DecodeError> {
+    if (payload.len() as Int) < 1 || payload[0] != PKT_AUTH_SW {
+        return Err(DeBadShape { reason: "expected AuthSwitchRequest".clone() });
+    }
+    let (name, used) = match read_cstr(payload, 1) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    let mut data: List<Byte> = List.new();
+    let mut i = 1 + used;
+    while i < payload.len() as Int {
+        data.push(payload[i]);
+        i = i + 1;
+    }
+    // Drop trailing NUL if present.
+    if data.len() > 0 && data[data.len() - 1] == 0 {
+        let _ = data.pop();
+    }
+    Ok(AuthSwitch { plugin_name: name, auth_data: data })
+}
+
+public type AuthMore is { data: List<Byte> };
+
+public fn parse_auth_more(payload: &[Byte]) -> Result<AuthMore, DecodeError> {
+    if (payload.len() as Int) < 1 || payload[0] != PKT_AUTH_MORE {
+        return Err(DeBadShape { reason: "expected AuthMoreData".clone() });
+    }
+    let mut data: List<Byte> = List.new();
+    let mut i = 1;
+    while i < payload.len() as Int {
+        data.push(payload[i]);
+        i = i + 1;
+    }
+    Ok(AuthMore { data: data })
+}
+
+// -----------------------------------------------------------------------------
+// ColumnDefinition41
+// -----------------------------------------------------------------------------
+
+public type ColumnDef is {
+    schema: Text,
+    table: Text,
+    org_table: Text,
+    name: Text,
+    org_name: Text,
+    character_set: Int,
+    column_length: Int,
+    column_type: Int,         // MYSQL_TYPE_*
+    flags: Int,
+    decimals: Int,
+};
+
+public fn parse_column_def(payload: &[Byte]) -> Result<ColumnDef, DecodeError> {
+    let mut off: Int = 0;
+    // catalog (always "def")
+    let (_, used) = match read_lenenc_string(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used;
+    let (schema_b, used2) = match read_lenenc_string(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used2;
+    let (table_b, used3) = match read_lenenc_string(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used3;
+    let (otable_b, used4) = match read_lenenc_string(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used4;
+    let (name_b, used5) = match read_lenenc_string(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used5;
+    let (oname_b, used6) = match read_lenenc_string(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used6;
+
+    // length-encoded fixed-length fields wrapper byte (always 0x0c)
+    let (_fixed_marker, _, used7) = match decode_lei(payload, off) { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + used7;
+    let charset = match read_u16_le(payload, off)  { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 2;
+    let col_len = match read_u32_le(payload, off)  { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 4;
+    let col_type = match read_u8(payload, off)     { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 1;
+    let flags = match read_u16_le(payload, off)    { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 2;
+    let dec = match read_u8(payload, off)          { Ok(v) => v, Err(e) => return Err(lift(e)) };
+    off = off + 1;
+
+    Ok(ColumnDef {
+        schema:   bytes_to_text(&schema_b),
+        table:    bytes_to_text(&table_b),
+        org_table: bytes_to_text(&otable_b),
+        name:     bytes_to_text(&name_b),
+        org_name: bytes_to_text(&oname_b),
+        character_set: charset,
+        column_length: col_len,
+        column_type: col_type,
+        flags: flags,
+        decimals: dec,
+    })
+}
+
+fn bytes_to_text(o: &Maybe<List<Byte>>) -> Text {
+    match o {
+        None    => "".clone(),
+        Some(v) => match Text.from_bytes(v) { Ok(t) => t, Err(_) => "".clone() },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// First-byte dispatcher — quickly distinguish OK / ERR / EOF / AuthSwitch /
+// AuthMore / ColumnCount LEI / DataRow.
+// -----------------------------------------------------------------------------
+
+public type ServerPacketKind is
+      SkOk
+    | SkError
+    | SkEof
+    | SkAuthSwitch
+    | SkAuthMore
+    | SkLocalInfile
+    | SkData;     // anything else — caller dispatches by context
+
+public fn classify(payload: &[Byte], capabilities: Int) -> ServerPacketKind {
+    if payload.len() == 0 { return SkData; }
+    let b = payload[0];
+    if b == PKT_ERROR { return SkError; }
+    if b == PKT_OK && (payload.len() as Int) >= 7 {
+        // Could also be a `LOCAL INFILE Request` (0xFB) — handled separately.
+        return SkOk;
+    }
+    if b == PKT_EOF && (payload.len() as Int) < 9 {
+        return SkEof;
+    }
+    if b == PKT_AUTH_SW {
+        // 0xFE could be EOF or AuthSwitch — disambiguate by length:
+        // EOF in protocol 4.1 has payload length 5 (cap-aware), so > 1
+        // here is AuthSwitch.
+        if (payload.len() as Int) > 5 {
+            return SkAuthSwitch;
+        }
+        return SkEof;
+    }
+    if b == PKT_AUTH_MORE { return SkAuthMore; }
+    if b == 0xFB as Byte  { return SkLocalInfile; }
+    SkData
+}

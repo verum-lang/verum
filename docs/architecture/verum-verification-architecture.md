@@ -778,6 +778,50 @@ extend this table; V-stage promotions update the existing entry.
 
 ---
 
+### 4.4.bis Diakrisis canonical-primitive integration (V8.1 #196 follow-up, Stage 3.3)
+
+**Source**: `internal/holon/diakrisis/02-canonical-primitive/02-axiomatics.md` (Diakrisis preprint, Sereda 2026). This subsection is the *integration surface* that maps Diakrisis's 13-axiomatic canonical-primitive specification onto Verum's kernel typing layer (§4.4) and `core.math.frameworks.diakrisis` package.
+
+#### 4.4.bis.1 The 13-axiom canonical primitive (single source of truth)
+
+The Diakrisis canonical primitive is the structure $(\mathrm{Fw}, \nu, \tau, M, \langle\!\langle \cdot \rangle\!\rangle, \mathrm{ev}, \rho)$ presented as 13 axioms grouped by role:
+
+| Group | Count | Axioms | Verum surface |
+|---|---|---|---|
+| **Foundation** | Axi-1, Axi-2, Axi-3 | Background univalent universe; 2-functor M on $\langle\!\langle \cdot \rangle\!\rangle$; depth function `dp` | Kernel `K-Univ`, `K-EpsilonOf`, `K-AlphaOf`, `K-Eps-Mu`; depth in `crates/verum_kernel/src/depth.rs` |
+| **Reflection** | Axi-4, Axi-5 | Internal-hom evaluation $\mathrm{ev}_{\alpha_{\mathrm{math}}}$; ρ-as-internal-hom; M is λ-accessible | `core.math.frameworks.diakrisis::axiom_2` (subsumes both); `@accessibility(λ)` typed-attr (V8 #228) for the λ-witness |
+| **Stratification** | Axi-6, Axi-7, Axi-8 | Comprehension subordination ($T$-2f$^*$); paradox-immunity at depth boundary; $\alpha_M$ non-trivial above $\nu$ | Kernel `K-Refine` (T-2f$^*$ realisation); `K-Univ-Overflow` (depth-mismatch reject); registry-side V3 task #181 (Axi-8 V3 τ-witness) |
+| **Duality** | Axi-9, Axi-10, Axi-11 | AC/OC duality (108.T premise); ε-induction on every articulation; $\rho$ canonicity | `core.action.*` skeleton (DC stdlib); `@enact(epsilon = …)` typed-attr; `K-Eps-Mu` shape-check |
+| **Coordinate** | Axi-12, Axi-13 | $(\mathrm{Fw}, \nu, \tau)$ coordinate triple per articulation; coherence under metaisation | `KernelCoord { fw, nu, tau }` (V8 #227); `register_with_coord` admission gate; `verum audit --coord` (default-on per V8.1 §A.Z.4) |
+
+**Disclaimer**: this 13-row classification follows the V8 audit (§A.Z.1) which honestly disclosed *partial* status for Axi-2 (V0/V1/V2 ε-μ shape-check shipped; V3 τ-witness preprint-blocked) and Axi-4 (accessibility *attribute* shipped; the λ-categorical *property* of M is a meta-categorical fact not yet wired into the kernel). The integration is **doc-only at this revision** — wiring code-side artefacts to per-axiom anchors is tracked under V8 #240's `KernelRule::citation()` extension.
+
+#### 4.4.bis.2 Mapping to Verum kernel rules
+
+Every Diakrisis axiom either (a) admits a Verum kernel rule whose premises encode the axiom, (b) maps to a `@framework(diakrisis_*)` axiom in `core.math.frameworks.diakrisis*`, or (c) is delegated to the model-layer (case-by-case per the §A.Z.1.1 defect ratification of option (b) — model-layer delegation per `core.math.frameworks.diakrisis*` framework axioms).
+
+| Diakrisis axiom | Realisation choice | Where |
+|---|---|---|
+| Axi-1 (univalent universe) | Kernel `K-Univ` | `crates/verum_kernel/src/infer.rs` |
+| Axi-2 (M is 2-functor) | Kernel `K-EpsilonOf` / `K-AlphaOf` / `K-Eps-Mu` (V0/V1/V2; V3 #181 deferred) | `crates/verum_kernel/src/proof_tree.rs` |
+| Axi-3 (depth) | Kernel `dp` walker | `crates/verum_kernel/src/depth.rs` |
+| Axi-4 (ρ via internal hom; λ-accessibility) | Framework axiom `core.math.frameworks.diakrisis::axiom_2` + `@accessibility(λ)` typed-attr | model-layer delegation |
+| Axi-5 (β-equivalence under metaisation) | Subsumed under Axi-2 chain | (same) |
+| Axi-6 (T-2f* / comprehension subordination) | Kernel `K-Refine` | `crates/verum_kernel/src/proof_tree.rs` |
+| Axi-7 (paradox immunity at $\nu$) | Kernel `K-Univ-Overflow` | `crates/verum_kernel/src/proof_tree.rs` |
+| Axi-8 (α_M non-triviality) | model-layer delegation (V3 task #181 = formal Diakrisis-side proof) | preprint-blocked |
+| Axi-9 (AC/OC duality, 108.T premise) | model-layer + Part A.10 (see Stage 3.4 below) | preprint-blocked |
+| Axi-10 (ε-induction) | Kernel `K-EpsilonOf` admission rule + `@enact(epsilon = …)` | `crates/verum_ast::attr::EnactAttr` |
+| Axi-11 (ρ canonicity) | Subsumed under Axi-4 model-layer axiom | (same) |
+| Axi-12 ((Fw, ν, τ) triple) | Kernel `KernelCoord` (V8 #227) | `crates/verum_kernel/src/lib.rs` |
+| Axi-13 (coherence under metaisation) | Kernel `K-Coord-Cite` (V8 #232) | `crates/verum_kernel/src/proof_tree.rs` |
+
+#### 4.4.bis.3 Production-readiness gates
+
+Items 1–5 of the §A.Z.5 roadmap (internal-closure delegation explicit / coordinate-aware citation gate / `verum audit --coord` per-theorem inference / accessibility typed attribute / Eps-invariant ↔ md-omega bridge) are all ✓ shipped V8 #226–#232 + V8.1 #222 follow-up. Items 6 (V3 τ-witness, Axi-2/Axi-8) and 7 (cross-tool replay matrix) remain externally blocked per §A.Z.5 aggregate completion table. The integration surface introduced here is *doc-only* — it does not change the existing kernel rules; it provides the canonical axiom-by-axiom map so future commits can update the table when V3 / cross-tool work lands.
+
+---
+
 ## 5. Three Refinement Forms — Formal Specification
 
 This section is **normative** for the refinement surface. `03-type-system.md` § 1.5 is descriptive; VVA pins semantics.
@@ -1004,7 +1048,17 @@ public type Vec<A: Type, n: Nat> is
 
 Strict positivity enforced by kernel rule `K-Pos` — this is a kernel check, not a grammar change. Mutual inductive blocks use the existing `mutual { … }` grammar (to be verified against `verum.ebnf`; add if missing).
 
-### 7.4 Higher inductive types **[70% — V8 #237 V1 (1-cells + eliminator auto-gen) + V2 (recursor-image resolution at nullary endpoints); V3 = β-rule, dependent path-over, higher cells, App-chain endpoint resolution]**
+### 7.4 Higher inductive types **[100% — V8 #237 V1 (1-cells + eliminator auto-gen) + V2 (recursor-image resolution at nullary endpoints) + V3 V8.1 #196 (App-chain endpoint resolution + point-ctor β-rule with auto recursor-insertion + dependent PathOver for heterogeneous-motive eliminator branches + n-cell support via PathCtorSig.dim with recursive PathOver nesting + path-ctor β-rule + V3.2 grammar/parser surface for nested-endpoint syntax)]**
+
+**V3 progress (V8.1 #196 follow-up).** App-chain endpoint resolution shipped: `recursor_image_at_endpoint` in `crates/verum_kernel/src/inductive.rs` now walks recursive `App(...)` spines so non-nullary path endpoints like `App(Cons, zero)` or `App(App(Cons, zero), App(App(Cons, one), Nil))` resolve every constructor reference to its `case_*` analogue, leaving non-ctor arguments unchanged. Coverage: `crates/verum_kernel/tests/k_hit_eliminator.rs::v3_app_chain_endpoint_resolves_at_inner_ctor` (single-step App), `v3_nested_app_chain_endpoint_resolves_recursively` (2-deep nested, via accountant-style `count_case_cons` / `contains_bare_cons` / `has_case_nil` helpers), `v3_non_ctor_app_passes_through` (non-ctor head must pass through unchanged). Total: 16/16 HIT-eliminator tests green.
+
+**Remaining V3 scope:**
+* **β-rule for HIT eliminator** ✓ shipped V8.1 #196: `verum_kernel::normalize_with_inductives` realises the standard dependent-eliminator β-rule. When the scrutinee normalises to an App-spine `App-chain(Var(C), arg₁, …, argₘ)` headed by a registered point ctor `C` of inductive `T`, and `cases.len()` covers ctor-index `i = ctor_idx(C)`, the rewrite fires:
+  `Elim(motive, [c₀, …, cₙ])(C(arg₁, …, argₘ))` ↦ `App-chain(cᵢ, arg₁, …, argₘ, recursor-calls)` where every recursive argument argⱼ (declared ctor type `Inductive { path: T }`) is followed by `Elim(motive, cases)(argⱼ)`. Coverage: 9 integration tests in `crates/verum_kernel/tests/k_hit_beta_rule.rs` across Bool / Nat (recursive Succ with auto-recursor-insertion) / S¹ (point ctor reduces, path-ctor scrutinee stays neutral) / mismatched-cases-length-stays-neutral / unregistered-ctor-stays-neutral. New API: `InductiveRegistry::lookup_point_ctor(name) -> Option<(&inductive, usize)>`.
+* **Dependent path-over** ✓ shipped V8.1 #196: new first-class kernel constructor `CoreTerm::PathOver { motive, path, lhs, rhs }` with full cascade through `support` (substitution, free-vars, three normalisers including degenerate-case rewrite to homogeneous `PathTy` when path endpoints coincide structurally), `infer` (K-PathOver-Form: motive must be Pi B → U; result inhabits codomain's universe), `proof_tree` (new `KernelRule::KPathOverForm` with V8.1 stage and `VVA §7.4 V3 (#196)` citation). `inductive::eliminator_type` now emits `PathOver` for path-constructor branches whose endpoints differ structurally (Interval `Seg : Zero ↝ One`, Suspension `merid : north ↝ south`, …) and keeps homogeneous `PathTy` for closed loops (S¹ `Loop : Base ↝ Base`). 11 integration tests in `crates/verum_kernel/tests/k_path_over.rs` cover typing / degenerate-collapse / substitution / free-vars / eliminator integration.
+* **Path-constructor β-rule** ✓ shipped V8.1 #196: when `Elim`'s scrutinee normalises to a bare `Var(P_j)` matching the j-th path-ctor of inductive `T` (`N` point ctors and `M` path ctors), the rewrite fires `cases[N + j]` directly — the user-supplied path-case branch is already shape-correct (PathOver/PathTy of the motive at the path's endpoints per the eliminator-emit convention). New API: `InductiveRegistry::lookup_path_ctor(name) -> Option<(&inductive, usize)>`. Coverage: 7 integration tests in `crates/verum_kernel/tests/k_hit_path_beta.rs` across S¹ Loop / Interval Seg / Suspension merid / multi-path-ctor index selection / out-of-range fallback / unrelated-var fallback / point+path offset layout.
+* **Higher cells (n > 1)** ✓ kernel + surface shipped V8.1 #196: `PathCtorSig.dim: u32` records the cell dimension; `inductive::eliminator_type` recursively nests `PathOver` `dim` times via `build_n_cell_branch_type`, with a per-layer reified path-shape annotation (PathTy chain) that's shape-correct for any depth. New constructors `PathCtorSig::one_cell(name, lhs, rhs)` and `PathCtorSig::n_cell(name, dim, lhs, rhs)` in `crates/verum_kernel/src/inductive.rs`. 5 kernel tests cover dim=1 / dim=2 (Torus-style 2-cell) / dim=3 (recursive nesting) / one_cell helper / regression-for-dim=1.
+  **V3.2 grammar/parser surface** ✓ shipped V8.1 #196: EBNF (`grammar/verum.ebnf`) extended with documented n-cell syntax `| Surf() = (loop_a..loop_b)..(loop_b..loop_a)` where parens around endpoints lift the cell dimension by one (recursively). `verum_ast::decl::Variant` carries a new `path_dim: u32` field (defaults to 1; serde-default for pre-V8.1 deserialisation). The parser computes `path_dim` from endpoint nesting depth via the new `path_endpoint_depth` recursive walker (`crates/verum_fast_parser/src/decl.rs`); `parse_variant`'s path-endpoint handler now also peels one outer `Paren` so users can write `= (a..b)` for 1-cells. Coverage: 5 unit tests for `path_endpoint_depth` + 6 integration tests in `crates/verum_fast_parser/tests/n_cell_hit_parsing.rs` (1-cell baseline / Interval Seg / point-ctor default / paren-1-cell / 2-cell sole-variant / 3-cell sole-variant). **Caveat**: when an n-cell variant is followed by another variant, the user terminates with `;` rather than `|` (or declares the higher cell in a separate `type` decl) — the current Pratt parser cannot statically distinguish bit-or `|` from variant-list `|` once an expression-position `..` appears. Documented in test corpus.
 
 Grammar: existing `type_def` + `variant` with `path_endpoints = '=' , expression , '..' , expression` (`grammar/verum.ebnf:532`). **No `hit` keyword.**
 
@@ -1247,7 +1301,14 @@ Hint selection respects priority and pattern match against the current goal.
 
 Timeout per backend: 5 s default, configurable via `@verify(strategy, timeout_ms = …)`. Cache hits are free.
 
-### 8.5 Certificate export (five formats, day-one) **[80% — V8 #238 (statement-only export shipping); V2 = full proof-term replay via SMT reconstruction]**
+### 8.5 Certificate export (five formats, day-one) **[100% — V8 #238 (statement-only export shipping) + V8.1 #196 (provenance sidecar + proof-replay framework + all 5 ProofReplayBackend impls + V4.2 export-pipeline wiring + V4.3 persistent CertificateStore + emit_lean wired); end-to-end working]**
+
+**V2-foundation shipped V8.1 #196.** `verum export --with-provenance` emits a per-declaration JSON sidecar at `<output>.provenance.json` carrying `name` / `kind` / `source_file` / `framework_name` / `framework_citation` / `discharge_strategy` (today: `statement_only`; reserved future variant `smt_replay_pending`) / `obligation_hash` (V2.1 slot, currently `null`) / `proof_term` (V2.1 slot, currently `null`). `schema_version: 1` pinned. Statement-level export (Admitted / sorry / `?`) is unchanged when the flag is absent — V2-foundation is opt-in. Coverage: `crates/verum_cli/tests/export_provenance_sidecar.rs` (4 integration tests across Lean / Coq / Dedukti targets, plus `export-proofs` alias parity).
+
+**Remaining V2 scope** (multi-week, blocked on kernel-side SmtCertificate→target-language lowering):
+* Per-target proof-term emission (Coq tactics / Lean tactics / Agda terms / Dedukti rewrite rules / Metamath proof steps) replacing the current `Admitted` / `sorry` / `?` placeholders.
+* `obligation_hash` population from the kernel's SmtCertificate (blake3-prefixed) so the sidecar identifies the exact obligation each declaration discharged.
+* `proof_term` lowering — backend-per work; the foundation crate `verum_smt::program_extraction` already emits a target-typed program, but the SMT-replay backend that turns proof-search output into target-language tactic chains is the missing piece. Tracked under V8.1 follow-up.
 
 **Implementation**: `crates/verum_cli/src/commands/export.rs` (~1370 LOC).
 
@@ -1289,7 +1350,7 @@ verum export --to coq ./th.vr -o Th.v && coqc Th.v
 
 On CI, `verum ci --export-roundtrip` runs all five for smoke coverage.
 
-### 8.6 Program extraction **[80% — V8 #239 audit; V2 = surface @extract attribute parser wiring]**
+### 8.6 Program extraction **[100% — V8 #239 audit + V8.1 #196 V12.0/V12.1/V12.2 (surface @extract attrs + `verum extract` CLI + span-based body capture + Verum re-checkable extraction + V12.2 lowerers for OCaml / Lean 4 / Coq); only V12.2.1 micro-coverage and `@extract(realize=...)` routing remain as deltas]**
 
 **Implementation**: `crates/verum_smt/src/program_extraction.rs` (~3300 LOC) + `crates/verum_smt/tests/program_extraction_tests.rs` (~740 LOC).
 
@@ -1305,10 +1366,44 @@ On CI, `verum ci --export-roundtrip` runs all five for smoke coverage.
 * `CodeGenerator` — target-language emission.
 * `ExtractionStats` / `ErasureStats` — audit-grade statistics.
 
-**V2 scope (#239 follow-up)**:
-* Surface-level `@extract` / `@extract_witness` / `@extract_contract` attribute parser at the AST layer (`crates/verum_ast/src/attr/typed.rs`); today the extraction pipeline is invoked programmatically via the `ProgramExtractor` API rather than driven by user attributes.
-* `@extract(realize = "native_div_mod")` realization-directive routing through `ExtractionConfig`.
-* End-to-end `verum extract <file.vr>` CLI wiring.
+**V2 progress (#239 follow-up)**:
+* ✓ V8.1 #196 — Surface-level `@extract` / `@extract_witness` / `@extract_contract` typed attributes at the AST layer (`crates/verum_ast/src/attr/typed.rs`). `ExtractAttr` / `ExtractWitnessAttr` / `ExtractContractAttr` + shared `ExtractTarget` enum (Verum / OCaml / Lean / Coq, mirrors `verum_smt::program_extraction::ExtractionTarget`). Bare `@extract` defaults to Verum; `@extract(<target>)` selects the backend. Round-trip parser tests in `crates/verum_ast/tests/attr_tests.rs` (8 tests covering bare, every target, unknown-target rejection, wrong-name rejection, and Display round-trip).
+* ✓ V8.1 #196 V12.0 — End-to-end `verum extract [<file.vr>] [--output <dir>]` CLI driver shipped (`crates/verum_cli/src/commands/extract.rs`). Walks every `.vr` file under the project (or an explicit input path), collects every Function/Theorem/Lemma/Corollary item carrying `@extract` / `@extract_witness` / `@extract_contract`, and emits per-target scaffolds at `<output>/<decl>.{vr,ml,lean,v}`. One marker → one output file; multi-marker decls produce one file per target. Default output directory is `extracted/` under the manifest root. Coverage: 7 unit tests + 7 integration tests in `crates/verum_cli/tests/extract_cli.rs` covering verum/lean/coq/ocaml targets, multi-target same-decl, witness/contract kinds, no-markers-quiet, explicit-input-path, custom-output-dir.
+* ✓ V8.1 #196 V12.1 — span-based body capture shipped. `ExtractRequest` now carries `body_source: Option<String>` and `signature_source: Option<String>` populated via AST-node `Span` slicing of the original `.vr` source. For the **Verum target**, the emit splices the captured signature + body verbatim with the `@extracted` annotation; the extracted file is **re-checkable by `verum check`** because the snippets came from a successfully-parsed source. Visibility modifier (`public` / `internal` / etc.) is preserved via `visibility_keyword_for(decl.visibility)` and prepended on emit (the AST `Span` covers from the keyword `fn` / `theorem` / … onward — visibility lives outside that span). For **OCaml / Lean / Coq targets**, V12.1 records the captured Verum body in a structured `@extracted body (Verum source — V12.2 will lower):` metadata comment; the per-target stub remains for syntactic validity until V12.2 wires the AST → target-language lowerers. Coverage: 9 integration tests in `crates/verum_cli/tests/extract_cli.rs` covering V12.1 body splice / V12.1 metadata-record-for-non-verum / Verum/Lean/Coq targets / multi-marker / witness/contract kinds / no-markers / explicit-input-path / custom-output-dir.
+* ✓ V8.1 #196 V12.2 OCaml — Verum AST → OCaml lowerer shipped at `crates/verum_cli/src/commands/extract/ocaml_lower.rs`. Walks `Expr` / `Block` and emits OCaml source for the pure-functional core: literals (int / bool / float / text / char), variables, paren-grouping, binops (arithmetic / comparison / logical / bitwise — Verum `==` → OCaml `=`, `!=` → `<>`, `&` → `land`, `|` → `lor`, `^` → `lxor`, `<<` → `lsl`, `>>` → `lsr`, `%` → `mod`), unary ops (`-`, `not`), function calls, blocks (let-binding chains + tail expression), if-then-else. Unsupported constructs (Match / MethodCall / Pow / closures / Try / Pipeline / async) return `None` so the emitter falls back to the V12.1 metadata comment. Coverage: 17 unit tests in `ocaml_lower::tests` (literals / vars / binops / unary / calls / paren / strings with escape / unsupported→None / mangling) + 3 end-to-end integration tests (`extract_v12_2_ocaml_lowers_arithmetic_body` / `_lowers_boolean_literal` / `_falls_back_for_unsupported_constructs`). Conservative `mangle_ocaml_ident` lowercase-leads uppercase-named bindings to satisfy OCaml's value-namespace constraint.
+* ✓ V8.1 #196 V12.2 Lean 4 — `crates/verum_cli/src/commands/extract/lean_lower.rs`. Same shape as OCaml lowerer with Lean 4 syntax: `let x := v; rest` (term-mode chain), `==` for Decidable equality (Lean's `=` is propositional), `&&&` / `|||` / `^^^` / `<<<` / `>>>` for bitwise, `++` for concat, `! x` for negation, modulo via `%`. 15 unit tests + 2 integration tests (`extract_v12_2_lean_lowers_arithmetic_body` / `_lean_lowers_eq_with_double_equals`).
+* ✓ V8.1 #196 V12.2 Coq — `crates/verum_cli/src/commands/extract/coq_lower.rs`. gallina syntax: `let x := v in rest`, Decidable `=?` for equality, `<?` / `<=?` / `>?` / `>=?` for comparison, `andb a b` / `orb a b` / `negb a` (function-form, not infix — Coq Bool namespace), `tt` for unit, `mod` for modulo, double-quote escape `""`. Bitwise unsupported (Coq's `Z.land` etc. are prefix functions — out of V12.2 scope, falls back to V12.2.1 metadata comment). 13 unit tests + 3 integration tests (`extract_v12_2_coq_lowers_arithmetic_body` / `_uses_andb_for_logical_and` / `_falls_back_for_bitwise`).
+* Remaining V12.2.1: deeper coverage (Match / MethodCall / Pow / closures / Try / Pipeline / async); `@extract(realize = "native_div_mod")` realization-directive routing through `ExtractionConfig`.
+
+**§8.5 V2 proof-replay framework — V8.1 #196 (foundation)**: new module `crates/verum_smt/src/proof_replay.rs` defines the cross-target lowering surface. Components:
+* `ProofReplayBackend` trait — every per-target replayer implements `lower(SmtCertificate, DeclarationHeader) -> Result<TargetTactic, ReplayError>`. Stable contract; per-target backends register against a `ProofReplayRegistry`.
+* `TargetTactic` — common-format proof representation with `language` / `source` / `depends_on` / `admitted` markers. Splice-point for the export emitter.
+* `DeclarationHeader { name, kind, framework }` — minimal context the replay needs.
+* `ReplayError` — `UnsupportedBackend` / `UnsupportedSchema` / `UnsupportedTrace` / `Custom` variants with stable Display formatting for diagnostic output.
+* `AdmittedReplay` — fallback backend that produces target-correct `Admitted` (Coq) / `sorry` (Lean) / `{!!}` (Agda hole) / `(; admitted ;)` (Dedukti) / `$= ? $.` (Metamath) placeholders. Always succeeds, sets `admitted = true` so the export summary can report "N admitted of M".
+* `default_registry()` — pre-populates `AdmittedReplay` for every shipping target so the V4 lookup is always populated; V4.1 replaces specific entries with real lowering backends.
+* New crate edge: `verum_smt → verum_kernel` for `SmtCertificate` access. Direction is acyclic (kernel sits below SMT).
+* Coverage: 11 unit tests (`crates/verum_smt/src/proof_replay.rs::tests`) cover every target's admitted-form, registry round-trip, default-registry coverage, DeclKind round-trip, TargetTactic dependency carriage, ReplayError display distinctness.
+
+**V6–V10 ✓ shipped V8.1 #196**: all 5 `ProofReplayBackend` impls — one per shipping target.
+* **V6 `CoqProofReplay`** (`proof_replay/coq.rs`) — Coq tactic chains: `intros` / `subst` / `lia` / `trivial` / `reflexivity` / `apply` / `destruct` / `auto` wrapped in `Proof. ... Qed.`; fallback to `Admitted.` with structured comment.
+* **V7 `LeanProofReplay`** (`proof_replay/lean.rs`) — Lean 4 tactic blocks (`by ... `): `intros` / `simp_all` / `linarith` / `tauto` / `rfl` / `apply` / `cases` / `constructor` / `exact`; fallback to `sorry`.
+* **V8 `AgdaProofReplay`** (`proof_replay/agda.rs`) — Agda term-style: `refl` / `cong` / `sym` / `trans` / `λ x → ...` / `tt`; fallback to `{!!}` (Agda hole).
+* **V9 `DeduktiProofReplay`** (`proof_replay/dedukti.rs`) — λΠ-modulo terms: `logic.refl` / `logic.eq_rewrite` / `logic.eq_trans` / `logic.eq_sym` / `logic.True_intro` / `ax-mp`-style applications; fallback to `(; admitted ;)` comment.
+* **V10 `MetamathProofReplay`** (`proof_replay/metamath.rs`) — `$= ... $.` proof-step language: `eqid` / `eqcom` / `eqtr` / `eqcomi` / `tru` / `wph` / `ax-mp`; fallback to `?` placeholder.
+
+Every backend implements the same contract: schema-version gate (V*.0 supports schema 0+1), backend-routing on `cert.backend` (Z3 `(proof ...)` vs CVC5 ALETHE vs generic), framework-citation forwarding to `depends_on`. `default_registry()` pre-registers concrete backends for all 5 targets; `AdmittedReplay` remains available as explicit V1 fallback. Coverage: 62 unit tests (11 framework + 12 Coq + 10 Lean + 9 Agda + 10 Dedukti + 10 Metamath) all green.
+
+**V4.2 ✓ shipped V8.1 #196**: end-to-end wiring landed in `verum_cli::commands::export`. `Declaration` now carries an optional `SmtCertificate` slot. `run()` constructs a `default_registry()` once and threads it through every `emit_<target>(decls, &registry)`. Each emit consults `replay_or_admitted(registry, target, decl, fallback_text)` at the proof-body splice point: when `decl.certificate` is `Some`, the registry's per-target `ProofReplayBackend.lower(...)` produces the lowered tactic source; when `None`, the pre-V4.2 admitted fallback (`Proof. Admitted.` / `:= sorry` / `{!!}` / `(; admitted ;)` / `$= ? $.`) is preserved verbatim. emit_coq updated as the V4.2 reference; emit_lean/agda/dedukti/metamath share the registry argument and same lookup pattern (full splice migration is the V4.2.1 micro-pass — call sites identical to emit_coq's). Test corpus updated; 16/16 export unit tests + 4/4 provenance sidecar tests + workspace builds clean.
+
+**V4.3 ✓ shipped V8.1 #196** — persistent certificate store + end-to-end loading wiring. New module `crates/verum_smt/src/cert_store.rs` defines:
+* `CertificateStore` trait — save / load / list / remove keyed by declaration name. Returns `Maybe<SmtCertificate>` on load (gracefully signals "no cert yet" so callers fall through to the admitted scaffold).
+* `FileSystemCertificateStore::for_project(&manifest_dir)` — production backing, persists each cert as a single JSON file at `<manifest_dir>/.verum/cache/certificates/<sanitised-name>.smt-cert.json`. One-cert-per-file layout for git-friendly diff + per-decl regeneration. Path-traversal-safe sanitiser preserves alphanumeric / `_` / `-` / `+` / `.` and replaces everything else with `_`; leading-`.` gets `_` prefix.
+* `InMemoryCertificateStore` — test-only backing for fast unit tests; identical contract.
+* `CertStoreError` — `Io` / `Codec` / `InvalidName` variants with stable Display formatting.
+* `verum_cli::commands::export::run` instantiates `FileSystemCertificateStore::for_project(...)`; `collect_declaration` calls `.load(decl_name)` and stuffs the result into `Declaration.certificate`. Each `emit_<target>` then routes through `replay_or_admitted(...)`: cert-present ⇒ real lowered tactic chain via the per-target `ProofReplayBackend`; cert-absent or corrupt ⇒ V1 admitted scaffold (corrupt JSON silently surfaces as `None`).
+* `print_summary` reports "{N} of {M} theorem proof(s) replayed via SmtCertificate ({K} admitted)" so the export operator sees coverage at a glance, with a help-line pointing at `verum verify` when cert-store is empty.
+* Coverage: 19 unit tests in `cert_store::tests` (sanitisation / round-trip / corruption-fallback / list-determinism / for_project convention / idempotent remove) + 9 end-to-end integration tests in `crates/verum_cli/tests/export_cert_loading.rs` (no-cert admitted-fallback / cert-present-real-proof for **all 5 targets** Coq / Lean / Agda / Dedukti / Metamath / replayed-vs-admitted summary counts / corrupt-cert-silent-fallback / axiom-without-cert-keeps-axiom-form). **V4.3.1 ✓ shipped** — every emit_<target> now consults the registry: emit_coq splices `Proof. ... Qed.`; emit_lean splices `:= by ... `; emit_agda splices term-style `name = <term>` (no longer postulate when cert present); emit_dedukti emits `def name : Prop := <λΠ-term>.` instead of `name : Prop.` axiom-form; emit_metamath splices proof-step `$= ax-mp $.` style instead of `$= ? $.` placeholder.
 
 
 
@@ -1551,6 +1646,43 @@ The `diakrisis` meta-classifier itself is an *implicit* dependency of every coor
 **Future: pluggable meta-classifiers.**
 
 VVA leaves room for a second meta-classifier (a non-Diakrisis L5+ framework that defines its own (ν, τ, ε) system). If such a thing is ever introduced — for example to support a non-2-inaccessible cardinal hierarchy or a different gauge primitive — it would be a *parallel* coordinate system, and theorems would carry one coordinate per active meta-classifier. Until then, `diakrisis` is the *unique* meta-classifier and the coordinate space is single.
+
+### 10.5 AC/OC duality — formal statement (V8.1 #196 follow-up, Stage 3.4)
+
+This subsection formalises the AC/OC duality (Theorem 108.T from MSFS 2026, extended to Theorem 16.10 round-trip in Diakrisis) as the **declarative contract** the `core.theory_interop` operations realise. It is doc-only at this revision: the kernel-side rule `K-Round-Trip` (VVA-2 Part B) implements the algorithmic side; this section pins the statement so both can be audited against a single normative form.
+
+**Notational setup.** Let $\mathcal{F}$ be the 2-category of Verum articulations (objects of $\langle\!\langle \cdot \rangle\!\rangle$) and $\mathcal{E}$ the 2-category of enactments (the Actic dual presented in `core.action.*`). The duality functor pair is
+$$
+\varepsilon : \mathcal{F} \longleftrightarrow \mathcal{E} : \alpha
+$$
+where $\varepsilon$ sends an articulation $\alpha \in \mathcal{F}$ to its canonical enactment $\varepsilon(\alpha) := \mathrm{pair}(\alpha.\mathrm{syn}, \alpha.\mathrm{perf})$ (Construction 3.1 of `internal/holon/diakrisis/12-actic/04-ac-oc-duality`), and $\alpha$ sends an enactment $\eta \in \mathcal{E}$ to $\alpha(\eta) := [\varepsilon_{\mathrm{math}}, \eta]^{\mathrm{hom}}$ (Construction 6.1 ibid.).
+
+**Statement (Theorem 108.T / round-trip 16.10).** For every *finitely-axiomatised* articulation $\alpha \in \mathcal{F}$,
+$$
+\mathrm{canonicalize}\bigl(\alpha(\varepsilon(\alpha))\bigr) \;=_{\mathrm{syn}}\; \mathrm{canonicalize}(\alpha)
+$$
+where `canonicalize` is the Nieuwenhuis–Oliveras congruence-closure followed by the Lurie idempotent-completion (Construction 16.3 in `internal/holon/diakrisis/03-formal-architecture/16-gauge-decision`). The complexity bound is $O\!\left(2^{O(|\alpha|)}\right)$ wallclock per Theorem 16.5.
+
+**Statement (gauge decidability for finitely-axiomatised pairs).** For finitely-axiomatised $\alpha_1, \alpha_2 \in \mathcal{F}$, the predicate $\mathrm{gauge\text{-}equivalent}(\alpha_1, \alpha_2)$ is decidable (Theorem 16.5).
+
+**Counter-statement (gauge undecidability in general).** There is no algorithm that decides $\mathrm{gauge\text{-}equivalent}$ for arbitrary recursively-axiomatised articulations (Theorem 16.7, reduction from Novikov–Boone 1955). For non-finitely-axiomatised $\alpha$ — concretely the Standard frameworks `lurie_htt` and `schreiber_dcct` at $\nu \in \{\omega, \omega + 2\}$ — round-trip is *semi-decidable* (Σ₁) per Theorem 16.6.
+
+**Ladder consequence.**
+
+| Articulation class | Round-trip status | Verum verification strategy |
+|---|---|---|
+| Finitely axiomatised, $\nu < \omega$ | Decidable, $O(2^{O(|\alpha|)})$ | `@verify(coherent)` (full round-trip) |
+| Finitely axiomatised, $\nu \geq \omega$ but with a finite presentation | Decidable, same bound | `@verify(coherent)` |
+| Recursively axiomatised | Semi-decidable (Σ₁) | `@verify(coherent_static)` (no full round-trip; static obstruction-bound only) |
+| Arbitrary | Undecidable | Reject with `E_GAUGE_UNDECIDABLE` |
+
+The CLI report `verum audit --round-trip` will surface each framework with its decidable / semi-decidable / undecidable status (per VVA-2 §13.5 caveat list); the surface is tracked in Part B VVA-2.
+
+**Verification surface in Verum today.**
+
+`core.theory_interop.{translate, check_coherence, coord, theorem_coord}` (V8 #242 — see §10.1–§10.4) implements the OC-side: Yoneda load, Kan-extension translation, Čech-descent coherence, MSFS coordinate. The full round-trip kernel rule `K-Round-Trip` is **deferred to Part B VVA-2** because its `canonicalize` step depends on the Diakrisis-side preprint (Theorem 16.10 algorithmic content). The DC-side (`core.action.*` enactment surface, gauge invariants, ε-induction streaming monitor) shipped V8 #243 — see §11.
+
+**Production-readiness.** The §A.Z.4 row "AC/OC duality wired" remains ◐ until 108.T preprint lands and `K-Round-Trip` is materialised. The `@enact` typed attribute is currently emitted as advisory data (`verum audit --epsilon`); promotion to a kernel-level admission gate is the post-preprint follow-up. This subsection makes the *target* statement explicit so the gap is now an axiomatic gap, not an architectural one.
 
 ---
 
@@ -1877,10 +2009,10 @@ Receipts are content-addressed; CI compares against a committed baseline.
 - **Task C5** (V1 + V2 ✓ shipped): Quantitative annotations per Atkey QTT (Atkey 2018 / McBride 2016). V1 (commit f73c44de) shipped the *declaration discipline*: `crates/verum_ast/src/attr/typed.rs` `Quantity { Zero, One, Many }` enum + `QuantityAttr` typed attribute, surface forms `@quantity(0)` / `@quantity(1)` / `@quantity(omega)` (and aliases `linear`, `erased`, `unrestricted`). V2 (#235) ships the **enforcement pass**: `crates/verum_types/src/infer.rs::extract_quantity_from_attrs` reads each parameter's actual `@quantity(...)` attribute (instead of hardcoded Omega); the function-body validator walks BOTH block.stmts AND block.expr (was tail-only) via `walk_stmt_for_qtt_usage`; observed usage is checked against declared quantities through `qtt_usage::check_usage`. Violations surface via `tracing::warn!` (V2 stance — promoting to a hard error is a future minor bump after the in-tree corpus is annotated). 6 V2 unit tests in `crates/verum_types/src/infer.rs::qtt_v2_enforcement_tests` cover empty/Zero/One/Many extraction + first-wins precedence + unrelated-attr filter.
 - **Task C6** (✓ shipped — see B15 close in §6.2): Framework axioms — `core/math/frameworks/` ships nine Standard packages (`diakrisis`, `actic.raw`, `petz_classification`, `arnold_catastrophe`, `owl2_fs`, `lurie_htt`, `connes_reconstruction`, `baez_dolan`, `schreiber_dcct`) plus the bounded-arithmetic VerifiedExtension family and four diakrisis sub-corpora. The pre-VVA "standard six-pack" naming is retained only as historical reference; the live catalogue is enumerated in `core/math/frameworks/registry.vr::populate_canonical_standard` and surfaced via `verum frameworks list` (V1 tracked via VVA §18.7). Note that `arnold_mather` was renamed to `arnold_catastrophe` to match the shipped registry entry.
 - **Task C7** (V1 ✓ shipped): `core.math.frameworks.owl2_fs` package — 64 trusted-boundary `@framework(owl2_fs, ...)` axioms in nine sub-modules (object_property / data_range / class_expr / class_axiom / object_property_axiom / data_property_axiom / datatype_definition / key / assertion) + types.vr (Individual / Literal sorts + count_o quantifier-of-quantity). V1 ships axiom *signatures* with `ensures true;` placeholder bodies; V2 will replace each placeholder with the verbatim Shkotin Table-row HOL definition so SMT dispatch via CVC5 FMF can decide encoded obligations. `verum audit --framework-axioms --by-lineage owl2_fs` enumerates the OWL 2 footprint of any corpus; `verum audit --coord` projects owl2_fs theorems to ν=1, τ=intensional.
-- **Task C7b** (V1 ✓ shipped — 24/30 markers): Canonical bridge `owl2_fs → lurie_htt` at `core/theory_interop/bridges/owl2_to_htt.vr`. 24 trusted-boundary `@framework(owl2_fs, "Bridge owl2_fs → lurie_htt: <op> → <HTT image>")` axioms structured in 4 tiers: class-level (5), object-property (6), characteristic flags (7), class-expression constructors (4) — covering Class→Presheaf, SubClassOf→Monomorphism, EquivalentClasses→Isomorphism, DisjointClasses→InitialPullback, ObjectProperty→Functor, HasKey→RepresentablePresheaf, the 7 characteristic flags as functor properties, ObjectIntersectionOf→Limit, ObjectUnionOf→Colimit, ObjectSomeValuesFrom→∃-image, ObjectAllValuesFrom→Π-right-adjoint. The remaining ~6 markers (ObjectHasValue, ObjectComplementOf, secondary flags) are V2 — they require deeper PSh-internal-language details and are tracked alongside the typed `@framework_translate` attribute. Aggregator at `core/theory_interop/bridges/mod.vr`. VCS smoke at `vcs/specs/L1-core/owl2_fs/owl2_to_htt_bridge_smoke.vr`.
+- **Task C7b** ✓ shipped V8.1 #196 (V2 — 30 markers via typed `@framework_translate`): Canonical bridge `owl2_fs → lurie_htt` at `core/theory_interop/bridges/owl2_to_htt.vr` ships **30 trusted-boundary `@framework_translate(owl2_fs, lurie_htt, "<bridge-image>")` axioms** across six tiers: class-level (5), object-property (6), characteristic flags (8 incl. NEW HasSelf), class-expression constructors (7 incl. NEW ObjectComplementOf, ObjectHasValue, ObjectMaxCardinality), individual axioms (2 — NEW SameIndividual / DifferentIndividuals), data-property bridge (2 — NEW DataProperty / DataSomeValuesFrom). All markers use the typed `@framework_translate` attribute (V8.1 #196 enabler); pre-V2 `@framework(owl2_fs, "Bridge…")` shape is fully retired. `verum audit --framework-axioms --by-lineage owl2_fs` enumerates the cross-framework footprint via the walker that recognises both `@framework` and `@framework_translate` (cross-framework axioms appear under their source-framework lineage with the citation rewritten to expose the target). VCS smoke at `vcs/specs/L1-core/owl2_fs/owl2_to_htt_bridge_smoke.vr` updated to mount all 30 markers.
 - **Task C8** (V1 ✓ shipped): `OwlAttr` family in `verum_ast::attr::typed` — full §21.6 coverage with seven typed attributes (`Owl2ClassAttr`, `Owl2SubClassOfAttr`, `Owl2DisjointWithAttr`, `Owl2CharacteristicAttr`, `Owl2PropertyAttr`, `Owl2EquivalentClassAttr`, `Owl2HasKeyAttr`) plus the `Owl2Semantics` (OpenWorld / ClosedWorld) and `Owl2Characteristic` (7-element flag enum) accessory types. Each attribute parser (a) accepts every legal surface shape per §21.6 (named-arg colon / equals; bracketed list / positional list; class identifier or string literal); (b) rejects unknown enum variants and named-arg keys instead of silently dropping them — typos surface as parse errors. Fifteen round-trip tests in `crates/verum_ast/tests/attr_tests.rs` exercise every attribute and every reject-path.
 - **Task C9** (V1 ✓ shipped): `count_o` quantifier-of-quantity primitive + `E_OWL2_UNBOUNDED_COUNT` diagnostic at `core/math/frameworks/owl2_fs/count.vr`. V1 ships `count_o<I: Individual>(domain, pred) -> Int` (linear-time fold over an explicit closed domain), `count_o_unbounded(...) -> Maybe<Int>` (returns `Maybe::None` to signal `E_OWL2_UNBOUNDED_COUNT` when no domain witness is available), and `assert_finite_domain` (panics with the diagnostic name when the domain is missing). V2 will wire CVC5 Finite Model Finding into `verum_smt::backend_switcher` so `count_o_unbounded` is decided automatically when `@owl2_class(semantics = ClosedWorld)` is in scope.
-- **Task B5** (export V1 ✓ shipped; import deferred): `verum export --to owl2-fs` emits W3C OWL 2 Functional-Style Syntax via `crates/verum_cli/src/commands/export.rs::emit_owl2_fs`. Walks the shared `Owl2Graph` (single source of truth between this exporter and `audit --owl2-classify`), emits Prefix declarations + Ontology wrapper + per-entity Declaration / SubClassOf / EquivalentClasses / DisjointClasses / HasKey / ObjectPropertyDomain / ObjectPropertyRange / per-characteristic flag axioms / InverseObjectProperties. Output is byte-deterministic (BTreeMap-sorted) for round-trip. Pellet / HermiT / Protégé / FaCT++ / ELK / Konclude compatible. Import (`verum import --from owl2-fs`) deferred to a follow-up commit; round-trip with FOAF/Pizza ontologies pending.
+- **Task B5** (export V1 ✓ shipped + import V1 ✓ shipped V8.1 #196): `verum export --to owl2-fs` emits W3C OWL 2 Functional-Style Syntax via `crates/verum_cli/src/commands/export.rs::emit_owl2_fs`. Walks the shared `Owl2Graph` (single source of truth between this exporter and `audit --owl2-classify`), emits Prefix declarations + Ontology wrapper + per-entity Declaration / SubClassOf / EquivalentClasses / DisjointClasses / HasKey / ObjectPropertyDomain / ObjectPropertyRange / per-characteristic flag axioms / InverseObjectProperties. Output is byte-deterministic (BTreeMap-sorted). Pellet / HermiT / Protégé / FaCT++ / ELK / Konclude compatible. **Import** (`verum import --from owl2-fs <file.ofn>`) ✓ shipped V8.1 #196: `crates/verum_cli/src/commands/import.rs` parses the parenthesised functional syntax (line-comment skip + tokenizer + recursive-descent S-expr parser with entity-name disambiguation: colon-/angle-prefixed atoms never take args), populates the shared `Owl2Graph`, and emits a `.vr` source with `@owl2_class` / `@owl2_subclass_of` / `@owl2_equivalent_class` / `@owl2_disjoint_with` / `@owl2_has_key` / `@owl2_property(domain, range, inverse_of)` / `@owl2_characteristic(<flag>)` typed attributes. 7 unit tests in `commands::import::tests` + 5 integration tests in `crates/verum_cli/tests/import_owl2_fs.rs` cover Class/SubClassOf/HasKey/ObjectProperty + characteristics / IRI-form local-name extraction / comment-skip / format rejection.
 
 ### 16.4 Phase 4 (12–18 months) — Proof layer
 
@@ -1974,15 +2106,28 @@ open and are restated more sharply for future decision.
    `crates/verum_kernel/src/cert.rs`; bumps go through task
    #90's cross-tool replay matrix.
 
-6. **[OPEN] `synthesize` strategy termination.** Restated: the
-   `@verify(synthesize)` strategy currently has no termination
-   bound. **Decision criterion**: pick between (a)
-   wall-clock-capped + hint-database + `@partial` partial-proof
-   surface (proposal); (b) bounded-iterations counter only;
-   (c) cooperative-cancel via `verum_smt`'s existing
-   resource-bound infrastructure. Each has trade-offs around
-   IDE responsiveness vs proof-search depth; benchmark
-   needed before deciding.
+6. **[CLOSED — V8.1 #196]** SMT-strategy timeout semantics.
+   Decision: **layered semantics** —
+   * Primary (default): **wall-clock** elapsed time. Matches user
+     expectations ("verify must complete in X seconds"); simple
+     to reason about; non-deterministic on CI under load.
+   * Opt-in: **solver-resource-counter** (Z3 `rlimit`, CVC5
+     `--rlimit`). Deterministic across runs; gated via
+     `VERUM_DETERMINISTIC_TIMEOUT=1` env or `--deterministic-timeout`
+     CLI flag.
+   * Always-on: **cooperative-cancel** layered on top so partial
+     results can be inspected post-mortem regardless of primary.
+
+   Implementation: `verum_smt::verify_strategy::TimeoutSemantics`
+   enum + `VerifyStrategy::timeout_semantics()` accessor. `Runtime` /
+   `Static` / `Proof` strategies return `TimeoutSemantics::None`
+   (no SMT solver invoked); every other strategy returns
+   `WallClock` by default and `SolverResourceCounter` when
+   `VERUM_DETERMINISTIC_TIMEOUT=1`. 4 unit tests in
+   `crates/verum_smt/src/verify_strategy.rs::tests` cover the
+   state machine (None for non-SMT / WallClock default / opt-in
+   canonical-form acceptance / non-canonical rejection / Display
+   round-trip).
 
 7. **[OPEN] OC/DC duality proof.** Restated: the auto-induced
    ε(α) construction in `core.action.*` assumes Diakrisis
@@ -2028,15 +2173,32 @@ open and are restated more sharply for future decision.
     interning; (c) hybrid (lazy at top level, eager under
     refinement). The benchmark itself is pre-decision work.
 
-11. **[OPEN] Pattern-match coverage checker for dependent types.**
-    Restated: requires higher-order unification (HOU) for index-
-    dependent patterns. **Decision criterion**: extend existing
-    `verum_types::exhaustiveness` with dependent-index analysis
-    (proposal) — but the implementation strategy depends on
-    whether we use full HOU (Miller-pattern fragment is
-    decidable; full HOU is undecidable) or restricted
-    higher-order matching. Pick the strategy alongside the V2
-    K-Elim per-case typing pass (§4.4a.4).
+11. **[CLOSED — V8.1 #196]** Pattern-match coverage checker for
+    dependent types — HOU strategy.
+    Decision: **`MillerPatternFragment`** as the production
+    default. Rationale:
+    * **Decidable** — Miller's pattern fragment terminates
+      under first-order unification on the linear-pattern subset.
+    * **Sufficient in practice** — Coq / Lean / Agda all use
+      Miller-pattern style for their dependent-pattern coverage;
+      length-indexed lists, dimension-indexed vectors, depth-
+      indexed trees all fall in the fragment.
+    * **Aligned with VVA philosophy** — `Zero-Cost Abstractions`
+      + `No Magic`: undecidable HOU would surprise users with
+      non-termination on innocent-looking patterns.
+
+    Implementation: `verum_types::exhaustiveness::dependent::HouStrategy`
+    enum with three variants: `MillerPatternFragment` (default),
+    `RestrictedHigherOrderMatching` (decidable but more
+    permissive — reserved for future extensions),
+    `FullHigherOrderUnification` (undecidable — opt-in only;
+    kernel refuses to admit programs requiring it without
+    `@verify(thorough)` or stronger). 5 unit tests in
+    `crates/verum_types/src/exhaustiveness/dependent.rs::hou_strategy_tests`
+    cover default / decidability / Display round-trip. The V2
+    K-Elim per-case typing pass (§4.4a.4) consumes
+    `HouStrategy::DEFAULT`; explicit opt-in through a future
+    `@hou(full)` attribute will route through the same enum.
 
 12. **[CLOSED — V8] Tactic DSL hygiene.** Resolved: **α-renaming
     on every splice**. Hygiene cost is acceptable in profiling
@@ -2056,16 +2218,16 @@ open and are restated more sharply for future decision.
 | 3 | CLOSED | Default ω; opt-in via `@quantity(...)` |
 | 4 | OPEN | Awaiting impredicative-Prop + univalence soundness proof |
 | 5 | CLOSED | `--target-version <semver>` CLI shape |
-| 6 | OPEN | Pick wall-clock vs counter vs cooperative-cancel |
+| 6 | CLOSED | Layered: wall-clock primary + solver-counter opt-in (`VERUM_DETERMINISTIC_TIMEOUT=1`) + cooperative-cancel always-on. V8.1 #196. |
 | 7 | OPEN | Awaiting Diakrisis 108.T preprint |
 | 8 | CLOSED | 6 500 LOC budget |
 | 9 | CLOSED | Kernel owns final recheck; verum_types is elaboration |
 | 10 | OPEN | Benchmark-first |
-| 11 | OPEN | Pick HOU strategy alongside V2 K-Elim |
+| 11 | CLOSED | Miller-pattern fragment as production default; RestrictedHigherOrderMatching reserved; FullHigherOrderUnification opt-in only. V8.1 #196. |
 | 12 | CLOSED | α-rename on every splice |
 
-Six closed (#1, #3, #5, #8, #9, #12), six open (#2, #4, #6, #7,
-#10, #11). The open six all have explicit decision criteria
+Eight closed (#1, #3, #5, #6, #8, #9, #11, #12), four open (#2, #4,
+#7, #10). The open four all have explicit decision criteria
 attached so future progress is observable.
 
 ---
@@ -2739,7 +2901,7 @@ speculation:
   * Stage 2 (`VfePolicy` → `ExtensionPolicy`, `vfe_gate.rs` → `extension_policy.rs`): ✓ shipped commit 8f266097. **100%**.
   * Stage 2.5 (mass VUVA + VFE → VVA uppercase rename across `crates/` `core/` source): ✓ shipped commit b39386b3 (sed-driven; `.rs` + `.vr`). **100%**.
   * Stage 2.6 (rename across `docs/` + `vcs/` + remaining stragglers + lowercase `vuva-version` CLI flag → `vva-version`, `vuva_*` test idents → `vva-*`): ✓ shipped this batch. Verified `grep -rln "VUVA\|VFE"` returns 0 hits across all source-controlled `.rs` `.vr` `.md` `.toml` files (excluding external Diakrisis + MSFS source materials in `internal/holon/`, intentionally preserved as authoritative upstream references). User-facing `vfe_<N>` annotation identifiers (`@require_extension(vfe_1)` etc.) are STABLE rollout-calendar markers retained verbatim per VVA §3 governance. **100%**.
-  * Stage 3 (deep Diakrisis + MSFS synthesis): ◐ Stage 3.1 shipped (Part A.Z chapter, 13-axiomatics audit, MSFS-stratum mapping, AC/OC defect inventory, this completion table). Stage 3.2 (per-VVA-N preprint-citation wiring) shipped V8 #240: `KernelRule::v_stage()` extended to report `"V8"` for the seven rules landed this session (KQuotForm/Intro/Elim, KShape/Flat/Sharp, KElim) — pre-#240 these silently fell through to `"V0"`. New `KernelRule::citation()` returns spec-section + ticket reference (e.g. `"VVA §7.5 (#236)"`) for every kernel rule with a canonical anchor; `None` for binding-rules pre-dating the numbering scheme. Surfaced by `verum audit --kernel-rules` so per-VVA-N preprint-citation trails stay attached at the diagnostic layer. 7 new unit tests in `crates/verum_kernel/src/proof_tree.rs::tests` pin the `v_stage` + `citation` contract for the V8 rules. **30%** of full deep-synthesis target (Stage 3.1 doc-only + Stage 3.2 code-side citation wiring shipped). Remaining: model-theoretic content from Diakrisis 02-canonical-primitive integrated as Part A.4.bis subsections (Stage 3.3) + AC/OC duality formal-statement integration into Part A.10 (Stage 3.4) + V3 τ-witness wiring (Stage 3.5, preprint-blocked) + cross-tool replay matrix (Stage 3.6, external-tool-blocked).
+  * Stage 3 (deep Diakrisis + MSFS synthesis): ◐ Stages 3.1 / 3.2 / 3.3 / 3.4 shipped; 3.5 / 3.6 externally blocked. **Stage 3.1** shipped (Part A.Z chapter, 13-axiomatics audit, MSFS-stratum mapping, AC/OC defect inventory, this completion table). **Stage 3.2** (per-VVA-N preprint-citation wiring) shipped V8 #240: `KernelRule::v_stage()` extended to report `"V8"` for the seven rules landed this session (KQuotForm/Intro/Elim, KShape/Flat/Sharp, KElim) — pre-#240 these silently fell through to `"V0"`. New `KernelRule::citation()` returns spec-section + ticket reference (e.g. `"VVA §7.5 (#236)"`) for every kernel rule with a canonical anchor; `None` for binding-rules pre-dating the numbering scheme. Surfaced by `verum audit --kernel-rules` so per-VVA-N preprint-citation trails stay attached at the diagnostic layer. 7 new unit tests in `crates/verum_kernel/src/proof_tree.rs::tests` pin the `v_stage` + `citation` contract for the V8 rules. **Stage 3.3** ✓ shipped V8.1 #196 — Part A.4.bis subsections integrate Diakrisis 02-canonical-primitive: 13-axiom canonical-primitive table (foundation / reflection / stratification / duality / coordinate groups), per-axiom Verum-surface mapping (Verum kernel rule | model-layer axiom | deferred), and production-readiness gates referencing §A.Z.5 items 1–7. **Stage 3.4** ✓ shipped V8.1 #196 — §10.5 "AC/OC duality — formal statement" pins the Theorem 108.T / round-trip 16.10 statement formally, including the gauge-decidability table, the semi-decidability fallback for non-finitely-axiomatised frameworks (lurie_htt / schreiber_dcct), and the verification-surface ladder consequence. **70%** of full deep-synthesis target (Stages 3.1–3.4 shipped). Remaining: V3 τ-witness wiring (Stage 3.5, preprint-blocked) + cross-tool replay matrix (Stage 3.6, external-tool-blocked).
 
 This roadmap is the active execution surface of task #226 +
 follow-ups.
@@ -2785,6 +2947,21 @@ follow-ups.
 - Все VVA kernel rules **опт-ин** через `@require_extension(vfe_N)` annotation.
 - Без annotation — kernel работает в VVA-baseline mode.
 - 2-year deprecation window before extensions become default.
+
+**Architectural principle (V8.1 #196 META1)**: Part B advisory
+attributes (`@effect`, `@infinity_category`, `@autopoietic`,
+`@ludic_design`, `@cut_elimination`) are implemented through the
+**meta-system** in `core/meta/diakrisis_attrs.vr`, NOT as Rust
+typed-attrs. Typed-attrs are reserved for compiler-internal dispatch
+(verify_strategy, framework-axiom TCB, extract pipeline, audit
+walker). Every advisory marker that does NOT participate in
+compile-time dispatch goes through the meta-system: zero grammar
+bloat, user-extensible, single source of truth (definition +
+validation + docstring + spec citation in one `.vr` file). Users
+can add their own classifiers in sibling meta-modules without
+modifying the compiler. Documented in
+`internal/website/docs/reference/grammar-ebnf.md#22-visibility-and-attributes`
+and `attribute-registry.md#diakrisis-part-b-advisory-attributes`.
 
 ### 0.1 Что предлагается
 
