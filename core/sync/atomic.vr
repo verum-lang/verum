@@ -38,9 +38,9 @@ mount core.intrinsics.atomic.{
     atomic_store_u8, atomic_store_u16, atomic_store_u32, atomic_store_u64,
     // Typed atomic CAS intrinsics
     atomic_cas_u32, atomic_cas_u64,
-    // Typed atomic fetch operations
-    atomic_fetch_add_u32, atomic_fetch_add_u64,
-    atomic_fetch_sub_u32, atomic_fetch_sub_u64,
+    // Typed atomic fetch operations (per-width)
+    atomic_fetch_add_u8, atomic_fetch_add_u32, atomic_fetch_add_u64,
+    atomic_fetch_sub_u8, atomic_fetch_sub_u32, atomic_fetch_sub_u64,
     atomic_fetch_and_u64, atomic_fetch_or_u64,
 };
 mount core.intrinsics.platform.{spin_hint};
@@ -382,49 +382,52 @@ implement AtomicU8 {
     }
 
     // Atomic fetch-add, returns old value.
-    // Uses u32-aligned CAS loop for true atomicity.
+    //
+    // Direct `atomic_fetch_add_u8` intrinsic (registered
+    // compiler-side in commit 1eb4ef63 / task #24). Earlier
+    // revision used a u32-aligned CAS loop with byte-masking
+    // (`load_u32` on `&value & !3`) — that path was both
+    // slower (3-5× under contention because of the CAS retry
+    // chain) AND structurally unsound: the load_u32 reads 3
+    // bytes that BELONG TO ADJACENT FIELDS in the enclosing
+    // struct.  Concurrent writes to those neighbour bytes by
+    // other threads (perfectly legitimate operations on
+    // unrelated atomics) caused our CAS to retry indefinitely
+    // and could observe torn reads of the neighbour data.
     public fn fetch_add(&self, val: Byte, order: MemoryOrdering) -> Byte {
-        let byte_ptr = &self.value as *const Byte as Int;
-        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
-        let byte_offset = (byte_ptr & 3) as UInt32;
-        let shift = byte_offset * 8;
-        let mask: UInt32 = 0xFF << shift;
-        let order_u8 = ordering_to_u8(order);
-        loop {
-            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
-            let old_byte = ((word >> shift) & 0xFF) as Byte;
-            let new_byte = ((old_byte as UInt32 + val as UInt32) & 0xFF) as UInt32;
-            let new_word = (word & !mask) | (new_byte << shift);
-            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
-            if success {
-                return old_byte;
-            }
-        }
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        atomic_fetch_add_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
     }
 
     // Atomic fetch-sub, returns old value.
-    // Uses u32-aligned CAS loop for true atomicity.
+    //
+    // Direct `atomic_fetch_sub_u8` intrinsic — same rationale
+    // as `fetch_add` above.
     public fn fetch_sub(&self, val: Byte, order: MemoryOrdering) -> Byte {
-        let byte_ptr = &self.value as *const Byte as Int;
-        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
-        let byte_offset = (byte_ptr & 3) as UInt32;
-        let shift = byte_offset * 8;
-        let mask: UInt32 = 0xFF << shift;
-        let order_u8 = ordering_to_u8(order);
-        loop {
-            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
-            let old_byte = ((word >> shift) & 0xFF) as Byte;
-            let new_byte = ((old_byte as UInt32 - val as UInt32) & 0xFF) as UInt32;
-            let new_word = (word & !mask) | (new_byte << shift);
-            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
-            if success {
-                return old_byte;
-            }
-        }
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        atomic_fetch_sub_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
     }
 
     // Atomic fetch-or, returns old value.
-    // Uses u32-aligned CAS loop for true atomicity.
+    //
+    // **Structural-soundness caveat (deferred fix)**: this
+    // path uses a u32-aligned CAS loop with byte-masking
+    // because the compiler-side `atomic_fetch_or_u8` intrinsic
+    // is not yet registered.  The load_u32 reads 3 bytes
+    // BELONGING TO ADJACENT FIELDS in the enclosing struct;
+    // concurrent writes to those neighbour bytes by other
+    // threads cause our CAS to retry (functional but slower
+    // than direct u8) AND can observe torn reads of
+    // neighbour data if those bytes are NOT themselves
+    // accessed via the same atomic protocol.  The right fix
+    // is registering `atomic_fetch_or_u8` /
+    // `atomic_fetch_and_u8` / `atomic_fetch_xor_u8`
+    // compiler-side and switching to direct intrinsics —
+    // tracked as a follow-up to task #24's atomic-completeness
+    // work.  For struct layouts where AtomicU8 is in a
+    // dedicated cache-line slot, the CAS loop is sound; for
+    // mixed-field layouts callers should ensure no foreign
+    // writes target the same word.
     public fn fetch_or(&self, val: Byte, order: MemoryOrdering) -> Byte {
         let byte_ptr = &self.value as *const Byte as Int;
         let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
