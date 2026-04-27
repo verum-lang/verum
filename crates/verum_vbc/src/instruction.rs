@@ -4766,6 +4766,28 @@ pub enum ArithSubOpcode {
     /// Returns `Some(result)` if no overflow, `None` if overflow.
     CheckedMulU = 0x06,
 
+    /// Checked signed integer negation returning Maybe<T>.
+    ///
+    /// Format: `dst:reg, src:reg, width:u8, signed:u8`
+    ///
+    /// Returns `Some(-src)` for every value EXCEPT signed `T::MIN`,
+    /// for which the mathematical result `|T::MIN|` is unrepresentable
+    /// in two's complement. `None` is returned for the unrepresentable
+    /// case.  The closes the gap where `core/intrinsics/arithmetic.vr`
+    /// declared `checked_neg<T>` but the compiler had no lowering for
+    /// it (calls would panic at codegen).
+    CheckedNeg = 0x07,
+
+    /// Checked signed integer absolute value returning Maybe<T>.
+    ///
+    /// Format: `dst:reg, src:reg, width:u8, signed:u8`
+    ///
+    /// Returns `Some(|src|)` for every value EXCEPT signed `T::MIN`
+    /// (same overflow as `CheckedNeg`).  Symmetric with `CheckedNeg`;
+    /// previously absent from both the .vr surface and the compiler
+    /// — closes the API completeness gap.
+    CheckedAbs = 0x08,
+
     // ========================================================================
     // Overflowing Arithmetic (0x10-0x1F) - Returns (result, overflow_flag)
     // ========================================================================
@@ -4879,6 +4901,25 @@ pub enum ArithSubOpcode {
     ///
     /// Format: `dst:reg, a:reg, b:reg, width:u8, signed:u8`
     SaturatingSub = 0x31,
+
+    /// Saturating signed negation - clamps `T::MIN` to `T::MAX`.
+    ///
+    /// Format: `dst:reg, src:reg, width:u8, signed:u8`
+    ///
+    /// Mathematically `-T::MIN = T::MAX + 1` is unrepresentable in
+    /// two's complement; rather than wrapping (WrappingNeg) or
+    /// returning Maybe<T> (CheckedNeg), this saturates to `T::MAX`
+    /// — the safe-but-lossy choice for code that prefers a
+    /// definite value over an Option.
+    SaturatingNeg = 0x33,
+
+    /// Saturating signed absolute value - clamps `T::MIN` to `T::MAX`.
+    ///
+    /// Format: `dst:reg, src:reg, width:u8, signed:u8`
+    ///
+    /// `|T::MIN|` overflows for the same reason as `-T::MIN`;
+    /// saturates to `T::MAX` instead of wrapping or panicking.
+    SaturatingAbs = 0x34,
 
     /// Saturating multiplication - clamps to MAX/MIN on overflow.
     ///
@@ -5123,6 +5164,9 @@ impl ArithSubOpcode {
             0x04 => Some(Self::CheckedAddU),
             0x05 => Some(Self::CheckedSubU),
             0x06 => Some(Self::CheckedMulU),
+            // Checked unary signed (closes T::MIN gap)
+            0x07 => Some(Self::CheckedNeg),
+            0x08 => Some(Self::CheckedAbs),
             // Overflowing Arithmetic
             0x10 => Some(Self::OverflowingAddI),
             0x11 => Some(Self::OverflowingSubI),
@@ -5143,6 +5187,8 @@ impl ArithSubOpcode {
             0x30 => Some(Self::SaturatingAdd),
             0x31 => Some(Self::SaturatingSub),
             0x32 => Some(Self::SaturatingMul),
+            0x33 => Some(Self::SaturatingNeg),
+            0x34 => Some(Self::SaturatingAbs),
             // Wrapping Arithmetic
             0x40 => Some(Self::WrappingAdd),
             0x41 => Some(Self::WrappingSub),
@@ -5197,6 +5243,8 @@ impl ArithSubOpcode {
             Self::CheckedAddU => "CHECKED_ADD_U",
             Self::CheckedSubU => "CHECKED_SUB_U",
             Self::CheckedMulU => "CHECKED_MUL_U",
+            Self::CheckedNeg => "CHECKED_NEG",
+            Self::CheckedAbs => "CHECKED_ABS",
             Self::OverflowingAddI => "OVERFLOWING_ADD_I",
             Self::OverflowingSubI => "OVERFLOWING_SUB_I",
             Self::OverflowingMulI => "OVERFLOWING_MUL_I",
@@ -5214,6 +5262,8 @@ impl ArithSubOpcode {
             Self::SaturatingAdd => "SATURATING_ADD",
             Self::SaturatingSub => "SATURATING_SUB",
             Self::SaturatingMul => "SATURATING_MUL",
+            Self::SaturatingNeg => "SATURATING_NEG",
+            Self::SaturatingAbs => "SATURATING_ABS",
             Self::WrappingAdd => "WRAPPING_ADD",
             Self::WrappingSub => "WRAPPING_SUB",
             Self::WrappingMul => "WRAPPING_MUL",

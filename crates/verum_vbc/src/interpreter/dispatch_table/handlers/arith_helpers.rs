@@ -208,6 +208,86 @@ pub(super) fn saturating_sub(a: i64, b: i64, width: u8, signed: bool) -> i64 {
     }
 }
 
+/// Saturating signed negation.
+///
+/// `T::MIN` saturates to `T::MAX` (mathematically `-T::MIN = T::MAX + 1`
+/// is unrepresentable in two's complement; saturate rather than wrap).
+/// For unsigned T the operation is meaningless (negation produces a
+/// negative value); we saturate to 0 to give callers a sensible
+/// definite result.
+#[inline(always)]
+pub(super) fn saturating_neg(a: i64, width: u8, signed: bool) -> i64 {
+    if !signed {
+        // Unsigned: -x is meaningless; saturate at 0.
+        return 0;
+    }
+    let (min_val, max_val) = type_bounds(width, true);
+    if a == min_val {
+        max_val
+    } else {
+        // Negation of any other value fits in width.
+        -a
+    }
+}
+
+/// Saturating signed absolute value.
+///
+/// `|T::MIN|` saturates to `T::MAX` (same overflow as `saturating_neg`).
+/// For unsigned T the value is already non-negative, so identity.
+#[inline(always)]
+pub(super) fn saturating_abs(a: i64, width: u8, signed: bool) -> i64 {
+    if !signed {
+        return a;
+    }
+    let (min_val, max_val) = type_bounds(width, true);
+    if a == min_val {
+        max_val
+    } else if a < 0 {
+        -a
+    } else {
+        a
+    }
+}
+
+/// Checked signed negation. Returns `Maybe<i64>` encoded as `(value, is_some)`.
+/// Caller wraps this into a Maybe Value at dispatch time.
+///
+/// Returns `(0, false)` for `T::MIN` (the only value that overflows
+/// negation in two's complement); `(- a, true)` for every other input.
+/// For unsigned T, negation of non-zero is unrepresentable; only 0
+/// returns `(0, true)`.
+#[inline(always)]
+pub(super) fn checked_neg(a: i64, width: u8, signed: bool) -> (i64, bool) {
+    if !signed {
+        if a == 0 { (0, true) } else { (0, false) }
+    } else {
+        let (min_val, _) = type_bounds(width, true);
+        if a == min_val { (0, false) } else { (-a, true) }
+    }
+}
+
+/// Checked signed absolute value. Returns `(value, is_some)` like
+/// `checked_neg`.
+///
+/// Returns `(|a|, true)` for every value EXCEPT `T::MIN` (which
+/// returns `(0, false)` because `|T::MIN|` is unrepresentable in
+/// two's complement). For unsigned T the value is already
+/// non-negative, so always returns `(a, true)`.
+#[inline(always)]
+pub(super) fn checked_abs(a: i64, width: u8, signed: bool) -> (i64, bool) {
+    if !signed {
+        return (a, true);
+    }
+    let (min_val, _) = type_bounds(width, true);
+    if a == min_val {
+        (0, false)
+    } else if a < 0 {
+        (-a, true)
+    } else {
+        (a, true)
+    }
+}
+
 /// Saturating multiplication.
 #[inline(always)]
 pub(super) fn saturating_mul(a: i64, b: i64, width: u8, signed: bool) -> i64 {

@@ -2847,6 +2847,63 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         mlir_op: None, // No direct LLVM intrinsic for saturating mul
         doc: "Saturating multiply",
     },
+    // -------------------------------------------------------------------------
+    // Saturating signed unary (#100, task #25)
+    //
+    // Closes the gap where core/intrinsics/arithmetic.vr declared
+    // `saturating_neg<T>` / `saturating_abs<T>` (lines 257/260)
+    // but the compiler had no lowering — calls would panic at
+    // codegen.  Both saturate `T::MIN` to `T::MAX`; the only
+    // value where standard negate / abs would overflow.
+    // -------------------------------------------------------------------------
+    Intrinsic {
+        name: "saturating_neg",
+        category: IntrinsicCategory::Saturating,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::SaturatingNeg),
+        mlir_op: None, // No direct LLVM intrinsic; lowered as ssub_sat(0, x)
+        doc: "Saturating signed negation (T::MIN → T::MAX)",
+    },
+    Intrinsic {
+        name: "saturating_abs",
+        category: IntrinsicCategory::Saturating,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::SaturatingAbs),
+        mlir_op: Some("llvm.intr.abs"), // with poison-on-overflow=false
+        doc: "Saturating signed absolute value (|T::MIN| → T::MAX)",
+    },
+    // -------------------------------------------------------------------------
+    // Checked unary signed (#100, task #25)
+    //
+    // checked_neg was declared at arithmetic.vr:127 but had no
+    // compiler-side entry; checked_abs was missing entirely.
+    // Both return Maybe<T>: Some(value) for the typical case,
+    // None for the unique-overflow case (T::MIN for signed).
+    // -------------------------------------------------------------------------
+    Intrinsic {
+        name: "checked_neg",
+        category: IntrinsicCategory::Arithmetic,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        param_count: 1,
+        return_count: 1, // returns Maybe<T> (single allocated value)
+        strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::CheckedNeg),
+        mlir_op: None,
+        doc: "Checked signed negation, None on T::MIN",
+    },
+    Intrinsic {
+        name: "checked_abs",
+        category: IntrinsicCategory::Arithmetic,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::CheckedAbs),
+        mlir_op: None,
+        doc: "Checked signed absolute value, None on T::MIN",
+    },
     // =========================================================================
     // Wrapping Arithmetic
     // =========================================================================
