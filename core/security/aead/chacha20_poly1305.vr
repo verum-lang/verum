@@ -66,7 +66,29 @@ public const TAG_SIZE: Int = 16;
 
 public type AeadError is
     | TagMismatch
-    | InvalidInput { reason: Text };
+    | InvalidInput { reason: Text }
+    /// Plaintext or ciphertext exceeds RFC 7539 §2.8 per-(key,nonce)
+    /// limit of 2^32 blocks × 64 bytes = 274_877_906_880 bytes (256 GiB).
+    /// Beyond this the ChaCha20 32-bit counter wraps and reuses
+    /// keystream — keystream-reuse catastrophe.
+    | InputTooLarge { limit_bytes: Int };
+
+/// RFC 7539 §2.8 absolute upper bound on plaintext per (key, nonce):
+///
+///     max_blocks = 2^32
+///     block_size = 64 bytes
+///     max_bytes  = 2^32 × 64 = 274_877_906_880  ≈ 256 GiB
+///
+/// Any caller wanting to encrypt more than this MUST rotate the
+/// nonce.  Beyond the limit a single (key, nonce) pair the ChaCha20
+/// counter wraps modulo 2^32 and the keystream of block N collides
+/// with block (N − 2^32), enabling plaintext recovery via XOR.
+///
+/// Mirrors the AES-GCM `GCM_MAX_PT_BYTES_PER_NONCE` cap shipped in
+/// the sibling module — both AEADs share the per-nonce keystream-
+/// reuse failure mode, just at different boundary sizes (GCM at
+/// 64 GiB, ChaCha at 256 GiB).
+public const CHACHA_MAX_PT_BYTES_PER_NONCE: Int = 274_877_906_880;
 
 // =============================================================================
 // Keyed AEAD
@@ -85,6 +107,14 @@ implement ChaCha20Poly1305 {
     }
 
     /// Seal plaintext → (ciphertext, 16-byte tag).
+    ///
+    /// SOUNDNESS: panics on plaintext exceeding RFC 7539 §2.8
+    /// per-(key,nonce) limit (256 GiB).  Beyond the limit the
+    /// ChaCha20 counter wraps modulo 2^32 and the keystream
+    /// repeats — keystream-reuse catastrophe enables plaintext
+    /// recovery from any pair of (counter mod 2^32)-aligned
+    /// ciphertext blocks.  Same failure mode and mitigation as
+    /// the sibling `aes_gcm` cap.
     public fn encrypt(
         &self,
         nonce: &ChaChaNonce,
@@ -93,6 +123,9 @@ implement ChaCha20Poly1305 {
         ciphertext: &mut List<Byte>,
         tag: &mut [Byte; 16],
     ) {
+        if plaintext.len() > CHACHA_MAX_PT_BYTES_PER_NONCE {
+            panic(f"ChaCha20-Poly1305 encrypt: plaintext {plaintext.len()} bytes exceeds RFC 7539 per-nonce limit {CHACHA_MAX_PT_BYTES_PER_NONCE} — rotate nonce or use streaming AEAD");
+        }
         // Derive one-time Poly1305 key from ChaCha20(counter=0).
         let block0 = chacha20_block(&self.key, 0, nonce);
         let mut poly_key: Poly1305Key = [0; 32];
@@ -125,6 +158,11 @@ implement ChaCha20Poly1305 {
 
     /// Open ciphertext; fails (TagMismatch) without exposing plaintext
     /// if integrity check fails.
+    ///
+    /// SOUNDNESS: rejects ciphertext exceeding the RFC 7539 §2.8
+    /// per-(key,nonce) limit BEFORE running Poly1305+ChaCha20.
+    /// Hostile callers can't force the verifier to do CPU-DoS work
+    /// across many GiB of attacker-supplied input.
     public fn decrypt(
         &self,
         nonce: &ChaChaNonce,
@@ -133,6 +171,11 @@ implement ChaCha20Poly1305 {
         tag: &[Byte; 16],
         plaintext: &mut List<Byte>,
     ) -> Result<(), AeadError> {
+        if ciphertext.len() > CHACHA_MAX_PT_BYTES_PER_NONCE {
+            return Err(AeadError.InputTooLarge {
+                limit_bytes: CHACHA_MAX_PT_BYTES_PER_NONCE,
+            });
+        }
         // Derive poly_key.
         let block0 = chacha20_block(&self.key, 0, nonce);
         let mut poly_key: Poly1305Key = [0; 32];
