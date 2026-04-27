@@ -34,6 +34,7 @@
 
 pub mod cache;
 pub mod frontmatter;
+pub mod lockfile;
 
 use std::ffi::OsString;
 use std::path::Path;
