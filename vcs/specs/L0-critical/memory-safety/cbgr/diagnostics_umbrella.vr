@@ -29,6 +29,7 @@
 mount core.diagnostics.{
     HeaderView, header_view_of,
     live_allocations, live_allocation_count,
+    CallFrame, current_call_stack,
     TaskInfo, TaskLifecycleState,
     PanicInfo, Location,
     PanicReport,
