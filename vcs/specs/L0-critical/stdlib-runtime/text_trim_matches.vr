@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, text, trim, perf
+
+// Regression test for `Text.trim_start_matches` / `trim_end_matches`
+// linear-time rewrite. The pre-fix implementation re-allocated via
+// `slice()` every iteration (O(k·n) for k repetitions on n-byte
+// input); the rewrite walks bytes once with a single final slice.
+//
+// This file validates correctness of every non-empty / boundary case
+// the production helpers must handle. Performance is implicit: a
+// 10k-leading-pattern test would exercise the prior O(k²) blowup but
+// is omitted here to keep typecheck fast — we cover *correctness*
+// surface; perf is separately a benchmark target if/when that
+// infrastructure is consumed by a typecheck-pass runner.
+
+fn main() {
+    // Empty pattern: no-op, returns clone of self.
+    let s1 = "abc";
+    assert(s1.trim_start_matches("") == "abc");
+    assert(s1.trim_end_matches("") == "abc");
+
+    // Pattern not present: no-op.
+    assert("hello".trim_start_matches("x") == "hello");
+    assert("hello".trim_end_matches("x") == "hello");
+
+    // Single match at boundary.
+    assert("xxhello".trim_start_matches("x") == "hello");
+    assert("helloxx".trim_end_matches("x") == "hello");
+
+    // Repeated multi-byte pattern at start.
+    assert("ababhello".trim_start_matches("ab") == "hello");
+    assert("helloabab".trim_end_matches("ab") == "hello");
+
+    // Pattern in middle MUST NOT trim.
+    assert("hexlloxx".trim_start_matches("x") == "hexlloxx");
+    assert("xxhexllo".trim_end_matches("x") == "xxhexllo");
+
+    // Pattern equals entire string: trims to empty.
+    assert("xxxx".trim_start_matches("xx") == "");
+    assert("xxxx".trim_end_matches("xx") == "");
+
+    // Empty input: stays empty.
+    assert("".trim_start_matches("x") == "");
+    assert("".trim_end_matches("x") == "");
+
+    // trim_matches composes both ends.
+    assert("xxhelloxx".trim_matches("x") == "hello");
+    assert("ababcoreabab".trim_matches("ab") == "core");
+
+    // Only-pattern input on both ends.
+    assert("xx".trim_matches("xx") == "");
+
+    // Pattern longer than string: no-op.
+    assert("ab".trim_start_matches("abcd") == "ab");
+    assert("ab".trim_end_matches("abcd") == "ab");
+
+    // Pattern is single byte and string is huge — exercises the
+    // single-pass advance.
+    let many_x = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxhi";  // 30 x's + "hi"
+    assert(many_x.trim_start_matches("x") == "hi");
+}

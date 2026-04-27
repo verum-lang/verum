@@ -224,7 +224,7 @@ implement Text {
         }
         let raw = try_alloc(cap + 1, 1)?;
         if is_null(raw) {
-            return Err(AllocError::OutOfMemory { requested: cap + 1 });
+            return Err(AllocError.OutOfMemory { requested: cap + 1 });
         }
         Ok(Text {
             ptr: raw,
@@ -992,22 +992,56 @@ implement Text {
         self.split_whitespace()
     }
 
-    /// Trim matching prefix repeatedly.
+    /// Trim matching prefix repeatedly. Single-pass O(n + k·m) where
+    /// `k` is the repetition count and `m = pattern.len()`. The prior
+    /// implementation re-allocated via `slice()` on every iteration,
+    /// making it O(k·n) — quadratic in the typical "trim N leading
+    /// copies of the pattern" case.
     public fn trim_start_matches(&self, pattern: &Text) -> Text {
-        let mut s = self.clone();
-        while s.starts_with(pattern) && !pattern.is_empty() {
-            s = s.slice(pattern.len(), s.len());
+        if pattern.is_empty() {
+            return self.clone();
         }
-        s
+        let self_bytes = self.as_bytes();
+        let pattern_bytes = pattern.as_bytes();
+        let plen = pattern_bytes.len();
+        let total = self_bytes.len();
+        let mut start = 0;
+        while start + plen <= total {
+            let mut i = 0;
+            while i < plen && self_bytes[start + i] == pattern_bytes[i] {
+                i = i + 1;
+            }
+            if i < plen {
+                break;
+            }
+            start = start + plen;
+        }
+        self.slice(start, total)
     }
 
-    /// Trim matching suffix repeatedly.
+    /// Trim matching suffix repeatedly. Single-pass O(n + k·m); same
+    /// complexity story as [`trim_start_matches`] above.
     public fn trim_end_matches(&self, pattern: &Text) -> Text {
-        let mut s = self.clone();
-        while s.ends_with(pattern) && !pattern.is_empty() {
-            s = s.slice(0, s.len() - pattern.len());
+        if pattern.is_empty() {
+            return self.clone();
         }
-        s
+        let self_bytes = self.as_bytes();
+        let pattern_bytes = pattern.as_bytes();
+        let plen = pattern_bytes.len();
+        let total = self_bytes.len();
+        let mut end = total;
+        while end >= plen {
+            let base = end - plen;
+            let mut i = 0;
+            while i < plen && self_bytes[base + i] == pattern_bytes[i] {
+                i = i + 1;
+            }
+            if i < plen {
+                break;
+            }
+            end = base;
+        }
+        self.slice(0, end)
     }
 
     /// Trim matching pattern from both ends repeatedly.
