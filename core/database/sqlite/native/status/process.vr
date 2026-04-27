@@ -71,7 +71,7 @@ implement ProcessStatus {
     /// Allocation tracking — bumps both memory_used and malloc_count.
     pub fn note_allocation(&mut self, bytes: Int64) {
         self.memory_used.add(bytes);
-        self.malloc_count.add(1 as Int64);
+        self.malloc_count.add1_i64;
         if bytes > self.malloc_size.current {
             self.malloc_size.observe(bytes);
         }

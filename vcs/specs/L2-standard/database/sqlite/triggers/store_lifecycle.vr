@@ -103,7 +103,7 @@ fn test_row_bindings_for_event() {
 
 fn test_binding_lookup() {
     let mut new_row: List<Register> = List.new();
-    new_row.push(RInt(42 as Int64));
+    new_row.push(RInt42_i64);
     let b = binding_for_insert(new_row);
     let v = b.lookup(&RbNew, 0);
     match v {

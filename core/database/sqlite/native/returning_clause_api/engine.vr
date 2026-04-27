@@ -37,7 +37,7 @@ implement ReturningEngine {
     /// column count doesn't match the expected projection.
     pub fn emit(&mut self, row: &ReturningRow) -> Bool {
         if row.cells.len() != self.column_count { return false; }
-        self.rows_yielded = self.rows_yielded + (1 as Int64);
+        self.rows_yielded = self.rows_yielded + 1_i64;
         true
     }
 

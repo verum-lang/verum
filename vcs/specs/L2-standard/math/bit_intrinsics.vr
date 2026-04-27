@@ -16,18 +16,18 @@ mount core.math.bits.{
 
 fn count_leading_zeros() {
     // 1 → 63 leading zeros (64-bit MSB).
-    let c = clz(1 as UInt64);
+    let c = clz1_u64;
     assert_eq(c, 63 as UInt32);
 }
 
 fn count_trailing_zeros() {
-    let c = ctz(8 as UInt64);      // 0b1000 → 3 trailing zeros
+    let c = ctz8_u64;      // 0b1000 → 3 trailing zeros
     assert_eq(c, 3 as UInt32);
 }
 
 fn popcount_on_all_ones() {
     // Low 8 bits all set — popcount should be 8.
-    let p = popcnt(0xFF as UInt64);
+    let p = popcnt0xFF_u64;
     assert_eq(p, 8 as UInt32);
 }
 
@@ -46,23 +46,23 @@ fn byte_swap_round_trip() {
 }
 
 fn highest_and_lowest_bit() {
-    let hi = highest_bit(0b00011000 as UInt64);   // 0b00010000
+    let hi = highest_bit0b00011000_u64;   // 0b00010000
     assert_eq(hi, 16 as UInt64);
-    let lo = lowest_bit(0b00011000 as UInt64);    // 0b00001000
+    let lo = lowest_bit0b00011000_u64;    // 0b00001000
     assert_eq(lo, 8 as UInt64);
 }
 
 fn clz32_and_ctz32() {
-    let a = clz32(1 as UInt32);
+    let a = clz321_u32;
     assert_eq(a, 31 as UInt32);
-    let b = ctz32(4 as UInt32);
+    let b = ctz324_u32;
     assert_eq(b, 2 as UInt32);
-    let p = popcnt32(7 as UInt32);
+    let p = popcnt327_u32;
     assert_eq(p, 3 as UInt32);
 }
 
 fn bswap16_byte_swap() {
-    let swapped = bswap16(0x1234 as UInt16);
+    let swapped = bswap160x1234_u16;
     assert_eq(swapped, 0x3412 as UInt16);
 }
 

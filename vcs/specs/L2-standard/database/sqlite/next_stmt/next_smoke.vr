@@ -22,23 +22,23 @@ fn test_empty_list_returns_zero() {
 
 fn test_register_unique() {
     let mut l = new_list();
-    assert(l.register(1 as Int64));
-    assert(!l.register(1 as Int64));
+    assert(l.register1_i64);
+    assert(!l.register1_i64);
     assert_eq(l.len(), 1);
 }
 
 fn test_first_via_zero() {
     let mut l = new_list();
-    let _ = l.register(7 as Int64);
-    let _ = l.register(11 as Int64);
+    let _ = l.register7_i64;
+    let _ = l.register11_i64;
     assert_eq(sqlite3_next_stmt(&l, 0 as Int64), 7 as Int64);
 }
 
 fn test_next_advances() {
     let mut l = new_list();
-    let _ = l.register(7 as Int64);
-    let _ = l.register(11 as Int64);
-    let _ = l.register(13 as Int64);
+    let _ = l.register7_i64;
+    let _ = l.register11_i64;
+    let _ = l.register13_i64;
     assert_eq(sqlite3_next_stmt(&l, 7 as Int64), 11 as Int64);
     assert_eq(sqlite3_next_stmt(&l, 11 as Int64), 13 as Int64);
     assert_eq(sqlite3_next_stmt(&l, 13 as Int64), 0 as Int64);
@@ -46,25 +46,25 @@ fn test_next_advances() {
 
 fn test_missing_returns_zero() {
     let mut l = new_list();
-    let _ = l.register(7 as Int64);
+    let _ = l.register7_i64;
     assert_eq(sqlite3_next_stmt(&l, 99 as Int64), 0 as Int64);
 }
 
 fn test_finalize_removes() {
     let mut l = new_list();
-    let _ = l.register(7 as Int64);
-    let _ = l.register(11 as Int64);
-    assert(l.finalize(7 as Int64));
+    let _ = l.register7_i64;
+    let _ = l.register11_i64;
+    assert(l.finalize7_i64);
     assert_eq(l.len(), 1);
-    assert(!l.finalize(7 as Int64));
+    assert(!l.finalize7_i64);
     assert_eq(sqlite3_next_stmt(&l, 0 as Int64), 11 as Int64);
 }
 
 fn test_walk_all_visits_every_entry() {
     let mut l = new_list();
-    let _ = l.register(1 as Int64);
-    let _ = l.register(2 as Int64);
-    let _ = l.register(3 as Int64);
+    let _ = l.register1_i64;
+    let _ = l.register2_i64;
+    let _ = l.register3_i64;
     walk_all(&l, noop);
 }
 

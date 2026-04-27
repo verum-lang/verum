@@ -29,7 +29,7 @@ fn test_v2_accepts_large_size() {
 }
 
 fn test_v1_rejects_above_int32_max() {
-    let too_big: Int64 = (2_147_483_647 as Int64) + (1 as Int64);
+    let too_big: Int64 = 2_147_483_647_i64 + 1_i64;
     let s = BindBlobSpec {
         byte_len: too_big,
         destructor: DStatic,

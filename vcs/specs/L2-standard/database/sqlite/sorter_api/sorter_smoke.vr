@@ -45,31 +45,31 @@ fn test_pma_empty_flag() {
 fn test_engine_accept_without_spill() {
     let threshold: Int64 = 10000 as Int64;
     let mut e = new_engine(threshold);
-    let _ = e.accept_row(100 as Int64);
-    let _ = e.accept_row(200 as Int64);
+    let _ = e.accept_row100_i64;
+    let _ = e.accept_row200_i64;
     assert_eq(e.stats.rows_ingested, 2 as Int64);
     assert(e.is_pure_memory());
 }
 
 fn test_engine_auto_spill_on_overflow() {
-    let mut e = new_engine(100 as Int64);
-    let _ = e.accept_row(500 as Int64);
+    let mut e = new_engine100_i64;
+    let _ = e.accept_row500_i64;
     assert_eq(e.pma_count(), 1);
     assert_eq(e.in_memory_bytes, 0 as Int64);
 }
 
 fn test_engine_peak_memory_tracked() {
-    let mut e = new_engine(1000 as Int64);
-    let _ = e.accept_row(300 as Int64);
+    let mut e = new_engine1000_i64;
+    let _ = e.accept_row300_i64;
     assert_eq(e.stats.peak_memory_bytes, 300 as Int64);
-    let _ = e.accept_row(500 as Int64);
+    let _ = e.accept_row500_i64;
     assert_eq(e.stats.peak_memory_bytes, 800 as Int64);
 }
 
 fn test_engine_finalize_and_emit() {
-    let mut e = new_engine(1000 as Int64);
-    let _ = e.accept_row(100 as Int64);
-    let _ = e.accept_row(100 as Int64);
+    let mut e = new_engine1000_i64;
+    let _ = e.accept_row100_i64;
+    let _ = e.accept_row100_i64;
     e.finalize();
     assert(e.emit_row());
     assert(e.emit_row());
@@ -79,11 +79,11 @@ fn test_engine_finalize_and_emit() {
 }
 
 fn test_engine_accept_after_drained_rejected() {
-    let mut e = new_engine(1000 as Int64);
+    let mut e = new_engine1000_i64;
     e.finalize();
     let _ = e.emit_row();
     // After drained, accept_row fails (not Ingest/Spilling).
-    assert(!e.accept_row(100 as Int64));
+    assert(!e.accept_row100_i64);
 }
 
 fn main() {

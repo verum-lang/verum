@@ -149,9 +149,9 @@ fn test_rtree_split_creates_internal_root() {
 fn test_rtree_delete() {
     let mut t = rtree_new(2);
     t.insert(99 as Int64, bbox_2d(0.0, 1.0, 0.0, 1.0));
-    let removed = t.delete(99 as Int64);
+    let removed = t.delete99_i64;
     assert(removed);
-    let still = t.delete(99 as Int64);
+    let still = t.delete99_i64;
     assert(!still);
 }
 

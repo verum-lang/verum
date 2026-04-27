@@ -50,7 +50,7 @@ public fn start(target: FrameRange) -> CkptSession {
 public fn record_drain(mut s: CkptSession, n: Int64) -> CkptSession {
     s.frames_drained = s.frames_drained + n;
     s.range = consume(s.range, n);
-    s.passes = s.passes + (1 as Int64);
+    s.passes = s.passes + 1_i64;
     s
 }
 
@@ -84,7 +84,7 @@ public fn is_done(s: &CkptSession) -> Bool {
 
 public fn progress(s: &CkptSession) -> Float {
     let total = s.frames_drained + length(&s.range);
-    if total <= (0 as Int64) { return 1.0 as Float; }
+    if total <= 0_i64 { return 1.0 as Float; }
     let drained = s.frames_drained as Float;
     let t = total as Float;
     drained / t

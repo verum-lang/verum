@@ -32,7 +32,7 @@ public fn new_stats() -> MemMethodStats {
 
 implement MemMethodStats {
     pub fn record_malloc(&mut self, bytes: Int64) {
-        self.malloc_calls = self.malloc_calls + (1 as Int64);
+        self.malloc_calls = self.malloc_calls + 1_i64;
         self.bytes_currently = self.bytes_currently + bytes;
         if self.bytes_currently > self.bytes_highwater {
             self.bytes_highwater = self.bytes_currently;
@@ -40,7 +40,7 @@ implement MemMethodStats {
     }
 
     pub fn record_free(&mut self, bytes: Int64) {
-        self.free_calls = self.free_calls + (1 as Int64);
+        self.free_calls = self.free_calls + 1_i64;
         if self.bytes_currently >= bytes {
             self.bytes_currently = self.bytes_currently - bytes;
         } else {
@@ -49,7 +49,7 @@ implement MemMethodStats {
     }
 
     pub fn record_realloc(&mut self, old_bytes: Int64, new_bytes: Int64) {
-        self.realloc_calls = self.realloc_calls + (1 as Int64);
+        self.realloc_calls = self.realloc_calls + 1_i64;
         self.record_free(old_bytes);
         self.record_malloc(new_bytes);
     }

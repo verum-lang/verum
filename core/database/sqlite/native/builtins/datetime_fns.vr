@@ -233,10 +233,10 @@ public fn timediff(a: &Register, b: &Register, clock: &DateTimeClock) -> Registe
             // Format as ±HH:MM:SS.SSS — minimal version.
             let mut neg: Bool = false;
             let mut s = total_secs;
-            if s < (0 as Int64) { neg = true; s = -s; }
-            let hours = (s / (3600 as Int64)) as Int;
-            let mins = (((s % (3600 as Int64)) / (60 as Int64))) as Int;
-            let secs = ((s % (60 as Int64))) as Int;
+            if s < 0_i64 { neg = true; s = -s; }
+            let hours = (s / 3600_i64) as Int;
+            let mins = (((s % 3600_i64) / 60_i64)) as Int;
+            let secs = ((s % 60_i64)) as Int;
             let mut out = Text.new();
             if neg { out.push_byte(45 as Byte); } else { out.push_byte(43 as Byte); }
             push_pad(&mut out, hours, 2);
@@ -379,14 +379,14 @@ fn push_pad(out: &mut Text, n: Int, width: Int) {
     // Same family as panic.vr / Formatter.write_int /
     // sqlite/string_fns.int_to_text fixes.
     let mut mag: UInt64 = if n < 0 {
-        (((!n) as UInt64) + (1 as UInt64))
+        (((!n) as UInt64) + 1_u64)
     } else {
         n as UInt64
     };
-    if mag == (0 as UInt64) { digits.push(48 as Byte); }
-    while mag > (0 as UInt64) {
-        digits.push(((mag % (10 as UInt64)) + (48 as UInt64)) as Byte);
-        mag = mag / (10 as UInt64);
+    if mag == 0_u64 { digits.push(48 as Byte); }
+    while mag > 0_u64 {
+        digits.push(((mag % 10_u64) + 48_u64) as Byte);
+        mag = mag / 10_u64;
     }
     let mut i: Int = digits.len();
     while i < width { out.push_byte(48 as Byte); i = i + 1; }

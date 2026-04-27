@@ -42,7 +42,7 @@ fn test_int16_overflowing_add() {
 @test
 fn test_int32_overflowing_add() {
     let a = 1000 as Int32;
-    let result = a.overflowing_add(2000 as Int32);
+    let result = a.overflowing_add2000_i32;
     assert_eq(result.0.to_int(), 3000);
     assert_eq(result.1, false);
 }
@@ -50,7 +50,7 @@ fn test_int32_overflowing_add() {
 @test
 fn test_int64_overflowing_add() {
     let a = 100000 as Int64;
-    let result = a.overflowing_add(200000 as Int64);
+    let result = a.overflowing_add200000_i64;
     assert_eq(result.0.to_int(), 300000);
     assert_eq(result.1, false);
 }
@@ -92,7 +92,7 @@ fn test_uint8_overflowing_add_overflow() {
 @test
 fn test_uint16_overflowing_add() {
     let a = 1000 as UInt16;
-    let result = a.overflowing_add(2000 as UInt16);
+    let result = a.overflowing_add2000_u16;
     assert_eq(result.0.to_int(), 3000);
     assert_eq(result.1, false);
 }
@@ -100,7 +100,7 @@ fn test_uint16_overflowing_add() {
 @test
 fn test_uint32_overflowing_add() {
     let a = 100000 as UInt32;
-    let result = a.overflowing_add(200000 as UInt32);
+    let result = a.overflowing_add200000_u32;
     assert_eq(result.0.to_int(), 300000);
     assert_eq(result.1, false);
 }
@@ -108,7 +108,7 @@ fn test_uint32_overflowing_add() {
 @test
 fn test_uint64_overflowing_add() {
     let a = 1000000 as UInt64;
-    let result = a.overflowing_add(2000000 as UInt64);
+    let result = a.overflowing_add2000000_u64;
     assert_eq(result.0.to_int(), 3000000);
     assert_eq(result.1, false);
 }
@@ -163,7 +163,7 @@ fn test_uint8_overflowing_sub_overflow() {
 @test
 fn test_int16_overflowing_sub() {
     let a = 100 as Int16;
-    let result = a.overflowing_sub(50 as Int16);
+    let result = a.overflowing_sub50_i16;
     assert_eq(result.0.to_int(), 50);
     assert_eq(result.1, false);
 }
@@ -171,7 +171,7 @@ fn test_int16_overflowing_sub() {
 @test
 fn test_uint16_overflowing_sub() {
     let a = 100 as UInt16;
-    let result = a.overflowing_sub(50 as UInt16);
+    let result = a.overflowing_sub50_u16;
     assert_eq(result.0.to_int(), 50);
     assert_eq(result.1, false);
 }
@@ -179,7 +179,7 @@ fn test_uint16_overflowing_sub() {
 @test
 fn test_int32_overflowing_sub() {
     let a = 1000 as Int32;
-    let result = a.overflowing_sub(500 as Int32);
+    let result = a.overflowing_sub500_i32;
     assert_eq(result.0.to_int(), 500);
     assert_eq(result.1, false);
 }
@@ -187,7 +187,7 @@ fn test_int32_overflowing_sub() {
 @test
 fn test_uint32_overflowing_sub() {
     let a = 1000 as UInt32;
-    let result = a.overflowing_sub(500 as UInt32);
+    let result = a.overflowing_sub500_u32;
     assert_eq(result.0.to_int(), 500);
     assert_eq(result.1, false);
 }
@@ -195,7 +195,7 @@ fn test_uint32_overflowing_sub() {
 @test
 fn test_int64_overflowing_sub() {
     let a = 100000 as Int64;
-    let result = a.overflowing_sub(50000 as Int64);
+    let result = a.overflowing_sub50000_i64;
     assert_eq(result.0.to_int(), 50000);
     assert_eq(result.1, false);
 }
@@ -203,7 +203,7 @@ fn test_int64_overflowing_sub() {
 @test
 fn test_uint64_overflowing_sub() {
     let a = 100000 as UInt64;
-    let result = a.overflowing_sub(50000 as UInt64);
+    let result = a.overflowing_sub50000_u64;
     assert_eq(result.0.to_int(), 50000);
     assert_eq(result.1, false);
 }
@@ -274,7 +274,7 @@ fn test_uint8_overflowing_mul_overflow() {
 @test
 fn test_int16_overflowing_mul() {
     let a = 100 as Int16;
-    let result = a.overflowing_mul(100 as Int16);
+    let result = a.overflowing_mul100_i16;
     assert_eq(result.0.to_int(), 10000);
     assert_eq(result.1, false);
 }
@@ -282,7 +282,7 @@ fn test_int16_overflowing_mul() {
 @test
 fn test_uint16_overflowing_mul() {
     let a = 100 as UInt16;
-    let result = a.overflowing_mul(100 as UInt16);
+    let result = a.overflowing_mul100_u16;
     assert_eq(result.0.to_int(), 10000);
     assert_eq(result.1, false);
 }
@@ -290,7 +290,7 @@ fn test_uint16_overflowing_mul() {
 @test
 fn test_int32_overflowing_mul() {
     let a = 1000 as Int32;
-    let result = a.overflowing_mul(1000 as Int32);
+    let result = a.overflowing_mul1000_i32;
     assert_eq(result.0.to_int(), 1000000);
     assert_eq(result.1, false);
 }
@@ -298,7 +298,7 @@ fn test_int32_overflowing_mul() {
 @test
 fn test_uint32_overflowing_mul() {
     let a = 1000 as UInt32;
-    let result = a.overflowing_mul(1000 as UInt32);
+    let result = a.overflowing_mul1000_u32;
     assert_eq(result.0.to_int(), 1000000);
     assert_eq(result.1, false);
 }
@@ -306,7 +306,7 @@ fn test_uint32_overflowing_mul() {
 @test
 fn test_int64_overflowing_mul() {
     let a = 100000 as Int64;
-    let result = a.overflowing_mul(100 as Int64);
+    let result = a.overflowing_mul100_i64;
     assert_eq(result.0.to_int(), 10000000);
     assert_eq(result.1, false);
 }
@@ -314,7 +314,7 @@ fn test_int64_overflowing_mul() {
 @test
 fn test_uint64_overflowing_mul() {
     let a = 100000 as UInt64;
-    let result = a.overflowing_mul(100 as UInt64);
+    let result = a.overflowing_mul100_u64;
     assert_eq(result.0.to_int(), 10000000);
     assert_eq(result.1, false);
 }
@@ -562,10 +562,10 @@ fn test_usize_to_hex() {
 
 @test
 fn test_zero_conversions() {
-    assert_eq((0 as Int8).to_binary(), "0");
-    assert_eq((0 as UInt8).to_hex(), "0");
-    assert_eq((0 as Int16).to_octal(), "0");
-    assert_eq((0 as UInt16).to_binary(), "0");
+    assert_eq(0_i8.to_binary(), "0");
+    assert_eq(0_u8.to_hex(), "0");
+    assert_eq(0_i16.to_octal(), "0");
+    assert_eq(0_u16.to_binary(), "0");
 }
 
 @test

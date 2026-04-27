@@ -107,7 +107,7 @@ implement StreamProducer {
     /// Append a frame to every replica's outbox.
     pub fn enqueue_frame(&mut self, header: ReplicationFrameHeader, payload: List<Byte>) -> Int64 {
         let seq = self.next_seq;
-        self.next_seq = seq + (1 as Int64);
+        self.next_seq = seq + 1_i64;
         let mut i: Int = 0;
         while i < self.tracks.len() {
             let mut payload_clone: List<Byte> = List.new();
@@ -154,7 +154,7 @@ implement StreamProducer {
     /// Bump epoch — on primary failover the new primary calls this
     /// then begins emitting frames at seq 0.
     pub fn advance_epoch(&mut self) {
-        self.epoch = self.epoch + (1 as Int64);
+        self.epoch = self.epoch + 1_i64;
         self.next_seq = 0 as Int64;
     }
 }
@@ -240,7 +240,7 @@ implement StreamConsumer {
         }
         let pos = frame_position(frame);
         if pos <= self.applied_position {
-            return Err(SeOutOfOrder(self.applied_position + (1 as Int64), pos));
+            return Err(SeOutOfOrder(self.applied_position + 1_i64, pos));
         }
         match applier(frame) {
             None      => {

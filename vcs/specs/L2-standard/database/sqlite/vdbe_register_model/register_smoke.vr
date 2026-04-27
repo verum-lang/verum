@@ -61,7 +61,7 @@ fn test_flag_set_clear() {
 }
 
 fn test_ownership_mutually_exclusive() {
-    assert(ownership_bits_valid(0 as Int64));
+    assert(ownership_bits_valid0_i64);
     assert(ownership_bits_valid(f_dyn()));
     assert(ownership_bits_valid(f_static()));
     assert(ownership_bits_valid(f_ephemeral()));
@@ -76,7 +76,7 @@ fn test_cell_constructors() {
     assert(is_null(&n));
     assert(!is_numeric_cell(&n));
     assert(is_null_flag(n.flags));
-    let i = int_cell(42 as Int64);
+    let i = int_cell42_i64;
     assert(is_numeric_cell(&i));
     assert_eq(i.int_val, 42 as Int64);
     let r = real_cell(3.14 as Float);
@@ -91,18 +91,18 @@ fn test_cell_constructors() {
 
 fn test_is_user_visible() {
     assert(is_user_visible(&null_cell()));
-    assert(is_user_visible(&int_cell(0 as Int64)));
+    assert(is_user_visible(&int_cell0_i64));
     assert(is_user_visible(&str_cell(0)));
 }
 
 fn test_flags_consistent_on_constructed() {
     assert(flags_consistent(&null_cell()));
-    assert(flags_consistent(&int_cell(1 as Int64)));
+    assert(flags_consistent(&int_cell1_i64));
     assert(flags_consistent(&str_cell(0)));
 }
 
 fn test_reset_to_null() {
-    let c = int_cell(99 as Int64);
+    let c = int_cell99_i64;
     let r = reset_to_null(c);
     assert(is_null(&r));
     assert_eq(r.byte_len, 0);

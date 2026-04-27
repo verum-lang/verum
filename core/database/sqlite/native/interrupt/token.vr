@@ -51,7 +51,7 @@ implement InterruptToken {
 
     pub fn fire(&mut self, reason: InterruptReason) {
         self.state = ItFiring(reason);
-        self.fire_version = self.fire_version + (1 as Int64);
+        self.fire_version = self.fire_version + 1_i64;
     }
 
     /// VDBE calls this once it has observed the firing and transitioned

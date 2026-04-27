@@ -55,49 +55,49 @@ fn test_other_classifiers() {
 }
 
 fn test_classify_fixed_values() {
-    match classify(0 as Int64)  { SkNull       => {}, _ => assert(false) }
-    match classify(1 as Int64)  { SkInt8       => {}, _ => assert(false) }
-    match classify(6 as Int64)  { SkInt64      => {}, _ => assert(false) }
-    match classify(7 as Int64)  { SkFloat64    => {}, _ => assert(false) }
-    match classify(8 as Int64)  { SkLiteralZero => {}, _ => assert(false) }
-    match classify(9 as Int64)  { SkLiteralOne => {}, _ => assert(false) }
-    match classify(10 as Int64) { SkReserved10 => {}, _ => assert(false) }
-    match classify(11 as Int64) { SkReserved11 => {}, _ => assert(false) }
+    match classify0_i64  { SkNull       => {}, _ => assert(false) }
+    match classify1_i64  { SkInt8       => {}, _ => assert(false) }
+    match classify6_i64  { SkInt64      => {}, _ => assert(false) }
+    match classify7_i64  { SkFloat64    => {}, _ => assert(false) }
+    match classify8_i64  { SkLiteralZero => {}, _ => assert(false) }
+    match classify9_i64  { SkLiteralOne => {}, _ => assert(false) }
+    match classify10_i64 { SkReserved10 => {}, _ => assert(false) }
+    match classify11_i64 { SkReserved11 => {}, _ => assert(false) }
 }
 
 fn test_classify_blob_and_text_parity() {
     // Even serial_type >= 12 → blob
-    match classify(12 as Int64) { SkBlob => {}, _ => assert(false) }
-    match classify(100 as Int64) { SkBlob => {}, _ => assert(false) }
+    match classify12_i64 { SkBlob => {}, _ => assert(false) }
+    match classify100_i64 { SkBlob => {}, _ => assert(false) }
     // Odd serial_type >= 13 → text
-    match classify(13 as Int64) { SkText => {}, _ => assert(false) }
-    match classify(99 as Int64) { SkText => {}, _ => assert(false) }
+    match classify13_i64 { SkText => {}, _ => assert(false) }
+    match classify99_i64 { SkText => {}, _ => assert(false) }
 }
 
 fn test_blob_byte_length() {
-    assert_eq(blob_byte_length(12 as Int64), 0 as Int64);
-    assert_eq(blob_byte_length(14 as Int64), 1 as Int64);
-    assert_eq(blob_byte_length(22 as Int64), 5 as Int64);
+    assert_eq(blob_byte_length12_i64, 0 as Int64);
+    assert_eq(blob_byte_length14_i64, 1 as Int64);
+    assert_eq(blob_byte_length22_i64, 5 as Int64);
     // Odd → not blob → 0
-    assert_eq(blob_byte_length(13 as Int64), 0 as Int64);
+    assert_eq(blob_byte_length13_i64, 0 as Int64);
 }
 
 fn test_text_byte_length() {
-    assert_eq(text_byte_length(13 as Int64), 0 as Int64);
-    assert_eq(text_byte_length(15 as Int64), 1 as Int64);
-    assert_eq(text_byte_length(23 as Int64), 5 as Int64);
+    assert_eq(text_byte_length13_i64, 0 as Int64);
+    assert_eq(text_byte_length15_i64, 1 as Int64);
+    assert_eq(text_byte_length23_i64, 5 as Int64);
     // Even → not text → 0
-    assert_eq(text_byte_length(14 as Int64), 0 as Int64);
+    assert_eq(text_byte_length14_i64, 0 as Int64);
 }
 
 fn test_encode_blob_round_trip() {
-    let st = encode_blob_length(10 as Int64);
+    let st = encode_blob_length10_i64;
     match classify(st) { SkBlob => {}, _ => assert(false) }
     assert_eq(blob_byte_length(st), 10 as Int64);
 }
 
 fn test_encode_text_round_trip() {
-    let st = encode_text_length(20 as Int64);
+    let st = encode_text_length20_i64;
     match classify(st) { SkText => {}, _ => assert(false) }
     assert_eq(text_byte_length(st), 20 as Int64);
 }

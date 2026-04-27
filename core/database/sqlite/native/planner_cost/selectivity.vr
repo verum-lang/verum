@@ -51,7 +51,7 @@ public fn estimate(p: &PredicateKind, stats: &TableStats) -> Float64 {
         PkColEqLiteral(col) => {
             match column_stats(stats, col) {
                 Some(c) => {
-                    if c.distinct_estimate <= (0 as Int64) {
+                    if c.distinct_estimate <= 0_i64 {
                         DEFAULT_EQ_SELECTIVITY
                     } else {
                         1.0 / (c.distinct_estimate as Float64)
@@ -63,7 +63,7 @@ public fn estimate(p: &PredicateKind, stats: &TableStats) -> Float64 {
         PkColEqCol(col) => {
             match column_stats(stats, col) {
                 Some(c) => {
-                    if c.distinct_estimate <= (0 as Int64) {
+                    if c.distinct_estimate <= 0_i64 {
                         DEFAULT_EQ_SELECTIVITY
                     } else {
                         1.0 / (c.distinct_estimate as Float64)
@@ -76,7 +76,7 @@ public fn estimate(p: &PredicateKind, stats: &TableStats) -> Float64 {
         PkColIn(col, n) => {
             let per_eq = match column_stats(stats, col) {
                 Some(c) => {
-                    if c.distinct_estimate <= (0 as Int64) {
+                    if c.distinct_estimate <= 0_i64 {
                         DEFAULT_EQ_SELECTIVITY
                     } else {
                         1.0 / (c.distinct_estimate as Float64)

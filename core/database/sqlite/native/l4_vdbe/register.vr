@@ -58,11 +58,11 @@ public fn register_kind(r: &Register) -> RegisterKind {
 public fn register_is_truthy(r: &Register) -> Bool {
     match r {
         RNull     => false,
-        RInt(i)   => i != (0 as Int64),
+        RInt(i)   => i != 0_i64,
         RReal(x)  => x != 0.0,
         RText(s)  => s.len() > 0,
         RBlob(b)  => b.len() > 0,
-        RRowId(i) => i != (0 as Int64),
+        RRowId(i) => i != 0_i64,
     }
 }
 

@@ -32,7 +32,7 @@ public fn default_policy() -> MemdbPolicy {
 }
 
 public fn set_max_bytes(p: &mut MemdbPolicy, n: Int64) -> Bool {
-    if n < (0 as Int64) { return false; }
+    if n < 0_i64 { return false; }
     p.max_bytes = n;
     true
 }
@@ -42,7 +42,7 @@ public fn mark_immutable(p: &mut MemdbPolicy) {
 }
 
 public fn fits(p: &mut MemdbPolicy, requested_bytes: Int64) -> Bool {
-    if requested_bytes < (0 as Int64) { return false; }
+    if requested_bytes < 0_i64 { return false; }
     if requested_bytes > p.max_bytes { return false; }
     if requested_bytes > p.peak_bytes { p.peak_bytes = requested_bytes; }
     true

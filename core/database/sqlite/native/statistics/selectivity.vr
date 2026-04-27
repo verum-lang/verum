@@ -55,12 +55,12 @@ implement Selectivity {
 
 public fn estimate_with_stat1(pred: &PredicateShape, stat: &Stat1Row, n_cols: Int) -> Selectivity {
     let total = stat.total_rows;
-    if total <= (0 as Int64) { return selectivity(1.0 as Float64); }
+    if total <= 0_i64 { return selectivity(1.0 as Float64); }
     match pred {
         PsEquality(_) => {
             // Equality on a leading prefix: rows / distinct_keys.
             let distinct = stat.distinct_keys(n_cols);
-            if distinct <= (0 as Int64) { return selectivity(1.0 as Float64); }
+            if distinct <= 0_i64 { return selectivity(1.0 as Float64); }
             selectivity((1.0 as Float64) / (distinct as Float64))
         }
         PsRange(_, _) => {
@@ -84,7 +84,7 @@ public fn estimate_with_stat1(pred: &PredicateShape, stat: &Stat1Row, n_cols: In
 
 public fn estimate_with_stat4(pred: &PredicateShape, hist: &Stat4Histogram) -> Selectivity {
     let total = hist.total_rows;
-    if total <= (0 as Int64) { return selectivity(1.0 as Float64); }
+    if total <= 0_i64 { return selectivity(1.0 as Float64); }
     match pred {
         PsEquality(k) => {
             let count = hist.estimate_eq(k);

@@ -43,12 +43,12 @@ implement LogEngine {
     /// accepted (and the record was pushed to the ring); false if the
     /// sink dropped or no sink is installed.
     pub fn log(&mut self, errcode: Int, message: Text, timestamp_ns: Int64) -> Bool {
-        self.seq = self.seq + (1 as Int64);
+        self.seq = self.seq + 1_i64;
         let rec = new_record(errcode, message, timestamp_ns, self.seq);
         match &self.sink {
             Maybe.Some(s) => {
                 if !sink_accepts(s, &rec.level) {
-                    self.dropped = self.dropped + (1 as Int64);
+                    self.dropped = self.dropped + 1_i64;
                     return false;
                 }
                 let cap = s.ring_capacity;
@@ -61,7 +61,7 @@ implement LogEngine {
                 true
             }
             Maybe.None => {
-                self.dropped = self.dropped + (1 as Int64);
+                self.dropped = self.dropped + 1_i64;
                 false
             }
         }

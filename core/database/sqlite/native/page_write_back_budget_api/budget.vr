@@ -24,7 +24,7 @@ public fn new(pages_per_tick: Int, capacity: Int) -> WriteBackBudget {
 
 // Advance one tick — replenish tokens up to capacity.
 public fn tick(mut b: WriteBackBudget) -> WriteBackBudget {
-    b.ticks_elapsed = b.ticks_elapsed + (1 as Int64);
+    b.ticks_elapsed = b.ticks_elapsed + 1_i64;
     b.tokens = b.tokens + b.pages_per_tick;
     if b.tokens > b.bucket_capacity { b.tokens = b.bucket_capacity; }
     b
@@ -44,7 +44,7 @@ public fn pages_written(b: &WriteBackBudget) -> Int64 { b.pages_written }
 
 // Utilisation = pages_written / (ticks_elapsed * pages_per_tick).
 public fn utilisation(b: &WriteBackBudget) -> Float {
-    if b.ticks_elapsed <= (0 as Int64) { return 0.0 as Float; }
+    if b.ticks_elapsed <= 0_i64 { return 0.0 as Float; }
     if b.pages_per_tick <= 0 { return 0.0 as Float; }
     let done = b.pages_written as Float;
     let capacity = (b.ticks_elapsed as Float) * (b.pages_per_tick as Float);

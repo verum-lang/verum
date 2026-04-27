@@ -41,7 +41,7 @@ public fn v2_spec(byte_len: Int64, destructor: Destructor) -> BindBlobSpec {
 /// Negative blob size is always SQLITE_MISUSE.  The 32-bit variant
 /// additionally rejects sizes > INT32_MAX.
 public fn is_valid(s: &BindBlobSpec) -> Bool {
-    if s.byte_len < (0 as Int64) { return false; }
+    if s.byte_len < 0_i64 { return false; }
     match &s.api {
         BaV1 => {
             let max32: Int64 = 2147483647 as Int64;

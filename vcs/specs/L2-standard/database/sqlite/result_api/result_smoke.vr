@@ -25,7 +25,7 @@ mount base.{Bool};
 
 fn test_payload_kind_names() {
     assert(kind_name(&RpNull) == "null".clone());
-    assert(kind_name(&RpInt(1 as Int64)) == "int".clone());
+    assert(kind_name(&RpInt1_i64) == "int".clone());
     assert(kind_name(&RpDouble(3.14)) == "double".clone());
     assert(kind_name(&RpText("x".clone())) == "text".clone());
     let b: List<u8> = List.new();
@@ -34,7 +34,7 @@ fn test_payload_kind_names() {
 
 fn test_is_null_only_rp_null() {
     assert(is_null(&RpNull));
-    assert(!is_null(&RpInt(0 as Int64)));
+    assert(!is_null(&RpInt0_i64));
 }
 
 fn test_byte_len_for_text_and_blob() {
@@ -43,7 +43,7 @@ fn test_byte_len_for_text_and_blob() {
     b.push(0x01 as u8);
     b.push(0x02 as u8);
     assert_eq(byte_len(&RpBlob(b)), 2 as Int64);
-    assert_eq(byte_len(&RpZeroBlob(128 as Int64)), 128 as Int64);
+    assert_eq(byte_len(&RpZeroBlob128_i64), 128 as Int64);
     assert_eq(byte_len(&RpNull), 0 as Int64);
 }
 
@@ -60,7 +60,7 @@ fn test_engine_set_payload_clears_error() {
     let mut e = new_engine();
     e.set_error(ReNoMem);
     assert(e.has_error());
-    e.set_payload(RpInt(42 as Int64));
+    e.set_payload(RpInt42_i64);
     assert(!e.has_error());
     assert_eq(e.sets, 2 as Int64);
 }

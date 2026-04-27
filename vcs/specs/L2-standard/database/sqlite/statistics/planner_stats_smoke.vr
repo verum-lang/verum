@@ -41,8 +41,8 @@ mount base.{Some, None, Maybe, Bool, Text};
 
 fn make_stat1() -> Stat1Row {
     let mut dups: List<Int64> = List.new();
-    dups.push(5 as Int64);    // 1 col → avg 5 dups
-    dups.push(1 as Int64);    // 2 cols → unique
+    dups.push5_i64;    // 1 col → avg 5 dups
+    dups.push1_i64;    // 2 cols → unique
     stat1_row("users".clone(), Some("idx_users_name".clone()), 1000 as Int64, dups)
 }
 
@@ -103,7 +103,7 @@ fn test_histogram_estimate_lt_threshold() {
 fn test_histogram_estimate_range() {
     let h = make_histogram();
     let r = h.estimate_range(&make_key(1), &make_key(9));
-    assert(r >= (0 as Int64));
+    assert(r >= 0_i64);
 }
 
 fn test_key_compare_orders_correctly() {
@@ -147,7 +147,7 @@ fn test_combine_or_complement() {
 
 fn test_selectivity_estimate_rows() {
     let s = selectivity(0.1 as Float64);
-    assert_eq(s.estimate_rows(1000 as Int64), 100 as Int64);
+    assert_eq(s.estimate_rows1000_i64, 100 as Int64);
 }
 
 // -----------------------------------------------------------------------------

@@ -47,7 +47,7 @@ implement DeadlineEngine {
     /// Observe a tick.  Returns true iff this tick caused the deadline
     /// to fire for the first time.
     pub fn tick(&mut self, now_ns: Int64, on_fire: fn()) -> Bool {
-        self.ticks_observed = self.ticks_observed + (1 as Int64);
+        self.ticks_observed = self.ticks_observed + 1_i64;
         if self.fired { return false; }
         if !has_elapsed(&self.deadline, now_ns) { return false; }
         self.fired = true;

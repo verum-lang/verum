@@ -94,17 +94,17 @@ fn test_slot_round_trip() {
 }
 
 fn test_text_encoding_valid() {
-    assert(text_encoding_is_valid(1 as Int64));
-    assert(text_encoding_is_valid(2 as Int64));
-    assert(text_encoding_is_valid(3 as Int64));
-    assert(!text_encoding_is_valid(0 as Int64));
-    assert(!text_encoding_is_valid(4 as Int64));
+    assert(text_encoding_is_valid1_i64);
+    assert(text_encoding_is_valid2_i64);
+    assert(text_encoding_is_valid3_i64);
+    assert(!text_encoding_is_valid0_i64);
+    assert(!text_encoding_is_valid4_i64);
 }
 
 fn test_schema_format_without_rowid() {
-    assert(schema_format_supports_without_rowid(4 as Int64));
-    assert(!schema_format_supports_without_rowid(3 as Int64));
-    assert(!schema_format_supports_without_rowid(1 as Int64));
+    assert(schema_format_supports_without_rowid4_i64);
+    assert(!schema_format_supports_without_rowid3_i64);
+    assert(!schema_format_supports_without_rowid1_i64);
 }
 
 fn main() {

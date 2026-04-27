@@ -49,7 +49,7 @@ fn test_datatype_names() {
 }
 
 fn test_value_type_dispatch() {
-    let v_i = new_int(42 as Int64);
+    let v_i = new_int42_i64;
     assert_eq(sqlite3_value_type(&v_i), SQLITE_INTEGER);
     let v_d = new_double(3.14);
     assert_eq(sqlite3_value_type(&v_d), SQLITE_FLOAT);
@@ -60,7 +60,7 @@ fn test_value_type_dispatch() {
 }
 
 fn test_value_accessors_ints_and_doubles() {
-    let v = new_int(17 as Int64);
+    let v = new_int17_i64;
     assert_eq(sqlite3_value_int(&v), 17);
     assert_eq(sqlite3_value_int64(&v), 17 as Int64);
     // Int → Float coercion.
@@ -83,21 +83,21 @@ fn test_value_blob_bytes_counts() {
 }
 
 fn test_value_from_bind_flag() {
-    let mut v = new_int(1 as Int64);
+    let mut v = new_int1_i64;
     assert_eq(sqlite3_value_frombind(&v), 0);
     mark_from_bind(&mut v);
     assert_eq(sqlite3_value_frombind(&v), 1);
 }
 
 fn test_value_nochange_flag() {
-    let mut v = new_int(1 as Int64);
+    let mut v = new_int1_i64;
     assert_eq(sqlite3_value_nochange(&v), 0);
     mark_nochange(&mut v);
     assert_eq(sqlite3_value_nochange(&v), 1);
 }
 
 fn test_value_subtype() {
-    let mut v = new_int(1 as Int64);
+    let mut v = new_int1_i64;
     set_subtype(&mut v, 74);
     assert_eq(sqlite3_value_subtype(&v), 74);
 }

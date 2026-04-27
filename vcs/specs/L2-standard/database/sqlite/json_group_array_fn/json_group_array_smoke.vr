@@ -17,7 +17,7 @@ mount core.database.sqlite.native.json_group_array_fn.agg.{
 mount base.{Bool, Int64};
 
 fn test_constructors() {
-    match from_int(7 as Int64) { EJsonInt(n) => assert_eq(n, 7 as Int64), _ => assert(false) }
+    match from_int7_i64 { EJsonInt(n) => assert_eq(n, 7 as Int64), _ => assert(false) }
     match from_text("a".clone()) { EJsonText(_) => {}, _ => assert(false) }
     match from_null() { EJsonNull => {}, _ => assert(false) }
 }
@@ -31,7 +31,7 @@ fn test_empty_finalize_is_empty_array() {
 
 fn test_step_accepts_null_and_text() {
     let mut s = empty_state();
-    s = step(s, &from_int(1 as Int64));
+    s = step(s, &from_int1_i64);
     s = step(s, &from_null());
     s = step(s, &from_text("hello".clone()));
     let r = finalize(&s);
@@ -40,9 +40,9 @@ fn test_step_accepts_null_and_text() {
 
 fn test_blob_marks_error() {
     let mut s = empty_state();
-    s = step(s, &from_int(1 as Int64));
+    s = step(s, &from_int1_i64);
     s = step(s, &EJsonBlobError);
-    s = step(s, &from_int(2 as Int64));
+    s = step(s, &from_int2_i64);
     let r = finalize(&s);
     match r { RJsonError => {}, _ => assert(false) }
     assert(is_error(&RJsonError));

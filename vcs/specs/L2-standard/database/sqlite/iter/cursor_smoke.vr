@@ -64,26 +64,26 @@ fn fake_step_busy(_id: Int64) -> StepOutcome { SoBusy }
 fn noop_on_row(_id: Int64) {}
 
 fn test_cursor_initial_state_ready() {
-    let c = cursor_open(7 as Int64);
+    let c = cursor_open7_i64;
     let s = c.current_state();
     assert(cursor_state_name(&s) == "ready".clone());
     assert(!c.is_done());
 }
 
 fn test_cursor_step_done_terminates() {
-    let mut c = cursor_open(1 as Int64);
+    let mut c = cursor_open1_i64;
     let _ = c.step(fake_step_done);
     assert(c.is_done());
 }
 
 fn test_cursor_step_row_records() {
-    let mut c = cursor_open(1 as Int64);
+    let mut c = cursor_open1_i64;
     let _ = c.step(fake_step_row);
     assert_eq(c.rows_returned, 1 as Int64);
 }
 
 fn test_cursor_drain_yields_rows() {
-    let mut c = cursor_open(1 as Int64);
+    let mut c = cursor_open1_i64;
     // Drain only handles the busy break + terminal break; with always-row
     // step it would loop forever — use the busy step instead to exit.
     let yielded = c.drain(fake_step_busy, noop_on_row);
@@ -95,13 +95,13 @@ fn test_cursor_drain_yields_rows() {
 // -----------------------------------------------------------------------------
 
 fn test_collect_all_records_steps_taken() {
-    let mut c = cursor_open(1 as Int64);
+    let mut c = cursor_open1_i64;
     let stats = collect_all(&mut c, fake_step_done, noop_on_row);
-    assert(stats.steps_taken >= (1 as Int64));
+    assert(stats.steps_taken >= 1_i64);
 }
 
 fn test_step_once_with_done_returns_false() {
-    let mut c = cursor_open(1 as Int64);
+    let mut c = cursor_open1_i64;
     assert(!step_once(&mut c, fake_step_done));
 }
 

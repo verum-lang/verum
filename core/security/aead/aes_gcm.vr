@@ -373,8 +373,8 @@ fn gcm_encrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
 
     // Length block: [len(A)*8 || len(C)*8], big-endian, 64 bits each.
     let mut len_block: [Byte; 16] = [0; 16];
-    let aad_bits = (aad.len() as UInt64) << (3 as UInt64);
-    let ct_bits  = (n as UInt64) << (3 as UInt64);
+    let aad_bits = (aad.len() as UInt64) << 3_u64;
+    let ct_bits  = (n as UInt64) << 3_u64;
     let ab = aad_bits.to_be_bytes();
     let cb = ct_bits.to_be_bytes();
     let mut m = 0;
@@ -415,8 +415,8 @@ fn gcm_decrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
     ghash_feed(&mut y, h, ciphertext);
 
     let mut len_block: [Byte; 16] = [0; 16];
-    let aad_bits = (aad.len() as UInt64) << (3 as UInt64);
-    let ct_bits  = (ciphertext.len() as UInt64) << (3 as UInt64);
+    let aad_bits = (aad.len() as UInt64) << 3_u64;
+    let ct_bits  = (ciphertext.len() as UInt64) << 3_u64;
     let ab = aad_bits.to_be_bytes();
     let cb = ct_bits.to_be_bytes();
     let mut m = 0;

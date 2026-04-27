@@ -32,7 +32,7 @@ public fn empty_pointer() -> TypedPointer {
 }
 
 public fn is_empty(p: &TypedPointer) -> Bool {
-    p.handle == (0 as Int64)
+    p.handle == 0_i64
 }
 
 /// Fetch the handle iff the requested tag matches the stored tag.

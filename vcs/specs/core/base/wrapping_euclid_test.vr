@@ -245,15 +245,15 @@ fn test_uint8_overflowing_shl() {
 @test
 fn test_all_have_wrapping_shl() {
     let _a = (1).wrapping_shl(0);
-    let _b = (1 as Int8).wrapping_shl(0);
-    let _c = (1 as Int16).wrapping_shl(0);
-    let _d = (1 as Int32).wrapping_shl(0);
-    let _e = (1 as Int64).wrapping_shl(0);
+    let _b = 1_i8.wrapping_shl(0);
+    let _c = 1_i16.wrapping_shl(0);
+    let _d = 1_i32.wrapping_shl(0);
+    let _e = 1_i64.wrapping_shl(0);
     let _f = (1 as Int128).wrapping_shl(0);
-    let _g = (1 as UInt8).wrapping_shl(0);
-    let _h = (1 as UInt16).wrapping_shl(0);
-    let _i = (1 as UInt32).wrapping_shl(0);
-    let _j = (1 as UInt64).wrapping_shl(0);
+    let _g = 1_u8.wrapping_shl(0);
+    let _h = 1_u16.wrapping_shl(0);
+    let _i = 1_u32.wrapping_shl(0);
+    let _j = 1_u64.wrapping_shl(0);
     let _k = (1 as UInt128).wrapping_shl(0);
     let _l = (1 as ISize).wrapping_shl(0);
     let _m = (1 as USize).wrapping_shl(0);
@@ -275,15 +275,15 @@ fn test_all_have_wrapping_shl() {
 @test
 fn test_all_have_wrapping_shr() {
     let _a = (1).wrapping_shr(0);
-    let _b = (1 as Int8).wrapping_shr(0);
-    let _c = (1 as Int16).wrapping_shr(0);
-    let _d = (1 as Int32).wrapping_shr(0);
-    let _e = (1 as Int64).wrapping_shr(0);
+    let _b = 1_i8.wrapping_shr(0);
+    let _c = 1_i16.wrapping_shr(0);
+    let _d = 1_i32.wrapping_shr(0);
+    let _e = 1_i64.wrapping_shr(0);
     let _f = (1 as Int128).wrapping_shr(0);
-    let _g = (1 as UInt8).wrapping_shr(0);
-    let _h = (1 as UInt16).wrapping_shr(0);
-    let _i = (1 as UInt32).wrapping_shr(0);
-    let _j = (1 as UInt64).wrapping_shr(0);
+    let _g = 1_u8.wrapping_shr(0);
+    let _h = 1_u16.wrapping_shr(0);
+    let _i = 1_u32.wrapping_shr(0);
+    let _j = 1_u64.wrapping_shr(0);
     let _k = (1 as UInt128).wrapping_shr(0);
     let _l = (1 as ISize).wrapping_shr(0);
     let _m = (1 as USize).wrapping_shr(0);
@@ -305,15 +305,15 @@ fn test_all_have_wrapping_shr() {
 @test
 fn test_all_have_wrapping_div() {
     let _a = (10).wrapping_div(3);
-    let _b = (10 as Int8).wrapping_div(3 as Int8);
-    let _c = (10 as Int16).wrapping_div(3 as Int16);
-    let _d = (10 as Int32).wrapping_div(3 as Int32);
-    let _e = (10 as Int64).wrapping_div(3 as Int64);
+    let _b = 10_i8.wrapping_div3_i8;
+    let _c = 10_i16.wrapping_div3_i16;
+    let _d = 10_i32.wrapping_div3_i32;
+    let _e = 10_i64.wrapping_div3_i64;
     let _f = (10 as Int128).wrapping_div(3 as Int128);
-    let _g = (10 as UInt8).wrapping_div(3 as UInt8);
-    let _h = (10 as UInt16).wrapping_div(3 as UInt16);
-    let _i = (10 as UInt32).wrapping_div(3 as UInt32);
-    let _j = (10 as UInt64).wrapping_div(3 as UInt64);
+    let _g = 10_u8.wrapping_div3_u8;
+    let _h = 10_u16.wrapping_div3_u16;
+    let _i = 10_u32.wrapping_div3_u32;
+    let _j = 10_u64.wrapping_div3_u64;
     let _k = (10 as UInt128).wrapping_div(3 as UInt128);
     let _l = (10 as ISize).wrapping_div(3 as ISize);
     let _m = (10 as USize).wrapping_div(3 as USize);
@@ -335,15 +335,15 @@ fn test_all_have_wrapping_div() {
 @test
 fn test_all_have_wrapping_rem() {
     let _a = (10).wrapping_rem(3);
-    let _b = (10 as Int8).wrapping_rem(3 as Int8);
-    let _c = (10 as Int16).wrapping_rem(3 as Int16);
-    let _d = (10 as Int32).wrapping_rem(3 as Int32);
-    let _e = (10 as Int64).wrapping_rem(3 as Int64);
+    let _b = 10_i8.wrapping_rem3_i8;
+    let _c = 10_i16.wrapping_rem3_i16;
+    let _d = 10_i32.wrapping_rem3_i32;
+    let _e = 10_i64.wrapping_rem3_i64;
     let _f = (10 as Int128).wrapping_rem(3 as Int128);
-    let _g = (10 as UInt8).wrapping_rem(3 as UInt8);
-    let _h = (10 as UInt16).wrapping_rem(3 as UInt16);
-    let _i = (10 as UInt32).wrapping_rem(3 as UInt32);
-    let _j = (10 as UInt64).wrapping_rem(3 as UInt64);
+    let _g = 10_u8.wrapping_rem3_u8;
+    let _h = 10_u16.wrapping_rem3_u16;
+    let _i = 10_u32.wrapping_rem3_u32;
+    let _j = 10_u64.wrapping_rem3_u64;
     let _k = (10 as UInt128).wrapping_rem(3 as UInt128);
     let _l = (10 as ISize).wrapping_rem(3 as ISize);
     let _m = (10 as USize).wrapping_rem(3 as USize);
@@ -365,15 +365,15 @@ fn test_all_have_wrapping_rem() {
 @test
 fn test_all_have_div_euclid() {
     let _a = (7).div_euclid(3);
-    let _b = (7 as Int8).div_euclid(3 as Int8);
-    let _c = (7 as Int16).div_euclid(3 as Int16);
-    let _d = (7 as Int32).div_euclid(3 as Int32);
-    let _e = (7 as Int64).div_euclid(3 as Int64);
+    let _b = 7_i8.div_euclid3_i8;
+    let _c = 7_i16.div_euclid3_i16;
+    let _d = 7_i32.div_euclid3_i32;
+    let _e = 7_i64.div_euclid3_i64;
     let _f = (7 as Int128).div_euclid(3 as Int128);
-    let _g = (7 as UInt8).div_euclid(3 as UInt8);
-    let _h = (7 as UInt16).div_euclid(3 as UInt16);
-    let _i = (7 as UInt32).div_euclid(3 as UInt32);
-    let _j = (7 as UInt64).div_euclid(3 as UInt64);
+    let _g = 7_u8.div_euclid3_u8;
+    let _h = 7_u16.div_euclid3_u16;
+    let _i = 7_u32.div_euclid3_u32;
+    let _j = 7_u64.div_euclid3_u64;
     let _k = (7 as UInt128).div_euclid(3 as UInt128);
     let _l = (7 as ISize).div_euclid(3 as ISize);
     let _m = (7 as USize).div_euclid(3 as USize);
@@ -395,15 +395,15 @@ fn test_all_have_div_euclid() {
 @test
 fn test_all_have_rem_euclid() {
     let _a = (7).rem_euclid(3);
-    let _b = (7 as Int8).rem_euclid(3 as Int8);
-    let _c = (7 as Int16).rem_euclid(3 as Int16);
-    let _d = (7 as Int32).rem_euclid(3 as Int32);
-    let _e = (7 as Int64).rem_euclid(3 as Int64);
+    let _b = 7_i8.rem_euclid3_i8;
+    let _c = 7_i16.rem_euclid3_i16;
+    let _d = 7_i32.rem_euclid3_i32;
+    let _e = 7_i64.rem_euclid3_i64;
     let _f = (7 as Int128).rem_euclid(3 as Int128);
-    let _g = (7 as UInt8).rem_euclid(3 as UInt8);
-    let _h = (7 as UInt16).rem_euclid(3 as UInt16);
-    let _i = (7 as UInt32).rem_euclid(3 as UInt32);
-    let _j = (7 as UInt64).rem_euclid(3 as UInt64);
+    let _g = 7_u8.rem_euclid3_u8;
+    let _h = 7_u16.rem_euclid3_u16;
+    let _i = 7_u32.rem_euclid3_u32;
+    let _j = 7_u64.rem_euclid3_u64;
     let _k = (7 as UInt128).rem_euclid(3 as UInt128);
     let _l = (7 as ISize).rem_euclid(3 as ISize);
     let _m = (7 as USize).rem_euclid(3 as USize);
@@ -425,15 +425,15 @@ fn test_all_have_rem_euclid() {
 @test
 fn test_all_have_saturating_pow() {
     let _a = (2).saturating_pow(3);
-    let _b = (2 as Int8).saturating_pow(3);
-    let _c = (2 as Int16).saturating_pow(3);
-    let _d = (2 as Int32).saturating_pow(3);
-    let _e = (2 as Int64).saturating_pow(3);
+    let _b = 2_i8.saturating_pow(3);
+    let _c = 2_i16.saturating_pow(3);
+    let _d = 2_i32.saturating_pow(3);
+    let _e = 2_i64.saturating_pow(3);
     let _f = (2 as Int128).saturating_pow(3);
-    let _g = (2 as UInt8).saturating_pow(3);
-    let _h = (2 as UInt16).saturating_pow(3);
-    let _i = (2 as UInt32).saturating_pow(3);
-    let _j = (2 as UInt64).saturating_pow(3);
+    let _g = 2_u8.saturating_pow(3);
+    let _h = 2_u16.saturating_pow(3);
+    let _i = 2_u32.saturating_pow(3);
+    let _j = 2_u64.saturating_pow(3);
     let _k = (2 as UInt128).saturating_pow(3);
     let _l = (2 as ISize).saturating_pow(3);
     let _m = (2 as USize).saturating_pow(3);
@@ -455,15 +455,15 @@ fn test_all_have_saturating_pow() {
 @test
 fn test_all_have_overflowing_shl() {
     let _a = (1).overflowing_shl(0);
-    let _b = (1 as Int8).overflowing_shl(0);
-    let _c = (1 as Int16).overflowing_shl(0);
-    let _d = (1 as Int32).overflowing_shl(0);
-    let _e = (1 as Int64).overflowing_shl(0);
+    let _b = 1_i8.overflowing_shl(0);
+    let _c = 1_i16.overflowing_shl(0);
+    let _d = 1_i32.overflowing_shl(0);
+    let _e = 1_i64.overflowing_shl(0);
     let _f = (1 as Int128).overflowing_shl(0);
-    let _g = (1 as UInt8).overflowing_shl(0);
-    let _h = (1 as UInt16).overflowing_shl(0);
-    let _i = (1 as UInt32).overflowing_shl(0);
-    let _j = (1 as UInt64).overflowing_shl(0);
+    let _g = 1_u8.overflowing_shl(0);
+    let _h = 1_u16.overflowing_shl(0);
+    let _i = 1_u32.overflowing_shl(0);
+    let _j = 1_u64.overflowing_shl(0);
     let _k = (1 as UInt128).overflowing_shl(0);
     let _l = (1 as ISize).overflowing_shl(0);
     let _m = (1 as USize).overflowing_shl(0);
@@ -485,15 +485,15 @@ fn test_all_have_overflowing_shl() {
 @test
 fn test_all_have_overflowing_shr() {
     let _a = (1).overflowing_shr(0);
-    let _b = (1 as Int8).overflowing_shr(0);
-    let _c = (1 as Int16).overflowing_shr(0);
-    let _d = (1 as Int32).overflowing_shr(0);
-    let _e = (1 as Int64).overflowing_shr(0);
+    let _b = 1_i8.overflowing_shr(0);
+    let _c = 1_i16.overflowing_shr(0);
+    let _d = 1_i32.overflowing_shr(0);
+    let _e = 1_i64.overflowing_shr(0);
     let _f = (1 as Int128).overflowing_shr(0);
-    let _g = (1 as UInt8).overflowing_shr(0);
-    let _h = (1 as UInt16).overflowing_shr(0);
-    let _i = (1 as UInt32).overflowing_shr(0);
-    let _j = (1 as UInt64).overflowing_shr(0);
+    let _g = 1_u8.overflowing_shr(0);
+    let _h = 1_u16.overflowing_shr(0);
+    let _i = 1_u32.overflowing_shr(0);
+    let _j = 1_u64.overflowing_shr(0);
     let _k = (1 as UInt128).overflowing_shr(0);
     let _l = (1 as ISize).overflowing_shr(0);
     let _m = (1 as USize).overflowing_shr(0);

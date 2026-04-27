@@ -43,7 +43,7 @@ public fn join_cardinality_legal(
 ) -> Bool {
     let cross: Int64 = left_size * right_size;
     match kind {
-        JkInner | JkCross => result_size >= (0 as Int64) && result_size <= cross,
+        JkInner | JkCross => result_size >= 0_i64 && result_size <= cross,
         JkLeftOuter       => result_size >= left_size  && result_size <= cross + left_size,
         JkRightOuter      => result_size >= right_size && result_size <= cross + right_size,
         JkFull            => result_size >= left_size + right_size && result_size <= cross + left_size + right_size,

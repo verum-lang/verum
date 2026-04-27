@@ -51,7 +51,7 @@ fn test_shared_region_full_size() {
 }
 
 fn test_shared_region_for_byte_clamps() {
-    let r = shared_region_for_byte(SHARED_SIZE * (10 as Int64));
+    let r = shared_region_for_byte(SHARED_SIZE * 10_i64);
     assert(r.offset < SHARED_FIRST + SHARED_SIZE);
 }
 

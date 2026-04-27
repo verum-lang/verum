@@ -72,40 +72,40 @@ public fn is_reserved(k: &SerialKind) -> Bool {
 
 // Classify a serial-type varint value (Int64).
 public fn classify(st: Int64) -> SerialKind {
-    if st == (0 as Int64) { return SkNull; }
-    if st == (1 as Int64) { return SkInt8; }
-    if st == (2 as Int64) { return SkInt16; }
-    if st == (3 as Int64) { return SkInt24; }
-    if st == (4 as Int64) { return SkInt32; }
-    if st == (5 as Int64) { return SkInt48; }
-    if st == (6 as Int64) { return SkInt64; }
-    if st == (7 as Int64) { return SkFloat64; }
-    if st == (8 as Int64) { return SkLiteralZero; }
-    if st == (9 as Int64) { return SkLiteralOne; }
-    if st == (10 as Int64) { return SkReserved10; }
-    if st == (11 as Int64) { return SkReserved11; }
-    if (st & (1 as Int64)) == (0 as Int64) { return SkBlob; }
+    if st == 0_i64 { return SkNull; }
+    if st == 1_i64 { return SkInt8; }
+    if st == 2_i64 { return SkInt16; }
+    if st == 3_i64 { return SkInt24; }
+    if st == 4_i64 { return SkInt32; }
+    if st == 5_i64 { return SkInt48; }
+    if st == 6_i64 { return SkInt64; }
+    if st == 7_i64 { return SkFloat64; }
+    if st == 8_i64 { return SkLiteralZero; }
+    if st == 9_i64 { return SkLiteralOne; }
+    if st == 10_i64 { return SkReserved10; }
+    if st == 11_i64 { return SkReserved11; }
+    if (st & 1_i64) == 0_i64 { return SkBlob; }
     SkText
 }
 
 public fn blob_byte_length(st: Int64) -> Int64 {
-    if st < (12 as Int64) { return 0 as Int64; }
-    if (st & (1 as Int64)) != (0 as Int64) { return 0 as Int64; }   // not blob
-    (st - (12 as Int64)) / (2 as Int64)
+    if st < 12_i64 { return 0 as Int64; }
+    if (st & 1_i64) != 0_i64 { return 0 as Int64; }   // not blob
+    (st - 12_i64) / 2_i64
 }
 
 public fn text_byte_length(st: Int64) -> Int64 {
-    if st < (13 as Int64) { return 0 as Int64; }
-    if (st & (1 as Int64)) == (0 as Int64) { return 0 as Int64; }   // not text
-    (st - (13 as Int64)) / (2 as Int64)
+    if st < 13_i64 { return 0 as Int64; }
+    if (st & 1_i64) == 0_i64 { return 0 as Int64; }   // not text
+    (st - 13_i64) / 2_i64
 }
 
 public fn encode_blob_length(n: Int64) -> Int64 {
-    if n < (0 as Int64) { return 12 as Int64; }
-    (12 as Int64) + n * (2 as Int64)
+    if n < 0_i64 { return 12 as Int64; }
+    12_i64 + n * 2_i64
 }
 
 public fn encode_text_length(n: Int64) -> Int64 {
-    if n < (0 as Int64) { return 13 as Int64; }
-    (13 as Int64) + n * (2 as Int64)
+    if n < 0_i64 { return 13 as Int64; }
+    13_i64 + n * 2_i64
 }

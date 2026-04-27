@@ -49,7 +49,7 @@ public fn checksum_for_sql(sql: &Text) -> Int64 {
     let mut i: Int = 0;
     while i < bs.len() {
         h = h ^ (bs[i] as Int64);
-        h = h * (1099511628211 as Int64);
+        h = h * 1099511628211_i64;
         i = i + 1;
     }
     h

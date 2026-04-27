@@ -147,9 +147,9 @@ implement Sha384 {
         let mut buf = self.buf;
         let mut buf_len = self.buf_len;
 
-        let bits_lo = self.length_lo << (3 as UInt64);
-        let carry = self.length_lo >> (61 as UInt64);
-        let bits_hi = (self.length_hi << (3 as UInt64)) | carry;
+        let bits_lo = self.length_lo << 3_u64;
+        let carry = self.length_lo >> 61_u64;
+        let bits_hi = (self.length_hi << 3_u64) | carry;
 
         buf[buf_len] = 0x80;
         buf_len = buf_len + 1;

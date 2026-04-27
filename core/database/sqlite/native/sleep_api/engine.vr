@@ -37,7 +37,7 @@ implement SleepEngine {
     /// sqlite3_sleep's return-value contract).
     pub fn sqlite3_sleep(&mut self, req: &SleepRequest) -> Int {
         if is_noop(req) { return 0; }
-        self.sleeps_taken = self.sleeps_taken + (1 as Int64);
+        self.sleeps_taken = self.sleeps_taken + 1_i64;
         self.requested_ms = self.requested_ms + (req.milliseconds as Int64);
         let effective = if req.milliseconds < self.floor_ms {
             self.floor_ms

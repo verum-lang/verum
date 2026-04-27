@@ -20,5 +20,5 @@ public fn new_slot(name: Text, handle: Int64, has_destructor: Bool) -> ClientDat
 }
 
 public fn is_unset(s: &ClientDataSlot) -> Bool {
-    s.handle == (0 as Int64)
+    s.handle == 0_i64
 }

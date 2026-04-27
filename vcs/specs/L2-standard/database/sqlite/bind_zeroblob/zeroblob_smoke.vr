@@ -32,7 +32,7 @@ fn test_v2_spec_accepts_large_sizes() {
 }
 
 fn test_v2_spec_rejects_negative() {
-    let s = v2_spec(-1 as Int64);
+    let s = v2_spec-1_i64;
     assert(!is_valid(&s));
 }
 

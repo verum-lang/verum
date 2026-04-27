@@ -105,7 +105,7 @@ fn parse_int64(t: &Text) -> Int64 {
     while i < bs.len() {
         let b = bs[i];
         if b < (48 as Byte) || b > (57 as Byte) { break; }
-        acc = acc * (10 as Int64) + ((b - (48 as Byte)) as Int64);
+        acc = acc * 10_i64 + ((b - (48 as Byte)) as Int64);
         i = i + 1;
     }
     if neg { -acc } else { acc }
@@ -117,7 +117,7 @@ fn parse_int64_from_blob(b: &List<Byte>) -> Int64 {
     let cap = if b.len() < 8 { b.len() } else { 8 };
     let mut i: Int = 0;
     while i < cap {
-        acc = (acc << (8 as Int64)) | ((b[i] as Int64) & (0xFF as Int64));
+        acc = (acc << 8_i64) | ((b[i] as Int64) & 0xFF_i64);
         i = i + 1;
     }
     acc
@@ -149,13 +149,13 @@ fn parse_real(t: &Text) -> Float64 {
 }
 
 fn render_int64(n: Int64) -> Text {
-    if n == (0 as Int64) { return "0".clone(); }
-    let neg = n < (0 as Int64);
+    if n == 0_i64 { return "0".clone(); }
+    let neg = n < 0_i64;
     let mut x: Int64 = if neg { -n } else { n };
     let mut digits: List<Byte> = List.new();
-    while x > (0 as Int64) {
+    while x > 0_i64 {
         digits.push((((x as Int) % 10) as Byte) + (48 as Byte));
-        x = x / (10 as Int64);
+        x = x / 10_i64;
     }
     let mut t = Text.new();
     if neg { t.push_byte(45 as Byte); }

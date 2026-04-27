@@ -29,12 +29,12 @@ public fn new_state() -> SharedCacheState {
 public fn set_enabled(s: &mut SharedCacheState, on: Bool) {
     if s.enabled != on {
         s.enabled = on;
-        s.toggles = s.toggles + (1 as Int64);
+        s.toggles = s.toggles + 1_i64;
     }
 }
 
 public fn sqlite3_enable_shared_cache(s: &mut SharedCacheState, onoff: Int) -> Int {
-    s.deprecation_warnings = s.deprecation_warnings + (1 as Int64);
+    s.deprecation_warnings = s.deprecation_warnings + 1_i64;
     set_enabled(s, onoff != 0);
     0   // SQLITE_OK
 }

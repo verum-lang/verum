@@ -164,7 +164,7 @@ fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, n
             let mut i: Int = 0;
             while i < items.len() {
                 let id = *next_id;
-                *next_id = *next_id + (1 as Int64);
+                *next_id = *next_id + 1_i64;
                 let path_str = format_index(base_path, i);
                 out.push(EachRow {
                     key: RInt(i as Int64),
@@ -183,7 +183,7 @@ fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, n
             let mut i: Int = 0;
             while i < fields.len() {
                 let id = *next_id;
-                *next_id = *next_id + (1 as Int64);
+                *next_id = *next_id + 1_i64;
                 let path_str = format_dot(base_path, &fields[i].key);
                 out.push(EachRow {
                     key: RText(fields[i].key.clone()),
@@ -201,7 +201,7 @@ fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, n
         // Scalars become a single root row in json_each semantics.
         _ => {
             let id = *next_id;
-            *next_id = *next_id + (1 as Int64);
+            *next_id = *next_id + 1_i64;
             out.push(EachRow {
                 key: RNull,
                 value: json_to_value_register(root),
@@ -218,7 +218,7 @@ fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, n
 
 fn walk_recursive(node: &JsonValue, path: &Text, parent: Maybe<Int64>, out: &mut List<EachRow>, next_id: &mut Int64) {
     let id = *next_id;
-    *next_id = *next_id + (1 as Int64);
+    *next_id = *next_id + 1_i64;
     let key_reg: Register = RNull;
     out.push(EachRow {
         key: key_reg,

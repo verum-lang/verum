@@ -59,10 +59,10 @@ public fn slot_from_index(idx: Int) -> Maybe<MetaSlot> {
 
 // Text-encoding meta[4] value for a given encoding constant — 1/2/3 per sqlite.
 public fn text_encoding_is_valid(code: Int64) -> Bool {
-    code == (1 as Int64) || code == (2 as Int64) || code == (3 as Int64)
+    code == 1_i64 || code == 2_i64 || code == 3_i64
 }
 
 // Schema format 1..4 — 4 means WITHOUT ROWID tables supported.
 public fn schema_format_supports_without_rowid(fmt: Int64) -> Bool {
-    fmt >= (4 as Int64)
+    fmt >= 4_i64
 }

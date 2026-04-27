@@ -56,10 +56,10 @@ fn test_stage_from_numeric_round_trip() {
 
 fn test_progress_monotone() {
     let mut p = new_progress();
-    p.note_source(10 as Int64);
-    p.note_source(5 as Int64);
+    p.note_source10_i64;
+    p.note_source5_i64;
     assert_eq(p.source_rows, 15 as Int64);
-    p.note_checkpoint(2 as Int64);
+    p.note_checkpoint2_i64;
     assert_eq(p.checkpoint_pages, 2 as Int64);
 }
 
@@ -67,7 +67,7 @@ fn test_progressed_detects_change() {
     let before = new_progress();
     let mut after = new_progress();
     assert(!progressed(&before, &after));
-    after.note_source(1 as Int64);
+    after.note_source1_i64;
     assert(progressed(&before, &after));
 }
 

@@ -120,8 +120,8 @@ public fn segment_empty() -> Fts5VtabSegment {
     Fts5VtabSegment {
         entries: List.new(),
         n_postings: 0,
-        min_rowid: (0 as Int64),
-        max_rowid: (0 as Int64),
+        min_rowid: 0_i64,
+        max_rowid: 0_i64,
     }
 }
 

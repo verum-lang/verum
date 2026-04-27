@@ -58,5 +58,5 @@ public fn pre_check(
 ) -> IncrementalVacuumOutcome {
     if !auto_vacuum_is_incremental { return ErrModeNotIncremental; }
     if in_explicit_txn             { return ErrInTransaction; }
-    OkReclaimed(0 as Int64)        // engine then proceeds with reclaim
+    OkReclaimed0_i64        // engine then proceeds with reclaim
 }

@@ -42,7 +42,7 @@ implement ClientDataRegistry {
         let idx = self.find(&name);
         if idx >= 0 {
             if self.slots.get(idx).has_destructor {
-                self.destructors_invoked = self.destructors_invoked + (1 as Int64);
+                self.destructors_invoked = self.destructors_invoked + 1_i64;
             }
             self.slots.get_mut(idx).handle = handle;
             self.slots.get_mut(idx).has_destructor = has_destructor;
@@ -62,7 +62,7 @@ implement ClientDataRegistry {
         let idx = self.find(name);
         if idx < 0 { return false; }
         if self.slots.get(idx).has_destructor {
-            self.destructors_invoked = self.destructors_invoked + (1 as Int64);
+            self.destructors_invoked = self.destructors_invoked + 1_i64;
         }
         let _ = self.slots.remove(idx);
         true
@@ -74,7 +74,7 @@ implement ClientDataRegistry {
         let mut fired: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < self.slots.len() {
-            if self.slots.get(i).has_destructor { fired = fired + (1 as Int64); }
+            if self.slots.get(i).has_destructor { fired = fired + 1_i64; }
             i = i + 1;
         }
         self.destructors_invoked = self.destructors_invoked + fired;

@@ -506,7 +506,7 @@ fn test_child_spec_with_restart() {
 
 @test
 fn test_child_spec_with_shutdown_timeout() {
-    let spec = ChildSpec.new("worker").with_shutdown_timeout_ms(5000 as UInt32);
+    let spec = ChildSpec.new("worker").with_shutdown_timeout_ms5000_u32;
     let _: ChildSpec = spec;
 }
 
@@ -526,7 +526,7 @@ fn test_child_spec_with_priority() {
 fn test_child_spec_chained_builder() {
     let spec = ChildSpec.new("worker")
         .with_restart(SupervisorRestartStrategy.Permanent)
-        .with_shutdown_timeout_ms(10000 as UInt32)
+        .with_shutdown_timeout_ms10000_u32
         .with_restart_limits(5 as UInt16, 120 as UInt32)
         .with_priority(255);
     let _: ChildSpec = spec;
@@ -683,7 +683,7 @@ fn test_spawn_config_full_setup() {
         .with_name("worker-1")
         .with_priority(PriorityLevel.High)
         .with_isolation(EnvIsolationLevel.SendOnly)
-        .with_timeout_ms(30000 as UInt64)
+        .with_timeout_ms30000_u64
         .with_stack_size(65536)
         .with_exponential_retry(3 as UInt16, 100 as UInt32, 5000 as UInt32, 0.1 as Float32)
         .with_restart_limits(5, 120 as UInt64);

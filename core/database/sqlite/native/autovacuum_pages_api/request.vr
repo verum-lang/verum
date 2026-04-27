@@ -33,7 +33,7 @@ public fn new_request(
 /// Fraction of the file that's currently free space, in tenths of
 /// a percent (0..1000).
 public fn free_fraction_tenths(r: &AutoVacuumRequest) -> Int {
-    if r.total_pages <= (0 as Int64) { return 0; }
-    let numer = r.free_pages * (1000 as Int64);
+    if r.total_pages <= 0_i64 { return 0; }
+    let numer = r.free_pages * 1000_i64;
     (numer / r.total_pages) as Int
 }

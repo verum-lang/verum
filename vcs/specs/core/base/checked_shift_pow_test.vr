@@ -422,15 +422,15 @@ fn test_usize_checked_pow() {
 @test
 fn test_all_types_have_checked_shl() {
     let _a = (1).checked_shl(0);
-    let _b = (1 as Int8).checked_shl(0);
-    let _c = (1 as Int16).checked_shl(0);
-    let _d = (1 as Int32).checked_shl(0);
-    let _e = (1 as Int64).checked_shl(0);
+    let _b = 1_i8.checked_shl(0);
+    let _c = 1_i16.checked_shl(0);
+    let _d = 1_i32.checked_shl(0);
+    let _e = 1_i64.checked_shl(0);
     let _f = (1 as Int128).checked_shl(0);
-    let _g = (1 as UInt8).checked_shl(0);
-    let _h = (1 as UInt16).checked_shl(0);
-    let _i = (1 as UInt32).checked_shl(0);
-    let _j = (1 as UInt64).checked_shl(0);
+    let _g = 1_u8.checked_shl(0);
+    let _h = 1_u16.checked_shl(0);
+    let _i = 1_u32.checked_shl(0);
+    let _j = 1_u64.checked_shl(0);
     let _k = (1 as UInt128).checked_shl(0);
     let _l = (1 as ISize).checked_shl(0);
     let _m = (1 as USize).checked_shl(0);
@@ -452,15 +452,15 @@ fn test_all_types_have_checked_shl() {
 @test
 fn test_all_types_have_checked_shr() {
     let _a = (1).checked_shr(0);
-    let _b = (1 as Int8).checked_shr(0);
-    let _c = (1 as Int16).checked_shr(0);
-    let _d = (1 as Int32).checked_shr(0);
-    let _e = (1 as Int64).checked_shr(0);
+    let _b = 1_i8.checked_shr(0);
+    let _c = 1_i16.checked_shr(0);
+    let _d = 1_i32.checked_shr(0);
+    let _e = 1_i64.checked_shr(0);
     let _f = (1 as Int128).checked_shr(0);
-    let _g = (1 as UInt8).checked_shr(0);
-    let _h = (1 as UInt16).checked_shr(0);
-    let _i = (1 as UInt32).checked_shr(0);
-    let _j = (1 as UInt64).checked_shr(0);
+    let _g = 1_u8.checked_shr(0);
+    let _h = 1_u16.checked_shr(0);
+    let _i = 1_u32.checked_shr(0);
+    let _j = 1_u64.checked_shr(0);
     let _k = (1 as UInt128).checked_shr(0);
     let _l = (1 as ISize).checked_shr(0);
     let _m = (1 as USize).checked_shr(0);
@@ -482,15 +482,15 @@ fn test_all_types_have_checked_shr() {
 @test
 fn test_all_types_have_checked_pow() {
     let _a = (2).checked_pow(3);
-    let _b = (2 as Int8).checked_pow(3);
-    let _c = (2 as Int16).checked_pow(3);
-    let _d = (2 as Int32).checked_pow(3);
-    let _e = (2 as Int64).checked_pow(3);
+    let _b = 2_i8.checked_pow(3);
+    let _c = 2_i16.checked_pow(3);
+    let _d = 2_i32.checked_pow(3);
+    let _e = 2_i64.checked_pow(3);
     let _f = (2 as Int128).checked_pow(3);
-    let _g = (2 as UInt8).checked_pow(3);
-    let _h = (2 as UInt16).checked_pow(3);
-    let _i = (2 as UInt32).checked_pow(3);
-    let _j = (2 as UInt64).checked_pow(3);
+    let _g = 2_u8.checked_pow(3);
+    let _h = 2_u16.checked_pow(3);
+    let _i = 2_u32.checked_pow(3);
+    let _j = 2_u64.checked_pow(3);
     let _k = (2 as UInt128).checked_pow(3);
     let _l = (2 as ISize).checked_pow(3);
     let _m = (2 as USize).checked_pow(3);

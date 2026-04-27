@@ -39,7 +39,7 @@ implement InitEngine {
     /// Record the start of work on `sub`.  Returns true iff the engine
     /// actually needs to do something; false if already running.
     pub fn begin(&mut self, sub: Subsystem) -> Bool {
-        self.calls = self.calls + (1 as Int64);
+        self.calls = self.calls + 1_i64;
         if self.is_ready() { return false; }
         self.phase = IpBringing(sub);
         true

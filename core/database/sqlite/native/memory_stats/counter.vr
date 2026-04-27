@@ -63,10 +63,10 @@ implement MemoryCounter {
     }
 
     pub fn is_over_soft_limit(&self) -> Bool {
-        self.soft_limit > (0 as Int64) && self.bytes_used > self.soft_limit
+        self.soft_limit > 0_i64 && self.bytes_used > self.soft_limit
     }
 
     pub fn allocation_would_exceed_hard(&self, n: Int64) -> Bool {
-        self.hard_limit > (0 as Int64) && (self.bytes_used + n) > self.hard_limit
+        self.hard_limit > 0_i64 && (self.bytes_used + n) > self.hard_limit
     }
 }

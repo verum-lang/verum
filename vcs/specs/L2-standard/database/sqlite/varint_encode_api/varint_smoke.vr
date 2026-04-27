@@ -36,18 +36,18 @@ fn test_max_value_for_sentinel_cap() {
 }
 
 fn test_encoded_length_boundaries() {
-    assert_eq(encoded_length(0 as Int64),   1);
-    assert_eq(encoded_length(127 as Int64), 1);
-    assert_eq(encoded_length(128 as Int64), 2);
-    assert_eq(encoded_length(16383 as Int64), 2);
-    assert_eq(encoded_length(16384 as Int64), 3);
-    assert_eq(encoded_length(2097151 as Int64), 3);
-    assert_eq(encoded_length(2097152 as Int64), 4);
+    assert_eq(encoded_length0_i64,   1);
+    assert_eq(encoded_length127_i64, 1);
+    assert_eq(encoded_length128_i64, 2);
+    assert_eq(encoded_length16383_i64, 2);
+    assert_eq(encoded_length16384_i64, 3);
+    assert_eq(encoded_length2097151_i64, 3);
+    assert_eq(encoded_length2097152_i64, 4);
 }
 
 fn test_encoded_length_negative_fills_nine_bytes() {
-    assert_eq(encoded_length(-1 as Int64), 9);
-    assert_eq(encoded_length(-0x7FFFFFFFFFFFFFFF as Int64), 9);
+    assert_eq(encoded_length-1_i64, 9);
+    assert_eq(encoded_length-0x7FFFFFFFFFFFFFFF_i64, 9);
 }
 
 fn test_decode_length_from_lead_ascii() {

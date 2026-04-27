@@ -44,15 +44,15 @@ fn test_set_and_clear() {
 fn test_promises_single_row() {
     assert(promises_single_row(f_unique()));
     assert(!promises_single_row(f_hex()));
-    assert(!promises_single_row(0 as Int64));
+    assert(!promises_single_row0_i64);
 }
 
 fn test_is_known_only_rejects_extraneous_bits() {
-    assert(is_known_only(0 as Int64));
+    assert(is_known_only0_i64);
     assert(is_known_only(f_unique()));
     assert(is_known_only(f_unique() | f_hex()));
     // bit 4 is not defined
-    assert(!is_known_only(0x10 as Int64));
+    assert(!is_known_only0x10_i64);
 }
 
 fn main() {

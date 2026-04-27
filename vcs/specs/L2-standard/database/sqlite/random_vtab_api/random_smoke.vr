@@ -38,18 +38,18 @@ fn test_neither_deterministic() {
 
 fn test_blob_length_bounds() {
     assert_eq(max_blob_length(), 1000000000 as Int64);
-    assert(is_within_blob_range(1 as Int64));
+    assert(is_within_blob_range1_i64);
     assert(is_within_blob_range(max_blob_length()));
-    assert(!is_within_blob_range(0 as Int64));
-    assert(!is_within_blob_range(-1 as Int64));
-    assert(!is_within_blob_range(max_blob_length() + (1 as Int64)));
+    assert(!is_within_blob_range0_i64);
+    assert(!is_within_blob_range-1_i64);
+    assert(!is_within_blob_range(max_blob_length() + 1_i64));
 }
 
 fn test_clamp_blob_length() {
-    assert_eq(clamp_blob_length(100 as Int64), 100 as Int64);
-    assert_eq(clamp_blob_length(0 as Int64), 1 as Int64);
-    assert_eq(clamp_blob_length(-5 as Int64), 1 as Int64);
-    assert_eq(clamp_blob_length(max_blob_length() + (10 as Int64)), max_blob_length());
+    assert_eq(clamp_blob_length100_i64, 100 as Int64);
+    assert_eq(clamp_blob_length0_i64, 1 as Int64);
+    assert_eq(clamp_blob_length-5_i64, 1 as Int64);
+    assert_eq(clamp_blob_length(max_blob_length() + 10_i64), max_blob_length());
 }
 
 fn main() {

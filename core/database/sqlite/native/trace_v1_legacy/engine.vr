@@ -24,7 +24,7 @@ public fn empty_slot() -> LegacySlot {
 }
 
 public fn is_installed(s: &LegacySlot) -> Bool {
-    s.callback != (0 as Int64)
+    s.callback != 0_i64
 }
 
 public type LegacyTraceEngine is {
@@ -54,13 +54,13 @@ implement LegacyTraceEngine {
 
     pub fn fire_begin(&mut self) -> Bool {
         if !is_installed(&self.trace) { return false; }
-        self.trace_calls = self.trace_calls + (1 as Int64);
+        self.trace_calls = self.trace_calls + 1_i64;
         true
     }
 
     pub fn fire_end(&mut self) -> Bool {
         if !is_installed(&self.profile) { return false; }
-        self.profile_calls = self.profile_calls + (1 as Int64);
+        self.profile_calls = self.profile_calls + 1_i64;
         true
     }
 

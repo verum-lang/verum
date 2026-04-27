@@ -427,7 +427,7 @@ implement Formatter {
             // Two's-complement magnitude: `(~n as UInt64) + 1`
             // is exact for every `Int` (Int.MIN's magnitude
             // 2^63 fits in UInt64).
-            (((!n) as UInt64) + (1 as UInt64))
+            (((!n) as UInt64) + 1_u64)
         } else {
             n as UInt64
         };
@@ -436,9 +436,9 @@ implement Formatter {
         let mut buf: [Byte; 20] = [0; 20];
         let mut i: Int = 19;
 
-        while mag > (0 as UInt64) {
-            buf[i] = ('0' as Byte) + ((mag % (10 as UInt64)) as Byte);
-            mag = mag / (10 as UInt64);
+        while mag > 0_u64 {
+            buf[i] = ('0' as Byte) + ((mag % 10_u64) as Byte);
+            mag = mag / 10_u64;
             i = i - 1;
         }
 

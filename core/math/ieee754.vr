@@ -285,7 +285,7 @@ public fn frexp(x: Float) -> (Float, Int) {
 
     if exp_bits == 0 {
         // Subnormal: normalize first
-        let normalized = x * ((1 as UInt64) << 52) as Float;
+        let normalized = x * (1_u64 << 52) as Float;
         let (m, e) = frexp(normalized);
         return (m, e - 52);
     }
@@ -310,7 +310,7 @@ public fn ldexp(x: Float, n: Int) -> Float {
 
     if exp_bits == 0 {
         // Subnormal: normalize first
-        let normalized = x * ((1 as UInt64) << 52) as Float;
+        let normalized = x * (1_u64 << 52) as Float;
         return ldexp(normalized, n - 52);
     }
 

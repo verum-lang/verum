@@ -108,8 +108,8 @@ public fn window_set_n(st: &mut WindowState, n: Int64) {
 
 public fn window_set_partition_size(st: &mut WindowState, n: Int64) {
     st.partition_size = n;
-    if st.kind == 5 && st.n_param > (0 as Int64) {
-        st.bucket_size = (n + st.n_param - (1 as Int64)) / st.n_param;
+    if st.kind == 5 && st.n_param > 0_i64 {
+        st.bucket_size = (n + st.n_param - 1_i64) / st.n_param;
     }
 }
 
@@ -118,13 +118,13 @@ public fn window_set_partition_size(st: &mut WindowState, n: Int64) {
 // -----------------------------------------------------------------------------
 
 public fn window_step(st: &mut WindowState, value: &Register, same_value_as_prev: Bool) {
-    st.row_number = st.row_number + (1 as Int64);
+    st.row_number = st.row_number + 1_i64;
     if st.kind == 1 || st.kind == 2 || st.kind == 3 {
         if same_value_as_prev {
             // RANK / DENSE_RANK do not bump
         } else {
             st.rank_value = st.row_number;
-            st.dense_rank_value = st.dense_rank_value + (1 as Int64);
+            st.dense_rank_value = st.dense_rank_value + 1_i64;
         }
         st.same_as_prev = same_value_as_prev;
     }
@@ -143,25 +143,25 @@ public fn window_value(st: &WindowState) -> Register {
         1 => RInt(st.rank_value),
         2 => RInt(st.dense_rank_value),
         3 => {
-            if st.partition_size <= (1 as Int64) {
+            if st.partition_size <= 1_i64 {
                 RReal(0.0)
             } else {
-                RReal((st.rank_value - (1 as Int64)) as Float64
-                      / (st.partition_size - (1 as Int64)) as Float64)
+                RReal((st.rank_value - 1_i64) as Float64
+                      / (st.partition_size - 1_i64) as Float64)
             }
         }
         4 => {
-            if st.partition_size == (0 as Int64) {
+            if st.partition_size == 0_i64 {
                 RReal(0.0)
             } else {
                 RReal((st.row_number as Float64) / (st.partition_size as Float64))
             }
         }
         5 => {
-            if st.bucket_size == (0 as Int64) {
-                RInt(1 as Int64)
+            if st.bucket_size == 0_i64 {
+                RInt1_i64
             } else {
-                RInt(((st.row_number - (1 as Int64)) / st.bucket_size) + (1 as Int64))
+                RInt(((st.row_number - 1_i64) / st.bucket_size) + 1_i64)
             }
         }
         6 => {

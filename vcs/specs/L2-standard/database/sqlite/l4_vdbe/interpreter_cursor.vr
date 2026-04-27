@@ -67,8 +67,8 @@ fn rewind_with_preinstalled_rows() {
     // Install two rows into cursor 0.
     let tbl = st.cursor_table_mut();
     let rows: List<List<Register>> = [
-        [RInt(10 as Int64)],
-        [RInt(20 as Int64)],
+        [RInt10_i64],
+        [RInt20_i64],
     ];
     let _ = tbl.install_rows(0, rows);
 

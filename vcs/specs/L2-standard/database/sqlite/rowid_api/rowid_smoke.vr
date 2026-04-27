@@ -51,9 +51,9 @@ fn test_fk_target_via_rowid() {
 
 fn test_rowid_range() {
     assert_eq(rowid_max(), 0x7FFFFFFFFFFFFFFF as Int64);
-    assert(is_valid_rowid(0 as Int64));
+    assert(is_valid_rowid0_i64);
     assert(is_valid_rowid(rowid_max()));
-    assert(is_valid_rowid(-1 as Int64));   // negative rowids are allowed
+    assert(is_valid_rowid-1_i64);   // negative rowids are allowed
 }
 
 fn test_scheme_selection() {

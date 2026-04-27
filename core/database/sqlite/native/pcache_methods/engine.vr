@@ -42,7 +42,7 @@ implement PCacheEngine {
     }
 
     pub fn note_create(&mut self) {
-        self.creates = self.creates + (1 as Int64);
+        self.creates = self.creates + 1_i64;
     }
 
     /// Decide whether the fetch will allocate based on demand + cache
@@ -54,9 +54,9 @@ implement PCacheEngine {
             FdAllocateAlways      => true,
         };
         if allocate {
-            self.fetches_allocated = self.fetches_allocated + (1 as Int64);
+            self.fetches_allocated = self.fetches_allocated + 1_i64;
         } else {
-            self.fetches_skipped = self.fetches_skipped + (1 as Int64);
+            self.fetches_skipped = self.fetches_skipped + 1_i64;
         }
         allocate
     }

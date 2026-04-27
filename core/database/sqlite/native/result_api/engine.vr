@@ -41,12 +41,12 @@ implement ResultEngine {
     pub fn set_payload(&mut self, p: ResultPayload) {
         self.payload = p;
         self.error = Maybe.None;
-        self.sets = self.sets + (1 as Int64);
+        self.sets = self.sets + 1_i64;
     }
 
     pub fn set_error(&mut self, e: ResultError) {
         self.error = Maybe.Some(e);
-        self.sets = self.sets + (1 as Int64);
+        self.sets = self.sets + 1_i64;
     }
 
     pub fn sqlite3_result_subtype(&mut self, st: Int) {

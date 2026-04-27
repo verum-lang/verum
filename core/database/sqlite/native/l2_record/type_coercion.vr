@@ -269,10 +269,10 @@ public fn parse_int64(s: &Text) -> Int64 {
     let mut acc: Int64 = 0 as Int64;
     while i < raw.len() {
         let d = (raw[i] - (0x30 as Byte)) as Int64;
-        acc = acc * (10 as Int64) + d;
+        acc = acc * 10_i64 + d;
         i = i + 1;
     }
-    if neg { (0 as Int64) - acc } else { acc }
+    if neg { 0_i64 - acc } else { acc }
 }
 
 /// Parse text that satisfies `looks_real` (or `looks_int`) into a Float64.
@@ -335,14 +335,14 @@ public fn parse_float64(s: &Text) -> Float64 {
 
 fn int64_to_text(n: Int64) -> Text {
     // Simple non-allocating stringify via byte accumulation.
-    if n == (0 as Int64) { return "0".clone(); }
-    let neg = n < (0 as Int64);
-    let mut abs: Int64 = if neg { (0 as Int64) - n } else { n };
+    if n == 0_i64 { return "0".clone(); }
+    let neg = n < 0_i64;
+    let mut abs: Int64 = if neg { 0_i64 - n } else { n };
     let mut digits: List<Byte> = List.new();
-    while abs > (0 as Int64) {
-        let d = (abs % (10 as Int64)) as Int;
+    while abs > 0_i64 {
+        let d = (abs % 10_i64) as Int;
         digits.push(((d as Int) + 0x30) as Byte);
-        abs = abs / (10 as Int64);
+        abs = abs / 10_i64;
     }
     let mut out: List<Byte> = List.new();
     if neg { out.push(0x2D as Byte); }

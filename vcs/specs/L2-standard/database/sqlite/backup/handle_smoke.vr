@@ -106,13 +106,13 @@ fn test_percent_done_calculation() {
 fn test_unlimited_policy() {
     let mut p = unlimited();
     assert(p.pages_for_next_step() > 100000);
-    assert(p.sleep_ns() == (0 as Int64));
+    assert(p.sleep_ns() == 0_i64);
 }
 
 fn test_bounded_policy() {
     let mut p = bounded(8, 1000 as Int64);
     assert_eq(p.pages_for_next_step(), 8);
-    assert(p.sleep_ns() == (1000 as Int64));
+    assert(p.sleep_ns() == 1000_i64);
     assert_eq(p.pages_for_next_step(), 8);   // stable
 }
 
@@ -138,7 +138,7 @@ fn test_adaptive_load_backoff_on_writes() {
 fn test_progress_snapshot_renders() {
     let mut h = handle_new("main->dest".clone(), 100, 4096);
     let _ = h.step(47);
-    let mut tr = tracker_new(0 as Int64);
+    let mut tr = tracker_new0_i64;
     let snap = tr.snapshot(&h, 1000000000 as Int64);   // 1 second elapsed
     assert_eq(snap.percent, 47);
     let line = render(&snap);
@@ -148,13 +148,13 @@ fn test_progress_snapshot_renders() {
 fn test_progress_throughput() {
     let mut h = handle_new("x".clone(), 100, 4096);
     let _ = h.step(50);
-    let mut tr = tracker_new(0 as Int64);
+    let mut tr = tracker_new0_i64;
     // 1 second → 50 pages/sec
     let snap = tr.snapshot(&h, 1000000000 as Int64);
     assert(snap.avg_pages_per_sec >= 49.0);
     assert(snap.avg_pages_per_sec <= 51.0);
     // ETA: 50 pages remaining @ 50 pages/sec = ~1s
-    assert(snap.eta_ns > (500000000 as Int64));
+    assert(snap.eta_ns > 500000000_i64);
 }
 
 fn main() {

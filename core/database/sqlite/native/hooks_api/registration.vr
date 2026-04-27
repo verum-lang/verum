@@ -43,5 +43,5 @@ public fn new_registration(kind: HookKind, tag: Text, handle: Int64) -> HookRegi
 }
 
 public fn is_installed(r: &HookRegistration) -> Bool {
-    r.handle != (0 as Int64)
+    r.handle != 0_i64
 }

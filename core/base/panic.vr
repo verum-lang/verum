@@ -93,7 +93,7 @@ fn write_int_stderr(n: Int) {
         // representation is exact for every Int including Int.MIN
         // (whose magnitude 2^63 doesn't fit in Int but does in
         // UInt64).
-        (((!n) as UInt64) + (1 as UInt64))
+        (((!n) as UInt64) + 1_u64)
     } else {
         n as UInt64
     };
@@ -102,9 +102,9 @@ fn write_int_stderr(n: Int) {
     let mut buf: [Byte; 20] = [0; 20];
     let mut i: Int = 19;
 
-    while mag > (0 as UInt64) {
-        buf[i] = ('0' as Byte) + ((mag % (10 as UInt64)) as Byte);
-        mag = mag / (10 as UInt64);
+    while mag > 0_u64 {
+        buf[i] = ('0' as Byte) + ((mag % 10_u64) as Byte);
+        mag = mag / 10_u64;
         i = i - 1;
     }
 

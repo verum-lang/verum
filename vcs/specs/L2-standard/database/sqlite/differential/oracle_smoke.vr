@@ -75,7 +75,7 @@ fn make_row(id: Int, name: Text) -> DifferentialResultRow {
 }
 
 fn make_result(label: Text, rows: List<DifferentialResultRow>) -> RunResult {
-    run_result(label, RsOk).with_rows(rows).with_elapsed(100 as Int64)
+    run_result(label, RsOk).with_rows(rows).with_elapsed100_i64
 }
 
 fn test_status_names() {

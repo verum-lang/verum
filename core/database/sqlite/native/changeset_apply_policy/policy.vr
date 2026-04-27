@@ -60,7 +60,7 @@ public fn summarise(
     omit_count: Int64,
 ) -> ApplyPolicyOutcome {
     if any_aborted { return AoAborted; }
-    if omit_count > (0 as Int64) { return AoOkWithSkips(omit_count); }
+    if omit_count > 0_i64 { return AoOkWithSkips(omit_count); }
     AoOk
 }
 

@@ -149,23 +149,23 @@ fn test_int8_sign_checks() {
 
 @test
 fn test_int16_sign_checks() {
-    assert((100 as Int16).is_positive());
-    assert((-100 as Int16).is_negative());
-    assert(!(0 as Int16).is_positive());
-    assert(!(0 as Int16).is_negative());
+    assert(100_i16.is_positive());
+    assert(-100_i16.is_negative());
+    assert(!0_i16.is_positive());
+    assert(!0_i16.is_negative());
 }
 
 @test
 fn test_int32_sign_checks() {
-    assert((1 as Int32).is_positive());
-    assert((-1 as Int32).is_negative());
-    assert(!(0 as Int32).is_positive());
+    assert(1_i32.is_positive());
+    assert(-1_i32.is_negative());
+    assert(!0_i32.is_positive());
 }
 
 @test
 fn test_int64_sign_checks() {
-    assert((1000000 as Int64).is_positive());
-    assert((-1000000 as Int64).is_negative());
+    assert(1000000_i64.is_positive());
+    assert(-1000000_i64.is_negative());
 }
 
 @test
@@ -203,23 +203,23 @@ fn test_int8_checked_div() {
 @test
 fn test_int16_checked_div() {
     let a = 1000 as Int16;
-    let result = a.checked_div(10 as Int16);
+    let result = a.checked_div10_i16;
     assert(result is Some);
-    assert(a.checked_div(0 as Int16) is None);
+    assert(a.checked_div0_i16 is None);
 }
 
 @test
 fn test_int32_checked_div() {
     let a = 100000 as Int32;
-    assert(a.checked_div(100 as Int32) is Some);
-    assert(a.checked_div(0 as Int32) is None);
+    assert(a.checked_div100_i32 is Some);
+    assert(a.checked_div0_i32 is None);
 }
 
 @test
 fn test_int64_checked_div() {
     let a = 1000000 as Int64;
-    assert(a.checked_div(1000 as Int64) is Some);
-    assert(a.checked_div(0 as Int64) is None);
+    assert(a.checked_div1000_i64 is Some);
+    assert(a.checked_div0_i64 is None);
 }
 
 @test
@@ -239,29 +239,29 @@ fn test_isize_checked_div() {
 @test
 fn test_uint8_checked_div() {
     let a = 200 as UInt8;
-    assert(a.checked_div(10 as UInt8) is Some);
-    assert(a.checked_div(0 as UInt8) is None);
+    assert(a.checked_div10_u8 is Some);
+    assert(a.checked_div0_u8 is None);
 }
 
 @test
 fn test_uint16_checked_div() {
     let a = 1000 as UInt16;
-    assert(a.checked_div(10 as UInt16) is Some);
-    assert(a.checked_div(0 as UInt16) is None);
+    assert(a.checked_div10_u16 is Some);
+    assert(a.checked_div0_u16 is None);
 }
 
 @test
 fn test_uint32_checked_div() {
     let a = 100000 as UInt32;
-    assert(a.checked_div(100 as UInt32) is Some);
-    assert(a.checked_div(0 as UInt32) is None);
+    assert(a.checked_div100_u32 is Some);
+    assert(a.checked_div0_u32 is None);
 }
 
 @test
 fn test_uint64_checked_div() {
     let a = 1000000 as UInt64;
-    assert(a.checked_div(1000 as UInt64) is Some);
-    assert(a.checked_div(0 as UInt64) is None);
+    assert(a.checked_div1000_u64 is Some);
+    assert(a.checked_div0_u64 is None);
 }
 
 @test
@@ -415,42 +415,42 @@ fn test_usize_to_float() {
 @test
 fn test_pow_zero_exponent() {
     // x^0 = 1 for all x
-    assert_eq((0 as Int8).pow(0).to_int(), 1);
-    assert_eq((0 as UInt8).pow(0).to_int(), 1);
-    assert_eq((0 as Int16).pow(0).to_int(), 1);
-    assert_eq((0 as UInt16).pow(0).to_int(), 1);
-    assert_eq((0 as Int32).pow(0).to_int(), 1);
-    assert_eq((0 as UInt32).pow(0).to_int(), 1);
-    assert_eq((0 as Int64).pow(0).to_int(), 1);
-    assert_eq((0 as UInt64).pow(0).to_int(), 1);
+    assert_eq(0_i8.pow(0).to_int(), 1);
+    assert_eq(0_u8.pow(0).to_int(), 1);
+    assert_eq(0_i16.pow(0).to_int(), 1);
+    assert_eq(0_u16.pow(0).to_int(), 1);
+    assert_eq(0_i32.pow(0).to_int(), 1);
+    assert_eq(0_u32.pow(0).to_int(), 1);
+    assert_eq(0_i64.pow(0).to_int(), 1);
+    assert_eq(0_u64.pow(0).to_int(), 1);
 }
 
 @test
 fn test_pow_one_exponent() {
     // x^1 = x
-    assert_eq((42 as Int8).pow(1).to_int(), 42);
-    assert_eq((42 as UInt8).pow(1).to_int(), 42);
-    assert_eq((1000 as Int16).pow(1).to_int(), 1000);
-    assert_eq((1000 as UInt16).pow(1).to_int(), 1000);
+    assert_eq(42_i8.pow(1).to_int(), 42);
+    assert_eq(42_u8.pow(1).to_int(), 42);
+    assert_eq(1000_i16.pow(1).to_int(), 1000);
+    assert_eq(1000_u16.pow(1).to_int(), 1000);
 }
 
 @test
 fn test_pow_base_one() {
     // 1^n = 1 for all n
-    assert_eq((1 as Int8).pow(50).to_int(), 1);
-    assert_eq((1 as UInt8).pow(50).to_int(), 1);
-    assert_eq((1 as Int32).pow(1000).to_int(), 1);
-    assert_eq((1 as UInt32).pow(1000).to_int(), 1);
+    assert_eq(1_i8.pow(50).to_int(), 1);
+    assert_eq(1_u8.pow(50).to_int(), 1);
+    assert_eq(1_i32.pow(1000).to_int(), 1);
+    assert_eq(1_u32.pow(1000).to_int(), 1);
 }
 
 @test
 fn test_pow_negative_base() {
     // negative base with even exponent = positive
-    assert_eq((-2 as Int8).pow(2).to_int(), 4);
-    assert_eq((-2 as Int8).pow(4).to_int(), 16);
+    assert_eq(-2_i8.pow(2).to_int(), 4);
+    assert_eq(-2_i8.pow(4).to_int(), 16);
     // negative base with odd exponent = negative
-    assert_eq((-2 as Int8).pow(1).to_int(), -2);
-    assert_eq((-2 as Int8).pow(3).to_int(), -8);
+    assert_eq(-2_i8.pow(1).to_int(), -2);
+    assert_eq(-2_i8.pow(3).to_int(), -8);
 }
 
 // =============================================================================
@@ -461,7 +461,7 @@ fn test_pow_negative_base() {
 fn test_checked_div_exact() {
     // Exact divisions
     let a = 100 as Int16;
-    let result = a.checked_div(10 as Int16);
+    let result = a.checked_div10_i16;
     assert(result is Some);
 }
 
@@ -469,13 +469,13 @@ fn test_checked_div_exact() {
 fn test_checked_div_truncation() {
     // Integer division truncates
     let a = 7 as Int8;
-    let result = a.checked_div(2 as Int8);
+    let result = a.checked_div2_i8;
     assert(result is Some);
 }
 
 @test
 fn test_checked_div_negative() {
     let a = -100 as Int16;
-    let result = a.checked_div(10 as Int16);
+    let result = a.checked_div10_i16;
     assert(result is Some);
 }

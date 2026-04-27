@@ -76,8 +76,8 @@ fn test_parse_overflow_clamp_negative() {
 
 fn test_int64_bounds_constants() {
     assert_eq(int64_max(), 0x7FFFFFFFFFFFFFFF as Int64);
-    assert(int64_min() < (0 as Int64));
-    assert(is_within_int64_range(0 as Int64));
+    assert(int64_min() < 0_i64);
+    assert(is_within_int64_range0_i64);
     assert(is_within_int64_range(int64_max()));
     assert(is_within_int64_range(int64_min()));
 }

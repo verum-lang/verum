@@ -38,7 +38,7 @@ implement ReleaseEngine {
     /// of bytes actually released (≤ request.target_bytes and
     /// ≤ reclaimable_bytes).
     pub fn sqlite3_release_memory(&mut self, req: &SizeRequest) -> Int {
-        self.calls = self.calls + (1 as Int64);
+        self.calls = self.calls + 1_i64;
         if is_noop(req) { return 0; }
         let target = req.target_bytes;
         let actual = if target <= self.reclaimable_bytes {

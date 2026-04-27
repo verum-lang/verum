@@ -8,20 +8,20 @@ mount base.{Bool, Int64};
 public fn max_value_for(n: Int) -> Int64 {
     // 7-bit per byte for bytes 1..8; byte 9 holds 8 bits → 64 bits total.
     if n <= 0 { return 0 as Int64; }
-    if n >= 9 { return (0x7FFFFFFFFFFFFFFF as Int64); }   // cap at Int64 max
+    if n >= 9 { return 0x7FFFFFFFFFFFFFFF_i64; }   // cap at Int64 max
     // 2^(7*n) - 1
     let mut result: Int64 = 1 as Int64;
     let mut i: Int = 0;
     while i < 7 * n {
-        result = result * (2 as Int64);
+        result = result * 2_i64;
         i = i + 1;
     }
-    result - (1 as Int64)
+    result - 1_i64
 }
 
 // Minimum byte count needed to encode `v` (non-negative Int64).
 public fn encoded_length(v: Int64) -> Int {
-    if v < (0 as Int64) { return 9; }     // large 2's-complement → 9 bytes
+    if v < 0_i64 { return 9; }     // large 2's-complement → 9 bytes
     if v <= max_value_for(1) { return 1; }
     if v <= max_value_for(2) { return 2; }
     if v <= max_value_for(3) { return 3; }

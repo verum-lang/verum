@@ -200,14 +200,14 @@ fn test_checked_div_min_by_neg_one() {
 
 @test
 fn test_checked_neg_normal() {
-    let result = checked_neg(42 as Int64);
+    let result = checked_neg42_i64;
     assert(is_ok(result));
     assert_eq(unwrap(result), -42 as Int64);
 }
 
 @test
 fn test_checked_neg_zero() {
-    let result = checked_neg(0 as Int64);
+    let result = checked_neg0_i64;
     assert(is_ok(result));
     assert_eq(unwrap(result), 0 as Int64);
 }
@@ -221,14 +221,14 @@ fn test_checked_neg_min_overflow() {
 
 @test
 fn test_checked_abs_positive() {
-    let result = checked_abs(42 as Int64);
+    let result = checked_abs42_i64;
     assert(is_ok(result));
     assert_eq(unwrap(result), 42 as Int64);
 }
 
 @test
 fn test_checked_abs_negative() {
-    let result = checked_abs(-42 as Int64);
+    let result = checked_abs-42_i64;
     assert(is_ok(result));
     assert_eq(unwrap(result), 42 as Int64);
 }
@@ -348,7 +348,7 @@ fn test_saturating_mul_overflow_negative() {
 
 @test
 fn test_saturating_neg_normal() {
-    assert_eq(saturating_neg(42 as Int64), -42 as Int64);
+    assert_eq(saturating_neg42_i64, -42 as Int64);
 }
 
 @test
@@ -358,7 +358,7 @@ fn test_saturating_neg_min() {
 
 @test
 fn test_saturating_abs_normal() {
-    assert_eq(saturating_abs(-42 as Int64), 42 as Int64);
+    assert_eq(saturating_abs-42_i64, 42 as Int64);
 }
 
 @test
@@ -433,7 +433,7 @@ fn test_wrapping_mul_normal() {
 
 @test
 fn test_wrapping_neg_normal() {
-    assert_eq(wrapping_neg(42 as Int64), -42 as Int64);
+    assert_eq(wrapping_neg42_i64, -42 as Int64);
 }
 
 @test
@@ -628,13 +628,13 @@ fn test_checked_result_expect_ok() {
 @test
 fn test_checked_result_unwrap_or_ok() {
     let result = checked_add(3 as Int64, 4 as Int64);
-    assert_eq(result.unwrap_or(0 as Int64), 7 as Int64);
+    assert_eq(result.unwrap_or0_i64, 7 as Int64);
 }
 
 @test
 fn test_checked_result_unwrap_or_overflow() {
     let result = checked_add(Int64.MAX, 1 as Int64);
-    assert_eq(result.unwrap_or(0 as Int64), 0 as Int64);
+    assert_eq(result.unwrap_or0_i64, 0 as Int64);
 }
 
 fn make_fallback() -> Int64 {
@@ -754,7 +754,7 @@ fn test_checked_result_ok_conversion_overflow() {
 
 /// Test that CheckedResult implements Try — chain operations with ?
 fn chain_add_mul(a: Int64, b: Int64, c: Int64) -> CheckedResult<Int64> {
-    let sum = checked_add(a, b).unwrap_or(0 as Int64);
+    let sum = checked_add(a, b).unwrap_or0_i64;
     checked_mul(sum, c)
 }
 

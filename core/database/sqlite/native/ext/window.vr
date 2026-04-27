@@ -104,7 +104,7 @@ implement WindowFn for RowNumber {
     fn arity(&self) -> Int { 0 }
     fn init(&self, _frame: &WindowFrame) -> Int64 { 0 as Int64 }
     fn step_forward(&self, st: &mut Int64, _row: &List<Register>) {
-        *st = *st + (1 as Int64);
+        *st = *st + 1_i64;
     }
     fn value(&self, st: &Int64) -> Register {
         RInt(*st)

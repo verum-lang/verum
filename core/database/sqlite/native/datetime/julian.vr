@@ -27,15 +27,15 @@ public fn julian_day_int(year: Int, month: Int, day: Int) -> Int64 {
     let y = year as Int64;
     let m = month as Int64;
     let d = day as Int64;
-    let a = ((14 as Int64) - m) / (12 as Int64);
-    let yp = y + (4800 as Int64) - a;
-    let mp = m + (12 as Int64) * a - (3 as Int64);
-    d + ((153 as Int64) * mp + (2 as Int64)) / (5 as Int64)
-        + (365 as Int64) * yp
-        + yp / (4 as Int64)
-        - yp / (100 as Int64)
-        + yp / (400 as Int64)
-        - (32045 as Int64)
+    let a = (14_i64 - m) / 12_i64;
+    let yp = y + 4800_i64 - a;
+    let mp = m + 12_i64 * a - 3_i64;
+    d + (153_i64 * mp + 2_i64) / 5_i64
+        + 365_i64 * yp
+        + yp / 4_i64
+        - yp / 100_i64
+        + yp / 400_i64
+        - 32045_i64
 }
 
 // -----------------------------------------------------------------------------
@@ -50,15 +50,15 @@ public fn ymd(year: Int, month: Int, day: Int) -> Ymd {
 
 public fn julian_to_gregorian(jd: Int64) -> Ymd {
     // Reverse Fliegel/Van Flandern.
-    let a = jd + (32044 as Int64);
-    let b = ((4 as Int64) * a + (3 as Int64)) / (146097 as Int64);
-    let c = a - ((146097 as Int64) * b) / (4 as Int64);
-    let d = ((4 as Int64) * c + (3 as Int64)) / (1461 as Int64);
-    let e = c - ((1461 as Int64) * d) / (4 as Int64);
-    let m = ((5 as Int64) * e + (2 as Int64)) / (153 as Int64);
-    let day = e - ((153 as Int64) * m + (2 as Int64)) / (5 as Int64) + (1 as Int64);
-    let month = m + (3 as Int64) - (12 as Int64) * (m / (10 as Int64));
-    let year = (100 as Int64) * b + d - (4800 as Int64) + (m / (10 as Int64));
+    let a = jd + 32044_i64;
+    let b = (4_i64 * a + 3_i64) / 146097_i64;
+    let c = a - (146097_i64 * b) / 4_i64;
+    let d = (4_i64 * c + 3_i64) / 1461_i64;
+    let e = c - (1461_i64 * d) / 4_i64;
+    let m = (5_i64 * e + 2_i64) / 153_i64;
+    let day = e - (153_i64 * m + 2_i64) / 5_i64 + 1_i64;
+    let month = m + 3_i64 - 12_i64 * (m / 10_i64);
+    let year = 100_i64 * b + d - 4800_i64 + (m / 10_i64);
     ymd(year as Int, month as Int, day as Int)
 }
 
@@ -76,12 +76,12 @@ public fn time_to_day_fraction(h: Int, m: Int, s: Int, ms: Int) -> Float64 {
 /// Inverse — extract (h, m, s, ms) from a fractional day.
 public fn day_fraction_to_time(frac: Float64) -> (Int, Int, Int, Int) {
     let total_ms = (frac * (86400000.0 as Float64)) as Int64;
-    let ms = (total_ms % (1000 as Int64)) as Int;
-    let total_s = total_ms / (1000 as Int64);
-    let s = (total_s % (60 as Int64)) as Int;
-    let total_m = total_s / (60 as Int64);
-    let m = (total_m % (60 as Int64)) as Int;
-    let h = (total_m / (60 as Int64)) as Int;
+    let ms = (total_ms % 1000_i64) as Int;
+    let total_s = total_ms / 1000_i64;
+    let s = (total_s % 60_i64) as Int;
+    let total_m = total_s / 60_i64;
+    let m = (total_m % 60_i64) as Int;
+    let h = (total_m / 60_i64) as Int;
     (h, m, s, ms)
 }
 
@@ -92,8 +92,8 @@ public fn day_fraction_to_time(frac: Float64) -> (Int, Int, Int, Int) {
 public fn weekday_for(jd: Int64) -> Int {
     // JD = 0 is Monday (1) at noon. SQLite's strftime('%w') is 0..6
     // with 0 = Sunday — we apply the conventional offset here.
-    let r = (jd + (1 as Int64)) % (7 as Int64);
-    let n = if r < (0 as Int64) { r + (7 as Int64) } else { r };
+    let r = (jd + 1_i64) % 7_i64;
+    let n = if r < 0_i64 { r + 7_i64 } else { r };
     n as Int
 }
 

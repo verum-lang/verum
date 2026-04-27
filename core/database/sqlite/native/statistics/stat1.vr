@@ -54,7 +54,7 @@ implement Stat1Row {
             return self.total_rows;
         }
         let dup = self.dup_per_prefix[n_cols - 1];
-        if dup <= (0 as Int64) { return self.total_rows; }
+        if dup <= 0_i64 { return self.total_rows; }
         self.total_rows / dup
     }
 
@@ -62,7 +62,7 @@ implement Stat1Row {
     /// (avg_dup == 1).
     pub fn is_unique_prefix(&self, n_cols: Int) -> Bool {
         if n_cols <= 0 || n_cols > self.dup_per_prefix.len() { return false; }
-        self.dup_per_prefix[n_cols - 1] == (1 as Int64)
+        self.dup_per_prefix[n_cols - 1] == 1_i64
     }
 }
 

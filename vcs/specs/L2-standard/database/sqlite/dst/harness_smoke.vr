@@ -39,14 +39,14 @@ mount base.{Some, None, Maybe, Bool};
 // -----------------------------------------------------------------------------
 
 fn test_seed_reproducible() {
-    let mut s1 = seed_from_u64(0x12345 as Int64);
-    let mut s2 = seed_from_u64(0x12345 as Int64);
+    let mut s1 = seed_from_u640x12345_i64;
+    let mut s2 = seed_from_u640x12345_i64;
     assert_eq(s1.next_u64(), s2.next_u64());
     assert_eq(s1.next_u64(), s2.next_u64());
 }
 
 fn test_seed_bounded_draw_in_range() {
-    let mut s = seed_from_u64(7 as Int64);
+    let mut s = seed_from_u647_i64;
     let v = s.next_below(10);
     assert(v >= 0);
     assert(v < 10);
@@ -87,7 +87,7 @@ fn test_op_stream_last_durable_index() {
 // -----------------------------------------------------------------------------
 
 fn test_generator_emits_requested_count() {
-    let s = seed_from_u64(0x42 as Int64);
+    let s = seed_from_u640x42_i64;
     let mut g = generator_new(s, default_mix());
     let stream = g.emit(50);
     assert_eq(stream.len(), 50);
@@ -118,7 +118,7 @@ fn test_schedule_next_after_finds_pending() {
 }
 
 fn test_generate_schedule_density() {
-    let mut s = seed_from_u64(0x9 as Int64);
+    let mut s = seed_from_u640x9_i64;
     let sched = generate_schedule(&mut s, 100, &default_density());
     assert(sched.len() >= 0);
 }

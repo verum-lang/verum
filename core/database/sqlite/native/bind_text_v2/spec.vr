@@ -41,7 +41,7 @@ public fn utf16le_spec(byte_len: Int64, destructor: Destructor) -> BindTextSpec 
 
 /// UTF-16 byte lengths (non-negative) must be even.
 public fn is_valid(s: &BindTextSpec) -> Bool {
-    if is_utf16(&s.encoding) && s.byte_len > (0 as Int64) && (s.byte_len & (1 as Int64)) != (0 as Int64) {
+    if is_utf16(&s.encoding) && s.byte_len > 0_i64 && (s.byte_len & 1_i64) != 0_i64 {
         return false;
     }
     true

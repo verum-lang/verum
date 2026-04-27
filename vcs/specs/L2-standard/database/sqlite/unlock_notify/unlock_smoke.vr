@@ -23,7 +23,7 @@ fn test_new_request_not_cancellation() {
 }
 
 fn test_cancel_request_is_cancellation() {
-    let r = cancel_request(1 as Int64);
+    let r = cancel_request1_i64;
     assert(is_cancellation(&r));
     assert_eq(r.blocker, 0 as Int64);
 }
@@ -38,7 +38,7 @@ fn test_engine_first_registration_succeeds() {
 fn test_engine_cancellation_removes() {
     let mut e = new_engine();
     let _ = e.sqlite3_unlock_notify(&new_request(1 as Int64, 2 as Int64, 100 as Int64));
-    let _ = e.sqlite3_unlock_notify(&cancel_request(1 as Int64));
+    let _ = e.sqlite3_unlock_notify(&cancel_request1_i64);
     assert_eq(e.pending_count(), 0);
 }
 
@@ -70,7 +70,7 @@ fn test_engine_blocker_released_fires_matching() {
     let mut e = new_engine();
     let _ = e.sqlite3_unlock_notify(&new_request(1 as Int64, 99 as Int64, 11 as Int64));
     let _ = e.sqlite3_unlock_notify(&new_request(2 as Int64, 99 as Int64, 22 as Int64));
-    let fired = e.blocker_released(99 as Int64);
+    let fired = e.blocker_released99_i64;
     assert_eq(fired, 2);
     assert_eq(e.pending_count(), 0);
     assert_eq(e.notifications_fired, 2 as Int64);
@@ -79,7 +79,7 @@ fn test_engine_blocker_released_fires_matching() {
 fn test_engine_blocker_released_no_match_is_zero() {
     let mut e = new_engine();
     let _ = e.sqlite3_unlock_notify(&new_request(1 as Int64, 99 as Int64, 11 as Int64));
-    let fired = e.blocker_released(42 as Int64);
+    let fired = e.blocker_released42_i64;
     assert_eq(fired, 0);
 }
 

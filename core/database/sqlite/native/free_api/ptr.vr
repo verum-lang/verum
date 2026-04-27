@@ -26,5 +26,5 @@ public fn new_handle(id: Int64, size: Int64) -> OpaqueHandle {
 }
 
 public fn is_null(h: &OpaqueHandle) -> Bool {
-    h.id == (0 as Int64)
+    h.id == 0_i64
 }

@@ -124,14 +124,14 @@ fn test_rtree_search_filters_misses() {
 fn test_rtree_delete_removes_entry() {
     let mut t = rtree_new(2, 4);
     t.insert(1 as Int64, make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64));
-    assert(t.delete(1 as Int64));
+    assert(t.delete1_i64);
     let q = make_bbox(0.0 as Float64, 0.0 as Float64, 5.0 as Float64, 5.0 as Float64);
     assert_eq(t.search(&q).len(), 0);
 }
 
 fn test_rtree_delete_missing_returns_false() {
     let mut t = rtree_new(2, 4);
-    assert(!t.delete(99 as Int64));
+    assert(!t.delete99_i64);
 }
 
 // -----------------------------------------------------------------------------

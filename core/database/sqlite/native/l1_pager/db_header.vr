@@ -159,7 +159,7 @@ fn write_u32_be(buf: &mut List<Byte>, v: UInt32) {
 
 /// Validate a page_size byte pair, returning the canonical Int size.
 fn canon_page_size(raw: UInt16) -> Result<Int, Text> {
-    if raw == (1 as UInt16) {
+    if raw == 1_u16 {
         return Ok(DB_PAGE_SIZE_SENTINEL);
     }
     let v = raw as Int;
@@ -176,7 +176,7 @@ fn canon_page_size(raw: UInt16) -> Result<Int, Text> {
 }
 
 fn encode_page_size(n: Int) -> Result<UInt16, Text> {
-    if n == DB_PAGE_SIZE_SENTINEL { return Ok(1 as UInt16); }
+    if n == DB_PAGE_SIZE_SENTINEL { return Ok1_u16; }
     if n < DB_PAGE_SIZE_MIN || n > DB_PAGE_SIZE_MAX {
         return Err("page size out of range for header".clone());
     }
@@ -244,7 +244,7 @@ public fn parse_header(buf: &[Byte]) -> Result<DatabaseHeader, Text> {
     let freelist_count = read_u32_be(buf, 36);
     let cookie         = read_u32_be(buf, 40);
     let schema_fmt     = read_u32_be(buf, 44);
-    if schema_fmt < (1 as UInt32) || schema_fmt > (4 as UInt32) {
+    if schema_fmt < 1_u32 || schema_fmt > 4_u32 {
         return Err("db_header: schema_format must be in [1, 4]".clone());
     }
     let default_cache  = read_u32_be(buf, 48);

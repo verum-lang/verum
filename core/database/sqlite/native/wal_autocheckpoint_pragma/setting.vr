@@ -25,7 +25,7 @@ public fn is_enabled(s: &WalAutocheckpointSetting) -> Bool {
 }
 
 public fn record_frame(mut s: WalAutocheckpointSetting) -> WalAutocheckpointSetting {
-    s.frames_seen = s.frames_seen + (1 as Int64);
+    s.frames_seen = s.frames_seen + 1_i64;
     s
 }
 

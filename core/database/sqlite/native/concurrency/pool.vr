@@ -125,7 +125,7 @@ implement DbConnectionPool {
         if idx < 0 || idx >= self.capacity { return Err(InvalidLease); }
         if !self.slots[idx].in_use { return Err(InvalidLease); }
         if self.slots[idx].sequence != lease.sequence { return Err(InvalidLease); }
-        self.slots[idx].sequence = self.slots[idx].sequence + (1 as Int64);
+        self.slots[idx].sequence = self.slots[idx].sequence + 1_i64;
         self.slots[idx].in_use = false;
         self.free.push(idx);
         Ok(())

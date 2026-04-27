@@ -148,11 +148,11 @@ implement TracingSpan {
     }
 
     pub fn duration_ns(&self) -> Int64 {
-        if self.ended_ns == (0 as Int64) { return 0 as Int64; }
+        if self.ended_ns == 0_i64 { return 0 as Int64; }
         self.ended_ns - self.started_ns
     }
 
-    pub fn is_ended(&self) -> Bool { self.ended_ns != (0 as Int64) }
+    pub fn is_ended(&self) -> Bool { self.ended_ns != 0_i64 }
 }
 
 // -----------------------------------------------------------------------------

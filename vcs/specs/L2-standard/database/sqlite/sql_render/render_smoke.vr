@@ -20,7 +20,7 @@ mount base.{Bool};
 
 fn test_literal_kind() {
     assert(literal_kind(&RlNull) == "NULL".clone());
-    assert(literal_kind(&RlInt(1 as Int64)) == "INTEGER".clone());
+    assert(literal_kind(&RlInt1_i64) == "INTEGER".clone());
     assert(literal_kind(&RlText("x".clone())) == "TEXT".clone());
     let b: List<u8> = List.new();
     assert(literal_kind(&RlBlob(b)) == "BLOB".clone());
@@ -34,10 +34,10 @@ fn test_render_null() {
 
 fn test_render_int() {
     let mut out = "".clone();
-    render_literal(&mut out, &RlInt(42 as Int64));
+    render_literal(&mut out, &RlInt42_i64);
     assert(out == "42".clone());
     let mut neg = "".clone();
-    render_literal(&mut neg, &RlInt(-17 as Int64));
+    render_literal(&mut neg, &RlInt-17_i64);
     assert(neg == "-17".clone());
 }
 
@@ -58,7 +58,7 @@ fn test_render_blob_hex() {
 
 fn test_expand_positional_placeholders() {
     let mut bindings: List<BoundValue> = List.new();
-    bindings.push(new_bound(1, RlInt(42 as Int64)));
+    bindings.push(new_bound(1, RlInt42_i64));
     bindings.push(new_bound(2, RlText("alice".clone())));
     let out = expand(&"SELECT ?, ?".clone(), &bindings);
     assert(out == "SELECT 42, 'alice'".clone());
@@ -66,8 +66,8 @@ fn test_expand_positional_placeholders() {
 
 fn test_expand_explicit_indexed() {
     let mut bindings: List<BoundValue> = List.new();
-    bindings.push(new_bound(1, RlInt(1 as Int64)));
-    bindings.push(new_bound(2, RlInt(2 as Int64)));
+    bindings.push(new_bound(1, RlInt1_i64));
+    bindings.push(new_bound(2, RlInt2_i64));
     let out = expand(&"SELECT ?2, ?1".clone(), &bindings);
     assert(out == "SELECT 2, 1".clone());
 }
@@ -80,7 +80,7 @@ fn test_expand_missing_binding_leaves_placeholder() {
 
 fn test_expand_preserves_string_literals() {
     let mut bindings: List<BoundValue> = List.new();
-    bindings.push(new_bound(1, RlInt(7 as Int64)));
+    bindings.push(new_bound(1, RlInt7_i64));
     let out = expand(&"SELECT 'keep ?', ?".clone(), &bindings);
     assert(out == "SELECT 'keep ?', 7".clone());
 }

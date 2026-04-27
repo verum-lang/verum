@@ -25,16 +25,16 @@ public fn end_offset(r: &MmapRegion) -> Int64 {
 // Does `offset..offset+len` fall entirely inside this region?
 public fn contains_range(r: &MmapRegion, offset: Int64, len: Int64) -> Bool {
     if offset < r.file_offset { return false; }
-    if len <= (0 as Int64) { return false; }
+    if len <= 0_i64 { return false; }
     offset + len <= end_offset(r)
 }
 
 public fn overlaps(a: &MmapRegion, b: &MmapRegion) -> Bool {
-    if a.length <= (0 as Int64) { return false; }
-    if b.length <= (0 as Int64) { return false; }
+    if a.length <= 0_i64 { return false; }
+    if b.length <= 0_i64 { return false; }
     !(end_offset(a) <= b.file_offset || end_offset(b) <= a.file_offset)
 }
 
 public fn is_well_formed(r: &MmapRegion) -> Bool {
-    r.file_offset >= (0 as Int64) && r.length >= (0 as Int64)
+    r.file_offset >= 0_i64 && r.length >= 0_i64
 }

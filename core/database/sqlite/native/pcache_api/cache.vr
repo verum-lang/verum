@@ -36,7 +36,7 @@ public fn new_cache(max_pages: Int) -> PCache {
 
 implement PCache {
     fn tick(&mut self) -> Int64 {
-        self.generation = self.generation + (1 as Int64);
+        self.generation = self.generation + 1_i64;
         self.generation
     }
 
@@ -56,14 +56,14 @@ implement PCache {
         let gen = self.tick();
         if idx >= 0 {
             pin(self.slots.get_mut(idx), gen);
-            self.hits = self.hits + (1 as Int64);
+            self.hits = self.hits + 1_i64;
             return true;
         }
         if self.slots.len() >= self.max_pages {
             let _ = self.evict_lru();
         }
         self.slots.push(new_slot(page_no, gen));
-        self.misses = self.misses + (1 as Int64);
+        self.misses = self.misses + 1_i64;
         false
     }
 
@@ -102,7 +102,7 @@ implement PCache {
         }
         if best < 0 { return false; }
         let _ = self.slots.remove(best);
-        self.evictions = self.evictions + (1 as Int64);
+        self.evictions = self.evictions + 1_i64;
         true
     }
 

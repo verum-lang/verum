@@ -20,7 +20,7 @@ public fn new(size: Int64) -> ZeroblobRegion {
 public fn max_size() -> Int64 { 0x7FFFFFFF as Int64 }
 
 public fn is_valid_size(n: Int64) -> Bool {
-    n >= (0 as Int64) && n <= max_size()
+    n >= 0_i64 && n <= max_size()
 }
 
 // Materialise `n` bytes — bumps the counter (clamped at logical size).
@@ -38,7 +38,7 @@ public fn is_fully_materialised(r: &ZeroblobRegion) -> Bool {
 
 // Reads at offset ≥ logical_size return 0 bytes (EOF).
 public fn read_byte_at(r: &ZeroblobRegion, offset: Int64) -> Int {
-    if offset < (0 as Int64) { return -1; }
+    if offset < 0_i64 { return -1; }
     if offset >= r.logical_size { return -1; }
     0    // zeroblob reads always return 0
 }

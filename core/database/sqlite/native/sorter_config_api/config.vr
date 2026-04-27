@@ -30,21 +30,21 @@ public fn minimum_viable() -> SorterConfig {
 }
 
 public fn is_well_formed(c: &SorterConfig) -> Bool {
-    if c.pma_size_bytes <= (0 as Int64) { return false; }
+    if c.pma_size_bytes <= 0_i64 { return false; }
     if c.merge_fanin < 2 { return false; }
-    if c.min_spill_bytes < (0 as Int64) { return false; }
+    if c.min_spill_bytes < 0_i64 { return false; }
     true
 }
 
 // How many merge passes needed to reduce `n_runs` to a single run at `fanin`.
 // log_fanin(n_runs), rounded up; returns 0 for n_runs <= 1.
 public fn merge_passes_needed(n_runs: Int64, fanin: Int) -> Int {
-    if n_runs <= (1 as Int64) { return 0; }
+    if n_runs <= 1_i64 { return 0; }
     let mut passes: Int = 0;
     let mut remaining: Int64 = n_runs;
-    while remaining > (1 as Int64) {
+    while remaining > 1_i64 {
         let f = fanin as Int64;
-        remaining = (remaining + f - (1 as Int64)) / f;
+        remaining = (remaining + f - 1_i64) / f;
         passes = passes + 1;
     }
     passes

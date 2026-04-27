@@ -39,11 +39,11 @@ implement ZeroBlobBindEngine {
     /// invalid, 25 (SQLITE_RANGE) if index is out of range.
     pub fn sqlite3_bind_zeroblob(&mut self, index: Int, spec: ZeroBlobSpec) -> Int {
         if index <= 0 || index >= self.slots.len() {
-            self.rejections = self.rejections + (1 as Int64);
+            self.rejections = self.rejections + 1_i64;
             return 25;
         }
         if !is_valid(&spec) {
-            self.rejections = self.rejections + (1 as Int64);
+            self.rejections = self.rejections + 1_i64;
             return 18;
         }
         self.slots.get_mut(index).spec = Maybe.Some(spec);

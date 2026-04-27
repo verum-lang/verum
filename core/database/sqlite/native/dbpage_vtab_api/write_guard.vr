@@ -56,7 +56,7 @@ public fn verdict_allows(v: &WriteVerdict) -> Bool {
 /// Decide whether a write to page `pgno` is allowed.
 public fn evaluate(g: &WriteGuard, pgno: Int64) -> WriteVerdict {
     if !g.schema_writable { return WvBlockReadOnly; }
-    if pgno == (1 as Int64) && !g.writable_schema_pragma {
+    if pgno == 1_i64 && !g.writable_schema_pragma {
         return WvBlockPageOneProtected;
     }
     if !g.no_active_read_txn { return WvBlockActiveTxn; }

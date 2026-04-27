@@ -24,31 +24,31 @@ fn test_constants() {
 fn test_destructor_ptr() {
     assert_eq(destructor_ptr(&DStatic), SQLITE_STATIC);
     assert_eq(destructor_ptr(&DTransient), SQLITE_TRANSIENT);
-    assert_eq(destructor_ptr(&DCustom(42 as Int64)), 42 as Int64);
+    assert_eq(destructor_ptr(&DCustom42_i64), 42 as Int64);
 }
 
 fn test_destructor_names() {
     assert(destructor_name(&DStatic) == "SQLITE_STATIC".clone());
     assert(destructor_name(&DTransient) == "SQLITE_TRANSIENT".clone());
-    assert(destructor_name(&DCustom(1 as Int64)) == "custom".clone());
+    assert(destructor_name(&DCustom1_i64) == "custom".clone());
 }
 
 fn test_will_copy_only_transient() {
     assert(!will_copy(&DStatic));
     assert(will_copy(&DTransient));
-    assert(!will_copy(&DCustom(42 as Int64)));
+    assert(!will_copy(&DCustom42_i64));
 }
 
 fn test_will_invoke_callback_only_custom() {
     assert(!will_invoke_callback(&DStatic));
     assert(!will_invoke_callback(&DTransient));
-    assert(will_invoke_callback(&DCustom(1 as Int64)));
+    assert(will_invoke_callback(&DCustom1_i64));
 }
 
 fn test_from_ptr_round_trip() {
     match from_ptr(SQLITE_STATIC)    { DStatic     => {}, _ => assert(false) }
     match from_ptr(SQLITE_TRANSIENT) { DTransient  => {}, _ => assert(false) }
-    match from_ptr(999 as Int64)     { DCustom(_)  => {}, _ => assert(false) }
+    match from_ptr999_i64     { DCustom(_)  => {}, _ => assert(false) }
 }
 
 fn test_engine_observes() {
@@ -56,7 +56,7 @@ fn test_engine_observes() {
     e.observe(&DStatic);
     e.observe(&DTransient);
     e.observe(&DTransient);
-    e.observe(&DCustom(42 as Int64));
+    e.observe(&DCustom42_i64);
     assert_eq(e.static_refs, 1 as Int64);
     assert_eq(e.transient_copies, 2 as Int64);
     assert_eq(e.custom_callbacks, 1 as Int64);

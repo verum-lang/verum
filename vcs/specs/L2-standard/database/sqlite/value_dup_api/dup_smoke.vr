@@ -28,22 +28,22 @@ fn test_free_transitions_to_not_live() {
 
 fn test_registry_dup_assigns_ids() {
     let mut r = new_registry();
-    let id1 = r.sqlite3_value_dup(10 as Int64);
-    let id2 = r.sqlite3_value_dup(20 as Int64);
+    let id1 = r.sqlite3_value_dup10_i64;
+    let id2 = r.sqlite3_value_dup20_i64;
     assert(id1 != id2);
     assert_eq(r.outstanding_count(), 2);
 }
 
 fn test_registry_free_decrements_outstanding() {
     let mut r = new_registry();
-    let id = r.sqlite3_value_dup(10 as Int64);
+    let id = r.sqlite3_value_dup10_i64;
     assert(r.sqlite3_value_free(id));
     assert_eq(r.outstanding_count(), 0);
 }
 
 fn test_registry_double_free_counted() {
     let mut r = new_registry();
-    let id = r.sqlite3_value_dup(10 as Int64);
+    let id = r.sqlite3_value_dup10_i64;
     assert(r.sqlite3_value_free(id));
     assert(!r.sqlite3_value_free(id));
     assert_eq(r.double_frees, 1 as Int64);
@@ -51,7 +51,7 @@ fn test_registry_double_free_counted() {
 
 fn test_registry_free_unknown_returns_false() {
     let mut r = new_registry();
-    assert(!r.sqlite3_value_free(99 as Int64));
+    assert(!r.sqlite3_value_free99_i64);
 }
 
 fn main() {

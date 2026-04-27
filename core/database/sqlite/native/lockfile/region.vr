@@ -34,8 +34,8 @@ public fn shared_region_full() -> SqliteLockRegion {
 /// implementations choose by `(getpid() % SHARED_SIZE)`. Caller does
 /// the actual selection.
 public fn shared_region_for_byte(offset_within: Int64) -> SqliteLockRegion {
-    let off = if offset_within < (0 as Int64) { 0 as Int64 }
-              else if offset_within >= SHARED_SIZE { SHARED_SIZE - (1 as Int64) }
+    let off = if offset_within < 0_i64 { 0 as Int64 }
+              else if offset_within >= SHARED_SIZE { SHARED_SIZE - 1_i64 }
               else { offset_within };
     lock_region(SHARED_FIRST + off, 1 as Int64)
 }

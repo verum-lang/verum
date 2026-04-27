@@ -107,20 +107,20 @@ fn test_generic_signed_operations() {
     assert(abs_signed(0) == 0);
 
     // abs_signed for Int8
-    assert(abs_signed(50 as Int8) == 50 as Int8);
-    assert(abs_signed(-50 as Int8) == 50 as Int8);
+    assert(abs_signed50_i8 == 50 as Int8);
+    assert(abs_signed-50_i8 == 50 as Int8);
 
     // abs_signed for Int16
-    assert(abs_signed(1000 as Int16) == 1000 as Int16);
-    assert(abs_signed(-1000 as Int16) == 1000 as Int16);
+    assert(abs_signed1000_i16 == 1000 as Int16);
+    assert(abs_signed-1000_i16 == 1000 as Int16);
 
     // abs_signed for Int32
-    assert(abs_signed(100000 as Int32) == 100000 as Int32);
-    assert(abs_signed(-100000 as Int32) == 100000 as Int32);
+    assert(abs_signed100000_i32 == 100000 as Int32);
+    assert(abs_signed-100000_i32 == 100000 as Int32);
 
     // abs_signed for Int64
-    assert(abs_signed(1000000000 as Int64) == 1000000000 as Int64);
-    assert(abs_signed(-1000000000 as Int64) == 1000000000 as Int64);
+    assert(abs_signed1000000000_i64 == 1000000000 as Int64);
+    assert(abs_signed-1000000000_i64 == 1000000000 as Int64);
 
     // signum for Int
     assert(signum(5) == 1);
@@ -128,19 +128,19 @@ fn test_generic_signed_operations() {
     assert(signum(0) == 0);
 
     // signum for Int8
-    assert(signum(50 as Int8) == 1 as Int8);
-    assert(signum(-50 as Int8) == -1 as Int8);
-    assert(signum(0 as Int8) == 0 as Int8);
+    assert(signum50_i8 == 1 as Int8);
+    assert(signum-50_i8 == -1 as Int8);
+    assert(signum0_i8 == 0 as Int8);
 
     // signum for Int32
-    assert(signum(100000 as Int32) == 1 as Int32);
-    assert(signum(-100000 as Int32) == -1 as Int32);
+    assert(signum100000_i32 == 1 as Int32);
+    assert(signum-100000_i32 == -1 as Int32);
 
     // negation
     assert(neg(5) == -5);
     assert(neg(-5) == 5);
     assert(neg(0) == 0);
-    assert(neg(100 as Int32) == -100 as Int32);
+    assert(neg100_i32 == -100 as Int32);
 }
 
 // =============================================================================
@@ -321,7 +321,7 @@ fn test_checked_arithmetic() {
     // Note: UInt32 overflow test skipped - checked_add uses signed overflow checking.
     // UInt32 max (4294967295) is -1 as i32, so -1 + 1 = 0 doesn't overflow as signed.
     // Normal UInt32 addition still works:
-    assert(checked_add(100 as UInt32, 50 as UInt32) == Some(150 as UInt32));
+    assert(checked_add(100 as UInt32, 50 as UInt32) == Some150_u32);
 }
 
 // =============================================================================
@@ -353,7 +353,7 @@ fn test_wrapping_arithmetic() {
     // Wrapping negation (MIN value case)
     // For i8: -(-128) would overflow, so it wraps to -128
     assert(wrapping_neg_i8(min_i8) == min_i8);
-    assert(wrapping_neg_i8(5 as Int8) == -5 as Int8);
+    assert(wrapping_neg_i85_i8 == -5 as Int8);
 
     // Wrapping shifts - use type-specific intrinsics
     assert(wrapping_shl_u32(1 as UInt32, 0) == 1 as UInt32);

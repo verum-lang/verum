@@ -27,28 +27,28 @@ fn test_always_true_in_release() {
 
 fn test_release_always_returns_held_1() {
     let e = new_engine(BmRelease);
-    assert_eq(e.sqlite3_mutex_held(42 as Int64), 1);
-    assert_eq(e.sqlite3_mutex_notheld(42 as Int64), 1);
+    assert_eq(e.sqlite3_mutex_held42_i64, 1);
+    assert_eq(e.sqlite3_mutex_notheld42_i64, 1);
 }
 
 fn test_debug_unknown_mutex_held_safe_default_1() {
     let e = new_engine(BmDebug);
-    assert_eq(e.sqlite3_mutex_held(99 as Int64), 1);
+    assert_eq(e.sqlite3_mutex_held99_i64, 1);
 }
 
 fn test_acquire_then_held_query() {
     let mut e = new_engine(BmDebug);
     assert(e.acquire(1 as Int64, 100 as Int64));
-    assert_eq(e.sqlite3_mutex_held(1 as Int64), 1);
-    assert_eq(e.sqlite3_mutex_notheld(1 as Int64), 0);
+    assert_eq(e.sqlite3_mutex_held1_i64, 1);
+    assert_eq(e.sqlite3_mutex_notheld1_i64, 0);
 }
 
 fn test_release_flips_held_to_zero() {
     let mut e = new_engine(BmDebug);
     let _ = e.acquire(1 as Int64, 100 as Int64);
-    assert(e.release(1 as Int64));
-    assert_eq(e.sqlite3_mutex_held(1 as Int64), 0);
-    assert_eq(e.sqlite3_mutex_notheld(1 as Int64), 1);
+    assert(e.release1_i64);
+    assert_eq(e.sqlite3_mutex_held1_i64, 0);
+    assert_eq(e.sqlite3_mutex_notheld1_i64, 1);
 }
 
 fn test_double_acquire_rejected() {
@@ -59,7 +59,7 @@ fn test_double_acquire_rejected() {
 
 fn test_release_unknown_mutex_returns_false() {
     let mut e = new_engine(BmDebug);
-    assert(!e.release(42 as Int64));
+    assert(!e.release42_i64);
 }
 
 fn main() {

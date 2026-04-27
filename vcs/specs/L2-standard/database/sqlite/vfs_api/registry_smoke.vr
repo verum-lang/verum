@@ -66,7 +66,7 @@ fn test_unregister_removes_and_promotes_next() {
     let mut r = new_registry();
     let _ = r.sqlite3_vfs_register("unix".clone(), 42 as Int64, true);
     let _ = r.sqlite3_vfs_register("memdb".clone(), 7 as Int64, false);
-    assert_eq(r.sqlite3_vfs_unregister(42 as Int64), 0);
+    assert_eq(r.sqlite3_vfs_unregister42_i64, 0);
     assert_eq(r.len(), 1);
     // Default promotes to the now-head entry.
     assert_eq(r.default_handle, 7 as Int64);
@@ -74,7 +74,7 @@ fn test_unregister_removes_and_promotes_next() {
 
 fn test_unregister_not_found_returns_one() {
     let mut r = new_registry();
-    assert_eq(r.sqlite3_vfs_unregister(99 as Int64), 1);
+    assert_eq(r.sqlite3_vfs_unregister99_i64, 1);
 }
 
 fn main() {

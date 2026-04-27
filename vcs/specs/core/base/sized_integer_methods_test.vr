@@ -755,9 +755,9 @@ fn test_usize_to_int() {
 @test
 fn test_all_signed_have_count_zeros() {
     // Verify count_zeros exists and is consistent for all signed types
-    let i16_zeros = (0 as Int16).count_zeros();
-    let i32_zeros = (0 as Int32).count_zeros();
-    let i64_zeros = (0 as Int64).count_zeros();
+    let i16_zeros = 0_i16.count_zeros();
+    let i32_zeros = 0_i32.count_zeros();
+    let i64_zeros = 0_i64.count_zeros();
     let i128_zeros = (0 as Int128).count_zeros();
     let isize_zeros = (0 as ISize).count_zeros();
 
@@ -770,9 +770,9 @@ fn test_all_signed_have_count_zeros() {
 
 @test
 fn test_all_unsigned_have_count_zeros() {
-    let u16_zeros = (0 as UInt16).count_zeros();
-    let u32_zeros = (0 as UInt32).count_zeros();
-    let u64_zeros = (0 as UInt64).count_zeros();
+    let u16_zeros = 0_u16.count_zeros();
+    let u32_zeros = 0_u32.count_zeros();
+    let u64_zeros = 0_u64.count_zeros();
     let u128_zeros = (0 as UInt128).count_zeros();
     let usize_zeros = (0 as USize).count_zeros();
 
@@ -785,10 +785,10 @@ fn test_all_unsigned_have_count_zeros() {
 
 @test
 fn test_all_signed_have_saturating_mul() {
-    let i8_r = (10 as Int8).saturating_mul(10 as Int8);
-    let i16_r = (10 as Int16).saturating_mul(10 as Int16);
-    let i32_r = (10 as Int32).saturating_mul(10 as Int32);
-    let i64_r = (10 as Int64).saturating_mul(10 as Int64);
+    let i8_r = 10_i8.saturating_mul10_i8;
+    let i16_r = 10_i16.saturating_mul10_i16;
+    let i32_r = 10_i32.saturating_mul10_i32;
+    let i64_r = 10_i64.saturating_mul10_i64;
     let i128_r = (10 as Int128).saturating_mul(10 as Int128);
     let isize_r = (10 as ISize).saturating_mul(10 as ISize);
 
@@ -802,10 +802,10 @@ fn test_all_signed_have_saturating_mul() {
 
 @test
 fn test_all_unsigned_have_saturating_mul() {
-    let u8_r = (10 as UInt8).saturating_mul(10 as UInt8);
-    let u16_r = (10 as UInt16).saturating_mul(10 as UInt16);
-    let u32_r = (10 as UInt32).saturating_mul(10 as UInt32);
-    let u64_r = (10 as UInt64).saturating_mul(10 as UInt64);
+    let u8_r = 10_u8.saturating_mul10_u8;
+    let u16_r = 10_u16.saturating_mul10_u16;
+    let u32_r = 10_u32.saturating_mul10_u32;
+    let u64_r = 10_u64.saturating_mul10_u64;
     let u128_r = (10 as UInt128).saturating_mul(10 as UInt128);
     let usize_r = (10 as USize).saturating_mul(10 as USize);
 
@@ -819,10 +819,10 @@ fn test_all_unsigned_have_saturating_mul() {
 
 @test
 fn test_all_wrapping_mul() {
-    let i8_r = (10 as Int8).wrapping_mul(10 as Int8);
-    let i16_r = (10 as Int16).wrapping_mul(10 as Int16);
-    let i32_r = (10 as Int32).wrapping_mul(10 as Int32);
-    let i64_r = (10 as Int64).wrapping_mul(10 as Int64);
+    let i8_r = 10_i8.wrapping_mul10_i8;
+    let i16_r = 10_i16.wrapping_mul10_i16;
+    let i32_r = 10_i32.wrapping_mul10_i32;
+    let i64_r = 10_i64.wrapping_mul10_i64;
     let i128_r = (10 as Int128).wrapping_mul(10 as Int128);
     let isize_r = (10 as ISize).wrapping_mul(10 as ISize);
 
@@ -836,16 +836,16 @@ fn test_all_wrapping_mul() {
 
 @test
 fn test_all_have_to_int() {
-    assert_eq((42 as Int8).to_int(), 42);
-    assert_eq((42 as Int16).to_int(), 42);
-    assert_eq((42 as Int32).to_int(), 42);
-    assert_eq((42 as Int64).to_int(), 42);
+    assert_eq(42_i8.to_int(), 42);
+    assert_eq(42_i16.to_int(), 42);
+    assert_eq(42_i32.to_int(), 42);
+    assert_eq(42_i64.to_int(), 42);
     assert_eq((42 as Int128).to_int(), 42);
     assert_eq((42 as ISize).to_int(), 42);
-    assert_eq((42 as UInt8).to_int(), 42);
-    assert_eq((42 as UInt16).to_int(), 42);
-    assert_eq((42 as UInt32).to_int(), 42);
-    assert_eq((42 as UInt64).to_int(), 42);
+    assert_eq(42_u8.to_int(), 42);
+    assert_eq(42_u16.to_int(), 42);
+    assert_eq(42_u32.to_int(), 42);
+    assert_eq(42_u64.to_int(), 42);
     assert_eq((42 as UInt128).to_int(), 42);
     assert_eq((42 as USize).to_int(), 42);
 }

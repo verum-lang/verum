@@ -26,8 +26,8 @@ fn test_new_counter_is_zero() {
 
 fn test_alloc_grows_bytes_and_highwater() {
     let mut c = new_counter();
-    c.on_alloc(100 as Int64);
-    c.on_alloc(50 as Int64);
+    c.on_alloc100_i64;
+    c.on_alloc50_i64;
     assert_eq(sqlite3_memory_used(&c), 150 as Int64);
     let hw = sqlite3_memory_highwater(&mut c, false);
     assert_eq(hw, 150 as Int64);
@@ -35,8 +35,8 @@ fn test_alloc_grows_bytes_and_highwater() {
 
 fn test_free_then_highwater_sticks() {
     let mut c = new_counter();
-    c.on_alloc(100 as Int64);
-    c.on_free(100 as Int64);
+    c.on_alloc100_i64;
+    c.on_free100_i64;
     assert_eq(sqlite3_memory_used(&c), 0 as Int64);
     let hw = sqlite3_memory_highwater(&mut c, false);
     assert_eq(hw, 100 as Int64);
@@ -44,7 +44,7 @@ fn test_free_then_highwater_sticks() {
 
 fn test_highwater_reset_after_read() {
     let mut c = new_counter();
-    c.on_alloc(40 as Int64);
+    c.on_alloc40_i64;
     let _ = sqlite3_memory_highwater(&mut c, true);
     // After reset, highwater equals current bytes_used.
     let hw2 = sqlite3_memory_highwater(&mut c, false);
@@ -62,22 +62,22 @@ fn test_hard_limit_setter_returns_prev() {
 fn test_soft_limit_triggers_over_soft() {
     let mut c = new_counter();
     let _ = sqlite3_soft_heap_limit64(&mut c, 100 as Int64);
-    c.on_alloc(150 as Int64);
+    c.on_alloc150_i64;
     assert(c.is_over_soft_limit());
 }
 
 fn test_hard_limit_blocks_alloc() {
     let mut c = new_counter();
     let _ = sqlite3_hard_heap_limit64(&mut c, 200 as Int64);
-    c.on_alloc(150 as Int64);
-    assert(c.allocation_would_exceed_hard(60 as Int64));
-    assert(!c.allocation_would_exceed_hard(40 as Int64));
+    c.on_alloc150_i64;
+    assert(c.allocation_would_exceed_hard60_i64);
+    assert(!c.allocation_would_exceed_hard40_i64);
 }
 
 fn test_free_underflow_clamps() {
     let mut c = new_counter();
-    c.on_alloc(10 as Int64);
-    c.on_free(50 as Int64);
+    c.on_alloc10_i64;
+    c.on_free50_i64;
     assert_eq(sqlite3_memory_used(&c), 0 as Int64);
 }
 
@@ -90,7 +90,7 @@ fn test_relaxation_attempt_records_releases() {
 }
 
 fn test_relaxation_database_target() {
-    let a = new_attempt(RtDatabase(7 as Int64), 50 as Int64);
+    let a = new_attempt(RtDatabase7_i64, 50 as Int64);
     match &a.target {
         RtDatabase(_) => {},
         _ => assert(false),

@@ -43,9 +43,9 @@ public fn new_page(
 }
 
 public fn is_allocated(p: &PcachePage) -> Bool {
-    p.buf_id != (0 as Int64)
+    p.buf_id != 0_i64
 }
 
 public fn has_extra(p: &PcachePage) -> Bool {
-    p.extra_id != (0 as Int64) && p.extra_byte_len > 0
+    p.extra_id != 0_i64 && p.extra_byte_len > 0
 }

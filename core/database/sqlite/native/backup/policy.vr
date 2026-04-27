@@ -66,7 +66,7 @@ public type Bounded is {
 public fn bounded(pages: Int, sleep_ns: Int64) -> Bounded {
     Bounded {
         pages_per_step: if pages <= 0 { 1 } else { pages },
-        sleep_per_step_ns: if sleep_ns < (0 as Int64) { 0 as Int64 } else { sleep_ns },
+        sleep_per_step_ns: if sleep_ns < 0_i64 { 0 as Int64 } else { sleep_ns },
     }
 }
 
@@ -127,7 +127,7 @@ implement ThrottlePolicy for AdaptiveLoad {
         self.ema_writes = (self.ema_writes * 3 + n_writes) / 4;
         if self.ema_writes >= self.threshold_writes {
             self.cur_pages = if self.cur_pages > 1 { self.cur_pages / 2 } else { 1 };
-            self.cur_sleep_ns = self.cur_sleep_ns * (2 as Int64);
+            self.cur_sleep_ns = self.cur_sleep_ns * 2_i64;
             // Hard cap to prevent unbounded slow-down.
             let cap: Int64 = 1000000000 as Int64;   // 1 second
             if self.cur_sleep_ns > cap { self.cur_sleep_ns = cap; }

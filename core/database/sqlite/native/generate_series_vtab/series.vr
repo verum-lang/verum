@@ -26,7 +26,7 @@ public type FilterCheck is
     ;
 
 public fn check(args: &SeriesArgs) -> FilterCheck {
-    if args.step == (0 as Int64) { return FcZeroStep; }
+    if args.step == 0_i64 { return FcZeroStep; }
     FcOk
 }
 
@@ -45,7 +45,7 @@ public type SeriesDirection is
     ;
 
 public fn direction_for(args: &SeriesArgs) -> SeriesDirection {
-    if args.step > (0 as Int64) { DirAscending } else { DirDescending }
+    if args.step > 0_i64 { DirAscending } else { DirDescending }
 }
 
 public fn direction_name(d: &SeriesDirection) -> Text {
@@ -62,12 +62,12 @@ public fn row_count(args: &SeriesArgs) -> Int64 {
     if args.step == zero { return zero; }
     if args.step > zero {
         if args.start > args.stop { return zero; }
-        return (args.stop - args.start) / args.step + (1 as Int64);
+        return (args.stop - args.start) / args.step + 1_i64;
     }
     // step < 0
     if args.start < args.stop { return zero; }
     let neg_step = zero - args.step;
-    (args.start - args.stop) / neg_step + (1 as Int64)
+    (args.start - args.stop) / neg_step + 1_i64
 }
 
 // Generate the value at the given 0-based row index.

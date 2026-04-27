@@ -45,11 +45,11 @@ fn test_default_roundup_multiples_of_8() {
 
 fn test_stats_record_malloc_and_free() {
     let mut s = new_stats();
-    s.record_malloc(100 as Int64);
-    s.record_malloc(50 as Int64);
+    s.record_malloc100_i64;
+    s.record_malloc50_i64;
     assert_eq(s.bytes_currently, 150 as Int64);
     assert_eq(s.bytes_highwater, 150 as Int64);
-    s.record_free(100 as Int64);
+    s.record_free100_i64;
     assert_eq(s.bytes_currently, 50 as Int64);
     // Highwater sticks at the peak.
     assert_eq(s.bytes_highwater, 150 as Int64);

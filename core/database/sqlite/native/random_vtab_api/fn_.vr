@@ -40,11 +40,11 @@ public fn is_deterministic(f: &RandomFn) -> Bool {
 public fn max_blob_length() -> Int64 { 1000000000 as Int64 }
 
 public fn clamp_blob_length(n: Int64) -> Int64 {
-    if n < (1 as Int64) { return 1 as Int64; }    // SQLite returns 1-byte for n<=0
+    if n < 1_i64 { return 1 as Int64; }    // SQLite returns 1-byte for n<=0
     if n > max_blob_length() { return max_blob_length(); }
     n
 }
 
 public fn is_within_blob_range(n: Int64) -> Bool {
-    n >= (1 as Int64) && n <= max_blob_length()
+    n >= 1_i64 && n <= max_blob_length()
 }

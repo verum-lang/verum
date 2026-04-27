@@ -598,7 +598,7 @@ fn format_radix_signed(n: Int, radix: Int) -> Text {
         // Two's-complement magnitude: exact for every Int (including
         // Int.MIN whose magnitude `2^63` is unrepresentable as a
         // positive Int but fits cleanly in UInt64).
-        (((!n) as UInt64) + (1 as UInt64))
+        (((!n) as UInt64) + 1_u64)
     } else {
         n as UInt64
     };
@@ -614,7 +614,7 @@ fn format_radix_signed(n: Int, radix: Int) -> Text {
     // `:x` spec wrapping); the wrap was correct, the underlying
     // formatter was the load-bearing bug.
     let mut digits = List<Char>.new();
-    while mag > (0 as UInt64) {
+    while mag > 0_u64 {
         let digit = (mag % radix_u) as Int;
         digits.push(hex_chars.nth_char(digit).expect("format_radix_signed: digit < radix ≤ hex_chars.len() guaranteed by caller (radix in 2..=16)"));
         mag = mag / radix_u;
@@ -862,7 +862,7 @@ implement Float {
     /// Check the sign bit is negative (IEEE 754). True for -0.0 and negative values.
     public fn is_sign_negative(self) -> Bool {
         let bits: UInt64 = f64_to_bits(self);
-        (bits >> 63) == (1 as UInt64)
+        (bits >> 63) == 1_u64
     }
 
     /// Check if zero (positive || negative).
@@ -1838,7 +1838,7 @@ implement UInt64 {
         result
     }
     public fn checked_div(self, rhs: UInt64) -> Maybe<UInt64> {
-        if rhs == (0 as UInt64) { None } else { Some(self / rhs) }
+        if rhs == 0_u64 { None } else { Some(self / rhs) }
     }
     public fn in_range(self, start: UInt64, end: UInt64) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -1851,7 +1851,7 @@ implement UInt64 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: UInt64) -> Maybe<UInt64> {
-        if rhs == (0 as UInt64) { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_u64 { None } else { Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> UInt64 { wrapping_neg(self) }
     public fn abs_diff(self, other: UInt64) -> Int {
@@ -1892,7 +1892,7 @@ implement UInt64 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt64> {
         if exp < 0 { None }
-        else if exp == 0 { Some(1 as UInt64) }
+        else if exp == 0 { Some1_u64 }
         else {
             let mut base = self;
             let mut e = exp;
@@ -1987,7 +1987,7 @@ implement UInt32 {
         result
     }
     public fn checked_div(self, rhs: UInt32) -> Maybe<UInt32> {
-        if rhs == (0 as UInt32) { None } else { Some(self / rhs) }
+        if rhs == 0_u32 { None } else { Some(self / rhs) }
     }
     public fn in_range(self, start: UInt32, end: UInt32) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -2000,7 +2000,7 @@ implement UInt32 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: UInt32) -> Maybe<UInt32> {
-        if rhs == (0 as UInt32) { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_u32 { None } else { Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> UInt32 { wrapping_neg(self) }
     public fn abs_diff(self, other: UInt32) -> Int {
@@ -2041,7 +2041,7 @@ implement UInt32 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt32> {
         if exp < 0 { None }
-        else if exp == 0 { Some(1 as UInt32) }
+        else if exp == 0 { Some1_u32 }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2136,7 +2136,7 @@ implement UInt16 {
         result
     }
     public fn checked_div(self, rhs: UInt16) -> Maybe<UInt16> {
-        if rhs == (0 as UInt16) { None } else { Some(self / rhs) }
+        if rhs == 0_u16 { None } else { Some(self / rhs) }
     }
     public fn in_range(self, start: UInt16, end: UInt16) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -2149,7 +2149,7 @@ implement UInt16 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: UInt16) -> Maybe<UInt16> {
-        if rhs == (0 as UInt16) { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_u16 { None } else { Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> UInt16 { wrapping_neg(self) }
     public fn abs_diff(self, other: UInt16) -> Int {
@@ -2190,7 +2190,7 @@ implement UInt16 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt16> {
         if exp < 0 { None }
-        else if exp == 0 { Some(1 as UInt16) }
+        else if exp == 0 { Some1_u16 }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2274,7 +2274,7 @@ implement UInt8 {
         result
     }
     public fn checked_div(self, rhs: UInt8) -> Maybe<UInt8> {
-        if rhs == (0 as UInt8) { None } else { Some(self / rhs) }
+        if rhs == 0_u8 { None } else { Some(self / rhs) }
     }
     public fn in_range(self, start: UInt8, end: UInt8) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -2298,7 +2298,7 @@ implement UInt8 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: UInt8) -> Maybe<UInt8> {
-        if rhs == (0 as UInt8) { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_u8 { None } else { Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> UInt8 { wrapping_neg(self) }
     public fn abs_diff(self, other: UInt8) -> Int {
@@ -2339,7 +2339,7 @@ implement UInt8 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt8> {
         if exp < 0 { None }
-        else if exp == 0 { Some(1 as UInt8) }
+        else if exp == 0 { Some1_u8 }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2573,10 +2573,10 @@ implement Int8 {
         }
         result
     }
-    public fn is_positive(self) -> Bool { self > (0 as Int8) }
-    public fn is_negative(self) -> Bool { self < (0 as Int8) }
+    public fn is_positive(self) -> Bool { self > 0_i8 }
+    public fn is_negative(self) -> Bool { self < 0_i8 }
     public fn checked_div(self, rhs: Int8) -> Maybe<Int8> {
-        if rhs == (0 as Int8) { None } else { Some(self / rhs) }
+        if rhs == 0_i8 { None } else { Some(self / rhs) }
     }
     public fn in_range(self, start: Int8, end: Int8) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -2588,7 +2588,7 @@ implement Int8 {
     public fn leading_zeros(self) -> Int { clz(self) }
     public fn trailing_zeros(self) -> Int { ctz(self) }
     public fn count_ones(self) -> Int { popcnt(self) }
-    public fn count_zeros(self) -> Int { (8 as Int8).to_int() - popcnt(self) }
+    public fn count_zeros(self) -> Int { 8_i8.to_int() - popcnt(self) }
     public fn rotate_left(self, n: Int) -> Int8 { rotl(self, n) }
     public fn rotate_right(self, n: Int) -> Int8 { rotr(self, n) }
     public fn swap_bytes(self) -> Int8 { bswap(self) }
@@ -2600,7 +2600,7 @@ implement Int8 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: Int8) -> Maybe<Int8> {
-        if rhs == (0 as Int8) { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_i8 { None } else { Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> Int8 { wrapping_neg(self) }
     public fn checked_neg(self) -> Maybe<Int8> {
@@ -2634,7 +2634,7 @@ implement Int8 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<Int8> {
         if exp < 0 { None }
-        else if exp == 0 { Some(1 as Int8) }
+        else if exp == 0 { Some1_i8 }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2745,10 +2745,10 @@ implement Int16 {
         }
         result
     }
-    public fn is_positive(self) -> Bool { self > (0 as Int16) }
-    public fn is_negative(self) -> Bool { self < (0 as Int16) }
+    public fn is_positive(self) -> Bool { self > 0_i16 }
+    public fn is_negative(self) -> Bool { self < 0_i16 }
     public fn checked_div(self, rhs: Int16) -> Maybe<Int16> {
-        if rhs == (0 as Int16) { None } else { Some(self / rhs) }
+        if rhs == 0_i16 { None } else { Some(self / rhs) }
     }
     public fn in_range(self, start: Int16, end: Int16) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -2761,7 +2761,7 @@ implement Int16 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: Int16) -> Maybe<Int16> {
-        if rhs == (0 as Int16) { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_i16 { None } else { Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> Int16 { wrapping_neg(self) }
     public fn checked_neg(self) -> Maybe<Int16> {
@@ -2795,7 +2795,7 @@ implement Int16 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<Int16> {
         if exp < 0 { None }
-        else if exp == 0 { Some(1 as Int16) }
+        else if exp == 0 { Some1_i16 }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2906,10 +2906,10 @@ implement Int32 {
         }
         result
     }
-    public fn is_positive(self) -> Bool { self > (0 as Int32) }
-    public fn is_negative(self) -> Bool { self < (0 as Int32) }
+    public fn is_positive(self) -> Bool { self > 0_i32 }
+    public fn is_negative(self) -> Bool { self < 0_i32 }
     public fn checked_div(self, rhs: Int32) -> Maybe<Int32> {
-        if rhs == (0 as Int32) { None } else { Some(self / rhs) }
+        if rhs == 0_i32 { None } else { Some(self / rhs) }
     }
     public fn in_range(self, start: Int32, end: Int32) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -2922,7 +2922,7 @@ implement Int32 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: Int32) -> Maybe<Int32> {
-        if rhs == (0 as Int32) { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_i32 { None } else { Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> Int32 { wrapping_neg(self) }
     public fn checked_neg(self) -> Maybe<Int32> {
@@ -2956,7 +2956,7 @@ implement Int32 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<Int32> {
         if exp < 0 { None }
-        else if exp == 0 { Some(1 as Int32) }
+        else if exp == 0 { Some1_i32 }
         else {
             let mut base = self;
             let mut e = exp;
@@ -3068,10 +3068,10 @@ implement Int64 {
         }
         result
     }
-    public fn is_positive(self) -> Bool { self > (0 as Int64) }
-    public fn is_negative(self) -> Bool { self < (0 as Int64) }
+    public fn is_positive(self) -> Bool { self > 0_i64 }
+    public fn is_negative(self) -> Bool { self < 0_i64 }
     public fn checked_div(self, rhs: Int64) -> Maybe<Int64> {
-        if rhs == (0 as Int64) { None } else { Some(self / rhs) }
+        if rhs == 0_i64 { None } else { Some(self / rhs) }
     }
     public fn in_range(self, start: Int64, end: Int64) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -3084,7 +3084,7 @@ implement Int64 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: Int64) -> Maybe<Int64> {
-        if rhs == (0 as Int64) { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_i64 { None } else { Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> Int64 { wrapping_neg(self) }
     public fn checked_neg(self) -> Maybe<Int64> {
@@ -3118,7 +3118,7 @@ implement Int64 {
     }
     public fn checked_pow(self, exp: Int) -> Maybe<Int64> {
         if exp < 0 { None }
-        else if exp == 0 { Some(1 as Int64) }
+        else if exp == 0 { Some1_i64 }
         else {
             let mut base = self;
             let mut e = exp;
@@ -4395,12 +4395,12 @@ implement Display for Byte {
 
 implement Zero for Int8 {
     public fn zero() -> Int8 { 0 as Int8 }
-    public fn is_zero(&self) -> Bool { *self == (0 as Int8) }
+    public fn is_zero(&self) -> Bool { *self == 0_i8 }
 }
 
 implement One for Int8 {
     public fn one() -> Int8 { 1 as Int8 }
-    public fn is_one(&self) -> Bool { *self == (1 as Int8) }
+    public fn is_one(&self) -> Bool { *self == 1_i8 }
 }
 
 implement Add for Int8 {
@@ -4469,12 +4469,12 @@ implement Shr for Int8 {
 
 implement Zero for Int16 {
     public fn zero() -> Int16 { 0 as Int16 }
-    public fn is_zero(&self) -> Bool { *self == (0 as Int16) }
+    public fn is_zero(&self) -> Bool { *self == 0_i16 }
 }
 
 implement One for Int16 {
     public fn one() -> Int16 { 1 as Int16 }
-    public fn is_one(&self) -> Bool { *self == (1 as Int16) }
+    public fn is_one(&self) -> Bool { *self == 1_i16 }
 }
 
 implement Add for Int16 {
@@ -4543,12 +4543,12 @@ implement Shr for Int16 {
 
 implement Zero for Int32 {
     public fn zero() -> Int32 { 0 as Int32 }
-    public fn is_zero(&self) -> Bool { *self == (0 as Int32) }
+    public fn is_zero(&self) -> Bool { *self == 0_i32 }
 }
 
 implement One for Int32 {
     public fn one() -> Int32 { 1 as Int32 }
-    public fn is_one(&self) -> Bool { *self == (1 as Int32) }
+    public fn is_one(&self) -> Bool { *self == 1_i32 }
 }
 
 implement Add for Int32 {
@@ -4617,12 +4617,12 @@ implement Shr for Int32 {
 
 implement Zero for Int64 {
     public fn zero() -> Int64 { 0 as Int64 }
-    public fn is_zero(&self) -> Bool { *self == (0 as Int64) }
+    public fn is_zero(&self) -> Bool { *self == 0_i64 }
 }
 
 implement One for Int64 {
     public fn one() -> Int64 { 1 as Int64 }
-    public fn is_one(&self) -> Bool { *self == (1 as Int64) }
+    public fn is_one(&self) -> Bool { *self == 1_i64 }
 }
 
 implement Add for Int64 {
@@ -4839,12 +4839,12 @@ implement Shr for ISize {
 
 implement Zero for UInt8 {
     public fn zero() -> UInt8 { 0 as UInt8 }
-    public fn is_zero(&self) -> Bool { *self == (0 as UInt8) }
+    public fn is_zero(&self) -> Bool { *self == 0_u8 }
 }
 
 implement One for UInt8 {
     public fn one() -> UInt8 { 1 as UInt8 }
-    public fn is_one(&self) -> Bool { *self == (1 as UInt8) }
+    public fn is_one(&self) -> Bool { *self == 1_u8 }
 }
 
 implement Add for UInt8 {
@@ -4908,12 +4908,12 @@ implement Shr for UInt8 {
 
 implement Zero for UInt16 {
     public fn zero() -> UInt16 { 0 as UInt16 }
-    public fn is_zero(&self) -> Bool { *self == (0 as UInt16) }
+    public fn is_zero(&self) -> Bool { *self == 0_u16 }
 }
 
 implement One for UInt16 {
     public fn one() -> UInt16 { 1 as UInt16 }
-    public fn is_one(&self) -> Bool { *self == (1 as UInt16) }
+    public fn is_one(&self) -> Bool { *self == 1_u16 }
 }
 
 implement Add for UInt16 {
@@ -4977,12 +4977,12 @@ implement Shr for UInt16 {
 
 implement Zero for UInt32 {
     public fn zero() -> UInt32 { 0 as UInt32 }
-    public fn is_zero(&self) -> Bool { *self == (0 as UInt32) }
+    public fn is_zero(&self) -> Bool { *self == 0_u32 }
 }
 
 implement One for UInt32 {
     public fn one() -> UInt32 { 1 as UInt32 }
-    public fn is_one(&self) -> Bool { *self == (1 as UInt32) }
+    public fn is_one(&self) -> Bool { *self == 1_u32 }
 }
 
 implement Add for UInt32 {
@@ -5046,12 +5046,12 @@ implement Shr for UInt32 {
 
 implement Zero for UInt64 {
     public fn zero() -> UInt64 { 0 as UInt64 }
-    public fn is_zero(&self) -> Bool { *self == (0 as UInt64) }
+    public fn is_zero(&self) -> Bool { *self == 0_u64 }
 }
 
 implement One for UInt64 {
     public fn one() -> UInt64 { 1 as UInt64 }
-    public fn is_one(&self) -> Bool { *self == (1 as UInt64) }
+    public fn is_one(&self) -> Bool { *self == 1_u64 }
 }
 
 implement Add for UInt64 {

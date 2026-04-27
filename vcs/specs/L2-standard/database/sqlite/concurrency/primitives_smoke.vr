@@ -125,7 +125,7 @@ fn test_snapshot_basic() {
 
     assert(tbl.release(s1.id));
     assert_eq(tbl.count(), 1);
-    assert(!tbl.release(99 as Int64));
+    assert(!tbl.release99_i64);
 }
 
 fn test_snapshot_oldest_after_releases() {
@@ -150,7 +150,7 @@ fn test_no_cycle_on_chain() {
     g.record_wait(1 as Int64, 2 as Int64);
     g.record_wait(2 as Int64, 3 as Int64);
     g.record_wait(3 as Int64, 4 as Int64);
-    match g.detect_cycle_from(1 as Int64) {
+    match g.detect_cycle_from1_i64 {
         None    => {},
         Some(_) => panic("chain should have no cycle"),
     }
@@ -160,7 +160,7 @@ fn test_cycle_two_txns() {
     let mut g = graph_new();
     g.record_wait(1 as Int64, 2 as Int64);
     g.record_wait(2 as Int64, 1 as Int64);
-    match g.detect_cycle_from(1 as Int64) {
+    match g.detect_cycle_from1_i64 {
         Some(_) => {},
         None    => panic("1→2→1 must be detected"),
     }
@@ -171,7 +171,7 @@ fn test_cycle_three_txns() {
     g.record_wait(10 as Int64, 20 as Int64);
     g.record_wait(20 as Int64, 30 as Int64);
     g.record_wait(30 as Int64, 10 as Int64);
-    match g.detect_cycle_from(10 as Int64) {
+    match g.detect_cycle_from10_i64 {
         Some(_) => {},
         None    => panic("3-cycle missed"),
     }
@@ -181,9 +181,9 @@ fn test_release_breaks_cycle() {
     let mut g = graph_new();
     g.record_wait(1 as Int64, 2 as Int64);
     g.record_wait(2 as Int64, 1 as Int64);
-    g.release_waiter(2 as Int64);
+    g.release_waiter2_i64;
     assert_eq(g.edge_count(), 1);
-    match g.detect_cycle_from(1 as Int64) {
+    match g.detect_cycle_from1_i64 {
         None    => {},
         Some(_) => panic("after release, no cycle"),
     }

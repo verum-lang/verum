@@ -54,21 +54,21 @@ fn test_promotion_threshold() {
 }
 
 fn test_new_bitvec_is_empty() {
-    let b = new(1000 as Int64);
+    let b = new1000_i64;
     assert(is_empty(&b));
     assert_eq(size(&b), 0 as Int64);
     assert(!is_full(&b));
 }
 
 fn test_record_insert_increments_and_reclassifies() {
-    let b0 = new(10 as Int64);
+    let b0 = new10_i64;
     let b1 = record_insert(b0);
     let b2 = record_insert(b1);
     assert_eq(size(&b2), 2 as Int64);
 }
 
 fn test_insert_capped_at_universe() {
-    let mut b = new(2 as Int64);
+    let mut b = new2_i64;
     b = record_insert(b);
     b = record_insert(b);
     assert(is_full(&b));
@@ -78,7 +78,7 @@ fn test_insert_capped_at_universe() {
 }
 
 fn test_density() {
-    let mut b = new(4 as Int64);
+    let mut b = new4_i64;
     b = record_insert(record_insert(b));
     let d = density(&b);
     assert(d > 0.49 as Float);
@@ -86,7 +86,7 @@ fn test_density() {
 }
 
 fn test_should_be_internal_only_when_both_thresholds_crossed() {
-    let mut b = new(10000 as Int64);
+    let mut b = new10000_i64;
     assert(!should_be_internal(&b));
     // Need to insert > 125 elements to flip.
     let mut i: Int = 0;
@@ -98,7 +98,7 @@ fn test_should_be_internal_only_when_both_thresholds_crossed() {
 }
 
 fn test_record_hash_collision_counter() {
-    let mut b = new(10 as Int64);
+    let mut b = new10_i64;
     b = record_hash_collision(record_hash_collision(b));
     assert_eq(b.hash_collisions, 2 as Int64);
 }

@@ -46,7 +46,7 @@ public fn new_directory(name: Text, mode: Int, mtime: Int64) -> SqlarEntry {
 }
 
 public fn is_directory(e: &SqlarEntry) -> Bool {
-    e.sz == (-1 as Int64)
+    e.sz == -1_i64
 }
 
 /// True iff the entry's data is stored compressed — happens when
@@ -56,6 +56,6 @@ public fn is_compressed(e: &SqlarEntry) -> Bool {
 }
 
 public fn compression_ratio_tenths(e: &SqlarEntry) -> Int {
-    if is_directory(e) || e.sz <= (0 as Int64) { return 0; }
-    ((e.data_len * (1000 as Int64)) / e.sz) as Int
+    if is_directory(e) || e.sz <= 0_i64 { return 0; }
+    ((e.data_len * 1000_i64) / e.sz) as Int
 }

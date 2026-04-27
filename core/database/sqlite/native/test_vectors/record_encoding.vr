@@ -80,12 +80,12 @@ public fn appendix_e2() -> List<RecordVector> {
         types(&[StNull]),
         bytes(&[0x02, 0x00])));
 
-    // (1 as Int8)
+    // 1_i8
     out.push(record_vec("int8_one".clone(),
         types(&[StInt8]),
         bytes(&[0x02, 0x01, 0x01])));
 
-    // (256 as Int16) — 0x0100
+    // 256_i16 — 0x0100
     out.push(record_vec("int16_256".clone(),
         types(&[StInt16]),
         bytes(&[0x02, 0x02, 0x01, 0x00])));

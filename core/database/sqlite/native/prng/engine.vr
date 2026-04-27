@@ -67,7 +67,7 @@ implement PrngEngine {
         let mut acc: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < 8 {
-            acc = (acc << (8 as Int64)) | ((bytes[i] as Int64) & (0xFF as Int64));
+            acc = (acc << 8_i64) | ((bytes[i] as Int64) & 0xFF_i64);
             i = i + 1;
         }
         acc

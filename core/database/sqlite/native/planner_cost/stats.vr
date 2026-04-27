@@ -112,7 +112,7 @@ public fn table_stats_default(name: Text, n_rows: Int64) -> TableStats {
     TableStats {
         table_name: name,
         n_rows: n_rows,
-        n_pages: (n_rows / (32 as Int64)) + (1 as Int64),
+        n_pages: (n_rows / 32_i64) + 1_i64,
         avg_row_size_bytes: 64,
         columns: List.new(),
     }

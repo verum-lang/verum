@@ -16,7 +16,7 @@ fn main() {
     // Test signum
     assert_eq(a.signum(), 1);
     assert_eq(b.signum(), -1);
-    assert_eq((0 as Int32).signum(), 0);
+    assert_eq(0_i32.signum(), 0);
 
     // Test checked_add (success)
     match a.checked_add(b) {

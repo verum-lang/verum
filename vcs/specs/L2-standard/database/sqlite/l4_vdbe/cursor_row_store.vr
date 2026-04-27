@@ -36,7 +36,7 @@ fn install_and_peek() {
 fn advance_walks_rows() {
     let mut tbl = cursor_table_new(1, 4096, 0);
     let _ = tbl.open_ephemeral(0, 1);
-    let rows: List<List<Register>> = [row_int(10 as Int64), row_int(20 as Int64), row_int(30 as Int64)];
+    let rows: List<List<Register>> = [row_int10_i64, row_int20_i64, row_int30_i64];
     let _ = tbl.install_rows(0, rows);
     match tbl.peek_cell(0, 0) {
         RInt(i) => { assert_eq(i as Int, 10); }, _ => panic("first"),
@@ -57,10 +57,10 @@ fn advance_walks_rows() {
 fn append_auto_rowid() {
     let mut tbl = cursor_table_new(1, 4096, 0);
     let _ = tbl.open_ephemeral(0, 1);
-    let r1 = match tbl.append_row(0, row_int(100 as Int64)) {
+    let r1 = match tbl.append_row(0, row_int100_i64) {
         Ok(r)  => r, Err(_) => { panic("append1"); return; }
     };
-    let r2 = match tbl.append_row(0, row_int(200 as Int64)) {
+    let r2 = match tbl.append_row(0, row_int200_i64) {
         Ok(r)  => r, Err(_) => { panic("append2"); return; }
     };
     assert_eq(r1 as Int, 1);
@@ -72,7 +72,7 @@ fn append_auto_rowid() {
 fn rewind_resets_position() {
     let mut tbl = cursor_table_new(1, 4096, 0);
     let _ = tbl.open_ephemeral(0, 1);
-    let _ = tbl.install_rows(0, [row_int(1 as Int64), row_int(2 as Int64)]);
+    let _ = tbl.install_rows(0, [row_int1_i64, row_int2_i64]);
     assert(tbl.advance(0));       // pos=1
     assert_eq(tbl.current_position(0), 1);
     let _ = tbl.rewind(0);
@@ -82,7 +82,7 @@ fn rewind_resets_position() {
 fn delete_current_row_shrinks() {
     let mut tbl = cursor_table_new(1, 4096, 0);
     let _ = tbl.open_ephemeral(0, 1);
-    let _ = tbl.install_rows(0, [row_int(1 as Int64), row_int(2 as Int64), row_int(3 as Int64)]);
+    let _ = tbl.install_rows(0, [row_int1_i64, row_int2_i64, row_int3_i64]);
     assert(tbl.advance(0));       // now on row 2
     assert(tbl.delete_current(0));
     assert_eq(tbl.row_count(0), 2);
@@ -103,7 +103,7 @@ fn peek_row_clones() {
 fn current_rowid_matches_position() {
     let mut tbl = cursor_table_new(1, 4096, 0);
     let _ = tbl.open_ephemeral(0, 1);
-    let _ = tbl.install_rows(0, [row_int(100 as Int64), row_int(200 as Int64)]);
+    let _ = tbl.install_rows(0, [row_int100_i64, row_int200_i64]);
     assert_eq(tbl.current_rowid(0) as Int, 1);
     let _ = tbl.advance(0);
     assert_eq(tbl.current_rowid(0) as Int, 2);

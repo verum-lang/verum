@@ -80,7 +80,7 @@ fn make_header() -> ReplicationFrameHeader {
 fn test_frame_position_packs_epoch_and_seq() {
     let f = frame_record(3 as Int64, 42 as Int64, make_header(), make_payload(8));
     let p = frame_position(&f);
-    assert(p > (0 as Int64));
+    assert(p > 0_i64);
 }
 
 fn make_payload(n: Int) -> List<Byte> {
@@ -95,7 +95,7 @@ fn make_payload(n: Int) -> List<Byte> {
 // -----------------------------------------------------------------------------
 
 fn test_producer_drain_per_replica() {
-    let mut p = producer_new(1 as Int64);
+    let mut p = producer_new1_i64;
     p.add_replica("rep-A".clone());
     p.add_replica("rep-B".clone());
     let _seq = p.enqueue_frame(make_header(), make_payload(16));
@@ -107,7 +107,7 @@ fn test_producer_drain_per_replica() {
 }
 
 fn test_producer_ack() {
-    let mut p = producer_new(1 as Int64);
+    let mut p = producer_new1_i64;
     p.add_replica("rep-A".clone());
     let _seq = p.enqueue_frame(make_header(), make_payload(8));
     assert(p.ack(&"rep-A".clone(), 1 as Int64));
@@ -115,7 +115,7 @@ fn test_producer_ack() {
 }
 
 fn test_producer_advance_epoch() {
-    let mut p = producer_new(5 as Int64);
+    let mut p = producer_new5_i64;
     assert_eq(p.current_epoch(), 5 as Int64);
     p.advance_epoch();
     assert_eq(p.current_epoch(), 6 as Int64);
@@ -149,14 +149,14 @@ fn test_consumer_rejects_lower_epoch() {
 
 fn test_lag_thresholds_default() {
     let t = thresholds_default();
-    assert(t.warn_frames > (0 as Int64));
+    assert(t.warn_frames > 0_i64);
     assert(t.crit_frames > t.warn_frames);
 }
 
 fn test_lag_severity_classification() {
     let mut tr = lag_tracker_new();
     tr.record_replica_ack(&"rep-A".clone(), 1 as Int64, 1010 as Int64);
-    tr.record_primary_commit(10000 as Int64);
+    tr.record_primary_commit10000_i64;
     match tr.snapshot(&"rep-A".clone(), 2000 as Int64) {
         Some(_) => {},
         None    => panic("snapshot exists"),

@@ -20,7 +20,7 @@ public fn new_at(v: u32) -> SchemaCookie {
 // Bump on any DDL — CREATE/ALTER/DROP/ANALYZE etc.
 public fn bump(mut c: SchemaCookie) -> SchemaCookie {
     c.value = (c.value + (1 as u32)) as u32;
-    c.ddl_events = c.ddl_events + (1 as Int64);
+    c.ddl_events = c.ddl_events + 1_i64;
     c
 }
 

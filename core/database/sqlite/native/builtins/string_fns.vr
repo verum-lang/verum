@@ -42,18 +42,18 @@ public fn length(v: &Register) -> Register {
         RNull    => RNull,
         // SQLite coerces numeric to text first, then takes byte-length.
         RInt(i)  => RInt(int_text_len(i) as Int64),
-        RReal(_) => RInt(15 as Int64),  // crude — proper conversion later
+        RReal(_) => RInt15_i64,  // crude — proper conversion later
         RRowId(i)=> RInt(int_text_len(i) as Int64),
     }
 }
 
 fn int_text_len(x: Int64) -> Int {
-    if x == (0 as Int64) { return 1; }
-    let mut n: Int64 = if x < (0 as Int64) { -x } else { x };
-    let mut count: Int = if x < (0 as Int64) { 1 } else { 0 };
-    while n > (0 as Int64) {
+    if x == 0_i64 { return 1; }
+    let mut n: Int64 = if x < 0_i64 { -x } else { x };
+    let mut count: Int = if x < 0_i64 { 1 } else { 0 };
+    while n > 0_i64 {
         count = count + 1;
-        n = n / (10 as Int64);
+        n = n / 10_i64;
     }
     count
 }
@@ -493,7 +493,7 @@ fn append_text(dst: &mut Text, s: &Text) {
 }
 
 fn int_to_text(x: Int64) -> Text {
-    if x == (0 as Int64) { return "0".clone(); }
+    if x == 0_i64 { return "0".clone(); }
     // Two's-complement negate of `Int64.MIN` overflows back to
     // `Int64.MIN`, so the naïve `if n < 0 { n = -n }` followed by
     // `while n > 0` would silently produce "-" with no digits for
@@ -502,20 +502,20 @@ fn int_to_text(x: Int64) -> Text {
     // 985336e3). Work in unsigned magnitude (`UInt64`) so every
     // `Int64`'s absolute value is exactly representable.
     let mut neg: Bool = false;
-    let mut mag: UInt64 = if x < (0 as Int64) {
+    let mut mag: UInt64 = if x < 0_i64 {
         neg = true;
         // `(~x as UInt64) + 1` is the two's-complement magnitude;
         // exact for every Int64 including Int64.MIN (whose
         // magnitude 2^63 fits in UInt64).
-        (((!x) as UInt64) + (1 as UInt64))
+        (((!x) as UInt64) + 1_u64)
     } else {
         x as UInt64
     };
     let mut digits: List<Byte> = List.new();
-    while mag > (0 as UInt64) {
-        let d: Byte = (mag % (10 as UInt64)) as Byte;
+    while mag > 0_u64 {
+        let d: Byte = (mag % 10_u64) as Byte;
         digits.push(d + (48 as Byte));
-        mag = mag / (10 as UInt64);
+        mag = mag / 10_u64;
     }
     let mut out = Text.new();
     if neg { out.push_byte(45 as Byte); }
@@ -609,14 +609,14 @@ public fn like(target: &Register, pattern: &Register, escape: &Register) -> Regi
                     _ => None,
                 };
                 if like_match(t, p, esc) {
-                    RInt(1 as Int64)
+                    RInt1_i64
                 } else {
-                    RInt(0 as Int64)
+                    RInt0_i64
                 }
             }
-            _ => RInt(0 as Int64),
+            _ => RInt0_i64,
         },
-        _ => RInt(0 as Int64),
+        _ => RInt0_i64,
     }
 }
 
@@ -624,11 +624,11 @@ public fn glob(target: &Register, pattern: &Register) -> Register {
     match target {
         RText(t) => match pattern {
             RText(p) => {
-                if glob_match(t, p) { RInt(1 as Int64) } else { RInt(0 as Int64) }
+                if glob_match(t, p) { RInt1_i64 } else { RInt0_i64 }
             }
-            _ => RInt(0 as Int64),
+            _ => RInt0_i64,
         },
-        _ => RInt(0 as Int64),
+        _ => RInt0_i64,
     }
 }
 

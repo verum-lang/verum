@@ -23,7 +23,7 @@ public fn is_empty(r: &FrameRange) -> Bool {
 
 public fn length(r: &FrameRange) -> Int64 {
     if is_empty(r) { return 0 as Int64; }
-    r.last_frame - r.first_frame + (1 as Int64)
+    r.last_frame - r.first_frame + 1_i64
 }
 
 public fn contains(r: &FrameRange, frame: Int64) -> Bool {

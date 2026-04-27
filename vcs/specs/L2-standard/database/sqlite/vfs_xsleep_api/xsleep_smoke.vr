@@ -39,15 +39,15 @@ fn test_actual_sleep_zero_or_negative() {
 }
 
 fn test_is_subsecond() {
-    assert(is_subsecond(500000 as Int64));
-    assert(!is_subsecond(1000000 as Int64));
-    assert(!is_subsecond(5000000 as Int64));
+    assert(is_subsecond500000_i64);
+    assert(!is_subsecond1000000_i64);
+    assert(!is_subsecond5000000_i64);
 }
 
 fn test_is_yield_request() {
-    assert(is_yield_request(0 as Int64));
-    assert(!is_yield_request(1 as Int64));
-    assert(!is_yield_request(-5 as Int64));
+    assert(is_yield_request0_i64);
+    assert(!is_yield_request1_i64);
+    assert(!is_yield_request-5_i64);
 }
 
 fn main() {

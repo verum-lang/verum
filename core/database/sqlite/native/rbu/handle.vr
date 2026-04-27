@@ -50,7 +50,7 @@ implement Rbu {
     }
 
     pub fn note_step(&mut self) {
-        self.steps_taken = self.steps_taken + (1 as Int64);
+        self.steps_taken = self.steps_taken + 1_i64;
     }
 
     pub fn close(&mut self) { self.closed = true; }

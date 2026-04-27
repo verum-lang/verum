@@ -64,7 +64,7 @@ public fn agg_new(kind: Int) -> AggregateState {
 public fn agg_step(st: &mut AggregateState, value: &Register) {
     match st.kind {
         // COUNT(*) — count regardless of NULL.
-        0 => { st.count = st.count + (1 as Int64); }
+        0 => { st.count = st.count + 1_i64; }
         // COUNT(X) handled by codegen as kind=0 with a NotNull guard,
         // so this branch is not separate.
         // SUM(X) and TOTAL(X)
@@ -74,7 +74,7 @@ public fn agg_step(st: &mut AggregateState, value: &Register) {
         2 => {
             agg_step_sum(st, value);
             let is_null = match value { RNull => true, _ => false };
-            if !is_null { st.count = st.count + (1 as Int64); }
+            if !is_null { st.count = st.count + 1_i64; }
         }
         // MIN(X)
         3 => agg_step_minmax(st, value, true),
@@ -155,7 +155,7 @@ public fn agg_final(st: &AggregateState) -> Register {
         0 => RInt(st.count),
         1 => {
             // SUM — NULL if no rows, else int or real
-            if !st.use_real && st.sum_int == (0 as Int64) && !st.has_value {
+            if !st.use_real && st.sum_int == 0_i64 && !st.has_value {
                 RNull
             } else if st.use_real {
                 RReal(st.sum_real)
@@ -168,7 +168,7 @@ public fn agg_final(st: &AggregateState) -> Register {
             if st.use_real { RReal(st.sum_real) } else { RReal(st.sum_int as Float64) }
         }
         2 => {
-            if st.count == (0 as Int64) {
+            if st.count == 0_i64 {
                 RNull
             } else {
                 let sum_f = if st.use_real { st.sum_real } else { st.sum_int as Float64 };

@@ -69,12 +69,12 @@ fn test_case_fold() {
 fn test_substr_one_indexed() {
     // SUBSTR('verum', 1, 3) = 'ver'
     require_text(
-        fn_substr(&r_text("verum".clone()), &r_int(1 as Int64), &r_int(3 as Int64)),
+        fn_substr(&r_text("verum".clone()), &r_int1_i64, &r_int3_i64),
         "ver".clone(),
     );
     // SUBSTR('verum', 3) = 'rum' (no length given)
     require_text(
-        fn_substr(&r_text("verum".clone()), &r_int(3 as Int64), &RNull),
+        fn_substr(&r_text("verum".clone()), &r_int3_i64, &RNull),
         "rum".clone(),
     );
 }
@@ -118,8 +118,8 @@ fn test_hex_unhex_roundtrip() {
 fn test_unicode_and_char() {
     require_int(fn_unicode(&r_text("A".clone())), 65 as Int64);
     let mut codes: List<Register> = List.new();
-    codes.push(r_int(72 as Int64));   // H
-    codes.push(r_int(105 as Int64));  // i
+    codes.push(r_int72_i64);   // H
+    codes.push(r_int105_i64);  // i
     require_text(char_from_codepoints(&codes), "Hi".clone());
 }
 

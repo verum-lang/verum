@@ -48,7 +48,7 @@ implement HashTable {
             return prev;
         }
         self.entries.push(new_entry(key, value));
-        self.inserts = self.inserts + (1 as Int64);
+        self.inserts = self.inserts + 1_i64;
         0 as Int64
     }
 
@@ -63,7 +63,7 @@ implement HashTable {
         if idx < 0 { return Maybe.None; }
         let prev = self.entries.get(idx).value;
         let _ = self.entries.remove(idx);
-        self.removes = self.removes + (1 as Int64);
+        self.removes = self.removes + 1_i64;
         Maybe.Some(prev)
     }
 

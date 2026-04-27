@@ -148,15 +148,15 @@ fn test_int_ne_bytes_zero() {
 @test
 fn test_all_have_midpoint() {
     let _a = (1).midpoint(3);
-    let _b = (1 as Int8).midpoint(3 as Int8);
-    let _c = (1 as Int16).midpoint(3 as Int16);
-    let _d = (1 as Int32).midpoint(3 as Int32);
-    let _e = (1 as Int64).midpoint(3 as Int64);
+    let _b = 1_i8.midpoint3_i8;
+    let _c = 1_i16.midpoint3_i16;
+    let _d = 1_i32.midpoint3_i32;
+    let _e = 1_i64.midpoint3_i64;
     let _f = (1 as Int128).midpoint(3 as Int128);
-    let _g = (1 as UInt8).midpoint(3 as UInt8);
-    let _h = (1 as UInt16).midpoint(3 as UInt16);
-    let _i = (1 as UInt32).midpoint(3 as UInt32);
-    let _j = (1 as UInt64).midpoint(3 as UInt64);
+    let _g = 1_u8.midpoint3_u8;
+    let _h = 1_u16.midpoint3_u16;
+    let _i = 1_u32.midpoint3_u32;
+    let _j = 1_u64.midpoint3_u64;
     let _k = (1 as UInt128).midpoint(3 as UInt128);
     let _l = (1 as ISize).midpoint(3 as ISize);
     let _m = (1 as USize).midpoint(3 as USize);
@@ -182,15 +182,15 @@ fn test_all_have_midpoint() {
 @test
 fn test_all_have_ne_bytes() {
     let _a = (42).to_ne_bytes();
-    let _b = (42 as Int8).to_ne_bytes();
-    let _c = (42 as Int16).to_ne_bytes();
-    let _d = (42 as Int32).to_ne_bytes();
-    let _e = (42 as Int64).to_ne_bytes();
+    let _b = 42_i8.to_ne_bytes();
+    let _c = 42_i16.to_ne_bytes();
+    let _d = 42_i32.to_ne_bytes();
+    let _e = 42_i64.to_ne_bytes();
     let _f = (42 as Int128).to_ne_bytes();
-    let _g = (42 as UInt8).to_ne_bytes();
-    let _h = (42 as UInt16).to_ne_bytes();
-    let _i = (42 as UInt32).to_ne_bytes();
-    let _j = (42 as UInt64).to_ne_bytes();
+    let _g = 42_u8.to_ne_bytes();
+    let _h = 42_u16.to_ne_bytes();
+    let _i = 42_u32.to_ne_bytes();
+    let _j = 42_u64.to_ne_bytes();
     let _k = (42 as UInt128).to_ne_bytes();
     let _l = (42 as ISize).to_ne_bytes();
     let _m = (42 as USize).to_ne_bytes();

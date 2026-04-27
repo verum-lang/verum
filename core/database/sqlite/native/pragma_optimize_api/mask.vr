@@ -16,7 +16,7 @@ public fn default_mask() -> Int64 {
 }
 
 public fn is_set(mask: Int64, bit: Int64) -> Bool {
-    (mask & bit) != (0 as Int64)
+    (mask & bit) != 0_i64
 }
 
 public fn set(mask: Int64, bit: Int64) -> Int64 { mask | bit }
@@ -31,7 +31,7 @@ public fn should_run_integrity(mask: Int64) -> Bool { is_set(mask, f_integrity_a
 public fn is_known_only(mask: Int64) -> Bool {
     let known = f_debug() | f_analyze_needed() | f_record_usage()
               | f_check_every() | f_integrity_after();
-    (mask & !known) == (0 as Int64)
+    (mask & !known) == 0_i64
 }
 
 public fn well_known_bit_count() -> Int { 5 }

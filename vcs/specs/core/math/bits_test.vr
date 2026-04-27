@@ -32,42 +32,42 @@ mount core.math.bits.{
 @test
 fn test_clz_max() {
     // clz(0) = 64 (all zeros)
-    assert_eq(clz(0 as UInt64), 64 as UInt32);
+    assert_eq(clz0_u64, 64 as UInt32);
 }
 
 @test
 fn test_clz_one() {
     // clz(1) = 63
-    assert_eq(clz(1 as UInt64), 63 as UInt32);
+    assert_eq(clz1_u64, 63 as UInt32);
 }
 
 @test
 fn test_clz_high_bit() {
     // clz(0x8000000000000000) = 0
-    assert_eq(clz(0x8000000000000000 as UInt64), 0 as UInt32);
+    assert_eq(clz0x8000000000000000_u64, 0 as UInt32);
 }
 
 @test
 fn test_clz_powers_of_two() {
-    assert_eq(clz(2 as UInt64), 62 as UInt32);
-    assert_eq(clz(4 as UInt64), 61 as UInt32);
-    assert_eq(clz(8 as UInt64), 60 as UInt32);
-    assert_eq(clz(16 as UInt64), 59 as UInt32);
+    assert_eq(clz2_u64, 62 as UInt32);
+    assert_eq(clz4_u64, 61 as UInt32);
+    assert_eq(clz8_u64, 60 as UInt32);
+    assert_eq(clz16_u64, 59 as UInt32);
 }
 
 @test
 fn test_clz32_max() {
-    assert_eq(clz32(0 as UInt32), 32 as UInt32);
+    assert_eq(clz320_u32, 32 as UInt32);
 }
 
 @test
 fn test_clz32_one() {
-    assert_eq(clz32(1 as UInt32), 31 as UInt32);
+    assert_eq(clz321_u32, 31 as UInt32);
 }
 
 @test
 fn test_clz32_high_bit() {
-    assert_eq(clz32(0x80000000 as UInt32), 0 as UInt32);
+    assert_eq(clz320x80000000_u32, 0 as UInt32);
 }
 
 // =============================================================================
@@ -77,41 +77,41 @@ fn test_clz32_high_bit() {
 @test
 fn test_ctz_zero() {
     // ctz(0) = 64 (all zeros)
-    assert_eq(ctz(0 as UInt64), 64 as UInt32);
+    assert_eq(ctz0_u64, 64 as UInt32);
 }
 
 @test
 fn test_ctz_one() {
     // ctz(1) = 0
-    assert_eq(ctz(1 as UInt64), 0 as UInt32);
+    assert_eq(ctz1_u64, 0 as UInt32);
 }
 
 @test
 fn test_ctz_powers_of_two() {
-    assert_eq(ctz(2 as UInt64), 1 as UInt32);
-    assert_eq(ctz(4 as UInt64), 2 as UInt32);
-    assert_eq(ctz(8 as UInt64), 3 as UInt32);
-    assert_eq(ctz(16 as UInt64), 4 as UInt32);
+    assert_eq(ctz2_u64, 1 as UInt32);
+    assert_eq(ctz4_u64, 2 as UInt32);
+    assert_eq(ctz8_u64, 3 as UInt32);
+    assert_eq(ctz16_u64, 4 as UInt32);
 }
 
 @test
 fn test_ctz_odd() {
     // Odd numbers have ctz = 0
-    assert_eq(ctz(3 as UInt64), 0 as UInt32);
-    assert_eq(ctz(7 as UInt64), 0 as UInt32);
-    assert_eq(ctz(15 as UInt64), 0 as UInt32);
+    assert_eq(ctz3_u64, 0 as UInt32);
+    assert_eq(ctz7_u64, 0 as UInt32);
+    assert_eq(ctz15_u64, 0 as UInt32);
 }
 
 @test
 fn test_ctz32_zero() {
-    assert_eq(ctz32(0 as UInt32), 32 as UInt32);
+    assert_eq(ctz320_u32, 32 as UInt32);
 }
 
 @test
 fn test_ctz32_powers_of_two() {
-    assert_eq(ctz32(1 as UInt32), 0 as UInt32);
-    assert_eq(ctz32(2 as UInt32), 1 as UInt32);
-    assert_eq(ctz32(16 as UInt32), 4 as UInt32);
+    assert_eq(ctz321_u32, 0 as UInt32);
+    assert_eq(ctz322_u32, 1 as UInt32);
+    assert_eq(ctz3216_u32, 4 as UInt32);
 }
 
 // =============================================================================
@@ -120,44 +120,44 @@ fn test_ctz32_powers_of_two() {
 
 @test
 fn test_popcnt_zero() {
-    assert_eq(popcnt(0 as UInt64), 0 as UInt32);
+    assert_eq(popcnt0_u64, 0 as UInt32);
 }
 
 @test
 fn test_popcnt_one() {
-    assert_eq(popcnt(1 as UInt64), 1 as UInt32);
+    assert_eq(popcnt1_u64, 1 as UInt32);
 }
 
 @test
 fn test_popcnt_all_ones() {
     // 0xFF = 8 bits set
-    assert_eq(popcnt(0xFF as UInt64), 8 as UInt32);
+    assert_eq(popcnt0xFF_u64, 8 as UInt32);
 }
 
 @test
 fn test_popcnt_alternating() {
     // 0x5555555555555555 = alternating 01 pattern = 32 bits set
-    assert_eq(popcnt(0x5555555555555555 as UInt64), 32 as UInt32);
+    assert_eq(popcnt0x5555555555555555_u64, 32 as UInt32);
 }
 
 @test
 fn test_popcnt_powers_of_two() {
     // Powers of 2 have exactly 1 bit set
-    assert_eq(popcnt(1 as UInt64), 1 as UInt32);
-    assert_eq(popcnt(2 as UInt64), 1 as UInt32);
-    assert_eq(popcnt(4 as UInt64), 1 as UInt32);
-    assert_eq(popcnt(0x8000000000000000 as UInt64), 1 as UInt32);
+    assert_eq(popcnt1_u64, 1 as UInt32);
+    assert_eq(popcnt2_u64, 1 as UInt32);
+    assert_eq(popcnt4_u64, 1 as UInt32);
+    assert_eq(popcnt0x8000000000000000_u64, 1 as UInt32);
 }
 
 @test
 fn test_popcnt32_ff() {
-    assert_eq(popcnt32(0xFF as UInt32), 8 as UInt32);
+    assert_eq(popcnt320xFF_u32, 8 as UInt32);
 }
 
 @test
 fn test_popcnt32_alternating() {
     // 0x55555555 = 16 bits set
-    assert_eq(popcnt32(0x55555555 as UInt32), 16 as UInt32);
+    assert_eq(popcnt320x55555555_u32, 16 as UInt32);
 }
 
 // =============================================================================
@@ -167,58 +167,58 @@ fn test_popcnt32_alternating() {
 @test
 fn test_ffs_zero() {
     // ffs(0) = 0 (no bit set)
-    assert_eq(ffs(0 as UInt64), 0 as UInt32);
+    assert_eq(ffs0_u64, 0 as UInt32);
 }
 
 @test
 fn test_ffs_one() {
     // ffs(1) = 1 (bit position 0, 1-indexed)
-    assert_eq(ffs(1 as UInt64), 1 as UInt32);
+    assert_eq(ffs1_u64, 1 as UInt32);
 }
 
 @test
 fn test_ffs_even() {
     // ffs(2) = 2, ffs(4) = 3
-    assert_eq(ffs(2 as UInt64), 2 as UInt32);
-    assert_eq(ffs(4 as UInt64), 3 as UInt32);
+    assert_eq(ffs2_u64, 2 as UInt32);
+    assert_eq(ffs4_u64, 3 as UInt32);
 }
 
 @test
 fn test_ffs_mixed() {
     // ffs(6) = ffs(0b110) = 2
-    assert_eq(ffs(6 as UInt64), 2 as UInt32);
+    assert_eq(ffs6_u64, 2 as UInt32);
 }
 
 @test
 fn test_fls_zero() {
-    assert_eq(fls(0 as UInt64), 0 as UInt32);
+    assert_eq(fls0_u64, 0 as UInt32);
 }
 
 @test
 fn test_fls_one() {
     // fls(1) = 1
-    assert_eq(fls(1 as UInt64), 1 as UInt32);
+    assert_eq(fls1_u64, 1 as UInt32);
 }
 
 @test
 fn test_fls_powers_of_two() {
-    assert_eq(fls(2 as UInt64), 2 as UInt32);
-    assert_eq(fls(4 as UInt64), 3 as UInt32);
-    assert_eq(fls(8 as UInt64), 4 as UInt32);
+    assert_eq(fls2_u64, 2 as UInt32);
+    assert_eq(fls4_u64, 3 as UInt32);
+    assert_eq(fls8_u64, 4 as UInt32);
 }
 
 @test
 fn test_fls_mixed() {
     // fls(7) = fls(0b111) = 3
-    assert_eq(fls(7 as UInt64), 3 as UInt32);
+    assert_eq(fls7_u64, 3 as UInt32);
 }
 
 @test
 fn test_ffs32_fls32() {
-    assert_eq(ffs32(0 as UInt32), 0 as UInt32);
-    assert_eq(ffs32(4 as UInt32), 3 as UInt32);
-    assert_eq(fls32(0 as UInt32), 0 as UInt32);
-    assert_eq(fls32(8 as UInt32), 4 as UInt32);
+    assert_eq(ffs320_u32, 0 as UInt32);
+    assert_eq(ffs324_u32, 3 as UInt32);
+    assert_eq(fls320_u32, 0 as UInt32);
+    assert_eq(fls328_u32, 4 as UInt32);
 }
 
 // =============================================================================
@@ -227,41 +227,41 @@ fn test_ffs32_fls32() {
 
 @test
 fn test_highest_bit_zero() {
-    assert_eq(highest_bit(0 as UInt64), 0 as UInt64);
+    assert_eq(highest_bit0_u64, 0 as UInt64);
 }
 
 @test
 fn test_highest_bit_powers_of_two() {
     // highest_bit of power of 2 is itself
-    assert_eq(highest_bit(4 as UInt64), 4 as UInt64);
-    assert_eq(highest_bit(16 as UInt64), 16 as UInt64);
+    assert_eq(highest_bit4_u64, 4 as UInt64);
+    assert_eq(highest_bit16_u64, 16 as UInt64);
 }
 
 @test
 fn test_highest_bit_mixed() {
     // highest_bit(7) = highest_bit(0b111) = 4 = 0b100
-    assert_eq(highest_bit(7 as UInt64), 4 as UInt64);
+    assert_eq(highest_bit7_u64, 4 as UInt64);
     // highest_bit(15) = 8
-    assert_eq(highest_bit(15 as UInt64), 8 as UInt64);
+    assert_eq(highest_bit15_u64, 8 as UInt64);
 }
 
 @test
 fn test_lowest_bit_zero() {
-    assert_eq(lowest_bit(0 as UInt64), 0 as UInt64);
+    assert_eq(lowest_bit0_u64, 0 as UInt64);
 }
 
 @test
 fn test_lowest_bit_powers_of_two() {
-    assert_eq(lowest_bit(4 as UInt64), 4 as UInt64);
-    assert_eq(lowest_bit(16 as UInt64), 16 as UInt64);
+    assert_eq(lowest_bit4_u64, 4 as UInt64);
+    assert_eq(lowest_bit16_u64, 16 as UInt64);
 }
 
 @test
 fn test_lowest_bit_mixed() {
     // lowest_bit(6) = lowest_bit(0b110) = 2
-    assert_eq(lowest_bit(6 as UInt64), 2 as UInt64);
+    assert_eq(lowest_bit6_u64, 2 as UInt64);
     // lowest_bit(12) = 4
-    assert_eq(lowest_bit(12 as UInt64), 4 as UInt64);
+    assert_eq(lowest_bit12_u64, 4 as UInt64);
 }
 
 // =============================================================================
@@ -327,7 +327,7 @@ fn test_rotl32_rotr32() {
 @test
 fn test_bswap_basic() {
     // 0x0102030405060708 -> 0x0807060504030201
-    assert_eq(bswap(0x0102030405060708 as UInt64), 0x0807060504030201 as UInt64);
+    assert_eq(bswap0x0102030405060708_u64, 0x0807060504030201 as UInt64);
 }
 
 @test
@@ -341,13 +341,13 @@ fn test_bswap_symmetric() {
 @test
 fn test_bswap32_basic() {
     // 0x01020304 -> 0x04030201
-    assert_eq(bswap32(0x01020304 as UInt32), 0x04030201 as UInt32);
+    assert_eq(bswap320x01020304_u32, 0x04030201 as UInt32);
 }
 
 @test
 fn test_bswap16_basic() {
     // 0x0102 -> 0x0201
-    assert_eq(bswap16(0x0102 as UInt16), 0x0201 as UInt16);
+    assert_eq(bswap160x0102_u16, 0x0201 as UInt16);
 }
 
 // =============================================================================
@@ -357,7 +357,7 @@ fn test_bswap16_basic() {
 @test
 fn test_bitreverse_one() {
     // Reversing 1 puts bit in highest position
-    assert_eq(bitreverse(1 as UInt64), 0x8000000000000000 as UInt64);
+    assert_eq(bitreverse1_u64, 0x8000000000000000 as UInt64);
 }
 
 @test
@@ -369,7 +369,7 @@ fn test_bitreverse_symmetric() {
 
 @test
 fn test_bitreverse32_one() {
-    assert_eq(bitreverse32(1 as UInt32), 0x80000000 as UInt32);
+    assert_eq(bitreverse321_u32, 0x80000000 as UInt32);
 }
 
 // =============================================================================
@@ -378,75 +378,75 @@ fn test_bitreverse32_one() {
 
 @test
 fn test_is_power_of_two_true() {
-    assert(is_power_of_two(1 as UInt64));
-    assert(is_power_of_two(2 as UInt64));
-    assert(is_power_of_two(4 as UInt64));
-    assert(is_power_of_two(8 as UInt64));
-    assert(is_power_of_two(256 as UInt64));
-    assert(is_power_of_two(0x8000000000000000 as UInt64));
+    assert(is_power_of_two1_u64);
+    assert(is_power_of_two2_u64);
+    assert(is_power_of_two4_u64);
+    assert(is_power_of_two8_u64);
+    assert(is_power_of_two256_u64);
+    assert(is_power_of_two0x8000000000000000_u64);
 }
 
 @test
 fn test_is_power_of_two_false() {
-    assert(!is_power_of_two(0 as UInt64));
-    assert(!is_power_of_two(3 as UInt64));
-    assert(!is_power_of_two(5 as UInt64));
-    assert(!is_power_of_two(6 as UInt64));
-    assert(!is_power_of_two(7 as UInt64));
-    assert(!is_power_of_two(15 as UInt64));
+    assert(!is_power_of_two0_u64);
+    assert(!is_power_of_two3_u64);
+    assert(!is_power_of_two5_u64);
+    assert(!is_power_of_two6_u64);
+    assert(!is_power_of_two7_u64);
+    assert(!is_power_of_two15_u64);
 }
 
 @test
 fn test_is_power_of_two32() {
-    assert(is_power_of_two32(1 as UInt32));
-    assert(is_power_of_two32(1024 as UInt32));
-    assert(!is_power_of_two32(0 as UInt32));
-    assert(!is_power_of_two32(3 as UInt32));
+    assert(is_power_of_two321_u32);
+    assert(is_power_of_two321024_u32);
+    assert(!is_power_of_two320_u32);
+    assert(!is_power_of_two323_u32);
 }
 
 @test
 fn test_next_power_of_two_exact() {
     // Powers of 2 return themselves
-    assert_eq(next_power_of_two(1 as UInt64), 1 as UInt64);
-    assert_eq(next_power_of_two(2 as UInt64), 2 as UInt64);
-    assert_eq(next_power_of_two(4 as UInt64), 4 as UInt64);
+    assert_eq(next_power_of_two1_u64, 1 as UInt64);
+    assert_eq(next_power_of_two2_u64, 2 as UInt64);
+    assert_eq(next_power_of_two4_u64, 4 as UInt64);
 }
 
 @test
 fn test_next_power_of_two_round_up() {
-    assert_eq(next_power_of_two(0 as UInt64), 1 as UInt64);
-    assert_eq(next_power_of_two(3 as UInt64), 4 as UInt64);
-    assert_eq(next_power_of_two(5 as UInt64), 8 as UInt64);
-    assert_eq(next_power_of_two(7 as UInt64), 8 as UInt64);
-    assert_eq(next_power_of_two(9 as UInt64), 16 as UInt64);
+    assert_eq(next_power_of_two0_u64, 1 as UInt64);
+    assert_eq(next_power_of_two3_u64, 4 as UInt64);
+    assert_eq(next_power_of_two5_u64, 8 as UInt64);
+    assert_eq(next_power_of_two7_u64, 8 as UInt64);
+    assert_eq(next_power_of_two9_u64, 16 as UInt64);
 }
 
 @test
 fn test_prev_power_of_two_exact() {
-    assert_eq(prev_power_of_two(1 as UInt64), 1 as UInt64);
-    assert_eq(prev_power_of_two(2 as UInt64), 2 as UInt64);
-    assert_eq(prev_power_of_two(4 as UInt64), 4 as UInt64);
+    assert_eq(prev_power_of_two1_u64, 1 as UInt64);
+    assert_eq(prev_power_of_two2_u64, 2 as UInt64);
+    assert_eq(prev_power_of_two4_u64, 4 as UInt64);
 }
 
 @test
 fn test_prev_power_of_two_round_down() {
-    assert_eq(prev_power_of_two(0 as UInt64), 0 as UInt64);
-    assert_eq(prev_power_of_two(3 as UInt64), 2 as UInt64);
-    assert_eq(prev_power_of_two(5 as UInt64), 4 as UInt64);
-    assert_eq(prev_power_of_two(7 as UInt64), 4 as UInt64);
-    assert_eq(prev_power_of_two(9 as UInt64), 8 as UInt64);
+    assert_eq(prev_power_of_two0_u64, 0 as UInt64);
+    assert_eq(prev_power_of_two3_u64, 2 as UInt64);
+    assert_eq(prev_power_of_two5_u64, 4 as UInt64);
+    assert_eq(prev_power_of_two7_u64, 4 as UInt64);
+    assert_eq(prev_power_of_two9_u64, 8 as UInt64);
 }
 
 @test
 fn test_next_power_of_two32() {
-    assert_eq(next_power_of_two32(3 as UInt32), 4 as UInt32);
-    assert_eq(next_power_of_two32(5 as UInt32), 8 as UInt32);
+    assert_eq(next_power_of_two323_u32, 4 as UInt32);
+    assert_eq(next_power_of_two325_u32, 8 as UInt32);
 }
 
 @test
 fn test_prev_power_of_two32() {
-    assert_eq(prev_power_of_two32(3 as UInt32), 2 as UInt32);
-    assert_eq(prev_power_of_two32(7 as UInt32), 4 as UInt32);
+    assert_eq(prev_power_of_two323_u32, 2 as UInt32);
+    assert_eq(prev_power_of_two327_u32, 4 as UInt32);
 }
 
 // =============================================================================
@@ -455,35 +455,35 @@ fn test_prev_power_of_two32() {
 
 @test
 fn test_log2_floor_exact() {
-    assert_eq(log2_floor(1 as UInt64), 0 as UInt32);
-    assert_eq(log2_floor(2 as UInt64), 1 as UInt32);
-    assert_eq(log2_floor(4 as UInt64), 2 as UInt32);
-    assert_eq(log2_floor(8 as UInt64), 3 as UInt32);
-    assert_eq(log2_floor(256 as UInt64), 8 as UInt32);
+    assert_eq(log2_floor1_u64, 0 as UInt32);
+    assert_eq(log2_floor2_u64, 1 as UInt32);
+    assert_eq(log2_floor4_u64, 2 as UInt32);
+    assert_eq(log2_floor8_u64, 3 as UInt32);
+    assert_eq(log2_floor256_u64, 8 as UInt32);
 }
 
 @test
 fn test_log2_floor_round_down() {
-    assert_eq(log2_floor(3 as UInt64), 1 as UInt32);
-    assert_eq(log2_floor(5 as UInt64), 2 as UInt32);
-    assert_eq(log2_floor(7 as UInt64), 2 as UInt32);
-    assert_eq(log2_floor(15 as UInt64), 3 as UInt32);
+    assert_eq(log2_floor3_u64, 1 as UInt32);
+    assert_eq(log2_floor5_u64, 2 as UInt32);
+    assert_eq(log2_floor7_u64, 2 as UInt32);
+    assert_eq(log2_floor15_u64, 3 as UInt32);
 }
 
 @test
 fn test_log2_ceil_exact() {
-    assert_eq(log2_ceil(1 as UInt64), 0 as UInt32);
-    assert_eq(log2_ceil(2 as UInt64), 1 as UInt32);
-    assert_eq(log2_ceil(4 as UInt64), 2 as UInt32);
-    assert_eq(log2_ceil(8 as UInt64), 3 as UInt32);
+    assert_eq(log2_ceil1_u64, 0 as UInt32);
+    assert_eq(log2_ceil2_u64, 1 as UInt32);
+    assert_eq(log2_ceil4_u64, 2 as UInt32);
+    assert_eq(log2_ceil8_u64, 3 as UInt32);
 }
 
 @test
 fn test_log2_ceil_round_up() {
-    assert_eq(log2_ceil(3 as UInt64), 2 as UInt32);
-    assert_eq(log2_ceil(5 as UInt64), 3 as UInt32);
-    assert_eq(log2_ceil(7 as UInt64), 3 as UInt32);
-    assert_eq(log2_ceil(9 as UInt64), 4 as UInt32);
+    assert_eq(log2_ceil3_u64, 2 as UInt32);
+    assert_eq(log2_ceil5_u64, 3 as UInt32);
+    assert_eq(log2_ceil7_u64, 3 as UInt32);
+    assert_eq(log2_ceil9_u64, 4 as UInt32);
 }
 
 // =============================================================================
@@ -492,30 +492,30 @@ fn test_log2_ceil_round_up() {
 
 @test
 fn test_parity_zero() {
-    assert_eq(parity(0 as UInt64), 0 as UInt32);
+    assert_eq(parity0_u64, 0 as UInt32);
 }
 
 @test
 fn test_parity_even() {
     // Even number of 1s -> parity = 0
-    assert_eq(parity(3 as UInt64), 0 as UInt32);  // 0b11 = 2 bits
-    assert_eq(parity(5 as UInt64), 0 as UInt32);  // 0b101 = 2 bits
-    assert_eq(parity(0xF as UInt64), 0 as UInt32); // 4 bits
+    assert_eq(parity3_u64, 0 as UInt32);  // 0b11 = 2 bits
+    assert_eq(parity5_u64, 0 as UInt32);  // 0b101 = 2 bits
+    assert_eq(parity0xF_u64, 0 as UInt32); // 4 bits
 }
 
 @test
 fn test_parity_odd() {
     // Odd number of 1s -> parity = 1
-    assert_eq(parity(1 as UInt64), 1 as UInt32);
-    assert_eq(parity(2 as UInt64), 1 as UInt32);
-    assert_eq(parity(7 as UInt64), 1 as UInt32);  // 0b111 = 3 bits
+    assert_eq(parity1_u64, 1 as UInt32);
+    assert_eq(parity2_u64, 1 as UInt32);
+    assert_eq(parity7_u64, 1 as UInt32);  // 0b111 = 3 bits
 }
 
 @test
 fn test_parity32() {
-    assert_eq(parity32(0 as UInt32), 0 as UInt32);
-    assert_eq(parity32(1 as UInt32), 1 as UInt32);
-    assert_eq(parity32(3 as UInt32), 0 as UInt32);
+    assert_eq(parity320_u32, 0 as UInt32);
+    assert_eq(parity321_u32, 1 as UInt32);
+    assert_eq(parity323_u32, 0 as UInt32);
 }
 
 // =============================================================================
@@ -524,30 +524,30 @@ fn test_parity32() {
 
 @test
 fn test_clear_lowest_bit() {
-    assert_eq(clear_lowest_bit(0b1110 as UInt64), 0b1100 as UInt64);
-    assert_eq(clear_lowest_bit(0b1000 as UInt64), 0 as UInt64);
-    assert_eq(clear_lowest_bit(0b1010 as UInt64), 0b1000 as UInt64);
+    assert_eq(clear_lowest_bit0b1110_u64, 0b1100 as UInt64);
+    assert_eq(clear_lowest_bit0b1000_u64, 0 as UInt64);
+    assert_eq(clear_lowest_bit0b1010_u64, 0b1000 as UInt64);
 }
 
 @test
 fn test_set_lowest_clear_bit() {
-    assert_eq(set_lowest_clear_bit(0b1110 as UInt64), 0b1111 as UInt64);
-    assert_eq(set_lowest_clear_bit(0b0111 as UInt64), 0b1111 as UInt64);
-    assert_eq(set_lowest_clear_bit(0b1010 as UInt64), 0b1011 as UInt64);
+    assert_eq(set_lowest_clear_bit0b1110_u64, 0b1111 as UInt64);
+    assert_eq(set_lowest_clear_bit0b0111_u64, 0b1111 as UInt64);
+    assert_eq(set_lowest_clear_bit0b1010_u64, 0b1011 as UInt64);
 }
 
 @test
 fn test_isolate_rightmost_one() {
-    assert_eq(isolate_rightmost_one(0b1100 as UInt64), 0b0100 as UInt64);
-    assert_eq(isolate_rightmost_one(0b1010 as UInt64), 0b0010 as UInt64);
-    assert_eq(isolate_rightmost_one(0b1000 as UInt64), 0b1000 as UInt64);
+    assert_eq(isolate_rightmost_one0b1100_u64, 0b0100 as UInt64);
+    assert_eq(isolate_rightmost_one0b1010_u64, 0b0010 as UInt64);
+    assert_eq(isolate_rightmost_one0b1000_u64, 0b1000 as UInt64);
 }
 
 @test
 fn test_propagate_rightmost_one() {
-    assert_eq(propagate_rightmost_one(0b1000 as UInt64), 0b1111 as UInt64);
-    assert_eq(propagate_rightmost_one(0b1100 as UInt64), 0b1111 as UInt64);
-    assert_eq(propagate_rightmost_one(0b10100 as UInt64), 0b10111 as UInt64);
+    assert_eq(propagate_rightmost_one0b1000_u64, 0b1111 as UInt64);
+    assert_eq(propagate_rightmost_one0b1100_u64, 0b1111 as UInt64);
+    assert_eq(propagate_rightmost_one0b10100_u64, 0b10111 as UInt64);
 }
 
 // =============================================================================
@@ -649,7 +649,7 @@ fn test_deinterleave_2d_roundtrip() {
 
 @test
 fn test_deinterleave_2d_simple() {
-    let (x, y) = deinterleave_2d(3 as UInt64);
+    let (x, y) = deinterleave_2d3_u64;
     assert_eq(x, 1 as UInt32);
     assert_eq(y, 1 as UInt32);
 }
@@ -660,21 +660,21 @@ fn test_deinterleave_2d_simple() {
 
 @test
 fn test_total_bits_set_zero() {
-    assert_eq(total_bits_set(0 as UInt64), 0 as UInt64);
+    assert_eq(total_bits_set0_u64, 0 as UInt64);
 }
 
 @test
 fn test_total_bits_set_small() {
     // Sum of popcount(i) for i in 0..4:
     // popcount(0) + popcount(1) + popcount(2) + popcount(3) = 0 + 1 + 1 + 2 = 4
-    assert_eq(total_bits_set(4 as UInt64), 4 as UInt64);
+    assert_eq(total_bits_set4_u64, 4 as UInt64);
 }
 
 @test
 fn test_total_bits_set_eight() {
     // Sum for i in 0..8:
     // 0 + 1 + 1 + 2 + 1 + 2 + 2 + 3 = 12
-    assert_eq(total_bits_set(8 as UInt64), 12 as UInt64);
+    assert_eq(total_bits_set8_u64, 12 as UInt64);
 }
 
 // =============================================================================
@@ -684,31 +684,31 @@ fn test_total_bits_set_eight() {
 @test
 fn test_clz_all_ones() {
     // clz(0xFFFFFFFFFFFFFFFF) = 0 (highest bit is set)
-    assert_eq(clz(0xFFFFFFFFFFFFFFFF as UInt64), 0 as UInt32);
+    assert_eq(clz0xFFFFFFFFFFFFFFFF_u64, 0 as UInt32);
 }
 
 @test
 fn test_clz_byte_boundary() {
-    assert_eq(clz(0x100 as UInt64), 55 as UInt32);  // bit 8 set
-    assert_eq(clz(0x10000 as UInt64), 47 as UInt32); // bit 16 set
-    assert_eq(clz(0x100000000 as UInt64), 31 as UInt32); // bit 32 set
+    assert_eq(clz0x100_u64, 55 as UInt32);  // bit 8 set
+    assert_eq(clz0x10000_u64, 47 as UInt32); // bit 16 set
+    assert_eq(clz0x100000000_u64, 31 as UInt32); // bit 32 set
 }
 
 @test
 fn test_ctz_high_bit() {
     // ctz(0x8000000000000000) = 63 (only bit 63 is set)
-    assert_eq(ctz(0x8000000000000000 as UInt64), 63 as UInt32);
+    assert_eq(ctz0x8000000000000000_u64, 63 as UInt32);
 }
 
 @test
 fn test_ctz_all_ones() {
     // ctz(0xFFFFFFFFFFFFFFFF) = 0 (bit 0 is set)
-    assert_eq(ctz(0xFFFFFFFFFFFFFFFF as UInt64), 0 as UInt32);
+    assert_eq(ctz0xFFFFFFFFFFFFFFFF_u64, 0 as UInt32);
 }
 
 @test
 fn test_ctz32_high_bit() {
-    assert_eq(ctz32(0x80000000 as UInt32), 31 as UInt32);
+    assert_eq(ctz320x80000000_u32, 31 as UInt32);
 }
 
 // =============================================================================
@@ -718,23 +718,23 @@ fn test_ctz32_high_bit() {
 @test
 fn test_popcnt_16_bits() {
     // 0xFFFF has 16 bits set
-    assert_eq(popcnt(0xFFFF as UInt64), 16 as UInt32);
+    assert_eq(popcnt0xFFFF_u64, 16 as UInt32);
 }
 
 @test
 fn test_popcnt_all_64_bits() {
     // 0xFFFFFFFFFFFFFFFF has 64 bits set
-    assert_eq(popcnt(0xFFFFFFFFFFFFFFFF as UInt64), 64 as UInt32);
+    assert_eq(popcnt0xFFFFFFFFFFFFFFFF_u64, 64 as UInt32);
 }
 
 @test
 fn test_popcnt32_all_ones() {
-    assert_eq(popcnt32(0xFFFFFFFF as UInt32), 32 as UInt32);
+    assert_eq(popcnt320xFFFFFFFF_u32, 32 as UInt32);
 }
 
 @test
 fn test_popcnt32_zero() {
-    assert_eq(popcnt32(0 as UInt32), 0 as UInt32);
+    assert_eq(popcnt320_u32, 0 as UInt32);
 }
 
 // =============================================================================
@@ -744,26 +744,26 @@ fn test_popcnt32_zero() {
 @test
 fn test_ffs_high_bit_64() {
     // ffs(0x8000000000000000) = 64 (bit 63 is first set, 1-indexed)
-    assert_eq(ffs(0x8000000000000000 as UInt64), 64 as UInt32);
+    assert_eq(ffs0x8000000000000000_u64, 64 as UInt32);
 }
 
 @test
 fn test_fls_high_bit_64() {
     // fls(0x8000000000000000) = 64 (bit 63 is last set, 1-indexed)
-    assert_eq(fls(0x8000000000000000 as UInt64), 64 as UInt32);
+    assert_eq(fls0x8000000000000000_u64, 64 as UInt32);
 }
 
 @test
 fn test_ffs_fls_power_of_two_agree() {
     // For a power of two, ffs == fls (only one bit set)
-    assert_eq(ffs(256 as UInt64), fls(256 as UInt64));
-    assert_eq(ffs(1024 as UInt64), fls(1024 as UInt64));
+    assert_eq(ffs256_u64, fls256_u64);
+    assert_eq(ffs1024_u64, fls1024_u64);
 }
 
 @test
 fn test_fls_large_value() {
     // fls(0xFFFF) = 16
-    assert_eq(fls(0xFFFF as UInt64), 16 as UInt32);
+    assert_eq(fls0xFFFF_u64, 16 as UInt32);
 }
 
 // =============================================================================
@@ -773,19 +773,19 @@ fn test_fls_large_value() {
 @test
 fn test_highest_lowest_bit_power_of_two() {
     // For a power of two, highest_bit == lowest_bit
-    assert_eq(highest_bit(64 as UInt64), lowest_bit(64 as UInt64));
-    assert_eq(highest_bit(256 as UInt64), lowest_bit(256 as UInt64));
-    assert_eq(highest_bit(4096 as UInt64), lowest_bit(4096 as UInt64));
+    assert_eq(highest_bit64_u64, lowest_bit64_u64);
+    assert_eq(highest_bit256_u64, lowest_bit256_u64);
+    assert_eq(highest_bit4096_u64, lowest_bit4096_u64);
 }
 
 @test
 fn test_highest_bit_large() {
-    assert_eq(highest_bit(0xFFFFFFFFFFFFFFFF as UInt64), 0x8000000000000000 as UInt64);
+    assert_eq(highest_bit0xFFFFFFFFFFFFFFFF_u64, 0x8000000000000000 as UInt64);
 }
 
 @test
 fn test_lowest_bit_one() {
-    assert_eq(lowest_bit(1 as UInt64), 1 as UInt64);
+    assert_eq(lowest_bit1_u64, 1 as UInt64);
 }
 
 // =============================================================================
@@ -823,12 +823,12 @@ fn test_rotr32_wrap() {
 
 @test
 fn test_bswap_zero() {
-    assert_eq(bswap(0 as UInt64), 0 as UInt64);
+    assert_eq(bswap0_u64, 0 as UInt64);
 }
 
 @test
 fn test_bswap32_zero() {
-    assert_eq(bswap32(0 as UInt32), 0 as UInt32);
+    assert_eq(bswap320_u32, 0 as UInt32);
 }
 
 @test
@@ -850,23 +850,23 @@ fn test_bswap16_roundtrip() {
 
 @test
 fn test_bitreverse_zero() {
-    assert_eq(bitreverse(0 as UInt64), 0 as UInt64);
+    assert_eq(bitreverse0_u64, 0 as UInt64);
 }
 
 @test
 fn test_bitreverse_all_ones() {
     // Reversing all 1s gives all 1s
-    assert_eq(bitreverse(0xFFFFFFFFFFFFFFFF as UInt64), 0xFFFFFFFFFFFFFFFF as UInt64);
+    assert_eq(bitreverse0xFFFFFFFFFFFFFFFF_u64, 0xFFFFFFFFFFFFFFFF as UInt64);
 }
 
 @test
 fn test_bitreverse32_zero() {
-    assert_eq(bitreverse32(0 as UInt32), 0 as UInt32);
+    assert_eq(bitreverse320_u32, 0 as UInt32);
 }
 
 @test
 fn test_bitreverse32_all_ones() {
-    assert_eq(bitreverse32(0xFFFFFFFF as UInt32), 0xFFFFFFFF as UInt32);
+    assert_eq(bitreverse320xFFFFFFFF_u32, 0xFFFFFFFF as UInt32);
 }
 
 // =============================================================================
@@ -876,26 +876,26 @@ fn test_bitreverse32_all_ones() {
 @test
 fn test_is_power_of_two_large() {
     // 2^32 = 0x100000000
-    assert(is_power_of_two(0x100000000 as UInt64));
+    assert(is_power_of_two0x100000000_u64);
     // 2^63 = 0x8000000000000000
-    assert(is_power_of_two(0x8000000000000000 as UInt64));
+    assert(is_power_of_two0x8000000000000000_u64);
 }
 
 @test
 fn test_next_power_of_two_129() {
-    assert_eq(next_power_of_two(129 as UInt64), 256 as UInt64);
+    assert_eq(next_power_of_two129_u64, 256 as UInt64);
 }
 
 @test
 fn test_prev_power_of_two_255() {
-    assert_eq(prev_power_of_two(255 as UInt64), 128 as UInt64);
+    assert_eq(prev_power_of_two255_u64, 128 as UInt64);
 }
 
 @test
 fn test_next_prev_power_of_two_exact() {
     // For exact powers of two, next and prev both return the same value
-    assert_eq(next_power_of_two(64 as UInt64), 64 as UInt64);
-    assert_eq(prev_power_of_two(64 as UInt64), 64 as UInt64);
+    assert_eq(next_power_of_two64_u64, 64 as UInt64);
+    assert_eq(prev_power_of_two64_u64, 64 as UInt64);
 }
 
 // =============================================================================
@@ -904,20 +904,20 @@ fn test_next_prev_power_of_two_exact() {
 
 @test
 fn test_log2_floor_1024() {
-    assert_eq(log2_floor(1024 as UInt64), 10 as UInt32);
+    assert_eq(log2_floor1024_u64, 10 as UInt32);
 }
 
 @test
 fn test_log2_ceil_1025() {
-    assert_eq(log2_ceil(1025 as UInt64), 11 as UInt32);
+    assert_eq(log2_ceil1025_u64, 11 as UInt32);
 }
 
 @test
 fn test_log2_floor_large() {
     // log2_floor(65536) = 16
-    assert_eq(log2_floor(65536 as UInt64), 16 as UInt32);
+    assert_eq(log2_floor65536_u64, 16 as UInt32);
     // log2_floor(65535) = 15
-    assert_eq(log2_floor(65535 as UInt64), 15 as UInt32);
+    assert_eq(log2_floor65535_u64, 15 as UInt32);
 }
 
 // =============================================================================
@@ -927,7 +927,7 @@ fn test_log2_floor_large() {
 @test
 fn test_parity_all_ones_64() {
     // 64 bits set -> even parity -> 0
-    assert_eq(parity(0xFFFFFFFFFFFFFFFF as UInt64), 0 as UInt32);
+    assert_eq(parity0xFFFFFFFFFFFFFFFF_u64, 0 as UInt32);
 }
 
 @test
@@ -940,7 +940,7 @@ fn test_parity_popcnt_consistency() {
 @test
 fn test_parity32_all_ones() {
     // 32 bits set -> even parity -> 0
-    assert_eq(parity32(0xFFFFFFFF as UInt32), 0 as UInt32);
+    assert_eq(parity320xFFFFFFFF_u32, 0 as UInt32);
 }
 
 // =============================================================================
@@ -950,26 +950,26 @@ fn test_parity32_all_ones() {
 @test
 fn test_clear_lowest_bit_zero() {
     // clear_lowest_bit(0) should be 0
-    assert_eq(clear_lowest_bit(0 as UInt64), 0 as UInt64);
+    assert_eq(clear_lowest_bit0_u64, 0 as UInt64);
 }
 
 @test
 fn test_clear_lowest_bit_single() {
     // Clearing the only bit set gives 0
-    assert_eq(clear_lowest_bit(1 as UInt64), 0 as UInt64);
-    assert_eq(clear_lowest_bit(0x8000000000000000 as UInt64), 0 as UInt64);
+    assert_eq(clear_lowest_bit1_u64, 0 as UInt64);
+    assert_eq(clear_lowest_bit0x8000000000000000_u64, 0 as UInt64);
 }
 
 @test
 fn test_isolate_rightmost_one_zero() {
     // isolate_rightmost_one(0) should be 0
-    assert_eq(isolate_rightmost_one(0 as UInt64), 0 as UInt64);
+    assert_eq(isolate_rightmost_one0_u64, 0 as UInt64);
 }
 
 @test
 fn test_propagate_rightmost_one_single_high_bit() {
     // propagate 0x8000000000000000 -> all bits set
-    assert_eq(propagate_rightmost_one(0x8000000000000000 as UInt64), 0xFFFFFFFFFFFFFFFF as UInt64);
+    assert_eq(propagate_rightmost_one0x8000000000000000_u64, 0xFFFFFFFFFFFFFFFF as UInt64);
 }
 
 // =============================================================================
@@ -1041,7 +1041,7 @@ fn test_interleave_2d_x_only() {
 
 @test
 fn test_deinterleave_2d_zero() {
-    let (x, y) = deinterleave_2d(0 as UInt64);
+    let (x, y) = deinterleave_2d0_u64;
     assert_eq(x, 0 as UInt32);
     assert_eq(y, 0 as UInt32);
 }
@@ -1065,15 +1065,15 @@ fn test_interleave_deinterleave_large() {
 fn test_total_bits_set_16() {
     // Sum for i in 0..16:
     // 0+1+1+2+1+2+2+3+1+2+2+3+2+3+3+4 = 32
-    assert_eq(total_bits_set(16 as UInt64), 32 as UInt64);
+    assert_eq(total_bits_set16_u64, 32 as UInt64);
 }
 
 @test
 fn test_total_bits_set_power_of_two() {
     // total_bits_set(1) = sum for i in 0..1 = popcount(0) = 0
-    assert_eq(total_bits_set(1 as UInt64), 0 as UInt64);
+    assert_eq(total_bits_set1_u64, 0 as UInt64);
     // total_bits_set(2) = popcount(0) + popcount(1) = 0 + 1 = 1
-    assert_eq(total_bits_set(2 as UInt64), 1 as UInt64);
+    assert_eq(total_bits_set2_u64, 1 as UInt64);
 }
 
 // =============================================================================
@@ -1086,7 +1086,7 @@ fn test_clz_fls_relationship() {
     let x: UInt64 = 0x12345678;
     let fls_val = fls(x);
     let clz_val = clz(x);
-    assert_eq(fls_val, (64 as UInt32) - clz_val);
+    assert_eq(fls_val, 64_u32 - clz_val);
 }
 
 @test

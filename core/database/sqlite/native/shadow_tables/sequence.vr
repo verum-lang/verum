@@ -56,13 +56,13 @@ implement SequenceTable {
                 } else {
                     observed_max
                 };
-                let next = prev + (1 as Int64);
+                let next = prev + 1_i64;
                 self.rows[i].seq = next;
                 return next;
             }
             i = i + 1;
         }
-        let next = observed_max + (1 as Int64);
+        let next = observed_max + 1_i64;
         self.rows.push(sequence_row(table.clone(), next));
         next
     }

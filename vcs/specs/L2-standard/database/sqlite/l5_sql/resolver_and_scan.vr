@@ -131,7 +131,7 @@ fn resolve_recurses_binary_op() {
     // id = 1
     let e = EBinary(BEq,
         Heap(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())),
-        Heap(ELit(LInt(1 as Int64))),
+        Heap(ELit(LInt1_i64)),
     );
     match resolve_expr(&e, &scopes) {
         Ok(EBinary(_, ref lhs, _)) => {

@@ -30,7 +30,7 @@ mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal
 
 public fn abs(v: &Register) -> Register {
     match v {
-        RInt(x)  => { if x < (0 as Int64) { RInt(-x) } else { RInt(x) } }
+        RInt(x)  => { if x < 0_i64 { RInt(-x) } else { RInt(x) } }
         RReal(x) => { if x < 0.0 { RReal(-x) } else { RReal(x) } }
         RNull    => RNull,
         _        => RNull,
@@ -146,11 +146,11 @@ public fn max_var(args: &List<Register>) -> Register {
 
 public fn iif(cond: &Register, then_v: &Register, else_v: &Register) -> Register {
     let truthy = match cond {
-        RInt(x)   => x != (0 as Int64),
+        RInt(x)   => x != 0_i64,
         RReal(x)  => x != 0.0,
         RText(s)  => s.len() > 0,
         RBlob(b)  => b.len() > 0,
-        RRowId(x) => x != (0 as Int64),
+        RRowId(x) => x != 0_i64,
         RNull     => false,
     };
     if truthy { clone_register(then_v) } else { clone_register(else_v) }
@@ -163,14 +163,14 @@ public fn iif(cond: &Register, then_v: &Register, else_v: &Register) -> Register
 public fn sign(v: &Register) -> Register {
     match v {
         RInt(x) => {
-            if x > (0 as Int64) { RInt(1 as Int64) }
-            else if x < (0 as Int64) { RInt(-1 as Int64) }
-            else { RInt(0 as Int64) }
+            if x > 0_i64 { RInt1_i64 }
+            else if x < 0_i64 { RInt-1_i64 }
+            else { RInt0_i64 }
         }
         RReal(x) => {
-            if x > 0.0 { RInt(1 as Int64) }
-            else if x < 0.0 { RInt(-1 as Int64) }
-            else { RInt(0 as Int64) }
+            if x > 0.0 { RInt1_i64 }
+            else if x < 0.0 { RInt-1_i64 }
+            else { RInt0_i64 }
         }
         RNull => RNull,
         _ => RNull,
@@ -190,15 +190,15 @@ public fn sign(v: &Register) -> Register {
 public type RngState is { value: Int64 };
 
 public fn rng_new(seed: Int64) -> RngState {
-    let s: Int64 = if seed == (0 as Int64) { 88172645463325252 as Int64 } else { seed };
+    let s: Int64 = if seed == 0_i64 { 88172645463325252 as Int64 } else { seed };
     RngState { value: s }
 }
 
 public fn rng_next(rng: &mut RngState) -> Int64 {
     let mut x: Int64 = rng.value;
-    x = x ^ (x << (13 as Int64));
-    x = x ^ (x >> (7 as Int64));
-    x = x ^ (x << (17 as Int64));
+    x = x ^ (x << 13_i64);
+    x = x ^ (x >> 7_i64);
+    x = x ^ (x << 17_i64);
     rng.value = x;
     x
 }

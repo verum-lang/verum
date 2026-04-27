@@ -21,14 +21,14 @@ public fn fresh() -> RandomStream {
 // sqlite3_randomness(N=0, NULL) requests a reseed.
 public fn request_reseed(mut s: RandomStream) -> RandomStream {
     s.seeded = false;
-    s.reseed_requested = s.reseed_requested + (1 as Int64);
+    s.reseed_requested = s.reseed_requested + 1_i64;
     s
 }
 
 // Draw `n` bytes — first call auto-seeds.
 public fn draw(mut s: RandomStream, n: Int64) -> RandomStream {
     if !s.seeded { s.seeded = true; }
-    if n > (0 as Int64) {
+    if n > 0_i64 {
         s.bytes_emitted = s.bytes_emitted + n;
     }
     s

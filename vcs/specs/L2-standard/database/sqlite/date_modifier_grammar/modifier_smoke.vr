@@ -32,7 +32,7 @@ fn test_modifier_kinds() {
     assert(modifier_kind(&m0) == "offset".clone());
     assert(modifier_kind(&Modifier.MdReplaceDate("2026-01-01".clone())) == "replace_date".clone());
     assert(modifier_kind(&Modifier.MdStartOfMonth) == "start_of_month".clone());
-    assert(modifier_kind(&Modifier.MdWeekday(0 as Int64)) == "weekday".clone());
+    assert(modifier_kind(&Modifier.MdWeekday0_i64) == "weekday".clone());
     assert(modifier_kind(&Modifier.MdLocalTime) == "localtime".clone());
     assert(modifier_kind(&Modifier.MdUnixEpoch) == "unixepoch".clone());
     assert(modifier_kind(&Modifier.MdSubsec) == "subsec".clone());
@@ -44,7 +44,7 @@ fn test_is_absolute() {
     assert(is_absolute(&Modifier.MdStartOfDay));
     assert(is_absolute(&Modifier.MdReplaceDate("2020-01-01".clone())));
     assert(is_absolute(&Modifier.MdReplaceTime("00:00:00".clone())));
-    assert(is_absolute(&Modifier.MdWeekday(1 as Int64)));
+    assert(is_absolute(&Modifier.MdWeekday1_i64));
     let off: Modifier = Modifier.MdOffset { amount: 3 as Int64, unit: UDays };
     assert(!is_absolute(&off));
     assert(!is_absolute(&Modifier.MdUtc));
@@ -66,10 +66,10 @@ fn test_output_format() {
 }
 
 fn test_valid_weekday() {
-    assert(valid_weekday(0 as Int64));
-    assert(valid_weekday(6 as Int64));
-    assert(!valid_weekday(7 as Int64));
-    assert(!valid_weekday(-1 as Int64));
+    assert(valid_weekday0_i64);
+    assert(valid_weekday6_i64);
+    assert(!valid_weekday7_i64);
+    assert(!valid_weekday-1_i64);
 }
 
 fn main() {

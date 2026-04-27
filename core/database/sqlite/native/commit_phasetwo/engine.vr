@@ -57,7 +57,7 @@ implement CommitEngine {
         match &self.phase {
             CpPhaseOne => {
                 self.phase = CpPhaseTwo;
-                self.fcntl_notifications = self.fcntl_notifications + (1 as Int64);
+                self.fcntl_notifications = self.fcntl_notifications + 1_i64;
                 SQLITE_FCNTL_COMMIT_PHASETWO
             }
             _ => -1,
@@ -68,7 +68,7 @@ implement CommitEngine {
         match &self.phase {
             CpPhaseTwo => {
                 self.phase = CpDone;
-                self.commits_completed = self.commits_completed + (1 as Int64);
+                self.commits_completed = self.commits_completed + 1_i64;
                 true
             }
             _ => false,
@@ -77,7 +77,7 @@ implement CommitEngine {
 
     pub fn rollback(&mut self, reason: Text) {
         self.phase = CpRollback(reason);
-        self.rollbacks_observed = self.rollbacks_observed + (1 as Int64);
+        self.rollbacks_observed = self.rollbacks_observed + 1_i64;
     }
 
     pub fn reset(&mut self) {

@@ -48,9 +48,9 @@ mount base.{Maybe, Some, None, Bool};
 // -----------------------------------------------------------------------------
 
 fn test_step_clock_advances() {
-    let mut c = step_clock(1000 as Int64);
+    let mut c = step_clock1000_i64;
     assert_eq(c.now_ns(), 1000 as Int64);
-    let after = c.advance(500 as Int64);
+    let after = c.advance500_i64;
     assert_eq(after, 1500 as Int64);
     assert_eq(c.now_ns(), 1500 as Int64);
 }
@@ -64,8 +64,8 @@ fn test_round_robin_cycles() {
 }
 
 fn test_seeded_scheduler_deterministic() {
-    let mut a = seeded_scheduler(42 as Int64);
-    let mut b = seeded_scheduler(42 as Int64);
+    let mut a = seeded_scheduler42_i64;
+    let mut b = seeded_scheduler42_i64;
     let mut k: Int = 0;
     while k < 5 {
         assert_eq(a.next_choice(8), b.next_choice(8));
@@ -91,9 +91,9 @@ fn test_scripted_faults_fire_at_op_index() {
 }
 
 fn test_dst_ledger_records() {
-    let mut led = ledger_new(0xABCD as Int64);
+    let mut led = ledger_new0xABCD_i64;
     led.record_op(0, "open".clone());
-    led.record_advance(1000 as Int64);
+    led.record_advance1000_i64;
     led.record_fault(1, FkPowerLoss);
     led.abort();
     assert_eq(led.event_count(), 3);
@@ -115,8 +115,8 @@ fn make_row(ints: List<Int64>) -> DiffRow {
 }
 
 fn test_diff_match_when_rows_identical() {
-    let mut r1: List<Int64> = List.new(); r1.push(1 as Int64); r1.push(2 as Int64);
-    let mut r2: List<Int64> = List.new(); r2.push(1 as Int64); r2.push(2 as Int64);
+    let mut r1: List<Int64> = List.new(); r1.push1_i64; r1.push2_i64;
+    let mut r2: List<Int64> = List.new(); r2.push1_i64; r2.push2_i64;
     let mut left: List<DiffRow> = List.new(); left.push(make_row(r1));
     let mut right: List<DiffRow> = List.new(); right.push(make_row(r2));
     let d = compare(&DrRows(left), &DrRows(right), &MdRowsetEquality);
@@ -124,7 +124,7 @@ fn test_diff_match_when_rows_identical() {
 }
 
 fn test_diff_row_count_mismatch() {
-    let mut r1: List<Int64> = List.new(); r1.push(1 as Int64);
+    let mut r1: List<Int64> = List.new(); r1.push1_i64;
     let mut left: List<DiffRow> = List.new(); left.push(make_row(r1));
     let right: List<DiffRow> = List.new();
     match compare(&DrRows(left), &DrRows(right), &MdRowsetEquality) {
@@ -134,8 +134,8 @@ fn test_diff_row_count_mismatch() {
 }
 
 fn test_diff_cell_mismatch() {
-    let mut r1: List<Int64> = List.new(); r1.push(1 as Int64); r1.push(2 as Int64);
-    let mut r2: List<Int64> = List.new(); r2.push(1 as Int64); r2.push(99 as Int64);
+    let mut r1: List<Int64> = List.new(); r1.push1_i64; r1.push2_i64;
+    let mut r2: List<Int64> = List.new(); r2.push1_i64; r2.push99_i64;
     let mut left: List<DiffRow> = List.new(); left.push(make_row(r1));
     let mut right: List<DiffRow> = List.new(); right.push(make_row(r2));
     match compare(&DrRows(left), &DrRows(right), &MdRowsetEquality) {
@@ -152,11 +152,11 @@ fn test_diff_error_equivalence() {
 }
 
 fn test_diff_sorted_mode_handles_reorder() {
-    let mut r1: List<Int64> = List.new(); r1.push(2 as Int64);
-    let mut r2: List<Int64> = List.new(); r2.push(1 as Int64);
+    let mut r1: List<Int64> = List.new(); r1.push2_i64;
+    let mut r2: List<Int64> = List.new(); r2.push1_i64;
     let mut left: List<DiffRow> = List.new(); left.push(make_row(r1)); left.push(make_row(r2));
-    let mut q1: List<Int64> = List.new(); q1.push(1 as Int64);
-    let mut q2: List<Int64> = List.new(); q2.push(2 as Int64);
+    let mut q1: List<Int64> = List.new(); q1.push1_i64;
+    let mut q2: List<Int64> = List.new(); q2.push2_i64;
     let mut right: List<DiffRow> = List.new(); right.push(make_row(q1)); right.push(make_row(q2));
     let d = compare(&DrRows(left), &DrRows(right), &MdRowsetSorted);
     assert(is_match(&d));
@@ -167,8 +167,8 @@ fn test_diff_sorted_mode_handles_reorder() {
 // -----------------------------------------------------------------------------
 
 fn test_fuzz_rng_deterministic() {
-    let mut a = fuzz_rng(7 as Int64);
-    let mut b = fuzz_rng(7 as Int64);
+    let mut a = fuzz_rng7_i64;
+    let mut b = fuzz_rng7_i64;
     let mut k: Int = 0;
     while k < 5 {
         assert_eq(a.next(), b.next());
@@ -217,7 +217,7 @@ fn test_wal_fuzzer_generates_plan() {
 }
 
 fn test_grammar_fuzzer_generates_text() {
-    let mut g = grammar_fuzzer(0xDEAD as Int64);
+    let mut g = grammar_fuzzer0xDEAD_i64;
     let stmt = g.generate();
     assert(stmt.len() > 0);
 }

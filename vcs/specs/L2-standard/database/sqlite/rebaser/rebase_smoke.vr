@@ -22,27 +22,27 @@ mount collections.List;
 mount base.{Bool};
 
 fn test_new_rebaser_not_configured() {
-    let r = new_rebaser(1 as Int64);
+    let r = new_rebaser1_i64;
     assert(!r.configured);
     assert_eq(r.rebased_count, 0 as Int64);
     assert(r.is_live());
 }
 
 fn test_mark_configured() {
-    let mut r = new_rebaser(1 as Int64);
+    let mut r = new_rebaser1_i64;
     r.mark_configured();
     assert(r.configured);
 }
 
 fn test_note_change_increments() {
-    let mut r = new_rebaser(1 as Int64);
+    let mut r = new_rebaser1_i64;
     r.note_change();
     r.note_change();
     assert_eq(r.rebased_count, 2 as Int64);
 }
 
 fn test_release_flag() {
-    let mut r = new_rebaser(1 as Int64);
+    let mut r = new_rebaser1_i64;
     r.release();
     assert(!r.is_live());
 }

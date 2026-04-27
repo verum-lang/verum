@@ -34,7 +34,7 @@ fn test_int32_to_int16_valid_positive() {
 @test
 fn test_int32_to_int16_valid_negative() {
     let val = 0 as Int32;
-    let neg = val - (1000 as Int32);
+    let neg = val - 1000_i32;
     let result = Int16.try_from(neg);
     assert(result.is_ok());
 }

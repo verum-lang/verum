@@ -406,7 +406,7 @@ implement CursorTable {
         }
         self.slots[cursor_id].rows.push(row);
         let rid = self.slots[cursor_id].next_rowid;
-        self.slots[cursor_id].next_rowid = rid + (1 as Int64);
+        self.slots[cursor_id].next_rowid = rid + 1_i64;
         Ok(rid)
     }
 
@@ -479,7 +479,7 @@ implement CursorTable {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return 0 as Int64; }
         let s = &self.slots[cursor_id];
         if s.pos >= s.rows.len() { return 0 as Int64; }
-        (s.pos as Int64) + (1 as Int64)
+        (s.pos as Int64) + 1_i64
     }
 
     /// Remove the current row. Used by Delete opcode. Leaves pos

@@ -22,7 +22,7 @@ public fn empty_reading() -> PageCountReading {
 }
 
 public fn is_empty(r: &PageCountReading) -> Bool {
-    r.total_pages == (0 as Int64)
+    r.total_pages == 0_i64
 }
 
 public fn file_size_bytes(r: &PageCountReading) -> Int64 {
@@ -60,10 +60,10 @@ public fn is_valid_size(c: &SizeCheck) -> Bool {
 
 // Common multipliers for human readability.
 public fn megabytes(r: &PageCountReading) -> Int64 {
-    file_size_bytes(r) / (1_048_576 as Int64)
+    file_size_bytes(r) / 1_048_576_i64
 }
 
 public fn pages_per_megabyte(r: &PageCountReading) -> Int64 {
     if r.page_size_bytes == 0 { return 0 as Int64; }
-    (1_048_576 as Int64) / (r.page_size_bytes as Int64)
+    1_048_576_i64 / (r.page_size_bytes as Int64)
 }

@@ -93,7 +93,7 @@ implement SnapshotTable {
     /// Issue a fresh Snapshot at the given watermark.
     public fn issue(&mut self, frame_count: Int, change_counter: Int, schema_cookie: Int) -> Snapshot {
         let snap = snapshot_new(self.next_id, frame_count, change_counter, schema_cookie);
-        self.next_id = self.next_id + (1 as Int64);
+        self.next_id = self.next_id + 1_i64;
         self.snapshots.push(snap.clone());
         snap
     }

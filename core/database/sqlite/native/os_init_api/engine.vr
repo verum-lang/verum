@@ -31,7 +31,7 @@ implement OsInitEngine {
     /// TornDown → Initialised.  Returns SQLITE_OK (0); idempotent when
     /// already initialised.
     pub fn sqlite3_os_init(&mut self) -> Int {
-        self.init_calls = self.init_calls + (1 as Int64);
+        self.init_calls = self.init_calls + 1_i64;
         self.phase = OsInitialised;
         0
     }
@@ -39,7 +39,7 @@ implement OsInitEngine {
     /// sqlite3_os_end — transitions Initialised → TornDown; ignored
     /// (but counted) if the phase is already Fresh or TornDown.
     pub fn sqlite3_os_end(&mut self) -> Int {
-        self.end_calls = self.end_calls + (1 as Int64);
+        self.end_calls = self.end_calls + 1_i64;
         match &self.phase {
             OsInitialised => self.phase = OsTornDown,
             _ => {}

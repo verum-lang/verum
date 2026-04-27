@@ -2671,7 +2671,7 @@ fn emit_literal(st: &mut CgState, lit: &SqlLiteral, dst: Int) -> Result<(), Code
         LNull  => { let _ = st.program.emit(Null(dst, dst)); Ok(()) }
         LInt(i) => {
             // Fits in i32? use Integer opcode; else Int64 via constant.
-            if i >= (-2147483648 as Int64) && i <= (2147483647 as Int64) {
+            if i >= -2147483648_i64 && i <= 2147483647_i64 {
                 let _ = st.program.emit(Integer(i as Int, dst));
             } else {
                 let idx = st.program.constants.add(KInt(i));

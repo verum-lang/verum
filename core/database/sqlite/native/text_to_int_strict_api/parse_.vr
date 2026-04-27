@@ -55,9 +55,9 @@ public fn parse(raw: &Text) -> ParseOutcome {
     while i < bs.len() && is_digit(bs[i]) {
         let d = (bs[i] - (0x30 as u8)) as Int64;
         // Check multiply overflow.
-        if acc > int64_max() / (10 as Int64) { overflow = true; }
-        acc = acc * (10 as Int64) + d;
-        if acc < (0 as Int64) { overflow = true; }
+        if acc > int64_max() / 10_i64 { overflow = true; }
+        acc = acc * 10_i64 + d;
+        if acc < 0_i64 { overflow = true; }
         i = i + 1;
     }
     let had_digits = i > digits_start;

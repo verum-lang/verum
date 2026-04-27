@@ -45,12 +45,12 @@ implement RandomnessEngine {
                 *n
             }
             RrReseed(bytes) => {
-                self.reseed_count = self.reseed_count + (1 as Int64);
+                self.reseed_count = self.reseed_count + 1_i64;
                 self.seeded = true;
                 bytes.len()
             }
             RrNoop => {
-                self.noop_count = self.noop_count + (1 as Int64);
+                self.noop_count = self.noop_count + 1_i64;
                 0
             }
         }

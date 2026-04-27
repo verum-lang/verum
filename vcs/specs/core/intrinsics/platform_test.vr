@@ -113,7 +113,7 @@ fn test_target_os() {
 
     // If running on desktop, this should be true
     // Note: WASM and unknown are valid for other contexts
-    if target_pointer_width() >= (32 as UInt32) {
+    if target_pointer_width() >= 32_u32 {
         // Desktop/server platform - should have known OS
         // This is a soft check since we might run on exotic platforms
     }
@@ -133,13 +133,13 @@ fn test_target_arch() {
     assert(arch <= ARCH_ARM);
 
     // On 64-bit systems, expect x86_64 or aarch64 or riscv64
-    if target_pointer_width() == (64 as UInt32) {
+    if target_pointer_width() == 64_u32 {
         let is_64bit_arch = arch == ARCH_X86_64 || arch == ARCH_AARCH64 || arch == ARCH_RISCV64;
         // Soft check - architecture should match pointer width
     }
 
     // On 32-bit systems, expect arm or wasm32
-    if target_pointer_width() == (32 as UInt32) {
+    if target_pointer_width() == 32_u32 {
         let is_32bit_arch = arch == ARCH_ARM || arch == ARCH_WASM32;
         // Soft check
     }
@@ -156,10 +156,10 @@ fn test_pointer_width() {
     let width = target_pointer_width();
 
     // Pointer width must be 32 or 64
-    assert(width == (32 as UInt32) || width == (64 as UInt32));
+    assert(width == 32_u32 || width == 64_u32);
 
     // Verify it's a power of 2
-    assert(width > (0 as UInt32));
+    assert(width > 0_u32);
 
     print("Pointer width tests passed");
 }

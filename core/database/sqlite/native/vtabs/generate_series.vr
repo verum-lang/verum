@@ -90,7 +90,7 @@ implement GsCursor {
         if args.len() >= 3 {
             match &args[2] {
                 RInt(x) => {
-                    if x == (0 as Int64) {
+                    if x == 0_i64 {
                         return Err(VtabConstraint("step must be non-zero".clone()));
                     }
                     step = x;
@@ -101,14 +101,14 @@ implement GsCursor {
         self.cur = start;
         self.stop = stop;
         self.step = step;
-        self.is_eof = if step > (0 as Int64) { start > stop } else { start < stop };
+        self.is_eof = if step > 0_i64 { start > stop } else { start < stop };
         Ok(())
     }
 
     public fn next_row(&mut self) -> Result<(), VtabError> {
         if self.is_eof { return Ok(()); }
         self.cur = self.cur + self.step;
-        let done = if self.step > (0 as Int64) { self.cur > self.stop } else { self.cur < self.stop };
+        let done = if self.step > 0_i64 { self.cur > self.stop } else { self.cur < self.stop };
         if done { self.is_eof = true; }
         Ok(())
     }

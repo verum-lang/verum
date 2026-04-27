@@ -51,9 +51,9 @@ fn test_classifier_helpers() {
 }
 
 fn test_is_known_only() {
-    assert(is_known_only(0 as Int64));
+    assert(is_known_only0_i64);
     assert(is_known_only(f_debug() | f_integrity_after()));
-    assert(!is_known_only(0x20 as Int64));
+    assert(!is_known_only0x20_i64);
 }
 
 fn main() {

@@ -43,5 +43,5 @@ public fn sleep_ns_for_attempt(r: &TimeoutRequest, attempt: Int) -> Int64 {
                   else if attempt == 5 { 20 }
                   else if attempt == 6 { 25 }
                   else { 50 };
-    (step_ms as Int64) * (1_000_000 as Int64)
+    (step_ms as Int64) * 1_000_000_i64
 }

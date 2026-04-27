@@ -35,12 +35,12 @@ public fn new() -> DirtyList {
 
 // Touch: move page to MRU position. Simple implementation — remove + insert.
 public fn touch(mut l: DirtyList, page_number: u32, state: DirtyState) -> DirtyList {
-    l.tick = l.tick + (1 as Int64);
+    l.tick = l.tick + 1_i64;
     // Remove existing entry (if any) and recompute dirty count.
     let mut i: Int = 0;
     while i < l.entries.len() {
         if l.entries[i].page_number == page_number {
-            if is_dirty(&l.entries[i].state) { l.dirty_count = l.dirty_count - (1 as Int64); }
+            if is_dirty(&l.entries[i].state) { l.dirty_count = l.dirty_count - 1_i64; }
             let _ = l.entries.remove(i);
             i = l.entries.len();
         } else {
@@ -48,7 +48,7 @@ public fn touch(mut l: DirtyList, page_number: u32, state: DirtyState) -> DirtyL
         }
     }
     let e = entry(page_number, state, l.tick);
-    if is_dirty(&e.state) { l.dirty_count = l.dirty_count + (1 as Int64); }
+    if is_dirty(&e.state) { l.dirty_count = l.dirty_count + 1_i64; }
     l.entries.insert(0, e);
     l
 }
@@ -81,7 +81,7 @@ public fn count_needing_flush(l: &DirtyList) -> Int64 {
     let mut n: Int64 = 0 as Int64;
     let mut i: Int = 0;
     while i < l.entries.len() {
-        if needs_flush(&l.entries[i].state) { n = n + (1 as Int64); }
+        if needs_flush(&l.entries[i].state) { n = n + 1_i64; }
         i = i + 1;
     }
     n

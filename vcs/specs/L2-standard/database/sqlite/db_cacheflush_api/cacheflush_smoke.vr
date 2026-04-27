@@ -14,25 +14,25 @@ mount core.database.sqlite.native.db_cacheflush_api.flush.{
 mount base.{Bool, Int64};
 
 fn test_outcome_names() {
-    assert(outcome_name(&OkFlushed(50 as Int64)) == "ok_flushed".clone());
+    assert(outcome_name(&OkFlushed50_i64) == "ok_flushed".clone());
     assert(outcome_name(&ErrBusyStmt)             == "err_busy_stmt".clone());
     assert(outcome_name(&ErrIo)                   == "err_io".clone());
     assert(outcome_name(&ErrCorrupt)              == "err_corrupt".clone());
 }
 
 fn test_is_ok() {
-    assert(is_ok(&OkFlushed(0 as Int64)));
+    assert(is_ok(&OkFlushed0_i64));
     assert(!is_ok(&ErrBusyStmt));
 }
 
 fn test_pages_flushed() {
-    assert_eq(pages_flushed(&OkFlushed(7 as Int64)), 7 as Int64);
+    assert_eq(pages_flushed(&OkFlushed7_i64), 7 as Int64);
     assert_eq(pages_flushed(&ErrBusyStmt),           0 as Int64);
     assert_eq(pages_flushed(&ErrIo),                 0 as Int64);
 }
 
 fn test_result_codes() {
-    assert_eq(result_code(&OkFlushed(0 as Int64)),  0);
+    assert_eq(result_code(&OkFlushed0_i64),  0);
     assert_eq(result_code(&ErrBusyStmt),            5);
     assert_eq(result_code(&ErrIo),                 10);
     assert_eq(result_code(&ErrCorrupt),            11);
@@ -52,7 +52,7 @@ fn test_check_names_and_is_ready() {
 }
 
 fn test_touches_wal_always_false() {
-    assert(!touches_wal(&OkFlushed(100 as Int64)));
+    assert(!touches_wal(&OkFlushed100_i64));
     assert(!touches_wal(&ErrIo));
 }
 

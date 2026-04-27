@@ -39,8 +39,8 @@ public fn instant_at(jd_int: Int64, frac_day: Float64) -> DatetimeInstant {
 public fn normalise(frac_day: Float64, jd_int: Int64) -> (Float64, DatetimeInstant) {
     let mut f = frac_day;
     let mut j = jd_int;
-    while f >= (1.0 as Float64) { f = f - (1.0 as Float64); j = j + (1 as Int64); }
-    while f < (0.0 as Float64) { f = f + (1.0 as Float64); j = j - (1 as Int64); }
+    while f >= (1.0 as Float64) { f = f - (1.0 as Float64); j = j + 1_i64; }
+    while f < (0.0 as Float64) { f = f + (1.0 as Float64); j = j - 1_i64; }
     (f, DatetimeInstant { jd_int: j, frac_day: f })
 }
 
@@ -56,7 +56,7 @@ implement DatetimeInstant {
         let unix_jd_int: Int64 = 2440587 as Int64;
         let day_diff = self.jd_int - unix_jd_int;
         let secs_in_day = (self.frac_day * (86400.0 as Float64)) as Int64;
-        day_diff * (86400 as Int64) + secs_in_day - (43200 as Int64)
+        day_diff * 86400_i64 + secs_in_day - 43200_i64
     }
 
     pub fn ymd_view(&self) -> Ymd { julian_to_gregorian(self.jd_int) }
@@ -106,8 +106,8 @@ public fn from_ymd_hms(year: Int, month: Int, day: Int, h: Int, m: Int, s: Int, 
 
 public fn from_unix_seconds(secs: Int64) -> DatetimeInstant {
     let unix_jd_int: Int64 = 2440587 as Int64;
-    let days = secs / (86400 as Int64);
-    let day_remainder = secs - days * (86400 as Int64);
+    let days = secs / 86400_i64;
+    let day_remainder = secs - days * 86400_i64;
     let frac = (day_remainder as Float64) / (86400.0 as Float64) + (0.5 as Float64);
     let (norm_frac, _i) = normalise(frac, unix_jd_int + days);
     let jd_offset = days_carried(frac);

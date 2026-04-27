@@ -85,7 +85,7 @@ implement AttachEngine {
             alias: d.alias.clone(),
             filename: d.filename.clone(),
         });
-        self.attaches_performed = self.attaches_performed + (1 as Int64);
+        self.attaches_performed = self.attaches_performed + 1_i64;
         AoOk
     }
 
@@ -94,7 +94,7 @@ implement AttachEngine {
         let idx = self.find(&d.alias);
         if idx < 0 { return DoUnknownAlias; }
         let _ = self.schemas.remove(idx);
-        self.detaches_performed = self.detaches_performed + (1 as Int64);
+        self.detaches_performed = self.detaches_performed + 1_i64;
         DoOk
     }
 

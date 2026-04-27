@@ -48,8 +48,8 @@ fn test_first_call_empty_list_done() {
 
 fn test_first_call_non_empty_returns_first_row() {
     let mut vals = List.new();
-    vals.push(10 as Int64);
-    vals.push(20 as Int64);
+    vals.push10_i64;
+    vals.push20_i64;
     let r = first_call(&vals, true);
     match r.outcome { OkRow => {}, _ => assert(false) }
     match r.pos {
@@ -60,9 +60,9 @@ fn test_first_call_non_empty_returns_first_row() {
 
 fn test_next_call_advances() {
     let mut vals = List.new();
-    vals.push(10 as Int64);
-    vals.push(20 as Int64);
-    vals.push(30 as Int64);
+    vals.push10_i64;
+    vals.push20_i64;
+    vals.push30_i64;
     let r1 = first_call(&vals, true);
     let r2 = next_call(&r1.pos, &vals);
     match r2.pos {
@@ -78,7 +78,7 @@ fn test_next_call_advances() {
 
 fn test_next_call_exhausts() {
     let mut vals = List.new();
-    vals.push(10 as Int64);
+    vals.push10_i64;
     let r1 = first_call(&vals, true);
     let r2 = next_call(&r1.pos, &vals);
     match r2.outcome { OkDone => {}, _ => assert(false) }
@@ -87,7 +87,7 @@ fn test_next_call_exhausts() {
 
 fn test_next_call_from_fresh_or_exhausted() {
     let mut vals = List.new();
-    vals.push(10 as Int64);
+    vals.push10_i64;
     let r = next_call(&PFresh, &vals);
     match r.outcome { OkErrNotInList => {}, _ => assert(false) }
     let r2 = next_call(&PExhausted, &vals);
@@ -96,8 +96,8 @@ fn test_next_call_from_fresh_or_exhausted() {
 
 fn test_current_value() {
     let mut vals = List.new();
-    vals.push(10 as Int64);
-    vals.push(20 as Int64);
+    vals.push10_i64;
+    vals.push20_i64;
     assert_eq(current_value(&PAtRow(0), &vals), 10 as Int64);
     assert_eq(current_value(&PAtRow(1), &vals), 20 as Int64);
     assert_eq(current_value(&PFresh, &vals),     0 as Int64);

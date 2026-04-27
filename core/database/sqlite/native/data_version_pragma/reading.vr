@@ -56,5 +56,5 @@ public fn empty_reading() -> DataVersionReading {
 
 // Whether *any* commit has ever been observed (counter > 0).
 public fn has_been_committed(r: &DataVersionReading) -> Bool {
-    r.counter > (0 as Int64)
+    r.counter > 0_i64
 }

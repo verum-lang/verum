@@ -88,7 +88,7 @@ fn test_write_then_read_parity_int() {
     let _ = execute(
         &mut cfg,
         &"foreign_keys".clone(),
-        Some(RInt(1 as Int64)),
+        Some(RInt1_i64),
         None,
     );
     match execute(&mut cfg, &"foreign_keys".clone(), None, None) {
@@ -131,7 +131,7 @@ fn test_read_only_pragma_rejects_write() {
     match execute(
         &mut cfg,
         &"freelist_count".clone(),
-        Some(RInt(99 as Int64)),
+        Some(RInt99_i64),
         None,
     ) {
         PrError(_) => {},

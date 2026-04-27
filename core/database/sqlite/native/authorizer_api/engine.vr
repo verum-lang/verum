@@ -23,7 +23,7 @@ public fn empty_slot() -> AuthSlot {
 }
 
 public fn is_installed(s: &AuthSlot) -> Bool {
-    s.user_data != (0 as Int64)
+    s.user_data != 0_i64
 }
 
 public type AuthorizerEngine is {
@@ -56,10 +56,10 @@ implement AuthorizerEngine {
     /// Observe an authorizer verdict — used by callers that feed raw
     /// xAuth return values through this engine.
     pub fn observe(&mut self, d: &Decision) {
-        self.calls_observed = self.calls_observed + (1 as Int64);
+        self.calls_observed = self.calls_observed + 1_i64;
         match d {
-            DDeny   => self.denies = self.denies + (1 as Int64),
-            DIgnore => self.ignores = self.ignores + (1 as Int64),
+            DDeny   => self.denies = self.denies + 1_i64,
+            DIgnore => self.ignores = self.ignores + 1_i64,
             _ => {}
         }
     }

@@ -48,7 +48,7 @@ public type CArrayFilterCheck is
 
 public fn check_filter(p_present: Bool, n: Int64, type_str: Text) -> CArrayFilterCheck {
     if !p_present { return FcNullPointer; }
-    if n < (0 as Int64) { return FcNegativeLength; }
+    if n < 0_i64 { return FcNegativeLength; }
     if type_str != "int32".clone()
         && type_str != "int64".clone()
         && type_str != "double".clone()

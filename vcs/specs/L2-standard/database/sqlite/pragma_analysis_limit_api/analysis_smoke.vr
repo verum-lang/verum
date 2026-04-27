@@ -21,13 +21,13 @@ fn test_no_limit_defaults() {
 }
 
 fn test_capped_positive() {
-    let l = capped(500 as Int64);
+    let l = capped500_i64;
     assert(has_cap(&l));
     assert_eq(l.sample_cap, 500 as Int64);
 }
 
 fn test_capped_negative_coerces_to_zero() {
-    let l = capped(-5 as Int64);
+    let l = capped-5_i64;
     assert(is_no_limit(&l));
 }
 
@@ -37,8 +37,8 @@ fn test_recommended_default() {
 
 fn test_is_reasonable() {
     assert(is_reasonable(&no_limit()));
-    assert(is_reasonable(&capped(100 as Int64)));
-    assert(!is_reasonable(&capped(1 as Int64)));
+    assert(is_reasonable(&capped100_i64));
+    assert(!is_reasonable(&capped1_i64));
 }
 
 fn test_should_continue_unlimited() {
@@ -48,7 +48,7 @@ fn test_should_continue_unlimited() {
 }
 
 fn test_should_continue_capped() {
-    let l = capped(100 as Int64);
+    let l = capped100_i64;
     assert(should_continue(&l, 0 as Int64));
     assert(should_continue(&l, 99 as Int64));
     assert(!should_continue(&l, 100 as Int64));
@@ -58,7 +58,7 @@ fn test_should_continue_capped() {
 fn test_samples_remaining() {
     let unlimited = no_limit();
     assert_eq(samples_remaining(&unlimited, 100 as Int64), -1 as Int64);
-    let capped_l = capped(50 as Int64);
+    let capped_l = capped50_i64;
     assert_eq(samples_remaining(&capped_l, 30 as Int64), 20 as Int64);
     assert_eq(samples_remaining(&capped_l, 50 as Int64), 0 as Int64);
     assert_eq(samples_remaining(&capped_l, 100 as Int64), 0 as Int64);

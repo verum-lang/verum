@@ -36,14 +36,14 @@ mount base.{Ok, Err, Some, None, Maybe, Bool};
 
 fn test_param_kind_names() {
     assert(param_kind_name(&TpNull) == "NULL".clone());
-    assert(param_kind_name(&TpInt64(0 as Int64)) == "INTEGER".clone());
+    assert(param_kind_name(&TpInt640_i64) == "INTEGER".clone());
     assert(param_kind_name(&TpReal(0.0 as Float64)) == "REAL".clone());
     assert(param_kind_name(&TpText("a".clone())) == "TEXT".clone());
 }
 
 fn test_param_byte_size() {
     assert_eq(param_byte_size(&TpNull), 0);
-    assert_eq(param_byte_size(&TpInt64(0 as Int64)), 8);
+    assert_eq(param_byte_size(&TpInt640_i64), 8);
     assert_eq(param_byte_size(&TpReal(0.0 as Float64)), 8);
     assert_eq(param_byte_size(&TpText("hello".clone())), 5);
     assert_eq(param_byte_size(&TpZeroBlob(1024)), 1024);
@@ -51,7 +51,7 @@ fn test_param_byte_size() {
 
 fn test_is_null_param() {
     assert(is_null_param(&TpNull));
-    assert(!is_null_param(&TpInt64(7 as Int64)));
+    assert(!is_null_param(&TpInt647_i64));
 }
 
 // -----------------------------------------------------------------------------
@@ -125,7 +125,7 @@ fn test_bindset_initial_all_null() {
 
 fn test_bindset_bind_and_lookup() {
     let mut bs = bindset_new(2);
-    let _ = bs.bind(1, TpInt64(42 as Int64));
+    let _ = bs.bind(1, TpInt6442_i64);
     match bs.lookup(1) {
         Some(_) => {},
         None    => panic("slot 1 set"),
@@ -152,14 +152,14 @@ fn test_bindset_bind_when_step_in_progress() {
 
 fn test_bindset_clear_resets_to_null() {
     let mut bs = bindset_new(2);
-    let _ = bs.bind(1, TpInt64(42 as Int64));
+    let _ = bs.bind(1, TpInt6442_i64);
     bs.clear();
     assert_eq(bs.populated_count(), 0);
 }
 
 fn test_bindset_fully_bound() {
     let mut bs = bindset_new(2);
-    let _ = bs.bind(1, TpInt64(1 as Int64));
+    let _ = bs.bind(1, TpInt641_i64);
     let _ = bs.bind(2, TpText("x".clone()));
     assert(bs.fully_bound());
 }

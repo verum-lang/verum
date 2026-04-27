@@ -36,21 +36,21 @@ fn push_digit(dst: &mut Text, d: Int) {
 }
 
 fn push_int64(dst: &mut Text, mut n: Int64) {
-    if n < (0 as Int64) {
+    if n < 0_i64 {
         dst.push_byte(0x2D as u8);
-        n = (0 as Int64) - n;
+        n = 0_i64 - n;
     }
-    if n == (0 as Int64) { push_digit(dst, 0); return; }
+    if n == 0_i64 { push_digit(dst, 0); return; }
     let mut digits: Int = 0;
     let mut x = n;
-    while x > (0 as Int64) { digits = digits + 1; x = x / (10 as Int64); }
+    while x > 0_i64 { digits = digits + 1; x = x / 10_i64; }
     let mut buf: Int64 = 1 as Int64;
     let mut d: Int = 1;
-    while d < digits { buf = buf * (10 as Int64); d = d + 1; }
-    while buf > (0 as Int64) {
-        let c = (n / buf) - ((n / (buf * (10 as Int64))) * (10 as Int64));
+    while d < digits { buf = buf * 10_i64; d = d + 1; }
+    while buf > 0_i64 {
+        let c = (n / buf) - ((n / (buf * 10_i64)) * 10_i64);
         push_digit(dst, c as Int);
-        buf = buf / (10 as Int64);
+        buf = buf / 10_i64;
     }
 }
 

@@ -17,14 +17,14 @@ public fn well_known_mask() -> Int64 {
 public fn well_known_bit_count() -> Int { 4 }
 
 public fn is_set(fl: Int64, bit: Int64) -> Bool {
-    (fl & bit) != (0 as Int64)
+    (fl & bit) != 0_i64
 }
 
 public fn set(fl: Int64, bit: Int64) -> Int64 { fl | bit }
 public fn clear(fl: Int64, bit: Int64) -> Int64 { fl & !bit }
 
 public fn is_known_only(fl: Int64) -> Bool {
-    (fl & !well_known_mask()) == (0 as Int64)
+    (fl & !well_known_mask()) == 0_i64
 }
 
 // Classifiers — used by docs and the planner.

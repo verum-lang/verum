@@ -21,7 +21,7 @@ mount base.{Bool, Int64};
 fn test_int64_range_constants() {
     assert_eq(int64_max(), 0x7FFFFFFFFFFFFFFF as Int64);
     // int64_min is -2^63.
-    assert(int64_min() < (0 as Int64));
+    assert(int64_min() < 0_i64);
 }
 
 fn test_policy_names() {
@@ -51,7 +51,7 @@ fn test_is_deterministic_on_overflow() {
 
 fn test_add_overflow_detection() {
     assert(!add_overflows(1 as Int64, 1 as Int64));
-    assert(!add_overflows(int64_max() - (1 as Int64), 1 as Int64));
+    assert(!add_overflows(int64_max() - 1_i64, 1 as Int64));
     assert(add_overflows(int64_max(), 1 as Int64));
     assert(add_overflows(int64_min(), -1 as Int64));
     assert(!add_overflows(0 as Int64, 0 as Int64));
@@ -83,15 +83,15 @@ fn test_div_overflow_only_int64_min_by_neg_one() {
 fn test_neg_overflow_only_int64_min() {
     assert(neg_overflows(int64_min()));
     assert(!neg_overflows(int64_max()));
-    assert(!neg_overflows(0 as Int64));
-    assert(!neg_overflows(-1 as Int64));
+    assert(!neg_overflows0_i64);
+    assert(!neg_overflows-1_i64);
 }
 
 fn test_within_range() {
-    assert(within_range(0 as Int64));
+    assert(within_range0_i64);
     assert(within_range(int64_max()));
     assert(within_range(int64_min()));
-    assert(within_range(-1 as Int64));
+    assert(within_range-1_i64);
 }
 
 fn main() {

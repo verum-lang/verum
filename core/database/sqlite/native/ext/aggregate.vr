@@ -82,7 +82,7 @@ implement AggregateFn for CountAll {
     fn arity(&self) -> Int { 0 }
     fn init(&self) -> Int64 { 0 as Int64 }
     fn step(&self, st: &mut Int64, _args: &List<Register>) {
-        *st = *st + (1 as Int64);
+        *st = *st + 1_i64;
     }
     fn finalize(&self, st: Int64) -> Register {
         core.database.sqlite.native.l4_vdbe.register.RInt(st)

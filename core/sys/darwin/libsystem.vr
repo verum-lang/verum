@@ -32,17 +32,24 @@ extern {
     // File I/O
     // =========================================================================
 
-    /// Read from file descriptor
-    public fn read(fd: Int, buf: &unsafe Byte, nbyte: Int) -> Int;
+    /// Read from file descriptor. C: `ssize_t read(int fd, void *buf, size_t nbyte)`.
+    /// fd is `int` (i32); nbyte is `size_t` (i64 on 64-bit); return is `ssize_t` (i64). T0.4 fix.
+    public fn read(fd: Int32, buf: &unsafe Byte, nbyte: Int) -> Int;
 
-    /// Write to file descriptor
-    public fn write(fd: Int, buf: &Byte, nbyte: Int) -> Int;
+    /// Write to file descriptor. Same shape as `read`. T0.4 fix.
+    public fn write(fd: Int32, buf: &Byte, nbyte: Int) -> Int;
 
     /// Open file
     public fn open(path: &Byte, oflag: Int, mode: Int) -> Int;
 
-    /// Close file descriptor
-    public fn close(fd: Int) -> Int32;
+    /// Close file descriptor.
+    ///
+    /// C signature: `int close(int fd)`. Both parameter and return are
+    /// `int` (i32). Declaring `fd: Int` (=i64) at the FFI boundary breaks
+    /// LLVM verification — the IR `call i32 @close(i64 %fd)` clashes with
+    /// any call site emitting the canonical `call i32 @close(i32 %fd)`.
+    /// Tracked under T0.4 / T0.4.1 (full POSIX C-ABI audit).
+    public fn close(fd: Int32) -> Int32;
 
     /// Read at offset (does not change file position)
     fn pread(fd: Int, buf: &unsafe Byte, nbyte: Int, offset: Int) -> Int;
@@ -291,8 +298,9 @@ extern {
     /// Get time of day
     public fn gettimeofday(tv: &mut DarwinTimeval, tz: &unsafe Byte) -> Int;
 
-    /// Get clock time (POSIX)
-    public fn clock_gettime(clk_id: Int, tp: &mut DarwinTimespec) -> Int;
+    /// Get clock time (POSIX). C: `int clock_gettime(clockid_t, struct timespec *)`.
+    /// `clockid_t` is `int32` on macOS. T0.4 fix.
+    public fn clock_gettime(clk_id: Int32, tp: &mut DarwinTimespec) -> Int32;
 
     /// Sleep (nanoseconds)
     public fn nanosleep(rqtp: &DarwinTimespec, rmtp: &mut DarwinTimespec) -> Int;
@@ -314,19 +322,20 @@ extern {
     /// libSystem's epilogue left in the upper 32 bits — typically
     /// garbage that flips a small positive fd into a "negative" i64
     /// and trips the `< 0` error path. Tracked under #108.
-    fn socket(domain: Int, socket_type: Int, protocol: Int) -> Int32;
+    fn socket(domain: Int32, socket_type: Int32, protocol: Int32) -> Int32;
 
-    /// Bind socket
-    fn bind(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int32;
+    /// Bind socket. socklen_t is uint32_t. T0.4 fix.
+    fn bind(sockfd: Int32, addr: &unsafe Byte, addrlen: UInt32) -> Int32;
 
-    /// Listen on socket
-    fn listen(sockfd: Int, backlog: Int) -> Int32;
+    /// Listen on socket. C: `int listen(int sockfd, int backlog)`. T0.4 fix.
+    fn listen(sockfd: Int32, backlog: Int32) -> Int32;
 
-    /// Accept connection
-    fn accept(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int32;
+    /// Accept connection. C signature uses `socklen_t *` (uint32_t) for
+    /// addrlen — declared as `&mut UInt32` here. T0.4 fix.
+    fn accept(sockfd: Int32, addr: &unsafe Byte, addrlen: &mut UInt32) -> Int32;
 
-    /// Connect socket
-    fn connect(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int32;
+    /// Connect socket. socklen_t is uint32_t on macOS / Linux. T0.4 fix.
+    fn connect(sockfd: Int32, addr: &unsafe Byte, addrlen: UInt32) -> Int32;
 
     /// Send data
     fn send(sockfd: Int, buf: &Byte, len: Int, flags: Int) -> Int;
@@ -358,8 +367,9 @@ extern {
     /// Get socket option
     fn getsockopt(sockfd: Int, level: Int, optname: Int, optval: &unsafe Byte, optlen: &mut Int) -> Int32;
 
-    /// Set socket option
-    fn setsockopt(sockfd: Int, level: Int, optname: Int, optval: &Byte, optlen: Int) -> Int32;
+    /// Set socket option. C: `int setsockopt(int, int, int, const void *, socklen_t)`.
+    /// All four `int`-typed params + socklen_t (uint32_t). T0.4 fix.
+    fn setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: &Byte, optlen: UInt32) -> Int32;
 
     /// Shutdown socket
     fn shutdown(sockfd: Int, how: Int) -> Int32;

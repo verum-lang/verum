@@ -76,15 +76,15 @@ fn test_change_op_codes() {
 
 fn test_change_insert_and_pk() {
     let mut row: List<Int64> = List.new();
-    row.push(7 as Int64); row.push(99 as Int64);
+    row.push7_i64; row.push99_i64;
     let c = change_insert("users".clone(), pk_first_only(2), make_row(row));
     assert(c.column_count() == 2);
     match c.op { OpInsert => {}, _ => panic("op insert") };
 }
 
 fn test_change_pk_matches() {
-    let mut row1: List<Int64> = List.new(); row1.push(7 as Int64); row1.push(1 as Int64);
-    let mut row2: List<Int64> = List.new(); row2.push(7 as Int64); row2.push(99 as Int64);
+    let mut row1: List<Int64> = List.new(); row1.push7_i64; row1.push1_i64;
+    let mut row2: List<Int64> = List.new(); row2.push7_i64; row2.push99_i64;
     let c1 = change_insert("t".clone(), pk_first_only(2), make_row(row1));
     let c2 = change_insert("t".clone(), pk_first_only(2), make_row(row2));
     // PKs are both row[0]=7
@@ -97,9 +97,9 @@ fn test_change_pk_matches() {
 
 fn build_three_change_set() -> ChangeSet {
     let mut cs = changeset_empty();
-    let mut r1: List<Int64> = List.new(); r1.push(1 as Int64);
-    let mut r2: List<Int64> = List.new(); r2.push(2 as Int64);
-    let mut r3: List<Int64> = List.new(); r3.push(3 as Int64);
+    let mut r1: List<Int64> = List.new(); r1.push1_i64;
+    let mut r2: List<Int64> = List.new(); r2.push2_i64;
+    let mut r3: List<Int64> = List.new(); r3.push3_i64;
     cs.record(change_insert("users".clone(), pk_first_only(1), make_row(r1)));
     cs.record(change_insert("orders".clone(), pk_first_only(1), make_row(r2)));
     cs.record(change_insert("users".clone(), pk_first_only(1), make_row(r3)));
@@ -128,7 +128,7 @@ fn test_recorder_attach_then_record() {
     let mut s = session_new();
     s.attach(attached_table("users".clone(), pk_first_only(1)));
     assert_eq(s.attached_count(), 1);
-    let mut r: List<Int64> = List.new(); r.push(7 as Int64);
+    let mut r: List<Int64> = List.new(); r.push7_i64;
     s.record_insert("users".clone(), make_row(r));
     assert_eq(s.change_count(), 1);
 }
@@ -136,7 +136,7 @@ fn test_recorder_attach_then_record() {
 fn test_recorder_drops_unattached_table() {
     let mut s = session_new();
     s.attach(attached_table("users".clone(), pk_first_only(1)));
-    let mut r: List<Int64> = List.new(); r.push(7 as Int64);
+    let mut r: List<Int64> = List.new(); r.push7_i64;
     s.record_insert("orders".clone(), make_row(r));
     assert_eq(s.change_count(), 0);
 }
@@ -145,7 +145,7 @@ fn test_recorder_pause_blocks_recording() {
     let mut s = session_new();
     s.attach(attached_table("users".clone(), pk_first_only(1)));
     s.pause();
-    let mut r: List<Int64> = List.new(); r.push(7 as Int64);
+    let mut r: List<Int64> = List.new(); r.push7_i64;
     s.record_insert("users".clone(), make_row(r));
     assert_eq(s.change_count(), 0);
     s.resume();
@@ -156,7 +156,7 @@ fn test_recorder_pause_blocks_recording() {
 fn test_recorder_take_changeset_resets() {
     let mut s = session_new();
     s.attach(attached_table("users".clone(), pk_first_only(1)));
-    let mut r: List<Int64> = List.new(); r.push(7 as Int64);
+    let mut r: List<Int64> = List.new(); r.push7_i64;
     s.record_insert("users".clone(), make_row(r));
     let cs = s.take_changeset();
     assert_eq(cs.len(), 1);
@@ -178,9 +178,9 @@ fn test_recorder_detach() {
 fn test_from_changeset_compacts_unchanged_cells() {
     let mut cs = changeset_empty();
     let mut old_row: List<Int64> = List.new();
-    old_row.push(7 as Int64); old_row.push(99 as Int64); old_row.push(33 as Int64);
+    old_row.push7_i64; old_row.push99_i64; old_row.push33_i64;
     let mut new_row: List<Int64> = List.new();
-    new_row.push(7 as Int64); new_row.push(99 as Int64); new_row.push(77 as Int64);
+    new_row.push7_i64; new_row.push99_i64; new_row.push77_i64;
     cs.record(change_update("t".clone(), pk_first_only(3), make_row(old_row), make_row(new_row)));
     let ps = from_changeset(&cs);
     assert_eq(ps.len(), 1);
@@ -198,7 +198,7 @@ fn test_from_changeset_compacts_unchanged_cells() {
 
 fn test_invert_swaps_op_and_rows() {
     let mut cs = changeset_empty();
-    let mut row: List<Int64> = List.new(); row.push(7 as Int64);
+    let mut row: List<Int64> = List.new(); row.push7_i64;
     cs.record(change_insert("t".clone(), pk_first_only(1), make_row(row)));
     let inv = invert(&cs);
     assert_eq(inv.len(), 1);

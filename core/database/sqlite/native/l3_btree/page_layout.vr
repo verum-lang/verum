@@ -193,7 +193,7 @@ public fn parse_page_header(buf: &[Byte], start: Int)
     };
 
     // SQLite: a cell_content_start of 0 is interpreted as 65536.
-    let ccs_canon: Int = if ccs_raw == (0 as UInt16) { 65536 } else { ccs_raw as Int };
+    let ccs_canon: Int = if ccs_raw == 0_u16 { 65536 } else { ccs_raw as Int };
 
     Ok(PageHeader {
         kind: kind,

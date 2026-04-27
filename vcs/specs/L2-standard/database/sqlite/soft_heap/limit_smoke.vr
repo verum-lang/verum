@@ -33,43 +33,43 @@ fn test_limit_unset_disabled() {
 }
 
 fn test_limit_with_threshold_active() {
-    let l = limit_with(1024 as Int64);
+    let l = limit_with1024_i64;
     assert(!l.is_disabled());
 }
 
 fn test_limit_add_advances_hwm() {
-    let mut l = limit_with(1024 as Int64);
-    l.add(500 as Int64);
+    let mut l = limit_with1024_i64;
+    l.add500_i64;
     let (_, used, hwm) = l.snapshot();
     assert_eq(used, 500 as Int64);
     assert_eq(hwm, 500 as Int64);
 }
 
 fn test_limit_sub_does_not_lower_hwm() {
-    let mut l = limit_with(1024 as Int64);
-    l.add(500 as Int64);
-    l.sub(200 as Int64);
+    let mut l = limit_with1024_i64;
+    l.add500_i64;
+    l.sub200_i64;
     let (_, used, hwm) = l.snapshot();
     assert_eq(used, 300 as Int64);
     assert_eq(hwm, 500 as Int64);
 }
 
 fn test_limit_would_exceed() {
-    let l = limit_with(100 as Int64);
-    assert(l.would_exceed(150 as Int64));
-    assert(!l.would_exceed(50 as Int64));
+    let l = limit_with100_i64;
+    assert(l.would_exceed150_i64);
+    assert(!l.would_exceed50_i64);
 }
 
 fn test_limit_set_threshold_returns_previous() {
-    let mut l = limit_with(100 as Int64);
-    let prev = l.set_threshold(200 as Int64);
+    let mut l = limit_with100_i64;
+    let prev = l.set_threshold200_i64;
     assert_eq(prev, 100 as Int64);
 }
 
 fn test_limit_reset_high_water_to_used() {
-    let mut l = limit_with(1024 as Int64);
-    l.add(800 as Int64);
-    l.sub(500 as Int64);
+    let mut l = limit_with1024_i64;
+    l.add800_i64;
+    l.sub500_i64;
     l.reset_high_water();
     let (_, used, hwm) = l.snapshot();
     assert_eq(used, 300 as Int64);
@@ -83,20 +83,20 @@ fn test_limit_reset_high_water_to_used() {
 fn test_event_kind_names_unique() {
     let n1 = event_kind_name(&PeSoftThresholdCrossing(0 as Int64, 0 as Int64));
     let n2 = event_kind_name(&PeHardThresholdImminent(0 as Int64, 0 as Int64));
-    let n3 = event_kind_name(&PeReleaseRequest(0 as Int64));
+    let n3 = event_kind_name(&PeReleaseRequest0_i64);
     assert(n1 != n2);
     assert(n2 != n3);
 }
 
 fn test_noop_callback_returns_zero() {
     let mut cb = noop_callback();
-    let n = cb.on_pressure(&PeReleaseRequest(1024 as Int64));
+    let n = cb.on_pressure(&PeReleaseRequest1024_i64);
     assert_eq(n, 0 as Int64);
 }
 
 fn test_fixed_release_callback_reports_constant() {
-    let mut cb = fixed_release_callback(512 as Int64);
-    let n = cb.on_pressure(&PeReleaseRequest(0 as Int64));
+    let mut cb = fixed_release_callback512_i64;
+    let n = cb.on_pressure(&PeReleaseRequest0_i64);
     assert_eq(n, 512 as Int64);
 }
 
@@ -106,13 +106,13 @@ fn test_fixed_release_callback_reports_constant() {
 
 fn test_engine_disabled_grants_everything() {
     let e = engine_new();
-    assert(is_granted(&e.plan(1_000_000 as Int64)));
+    assert(is_granted(&e.plan1_000_000_i64));
 }
 
 fn test_engine_soft_limit_refuses() {
     let mut e = engine_new();
-    let _ = e.set_soft_limit(100 as Int64);
-    match e.plan(150 as Int64) {
+    let _ = e.set_soft_limit100_i64;
+    match e.plan150_i64 {
         AoRefusedSoft => {},
         _             => panic("soft refusal"),
     }
@@ -120,9 +120,9 @@ fn test_engine_soft_limit_refuses() {
 
 fn test_engine_hard_limit_refuses() {
     let mut e = engine_new();
-    let _ = e.set_soft_limit(100 as Int64);
-    let _ = e.set_hard_limit(200 as Int64);
-    match e.plan(300 as Int64) {
+    let _ = e.set_soft_limit100_i64;
+    let _ = e.set_hard_limit200_i64;
+    match e.plan300_i64 {
         AoRefusedHard => {},
         _             => panic("hard refusal"),
     }
@@ -130,14 +130,14 @@ fn test_engine_hard_limit_refuses() {
 
 fn test_engine_note_allocation_then_used() {
     let mut e = engine_new();
-    let _ = e.set_soft_limit(1000 as Int64);
-    e.note_allocation(300 as Int64);
+    let _ = e.set_soft_limit1000_i64;
+    e.note_allocation300_i64;
     assert_eq(e.used_bytes(), 300 as Int64);
 }
 
 fn outcome_names_distinct() {
     let n1 = outcome_kind_name(&AoGranted);
-    let n2 = outcome_kind_name(&AoGrantedAfterReclaim(0 as Int64));
+    let n2 = outcome_kind_name(&AoGrantedAfterReclaim0_i64);
     let n3 = outcome_kind_name(&AoRefusedSoft);
     let n4 = outcome_kind_name(&AoRefusedHard);
     assert(n1 != n2);

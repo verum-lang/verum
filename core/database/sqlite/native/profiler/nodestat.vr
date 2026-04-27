@@ -59,7 +59,7 @@ public fn nodestat_new(node_id: Int, kind: Text, estimated_rows: Int64) -> NodeS
 
 implement NodeStat {
     public fn record_row(&mut self, when_ns: Int64) {
-        self.actual_rows = self.actual_rows + (1 as Int64);
+        self.actual_rows = self.actual_rows + 1_i64;
         if !self.first_row_seen {
             self.first_row_ns = when_ns;
             self.first_row_seen = true;
@@ -71,7 +71,7 @@ implement NodeStat {
     /// Ratio of estimate over actual; 1.0 means perfect, > 1 means
     /// over-estimate, < 1 means under-estimate.
     public fn estimate_ratio(&self) -> Float64 {
-        if self.actual_rows == (0 as Int64) { 0.0 as Float64 }
+        if self.actual_rows == 0_i64 { 0.0 as Float64 }
         else { (self.estimated_rows as Float64) / (self.actual_rows as Float64) }
     }
 }

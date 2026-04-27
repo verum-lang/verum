@@ -31,7 +31,7 @@ public fn limit_with(threshold: Int64) -> Limit {
 }
 
 implement Limit {
-    pub fn is_disabled(&self) -> Bool { self.threshold <= (0 as Int64) }
+    pub fn is_disabled(&self) -> Bool { self.threshold <= 0_i64 }
 
     /// Increase used and adjust HWM.
     pub fn add(&mut self, bytes: Int64) {
@@ -41,7 +41,7 @@ implement Limit {
 
     pub fn sub(&mut self, bytes: Int64) {
         self.used = self.used - bytes;
-        if self.used < (0 as Int64) { self.used = 0 as Int64; }
+        if self.used < 0_i64 { self.used = 0 as Int64; }
     }
 
     /// True iff `used + delta` would exceed the threshold (when enabled).

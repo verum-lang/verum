@@ -38,7 +38,7 @@ implement DbReleaseEngine {
     /// Returns (0 for SQLITE_OK).  Non-zero would mean the engine
     /// couldn't release anything; SQLite always returns OK here.
     pub fn sqlite3_db_release_memory(&mut self) -> Int {
-        self.calls = self.calls + (1 as Int64);
+        self.calls = self.calls + 1_i64;
         let released_slots = drain_to_zero(&mut self.lookaside);
         let released_lookaside_bytes =
             (released_slots as Int64) * (self.lookaside.slot_size_bytes as Int64);

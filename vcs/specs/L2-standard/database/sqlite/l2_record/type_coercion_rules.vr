@@ -46,7 +46,7 @@ fn parse_int_roundtrip() {
 
 fn classify_each_class() {
     match classify(&VNull) { Null => {}, _ => panic("NULL"), }
-    match classify(&VInt(7 as Int64)) { Int64Class => {}, _ => panic("int"), }
+    match classify(&VInt7_i64) { Int64Class => {}, _ => panic("int"), }
     match classify(&VReal(1.5)) { RealClass => {}, _ => panic("real"), }
     match classify(&VText("hi".clone())) { TextClass => {}, _ => panic("text"), }
     let mut b: List<Byte> = List.new();
@@ -79,7 +79,7 @@ fn integer_affinity_coerces_text() {
 }
 
 fn real_affinity_accepts_int() {
-    match coerce(VInt(42 as Int64), Real) {
+    match coerce(VInt42_i64, Real) {
         VReal(x) => { assert(x == 42.0); }
         _ => panic("int → real"),
     }
@@ -97,7 +97,7 @@ fn numeric_affinity_prefers_int() {
 }
 
 fn blob_affinity_never_coerces() {
-    match coerce(VInt(42 as Int64), Blob) {
+    match coerce(VInt42_i64, Blob) {
         VInt(_) => {},   // unchanged
         _ => panic("blob-affinity does not coerce"),
     }

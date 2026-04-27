@@ -82,12 +82,12 @@ fn test_from_ymd_hms_has_fraction() {
 }
 
 fn test_unix_round_trip() {
-    let i = from_unix_seconds(1000000 as Int64);
+    let i = from_unix_seconds1000000_i64;
     let s = i.unix_seconds();
     // Tolerate ±1s drift from sub-day arithmetic.
-    let diff = s - (1000000 as Int64);
-    let abs = if diff < (0 as Int64) { -diff } else { diff };
-    assert(abs <= (1 as Int64));
+    let diff = s - 1000000_i64;
+    let abs = if diff < 0_i64 { -diff } else { diff };
+    assert(abs <= 1_i64);
 }
 
 fn test_julian_real_combines_int_and_frac() {
@@ -206,7 +206,7 @@ fn test_parse_unknown_returns_none() {
 
 fn test_apply_add_days_advances_jd() {
     let i = from_ymd(2024, 4, 24);
-    let i2 = apply_modifier(&i, &MAddDays(7 as Int64), 0 as Int64);
+    let i2 = apply_modifier(&i, &MAddDays7_i64, 0 as Int64);
     assert_eq(i2.jd_int - i.jd_int, 7 as Int64);
 }
 

@@ -417,20 +417,20 @@ fn test_atomicu8_fetch_and() {
 
 @test
 fn test_atomicu16_new() {
-    let atomic = AtomicU16.new(0 as UInt16);
+    let atomic = AtomicU16.new0_u16;
     assert_eq(atomic.load(Relaxed), 0 as UInt16);
 }
 
 @test
 fn test_atomicu16_store_load() {
-    let atomic = AtomicU16.new(0 as UInt16);
+    let atomic = AtomicU16.new0_u16;
     atomic.store(65535 as UInt16, SeqCst);
     assert_eq(atomic.load(SeqCst), 65535 as UInt16);
 }
 
 @test
 fn test_atomicu16_fetch_add() {
-    let atomic = AtomicU16.new(100 as UInt16);
+    let atomic = AtomicU16.new100_u16;
     let old = atomic.fetch_add(50 as UInt16, Relaxed);
     assert_eq(old, 100 as UInt16);
     assert_eq(atomic.load(Relaxed), 150 as UInt16);
@@ -438,7 +438,7 @@ fn test_atomicu16_fetch_add() {
 
 @test
 fn test_atomicu16_fetch_sub() {
-    let atomic = AtomicU16.new(200 as UInt16);
+    let atomic = AtomicU16.new200_u16;
     let old = atomic.fetch_sub(50 as UInt16, Relaxed);
     assert_eq(old, 200 as UInt16);
     assert_eq(atomic.load(Relaxed), 150 as UInt16);
@@ -446,7 +446,7 @@ fn test_atomicu16_fetch_sub() {
 
 @test
 fn test_atomicu16_swap() {
-    let atomic = AtomicU16.new(1000 as UInt16);
+    let atomic = AtomicU16.new1000_u16;
     let old = atomic.swap(2000 as UInt16, SeqCst);
     assert_eq(old, 1000 as UInt16);
     assert_eq(atomic.load(SeqCst), 2000 as UInt16);
@@ -454,7 +454,7 @@ fn test_atomicu16_swap() {
 
 @test
 fn test_atomicu16_compare_exchange_success() {
-    let atomic = AtomicU16.new(500 as UInt16);
+    let atomic = AtomicU16.new500_u16;
     let result = atomic.compare_exchange(500 as UInt16, 600 as UInt16, SeqCst, Relaxed);
     assert(result.is_ok());
     assert_eq(atomic.load(SeqCst), 600 as UInt16);
@@ -462,7 +462,7 @@ fn test_atomicu16_compare_exchange_success() {
 
 @test
 fn test_atomicu16_fetch_or() {
-    let atomic = AtomicU16.new(0xFF00 as UInt16);
+    let atomic = AtomicU16.new0xFF00_u16;
     let old = atomic.fetch_or(0x00FF as UInt16, Relaxed);
     assert_eq(old, 0xFF00 as UInt16);
     assert_eq(atomic.load(Relaxed), 0xFFFF as UInt16);
@@ -470,7 +470,7 @@ fn test_atomicu16_fetch_or() {
 
 @test
 fn test_atomicu16_fetch_and() {
-    let atomic = AtomicU16.new(0xFFFF as UInt16);
+    let atomic = AtomicU16.new0xFFFF_u16;
     let old = atomic.fetch_and(0xFF00 as UInt16, Relaxed);
     assert_eq(old, 0xFFFF as UInt16);
     assert_eq(atomic.load(Relaxed), 0xFF00 as UInt16);
@@ -482,20 +482,20 @@ fn test_atomicu16_fetch_and() {
 
 @test
 fn test_atomicu32_new() {
-    let atomic = AtomicU32.new(0 as UInt32);
+    let atomic = AtomicU32.new0_u32;
     assert_eq(atomic.load(Relaxed), 0 as UInt32);
 }
 
 @test
 fn test_atomicu32_store_load() {
-    let atomic = AtomicU32.new(0 as UInt32);
+    let atomic = AtomicU32.new0_u32;
     atomic.store(0xDEAD as UInt32, SeqCst);
     assert_eq(atomic.load(SeqCst), 0xDEAD as UInt32);
 }
 
 @test
 fn test_atomicu32_fetch_add() {
-    let atomic = AtomicU32.new(1000 as UInt32);
+    let atomic = AtomicU32.new1000_u32;
     let old = atomic.fetch_add(500 as UInt32, Relaxed);
     assert_eq(old, 1000 as UInt32);
     assert_eq(atomic.load(Relaxed), 1500 as UInt32);
@@ -503,7 +503,7 @@ fn test_atomicu32_fetch_add() {
 
 @test
 fn test_atomicu32_fetch_sub() {
-    let atomic = AtomicU32.new(1000 as UInt32);
+    let atomic = AtomicU32.new1000_u32;
     let old = atomic.fetch_sub(300 as UInt32, Relaxed);
     assert_eq(old, 1000 as UInt32);
     assert_eq(atomic.load(Relaxed), 700 as UInt32);
@@ -511,7 +511,7 @@ fn test_atomicu32_fetch_sub() {
 
 @test
 fn test_atomicu32_swap() {
-    let atomic = AtomicU32.new(0xBEEF as UInt32);
+    let atomic = AtomicU32.new0xBEEF_u32;
     let old = atomic.swap(0xCAFE as UInt32, SeqCst);
     assert_eq(old, 0xBEEF as UInt32);
     assert_eq(atomic.load(SeqCst), 0xCAFE as UInt32);
@@ -519,7 +519,7 @@ fn test_atomicu32_swap() {
 
 @test
 fn test_atomicu32_compare_exchange_success() {
-    let atomic = AtomicU32.new(42 as UInt32);
+    let atomic = AtomicU32.new42_u32;
     let result = atomic.compare_exchange(42 as UInt32, 100 as UInt32, SeqCst, Relaxed);
     assert(result.is_ok());
     assert_eq(atomic.load(SeqCst), 100 as UInt32);
@@ -527,7 +527,7 @@ fn test_atomicu32_compare_exchange_success() {
 
 @test
 fn test_atomicu32_compare_exchange_failure() {
-    let atomic = AtomicU32.new(42 as UInt32);
+    let atomic = AtomicU32.new42_u32;
     let result = atomic.compare_exchange(99 as UInt32, 100 as UInt32, SeqCst, Relaxed);
     assert(result.is_err());
     assert_eq(atomic.load(SeqCst), 42 as UInt32);
@@ -535,7 +535,7 @@ fn test_atomicu32_compare_exchange_failure() {
 
 @test
 fn test_atomicu32_fetch_or() {
-    let atomic = AtomicU32.new(0xFF000000 as UInt32);
+    let atomic = AtomicU32.new0xFF000000_u32;
     let old = atomic.fetch_or(0x00FF0000 as UInt32, Relaxed);
     assert_eq(old, 0xFF000000 as UInt32);
     assert_eq(atomic.load(Relaxed), 0xFFFF0000 as UInt32);
@@ -543,7 +543,7 @@ fn test_atomicu32_fetch_or() {
 
 @test
 fn test_atomicu32_fetch_and() {
-    let atomic = AtomicU32.new(0xFFFFFFFF as UInt32);
+    let atomic = AtomicU32.new0xFFFFFFFF_u32;
     let old = atomic.fetch_and(0x0000FFFF as UInt32, Relaxed);
     assert_eq(old, 0xFFFFFFFF as UInt32);
     assert_eq(atomic.load(Relaxed), 0x0000FFFF as UInt32);
@@ -555,20 +555,20 @@ fn test_atomicu32_fetch_and() {
 
 @test
 fn test_atomicu64_new() {
-    let atomic = AtomicU64.new(0 as UInt64);
+    let atomic = AtomicU64.new0_u64;
     assert_eq(atomic.load(Relaxed), 0 as UInt64);
 }
 
 @test
 fn test_atomicu64_store_load() {
-    let atomic = AtomicU64.new(0 as UInt64);
+    let atomic = AtomicU64.new0_u64;
     atomic.store(0xDEADBEEF as UInt64, SeqCst);
     assert_eq(atomic.load(SeqCst), 0xDEADBEEF as UInt64);
 }
 
 @test
 fn test_atomicu64_fetch_add() {
-    let atomic = AtomicU64.new(1000 as UInt64);
+    let atomic = AtomicU64.new1000_u64;
     let old = atomic.fetch_add(500 as UInt64, Relaxed);
     assert_eq(old, 1000 as UInt64);
     assert_eq(atomic.load(Relaxed), 1500 as UInt64);
@@ -576,7 +576,7 @@ fn test_atomicu64_fetch_add() {
 
 @test
 fn test_atomicu64_fetch_sub() {
-    let atomic = AtomicU64.new(1000 as UInt64);
+    let atomic = AtomicU64.new1000_u64;
     let old = atomic.fetch_sub(300 as UInt64, Relaxed);
     assert_eq(old, 1000 as UInt64);
     assert_eq(atomic.load(Relaxed), 700 as UInt64);
@@ -584,7 +584,7 @@ fn test_atomicu64_fetch_sub() {
 
 @test
 fn test_atomicu64_swap() {
-    let atomic = AtomicU64.new(0xCAFEBABE as UInt64);
+    let atomic = AtomicU64.new0xCAFEBABE_u64;
     let old = atomic.swap(0xFEEDFACE as UInt64, SeqCst);
     assert_eq(old, 0xCAFEBABE as UInt64);
     assert_eq(atomic.load(SeqCst), 0xFEEDFACE as UInt64);
@@ -592,7 +592,7 @@ fn test_atomicu64_swap() {
 
 @test
 fn test_atomicu64_compare_exchange_success() {
-    let atomic = AtomicU64.new(42 as UInt64);
+    let atomic = AtomicU64.new42_u64;
     let result = atomic.compare_exchange(42 as UInt64, 100 as UInt64, SeqCst, Relaxed);
     assert(result.is_ok());
     assert_eq(atomic.load(SeqCst), 100 as UInt64);
@@ -600,7 +600,7 @@ fn test_atomicu64_compare_exchange_success() {
 
 @test
 fn test_atomicu64_compare_exchange_failure() {
-    let atomic = AtomicU64.new(42 as UInt64);
+    let atomic = AtomicU64.new42_u64;
     let result = atomic.compare_exchange(99 as UInt64, 100 as UInt64, SeqCst, Relaxed);
     assert(result.is_err());
     assert_eq(atomic.load(SeqCst), 42 as UInt64);
@@ -608,7 +608,7 @@ fn test_atomicu64_compare_exchange_failure() {
 
 @test
 fn test_atomicu64_fetch_or() {
-    let atomic = AtomicU64.new(0xFF00000000000000 as UInt64);
+    let atomic = AtomicU64.new0xFF00000000000000_u64;
     let old = atomic.fetch_or(0x00FF000000000000 as UInt64, Relaxed);
     assert_eq(old, 0xFF00000000000000 as UInt64);
     assert_eq(atomic.load(Relaxed), 0xFFFF000000000000 as UInt64);
@@ -616,7 +616,7 @@ fn test_atomicu64_fetch_or() {
 
 @test
 fn test_atomicu64_fetch_and() {
-    let atomic = AtomicU64.new(0xFFFFFFFFFFFFFFFF as UInt64);
+    let atomic = AtomicU64.new0xFFFFFFFFFFFFFFFF_u64;
     let old = atomic.fetch_and(0x00000000FFFFFFFF as UInt64, Relaxed);
     assert_eq(old, 0xFFFFFFFFFFFFFFFF as UInt64);
     assert_eq(atomic.load(Relaxed), 0x00000000FFFFFFFF as UInt64);
@@ -758,7 +758,7 @@ fn test_atomicint_mixed_operations() {
 
 @test
 fn test_atomicu32_counter_simulation() {
-    let counter = AtomicU32.new(0 as UInt32);
+    let counter = AtomicU32.new0_u32;
 
     for _ in 0..50 {
         counter.fetch_add(1 as UInt32, Relaxed);
@@ -769,7 +769,7 @@ fn test_atomicu32_counter_simulation() {
 
 @test
 fn test_atomicu64_large_values() {
-    let atomic = AtomicU64.new(0xFFFFFFFF00000000 as UInt64);
+    let atomic = AtomicU64.new0xFFFFFFFF00000000_u64;
     let old = atomic.fetch_add(0x00000000FFFFFFFF as UInt64, SeqCst);
     assert_eq(old, 0xFFFFFFFF00000000 as UInt64);
     assert_eq(atomic.load(SeqCst), 0xFFFFFFFFFFFFFFFF as UInt64);

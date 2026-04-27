@@ -32,18 +32,18 @@ public fn seed_from_u64(seed: Int64) -> DstSeed {
 }
 
 fn splitmix(z: &mut Int64) -> Int64 {
-    *z = *z + (0x9E3779B97F4A7C15 as Int64);
+    *z = *z + 0x9E3779B97F4A7C15_i64;
     let mut x: Int64 = *z;
-    x = (x ^ (x >> (30 as Int64))) * (0xBF58476D1CE4E5B9 as Int64);
-    x = (x ^ (x >> (27 as Int64))) * (0x94D049BB133111EB as Int64);
-    x ^ (x >> (31 as Int64))
+    x = (x ^ (x >> 30_i64)) * 0xBF58476D1CE4E5B9_i64;
+    x = (x ^ (x >> 27_i64)) * 0x94D049BB133111EB_i64;
+    x ^ (x >> 31_i64)
 }
 
 implement DstSeed {
     /// Pull the next u64-shaped Int64 + advance state in place.
     pub fn next_u64(&mut self) -> Int64 {
-        let result = rotl(self.s1 * (5 as Int64), 7) * (9 as Int64);
-        let t = self.s1 << (17 as Int64);
+        let result = rotl(self.s1 * 5_i64, 7) * 9_i64;
+        let t = self.s1 << 17_i64;
         self.s2 = self.s2 ^ self.s0;
         self.s3 = self.s3 ^ self.s1;
         self.s1 = self.s1 ^ self.s2;
@@ -57,12 +57,12 @@ implement DstSeed {
     pub fn next_below(&mut self, n: Int) -> Int {
         if n <= 0 { return 0; }
         let v = self.next_u64();
-        let abs_v = if v < (0 as Int64) { -v } else { v };
+        let abs_v = if v < 0_i64 { -v } else { v };
         ((abs_v as Int) % n)
     }
 
     pub fn next_bool(&mut self) -> Bool {
-        (self.next_u64() & (1 as Int64)) != (0 as Int64)
+        (self.next_u64() & 1_i64) != 0_i64
     }
 
     /// Bernoulli draw — true with `numerator/denominator` probability.
