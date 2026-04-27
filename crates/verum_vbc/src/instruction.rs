@@ -4186,6 +4186,30 @@ pub enum FfiSubOpcode {
     /// Initializes: All elements to init value (cast to element type)
     NewTypedArray = 0x4E,
 
+    /// Get raw address of a struct field.
+    ///
+    /// Format: `dst:reg, obj:reg, field_offset:u16`
+    /// Returns: `obj_heap_ptr + OBJECT_HEADER_SIZE + field_offset`
+    ///   (or, for register-encoded scalars stored in a Value-typed
+    ///    field, the address of the Value's u64 storage so atomic
+    ///    sub-byte reads of the inline-int payload land correctly
+    ///    on little-endian targets)
+    ///
+    /// Generalises ByteArrayElementAddr / TypedArrayElementAddr to
+    /// the struct-field surface so `&self.field as *const T` lowers
+    /// to a real heap address — required by every atomic stdlib op
+    /// (AtomicU8 / AtomicU16 / AtomicU32) that takes
+    /// `&self.value as *const Byte` and feeds it to the typed
+    /// `atomic_load_*` / `atomic_cas_*` intrinsics.  Without this,
+    /// `&self.value` produces a register-encoded CBGR ref whose
+    /// bit-pattern is meaningless when cast to a raw pointer (the
+    /// historical bug — every Tier-0 atomic was a silent no-op).
+    ///
+    /// # Safety
+    /// Caller must ensure obj is a valid heap-allocated object and
+    /// field_offset stays within the object's data section.
+    StructFieldAddr = 0x4F,
+
     // ========================================================================
     // Callback Support (0x50-0x5F)
     // ========================================================================
@@ -4489,6 +4513,7 @@ impl FfiSubOpcode {
             0x4C => Some(Self::ByteArrayStore),
             0x4D => Some(Self::TypedArrayElementAddr),
             0x4E => Some(Self::NewTypedArray),
+            0x4F => Some(Self::StructFieldAddr),
             // Callback Support
             0x50 => Some(Self::CreateCallback),
             0x51 => Some(Self::FreeCallback),
@@ -4578,6 +4603,7 @@ impl FfiSubOpcode {
             Self::ByteArrayStore => "FFI_BYTE_ARRAY_STORE",
             Self::TypedArrayElementAddr => "FFI_TYPED_ARRAY_ELEM_ADDR",
             Self::NewTypedArray => "FFI_NEW_TYPED_ARRAY",
+            Self::StructFieldAddr => "FFI_STRUCT_FIELD_ADDR",
             Self::CreateCallback => "FFI_CREATE_CALLBACK",
             Self::FreeCallback => "FFI_FREE_CALLBACK",
             Self::DerefRaw => "FFI_DEREF_RAW",

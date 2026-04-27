@@ -11486,6 +11486,16 @@ impl VbcCodegen {
                 return Ok(Some(result));
             }
 
+        // Check for `&receiver.field as *const T` / `&mut receiver.field as *mut T`
+        // pattern (struct field address — task #37 enabler for atomic stdlib).
+        // Without this, the cast falls through to the generic _ arm which is
+        // a passthrough, leaving the result as a register-encoded CBGR ref
+        // bit-pattern that atomic_load_* misreads as a meaningless raw address.
+        if let TypeKind::Pointer { .. } = &ty.kind
+            && let Some(result) = self.try_compile_struct_field_addr(inner)? {
+                return Ok(Some(result));
+            }
+
         // Compile the source expression
         let src_reg = self.compile_expr(inner)?
             .ok_or_else(|| CodegenError::internal("cast source has no value"))?;
@@ -11684,6 +11694,97 @@ impl VbcCodegen {
         }
 
         self.ctx.free_temp(src_reg);
+        Ok(Some(dst))
+    }
+
+    /// Tries to compile a struct-field address pattern: `&receiver.field as *const T`
+    /// (or `&mut receiver.field as *mut T`).
+    ///
+    /// Lowers the cast to `FfiSubOpcode::StructFieldAddr` so the
+    /// resulting raw pointer is the actual heap address of the field
+    /// inside the receiver's data section.  Required by every atomic
+    /// stdlib op (AtomicU8 / AtomicU16 / AtomicU32 etc.) which lowers
+    /// `&self.value as *const Byte` and feeds the result to typed
+    /// `atomic_load_*` / `atomic_cas_*` intrinsics.
+    ///
+    /// Returns `Some(reg)` if the pattern was detected and lowered,
+    /// `None` otherwise (caller falls through to generic cast paths).
+    fn try_compile_struct_field_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+        use crate::instruction::FfiSubOpcode;
+
+        // Unwrap parenthesized expressions.
+        let expr = {
+            let mut e = expr;
+            while let ExprKind::Paren(inner) = &e.kind {
+                e = inner.as_ref();
+            }
+            e
+        };
+
+        // Pattern: `&recv.field` or `&mut recv.field` (or bare
+        // `recv.field` to handle the parser-precedence corner where
+        // `&recv.field as *const T` parses as `&(recv.field as *const T)`).
+        let field_expr = match &expr.kind {
+            ExprKind::Unary { op: UnOp::Ref, expr: inner } => inner.as_ref(),
+            ExprKind::Unary { op: UnOp::RefMut, expr: inner } => inner.as_ref(),
+            ExprKind::Field { .. } => expr,
+            _ => return Ok(None),
+        };
+
+        // Field-of-receiver shape required.
+        let (receiver, field_name) = match &field_expr.kind {
+            ExprKind::Field { expr: recv, field } => (recv.as_ref(), field.as_str()),
+            _ => return Ok(None),
+        };
+
+        // Receiver type must be a registered struct so we can look up
+        // the field offset.  Use the same type-resolution helper that
+        // GetF + compile_field_access rely on.
+        let receiver_type_name = self
+            .infer_expr_type_name(receiver)
+            .or_else(|| self.extract_expr_type_name(receiver));
+        let type_name = match receiver_type_name {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        // Field offset in bytes within the data section.  Verum stores
+        // every field as an 8-byte Value slot regardless of the field's
+        // declared type — see compute_field_offset.  The address we
+        // return points to the low byte of that Value's u64 storage,
+        // which on little-endian targets is exactly the inline-int
+        // payload byte that AtomicU8 / U16 / U32 read/write.
+        let field_offset = self.compute_field_offset(&type_name, field_name);
+        if !(0..=u16::MAX as i64).contains(&field_offset) {
+            // Out-of-range offset (likely an unregistered type for
+            // which compute_field_offset returned a fallback).  Bail
+            // so the generic cast path fires and the user sees the
+            // existing diagnostic instead of a silent miscompile.
+            return Ok(None);
+        }
+        let field_offset = field_offset as u16;
+
+        // Compile the receiver to get a heap pointer Value.
+        let recv_reg = self.compile_expr(receiver)?
+            .ok_or_else(|| CodegenError::internal("field-addr receiver has no value"))?;
+
+        let dst = self.ctx.alloc_temp();
+
+        // Encode operands: dst, recv_reg, offset_lo:u8, offset_hi:u8
+        let mut operands = Vec::<u8>::with_capacity(6);
+        Self::write_reg(&mut operands, dst.0);
+        Self::write_reg(&mut operands, recv_reg.0);
+        operands.push((field_offset & 0xFF) as u8);
+        operands.push(((field_offset >> 8) & 0xFF) as u8);
+
+        self.ctx.emit(Instruction::FfiExtended {
+            sub_op: FfiSubOpcode::StructFieldAddr.to_byte(),
+            operands,
+        });
+
+        self.ctx.free_temp(recv_reg);
+        self.ctx.mark_raw_pointer(dst);
+
         Ok(Some(dst))
     }
 

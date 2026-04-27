@@ -77,7 +77,16 @@ pub(in super::super) fn handle_atomic_load(state: &mut InterpreterState) -> Inte
     let ordering = read_u8(state)?;
     let size = read_u8(state)?;
 
-    let ptr = state.get_reg(ptr_reg).as_i64() as usize;
+    // Accept both Pointer-tagged and Int-tagged values as raw addresses
+    // — StructFieldAddr (#37) returns Pointer-tagged via Value::from_ptr
+    // for true heap addresses; legacy callers may pass an Int.  Same
+    // pattern as DerefRaw / DerefMutRaw.
+    let val = state.get_reg(ptr_reg);
+    let ptr = if val.is_ptr() {
+        val.as_ptr::<u8>() as usize
+    } else {
+        val.as_i64() as usize
+    };
 
     use std::sync::atomic::Ordering;
     let ord = match ordering {
@@ -128,7 +137,13 @@ pub(in super::super) fn handle_atomic_store(state: &mut InterpreterState) -> Int
     let ordering = read_u8(state)?;
     let size = read_u8(state)?;
 
-    let ptr = state.get_reg(ptr_reg).as_i64() as usize;
+    // Same pointer-extraction pattern as handle_atomic_load (#37).
+    let ptr_val = state.get_reg(ptr_reg);
+    let ptr = if ptr_val.is_ptr() {
+        ptr_val.as_ptr::<u8>() as usize
+    } else {
+        ptr_val.as_i64() as usize
+    };
     let val = state.get_reg(val_reg).as_i64();
 
     if ptr == 0 || ptr < 0x1000 {
@@ -187,7 +202,13 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
     let ordering = read_u8(state)?;
     let size = read_u8(state)?;
 
-    let ptr = state.get_reg(ptr_reg).as_i64() as usize;
+    // Same pointer-extraction pattern as handle_atomic_load (#37).
+    let ptr_val = state.get_reg(ptr_reg);
+    let ptr = if ptr_val.is_ptr() {
+        ptr_val.as_ptr::<u8>() as usize
+    } else {
+        ptr_val.as_i64() as usize
+    };
     let expected = state.get_reg(expected_reg).as_i64();
     let desired = state.get_reg(desired_reg).as_i64();
 

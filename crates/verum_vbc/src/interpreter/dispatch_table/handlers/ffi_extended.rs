@@ -539,6 +539,58 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         }
 
         // ================================================================
+        // Struct Field Address (#37 — atomic-stdlib runtime enabler)
+        // ================================================================
+        Some(FfiSubOpcode::StructFieldAddr) => {
+            // Get the raw heap address of a struct field.
+            //
+            // Format: dst:reg, obj:reg, field_offset_lo:u8, field_offset_hi:u8
+            // Returns: dst = obj_heap_ptr + OBJECT_HEADER_SIZE + field_offset
+            //
+            // Used by the codegen path for `&self.field as *const T`
+            // — without this, the cast falls through compile_cast's
+            // generic _ arm (a passthrough), and the resulting Value
+            // is a register-encoded CBGR ref bit-pattern that
+            // atomic_load_* misreads as a raw address (silent
+            // ptr<0x1000 → returns 0).
+            let dst = read_reg(state)?;
+            let obj_reg = read_reg(state)?;
+            let offset_lo = read_u8(state)? as u16;
+            let offset_hi = read_u8(state)? as u16;
+            let field_offset = (offset_hi << 8) | offset_lo;
+
+            let obj_val = state.get_reg(obj_reg);
+            // The struct receiver lives in the register either as an
+            // Object/Pointer Value (heap-allocated struct) or — for
+            // some single-field receivers — as the inline payload
+            // itself.  Treat both: if it's a pointer Value, take the
+            // raw address; otherwise read as i64 (already the
+            // address, e.g. when the field-of-self pattern was
+            // pre-stabilised through an integer slot).
+            let obj_ptr: *mut u8 = if obj_val.is_ptr() {
+                obj_val.as_ptr()
+            } else {
+                obj_val.as_i64() as *mut u8
+            };
+            if obj_ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+
+            // SAFETY: the codegen only emits StructFieldAddr when
+            // (a) the receiver Type is a registered struct in the
+            // type-field-layouts table, and (b) the field_offset
+            // came from compute_field_offset for that type — so it
+            // is always within the object's data section.
+            // OBJECT_HEADER_SIZE adds the standard 24-byte header
+            // skip to reach the data section's first byte.
+            let field_addr = unsafe {
+                obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE + field_offset as usize)
+            };
+            state.set_reg(dst, Value::from_ptr(field_addr));
+            Ok(DispatchResult::Continue)
+        }
+
+        // ================================================================
         // Raw Pointer Operations
         // ================================================================
         Some(FfiSubOpcode::DerefRaw) => {
