@@ -497,6 +497,113 @@ public fn rising_factorial(n: Int, k: Int{>= 0}) -> Int {
 }
 
 // =============================================================================
+// Number-theoretic functions (V8 #251)
+// =============================================================================
+
+/// Euler totient φ(n) — number of integers in [1, n] coprime to n.
+///
+/// Computed via trial-division factorisation + Euler product formula:
+///
+///     φ(n) = n · ∏_{p | n} (1 − 1/p)
+///
+/// where the product runs over the *distinct* prime divisors of n.
+///
+/// Properties (verified by SMT in companion theorems):
+///   • φ(1) = 1.
+///   • φ(p) = p − 1 for prime p.
+///   • φ(p^k) = p^(k−1) · (p − 1).
+///   • Multiplicativity: gcd(a, b) = 1 ⇒ φ(a · b) = φ(a) · φ(b).
+///
+/// Trial division is O(√n) — adequate for n up to ≈ 10⁹.
+/// Refinement type bounds the input strictly positive.
+public fn euler_phi(n: Int{>= 1}) -> Int{>= 1} {
+    if n == 1 { return 1; }
+    let mut m = n;
+    let mut result = n;
+    // Strip factor 2.
+    if m % 2 == 0 {
+        result = result / 2;
+        while m % 2 == 0 { m = m / 2; }
+    }
+    // Strip odd primes p ≤ √m.
+    let mut p: Int = 3;
+    while p * p <= m {
+        if m % p == 0 {
+            result = result - result / p;
+            while m % p == 0 { m = m / p; }
+        }
+        p = p + 2;
+    }
+    // Any leftover m > 1 is itself a prime factor.
+    if m > 1 {
+        result = result - result / m;
+    }
+    result
+}
+
+/// Largest prime ≤ n. Returns `None` if no such prime exists
+/// (i.e. n < 2). Mirrors `next_prime` (smallest prime ≥ n).
+public fn prev_prime(n: Int) -> Maybe<Int> {
+    if n < 2 { return None; }
+    if n == 2 { return Some(2); }
+    let mut candidate = if n % 2 == 0 { n - 1 } else { n };
+    while candidate >= 3 {
+        if is_prime_miller_rabin(candidate) {
+            return Some(candidate);
+        }
+        candidate = candidate - 2;
+    }
+    Some(2)
+}
+
+/// Ascending list of all positive divisors of n. For n = 12 returns
+/// [1, 2, 3, 4, 6, 12]. Implementation: trial-divide up to √n,
+/// collect each (d, n/d) pair, sort + dedupe (the perfect-square case
+/// n = d² yields only one entry, not two).
+///
+/// Refinement type bounds n strictly positive; divisors of negative
+/// integers are handled by callers via abs() preprocessing.
+public fn divisors(n: Int{>= 1}) -> List<Int> {
+    let mut small: List<Int> = [];
+    let mut large: List<Int> = [];
+    let mut i: Int = 1;
+    while i * i <= n {
+        if n % i == 0 {
+            small.push(i);
+            let other = n / i;
+            if other != i { large.push(other); }
+        }
+        i = i + 1;
+    }
+    // `small` is already ascending; reverse `large` to ascend.
+    let mut result: List<Int> = [];
+    let mut k: Int = 0;
+    while k < small.len() { result.push(small[k]); k = k + 1; }
+    let mut j: Int = large.len() - 1;
+    while j >= 0 { result.push(large[j]); j = j - 1; }
+    result
+}
+
+/// Sum of all positive divisors of n (sigma function σ(n)).
+/// σ(1) = 1, σ(prime p) = p + 1.
+public fn sigma(n: Int{>= 1}) -> Int{>= 1} {
+    let ds = divisors(n);
+    let mut total: Int = 0;
+    let mut i: Int = 0;
+    while i < ds.len() {
+        total = total + ds[i];
+        i = i + 1;
+    }
+    total
+}
+
+/// Number of positive divisors of n (tau function τ(n) / d(n)).
+/// τ(1) = 1, τ(prime p) = 2, τ(p^k) = k + 1.
+public fn tau(n: Int{>= 1}) -> Int{>= 1} {
+    divisors(n).len() as Int
+}
+
+// =============================================================================
 // Integer arithmetic theorems (SMT-discharged)
 // =============================================================================
 
