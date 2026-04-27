@@ -161,6 +161,7 @@ pub use typed::{
     AccessibilityAttr,
     FeatureAttr,
     FrameworkAttr,
+    FrameworkTranslateAttr,
     HotAttr,
     InlineAttr,
     InlineMode,
