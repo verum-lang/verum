@@ -852,7 +852,7 @@ implement JsonParser {
             return Err(DataError.ParseError { message: "Unexpected end in number" });
         }
         while !self.at_end() {
-            let c = self.peek().unwrap();
+            let c = self.peek().expect("parse_number/int: peek is_some after !at_end guard");
             if c >= '0' && c <= '9' {
                 self.pos = self.pos + 1;
             } else {
@@ -865,7 +865,7 @@ implement JsonParser {
             is_float = true;
             self.pos = self.pos + 1;
             while !self.at_end() {
-                let c = self.peek().unwrap();
+                let c = self.peek().expect("parse_number/frac: peek is_some after !at_end guard");
                 if c >= '0' && c <= '9' {
                     self.pos = self.pos + 1;
                 } else {
@@ -876,18 +876,18 @@ implement JsonParser {
 
         // Exponent part
         if !self.at_end() {
-            let c = self.peek().unwrap();
+            let c = self.peek().expect("parse_number/exp: peek is_some after !at_end guard");
             if c == 'e' || c == 'E' {
                 is_float = true;
                 self.pos = self.pos + 1;
                 if !self.at_end() {
-                    let sign = self.peek().unwrap();
+                    let sign = self.peek().expect("parse_number/exp-sign: peek is_some after !at_end guard");
                     if sign == '+' || sign == '-' {
                         self.pos = self.pos + 1;
                     }
                 }
                 while !self.at_end() {
-                    let c2 = self.peek().unwrap();
+                    let c2 = self.peek().expect("parse_number/exp-digits: peek is_some after !at_end guard");
                     if c2 >= '0' && c2 <= '9' {
                         self.pos = self.pos + 1;
                     } else {
@@ -951,7 +951,7 @@ implement JsonParser {
         let mut result = Text.new();
 
         while !self.at_end() {
-            let c = self.advance().unwrap();
+            let c = self.advance().expect("parse_string: advance is_some after !at_end guard");
             if c == '"' {
                 return Ok(result);
             }
