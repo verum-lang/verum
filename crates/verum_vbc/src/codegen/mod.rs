@@ -1141,7 +1141,27 @@ impl VbcCodegen {
         if let Some(name) = Self::extract_source_module_name(module) {
             self.ctx.current_source_module = Some(name);
         }
+        let module_name = self.ctx.current_source_module.clone().unwrap_or_default();
+        let funcs_before = self.ctx.functions.len();
         let result = self.collect_all_declarations(module);
+        let funcs_after = self.ctx.functions.len();
+        // #200 diagnostic: surface decl-collection per-module net change so
+        // a silent decl-drop (returning Err that drops items mid-walk) is
+        // visible at trace level.  Triggered via `RUST_LOG=trace`.
+        match &result {
+            Ok(()) => {
+                tracing::trace!(
+                    "[decl-collect] {} ok: +{} funcs (total {})",
+                    module_name, funcs_after - funcs_before, funcs_after
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[decl-collect] {} ERR: +{} funcs registered before fail: {}",
+                    module_name, funcs_after - funcs_before, e
+                );
+            }
+        }
         self.ctx.current_source_module = prev;
         result
     }
