@@ -234,13 +234,10 @@ impl ComputeGraph {
 }
 
 /// Builder for constructing computational graphs from AST
-#[allow(dead_code)] // Reserved for autodiff graph construction
 pub struct GraphBuilder {
     graph: ComputeGraph,
     /// Map from variable names to their node IDs
     var_map: HashMap<String, usize>,
-    /// Counter for generating unique names
-    temp_counter: usize,
 }
 
 impl GraphBuilder {
@@ -248,7 +245,6 @@ impl GraphBuilder {
         Self {
             graph: ComputeGraph::new(),
             var_map: HashMap::new(),
-            temp_counter: 0,
         }
     }
 

@@ -1704,10 +1704,3 @@ struct SafetyStats {
 }
 
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Reserved for aggregated FFI processing results
-struct FunctionResult {
-    function_name: String,
-    wrapper: MarshallingWrapper,
-    safety_checks: Vec<String>,
-}

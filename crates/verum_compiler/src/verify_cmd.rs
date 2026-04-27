@@ -1374,7 +1374,6 @@ impl<'s> VerifyCommand<'s> {
     /// Outcome of a CVC5 fallback check for a function ensures.
     /// Same trichotomy Z3 uses: Valid (ensures holds), Invalid
     /// (counterexample), Unknown (solver can't decide).
-    #[allow(dead_code)]
     fn cvc5_discharge_negated(
         &self,
         ensures: &Expr,
