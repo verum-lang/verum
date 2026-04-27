@@ -432,6 +432,16 @@ fn parse_int(src: &List<Byte>) -> Result<Int, CronError> {
     if src.len() == 0 {
         return Err(CronError.InvalidField(Text.from("")));
     }
+    // SOUNDNESS: cron values top out at 59 (minute) — 5-digit cap is
+    // wide-envelope room for `step` (which can theoretically be
+    // larger but never practical). Reject hostile multi-thousand-
+    // digit inputs that would otherwise overflow `v * 10 + digit`
+    // without ever passing the post-loop range validation. Same
+    // hostile-input recipe as #71 (pbkdf2 iter), #72 (json_pointer),
+    // #73 (duration_parse).
+    if src.len() > 6 {  // 5 digits + optional leading '-'
+        return Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
+    }
     let mut i: Int = 0;
     let mut negative = false;
     if src[0] == ('-' as Byte) { negative = true; i = 1; }
