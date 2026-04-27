@@ -881,6 +881,7 @@ mod tests {
                 where_clause: verum_common::Maybe::None,
                 attributes: List::new(),
                 path_endpoints: None,
+                path_dim: 0,
                 span,
             },
             Variant {
@@ -890,6 +891,7 @@ mod tests {
                 where_clause: verum_common::Maybe::None,
                 attributes: List::new(),
                 path_endpoints: None,
+                path_dim: 0,
                 span,
             },
         ];
