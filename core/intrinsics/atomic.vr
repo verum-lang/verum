@@ -336,11 +336,6 @@ public fn atomic_exchange_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) 
 @vbc_direct_lowering
 public fn atomic_exchange_i32(ptr: *mut Int32, value: Int32, ordering: UInt8) -> Int32;
 
-/// Atomic fetch-and-sub for UInt64.
-@intrinsic("atomic_fetch_sub_u64")
-@vbc_direct_lowering
-public fn atomic_fetch_sub_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
-
 // -----------------------------------------------------------------------------
 // 64-bit signed atomics (#100, task #24)
 //
