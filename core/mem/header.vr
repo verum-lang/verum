@@ -240,7 +240,19 @@ implement AllocationHeader {
     }
 
     /// Create header for a typed allocation.
+    ///
+    /// SOUNDNESS: validates that T's static size / alignment fit in
+    /// UInt32 (the on-disk header field type).  A type whose size
+    /// exceeds 4 GiB silently truncating to UInt32 would mis-sized
+    /// the allocation and corrupt subsequent CBGR validation
+    /// (the size field gates pointer-derivation bounds).
     public fn for_type<T>(capabilities: UInt16) -> AllocationHeader {
+        if T.size > 0xFFFF_FFFF {
+            panic("AllocationHeader::for_type<T>: T.size exceeds UInt32.MAX (header size field is UInt32-bounded)");
+        }
+        if T.alignment > 0xFFFF_FFFF {
+            panic("AllocationHeader::for_type<T>: T.alignment exceeds UInt32.MAX");
+        }
         let size = T.size as UInt32;
         let alignment = T.alignment as UInt32;
         let type_id = T.id as UInt32;
@@ -262,6 +274,73 @@ implement AllocationHeader {
     @inline
     public fn store_generation(&mut self, gen: UInt32) {
         atomic_store_u32(&mut self.generation, gen, ORDERING_RELEASE)
+    }
+
+    /// Revoke the allocation iff the current generation matches
+    /// `expected_gen`.  This is the load-bearing primitive for
+    /// `ThinRef::revoke`-style APIs: the verify-then-increment is
+    /// performed as a single CAS so two concurrent revokers can't
+    /// both succeed, and a stale revoker can't double-bump the
+    /// generation past a successor's freshly-issued reference.
+    ///
+    /// Returns:
+    ///   - `Some(new_gen)` if this thread successfully revoked.
+    ///   - `None` if the generation no longer matches
+    ///     `expected_gen` (someone else revoked first; caller
+    ///     should report `already_revoked`).
+    ///
+    /// Wraparound is handled identically to `increment_generation`:
+    /// after a successful CAS that lands at GEN_MAX, the epoch is
+    /// CAS-bumped and the generation is reset to GEN_INITIAL.
+    @inline
+    public fn try_revoke(&mut self, expected_gen: UInt32) -> Maybe<UInt32> {
+        let new_gen = if expected_gen >= GEN_MAX - 1 {
+            // Wraparound boundary — caller's expected_gen is already
+            // saturated; any further increment must go through the
+            // wraparound path.  CAS to GEN_INITIAL directly here.
+            GEN_INITIAL
+        } else {
+            expected_gen + 1
+        };
+
+        let (_observed, swapped) = atomic_cas_u32(
+            &mut self.generation,
+            expected_gen,
+            new_gen,
+            ORDERING_ACQ_REL,
+            ORDERING_ACQUIRE,
+        );
+        if !swapped {
+            // Snapshot stale → another thread revoked first.
+            return None;
+        }
+
+        // If we crossed the wraparound boundary, bump the epoch
+        // exactly once.  Mirrors the wraparound branch of
+        // `increment_generation`.
+        if expected_gen >= GEN_MAX - 1 {
+            loop {
+                let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
+                let old_epoch = (old_packed & 0xFFFF) as UInt16;
+                let caps_bits = old_packed & 0xFFFF_0000;
+                if old_epoch == 0xFFFF {
+                    panic("AllocationHeader epoch overflow during try_revoke — exceeded UInt16 wraparound budget");
+                }
+                let new_epoch = old_epoch + 1;
+                let new_packed = caps_bits | (new_epoch as UInt32);
+                let (_obs, ok) = atomic_cas_u32(
+                    &mut self.epoch_and_caps,
+                    old_packed,
+                    new_packed,
+                    ORDERING_ACQ_REL,
+                    ORDERING_ACQUIRE,
+                );
+                if ok { break; }
+            }
+            super.epoch.GLOBAL_EPOCH.on_wraparound();
+        }
+
+        Some(new_gen)
     }
 
     /// Increment generation and return old value.
@@ -364,12 +443,31 @@ implement AllocationHeader {
     }
 
     /// Store epoch counter atomically (preserves capabilities in upper 16 bits).
+    ///
+    /// SOUNDNESS: this MUST be a CAS-loop, not a load-then-store.
+    /// Earlier revisions did `let p = load(); let new = (p & caps_mask) | epoch; store(new)`
+    /// — which races with `attenuate_capabilities` / `store_capabilities`
+    /// running on another thread.  If the two stores interleave, the
+    /// epoch-store overwrites the capability-attenuation, silently
+    /// RESTORING capabilities that the attenuator just removed.  That
+    /// is a security violation: capability removal must be monotone
+    /// from the caller's perspective.  The CAS-loop guarantees the
+    /// two halves see a consistent transition.
     @inline
     public fn store_epoch(&mut self, epoch: UInt16) {
-        let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
-        let caps = old_packed & 0xFFFF_0000;
-        let new_packed = caps | (epoch as UInt32);
-        atomic_store_u32(&mut self.epoch_and_caps, new_packed, ORDERING_RELEASE)
+        loop {
+            let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
+            let caps_bits = old_packed & 0xFFFF_0000;
+            let new_packed = caps_bits | (epoch as UInt32);
+            let (_observed, swapped) = atomic_cas_u32(
+                &mut self.epoch_and_caps,
+                old_packed,
+                new_packed,
+                ORDERING_ACQ_REL,
+                ORDERING_ACQUIRE,
+            );
+            if swapped { break; }
+        }
     }
 
     /// Load generation and epoch in optimized sequential access.
@@ -409,12 +507,30 @@ implement AllocationHeader {
     }
 
     /// Store capabilities atomically (preserves epoch in lower 16 bits).
+    ///
+    /// SOUNDNESS: CAS-loop for the same race-with-store_epoch /
+    /// fetch_add(generation-wraparound) reason as `store_epoch`.
+    ///
+    /// SECURITY: this method should be used sparingly — it can
+    /// REPLACE the capabilities mask (granting access).  Prefer
+    /// `attenuate_capabilities` for the common case of removing
+    /// rights, since attenuation is monotone and cannot
+    /// accidentally re-grant.
     @inline
     public fn store_capabilities(&mut self, caps: UInt16) {
-        let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
-        let epoch = old_packed & 0xFFFF;
-        let new_packed = ((caps as UInt32) << 16) | epoch;
-        atomic_store_u32(&mut self.epoch_and_caps, new_packed, ORDERING_RELEASE)
+        loop {
+            let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
+            let epoch_bits = old_packed & 0xFFFF;
+            let new_packed = ((caps as UInt32) << 16) | epoch_bits;
+            let (_observed, swapped) = atomic_cas_u32(
+                &mut self.epoch_and_caps,
+                old_packed,
+                new_packed,
+                ORDERING_ACQ_REL,
+                ORDERING_ACQUIRE,
+            );
+            if swapped { break; }
+        }
     }
 
     /// Attenuate (reduce) capabilities using AND mask.
@@ -440,9 +556,21 @@ implement AllocationHeader {
     }
 
     /// Increment reference count and return old value.
+    ///
+    /// SOUNDNESS: hard panic on overflow.  A naive `fetch_add(1)` would
+    /// silently wrap from UInt32.MAX to 0, after which a subsequent
+    /// drop would race the dealloc through 0 → UInt32.MAX → 0 again,
+    /// or worse — drop the live object while another thread still
+    /// holds a clone.  Reaching UInt32.MAX requires ~4 billion live
+    /// clones; in practice this is unreachable, but loud failure is
+    /// the right behaviour if it ever occurs.
     @inline
     public fn increment_ref_count(&mut self) -> UInt32 {
-        atomic_fetch_add_u32(&mut self.ref_count, 1, ORDERING_ACQ_REL)
+        let old = atomic_fetch_add_u32(&mut self.ref_count, 1, ORDERING_ACQ_REL);
+        if old == 0xFFFF_FFFF {
+            panic("AllocationHeader::increment_ref_count overflow — ref_count exceeded UInt32.MAX; allocation has too many concurrent owners (clone leak likely)");
+        }
+        old
     }
 
     /// Decrement reference count and return new value.
