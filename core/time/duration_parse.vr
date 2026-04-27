@@ -55,7 +55,16 @@ public type DurationParseError is
       Empty
     | Malformed(Text)
     | UnknownUnit(Text)
-    | Overflow;
+    | Overflow
+    | InputTooLong { limit_bytes: Int };
+
+/// Maximum accepted duration-input length. Real-world Go-style
+/// durations top out at ~30 chars (`-9999999h59m59.999999999s`);
+/// 256 B is generous-by-8x and rejects gigabyte-scale DoS payloads
+/// that would otherwise drive the parse-loop overlong. Same hostile-
+/// input cap class as #181 (json_pointer 64 KiB) and #77 (HTTP
+/// Content-Length 32 MiB) — duration strings are short by nature.
+public const MAX_DURATION_INPUT_BYTES: Int = 256;
 
 // =============================================================================
 // Public entry
@@ -63,6 +72,11 @@ public type DurationParseError is
 
 public fn parse(text: &Text) -> Result<Duration, DurationParseError> {
     let b = text.as_bytes();
+    if b.len() > MAX_DURATION_INPUT_BYTES {
+        return Err(DurationParseError.InputTooLong {
+            limit_bytes: MAX_DURATION_INPUT_BYTES,
+        });
+    }
     let trimmed = trim(b);
     if trimmed.len() == 0 { return Err(DurationParseError.Empty); }
 
@@ -121,7 +135,7 @@ fn parse_compact(b: &[Byte]) -> Result<Duration, DurationParseError> {
         }
         let unit_end = i;
 
-        let int_part = parse_int_bytes(b, int_start, int_end);
+        let int_part = parse_int_bytes(b, int_start, int_end)?;
         let unit_ns = match unit_nanoseconds(b, unit_start, unit_end) {
             Ok(n) => n,
             Err(e) => return Err(e),
@@ -134,10 +148,13 @@ fn parse_compact(b: &[Byte]) -> Result<Duration, DurationParseError> {
 
         // Fraction: `frac_digits / 10^n * unit_ns`.
         if frac_end > frac_start {
-            let frac_digits = parse_int_bytes(b, frac_start, frac_end);
-            let divisor = pow10(frac_end - frac_start);
-            let frac_contribution = (frac_digits * unit_ns) / divisor;
-            total_ns = total_ns + frac_contribution;
+            let frac_digits = parse_int_bytes(b, frac_start, frac_end)?;
+            let divisor = pow10(frac_end - frac_start)?;
+            let frac_mul = frac_digits.checked_mul(unit_ns)
+                .ok_or(DurationParseError.Overflow)?;
+            let frac_contribution = frac_mul / divisor;
+            total_ns = total_ns.checked_add(frac_contribution)
+                .ok_or(DurationParseError.Overflow)?;
         }
 
         progressed = true;
@@ -188,7 +205,7 @@ fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {
         let desig = b[i];
         i = i + 1;
 
-        let int_part = parse_int_bytes(b, int_start, int_end);
+        let int_part = parse_int_bytes(b, int_start, int_end)?;
         let unit_ns: Int = if in_time {
             match desig {
                 0x48_u8 /* H */ | 0x68_u8 /* h */ => 3_600_000_000_000,
@@ -209,9 +226,12 @@ fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {
             .ok_or(DurationParseError.Overflow)?;
 
         if frac_end > frac_start {
-            let frac_digits = parse_int_bytes(b, frac_start, frac_end);
-            let divisor = pow10(frac_end - frac_start);
-            total_ns = total_ns + (frac_digits * unit_ns) / divisor;
+            let frac_digits = parse_int_bytes(b, frac_start, frac_end)?;
+            let divisor = pow10(frac_end - frac_start)?;
+            let frac_mul = frac_digits.checked_mul(unit_ns)
+                .ok_or(DurationParseError.Overflow)?;
+            total_ns = total_ns.checked_add(frac_mul / divisor)
+                .ok_or(DurationParseError.Overflow)?;
         }
     }
     Ok(Duration.from_nanos(total_ns))
@@ -263,21 +283,39 @@ fn is_ws(c: Byte) -> Bool {
         || c == ('\r' as Byte) || c == ('\n' as Byte)
 }
 
-fn parse_int_bytes(b: &[Byte], start: Int, end: Int) -> Int {
+/// Parse a digit slice into Int with explicit overflow detection.
+/// Returns `Err(Overflow)` if the digit sequence would exceed
+/// Int.MAX; the parent parser's `checked_mul` chain assumes the
+/// returned value is ≤ Int.MAX, so we MUST surface overflow here
+/// rather than silently wrap. Pre-multiply guard `v > Int.MAX/10`
+/// fires on 19-digit values that would overflow the next multiply.
+fn parse_int_bytes(b: &[Byte], start: Int, end: Int) -> Result<Int, DurationParseError> {
     let mut v: Int = 0;
     let mut i: Int = start;
     while i < end {
+        if v > 922_337_203_685_477_580 {           // Int.MAX / 10
+            return Err(DurationParseError.Overflow);
+        }
         v = v * 10 + ((b[i] - ('0' as Byte)) as Int);
+        if v < 0 {                                  // wrap-around defence
+            return Err(DurationParseError.Overflow);
+        }
         i = i + 1;
     }
-    v
+    Ok(v)
 }
 
-fn pow10(n: Int) -> Int {
+/// 10^n with overflow detection. Caller (fractional path) supplies
+/// `n` derived from the digit count of the fractional segment;
+/// without a guard, n ≥ 19 silently overflows Int.MAX. Cap at
+/// 18 (largest 10^n that fits in Int) — anything beyond is rejected
+/// upstream as an unrepresentable fractional precision.
+fn pow10(n: Int) -> Result<Int, DurationParseError> {
+    if n < 0 || n > 18 { return Err(DurationParseError.Overflow); }
     let mut p: Int = 1;
     let mut i: Int = 0;
     while i < n { p = p * 10; i = i + 1; }
-    p
+    Ok(p)
 }
 
 fn trim(b: &[Byte]) -> List<Byte> {
