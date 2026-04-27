@@ -379,27 +379,68 @@ implement<T> OnceLock<T> {
             return Ok(self.value.as_ref().unwrap());
         }
 
-        // Slow path: serialise initialisation through try_call_once.
-        // The closure captures &self.value via raw pointer so the
-        // computed `v` lands in the OnceLock's storage atomically
-        // with the COMPLETE state publication.
-        self.once.try_call_once(|| -> Result<(), E> {
-            match f() {
-                Ok(v) => {
-                    unsafe {
-                        let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
-                        *ptr = Some(v);
+        // Slow path: race for INCOMPLETE → RUNNING transition.
+        //
+        // Drives the state CAS directly (parallel to try_get_or_set)
+        // instead of going through try_call_once + closure.  Reasons:
+        //   1. Tier-0 closure-context codegen for `unsafe { *ptr =
+        //      Some(v) }` doesn't currently round-trip the captured
+        //      `&self.value` correctly when invoked indirectly through
+        //      `f()` (separate codegen issue tracked at task #40
+        //      follow-up).  The direct-CAS pattern bypasses that
+        //      entirely.
+        //   2. Slightly faster — one CAS + one store on the win path
+        //      instead of CAS + closure-call + CAS + store.
+        //   3. Same `f()`-runs-at-most-once contract as the
+        //      try_call_once version: only the RUNNING-winning thread
+        //      ever invokes `f`; losers spin on RUNNING then either
+        //      observe COMPLETE (return Ok) or INCOMPLETE-after-
+        //      surrender (retry their own CAS attempt).
+        loop {
+            let cas = self.once.state.compare_exchange(
+                INCOMPLETE,
+                RUNNING,
+                MemoryOrdering.AcqRel,
+                MemoryOrdering.Acquire,
+            );
+            if cas.is_ok() {
+                // We won — invoke `f` and either store on success or
+                // surrender RUNNING → INCOMPLETE on failure (so the
+                // next caller can retry).
+                match f() {
+                    Ok(v) => {
+                        unsafe {
+                            let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
+                            *ptr = Some(v);
+                        }
+                        self.once.state.store(COMPLETE, MemoryOrdering.Release);
+                        return Ok(self.value.as_ref().unwrap());
                     }
-                    Ok(())
+                    Err(e) => {
+                        self.once.state.store(INCOMPLETE, MemoryOrdering.Release);
+                        return Err(e);
+                    }
                 }
-                Err(e) => Err(e),
             }
-        })?;
-
-        // At this point either we wrote the value or another thread
-        // did — both paths leave self.value populated and the Once
-        // marked COMPLETE.
-        Ok(self.value.as_ref().unwrap())
+            // CAS lost — observe the actual state and dispatch.
+            let observed: Int = match cas {
+                Err(actual) => actual,
+                Ok(_) => unsafe { unreachable_unchecked() },
+            };
+            if observed == COMPLETE {
+                return Ok(self.value.as_ref().unwrap());
+            }
+            if observed == POISONED {
+                panic("OnceLock::get_or_try_init on poisoned Once");
+            }
+            if observed == RUNNING {
+                while self.once.state.load(MemoryOrdering.Acquire) == RUNNING {
+                    spin_hint();
+                }
+                continue;
+            }
+            compiler_fence(MemoryOrdering.SeqCst);
+        }
     }
 
     /// Try to set the value to `value`.  Race-safe single-shot
@@ -436,41 +477,51 @@ implement<T> OnceLock<T> {
         // because the value can only be moved into storage on the
         // winning path; any closure capture would burn the value
         // on the losing thread.
+        //
+        // Refactor: outer loop with a Bool wait flag instead of
+        // nested `Err(POISONED)` / `Err(RUNNING)` / `Err(_)` arms.
+        // Pattern matching `Err(<const>)` against Result's Int
+        // payload is brittle in the current codegen — see task
+        // #40 — so we destructure into the actual i64 first then
+        // do plain integer comparisons.
         loop {
-            match self.once.state.compare_exchange(
+            let cas = self.once.state.compare_exchange(
                 INCOMPLETE,
                 RUNNING,
                 MemoryOrdering.AcqRel,
                 MemoryOrdering.Acquire,
-            ) {
-                Ok(_) => {
-                    // We won — store value, publish COMPLETE.
-                    unsafe {
-                        let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
-                        *ptr = Some(value);
-                    }
-                    self.once.state.store(COMPLETE, MemoryOrdering.Release);
-                    return Ok(self.value.as_ref().unwrap());
+            );
+            if cas.is_ok() {
+                // We won — store value, publish COMPLETE.
+                unsafe {
+                    let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
+                    *ptr = Some(value);
                 }
-                Err(COMPLETE) => {
-                    return Err(value);
-                }
-                Err(POISONED) => {
-                    panic("OnceLock::try_get_or_set on poisoned Once — use try_get_or_set_force to recover");
-                }
-                Err(RUNNING) => {
-                    // Another thread is initialising — spin until it
-                    // either completes or surrenders the RUNNING claim.
-                    while self.once.state.load(MemoryOrdering.Acquire) == RUNNING {
-                        spin_hint();
-                    }
-                    // Then retry the CAS (will hit COMPLETE on success
-                    // or INCOMPLETE if the winning thread surrendered).
-                }
-                Err(_) => {
-                    compiler_fence(MemoryOrdering.SeqCst);
-                }
+                self.once.state.store(COMPLETE, MemoryOrdering.Release);
+                return Ok(self.value.as_ref().unwrap());
             }
+            let observed: Int = match cas {
+                Err(actual) => actual,
+                Ok(_) => unsafe { unreachable_unchecked() },
+            };
+            if observed == COMPLETE {
+                return Err(value);
+            }
+            if observed == POISONED {
+                panic("OnceLock::try_get_or_set on poisoned Once — use try_get_or_set_force to recover");
+            }
+            if observed == RUNNING {
+                // Spin until the winning thread releases RUNNING
+                // (either completes → COMPLETE, or surrenders →
+                // INCOMPLETE).
+                while self.once.state.load(MemoryOrdering.Acquire) == RUNNING {
+                    spin_hint();
+                }
+                // Loop continues — next CAS sees the resolved state.
+                continue;
+            }
+            // Unexpected state — fence and retry.
+            compiler_fence(MemoryOrdering.SeqCst);
         }
     }
 }
