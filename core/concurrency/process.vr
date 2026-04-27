@@ -35,6 +35,9 @@
 
 module core.concurrency.process;
 
+mount core.*;
+mount core.collections.set.{Set};
+
 // =============================================================================
 // 1. The process algebra
 // =============================================================================
@@ -86,28 +89,115 @@ public fn proc_replicate(inner: Process) -> Process {
 // 3. Capture-avoiding substitution
 // =============================================================================
 
-/// Substitute `from` with `to` everywhere it appears free,
-/// respecting restriction and recv binders that shadow `from`.
+/// Collect free names of a process into `out`.
+///
+/// A name is *free* iff it occurs as a channel / message / object
+/// position outside the scope of any (νx) or x(y) that binds it.
+/// `substitute` uses this to detect — and α-rename around — binders
+/// that would otherwise capture the substituted value.
+public fn free_names(p: &Process, out: &mut Set<Text>) {
+    match p {
+        Process.Zero => {},
+        Process.Par { left, right } => {
+            free_names(left, out);
+            free_names(right, out);
+        },
+        Process.Restrict { name, body } => {
+            // Body's free names minus `name` (bound here).
+            let mut body_fv: Set<Text> = Set.new();
+            free_names(body, &mut body_fv);
+            body_fv.remove(name.clone());
+            for n in body_fv.iter() { out.insert(n.clone()); }
+        },
+        Process.Send { channel, message, cont } => {
+            out.insert(channel.clone());
+            out.insert(message.clone());
+            free_names(cont, out);
+        },
+        Process.Recv { channel, binder, cont } => {
+            out.insert(channel.clone());
+            // Continuation's free names minus `binder`.
+            let mut cont_fv: Set<Text> = Set.new();
+            free_names(cont, &mut cont_fv);
+            cont_fv.remove(binder.clone());
+            for n in cont_fv.iter() { out.insert(n.clone()); }
+        },
+        Process.Replicate { inner } => free_names(inner, out),
+    }
+}
+
+/// Pick a name based on `base` that is NOT in `avoid`. Appends
+/// successive primes until a fresh candidate is found. Deterministic
+/// — the same `(base, avoid)` always yields the same fresh name.
+fn fresh_name(base: Text, avoid: &Set<Text>) -> Text {
+    let mut candidate = base + "'";
+    while avoid.contains(candidate.clone()) {
+        candidate = candidate + "'";
+    }
+    candidate
+}
+
+/// Choose a fresh binder name that doesn't collide with `from`,
+/// `to`, or any free name of `body`. Used by the α-rename branches
+/// of `substitute`.
+fn alpha_rename_avoiding(
+    base: &Text,
+    from: &Text,
+    to:   &Text,
+    body: &Process,
+) -> Text {
+    let mut avoid: Set<Text> = Set.new();
+    free_names(body, &mut avoid);
+    avoid.insert(from.clone());
+    avoid.insert(to.clone());
+    fresh_name(base.clone(), &avoid)
+}
+
+/// Substitute `from` with `to` in every free position of `p`.
+///
+/// SOUNDNESS: capture-avoiding. When a binder `(νx)` or `x(y)` would
+/// otherwise capture a substituted occurrence (i.e. `binder == to`
+/// and `binder != from`), the binder is α-renamed to a fresh name
+/// before the substitution descends into its scope. Without this,
+/// `substitute((νto) from.0, from, to)` would produce `(νto) to.0`
+/// where the inner `to` is bound by the outer `(νto)` — silently
+/// changing the process semantics. The α-rename preserves the
+/// observational meaning of the bound subterm.
 public fn substitute(p: Process, from: Text, to: Text) -> Process {
     match p {
         Process.Zero => Process.Zero,
         Process.Par { left, right } => proc_par(
-            substitute(*left, from, to),
+            substitute(*left, from.clone(), to.clone()),
             substitute(*right, from, to),
         ),
         Process.Restrict { name, body } => {
-            if name == from { p }
-            else { proc_restrict(name, substitute(*body, from, to)) }
+            if name == from {
+                // Binder shadows `from` — body has no free `from`.
+                p
+            } else if name == to {
+                // Binder would capture: α-rename first.
+                let fresh = alpha_rename_avoiding(&name, &from, &to, &*body);
+                let renamed = substitute(*body, name, fresh.clone());
+                proc_restrict(fresh, substitute(renamed, from, to))
+            } else {
+                proc_restrict(name, substitute(*body, from, to))
+            }
         },
         Process.Send { channel, message, cont } => {
-            let new_ch = if channel == from { to } else { channel };
-            let new_msg = if message == from { to } else { message };
+            let new_ch = if channel == from { to.clone() } else { channel };
+            let new_msg = if message == from { to.clone() } else { message };
             proc_send(new_ch, new_msg, substitute(*cont, from, to))
         },
         Process.Recv { channel, binder, cont } => {
-            let new_ch = if channel == from { to } else { channel };
+            let new_ch = if channel == from { to.clone() } else { channel };
             if binder == from {
+                // Binder shadows `from` inside cont.
                 proc_recv(new_ch, binder, *cont)
+            } else if binder == to {
+                // Binder would capture: α-rename first.
+                let fresh = alpha_rename_avoiding(&binder, &from, &to, &*cont);
+                let renamed = substitute(*cont, binder, fresh.clone());
+                proc_recv(new_ch, fresh, substitute(renamed, from, to))
             } else {
                 proc_recv(new_ch, binder, substitute(*cont, from, to))
             }
