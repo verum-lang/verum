@@ -70,7 +70,10 @@ implement<T: Clone> Provider<T> {
         }
         match &self.cached {
             Some(value) => value.clone(),
-            None => unreachable(),
+            // Invariant: the `is_none()` guard above just stored
+            // Some(...). Reaching None here is a bug — concurrent
+            // mutation, or factory-stored-None somehow.
+            None => unreachable("Provider::get: self.cached must be Some after the populate-guard ran"),
         }
     }
 
@@ -88,7 +91,8 @@ implement<T: Clone> Provider<T> {
         }
         match &self.cached {
             Some(value) => value,
-            None => unreachable(),
+            // See `get` above — same invariant.
+            None => unreachable("Provider::get_ref: self.cached must be Some after the populate-guard ran"),
         }
     }
 
