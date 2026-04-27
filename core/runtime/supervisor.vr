@@ -1330,10 +1330,14 @@ implement SupervisorHandle {
         // Note: This requires interior mutability pattern
         // In production, use a proper sync mechanism
         let _ = parent;  // parent info stored separately via inner state
+        // SupervisorHandleOpaque is `is (Int)` per runtime/async_ops.vr:13
+        // — pass the address as an Int (no `*const Byte` round-trip).
+        // Pre-fix this used `as *const Byte` which mismatched the
+        // newtype's payload type (E400 on type-check).
         unsafe {
             supervisor_set_parent(
-                SupervisorHandleOpaque(self as Int as *const Byte),
-                SupervisorHandleOpaque(0 as *const Byte),
+                SupervisorHandleOpaque(self as Int),
+                SupervisorHandleOpaque(0),
             );
         }
     }
@@ -1485,18 +1489,18 @@ implement ChildState {
 
     /// Take task handle (for monitoring)
     public fn take_handle(&self) -> Maybe<JoinHandle<()>> {
-        self.handle.lock().take()
+        self.handle.lock().unwrap_or_else(|p| p.into_inner()).take()
     }
 
     /// Set task handle
     public fn set_handle(&self, handle: JoinHandle<()>) {
-        *self.handle.lock() = Some(handle);
+        *self.handle.lock().unwrap_or_else(|p| p.into_inner()) = Some(handle);
     }
 
     /// Take factory (for respawning)
     public fn take_factory(&self) -> Maybe<Heap<fn() -> Future<()>>> {
         // Clone the factory (it's a Fn, not FnOnce)
-        self.factory.lock().clone()
+        self.factory.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     /// Record a restart event for this child and return the
@@ -1531,7 +1535,7 @@ implement ChildState {
         // shouldn't accumulate >255 restarts before the supervisor
         // escalates.  Saturating cast preserves "many restarts"
         // semantics without wrap-around to 0.
-        let attempt = if attempt_count > 0xFF { 0xFFu8 } else { attempt_count as UInt8 };
+        let attempt = if attempt_count > 0xFF { 0xFF as UInt8 } else { attempt_count as UInt8 };
 
         RestartEvent.new(self.id, reason, attempt, run_duration_secs)
     }
