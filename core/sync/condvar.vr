@@ -24,14 +24,14 @@
 //
 // // Producer thread
 // {
-//     let mut guard = mutex.lock().unwrap();
+//     let mut guard = mutex.lock().unwrap_or_else(|p| p.into_inner());
 //     guard.push(item);
 //     condvar.notify_one();
 // }
 //
 // // Consumer thread
 // {
-//     let mut guard = mutex.lock().unwrap();
+//     let mut guard = mutex.lock().unwrap_or_else(|p| p.into_inner());
 //     while guard.is_empty() {
 //         guard = condvar.wait(guard).unwrap();
 //     }
@@ -306,14 +306,14 @@ implement Drop for CondvarNotifyGuard {
 ///
 /// // Producer
 /// {
-///     let mut guard = mutex.lock().unwrap();
+///     let mut guard = mutex.lock().unwrap_or_else(|p| p.into_inner());
 ///     guard.push(item);
 ///     condvar.notify_one();
 /// }
 ///
 /// // Consumer
 /// {
-///     let mut guard = mutex.lock().unwrap();
+///     let mut guard = mutex.lock().unwrap_or_else(|p| p.into_inner());
 ///     guard = condvar.wait_while(guard, |q| q.is_empty()).unwrap();
 ///     let item = guard.pop();
 /// }

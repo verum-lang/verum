@@ -194,7 +194,7 @@ implement TracerProvider {
     /// Same (name, version) pair returns the same Tracer to amortise
     /// Shared-clone cost.
     public fn tracer(&self, name: &Text, version: &Text) -> Heap<dyn Tracer> {
-        let mut guard = self.tracers.lock().unwrap();
+        let mut guard = self.tracers.lock().unwrap_or_else(|p| p.into_inner());
         let mut i = 0;
         while i < guard.len() {
             if guard[i].0 == *name && guard[i].1 == *version {
@@ -381,14 +381,14 @@ static GLOBAL_PROVIDER: Shared<Mutex<Maybe<Shared<TracerProvider>>>> =
 /// startup. Replaces any previous provider (its processors are NOT
 /// flushed — the caller is responsible for orderly shutdown).
 public fn set_global_tracer_provider(provider: TracerProvider) {
-    let mut guard = GLOBAL_PROVIDER.lock().unwrap();
+    let mut guard = GLOBAL_PROVIDER.lock().unwrap_or_else(|p| p.into_inner());
     *guard = Some(Shared.new(provider));
 }
 
 /// Return the installed provider, or a fresh NoopTracerProvider if none
 /// has been installed. This lets `get_tracer(...)` always succeed.
 public fn global_tracer_provider() -> Shared<TracerProvider> {
-    let guard = GLOBAL_PROVIDER.lock().unwrap();
+    let guard = GLOBAL_PROVIDER.lock().unwrap_or_else(|p| p.into_inner());
     match &*guard {
         Some(p) => p.clone(),
         None => Shared.new(TracerProvider.noop()),

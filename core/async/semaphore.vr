@@ -103,7 +103,7 @@ implement AsyncSemaphore {
     /// are available.
     public fn try_acquire(&self) -> Maybe<SemaphorePermit> {
         let shared = self.inner.clone();
-        let mut inner = (*shared).lock().unwrap();
+        let mut inner = (*shared).lock().unwrap_or_else(|p| p.into_inner());
         if inner.closed || inner.permits <= 0 { return None; }
         inner.permits = inner.permits - 1;
         Some(SemaphorePermit { sem: shared.clone() })
@@ -114,7 +114,7 @@ implement AsyncSemaphore {
     public fn add_permits(&self, n: Int) {
         if n <= 0 { return; }
         let shared = self.inner.clone();
-        let mut inner = (*shared).lock().unwrap();
+        let mut inner = (*shared).lock().unwrap_or_else(|p| p.into_inner());
         inner.permits = inner.permits + n;
         // Wake up to n waiters.
         let mut i: Int = 0;
@@ -132,7 +132,7 @@ implement AsyncSemaphore {
     /// their drop.
     public fn close(&self) {
         let shared = self.inner.clone();
-        let mut inner = (*shared).lock().unwrap();
+        let mut inner = (*shared).lock().unwrap_or_else(|p| p.into_inner());
         inner.closed = true;
         // Wake every waiter so they observe the closed state.
         while inner.waiters.len() > 0 {
@@ -147,7 +147,7 @@ implement AsyncSemaphore {
     /// the caller acts on it). For metrics only.
     public fn available_permits(&self) -> Int {
         let shared = self.inner.clone();
-        let inner = (*shared).lock().unwrap();
+        let inner = (*shared).lock().unwrap_or_else(|p| p.into_inner());
         inner.permits
     }
 }
@@ -169,7 +169,7 @@ implement SemaphorePermit {
 // Drop hook — returns the permit to the pool and wakes one waiter.
 implement Drop for SemaphorePermit {
     fn drop(&mut self) {
-        let mut inner = (*self.sem).lock().unwrap();
+        let mut inner = (*self.sem).lock().unwrap_or_else(|p| p.into_inner());
         inner.permits = inner.permits + 1;
         match inner.waiters.pop_front() {
             Some(w) => w.wake(),
@@ -195,7 +195,7 @@ implement Future for SemaphoreFuture {
     type Output = Result<SemaphorePermit, SemaphoreError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output> {
-        let mut inner = (*self.sem).lock().unwrap();
+        let mut inner = (*self.sem).lock().unwrap_or_else(|p| p.into_inner());
         if inner.closed {
             return Poll.Ready(Err(SemaphoreError.Closed));
         }

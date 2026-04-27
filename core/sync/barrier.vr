@@ -118,7 +118,7 @@ implement Barrier {
     /// }
     /// ```
     public fn wait(&self) -> BarrierWaitResult {
-        let mut guard = self.state.lock().unwrap();
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let my_generation = guard.generation;
 
         guard.count = guard.count + 1;
@@ -152,14 +152,14 @@ implement Barrier {
     ///
     /// Note: This is approximate due to concurrent modifications.
     public fn waiting_count(&self) -> Int {
-        self.state.lock().unwrap().count
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).count
     }
 
     /// Get the current generation number.
     ///
     /// The generation increments each time all threads pass the barrier.
     public fn generation(&self) -> Int {
-        self.state.lock().unwrap().generation
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).generation
     }
 }
 
@@ -283,7 +283,7 @@ implement Phaser {
     ///
     /// Returns the current phase number.
     public fn register(&self) -> Int {
-        let _guard = self.mutex.lock().unwrap();
+        let _guard = self.mutex.lock().unwrap_or_else(|p| p.into_inner());
 
         let old_state = self.state.fetch_add(1, MemoryOrdering.SeqCst);
         // PHASE_MASK_SHIFTED guarantees the TERMINATED_BIT (now at
@@ -346,7 +346,7 @@ implement Phaser {
         }
 
         // Wait for phase to advance
-        let mut guard = self.mutex.lock().unwrap();
+        let mut guard = self.mutex.lock().unwrap_or_else(|p| p.into_inner());
         while self.get_phase() == phase {
             guard = self.condvar.wait(guard).unwrap();
         }
@@ -369,7 +369,7 @@ implement Phaser {
     /// `arrive_and_await` itself.  We now use the same CAS-loop
     /// pattern with TERMINATED_BIT preservation.
     public fn arrive_and_deregister(&self) -> Int {
-        let _guard = self.mutex.lock().unwrap();
+        let _guard = self.mutex.lock().unwrap_or_else(|p| p.into_inner());
 
         // Decrement parties && increment arrived
         let adjustment = (1 << ARRIVED_SHIFT) - 1;  // +1 arrived, -1 parties
@@ -498,7 +498,7 @@ implement CountDownLatch {
             return;
         }
 
-        let mut guard = self.latch_lock.lock().unwrap();
+        let mut guard = self.latch_lock.lock().unwrap_or_else(|p| p.into_inner());
         while self.count.load(MemoryOrdering.SeqCst) > 0 {
             guard = self.condvar.wait(guard).unwrap();
         }
@@ -512,7 +512,7 @@ implement CountDownLatch {
             return true;
         }
 
-        let guard = self.latch_lock.lock().unwrap();
+        let guard = self.latch_lock.lock().unwrap_or_else(|p| p.into_inner());
         let (_, timed_out) = self.condvar.wait_timeout(guard, timeout_ns).unwrap();
         !timed_out && self.count.load(MemoryOrdering.SeqCst) == 0
     }

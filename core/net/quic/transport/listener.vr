@@ -210,7 +210,7 @@ implement ServerListener {
     }
 
     fn find_connection(&self, dcid: &ConnectionId) -> Maybe<TrackedConnection> {
-        let conns = self.connections.lock().unwrap();
+        let conns = self.connections.lock().unwrap_or_else(|p| p.into_inner());
         let mut i: Int = 0;
         while i < conns.len() {
             if conns[i].local_cid.eq(dcid) {
@@ -227,7 +227,7 @@ implement ServerListener {
         peer_dcid: ConnectionId,
     ) -> Result<(), ListenerError> {
         // Cap check.
-        let current = self.connections.lock().unwrap().len() as UInt64;
+        let current = self.connections.lock().unwrap_or_else(|p| p.into_inner()).len() as UInt64;
         if self.max_connections > 0_u64 && current >= self.max_connections {
             return Err(ListenerError.TooManyConnections(current));
         }
@@ -246,7 +246,7 @@ implement ServerListener {
         let local_cid = self.mint_cid();
 
         // Build server TLS SM + handshake driver.
-        let tls_cfg = self.tls_config.lock().unwrap().clone();
+        let tls_cfg = self.tls_config.lock().unwrap_or_else(|p| p.into_inner()).clone();
         let server_sm = ServerSm.new(tls_cfg);
         let handshake = HandshakeDriver.server(server_sm);
 
@@ -308,7 +308,7 @@ implement ServerListener {
 
         // Register in the DCID table.
         {
-            let mut conns = self.connections.lock().unwrap();
+            let mut conns = self.connections.lock().unwrap_or_else(|p| p.into_inner());
             conns.push(TrackedConnection {
                 local_cid:  local_cid.clone(),
                 peer_addr:  dg.peer_addr.clone(),
@@ -336,7 +336,7 @@ implement ServerListener {
     }
 
     fn mint_cid(&self) -> ConnectionId {
-        let mut seed = self.cid_seed.lock().unwrap();
+        let mut seed = self.cid_seed.lock().unwrap_or_else(|p| p.into_inner());
         let id = *seed;
         *seed = id + 1_u64;
 
@@ -357,7 +357,7 @@ implement ServerListener {
 
     pub async fn close(&self) -> Result<(), ListenerError> {
         // Close all tracked connections + drop the UDP socket.
-        let conns = self.connections.lock().unwrap().clone();
+        let conns = self.connections.lock().unwrap_or_else(|p| p.into_inner()).clone();
         let mut i: Int = 0;
         while i < conns.len() { i = i + 1; }    // per-pump close hook lives inside ConnectionPump
         self.transport.close().await.map_err(|e| ListenerError.Transport(e))?;

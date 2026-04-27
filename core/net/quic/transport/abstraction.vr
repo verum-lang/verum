@@ -299,7 +299,7 @@ implement SimUdpTransport {
 implement UdpTransport for SimUdpTransport {
     async fn recv(&self) -> Result<InboundDatagram, TransportError> {
         loop {
-            let mut net = self.network.lock().unwrap();
+            let mut net = self.network.lock().unwrap_or_else(|p| p.into_inner());
             if net.closed { return Err(TransportError.Closed); }
             // Scan inflight for first datagram addressed to us.
             let mut idx: Int = 0;
@@ -323,7 +323,7 @@ implement UdpTransport for SimUdpTransport {
     }
 
     async fn send(&self, data: &[Byte], to: &SocketAddr, ecn: EcnCodepoint) -> Result<(), TransportError> {
-        let mut net = self.network.lock().unwrap();
+        let mut net = self.network.lock().unwrap_or_else(|p| p.into_inner());
         if net.closed { return Err(TransportError.Closed); }
         net.sent_count = net.sent_count + 1_u64;
 
@@ -347,7 +347,7 @@ implement UdpTransport for SimUdpTransport {
     fn max_datagram_size(&self) -> Int { 1472 }
 
     async fn close(&self) -> Result<(), TransportError> {
-        let mut net = self.network.lock().unwrap();
+        let mut net = self.network.lock().unwrap_or_else(|p| p.into_inner());
         net.closed = true;
         Ok(())
     }

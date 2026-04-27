@@ -223,7 +223,7 @@ implement<T> Sender<T> {
         loop {
             let seq = self.inner.notify_seq.load(MemoryOrdering.Acquire);
 
-            let mut guard = self.inner.queue.lock().unwrap();
+            let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
             // Bounded-capacity check under the same lock as the push — no TOCTOU.
             if let Some(cap) = self.inner.capacity {
                 if guard.len() >= cap {
@@ -243,7 +243,7 @@ implement<T> Sender<T> {
             self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
             let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
 
-            let waker_guard = self.inner.receiver_waker.lock().unwrap();
+            let waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(waker) = waker_guard.as_ref() {
                 waker.wake_by_ref();
             }
@@ -327,7 +327,7 @@ implement<T> Sender<T> {
             return Err(TrySendError.Disconnected(value));
         }
 
-        let mut guard = self.inner.queue.lock().unwrap();
+        let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
 
         if let Some(cap) = self.inner.capacity {
             if guard.len() >= cap {
@@ -341,7 +341,7 @@ implement<T> Sender<T> {
         self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
         let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
 
-        let waker_guard = self.inner.receiver_waker.lock().unwrap();
+        let waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(waker) = waker_guard.as_ref() {
             waker.wake_by_ref();
         }
@@ -367,12 +367,12 @@ implement<T> Sender<T> {
 
     // Get number of messages in channel.
     public fn len(&self) -> Int {
-        self.inner.queue.lock().unwrap().len()
+        self.inner.queue.lock().unwrap_or_else(|p| p.into_inner()).len()
     }
 
     // Check if channel is empty.
     public fn is_empty(&self) -> Bool {
-        self.inner.queue.lock().unwrap().is_empty()
+        self.inner.queue.lock().unwrap_or_else(|p| p.into_inner()).is_empty()
     }
 
     // Get capacity (None for unbounded).
@@ -385,7 +385,7 @@ implement<T> Sender<T> {
     // and L2 rendezvous/bounded test scenarios that gate `send` on space.
     public fn is_full(&self) -> Bool {
         match self.inner.capacity {
-            Some(cap) => self.inner.queue.lock().unwrap().len() >= cap,
+            Some(cap) => self.inner.queue.lock().unwrap_or_else(|p| p.into_inner()).len() >= cap,
             None => false,
         }
     }
@@ -428,7 +428,7 @@ implement<T> Drop for Sender<T> {
             let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
 
             // Also wake async receiver
-            let waker_guard = self.inner.receiver_waker.lock().unwrap();
+            let waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(waker) = waker_guard.as_ref() {
                 waker.wake_by_ref();
             }
@@ -452,10 +452,10 @@ implement<T> Receiver<T> {
             // Snapshot notification counter before checking queue
             let seq = self.inner.notify_seq.load(MemoryOrdering.Acquire);
 
-            let mut guard = self.inner.queue.lock().unwrap();
+            let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(value) = guard.pop_front() {
                 // Wake a waiting sender
-                let mut wakers = self.inner.sender_wakers.lock().unwrap();
+                let mut wakers = self.inner.sender_wakers.lock().unwrap_or_else(|p| p.into_inner());
                 if let Some(waker) = wakers.pop() {
                     waker.wake();
                 }
@@ -477,7 +477,7 @@ implement<T> Receiver<T> {
 
     // Try to receive without waiting.
     public fn try_recv(&mut self) -> Result<T, TryRecvError> {
-        let mut guard = self.inner.queue.lock().unwrap();
+        let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
         match guard.pop_front() {
             Some(value) => Ok(value),
             None => {
@@ -492,17 +492,17 @@ implement<T> Receiver<T> {
 
     // Check if channel is closed && empty.
     public fn is_closed(&self) -> Bool {
-        self.inner.closed.load(MemoryOrdering.Relaxed) && self.inner.queue.lock().unwrap().is_empty()
+        self.inner.closed.load(MemoryOrdering.Relaxed) && self.inner.queue.lock().unwrap_or_else(|p| p.into_inner()).is_empty()
     }
 
     // Get number of messages in channel.
     public fn len(&self) -> Int {
-        self.inner.queue.lock().unwrap().len()
+        self.inner.queue.lock().unwrap_or_else(|p| p.into_inner()).len()
     }
 
     // Check if channel is empty.
     public fn is_empty(&self) -> Bool {
-        self.inner.queue.lock().unwrap().is_empty()
+        self.inner.queue.lock().unwrap_or_else(|p| p.into_inner()).is_empty()
     }
 
     // Close the channel, preventing further sends.
@@ -516,7 +516,7 @@ implement<T> Future for Receiver<T> {
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
         // Try to receive
-        let mut guard = self.inner.queue.lock().unwrap();
+        let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(value) = guard.pop_front() {
             return Poll.Ready(Some(value));
         }
@@ -527,7 +527,7 @@ implement<T> Future for Receiver<T> {
         }
 
         // Register waker for when data arrives
-        let mut waker_guard = self.inner.receiver_waker.lock().unwrap();
+        let mut waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
         *waker_guard = Some(cx.waker().clone());
 
         Poll.Pending
@@ -552,7 +552,7 @@ implement<T> Receiver<T> {
     // `out` via push_back; returns number of items drained. Zero indicates
     // empty-and-still-open or closed — distinguish via `is_closed`.
     public fn recv_many(&mut self, out: &mut List<T>, max: Int) -> Int {
-        let mut guard = self.inner.queue.lock().unwrap();
+        let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
         let mut n = 0;
         while n < max {
             match guard.pop_front() {
@@ -576,7 +576,7 @@ implement<T> Receiver<T> {
         if max <= 0 { return out; }
         loop {
             let seq = self.inner.notify_seq.load(MemoryOrdering.Acquire);
-            let mut guard = self.inner.queue.lock().unwrap();
+            let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
             if guard.len() > 0 {
                 let mut n = 0;
                 while n < max {
@@ -589,7 +589,7 @@ implement<T> Receiver<T> {
                 // policy as recv(): a single wake is sufficient because
                 // futex_wake with count=1 is coalesced; the sender loop
                 // re-snapshots on wake.
-                let mut wakers = self.inner.sender_wakers.lock().unwrap();
+                let mut wakers = self.inner.sender_wakers.lock().unwrap_or_else(|p| p.into_inner());
                 if let Some(waker) = wakers.pop() { waker.wake(); }
                 return out;
             }
@@ -624,9 +624,9 @@ implement<T> Stream for Receiver<T> {
     type Item = T;
 
     fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
-        let mut guard = self.inner.queue.lock().unwrap();
+        let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(value) = guard.pop_front() {
-            let mut wakers = self.inner.sender_wakers.lock().unwrap();
+            let mut wakers = self.inner.sender_wakers.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(waker) = wakers.pop() {
                 waker.wake();
             }
@@ -637,13 +637,13 @@ implement<T> Stream for Receiver<T> {
             return Poll.Ready(None);
         }
 
-        let mut waker_guard = self.inner.receiver_waker.lock().unwrap();
+        let mut waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
         *waker_guard = Some(cx.waker().clone());
         Poll.Pending
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let g = self.inner.queue.lock().unwrap();
+        let g = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
         (g.len(), self.inner.capacity)
     }
 }
@@ -680,12 +680,12 @@ implement<T> Future for SendFut<T> {
             return Poll.Ready(Err(SendError(v)));
         }
 
-        let mut guard = self.inner.queue.lock().unwrap();
+        let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
 
         if let Some(cap) = self.inner.capacity {
             if guard.len() >= cap {
                 if !self.waker_registered {
-                    let mut wakers = self.inner.sender_wakers.lock().unwrap();
+                    let mut wakers = self.inner.sender_wakers.lock().unwrap_or_else(|p| p.into_inner());
                     wakers.push(cx.waker().clone());
                     self.waker_registered = true;
                 }
@@ -700,7 +700,7 @@ implement<T> Future for SendFut<T> {
         self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
         let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
 
-        let waker_guard = self.inner.receiver_waker.lock().unwrap();
+        let waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(waker) = waker_guard.as_ref() {
             waker.wake_by_ref();
         }
@@ -721,9 +721,9 @@ implement<T> Future for RecvFut<T> {
     type Output = Maybe<T>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
-        let mut guard = self.inner.queue.lock().unwrap();
+        let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(value) = guard.pop_front() {
-            let mut wakers = self.inner.sender_wakers.lock().unwrap();
+            let mut wakers = self.inner.sender_wakers.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(waker) = wakers.pop() {
                 waker.wake();
             }
@@ -734,7 +734,7 @@ implement<T> Future for RecvFut<T> {
             return Poll.Ready(None);
         }
 
-        let mut waker_guard = self.inner.receiver_waker.lock().unwrap();
+        let mut waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
         *waker_guard = Some(cx.waker().clone());
         Poll.Pending
     }
@@ -755,7 +755,7 @@ implement<T> Future for ChannelClosed<T> {
         if self.inner.closed.load(MemoryOrdering.Acquire) {
             return Poll.Ready(());
         }
-        let mut waker_guard = self.inner.receiver_waker.lock().unwrap();
+        let mut waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
         *waker_guard = Some(cx.waker().clone());
         Poll.Pending
     }
@@ -977,10 +977,10 @@ implement<T> OneshotSender<T> {
             return Err(value);
         }
 
-        *self.inner.value.lock().unwrap() = Some(value);
+        *self.inner.value.lock().unwrap_or_else(|p| p.into_inner()) = Some(value);
 
         // Wake receiver
-        if let Some(waker) = self.inner.waker.lock().unwrap().take() {
+        if let Some(waker) = self.inner.waker.lock().unwrap_or_else(|p| p.into_inner()).take() {
             waker.wake();
         }
 
@@ -993,7 +993,7 @@ implement<T> Future for OneshotReceiver<T> {
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, RecvError>> {
         // Check if value is available
-        let mut value_guard = self.inner.value.lock().unwrap();
+        let mut value_guard = self.inner.value.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(value) = value_guard.take() {
             return Poll.Ready(Ok(value));
         }
@@ -1004,7 +1004,7 @@ implement<T> Future for OneshotReceiver<T> {
         }
 
         // Register waker
-        *self.inner.waker.lock().unwrap() = Some(cx.waker().clone());
+        *self.inner.waker.lock().unwrap_or_else(|p| p.into_inner()) = Some(cx.waker().clone());
 
         Poll.Pending
     }
