@@ -740,8 +740,17 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     // src/main.vr, synthesise a `mount cog.lib.*` (or `mount cog.main.*`)
     // line and prepend it via a temp file so the production pipeline
     // resolves crate-root references without per-test boilerplate.
-    let test_input = synthesise_test_input_with_crate_root(&test.file, target_dir)
-        .unwrap_or_else(|| test.file.clone());
+    //
+    // T0.5.2 — additionally synthesise a `fn main()` that invokes the
+    // @test function and exits 0 on success, so the AOT-compiled
+    // binary's exit code matches the test convention (mirrors what
+    // run_test_interpret does in-process via Interpreter::call).
+    let test_input = synthesise_test_input_with_crate_root(
+        &test.file,
+        target_dir,
+        test.fn_name.as_deref(),
+    )
+    .unwrap_or_else(|| test.file.clone());
 
     let options = CompilerOptions {
         input: test_input,
@@ -852,12 +861,18 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
 /// implicit access to src/lib.vr we read both, concatenate body
 /// contents (stripping any duplicate `module` header from the
 /// crate root since the test file owns its own module identity),
-/// and write to `<target_dir>/test_<stem>.merged.vr`. Returns the
-/// merged file path on success, `None` (= use the original test
-/// file) if no manifest / no crate root / IO failure.
+/// and write to `<target_dir>/test_<stem>.merged.vr`.
+///
+/// T0.5.2 — when `test_fn_name` is provided, *also* append a
+/// synthesised `fn main() -> Int { <fn>(); 0 }` so the AOT
+/// binary's exit-code semantics match the test convention. The
+/// runner reads the binary's exit code, so success must be 0.
+/// Returns the merged file path on success, `None` (= use the
+/// original test file) if no manifest / no crate root / IO failure.
 fn synthesise_test_input_with_crate_root(
     test_file: &Path,
     target_dir: &Path,
+    test_fn_name: Option<&str>,
 ) -> Option<PathBuf> {
     let mut cur = test_file.parent()?;
     let cog_root = loop {
@@ -891,6 +906,19 @@ fn synthesise_test_input_with_crate_root(
         stripped_root
     };
 
+    // T0.5.2 — synthetic main wraps the @test function. Returns 0
+    // on natural completion (any panic / assert-fail aborts the
+    // process before reaching the final 0). This mirrors how
+    // run_test_interpret extracts the test fn and calls it directly.
+    let synth_main = match test_fn_name {
+        Some(name) => format!(
+            "\n\n// === T0.5.2 synthetic main — invokes the @test fn ===\n\
+             public fn main() -> Int {{\n    {}();\n    0\n}}\n",
+            name
+        ),
+        None => String::new(),
+    };
+
     let stem = test_file.file_stem()?.to_str()?;
     let merged_path = target_dir.join(format!("test_{}.merged.vr", stem));
     if std::fs::create_dir_all(target_dir).is_err() {
@@ -898,11 +926,12 @@ fn synthesise_test_input_with_crate_root(
     }
     let merged = format!(
         "// Auto-merged by T6.0.4 — test file body appended after stripped crate root.\n\
-         // Source test: {}\n// Source crate root: {}\n\n{}\n\n// === test body ===\n{}\n",
+         // Source test: {}\n// Source crate root: {}\n\n{}\n\n// === test body ===\n{}{}",
         test_file.display(),
         root_path.display(),
         stripped_root,
         test_source,
+        synth_main,
     );
     std::fs::write(&merged_path, merged).ok()?;
     Some(merged_path)
