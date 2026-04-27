@@ -107,6 +107,35 @@ implement<V: Eq + Hash, L> AdjacencyList<V, L> {
         }
         total
     }
+
+    // -------------------------------------------------------------
+    // §2.5. Zero-clone borrow accessors
+    //
+    // The `Graph<V, L>` protocol's API is shape-pinned at owned
+    // `List<Edge>` returns — every algorithm consuming the protocol
+    // must work cross-implementation, so clone-on-return is the
+    // safe contract. These inherent methods are the *fast path* for
+    // call-sites that hold a concrete `&AdjacencyList<V, L>` and
+    // don't need ownership: BFS / DFS / SCC / Dijkstra spend most
+    // of their time iterating, not transforming, and a 10k-vertex
+    // graph with average degree 100 makes one clone per call into
+    // 10^6 wasted allocations across a typical traversal.
+    //
+    // Naming convention: `_ref` suffix means "no ownership transfer",
+    // matching `core.collections.map.Map::get` (returns `Maybe<&V>`).
+    // -------------------------------------------------------------
+
+    /// Borrow the canonical vertex list. Zero-clone.
+    public fn vertices_ref(&self) -> &List<V> {
+        &self.vertex_list
+    }
+
+    /// Borrow the outgoing-edge list for `v`. Returns `Maybe::None`
+    /// only if `v` was never seen by the builder; an isolated vertex
+    /// (no edges) returns `Maybe::Some` of an empty list reference.
+    public fn out_edges_ref(&self, v: &V) -> Maybe<&List<Edge<V, L>>> {
+        self.out_edges.get(v)
+    }
 }
 
 // =============================================================================
