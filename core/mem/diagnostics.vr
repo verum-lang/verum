@@ -283,3 +283,151 @@ public fn live_allocations() -> List<HeaderView> {
 public fn live_allocation_count() -> Int {
     0
 }
+
+// =============================================================================
+// CallFrame — single frame in a symbolicated call stack
+// =============================================================================
+
+/// One frame of a symbolicated call stack.  Captured at panic time
+/// or via `current_call_stack()` for forensic post-mortem dumps.
+///
+/// All fields are by-value so the frame can cross thread boundaries
+/// safely (no borrowed references into the live stack).
+///
+/// # Symbolication tiers
+///
+/// - Tier-1 AOT: `function` / `file` / `line` / `column` resolved
+///   via DWARF (or PDB on Windows) symbol tables embedded in the
+///   binary.  `instruction_pointer` is the raw return address.
+/// - Tier-0 interpreter: `function` / `line` resolved from the VBC
+///   debug-info section per-frame; `file` / `column` recovered from
+///   the source-map index produced by the codegen.
+///   `instruction_pointer` is the VBC instruction offset of the
+///   call site.
+///
+/// When symbolication is unavailable for a frame, observers see the
+/// raw integer fields (`instruction_pointer != 0`, `function ==
+/// ""`).  This lets call-stack rendering survive stripped binaries
+/// instead of returning empty.
+public type CallFrame is {
+    /// Function name (mangled or human-readable depending on
+    /// symbolication source).  Empty when symbolication failed.
+    function: Text,
+
+    /// Source file path.  Empty when source-map lookup failed.
+    file: Text,
+
+    /// Source line (1-indexed).  `0` when unknown.
+    line: Int,
+
+    /// Source column (1-indexed).  `0` when unknown.
+    column: Int,
+
+    /// Raw instruction-pointer (Tier-1 return address) or VBC
+    /// instruction offset (Tier-0).  Always non-zero for a real
+    /// frame; observers can correlate frames with raw addresses
+    /// when symbolication is partial.
+    instruction_pointer: UInt64,
+};
+
+implement CallFrame {
+    /// Construct an unsymbolicated frame from a raw IP.  Used by
+    /// frame walkers that captured the IP but couldn't resolve
+    /// symbols.  Callers should not synthesise frames with
+    /// `instruction_pointer == 0` — that's reserved as the
+    /// "no frame" sentinel.
+    public fn from_ip(ip: UInt64) -> CallFrame {
+        CallFrame {
+            function: Text.new(),
+            file: Text.new(),
+            line: 0,
+            column: 0,
+            instruction_pointer: ip,
+        }
+    }
+
+    /// Construct a fully-symbolicated frame.  Used when DWARF / VBC
+    /// debug-info lookup succeeded and the frame walker has all
+    /// fields available.
+    public fn new(
+        function: Text,
+        file: Text,
+        line: Int,
+        column: Int,
+        instruction_pointer: UInt64,
+    ) -> CallFrame {
+        CallFrame {
+            function: function,
+            file: file,
+            line: line,
+            column: column,
+            instruction_pointer: instruction_pointer,
+        }
+    }
+
+    /// True iff the frame has a resolved function name.  Useful for
+    /// stack-trace renderers that fall back to raw addresses when
+    /// symbols are unavailable.
+    @inline
+    public fn is_symbolicated(&self) -> Bool {
+        !self.function.is_empty()
+    }
+}
+
+implement Display for CallFrame {
+    /// Single-line summary suitable for log lines and stack-trace
+    /// output.  Formats as `function (file:line:column)` when
+    /// symbolicated, or `<unsymbolicated 0xIP>` when not.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        if self.is_symbolicated() {
+            f.write_str(f"{self.function} ({self.file}:{self.line}:{self.column})")
+        } else {
+            f.write_str(f"<unsymbolicated 0x{self.instruction_pointer}>")
+        }
+    }
+}
+
+implement Debug for CallFrame {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("CallFrame {\n")?;
+        f.write_str(f"  function:            {self.function}\n")?;
+        f.write_str(f"  file:                {self.file}\n")?;
+        f.write_str(f"  line:                {self.line}\n")?;
+        f.write_str(f"  column:              {self.column}\n")?;
+        f.write_str(f"  instruction_pointer: 0x{self.instruction_pointer}\n")?;
+        f.write_str(f"  is_symbolicated:     {self.is_symbolicated()}\n")?;
+        f.write_str("}")
+    }
+}
+
+/// Capture a symbolicated call stack from the current frame upward.
+///
+/// `skip` is the number of frames to skip from the top of the stack
+/// (caller frames closest to this function).  Pass `0` to capture
+/// the full stack including the call to `current_call_stack` itself;
+/// pass `1` to skip the call frame and start from the caller.
+///
+/// # Status: format-stable boundary; producer-side wiring deferred
+///
+/// The boundary ships today returning an empty List so observer
+/// code can call it safely.  Producer-side requires:
+///   - Tier-1 AOT: DWARF symbol resolution (addr2line crate)
+///   - Tier-0 interpreter: VBC frame walk via interpreter call stack
+/// Tracked in #202.
+///
+/// # Format-stable contract
+///
+/// - Returns `List<CallFrame>` in stack order (innermost first —
+///   matches the caller's expected reading order: "what was happening
+///   at the moment of capture, then what called that").
+/// - May return fewer frames than the actual stack depth when the
+///   walker hits an unwinding boundary (ABI mismatch, FFI frame, etc.).
+/// - Empty list does NOT mean "no stack" — until producer-side wiring
+///   lands, it means "frame walking is not yet supported".
+public fn current_call_stack(_skip: Int) -> List<CallFrame> {
+    // Empty stub: the frame walker is not yet wired into either
+    // tier.  Observer code can call this today and graceful-degrade;
+    // when DWARF (Tier-1) and VBC frame walking (Tier-0) land, this
+    // body changes without API churn.
+    List.new()
+}

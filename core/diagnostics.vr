@@ -64,6 +64,7 @@ mount core.{Maybe, Text};
 public mount core.mem.diagnostics.{
     HeaderView, header_view_of,
     live_allocations, live_allocation_count,
+    CallFrame, current_call_stack,
 };
 
 // =============================================================================
@@ -142,6 +143,13 @@ public type PanicReport is {
     /// Empty for non-memory-related panics.
     header: Maybe<HeaderView>,
 
+    /// Symbolicated call stack at panic time.  Empty list when frame
+    /// walking is unavailable (Tier-0 interpreter without VBC debug-
+    /// info, Tier-1 AOT with stripped DWARF) or the panic hook opted
+    /// out of capture for performance.  Frames are in innermost-first
+    /// order (matching `current_call_stack()`).
+    call_stack: List<CallFrame>,
+
     /// OS thread name when one was set on the panicking thread.
     /// Empty when no name was supplied; observers should fall back to
     /// the platform-specific thread identifier in that case.
@@ -150,15 +158,25 @@ public type PanicReport is {
 
 implement PanicReport {
     /// Construct a minimal PanicReport from just the panic identity.
-    /// Use builder methods (`with_task`, `with_header`, `with_thread_name`)
-    /// to layer on additional context as the panic hook gathers it.
+    /// Use builder methods (`with_task`, `with_header`, `with_call_stack`,
+    /// `with_thread_name`) to layer on additional context as the panic
+    /// hook gathers it.
     public fn from_info(info: PanicInfo) -> PanicReport {
         PanicReport {
             info: info,
             task: None,
             header: None,
+            call_stack: List.new(),
             thread_name: Text.new(),
         }
+    }
+
+    /// Builder: attach a symbolicated call stack.  Pass the result of
+    /// `current_call_stack(0)` to capture from the panic site upward,
+    /// or `current_call_stack(1)` to skip the panic-hook frame itself.
+    public fn with_call_stack(mut self, frames: List<CallFrame>) -> PanicReport {
+        self.call_stack = frames;
+        self
     }
 
     /// Builder: attach an async task snapshot.  The hook should call
@@ -203,6 +221,12 @@ implement PanicReport {
         !self.thread_name.is_empty()
     }
 
+    /// True iff the report carries a non-empty call stack.
+    @inline
+    public fn has_call_stack(&self) -> Bool {
+        !self.call_stack.is_empty()
+    }
+
     /// Format as a multi-section panic-site dump.  Each present
     /// section is two-space indented so the dump composes as the body
     /// of a panic message.  Sections appear in the order
@@ -237,6 +261,15 @@ implement PanicReport {
                 out = out + &h.format_panic_context();
             }
             None => {}
+        }
+        if self.has_call_stack() {
+            out = out + "\n  call stack:";
+            let mut i: Int = 0;
+            while i < self.call_stack.len() {
+                let frame = &self.call_stack[i];
+                out = out + f"\n    #{i} {frame}";
+                i = i + 1;
+            }
         }
         out
     }

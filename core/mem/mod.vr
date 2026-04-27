@@ -158,6 +158,7 @@ public mount .heap.{
 public mount .diagnostics.{
     HeaderView, header_view_of,
     live_allocations, live_allocation_count,
+    CallFrame, current_call_stack,
 };
 
 /// Capability-audit event type — one auditable CBGR state transition
