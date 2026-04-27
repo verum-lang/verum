@@ -213,20 +213,24 @@ public fn validate_meta_classifier_uniqueness(
     if (tally.candidates.len() as Int) <= 1 {
         return Maybe.None;
     }
-    let mut msg: Text = Text.from("multiple meta-classifier frameworks detected: ");
+    // Linear-time message build via push_str (vs `msg = msg.concat(...)`
+    // re-assignment loop, which copied the full prefix on every step
+    // — quadratic in candidates.len()).
+    let mut msg: Text = Text.with_capacity(256);
+    msg.push_str("multiple meta-classifier frameworks detected: ");
     let mut i: Int = 0;
     while i < tally.candidates.len() as Int {
-        let name = (*tally.candidates.get(i as Int)
-            .expect("R3: i < tally.candidates.len() by while-condition")).clone();
-        msg = msg.concat(name);
+        let name = tally.candidates.get(i as Int)
+            .expect("R3: i < tally.candidates.len() by while-condition");
+        msg.push_str(name);
         if i + 1 < tally.candidates.len() as Int {
-            msg = msg.concat(", ");
+            msg.push_str(", ");
         }
         i = i + 1;
     }
-    msg = msg.concat(". Per VVA §10.4.1 only one framework may play ")
-            .concat("the meta-classifier role at a time; the others must ")
-            .concat("be coordinate-point frameworks.");
+    msg.push_str(". Per VVA §10.4.1 only one framework may play ");
+    msg.push_str("the meta-classifier role at a time; the others must ");
+    msg.push_str("be coordinate-point frameworks.");
     Maybe.Some(hygiene_diagnostic(
         Text.from("R3"),
         Error,
