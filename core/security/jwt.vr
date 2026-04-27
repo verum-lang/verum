@@ -135,7 +135,8 @@ implement JwtHeader {
 
 fn header_to_json(h: &JwtHeader) -> Text {
     // Compact shape: {"alg":"HS256","typ":"JWT","kid":"..."}
-    let mut out: List<Byte> = [];
+    // Typical header body ≤ 64 bytes (alg=HS256 + typ=JWT + maybe a small kid).
+    let mut out: List<Byte> = List.with_capacity(64);
     push_bytes(&mut out, b"{\"alg\":\"");
     push_bytes(&mut out, algo_name(&h.alg).as_bytes());
     push_bytes(&mut out, b"\",\"typ\":\"");
@@ -173,7 +174,8 @@ public fn sign_compact(
     let payload_b64 = b64u_encode(payload_json.as_bytes());
 
     // Signing input = header_b64 || "." || payload_b64, byte-exact.
-    let mut signing_input: List<Byte> = [];
+    let signing_cap = header_b64.as_bytes().len() + 1 + payload_b64.as_bytes().len();
+    let mut signing_input: List<Byte> = List.with_capacity(signing_cap);
     push_bytes(&mut signing_input, header_b64.as_bytes());
     signing_input.push('.' as Byte);
     push_bytes(&mut signing_input, payload_b64.as_bytes());
@@ -181,7 +183,9 @@ public fn sign_compact(
     let signature = compute_signature(&header.alg, signing_input.as_slice(), key)?;
     let sig_b64 = b64u_encode(signature.as_slice());
 
-    let mut token: List<Byte> = [];
+    // Final token = signing_input || "." || sig_b64.
+    let token_cap = signing_input.len() + 1 + sig_b64.as_bytes().len();
+    let mut token: List<Byte> = List.with_capacity(token_cap);
     let mut i: Int = 0;
     while i < signing_input.len() { token.push(signing_input[i]); i = i + 1; }
     token.push('.' as Byte);
@@ -250,7 +254,8 @@ public fn verify_compact(
     check_key_matches_algo(&header.alg, key)?;
 
     // Constant-time signature verification.
-    let mut signing_input: List<Byte> = [];
+    let mut signing_input: List<Byte> =
+        List.with_capacity(header_b64.len() + 1 + payload_b64.len());
     let mut i: Int = 0;
     while i < header_b64.len()  { signing_input.push(header_b64[i]);  i = i + 1; }
     signing_input.push('.' as Byte);
@@ -478,7 +483,8 @@ fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
 }
 
 fn slice_owned(src: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
+    // Output is exactly src.len() bytes.
+    let mut out: List<Byte> = List.with_capacity(src.len());
     let mut i: Int = 0;
     while i < src.len() { out.push(src[i]); i = i + 1; }
     out
