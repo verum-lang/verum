@@ -252,6 +252,17 @@ pub type CacheResult<T> = Result<T, CacheError>;
 #[derive(Debug, Clone)]
 pub struct ScriptCache {
     root: PathBuf,
+    /// Process-wide store serialiser: cleanup+rename is unavoidably
+    /// racy on POSIX directories (`fs::rename` over a populated dir
+    /// fails with ENOTEMPTY; the cleanup+rename window is exposed to
+    /// every concurrent same-key writer in the same process). The
+    /// content-addressed property makes the race benign across
+    /// processes (any winning bytes are identical to losing bytes), so
+    /// we only need to coordinate in-process. `Arc<Mutex<()>>` keeps
+    /// `ScriptCache` cheap to clone — every clone shares the same lock,
+    /// which is what test rigs depend on when they spawn N threads
+    /// against `cache.clone()`.
+    store_lock: std::sync::Arc<std::sync::Mutex<()>>,
 }
 
 impl ScriptCache {
@@ -271,7 +282,10 @@ impl ScriptCache {
     /// Use a custom root directory. Created if missing.
     pub fn at(root: PathBuf) -> CacheResult<Self> {
         fs::create_dir_all(&root).map_err(io_err("mkdir -p", &root))?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            store_lock: std::sync::Arc::new(std::sync::Mutex::new(())),
+        })
     }
 
     /// Path to the per-entry directory for `key`.
@@ -365,12 +379,12 @@ impl ScriptCache {
 
         // If a previous entry for this key exists, remove it before the
         // rename — `fs::rename` over a populated directory is not atomic
-        // on either Unix (ENOTEMPTY) or Windows. We do explicit cleanup +
-        // rename, then handle the inherent cleanup/rename race below: a
-        // concurrent same-key writer may interpose between the two calls.
-        // Since the cache is content-addressed, that race is benign —
-        // both writers produce byte-identical `cog.vbc`; the loser
-        // simply reaps its tempdir.
+        // on either Unix (ENOTEMPTY) or Windows. We hold an in-process
+        // mutex across cleanup+rename so concurrent same-key writers in
+        // the same process are serialised; cross-process races are
+        // benign (content-addressed: every winner's bytes match every
+        // loser's bytes), so the lock is intentionally process-local.
+        let _guard = self.store_lock.lock().unwrap_or_else(|p| p.into_inner());
         let _ = fs::remove_dir_all(&dir);
         match fs::rename(&tmp, &dir) {
             Ok(()) => Ok(()),
