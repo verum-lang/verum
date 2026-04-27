@@ -1,0 +1,161 @@
+// =============================================================================
+// core/database/common/retry_run.vr — run_with_retry combinator
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §5.5
+// =============================================================================
+//
+// `run_with_retry<R>(policy, body)` is the canonical retry path for
+// idempotent database operations. The body closure produces a fresh
+// `Result<R, DbError>` on each attempt; we look at
+// `err.is_retryable()` and either retry with full-jitter exponential
+// backoff or surface the error to the caller.
+//
+// Determinism. The PRNG state lives inside `RetryPolicy.seed` —
+// `seed == 0` draws from a process-default LCG, anything non-zero
+// gives reproducible attempt scheduling for DST tests. The actual
+// jitter math is in `RetryPolicy::jittered_delay_ms` so this module
+// stays free of timing logic.
+//
+// The body is a `fn() -> Result<R, DbError>` rather than `fn(&mut Tx)`
+// because the transaction handle is `affine` and must be re-acquired
+// on each attempt. The caller's body closes over the connection /
+// pool and re-begins inside.
+// =============================================================================
+
+module core.database.common.retry_run;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount async.timer.sleep_ms;
+mount core.database.common.error.DbError;
+mount core.database.common.retry.{RetryPolicy, RetryAttemptInfo};
+
+// -----------------------------------------------------------------------------
+// Synchronous variant — for SQLite (and any other adapter exposing a
+// sync `Connection` shape).
+// -----------------------------------------------------------------------------
+
+/// Run `body` against the configured policy, retrying on retryable
+/// errors with full-jitter exponential backoff. Returns the first
+/// `Ok(R)` or the final `Err(DbError)` after the budget is spent.
+///
+/// The body is expected to be idempotent — the framework does not
+/// enforce this at the type level (database.md §5.5 documents the
+/// `Idempotent` marker as informational), but the retry semantics
+/// only make sense for operations that can be re-run safely.
+public fn run_with_retry_sync<R, F: fn() -> Result<R, DbError>>(
+    policy: RetryPolicy,
+    body: F,
+) -> Result<R, DbError> {
+    let mut prng_state: Int = if policy.seed == 0 {
+        // Cheap process-default seed — wall-clock millis would be
+        // ideal but we don't bring `core.time` into scope here.
+        // 0xDEAD_BEEF_CAFE_BABE rolls over deterministically; for
+        // production randomness the caller passes a real seed.
+        0x1A2B3C4D5E6F7080
+    } else {
+        policy.seed
+    };
+
+    let mut attempt: Int = 0;
+    loop {
+        match body() {
+            Ok(value) => { return Ok(value); }
+            Err(e) => {
+                attempt = attempt + 1;
+                if attempt >= policy.max_attempts {
+                    return Err(e);
+                }
+                if !e.is_retryable() {
+                    return Err(e);
+                }
+                let delay_ms = policy.jittered_delay_ms(attempt, &mut prng_state);
+                if delay_ms > 0 {
+                    let _ = sleep_ms(delay_ms);
+                }
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Async variant — for postgres / mysql.
+// -----------------------------------------------------------------------------
+
+/// Async equivalent — the body produces an awaitable `Future<Result<R,
+/// DbError>>`. Same retry rules; the inter-attempt sleep is awaited
+/// instead of blocking.
+public async fn run_with_retry<R, F: fn() -> Result<R, DbError>>(
+    policy: RetryPolicy,
+    body: F,
+) -> Result<R, DbError> {
+    let mut prng_state: Int = if policy.seed == 0 {
+        0x1A2B3C4D5E6F7080
+    } else {
+        policy.seed
+    };
+    let mut attempt: Int = 0;
+    loop {
+        match body() {
+            Ok(value) => { return Ok(value); }
+            Err(e) => {
+                attempt = attempt + 1;
+                if attempt >= policy.max_attempts {
+                    return Err(e);
+                }
+                if !e.is_retryable() {
+                    return Err(e);
+                }
+                let delay_ms = policy.jittered_delay_ms(attempt, &mut prng_state);
+                if delay_ms > 0 {
+                    let _ = sleep_ms(delay_ms).await;
+                }
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Attempt observability — emit per-attempt records when the caller
+// supplies an inspector closure (DST tests + tracing spans use this).
+// -----------------------------------------------------------------------------
+
+/// Like `run_with_retry_sync` but threads each attempt's
+/// `RetryAttemptInfo` through `inspector` before sleeping. Useful for
+/// metrics labels and DST replay diagnostics.
+public fn run_with_retry_inspect_sync<R, F: fn() -> Result<R, DbError>, G: fn(RetryAttemptInfo) -> ()>(
+    policy: RetryPolicy,
+    body: F,
+    inspector: G,
+) -> Result<R, DbError> {
+    let mut prng_state: Int = if policy.seed == 0 {
+        0x1A2B3C4D5E6F7080
+    } else {
+        policy.seed
+    };
+    let mut attempt: Int = 0;
+    loop {
+        match body() {
+            Ok(value) => { return Ok(value); }
+            Err(e) => {
+                attempt = attempt + 1;
+                if attempt >= policy.max_attempts {
+                    return Err(e);
+                }
+                if !e.is_retryable() {
+                    return Err(e);
+                }
+                let delay_ms = policy.jittered_delay_ms(attempt, &mut prng_state);
+                inspector(RetryAttemptInfo {
+                    attempt: attempt,
+                    last_error: e.message(),
+                    next_delay_ms: delay_ms,
+                });
+                if delay_ms > 0 {
+                    let _ = sleep_ms(delay_ms);
+                }
+            }
+        }
+    }
+}

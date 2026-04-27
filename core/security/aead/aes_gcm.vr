@@ -83,7 +83,32 @@ public type GcmError is
     | TagMismatch
     /// Invalid parameter sizes. Caught at compile-time for typed-array
     /// arguments but exposed for slice-accepting entry points.
-    | InvalidInput { reason: Text };
+    | InvalidInput { reason: Text }
+    /// Plaintext or ciphertext exceeds the NIST SP 800-38D §5.2.1.1
+    /// per-(key,IV) limit of 2^39 - 256 bits ≈ 64 GiB.  Beyond this,
+    /// the GCM counter would wrap modulo 2^32 and reuse keystream —
+    /// catastrophic security failure (plaintext recovery + tag
+    /// forgery).
+    | InputTooLarge { limit_bytes: Int };
+
+// NIST SP 800-38D §5.2.1.1 absolute upper bound on plaintext size for
+// a single (key, IV) pair under AES-GCM:
+//
+//     max_bits = 2^39 − 256
+//
+// = (2^32 − 2) × 16 bytes per block × 8 bits per byte
+// = 68_719_476_704 bytes ≈ 64 GiB.
+//
+// Any caller wanting to encrypt more than this MUST rotate the IV
+// (RFC 8446 §5.3 nonce construction) — beyond the limit a single
+// (key, IV) pair the GTR counter wraps modulo 2^32 and the keystream
+// of block N collides with block (N − 2^32), enabling plaintext
+// recovery via XOR.
+//
+// The limit applies symmetrically: a decrypt of ciphertext exceeding
+// this limit is rejected as invalid input rather than silently
+// producing garbage / leaking key material.
+public const GCM_MAX_PT_BYTES_PER_NONCE: Int = 68_719_476_704;
 
 // =============================================================================
 // GHASH — multiplication in GF(2^128) with TLS/QUIC reduction poly
@@ -336,6 +361,24 @@ fn gcm_encrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
     ciphertext: &mut List<Byte>,
     tag: &mut [Byte; 16],
 ) {
+    // SOUNDNESS: NIST SP 800-38D §5.2.1.1 caps per-(key,IV) plaintext
+    // at 2^39 − 256 bits ≈ 64 GiB.  Beyond this the CTR-mode counter
+    // wraps modulo 2^32 and reuses keystream — keystream-reuse
+    // catastrophe: XOR-ing ciphertexts of identical-counter blocks
+    // recovers the plaintexts.  Without this guard the encrypt path
+    // silently produces broken ciphertext that LOOKS valid but leaks
+    // every byte past the wraparound point.
+    //
+    // We panic rather than return Result because the existing public
+    // API (`encrypt(...)` returns `()`) would have to break to expose
+    // an error path, and exceeding the limit always indicates a
+    // caller-side correctness bug (e.g. trying to single-shot a
+    // file larger than 64 GiB instead of using a streaming
+    // construction with IV rotation).
+    if plaintext.len() > GCM_MAX_PT_BYTES_PER_NONCE {
+        panic(f"AES-GCM encrypt: plaintext {plaintext.len()} bytes exceeds NIST SP 800-38D per-nonce limit {GCM_MAX_PT_BYTES_PER_NONCE} — rotate IV or use streaming AEAD");
+    }
+
     // J0 = IV || 0x00 0x00 0x00 0x01
     let mut j0: [Byte; 16] = [0; 16];
     let mut i = 0;
@@ -403,6 +446,18 @@ fn gcm_decrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
     tag: &[Byte; 16],
     plaintext: &mut List<Byte>,
 ) -> Result<(), GcmError> {
+    // SOUNDNESS: same NIST per-(key,IV) cap as encrypt.  Decrypting
+    // ciphertext that exceeds the limit is always invalid — either
+    // the producer was buggy (and the ciphertext past the cap is
+    // garbage) or the input is hostile.  Reject before doing any
+    // cryptographic work so an attacker can't force the verifier
+    // to GHASH+AES many GiB of input as a CPU-DoS amplifier.
+    if ciphertext.len() > GCM_MAX_PT_BYTES_PER_NONCE {
+        return Err(GcmError.InputTooLarge {
+            limit_bytes: GCM_MAX_PT_BYTES_PER_NONCE,
+        });
+    }
+
     // J0 as in encrypt.
     let mut j0: [Byte; 16] = [0; 16];
     let mut i = 0;
