@@ -405,8 +405,12 @@ public fn panic_impl(message: Text, file: Text, line: Int, column: Int) -> ! {
     @cfg(runtime = "embedded")
     { loop { spin_hint(); } }
 
-    // Unreachable marker for type checker
-    unreachable()
+    // No @cfg block matched: panic_impl has nowhere to abort to on
+    // this target. Surface a descriptive message so a future cross-
+    // compile to a target without an exit-syscall lowering shows the
+    // failing function in the crash dump rather than the generic
+    // "entered unreachable code".
+    unreachable("panic_impl: no exit-process lowering for this target OS")
 }
 
 // =============================================================================
