@@ -35,5 +35,25 @@ fn main() {
     let lock3 = OnceLock<Int>.new();
     assert(!lock3.is_initialized());
 
+    // 5. get_or_try_init Ok-on-first-call (now via direct CAS, no closure)
+    let lock4 = OnceLock<Int>.new();
+    let r4 = lock4.get_or_try_init<Text, _>(|| Ok(123));
+    assert(r4.is_ok());
+    assert(*r4.unwrap() == 123);
+
+    // 6. get_or_try_init idempotent
+    let r5 = lock4.get_or_try_init<Text, _>(|| Ok(999));
+    assert(r5.is_ok());
+    assert(*r5.unwrap() == 123);
+
+    // 7. get_or_try_init Err-keeps-uninit + retry-after-Err succeeds
+    let lock5 = OnceLock<Int>.new();
+    let r6 = lock5.get_or_try_init<Text, _>(|| Err("nope".to_text()));
+    assert(r6.is_err());
+    assert(!lock5.is_initialized());
+    let r7 = lock5.get_or_try_init<Text, _>(|| Ok(7));
+    assert(r7.is_ok());
+    assert(*r7.unwrap() == 7);
+
     print("ok");
 }
