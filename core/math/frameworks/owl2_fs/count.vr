@@ -55,7 +55,8 @@ public fn count_o<I: Individual>(
     let mut hits: Int = 0;
     let mut i: Int = 0;
     while i < domain.len() as Int {
-        let x: I = (*domain.get(i as Int).unwrap()).clone();
+        let x: I = (*domain.get(i as Int)
+            .expect("count_o: i < domain.len() by while-condition")).clone();
         if pred(x) {
             hits = hits + 1;
         }
