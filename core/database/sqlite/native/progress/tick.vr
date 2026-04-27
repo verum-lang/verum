@@ -28,18 +28,18 @@ public fn new_accumulator() -> TickAccumulator {
 
 implement TickAccumulator {
     pub fn observe_op(&mut self) {
-        self.op_count = self.op_count + (1 as Int64);
+        self.op_count = self.op_count + 1_i64;
     }
 
     pub fn should_consult(&self, interval_ops: Int) -> Bool {
         if interval_ops <= 0 { return false; }
         let i = interval_ops as Int64;
-        if i == (0 as Int64) { return false; }
+        if i == 0_i64 { return false; }
         let residue: Int64 = self.op_count - ((self.op_count / i) * i);
-        residue == (0 as Int64) && self.op_count > (0 as Int64)
+        residue == 0_i64 && self.op_count > 0_i64
     }
 
     pub fn note_consultation(&mut self) {
-        self.consultations = self.consultations + (1 as Int64);
+        self.consultations = self.consultations + 1_i64;
     }
 }

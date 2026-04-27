@@ -50,11 +50,11 @@ public fn total_changes32_saturating(c: &Counters) -> Int {
 
 // Whether the 32-bit values would have lost information.
 public fn last_stmt_overflows_32(c: &Counters) -> Bool {
-    c.last_stmt > (2147483647 as Int64)
+    c.last_stmt > 2147483647_i64
 }
 
 public fn total_overflows_32(c: &Counters) -> Bool {
-    c.total > (2147483647 as Int64)
+    c.total > 2147483647_i64
 }
 
 // Snapshot diff: difference between two consecutive `total` reads.
@@ -72,7 +72,7 @@ public fn snapshot_text(c: &Counters) -> Text {
 }
 
 fn int64_decimal(n: Int64) -> Text {
-    if n == (0 as Int64) { return "0".clone(); }
+    if n == 0_i64 { return "0".clone(); }
     let zero = 0 as Int64;
     let ten = 10 as Int64;
     let mut x = n;

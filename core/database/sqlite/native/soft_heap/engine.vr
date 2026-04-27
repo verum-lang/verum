@@ -117,7 +117,7 @@ implement SoftHeapEngine {
                 let used = self.soft.used;
                 let event = PeSoftThresholdCrossing(used, bytes);
                 let reclaimed = (reclaim_callback)(&event);
-                if reclaimed > (0 as Int64) { self.note_reclaim(reclaimed); }
+                if reclaimed > 0_i64 { self.note_reclaim(reclaimed); }
                 if !self.soft.would_exceed(bytes) {
                     self.note_allocation(bytes);
                     return AoGrantedAfterReclaim(reclaimed);
@@ -128,7 +128,7 @@ implement SoftHeapEngine {
                 let used = self.hard.used;
                 let event = PeHardThresholdImminent(used, bytes);
                 let reclaimed = (reclaim_callback)(&event);
-                if reclaimed > (0 as Int64) { self.note_reclaim(reclaimed); }
+                if reclaimed > 0_i64 { self.note_reclaim(reclaimed); }
                 if !self.hard.would_exceed(bytes) {
                     self.note_allocation(bytes);
                     return AoGrantedAfterReclaim(reclaimed);

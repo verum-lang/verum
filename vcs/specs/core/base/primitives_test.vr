@@ -1099,7 +1099,7 @@ fn test_int8_bounds_and_ops() {
     assert(x == Int8.MAX);
     assert(y == Int8.MIN);
     assert(x.abs() == 127);
-    assert((-1 as Int8).abs() == 1);
+    assert(-1_i8.abs() == 1);
 }
 
 @test

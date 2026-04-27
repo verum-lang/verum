@@ -20,29 +20,29 @@ fn test_empty_reading() {
 }
 
 fn test_pragma_round_trip() {
-    let r = from_pragma_value(42 as Int64);
+    let r = from_pragma_value42_i64;
     assert_eq(to_pragma_value(&r), 42 as Int64);
-    let neg = from_pragma_value(-5 as Int64);
+    let neg = from_pragma_value-5_i64;
     assert_eq(to_pragma_value(&neg), 0 as Int64);
 }
 
 fn test_detect_unchanged() {
-    let prev = from_pragma_value(7 as Int64);
-    let now  = from_pragma_value(7 as Int64);
+    let prev = from_pragma_value7_i64;
+    let now  = from_pragma_value7_i64;
     match detect(&prev, &now) { CsUnchanged => {}, _ => assert(false) }
     assert_eq(delta(&prev, &now), 0 as Int64);
 }
 
 fn test_detect_modified() {
-    let prev = from_pragma_value(7 as Int64);
-    let now  = from_pragma_value(15 as Int64);
+    let prev = from_pragma_value7_i64;
+    let now  = from_pragma_value15_i64;
     match detect(&prev, &now) { CsExternallyModified => {}, _ => assert(false) }
     assert_eq(delta(&prev, &now), 8 as Int64);
 }
 
 fn test_detect_rolled_back() {
-    let prev = from_pragma_value(15 as Int64);
-    let now  = from_pragma_value(7 as Int64);
+    let prev = from_pragma_value15_i64;
+    let now  = from_pragma_value7_i64;
     match detect(&prev, &now) { CsRolledBack => {}, _ => assert(false) }
     assert_eq(delta(&prev, &now), 0 as Int64);   // floored to 0
 }
@@ -60,8 +60,8 @@ fn test_is_unchanged_predicate() {
 }
 
 fn test_has_been_committed_threshold() {
-    assert(!has_been_committed(&from_pragma_value(0 as Int64)));
-    assert(has_been_committed(&from_pragma_value(1 as Int64)));
+    assert(!has_been_committed(&from_pragma_value0_i64));
+    assert(has_been_committed(&from_pragma_value1_i64));
 }
 
 fn main() {

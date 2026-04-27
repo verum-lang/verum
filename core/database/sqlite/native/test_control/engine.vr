@@ -28,10 +28,10 @@ public fn new_engine() -> TestControlEngine {
 
 implement TestControlEngine {
     pub fn sqlite3_test_control(&mut self, op: &TestCtrlOp) {
-        self.calls = self.calls + (1 as Int64);
+        self.calls = self.calls + 1_i64;
         self.last_op_numeric = op_numeric(op);
         if !is_safe_in_prod(op) {
-            self.unsafe_calls = self.unsafe_calls + (1 as Int64);
+            self.unsafe_calls = self.unsafe_calls + 1_i64;
         }
     }
 }

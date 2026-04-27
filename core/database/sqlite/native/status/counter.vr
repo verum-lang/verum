@@ -56,12 +56,12 @@ public fn counter_pair_zero() -> CounterPair {
 }
 
 implement CounterPair {
-    pub fn note_hit(&mut self) { self.hits.add(1 as Int64); }
-    pub fn note_miss(&mut self) { self.misses.add(1 as Int64); }
+    pub fn note_hit(&mut self) { self.hits.add1_i64; }
+    pub fn note_miss(&mut self) { self.misses.add1_i64; }
 
     pub fn ratio(&self) -> Float64 {
         let total = self.hits.current + self.misses.current;
-        if total == (0 as Int64) { return 0.0 as Float64; }
+        if total == 0_i64 { return 0.0 as Float64; }
         (self.hits.current as Float64) / (total as Float64)
     }
 }

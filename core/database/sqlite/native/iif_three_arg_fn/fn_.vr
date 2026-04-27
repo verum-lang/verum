@@ -28,7 +28,7 @@ public fn is_null(v: &IifThreeArgValue) -> Bool {
 public fn is_truthy(v: &IifThreeArgValue) -> Bool {
     match v {
         VNull    => false,
-        VInt(n)  => n.clone() != (0 as Int64),
+        VInt(n)  => n.clone() != 0_i64,
         VText(_) => false,    // SQLite iif() converts via affinity → 0 when text isn't numeric
     }
 }

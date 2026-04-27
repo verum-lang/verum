@@ -79,7 +79,7 @@ const SIGMA: [UInt32; 4] = [
 // VBC interpreter, keeping the hot loop self-contained.
 @inline
 fn rotl32(x: UInt32, n: UInt32) -> UInt32 {
-    (x << n) | (x >> ((32 as UInt32) - n))
+    (x << n) | (x >> (32_u32 - n))
 }
 
 @inline

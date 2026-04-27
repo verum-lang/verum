@@ -40,20 +40,20 @@ implement FaultEngine {
 
     /// Returns true iff the next malloc should FAIL (simulating ENOMEM).
     pub fn tick(&mut self) -> Bool {
-        self.mallocs_observed = self.mallocs_observed + (1 as Int64);
+        self.mallocs_observed = self.mallocs_observed + 1_i64;
         let fail = match &self.schedule {
             FsDisabled    => false,
             FsAlways      => true,
             FsAfterNth(n) => self.mallocs_observed > *n,
             FsEveryNth(n) => {
-                if *n <= (0 as Int64) { false }
+                if *n <= 0_i64 { false }
                 else {
                     let rem = self.mallocs_observed - ((self.mallocs_observed / *n) * *n);
-                    rem == (0 as Int64)
+                    rem == 0_i64
                 }
             }
         };
-        if fail { self.faults_issued = self.faults_issued + (1 as Int64); }
+        if fail { self.faults_issued = self.faults_issued + 1_i64; }
         fail
     }
 }

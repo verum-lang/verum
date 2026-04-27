@@ -19,7 +19,7 @@ public type MmapPolicy is {
 public fn new(requested: Int64, effective_ceiling: Int64) -> MmapPolicy {
     let capped = if requested > effective_ceiling {
         effective_ceiling
-    } else if requested < (0 as Int64) {
+    } else if requested < 0_i64 {
         0 as Int64
     } else {
         requested
@@ -32,7 +32,7 @@ public fn new(requested: Int64, effective_ceiling: Int64) -> MmapPolicy {
 }
 
 public fn is_enabled(p: &MmapPolicy) -> Bool {
-    p.active_bytes > (0 as Int64)
+    p.active_bytes > 0_i64
 }
 
 public fn hit_ceiling(p: &MmapPolicy) -> Bool {

@@ -62,20 +62,20 @@ fn test_with_complex_sets_flag() {
 }
 
 fn test_scan_value_numeric_predicate() {
-    assert(is_numeric(&SvInt64(1 as Int64)));
+    assert(is_numeric(&SvInt641_i64));
     assert(!is_numeric(&SvText("x".clone())));
     assert(!is_numeric(&SvUnknown));
 }
 
 fn test_value_matches_numeric_field() {
-    assert(value_matches_field(&SvInt64(1 as Int64), &SfNLoop));
+    assert(value_matches_field(&SvInt641_i64, &SfNLoop));
     assert(!value_matches_field(&SvText("x".clone()), &SfNLoop));
     assert(!value_matches_field(&SvUnknown, &SfNLoop));
 }
 
 fn test_value_matches_text_field() {
     assert(value_matches_field(&SvText("t".clone()), &SfName));
-    assert(!value_matches_field(&SvInt64(0 as Int64), &SfName));
+    assert(!value_matches_field(&SvInt640_i64, &SfName));
 }
 
 fn test_reset_engine_counts() {

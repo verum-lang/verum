@@ -25,7 +25,7 @@ fn test_default_config_well_formed() {
 
 fn test_total_bytes() {
     let c = default_config();
-    let want = (128 as Int64) * (500 as Int64) + (1024 as Int64) * (100 as Int64);
+    let want = 128_i64 * 500_i64 + 1024_i64 * 100_i64;
     assert_eq(total_bytes(&c), want);
 }
 

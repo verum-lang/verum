@@ -45,13 +45,13 @@ fn test_set_clear_is_set() {
 }
 
 fn test_is_known_only() {
-    assert(is_known_only(0 as Int64));
+    assert(is_known_only0_i64);
     assert(is_known_only(f_readonly() | f_uri()));
-    assert(!is_known_only(0x80000000 as Int64));
+    assert(!is_known_only0x80000000_i64);
 }
 
 fn test_access_for_branches() {
-    match access_for(0 as Int64)                    { AmReadOnly        => {}, _ => assert(false) }
+    match access_for0_i64                    { AmReadOnly        => {}, _ => assert(false) }
     match access_for(f_readonly())                  { AmReadOnly        => {}, _ => assert(false) }
     match access_for(f_readwrite())                  { AmReadWrite       => {}, _ => assert(false) }
     match access_for(f_readwrite() | f_create())     { AmReadWriteCreate => {}, _ => assert(false) }
@@ -64,7 +64,7 @@ fn test_access_names() {
 }
 
 fn test_mutex_resolution() {
-    match mutex_for(0 as Int64)                       { MxDefault  => {}, _ => assert(false) }
+    match mutex_for0_i64                       { MxDefault  => {}, _ => assert(false) }
     match mutex_for(f_nomutex())                       { MxNone     => {}, _ => assert(false) }
     match mutex_for(f_fullmutex())                     { MxFull     => {}, _ => assert(false) }
     match mutex_for(f_nomutex() | f_fullmutex())       { MxConflict => {}, _ => assert(false) }
@@ -78,7 +78,7 @@ fn test_mutex_names() {
 }
 
 fn test_cache_resolution() {
-    match cache_for(0 as Int64)                            { CmDefault  => {}, _ => assert(false) }
+    match cache_for0_i64                            { CmDefault  => {}, _ => assert(false) }
     match cache_for(f_sharedcache())                       { CmShared   => {}, _ => assert(false) }
     match cache_for(f_privatecache())                      { CmPrivate  => {}, _ => assert(false) }
     match cache_for(f_sharedcache() | f_privatecache())    { CmConflict => {}, _ => assert(false) }
@@ -96,7 +96,7 @@ fn test_bit_names() {
     assert(bit_name(f_readwrite())    == "READWRITE".clone());
     assert(bit_name(f_uri())          == "URI".clone());
     assert(bit_name(f_nofollow())     == "NOFOLLOW".clone());
-    assert(bit_name(0x80000000 as Int64) == "UNKNOWN".clone());
+    assert(bit_name0x80000000_i64 == "UNKNOWN".clone());
 }
 
 fn main() {

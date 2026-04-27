@@ -10,7 +10,7 @@ public fn f_ignorenoop()  -> Int64 { 0x04 as Int64 }
 public fn f_fknoaction()  -> Int64 { 0x08 as Int64 }
 
 public fn is_set(flags: Int64, bit: Int64) -> Bool {
-    (flags & bit) != (0 as Int64)
+    (flags & bit) != 0_i64
 }
 
 public fn set(flags: Int64, bit: Int64) -> Int64 { flags | bit }
@@ -23,7 +23,7 @@ public fn suppresses_fk_action(flags: Int64) -> Bool { is_set(flags, f_fknoactio
 
 public fn is_known_only(flags: Int64) -> Bool {
     let mask = f_nosavepoint() | f_invert() | f_ignorenoop() | f_fknoaction();
-    (flags & !mask) == (0 as Int64)
+    (flags & !mask) == 0_i64
 }
 
 public fn well_known_bit_count() -> Int { 4 }

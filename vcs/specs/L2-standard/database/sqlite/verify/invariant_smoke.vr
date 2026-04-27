@@ -85,20 +85,20 @@ fn test_page_count() {
 
 fn test_cell_ordering() {
     let mut keys: List<Int64> = List.new();
-    keys.push(1 as Int64);
-    keys.push(3 as Int64);
-    keys.push(7 as Int64);
+    keys.push1_i64;
+    keys.push3_i64;
+    keys.push7_i64;
     assert(cells_strictly_ascending(&keys));
 
     let mut bad: List<Int64> = List.new();
-    bad.push(1 as Int64);
-    bad.push(3 as Int64);
-    bad.push(2 as Int64);
+    bad.push1_i64;
+    bad.push3_i64;
+    bad.push2_i64;
     assert(!cells_strictly_ascending(&bad));
 
     let mut equal_ok: List<Int64> = List.new();
-    equal_ok.push(1 as Int64);
-    equal_ok.push(1 as Int64);
+    equal_ok.push1_i64;
+    equal_ok.push1_i64;
     assert(cells_ascending_or_equal(&equal_ok));
     assert(!cells_strictly_ascending(&equal_ok));
 }
@@ -112,15 +112,15 @@ fn test_separator() {
 
 fn test_no_duplicate_pointers() {
     let mut ok: List<Int64> = List.new();
-    ok.push(1 as Int64);
-    ok.push(2 as Int64);
-    ok.push(3 as Int64);
+    ok.push1_i64;
+    ok.push2_i64;
+    ok.push3_i64;
     assert(no_duplicate_child_pointers(&ok));
 
     let mut dup: List<Int64> = List.new();
-    dup.push(1 as Int64);
-    dup.push(2 as Int64);
-    dup.push(1 as Int64);
+    dup.push1_i64;
+    dup.push2_i64;
+    dup.push1_i64;
     assert(!no_duplicate_child_pointers(&dup));
 }
 
@@ -272,9 +272,9 @@ fn test_row_shape() {
 
 fn test_partition_safe() {
     let mut parts: List<Int64> = List.new();
-    parts.push(3 as Int64);
-    parts.push(5 as Int64);
-    parts.push(2 as Int64);
+    parts.push3_i64;
+    parts.push5_i64;
+    parts.push2_i64;
     assert(count_is_partition_safe(&parts, 10 as Int64));
     assert(!count_is_partition_safe(&parts, 11 as Int64));
     assert(sum_is_partition_safe(&parts, 10 as Int64));

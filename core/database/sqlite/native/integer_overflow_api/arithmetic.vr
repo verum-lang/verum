@@ -9,7 +9,7 @@ mount base.{Bool, Int64};
 
 // Return true iff a + b would overflow Int64.
 public fn add_overflows(a: Int64, b: Int64) -> Bool {
-    if b > (0 as Int64) {
+    if b > 0_i64 {
         a > int64_max() - b
     } else {
         a < int64_min() - b
@@ -17,9 +17,9 @@ public fn add_overflows(a: Int64, b: Int64) -> Bool {
 }
 
 public fn sub_overflows(a: Int64, b: Int64) -> Bool {
-    if b > (0 as Int64) {
+    if b > 0_i64 {
         a < int64_min() + b
-    } else if b < (0 as Int64) {
+    } else if b < 0_i64 {
         a > int64_max() + b
     } else {
         false
@@ -28,20 +28,20 @@ public fn sub_overflows(a: Int64, b: Int64) -> Bool {
 
 // Multiplication overflow — classic divide-by-zero-avoiding check.
 public fn mul_overflows(a: Int64, b: Int64) -> Bool {
-    if a == (0 as Int64) { return false; }
-    if b == (0 as Int64) { return false; }
+    if a == 0_i64 { return false; }
+    if b == 0_i64 { return false; }
     // Special case: INT64_MIN * -1 overflows.
-    if a == int64_min() && b == (-1 as Int64) { return true; }
-    if b == int64_min() && a == (-1 as Int64) { return true; }
+    if a == int64_min() && b == -1_i64 { return true; }
+    if b == int64_min() && a == -1_i64 { return true; }
     // General: |a * b| > INT64_MAX iff |a| > INT64_MAX / |b|.
-    let abs_a = if a < (0 as Int64) { -a } else { a };
-    let abs_b = if b < (0 as Int64) { -b } else { b };
+    let abs_a = if a < 0_i64 { -a } else { a };
+    let abs_b = if b < 0_i64 { -b } else { b };
     abs_a > int64_max() / abs_b
 }
 
 // Checked division: INT64_MIN / -1 is the only overflow case.
 public fn div_overflows(a: Int64, b: Int64) -> Bool {
-    a == int64_min() && b == (-1 as Int64)
+    a == int64_min() && b == -1_i64
 }
 
 // Checked unary negation: only INT64_MIN overflows (no positive counterpart).

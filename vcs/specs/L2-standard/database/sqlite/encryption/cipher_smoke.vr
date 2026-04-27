@@ -170,7 +170,7 @@ fn test_key_ring_rotation_closes_previous() {
     }
     // Old key is still accessible by id.
     match r.lookup(id1) {
-        Some(e) => assert(e.valid_to_ns != (0 as Int64)),
+        Some(e) => assert(e.valid_to_ns != 0_i64),
         None    => panic("old key still in history"),
     }
 }

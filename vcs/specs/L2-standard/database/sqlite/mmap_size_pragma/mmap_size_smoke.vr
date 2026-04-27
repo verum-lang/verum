@@ -22,41 +22,41 @@ fn test_default_value() {
 
 fn test_hard_max_clamp() {
     let cap = hard_max_value();
-    let huge = cap * (2 as Int64);
+    let huge = cap * 2_i64;
     let s = new(huge);
     assert_eq(s.bytes, cap);
     assert(is_unbounded(&s));
 }
 
 fn test_negative_clamps_to_zero() {
-    let s = new(-100 as Int64);
+    let s = new-100_i64;
     assert_eq(s.bytes, 0 as Int64);
     assert(is_disabled(&s));
 }
 
 fn test_pragma_round_trip() {
-    let s = from_pragma_value(1_000_000 as Int64);
+    let s = from_pragma_value1_000_000_i64;
     assert_eq(to_pragma_value(&s), 1_000_000 as Int64);
 }
 
 fn test_mode_names() {
-    assert(mode_name(&new(0 as Int64))             == "disabled".clone());
-    assert(mode_name(&new(1_000_000 as Int64))      == "bounded".clone());
+    assert(mode_name(&new0_i64)             == "disabled".clone());
+    assert(mode_name(&new1_000_000_i64)      == "bounded".clone());
     assert(mode_name(&new(hard_max_value()))        == "unbounded".clone());
 }
 
 fn test_pages_mappable() {
-    let s = new(8192 as Int64);
+    let s = new8192_i64;
     assert_eq(pages_mappable(&s, 4096 as Int64), 2 as Int64);
-    let dis = new(0 as Int64);
+    let dis = new0_i64;
     assert_eq(pages_mappable(&dis, 4096 as Int64), 0 as Int64);
-    let bad = new(8192 as Int64);
+    let bad = new8192_i64;
     assert_eq(pages_mappable(&bad, 0 as Int64), 0 as Int64);
 }
 
 fn test_min_with() {
-    let a = new(1024 as Int64);
-    let b = new(2048 as Int64);
+    let a = new1024_i64;
+    let b = new2048_i64;
     let m = min_with(a, b);
     assert_eq(m.bytes, 1024 as Int64);
 }

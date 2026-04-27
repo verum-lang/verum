@@ -145,7 +145,7 @@ fn draw_fault(seed: &mut DstSeed) -> Fault {
     let pick = seed.next_below(5);
     if pick == 0 { FaultDiskFull }
     else if pick == 1 { FaultIoError("EIO".clone()) }
-    else if pick == 2 { FaultSlowFsync(seed.next_u64() & (1000000 as Int64)) }
+    else if pick == 2 { FaultSlowFsync(seed.next_u64() & 1000000_i64) }
     else if pick == 3 { FaultPartialWrite(seed.next_below(4096)) }
-    else { FaultClockSkew(seed.next_u64() & (10000000 as Int64)) }
+    else { FaultClockSkew(seed.next_u64() & 10000000_i64) }
 }

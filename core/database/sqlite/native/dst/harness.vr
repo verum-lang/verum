@@ -71,7 +71,7 @@ public fn harness_from_seed(seed: Int64, total_ops: Int) -> DstHarness {
     let stream = g.emit(total_ops);
     // Re-derive a fresh seed for the schedule so the fault choices
     // are statistically independent of the op draws.
-    let mut sched_seed = seed_from_u64(seed + (1 as Int64));
+    let mut sched_seed = seed_from_u64(seed + 1_i64);
     let schedule = generate_schedule(&mut sched_seed, total_ops, &default_density());
     DstHarness {
         stream: stream,

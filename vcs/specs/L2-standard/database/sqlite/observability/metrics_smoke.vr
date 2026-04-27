@@ -47,20 +47,20 @@ mount base.{Some, None, Maybe};
 
 fn test_counter_inc_add() {
     let mut c = counter_new("queries".clone());
-    assert(c.get() == (0 as Int64));
+    assert(c.get() == 0_i64);
     c.inc();
     c.inc();
-    c.add(5 as Int64);
-    assert(c.get() == (7 as Int64));
+    c.add5_i64;
+    assert(c.get() == 7_i64);
 }
 
 fn test_gauge_set_inc_dec() {
     let mut g = gauge_new("cursors".clone());
-    g.set(10 as Int64);
+    g.set10_i64;
     g.inc();
     g.dec();
     g.dec();
-    assert(g.get() == (9 as Int64));
+    assert(g.get() == 9_i64);
 }
 
 // -----------------------------------------------------------------------------
@@ -69,34 +69,34 @@ fn test_gauge_set_inc_dec() {
 
 fn test_histogram_bucket_placement() {
     let mut h = histogram_default("latency".clone());
-    h.observe(5 as Int64);                  // 5 ns → 10us bucket
-    h.observe(50000 as Int64);              // 50µs → 100us bucket
-    h.observe(500000000 as Int64);          // 500ms → 1s bucket
-    assert(h.count() == (3 as Int64));
-    assert(h.cumulative(0) >= (1 as Int64)); // 10us bucket has at least 1
+    h.observe5_i64;                  // 5 ns → 10us bucket
+    h.observe50000_i64;              // 50µs → 100us bucket
+    h.observe500000000_i64;          // 500ms → 1s bucket
+    assert(h.count() == 3_i64);
+    assert(h.cumulative(0) >= 1_i64); // 10us bucket has at least 1
 }
 
 fn test_histogram_mean() {
     let mut h = histogram_default("latency".clone());
-    h.observe(100 as Int64);
-    h.observe(200 as Int64);
-    h.observe(300 as Int64);
-    assert(h.mean_ns() == (200 as Int64));
+    h.observe100_i64;
+    h.observe200_i64;
+    h.observe300_i64;
+    assert(h.mean_ns() == 200_i64);
 }
 
 fn test_histogram_quantile_picks_bucket() {
     let mut h = histogram_default("latency".clone());
     let mut i: Int = 0;
-    while i < 10 { h.observe(50 as Int64); i = i + 1; }
+    while i < 10 { h.observe50_i64; i = i + 1; }
     let q50 = h.approx_quantile_ns(0.5);
     // p50 falls in the 10us bucket
-    assert(q50 == (10 as Int64) * NS_PER_US);
+    assert(q50 == 10_i64 * NS_PER_US);
 }
 
 fn test_histogram_overflow_bucket() {
     let mut h = histogram_default("latency".clone());
     h.observe(99999 * NS_PER_S);   // way beyond the largest bound
-    assert(h.count() == (1 as Int64));
+    assert(h.count() == 1_i64);
 }
 
 // -----------------------------------------------------------------------------
@@ -117,7 +117,7 @@ fn test_registry_inc_then_read() {
     r.inc_counter("rows_read".clone());
     r.add_counter("rows_read".clone(), 8 as Int64);
     match r.counter_value(&"rows_read".clone()) {
-        Some(v) => assert(v == (10 as Int64)),
+        Some(v) => assert(v == 10_i64),
         None    => panic("counter present"),
     }
 }
@@ -126,7 +126,7 @@ fn test_registry_set_gauge() {
     let mut r = registry_new();
     r.set_gauge("open_cursors".clone(), 5 as Int64);
     match r.gauge_value(&"open_cursors".clone()) {
-        Some(v) => assert(v == (5 as Int64)),
+        Some(v) => assert(v == 5_i64),
         None    => panic("gauge present"),
     }
 }
@@ -136,7 +136,7 @@ fn test_registry_observe() {
     r.observe("latency".clone(), 1500 as Int64);
     r.observe("latency".clone(), 2500 as Int64);
     match r.histogram_observations(&"latency".clone()) {
-        Some(v) => assert(v == (2 as Int64)),
+        Some(v) => assert(v == 2_i64),
         None    => panic("histogram present"),
     }
 }
@@ -158,7 +158,7 @@ fn test_trace_ctx_child_inherits_trace_id() {
     let child = trace_ctx_child(&root, 7 as Int64);
     assert(child.trace_id_hi == root.trace_id_hi);
     assert(child.trace_id_lo == root.trace_id_lo);
-    assert(child.parent_span_id == (7 as Int64));
+    assert(child.parent_span_id == 7_i64);
 }
 
 fn test_span_lifecycle() {
@@ -167,9 +167,9 @@ fn test_span_lifecycle() {
     assert(!s.is_ended());
     s.set_attribute(attr_text("sql".clone(), "SELECT 1".clone()));
     s.set_attribute(attr_int("rows".clone(), 1 as Int64));
-    s.end(500 as Int64);
+    s.end500_i64;
     assert(s.is_ended());
-    assert(s.duration_ns() == (500 as Int64));
+    assert(s.duration_ns() == 500_i64);
     match &s.status { SsOk => {}, _ => panic("end-clean defaults to Ok") };
 }
 
@@ -194,7 +194,7 @@ fn test_buffering_sink_collects() {
     let mut sink = buffering_sink();
     let ctx = trace_ctx_root(0 as Int64, 0 as Int64);
     let mut s = span_start("a".clone(), SkInternal, &ctx, 1 as Int64, 0 as Int64);
-    s.end(10 as Int64);
+    s.end10_i64;
     sink.on_span_end(&s);
     sink.on_span_end(&s);
     assert_eq(sink.buffered_count(), 2);

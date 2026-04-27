@@ -27,7 +27,7 @@ public fn new(universe: Int64) -> Bitvec {
 public fn size(b: &Bitvec) -> Int64 { b.inserted }
 
 public fn is_empty(b: &Bitvec) -> Bool {
-    b.inserted == (0 as Int64)
+    b.inserted == 0_i64
 }
 
 public fn is_full(b: &Bitvec) -> Bool {
@@ -37,20 +37,20 @@ public fn is_full(b: &Bitvec) -> Bool {
 // Record an insertion — bump counter + re-evaluate kind.
 public fn record_insert(mut b: Bitvec) -> Bitvec {
     if b.inserted < b.universe_size {
-        b.inserted = b.inserted + (1 as Int64);
+        b.inserted = b.inserted + 1_i64;
     }
     b.kind = choose_kind(b.universe_size, b.inserted);
     b
 }
 
 public fn record_hash_collision(mut b: Bitvec) -> Bitvec {
-    b.hash_collisions = b.hash_collisions + (1 as Int64);
+    b.hash_collisions = b.hash_collisions + 1_i64;
     b
 }
 
 // Density expressed as fraction of universe used.
 public fn density(b: &Bitvec) -> Float {
-    if b.universe_size <= (0 as Int64) { return 0.0 as Float; }
+    if b.universe_size <= 0_i64 { return 0.0 as Float; }
     let ins = b.inserted as Float;
     let un  = b.universe_size as Float;
     ins / un

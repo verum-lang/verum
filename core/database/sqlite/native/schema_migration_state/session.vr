@@ -36,12 +36,12 @@ public fn advance(mut s: MigrationSession) -> MigrationSession {
 }
 
 public fn record_row(mut s: MigrationSession) -> MigrationSession {
-    s.rows_copied = s.rows_copied + (1 as Int64);
+    s.rows_copied = s.rows_copied + 1_i64;
     s
 }
 
 public fn record_index(mut s: MigrationSession) -> MigrationSession {
-    s.indexes_rebuilt = s.indexes_rebuilt + (1 as Int64);
+    s.indexes_rebuilt = s.indexes_rebuilt + 1_i64;
     s
 }
 
@@ -60,14 +60,14 @@ public fn needs_write_lock(s: &MigrationSession) -> Bool {
 }
 
 public fn copy_progress(s: &MigrationSession) -> Float {
-    if s.rows_total <= (0 as Int64) { return 0.0 as Float; }
+    if s.rows_total <= 0_i64 { return 0.0 as Float; }
     let r = s.rows_copied as Float;
     let t = s.rows_total as Float;
     r / t
 }
 
 public fn index_progress(s: &MigrationSession) -> Float {
-    if s.indexes_total <= (0 as Int64) { return 1.0 as Float; }
+    if s.indexes_total <= 0_i64 { return 1.0 as Float; }
     let r = s.indexes_rebuilt as Float;
     let t = s.indexes_total as Float;
     r / t

@@ -65,17 +65,17 @@ fn test_get_tier() {
     let _: UInt8 = tier;
 
     // Tier must be in valid range
-    assert(tier <= (3 as UInt8));
+    assert(tier <= 3_u8);
 
     // When running in VBC Tier 0 interpreter, tier should be 0
     // We can't assert this firmly as tests might run in different modes
-    if tier == (0 as UInt8) {
+    if tier == 0_u8 {
         print("Tier 0: VBC Interpreter");
-    } else if tier == (1 as UInt8) {
+    } else if tier == 1_u8 {
         print("Tier 1: JIT Baseline");
-    } else if tier == (2 as UInt8) {
+    } else if tier == 2_u8 {
         print("Tier 2: JIT Optimized");
-    } else if tier == (3 as UInt8) {
+    } else if tier == 3_u8 {
         print("Tier 3: AOT");
     } else {
         print("Unknown tier");

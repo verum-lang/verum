@@ -108,11 +108,11 @@ implement StatementCache {
         match self.find_idx(&key) {
             Some(i) => {
                 self.entries[i].touch(now_ns);
-                self.stats.hits = self.stats.hits + (1 as Int64);
+                self.stats.hits = self.stats.hits + 1_i64;
                 Some(self.entries[i].program_id)
             }
             None => {
-                self.stats.misses = self.stats.misses + (1 as Int64);
+                self.stats.misses = self.stats.misses + 1_i64;
                 None
             }
         }
@@ -144,7 +144,7 @@ implement StatementCache {
                         k = k + 1;
                     }
                     self.entries = new_entries;
-                    self.stats.evictions = self.stats.evictions + (1 as Int64);
+                    self.stats.evictions = self.stats.evictions + 1_i64;
                 }
                 None => { return Err(CeNoSpace); }
             }

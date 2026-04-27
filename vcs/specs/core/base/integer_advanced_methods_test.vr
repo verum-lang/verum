@@ -217,13 +217,13 @@ fn test_int8_ilog10() {
 
 @test
 fn test_int8_is_power_of_two() {
-    assert((1 as Int8).is_power_of_two());
-    assert((2 as Int8).is_power_of_two());
-    assert((4 as Int8).is_power_of_two());
-    assert((64 as Int8).is_power_of_two());
-    assert(!(0 as Int8).is_power_of_two());
-    assert(!(3 as Int8).is_power_of_two());
-    assert(!(-1 as Int8).is_power_of_two());
+    assert(1_i8.is_power_of_two());
+    assert(2_i8.is_power_of_two());
+    assert(4_i8.is_power_of_two());
+    assert(64_i8.is_power_of_two());
+    assert(!0_i8.is_power_of_two());
+    assert(!3_i8.is_power_of_two());
+    assert(!-1_i8.is_power_of_two());
 }
 
 // =============================================================================
@@ -237,7 +237,7 @@ fn test_int16_checked_rem() {
     let result = a.checked_rem(b);
     assert(result is Some);
     assert_eq(result.unwrap().to_int(), 6);
-    assert(a.checked_rem(0 as Int16) is None);
+    assert(a.checked_rem0_i16 is None);
 }
 
 @test
@@ -280,9 +280,9 @@ fn test_int16_ilog10() {
 
 @test
 fn test_int16_is_power_of_two() {
-    assert((1024 as Int16).is_power_of_two());
-    assert((16384 as Int16).is_power_of_two());
-    assert(!(1000 as Int16).is_power_of_two());
+    assert(1024_i16.is_power_of_two());
+    assert(16384_i16.is_power_of_two());
+    assert(!1000_i16.is_power_of_two());
 }
 
 // =============================================================================
@@ -295,7 +295,7 @@ fn test_int32_checked_rem() {
     let b = 7 as Int32;
     let result = a.checked_rem(b);
     assert(result is Some);
-    assert(a.checked_rem(0 as Int32) is None);
+    assert(a.checked_rem0_i32 is None);
 }
 
 @test
@@ -327,8 +327,8 @@ fn test_int32_ilog10() {
 
 @test
 fn test_int32_is_power_of_two() {
-    assert((1048576 as Int32).is_power_of_two());
-    assert(!(999999 as Int32).is_power_of_two());
+    assert(1048576_i32.is_power_of_two());
+    assert(!999999_i32.is_power_of_two());
 }
 
 // =============================================================================
@@ -340,7 +340,7 @@ fn test_int64_checked_rem() {
     let a = 100 as Int64;
     let b = 7 as Int64;
     assert(a.checked_rem(b) is Some);
-    assert(a.checked_rem(0 as Int64) is None);
+    assert(a.checked_rem0_i64 is None);
 }
 
 @test
@@ -362,8 +362,8 @@ fn test_int64_abs_diff_ilog2() {
 fn test_int64_ilog10_is_power_of_two() {
     let a = 1000000 as Int64;
     assert_eq(a.ilog10(), 6);
-    assert((1024 as Int64).is_power_of_two());
-    assert(!(1000 as Int64).is_power_of_two());
+    assert(1024_i64.is_power_of_two());
+    assert(!1000_i64.is_power_of_two());
 }
 
 // =============================================================================
@@ -460,7 +460,7 @@ fn test_uint8_checked_rem() {
     let b = 3 as UInt8;
     assert(a.checked_rem(b) is Some);
     assert_eq(a.checked_rem(b).unwrap().to_int(), 1);
-    assert(a.checked_rem(0 as UInt8) is None);
+    assert(a.checked_rem0_u8 is None);
 }
 
 @test
@@ -504,12 +504,12 @@ fn test_uint8_ilog10() {
 
 @test
 fn test_uint8_is_power_of_two() {
-    assert((1 as UInt8).is_power_of_two());
-    assert((2 as UInt8).is_power_of_two());
-    assert((128 as UInt8).is_power_of_two());
-    assert(!(0 as UInt8).is_power_of_two());
-    assert(!(3 as UInt8).is_power_of_two());
-    assert(!(255 as UInt8).is_power_of_two());
+    assert(1_u8.is_power_of_two());
+    assert(2_u8.is_power_of_two());
+    assert(128_u8.is_power_of_two());
+    assert(!0_u8.is_power_of_two());
+    assert(!3_u8.is_power_of_two());
+    assert(!255_u8.is_power_of_two());
 }
 
 // =============================================================================
@@ -519,8 +519,8 @@ fn test_uint8_is_power_of_two() {
 @test
 fn test_uint16_checked_rem() {
     let a = 1000 as UInt16;
-    assert(a.checked_rem(7 as UInt16) is Some);
-    assert(a.checked_rem(0 as UInt16) is None);
+    assert(a.checked_rem7_u16 is Some);
+    assert(a.checked_rem0_u16 is None);
 }
 
 @test
@@ -541,8 +541,8 @@ fn test_uint16_abs_diff_ilog2() {
 fn test_uint16_ilog10_is_power_of_two() {
     let a = 10000 as UInt16;
     assert_eq(a.ilog10(), 4);
-    assert((4096 as UInt16).is_power_of_two());
-    assert(!(4095 as UInt16).is_power_of_two());
+    assert(4096_u16.is_power_of_two());
+    assert(!4095_u16.is_power_of_two());
 }
 
 // =============================================================================
@@ -552,8 +552,8 @@ fn test_uint16_ilog10_is_power_of_two() {
 @test
 fn test_uint32_checked_rem() {
     let a = 100000 as UInt32;
-    assert(a.checked_rem(7 as UInt32) is Some);
-    assert(a.checked_rem(0 as UInt32) is None);
+    assert(a.checked_rem7_u32 is Some);
+    assert(a.checked_rem0_u32 is None);
 }
 
 @test
@@ -577,8 +577,8 @@ fn test_uint32_abs_diff_ilog2() {
 fn test_uint32_ilog10_is_power_of_two() {
     let a = 1000000 as UInt32;
     assert_eq(a.ilog10(), 6);
-    assert((1048576 as UInt32).is_power_of_two());
-    assert(!(1000000 as UInt32).is_power_of_two());
+    assert(1048576_u32.is_power_of_two());
+    assert(!1000000_u32.is_power_of_two());
 }
 
 // =============================================================================
@@ -588,8 +588,8 @@ fn test_uint32_ilog10_is_power_of_two() {
 @test
 fn test_uint64_checked_rem() {
     let a = 100 as UInt64;
-    assert(a.checked_rem(7 as UInt64) is Some);
-    assert(a.checked_rem(0 as UInt64) is None);
+    assert(a.checked_rem7_u64 is Some);
+    assert(a.checked_rem0_u64 is None);
 }
 
 @test
@@ -616,9 +616,9 @@ fn test_uint64_ilog2_ilog10() {
 
 @test
 fn test_uint64_is_power_of_two() {
-    assert((1 as UInt64).is_power_of_two());
-    assert((512 as UInt64).is_power_of_two());
-    assert(!(511 as UInt64).is_power_of_two());
+    assert(1_u64.is_power_of_two());
+    assert(512_u64.is_power_of_two());
+    assert(!511_u64.is_power_of_two());
 }
 
 // =============================================================================
@@ -702,36 +702,36 @@ fn test_usize_is_power_of_two() {
 @test
 fn test_all_signed_have_checked_rem() {
     // Verify checked_rem exists and returns Maybe for all signed types
-    assert((10 as Int8).checked_rem(3 as Int8) is Some);
-    assert((10 as Int16).checked_rem(3 as Int16) is Some);
-    assert((10 as Int32).checked_rem(3 as Int32) is Some);
-    assert((10 as Int64).checked_rem(3 as Int64) is Some);
+    assert(10_i8.checked_rem3_i8 is Some);
+    assert(10_i16.checked_rem3_i16 is Some);
+    assert(10_i32.checked_rem3_i32 is Some);
+    assert(10_i64.checked_rem3_i64 is Some);
     assert((10 as Int128).checked_rem(3 as Int128) is Some);
     assert((10 as ISize).checked_rem(3 as ISize) is Some);
 }
 
 @test
 fn test_all_unsigned_have_checked_rem() {
-    assert((10 as UInt8).checked_rem(3 as UInt8) is Some);
-    assert((10 as UInt16).checked_rem(3 as UInt16) is Some);
-    assert((10 as UInt32).checked_rem(3 as UInt32) is Some);
-    assert((10 as UInt64).checked_rem(3 as UInt64) is Some);
+    assert(10_u8.checked_rem3_u8 is Some);
+    assert(10_u16.checked_rem3_u16 is Some);
+    assert(10_u32.checked_rem3_u32 is Some);
+    assert(10_u64.checked_rem3_u64 is Some);
     assert((10 as UInt128).checked_rem(3 as UInt128) is Some);
     assert((10 as USize).checked_rem(3 as USize) is Some);
 }
 
 @test
 fn test_all_have_wrapping_neg() {
-    let _a = (5 as Int8).wrapping_neg();
-    let _b = (5 as Int16).wrapping_neg();
-    let _c = (5 as Int32).wrapping_neg();
-    let _d = (5 as Int64).wrapping_neg();
+    let _a = 5_i8.wrapping_neg();
+    let _b = 5_i16.wrapping_neg();
+    let _c = 5_i32.wrapping_neg();
+    let _d = 5_i64.wrapping_neg();
     let _e = (5 as Int128).wrapping_neg();
     let _f = (5 as ISize).wrapping_neg();
-    let _g = (5 as UInt8).wrapping_neg();
-    let _h = (5 as UInt16).wrapping_neg();
-    let _i = (5 as UInt32).wrapping_neg();
-    let _j = (5 as UInt64).wrapping_neg();
+    let _g = 5_u8.wrapping_neg();
+    let _h = 5_u16.wrapping_neg();
+    let _i = 5_u32.wrapping_neg();
+    let _j = 5_u64.wrapping_neg();
     let _k = (5 as UInt128).wrapping_neg();
     let _l = (5 as USize).wrapping_neg();
     assert_eq(_a.to_int(), -5);
@@ -750,26 +750,26 @@ fn test_all_have_wrapping_neg() {
 
 @test
 fn test_all_signed_have_checked_neg() {
-    assert((5 as Int8).checked_neg() is Some);
-    assert((5 as Int16).checked_neg() is Some);
-    assert((5 as Int32).checked_neg() is Some);
-    assert((5 as Int64).checked_neg() is Some);
+    assert(5_i8.checked_neg() is Some);
+    assert(5_i16.checked_neg() is Some);
+    assert(5_i32.checked_neg() is Some);
+    assert(5_i64.checked_neg() is Some);
     assert((5 as Int128).checked_neg() is Some);
     assert((5 as ISize).checked_neg() is Some);
 }
 
 @test
 fn test_all_have_ilog2() {
-    assert_eq((8 as Int8).ilog2(), 3);
-    assert_eq((8 as Int16).ilog2(), 3);
-    assert_eq((8 as Int32).ilog2(), 3);
-    assert_eq((8 as Int64).ilog2(), 3);
+    assert_eq(8_i8.ilog2(), 3);
+    assert_eq(8_i16.ilog2(), 3);
+    assert_eq(8_i32.ilog2(), 3);
+    assert_eq(8_i64.ilog2(), 3);
     assert_eq((8 as Int128).ilog2(), 3);
     assert_eq((8 as ISize).ilog2(), 3);
-    assert_eq((8 as UInt8).ilog2(), 3);
-    assert_eq((8 as UInt16).ilog2(), 3);
-    assert_eq((8 as UInt32).ilog2(), 3);
-    assert_eq((8 as UInt64).ilog2(), 3);
+    assert_eq(8_u8.ilog2(), 3);
+    assert_eq(8_u16.ilog2(), 3);
+    assert_eq(8_u32.ilog2(), 3);
+    assert_eq(8_u64.ilog2(), 3);
     assert_eq((8 as UInt128).ilog2(), 3);
     assert_eq((8 as USize).ilog2(), 3);
     assert_eq((8).ilog2(), 3);
@@ -777,16 +777,16 @@ fn test_all_have_ilog2() {
 
 @test
 fn test_all_have_is_power_of_two() {
-    assert((8 as Int8).is_power_of_two());
-    assert((8 as Int16).is_power_of_two());
-    assert((8 as Int32).is_power_of_two());
-    assert((8 as Int64).is_power_of_two());
+    assert(8_i8.is_power_of_two());
+    assert(8_i16.is_power_of_two());
+    assert(8_i32.is_power_of_two());
+    assert(8_i64.is_power_of_two());
     assert((8 as Int128).is_power_of_two());
     assert((8 as ISize).is_power_of_two());
-    assert((8 as UInt8).is_power_of_two());
-    assert((8 as UInt16).is_power_of_two());
-    assert((8 as UInt32).is_power_of_two());
-    assert((8 as UInt64).is_power_of_two());
+    assert(8_u8.is_power_of_two());
+    assert(8_u16.is_power_of_two());
+    assert(8_u32.is_power_of_two());
+    assert(8_u64.is_power_of_two());
     assert((8 as UInt128).is_power_of_two());
     assert((8 as USize).is_power_of_two());
     assert((8).is_power_of_two());

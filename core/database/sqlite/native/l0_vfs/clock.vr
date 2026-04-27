@@ -99,7 +99,7 @@ implement MockClock {
     /// Advance both clocks by `delta_nanos`. Monotonic never regresses;
     /// negative deltas panic.
     public fn advance(&mut self, delta_nanos: Int64) {
-        if delta_nanos < (0 as Int64) {
+        if delta_nanos < 0_i64 {
             panic("MockClock.advance requires non-negative delta");
         }
         self.monotonic = self.monotonic + delta_nanos;
@@ -109,7 +109,7 @@ implement MockClock {
     /// Advance only the monotonic counter (for benchmarks that keep
     /// wall-clock fixed).
     public fn advance_mono(&mut self, delta_nanos: Int64) {
-        if delta_nanos < (0 as Int64) {
+        if delta_nanos < 0_i64 {
             panic("MockClock.advance_mono requires non-negative delta");
         }
         self.monotonic = self.monotonic + delta_nanos;

@@ -45,15 +45,15 @@ public type Mutator is protocol {
 public type FuzzRng is { state: Int64 };
 
 public fn fuzz_rng(seed: Int64) -> FuzzRng {
-    FuzzRng { state: if seed == (0 as Int64) { 1 as Int64 } else { seed } }
+    FuzzRng { state: if seed == 0_i64 { 1 as Int64 } else { seed } }
 }
 
 implement FuzzRng {
     public fn next(&mut self) -> Int64 {
         let mut x: Int64 = self.state;
-        x = x ^ (x << (13 as Int64));
-        x = x ^ (x >> (7 as Int64));
-        x = x ^ (x << (17 as Int64));
+        x = x ^ (x << 13_i64);
+        x = x ^ (x >> 7_i64);
+        x = x ^ (x << 17_i64);
         self.state = x;
         x
     }

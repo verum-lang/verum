@@ -51,14 +51,14 @@ implement TraceEngine {
     /// constant.
     pub fn note_event(&mut self, bit: Int) -> Bool {
         if !self.is_enabled() {
-            self.events_dropped = self.events_dropped + (1 as Int64);
+            self.events_dropped = self.events_dropped + 1_i64;
             return false;
         }
         if (self.mask.bits & bit) == 0 {
-            self.events_dropped = self.events_dropped + (1 as Int64);
+            self.events_dropped = self.events_dropped + 1_i64;
             return false;
         }
-        self.events_delivered = self.events_delivered + (1 as Int64);
+        self.events_delivered = self.events_delivered + 1_i64;
         true
     }
 }

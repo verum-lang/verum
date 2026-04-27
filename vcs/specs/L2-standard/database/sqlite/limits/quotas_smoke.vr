@@ -41,8 +41,8 @@ fn test_dimension_names() {
 }
 
 fn test_default_caps_positive() {
-    assert(default_limit(&LdMemoryBytes) > (0 as Int64));
-    assert(default_limit(&LdRowsScanned) > (0 as Int64));
+    assert(default_limit(&LdMemoryBytes) > 0_i64);
+    assert(default_limit(&LdRowsScanned) > 0_i64);
 }
 
 // -----------------------------------------------------------------------------

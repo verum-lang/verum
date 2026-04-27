@@ -56,7 +56,7 @@ implement BlobEngine {
         byte_size: Int,
     ) -> Int64 {
         let id = self.next_handle_id;
-        self.next_handle_id = id + (1 as Int64);
+        self.next_handle_id = id + 1_i64;
         self.handles.push(blob_handle(
             id, schema_name, table_name, column_name, rowid, mode, byte_size,
         ));

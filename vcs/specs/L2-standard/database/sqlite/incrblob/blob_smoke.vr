@@ -103,7 +103,7 @@ fn test_sqlite_error_code_mapping() {
 fn test_engine_open_returns_handle_id() {
     let mut e = engine_new();
     let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadWrite, 4096);
-    assert(id > (0 as Int64));
+    assert(id > 0_i64);
     assert_eq(e.open_handle_count(), 1);
 }
 

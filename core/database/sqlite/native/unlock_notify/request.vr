@@ -31,5 +31,5 @@ public fn cancel_request(blocked: Int64) -> RegistrationRequest {
 }
 
 public fn is_cancellation(r: &RegistrationRequest) -> Bool {
-    r.blocker == (0 as Int64)
+    r.blocker == 0_i64
 }

@@ -85,7 +85,7 @@ public fn default_policy() -> ReseedPolicy {
 }
 
 public fn should_reseed(policy: &ReseedPolicy, bytes_since_seed: Int64, secs_since_seed: Int64) -> Bool {
-    if policy.bytes_threshold > (0 as Int64) && bytes_since_seed >= policy.bytes_threshold { return true; }
-    if policy.secs_threshold > (0 as Int64) && secs_since_seed >= policy.secs_threshold { return true; }
+    if policy.bytes_threshold > 0_i64 && bytes_since_seed >= policy.bytes_threshold { return true; }
+    if policy.secs_threshold > 0_i64 && secs_since_seed >= policy.secs_threshold { return true; }
     false
 }

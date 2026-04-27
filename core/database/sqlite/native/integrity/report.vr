@@ -54,11 +54,11 @@ implement IntegrityReport {
     }
 
     pub fn note_page_visited(&mut self) {
-        self.pages_checked = self.pages_checked + (1 as Int64);
+        self.pages_checked = self.pages_checked + 1_i64;
     }
 
     pub fn note_row_visited(&mut self) {
-        self.rows_checked = self.rows_checked + (1 as Int64);
+        self.rows_checked = self.rows_checked + 1_i64;
     }
 
     pub fn start(&mut self, when_ns: Int64) {
@@ -118,14 +118,14 @@ fn push_int(dst: &mut Text, n: Int) {
 }
 
 fn push_int64(dst: &mut Text, n: Int64) {
-    if n == (0 as Int64) { dst.push_byte(48 as Byte); return; }
+    if n == 0_i64 { dst.push_byte(48 as Byte); return; }
     let mut digits: List<Byte> = List.new();
-    let mut x: Int64 = if n < (0 as Int64) { -n } else { n };
-    while x > (0 as Int64) {
+    let mut x: Int64 = if n < 0_i64 { -n } else { n };
+    while x > 0_i64 {
         digits.push((((x as Int) % 10) as Byte) + (48 as Byte));
-        x = x / (10 as Int64);
+        x = x / 10_i64;
     }
-    if n < (0 as Int64) { dst.push_byte(45 as Byte); }
+    if n < 0_i64 { dst.push_byte(45 as Byte); }
     let mut i: Int = digits.len() - 1;
     while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
 }

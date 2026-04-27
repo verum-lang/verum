@@ -43,19 +43,19 @@ implement ChangeCounter {
     pub fn record_statement(&mut self, changes: Int64) {
         self.statement_changes = changes;
         self.total_changes = self.total_changes + changes;
-        self.version = self.version + (1 as Int64);
+        self.version = self.version + 1_i64;
     }
 
     /// Called by the VDBE when an INSERT into a rowid table commits.
     pub fn record_insert(&mut self, rowid: Int64) {
         self.last_insert_rowid = rowid;
-        self.version = self.version + (1 as Int64);
+        self.version = self.version + 1_i64;
     }
 
     /// Explicit override — matches sqlite3_set_last_insert_rowid.
     pub fn override_last_insert_rowid(&mut self, rowid: Int64) {
         self.last_insert_rowid = rowid;
-        self.version = self.version + (1 as Int64);
+        self.version = self.version + 1_i64;
     }
 
     /// Reset statement-local counter at the start of a new statement.
@@ -66,5 +66,5 @@ implement ChangeCounter {
 
 /// True iff the last statement made no visible modifications.
 public fn is_noop(c: &ChangeCounter) -> Bool {
-    c.statement_changes == (0 as Int64)
+    c.statement_changes == 0_i64
 }

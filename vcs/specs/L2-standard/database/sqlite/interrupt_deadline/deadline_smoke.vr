@@ -23,43 +23,43 @@ fn test_disarmed_never_elapsed() {
 }
 
 fn test_armed_at_elapses_after_deadline() {
-    let d = armed_at(1000 as Int64);
+    let d = armed_at1000_i64;
     assert(!has_elapsed(&d, 500 as Int64));
     assert(has_elapsed(&d, 1000 as Int64));
     assert(has_elapsed(&d, 2000 as Int64));
 }
 
 fn test_armed_at_normalises_negative_to_zero() {
-    let d = armed_at(-5 as Int64);
+    let d = armed_at-5_i64;
     assert(has_elapsed(&d, 0 as Int64));
 }
 
 fn test_disarm_cancels() {
-    let mut d = armed_at(1000 as Int64);
+    let mut d = armed_at1000_i64;
     disarm(&mut d);
     assert(!has_elapsed(&d, 5000 as Int64));
 }
 
 fn test_remaining_ns_before_deadline() {
-    let d = armed_at(1000 as Int64);
+    let d = armed_at1000_i64;
     assert_eq(remaining_ns(&d, 200 as Int64), 800 as Int64);
 }
 
 fn test_remaining_ns_after_deadline_zero() {
-    let d = armed_at(1000 as Int64);
+    let d = armed_at1000_i64;
     assert_eq(remaining_ns(&d, 1500 as Int64), 0 as Int64);
 }
 
 fn test_engine_arm_initialises() {
     let mut e = new_engine();
-    e.arm(5000 as Int64);
+    e.arm5000_i64;
     assert(!e.fired);
     assert_eq(e.ticks_observed, 0 as Int64);
 }
 
 fn test_engine_tick_before_deadline_no_fire() {
     let mut e = new_engine();
-    e.arm(5000 as Int64);
+    e.arm5000_i64;
     let fired = e.tick(100 as Int64, noop);
     assert(!fired);
     assert_eq(e.ticks_observed, 1 as Int64);
@@ -68,7 +68,7 @@ fn test_engine_tick_before_deadline_no_fire() {
 
 fn test_engine_tick_after_deadline_fires_once() {
     let mut e = new_engine();
-    e.arm(1000 as Int64);
+    e.arm1000_i64;
     assert(e.tick(1500 as Int64, noop));
     assert(e.fired);
     // Second tick should NOT re-fire.
@@ -77,7 +77,7 @@ fn test_engine_tick_after_deadline_fires_once() {
 
 fn test_engine_disarm_prevents_fire() {
     let mut e = new_engine();
-    e.arm(1000 as Int64);
+    e.arm1000_i64;
     e.disarm();
     assert(!e.tick(5000 as Int64, noop));
     assert(!e.fired);
@@ -85,8 +85,8 @@ fn test_engine_disarm_prevents_fire() {
 
 fn test_engine_remaining_ns_via_engine() {
     let mut e = new_engine();
-    e.arm(2000 as Int64);
-    assert_eq(e.remaining_ns_at(500 as Int64), 1500 as Int64);
+    e.arm2000_i64;
+    assert_eq(e.remaining_ns_at500_i64, 1500 as Int64);
 }
 
 fn main() {

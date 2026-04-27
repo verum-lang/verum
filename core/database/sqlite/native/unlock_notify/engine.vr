@@ -74,7 +74,7 @@ implement UnlockNotifyEngine {
         self.clear_for(req.blocked);
         if is_cancellation(req) { return 0; }
         if self.would_deadlock(req.blocked, req.blocker) {
-            self.deadlock_rejects = self.deadlock_rejects + (1 as Int64);
+            self.deadlock_rejects = self.deadlock_rejects + 1_i64;
             return 6;
         }
         self.pending.push(UnlockRegistration {

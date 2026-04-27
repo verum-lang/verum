@@ -59,7 +59,7 @@ public fn parse_int64(raw: &Text, default_when_invalid: Int64) -> Int64 {
     while i < bs.len() {
         if !is_digit(bs[i]) { return default_when_invalid; }
         let d = (bs[i] - (0x30 as u8)) as Int64;
-        acc = acc * (10 as Int64) + d;
+        acc = acc * 10_i64 + d;
         had_digit = true;
         i = i + 1;
     }

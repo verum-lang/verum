@@ -28,7 +28,7 @@ public fn add(mask: Int64, r: &Reason) -> Int64 {
 }
 
 public fn has(mask: Int64, r: &Reason) -> Bool {
-    (mask & bit_for(r)) != (0 as Int64)
+    (mask & bit_for(r)) != 0_i64
 }
 
 // Join of two reorder-reason sets.
@@ -42,7 +42,7 @@ public fn meet(a: Int64, b: Int64) -> Int64 {
 }
 
 public fn reorderable(mask: Int64) -> Bool {
-    mask == (0 as Int64)
+    mask == 0_i64
 }
 
 // Any bit that is a hard barrier → reorder impossible.
@@ -54,6 +54,6 @@ public fn has_any_hard_barrier(mask: Int64) -> Bool {
 }
 
 public fn has_only_preferences(mask: Int64) -> Bool {
-    if mask == (0 as Int64) { return false; }
+    if mask == 0_i64 { return false; }
     !has_any_hard_barrier(mask)
 }

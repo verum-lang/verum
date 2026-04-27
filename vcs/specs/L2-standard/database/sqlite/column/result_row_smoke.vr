@@ -34,7 +34,7 @@ mount base.{Some, None, Maybe, Bool, Text};
 // -----------------------------------------------------------------------------
 
 fn test_type_codes_match_sqlite() {
-    assert_eq(type_code(&CvInt64(0 as Int64)), SQLITE_INTEGER);
+    assert_eq(type_code(&CvInt640_i64), SQLITE_INTEGER);
     assert_eq(type_code(&CvReal(0.0 as Float64)), SQLITE_FLOAT);
     assert_eq(type_code(&CvText("a".clone())), SQLITE_TEXT);
     assert_eq(type_code(&CvNull), SQLITE_NULL);
@@ -42,14 +42,14 @@ fn test_type_codes_match_sqlite() {
 
 fn test_type_names_match_sqlite() {
     assert(type_name(&CvNull) == "NULL".clone());
-    assert(type_name(&CvInt64(0 as Int64)) == "INTEGER".clone());
+    assert(type_name(&CvInt640_i64) == "INTEGER".clone());
     assert(type_name(&CvReal(0.0 as Float64)) == "REAL".clone());
     assert(type_name(&CvText("a".clone())) == "TEXT".clone());
 }
 
 fn test_byte_size_zero_for_scalar() {
     assert_eq(byte_size(&CvNull), 0);
-    assert_eq(byte_size(&CvInt64(0 as Int64)), 0);
+    assert_eq(byte_size(&CvInt640_i64), 0);
 }
 
 fn test_byte_size_text_blob() {
@@ -62,7 +62,7 @@ fn test_byte_size_text_blob() {
 
 fn test_is_null() {
     assert(is_null(&CvNull));
-    assert(!is_null(&CvInt64(7 as Int64)));
+    assert(!is_null(&CvInt647_i64));
 }
 
 // -----------------------------------------------------------------------------
@@ -118,7 +118,7 @@ fn test_to_int64_negative_text() {
 }
 
 fn test_to_text_from_int64() {
-    assert(to_text(&CvInt64(42 as Int64)) == "42".clone());
+    assert(to_text(&CvInt6442_i64) == "42".clone());
 }
 
 fn test_to_text_from_null_empty() {
@@ -147,7 +147,7 @@ fn make_row() -> ResultRow {
     specs.add(make_spec("id".clone(), "users".clone()));
     specs.add(make_spec("name".clone(), "users".clone()));
     let mut vals: List<ColumnValue> = List.new();
-    vals.push(CvInt64(7 as Int64));
+    vals.push(CvInt647_i64);
     vals.push(CvText("Ada".clone()));
     result_row_with(specs, vals)
 }

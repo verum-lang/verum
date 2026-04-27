@@ -34,7 +34,7 @@ public fn record(mut r: WalkerIntegrityReport, f: Finding) -> WalkerIntegrityRep
 }
 
 public fn count_page(mut r: WalkerIntegrityReport) -> WalkerIntegrityReport {
-    r.pages_scanned = r.pages_scanned + (1 as Int64);
+    r.pages_scanned = r.pages_scanned + 1_i64;
     r
 }
 

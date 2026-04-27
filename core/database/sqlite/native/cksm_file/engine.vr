@@ -53,7 +53,7 @@ implement CksmEngine {
         total_pages: Int64,
         corrupt_pages: List<Int64>,
     ) -> Int {
-        self.verify_count = self.verify_count + (1 as Int64);
+        self.verify_count = self.verify_count + 1_i64;
         if corrupt_pages.len() == 0 {
             self.status = CsVerified(total_pages);
             return 0;
@@ -61,7 +61,7 @@ implement CksmEngine {
         let verified = total_pages - (corrupt_pages.len() as Int64);
         self.status = CsCorrupted {
             corrupt_pages: corrupt_pages,
-            verified: if verified < (0 as Int64) { 0 as Int64 } else { verified },
+            verified: if verified < 0_i64 { 0 as Int64 } else { verified },
         };
         11   // SQLITE_CORRUPT
     }

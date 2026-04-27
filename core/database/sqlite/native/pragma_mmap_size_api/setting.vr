@@ -24,13 +24,13 @@ public fn disabled_setting() -> MmapSetting {
 
 // Round `n` up to the next multiple of `page_size`.
 fn round_up_to_page(n: Int64, page_size: Int64) -> Int64 {
-    if page_size <= (0 as Int64) { return n; }
+    if page_size <= 0_i64 { return n; }
     let rem = n % page_size;
-    if rem == (0 as Int64) { n } else { n + (page_size - rem) }
+    if rem == 0_i64 { n } else { n + (page_size - rem) }
 }
 
 public fn resolve(requested: Int64, page_size: Int64) -> MmapSetting {
-    if requested <= (0 as Int64) {
+    if requested <= 0_i64 {
         return MmapSetting {
             requested: requested,
             active: 0 as Int64,
@@ -52,6 +52,6 @@ public fn resolve(requested: Int64, page_size: Int64) -> MmapSetting {
     }
 }
 
-public fn is_enabled(s: &MmapSetting) -> Bool { !s.disabled && s.active > (0 as Int64) }
+public fn is_enabled(s: &MmapSetting) -> Bool { !s.disabled && s.active > 0_i64 }
 public fn was_clamped(s: &MmapSetting) -> Bool { s.clamped_high }
 public fn active_bytes(s: &MmapSetting) -> Int64 { s.active }

@@ -27,7 +27,7 @@ public fn empty_slot() -> AutoVacuumSlot {
 }
 
 public fn is_installed(s: &AutoVacuumSlot) -> Bool {
-    s.user_data != (0 as Int64) || s.tag.len() > 0
+    s.user_data != 0_i64 || s.tag.len() > 0
 }
 
 public type AutoVacuumEngine is {
@@ -56,7 +56,7 @@ implement AutoVacuumEngine {
     /// Invoke the callback via the caller's closure; returns the
     /// number of pages the callback asked to reclaim.
     pub fn invoke(&mut self, req: &AutoVacuumRequest, policy: fn(&AutoVacuumRequest) -> DecisionOutcome) -> Int64 {
-        self.invocations = self.invocations + (1 as Int64);
+        self.invocations = self.invocations + 1_i64;
         let outcome = (policy)(req);
         let n = outcome_pages(&outcome);
         self.total_pages_reclaimed = self.total_pages_reclaimed + n;

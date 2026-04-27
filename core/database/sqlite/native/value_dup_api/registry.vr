@@ -31,7 +31,7 @@ public fn new_registry() -> DupRegistry {
 implement DupRegistry {
     pub fn sqlite3_value_dup(&mut self, source_id: Int64) -> Int64 {
         let id = self.next_id;
-        self.next_id = self.next_id + (1 as Int64);
+        self.next_id = self.next_id + 1_i64;
         self.handles.push(new_handle(id, source_id));
         id
     }
@@ -49,7 +49,7 @@ implement DupRegistry {
         let idx = self.find(id);
         if idx < 0 { return false; }
         if !is_live(self.handles.get(idx)) {
-            self.double_frees = self.double_frees + (1 as Int64);
+            self.double_frees = self.double_frees + 1_i64;
             return false;
         }
         free(self.handles.get_mut(idx));

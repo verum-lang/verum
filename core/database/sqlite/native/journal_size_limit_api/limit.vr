@@ -19,8 +19,8 @@ public fn mode_name(m: &LimitMode) -> Text {
 }
 
 public fn from_pragma_value(n: Int64) -> LimitMode {
-    if n < (0 as Int64) { return LmUnlimited; }
-    if n == (0 as Int64) { return LmTruncate; }
+    if n < 0_i64 { return LmUnlimited; }
+    if n == 0_i64 { return LmTruncate; }
     LmCap(n)
 }
 
@@ -43,7 +43,7 @@ public fn has_cap(m: &LimitMode) -> Bool {
 public fn allows(m: &LimitMode, current_bytes: Int64) -> Bool {
     match m {
         LmUnlimited => true,
-        LmTruncate  => current_bytes == (0 as Int64),
+        LmTruncate  => current_bytes == 0_i64,
         LmCap(cap)  => current_bytes <= cap.clone(),
     }
 }

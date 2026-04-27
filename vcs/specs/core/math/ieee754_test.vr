@@ -1324,14 +1324,14 @@ fn test_neg_infinity_function_matches_constant() {
 
 @test
 fn test_nan_with_payload_is_nan() {
-    let val = nan_with_payload(42 as UInt64);
+    let val = nan_with_payload42_u64;
     assert(is_nan(val));
 }
 
 @test
 fn test_nan_with_payload_zero() {
     // Even with payload 0, the quiet bit is set, so it's still NaN
-    let val = nan_with_payload(0 as UInt64);
+    let val = nan_with_payload0_u64;
     assert(is_nan(val));
 }
 

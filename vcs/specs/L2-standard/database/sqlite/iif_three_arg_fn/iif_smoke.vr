@@ -32,21 +32,21 @@ fn test_arity_names() {
 
 fn test_is_null_predicate() {
     assert(is_null(&null_value()));
-    assert(!is_null(&int_value(0 as Int64)));
+    assert(!is_null(&int_value0_i64));
     assert(!is_null(&text_value("".clone())));
 }
 
 fn test_is_truthy_rules() {
     assert(!is_truthy(&null_value()));
-    assert(!is_truthy(&int_value(0 as Int64)));
-    assert(is_truthy(&int_value(1 as Int64)));
-    assert(is_truthy(&int_value(-1 as Int64)));
+    assert(!is_truthy(&int_value0_i64));
+    assert(is_truthy(&int_value1_i64));
+    assert(is_truthy(&int_value-1_i64));
     // SQLite iif() applies numeric affinity; non-numeric text → false.
     assert(!is_truthy(&text_value("hello".clone())));
 }
 
 fn test_evaluate_picks_y_when_truthy() {
-    let r = evaluate(&int_value(7 as Int64), &int_value(100 as Int64), &int_value(200 as Int64));
+    let r = evaluate(&int_value7_i64, &int_value100_i64, &int_value200_i64);
     match r {
         VInt(n) => assert_eq(n, 100 as Int64),
         _ => assert(false),
@@ -54,7 +54,7 @@ fn test_evaluate_picks_y_when_truthy() {
 }
 
 fn test_evaluate_picks_z_when_zero() {
-    let r = evaluate(&int_value(0 as Int64), &int_value(100 as Int64), &int_value(200 as Int64));
+    let r = evaluate(&int_value0_i64, &int_value100_i64, &int_value200_i64);
     match r {
         VInt(n) => assert_eq(n, 200 as Int64),
         _ => assert(false),

@@ -47,10 +47,10 @@ public type SeriesCursor is {
 }
 
 public fn cursor_open(params: SeriesParams) -> SeriesCursor {
-    let step = if params.step == (0 as Int64) { 1 as Int64 } else { params.step };
+    let step = if params.step == 0_i64 { 1 as Int64 } else { params.step };
     let p = SeriesParams { start: params.start, stop: params.stop, step: step };
     let initial = p.start;
-    let eof = if step > (0 as Int64) { initial > p.stop } else { initial < p.stop };
+    let eof = if step > 0_i64 { initial > p.stop } else { initial < p.stop };
     SeriesCursor { params: p, current: initial, eof: eof }
 }
 
@@ -63,7 +63,7 @@ implement SeriesCursor {
         if self.eof { return; }
         let n = self.current + self.params.step;
         self.current = n;
-        if self.params.step > (0 as Int64) {
+        if self.params.step > 0_i64 {
             if n > self.params.stop { self.eof = true; }
         } else {
             if n < self.params.stop { self.eof = true; }
@@ -90,8 +90,8 @@ implement SeriesCursor {
 // -----------------------------------------------------------------------------
 
 public fn estimate_row_count(p: &SeriesParams) -> Int64 {
-    let step = if p.step == (0 as Int64) { 1 as Int64 } else { p.step };
-    let abs_step = if step < (0 as Int64) { -step } else { step };
+    let step = if p.step == 0_i64 { 1 as Int64 } else { p.step };
+    let abs_step = if step < 0_i64 { -step } else { step };
     let span = if p.stop > p.start { p.stop - p.start } else { p.start - p.stop };
-    (span / abs_step) + (1 as Int64)
+    (span / abs_step) + 1_i64
 }

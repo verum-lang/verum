@@ -31,7 +31,7 @@ public fn as_bool(v: &ConfigValue) -> Bool {
     match v {
         CvBool(b)   => *b,
         CvInt(i)    => *i != 0,
-        CvInt64(i)  => *i != (0 as Int64),
+        CvInt64(i)  => *i != 0_i64,
         _           => false,
     }
 }

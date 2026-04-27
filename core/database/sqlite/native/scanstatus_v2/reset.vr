@@ -33,10 +33,10 @@ implement ResetEngine {
     pub fn sqlite3_stmt_scanstatus_reset(&mut self, scope: &ResetScope) {
         match scope {
             RsAll => {
-                self.reset_all_count = self.reset_all_count + (1 as Int64);
+                self.reset_all_count = self.reset_all_count + 1_i64;
             }
             RsOp(_) => {
-                self.reset_op_count = self.reset_op_count + (1 as Int64);
+                self.reset_op_count = self.reset_op_count + 1_i64;
             }
         }
     }

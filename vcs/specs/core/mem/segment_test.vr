@@ -531,15 +531,15 @@ fn test_purge_mask_bit_operations() {
     let mut mask: UInt64 = 0;
 
     // Set bit 5
-    mask = mask | ((1 as UInt64) << 5);
+    mask = mask | (1_u64 << 5);
     assert_eq(mask, 32 as UInt64);
 
     // Set bit 10
-    mask = mask | ((1 as UInt64) << 10);
+    mask = mask | (1_u64 << 10);
     assert_eq(mask, (32 + 1024) as UInt64);
 
     // Clear bit 5
-    mask = mask & !((1 as UInt64) << 5);
+    mask = mask & !(1_u64 << 5);
     assert_eq(mask, 1024 as UInt64);
 }
 

@@ -23,7 +23,7 @@ public fn disarmed() -> Deadline {
 }
 
 public fn armed_at(absolute_ns: Int64) -> Deadline {
-    let at = if absolute_ns < (0 as Int64) { 0 as Int64 } else { absolute_ns };
+    let at = if absolute_ns < 0_i64 { 0 as Int64 } else { absolute_ns };
     Deadline { absolute_ns: at, armed: true }
 }
 

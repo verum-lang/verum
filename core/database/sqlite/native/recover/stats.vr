@@ -30,16 +30,16 @@ public fn new_stats() -> RecoveryStats {
 
 implement RecoveryStats {
     pub fn note_page(&mut self) {
-        self.pages_read = self.pages_read + (1 as Int64);
+        self.pages_read = self.pages_read + 1_i64;
     }
     pub fn note_row(&mut self) {
-        self.rows_recovered = self.rows_recovered + (1 as Int64);
+        self.rows_recovered = self.rows_recovered + 1_i64;
     }
     pub fn note_rejected(&mut self) {
-        self.rows_rejected = self.rows_rejected + (1 as Int64);
+        self.rows_rejected = self.rows_rejected + 1_i64;
     }
     pub fn note_error(&mut self) {
-        self.errors_encountered = self.errors_encountered + (1 as Int64);
+        self.errors_encountered = self.errors_encountered + 1_i64;
     }
     pub fn total_rows(&self) -> Int64 {
         self.rows_recovered + self.rows_rejected

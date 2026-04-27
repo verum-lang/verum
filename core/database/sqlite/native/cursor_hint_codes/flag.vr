@@ -11,7 +11,7 @@ public fn f_omit_journal() -> Int64 { 0x08 as Int64 }
 public fn f_no_mutex()     -> Int64 { 0x10 as Int64 }
 
 public fn is_set(flags: Int64, bit: Int64) -> Bool {
-    (flags & bit) != (0 as Int64)
+    (flags & bit) != 0_i64
 }
 
 public fn set_bit(flags: Int64, bit: Int64) -> Int64 {

@@ -21,7 +21,7 @@ mount core.database.sqlite.native.next_stmt.stmt_list.{
 /// returns the head.
 public fn sqlite3_next_stmt(list: &StmtList, current: Int64) -> Int64 {
     if list.len() == 0 { return 0 as Int64; }
-    if current == (0 as Int64) {
+    if current == 0_i64 {
         return *list.ids.get(0);
     }
     let mut i: Int = 0;
@@ -41,7 +41,7 @@ public fn sqlite3_next_stmt(list: &StmtList, current: Int64) -> Int64 {
 /// the supplied closure.
 public fn walk_all(list: &StmtList, visit: fn(Int64)) {
     let mut current = sqlite3_next_stmt(list, 0 as Int64);
-    while current != (0 as Int64) {
+    while current != 0_i64 {
         (visit)(current);
         current = sqlite3_next_stmt(list, current);
     }

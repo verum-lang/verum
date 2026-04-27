@@ -149,8 +149,8 @@ fn test_report_summary_non_empty() {
 
 fn test_report_elapsed_ns() {
     let mut r = report_new(CmIntegrity);
-    r.start(100 as Int64);
-    r.finish(500 as Int64);
+    r.start100_i64;
+    r.finish500_i64;
     assert_eq(r.elapsed_ns(), 400 as Int64);
 }
 

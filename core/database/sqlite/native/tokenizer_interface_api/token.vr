@@ -11,15 +11,15 @@ public fn f_document_tokenize() -> Int64 { 0x0002 as Int64 }
 public fn f_aux_tokenize()     -> Int64 { 0x0004 as Int64 }
 
 public fn is_query_mode(flags: Int64) -> Bool {
-    (flags & f_query_tokenize()) != (0 as Int64)
+    (flags & f_query_tokenize()) != 0_i64
 }
 
 public fn is_document_mode(flags: Int64) -> Bool {
-    (flags & f_document_tokenize()) != (0 as Int64)
+    (flags & f_document_tokenize()) != 0_i64
 }
 
 public fn is_aux_mode(flags: Int64) -> Bool {
-    (flags & f_aux_tokenize()) != (0 as Int64)
+    (flags & f_aux_tokenize()) != 0_i64
 }
 
 // Per-token emission — (text, start_offset, end_offset, colocated flag).

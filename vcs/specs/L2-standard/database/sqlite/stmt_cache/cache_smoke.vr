@@ -89,7 +89,7 @@ fn test_entry_touch_increments() {
     let k = key_for(&"SELECT 1".clone());
     let mut e = entry_new(k, 7, 100 as Int64);
     assert_eq(e.use_count, 0);
-    e.touch(200 as Int64);
+    e.touch200_i64;
     assert_eq(e.use_count, 1);
     assert_eq(e.last_used_ns, 200 as Int64);
 }
@@ -129,7 +129,7 @@ fn test_cache_evicts_on_overflow() {
     let _ = c.insert(&"C".clone(), 3, 300 as Int64);
     assert_eq(c.current_size(), 2);
     let stats = c.stats_snapshot();
-    assert(stats.evictions >= (1 as Int64));
+    assert(stats.evictions >= 1_i64);
 }
 
 fn test_cache_lru_evicts_oldest() {

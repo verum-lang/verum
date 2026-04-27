@@ -41,12 +41,12 @@ public fn can_push_to_index(t: &WhereTerm) -> Bool {
 }
 
 public fn touches_cursor(t: &WhereTerm, cursor_bit: Int64) -> Bool {
-    (t.involves_cursors & cursor_bit) != (0 as Int64)
+    (t.involves_cursors & cursor_bit) != 0_i64
 }
 
 // A term applies to a loop-scope iff it only references cursors in that scope.
 public fn applies_in_scope(t: &WhereTerm, scope_bits: Int64) -> Bool {
-    (t.involves_cursors & !scope_bits) == (0 as Int64)
+    (t.involves_cursors & !scope_bits) == 0_i64
 }
 
 public fn is_join_equality(t: &WhereTerm) -> Bool {
@@ -55,9 +55,9 @@ public fn is_join_equality(t: &WhereTerm) -> Bool {
     // popcount(involves_cursors) >= 2
     let mut n: Int = 0;
     let mut mask: Int64 = t.involves_cursors;
-    while mask != (0 as Int64) {
-        if (mask & (1 as Int64)) != (0 as Int64) { n = n + 1; }
-        mask = mask >> (1 as Int64);
+    while mask != 0_i64 {
+        if (mask & 1_i64) != 0_i64 { n = n + 1; }
+        mask = mask >> 1_i64;
     }
     n >= 2
 }

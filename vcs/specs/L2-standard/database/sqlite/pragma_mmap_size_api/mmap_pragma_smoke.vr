@@ -47,7 +47,7 @@ fn test_resolve_exact_multiple() {
 }
 
 fn test_resolve_clamps_above_ceiling() {
-    let huge = max_mmap_ceiling() + (1 as Int64);
+    let huge = max_mmap_ceiling() + 1_i64;
     let s = resolve(huge, 4096 as Int64);
     assert(is_enabled(&s));
     assert(was_clamped(&s));

@@ -25,16 +25,16 @@ fn use_system_clock() {
 
 fn drive_mock() {
     let mut mc = mock_clock();
-    mc.advance(1_000_000 as Int64);
+    mc.advance1_000_000_i64;
     assert_eq(mc.peek_mono(), 1_000_000 as Int64);
     assert_eq(mc.peek_wall(), 1_000_000 as Int64);
 
-    mc.advance_mono(500 as Int64);
+    mc.advance_mono500_i64;
     assert_eq(mc.peek_mono(), 1_000_500 as Int64);
     assert_eq(mc.peek_wall(), 1_000_000 as Int64);
 
     // Wall may jump backwards (NTP step) — advance_wall accepts negative.
-    mc.advance_wall(-999 as Int64);
+    mc.advance_wall-999_i64;
     assert_eq(mc.peek_wall(), 999_001 as Int64);
 
     let _ = timestamp_monotonic_mock(&mc);

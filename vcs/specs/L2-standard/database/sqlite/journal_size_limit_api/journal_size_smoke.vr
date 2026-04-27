@@ -20,9 +20,9 @@ fn test_default_value() {
 }
 
 fn test_from_pragma_value_round_trip() {
-    match from_pragma_value(-1 as Int64) { LmUnlimited => {}, _ => assert(false) }
-    match from_pragma_value(0 as Int64)  { LmTruncate  => {}, _ => assert(false) }
-    match from_pragma_value(4096 as Int64) {
+    match from_pragma_value-1_i64 { LmUnlimited => {}, _ => assert(false) }
+    match from_pragma_value0_i64  { LmTruncate  => {}, _ => assert(false) }
+    match from_pragma_value4096_i64 {
         LmCap(n) => assert_eq(n, 4096 as Int64),
         _ => assert(false),
     }
@@ -31,20 +31,20 @@ fn test_from_pragma_value_round_trip() {
 fn test_to_pragma_value() {
     assert_eq(to_pragma_value(&LmUnlimited), -1 as Int64);
     assert_eq(to_pragma_value(&LmTruncate),   0 as Int64);
-    assert_eq(to_pragma_value(&LmCap(8192 as Int64)), 8192 as Int64);
+    assert_eq(to_pragma_value(&LmCap8192_i64), 8192 as Int64);
 }
 
 fn test_mode_names() {
     assert(mode_name(&LmUnlimited)            == "unlimited".clone());
     assert(mode_name(&LmTruncate)             == "truncate".clone());
-    assert(mode_name(&LmCap(1 as Int64))      == "cap".clone());
+    assert(mode_name(&LmCap1_i64)      == "cap".clone());
 }
 
 fn test_truncates_and_cap_helpers() {
     assert(truncates_after_commit(&LmTruncate));
     assert(!truncates_after_commit(&LmUnlimited));
-    assert(!truncates_after_commit(&LmCap(1 as Int64)));
-    assert(has_cap(&LmCap(99 as Int64)));
+    assert(!truncates_after_commit(&LmCap1_i64));
+    assert(has_cap(&LmCap99_i64));
     assert(!has_cap(&LmTruncate));
 }
 
@@ -52,8 +52,8 @@ fn test_allows_predicate() {
     assert(allows(&LmUnlimited, 1024 as Int64));
     assert(allows(&LmTruncate, 0 as Int64));
     assert(!allows(&LmTruncate, 1 as Int64));
-    assert(allows(&LmCap(2048 as Int64), 2048 as Int64));
-    assert(!allows(&LmCap(2048 as Int64), 4096 as Int64));
+    assert(allows(&LmCap2048_i64, 2048 as Int64));
+    assert(!allows(&LmCap2048_i64, 4096 as Int64));
 }
 
 fn test_post_commit_action() {
@@ -63,10 +63,10 @@ fn test_post_commit_action() {
     match post_commit_action(&LmTruncate, 4096 as Int64) {
         PcTruncateToZero => {}, _ => assert(false),
     }
-    match post_commit_action(&LmCap(2048 as Int64), 4096 as Int64) {
+    match post_commit_action(&LmCap2048_i64, 4096 as Int64) {
         PcShrinkToCap => {}, _ => assert(false),
     }
-    match post_commit_action(&LmCap(8192 as Int64), 4096 as Int64) {
+    match post_commit_action(&LmCap8192_i64, 4096 as Int64) {
         PcKeepAsIs => {}, _ => assert(false),
     }
 }

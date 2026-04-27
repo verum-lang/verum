@@ -104,7 +104,7 @@ public fn interpret_int64(v: &Text, default: Int64) -> Int64 {
     while i < bs.len() {
         let b = bs[i];
         if b < (0x30 as u8) || b > (0x39 as u8) { return default; }
-        out = (out * (10 as Int64)) + ((b - (0x30 as u8)) as Int64);
+        out = (out * 10_i64) + ((b - (0x30 as u8)) as Int64);
         i = i + 1;
     }
     out * sign

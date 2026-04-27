@@ -69,7 +69,7 @@ public fn has_overflow(c: &ParsedCell) -> Bool {
 public fn layout_is_consistent(c: &ParsedCell) -> Bool {
     // table-interior skips payload checks.
     match c.kind {
-        CkTableInterior => return c.payload_size == (0 as Int64) && c.local_bytes == 0,
+        CkTableInterior => return c.payload_size == 0_i64 && c.local_bytes == 0,
         _ => {}
     }
     let on_disk = c.local_bytes as Int64;
@@ -87,10 +87,10 @@ public fn cell_kind_invariant(c: &ParsedCell) -> Bool {
         if c.left_child_page != (0 as u32) { return false; }
     }
     if has_rowid(&c.kind) {
-        if c.rowid == (0 as Int64) { return true; }   // rowid 0 is valid
+        if c.rowid == 0_i64 { return true; }   // rowid 0 is valid
     }
     if !has_payload(&c.kind) {
-        if c.payload_size != (0 as Int64) { return false; }
+        if c.payload_size != 0_i64 { return false; }
     }
     true
 }

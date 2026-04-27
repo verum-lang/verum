@@ -87,7 +87,7 @@ public fn cursor_with_synthetic_baseline(page_size: Int) -> DbstatCursor {
         pagetype: "internal".clone(),
         ncell: 0 as Int64,
         payload: 0 as Int64,
-        unused: (page_size as Int64) - (100 as Int64),
+        unused: (page_size as Int64) - 100_i64,
         mx_payload: 0 as Int64,
         pgoffset: 0 as Int64,
         pgsize: page_size as Int64,

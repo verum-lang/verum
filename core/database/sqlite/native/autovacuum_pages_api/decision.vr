@@ -25,9 +25,9 @@ public fn outcome_pages(o: &DecisionOutcome) -> Int64 {
 
 /// Default policy: reclaim 1/16 of the free pages, floored at 0.
 public fn default_policy(r: &AutoVacuumRequest) -> DecisionOutcome {
-    if r.free_pages <= (0 as Int64) { return DoSkip; }
-    let take = r.free_pages / (16 as Int64);
-    if take == (0 as Int64) { return DoSkip; }
+    if r.free_pages <= 0_i64 { return DoSkip; }
+    let take = r.free_pages / 16_i64;
+    if take == 0_i64 { return DoSkip; }
     DoReclaimPages(take)
 }
 

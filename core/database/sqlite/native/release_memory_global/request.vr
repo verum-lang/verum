@@ -24,5 +24,5 @@ public fn from_int(n: Int) -> SizeRequest {
 }
 
 public fn is_noop(r: &SizeRequest) -> Bool {
-    r.target_bytes == (0 as Int64)
+    r.target_bytes == 0_i64
 }

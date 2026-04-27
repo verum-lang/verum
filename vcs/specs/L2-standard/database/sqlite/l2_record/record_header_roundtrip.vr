@@ -57,11 +57,11 @@ fn variable_flag() {
 }
 
 fn reserved_codes_rejected() {
-    match serial_type_decode(10 as Int64) {
+    match serial_type_decode10_i64 {
         Ok(_) => panic("expected ReservedCode for 10"),
         Err(_) => {},
     }
-    match serial_type_decode(11 as Int64) {
+    match serial_type_decode11_i64 {
         Ok(_) => panic("expected ReservedCode for 11"),
         Err(_) => {},
     }

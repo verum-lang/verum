@@ -79,7 +79,7 @@ implement MutexMethods for TrackingMethods {
 
     fn alloc(&mut self, class_kind: MutexClass) -> Int64 {
         let id = self.next_id;
-        self.next_id = id + (1 as Int64);
+        self.next_id = id + 1_i64;
         self.entries.push(mutex_entry(id, state_unheld(class_kind)));
         id
     }

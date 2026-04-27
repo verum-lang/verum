@@ -22,10 +22,10 @@ public fn resolution_microseconds(r: &ClockResolution) -> Int64 {
 // Compute actual microseconds slept given the request and clock resolution.
 // Rule: round up to the next multiple of `resolution_microseconds`.
 public fn actual_sleep_us(requested_us: Int64, r: &ClockResolution) -> Int64 {
-    if requested_us <= (0 as Int64) { return 0 as Int64; }
+    if requested_us <= 0_i64 { return 0 as Int64; }
     let step = resolution_microseconds(r);
     let rem = requested_us % step;
-    if rem == (0 as Int64) {
+    if rem == 0_i64 {
         requested_us
     } else {
         requested_us + (step - rem)
@@ -33,12 +33,12 @@ public fn actual_sleep_us(requested_us: Int64, r: &ClockResolution) -> Int64 {
 }
 
 public fn is_subsecond(actual_us: Int64) -> Bool {
-    actual_us < (1000000 as Int64)
+    actual_us < 1000000_i64
 }
 
 // xSleep(0) is a yield — should return 0 but may still block briefly.
 public fn is_yield_request(requested_us: Int64) -> Bool {
-    requested_us == (0 as Int64)
+    requested_us == 0_i64
 }
 
 public fn default_resolution() -> ClockResolution { CrMilliseconds }

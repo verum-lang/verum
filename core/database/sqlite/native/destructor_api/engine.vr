@@ -32,9 +32,9 @@ public fn new_engine() -> DestructorEngine {
 implement DestructorEngine {
     pub fn observe(&mut self, d: &BindDestructorKind) {
         match d {
-            DStatic     => self.static_refs = self.static_refs + (1 as Int64),
-            DTransient  => self.transient_copies = self.transient_copies + (1 as Int64),
-            DCustom(_)  => self.custom_callbacks = self.custom_callbacks + (1 as Int64),
+            DStatic     => self.static_refs = self.static_refs + 1_i64,
+            DTransient  => self.transient_copies = self.transient_copies + 1_i64,
+            DCustom(_)  => self.custom_callbacks = self.custom_callbacks + 1_i64,
         }
     }
 

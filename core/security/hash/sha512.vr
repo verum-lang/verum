@@ -187,9 +187,9 @@ implement Sha512 {
 
         // Total length in BITS, as 128-bit big-endian.
         // length_bits = length_lo * 8 + length_hi * 2^64 * 8
-        let bits_lo = self.length_lo << (3 as UInt64);
-        let carry = self.length_lo >> (61 as UInt64);
-        let bits_hi = (self.length_hi << (3 as UInt64)) | carry;
+        let bits_lo = self.length_lo << 3_u64;
+        let carry = self.length_lo >> 61_u64;
+        let bits_hi = (self.length_hi << 3_u64) | carry;
 
         // Append the 0x80 separator.
         buf[buf_len] = 0x80;
@@ -246,7 +246,7 @@ implement Sha512 {
 fn ch(x: UInt64, y: UInt64, z: UInt64) -> UInt64 {
     // Bitwise-NOT via XOR with all-ones — self-contained so we don't
     // depend on primitive-type method dispatch in the VBC interpreter.
-    (x & y) ^ ((x ^ (0xFFFFFFFFFFFFFFFF as UInt64)) & z)
+    (x & y) ^ ((x ^ 0xFFFFFFFFFFFFFFFF_u64) & z)
 }
 
 @inline
@@ -258,7 +258,7 @@ fn maj(x: UInt64, y: UInt64, z: UInt64) -> UInt64 {
 // method-dispatch table for primitives in the VBC interpreter.
 @inline
 fn rotr64(x: UInt64, n: UInt64) -> UInt64 {
-    (x >> n) | (x << ((64 as UInt64) - n))
+    (x >> n) | (x << (64_u64 - n))
 }
 
 @inline
@@ -273,12 +273,12 @@ fn big_sigma1(x: UInt64) -> UInt64 {
 
 @inline
 fn small_sigma0(x: UInt64) -> UInt64 {
-    rotr64(x, 1) ^ rotr64(x, 8) ^ (x >> (7 as UInt64))
+    rotr64(x, 1) ^ rotr64(x, 8) ^ (x >> 7_u64)
 }
 
 @inline
 fn small_sigma1(x: UInt64) -> UInt64 {
-    rotr64(x, 19) ^ rotr64(x, 61) ^ (x >> (6 as UInt64))
+    rotr64(x, 19) ^ rotr64(x, 61) ^ (x >> 6_u64)
 }
 
 // =============================================================================

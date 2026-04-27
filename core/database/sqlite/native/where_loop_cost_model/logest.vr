@@ -11,20 +11,20 @@ public fn logest_zero() -> Int { 0 }
 // for n >= 1 returns ceil(10 * log2(n)).
 // Iterative implementation; avoids floating point.
 public fn from_int(n: Int64) -> Int {
-    if n <= (0 as Int64) { return 0; }
-    if n == (1 as Int64) { return 0; }
+    if n <= 0_i64 { return 0; }
+    if n == 1_i64 { return 0; }
     // Find the highest bit.
     let mut v = n;
     let mut hi: Int = 0;
-    while v > (1 as Int64) {
-        v = v >> (1 as Int64);
+    while v > 1_i64 {
+        v = v >> 1_i64;
         hi = hi + 1;
     }
     // Fractional part: compute 10 * log2(n / 2^hi) in fixed-point.
     // For simplicity use linear interpolation between 2^hi and 2^(hi+1).
-    let base: Int64 = (1 as Int64) << (hi as Int64);
-    let next: Int64 = base << (1 as Int64);
-    let frac_num: Int64 = (n - base) * (10 as Int64);
+    let base: Int64 = 1_i64 << (hi as Int64);
+    let next: Int64 = base << 1_i64;
+    let frac_num: Int64 = (n - base) * 10_i64;
     let frac_den: Int64 = next - base;
     let frac: Int64 = frac_num / frac_den;
     (hi * 10) + (frac as Int)

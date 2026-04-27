@@ -68,9 +68,9 @@ fn test_generic_bitwise() {
 
     // NOT - VBC uses 64-bit values internally, so bitnot gives 64-bit results
     // For 32-bit semantics, we need to test with 64-bit values and mask
-    assert(bitnot(0 as UInt64) == 0xFFFFFFFFFFFFFFFF);
-    assert(bitnot(0xFFFFFFFFFFFFFFFF as UInt64) == 0);
-    assert(bitnot(0xAAAAAAAAAAAAAAAA as UInt64) == 0x5555555555555555);
+    assert(bitnot0_u64 == 0xFFFFFFFFFFFFFFFF);
+    assert(bitnot0xFFFFFFFFFFFFFFFF_u64 == 0);
+    assert(bitnot0xAAAAAAAAAAAAAAAA_u64 == 0x5555555555555555);
 
     // UInt64 operations
     assert(bitand(0xFF00FF00FF00FF00 as UInt64, 0x00FF00FF00FF00FF as UInt64) == 0);
@@ -89,25 +89,25 @@ fn test_count_leading_zeros() {
     // AOT compilation uses proper type-specific LLVM intrinsics.
 
     // All values are promoted to 64-bit in VBC, so clz always counts 64-bit leading zeros
-    assert(clz(1 as UInt64) == 63);
-    assert(clz(2 as UInt64) == 62);
-    assert(clz(0x80000000 as UInt64) == 32);  // Upper 32 bits are 0
-    assert(clz(0x40000000 as UInt64) == 33);
-    assert(clz(0x0000FFFF as UInt64) == 48);
-    assert(clz(0x00010000 as UInt64) == 47);
+    assert(clz1_u64 == 63);
+    assert(clz2_u64 == 62);
+    assert(clz0x80000000_u64 == 32);  // Upper 32 bits are 0
+    assert(clz0x40000000_u64 == 33);
+    assert(clz0x0000FFFF_u64 == 48);
+    assert(clz0x00010000_u64 == 47);
     // Note: clz(0) returns 64 (all bits are zero)
 
     // UInt64 full range tests
-    assert(clz(0x0000000000000001 as UInt64) == 63);
-    assert(clz(0x8000000000000000 as UInt64) == 0);
-    assert(clz(0x00000000FFFFFFFF as UInt64) == 32);
-    assert(clz(0x0001000000000000 as UInt64) == 15);
+    assert(clz0x0000000000000001_u64 == 63);
+    assert(clz0x8000000000000000_u64 == 0);
+    assert(clz0x00000000FFFFFFFF_u64 == 32);
+    assert(clz0x0001000000000000_u64 == 15);
 
     // Powers of two (64-bit)
     let mut i: UInt64 = 0;
     while i < 64 {
-        let val: UInt64 = (1 as UInt64) << i;
-        assert(clz(val) == (63 as UInt64) - i);
+        let val: UInt64 = 1_u64 << i;
+        assert(clz(val) == 63_u64 - i);
         i = i + 1;
     }
 }
@@ -119,41 +119,41 @@ fn test_count_leading_zeros() {
 @test
 fn test_count_trailing_zeros() {
     // UInt32
-    assert(ctz(0x00000001 as UInt32) == 0);
-    assert(ctz(0x00000002 as UInt32) == 1);
-    assert(ctz(0x80000000 as UInt32) == 31);
-    assert(ctz(0x00010000 as UInt32) == 16);
-    assert(ctz(0xFFFF0000 as UInt32) == 16);
+    assert(ctz0x00000001_u32 == 0);
+    assert(ctz0x00000002_u32 == 1);
+    assert(ctz0x80000000_u32 == 31);
+    assert(ctz0x00010000_u32 == 16);
+    assert(ctz0xFFFF0000_u32 == 16);
 
     // UInt64
-    assert(ctz(0x0000000000000001 as UInt64) == 0);
-    assert(ctz(0x8000000000000000 as UInt64) == 63);
-    assert(ctz(0x0000000100000000 as UInt64) == 32);
+    assert(ctz0x0000000000000001_u64 == 0);
+    assert(ctz0x8000000000000000_u64 == 63);
+    assert(ctz0x0000000100000000_u64 == 32);
 
     // Powers of two
     let mut i: UInt32 = 0;
     while i < 32 {
-        let val: UInt32 = (1 as UInt32) << i;
+        let val: UInt32 = 1_u32 << i;
         assert(ctz(val) == i);
         i = i + 1;
     }
 
     let mut j: UInt64 = 0;
     while j < 64 {
-        let val: UInt64 = (1 as UInt64) << j;
+        let val: UInt64 = 1_u64 << j;
         assert(ctz(val) == j);
         j = j + 1;
     }
 
     // UInt16
-    assert(ctz(0x0001 as UInt16) == 0);
-    assert(ctz(0x8000 as UInt16) == 15);
-    assert(ctz(0x0100 as UInt16) == 8);
+    assert(ctz0x0001_u16 == 0);
+    assert(ctz0x8000_u16 == 15);
+    assert(ctz0x0100_u16 == 8);
 
     // UInt8
-    assert(ctz(0x01 as UInt8) == 0);
-    assert(ctz(0x80 as UInt8) == 7);
-    assert(ctz(0x10 as UInt8) == 4);
+    assert(ctz0x01_u8 == 0);
+    assert(ctz0x80_u8 == 7);
+    assert(ctz0x10_u8 == 4);
 }
 
 // =============================================================================
@@ -163,38 +163,38 @@ fn test_count_trailing_zeros() {
 @test
 fn test_population_count() {
     // UInt32
-    assert(popcnt(0x00000000 as UInt32) == 0);
-    assert(popcnt(0x00000001 as UInt32) == 1);
-    assert(popcnt(0xFFFFFFFF as UInt32) == 32);
-    assert(popcnt(0xAAAAAAAA as UInt32) == 16);  // Alternating bits
-    assert(popcnt(0x55555555 as UInt32) == 16);
-    assert(popcnt(0x0F0F0F0F as UInt32) == 16);
-    assert(popcnt(0x000000FF as UInt32) == 8);
+    assert(popcnt0x00000000_u32 == 0);
+    assert(popcnt0x00000001_u32 == 1);
+    assert(popcnt0xFFFFFFFF_u32 == 32);
+    assert(popcnt0xAAAAAAAA_u32 == 16);  // Alternating bits
+    assert(popcnt0x55555555_u32 == 16);
+    assert(popcnt0x0F0F0F0F_u32 == 16);
+    assert(popcnt0x000000FF_u32 == 8);
 
     // UInt64
-    assert(popcnt(0x0000000000000000 as UInt64) == 0);
-    assert(popcnt(0xFFFFFFFFFFFFFFFF as UInt64) == 64);
-    assert(popcnt(0xAAAAAAAAAAAAAAAA as UInt64) == 32);
-    assert(popcnt(0x0000000000000001 as UInt64) == 1);
+    assert(popcnt0x0000000000000000_u64 == 0);
+    assert(popcnt0xFFFFFFFFFFFFFFFF_u64 == 64);
+    assert(popcnt0xAAAAAAAAAAAAAAAA_u64 == 32);
+    assert(popcnt0x0000000000000001_u64 == 1);
 
     // Powers of two (always have exactly 1 bit set)
     let mut i: UInt64 = 0;
     while i < 64 {
-        let val: UInt64 = (1 as UInt64) << i;
+        let val: UInt64 = 1_u64 << i;
         assert(popcnt(val) == 1);
         i = i + 1;
     }
 
     // UInt16
-    assert(popcnt(0x0000 as UInt16) == 0);
-    assert(popcnt(0xFFFF as UInt16) == 16);
-    assert(popcnt(0x00FF as UInt16) == 8);
+    assert(popcnt0x0000_u16 == 0);
+    assert(popcnt0xFFFF_u16 == 16);
+    assert(popcnt0x00FF_u16 == 8);
 
     // UInt8
-    assert(popcnt(0x00 as UInt8) == 0);
-    assert(popcnt(0xFF as UInt8) == 8);
-    assert(popcnt(0x0F as UInt8) == 4);
-    assert(popcnt(0xAA as UInt8) == 4);
+    assert(popcnt0x00_u8 == 0);
+    assert(popcnt0xFF_u8 == 8);
+    assert(popcnt0x0F_u8 == 4);
+    assert(popcnt0xAA_u8 == 4);
 }
 
 // =============================================================================
@@ -209,16 +209,16 @@ fn test_byte_swap() {
     // AOT compilation uses proper type-specific LLVM intrinsics.
 
     // UInt64 (swap 8 bytes) - these work correctly
-    assert(bswap(0x0102030405060708 as UInt64) == 0x0807060504030201 as UInt64);
-    assert(bswap(0xFF00000000000000 as UInt64) == 0x00000000000000FF as UInt64);
-    assert(bswap(0x0000000000000000 as UInt64) == 0x0000000000000000 as UInt64);
-    assert(bswap(0xFFFFFFFFFFFFFFFF as UInt64) == 0xFFFFFFFFFFFFFFFF as UInt64);
+    assert(bswap0x0102030405060708_u64 == 0x0807060504030201 as UInt64);
+    assert(bswap0xFF00000000000000_u64 == 0x00000000000000FF as UInt64);
+    assert(bswap0x0000000000000000_u64 == 0x0000000000000000 as UInt64);
+    assert(bswap0xFFFFFFFFFFFFFFFF_u64 == 0xFFFFFFFFFFFFFFFF as UInt64);
 
     // For 32-bit values in 64-bit representation:
     // bswap(0x0000000012345678) = 0x7856341200000000
     // The lower 32 bits of a 32-bit value get moved to upper 32 bits when swapped
-    assert(bswap(0x0000000012345678 as UInt64) == 0x7856341200000000 as UInt64);
-    assert(bswap(0x00000000FF000000 as UInt64) == 0x000000FF00000000 as UInt64);
+    assert(bswap0x0000000012345678_u64 == 0x7856341200000000 as UInt64);
+    assert(bswap0x00000000FF000000_u64 == 0x000000FF00000000 as UInt64);
 
     // Double swap is identity (works for all bit widths)
     let val_u64: UInt64 = 0xCAFEBABEDEADBEEF;
@@ -240,10 +240,10 @@ fn test_bit_reverse() {
     // AOT compilation uses proper type-specific LLVM intrinsics.
 
     // UInt64 (64 bits) - these work correctly
-    assert(bitreverse(0x0000000000000001 as UInt64) == 0x8000000000000000 as UInt64);
-    assert(bitreverse(0x8000000000000000 as UInt64) == 0x0000000000000001 as UInt64);
-    assert(bitreverse(0x0000000000000000 as UInt64) == 0x0000000000000000 as UInt64);
-    assert(bitreverse(0xFFFFFFFFFFFFFFFF as UInt64) == 0xFFFFFFFFFFFFFFFF as UInt64);
+    assert(bitreverse0x0000000000000001_u64 == 0x8000000000000000 as UInt64);
+    assert(bitreverse0x8000000000000000_u64 == 0x0000000000000001 as UInt64);
+    assert(bitreverse0x0000000000000000_u64 == 0x0000000000000000 as UInt64);
+    assert(bitreverse0xFFFFFFFFFFFFFFFF_u64 == 0xFFFFFFFFFFFFFFFF as UInt64);
 
     // For 32-bit values in 64-bit representation:
     // bitreverse(0x0000000000000001) = 0x8000000000000000 (bit 0 -> bit 63)
@@ -364,9 +364,9 @@ fn test_bitwise_patterns() {
     // Single bit (64-bit)
     let mut i: UInt64 = 0;
     while i < 64 {
-        let single_bit: UInt64 = (1 as UInt64) << i;
+        let single_bit: UInt64 = 1_u64 << i;
         assert(popcnt(single_bit) == 1);
-        assert(clz(single_bit) == (63 as UInt64) - i);  // 64-bit clz
+        assert(clz(single_bit) == 63_u64 - i);  // 64-bit clz
         assert(ctz(single_bit) == i);
         i = i + 1;
     }
@@ -387,21 +387,21 @@ fn test_type_specific_aliases() {
     // LLVM intrinsics. Tests here verify they match the generic 64-bit versions.
 
     // clz aliases - both u64 and u32 versions use 64-bit clz in VBC
-    assert(clz_u64(0x0000000000000001 as UInt64) == 63);
-    assert(clz_u64(0x8000000000000000 as UInt64) == 0);
+    assert(clz_u640x0000000000000001_u64 == 63);
+    assert(clz_u640x8000000000000000_u64 == 0);
     // clz_u32 in VBC gives same result as clz (64-bit)
     assert(clz_u32(0x00000001) == 63);  // 64-bit clz, not 31
     assert(clz_u32(0x80000000) == 32);  // Upper 32 bits are 0, so clz = 32
 
     // ctz aliases - ctz is width-independent for positive values
-    assert(ctz_u64(0x0000000000000001 as UInt64) == 0);
-    assert(ctz_u64(0x8000000000000000 as UInt64) == 63);
+    assert(ctz_u640x0000000000000001_u64 == 0);
+    assert(ctz_u640x8000000000000000_u64 == 63);
     assert(ctz_u32(0x00000001) == 0);  // Same as 64-bit
     assert(ctz_u32(0x80000000) == 31); // Same as 64-bit
 
     // popcnt aliases - popcnt is width-independent for values that fit
-    assert(popcnt_u64(0xFFFFFFFFFFFFFFFF as UInt64) == 64);
-    assert(popcnt_u64(0xAAAAAAAAAAAAAAAA as UInt64) == 32);
+    assert(popcnt_u640xFFFFFFFFFFFFFFFF_u64 == 64);
+    assert(popcnt_u640xAAAAAAAAAAAAAAAA_u64 == 32);
     assert(popcnt_u32(0xFFFFFFFF) == 32);  // Same as 64-bit
     assert(popcnt_u32(0xAAAAAAAA) == 16);  // Same as 64-bit
 

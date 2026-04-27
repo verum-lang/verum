@@ -79,7 +79,7 @@ fn test_realloc_tracks_delta() {
 
 fn test_hard_limit_rejects_oversize() {
     let mut e = new_engine();
-    e.set_hard_limit(100 as Int64);
+    e.set_hard_limit100_i64;
     let ok = e.sqlite3_malloc(80);
     assert(!is_null(&ok));
     let fail = e.sqlite3_malloc(40);

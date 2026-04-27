@@ -69,11 +69,11 @@ fn main() {
 
 @test
 fn test_ordering_constant_values() {
-    assert(ORDERING_RELAXED == (0 as UInt8));
-    assert(ORDERING_ACQUIRE == (1 as UInt8));
-    assert(ORDERING_RELEASE == (2 as UInt8));
-    assert(ORDERING_ACQ_REL == (3 as UInt8));
-    assert(ORDERING_SEQ_CST == (4 as UInt8));
+    assert(ORDERING_RELAXED == 0_u8);
+    assert(ORDERING_ACQUIRE == 1_u8);
+    assert(ORDERING_RELEASE == 2_u8);
+    assert(ORDERING_ACQ_REL == 3_u8);
+    assert(ORDERING_SEQ_CST == 4_u8);
 }
 
 @test
@@ -506,11 +506,11 @@ fn test_compiler_fence_does_not_affect_state() {
 @test
 fn test_ordering_constant_range() {
     // All constants should be in 0..=4
-    assert(ORDERING_RELAXED <= (4 as UInt8));
-    assert(ORDERING_ACQUIRE <= (4 as UInt8));
-    assert(ORDERING_RELEASE <= (4 as UInt8));
-    assert(ORDERING_ACQ_REL <= (4 as UInt8));
-    assert(ORDERING_SEQ_CST <= (4 as UInt8));
+    assert(ORDERING_RELAXED <= 4_u8);
+    assert(ORDERING_ACQUIRE <= 4_u8);
+    assert(ORDERING_RELEASE <= 4_u8);
+    assert(ORDERING_ACQ_REL <= 4_u8);
+    assert(ORDERING_SEQ_CST <= 4_u8);
 }
 
 @test

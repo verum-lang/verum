@@ -30,7 +30,7 @@ fn test_from_int_positive_records_target() {
 
 fn test_engine_release_under_budget() {
     let mut e = new_engine();
-    e.set_reclaimable(500 as Int64);
+    e.set_reclaimable500_i64;
     let r = from_int(200);
     let got = e.sqlite3_release_memory(&r);
     assert_eq(got, 200);
@@ -40,7 +40,7 @@ fn test_engine_release_under_budget() {
 
 fn test_engine_release_exceeds_budget_caps() {
     let mut e = new_engine();
-    e.set_reclaimable(100 as Int64);
+    e.set_reclaimable100_i64;
     let r = from_int(1000);
     let got = e.sqlite3_release_memory(&r);
     assert_eq(got, 100);
@@ -49,7 +49,7 @@ fn test_engine_release_exceeds_budget_caps() {
 
 fn test_engine_noop_request_no_effect() {
     let mut e = new_engine();
-    e.set_reclaimable(500 as Int64);
+    e.set_reclaimable500_i64;
     let r = from_int(0);
     let got = e.sqlite3_release_memory(&r);
     assert_eq(got, 0);

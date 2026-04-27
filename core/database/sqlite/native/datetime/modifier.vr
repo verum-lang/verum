@@ -147,10 +147,10 @@ public fn parse(text: &Text) -> Maybe<DatetimeModifier> {
 
 public fn apply(inst: &Instant, m: &DatetimeModifier, now_ns: Int64) -> Instant {
     match m {
-        MNow => from_unix_seconds(now_ns / (1_000_000_000 as Int64)),
+        MNow => from_unix_seconds(now_ns / 1_000_000_000_i64),
         MAddDays(n)     => Instant { jd_int: inst.jd_int + (*n), frac_day: inst.frac_day },
-        MAddHours(n)    => inst.shift_seconds((*n) * (3600 as Int64)),
-        MAddMinutes(n)  => inst.shift_seconds((*n) * (60 as Int64)),
+        MAddHours(n)    => inst.shift_seconds((*n) * 3600_i64),
+        MAddMinutes(n)  => inst.shift_seconds((*n) * 60_i64),
         MAddSeconds(n)  => inst.shift_seconds(*n),
         MAddMonths(n)   => add_months(inst, *n),
         MAddYears(n)    => add_months(inst, (*n) * 12),

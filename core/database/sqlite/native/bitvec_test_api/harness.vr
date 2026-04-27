@@ -35,18 +35,18 @@ public fn new_result() -> TestResult {
 }
 
 public fn apply_op(v: &mut PagerBitmap, op: &TestOp, r: &mut TestResult) {
-    r.ops_applied = r.ops_applied + (1 as Int64);
+    r.ops_applied = r.ops_applied + 1_i64;
     match op {
         ToSet(i) => {
-            if !set(v, *i) { r.set_duplicates = r.set_duplicates + (1 as Int64); }
+            if !set(v, *i) { r.set_duplicates = r.set_duplicates + 1_i64; }
         }
         ToClear(i) => {
-            if !clear(v, *i) { r.clear_misses = r.clear_misses + (1 as Int64); }
+            if !clear(v, *i) { r.clear_misses = r.clear_misses + 1_i64; }
         }
     }
 }
 
 public fn finalize(v: &PagerBitmap, r: &mut TestResult) {
     r.final_population = v.population;
-    r.assertion_count = r.assertion_count + (1 as Int64);
+    r.assertion_count = r.assertion_count + 1_i64;
 }

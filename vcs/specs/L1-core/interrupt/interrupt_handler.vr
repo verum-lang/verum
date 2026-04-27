@@ -15,8 +15,8 @@ const TIMER_BASE: USize = 0x4000_0000 as USize;
 const TIMER_STATUS: Register<UInt32, WriteOneToClear> = Register.at(TIMER_BASE);
 const TIMER_COUNT: Register<UInt32, ReadWrite> = Register.at(TIMER_BASE + (4 as USize));
 
-const TIMER_PENDING: UInt32 = (1 as UInt32) << (0 as UInt32);
-const TIMER_OVERFLOW: UInt32 = (1 as UInt32) << (1 as UInt32);
+const TIMER_PENDING: UInt32 = 1_u32 << 0_u32;
+const TIMER_OVERFLOW: UInt32 = 1_u32 << 1_u32;
 
 /// Simple interrupt handler with @interrupt attribute.
 @interrupt(regular)

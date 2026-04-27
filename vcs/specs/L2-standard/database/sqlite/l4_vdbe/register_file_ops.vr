@@ -23,7 +23,7 @@ fn construction_and_defaults() {
 
 fn set_and_get() {
     let mut rf = register_file_new(4);
-    rf.set(0, RInt(42 as Int64));
+    rf.set(0, RInt42_i64);
     rf.set(1, RReal(3.14));
     rf.set(2, RText("hi".clone()));
     match rf.get(0) { RInt(i) => { assert_eq(i as Int, 42); }, _ => panic("slot 0"), }
@@ -40,19 +40,19 @@ fn out_of_bounds_reads_null() {
 
 fn kind_tags() {
     match register_kind(&RNull)  { KNull => {}, _ => panic("kind null"), }
-    match register_kind(&RInt(0 as Int64)) { KInt => {}, _ => panic("kind int"), }
+    match register_kind(&RInt0_i64) { KInt => {}, _ => panic("kind int"), }
     match register_kind(&RReal(0.0)) { KReal => {}, _ => panic("kind real"), }
     match register_kind(&RText("x".clone())) { KText => {}, _ => panic("kind text"), }
     let mut b: List<Byte> = List.new();
     b.push(0 as Byte);
     match register_kind(&RBlob(b)) { KBlob => {}, _ => panic("kind blob"), }
-    match register_kind(&RRowId(1 as Int64)) { KRowId => {}, _ => panic("kind rowid"), }
+    match register_kind(&RRowId1_i64) { KRowId => {}, _ => panic("kind rowid"), }
 }
 
 fn truthy_rules() {
     assert(!register_is_truthy(&RNull));
-    assert(!register_is_truthy(&RInt(0 as Int64)));
-    assert(register_is_truthy(&RInt(1 as Int64)));
+    assert(!register_is_truthy(&RInt0_i64));
+    assert(register_is_truthy(&RInt1_i64));
     assert(!register_is_truthy(&RReal(0.0)));
     assert(register_is_truthy(&RReal(0.5)));
     assert(!register_is_truthy(&RText("".clone())));
@@ -61,9 +61,9 @@ fn truthy_rules() {
 
 fn move_and_copy() {
     let mut rf = register_file_new(6);
-    rf.set(0, RInt(1 as Int64));
-    rf.set(1, RInt(2 as Int64));
-    rf.set(2, RInt(3 as Int64));
+    rf.set(0, RInt1_i64);
+    rf.set(1, RInt2_i64);
+    rf.set(2, RInt3_i64);
     // Move 0..3 → 3..6.
     rf.move_range(0, 3, 3);
     match rf.get(0) { RNull => {}, _ => panic("src cleared"), }
@@ -78,9 +78,9 @@ fn move_and_copy() {
 
 fn clear_range_fills_null() {
     let mut rf = register_file_new(4);
-    rf.set(0, RInt(1 as Int64));
-    rf.set(1, RInt(2 as Int64));
-    rf.set(2, RInt(3 as Int64));
+    rf.set(0, RInt1_i64);
+    rf.set(1, RInt2_i64);
+    rf.set(2, RInt3_i64);
     rf.clear_range(0, 2);
     match rf.get(0) { RNull => {}, _ => panic("cleared 0"), }
     match rf.get(1) { RNull => {}, _ => panic("cleared 1"), }

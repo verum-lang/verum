@@ -82,7 +82,7 @@ implement Stat4Histogram {
         // Probe between samples — fall back to average density.
         if self.buckets.len() == 0 { return 1 as Int64; }
         let avg = self.total_rows / (self.buckets.len() as Int64);
-        if avg < (1 as Int64) { 1 as Int64 } else { avg }
+        if avg < 1_i64 { 1 as Int64 } else { avg }
     }
 
     /// Estimate the count of rows with `key < probe`.

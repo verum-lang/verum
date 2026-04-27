@@ -130,13 +130,13 @@ fn test_encode_byte_round_trip() {
 }
 
 fn test_len_class_for_boundaries() {
-    assert_eq(len_class_for(0 as Int64),    0);
-    assert_eq(len_class_for(11 as Int64),   11);
-    assert_eq(len_class_for(12 as Int64),   12);
-    assert_eq(len_class_for(0xFF as Int64), 12);
-    assert_eq(len_class_for(0x100 as Int64), 13);
-    assert_eq(len_class_for(0x10000 as Int64), 14);
-    assert_eq(len_class_for(0x100000000 as Int64), 15);
+    assert_eq(len_class_for0_i64,    0);
+    assert_eq(len_class_for11_i64,   11);
+    assert_eq(len_class_for12_i64,   12);
+    assert_eq(len_class_for0xFF_i64, 12);
+    assert_eq(len_class_for0x100_i64, 13);
+    assert_eq(len_class_for0x10000_i64, 14);
+    assert_eq(len_class_for0x100000000_i64, 15);
 }
 
 fn test_header_consistency_for_empty_payload_elements() {

@@ -89,14 +89,14 @@ fn hex_digit(n: Byte) -> Byte {
 }
 
 fn render_int64(n: Int64) -> Text {
-    if n == (0 as Int64) { return "0".clone(); }
+    if n == 0_i64 { return "0".clone(); }
     let mut digits: List<Byte> = List.new();
-    let neg = n < (0 as Int64);
+    let neg = n < 0_i64;
     let mut x: Int64 = if neg { -n } else { n };
-    while x > (0 as Int64) {
+    while x > 0_i64 {
         let d: Byte = ((x as Int) % 10) as Byte;
         digits.push(d + (48 as Byte));
-        x = x / (10 as Int64);
+        x = x / 10_i64;
     }
     let mut out = Text.new();
     if neg { out.push_byte(45 as Byte); }
@@ -122,12 +122,12 @@ fn render_float(f: Float64) -> Text {
 
     // zero-pad fractional digits to 6 places
     let mut digits: List<Byte> = List.new();
-    let mut x: Int64 = if scaled < (0 as Int64) { -scaled } else { scaled };
+    let mut x: Int64 = if scaled < 0_i64 { -scaled } else { scaled };
     let mut placed: Int = 0;
     while placed < 6 {
         let d: Byte = ((x as Int) % 10) as Byte;
         digits.push(d + (48 as Byte));
-        x = x / (10 as Int64);
+        x = x / 10_i64;
         placed = placed + 1;
     }
     let mut i: Int = digits.len() - 1;

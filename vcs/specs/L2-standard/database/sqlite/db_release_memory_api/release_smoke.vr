@@ -54,7 +54,7 @@ fn test_engine_release_drains_lookaside_and_reports_ok() {
     let _ = try_allocate(&mut l, 16);
     let _ = try_allocate(&mut l, 16);
     let mut e = new_engine(l);
-    e.note_page_cache(1024 as Int64);
+    e.note_page_cache1024_i64;
     let rc = e.sqlite3_db_release_memory();
     assert_eq(rc, 0);
     assert_eq(e.calls, 1 as Int64);

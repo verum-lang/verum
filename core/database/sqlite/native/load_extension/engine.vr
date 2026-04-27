@@ -75,10 +75,10 @@ implement LoadEngine {
     /// the policy forbids it and bumps the counter.
     pub fn gate(&mut self, _req: &LoadRequest) -> LoadOutcome {
         if !allows_c_level(&self.policy) {
-            self.loads_denied = self.loads_denied + (1 as Int64);
+            self.loads_denied = self.loads_denied + 1_i64;
             return LoDenied("sqlite3_enable_load_extension is off".clone());
         }
-        self.loads_completed = self.loads_completed + (1 as Int64);
+        self.loads_completed = self.loads_completed + 1_i64;
         LoOk
     }
 }

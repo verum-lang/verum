@@ -50,7 +50,7 @@ public fn exec_statement(
     callback: fn(&ExecRow) -> CallbackDecision,
 ) -> ExecOutcome {
     let stmt_id = (prepare_fn)(&sql);
-    if stmt_id < (0 as Int64) {
+    if stmt_id < 0_i64 {
         return EoError("prepare failed".clone());
     }
     let mut outcome: ExecOutcome = EoOk;

@@ -28,5 +28,5 @@ public fn null_spec() -> CallbackSpec {
 }
 
 public fn is_null(s: &CallbackSpec) -> Bool {
-    s.handle == (0 as Int64)
+    s.handle == 0_i64
 }

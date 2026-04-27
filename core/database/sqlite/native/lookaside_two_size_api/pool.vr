@@ -84,7 +84,7 @@ public fn empty_stats() -> Stats {
 }
 
 public fn record_hit(mut s: Stats, k: &SlotKind) -> Stats {
-    s.hit = s.hit + (1 as Int64);
+    s.hit = s.hit + 1_i64;
     match k {
         SkSmall => { s.used_small = s.used_small + 1; },
         SkLarge => { s.used_large = s.used_large + 1; },
@@ -94,12 +94,12 @@ public fn record_hit(mut s: Stats, k: &SlotKind) -> Stats {
 }
 
 public fn record_miss_full(mut s: Stats) -> Stats {
-    s.miss_full = s.miss_full + (1 as Int64);
+    s.miss_full = s.miss_full + 1_i64;
     s
 }
 
 public fn record_miss_size(mut s: Stats) -> Stats {
-    s.miss_size = s.miss_size + (1 as Int64);
+    s.miss_size = s.miss_size + 1_i64;
     s
 }
 

@@ -99,9 +99,9 @@ fn test_in_iterator_empty_is_done() {
 
 fn test_in_iterator_iterates_then_stops() {
     let mut values: List<Int64> = List.new();
-    values.push(10 as Int64);
-    values.push(20 as Int64);
-    values.push(30 as Int64);
+    values.push10_i64;
+    values.push20_i64;
+    values.push30_i64;
     let mut it = new_iterator(values);
     assert_eq(it.sqlite3_vtab_in_first(), 100);   // ROW (1st)
     assert_eq(it.sqlite3_vtab_in_next(),  100);   // ROW (2nd)

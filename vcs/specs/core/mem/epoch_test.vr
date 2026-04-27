@@ -228,7 +228,7 @@ fn test_epoch_cache_check_matching() {
     };
 
     // Check with matching epoch (truncated to 16 bits)
-    assert(cache.check(42 as UInt16));
+    assert(cache.check42_u16);
 }
 
 @test
@@ -240,7 +240,7 @@ fn test_epoch_cache_check_non_matching() {
     };
 
     // Check with non-matching epoch
-    assert(!cache.check(99 as UInt16));
+    assert(!cache.check99_u16);
 }
 
 @test
@@ -450,7 +450,7 @@ fn test_epoch_16bit_truncation() {
     };
 
     // Check should compare only lower 16 bits
-    assert(cache.check(0x0042 as UInt16));
+    assert(cache.check0x0042_u16);
 }
 
 @test
@@ -461,7 +461,7 @@ fn test_epoch_max_truncation() {
         sync_interval: 1000,
     };
 
-    assert(cache.check(0xFFFF as UInt16));
+    assert(cache.check0xFFFF_u16);
 }
 
 // =============================================================================
@@ -723,8 +723,8 @@ fn test_epoch_cache_check_zero_epoch() {
         sync_interval: 1000,
     };
 
-    assert(cache.check(0 as UInt16));
-    assert(!cache.check(1 as UInt16));
+    assert(cache.check0_u16);
+    assert(!cache.check1_u16);
 }
 
 @test
@@ -891,9 +891,9 @@ fn test_epoch_cache_check_boundary_values() {
         sync_interval: 1000,
     };
 
-    assert(cache.check(0xFFFF as UInt16));
-    assert(!cache.check(0 as UInt16));
-    assert(!cache.check(0xFFFE as UInt16));
+    assert(cache.check0xFFFF_u16);
+    assert(!cache.check0_u16);
+    assert(!cache.check0xFFFE_u16);
 }
 
 @test
@@ -1063,9 +1063,9 @@ fn test_epoch_cache_check_with_high_epoch() {
     };
 
     // Check truncates to lower 16 bits
-    assert(cache.check(0x1234 as UInt16));
-    assert(!cache.check(0xABCD as UInt16));
-    assert(!cache.check(0x0000 as UInt16));
+    assert(cache.check0x1234_u16);
+    assert(!cache.check0xABCD_u16);
+    assert(!cache.check0x0000_u16);
 }
 
 @test

@@ -29,7 +29,7 @@ public fn v2_spec(size_bytes: Int64) -> ZeroBlobSpec {
 /// sqlite3_bind_zeroblob (32-bit) rejects N < 0 OR N > INT32_MAX.
 /// The 64-bit variant only rejects negative.
 public fn is_valid(s: &ZeroBlobSpec) -> Bool {
-    if s.size_bytes < (0 as Int64) { return false; }
+    if s.size_bytes < 0_i64 { return false; }
     match &s.api {
         ZaV1 => {
             let max32: Int64 = 2147483647 as Int64;

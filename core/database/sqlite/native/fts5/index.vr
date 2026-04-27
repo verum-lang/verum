@@ -85,7 +85,7 @@ implement InvertedIndex {
     /// Materialise the buffer as a fresh L0 segment.
     pub fn flush(&mut self) -> Int64 {
         let id = self.next_segment_id;
-        self.next_segment_id = id + (1 as Int64);
+        self.next_segment_id = id + 1_i64;
         let mut seg = segment_new(id, L0);
         let mut i: Int = 0;
         while i < self.buffer.len() {

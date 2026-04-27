@@ -82,37 +82,37 @@ public fn serial_type_encode(st: SerialType) -> Int64 {
         StReal   => 7  as Int64,
         StZero   => 8  as Int64,
         StOne    => 9  as Int64,
-        StBlob(n) => ((12 as Int64) + (2 as Int64) * (n as Int64)),
-        StText(n) => ((13 as Int64) + (2 as Int64) * (n as Int64)),
+        StBlob(n) => (12_i64 + 2_i64 * (n as Int64)),
+        StText(n) => (13_i64 + 2_i64 * (n as Int64)),
     }
 }
 
 /// Parse a u64 code back into a SerialType.
 public fn serial_type_decode(code: Int64) -> Result<SerialType, RecordError> {
-    if code == (0 as Int64)  { return Ok(StNull); }
-    if code == (1 as Int64)  { return Ok(StInt8); }
-    if code == (2 as Int64)  { return Ok(StInt16); }
-    if code == (3 as Int64)  { return Ok(StInt24); }
-    if code == (4 as Int64)  { return Ok(StInt32); }
-    if code == (5 as Int64)  { return Ok(StInt48); }
-    if code == (6 as Int64)  { return Ok(StInt64); }
-    if code == (7 as Int64)  { return Ok(StReal); }
-    if code == (8 as Int64)  { return Ok(StZero); }
-    if code == (9 as Int64)  { return Ok(StOne); }
-    if code == (10 as Int64) || code == (11 as Int64) {
+    if code == 0_i64  { return Ok(StNull); }
+    if code == 1_i64  { return Ok(StInt8); }
+    if code == 2_i64  { return Ok(StInt16); }
+    if code == 3_i64  { return Ok(StInt24); }
+    if code == 4_i64  { return Ok(StInt32); }
+    if code == 5_i64  { return Ok(StInt48); }
+    if code == 6_i64  { return Ok(StInt64); }
+    if code == 7_i64  { return Ok(StReal); }
+    if code == 8_i64  { return Ok(StZero); }
+    if code == 9_i64  { return Ok(StOne); }
+    if code == 10_i64 || code == 11_i64 {
         return Err(ReservedCode(code));
     }
     // BLOB / TEXT branch.
-    if code < (12 as Int64) {
+    if code < 12_i64 {
         return Err(InvalidLength(code));
     }
-    let even = (code - (12 as Int64)) / (2 as Int64) == (code - (13 as Int64)) / (2 as Int64) + (1 as Int64);
+    let even = (code - 12_i64) / 2_i64 == (code - 13_i64) / 2_i64 + 1_i64;
     // Simpler: check parity via modulo.
-    let is_blob = (code & (1 as Int64)) == (0 as Int64);
+    let is_blob = (code & 1_i64) == 0_i64;
     let n: Int = if is_blob {
-        ((code - (12 as Int64)) / (2 as Int64)) as Int
+        ((code - 12_i64) / 2_i64) as Int
     } else {
-        ((code - (13 as Int64)) / (2 as Int64)) as Int
+        ((code - 13_i64) / 2_i64) as Int
     };
     let _ = even;
     if n < 0 {

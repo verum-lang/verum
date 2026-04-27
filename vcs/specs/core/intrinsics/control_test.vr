@@ -200,7 +200,7 @@ fn test_random_u64_not_all_zero() {
     let mut has_nonzero = false;
     while j < 10 {
         let r = random_u64();
-        if r != (0 as UInt64) {
+        if r != 0_u64 {
             has_nonzero = true;
         }
         j = j + 1;

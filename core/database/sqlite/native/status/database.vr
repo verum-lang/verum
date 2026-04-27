@@ -72,8 +72,8 @@ implement DbStatus {
     pub fn note_lookaside_miss(&mut self) { self.lookaside.note_miss(); }
     pub fn note_cache_hit(&mut self) { self.cache.note_hit(); }
     pub fn note_cache_miss(&mut self) { self.cache.note_miss(); }
-    pub fn note_cache_write(&mut self) { self.cache_writes.add(1 as Int64); }
-    pub fn note_cache_spill(&mut self) { self.cache_spill.add(1 as Int64); }
+    pub fn note_cache_write(&mut self) { self.cache_writes.add1_i64; }
+    pub fn note_cache_spill(&mut self) { self.cache_spill.add1_i64; }
 
     pub fn cache_hit_ratio(&self) -> Float64 { self.cache.ratio() }
 }

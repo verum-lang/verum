@@ -50,7 +50,7 @@ mount base.{Maybe, Some, None, Bool};
 fn test_index_stats_equality_selectivity() {
     let mut s = index_stats_default("idx_users_email".clone(), "users".clone(), 1000 as Int64);
     // tuple_card = [1000, 5] means avg-rows-per-equality on first key = 5
-    s.tuple_card.push(5 as Int64);
+    s.tuple_card.push5_i64;
     let sel = s.equality_selectivity(1);
     assert(sel == 5.0 / 1000.0);
 }
@@ -63,7 +63,7 @@ fn test_index_stats_no_keys() {
 
 fn test_table_stats_default_pages() {
     let t = table_stats_default("users".clone(), 1000 as Int64);
-    assert(t.n_pages > (0 as Int64));
+    assert(t.n_pages > 0_i64);
 }
 
 fn test_stats_registry_lookup() {

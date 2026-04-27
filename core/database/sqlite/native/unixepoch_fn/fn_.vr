@@ -60,7 +60,7 @@ public fn evaluate(tv: &TimeValue, now_seconds: Int64) -> UnixepochResult {
             // Unix epoch = Julian 2440587.5; we drop the .5 day for an integer
             // surrogate so the test harness can verify the formula path.
             let jd_unix = 2440588 as Int64;
-            REpoch((j.clone() - jd_unix) * (86400 as Int64))
+            REpoch((j.clone() - jd_unix) * 86400_i64)
         },
         TvIso(_)           => RNull,    // delegated to date parser
     }

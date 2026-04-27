@@ -42,17 +42,17 @@ public fn begin(mut s: AggState) -> AggState {
 }
 
 public fn step(mut s: AggState) -> AggState {
-    s.rows_stepped = s.rows_stepped + (1 as Int64);
+    s.rows_stepped = s.rows_stepped + 1_i64;
     s
 }
 
 public fn inverse(mut s: AggState) -> AggState {
-    s.rows_inverted = s.rows_inverted + (1 as Int64);
+    s.rows_inverted = s.rows_inverted + 1_i64;
     s
 }
 
 public fn emit_value(mut s: AggState) -> AggState {
-    s.values_emitted = s.values_emitted + (1 as Int64);
+    s.values_emitted = s.values_emitted + 1_i64;
     s
 }
 
@@ -72,9 +72,9 @@ public fn live_row_count(s: &AggState) -> Int64 {
 }
 
 public fn is_window_use(s: &AggState) -> Bool {
-    s.rows_inverted > (0 as Int64) || s.values_emitted > (0 as Int64)
+    s.rows_inverted > 0_i64 || s.values_emitted > 0_i64
 }
 
 public fn is_plain_aggregate_use(s: &AggState) -> Bool {
-    s.rows_inverted == (0 as Int64) && s.values_emitted == (0 as Int64)
+    s.rows_inverted == 0_i64 && s.values_emitted == 0_i64
 }

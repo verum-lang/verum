@@ -43,7 +43,7 @@ implement FreeEngine {
     pub fn set_hard_limit(&mut self, n: Int64) { self.hard_limit = n; }
 
     fn reject_oom(&self, size: Int64) -> Bool {
-        self.hard_limit > (0 as Int64)
+        self.hard_limit > 0_i64
             && (self.outstanding_bytes + size) > self.hard_limit
     }
 
@@ -52,19 +52,19 @@ implement FreeEngine {
         let size = n as Int64;
         if self.reject_oom(size) { return null_handle(); }
         let id = self.next_id;
-        self.next_id = self.next_id + (1 as Int64);
+        self.next_id = self.next_id + 1_i64;
         self.outstanding_bytes = self.outstanding_bytes + size;
-        self.mallocs = self.mallocs + (1 as Int64);
+        self.mallocs = self.mallocs + 1_i64;
         new_handle(id, size)
     }
 
     pub fn sqlite3_malloc64(&mut self, n: Int64) -> OpaqueHandle {
-        if n <= (0 as Int64) { return null_handle(); }
+        if n <= 0_i64 { return null_handle(); }
         if self.reject_oom(n) { return null_handle(); }
         let id = self.next_id;
-        self.next_id = self.next_id + (1 as Int64);
+        self.next_id = self.next_id + 1_i64;
         self.outstanding_bytes = self.outstanding_bytes + n;
-        self.mallocs = self.mallocs + (1 as Int64);
+        self.mallocs = self.mallocs + 1_i64;
         new_handle(id, n)
     }
 
@@ -75,7 +75,7 @@ implement FreeEngine {
         } else {
             self.outstanding_bytes = 0 as Int64;
         }
-        self.frees = self.frees + (1 as Int64);
+        self.frees = self.frees + 1_i64;
     }
 
     /// Classical realloc semantics: free(old) + malloc(new).  On OOM
@@ -85,10 +85,10 @@ implement FreeEngine {
         let size = new_size as Int64;
         let delta = if size > old.size { size - old.size } else { 0 as Int64 };
         if self.reject_oom(delta) { return null_handle(); }
-        self.reallocs = self.reallocs + (1 as Int64);
+        self.reallocs = self.reallocs + 1_i64;
         self.outstanding_bytes = self.outstanding_bytes + (size - old.size);
         let id = self.next_id;
-        self.next_id = self.next_id + (1 as Int64);
+        self.next_id = self.next_id + 1_i64;
         new_handle(id, size)
     }
 

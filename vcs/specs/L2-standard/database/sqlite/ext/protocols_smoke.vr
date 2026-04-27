@@ -98,7 +98,7 @@ fn test_scalar_closure() {
     assert_eq(f.arity(), 1);
 
     let mut args: List<Register> = List.new();
-    args.push(RInt(42 as Int64));
+    args.push(RInt42_i64);
     let r = f.eval(&args);
     match r {
         Ok(v) => match v {
@@ -135,9 +135,9 @@ fn drive_aggregate_count() {
 fn drive_aggregate_sum() {
     let agg = sum_int();
     let mut st = agg.init();
-    let mut a1: List<Register> = List.new(); a1.push(RInt(10 as Int64));
-    let mut a2: List<Register> = List.new(); a2.push(RInt(20 as Int64));
-    let mut a3: List<Register> = List.new(); a3.push(RInt(30 as Int64));
+    let mut a1: List<Register> = List.new(); a1.push(RInt10_i64);
+    let mut a2: List<Register> = List.new(); a2.push(RInt20_i64);
+    let mut a3: List<Register> = List.new(); a3.push(RInt30_i64);
     agg.step(&mut st, &a1);
     agg.step(&mut st, &a2);
     agg.step(&mut st, &a3);
@@ -159,11 +159,11 @@ fn drive_aggregate_sum_empty_returns_null() {
 fn drive_aggregate_max() {
     let agg = max_int();
     let mut st = agg.init();
-    let mut a: List<Register> = List.new(); a.push(RInt(5 as Int64));
+    let mut a: List<Register> = List.new(); a.push(RInt5_i64);
     agg.step(&mut st, &a);
-    let mut b: List<Register> = List.new(); b.push(RInt(99 as Int64));
+    let mut b: List<Register> = List.new(); b.push(RInt99_i64);
     agg.step(&mut st, &b);
-    let mut c: List<Register> = List.new(); c.push(RInt(7 as Int64));
+    let mut c: List<Register> = List.new(); c.push(RInt7_i64);
     agg.step(&mut st, &c);
     match agg.finalize(st) {
         RInt(x) => assert_eq(x, 99 as Int64),
@@ -208,9 +208,9 @@ fn drive_window_sum_with_step_back() {
     let win = w_sum(0);
     let frame = frame_default();
     let mut st = win.init(&frame);
-    let mut r1: List<Register> = List.new(); r1.push(RInt(10 as Int64));
-    let mut r2: List<Register> = List.new(); r2.push(RInt(20 as Int64));
-    let mut r3: List<Register> = List.new(); r3.push(RInt(30 as Int64));
+    let mut r1: List<Register> = List.new(); r1.push(RInt10_i64);
+    let mut r2: List<Register> = List.new(); r2.push(RInt20_i64);
+    let mut r3: List<Register> = List.new(); r3.push(RInt30_i64);
     win.step_forward(&mut st, &r1);
     win.step_forward(&mut st, &r2);
     win.step_forward(&mut st, &r3);

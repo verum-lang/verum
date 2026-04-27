@@ -32,11 +32,11 @@ public fn integer_serial_width(n: Int64) -> Int {
     let one  = 1 as Int64;
     let v = if n < zero { zero - n } else { n };
     if v == zero { return 0; }                // serial type 8 / 9 (0/1)
-    if v <= (127 as Int64) { return 1; }      // 1-byte integer
-    if v <= (32767 as Int64) { return 2; }
-    if v <= (8388607 as Int64) { return 3; }
-    if v <= (2147483647 as Int64) { return 4; }
-    if v <= (140737488355327 as Int64) { return 6; }
+    if v <= 127_i64 { return 1; }      // 1-byte integer
+    if v <= 32767_i64 { return 2; }
+    if v <= 8388607_i64 { return 3; }
+    if v <= 2147483647_i64 { return 4; }
+    if v <= 140737488355327_i64 { return 6; }
     8
 }
 

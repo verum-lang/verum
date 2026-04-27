@@ -18,7 +18,7 @@ fn test_default_bits_per_entry() {
 }
 
 fn test_new_spec_sizing() {
-    let s = new(1000 as Int64);
+    let s = new1000_i64;
     assert_eq(s.bit_count, 8000 as Int64);
     assert_eq(s.hash_count, 1);
     assert_eq(s.expected_entries, 1000 as Int64);
@@ -26,33 +26,33 @@ fn test_new_spec_sizing() {
 }
 
 fn test_with_hash_count_floors_at_one() {
-    let s = with_hash_count(new(100 as Int64), 0);
+    let s = with_hash_count(new100_i64, 0);
     assert_eq(s.hash_count, 1);
-    let s2 = with_hash_count(new(100 as Int64), 3);
+    let s2 = with_hash_count(new100_i64, 3);
     assert_eq(s2.hash_count, 3);
 }
 
 fn test_record_insert_bumps_counter() {
-    let s = record_insert(record_insert(new(100 as Int64)));
+    let s = record_insert(record_insert(new100_i64));
     assert_eq(s.entries_inserted, 2 as Int64);
 }
 
 fn test_bits_per_entry_matches_default() {
-    let s = new(1000 as Int64);
+    let s = new1000_i64;
     let b = bits_per_entry(&s);
     assert(b > 7.9 as Float);
     assert(b < 8.1 as Float);
 }
 
 fn test_is_worthwhile_threshold() {
-    assert(!is_worthwhile(10 as Int64));
-    assert(!is_worthwhile(24 as Int64));
-    assert(is_worthwhile(25 as Int64));
-    assert(is_worthwhile(1000 as Int64));
+    assert(!is_worthwhile10_i64);
+    assert(!is_worthwhile24_i64);
+    assert(is_worthwhile25_i64);
+    assert(is_worthwhile1000_i64);
 }
 
 fn test_fpr_grows_with_inserts() {
-    let mut s = new(1000 as Int64);
+    let mut s = new1000_i64;
     let f0 = approximate_fpr(&s);
     s = record_insert(record_insert(s));
     let f1 = approximate_fpr(&s);
@@ -61,7 +61,7 @@ fn test_fpr_grows_with_inserts() {
 
 fn test_fpr_capped_at_one() {
     // Push way past the expected entries — linear approx still clamped.
-    let mut s = new(10 as Int64);
+    let mut s = new10_i64;
     let mut i: Int = 0;
     while i < 100 {
         s = record_insert(s);

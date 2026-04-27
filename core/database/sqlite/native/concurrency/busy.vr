@@ -106,7 +106,7 @@ implement BusyPolicy for ExponentialRetry {
         let mut sleep: Int64 = self.base_ns;
         let mut k: Int = 0;
         while k < attempt && sleep < self.max_sleep_ns {
-            sleep = sleep * (2 as Int64);
+            sleep = sleep * 2_i64;
             k = k + 1;
         }
         if sleep > self.max_sleep_ns { sleep = self.max_sleep_ns; }

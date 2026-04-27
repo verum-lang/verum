@@ -659,10 +659,10 @@ fn test_eq_zero_signed() {
     let z64: Int64 = 0 as Int64;
     let z128: Int128 = 0 as Int128;
     let zis: ISize = 0 as ISize;
-    assert(z8.eq(&(0 as Int8)));
-    assert(z16.eq(&(0 as Int16)));
-    assert(z32.eq(&(0 as Int32)));
-    assert(z64.eq(&(0 as Int64)));
+    assert(z8.eq(&0_i8));
+    assert(z16.eq(&0_i16));
+    assert(z32.eq(&0_i32));
+    assert(z64.eq(&0_i64));
     assert(z128.eq(&(0 as Int128)));
     assert(zis.eq(&(0 as ISize)));
 }
@@ -675,10 +675,10 @@ fn test_eq_zero_unsigned() {
     let z64: UInt64 = 0 as UInt64;
     let z128: UInt128 = 0 as UInt128;
     let zus: USize = 0 as USize;
-    assert(z8.eq(&(0 as UInt8)));
-    assert(z16.eq(&(0 as UInt16)));
-    assert(z32.eq(&(0 as UInt32)));
-    assert(z64.eq(&(0 as UInt64)));
+    assert(z8.eq(&0_u8));
+    assert(z16.eq(&0_u16));
+    assert(z32.eq(&0_u32));
+    assert(z64.eq(&0_u64));
     assert(z128.eq(&(0 as UInt128)));
     assert(zus.eq(&(0 as USize)));
 }

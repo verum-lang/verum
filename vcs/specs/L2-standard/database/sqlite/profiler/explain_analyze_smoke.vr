@@ -33,9 +33,9 @@ mount base.{Some, None, Maybe, Bool};
 
 fn test_opstat_record_updates_count_total_worst() {
     let mut s = opstat_new("Add".clone());
-    s.record(100 as Int64);
-    s.record(200 as Int64);
-    s.record(50 as Int64);
+    s.record100_i64;
+    s.record200_i64;
+    s.record50_i64;
     assert_eq(s.count, 3 as Int64);
     assert_eq(s.total_ns, 350 as Int64);
     assert_eq(s.worst_ns, 200 as Int64);
@@ -43,8 +43,8 @@ fn test_opstat_record_updates_count_total_worst() {
 
 fn test_opstat_average() {
     let mut s = opstat_new("Add".clone());
-    s.record(100 as Int64);
-    s.record(200 as Int64);
+    s.record100_i64;
+    s.record200_i64;
     assert_eq(s.average_ns(), 150 as Int64);
 }
 
@@ -97,7 +97,7 @@ fn test_opstat_table_lookup_absent() {
 
 fn test_nodestat_record_row_first_row_seen() {
     let mut n = nodestat_new(0, "PnTableScan".clone(), 1000 as Int64);
-    n.record_row(500 as Int64);
+    n.record_row500_i64;
     assert_eq(n.actual_rows, 1 as Int64);
     assert(n.first_row_seen);
     assert_eq(n.first_row_ns, 500 as Int64);
@@ -105,10 +105,10 @@ fn test_nodestat_record_row_first_row_seen() {
 
 fn test_nodestat_estimate_ratio() {
     let mut n = nodestat_new(0, "PnTableScan".clone(), 1000 as Int64);
-    n.record_row(0 as Int64);
-    n.record_row(0 as Int64);
-    n.record_row(0 as Int64);
-    n.record_row(0 as Int64);
+    n.record_row0_i64;
+    n.record_row0_i64;
+    n.record_row0_i64;
+    n.record_row0_i64;
     let r = n.estimate_ratio();
     assert(r > (200.0 as Float64));
 }
@@ -146,8 +146,8 @@ fn test_nodestat_register_idempotent() {
 
 fn test_session_lifecycle() {
     let mut s = session_new("SELECT 1".clone());
-    s.start(100 as Int64);
-    s.finish(500 as Int64);
+    s.start100_i64;
+    s.finish500_i64;
     assert_eq(s.elapsed_ns(), 400 as Int64);
 }
 
@@ -172,7 +172,7 @@ fn test_session_observe_op_routes_to_active_node() {
     s.enter_node(0);
     s.observe_op(&"Next".clone(), 50 as Int64);
     s.observe_op(&"Column".clone(), 30 as Int64);
-    s.observe_row(200 as Int64);
+    s.observe_row200_i64;
     assert_eq(s.dispatches(), 2 as Int64);
     assert_eq(s.op_time_ns(), 80 as Int64);
 }
@@ -183,13 +183,13 @@ fn test_session_observe_op_routes_to_active_node() {
 
 fn test_report_render_non_empty() {
     let mut s = session_new("SELECT 1".clone());
-    s.start(0 as Int64);
+    s.start0_i64;
     s.register_node(0, "PnTableScan".clone(), 100 as Int64);
     s.enter_node(0);
     s.observe_op(&"Next".clone(), 50 as Int64);
-    s.observe_row(100 as Int64);
+    s.observe_row100_i64;
     s.exit_node();
-    s.finish(1000 as Int64);
+    s.finish1000_i64;
     let txt = render(&s);
     assert(txt.len() > 0);
 }

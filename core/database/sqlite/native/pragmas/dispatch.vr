@@ -130,8 +130,8 @@ fn execute_read(cfg: &PragmaConfig, k: &PragmaKind) -> PragmaResult {
         // Stubs — rich rows follow as catalog evolves
         PIntegrityCheck    => single_text("ok".clone()),
         PQuickCheck        => single_text("ok".clone()),
-        PFreelistCount     => single_int(0 as Int64),
-        PPageCount         => single_int(0 as Int64),
+        PFreelistCount     => single_int0_i64,
+        PPageCount         => single_int0_i64,
         // Schema introspections — empty until SchemaCache binding lands
         PTableInfo | PTableXInfo | PIndexInfo | PIndexXInfo | PIndexList |
         PForeignKeyList | PForeignKeyCheck | PStats | PDatabaseList |
@@ -284,7 +284,7 @@ fn int_opt(v: &Register) -> Maybe<Int> {
 
 fn bool_or(v: &Register, fallback: Bool) -> Bool {
     match v {
-        RInt(x)  => x != (0 as Int64),
+        RInt(x)  => x != 0_i64,
         RText(s) => {
             let lo = ascii_lower(s);
             if lo == "1".clone() || lo == "true".clone() || lo == "yes".clone() || lo == "on".clone() {
@@ -311,7 +311,7 @@ fn parse_signed_int(s: &Text) -> Maybe<Int64> {
     while i < bs.len() {
         let b = bs[i];
         if b < (48 as Byte) || b > (57 as Byte) { return None; }
-        acc = acc * (10 as Int64) + ((b as Int64) - (48 as Int64));
+        acc = acc * 10_i64 + ((b as Int64) - 48_i64);
         i = i + 1;
     }
     Some(acc * sign)

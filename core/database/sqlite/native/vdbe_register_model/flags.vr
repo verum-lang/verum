@@ -20,7 +20,7 @@ public fn f_zeroblob()  -> Int64 { 0x4000 as Int64 }  // zero-filled blob
 public fn f_subtype()   -> Int64 { 0x10000 as Int64 } // subtype is valid
 
 public fn is_set(flags: Int64, bit: Int64) -> Bool {
-    (flags & bit) != (0 as Int64)
+    (flags & bit) != 0_i64
 }
 
 public fn set_bit(flags: Int64, bit: Int64) -> Int64 {

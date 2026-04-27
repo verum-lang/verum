@@ -19,11 +19,11 @@ public fn empty() -> ViolationSet {
 }
 
 public fn is_empty(v: &ViolationSet) -> Bool {
-    v.pending_count == (0 as Int64)
+    v.pending_count == 0_i64
 }
 
 public fn record_violation(mut v: ViolationSet) -> ViolationSet {
-    v.pending_count = v.pending_count + (1 as Int64);
+    v.pending_count = v.pending_count + 1_i64;
     if v.pending_count > v.peak_count {
         v.peak_count = v.pending_count;
     }
@@ -31,9 +31,9 @@ public fn record_violation(mut v: ViolationSet) -> ViolationSet {
 }
 
 public fn resolve_violation(mut v: ViolationSet) -> ViolationSet {
-    if v.pending_count > (0 as Int64) {
-        v.pending_count = v.pending_count - (1 as Int64);
-        v.violations_resolved = v.violations_resolved + (1 as Int64);
+    if v.pending_count > 0_i64 {
+        v.pending_count = v.pending_count - 1_i64;
+        v.violations_resolved = v.violations_resolved + 1_i64;
     }
     v
 }

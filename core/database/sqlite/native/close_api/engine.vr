@@ -35,7 +35,7 @@ implement CloseEngine {
     pub fn register_stmt(&mut self) -> Bool {
         match &self.state {
             CsLive => {
-                self.outstanding = self.outstanding + (1 as Int64);
+                self.outstanding = self.outstanding + 1_i64;
                 true
             }
             _ => false,
@@ -43,10 +43,10 @@ implement CloseEngine {
     }
 
     pub fn finalize_stmt(&mut self) {
-        if self.outstanding > (0 as Int64) {
-            self.outstanding = self.outstanding - (1 as Int64);
+        if self.outstanding > 0_i64 {
+            self.outstanding = self.outstanding - 1_i64;
         }
-        if self.outstanding == (0 as Int64) {
+        if self.outstanding == 0_i64 {
             match &self.state {
                 CsZombie => self.state = CsClosed,
                 _ => {}
@@ -57,12 +57,12 @@ implement CloseEngine {
     /// Returns sqlite3 code: 0 (SQLITE_OK) or 5 (SQLITE_BUSY) for
     /// strict mode with outstanding statements.
     pub fn close(&mut self, mode: &CloseMode) -> Int {
-        self.closes_attempted = self.closes_attempted + (1 as Int64);
+        self.closes_attempted = self.closes_attempted + 1_i64;
         match &self.state {
             CsClosed => return 0,
             _ => {}
         }
-        if self.outstanding > (0 as Int64) {
+        if self.outstanding > 0_i64 {
             if rejects_on_busy(mode) {
                 return 5;
             }

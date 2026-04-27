@@ -39,11 +39,11 @@ implement BindTextEngine {
     /// 1 (SQLITE_ERROR) on invalid spec shape.
     pub fn sqlite3_bind_text(&mut self, index: Int, spec: BindTextSpec) -> Int {
         if index <= 0 || index >= self.slots.len() {
-            self.rejections = self.rejections + (1 as Int64);
+            self.rejections = self.rejections + 1_i64;
             return 25;
         }
         if !is_valid(&spec) {
-            self.rejections = self.rejections + (1 as Int64);
+            self.rejections = self.rejections + 1_i64;
             return 1;
         }
         self.slots.get_mut(index).spec = Maybe.Some(spec);

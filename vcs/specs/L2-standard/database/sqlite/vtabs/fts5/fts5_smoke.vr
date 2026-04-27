@@ -276,7 +276,7 @@ fn test_dml_insert_then_lookup() {
 fn test_dml_delete_marks_tombstone() {
     let mut tomb = tombstones_new();
     delete_row(&mut tomb, 99 as Int64);
-    assert(tomb.contains(99 as Int64));
+    assert(tomb.contains99_i64);
 }
 
 fn test_dml_optimize_clears_tombstones() {

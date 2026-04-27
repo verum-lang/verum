@@ -36,49 +36,49 @@ mount core.mem.capability.{
 
 @test
 fn test_cap_read_bit_position() {
-    assert_eq(CAP_READ, (1 as UInt16) << 0);
+    assert_eq(CAP_READ, 1_u16 << 0);
     assert_eq(CAP_READ, 0x0001 as UInt16);
 }
 
 @test
 fn test_cap_write_bit_position() {
-    assert_eq(CAP_WRITE, (1 as UInt16) << 1);
+    assert_eq(CAP_WRITE, 1_u16 << 1);
     assert_eq(CAP_WRITE, 0x0002 as UInt16);
 }
 
 @test
 fn test_cap_execute_bit_position() {
-    assert_eq(CAP_EXECUTE, (1 as UInt16) << 2);
+    assert_eq(CAP_EXECUTE, 1_u16 << 2);
     assert_eq(CAP_EXECUTE, 0x0004 as UInt16);
 }
 
 @test
 fn test_cap_delegate_bit_position() {
-    assert_eq(CAP_DELEGATE, (1 as UInt16) << 3);
+    assert_eq(CAP_DELEGATE, 1_u16 << 3);
     assert_eq(CAP_DELEGATE, 0x0008 as UInt16);
 }
 
 @test
 fn test_cap_revoke_bit_position() {
-    assert_eq(CAP_REVOKE, (1 as UInt16) << 4);
+    assert_eq(CAP_REVOKE, 1_u16 << 4);
     assert_eq(CAP_REVOKE, 0x0010 as UInt16);
 }
 
 @test
 fn test_cap_borrowed_bit_position() {
-    assert_eq(CAP_BORROWED, (1 as UInt16) << 5);
+    assert_eq(CAP_BORROWED, 1_u16 << 5);
     assert_eq(CAP_BORROWED, 0x0020 as UInt16);
 }
 
 @test
 fn test_cap_mutable_bit_position() {
-    assert_eq(CAP_MUTABLE, (1 as UInt16) << 6);
+    assert_eq(CAP_MUTABLE, 1_u16 << 6);
     assert_eq(CAP_MUTABLE, 0x0040 as UInt16);
 }
 
 @test
 fn test_cap_no_escape_bit_position() {
-    assert_eq(CAP_NO_ESCAPE, (1 as UInt16) << 7);
+    assert_eq(CAP_NO_ESCAPE, 1_u16 << 7);
     assert_eq(CAP_NO_ESCAPE, 0x0080 as UInt16);
 }
 

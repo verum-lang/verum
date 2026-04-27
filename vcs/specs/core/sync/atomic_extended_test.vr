@@ -71,21 +71,21 @@ fn test_atomicu16_default_value() {
 
 @test
 fn test_atomicu16_get_mut() {
-    let mut a = AtomicU16.new(1000 as UInt16);
+    let mut a = AtomicU16.new1000_u16;
     let r = a.get_mut();
     assert_eq(*r, 1000 as UInt16);
 }
 
 @test
 fn test_atomicu16_get_mut_modify() {
-    let mut a = AtomicU16.new(100 as UInt16);
+    let mut a = AtomicU16.new100_u16;
     *a.get_mut() = 200 as UInt16;
     assert_eq(a.load(SeqCst), 200 as UInt16);
 }
 
 @test
 fn test_atomicu16_compare_exchange_failure() {
-    let a = AtomicU16.new(42 as UInt16);
+    let a = AtomicU16.new42_u16;
     let result = a.compare_exchange(10 as UInt16, 99 as UInt16, SeqCst, Relaxed);
     assert(result.is_err());
 }
@@ -102,14 +102,14 @@ fn test_atomicu32_default_value() {
 
 @test
 fn test_atomicu32_get_mut() {
-    let mut a = AtomicU32.new(500 as UInt32);
+    let mut a = AtomicU32.new500_u32;
     let r = a.get_mut();
     assert_eq(*r, 500 as UInt32);
 }
 
 @test
 fn test_atomicu32_get_mut_modify() {
-    let mut a = AtomicU32.new(100 as UInt32);
+    let mut a = AtomicU32.new100_u32;
     *a.get_mut() = 999 as UInt32;
     assert_eq(a.load(SeqCst), 999 as UInt32);
 }
@@ -126,14 +126,14 @@ fn test_atomicu64_default_value() {
 
 @test
 fn test_atomicu64_get_mut() {
-    let mut a = AtomicU64.new(123456 as UInt64);
+    let mut a = AtomicU64.new123456_u64;
     let r = a.get_mut();
     assert_eq(*r, 123456 as UInt64);
 }
 
 @test
 fn test_atomicu64_get_mut_modify() {
-    let mut a = AtomicU64.new(100 as UInt64);
+    let mut a = AtomicU64.new100_u64;
     *a.get_mut() = 999 as UInt64;
     assert_eq(a.load(SeqCst), 999 as UInt64);
 }
@@ -519,7 +519,7 @@ fn test_atomicint_increment_decrement_roundtrip() {
 
 @test
 fn test_atomicu32_fetch_ops_chain() {
-    let a = AtomicU32.new(0 as UInt32);
+    let a = AtomicU32.new0_u32;
     a.fetch_add(100 as UInt32, SeqCst);
     a.fetch_sub(25 as UInt32, SeqCst);
     assert_eq(a.load(SeqCst), 75 as UInt32);
@@ -527,7 +527,7 @@ fn test_atomicu32_fetch_ops_chain() {
 
 @test
 fn test_atomicu64_fetch_ops_chain() {
-    let a = AtomicU64.new(0 as UInt64);
+    let a = AtomicU64.new0_u64;
     a.fetch_add(1000 as UInt64, SeqCst);
     a.fetch_sub(250 as UInt64, SeqCst);
     assert_eq(a.load(SeqCst), 750 as UInt64);
@@ -583,7 +583,7 @@ fn test_atomicu8_boundary_values() {
 
 @test
 fn test_atomicu16_boundary_values() {
-    let a = AtomicU16.new(65535 as UInt16);
+    let a = AtomicU16.new65535_u16;
     assert_eq(a.load(SeqCst), 65535 as UInt16);
     a.store(0 as UInt16, SeqCst);
     assert_eq(a.load(SeqCst), 0 as UInt16);
@@ -591,14 +591,14 @@ fn test_atomicu16_boundary_values() {
 
 @test
 fn test_atomicu32_boundary_values() {
-    let a = AtomicU32.new(0 as UInt32);
+    let a = AtomicU32.new0_u32;
     a.store(0x7FFFFFFF as UInt32, SeqCst);
     assert_eq(a.load(SeqCst), 0x7FFFFFFF as UInt32);
 }
 
 @test
 fn test_atomicu64_boundary_values() {
-    let a = AtomicU64.new(0 as UInt64);
+    let a = AtomicU64.new0_u64;
     a.store(0x7FFFFFFFFFFFFFFF as UInt64, SeqCst);
     assert_eq(a.load(SeqCst), 0x7FFFFFFFFFFFFFFF as UInt64);
 }

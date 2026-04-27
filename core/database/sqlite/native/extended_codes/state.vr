@@ -21,7 +21,7 @@ public fn new_state() -> ExtendedCodeState {
 public fn set_enabled(s: &mut ExtendedCodeState, on: Bool) {
     if s.enabled != on {
         s.enabled = on;
-        s.toggles = s.toggles + (1 as Int64);
+        s.toggles = s.toggles + 1_i64;
     }
 }
 

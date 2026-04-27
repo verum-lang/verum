@@ -19,13 +19,13 @@ mount base.{Bool};
 fn test_schedule_names() {
     assert(schedule_name(&FsDisabled) == "disabled".clone());
     assert(schedule_name(&FsAlways) == "always".clone());
-    assert(schedule_name(&FsAfterNth(5 as Int64)) == "after-nth".clone());
-    assert(schedule_name(&FsEveryNth(3 as Int64)) == "every-nth".clone());
+    assert(schedule_name(&FsAfterNth5_i64) == "after-nth".clone());
+    assert(schedule_name(&FsEveryNth3_i64) == "every-nth".clone());
 }
 
 fn test_is_active() {
     assert(!is_active(&FsDisabled));
-    assert(is_active(&FsAfterNth(0 as Int64)));
+    assert(is_active(&FsAfterNth0_i64));
     assert(is_active(&FsAlways));
 }
 
@@ -50,7 +50,7 @@ fn test_always_fails() {
 
 fn test_after_nth_succeeds_then_fails() {
     let mut e = new_engine();
-    e.install(FsAfterNth(3 as Int64));
+    e.install(FsAfterNth3_i64);
     assert(!e.tick());
     assert(!e.tick());
     assert(!e.tick());
@@ -61,7 +61,7 @@ fn test_after_nth_succeeds_then_fails() {
 
 fn test_every_nth_fires_on_multiples() {
     let mut e = new_engine();
-    e.install(FsEveryNth(3 as Int64));
+    e.install(FsEveryNth3_i64);
     assert(!e.tick());    // 1
     assert(!e.tick());    // 2
     assert(e.tick());     // 3 → fail

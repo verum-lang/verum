@@ -30,7 +30,7 @@ public fn new_rebaser(id: Int64) -> Rebaser {
 implement Rebaser {
     pub fn mark_configured(&mut self) { self.configured = true; }
     pub fn note_change(&mut self) {
-        self.rebased_count = self.rebased_count + (1 as Int64);
+        self.rebased_count = self.rebased_count + 1_i64;
     }
     pub fn release(&mut self) { self.released = true; }
     pub fn is_live(&self) -> Bool { !self.released }

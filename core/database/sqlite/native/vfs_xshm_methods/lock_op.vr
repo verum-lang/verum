@@ -14,19 +14,19 @@ public fn f_exclusive() -> Int64 { 8 as Int64 }
 public fn total_slots() -> Int { 8 }
 
 public fn is_unlock(flags: Int64) -> Bool {
-    (flags & f_unlock()) != (0 as Int64)
+    (flags & f_unlock()) != 0_i64
 }
 
 public fn is_lock(flags: Int64) -> Bool {
-    (flags & f_lock()) != (0 as Int64)
+    (flags & f_lock()) != 0_i64
 }
 
 public fn is_shared_mode(flags: Int64) -> Bool {
-    (flags & f_shared()) != (0 as Int64)
+    (flags & f_shared()) != 0_i64
 }
 
 public fn is_exclusive_mode(flags: Int64) -> Bool {
-    (flags & f_exclusive()) != (0 as Int64)
+    (flags & f_exclusive()) != 0_i64
 }
 
 // A well-formed xShmLock call has exactly one of {lock,unlock} AND exactly

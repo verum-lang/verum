@@ -91,17 +91,17 @@ fn int_to_string(value: Int, buf: &mut [Byte]) -> Int {
     // exact for every Int including Int.MIN (whose magnitude
     // 2^63 fits in UInt64 but not in Int).
     let mut mag: UInt64 = if negative {
-        (((!value) as UInt64) + (1 as UInt64))
+        (((!value) as UInt64) + 1_u64)
     } else {
         value as UInt64
     };
 
     // Write digits in reverse order.
     let mut pos = 0;
-    while mag > (0 as UInt64) && pos < buf.len() {
-        let digit = (mag % (10 as UInt64)) as Byte;
+    while mag > 0_u64 && pos < buf.len() {
+        let digit = (mag % 10_u64) as Byte;
         buf[pos] = '0' as Byte + digit;
-        mag = mag / (10 as UInt64);
+        mag = mag / 10_u64;
         pos = pos + 1;
     }
 
@@ -572,7 +572,7 @@ implement TextFormatter {
         // Two's-complement magnitude in unsigned 64-bit; exact
         // for every Int including Int.MIN.
         let mut mag: UInt64 = if negative {
-            (((!n) as UInt64) + (1 as UInt64))
+            (((!n) as UInt64) + 1_u64)
         } else {
             n as UInt64
         };
@@ -581,7 +581,7 @@ implement TextFormatter {
         // Worst case: base=2 over 64-bit unsigned ⇒ 64 digits.
         let mut buf: [Byte; 64] = [0; 64];
         let mut i: Int = 63;
-        while mag > (0 as UInt64) {
+        while mag > 0_u64 {
             let digit = (mag % base_u) as Int;
             buf[i] = digits.nth_char(digit).expect("write_int_base: digit < base ≤ digits.len() guaranteed by caller (currently bases 2..=16)") as Byte;
             mag = mag / base_u;
@@ -1240,7 +1240,7 @@ public fn int_to_text_radix(n: Int, radix: Int) -> Text {
     let digits = "0123456789abcdefghijklmnopqrstuvwxyz";
     let negative = n < 0;
     let mut mag: UInt64 = if negative {
-        (((!n) as UInt64) + (1 as UInt64))
+        (((!n) as UInt64) + 1_u64)
     } else {
         n as UInt64
     };
@@ -1249,7 +1249,7 @@ public fn int_to_text_radix(n: Int, radix: Int) -> Text {
     // Worst case: radix 2 over 64-bit unsigned ⇒ 64 digits.
     let mut buf: [Byte; 64] = [0; 64];
     let mut i: Int = 63;
-    while mag > (0 as UInt64) {
+    while mag > 0_u64 {
         let digit = (mag % radix_u) as Int;
         buf[i] = digits.nth_char(digit).unwrap() as Byte;
         mag = mag / radix_u;

@@ -29,7 +29,7 @@ public fn join(a: &DepSet, b: &DepSet) -> DepSet {
 }
 
 public fn is_constant(d: &DepSet) -> Bool {
-    d.cursor_bits == (0 as Int64) && !d.references_random
+    d.cursor_bits == 0_i64 && !d.references_random
 }
 
 // Given an expression with `d` and a loop that iterates over `inner_bit`, the
@@ -37,12 +37,12 @@ public fn is_constant(d: &DepSet) -> Bool {
 // not random.
 public fn is_invariant_at_loop(d: &DepSet, inner_bit: Int64) -> Bool {
     if d.references_random { return false; }
-    (d.cursor_bits & inner_bit) == (0 as Int64)
+    (d.cursor_bits & inner_bit) == 0_i64
 }
 
 // An outer-loop-invariant expression depends only on cursors *outside* the
 // loop currently being emitted.
 public fn depends_only_outside(d: &DepSet, inner_mask: Int64) -> Bool {
     if d.references_random { return false; }
-    (d.cursor_bits & inner_mask) == (0 as Int64)
+    (d.cursor_bits & inner_mask) == 0_i64
 }

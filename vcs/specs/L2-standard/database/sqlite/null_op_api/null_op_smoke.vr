@@ -23,30 +23,30 @@ fn test_op_names() {
 
 fn test_is_null_value_predicate() {
     assert(is_null_value(&VNull));
-    assert(!is_null_value(&VInt(0 as Int64)));
+    assert(!is_null_value(&VInt0_i64));
 }
 
 fn test_eval_unary_is_null() {
     assert_eq(eval_unary(&OpIsNull,    &VNull),               1);
-    assert_eq(eval_unary(&OpIsNull,    &VInt(0 as Int64)),    0);
+    assert_eq(eval_unary(&OpIsNull,    &VInt0_i64),    0);
     assert_eq(eval_unary(&OpIsNotNull, &VNull),               0);
-    assert_eq(eval_unary(&OpIsNotNull, &VInt(7 as Int64)),    1);
+    assert_eq(eval_unary(&OpIsNotNull, &VInt7_i64),    1);
 }
 
 fn test_eval_binary_is_null_eq_null() {
     assert_eq(eval_binary(&OpIs,    &VNull,             &VNull),                      1);
     assert_eq(eval_binary(&OpIsNot, &VNull,             &VNull),                      0);
-    assert_eq(eval_binary(&OpIs,    &VInt(5 as Int64), &VInt(5 as Int64)),            1);
-    assert_eq(eval_binary(&OpIs,    &VInt(5 as Int64), &VInt(6 as Int64)),            0);
-    assert_eq(eval_binary(&OpIsNot, &VInt(5 as Int64), &VInt(6 as Int64)),            1);
+    assert_eq(eval_binary(&OpIs,    &VInt5_i64, &VInt5_i64),            1);
+    assert_eq(eval_binary(&OpIs,    &VInt5_i64, &VInt6_i64),            0);
+    assert_eq(eval_binary(&OpIsNot, &VInt5_i64, &VInt6_i64),            1);
 }
 
 fn test_eval_binary_null_one_side() {
     // NULL IS 5 -> 0; NULL IS NOT 5 -> 1
-    assert_eq(eval_binary(&OpIs,    &VNull,             &VInt(5 as Int64)),  0);
-    assert_eq(eval_binary(&OpIsNot, &VNull,             &VInt(5 as Int64)),  1);
-    assert_eq(eval_binary(&OpIs,    &VInt(5 as Int64), &VNull),              0);
-    assert_eq(eval_binary(&OpIsNot, &VInt(5 as Int64), &VNull),              1);
+    assert_eq(eval_binary(&OpIs,    &VNull,             &VInt5_i64),  0);
+    assert_eq(eval_binary(&OpIsNot, &VNull,             &VInt5_i64),  1);
+    assert_eq(eval_binary(&OpIs,    &VInt5_i64, &VNull),              0);
+    assert_eq(eval_binary(&OpIsNot, &VInt5_i64, &VNull),              1);
 }
 
 fn test_arity_dispatch() {

@@ -78,7 +78,7 @@ implement MockScheduler for RoundRobin {
 public type SeededScheduler is { state: Int64 };
 
 public fn seeded_scheduler(seed: Int64) -> SeededScheduler {
-    SeededScheduler { state: if seed == (0 as Int64) { 1 as Int64 } else { seed } }
+    SeededScheduler { state: if seed == 0_i64 { 1 as Int64 } else { seed } }
 }
 
 implement MockScheduler for SeededScheduler {
@@ -87,9 +87,9 @@ implement MockScheduler for SeededScheduler {
         if n_runnable <= 0 { return 0; }
         // xorshift64
         let mut x: Int64 = self.state;
-        x = x ^ (x << (13 as Int64));
-        x = x ^ (x >> (7 as Int64));
-        x = x ^ (x << (17 as Int64));
+        x = x ^ (x << 13_i64);
+        x = x ^ (x >> 7_i64);
+        x = x ^ (x << 17_i64);
         self.state = x;
         let raw: Int = (x as Int) & 2147483647;
         raw % n_runnable

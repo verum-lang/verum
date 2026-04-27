@@ -43,13 +43,13 @@ public fn opstat_new(opcode: Text) -> OpStat {
 
 implement OpStat {
     public fn record(&mut self, ns: Int64) {
-        self.count = self.count + (1 as Int64);
+        self.count = self.count + 1_i64;
         self.total_ns = self.total_ns + ns;
         if ns > self.worst_ns { self.worst_ns = ns; }
     }
 
     public fn average_ns(&self) -> Int64 {
-        if self.count == (0 as Int64) { 0 as Int64 } else { self.total_ns / self.count }
+        if self.count == 0_i64 { 0 as Int64 } else { self.total_ns / self.count }
     }
 }
 

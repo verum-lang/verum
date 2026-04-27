@@ -32,7 +32,7 @@ public fn ms_per_day() -> Int64 { 86_400_000 as Int64 }
 // Convert Int64 ms to "Julian × 1e4" surrogate (the engine uses Float
 // internally; here we model the bridge formula).
 public fn millis_to_julian_x10000(ms_since_epoch: Int64) -> Int64 {
-    let day_x10000 = (ms_since_epoch * (10_000 as Int64)) / ms_per_day();
+    let day_x10000 = (ms_since_epoch * 10_000_i64) / ms_per_day();
     unix_epoch_julian_x10000() + day_x10000
 }
 
@@ -41,7 +41,7 @@ public fn julian_x10000_to_millis(jd_x10000: Int64) -> Int64 {
     let zero = 0 as Int64;
     let delta = jd_x10000 - unix_epoch_julian_x10000();
     if delta < zero { return zero; }
-    (delta * ms_per_day()) / (10_000 as Int64)
+    (delta * ms_per_day()) / 10_000_i64
 }
 
 // VfsCurrentTimeOutcome.

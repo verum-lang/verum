@@ -30,6 +30,6 @@ public fn clear_after_reprepare(f: &mut ExpiredFlag) {
 }
 
 public fn sqlite3_expired(f: &mut ExpiredFlag) -> Int {
-    f.queries = f.queries + (1 as Int64);
+    f.queries = f.queries + 1_i64;
     if f.stale { 1 } else { 0 }
 }

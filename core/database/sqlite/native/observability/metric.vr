@@ -33,7 +33,7 @@ public fn counter_new(name: Text) -> MetricObsCounter {
 }
 
 implement MetricObsCounter {
-    public fn inc(&mut self) { self.value = self.value + (1 as Int64); }
+    public fn inc(&mut self) { self.value = self.value + 1_i64; }
     public fn add(&mut self, n: Int64) { self.value = self.value + n; }
     public fn get(&self) -> Int64 { self.value }
 }
@@ -50,8 +50,8 @@ public fn gauge_new(name: Text) -> MetricObsGauge {
 
 implement MetricObsGauge {
     public fn set(&mut self, value: Int64) { self.value = value; }
-    public fn inc(&mut self) { self.value = self.value + (1 as Int64); }
-    public fn dec(&mut self) { self.value = self.value - (1 as Int64); }
+    public fn inc(&mut self) { self.value = self.value + 1_i64; }
+    public fn dec(&mut self) { self.value = self.value - 1_i64; }
     public fn add(&mut self, n: Int64) { self.value = self.value + n; }
     public fn sub(&mut self, n: Int64) { self.value = self.value - n; }
     public fn get(&self) -> Int64 { self.value }
@@ -68,13 +68,13 @@ public const NS_PER_S: Int64 = 1000000000 as Int64;
 /// Default bucket upper bounds in nanoseconds.
 public fn default_bucket_bounds_ns() -> List<Int64> {
     let mut out: List<Int64> = List.new();
-    out.push((10 as Int64) * NS_PER_US);
-    out.push((100 as Int64) * NS_PER_US);
+    out.push(10_i64 * NS_PER_US);
+    out.push(100_i64 * NS_PER_US);
     out.push(NS_PER_MS);
-    out.push((10 as Int64) * NS_PER_MS);
-    out.push((100 as Int64) * NS_PER_MS);
+    out.push(10_i64 * NS_PER_MS);
+    out.push(100_i64 * NS_PER_MS);
     out.push(NS_PER_S);
-    out.push((10 as Int64) * NS_PER_S);
+    out.push(10_i64 * NS_PER_S);
     out
 }
 
@@ -91,7 +91,7 @@ public fn histogram_new(name: Text, bounds_ns: List<Int64>) -> MetricObsHistogra
     let n = bounds_ns.len() + 1;
     let mut counts: List<Int64> = List.new();
     let mut i: Int = 0;
-    while i < n { counts.push(0 as Int64); i = i + 1; }
+    while i < n { counts.push0_i64; i = i + 1; }
     MetricObsHistogram {
         name: name,
         bounds_ns: bounds_ns,
@@ -108,18 +108,18 @@ public fn histogram_default(name: Text) -> MetricObsHistogram {
 implement MetricObsHistogram {
     public fn observe(&mut self, value_ns: Int64) {
         self.sum_ns = self.sum_ns + value_ns;
-        self.count_total = self.count_total + (1 as Int64);
+        self.count_total = self.count_total + 1_i64;
         let mut i: Int = 0;
         while i < self.bounds_ns.len() {
             if value_ns <= self.bounds_ns[i] {
-                self.counts[i] = self.counts[i] + (1 as Int64);
+                self.counts[i] = self.counts[i] + 1_i64;
                 return;
             }
             i = i + 1;
         }
         // Overflow bucket.
         let last = self.counts.len() - 1;
-        self.counts[last] = self.counts[last] + (1 as Int64);
+        self.counts[last] = self.counts[last] + 1_i64;
     }
 
     public fn count(&self) -> Int64 { self.count_total }
@@ -127,7 +127,7 @@ implement MetricObsHistogram {
 
     /// Mean observation in nanoseconds (0 when no observations).
     public fn mean_ns(&self) -> Int64 {
-        if self.count_total == (0 as Int64) { return 0 as Int64; }
+        if self.count_total == 0_i64 { return 0 as Int64; }
         self.sum_ns / self.count_total
     }
 
@@ -146,7 +146,7 @@ implement MetricObsHistogram {
     /// Approximate quantile from the bucket boundaries — interpolate
     /// linearly within the bucket containing the q-th observation.
     public fn approx_quantile_ns(&self, q: Float64) -> Int64 {
-        if self.count_total == (0 as Int64) { return 0 as Int64; }
+        if self.count_total == 0_i64 { return 0 as Int64; }
         let target: Float64 = (self.count_total as Float64) * q;
         let mut acc: Float64 = 0.0;
         let mut i: Int = 0;

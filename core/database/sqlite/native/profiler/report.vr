@@ -94,15 +94,15 @@ fn append_int(dst: &mut Text, n: Int) {
 }
 
 fn append_int64(dst: &mut Text, n: Int64) {
-    if n == (0 as Int64) { dst.push_byte(48 as Byte); return; }
+    if n == 0_i64 { dst.push_byte(48 as Byte); return; }
     let mut digits: List<Byte> = List.new();
-    let mut x: Int64 = if n < (0 as Int64) { -n } else { n };
-    while x > (0 as Int64) {
+    let mut x: Int64 = if n < 0_i64 { -n } else { n };
+    while x > 0_i64 {
         let d: Byte = ((x as Int) % 10) as Byte;
         digits.push(d + (48 as Byte));
-        x = x / (10 as Int64);
+        x = x / 10_i64;
     }
-    if n < (0 as Int64) { dst.push_byte(45 as Byte); }
+    if n < 0_i64 { dst.push_byte(45 as Byte); }
     let mut i: Int = digits.len() - 1;
     while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
 }

@@ -57,8 +57,8 @@ fn test_verify_with_corrupt_pages_returns_corrupt() {
     let mut e = new_engine();
     let _ = e.set_reserve_bytes(8);
     let mut bad: List<Int64> = List.new();
-    bad.push(7 as Int64);
-    bad.push(19 as Int64);
+    bad.push7_i64;
+    bad.push19_i64;
     assert_eq(e.sqlite3_file_control_cksm_file(100 as Int64, bad), 11);  // SQLITE_CORRUPT
     assert(!is_ok(&e.status));
     assert_eq(corrupt_count(&e.status), 2);
@@ -66,7 +66,7 @@ fn test_verify_with_corrupt_pages_returns_corrupt() {
 
 fn test_status_names() {
     assert(status_name(&CsNotChecked) == "not-checked".clone());
-    assert(status_name(&CsVerified(100 as Int64)) == "verified".clone());
+    assert(status_name(&CsVerified100_i64) == "verified".clone());
     let corrupt: CksmStatus = CsCorrupted {
         corrupt_pages: List.new(),
         verified: 0 as Int64,
@@ -76,7 +76,7 @@ fn test_status_names() {
 
 fn test_corrupt_count_zero_for_other_states() {
     assert_eq(corrupt_count(&CsNotChecked), 0);
-    assert_eq(corrupt_count(&CsVerified(99 as Int64)), 0);
+    assert_eq(corrupt_count(&CsVerified99_i64), 0);
 }
 
 fn main() {

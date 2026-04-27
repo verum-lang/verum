@@ -97,7 +97,7 @@ fn test_payload_kind_names() {
     let p1 = TpStmt(stmt_payload("SQL".clone(), "SQL".clone(), 1 as Int64));
     let p2 = TpProfile(profile_payload("SQL".clone(), 100 as Int64, 1 as Int64));
     let p3 = TpRow(row_payload(1 as Int64, 0 as Int64));
-    let p4 = TpClose(close_payload(7 as Int64));
+    let p4 = TpClose(close_payload7_i64);
     assert(payload_kind_name(&p1) == "stmt".clone());
     assert(payload_kind_name(&p2) == "profile".clone());
     assert(payload_kind_name(&p3) == "row".clone());
@@ -113,7 +113,7 @@ fn test_counting_handler_increments() {
     h.on_event(&TpStmt(stmt_payload("SQL".clone(), "SQL".clone(), 1 as Int64)));
     h.on_event(&TpProfile(profile_payload("SQL".clone(), 100 as Int64, 1 as Int64)));
     h.on_event(&TpRow(row_payload(1 as Int64, 0 as Int64)));
-    h.on_event(&TpClose(close_payload(7 as Int64)));
+    h.on_event(&TpClose(close_payload7_i64));
     assert_eq(h.total_events(), 4);
     assert_eq(h.stmt_count, 1);
     assert_eq(h.profile_count, 1);

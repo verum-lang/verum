@@ -73,7 +73,7 @@ implement StmtCursor {
             return SoOther(self.stmt_id as Int);
         }
         let outcome = (step_fn)(self.stmt_id);
-        self.steps_taken = self.steps_taken + (1 as Int64);
+        self.steps_taken = self.steps_taken + 1_i64;
         self.note_outcome(&outcome);
         outcome
     }
@@ -82,7 +82,7 @@ implement StmtCursor {
         match o {
             SoRow => {
                 self.state = CsRowAvailable;
-                self.rows_returned = self.rows_returned + (1 as Int64);
+                self.rows_returned = self.rows_returned + 1_i64;
             }
             SoDone => self.state = CsDone,
             SoBusy => self.state = CsBusy,
@@ -99,7 +99,7 @@ implement StmtCursor {
             let o = self.step(step_fn);
             if has_row(&o) {
                 (on_row)(self.stmt_id);
-                yielded = yielded + (1 as Int64);
+                yielded = yielded + 1_i64;
             } else if is_retriable(&o) {
                 // Caller-side back-off would happen here; for the
                 // catalogue we just stop.

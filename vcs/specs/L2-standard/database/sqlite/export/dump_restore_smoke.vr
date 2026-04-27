@@ -40,7 +40,7 @@ mount base.{Some, None, Maybe, Bool, Text};
 
 fn test_sv_kind_names() {
     assert(sv_kind_name(&SvNull) == "NULL".clone());
-    assert(sv_kind_name(&SvInteger(42 as Int64)) == "INTEGER".clone());
+    assert(sv_kind_name(&SvInteger42_i64) == "INTEGER".clone());
 }
 
 fn test_render_null_literal() {
@@ -48,12 +48,12 @@ fn test_render_null_literal() {
 }
 
 fn test_render_integer_literal() {
-    let s = render_sql_literal(&SvInteger(42 as Int64));
+    let s = render_sql_literal(&SvInteger42_i64);
     assert(s == "42".clone());
 }
 
 fn test_render_negative_integer() {
-    let s = render_sql_literal(&SvInteger(-7 as Int64));
+    let s = render_sql_literal(&SvInteger-7_i64);
     assert(s == "-7".clone());
 }
 
@@ -112,7 +112,7 @@ fn make_row() -> RowDump {
     cols.push("id".clone());
     cols.push("name".clone());
     let mut vals: List<SqlValue> = List.new();
-    vals.push(SvInteger(1 as Int64));
+    vals.push(SvInteger1_i64);
     vals.push(SvText("Ada".clone()));
     row_dump("users".clone(), cols, vals)
 }

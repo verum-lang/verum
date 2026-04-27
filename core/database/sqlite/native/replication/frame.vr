@@ -74,7 +74,7 @@ public fn frame_position(f: &WalFrameRecord) -> Int64 {
     // upper 32 bits are the epoch; the lower 32 are the seq.
     // Replica clamps to 32-bit seq; loom replication ratchets the
     // epoch on overflow so this remains injective.
-    (f.epoch << (32 as Int64)) | (f.seq & ((4294967295 as Int64)))
+    (f.epoch << 32_i64) | (f.seq & (4294967295_i64))
 }
 
 // -----------------------------------------------------------------------------

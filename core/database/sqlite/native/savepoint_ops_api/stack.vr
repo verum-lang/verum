@@ -55,7 +55,7 @@ implement SavepointStack {
         match op {
             SoBegin(n) => {
                 self.names.push(n.clone());
-                self.pushes = self.pushes + (1 as Int64);
+                self.pushes = self.pushes + 1_i64;
                 SpoOk
             }
             SoRelease(n) => {
@@ -65,7 +65,7 @@ implement SavepointStack {
                 while self.names.len() > idx {
                     let _ = self.names.remove(self.names.len() - 1);
                 }
-                self.releases = self.releases + (1 as Int64);
+                self.releases = self.releases + 1_i64;
                 SpoOk
             }
             SoRollbackTo(n) => {
@@ -75,7 +75,7 @@ implement SavepointStack {
                 while self.names.len() > idx + 1 {
                     let _ = self.names.remove(self.names.len() - 1);
                 }
-                self.rollbacks = self.rollbacks + (1 as Int64);
+                self.rollbacks = self.rollbacks + 1_i64;
                 SpoOk
             }
         }

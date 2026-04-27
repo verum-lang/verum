@@ -44,10 +44,10 @@ public fn encode_byte(e: &JsonbElementType, len_class: Int) -> u8 {
 
 // Choose a length-class for a given payload length.
 public fn len_class_for(n: Int64) -> Int {
-    if n <= (11 as Int64)        { return n as Int; }
-    if n <= (0xFF as Int64)      { return 12; }
-    if n <= (0xFFFF as Int64)    { return 13; }
-    if n <= (0xFFFFFFFF as Int64) { return 14; }
+    if n <= 11_i64        { return n as Int; }
+    if n <= 0xFF_i64      { return 12; }
+    if n <= 0xFFFF_i64    { return 13; }
+    if n <= 0xFFFFFFFF_i64 { return 14; }
     15
 }
 

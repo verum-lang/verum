@@ -204,7 +204,7 @@ fn test_spawn_config_with_isolation() {
 
 @test
 fn test_spawn_config_with_timeout_ms() {
-    let config = SupervisorSpawnConfig.new().with_timeout_ms(5000 as UInt64);
+    let config = SupervisorSpawnConfig.new().with_timeout_ms5000_u64;
 
     // Timeout should be converted to deadline in nanoseconds (> 0 means set)
     assert(config.deadline_ns > 0);
@@ -242,7 +242,7 @@ fn test_spawn_config_builder_chain() {
         .with_name("worker-1")
         .with_priority(PriorityLevel.High)
         .with_isolation(EnvIsolationLevel.Full)
-        .with_timeout_ms(10000 as UInt64)
+        .with_timeout_ms10000_u64
         .with_stack_size(32768);
 
     // Verify all settings
@@ -435,7 +435,7 @@ fn test_spawn_config_empty_name() {
 
 @test
 fn test_spawn_config_zero_timeout() {
-    let config = SupervisorSpawnConfig.new().with_timeout_ms(0 as UInt64);
+    let config = SupervisorSpawnConfig.new().with_timeout_ms0_u64;
 
     // Zero timeout sets deadline to current time (immediate deadline)
     assert(config.deadline_ns > 0);
@@ -456,7 +456,7 @@ fn test_spawn_config_zero_stack_size() {
 @test
 fn test_spawn_config_large_timeout() {
     // Very large timeout (1 day in ms)
-    let one_day_ms: UInt64 = (24 as UInt64) * 60 * 60 * 1000;
+    let one_day_ms: UInt64 = 24_u64 * 60 * 60 * 1000;
     let config = SupervisorSpawnConfig.new().with_timeout_ms(one_day_ms);
 
     assert(config.deadline_ns > 0);

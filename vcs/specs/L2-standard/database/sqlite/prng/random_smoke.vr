@@ -96,8 +96,8 @@ fn test_seed_source_name() {
 
 fn test_default_policy_thresholds_positive() {
     let p = default_policy();
-    assert(p.bytes_threshold > (0 as Int64));
-    assert(p.secs_threshold > (0 as Int64));
+    assert(p.bytes_threshold > 0_i64);
+    assert(p.secs_threshold > 0_i64);
 }
 
 fn test_should_reseed_under_threshold_false() {
@@ -129,13 +129,13 @@ fn test_engine_random_blob_returns_n_bytes() {
     let mut e = engine_with_fixed_seed(make_seed(32));
     let blob = e.random_blob(32);
     assert_eq(blob.len(), 32);
-    assert(e.bytes_emitted() == (32 as Int64));
+    assert(e.bytes_emitted() == 32_i64);
 }
 
 fn test_engine_random_int_emits_int64() {
     let mut e = engine_with_fixed_seed(make_seed(32));
     let _v = e.random_int();
-    assert(e.bytes_emitted() == (8 as Int64));
+    assert(e.bytes_emitted() == 8_i64);
 }
 
 fn test_engine_reproducible_from_same_seed() {

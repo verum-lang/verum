@@ -32,12 +32,12 @@ fn test_mode_behaviour() {
 fn test_pages_freed_and_bytes_freed() {
     let p = new(TmReleaseAll, 1000 as Int64, 600 as Int64, 4096 as Int64);
     assert_eq(pages_freed(&p), 400 as Int64);
-    assert_eq(bytes_freed(&p), (400 as Int64) * (4096 as Int64));
+    assert_eq(bytes_freed(&p), 400_i64 * 4096_i64);
 }
 
 fn test_new_file_size() {
     let p = new(TmReleaseAll, 500 as Int64, 500 as Int64, 4096 as Int64);
-    assert_eq(new_file_size(&p), (500 as Int64) * (4096 as Int64));
+    assert_eq(new_file_size(&p), 500_i64 * 4096_i64);
 }
 
 fn test_is_effective() {

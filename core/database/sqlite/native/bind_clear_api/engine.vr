@@ -51,7 +51,7 @@ implement ClearEngine {
     /// Counts how many slots were previously bound so callers can tell
     /// whether the call reclaimed any allocations.
     pub fn sqlite3_clear_bindings(&mut self) -> Int {
-        self.clears = self.clears + (1 as Int64);
+        self.clears = self.clears + 1_i64;
         let mut i: Int = 0;
         while i < self.slots.len() {
             self.slots.get_mut(i).bound = false;

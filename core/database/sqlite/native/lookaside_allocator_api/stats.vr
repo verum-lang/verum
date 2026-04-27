@@ -23,29 +23,29 @@ public fn zeroed(total_slots: Int) -> LookasideStats {
 }
 
 public fn record_hit(mut s: LookasideStats) -> LookasideStats {
-    s.hits = s.hits + (1 as Int64);
-    s.slots_used = s.slots_used + (1 as Int64);
-    if s.slots_free > (0 as Int64) {
-        s.slots_free = s.slots_free - (1 as Int64);
+    s.hits = s.hits + 1_i64;
+    s.slots_used = s.slots_used + 1_i64;
+    if s.slots_free > 0_i64 {
+        s.slots_free = s.slots_free - 1_i64;
     }
     s
 }
 
 public fn record_free(mut s: LookasideStats) -> LookasideStats {
-    if s.slots_used > (0 as Int64) {
-        s.slots_used = s.slots_used - (1 as Int64);
-        s.slots_free = s.slots_free + (1 as Int64);
+    if s.slots_used > 0_i64 {
+        s.slots_used = s.slots_used - 1_i64;
+        s.slots_free = s.slots_free + 1_i64;
     }
     s
 }
 
 public fn record_miss_size(mut s: LookasideStats) -> LookasideStats {
-    s.misses_size = s.misses_size + (1 as Int64);
+    s.misses_size = s.misses_size + 1_i64;
     s
 }
 
 public fn record_miss_full(mut s: LookasideStats) -> LookasideStats {
-    s.misses_full = s.misses_full + (1 as Int64);
+    s.misses_full = s.misses_full + 1_i64;
     s
 }
 
@@ -55,14 +55,14 @@ public fn total_requests(s: &LookasideStats) -> Int64 {
 
 public fn hit_rate(s: &LookasideStats) -> Float {
     let tot = total_requests(s);
-    if tot <= (0 as Int64) { return 1.0 as Float; }
+    if tot <= 0_i64 { return 1.0 as Float; }
     let h = s.hits as Float;
     let t = tot as Float;
     h / t
 }
 
 public fn is_exhausted(s: &LookasideStats) -> Bool {
-    s.slots_free == (0 as Int64)
+    s.slots_free == 0_i64
 }
 
 // Peak usage counter for SQLITE_DBSTATUS_LOOKASIDE_USED_HIGH.

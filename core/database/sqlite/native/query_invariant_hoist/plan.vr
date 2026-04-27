@@ -32,10 +32,10 @@ public fn is_hoistable(p: &HoistPlan) -> Bool {
 public fn classify(d: &DepSet, outer_mask: Int64, inner_bit: Int64) -> HoistPlan {
     if is_constant(d) { return HpHoistToStmtSetup; }
     if d.references_random { return HpKeepInline; }
-    if (d.cursor_bits & inner_bit) != (0 as Int64) { return HpKeepInline; }
+    if (d.cursor_bits & inner_bit) != 0_i64 { return HpKeepInline; }
     // Depends on some outer cursor but not the current inner cursor.
     if depends_only_outside(d, inner_bit) {
-        if (d.cursor_bits & outer_mask) == (0 as Int64) {
+        if (d.cursor_bits & outer_mask) == 0_i64 {
             return HpHoistToStmtSetup;
         }
         return HpHoistToLoopEntry;

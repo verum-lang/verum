@@ -13,12 +13,12 @@ public fn no_limit() -> AnalysisLimit {
 }
 
 public fn capped(n: Int64) -> AnalysisLimit {
-    let clipped = if n < (0 as Int64) { 0 as Int64 } else { n };
+    let clipped = if n < 0_i64 { 0 as Int64 } else { n };
     AnalysisLimit { sample_cap: clipped }
 }
 
 public fn is_no_limit(l: &AnalysisLimit) -> Bool {
-    l.sample_cap == (0 as Int64)
+    l.sample_cap == 0_i64
 }
 
 public fn has_cap(l: &AnalysisLimit) -> Bool { !is_no_limit(l) }
@@ -29,7 +29,7 @@ public fn recommended_default() -> Int64 { 1000 as Int64 }
 
 public fn is_reasonable(l: &AnalysisLimit) -> Bool {
     // 0 (unlimited) or > 1 is reasonable; a cap of 1 is degenerate.
-    l.sample_cap == (0 as Int64) || l.sample_cap > (1 as Int64)
+    l.sample_cap == 0_i64 || l.sample_cap > 1_i64
 }
 
 // Whether scan should continue past `seen` samples.

@@ -213,7 +213,7 @@ public fn rollback_replay(
     let mut pos: Int = ROLLBACK_HEADER_SIZE;
     // If n_rec is 0xFFFFFFFF we scan until EOF; otherwise we scan for
     // exactly n_rec records.
-    let expected_records: Int = if header.n_rec == (0xFFFFFFFF as UInt32) {
+    let expected_records: Int = if header.n_rec == 0xFFFFFFFF_u32 {
         -1
     } else {
         header.n_rec as Int

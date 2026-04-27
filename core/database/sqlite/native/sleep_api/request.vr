@@ -23,5 +23,5 @@ public fn is_noop(r: &SleepRequest) -> Bool {
 
 public fn to_ns(r: &SleepRequest) -> Int64 {
     if r.milliseconds <= 0 { return 0 as Int64; }
-    (r.milliseconds as Int64) * (1_000_000 as Int64)
+    (r.milliseconds as Int64) * 1_000_000_i64
 }

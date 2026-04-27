@@ -25,5 +25,5 @@ public fn null_handle() -> FileObjectHandle {
 }
 
 public fn is_null(h: &FileObjectHandle) -> Bool {
-    h.file_ptr == (0 as Int64)
+    h.file_ptr == 0_i64
 }

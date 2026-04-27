@@ -30,7 +30,7 @@ public fn with_hash_count(mut s: FilterSpec, n: Int) -> FilterSpec {
 }
 
 public fn record_insert(mut s: FilterSpec) -> FilterSpec {
-    s.entries_inserted = s.entries_inserted + (1 as Int64);
+    s.entries_inserted = s.entries_inserted + 1_i64;
     s
 }
 
@@ -38,7 +38,7 @@ public fn record_insert(mut s: FilterSpec) -> FilterSpec {
 //   fpr ~= (1 - e^(-n / m))^k  ≈  (n / m)   for k = 1 and small n
 // We use the linear approximation; returns 0..1 Float.
 public fn approximate_fpr(s: &FilterSpec) -> Float {
-    if s.bit_count <= (0 as Int64) { return 1.0 as Float; }
+    if s.bit_count <= 0_i64 { return 1.0 as Float; }
     let n = s.entries_inserted as Float;
     let m = s.bit_count as Float;
     let single = n / m;
@@ -55,12 +55,12 @@ public fn approximate_fpr(s: &FilterSpec) -> Float {
 
 // Decide whether the filter is worth building — skip if too small.
 public fn is_worthwhile(expected_entries: Int64) -> Bool {
-    expected_entries >= (25 as Int64)
+    expected_entries >= 25_i64
 }
 
 // Bits per entry at current fill.
 public fn bits_per_entry(s: &FilterSpec) -> Float {
-    if s.expected_entries <= (0 as Int64) { return 0.0 as Float; }
+    if s.expected_entries <= 0_i64 { return 0.0 as Float; }
     let m = s.bit_count as Float;
     let n = s.expected_entries as Float;
     m / n

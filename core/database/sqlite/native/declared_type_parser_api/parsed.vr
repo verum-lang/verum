@@ -39,7 +39,7 @@ fn parse_u32(bs: &List<u8>, i: Int) -> (Int64, Int) {
     let mut v: Int64 = 0 as Int64;
     while j < bs.len() && is_digit(bs[j]) {
         let d = (bs[j] - (0x30 as u8)) as Int64;
-        v = v * (10 as Int64) + d;
+        v = v * 10_i64 + d;
         j = j + 1;
     }
     (v, j)
@@ -93,11 +93,11 @@ public fn parse(raw: &Text) -> ParsedType {
 }
 
 public fn has_size_hint(p: &ParsedType) -> Bool {
-    p.size_hint >= (0 as Int64)
+    p.size_hint >= 0_i64
 }
 
 public fn has_scale_hint(p: &ParsedType) -> Bool {
-    p.scale_hint >= (0 as Int64)
+    p.scale_hint >= 0_i64
 }
 
 public fn has_parens(p: &ParsedType) -> Bool {

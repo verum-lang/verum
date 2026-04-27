@@ -28,7 +28,7 @@ public fn effective_page_count(pragma_value: Int, page_size_bytes: Int) -> Int {
     if pragma_value >= 0 { return pragma_value; }
     if page_size_bytes <= 0 { return 0; }
     let kib = (-pragma_value) as Int64;
-    let bytes = kib * (1024 as Int64);
+    let bytes = kib * 1024_i64;
     let pages = bytes / (page_size_bytes as Int64);
     pages as Int
 }

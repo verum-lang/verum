@@ -300,9 +300,9 @@ fn is_ident_cont(b: Byte) -> Bool {
 fn hex_digit_value(b: Byte) -> Int64 {
     if is_digit(b) { return (b - (0x30 as Byte)) as Int64; }
     if b >= (0x41 as Byte) && b <= (0x46 as Byte) {
-        return ((b - (0x41 as Byte)) as Int64) + (10 as Int64);
+        return ((b - (0x41 as Byte)) as Int64) + 10_i64;
     }
-    ((b - (0x61 as Byte)) as Int64) + (10 as Int64)
+    ((b - (0x61 as Byte)) as Int64) + 10_i64
 }
 
 // -----------------------------------------------------------------------------
@@ -596,7 +596,7 @@ fn parse_int_from_bytes(b: &List<Byte>) -> Int64 {
     let mut i: Int = 0;
     while i < b.len() {
         let d = (b[i] - (0x30 as Byte)) as Int64;
-        v = v * (10 as Int64) + d;
+        v = v * 10_i64 + d;
         i = i + 1;
     }
     v

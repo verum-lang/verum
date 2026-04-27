@@ -27,9 +27,9 @@ fn test_varint_vectors_cover_every_length() {
     let mut found_max = false;
     let mut i: Int = 0;
     while i < vs.len() {
-        if vs[i].decoded == (0 as Int64) { found_zero = true; }
-        if vs[i].decoded == (127 as Int64) { found_127 = true; }
-        if vs[i].decoded == (9223372036854775807 as Int64) { found_max = true; }
+        if vs[i].decoded == 0_i64 { found_zero = true; }
+        if vs[i].decoded == 127_i64 { found_127 = true; }
+        if vs[i].decoded == 9223372036854775807_i64 { found_max = true; }
         i = i + 1;
     }
     assert(found_zero);
@@ -53,7 +53,7 @@ fn test_varint_127_is_single_byte() {
     let mut found = false;
     let mut i: Int = 0;
     while i < vs.len() {
-        if vs[i].decoded == (127 as Int64) {
+        if vs[i].decoded == 127_i64 {
             assert_eq(vs[i].encoded.len(), 1);
             assert_eq(vs[i].encoded[0], 0x7F as Byte);
             found = true;

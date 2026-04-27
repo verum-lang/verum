@@ -76,10 +76,10 @@ public fn check(r: &DbpageWriteguardRequest) -> DbpageWriteguardOutcome {
     if !r.in_write_txn          { return DenyNoTxn; }
     if r.schema_readonly        { return DenySchemaReadonly; }
     if r.is_journal_or_wal_page { return DenyJournalPage; }
-    if r.pgno <= (0 as Int64)    { return DenyPgnoOutOfRange; }
+    if r.pgno <= 0_i64    { return DenyPgnoOutOfRange; }
     if r.pgno > r.db_pages       { return DenyPgnoOutOfRange; }
     if r.buffer_size != r.page_size { return DenyBufferSizeMismatch; }
-    if r.defensive_mode && r.pgno == (1 as Int64) { return DenyDefensivePage1; }
+    if r.defensive_mode && r.pgno == 1_i64 { return DenyDefensivePage1; }
     Allow
 }
 

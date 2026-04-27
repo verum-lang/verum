@@ -33,7 +33,7 @@ implement MutexAssertEngine {
         let mut i: Int = 0;
         while i < self.held.len() {
             if self.held.get(i).id == mutex_id {
-                if self.held.get(i).owner != (0 as Int64) { return false; }
+                if self.held.get(i).owner != 0_i64 { return false; }
                 self.held.get_mut(i).owner = owner;
                 return true;
             }
@@ -62,7 +62,7 @@ implement MutexAssertEngine {
         let mut i: Int = 0;
         while i < self.held.len() {
             if self.held.get(i).id == mutex_id {
-                return if self.held.get(i).owner != (0 as Int64) { 1 } else { 0 };
+                return if self.held.get(i).owner != 0_i64 { 1 } else { 0 };
             }
             i = i + 1;
         }

@@ -77,9 +77,9 @@ public type Effectiveness is
 
 public fn classify(r: &Report) -> Effectiveness {
     let total = total_bytes_released(r);
-    if total == (0 as Int64) { return EfNoOp; }
-    if total < (4096 as Int64) { return EfMinor; }
-    if total < (1_048_576 as Int64) { return EfNotable; }
+    if total == 0_i64 { return EfNoOp; }
+    if total < 4096_i64 { return EfMinor; }
+    if total < 1_048_576_i64 { return EfNotable; }
     EfSubstantial
 }
 

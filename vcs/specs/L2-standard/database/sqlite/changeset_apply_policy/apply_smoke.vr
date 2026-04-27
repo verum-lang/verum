@@ -43,13 +43,13 @@ fn test_flag_classifiers() {
     assert(inverts_changeset(f_invert()));
     assert(ignores_noop(f_ignorenoop()));
     assert(suppresses_fk_action(f_fknoaction()));
-    assert(!skips_savepoint(0 as Int64));
+    assert(!skips_savepoint0_i64);
 }
 
 fn test_is_known_only() {
-    assert(is_known_only(0 as Int64));
+    assert(is_known_only0_i64);
     assert(is_known_only(f_nosavepoint() | f_invert()));
-    assert(!is_known_only(0x10 as Int64));
+    assert(!is_known_only0x10_i64);
 }
 
 fn test_disposition_codes() {
@@ -83,20 +83,20 @@ fn test_summarise_outcomes() {
 
 fn test_omit_count_projection() {
     assert_eq(omit_count(&AoOk), 0 as Int64);
-    assert_eq(omit_count(&AoOkWithSkips(7 as Int64)), 7 as Int64);
+    assert_eq(omit_count(&AoOkWithSkips7_i64), 7 as Int64);
     assert_eq(omit_count(&AoAborted), 0 as Int64);
 }
 
 fn test_savepoint_and_direction_flags() {
-    assert(wraps_in_savepoint(0 as Int64));
+    assert(wraps_in_savepoint0_i64);
     assert(!wraps_in_savepoint(f_nosavepoint()));
     assert(reverses_direction(f_invert()));
-    assert(!reverses_direction(0 as Int64));
+    assert(!reverses_direction0_i64);
 }
 
 fn test_outcome_names() {
     assert(outcome_name(&AoOk)                 == "ok".clone());
-    assert(outcome_name(&AoOkWithSkips(1 as Int64)) == "ok_with_skips".clone());
+    assert(outcome_name(&AoOkWithSkips1_i64) == "ok_with_skips".clone());
     assert(outcome_name(&AoAborted)            == "aborted".clone());
 }
 

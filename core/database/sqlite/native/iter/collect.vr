@@ -45,10 +45,10 @@ public fn collect_all(
     let mut stats = collect_stats_zero();
     loop {
         let o = cursor.step(step_fn);
-        stats.steps_taken = stats.steps_taken + (1 as Int64);
+        stats.steps_taken = stats.steps_taken + 1_i64;
         if has_row(&o) {
             (on_row)(cursor.stmt_id);
-            stats.rows_yielded = stats.rows_yielded + (1 as Int64);
+            stats.rows_yielded = stats.rows_yielded + 1_i64;
         } else if is_retriable(&o) {
             stats.busy_count = stats.busy_count + 1;
             break;    // catalogue does not implement retry — host's job

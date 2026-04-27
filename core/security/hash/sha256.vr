@@ -171,7 +171,7 @@ implement Sha256 {
         let mut h = self.h;
         let mut buf = self.buf;
         let mut buf_len = self.buf_len;
-        let total_bits = self.length_bytes * (8 as UInt64);
+        let total_bits = self.length_bytes * 8_u64;
 
         // Append 0x80 byte.
         buf[buf_len] = 0x80;
@@ -224,7 +224,7 @@ implement Sha256 {
 fn ch(x: UInt32, y: UInt32, z: UInt32) -> UInt32 {
     // Bitwise-NOT via XOR with all-ones — self-contained so we don't
     // depend on primitive-type method dispatch in the VBC interpreter.
-    (x & y) ^ ((x ^ (0xFFFFFFFF as UInt32)) & z)
+    (x & y) ^ ((x ^ 0xFFFFFFFF_u32) & z)
 }
 
 @inline
@@ -237,7 +237,7 @@ fn maj(x: UInt32, y: UInt32, z: UInt32) -> UInt32 {
 // keeps the reference implementation self-contained.
 @inline
 fn rotr32(x: UInt32, n: UInt32) -> UInt32 {
-    (x >> n) | (x << ((32 as UInt32) - n))
+    (x >> n) | (x << (32_u32 - n))
 }
 
 @inline
@@ -252,12 +252,12 @@ fn big_sigma1(x: UInt32) -> UInt32 {
 
 @inline
 fn small_sigma0(x: UInt32) -> UInt32 {
-    rotr32(x, 7) ^ rotr32(x, 18) ^ (x >> (3 as UInt32))
+    rotr32(x, 7) ^ rotr32(x, 18) ^ (x >> 3_u32)
 }
 
 @inline
 fn small_sigma1(x: UInt32) -> UInt32 {
-    rotr32(x, 17) ^ rotr32(x, 19) ^ (x >> (10 as UInt32))
+    rotr32(x, 17) ^ rotr32(x, 19) ^ (x >> 10_u32)
 }
 
 /// Core compression: merge one 64-byte block into hash state.

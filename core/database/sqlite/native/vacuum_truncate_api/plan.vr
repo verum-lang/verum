@@ -60,12 +60,12 @@ public fn new_file_size(p: &TruncatePlan) -> Int64 {
 }
 
 public fn is_effective(p: &TruncatePlan) -> Bool {
-    pages_freed(p) > (0 as Int64)
+    pages_freed(p) > 0_i64
 }
 
 // Recovery space saved as a fraction of original size.
 public fn savings_fraction(p: &TruncatePlan) -> Float {
-    if p.before_pages <= (0 as Int64) { return 0.0 as Float; }
+    if p.before_pages <= 0_i64 { return 0.0 as Float; }
     let freed = pages_freed(p) as Float;
     let before = p.before_pages as Float;
     freed / before

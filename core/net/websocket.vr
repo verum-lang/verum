@@ -325,7 +325,7 @@ public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> WebSock
             v = (v << 8) | (buf[pos + i] as UInt64);
             i = i + 1;
         }
-        if v > (9223372036854775807 as UInt64) {
+        if v > 9223372036854775807_u64 {
             return WebSocketDecodeResult.Err(WebSocketDecodeError.PayloadTooLong { limit: max_payload });
         }
         payload_len = v as Int;

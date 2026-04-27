@@ -110,14 +110,14 @@ fn push_int_padded(dst: &mut Text, n: Int, width: Int) {
 }
 
 fn push_int64(dst: &mut Text, n: Int64) {
-    if n == (0 as Int64) { dst.push_byte(48 as Byte); return; }
-    let neg = n < (0 as Int64);
+    if n == 0_i64 { dst.push_byte(48 as Byte); return; }
+    let neg = n < 0_i64;
     let mut x: Int64 = if neg { -n } else { n };
     let mut digits: List<Byte> = List.new();
-    while x > (0 as Int64) {
+    while x > 0_i64 {
         let d: Byte = (((x as Int) % 10) as Byte);
         digits.push(d + (48 as Byte));
-        x = x / (10 as Int64);
+        x = x / 10_i64;
     }
     if neg { dst.push_byte(45 as Byte); }
     let mut i: Int = digits.len() - 1;
@@ -134,12 +134,12 @@ fn push_real(dst: &mut Text, f: Float64) {
     push_int64(dst, int_part);
     dst.push_byte(46 as Byte);
     let mut digits: List<Byte> = List.new();
-    let mut x: Int64 = if scaled < (0 as Int64) { -scaled } else { scaled };
+    let mut x: Int64 = if scaled < 0_i64 { -scaled } else { scaled };
     let mut placed: Int = 0;
     while placed < 6 {
         let d: Byte = (((x as Int) % 10) as Byte);
         digits.push(d + (48 as Byte));
-        x = x / (10 as Int64);
+        x = x / 10_i64;
         placed = placed + 1;
     }
     let mut i: Int = digits.len() - 1;

@@ -80,7 +80,7 @@ public fn outcome_name(o: &AllocOutcome) -> Text {
 public fn allocate(mut r: AutoincrementRegister, table_name: Text) -> (AutoincrementRegister, AllocOutcome) {
     let current = find(&r, &table_name);
     let next = match current {
-        Maybe.Some(s) => s + (1 as Int64),
+        Maybe.Some(s) => s + 1_i64,
         Maybe.None    => 1 as Int64,
     };
     if next > rowid_max() { return (r, AoFull); }

@@ -70,7 +70,7 @@ public fn rotate(mut e: Wal2Engine) -> Wal2Engine {
             e.slot_zero_role = SrActive;
         },
     }
-    e.swaps = e.swaps + (1 as Int64);
+    e.swaps = e.swaps + 1_i64;
     e
 }
 

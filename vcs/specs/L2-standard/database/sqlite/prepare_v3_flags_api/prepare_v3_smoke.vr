@@ -37,9 +37,9 @@ fn test_set_and_is_set() {
 }
 
 fn test_is_known_only() {
-    assert(is_known_only(0 as Int64));
+    assert(is_known_only0_i64);
     assert(is_known_only(f_persistent() | f_dont_log()));
-    assert(!is_known_only(0x80 as Int64));
+    assert(!is_known_only0x80_i64);
 }
 
 fn test_classifiers() {
@@ -54,11 +54,11 @@ fn test_bit_names() {
     assert(bit_name(f_normalize())  == "NORMALIZE".clone());
     assert(bit_name(f_no_vtab())    == "NO_VTAB".clone());
     assert(bit_name(f_dont_log())   == "DONT_LOG".clone());
-    assert(bit_name(0x80 as Int64)  == "UNKNOWN".clone());
+    assert(bit_name0x80_i64  == "UNKNOWN".clone());
 }
 
 fn test_eviction_policy_dispatch() {
-    match eviction_for(0 as Int64)             { EpEvictable => {}, _ => assert(false) }
+    match eviction_for0_i64             { EpEvictable => {}, _ => assert(false) }
     match eviction_for(f_persistent())          { EpPinned    => {}, _ => assert(false) }
     match eviction_for(f_dont_log())            { EpEvictable => {}, _ => assert(false) }
 }

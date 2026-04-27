@@ -49,13 +49,13 @@ public fn start(register_base: Int) -> Coroutine {
 public fn record_yield(mut c: Coroutine, return_pc: Int) -> Coroutine {
     c.state = CsYielded;
     c.return_pc = return_pc;
-    c.yields = c.yields + (1 as Int64);
+    c.yields = c.yields + 1_i64;
     c
 }
 
 public fn record_resume(mut c: Coroutine) -> Coroutine {
     c.state = CsRunning;
-    c.resumes = c.resumes + (1 as Int64);
+    c.resumes = c.resumes + 1_i64;
     c
 }
 
@@ -71,5 +71,5 @@ public fn net_open(c: &Coroutine) -> Int64 {
 
 public fn is_consistent(c: &Coroutine) -> Bool {
     let n = net_open(c);
-    n == (0 as Int64) || n == (1 as Int64)
+    n == 0_i64 || n == 1_i64
 }

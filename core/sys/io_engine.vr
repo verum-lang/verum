@@ -89,7 +89,7 @@ public type NonZeroDuration is EngineDuration where |d| d.0 > 0;
 public const MAX_PRACTICAL_DURATION: UInt64 = 365 * 24 * 60 * 60 * 1_000_000_000;
 
 implement EngineDuration {
-    public const ZERO: EngineDuration = EngineDuration(0 as UInt64);
+    public const ZERO: EngineDuration = EngineDuration0_u64;
     public const MAX: EngineDuration = EngineDuration(UInt64.MAX);
 
     /// Create duration from nanoseconds (zero-copy, compile-time constant capable)
@@ -101,19 +101,19 @@ implement EngineDuration {
     /// Create duration from microseconds
     @inline
     public pure fn from_micros(us: UInt64) -> EngineDuration {
-        EngineDuration(us * (1_000 as UInt64))
+        EngineDuration(us * 1_000_u64)
     }
 
     /// Create duration from milliseconds
     @inline
     public pure fn from_millis(ms: UInt64) -> EngineDuration {
-        EngineDuration(ms * (1_000_000 as UInt64))
+        EngineDuration(ms * 1_000_000_u64)
     }
 
     /// Create duration from seconds
     @inline
     public pure fn from_secs(s: UInt64) -> EngineDuration {
-        EngineDuration(s * (1_000_000_000 as UInt64))
+        EngineDuration(s * 1_000_000_000_u64)
     }
 
     /// Get duration as nanoseconds
@@ -125,19 +125,19 @@ implement EngineDuration {
     /// Get duration as milliseconds (truncates sub-millisecond)
     @inline
     public pure fn as_millis(&self) -> UInt64 {
-        self.0 / (1_000_000 as UInt64)
+        self.0 / 1_000_000_u64
     }
 
     /// Get duration as seconds (truncates sub-second)
     @inline
     public pure fn as_secs(&self) -> UInt64 {
-        self.0 / (1_000_000_000 as UInt64)
+        self.0 / 1_000_000_000_u64
     }
 
     /// Check if this is a zero duration
     @inline
     public pure fn is_zero(&self) -> Bool {
-        self.0 == (0 as UInt64)
+        self.0 == 0_u64
     }
 
     /// Saturating addition (caps at MAX instead of overflowing)
@@ -158,15 +158,15 @@ implement EngineDuration {
         if self.0 >= other.0 {
             EngineDuration(self.0 - other.0)
         } else {
-            EngineDuration(0 as UInt64)
+            EngineDuration0_u64
         }
     }
 
     /// Convert to POSIX timespec structure
     public pure fn to_timespec(&self) -> TimeSpec {
         TimeSpec {
-            tv_sec: (self.0 / (1_000_000_000 as UInt64)) as Int64,
-            tv_nsec: (self.0 % (1_000_000_000 as UInt64)) as Int64,
+            tv_sec: (self.0 / 1_000_000_000_u64) as Int64,
+            tv_nsec: (self.0 % 1_000_000_000_u64) as Int64,
         }
     }
 }

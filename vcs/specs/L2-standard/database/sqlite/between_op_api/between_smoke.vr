@@ -27,33 +27,33 @@ fn test_rewrite_names() {
 }
 
 fn test_evaluate_between_true() {
-    let r = evaluate(&FBetween, &VInt(5 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    let r = evaluate(&FBetween, &VInt5_i64, &VInt1_i64, &VInt10_i64);
     match r { SbTrue => {}, _ => assert(false) }
 }
 
 fn test_evaluate_between_false_outside() {
-    let r = evaluate(&FBetween, &VInt(50 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    let r = evaluate(&FBetween, &VInt50_i64, &VInt1_i64, &VInt10_i64);
     match r { SbFalse => {}, _ => assert(false) }
 }
 
 fn test_evaluate_between_inclusive_endpoints() {
-    let lo = evaluate(&FBetween, &VInt(1 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
-    let hi = evaluate(&FBetween, &VInt(10 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    let lo = evaluate(&FBetween, &VInt1_i64, &VInt1_i64, &VInt10_i64);
+    let hi = evaluate(&FBetween, &VInt10_i64, &VInt1_i64, &VInt10_i64);
     match lo { SbTrue => {}, _ => assert(false) }
     match hi { SbTrue => {}, _ => assert(false) }
 }
 
 fn test_evaluate_not_between_inverts() {
-    let inside  = evaluate(&FNotBetween, &VInt(5 as Int64),  &VInt(1 as Int64), &VInt(10 as Int64));
-    let outside = evaluate(&FNotBetween, &VInt(50 as Int64), &VInt(1 as Int64), &VInt(10 as Int64));
+    let inside  = evaluate(&FNotBetween, &VInt5_i64,  &VInt1_i64, &VInt10_i64);
+    let outside = evaluate(&FNotBetween, &VInt50_i64, &VInt1_i64, &VInt10_i64);
     match inside  { SbFalse => {}, _ => assert(false) }
     match outside { SbTrue  => {}, _ => assert(false) }
 }
 
 fn test_evaluate_null_propagates() {
-    let r1 = evaluate(&FBetween, &VNull,  &VInt(1 as Int64), &VInt(10 as Int64));
-    let r2 = evaluate(&FBetween, &VInt(5 as Int64), &VNull, &VInt(10 as Int64));
-    let r3 = evaluate(&FBetween, &VInt(5 as Int64), &VInt(1 as Int64), &VNull);
+    let r1 = evaluate(&FBetween, &VNull,  &VInt1_i64, &VInt10_i64);
+    let r2 = evaluate(&FBetween, &VInt5_i64, &VNull, &VInt10_i64);
+    let r3 = evaluate(&FBetween, &VInt5_i64, &VInt1_i64, &VNull);
     match r1 { SbNull => {}, _ => assert(false) }
     match r2 { SbNull => {}, _ => assert(false) }
     match r3 { SbNull => {}, _ => assert(false) }
@@ -69,11 +69,11 @@ fn test_bool_names_and_is_true() {
 }
 
 fn test_degenerate_range() {
-    assert(is_degenerate_range(&VInt(10 as Int64), &VInt(5 as Int64)));
-    assert(!is_degenerate_range(&VInt(1 as Int64), &VInt(10 as Int64)));
-    assert(!is_degenerate_range(&VInt(5 as Int64), &VInt(5 as Int64)));
-    assert(!is_degenerate_range(&VNull,             &VInt(5 as Int64)));
-    assert(!is_degenerate_range(&VInt(5 as Int64), &VNull));
+    assert(is_degenerate_range(&VInt10_i64, &VInt5_i64));
+    assert(!is_degenerate_range(&VInt1_i64, &VInt10_i64));
+    assert(!is_degenerate_range(&VInt5_i64, &VInt5_i64));
+    assert(!is_degenerate_range(&VNull,             &VInt5_i64));
+    assert(!is_degenerate_range(&VInt5_i64, &VNull));
 }
 
 fn main() {

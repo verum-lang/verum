@@ -32,15 +32,15 @@ public fn new_lookaside(slot_size_bytes: Int, slot_count: Int) -> Lookaside {
 
 public fn try_allocate(l: &mut Lookaside, requested_bytes: Int) -> Bool {
     if requested_bytes > l.slot_size_bytes {
-        l.misses = l.misses + (1 as Int64);
+        l.misses = l.misses + 1_i64;
         return false;
     }
     if l.slots_in_use >= l.slot_count {
-        l.misses = l.misses + (1 as Int64);
+        l.misses = l.misses + 1_i64;
         return false;
     }
     l.slots_in_use = l.slots_in_use + 1;
-    l.hits = l.hits + (1 as Int64);
+    l.hits = l.hits + 1_i64;
     true
 }
 

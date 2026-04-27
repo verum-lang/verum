@@ -35,7 +35,7 @@ public fn enqueue(mut q: WorkQueue, row_id: Int64) -> WorkQueue {
         TmBreadthFirst => q.items.push(row_id),
         TmDepthFirst   => q.items.insert(0, row_id),
     }
-    q.total_enqueued = q.total_enqueued + (1 as Int64);
+    q.total_enqueued = q.total_enqueued + 1_i64;
     q
 }
 
@@ -44,7 +44,7 @@ public fn dequeue_front(mut q: WorkQueue) -> (WorkQueue, Int64) {
     if q.items.len() == 0 { return (q, -1 as Int64); }
     let front = q.items[0];
     let _ = q.items.remove(0);
-    q.total_dequeued = q.total_dequeued + (1 as Int64);
+    q.total_dequeued = q.total_dequeued + 1_i64;
     (q, front)
 }
 

@@ -307,8 +307,8 @@ fn test_wrapping_arithmetic() {
     // Type-specific wrapping (UInt32)
     let u32_a: UInt32 = 100 as UInt32;
     let u32_b: UInt32 = 50 as UInt32;
-    assert(wrapping_add_u32(u32_a, u32_b) == (150 as UInt32));
-    assert(wrapping_sub_u32(u32_a, u32_b) == (50 as UInt32));
+    assert(wrapping_add_u32(u32_a, u32_b) == 150_u32);
+    assert(wrapping_sub_u32(u32_a, u32_b) == 50_u32);
 
     print("Wrapping arithmetic tests passed");
 }
@@ -338,19 +338,19 @@ fn test_saturating_arithmetic() {
     // Type-specific saturating (Int32)
     let i32_a: Int32 = 100 as Int32;
     let i32_b: Int32 = 50 as Int32;
-    assert(saturating_add_i32(i32_a, i32_b) == (150 as Int32));
-    assert(saturating_sub_i32(i32_a, i32_b) == (50 as Int32));
+    assert(saturating_add_i32(i32_a, i32_b) == 150_i32);
+    assert(saturating_sub_i32(i32_a, i32_b) == 50_i32);
 
     // Type-specific saturating (UInt32)
     let u32_a: UInt32 = 100 as UInt32;
     let u32_b: UInt32 = 50 as UInt32;
-    assert(saturating_add_u32(u32_a, u32_b) == (150 as UInt32));
-    assert(saturating_sub_u32(u32_a, u32_b) == (50 as UInt32));
+    assert(saturating_add_u32(u32_a, u32_b) == 150_u32);
+    assert(saturating_sub_u32(u32_a, u32_b) == 50_u32);
 
     // Saturating at zero for unsigned
     let u32_small: UInt32 = 10 as UInt32;
     let u32_large: UInt32 = 100 as UInt32;
-    assert(saturating_sub_u32(u32_small, u32_large) == (0 as UInt32));
+    assert(saturating_sub_u32(u32_small, u32_large) == 0_u32);
 
     print("Saturating arithmetic tests passed");
 }

@@ -31,5 +31,5 @@ public fn new_run(index: Int, offset: Int64, byte_len: Int64, row_count: Int64) 
 }
 
 public fn run_is_empty(r: &PmaRun) -> Bool {
-    r.byte_len == (0 as Int64) || r.row_count == (0 as Int64)
+    r.byte_len == 0_i64 || r.row_count == 0_i64
 }

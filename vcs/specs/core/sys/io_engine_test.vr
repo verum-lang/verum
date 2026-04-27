@@ -52,29 +52,29 @@ fn main() {
 @test
 fn test_duration() {
     // Constants
-    assert(Duration.ZERO.as_nanos() == (0 as UInt64));
+    assert(Duration.ZERO.as_nanos() == 0_u64);
     assert(Duration.ZERO.is_zero());
     assert(Duration.MAX.as_nanos() == UInt64.MAX);
     assert(!Duration.MAX.is_zero());
 
     // Creation
-    let d1 = Duration.from_nanos(1000 as UInt64);
-    assert(d1.as_nanos() == (1000 as UInt64));
+    let d1 = Duration.from_nanos1000_u64;
+    assert(d1.as_nanos() == 1000_u64);
     assert(!d1.is_zero());
 
-    let d2 = Duration.from_micros(1 as UInt64);
-    assert(d2.as_nanos() == (1000 as UInt64));
+    let d2 = Duration.from_micros1_u64;
+    assert(d2.as_nanos() == 1000_u64);
 
-    let d3 = Duration.from_millis(1 as UInt64);
-    assert(d3.as_nanos() == (1_000_000 as UInt64));
+    let d3 = Duration.from_millis1_u64;
+    assert(d3.as_nanos() == 1_000_000_u64);
 
-    let d4 = Duration.from_secs(1 as UInt64);
-    assert(d4.as_nanos() == (1_000_000_000 as UInt64));
+    let d4 = Duration.from_secs1_u64;
+    assert(d4.as_nanos() == 1_000_000_000_u64);
 
     // Zero
-    let zero = Duration.from_nanos(0 as UInt64);
+    let zero = Duration.from_nanos0_u64;
     assert(zero.is_zero());
-    assert(zero.as_nanos() == (0 as UInt64));
+    assert(zero.as_nanos() == 0_u64);
 
     print("Duration basic tests passed");
 }
@@ -82,17 +82,17 @@ fn test_duration() {
 @test
 fn test_duration_conversions() {
     // Nanos -> larger units
-    let d = Duration.from_nanos(123_456_789_012 as UInt64);
+    let d = Duration.from_nanos123_456_789_012_u64;
 
-    assert(d.as_nanos() == (123_456_789_012 as UInt64));
-    assert(d.as_millis() == (123_456 as UInt64));  // Truncates to millis
-    assert(d.as_secs() == (123 as UInt64));        // Truncates to secs
+    assert(d.as_nanos() == 123_456_789_012_u64);
+    assert(d.as_millis() == 123_456_u64);  // Truncates to millis
+    assert(d.as_secs() == 123_u64);        // Truncates to secs
 
     // From larger units
-    let from_millis = Duration.from_millis(5000 as UInt64);
-    assert(from_millis.as_secs() == (5 as UInt64));
-    assert(from_millis.as_millis() == (5000 as UInt64));
-    assert(from_millis.as_nanos() == (5_000_000_000 as UInt64));
+    let from_millis = Duration.from_millis5000_u64;
+    assert(from_millis.as_secs() == 5_u64);
+    assert(from_millis.as_millis() == 5000_u64);
+    assert(from_millis.as_nanos() == 5_000_000_000_u64);
 
     // Round-trip: secs -> nanos -> secs
     for secs in [0, 1, 10, 100, 1000] {
@@ -112,17 +112,17 @@ fn test_duration_conversions() {
 @test
 fn test_duration_arithmetic() {
     // Basic Duration operations
-    let d1 = Duration.from_secs(10 as UInt64);
-    let d2 = Duration.from_secs(5 as UInt64);
+    let d1 = Duration.from_secs10_u64;
+    let d2 = Duration.from_secs5_u64;
 
     // Test basic Duration values
-    assert(d1.as_secs() == (10 as UInt64));
-    assert(d2.as_secs() == (5 as UInt64));
-    assert(d1.as_nanos() == (10_000_000_000 as UInt64));
-    assert(d2.as_nanos() == (5_000_000_000 as UInt64));
+    assert(d1.as_secs() == 10_u64);
+    assert(d2.as_secs() == 5_u64);
+    assert(d1.as_nanos() == 10_000_000_000_u64);
+    assert(d2.as_nanos() == 5_000_000_000_u64);
 
     // Test is_zero
-    let zero_dur = Duration.from_nanos(0 as UInt64);
+    let zero_dur = Duration.from_nanos0_u64;
     assert(zero_dur.is_zero());
     assert(!d1.is_zero());
 
@@ -144,34 +144,34 @@ fn test_duration_arithmetic() {
 @test
 fn test_timespec() {
     // Create from Duration
-    let d = Duration.from_nanos(1_500_000_000 as UInt64);  // 1.5 seconds
+    let d = Duration.from_nanos1_500_000_000_u64;  // 1.5 seconds
     let ts = d.to_timespec();
 
-    assert(ts.tv_sec == (1 as Int64));
-    assert(ts.tv_nsec == (500_000_000 as Int64));
+    assert(ts.tv_sec == 1_i64);
+    assert(ts.tv_nsec == 500_000_000_i64);
 
     // Zero duration
     let zero_ts = Duration.ZERO.to_timespec();
-    assert(zero_ts.tv_sec == (0 as Int64));
-    assert(zero_ts.tv_nsec == (0 as Int64));
+    assert(zero_ts.tv_sec == 0_i64);
+    assert(zero_ts.tv_nsec == 0_i64);
 
     // Large duration
-    let large = Duration.from_secs(1000 as UInt64);
+    let large = Duration.from_secs1000_u64;
     let large_ts = large.to_timespec();
-    assert(large_ts.tv_sec == (1000 as Int64));
-    assert(large_ts.tv_nsec == (0 as Int64));
+    assert(large_ts.tv_sec == 1000_i64);
+    assert(large_ts.tv_nsec == 0_i64);
 
     // Fractional seconds
-    let frac = Duration.from_nanos(123_456_789 as UInt64);
+    let frac = Duration.from_nanos123_456_789_u64;
     let frac_ts = frac.to_timespec();
-    assert(frac_ts.tv_sec == (0 as Int64));
-    assert(frac_ts.tv_nsec == (123_456_789 as Int64));
+    assert(frac_ts.tv_sec == 0_i64);
+    assert(frac_ts.tv_nsec == 123_456_789_i64);
 
     // Multiple seconds with nanoseconds
-    let multi = Duration.from_nanos(3_141_592_653 as UInt64);  // ~3.14 seconds
+    let multi = Duration.from_nanos3_141_592_653_u64;  // ~3.14 seconds
     let multi_ts = multi.to_timespec();
-    assert(multi_ts.tv_sec == (3 as Int64));
-    assert(multi_ts.tv_nsec == (141_592_653 as Int64));
+    assert(multi_ts.tv_sec == 3_i64);
+    assert(multi_ts.tv_nsec == 141_592_653_i64);
 
     print("TimeSpec tests passed");
 }
@@ -184,14 +184,14 @@ fn test_timespec() {
 fn test_file_descriptors() {
     // Fd basic operations
     let invalid = Fd.INVALID;
-    assert(invalid.as_raw() == (-1 as Int32));
+    assert(invalid.as_raw() == -1_i32);
     assert(!invalid.is_valid());
 
-    let fd0 = Fd(0 as Int32);
-    assert(fd0.as_raw() == (0 as Int32));
+    let fd0 = Fd0_i32;
+    assert(fd0.as_raw() == 0_i32);
     assert(fd0.is_valid());
 
-    let fd_neg = Fd(-5 as Int32);
+    let fd_neg = Fd-5_i32;
     assert(!fd_neg.is_valid());
 
     // ValidFd constants - copy to local variables to avoid method resolution on constants
@@ -199,14 +199,14 @@ fn test_file_descriptors() {
     let stdout_fd: ValidFd = STDOUT_FD;
     let stderr_fd: ValidFd = STDERR_FD;
 
-    assert(stdin_fd.as_raw() >= (0 as Int32));
-    assert(stdout_fd.as_raw() >= (0 as Int32));
-    assert(stderr_fd.as_raw() >= (0 as Int32));
+    assert(stdin_fd.as_raw() >= 0_i32);
+    assert(stdout_fd.as_raw() >= 0_i32);
+    assert(stderr_fd.as_raw() >= 0_i32);
 
     // Standard descriptors
-    assert(stdin_fd.as_raw() == (0 as Int32));
-    assert(stdout_fd.as_raw() == (1 as Int32));
-    assert(stderr_fd.as_raw() == (2 as Int32));
+    assert(stdin_fd.as_raw() == 0_i32);
+    assert(stdout_fd.as_raw() == 1_i32);
+    assert(stderr_fd.as_raw() == 2_i32);
 
     // try_as_valid
     let valid_opt = fd0.try_as_valid();
@@ -220,7 +220,7 @@ fn test_file_descriptors() {
 
     // ValidFd to Fd conversion
     let fd_back = stdin_fd.as_fd();
-    assert(fd_back.as_raw() == (0 as Int32));
+    assert(fd_back.as_raw() == 0_i32);
     assert(fd_back.is_valid());
 
     print("File descriptor tests passed");
@@ -240,8 +240,8 @@ fn test_socket_addr() {
 
     match v4 {
         SocketAddr.V4 { addr, port } => {
-            assert(addr == (0x7F000001 as UInt32));
-            assert(port == (8080 as UInt16));
+            assert(addr == 0x7F000001_u32);
+            assert(port == 8080_u16);
         }
         _ => {
             assert(false);
@@ -258,10 +258,10 @@ fn test_socket_addr() {
 
     match v6 {
         SocketAddr.V6 { addr, port, flowinfo, scope_id } => {
-            assert(port == (443 as UInt16));
-            assert(addr[15] == (1 as UInt8));  // Last byte is 1 for ::1
-            assert(flowinfo == (0 as UInt32));
-            assert(scope_id == (0 as UInt32));
+            assert(port == 443_u16);
+            assert(addr[15] == 1_u8);  // Last byte is 1 for ::1
+            assert(flowinfo == 0_u32);
+            assert(scope_id == 0_u32);
         }
         _ => {
             assert(false);
@@ -273,14 +273,14 @@ fn test_socket_addr() {
     let any = SocketAddr.V4 { addr: 0 as UInt32, port: 0 as UInt16 };
 
     match localhost {
-        SocketAddr.V4 { addr, .. } => assert(addr == (0x7F000001 as UInt32)),
+        SocketAddr.V4 { addr, .. } => assert(addr == 0x7F000001_u32),
         _ => assert(false),
     }
 
     match any {
         SocketAddr.V4 { addr, port } => {
-            assert(addr == (0 as UInt32));
-            assert(port == (0 as UInt16));
+            assert(addr == 0_u32);
+            assert(port == 0_u16);
         }
         _ => assert(false),
     }
@@ -301,11 +301,11 @@ fn test_port() {
     let p8080: Port = 8080 as UInt16;  // Alt HTTP
     let p_max: Port = 65535 as UInt16; // Maximum
 
-    assert(p0 == (0 as UInt16));
-    assert(p80 == (80 as UInt16));
-    assert(p443 == (443 as UInt16));
-    assert(p8080 == (8080 as UInt16));
-    assert(p_max == (65535 as UInt16));
+    assert(p0 == 0_u16);
+    assert(p80 == 80_u16);
+    assert(p443 == 443_u16);
+    assert(p8080 == 8080_u16);
+    assert(p_max == 65535_u16);
 
     // BoundPort (non-zero)
     // Note: BoundPort is a refinement type (Port{> 0}), so 0 is invalid
@@ -325,22 +325,22 @@ fn test_completion_result() {
     // Successful completion
     // CompletionResult.success() static method not resolvable — use direct construction
     let success = CompletionResult { user_data: 42 as UInt64, result: 1024 as Int32, flags: 0 };
-    assert(success.user_data == (42 as UInt64));
+    assert(success.user_data == 42_u64);
     assert(success.is_success());
     assert(!success.is_error());
-    assert(success.bytes_transferred() == (1024 as UInt32));
-    assert(success.error_code() == (0 as Int32));
+    assert(success.bytes_transferred() == 1024_u32);
+    assert(success.error_code() == 0_i32);
     assert(!success.was_cancelled());
     assert(!success.was_timeout());
 
     // Error completion
     // CompletionResult.error() static method not resolvable — use direct construction
-    let error = CompletionResult { user_data: 99 as UInt64, result: -(13 as Int32), flags: 0 };
-    assert(error.user_data == (99 as UInt64));
+    let error = CompletionResult { user_data: 99 as UInt64, result: -13_i32, flags: 0 };
+    assert(error.user_data == 99_u64);
     assert(!error.is_success());
     assert(error.is_error());
-    assert(error.bytes_transferred() == (0 as UInt32));
-    assert(error.error_code() == (13 as Int32));
+    assert(error.bytes_transferred() == 0_u32);
+    assert(error.error_code() == 13_i32);
 
     // Cancellation
     let cancelled = CompletionResult {
@@ -362,7 +362,7 @@ fn test_completion_result() {
 
     // to_result conversion
     match success.to_result() {
-        Ok(bytes) => assert(bytes == (1024 as UInt32)),
+        Ok(bytes) => assert(bytes == 1024_u32),
         Err(_) => assert(false),
     }
 
@@ -379,7 +379,7 @@ fn test_completion_result() {
     // Zero bytes transferred
     let zero_success = CompletionResult { user_data: 0 as UInt64, result: 0 as Int32, flags: 0 };
     assert(zero_success.is_success());
-    assert(zero_success.bytes_transferred() == (0 as UInt32));
+    assert(zero_success.bytes_transferred() == 0_u32);
 
     print("CompletionResult tests passed");
 }
@@ -445,95 +445,95 @@ fn test_io_error() {
 @test
 fn test_io_error_errno_mapping() {
     // Linux errno values
-    let e_again = IoError.from_errno(11 as Int32);  // EAGAIN
+    let e_again = IoError.from_errno11_i32;  // EAGAIN
     assert(e_again.is_retryable());
 
-    let e_intr = IoError.from_errno(4 as Int32);  // EINTR
+    let e_intr = IoError.from_errno4_i32;  // EINTR
     assert(e_intr.is_retryable());
 
-    let e_noent = IoError.from_errno(2 as Int32);  // ENOENT
+    let e_noent = IoError.from_errno2_i32;  // ENOENT
     match e_noent {
         IoError.NotFound { .. } => { }
         _ => assert(false),
     }
 
-    let e_exist = IoError.from_errno(17 as Int32);  // EEXIST
+    let e_exist = IoError.from_errno17_i32;  // EEXIST
     match e_exist {
         IoError.AlreadyExists => { }
         _ => assert(false),
     }
 
-    let e_inval = IoError.from_errno(22 as Int32);  // EINVAL
+    let e_inval = IoError.from_errno22_i32;  // EINVAL
     match e_inval {
         IoError.InvalidInput { .. } => { }
         _ => assert(false),
     }
 
-    let e_acces = IoError.from_errno(13 as Int32);  // EACCES
+    let e_acces = IoError.from_errno13_i32;  // EACCES
     match e_acces {
         IoError.PermissionDenied => { }
         _ => assert(false),
     }
 
-    let e_perm = IoError.from_errno(1 as Int32);  // EPERM
+    let e_perm = IoError.from_errno1_i32;  // EPERM
     match e_perm {
         IoError.PermissionDenied => { }
         _ => assert(false),
     }
 
-    let e_pipe = IoError.from_errno(32 as Int32);  // EPIPE
+    let e_pipe = IoError.from_errno32_i32;  // EPIPE
     match e_pipe {
         IoError.BrokenPipe => { }
         _ => assert(false),
     }
 
     // Darwin (BSD) errno values
-    let e_darwin_block = IoError.from_errno(35 as Int32);  // EWOULDBLOCK on Darwin
+    let e_darwin_block = IoError.from_errno35_i32;  // EWOULDBLOCK on Darwin
     assert(e_darwin_block.is_retryable());
 
-    let e_darwin_refused = IoError.from_errno(61 as Int32);  // ECONNREFUSED on Darwin
+    let e_darwin_refused = IoError.from_errno61_i32;  // ECONNREFUSED on Darwin
     match e_darwin_refused {
         IoError.ConnectionRefused => { }
         _ => assert(false),
     }
 
-    let e_darwin_reset = IoError.from_errno(54 as Int32);  // ECONNRESET on Darwin
+    let e_darwin_reset = IoError.from_errno54_i32;  // ECONNRESET on Darwin
     match e_darwin_reset {
         IoError.ConnectionReset => { }
         _ => assert(false),
     }
 
     // Linux specific
-    let e_linux_refused = IoError.from_errno(111 as Int32);  // ECONNREFUSED on Linux
+    let e_linux_refused = IoError.from_errno111_i32;  // ECONNREFUSED on Linux
     match e_linux_refused {
         IoError.ConnectionRefused => { }
         _ => assert(false),
     }
 
-    let e_linux_reset = IoError.from_errno(104 as Int32);  // ECONNRESET on Linux
+    let e_linux_reset = IoError.from_errno104_i32;  // ECONNRESET on Linux
     match e_linux_reset {
         IoError.ConnectionReset => { }
         _ => assert(false),
     }
 
     // io_uring specific
-    let e_etime = IoError.from_errno(62 as Int32);  // ETIME
+    let e_etime = IoError.from_errno62_i32;  // ETIME
     match e_etime {
         IoError.TimedOut => { }
         _ => assert(false),
     }
 
-    let e_cancelled = IoError.from_errno(125 as Int32);  // ECANCELED on Linux
+    let e_cancelled = IoError.from_errno125_i32;  // ECANCELED on Linux
     match e_cancelled {
         IoError.Cancelled => { }
         _ => assert(false),
     }
 
     // Unknown errno
-    let e_unknown = IoError.from_errno(12345 as Int32);
+    let e_unknown = IoError.from_errno12345_i32;
     match e_unknown {
         IoError.Other { code, .. } => {
-            assert(code == (12345 as Int32));
+            assert(code == 12345_i32);
         }
         _ => assert(false),
     }
@@ -578,13 +578,13 @@ fn test_io_interest() {
 @test
 fn test_constants() {
     // MAX_PRACTICAL_DURATION should be about 1 year
-    let one_year_ns: UInt64 = (365 as UInt64) * 24 * 60 * 60 * 1_000_000_000;
+    let one_year_ns: UInt64 = 365_u64 * 24 * 60 * 60 * 1_000_000_000;
     assert(MAX_PRACTICAL_DURATION == one_year_ns);
 
     // Standard file descriptors should be 0, 1, 2
-    assert(STDIN_FD.as_raw() == (0 as Int32));
-    assert(STDOUT_FD.as_raw() == (1 as Int32));
-    assert(STDERR_FD.as_raw() == (2 as Int32));
+    assert(STDIN_FD.as_raw() == 0_i32);
+    assert(STDOUT_FD.as_raw() == 1_i32);
+    assert(STDERR_FD.as_raw() == 2_i32);
 
     print("Constants verification passed");
 }

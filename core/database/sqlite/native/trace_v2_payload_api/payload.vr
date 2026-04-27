@@ -49,7 +49,7 @@ public fn is_terminal_event(e: &TraceV2Event) -> Bool {
 
 // Whether an event is active given the current mask.
 public fn is_enabled(e: &TraceV2Event, mask: Int64) -> Bool {
-    (mask & event_mask_bit(e)) != (0 as Int64)
+    (mask & event_mask_bit(e)) != 0_i64
 }
 
 // All well-known events (4).
