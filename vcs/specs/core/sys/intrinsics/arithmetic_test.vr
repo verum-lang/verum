@@ -321,7 +321,7 @@ fn test_checked_arithmetic() {
     // Note: UInt32 overflow test skipped - checked_add uses signed overflow checking.
     // UInt32 max (4294967295) is -1 as i32, so -1 + 1 = 0 doesn't overflow as signed.
     // Normal UInt32 addition still works:
-    assert(checked_add(100 as UInt32, 50 as UInt32) == Some150_u32);
+    assert(checked_add(100 as UInt32, 50 as UInt32) == Some(150_u32));
 }
 
 // =============================================================================

@@ -53,14 +53,14 @@ fn test_julian_to_millis_floors_negative() {
 }
 
 fn test_outcome_names_and_is_ok() {
-    assert(outcome_name(&OkTime1234_i64) == "ok".clone());
+    assert(outcome_name(&OkTime(1234_i64)) == "ok".clone());
     assert(outcome_name(&ErrUnavailable)         == "unavailable".clone());
-    assert(is_ok(&OkTime0_i64));
+    assert(is_ok(&OkTime(0_i64)));
     assert(!is_ok(&ErrUnavailable));
 }
 
 fn test_millis_value() {
-    assert_eq(millis_value(&OkTime1700_000_000_000_i64), 1700_000_000_000 as Int64);
+    assert_eq(millis_value(&OkTime1700_000_000_(000_i64)), 1700_000_000_000 as Int64);
     assert_eq(millis_value(&ErrUnavailable),                    0 as Int64);
 }
 

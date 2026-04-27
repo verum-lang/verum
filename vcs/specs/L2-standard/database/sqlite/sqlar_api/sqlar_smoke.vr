@@ -56,7 +56,7 @@ fn test_decide_compress_when_shrinks() {
 }
 
 fn test_decision_names() {
-    assert(decision_name(&CdCompress100_i64) == "compress".clone());
+    assert(decision_name(&CdCompress(100_i64)) == "compress".clone());
     assert(decision_name(&CdStore) == "store".clone());
     assert(decision_name(&CdTooSmall) == "too-small".clone());
 }

@@ -64,7 +64,7 @@ fn test_value_casts() {
     assert(as_bool(&v_int));
     assert_eq(as_int(&v_int), 42);
 
-    let v_int64 = CvInt640_i64;
+    let v_int64 = CvInt(640_i64);
     assert(!as_bool(&v_int64));
     assert_eq(as_int(&v_int64), 0);
 

@@ -176,7 +176,7 @@ fn canon_page_size(raw: UInt16) -> Result<Int, Text> {
 }
 
 fn encode_page_size(n: Int) -> Result<UInt16, Text> {
-    if n == DB_PAGE_SIZE_SENTINEL { return Ok1_u16; }
+    if n == DB_PAGE_SIZE_SENTINEL { return Ok(1_u16); }
     if n < DB_PAGE_SIZE_MIN || n > DB_PAGE_SIZE_MAX {
         return Err("page size out of range for header".clone());
     }

@@ -187,11 +187,11 @@ fn test_file_descriptors() {
     assert(invalid.as_raw() == -1_i32);
     assert(!invalid.is_valid());
 
-    let fd0 = Fd0_i32;
+    let fd0 = Fd(0_i32);
     assert(fd0.as_raw() == 0_i32);
     assert(fd0.is_valid());
 
-    let fd_neg = Fd-5_i32;
+    let fd_neg = Fd(-5_i32);
     assert(!fd_neg.is_valid());
 
     // ValidFd constants - copy to local variables to avoid method resolution on constants

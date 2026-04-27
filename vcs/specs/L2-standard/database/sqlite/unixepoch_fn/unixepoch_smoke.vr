@@ -41,17 +41,17 @@ fn test_evaluate_now_uses_clock() {
 }
 
 fn test_evaluate_unix_seconds_round_trip() {
-    let r = evaluate(&TvUnixSeconds42_i64, 0 as Int64);
+    let r = evaluate(&TvUnixSeconds(42_i64), 0 as Int64);
     assert_eq(result_seconds(&r), 42 as Int64);
 }
 
 fn test_evaluate_julian_offset_zero() {
-    let r = evaluate(&TvJulian2440588_i64, 0 as Int64);
+    let r = evaluate(&TvJulian(2440588_i64), 0 as Int64);
     assert_eq(result_seconds(&r), 0 as Int64);
 }
 
 fn test_evaluate_julian_one_day_after_epoch() {
-    let r = evaluate(&TvJulian2440589_i64, 0 as Int64);
+    let r = evaluate(&TvJulian(2440589_i64), 0 as Int64);
     assert_eq(result_seconds(&r), 86400 as Int64);
 }
 

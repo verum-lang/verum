@@ -19,9 +19,9 @@ mount core.database.sqlite.native.json_group_object_fn.agg.{
 mount base.{Bool, Int64};
 
 fn test_check_step_branches() {
-    match check_step(&KText("a".clone()), &VInt1_i64) { OkPair       => {}, _ => assert(false) }
+    match check_step(&KText("a".clone()), &VInt(1_i64)) { OkPair       => {}, _ => assert(false) }
     match check_step(&KText("a".clone()), &VNull)            { OkPair       => {}, _ => assert(false) }
-    match check_step(&KNullErr,            &VInt1_i64) { ErrNullKey   => {}, _ => assert(false) }
+    match check_step(&KNullErr,            &VInt(1_i64)) { ErrNullKey   => {}, _ => assert(false) }
     match check_step(&KText("a".clone()), &VBlobErr)         { ErrBlobValue => {}, _ => assert(false) }
 }
 
@@ -35,7 +35,7 @@ fn test_check_names() {
 
 fn test_step_accepts_pairs() {
     let mut s = empty_state();
-    s = step(s, &KText("a".clone()), &VInt1_i64);
+    s = step(s, &KText("a".clone()), &VInt(1_i64));
     s = step(s, &KText("b".clone()), &VText("hello".clone()));
     let r = finalize(&s);
     match r { RJsonObject(n) => assert_eq(n, 2), _ => assert(false) }
@@ -43,8 +43,8 @@ fn test_step_accepts_pairs() {
 
 fn test_step_null_key_marks_error() {
     let mut s = empty_state();
-    s = step(s, &KText("a".clone()), &VInt1_i64);
-    s = step(s, &KNullErr,            &VInt2_i64);
+    s = step(s, &KText("a".clone()), &VInt(1_i64));
+    s = step(s, &KNullErr,            &VInt(2_i64));
     let r = finalize(&s);
     match r { RJsonError => {}, _ => assert(false) }
 }

@@ -83,7 +83,7 @@ fn test_summarise_outcomes() {
 
 fn test_omit_count_projection() {
     assert_eq(omit_count(&AoOk), 0 as Int64);
-    assert_eq(omit_count(&AoOkWithSkips7_i64), 7 as Int64);
+    assert_eq(omit_count(&AoOkWithSkips(7_i64)), 7 as Int64);
     assert_eq(omit_count(&AoAborted), 0 as Int64);
 }
 
@@ -96,7 +96,7 @@ fn test_savepoint_and_direction_flags() {
 
 fn test_outcome_names() {
     assert(outcome_name(&AoOk)                 == "ok".clone());
-    assert(outcome_name(&AoOkWithSkips1_i64) == "ok_with_skips".clone());
+    assert(outcome_name(&AoOkWithSkips(1_i64)) == "ok_with_skips".clone());
     assert(outcome_name(&AoAborted)            == "aborted".clone());
 }
 

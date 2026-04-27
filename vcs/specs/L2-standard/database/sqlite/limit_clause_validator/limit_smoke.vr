@@ -27,7 +27,7 @@ fn test_resolve_null_limit_is_unbounded() {
 }
 
 fn test_resolve_positive_limit() {
-    let l: Maybe<Int64> = Maybe.Some10_i64;
+    let l: Maybe<Int64> = Maybe.Some(10_i64);
     let c = resolve(&l, &Maybe.None);
     assert(c.has_limit);
     assert_eq(c.effective_limit, 10 as Int64);
@@ -35,28 +35,28 @@ fn test_resolve_positive_limit() {
 }
 
 fn test_resolve_negative_limit_is_unbounded() {
-    let l: Maybe<Int64> = Maybe.Some-1_i64;
+    let l: Maybe<Int64> = Maybe.Some(-1_i64);
     let c = resolve(&l, &Maybe.None);
     assert(is_unbounded(&c));
-    let l2: Maybe<Int64> = Maybe.Some-100_i64;
+    let l2: Maybe<Int64> = Maybe.Some(-100_i64);
     let c2 = resolve(&l2, &Maybe.None);
     assert(is_unbounded(&c2));
 }
 
 fn test_resolve_zero_limit_emits_zero_rows() {
-    let l: Maybe<Int64> = Maybe.Some0_i64;
+    let l: Maybe<Int64> = Maybe.Some(0_i64);
     let c = resolve(&l, &Maybe.None);
     assert(c.has_limit);
     assert(emits_zero_rows(&c));
 }
 
 fn test_resolve_offset_positive_and_negative() {
-    let o: Maybe<Int64> = Maybe.Some5_i64;
-    let l: Maybe<Int64> = Maybe.Some10_i64;
+    let o: Maybe<Int64> = Maybe.Some(5_i64);
+    let l: Maybe<Int64> = Maybe.Some(10_i64);
     let c = resolve(&l, &o);
     assert_eq(c.effective_offset, 5 as Int64);
     assert(applies_offset(&c));
-    let bad_o: Maybe<Int64> = Maybe.Some-3_i64;
+    let bad_o: Maybe<Int64> = Maybe.Some(-3_i64);
     let c2 = resolve(&l, &bad_o);
     assert_eq(c2.effective_offset, 0 as Int64);
     assert(!applies_offset(&c2));
@@ -67,7 +67,7 @@ fn test_int64_max() {
 }
 
 fn test_offset_overflow_detection() {
-    let o: Maybe<Int64> = Maybe.Some100_i64;
+    let o: Maybe<Int64> = Maybe.Some(100_i64);
     let c = resolve(&Maybe.None, &o);
     assert(!offset_overflows_after_n(&c, 1000 as Int64));
     assert(offset_overflows_after_n(&c, int64_max()));

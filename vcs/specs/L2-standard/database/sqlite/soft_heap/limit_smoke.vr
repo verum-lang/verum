@@ -83,20 +83,20 @@ fn test_limit_reset_high_water_to_used() {
 fn test_event_kind_names_unique() {
     let n1 = event_kind_name(&PeSoftThresholdCrossing(0 as Int64, 0 as Int64));
     let n2 = event_kind_name(&PeHardThresholdImminent(0 as Int64, 0 as Int64));
-    let n3 = event_kind_name(&PeReleaseRequest0_i64);
+    let n3 = event_kind_name(&PeReleaseRequest(0_i64));
     assert(n1 != n2);
     assert(n2 != n3);
 }
 
 fn test_noop_callback_returns_zero() {
     let mut cb = noop_callback();
-    let n = cb.on_pressure(&PeReleaseRequest1024_i64);
+    let n = cb.on_pressure(&PeReleaseRequest(1024_i64));
     assert_eq(n, 0 as Int64);
 }
 
 fn test_fixed_release_callback_reports_constant() {
     let mut cb = fixed_release_callback512_i64;
-    let n = cb.on_pressure(&PeReleaseRequest0_i64);
+    let n = cb.on_pressure(&PeReleaseRequest(0_i64));
     assert_eq(n, 512 as Int64);
 }
 
@@ -137,7 +137,7 @@ fn test_engine_note_allocation_then_used() {
 
 fn outcome_names_distinct() {
     let n1 = outcome_kind_name(&AoGranted);
-    let n2 = outcome_kind_name(&AoGrantedAfterReclaim0_i64);
+    let n2 = outcome_kind_name(&AoGrantedAfterReclaim(0_i64));
     let n3 = outcome_kind_name(&AoRefusedSoft);
     let n4 = outcome_kind_name(&AoRefusedHard);
     assert(n1 != n2);

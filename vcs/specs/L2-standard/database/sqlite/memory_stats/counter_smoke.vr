@@ -90,7 +90,7 @@ fn test_relaxation_attempt_records_releases() {
 }
 
 fn test_relaxation_database_target() {
-    let a = new_attempt(RtDatabase7_i64, 50 as Int64);
+    let a = new_attempt(RtDatabase(7_i64), 50 as Int64);
     match &a.target {
         RtDatabase(_) => {},
         _ => assert(false),

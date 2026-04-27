@@ -159,7 +159,7 @@ public fn window_value(st: &WindowState) -> Register {
         }
         5 => {
             if st.bucket_size == 0_i64 {
-                RInt1_i64
+                RInt(1_i64)
             } else {
                 RInt(((st.row_number - 1_i64) / st.bucket_size) + 1_i64)
             }

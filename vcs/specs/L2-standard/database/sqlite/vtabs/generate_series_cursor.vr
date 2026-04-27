@@ -28,8 +28,8 @@ fn test_schema_has_value_column() {
 fn test_ascending_sequence() {
     let mut cur = cursor_new();
     let mut args: List<Register> = List.new();
-    args.push(RInt1_i64);
-    args.push(RInt5_i64);
+    args.push(RInt(1_i64));
+    args.push(RInt(5_i64));
     let r = cur.filter(0, &"".clone(), &args);
     assert(r.is_ok());
     let mut emitted: List<Int64> = List.new();
@@ -48,9 +48,9 @@ fn test_ascending_sequence() {
 fn test_explicit_step() {
     let mut cur = cursor_new();
     let mut args: List<Register> = List.new();
-    args.push(RInt0_i64);
-    args.push(RInt10_i64);
-    args.push(RInt2_i64);
+    args.push(RInt(0_i64));
+    args.push(RInt(10_i64));
+    args.push(RInt(2_i64));
     let _ = cur.filter(0, &"".clone(), &args);
     let mut emitted: List<Int64> = List.new();
     while !cur.eof() {
@@ -68,9 +68,9 @@ fn test_explicit_step() {
 fn test_zero_step_is_rejected() {
     let mut cur = cursor_new();
     let mut args: List<Register> = List.new();
-    args.push(RInt0_i64);
-    args.push(RInt10_i64);
-    args.push(RInt0_i64);
+    args.push(RInt(0_i64));
+    args.push(RInt(10_i64));
+    args.push(RInt(0_i64));
     match cur.filter(0, &"".clone(), &args) {
         Err(_) => {},
         Ok(_)  => panic("step=0 must be rejected"),
@@ -80,9 +80,9 @@ fn test_zero_step_is_rejected() {
 fn test_descending_sequence() {
     let mut cur = cursor_new();
     let mut args: List<Register> = List.new();
-    args.push(RInt10_i64);
-    args.push(RInt5_i64);
-    args.push(RInt-1_i64);
+    args.push(RInt(10_i64));
+    args.push(RInt(5_i64));
+    args.push(RInt(-1_i64));
     let _ = cur.filter(0, &"".clone(), &args);
     let mut emitted: List<Int64> = List.new();
     while !cur.eof() {

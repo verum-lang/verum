@@ -25,17 +25,17 @@ mount base.{Bool};
 
 fn test_result_kind_names() {
     assert(result_kind_name(&FrNull) == "null".clone());
-    assert(result_kind_name(&FrInt42_i64) == "int".clone());
+    assert(result_kind_name(&FrInt(42_i64)) == "int".clone());
     assert(result_kind_name(&FrDouble(3.14)) == "double".clone());
     assert(result_kind_name(&FrText("x".clone())) == "text".clone());
     let blob: List<u8> = List.new();
     assert(result_kind_name(&FrBlob(blob)) == "blob".clone());
-    assert(result_kind_name(&FrZeroBlob128_i64) == "zeroblob".clone());
+    assert(result_kind_name(&FrZeroBlob(128_i64)) == "zeroblob".clone());
 }
 
 fn test_is_error_only_fr_error() {
     assert(!is_error(&FrNull));
-    assert(!is_error(&FrInt0_i64));
+    assert(!is_error(&FrInt(0_i64)));
     let e: FnResult = FrError {
         code: extended_of(PcError, 0),
         message: "bad input".clone(),
@@ -92,7 +92,7 @@ fn test_auxdata_through_context() {
 
 fn test_set_result_records_fnresult() {
     let mut ctx = new_context(1 as Int64, 0 as Int64);
-    ctx.set_result(FrInt999_i64);
+    ctx.set_result(FrInt(999_i64));
     match ctx.current_result() {
         FrInt(_) => {},
         _ => assert(false),

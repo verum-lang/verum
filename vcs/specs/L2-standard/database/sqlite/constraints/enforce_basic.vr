@@ -50,7 +50,7 @@ fn test_not_null_violation() {
         _ => panic("NULL value should yield VdRaiseError"),
     }
     // Non-null value: no violation
-    match enforce_not_null(&"users".clone(), &spec, &RInt42_i64) {
+    match enforce_not_null(&"users".clone(), &spec, &RInt(42_i64)) {
         None => {},
         _    => panic("non-null value should yield None"),
     }

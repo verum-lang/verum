@@ -42,7 +42,7 @@ public fn length(v: &Register) -> Register {
         RNull    => RNull,
         // SQLite coerces numeric to text first, then takes byte-length.
         RInt(i)  => RInt(int_text_len(i) as Int64),
-        RReal(_) => RInt15_i64,  // crude — proper conversion later
+        RReal(_) => RInt(15_i64),  // crude — proper conversion later
         RRowId(i)=> RInt(int_text_len(i) as Int64),
     }
 }
@@ -609,14 +609,14 @@ public fn like(target: &Register, pattern: &Register, escape: &Register) -> Regi
                     _ => None,
                 };
                 if like_match(t, p, esc) {
-                    RInt1_i64
+                    RInt(1_i64)
                 } else {
-                    RInt0_i64
+                    RInt(0_i64)
                 }
             }
-            _ => RInt0_i64,
+            _ => RInt(0_i64),
         },
-        _ => RInt0_i64,
+        _ => RInt(0_i64),
     }
 }
 
@@ -624,11 +624,11 @@ public fn glob(target: &Register, pattern: &Register) -> Register {
     match target {
         RText(t) => match pattern {
             RText(p) => {
-                if glob_match(t, p) { RInt1_i64 } else { RInt0_i64 }
+                if glob_match(t, p) { RInt(1_i64) } else { RInt(0_i64) }
             }
-            _ => RInt0_i64,
+            _ => RInt(0_i64),
         },
-        _ => RInt0_i64,
+        _ => RInt(0_i64),
     }
 }
 

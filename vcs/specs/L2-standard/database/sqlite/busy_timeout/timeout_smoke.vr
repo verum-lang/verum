@@ -21,9 +21,9 @@ mount base.{Bool};
 fn always_give_up(_attempt: Int) -> BusyDecision { BdGiveUp }
 
 fn test_decision_should_retry() {
-    assert(decision_should_retry(&BdRetry1000_i64));
+    assert(decision_should_retry(&BdRetry(1000_i64)));
     assert(!decision_should_retry(&BdGiveUp));
-    assert_eq(decision_sleep_ns(&BdRetry1000_i64), 1000 as Int64);
+    assert_eq(decision_sleep_ns(&BdRetry(1000_i64)), 1000 as Int64);
 }
 
 fn test_kind_name_for_builtin_timeout() {

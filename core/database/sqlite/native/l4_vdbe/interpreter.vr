@@ -636,10 +636,10 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                     RReal(x) => RInt(x as Int64),
                     RText(ref s) => match parse_int_text(s) {
                         Some(i) => RInt(i),
-                        None    => RInt0_i64,
+                        None    => RInt(0_i64),
                     },
                     RNull => RNull,
-                    _ => RInt0_i64,
+                    _ => RInt(0_i64),
                 },
                 1 => match v {
                     RInt(x)  => RReal(x as Float64),
@@ -781,18 +781,18 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                 10 => {
                     // LIKE: arg0 target text, arg1 pattern.
                     if n_args < 2 {
-                        RInt0_i64
+                        RInt(0_i64)
                     } else {
                         let tv = state.regs.get(first_arg_reg);
                         let pv = state.regs.get(first_arg_reg + 1);
                         match tv {
                             RText(ref t) => match pv {
                                 RText(ref p) => {
-                                    if like_match(t, p) { RInt1_i64 } else { RInt0_i64 }
+                                    if like_match(t, p) { RInt(1_i64) } else { RInt(0_i64) }
                                 }
-                                _ => RInt0_i64,
+                                _ => RInt(0_i64),
                             },
-                            _ => RInt0_i64,
+                            _ => RInt(0_i64),
                         }
                     }
                 }
@@ -1123,14 +1123,14 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                     } else {
                         match state.regs.get(first_arg_reg) {
                             RInt(x)  => {
-                                if x > 0_i64 { RInt1_i64 }
-                                else if x < 0_i64 { RInt-1_i64 }
-                                else { RInt0_i64 }
+                                if x > 0_i64 { RInt(1_i64) }
+                                else if x < 0_i64 { RInt(-1_i64) }
+                                else { RInt(0_i64) }
                             }
                             RReal(x) => {
-                                if x > 0.0 { RInt1_i64 }
-                                else if x < 0.0 { RInt-1_i64 }
-                                else { RInt0_i64 }
+                                if x > 0.0 { RInt(1_i64) }
+                                else if x < 0.0 { RInt(-1_i64) }
+                                else { RInt(0_i64) }
                             }
                             RNull => RNull,
                             _ => RNull,
@@ -1140,18 +1140,18 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                 11 => {
                     // NOT LIKE — inverse of LIKE.
                     if n_args < 2 {
-                        RInt1_i64
+                        RInt(1_i64)
                     } else {
                         let tv = state.regs.get(first_arg_reg);
                         let pv = state.regs.get(first_arg_reg + 1);
                         match tv {
                             RText(ref t) => match pv {
                                 RText(ref p) => {
-                                    if like_match(t, p) { RInt0_i64 } else { RInt1_i64 }
+                                    if like_match(t, p) { RInt(0_i64) } else { RInt(1_i64) }
                                 }
-                                _ => RInt1_i64,
+                                _ => RInt(1_i64),
                             },
-                            _ => RInt1_i64,
+                            _ => RInt(1_i64),
                         }
                     }
                 }

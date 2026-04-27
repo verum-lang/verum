@@ -163,14 +163,14 @@ public fn iif(cond: &Register, then_v: &Register, else_v: &Register) -> Register
 public fn sign(v: &Register) -> Register {
     match v {
         RInt(x) => {
-            if x > 0_i64 { RInt1_i64 }
-            else if x < 0_i64 { RInt-1_i64 }
-            else { RInt0_i64 }
+            if x > 0_i64 { RInt(1_i64) }
+            else if x < 0_i64 { RInt(-1_i64) }
+            else { RInt(0_i64) }
         }
         RReal(x) => {
-            if x > 0.0 { RInt1_i64 }
-            else if x < 0.0 { RInt-1_i64 }
-            else { RInt0_i64 }
+            if x > 0.0 { RInt(1_i64) }
+            else if x < 0.0 { RInt(-1_i64) }
+            else { RInt(0_i64) }
         }
         RNull => RNull,
         _ => RNull,

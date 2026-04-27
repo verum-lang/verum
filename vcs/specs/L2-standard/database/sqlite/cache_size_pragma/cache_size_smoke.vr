@@ -32,14 +32,14 @@ fn test_from_pragma_value_branches() {
 
 fn test_to_pragma_value_round_trip() {
     assert_eq(to_pragma_value(&CsDefault),                   -2000 as Int64);
-    assert_eq(to_pragma_value(&CsPages500_i64),         500 as Int64);
-    assert_eq(to_pragma_value(&CsKibibytes2000_i64), -2000 as Int64);
+    assert_eq(to_pragma_value(&CsPages(500_i64)),         500 as Int64);
+    assert_eq(to_pragma_value(&CsKibibytes(2000_i64)), -2000 as Int64);
 }
 
 fn test_kind_names() {
     assert(kind_name(&CsDefault)                  == "default".clone());
-    assert(kind_name(&CsPages1_i64)         == "pages".clone());
-    assert(kind_name(&CsKibibytes1_i64)     == "kib".clone());
+    assert(kind_name(&CsPages(1_i64))         == "pages".clone());
+    assert(kind_name(&CsKibibytes(1_i64))     == "kib".clone());
 }
 
 fn test_effective_pages_default() {
@@ -48,21 +48,21 @@ fn test_effective_pages_default() {
 }
 
 fn test_effective_pages_explicit() {
-    assert_eq(effective_pages(&CsPages123_i64, 4096 as Int64), 123 as Int64);
+    assert_eq(effective_pages(&CsPages(123_i64), 4096 as Int64), 123 as Int64);
 }
 
 fn test_effective_pages_kib() {
     // 100 KiB = 102_400 bytes; / 4096 = 25 pages
-    assert_eq(effective_pages(&CsKibibytes100_i64, 4096 as Int64), 25 as Int64);
+    assert_eq(effective_pages(&CsKibibytes(100_i64), 4096 as Int64), 25 as Int64);
 }
 
 fn test_kind_predicates() {
     assert(is_default(&CsDefault));
-    assert(!is_default(&CsPages1_i64));
-    assert(is_explicit_pages(&CsPages1_i64));
+    assert(!is_default(&CsPages(1_i64)));
+    assert(is_explicit_pages(&CsPages(1_i64)));
     assert(!is_explicit_pages(&CsDefault));
-    assert(is_byte_target(&CsKibibytes1_i64));
-    assert(!is_byte_target(&CsPages1_i64));
+    assert(is_byte_target(&CsKibibytes(1_i64)));
+    assert(!is_byte_target(&CsPages(1_i64)));
 }
 
 fn main() {

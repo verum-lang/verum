@@ -66,7 +66,7 @@ fn test_verify_with_corrupt_pages_returns_corrupt() {
 
 fn test_status_names() {
     assert(status_name(&CsNotChecked) == "not-checked".clone());
-    assert(status_name(&CsVerified100_i64) == "verified".clone());
+    assert(status_name(&CsVerified(100_i64)) == "verified".clone());
     let corrupt: CksmStatus = CsCorrupted {
         corrupt_pages: List.new(),
         verified: 0 as Int64,
@@ -76,7 +76,7 @@ fn test_status_names() {
 
 fn test_corrupt_count_zero_for_other_states() {
     assert_eq(corrupt_count(&CsNotChecked), 0);
-    assert_eq(corrupt_count(&CsVerified99_i64), 0);
+    assert_eq(corrupt_count(&CsVerified(99_i64)), 0);
 }
 
 fn main() {

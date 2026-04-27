@@ -61,7 +61,7 @@ fn declare_result_column() {
 
 fn constant_pool_add_get() {
     let mut pool = constant_pool_new();
-    let a = pool.add(KInt42_i64);
+    let a = pool.add(KInt(42_i64));
     let b = pool.add(KText("hello".clone()));
     assert_eq(pool.len(), 2);
     match pool.get(a) {

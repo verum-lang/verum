@@ -17,19 +17,19 @@ mount base.{Bool, Int64};
 fn test_segment_kinds() {
     assert(segment_kind(&PsRoot) == "root".clone());
     assert(segment_kind(&PsKey("foo".clone())) == "key".clone());
-    assert(segment_kind(&PsIndex2_i64) == "index".clone());
-    assert(segment_kind(&PsLastIndex1_i64) == "last_index".clone());
+    assert(segment_kind(&PsIndex(2_i64)) == "index".clone());
+    assert(segment_kind(&PsLastIndex(1_i64)) == "last_index".clone());
     assert(segment_kind(&PsWildcardKey) == "wildcard".clone());
 }
 
 fn test_classification_predicates() {
     assert(is_keyed(&PsKey("x".clone())));
     assert(!is_keyed(&PsRoot));
-    assert(is_indexed(&PsIndex0_i64));
-    assert(is_indexed(&PsLastIndex1_i64));
+    assert(is_indexed(&PsIndex(0_i64)));
+    assert(is_indexed(&PsLastIndex(1_i64)));
     assert(!is_indexed(&PsKey("x".clone())));
     assert(is_wildcard(&PsWildcardKey));
-    assert(!is_wildcard(&PsIndex0_i64));
+    assert(!is_wildcard(&PsIndex(0_i64)));
 }
 
 fn test_root_only_valid_at_zero() {
@@ -47,7 +47,7 @@ fn test_root_only_path() {
 }
 
 fn test_deep_concrete_path() {
-    let p = push(push(push(root_only(), PsKey("a".clone())), PsIndex0_i64), PsKey("b".clone()));
+    let p = push(push(push(root_only(), PsKey("a".clone())), PsIndex(0_i64)), PsKey("b".clone()));
     assert_eq(len(&p), 4);
     assert(!is_root(&p));
     assert(is_well_formed(&p));
