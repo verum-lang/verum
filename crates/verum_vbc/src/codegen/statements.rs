@@ -853,21 +853,6 @@ impl VbcCodegen {
         None
     }
 
-    /// Checks if expression is a call to uninit() or zeroed().
-    #[allow(dead_code)]  // Reserved for future MaybeUninit support
-    fn is_uninit_or_zeroed_call(&self, expr: &verum_ast::Expr) -> bool {
-        use verum_ast::ExprKind;
-        use verum_ast::ty::PathSegment;
-
-        if let ExprKind::Call { func, .. } = &expr.kind
-            && let ExprKind::Path(path) = &func.kind
-                && let Some(PathSegment::Name(ident)) = path.segments.last() {
-                    let name = ident.as_str();
-                    return name == "uninit" || name == "zeroed";
-                }
-        false
-    }
-
     /// Gets the init value for byte array from various initialization patterns.
     /// Returns Some(byte_value) for:
     /// - uninit() -> 0

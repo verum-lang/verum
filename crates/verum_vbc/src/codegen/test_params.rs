@@ -273,6 +273,7 @@ fn main() {
 /// Uses simple compile_module() without mount resolution.
 /// Cross-module functions/constants are pre-registered via
 /// register_stdlib_constants() and register_stdlib_intrinsics().
+#[cfg(test)]
 fn compile_stdlib_file(path: &str) -> Result<(), String> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path, e))?;
@@ -297,7 +298,7 @@ fn compile_stdlib_file(path: &str) -> Result<(), String> {
 /// from `core_root` and registers its declarations before the main
 /// module is compiled.  Files that don't use `mount` should prefer the
 /// cheaper `compile_stdlib_file` helper.
-#[allow(dead_code)]
+#[cfg(test)]
 fn compile_stdlib_file_with_mounts(path: &str, core_root: &str) -> Result<(), String> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path, e))?;
