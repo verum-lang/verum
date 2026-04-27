@@ -22,7 +22,11 @@
 
 module math.complex;
 
-mount core.math.elementary.{sqrt, atan2, sin, cos, exp, ln};
+mount core.math.elementary.{
+    sqrt, atan2, sin, cos, exp, ln,
+    sinh, cosh,                    // V8 (#250) — hyperbolic family
+};
+mount core.math.constants.{NAN};
 
 // =============================================================================
 // Complex<T> - Generic complex number
@@ -215,6 +219,76 @@ implement Complex<Float> {
         Complex {
             re: self.re + t * (other.re - self.re),
             im: self.im + t * (other.im - self.im),
+        }
+    }
+
+    // =========================================================================
+    // V8 (#250) — trigonometric + hyperbolic family on Complex<Float>
+    // =========================================================================
+
+    /// True iff the imaginary part is zero (so `self` lies on the real axis).
+    public fn is_real(&self) -> Bool { self.im == 0.0 }
+
+    /// True iff the real part is zero (so `self` lies on the imaginary axis).
+    public fn is_imaginary(&self) -> Bool { self.re == 0.0 }
+
+    /// Complex sine: `sin(z) = sin(x) cosh(y) + i cos(x) sinh(y)`
+    /// where `z = x + iy`.
+    public fn csin(&self) -> Complex<Float> {
+        Complex {
+            re: sin(self.re) * cosh(self.im),
+            im: cos(self.re) * sinh(self.im),
+        }
+    }
+
+    /// Complex cosine: `cos(z) = cos(x) cosh(y) − i sin(x) sinh(y)`.
+    public fn ccos(&self) -> Complex<Float> {
+        Complex {
+            re:  cos(self.re) * cosh(self.im),
+            im: -sin(self.re) * sinh(self.im),
+        }
+    }
+
+    /// Complex tangent: `tan(z) = sin(z) / cos(z)`. Returns the
+    /// componentwise NaN result if `cos(z) = 0` — callers needing
+    /// the no-pole guarantee should pre-check via `ccos().is_zero()`.
+    public fn ctan(&self) -> Complex<Float> {
+        let s = self.csin();
+        let c = self.ccos();
+        match c.recip() {
+            Some(c_inv) => s * c_inv,
+            None        => Complex { re: NAN, im: NAN },
+        }
+    }
+
+    /// Complex hyperbolic sine:
+    /// `sinh(z) = sinh(x) cos(y) + i cosh(x) sin(y)`.
+    public fn csinh(&self) -> Complex<Float> {
+        Complex {
+            re: sinh(self.re) * cos(self.im),
+            im: cosh(self.re) * sin(self.im),
+        }
+    }
+
+    /// Complex hyperbolic cosine:
+    /// `cosh(z) = cosh(x) cos(y) + i sinh(x) sin(y)`.
+    public fn ccosh(&self) -> Complex<Float> {
+        Complex {
+            re: cosh(self.re) * cos(self.im),
+            im: sinh(self.re) * sin(self.im),
+        }
+    }
+
+    /// Complex hyperbolic tangent: `tanh(z) = sinh(z) / cosh(z)`.
+    /// `cosh(z)` has no zeros on the real axis but does on iπ/2 + iπk;
+    /// the result is componentwise NaN at those poles, mirroring
+    /// `ctan` semantics.
+    public fn ctanh(&self) -> Complex<Float> {
+        let s = self.csinh();
+        let c = self.ccosh();
+        match c.recip() {
+            Some(c_inv) => s * c_inv,
+            None        => Complex { re: NAN, im: NAN },
         }
     }
 }
