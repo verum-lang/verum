@@ -341,8 +341,10 @@ fn verify_signature(
             let mut sig_arr: [Byte; 64] = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig_arr[i] = sig[i]; i = i + 1; }
-            if Ed25519.verify(pk, signing_input, &sig_arr) { Ok(()) }
-            else { Err(JwtError.SignatureMismatch) }
+            match Ed25519.verify(pk, signing_input, &sig_arr) {
+                Ok(())  => Ok(()),
+                Err(_)  => Err(JwtError.SignatureMismatch),
+            }
         },
         // EdDSA with a private key is OK (signer can self-verify).
         (JwtAlgorithm.EdDSA, JwtKey.Ed25519Seeded(sk)) => {
@@ -351,8 +353,10 @@ fn verify_signature(
             let mut sig_arr: [Byte; 64] = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig_arr[i] = sig[i]; i = i + 1; }
-            if Ed25519.verify(&pk, signing_input, &sig_arr) { Ok(()) }
-            else { Err(JwtError.SignatureMismatch) }
+            match Ed25519.verify(&pk, signing_input, &sig_arr) {
+                Ok(())  => Ok(()),
+                Err(_)  => Err(JwtError.SignatureMismatch),
+            }
         },
         _ => Err(JwtError.WrongKeyKind),
     }
