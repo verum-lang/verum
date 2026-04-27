@@ -234,12 +234,28 @@ fn parse_array_index(s: &Text) -> Maybe<Int> {
     if b.len() == 0 { return None; }
     // RFC 6901 §4: "leading zeros are not allowed" (except "0" itself).
     if b.len() > 1 && b[0] == ('0' as Byte) { return None; }
+
+    // SOUNDNESS: Int.MAX (2^63 - 1) is 19 decimal digits wide. Any
+    // longer digit run necessarily overflows the accumulator. The
+    // parse-entry cap on JsonPointer.parse (#181) caps the WHOLE
+    // pointer at 64 KiB, but a single token can still be tens of
+    // thousands of digits long ("/123…<65500 digits>") — hostile
+    // input that drives the multiply past overflow. Reject before
+    // the loop runs.
+    if b.len() > 19 { return None; }
+
     let mut v: Int = 0;
     let mut i: Int = 0;
     while i < b.len() {
         let c = b[i];
         if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
+        // Belt-and-braces pre-multiply guard. With the b.len() ≤ 19
+        // cap above this can only fire on a 19-digit value larger
+        // than Int.MAX/10 — but the check keeps arithmetic well-
+        // defined regardless of the backend's overflow semantics.
+        if v > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
         v = v * 10 + ((c - ('0' as Byte)) as Int);
+        if v < 0 { return None; }                          // wrap-around guard
         i = i + 1;
     }
     Some(v)
