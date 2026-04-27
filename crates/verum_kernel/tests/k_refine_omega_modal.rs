@@ -1,4 +1,4 @@
-//! K-Refine-omega modal-depth integration tests (VVA-7 V1, Theorem 136.T).
+//! K-Refine-omega modal-depth integration tests (Modal-depth, Theorem 136.T).
 //!
 //! Diakrisis Definition 136.D1: transfinite modal language L^ω_α with
 //! ordinal-valued modal-depth `md^ω`. The K-Refine-omega rule extends

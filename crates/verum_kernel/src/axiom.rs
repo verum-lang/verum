@@ -21,7 +21,7 @@ use verum_common::{List, Maybe, Text};
 
 use crate::{CoreTerm, FrameworkId, KernelError, UniverseLevel};
 
-/// V8 (#217) — subsingleton-check regime for `K-FwAx` admission.
+/// subsingleton-check regime for `K-FwAx` admission.
 ///
 /// Per `verification-architecture.md` §4.4 and §4.5, a framework
 /// axiom's body must be a *subsingleton* (proof-irrelevant: at
@@ -77,19 +77,19 @@ pub struct RegisteredAxiom {
     pub ty: CoreTerm,
     /// Framework attribution.
     pub framework: FrameworkId,
-    /// V8 (#227) — `(Fw, ν, τ)` coordinate per VVA §A.Z.2 +
+    /// `(Fw, ν, τ)` coordinate +
     /// Diakrisis 09-applications/02-canonical-nu-table.md. Used
     /// by the K-Coord-Cite rule to gate cross-framework
     /// citations. `None` (the V8 default) marks the axiom as
     /// coordinate-unannotated — the K-Coord-Cite rule treats
     /// such axioms as always-citable (preserves backwards
-    /// compat for axioms registered before V8 #227).
+    /// compat for axioms registered before ).
     ///
     /// `#[serde(default)]` keeps pre-V8 on-disk certificates
     /// without the field deserialisable.
     #[serde(default)]
     pub coord: Option<crate::KernelCoord>,
-    /// V8 (#223) — definitional content (transparent body).
+    /// definitional content (transparent body).
     ///
     /// `None` (the V8 default) marks the entry as an **opaque
     /// postulate**: a true axiom whose only kernel-visible
@@ -139,7 +139,7 @@ impl AxiomRegistry {
     ///
     /// Corresponds to rule 10 in `docs/verification/trusted-kernel.md`.
     ///
-    /// V8.1 (#222 follow-up) — production default is now
+    /// production default is now
     /// [`SubsingletonRegime::ClosedPropositionOnly`] per
     /// `verification-architecture.md` §A.Z.4
     /// "production CLI defaults `register_subsingleton`". The
@@ -155,9 +155,9 @@ impl AxiomRegistry {
         self.register_with_regime(name, ty, framework, SubsingletonRegime::ClosedPropositionOnly)
     }
 
-    /// V8.1 (#222 follow-up) — explicit legacy entry for callers
+    /// explicit legacy entry for callers
     /// that intentionally need the pre-V8.1 `LegacyUnchecked` shim
-    /// (skips both V8 #217 subsingleton and V8 #220 body-is-Prop
+    /// (skips both subsingleton and body-is-Prop check
     /// checks). New code should NOT use this; it exists only so
     /// the migration to strict-by-default can be staged across
     /// the workspace rather than landing as a single breaking
@@ -171,7 +171,7 @@ impl AxiomRegistry {
         self.register_with_regime(name, ty, framework, SubsingletonRegime::LegacyUnchecked)
     }
 
-    /// V8 (#217) — register an axiom with the strict
+    /// register an axiom with the strict
     /// closed-proposition subsingleton check enforced.
     ///
     /// Equivalent to
@@ -193,7 +193,7 @@ impl AxiomRegistry {
         )
     }
 
-    /// V8 (#217) — register an axiom under an explicit
+    /// register an axiom under an explicit
     /// [`SubsingletonRegime`].
     ///
     /// Implements the full `K-FwAx` admission gate from
@@ -203,11 +203,11 @@ impl AxiomRegistry {
     ///   1. Duplicate-name rejection (`KernelError::DuplicateAxiom`).
     ///   2. UIP-shape syntactic rejection (`KernelError::UipForbidden`)
     ///      — the original pre-V8 gate, preserved.
-    ///   3. Subsingleton check (V8 #217) — body must satisfy the
+    ///   3. Subsingleton check () — body must satisfy the
     ///      closed-proposition condition unless the regime is
     ///      [`SubsingletonRegime::UipPermitted`] or
     ///      [`SubsingletonRegime::LegacyUnchecked`].
-    ///   4. Body-is-Prop check (V8 #220) — body must inhabit a
+    ///   4. Body-is-Prop check () — body must inhabit a
     ///      universe (i.e., body itself is a type, not a non-type
     ///      term like an integer literal). Skipped under
     ///      `UipPermitted` (free-vars + needs Γ to type-check) and
@@ -228,7 +228,7 @@ impl AxiomRegistry {
         if crate::inductive::is_uip_shape(&ty) {
             return Err(KernelError::UipForbidden(name));
         }
-        // V8 (#217) subsingleton check + V8 (#220) body-is-Prop
+        // subsingleton check + body-is-Prop
         // check. Both apply only under
         // [`SubsingletonRegime::ClosedPropositionOnly`]:
         //
@@ -258,7 +258,7 @@ impl AxiomRegistry {
                         free_vars_rendered: Text::from(rendered.join(", ")),
                     });
                 }
-                // V8 (#220) body-is-Prop check. The body is
+                // body-is-Prop check. The body is
                 // closed (free_vars empty), so we can type-check
                 // it under empty Γ + empty axiom registry. The
                 // result must inhabit a universe — anything else
@@ -310,7 +310,7 @@ impl AxiomRegistry {
         Ok(())
     }
 
-    /// V8 (#227) — register a postulate **with** an explicit
+    /// register a postulate **with** an explicit
     /// `(Fw, ν, τ)` coordinate. Routed through
     /// [`Self::register_with_regime`] under
     /// [`SubsingletonRegime::ClosedPropositionOnly`] (the strict
@@ -347,7 +347,7 @@ impl AxiomRegistry {
         Ok(())
     }
 
-    /// V8 (#223) — register a transparent **definition**: a name
+    /// register a transparent **definition**: a name
     /// bound to an explicit body that δ-reduction will unfold.
     ///
     /// Equivalent to `register_with_regime(LegacyUnchecked)` but
@@ -410,7 +410,7 @@ impl AxiomRegistry {
 /// Scan a parsed Verum module and register every axiom that carries a
 /// `@framework(identifier, "citation")` attribute.
 ///
-/// V8.1 (#222 follow-up) — production default is now
+/// production default is now
 /// [`SubsingletonRegime::ClosedPropositionOnly`] per
 /// `verification-architecture.md` §A.Z.4 row "production callers
 /// using strict regime". The previous `LegacyUnchecked` default
@@ -430,9 +430,9 @@ pub fn load_framework_axioms(
     )
 }
 
-/// V8.1 (#222 follow-up) — explicit legacy loader entry for
+/// explicit legacy loader entry for
 /// callers that need the pre-V8.1 `LegacyUnchecked` regime
-/// (skips V8 #217 subsingleton + V8 #220 body-is-Prop checks).
+/// (skips subsingleton + body-is-Prop check checks).
 /// New code should NOT use this; the strict default ([`load_framework_axioms`])
 /// is the production path per §A.Z.4.
 pub fn load_framework_axioms_legacy_unchecked(
@@ -446,9 +446,9 @@ pub fn load_framework_axioms_legacy_unchecked(
     )
 }
 
-/// V8 (#222) — load framework axioms under the strict
-/// closed-proposition regime, surfacing V8 #217 (subsingleton)
-/// and V8 #220 (body-is-Prop) violations as report rows
+/// load framework axioms under the strict
+/// closed-proposition regime, surfacing subsingleton check
+/// and body-is-Prop check violations as report rows
 /// rather than aborting on the first failure.
 ///
 /// This is the production loader entry point: every framework
@@ -471,7 +471,7 @@ pub fn load_framework_axioms_strict(
     )
 }
 
-/// V8 (#222) — regime-explicit framework-axiom loader.
+/// regime-explicit framework-axiom loader.
 ///
 /// This closes the architectural loop for trusted-boundary declarations:
 ///
@@ -497,12 +497,12 @@ pub fn load_framework_axioms_strict(
 /// - [`LoadAxiomsReport::malformed`] — `@framework(...)` attributes
 ///   with wrong argument shape, or registration errors not
 ///   covered by the named buckets.
-/// - [`LoadAxiomsReport::subsingleton_violations`] (V8 #222) —
-///   axioms rejected by the V8 #217 subsingleton check (closed-
+/// - [`LoadAxiomsReport::subsingleton_violations`] () —
+///   axioms rejected by the subsingleton check (closed-
 ///   proposition route required free-vars empty).
-/// - [`LoadAxiomsReport::not_prop_violations`] (V8 #222) — axioms
-///   rejected by the V8 #220 body-is-Prop check.
-/// - [`LoadAxiomsReport::uip_shape_violations`] (V8 #222) — axioms
+/// - [`LoadAxiomsReport::not_prop_violations`] () — axioms
+///   rejected by the body-is-Prop check check.
+/// - [`LoadAxiomsReport::uip_shape_violations`] () — axioms
 ///   whose body matches the precise UIP-shape (rejected even
 ///   under LegacyUnchecked).
 ///
@@ -605,14 +605,14 @@ pub struct LoadAxiomsReport {
     /// malformed argument shape (wrong arg count, non-identifier
     /// first arg, non-string second arg).
     pub malformed: List<Text>,
-    /// V8 (#222) — axioms rejected by the K-FwAx subsingleton
-    /// check (V8 #217). Body had free type-variables under the
+    /// axioms rejected by the K-FwAx subsingleton
+    /// check (). Body had free type-variables under the
     /// closed-proposition regime.
     pub subsingleton_violations: List<Text>,
-    /// V8 (#222) — axioms rejected by the K-FwAx body-is-Prop
-    /// check (V8 #220). Body wasn't a type at any universe.
+    /// axioms rejected by the K-FwAx body-is-Prop
+    /// check (). Body wasn't a type at any universe.
     pub not_prop_violations: List<Text>,
-    /// V8 (#222) — axioms rejected by the syntactic UIP-shape
+    /// axioms rejected by the syntactic UIP-shape
     /// gate. UIP is incompatible with univalence per
     /// `framework_compat::audit_framework_set` and rejected at
     /// every regime including LegacyUnchecked.
@@ -629,7 +629,7 @@ impl LoadAxiomsReport {
             && self.uip_shape_violations.is_empty()
     }
 
-    /// V8 (#222) — total count of soundness-gate violations
+    /// total count of soundness-gate violations
     /// (subsingleton + body-is-Prop + UIP-shape). Useful for CI
     /// scripts that want a single "n violations found" summary.
     pub fn soundness_violation_count(&self) -> usize {

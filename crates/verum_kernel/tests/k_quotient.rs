@@ -1,5 +1,5 @@
-//! K-Quot-Form / K-Quot-Intro / K-Quot-Elim integration tests
-//! (V8 #236, VVA §7.5).
+//! K-Quot-Form / K-Quot-Intro / K-Quot-Elim integration tests for
+//! quotient types.
 //!
 //! Quotient types `T / ~` collapse equivalence classes of T into
 //! single elements. The kernel checks:

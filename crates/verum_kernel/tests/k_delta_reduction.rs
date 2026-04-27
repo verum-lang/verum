@@ -1,6 +1,6 @@
 //! δ-reduction (axiom unfolding) integration tests (V8, #223).
 //!
-//! V8 #223 ships `normalize_with_axioms` and
+//! ships `normalize_with_axioms` and
 //! `definitional_eq_with_axioms` — the δ-aware companions to V8
 //! #216's β-only `normalize` / `definitional_eq`. δ unfolds
 //! transparent **definitions** (registered with non-None body

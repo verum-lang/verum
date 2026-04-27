@@ -1,8 +1,8 @@
-//! K-Pos strict-positivity check integration tests (VVA §7.3).
+//! K-Pos strict-positivity check integration tests .
 //!
-//! Per VVA §7.3: an inductive type `T` is well-formed only when every
-//! recursive occurrence of `T` in any constructor's argument types
-//! appears strictly positively. Berardi 1998 establishes that
+//! Strict positivity: an inductive type `T` is well-formed only when
+//! every recursive occurrence of `T` in any constructor's argument
+//! types appears strictly positively. Berardi 1998 establishes that
 //! admitting non-positive recursion in a system with even minimal
 //! impredicativity yields a derivation of `False` — the kernel
 //! enforces strict positivity at registration time so `False` is not

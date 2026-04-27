@@ -54,8 +54,8 @@ pub enum KernelError {
     #[error("duplicate axiom registration: {0}")]
     DuplicateAxiom(Text),
 
-    /// An inductive declaration violates strict positivity (VVA §7.3
-    /// `K-Pos` rule). The recursive occurrence of the type's own name
+    /// An inductive declaration violates strict positivity
+    /// (`K-Pos` rule). The recursive occurrence of the type's own name
     /// inside a constructor's argument appears in a *negative*
     /// position (left of an arrow) — admitting such a definition is
     /// inconsistent (Berardi 1998). The kernel rejects the
@@ -147,7 +147,7 @@ pub enum KernelError {
 
     /// A refinement type `{x : base | P(x)}` violates Diakrisis T-2f*
     /// depth-stratification: `dp(P) >= dp(base) + 1`. This is the
-    /// Yanofsky paradox-immunity rule imported by VVA §2.4 as
+    /// Yanofsky paradox-immunity rule imported by as
     /// `K-Refine` — comprehension is admissible only when the
     /// predicate's M-iteration depth is strictly less than the
     /// comprehended object's depth.
@@ -171,7 +171,7 @@ pub enum KernelError {
         pred_depth: usize,
     },
 
-    /// VVA-1 V0 — `K-Eps-Mu` naturality witness construction failed.
+    /// Naturality witness — `K-Eps-Mu` naturality witness construction failed.
     /// The kernel attempted to verify the canonical 2-natural
     /// equivalence τ : ε ∘ M ≃ A ∘ ε of Proposition 5.1 / Corollary
     /// 5.10 and could not produce the τ-witness for the supplied
@@ -185,7 +185,7 @@ pub enum KernelError {
         context: Text,
     },
 
-    /// VVA-7 V0 — `K-Refine-omega` modal-depth bound exceeded. A
+    /// Modal-depth (V0) — `K-Refine-omega` modal-depth bound exceeded. A
     /// refinement type's predicate has ordinal modal-depth `md^ω`
     /// strictly greater than the base type's depth + 1, violating
     /// the transfinite stratification of Theorem 136.T (T-2f***).
@@ -205,7 +205,7 @@ pub enum KernelError {
         pred_rank: Text,
     },
 
-    /// VVA-3 V1 — `K-Universe-Ascent` rule rejected an invalid
+    /// Categorical coherence — `K-Universe-Ascent` rule rejected an invalid
     /// universe transition. Meta-classifier application
     /// `M_stack(α)` must ascend universe levels in the canonical
     /// κ-tower per Theorem 131.T: Truncated → Truncated (Cat-id),
@@ -228,16 +228,16 @@ pub enum KernelError {
         to_tier: Text,
     },
 
-    /// V8 (#227) — `K-Coord-Cite` rule rejected a theorem
+    /// `K-Coord-Cite` rule rejected a theorem
     /// citing an axiom whose `(Fw, ν, τ)` coordinate sits at a
     /// strictly higher ν tier.
     ///
-    /// Per VVA §A.Z.5 item 2: a theorem at coordinate
+    /// Per item 2: a theorem at coordinate
     /// (Fw, ν, τ) may cite an axiom at coordinate (Fw', ν', τ')
     /// only when ν' ≤ ν (lex on [`crate::OrdinalDepth`]). Higher-
     /// tier citations are rejected unless the calling module
     /// imports the κ-tier-jump extension via
-    /// `@require_extension(vfe_3)` (VVA-3 K-Universe-Ascent).
+    /// `@require_extension(vfe_3)` (Categorical coherence K-Universe-Ascent).
     ///
     /// The diagnostic carries both framework slugs + rendered
     /// ordinal-depth strings so the user can navigate the
@@ -278,7 +278,7 @@ pub enum KernelError {
     ///   2. `body` is a subsingleton (closed proposition or UIP
     ///      regime) — see [`Self::AxiomNotSubsingleton`].
     ///
-    /// V8 #217 shipped (2) but pre-V8 the kernel never enforced
+    /// shipped (2) but pre-V8 the kernel never enforced
     /// (1) at register time. This variant fires when an axiom's
     /// declared type, viewed as a CoreTerm via the empty Context,
     /// does NOT inhabit `Universe(Prop)` (or `Universe(Concrete(0))`
@@ -383,7 +383,7 @@ pub enum KernelError {
         actual: Text,
     },
 
-    /// V8 (#207, B1) — `K-Univ` universe-level overflow. The kernel's
+    /// `K-Univ` universe-level overflow. The kernel's
     /// finite universe levels are encoded as `u32`; a request to
     /// type `Universe(Concrete(u32::MAX))` cannot honestly produce
     /// `Universe(Concrete(u32::MAX + 1))` and pre-V8

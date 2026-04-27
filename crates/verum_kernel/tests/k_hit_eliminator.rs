@@ -1,5 +1,5 @@
 //! K-HIT-Form / eliminator auto-generation integration tests
-//! (V8 #237, VVA §7.4 + §17.2 Task C3).
+//! (, + §17.2 Task C3).
 //!
 //! Higher inductive types extend ordinary inductives with **path
 //! constructors** — 1-cells whose endpoints are values of the type
@@ -114,8 +114,7 @@ fn nat_succ_case_takes_pi_argument() {
         List::from_iter(vec![
             nullary("Zero"),
             ConstructorSig {
-                name: Text::from("Succ"),
-                arg_types: List::from_iter(vec![CoreTerm::Inductive {
+                name: Text::from("Succ"),                arg_types: List::from_iter(vec![CoreTerm::Inductive {
                     path: Text::from("Nat"),
                     args: List::new(),
                 }]),
@@ -179,11 +178,12 @@ fn s1_eliminator_has_path_branch() {
     )
     .with_path_constructor(PathCtorSig {
         name: Text::from("Loop"),
+        dim: 1,
         lhs: CoreTerm::Var(Text::from("Base")),
         rhs: CoreTerm::Var(Text::from("Base")),
     });
     let elim = eliminator_type(&s1);
-    // V8 (#237 V2) recursor-image resolution:
+    //  recursor-image resolution:
     //   Π (motive). Π (case_Base : motive(Base)).
     //     Π (case_Loop : PathTy(motive(Base), case_Base, case_Base)).
     //     Π (x : S1). motive(x)
@@ -230,6 +230,7 @@ fn interval_eliminator_has_two_points_and_seg_branch() {
     )
     .with_path_constructor(PathCtorSig {
         name: Text::from("Seg"),
+        dim: 1,
         lhs: CoreTerm::Var(Text::from("Zero")),
         rhs: CoreTerm::Var(Text::from("One")),
     });
@@ -241,14 +242,196 @@ fn interval_eliminator_has_two_points_and_seg_branch() {
     // Now the Seg branch.
     let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else { panic!() };
     assert_eq!(binder.as_str(), "case_Seg");
-    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else {
-        panic!("Seg branch must be a PathTy");
+    // heterogeneous endpoints
+    // (Zero ≠ One structurally) ⇒ branch is dependent PathOver,
+    // not homogeneous PathTy. The motive's image at Zero and One
+    // is distinct, so the user-supplied case must be a heterogeneous
+    // path lying over the constructor-path.
+    let CoreTerm::PathOver { lhs, rhs, .. } = domain.as_ref() else {
+        panic!("Seg branch must be a PathOver (heterogeneous endpoints)");
     };
-    // V8 (#237 V2): nullary endpoints rewrite to recursor-image
+    // : nullary endpoints rewrite to recursor-image
     // references so the Seg branch types against the user-supplied
     // case bodies, not the bare ctor values.
     assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Zero"));
     assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_One"));
+}
+
+// =============================================================================
+// V3 () — App-chain endpoint resolution
+// =============================================================================
+//
+// V2 only resolved bare `Var(name)` endpoints to `case_<name>`. V3
+// extends to recursive App-chains: `Cons(x, Cons(y, Nil))` at a path
+// endpoint should resolve to `case_Cons(x, case_Cons(y, case_Nil))`.
+// This is the shape an actual user-supplied recursor case body
+// types against when the path's endpoint is a non-nullary
+// constructor application.
+
+#[test]
+fn v3_app_chain_endpoint_resolves_at_inner_ctor() {
+    // SuspensionList: Nil | Cons(Nat → SuspensionList)
+    //                 | Merid : Nil ↝ Cons(zero) ↝ ... (single-step
+    //                   App-chain endpoint to exercise V3 walk)
+    let susp = RegisteredInductive::new(
+        Text::from("SuspList"),
+        List::new(),
+        List::from_iter(vec![
+            nullary("Nil"),
+            ConstructorSig {
+                name: Text::from("Cons"),                arg_types: List::from_iter(vec![CoreTerm::Var(Text::from("Nat"))]),
+            },
+        ]),
+    )
+    .with_path_constructor(PathCtorSig {
+        name: Text::from("Step"),
+        dim: 1,
+        lhs: CoreTerm::Var(Text::from("Nil")),
+        // rhs = App(Cons, zero) — V3 must resolve to App(case_Cons, zero)
+        rhs: CoreTerm::App(
+            Heap::new(CoreTerm::Var(Text::from("Cons"))),
+            Heap::new(CoreTerm::Var(Text::from("zero"))),
+        ),
+    });
+    let elim = eliminator_type(&susp);
+
+    // Walk past motive + case_Nil + case_Cons to find the path branch.
+    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else { panic!() };
+    assert_eq!(binder.as_str(), "case_Step");
+
+    // heterogeneous endpoints
+    // (Nil ≠ App(Cons, zero)) ⇒ PathOver.
+    let CoreTerm::PathOver { lhs, rhs, .. } = domain.as_ref() else {
+        panic!("Step branch must be a PathOver (heterogeneous endpoints)")
+    };
+    // lhs = case_Nil (V2 nullary resolution)
+    assert!(
+        matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Nil"),
+        "lhs not resolved to case_Nil"
+    );
+    // rhs = App(case_Cons, zero) — V3 App-chain resolution rewrites
+    // the head ctor reference, leaves the argument unchanged (zero
+    // is not a registered ctor).
+    let CoreTerm::App(func, arg) = rhs.as_ref() else {
+        panic!("rhs must be an App")
+    };
+    assert!(
+        matches!(func.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Cons"),
+        "App head not resolved to case_Cons"
+    );
+    assert!(
+        matches!(arg.as_ref(), CoreTerm::Var(n) if n.as_str() == "zero"),
+        "App argument should pass through unchanged"
+    );
+}
+
+#[test]
+fn v3_nested_app_chain_endpoint_resolves_recursively() {
+    // Endpoint `Cons(zero, Cons(one, Nil))` — fully nested. V3 walks
+    // every depth, rewriting each Cons → case_Cons, Nil → case_Nil.
+    let nested = RegisteredInductive::new(
+        Text::from("NestedList"),
+        List::new(),
+        List::from_iter(vec![
+            nullary("Nil"),
+            ConstructorSig {
+                name: Text::from("Cons"),                arg_types: List::from_iter(vec![
+                    CoreTerm::Var(Text::from("Nat")),
+                    CoreTerm::Var(Text::from("NestedList")),
+                ]),
+            },
+        ]),
+    )
+    .with_path_constructor(PathCtorSig {
+        name: Text::from("Twist"),
+        dim: 1,
+        lhs: CoreTerm::Var(Text::from("Nil")),
+        rhs: CoreTerm::App(
+            Heap::new(CoreTerm::App(
+                Heap::new(CoreTerm::Var(Text::from("Cons"))),
+                Heap::new(CoreTerm::Var(Text::from("zero"))),
+            )),
+            Heap::new(CoreTerm::App(
+                Heap::new(CoreTerm::App(
+                    Heap::new(CoreTerm::Var(Text::from("Cons"))),
+                    Heap::new(CoreTerm::Var(Text::from("one"))),
+                )),
+                Heap::new(CoreTerm::Var(Text::from("Nil"))),
+            )),
+        ),
+    });
+    let elim = eliminator_type(&nested);
+    // Walk past motive + case_Nil + case_Cons.
+    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    // heterogeneous endpoints ⇒ PathOver.
+    let CoreTerm::PathOver { rhs, .. } = domain.as_ref() else {
+        panic!("Twist branch must be PathOver (heterogeneous endpoints)")
+    };
+
+    // Verify head Cons rewrote to case_Cons at the OUTERMOST App
+    // and the trailing Nil rewrote to case_Nil at the deepest level.
+    fn count_case_cons(term: &CoreTerm) -> usize {
+        match term {
+            CoreTerm::Var(n) if n.as_str() == "case_Cons" => 1,
+            CoreTerm::App(f, a) => count_case_cons(f) + count_case_cons(a),
+            _ => 0,
+        }
+    }
+    fn contains_bare_cons(term: &CoreTerm) -> bool {
+        match term {
+            CoreTerm::Var(n) if n.as_str() == "Cons" => true,
+            CoreTerm::App(f, a) => contains_bare_cons(f) || contains_bare_cons(a),
+            _ => false,
+        }
+    }
+    fn has_case_nil(term: &CoreTerm) -> bool {
+        match term {
+            CoreTerm::Var(n) if n.as_str() == "case_Nil" => true,
+            CoreTerm::App(f, a) => has_case_nil(f) || has_case_nil(a),
+            _ => false,
+        }
+    }
+    assert_eq!(count_case_cons(rhs), 2, "expected two case_Cons rewrites");
+    assert!(!contains_bare_cons(rhs), "no bare Cons must remain");
+    assert!(has_case_nil(rhs), "deepest Nil must rewrite to case_Nil");
+}
+
+#[test]
+fn v3_non_ctor_app_passes_through() {
+    // App where the head is NOT a registered ctor must pass through
+    // unchanged at the head, but recurse into args (which here are
+    // also non-ctors).
+    let unrelated = RegisteredInductive::new(
+        Text::from("Foo"),
+        List::new(),
+        List::from_iter(vec![nullary("Bar")]),
+    )
+    .with_path_constructor(PathCtorSig {
+        name: Text::from("Wave"),
+        dim: 1,
+        lhs: CoreTerm::Var(Text::from("Bar")),
+        rhs: CoreTerm::App(
+            Heap::new(CoreTerm::Var(Text::from("not_a_ctor"))),
+            Heap::new(CoreTerm::Var(Text::from("arg"))),
+        ),
+    });
+    let elim = eliminator_type(&unrelated);
+    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    // heterogeneous endpoints ⇒ PathOver.
+    let CoreTerm::PathOver { rhs, .. } = domain.as_ref() else {
+        panic!("Wave branch must be PathOver (heterogeneous endpoints)")
+    };
+    let CoreTerm::App(func, arg) = rhs.as_ref() else { panic!() };
+    assert!(matches!(func.as_ref(), CoreTerm::Var(n) if n.as_str() == "not_a_ctor"));
+    assert!(matches!(arg.as_ref(), CoreTerm::Var(n) if n.as_str() == "arg"));
 }
 
 // =============================================================================
@@ -265,6 +448,7 @@ fn register_rejects_path_ctor_colliding_with_point_ctor() {
     )
     .with_path_constructor(PathCtorSig {
         name: Text::from("X"), // collides with point ctor "X"
+        dim: 1,
         lhs: CoreTerm::Var(Text::from("X")),
         rhs: CoreTerm::Var(Text::from("X")),
     });
@@ -282,11 +466,13 @@ fn register_rejects_duplicate_path_ctor_names() {
     )
     .with_path_constructor(PathCtorSig {
         name: Text::from("Loop"),
+        dim: 1,
         lhs: CoreTerm::Var(Text::from("Pt")),
         rhs: CoreTerm::Var(Text::from("Pt")),
     })
     .with_path_constructor(PathCtorSig {
         name: Text::from("Loop"), // duplicate
+        dim: 1,
         lhs: CoreTerm::Var(Text::from("Pt")),
         rhs: CoreTerm::Var(Text::from("Pt")),
     });
@@ -333,8 +519,7 @@ fn binary_ctor_case_type_chains_pi() {
         args: List::new(),
     };
     let ctor = ConstructorSig {
-        name: Text::from("Pair"),
-        arg_types: List::from_iter(vec![int_ty.clone(), int_ty]),
+        name: Text::from("Pair"),        arg_types: List::from_iter(vec![int_ty.clone(), int_ty]),
     };
     let ty = point_constructor_case_type(&motive, &ctor);
     // Π (a0 : Int) . Π (a1 : Int) . motive(Pair(a0, a1))
@@ -361,7 +546,7 @@ fn binary_ctor_case_type_chains_pi() {
 // =============================================================================
 
 // =============================================================================
-// V8 (#237 V2) — recursor-image resolution at nullary endpoints
+// recursor-image resolution at nullary endpoints
 // =============================================================================
 
 #[test]
@@ -377,6 +562,7 @@ fn nullary_endpoint_rewrites_to_case_binder() {
     )
     .with_path_constructor(PathCtorSig {
         name: Text::from("Loop"),
+        dim: 1,
         lhs: CoreTerm::Var(Text::from("Base")),
         rhs: CoreTerm::Var(Text::from("Base")),
     });
@@ -401,6 +587,7 @@ fn endpoint_not_referencing_point_ctor_falls_through_unchanged() {
     )
     .with_path_constructor(PathCtorSig {
         name: Text::from("Edge"),
+        dim: 1,
         lhs: CoreTerm::Var(Text::from("External")),
         rhs: CoreTerm::Var(Text::from("External")),
     });
@@ -426,6 +613,7 @@ fn app_chain_endpoint_falls_through_unchanged() {
     )
     .with_path_constructor(PathCtorSig {
         name: Text::from("Merid"),
+        dim: 1,
         lhs: CoreTerm::App(
             verum_common::Heap::new(CoreTerm::Var(Text::from("North"))),
             verum_common::Heap::new(CoreTerm::Var(Text::from("a0"))),
@@ -437,9 +625,22 @@ fn app_chain_endpoint_falls_through_unchanged() {
     let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
     let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
     let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else { panic!() };
-    // App-chain lhs unchanged — V2 only resolves bare Var.
-    assert!(matches!(lhs.as_ref(), CoreTerm::App(..)));
+    // heterogeneous endpoints
+    // (App(North, a0) ≠ South) ⇒ PathOver.
+    let CoreTerm::PathOver { lhs, rhs, .. } = domain.as_ref() else {
+        panic!("Merid branch must be PathOver (heterogeneous endpoints)")
+    };
+    // App-chain lhs unchanged — V2 only resolves bare Var, but
+    // V3 App-chain walks recursively. Head North isn't a registered
+    // point ctor (not in the Sus inductive's ctor list — only
+    // North/South are nullary points so V3 spec walk treats both
+    // North and South as point ctors when their parent matches).
+    // Here North IS a registered point ctor → V3 rewrites.
+    let CoreTerm::App(func, arg) = lhs.as_ref() else {
+        panic!("lhs should be an App-chain")
+    };
+    assert!(matches!(func.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_North"));
+    assert!(matches!(arg.as_ref(), CoreTerm::Var(n) if n.as_str() == "a0"));
     // Bare Var rhs ("South") IS a point ctor → resolves to case_South.
     assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_South"));
 }

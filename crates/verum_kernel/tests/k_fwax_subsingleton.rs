@@ -289,17 +289,35 @@ fn open_axiom_admitted_under_legacy_regime() {
 }
 
 #[test]
-fn legacy_register_preserves_pre_v8_behaviour() {
-    // The original `register()` entry point must continue to
-    // accept open bodies — backwards compat for the existing
-    // test corpus + stdlib bring-up registrations.
+fn v8_1_register_is_strict_by_default() {
+    // The original `register()` entry point is now strict-by-default
+    // ("production CLI defaults `register_subsingleton`"). Open-body
+    // axioms are rejected via the K-FwAx subsingleton gate. Callers
+    // that intentionally need the legacy-unchecked shim
+    // must explicitly use `register_legacy_unchecked`.
     let mut reg = AxiomRegistry::new();
     let res = reg.register(
-        Text::from("legacy_via_register"),
+        Text::from("strict_via_register"),
         open_prop_ty(),
         fw("test_corpus"),
     );
-    assert!(res.is_ok(), "register() must preserve pre-V8 semantics");
+    assert!(
+        matches!(res, Err(KernelError::AxiomNotSubsingleton { .. })),
+        "V8.1 register() must reject open-body axiom; got {:?}",
+        res
+    );
+}
+
+#[test]
+fn v8_1_register_legacy_unchecked_preserves_pre_v8_behaviour() {
+    // The explicit legacy entry continues to admit open bodies.
+    let mut reg = AxiomRegistry::new();
+    let res = reg.register_legacy_unchecked(
+        Text::from("legacy_via_explicit"),
+        open_prop_ty(),
+        fw("test_corpus"),
+    );
+    assert!(res.is_ok(), "register_legacy_unchecked must admit pre-V8.1 shape");
 }
 
 #[test]
@@ -404,7 +422,7 @@ fn rejected_subsingleton_check_does_not_commit_entry() {
 }
 
 // =============================================================================
-// V8 (#220) — body-is-Prop check at register time
+// body-is-Prop check at register time
 // =============================================================================
 
 #[test]

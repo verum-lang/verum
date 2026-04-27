@@ -90,6 +90,58 @@ pub enum CoreTerm {
     /// Reflexivity path: `refl(a) : Path<A>(a, a)`.
     Refl(Heap<CoreTerm>),
 
+    /// **dependent path-over**:
+    /// `PathOver(motive, p, lhs, rhs)`.
+    ///
+    /// When a HIT path-constructor has endpoints whose motive
+    /// images are not definitionally equal — e.g. the Suspension
+    /// HIT's `merid : north ↝ south` where `motive(north) ≠
+    /// motive(south)` definitionally — the eliminator's path-
+    /// branch type cannot be the homogeneous `PathTy(motive(lhs),
+    /// lhs_image, rhs_image)`. Instead it must be a **heterogeneous**
+    /// path lying *over* the constructor-path `p` along the
+    /// motive: `PathOver(motive, p, lhs_image, rhs_image)` where
+    /// `lhs_image : motive(lhs)` and `rhs_image : motive(rhs)`.
+    ///
+    /// **Typing rule (K-PathOver-Form):**
+    ///
+    /// ```text
+    ///   Γ ⊢ motive : B → U     Γ ⊢ p : Path<B>(b₀, b₁)
+    ///   Γ ⊢ lhs : motive(b₀)   Γ ⊢ rhs : motive(b₁)
+    ///   ───────────────────────────────────────────────
+    ///   Γ ⊢ PathOver(motive, p, lhs, rhs) : U
+    /// ```
+    ///
+    /// **Degenerate-case reduction:** when `lhs == rhs` structurally
+    /// AND the endpoint-images of `p` coincide (e.g., closed loops
+    /// like `Loop : Base ↝ Base` in S¹), `PathOver(motive, p, lhs,
+    /// rhs)` is definitionally equal to `PathTy(motive(b₀), lhs,
+    /// rhs)` — the kernel exposes both and the typechecker
+    /// computes the conversion when the homogeneous shape is
+    /// expected by a downstream check.
+    ///
+    /// References:
+    /// * HoTT Book §6.2 (Function spaces over identifications).
+    /// * Cubical Agda's `PathP A x y` (the same primitive).
+    PathOver {
+        /// Type-family `motive : B → U` along whose image the path
+        /// lies. Stored as the raw motive expression (no eta-
+        /// expansion) so substitution and normalisation operate
+        /// uniformly with [`PathTy`].
+        motive: Heap<CoreTerm>,
+        /// Constructor-path in the base type `B`. Typically
+        /// `Var(point_ctor)` ↝ `Var(point_ctor')` for a HIT path-
+        /// constructor; arbitrary terms admitted to support
+        /// elaborated higher-cell structure.
+        path: Heap<CoreTerm>,
+        /// Left endpoint, lives in `motive(b₀)` where `b₀` is the
+        /// left endpoint of `path`.
+        lhs: Heap<CoreTerm>,
+        /// Right endpoint, lives in `motive(b₁)` where `b₁` is the
+        /// right endpoint of `path`.
+        rhs: Heap<CoreTerm>,
+    },
+
     /// Cubical homogeneous composition: `hcomp φ walls base`.
     HComp {
         /// Face / interval formula.
@@ -135,9 +187,9 @@ pub enum CoreTerm {
         predicate: Heap<CoreTerm>,
     },
 
-    /// V8 (#236) — quotient type: `Quotient(base, equiv)`.
+    /// quotient type: `Quotient(base, equiv)`.
     ///
-    /// Per VVA §7.5: a quotient `Q = T / ~` collapses elements
+    /// Quotient types: a quotient `Q = T / ~` collapses elements
     /// of `T` related by the equivalence `~` into a single
     /// equivalence class. The kernel checks (a) `base` is a
     /// type, (b) `equiv` is a binary relation on `base`,
@@ -157,13 +209,15 @@ pub enum CoreTerm {
         equiv: Heap<CoreTerm>,
     },
 
-    /// V8 (#236) — quotient introduction: `[t]_~`. Lifts a
+    /// quotient introduction: `[t]_~`. Lifts a
     /// value `t : T` into the quotient `T / ~` by taking its
     /// equivalence class. Per `K-Quot-Intro`:
     ///
-    ///     Γ ⊢ t : T   Γ ⊢ ~ : T → T → Prop
-    ///     ──────────────────────────────────
-    ///     Γ ⊢ QuotIntro(t) : Quotient(T, ~)
+    /// ```text
+    /// Γ ⊢ t : T   Γ ⊢ ~ : T → T → Prop
+    /// ──────────────────────────────────
+    /// Γ ⊢ QuotIntro(t) : Quotient(T, ~)
+    /// ```
     QuotIntro {
         /// Element to lift.
         value: Heap<CoreTerm>,
@@ -173,16 +227,18 @@ pub enum CoreTerm {
         equiv: Heap<CoreTerm>,
     },
 
-    /// V8 (#236) — quotient elimination: `quot_elim(q, motive,
+    /// quotient elimination: `quot_elim(q, motive,
     /// case)`. Eliminates a quotient by providing a value-level
     /// case that respects the equivalence:
     ///
-    ///     Γ ⊢ q : Quotient(T, ~)
-    ///     Γ ⊢ motive : Quotient(T, ~) → U
-    ///     Γ ⊢ case : Π(t: T). motive([t]_~)
-    ///     // implicit obligation: ∀ t1 t2: T. t1 ~ t2 → case(t1) ≡ case(t2)
-    ///     ─────────────────────────────────────────────
-    ///     Γ ⊢ quot_elim(q, motive, case) : motive(q)
+    /// ```text
+    /// Γ ⊢ q : Quotient(T, ~)
+    /// Γ ⊢ motive : Quotient(T, ~) → U
+    /// Γ ⊢ case : Π(t: T). motive([t]_~)
+    /// // implicit obligation: ∀ t1 t2: T. t1 ~ t2 → case(t1) ≡ case(t2)
+    /// ─────────────────────────────────────────────
+    /// Γ ⊢ quot_elim(q, motive, case) : motive(q)
+    /// ```
     ///
     /// The respect-of-equivalence obligation is discharged by
     /// the framework-axiom system or `@verify(proof)` — the
@@ -240,7 +296,7 @@ pub enum CoreTerm {
         framework: FrameworkId,
     },
 
-    /// VVA-1 V0 — `EpsilonOf(α)` represents the canonical enactment
+    /// Naturality witness — `EpsilonOf(α)` represents the canonical enactment
     /// image of an articulation under the M ⊣ A biadjunction (the
     /// activation modality applied at the articulation level). The
     /// kernel uses this constructor to track the natural-equivalence
@@ -252,23 +308,23 @@ pub enum CoreTerm {
     /// wired in.
     EpsilonOf(Heap<CoreTerm>),
 
-    /// VVA-1 V0 — `AlphaOf(ε)` represents the canonical articulation
+    /// Naturality witness — `AlphaOf(ε)` represents the canonical articulation
     /// image of an enactment (the inverse direction of the M ⊣ A
     /// biadjunction). Together with `EpsilonOf` this enables kernel-
     /// level reasoning about the ε ↔ α duality.
     AlphaOf(Heap<CoreTerm>),
 
-    /// VVA-7 V1 — `ModalBox(φ)` represents `□φ` (necessity in the
+    /// Modal-depth — `ModalBox(φ)` represents `□φ` (necessity in the
     /// underlying modal logic). md^ω(□φ) = md^ω(φ) + 1 per
     /// Definition 136.D1. The K-Refine-omega rule uses the
     /// resulting ordinal to gate refinement-type formation.
     ModalBox(Heap<CoreTerm>),
 
-    /// VVA-7 V1 — `ModalDiamond(φ)` represents `◇φ` (possibility).
+    /// Modal-depth — `ModalDiamond(φ)` represents `◇φ` (possibility).
     /// md^ω(◇φ) = md^ω(φ) + 1 per Definition 136.D1.
     ModalDiamond(Heap<CoreTerm>),
 
-    /// VVA-7 V1 — `ModalBigAnd(P_0, ..., P_κ)` represents the
+    /// Modal-depth — `ModalBigAnd(P_0, ..., P_κ)` represents the
     /// transfinite conjunction `⋀_{i<κ} P_i`. md^ω of the big-and
     /// is the *supremum* of the components' md^ω-ranks, per
     /// Definition 136.D1 + Lemma 136.L0 well-founded ordinal
@@ -276,13 +332,13 @@ pub enum CoreTerm {
     /// quantify over all possible-world labels at once.
     ModalBigAnd(List<Heap<CoreTerm>>),
 
-    /// V8 (#241) — **shape modality `∫A`** (Schreiber DCCT, cohesive
+    /// **shape modality `∫A`** (Schreiber DCCT, cohesive
     /// HoTT). The leftmost of the cohesive triple-adjunction
     /// `∫ ⊣ ♭ ⊣ ♯`. Computes the underlying ∞-groupoid (homotopy
     /// type) of a cohesive type, forgetting the geometric / modal
     /// structure and keeping only the homotopy data.
     ///
-    /// Per VVA §7.7 the kernel admits the type former unconditionally
+    /// Per the kernel admits the type former unconditionally
     /// (the cubical-set semantics interprets it via localisation at
     /// the discrete-type subuniverse); the **adjunction laws** (unit
     /// `η : A → ♭∫A`, counit `ε : ∫♭A → A`, triangle identities) are
@@ -293,7 +349,7 @@ pub enum CoreTerm {
     /// Cohesive ∞-Topos.* §3.4 (cohesive modalities).
     Shape(Heap<CoreTerm>),
 
-    /// V8 (#241) — **flat modality `♭A`** (Schreiber DCCT). The
+    /// **flat modality `♭A`** (Schreiber DCCT). The
     /// middle of the cohesive triple-adjunction `∫ ⊣ ♭ ⊣ ♯`.
     /// Singles out the **discrete** (constant) part of a cohesive
     /// type — the points whose cohesive structure is "trivially
@@ -308,7 +364,7 @@ pub enum CoreTerm {
     /// in real-cohesive homotopy type theory.* §3.
     Flat(Heap<CoreTerm>),
 
-    /// V8 (#241) — **sharp modality `♯A`** (Schreiber DCCT). The
+    /// **sharp modality `♯A`** (Schreiber DCCT). The
     /// rightmost of the cohesive triple-adjunction `∫ ⊣ ♭ ⊣ ♯`.
     /// Singles out the **codiscrete** (totally cohesive) part of
     /// a type — the points whose underlying homotopy type is
