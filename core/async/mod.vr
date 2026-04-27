@@ -83,6 +83,13 @@ public mount .task.JoinHandle;
 public mount .task.spawn;
 public mount .task.spawn_detached;
 
+// Read-only introspection surface for live tasks (#197).
+// Composes with `core::mem::diagnostics::HeaderView` to form the
+// substrate of a future user-facing `core::diagnostics` umbrella
+// module providing JFR / tokio-console / Erlang :observer-class
+// observability.
+public mount .diagnostics.{TaskInfo, TaskLifecycleState};
+
 // From channel
 public mount .channel.channel;
 public mount .channel.Sender;
