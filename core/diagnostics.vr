@@ -67,7 +67,12 @@ public mount core.mem.diagnostics.{HeaderView, header_view_of};
 // CBGR capability audit (re-exports from core::mem::cap_audit + ring)
 // =============================================================================
 
-public mount core.mem.cap_audit.{CapEvent, CapEventKind};
+public mount core.mem.cap_audit.{
+    CapEvent, CapEventKind,
+    record_revoke, record_attenuate,
+    record_ref_incr, record_ref_decr,
+    record_gen_bump, record_epoch_advance,
+};
 
 /// Producer + reader API for the capability-audit ring buffer.  The
 /// producer side is wired into CBGR write sites; observers call
