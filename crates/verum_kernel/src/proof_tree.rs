@@ -704,6 +704,9 @@ pub enum KernelRule {
     KSndElim,
     // §4.4a.2 Cubical
     KPathTyForm,
+    /// V8.1 (#196 follow-up, §7.4 V3) — dependent path-over,
+    /// `PathOver(motive, p, lhs, rhs) : U`.
+    KPathOverForm,
     KReflIntro,
     KHComp,
     KTransp,
@@ -754,6 +757,7 @@ impl KernelRule {
             KernelRule::KFstElim => "K-Fst-Elim",
             KernelRule::KSndElim => "K-Snd-Elim",
             KernelRule::KPathTyForm => "K-PathTy-Form",
+            KernelRule::KPathOverForm => "K-PathOver-Form",
             KernelRule::KReflIntro => "K-Refl-Intro",
             KernelRule::KHComp => "K-HComp",
             KernelRule::KTransp => "K-Transp",
@@ -789,6 +793,8 @@ impl KernelRule {
         match self {
             KernelRule::KUniv => "V8",
             KernelRule::KPathTyForm => "V8",
+            // V8.1 (#196 follow-up) — dependent path-over.
+            KernelRule::KPathOverForm => "V8.1",
             KernelRule::KAppElim => "V8",
             KernelRule::KInductive => "V8",
             KernelRule::KElim => "V8",
@@ -828,6 +834,8 @@ impl KernelRule {
             KernelRule::KShape => Some("VVA §7.7 (#241)"),
             KernelRule::KFlat => Some("VVA §7.7 (#241)"),
             KernelRule::KSharp => Some("VVA §7.7 (#241)"),
+            // V8.1 (#196 follow-up) — dependent path-over.
+            KernelRule::KPathOverForm => Some("VVA §7.4 V3 (#196)"),
             // VVA-1 — ε / α duality.
             KernelRule::KEpsilonOf => Some("VVA §6.4"),
             KernelRule::KAlphaOf => Some("VVA §6.4"),
@@ -848,6 +856,8 @@ impl KernelRule {
             KernelRule::KFstElim => Some("VVA §4.4a"),
             KernelRule::KSndElim => Some("VVA §4.4a"),
             KernelRule::KPathTyForm => Some("VVA §4.4a (cubical)"),
+            // V8.1 #196 §7.4 V3 — heterogeneous path-over (`PathOver`).
+            KernelRule::KPathOverForm => Some("VVA §7.4 (#196 V3, cubical)"),
             KernelRule::KReflIntro => Some("VVA §4.4a (cubical)"),
             KernelRule::KHComp => Some("VVA §4.4a (cubical)"),
             KernelRule::KTransp => Some("VVA §4.4a (cubical)"),
@@ -1116,6 +1126,21 @@ fn inference_rule_and_premises(
                 premises.push(p);
             }
             KernelRule::KPathTyForm
+        }
+        CoreTerm::PathOver { motive, path, lhs, rhs } => {
+            if let Some(p) = record_inference(ctx, motive, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, path, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, lhs, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, rhs, axioms) {
+                premises.push(p);
+            }
+            KernelRule::KPathOverForm
         }
         CoreTerm::Refl(x) => {
             if let Some(p) = record_inference(ctx, x, axioms) {

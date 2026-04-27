@@ -75,6 +75,14 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         CoreTerm::PathTy { carrier, lhs, rhs } => {
             m_depth(carrier).max(m_depth(lhs)).max(m_depth(rhs))
         }
+        // V8.1 #196 §7.4 V3 — heterogeneous path-over: structurally a
+        // 4-child generalisation of `PathTy` whose extra component is
+        // the constructor-path `path`. M-depth is the max over all four
+        // children, identical to the homogeneous case extended.
+        CoreTerm::PathOver { motive, path, lhs, rhs } => m_depth(motive)
+            .max(m_depth(path))
+            .max(m_depth(lhs))
+            .max(m_depth(rhs)),
         CoreTerm::Refl(a) => m_depth(a),
         CoreTerm::HComp { phi, walls, base } => {
             m_depth(phi).max(m_depth(walls)).max(m_depth(base))
@@ -324,6 +332,13 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
                 ord_max(m_depth_omega(lhs), m_depth_omega(rhs)),
             )
         }
+        // V8.1 #196 §7.4 V3 — heterogeneous path-over: 4-child
+        // generalisation of `PathTy`. Modal-depth ordinal is the
+        // pairwise max over motive / path / lhs / rhs.
+        CoreTerm::PathOver { motive, path, lhs, rhs } => ord_max(
+            ord_max(m_depth_omega(motive), m_depth_omega(path)),
+            ord_max(m_depth_omega(lhs), m_depth_omega(rhs)),
+        ),
         CoreTerm::Refl(a) => m_depth_omega(a),
         CoreTerm::HComp { phi, walls, base } => ord_max(
             m_depth_omega(phi),
