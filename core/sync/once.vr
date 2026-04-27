@@ -41,10 +41,33 @@ type OnceGuard is {
 };
 
 implement Drop for OnceGuard {
+    /// Drop semantics — poison the Once iff our RUNNING claim is
+    /// still live.
+    ///
+    /// SOUNDNESS: previous revision did an unconditional
+    /// `self.state.store(POISONED, ...)` when `!self.completed`.  The
+    /// `call_once_slow` path stores `state = COMPLETE` BEFORE setting
+    /// `guard.completed = true`; if a panic fires in that narrow
+    /// window (between the COMPLETE publication and the disarm
+    /// flag), the guard's drop runs with `completed: false` and
+    /// SILENTLY OVERWRITES a successful COMPLETE with POISONED.
+    /// Future callers then see POISONED and refuse to use a
+    /// fully-initialised value — a real soundness bug.
+    ///
+    /// The fix: poison via CAS that only succeeds when state is
+    /// still RUNNING (i.e. our claim never advanced).  Any
+    /// already-published COMPLETE / POISONED observed by the CAS is
+    /// preserved — the drop becomes a no-op in those cases, which
+    /// matches the documented contract ("guard panic-poisons only
+    /// the slot it owns").
     fn drop(&mut self) {
         if !self.completed {
-            // Initialization panicked - poison the Once
-            self.state.store(POISONED, MemoryOrdering.Release);
+            let _ = self.state.compare_exchange(
+                RUNNING,
+                POISONED,
+                MemoryOrdering.Release,
+                MemoryOrdering.Relaxed,
+            );
         }
     }
 }
