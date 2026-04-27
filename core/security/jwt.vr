@@ -88,6 +88,7 @@ public type JwtKey is
 
 public type JwtError is
       MalformedToken                 // missing dots / wrong segment count
+    | TokenTooLong                   // exceeds MAX_JWT_TOKEN_BYTES
     | Base64Decode
     | JsonDecode
     | AlgorithmMismatch              // header.alg ≠ allowed list
@@ -99,6 +100,18 @@ public type JwtError is
     | AudienceMismatch
     | WrongKeyKind                   // JwtKey variant doesn't match algorithm
     | SigningFailure;
+
+// Maximum permitted JWT compact-form token length in bytes.  Hostile
+// inputs with multi-megabyte tokens would force the verifier to do
+// expensive base64-decode + HMAC/signature work on attacker-supplied
+// data before any structural validation can reject the token.
+//
+// 64 KiB is generous compared to industry norms — typical OAuth /
+// OIDC tokens are 1-4 KiB, AWS IAM tokens up to 8 KiB, and even
+// large-claim-set scenarios rarely exceed 16 KiB.  Tokens over
+// 64 KiB are almost certainly DoS attempts or a misuse of the
+// JWT format (use a separate API for bulk credentials).
+public const MAX_JWT_TOKEN_BYTES: Int = 64 * 1024;
 
 // =============================================================================
 // Header
@@ -207,6 +220,15 @@ public fn verify_compact(
     opts:  &VerifyOptions,
 ) -> Result<JwtPayload, JwtError> {
     let bytes = token.as_bytes();
+    // SOUNDNESS: cap token length BEFORE doing any parsing or crypto
+    // work.  Without this, hostile multi-megabyte tokens would force
+    // the verifier to run expensive base64 decode + HMAC/signature
+    // verification on attacker-supplied data — a trivial DoS amplifier
+    // (small input cost on the attacker, large CPU cost on the
+    // verifier).
+    if bytes.len() > MAX_JWT_TOKEN_BYTES {
+        return Err(JwtError.TokenTooLong);
+    }
     // Split on '.'.
     let (h_end, p_end) = find_two_dots(bytes)?;
     let header_b64  = &bytes[..h_end];
