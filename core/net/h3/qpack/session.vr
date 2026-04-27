@@ -120,7 +120,9 @@ implement QpackSession {
         &mut self,
         headers: &List<QpackHeaderField>,
     ) -> Result<List<Byte>, QpackSessionError> {
-        let mut body: List<Byte> = [];
+        // Heuristic 32 bytes/header for typical name+value with
+        // Huffman coding (cf. encoder::encode_field_section).
+        let mut body: List<Byte> = List.with_capacity(headers.len() * 32 + 16);
 
         // Plan per-header emission:
         //   1. exact (name, value) in static table  → Indexed Field Line, static
@@ -174,8 +176,8 @@ implement QpackSession {
         }
 
         // Assemble full field section: Required Insert Count (0) +
-        // Delta Base (0, sign=0) + body.
-        let mut out: List<Byte> = [];
+        // Delta Base (0, sign=0) + body. ICN+DB ≤ 16 bytes total.
+        let mut out: List<Byte> = List.with_capacity(16 + body.len());
         int_encode(&mut out, 8, 0_u8, 0_u64);
         int_encode(&mut out, 7, 0_u8, 0_u64);
         let mut j: Int = 0;
@@ -327,7 +329,8 @@ implement QpackSession {
     // ==================== drain ====================
 
     public fn drain_encoder_out(&mut self) -> List<Byte> {
-        let mut out: List<Byte> = [];
+        // Output is exactly self.encoder_out.len() bytes.
+        let mut out: List<Byte> = List.with_capacity(self.encoder_out.len());
         let mut i: Int = 0;
         while i < self.encoder_out.len() { out.push(self.encoder_out[i]); i = i + 1; }
         self.encoder_out = [];
@@ -335,7 +338,8 @@ implement QpackSession {
     }
 
     public fn drain_decoder_out(&mut self) -> List<Byte> {
-        let mut out: List<Byte> = [];
+        // Output is exactly self.decoder_out.len() bytes.
+        let mut out: List<Byte> = List.with_capacity(self.decoder_out.len());
         let mut i: Int = 0;
         while i < self.decoder_out.len() { out.push(self.decoder_out[i]); i = i + 1; }
         self.decoder_out = [];
@@ -421,7 +425,8 @@ fn read_string(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSessionError>
     if end > buf.len() {
         return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
     }
-    let mut bytes: List<Byte> = [];
+    // Bytes copy is exactly end - p1 bytes.
+    let mut bytes: List<Byte> = List.with_capacity(end - p1);
     let mut i: Int = p1;
     while i < end { bytes.push(buf[i]); i = i + 1; }
     let plain: List<Byte> = if huffman {
@@ -442,7 +447,8 @@ fn read_name_literal(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSession
     if end > buf.len() {
         return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
     }
-    let mut bytes: List<Byte> = [];
+    // Bytes copy is exactly end - p1 bytes.
+    let mut bytes: List<Byte> = List.with_capacity(end - p1);
     let mut i: Int = p1;
     while i < end { bytes.push(buf[i]); i = i + 1; }
     let plain: List<Byte> = if huffman {
