@@ -352,6 +352,37 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
         }
 
         // ================================================================
+        // Checked unary signed (#100, task #25)
+        //
+        // Both ops produce `Maybe<T>`: `Some(value)` for the typical
+        // case, `None` for the unique-overflow case (`T::MIN` for
+        // signed). Format mirrors WrappingNeg: `dst, src, width, signed`.
+        // ================================================================
+        Some(ArithSubOpcode::CheckedNeg) => {
+            let dst = read_reg(state)?;
+            let src_reg = read_reg(state)?;
+            let width = read_u8(state)?;
+            let signed = read_u8(state)? != 0;
+
+            let src = state.get_reg(src_reg).as_i64();
+            let (result, ok) = checked_neg(src, width, signed);
+            emit_maybe_int(state, dst, result, ok)?;
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(ArithSubOpcode::CheckedAbs) => {
+            let dst = read_reg(state)?;
+            let src_reg = read_reg(state)?;
+            let width = read_u8(state)?;
+            let signed = read_u8(state)? != 0;
+
+            let src = state.get_reg(src_reg).as_i64();
+            let (result, ok) = checked_abs(src, width, signed);
+            emit_maybe_int(state, dst, result, ok)?;
+            Ok(DispatchResult::Continue)
+        }
+
+        // ================================================================
         // Overflowing Arithmetic (0x10-0x12) - Returns (result, overflowed)
         // ================================================================
         Some(ArithSubOpcode::OverflowingAddI) => {
@@ -696,6 +727,33 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
             let b = state.get_reg(b_reg).as_i64();
 
             let result = saturating_mul(a, b, width, signed);
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+
+        // ================================================================
+        // Saturating signed unary (#100, task #25)
+        // ================================================================
+        Some(ArithSubOpcode::SaturatingNeg) => {
+            let dst = read_reg(state)?;
+            let src_reg = read_reg(state)?;
+            let width = read_u8(state)?;
+            let signed = read_u8(state)? != 0;
+
+            let src = state.get_reg(src_reg).as_i64();
+            let result = saturating_neg(src, width, signed);
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(ArithSubOpcode::SaturatingAbs) => {
+            let dst = read_reg(state)?;
+            let src_reg = read_reg(state)?;
+            let width = read_u8(state)?;
+            let signed = read_u8(state)? != 0;
+
+            let src = state.get_reg(src_reg).as_i64();
+            let result = saturating_abs(src, width, signed);
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
         }
@@ -1130,4 +1188,57 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
             })
         }
     }
+}
+
+/// Emit a `Maybe<Int>` value at the given register.
+///
+/// `ok = true`  ⇒ allocate `Some(value)` (TypeId tag 0, single payload).
+/// `ok = false` ⇒ allocate `None`        (TypeId tag 1, no payload).
+///
+/// Layout matches the inline construction used by `CheckedAddI` /
+/// `CheckedSubI` / `CheckedMulI` / etc. — extracted into a helper so
+/// the new `CheckedNeg` / `CheckedAbs` arms don't duplicate ~30 lines
+/// of allocation / tag / field-write boilerplate. The four extant
+/// inline copies stay as-is to preserve their exact instruction
+/// scheduling for the well-trod hot path; this helper is the
+/// canonical pattern for any new Maybe-returning arith arm.
+fn emit_maybe_int(
+    state: &mut InterpreterState,
+    dst: crate::instruction::Reg,
+    value: i64,
+    ok: bool,
+) -> InterpreterResult<()> {
+    if ok {
+        let obj = state.heap.alloc_with_init(
+            TypeId(0x8000), // Maybe.Some variant (tag=0)
+            8 + std::mem::size_of::<Value>(),
+            |data| {
+                let tag_ptr = data.as_mut_ptr() as *mut u32;
+                unsafe {
+                    *tag_ptr = 0;        // tag = Some
+                    *tag_ptr.add(1) = 1; // field_count = 1
+                }
+            },
+        )?;
+        state.record_allocation();
+        let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
+        let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
+        unsafe { *field_ptr = Value::from_i64(value); }
+        state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+    } else {
+        let obj = state.heap.alloc_with_init(
+            TypeId(0x8001), // Maybe.None variant (tag=1)
+            8,              // tag + field_count, no payload
+            |data| {
+                let tag_ptr = data.as_mut_ptr() as *mut u32;
+                unsafe {
+                    *tag_ptr = 1;        // tag = None
+                    *tag_ptr.add(1) = 0; // field_count = 0
+                }
+            },
+        )?;
+        state.record_allocation();
+        state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+    }
+    Ok(())
 }

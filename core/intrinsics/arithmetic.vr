@@ -126,6 +126,10 @@ public fn checked_rem<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_rem", a, 
 /// Checked negation (returns None if self is MIN)
 public fn checked_neg<T>(x: T) -> Maybe<T> { @intrinsic("checked_neg", x) }
 
+/// Checked absolute value (returns None if self is MIN — same overflow
+/// as `checked_neg`).  Symmetric counterpart added in #100/task #25.
+public fn checked_abs<T>(x: T) -> Maybe<T> { @intrinsic("checked_abs", x) }
+
 /// Checked left shift (returns None if shift >= bit width)
 public fn checked_shl<T>(x: T, n: UInt32) -> Maybe<T> { @intrinsic("checked_shl", x, n) }
 
