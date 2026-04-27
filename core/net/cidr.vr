@@ -216,14 +216,22 @@ fn clone_cidr(c: &Cidr) -> Cidr {
 // =============================================================================
 
 fn mask_equal(a: &[Byte], b: &[Byte], prefix_len: Int) -> Bool {
-    let full_bytes = prefix_len / 8;
+    if prefix_len < 0 { return false; }
+    if a.len() != b.len() { return false; }
+    // Cap full_bytes at the buffer length so a hand-constructed Cidr
+    // with prefix_len > 8 * len cannot index past the end of either
+    // octet array. `parse()` already rejects out-of-range prefix_len,
+    // but Cidr's variants are public — defend at the helper anyway.
+    let max_bytes = a.len();
+    let mut full_bytes = prefix_len / 8;
+    if full_bytes > max_bytes { full_bytes = max_bytes; }
     let residual_bits = prefix_len % 8;
     let mut i: Int = 0;
     while i < full_bytes {
         if a[i] != b[i] { return false; }
         i = i + 1;
     }
-    if residual_bits > 0 {
+    if residual_bits > 0 && full_bytes < max_bytes {
         let mask = (0xFF_u8 << ((8 - residual_bits) as UInt8)) & 0xFF_u8;
         if (a[full_bytes] & mask) != (b[full_bytes] & mask) { return false; }
     }
@@ -243,11 +251,20 @@ fn slice_text(src: &[Byte], start: Int, end: Int) -> Text {
 
 fn parse_int(src: &[Byte]) -> Maybe<Int> {
     if src.len() == 0 { return None; }
+    // Hard cap on digit count: 4 digits is enough to express every
+    // legal prefix length (max 128). A long-digit input is either a
+    // typo or an attempt to wrap `v = v * 10 + d` past Int.MAX into
+    // a small positive value that slips past the prefix-range check.
+    if src.len() > 4 { return None; }
     let mut v: Int = 0;
     let mut i: Int = 0;
     while i < src.len() {
         let c = src[i];
         if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
+        // 4-digit cap above bounds v at 9999 — well below Int.MAX, so
+        // the multiply-add cannot overflow. Belt-and-braces on a per-
+        // step ceiling keeps the invariant local.
+        if v > 9999 { return None; }
         v = v * 10 + ((c - ('0' as Byte)) as Int);
         i = i + 1;
     }
