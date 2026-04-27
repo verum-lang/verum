@@ -53,6 +53,7 @@ mount core.intrinsics.{
     atomic_store_u64,
     atomic_cas_u64,
     atomic_fence,
+    MemoryOrder,
     ORDERING_RELAXED,
     ORDERING_ACQUIRE,
     ORDERING_RELEASE,
@@ -401,7 +402,7 @@ implement<T: Send> WorkDeque<T> {
         }
 
         // Release fence ensures write is visible before bottom update
-        atomic_fence(ORDERING_RELEASE);
+        atomic_fence(MemoryOrder.Release);
 
         // Publish new bottom
         inner.store_bottom(bottom + 1, ORDERING_RELAXED);
@@ -440,7 +441,7 @@ implement<T: Send> WorkDeque<T> {
         }
 
         // Release fence ensures buffer swap and value write are visible
-        atomic_fence(ORDERING_RELEASE);
+        atomic_fence(MemoryOrder.Release);
 
         // Update bottom to include the new element
         inner.store_bottom(bottom + 1, ORDERING_RELAXED);
@@ -462,7 +463,7 @@ implement<T: Send> WorkDeque<T> {
 
         // Full memory barrier - ensures bottom write is visible and
         // subsequent top read sees latest value
-        atomic_fence(ORDERING_SEQ_CST);
+        atomic_fence(MemoryOrder.SeqCst);
 
         let top = inner.load_top(ORDERING_RELAXED);
         let size = bottom - top;
@@ -569,7 +570,7 @@ implement<T: Send> Stealer<T> {
         let top = inner.load_top(ORDERING_ACQUIRE);
 
         // Full barrier between reading top and bottom
-        atomic_fence(ORDERING_SEQ_CST);
+        atomic_fence(MemoryOrder.SeqCst);
 
         let bottom = inner.load_bottom(ORDERING_ACQUIRE);
 
