@@ -304,6 +304,17 @@ implement AllocationHeader {
     /// Wraparound is handled identically to `increment_generation`:
     /// after a successful CAS that lands at GEN_MAX, the epoch is
     /// CAS-bumped and the generation is reset to GEN_INITIAL.
+    /// Stable allocation identity as UInt64.  Used by audit-log
+    /// callers to correlate CapEvent records back to specific
+    /// allocations.  The address is the AllocationHeader's own
+    /// position in memory; the user data starts HEADER_SIZE bytes
+    /// later, but observers grouping events by allocation just need
+    /// any stable, unique-per-allocation identifier.
+    @inline
+    public fn address(&self) -> UInt64 {
+        unsafe { (self as *const AllocationHeader) as Int as UInt64 }
+    }
+
     @inline
     public fn try_revoke(&mut self, expected_gen: UInt32) -> Maybe<UInt32> {
         let new_gen = if expected_gen >= GEN_MAX - 1 {
@@ -356,7 +367,7 @@ implement AllocationHeader {
         // runtime gate (`cap_audit_is_enabled`) keeps this O(1) when
         // audit is off; observers never see speculative or torn state.
         let caps = self.load_capabilities();
-        record_revoke(0, expected_gen, new_gen, caps, 0);
+        record_revoke(self.address(), expected_gen, new_gen, caps, 0);
 
         Some(new_gen)
     }
@@ -456,7 +467,7 @@ implement AllocationHeader {
         // sees, the new generation after the transition).
         let new_gen = if old_gen >= GEN_MAX - 1 { GEN_INITIAL } else { old_gen + 1 };
         let caps = self.load_capabilities();
-        record_gen_bump(0, old_gen, new_gen, caps, 0);
+        record_gen_bump(self.address(), old_gen, new_gen, caps, 0);
 
         old_gen
     }
@@ -572,7 +583,7 @@ implement AllocationHeader {
         // (monotonic narrowing).  Generation is unaffected.
         let caps_after = caps_before & mask;
         let gen = self.load_generation();
-        record_attenuate(0, gen, caps_before, caps_after, 0);
+        record_attenuate(self.address(), gen, caps_before, caps_after, 0);
 
         caps_before
     }
@@ -609,7 +620,7 @@ implement AllocationHeader {
         // audited.  The runtime gate keeps this O(1) when off.
         let gen = self.load_generation();
         let caps = self.load_capabilities();
-        record_ref_incr(0, gen, caps, 0);
+        record_ref_incr(self.address(), gen, caps, 0);
         old
     }
 
@@ -635,7 +646,7 @@ implement AllocationHeader {
         // Audit-log the ref_count decrement.
         let gen = self.load_generation();
         let caps = self.load_capabilities();
-        record_ref_decr(0, gen, caps, 0);
+        record_ref_decr(self.address(), gen, caps, 0);
         old - 1
     }
 
