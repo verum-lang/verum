@@ -37,7 +37,10 @@ mount core.net.h3.qpack.decoder.{QpackHeaderField};
 
 /// Encode a field section into a fresh byte vector.
 public fn encode_field_section(headers: &List<QpackHeaderField>) -> List<Byte> {
-    let mut out: List<Byte> = [];
+    // Heuristic: 32 bytes/header (typical name+value with Huffman
+    // coding). Avoids initial growth events for typical 5-30
+    // header field sections.
+    let mut out: List<Byte> = List.with_capacity(headers.len() * 32 + 16);
 
     // Required Insert Count = 0 (§4.5.1 — `Encoded Required Insert Count = 0`).
     int_encode(&mut out, 8, 0_u8, 0_u64);
