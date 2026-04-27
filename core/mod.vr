@@ -242,6 +242,18 @@ public module metrics;
 public module net;
 
 // =============================================================================
+// Layer 5: Diagnostics (Depends on: mem.diagnostics, async.diagnostics)
+// =============================================================================
+
+// User-facing observability umbrella — composes layer-local CBGR
+// (mem::diagnostics) and async runtime (async::diagnostics) snapshot
+// surfaces into a single import target.  Future folds: tracing/metrics
+// observability handle, capability audit log, symbolicated panic stack,
+// live_allocations iterator.  Tracked in #197.
+// Spec: docs/architecture/observability.md (TODO)
+public module diagnostics;
+
+// =============================================================================
 // Layer 5.5: Service mesh (Depends on: core.net.http2, core.protobuf, core.net.tls)
 // =============================================================================
 
