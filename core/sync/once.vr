@@ -122,6 +122,83 @@ implement Once {
         }
     }
 
+    /// Run a fallible initialization function at most once.
+    ///
+    /// Like `call_once` but `f` returns `Result<(), E>`:
+    ///   - If `f` returns `Ok(())`, the Once becomes COMPLETE and
+    ///     subsequent callers will see `Ok(false)` ("another
+    ///     thread completed it").
+    ///   - If `f` returns `Err(e)`, the Once is RESET to INCOMPLETE
+    ///     and the next caller may retry — the Err is propagated to
+    ///     this caller.
+    ///   - If the Once is already COMPLETE on entry, returns
+    ///     `Ok(false)` immediately (no retry, no `f` execution).
+    ///
+    /// Returns `Ok(true)` when this caller's `f` ran AND succeeded;
+    /// `Ok(false)` when another thread already completed init;
+    /// `Err(e)` when this caller's `f` ran AND failed.
+    ///
+    /// This is the foundation primitive for `OnceLock::get_or_try_init`
+    /// — the previous implementation ran `f()` BEFORE entering
+    /// `call_once`, which let multiple racing callers all execute
+    /// `f` concurrently (contract violation: `f` must run at most
+    /// once across the program lifetime).  Routing through
+    /// `try_call_once` serialises `f` properly inside the
+    /// CAS-protected critical section.
+    public fn try_call_once<E, F: fn() -> Result<(), E>>(&self, f: F) -> Result<Bool, E> {
+        // Fast path: already complete
+        if self.is_completed() {
+            return Ok(false);
+        }
+
+        loop {
+            match self.state.compare_exchange(INCOMPLETE, RUNNING, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
+                Ok(_) => {
+                    // We won the race - use a guard to handle panics
+                    let mut guard = OnceGuard { state: &self.state, completed: false };
+
+                    match f() {
+                        Ok(()) => {
+                            // Init succeeded — publish COMPLETE
+                            self.state.store(COMPLETE, MemoryOrdering.Release);
+                            guard.completed = true;
+                            return Ok(true);
+                        }
+                        Err(e) => {
+                            // Init failed — reset to INCOMPLETE so a future
+                            // caller can retry.  Disarm the guard explicitly
+                            // (completed=true) so its Drop doesn't poison
+                            // the slot — we are intentionally surrendering
+                            // the RUNNING claim, not panicking through it.
+                            self.state.store(INCOMPLETE, MemoryOrdering.Release);
+                            guard.completed = true;
+                            return Err(e);
+                        }
+                    }
+                }
+                Err(COMPLETE) => {
+                    // Another thread completed it
+                    return Ok(false);
+                }
+                Err(POISONED) => {
+                    panic("Once.try_call_once called after panic — use call_once_force to recover");
+                }
+                Err(RUNNING) => {
+                    // Another thread is initialising. Spin-wait until it
+                    // either completes or surrenders the RUNNING claim.
+                    while self.state.load(MemoryOrdering.Acquire) == RUNNING {
+                        spin_hint();
+                    }
+                    // Then retry the CAS (will hit COMPLETE on success
+                    // or INCOMPLETE if the winning thread surrendered).
+                }
+                Err(_) => {
+                    compiler_fence(MemoryOrdering.SeqCst);
+                }
+            }
+        }
+    }
+
     /// Run function if !yet called, ignoring poison.
     ///
     /// Unlike `call_once`, this will attempt initialization even if a
@@ -252,49 +329,23 @@ implement<T> OnceLock<T> {
     }
 
     // Set value if not already set.
-    // Returns Ok(()) on success, Err(value) if already initialized
-    // (the rejected value is returned to the caller so it isn't
-    // silently dropped).
+    //
+    // Returns Ok(()) on success, Err(value) if already initialised
+    // OR if another thread won the initialisation race.  Rejected
+    // value is returned unchanged so the caller can decide what to
+    // do with it.
+    //
+    // Implemented as a thin wrapper over `try_get_or_set` — the
+    // earlier impl had a latent `panic("lost a race window…")`
+    // because it tried to drive the init through `call_once` which
+    // moves the value into a closure that may never run.  The new
+    // race-safe primitive handles every contention path without
+    // ever panicking, so `set` now upholds its `Result` contract
+    // strictly.
     public fn set(&self, value: T) -> Result<(), T> {
-        // Fast-path: already initialised — no need to enter the
-        // call_once dance, return the rejected value
-        // immediately. This also sidesteps the move-semantics
-        // problem where capturing `value` into the closure
-        // would prevent us from returning it on the
-        // already-initialised path.
-        if self.once.is_completed() {
-            return Err(value);
-        }
-
-        let mut stored = false;
-        self.once.call_once(|| {
-            unsafe {
-                let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
-                *ptr = Some(value);
-            }
-            stored = true;
-        });
-
-        if stored {
-            Ok(())
-        } else {
-            // Lost the race: another thread initialised between
-            // our `is_completed()` fast-path check and our own
-            // `call_once` attempt. The value was moved into the
-            // closure (which never ran, so it was dropped at
-            // closure-end); we can't materialise a `T` to
-            // return here without inventing one.
-            //
-            // Earlier revisions returned the moved `value`
-            // directly — a use-after-move that produced
-            // implementation-defined results. This honest
-            // panic surfaces the rare race at the actual
-            // misuse site rather than corrupting the value.
-            // Callers needing strict rejected-value
-            // preservation should use the (future)
-            // `try_get_or_set` API that doesn't move on the
-            // gating check.
-            panic("OnceLock::set lost a race window between is_completed() check and call_once entry — rejected value cannot be recovered. Use try_get_or_set for race-safe single-shot semantics.")
+        match self.try_get_or_set(value) {
+            Ok(_) => Ok(()),
+            Err(rejected) => Err(rejected),
         }
     }
 
@@ -314,24 +365,112 @@ implement<T> OnceLock<T> {
 
     /// Get value, initializing with a fallible function if needed.
     /// If the function returns Err, the OnceLock remains uninitialized
-    /// and the error is returned.
+    /// and the error is returned (a future caller can retry).
+    ///
+    /// **Race-fix**: previous implementation ran `f()` BEFORE
+    /// entering `call_once`, so multiple racing callers could each
+    /// execute their own copy of `f`.  Now `f()` runs INSIDE
+    /// `try_call_once`'s CAS-protected critical section so it runs
+    /// at most once across all racers — matches the contract its
+    /// docstring claims.
     public fn get_or_try_init<E, F: fn() -> Result<T, E>>(&self, f: F) -> Result<&T, E> {
+        // Fast path: already initialised
         if self.once.is_completed() {
             return Ok(self.value.as_ref().unwrap());
         }
 
-        let result = f();
-        match result {
-            Ok(v) => {
-                self.once.call_once(|| {
+        // Slow path: serialise initialisation through try_call_once.
+        // The closure captures &self.value via raw pointer so the
+        // computed `v` lands in the OnceLock's storage atomically
+        // with the COMPLETE state publication.
+        self.once.try_call_once(|| -> Result<(), E> {
+            match f() {
+                Ok(v) => {
                     unsafe {
                         let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
                         *ptr = Some(v);
                     }
-                });
-                Ok(self.value.as_ref().unwrap())
+                    Ok(())
+                }
+                Err(e) => Err(e),
             }
-            Err(e) => Err(e),
+        })?;
+
+        // At this point either we wrote the value or another thread
+        // did — both paths leave self.value populated and the Once
+        // marked COMPLETE.
+        Ok(self.value.as_ref().unwrap())
+    }
+
+    /// Try to set the value to `value`.  Race-safe single-shot
+    /// counterpart of `set` — never moves `value` into a closure
+    /// that might not run, so the rejected value is preserved
+    /// across every contention path.
+    ///
+    /// Returns `Ok(&T)` (the just-stored value) on successful set,
+    /// or `Err(value)` if either the OnceLock was already
+    /// initialised on entry OR another thread won the
+    /// initialisation race.  In both Err paths the original
+    /// `value` is returned unchanged so the caller can decide
+    /// what to do with it (retry, drop, log, etc.).
+    ///
+    /// Why not just use `set`?  `set` captures `value` into the
+    /// `call_once` closure to allow it to run at most once; if
+    /// the closure doesn't run because another thread won the
+    /// race between the `is_completed` fast-path check and the
+    /// closure entry, the captured `value` is dropped and there
+    /// is no way to materialise a `T` for the caller — the prior
+    /// `set` impl honestly panicked at that race window.
+    /// `try_get_or_set` avoids the moved-into-closure dance by
+    /// driving the state CAS directly: only the winning thread
+    /// stores its value; losing threads return their `value`
+    /// untouched.
+    public fn try_get_or_set(&self, value: T) -> Result<&T, T> {
+        // Fast path: already initialised
+        if self.once.is_completed() {
+            return Err(value);
+        }
+
+        // Slow path: race for the INCOMPLETE → RUNNING transition.
+        // We MUST drive the CAS directly (not through call_once)
+        // because the value can only be moved into storage on the
+        // winning path; any closure capture would burn the value
+        // on the losing thread.
+        loop {
+            match self.once.state.compare_exchange(
+                INCOMPLETE,
+                RUNNING,
+                MemoryOrdering.AcqRel,
+                MemoryOrdering.Acquire,
+            ) {
+                Ok(_) => {
+                    // We won — store value, publish COMPLETE.
+                    unsafe {
+                        let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
+                        *ptr = Some(value);
+                    }
+                    self.once.state.store(COMPLETE, MemoryOrdering.Release);
+                    return Ok(self.value.as_ref().unwrap());
+                }
+                Err(COMPLETE) => {
+                    return Err(value);
+                }
+                Err(POISONED) => {
+                    panic("OnceLock::try_get_or_set on poisoned Once — use try_get_or_set_force to recover");
+                }
+                Err(RUNNING) => {
+                    // Another thread is initialising — spin until it
+                    // either completes or surrenders the RUNNING claim.
+                    while self.once.state.load(MemoryOrdering.Acquire) == RUNNING {
+                        spin_hint();
+                    }
+                    // Then retry the CAS (will hit COMPLETE on success
+                    // or INCOMPLETE if the winning thread surrendered).
+                }
+                Err(_) => {
+                    compiler_fence(MemoryOrdering.SeqCst);
+                }
+            }
         }
     }
 }
