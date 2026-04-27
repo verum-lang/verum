@@ -93,6 +93,14 @@ public type PlanNode is
     // lives in an enclosing PnFilter.
     // UNION ALL — concatenate two plan pipelines' ResultRow emissions.
     | PnUnionAll(left: Heap<PlanNode>, right: Heap<PlanNode>)
+    // UNION (distinct) — concatenate then dedup. n_proj is the
+    // projected column count (both sides must agree; the planner
+    // enforces this where schema is available).
+    | PnUnion(left: Heap<PlanNode>, right: Heap<PlanNode>, n_proj: Int)
+    // INTERSECT (distinct) — emit rows present in BOTH sides.
+    | PnIntersect(left: Heap<PlanNode>, right: Heap<PlanNode>, n_proj: Int)
+    // EXCEPT (distinct) — emit rows present in left but NOT in right.
+    | PnExcept(left: Heap<PlanNode>, right: Heap<PlanNode>, n_proj: Int)
     | PnNestedLoopJoin(
           left_table: TableRef,
           left_cid: Int,
@@ -152,11 +160,36 @@ public fn plan_statement(stmt: &Statement) -> Result<PlanNode, PlanError> {
 // -----------------------------------------------------------------------------
 
 fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
-    // Compound SELECT unimplemented in v1.
+    // Compound SELECT — recursively plan both sides, then wrap in the
+    // corresponding compound node.  Outer ORDER BY / LIMIT (held on
+    // `sel`) is applied AFTER the compound op, mirroring SQL semantics.
     let simple = match sel.kind {
         SkSimple(ref s) => s,
-        SkCompound(_, _, _) => {
-            return Err(plan_error("compound SELECT (UNION/INTERSECT/EXCEPT) pending".clone()));
+        SkCompound(op, ref lhs, ref rhs) => {
+            let lp = plan_select(lhs)?;
+            let rp = plan_select(rhs)?;
+            let n_proj = compound_proj_count(lhs);
+            let mut compound: PlanNode = match op {
+                CoUnionAll  => PnUnionAll(Heap(lp), Heap(rp)),
+                CoUnion     => PnUnion(Heap(lp), Heap(rp), n_proj),
+                CoIntersect => PnIntersect(Heap(lp), Heap(rp), n_proj),
+                CoExcept    => PnExcept(Heap(lp), Heap(rp), n_proj),
+            };
+            // Outer ORDER BY / LIMIT applies to the compound result.
+            if sel.order_by.len() > 0 {
+                compound = PnSort(Heap(compound), clone_order_terms(&sel.order_by));
+            }
+            match sel.limit {
+                Some(ref lc) => {
+                    let off: Maybe<Expr> = match lc.offset {
+                        Some(ref e) => Some(clone_expr(e)),
+                        None => None,
+                    };
+                    compound = PnLimit(Heap(compound), clone_expr(&lc.limit), off);
+                }
+                None => {}
+            }
+            return Ok(compound);
         }
     };
 
@@ -355,6 +388,54 @@ fn clone_assignments(xs: &List<UpdateAssignment>) -> List<UpdateAssignment> {
         i = i + 1;
     }
     out
+}
+
+// Recover the projection width of a planned subtree.  Used as a
+// fallback when the AST-side `compound_proj_count` returns -1 (i.e.
+// the lhs uses `SELECT *` / `t.*`); the post-projection plan node
+// structure exposes the resolved count.
+fn plan_node_proj_count(node: &PlanNode) -> Int {
+    match node {
+        PnProject(_, ref cols) => cols.len(),
+        PnDistinct(_, n_proj) => n_proj,
+        PnGroupBy(_, _, ref projection, _) => projection.len(),
+        PnValues(_, col_count) => col_count,
+        PnSort(ref child, _) => plan_node_proj_count(child),
+        PnLimit(ref child, _, _) => plan_node_proj_count(child),
+        PnFilter(ref child, _) => plan_node_proj_count(child),
+        PnUnion(_, _, n_proj) => n_proj,
+        PnIntersect(_, _, n_proj) => n_proj,
+        PnExcept(_, _, n_proj) => n_proj,
+        PnUnionAll(ref l, _) => plan_node_proj_count(l),
+        // Conservative fallback — codegen will reject this anyway.
+        _ => 0,
+    }
+}
+
+// Walk a SELECT statement to find the column count produced by the
+// leftmost simple SELECT.  Compound semantics (UNION, INTERSECT,
+// EXCEPT) require both sides to have the same column count; we use
+// the left side as the reference (mirrors SQLite's own behaviour).
+//
+// Returns -1 for `SELECT *` / `SELECT t.*` since the actual column
+// count needs schema; those cases fall through to the schema-aware
+// planner which has access to table metadata.
+fn compound_proj_count(sel: &SelectStmt) -> Int {
+    match sel.kind {
+        SkSimple(ref s) => {
+            let mut count: Int = 0;
+            let mut i: Int = 0;
+            while i < s.result_columns.len() {
+                match s.result_columns[i] {
+                    RcExpr(_, _) => { count = count + 1; }
+                    RcStar | RcTableStar(_) => { return -1; }
+                }
+                i = i + 1;
+            }
+            count
+        }
+        SkCompound(_, ref lhs, _) => compound_proj_count(lhs),
+    }
 }
 
 fn clone_order_terms(xs: &List<OrderTerm>) -> List<OrderTerm> {
@@ -668,18 +749,62 @@ fn plan_select_with_schema(
 ) -> Result<PlanNode, PlanError> {
     let simple = match sel.kind {
         SkSimple(ref s) => s,
-        SkCompound(op, ref lhs, ref rhs) => match op {
-            CoUnionAll => {
-                let lp = match plan_select_with_schema(lhs, schema) {
-                    Ok(p)  => p, Err(e) => { return Err(e); }
-                };
-                let rp = match plan_select_with_schema(rhs, schema) {
-                    Ok(p)  => p, Err(e) => { return Err(e); }
-                };
-                return Ok(PnUnionAll(Heap(lp), Heap(rp)));
+        SkCompound(op, ref lhs, ref rhs) => {
+            let lp = match plan_select_with_schema(lhs, schema) {
+                Ok(p)  => p, Err(e) => { return Err(e); }
+            };
+            let rp = match plan_select_with_schema(rhs, schema) {
+                Ok(p)  => p, Err(e) => { return Err(e); }
+            };
+            // Determine projection width — when the lhs is a simple
+            // SELECT with no `*`, we know it from result_columns; for
+            // `*`/`t.*` or nested compounds we resort to the count
+            // produced by the lhs subplan structure.  The codegen
+            // never reads n_proj < 0; the schema resolver above has
+            // already enforced agreement.
+            let n_proj_left = compound_proj_count(lhs);
+            let n_proj = if n_proj_left < 0 {
+                plan_node_proj_count(&lp)
+            } else {
+                n_proj_left
+            };
+            let mut compound: PlanNode = match op {
+                CoUnionAll  => PnUnionAll(Heap(lp), Heap(rp)),
+                CoUnion     => PnUnion(Heap(lp), Heap(rp), n_proj),
+                CoIntersect => PnIntersect(Heap(lp), Heap(rp), n_proj),
+                CoExcept    => PnExcept(Heap(lp), Heap(rp), n_proj),
+            };
+            // Outer ORDER BY / LIMIT applies AFTER the compound op.
+            if sel.order_by.len() > 0 {
+                let mut resolved_terms: List<OrderTerm> = List.new();
+                let mut t: Int = 0;
+                while t < sel.order_by.len() {
+                    let term = &sel.order_by[t];
+                    // Compound ORDER BY can only reference position-
+                    // independent expressions / column-position numbers;
+                    // for v1 we accept the literal expr without scope
+                    // resolution (matches schema-free planner).
+                    resolved_terms.push(OrderTerm {
+                        expr: clone_expr(&term.expr),
+                        direction: term.direction,
+                        nulls_first: term.nulls_first,
+                    });
+                    t = t + 1;
+                }
+                compound = PnSort(Heap(compound), resolved_terms);
             }
-            _ => { return Err(plan_error("compound SELECT op pending (UNION/INTERSECT/EXCEPT dedup)".clone())); }
-        },
+            match sel.limit {
+                Some(ref lc) => {
+                    let off: Maybe<Expr> = match lc.offset {
+                        Some(ref e) => Some(clone_expr(e)),
+                        None => None,
+                    };
+                    compound = PnLimit(Heap(compound), clone_expr(&lc.limit), off);
+                }
+                None => {}
+            }
+            return Ok(compound);
+        }
     };
 
     // No FROM → fall back to the schema-free planner.
