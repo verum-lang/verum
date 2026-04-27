@@ -925,7 +925,13 @@ impl WPCalculator {
     /// 2. Have a well-founded ordering (non-negative integers satisfy this)
     ///
     /// Returns true if the measure appears to be well-formed.
-    #[allow(dead_code)]
+    ///
+    /// Currently exercised only by tests; gated `#[cfg(test)]` so the
+    /// production binary doesn't carry it.  Promoting to a non-test API
+    /// requires a proper caller in the verification pipeline (the
+    /// well-foundedness obligation is currently produced inline by
+    /// the verification-condition generator).
+    #[cfg(test)]
     fn validate_measure(&self, measure: &SmtExpr) -> bool {
         // For now, we accept any integer expression as a valid measure
         // The well-foundedness is enforced by the >= 0 verification condition

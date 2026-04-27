@@ -31,7 +31,7 @@
 
 use crate::tactic_evaluation::{Goal, Hypothesis};
 use verum_ast::expr::{BinOp, Expr, ExprKind};
-use verum_common::{List, Text};
+use verum_common::Text;
 
 /// Confidence level on a suggestion — how likely it is to help.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -599,8 +599,3 @@ mod tests {
     }
 }
 
-// Silence unused-import warnings when tests are disabled.
-#[allow(dead_code)]
-fn _keep_list_import() {
-    let _: List<()> = List::new();
-}
