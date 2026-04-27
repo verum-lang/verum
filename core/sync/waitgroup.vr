@@ -40,6 +40,9 @@ fn __waitgroup_done_raw(wg: Int) -> Int;
 @intrinsic("waitgroup_wait")
 fn __waitgroup_wait_raw(wg: Int) -> Int;
 
+@intrinsic("waitgroup_try_wait")
+fn __waitgroup_try_wait_raw(wg: Int) -> Int;
+
 @intrinsic("waitgroup_destroy")
 fn __waitgroup_destroy_raw(wg: Int) -> Int;
 
@@ -76,8 +79,35 @@ implement WaitGroup {
         __waitgroup_wait_raw(self.handle);
     }
 
+    /// Non-blocking poll: returns `true` if the counter is already
+    /// at 0 (i.e. `wait()` would return immediately), `false`
+    /// otherwise. Useful for `select`-style polling where the
+    /// caller wants to do other work if the WaitGroup isn't
+    /// ready yet.
+    public fn try_wait(&self) -> Bool {
+        __waitgroup_try_wait_raw(self.handle) != 0
+    }
+
     /// Destroy the WaitGroup, freeing resources.
+    ///
+    /// Most callers should NOT need to call this directly — the
+    /// `Drop` impl below releases the underlying handle when the
+    /// `WaitGroup` value goes out of scope. The explicit method
+    /// is retained for cases where the caller needs to release
+    /// resources before scope-exit (e.g. handing ownership across
+    /// an FFI boundary).
     public fn destroy(&self) {
+        __waitgroup_destroy_raw(self.handle);
+    }
+}
+
+// RAII: release the underlying handle when the WaitGroup value
+// goes out of scope. Without this, callers had to remember to
+// call `destroy()` manually — a classic resource-leak hazard
+// that gets worse over a long-running process where dozens of
+// short-lived task-orchestration WaitGroups accumulate.
+implement Drop for WaitGroup {
+    fn drop(&mut self) {
         __waitgroup_destroy_raw(self.handle);
     }
 }
