@@ -93,12 +93,18 @@ public mount .core.{
     CoherenceResult, check_coherence,
     // Auditing
     AuditResult, audit_theory, audit_meta,
+    // §242 audit-helper layer
+    translation_verdict, translation_admits,
+    is_coherent, coherence_quality,
 };
 
 // VVA §10.2 obstruction verdict + §10.4 MSFS coordinate
 public mount .coord.{
     TranslationVerdict, verdict_of, verdict_as_text, verdict_admits,
     MsfsCoord, msfs_coord, coord_of, coord_as_text, coord_eq,
+    MsfsTheoremCoord, theorem_coord, theorem_coord_as_text,
+    Ordinal, ord_zero, ord_finite, ord_omega, ord_max, ord_lt,
+    ord_eq, ord_as_text,
 };
 
 // Protocol operations
