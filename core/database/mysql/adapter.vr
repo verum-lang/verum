@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/mysql/adapter.vr — Spindle MySQL adapter façade
+// =============================================================================
+// Spec: internal/specs/database.md §6.3
+// =============================================================================
+
+module core.database.mysql.adapter;
+
+mount core.*;
+mount base.Text;
+mount core.database.common.error.AdapterId;
+
+public type MysqlAdapter is ();
+
+implement MysqlAdapter {
+    public fn name() -> Text { "mysql".clone() }
+    public fn version_required() -> Text { "8.0.0".clone() }
+    public fn adapter_id() -> AdapterId { AdMysql }
+}

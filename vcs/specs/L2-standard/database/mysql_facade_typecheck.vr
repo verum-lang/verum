@@ -1,0 +1,126 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: database, mysql, spindle, common, facade, caching_sha2
+// @timeout: 30000
+//
+// Type-check exercise for the Spindle MySQL façade — wire taxonomy,
+// caching_sha2_password scrambler, and adapter/config builders.
+
+mount core.*;
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId, AdMysql};
+mount core.database.mysql.{
+    MysqlAdapter, MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
+};
+mount core.database.mysql.auth.caching_sha2.{
+    scramble_caching_sha2,
+    CachingSha2State, CsFastAuthOk, CsFullAuthRequired, CsFailed,
+    classify_auth_more,
+};
+mount core.database.mysql.wire.frame.{
+    encode_lei, decode_lei, frame_packet, try_parse_packet,
+    LkOneByte, LkTwoBytes, LkThreeBytes, LkEightBytes, LkNull,
+};
+
+fn check_config_builders() {
+    let cfg = MysqlConfig.local_dev();
+    assert(cfg.target_label() == "127.0.0.1:53306");
+
+    let cfg2 = MysqlConfig.new(
+        "db.example.com".clone(),
+        3306,
+        "alice".clone(),
+        "secret".clone(),
+        "app_db".clone(),
+    )
+    .with_character_set(33)
+    .with_tls(MtmRequired)
+    .with_connect_timeout_ms(20_000);
+    let _ = cfg2;
+    assert(MtmRequired.is_encrypted());
+    assert(!MtmDisable.is_encrypted());
+}
+
+fn check_adapter_identity() {
+    assert(MysqlAdapter.name() == "mysql");
+    let id = MysqlAdapter.adapter_id();
+    match id {
+        AdMysql => {},
+        _       => panic("expected AdMysql"),
+    }
+}
+
+fn check_lei_codec() {
+    // Round-trip encode/decode of small / 2-byte / 3-byte / 8-byte values.
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0xFA);              // single-byte boundary
+    encode_lei(&mut buf, 0x1234);            // 2-byte
+    encode_lei(&mut buf, 0x123456);          // 3-byte
+    encode_lei(&mut buf, 0x12345678);        // 4-byte fits in 8-byte form
+
+    let (v0, k0, n0) = match decode_lei(buf.as_slice(), 0)         { Ok(t) => t, Err(_) => panic("LEI 0") };
+    let (v1, k1, n1) = match decode_lei(buf.as_slice(), n0)        { Ok(t) => t, Err(_) => panic("LEI 1") };
+    let (v2, k2, n2) = match decode_lei(buf.as_slice(), n0 + n1)   { Ok(t) => t, Err(_) => panic("LEI 2") };
+    let (v3, k3, _)  = match decode_lei(buf.as_slice(), n0 + n1 + n2) { Ok(t) => t, Err(_) => panic("LEI 3") };
+
+    assert(v0 == 0xFA);
+    assert(v1 == 0x1234);
+    assert(v2 == 0x123456);
+    assert(v3 == 0x12345678);
+    let _ = k0; let _ = k1; let _ = k2; let _ = k3;
+}
+
+fn check_packet_roundtrip() {
+    let payload: List<Byte> = [0x10 as Byte, 0x20 as Byte, 0x30 as Byte];
+    let pkt = frame_packet(7, payload.as_slice());
+    match try_parse_packet(pkt.as_slice()) {
+        Ok(Some(outcome)) => {
+            assert(outcome.packet.sequence() == 7);
+            assert(outcome.packet.payload().len() == 3);
+            assert(outcome.bytes_consumed == 7);     // 4-byte header + 3 payload
+        }
+        Ok(None) => panic("packet incomplete"),
+        Err(_)   => panic("packet parse error"),
+    }
+}
+
+fn check_caching_sha2() {
+    // Empty password yields an empty response per spec.
+    let pw: List<Byte> = List.new();
+    let nonce: List<Byte> = make_filled(0xAB as Byte, 20);
+    let r = scramble_caching_sha2(pw.as_slice(), nonce.as_slice());
+    assert(r.len() == 0);
+
+    // Non-empty password yields a 32-byte response.
+    let pw2: List<Byte> = make_filled(0x11 as Byte, 8);
+    let r2 = scramble_caching_sha2(pw2.as_slice(), nonce.as_slice());
+    assert(r2.len() == 32);
+
+    // FastAuthOk classifier
+    let amok: List<Byte> = [0x03 as Byte];
+    match classify_auth_more(amok.as_slice()) {
+        CsFastAuthOk => {},
+        _            => panic("expected CsFastAuthOk"),
+    }
+    let amfull: List<Byte> = [0x04 as Byte];
+    match classify_auth_more(amfull.as_slice()) {
+        CsFullAuthRequired => {},
+        _                  => panic("expected CsFullAuthRequired"),
+    }
+}
+
+fn make_filled(b: Byte, n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < n { out.push(b); i = i + 1; }
+    out
+}
+
+fn main() {
+    check_config_builders();
+    check_adapter_identity();
+    check_lei_codec();
+    check_packet_roundtrip();
+    check_caching_sha2();
+}

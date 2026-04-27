@@ -21,3 +21,11 @@ module core.database.mysql;
 public module wire;
 public module auth;
 public module error;
+public module config;
+public module adapter;
+
+public mount .config.{
+    MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
+};
+public mount .adapter.MysqlAdapter;
+public mount .error.dberr_from_mysql;
