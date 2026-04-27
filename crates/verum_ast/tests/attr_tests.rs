@@ -732,6 +732,97 @@ fn test_framework_attr_display_roundtrip() {
 }
 
 // ============================================================================
+// FrameworkTranslateAttr Tests — `@framework_translate(source, target, "...")`
+// ============================================================================
+
+fn build_framework_translate_attr(
+    source: &str,
+    target: &str,
+    citation: &str,
+) -> Attribute {
+    let span = Span::default();
+    let source_expr = Expr::ident(Ident::new(Text::from(source), span));
+    let target_expr = Expr::ident(Ident::new(Text::from(target), span));
+    let citation_lit = Literal::new(
+        LiteralKind::Text(StringLit::Regular(Text::from(citation))),
+        span,
+    );
+    let citation_expr = Expr::literal(citation_lit);
+    let mut args = List::new();
+    args.push(source_expr);
+    args.push(target_expr);
+    args.push(citation_expr);
+    Attribute::new(Text::from("framework_translate"), Maybe::Some(args), span)
+}
+
+#[test]
+fn test_framework_translate_extracts_from_generic_attribute() {
+    let raw = build_framework_translate_attr(
+        "owl2_fs",
+        "lurie_htt",
+        "Class → Presheaf",
+    );
+    let typed = FrameworkTranslateAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(t) => {
+            assert_eq!(t.source.as_str(), "owl2_fs");
+            assert_eq!(t.target.as_str(), "lurie_htt");
+            assert_eq!(t.citation.as_str(), "Class → Presheaf");
+        }
+        Maybe::None => panic!(
+            "FrameworkTranslateAttr::from_attribute returned None on valid input"
+        ),
+    }
+}
+
+#[test]
+fn test_framework_translate_rejects_wrong_name() {
+    let raw = build_framework_attr("lurie_htt", "HTT 6.2.2.7");
+    assert!(matches!(
+        FrameworkTranslateAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+}
+
+#[test]
+fn test_framework_translate_rejects_two_args() {
+    // Two args (source, target) without citation must reject.
+    let span = Span::default();
+    let source_expr = Expr::ident(Ident::new(Text::from("a"), span));
+    let target_expr = Expr::ident(Ident::new(Text::from("b"), span));
+    let mut args = List::new();
+    args.push(source_expr);
+    args.push(target_expr);
+    let raw = Attribute::new(
+        Text::from("framework_translate"),
+        Maybe::Some(args),
+        span,
+    );
+    assert!(matches!(
+        FrameworkTranslateAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+}
+
+#[test]
+fn test_framework_translate_display_roundtrip() {
+    let raw = build_framework_translate_attr(
+        "owl2_fs",
+        "lurie_htt",
+        "ObjectProperty → Functor",
+    );
+    let typed = FrameworkTranslateAttr::from_attribute(&raw);
+    let t = match typed {
+        Maybe::Some(t) => t,
+        Maybe::None => panic!("extraction failed"),
+    };
+    assert_eq!(
+        format!("{}", t),
+        r#"@framework_translate(owl2_fs, lurie_htt, "ObjectProperty → Functor")"#
+    );
+}
+
+// ============================================================================
 // OWL 2 ATTRIBUTION FAMILY — VVA §21.6 Phase 3 C8
 // ============================================================================
 //
