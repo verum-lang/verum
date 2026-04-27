@@ -233,6 +233,44 @@ implement PgConnection {
         }
     }
 
+    /// Convenience — run a single statement that produces no rows
+    /// (DDL / INSERT / UPDATE / DELETE / TX control). Returns the
+    /// `command_tag` from the OK CommandComplete frame; affected-row
+    /// count parsing is deferred to the caller, since the format
+    /// varies across statement kinds (`INSERT 0 N`, `UPDATE N`,
+    /// `DELETE N`, etc.).
+    public fn execute(&mut self, sql: &Text) -> Result<Text, DbError> {
+        match self.simple_query(sql) {
+            Ok(result) => Ok(result.command_tag),
+            Err(e)     => Err(e),
+        }
+    }
+
+    /// Convenience — run a SELECT and return only the rows. Discards
+    /// the row description (callers that need column names use
+    /// `simple_query` directly).
+    public fn query_all(&mut self, sql: &Text) -> Result<List<List<WireValue>>, DbError> {
+        match self.simple_query(sql) {
+            Ok(result) => Ok(result.rows),
+            Err(e)     => Err(e),
+        }
+    }
+
+    /// Convenience — run a SELECT and return only the first row.
+    /// `Ok(None)` when the query completes with no rows.
+    public fn query_first(&mut self, sql: &Text) -> Result<Maybe<List<WireValue>>, DbError> {
+        match self.simple_query(sql) {
+            Ok(result) => {
+                if (result.rows.len() as Int) == 0 {
+                    Ok(None)
+                } else {
+                    Ok(Some(result.rows[0].clone()))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Orderly shutdown — sends Terminate then closes the underlying
     /// TCP stream. Affine: the value is moved out so further use is
     /// a compile error.
