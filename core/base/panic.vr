@@ -322,7 +322,11 @@ public unsafe fn unreachable_unchecked(_msg: Text = "") -> ! {
     // True UB-hint via the renamed intrinsic import (line 15).
     // The local `unreachable(msg)` defined above is the safe
     // panicking version; this branch deliberately bypasses it.
-    intrinsic_unreachable()
+    // The intrinsic is itself `unsafe` because reaching it is
+    // UB; we're inside an `unsafe fn` so the call is permitted,
+    // and we wrap it in an explicit `unsafe { ... }` block to
+    // make the contract-discharge visible at the call site.
+    unsafe { intrinsic_unreachable() }
 }
 
 /// Marks code as unimplemented.

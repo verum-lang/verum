@@ -59,8 +59,27 @@ public fn itrunc<S, D>(x: S) -> D { @intrinsic("trunc", x) }
 // SECTION 3: Bit Reinterpretation
 // =============================================================================
 
-/// Reinterpret bits as different type (same size required)
-public fn bitcast<S, D>(x: S) -> D { @intrinsic("bitcast", x) }
+/// Reinterpret the bits of `x` as a value of type `D`.
+///
+/// **Unsafe contract:** sizes of `S` and `D` MUST match
+/// (`S.size == D.size`). The compiler does NOT enforce this at the
+/// generic-instantiation site; bitcast between mismatched sizes
+/// produces undefined behaviour (may read past the end of the
+/// source value, may write past the end of the destination — the
+/// LLVM `bitcast` instruction is silently UB on mismatched sizes).
+///
+/// Use the size-typed convenience wrappers below
+/// (`f32_to_bits` / `f32_from_bits` / `f64_to_bits` /
+/// `f64_from_bits`) when working with the canonical IEEE 754
+/// float-bits round-trip — those are safe because the size pair
+/// is fixed in the intrinsic name (`bitcast` of `Float32` ↔
+/// `UInt32` and `Float64` ↔ `UInt64` is always size-matched).
+///
+/// Marked `unsafe` to surface the size-match contract; the prior
+/// safe declaration let arbitrary callers silently UB. No
+/// existing call site in `core/` is affected — only the size-
+/// typed wrappers below were used in practice.
+public unsafe fn bitcast<S, D>(x: S) -> D { @intrinsic("bitcast", x) }
 
 // =============================================================================
 // SECTION 4: Byte Conversions
@@ -115,7 +134,7 @@ public fn from_le<T>(x: T) -> T { @intrinsic("from_le", x) }
 public fn from_be<T>(x: T) -> T { @intrinsic("from_be", x) }
 
 // =============================================================================
-// SECTION 5: Convenience Aliases
+// SECTION 6: Convenience Aliases
 // =============================================================================
 
 /// Convert integer to byte array (alias for to_ne_bytes)
