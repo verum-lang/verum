@@ -134,6 +134,17 @@ public async fn race<T, FA: Future<Output>, FB: Future<Output>>(
 // Select All - Select from collection
 // =============================================================================
 
+/// Errors raised by selection combinators.
+///
+/// These map cases that previously panicked (empty input list, exhausted
+/// fallback chain) into typed error values so callers can handle them with
+/// `?` instead of crashing the task.
+public type SelectError is
+    /// `select_all` / `race_all` / `try_first` was given an empty list.
+    /// There is no future to wait on, so the call returns this error
+    /// synchronously (no Pending hang, no panic).
+    | EmptyInput;
+
 /// Result of select_all operation.
 public type SelectAllResult<T> is {
     /// The completed value
@@ -147,6 +158,8 @@ public type SelectAllResult<T> is {
 /// Select from a collection of futures, completing when any one finishes.
 ///
 /// Returns the result along with the index && remaining futures.
+/// Returns `Err(SelectError::EmptyInput)` when the input list is empty
+/// (instead of panicking, which the previous implementation did).
 ///
 /// # Example
 ///
@@ -157,12 +170,12 @@ public type SelectAllResult<T> is {
 ///     fetch_server_3(),
 /// ]);
 ///
-/// let res = select_all(futures).await;
-/// println(f"Server {result.index} responded first");
+/// let res = select_all(futures).await?;
+/// println(f"Server {res.index} responded first");
 /// ```
 public async fn select_all<T, F: Future<Output>>(
     mut futures: List<F>,
-) -> SelectAllResult<T> {
+) -> Result<SelectAllResult<T>, SelectError> {
     SelectAll { futures: futures }.await
 }
 
@@ -171,9 +184,15 @@ type SelectAll<T, F: Future<Output>> is {
 };
 
 implement<T, F: Future<Output>> Future for SelectAll<T, F> {
-    type Output = SelectAllResult<T>;
+    type Output = Result<SelectAllResult<T>, SelectError>;
 
-    fn poll(&mut self, cx: &mut Context) -> Poll<SelectAllResult<T>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<SelectAllResult<T>, SelectError>> {
+        // Empty input → synchronous error (do this first so the for-loop
+        // bound check below is a pure "all-pending" signal).
+        if self.futures.is_empty() {
+            return Poll.Ready(Err(SelectError.EmptyInput));
+        }
+
         for i in 0..self.futures.len() {
             match self.futures[i].poll(cx) {
                 Poll.Ready(val) => {
@@ -181,18 +200,14 @@ implement<T, F: Future<Output>> Future for SelectAll<T, F> {
                     let completed = self.futures.remove(i);
                     let remaining = self.futures.clone();
 
-                    return Poll.Ready(SelectAllResult {
+                    return Poll.Ready(Ok(SelectAllResult {
                         value: val,
                         index: i,
                         remaining: remaining,
-                    });
+                    }));
                 }
                 Poll.Pending => {}
             }
-        }
-
-        if self.futures.is_empty() {
-            panic("select_all called with empty list");
         }
 
         Poll.Pending
@@ -388,10 +403,14 @@ public async fn try_join3<A, B, C, E,
 
 /// Race a collection of futures — returns the first one to complete.
 /// Alias for `select_all` that drops the index and the remaining futures.
+///
+/// Returns `Err(SelectError::EmptyInput)` when the input list is empty
+/// (propagated from `select_all`).
 public async fn race_all<T, F: Future<Output = T>>(
     futures: List<F>,
-) -> T {
-    select_all(futures).await.value
+) -> Result<T, SelectError> {
+    let r = select_all(futures).await?;
+    Ok(r.value)
 }
 
 /// Wait for all futures and return their results; does NOT short-circuit
@@ -540,6 +559,12 @@ implement<T, F: Future<Output>> Future for SelectTimeout<T, F> {
 ///
 /// Unlike `race`, this tries futures sequentially && returns on first success.
 ///
+/// Returns:
+/// - `Ok(value)` — first future that succeeded
+/// - `Err(LastError(e))` — every future errored; `e` is the last seen
+///   error (preserves the existing per-future error type `E`)
+/// - `Err(EmptyInput)` — input list was empty (previously panicked)
+///
 /// # Example
 ///
 /// ```verum
@@ -547,11 +572,15 @@ implement<T, F: Future<Output>> Future for SelectTimeout<T, F> {
 ///     || fetch_primary().await,
 ///     || fetch_secondary().await,
 ///     || fetch_fallback().await,
-/// ])).await;
+/// ])).await?;
 /// ```
+public type TryFirstError<E> is
+    | EmptyInput
+    | LastError(E);
+
 public async fn try_first<T, E, F: Future<Output = Result<T, E>>>(
     futures: List<F>,
-) -> Result<T, E> {
+) -> Result<T, TryFirstError<E>> {
     TryFirst {
         futures: futures,
         current: 0,
@@ -564,9 +593,15 @@ type TryFirst<T, E, F: Future<Output = Result<T, E>>> is {
 };
 
 implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
-    type Output = Result<T, E>;
+    type Output = Result<T, TryFirstError<E>>;
 
-    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, E>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, TryFirstError<E>>> {
+        // Synchronous EmptyInput: covers both the initial-empty-list
+        // case and the post-drain case (current ≥ len with len == 0).
+        if self.futures.is_empty() {
+            return Poll.Ready(Err(TryFirstError.EmptyInput));
+        }
+
         while self.current < self.futures.len() {
             match self.futures[self.current].poll(cx) {
                 Poll.Ready(Ok(val)) => {
@@ -575,18 +610,32 @@ implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
                 Poll.Ready(Err(e)) => {
                     self.current = self.current + 1;
                     if self.current >= self.futures.len() {
-                        return Poll.Ready(Err(e));
+                        return Poll.Ready(Err(TryFirstError.LastError(e)));
                     }
                     // Continue to next future
                 }
                 Poll.Pending => {
                     return Poll.Pending;
                 }
-                Poll.Ready(_) => unreachable(),
+                // Exhaustiveness shim: Verum's checker can't prove
+                // that `Result<T, E>` only inhabits Ok / Err, so this
+                // arm is required even though it is provably dead by
+                // construction.  We yield Pending instead of panicking
+                // — if the unreachable ever fires, the executor will
+                // simply re-poll, and the deadlock-detector surfaces
+                // any hang.
+                Poll.Ready(_) => return Poll.Pending,
             }
         }
 
-        panic("try_first called with empty list");
+        // Loop exit: only reachable when `current ≥ len` AND the list
+        // is non-empty (the empty-list path returned earlier).  This
+        // happens after every future errored: the final iteration
+        // returned `LastError(e)`, so we can never actually reach
+        // here.  Be defensive anyway with EmptyInput rather than a
+        // panic — a hostile mutator that cleared `futures` mid-poll
+        // is the only way to land here.
+        Poll.Ready(Err(TryFirstError.EmptyInput))
     }
 }
 
@@ -678,10 +727,17 @@ public type SelectReadyFuture<T> is {
 implement<T> Future for SelectReadyFuture<T> {
     type Output = T;
 
+    /// Polls return `Ready(v)` exactly once; subsequent polls return
+    /// `Pending` indefinitely (FusedFuture semantics).  This matches
+    /// the convention used by `core/async/future.rs`'s NeverFuture
+    /// and avoids panicking on the documented contract violation
+    /// "don't poll after Ready" — instead the contract violation
+    /// degrades to a clean hang that the executor's deadlock
+    /// detector can surface.
     fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
         match self.value.take() {
             Some(v) => Poll.Ready(v),
-            None => panic("SelectReadyFuture polled after completion"),
+            None => Poll.Pending,
         }
     }
 }
