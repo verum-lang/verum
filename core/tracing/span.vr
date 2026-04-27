@@ -229,7 +229,7 @@ implement Span {
 
     /// Get a copy of the SpanContext for propagation.
     public fn context(&self) -> SpanContext {
-        let guard = (&*self.inner).lock().unwrap();
+        let guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &SpanInner = &*guard;
         inner.context.clone()
     }
@@ -251,7 +251,7 @@ implement Span {
 
     public fn set_attribute(&self, key: Text, value: AttributeValue) {
         if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap();
+        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
         // Re-check under the lock: end() may have completed between the
         // fast-path load and the lock acquisition, in which case the
@@ -262,7 +262,7 @@ implement Span {
 
     public fn add_event(&self, name: Text, attributes: AttributeSet) {
         if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap();
+        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
         if inner.events.len() >= SPAN_EVENT_LIMIT { return; }
@@ -275,7 +275,7 @@ implement Span {
 
     public fn add_link(&self, link: SpanLink) {
         if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap();
+        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
         if inner.links.len() >= SPAN_LINK_LIMIT { return; }
@@ -284,7 +284,7 @@ implement Span {
 
     public fn set_status(&self, new_status: SpanStatus) {
         if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap();
+        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
         // Per OTel spec §5.1.5: Ok can only transition from Unset;
@@ -303,7 +303,7 @@ implement Span {
 
     public fn update_name(&self, name: Text) {
         if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap();
+        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
         inner.name = name;
@@ -327,7 +327,7 @@ implement Span {
     public fn end(&self) -> Maybe<SpanData> {
         // Fast-path idempotency: if already ended, skip the lock.
         if self.ended_flag.load(MemoryOrdering.Acquire) { return None; }
-        let mut guard = (&*self.inner).lock().unwrap();
+        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
         if inner.end_time.is_some() { return None; }
         let now = Instant.now();
@@ -341,7 +341,7 @@ implement Span {
     /// End with an explicit timestamp (for replay / test scenarios).
     public fn end_at(&self, ts: Instant) -> Maybe<SpanData> {
         if self.ended_flag.load(MemoryOrdering.Acquire) { return None; }
-        let mut guard = (&*self.inner).lock().unwrap();
+        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
         if inner.end_time.is_some() { return None; }
         inner.end_time = Some(ts);
@@ -358,7 +358,7 @@ implement Debug for Span {
         let ctx = self.context();
         let tid = ctx.trace_id().to_hex();
         let sid = ctx.span_id().to_hex();
-        let guard = (&*self.inner).lock().unwrap();
+        let guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &SpanInner = &*guard;
         f.write_str(f"Span {{ trace_id: \"{tid}\", span_id: \"{sid}\", name: \"{inner.name}\" }}")
     }
@@ -369,7 +369,7 @@ implement Display for Span {
         let ctx = self.context();
         let tid = ctx.trace_id().to_hex();
         let sid = ctx.span_id().to_hex();
-        let guard = (&*self.inner).lock().unwrap();
+        let guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &SpanInner = &*guard;
         f.write_str(f"[{tid}:{sid}] {inner.name}")
     }

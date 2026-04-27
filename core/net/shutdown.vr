@@ -148,7 +148,7 @@ implement GracefulShutdown {
         );
         match first {
             Ok(_) => {
-                let mut g = (&*self.started_at).lock().unwrap();
+                let mut g = (&*self.started_at).lock().unwrap_or_else(|p| p.into_inner());
                 *g = Some(Instant.now());
                 (&*self.token_source).cancel();
             }

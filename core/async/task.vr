@@ -148,7 +148,7 @@ implement<T> Future for JoinHandle<T> {
             if self.task.is_cancelled() {
                 Poll.Ready(Err(JoinError.Cancelled))
             } else {
-                let mut guard = self.task.result.lock().unwrap();
+                let mut guard = self.task.result.lock().unwrap_or_else(|p| p.into_inner());
                 match guard.take() {
                     Some(res) => Poll.Ready(Ok(res)),
                     None => Poll.Ready(Err(JoinError.Panicked)),

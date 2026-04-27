@@ -110,13 +110,13 @@ implement MetricFamily {
     /// Snapshot the family for export — clones entries, including
     /// atomic values (via each instrument's Shared handle).
     public fn snapshot_entries(&self) -> List<MetricEntry> {
-        let guard = (&*self.entries).lock().unwrap();
+        let guard = (&*self.entries).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &List<MetricEntry> = &*guard;
         clone_entries(inner)
     }
 
     fn resolve_counter(&self, labels: &LabelSet) -> Shared<Counter> {
-        let mut guard = (&*self.entries).lock().unwrap();
+        let mut guard = (&*self.entries).lock().unwrap_or_else(|p| p.into_inner());
         let entries: &mut List<MetricEntry> = &mut *guard;
         let mut i = 0;
         while i < entries.len() {
@@ -146,7 +146,7 @@ implement MetricFamily {
     }
 
     fn resolve_up_down(&self, labels: &LabelSet) -> Shared<UpDownCounter> {
-        let mut guard = (&*self.entries).lock().unwrap();
+        let mut guard = (&*self.entries).lock().unwrap_or_else(|p| p.into_inner());
         let entries: &mut List<MetricEntry> = &mut *guard;
         let mut i = 0;
         while i < entries.len() {
@@ -172,7 +172,7 @@ implement MetricFamily {
     }
 
     fn resolve_gauge(&self, labels: &LabelSet) -> Shared<Gauge> {
-        let mut guard = (&*self.entries).lock().unwrap();
+        let mut guard = (&*self.entries).lock().unwrap_or_else(|p| p.into_inner());
         let entries: &mut List<MetricEntry> = &mut *guard;
         let mut i = 0;
         while i < entries.len() {
@@ -198,7 +198,7 @@ implement MetricFamily {
     }
 
     fn resolve_histogram(&self, labels: &LabelSet) -> Shared<Histogram> {
-        let mut guard = (&*self.entries).lock().unwrap();
+        let mut guard = (&*self.entries).lock().unwrap_or_else(|p| p.into_inner());
         let entries: &mut List<MetricEntry> = &mut *guard;
         let mut i = 0;
         while i < entries.len() {
@@ -274,7 +274,7 @@ implement Registry {
 
     /// Take a snapshot of all families for export.
     public fn snapshot(&self) -> List<Shared<MetricFamily>> {
-        let guard = (&*self.families).lock().unwrap();
+        let guard = (&*self.families).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &List<Shared<MetricFamily>> = &*guard;
         let mut out = List.with_capacity(inner.len());
         let mut i = 0;
@@ -293,7 +293,7 @@ implement Registry {
         label_names: List<Text>,
         buckets: HistogramBuckets,
     ) -> Shared<MetricFamily> {
-        let mut guard = (&*self.families).lock().unwrap();
+        let mut guard = (&*self.families).lock().unwrap_or_else(|p| p.into_inner());
         let families: &mut List<Shared<MetricFamily>> = &mut *guard;
         let mut i = 0;
         while i < families.len() {
