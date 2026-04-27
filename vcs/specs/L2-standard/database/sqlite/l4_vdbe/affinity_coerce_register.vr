@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l4, affinity, coerce, register
+// @timeout: 15000
+// @description: Register ↔ Value bridge + coerce_register affinity matrix
+//
+// Spec: internal/specs/sqlite-native.md §9.3, §11.6 (MakeRecord affinity p4)
+//
+// Validates the L4-side bridge that lets the VDBE apply L2's affinity
+// coercion table directly on `Register` values without the cursor
+// having to detour through the L2 `CoercionSqliteValue` shape.
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.{
+    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
+    register_to_value, value_to_register,
+    coerce_register, coerce_row,
+};
+mount core.database.sqlite.native.l2_record.{
+    CoercionSqliteValue, VNull, VInt, VReal, VText, VBlob,
+    Affinity,
+};
+
+fn null_passes_through() {
+    match coerce_register(RNull, Affinity.Integer) { RNull => {}, _ => panic("RNull"), }
+    match coerce_register(RNull, Affinity.Text)    { RNull => {}, _ => panic("RNull text"), }
+    match coerce_register(RNull, Affinity.Real)    { RNull => {}, _ => panic("RNull real"), }
+    match coerce_register(RNull, Affinity.Blob)    { RNull => {}, _ => panic("RNull blob"), }
+}
+
+fn rowid_folds_to_int() {
+    match register_to_value(RRowId(42 as Int64)) {
+        VInt(i) => { assert(i == (42 as Int64)); }
+        _ => panic("RRowId → VInt"),
+    }
+}
+
+fn integer_affinity_text_to_int() {
+    match coerce_register(RText("123".clone()), Affinity.Integer) {
+        RInt(i) => { assert(i == (123 as Int64)); }
+        _ => panic("text '123' → Int"),
+    }
+    match coerce_register(RText("abc".clone()), Affinity.Integer) {
+        RText(_) => {},   // non-numeric kept as text
+        _ => panic("text 'abc' kept"),
+    }
+}
+
+fn real_affinity_int_to_real() {
+    match coerce_register(RInt(42 as Int64), Affinity.Real) {
+        RReal(x) => { assert(x == 42.0); }
+        _ => panic("int → real"),
+    }
+}
+
+fn numeric_affinity_text() {
+    match coerce_register(RText("99".clone()), Affinity.Numeric) {
+        RInt(_) => {},
+        _ => panic("text '99' → Int"),
+    }
+    match coerce_register(RText("1.5".clone()), Affinity.Numeric) {
+        RReal(_) => {},
+        _ => panic("text '1.5' → Real"),
+    }
+}
+
+fn blob_affinity_no_coerce() {
+    match coerce_register(RInt(7 as Int64), Affinity.Blob) {
+        RInt(_) => {},   // unchanged
+        _ => panic("blob no-op on int"),
+    }
+}
+
+fn coerce_row_partial_affinities() {
+    let mut row: List<Register> = List.new();
+    row.push(RText("42".clone()));
+    row.push(RText("hello".clone()));
+    row.push(RInt(7 as Int64));
+
+    let mut affs: List<Affinity> = List.new();
+    affs.push(Affinity.Integer);
+    affs.push(Affinity.Text);
+    // No third affinity → trailing register left untouched.
+
+    let out = coerce_row(row, &affs);
+    match out[0] { RInt(i) => assert(i == (42 as Int64)), _ => panic("col0 not Int"), }
+    match out[1] { RText(_) => {}, _ => panic("col1 not Text"), }
+    match out[2] { RInt(i) => assert(i == (7 as Int64)), _ => panic("col2 untouched"), }
+}
+
+fn round_trip_register_value() {
+    let r = RText("hi".clone());
+    let v = register_to_value(r);
+    let back = value_to_register(v);
+    match back { RText(s) => { assert(s == "hi"); } _ => panic("round-trip text"), }
+}
+
+fn main() {
+    null_passes_through();
+    rowid_folds_to_int();
+    integer_affinity_text_to_int();
+    real_affinity_int_to_real();
+    numeric_affinity_text();
+    blob_affinity_no_coerce();
+    coerce_row_partial_affinities();
+    round_trip_register_value();
+    print("affinity_coerce_register typecheck ok");
+}

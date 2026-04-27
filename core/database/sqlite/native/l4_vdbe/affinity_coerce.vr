@@ -1,0 +1,102 @@
+module core.database.sqlite.native.l4_vdbe.affinity_coerce;
+
+// =============================================================================
+// l4_vdbe/affinity_coerce.vr — Register-native affinity coercion
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §9.3, §11.6 (MakeRecord opcode + affinity p4)
+//
+// L2 (`l2_record.type_coercion`) owns the canonical affinity coercion
+// table over `CoercionSqliteValue`. The VDBE keeps SQLite's storage
+// classes in `Register`. This module is the bridge:
+//
+//   * `register_to_value(reg) -> CoercionSqliteValue`
+//   * `value_to_register(val) -> Register`
+//   * `coerce_register(reg, affinity) -> Register`
+//
+// Bridge lives in L4 (the consumer) so L2 stays oblivious of the
+// VDBE layer (architectural rule: L2 → L4 is forbidden; L4 → L2 is
+// fine).
+//
+// `RRowId(i)` folds into `VInt(i)` for the bridge — the storage-class
+// distinction is meaningful to the VDBE but not to the on-disk record
+// layer (rowid is just an int64 once written).
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Maybe, None, Some};
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
+};
+mount core.database.sqlite.native.l2_record.type_coercion.{
+    CoercionSqliteValue, VNull, VInt, VReal, VText, VBlob,
+    coerce,
+};
+mount core.database.sqlite.native.l2_record.affinity.Affinity;
+
+// -----------------------------------------------------------------------------
+// Register ↔ CoercionSqliteValue
+// -----------------------------------------------------------------------------
+
+/// Promote a VDBE register into the L2 value shape.  RRowId folds to
+/// VInt — the storage class distinction is VDBE-internal.
+public fn register_to_value(reg: Register) -> CoercionSqliteValue {
+    match reg {
+        RNull       => VNull,
+        RInt(i)     => VInt(i),
+        RReal(x)    => VReal(x),
+        RText(t)    => VText(t),
+        RBlob(b)    => VBlob(b),
+        RRowId(i)   => VInt(i),
+    }
+}
+
+/// Demote an L2 coerced value back into a VDBE register.
+public fn value_to_register(v: CoercionSqliteValue) -> Register {
+    match v {
+        VNull       => RNull,
+        VInt(i)     => RInt(i),
+        VReal(x)    => RReal(x),
+        VText(t)    => RText(t),
+        VBlob(b)    => RBlob(b),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Register-native affinity coercion
+// -----------------------------------------------------------------------------
+
+/// Apply SQLite's affinity-driven coercion to a VDBE register. The
+/// canonical table is in L2 (`type_coercion.coerce`); we just bridge
+/// the register encoding around it.
+///
+/// NULL passes through; STRICT-table enforcement is *not* applied here
+/// (callers wanting STRICT semantics should call `strict.strict_coerce`
+/// explicitly before this).
+public fn coerce_register(reg: Register, affinity: Affinity) -> Register {
+    let v = register_to_value(reg);
+    let coerced = coerce(v, affinity);
+    value_to_register(coerced)
+}
+
+/// Coerce a row of registers in place against a per-column affinity
+/// list. If `affinities` is shorter than the row, trailing columns
+/// are left untouched (mirrors SQLite's behaviour for over-shaped
+/// tuples after CREATE TABLE...AS SELECT).
+public fn coerce_row(row: List<Register>, affinities: &List<Affinity>) -> List<Register> {
+    let n = row.len() as Int;
+    let m = affinities.len() as Int;
+    let mut out: List<Register> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        let reg = row[i].clone();
+        if i < m {
+            out.push(coerce_register(reg, affinities[i].clone()));
+        } else {
+            out.push(reg);
+        }
+        i = i + 1;
+    }
+    out
+}
