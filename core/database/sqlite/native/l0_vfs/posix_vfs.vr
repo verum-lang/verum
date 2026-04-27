@@ -29,7 +29,16 @@ module core.database.sqlite.native.l0_vfs.posix_vfs;
 mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
-mount sys.common.{FileDesc, OSError, pread, pwrite, full_fsync};
+mount sys.common.{
+    FileDesc, OSError,
+    pread, pwrite, full_fsync,
+    file_size as sys_file_size,
+    truncate as sys_truncate,
+    access as sys_access,
+    random_bytes as sys_random_bytes,
+    monotonic_nanos, realtime_nanos,
+    ACCESS_F_OK, ACCESS_R_OK, ACCESS_W_OK,
+};
 mount sys.durability;
 
 @cfg(target_os = "linux")
@@ -217,15 +226,14 @@ implement SqliteFile for PosixFile {
         }
     }
 
-    fn truncate(&mut self, _size: Int) -> Result<(), VfsError> {
-        // ftruncate wrapper not yet surfaced from platform modules;
-        // pager-driven workloads rely on extending writes, not truncate,
-        // in the normal path. VACUUM and journal-mode DELETE need this —
-        // wiring lands once sys.common.ftruncate is added.
-        Err(VfsError {
-            kind: Unsupported,
-            message: "truncate pending sys.common.ftruncate wiring",
-        })
+    fn truncate(&mut self, size: Int) -> Result<(), VfsError> {
+        if self.closed {
+            return Err(VfsError { kind: Closed, message: "truncate on closed file" });
+        }
+        match sys_truncate(self.fd, size) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(to_vfs_err(e)),
+        }
     }
 
     fn sync(&self, flags: SyncFlags) -> Result<(), VfsError> {
@@ -244,13 +252,13 @@ implement SqliteFile for PosixFile {
     }
 
     fn file_size(&self) -> Result<Int, VfsError> {
-        // Without fstat surfaced from platforms, callers use read+EOF
-        // probe. Returning Unsupported surfaces the gap rather than
-        // silently corrupting the pager's size tracking.
-        Err(VfsError {
-            kind: Unsupported,
-            message: "file_size pending sys.common.fstat wiring",
-        })
+        if self.closed {
+            return Err(VfsError { kind: Closed, message: "file_size on closed file" });
+        }
+        match sys_file_size(self.fd) {
+            Ok(n)  => Ok(n),
+            Err(e) => Err(to_vfs_err(e)),
+        }
     }
 
     fn lock(&mut self, kind: LockKind) -> Result<(), VfsError> {
@@ -404,11 +412,23 @@ implement VfsProtocol for PosixVfs {
         }
     }
 
-    fn access(&self, _path: &Text, _kind: AccessKind) -> Result<Bool, VfsError> {
-        Err(VfsError {
-            kind: Unsupported,
-            message: "access pending sys.common.access wiring",
-        })
+    fn access(&self, path: &Text, kind: AccessKind) -> Result<Bool, VfsError> {
+        // SQLite's three-valued probe maps onto POSIX access(2) modes:
+        //   Exists       → F_OK              (presence test only)
+        //   CanRead      → F_OK | R_OK
+        //   CanReadWrite → F_OK | R_OK | W_OK
+        // sys.common.access returns Ok(false) for ENOENT/EACCES/EROFS —
+        // exactly what SQLite wants — and Err for genuine I/O faults.
+        let mode: Int = match kind {
+            Exists       => ACCESS_F_OK,
+            CanRead      => ACCESS_F_OK | ACCESS_R_OK,
+            CanReadWrite => ACCESS_F_OK | ACCESS_R_OK | ACCESS_W_OK,
+        };
+        let cp = to_c_path(path);
+        match sys_access(&cp, mode) {
+            Ok(b)  => Ok(b),
+            Err(e) => Err(to_vfs_err(e)),
+        }
     }
 
     fn full_pathname(&self, path: &Text) -> Result<Text, VfsError> {
@@ -419,26 +439,39 @@ implement VfsProtocol for PosixVfs {
     }
 
     fn random_bytes(&self, len: Int) -> List<Byte> {
-        // getrandom / getentropy — platform-specific; the existing
-        // sys.linux.syscall.getrandom and sys.darwin.libsystem.safe_getentropy
-        // fill this. For v1 we return a length-conformant but
-        // deterministic buffer to avoid adding a new dependency in this
-        // PR — PosixVfs callers that need real randomness should inject
-        // via core.context.
-        let mut out: List<Byte> = List.new();
-        let mut i: Int = 0;
-        while i < len {
-            out.push((i & 0xFF) as Byte);
-            i = i + 1;
+        // Cryptographic-grade entropy from the kernel — getrandom on
+        // Linux, getentropy on Darwin, BCryptGenRandom on Windows.
+        // Required for unpredictable WAL header salts (sqlite-native.md
+        // §6.5); the deterministic stub previously here let an attacker
+        // forge WAL frames with matching checksums.
+        if len <= 0 {
+            return List.new();
         }
-        out
+        let mut out: List<Byte> = List.with_capacity(len);
+        out.resize(len, 0 as Byte);
+        let slice: &mut [Byte] = out.as_mut_slice();
+        match sys_random_bytes(slice) {
+            Ok(_) => out,
+            Err(_) => {
+                // Hard-fail to a fresh empty list rather than silently
+                // returning predictable bytes — the caller surfaces
+                // `Err(VfsError::IoError)` via VFS error mapping when
+                // the buffer length is wrong, which is strictly safer
+                // than a side-channel-leaking fallback.
+                List.new()
+            }
+        }
     }
 
     fn current_time(&self) -> Timestamp {
-        // Monotonic nanoseconds via intrinsics. The VFS surface treats
-        // this as wall-clock-equivalent for WAL metadata; true wall
-        // clock will land with sys.clock.realtime_nanos exposure.
-        Timestamp { nanos: 0 as Int64, is_monotonic: true }
+        // Wall-clock nanoseconds since the Unix epoch. SQLite WAL frame
+        // headers and journal salts use this as a freshness probe; a
+        // hard-zero (the previous stub) made every header timestamp
+        // identical and broke replay ordering on multi-instance setups.
+        Timestamp {
+            nanos: realtime_nanos() as Int64,
+            is_monotonic: false,
+        }
     }
 
     fn get_last_error(&self) -> Maybe<VfsError> { None }
