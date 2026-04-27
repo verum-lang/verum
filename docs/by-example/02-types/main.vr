@@ -1,0 +1,24 @@
+// docs/by-example/02-types/main.vr
+// Built-in types, let-bindings, and a user-defined record type.
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+fn main() {
+    // Built-in scalars.
+    let n: Int = 42;
+    let pi: Float = 3.14159;
+    let greeting: Text = "Hello, Verum!";
+    let ready: Bool = true;
+
+    // User-defined record.
+    let origin = Point { x: 0, y: 0 };
+    let p2 = Point { x: 3, y: 4 };
+
+    print(f"n = {n}, pi = {pi}, ready = {ready}");
+    print(f"greeting = {greeting}");
+    print(f"origin = ({origin.x}, {origin.y})");
+    print(f"p2 = ({p2.x}, {p2.y})");
+}

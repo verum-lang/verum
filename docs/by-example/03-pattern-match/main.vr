@@ -1,0 +1,37 @@
+// docs/by-example/03-pattern-match/main.vr
+// Sum types and exhaustive pattern matching.
+
+type Shape is
+    | Circle(Float)              // radius
+    | Rectangle(Float, Float)    // width, height
+    | Square(Float);             // side
+
+fn area(s: Shape) -> Float {
+    match s {
+        Circle(r) => 3.14159 * r * r,
+        Rectangle(w, h) => w * h,
+        Square(side) => side * side,
+    }
+}
+
+fn describe(s: Shape) -> Text {
+    match s {
+        Circle(_) => "a circle".clone(),
+        Rectangle(w, h) if w == h => "a square (disguised as a rectangle)".clone(),
+        Rectangle(_, _) => "a rectangle".clone(),
+        Square(_) => "a square".clone(),
+    }
+}
+
+fn main() {
+    let shapes = [
+        Circle(2.0),
+        Rectangle(3.0, 4.0),
+        Square(5.0),
+        Rectangle(2.5, 2.5),
+    ];
+
+    for s in shapes {
+        print(f"{describe(s)} has area {area(s)}");
+    }
+}
