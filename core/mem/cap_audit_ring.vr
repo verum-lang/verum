@@ -76,6 +76,7 @@ module core.mem.cap_audit_ring;
 
 mount super.cap_audit.{CapEvent, CapEventKind};
 mount core.intrinsics.atomic.{
+    atomic_load_u8, atomic_store_u8,
     atomic_load_u64, atomic_store_u64, atomic_fetch_add_u64,
     atomic_compare_exchange_u64,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL,
@@ -99,6 +100,39 @@ const SLOT_WRITING_BIT: UInt64 = 0x8000_0000_0000_0000;
 /// Initial sequence value — zero indicates "no event ever committed to
 /// this slot" so `recent()` can skip uninitialised slots.
 const SLOT_UNINITIALISED: UInt64 = 0;
+
+// =============================================================================
+// Runtime-gated recording switch
+// =============================================================================
+//
+// CBGR writes are on the hot path (~0.93ns measured).  The audit ring's
+// `commit` adds ~30-50ns per call (atomic_fetch_add + CAS-loop + struct
+// memcpy + release-store), which would 30-50× the CBGR budget if always
+// active.
+//
+// The runtime gate lets the audit be turned off by default and toggled
+// on at process start (debug builds, observability mode) or per-test
+// scope.  When disabled, `record_*` helpers in `cap_audit.vr` early-
+// return without touching the ring — the cost is a single relaxed
+// atomic load + branch (~1-2ns) rather than the full commit.
+//
+// Order semantics:
+//   * `enable()` / `disable()` use Release so subsequent calls in the
+//     enabling thread observe the flag set before any audit work runs.
+//   * `is_enabled()` uses Relaxed because the producer has already
+//     synchronised through the per-slot seqlock acquire — the flag
+//     check is a fast-path filter, not a synchronisation point.
+//
+// This is *not* the eventual `@cfg(feature = "cbgr_audit")` compile-
+// time gate (which would compile every audit call to a literal no-op).
+// The runtime gate is the bootstrap mechanism: ships today, exercises
+// the audit pipeline end-to-end in tests, and stays useful as a per-
+// process toggle even after the compile-time gate lands.
+// =============================================================================
+
+/// Recording-enabled flag.  Zero = audit ring is disabled (commits
+/// short-circuit at the helper level); non-zero = recording.
+public static mut CAP_AUDIT_ENABLED: UInt8 = 0;
 
 // =============================================================================
 // Slot layout — one cell of the ring
@@ -276,6 +310,44 @@ public fn recent(n: Int) -> List<CapEvent> {
 public fn count() -> UInt64 {
     let next_seq_ptr = unsafe { &CAP_AUDIT_NEXT_SEQ as *const UInt64 };
     atomic_load_u64(next_seq_ptr, ORDERING_ACQUIRE)
+}
+
+// =============================================================================
+// Runtime gate API
+// =============================================================================
+
+/// Enable audit recording.  Subsequent CBGR write events will be
+/// committed to the ring.  Idempotent.
+///
+/// Release-store ensures that any setup work (e.g. clearing the ring,
+/// initialising observers) performed by the calling thread before
+/// `enable()` happens-before any `record_*` call running concurrently
+/// after the flag becomes visible.
+public fn enable() {
+    let ptr = unsafe { &CAP_AUDIT_ENABLED as *mut UInt8 };
+    atomic_store_u8(ptr, 1, ORDERING_RELEASE);
+}
+
+/// Disable audit recording.  Subsequent `record_*` calls short-circuit
+/// without touching the ring.  Already-published events remain in the
+/// ring and are still observable via `recent()`.
+public fn disable() {
+    let ptr = unsafe { &CAP_AUDIT_ENABLED as *mut UInt8 };
+    atomic_store_u8(ptr, 0, ORDERING_RELEASE);
+}
+
+/// True iff recording is currently enabled.  Hot-path predicate used
+/// by `record_*` helpers to skip the commit work when audit is off.
+///
+/// Uses Relaxed ordering — a missed transition (writer sees stale
+/// "disabled" briefly after `enable()`) is acceptable for a forensic
+/// log; the next CBGR write picks up the new state.  The atomic load
+/// is ~1-2 ns vs ~30-50 ns for a full commit, so the early-return
+/// path keeps the CBGR hot path within budget when audit is off.
+@inline
+public fn is_enabled() -> Bool {
+    let ptr = unsafe { &CAP_AUDIT_ENABLED as *const UInt8 };
+    atomic_load_u8(ptr, ORDERING_RELAXED) != 0
 }
 
 /// Reset the ring to the empty state.  Intended for tests; production
