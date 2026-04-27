@@ -148,3 +148,101 @@ public axiom effect_io_is_not_commutative() -> Bool ensures true;
 /// verification phase.
 @framework(diakrisis, "Corollary 17.C2 (concurrent coherence under commutative effects)")
 public axiom concurrent_coherence_under_commutativity() -> Bool ensures true;
+
+// =============================================================================
+// V8 (#244) — runtime-queryable effect classifier surface
+//
+// The eight axioms above record each effect's commutativity +
+// ε-coordinate classification per Theorem 17.T1. Pre-#244 those
+// classifications were trapped inside axiom *names* — user code
+// that wanted to ask "is `Probability` commutative?" had no
+// stable surface to query. The enum + predicates below close that
+// gap: every effect maps to a single `EffectKind` value, and the
+// classifier predicates return the spec-prescribed bucket.
+// =============================================================================
+
+/// The eight standard effects classified by Theorem 17.T1. Used by
+/// concurrent-coherence audit (Corollary 17.C2 / verify(coherent))
+/// and ε-coordinate-aware planners to interrogate an effect's
+/// algebraic properties without re-parsing axiom names.
+@derive(Clone)
+public type EffectKind is
+    PureEffect
+  | ReaderEffect
+  | WriterEffect
+  | ProbabilityEffect
+  | ListEffect
+  | StateEffect
+  | ExceptionEffect
+  | IoEffect;
+
+/// True iff the effect's monad is commutative under tensor
+/// product. Per Theorem 17.T1: Pure / Reader / Writer (when
+/// monoid is commutative) / Probability (under independent
+/// tensor) / List (under cartesian product) all commute;
+/// State / Exception / Io do not.
+///
+/// This is the gate for Corollary 17.C2 — parallel composition
+/// preserves @verify(coherent) iff every effect in either branch
+/// satisfies this predicate.
+public fn is_commutative_effect(kind: EffectKind) -> Bool {
+    match kind {
+        PureEffect        => true,
+        ReaderEffect      => true,
+        WriterEffect      => true,
+        ProbabilityEffect => true,
+        ListEffect        => true,
+        StateEffect       => false,
+        ExceptionEffect   => false,
+        IoEffect          => false,
+    }
+}
+
+/// Diakrisis ε-coordinate for the effect, per Theorem 17.T1.
+/// `Pure` lives at coordinate 0 (no observable enactment);
+/// every other commutative effect lives at ω; non-commutative
+/// effects (State / Exception / Io) live at ω + 1 because the
+/// non-commutativity introduces ordinal-irreducible
+/// dependency on action-order.
+public fn effect_epsilon_coord(kind: EffectKind) -> Text {
+    match kind {
+        PureEffect        => "0",
+        ReaderEffect      => "ω",
+        WriterEffect      => "ω",
+        ProbabilityEffect => "ω",
+        ListEffect        => "ω",
+        StateEffect       => "ω + 1",
+        ExceptionEffect   => "ω + 1",
+        IoEffect          => "ω + 1",
+    }
+}
+
+/// Canonical name for audit / JSON-RPC emission.
+public fn effect_kind_name(kind: EffectKind) -> Text {
+    match kind {
+        PureEffect        => "Pure",
+        ReaderEffect      => "Reader",
+        WriterEffect      => "Writer",
+        ProbabilityEffect => "Probability",
+        ListEffect        => "List",
+        StateEffect       => "State",
+        ExceptionEffect   => "Exception",
+        IoEffect          => "Io",
+    }
+}
+
+/// True iff a program composed entirely of `kinds` would preserve
+/// the `@verify(coherent)` verdict under parallel composition
+/// (Corollary 17.C2). Implementation: every kind must satisfy
+/// `is_commutative_effect`. Empty input is vacuously coherent
+/// (the trivial empty program parallels-composes with anything).
+public fn parallel_coherent(kinds: List<EffectKind>) -> Bool {
+    let mut i: Int = 0;
+    while i < kinds.len() as Int {
+        if !is_commutative_effect(*kinds.get(i as Int).unwrap()) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
